@@ -32,8 +32,16 @@ Before continuing code generation, read these files in order:
 2. `ANI-08-安全架构设计.md`
 3. `ANI-09-数据模型设计.md`
 4. `ANI-11-代码实现规范.md`
-5. `repo/development-records/m2-1-task-a-b-task-service-outbox.md`
-6. `repo/development-records/2026-05-11-handoff-codex-cloud.md`
+5. `ANI-12-版本管理策略.md`
+6. `repo/development-records/m2-1-task-a-b-task-service-outbox.md`
+7. `repo/development-records/2026-05-11-handoff-codex-cloud.md`
+
+## Version Position
+
+- Current release line: `v0.x` development.
+- First formal release target: `v1.0.0` on 2026-09-30.
+- Versioning policy: `ANI-12-版本管理策略.md`.
+- Current `M2.1-TASK-C` work should be recorded as `no-release-impact` unless it changes API/Proto/DB compatibility; if it changes `task_service.proto`, classify the impact in the stage record.
 
 ## Next Work Boundary
 

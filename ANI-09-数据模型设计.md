@@ -747,6 +747,8 @@ ani.events.inference.{svc_id}.status   # 推理服务状态变化
 
 **工具：** Atlas（Go 原生，支持声明式 Schema 管理）
 
+**版本策略：** 数据库迁移兼容性判定以 `ANI-12-版本管理策略.md` 为准。
+
 **迁移文件命名：**
 ```
 migrations/
@@ -760,6 +762,7 @@ migrations/
 - 删除操作分两步：先废弃（应用层停止使用），下个版本再物理删除
 - 所有迁移脚本必须是幂等的（可重复执行）
 - 大表加列使用 `ALTER TABLE ... ADD COLUMN ... DEFAULT ...`（PG 11+ 支持在线加列）
+- `PATCH` 和 `MINOR` 版本默认只允许向后兼容迁移；需要人工处理、停机窗口或不可自动回滚的迁移必须升级 MAJOR 或延期。
 
 ---
 

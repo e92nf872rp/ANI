@@ -11,6 +11,11 @@ Current commit:
 Remote repository:
 - `https://github.com/e92nf872rp/ANI.git`
 
+Version status:
+- Current line: `v0.x` development.
+- First formal release target: `v1.0.0` on 2026-09-30.
+- Versioning policy: `ANI-12-版本管理策略.md`.
+
 ## Current State
 
 The repository has been initialized, committed, and pushed to GitHub.
@@ -105,7 +110,7 @@ make build
 ## Suggested Codex Cloud Prompt
 
 ```text
-请加载本仓库，先阅读 CLAUDE.md、ANI-00 到 ANI-11 设计文档，以及 repo/development-records/README.md、repo/development-records/m2-1-task-a-b-task-service-outbox.md 和 repo/development-records/2026-05-11-handoff-codex-cloud.md。
+请加载本仓库，先阅读 CLAUDE.md、ANI-00 到 ANI-12 设计文档，以及 repo/development-records/README.md、repo/development-records/m2-1-task-a-b-task-service-outbox.md 和 repo/development-records/2026-05-11-handoff-codex-cloud.md。
 
 继续 `M2.1-TASK-C` 开发，只做 `ANI-06 / 模块 2 / 2.1 Gateway 骨架 / NATS JetStream 异步任务框架` 下的 Task Service Worker Mutation RPC 与多租户安全闭环。
 
@@ -119,14 +124,16 @@ make build
 5. 所有写操作必须有明确 tenant_id / worker 身份 / task ownership 校验。
 6. 保持 outbox 事务一致性，不引入双写风险。
 7. 补充必要单元测试或仓储层测试。
-8. 执行并通过：
+8. 在开发记录中标注版本影响：如果修改 task_service.proto，则按 ANI-12 判定是 MINOR、PATCH 还是 no-release-impact；不得创建正式版本 tag。
+9. 执行并通过：
    - make gen-proto
    - make test
    - make build
-9. 新增开发记录：repo/development-records/m2-1-task-c-worker-mutations.md，记录：
+10. 新增开发记录：repo/development-records/m2-1-task-c-worker-mutations.md，记录：
    - 实现了哪些功能
    - 修改了哪些文件
    - 做了哪些测试
    - 哪些设计风险仍然保留
-10. 使用独立分支：codex/stage-3c-task-worker-mutations，完成后提交 Pull Request，不要直接覆盖 main。
+   - 版本影响判定
+11. 使用独立分支：codex/m2-1-task-c-worker-mutations，完成后提交 Pull Request，不要直接覆盖 main。
 ```

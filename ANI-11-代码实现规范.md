@@ -48,6 +48,13 @@ M2.1-TASK-C
 - 记录文件命名必须使用新命名格式，例如 `m2-1-task-c-worker-mutations.md`。
 - 记录中必须包含：产品计划映射、实现范围、修改文件、验证命令、剩余风险、下一步边界。
 
+### 0.4 版本管理
+
+- 版本号、tag、发布包和兼容性判定以 `ANI-12-版本管理策略.md` 为准。
+- 任何 API/Proto/DB/CRD/Helm values/NATS payload 的变更，提交说明或开发记录中必须标注兼容性影响：`MAJOR`、`MINOR`、`PATCH` 或 `no-release-impact`。
+- Codex Cloud 生成代码时不得擅自创建正式版本 tag。
+- 当前开发期默认属于 `v0.x`，只有达到 `ANI-12` 的发布门禁后才能进入 `v1.0.0-rc.N` 或 `v1.0.0`。
+
 ---
 
 ## 一、模块结构

@@ -10,6 +10,11 @@ Naming clarification:
 
 Date: 2026-05-11
 
+Version impact:
+- Current line: `v0.x` development.
+- Release impact: `no-release-impact`.
+- No formal tag was created.
+
 Scope accepted by product owner:
 - `M2.1-TASK-A`: implement the minimal `task-service` query interface.
 - `M2.1-TASK-B`: implement the outbox publisher loop.
