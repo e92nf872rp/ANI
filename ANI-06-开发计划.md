@@ -26,9 +26,9 @@
 | Sprint 2 | ⏳ 计划中 | 2026-06-01~06-15 | VM & Container 深度 |
 | Sprint 3 | ⏳ 计划中 | 2026-06-16~06-30 | 网络/存储/向量 API |
 | Sprint 4 ⭐ | ⏳ 计划中 | 2026-07-01~07-15 | **API 冻结 + SDK**（硬截止）|
-| Sprint 5 | ⏳ 计划中 | 2026-07-16~07-31 | 控制器 + 加解密 + Sandbox |
-| Sprint 6 | ⏳ 计划中 | 2026-08-01~08-15 | 平台支撑 + Services P0 开始 |
-| Sprint 7 | ⏳ 计划中 | 2026-08-16~09-01 | Installer + 知识库 RAG |
+| Sprint 5 | ⏳ 计划中 | 2026-07-16~07-31 | **K8s集群(vCluster)** + 控制器 + 加解密 ← K8S-A 恢复 v1.0.0 |
+| Sprint 6 | ⏳ 计划中 | 2026-08-01~08-15 | Sandbox + 平台支撑 + Services 模型仓库/推理 |
+| Sprint 7 | ⏳ 计划中 | 2026-08-16~09-01 | Installer + 知识库 RAG（从零建）+ Console Alpha |
 | Sprint 8 | ⏳ 计划中 | 2026-09-01~09-15 | Console + BOSS |
 | Sprint 9 | ⏳ 计划中 | 2026-09-16~09-25 | RC 加固 |
 | Sprint 10 | ⏳ 计划中 | 2026-09-26~09-30 | v1.0.0 发布 |
@@ -46,8 +46,8 @@
 
 ### 已完成批次完整记录
 
-> 完整的已完成批次列表和进度记录在 CLAUDE.md（"开发阶段命名强制约定 → 第4条"）。
-> 对应代码记录在 `repo/development-records/` 目录下（56个文件）。
+> 完整的已完成批次列表在 `repo/development-records/README.md`（唯一归档索引）。
+> 详细技术记录在 `repo/development-records/*.md`（56个文件）。
 
 主要已完成里程碑（仅列关键节点）：
 - M1-INFRA-A/B/C/D/E/F — Kubernetes 基础设施、KubeOVN 网络、GPU 调度基线
@@ -61,10 +61,11 @@
 
 ### Phase 2 延期（v1.0.0 不实现，生意驱动迭代）
 
+> ⚠️ **M1-K8S-A 已从延期列表移回 v1.0.0 范围（Sprint 5）**，理由见 Sprint 5 说明。
+
 | 条目 | 理由 |
 |---|---|
 | M1-BM-A（裸金属/Metal3）| 需物理机环境，无 P0 依赖 |
-| M1-K8S-A（K8s集群/vCluster）| 复杂度高，无 P0 依赖 |
 | M1-DPU-A（DPU节点）| 需专用硬件 |
 | SDK-JAVA-A（Java SDK）| 1天生成任务，按需做 |
 | M1-SVC-EP-A（服务目录/DNS）| PaaS 依赖，Phase 2 |
@@ -117,20 +118,54 @@
 ### Sprint 计划总览
 
 ```
-           ANI Core 开发线                    ANI Services 开发线
-           ─────────────────────              ──────────────────────
-S1  05-15~05-31  操作语义 + Foundation
-S2  06-01~06-15  VM & Container 深度
-S3  06-16~06-30  Core API 面（网络/存储/向量）
-S4  07-01~07-15  API 冻结 + 三语言 SDK        ← 解锁日：07-15
-S5  07-16~07-31  后台控制器 + 加解密 + Sandbox  S_A  模型仓库 + 推理服务
-S6  08-01~08-15  平台支撑完整化               S_A  知识库 RAG
-S7  08-16~09-01  Installer + 集成测试          S_B  Console 核心页面
-S8  09-01~09-15  Console 集成 + BOSS          S_B  BOSS 基础版
+           ANI Core 开发线                         ANI Services 开发线
+           ──────────────────────────────────      ──────────────────────────
+S1  05-15~05-31  操作语义底座 + Health + Auth收尾
+                 ↑ 当前位置（2026-05-15）
+S2  06-01~06-15  VM 深度 + Container/GPU 深度
+S3  06-16~06-30  网络/存储/向量 API（Handler 从 stub 变真实）
+S4  07-01~07-15  API 冻结 + 三语言 SDK + Mock Server   ← 解锁日：07-15
+S5  07-16~07-31  K8s集群(vCluster) + 控制器 + 加解密   S_A  模型仓库 + 推理服务
+S6  08-01~08-15  Sandbox + 平台支撑                    S_A  知识库 RAG
+S7  08-16~09-01  Installer + 集成测试                  S_B  Console Alpha
+S8  09-01~09-15  Console 全量 + BOSS                   S_B  BOSS 基础版
 S9  09-16~09-25  RC 加固（只修 Bug）
 S10 09-26~09-30  v1.0.0 发布
-─────────────────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────────────────────────────
 09-30  ✅  ANI Core v1.0.0  +  ANI Services P0
+```
+
+### 代码依赖关键路径（实际代码状态驱动）
+
+> 以下基于 2026-05-15 代码扫描结果，反映真实依赖而非文档描述。
+
+```
+当前代码实际状态：
+  ✅ pkg/ports/ 31个接口，pkg/adapters/runtime/ 28个文件 — 架构基础完整
+  ✅ auth-service JWT/OIDC/RBAC 完整实现
+  ✅ DB migrations 3个SQL，operations 表已建
+  ⚠️  /api/v1/instances /networks /volumes handler — 当前是 501 stub（stubs.go）
+  ⚠️  model-service 有实现但属于 Services 层，需要划清边界
+  ❌ kb-service — 完全空目录，Sprint 6 从零建
+  ❌ K8s vCluster 集成 — 零代码，Sprint 5 建
+  ❌ Kata Containers 集成 — 零代码，Sprint 6 建
+
+关键依赖链（必须按顺序）：
+  Sprint 1：WorkloadOperation 语义 + operation_id DB
+       ↓ 解锁 Sprint 2（VM/Container 深度需要 operation_id 记录）
+  Sprint 2：/instances handler stub → 真实实现（VM/Container/GPU）
+       ↓ 解锁 Sprint 3（网络/存储需要 instances 关联）
+  Sprint 3：/networks /volumes /objects /vector-stores handler → 真实
+       ↓ 解锁 Sprint 4（API Spec 能写全量路径）
+  Sprint 4：API 冻结 + SDK + Mock Server
+       ↓ 解锁 Services 团队（07-15）
+  Sprint 5：vCluster 生命周期（Services IaaS 最高需求）+ 加解密（模型上传需要）
+       ↓ Services 团队并行：模型仓库 + 推理服务（依赖 objects + encryption）
+  Sprint 6：Sandbox（Agent 服务需要）+ 平台支撑（告警/计量）
+       ↓ Services 团队并行：知识库（依赖 vector-stores + objects）
+  Sprint 7：Installer（最终交付必须）
+       ↓ Services 团队并行：Console Alpha（依赖所有 Core API 稳定）
+  Sprint 8~10：收尾 + RC + 发布
 ```
 
 ---
@@ -244,63 +279,73 @@ prism mock api/openapi/v1.yaml --port 4010   # 所有路径返回 200 mock
 
 ### Sprint 5：2026-07-16 → 2026-07-31
 
-**主题：后台控制器 + 加解密 + Sandbox**
+**主题：K8s 集群管理 + 后台控制器 + 加解密**
 
-**进入条件：** API 冻结完成；Services 团队已接入 Mock Server 自行推进
+> ⚠️ **M1-K8S-A 已恢复到 v1.0.0 范围**。理由：Services IaaS 域的"K8s集群服务"是客户最核心的 IaaS 需求之一；vCluster 实现有成熟路径，不需要专用硬件；Services 团队在 Sprint 5~6 开发模型仓库和推理服务时依赖稳定的 K8s 集群环境。
 
-| 批次 | 内容 | 难度 | 预估 |
-|---|---|---|---|
-| **M1-RECONCILE-A** | WorkloadReconcileController 实现（30s/5s 双速后台 goroutine）| 高 | 5天 |
-| **M1-ENCRYPT-A** | SM4 密钥管理 + seal/unseal-token（Init Container 解密模型文件）| 中 | 3天 |
-| **M1-SECRETS-A** | Secret CRUD + 实例绑定（创建实例时注入 env var）| 中 | 3天 |
-| **M1-SANDBOX-A** | Kata Containers QEMU RuntimeClass 接入 + Sandbox 实例 create/exec | 高 | 5天 |
+**进入条件：** API 冻结完成（Sprint 4）；Services 团队已用 Mock Server 自行开始 SVC-MODEL-A
+
+| 批次 | 内容 | 难度 | 预估 | 解锁对象 |
+|---|---|---|---|---|
+| **M1-K8S-A** ⭐ | vCluster 生命周期 API（创建/升级/删除/kubeconfig）+ 原生 K8s API 透明代理 | 高 | 6天 | Services K8s集群服务；租户 kubectl/Helm 工具链 |
+| **M1-RECONCILE-A** | WorkloadReconcileController（30s/5s 双速后台 goroutine，控制平面/数据平面分离）| 高 | 4天 | 生产级状态一致性保证 |
+| **M1-ENCRYPT-A** | SM4 密钥管理 + seal/unseal-token | 中 | 3天 | Services 模型仓库加密功能 |
+| **M1-SECRETS-A** | Secret CRUD + 实例绑定注入 | 中 | 2天 | Services PaaS 凭据注入 |
+
+> M1-SANDBOX-A 移到 Sprint 6，腾出时间给 K8S-A。Sandbox 不在 Services P0 关键路径上。
 
 **完工标准：**
 ```bash
 make test
-# Reconcile Controller 可扫描 workload_instances 并更新状态，不依赖 API 调用
+# POST /api/v1/k8s-clusters → 创建 vCluster，状态变为 running
+# GET /api/v1/k8s-clusters/{id}/kubeconfig → 返回可用 kubeconfig
+# kubectl --kubeconfig=<returned> get pods -A → 正常返回
+# Reconcile Controller 独立扫描 workload_instances 并更新状态（不依赖 API 调用）
 # POST /api/v1/encryption/seal → 返回 unseal-token
-# POST /api/v1/instances {kind: "sandbox"} → 实例起来，exec 可运行命令
 ```
 
-**解锁：** 模型文件加密工作流（Services 模型仓库依赖）；Agent Sandbox 运行时就绪
+**解锁：** Services K8s集群服务；Services 模型加密功能；生产级状态一致性
 
 ---
 
 ### Sprint 6：2026-08-01 → 2026-08-15
 
-**主题：Core 平台支撑服务 + Services P0 核心功能同步推进**
+**主题：Sandbox + 平台支撑 + Services P0 核心（模型仓库/推理服务）**
 
 **Core 任务（本小组）：**
 
-| 批次 | 内容 | 难度 | 预估 |
-|---|---|---|---|
-| **M1-OBS-A** | PromQL 代理查询 + 基础告警规则 CRUD | 中 | 3天 |
-| **M1-METER-A** | 实例用量计量 + Token 用量上报接口 | 中 | 2天 |
-| **M1-REGISTRY-A** | Harbor API 封装（镜像推拉权限 + 安全扫描） | 中 | 2天 |
-| **Core E2E** | 全链路集成测试回归（Sprint 1-5 所有功能） | 中 | 3天 |
+| 批次 | 内容 | 难度 | 预估 | 解锁对象 |
+|---|---|---|---|---|
+| **M1-SANDBOX-A** | Kata Containers QEMU RuntimeClass + Sandbox 实例 create/exec | 高 | 5天 | Services Agent 运行时 |
+| **M1-OBS-A** | PromQL 代理查询 + 基础告警规则 CRUD | 中 | 3天 | Services 推理监控 |
+| **M1-METER-A** | 实例用量 + Token 用量上报 | 中 | 2天 | Services 计费 |
+| **M1-REGISTRY-A** | Harbor API 封装（镜像推拉权限 + 安全扫描）| 中 | 2天 | Services 镜像仓库服务 |
+| **Core E2E** | Sprint 1-5 全链路集成测试回归 | 中 | 3天 | RC 门控 |
 
-**Services 任务（另一小组，从 07-15 起并行）：**
+**Services 任务（另一小组，从 07-15 解锁后并行，本 Sprint 是 Services 第一个完整冲刺）：**
 
-| 批次 | 内容 | 说明 |
+| 批次 | 依赖的 Core API | 内容 |
 |---|---|---|
-| **SVC-MODEL-A** | 模型仓库：上传/版本/元数据/国密加解密/HuggingFace 导入 | 依赖 Core objects + encryption API |
-| **SVC-INFER-A** | 推理服务：部署端点/状态/日志/OpenAI 兼容 `/v1/chat/completions` | 依赖 Core GPU container + instances API |
+| **SVC-MODEL-A** | `/api/v1/objects`（S3）+ `/api/v1/encryption`（SM4）| 模型仓库：上传/版本/元数据/国密加解密/HuggingFace 导入 |
+| **SVC-INFER-A** | `/api/v1/instances`（kind=gpu-container）+ `/api/v1/k8s-clusters`（vCluster 中部署 vLLM）| 推理服务：端点部署/状态/日志/OpenAI 兼容 API |
+
+> **注意**：kb-service 是完全空目录，SVC-KB-A 工作量比预期大，移到 Sprint 7 专门处理。
 
 **完工标准：**
 ```bash
 # Core
-make test   # 全通，包含 E2E
+make test  # 全通（含 E2E）
+# POST /api/v1/instances {kind: "sandbox"} → 实例启动，exec 可运行 python 命令
 # Services（另一小组验证）
-# 模型文件上传 + 加密 → 成功
-# 推理端点部署 + 调用 /v1/chat/completions → 得到 LLM 回答
+# 模型文件上传 + SM4 加密 → 成功写入 MinIO
+# 推理端点部署 + GET /v1/chat/completions → 得到 LLM 回答
 ```
 
 ---
 
 ### Sprint 7：2026-08-16 → 2026-09-01
 
-**主题：ani-installer + 知识库 RAG + Console Alpha**
+**主题：ani-installer + 知识库 RAG（从零建）+ Console Alpha**
 
 **Core 任务：**
 
@@ -312,16 +357,19 @@ make test   # 全通，包含 E2E
 
 **Services 任务：**
 
-| 批次 | 内容 | 说明 |
-|---|---|---|
-| **SVC-KB-A** | 知识库 RAG：文档上传→解析→向量化→混合检索→问答→来源引用 | 依赖 Core vector-stores + objects API |
-| **SVC-CONSOLE-Alpha** | 实例列表/详情/操作页面接真实 Core API（替换 mock） | 大量前端工作 |
+| 批次 | 依赖的 Core API | 内容 | 特别说明 |
+|---|---|---|---|
+| **SVC-KB-A** | `/api/v1/vector-stores`（Milvus）+ `/api/v1/objects`（MinIO）| 知识库：文档上传→解析→向量化→混合检索→问答→来源引用 | **kb-service 是空目录，从零构建，预估 10 天** |
+| **SVC-CONSOLE-Alpha** | 所有 Core API（Sprint 1-4 实现的端点）| 实例列表/详情/操作页面接真实 Core API | 依赖 Sprint 4 API 冻结后的稳定 SDK |
 
 **完工标准：**
 ```bash
-# 在一台全新机器上运行 ani-installer
-# 15 分钟内完成安装，make test 在新环境跑通
+# Core
+# 在一台全新机器上运行 ani-installer → 15 分钟内完成安装
+# make test 在新环境跑通
+# Services
 # 上传 5 个 PDF → 建立知识库 → 问答得到含来源引用的回答
+# Console：VM/容器实例列表页面显示真实数据（不是 mock）
 ```
 
 ---
@@ -387,6 +435,55 @@ git tag v1.0.0
 
 ---
 
+### ANI Services P0 完整范围定义
+
+> 本节是 ANI Services 交付边界的**唯一权威定义**（基于2026-05-15会话确认）。
+> ANI Services 由另一小组开发，全部通过 ANI Core REST API / SDK 实现。
+> 代码位置：`repo/services/`（当前 model-service 有实现，kb-service 为空壳）。
+
+#### 域A：IaaS 云服务（基于 Core instances/networks/volumes API）
+
+| 服务 | v1.0.0 P0 范围 | 依赖 Core Sprint |
+|---|---|---|
+| 云主机/容器/GPU实例控制台 | 创建/生命周期/运维的 Console UI | Sprint 1~2 |
+| **K8s 集群服务** | vCluster 创建/kubeconfig/原生 API 代理；kubectl/Helm 兼容 | **Sprint 5（M1-K8S-A）** |
+| VPC/子网/安全组管理 | CRUD Console UI | Sprint 3 |
+| 块存储/文件存储/对象存储 | CRUD Console UI | Sprint 3 |
+| 镜像仓库服务 | Harbor 镜像浏览/推拉权限 | Sprint 6（M1-REGISTRY-A）|
+
+#### 域B：AI 全生命周期（对标 AWS SageMaker）
+
+| 服务 | v1.0.0 P0 范围 | 依赖 Core Sprint | 代码现状 |
+|---|---|---|---|
+| **模型仓库** | 上传/版本/元数据/SM4加解密/HuggingFace导入 | Sprint 5（加解密）| model-service 有实现，需划清边界 |
+| **推理服务** | 端点部署/状态/日志/OpenAI 兼容 `/v1/chat/completions` | Sprint 4（API冻结）| 从零建 |
+| Notebook | JupyterLab 托管（P1，v1.x）| — | 未建 |
+| 训练/微调 | LoRA 微调（Phase 2）| — | 未建 |
+| AI API 网关 | Token 计费/限流（P1）| Sprint 6（计量）| 未建 |
+
+#### 域C：AI-Native 应用
+
+| 服务 | v1.0.0 P0 范围 | 依赖 Core Sprint | 代码现状 |
+|---|---|---|---|
+| **知识库/RAG** | 文档上传→解析→向量化→混合检索→问答→来源引用 | Sprint 3（vector-stores）| **kb-service 完全空，从零建** |
+| Agent 运行时 | 基础沙箱会话管理（P1）| Sprint 6（Sandbox）| 未建 |
+| 文档智能/会议智能 | Phase 2 | — | 未建 |
+
+#### 域D：PaaS 托管服务
+
+| 服务 | v1.0.0 P0 范围 | 依赖 Core Sprint |
+|---|---|---|
+| 托管数据库/消息队列 | **Phase 2**，v1.0.0 不做 | — |
+| 函数计算 | Phase 2 | — |
+
+#### 重要边界说明（防止越界）
+
+1. **model-service 划清边界**：model-service 逻辑属于 ANI Services，代码暂存 Core 仓库。它**只能调用** `api/v1/objects`（MinIO）和 `api/v1/encryption`（SM4），**不得** import `pkg/ports/` 或任何 Core 内部包。
+2. **kb-service 完全从零建**：`repo/services/kb-service/` 是空目录，Services 团队需要先建 go.mod、实现 RAG 引擎（Python）和管理 API（Go），工程量约10天。
+3. **ANI Services 禁止直接调用 K8s API**：所有 K8s 操作必须通过 Core `instances/` 或 `k8s-clusters/` API，不得绕过。
+
+---
+
 ### v1.0.0 交付验收单（9 月 30 日前必须全部打勾）
 
 ```
@@ -394,6 +491,7 @@ ANI Core：
   [ ] make build && make test 通过（含 E2E）
   [ ] /healthz + /readyz 所有服务可用
   [ ] VM / 容器 / GPU 容器 全生命周期（含 operation_id + 时间线）
+  [ ] **K8s 集群（vCluster）创建/kubeconfig/原生 API 代理**  ← 恢复 v1.0.0
   [ ] Sandbox 实例可 exec 命令
   [ ] VPC / 子网 / 安全组 CRUD
   [ ] 块存储 / 文件存储 / 对象存储 CRUD
