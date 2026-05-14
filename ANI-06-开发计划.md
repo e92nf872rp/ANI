@@ -1,6 +1,74 @@
 # KuberCloud ANI · 开发计划
 
-> 版本 V1 | 广州常青云科技有限公司 | 内部产品规划文件
+> 版本 V8.1 | 广州常青云科技有限公司 | 内部产品规划文件
+> 最后更新：2026-05-15
+
+---
+
+## 零、状态快照（先读这里）
+
+> 任何新开发者（人类或 AI）打开本文件，先看这一节，30 秒内定位现在的位置。
+> 任务细节见 → [`repo/CURRENT-SPRINT.md`](repo/CURRENT-SPRINT.md)（每冲刺更新）
+
+### 项目全局进度
+
+```
+总体进度：Phase 1 v1.0.0 开发中（2026-05-15）
+交付目标：2026-09-30 ANI Core v1.0.0 + ANI Services P0
+```
+
+| 阶段 | 状态 | 完成时间 | 说明 |
+|---|---|---|---|
+| **M1 基础设施底座** | ✅ 已完成 | 2026-05 | INFRA/GPU/Runtime/Instance A-S 全链路 |
+| **M2 Auth/Gateway** | ✅ 已完成 | 2026-05 | OIDC/JWT/RBAC/API Key 全流程 |
+| **V8 架构重规划** | ✅ 已完成 | 2026-05-15 | Core/Services 分层、AWS 工程加固 |
+| **Sprint 1（当前）** | 🔄 进行中 | 2026-05-15~05-31 | 操作语义底座 + Health + Idempotency |
+| Sprint 2 | ⏳ 计划中 | 2026-06-01~06-15 | VM & Container 深度 |
+| Sprint 3 | ⏳ 计划中 | 2026-06-16~06-30 | 网络/存储/向量 API |
+| Sprint 4 ⭐ | ⏳ 计划中 | 2026-07-01~07-15 | **API 冻结 + SDK**（硬截止）|
+| Sprint 5 | ⏳ 计划中 | 2026-07-16~07-31 | 控制器 + 加解密 + Sandbox |
+| Sprint 6 | ⏳ 计划中 | 2026-08-01~08-15 | 平台支撑 + Services P0 开始 |
+| Sprint 7 | ⏳ 计划中 | 2026-08-16~09-01 | Installer + 知识库 RAG |
+| Sprint 8 | ⏳ 计划中 | 2026-09-01~09-15 | Console + BOSS |
+| Sprint 9 | ⏳ 计划中 | 2026-09-16~09-25 | RC 加固 |
+| Sprint 10 | ⏳ 计划中 | 2026-09-26~09-30 | v1.0.0 发布 |
+
+### 当前冲刺：Sprint 1（2026-05-15 → 2026-05-31）
+
+| 批次 | 优先级 | 状态 |
+|---|---|---|
+| M1-INSTANCE-T（操作语义）| P0 ⭐ | 🔄 进行中 |
+| M1-HEALTH-A（健康检查端点）| P1 | ⏳ 待开始 |
+| M1-IDEM-A（幂等性令牌集成）| P1 | ⏳ 待开始 |
+| M2.2-AUTH-FINAL（Auth 收尾）| P1 | ⏳ 待开始 |
+
+**→ 今天该做什么，看 [`repo/CURRENT-SPRINT.md`](repo/CURRENT-SPRINT.md)**
+
+### 已完成批次完整记录
+
+> 完整的已完成批次列表和进度记录在 CLAUDE.md（"开发阶段命名强制约定 → 第4条"）。
+> 对应代码记录在 `repo/development-records/` 目录下（56个文件）。
+
+主要已完成里程碑（仅列关键节点）：
+- M1-INFRA-A/B/C/D/E/F — Kubernetes 基础设施、KubeOVN 网络、GPU 调度基线
+- M1-GPU-A — 异构 GPU（NVIDIA/昇腾/海光）发现与调度契约
+- M1-RUNTIME-A — WorkloadRuntime port（VM/容器/GPU/Sandbox/Batch Job 抽象）
+- M1-INSTANCE-A ~ S — 实例全链路（计划→渲染→准入→审计→dry-run→apply→observe→持久化→服务层）
+- M2.1-TASK-A/B/C — 异步任务/outbox/worker mutations
+- M2.2-AUTH-A ~ K — Auth 服务完整实现（JWT/RBAC/OIDC/JWKS/API Key）
+- V8 架构设计 — Core/Services 分层、API 工程约定（幂等性/控制平面分离等）
+- AWS 工程加固 — /healthz /readyz schema、WorkloadReconcileController port、operations DB 表、permissions schema
+
+### Phase 2 延期（v1.0.0 不实现，生意驱动迭代）
+
+| 条目 | 理由 |
+|---|---|
+| M1-BM-A（裸金属/Metal3）| 需物理机环境，无 P0 依赖 |
+| M1-K8S-A（K8s集群/vCluster）| 复杂度高，无 P0 依赖 |
+| M1-DPU-A（DPU节点）| 需专用硬件 |
+| SDK-JAVA-A（Java SDK）| 1天生成任务，按需做 |
+| M1-SVC-EP-A（服务目录/DNS）| PaaS 依赖，Phase 2 |
+| M1-NOTIFY-A（事件通知 API）| 非 P0 阻塞 |
 
 ---
 
@@ -370,11 +438,19 @@ ANI Services P0：
 
 ---
 
-## 三、Phase 1 详细开发点（2026-05 ~ 09-30）
+## 三、已完成模块归档（精简）
 
-### 模块 1：基础设施底座（M1）
+> **已完成的批次不在此处重复维护**，完整记录在两处：
+> - **代码批次进度**：`CLAUDE.md` → "开发阶段命名强制约定" → 第4条（完整批次列表）
+> - **详细技术记录**：`repo/development-records/*.md`（56个文件，每个批次一份）
+>
+> 本节只保留"为什么做"的设计意图，不重复已完成条目清单。
+
+### 模块 1：基础设施底座（M1）✅
 
 **目标：** 在 K8s 1.36 上搭建完整 AI 平台底座，让 GPU 资源可被统一调度。
+
+**已完成（全部）：** M1-INFRA-A/B/C/D/E/F + M1-GPU-A + M1-RUNTIME-A + M1-INSTANCE-A~S + M1-E2E-A/B + ARCH-ADAPTER-A/B/C/GUARD-A
 
 **当前实现对齐（2026-05-11）：**
 - `M1-INFRA-A`：已新增基础设施代码化基线，覆盖 `ani-system` 命名空间、平台依赖配置占位、默认拒绝 NetworkPolicy、控制面 ServiceAccount、Helm umbrella chart values contract。
@@ -1269,7 +1345,9 @@ M5（9月）
 
 ---
 
-## 七、V8 新增模块规划（2026-05-14）
+## 八、V8 新增模块规划（已纳入冲刺计划）
+
+> 以下模块在 Sprint 3~5（已纳入 Section 二冲刺计划）实现，本节保留详细技术规格供实现时参考。
 
 本节记录 V8 架构重规划新增的开发模块，作为后续代码生成批次的完整任务清单。
 
@@ -1447,7 +1525,7 @@ M5（9月）
 
 ---
 
-## 八、Phase 1 非功能验收标准
+## 九、Phase 1 非功能验收标准
 
 | 指标 | 要求 | 验证方式 |
 |---|---|---|
