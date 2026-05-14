@@ -78,10 +78,22 @@
 
 ## 批次完工的更新流程
 
+> 完整规约在 `CLAUDE.md` → "📋 开发进度更新规约"，以下是速查版本。
+
+**批次完成时（必须按顺序）：**
+
 ```
-1. 新建 repo/development-records/{批次名}.md
-2. 在本文件追加一行
-3. 更新 ANI-06 Section 零 状态快照（✅/🔄/⏳）
-4. 更新 repo/CURRENT-SPRINT.md 当前任务状态
-5. make test 全通后 git commit
+① make test                              → 全通（零失败）
+② 新建 {批次名}.md（用 TEMPLATE.md）    → 填入完成日期/验证结果/关键文件
+③ 本文件 README.md                       → 在对应分组表格追加一行
+④ repo/CURRENT-SPRINT.md                 → 该批次 🔄→✅，下一批次 ⏳→🔄
+⑤ ANI-06-开发计划.md Section 零         → 更新批次/Sprint 状态行
+⑥ git commit -m "feat: {批次名} {一句话}"
+```
+
+**Sprint 全部完成时，额外：**
+```
+⑦ ANI-06 Section 零 Sprint 行：🔄→✅（填完成日期）/ 下一Sprint：⏳→🔄
+⑧ repo/CURRENT-SPRINT.md 整体重写为下一 Sprint 内容
+⑨ git commit -m "sprint: Sprint N completed"
 ```

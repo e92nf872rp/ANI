@@ -53,6 +53,93 @@ ANI-06-开发计划.md                  ← 冲刺计划 + Phase 2 延期条目
 repo/pkg/ports/                     ← 所有能力接口定义
 repo/api/openapi/v1.yaml            ← Core API 契约
 repo/deploy/migrations/             ← 数据库 Schema（3 个 SQL）
+repo/development-records/           ← 已完成批次归档（README.md 是索引）
+```
+
+---
+
+## 📋 开发进度更新规约（每次完工后必须执行）
+
+> **这是最容易被跳过的步骤，也是最重要的。** 没有更新的进度等于没有完成。
+> 人类开发者和 AI 实例在完成每个批次后**必须按顺序**执行以下操作。
+
+### 事件 A：一个批次完成（如 M1-INSTANCE-T 完工）
+
+**触发条件：** `make test` 全通，该批次所有验收命令通过。
+
+**必须按顺序操作（不可跳过）：**
+
+```
+① make test  →  确认仍然全通（零失败）
+
+② 新建 repo/development-records/{批次名}.md
+   使用标准模板（见下方），填入完成日期、核心变化、关键文件
+
+③ repo/development-records/README.md
+   在对应分组追加一行：| 批次名 | 内容摘要 | 文件名.md |
+
+④ repo/CURRENT-SPRINT.md
+   把该批次的状态从 🔄 改为 ✅
+   把下一个待开始的批次改为 🔄
+   如果所有批次都 ✅ → 执行【事件 B】
+
+⑤ ANI-06-开发计划.md Section 零（"当前冲刺"表格）
+   更新对应批次行的状态列
+
+⑥ git add + git commit
+   提交信息格式：feat: {批次名} {一句话描述}
+   例：feat: M1-INSTANCE-T add operation semantics and timeline tracking
+```
+
+### 事件 B：整个 Sprint 完成（本 Sprint 所有批次都 ✅）
+
+**触发条件：** CURRENT-SPRINT.md 中所有批次都已标记 ✅。
+
+```
+① ANI-06-开发计划.md Section 零（"项目全局进度"表格）
+   当前 Sprint 行：🔄 进行中 → ✅ 已完成，填入完成日期
+   下一个 Sprint 行：⏳ 计划中 → 🔄 进行中，填入开始日期
+
+② repo/CURRENT-SPRINT.md
+   完整重写文件，切换到下一个 Sprint 的内容
+   参照 ANI-06 Section 二 对应 Sprint 的任务清单填写
+
+③ git commit -m "sprint: Sprint N completed, Sprint N+1 started"
+```
+
+### 批次记录文件标准模板
+
+在 `repo/development-records/{批次名}.md` 中使用以下结构（必填项用 * 标出）：
+
+```markdown
+# {批次名} — {主题}    *
+
+完成日期：YYYY-MM-DD    *
+对应 Sprint：Sprint N    *
+验证结果：make test EXIT:0，{N} tests passed    *
+
+## 实现了什么    *
+（1-3 句话，说明核心变化是什么，不是怎么做的）
+
+## 关键文件改动
+- `path/to/new-file.go` — 新增，{用途}
+- `path/to/changed-file.go` — 修改，{改了什么}
+
+## 完工标准达成
+- [x] {验收条件1，例：make test 全通}
+- [x] {验收条件2，例：curl /healthz 返回 200}
+```
+
+**文件命名规范：** `{批次名小写-连字符}.md`
+例：`m1-instance-t-operation-semantics.md`，`m1-health-a-health-endpoints.md`
+
+### 快速验证检查表（每次 commit 前）
+
+```bash
+# 这 3 条必须全通才能提交
+make test                    # 测试全通
+make validate-architecture   # 架构边界检查
+git diff --name-only HEAD    # 确认修改的文件都在预期范围内
 ```
 
 ---

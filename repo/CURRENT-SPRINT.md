@@ -177,10 +177,29 @@ GET  /api/v1/instances/{id}/operations                   → steps 列表非空
 |---|---|
 | 接口 | 先更新 `api/openapi/v1.yaml`，再写实现 |
 | 测试 | 每个公开函数需有测试，不写测试不 merge |
-| 命名 | 进度记录：`repo/development-records/m1-instance-t-operation-semantics.md` |
 | SDK 调用 | 不直接调 K8s/KubeVirt SDK，通过 ports 接口 |
 | RLS | 所有 DB 写入前必须设置 `app.tenant_id` |
 | "API 契约" | 不说"OpenAPI"（避免与 OpenAI 混淆）|
+
+## 完工后必做（每个批次完成时）
+
+```
+① make test              → 全通
+② 新建 development-records/{批次名}.md  → 用 TEMPLATE.md 模板
+③ development-records/README.md         → 追加一行到对应分组表格
+④ 本文件（CURRENT-SPRINT.md）          → 该批次状态 🔄 → ✅，下一批次 ⏳ → 🔄
+⑤ ANI-06-开发计划.md Section 零        → 更新批次/Sprint 状态
+⑥ git commit -m "feat: {批次名} {一句话}"
+```
+
+**Sprint 全部完成时额外操作：**
+```
+⑦ ANI-06 Section 零 Sprint 行：🔄 → ✅（填完成日期）/ 下一 Sprint：⏳ → 🔄
+⑧ 本文件（CURRENT-SPRINT.md）整体重写为下一个 Sprint 内容
+⑨ git commit -m "sprint: Sprint N completed"
+```
+
+完整规约说明：`CLAUDE.md` → "📋 开发进度更新规约"
 
 ---
 
