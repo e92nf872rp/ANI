@@ -438,21 +438,33 @@ ANI Services P0：
 
 ---
 
-## 三、已完成模块归档（精简）
+## 三、功能规格参考（Services 团队 + 前端实现依据）
 
-> **已完成的批次不在此处重复维护**，完整记录在两处：
-> - **代码批次进度**：`CLAUDE.md` → "开发阶段命名强制约定" → 第4条（完整批次列表）
-> - **详细技术记录**：`repo/development-records/*.md`（56个文件，每个批次一份）
+> **关于本节的阅读说明：**
 >
-> 本节只保留"为什么做"的设计意图，不重复已完成条目清单。
+> ANI-06 现在包含两套不同性质的内容，用途不同，请注意区分：
+>
+> | 内容 | 位置 | 用途 |
+> |---|---|---|
+> | 10个双周冲刺 | **Section 二** ← 主线 | 开发进度追踪（先读这里）|
+> | 开发批次归档 | `repo/development-records/README.md` | 已完成工作的索引 |
+> | **本节（Section 三）** | Section 三 | **功能规格参考**：描述产品应该做什么，供实现时查阅 |
+>
+> - `- [x]` 表示该功能已实现（代码存在）
+> - `- [ ]` 表示该功能在当前或未来冲刺计划中（尚未实现）
+> - **本节不用于追踪进度，进度在 Section 二**
 
-### 模块 1：基础设施底座（M1）✅
+---
+
+### 模块 1：基础设施底座（M1）✅ 已完成
 
 **目标：** 在 K8s 1.36 上搭建完整 AI 平台底座，让 GPU 资源可被统一调度。
 
-**已完成（全部）：** M1-INFRA-A/B/C/D/E/F + M1-GPU-A + M1-RUNTIME-A + M1-INSTANCE-A~S + M1-E2E-A/B + ARCH-ADAPTER-A/B/C/GUARD-A
+**完成状态：** 全部完成。完整批次记录见 `repo/development-records/README.md`
 
-**当前实现对齐（2026-05-11）：**
+**已实现能力（简写）：** M1-INFRA-A/B/C/D/E/F + M1-GPU-A + M1-RUNTIME-A + M1-INSTANCE-A~S + M1-E2E-A/B + ARCH-ADAPTER 系列
+
+**当前实现对齐（2026-05-11，已全部完成）：**
 - `M1-INFRA-A`：已新增基础设施代码化基线，覆盖 `ani-system` 命名空间、平台依赖配置占位、默认拒绝 NetworkPolicy、控制面 ServiceAccount、Helm umbrella chart values contract。
 - `M1-INFRA-B`：已新增组件安装 profile 和基础设施依赖合同，覆盖 PostgreSQL/CloudNativePG、NATS JetStream、Redis、MinIO、Milvus、Harbor。
 - `M1-INFRA-C`：已新增 KubeOVN 租户 VPC/Subnet 模板、租户默认拒绝 NetworkPolicy、Gateway-only ingress、AI Agent 沙箱 egress 限制模板。
@@ -793,11 +805,11 @@ ANI Services P0：
 
 ---
 
-### 模块 2：ANI Gateway（统一 Web Server 层）（M1-M2）
+### 模块 2：ANI Gateway（统一 Web Server 层）✅ 已完成
 
 **目标：** 所有消费者的唯一入口，从这里衍生出 REST API、SDK、CLI、运维 Skills。
 
-> 这是整个架构最关键的模块，M1 第一周就要搭好骨架，后续所有模块都依赖它。
+**完成状态：** Gateway 骨架、Middleware 链、Auth wiring 全部完成。Sprint 4 补齐 SDK 生成。
 
 #### 2.1 Gateway 骨架（Go + Hertz）
 
@@ -887,7 +899,10 @@ ANI Services P0：
 
 ---
 
-### 模块 3：模型管理平台（Go + Python）（M2）
+### 模块 3：模型管理平台 ⏳ ANI Services — Sprint 5~6 实现
+
+> **归属：ANI Services 层**（另一小组负责，调用 Core API）
+> Sprint 6 中 SVC-MODEL-A 实现此模块的核心功能。
 
 **目标：** IT 管理员无需懂 AI，把模型文件变成一个可调用的内网 API。
 
@@ -1028,7 +1043,10 @@ ANI Services P0：
 
 ---
 
-### 模块 4：企业知识库问答（Go + Python）（M3）
+### 模块 4：企业知识库问答 ⏳ ANI Services — Sprint 6~7 实现
+
+> **归属：ANI Services 层**（另一小组负责，调用 Core vector-stores + objects API）
+> Sprint 6 中 SVC-KB-A 实现此模块的核心功能。
 
 **目标：** Phase 1 核心交付物，业务用户最直接感知的 AI 能力，决定客户续费。
 
@@ -1074,7 +1092,10 @@ ANI Services P0：
 
 ---
 
-### 模块 5：前端 Console（TypeScript + React）（M4）
+### 模块 5：前端 Console ⏳ ANI Services — Sprint 7~8 实现
+
+> **归属：ANI Services 层（前端）**，Sprint 7 Console Alpha，Sprint 8 全量。
+> 依赖 Core API 冻结（Sprint 4）后替换 mock。
 
 **目标：** IT 管理员和业务部门用户的操作界面，30 分钟能学会用。
 
@@ -1126,7 +1147,9 @@ ANI Services P0：
 
 ---
 
-### 模块 6：前端 BOSS（TypeScript + React）（M4）
+### 模块 6：前端 BOSS ⏳ ANI Services — Sprint 8 实现
+
+> **归属：ANI Services 层（BOSS 前端）**，Sprint 8 中 BOSS-A 实现基础版。
 
 **目标：** 常青云内部运营和运维团队的后台，与 Console 同步全量开发。
 
@@ -1167,7 +1190,7 @@ ANI Services P0：
 
 ---
 
-### 模块 7：CLI 工具 `ani`（Go）（M4）
+### 模块 7：CLI 工具 `ani` ⏳ Sprint 8 实现（CLI-A）
 
 - [ ] **cobra + viper 骨架**
   - 全局配置：`~/.ani/config.yaml`
@@ -1199,7 +1222,7 @@ ANI Services P0：
 
 ---
 
-### 模块 8：可观测性（贯穿 M1-M5）
+### 模块 8：可观测性 ⏳ Sprint 6 实现（M1-OBS-A，Core 侧）
 
 - [ ] **指标采集（Prometheus）**
   - DCGM Exporter：GPU 利用率、显存、温度、功耗
