@@ -1,0 +1,43 @@
+profile: M1-ENCRYPT-LIVE-A
+status: contract
+description: >
+  Sprint 5 KMS/SM4 live validation gate for proving Core encryption key
+  lifecycle, seal/unseal-token, provider streaming seal/open and object store
+  sealed-content round trip against REAL-K8S-LAB-A or an equivalent live lab.
+
+required_endpoints:
+  - ani_gateway_api_v1
+  - kms_sm4_provider
+  - objectstore_presigned_put
+  - objectstore_presigned_get
+
+live_checks:
+  - id: core-create-sm4-key
+    command: POST {gateway_url}/encryption/keys algorithm=SM4
+    pass_condition: response_dev_profile_real_provider
+  - id: core-seal-object
+    command: POST {gateway_url}/encryption/seal object_uri={object_uri}
+    pass_condition: response_has_kms_sm4_sealed_uri_and_unseal_token
+  - id: core-unseal-token
+    command: POST {gateway_url}/encryption/unseal-token sealed_object_uri={sealed_object_uri}
+    pass_condition: response_has_unseal_token
+  - id: kms-stream-seal
+    command: POST {kms_base_url}/v1/stream/seal body={plaintext_bytes}
+    pass_condition: ciphertext_differs_from_plaintext
+  - id: objectstore-write-sealed-content
+    command: PUT {object_put_url} body={sealed_bytes}
+    pass_condition: http_2xx
+  - id: objectstore-read-sealed-content
+    command: GET {object_get_url}
+    pass_condition: content_matches_written_sealed_bytes
+  - id: kms-stream-open
+    command: POST {kms_base_url}/v1/stream/open body={sealed_bytes}
+    pass_condition: plaintext_matches_original
+
+readiness_levels:
+  contract:
+    meaning: Gate definition and local validator exist; no live KMS/objectstore proof.
+  live:
+    meaning: Core, KMS/SM4 streaming provider and objectstore sealed-content round trip passed in a live lab.
+  production_like:
+    meaning: Live checks, key rotation/revoke, audit evidence, objectstore durability and failure recovery evidence are present.

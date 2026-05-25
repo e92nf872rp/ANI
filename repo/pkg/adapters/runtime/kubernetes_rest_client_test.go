@@ -81,6 +81,93 @@ func TestKubernetesRESTClientApplyUsesServerSideApply(t *testing.T) {
 	}
 }
 
+func TestKubernetesRESTClientApplyManifestsSupportsSecret(t *testing.T) {
+	var gotPath string
+	var gotBody string
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		gotPath = r.URL.String()
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		gotBody = string(body)
+		if r.Method != http.MethodPatch {
+			t.Fatalf("method = %s, want PATCH", r.Method)
+		}
+		return jsonResponse(http.StatusOK, `{"kind":"Secret"}`), nil
+	})
+
+	client := newTestKubernetesRESTClient(t, transport)
+	refs, err := client.ApplyManifests(context.Background(), []ports.WorkloadManifest{{
+		Provider: "kubernetes",
+		Kind:     "Secret",
+		Name:     "sec-abc",
+		Content: `{
+  "apiVersion": "v1",
+  "kind": "Secret",
+  "metadata": {
+    "name": "sec-abc",
+    "namespace": "ani-tenant-tenant-a"
+  },
+  "type": "Opaque",
+  "stringData": {
+    "password": "secret-value"
+  }
+}`,
+	}})
+	if err != nil {
+		t.Fatalf("ApplyManifests(Secret) error = %v", err)
+	}
+	if len(refs) != 1 || refs[0] != "kubernetes/Secret/sec-abc" {
+		t.Fatalf("refs = %#v, want Kubernetes Secret ref", refs)
+	}
+	if !strings.Contains(gotPath, "/api/v1/namespaces/ani-tenant-tenant-a/secrets/sec-abc") {
+		t.Fatalf("path = %q, want Secret resource path", gotPath)
+	}
+	if !strings.Contains(gotBody, `"stringData"`) || strings.Contains(gotBody, `"data"`) {
+		t.Fatalf("body = %s, want stringData and no base64 data", gotBody)
+	}
+}
+
+func TestKubernetesRESTClientSupportsClusterAPIMachineDeployment(t *testing.T) {
+	var gotPath string
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		gotPath = r.URL.String()
+		if r.Method != http.MethodPatch {
+			t.Fatalf("method = %s, want PATCH", r.Method)
+		}
+		return jsonResponse(http.StatusOK, `{"kind":"MachineDeployment"}`), nil
+	})
+
+	client := newTestKubernetesRESTClient(t, transport)
+	refs, err := client.ApplyManifests(context.Background(), []ports.WorkloadManifest{{
+		Provider: "clusterapi",
+		Kind:     "MachineDeployment",
+		Name:     "gpu-pool",
+		Content: `{
+  "apiVersion": "cluster.x-k8s.io/v1beta1",
+  "kind": "MachineDeployment",
+  "metadata": {
+    "name": "gpu-pool",
+    "namespace": "ani-tenant-tenant-a"
+  },
+  "spec": {
+    "clusterName": "cluster-a",
+    "replicas": 2
+  }
+}`,
+	}})
+	if err != nil {
+		t.Fatalf("ApplyManifests(MachineDeployment) error = %v", err)
+	}
+	if len(refs) != 1 || refs[0] != "clusterapi/MachineDeployment/gpu-pool" {
+		t.Fatalf("refs = %#v, want Cluster API MachineDeployment ref", refs)
+	}
+	if !strings.Contains(gotPath, "/apis/cluster.x-k8s.io/v1beta1/namespaces/ani-tenant-tenant-a/machinedeployments/gpu-pool") {
+		t.Fatalf("path = %q, want Cluster API MachineDeployment resource path", gotPath)
+	}
+}
+
 func TestKubernetesRESTClientObserveDeploymentStatus(t *testing.T) {
 	var gotPath string
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {

@@ -5,6 +5,7 @@ use (
 	./services/ani-gateway
 	./services/auth-service
 	./services/model-service
+	./services/reconcile-worker
 	./services/task-service
 )
 

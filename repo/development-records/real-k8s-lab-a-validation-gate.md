@@ -7,8 +7,8 @@
 
 ## 关键实现
 
-- `deploy/real-k8s-lab/profile.yaml`：定义 REAL-K8S-LAB-A 最小真实底座组件、三节点要求和 live check。
-- `scripts/validate_real_k8s_profile.py`：默认校验门禁定义和文档引用；`--live` 模式通过 `kubectl` 检查真实 lab。
+- `deploy/real-k8s-lab/profile.yaml`：定义 REAL-K8S-LAB-A 最小真实底座组件、三节点要求、live check 和组件级 `contract_gates` 索引。
+- `scripts/validate_real_k8s_profile.py`：默认校验门禁定义、文档引用、组件级 Make target/manifest/validator 索引；`--live` 模式通过 `kubectl` 检查真实 lab，并可用 `--evidence-output` 写出 JSON 证据。
 - `Makefile`：新增 `make validate-real-k8s-profile`。
 - `CLAUDE.md`、`ANI-DOCS-INDEX.md`、`ANI-06-开发计划.md`、`repo/CURRENT-SPRINT.md`：同步真实底座强制门禁。
 
@@ -24,6 +24,12 @@ make validate-real-k8s-profile
 
 ```bash
 KUBECONFIG=/path/to/real-lab.kubeconfig python scripts/validate_real_k8s_profile.py --live
+```
+
+归档总入口 live 证据：
+
+```bash
+KUBECONFIG=/path/to/real-lab.kubeconfig python scripts/validate_real_k8s_profile.py --live --evidence-output repo/development-records/live/real-k8s-lab-a.json
 ```
 
 ## 真实边界

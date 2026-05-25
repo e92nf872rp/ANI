@@ -6,6 +6,80 @@ description: >
 
 minimum_nodes: 3
 
+contract_gates:
+  - id: vcluster-live-gate
+    profile: M1-K8S-LIVE-A
+    command: make validate-vcluster-live-gate
+    manifest: deploy/real-k8s-lab/vcluster-live-gate.yaml
+    validator_script: scripts/validate_vcluster_live_gate.py
+    required_env:
+      - KUBECONFIG
+      - ANI_GATEWAY_URL
+      - ANI_BEARER_TOKEN
+  - id: vcluster-upgrade-live-gate
+    profile: M1-K8S-LIVE-C
+    command: make validate-vcluster-upgrade-live-gate
+    manifest: deploy/real-k8s-lab/vcluster-upgrade-live-gate.yaml
+    validator_script: scripts/validate_vcluster_upgrade_live_gate.py
+    required_env:
+      - KUBECONFIG
+      - ANI_GATEWAY_URL
+      - ANI_BEARER_TOKEN
+  - id: k8s-node-pool-live-gate
+    profile: M1-K8S-LIVE-B
+    command: make validate-k8s-node-pool-live-gate
+    manifest: deploy/real-k8s-lab/k8s-node-pool-live-gate.yaml
+    validator_script: scripts/validate_k8s_node_pool_live_gate.py
+    required_env:
+      - KUBECONFIG
+      - ANI_GATEWAY_URL
+      - ANI_BEARER_TOKEN
+      - ANI_LIVE_K8S_CLUSTER_ID
+  - id: kubeovn-network-live-gate
+    profile: M1-NETWORK-LIVE-A
+    command: make validate-kubeovn-network-live-gate
+    manifest: deploy/real-k8s-lab/kubeovn-network-live-gate.yaml
+    validator_script: scripts/validate_kubeovn_network_live_gate.py
+    required_env:
+      - KUBECONFIG
+  - id: kubevirt-vm-live-gate
+    profile: M1-KUBEVIRT-LIVE-A
+    command: make validate-kubevirt-vm-live-gate
+    manifest: deploy/real-k8s-lab/kubevirt-vm-live-gate.yaml
+    validator_script: scripts/validate_kubevirt_vm_live_gate.py
+    required_env:
+      - KUBECONFIG
+  - id: reconcile-ha-live-gate
+    profile: M1-RECONCILE-LIVE-A
+    command: make validate-reconcile-ha-live-gate
+    manifest: deploy/real-k8s-lab/reconcile-ha-live-gate.yaml
+    validator_script: scripts/validate_reconcile_ha_live_gate.py
+    required_env:
+      - KUBECONFIG
+      - DATABASE_URL
+      - RECONCILE_WORKER_METRICS_URL
+  - id: kms-sm4-live-gate
+    profile: M1-ENCRYPT-LIVE-A
+    command: make validate-kms-sm4-live-gate
+    manifest: deploy/real-k8s-lab/kms-sm4-live-gate.yaml
+    validator_script: scripts/validate_kms_sm4_live_gate.py
+    required_env:
+      - ANI_GATEWAY_URL
+      - ANI_BEARER_TOKEN
+      - KMS_PROVIDER_BASE_URL
+      - KMS_PROVIDER_BEARER_TOKEN
+      - OBJECTSTORE_LIVE_PUT_URL
+      - OBJECTSTORE_LIVE_GET_URL
+  - id: secrets-live-gate
+    profile: M1-SECRETS-LIVE-A
+    command: make validate-secrets-live-gate
+    manifest: deploy/real-k8s-lab/secrets-live-gate.yaml
+    validator_script: scripts/validate_secrets_live_gate.py
+    required_env:
+      - KUBECONFIG
+      - ANI_GATEWAY_URL
+      - ANI_BEARER_TOKEN
+
 components:
   kubernetes:
     required: true
@@ -46,11 +120,17 @@ components:
         pass_condition: at_least_one_item
   kms_sm4_and_secret:
     required: false
-    purpose: Sprint 5-6 encryption and K8s Secret injection validation.
+    purpose: Sprint 5-6 encryption, provider streaming, objectstore sealed-content round trip and K8s Secret injection validation.
     live_checks:
       - id: kubernetes-secret-api
         command: kubectl auth can-i create secrets --all-namespaces
         pass_condition: stdout_yes
+      - id: kms-sm4-provider-streaming
+        command: make validate-kms-sm4-live-gate
+        pass_condition: contract_gate_exists
+      - id: kubernetes-secret-live-gate
+        command: make validate-secrets-live-gate
+        pass_condition: contract_gate_exists
 
 readiness_levels:
   contract:

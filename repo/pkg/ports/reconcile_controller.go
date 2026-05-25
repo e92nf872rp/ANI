@@ -54,6 +54,26 @@ type ReconcileControllerConfig struct {
 	// MaxConcurrentReconciles limits the number of targets processed per tick.
 	// Implementations may use it as a provider-call concurrency cap. Default 10.
 	MaxConcurrentReconciles int
+	// FailureBackoffSeconds is the cooldown before retrying a target after a
+	// transient reconcile error. Default 30.
+	FailureBackoffSeconds int
+}
+
+type ReconcileControllerMetrics struct {
+	Ticks          int64
+	Successes      int64
+	Failures       int64
+	SkippedBackoff int64
+}
+
+type ReconcileControllerMetricsReader interface {
+	Metrics() ReconcileControllerMetrics
+}
+
+// ReconcileLeaderElector gates a reconcile controller so only the elected
+// process runs the background loop in an HA deployment.
+type ReconcileLeaderElector interface {
+	Run(ctx context.Context, run func(context.Context) error) error
 }
 
 // WorkloadReconcileController is the background control-plane component that

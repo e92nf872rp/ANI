@@ -26,9 +26,12 @@ func (s fakeMetadataStore) WithPlatformTx(ctx context.Context, fn func(context.C
 }
 
 type fakeMetadataTx struct {
-	sql   string
-	args  []any
-	execs []string
+	sql          string
+	args         []any
+	execs        []string
+	queryRowSQL  string
+	queryRowArgs []any
+	row          fakeMetadataRow
 }
 
 func (tx *fakeMetadataTx) Exec(_ context.Context, sql string, args ...any) (ports.CommandTag, error) {
@@ -42,7 +45,35 @@ func (tx *fakeMetadataTx) Query(context.Context, string, ...any) (ports.Rows, er
 	return nil, ports.ErrUnsupported
 }
 
-func (tx *fakeMetadataTx) QueryRow(context.Context, string, ...any) ports.Row {
+func (tx *fakeMetadataTx) QueryRow(_ context.Context, sql string, args ...any) ports.Row {
+	tx.queryRowSQL = sql
+	tx.queryRowArgs = args
+	return tx.row
+}
+
+type fakeMetadataRow struct {
+	values []any
+	err    error
+}
+
+func (r fakeMetadataRow) Scan(dest ...any) error {
+	if r.err != nil {
+		return r.err
+	}
+	for i, target := range dest {
+		switch ptr := target.(type) {
+		case *string:
+			*ptr = r.values[i].(string)
+		case *bool:
+			*ptr = r.values[i].(bool)
+		case *time.Time:
+			*ptr = r.values[i].(time.Time)
+		case *[]byte:
+			*ptr = r.values[i].([]byte)
+		default:
+			return ports.ErrUnsupported
+		}
+	}
 	return nil
 }
 

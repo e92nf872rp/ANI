@@ -4,10 +4,23 @@
 // implemented by the owning team.
 package router
 
-import "github.com/cloudwego/hertz/pkg/app/server"
+import (
+	"github.com/cloudwego/hertz/pkg/app/server"
+	"github.com/kubercloud/ani/pkg/ports"
+)
+
+type RegisterOptions struct {
+	K8sClusterService ports.K8sClusterService
+	EncryptionService ports.EncryptionService
+	SecretService     ports.SecretService
+}
 
 // Register wires all route groups onto the Hertz server.
 func Register(h *server.Hertz) {
+	RegisterWithOptions(h, RegisterOptions{})
+}
+
+func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	// Health/readiness probes (no auth required)
 	registerHealth(h.Group(""))
 
@@ -21,9 +34,9 @@ func Register(h *server.Hertz) {
 	registerNetworkResources(v1)
 	registerStorageResources(v1)
 	registerVectorStoreResources(v1)
-	registerK8sClusterResources(v1)
-	registerEncryptionResources(v1)
-	registerSecretResources(v1)
+	registerK8sClusterResourcesWithService(v1, options.K8sClusterService)
+	registerEncryptionResourcesWithService(v1, options.EncryptionService)
+	registerSecretResourcesWithService(v1, options.SecretService)
 
 	svc := h.Group("/api/v1/svc")
 	registerModels(svc)

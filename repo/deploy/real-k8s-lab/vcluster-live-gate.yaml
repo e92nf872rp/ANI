@@ -1,0 +1,30 @@
+profile: M1-K8S-LIVE-A
+status: contract
+description: >
+  Sprint 5 vCluster live validation gate for proving Helm install,
+  vCluster kubeconfig usability and Core proxy access against REAL-K8S-LAB-A.
+
+required_tools:
+  - helm
+  - vcluster
+  - kubectl
+
+live_checks:
+  - id: helm-install
+    command: helm upgrade --install {cluster_id} vcluster --repo https://charts.loft.sh --namespace {namespace} --create-namespace --repository-config= --set sync.toHost.service.enabled=true
+    pass_condition: command_succeeds
+  - id: vcluster-kubeconfig
+    command: vcluster connect {cluster_id} --namespace {namespace} --print
+    pass_condition: stdout_contains_kubeconfig
+  - id: kubectl-version
+    command: kubectl --kubeconfig {generated_kubeconfig} get --raw /version
+    pass_condition: json_has_kubernetes_version
+  - id: core-proxy-version
+    command: POST {gateway_url}/k8s-clusters/{cluster_id}/proxy path=/version
+    pass_condition: http_2xx
+
+readiness_levels:
+  contract:
+    meaning: Gate definition and local validator exist; no live vCluster proof.
+  live:
+    meaning: Helm install, vCluster kubeconfig and Core proxy checks passed against REAL-K8S-LAB-A.

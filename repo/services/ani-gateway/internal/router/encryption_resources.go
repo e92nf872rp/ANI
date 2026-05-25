@@ -71,10 +71,21 @@ type encryptionUnsealTokenResponse struct {
 }
 
 func newEncryptionAPI() *encryptionAPI {
-	return &encryptionAPI{service: runtimeadapter.NewLocalEncryptionService()}
+	return newEncryptionAPIWithService(nil)
+}
+
+func newEncryptionAPIWithService(service ports.EncryptionService) *encryptionAPI {
+	if service == nil {
+		service = runtimeadapter.NewLocalEncryptionService()
+	}
+	return &encryptionAPI{service: service}
 }
 func registerEncryptionResources(v1 *route.RouterGroup) {
-	api := newEncryptionAPI()
+	registerEncryptionResourcesWithService(v1, nil)
+}
+
+func registerEncryptionResourcesWithService(v1 *route.RouterGroup, service ports.EncryptionService) {
+	api := newEncryptionAPIWithService(service)
 	v1.GET("/encryption/keys", api.listKeys)
 	v1.POST("/encryption/keys", api.createKey)
 	v1.GET("/encryption/keys/:key_id", api.getKey)
@@ -178,16 +189,28 @@ func (api *encryptionAPI) createUnsealToken(ctx context.Context, c *app.RequestC
 	c.JSON(http.StatusOK, encryptionUnsealTokenFromRecord(rec))
 }
 func encryptionFromRecord(r ports.EncryptionKeyRecord) encryptionResponse {
-	return encryptionResponse{ID: r.KeyID, TenantID: r.TenantID, Name: r.Name, Algorithm: r.Algorithm, State: r.State, DevProfile: localCoreDevProfile("local-encryption-service", "Core dev/local profile; provider KMS integration is deferred"), CreatedAt: time.Unix(r.CreatedAt, 0).UTC().Format(time.RFC3339), UpdatedAt: time.Unix(r.UpdatedAt, 0).UTC().Format(time.RFC3339)}
+	return encryptionResponse{ID: r.KeyID, TenantID: r.TenantID, Name: r.Name, Algorithm: r.Algorithm, State: r.State, DevProfile: encryptionDevProfile(r.RealProvider, r.Provider, "Core dev/local profile; provider KMS integration is deferred"), CreatedAt: time.Unix(r.CreatedAt, 0).UTC().Format(time.RFC3339), UpdatedAt: time.Unix(r.UpdatedAt, 0).UTC().Format(time.RFC3339)}
 }
 func encryptionRotationFromRecord(r ports.EncryptionKeyRotationRecord) encryptionRotationResponse {
-	return encryptionRotationResponse{RotationID: r.RotationID, TenantID: r.TenantID, PreviousKeyID: r.PreviousKey.KeyID, RotatedKey: encryptionFromRecord(r.RotatedKey), RotatedAt: time.Unix(r.RotatedAt, 0).UTC().Format(time.RFC3339), DevProfile: localCoreDevProfile("local-encryption-service", "Core dev/local profile; key rotation is simulated")}
+	return encryptionRotationResponse{RotationID: r.RotationID, TenantID: r.TenantID, PreviousKeyID: r.PreviousKey.KeyID, RotatedKey: encryptionFromRecord(r.RotatedKey), RotatedAt: time.Unix(r.RotatedAt, 0).UTC().Format(time.RFC3339), DevProfile: encryptionDevProfile(r.RotatedKey.RealProvider, r.RotatedKey.Provider, "Core dev/local profile; key rotation is simulated")}
 }
 func encryptionSealFromRecord(r ports.EncryptionSealRecord) encryptionSealResponse {
-	return encryptionSealResponse{KeyID: r.KeyID, TenantID: r.TenantID, ObjectURI: r.ObjectURI, SealedObjectURI: r.SealedObjectURI, UnsealToken: r.UnsealToken, ExpiresAt: time.Unix(r.ExpiresAt, 0).UTC().Format(time.RFC3339), DevProfile: localCoreDevProfile("local-encryption-service", "Core dev/local profile; seal/unseal token is simulated")}
+	return encryptionSealResponse{KeyID: r.KeyID, TenantID: r.TenantID, ObjectURI: r.ObjectURI, SealedObjectURI: r.SealedObjectURI, UnsealToken: r.UnsealToken, ExpiresAt: time.Unix(r.ExpiresAt, 0).UTC().Format(time.RFC3339), DevProfile: encryptionDevProfile(r.RealProvider, r.Provider, "Core dev/local profile; seal/unseal token is simulated")}
 }
 func encryptionUnsealTokenFromRecord(r ports.EncryptionUnsealTokenRecord) encryptionUnsealTokenResponse {
-	return encryptionUnsealTokenResponse{KeyID: r.KeyID, TenantID: r.TenantID, SealedObjectURI: r.SealedObjectURI, UnsealToken: r.UnsealToken, ExpiresAt: time.Unix(r.ExpiresAt, 0).UTC().Format(time.RFC3339), DevProfile: localCoreDevProfile("local-encryption-service", "Core dev/local profile; seal/unseal token is simulated")}
+	return encryptionUnsealTokenResponse{KeyID: r.KeyID, TenantID: r.TenantID, SealedObjectURI: r.SealedObjectURI, UnsealToken: r.UnsealToken, ExpiresAt: time.Unix(r.ExpiresAt, 0).UTC().Format(time.RFC3339), DevProfile: encryptionDevProfile(r.RealProvider, r.Provider, "Core dev/local profile; seal/unseal token is simulated")}
+}
+
+func encryptionDevProfile(realProvider bool, provider string, localReason string) coreDevProfileResponse {
+	if realProvider && provider == "kms-sm4" {
+		return coreDevProfileResponse{
+			Mode:         "real",
+			Provider:     "kms-sm4-provider",
+			RealProvider: true,
+			Reason:       "KMS/SM4 provider handled key material or seal operation; live KMS validation is gated separately",
+		}
+	}
+	return localCoreDevProfile("local-encryption-service", localReason)
 }
 func writeEncryptionError(c *app.RequestContext, err error) {
 	switch {

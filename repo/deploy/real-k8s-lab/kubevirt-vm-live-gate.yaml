@@ -1,0 +1,46 @@
+profile: M1-KUBEVIRT-LIVE-A
+status: contract
+description: >
+  Sprint 5 KubeVirt VM live validation gate for proving the real lab can
+  create, start, stop, observe, access console/VNC subresources and delete a
+  KubeVirt VirtualMachine.
+
+required_tools:
+  - kubectl
+
+required_endpoints:
+  - kubernetes_api
+  - kubevirt_api
+  - kubevirt_subresources_api
+
+live_checks:
+  - id: kubevirt-crds-ready
+    command: kubectl get crd virtualmachines.kubevirt.io virtualmachineinstances.kubevirt.io -o json
+    pass_condition: kubevirt_vm_and_vmi_crds_exist
+  - id: kubevirt-control-plane-available
+    command: kubectl get kubevirt -A -o json
+    pass_condition: at_least_one_kubevirt_cr_available
+  - id: kubevirt-vm-created
+    command: kubectl apply -f kubevirt-vm.yaml && kubectl get virtualmachine {vm_name} -n {namespace} -o json
+    pass_condition: virtualmachine_exists_in_tenant_namespace
+  - id: kubevirt-vmi-ready
+    command: kubectl patch virtualmachine {vm_name} -n {namespace} --type=merge -p '{"spec":{"running":true}}' && kubectl wait --for=condition=Ready virtualmachineinstance/{vm_name} -n {namespace}
+    pass_condition: virtualmachineinstance_ready_or_running
+  - id: kubevirt-vnc-subresource
+    command: kubectl get --raw /apis/subresources.kubevirt.io/v1/namespaces/{namespace}/virtualmachineinstances/{vm_name}/vnc
+    pass_condition: vnc_subresource_accepts_request
+  - id: kubevirt-console-subresource
+    command: kubectl get --raw /apis/subresources.kubevirt.io/v1/namespaces/{namespace}/virtualmachineinstances/{vm_name}/console
+    pass_condition: console_subresource_accepts_request
+  - id: kubevirt-vm-stopped
+    command: kubectl patch virtualmachine {vm_name} -n {namespace} --type=merge -p '{"spec":{"running":false}}' && kubectl wait --for=delete virtualmachineinstance/{vm_name} -n {namespace}
+    pass_condition: virtualmachineinstance_stopped
+  - id: kubevirt-vm-deleted
+    command: kubectl delete virtualmachine {vm_name} -n {namespace} && kubectl wait --for=delete virtualmachine/{vm_name} -n {namespace}
+    pass_condition: virtualmachine_deleted
+
+readiness_levels:
+  contract:
+    meaning: Gate definition and local validator exist; no live KubeVirt VM proof.
+  live:
+    meaning: KubeVirt CRD/control-plane, VM start/stop lifecycle and console/VNC checks passed against REAL-K8S-LAB-A.

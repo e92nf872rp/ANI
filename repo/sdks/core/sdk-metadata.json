@@ -203,10 +203,46 @@
       "scope": "scope:k8s-clusters:read"
     },
     {
+      "operationId": "listK8sClusterNodePools",
+      "method": "GET",
+      "path": "/k8s-clusters/{cluster_id}/node-pools",
+      "scope": "scope:k8s-clusters:read"
+    },
+    {
+      "operationId": "createK8sClusterNodePool",
+      "method": "POST",
+      "path": "/k8s-clusters/{cluster_id}/node-pools",
+      "scope": "scope:k8s-clusters:manage"
+    },
+    {
+      "operationId": "deleteK8sClusterNodePool",
+      "method": "DELETE",
+      "path": "/k8s-clusters/{cluster_id}/node-pools/{node_pool_id}",
+      "scope": "scope:k8s-clusters:manage"
+    },
+    {
+      "operationId": "getK8sClusterNodePool",
+      "method": "GET",
+      "path": "/k8s-clusters/{cluster_id}/node-pools/{node_pool_id}",
+      "scope": "scope:k8s-clusters:read"
+    },
+    {
+      "operationId": "updateK8sClusterNodePool",
+      "method": "PATCH",
+      "path": "/k8s-clusters/{cluster_id}/node-pools/{node_pool_id}",
+      "scope": "scope:k8s-clusters:manage"
+    },
+    {
       "operationId": "proxyK8sClusterAPI",
       "method": "POST",
       "path": "/k8s-clusters/{cluster_id}/proxy",
       "scope": "scope:k8s-clusters:proxy"
+    },
+    {
+      "operationId": "upgradeK8sCluster",
+      "method": "POST",
+      "path": "/k8s-clusters/{cluster_id}/upgrade",
+      "scope": "scope:k8s-clusters:manage"
     },
     {
       "operationId": "getMeteringUsage",
@@ -474,8 +510,14 @@
     "K8sClusterCreateRequest",
     "K8sClusterKubeconfig",
     "K8sClusterListResponse",
+    "K8sClusterNodePool",
+    "K8sClusterNodePoolCreateRequest",
+    "K8sClusterNodePoolGPU",
+    "K8sClusterNodePoolListResponse",
+    "K8sClusterNodePoolUpdateRequest",
     "K8sClusterProxyRequest",
     "K8sClusterProxyResponse",
+    "K8sClusterUpgradeRequest",
     "ListAPIKeysResponse",
     "LogoutRequest",
     "NetworkLoadBalancer",
@@ -522,7 +564,10 @@
     "createInstance",
     "applyInstanceLifecycle",
     "createK8sCluster",
+    "createK8sClusterNodePool",
+    "updateK8sClusterNodePool",
     "proxyK8sClusterAPI",
+    "upgradeK8sCluster",
     "createNetworkLoadBalancer",
     "createNetworkSecurityGroup",
     "createNetworkSubnet",

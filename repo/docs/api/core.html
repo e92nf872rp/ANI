@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>71</dd></div>
-          <div><dt>Schemas</dt><dd>80</dd></div>
+          <div><dt>Operations</dt><dd>77</dd></div>
+          <div><dt>Schemas</dt><dd>86</dd></div>
         </dl>
       </section>
 
@@ -424,11 +424,59 @@
           <td>200, 404, 409</td>
         </tr>
         <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/k8s-clusters/{cluster_id}/node-pools</code></td>
+          <td><code>listK8sClusterNodePools</code></td>
+          <td>列出 K8s 集群节点池</td>
+          <td><code>scope:k8s-clusters:read</code></td>
+          <td>200, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/k8s-clusters/{cluster_id}/node-pools</code></td>
+          <td><code>createK8sClusterNodePool</code></td>
+          <td>创建 K8s 集群节点池</td>
+          <td><code>scope:k8s-clusters:manage</code></td>
+          <td>201, 400, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/k8s-clusters/{cluster_id}/node-pools/{node_pool_id}</code></td>
+          <td><code>deleteK8sClusterNodePool</code></td>
+          <td>删除 K8s 集群节点池</td>
+          <td><code>scope:k8s-clusters:manage</code></td>
+          <td>200, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/k8s-clusters/{cluster_id}/node-pools/{node_pool_id}</code></td>
+          <td><code>getK8sClusterNodePool</code></td>
+          <td>获取 K8s 集群节点池</td>
+          <td><code>scope:k8s-clusters:read</code></td>
+          <td>200, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-patch">PATCH</span></td>
+          <td><code>/k8s-clusters/{cluster_id}/node-pools/{node_pool_id}</code></td>
+          <td><code>updateK8sClusterNodePool</code></td>
+          <td>更新 K8s 集群节点池</td>
+          <td><code>scope:k8s-clusters:manage</code></td>
+          <td>200, 400, 404, 409</td>
+        </tr>
+        <tr>
           <td><span class="method method-post">POST</span></td>
           <td><code>/k8s-clusters/{cluster_id}/proxy</code></td>
           <td><code>proxyK8sClusterAPI</code></td>
           <td>代理访问 K8s 集群原生 API</td>
           <td><code>scope:k8s-clusters:proxy</code></td>
+          <td>200, 400, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/k8s-clusters/{cluster_id}/upgrade</code></td>
+          <td><code>upgradeK8sCluster</code></td>
+          <td>升级 K8s 集群版本</td>
+          <td><code>scope:k8s-clusters:manage</code></td>
           <td>200, 400, 404, 409</td>
         </tr>
         <tr>
@@ -776,8 +824,14 @@
         <li><code>K8sClusterCreateRequest</code></li>
         <li><code>K8sClusterKubeconfig</code></li>
         <li><code>K8sClusterListResponse</code></li>
+        <li><code>K8sClusterNodePool</code></li>
+        <li><code>K8sClusterNodePoolCreateRequest</code></li>
+        <li><code>K8sClusterNodePoolGPU</code></li>
+        <li><code>K8sClusterNodePoolListResponse</code></li>
+        <li><code>K8sClusterNodePoolUpdateRequest</code></li>
         <li><code>K8sClusterProxyRequest</code></li>
         <li><code>K8sClusterProxyResponse</code></li>
+        <li><code>K8sClusterUpgradeRequest</code></li>
         <li><code>ListAPIKeysResponse</code></li>
         <li><code>LogoutRequest</code></li>
         <li><code>NetworkLoadBalancer</code></li>

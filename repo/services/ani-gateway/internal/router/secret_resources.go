@@ -56,11 +56,22 @@ type secretBindingResponse struct {
 }
 
 func newSecretAPI() *secretAPI {
-	return &secretAPI{service: runtimeadapter.NewLocalSecretService()}
+	return newSecretAPIWithService(nil)
+}
+
+func newSecretAPIWithService(service ports.SecretService) *secretAPI {
+	if service == nil {
+		service = runtimeadapter.NewLocalSecretService()
+	}
+	return &secretAPI{service: service}
 }
 
 func registerSecretResources(v1 *route.RouterGroup) {
-	api := newSecretAPI()
+	registerSecretResourcesWithService(v1, nil)
+}
+
+func registerSecretResourcesWithService(v1 *route.RouterGroup, service ports.SecretService) {
+	api := newSecretAPIWithService(service)
 	v1.GET("/secrets", api.listSecrets)
 	v1.POST("/secrets", api.createSecret)
 	v1.GET("/secrets/:secret_id", api.getSecret)
@@ -141,6 +152,15 @@ func (api *secretAPI) bindSecret(ctx context.Context, c *app.RequestContext) {
 }
 
 func secretFromRecord(r ports.SecretRecord) secretResponse {
+	devProfile := localCoreDevProfile("local-secret-service", "Core dev/local profile; secret values are stored only in the local adapter and never returned")
+	if r.RealProvider && r.Provider == "kubernetes" {
+		devProfile = coreDevProfileResponse{
+			Mode:         "real",
+			Provider:     "kubernetes-secret-provider",
+			RealProvider: true,
+			Reason:       "Kubernetes Secret has been written; instance environment/file injection is gated separately",
+		}
+	}
 	return secretResponse{
 		ID:         r.SecretID,
 		TenantID:   r.TenantID,
@@ -148,7 +168,7 @@ func secretFromRecord(r ports.SecretRecord) secretResponse {
 		Type:       r.Type,
 		Keys:       r.Keys,
 		State:      r.State,
-		DevProfile: localCoreDevProfile("local-secret-service", "Core dev/local profile; secret values are stored only in the local adapter and never returned"),
+		DevProfile: devProfile,
 		CreatedAt:  time.Unix(r.CreatedAt, 0).UTC().Format(time.RFC3339),
 		UpdatedAt:  time.Unix(r.UpdatedAt, 0).UTC().Format(time.RFC3339),
 	}

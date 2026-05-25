@@ -108,7 +108,19 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 	}
 	reconciler := runtimeadapter.NewLocalStatusReconciler()
 	instanceStore := runtimeadapter.NewMetadataInstanceStore(metadata)
-	reconcileController := runtimeadapter.NewLocalWorkloadReconcileController(instanceStore, instanceStore, statusReader, reconciler, reconcileControllerConfig(cfg))
+	reconcileController := ports.WorkloadReconcileController(runtimeadapter.NewLocalWorkloadReconcileController(instanceStore, instanceStore, statusReader, reconciler, reconcileControllerConfig(cfg)))
+	if cfg.WorkloadReconcileLeaderElectionEnabled {
+		elector, err := runtimeadapter.NewMetadataReconcileLeaderElector(metadata, runtimeadapter.MetadataReconcileLeaderElectorConfig{
+			LeaseName:            cfg.WorkloadReconcileLeaderLeaseName,
+			Identity:             cfg.WorkloadReconcileLeaderIdentity,
+			LeaseTTLSeconds:      cfg.WorkloadReconcileLeaderLeaseTTL,
+			RenewIntervalSeconds: cfg.WorkloadReconcileLeaderRenewInterval,
+		})
+		if err != nil {
+			return Capabilities{}, err
+		}
+		reconcileController = runtimeadapter.NewLeaderElectingWorkloadReconcileController(reconcileController, elector)
+	}
 	operationStore := runtimeadapter.NewMetadataOperationStore(metadata)
 	workloadIdentity := runtimeadapter.NewMetadataWorkloadIdentityService(metadata)
 	networkStore := runtimeadapter.NewMetadataNetworkStore(metadata)
@@ -182,6 +194,7 @@ func reconcileControllerConfig(cfg Config) ports.ReconcileControllerConfig {
 		ActiveIntervalSeconds:   cfg.WorkloadReconcileActiveInterval,
 		StaleThresholdSeconds:   cfg.WorkloadReconcileStaleThreshold,
 		MaxConcurrentReconciles: cfg.WorkloadReconcileMaxBatch,
+		FailureBackoffSeconds:   cfg.WorkloadReconcileFailureBackoff,
 	}
 }
 

@@ -82,3 +82,21 @@ func TestEncryptionAPIDevProfileAndIdempotency(t *testing.T) {
 		t.Fatalf("want revoked key to reject seal")
 	}
 }
+
+func TestEncryptionResponseMarksRealProviderWhenKMSProviderApplied(t *testing.T) {
+	resp := encryptionFromRecord(ports.EncryptionKeyRecord{
+		KeyID:        "ekey-real",
+		TenantID:     "tenant-a",
+		Name:         "model-seal",
+		Algorithm:    "SM4",
+		State:        "active",
+		Provider:     "kms-sm4",
+		RealProvider: true,
+		ProviderRefs: []string{"kms://tenant-a/ekey-real"},
+		CreatedAt:    100,
+		UpdatedAt:    100,
+	})
+	if resp.DevProfile.Mode != "real" || !resp.DevProfile.RealProvider || resp.DevProfile.Provider != "kms-sm4-provider" {
+		t.Fatalf("dev_profile = %+v, want KMS SM4 provider", resp.DevProfile)
+	}
+}

@@ -21,4 +21,4 @@
 - 开发阶段命名约定 → [CLAUDE.md #开发阶段命名强制约定](./CLAUDE.md)
 - API 工程约定（幂等性/兼容性/控制平面分离等）→ [CLAUDE.md #API-工程约定](./CLAUDE.md)
 - 版本管理约定 → [CLAUDE.md #版本管理强制约定](./CLAUDE.md)
-- Karpathy 四条开发原则 → [CLAUDE.md #Karpathy-四条开发原则](./CLAUDE.md)
+- Karpathy 五条开发原则 → [CLAUDE.md #Karpathy-五条开发原则](./CLAUDE.md)

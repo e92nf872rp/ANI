@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kubercloud/ani/pkg/ports"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 )
@@ -36,11 +37,17 @@ type Config struct {
 	KubernetesBearerToken          string
 	KubernetesProviderFieldManager string
 
-	WorkloadReconcileControllerEnabled bool
-	WorkloadReconcileNormalInterval    int
-	WorkloadReconcileActiveInterval    int
-	WorkloadReconcileStaleThreshold    int
-	WorkloadReconcileMaxBatch          int
+	WorkloadReconcileControllerEnabled     bool
+	WorkloadReconcileNormalInterval        int
+	WorkloadReconcileActiveInterval        int
+	WorkloadReconcileStaleThreshold        int
+	WorkloadReconcileMaxBatch              int
+	WorkloadReconcileFailureBackoff        int
+	WorkloadReconcileLeaderElectionEnabled bool
+	WorkloadReconcileLeaderIdentity        string
+	WorkloadReconcileLeaderLeaseName       string
+	WorkloadReconcileLeaderLeaseTTL        int
+	WorkloadReconcileLeaderRenewInterval   int
 }
 
 // MustConnect initializes all dependencies. Exits the process if any connection fails.
@@ -133,6 +140,24 @@ func (c Config) withEnvironmentOverrides() Config {
 	if value := os.Getenv("WORKLOAD_RECONCILE_MAX_BATCH"); value != "" {
 		c.WorkloadReconcileMaxBatch = parseInt(value, c.WorkloadReconcileMaxBatch)
 	}
+	if value := os.Getenv("WORKLOAD_RECONCILE_FAILURE_BACKOFF_SECONDS"); value != "" {
+		c.WorkloadReconcileFailureBackoff = parseInt(value, c.WorkloadReconcileFailureBackoff)
+	}
+	if value := os.Getenv("WORKLOAD_RECONCILE_LEADER_ELECTION_ENABLED"); value != "" {
+		c.WorkloadReconcileLeaderElectionEnabled = parseBool(value)
+	}
+	if value := os.Getenv("WORKLOAD_RECONCILE_LEADER_IDENTITY"); value != "" {
+		c.WorkloadReconcileLeaderIdentity = value
+	}
+	if value := os.Getenv("WORKLOAD_RECONCILE_LEADER_LEASE_NAME"); value != "" {
+		c.WorkloadReconcileLeaderLeaseName = value
+	}
+	if value := os.Getenv("WORKLOAD_RECONCILE_LEADER_LEASE_TTL_SECONDS"); value != "" {
+		c.WorkloadReconcileLeaderLeaseTTL = parseInt(value, c.WorkloadReconcileLeaderLeaseTTL)
+	}
+	if value := os.Getenv("WORKLOAD_RECONCILE_LEADER_RENEW_INTERVAL_SECONDS"); value != "" {
+		c.WorkloadReconcileLeaderRenewInterval = parseInt(value, c.WorkloadReconcileLeaderRenewInterval)
+	}
 	return c
 }
 
@@ -177,7 +202,7 @@ func RunGRPC(port int, register func(*grpc.Server), deps *Deps) {
 	if deps.HealthPort > 0 {
 		probe = &http.Server{
 			Addr:              fmt.Sprintf(":%d", deps.HealthPort),
-			Handler:           newProbeHandler(deps.ServiceName, dependencyProbeChecks(deps)),
+			Handler:           newProbeHandler(deps.ServiceName, dependencyProbeChecks(deps), reconcileControllerMetricsReader(deps)),
 			ReadHeaderTimeout: 5 * time.Second,
 		}
 		go func() {
@@ -211,6 +236,58 @@ func RunGRPC(port int, register func(*grpc.Server), deps *Deps) {
 	}
 	srv.GracefulStop()
 	deps.Logger.Info("gRPC server stopped")
+}
+
+func RunWorkloadReconcileWorker(deps *Deps) {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	runWorkloadReconcileWorker(ctx, deps)
+}
+
+func runWorkloadReconcileWorker(ctx context.Context, deps *Deps) {
+	logger := slog.Default()
+	if deps != nil && deps.Logger != nil {
+		logger = deps.Logger
+	}
+	var probe *http.Server
+	if deps != nil && deps.HealthPort > 0 {
+		probe = &http.Server{
+			Addr:              fmt.Sprintf(":%d", deps.HealthPort),
+			Handler:           newProbeHandler(deps.ServiceName, dependencyProbeChecks(deps), reconcileControllerMetricsReader(deps)),
+			ReadHeaderTimeout: 5 * time.Second,
+		}
+		go func() {
+			logger.Info("reconcile worker probe server listening", "port", deps.HealthPort)
+			if err := probe.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.Error("reconcile worker probe serve error", "err", err)
+				os.Exit(1)
+			}
+		}()
+	}
+	if deps != nil {
+		deps.WorkloadReconcileControllerEnabled = true
+	}
+	startWorkloadReconcileController(ctx, deps)
+	<-ctx.Done()
+	if probe != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := probe.Shutdown(shutdownCtx); err != nil {
+			logger.Error("reconcile worker probe shutdown error", "err", err)
+		}
+	}
+	logger.Info("workload reconcile worker stopped")
+}
+
+func reconcileControllerMetricsReader(deps *Deps) ports.ReconcileControllerMetricsReader {
+	if deps == nil || deps.Ports.WorkloadController == nil {
+		return nil
+	}
+	reader, ok := deps.Ports.WorkloadController.(ports.ReconcileControllerMetricsReader)
+	if !ok {
+		return nil
+	}
+	return reader
 }
 
 func startWorkloadReconcileController(ctx context.Context, deps *Deps) bool {

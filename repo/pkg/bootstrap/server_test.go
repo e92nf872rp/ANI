@@ -16,6 +16,12 @@ func TestConfigEnvironmentOverridesWorkloadReconcileController(t *testing.T) {
 	t.Setenv("WORKLOAD_RECONCILE_ACTIVE_INTERVAL_SECONDS", "7")
 	t.Setenv("WORKLOAD_RECONCILE_STALE_THRESHOLD_SECONDS", "180")
 	t.Setenv("WORKLOAD_RECONCILE_MAX_BATCH", "12")
+	t.Setenv("WORKLOAD_RECONCILE_FAILURE_BACKOFF_SECONDS", "90")
+	t.Setenv("WORKLOAD_RECONCILE_LEADER_ELECTION_ENABLED", "true")
+	t.Setenv("WORKLOAD_RECONCILE_LEADER_IDENTITY", "worker-a")
+	t.Setenv("WORKLOAD_RECONCILE_LEADER_LEASE_NAME", "workload-reconcile")
+	t.Setenv("WORKLOAD_RECONCILE_LEADER_LEASE_TTL_SECONDS", "60")
+	t.Setenv("WORKLOAD_RECONCILE_LEADER_RENEW_INTERVAL_SECONDS", "15")
 
 	cfg := (Config{}).withEnvironmentOverrides()
 
@@ -33,6 +39,28 @@ func TestConfigEnvironmentOverridesWorkloadReconcileController(t *testing.T) {
 	}
 	if cfg.WorkloadReconcileMaxBatch != 12 {
 		t.Fatalf("WorkloadReconcileMaxBatch = %d, want 12", cfg.WorkloadReconcileMaxBatch)
+	}
+	if cfg.WorkloadReconcileFailureBackoff != 90 {
+		t.Fatalf("WorkloadReconcileFailureBackoff = %d, want 90", cfg.WorkloadReconcileFailureBackoff)
+	}
+	if !cfg.WorkloadReconcileLeaderElectionEnabled {
+		t.Fatalf("WorkloadReconcileLeaderElectionEnabled = false, want true")
+	}
+	if cfg.WorkloadReconcileLeaderIdentity != "worker-a" {
+		t.Fatalf("WorkloadReconcileLeaderIdentity = %q, want worker-a", cfg.WorkloadReconcileLeaderIdentity)
+	}
+	if cfg.WorkloadReconcileLeaderLeaseName != "workload-reconcile" {
+		t.Fatalf("WorkloadReconcileLeaderLeaseName = %q, want workload-reconcile", cfg.WorkloadReconcileLeaderLeaseName)
+	}
+	if cfg.WorkloadReconcileLeaderLeaseTTL != 60 {
+		t.Fatalf("WorkloadReconcileLeaderLeaseTTL = %d, want 60", cfg.WorkloadReconcileLeaderLeaseTTL)
+	}
+	if cfg.WorkloadReconcileLeaderRenewInterval != 15 {
+		t.Fatalf("WorkloadReconcileLeaderRenewInterval = %d, want 15", cfg.WorkloadReconcileLeaderRenewInterval)
+	}
+	reconcileCfg := reconcileControllerConfig(cfg)
+	if reconcileCfg.FailureBackoffSeconds != 90 {
+		t.Fatalf("FailureBackoffSeconds = %d, want 90", reconcileCfg.FailureBackoffSeconds)
 	}
 }
 
@@ -66,6 +94,41 @@ func TestStartWorkloadReconcileControllerRequiresOptIn(t *testing.T) {
 	case <-controller.stopped:
 	case <-time.After(time.Second):
 		t.Fatalf("controller did not stop after context cancellation")
+	}
+}
+
+func TestRunWorkloadReconcileWorkerStartsControllerWithoutGRPC(t *testing.T) {
+	controller := &fakeWorkloadReconcileController{
+		started: make(chan struct{}),
+		stopped: make(chan struct{}),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	deps := &Deps{
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Ports:  Capabilities{WorkloadController: controller},
+	}
+
+	done := make(chan struct{})
+	go func() {
+		runWorkloadReconcileWorker(ctx, deps)
+		close(done)
+	}()
+
+	select {
+	case <-controller.started:
+	case <-time.After(time.Second):
+		t.Fatalf("worker did not start controller")
+	}
+	cancel()
+	select {
+	case <-controller.stopped:
+	case <-time.After(time.Second):
+		t.Fatalf("worker did not stop controller after context cancellation")
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatalf("worker did not return after context cancellation")
 	}
 }
 

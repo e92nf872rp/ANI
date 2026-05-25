@@ -68,6 +68,12 @@ components:
         name:            { type: string }
         version:         { type: string }
       required: [idempotency_key, name]
+    K8sClusterUpgradeRequest:
+      type: object
+      properties:
+        idempotency_key: { type: string }
+        version:         { type: string }
+      required: [idempotency_key, version]
     K8sCluster:
       type: object
       properties:
@@ -85,6 +91,55 @@ components:
       type: object
       properties:
         items: { type: array, items: { $ref: "#/components/schemas/K8sCluster" } }
+        total: { type: integer }
+        next_cursor: { type: string, nullable: true }
+    K8sClusterNodePoolGPU:
+      type: object
+      properties:
+        vendor:        { type: string }
+        model:         { type: string }
+        count:         { type: integer }
+        resource_name: { type: string }
+    K8sClusterNodePoolCreateRequest:
+      type: object
+      properties:
+        idempotency_key: { type: string }
+        name:            { type: string }
+        node_count:      { type: integer, minimum: 1 }
+        instance_type:   { type: string }
+        gpu:
+          $ref: '#/components/schemas/K8sClusterNodePoolGPU'
+      required: [idempotency_key, name, node_count, instance_type]
+    K8sClusterNodePoolUpdateRequest:
+      type: object
+      properties:
+        idempotency_key: { type: string }
+        node_count:      { type: integer, minimum: 0 }
+        instance_type:   { type: string }
+        gpu:
+          $ref: '#/components/schemas/K8sClusterNodePoolGPU'
+      required: [idempotency_key, node_count, instance_type]
+    K8sClusterNodePool:
+      type: object
+      properties:
+        id:            { type: string }
+        tenant_id:     { type: string }
+        cluster_id:    { type: string }
+        name:          { type: string }
+        node_count:    { type: integer }
+        instance_type: { type: string }
+        gpu:
+          $ref: '#/components/schemas/K8sClusterNodePoolGPU'
+        state:         { type: string, enum: [running, deleting] }
+        reason:        { type: string }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        created_at:    { type: string, format: date-time }
+        updated_at:    { type: string, format: date-time }
+    K8sClusterNodePoolListResponse:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/K8sClusterNodePool" } }
         total: { type: integer }
         next_cursor: { type: string, nullable: true }
     K8sClusterKubeconfig:
@@ -2169,6 +2224,141 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/K8sClusterKubeconfig"
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+
+  /k8s-clusters/{cluster_id}/upgrade:
+    post:
+      operationId: upgradeK8sCluster
+      summary: 升级 K8s 集群版本
+      description: Sprint 5 code boundary 会更新 Core cluster version，并在 vCluster provider mode 下委托 provider 表达 Helm upgrade 意图；真实 live 升级验证由 REAL-K8S-LAB-A / vCluster live gate 单独证明。
+      tags: [K8sClusters]
+      x-ani-rbac-scope: "scope:k8s-clusters:manage"
+      parameters:
+        - { name: cluster_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/K8sClusterUpgradeRequest"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/K8sCluster"
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+
+  /k8s-clusters/{cluster_id}/node-pools:
+    get:
+      operationId: listK8sClusterNodePools
+      summary: 列出 K8s 集群节点池
+      description: Sprint 5 local dev profile 返回租户集群下的节点池列表；真实节点池扩缩容验证由后续真实 provider/live gate 单独证明。
+      tags: [K8sClusters]
+      x-ani-rbac-scope: "scope:k8s-clusters:read"
+      parameters:
+        - { name: cluster_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/K8sClusterNodePoolListResponse"
+        "404":
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: createK8sClusterNodePool
+      summary: 创建 K8s 集群节点池
+      description: Sprint 5 local dev profile 记录节点池规格、节点数和 GPU intent；真实节点池 provider apply/live 验证待后续切片。
+      tags: [K8sClusters]
+      x-ani-rbac-scope: "scope:k8s-clusters:manage"
+      parameters:
+        - { name: cluster_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/K8sClusterNodePoolCreateRequest"
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/K8sClusterNodePool"
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+
+  /k8s-clusters/{cluster_id}/node-pools/{node_pool_id}:
+    get:
+      operationId: getK8sClusterNodePool
+      summary: 获取 K8s 集群节点池
+      tags: [K8sClusters]
+      x-ani-rbac-scope: "scope:k8s-clusters:read"
+      parameters:
+        - { name: cluster_id, in: path, required: true, schema: { type: string } }
+        - { name: node_pool_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/K8sClusterNodePool"
+        "404":
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateK8sClusterNodePool
+      summary: 更新 K8s 集群节点池
+      description: 用于调整节点数、实例规格和 GPU intent；`idempotency_key` 必须在客户端重试时保持不变。
+      tags: [K8sClusters]
+      x-ani-rbac-scope: "scope:k8s-clusters:manage"
+      parameters:
+        - { name: cluster_id, in: path, required: true, schema: { type: string } }
+        - { name: node_pool_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/K8sClusterNodePoolUpdateRequest"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/K8sClusterNodePool"
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+    delete:
+      operationId: deleteK8sClusterNodePool
+      summary: 删除 K8s 集群节点池
+      tags: [K8sClusters]
+      x-ani-rbac-scope: "scope:k8s-clusters:manage"
+      parameters:
+        - { name: cluster_id, in: path, required: true, schema: { type: string } }
+        - { name: node_pool_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/K8sClusterNodePool"
         "404":
           $ref: '#/components/responses/NotFound'
         "409":

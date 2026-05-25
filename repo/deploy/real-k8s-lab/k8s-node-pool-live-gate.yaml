@@ -1,0 +1,37 @@
+profile: M1-K8S-LIVE-B
+status: contract
+description: >
+  Sprint 5 K8s node pool live validation gate for proving Core node pool
+  create/update calls reach a Cluster API MachineDeployment and that GPU
+  scheduling can be verified against the workload cluster.
+
+required_tools:
+  - kubectl
+
+required_endpoints:
+  - ani_gateway_api_v1
+  - kubernetes_api
+  - cluster_api
+
+live_checks:
+  - id: core-create-node-pool
+    command: POST {gateway_url}/k8s-clusters/{cluster_id}/node-pools
+    pass_condition: response_dev_profile_real_provider
+  - id: clusterapi-machinedeployment-created
+    command: kubectl get machinedeployment {node_pool_name} -n {namespace} -o json
+    pass_condition: spec_replicas_and_gpu_intent_match_create_request
+  - id: core-scale-node-pool
+    command: PATCH {gateway_url}/k8s-clusters/{cluster_id}/node-pools/{node_pool_id}
+    pass_condition: response_dev_profile_real_provider
+  - id: clusterapi-machinedeployment-scaled
+    command: kubectl get machinedeployment {node_pool_name} -n {namespace} -o json
+    pass_condition: spec_replicas_match_scaled_node_count
+  - id: gpu-workload-scheduled
+    command: kubectl apply -f gpu-smoke-pod.yaml && kubectl wait --for=condition=PodScheduled pod/{gpu_smoke_pod}
+    pass_condition: gpu_pod_scheduled_on_workload_cluster
+
+readiness_levels:
+  contract:
+    meaning: Gate definition and local validator exist; no live node pool scaling or GPU scheduling proof.
+  live:
+    meaning: Core node pool create/update, Cluster API MachineDeployment observation and GPU scheduling checks passed against REAL-K8S-LAB-A.

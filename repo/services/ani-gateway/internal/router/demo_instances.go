@@ -78,23 +78,30 @@ type demoInstanceAPI struct {
 }
 
 type demoCreateInstanceRequest struct {
-	Kind                  string               `json:"kind"`
-	Name                  string               `json:"name"`
-	CPU                   string               `json:"cpu"`
-	Memory                string               `json:"memory"`
-	BootImage             string               `json:"boot_image"`
-	SSHUsername           string               `json:"ssh_username"`
-	SSHKeyRef             string               `json:"ssh_key_ref"`
-	Image                 string               `json:"image"`
-	GPUVendor             string               `json:"gpu_vendor"`
-	GPUModel              string               `json:"gpu_model"`
-	GPUCount              int                  `json:"gpu_count"`
-	GPU                   demoCreateGPURequest `json:"gpu"`
-	Replicas              int                  `json:"replicas"`
-	AutoStart             *bool                `json:"auto_start"`
-	TerminationProtection bool                 `json:"termination_protection"`
-	Description           string               `json:"description"`
-	IdempotencyKey        string               `json:"idempotency_key"`
+	Kind                  string                     `json:"kind"`
+	Name                  string                     `json:"name"`
+	CPU                   string                     `json:"cpu"`
+	Memory                string                     `json:"memory"`
+	BootImage             string                     `json:"boot_image"`
+	SSHUsername           string                     `json:"ssh_username"`
+	SSHKeyRef             string                     `json:"ssh_key_ref"`
+	Image                 string                     `json:"image"`
+	GPUVendor             string                     `json:"gpu_vendor"`
+	GPUModel              string                     `json:"gpu_model"`
+	GPUCount              int                        `json:"gpu_count"`
+	GPU                   demoCreateGPURequest       `json:"gpu"`
+	Replicas              int                        `json:"replicas"`
+	AutoStart             *bool                      `json:"auto_start"`
+	TerminationProtection bool                       `json:"termination_protection"`
+	SecretBindings        []demoSecretBindingRequest `json:"secret_bindings"`
+	Description           string                     `json:"description"`
+	IdempotencyKey        string                     `json:"idempotency_key"`
+}
+
+type demoSecretBindingRequest struct {
+	SecretID  string `json:"secret_id"`
+	MountPath string `json:"mount_path"`
+	EnvPrefix string `json:"env_prefix"`
 }
 
 type demoCreateGPURequest struct {
@@ -697,6 +704,7 @@ func demoSpecFromRequest(req demoCreateInstanceRequest, tenantID string) (ports.
 		Annotations: map[string]string{
 			"ani.io/demo-description": req.Description,
 		},
+		SecretBindings: demoSecretBindingsFromRequest(req.SecretBindings),
 	}
 	switch kind {
 	case ports.WorkloadKindVM:
@@ -724,6 +732,21 @@ func demoSpecFromRequest(req demoCreateInstanceRequest, tenantID string) (ports.
 		return ports.WorkloadSpec{}, fmt.Errorf("unsupported demo instance kind %q", kind)
 	}
 	return spec, nil
+}
+
+func demoSecretBindingsFromRequest(request []demoSecretBindingRequest) []ports.WorkloadSecretBinding {
+	if len(request) == 0 {
+		return nil
+	}
+	bindings := make([]ports.WorkloadSecretBinding, 0, len(request))
+	for _, item := range request {
+		bindings = append(bindings, ports.WorkloadSecretBinding{
+			SecretID:  strings.TrimSpace(item.SecretID),
+			MountPath: strings.TrimSpace(item.MountPath),
+			EnvPrefix: strings.TrimSpace(item.EnvPrefix),
+		})
+	}
+	return bindings
 }
 
 func demoInstanceFromRecord(record ports.WorkloadInstanceRecord) demoInstanceResponse {

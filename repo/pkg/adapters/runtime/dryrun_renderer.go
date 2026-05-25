@@ -51,6 +51,9 @@ func renderVM(spec ports.WorkloadSpec) ports.WorkloadManifest {
 				"spec": map[string]any{
 					"domain": map[string]any{
 						"machine": map[string]any{"type": firstNonEmpty(spec.VM.MachineType, "q35")},
+						"devices": map[string]any{
+							"disks": vmDisks(spec),
+						},
 						"resources": map[string]any{
 							"requests": resourceRequests(spec),
 						},
@@ -101,12 +104,13 @@ func podTemplate(spec ports.WorkloadSpec) map[string]any {
 				"command":      omitEmptySlice(spec.Command),
 				"args":         omitEmptySlice(spec.Args),
 				"env":          workloadIdentityEnv(spec),
+				"envFrom":      secretEnvFrom(spec.SecretBindings),
 				"resources":    containerResources(spec),
 				"ports":        containerPorts(spec),
-				"volumeMounts": volumeMounts(spec.Storage),
+				"volumeMounts": append(volumeMounts(spec.Storage), secretVolumeMounts(spec.SecretBindings)...),
 			},
 		},
-		"volumes": volumes(spec.Storage),
+		"volumes": append(volumes(spec.Storage), secretVolumes(spec.SecretBindings)...),
 	}
 	if spec.Kind == ports.WorkloadKindBatchJob {
 		podSpec["restartPolicy"] = "Never"
@@ -167,6 +171,11 @@ func annotationsWithInstancePlan(spec ports.WorkloadSpec) map[string]string {
 	if spec.Identity != nil {
 		annotations["ani.kubercloud.io/workload-identity-key-id"] = spec.Identity.KeyID
 		annotations["ani.kubercloud.io/workload-identity-secret"] = workloadIdentitySecretName(spec)
+	}
+	if spec.Kind == ports.WorkloadKindVM {
+		if mounts := vmSecretMountAnnotation(spec.SecretBindings); mounts != "" {
+			annotations["ani.kubercloud.io/vm-secret-mounts"] = mounts
+		}
 	}
 	return annotations
 }
@@ -264,6 +273,43 @@ func volumeMounts(storage []ports.WorkloadStorageAttachment) []any {
 	return mounts
 }
 
+func secretEnvFrom(bindings []ports.WorkloadSecretBinding) []any {
+	envFrom := make([]any, 0, len(bindings))
+	for _, binding := range bindings {
+		if binding.SecretID == "" || binding.EnvPrefix == "" {
+			continue
+		}
+		envFrom = append(envFrom, map[string]any{
+			"prefix": binding.EnvPrefix,
+			"secretRef": map[string]any{
+				"name": binding.SecretID,
+			},
+		})
+	}
+	if len(envFrom) == 0 {
+		return nil
+	}
+	return envFrom
+}
+
+func secretVolumeMounts(bindings []ports.WorkloadSecretBinding) []any {
+	mounts := make([]any, 0, len(bindings))
+	for i, binding := range bindings {
+		if binding.SecretID == "" || binding.MountPath == "" {
+			continue
+		}
+		mounts = append(mounts, map[string]any{
+			"name":      secretVolumeName(binding, i),
+			"mountPath": binding.MountPath,
+			"readOnly":  true,
+		})
+	}
+	if len(mounts) == 0 {
+		return nil
+	}
+	return mounts
+}
+
 func volumes(storage []ports.WorkloadStorageAttachment) []any {
 	result := make([]any, 0, len(storage))
 	for _, attachment := range storage {
@@ -280,6 +326,46 @@ func volumes(storage []ports.WorkloadStorageAttachment) []any {
 		result = append(result, volume)
 	}
 	return result
+}
+
+func secretVolumes(bindings []ports.WorkloadSecretBinding) []any {
+	result := make([]any, 0, len(bindings))
+	for i, binding := range bindings {
+		if binding.SecretID == "" || binding.MountPath == "" {
+			continue
+		}
+		result = append(result, map[string]any{
+			"name": secretVolumeName(binding, i),
+			"secret": map[string]any{
+				"secretName": binding.SecretID,
+			},
+		})
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func secretVolumeName(binding ports.WorkloadSecretBinding, index int) string {
+	seed := strings.ToLower(binding.SecretID)
+	var builder strings.Builder
+	for _, r := range seed {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			builder.WriteRune(r)
+			continue
+		}
+		builder.WriteByte('-')
+	}
+	name := strings.Trim(builder.String(), "-")
+	if name == "" {
+		name = "secret"
+	}
+	name = "secret-" + name + "-" + strconv.Itoa(index+1)
+	if len(name) > 63 {
+		name = strings.TrimRight(name[:63], "-")
+	}
+	return name
 }
 
 func vmVolumes(spec ports.WorkloadSpec) []any {
@@ -299,7 +385,45 @@ func vmVolumes(spec ports.WorkloadSpec) []any {
 			},
 		})
 	}
+	volumes = append(volumes, secretVolumes(spec.SecretBindings)...)
 	return volumes
+}
+
+func vmDisks(spec ports.WorkloadSpec) []any {
+	disks := []any{
+		map[string]any{
+			"name": "containerdisk",
+			"disk": map[string]any{"bus": "virtio"},
+		},
+	}
+	for _, attachment := range spec.Storage {
+		disks = append(disks, map[string]any{
+			"name": attachment.Name,
+			"disk": map[string]any{"bus": "virtio"},
+		})
+	}
+	for i, binding := range spec.SecretBindings {
+		if binding.SecretID == "" || binding.MountPath == "" {
+			continue
+		}
+		disks = append(disks, map[string]any{
+			"name":     secretVolumeName(binding, i),
+			"disk":     map[string]any{"bus": "virtio"},
+			"readOnly": true,
+		})
+	}
+	return disks
+}
+
+func vmSecretMountAnnotation(bindings []ports.WorkloadSecretBinding) string {
+	mounts := make([]string, 0, len(bindings))
+	for _, binding := range bindings {
+		if binding.SecretID == "" || binding.MountPath == "" {
+			continue
+		}
+		mounts = append(mounts, binding.SecretID+":"+binding.MountPath)
+	}
+	return strings.Join(mounts, ",")
 }
 
 func networkRefs(spec ports.WorkloadSpec) []any {

@@ -12,10 +12,11 @@ import (
 )
 
 type localSecretService struct {
-	mu       sync.Mutex
-	byID     map[string]secretEntry
-	idem     map[string]string
-	bindings map[string]ports.SecretBindingRecord
+	mu            sync.Mutex
+	byID          map[string]secretEntry
+	idem          map[string]string
+	bindings      map[string]ports.SecretBindingRecord
+	providerApply ports.SecretProviderApply
 }
 
 type secretEntry struct {
@@ -23,15 +24,27 @@ type secretEntry struct {
 	data   map[string]string
 }
 
-func NewLocalSecretService() ports.SecretService {
-	return &localSecretService{
+type SecretServiceOption func(*localSecretService)
+
+func WithSecretProviderApply(provider ports.SecretProviderApply) SecretServiceOption {
+	return func(service *localSecretService) {
+		service.providerApply = provider
+	}
+}
+
+func NewLocalSecretService(options ...SecretServiceOption) ports.SecretService {
+	service := &localSecretService{
 		byID:     map[string]secretEntry{},
 		idem:     map[string]string{},
 		bindings: map[string]ports.SecretBindingRecord{},
 	}
+	for _, option := range options {
+		option(service)
+	}
+	return service
 }
 
-func (s *localSecretService) CreateSecret(_ context.Context, req ports.SecretCreateRequest) (ports.SecretRecord, error) {
+func (s *localSecretService) CreateSecret(ctx context.Context, req ports.SecretCreateRequest) (ports.SecretRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if req.TenantID == "" || req.IdempotencyKey == "" || req.Name == "" || len(req.Data) == 0 {
@@ -53,11 +66,35 @@ func (s *localSecretService) CreateSecret(_ context.Context, req ports.SecretCre
 		Type:      secretType,
 		Keys:      sortedSecretKeys(req.Data),
 		State:     "active",
+		Provider:  "local",
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
 	s.byID[rec.SecretID] = secretEntry{record: rec, data: cloneSecretData(req.Data)}
 	s.idem[idemKey] = rec.SecretID
+	if s.providerApply != nil {
+		result, err := s.providerApply.ApplySecret(ctx, ports.SecretProviderApplyRequest{
+			TenantID: rec.TenantID,
+			SecretID: rec.SecretID,
+			Name:     rec.Name,
+			Type:     rec.Type,
+			Data:     cloneSecretData(req.Data),
+		})
+		if err != nil {
+			delete(s.byID, rec.SecretID)
+			delete(s.idem, idemKey)
+			return ports.SecretRecord{}, err
+		}
+		if !result.Applied {
+			delete(s.byID, rec.SecretID)
+			delete(s.idem, idemKey)
+			return ports.SecretRecord{}, fmt.Errorf("%w: secret provider did not apply secret", ports.ErrNotConfigured)
+		}
+		rec.Provider = result.Provider
+		rec.RealProvider = true
+		rec.ProviderRefs = append([]string(nil), result.ResourceRefs...)
+		s.byID[rec.SecretID] = secretEntry{record: rec, data: cloneSecretData(req.Data)}
+	}
 	return rec, nil
 }
 

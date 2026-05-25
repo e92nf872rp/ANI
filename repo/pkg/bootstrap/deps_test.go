@@ -6,6 +6,20 @@ import (
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 )
 
+func TestConnectMetadataStoreRejectsInvalidDatabaseURL(t *testing.T) {
+	store, closeStore, err := ConnectMetadataStore(t.Context(), ":// invalid")
+	if err == nil {
+		t.Fatalf("ConnectMetadataStore() error = nil, want invalid database URL error")
+	}
+	if store != nil {
+		t.Fatalf("store = %T, want nil", store)
+	}
+	if closeStore == nil {
+		t.Fatalf("closeStore = nil, want no-op close function")
+	}
+	closeStore()
+}
+
 func TestNewCapabilitiesDefaultsToLocalProviderAdapters(t *testing.T) {
 	capabilities, err := NewCapabilitiesWithConfig(nil, nil, nil, Config{})
 	if err != nil {
@@ -122,6 +136,27 @@ func TestNewCapabilitiesCanWireKubernetesRESTOpsProvider(t *testing.T) {
 	}
 	if _, ok := capabilities.InstanceOps.(*runtimeadapter.KubernetesInstanceOps); !ok {
 		t.Fatalf("InstanceOps = %T, want KubernetesInstanceOps", capabilities.InstanceOps)
+	}
+}
+
+func TestNewCapabilitiesCanWrapReconcileControllerWithMetadataLeaderElection(t *testing.T) {
+	capabilities, err := NewCapabilitiesWithConfig(nil, nil, nil, Config{
+		WorkloadReconcileLeaderElectionEnabled: true,
+		WorkloadReconcileLeaderIdentity:        "worker-a",
+	})
+	if err != nil {
+		t.Fatalf("NewCapabilitiesWithConfig() error = %v", err)
+	}
+	if _, ok := capabilities.WorkloadController.(*runtimeadapter.LeaderElectingWorkloadReconcileController); !ok {
+		t.Fatalf("WorkloadController = %T, want LeaderElectingWorkloadReconcileController", capabilities.WorkloadController)
+	}
+}
+
+func TestNewCapabilitiesRejectsLeaderElectionWithoutIdentity(t *testing.T) {
+	if _, err := NewCapabilitiesWithConfig(nil, nil, nil, Config{
+		WorkloadReconcileLeaderElectionEnabled: true,
+	}); err == nil {
+		t.Fatalf("NewCapabilitiesWithConfig() error = nil, want missing leader identity error")
 	}
 }
 

@@ -3,9 +3,9 @@
 
 .PHONY: help deps deps-down deps-status deps-clean \
         tools-proto gen-api gen-proto gen-core-sdk gen-api-docs \
-        build build-gateway build-auth-service build-model-service build-task-service \
+        build build-gateway build-auth-service build-model-service build-task-service build-reconcile-worker \
         test test-go test-python test-cover \
-        validate-infra validate-gpu-preflight validate-gpu-contracts validate-runtime-contracts validate-instance-contracts validate-instance-planner validate-instance-renderer validate-instance-admission validate-instance-audit validate-instance-provider-dry-run validate-instance-provider-apply validate-instance-status-reconcile validate-instance-orchestrator validate-instance-store validate-instance-provider-adapter validate-instance-service validate-instance-lifecycle-ops validate-m1-e2e validate-kubernetes-provider-execution validate-kubernetes-rest-client validate-kubernetes-bootstrap-wiring validate-kubernetes-lifecycle-execution validate-kubernetes-ops-execution validate-m1-real-provider-profile validate-real-k8s-profile validate-demo-instances validate-core-alpha validate-network-alpha validate-storage-alpha validate-vector-alpha validate-workload-identity validate-core-dev-profile validate-sdk-alpha validate-sdk-beta validate-sdk-mock-smoke validate-sprint3-closure validate-sprint4-closure validate-spec-split validate-core-beta validate-core-api-compatibility validate-mock-a validate-doc-api validate-doc-entrypoints validate-auth-contract validate-auth-dex-smoke validate-architecture \
+        validate-infra validate-gpu-preflight validate-gpu-contracts validate-runtime-contracts validate-instance-contracts validate-instance-planner validate-instance-renderer validate-instance-admission validate-instance-audit validate-instance-provider-dry-run validate-instance-provider-apply validate-instance-status-reconcile validate-instance-orchestrator validate-instance-store validate-instance-provider-adapter validate-instance-service validate-instance-lifecycle-ops validate-m1-e2e validate-kubernetes-provider-execution validate-kubernetes-rest-client validate-kubernetes-bootstrap-wiring validate-kubernetes-lifecycle-execution validate-kubernetes-ops-execution validate-m1-real-provider-profile validate-real-k8s-profile validate-vcluster-live-gate validate-vcluster-upgrade-live-gate validate-k8s-node-pool-live-gate validate-kubeovn-network-live-gate validate-kubevirt-vm-live-gate validate-reconcile-ha-live-gate validate-kms-sm4-live-gate validate-secrets-live-gate validate-demo-instances validate-core-alpha validate-network-alpha validate-storage-alpha validate-vector-alpha validate-workload-identity validate-core-dev-profile validate-sdk-alpha validate-sdk-beta validate-sdk-mock-smoke validate-sprint3-closure validate-sprint4-closure validate-spec-split validate-core-beta validate-core-api-compatibility validate-mock-a validate-doc-api validate-doc-entrypoints validate-auth-contract validate-auth-dex-smoke validate-architecture \
         lint lint-go lint-python lint-ts \
         dev-gateway dev-console dev-core-mock \
         image image-gateway \
@@ -35,6 +35,7 @@ help:
 	@echo "    make build-auth-service  仅构建 Auth Service"
 	@echo "    make build-model-service  仅构建 Model Service"
 	@echo "    make build-task-service   仅构建 Task Service"
+	@echo "    make build-reconcile-worker  仅构建 Reconcile Worker"
 	@echo ""
 	@echo "  测试:"
 	@echo "    make test           运行所有测试（Go + Python）"
@@ -64,6 +65,14 @@ help:
 	@echo "    make validate-kubernetes-ops-execution 校验 M1-INSTANCE-R Kubernetes visual ops execution"
 	@echo "    make validate-m1-real-provider-profile 校验 M1-E2E-B real provider 回归剖面"
 	@echo "    make validate-real-k8s-profile 校验 Sprint 5 REAL-K8S-LAB-A 真实底座门禁"
+	@echo "    make validate-vcluster-live-gate 校验 Sprint 5 M1-K8S-LIVE-A vCluster live 验证门禁"
+	@echo "    make validate-vcluster-upgrade-live-gate 校验 Sprint 5 M1-K8S-LIVE-C vCluster upgrade live 验证门禁"
+	@echo "    make validate-k8s-node-pool-live-gate 校验 Sprint 5 M1-K8S-LIVE-B node pool live 验证门禁"
+	@echo "    make validate-kubeovn-network-live-gate 校验 Sprint 5 M1-NETWORK-LIVE-A Kube-OVN network live 验证门禁"
+	@echo "    make validate-kubevirt-vm-live-gate 校验 Sprint 5 M1-KUBEVIRT-LIVE-A KubeVirt VM live 验证门禁"
+	@echo "    make validate-reconcile-ha-live-gate 校验 Sprint 5 M1-RECONCILE-LIVE-A controller HA live 验证门禁"
+	@echo "    make validate-kms-sm4-live-gate 校验 Sprint 5 M1-ENCRYPT-LIVE-A KMS/SM4 live 验证门禁"
+	@echo "    make validate-secrets-live-gate 校验 Sprint 5 M1-SECRETS-LIVE-A Secret live 验证门禁"
 	@echo "    make validate-demo-instances 校验阶段性实例 Demo API"
 	@echo "    make validate-core-alpha 校验 Sprint 2 Core API Alpha 契约"
 	@echo "    make validate-network-alpha 校验 Sprint 3 网络资源 Core API 契约"
@@ -98,7 +107,7 @@ help:
 COMPOSE = docker compose -f deploy/docker/docker-compose.yml
 GO_CACHE_ENV = GOCACHE=/private/tmp/ani-go-build GOMODCACHE=$(CURDIR)/.cache/gomod
 BUF_CACHE_ENV = BUF_CACHE_DIR=$(CURDIR)/.cache/buf
-GO_PACKAGES = ./pkg/... ./services/ani-gateway/... ./services/auth-service/... ./services/model-service/... ./services/task-service/...
+GO_PACKAGES = ./pkg/... ./services/ani-gateway/... ./services/auth-service/... ./services/model-service/... ./services/task-service/... ./services/reconcile-worker/...
 TOOLS_BIN = $(CURDIR)/.bin
 
 deps:
@@ -163,7 +172,7 @@ gen-core-api-compat-baseline:
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS = -X main.Version=$(VERSION) -X main.BuildTime=$(shell date -u +%Y%m%dT%H%M%SZ)
 
-build: build-gateway build-auth-service build-model-service build-task-service
+build: build-gateway build-auth-service build-model-service build-task-service build-reconcile-worker
 
 build-gateway:
 	@echo "→ 构建 ANI Gateway..."
@@ -192,6 +201,13 @@ build-task-service:
 	cd services/task-service && \
 		$(GO_CACHE_ENV) CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o ../../bin/task-service .
 	@echo "✅ bin/task-service"
+
+build-reconcile-worker:
+	@echo "→ 构建 Reconcile Worker..."
+	@mkdir -p bin
+	cd services/reconcile-worker && \
+		$(GO_CACHE_ENV) CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o ../../bin/reconcile-worker .
+	@echo "✅ bin/reconcile-worker"
 
 # ── 测试 ──────────────────────────────────────────────────────────────────────
 test: validate-architecture validate-auth-contract test-go test-python
@@ -417,7 +433,56 @@ validate-m1-real-provider-profile:
 validate-real-k8s-profile:
 	@echo "→ 校验 Sprint 5 REAL-K8S-LAB-A 真实底座门禁..."
 	python scripts/validate_real_k8s_profile.py
+	python scripts/validate_real_k8s_profile_test.py
 	@echo "✅ REAL-K8S-LAB-A real provider lab gate valid"
+
+validate-vcluster-live-gate:
+	@echo "→ 校验 Sprint 5 M1-K8S-LIVE-A vCluster live 验证门禁..."
+	python scripts/validate_vcluster_live_gate.py
+	python scripts/validate_vcluster_live_gate_test.py
+	@echo "✅ M1-K8S-LIVE-A vCluster live validation gate valid"
+
+validate-vcluster-upgrade-live-gate:
+	@echo "→ 校验 Sprint 5 M1-K8S-LIVE-C vCluster upgrade live 验证门禁..."
+	python scripts/validate_vcluster_upgrade_live_gate.py
+	python scripts/validate_vcluster_upgrade_live_gate_test.py
+	@echo "✅ M1-K8S-LIVE-C vCluster upgrade live validation gate valid"
+
+validate-k8s-node-pool-live-gate:
+	@echo "→ 校验 Sprint 5 M1-K8S-LIVE-B node pool live 验证门禁..."
+	python scripts/validate_k8s_node_pool_live_gate.py
+	python scripts/validate_k8s_node_pool_live_gate_test.py
+	@echo "✅ M1-K8S-LIVE-B node pool live validation gate valid"
+
+validate-kubeovn-network-live-gate:
+	@echo "→ 校验 Sprint 5 M1-NETWORK-LIVE-A Kube-OVN network live 验证门禁..."
+	python scripts/validate_kubeovn_network_live_gate.py
+	python scripts/validate_kubeovn_network_live_gate_test.py
+	@echo "✅ M1-NETWORK-LIVE-A Kube-OVN network live validation gate valid"
+
+validate-kubevirt-vm-live-gate:
+	@echo "→ 校验 Sprint 5 M1-KUBEVIRT-LIVE-A KubeVirt VM live 验证门禁..."
+	python scripts/validate_kubevirt_vm_live_gate.py
+	python scripts/validate_kubevirt_vm_live_gate_test.py
+	@echo "✅ M1-KUBEVIRT-LIVE-A KubeVirt VM live validation gate valid"
+
+validate-reconcile-ha-live-gate:
+	@echo "→ 校验 Sprint 5 M1-RECONCILE-LIVE-A controller HA live 验证门禁..."
+	python scripts/validate_reconcile_ha_live_gate.py
+	python scripts/validate_reconcile_ha_live_gate_test.py
+	@echo "✅ M1-RECONCILE-LIVE-A controller HA live validation gate valid"
+
+validate-kms-sm4-live-gate:
+	@echo "→ 校验 Sprint 5 M1-ENCRYPT-LIVE-A KMS/SM4 live 验证门禁..."
+	python scripts/validate_kms_sm4_live_gate.py
+	python scripts/validate_kms_sm4_live_gate_test.py
+	@echo "✅ M1-ENCRYPT-LIVE-A KMS/SM4 live validation gate valid"
+
+validate-secrets-live-gate:
+	@echo "→ 校验 Sprint 5 M1-SECRETS-LIVE-A Secret live 验证门禁..."
+	python scripts/validate_secrets_live_gate.py
+	python scripts/validate_secrets_live_gate_test.py
+	@echo "✅ M1-SECRETS-LIVE-A Secret live validation gate valid"
 
 validate-demo-instances:
 	@echo "→ 校验阶段性 VM/container/GPU container Demo API..."
@@ -528,6 +593,7 @@ validate-doc-api:
 validate-doc-entrypoints:
 	@echo "→ 校验文档入口职责边界..."
 	python scripts/validate_doc_entrypoints.py
+	python scripts/validate_doc_entrypoints_test.py
 	@echo "✅ document entrypoints valid"
 
 validate-auth-contract:

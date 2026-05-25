@@ -91,6 +91,82 @@ func TestKubernetesDryRunRendererInjectsWorkloadIdentityEnvFromSecret(t *testing
 	}
 }
 
+func TestKubernetesDryRunRendererInjectsSecretBindingEnvAndFileRefs(t *testing.T) {
+	renderer := NewKubernetesDryRunRenderer(NewPlanningRuntime())
+
+	manifests, err := renderer.Render(context.Background(), ports.WorkloadSpec{
+		TenantID: "tenant-a",
+		Name:     "app-01",
+		Kind:     ports.WorkloadKindContainer,
+		Image:    "harbor/app:1",
+		SecretBindings: []ports.WorkloadSecretBinding{
+			{
+				SecretID:  "sec-db",
+				EnvPrefix: "DB_",
+				MountPath: "/etc/secrets/db",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	content := manifests[0].Content
+	for _, want := range []string{
+		`"envFrom":`,
+		`"prefix": "DB_"`,
+		`"secretRef":`,
+		`"name": "sec-db"`,
+		`"mountPath": "/etc/secrets/db"`,
+		`"readOnly": true`,
+		`"secretName": "sec-db"`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("rendered secret binding manifest missing %q:\n%s", want, content)
+		}
+	}
+}
+
+func TestKubernetesDryRunRendererInjectsVMSecretBindingsAsKubeVirtVolumes(t *testing.T) {
+	renderer := NewKubernetesDryRunRenderer(NewPlanningRuntime())
+
+	manifests, err := renderer.Render(context.Background(), ports.WorkloadSpec{
+		TenantID: "tenant-a",
+		Name:     "vm-secret-01",
+		Kind:     ports.WorkloadKindVM,
+		VM: &ports.VMInstanceSpec{
+			BootImage: "harbor/base/ubuntu.qcow2",
+			RootDisk: ports.WorkloadStorageAttachment{
+				Name:      "root",
+				Kind:      ports.StorageAttachmentRootDisk,
+				SizeGiB:   80,
+				SourceRef: "vm-secret-01-root",
+			},
+		},
+		SecretBindings: []ports.WorkloadSecretBinding{
+			{
+				SecretID:  "sec-bootstrap",
+				MountPath: "/var/lib/ani/secrets/bootstrap",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	content := manifests[0].Content
+	for _, want := range []string{
+		`"secretName": "sec-bootstrap"`,
+		`"name": "secret-sec-bootstrap-1"`,
+		`"disks":`,
+		`"readOnly": true`,
+		`"ani.kubercloud.io/vm-secret-mounts"`,
+		`"sec-bootstrap:/var/lib/ani/secrets/bootstrap"`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("rendered VM secret binding manifest missing %q:\n%s", want, content)
+		}
+	}
+}
+
 func TestKubernetesDryRunRendererRendersBatchJob(t *testing.T) {
 	renderer := NewKubernetesDryRunRenderer(NewPlanningRuntime())
 

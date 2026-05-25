@@ -1,0 +1,40 @@
+profile: M1-K8S-LIVE-C
+status: contract
+description: >
+  Sprint 5 vCluster upgrade live validation gate for proving Core upgrade API
+  calls reach the vCluster Helm release, the target Kubernetes version is
+  reflected in Helm values, and kubeconfig/Core proxy access still works after
+  the upgrade.
+
+required_tools:
+  - helm
+  - vcluster
+  - kubectl
+
+required_endpoints:
+  - ani_gateway_api_v1
+  - kubernetes_api
+  - vcluster_helm_release
+
+live_checks:
+  - id: core-upgrade-cluster
+    command: POST {gateway_url}/k8s-clusters/{cluster_id}/upgrade version={target_version}
+    pass_condition: response_dev_profile_real_provider_and_version_matches_target
+  - id: helm-values-target-version
+    command: helm get values {cluster_id} --namespace {namespace} -a -o json
+    pass_condition: controlPlane.distro.k8s.version_matches_target
+  - id: vcluster-kubeconfig-after-upgrade
+    command: vcluster connect {cluster_id} --namespace {namespace} --print
+    pass_condition: stdout_contains_kubeconfig_after_upgrade
+  - id: kubectl-version-after-upgrade
+    command: kubectl --kubeconfig {generated_kubeconfig} get --raw /version
+    pass_condition: json_git_version_matches_target
+  - id: core-proxy-version-after-upgrade
+    command: POST {gateway_url}/k8s-clusters/{cluster_id}/proxy path=/version
+    pass_condition: http_2xx_after_upgrade
+
+readiness_levels:
+  contract:
+    meaning: Gate definition and local validator exist; no live vCluster upgrade proof.
+  live:
+    meaning: Core upgrade, Helm target version, kubeconfig and Core proxy checks passed against REAL-K8S-LAB-A.

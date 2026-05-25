@@ -1,0 +1,42 @@
+profile: M1-RECONCILE-LIVE-A
+status: contract
+description: >
+  Sprint 5 WorkloadReconcileController HA live validation gate for proving
+  two reconcile-worker replicas use metadata-backed leader election, expose
+  Prometheus reconcile metrics and continue reconciling after deleting the
+  active leader pod.
+
+required_tools:
+  - kubectl
+  - psql
+
+required_endpoints:
+  - postgres_control_plane_leases
+  - reconcile_worker_metrics
+  - kubernetes_api
+
+live_checks:
+  - id: deploy-two-reconcile-workers
+    command: kubectl get pods -n {namespace} -l {worker_selector}
+    pass_condition: at_least_two_workers_with_unique_reconcile_identity_labels
+  - id: leader-lease-acquired
+    command: SELECT holder_id FROM control_plane_leases WHERE lease_name = {lease_name} AND lease_until > now()
+    pass_condition: active_holder_id_exists
+  - id: leader-metrics-active
+    command: GET {metrics_url}
+    pass_condition: reconcile_prometheus_counters_exposed_before_failover
+  - id: kill-leader-pod
+    command: kubectl delete pod {leader_pod} -n {namespace}
+    pass_condition: active_leader_pod_deleted
+  - id: follower-acquires-lease
+    command: SELECT holder_id FROM control_plane_leases WHERE lease_name = {lease_name} AND lease_until > now()
+    pass_condition: holder_id_changes_from_deleted_leader_identity
+  - id: reconcile-continues-after-failover
+    command: GET {metrics_url}
+    pass_condition: reconcile_prometheus_counters_exposed_after_failover
+
+readiness_levels:
+  contract:
+    meaning: Gate definition and local validator exist; no live controller HA failover proof.
+  live:
+    meaning: Two reconcile workers, metadata lease failover and reconcile metrics checks passed against REAL-K8S-LAB-A.

@@ -61,6 +61,30 @@ func TestDemoInstanceServiceCreatesVMContainerAndGPUContainer(t *testing.T) {
 	}
 }
 
+func TestDemoSpecFromRequestMapsSecretBindings(t *testing.T) {
+	spec, err := demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind: "container",
+		Name: "demo-secret-app",
+		SecretBindings: []demoSecretBindingRequest{
+			{
+				SecretID:  "sec-db",
+				EnvPrefix: "DB_",
+				MountPath: "/etc/secrets/db",
+			},
+		},
+	}, "tenant-a")
+	if err != nil {
+		t.Fatalf("demoSpecFromRequest error = %v", err)
+	}
+	if len(spec.SecretBindings) != 1 {
+		t.Fatalf("secret bindings = %d, want 1", len(spec.SecretBindings))
+	}
+	binding := spec.SecretBindings[0]
+	if binding.SecretID != "sec-db" || binding.EnvPrefix != "DB_" || binding.MountPath != "/etc/secrets/db" {
+		t.Fatalf("secret binding = %#v, want request values", binding)
+	}
+}
+
 func TestDemoInstanceServiceLifecycleAndOps(t *testing.T) {
 	api := newDemoInstanceAPI()
 	spec, err := demoSpecFromRequest(demoCreateInstanceRequest{Kind: "container", Name: "demo-app"}, "tenant-a")

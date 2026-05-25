@@ -1,0 +1,37 @@
+profile: M1-NETWORK-LIVE-A
+status: contract
+description: >
+  Sprint 5 Kube-OVN network live validation gate for proving the real lab can
+  create and observe Kube-OVN Vpc/Subnet plus Kubernetes NetworkPolicy and
+  Service/LB resources used by ANI network provider rendering.
+
+required_tools:
+  - kubectl
+
+required_endpoints:
+  - kubernetes_api
+  - kube_ovn_crds
+  - networking_k8s_api
+
+live_checks:
+  - id: kubeovn-crds-ready
+    command: kubectl get crd vpcs.kubeovn.io subnets.kubeovn.io -o json
+    pass_condition: kubeovn_vpc_and_subnet_crds_exist
+  - id: kubeovn-vpc-created
+    command: kubectl apply -f kubeovn-vpc.yaml && kubectl get vpc {vpc_name} -o json
+    pass_condition: kubeovn_vpc_exists_and_ready_or_observable
+  - id: kubeovn-subnet-created
+    command: kubectl apply -f kubeovn-subnet.yaml && kubectl get subnet {subnet_name} -o json
+    pass_condition: kubeovn_subnet_exists_and_ready_or_observable
+  - id: networkpolicy-created
+    command: kubectl apply -f networkpolicy.yaml && kubectl get networkpolicy {security_group_name} -n {namespace} -o json
+    pass_condition: networkpolicy_exists_in_tenant_namespace
+  - id: service-lb-created
+    command: kubectl apply -f service-lb.yaml && kubectl get service {load_balancer_name} -n {namespace} -o json
+    pass_condition: service_type_load_balancer_or_observable
+
+readiness_levels:
+  contract:
+    meaning: Gate definition and local validator exist; no live Kube-OVN resource proof.
+  live:
+    meaning: Kube-OVN CRD checks plus Vpc/Subnet, NetworkPolicy and Service/LB checks passed against REAL-K8S-LAB-A.

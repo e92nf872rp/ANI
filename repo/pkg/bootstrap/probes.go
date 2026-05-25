@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
+
+	"github.com/kubercloud/ani/pkg/ports"
 )
 
 const healthVersion = "v0.8.0"
@@ -27,7 +31,7 @@ type probeCheckBody struct {
 	Error     string `json:"error,omitempty"`
 }
 
-func newProbeHandler(serviceName string, checks []probeCheck) http.Handler {
+func newProbeHandler(serviceName string, checks []probeCheck, metricsReaders ...ports.ReconcileControllerMetricsReader) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeProbeJSON(w, http.StatusOK, probeResponse{
@@ -43,7 +47,53 @@ func newProbeHandler(serviceName string, checks []probeCheck) http.Handler {
 		}
 		writeProbeJSON(w, statusCode, result)
 	})
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		reader := firstReconcileMetricsReader(metricsReaders)
+		writePrometheusMetrics(w, serviceName, reader)
+	})
 	return mux
+}
+
+func firstReconcileMetricsReader(readers []ports.ReconcileControllerMetricsReader) ports.ReconcileControllerMetricsReader {
+	for _, reader := range readers {
+		if reader != nil {
+			return reader
+		}
+	}
+	return nil
+}
+
+func writePrometheusMetrics(w http.ResponseWriter, serviceName string, reader ports.ReconcileControllerMetricsReader) {
+	serviceName = sanitizePrometheusLabel(firstNonEmptyString(serviceName, "unknown"))
+	metrics := ports.ReconcileControllerMetrics{}
+	if reader != nil {
+		metrics = reader.Metrics()
+	}
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+	w.WriteHeader(http.StatusOK)
+	writeCounterMetric(w, "ani_workload_reconcile_ticks_total", "Total workload reconcile controller ticks.", serviceName, metrics.Ticks)
+	writeCounterMetric(w, "ani_workload_reconcile_successes_total", "Total successful workload reconcile attempts.", serviceName, metrics.Successes)
+	writeCounterMetric(w, "ani_workload_reconcile_failures_total", "Total failed workload reconcile attempts.", serviceName, metrics.Failures)
+	writeCounterMetric(w, "ani_workload_reconcile_backoff_skips_total", "Total workload reconcile targets skipped due to failure backoff.", serviceName, metrics.SkippedBackoff)
+}
+
+func writeCounterMetric(w http.ResponseWriter, name string, help string, serviceName string, value int64) {
+	_, _ = fmt.Fprintf(w, "# HELP %s %s\n", name, help)
+	_, _ = fmt.Fprintf(w, "# TYPE %s counter\n", name)
+	_, _ = fmt.Fprintf(w, "%s{service=\"%s\"} %d\n", name, serviceName, value)
+}
+
+func sanitizePrometheusLabel(value string) string {
+	return strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`).Replace(value)
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func runProbeChecks(ctx context.Context, checks []probeCheck) probeResponse {

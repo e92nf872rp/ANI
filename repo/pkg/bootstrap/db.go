@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	postgresadapter "github.com/kubercloud/ani/pkg/adapters/postgres"
+	"github.com/kubercloud/ani/pkg/ports"
 )
 
 // connectDB creates a pgxpool with retry logic.
@@ -47,4 +49,16 @@ func connectDB(databaseURL string) (*pgxpool.Pool, error) {
 			slog.Warn("database not ready, retrying...", "err", err)
 		}
 	}
+}
+
+func ConnectMetadataStore(ctx context.Context, databaseURL string) (ports.MetadataStore, func(), error) {
+	closeStore := func() {}
+	if err := ctx.Err(); err != nil {
+		return nil, closeStore, err
+	}
+	pool, err := connectDB(databaseURL)
+	if err != nil {
+		return nil, closeStore, err
+	}
+	return postgresadapter.NewMetadataStore(pool), pool.Close, nil
 }

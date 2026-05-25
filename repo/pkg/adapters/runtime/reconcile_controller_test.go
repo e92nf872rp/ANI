@@ -110,11 +110,160 @@ func TestLocalWorkloadReconcileControllerRunOnceUsesTargetLister(t *testing.T) {
 	}
 }
 
+func TestLocalWorkloadReconcileControllerBacksOffFailedTargetsAndContinues(t *testing.T) {
+	store := newReconcileMemoryStore()
+	failing := reconcileTestRecord(ports.WorkloadStateProvisioning)
+	failing.InstanceID = "inst-failing"
+	failing.Status.Ref.InstanceID = "inst-failing"
+	ok := reconcileTestRecord(ports.WorkloadStateProvisioning)
+	ok.InstanceID = "inst-ok"
+	ok.Status.Ref.InstanceID = "inst-ok"
+	ok.ResourceRefs = []string{"kubernetes/Deployment/ok"}
+	if err := store.UpsertStatus(context.Background(), failing); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertStatus(context.Background(), ok); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(500, 0)
+	reader := &selectiveFailingStatusReader{failInstanceID: failing.InstanceID}
+	controller := NewLocalWorkloadReconcileController(
+		store,
+		store,
+		reader,
+		NewLocalStatusReconciler(WithReconcileClock(func() time.Time { return now.Add(1 * time.Second) })),
+		ports.ReconcileControllerConfig{FailureBackoffSeconds: 30},
+		WithReconcileControllerClock(func() time.Time { return now }),
+	)
+
+	active, err := controller.runOnce(context.Background())
+	if err != nil {
+		t.Fatalf("runOnce() error = %v, want nil when one target fails", err)
+	}
+	if !active {
+		t.Fatalf("runOnce() active = false, want true")
+	}
+	updated, err := store.Get(context.Background(), ok.TenantID, ok.InstanceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status.State != ports.WorkloadStateRunning {
+		t.Fatalf("second target state = %s, want running after first target failure", updated.Status.State)
+	}
+	metrics := controller.Metrics()
+	if metrics.Ticks != 1 || metrics.Successes != 1 || metrics.Failures != 1 || metrics.SkippedBackoff != 0 {
+		t.Fatalf("metrics after first run = %+v, want ticks=1 successes=1 failures=1 skipped=0", metrics)
+	}
+
+	active, err = controller.runOnce(context.Background())
+	if err != nil {
+		t.Fatalf("second runOnce() error = %v", err)
+	}
+	if !active {
+		t.Fatalf("second runOnce() active = false, want true")
+	}
+	metrics = controller.Metrics()
+	if reader.callsFor(failing.InstanceID) != 1 {
+		t.Fatalf("failing target observe calls = %d, want still 1 inside backoff", reader.callsFor(failing.InstanceID))
+	}
+	if metrics.Ticks != 2 || metrics.SkippedBackoff != 1 {
+		t.Fatalf("metrics after backoff skip = %+v, want ticks=2 skipped=1", metrics)
+	}
+
+	now = now.Add(31 * time.Second)
+	if _, err := controller.runOnce(context.Background()); err != nil {
+		t.Fatalf("third runOnce() error = %v", err)
+	}
+	if reader.callsFor(failing.InstanceID) != 2 {
+		t.Fatalf("failing target observe calls = %d, want retry after backoff", reader.callsFor(failing.InstanceID))
+	}
+}
+
+func TestLeaderElectingWorkloadReconcileControllerRunsDelegateUnderElector(t *testing.T) {
+	delegate := &fakeReconcileDelegate{}
+	elector := &fakeReconcileLeaderElector{}
+	controller := NewLeaderElectingWorkloadReconcileController(delegate, elector)
+
+	if err := controller.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if !elector.ran {
+		t.Fatalf("leader elector was not used")
+	}
+	if delegate.starts != 1 {
+		t.Fatalf("delegate starts = %d, want 1", delegate.starts)
+	}
+}
+
+func TestLeaderElectingWorkloadReconcileControllerDelegatesMetrics(t *testing.T) {
+	delegate := &fakeReconcileDelegate{metrics: ports.ReconcileControllerMetrics{Ticks: 3, Successes: 2}}
+	controller := NewLeaderElectingWorkloadReconcileController(delegate, &fakeReconcileLeaderElector{})
+
+	metrics := controller.Metrics()
+	if metrics.Ticks != 3 || metrics.Successes != 2 {
+		t.Fatalf("Metrics() = %+v, want delegated ticks=3 successes=2", metrics)
+	}
+}
+
+type selectiveFailingStatusReader struct {
+	failInstanceID string
+	calls          map[string]int
+}
+
+func (r *selectiveFailingStatusReader) Observe(ctx context.Context, request ports.WorkloadProviderStatusRequest) (ports.WorkloadProviderObservation, error) {
+	if r.calls == nil {
+		r.calls = map[string]int{}
+	}
+	r.calls[request.InstanceID]++
+	if request.InstanceID == r.failInstanceID {
+		return ports.WorkloadProviderObservation{}, errors.New("provider timeout")
+	}
+	return NewLocalProviderStatusReader().Observe(ctx, request)
+}
+
+func (r *selectiveFailingStatusReader) callsFor(instanceID string) int {
+	if r.calls == nil {
+		return 0
+	}
+	return r.calls[instanceID]
+}
+
 type missingProviderStatusReader struct{}
 
 func (missingProviderStatusReader) Observe(context.Context, ports.WorkloadProviderStatusRequest) (ports.WorkloadProviderObservation, error) {
 	return ports.WorkloadProviderObservation{}, ports.ErrNotFound
 }
+
+type fakeReconcileDelegate struct {
+	starts  int
+	metrics ports.ReconcileControllerMetrics
+}
+
+func (c *fakeReconcileDelegate) Start(context.Context) error {
+	c.starts++
+	return nil
+}
+
+func (*fakeReconcileDelegate) ReconcileNow(context.Context, ports.ReconcileTarget) (ports.ReconcileResult, error) {
+	return ports.ReconcileResult{TenantID: "tenant-a", InstanceID: "inst-a"}, nil
+}
+
+func (c *fakeReconcileDelegate) Metrics() ports.ReconcileControllerMetrics {
+	return c.metrics
+}
+
+type fakeReconcileLeaderElector struct {
+	ran bool
+}
+
+func (e *fakeReconcileLeaderElector) Run(ctx context.Context, run func(context.Context) error) error {
+	e.ran = true
+	return run(ctx)
+}
+
+var _ ports.WorkloadReconcileController = (*fakeReconcileDelegate)(nil)
+var _ ports.ReconcileControllerMetricsReader = (*fakeReconcileDelegate)(nil)
+var _ ports.ReconcileLeaderElector = (*fakeReconcileLeaderElector)(nil)
 
 type reconcileMemoryStore struct {
 	records      map[string]ports.WorkloadInstanceRecord

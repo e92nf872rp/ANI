@@ -362,8 +362,12 @@ func resourceMapping(provider string, apiVersion string, kind string) (kubernete
 		return kubernetesResource{Provider: provider, APIGroup: "", APIVersion: "v1", Resource: "services", Kind: kind, Namespaced: true}, nil
 	case "kubernetes/PersistentVolumeClaim":
 		return kubernetesResource{Provider: provider, APIGroup: "", APIVersion: "v1", Resource: "persistentvolumeclaims", Kind: kind, Namespaced: true}, nil
+	case "kubernetes/Secret":
+		return kubernetesResource{Provider: provider, APIGroup: "", APIVersion: "v1", Resource: "secrets", Kind: kind, Namespaced: true}, nil
 	case "kubevirt/VirtualMachine":
 		return kubernetesResource{Provider: provider, APIGroup: "kubevirt.io", APIVersion: "v1", Resource: "virtualmachines", Kind: kind, Namespaced: true}, nil
+	case "clusterapi/MachineDeployment":
+		return kubernetesResource{Provider: provider, APIGroup: "cluster.x-k8s.io", APIVersion: "v1beta1", Resource: "machinedeployments", Kind: kind, Namespaced: true}, nil
 	case "kubeovn/Vpc":
 		return kubernetesResource{Provider: provider, APIGroup: "kubeovn.io", APIVersion: "v1", Resource: "vpcs", Kind: kind}, nil
 	case "kubeovn/Subnet":

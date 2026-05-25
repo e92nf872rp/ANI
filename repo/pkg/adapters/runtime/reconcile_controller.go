@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/kubercloud/ani/pkg/ports"
@@ -16,6 +17,9 @@ type LocalWorkloadReconcileController struct {
 	reconciler ports.WorkloadStatusReconciler
 	config     ports.ReconcileControllerConfig
 	now        func() time.Time
+	mu         sync.Mutex
+	backoff    map[string]time.Time
+	metrics    ports.ReconcileControllerMetrics
 }
 
 type ReconcileControllerOption func(*LocalWorkloadReconcileController)
@@ -43,11 +47,18 @@ func NewLocalWorkloadReconcileController(
 		reconciler: reconciler,
 		config:     defaultReconcileControllerConfig(config),
 		now:        time.Now,
+		backoff:    map[string]time.Time{},
 	}
 	for _, option := range options {
 		option(controller)
 	}
 	return controller
+}
+
+func (c *LocalWorkloadReconcileController) Metrics() ports.ReconcileControllerMetrics {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.metrics
 }
 
 func (c *LocalWorkloadReconcileController) Start(ctx context.Context) error {
@@ -133,6 +144,7 @@ func (c *LocalWorkloadReconcileController) ReconcileNow(ctx context.Context, tar
 }
 
 func (c *LocalWorkloadReconcileController) runOnce(ctx context.Context) (bool, error) {
+	c.recordTick()
 	targets, err := c.targets.ListReconcileTargets(ctx, ports.ReconcileTargetListRequest{
 		StaleBefore: c.now().UTC().Add(-time.Duration(c.config.StaleThresholdSeconds) * time.Second),
 		Limit:       c.config.MaxConcurrentReconciles,
@@ -145,10 +157,16 @@ func (c *LocalWorkloadReconcileController) runOnce(ctx context.Context) (bool, e
 		if isTransientWorkloadState(target.State) {
 			active = true
 		}
+		if c.isTargetBackedOff(target, c.now().UTC()) {
+			c.recordBackoffSkip()
+			continue
+		}
 		result, err := c.ReconcileNow(ctx, target)
 		if err != nil {
-			return active, err
+			c.recordFailure(target, c.now().UTC())
+			continue
 		}
+		c.recordSuccess(target)
 		if isTransientWorkloadState(result.CurrentState) {
 			active = true
 		}
@@ -207,7 +225,47 @@ func defaultReconcileControllerConfig(config ports.ReconcileControllerConfig) po
 	if config.MaxConcurrentReconciles <= 0 {
 		config.MaxConcurrentReconciles = 10
 	}
+	if config.FailureBackoffSeconds <= 0 {
+		config.FailureBackoffSeconds = 30
+	}
 	return config
+}
+
+func (c *LocalWorkloadReconcileController) isTargetBackedOff(target ports.ReconcileTarget, now time.Time) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	until, ok := c.backoff[reconcileTargetKey(target)]
+	return ok && now.Before(until)
+}
+
+func (c *LocalWorkloadReconcileController) recordTick() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.metrics.Ticks++
+}
+
+func (c *LocalWorkloadReconcileController) recordSuccess(target ports.ReconcileTarget) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.metrics.Successes++
+	delete(c.backoff, reconcileTargetKey(target))
+}
+
+func (c *LocalWorkloadReconcileController) recordFailure(target ports.ReconcileTarget, now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.metrics.Failures++
+	c.backoff[reconcileTargetKey(target)] = now.Add(time.Duration(c.config.FailureBackoffSeconds) * time.Second)
+}
+
+func (c *LocalWorkloadReconcileController) recordBackoffSkip() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.metrics.SkippedBackoff++
+}
+
+func reconcileTargetKey(target ports.ReconcileTarget) string {
+	return target.TenantID + "/" + string(target.Kind) + "/" + target.InstanceID
 }
 
 func reconcileOperationForState(state ports.WorkloadState) ports.WorkloadLifecycleAction {

@@ -7,11 +7,27 @@ Core/Services boundaries aligned with the code and OpenAPI contract split.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = REPO_ROOT.parent
+REPOSITORY_WIDE_STALE_PATTERNS = (
+    "POST /inference-services",
+    "POST /knowledge-bases",
+    "POST /models/import",
+    "GET /knowledge-bases",
+    "/api/v1/models",
+    "/api/v1/inference-services",
+    "/api/v1/knowledge-bases",
+    "npx openapi-typescript ../../api/openapi/v1.yaml -o src/api/schema.d.ts",
+    "api.GET('/models'",
+    "模型工程平台",
+    "待补服务层",
+    "RKE",
+    "Rancher",
+)
 
 
 def read(path: Path) -> str:
@@ -28,6 +44,16 @@ def require(text: str, needle: str, path: Path) -> None:
 def reject(text: str, needle: str, path: Path) -> None:
     if needle in text:
         raise SystemExit(f"{path}: forbidden dynamic-detail text found: {needle}")
+
+
+def matches_stale_pattern(text: str, pattern: str) -> bool:
+    if pattern == "RKE":
+        return re.search(r"(?<![A-Z])RKE(?![A-Z])", text) is not None
+    return pattern in text
+
+
+def contains_stale_pattern(text: str, patterns: tuple[str, ...] = REPOSITORY_WIDE_STALE_PATTERNS) -> bool:
+    return any(matches_stale_pattern(text, pattern) for pattern in patterns)
 
 
 def markdown_paths() -> list[Path]:
@@ -90,7 +116,7 @@ def main() -> None:
     require(claude, "轻量入口和强制规则索引", claude_path)
     require(claude, "禁止写入单批次完成清单", claude_path)
     require(claude, "动态进度必须写入 `repo/CURRENT-SPRINT.md`", claude_path)
-    require(claude, "Karpathy 四条开发原则", claude_path)
+    require(claude, "Karpathy 五条开发原则", claude_path)
     require(claude, "跨层控制面契约", claude_path)
     require(claude, "Core OpenAPI REST API / Core SDK", claude_path)
     require(claude, "直接调用 Core 内部 gRPC service", claude_path)
@@ -216,28 +242,13 @@ def main() -> None:
             require(content, "ANI-DOCS-INDEX.md", path)
             require(content, "repo/CURRENT-SPRINT.md", path)
         for pattern in stale_patterns:
-            if pattern in content:
+            if matches_stale_pattern(content, pattern):
                 raise SystemExit(f"{path}: stale or ambiguous documentation text found: {pattern}")
 
-    repository_wide_stale_patterns = (
-        "POST /inference-services",
-        "POST /knowledge-bases",
-        "POST /models/import",
-        "GET /knowledge-bases",
-        "/api/v1/models",
-        "/api/v1/inference-services",
-        "/api/v1/knowledge-bases",
-        "npx openapi-typescript ../../api/openapi/v1.yaml -o src/api/schema.d.ts",
-        "api.GET('/models'",
-        "模型工程平台",
-        "待补服务层",
-        "RKE",
-        "Rancher",
-    )
     for path in markdown_paths():
         content = read(path)
-        for pattern in repository_wide_stale_patterns:
-            if pattern in content:
+        for pattern in REPOSITORY_WIDE_STALE_PATTERNS:
+            if matches_stale_pattern(content, pattern):
                 raise SystemExit(f"{path}: repository-wide stale documentation text found: {pattern}")
 
     print("document entrypoint boundaries valid")

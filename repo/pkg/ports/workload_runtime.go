@@ -126,6 +126,12 @@ type WorkloadStorageAttachment struct {
 	SourceRef    string
 }
 
+type WorkloadSecretBinding struct {
+	SecretID  string
+	MountPath string
+	EnvPrefix string
+}
+
 type VMInstanceSpec struct {
 	BootImage       string
 	CloudInitSecret string
@@ -214,6 +220,7 @@ type WorkloadSpec struct {
 	SchedulerName      string
 	ServiceAccountName string
 	Identity           *WorkloadIdentityBinding
+	SecretBindings     []WorkloadSecretBinding
 	TTL                time.Duration
 }
 
