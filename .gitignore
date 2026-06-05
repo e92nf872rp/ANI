@@ -51,3 +51,7 @@ cosign.key
 # Test temporary files
 /tmp/
 testdata/*/output/
+
+# Local document and presentation files (not synced to GitHub)
+doc/
+ppt/
