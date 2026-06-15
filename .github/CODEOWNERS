@@ -25,7 +25,7 @@
 /repo/scripts/                                          @e92nf872rp
 /repo/Makefile                                          @e92nf872rp
 /CLAUDE.md                                              @e92nf872rp
-/ANI-06-开发计划.md                                      @e92nf872rp
+# ANI-06-开发计划.md 含中文名，CODEOWNERS 不支持非 ASCII 路径；全局 * 规则已覆盖
 
 # ── Services API 契约（两人共同审核）─────────────────────────────────────────
 # services/v1.yaml 是跨层合同，Core 和 Services 都必须 approve
