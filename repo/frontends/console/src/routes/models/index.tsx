@@ -20,11 +20,7 @@ function ModelList() {
     { title: '能力', colKey: 'capabilities',
       cell: ({ row }: any) => row.capabilities?.join(', ') },
     { title: '操作', colKey: 'actions',
-      cell: ({ row }: any) => (
-        <Space>
-          <Link to="/models/$modelId" params={{ modelId: row.id }}>详情</Link>
-        </Space>
-      ) },
+      cell: () => <span style={{ color: 'var(--td-text-color-placeholder)' }}>详情（开发中）</span> },
   ]
 
   return (

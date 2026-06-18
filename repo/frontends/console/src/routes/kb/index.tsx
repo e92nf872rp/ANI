@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { Button, Table, Tag, Space } from 'tdesign-react'
+import { Button, Table, Tag } from 'tdesign-react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
 
@@ -20,10 +20,7 @@ function KBList() {
       cell: ({ row }: any) => <Tag theme={row.status === 'active' ? 'success' : 'default'}>{row.status}</Tag> },
     { title: '操作', colKey: 'actions',
       cell: ({ row }: any) => (
-        <Space>
-          <Link to="/kb/$kbId" params={{ kbId: row.id }}>文档</Link>
-          <Link to="/kb/$kbId/chat" params={{ kbId: row.id }}>问答</Link>
-        </Space>
+        <Link to="/kb/$kbId/chat" params={{ kbId: String(row.id) }}>问答</Link>
       ) },
   ]
 

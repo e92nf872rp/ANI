@@ -8,11 +8,12 @@ export const Route = createFileRoute('/')({
 })
 
 function Dashboard() {
-  const { data: models } = useQuery({
-    queryKey: ['models', 'running'],
-    queryFn: () => api.GET('/inference-services', { params: { query: { status: 'running' } } })
-      .then(({ data }) => data),
+  const { data: services } = useQuery({
+    queryKey: ['inference-services'],
+    queryFn: () => api.GET('/inference-services').then(({ data }) => data),
   })
+
+  const runningCount = services?.items?.filter((item) => item.status === 'running').length ?? 0
 
   return (
     <div>
@@ -20,7 +21,7 @@ function Dashboard() {
       <Row gutter={16}>
         <Col span={6}>
           <Card>
-            <Statistic title="运行中的推理服务" value={models?.items?.length ?? 0} />
+            <Statistic title="运行中的推理服务" value={runningCount} />
           </Card>
         </Col>
         {/* GPU 资源卡片、知识库调用量图表等后续实现 */}

@@ -6,7 +6,7 @@ export const Route = createFileRoute('/settings/')({
     <div>
       <h2>设置</h2>
       <List>
-        <List.Item><Link to="/settings/api-keys">API Key 管理</Link></List.Item>
+        <List.ListItem><Link to="/settings/api-keys">API Key 管理</Link></List.ListItem>
       </List>
     </div>
   ),

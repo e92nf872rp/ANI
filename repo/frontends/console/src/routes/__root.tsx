@@ -2,8 +2,8 @@ import { createRootRoute, Link, Outlet } from '@tanstack/react-router'
 import { Layout, Menu } from 'tdesign-react'
 import {
   DashboardIcon,
-  CloudServerIcon,
-  ArchiveIcon,
+  ServerIcon,
+  BookIcon,
   ChartBarIcon,
   SettingIcon,
 } from 'tdesign-icons-react'
@@ -22,10 +22,10 @@ function RootLayout() {
             <Menu.MenuItem value="dashboard" icon={<DashboardIcon />}>
               <Link to="/">仪表盘</Link>
             </Menu.MenuItem>
-            <Menu.MenuItem value="models" icon={<CloudServerIcon />}>
+            <Menu.MenuItem value="models" icon={<ServerIcon />}>
               <Link to="/models">模型管理</Link>
             </Menu.MenuItem>
-            <Menu.MenuItem value="kb" icon={<ArchiveIcon />}>
+            <Menu.MenuItem value="kb" icon={<BookIcon />}>
               <Link to="/kb">知识库</Link>
             </Menu.MenuItem>
             <Menu.MenuItem value="usage" icon={<ChartBarIcon />}>

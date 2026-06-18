@@ -2,7 +2,7 @@
 # 使用方式：make <target>
 
 .PHONY: help deps deps-down deps-status deps-clean \
-        tools-proto gen-api gen-proto gen-core-sdk gen-api-docs \
+        tools-proto gen-api gen-console-api gen-proto gen-core-sdk gen-api-docs \
         build build-gateway build-auth-service build-model-service build-task-service build-reconcile-worker build-cli \
         test test-go test-python test-cover \
         validate-infra validate-gpu-preflight validate-gpu-contracts validate-runtime-contracts validate-instance-contracts validate-instance-planner validate-instance-renderer validate-instance-admission validate-instance-audit validate-instance-provider-dry-run validate-instance-provider-apply validate-instance-status-reconcile validate-instance-orchestrator validate-instance-store validate-instance-provider-adapter validate-instance-service validate-instance-lifecycle-ops validate-m1-e2e validate-kubernetes-provider-execution validate-kubernetes-rest-client validate-kubernetes-bootstrap-wiring validate-kubernetes-lifecycle-execution validate-kubernetes-ops-execution validate-m1-real-provider-profile validate-real-k8s-profile validate-vcluster-live-gate validate-vcluster-upgrade-live-gate validate-k8s-node-pool-live-gate validate-kubeovn-network-live-gate validate-kubevirt-vm-live-gate validate-reconcile-ha-live-gate validate-kms-sm4-live-gate validate-secrets-live-gate validate-core-installer validate-core-offline validate-core-cli validate-sprint7-core-regression validate-core-release-hardening validate-core-installer-live validate-core-offline-pack validate-core-doc-consistency validate-sprint8-core-release validate-core-release-evidence validate-sprint9-core-rc validate-sprint9-core-doc-consistency validate-sprint9-rc validate-core-artifact-manifest validate-core-version-policy validate-sprint10-final-readiness validate-sprint10-core-doc-consistency validate-sprint10-release-prep validate-sprint11-storage-disk-plan validate-sprint11-core-real-deployment validate-sprint11-rook-ceph-formal-deployment validate-sprint11-rook-ceph-live-deployment-result validate-sprint11-rook-ceph-vm-storage-smoke validate-sprint11-rook-ceph-reboot-resilience validate-sprint11-safe-completion validate-sprint11-core-doc-consistency validate-sprint11-real-deployment validate-demo-instances validate-core-alpha validate-network-alpha validate-storage-alpha validate-vector-alpha validate-workload-identity validate-core-dev-profile validate-sdk-alpha validate-sdk-beta validate-sdk-mock-smoke validate-sprint3-closure validate-sprint4-closure validate-spec-split validate-core-beta validate-core-api-compatibility validate-mock-a validate-doc-api validate-doc-entrypoints validate-auth-contract validate-auth-dex-smoke validate-architecture \
@@ -23,7 +23,8 @@ help:
 	@echo ""
 	@echo "  代码生成:"
 	@echo "    make tools-proto    安装本地 Protobuf 生成插件"
-	@echo "    make gen-api        从 OpenAPI Spec 生成 Go/TS 代码"
+	@echo "    make gen-api        从 OpenAPI Spec 生成 Gateway Go 代码 + Console TS 类型"
+	@echo "    make gen-console-api  仅从 services/v1.yaml 生成 Console TypeScript 类型"
 	@echo "    make gen-proto      从 Protobuf 生成 Go gRPC 代码"
 	@echo "    make gen-core-sdk   从 Core/Services API 契约生成四语言 SDK Alpha"
 	@echo "    make gen-api-docs   从 Core/Services API 契约生成静态 API 文档"
@@ -172,9 +173,18 @@ gen-api:
 	@echo "→ 从 OpenAPI Spec 生成 Go 代码..."
 	cd services/ani-gateway && \
 		go generate ./...
-	@echo "→ 从 OpenAPI Spec 生成 TypeScript SDK..."
-	npx openapi-typescript api/openapi/v1.yaml -o frontends/console/src/api/types.ts
+	@echo "→ 从 Services OpenAPI Spec 生成 Console TypeScript 类型..."
+	npx openapi-typescript api/openapi/services/v1.yaml -o frontends/console/src/api/schema.d.ts
+	@echo "→ 从 Core OpenAPI Spec 生成 Console TypeScript 类型..."
+	node frontends/console/scripts/gen-core-schema.mjs
 	@echo "✅ API 代码生成完成"
+
+gen-console-api:
+	@echo "→ 从 Services OpenAPI Spec 生成 Console TypeScript 类型..."
+	npx openapi-typescript api/openapi/services/v1.yaml -o frontends/console/src/api/schema.d.ts
+	@echo "→ 从 Core OpenAPI Spec 生成 Console TypeScript 类型..."
+	node frontends/console/scripts/gen-core-schema.mjs
+	@echo "✅ Console API types generated"
 
 gen-proto: tools-proto
 	@echo "→ 从 Protobuf 生成 Go gRPC 代码..."
