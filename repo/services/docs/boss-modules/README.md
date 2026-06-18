@@ -12,6 +12,7 @@
 | [module-completion-matrix.md](governance/module-completion-matrix.md) | 模块 × 冻结路径对照 |
 | [module-delivery-workflow.md](governance/module-delivery-workflow.md) | 交付与复审口径 |
 | [boss-full-depth-checklist.md](governance/boss-full-depth-checklist.md) | Console 满配章节 + 阻塞项 |
+| [notebook/README.md](../notebook/README.md) | 前端开发日志（按日记录） |
 
 ### 业务域模块详文
 

@@ -13,6 +13,7 @@
 | [console-undefined-features-backlog.md](governance/console-undefined-features-backlog.md) | P0/P1/P2 backlog |
 | [schema-completion-tracker.md](governance/schema-completion-tracker.md) | YAML vs handler 跟踪 |
 | [module-delivery-workflow.md](governance/module-delivery-workflow.md) | 交付与 422 口径 |
+| [notebook/README.md](../notebook/README.md) | 前端开发日志（按日记录） |
 
 → 完整列表：[governance/README.md](governance/README.md)
 
