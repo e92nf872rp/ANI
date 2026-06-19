@@ -7,6 +7,7 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/route"
+	"github.com/google/uuid"
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
 )
@@ -102,6 +103,20 @@ type storageMountTargetResponse struct {
 	Status       string                 `json:"status"`
 	CreatedAt    string                 `json:"created_at"`
 	DevProfile   coreDevProfileResponse `json:"dev_profile"`
+}
+
+type storageSnapshotTaskResponse struct {
+	ID             string         `json:"id"`
+	IdempotencyKey string         `json:"idempotency_key"`
+	TaskType       string         `json:"task_type"`
+	ResourceType   string         `json:"resource_type"`
+	Status         string         `json:"status"`
+	AttemptCount   int            `json:"attempt_count"`
+	MaxAttempts    int            `json:"max_attempts"`
+	ProgressPct    int            `json:"progress_pct"`
+	Result         map[string]any `json:"result"`
+	CreatedAt      string         `json:"created_at"`
+	CompletedAt    string         `json:"completed_at"`
 }
 
 func newStorageAPI() *storageAPI {
@@ -300,7 +315,9 @@ func (api *storageAPI) createVolumeSnapshot(ctx context.Context, c *app.RequestC
 		writeStorageError(c, err)
 		return
 	}
-	c.JSON(http.StatusAccepted, storageSnapshotFromRecord(record))
+	taskID := uuid.NewString()
+	c.Response.Header.Set("Location", "/api/v1/tasks/"+taskID)
+	c.JSON(http.StatusAccepted, storageSnapshotTaskFromRecord(record, req.IdempotencyKey, taskID))
 }
 
 func (api *storageAPI) listVolumeSnapshots(ctx context.Context, c *app.RequestContext) {
@@ -391,6 +408,23 @@ func storageSnapshotFromRecord(record ports.VolumeSnapshotRecord) storageSnapsho
 		SizeBytes:  record.SizeBytes,
 		CreatedAt:  networkTime(record.CreatedAt),
 		DevProfile: localCoreDevProfile("local-storage-service", "Core dev/local profile; snapshot provider execution is gated separately"),
+	}
+}
+
+func storageSnapshotTaskFromRecord(record ports.VolumeSnapshotRecord, idempotencyKey string, taskID string) storageSnapshotTaskResponse {
+	completedAt := networkTime(record.CreatedAt)
+	return storageSnapshotTaskResponse{
+		ID:             taskID,
+		IdempotencyKey: idempotencyKey,
+		TaskType:       "volume.snapshot.create",
+		ResourceType:   "volume_snapshot",
+		Status:         "completed",
+		AttemptCount:   1,
+		MaxAttempts:    1,
+		ProgressPct:    100,
+		Result:         map[string]any{"snapshot": storageSnapshotFromRecord(record)},
+		CreatedAt:      completedAt,
+		CompletedAt:    completedAt,
 	}
 }
 

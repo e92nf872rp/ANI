@@ -3,7 +3,7 @@
 > 新开发者（人类或 AI 工具）的第一个入口文件。本文只描述当前真实执行状态；历史完成批次查 `repo/development-records/README.md`。
 
 > **仓库范围：仅 ANI Core。** ANI Services 已冻结并移交外部产品团队，本仓库不再开发任何 Services 代码（旧 Services 骨架只读保留）。外部团队给出产品功能/交互/API 定义后，Core 只按 Core OpenAPI/SDK/CLI 缺口补齐基础设施支撑。
-> **当前重心：Sprint 12 / Core「Services 支撑 Handler」实现。** 基于真实 Core 代码与 `api/openapi/v1.yaml` 的 GAP，闭合已声明但网关未实现的 Core handler；仅 ANI Core，Tier1 local profile。`CORE-SVC-SUPPORT-OBSERVABILITY-A` 已完成实例可观测、GPU 清单/占用和 Sandbox 模板 catalog handler；`CORE-SVC-SUPPORT-NETSTORE-A` 已完成网络路由、卷快照、mount-targets、K8s workloads 与 2 个 422；不代表 real-provider、runtime ready 或 production ready。RAG、Console、BOSS、model-service、kb-service、ai、operators、frontends 均不在本仓库执行范围内。
+> **当前重心：Sprint 12 / Core「Services 支撑 Handler」实现。** 基于真实 Core 代码与 `api/openapi/v1.yaml` 的 GAP，闭合已声明但网关未实现的 Core handler；仅 ANI Core，Tier1 local profile。`CORE-SVC-SUPPORT-OBSERVABILITY-A` 已完成实例可观测、GPU 清单/占用和 Sandbox 模板 catalog handler；`CORE-SVC-SUPPORT-NETSTORE-A` 已完成网络路由、卷快照、mount-targets、K8s workloads 与 2 个 422，并完成二次复审收口；不代表 real-provider、runtime ready 或 production ready。RAG、Console、BOSS、model-service、kb-service、ai、operators、frontends 均不在本仓库执行范围内。
 > **标准状态 marker：** 真实服务器只读验证已完成；Rook-Ceph 正式部署已完成。Sprint 11 执行环境：正式部署执行环境。
 
 > **Sprint 12（当前活跃冲刺，2026-06-19 起）：** Core「Services 支撑 Handler」实现。基于真实代码与 `api/openapi/v1.yaml` 的 GAP，闭合 19 个已声明未实现的 Core handler（实例可观测 / GPU 清单 / 网络路由 / 卷快照 / 对象存储 / 向量写入 / K8s workloads）+ 2 个 422，分 B1/B2/B3 三批；仅 ANI Core，Tier1 local profile。下方 Sprint 11 已闭环并转为历史回归门禁，其 marker 保留供历史门禁校验。完整 GAP 与触发方式见 [`development-records/sprint12-kickoff-core-svc-support.md`](development-records/sprint12-kickoff-core-svc-support.md)。
@@ -14,7 +14,7 @@
 |---|---|
 | **冲刺编号** | Sprint 12（Core「Services 支撑 Handler」实现） |
 | **主题** | 闭合 Core OpenAPI 已声明但网关未实现的 Services 支撑 handler 缺口 |
-| **当前状态** | `SPRINT12-KICKOFF-A` 已完成 GAP 分析与 B1/B2/B3 批次规划；`CORE-SVC-SUPPORT-OBSERVABILITY-A` 已完成 8 个 B1 operationId；`CORE-SVC-SUPPORT-NETSTORE-A` 已完成 6 个 B2 operationId + 2 个 422；B3 对象存储/向量写入待执行 |
+| **当前状态** | `SPRINT12-KICKOFF-A` 已完成 GAP 分析与 B1/B2/B3 批次规划；`CORE-SVC-SUPPORT-OBSERVABILITY-A` 已完成 8 个 B1 operationId；`CORE-SVC-SUPPORT-NETSTORE-A` 已完成 6 个 B2 operationId + 2 个 422，并完成复审收口；B3 对象存储/向量写入待执行 |
 | **执行环境** | Tier1 local profile。允许新增/扩展 Core ports、local adapters、Gateway handler 与测试；禁止开发 Services 业务逻辑，禁止把 local profile 标记为 real-provider、runtime ready 或 production ready |
 | **已由代码/真实环境证明完成** | B1 已由本地代码和单元测试证明：实例观测返回 dev_profile 合成数据；exec session 返回短期 WebSocket URL 且不发长期凭据；GPU 清单复用 `ports.GPUInventory.ListNodeClasses`；occupancy 由 node classes 派生；sandbox templates 由 local catalog 提供。B2 已由本地代码和单元测试证明：network routes、volume snapshots、filesystem mount-targets、K8s workloads 均经 ports/local adapters/handler 闭合；向量库非 ready 与 K8s 创建前置不满足返回 422。 |
 | **生产化边界** | Sprint 12 B1/B2 仅闭合契约和 local profile handler；真实 Prometheus/K8s/kubelet/DCGM/Kata/Kube-OVN/Rook-Ceph/vCluster provider 及 live gate 属 Tier2 后续批次 |
@@ -25,7 +25,7 @@
 
 1. `SPRINT12-KICKOFF-A`：Sprint 12 启动 + GAP 分析归档，规划 19 个 Core handler 缺口 + 2 个 422，分 B1/B2/B3 三批；仅 ANI Core，Tier1 local profile。
 2. `CORE-SVC-SUPPORT-OBSERVABILITY-A`：B1 handler 已完成。新增实例可观测只读 port/local adapter，接入 `/instances/{instance_id}/logs`、`/events`、`/metrics`、`/security-events` 和 `POST /exec`；新增 GPU inventory local adapter 与 `gpu_inventory_resources.go`，注册 `/gpu-inventory`、`/gpu-inventory/occupancy`、`/sandbox-templates`；响应带 `dev_profile`，不声明 production/runtime ready。
-3. `CORE-SVC-SUPPORT-NETSTORE-A`：B2 handler 已完成。扩展 network/storage/K8s ports 与 local adapters，接入 `/networks/routes`、`/volumes/{volume_id}/snapshots`、`/filesystems/{filesystem_id}/mount-targets`、`/k8s-clusters/{cluster_id}/workloads`；向量库非 ready 与 K8s 创建前置不满足返回 `422 PRECONDITION_FAILED`；响应带 `dev_profile`，不声明 production/runtime ready。
+3. `CORE-SVC-SUPPORT-NETSTORE-A`：B2 handler 已完成并复审收口。扩展 network/storage/K8s ports 与 local adapters，接入 `/networks/routes`、`/volumes/{volume_id}/snapshots`、`/filesystems/{filesystem_id}/mount-targets`、`/k8s-clusters/{cluster_id}/workloads`；`createVolumeSnapshot` 的 202 响应按全局约定返回 `AsyncTask`；向量库非 ready 与 K8s 创建前置不满足返回 `422 PRECONDITION_FAILED`；响应带 `dev_profile`，不声明 production/runtime ready。
 
 ## Sprint 12 执行矩阵
 
@@ -33,7 +33,7 @@
 |---|---|---|---|
 | A `SPRINT12-KICKOFF-A` | GAP 分析、A/B1/B2/B3 拆分、执行提示词 | `api/openapi/v1.yaml`、`services/ani-gateway/internal/router/*.go`、`development-records/sprint12-kickoff-core-svc-support.md`、`development-records/sprint12-batch-execution-prompts.md` | 已完成 |
 | B1 `CORE-SVC-SUPPORT-OBSERVABILITY-A` | 实例 logs/events/metrics/security-events/exec session；GPU inventory/occupancy；Sandbox templates | `pkg/ports/instance_observability.go`、`pkg/ports/gpu_inventory.go`、`pkg/ports/sandbox_template_catalog.go`、`pkg/adapters/runtime/local_instance_observability_service.go`、`pkg/adapters/runtime/local_gpu_inventory.go`、`pkg/adapters/runtime/local_sandbox_template_catalog.go`、`services/ani-gateway/internal/router/demo_instances.go`、`services/ani-gateway/internal/router/gpu_inventory_resources.go` | 已完成 Tier1 local profile |
-| B2 `CORE-SVC-SUPPORT-NETSTORE-A` | 网络 route、卷 snapshot、filesystem mount-targets、K8s workloads、2 个 422 | `pkg/ports/network_resources.go`、`pkg/ports/storage_resources.go`、`pkg/ports/k8s_clusters.go`、`pkg/ports/errors.go`、`pkg/adapters/runtime/network_service.go`、`pkg/adapters/runtime/storage_service.go`、`pkg/adapters/runtime/local_k8s_cluster_service.go`、`services/ani-gateway/internal/router/network_resources.go`、`services/ani-gateway/internal/router/storage_resources.go`、`services/ani-gateway/internal/router/k8s_cluster_resources.go`、`services/ani-gateway/internal/router/vector_store_resources.go` | 已完成 Tier1 local profile |
+| B2 `CORE-SVC-SUPPORT-NETSTORE-A` | 网络 route、卷 snapshot、filesystem mount-targets、K8s workloads、2 个 422 | `pkg/ports/network_resources.go`、`pkg/ports/storage_resources.go`、`pkg/ports/k8s_clusters.go`、`pkg/ports/errors.go`、`pkg/adapters/runtime/network_service.go`、`pkg/adapters/runtime/storage_service.go`、`pkg/adapters/runtime/local_k8s_cluster_service.go`、`services/ani-gateway/internal/router/network_resources.go`、`services/ani-gateway/internal/router/storage_resources.go`、`services/ani-gateway/internal/router/k8s_cluster_resources.go`、`services/ani-gateway/internal/router/vector_store_resources.go` | 已完成 Tier1 local profile；复审收口完成 |
 | B3 `CORE-SVC-SUPPORT-OBJVEC-A` | 对象存储 bucket/object 与 vector document insert | 目标：`pkg/ports/storage_resources.go`、`pkg/ports/object_store.go`、`pkg/ports/vector_store.go`、`services/ani-gateway/internal/router/storage_resources.go`、`services/ani-gateway/internal/router/vector_store_resources.go` | 待执行 |
 
 ## Sprint 13 真实环境测试准备

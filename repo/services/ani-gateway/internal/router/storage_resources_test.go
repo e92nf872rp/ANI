@@ -99,6 +99,14 @@ func TestStorageAPIDevProfileSnapshotAndMountTarget(t *testing.T) {
 	if got := storageSnapshotFromRecord(snapshot); got.ID == "" || got.VolumeID != volume.VolumeID || got.Status != "available" || got.SizeBytes <= 0 {
 		t.Fatalf("snapshot response = %+v, want available snapshot", got)
 	}
+	task := storageSnapshotTaskFromRecord(snapshot, "api-snapshot-a", "00000000-0000-0000-0000-000000000123")
+	if task.TaskType != "volume.snapshot.create" || task.ResourceType != "volume_snapshot" || task.Status != "completed" || task.ProgressPct != 100 {
+		t.Fatalf("snapshot task = %+v, want completed volume snapshot task", task)
+	}
+	taskSnapshot, ok := task.Result["snapshot"].(storageSnapshotResponse)
+	if !ok || taskSnapshot.ID != snapshot.SnapshotID || taskSnapshot.VolumeID != volume.VolumeID {
+		t.Fatalf("snapshot task result = %+v, want embedded snapshot response", task.Result)
+	}
 	filesystem, err := api.service.CreateFilesystem(context.Background(), ports.StorageFilesystemCreateRequest{
 		TenantID:       "tenant-a",
 		IdempotencyKey: "api-mount-fs-a",

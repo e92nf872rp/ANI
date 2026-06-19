@@ -37,6 +37,15 @@ go test ./pkg/adapters/runtime ./services/ani-gateway/internal/router
 
 完整门禁与 curl smoke 结果见本批提交记录和最终执行输出。
 
+## 复审收口
+
+2026-06-19 二次审查结论：本批代码数量和质量与 B2 目标匹配；6 个 operationId、2 个 422、ports/local adapters/Gateway handler、schema、validator、单元测试与 smoke 均已覆盖。复审中补齐以下契约细节：
+
+- `createVolumeSnapshot` 的 `202` 响应按全局 OpenAPI 约定改为 `AsyncTask`，并声明 `Location` header；local profile 将 snapshot 响应放入 task `result.snapshot`。
+- B2 新增 schema 的资源 id 字段统一为普通 `string`，与 local profile 的 `rt_` / `snap_` / `mt_` / `vol_` / `fs_` 前缀资源 ID 对齐。
+- `K8sClusterWorkloadListResponse.required` 补齐 `total`，保持所有 B2 列表响应统一为 `{items,total,next_cursor}`。
+- `validate_storage_alpha_contract.py` 增加 snapshot 202 `AsyncTask` 与 `Location` header 守卫，避免后续回退。
+
 ## 关键文件
 
 - `api/openapi/v1.yaml`

@@ -117,6 +117,18 @@ def validate_openapi(root: Path, errors: list[str]) -> None:
             missing = expected_responses - set(operation.get("responses", {}).keys())
             if missing:
                 errors.append(f"{method.upper()} {path} missing responses: {sorted(missing)}")
+            if operation_id == "createVolumeSnapshot":
+                response_202 = operation.get("responses", {}).get("202", {})
+                schema_ref = (
+                    response_202.get("content", {})
+                    .get("application/json", {})
+                    .get("schema", {})
+                    .get("$ref")
+                )
+                if schema_ref != "#/components/schemas/AsyncTask":
+                    errors.append("POST /volumes/{volume_id}/snapshots 202 response must return AsyncTask")
+                if "Location" not in response_202.get("headers", {}):
+                    errors.append("POST /volumes/{volume_id}/snapshots 202 response must declare Location header")
 
     for schema in EXPECTED_SCHEMAS:
         if schema not in schemas:
@@ -157,6 +169,9 @@ def validate_gateway(root: Path, errors: list[str]) -> None:
     for token in ("NewLocalStorageService", "WithStorageResourceStore", "CreateVolume", "CreateFilesystem", "CreateObject", "DeleteVolume", "CreateVolumeSnapshot", "ListVolumeSnapshots", "ListFilesystemMountTargets"):
         if token not in adapter_go:
             errors.append(f"storage_service.go missing token {token}")
+    for token in ("storageSnapshotTaskFromRecord", "volume.snapshot.create", "volume_snapshot", "Location"):
+        if token not in routes_go:
+            errors.append(f"storage_resources.go missing async snapshot task token {token}")
     for token in ("MetadataStorageStore", "UpsertVolume", "UpsertFilesystem", "UpsertObject", "UpdateResourceState"):
         if token not in store_go:
             errors.append(f"storage_store.go missing token {token}")

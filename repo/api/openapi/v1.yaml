@@ -353,9 +353,9 @@ components:
         id:               { type: string, format: uuid }
         idempotency_key:  { type: string, description: "客户端提供的幂等键" }
         task_type:        { type: string, example: "model.import",
-                            enum: [model.import, kb.parse, kb.index, inference.deploy] }
+                            enum: [model.import, kb.parse, kb.index, inference.deploy, volume.snapshot.create] }
         resource_type:    { type: string, nullable: true,
-                            enum: [inference_service, kb_document, model_version] }
+                            enum: [inference_service, kb_document, model_version, volume_snapshot] }
         resource_id:      { type: string, format: uuid, nullable: true }
         status:           { type: string,
                             enum: [pending, running, completed, failed, cancelled, dead_letter] }
@@ -1512,11 +1512,11 @@ components:
       type: object
       required: [id, vpc_id, destination_cidr, next_hop_type, next_hop_id, created_at, dev_profile]
       properties:
-        id:               { type: string, format: uuid }
-        vpc_id:           { type: string, format: uuid }
+        id:               { type: string }
+        vpc_id:           { type: string }
         destination_cidr: { type: string }
         next_hop_type:    { type: string, enum: [gateway, instance, nat] }
-        next_hop_id:      { type: string, format: uuid }
+        next_hop_id:      { type: string }
         description:      { type: string, nullable: true }
         created_at:       { type: string, format: date-time }
         dev_profile:
@@ -1535,18 +1535,18 @@ components:
       required: [idempotency_key, vpc_id, destination_cidr, next_hop_type, next_hop_id]
       properties:
         idempotency_key:  { type: string }
-        vpc_id:           { type: string, format: uuid }
+        vpc_id:           { type: string }
         destination_cidr: { type: string }
         next_hop_type:    { type: string, enum: [gateway, instance, nat] }
-        next_hop_id:      { type: string, format: uuid }
+        next_hop_id:      { type: string }
         description:      { type: string }
 
     VolumeSnapshotRecord:
       type: object
       required: [id, volume_id, name, status, size_bytes, created_at, dev_profile]
       properties:
-        id:         { type: string, format: uuid }
-        volume_id:  { type: string, format: uuid }
+        id:         { type: string }
+        volume_id:  { type: string }
         name:       { type: string }
         status:     { type: string, enum: [creating, available, error, deleting] }
         size_bytes: { type: integer }
@@ -1574,9 +1574,9 @@ components:
       type: object
       required: [id, filesystem_id, subnet_id, ip_address, status, created_at, dev_profile]
       properties:
-        id:            { type: string, format: uuid }
-        filesystem_id: { type: string, format: uuid }
-        subnet_id:     { type: string, format: uuid }
+        id:            { type: string }
+        filesystem_id: { type: string }
+        subnet_id:     { type: string }
         ip_address:    { type: string }
         status:        { type: string, enum: [creating, available, deleting, error] }
         created_at:    { type: string, format: date-time }
@@ -1687,7 +1687,7 @@ components:
 
     K8sClusterWorkloadListResponse:
       type: object
-      required: [items]
+      required: [items, total]
       properties:
         items:       { type: array, items: { $ref: '#/components/schemas/K8sClusterWorkload' } }
         next_cursor: { type: string, nullable: true }
@@ -2685,9 +2685,13 @@ paths:
       responses:
         "202":
           description: 快照创建任务已提交
+          headers:
+            Location:
+              schema: { type: string }
+              description: 任务轮询 URL
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/VolumeSnapshotRecord' }
+              schema: { $ref: '#/components/schemas/AsyncTask' }
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
