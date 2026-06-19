@@ -37,6 +37,7 @@
 | SPRINT13-NETROUTE-KUBEOVN-A-TRACK | S01 网络路由 Kube-OVN A 轨：adapter-local route→`Vpc.spec.staticRoutes` renderer、provider dry-run fake 单测、`validate-kubeovn-network-live-gate` route contract；状态 code+contract ready, LIVE PENDING，不标 real-provider/runtime/production ready | sprint13-netroute-kubeovn-a-track.md |
 | SPRINT13-K8S-WORKLOADS-VCLUSTER-A-TRACK | S02 K8s workloads vCluster A 轨：real-provider cluster 经既有 proxy target 只读读取 Kubernetes API workload list，fake 单测覆盖 Deployment 解析，`validate-vcluster-live-gate` 增加 `core-workloads-list` contract；状态 code+contract ready, LIVE PENDING，不标 real-provider/runtime/production ready | sprint13-k8s-workloads-vcluster-a-track.md |
 | SPRINT13-STORAGE-ROOK-CEPH-A-TRACK | S03 storage Rook-Ceph A 轨：`KubernetesStorageRenderer` 增加 CSI `VolumeSnapshot` 与 mount-target `Service` contract manifest，provider dry-run / REST client fake 单测覆盖，新增 `validate-storage-live-gate`；状态 code+contract ready, LIVE PENDING，不标 real-provider/runtime/production ready | sprint13-storage-rook-ceph-a-track.md |
+| SPRINT13-GPU-INVENTORY-DCGM-A-TRACK | S04 GPU inventory / occupancy A 轨：新增 `KubernetesGPUInventory` 只读解析 NVIDIA device-plugin NodeList capacity/product labels，新增 `validate-gpu-inventory-live-gate` 覆盖 Core `/gpu-inventory`、`/gpu-inventory/occupancy` 与 DCGM readable contract；状态 code+contract ready, LIVE PENDING，不标 real-provider/runtime/production ready | sprint13-gpu-inventory-dcgm-a-track.md |
 
 ### Sprint 11 Kickoff（2026-06）
 

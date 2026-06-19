@@ -1,0 +1,29 @@
+profile: SPRINT13-GPU-INVENTORY-DCGM-A
+status: contract
+description: >
+  Sprint 13 GPU inventory live validation gate for proving Core GPU inventory
+  and occupancy contract readiness against NVIDIA device-plugin node capacity
+  plus DCGM metrics visibility.
+
+required_tools:
+  - kubectl
+
+live_checks:
+  - id: nvidia-device-plugin-node-capacity
+    command: kubectl get nodes -o json
+    pass_condition: node_status_capacity_or_allocatable_has_nvidia_dot_com_gpu
+  - id: core-gpu-inventory-list
+    command: GET {gateway_url}/gpu-inventory
+    pass_condition: http_200_response_has_items_total_and_dev_profile
+  - id: core-gpu-occupancy-get
+    command: GET {gateway_url}/gpu-inventory/occupancy
+    pass_condition: http_200_response_has_total_available_in_use_fault_and_dev_profile
+  - id: dcgm-exporter-metrics-readable
+    command: GET {metrics_url}/metrics or Prometheus query for DCGM_FI_DEV_GPU_UTIL
+    pass_condition: dcgm_gpu_metric_series_readable_without_credentials_in_evidence
+
+readiness_levels:
+  contract:
+    meaning: Gate definition and local validator exist; no live NVIDIA/DCGM/Core API proof.
+  live:
+    meaning: Core GPU inventory and occupancy checks passed against the approved real lab backend.

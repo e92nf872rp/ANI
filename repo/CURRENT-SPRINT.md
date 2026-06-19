@@ -14,7 +14,7 @@
 |---|---|
 | **冲刺编号** | Sprint 13（Core real provider 与 live gate 收敛） |
 | **主题** | 将 Sprint 12 已闭合的 Core handler/ports/local adapters 接到真实组件，并建立可复跑 live gate 与 evidence JSON |
-| **当前状态** | Sprint 12 进入条件已满足：A/B1/B2/B3 全部 19 个 Core handler + 2 个 422 已完成并收口；Sprint 13 当前为真实 provider/live gate 收敛阶段，S01 网络路由 Kube-OVN、S02 K8s workloads vCluster 与 S03 storage Rook-Ceph 已到 code+contract ready / LIVE PENDING |
+| **当前状态** | Sprint 12 进入条件已满足：A/B1/B2/B3 全部 19 个 Core handler + 2 个 422 已完成并收口；Sprint 13 当前为真实 provider/live gate 收敛阶段，S01 网络路由 Kube-OVN、S02 K8s workloads vCluster、S03 storage Rook-Ceph 与 S04 GPU NVIDIA device-plugin/DCGM 已到 code+contract ready / LIVE PENDING |
 | **执行环境** | 真实 provider 批次必须先声明组件与版本、live gate 命令、evidence 输出路径和失败边界；涉及真实服务器写操作前必须重新只读盘点并取得人工确认 |
 | **已由代码/真实环境证明完成** | Sprint 12 证明了 contract + Tier1 local profile：B1 实例观测/GPU/Sandbox、B2 网络/存储/K8s workloads + 2 个 422、B3 对象/向量写入均经 OpenAPI、ports/adapters、Gateway handler 和测试闭合。Sprint 11/Sprint 5 提供真实 K8s/Kube-OVN/KubeVirt/vCluster/Rook-Ceph/GPU/CAPK 等历史 live evidence，可作为 Sprint 13 provider gate 的基础。 |
 | **生产化边界** | Sprint 13 未执行具体 live gate 前，Sprint 12 能力仍只可标 Tier1 local profile；不得把计划、local profile 或历史相邻 live evidence 直接等同于当前能力 runtime/production ready |
@@ -24,7 +24,7 @@
 ## Sprint 13 当前任务
 
 1. `SPRINT13-REAL-PROVIDER-READINESS-PLAN`：已建立 Sprint 12 handler/ports/local adapters 到真实 provider/live gate 的代码关联计划；该文档是 Sprint 13 的执行地图，不是完成记录。
-2. 已完成 S01 网络路由 Kube-OVN、S02 K8s workloads vCluster 与 S03 storage Rook-Ceph A 轨；下一批从 S04 GPU 清单/占用开始，仍只推进 code+contract ready / LIVE PENDING。
+2. 已完成 S01 网络路由 Kube-OVN、S02 K8s workloads vCluster、S03 storage Rook-Ceph 与 S04 GPU NVIDIA device-plugin/DCGM A 轨；下一批从 S05 对象存储 bucket/upload/download 开始，仍只推进 code+contract ready / LIVE PENDING。
 3. 每个 provider slice 必须先补 real adapter 或 provider runtime 选择，再补 live gate 和 evidence JSON，再更新对应 development record；未跑通前只保持 planning/local-profile 状态。
 4. 持续执行驱动：[`development-records/sprint13-loop-execution-prompts.md`](development-records/sprint13-loop-execution-prompts.md) 提供 codex goal 持续循环提示与切片队列（S01–S07）。两轨道：**A 轨 loop-safe**（readiness/real adapter 代码/fake 单测/契约级 live-gate/文档闭环/提交，可自动）；**B 轨 human-gated**（真实集群写、组件部署、真实 live gate evidence、real-provider 标记，必须人工先只读盘点 + 确认）。循环只跑 A 轨，把切片推进到「code+contract ready, LIVE PENDING」。
 
@@ -33,7 +33,7 @@
 | 候选切片 | 真实组件方向 | 代码边界 | 当前状态 |
 |---|---|---|---|
 | 实例观测 | Prometheus + kubelet / K8s API（已选 2026-06-19） | `ports.InstanceObservability`，Gateway handler 不绕过 port | 待拆分执行 |
-| GPU 清单/占用 | NVIDIA device plugin / DCGM / node labels | `ports.GPUInventory`，复用 Sprint 5 GPU evidence 作为前置事实 | 待拆分执行 |
+| GPU 清单/占用 | NVIDIA device-plugin / DCGM / node labels | `ports.GPUInventory`，复用 Sprint 5 GPU evidence 作为前置事实 | **code+contract ready, LIVE PENDING**（`SPRINT13-GPU-INVENTORY-DCGM-A-TRACK`；`sprint13-gpu-inventory-dcgm-a-track.md`；readiness：`sprint13-gpu-inventory-dcgm-readiness.md`；gate：`validate-gpu-inventory-live-gate`） |
 | Sandbox templates | Kata / runtimeClass / template catalog | `ports.SandboxTemplateCatalog` | 待拆分执行 |
 | 网络路由 | Kube-OVN | `ports.NetworkService` / `runtime.NetworkService` / `network_resources.go` | **code+contract ready, LIVE PENDING**（`sprint13-netroute-kubeovn-a-track.md`；readiness：`sprint13-netroute-kubeovn-readiness.md`） |
 | 卷快照与 mount-targets | Rook-Ceph RBD / CSI snapshot / NFS 或等价 filesystem backend | `ports.StorageService` / `runtime.LocalStorageService` / `storage_resources.go` | **code+contract ready, LIVE PENDING**（`SPRINT13-STORAGE-ROOK-CEPH-A-TRACK`；`sprint13-storage-rook-ceph-a-track.md`；readiness：`sprint13-storage-rook-ceph-readiness.md`；gate：`validate-storage-live-gate`） |
