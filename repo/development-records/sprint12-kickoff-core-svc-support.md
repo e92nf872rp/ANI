@@ -109,6 +109,8 @@ curl -X POST -H "X-API-Key: $TEST_KEY" -d @upload.json "http://localhost:8080/ap
 
 本仓库没有字面 `/goal` 工具。触发 = 「按 CLAUDE.md 加载顺序加载 + 一段锚定到批次的执行提示」。
 
+> **B1/B2/B3 完整可复制执行提示词（人工/AI 直接粘贴）见 [`sprint12-batch-execution-prompts.md`](sprint12-batch-execution-prompts.md)。** 下方仅留 B1 示例。
+
 加载顺序：`CLAUDE.md` → `ANI-DOCS-INDEX.md` → `repo/CURRENT-SPRINT.md` → `ANI-06-开发计划.md` §0 → 本文件 → `api/openapi/v1.yaml`（对应 operationId 段）+ 目标 `*_resources.go` + 对应 `pkg/ports/*.go`。
 
 B1 可复制 kickoff prompt：
