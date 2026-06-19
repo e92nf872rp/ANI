@@ -31,14 +31,14 @@
 
 | 候选切片 | 真实组件方向 | 代码边界 | 当前状态 |
 |---|---|---|---|
-| 实例观测 | K8s API / kubelet / Prometheus 或等价观测源 | `ports.InstanceObservability`，Gateway handler 不绕过 port | 待拆分执行 |
+| 实例观测 | Prometheus + kubelet / K8s API（已选 2026-06-19） | `ports.InstanceObservability`，Gateway handler 不绕过 port | 待拆分执行 |
 | GPU 清单/占用 | NVIDIA device plugin / DCGM / node labels | `ports.GPUInventory`，复用 Sprint 5 GPU evidence 作为前置事实 | 待拆分执行 |
 | Sandbox templates | Kata / runtimeClass / template catalog | `ports.SandboxTemplateCatalog` | 待拆分执行 |
-| 网络路由 | Kube-OVN | `ports.NetworkService` / `runtime.NetworkService` / `network_resources.go` | 待拆分执行 |
+| 网络路由 | Kube-OVN | `ports.NetworkService` / `runtime.NetworkService` / `network_resources.go` | **首切片，就绪声明已建立**（`sprint13-netroute-kubeovn-readiness.md`） |
 | 卷快照与 mount-targets | Rook-Ceph RBD / CSI snapshot / NFS 或等价 filesystem backend | `ports.StorageService` / `runtime.LocalStorageService` / `storage_resources.go` | 待拆分执行 |
 | K8s workloads | vCluster / Kubernetes API | `ports.K8sClusterService` / `local_k8s_cluster_service.go` / `k8s_cluster_resources.go` | 待拆分执行 |
-| 对象存储 bucket/upload/download | MinIO / S3-compatible object store | `ports.ObjectStore` + `ports.StorageService` / `storage_resources.go` | 待拆分执行 |
-| 向量文档写入 | Milvus / Qdrant 或选定向量后端 | `ports.VectorStore` + `ports.VectorStoreService` / `vector_store_resources.go` | 待拆分执行 |
+| 对象存储 bucket/upload/download | MinIO（已选 2026-06-19，S3 兼容） | `ports.ObjectStore` + `ports.StorageService` / `storage_resources.go` | 待拆分执行 |
+| 向量文档写入 | Milvus（已选 2026-06-19） | `ports.VectorStore` + `ports.VectorStoreService` / `vector_store_resources.go` | 待拆分执行 |
 
 ## Sprint 12 已完成切片
 

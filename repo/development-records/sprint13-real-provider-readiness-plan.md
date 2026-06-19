@@ -8,6 +8,16 @@
 
 Sprint 12 只闭合 Core OpenAPI handler 与 local adapters，不声明 real-provider、runtime ready 或 production ready。Sprint 13 的目标是把 Sprint 12 已落地的 Core handler 接到真实底座组件，按 ANI-06「真实底座组件引入强制门禁」形成可复跑 live gate 与 evidence JSON。
 
+## 组件选型决策（已定，2026-06-19）
+
+| 切片 | 选定组件 | 备注 |
+|---|---|---|
+| 对象存储 bucket/upload/download | **MinIO**（S3 兼容，预签名 URL） | 替代待定项 |
+| 向量文档写入 | **Milvus** | Milvus / Qdrant 决策已定为 Milvus |
+| 实例观测 logs/metrics/events | **Prometheus** + kubelet / K8s API | 观测源已定 |
+
+首切片（执行中）：**网络路由 Kube-OVN**，就绪声明见 [`sprint13-netroute-kubeovn-readiness.md`](sprint13-netroute-kubeovn-readiness.md)。
+
 ## 代码关联矩阵
 
 | Sprint 12 批次 | 已落地代码入口 | Sprint 13 真实组件 | Sprint 13 需新增或复用的 live gate |
