@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### Sprint 12 Kickoff（2026-06）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| SPRINT12-KICKOFF-A | Sprint 12 启动 + GAP 分析：基于真实 Core 代码与 `api/openapi/v1.yaml` diff，规划 19 个已声明未实现 Core handler 缺口 + 2 个 422，分 B1/B2/B3 三批；仅 ANI Core，Tier1 local profile；Sprint 11 转历史回归门禁 | sprint12-kickoff-core-svc-support.md |
+
 ### Sprint 11 Kickoff（2026-06）
 
 | 批次 | 内容摘要 | 文件 |

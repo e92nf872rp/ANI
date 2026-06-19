@@ -6,6 +6,8 @@
 > **当前重心：Sprint 11 / Core Real Deployment Validation 正式部署完成。** 本阶段已把 Sprint 6-10 的 contract/local/release-prep 成果放到真实物理服务器上验证，并完成 Rook-Ceph 正式部署：`rook-ceph` CephCluster 为 `Ready/HEALTH_OK`，`ceph-rbd-ssd` pool 为 `Ready`，5 个 SSD OSD 运行，`ani-rbd-ssd` StorageClass 已上线，受控 RBD smoke test、KubeVirt VM RBD storage smoke 与逐节点 reboot resilience 已通过并清理临时资源。未执行手工挂载、`/etc/fstab` 修改、系统盘变更、默认 StorageClass 切换或已有 PVC 迁移。RAG、Console、BOSS、model-service、kb-service、ai、operators、frontends 均不在本仓库执行范围内。
 > **标准状态 marker：** 真实服务器只读验证已完成；Rook-Ceph 正式部署已完成。Sprint 11 执行环境：正式部署执行环境。
 
+> **Sprint 12（当前活跃冲刺，2026-06-19 起）：** Core「Services 支撑 Handler」实现。基于真实代码与 `api/openapi/v1.yaml` 的 GAP，闭合 19 个已声明未实现的 Core handler（实例可观测 / GPU 清单 / 网络路由 / 卷快照 / 对象存储 / 向量写入 / K8s workloads）+ 2 个 422，分 B1/B2/B3 三批；仅 ANI Core，Tier1 local profile。下方 Sprint 11 已闭环并转为历史回归门禁，其 marker 保留供历史门禁校验。完整 GAP 与触发方式见 [`development-records/sprint12-kickoff-core-svc-support.md`](development-records/sprint12-kickoff-core-svc-support.md)。
+
 ## 当前冲刺
 
 | 字段 | 值 |
