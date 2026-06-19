@@ -60,7 +60,7 @@
 | 16 | createStorageBucket | storage_resources.go | 同上（带 idempotency） | StorageBucket |
 | 17 | uploadStorageObject | storage_resources.go | 复用 `ports.ObjectStore.SignedUploadURL`（预签名 URL，非 multipart，200） | StorageObjectUploadRequest/Response |
 | 18 | downloadStorageObject | storage_resources.go | 复用 `ports.ObjectStore.SignedDownloadURL` | StorageObjectDownloadInfo |
-| 19 | insertVectorStoreDocuments | vector_store_resources.go | `ports.VectorStoreService` 扩展 `InsertDocuments`，复用 `ports.VectorStore.Upsert`（202 形态） | VectorDocument* / AsyncTask |
+| 19 | insertVectorStoreDocuments | vector_store_resources.go | `ports.VectorStoreService` 扩展 `InsertDocuments`，复用 `ports.VectorStore.Upsert`（202 形态，设置 `Location: /api/v1/tasks/{task_id}`） | VectorStoreDocumentInsertRequest/Response |
 
 > 实现以 `v1.yaml` 对应 operationId 的 request/response schema 为唯一真相；response struct 字段必须与 schema 一一对应。
 
@@ -70,8 +70,8 @@
 |---|---|---|---|
 | A | GAP 分析 + 批次拆分 + 执行提示词 | `SPRINT12-KICKOFF-A` | 已完成 |
 | B1 | 实例可观测 ×5 + GPU 清单 ×3 | `CORE-SVC-SUPPORT-OBSERVABILITY-A` | 已完成 |
-| B2 | 网络路由 ×2 + 卷快照 ×2 + mount-targets ×1 + K8s workloads ×1 + 2×422 | `CORE-SVC-SUPPORT-NETSTORE-A` | 待执行 |
-| B3 | 对象存储 ×4 + 向量写入 ×1 | `CORE-SVC-SUPPORT-OBJVEC-A` | 待执行 |
+| B2 | 网络路由 ×2 + 卷快照 ×2 + mount-targets ×1 + K8s workloads ×1 + 2×422 | `CORE-SVC-SUPPORT-NETSTORE-A` | 已完成并复审收口 |
+| B3 | 对象存储 ×4 + 向量写入 ×1 | `CORE-SVC-SUPPORT-OBJVEC-A` | 已完成 Tier1 local profile |
 
 B1/B2/B3 之间无硬依赖，可并行；组内 port→adapter→handler→test 串行（TDD 先写测试）。
 
@@ -83,11 +83,11 @@ B1/B2/B3 之间无硬依赖，可并行；组内 port→adapter→handler→test
 | B1 | `listInstanceLogs` / `listInstanceEvents` / `getInstanceMetrics` / `listInstanceSecurityEvents` / `createInstanceExecSession` | `pkg/ports/instance_observability.go`、`pkg/adapters/runtime/local_instance_observability_service.go`、`services/ani-gateway/internal/router/demo_instances.go`、对应 `_test.go` | 已完成 local profile |
 | B1 | `listGPUInventory` / `getGPUOccupancy` | `pkg/ports/gpu_inventory.go`、`pkg/adapters/runtime/local_gpu_inventory.go`、`services/ani-gateway/internal/router/gpu_inventory_resources.go`、对应 `_test.go` | 已完成 local profile |
 | B1 | `listSandboxTemplates` | `pkg/ports/sandbox_template_catalog.go`、`pkg/adapters/runtime/local_sandbox_template_catalog.go`、`services/ani-gateway/internal/router/gpu_inventory_resources.go`、对应 `_test.go` | 已完成 local profile |
-| B2 | `listNetworkRoutes` / `createNetworkRoute` | 目标：`pkg/ports/network_resources.go`、`pkg/adapters/runtime/network_service.go`、`services/ani-gateway/internal/router/network_resources.go`、对应 `_test.go` | 待执行 |
-| B2 | `listVolumeSnapshots` / `createVolumeSnapshot` / `listFilesystemMountTargets` | 目标：`pkg/ports/storage_resources.go`、`pkg/adapters/runtime/storage_service.go`、`services/ani-gateway/internal/router/storage_resources.go`、对应 `_test.go` | 待执行 |
-| B2 | `listK8sClusterWorkloads` / 2×422 | 目标：`pkg/ports/k8s_cluster.go`、`pkg/adapters/runtime/local_k8s_cluster_service.go`、`services/ani-gateway/internal/router/k8s_cluster_resources.go`、`services/ani-gateway/internal/router/vector_store_resources.go` | 待执行 |
-| B3 | `listStorageBuckets` / `createStorageBucket` / `uploadStorageObject` / `downloadStorageObject` | 目标：`pkg/ports/storage_resources.go`、`pkg/ports/object_store.go`、`pkg/adapters/runtime/storage_service.go`、`services/ani-gateway/internal/router/storage_resources.go` | 待执行 |
-| B3 | `insertVectorStoreDocuments` | 目标：`pkg/ports/vector_store.go`、`pkg/adapters/runtime/vector_store_service.go`、`services/ani-gateway/internal/router/vector_store_resources.go` | 待执行 |
+| B2 | `listNetworkRoutes` / `createNetworkRoute` | `pkg/ports/network_resources.go`、`pkg/adapters/runtime/network_service.go`、`services/ani-gateway/internal/router/network_resources.go`、对应 `_test.go` | 已完成 local profile |
+| B2 | `listVolumeSnapshots` / `createVolumeSnapshot` / `listFilesystemMountTargets` | `pkg/ports/storage_resources.go`、`pkg/adapters/runtime/storage_service.go`、`services/ani-gateway/internal/router/storage_resources.go`、对应 `_test.go` | 已完成 local profile；snapshot 202 返回 AsyncTask |
+| B2 | `listK8sClusterWorkloads` / 2×422 | `pkg/ports/k8s_clusters.go`、`pkg/adapters/runtime/local_k8s_cluster_service.go`、`services/ani-gateway/internal/router/k8s_cluster_resources.go`、`services/ani-gateway/internal/router/vector_store_resources.go` | 已完成 local profile；前置不满足返回 422 |
+| B3 | `listStorageBuckets` / `createStorageBucket` / `uploadStorageObject` / `downloadStorageObject` | `pkg/ports/storage_resources.go`、`pkg/ports/object_store.go`、`pkg/adapters/runtime/storage_service.go`、`services/ani-gateway/internal/router/storage_resources.go`、对应 `_test.go` | 已完成 local profile |
+| B3 | `insertVectorStoreDocuments` | `pkg/ports/vector_store.go`、`pkg/adapters/runtime/vector_store_service.go`、`services/ani-gateway/internal/router/vector_store_resources.go`、对应 `_test.go` | 已完成 local profile |
 
 ## 5. 每批要新建 / 修改的文件
 

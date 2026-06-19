@@ -127,10 +127,10 @@ repo/api/openapi/v1.yaml（对应 operationId 段）。
 - createStorageBucket  → 同上（带 idempotency） → schema StorageBucket
 - uploadStorageObject  → 复用 ports.ObjectStore.SignedUploadURL（预签名 URL，非 multipart，返回 200） → schema StorageObjectUploadRequest/Response
 - downloadStorageObject→ 复用 ports.ObjectStore.SignedDownloadURL（预签名 URL，返回 200） → schema StorageObjectDownloadInfo
-- insertVectorStoreDocuments → VectorStoreService 扩展 InsertDocuments，复用 ports.VectorStore.Upsert（202 形态） → schema VectorDocument* / AsyncTask
+- insertVectorStoreDocuments → VectorStoreService 扩展 InsertDocuments，复用 ports.VectorStore.Upsert（202 形态，设置 Location 任务 URL） → schema VectorStoreDocumentInsertRequest/Response
 
 约束：只改 Core；能力经 pkg/ports+pkg/adapters；upload/download 不要写成 multipart，用预签名 URL；
-Tier1 local profile 带 dev_profile，严禁标 production/runtime ready；response 字段与 v1.yaml schema 一一对应；
+Tier1 local profile 严禁标 production/runtime ready；response 字段与 v1.yaml schema 一一对应，只有 schema 已定义 dev_profile 的响应才返回 dev_profile；
 列表 {items,total,next_cursor}；ports.Err*→HTTP 沿用既有写法；POST 带 idempotency_key；保留 x-ani-rbac-scope；TDD 先写测试。
 参照模板：storage_resources.go、vector_store_resources.go。
 

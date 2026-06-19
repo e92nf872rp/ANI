@@ -129,6 +129,12 @@ type storageBucketResponse struct {
 	CreatedAt   string `json:"created_at"`
 }
 
+type storageBucketListResponse struct {
+	Items      []storageBucketResponse `json:"items"`
+	Total      int                     `json:"total"`
+	NextCursor *string                 `json:"next_cursor"`
+}
+
 type storageObjectUploadResponse struct {
 	UploadURL string `json:"upload_url"`
 	ObjectID  string `json:"object_id"`
@@ -370,11 +376,7 @@ func (api *storageAPI) listStorageBuckets(ctx context.Context, c *app.RequestCon
 		writeStorageError(c, err)
 		return
 	}
-	items := make([]storageBucketResponse, 0, len(records))
-	for _, record := range records {
-		items = append(items, storageBucketFromRecord(record))
-	}
-	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
+	c.JSON(http.StatusOK, storageBucketListFromRecords(records))
 }
 
 func (api *storageAPI) uploadStorageObject(ctx context.Context, c *app.RequestContext) {
@@ -521,6 +523,14 @@ func storageBucketFromRecord(record ports.StorageBucketRecord) storageBucketResp
 		SizeBytes:   record.SizeBytes,
 		CreatedAt:   networkTime(record.CreatedAt),
 	}
+}
+
+func storageBucketListFromRecords(records []ports.StorageBucketRecord) storageBucketListResponse {
+	items := make([]storageBucketResponse, 0, len(records))
+	for _, record := range records {
+		items = append(items, storageBucketFromRecord(record))
+	}
+	return storageBucketListResponse{Items: items, Total: len(items), NextCursor: nil}
 }
 
 func storageObjectUploadFromRecord(record ports.StorageObjectUploadRecord) storageObjectUploadResponse {

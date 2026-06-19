@@ -169,4 +169,12 @@ func TestStorageAPIBucketAndSignedURLResponsesMatchCoreSchema(t *testing.T) {
 	if got := storageObjectDownloadFromRecord(download); got.DownloadURL == "" || got.ExpiresAt == "" || got.ContentType != "application/octet-stream" {
 		t.Fatalf("download response = %+v, want StorageObjectDownloadInfo fields", got)
 	}
+
+	buckets, err := api.service.ListStorageBuckets(context.Background(), ports.StorageResourceListRequest{TenantID: "tenant-a"})
+	if err != nil {
+		t.Fatalf("ListStorageBuckets error = %v", err)
+	}
+	if got := storageBucketListFromRecords(buckets); got.Total != 1 || got.NextCursor != nil || len(got.Items) != 1 || got.Items[0].Name != "models-a" {
+		t.Fatalf("bucket list response = %+v, want items,total,next_cursor aligned with StorageBucketListResponse", got)
+	}
 }

@@ -1605,9 +1605,10 @@ components:
 
     StorageBucketListResponse:
       type: object
-      required: [items]
+      required: [items, total]
       properties:
         items:       { type: array, items: { $ref: '#/components/schemas/StorageBucketRecord' } }
+        total:       { type: integer }
         next_cursor: { type: string, nullable: true }
 
     CreateStorageBucketRequest:
