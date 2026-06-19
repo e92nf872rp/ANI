@@ -125,3 +125,21 @@ validate-gpu-contracts + git diff --check，并更新 Feature batch 四件套文
 ```
 
 B2 / B3 同构替换批次 ID、operationId 列表与领域校验命令即可。亦可用 skill 驱动：`everything-claude-code:prp-implement` 或 `superpowers:executing-plans`，把本文件作为输入。
+
+## 8. 生产化路线（Tier 2 — real-provider，受 ANI-06「真实底座组件引入强制门禁」约束）
+
+Tier 1（B1–B3）只交付 contract + local profile，按 ANI-06 §「真实底座组件引入强制门禁」**不得标记 production ready / runtime ready**。要达到「生产环境可落地部署 + ANI 完整功能落地」，每个域还需 Tier 2 批次（建议落在 Sprint 13）：real adapter 经 `pkg/adapters` 接真实组件，handler 与 port 接口不变；新增 / 复用 live gate，在三台物理服务器跑通并输出 evidence JSON。
+
+| 域 | Tier 2 real adapter | 真实组件（已具备） | live gate |
+|---|---|---|---|
+| GPU 清单 | 真实 GPU 发现 | NVIDIA device plugin / DCGM / node labels | 新增 gpu-inventory live gate |
+| 实例 logs/metrics/events | 真实运行时观测 | K8s API / kubelet / Prometheus | 复用 KubeVirt/K8s live lab |
+| 对象存储 upload/download/buckets | 预签名 | MinIO | 新增 object-store live gate |
+| 向量写入 | upsert | Milvus | 新增 vector live gate |
+| K8s workloads | 经 cluster proxy 真实列举 | vCluster / K8s | 复用 Sprint 5 vCluster live gate |
+| 卷快照 / mount-targets | RBD snapshot / NFS | Rook-Ceph（Sprint 11 已部署） | 复用 Sprint 11 storage live |
+| 网络路由 | 路由真实创建/观察 | Kube-OVN | 复用 Sprint 5 Kube-OVN live gate |
+
+每个 Tier 2 批次必须（ANI-06 §153）声明当前是 contract / local-profile / real-provider、依赖组件 + 版本、用什么命令或 evidence 证明跑通。
+
+边界：本仓库交付完整 **Core** 生产功能；Services 业务（模型 / 推理 / 知识库 / 租户业务）由外部团队基于 Core API 实现，「完整 ANI」是跨团队合力。Tier 1 闭合契约 → Tier 2 接真实 provider 并过 live gate → 三台物理服务器集成验证 → 进入 v1.0.0 发布候选，是本仓库到「生产可落地」的完整链路。
