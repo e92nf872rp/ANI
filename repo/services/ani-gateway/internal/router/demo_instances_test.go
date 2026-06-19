@@ -356,6 +356,71 @@ func TestDemoInstanceOperationsAreQueryable(t *testing.T) {
 	}
 }
 
+func TestDemoInstanceObservabilityResponsesUseLocalProfile(t *testing.T) {
+	api := newDemoInstanceAPI()
+	spec, err := demoSpecFromRequest(demoCreateInstanceRequest{Kind: "sandbox", Name: "obs-sandbox"}, "tenant-a")
+	if err != nil {
+		t.Fatalf("demoSpecFromRequest error = %v", err)
+	}
+	created, err := api.service.Create(context.Background(), ports.WorkloadInstanceCreateRequest{
+		IdempotencyKey:  "demo-observe-create",
+		Spec:            spec,
+		UserID:          "user-a",
+		PermissionProof: "demo:test",
+		RequestedAt:     time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("Create error = %v", err)
+	}
+	logs, err := api.observability.ListLogs(context.Background(), ports.InstanceObservationListRequest{
+		TenantID:   "tenant-a",
+		InstanceID: created.Ref.InstanceID,
+		Limit:      5,
+		Level:      "info",
+	})
+	if err != nil {
+		t.Fatalf("ListLogs error = %v", err)
+	}
+	logResponse := demoInstanceLogListFromResult(logs)
+	if len(logResponse.Items) == 0 || logResponse.Total != len(logResponse.Items) {
+		t.Fatalf("log response = %+v, want items and total", logResponse)
+	}
+	requireLocalCoreDevProfile(t, logResponse.DevProfile, "local-instance-observability")
+
+	metrics, err := api.observability.GetMetrics(context.Background(), ports.InstanceObservationGetRequest{
+		TenantID:   "tenant-a",
+		InstanceID: created.Ref.InstanceID,
+	})
+	if err != nil {
+		t.Fatalf("GetMetrics error = %v", err)
+	}
+	metricsResponse := demoInstanceMetricsFromRecord(metrics)
+	if metricsResponse.InstanceID != created.Ref.InstanceID || metricsResponse.CPUUtilizationPct == nil {
+		t.Fatalf("metrics response = %+v, want instance metrics", metricsResponse)
+	}
+	requireLocalCoreDevProfile(t, metricsResponse.DevProfile, "local-instance-observability")
+
+	execSession, err := api.observability.CreateExecSession(context.Background(), ports.InstanceExecSessionCreateRequest{
+		TenantID:       "tenant-a",
+		InstanceID:     created.Ref.InstanceID,
+		IdempotencyKey: "exec-observe",
+		Command:        []string{"/bin/sh"},
+		TTY:            true,
+		Rows:           24,
+	})
+	if err != nil {
+		t.Fatalf("CreateExecSession error = %v", err)
+	}
+	execResponse := demoInstanceExecSessionFromRecord(execSession)
+	if execResponse.InstanceID != created.Ref.InstanceID || execResponse.WSURL == "" {
+		t.Fatalf("exec response = %+v, want websocket session", execResponse)
+	}
+	if execResponse.Token != "" {
+		t.Fatalf("exec token = %q, want no long-lived credential", execResponse.Token)
+	}
+	requireLocalCoreDevProfile(t, execResponse.DevProfile, "local-instance-observability")
+}
+
 func TestDemoInstanceServiceVMConsoleSession(t *testing.T) {
 	api := newDemoInstanceAPI()
 	spec, err := demoSpecFromRequest(demoCreateInstanceRequest{Kind: "vm", Name: "demo-vm"}, "tenant-a")

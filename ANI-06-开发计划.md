@@ -1,7 +1,7 @@
 # KuberCloud ANI · 开发计划
 
 > 版本 V8.3 | 广州常青云科技有限公司 | 内部产品规划文件
-> 最后更新：2026-06-06（Sprint 11 / Core Real Deployment Validation 正式部署完成；Rook-Ceph 正式部署已完成；本仓库只推进 ANI Core，不开发 Services/RAG/Console/BOSS/frontends；真实服务器只读验证已完成；`ani-rbd-ssd` StorageClass 已上线；KubeVirt VM RBD storage smoke 与逐节点 reboot resilience 已通过；历史 Sprint 8/9/10 Core 文档一致性门禁已兼容当前历史归档表达；未执行手工挂载、`/etc/fstab` 修改、系统盘变更、默认 StorageClass 切换或已有 PVC 迁移）
+> 最后更新：2026-06-19（Sprint 12 / Core「Services 支撑 Handler」实现中；`CORE-SVC-SUPPORT-OBSERVABILITY-A` 已完成实例可观测、GPU 清单/占用和 Sandbox 模板 catalog 的 Tier1 local profile handler；本仓库只推进 ANI Core，不开发 Services/RAG/Console/BOSS/frontends；Sprint 11 / Core Real Deployment Validation 与 Rook-Ceph 正式部署结果继续作为历史回归边界保留；本批不代表 real-provider、runtime ready 或 production ready）
 
 ---
 
@@ -31,8 +31,9 @@
 交付目标：2026-09-30 ANI Core v1.0.0（Services P0 由外部团队负责，不在本仓库交付范围内）
 关键节奏：外部 Services 团队预计 2026-06-10 前后给出清晰的产品功能/交互风格/API 列表与参数；ANI Core 据此以 AI Coding 快速循环实现支撑（他们改产品/接口定义 → Core 生成/调整代码）。该定义到位前，Core 不基于猜测提前建设 Services 业务能力，避免返工。
 当前重心：Sprint 11 / Core Real Deployment Validation 正式部署完成；真实服务器只读验证已完成；Rook-Ceph 正式部署已完成（CephCluster Ready/HEALTH_OK，5 SSD OSD，ani-rbd-ssd StorageClass，RBD smoke test 与逐节点 reboot resilience 通过）；Sprint 11 执行环境：正式部署执行环境；不是实际 v1.0.0 发布；破坏性操作须单独审批；Sprint 5-10 历史回归门禁有效；guard 冻结仍有效；详见 repo/CURRENT-SPRINT.md
-当前活跃冲刺：Sprint 12 / Core「Services 支撑 Handler」实现（2026-06-19 起）；基于真实 Core 代码与 api/openapi/v1.yaml 的 GAP，闭合 19 个已声明未实现 Core handler + 2 个 422，分 B1/B2/B3 三批；仅 ANI Core，Tier1 local profile；Sprint 11 已闭环转历史回归门禁；详见 repo/development-records/sprint12-kickoff-core-svc-support.md
+当前活跃冲刺：Sprint 12 / Core「Services 支撑 Handler」实现（2026-06-19 起）；基于真实 Core 代码与 api/openapi/v1.yaml 的 GAP，闭合 19 个已声明未实现 Core handler + 2 个 422，分 B1/B2/B3 三批；仅 ANI Core，Tier1 local profile；B1 `CORE-SVC-SUPPORT-OBSERVABILITY-A` 已完成；Sprint 11 已闭环转历史回归门禁；详见 repo/development-records/sprint12-kickoff-core-svc-support.md
 最近里程碑（详情见 repo/CURRENT-SPRINT.md 已完成切片）：
+  2026-06-19  CORE-SVC-SUPPORT-OBSERVABILITY-A：B1 实例可观测与 GPU/Sandbox catalog handler 完成；新增 `InstanceObservability` port/local adapter、local GPU inventory、sandbox template catalog，注册 8 个 operationId；Tier1 local profile，响应带 dev_profile，不声明 runtime/production ready [Feature batch]
   2026-06-19  SPRINT12-KICKOFF-A：Sprint 12 启动 + GAP 分析归档，规划 19 个 Core handler 缺口（实例可观测/GPU 清单/网络路由/卷快照/对象存储/向量写入/K8s workloads）+ 2 个 422，分 B1/B2/B3 三批；仅 ANI Core，Tier1 local profile [Kickoff]
   2026-06-10  ANI-14-PHASE4-BATCH1-A：Phase 4 第一批 handler 骨架完成，新建 8 个 handler 文件（55 条路由），修改 stubs.go/router.go，Models/InferenceServices/KnowledgeBases/GpuContainers/Sandboxes/Tenant/Branding/Tasks 从 501→200，build/test/architecture 通过 [Feature batch]
   2026-06-06  CORE-HISTORICAL-DOC-MARKER-COMPAT-A：修复 Sprint 8/9/10 Core 历史文档一致性 validator 的 marker 逻辑，接受当前 Sprint 11 入口文档中的历史门禁/已完成归档表达，同时继续拒绝 stale current marker [Maintenance]

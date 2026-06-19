@@ -32,6 +32,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerMetering(v1)
 	registerHarbor(v1)
 	registerDemoInstances(v1)
+	registerGPUInventoryResources(v1)
 	registerNetworkResources(v1)
 	registerStorageResources(v1)
 	registerVectorStoreResources(v1)

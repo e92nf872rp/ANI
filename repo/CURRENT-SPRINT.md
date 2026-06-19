@@ -3,7 +3,7 @@
 > 新开发者（人类或 AI 工具）的第一个入口文件。本文只描述当前真实执行状态；历史完成批次查 `repo/development-records/README.md`。
 
 > **仓库范围：仅 ANI Core。** ANI Services 已冻结并移交外部产品团队，本仓库不再开发任何 Services 代码（旧 Services 骨架只读保留）。外部团队给出产品功能/交互/API 定义后，Core 只按 Core OpenAPI/SDK/CLI 缺口补齐基础设施支撑。
-> **当前重心：Sprint 11 / Core Real Deployment Validation 正式部署完成。** 本阶段已把 Sprint 6-10 的 contract/local/release-prep 成果放到真实物理服务器上验证，并完成 Rook-Ceph 正式部署：`rook-ceph` CephCluster 为 `Ready/HEALTH_OK`，`ceph-rbd-ssd` pool 为 `Ready`，5 个 SSD OSD 运行，`ani-rbd-ssd` StorageClass 已上线，受控 RBD smoke test、KubeVirt VM RBD storage smoke 与逐节点 reboot resilience 已通过并清理临时资源。未执行手工挂载、`/etc/fstab` 修改、系统盘变更、默认 StorageClass 切换或已有 PVC 迁移。RAG、Console、BOSS、model-service、kb-service、ai、operators、frontends 均不在本仓库执行范围内。
+> **当前重心：Sprint 12 / Core「Services 支撑 Handler」实现。** 基于真实 Core 代码与 `api/openapi/v1.yaml` 的 GAP，闭合已声明但网关未实现的 Core handler；仅 ANI Core，Tier1 local profile。`CORE-SVC-SUPPORT-OBSERVABILITY-A` 已完成实例可观测、GPU 清单/占用和 Sandbox 模板 catalog handler；不代表 real-provider、runtime ready 或 production ready。RAG、Console、BOSS、model-service、kb-service、ai、operators、frontends 均不在本仓库执行范围内。
 > **标准状态 marker：** 真实服务器只读验证已完成；Rook-Ceph 正式部署已完成。Sprint 11 执行环境：正式部署执行环境。
 
 > **Sprint 12（当前活跃冲刺，2026-06-19 起）：** Core「Services 支撑 Handler」实现。基于真实代码与 `api/openapi/v1.yaml` 的 GAP，闭合 19 个已声明未实现的 Core handler（实例可观测 / GPU 清单 / 网络路由 / 卷快照 / 对象存储 / 向量写入 / K8s workloads）+ 2 个 422，分 B1/B2/B3 三批；仅 ANI Core，Tier1 local profile。下方 Sprint 11 已闭环并转为历史回归门禁，其 marker 保留供历史门禁校验。完整 GAP 与触发方式见 [`development-records/sprint12-kickoff-core-svc-support.md`](development-records/sprint12-kickoff-core-svc-support.md)。
@@ -12,14 +12,19 @@
 
 | 字段 | 值 |
 |---|---|
-| **冲刺编号** | Sprint 11（Core Real Deployment Validation 正式部署完成） |
-| **主题** | Core real deployment validation + Rook-Ceph VM-first block storage live deployment |
-| **当前状态** | `SPRINT11-KICKOFF-A`、`CORE-STORAGE-DISK-RISK-A`、`CORE-REAL-DEPLOY-A`、`CORE-ROOK-CEPH-FORMAL-DEPLOYMENT-A`、`CORE-ROOK-CEPH-LIVE-DEPLOYMENT-A`、`CORE-ROOK-CEPH-VM-STORAGE-SMOKE-A`、`CORE-ROOK-CEPH-REBOOT-RESILIENCE-A`、`CORE-SAFE-COMPLETION-A`、`CORE-REAL-DEPLOY-DOC-CONSISTENCY-A`、`SPRINT11-SAFE-CLOSURE-A` 与 `CORE-HISTORICAL-DOC-MARKER-COMPAT-A` 已建立代码和文档闭环。当前完成真实服务器只读验证、磁盘/存储风险计划、Rook-Ceph 正式部署代码包、真实 Rook-Ceph live 部署、RBD PVC/Pod smoke test、KubeVirt VM RBD storage smoke、逐节点 reboot resilience、聚合门禁和历史文档 marker 兼容维护 |
-| **执行环境** | Sprint 11 执行环境：正式部署执行环境。允许已审批的 Rook-Ceph operator、CSI operator、CSI-Addons CRD、CephCluster、OSD、CephBlockPool、StorageClass 部署、受控 RBD smoke test、KubeVirt VM RBD storage smoke 和逐节点 reboot resilience；禁止手工挂载、fstab 修改、系统盘变更、盘符对齐、并发重启、默认 StorageClass 切换和已有 PVC 迁移 |
-| **已由代码/真实环境证明完成** | Sprint 11：三台物理服务器 read-only disk/K8s/KubeVirt/storage 状态已核查；`rook-ceph` CephCluster 为 `Ready/HEALTH_OK`；3 个 mon、1 个 mgr、5 个 OSD 运行；`ceph-rbd-ssd` pool 为 `Ready`；`ani-rbd-ssd` StorageClass 已上线；临时 RBD PVC/Pod smoke test 已通过并清理；临时 KubeVirt VM 已挂载 RBD Block PVC，guest 看到块设备并完成写入尝试；两个 worker 逐台重启后 VM/PVC 恢复，control-plane 最后重启后 API readyz、mon/mgr/OSD、Ceph 和 worker VM/PVC 观测恢复；临时 VM/PVC/PV/StorageClass 均已清理 |
-| **生产化边界** | Sprint 11 已完成 VM 优先块存储的真实部署验证和逐节点 reboot resilience，但仍不是实际 v1.0.0 发布，不代表完整 production ready、备份/恢复演练、容量告警、故障注入、长期 soak、升级/回滚演练或业务迁移完成。后续破坏性磁盘操作、默认 StorageClass 切换、已有 PVC 迁移、HDD class 引入、并发重启或更大故障演练仍必须单独审批 |
+| **冲刺编号** | Sprint 12（Core「Services 支撑 Handler」实现） |
+| **主题** | 闭合 Core OpenAPI 已声明但网关未实现的 Services 支撑 handler 缺口 |
+| **当前状态** | `SPRINT12-KICKOFF-A` 已完成 GAP 分析与 B1/B2/B3 批次规划；`CORE-SVC-SUPPORT-OBSERVABILITY-A` 已完成 8 个 B1 operationId：实例 logs/events/metrics/security-events/exec session、GPU inventory/occupancy、Sandbox templates |
+| **执行环境** | Tier1 local profile。允许新增/扩展 Core ports、local adapters、Gateway handler 与测试；禁止开发 Services 业务逻辑，禁止把 local profile 标记为 real-provider、runtime ready 或 production ready |
+| **已由代码/真实环境证明完成** | B1 已由本地代码和单元测试证明：实例观测返回 dev_profile 合成数据；exec session 返回短期 WebSocket URL 且不发长期凭据；GPU 清单复用 `ports.GPUInventory.ListNodeClasses`；occupancy 由 node classes 派生；sandbox templates 由 local catalog 提供 |
+| **生产化边界** | Sprint 12 B1 仅闭合契约和 local profile handler；真实 Prometheus/K8s/kubelet/DCGM/Kata provider 及 live gate 属 Tier2 后续批次 |
 | **关联历史门禁** | Sprint 5 REAL-K8S-LAB-A 和 live gate evidence；Sprint 7 installer/offline/CLI/regression gates；Sprint 8 release hardening/offline/CLI/doc gates；Sprint 9 RC readiness gates；Sprint 10 release-prep gates |
-| **最后校准日期** | 2026-06-06 |
+| **最后校准日期** | 2026-06-19 |
+
+## Sprint 12 已完成切片
+
+1. `SPRINT12-KICKOFF-A`：Sprint 12 启动 + GAP 分析归档，规划 19 个 Core handler 缺口 + 2 个 422，分 B1/B2/B3 三批；仅 ANI Core，Tier1 local profile。
+2. `CORE-SVC-SUPPORT-OBSERVABILITY-A`：B1 handler 已完成。新增实例可观测只读 port/local adapter，接入 `/instances/{instance_id}/logs`、`/events`、`/metrics`、`/security-events` 和 `POST /exec`；新增 GPU inventory local adapter 与 `gpu_inventory_resources.go`，注册 `/gpu-inventory`、`/gpu-inventory/occupancy`、`/sandbox-templates`；响应带 `dev_profile`，不声明 production/runtime ready。
 
 ## Sprint 11 已完成切片
 
@@ -89,6 +94,15 @@ make validate-sprint11-core-doc-consistency
 make validate-sprint11-real-deployment
 python scripts/validate_yaml.py deploy/real-k8s-lab/sprint11-core-real-deployment.yaml deploy/real-k8s-lab/sprint11-storage-disk-plan.yaml deploy/real-k8s-lab/sprint11-rook-ceph-formal-deployment.yaml deploy/real-k8s-lab/sprint11-rook-ceph-live-deployment-result.yaml deploy/real-k8s-lab/sprint11-rook-ceph-vm-storage-smoke-result.yaml deploy/real-k8s-lab/sprint11-rook-ceph-reboot-resilience-result.yaml deploy/real-k8s-lab/sprint11-core-safe-completion.yaml
 make validate-doc-entrypoints
+git diff --check
+```
+
+Sprint 12 B1 当前批次验收入口：
+
+```bash
+make test
+make validate-demo-instances validate-core-alpha validate-gpu-contracts
+python scripts/validate_yaml.py api/openapi/v1.yaml
 git diff --check
 ```
 

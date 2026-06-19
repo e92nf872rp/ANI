@@ -73,8 +73,9 @@ func (s *demoInstanceStore) List(_ context.Context, tenantID string, kind ports.
 var _ ports.WorkloadInstanceStore = (*demoInstanceStore)(nil)
 
 type demoInstanceAPI struct {
-	service    ports.WorkloadInstanceService
-	operations ports.WorkloadOperationStore
+	service       ports.WorkloadInstanceService
+	operations    ports.WorkloadOperationStore
+	observability ports.InstanceObservability
 }
 
 type demoCreateInstanceRequest struct {
@@ -141,6 +142,15 @@ type demoShellExecResponse struct {
 	Output   string `json:"output"`
 	ExitCode int    `json:"exit_code"`
 	CWD      string `json:"cwd"`
+}
+
+type demoCreateExecSessionRequest struct {
+	IdempotencyKey string   `json:"idempotency_key"`
+	Container      string   `json:"container"`
+	Command        []string `json:"command"`
+	TTY            *bool    `json:"tty"`
+	Rows           int      `json:"rows"`
+	Cols           int      `json:"cols"`
 }
 
 type demoInstanceResponse struct {
@@ -265,6 +275,77 @@ type demoOperationResponse struct {
 	UpdatedAt      string             `json:"updated_at"`
 }
 
+type demoInstanceLogEntryResponse struct {
+	Timestamp string `json:"timestamp"`
+	Level     string `json:"level"`
+	Message   string `json:"message"`
+	Container string `json:"container,omitempty"`
+	Stream    string `json:"stream,omitempty"`
+}
+
+type demoInstanceLogListResponse struct {
+	Items      []demoInstanceLogEntryResponse `json:"items"`
+	Total      int                            `json:"total"`
+	NextCursor *string                        `json:"next_cursor"`
+	DevProfile coreDevProfileResponse         `json:"dev_profile"`
+}
+
+type demoInstanceEventResponse struct {
+	ID         string `json:"id"`
+	InstanceID string `json:"instance_id"`
+	Type       string `json:"type"`
+	Reason     string `json:"reason"`
+	Message    string `json:"message"`
+	Count      int    `json:"count,omitempty"`
+	OccurredAt string `json:"occurred_at"`
+}
+
+type demoInstanceEventListResponse struct {
+	Items      []demoInstanceEventResponse `json:"items"`
+	Total      int                         `json:"total"`
+	NextCursor *string                     `json:"next_cursor"`
+	DevProfile coreDevProfileResponse      `json:"dev_profile"`
+}
+
+type demoInstanceMetricsResponse struct {
+	InstanceID        string                 `json:"instance_id"`
+	Timestamp         string                 `json:"timestamp"`
+	CPUUtilizationPct *float64               `json:"cpu_utilization_pct"`
+	MemoryUsedMB      *float64               `json:"memory_used_mb"`
+	MemoryTotalMB     *float64               `json:"memory_total_mb"`
+	GPUUtilizationPct *float64               `json:"gpu_utilization_pct"`
+	GPUMemoryUsedMB   *float64               `json:"gpu_memory_used_mb"`
+	GPUMemoryTotalMB  *float64               `json:"gpu_memory_total_mb"`
+	NetworkRXBytes    *int64                 `json:"network_rx_bytes"`
+	NetworkTXBytes    *int64                 `json:"network_tx_bytes"`
+	DevProfile        coreDevProfileResponse `json:"dev_profile"`
+}
+
+type demoInstanceSecurityEventResponse struct {
+	ID          string `json:"id"`
+	InstanceID  string `json:"instance_id"`
+	EventType   string `json:"event_type"`
+	Severity    string `json:"severity"`
+	Description string `json:"description,omitempty"`
+	OccurredAt  string `json:"occurred_at"`
+}
+
+type demoInstanceSecurityEventListResponse struct {
+	Items      []demoInstanceSecurityEventResponse `json:"items"`
+	Total      int                                 `json:"total"`
+	NextCursor *string                             `json:"next_cursor"`
+	DevProfile coreDevProfileResponse              `json:"dev_profile"`
+}
+
+type demoInstanceExecSessionResponse struct {
+	ID         string                 `json:"id"`
+	InstanceID string                 `json:"instance_id"`
+	WSURL      string                 `json:"ws_url"`
+	Token      string                 `json:"token,omitempty"`
+	ExpiresAt  string                 `json:"expires_at"`
+	DevProfile coreDevProfileResponse `json:"dev_profile"`
+}
+
 type demoManifest struct {
 	Name     string `json:"name"`
 	Kind     string `json:"kind"`
@@ -303,7 +384,11 @@ func newDemoInstanceAPI() *demoInstanceAPI {
 		runtimeadapter.WithWorkloadIdentityService(identity),
 		runtimeadapter.WithSandboxRuntime(runtimeadapter.NewLocalSandboxRuntime()),
 	)
-	return &demoInstanceAPI{service: service, operations: operations}
+	return &demoInstanceAPI{
+		service:       service,
+		operations:    operations,
+		observability: runtimeadapter.NewLocalInstanceObservabilityService(),
+	}
 }
 
 func registerDemoInstances(v1 *route.RouterGroup) {
@@ -313,6 +398,11 @@ func registerDemoInstances(v1 *route.RouterGroup) {
 	v1.GET("/instances/:instance_id", api.get)
 	v1.POST("/instances/:instance_id/lifecycle", api.lifecycle)
 	v1.POST("/instances/:instance_id/console", api.console)
+	v1.GET("/instances/:instance_id/logs", api.listLogs)
+	v1.GET("/instances/:instance_id/events", api.listEvents)
+	v1.GET("/instances/:instance_id/metrics", api.getMetrics)
+	v1.POST("/instances/:instance_id/exec", api.createExecSession)
+	v1.GET("/instances/:instance_id/security-events", api.listSecurityEvents)
 	v1.GET("/instances/:instance_id/operations", api.listOperations)
 	v1.GET("/demo/instances", api.list)
 	v1.POST("/demo/instances", api.create)
@@ -494,6 +584,114 @@ func (api *demoInstanceAPI) listOperations(ctx context.Context, c *app.RequestCo
 	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": result.NextCursor})
 }
 
+func (api *demoInstanceAPI) listLogs(ctx context.Context, c *app.RequestContext) {
+	if err := api.ensureInstanceExists(ctx, c); err != nil {
+		writeInstanceObservabilityError(c, err)
+		return
+	}
+	result, err := api.observability.ListLogs(ctx, ports.InstanceObservationListRequest{
+		TenantID:   demoTenantID(c),
+		InstanceID: c.Param("instance_id"),
+		Limit:      queryInt(c, "limit", 100),
+		Cursor:     c.Query("cursor"),
+		Level:      c.Query("level"),
+	})
+	if err != nil {
+		writeInstanceObservabilityError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, demoInstanceLogListFromResult(result))
+}
+
+func (api *demoInstanceAPI) listEvents(ctx context.Context, c *app.RequestContext) {
+	if err := api.ensureInstanceExists(ctx, c); err != nil {
+		writeInstanceObservabilityError(c, err)
+		return
+	}
+	result, err := api.observability.ListEvents(ctx, ports.InstanceObservationListRequest{
+		TenantID:   demoTenantID(c),
+		InstanceID: c.Param("instance_id"),
+		Limit:      queryInt(c, "limit", 50),
+		Type:       c.Query("type"),
+	})
+	if err != nil {
+		writeInstanceObservabilityError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, demoInstanceEventListFromResult(result))
+}
+
+func (api *demoInstanceAPI) getMetrics(ctx context.Context, c *app.RequestContext) {
+	if err := api.ensureInstanceExists(ctx, c); err != nil {
+		writeInstanceObservabilityError(c, err)
+		return
+	}
+	result, err := api.observability.GetMetrics(ctx, ports.InstanceObservationGetRequest{
+		TenantID:   demoTenantID(c),
+		InstanceID: c.Param("instance_id"),
+	})
+	if err != nil {
+		writeInstanceObservabilityError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, demoInstanceMetricsFromRecord(result))
+}
+
+func (api *demoInstanceAPI) createExecSession(ctx context.Context, c *app.RequestContext) {
+	if err := api.ensureInstanceExists(ctx, c); err != nil {
+		writeInstanceObservabilityError(c, err)
+		return
+	}
+	var req demoCreateExecSessionRequest
+	if len(c.Request.Body()) > 0 {
+		if err := c.BindJSON(&req); err != nil {
+			writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid exec session request")
+			return
+		}
+	}
+	if !hasIdempotencyKey(req.IdempotencyKey) {
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
+		return
+	}
+	tty := true
+	if req.TTY != nil {
+		tty = *req.TTY
+	}
+	result, err := api.observability.CreateExecSession(ctx, ports.InstanceExecSessionCreateRequest{
+		TenantID:       demoTenantID(c),
+		InstanceID:     c.Param("instance_id"),
+		IdempotencyKey: req.IdempotencyKey,
+		Container:      req.Container,
+		Command:        req.Command,
+		TTY:            tty,
+		Rows:           maxInt(req.Rows, 24),
+		Cols:           maxInt(req.Cols, 80),
+	})
+	if err != nil {
+		writeInstanceObservabilityError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, demoInstanceExecSessionFromRecord(result))
+}
+
+func (api *demoInstanceAPI) listSecurityEvents(ctx context.Context, c *app.RequestContext) {
+	if err := api.ensureInstanceExists(ctx, c); err != nil {
+		writeInstanceObservabilityError(c, err)
+		return
+	}
+	result, err := api.observability.ListSecurityEvents(ctx, ports.InstanceObservationListRequest{
+		TenantID:   demoTenantID(c),
+		InstanceID: c.Param("instance_id"),
+		Limit:      queryInt(c, "limit", 50),
+		Severity:   c.Query("severity"),
+	})
+	if err != nil {
+		writeInstanceObservabilityError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, demoInstanceSecurityEventListFromResult(result))
+}
+
 func (api *demoInstanceAPI) getOperation(ctx context.Context, c *app.RequestContext) {
 	record, err := api.operations.GetOperation(ctx, demoTenantID(c), c.Param("operation_id"))
 	if err != nil {
@@ -575,6 +773,14 @@ func (api *demoInstanceAPI) consoleExec(ctx context.Context, c *app.RequestConte
 		return
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+func (api *demoInstanceAPI) ensureInstanceExists(ctx context.Context, c *app.RequestContext) error {
+	_, err := api.service.Get(ctx, ports.WorkloadInstanceGetRequest{
+		TenantID:   demoTenantID(c),
+		InstanceID: c.Param("instance_id"),
+	})
+	return err
 }
 
 func consoleAction(protocol string) ports.WorkloadInstanceOpsAction {
@@ -1014,6 +1220,93 @@ func demoOperationFromRecord(record ports.WorkloadOperationRecord) demoOperation
 	}
 }
 
+func demoInstanceLogListFromResult(result ports.InstanceLogListResult) demoInstanceLogListResponse {
+	items := make([]demoInstanceLogEntryResponse, 0, len(result.Items))
+	for _, item := range result.Items {
+		items = append(items, demoInstanceLogEntryResponse{
+			Timestamp: item.Timestamp.Format(time.RFC3339),
+			Level:     item.Level,
+			Message:   item.Message,
+			Container: item.Container,
+			Stream:    item.Stream,
+		})
+	}
+	return demoInstanceLogListResponse{
+		Items:      items,
+		Total:      result.Total,
+		NextCursor: optionalString(result.NextCursor),
+		DevProfile: coreDevProfileFromPort(result.DevProfile),
+	}
+}
+
+func demoInstanceEventListFromResult(result ports.InstanceEventListResult) demoInstanceEventListResponse {
+	items := make([]demoInstanceEventResponse, 0, len(result.Items))
+	for _, item := range result.Items {
+		items = append(items, demoInstanceEventResponse{
+			ID:         item.ID,
+			InstanceID: item.InstanceID,
+			Type:       item.Type,
+			Reason:     item.Reason,
+			Message:    item.Message,
+			Count:      item.Count,
+			OccurredAt: item.OccurredAt.Format(time.RFC3339),
+		})
+	}
+	return demoInstanceEventListResponse{
+		Items:      items,
+		Total:      result.Total,
+		NextCursor: optionalString(result.NextCursor),
+		DevProfile: coreDevProfileFromPort(result.DevProfile),
+	}
+}
+
+func demoInstanceMetricsFromRecord(record ports.InstanceMetricsRecord) demoInstanceMetricsResponse {
+	return demoInstanceMetricsResponse{
+		InstanceID:        record.InstanceID,
+		Timestamp:         record.Timestamp.Format(time.RFC3339),
+		CPUUtilizationPct: record.CPUUtilizationPct,
+		MemoryUsedMB:      record.MemoryUsedMB,
+		MemoryTotalMB:     record.MemoryTotalMB,
+		GPUUtilizationPct: record.GPUUtilizationPct,
+		GPUMemoryUsedMB:   record.GPUMemoryUsedMB,
+		GPUMemoryTotalMB:  record.GPUMemoryTotalMB,
+		NetworkRXBytes:    record.NetworkRXBytes,
+		NetworkTXBytes:    record.NetworkTXBytes,
+		DevProfile:        coreDevProfileFromPort(record.DevProfile),
+	}
+}
+
+func demoInstanceSecurityEventListFromResult(result ports.InstanceSecurityEventListResult) demoInstanceSecurityEventListResponse {
+	items := make([]demoInstanceSecurityEventResponse, 0, len(result.Items))
+	for _, item := range result.Items {
+		items = append(items, demoInstanceSecurityEventResponse{
+			ID:          item.ID,
+			InstanceID:  item.InstanceID,
+			EventType:   item.EventType,
+			Severity:    item.Severity,
+			Description: item.Description,
+			OccurredAt:  item.OccurredAt.Format(time.RFC3339),
+		})
+	}
+	return demoInstanceSecurityEventListResponse{
+		Items:      items,
+		Total:      result.Total,
+		NextCursor: optionalString(result.NextCursor),
+		DevProfile: coreDevProfileFromPort(result.DevProfile),
+	}
+}
+
+func demoInstanceExecSessionFromRecord(record ports.InstanceExecSessionRecord) demoInstanceExecSessionResponse {
+	return demoInstanceExecSessionResponse{
+		ID:         record.ID,
+		InstanceID: record.InstanceID,
+		WSURL:      record.WSURL,
+		Token:      record.Token,
+		ExpiresAt:  record.ExpiresAt.Format(time.RFC3339),
+		DevProfile: coreDevProfileFromPort(record.DevProfile),
+	}
+}
+
 func demoTenantID(c *app.RequestContext) string {
 	if tenantID := middleware.GetTenantID(c); tenantID != "" {
 		return tenantID
@@ -1036,6 +1329,21 @@ func writeDemoError(c *app.RequestContext, status int, code string, message stri
 		"message":    message,
 		"request_id": middleware.GetRequestID(c),
 	})
+}
+
+func writeInstanceObservabilityError(c *app.RequestContext, err error) {
+	switch {
+	case errors.Is(err, ports.ErrNotFound):
+		writeDemoError(c, http.StatusNotFound, "INSTANCE_NOT_FOUND", err.Error())
+	case errors.Is(err, ports.ErrConflict):
+		writeDemoError(c, http.StatusConflict, "CONFLICT", err.Error())
+	case errors.Is(err, ports.ErrUnsupported):
+		writeDemoError(c, http.StatusBadRequest, "UNSUPPORTED", err.Error())
+	case errors.Is(err, ports.ErrInvalid):
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+	default:
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+	}
 }
 
 func demoLifecycleErrorStatus(err error) int {
@@ -1088,6 +1396,22 @@ func queryInt(c *app.RequestContext, name string, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+func optionalString(value string) *string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return &value
+}
+
+func coreDevProfileFromPort(profile ports.DevProfileInfo) coreDevProfileResponse {
+	return coreDevProfileResponse{
+		Mode:         profile.Mode,
+		Provider:     profile.Provider,
+		RealProvider: profile.RealProvider,
+		Reason:       profile.Reason,
+	}
 }
 
 func maxInt(value int, fallback int) int {

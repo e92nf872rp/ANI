@@ -6,7 +6,7 @@
 > - **当前冲刺任务** → `repo/CURRENT-SPRINT.md`（每冲刺更新）
 > - **已完成批次详情** → 本文件（每批次完成后追加）
 
-> 当前执行：**Sprint 11 / Core Real Deployment Validation 正式部署完成；Rook-Ceph 正式部署已完成**，当前把 Sprint 6-10 的 contract/local/release-prep 成果放到真实物理服务器上验证，并完成 VM 优先块存储 live 部署。真实服务器只读验证已完成；Rook-Ceph 正式部署已完成；`rook-ceph` CephCluster 为 `Ready/HEALTH_OK`，`ceph-rbd-ssd` pool 为 `Ready`，5 个 SSD OSD 运行，`ani-rbd-ssd` StorageClass 已上线，受控 RBD smoke test、KubeVirt VM RBD storage smoke 与逐节点 reboot resilience 已通过并清理临时资源。Sprint 11 执行环境：正式部署执行环境；未执行手工挂载、`/etc/fstab` 修改、系统盘变更、默认 StorageClass 切换或已有 PVC 迁移。Sprint 9 Core-only 代码开发已完成，Sprint 10 Core-only 代码开发已完成；两者的 release-prep gates 仍作为历史回归边界保留。Sprint 5 真实 live gate evidence、Sprint 6 Core 平台支撑批次、Sprint 7 installer/offline/CLI/regression contract、Sprint 8 release hardening/offline/CLI/doc consistency gates 仍作为历史回归边界保留；guard 微批次完整索引见 [guard-series/REAL-K8S-LAB-guard-index.md](guard-series/REAL-K8S-LAB-guard-index.md)（最新 ID：M1-REAL-LAB-KX）。本文只做已完成批次归档，不作为当前任务清单使用。
+> 当前执行：**Sprint 12 / Core「Services 支撑 Handler」实现**。当前闭合 `api/openapi/v1.yaml` 已声明但网关未实现的 Core handler 缺口；仅 ANI Core，Tier1 local profile。`CORE-SVC-SUPPORT-OBSERVABILITY-A` 已完成实例可观测、GPU 清单/占用和 Sandbox 模板 catalog handler；不代表 real-provider、runtime ready 或 production ready。Sprint 11 / Core Real Deployment Validation 正式部署完成与 Rook-Ceph 正式部署结果继续作为历史回归边界保留；guard 微批次完整索引见 [guard-series/REAL-K8S-LAB-guard-index.md](guard-series/REAL-K8S-LAB-guard-index.md)（最新 ID：M1-REAL-LAB-KX）。本文只做已完成批次归档，不作为当前任务清单使用。
 > 历史校准记录（2026-05-20/2026-05-21）：Sprint 2/3/4 的 API、SDK、Mock、Docs 与记录闭环已归档；这些记录只解释历史切换，不代表当前执行阶段。
 
 ---
@@ -19,6 +19,12 @@
 |---|---|---|
 | SPRINT12-KICKOFF-A | Sprint 12 启动 + GAP 分析：基于真实 Core 代码与 `api/openapi/v1.yaml` diff，规划 19 个已声明未实现 Core handler 缺口 + 2 个 422，分 B1/B2/B3 三批；仅 ANI Core，Tier1 local profile；Sprint 11 转历史回归门禁 | sprint12-kickoff-core-svc-support.md |
 | SPRINT12-KICKOFF-A（配套） | B1/B2/B3 批次执行提示词，人工/AI 可直接粘贴执行，含前置事实防幻觉 | sprint12-batch-execution-prompts.md |
+
+### Sprint 12 Delivery（2026-06）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| CORE-SVC-SUPPORT-OBSERVABILITY-A | B1 实例可观测与 GPU/Sandbox catalog handler：新增实例 logs/events/metrics/security-events/exec session，只读观测 port + local adapter；新增 GPU inventory/occupancy handler 与 sandbox template catalog；全部为 Tier1 local profile，响应带 dev_profile，不声明 runtime/production ready | core-svc-support-observability-a.md |
 
 ### Sprint 11 Kickoff（2026-06）
 
