@@ -1,0 +1,67 @@
+profile: SPRINT13-AUTH-DEX-PRODUCTION-GATE
+status: contract
+description: >
+  Sprint 13 Auth/Dex production-shaped gate for upgrading S01-S04 from
+  component production-shaped acceptance to platform production readiness.
+  The gate requires Gateway non-dev auth mode, auth-service gRPC validation,
+  Dex discovery/JWKS, OIDC auth-code completion, refresh token flow and a
+  protected Core API request accepted only with a Dex-backed ANI access token.
+
+required_components:
+  - dex
+  - auth-service
+  - ani-gateway
+  - postgres
+  - redis
+  - nats
+
+required_tools:
+  - kubectl
+  - curl
+
+manifests:
+  auth_dex: deploy/real-k8s-lab/sprint13-production-auth-dex.yaml
+  gateway: deploy/real-k8s-lab/sprint13-production-shaped-gateway-deployment.yaml
+
+evidence:
+  output: development-records/live-evidence/sprint13-auth-dex-production-evidence.json
+  forbidden_fields:
+    - access_token
+    - refresh_token
+    - id_token
+    - client_secret
+    - password
+    - kubeconfig
+
+live_checks:
+  - id: dex-discovery-ready
+    command: "curl ${DEX_ISSUER}/.well-known/openid-configuration"
+    pass_condition: issuer_matches_and_authorization_token_jwks_endpoints_present
+  - id: dex-jwks-ready
+    command: "curl ${DEX_ISSUER}/keys"
+    pass_condition: jwks_contains_signing_key
+  - id: auth-service-grpc-ready
+    command: "kubectl rollout status deployment/ani-auth-service -n ani-system"
+    pass_condition: auth_service_deployment_available
+  - id: gateway-protected-route-rejects-anonymous
+    command: "curl -i ${GATEWAY_URL}/api/v1/auth/api-keys"
+    pass_condition: http_401_without_authorization
+  - id: gateway-oidc-auth-code-flow
+    command: "scripts/validate_auth_dex_production_live.py --gateway-url ${GATEWAY_URL}"
+    pass_condition: gateway_begin_and_complete_oidc_return_token_pair
+  - id: gateway-protected-route-accepts-dex-token
+    command: "curl -H 'Authorization: Bearer ${ANI_ACCESS_TOKEN}' ${GATEWAY_URL}/api/v1/auth/api-keys"
+    pass_condition: http_200_with_dex_backed_ani_access_token
+  - id: gateway-refresh-token-flow
+    command: "curl -X POST ${GATEWAY_URL}/api/v1/auth/refresh"
+    pass_condition: http_200_returns_new_access_token
+
+production_shape:
+  required_gateway_auth_mode: auth_service
+  required_proof_items:
+    - gateway_non_dev_auth
+    - dex_discovery_and_jwks
+    - gateway_rejects_anonymous
+    - gateway_accepts_dex_oidc_token
+    - gateway_refresh_token
+    - auth_service_rbac_check

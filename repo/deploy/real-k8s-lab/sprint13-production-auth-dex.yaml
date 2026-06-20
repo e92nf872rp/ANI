@@ -1,0 +1,370 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-dex-production-config
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-dex
+    ani.dev/profile: sprint13-auth-dex-production
+data:
+  config.yaml: |
+    issuer: http://ani-dex.ani-system.svc.cluster.local:5556/dex
+
+    storage:
+      type: memory
+
+    web:
+      http: 0.0.0.0:5556
+
+    oauth2:
+      skipApprovalScreen: true
+
+    staticClients:
+      - id: ani-console
+        name: ANI Console
+        secret: $ANI_DEX_CLIENT_SECRET
+        redirectURIs:
+          - http://ani-gateway.ani-system.svc.cluster.local:8080/auth/callback
+          - http://ani-gateway.ani-system.svc.cluster.local:8080/api/v1/auth/callback
+          - https://console.example.test/callback
+
+    enablePasswordDB: true
+
+    staticPasswords:
+      - email: admin@ani.local
+        # password is supplied only to the live gate runner and must not be recorded in evidence.
+        hash: "$2a$10$wbTiEfZUu5O8uxm9JRXPyeqXKtC5VD0DY7igdDLV7Wyq4.MfZSara"
+        username: admin
+        userID: "11111111-1111-1111-1111-111111111111"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ani-dex
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-dex
+    ani.dev/profile: sprint13-auth-dex-production
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ani-dex
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ani-dex
+        ani.dev/profile: sprint13-auth-dex-production
+    spec:
+      containers:
+        - name: dex
+          image: ghcr.io/dexidp/dex:v2.40.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -ec
+          args:
+            - |
+              sed "s|\$ANI_DEX_CLIENT_SECRET|${ANI_DEX_CLIENT_SECRET}|g" /etc/dex/config.yaml > /tmp/dex-config.yaml
+              exec dex serve /tmp/dex-config.yaml
+          env:
+            - name: ANI_DEX_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: ani-auth-production-shaped-runtime
+                  key: oidc_client_secret
+          ports:
+            - name: http
+              containerPort: 5556
+          volumeMounts:
+            - name: dex-config
+              mountPath: /etc/dex
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /dex/.well-known/openid-configuration
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /dex/.well-known/openid-configuration
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: dex-config
+          configMap:
+            name: ani-dex-production-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ani-dex
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-dex
+    ani.dev/profile: sprint13-auth-dex-production
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: ani-dex
+  ports:
+    - name: http
+      port: 5556
+      targetPort: http
+      nodePort: 30556
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ani-auth-service
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-auth-service
+    ani.dev/profile: sprint13-auth-dex-production
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ani-auth-service
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-auth-service
+    ani.dev/profile: sprint13-auth-dex-production
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ani-auth-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ani-auth-service
+        ani.dev/profile: sprint13-auth-dex-production
+    spec:
+      serviceAccountName: ani-auth-service
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: auth-service
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          command:
+            - /opt/ani/bin/auth-service
+          ports:
+            - name: grpc
+              containerPort: 9101
+            - name: health
+              containerPort: 9201
+          env:
+            - name: GRPC_PORT
+              value: "9101"
+            - name: HEALTH_PORT
+              value: "9201"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ani-auth-production-shaped-runtime
+                  key: database_url
+            - name: NATS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ani-auth-production-shaped-runtime
+                  key: nats_url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ani-auth-production-shaped-runtime
+                  key: redis_url
+            - name: AUTH_JWT_ISSUER
+              value: ani-auth-service
+            - name: AUTH_JWT_PUBLIC_KEY_PEM
+              valueFrom:
+                secretKeyRef:
+                  name: ani-auth-production-shaped-runtime
+                  key: jwt_public_key_pem
+            - name: AUTH_JWT_PRIVATE_KEY_PEM
+              valueFrom:
+                secretKeyRef:
+                  name: ani-auth-production-shaped-runtime
+                  key: jwt_private_key_pem
+            - name: AUTH_OIDC_ISSUER_URL
+              value: http://ani-dex.ani-system.svc.cluster.local:5556/dex
+            - name: AUTH_OIDC_CLIENT_ID
+              value: ani-console
+            - name: AUTH_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: ani-auth-production-shaped-runtime
+                  key: oidc_client_secret
+            - name: AUTH_OIDC_GROUP_ROLE_MAP_JSON
+              value: '{"admins":["tenant-admin"],"platform-admins":["platform-admin"]}'
+          readinessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: ani-bin
+              mountPath: /opt/ani/bin
+              readOnly: true
+      volumes:
+        - name: ani-bin
+          hostPath:
+            path: /opt/ani/bin
+            type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ani-auth-service
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-auth-service
+    ani.dev/profile: sprint13-auth-dex-production
+spec:
+  selector:
+    app.kubernetes.io/name: ani-auth-service
+  ports:
+    - name: grpc
+      port: 9101
+      targetPort: grpc
+    - name: health
+      port: 9201
+      targetPort: health
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ani-gateway
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-gateway
+    ani.dev/profile: sprint13-auth-dex-production
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ani-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ani-gateway
+        ani.dev/profile: sprint13-auth-dex-production
+    spec:
+      serviceAccountName: ani-gateway
+      containers:
+        - name: ani-gateway
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          command:
+            - /opt/ani/bin/ani-gateway
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: ANI_AUTH_MODE
+              value: auth_service
+            - name: AUTH_SERVICE_ADDR
+              value: ani-auth-service.ani-system.svc.cluster.local:9101
+            - name: KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE
+              value: /var/run/secrets/kubernetes.io/serviceaccount/token
+            - name: KUBERNETES_SERVICE_ACCOUNT_CA_FILE
+              value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+            - name: KUBERNETES_PROVIDER_FIELD_MANAGER
+              value: ani-gateway-sprint13-production-shaped
+            - name: NETWORK_PROVIDER
+              value: kubeovn_rest
+            - name: NETWORK_PROVIDER_APPLY_ENABLED
+              value: "true"
+            - name: NETWORK_PROVIDER_USER_ID
+              value: ani-core-network-provider
+            - name: NETWORK_PROVIDER_PERMISSION_PROOF
+              value: rbac-scope:networks.write
+            - name: STORAGE_PROVIDER
+              value: kubernetes_rest
+            - name: STORAGE_PROVIDER_APPLY_ENABLED
+              value: "true"
+            - name: STORAGE_PROVIDER_USER_ID
+              value: ani-core-storage-provider
+            - name: STORAGE_PROVIDER_PERMISSION_PROOF
+              value: rbac-scope:storage.write
+            - name: GPU_INVENTORY_PROVIDER
+              value: kubernetes_rest
+            - name: K8S_CLUSTER_PROVIDER_MODE
+              value: vcluster_helm
+            - name: K8S_CLUSTER_PROXY_MODE
+              value: forwarding_metadata
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ani-gateway-production-shaped-runtime
+                  key: database_url
+            - name: VCLUSTER_HELM_BINARY
+              value: /usr/local/bin/helm
+            - name: VCLUSTER_BINARY
+              value: /usr/local/bin/vcluster
+            - name: VCLUSTER_CHART_NAME
+              value: vcluster
+            - name: VCLUSTER_CHART_REPO
+              value: https://charts.loft.sh
+            - name: VCLUSTER_HELM_SET_VALUES
+              value: controlPlane.statefulSet.persistence.volumeClaim.storageClass=ani-rbd-ssd
+            - name: VCLUSTER_PROXY_SERVER_TEMPLATE
+              value: https://{cluster_id}.{namespace}:443
+            - name: VCLUSTER_KUBECONFIG_SERVER_TEMPLATE
+              value: https://{cluster_id}.{namespace}:443
+          volumeMounts:
+            - name: ani-bin
+              mountPath: /opt/ani/bin
+              readOnly: true
+      volumes:
+        - name: ani-bin
+          hostPath:
+            path: /opt/ani/bin
+            type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ani-gateway
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-gateway
+    ani.dev/profile: sprint13-auth-dex-production
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: ani-gateway
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      nodePort: 30080

@@ -26,14 +26,18 @@ spec:
           type: RuntimeDefault
       containers:
         - name: ani-gateway
-          image: ani-gateway:sprint13-production-shaped
+          image: registry.k8s.io/pause:3.10
           imagePullPolicy: IfNotPresent
+          command:
+            - /opt/ani/bin/ani-gateway
           ports:
             - name: http
               containerPort: 8080
           env:
             - name: ANI_AUTH_MODE
-              value: dev
+              value: auth_service
+            - name: AUTH_SERVICE_ADDR
+              value: ani-auth-service.ani-system.svc.cluster.local:9101
             - name: KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE
               value: /var/run/secrets/kubernetes.io/serviceaccount/token
             - name: KUBERNETES_SERVICE_ACCOUNT_CA_FILE
@@ -105,6 +109,15 @@ spec:
             capabilities:
               drop:
                 - ALL
+          volumeMounts:
+            - name: ani-gateway-bin
+              mountPath: /opt/ani/bin
+              readOnly: true
+      volumes:
+        - name: ani-gateway-bin
+          hostPath:
+            path: /opt/ani/bin
+            type: Directory
 ---
 apiVersion: v1
 kind: Service

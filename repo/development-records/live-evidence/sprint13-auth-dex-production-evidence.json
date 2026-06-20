@@ -1,0 +1,23 @@
+{
+  "auth_dex_production_shape": {
+    "anonymous_status": 401,
+    "authorized_status": 200,
+    "dex_issuer": "http://ani-dex.ani-system.svc.cluster.local:5556/dex",
+    "dex_transport_issuer": "http://100.64.128.1:30556/dex",
+    "gateway_auth_mode": "auth_service",
+    "oidc_begin_status": 200,
+    "oidc_complete_status": 200,
+    "proof_items": [
+      "gateway_non_dev_auth",
+      "dex_discovery_and_jwks",
+      "gateway_rejects_anonymous",
+      "gateway_accepts_dex_oidc_token",
+      "gateway_refresh_token",
+      "auth_service_rbac_check"
+    ],
+    "protected_path": "/api/v1/auth/api-keys",
+    "refresh_status": 200,
+    "status": "passed"
+  },
+  "status": "passed"
+}

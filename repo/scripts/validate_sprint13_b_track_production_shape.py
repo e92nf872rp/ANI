@@ -23,6 +23,7 @@ PLAN = PROJECT_ROOT / "ANI-06-开发计划.md"
 CURRENT_SPRINT = ROOT / "CURRENT-SPRINT.md"
 RECORDS_INDEX = RECORD_ROOT / "README.md"
 PRODUCTION_READINESS_REVIEW = RECORD_ROOT / "sprint13-s01-s04-production-readiness-review.md"
+AUTH_DEX_EVIDENCE = RECORD_ROOT / "live-evidence/sprint13-auth-dex-production-evidence.json"
 
 SLICES = {
     "S01": {
@@ -121,6 +122,7 @@ REQUIRED_RBAC_RESOURCES = {
 REQUIRED_STANDARD_SLICES = {"S01", "S02", "S03", "S04", "S05", "S06", "S07"}
 REQUIRED_DEPLOYMENT_ENVS = {
     "ANI_AUTH_MODE",
+    "AUTH_SERVICE_ADDR",
     "KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE",
     "KUBERNETES_SERVICE_ACCOUNT_CA_FILE",
     "KUBERNETES_PROVIDER_FIELD_MANAGER",
@@ -140,9 +142,17 @@ REQUIRED_DEPLOYMENT_ENVS = {
 }
 REQUIRED_PRODUCTION_READINESS_DOC_TOKENS = {
     "Auth/Dex production gate",
-    "ANI_AUTH_MODE=dev",
+    "ANI_AUTH_MODE=auth_service",
+    "SPRINT13-AUTH-DEX-PRODUCTION-GATE",
     "S05-S07 B 轨可以继续",
-    "不能标记为 production ready",
+}
+REQUIRED_AUTH_DEX_PROOF_ITEMS = {
+    "gateway_non_dev_auth",
+    "dex_discovery_and_jwks",
+    "gateway_rejects_anonymous",
+    "gateway_accepts_dex_oidc_token",
+    "gateway_refresh_token",
+    "auth_service_rbac_check",
 }
 
 
@@ -423,8 +433,11 @@ def validate_production_deployment_contract() -> None:
     if absent_env:
         fail(f"production Deployment missing env {', '.join(sorted(absent_env))}")
     auth_mode = env_by_name.get("ANI_AUTH_MODE", {}).get("value")
-    if auth_mode != "dev":
-        fail("production-shaped Deployment ANI_AUTH_MODE must remain dev until Auth/Dex production gate is implemented and evidenced")
+    if auth_mode != "auth_service":
+        fail("production Deployment ANI_AUTH_MODE must be auth_service after Auth/Dex production gate")
+    auth_service_addr = env_by_name.get("AUTH_SERVICE_ADDR", {}).get("value")
+    if auth_service_addr != "ani-auth-service.ani-system.svc.cluster.local:9101":
+        fail("production Deployment AUTH_SERVICE_ADDR must point at in-cluster auth-service")
     database_env = env_by_name.get("DATABASE_URL", {})
     if "value" in database_env:
         fail("production Deployment must not commit DATABASE_URL literal")
@@ -460,9 +473,39 @@ def validate_production_readiness_boundary_docs() -> None:
             fail(f"{path.relative_to(PROJECT_ROOT)} must document production readiness boundary tokens: {', '.join(missing)}")
 
 
+def validate_auth_dex_evidence() -> None:
+    payload = load_json(AUTH_DEX_EVIDENCE)
+    if payload.get("status") != "passed":
+        fail("Auth/Dex production evidence status must be passed")
+    shape = payload.get("auth_dex_production_shape")
+    if not isinstance(shape, dict):
+        fail("Auth/Dex production evidence must include auth_dex_production_shape")
+    if shape.get("status") != "passed":
+        fail("Auth/Dex production shape status must be passed")
+    if shape.get("gateway_auth_mode") != "auth_service":
+        fail("Auth/Dex production evidence gateway_auth_mode must be auth_service")
+    proof_items = shape.get("proof_items")
+    if not isinstance(proof_items, list):
+        fail("Auth/Dex production evidence proof_items must be a list")
+    missing = REQUIRED_AUTH_DEX_PROOF_ITEMS - {str(item).strip() for item in proof_items}
+    if missing:
+        fail(f"Auth/Dex production evidence proof_items missing {', '.join(sorted(missing))}")
+    expected_statuses = {
+        "anonymous_status": 401,
+        "oidc_begin_status": 200,
+        "oidc_complete_status": 200,
+        "authorized_status": 200,
+        "refresh_status": 200,
+    }
+    for field, expected in expected_statuses.items():
+        if shape.get(field) != expected:
+            fail(f"Auth/Dex production evidence requires {field}={expected}")
+
+
 def validate_all() -> None:
     validate_production_profile()
     validate_production_deployment_contract()
+    validate_auth_dex_evidence()
     validate_production_readiness_boundary_docs()
     for slice_id, spec in SLICES.items():
         validate_evidence(slice_id, spec["evidence"])

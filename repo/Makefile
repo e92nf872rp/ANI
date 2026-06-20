@@ -5,10 +5,10 @@
         tools-proto gen-api gen-console-api gen-proto gen-core-sdk gen-api-docs \
         build build-gateway build-auth-service build-model-service build-task-service build-reconcile-worker build-cli \
         test test-go test-python test-cover \
-        validate-infra validate-gpu-preflight validate-gpu-contracts validate-runtime-contracts validate-instance-contracts validate-instance-planner validate-instance-renderer validate-instance-admission validate-instance-audit validate-instance-provider-dry-run validate-instance-provider-apply validate-instance-status-reconcile validate-instance-orchestrator validate-instance-store validate-instance-provider-adapter validate-instance-service validate-instance-lifecycle-ops validate-m1-e2e validate-kubernetes-provider-execution validate-kubernetes-rest-client validate-kubernetes-bootstrap-wiring validate-kubernetes-lifecycle-execution validate-kubernetes-ops-execution validate-m1-real-provider-profile validate-real-k8s-profile validate-vcluster-live-gate validate-vcluster-upgrade-live-gate validate-k8s-node-pool-live-gate validate-kubeovn-network-live-gate validate-kubevirt-vm-live-gate validate-reconcile-ha-live-gate validate-kms-sm4-live-gate validate-secrets-live-gate validate-storage-live-gate validate-gpu-inventory-live-gate validate-object-store-live-gate validate-vector-store-live-gate validate-instance-observability-live-gate validate-sprint13-b-track-production-shape validate-core-installer validate-core-offline validate-core-cli validate-sprint7-core-regression validate-core-release-hardening validate-core-installer-live validate-core-offline-pack validate-core-doc-consistency validate-sprint8-core-release validate-core-release-evidence validate-sprint9-core-rc validate-sprint9-core-doc-consistency validate-sprint9-rc validate-core-artifact-manifest validate-core-version-policy validate-sprint10-final-readiness validate-sprint10-core-doc-consistency validate-sprint10-release-prep validate-sprint11-storage-disk-plan validate-sprint11-core-real-deployment validate-sprint11-rook-ceph-formal-deployment validate-sprint11-rook-ceph-live-deployment-result validate-sprint11-rook-ceph-vm-storage-smoke validate-sprint11-rook-ceph-reboot-resilience validate-sprint11-safe-completion validate-sprint11-core-doc-consistency validate-sprint11-real-deployment validate-demo-instances validate-core-alpha validate-network-alpha validate-storage-alpha validate-vector-alpha validate-workload-identity validate-core-dev-profile validate-sdk-alpha validate-sdk-beta validate-sdk-mock-smoke validate-sprint3-closure validate-sprint4-closure validate-spec-split validate-core-beta validate-core-api-compatibility validate-mock-a validate-doc-api validate-doc-entrypoints validate-auth-contract validate-auth-dex-smoke validate-architecture \
+        validate-infra validate-gpu-preflight validate-gpu-contracts validate-runtime-contracts validate-instance-contracts validate-instance-planner validate-instance-renderer validate-instance-admission validate-instance-audit validate-instance-provider-dry-run validate-instance-provider-apply validate-instance-status-reconcile validate-instance-orchestrator validate-instance-store validate-instance-provider-adapter validate-instance-service validate-instance-lifecycle-ops validate-m1-e2e validate-kubernetes-provider-execution validate-kubernetes-rest-client validate-kubernetes-bootstrap-wiring validate-kubernetes-lifecycle-execution validate-kubernetes-ops-execution validate-m1-real-provider-profile validate-real-k8s-profile validate-vcluster-live-gate validate-vcluster-upgrade-live-gate validate-k8s-node-pool-live-gate validate-kubeovn-network-live-gate validate-kubevirt-vm-live-gate validate-reconcile-ha-live-gate validate-kms-sm4-live-gate validate-secrets-live-gate validate-storage-live-gate validate-gpu-inventory-live-gate validate-object-store-live-gate validate-vector-store-live-gate validate-instance-observability-live-gate validate-sprint13-b-track-production-shape validate-core-installer validate-core-offline validate-core-cli validate-sprint7-core-regression validate-core-release-hardening validate-core-installer-live validate-core-offline-pack validate-core-doc-consistency validate-sprint8-core-release validate-core-release-evidence validate-sprint9-core-rc validate-sprint9-core-doc-consistency validate-sprint9-rc validate-core-artifact-manifest validate-core-version-policy validate-sprint10-final-readiness validate-sprint10-core-doc-consistency validate-sprint10-release-prep validate-sprint11-storage-disk-plan validate-sprint11-core-real-deployment validate-sprint11-rook-ceph-formal-deployment validate-sprint11-rook-ceph-live-deployment-result validate-sprint11-rook-ceph-vm-storage-smoke validate-sprint11-rook-ceph-reboot-resilience validate-sprint11-safe-completion validate-sprint11-core-doc-consistency validate-sprint11-real-deployment validate-demo-instances validate-core-alpha validate-network-alpha validate-storage-alpha validate-vector-alpha validate-workload-identity validate-core-dev-profile validate-sdk-alpha validate-sdk-beta validate-sdk-mock-smoke validate-sprint3-closure validate-sprint4-closure validate-spec-split validate-core-beta validate-core-api-compatibility validate-mock-a validate-doc-api validate-doc-entrypoints validate-auth-contract validate-auth-dex-smoke validate-auth-dex-production-gate validate-architecture \
         lint lint-go lint-python lint-ts \
         dev-gateway dev-console dev-core-mock \
-        image image-gateway \
+        image image-gateway image-auth-service \
         clean
 
 # ── 帮助 ──────────────────────────────────────────────────────────────────────
@@ -848,6 +848,12 @@ validate-auth-dex-smoke:
 	python scripts/smoke_auth_dex.py
 	@echo "✅ Dex OIDC smoke passed"
 
+validate-auth-dex-production-gate:
+	@echo "→ 校验 Sprint 13 Auth/Dex production-shaped gate..."
+	python scripts/validate_auth_dex_production_gate.py
+	python scripts/validate_auth_dex_production_gate_test.py
+	@echo "✅ Sprint 13 Auth/Dex production-shaped gate valid"
+
 validate-architecture:
 	@echo "→ 校验开源组件 ports/adapters 边界..."
 	python scripts/validate_component_imports.py --root .
@@ -885,11 +891,16 @@ dev-core-mock:
 # ── 镜像构建 ──────────────────────────────────────────────────────────────────
 REGISTRY ?= harbor.ani.internal/ani
 
-image: image-gateway
+image: image-gateway image-auth-service
 
 image-gateway:
 	docker build -t $(REGISTRY)/ani-gateway:$(VERSION) \
 		-f services/ani-gateway/Dockerfile \
+		.
+
+image-auth-service:
+	docker build -t $(REGISTRY)/ani-auth-service:$(VERSION) \
+		-f services/auth-service/Dockerfile \
 		.
 
 # ── 清理 ──────────────────────────────────────────────────────────────────────

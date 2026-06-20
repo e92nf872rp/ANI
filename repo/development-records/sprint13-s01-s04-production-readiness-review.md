@@ -3,48 +3,60 @@
 > 记录类型：Sprint 13 S01-S04 B-track production readiness boundary review
 > 日期：2026-06-20
 > 范围：仅 ANI Core S01-S04 B 轨代码路径、部署契约、production-shaped gate 与 Auth/Dex 生产边界复审；不改 Services，不推远端
-> 状态：**S01-S04 production-shaped acceptance passed；不能标记为 production ready**。
+> 状态：**S01-S04 production-shaped acceptance passed；Auth/Dex production ready 阻断已解除**。
 
 ## 结论
 
 S01-S04 B 轨的代码路径、部署契约和门禁已经达到 production-shaped acceptance standard ready，并且对应 evidence 已为 `production_shape.status=passed`。这证明的是组件生产形态验收：Gateway 走 in-cluster ServiceAccount/RBAC 或 metadata target / cluster Service 路径，live gate 不再依赖本机 kubectl proxy、port-forward 或 dev gateway 证据。
 
-但 S01-S04 不能标记为 full platform production ready。当前 production-shaped Gateway manifest 仍显式使用 `ANI_AUTH_MODE=dev`，Auth/Dex production gate 尚未在 S01-S04 范围内执行并产出证据；`validate-auth-dex-smoke` 仍是本地 Docker/dev smoke，不是 in-cluster 生产形态 OIDC/Dex evidence。
+`SPRINT13-AUTH-DEX-PRODUCTION-GATE` / Auth/Dex production gate 已在真实集群通过。production-shaped Gateway 固定 `ANI_AUTH_MODE=auth_service`，通过集群内 `AUTH_SERVICE_ADDR=ani-auth-service.ani-system.svc.cluster.local:9101` 调用 auth-service，并经 `validate-auth-dex-production-gate` 证明：
 
-因此：**S05-S07 B 轨可以继续**，但只能作为组件级 production-shaped live gate 继续推进；在 Auth/Dex production gate 通过前，整个平台和 S01-S04 聚合状态都不能标记为 production ready。
+- anonymous protected API 返回 401。
+- Gateway OIDC begin 返回 200。
+- Dex 登录后 Gateway OIDC complete 返回 200。
+- Dex-backed ANI access token 访问 protected API 返回 200。
+- refresh token flow 返回 200。
+
+因此 S01-S04 的 Auth/Dex production ready 阻断已解除。该结论仍不等于 full platform v1.0.0 production ready：正式镜像发布/升级、长期 SLA/soak、备份/恢复和故障注入仍需后续 release gate。
 
 ## 审查矩阵
 
 | 范围 | 当前证据 | 结论 |
 |---|---|---|
-| S01 网络路由 Kube-OVN | Gateway `POST/GET /networks/routes` create/list + in-cluster ServiceAccount/RBAC + Kube-OVN 底层观测，`production_shape.status=passed` | production-shaped acceptance passed；不能标记为 production ready |
-| S02 K8s workloads vCluster | Gateway provider create vCluster + metadata target TLS + workload list observe + cleanup，`production_shape.status=passed` | production-shaped acceptance passed；不能标记为 production ready |
-| S03 storage Rook-Ceph | Gateway storage provider + in-cluster RBAC + volume/snapshot/filesystem/mount-target lifecycle + cleanup，`production_shape.status=passed` | production-shaped acceptance passed；不能标记为 production ready |
-| S04 GPU inventory/DCGM | Gateway GPU inventory + Kubernetes NodeList + DCGM cluster Service metrics，`production_shape.status=passed` | production-shaped acceptance passed；不能标记为 production ready |
-| Auth/Dex | Gateway deployment 仍为 `ANI_AUTH_MODE=dev`；本仓库只有 contract/local Docker smoke，没有 S01-S04 production-shaped Auth/Dex evidence | Auth/Dex production gate 未通过，是 full production release blocker |
+| S01 网络路由 Kube-OVN | Gateway `POST/GET /networks/routes` create/list + in-cluster ServiceAccount/RBAC + Kube-OVN 底层观测，`production_shape.status=passed` | production-shaped acceptance passed；Auth/Dex 阻断已解除 |
+| S02 K8s workloads vCluster | Gateway provider create vCluster + metadata target TLS + workload list observe + cleanup，`production_shape.status=passed` | production-shaped acceptance passed；Auth/Dex 阻断已解除 |
+| S03 storage Rook-Ceph | Gateway storage provider + in-cluster RBAC + volume/snapshot/filesystem/mount-target lifecycle + cleanup，`production_shape.status=passed` | production-shaped acceptance passed；Auth/Dex 阻断已解除 |
+| S04 GPU inventory/DCGM | Gateway GPU inventory + Kubernetes NodeList + DCGM cluster Service metrics，`production_shape.status=passed` | production-shaped acceptance passed；Auth/Dex 阻断已解除 |
+| Auth/Dex | Gateway deployment 为 `ANI_AUTH_MODE=auth_service`；Dex discovery/JWKS、OIDC begin/complete、protected API、refresh 均为 passed evidence | Auth/Dex production gate passed |
 
-## 后续生产可用门禁
+## 生产可用边界
 
-若要把 S01-S04 聚合状态从 production-shaped acceptance passed 升级为 production ready，必须新增并跑通单独 Auth/Dex production gate，至少包含：
+S01-S04 现在具备 production-shaped acceptance + Auth/Dex production gate passed 的组合证据。允许把 S01-S04 的 Auth/Dex 阻断状态更新为 resolved。
 
-- Gateway 以非 dev auth 模式运行，受保护 API route 强制经过认证与 RBAC。
-- Dex/OIDC issuer、JWKS、token、refresh 或等价会话链路经 in-cluster 或正式受控 endpoint 验证。
-- evidence JSON 不包含 token、password、client secret、真实 kubeconfig 或服务器私密信息。
-- 文档同步把 `ANI_AUTH_MODE=dev` 边界移除，并说明新的生产 Auth/Dex 证据路径。
-- `validate-sprint13-b-track-production-shape` 更新为校验 Auth/Dex production gate，而不是接受 dev auth 边界。
+仍不得把该结论扩展为 full platform production ready，除非后续 release gate 单独通过：
+
+- 正式镜像发布、签名、升级和回滚。
+- 长期 SLA/soak。
+- backup/restore 演练。
+- 故障注入和恢复演练。
+- S05-S07 对应 production-shaped live gate。
 
 ## S05-S07 准入判断
 
-当前状态可以进入 S05-S07 B 轨，但准入条件必须保持无歧义：
+**S05-S07 B 轨可以继续**，但准入条件必须保持无歧义：
 
 - S05-S07 B 轨继续按 `sprint13-production-shaped-gateway-profile.yaml` 的 proof_items 标准执行。
-- S05-S07 通过后也只能标记对应切片 production-shaped acceptance passed。
-- 在 Auth/Dex production gate 通过前，任何入口文档、development record 或 evidence 汇总都不能标记为 production ready。
+- S05-S07 通过后也只能先标记对应切片 production-shaped acceptance passed。
+- 若后续要把平台聚合状态升级为 full platform production ready，必须追加 release gate，而不是复用 S01-S04 或 Auth/Dex evidence。
 
 ## 门禁更新
 
-`make validate-sprint13-b-track-production-shape` 已新增 production readiness boundary 检查：
+`make validate-sprint13-b-track-production-shape` 已更新为强制校验 Auth/Dex evidence：
 
-- production-shaped Gateway manifest 中 `ANI_AUTH_MODE=dev` 必须被文档明确记录为 Auth/Dex production gate 阻断项。
-- `ANI-DOCS-INDEX.md`、`ANI-06-开发计划.md`、`repo/CURRENT-SPRINT.md`、`repo/development-records/README.md` 和本记录必须同时说明 `S05-S07 B 轨可以继续` 与 `不能标记为 production ready`。
-- 若后续实现真正 Auth/Dex production gate，必须同步更新 deployment、evidence、门禁和文档，不能只改状态文字。
+- `development-records/live-evidence/sprint13-auth-dex-production-evidence.json` 必须存在。
+- `auth_dex_production_shape.status` 必须为 `passed`。
+- `gateway_auth_mode` 必须为 `auth_service`。
+- proof_items 必须包含 `gateway_non_dev_auth`、`dex_discovery_and_jwks`、`gateway_rejects_anonymous`、`gateway_accepts_dex_oidc_token`、`gateway_refresh_token`、`auth_service_rbac_check`。
+- `anonymous_status=401`，`oidc_begin_status=200`，`oidc_complete_status=200`，`authorized_status=200`，`refresh_status=200`。
+
+入口文档必须同时记录 `SPRINT13-AUTH-DEX-PRODUCTION-GATE`、`validate-auth-dex-production-gate`、`Auth/Dex production gate`、`ANI_AUTH_MODE=auth_service`、`production ready` 和 `S05-S07 B 轨可以继续`，确保人和 AI 都不会再引用旧的 dev auth 阻断结论。

@@ -36,13 +36,13 @@ class Sprint13ProductionShapeGuardTest(unittest.TestCase):
 
         self.assertIn("must match vCluster TLS SAN service namespace", str(raised.exception))
 
-    def test_production_deployment_requires_dev_auth_until_auth_dex_gate(self) -> None:
+    def test_production_deployment_rejects_dev_auth_after_auth_dex_gate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             deployment = Path(tmp) / "deployment.yaml"
             deployment.write_text(
                 guard.PRODUCTION_DEPLOYMENT.read_text(encoding="utf-8").replace(
+                    "value: auth_service",
                     "value: dev",
-                    "value: oidc",
                     1,
                 ),
                 encoding="utf-8",
@@ -52,7 +52,7 @@ class Sprint13ProductionShapeGuardTest(unittest.TestCase):
                 with self.assertRaises(SystemExit) as raised:
                     guard.validate_production_deployment_contract()
 
-        self.assertIn("ANI_AUTH_MODE must remain dev until Auth/Dex production gate", str(raised.exception))
+        self.assertIn("ANI_AUTH_MODE must be auth_service after Auth/Dex production gate", str(raised.exception))
 
     def test_production_readiness_boundary_docs_are_explicit(self) -> None:
         guard.validate_production_readiness_boundary_docs()

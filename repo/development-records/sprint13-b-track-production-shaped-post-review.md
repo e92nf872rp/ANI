@@ -44,6 +44,6 @@
 
 本次修复提升的是生产部署代码路径一致性和可验收性；S01-S04 已在正式 Gateway + in-cluster ServiceAccount/RBAC + 非本地 transport 路径重新执行对应 `--production-shaped` live gate，并产出新的非敏感 evidence JSON，均为 `production_shape.status=passed`。
 
-该结论仍不等于 full platform production ready；当前 production-shaped Gateway 仍为 `ANI_AUTH_MODE=dev`，Auth/Dex production gate 尚未通过生产形态验证，生产发布还需要 Auth/Dex、正式镜像与升级、长期运行、备份/恢复和故障注入等门禁。因此 S01-S04 和平台聚合状态不能标记为 production ready；S05-S07 B 轨可以继续，但仍按组件级 production-shaped acceptance 标准验收。
+该结论仍不等于 full platform production ready；`SPRINT13-AUTH-DEX-PRODUCTION-GATE` 已通过，production-shaped Gateway 为 `ANI_AUTH_MODE=auth_service`，S01-S04 的 Auth/Dex production ready 阻断已解除；生产发布仍需要正式镜像与升级、长期运行、备份/恢复和故障注入等 release gate。因此该结论仍不是 full platform production ready；S05-S07 B 轨可以继续，但仍按组件级 production-shaped acceptance 标准验收。
 
 Auth/Dex 边界复审见 `sprint13-s01-s04-production-readiness-review.md`。

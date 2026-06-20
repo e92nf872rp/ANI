@@ -15,10 +15,10 @@ S01-S04 均已通过各自 real-provider live gate；本批次最初为防止误
 
 | 切片 | 已证明 | production_shape 当前状态 | 生产形态仍缺 |
 |---|---|---|---|
-| S01 网络路由 Kube-OVN | Gateway VPC/Subnet/Route create/list + Kube-OVN 底层观测 + cleanup 通过 | `passed` / `production_gateway_in_cluster_serviceaccount` | 组件 production-shaped 已闭合；full production 仍受 Auth/Dex production gate 阻断 |
-| S02 K8s workloads vCluster | Gateway provider create vCluster + metadata target TLS + workload list observe + cleanup 通过 | `passed` / `metadata_target_tls` | 组件 production-shaped 已闭合；full production 仍受 Auth/Dex production gate 阻断 |
-| S03 storage Rook-Ceph | Gateway volume/snapshot/filesystem/mount-target lifecycle + cleanup 通过 | `passed` / `production_gateway_in_cluster_serviceaccount` | 组件 production-shaped 已闭合；full production 仍受 Auth/Dex production gate 阻断 |
-| S04 GPU inventory/DCGM | Gateway `/gpu-inventory` 与 `/gpu-inventory/occupancy` + Kubernetes NodeList + DCGM metrics 通过 | `passed` / `in_cluster_kubernetes_api_and_cluster_metrics_service` | 组件 production-shaped 已闭合；full production 仍受 Auth/Dex production gate 阻断 |
+| S01 网络路由 Kube-OVN | Gateway VPC/Subnet/Route create/list + Kube-OVN 底层观测 + cleanup 通过 | `passed` / `production_gateway_in_cluster_serviceaccount` | 组件 production-shaped 已闭合；Auth/Dex production gate 已通过，full platform release 仍受正式镜像、SLA/soak、备份/恢复和故障注入门禁约束 |
+| S02 K8s workloads vCluster | Gateway provider create vCluster + metadata target TLS + workload list observe + cleanup 通过 | `passed` / `metadata_target_tls` | 组件 production-shaped 已闭合；Auth/Dex production gate 已通过，full platform release 仍受正式镜像、SLA/soak、备份/恢复和故障注入门禁约束 |
+| S03 storage Rook-Ceph | Gateway volume/snapshot/filesystem/mount-target lifecycle + cleanup 通过 | `passed` / `production_gateway_in_cluster_serviceaccount` | 组件 production-shaped 已闭合；Auth/Dex production gate 已通过，full platform release 仍受正式镜像、SLA/soak、备份/恢复和故障注入门禁约束 |
+| S04 GPU inventory/DCGM | Gateway `/gpu-inventory` 与 `/gpu-inventory/occupancy` + Kubernetes NodeList + DCGM metrics 通过 | `passed` / `in_cluster_kubernetes_api_and_cluster_metrics_service` | 组件 production-shaped 已闭合；Auth/Dex production gate 已通过，full platform release 仍受正式镜像、SLA/soak、备份/恢复和故障注入门禁约束 |
 
 ## 新增强制门禁
 
@@ -43,7 +43,7 @@ cd repo && make validate-sprint13-b-track-production-shape
 - Kubernetes API 通过正式 ServiceAccount/RBAC、in-cluster API 或受控 API endpoint 访问，不使用本机 `kubectl proxy` 作为生产证据。
 - DCGM/Prometheus 使用集群 Service 或正式 Prometheus query，不使用本机 port-forward 作为生产证据。
 - 凭据、token、kubeconfig、服务器 IP、Pod IP 不写入 evidence 或文档。
-- 当前 production-shaped Gateway 仍为 `ANI_AUTH_MODE=dev`，Auth/Dex production gate 未通过前，S01-S04 和平台聚合状态不能标记为 production ready。
+- `SPRINT13-AUTH-DEX-PRODUCTION-GATE` 已通过，production-shaped Gateway 为 `ANI_AUTH_MODE=auth_service`；S01-S04 的 Auth/Dex production ready 阻断已解除，但 full platform release 仍需正式镜像、SLA/soak、备份/恢复和故障注入门禁。
 - S05-S07 B 轨可以继续，但只能按组件 production-shaped acceptance 标准验收。
 
 ## 验证
