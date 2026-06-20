@@ -17,6 +17,12 @@ PRODUCTION_RBAC = ROOT / "deploy/real-k8s-lab/sprint13-production-shaped-gateway
 PRODUCTION_DEPLOYMENT = ROOT / "deploy/real-k8s-lab/sprint13-production-shaped-gateway-deployment.yaml"
 GATEWAY_DOCKERFILE = ROOT / "services/ani-gateway/Dockerfile"
 MAKEFILE = ROOT / "Makefile"
+PROJECT_ROOT = ROOT.parent
+DOCS_INDEX = PROJECT_ROOT / "ANI-DOCS-INDEX.md"
+PLAN = PROJECT_ROOT / "ANI-06-开发计划.md"
+CURRENT_SPRINT = ROOT / "CURRENT-SPRINT.md"
+RECORDS_INDEX = RECORD_ROOT / "README.md"
+PRODUCTION_READINESS_REVIEW = RECORD_ROOT / "sprint13-s01-s04-production-readiness-review.md"
 
 SLICES = {
     "S01": {
@@ -131,6 +137,12 @@ REQUIRED_DEPLOYMENT_ENVS = {
     "VCLUSTER_HELM_SET_VALUES",
     "VCLUSTER_PROXY_SERVER_TEMPLATE",
     "VCLUSTER_KUBECONFIG_SERVER_TEMPLATE",
+}
+REQUIRED_PRODUCTION_READINESS_DOC_TOKENS = {
+    "Auth/Dex production gate",
+    "ANI_AUTH_MODE=dev",
+    "S05-S07 B 轨可以继续",
+    "不能标记为 production ready",
 }
 
 
@@ -410,6 +422,9 @@ def validate_production_deployment_contract() -> None:
     absent_env = REQUIRED_DEPLOYMENT_ENVS - set(env_by_name)
     if absent_env:
         fail(f"production Deployment missing env {', '.join(sorted(absent_env))}")
+    auth_mode = env_by_name.get("ANI_AUTH_MODE", {}).get("value")
+    if auth_mode != "dev":
+        fail("production-shaped Deployment ANI_AUTH_MODE must remain dev until Auth/Dex production gate is implemented and evidenced")
     database_env = env_by_name.get("DATABASE_URL", {})
     if "value" in database_env:
         fail("production Deployment must not commit DATABASE_URL literal")
@@ -428,9 +443,27 @@ def validate_production_deployment_contract() -> None:
         fail("production Gateway Service must be NodePort for non-local live-gate access")
 
 
+def validate_production_readiness_boundary_docs() -> None:
+    paths = [
+        DOCS_INDEX,
+        PLAN,
+        CURRENT_SPRINT,
+        RECORDS_INDEX,
+        PRODUCTION_READINESS_REVIEW,
+    ]
+    for path in paths:
+        if not path.exists():
+            fail(f"missing production readiness boundary doc {path.relative_to(PROJECT_ROOT)}")
+        content = path.read_text(encoding="utf-8")
+        missing = [token for token in REQUIRED_PRODUCTION_READINESS_DOC_TOKENS if token not in content]
+        if missing:
+            fail(f"{path.relative_to(PROJECT_ROOT)} must document production readiness boundary tokens: {', '.join(missing)}")
+
+
 def validate_all() -> None:
     validate_production_profile()
     validate_production_deployment_contract()
+    validate_production_readiness_boundary_docs()
     for slice_id, spec in SLICES.items():
         validate_evidence(slice_id, spec["evidence"])
         validate_result_doc(slice_id, spec["result"])

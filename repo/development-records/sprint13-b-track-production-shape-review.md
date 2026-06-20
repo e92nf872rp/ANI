@@ -15,10 +15,10 @@ S01-S04 均已通过各自 real-provider live gate；本批次最初为防止误
 
 | 切片 | 已证明 | production_shape 当前状态 | 生产形态仍缺 |
 |---|---|---|---|
-| S01 网络路由 Kube-OVN | `NETWORK_PROVIDER=kubeovn_rest` 下 route create/observe/cleanup 通过 | `pending` / `lab_kubeconfig` | `production_rbac_and_credential_management`；`persistent_route_metadata_reconciliation` |
-| S02 K8s workloads vCluster | Core Gateway workload list observe + cleanup 通过 | `pending` / `lab_proxy` | `production_per_cluster_metadata_target`；`production_tls_and_token_management` |
-| S03 storage Rook-Ceph | Core volume/snapshot/filesystem/mount-target create/list/cleanup 通过 | `pending` / `lab_kubeconfig_and_dev_gateway` | `production_serviceaccount_rbac`；`tenant_storage_lifecycle_and_backup_restore` |
-| S04 GPU inventory/DCGM | Core `/gpu-inventory` 与 `/gpu-inventory/occupancy` + DCGM metrics 通过 | `pending` / `lab_proxy` | `production_in_cluster_kubernetes_api`；`production_dcgm_service_or_prometheus_query` |
+| S01 网络路由 Kube-OVN | Gateway VPC/Subnet/Route create/list + Kube-OVN 底层观测 + cleanup 通过 | `passed` / `production_gateway_in_cluster_serviceaccount` | 组件 production-shaped 已闭合；full production 仍受 Auth/Dex production gate 阻断 |
+| S02 K8s workloads vCluster | Gateway provider create vCluster + metadata target TLS + workload list observe + cleanup 通过 | `passed` / `metadata_target_tls` | 组件 production-shaped 已闭合；full production 仍受 Auth/Dex production gate 阻断 |
+| S03 storage Rook-Ceph | Gateway volume/snapshot/filesystem/mount-target lifecycle + cleanup 通过 | `passed` / `production_gateway_in_cluster_serviceaccount` | 组件 production-shaped 已闭合；full production 仍受 Auth/Dex production gate 阻断 |
+| S04 GPU inventory/DCGM | Gateway `/gpu-inventory` 与 `/gpu-inventory/occupancy` + Kubernetes NodeList + DCGM metrics 通过 | `passed` / `in_cluster_kubernetes_api_and_cluster_metrics_service` | 组件 production-shaped 已闭合；full production 仍受 Auth/Dex production gate 阻断 |
 
 ## 新增强制门禁
 
@@ -37,12 +37,14 @@ cd repo && make validate-sprint13-b-track-production-shape
 
 ## 生产形态通过条件
 
-后续若要把某个切片升级为 production-shaped passed，必须重新产出证据，不得复用当前 lab evidence：
+当前 S01-S04 已通过 production-shaped passed。后续若要把平台聚合状态升级为 production ready，必须重新产出 Auth/Dex production gate 证据，不得复用当前组件 evidence：
 
 - Gateway 使用正式部署路径，不使用本机 `127.0.0.1` dev gateway 作为生产证据。
 - Kubernetes API 通过正式 ServiceAccount/RBAC、in-cluster API 或受控 API endpoint 访问，不使用本机 `kubectl proxy` 作为生产证据。
 - DCGM/Prometheus 使用集群 Service 或正式 Prometheus query，不使用本机 port-forward 作为生产证据。
 - 凭据、token、kubeconfig、服务器 IP、Pod IP 不写入 evidence 或文档。
+- 当前 production-shaped Gateway 仍为 `ANI_AUTH_MODE=dev`，Auth/Dex production gate 未通过前，S01-S04 和平台聚合状态不能标记为 production ready。
+- S05-S07 B 轨可以继续，但只能按组件 production-shaped acceptance 标准验收。
 
 ## 验证
 

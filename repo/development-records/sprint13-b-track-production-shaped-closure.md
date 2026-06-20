@@ -54,8 +54,10 @@ make validate-sprint13-b-track-production-shape
 
 S01-S04 已在正式 Gateway + in-cluster ServiceAccount/RBAC + metadata target / cluster Service 路径重新执行对应 `--production-shaped` live gate，并产出新的非敏感 evidence JSON，四份 evidence 均为 `production_shape.status=passed`。
 
-该结论只代表 **production-shaped acceptance passed**，不是 full platform production ready：Auth/Dex production gate、正式镜像发布/升级、长期 SLA/soak、备份/恢复和故障注入仍需后续单独门禁。
+该结论只代表 **production-shaped acceptance passed**，不是 full platform production ready：当前 production-shaped Gateway 仍为 `ANI_AUTH_MODE=dev`，Auth/Dex production gate、正式镜像发布/升级、长期 SLA/soak、备份/恢复和故障注入仍需后续单独门禁。S01-S04 和平台聚合状态不能标记为 production ready；S05-S07 B 轨可以继续，但也只能按同一组件级 production-shaped acceptance 标准验收。
 S01 也尚未证明 Gateway delete / provider delete 全生命周期；本轮 cleanup 是 live gate 对底层临时资源的受控清理。
+
+Auth/Dex 边界复审见 `sprint13-s01-s04-production-readiness-review.md`。
 
 ## 验证
 
