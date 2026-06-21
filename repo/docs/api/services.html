@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1/svc</code></dd></div>
-          <div><dt>Operations</dt><dd>19</dd></div>
-          <div><dt>Schemas</dt><dd>13</dd></div>
+          <div><dt>Operations</dt><dd>59</dd></div>
+          <div><dt>Schemas</dt><dd>51</dd></div>
         </dl>
       </section>
 
@@ -159,6 +159,86 @@
             </tr>
           </thead>
           <tbody>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/gpu-containers</code></td>
+          <td><code>listGpuContainers</code></td>
+          <td>GPU容器列表（已废弃，请使用 /api/v1/instances?kind=gpu_container）</td>
+          <td><code></code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/gpu-containers</code></td>
+          <td><code>createGpuContainer</code></td>
+          <td>创建GPU容器（已废弃，请使用 POST /api/v1/instances）</td>
+          <td><code></code></td>
+          <td>202, 400, 401, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/gpu-containers/available-gpus</code></td>
+          <td><code>listAvailableGpus</code></td>
+          <td>查询可用GPU资源（已废弃，请使用 GET /api/v1/gpu-inventory）</td>
+          <td><code></code></td>
+          <td>200, 401</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/gpu-containers/{container_id}</code></td>
+          <td><code>deleteGpuContainer</code></td>
+          <td>删除GPU容器（已废弃）</td>
+          <td><code></code></td>
+          <td>202, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/gpu-containers/{container_id}</code></td>
+          <td><code>getGpuContainer</code></td>
+          <td>获取GPU容器详情（已废弃）</td>
+          <td><code></code></td>
+          <td>200, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-patch">PATCH</span></td>
+          <td><code>/gpu-containers/{container_id}</code></td>
+          <td><code>patchGpuContainer</code></td>
+          <td>更新GPU容器配置（已废弃）</td>
+          <td><code></code></td>
+          <td>200, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/gpu-containers/{container_id}/metrics</code></td>
+          <td><code>getGpuContainerMetrics</code></td>
+          <td>获取GPU容器监控指标（已废弃）</td>
+          <td><code></code></td>
+          <td>200, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/gpu-containers/{container_id}/rebuild</code></td>
+          <td><code>rebuildGpuContainer</code></td>
+          <td>重建GPU容器（已废弃）</td>
+          <td><code></code></td>
+          <td>202, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/gpu-containers/{container_id}/rollback</code></td>
+          <td><code>rollbackGpuContainer</code></td>
+          <td>回滚GPU容器到指定版本（已废弃）</td>
+          <td><code></code></td>
+          <td>202, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/gpu-containers/{container_id}/versions</code></td>
+          <td><code>listGpuContainerVersions</code></td>
+          <td>GPU容器版本历史（已废弃）</td>
+          <td><code></code></td>
+          <td>200, 404</td>
+        </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
           <td><code>/inference-services</code></td>
@@ -181,7 +261,7 @@
           <td><code>deleteInferenceService</code></td>
           <td>停止并删除推理服务</td>
           <td><code></code></td>
-          <td>202, 404</td>
+          <td>202, 401, 403, 404</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -190,6 +270,54 @@
           <td>获取推理服务详情</td>
           <td><code></code></td>
           <td>200, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/inference-services/{service_id}/logs</code></td>
+          <td><code>getInferenceServiceLogs</code></td>
+          <td>获取推理服务日志</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/inference-services/{service_id}/policies</code></td>
+          <td><code>updateInferenceServicePolicies</code></td>
+          <td>更新推理服务限流与访问策略</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/inference-services/{service_id}/test</code></td>
+          <td><code>testInferenceService</code></td>
+          <td>推理服务调用测试</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/integrations</code></td>
+          <td><code>listIntegrations</code></td>
+          <td>第三方集成列表</td>
+          <td><code></code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/integrations</code></td>
+          <td><code>createIntegration</code></td>
+          <td>创建第三方集成</td>
+          <td><code></code></td>
+          <td>201, 400, 401, 403, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/integrations/bots</code></td>
+          <td><code>createIntegrationBot</code></td>
+          <td>创建企微/钉钉 Bot 集成</td>
+          <td><code></code></td>
+          <td>201, 400, 401, 403, 409</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -225,6 +353,14 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/knowledge-bases/{kb_id}/citations</code></td>
+          <td><code>listKnowledgeBaseCitations</code></td>
+          <td>知识库引用来源列表</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/knowledge-bases/{kb_id}/documents</code></td>
           <td><code>listKnowledgeBaseDocuments</code></td>
           <td>文档列表</td>
@@ -248,6 +384,14 @@
           <td>204, 404</td>
         </tr>
         <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/knowledge-bases/{kb_id}/permissions</code></td>
+          <td><code>updateKnowledgeBasePermissions</code></td>
+          <td>更新知识库访问权限</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
           <td><span class="method method-post">POST</span></td>
           <td><code>/knowledge-bases/{kb_id}/query</code></td>
           <td><code>queryKnowledgeBase</code></td>
@@ -262,6 +406,14 @@
           <td>知识库问答 SSE 流式</td>
           <td><code></code></td>
           <td>200, 400, 401</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/knowledge-bases/{kb_id}/sessions</code></td>
+          <td><code>listKnowledgeBaseSessions</code></td>
+          <td>知识库对话历史列表</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -311,6 +463,174 @@
           <td><code></code></td>
           <td>201</td>
         </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/sandboxes</code></td>
+          <td><code>listSandboxes</code></td>
+          <td>Sandbox列表（已废弃，请使用 /api/v1/instances?kind=sandbox）</td>
+          <td><code></code></td>
+          <td>200, 401</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/sandboxes</code></td>
+          <td><code>createSandbox</code></td>
+          <td>创建Sandbox（已废弃，请使用 POST /api/v1/instances）</td>
+          <td><code></code></td>
+          <td>202, 400, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/sandboxes/{sandbox_id}</code></td>
+          <td><code>deleteSandbox</code></td>
+          <td>删除Sandbox（已废弃）</td>
+          <td><code></code></td>
+          <td>202, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/sandboxes/{sandbox_id}</code></td>
+          <td><code>getSandbox</code></td>
+          <td>获取Sandbox详情（已废弃）</td>
+          <td><code></code></td>
+          <td>200, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-patch">PATCH</span></td>
+          <td><code>/sandboxes/{sandbox_id}</code></td>
+          <td><code>patchSandbox</code></td>
+          <td>更新Sandbox配置（已废弃）</td>
+          <td><code></code></td>
+          <td>200, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/sandboxes/{sandbox_id}/extend</code></td>
+          <td><code>extendSandbox</code></td>
+          <td>延期Sandbox有效期（已废弃）</td>
+          <td><code></code></td>
+          <td>200, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/sandboxes/{sandbox_id}/pause</code></td>
+          <td><code>pauseSandbox</code></td>
+          <td>暂停Sandbox（已废弃）</td>
+          <td><code></code></td>
+          <td>202, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/sandboxes/{sandbox_id}/security-events</code></td>
+          <td><code>listSandboxSecurityEvents</code></td>
+          <td>Sandbox安全事件列表（已废弃，请使用 GET /api/v1/instances/{id}/security-events）</td>
+          <td><code></code></td>
+          <td>200, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/sandboxes/{sandbox_id}/security-overview</code></td>
+          <td><code>getSandboxSecurityOverview</code></td>
+          <td>Sandbox安全概览（已废弃）</td>
+          <td><code></code></td>
+          <td>200, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant/members</code></td>
+          <td><code>listTenantMembers</code></td>
+          <td>租户成员列表</td>
+          <td><code></code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenant/members</code></td>
+          <td><code>inviteTenantMember</code></td>
+          <td>邀请成员加入租户</td>
+          <td><code></code></td>
+          <td>202, 400, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/tenant/members/{member_id}</code></td>
+          <td><code>removeTenantMember</code></td>
+          <td>移除租户成员</td>
+          <td><code></code></td>
+          <td>204, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant/members/{member_id}</code></td>
+          <td><code>getTenantMember</code></td>
+          <td>获取租户成员详情</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant/roles</code></td>
+          <td><code>listTenantRoles</code></td>
+          <td>角色列表</td>
+          <td><code></code></td>
+          <td>200, 401</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/tenant/roles/{role_id}</code></td>
+          <td><code>updateTenantRole</code></td>
+          <td>更新角色权限配置</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant/sso</code></td>
+          <td><code>getSsoConfig</code></td>
+          <td>获取SSO配置</td>
+          <td><code></code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/tenant/sso</code></td>
+          <td><code>updateSsoConfig</code></td>
+          <td>更新SSO配置</td>
+          <td><code></code></td>
+          <td>200, 400, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant/webhooks</code></td>
+          <td><code>listWebhooks</code></td>
+          <td>Webhook列表</td>
+          <td><code></code></td>
+          <td>200, 401</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenant/webhooks</code></td>
+          <td><code>createWebhook</code></td>
+          <td>创建Webhook</td>
+          <td><code></code></td>
+          <td>201, 400, 401, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/tenant/webhooks/{webhook_id}</code></td>
+          <td><code>deleteWebhook</code></td>
+          <td>删除Webhook</td>
+          <td><code></code></td>
+          <td>204, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant/webhooks/{webhook_id}/deliveries</code></td>
+          <td><code>listWebhookDeliveries</code></td>
+          <td>Webhook 投递日志</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
           </tbody>
         </table>
       </section>
@@ -319,18 +639,56 @@
         <h2>Schemas</h2>
         <ul class="schema-list">
         <li><code>AsyncTask</code></li>
+        <li><code>AvailableGpu</code></li>
+        <li><code>CreateGpuContainerRequest</code></li>
         <li><code>CreateInferenceEndpointRequest</code></li>
+        <li><code>CreateIntegrationBotRequest</code></li>
+        <li><code>CreateIntegrationRequest</code></li>
         <li><code>CreateModelRequest</code></li>
+        <li><code>CreateSandboxRequest</code></li>
+        <li><code>CreateWebhookRequest</code></li>
         <li><code>CursorPage</code></li>
         <li><code>ErrorResponse</code></li>
+        <li><code>ExtendSandboxRequest</code></li>
+        <li><code>GpuContainer</code></li>
+        <li><code>GpuContainerMetrics</code></li>
+        <li><code>GpuContainerVersion</code></li>
         <li><code>InferenceEndpoint</code></li>
         <li><code>InferenceService</code></li>
+        <li><code>InferenceServiceLogEntry</code></li>
+        <li><code>InferenceServiceLogListResponse</code></li>
+        <li><code>InferenceServicePolicies</code></li>
+        <li><code>InferenceTestRequest</code></li>
+        <li><code>InferenceTestResponse</code></li>
+        <li><code>Integration</code></li>
+        <li><code>IntegrationBot</code></li>
+        <li><code>IntegrationListResponse</code></li>
+        <li><code>InviteMemberRequest</code></li>
+        <li><code>KBCitation</code></li>
+        <li><code>KBCitationListResponse</code></li>
         <li><code>KBDocument</code></li>
         <li><code>KBQueryRequest</code></li>
         <li><code>KBQueryResponse</code></li>
+        <li><code>KBSession</code></li>
+        <li><code>KBSessionListResponse</code></li>
         <li><code>KnowledgeBase</code></li>
         <li><code>Model</code></li>
         <li><code>ModelVersion</code></li>
+        <li><code>PatchGpuContainerRequest</code></li>
+        <li><code>PatchSandboxRequest</code></li>
+        <li><code>Sandbox</code></li>
+        <li><code>SecurityEvent</code></li>
+        <li><code>SecurityOverview</code></li>
+        <li><code>SsoConfig</code></li>
+        <li><code>TenantMember</code></li>
+        <li><code>TenantRole</code></li>
+        <li><code>UpdateInferenceServicePoliciesRequest</code></li>
+        <li><code>UpdateKBPermissionsRequest</code></li>
+        <li><code>UpdateSsoConfigRequest</code></li>
+        <li><code>UpdateTenantRoleRequest</code></li>
+        <li><code>Webhook</code></li>
+        <li><code>WebhookDelivery</code></li>
+        <li><code>WebhookDeliveryListResponse</code></li>
         </ul>
       </section>
 

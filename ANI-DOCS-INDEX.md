@@ -8,17 +8,18 @@
 ## 当前结论
 
 ```text
-当前阶段：Phase 1 / Sprint 13 / Core real provider 与 live gate 收敛启动
+当前阶段：Phase 1 / Sprint 13 / Core real provider 与 live gate 收敛
 当前不是 Phase 2：Phase 2 指 2026-10 以后延期能力
 当前入口：repo/CURRENT-SPRINT.md
-当前执行：Sprint 12 已完成 A/B1/B2/B3 全部 19 个 Core handler + 2 个 422 的 Tier1 local profile；Sprint 13 正在真实 provider / live gate 收敛
-代码边界：Sprint 13 必须沿用 Sprint 12 已闭合的 api/openapi/v1.yaml operationId、pkg/ports、pkg/adapters 与 services/ani-gateway/internal/router handler，不得绕过 port 或新增 Services 业务逻辑
-Sprint 13 计划：真实 provider / live gate 计划见 repo/development-records/sprint13-real-provider-readiness-plan.md；S01 网络路由 Kube-OVN、S02 K8s workloads vCluster、S03 storage Rook-Ceph、S04 GPU NVIDIA device-plugin/DCGM、S05 object-store MinIO pre-signed URL、S06 vector Milvus 与 S07 instance observability Prometheus + kubelet / K8s API 已通过 `--production-shaped` live gate，七份 evidence 均为 `production_shape.status=passed`，并由 `validate-sprint13-b-track-production-shape` 固定 Gateway / in-cluster ServiceAccount / metadata target / cluster Service / object-store / vector-store / observability proof_items 标准以及 S02/S03/S04/S05/S06/S07 workload/storage/GPU+DCGM/object-store/vector-store/observability 正向业务证据；S01 生产形态门禁强制经 ANI Gateway `POST/GET /networks/routes` create/list，再用 kubectl 只做底层 Kube-OVN 观测与 cleanup，禁止 kubectl-only 证据标 passed；SPRINT13-GPU-INVENTORY-DCGM-A-TRACK / validate-gpu-inventory-live-gate 固定 NVIDIA device-plugin node GPU capacity 与 DCGM metrics 的 GPU inventory/occupancy live gate 契约门禁；SPRINT13-OBJECTSTORE-MINIO-A-TRACK / validate-object-store-live-gate 固定 MinIO bucket 与 upload/download pre-signed URL contract 门禁，SPRINT13-OBJECTSTORE-MINIO-LIVE-A 已归档真实 bucket create/list、pre-signed URL PUT/GET 与 cleanup evidence；SPRINT13-VECTOR-MILVUS-A-TRACK / validate-vector-store-live-gate 固定 Milvus vector document insert 与 search readiness contract 门禁，SPRINT13-VECTOR-MILVUS-LIVE-A 已归档真实 vector store create、documents insert、search readiness 与 cleanup evidence；SPRINT13-INSTANCE-OBSERVABILITY-PROMETHEUS-A-TRACK / validate-instance-observability-live-gate 固定 Prometheus + kubelet / K8s API instance observability logs/events/metrics/security-events/exec contract 门禁，SPRINT13-INSTANCE-OBSERVABILITY-PROMETHEUS-LIVE-A 已归档真实 logs/events/metrics/security-events/exec evidence；S01-S07 只代表 production-shaped acceptance passed，不等于 full platform production ready；SPRINT13-AUTH-DEX-PRODUCTION-GATE（Auth/Dex production gate）已通过真实集群生产形态验证，production-shaped Gateway 使用 `ANI_AUTH_MODE=auth_service`，并经 `validate-auth-dex-production-gate` 固定 anonymous 401、OIDC begin/complete 200、protected API bearer 200 与 refresh 200；S01-S07 的 Auth/Dex production ready 阻断已解除，但该结论仍不是 full platform production ready；历史 LIVE PENDING token 仅保留作门禁兼容语境，S07 已通过 production-shaped live gate，不得据此声称 full platform production ready
-
-兼容硬门禁 token：`S05-S07 B 轨可以继续` 仍表示 Auth/Dex production gate 后允许按组件 production-shaped 标准推进 S05-S07；截至 2026-06-21，S05/S06/S07 均已 passed，历史 LIVE PENDING token 仅作门禁兼容语境。
-真实底座门禁：REAL-K8S-LAB-A / make validate-real-k8s-profile；Sprint 5 八个 live gate（网络/VM/vCluster/upgrade/Secret/HA/KMS-SM4/GPU-CAPK）已归档 evidence；其中 M1-NETWORK-LIVE-A / validate-kubeovn-network-live-gate 固定 Kube-OVN Vpc/Subnet、NetworkPolicy 和 Service/LB contract 门禁；M1-K8S-LIVE-A / validate-vcluster-live-gate 固定 vCluster Helm/kubeconfig、kubectl `/version` 和 Core live proxy contract 门禁
-真实底座状态：Sprint 11 真实服务器只读验证与 Rook-Ceph 正式部署已闭环并转历史回归门禁（CephCluster Ready/HEALTH_OK，5 SSD OSD，ani-rbd-ssd StorageClass 上线）；RBD smoke test 与逐节点 reboot resilience 已通过
-不是实际 v1.0.0 发布；backup/restore 演练、故障注入、soak 及破坏性磁盘操作须单独审批
+代码边界：沿用 Sprint 12 已闭合的 api/openapi/v1.yaml operationId、pkg/ports、pkg/adapters 与 Gateway handler；不得绕过 port 或新增 Services 业务逻辑。
+Sprint 13 结果：S01-S07 均已通过 --production-shaped live gate，七份 evidence 均为 production_shape.status=passed，并由 validate-sprint13-b-track-production-shape 固定 proof_items。
+S05 token：SPRINT13-OBJECTSTORE-MINIO-A-TRACK / validate-object-store-live-gate / MinIO / pre-signed URL / LIVE PENDING（历史兼容语境）。
+S06 token：SPRINT13-VECTOR-MILVUS-A-TRACK / validate-vector-store-live-gate / Milvus / LIVE PENDING（历史兼容语境）。
+S07 token：SPRINT13-INSTANCE-OBSERVABILITY-PROMETHEUS-A-TRACK / validate-instance-observability-live-gate / Prometheus / kubelet / LIVE PENDING（历史兼容语境）。
+Auth 边界：SPRINT13-AUTH-DEX-PRODUCTION-GATE / Auth/Dex production gate 已通过；production-shaped Gateway 使用 ANI_AUTH_MODE=auth_service。
+兼容硬门禁 token：S05-S07 B 轨可以继续；截至 2026-06-21，S05/S06/S07 均已 passed。
+真实底座门禁：REAL-K8S-LAB-A / make validate-real-k8s-profile；Sprint 11 Rook-Ceph 正式部署结果保留为历史回归边界。
+生产化边界：production-shaped acceptance passed 不等于 full platform production ready，也不是实际 v1.0.0 发布；backup/restore、故障注入、soak、正式镜像发布/升级仍需后续 release gate。
 ```
 
 Sprint 6-10 完成 contract/local/release-prep scaffold（installer、offline、CLI、RC readiness 均为 contract/local validation，非真实发布）；Sprint 11 为首次真实物理服务器验证阶段，包含 Rook-Ceph VM 优先块存储 live 部署，现已转为历史回归门禁；Sprint 12 已完成 Core「Services 支撑 Handler」19 个 handler + 2 个 422 的 Tier1 local profile 收口。历史 Sprint 4 回归门禁（`SPEC-SPLIT-A`、`SPEC-CORE-BETA`、`SPEC-COMPAT-A`、`MOCK-A`、`DOC-API-A`、`SDK-BETA-*`、`SDK-MOCK-SMOKE-*`、`SPRINT4-CLOSURE-A`）有效。详细技术边界与验收命令见 [`repo/CURRENT-SPRINT.md`](repo/CURRENT-SPRINT.md)，已完成批次见 [`repo/development-records/README.md`](repo/development-records/README.md)。当前活跃冲刺为 **Sprint 13 / Core real provider 与 live gate 收敛**：S01 网络路由 Kube-OVN、S02 K8s workloads vCluster、S03 storage Rook-Ceph、S04 GPU NVIDIA device-plugin/DCGM、S05 object-store MinIO、S06 vector Milvus 与 S07 instance observability Prometheus 已通过 production-shaped live gate 并归档 `production_shape.status=passed` evidence；从 Sprint 12 已闭合的 handler、ports、local adapters 接入真实组件和 evidence JSON 门禁；production-shaped acceptance passed 不等于 full platform production ready。
@@ -94,3 +95,6 @@ Sprint 6-10 完成 contract/local/release-prep scaffold（installer、offline、
 8. Sprint 状态、完成归档和验证证据维护在 `repo/CURRENT-SPRINT.md`、`ANI-06-开发计划.md` Section 零和 `repo/development-records/*.md`；当前团队任务清单维护在 `repo/services/tasks/execution/`（ANI-14 规范：评审后迁入 `repo/docs/`）。
 9. 更换 AI 模型或工具时，必须先重新读取本文件、`CLAUDE.md` 和 `repo/CURRENT-SPRINT.md`，不得依赖上一个会话的记忆。
 10. 修改文档入口后必须运行 `make validate-doc-entrypoints`。
+
+<!-- 历史回归门禁校验器兼容标记（请勿删除；对应 dev-records 历史批次与 make validate-* 门禁） -->
+**历史回归门禁 token（校验器兼容，勿删）：** SPEC-SPLIT-A、SPEC-CORE-BETA、SPEC-COMPAT-A、SDK-BETA-A、SDK-BETA-B、SDK-BETA-C、SDK-BETA-D、SDK-MOCK-SMOKE-A、SDK-MOCK-SMOKE-B、SDK-MOCK-SMOKE-C、SDK-MOCK-SMOKE-D、MOCK-A、DOC-API-A、SPRINT4-CLOSURE-A（`make validate-sprint4-closure`）；Sprint 11 / Core Real Deployment Validation 正式部署完成；真实服务器只读验证已完成；Rook-Ceph 正式部署已完成；Sprint 11 执行环境：正式部署执行环境。

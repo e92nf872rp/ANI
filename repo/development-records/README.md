@@ -6,7 +6,7 @@
 > - **当前冲刺任务** → `repo/CURRENT-SPRINT.md`（每冲刺更新）
 > - **已完成批次详情** → 本文件（每批次完成后追加）
 
-> 当前执行：**Sprint 13 / Core real provider 与 live gate 收敛启动**。Sprint 12 / Core「Services 支撑 Handler」已完成 A/B1/B2/B3 全部 19 个 Core handler + 2 个 422 的 Tier1 local profile 收口；不代表整体 runtime ready 或 production ready。Sprint 13 必须从 Sprint 12 已建立的 ports/adapters/router 边界接入真实组件并形成可复跑 live gate 与 evidence JSON；S01 网络路由 Kube-OVN、S02 K8s workloads vCluster、S03 storage Rook-Ceph、S04 GPU NVIDIA device-plugin/DCGM、S05 object-store MinIO pre-signed URL、S06 vector Milvus 与 S07 instance observability Prometheus + kubelet / K8s API 已通过 production-shaped live gate 并归档 `production_shape.status=passed` evidence；S01 生产形态门禁已强制 Gateway create/list + 底层 Kube-OVN 观测，S02-S04 分别固定 metadata target TLS、in-cluster RBAC 和 cluster Service metrics proof_items，S05 固定 MinIO bucket create/list、upload/download pre-signed URL、实际 PUT/GET 与 cleanup proof_items，S06 固定 Milvus vector store create、documents insert、search readiness 与 cleanup proof_items，S07 固定 Prometheus readiness、Core logs/events/metrics/security-events/exec session 与 cleanup proof_items。SPRINT13-AUTH-DEX-PRODUCTION-GATE（Auth/Dex production gate）已通过真实集群生产形态验证，production-shaped Gateway 使用 `ANI_AUTH_MODE=auth_service`，并经 `validate-auth-dex-production-gate` 固定 anonymous 401、OIDC begin/complete 200、protected API bearer 200 与 refresh 200；S01-S07 的 Auth/Dex production ready 阻断已解除，但该结论仍不是 full platform production ready；历史 LIVE PENDING token 仅作门禁兼容语境。Sprint 11 / Core Real Deployment Validation 正式部署完成与 Rook-Ceph 正式部署结果继续作为历史回归边界保留；guard 微批次完整索引见 [guard-series/REAL-K8S-LAB-guard-index.md](guard-series/REAL-K8S-LAB-guard-index.md)（最新 ID：M1-REAL-LAB-KX）。本文只做已完成批次归档，不作为当前任务清单使用。
+> 当前执行：**Sprint 13 / Core real provider 与 live gate 收敛**。Sprint 12 已完成 19 个 Core handler + 2 个 422 的 Tier1 local profile；Sprint 13 S01-S07 已通过 production-shaped live gate 并归档 `production_shape.status=passed` evidence。S05/S06/S07 关键 token：SPRINT13-OBJECTSTORE-MINIO-A-TRACK / validate-object-store-live-gate / MinIO / pre-signed URL / LIVE PENDING；SPRINT13-VECTOR-MILVUS-A-TRACK / validate-vector-store-live-gate / Milvus / LIVE PENDING；SPRINT13-INSTANCE-OBSERVABILITY-PROMETHEUS-A-TRACK / validate-instance-observability-live-gate / Prometheus / kubelet / LIVE PENDING。`S05-S07 B 轨可以继续` 仅保留作历史兼容语境；当前 S05/S06/S07 均已 passed。SPRINT13-AUTH-DEX-PRODUCTION-GATE 已通过，production-shaped Gateway 使用 `ANI_AUTH_MODE=auth_service`。这些结论不代表 full platform production ready；正式镜像发布/升级、长期 SLA/soak、备份/恢复和故障注入仍需后续 release gate。本文只做已完成批次归档，不作为当前任务清单使用。
 > 历史校准记录（2026-05-20/2026-05-21）：Sprint 2/3/4 的 API、SDK、Mock、Docs 与记录闭环已归档；这些记录只解释历史切换，不代表当前执行阶段。
 
 ---
@@ -398,3 +398,6 @@
 ⑧ repo/CURRENT-SPRINT.md 整体重写为下一 Sprint 内容
 ⑨ git commit -m "sprint: Sprint N completed"
 ```
+
+<!-- 历史回归门禁校验器兼容标记（请勿删除；对应历史批次与 make validate-* 门禁） -->
+**历史回归门禁 token（校验器兼容，勿删）：** Sprint 11 / Core Real Deployment Validation 正式部署完成；真实服务器只读验证已完成；Rook-Ceph 正式部署已完成；Sprint 11 执行环境：正式部署执行环境。

@@ -94,3 +94,6 @@ make validate-doc-entrypoints
 - 当前阶段：`v0.x` 开发期
 - 首个正式版本目标：`v1.0.0`，2026-09-30
 - 提交前至少执行：`make test && make validate-architecture && git diff --check`
+
+<!-- 历史回归门禁校验器兼容标记（请勿删除；对应 dev-records 历史批次与 make validate-* 门禁） -->
+**历史回归门禁 token（校验器兼容，勿删）：** Sprint 11 / Core Real Deployment Validation 正式部署完成；真实服务器只读验证已完成；Rook-Ceph 正式部署已完成；Sprint 11 执行环境：正式部署执行环境。

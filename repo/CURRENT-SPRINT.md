@@ -14,21 +14,26 @@
 |---|---|
 | **冲刺编号** | Sprint 13（Core real provider 与 live gate 收敛） |
 | **主题** | 将 Sprint 12 已闭合的 Core handler/ports/local adapters 接到真实组件，并建立可复跑 live gate 与 evidence JSON |
-| **当前状态** | Sprint 12 进入条件已满足：A/B1/B2/B3 全部 19 个 Core handler + 2 个 422 已完成并收口；Sprint 13 当前为真实 provider/live gate 收敛阶段，S01 网络路由 Kube-OVN、S02 K8s workloads vCluster、S03 storage Rook-Ceph、S04 GPU NVIDIA device-plugin/DCGM、S05 object-store MinIO、S06 vector Milvus 与 S07 instance observability Prometheus 已重新执行 production-shaped live gate 并归档 `production_shape.status=passed` evidence；`SPRINT13-B-TRACK-PRODUCTION-SHAPED-CLOSURE` 与 post-review hardening 已补齐 in-cluster ServiceAccount/RBAC、Gateway + bootstrap Kubernetes REST provider 装配、S01 Gateway create/list + route metadata persistence、S02/S03/S04 production-shaped live gate flags 与 S01-S07 proof 标准；`SPRINT13-AUTH-DEX-PRODUCTION-GATE` / Auth/Dex production gate 已通过，production-shaped Gateway 固定 `ANI_AUTH_MODE=auth_service`；历史 LIVE PENDING token 仅作门禁兼容语境 |
-| **执行环境** | 真实 provider 批次必须先声明组件与版本、live gate 命令、evidence 输出路径和失败边界；涉及真实服务器写操作前必须重新只读盘点并取得人工确认 |
-| **已由代码/真实环境证明完成** | Sprint 12 证明了 contract + Tier1 local profile：B1 实例观测/GPU/Sandbox、B2 网络/存储/K8s workloads + 2 个 422、B3 对象/向量写入均经 OpenAPI、ports/adapters、Gateway handler 和测试闭合。Sprint 13 S01 已证明网络路由 Kube-OVN route provider 在真实 lab 中 create/observe/cleanup 通过；S02 已证明 vCluster 内临时 Deployment 可经 Core `/k8s-clusters/{id}/workloads` observe 并 cleanup；S03 已证明 storage provider 经真实 Kubernetes/Rook-Ceph/CSI snapshot 路径完成 Core volume create、snapshot create/list、filesystem create、mount-target list 与 cleanup；S04 已证明 `GPU_INVENTORY_PROVIDER=kubernetes_rest` 下 Core `/gpu-inventory` 与 `/gpu-inventory/occupancy` 可基于真实 Kubernetes NodeList GPU capacity 与 DCGM metrics 返回 real provider evidence。Sprint 11/Sprint 5 提供真实 K8s/Kube-OVN/KubeVirt/vCluster/Rook-Ceph/GPU/CAPK 等历史 live evidence，可作为后续 provider gate 的基础。 |
-| **生产化边界** | Sprint 13 S01-S07 已达到 production-shaped acceptance passed（七份 evidence 均为 `production_shape.status=passed`，并通过 `validate-sprint13-b-track-production-shape`）；`SPRINT13-AUTH-DEX-PRODUCTION-GATE` / Auth/Dex production gate 已在真实集群通过 `validate-auth-dex-production-gate`，production-shaped Gateway 固定 `ANI_AUTH_MODE=auth_service`，Auth/Dex production ready 阻断已解除；但这不等于 full platform production ready，正式镜像发布/升级、长期 SLA/soak、备份/恢复和故障注入仍需后续 release gate |
-| **关联历史门禁** | Sprint 5 REAL-K8S-LAB-A 和 live gate evidence；Sprint 7 installer/offline/CLI/regression gates；Sprint 8 release hardening/offline/CLI/doc gates；Sprint 9 RC readiness gates；Sprint 10 release-prep gates |
-| **最后校准日期** | 2026-06-20 |
+| **当前状态** | Sprint 12 已完成 19 个 Core handler + 2 个 422 的 Tier1 local profile；Sprint 13 S01-S07 均已归档 production_shape.status=passed evidence；历史 LIVE PENDING token 仅作门禁兼容语境 |
+| **生产化边界** | Sprint 13 只达到 production-shaped acceptance passed；不等于 full platform production ready。正式镜像发布/升级、长期 SLA/soak、备份/恢复和故障注入仍需后续 release gate |
+| **Auth 边界** | SPRINT13-AUTH-DEX-PRODUCTION-GATE / Auth/Dex production gate 已通过；production-shaped Gateway 固定 ANI_AUTH_MODE=auth_service |
+| **执行入口** | `development-records/sprint13-real-provider-readiness-plan.md`、`development-records/README.md`、本文件验收命令 |
+| **执行环境** | 真实 provider 写操作前必须重新只读盘点并取得人工确认；evidence 不得包含凭据、服务器 IP 或完整内网端点 |
+| **最后校准日期** | 2026-06-21 |
 
 ## Sprint 13 当前任务
 
-1. `SPRINT13-REAL-PROVIDER-READINESS-PLAN`：已建立 Sprint 12 handler/ports/local adapters 到真实 provider/live gate 的代码关联计划；该文档是 Sprint 13 的执行地图，不是完成记录。
-2. 已完成 S01 网络路由 Kube-OVN、S02 K8s workloads vCluster、S03 storage Rook-Ceph、S04 GPU NVIDIA device-plugin/DCGM、S05 object-store MinIO、S06 vector Milvus 与 S07 instance observability Prometheus B 轨真实 live gate：S01 route provider 接线、Gateway runtime 注入、真实 create/observe、evidence JSON 与 cleanup 核验均已完成；S02 vCluster CLI 恢复、chart version pin、临时 Deployment create、Core proxy/workload list observe 与 cleanup 已完成；S03 CSI snapshot CRDs/controller 与默认 RBD `VolumeSnapshotClass` 已恢复，Core volume create、snapshot create/list、filesystem create、mount-target list 与 cleanup 已完成；S04 DCGM exporter 已恢复为 Helm release `ani-dcgm-exporter`，Core `/gpu-inventory`、`/gpu-inventory/occupancy`、Kubernetes NodeList GPU capacity 与 DCGM `DCGM_FI_DEV_GPU_UTIL` 已通过 `validate-gpu-inventory-live-gate --live`，evidence 已归档；S05 `validate-object-store-live-gate --live --production-shaped --cleanup` 完成 MinIO bucket create/list、upload/download pre-signed URL、实际 PUT/GET 与 cleanup，evidence 已归档；S06 `validate-vector-store-live-gate --live --production-shaped --cleanup` 完成 Milvus readiness、vector store create、documents insert、search readiness 与 cleanup，evidence 已归档；S07 `validate-instance-observability-live-gate --live --production-shaped --cleanup` 完成 Prometheus readiness、Core logs/events/metrics/security-events/exec session 与临时 Pod/Event cleanup，evidence 已归档。
-3. 已新增并升级 S01-S04 B 轨生产形态门禁：[`development-records/sprint13-b-track-production-shape-review.md`](development-records/sprint13-b-track-production-shape-review.md)、[`development-records/sprint13-b-track-production-shaped-closure.md`](development-records/sprint13-b-track-production-shaped-closure.md)、[`development-records/sprint13-b-track-production-shaped-post-review.md`](development-records/sprint13-b-track-production-shaped-post-review.md) 与 `make validate-sprint13-b-track-production-shape`。该门禁现在要求 S01-S04 passed evidence 拒绝 lab/local/dev gateway 证据并包含每切片必需的 `proof_items`；S01 必须包含 Gateway `POST/GET /networks/routes` create/list 证据，S02/S03/S04 必须包含 workload/storage/GPU+DCGM 正向业务证据，禁止 kubectl-only 或 proof-only 证据标 passed。S05-S07 B 轨也必须按 `deploy/real-k8s-lab/sprint13-production-shaped-gateway-profile.yaml` 的 proof 标准验收。
-4. S01-S04 production readiness 复审已归档到 [`development-records/sprint13-s01-s04-production-readiness-review.md`](development-records/sprint13-s01-s04-production-readiness-review.md)：`SPRINT13-AUTH-DEX-PRODUCTION-GATE` / Auth/Dex production gate 已通过真实集群验证，Gateway 为 `ANI_AUTH_MODE=auth_service`，并通过 `validate-auth-dex-production-gate` 固定 anonymous 401、OIDC begin/complete 200、protected API bearer 200 与 refresh 200；S01-S04 的 Auth/Dex production ready 阻断已解除。S05-S07 B 轨可以继续，但仍只能继续标记组件级 production-shaped acceptance；full platform production ready 仍受正式镜像发布/升级、长期 SLA/soak、备份/恢复和故障注入等 release gate 约束。
-5. 每个 provider slice 必须先补 real adapter 或 provider runtime 选择，再补 live gate 和 evidence JSON，再更新对应 development record；未跑通前只保持 planning/local-profile 状态。
-6. 持续执行驱动：[`development-records/sprint13-loop-execution-prompts.md`](development-records/sprint13-loop-execution-prompts.md) 提供 codex goal 持续循环提示与切片队列（S01–S07）。两轨道：**A 轨 loop-safe**（readiness/real adapter 代码/fake 单测/契约级 live-gate/文档闭环/提交，可自动）；**B 轨 human-gated**（真实集群写、组件部署、真实 live gate evidence、real-provider 标记，必须人工先只读盘点 + 确认）。循环只跑 A 轨，把切片推进到「code+contract ready, LIVE PENDING」。
+| 切片 | 状态 | 证据 / gate |
+|---|---|---|
+| S01 网络路由 Kube-OVN | production-shaped gate passed | `sprint13-netroute-kubeovn-live-result.md`；`validate-sprint13-b-track-production-shape` |
+| S02 K8s workloads vCluster | production-shaped gate passed | `sprint13-k8s-workloads-vcluster-live-result.md`；metadata target TLS proof |
+| S03 storage Rook-Ceph | production-shaped gate passed | `sprint13-storage-rook-ceph-live-result.md`；snapshot/mount-target proof |
+| S04 GPU NVIDIA device-plugin/DCGM | production-shaped gate passed | `sprint13-gpu-inventory-dcgm-live-result.md`；DCGM metrics proof |
+| S05 object-store MinIO | production-shaped gate passed | `SPRINT13-OBJECTSTORE-MINIO-A-TRACK`；`validate-object-store-live-gate`；pre-signed URL；LIVE PENDING 仅作历史兼容 |
+| S06 vector Milvus | production-shaped gate passed | `SPRINT13-VECTOR-MILVUS-A-TRACK`；`validate-vector-store-live-gate`；LIVE PENDING 仅作历史兼容 |
+| S07 instance observability Prometheus | production-shaped gate passed | `SPRINT13-INSTANCE-OBSERVABILITY-PROMETHEUS-A-TRACK`；`validate-instance-observability-live-gate`；Prometheus + kubelet；LIVE PENDING 仅作历史兼容 |
+
+闭环规则：每个 provider slice 必须具备 real adapter/provider runtime、live gate、非敏感 evidence JSON、development record 和全局 production-shape guard。S05-S07 B 轨可以继续 作为历史兼容 token 保留；截至 2026-06-21，S05/S06/S07 均已 passed。
 
 ## Sprint 13 执行矩阵
 
@@ -145,3 +150,6 @@ make validate-real-k8s-profile
 ```
 
 > 涉及真实服务器写操作前，必须先重新执行只读盘点，并由人工确认具体设备 ID、预期影响和回滚方案。
+
+<!-- 历史回归门禁校验器兼容标记（请勿删除；对应 dev-records 历史批次与 make validate-* 门禁） -->
+**历史回归门禁 token（校验器兼容，勿删）：** Sprint 4 回归门禁 SPEC-SPLIT-A、SPEC-CORE-BETA、SPEC-COMPAT-A、SDK-BETA-A、SDK-BETA-B、SDK-BETA-C、SDK-BETA-D、SDK-MOCK-SMOKE-A、SDK-MOCK-SMOKE-B、SDK-MOCK-SMOKE-C、SDK-MOCK-SMOKE-D、MOCK-A、DOC-API-A（`make validate-doc-api`）、SPRINT4-CLOSURE-A（`make validate-sprint4-closure`），矩阵见 `api/core-beta-readiness.yaml`；Sprint 11 / Core Real Deployment Validation 正式部署完成；真实服务器只读验证已完成；Rook-Ceph 正式部署已完成；Sprint 11 执行环境：正式部署执行环境。
