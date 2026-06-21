@@ -53,6 +53,18 @@
       "scope": ""
     },
     {
+      "operationId": "listStorageBuckets",
+      "method": "GET",
+      "path": "/buckets",
+      "scope": "scope:objects:read"
+    },
+    {
+      "operationId": "createStorageBucket",
+      "method": "POST",
+      "path": "/buckets",
+      "scope": "scope:objects:create"
+    },
+    {
       "operationId": "listEncryptionKeys",
       "method": "GET",
       "path": "/encryption/keys",
@@ -125,6 +137,24 @@
       "scope": "scope:filesystems:read"
     },
     {
+      "operationId": "listFilesystemMountTargets",
+      "method": "GET",
+      "path": "/filesystems/{filesystem_id}/mount-targets",
+      "scope": "scope:filesystems:read"
+    },
+    {
+      "operationId": "listGPUInventory",
+      "method": "GET",
+      "path": "/gpu-inventory",
+      "scope": "scope:gpu-inventory:read"
+    },
+    {
+      "operationId": "getGPUOccupancy",
+      "method": "GET",
+      "path": "/gpu-inventory/occupancy",
+      "scope": "scope:gpu-inventory:read"
+    },
+    {
       "operationId": "liveness",
       "method": "GET",
       "path": "/healthz",
@@ -161,15 +191,45 @@
       "scope": "scope:instances:console"
     },
     {
+      "operationId": "listInstanceEvents",
+      "method": "GET",
+      "path": "/instances/{instance_id}/events",
+      "scope": "scope:instances:read"
+    },
+    {
+      "operationId": "createInstanceExecSession",
+      "method": "POST",
+      "path": "/instances/{instance_id}/exec",
+      "scope": "scope:instances:exec"
+    },
+    {
       "operationId": "applyInstanceLifecycle",
       "method": "POST",
       "path": "/instances/{instance_id}/lifecycle",
       "scope": "scope:instances:update"
     },
     {
+      "operationId": "listInstanceLogs",
+      "method": "GET",
+      "path": "/instances/{instance_id}/logs",
+      "scope": "scope:instances:read"
+    },
+    {
+      "operationId": "getInstanceMetrics",
+      "method": "GET",
+      "path": "/instances/{instance_id}/metrics",
+      "scope": "scope:instances:read"
+    },
+    {
       "operationId": "listInstanceOperations",
       "method": "GET",
       "path": "/instances/{instance_id}/operations",
+      "scope": "scope:instances:read"
+    },
+    {
+      "operationId": "listInstanceSecurityEvents",
+      "method": "GET",
+      "path": "/instances/{instance_id}/security-events",
       "scope": "scope:instances:read"
     },
     {
@@ -245,6 +305,12 @@
       "scope": "scope:k8s-clusters:manage"
     },
     {
+      "operationId": "listK8sClusterWorkloads",
+      "method": "GET",
+      "path": "/k8s-clusters/{cluster_id}/workloads",
+      "scope": "scope:k8s-clusters:read"
+    },
+    {
       "operationId": "reportTokenUsage",
       "method": "POST",
       "path": "/metering/token-usage",
@@ -279,6 +345,18 @@
       "method": "GET",
       "path": "/networks/load-balancers/{load_balancer_id}",
       "scope": "scope:networks:read"
+    },
+    {
+      "operationId": "listNetworkRoutes",
+      "method": "GET",
+      "path": "/networks/routes",
+      "scope": "scope:networks:read"
+    },
+    {
+      "operationId": "createNetworkRoute",
+      "method": "POST",
+      "path": "/networks/routes",
+      "scope": "scope:networks:create"
     },
     {
       "operationId": "listNetworkSecurityGroups",
@@ -365,6 +443,12 @@
       "scope": "scope:objects:create"
     },
     {
+      "operationId": "uploadStorageObject",
+      "method": "POST",
+      "path": "/objects/upload",
+      "scope": "scope:objects:create"
+    },
+    {
       "operationId": "deleteStorageObject",
       "method": "DELETE",
       "path": "/objects/{object_id}",
@@ -374,6 +458,12 @@
       "operationId": "getStorageObject",
       "method": "GET",
       "path": "/objects/{object_id}",
+      "scope": "scope:objects:read"
+    },
+    {
+      "operationId": "downloadStorageObject",
+      "method": "GET",
+      "path": "/objects/{object_id}/download",
       "scope": "scope:objects:read"
     },
     {
@@ -467,6 +557,12 @@
       "scope": "scope:registry:read"
     },
     {
+      "operationId": "listSandboxTemplates",
+      "method": "GET",
+      "path": "/sandbox-templates",
+      "scope": "scope:instances:read"
+    },
+    {
       "operationId": "listSecrets",
       "method": "GET",
       "path": "/secrets",
@@ -527,6 +623,12 @@
       "scope": "scope:vector-stores:read"
     },
     {
+      "operationId": "insertVectorStoreDocuments",
+      "method": "POST",
+      "path": "/vector-stores/{vector_store_id}/documents",
+      "scope": "scope:vector-stores:write"
+    },
+    {
       "operationId": "searchVectorStore",
       "method": "POST",
       "path": "/vector-stores/{vector_store_id}/search",
@@ -555,6 +657,18 @@
       "method": "GET",
       "path": "/volumes/{volume_id}",
       "scope": "scope:volumes:read"
+    },
+    {
+      "operationId": "listVolumeSnapshots",
+      "method": "GET",
+      "path": "/volumes/{volume_id}/snapshots",
+      "scope": "scope:volumes:read"
+    },
+    {
+      "operationId": "createVolumeSnapshot",
+      "method": "POST",
+      "path": "/volumes/{volume_id}/snapshots",
+      "scope": "scope:volumes:create"
     }
   ],
   "schemas": [
@@ -567,19 +681,23 @@
     "CreateAPIKeyRequest",
     "CreateAPIKeyResponse",
     "CreateInstanceConsoleSessionRequest",
+    "CreateInstanceExecSessionRequest",
     "CreateInstanceRequest",
     "CreateInstanceResponse",
     "CreateNetworkLoadBalancerRequest",
+    "CreateNetworkRouteRequest",
     "CreateNetworkSecurityGroupRequest",
     "CreateNetworkSubnetRequest",
     "CreateNetworkVPCRequest",
     "CreateObservabilityAlertRuleRequest",
     "CreateRegistryProjectRequest",
     "CreateRegistryPullSecretRequest",
+    "CreateStorageBucketRequest",
     "CreateStorageFilesystemRequest",
     "CreateStorageObjectRequest",
     "CreateStorageVolumeRequest",
     "CreateVectorStoreRequest",
+    "CreateVolumeSnapshotRequest",
     "CursorPage",
     "EncryptionKey",
     "EncryptionKeyCreateRequest",
@@ -592,13 +710,26 @@
     "EncryptionUnsealTokenRequest",
     "EncryptionUnsealTokenResponse",
     "ErrorResponse",
+    "FilesystemMountTarget",
+    "FilesystemMountTargetListResponse",
+    "GPUInventoryListResponse",
+    "GPUInventoryRecord",
+    "GPUOccupancyStats",
     "HealthCheck",
     "InstanceConsoleSession",
+    "InstanceEvent",
+    "InstanceEventListResponse",
+    "InstanceExecSession",
     "InstanceLifecycleRequest",
     "InstanceLifecycleResponse",
     "InstanceListResponse",
+    "InstanceLogEntry",
+    "InstanceLogListResponse",
+    "InstanceMetrics",
     "InstanceOperation",
     "InstanceRecord",
+    "InstanceSecurityEvent",
+    "InstanceSecurityEventListResponse",
     "K8sCluster",
     "K8sClusterCreateRequest",
     "K8sClusterKubeconfig",
@@ -611,6 +742,8 @@
     "K8sClusterProxyRequest",
     "K8sClusterProxyResponse",
     "K8sClusterUpgradeRequest",
+    "K8sClusterWorkload",
+    "K8sClusterWorkloadListResponse",
     "ListAPIKeysResponse",
     "LogoutRequest",
     "MeteringUsageRecord",
@@ -619,6 +752,8 @@
     "NetworkLoadBalancerListResponse",
     "NetworkLoadBalancerListener",
     "NetworkResourceState",
+    "NetworkRoute",
+    "NetworkRouteListResponse",
     "NetworkSecurityGroup",
     "NetworkSecurityGroupListResponse",
     "NetworkSecurityGroupRule",
@@ -646,16 +781,23 @@
     "SandboxConfig",
     "SandboxInstanceStatus",
     "SandboxNetworkEgressPolicy",
+    "SandboxTemplate",
+    "SandboxTemplateListResponse",
     "Secret",
     "SecretBinding",
     "SecretBindingRequest",
     "SecretCreateRequest",
     "SecretListResponse",
     "SetRegistryPermissionRequest",
+    "StorageBucketListResponse",
+    "StorageBucketRecord",
     "StorageFilesystem",
     "StorageFilesystemListResponse",
     "StorageObject",
+    "StorageObjectDownloadInfo",
     "StorageObjectListResponse",
+    "StorageObjectUploadRequest",
+    "StorageObjectUploadResponse",
     "StorageResourceState",
     "StorageVolume",
     "StorageVolumeListResponse",
@@ -663,20 +805,26 @@
     "TokenUsageReport",
     "UpdateObservabilityAlertRuleRequest",
     "VectorStore",
+    "VectorStoreDocumentInsertRequest",
+    "VectorStoreDocumentInsertResponse",
     "VectorStoreListResponse",
     "VectorStoreSearchHit",
     "VectorStoreSearchRequest",
     "VectorStoreSearchResponse",
     "VectorStoreState",
+    "VolumeSnapshotListResponse",
+    "VolumeSnapshotRecord",
     "WorkloadIdentityBinding"
   ],
   "idempotencyOperations": [
+    "createStorageBucket",
     "createEncryptionKey",
     "revokeEncryptionKey",
     "rotateEncryptionKey",
     "sealEncryptionObject",
     "createStorageFilesystem",
     "createInstance",
+    "createInstanceExecSession",
     "applyInstanceLifecycle",
     "createK8sCluster",
     "createK8sClusterNodePool",
@@ -685,10 +833,12 @@
     "upgradeK8sCluster",
     "reportTokenUsage",
     "createNetworkLoadBalancer",
+    "createNetworkRoute",
     "createNetworkSecurityGroup",
     "createNetworkSubnet",
     "createNetworkVPC",
     "createStorageObject",
+    "uploadStorageObject",
     "createObservabilityAlertRule",
     "updateObservabilityAlertRule",
     "createRegistryProject",
@@ -696,15 +846,23 @@
     "setRegistryRepositoryPermission",
     "createSecret",
     "createVectorStore",
-    "createStorageVolume"
+    "insertVectorStoreDocuments",
+    "createStorageVolume",
+    "createVolumeSnapshot"
   ],
   "cursorPaginationOperations": [
+    "listStorageBuckets",
     "listEncryptionKeys",
     "listStorageFilesystems",
+    "listFilesystemMountTargets",
+    "listGPUInventory",
     "listInstances",
+    "listInstanceLogs",
     "listInstanceOperations",
     "listK8sClusters",
+    "listK8sClusterWorkloads",
     "listNetworkLoadBalancers",
+    "listNetworkRoutes",
     "listNetworkSecurityGroups",
     "listNetworkSubnets",
     "listNetworkVPCs",
@@ -713,9 +871,11 @@
     "listRegistryProjects",
     "listRegistryRepositories",
     "listRegistryArtifacts",
+    "listSandboxTemplates",
     "listSecrets",
     "listVectorStores",
-    "listStorageVolumes"
+    "listStorageVolumes",
+    "listVolumeSnapshots"
   ],
   "errorCodes": [
     "BAD_REQUEST",
@@ -724,6 +884,7 @@
     "INTERNAL_ERROR",
     "NOT_FOUND",
     "NOT_IMPLEMENTED",
+    "PRECONDITION_FAILED",
     "RATE_LIMIT_EXCEEDED",
     "UNAUTHORIZED"
   ]
