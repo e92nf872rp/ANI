@@ -36,7 +36,7 @@ Phase 与版本号关系：
 
 ### 当前开发节奏（与 ANI-06 对齐）
 
-当前执行阶段以 `ANI-06-开发计划.md` Section 零和 `repo/CURRENT-SPRINT.md` 为准；截至 2026-05-23，项目处于 **Phase 1 / Sprint 5 收敛中**，不是 Phase 2。Phase 1 内部拆成两个交付对象：
+当前执行阶段以 `ANI-06-开发计划.md` Section 零和 `repo/CURRENT-SPRINT.md` 为准（本文不复述具体 Sprint 进度，避免与真实来源不一致）；项目处于 **Phase 1**，不是 Phase 2。Phase 1 内部拆成两个交付对象：
 
 | 交付对象 | 关键门禁 | 说明 |
 |---|---|---|
