@@ -44,6 +44,7 @@
 | sprint14-core-resilience-plan.md | Sprint 14 Core 韧性与服务语义计划：限流/幂等重放/每调用超时/数据面 readyz（P0）、重试+断路器/优雅降级（P1）、多端点 failover（P2）；含 §0 现状事实、§0.1 差距→批次→阶段追溯矩阵、goal 加载提示词；与 Services 零交互、可独立开展 | Planning（Core） |
 | frontend-acceleration-design-for-services.md | 交付 ANI Services/前端团队的前端加速设计：契约 + 20 行 page-spec → AI 生成 80%/人工打磨 20%；含项目背景补充、`instances`（VM/容器/GPU/沙箱）worked example、端到端调用闭环 | Design（交接 Services） |
 | r-p0-0-gateway-shared-store.md | R-P0-0 gateway shared store：gateway middleware 通过 `ports.CacheStore` 接收共享 store，Redis 构造留在 bootstrap/adapter 边界内，并注入 middleware chain，为 R-P0-1 限流与 R-P0-2 幂等重放提供共享存储前置；local/logic verified，不标 production ready | Execution（Core） |
+| r-p0-1-gateway-rate-limit.md | R-P0-1 gateway rate limit：`RateLimit(store)` 复用 gateway shared store 做 per-tenant + method + route-class 窗口计数，超限返回 `429 RATE_LIMIT_EXCEEDED`；新增 `make validate-gateway-ratelimit`；local/logic verified，不标 production ready | Execution（Core） |
 
 ### Sprint 13 Planning（2026-06）
 

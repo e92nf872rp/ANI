@@ -22,7 +22,7 @@ goal: 执行 ANI Sprint 14 Core 韧性与服务语义计划
   4. repo/development-records/sprint14-core-resilience-plan.md   ← 本计划（执行主文件）
 执行规则：
   - 先读 §0 现状事实 + §0.3 开工前置，逐条按「核对命令」grep 验证；现状不符则停下来先更新，不要带着旧假设继续。
-  - **R-P0-1/R-P0-2 有硬前置 R-P0-0（gateway 当前无 Redis/DB，见 §0.3 F11）；必须先做 R-P0-0 或人工确认存储方案，否则这两批无法开工。**
+  - **R-P0-1/R-P0-2 有硬前置 R-P0-0（gateway shared store，见 §0.3 F11）；当前分支 R-P0-0 已完成，后续批次必须复用该 store 注入模式。**
   - 严格按 §4 阶段顺序执行：阶段零 R-P0-0 → 阶段一 P0（R-P0-1..4）→ 阶段二 P1（R-P1-5..6）→ 阶段三 P2（R-P2-7）。批次依赖见 §4 依赖图与 §0.1 追溯矩阵。
   - 本计划命名的 make 门禁均为**待新建**（§0.3 F14），每批验收含"新建该 target"。
   - 每批次按 §5 的 TDD 步骤：先写失败测试 → 跑红 → 最小实现 → 跑绿 → 提交。
@@ -43,7 +43,7 @@ goal: 执行 ANI Sprint 14 Core 韧性与服务语义计划
 |---|---|---|---|
 | F1 | async-task 创建走 DB 级幂等：`ON CONFLICT (tenant_id, idempotency_key) DO NOTHING` | `pkg/repo/task_repo.go:98` | 异步任务幂等**已有**，可复用其模式 |
 | F2 | 幂等重放**实现碎片化、不统一**：observability 规则创建走**内存 map** 重放（`local_observability_service.go:77`，**重启/多副本即失效**）；async-task 走 DB `ON CONFLICT`（`task_repo.go:98`）；多数 mutating handler 只**校验** `idempotency_key` 必填、不重放。无统一且持久的重放机制，也无幂等中间件 | `local_observability_service.go:77`、`task_repo.go:98`、`middleware/` 无 idempotency | 不是"空白"，而是"碎片化 + 内存版不持久"，需收敛为一处持久机制 |
-| F3 | 限流是桩：`checkLimit()` 永远 `return true` | `services/ani-gateway/internal/middleware/ratelimit.go:34` | 背压/限流未落地 |
+| F3 | 限流桩已由 R-P0-1 替换：`RateLimit(store)` 使用 gateway shared store 做 per-tenant + route-class 窗口计数，超限返回 429；本批仍仅为 local/logic verified | `services/ani-gateway/internal/middleware/ratelimit.go`、`services/ani-gateway/internal/middleware/ratelimit_test.go`、`Makefile:validate-gateway-ratelimit` | 背压/限流本地逻辑已落地；未跑真实压测/live gate，不标 production ready |
 | F4 | readyz 仅探 postgres/nats/redis；**Milvus 已有 `Health()`**（`milvus_store.go:137`，未接 readyz），MinIO/network/storage/k8s/gpu 无 Health | `pkg/bootstrap/probes.go` 内 `dependencyProbeChecks`；`milvus_store.go:137` | vector 是"接线"，object/k8s 是"新增 Health" |
 | F5 | 重连仅连接期：NATS `MaxReconnects(5)`、pgxpool `HealthCheckPeriod=30s`、go-redis pool 自动重连 | `pkg/bootstrap/nats.go:23-25`、`pkg/bootstrap/db.go:23-27` | 无操作级重试 |
 | F6 | 超时仅启动期：db 30s / redis 10s / nats 30s。数据面真实调用（network/storage/k8s/gpu 共享 `kubernetes_rest_client` + minio/milvus）**无请求级超时**；`main.go` 不注入带 Timeout 的 http.Client → 回落到无超时默认 client。**唯二有超时模式**：`auth_client.go`（9 处）、`demo_instances.go:841`（exec 5s） | `pkg/bootstrap/{db,redis,nats}.go`；`kubernetes_rest_client.go:139/331`；`main.go`；`auth_client.go` | 无 adapter 每调用强制超时；auth_client 可作 R-P0-3 参考 |
@@ -69,8 +69,8 @@ grep -rn "circuitbreak\|CircuitBreaker" pkg/ || echo "NO circuit breaker (expect
 
 | 现状差距（§0 事实） | 修复批次 | 阶段 | 落点 |
 |---|---|---|---|
-| F11 gateway 无共享存储后端（R-P0-1/2 的前置） | **R-P0-0** 引入 gateway 共享 store | **P0 前置** | main.go + chain.go + store.go |
-| F3 限流是桩（`checkLimit` 恒 true） | **R-P0-1** 限流背压落地（依赖 R-P0-0） | **P0** | gateway middleware |
+| F11 gateway 无共享存储后端（R-P0-1/2 的前置） | **R-P0-0** 已引入 gateway 共享 store | **P0 前置** | main.go + chain.go + store.go |
+| F3 限流是桩（`checkLimit` 恒 true） | **R-P0-1** 已落地限流背压（依赖 R-P0-0） | **P0** | gateway middleware |
 | F2 幂等重放碎片化（内存版不持久） | **R-P0-2** 统一幂等重放中间件（收敛 + 修内存版缺陷） | **P0** | gateway middleware |
 | F6 无每调用超时 | **R-P0-3** 每调用超时 + resilience 包骨架 | **P0** | `pkg/adapters/resilience` + 各 adapter |
 | F4 数据面未接 readyz | **R-P0-4** 数据面 readyz | **P0** | ports `Health()` + `probes.go` |
@@ -111,15 +111,15 @@ grep -rn "circuitbreak\|CircuitBreaker" pkg/ || echo "NO circuit breaker (expect
 
 | # | 事实 | 证据 | 对计划的影响 |
 |---|---|---|---|
-| **F11** | **gateway 中间件层无任何有状态后端**：无 Redis、无 DB 句柄；`Register(h)` 装配 `RateLimit()`/`Audit()` 均无依赖；audit 落库仍是 `// TODO: batch-write ... via DB pool` | `services/ani-gateway/internal/middleware/chain.go`、`audit.go:51`；gateway 全目录无 `redis`/`pgx` import | **R-P0-1、R-P0-2 都需要一个 gateway 目前没有的存储后端** → 必须先做 R-P0-0 |
-| **F12** | 中间件依赖注入模式 = 在 `Register(h)` 内构造（如 `NewAuthClientFromEnv()`），再 `h.Use(...)` | `chain.go:9-16` | 给 RateLimit/Idempotency 注入 store，需改 `Register` 签名或在其内部从 env 构造 store；这是 R-P0-0 的具体落点 |
+| **F11** | **gateway shared store 前置已由 R-P0-0 建立**：`main.go` 通过 bootstrap 构造 Redis-backed `ports.CacheStore`，`Register(h, store)` 显式接收；middleware 仍不直接 import Redis SDK；audit 落库仍是 `// TODO: batch-write ... via DB pool` | `services/ani-gateway/main.go`、`services/ani-gateway/internal/middleware/chain.go`、`services/ani-gateway/internal/middleware/store.go`、`pkg/bootstrap/redis.go` | R-P0-1/R-P0-2 的共享存储前置已满足；后续批次必须继续通过 store 注入，不得在 middleware 直接依赖 Redis SDK |
+| **F12** | 中间件依赖注入模式已扩展为 `Register(h, store)`：auth client 仍在 `Register` 内构造，RateLimit 已由 R-P0-1 接收 shared store | `chain.go:9-16`、`ratelimit.go` | R-P0-2 应复用同一个 store 注入模式，在 `RateLimit(store)` 之后、`Audit()` 之前接入 |
 | **F13** | gateway **无中央 Config**；每个 runtime 各自 `gatewayXxxRuntimeConfigFromEnv()` 从 env 取值并构造自己的 client | `services/ani-gateway/*_runtime.go`（network/storage/k8s/gpu/...） | R-P0-3 超时注入落点 = 这些 per-runtime config 函数 + 各自 http.Client 构造，**不是某个中央 config** |
-| **F14** | 本计划命名的所有 `make validate-*`（ratelimit/idempotency/readyz-dataplane/resilience-faultinjection/ha-failover）**Makefile 中均不存在** | `grep` Makefile = 0 | 它们是**待新建**目标，不是现成可调；每批的"验收 gate"含"新建该 target"这一步 |
+| **F14** | 本计划命名的 `make validate-gateway-ratelimit` 已由 R-P0-1 新建；其余 `validate-gateway-idempotency`、`validate-readyz-dataplane-live-gate`、`validate-resilience-faultinjection-live-gate`、`validate-ha-failover-live-gate` 仍不存在 | `Makefile` | 后续每批的"验收 gate"仍含"新建该 target"这一步；R-P0-1 gate 已可复跑 |
 
 **核对命令：**
 ```bash
 cd repo
-grep -rn "redis\|pgx" services/ani-gateway | grep -v _test || echo "gateway has NO redis/db (expected)"
+grep -rn "redis\|pgx" services/ani-gateway | grep -v _test
 sed -n '1,20p' services/ani-gateway/internal/middleware/chain.go
 grep -cE "validate-gateway-ratelimit|validate-gateway-idempotency|validate-readyz-dataplane-live-gate|validate-resilience-faultinjection-live-gate|validate-ha-failover-live-gate" Makefile
 ```
@@ -147,7 +147,7 @@ grep -cE "validate-gateway-ratelimit|validate-gateway-idempotency|validate-ready
 - [x] 写失败测试：`TestGatewayStoreSetGetTTL`。
 - [x] 实现 gateway KV 抽象 + Redis 实现 + main 装配 + `Register` 注入。
 - [x] 跑绿；`go test ./services/ani-gateway/internal/middleware -run Store -v`。
-- [ ] 提交：`feat(gateway): introduce shared store for rate-limit and idempotency`
+- [x] 提交：`0856f9a feat(gateway): add shared store foundation for sprint14`
 
 **验收 gate：** `go test ./services/ani-gateway/internal/middleware/ -run Store`（新建）。
 
@@ -255,12 +255,12 @@ func Do(ctx context.Context, p Policy, fn func(context.Context) error) error
 
 ### R-P0-1 · 限流背压落地（替换桩）
 
-**目标：** 用 Redis 令牌桶替换 `checkLimit` 桩，per-tenant + 路由类别限流，超限返回 429。
+**目标：** 用 shared store 窗口计数替换 `checkLimit` 桩，per-tenant + 路由类别限流，超限返回 429。
 
-**前置：** R-P0-0 已完成（gateway 有共享 store）。当前 `RateLimit()` 无依赖（chain.go），本批改为 `RateLimit(store)` 并在 `Register` 注入。
+**前置：** R-P0-0 已完成（gateway 有共享 store）。本批已将 `RateLimit()` 改为 `RateLimit(store)` 并在 `Register` 注入。
 
 **Files：**
-- Modify: `services/ani-gateway/internal/middleware/ratelimit.go`（`RateLimit(store)` + 真实令牌桶）
+- Modify: `services/ani-gateway/internal/middleware/ratelimit.go`（`RateLimit(store)` + shared store 窗口计数）
 - Modify: `services/ani-gateway/internal/middleware/chain.go`（注入 store 到 `RateLimit`）
 - Test: `services/ani-gateway/internal/middleware/ratelimit_test.go`（新建）
 - 复用：R-P0-0 的 gateway store（Redis）
@@ -268,17 +268,17 @@ func Do(ctx context.Context, p Policy, fn func(context.Context) error) error
 **契约影响：** 无（429 已属标准错误语义，无需改 OpenAPI）。
 
 **实现要点：**
-- 原子令牌桶：用 Redis Lua 脚本（`INCR` + `EXPIRE` 或滑动窗口）保证并发原子性，键 `ratelimit:{tenant_id}:{route_class}`。
+- 原子窗口计数：复用 `GatewayStore.Increment(ctx,key,ttl)` 的 Redis `INCR` + `EXPIRE`，键 `ratelimit:{tenant_id}:{method}:{route_class}`。
 - 限额来源 env / 配置；缺省给安全默认（如 100 req/s/tenant）。
 - 超限 `respondError(c, 429, "RATE_LIMIT_EXCEEDED", ...)`（保持现有错误体格式）。
 - 公共路径（`isPublicPath`）与无 tenant 请求维持放行。
 
 **任务步骤：**
-- [ ] 写失败测试：`TestRateLimitRejectsOverQuota`（同一 tenant 连续请求超阈值返回 429，恢复后放行）。
-- [ ] 跑红：`go test ./services/ani-gateway/internal/middleware/ -run RateLimit -v` → FAIL。
-- [ ] 实现 Redis 令牌桶替换 `checkLimit`。
-- [ ] 跑绿：同上命令 → PASS。
-- [ ] 提交：`feat(gateway): replace rate-limit stub with redis token bucket`
+- [x] 写失败测试：`TestRateLimitRejectsOverQuotaAndRecoversAfterWindow`（同一 tenant 连续请求超阈值返回 429，恢复后放行）。
+- [x] 跑红：`go test ./services/ani-gateway/internal/middleware/ -run RateLimit -v` → FAIL（`RateLimit` 尚未接收 store）。
+- [x] 实现 shared store 窗口计数替换 `checkLimit` 恒 true。
+- [x] 跑绿：同上命令 → PASS。
+- [x] 提交：`feat(gateway): replace rate-limit stub with shared-store window counter`
 
 **验收 gate：** `go test ./services/ani-gateway/internal/middleware/ -run RateLimit`；并新增 `make validate-gateway-ratelimit`（包装上述测试）。
 

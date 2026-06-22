@@ -14,7 +14,7 @@ func Register(h *server.Hertz, store GatewayStore) {
 		RequestID(),
 		AuthWithClient(authClient),
 		RBACWithClient(authClient),
-		RateLimit(),
+		RateLimit(store),
 		Audit(),
 	)
 }

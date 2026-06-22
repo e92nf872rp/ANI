@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"errors"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -107,8 +108,13 @@ func (s *memoryGatewayStoreForTest) Increment(_ context.Context, key string, ttl
 		s.entries[key] = memoryGatewayStoreEntryForTest{value: []byte("1"), expiresAt: expiresAtForTest(ttl)}
 		return 1, nil
 	}
-	s.entries[key] = memoryGatewayStoreEntryForTest{value: []byte("2"), expiresAt: expiresAtForTest(ttl)}
-	return 2, nil
+	current, err := strconv.ParseInt(string(entry.value), 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	current++
+	s.entries[key] = memoryGatewayStoreEntryForTest{value: []byte(strconv.FormatInt(current, 10)), expiresAt: expiresAtForTest(ttl)}
+	return current, nil
 }
 
 func (s *memoryGatewayStoreForTest) Exists(_ context.Context, key string) (bool, error) {
