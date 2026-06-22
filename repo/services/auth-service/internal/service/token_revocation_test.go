@@ -80,6 +80,14 @@ func (m *memoryCache) Set(_ context.Context, key string, value []byte, _ time.Du
 	return nil
 }
 
+func (m *memoryCache) SetNX(_ context.Context, key string, value []byte, _ time.Duration) (bool, error) {
+	if _, ok := m.values[key]; ok {
+		return false, nil
+	}
+	m.values[key] = value
+	return true, nil
+}
+
 func (m *memoryCache) Delete(_ context.Context, key string) error {
 	delete(m.values, key)
 	return nil

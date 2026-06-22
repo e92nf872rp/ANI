@@ -10,6 +10,7 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/app/server"
 
+	"github.com/kubercloud/ani/pkg/bootstrap"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/router"
 )
@@ -80,8 +81,14 @@ func main() {
 			"prometheus_configured", strings.TrimSpace(instanceObservabilityRuntimeConfig.PrometheusURL) != "",
 		)
 	}
+	gatewayStore, closeGatewayStore, err := bootstrap.ConnectRedisCacheStore(gatewayRedisURLFromEnv())
+	if err != nil {
+		logger.Error("failed to configure gateway shared store", "err", err)
+		os.Exit(1)
+	}
+	defer closeGatewayStore()
 	middleware.StartAuditWorker()
-	middleware.Register(h)
+	middleware.Register(h, gatewayStore)
 	router.RegisterWithOptions(h, router.RegisterOptions{
 		K8sClusterService:                     k8sClusterService,
 		EncryptionService:                     encryptionService,
@@ -103,4 +110,14 @@ func main() {
 	}()
 
 	h.Spin()
+}
+
+func gatewayRedisURLFromEnv() string {
+	if value := strings.TrimSpace(os.Getenv("GATEWAY_REDIS_URL")); value != "" {
+		return value
+	}
+	if value := strings.TrimSpace(os.Getenv("REDIS_URL")); value != "" {
+		return value
+	}
+	return "redis://:ani_dev_password@127.0.0.1:6379/0"
 }

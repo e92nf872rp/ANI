@@ -5,7 +5,10 @@ package middleware
 import "github.com/cloudwego/hertz/pkg/app/server"
 
 // Register wires all middleware onto the Hertz server in the correct order.
-func Register(h *server.Hertz) {
+func Register(h *server.Hertz, store GatewayStore) {
+	if store == nil {
+		panic("gateway middleware store is required")
+	}
 	authClient := NewAuthClientFromEnv()
 	h.Use(
 		RequestID(),

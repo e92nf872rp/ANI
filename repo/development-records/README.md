@@ -35,6 +35,16 @@
 | CORE-SVC-SUPPORT-OBJVEC-A | B3 对象/向量 handler：新增 storage buckets、object upload/download 预签名 URL、vector document insert；复用 `ports.ObjectStore` 与 `ports.VectorStore.Upsert` 边界；全部为 Tier1 local profile，不声明 runtime/production ready | core-svc-support-objvec-a.md |
 | SPRINT12-CLOSURE-A | Sprint 12 收口：A/B1/B2/B3 全部 19 个 Core handler + 2 个 422 经 OpenAPI、ports/adapters、Gateway handler、测试和文档闭环；进入 Sprint 13 real provider/live gate 收敛 | sprint12-closure-core-svc-support.md |
 
+### Sprint 14 Planning / Execution（分支执行中，2026-06）
+
+> 当前官方入口仍保留 Sprint 13 production-shaped 边界；`feature/sprint14-core-resilience-semantics` 分支开始执行 Sprint 14 Core 韧性前置批次。未跑通真实 live gate 的能力只标 local/logic verified，不标 production ready。
+
+| 文件 | 内容摘要 | 类型 |
+|---|---|---|
+| sprint14-core-resilience-plan.md | Sprint 14 Core 韧性与服务语义计划：限流/幂等重放/每调用超时/数据面 readyz（P0）、重试+断路器/优雅降级（P1）、多端点 failover（P2）；含 §0 现状事实、§0.1 差距→批次→阶段追溯矩阵、goal 加载提示词；与 Services 零交互、可独立开展 | Planning（Core） |
+| frontend-acceleration-design-for-services.md | 交付 ANI Services/前端团队的前端加速设计：契约 + 20 行 page-spec → AI 生成 80%/人工打磨 20%；含项目背景补充、`instances`（VM/容器/GPU/沙箱）worked example、端到端调用闭环 | Design（交接 Services） |
+| r-p0-0-gateway-shared-store.md | R-P0-0 gateway shared store：gateway middleware 通过 `ports.CacheStore` 接收共享 store，Redis 构造留在 bootstrap/adapter 边界内，并注入 middleware chain，为 R-P0-1 限流与 R-P0-2 幂等重放提供共享存储前置；local/logic verified，不标 production ready | Execution（Core） |
+
 ### Sprint 13 Planning（2026-06）
 
 | 批次 | 内容摘要 | 文件 |

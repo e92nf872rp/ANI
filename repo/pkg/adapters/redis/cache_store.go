@@ -38,6 +38,14 @@ func (s *CacheStore) Set(ctx context.Context, key string, value []byte, ttl time
 	return nil
 }
 
+func (s *CacheStore) SetNX(ctx context.Context, key string, value []byte, ttl time.Duration) (bool, error) {
+	ok, err := s.client.SetNX(ctx, key, value, ttl).Result()
+	if err != nil {
+		return false, fmt.Errorf("cache setnx: %w", err)
+	}
+	return ok, nil
+}
+
 func (s *CacheStore) Delete(ctx context.Context, key string) error {
 	if err := s.client.Del(ctx, key).Err(); err != nil {
 		return fmt.Errorf("cache delete: %w", err)

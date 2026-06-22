@@ -3,6 +3,7 @@
 > 版本 V8.3 | 广州常青云科技有限公司 | 内部产品规划文件
 > 最后更新：2026-06-21
 > 当前摘要：Sprint 12 Core handler/local profile 已闭环；Sprint 13 S01-S07 real provider live gate 均为 `production_shape.status=passed`。这只表示组件级 production-shaped acceptance passed，不等于 full platform production ready。
+> Sprint 14 分支执行：`feature/sprint14-core-resilience-semantics` 已完成 R-P0-0 gateway shared store 前置批次；该批仅为 local/logic verified，不声明 production ready。
 
 ---
 

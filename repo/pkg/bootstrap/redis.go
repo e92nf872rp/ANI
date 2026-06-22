@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"time"
 
+	redisadapter "github.com/kubercloud/ani/pkg/adapters/redis"
+	"github.com/kubercloud/ani/pkg/ports"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -26,4 +28,12 @@ func connectRedis(redisURL string) (*redis.Client, error) {
 
 	slog.Info("redis connected")
 	return rdb, nil
+}
+
+func ConnectRedisCacheStore(redisURL string) (ports.CacheStore, func() error, error) {
+	client, err := connectRedis(redisURL)
+	if err != nil {
+		return nil, nil, err
+	}
+	return redisadapter.NewCacheStore(client), client.Close, nil
 }
