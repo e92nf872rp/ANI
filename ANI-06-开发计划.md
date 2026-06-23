@@ -604,7 +604,7 @@ make validate-sprint13-b-track-production-shape
 
 **主题：** 在 Sprint 13 production-shaped provider 基础上补齐 Core 运行期韧性与服务语义。P0 覆盖 gateway shared store、限流、幂等重放、adapter per-call timeout、data-plane readyz；P1 覆盖 retry/circuit breaker foundation 与 strong/weak dependency degradation；P2 覆盖 Redis Sentinel/Cluster 配置、MinIO/Milvus endpoint list fallback 和 controller primary kill / follower failover 验证。
 
-**关联记录：** 主计划见 [`repo/development-records/sprint14-core-resilience-plan.md`](repo/development-records/sprint14-core-resilience-plan.md)，批次索引见 [`repo/development-records/README.md`](repo/development-records/README.md)，真实 aggregate live gate 完成记录见 [`repo/development-records/r-sprint14-resilience-live-gate.md`](repo/development-records/r-sprint14-resilience-live-gate.md)。
+**关联记录：** 主计划见 [`repo/development-records/sprint14-core-resilience-plan.md`](repo/development-records/sprint14-core-resilience-plan.md)，批次索引见 [`repo/development-records/README.md`](repo/development-records/README.md)，真实 aggregate live gate 完成记录见 [`repo/development-records/r-sprint14-resilience-live-gate.md`](repo/development-records/r-sprint14-resilience-live-gate.md)，接口契约影响说明见 [`repo/api/core-contract-changelog-sprint14.md`](repo/api/core-contract-changelog-sprint14.md)。
 
 **完成状态：** `feature/sprint14-core-resilience-semantics` 已完成 R-P0-0..R-P2-7，新增 `SPRINT14-CORE-RESILIENCE-LIVE-GATE` 并在 `ani-sprint14-resilience` 隔离 namespace 真实执行：
 

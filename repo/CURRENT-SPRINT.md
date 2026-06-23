@@ -149,7 +149,7 @@ S01-S07 B 轨还必须追加 `make validate-sprint13-b-track-production-shape`�
 
 Sprint 14 resilience feature branch 回归入口：
 
-关联记录：[`development-records/sprint14-core-resilience-plan.md`](development-records/sprint14-core-resilience-plan.md)、[`development-records/r-sprint14-resilience-live-gate.md`](development-records/r-sprint14-resilience-live-gate.md)、[`development-records/live-evidence/sprint14-resilience-live-evidence.json`](development-records/live-evidence/sprint14-resilience-live-evidence.json)。
+关联记录：[`development-records/sprint14-core-resilience-plan.md`](development-records/sprint14-core-resilience-plan.md)、[`development-records/r-sprint14-resilience-live-gate.md`](development-records/r-sprint14-resilience-live-gate.md)、[`development-records/live-evidence/sprint14-resilience-live-evidence.json`](development-records/live-evidence/sprint14-resilience-live-evidence.json)、[`api/core-contract-changelog-sprint14.md`](api/core-contract-changelog-sprint14.md)。
 
 ```bash
 make validate-sprint14-resilience-live-gate
