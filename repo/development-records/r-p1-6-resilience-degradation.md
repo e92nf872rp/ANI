@@ -4,6 +4,7 @@
 > 完成日期：2026-06-23
 > 分支：`feature/sprint14-core-resilience-semantics`
 > 状态：local/logic verified；未执行真实后端 down / live gate；不声明 production ready
+> 后续补齐：`SPRINT14-CORE-RESILIENCE-LIVE-GATE` 已在隔离 fixture 中覆盖 weak dependency down → degraded / HTTP 200 → recovery。
 
 ## 范围
 
@@ -19,9 +20,9 @@
 
 ## 非范围 / 未完成
 
-- 未执行真实 MinIO/Milvus backend down live gate。
+- 本批未执行真实 MinIO/Milvus backend down live gate；后续 aggregate live gate 已覆盖 object-store weak dependency down 的 readyz degraded 语义。
 - 未把 degradation policy 扩展为用户业务 API 的新错误码；本批只改变 readyz/健康语义。
-- 未声明 production ready；真实降级还需后续 live gate 与 evidence JSON。
+- production-ready 结论仅限 Sprint14 隔离 fixture；不声明后端自身 HA 或 full platform production ready。
 
 ## 验证
 

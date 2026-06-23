@@ -4,12 +4,13 @@
 > 分支：`feature/sprint14-core-resilience-semantics`
 > 状态：Completed（local/logic verified）
 > 范围：ANI Core only；不触碰 ANI Services 业务逻辑，不修改 `api/openapi/services/v1.yaml`
+> 后续补齐：`SPRINT14-CORE-RESILIENCE-LIVE-GATE` 已在隔离 fixture 中覆盖 strong backend kill 后 readyz fail / recovery；production-ready 范围仅限该 fixture。
 
 ## 目标
 
 把 Core 数据面依赖接入 bootstrap `/readyz`：ObjectStore、VectorStore、Kubernetes API 任一已配置后端 health 返回错误时，dependency probe 能暴露对应失败，并使 readyz 进入 degraded/503 路径。
 
-本批没有执行真实后端 kill / fault-injection，只证明本地逻辑、接口和 adapter health 调用可复跑；不声明 production ready。
+本批没有执行真实后端 kill / fault-injection，只证明本地逻辑、接口和 adapter health 调用可复跑；单批次不声明 production ready。后续 aggregate live gate 已补齐 strong backend kill → readyz fail → recovery 的隔离 fixture 证据。
 
 ## 实现
 
@@ -84,6 +85,6 @@ go test ./pkg/bootstrap ./pkg/ports ./pkg/adapters/runtime ./pkg/adapters/object
 
 ## 边界
 
-- 未执行 `kill` MinIO/Milvus/Kubernetes API 等真实后端，不标 production ready。
+- 单批次未执行 `kill` MinIO/Milvus/Kubernetes API 等真实后端；后续 Sprint14 aggregate live gate 仅证明隔离 fixture 内的 strong backend kill / recovery，不外推到现有后端自身 HA。
 - R-P1-6 会进一步区分 strong/weak dependency 的 degraded 策略；本批只接入数据面健康信号。
 - Gateway router 自身 `/readyz` 仍是独立轻量 health endpoint；本批按 Sprint14 主计划接 `pkg/bootstrap/probes.go`。

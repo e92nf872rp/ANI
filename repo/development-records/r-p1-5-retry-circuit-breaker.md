@@ -4,6 +4,7 @@
 > 完成日期：2026-06-23
 > 分支：`feature/sprint14-core-resilience-semantics`
 > 状态：local/logic verified；未执行真实后端 kill、network partition 或 soak；不声明 production ready
+> 后续补齐：`SPRINT14-CORE-RESILIENCE-LIVE-GATE` 已覆盖真实 backend kill/degradation/controller failover；命名 circuit breaker 的持续故障注入与 soak 仍未完成。
 
 ## 范围
 
@@ -18,7 +19,7 @@
 ## 非范围 / 未完成
 
 - MinIO、Milvus 尚未接入命名 circuit breaker policy；R-P2-7 已补充 endpoint list fallback，本地覆盖网络错误、`429`、`5xx` 后尝试下一个 endpoint。
-- 未执行真实 MinIO/Milvus/Kubernetes API 后端 kill、network partition、持续 5xx 注入或 half-open live probe。
+- 本批未执行真实 MinIO/Milvus/Kubernetes API 后端 kill、network partition、持续 5xx 注入或 half-open live probe；后续 aggregate live gate 补齐的是 backend kill/degradation/controller failover，不等同于命名 circuit breaker soak。
 - 未声明 full platform production ready；本批只证明共享逻辑和 Kubernetes REST 幂等路径本地可复跑。
 
 ## 验证
