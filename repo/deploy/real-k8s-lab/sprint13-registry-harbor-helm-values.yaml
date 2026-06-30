@@ -1,0 +1,7 @@
+# 已有 Harbor（docker.kubercon.local @ 192.168.102.81）— 勿用本文件在集群内重复安装。
+# 仅作历史参考；live gate 直接连节点 Harbor + Gateway REGISTRY_* 即可。
+#
+# /etc/hosts:
+#   192.168.102.81 docker.kubercon.local
+#
+# Core API health: GET https://docker.kubercon.local/api/v2.0/health

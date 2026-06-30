@@ -1,0 +1,46 @@
+# Sprint 13 S08 — 使用节点已有 Harbor（非 Helm 新装）
+#
+# 本机 Harbor 部署在 192.168.102.81，域名 docker.kubercon.local（HTTPS）。
+# 执行 live gate 前在本机 /etc/hosts 增加：
+#   192.168.102.81 docker.kubercon.local
+#
+# Gateway 环境变量示例：
+#   REGISTRY_PROVIDER=harbor
+#   REGISTRY_ENDPOINT=docker.kubercon.local
+#   REGISTRY_SECURE=true
+#   REGISTRY_TLS_INSECURE=true    # 自签/内网 CA 时必填
+#   REGISTRY_USERNAME=admin
+#   REGISTRY_PASSWORD=<from-secret>
+#
+# production-shaped live gate：
+#   GATEWAY_URL=http://<node-ip>:30080/api/v1   # in-cluster NodePort（P6-B1）
+#   GATEWAY_URL=http://<本机非回环IP>:8080/api/v1  # 本地 dev Gateway
+#   HARBOR_URL=https://docker.kubercon.local
+#   HARBOR_TLS_INSECURE=true
+#   python3 scripts/run_registry_harbor_live_gate.py --track in-cluster   # P6-B1 in-cluster
+#   python3 scripts/run_registry_harbor_live_gate.py --track production  # 本机 dev
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ani-s08-registry
+  labels:
+    app.kubernetes.io/part-of: ani-core
+    ani.dev/sprint: sprint13
+    ani.dev/slice: s08-registry-harbor
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ani-registry-production-shaped-runtime
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-gateway
+    ani.dev/profile: sprint13-production-shaped
+type: Opaque
+stringData:
+  endpoint: https://docker.kubercon.local
+  username: admin
+  password: REPLACE_ME_BEFORE_APPLY
+  secure: "true"
+  tls_insecure: "true"

@@ -79,6 +79,13 @@ slice_proof_items:
     - production_gateway
     - production_prometheus_service_or_query
     - production_kubelet_or_kubernetes_api_access
+  S08:
+    - production_gateway
+    - production_harbor_credentials
+    - production_registry_provider_runtime
+    - production_registry_artifacts_observed
+    - production_registry_scan_result_observed
+    - production_registry_pull_secret_kubernetes_applied
 
 evidence_rules:
   production_shape_status_passed_requires:

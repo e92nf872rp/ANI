@@ -194,6 +194,12 @@ REQUIRED_DEPLOYMENT_ENVS = {
     "INSTANCE_OBSERVABILITY_PROVIDER",
     "INSTANCE_OBSERVABILITY_PROMETHEUS_URL",
     "INSTANCE_OBSERVABILITY_EXEC_BASE_URL",
+    "REGISTRY_PROVIDER",
+    "REGISTRY_ENDPOINT",
+    "REGISTRY_USERNAME",
+    "REGISTRY_PASSWORD",
+    "REGISTRY_SECURE",
+    "REGISTRY_TLS_INSECURE",
 }
 REQUIRED_PRODUCTION_READINESS_DOC_TOKENS = {
     "Auth/Dex production gate",
@@ -612,6 +618,18 @@ def validate_production_deployment_contract() -> None:
         fail("production Deployment INSTANCE_OBSERVABILITY_PROMETHEUS_URL must point at in-cluster Sprint 13 Prometheus")
     if env_by_name.get("INSTANCE_OBSERVABILITY_EXEC_BASE_URL", {}).get("value") != "wss://ani-gateway.ani-system.svc.cluster.local:8080/api/v1":
         fail("production Deployment INSTANCE_OBSERVABILITY_EXEC_BASE_URL must point at in-cluster Gateway API")
+    if env_by_name.get("REGISTRY_PROVIDER", {}).get("value") != "harbor":
+        fail("production Deployment REGISTRY_PROVIDER must be harbor")
+    for name in ("REGISTRY_ENDPOINT", "REGISTRY_USERNAME", "REGISTRY_PASSWORD", "REGISTRY_SECURE", "REGISTRY_TLS_INSECURE"):
+        env_item = env_by_name.get(name, {})
+        value_from = env_item.get("valueFrom")
+        if not isinstance(value_from, dict) or "secretKeyRef" not in value_from:
+            fail(f"production Deployment {name} must come from secretKeyRef")
+        if "value" in env_item:
+            fail(f"production Deployment must not commit {name} literal")
+        secret_ref = value_from.get("secretKeyRef", {})
+        if secret_ref.get("name") != "ani-registry-production-shaped-runtime":
+            fail(f"production Deployment {name} must use ani-registry-production-shaped-runtime secret")
     proxy_template = env_by_name.get("VCLUSTER_PROXY_SERVER_TEMPLATE", {}).get("value")
     kubeconfig_template = env_by_name.get("VCLUSTER_KUBECONFIG_SERVER_TEMPLATE", {}).get("value")
     if proxy_template != "https://{cluster_id}.{namespace}:443":

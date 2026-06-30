@@ -1,0 +1,31 @@
+{
+  "cleanup_enabled": true,
+  "cleanup_project_status": 200,
+  "dev_profile_real_provider": true,
+  "harbor_health_ready": true,
+  "harbor_health_status": 200,
+  "id": "registry-harbor-live-gate",
+  "optional_artifacts_count": 0,
+  "optional_artifacts_enabled": false,
+  "optional_artifacts_status": 0,
+  "optional_scan_result_enabled": false,
+  "optional_scan_result_status": 0,
+  "production_shape": {
+    "missing_items": [],
+    "proof_items": [
+      "production_gateway",
+      "production_harbor_credentials",
+      "production_registry_provider_runtime"
+    ],
+    "status": "passed",
+    "transport_profile": "production_gateway_and_harbor_service"
+  },
+  "profile": "SPRINT13-REGISTRY-HARBOR-A",
+  "project_create_status": 201,
+  "projects_list_count": 1,
+  "projects_list_status": 200,
+  "pull_secret_status": 201,
+  "repositories_list_status": 200,
+  "scan_report_status": 200,
+  "status": "passed"
+}

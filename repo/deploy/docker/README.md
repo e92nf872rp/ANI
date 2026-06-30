@@ -16,9 +16,9 @@ make deps          # 启动所有依赖服务
 make deps-status
 ```
 
-首次 `make deps` 会在空 PostgreSQL 数据卷上自动执行 `deploy/real-k8s-lab/auth-dex-production-db-init.sql`（经 `init-scripts/postgres/` 符号链接挂载）。该脚本创建 auth 表、Core runtime metadata 表（instances/network/storage/k8s proxy 等）并写入内置 roles/tenants seed。
+首次 `make deps` 会在空 PostgreSQL 数据卷上自动执行 `deploy/postgres/ani-dev-database-init.sql`（经 `init-scripts/postgres/001-ani-dev-database-init.sql` 挂载）。该脚本包含 auth 表、Core runtime metadata、Gateway 元数据 P1/P3 表及内置 roles/tenants seed。
 
-若本机已有旧的 Postgres 数据卷，init 不会重跑；需要完整 schema 时请执行 `make deps-clean` 后重新 `make deps`。
+若本机已有旧的 Postgres 数据卷，init 不会重跑；需要完整 schema 时请执行 `make deps-clean` 后重新 `make deps`，或对已有卷执行 `make db-upgrade-gateway-metadata`。
 
 ## 服务访问
 
@@ -53,6 +53,18 @@ Dex 开发配置位于 `deploy/docker/config/dex-dev.yaml`：
 
 auth-service 只需要配置 `AUTH_OIDC_ISSUER_URL`、`AUTH_OIDC_CLIENT_ID`、`AUTH_OIDC_CLIENT_SECRET`。
 Dex-compatible 端点会自动推导为 `{issuer}/auth`、`{issuer}/token`、`{issuer}/keys`；接入非 Dex-compatible IdP 时再显式覆盖 `AUTH_OIDC_AUTH_URL` / `AUTH_OIDC_TOKEN_URL` / `AUTH_OIDC_JWKS_URL`。
+
+## Kubernetes REST provider（本地连集群）
+
+默认 `make deps` + Gateway 使用 **local profile**，不连接 Kubernetes。
+
+启用真实 K8s provider（如 `SECRET_PROVIDER_MODE=kubernetes_rest`）时，凭证按以下优先级自动解析：
+
+1. 显式 `KUBERNETES_API_HOST` / `KUBERNETES_BEARER_TOKEN` / `KUBERNETES_SERVICE_*`（生产部署）
+2. `KUBECONFIG` 或 `~/.kube/config`（本地开发）
+3. Pod 内 ServiceAccount（in-cluster）
+
+关闭自动解析：`KUBERNETES_CONFIG_AUTO_LOAD=false`。详见 `.env.example`。
 
 ## Dex smoke 验收
 

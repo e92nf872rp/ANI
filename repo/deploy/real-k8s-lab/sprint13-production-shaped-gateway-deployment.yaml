@@ -138,6 +138,37 @@ spec:
               value: http://sprint13-prometheus.ani-s07-observability.svc.cluster.local:9090
             - name: INSTANCE_OBSERVABILITY_EXEC_BASE_URL
               value: wss://ani-gateway.ani-system.svc.cluster.local:8080/api/v1
+            - name: REGISTRY_PROVIDER
+              value: harbor
+            - name: REGISTRY_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: ani-registry-production-shaped-runtime
+                  key: endpoint
+            - name: REGISTRY_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: ani-registry-production-shaped-runtime
+                  key: username
+            - name: REGISTRY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ani-registry-production-shaped-runtime
+                  key: password
+            - name: REGISTRY_SECURE
+              valueFrom:
+                secretKeyRef:
+                  name: ani-registry-production-shaped-runtime
+                  key: secure
+            - name: REGISTRY_TLS_INSECURE
+              valueFrom:
+                secretKeyRef:
+                  name: ani-registry-production-shaped-runtime
+                  key: tls_insecure
+            - name: SECRET_PROVIDER_MODE
+              value: kubernetes_rest
+            - name: SECRET_PROVIDER_APPLY_ENABLED
+              value: "true"
           readinessProbe:
             httpGet:
               path: /readyz

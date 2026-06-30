@@ -209,6 +209,7 @@ PATHS = [
     "GET /registry/projects",
     "POST /registry/projects",
     "POST /registry/projects/{project}/pull-secret",
+    "POST /registry/projects/{project}/pull-secret/kubernetes-apply",
     "GET /registry/projects/{project}/repositories",
     "GET /registry/projects/{project}/repositories/{repository}/artifacts",
     "POST /registry/projects/{project}/repositories/{repository}/permissions",
