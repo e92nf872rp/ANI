@@ -236,7 +236,7 @@ func (s *MetadataOperationStore) RecordOperation(ctx context.Context, record por
 				COALESCE(idempotency_key, ''), requested_by, precheck_json,
 				destructive_impact_json, before_spec_json, after_spec_json,
 				provider_refs_json, COALESCE(failure_reason, ''),
-				COALESCE(failure_message, ''), retry_eligible, created_at, updated_at
+				COALESCE(failure_message, ''), retry_eligible, created_at::text, updated_at::text
 		`, record.ID, record.TenantID, record.InstanceID, string(record.Operation), string(record.Status), record.IdempotencyKey,
 			record.RequestedBy, precheck, destructive, beforeSpec, afterSpec, providerRefs, record.FailureReason,
 			record.FailureMessage, record.RetryEligible, record.CreatedAt, record.UpdatedAt)
@@ -514,7 +514,7 @@ func operationSelectSQL() string {
 			COALESCE(idempotency_key, ''), requested_by, precheck_json,
 			destructive_impact_json, before_spec_json, after_spec_json,
 			provider_refs_json, COALESCE(failure_reason, ''),
-			COALESCE(failure_message, ''), retry_eligible, created_at, updated_at
+			COALESCE(failure_message, ''), retry_eligible, created_at::text, updated_at::text
 		FROM workload_instance_operations
 	`
 }
@@ -562,6 +562,8 @@ func scanOperation(row scanner, record *ports.WorkloadOperationRecord) error {
 	var beforeSpecJSON []byte
 	var afterSpecJSON []byte
 	var providerRefsJSON []byte
+	var createdAt string
+	var updatedAt string
 	if err := row.Scan(
 		&record.ID,
 		&record.TenantID,
@@ -578,10 +580,19 @@ func scanOperation(row scanner, record *ports.WorkloadOperationRecord) error {
 		&record.FailureReason,
 		&record.FailureMessage,
 		&record.RetryEligible,
-		&record.CreatedAt,
-		&record.UpdatedAt,
+		&createdAt,
+		&updatedAt,
 	); err != nil {
 		return err
+	}
+	var err error
+	record.CreatedAt, err = parsePostgresTimestamp(createdAt)
+	if err != nil {
+		return fmt.Errorf("parse operation created_at: %w", err)
+	}
+	record.UpdatedAt, err = parsePostgresTimestamp(updatedAt)
+	if err != nil {
+		return fmt.Errorf("parse operation updated_at: %w", err)
 	}
 	record.Operation = ports.WorkloadLifecycleAction(operation)
 	record.Status = ports.WorkloadOperationStatus(status)
@@ -601,4 +612,21 @@ func scanOperation(row scanner, record *ports.WorkloadOperationRecord) error {
 		return fmt.Errorf("unmarshal provider refs: %w", err)
 	}
 	return nil
+}
+
+func parsePostgresTimestamp(value string) (time.Time, error) {
+	raw := strings.TrimSpace(value)
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05.999999999Z07:00",
+		"2006-01-02 15:04:05.999999999-07",
+		"2006-01-02 15:04:05Z07:00",
+		"2006-01-02 15:04:05-07",
+	} {
+		parsed, err := time.Parse(layout, raw)
+		if err == nil {
+			return parsed.UTC(), nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unsupported timestamp %q", value)
 }

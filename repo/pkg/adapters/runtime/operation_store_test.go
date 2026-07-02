@@ -27,8 +27,8 @@ func TestMetadataOperationStoreRecordOperationUsesAtomicIdempotencyInsert(t *tes
 			"",
 			"",
 			false,
-			time.Unix(100, 0),
-			time.Unix(100, 0),
+			time.Unix(100, 0).UTC().Format(time.RFC3339Nano),
+			time.Unix(100, 0).UTC().Format(time.RFC3339Nano),
 		}}},
 		stepRows: fakeRows{},
 	}
@@ -58,6 +58,49 @@ func TestMetadataOperationStoreRecordOperationUsesAtomicIdempotencyInsert(t *tes
 	}
 	if len(tx.queries) == 0 || !strings.Contains(tx.queries[0], "ON CONFLICT (tenant_id, idempotency_key)") {
 		t.Fatalf("insert query = %q, want atomic idempotency conflict clause", tx.queries)
+	}
+}
+
+func TestMetadataOperationStoreRecordOperationScansPostgresTextTimestamps(t *testing.T) {
+	tx := &fakeOperationMetadataTx{
+		insertRows: fakeRows{values: [][]any{{
+			"00000000-0000-4000-8000-000000000001",
+			"5dbb1d01-0000-4000-8000-000000000001",
+			"inst_1",
+			"delete",
+			"succeeded",
+			"idem-delete",
+			"user-a",
+			[]byte(`{}`),
+			[]byte(`{}`),
+			[]byte(`{}`),
+			[]byte(`{}`),
+			[]byte(`[]`),
+			"",
+			"",
+			false,
+			"2026-06-30 09:13:14.394711+00",
+			"2026-06-30 09:13:14.394711+00",
+		}}},
+		stepRows: fakeRows{},
+	}
+	store := NewMetadataOperationStore(fakeOperationMetadataStore{tx: tx})
+
+	record, _, err := store.RecordOperation(context.Background(), ports.WorkloadOperationRecord{
+		ID:             "00000000-0000-4000-8000-000000000001",
+		TenantID:       "5dbb1d01-0000-4000-8000-000000000001",
+		InstanceID:     "inst_1",
+		Operation:      ports.WorkloadLifecycleDelete,
+		Status:         ports.WorkloadOperationSucceeded,
+		IdempotencyKey: "idem-delete",
+		RequestedBy:    "user-a",
+	})
+	if err != nil {
+		t.Fatalf("RecordOperation error = %v", err)
+	}
+	want := time.Date(2026, 6, 30, 9, 13, 14, 394711000, time.UTC)
+	if !record.CreatedAt.Equal(want) || !record.UpdatedAt.Equal(want) {
+		t.Fatalf("timestamps = %s/%s, want %s", record.CreatedAt, record.UpdatedAt, want)
 	}
 }
 
@@ -138,7 +181,18 @@ func assignScanValues(dest []any, values []any) error {
 		case *bool:
 			*ptr = values[i].(bool)
 		case *time.Time:
-			*ptr = values[i].(time.Time)
+			switch value := values[i].(type) {
+			case time.Time:
+				*ptr = value
+			case string:
+				parsed, err := time.Parse(time.RFC3339Nano, value)
+				if err != nil {
+					return err
+				}
+				*ptr = parsed
+			default:
+				return ports.ErrUnsupported
+			}
 		default:
 			return ports.ErrUnsupported
 		}

@@ -26,11 +26,11 @@ func (s fakeMetadataStore) WithPlatformTx(ctx context.Context, fn func(context.C
 }
 
 type fakeMetadataTx struct {
-	sql          string
-	args         []any
-	execs        []string
-	queryRowSQL  string
-	queryRowArgs []any
+	sql           string
+	args          []any
+	execs         []string
+	queryRowSQL   string
+	queryRowArgs  []any
 	querySQL      string
 	queryRows     []ports.Row
 	queryRowRows  []ports.Row
@@ -74,6 +74,8 @@ func (r fakeMetadataRow) Scan(dest ...any) error {
 		switch ptr := target.(type) {
 		case *string:
 			*ptr = r.values[i].(string)
+		case *[]string:
+			*ptr = r.values[i].([]string)
 		case *bool:
 			*ptr = r.values[i].(bool)
 		case *int64:

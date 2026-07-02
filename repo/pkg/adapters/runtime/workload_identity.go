@@ -335,14 +335,14 @@ func scanWorkloadIdentityBinding(row scanner, binding *ports.WorkloadIdentityBin
 		return err
 	}
 	if expiresAt != "" {
-		parsed, err := time.Parse(time.RFC3339Nano, expiresAt)
+		parsed, err := parsePostgresTimestamp(expiresAt)
 		if err != nil {
 			return err
 		}
 		binding.ExpiresAt = parsed
 	}
 	if revokedAt != "" {
-		parsed, err := time.Parse(time.RFC3339Nano, revokedAt)
+		parsed, err := parsePostgresTimestamp(revokedAt)
 		if err != nil {
 			return err
 		}

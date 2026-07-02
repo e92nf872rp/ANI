@@ -17,6 +17,10 @@ type KubernetesInstanceOps struct {
 	now     func() time.Time
 }
 
+var kubeVirtSubresourceHeaders = map[string]string{
+	"Accept": "*/*",
+}
+
 type KubernetesInstanceOpsOption func(*KubernetesInstanceOps)
 
 func WithKubernetesInstanceOpsEnabled(enabled bool) KubernetesInstanceOpsOption {
@@ -94,13 +98,34 @@ func (o *KubernetesInstanceOps) execute(ctx context.Context, request ports.Workl
 		body, err := o.client.do(ctx, http.MethodPost, o.client.host+podPath(namespace, podName)+"/exec?"+query, "", nil)
 		return string(body), opsSessionID(request), err
 	case ports.WorkloadInstanceOpsVMConsole:
-		body, err := o.client.do(ctx, http.MethodGet, o.client.host+kubeVirtSubresourcePath(namespace, podName, "console"), "", nil)
+		body, err := o.client.doWithHeaders(
+			ctx,
+			http.MethodGet,
+			o.client.host+kubeVirtSubresourcePath(namespace, podName, "console"),
+			"",
+			nil,
+			kubeVirtSubresourceHeaders,
+		)
 		return string(body), opsSessionID(request), err
 	case ports.WorkloadInstanceOpsVMVNC:
-		body, err := o.client.do(ctx, http.MethodGet, o.client.host+kubeVirtSubresourcePath(namespace, podName, "vnc"), "", nil)
+		body, err := o.client.doWithHeaders(
+			ctx,
+			http.MethodGet,
+			o.client.host+kubeVirtSubresourcePath(namespace, podName, "vnc"),
+			"",
+			nil,
+			kubeVirtSubresourceHeaders,
+		)
 		return string(body), opsSessionID(request), err
 	case ports.WorkloadInstanceOpsVMSerial:
-		body, err := o.client.do(ctx, http.MethodGet, o.client.host+kubeVirtSubresourcePath(namespace, podName, "console"), "", nil)
+		body, err := o.client.doWithHeaders(
+			ctx,
+			http.MethodGet,
+			o.client.host+kubeVirtSubresourcePath(namespace, podName, "console"),
+			"",
+			nil,
+			kubeVirtSubresourceHeaders,
+		)
 		return string(body), opsSessionID(request), err
 	default:
 		return "", "", fmt.Errorf("%w: unsupported instance ops action %q", ports.ErrUnsupported, request.Action)

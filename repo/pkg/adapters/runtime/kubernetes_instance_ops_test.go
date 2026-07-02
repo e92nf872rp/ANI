@@ -50,8 +50,10 @@ func TestKubernetesInstanceOpsExecCreatesSession(t *testing.T) {
 
 func TestKubernetesInstanceOpsVMVNCUsesKubeVirtSubresource(t *testing.T) {
 	var got string
+	var accept string
 	ops := newTestKubernetesInstanceOps(t, func(r *http.Request) (*http.Response, error) {
 		got = r.Method + " " + r.URL.String()
+		accept = r.Header.Get("Accept")
 		return jsonResponse(http.StatusOK, "vnc accepted"), nil
 	})
 	req := opsRequest(ports.WorkloadInstanceOpsVMVNC)
@@ -64,6 +66,9 @@ func TestKubernetesInstanceOpsVMVNCUsesKubeVirtSubresource(t *testing.T) {
 	}
 	if !strings.Contains(got, "/apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachineinstances/vm-01/vnc") {
 		t.Fatalf("request = %q, want KubeVirt vnc subresource", got)
+	}
+	if accept != "*/*" {
+		t.Fatalf("Accept = %q, want */*", accept)
 	}
 }
 

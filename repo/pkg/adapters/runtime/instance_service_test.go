@@ -341,6 +341,34 @@ func TestLocalInstanceServiceDeleteRevokesWorkloadIdentity(t *testing.T) {
 	}
 }
 
+func TestMetadataWorkloadIdentityRevokeScansPostgresTextTimestamps(t *testing.T) {
+	tx := &fakeMetadataTx{row: fakeMetadataRow{values: []any{
+		"00000000-0000-4000-8000-000000000001",
+		"5dbb1d01-0000-4000-8000-000000000001",
+		"inst_1",
+		"ani_wi_5dbb1d010000",
+		[]string{"instances:read"},
+		false,
+		time.Date(2026, 6, 30, 9, 0, 0, 0, time.UTC),
+		"",
+		"2026-06-30 09:13:14.394711+00",
+	}}}
+	identity := NewMetadataWorkloadIdentityService(fakeMetadataStore{tx: tx})
+
+	record, err := identity.RevokeForInstance(context.Background(), ports.WorkloadIdentityRevokeRequest{
+		TenantID:    "5dbb1d01-0000-4000-8000-000000000001",
+		InstanceID:  "inst_1",
+		RequestedAt: time.Date(2026, 6, 30, 9, 13, 14, 394711000, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("RevokeForInstance error = %v", err)
+	}
+	want := time.Date(2026, 6, 30, 9, 13, 14, 394711000, time.UTC)
+	if !record.RevokedAt.Equal(want) {
+		t.Fatalf("revoked_at = %s, want %s", record.RevokedAt, want)
+	}
+}
+
 func TestLocalInstanceServiceLifecycleRecordsOperation(t *testing.T) {
 	store := &fakeInstanceStore{
 		last: ports.WorkloadInstanceRecord{
