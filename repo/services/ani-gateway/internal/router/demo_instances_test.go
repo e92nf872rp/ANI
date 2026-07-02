@@ -35,8 +35,8 @@ func TestDemoInstanceServiceCreatesVMContainerAndGPUContainer(t *testing.T) {
 		if result.FinalStatus.State != ports.WorkloadStateRunning {
 			t.Fatalf("Create(%s) state = %s, want running", kind, result.FinalStatus.State)
 		}
-		if len(result.Manifests) != 1 {
-			t.Fatalf("Create(%s) manifests = %d, want 1", kind, len(result.Manifests))
+		if len(result.Manifests) != 2 || result.Manifests[0].Kind != "Secret" {
+			t.Fatalf("Create(%s) manifests = %#v, want workload identity Secret + workload manifest", kind, result.Manifests)
 		}
 		record, err := api.service.Get(context.Background(), ports.WorkloadInstanceGetRequest{
 			TenantID:   result.Ref.TenantID,
@@ -45,7 +45,7 @@ func TestDemoInstanceServiceCreatesVMContainerAndGPUContainer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Get(%s) error = %v", kind, err)
 		}
-		requireLocalCoreDevProfile(t, demoInstanceFromRecord(record).DevProfile, "local-instance-service")
+		requireLocalCoreDevProfile(t, api.demoInstanceFromRecord(record).DevProfile, "local-instance-service")
 		if kind == "vm" {
 			if record.SSH == nil || record.SSH.Username == "" || record.SSH.Host == "" || record.SSH.Port != 22 {
 				t.Fatalf("vm ssh = %+v, want connection metadata", record.SSH)
@@ -142,7 +142,7 @@ func TestDemoInstanceServiceSandboxResponseIncludesLocalProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get error = %v", err)
 	}
-	response := demoInstanceFromRecord(record)
+	response := api.demoInstanceFromRecord(record)
 	if response.Sandbox == nil {
 		t.Fatalf("response sandbox is nil")
 	}
@@ -257,7 +257,7 @@ func TestDemoInstanceServiceContainerRolloutStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get error = %v", err)
 	}
-	response := demoInstanceFromRecord(record)
+	response := api.demoInstanceFromRecord(record)
 	if response.Container == nil {
 		t.Fatalf("response container is nil")
 	}
@@ -300,7 +300,7 @@ func TestDemoInstanceServiceGPUStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get error = %v", err)
 	}
-	response := demoInstanceFromRecord(record)
+	response := api.demoInstanceFromRecord(record)
 	if response.GPU == nil {
 		t.Fatalf("response GPU is nil")
 	}
@@ -516,7 +516,7 @@ func TestDemoInstanceServiceVMSnapshot(t *testing.T) {
 	if record.Status.State != ports.WorkloadStateRunning || len(record.Snapshots) != 1 {
 		t.Fatalf("state=%s snapshots=%d, want running with one snapshot", record.Status.State, len(record.Snapshots))
 	}
-	response := demoInstanceFromRecord(record)
+	response := api.demoInstanceFromRecord(record)
 	if len(response.Snapshots) != 1 || response.Snapshots[0].Name != "before-upgrade" {
 		t.Fatalf("response snapshots = %#v, want before-upgrade", response.Snapshots)
 	}
@@ -549,7 +549,7 @@ func TestDemoInstanceServiceVMVolumeBinding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AttachVolume error = %v", err)
 	}
-	response := demoInstanceFromRecord(attached)
+	response := api.demoInstanceFromRecord(attached)
 	if response.Status != "running" || len(response.Volumes) != 2 {
 		t.Fatalf("status=%s volumes=%d, want running with root+data volume", response.Status, len(response.Volumes))
 	}
@@ -568,8 +568,8 @@ func TestDemoInstanceServiceVMVolumeBinding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DetachVolume error = %v", err)
 	}
-	if len(demoInstanceFromRecord(detached).Volumes) != 1 {
-		t.Fatalf("volumes after detach = %#v, want root disk only", demoInstanceFromRecord(detached).Volumes)
+	if len(api.demoInstanceFromRecord(detached).Volumes) != 1 {
+		t.Fatalf("volumes after detach = %#v, want root disk only", api.demoInstanceFromRecord(detached).Volumes)
 	}
 }
 
@@ -591,5 +591,27 @@ func TestDemoInstanceServiceRealShellExecutesCommand(t *testing.T) {
 	}
 	if result.CWD == "" {
 		t.Fatalf("CWD is empty")
+	}
+}
+
+func TestDemoInstanceResponseMarksRealProviderWhenKubernetesWorkloadRuntimeConfigured(t *testing.T) {
+	workload := DefaultInstanceWorkloadRuntime()
+	workload.Provider = "kubernetes_rest"
+	api := newDemoInstanceAPIWithOptions(nil, workload, nil, nil, false)
+	record := ports.WorkloadInstanceRecord{
+		TenantID:     "tenant-a",
+		InstanceID:   "instance-k8s",
+		Name:         "demo-container",
+		Kind:         ports.WorkloadKindContainer,
+		Provider:     "kubernetes",
+		ResourceRefs: []string{"kubernetes/Secret/ani-tenant-a/demo-container-identity", "kubernetes/Deployment/ani-tenant-a/demo-container"},
+		Status:       ports.WorkloadStatus{State: ports.WorkloadStateProvisioning},
+	}
+	resp := api.demoInstanceFromRecord(record)
+	if resp.DevProfile.Mode != "real" || !resp.DevProfile.RealProvider || resp.DevProfile.Provider != "kubernetes_rest" {
+		t.Fatalf("dev profile = %+v, want real kubernetes_rest marker", resp.DevProfile)
+	}
+	if notice := api.instanceCreateDemoNotice(); !strings.Contains(notice, "kubernetes_rest") {
+		t.Fatalf("demo notice = %q, want kubernetes_rest guidance", notice)
 	}
 }

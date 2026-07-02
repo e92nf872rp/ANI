@@ -5,6 +5,7 @@ go 1.23
 require (
 	github.com/cloudwego/hertz v0.9.0
 	github.com/google/uuid v1.6.0
+	github.com/jackc/pgx/v5 v5.6.0
 	github.com/kubercloud/ani/pkg v0.0.0
 	google.golang.org/grpc v1.64.0
 	google.golang.org/protobuf v1.33.0
@@ -30,7 +31,6 @@ require (
 	github.com/imdario/mergo v0.3.6 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20221227161230-091c0ba34f0a // indirect
-	github.com/jackc/pgx/v5 v5.6.0 // indirect
 	github.com/jackc/puddle/v2 v2.2.1 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.17.2 // indirect

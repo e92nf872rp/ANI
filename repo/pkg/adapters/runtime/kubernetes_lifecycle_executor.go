@@ -56,11 +56,11 @@ func (e *KubernetesLifecycleExecutor) Apply(ctx context.Context, request ports.W
 		return ports.WorkloadInstanceLifecycleResult{}, ports.ErrNotConfigured
 	}
 
-	resource, err := resourceFromRecord(record)
+	resource, err := resourceFromRecordRef(record, "")
 	if err != nil {
 		return ports.WorkloadInstanceLifecycleResult{}, err
 	}
-	if err := e.execute(ctx, request.Action, resource); err != nil {
+	if err := e.execute(ctx, request.Action, resource, record); err != nil {
 		return ports.WorkloadInstanceLifecycleResult{}, err
 	}
 	return ports.WorkloadInstanceLifecycleResult{
@@ -71,7 +71,7 @@ func (e *KubernetesLifecycleExecutor) Apply(ctx context.Context, request ports.W
 	}, nil
 }
 
-func (e *KubernetesLifecycleExecutor) execute(ctx context.Context, action ports.WorkloadLifecycleAction, resource kubernetesResource) error {
+func (e *KubernetesLifecycleExecutor) execute(ctx context.Context, action ports.WorkloadLifecycleAction, resource kubernetesResource, record ports.WorkloadInstanceRecord) error {
 	switch action {
 	case ports.WorkloadLifecycleStart:
 		return e.start(ctx, resource)
@@ -82,8 +82,16 @@ func (e *KubernetesLifecycleExecutor) execute(ctx context.Context, action ports.
 	case ports.WorkloadLifecycleResize:
 		return e.restart(ctx, resource)
 	case ports.WorkloadLifecycleDelete:
-		_, err := e.client.do(ctx, http.MethodDelete, e.client.resourceURL(resource, ""), "", nil)
-		return err
+		for _, ref := range providerResourceRefsForLifecycleDelete(record.ResourceRefs) {
+			resource, err := resourceFromRecordRef(record, ref)
+			if err != nil {
+				return err
+			}
+			if _, err := e.client.do(ctx, http.MethodDelete, e.client.resourceURL(resource, ""), "", nil); err != nil {
+				return err
+			}
+		}
+		return nil
 	default:
 		return fmt.Errorf("%w: unsupported Kubernetes lifecycle action %q", ports.ErrUnsupported, action)
 	}
@@ -141,12 +149,26 @@ func validateLifecycleExecutionRequest(request ports.WorkloadInstanceLifecycleRe
 }
 
 func resourceFromRecord(record ports.WorkloadInstanceRecord) (kubernetesResource, error) {
-	namespace := tenantNamespace(record.TenantID)
-	provider := record.Provider
-	if provider == "" && len(record.ResourceRefs) > 0 {
-		provider = strings.Split(record.ResourceRefs[0], "/")[0]
+	ref, err := primaryWorkloadResourceRef(record.ResourceRefs)
+	if err != nil {
+		return kubernetesResource{}, err
 	}
-	resource, err := resourceFromRef(provider, namespace, record.ResourceRefs[0])
+	return resourceFromRecordRef(record, ref)
+}
+
+func resourceFromRecordRef(record ports.WorkloadInstanceRecord, ref string) (kubernetesResource, error) {
+	if len(record.ResourceRefs) == 0 {
+		return kubernetesResource{}, fmt.Errorf("%w: resource refs are required for lifecycle execution", ports.ErrInvalid)
+	}
+	if strings.TrimSpace(ref) == "" {
+		var err error
+		ref, err = primaryWorkloadResourceRef(record.ResourceRefs)
+		if err != nil {
+			return kubernetesResource{}, err
+		}
+	}
+	namespace := tenantNamespace(record.TenantID)
+	resource, err := resourceFromRef("", namespace, ref)
 	if err != nil {
 		return kubernetesResource{}, err
 	}

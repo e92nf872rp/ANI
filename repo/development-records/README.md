@@ -100,6 +100,7 @@
 | SPRINT13-REGISTRY-HARBOR-LIVE-A | Harbor production-shaped live gate passed：`docker.kubercon.local` + 本机 Gateway `:8080`；`validate-registry-harbor-live-gate`；evidence `live-evidence/sprint13-registry-harbor-live-evidence.json`；LIVE PENDING 仅作历史兼容语境；不代表 full platform production ready | sprint13-registry-harbor-live-result.md |
 | REGISTRY-MULTI-PROJECT-A | Registry 租户多项目语义对齐：ANI 自定义 `name` + Harbor `ani-{tenant}-{name}` 映射；local/Harbor adapter + live gate 契约；OpenAPI 描述补充；不标 production ready | registry-multi-project-a.md |
 | SPRINT13-KUBERNETES-REST-CREDENTIAL-RESOLVER-A | Kubernetes REST 凭证自动解析：新增 `ResolveKubernetesRESTClientConfig`（显式 env > kubeconfig > in-cluster SA）、`LoadKubernetesRESTEnvFromOS`、Gateway `kubernetes_runtime.go` 收敛；`client-go/clientcmd` 仅用于 kubeconfig 读取；本地开发可只设 provider mode + `KUBECONFIG`；不新增 live gate，不标 production ready | sprint13-kubernetes-rest-credential-resolver-a.md |
+| GATEWAY-INSTANCE-WORKLOAD-RUNTIME-A | Gateway `/instances` workload provider env 注入：对齐 M1-INSTANCE-P bootstrap；`workload_runtime.go` + router 注入；`dev_profile`/`demo_notice` 语义；Secret+Deployment 混合 apply 最小修复；gate：`make validate-gateway-instance-workload-runtime`；**不新增 live gate，不标 production ready** | gateway-instance-workload-runtime-a.md |
 
 ### Sprint 11 Kickoff（2026-06）
 

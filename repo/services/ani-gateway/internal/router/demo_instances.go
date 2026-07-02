@@ -77,6 +77,7 @@ type demoInstanceAPI struct {
 	operations                    ports.WorkloadOperationStore
 	observability                 ports.InstanceObservability
 	observabilityUsesInstanceName bool
+	workloadProvider              string
 }
 
 type demoCreateInstanceRequest struct {
@@ -361,14 +362,14 @@ type demoTimelineStep struct {
 }
 
 func newDemoInstanceAPI() *demoInstanceAPI {
-	return newDemoInstanceAPIWithOptions(nil, nil, false)
+	return newDemoInstanceAPIWithOptions(nil, DefaultInstanceWorkloadRuntime(), nil, nil, false)
 }
 
 func newDemoInstanceAPIWithObservability(observability ports.InstanceObservability, useInstanceName bool) *demoInstanceAPI {
-	return newDemoInstanceAPIWithOptions(nil, observability, useInstanceName)
+	return newDemoInstanceAPIWithOptions(nil, DefaultInstanceWorkloadRuntime(), nil, observability, useInstanceName)
 }
 
-func newDemoInstanceAPIWithOptions(metadata ports.MetadataStore, observability ports.InstanceObservability, useInstanceName bool) *demoInstanceAPI {
+func newDemoInstanceAPIWithOptions(metadata ports.MetadataStore, workload InstanceWorkloadRuntime, gpuInventory ports.GPUInventory, observability ports.InstanceObservability, useInstanceName bool) *demoInstanceAPI {
 	var store ports.WorkloadInstanceStore
 	var operations ports.WorkloadOperationStore
 	var identity ports.WorkloadIdentityService
@@ -384,26 +385,39 @@ func newDemoInstanceAPIWithOptions(metadata ports.MetadataStore, observability p
 		identity = runtimeadapter.NewLocalWorkloadIdentityService()
 		audit = &demoPlanAuditStore{}
 	}
-	planner := runtimeadapter.NewPlanningRuntime(runtimeadapter.WithGPUInventory(demoGPUInventory{}))
+	if workload.DryRun == nil || workload.Apply == nil || workload.StatusReader == nil || workload.Ops == nil {
+		workload = DefaultInstanceWorkloadRuntime()
+	}
+	inventory := ports.GPUInventory(demoGPUInventory{})
+	if gpuInventory != nil {
+		inventory = gpuInventory
+	}
+	planner := runtimeadapter.NewPlanningRuntime(runtimeadapter.WithGPUInventory(inventory))
 	orchestrator := runtimeadapter.NewLocalInstanceOrchestrator(
 		planner,
 		runtimeadapter.NewKubernetesDryRunRenderer(planner),
 		runtimeadapter.NewLocalAdmissionGuard(),
 		audit,
-		runtimeadapter.NewLocalProviderDryRun(),
-		runtimeadapter.NewLocalProviderApply(runtimeadapter.WithProviderApplyEnabled(true)),
-		runtimeadapter.NewLocalProviderStatusReader(),
+		workload.DryRun,
+		workload.Apply,
+		workload.StatusReader,
 		runtimeadapter.NewLocalStatusReconciler(),
 		runtimeadapter.WithInstanceStore(store),
 		runtimeadapter.WithInstanceOrchestratorWorkloadIdentityService(identity),
 	)
-	service := runtimeadapter.NewLocalInstanceServiceWithOptions(
-		orchestrator,
-		store,
-		runtimeadapter.NewLocalInstanceOpsGuard(runtimeadapter.WithInstanceOpsEnabled(true)),
+	serviceOptions := []runtimeadapter.InstanceServiceOption{
 		runtimeadapter.WithOperationStore(operations),
 		runtimeadapter.WithWorkloadIdentityService(identity),
 		runtimeadapter.WithSandboxRuntime(runtimeadapter.NewLocalSandboxRuntime()),
+	}
+	if workload.Lifecycle != nil {
+		serviceOptions = append(serviceOptions, runtimeadapter.WithInstanceLifecycleExecutor(workload.Lifecycle))
+	}
+	service := runtimeadapter.NewLocalInstanceServiceWithOptions(
+		orchestrator,
+		store,
+		workload.Ops,
+		serviceOptions...,
 	)
 	if observability == nil {
 		observability = runtimeadapter.NewLocalInstanceObservabilityService()
@@ -413,15 +427,16 @@ func newDemoInstanceAPIWithOptions(metadata ports.MetadataStore, observability p
 		operations:                    operations,
 		observability:                 observability,
 		observabilityUsesInstanceName: useInstanceName,
+		workloadProvider:              strings.TrimSpace(workload.Provider),
 	}
 }
 
 func registerDemoInstances(v1 *route.RouterGroup) {
-	registerDemoInstancesWithObservability(v1, nil, nil, false)
+	registerDemoInstancesWithObservability(v1, nil, DefaultInstanceWorkloadRuntime(), nil, nil, false)
 }
 
-func registerDemoInstancesWithObservability(v1 *route.RouterGroup, metadata ports.MetadataStore, observability ports.InstanceObservability, useInstanceName bool) {
-	api := newDemoInstanceAPIWithOptions(metadata, observability, useInstanceName)
+func registerDemoInstancesWithObservability(v1 *route.RouterGroup, metadata ports.MetadataStore, workload InstanceWorkloadRuntime, gpuInventory ports.GPUInventory, observability ports.InstanceObservability, useInstanceName bool) {
+	api := newDemoInstanceAPIWithOptions(metadata, workload, gpuInventory, observability, useInstanceName)
 	v1.GET("/instances", api.list)
 	v1.POST("/instances", api.create)
 	v1.GET("/instances/:instance_id", api.get)
@@ -491,12 +506,12 @@ func (api *demoInstanceAPI) create(ctx context.Context, c *app.RequestContext) {
 		status = http.StatusConflict
 	}
 	c.JSON(status, demoInstanceCreateResponse{
-		Instance:    demoInstanceFromRecord(record),
+		Instance:    api.demoInstanceFromRecord(record),
 		OperationID: result.OperationID,
 		AuditID:     result.AuditID,
 		Manifests:   demoManifests(result.Manifests),
 		Timeline:    demoTimeline(result),
-		DemoNotice:  "demo profile uses the M1 instance service with local apply enabled; set kubernetes_rest provider separately for live cluster execution.",
+		DemoNotice:  api.instanceCreateDemoNotice(),
 	})
 }
 
@@ -509,7 +524,7 @@ func (api *demoInstanceAPI) get(ctx context.Context, c *app.RequestContext) {
 		writeDemoError(c, http.StatusNotFound, "INSTANCE_NOT_FOUND", err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, demoInstanceFromRecord(record))
+	c.JSON(http.StatusOK, api.demoInstanceFromRecord(record))
 }
 
 func (api *demoInstanceAPI) list(ctx context.Context, c *app.RequestContext) {
@@ -524,7 +539,7 @@ func (api *demoInstanceAPI) list(ctx context.Context, c *app.RequestContext) {
 	}
 	items := make([]demoInstanceResponse, 0, len(records))
 	for _, record := range records {
-		items = append(items, demoInstanceFromRecord(record))
+		items = append(items, api.demoInstanceFromRecord(record))
 	}
 	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items)})
 }
@@ -590,7 +605,7 @@ func (api *demoInstanceAPI) lifecycle(ctx context.Context, c *app.RequestContext
 		return
 	}
 	c.JSON(http.StatusOK, demoInstanceLifecycleResponse{
-		Instance:    demoInstanceFromRecord(record),
+		Instance:    api.demoInstanceFromRecord(record),
 		OperationID: record.OperationID,
 	})
 }
@@ -954,7 +969,7 @@ func demoSpecFromRequest(req demoCreateInstanceRequest, tenantID string) (ports.
 		TenantID: tenantID,
 		Name:     name,
 		Kind:     kind,
-		Image:    firstNonEmpty(req.Image, "registry.local/ani/demo-runtime:latest"),
+		Image:    firstNonEmpty(req.Image, "nginx:1.27-alpine"),
 		Resources: ports.WorkloadResourceRequest{
 			CPU:    firstNonEmpty(req.CPU, "2"),
 			Memory: firstNonEmpty(req.Memory, "4Gi"),
@@ -968,7 +983,7 @@ func demoSpecFromRequest(req demoCreateInstanceRequest, tenantID string) (ports.
 			},
 		},
 		Storage: []ports.WorkloadStorageAttachment{
-			{Name: name + "-root", Kind: ports.StorageAttachmentRootDisk, SizeGiB: 40, SourceRef: firstNonEmpty(req.BootImage, "images/ubuntu-22.04.qcow2"), Required: true},
+			{Name: name + "-root", Kind: ports.StorageAttachmentRootDisk, SizeGiB: 40, SourceRef: firstNonEmpty(req.BootImage, "quay.io/kubevirt/cirros-container-disk-demo:v1.2.0"), Required: true},
 		},
 		Lifecycle: ports.InstanceLifecyclePolicy{AutoStart: autoStart, TerminationProtection: req.TerminationProtection},
 		Labels: map[string]string{
@@ -982,7 +997,7 @@ func demoSpecFromRequest(req demoCreateInstanceRequest, tenantID string) (ports.
 	switch kind {
 	case ports.WorkloadKindVM:
 		spec.VM = &ports.VMInstanceSpec{
-			BootImage:    firstNonEmpty(req.BootImage, "images/ubuntu-22.04.qcow2"),
+			BootImage:    firstNonEmpty(req.BootImage, "quay.io/kubevirt/cirros-container-disk-demo:v1.2.0"),
 			SSHUsername:  firstNonEmpty(req.SSHUsername, "ubuntu"),
 			SSHKeySecret: req.SSHKeyRef,
 			MachineType:  "q35",
@@ -1063,7 +1078,7 @@ func demoSecretBindingsFromRequest(request []demoSecretBindingRequest) []ports.W
 	return bindings
 }
 
-func demoInstanceFromRecord(record ports.WorkloadInstanceRecord) demoInstanceResponse {
+func (api *demoInstanceAPI) demoInstanceFromRecord(record ports.WorkloadInstanceRecord) demoInstanceResponse {
 	return demoInstanceResponse{
 		ID:                    record.InstanceID,
 		TenantID:              record.TenantID,
@@ -1073,7 +1088,7 @@ func demoInstanceFromRecord(record ports.WorkloadInstanceRecord) demoInstanceRes
 		State:                 string(record.Status.State),
 		Status:                string(record.Status.State),
 		Provider:              record.Provider,
-		DevProfile:            localCoreDevProfile("local-instance-service", "Core dev/local profile; provider execution is gated separately"),
+		DevProfile:            api.instanceDevProfile(record),
 		OperationID:           record.OperationID,
 		ResourceRefs:          record.ResourceRefs,
 		Endpoint:              record.Status.Endpoint,
@@ -1457,6 +1472,39 @@ func coreDevProfileFromPort(profile ports.DevProfileInfo) coreDevProfileResponse
 		RealProvider: profile.RealProvider,
 		Reason:       profile.Reason,
 	}
+}
+
+func (api *demoInstanceAPI) instanceDevProfile(record ports.WorkloadInstanceRecord) coreDevProfileResponse {
+	if api.workloadProvider != "kubernetes_rest" {
+		return localCoreDevProfile("local-instance-service", "Core dev/local profile; workload provider defaults to local adapters")
+	}
+	if record.Provider == "kubernetes" || record.Provider == "kubevirt" {
+		return coreDevProfileResponse{
+			Mode:         "real",
+			Provider:     "kubernetes_rest",
+			RealProvider: instanceUsesKubernetesResourceRefs(record.ResourceRefs),
+			Reason:       "Gateway workload provider runtime configured; Kubernetes manifests rendered and applied when apply is enabled",
+		}
+	}
+	return localCoreDevProfile("kubernetes_rest", "Gateway workload provider runtime configured; instance not yet materialized on Kubernetes")
+}
+
+func (api *demoInstanceAPI) instanceCreateDemoNotice() string {
+	switch api.workloadProvider {
+	case "kubernetes_rest":
+		return "Gateway workload provider runtime is kubernetes_rest; instance create uses WorkloadProviderDryRun/Apply when WORKLOAD_PROVIDER_APPLY_ENABLED=true."
+	default:
+		return "Core dev/local profile uses local workload provider adapters; configure WORKLOAD_PROVIDER=kubernetes_rest for live cluster execution."
+	}
+}
+
+func instanceUsesKubernetesResourceRefs(refs []string) bool {
+	for _, ref := range refs {
+		if strings.HasPrefix(ref, "kubernetes/") {
+			return true
+		}
+	}
+	return false
 }
 
 func maxInt(value int, fallback int) int {

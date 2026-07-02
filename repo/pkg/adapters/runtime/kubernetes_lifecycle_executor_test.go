@@ -54,6 +54,35 @@ func TestKubernetesLifecycleExecutorDeletesResource(t *testing.T) {
 	}
 }
 
+func TestKubernetesLifecycleExecutorDeleteRemovesSecretAndDeployment(t *testing.T) {
+	var requests []string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.ResourceRefs = []string{
+		"kubernetes/Secret/app-01-identity",
+		"kubernetes/Deployment/app-01",
+	}
+	result, err := executor.Apply(context.Background(), lifecycleRequest(ports.WorkloadLifecycleDelete), record)
+	if err != nil {
+		t.Fatalf("Delete Apply() error = %v", err)
+	}
+	if !result.Accepted {
+		t.Fatalf("Accepted = false, reason = %s", result.Reason)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("requests = %#v, want deployment and secret delete", requests)
+	}
+	if !strings.Contains(requests[0], "/deployments/app-01") {
+		t.Fatalf("first request = %q, want deployment delete first", requests[0])
+	}
+	if !strings.Contains(requests[1], "/secrets/app-01-identity") {
+		t.Fatalf("second request = %q, want secret delete second", requests[1])
+	}
+}
+
 func TestKubernetesLifecycleExecutorDisabledDoesNotCallProvider(t *testing.T) {
 	called := false
 	client := newLifecycleRESTClient(t, func(r *http.Request) (*http.Response, error) {

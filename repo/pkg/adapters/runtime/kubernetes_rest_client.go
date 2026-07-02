@@ -162,6 +162,9 @@ func (c *KubernetesRESTClient) ServerSideDryRun(ctx context.Context, manifests [
 		return ports.WorkloadProviderDryRunResult{}, fmt.Errorf("%w: at least one manifest is required for Kubernetes server-side dry-run", ports.ErrInvalid)
 	}
 	provider := manifests[0].Provider
+	if allowWorkloadIdentitySecretBatch(manifests) {
+		provider = manifests[1].Provider
+	}
 	for _, manifest := range manifests {
 		resource, err := parseKubernetesResource(manifest)
 		if err != nil {
@@ -186,6 +189,9 @@ func (c *KubernetesRESTClient) Apply(ctx context.Context, request ports.Workload
 		return ports.WorkloadProviderApplyResult{}, err
 	}
 	provider := request.Manifests[0].Provider
+	if allowWorkloadIdentitySecretBatch(request.Manifests) {
+		provider = request.Manifests[1].Provider
+	}
 	refs, err := c.ApplyManifests(ctx, request.Manifests)
 	if err != nil {
 		return ports.WorkloadProviderApplyResult{}, err
@@ -309,7 +315,11 @@ func (c *KubernetesRESTClient) Observe(ctx context.Context, request ports.Worklo
 		return ports.WorkloadProviderObservation{}, fmt.Errorf("%w: resource refs are required for Kubernetes observation", ports.ErrInvalid)
 	}
 
-	resource, err := resourceFromRef(request.ApplyResult.Provider, tenantNamespace(request.TenantID), request.ApplyResult.ResourceRefs[0])
+	ref, err := primaryWorkloadResourceRef(request.ApplyResult.ResourceRefs)
+	if err != nil {
+		return ports.WorkloadProviderObservation{}, err
+	}
+	resource, err := resourceFromRef("", tenantNamespace(request.TenantID), ref)
 	if err != nil {
 		return ports.WorkloadProviderObservation{}, err
 	}
@@ -336,24 +346,28 @@ func (c *KubernetesRESTClient) Observe(ctx context.Context, request ports.Worklo
 }
 
 func (c *KubernetesRESTClient) do(ctx context.Context, method string, endpoint string, contentType string, body []byte) ([]byte, error) {
-	return c.doWithPolicy(ctx, c.policy, method, endpoint, contentType, body)
+	return c.doWithPolicy(ctx, c.policy, method, endpoint, contentType, body, nil)
 }
 
 func (c *KubernetesRESTClient) doIdempotent(ctx context.Context, method string, endpoint string, contentType string, body []byte) ([]byte, error) {
-	return c.doWithPolicy(ctx, c.idempotentPolicy, method, endpoint, contentType, body)
+	return c.doWithPolicy(ctx, c.idempotentPolicy, method, endpoint, contentType, body, nil)
 }
 
-func (c *KubernetesRESTClient) doWithPolicy(ctx context.Context, policy resilience.Policy, method string, endpoint string, contentType string, body []byte) ([]byte, error) {
+func (c *KubernetesRESTClient) doWithHeaders(ctx context.Context, method string, endpoint string, contentType string, body []byte, headers map[string]string) ([]byte, error) {
+	return c.doWithPolicy(ctx, c.policy, method, endpoint, contentType, body, headers)
+}
+
+func (c *KubernetesRESTClient) doWithPolicy(ctx context.Context, policy resilience.Policy, method string, endpoint string, contentType string, body []byte, headers map[string]string) ([]byte, error) {
 	var data []byte
 	err := resilience.Do(ctx, policy, func(callCtx context.Context) error {
 		var err error
-		data, err = c.doOnce(callCtx, method, endpoint, contentType, body)
+		data, err = c.doOnce(callCtx, method, endpoint, contentType, body, headers)
 		return err
 	})
 	return data, err
 }
 
-func (c *KubernetesRESTClient) doOnce(ctx context.Context, method string, endpoint string, contentType string, body []byte) ([]byte, error) {
+func (c *KubernetesRESTClient) doOnce(ctx context.Context, method string, endpoint string, contentType string, body []byte, headers map[string]string) ([]byte, error) {
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
@@ -366,6 +380,12 @@ func (c *KubernetesRESTClient) doOnce(ctx context.Context, method string, endpoi
 		req.Header.Set("Content-Type", contentType)
 	}
 	req.Header.Set("Accept", "application/json")
+	for key, value := range headers {
+		if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
+			continue
+		}
+		req.Header.Set(key, value)
+	}
 	if c.bearerToken != "" {
 		req.Header.Set("Authorization", "Bearer "+c.bearerToken)
 	}

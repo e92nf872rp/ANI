@@ -55,6 +55,7 @@ Sprint 13 production-shaped live gate 摘要：
 - S05-S07 B 轨可以继续：保留为历史兼容 token；截至 2026-06-21，S05/S06/S07 均已 passed。
 - 镜像仓库 Harbor：SPRINT13-REGISTRY-HARBOR-A 代码对接 + **SPRINT13-REGISTRY-HARBOR-LIVE-A production-shaped live gate passed**（2026-06-30）；**REGISTRY-MULTI-PROJECT-A** 对齐租户多项目/自定义 name（Harbor 内部映射）；Harbor `docker.kubercon.local` @ 192.168.102.81；本机 Gateway `:8080` + `REGISTRY_PROVIDER=harbor`；`validate-registry-harbor-live-gate --production-shaped`；evidence 见 `sprint13-registry-harbor-live-result.md`；不代表 full platform production ready。
 - Kubernetes REST 凭证解析：SPRINT13-KUBERNETES-REST-CREDENTIAL-RESOLVER-A；`ResolveKubernetesRESTClientConfig` + `LoadKubernetesRESTEnvFromOS` + Gateway `kubernetes_runtime.go`；本地可 `KUBECONFIG` 自动连集群；显式 `KUBERNETES_*` 仍覆盖 kubeconfig；**dev 便利批次，不标 production ready**。
+- Gateway 实例 workload 接线：GATEWAY-INSTANCE-WORKLOAD-RUNTIME-A；`services/ani-gateway/workload_runtime.go` 将 `WORKLOAD_PROVIDER=kubernetes_rest` 注入 `/instances` orchestrator（对齐 M1-INSTANCE-P bootstrap）；`dev_profile`/`demo_notice` 反映 provider 配置；gate：`make validate-gateway-instance-workload-runtime`；**不新增 live gate，不标 production ready**。
 
 Sprint 14 Core resilience 分支完成状态：
 - 分支：`feature/sprint14-core-resilience-semantics`。
