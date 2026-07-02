@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app/server"
 
@@ -111,6 +113,21 @@ func main() {
 			"prometheus_configured", strings.TrimSpace(instanceObservabilityRuntimeConfig.PrometheusURL) != "",
 		)
 	}
+	instanceWorkloadRuntimeConfig := gatewayWorkloadRuntimeConfigFromEnv()
+	instanceWorkloadRuntime, err := newGatewayInstanceWorkloadRuntime(instanceWorkloadRuntimeConfig)
+	if err != nil {
+		logger.Error("failed to configure instance workload provider runtime", "err", err)
+		os.Exit(1)
+	}
+	logger.Info("instance workload provider runtime configured",
+		"provider", strings.TrimSpace(instanceWorkloadRuntime.Provider),
+		"apply_enabled", instanceWorkloadRuntimeConfig.ProviderApplyEnabled,
+		"lifecycle_provider", strings.TrimSpace(instanceWorkloadRuntimeConfig.LifecycleProvider),
+		"lifecycle_apply_enabled", instanceWorkloadRuntimeConfig.LifecycleApplyEnabled,
+		"ops_provider", strings.TrimSpace(instanceWorkloadRuntimeConfig.OpsProvider),
+		"ops_enabled", instanceWorkloadRuntimeConfig.OpsEnabled,
+	)
+	warnIfReconcileWorkerUnavailable(logger, instanceWorkloadRuntimeConfig)
 	gatewayStore, closeGatewayStore, err := bootstrap.ConnectRedisCacheStoreWithConfig(gatewayRedisConfigFromEnv())
 	if err != nil {
 		logger.Error("failed to configure gateway shared store", "err", err)
@@ -133,6 +150,7 @@ func main() {
 		NetworkService:                        networkService,
 		StorageService:                        storageService,
 		VectorStoreService:                    vectorStoreService,
+		InstanceWorkloadRuntime:               instanceWorkloadRuntime,
 		InstanceObservability:                 instanceObservability,
 		InstanceObservabilityUsesInstanceName: instanceObservabilityUsesInstanceName,
 	})
@@ -187,4 +205,38 @@ func firstGatewayEnv(keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func warnIfReconcileWorkerUnavailable(logger *slog.Logger, cfg gatewayWorkloadRuntimeConfig) {
+	if logger == nil {
+		return
+	}
+	// Local profile does not rely on async status reconciliation loop.
+	usesRealProvider := strings.EqualFold(strings.TrimSpace(cfg.ProviderMode), "kubernetes_rest") ||
+		strings.EqualFold(strings.TrimSpace(cfg.LifecycleProvider), "kubernetes_rest") ||
+		strings.EqualFold(strings.TrimSpace(cfg.OpsProvider), "kubernetes_rest")
+	if !usesRealProvider {
+		return
+	}
+	if value := strings.TrimSpace(os.Getenv("ANI_RECONCILE_WORKER_REQUIRED")); strings.EqualFold(value, "false") {
+		return
+	}
+	reconcileHealthURL := strings.TrimSpace(os.Getenv("ANI_RECONCILE_WORKER_HEALTH_URL"))
+	if reconcileHealthURL == "" {
+		reconcileHealthURL = "http://127.0.0.1:9205/healthz"
+	}
+	client := &http.Client{Timeout: 1200 * time.Millisecond}
+	resp, err := client.Get(reconcileHealthURL)
+	if err != nil {
+		logger.Warn("reconcile-worker health probe failed; instance state may become stale",
+			"health_url", reconcileHealthURL,
+			"err", err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		logger.Warn("reconcile-worker health probe is not ready; instance state may become stale",
+			"health_url", reconcileHealthURL,
+			"status_code", resp.StatusCode)
+	}
 }

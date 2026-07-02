@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/kubercloud/ani/pkg/ports"
+	"github.com/kubercloud/ani/pkg/types"
+	"github.com/google/uuid"
 )
 
 type LocalWorkloadReconcileController struct {
@@ -91,7 +93,11 @@ func (c *LocalWorkloadReconcileController) ReconcileNow(ctx context.Context, tar
 	if target.TenantID == "" || target.InstanceID == "" || target.Kind == "" {
 		return ports.ReconcileResult{}, fmt.Errorf("%w: tenant_id/instance_id/kind required for reconcile target", ports.ErrInvalid)
 	}
-	current, err := c.store.Get(ctx, target.TenantID, target.InstanceID)
+	tenantCtx, err := tenantScopedContext(ctx, target.TenantID)
+	if err != nil {
+		return ports.ReconcileResult{}, err
+	}
+	current, err := c.store.Get(tenantCtx, target.TenantID, target.InstanceID)
 	if err != nil {
 		return ports.ReconcileResult{}, err
 	}
@@ -128,7 +134,7 @@ func (c *LocalWorkloadReconcileController) ReconcileNow(ctx context.Context, tar
 	if reconciled.Changed {
 		current.Status = reconciled.Status
 		current.UpdatedAt = firstNonZeroTime(reconciled.Status.UpdatedAt, reconciled.ReconciledAt, c.now().UTC())
-		if err := c.store.UpsertStatus(ctx, current); err != nil {
+		if err := c.store.UpsertStatus(tenantCtx, current); err != nil {
 			return ports.ReconcileResult{}, err
 		}
 	}
@@ -181,7 +187,11 @@ func (c *LocalWorkloadReconcileController) markProviderMissing(ctx context.Conte
 	current.Status.Reason = "ProviderResourceLost"
 	current.Status.UpdatedAt = now
 	current.UpdatedAt = now
-	if err := c.store.UpsertStatus(ctx, current); err != nil {
+	tenantCtx, err := tenantScopedContext(ctx, current.TenantID)
+	if err != nil {
+		return ports.ReconcileResult{}, err
+	}
+	if err := c.store.UpsertStatus(tenantCtx, current); err != nil {
 		return ports.ReconcileResult{}, err
 	}
 	return ports.ReconcileResult{
@@ -194,6 +204,18 @@ func (c *LocalWorkloadReconcileController) markProviderMissing(ctx context.Conte
 		Reason:          "ProviderResourceLost",
 		ReconciledAt:    now,
 	}, nil
+}
+
+func tenantScopedContext(ctx context.Context, tenantID string) (context.Context, error) {
+	if _, ok := types.TryFromContext(ctx); ok {
+		return ctx, nil
+	}
+	parsed, err := uuid.Parse(tenantID)
+	if err != nil {
+		// Local profile data may use non-UUID tenant ids; derive a stable UUID to satisfy RLS context contract.
+		parsed = uuid.NewSHA1(uuid.NameSpaceOID, []byte(tenantID))
+	}
+	return types.WithTenant(ctx, &types.TenantContext{TenantID: parsed}), nil
 }
 
 func (c *LocalWorkloadReconcileController) validate() error {
