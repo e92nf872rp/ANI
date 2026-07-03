@@ -657,12 +657,10 @@ data:
         name: ANI Console
         secret: $ANI_DEX_CLIENT_SECRET
         redirectURIs:
-          - http://ani-gateway.ani-system.svc.cluster.local:8080/auth/callback
-          - http://ani-gateway.ani-system.svc.cluster.local:8080/api/v1/auth/callback
-          - http://127.0.0.1:30080/auth/callback
-          - http://127.0.0.1:30080/api/v1/auth/callback
-          - http://localhost:30080/auth/callback
-          - http://localhost:30080/api/v1/auth/callback
+          - http://ani-gateway.ani-system.svc.cluster.local:8080/login/callback
+          - http://ani-gateway.ani-system.svc.cluster.local:8080/api/v1/login/callback
+          - http://127.0.0.1:5173/login/callback
+          - http://localhost:5173/login/callback
           - http://console.example.local:30081/login/callback
 
     enablePasswordDB: true

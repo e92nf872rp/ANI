@@ -18,7 +18,7 @@
 ```text
 render → mirror → foundation:
          KubeVirt → Rook operator → Ceph OSD 预备 → CephCluster → StorageClass ani-rbd-ssd → Harbor(PVC)
-       → base-infra(Postgres PVC) → business → verify
+       → base-infra(Postgres PVC + DB init) → business → verify
 ```
 
 **必须先有 `ani-rbd-ssd` StorageClass**，才会部署 Harbor 和 Postgres 等业务组件。
@@ -60,6 +60,8 @@ python3 deploy/isolated/deploy.py deploy --only foundation
 | Postgres | PVC 5Gi，`storageClassName: ani-rbd-ssd` |
 | Harbor | PVC，`ani-rbd-ssd` |
 | MinIO/Milvus 等 | 仍为 emptyDir（dev 可接受；需持久化可后续改 PVC） |
+
+base-infra 阶段会在 Postgres Ready 后执行 `deploy/postgres/ani-dev-database-init.sql`，补齐 OIDC 登录所需的 tenants、roles、users、refresh_tokens 等表和默认 seed。
 
 ## 访问地址
 

@@ -39,6 +39,7 @@ REGISTRY_MIRROR = os.environ.get("REGISTRY", "docker.changqingyun.cn/mirror")
 REGISTRY_ANI = os.environ.get("REGISTRY_ANI", "docker.changqingyun.cn/ani")
 DOCKER_CONFIG = Path(os.environ.get("DOCKER_CONFIG", Path.home() / ".docker/config.json"))
 STORAGE_CLASS = "ani-rbd-ssd"
+DB_INIT_SQL = ROOT / "deploy" / "postgres" / "ani-dev-database-init.sql"
 
 BASE_MIRRORS = [
     ("docker.io/library/busybox:latest", "busybox:latest"),
@@ -256,6 +257,41 @@ def require_storage_class(name: str = STORAGE_CLASS) -> None:
             f"StorageClass {name} not found; run foundation with Ceph first "
             f"(deploy --only foundation)"
         )
+
+
+def init_database(namespace: str) -> None:
+    log("base-infra: initialize Postgres schema")
+    if not DB_INIT_SQL.exists():
+        raise DeployError(f"database init SQL not found: {DB_INIT_SQL}")
+    probe = run(
+        [
+            "kubectl", "-n", namespace,
+            "exec", "-i", "ani-postgres-0", "--",
+            "psql", "-U", "ani", "-d", "ani", "-tAc",
+            (
+                "SELECT CASE WHEN "
+                "to_regclass('public.tenants') IS NOT NULL "
+                "AND to_regclass('public.roles') IS NOT NULL "
+                "AND to_regclass('public.refresh_tokens') IS NOT NULL "
+                "THEN 'initialized' ELSE 'missing' END"
+            ),
+        ],
+        quiet=True,
+    )
+    if probe.stdout.strip() == "initialized":
+        print("✅ database schema already initialized")
+        return
+    sql = DB_INIT_SQL.read_text(encoding="utf-8")
+    run(
+        [
+            "kubectl", "-n", namespace,
+            "exec", "-i", "ani-postgres-0", "--",
+            "psql", "-U", "ani", "-d", "ani", "-v", "ON_ERROR_STOP=1",
+        ],
+        input=sql,
+        quiet=True,
+    )
+    print("✅ database schema initialized")
 
 
 def prep_ceph_osd_devices() -> None:
@@ -703,6 +739,7 @@ def deploy_base_infra(cfg: dict[str, str]) -> None:
     rollout(ns, "deploy", "ani-redis", timeout="240s")
     rollout(ns, "deploy", "nats", timeout="240s")
     rollout(ns, "sts", "ani-postgres", timeout="240s")
+    init_database(ns)
     rollout(ns, "deploy", "ani-s05-minio", timeout="240s")
     rollout(ns, "deploy", "milvus", timeout="240s")
     rollout(ns, "deploy", "prometheus", timeout="240s")
