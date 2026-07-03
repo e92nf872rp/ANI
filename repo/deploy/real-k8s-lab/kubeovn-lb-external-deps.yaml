@@ -51,7 +51,7 @@ spec:
     spec:
       containers:
         - name: http
-          image: busybox:1.36
+          image: dockerproxy.net/library/busybox:1.36
           command:
             - sh
             - -c

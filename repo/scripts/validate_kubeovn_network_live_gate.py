@@ -153,7 +153,7 @@ class ExternalLBConfig:
     deps_manifest: str = str(DEFAULT_EXTERNAL_LB_DEPS)
     script_configmap_manifest: str = str(DEFAULT_EXTERNAL_LB_SCRIPT_CONFIGMAP)
     script_configmap_name: str = "ani-kubeovn-lb-svc-script"
-    helper_image: str = "docker.io/kubeovn/kube-ovn:v1.15.8"
+    helper_image: str = "dockerproxy.net/kubeovn/kube-ovn:v1.15.8"
     controller_namespace: str = "kube-system"
     controller_deployment: str = "kube-ovn-controller"
     kubeconfig: str = ""
@@ -1041,7 +1041,7 @@ def main() -> int:
         default=os.getenv("ANI_KUBEOVN_EXTERNAL_LB_SCRIPT_CONFIGMAP", str(DEFAULT_EXTERNAL_LB_SCRIPT_CONFIGMAP)),
     )
     parser.add_argument("--external-lb-script-configmap-name", default=os.getenv("ANI_KUBEOVN_EXTERNAL_LB_SCRIPT_CONFIGMAP_NAME", "ani-kubeovn-lb-svc-script"))
-    parser.add_argument("--external-lb-helper-image", default=os.getenv("ANI_KUBEOVN_EXTERNAL_LB_HELPER_IMAGE", "docker.io/kubeovn/kube-ovn:v1.15.8"))
+    parser.add_argument("--external-lb-helper-image", default=os.getenv("ANI_KUBEOVN_EXTERNAL_LB_HELPER_IMAGE", "dockerproxy.net/kubeovn/kube-ovn:v1.15.8"))
     parser.add_argument("--external-lb-controller-namespace", default=os.getenv("ANI_KUBEOVN_CONTROLLER_NAMESPACE", "kube-system"))
     parser.add_argument("--external-lb-controller-deployment", default=os.getenv("ANI_KUBEOVN_CONTROLLER_DEPLOYMENT", "kube-ovn-controller"))
     parser.add_argument("--external-lb-ssh-binary", default=os.getenv("ANI_KUBEOVN_EXTERNAL_LB_SSH_BINARY", "ssh"))

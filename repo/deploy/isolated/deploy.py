@@ -42,16 +42,16 @@ STORAGE_CLASS = "ani-rbd-ssd"
 DB_INIT_SQL = ROOT / "deploy" / "postgres" / "ani-dev-database-init.sql"
 
 BASE_MIRRORS = [
-    ("docker.io/library/busybox:latest", "busybox:latest"),
+    ("dockerproxy.net/library/busybox:latest", "busybox:latest"),
     ("ghcr.io/cloudnative-pg/postgresql:15.5-1", "cloudnative-pg/postgresql:15.5-1"),
-    ("docker.io/library/redis:8.2.3-alpine", "redis:8.2.3-alpine"),
-    ("docker.io/library/nats:2.10-alpine", "nats:2.10-alpine"),
-    ("docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z", "minio/minio:RELEASE.2025-09-07T16-13-09Z"),
+    ("dockerproxy.net/library/redis:8.2.3-alpine", "redis:8.2.3-alpine"),
+    ("dockerproxy.net/library/nats:2.10-alpine", "nats:2.10-alpine"),
+    ("dockerproxy.net/minio/minio:RELEASE.2025-09-07T16-13-09Z", "minio/minio:RELEASE.2025-09-07T16-13-09Z"),
     ("quay.io/coreos/etcd:v3.5.5", "coreos/etcd:v3.5.5"),
-    ("docker.io/milvusdb/milvus:v2.4.15", "milvusdb/milvus:v2.4.15"),
-    ("docker.io/prom/prometheus:v2.39.1", "prom/prometheus:v2.39.1"),
+    ("dockerproxy.net/milvusdb/milvus:v2.4.15", "milvusdb/milvus:v2.4.15"),
+    ("dockerproxy.net/prom/prometheus:v2.39.1", "prom/prometheus:v2.39.1"),
     ("ghcr.io/dexidp/dex:v2.40.0", "dexidp/dex:v2.40.0"),
-    ("docker.io/zilliz/attu:v2.4", "zilliz/attu:v2.4"),
+    ("dockerproxy.net/zilliz/attu:v2.4", "zilliz/attu:v2.4"),
 ]
 
 FOUNDATION_MIRRORS = [
@@ -60,7 +60,7 @@ FOUNDATION_MIRRORS = [
     ("quay.io/kubevirt/virt-controller:v1.8.2", "kubevirt/virt-controller:v1.8.2"),
     ("quay.io/kubevirt/virt-handler:v1.8.2", "kubevirt/virt-handler:v1.8.2"),
     ("quay.io/kubevirt/virt-launcher:v1.8.2", "kubevirt/virt-launcher:v1.8.2"),
-    ("docker.io/rook/ceph:v1.20.0", "rook/ceph:v1.20.0"),
+    ("dockerproxy.net/rook/ceph:v1.20.0", "rook/ceph:v1.20.0"),
     ("quay.io/ceph/ceph:v19.2.3", "ceph/ceph:v19.2.3"),
     ("quay.io/cephcsi/ceph-csi-operator:v1.0.1", "cephcsi/ceph-csi-operator:v1.0.1"),
     ("quay.io/cephcsi/cephcsi:v3.17.0", "cephcsi/cephcsi:v3.17.0"),
@@ -70,15 +70,15 @@ FOUNDATION_MIRRORS = [
     ("registry.k8s.io/sig-storage/csi-attacher:v4.12.0", "sig-storage/csi-attacher:v4.12.0"),
     ("registry.k8s.io/sig-storage/csi-resizer:v2.1.0", "sig-storage/csi-resizer:v2.1.0"),
     ("quay.io/csiaddons/k8s-sidecar:v0.14.0", "csiaddons/k8s-sidecar:v0.14.0"),
-    ("docker.io/goharbor/harbor-core:v2.15.1", "goharbor/harbor-core:v2.15.1"),
-    ("docker.io/goharbor/harbor-jobservice:v2.15.1", "goharbor/harbor-jobservice:v2.15.1"),
-    ("docker.io/goharbor/nginx-photon:v2.15.1", "goharbor/nginx-photon:v2.15.1"),
-    ("docker.io/goharbor/harbor-portal:v2.15.1", "goharbor/harbor-portal:v2.15.1"),
-    ("docker.io/goharbor/registry-photon:v2.15.1", "goharbor/registry-photon:v2.15.1"),
-    ("docker.io/goharbor/harbor-registryctl:v2.15.1", "goharbor/harbor-registryctl:v2.15.1"),
-    ("docker.io/goharbor/harbor-db:v2.15.1", "goharbor/harbor-db:v2.15.1"),
-    ("docker.io/goharbor/redis-photon:v2.15.1", "goharbor/redis-photon:v2.15.1"),
-    ("docker.io/goharbor/trivy-adapter-photon:v2.15.1", "goharbor/trivy-adapter-photon:v2.15.1"),
+    ("dockerproxy.net/goharbor/harbor-core:v2.15.1", "goharbor/harbor-core:v2.15.1"),
+    ("dockerproxy.net/goharbor/harbor-jobservice:v2.15.1", "goharbor/harbor-jobservice:v2.15.1"),
+    ("dockerproxy.net/goharbor/nginx-photon:v2.15.1", "goharbor/nginx-photon:v2.15.1"),
+    ("dockerproxy.net/goharbor/harbor-portal:v2.15.1", "goharbor/harbor-portal:v2.15.1"),
+    ("dockerproxy.net/goharbor/registry-photon:v2.15.1", "goharbor/registry-photon:v2.15.1"),
+    ("dockerproxy.net/goharbor/harbor-registryctl:v2.15.1", "goharbor/harbor-registryctl:v2.15.1"),
+    ("dockerproxy.net/goharbor/harbor-db:v2.15.1", "goharbor/harbor-db:v2.15.1"),
+    ("dockerproxy.net/goharbor/redis-photon:v2.15.1", "goharbor/redis-photon:v2.15.1"),
+    ("dockerproxy.net/goharbor/trivy-adapter-photon:v2.15.1", "goharbor/trivy-adapter-photon:v2.15.1"),
 ]
 
 ANI_IMAGES = (

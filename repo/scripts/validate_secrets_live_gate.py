@@ -233,7 +233,7 @@ def pod_manifest(namespace: str, pod_name: str, secret_id: str) -> str:
                 "containers": [
                     {
                         "name": "secret-check",
-                        "image": "busybox:1.36",
+                        "image": "dockerproxy.net/library/busybox:1.36",
                         "command": [
                             "sh",
                             "-c",

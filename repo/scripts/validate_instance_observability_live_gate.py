@@ -275,7 +275,7 @@ spec:
   restartPolicy: Always
   containers:
     - name: main
-      image: busybox:1.36
+      image: dockerproxy.net/library/busybox:1.36
       imagePullPolicy: IfNotPresent
       command: ["/bin/sh", "-c"]
       args:
@@ -349,7 +349,7 @@ def validate_live(
         {
             "kind": "container",
             "name": args.instance_name,
-            "image": "busybox:1.36",
+            "image": "dockerproxy.net/library/busybox:1.36",
             "cpu": "100m",
             "memory": "64Mi",
             "idempotency_key": idempotency,
