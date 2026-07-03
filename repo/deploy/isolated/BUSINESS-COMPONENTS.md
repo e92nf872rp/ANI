@@ -12,13 +12,19 @@
 - `task-service`
 - `reconcile-worker`
 
-## 2. 镜像构建与推送
+## 2. 镜像使用
 
-统一脚本会构建并推送以上 5 个组件镜像：
+默认部署直接使用厂库中已存在的 5 个组件镜像：
 
 ```bash
 cd repo
-./scripts/build_push_core_images.sh dev
+python3 deploy/isolated/deploy.py deploy dev --skip-mirror
+```
+
+需要现场重新构建并推送时，显式加 `--build`：
+
+```bash
+python3 deploy/isolated/deploy.py deploy dev --build
 ```
 
 对应镜像名：
@@ -29,44 +35,33 @@ cd repo
 - `docker.changqingyun.cn/ani/task-service:dev`
 - `docker.changqingyun.cn/ani/reconcile-worker:dev`
 
-## 3. 当前 Isolated 部署入口现状
+## 3. 当前 Isolated 部署入口
 
-## 3.1 已有 Isolated 清单直接覆盖
-
-- `model-service`
-- `task-service`
-- `reconcile-worker`
+`business-stack.yaml` 已覆盖全部 5 个业务组件（gateway / auth / model / task / reconcile）与 gateway RBAC；`ani-services-runtime` 由部署脚本生成。
 
 入口：
 
-- 清单：`deploy/isolated/services-stack.yaml`
-- 脚本：`scripts/deploy_isolated_core_stack.sh`
+- 清单：`deploy/isolated/business-stack.yaml`
 
-## 3.2 gateway/auth 当前部署边界
-
-当前 `deploy/isolated` 目录下**没有**独立的 `ani-gateway`/`ani-auth-service` manifest。
-
-因此在 Isolated 路径中：
-
-- 已支持：gateway/auth 镜像构建与推送（`build_push_core_images.sh`）
-- 未内置：gateway/auth 的 isolated k8s 清单直接 apply 入口
-
-如果需要把 gateway/auth 也纳入 isolated “一键部署”，建议后续补充：
-
-- `deploy/isolated/gateway-auth.yaml`
-- 或在 `deploy/isolated/services-stack.yaml` 中扩展 gateway/auth 资源
+```bash
+python3 deploy/isolated/deploy.py deploy dev --only business
+```
 
 ## 4. model/task/reconcile 组件配置
 
 ## 4.1 统一运行时 Secret
 
-`deploy_isolated_core_stack.sh` 会创建 `ani-services-runtime`（默认 namespace `ani-system`），包含：
+`deploy.py` business 阶段会创建 `ani-services-runtime`（默认 namespace `ani-system`），包含：
 
 - `database_url`
 - `nats_url`
 - `redis_url`
+- `oidc_*`
+- `auth_jwt_issuer`
+- `jwt_private_key_pem`
+- `jwt_public_key_pem`
 
-三个业务服务都通过 `secretKeyRef` 读取该 Secret。
+业务组件都通过 `secretKeyRef` 读取该 Secret。
 
 ## 4.2 model-service
 
@@ -117,18 +112,15 @@ kubectl -n ani-system rollout status deploy/reconcile-worker --timeout=180s
 cd repo
 POSTGRES_PASSWORD=ani_dev_password \
 REDIS_PASSWORD=ani_dev_password \
-NATS_URL=nats://nats.ani-data.svc.cluster.local:4222 \
-./scripts/deploy_isolated_core_stack.sh dev
+NATS_URL=nats://nats.ani-system.svc.cluster.local:4222 \
+python3 deploy/isolated/deploy.py deploy dev --only business
 ```
 
 ## 6. 一键入口（当前能力）
 
-`scripts/deploy_isolated_all.sh` 当前流程：
+`python3 deploy/isolated/deploy.py deploy dev` 当前流程：
 
-1. 构建并推送 core 镜像（包含 gateway/auth）
-2. 部署 isolated 基础组件
-3. 部署 `model/task/reconcile`
+1. 渲染/同步依赖镜像
+2. 部署 foundation 与 isolated 基础组件
+3. 部署业务组件
 4. 输出健康检查摘要
-
-> 说明：该一键入口当前仍未在 isolated 清单中直接 apply gateway/auth 资源；如需“业务组件五件套都由 isolated 清单部署”，需要新增 gateway/auth 的 isolated manifest。
-

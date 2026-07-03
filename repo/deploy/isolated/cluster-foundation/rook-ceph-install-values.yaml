@@ -1,0 +1,42 @@
+# Rook-Ceph operator install values (isolated / changqingyun mirror).
+# Used by deploy/isolated/deploy.py.
+
+image:
+  repository: docker.changqingyun.cn/mirror/rook/ceph
+  tag: v1.20.0
+crds:
+  enabled: true
+csi:
+  cephcsi:
+    repository: docker.changqingyun.cn/mirror/cephcsi/cephcsi
+    tag: v3.17.0
+  registrar:
+    repository: docker.changqingyun.cn/mirror/sig-storage/csi-node-driver-registrar
+    tag: v2.17.0
+  provisioner:
+    repository: docker.changqingyun.cn/mirror/sig-storage/csi-provisioner
+    tag: v6.2.0
+  snapshotter:
+    repository: docker.changqingyun.cn/mirror/sig-storage/csi-snapshotter
+    tag: v8.5.0
+  attacher:
+    repository: docker.changqingyun.cn/mirror/sig-storage/csi-attacher
+    tag: v4.12.0
+  resizer:
+    repository: docker.changqingyun.cn/mirror/sig-storage/csi-resizer
+    tag: v2.1.0
+  csiAddons:
+    repository: docker.changqingyun.cn/mirror/csiaddons/k8s-sidecar
+    tag: v0.14.0
+ceph-csi-operator:
+  controllerManager:
+    manager:
+      image:
+        repository: docker.changqingyun.cn/mirror/cephcsi/ceph-csi-operator
+        tag: v1.0.1
+resources:
+  limits:
+    memory: 512Mi
+  requests:
+    cpu: 200m
+    memory: 128Mi

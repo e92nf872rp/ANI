@@ -1,0 +1,9 @@
+dependencies:
+- name: rook-ceph
+  repository: https://charts.rook.io/release
+  version: v1.20.0
+- name: harbor
+  repository: https://helm.goharbor.io
+  version: 1.19.1
+digest: sha256:bf57e86515be36cdf4f8378ee4a4858661cd191fe9527fedf7a4ac8dbb3e0ee1
+generated: "2026-07-02T19:39:58.776764135+08:00"

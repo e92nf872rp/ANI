@@ -1,0 +1,138 @@
+# ANI cluster foundation umbrella chart values.
+# Kube-OVN is assumed pre-installed with the cluster.
+# For operator/Harbor install, prefer rook-ceph-install-values.yaml and harbor-install-values.yaml.
+
+kubevirt:
+  enabled: true
+  operatorManifest: manifests/kubevirt-operator-v1.8.2.yaml
+
+rook:
+  enabled: true
+
+rook-ceph:
+  image:
+    repository: docker.changqingyun.cn/mirror/rook/ceph
+    tag: v1.20.0
+  crds:
+    enabled: true
+  csi:
+    cephcsi:
+      repository: docker.changqingyun.cn/mirror/cephcsi/cephcsi
+      tag: v3.17.0
+    registrar:
+      repository: docker.changqingyun.cn/mirror/sig-storage/csi-node-driver-registrar
+      tag: v2.17.0
+    provisioner:
+      repository: docker.changqingyun.cn/mirror/sig-storage/csi-provisioner
+      tag: v6.2.0
+    snapshotter:
+      repository: docker.changqingyun.cn/mirror/sig-storage/csi-snapshotter
+      tag: v8.5.0
+    attacher:
+      repository: docker.changqingyun.cn/mirror/sig-storage/csi-attacher
+      tag: v4.12.0
+    resizer:
+      repository: docker.changqingyun.cn/mirror/sig-storage/csi-resizer
+      tag: v2.1.0
+    csiAddons:
+      repository: docker.changqingyun.cn/mirror/csiaddons/k8s-sidecar
+      tag: v0.14.0
+  ceph-csi-operator:
+    controllerManager:
+      manager:
+        image:
+          repository: docker.changqingyun.cn/mirror/cephcsi/ceph-csi-operator
+          tag: v1.0.1
+  resources:
+    limits:
+      memory: 512Mi
+    requests:
+      cpu: 200m
+      memory: 128Mi
+
+# Optional: enable only when nodes have unused raw block devices.
+cephCluster:
+  enabled: false
+  cephVersion:
+    image: docker.changqingyun.cn/mirror/ceph/ceph:v19.2.3
+  mon:
+    count: 1
+    allowMultiplePerNode: true
+  mgr:
+    count: 1
+  storage:
+    useAllNodes: true
+    useAllDevices: true
+  blockPool:
+    name: ceph-rbd-ssd
+    replicatedSize: 1
+  storageClass:
+    name: ani-rbd-ssd
+
+harbor:
+  enabled: true
+  expose:
+    type: nodePort
+    tls:
+      enabled: false
+    nodePort:
+      name: harbor
+      ports:
+        http:
+          port: 80
+          nodePort: 30002
+        https:
+          port: 443
+          nodePort: 30003
+  externalURL: http://harbor.harbor.svc.cluster.local
+  harborAdminPassword: ani-harbor-admin-dev
+  nginx:
+    image:
+      repository: docker.changqingyun.cn/mirror/goharbor/nginx-photon
+      tag: v2.15.1
+  portal:
+    replicas: 1
+    image:
+      repository: docker.changqingyun.cn/mirror/goharbor/harbor-portal
+      tag: v2.15.1
+  core:
+    replicas: 1
+    image:
+      repository: docker.changqingyun.cn/mirror/goharbor/harbor-core
+      tag: v2.15.1
+  jobservice:
+    replicas: 1
+    image:
+      repository: docker.changqingyun.cn/mirror/goharbor/harbor-jobservice
+      tag: v2.15.1
+  registry:
+    replicas: 1
+    registry:
+      image:
+        repository: docker.changqingyun.cn/mirror/goharbor/registry-photon
+        tag: v2.15.1
+    controller:
+      image:
+        repository: docker.changqingyun.cn/mirror/goharbor/harbor-registryctl
+        tag: v2.15.1
+  database:
+    internal:
+      image:
+        repository: docker.changqingyun.cn/mirror/goharbor/harbor-db
+        tag: v2.15.1
+  redis:
+    internal:
+      image:
+        repository: docker.changqingyun.cn/mirror/goharbor/redis-photon
+        tag: v2.15.1
+  trivy:
+    enabled: true
+    image:
+      repository: docker.changqingyun.cn/mirror/goharbor/trivy-adapter-photon
+      tag: v2.15.1
+  persistence:
+    enabled: false
+  notary:
+    enabled: false
+  chartmuseum:
+    enabled: false

@@ -1,0 +1,73 @@
+# Prepare LVM-backed block devices for Rook OSD on nodes without spare raw disks.
+# Creates ubuntu-vg/rook-osd (50Gi LV) and /var/lib/rook/osd-block-device on each node.
+# Rook osd-prepare does not discover loop devices; LVM volumes are visible to ceph-volume.
+# Applied by deploy.py before CephCluster.
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: ceph-osd-prep
+  namespace: rook-ceph
+  labels:
+    app.kubernetes.io/name: ceph-osd-prep
+    ani.deploy/profile: isolated
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ceph-osd-prep
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ceph-osd-prep
+        ani.deploy/profile: isolated
+    spec:
+      hostPID: true
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: prep
+          image: docker.changqingyun.cn/mirror/busybox:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: host-root
+              mountPath: /host
+          command:
+            - sh
+            - -ec
+            - |
+              MARK=/host/var/lib/rook/osd-prep.done
+              DEVFILE=/host/var/lib/rook/osd-block-device
+              VERSIONFILE=/host/var/lib/rook/osd-prep-version
+              WANT=lvm-v1
+              if [ -f "$VERSIONFILE" ] && [ "$(cat "$VERSIONFILE")" = "$WANT" ] \
+                 && [ -f "$MARK" ] && [ -f "$DEVFILE" ]; then
+                echo "already prepared: $(cat "$DEVFILE")"
+              else
+                mkdir -p /host/var/lib/rook
+                chroot /host sh -ec '
+                  set -e
+                  VG=ubuntu-vg
+                  LV=rook-osd
+                  DEV=/dev/${VG}/${LV}
+                  if losetup -j /var/lib/rook/osd-backing.img 2>/dev/null | grep -q .; then
+                    losetup -D /var/lib/rook/osd-backing.img 2>/dev/null || true
+                  fi
+                  rm -f /var/lib/rook/osd-backing.img /var/lib/rook/osd-loop-device
+                  if [ ! -b "${DEV}" ]; then
+                    flock -n /var/lib/rook/.lv-create.lock lvcreate -y -L 50G -n "${LV}" "${VG}"
+                  fi
+                  test -b "${DEV}"
+                  echo "${DEV}" > /var/lib/rook/osd-block-device
+                  echo lvm-v1 > /var/lib/rook/osd-prep-version
+                  touch /var/lib/rook/osd-prep.done
+                  echo "prepared ${DEV}"
+                '
+              fi
+              sleep infinity
+      volumes:
+        - name: host-root
+          hostPath:
+            path: /
+            type: Directory

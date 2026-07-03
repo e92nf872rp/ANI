@@ -1,99 +1,87 @@
-# Isolated Deploy (no real-k8s-lab)
+# Isolated Deploy — 新环境一键部署
 
-本目录用于新环境独立部署，不依赖 `deploy/real-k8s-lab`。
+不依赖 `deploy/real-k8s-lab`，适用于全新 Kubernetes 集群（已装 Kube-OVN）。
 
-## 组件化配置文档
+**唯一入口：** `deploy/isolated/deploy.py`
 
-- 总览（全组件视角）：`deploy/isolated/COMPONENT-DEPLOY-CONFIG.md`
-- 基础组件（数据/消息/中间件）：`deploy/isolated/BASE-INFRA-COMPONENTS.md`
-- 业务组件（gateway/auth/model/task/reconcile）：`deploy/isolated/BUSINESS-COMPONENTS.md`
+## 前置条件
 
-## 覆盖范围
+| 项 | 要求 |
+|---|---|
+| 集群 | K8s 1.28+，节点可访问 `docker.changqingyun.cn` |
+| 工具 | `kubectl`、`helm`、`oras`、`openssl`（只有 `--build` 时需要 `docker`） |
+| 凭据 | `docker login docker.changqingyun.cn` |
+| 节点磁盘 | 每节点至少 50Gi 可用空间（用于 Ceph OSD loop 文件，无裸盘时自动创建） |
 
-- 新增/补齐 services 下的其余组件：
-  - `model-service`
-  - `task-service`
-  - `reconcile-worker`
-- 可独立部署 core 依赖：
-  - `ani-postgres`
-  - `ani-redis`
-  - `nats`
-  - `ani-s05-minio`
-  - `sprint13-milvus`（含 etcd/minio）
-  - `sprint13-prometheus`
+## 部署顺序（有依赖）
 
-## 1) 构建并推送镜像
+```text
+render → mirror → foundation:
+         KubeVirt → Rook operator → Ceph OSD 预备 → CephCluster → StorageClass ani-rbd-ssd → Harbor(PVC)
+       → base-infra(Postgres PVC) → business → verify
+```
+
+**必须先有 `ani-rbd-ssd` StorageClass**，才会部署 Harbor 和 Postgres 等业务组件。
+
+## 一键部署
 
 ```bash
 cd repo
-make image-model-service image-task-service image-reconcile-worker VERSION=dev REGISTRY=docker.changqingyun.cn/ani
-
-docker push docker.changqingyun.cn/ani/model-service:dev
-docker push docker.changqingyun.cn/ani/task-service:dev
-docker push docker.changqingyun.cn/ani/reconcile-worker:dev
+docker login docker.changqingyun.cn
+python3 deploy/isolated/deploy.py deploy dev
 ```
-
-或统一脚本（已包含 gateway/auth + 这三个服务）：
 
 ```bash
-./scripts/build_push_core_images.sh dev
+# 基础/底座镜像已同步到厂库时
+python3 deploy/isolated/deploy.py deploy dev --skip-mirror
 ```
-
-## 2) 先部署 core 依赖（新环境必做）
 
 ```bash
-export POSTGRES_PASSWORD='ani_dev_password'
-export REDIS_PASSWORD='ani_dev_password'
-export MINIO_ACCESS_KEY_ID='ani-minio-access'
-export MINIO_SECRET_ACCESS_KEY='ani-minio-secret'
-export MILVUS_MINIO_ACCESS_KEY='ani-milvus-access'
-export MILVUS_MINIO_SECRET_KEY='ani-milvus-secret'
-
-./scripts/deploy_isolated_core_deps.sh
+# 需要现场重新构建并推送 ANI 业务镜像时
+python3 deploy/isolated/deploy.py deploy dev --build
 ```
 
-依赖清单文件：`deploy/isolated/core-deps.yaml`
-
-## 3) 部署其余 services 组件
+### 子命令
 
 ```bash
-# 可按需覆盖密码与 NATS 地址
-export POSTGRES_PASSWORD='ani_dev_password'
-export REDIS_PASSWORD='ani_dev_password'
-export NATS_URL='nats://nats.ani-data.svc.cluster.local:4222'
-
-./scripts/deploy_isolated_core_stack.sh dev
+python3 deploy/isolated/deploy.py cleanup
+python3 deploy/isolated/deploy.py verify
+python3 deploy/isolated/deploy.py render
+python3 deploy/isolated/deploy.py mirror
+python3 deploy/isolated/deploy.py deploy --only foundation
 ```
 
-## 4) 验证
+## 存储
 
-```bash
-kubectl -n ani-system get pods | rg 'model-service|task-service|reconcile-worker'
-kubectl -n ani-system get svc | rg 'model-service|task-service|reconcile-worker'
-kubectl -n ani-data get pods
-kubectl -n ani-s05-objectstore get pods
-kubectl -n ani-s06-vectorstore get pods
-kubectl -n ani-s07-observability get pods
+| 组件 | 方式 |
+|---|---|
+| Ceph OSD | 每节点 `/var/lib/rook/osd-backing.img`（50Gi loop，由 `ceph-osd-prep` 创建） |
+| StorageClass | `ani-rbd-ssd`（Rook RBD） |
+| Postgres | PVC 5Gi，`storageClassName: ani-rbd-ssd` |
+| Harbor | PVC，`ani-rbd-ssd` |
+| MinIO/Milvus 等 | 仍为 emptyDir（dev 可接受；需持久化可后续改 PVC） |
+
+## 访问地址
+
+| 服务 | 地址 |
+|---|---|
+| Gateway | `http://<node-ip>:30080` |
+| MinIO | `http://<node-ip>:30900` |
+| Prometheus | `http://<node-ip>:31990` |
+| Dex | `http://console.example.local:30081/dex`（外部 issuer） / `http://<node-ip>:30556`（直连探针） |
+| Attu | `http://<node-ip>:30300` |
+| Harbor | `http://<node-ip>:30002`（admin / `ani-harbor-admin-dev`） |
+
+## 目录结构
+
+```text
+deploy/isolated/
+├── deploy.py
+├── base-infra.yaml
+├── business-stack.yaml
+└── cluster-foundation/
+    ├── ceph-osd-prep.yaml
+    ├── rook-ceph-cluster.yaml
+    ├── harbor-install-values.yaml
+    └── yaml/
 ```
-
-## 文件说明
-
-- `deploy/isolated/core-deps.yaml`：独立 core 依赖清单
-- `deploy/isolated/services-stack.yaml`：三个服务的 Deployment/Service
-- `scripts/deploy_isolated_core_deps.sh`：创建依赖 secret + 部署 core 依赖
-- `scripts/deploy_isolated_core_stack.sh`：创建 runtime secret + 部署/滚动验证
-- `scripts/deploy_isolated_all.sh`：一键执行“构建推送 + core 依赖 + services 部署 + 健康检查”
-
-## 一键模式
-
-```bash
-cd repo
-POSTGRES_PASSWORD=ani_dev_password \
-REDIS_PASSWORD=ani_dev_password \
-MINIO_ACCESS_KEY_ID=ani-minio-access \
-MINIO_SECRET_ACCESS_KEY=ani-minio-secret \
-MILVUS_MINIO_ACCESS_KEY=ani-milvus-access \
-MILVUS_MINIO_SECRET_KEY=ani-milvus-secret \
-./scripts/deploy_isolated_all.sh dev
-```
-

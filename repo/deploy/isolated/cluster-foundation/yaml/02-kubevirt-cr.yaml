@@ -1,0 +1,30 @@
+---
+# Source: ani-cluster-foundation/templates/kubevirt-cr.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubevirt
+  labels:
+    app.kubernetes.io/name: kubevirt
+    app.kubernetes.io/part-of: ani-cluster-foundation
+    ani.deploy/profile: isolated
+---
+# Source: ani-cluster-foundation/templates/kubevirt-cr.yaml
+apiVersion: kubevirt.io/v1
+kind: KubeVirt
+metadata:
+  name: kubevirt
+  namespace: kubevirt
+  labels:
+    app.kubernetes.io/name: kubevirt
+    app.kubernetes.io/part-of: ani-cluster-foundation
+    ani.deploy/profile: isolated
+spec:
+  certificateRotateStrategy: {}
+  configuration:
+    developerConfiguration: {}
+  customizeComponents: {}
+  imagePullPolicy: IfNotPresent
+  imageRegistry: docker.changqingyun.cn/mirror/kubevirt
+  imageTag: v1.8.2
+  workloadUpdateStrategy: {}
