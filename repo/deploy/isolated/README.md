@@ -72,6 +72,8 @@ python3 deploy/isolated/deploy.py deploy --only foundation
 | Attu | `http://<node-ip>:30300` |
 | Harbor | `http://<node-ip>:30002`（admin / `ani-harbor-admin-dev`） |
 
+`deploy.py` 会把 OIDC issuer 里的主机名写入 `ani-auth-service` 的 `hostAliases`，默认指向首个节点 InternalIP；如需覆盖，设置 `OIDC_HOST_ALIAS_IP`。
+
 ## 目录结构
 
 ```text

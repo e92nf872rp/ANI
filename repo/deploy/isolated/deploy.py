@@ -26,6 +26,7 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -173,6 +174,29 @@ def kubectl_apply(path: Path) -> None:
 
 def kubectl_delete(path: Path, *, timeout: str = "60s") -> None:
     kubectl("delete", "-f", str(path), "--ignore-not-found", f"--timeout={timeout}", check=False)
+
+
+def ensure_host_alias(namespace: str, deployment: str, hostname: str, ip: str) -> None:
+    patch = {
+        "spec": {
+            "template": {
+                "spec": {
+                    "hostAliases": [
+                        {
+                            "ip": ip,
+                            "hostnames": [hostname],
+                        }
+                    ]
+                }
+            }
+        }
+    }
+    kubectl(
+        "-n", namespace,
+        "patch", "deployment", deployment,
+        "--type=merge",
+        "-p", json.dumps(patch),
+    )
 
 
 def rollout(namespace: str, kind: str, name: str, timeout: str = "300s") -> None:
@@ -724,6 +748,11 @@ def deploy_business(cfg: dict[str, str], version: str) -> None:
         run(["kubectl", "apply", "-f", "-"], input=run(cmd, quiet=True).stdout)
 
     kubectl_apply(DEPLOY / "business-stack.yaml")
+
+    issuer_host = urllib.parse.urlparse(cfg["oidc_issuer_url"]).hostname
+    if issuer_host and "." in issuer_host:
+        alias_ip = os.environ.get("OIDC_HOST_ALIAS_IP", node_ip())
+        ensure_host_alias(ns, "ani-auth-service", issuer_host, alias_ip)
 
     for name in ANI_IMAGES:
         image = f"{REGISTRY_ANI}/{name}:{version}"
