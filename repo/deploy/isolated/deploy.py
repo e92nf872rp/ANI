@@ -868,7 +868,7 @@ def default_config() -> dict[str, str]:
         "milvus_minio_access": os.environ.get("MILVUS_MINIO_ACCESS_KEY", "ani-milvus-access"),
         "milvus_minio_secret": os.environ.get("MILVUS_MINIO_SECRET_KEY", "ani-milvus-secret"),
         "nats_url": os.environ.get("NATS_URL", "nats://nats.ani-system.svc.cluster.local:4222"),
-        "oidc_issuer_url": os.environ.get("OIDC_ISSUER_URL", "http://console.example.local:30081/dex"),
+        "oidc_issuer_url": os.environ.get("OIDC_ISSUER_URL", "http://console.example.local:30556/dex"),
         "oidc_client_id": os.environ.get("OIDC_CLIENT_ID", "ani-console"),
         "oidc_client_secret": os.environ.get("OIDC_CLIENT_SECRET", "ani-dex-client-secret-dev"),
         "oidc_group_role_map": os.environ.get(

@@ -68,7 +68,7 @@ python3 deploy/isolated/deploy.py deploy --only foundation
 | Gateway | `http://<node-ip>:30080` |
 | MinIO | `http://<node-ip>:30900` |
 | Prometheus | `http://<node-ip>:31990` |
-| Dex | `http://console.example.local:30081/dex`（外部 issuer） / `http://<node-ip>:30556`（直连探针） |
+| Dex | `http://console.example.local:30556/dex`（外部 issuer） / `http://<node-ip>:30556`（直连探针） |
 | Attu | `http://<node-ip>:30300` |
 | Harbor | `http://<node-ip>:30002`（admin / `ani-harbor-admin-dev`） |
 

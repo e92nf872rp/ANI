@@ -641,7 +641,7 @@ metadata:
     ani.deploy/profile: isolated
 data:
   config.yaml: |
-    issuer: http://console.example.local:30081/dex
+    issuer: http://console.example.local:30556/dex
 
     storage:
       type: memory
