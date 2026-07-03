@@ -1,4 +1,22 @@
 apiVersion: v1
+kind: Namespace
+metadata:
+  name: ani-tenant-default
+  labels:
+    app.kubernetes.io/part-of: ani-core
+    ani.deploy/profile: isolated
+    ani.kubercloud.io/tenant-name: default
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ani-tenant-tenant-a
+  labels:
+    app.kubernetes.io/part-of: ani-core
+    ani.deploy/profile: isolated
+    ani.kubercloud.io/tenant-name: tenant-a
+---
+apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: ani-gateway
@@ -24,6 +42,36 @@ metadata:
     app.kubernetes.io/name: ani-gateway
     ani.deploy/profile: isolated
 rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["services", "persistentvolumeclaims", "secrets", "pods", "events"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["get", "create"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "deployments/scale"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["kubeovn.io"]
+    resources: ["vpcs", "subnets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get", "list"]
   - apiGroups: ["kubevirt.io"]
     resources: ["virtualmachines", "virtualmachineinstances"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -211,6 +259,74 @@ spec:
               value: "ani-auth-service.ani-system.svc.cluster.local:9101"
             - name: GATEWAY_HTTP_ADDR
               value: ":8080"
+            - name: KUBERNETES_PROVIDER_FIELD_MANAGER
+              value: "ani-isolated-gateway"
+            - name: WORKLOAD_PROVIDER
+              value: "kubernetes_rest"
+            - name: WORKLOAD_PROVIDER_APPLY_ENABLED
+              value: "true"
+            - name: WORKLOAD_LIFECYCLE_PROVIDER
+              value: "kubernetes_rest"
+            - name: WORKLOAD_LIFECYCLE_APPLY_ENABLED
+              value: "true"
+            - name: WORKLOAD_OPS_PROVIDER
+              value: "kubernetes_rest"
+            - name: WORKLOAD_OPS_ENABLED
+              value: "true"
+            - name: INSTANCE_OBSERVABILITY_PROVIDER
+              value: "prometheus_kubernetes"
+            - name: INSTANCE_OBSERVABILITY_PROMETHEUS_URL
+              value: "http://prometheus.ani-system.svc.cluster.local:9090"
+            - name: INSTANCE_OBSERVABILITY_EXEC_BASE_URL
+              value: "http://192.168.102.75:30080"
+            - name: NETWORK_PROVIDER
+              value: "kubeovn_rest"
+            - name: NETWORK_PROVIDER_APPLY_ENABLED
+              value: "true"
+            - name: NETWORK_PROVIDER_USER_ID
+              value: "ani-core-network-provider"
+            - name: NETWORK_PROVIDER_PERMISSION_PROOF
+              value: "rbac-scope:networks.write"
+            - name: STORAGE_PROVIDER
+              value: "kubernetes_rest"
+            - name: STORAGE_PROVIDER_APPLY_ENABLED
+              value: "true"
+            - name: STORAGE_PROVIDER_USER_ID
+              value: "ani-core-storage-provider"
+            - name: STORAGE_PROVIDER_PERMISSION_PROOF
+              value: "rbac-scope:storage.write"
+            - name: OBJECT_STORE_PROVIDER
+              value: "minio"
+            - name: OBJECT_STORE_ENDPOINT
+              value: "http://ani-s05-minio.ani-system.svc.cluster.local:9000"
+            - name: OBJECT_STORE_PUBLIC_ENDPOINT
+              value: "http://192.168.102.75:30900"
+            - name: OBJECT_STORE_ACCESS_KEY_ID
+              value: "ani-minio-access"
+            - name: OBJECT_STORE_SECRET_ACCESS_KEY
+              value: "ani-minio-secret"
+            - name: OBJECT_STORE_REGION
+              value: "us-east-1"
+            - name: OBJECT_STORE_SECURE
+              value: "false"
+            - name: VECTOR_STORE_PROVIDER
+              value: "milvus"
+            - name: VECTOR_STORE_ENDPOINT
+              value: "milvus.ani-system.svc.cluster.local:19530"
+            - name: VECTOR_STORE_DATABASE
+              value: "default"
+            - name: REGISTRY_PROVIDER
+              value: "harbor"
+            - name: REGISTRY_ENDPOINT
+              value: "http://harbor.harbor.svc.cluster.local"
+            - name: REGISTRY_USERNAME
+              value: "admin"
+            - name: REGISTRY_PASSWORD
+              value: "ani-harbor-admin-dev"
+            - name: REGISTRY_SECURE
+              value: "false"
+            - name: REGISTRY_TLS_INSECURE
+              value: "true"
           readinessProbe:
             httpGet:
               path: /readyz
