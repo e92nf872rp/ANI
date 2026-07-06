@@ -549,6 +549,12 @@ spec:
                   key: redis_url
             - name: HEALTH_PORT
               value: "9205"
+            - name: KUBERNETES_PROVIDER_FIELD_MANAGER
+              value: "ani-isolated-reconcile-worker"
+            - name: WORKLOAD_PROVIDER
+              value: "kubernetes_rest"
+            - name: WORKLOAD_PROVIDER_APPLY_ENABLED
+              value: "false"
           readinessProbe:
             httpGet:
               path: /healthz
