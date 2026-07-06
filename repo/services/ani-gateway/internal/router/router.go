@@ -44,7 +44,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerObservability(v1)
 	registerMeteringWithService(v1, options.MeteringService)
 	registerHarborWithService(v1, options.ImageRegistry, options.RegistryPullSecretKubernetesApply)
-	registerDemoInstancesWithObservability(v1, options.MetadataStore, options.InstanceWorkloadRuntime, options.GPUInventory, options.InstanceObservability, options.InstanceObservabilityUsesInstanceName)
+	registerDemoInstancesWithObservability(v1, options.MetadataStore, options.InstanceWorkloadRuntime, options.NetworkService, options.GPUInventory, options.InstanceObservability, options.InstanceObservabilityUsesInstanceName)
 	registerGPUInventoryResourcesWithInventory(v1, options.GPUInventory)
 	registerNetworkResourcesWithService(v1, options.NetworkService)
 	registerStorageResourcesWithService(v1, options.StorageService)

@@ -62,6 +62,87 @@ func TestKubernetesDryRunRendererRendersGPUDeployment(t *testing.T) {
 	}
 }
 
+func TestKubernetesDryRunRendererInjectsKubeOVNAnnotationsForContainerNetwork(t *testing.T) {
+	renderer := NewKubernetesDryRunRenderer(NewPlanningRuntime())
+
+	manifests, err := renderer.Render(context.Background(), ports.WorkloadSpec{
+		TenantID: "tenant-a",
+		Name:     "app-net-01",
+		Kind:     ports.WorkloadKindContainer,
+		Image:    "harbor/app:1",
+		Network: ports.WorkloadNetworkPolicy{
+			Attachments: []ports.WorkloadNetworkAttachment{
+				{
+					Plane:     ports.NetworkPlaneTenantVPC,
+					NetworkID: "vpc_a",
+					SubnetID:  "subnet_app",
+					IPAddress: "10.72.0.10",
+					Primary:   true,
+					Required:  true,
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	content := manifests[0].Content
+	for _, want := range []string{
+		`"ovn.kubernetes.io/logical_switch": "subnet-subnet-app"`,
+		`"ovn.kubernetes.io/ip_address": "10.72.0.10"`,
+		`"ani.kubercloud.io/subnet-id": "subnet_app"`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("rendered container manifest missing %q:\n%s", want, content)
+		}
+	}
+}
+
+func TestKubernetesDryRunRendererInjectsKubeOVNAnnotationsForVMLauncherTemplate(t *testing.T) {
+	renderer := NewKubernetesDryRunRenderer(NewPlanningRuntime())
+
+	manifests, err := renderer.Render(context.Background(), ports.WorkloadSpec{
+		TenantID: "tenant-a",
+		Name:     "vm-net-01",
+		Kind:     ports.WorkloadKindVM,
+		Network: ports.WorkloadNetworkPolicy{
+			Attachments: []ports.WorkloadNetworkAttachment{
+				{
+					Plane:     ports.NetworkPlaneTenantVPC,
+					NetworkID: "vpc_a",
+					SubnetID:  "subnet_vm",
+					IPAddress: "10.72.0.11",
+					Primary:   true,
+					Required:  true,
+				},
+			},
+		},
+		VM: &ports.VMInstanceSpec{
+			BootImage: "harbor/base/ubuntu.qcow2",
+			RootDisk: ports.WorkloadStorageAttachment{
+				Name:      "root",
+				Kind:      ports.StorageAttachmentRootDisk,
+				SizeGiB:   80,
+				SourceRef: "vm-net-01-root",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	content := manifests[0].Content
+	for _, want := range []string{
+		`"template":`,
+		`"annotations":`,
+		`"ovn.kubernetes.io/logical_switch": "subnet-subnet-vm"`,
+		`"ovn.kubernetes.io/ip_address": "10.72.0.11"`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("rendered VM manifest missing %q:\n%s", want, content)
+		}
+	}
+}
+
 func TestKubernetesDryRunRendererInjectsWorkloadIdentityEnvFromSecret(t *testing.T) {
 	renderer := NewKubernetesDryRunRenderer(NewPlanningRuntime())
 

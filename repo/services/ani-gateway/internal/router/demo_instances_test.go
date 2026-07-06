@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
@@ -82,6 +83,186 @@ func TestDemoSpecFromRequestMapsSecretBindings(t *testing.T) {
 	binding := spec.SecretBindings[0]
 	if binding.SecretID != "sec-db" || binding.EnvPrefix != "DB_" || binding.MountPath != "/etc/secrets/db" {
 		t.Fatalf("secret binding = %#v, want request values", binding)
+	}
+}
+
+func TestDemoSpecFromRequestMapsContainerCommandAndArgs(t *testing.T) {
+	spec, err := demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind:    "container",
+		Name:    "demo-command-app",
+		Image:   "dockerproxy.net/library/busybox:1.36",
+		Command: []string{"sh", "-c"},
+		Args:    []string{"sleep 3600"},
+	}, "tenant-a")
+	if err != nil {
+		t.Fatalf("demoSpecFromRequest error = %v", err)
+	}
+	if strings.Join(spec.Command, " ") != "sh -c" || strings.Join(spec.Args, " ") != "sleep 3600" {
+		t.Fatalf("command=%#v args=%#v, want request command/args", spec.Command, spec.Args)
+	}
+}
+
+func TestDemoInstanceNetworkSelectionValidation(t *testing.T) {
+	ctx := context.Background()
+	tenantID := "11111111-1111-1111-1111-111111111111"
+	network := runtimeadapter.NewLocalNetworkService()
+	vpc, err := network.CreateVPC(ctx, ports.NetworkVPCCreateRequest{
+		TenantID:       tenantID,
+		IdempotencyKey: "vpc-network-selection",
+		Name:           "test",
+		CIDR:           "10.72.0.0/24",
+	})
+	if err != nil {
+		t.Fatalf("CreateVPC error = %v", err)
+	}
+	subnet, err := network.CreateSubnet(ctx, ports.NetworkSubnetCreateRequest{
+		TenantID:       tenantID,
+		IdempotencyKey: "subnet-network-selection",
+		VPCID:          vpc.VPCID,
+		Name:           "test-subnet",
+		CIDR:           "10.72.0.0/25",
+		Gateway:        "10.72.0.1",
+	})
+	if err != nil {
+		t.Fatalf("CreateSubnet error = %v", err)
+	}
+	api := newDemoInstanceAPIWithNetworkService(network)
+
+	tests := []struct {
+		name    string
+		tenant  string
+		network demoCreateNetworkRequest
+		wantErr string
+	}{
+		{
+			name:    "subnet missing",
+			tenant:  tenantID,
+			network: demoCreateNetworkRequest{SubnetID: "subnet_missing"},
+			wantErr: "network.subnet_id subnet_missing does not exist",
+		},
+		{
+			name:    "subnet belongs to another tenant",
+			tenant:  "22222222-2222-2222-2222-222222222222",
+			network: demoCreateNetworkRequest{SubnetID: subnet.SubnetID},
+			wantErr: "network.subnet_id " + subnet.SubnetID + " does not exist",
+		},
+		{
+			name:    "vpc mismatch",
+			tenant:  tenantID,
+			network: demoCreateNetworkRequest{VPCID: "vpc_other", SubnetID: subnet.SubnetID},
+			wantErr: "network.vpc_id must match subnet.vpc_id",
+		},
+		{
+			name:    "private ip outside cidr",
+			tenant:  tenantID,
+			network: demoCreateNetworkRequest{SubnetID: subnet.SubnetID, PrivateIP: stringPtr("10.72.0.200")},
+			wantErr: "network.private_ip must be inside subnet.cidr",
+		},
+		{
+			name:    "private ip equals gateway",
+			tenant:  tenantID,
+			network: demoCreateNetworkRequest{SubnetID: subnet.SubnetID, PrivateIP: stringPtr("10.72.0.1")},
+			wantErr: "network.private_ip must not equal subnet.gateway",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec, err := demoSpecFromRequest(demoCreateInstanceRequest{
+				Kind:    "container",
+				Name:    "net-test",
+				Network: tt.network,
+			}, tt.tenant)
+			if err != nil {
+				t.Fatalf("demoSpecFromRequest error = %v", err)
+			}
+			err = api.validateInstanceNetworkSelection(ctx, tt.tenant, &spec, tt.network)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("validateInstanceNetworkSelection error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestDemoInstanceNetworkSelectionRequiresAvailableSubnetAndVPC(t *testing.T) {
+	ctx := context.Background()
+	tenantID := "11111111-1111-1111-1111-111111111111"
+	vpc := ports.NetworkVPCRecord{TenantID: tenantID, VPCID: "vpc_unavailable", Name: "test-unavailable-vpc", State: ports.NetworkResourceAvailable}
+	subnet := ports.NetworkSubnetRecord{TenantID: tenantID, SubnetID: "subnet_unavailable", VPCID: vpc.VPCID, Name: "test-unavailable-subnet", CIDR: "10.73.0.0/25", Gateway: "10.73.0.1", State: ports.NetworkResourceFailed}
+	network := &fakeInstanceNetworkService{vpc: vpc, subnet: subnet}
+	api := newDemoInstanceAPIWithNetworkService(network)
+	spec, err := demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind:    "container",
+		Name:    "net-test",
+		Network: demoCreateNetworkRequest{SubnetID: subnet.SubnetID},
+	}, tenantID)
+	if err != nil {
+		t.Fatalf("demoSpecFromRequest error = %v", err)
+	}
+	if err := api.validateInstanceNetworkSelection(ctx, tenantID, &spec, demoCreateNetworkRequest{SubnetID: subnet.SubnetID}); err == nil || !strings.Contains(err.Error(), "network.subnet_id must reference an available subnet") {
+		t.Fatalf("subnet unavailable error = %v", err)
+	}
+
+	network.subnet.State = ports.NetworkResourceAvailable
+	network.vpc.State = ports.NetworkResourceFailed
+	if err := api.validateInstanceNetworkSelection(ctx, tenantID, &spec, demoCreateNetworkRequest{SubnetID: subnet.SubnetID}); err == nil || !strings.Contains(err.Error(), "network.vpc_id must reference an available vpc") {
+		t.Fatalf("vpc unavailable error = %v", err)
+	}
+}
+
+func TestDemoInstanceValidNetworkSelectionIsSavedInRecord(t *testing.T) {
+	ctx := context.Background()
+	tenantID := "11111111-1111-1111-1111-111111111111"
+	network := runtimeadapter.NewLocalNetworkService()
+	vpc, err := network.CreateVPC(ctx, ports.NetworkVPCCreateRequest{
+		TenantID:       tenantID,
+		IdempotencyKey: "vpc-valid",
+		Name:           "test",
+		CIDR:           "10.72.0.0/24",
+	})
+	if err != nil {
+		t.Fatalf("CreateVPC error = %v", err)
+	}
+	subnet, err := network.CreateSubnet(ctx, ports.NetworkSubnetCreateRequest{
+		TenantID:       tenantID,
+		IdempotencyKey: "subnet-valid",
+		VPCID:          vpc.VPCID,
+		Name:           "test-subnet",
+		CIDR:           "10.72.0.0/25",
+		Gateway:        "10.72.0.1",
+	})
+	if err != nil {
+		t.Fatalf("CreateSubnet error = %v", err)
+	}
+	api := newDemoInstanceAPIWithNetworkService(network)
+	req := demoCreateNetworkRequest{VPCID: vpc.VPCID, SubnetID: subnet.SubnetID, PrivateIP: stringPtr("10.72.0.10")}
+	spec, err := demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind:    "container",
+		Name:    "net-valid",
+		Network: req,
+	}, tenantID)
+	if err != nil {
+		t.Fatalf("demoSpecFromRequest error = %v", err)
+	}
+	if err := api.validateInstanceNetworkSelection(ctx, tenantID, &spec, req); err != nil {
+		t.Fatalf("validateInstanceNetworkSelection error = %v", err)
+	}
+	result, err := api.service.Create(ctx, ports.WorkloadInstanceCreateRequest{
+		IdempotencyKey:  "valid-network-create",
+		Spec:            spec,
+		UserID:          "user-a",
+		PermissionProof: "demo:test",
+		RequestedAt:     time.Unix(2200, 0),
+	})
+	if err != nil {
+		t.Fatalf("Create error = %v", err)
+	}
+	record, err := api.service.Get(ctx, ports.WorkloadInstanceGetRequest{TenantID: tenantID, InstanceID: result.Ref.InstanceID})
+	if err != nil {
+		t.Fatalf("Get error = %v", err)
+	}
+	response := api.demoInstanceFromRecord(record)
+	if response.VPCID == nil || *response.VPCID != vpc.VPCID || response.SubnetID == nil || *response.SubnetID != subnet.SubnetID || response.PrivateIP == nil || *response.PrivateIP != "10.72.0.10" {
+		t.Fatalf("network response = vpc=%v subnet=%v ip=%v, want saved network selection", response.VPCID, response.SubnetID, response.PrivateIP)
 	}
 }
 
@@ -219,6 +400,30 @@ func TestDemoLifecycleErrorStatusMapsConflict(t *testing.T) {
 	if got := demoLifecycleErrorCode(err); got != "CONFLICT" {
 		t.Fatalf("code = %q, want CONFLICT", got)
 	}
+}
+
+type fakeInstanceNetworkService struct {
+	ports.NetworkService
+	vpc    ports.NetworkVPCRecord
+	subnet ports.NetworkSubnetRecord
+}
+
+func (s *fakeInstanceNetworkService) GetSubnet(_ context.Context, request ports.NetworkResourceGetRequest) (ports.NetworkSubnetRecord, error) {
+	if request.TenantID == s.subnet.TenantID && request.ResourceID == s.subnet.SubnetID {
+		return s.subnet, nil
+	}
+	return ports.NetworkSubnetRecord{}, ports.ErrNotFound
+}
+
+func (s *fakeInstanceNetworkService) GetVPC(_ context.Context, request ports.NetworkResourceGetRequest) (ports.NetworkVPCRecord, error) {
+	if request.TenantID == s.vpc.TenantID && request.ResourceID == s.vpc.VPCID {
+		return s.vpc, nil
+	}
+	return ports.NetworkVPCRecord{}, ports.ErrNotFound
+}
+
+func stringPtr(value string) *string {
+	return &value
 }
 
 func TestDemoGatewayRequiresIdempotencyKey(t *testing.T) {
@@ -597,7 +802,7 @@ func TestDemoInstanceServiceRealShellExecutesCommand(t *testing.T) {
 func TestDemoInstanceResponseMarksRealProviderWhenKubernetesWorkloadRuntimeConfigured(t *testing.T) {
 	workload := DefaultInstanceWorkloadRuntime()
 	workload.Provider = "kubernetes_rest"
-	api := newDemoInstanceAPIWithOptions(nil, workload, nil, nil, false)
+	api := newDemoInstanceAPIWithOptions(nil, workload, nil, nil, nil, false)
 	record := ports.WorkloadInstanceRecord{
 		TenantID:     "tenant-a",
 		InstanceID:   "instance-k8s",

@@ -179,11 +179,26 @@ func annotationsWithInstancePlan(spec ports.WorkloadSpec) map[string]string {
 		"ani.kubercloud.io/render-mode":     "dry-run",
 		"ani.kubercloud.io/runtime-adapter": "planning",
 	}, spec.Annotations)
+	for _, attachment := range spec.Network.Attachments {
+		if !attachment.Primary || attachment.Plane != ports.NetworkPlaneTenantVPC || strings.TrimSpace(attachment.SubnetID) == "" {
+			continue
+		}
+		annotations["ovn.kubernetes.io/logical_switch"] = KubeOVNProviderName("subnet", attachment.SubnetID)
+		annotations["ani.kubercloud.io/vpc-id"] = strings.TrimSpace(attachment.NetworkID)
+		annotations["ani.kubercloud.io/subnet-id"] = strings.TrimSpace(attachment.SubnetID)
+		if ip := strings.TrimSpace(attachment.IPAddress); ip != "" {
+			annotations["ovn.kubernetes.io/ip_address"] = ip
+		}
+		break
+	}
 	if spec.Identity != nil {
 		annotations["ani.kubercloud.io/workload-identity-key-id"] = spec.Identity.KeyID
 		annotations["ani.kubercloud.io/workload-identity-secret"] = workloadIdentitySecretName(spec)
 	}
 	if spec.Kind == ports.WorkloadKindVM {
+		if spec.VM != nil && strings.TrimSpace(spec.VM.RootDisk.SourceRef) != "" {
+			annotations["ani.kubercloud.io/root-disk-source-ref"] = strings.TrimSpace(spec.VM.RootDisk.SourceRef)
+		}
 		if mounts := vmSecretMountAnnotation(spec.SecretBindings); mounts != "" {
 			annotations["ani.kubercloud.io/vm-secret-mounts"] = mounts
 		}

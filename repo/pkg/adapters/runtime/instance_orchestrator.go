@@ -237,11 +237,15 @@ var _ ports.WorkloadInstanceOrchestrator = (*LocalInstanceOrchestrator)(nil)
 
 func instanceRecordFromResult(spec ports.WorkloadSpec, ref ports.WorkloadRef, auditID string, provider string, resourceRefs []string, status ports.WorkloadStatus, createdAt time.Time) ports.WorkloadInstanceRecord {
 	status.Ref = ref
+	vpcID, subnetID, privateIP := selectedNetworkFields(spec.Network.Attachments)
 	return ports.WorkloadInstanceRecord{
 		TenantID:     spec.TenantID,
 		InstanceID:   ref.InstanceID,
 		Name:         spec.Name,
 		Kind:         spec.Kind,
+		VPCID:        vpcID,
+		SubnetID:     subnetID,
+		PrivateIP:    privateIP,
 		Provider:     provider,
 		AuditID:      auditID,
 		Lifecycle:    spec.Lifecycle,
@@ -254,6 +258,15 @@ func instanceRecordFromResult(spec ports.WorkloadSpec, ref ports.WorkloadRef, au
 		CreatedAt:    createdAt,
 		UpdatedAt:    firstNonZeroTime(status.UpdatedAt, createdAt),
 	}
+}
+
+func selectedNetworkFields(attachments []ports.WorkloadNetworkAttachment) (string, string, string) {
+	for _, attachment := range attachments {
+		if attachment.Primary && attachment.Plane == ports.NetworkPlaneTenantVPC && strings.TrimSpace(attachment.SubnetID) != "" {
+			return strings.TrimSpace(attachment.NetworkID), strings.TrimSpace(attachment.SubnetID), strings.TrimSpace(attachment.IPAddress)
+		}
+	}
+	return "", "", ""
 }
 
 func workloadIdentitySummary(identity *ports.WorkloadIdentityBinding) *ports.WorkloadIdentityBinding {

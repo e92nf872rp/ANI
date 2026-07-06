@@ -271,4 +271,8 @@ func networkProviderName(prefix string, value string) string {
 	return strings.TrimRight(name, "-.")
 }
 
+func KubeOVNProviderName(prefix string, value string) string {
+	return networkProviderName(prefix, value)
+}
+
 var _ ports.NetworkProviderRenderer = (*KubeOVNNetworkRenderer)(nil)

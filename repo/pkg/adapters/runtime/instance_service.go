@@ -244,11 +244,15 @@ func (s *LocalInstanceService) createSandbox(ctx context.Context, request ports.
 		Reason:    string(instance.State),
 		UpdatedAt: instance.UpdatedAt,
 	}
+	vpcID, subnetID, privateIP := selectedNetworkFields(request.Spec.Network.Attachments)
 	record := ports.WorkloadInstanceRecord{
 		TenantID:     instance.TenantID,
 		InstanceID:   instance.InstanceID,
 		Name:         instance.Name,
 		Kind:         ports.WorkloadKindSandbox,
+		VPCID:        vpcID,
+		SubnetID:     subnetID,
+		PrivateIP:    privateIP,
 		Provider:     instance.Provider,
 		Lifecycle:    request.Spec.Lifecycle,
 		Sandbox:      &instance,
@@ -712,6 +716,11 @@ func workloadSpecSummary(spec ports.WorkloadSpec) map[string]any {
 		summary["sandbox_runtime_class"] = spec.Sandbox.RuntimeClass
 		summary["sandbox_session_timeout"] = spec.Sandbox.SessionTimeout.String()
 		summary["sandbox_network_egress_policy"] = string(spec.Sandbox.NetworkEgressPolicy)
+	}
+	if vpcID, subnetID, privateIP := selectedNetworkFields(spec.Network.Attachments); subnetID != "" {
+		summary["vpc_id"] = vpcID
+		summary["subnet_id"] = subnetID
+		summary["private_ip"] = privateIP
 	}
 	return summary
 }

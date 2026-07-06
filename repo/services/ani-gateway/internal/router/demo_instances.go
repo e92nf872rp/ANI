@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -75,6 +76,7 @@ var _ ports.WorkloadInstanceStore = (*demoInstanceStore)(nil)
 type demoInstanceAPI struct {
 	service                       ports.WorkloadInstanceService
 	operations                    ports.WorkloadOperationStore
+	network                       ports.NetworkService
 	observability                 ports.InstanceObservability
 	observabilityUsesInstanceName bool
 	workloadProvider              string
@@ -90,6 +92,8 @@ type demoCreateInstanceRequest struct {
 	SSHUsername           string                     `json:"ssh_username"`
 	SSHKeyRef             string                     `json:"ssh_key_ref"`
 	Image                 string                     `json:"image"`
+	Command               []string                   `json:"command"`
+	Args                  []string                   `json:"args"`
 	GPUVendor             string                     `json:"gpu_vendor"`
 	GPUModel              string                     `json:"gpu_model"`
 	GPUCount              int                        `json:"gpu_count"`
@@ -98,9 +102,16 @@ type demoCreateInstanceRequest struct {
 	AutoStart             *bool                      `json:"auto_start"`
 	TerminationProtection bool                       `json:"termination_protection"`
 	SandboxConfig         demoSandboxConfigRequest   `json:"sandbox_config"`
+	Network               demoCreateNetworkRequest   `json:"network"`
 	SecretBindings        []demoSecretBindingRequest `json:"secret_bindings"`
 	Description           string                     `json:"description"`
 	IdempotencyKey        string                     `json:"idempotency_key"`
+}
+
+type demoCreateNetworkRequest struct {
+	VPCID     string  `json:"vpc_id"`
+	SubnetID  string  `json:"subnet_id"`
+	PrivateIP *string `json:"private_ip"`
 }
 
 type demoSandboxConfigRequest struct {
@@ -176,6 +187,9 @@ type demoInstanceResponse struct {
 	GPU                   *demoGPU               `json:"gpu,omitempty"`
 	Sandbox               *demoSandbox           `json:"sandbox,omitempty"`
 	WorkloadIdentity      *demoIdentity          `json:"workload_identity,omitempty"`
+	VPCID                 *string                `json:"vpc_id,omitempty"`
+	SubnetID              *string                `json:"subnet_id,omitempty"`
+	PrivateIP             *string                `json:"private_ip,omitempty"`
 	CreatedAt             string                 `json:"created_at"`
 	UpdatedAt             string                 `json:"updated_at"`
 }
@@ -362,14 +376,18 @@ type demoTimelineStep struct {
 }
 
 func newDemoInstanceAPI() *demoInstanceAPI {
-	return newDemoInstanceAPIWithOptions(nil, DefaultInstanceWorkloadRuntime(), nil, nil, false)
+	return newDemoInstanceAPIWithOptions(nil, DefaultInstanceWorkloadRuntime(), nil, nil, nil, false)
 }
 
 func newDemoInstanceAPIWithObservability(observability ports.InstanceObservability, useInstanceName bool) *demoInstanceAPI {
-	return newDemoInstanceAPIWithOptions(nil, DefaultInstanceWorkloadRuntime(), nil, observability, useInstanceName)
+	return newDemoInstanceAPIWithOptions(nil, DefaultInstanceWorkloadRuntime(), nil, nil, observability, useInstanceName)
 }
 
-func newDemoInstanceAPIWithOptions(metadata ports.MetadataStore, workload InstanceWorkloadRuntime, gpuInventory ports.GPUInventory, observability ports.InstanceObservability, useInstanceName bool) *demoInstanceAPI {
+func newDemoInstanceAPIWithNetworkService(network ports.NetworkService) *demoInstanceAPI {
+	return newDemoInstanceAPIWithOptions(nil, DefaultInstanceWorkloadRuntime(), network, nil, nil, false)
+}
+
+func newDemoInstanceAPIWithOptions(metadata ports.MetadataStore, workload InstanceWorkloadRuntime, network ports.NetworkService, gpuInventory ports.GPUInventory, observability ports.InstanceObservability, useInstanceName bool) *demoInstanceAPI {
 	var store ports.WorkloadInstanceStore
 	var operations ports.WorkloadOperationStore
 	var identity ports.WorkloadIdentityService
@@ -425,6 +443,7 @@ func newDemoInstanceAPIWithOptions(metadata ports.MetadataStore, workload Instan
 	return &demoInstanceAPI{
 		service:                       service,
 		operations:                    operations,
+		network:                       network,
 		observability:                 observability,
 		observabilityUsesInstanceName: useInstanceName,
 		workloadProvider:              strings.TrimSpace(workload.Provider),
@@ -432,11 +451,11 @@ func newDemoInstanceAPIWithOptions(metadata ports.MetadataStore, workload Instan
 }
 
 func registerDemoInstances(v1 *route.RouterGroup) {
-	registerDemoInstancesWithObservability(v1, nil, DefaultInstanceWorkloadRuntime(), nil, nil, false)
+	registerDemoInstancesWithObservability(v1, nil, DefaultInstanceWorkloadRuntime(), nil, nil, nil, false)
 }
 
-func registerDemoInstancesWithObservability(v1 *route.RouterGroup, metadata ports.MetadataStore, workload InstanceWorkloadRuntime, gpuInventory ports.GPUInventory, observability ports.InstanceObservability, useInstanceName bool) {
-	api := newDemoInstanceAPIWithOptions(metadata, workload, gpuInventory, observability, useInstanceName)
+func registerDemoInstancesWithObservability(v1 *route.RouterGroup, metadata ports.MetadataStore, workload InstanceWorkloadRuntime, network ports.NetworkService, gpuInventory ports.GPUInventory, observability ports.InstanceObservability, useInstanceName bool) {
+	api := newDemoInstanceAPIWithOptions(metadata, workload, network, gpuInventory, observability, useInstanceName)
 	v1.GET("/instances", api.list)
 	v1.POST("/instances", api.create)
 	v1.GET("/instances/:instance_id", api.get)
@@ -471,6 +490,10 @@ func (api *demoInstanceAPI) create(ctx context.Context, c *app.RequestContext) {
 	}
 	spec, err := demoSpecFromRequest(req, demoTenantID(c))
 	if err != nil {
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		return
+	}
+	if err := api.validateInstanceNetworkSelection(ctx, demoTenantID(c), &spec, req.Network); err != nil {
 		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 		return
 	}
@@ -513,6 +536,80 @@ func (api *demoInstanceAPI) create(ctx context.Context, c *app.RequestContext) {
 		Timeline:    demoTimeline(result),
 		DemoNotice:  api.instanceCreateDemoNotice(),
 	})
+}
+
+func (api *demoInstanceAPI) validateInstanceNetworkSelection(ctx context.Context, tenantID string, spec *ports.WorkloadSpec, request demoCreateNetworkRequest) error {
+	if spec == nil {
+		return fmt.Errorf("%w: instance spec is required", ports.ErrInvalid)
+	}
+	subnetID := strings.TrimSpace(request.SubnetID)
+	if subnetID == "" {
+		return nil
+	}
+	if api.network == nil {
+		return fmt.Errorf("%w: network service is required when network.subnet_id is set", ports.ErrNotConfigured)
+	}
+	subnet, err := api.network.GetSubnet(ctx, ports.NetworkResourceGetRequest{TenantID: tenantID, ResourceID: subnetID})
+	if err != nil {
+		return fmt.Errorf("%w: network.subnet_id %s does not exist for tenant", ports.ErrInvalid, subnetID)
+	}
+	if subnet.State != ports.NetworkResourceAvailable {
+		return fmt.Errorf("%w: network.subnet_id must reference an available subnet", ports.ErrInvalid)
+	}
+	vpc, err := api.network.GetVPC(ctx, ports.NetworkResourceGetRequest{TenantID: tenantID, ResourceID: subnet.VPCID})
+	if err != nil {
+		return fmt.Errorf("%w: network.vpc_id %s does not exist for subnet", ports.ErrInvalid, subnet.VPCID)
+	}
+	if vpc.State != ports.NetworkResourceAvailable {
+		return fmt.Errorf("%w: network.vpc_id must reference an available vpc", ports.ErrInvalid)
+	}
+	if vpcID := strings.TrimSpace(request.VPCID); vpcID != "" && vpcID != subnet.VPCID {
+		return fmt.Errorf("%w: network.vpc_id must match subnet.vpc_id", ports.ErrInvalid)
+	}
+	privateIP := ""
+	if request.PrivateIP != nil {
+		privateIP = strings.TrimSpace(*request.PrivateIP)
+	}
+	if privateIP != "" {
+		ip := net.ParseIP(privateIP)
+		if ip == nil || ip.To4() == nil {
+			return fmt.Errorf("%w: network.private_ip must be a valid IPv4 address", ports.ErrInvalid)
+		}
+		_, cidr, err := net.ParseCIDR(subnet.CIDR)
+		if err != nil {
+			return fmt.Errorf("%w: subnet.cidr is not a valid CIDR", ports.ErrInvalid)
+		}
+		if !cidr.Contains(ip) {
+			return fmt.Errorf("%w: network.private_ip must be inside subnet.cidr", ports.ErrInvalid)
+		}
+		if gateway := net.ParseIP(strings.TrimSpace(subnet.Gateway)); gateway != nil && gateway.Equal(ip) {
+			return fmt.Errorf("%w: network.private_ip must not equal subnet.gateway", ports.ErrInvalid)
+		}
+	}
+	applyPrimaryNetworkSelection(spec, vpc.VPCID, subnet.SubnetID, privateIP)
+	return nil
+}
+
+func applyPrimaryNetworkSelection(spec *ports.WorkloadSpec, vpcID string, subnetID string, privateIP string) {
+	attachment := ports.WorkloadNetworkAttachment{
+		Plane:     ports.NetworkPlaneTenantVPC,
+		NetworkID: strings.TrimSpace(vpcID),
+		SubnetID:  strings.TrimSpace(subnetID),
+		IPAddress: strings.TrimSpace(privateIP),
+		Primary:   true,
+		Required:  true,
+	}
+	replaced := false
+	for i := range spec.Network.Attachments {
+		if spec.Network.Attachments[i].Primary && spec.Network.Attachments[i].Plane == ports.NetworkPlaneTenantVPC {
+			spec.Network.Attachments[i] = attachment
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		spec.Network.Attachments = append([]ports.WorkloadNetworkAttachment{attachment}, spec.Network.Attachments...)
+	}
 }
 
 func (api *demoInstanceAPI) get(ctx context.Context, c *app.RequestContext) {
@@ -970,6 +1067,8 @@ func demoSpecFromRequest(req demoCreateInstanceRequest, tenantID string) (ports.
 		Name:     name,
 		Kind:     kind,
 		Image:    firstNonEmpty(req.Image, "nginx:1.27-alpine"),
+		Command:  append([]string(nil), req.Command...),
+		Args:     append([]string(nil), req.Args...),
 		Resources: ports.WorkloadResourceRequest{
 			CPU:    firstNonEmpty(req.CPU, "2"),
 			Memory: firstNonEmpty(req.Memory, "4Gi"),
@@ -1100,9 +1199,20 @@ func (api *demoInstanceAPI) demoInstanceFromRecord(record ports.WorkloadInstance
 		GPU:                   demoGPUFromRecord(record),
 		Sandbox:               demoSandboxFromRecord(record),
 		WorkloadIdentity:      demoIdentityFromRecord(record),
+		VPCID:                 optionalString(record.VPCID),
+		SubnetID:              optionalString(record.SubnetID),
+		PrivateIP:             optionalString(record.PrivateIP),
 		CreatedAt:             record.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:             record.UpdatedAt.Format(time.RFC3339),
 	}
+}
+
+func optionalString(value string) *string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 func demoSSHFromRecord(record ports.WorkloadInstanceRecord) *demoSSHResponse {
@@ -1456,13 +1566,6 @@ func queryInt(c *app.RequestContext, name string, fallback int) int {
 		return fallback
 	}
 	return value
-}
-
-func optionalString(value string) *string {
-	if strings.TrimSpace(value) == "" {
-		return nil
-	}
-	return &value
 }
 
 func coreDevProfileFromPort(profile ports.DevProfileInfo) coreDevProfileResponse {

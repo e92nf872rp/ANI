@@ -463,6 +463,9 @@ type WorkloadInstanceRecord struct {
 	OperationID  string
 	Name         string
 	Kind         WorkloadKind
+	VPCID        string
+	SubnetID     string
+	PrivateIP    string
 	Provider     string
 	AuditID      string
 	Lifecycle    InstanceLifecyclePolicy

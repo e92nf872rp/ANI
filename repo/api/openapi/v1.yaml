@@ -446,6 +446,9 @@ components:
         provider:       { type: string, example: "kubernetes_rest" }
         dev_profile:
           $ref: '#/components/schemas/CoreDevProfileInfo'
+        vpc_id:         { type: string, nullable: true, description: "实例创建时选择的 ANI VPC ID；未指定网络时为空。" }
+        subnet_id:      { type: string, nullable: true, description: "实例创建时选择的 ANI Subnet ID；后端负责翻译为 provider 子网资源。" }
+        private_ip:     { type: string, nullable: true, description: "实例创建时请求的私有 IPv4；未指定时由 provider 分配。" }
         audit_id:       { type: string, nullable: true }
         resource_refs:  { type: array, items: { type: string } }
         endpoint:       { type: string, nullable: true }
@@ -595,7 +598,25 @@ components:
         boot_image:     { type: string, nullable: true, description: "VM boot image 引用" }
         ssh_username:   { type: string, nullable: true, default: "ubuntu", description: "VM SSH 用户名；仅 VM 使用" }
         ssh_key_ref:    { type: string, nullable: true, description: "VM SSH key/secret 引用；不包含私钥内容" }
+        command:
+          type: array
+          nullable: true
+          description: "容器入口命令；可选，不传时使用镜像默认入口。"
+          items: { type: string }
+        args:
+          type: array
+          nullable: true
+          description: "容器入口参数；可选，不传时使用镜像默认参数。"
+          items: { type: string }
         termination_protection: { type: boolean, default: false }
+        network:
+          type: object
+          nullable: true
+          description: "实例网络选择；客户端只提交 ANI VPC/Subnet ID，不能提交 provider annotation。未传时走当前默认网络逻辑。"
+          properties:
+            vpc_id:     { type: string, nullable: true }
+            subnet_id:  { type: string, nullable: true }
+            private_ip: { type: string, nullable: true, description: "可选 IPv4，必须位于 subnet.cidr 内且不能等于 gateway。" }
         gpu:
           type: object
           nullable: true

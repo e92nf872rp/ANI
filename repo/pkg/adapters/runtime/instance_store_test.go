@@ -20,6 +20,9 @@ func TestMetadataInstanceStoreUpsertsStatus(t *testing.T) {
 		InstanceID: "inst_1",
 		Name:       "app-01",
 		Kind:       ports.WorkloadKindContainer,
+		VPCID:      "vpc-a",
+		SubnetID:   "subnet-a",
+		PrivateIP:  "10.72.0.10",
 		Provider:   "kubernetes",
 		AuditID:    "5dbb1d01-0000-4000-8000-000000000002",
 		Lifecycle: ports.InstanceLifecyclePolicy{
@@ -91,22 +94,31 @@ func TestMetadataInstanceStoreUpsertsStatus(t *testing.T) {
 	if got, want := tx.args[2], "app-01"; got != want {
 		t.Fatalf("name arg = %v, want %s", got, want)
 	}
-	if got, want := tx.args[8], "running"; got != want {
+	if got, want := tx.args[4], "vpc-a"; got != want {
+		t.Fatalf("vpc arg = %v, want %s", got, want)
+	}
+	if got, want := tx.args[5], "subnet-a"; got != want {
+		t.Fatalf("subnet arg = %v, want %s", got, want)
+	}
+	if got, want := tx.args[6], "10.72.0.10"; got != want {
+		t.Fatalf("private ip arg = %v, want %s", got, want)
+	}
+	if got, want := tx.args[11], "running"; got != want {
 		t.Fatalf("state arg = %v, want %s", got, want)
 	}
-	if got := tx.args[14]; !strings.Contains(got.(string), "TerminationProtection") {
+	if got := tx.args[17]; !strings.Contains(got.(string), "TerminationProtection") {
 		t.Fatalf("lifecycle arg = %v, want termination protection policy", got)
 	}
-	if got := tx.args[15]; !strings.Contains(got.(string), "ssh-key-a") {
+	if got := tx.args[18]; !strings.Contains(got.(string), "ssh-key-a") {
 		t.Fatalf("ssh arg = %v, want ssh key reference", got)
 	}
-	if got := tx.args[16]; !strings.Contains(got.(string), "snap-a") {
+	if got := tx.args[19]; !strings.Contains(got.(string), "snap-a") {
 		t.Fatalf("snapshots arg = %v, want snapshot metadata", got)
 	}
-	if got := tx.args[17]; !strings.Contains(got.(string), "rev-harbor-app-1") {
+	if got := tx.args[20]; !strings.Contains(got.(string), "rev-harbor-app-1") {
 		t.Fatalf("container arg = %v, want rollout metadata", got)
 	}
-	if got := tx.args[18]; !strings.Contains(got.(string), "A100") {
+	if got := tx.args[21]; !strings.Contains(got.(string), "A100") {
 		t.Fatalf("gpu arg = %v, want gpu metadata", got)
 	}
 }

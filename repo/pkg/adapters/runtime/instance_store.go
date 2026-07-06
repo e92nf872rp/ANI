@@ -95,18 +95,21 @@ func (s *MetadataInstanceStore) UpsertStatus(ctx context.Context, record ports.W
 	return s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO workload_instances (
-				tenant_id, instance_id, name, workload_kind, provider, audit_id,
+				tenant_id, instance_id, name, workload_kind, vpc_id, subnet_id, private_ip, provider, audit_id,
 				provider_id, resource_refs, state, endpoint, node_name, reason,
 				networks, storage, lifecycle_policy, ssh_connection, snapshots, container_status, gpu_status, created_at, updated_at
 			)
 			VALUES (
-				$1::uuid, $2, $3, $4, NULLIF($5, ''), NULLIF($6, '')::uuid,
-				NULLIF($7, ''), $8::jsonb, $9, NULLIF($10, ''), NULLIF($11, ''),
-				NULLIF($12, ''), $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb, $17::jsonb, $18::jsonb, $19::jsonb, $20, $21
+				$1::uuid, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, '')::uuid,
+				NULLIF($10, ''), $11::jsonb, $12, NULLIF($13, ''), NULLIF($14, ''),
+				NULLIF($15, ''), $16::jsonb, $17::jsonb, $18::jsonb, $19::jsonb, $20::jsonb, $21::jsonb, $22::jsonb, $23, $24
 			)
 			ON CONFLICT (tenant_id, instance_id) DO UPDATE SET
 				name = EXCLUDED.name,
 				workload_kind = EXCLUDED.workload_kind,
+				vpc_id = EXCLUDED.vpc_id,
+				subnet_id = EXCLUDED.subnet_id,
+				private_ip = EXCLUDED.private_ip,
 				provider = EXCLUDED.provider,
 				audit_id = EXCLUDED.audit_id,
 				provider_id = EXCLUDED.provider_id,
@@ -123,7 +126,7 @@ func (s *MetadataInstanceStore) UpsertStatus(ctx context.Context, record ports.W
 				container_status = EXCLUDED.container_status,
 				gpu_status = EXCLUDED.gpu_status,
 				updated_at = EXCLUDED.updated_at
-		`, record.TenantID, record.InstanceID, record.Name, string(record.Kind), record.Provider,
+		`, record.TenantID, record.InstanceID, record.Name, string(record.Kind), record.VPCID, record.SubnetID, record.PrivateIP, record.Provider,
 			record.AuditID, record.Status.Ref.ProviderID, string(resourceRefs), string(record.Status.State),
 			record.Status.Endpoint, record.Status.NodeName, record.Status.Reason, string(networks), string(storage),
 			string(lifecyclePolicy), string(sshConnection), string(snapshots), string(containerStatus), string(gpuStatus), createdAt, updatedAt)
@@ -145,7 +148,7 @@ func (s *MetadataInstanceStore) Get(ctx context.Context, tenantID string, instan
 	var record ports.WorkloadInstanceRecord
 	err := s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
 		row := tx.QueryRow(ctx, `
-			SELECT tenant_id::text, instance_id, name, workload_kind, COALESCE(provider, ''),
+			SELECT tenant_id::text, instance_id, name, workload_kind, COALESCE(vpc_id, ''), COALESCE(subnet_id, ''), COALESCE(private_ip, ''), COALESCE(provider, ''),
 				COALESCE(audit_id::text, ''), COALESCE(provider_id, ''), resource_refs,
 				state, COALESCE(endpoint, ''), COALESCE(node_name, ''), COALESCE(reason, ''),
 				networks, storage, lifecycle_policy, ssh_connection, snapshots, container_status, gpu_status, created_at, updated_at
@@ -171,7 +174,7 @@ func (s *MetadataInstanceStore) List(ctx context.Context, tenantID string, kind 
 	var records []ports.WorkloadInstanceRecord
 	err := s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT tenant_id::text, instance_id, name, workload_kind, COALESCE(provider, ''),
+			SELECT tenant_id::text, instance_id, name, workload_kind, COALESCE(vpc_id, ''), COALESCE(subnet_id, ''), COALESCE(private_ip, ''), COALESCE(provider, ''),
 				COALESCE(audit_id::text, ''), COALESCE(provider_id, ''), resource_refs,
 				state, COALESCE(endpoint, ''), COALESCE(node_name, ''), COALESCE(reason, ''),
 				networks, storage, lifecycle_policy, ssh_connection, snapshots, container_status, gpu_status, created_at, updated_at
@@ -263,6 +266,9 @@ func scanWorkloadInstance(row scanner, record *ports.WorkloadInstanceRecord) err
 		&record.InstanceID,
 		&record.Name,
 		&kind,
+		&record.VPCID,
+		&record.SubnetID,
+		&record.PrivateIP,
 		&record.Provider,
 		&record.AuditID,
 		&record.Status.Ref.ProviderID,

@@ -104,6 +104,9 @@ CREATE TABLE IF NOT EXISTS instance_plan_audits (
     instance_name       TEXT NOT NULL,
     workload_kind       TEXT NOT NULL
         CHECK (workload_kind IN ('vm','container','gpu_container','inference','notebook','agent_sandbox','batch_job')),
+    vpc_id              TEXT,
+    subnet_id           TEXT,
+    private_ip          TEXT,
     provider            TEXT,
     manifest_count      INT NOT NULL DEFAULT 0,
     rendered_manifests  JSONB NOT NULL DEFAULT '[]',
