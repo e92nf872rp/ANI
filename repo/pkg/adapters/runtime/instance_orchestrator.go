@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -88,6 +90,9 @@ func (o *LocalInstanceOrchestrator) Create(ctx context.Context, request ports.Wo
 	if err != nil {
 		return ports.WorkloadInstanceCreateResult{}, err
 	}
+	renderSpec := request.Spec
+	renderSpec.Name = providerWorkloadResourceName(request.Spec.Kind, request.Spec.Name, ref.InstanceID)
+	recordSpec := request.Spec
 	current, err := o.runtime.Get(ctx, ref)
 	if err != nil {
 		return ports.WorkloadInstanceCreateResult{}, err
@@ -106,9 +111,10 @@ func (o *LocalInstanceOrchestrator) Create(ctx context.Context, request ports.Wo
 			return ports.WorkloadInstanceCreateResult{}, err
 		}
 		identity = &binding
-		request.Spec.Identity = identity
+		renderSpec.Identity = identity
+		recordSpec.Identity = identity
 	}
-	manifests, err := o.renderer.Render(ctx, request.Spec)
+	manifests, err := o.renderer.Render(ctx, renderSpec)
 	if err != nil {
 		return ports.WorkloadInstanceCreateResult{}, err
 	}
@@ -165,7 +171,7 @@ func (o *LocalInstanceOrchestrator) Create(ctx context.Context, request ports.Wo
 		Identity:    identity,
 	}
 	if o.store != nil {
-		if err := o.store.UpsertStatus(ctx, instanceRecordFromResult(request.Spec, ref, auditID, provider, nil, current, firstNonZeroTime(request.RequestedAt, o.now().UTC()))); err != nil {
+		if err := o.store.UpsertStatus(ctx, instanceRecordFromResult(recordSpec, ref, auditID, provider, nil, current, firstNonZeroTime(request.RequestedAt, o.now().UTC()))); err != nil {
 			return ports.WorkloadInstanceCreateResult{}, err
 		}
 	}
@@ -198,11 +204,69 @@ func (o *LocalInstanceOrchestrator) Create(ctx context.Context, request ports.Wo
 	result.FinalStatus = reconcile.Status
 	result.Orchestrated = true
 	if o.store != nil {
-		if err := o.store.UpsertStatus(ctx, instanceRecordFromResult(request.Spec, ref, auditID, provider, apply.ResourceRefs, reconcile.Status, firstNonZeroTime(request.RequestedAt, o.now().UTC()))); err != nil {
+		if err := o.store.UpsertStatus(ctx, instanceRecordFromResult(recordSpec, ref, auditID, provider, apply.ResourceRefs, reconcile.Status, firstNonZeroTime(request.RequestedAt, o.now().UTC()))); err != nil {
 			return ports.WorkloadInstanceCreateResult{}, err
 		}
 	}
 	return result, nil
+}
+
+func providerWorkloadResourceName(kind ports.WorkloadKind, displayName string, instanceID string) string {
+	prefix := providerWorkloadKindPrefix(kind)
+	base := kubernetesDNSLabelPart(displayName)
+	if base == "" {
+		base = "instance"
+	}
+	sum := sha1.Sum([]byte(strings.TrimSpace(instanceID)))
+	suffix := hex.EncodeToString(sum[:])[:8]
+	name := prefix + "-" + base + "-" + suffix
+	if len(name) <= 63 {
+		return name
+	}
+	over := len(name) - 63
+	if over >= len(base) {
+		base = "instance"
+	} else {
+		base = strings.TrimRight(base[:len(base)-over], "-")
+	}
+	if base == "" {
+		base = "instance"
+	}
+	return prefix + "-" + base + "-" + suffix
+}
+
+func providerWorkloadKindPrefix(kind ports.WorkloadKind) string {
+	switch kind {
+	case ports.WorkloadKindVM:
+		return "vm"
+	case ports.WorkloadKindContainer:
+		return "container"
+	case ports.WorkloadKindGPUContainer:
+		return "gpu-container"
+	case ports.WorkloadKindSandbox:
+		return "sandbox"
+	default:
+		return "workload"
+	}
+}
+
+func kubernetesDNSLabelPart(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var sanitized strings.Builder
+	lastDash := false
+	for _, r := range value {
+		valid := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if valid {
+			sanitized.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			sanitized.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(sanitized.String(), "-")
 }
 
 func (o *LocalInstanceOrchestrator) validate() error {

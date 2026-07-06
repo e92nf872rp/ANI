@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kubercloud/ani/pkg/ports"
@@ -81,7 +82,7 @@ func (o *KubernetesInstanceOps) Run(ctx context.Context, request ports.WorkloadI
 
 func (o *KubernetesInstanceOps) execute(ctx context.Context, request ports.WorkloadInstanceOpsRequest, record ports.WorkloadInstanceRecord) (string, string, error) {
 	namespace := tenantNamespace(record.TenantID)
-	podName := firstNonEmpty(record.Name, record.InstanceID)
+	podName := opsTargetName(record)
 	switch request.Action {
 	case ports.WorkloadInstanceOpsLogs:
 		body, err := o.client.do(ctx, http.MethodGet, o.client.host+podPath(namespace, podName)+"/log?"+opsLogQuery(request), "", nil)
@@ -130,6 +131,17 @@ func (o *KubernetesInstanceOps) execute(ctx context.Context, request ports.Workl
 	default:
 		return "", "", fmt.Errorf("%w: unsupported instance ops action %q", ports.ErrUnsupported, request.Action)
 	}
+}
+
+func opsTargetName(record ports.WorkloadInstanceRecord) string {
+	ref, err := primaryWorkloadResourceRef(record.ResourceRefs)
+	if err == nil {
+		resource, err := resourceFromRecordRef(record, ref)
+		if err == nil && strings.TrimSpace(resource.Name) != "" {
+			return resource.Name
+		}
+	}
+	return firstNonEmpty(record.Name, record.InstanceID)
 }
 
 func podPath(namespace string, podName string) string {

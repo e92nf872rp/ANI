@@ -1,13 +1,17 @@
 package router
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/cloudwego/hertz/pkg/app/server"
+	"github.com/cloudwego/hertz/pkg/common/ut"
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
 )
@@ -99,6 +103,54 @@ func TestDemoSpecFromRequestMapsContainerCommandAndArgs(t *testing.T) {
 	}
 	if strings.Join(spec.Command, " ") != "sh -c" || strings.Join(spec.Args, " ") != "sleep 3600" {
 		t.Fatalf("command=%#v args=%#v, want request command/args", spec.Command, spec.Args)
+	}
+}
+
+func TestDemoInstanceServiceKeepsDisplayNameAndPrefixesProviderContainerName(t *testing.T) {
+	api := newDemoInstanceAPI()
+	spec, err := demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind:  "container",
+		Name:  "qqqq",
+		Image: "dockerproxy.net/library/busybox:1.36",
+	}, "tenant-a")
+	if err != nil {
+		t.Fatalf("demoSpecFromRequest error = %v", err)
+	}
+
+	result, err := api.service.Create(context.Background(), ports.WorkloadInstanceCreateRequest{
+		Spec:            spec,
+		UserID:          "user-a",
+		PermissionProof: "demo:test",
+		RequestedAt:     time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("Create error = %v", err)
+	}
+	record, err := api.service.Get(context.Background(), ports.WorkloadInstanceGetRequest{
+		TenantID:   result.Ref.TenantID,
+		InstanceID: result.Ref.InstanceID,
+	})
+	if err != nil {
+		t.Fatalf("Get error = %v", err)
+	}
+	if record.Name != "qqqq" {
+		t.Fatalf("record name = %q, want display name qqqq", record.Name)
+	}
+	if len(record.ResourceRefs) == 0 {
+		t.Fatalf("resource refs are empty, want provider Deployment ref")
+	}
+	found := false
+	for _, ref := range record.ResourceRefs {
+		if strings.HasPrefix(ref, "kubernetes/Deployment/container-qqqq-") {
+			found = true
+			break
+		}
+		if ref == "kubernetes/Deployment/qqqq" {
+			t.Fatalf("resource ref = %q, want container-prefixed provider name", ref)
+		}
+	}
+	if !found {
+		t.Fatalf("resource refs = %#v, want kubernetes/Deployment/container-qqqq-*", record.ResourceRefs)
 	}
 }
 
@@ -626,6 +678,45 @@ func TestDemoInstanceObservabilityResponsesUseLocalProfile(t *testing.T) {
 	requireLocalCoreDevProfile(t, execResponse.DevProfile, "local-instance-observability")
 }
 
+func TestDemoInstanceLogsEndpointUsesFollowParameterForSSE(t *testing.T) {
+	h := server.New()
+	RegisterWithOptions(h, RegisterOptions{})
+	instanceID := createDemoInstanceForLogs(t, h)
+
+	listResp := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/instances/"+instanceID+"/logs?limit=1", nil).Result()
+	if listResp.StatusCode() != http.StatusOK {
+		t.Fatalf("list logs status = %d body=%s, want 200", listResp.StatusCode(), listResp.Body())
+	}
+	if got := string(listResp.Header.Get("Content-Type")); !strings.Contains(got, "text/plain") {
+		t.Fatalf("list logs content-type = %q, want text/plain", got)
+	}
+	if got := string(listResp.Body()); strings.Contains(got, `"items"`) || strings.Contains(got, "event: log") || strings.TrimSpace(got) == "" {
+		t.Fatalf("list logs body = %q, want plain text log content", got)
+	}
+
+	streamResp := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/instances/"+instanceID+"/logs?follow=true&tail_lines=2", nil).Result()
+	if streamResp.StatusCode() != http.StatusOK {
+		t.Fatalf("stream logs status = %d body=%s, want 200", streamResp.StatusCode(), streamResp.Body())
+	}
+	if got := string(streamResp.Header.Get("Content-Type")); !strings.Contains(got, "text/event-stream") {
+		t.Fatalf("stream logs content-type = %q, want text/event-stream", got)
+	}
+	if got := string(streamResp.Body()); !strings.Contains(got, "event: log\n") || !strings.Contains(got, `"message"`) {
+		t.Fatalf("stream logs body = %q, want SSE log events", got)
+	}
+}
+
+func TestDemoInstanceLogsStreamEndpointIsNotRegistered(t *testing.T) {
+	h := server.New()
+	RegisterWithOptions(h, RegisterOptions{})
+	instanceID := createDemoInstanceForLogs(t, h)
+
+	resp := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/instances/"+instanceID+"/logs/stream", nil).Result()
+	if resp.StatusCode() != http.StatusNotFound {
+		t.Fatalf("legacy stream route status = %d, want 404", resp.StatusCode())
+	}
+}
+
 func TestDemoInstanceObservabilityCanUseInstanceNameForProviderTarget(t *testing.T) {
 	api := newDemoInstanceAPIWithObservability(nil, true)
 	spec, err := demoSpecFromRequest(demoCreateInstanceRequest{Kind: "container", Name: "s07-observability-live"}, "tenant-a")
@@ -649,6 +740,7 @@ func TestDemoInstanceObservabilityCanUseInstanceNameForProviderTarget(t *testing
 	if err != nil {
 		t.Fatalf("Get error = %v", err)
 	}
+	record.ResourceRefs = nil
 	if got := api.observabilityTargetID(record); got != "s07-observability-live" {
 		t.Fatalf("observability target = %q, want instance name", got)
 	}
@@ -656,6 +748,63 @@ func TestDemoInstanceObservabilityCanUseInstanceNameForProviderTarget(t *testing
 	localAPI := newDemoInstanceAPIWithObservability(nil, false)
 	if got := localAPI.observabilityTargetID(record); got != created.Ref.InstanceID {
 		t.Fatalf("local observability target = %q, want instance id %q", got, created.Ref.InstanceID)
+	}
+}
+
+func TestDemoInstanceObservabilityUsesProviderWorkloadRefBeforeDisplayName(t *testing.T) {
+	api := newDemoInstanceAPIWithObservability(nil, true)
+	record := ports.WorkloadInstanceRecord{
+		InstanceID:   "inst-ttt",
+		Name:         "ttt",
+		ResourceRefs: []string{"kubernetes/Secret/container-ttt-identity", "kubernetes/Deployment/container-ttt-094ae46b"},
+	}
+	if got := api.observabilityTargetID(record); got != "container-ttt-094ae46b" {
+		t.Fatalf("observability target = %q, want provider deployment name", got)
+	}
+	localAPI := newDemoInstanceAPIWithObservability(nil, false)
+	if got := localAPI.observabilityTargetID(record); got != "inst-ttt" {
+		t.Fatalf("local observability target = %q, want instance id", got)
+	}
+}
+
+func createDemoInstanceForLogs(t *testing.T, h *server.Hertz) string {
+	t.Helper()
+	body := `{"idempotency_key":"logs-follow-test","kind":"container","name":"logs-follow","image":"dockerproxy.net/library/busybox:1.36"}`
+	resp := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/instances", &ut.Body{Body: bytes.NewBufferString(body), Len: len(body)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+	).Result()
+	if resp.StatusCode() != http.StatusCreated {
+		t.Fatalf("create instance status = %d body=%s, want 201", resp.StatusCode(), resp.Body())
+	}
+	var payload struct {
+		Instance struct {
+			ID string `json:"id"`
+		} `json:"instance"`
+	}
+	if err := json.Unmarshal(resp.Body(), &payload); err != nil {
+		t.Fatalf("decode create response: %v body=%s", err, resp.Body())
+	}
+	if strings.TrimSpace(payload.Instance.ID) == "" {
+		t.Fatalf("create response missing instance.id: %s", resp.Body())
+	}
+	return payload.Instance.ID
+}
+
+func TestDemoInstanceLogSSEEncoding(t *testing.T) {
+	var buffer bytes.Buffer
+	err := writeInstanceLogSSE(&buffer, ports.InstanceLogEntry{
+		Timestamp: time.Date(2026, 7, 6, 16, 30, 0, 0, time.UTC),
+		Level:     "info",
+		Message:   "container ready",
+		Container: "main",
+		Stream:    "stdout",
+	})
+	if err != nil {
+		t.Fatalf("writeInstanceLogSSE error = %v", err)
+	}
+	got := buffer.String()
+	if !strings.HasPrefix(got, "event: log\n") || !strings.Contains(got, `"message":"container ready"`) || !strings.HasSuffix(got, "\n\n") {
+		t.Fatalf("SSE payload = %q, want log event with JSON data", got)
 	}
 }
 

@@ -15,6 +15,16 @@ type InstanceObservationListRequest struct {
 	Severity   string
 }
 
+type InstanceLogStreamRequest struct {
+	TenantID   string
+	InstanceID string
+	TailLines  int
+	Level      string
+	Container  string
+}
+
+type InstanceLogStreamSink func(InstanceLogEntry) error
+
 type InstanceObservationGetRequest struct {
 	TenantID   string
 	InstanceID string
@@ -106,6 +116,7 @@ type InstanceExecSessionRecord struct {
 // leaking Kubernetes, kubelet, Prometheus, or terminal provider SDK objects.
 type InstanceObservability interface {
 	ListLogs(ctx context.Context, request InstanceObservationListRequest) (InstanceLogListResult, error)
+	StreamLogs(ctx context.Context, request InstanceLogStreamRequest, sink InstanceLogStreamSink) error
 	ListEvents(ctx context.Context, request InstanceObservationListRequest) (InstanceEventListResult, error)
 	GetMetrics(ctx context.Context, request InstanceObservationGetRequest) (InstanceMetricsRecord, error)
 	ListSecurityEvents(ctx context.Context, request InstanceObservationListRequest) (InstanceSecurityEventListResult, error)

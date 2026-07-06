@@ -98,6 +98,47 @@ func TestKubernetesDryRunRendererInjectsKubeOVNAnnotationsForContainerNetwork(t 
 	}
 }
 
+func TestKubernetesDryRunRendererInjectsDefaultKubeOVNNetworkWhenNoSubnetSelected(t *testing.T) {
+	renderer := NewKubernetesDryRunRenderer(NewPlanningRuntime())
+
+	manifests, err := renderer.Render(context.Background(), ports.WorkloadSpec{
+		TenantID: "tenant-a",
+		Name:     "app-default-net",
+		Kind:     ports.WorkloadKindContainer,
+		Image:    "harbor/app:1",
+		Network: ports.WorkloadNetworkPolicy{
+			Attachments: []ports.WorkloadNetworkAttachment{
+				{
+					Plane:     ports.NetworkPlaneTenantVPC,
+					NetworkID: "tenant-vpc",
+					Primary:   true,
+					Required:  true,
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	content := manifests[0].Content
+	for _, want := range []string{
+		`"ovn.kubernetes.io/logical_switch": "ovn-default"`,
+		`"ani.kubercloud.io/network-planes": "tenant_vpc"`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("rendered container manifest missing %q:\n%s", want, content)
+		}
+	}
+	for _, unwanted := range []string{
+		`"ani.kubercloud.io/subnet-id"`,
+		`"ovn.kubernetes.io/ip_address"`,
+	} {
+		if strings.Contains(content, unwanted) {
+			t.Fatalf("rendered container manifest contains %q without subnet selection:\n%s", unwanted, content)
+		}
+	}
+}
+
 func TestKubernetesDryRunRendererInjectsKubeOVNAnnotationsForVMLauncherTemplate(t *testing.T) {
 	renderer := NewKubernetesDryRunRenderer(NewPlanningRuntime())
 

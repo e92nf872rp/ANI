@@ -42,10 +42,13 @@ func TestM1RealProviderProfileCreateLifecycleAndOps(t *testing.T) {
 	if created.Apply.Provider != "kubernetes" || len(created.Apply.ResourceRefs) != 1 {
 		t.Fatalf("provider apply = %#v, want kubernetes resource ref", created.Apply)
 	}
-	if !provider.seen("PATCH", "/apis/apps/v1/namespaces/ani-tenant-tenant-a/deployments/app-01", "dryRun=All") {
+	providerName := providerNameFromTestRef(t, created.Apply.ResourceRefs[0])
+	deploymentPath := "/apis/apps/v1/namespaces/ani-tenant-tenant-a/deployments/" + providerName
+	podPath := "/api/v1/namespaces/ani-tenant-tenant-a/pods/" + providerName
+	if !provider.seen("PATCH", deploymentPath, "dryRun=All") {
 		t.Fatalf("provider requests = %#v, want server-side dry-run", provider.requests)
 	}
-	if !provider.seen("PATCH", "/apis/apps/v1/namespaces/ani-tenant-tenant-a/deployments/app-01", "fieldManager=ani-test") {
+	if !provider.seen("PATCH", deploymentPath, "fieldManager=ani-test") {
 		t.Fatalf("provider requests = %#v, want server-side apply", provider.requests)
 	}
 
@@ -55,7 +58,7 @@ func TestM1RealProviderProfileCreateLifecycleAndOps(t *testing.T) {
 	if _, err := service.Start(context.Background(), lifecycleRequestFor(created.Ref.InstanceID, ports.WorkloadLifecycleStart)); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	if !provider.seen("PATCH", "/apis/apps/v1/namespaces/ani-tenant-tenant-a/deployments/app-01/scale", "") {
+	if !provider.seen("PATCH", deploymentPath+"/scale", "") {
 		t.Fatalf("provider requests = %#v, want scale lifecycle call", provider.requests)
 	}
 
@@ -86,12 +89,21 @@ func TestM1RealProviderProfileCreateLifecycleAndOps(t *testing.T) {
 	if execResult.SessionID == "" {
 		t.Fatalf("exec session id is empty")
 	}
-	if !provider.seen("GET", "/api/v1/namespaces/ani-tenant-tenant-a/pods/app-01/log", "") {
+	if !provider.seen("GET", podPath+"/log", "") {
 		t.Fatalf("provider requests = %#v, want pod logs", provider.requests)
 	}
-	if !provider.seen("POST", "/api/v1/namespaces/ani-tenant-tenant-a/pods/app-01/exec", "command=env") {
+	if !provider.seen("POST", podPath+"/exec", "command=env") {
 		t.Fatalf("provider requests = %#v, want pod exec", provider.requests)
 	}
+}
+
+func providerNameFromTestRef(t *testing.T, ref string) string {
+	t.Helper()
+	parts := strings.Split(ref, "/")
+	if len(parts) != 3 || strings.TrimSpace(parts[2]) == "" {
+		t.Fatalf("provider ref = %q, want provider/kind/name", ref)
+	}
+	return parts[2]
 }
 
 func lifecycleRequestFor(instanceID string, action ports.WorkloadLifecycleAction) ports.WorkloadInstanceLifecycleRequest {

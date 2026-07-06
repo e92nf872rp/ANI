@@ -52,6 +52,44 @@ func TestLocalInstanceOrchestratorCreatesAndReconciles(t *testing.T) {
 	}
 }
 
+func TestLocalInstanceOrchestratorGeneratesProviderNameFromKindAndDisplayName(t *testing.T) {
+	store := &fakeInstanceStore{}
+	orchestrator := newTestInstanceOrchestrator(true, store)
+	request := ports.WorkloadInstanceCreateRequest{
+		Spec: ports.WorkloadSpec{
+			TenantID: "tenant-a",
+			Name:     "net-clean-a",
+			Kind:     ports.WorkloadKindContainer,
+			Image:    "harbor/app:1",
+		},
+		UserID:          "user-a",
+		PermissionProof: "rbac:create:workload",
+	}
+
+	first, err := orchestrator.Create(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Create(first) error = %v", err)
+	}
+	second, err := orchestrator.Create(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Create(second) error = %v", err)
+	}
+	if len(first.Apply.ResourceRefs) != 1 || len(second.Apply.ResourceRefs) != 1 {
+		t.Fatalf("resource refs first=%#v second=%#v, want one ref each", first.Apply.ResourceRefs, second.Apply.ResourceRefs)
+	}
+	if first.Apply.ResourceRefs[0] == second.Apply.ResourceRefs[0] {
+		t.Fatalf("resource ref = %q reused for two creates with same display name", first.Apply.ResourceRefs[0])
+	}
+	for _, ref := range []string{first.Apply.ResourceRefs[0], second.Apply.ResourceRefs[0]} {
+		if !strings.HasPrefix(ref, "kubernetes/Deployment/container-net-clean-a-") {
+			t.Fatalf("resource ref = %q, want container-prefixed provider name", ref)
+		}
+	}
+	if store.last.Name != "net-clean-a" {
+		t.Fatalf("stored name = %q, want user display name", store.last.Name)
+	}
+}
+
 func TestLocalInstanceOrchestratorStopsBeforeObservationWhenApplyDisabled(t *testing.T) {
 	store := &fakeInstanceStore{}
 	orchestrator := newTestInstanceOrchestrator(false, store)

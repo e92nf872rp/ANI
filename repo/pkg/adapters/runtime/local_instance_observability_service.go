@@ -53,6 +53,35 @@ func (s *LocalInstanceObservabilityService) ListLogs(_ context.Context, request 
 	return ports.InstanceLogListResult{Items: items, Total: len(items), DevProfile: instanceObservabilityDevProfile()}, nil
 }
 
+func (s *LocalInstanceObservabilityService) StreamLogs(ctx context.Context, request ports.InstanceLogStreamRequest, sink ports.InstanceLogStreamSink) error {
+	if sink == nil {
+		return fmt.Errorf("%w: log stream sink is required", ports.ErrInvalid)
+	}
+	result, err := s.ListLogs(ctx, ports.InstanceObservationListRequest{
+		TenantID:   request.TenantID,
+		InstanceID: request.InstanceID,
+		Limit:      request.TailLines,
+		Level:      request.Level,
+	})
+	if err != nil {
+		return err
+	}
+	for _, item := range result.Items {
+		if strings.TrimSpace(request.Container) != "" && item.Container != request.Container {
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		if err := sink(item); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *LocalInstanceObservabilityService) ListEvents(_ context.Context, request ports.InstanceObservationListRequest) (ports.InstanceEventListResult, error) {
 	if err := validateInstanceObservationIdentity(request.TenantID, request.InstanceID); err != nil {
 		return ports.InstanceEventListResult{}, err

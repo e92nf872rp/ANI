@@ -16,6 +16,16 @@ func TestPrometheusInstanceObservabilityListsLogsEventsAndSecurityEvents(t *test
 	service := newTestPrometheusInstanceObservability(t, func(r *http.Request) (*http.Response, error) {
 		requests = append(requests, r.Method+" "+r.URL.String())
 		switch {
+		case r.URL.Path == "/api/v1/namespaces/ani-tenant-tenant-a/pods":
+			query, _ := url.QueryUnescape(r.URL.RawQuery)
+			if !strings.Contains(query, "ani.kubercloud.io/instance=workload-a") {
+				t.Fatalf("pod list query = %q, want workload label selector", query)
+			}
+			return jsonResponse(http.StatusOK, `{
+				"items": [
+					{"metadata":{"name":"pod-a"},"status":{"phase":"Running","conditions":[{"type":"Ready","status":"True"}]}}
+				]
+			}`), nil
 		case r.URL.Path == "/api/v1/namespaces/ani-tenant-tenant-a/pods/pod-a/log":
 			return jsonResponse(http.StatusOK, "info booted\nwarn restarted\n"), nil
 		case r.URL.Path == "/api/v1/namespaces/ani-tenant-tenant-a/events":
@@ -33,7 +43,7 @@ func TestPrometheusInstanceObservabilityListsLogsEventsAndSecurityEvents(t *test
 
 	logs, err := service.ListLogs(context.Background(), ports.InstanceObservationListRequest{
 		TenantID:   "tenant-a",
-		InstanceID: "pod-a",
+		InstanceID: "workload-a",
 		Limit:      1,
 		Level:      "warn",
 	})
@@ -49,7 +59,7 @@ func TestPrometheusInstanceObservabilityListsLogsEventsAndSecurityEvents(t *test
 
 	events, err := service.ListEvents(context.Background(), ports.InstanceObservationListRequest{
 		TenantID:   "tenant-a",
-		InstanceID: "pod-a",
+		InstanceID: "workload-a",
 		Type:       "Warning",
 	})
 	if err != nil {
@@ -61,7 +71,7 @@ func TestPrometheusInstanceObservabilityListsLogsEventsAndSecurityEvents(t *test
 
 	security, err := service.ListSecurityEvents(context.Background(), ports.InstanceObservationListRequest{
 		TenantID:   "tenant-a",
-		InstanceID: "pod-a",
+		InstanceID: "workload-a",
 		Severity:   "warning",
 	})
 	if err != nil {
@@ -70,13 +80,21 @@ func TestPrometheusInstanceObservabilityListsLogsEventsAndSecurityEvents(t *test
 	if len(security.Items) != 1 || security.Items[0].EventType != "kubernetes_warning" {
 		t.Fatalf("security events = %+v, want warning event projection", security)
 	}
-	if len(requests) != 3 || !strings.Contains(requests[0], "tailLines=1") || !strings.Contains(requests[1], "involvedObject.name%3Dpod-a") {
-		t.Fatalf("requests = %+v, want Kubernetes logs/events API calls", requests)
+	if len(requests) != 6 || !strings.Contains(requests[1], "tailLines=1") || !strings.Contains(requests[3], "involvedObject.name%3Dpod-a") {
+		t.Fatalf("requests = %+v, want Kubernetes pod selector plus logs/events API calls", requests)
 	}
 }
 
 func TestPrometheusInstanceObservabilityGetsMetricsFromPrometheus(t *testing.T) {
 	service := newTestPrometheusInstanceObservability(t, func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/api/v1/namespaces/ani-tenant-tenant-a/pods" {
+			return jsonResponse(http.StatusOK, `{
+				"items": [
+					{"metadata":{"name":"pod-a-old"},"status":{"phase":"Pending"}},
+					{"metadata":{"name":"pod-a"},"status":{"phase":"Running","conditions":[{"type":"Ready","status":"True"}]}}
+				]
+			}`), nil
+		}
 		if r.URL.Path != "/api/v1/query" {
 			t.Fatalf("path = %s, want Prometheus query API", r.URL.Path)
 		}
@@ -92,12 +110,12 @@ func TestPrometheusInstanceObservabilityGetsMetricsFromPrometheus(t *testing.T) 
 
 	metrics, err := service.GetMetrics(context.Background(), ports.InstanceObservationGetRequest{
 		TenantID:   "tenant-a",
-		InstanceID: "pod-a",
+		InstanceID: "workload-a",
 	})
 	if err != nil {
 		t.Fatalf("GetMetrics() error = %v", err)
 	}
-	if metrics.InstanceID != "pod-a" || metrics.CPUUtilizationPct == nil || *metrics.CPUUtilizationPct != 23.5 {
+	if metrics.InstanceID != "workload-a" || metrics.CPUUtilizationPct == nil || *metrics.CPUUtilizationPct != 23.5 {
 		t.Fatalf("metrics = %+v, want Prometheus CPU utilization", metrics)
 	}
 	if !metrics.Timestamp.Equal(time.Unix(1780000000, 0).UTC()) {
@@ -105,6 +123,48 @@ func TestPrometheusInstanceObservabilityGetsMetricsFromPrometheus(t *testing.T) 
 	}
 	if metrics.DevProfile.Provider != "prometheus-kubernetes-instance-observability" || metrics.DevProfile.RealProvider {
 		t.Fatalf("metrics dev profile = %+v, want Prometheus/Kubernetes contract marker", metrics.DevProfile)
+	}
+}
+
+func TestPrometheusInstanceObservabilityStreamsLogsFromResolvedPod(t *testing.T) {
+	var requests []string
+	service := newTestPrometheusInstanceObservability(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.URL.String())
+		switch r.URL.Path {
+		case "/api/v1/namespaces/ani-tenant-tenant-a/pods":
+			return jsonResponse(http.StatusOK, `{
+				"items": [
+					{"metadata":{"name":"container-ttt-094ae46b-f6f97bd95-vwdv2"},"status":{"phase":"Running","conditions":[{"type":"Ready","status":"True"}]}}
+				]
+			}`), nil
+		case "/api/v1/namespaces/ani-tenant-tenant-a/pods/container-ttt-094ae46b-f6f97bd95-vwdv2/log":
+			query, _ := url.QueryUnescape(r.URL.RawQuery)
+			if !strings.Contains(query, "follow=true") || !strings.Contains(query, "tailLines=25") {
+				t.Fatalf("log query = %q, want follow and tailLines", query)
+			}
+			return jsonResponse(http.StatusOK, "info booted\nwarn warming\n"), nil
+		default:
+			t.Fatalf("unexpected request %s", r.URL.String())
+			return nil, nil
+		}
+	})
+	var entries []ports.InstanceLogEntry
+	err := service.StreamLogs(context.Background(), ports.InstanceLogStreamRequest{
+		TenantID:   "tenant-a",
+		InstanceID: "container-ttt-094ae46b",
+		TailLines:  25,
+	}, func(entry ports.InstanceLogEntry) error {
+		entries = append(entries, entry)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("StreamLogs() error = %v", err)
+	}
+	if len(entries) != 2 || entries[0].Message != "info booted" || entries[1].Level != "warn" {
+		t.Fatalf("entries = %+v, want streamed log entries", entries)
+	}
+	if len(requests) != 2 || strings.Contains(requests[1], "/pods/container-ttt-094ae46b/log") {
+		t.Fatalf("requests = %+v, want resolved Pod log stream request", requests)
 	}
 }
 

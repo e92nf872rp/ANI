@@ -3,8 +3,10 @@ package router
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -726,6 +728,10 @@ func (api *demoInstanceAPI) listOperations(ctx context.Context, c *app.RequestCo
 }
 
 func (api *demoInstanceAPI) listLogs(ctx context.Context, c *app.RequestContext) {
+	if queryBool(c, "follow", false) {
+		api.streamLogs(ctx, c)
+		return
+	}
 	record, err := api.instanceForObservation(ctx, c)
 	if err != nil {
 		writeInstanceObservabilityError(c, err)
@@ -742,7 +748,42 @@ func (api *demoInstanceAPI) listLogs(ctx context.Context, c *app.RequestContext)
 		writeInstanceObservabilityError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, demoInstanceLogListFromResult(result))
+	c.Response.Header.Set("Content-Type", "text/plain; charset=utf-8")
+	c.String(http.StatusOK, instanceLogTextFromResult(result))
+}
+
+func (api *demoInstanceAPI) streamLogs(ctx context.Context, c *app.RequestContext) {
+	record, err := api.instanceForObservation(ctx, c)
+	if err != nil {
+		writeInstanceObservabilityError(c, err)
+		return
+	}
+	reader, writer := io.Pipe()
+	c.Response.Header.Set("Content-Type", "text/event-stream")
+	c.Response.Header.Set("Cache-Control", "no-cache")
+	c.Response.Header.Set("X-Accel-Buffering", "no")
+	c.Response.SetStatusCode(http.StatusOK)
+	c.SetBodyStream(reader, -1)
+
+	request := ports.InstanceLogStreamRequest{
+		TenantID:   demoTenantID(c),
+		InstanceID: api.observabilityTargetID(record),
+		TailLines:  queryInt(c, "tail_lines", queryInt(c, "limit", 100)),
+		Level:      c.Query("level"),
+		Container:  c.Query("container"),
+	}
+	go func() {
+		defer writer.Close()
+		if _, err := io.WriteString(writer, ": ani instance log stream\n\n"); err != nil {
+			return
+		}
+		err := api.observability.StreamLogs(ctx, request, func(entry ports.InstanceLogEntry) error {
+			return writeInstanceLogSSE(writer, entry)
+		})
+		if err != nil && !errors.Is(err, context.Canceled) {
+			_ = writeSSEEvent(writer, "error", map[string]any{"code": "INSTANCE_LOG_STREAM_FAILED", "message": err.Error()})
+		}
+	}()
 }
 
 func (api *demoInstanceAPI) listEvents(ctx context.Context, c *app.RequestContext) {
@@ -934,10 +975,34 @@ func (api *demoInstanceAPI) instanceForObservation(ctx context.Context, c *app.R
 }
 
 func (api *demoInstanceAPI) observabilityTargetID(record ports.WorkloadInstanceRecord) string {
-	if api.observabilityUsesInstanceName && strings.TrimSpace(record.Name) != "" {
-		return record.Name
+	if api.observabilityUsesInstanceName {
+		if target := observabilityProviderWorkloadName(record.ResourceRefs); target != "" {
+			return target
+		}
+		if strings.TrimSpace(record.Name) != "" {
+			return record.Name
+		}
 	}
 	return record.InstanceID
+}
+
+func observabilityProviderWorkloadName(refs []string) string {
+	for _, kind := range []string{"Deployment", "Job", "VirtualMachine"} {
+		for _, ref := range refs {
+			parts := strings.Split(ref, "/")
+			if len(parts) != 3 {
+				continue
+			}
+			provider := strings.TrimSpace(parts[0])
+			if provider != "kubernetes" && provider != "kubevirt" {
+				continue
+			}
+			if strings.TrimSpace(parts[1]) == kind && strings.TrimSpace(parts[2]) != "" {
+				return strings.TrimSpace(parts[2])
+			}
+		}
+	}
+	return ""
 }
 
 func consoleAction(protocol string) ports.WorkloadInstanceOpsAction {
@@ -1409,6 +1474,41 @@ func demoInstanceLogListFromResult(result ports.InstanceLogListResult) demoInsta
 	}
 }
 
+func instanceLogTextFromResult(result ports.InstanceLogListResult) string {
+	lines := make([]string, 0, len(result.Items))
+	for _, item := range result.Items {
+		lines = append(lines, item.Message)
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func writeInstanceLogSSE(writer io.Writer, entry ports.InstanceLogEntry) error {
+	return writeSSEEvent(writer, "log", demoInstanceLogEntryResponse{
+		Timestamp: entry.Timestamp.Format(time.RFC3339),
+		Level:     entry.Level,
+		Message:   entry.Message,
+		Container: entry.Container,
+		Stream:    entry.Stream,
+	})
+}
+
+func writeSSEEvent(writer io.Writer, event string, payload any) error {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(event) != "" {
+		if _, err := fmt.Fprintf(writer, "event: %s\n", strings.TrimSpace(event)); err != nil {
+			return err
+		}
+	}
+	_, err = fmt.Fprintf(writer, "data: %s\n\n", data)
+	return err
+}
+
 func demoInstanceEventListFromResult(result ports.InstanceEventListResult) demoInstanceEventListResponse {
 	items := make([]demoInstanceEventResponse, 0, len(result.Items))
 	for _, item := range result.Items {
@@ -1566,6 +1666,21 @@ func queryInt(c *app.RequestContext, name string, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+func queryBool(c *app.RequestContext, name string, fallback bool) bool {
+	raw := strings.ToLower(strings.TrimSpace(c.Query(name)))
+	if raw == "" {
+		return fallback
+	}
+	switch raw {
+	case "1", "true", "t", "yes", "y", "on":
+		return true
+	case "0", "false", "f", "no", "n", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 func coreDevProfileFromPort(profile ports.DevProfileInfo) coreDevProfileResponse {

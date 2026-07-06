@@ -14,6 +14,8 @@ type KubernetesDryRunRenderer struct {
 	planner *PlanningRuntime
 }
 
+const defaultKubeOVNLogicalSwitch = "ovn-default"
+
 func NewKubernetesDryRunRenderer(planner *PlanningRuntime) *KubernetesDryRunRenderer {
 	if planner == nil {
 		planner = NewPlanningRuntime()
@@ -180,12 +182,17 @@ func annotationsWithInstancePlan(spec ports.WorkloadSpec) map[string]string {
 		"ani.kubercloud.io/runtime-adapter": "planning",
 	}, spec.Annotations)
 	for _, attachment := range spec.Network.Attachments {
-		if !attachment.Primary || attachment.Plane != ports.NetworkPlaneTenantVPC || strings.TrimSpace(attachment.SubnetID) == "" {
+		if !attachment.Primary || attachment.Plane != ports.NetworkPlaneTenantVPC {
 			continue
 		}
-		annotations["ovn.kubernetes.io/logical_switch"] = KubeOVNProviderName("subnet", attachment.SubnetID)
+		subnetID := strings.TrimSpace(attachment.SubnetID)
+		if subnetID == "" {
+			annotations["ovn.kubernetes.io/logical_switch"] = defaultKubeOVNLogicalSwitch
+			break
+		}
+		annotations["ovn.kubernetes.io/logical_switch"] = KubeOVNProviderName("subnet", subnetID)
 		annotations["ani.kubercloud.io/vpc-id"] = strings.TrimSpace(attachment.NetworkID)
-		annotations["ani.kubercloud.io/subnet-id"] = strings.TrimSpace(attachment.SubnetID)
+		annotations["ani.kubercloud.io/subnet-id"] = subnetID
 		if ip := strings.TrimSpace(attachment.IPAddress); ip != "" {
 			annotations["ovn.kubernetes.io/ip_address"] = ip
 		}

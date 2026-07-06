@@ -2241,12 +2241,19 @@ paths:
         - { name: limit,  in: query, schema: { type: integer, default: 100, minimum: 1, maximum: 1000 } }
         - { name: cursor, in: query, schema: { type: string } }
         - { name: level,  in: query, schema: { type: string, enum: [debug, info, warn, error] } }
+        - { name: follow, in: query, schema: { type: boolean, default: false }, description: "false 返回一次性 text/plain 日志文本；true 返回 text/event-stream 实时日志流。" }
+        - { name: tail_lines, in: query, schema: { type: integer, default: 100, minimum: 1, maximum: 1000 }, description: "follow=true 时订阅前返回的历史尾部行数。" }
+        - { name: container, in: query, schema: { type: string }, description: "follow=true 时订阅指定容器日志。" }
       responses:
         "200":
-          description: 实例日志列表
+          description: 实例日志。默认返回一次性 text/plain 日志文本；follow=true 时返回 Server-Sent Events log stream。
           content:
-            application/json:
-              schema: { $ref: '#/components/schemas/InstanceLogListResponse' }
+            text/plain:
+              schema:
+                type: string
+            text/event-stream:
+              schema:
+                type: string
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }

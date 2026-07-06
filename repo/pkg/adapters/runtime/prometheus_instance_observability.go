@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -74,11 +75,15 @@ func (o *PrometheusInstanceObservability) ListLogs(ctx context.Context, request 
 	if err := validateInstanceObservationIdentity(request.TenantID, request.InstanceID); err != nil {
 		return ports.InstanceLogListResult{}, err
 	}
+	podName, err := o.resolveObservationPodName(ctx, request.TenantID, request.InstanceID)
+	if err != nil {
+		return ports.InstanceLogListResult{}, err
+	}
 	query := url.Values{}
 	if request.Limit > 0 {
 		query.Set("tailLines", strconv.Itoa(normalizeLimit(request.Limit, 100, 1000)))
 	}
-	body, err := o.kubeClient.do(ctx, http.MethodGet, o.kubeClient.host+podPath(tenantNamespace(request.TenantID), request.InstanceID)+"/log?"+query.Encode(), "", nil)
+	body, err := o.kubeClient.do(ctx, http.MethodGet, o.kubeClient.host+podPath(tenantNamespace(request.TenantID), podName)+"/log?"+query.Encode(), "", nil)
 	if err != nil {
 		return ports.InstanceLogListResult{}, err
 	}
@@ -88,11 +93,72 @@ func (o *PrometheusInstanceObservability) ListLogs(ctx context.Context, request 
 	return ports.InstanceLogListResult{Items: items, Total: len(items), DevProfile: prometheusInstanceObservabilityDevProfile()}, nil
 }
 
+func (o *PrometheusInstanceObservability) StreamLogs(ctx context.Context, request ports.InstanceLogStreamRequest, sink ports.InstanceLogStreamSink) error {
+	if sink == nil {
+		return fmt.Errorf("%w: log stream sink is required", ports.ErrInvalid)
+	}
+	if err := validateInstanceObservationIdentity(request.TenantID, request.InstanceID); err != nil {
+		return err
+	}
+	podName, err := o.resolveObservationPodName(ctx, request.TenantID, request.InstanceID)
+	if err != nil {
+		return err
+	}
+	query := url.Values{}
+	query.Set("follow", "true")
+	query.Set("tailLines", strconv.Itoa(normalizeLimit(request.TailLines, 100, 1000)))
+	if strings.TrimSpace(request.Container) != "" {
+		query.Set("container", strings.TrimSpace(request.Container))
+	}
+	endpoint := o.kubeClient.host + podPath(tenantNamespace(request.TenantID), podName) + "/log?" + query.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "text/plain")
+	if o.kubeClient.bearerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+o.kubeClient.bearerToken)
+	}
+	resp, err := o.kubeClient.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("%w: Kubernetes API GET %s returned HTTP %d", ports.ErrInvalid, req.URL.Path, resp.StatusCode)
+	}
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		entry := ports.InstanceLogEntry{
+			Timestamp: o.now().UTC(),
+			Level:     inferLogLevel(scanner.Text()),
+			Message:   scanner.Text(),
+			Container: firstNonEmpty(strings.TrimSpace(request.Container), "main"),
+			Stream:    "stdout",
+		}
+		if strings.TrimSpace(request.Level) != "" && entry.Level != strings.TrimSpace(request.Level) {
+			continue
+		}
+		if err := sink(entry); err != nil {
+			return err
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	return ctx.Err()
+}
+
 func (o *PrometheusInstanceObservability) ListEvents(ctx context.Context, request ports.InstanceObservationListRequest) (ports.InstanceEventListResult, error) {
 	if err := validateInstanceObservationIdentity(request.TenantID, request.InstanceID); err != nil {
 		return ports.InstanceEventListResult{}, err
 	}
-	events, err := o.readKubernetesEvents(ctx, request.TenantID, request.InstanceID)
+	podName, err := o.resolveObservationPodName(ctx, request.TenantID, request.InstanceID)
+	if err != nil {
+		return ports.InstanceEventListResult{}, err
+	}
+	events, err := o.readKubernetesEvents(ctx, request.TenantID, request.InstanceID, podName)
 	if err != nil {
 		return ports.InstanceEventListResult{}, err
 	}
@@ -105,7 +171,11 @@ func (o *PrometheusInstanceObservability) GetMetrics(ctx context.Context, reques
 	if err := validateInstanceObservationIdentity(request.TenantID, request.InstanceID); err != nil {
 		return ports.InstanceMetricsRecord{}, err
 	}
-	query := fmt.Sprintf(`container_cpu_usage_seconds_total{namespace=%q,pod=%q}`, tenantNamespace(request.TenantID), request.InstanceID)
+	podName, err := o.resolveObservationPodName(ctx, request.TenantID, request.InstanceID)
+	if err != nil {
+		return ports.InstanceMetricsRecord{}, err
+	}
+	query := fmt.Sprintf(`container_cpu_usage_seconds_total{namespace=%q,pod=%q}`, tenantNamespace(request.TenantID), podName)
 	sample, err := o.queryPrometheusScalar(ctx, query)
 	if err != nil {
 		return ports.InstanceMetricsRecord{}, err
@@ -122,7 +192,11 @@ func (o *PrometheusInstanceObservability) ListSecurityEvents(ctx context.Context
 	if err := validateInstanceObservationIdentity(request.TenantID, request.InstanceID); err != nil {
 		return ports.InstanceSecurityEventListResult{}, err
 	}
-	events, err := o.readKubernetesEvents(ctx, request.TenantID, request.InstanceID)
+	podName, err := o.resolveObservationPodName(ctx, request.TenantID, request.InstanceID)
+	if err != nil {
+		return ports.InstanceSecurityEventListResult{}, err
+	}
+	events, err := o.readKubernetesEvents(ctx, request.TenantID, request.InstanceID, podName)
 	if err != nil {
 		return ports.InstanceSecurityEventListResult{}, err
 	}
@@ -178,13 +252,41 @@ func (o *PrometheusInstanceObservability) CreateExecSession(_ context.Context, r
 	return record, nil
 }
 
-func (o *PrometheusInstanceObservability) readKubernetesEvents(ctx context.Context, tenantID string, instanceID string) ([]ports.InstanceEventRecord, error) {
-	query := "fieldSelector=" + url.QueryEscape("involvedObject.name="+instanceID)
+func (o *PrometheusInstanceObservability) readKubernetesEvents(ctx context.Context, tenantID string, instanceID string, podName string) ([]ports.InstanceEventRecord, error) {
+	query := "fieldSelector=" + url.QueryEscape("involvedObject.name="+podName)
 	body, err := o.kubeClient.do(ctx, http.MethodGet, o.kubeClient.host+"/api/v1/namespaces/"+url.PathEscape(tenantNamespace(tenantID))+"/events?"+query, "", nil)
 	if err != nil {
 		return nil, err
 	}
 	return parseKubernetesEvents(body, instanceID, o.now().UTC())
+}
+
+func (o *PrometheusInstanceObservability) resolveObservationPodName(ctx context.Context, tenantID string, instanceID string) (string, error) {
+	pods, err := o.listObservationPods(ctx, tenantID, instanceID)
+	if err != nil {
+		return "", err
+	}
+	if len(pods) == 0 {
+		return instanceID, nil
+	}
+	if podName := selectObservationPod(pods); podName != "" {
+		return podName, nil
+	}
+	return instanceID, nil
+}
+
+func (o *PrometheusInstanceObservability) listObservationPods(ctx context.Context, tenantID string, instanceID string) ([]kubernetesPod, error) {
+	values := url.Values{}
+	values.Set("labelSelector", "ani.kubercloud.io/tenant-id="+tenantID+",ani.kubercloud.io/instance="+instanceID)
+	body, err := o.kubeClient.do(ctx, http.MethodGet, o.kubeClient.host+"/api/v1/namespaces/"+url.PathEscape(tenantNamespace(tenantID))+"/pods?"+values.Encode(), "", nil)
+	if err != nil {
+		return nil, err
+	}
+	var payload kubernetesPodList
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+	return payload.Items, nil
 }
 
 func (o *PrometheusInstanceObservability) queryPrometheusScalar(ctx context.Context, query string) (prometheusScalarSample, error) {
@@ -248,6 +350,49 @@ func inferLogLevel(line string) string {
 
 type kubernetesEventList struct {
 	Items []kubernetesEvent `json:"items"`
+}
+
+type kubernetesPodList struct {
+	Items []kubernetesPod `json:"items"`
+}
+
+type kubernetesPod struct {
+	Metadata struct {
+		Name string `json:"name"`
+	} `json:"metadata"`
+	Status struct {
+		Phase      string `json:"phase"`
+		Conditions []struct {
+			Type   string `json:"type"`
+			Status string `json:"status"`
+		} `json:"conditions"`
+	} `json:"status"`
+}
+
+func selectObservationPod(pods []kubernetesPod) string {
+	for _, pod := range pods {
+		if strings.TrimSpace(pod.Metadata.Name) == "" {
+			continue
+		}
+		if pod.Status.Phase == "Running" && podReady(pod) {
+			return pod.Metadata.Name
+		}
+	}
+	for _, pod := range pods {
+		if strings.TrimSpace(pod.Metadata.Name) != "" {
+			return pod.Metadata.Name
+		}
+	}
+	return ""
+}
+
+func podReady(pod kubernetesPod) bool {
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == "Ready" && condition.Status == "True" {
+			return true
+		}
+	}
+	return false
 }
 
 type kubernetesEvent struct {

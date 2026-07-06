@@ -55,6 +55,22 @@ func TestLocalInstanceObservabilityReturnsDevProfileData(t *testing.T) {
 	if len(security.Items) != 1 || security.Items[0].Severity != "warning" {
 		t.Fatalf("security events = %+v, want one warning event", security)
 	}
+
+	var streamed []ports.InstanceLogEntry
+	err = service.StreamLogs(context.Background(), ports.InstanceLogStreamRequest{
+		TenantID:   "tenant-a",
+		InstanceID: "11111111-1111-1111-1111-111111111111",
+		TailLines:  2,
+	}, func(entry ports.InstanceLogEntry) error {
+		streamed = append(streamed, entry)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("StreamLogs error = %v", err)
+	}
+	if len(streamed) != 2 {
+		t.Fatalf("streamed logs = %+v, want two entries", streamed)
+	}
 }
 
 func TestLocalInstanceObservabilityExecSessionIsIdempotentAndShortLived(t *testing.T) {

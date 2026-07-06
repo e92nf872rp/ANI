@@ -28,6 +28,28 @@ func TestKubernetesInstanceOpsReadsLogs(t *testing.T) {
 	}
 }
 
+func TestKubernetesInstanceOpsUsesProviderResourceRefName(t *testing.T) {
+	var got string
+	ops := newTestKubernetesInstanceOps(t, func(r *http.Request) (*http.Response, error) {
+		got = r.Method + " " + r.URL.String()
+		return jsonResponse(http.StatusOK, "log line"), nil
+	})
+	record := opsRecord()
+	record.Name = "app-01"
+	record.ResourceRefs = []string{"kubernetes/Deployment/container-app-01-094ae46b"}
+
+	_, err := ops.Run(context.Background(), opsRequest(ports.WorkloadInstanceOpsLogs), record)
+	if err != nil {
+		t.Fatalf("Run(logs) error = %v", err)
+	}
+	if !strings.Contains(got, "/api/v1/namespaces/ani-tenant-tenant-a/pods/container-app-01-094ae46b/log") {
+		t.Fatalf("request = %q, want provider resource ref pod log path", got)
+	}
+	if strings.Contains(got, "/pods/app-01/log") {
+		t.Fatalf("request = %q, used display name instead of provider resource ref", got)
+	}
+}
+
 func TestKubernetesInstanceOpsExecCreatesSession(t *testing.T) {
 	var got string
 	ops := newTestKubernetesInstanceOps(t, func(r *http.Request) (*http.Response, error) {
