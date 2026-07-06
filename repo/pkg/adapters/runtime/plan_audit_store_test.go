@@ -53,6 +53,9 @@ func (tx *fakeMetadataTx) Query(_ context.Context, sql string, _ ...any) (ports.
 func (tx *fakeMetadataTx) QueryRow(_ context.Context, sql string, args ...any) ports.Row {
 	tx.queryRowSQL = sql
 	tx.queryRowArgs = args
+	if strings.Contains(sql, "COUNT(*)") {
+		return fakeMetadataRow{values: []any{int64(0)}}
+	}
 	if len(tx.queryRowRows) > 0 && tx.queryRowIndex < len(tx.queryRowRows) {
 		row := tx.queryRowRows[tx.queryRowIndex]
 		tx.queryRowIndex++

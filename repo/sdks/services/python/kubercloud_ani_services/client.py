@@ -6,7 +6,7 @@ from urllib import error, parse, request
 LAYER = "services"
 TITLE = "KuberCloud ANI Services API"
 VERSION = "1.0.0"
-SERVER_URL = "https://{host}/api/v1/svc"
+SERVER_URL = "http://127.0.0.1:4010/api/v1"
 OPERATIONS = [
     "listGpuContainers",
     "createGpuContainer",

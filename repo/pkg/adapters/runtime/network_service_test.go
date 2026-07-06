@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -78,6 +79,16 @@ func TestLocalNetworkServiceSubnetRequiresTenantVPC(t *testing.T) {
 	}); err == nil {
 		t.Fatalf("CreateSubnet with another tenant VPC succeeded, want error")
 	}
+	if _, err := service.CreateSubnet(context.Background(), ports.NetworkSubnetCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "network-subnet-bad-gateway",
+		VPCID:          vpc.VPCID,
+		Name:           "bad-gateway",
+		CIDR:           "10.20.2.0/24",
+		Gateway:        "10.20.3.1",
+	}); !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("CreateSubnet gateway outside CIDR error = %v, want ErrInvalid", err)
+	}
 }
 
 func TestLocalNetworkServiceSecurityGroupAndLoadBalancer(t *testing.T) {
@@ -100,6 +111,22 @@ func TestLocalNetworkServiceSecurityGroupAndLoadBalancer(t *testing.T) {
 	if sg.SecurityGroupID == "" || len(sg.Rules) != 1 {
 		t.Fatalf("security group = %+v, want one rule", sg)
 	}
+	updated, err := service.UpdateSecurityGroup(context.Background(), ports.NetworkSecurityGroupUpdateRequest{
+		TenantID:          "tenant-a",
+		ResourceID:        sg.SecurityGroupID,
+		IdempotencyKey:    "network-sg-update-a",
+		Description:       "updated description",
+		UpdateDescription: true,
+		Rules: []ports.NetworkSecurityGroupRule{
+			{Direction: "egress", Protocol: "all", PortRange: "all", CIDR: "10.0.0.0/8", Action: "allow"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpdateSecurityGroup error = %v", err)
+	}
+	if updated.Description != "updated description" || len(updated.Rules) != 1 || updated.Rules[0].Direction != "egress" {
+		t.Fatalf("updated security group = %+v, want replaced rules and description", updated)
+	}
 	lb, err := service.CreateLoadBalancer(context.Background(), ports.NetworkLoadBalancerCreateRequest{
 		TenantID:       "tenant-a",
 		IdempotencyKey: "network-lb-a",
@@ -115,6 +142,36 @@ func TestLocalNetworkServiceSecurityGroupAndLoadBalancer(t *testing.T) {
 	}
 	if lb.LoadBalancerID == "" || lb.VIP == "" || lb.State != ports.NetworkResourceAvailable {
 		t.Fatalf("load balancer = %+v, want available local lb", lb)
+	}
+	if _, err := service.CreateLoadBalancer(context.Background(), ports.NetworkLoadBalancerCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "network-lb-bad-vpc",
+		Name:           "bad-lb",
+		VPCID:          "vpc-missing",
+	}); !errors.Is(err, ports.ErrNotFound) {
+		t.Fatalf("CreateLoadBalancer missing VPC error = %v, want ErrNotFound", err)
+	}
+	otherVPC, err := service.CreateVPC(context.Background(), ports.NetworkVPCCreateRequest{TenantID: "tenant-a", IdempotencyKey: "network-vpc-other", Name: "other-vpc"})
+	if err != nil {
+		t.Fatalf("CreateVPC other error = %v", err)
+	}
+	otherSubnet, err := service.CreateSubnet(context.Background(), ports.NetworkSubnetCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "network-subnet-other",
+		VPCID:          otherVPC.VPCID,
+		Name:           "other-subnet",
+	})
+	if err != nil {
+		t.Fatalf("CreateSubnet other error = %v", err)
+	}
+	if _, err := service.CreateLoadBalancer(context.Background(), ports.NetworkLoadBalancerCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "network-lb-bad-subnet",
+		Name:           "bad-subnet-lb",
+		VPCID:          vpc.VPCID,
+		SubnetID:       otherSubnet.SubnetID,
+	}); !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("CreateLoadBalancer subnet mismatch error = %v, want ErrInvalid", err)
 	}
 	deleted, err := service.DeleteLoadBalancer(context.Background(), ports.NetworkResourceGetRequest{
 		TenantID:   "tenant-a",
@@ -132,6 +189,61 @@ func TestLocalNetworkServiceSecurityGroupAndLoadBalancer(t *testing.T) {
 	}
 	if len(list) != 0 {
 		t.Fatalf("load balancers = %#v, want deleted item hidden", list)
+	}
+}
+
+func TestLocalNetworkServiceListSubnetsCanFilterByVPC(t *testing.T) {
+	service := NewLocalNetworkService()
+	vpcA, err := service.CreateVPC(context.Background(), ports.NetworkVPCCreateRequest{TenantID: "tenant-a", IdempotencyKey: "filter-vpc-a", Name: "vpc-a"})
+	if err != nil {
+		t.Fatalf("CreateVPC A error = %v", err)
+	}
+	vpcB, err := service.CreateVPC(context.Background(), ports.NetworkVPCCreateRequest{TenantID: "tenant-a", IdempotencyKey: "filter-vpc-b", Name: "vpc-b"})
+	if err != nil {
+		t.Fatalf("CreateVPC B error = %v", err)
+	}
+	subnetA, err := service.CreateSubnet(context.Background(), ports.NetworkSubnetCreateRequest{TenantID: "tenant-a", IdempotencyKey: "filter-subnet-a", VPCID: vpcA.VPCID, Name: "subnet-a"})
+	if err != nil {
+		t.Fatalf("CreateSubnet A error = %v", err)
+	}
+	if _, err := service.CreateSubnet(context.Background(), ports.NetworkSubnetCreateRequest{TenantID: "tenant-a", IdempotencyKey: "filter-subnet-b", VPCID: vpcB.VPCID, Name: "subnet-b"}); err != nil {
+		t.Fatalf("CreateSubnet B error = %v", err)
+	}
+
+	items, err := service.ListSubnets(context.Background(), ports.NetworkResourceListRequest{TenantID: "tenant-a", VPCID: vpcA.VPCID})
+	if err != nil {
+		t.Fatalf("ListSubnets error = %v", err)
+	}
+	if len(items) != 1 || items[0].SubnetID != subnetA.SubnetID {
+		t.Fatalf("filtered subnets = %+v, want only %s", items, subnetA.SubnetID)
+	}
+}
+
+func TestLocalNetworkServiceDeleteDetectsDependencies(t *testing.T) {
+	service := NewLocalNetworkService()
+	vpc, err := service.CreateVPC(context.Background(), ports.NetworkVPCCreateRequest{TenantID: "tenant-a", IdempotencyKey: "dep-vpc", Name: "dep-vpc"})
+	if err != nil {
+		t.Fatalf("CreateVPC error = %v", err)
+	}
+	subnet, err := service.CreateSubnet(context.Background(), ports.NetworkSubnetCreateRequest{TenantID: "tenant-a", IdempotencyKey: "dep-subnet", VPCID: vpc.VPCID, Name: "dep-subnet"})
+	if err != nil {
+		t.Fatalf("CreateSubnet error = %v", err)
+	}
+	if _, err := service.DeleteVPC(context.Background(), ports.NetworkResourceGetRequest{TenantID: "tenant-a", ResourceID: vpc.VPCID}); !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("DeleteVPC error = %v, want ErrConflict while subnet exists", err)
+	}
+	lb, err := service.CreateLoadBalancer(context.Background(), ports.NetworkLoadBalancerCreateRequest{TenantID: "tenant-a", IdempotencyKey: "dep-lb", Name: "dep-lb", VPCID: vpc.VPCID, SubnetID: subnet.SubnetID})
+	if err != nil {
+		t.Fatalf("CreateLoadBalancer error = %v", err)
+	}
+	if _, err := service.DeleteSubnet(context.Background(), ports.NetworkResourceGetRequest{TenantID: "tenant-a", ResourceID: subnet.SubnetID}); !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("DeleteSubnet error = %v, want ErrConflict while load balancer uses subnet", err)
+	}
+	if _, err := service.DeleteLoadBalancer(context.Background(), ports.NetworkResourceGetRequest{TenantID: "tenant-a", ResourceID: lb.LoadBalancerID}); err != nil {
+		t.Fatalf("DeleteLoadBalancer error = %v", err)
+	}
+	if _, err := service.DeleteSubnet(context.Background(), ports.NetworkResourceGetRequest{TenantID: "tenant-a", ResourceID: subnet.SubnetID}); err != nil {
+		t.Fatalf("DeleteSubnet after dependencies removed error = %v", err)
 	}
 }
 
@@ -159,6 +271,16 @@ func TestLocalNetworkServiceRoutesDevProfileAndIdempotency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRoute error = %v", err)
 	}
+	if _, err := service.CreateRoute(context.Background(), ports.NetworkRouteCreateRequest{
+		TenantID:        "tenant-a",
+		IdempotencyKey:  "route-conflict",
+		VPCID:           vpc.VPCID,
+		DestinationCIDR: "0.0.0.0/0",
+		NextHopType:     "gateway",
+		NextHopID:       "33333333-3333-3333-3333-333333333333",
+	}); !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("CreateRoute duplicate destination error = %v, want ErrConflict", err)
+	}
 	retry, err := service.CreateRoute(context.Background(), ports.NetworkRouteCreateRequest{
 		TenantID:        "tenant-a",
 		IdempotencyKey:  "route-a",
@@ -180,6 +302,20 @@ func TestLocalNetworkServiceRoutesDevProfileAndIdempotency(t *testing.T) {
 	}
 	if len(routes) != 1 || routes[0].RouteID != route.RouteID || routes[0].State != ports.NetworkResourceAvailable {
 		t.Fatalf("routes = %+v, want one available route", routes)
+	}
+	got, err := service.GetRoute(context.Background(), ports.NetworkResourceGetRequest{TenantID: "tenant-a", ResourceID: route.RouteID})
+	if err != nil {
+		t.Fatalf("GetRoute error = %v", err)
+	}
+	if got.RouteID != route.RouteID {
+		t.Fatalf("GetRoute = %+v, want %s", got, route.RouteID)
+	}
+	deleted, err := service.DeleteRoute(context.Background(), ports.NetworkResourceGetRequest{TenantID: "tenant-a", ResourceID: route.RouteID})
+	if err != nil {
+		t.Fatalf("DeleteRoute error = %v", err)
+	}
+	if deleted.State != ports.NetworkResourceDeleted {
+		t.Fatalf("deleted route state = %s, want deleted", deleted.State)
 	}
 }
 

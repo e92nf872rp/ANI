@@ -2,7 +2,7 @@
 export const layer = "services" as const;
 export const title = "KuberCloud ANI Services API" as const;
 export const version = "1.0.0" as const;
-export const serverURL = "https://{host}/api/v1/svc" as const;
+export const serverURL = "http://127.0.0.1:4010/api/v1" as const;
 export const operations = [
   "listGpuContainers",
   "createGpuContainer",

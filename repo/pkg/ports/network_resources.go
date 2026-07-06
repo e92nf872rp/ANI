@@ -118,6 +118,15 @@ type NetworkSecurityGroupCreateRequest struct {
 	Rules          []NetworkSecurityGroupRule
 }
 
+type NetworkSecurityGroupUpdateRequest struct {
+	TenantID          string
+	ResourceID        string
+	IdempotencyKey    string
+	Description       string
+	UpdateDescription bool
+	Rules             []NetworkSecurityGroupRule
+}
+
 type NetworkLoadBalancerCreateRequest struct {
 	TenantID       string
 	IdempotencyKey string
@@ -145,6 +154,7 @@ type NetworkResourceGetRequest struct {
 
 type NetworkResourceListRequest struct {
 	TenantID string
+	VPCID    string
 	Limit    int
 	Cursor   string
 }
@@ -170,6 +180,7 @@ type NetworkService interface {
 	CreateSecurityGroup(ctx context.Context, request NetworkSecurityGroupCreateRequest) (NetworkSecurityGroupRecord, error)
 	ListSecurityGroups(ctx context.Context, request NetworkResourceListRequest) ([]NetworkSecurityGroupRecord, error)
 	GetSecurityGroup(ctx context.Context, request NetworkResourceGetRequest) (NetworkSecurityGroupRecord, error)
+	UpdateSecurityGroup(ctx context.Context, request NetworkSecurityGroupUpdateRequest) (NetworkSecurityGroupRecord, error)
 	DeleteSecurityGroup(ctx context.Context, request NetworkResourceGetRequest) (NetworkSecurityGroupRecord, error)
 
 	CreateLoadBalancer(ctx context.Context, request NetworkLoadBalancerCreateRequest) (NetworkLoadBalancerRecord, error)
@@ -179,6 +190,8 @@ type NetworkService interface {
 
 	CreateRoute(ctx context.Context, request NetworkRouteCreateRequest) (NetworkRouteRecord, error)
 	ListRoutes(ctx context.Context, request NetworkRouteListRequest) ([]NetworkRouteRecord, error)
+	GetRoute(ctx context.Context, request NetworkResourceGetRequest) (NetworkRouteRecord, error)
+	DeleteRoute(ctx context.Context, request NetworkResourceGetRequest) (NetworkRouteRecord, error)
 }
 
 type NetworkResourceStore interface {
@@ -199,6 +212,7 @@ type NetworkResourceStore interface {
 	GetLoadBalancer(ctx context.Context, tenantID string, loadBalancerID string) (NetworkLoadBalancerRecord, error)
 	ListRoutes(ctx context.Context, request NetworkRouteListRequest) ([]NetworkRouteRecord, error)
 	GetRoute(ctx context.Context, tenantID string, routeID string) (NetworkRouteRecord, error)
+	CountDeleteDependencies(ctx context.Context, request NetworkResourceGetRequest, resourceKind string) ([]string, error)
 }
 
 type NetworkProviderRenderer interface {

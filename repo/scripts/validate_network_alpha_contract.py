@@ -14,7 +14,7 @@ EXPECTED_PATHS = {
     },
     "/networks/vpcs/{vpc_id}": {
         "get": ("getNetworkVPC", "scope:networks:read", {"200", "401", "403", "404"}),
-        "delete": ("deleteNetworkVPC", "scope:networks:delete", {"200", "401", "403", "404"}),
+        "delete": ("deleteNetworkVPC", "scope:networks:delete", {"200", "401", "403", "404", "409"}),
     },
     "/networks/subnets": {
         "get": ("listNetworkSubnets", "scope:networks:read", {"200", "401", "403"}),
@@ -22,7 +22,7 @@ EXPECTED_PATHS = {
     },
     "/networks/subnets/{subnet_id}": {
         "get": ("getNetworkSubnet", "scope:networks:read", {"200", "401", "403", "404"}),
-        "delete": ("deleteNetworkSubnet", "scope:networks:delete", {"200", "401", "403", "404"}),
+        "delete": ("deleteNetworkSubnet", "scope:networks:delete", {"200", "401", "403", "404", "409"}),
     },
     "/networks/security-groups": {
         "get": ("listNetworkSecurityGroups", "scope:networks:read", {"200", "401", "403"}),
@@ -30,7 +30,8 @@ EXPECTED_PATHS = {
     },
     "/networks/security-groups/{security_group_id}": {
         "get": ("getNetworkSecurityGroup", "scope:networks:read", {"200", "401", "403", "404"}),
-        "delete": ("deleteNetworkSecurityGroup", "scope:networks:delete", {"200", "401", "403", "404"}),
+        "patch": ("updateNetworkSecurityGroup", "scope:networks:update", {"200", "400", "401", "403", "404", "409"}),
+        "delete": ("deleteNetworkSecurityGroup", "scope:networks:delete", {"200", "401", "403", "404", "409"}),
     },
     "/networks/load-balancers": {
         "get": ("listNetworkLoadBalancers", "scope:networks:read", {"200", "401", "403"}),
@@ -38,11 +39,15 @@ EXPECTED_PATHS = {
     },
     "/networks/load-balancers/{load_balancer_id}": {
         "get": ("getNetworkLoadBalancer", "scope:networks:read", {"200", "401", "403", "404"}),
-        "delete": ("deleteNetworkLoadBalancer", "scope:networks:delete", {"200", "401", "403", "404"}),
+        "delete": ("deleteNetworkLoadBalancer", "scope:networks:delete", {"200", "401", "403", "404", "409"}),
     },
     "/networks/routes": {
         "get": ("listNetworkRoutes", "scope:networks:read", {"200", "401", "403"}),
-        "post": ("createNetworkRoute", "scope:networks:create", {"201", "400", "401", "403", "404"}),
+        "post": ("createNetworkRoute", "scope:networks:create", {"201", "400", "401", "403", "404", "409"}),
+    },
+    "/networks/routes/{route_id}": {
+        "get": ("getNetworkRoute", "scope:networks:read", {"200", "401", "403", "404"}),
+        "delete": ("deleteNetworkRoute", "scope:networks:delete", {"200", "401", "403", "404"}),
     },
 }
 
@@ -57,6 +62,7 @@ EXPECTED_SCHEMAS = {
     "CreateNetworkVPCRequest",
     "CreateNetworkSubnetRequest",
     "CreateNetworkSecurityGroupRequest",
+    "UpdateNetworkSecurityGroupRequest",
     "CreateNetworkLoadBalancerRequest",
     "NetworkRoute",
     "NetworkRouteListResponse",
@@ -70,6 +76,7 @@ EXPECTED_FIELDS = {
     "NetworkLoadBalancer": {"id", "tenant_id", "name", "vpc_id", "subnet_id", "scheme", "vip", "listeners", "state", "reason", "created_at", "updated_at"},
     "NetworkRoute": {"id", "vpc_id", "destination_cidr", "next_hop_type", "next_hop_id", "description", "created_at", "dev_profile"},
     "NetworkRouteListResponse": {"items", "total", "next_cursor"},
+    "UpdateNetworkSecurityGroupRequest": {"idempotency_key", "description", "rules"},
 }
 
 EXPECTED_ROUTES = {
@@ -81,10 +88,13 @@ EXPECTED_ROUTES = {
     'v1.POST("/networks/subnets"',
     'v1.GET("/networks/security-groups"',
     'v1.POST("/networks/security-groups"',
+    'v1.PATCH("/networks/security-groups/:security_group_id"',
     'v1.GET("/networks/load-balancers"',
     'v1.POST("/networks/load-balancers"',
     'v1.GET("/networks/routes"',
     'v1.POST("/networks/routes"',
+    'v1.GET("/networks/routes/:route_id"',
+    'v1.DELETE("/networks/routes/:route_id"',
 }
 
 

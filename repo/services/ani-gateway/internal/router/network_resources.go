@@ -37,6 +37,12 @@ type networkCreateSecurityGroupRequest struct {
 	Rules          []networkSecurityGroupRule `json:"rules"`
 }
 
+type networkUpdateSecurityGroupRequest struct {
+	IdempotencyKey string                     `json:"idempotency_key"`
+	Description    *string                    `json:"description"`
+	Rules          []networkSecurityGroupRule `json:"rules"`
+}
+
 type networkSecurityGroupRule struct {
 	Direction string `json:"direction"`
 	Protocol  string `json:"protocol"`
@@ -165,6 +171,7 @@ func registerNetworkResourcesWithService(v1 *route.RouterGroup, service ports.Ne
 	v1.GET("/networks/security-groups", api.listSecurityGroups)
 	v1.POST("/networks/security-groups", api.createSecurityGroup)
 	v1.GET("/networks/security-groups/:security_group_id", api.getSecurityGroup)
+	v1.PATCH("/networks/security-groups/:security_group_id", api.updateSecurityGroup)
 	v1.DELETE("/networks/security-groups/:security_group_id", api.deleteSecurityGroup)
 
 	v1.GET("/networks/load-balancers", api.listLoadBalancers)
@@ -174,6 +181,8 @@ func registerNetworkResourcesWithService(v1 *route.RouterGroup, service ports.Ne
 
 	v1.GET("/networks/routes", api.listRoutes)
 	v1.POST("/networks/routes", api.createRoute)
+	v1.GET("/networks/routes/:route_id", api.getRoute)
+	v1.DELETE("/networks/routes/:route_id", api.deleteRoute)
 }
 
 func (api *networkAPI) createVPC(ctx context.Context, c *app.RequestContext) {
@@ -248,7 +257,10 @@ func (api *networkAPI) createSubnet(ctx context.Context, c *app.RequestContext) 
 }
 
 func (api *networkAPI) listSubnets(ctx context.Context, c *app.RequestContext) {
-	records, err := api.service.ListSubnets(ctx, ports.NetworkResourceListRequest{TenantID: demoTenantID(c)})
+	records, err := api.service.ListSubnets(ctx, ports.NetworkResourceListRequest{
+		TenantID: demoTenantID(c),
+		VPCID:    c.Query("vpc_id"),
+	})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -313,6 +325,33 @@ func (api *networkAPI) listSecurityGroups(ctx context.Context, c *app.RequestCon
 
 func (api *networkAPI) getSecurityGroup(ctx context.Context, c *app.RequestContext) {
 	record, err := api.service.GetSecurityGroup(ctx, ports.NetworkResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("security_group_id")})
+	if err != nil {
+		writeNetworkError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, networkSecurityGroupFromRecord(record))
+}
+
+func (api *networkAPI) updateSecurityGroup(ctx context.Context, c *app.RequestContext) {
+	var req networkUpdateSecurityGroupRequest
+	if err := c.BindJSON(&req); err != nil {
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid security group update request")
+		return
+	}
+	description := ""
+	updateDescription := false
+	if req.Description != nil {
+		description = *req.Description
+		updateDescription = true
+	}
+	record, err := api.service.UpdateSecurityGroup(ctx, ports.NetworkSecurityGroupUpdateRequest{
+		TenantID:          demoTenantID(c),
+		ResourceID:        c.Param("security_group_id"),
+		IdempotencyKey:    req.IdempotencyKey,
+		Description:       description,
+		UpdateDescription: updateDescription,
+		Rules:             networkRulesToPorts(req.Rules),
+	})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -418,6 +457,24 @@ func (api *networkAPI) listRoutes(ctx context.Context, c *app.RequestContext) {
 		items = append(items, networkRouteFromRecord(record))
 	}
 	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
+}
+
+func (api *networkAPI) getRoute(ctx context.Context, c *app.RequestContext) {
+	record, err := api.service.GetRoute(ctx, ports.NetworkResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("route_id")})
+	if err != nil {
+		writeNetworkError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, networkRouteFromRecord(record))
+}
+
+func (api *networkAPI) deleteRoute(ctx context.Context, c *app.RequestContext) {
+	record, err := api.service.DeleteRoute(ctx, ports.NetworkResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("route_id")})
+	if err != nil {
+		writeNetworkError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, networkRouteFromRecord(record))
 }
 
 func networkVPCFromRecord(record ports.NetworkVPCRecord) networkVPCResponse {

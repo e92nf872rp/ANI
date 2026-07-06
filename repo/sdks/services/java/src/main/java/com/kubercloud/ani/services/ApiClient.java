@@ -24,7 +24,7 @@ public final class ApiClient {
     public static final String LAYER = "services";
     public static final String TITLE = "KuberCloud ANI Services API";
     public static final String VERSION = "1.0.0";
-    public static final String SERVER_URL = "https://{host}/api/v1/svc";
+    public static final String SERVER_URL = "http://127.0.0.1:4010/api/v1";
     public static final List<String> OPERATIONS = Collections.unmodifiableList(Arrays.asList(
         "listGpuContainers",
         "createGpuContainer",

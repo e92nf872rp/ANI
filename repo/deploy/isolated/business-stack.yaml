@@ -273,6 +273,8 @@ spec:
               value: "kubernetes_rest"
             - name: WORKLOAD_OPS_ENABLED
               value: "true"
+            - name: ANI_RECONCILE_WORKER_HEALTH_URL
+              value: "http://reconcile-worker.ani-system.svc.cluster.local:9205/healthz"
             - name: INSTANCE_OBSERVABILITY_PROVIDER
               value: "prometheus_kubernetes"
             - name: INSTANCE_OBSERVABILITY_PROMETHEUS_URL

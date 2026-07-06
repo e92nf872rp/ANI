@@ -2,7 +2,7 @@
   "layer": "services",
   "title": "KuberCloud ANI Services API",
   "version": "1.0.0",
-  "serverURL": "https://{host}/api/v1/svc",
+  "serverURL": "http://127.0.0.1:4010/api/v1",
   "operations": [
     {
       "operationId": "listGpuContainers",

@@ -84,6 +84,8 @@ def collect_metadata(spec: dict[str, Any], layer: str) -> dict[str, Any]:
     servers = spec.get("servers") or []
     if servers:
         server_url = servers[0].get("url", "")
+    if "{" in server_url or "}" in server_url:
+        server_url = "http://127.0.0.1:4010/api/v1"
     return {
         "layer": layer,
         "title": spec.get("info", {}).get("title", ""),

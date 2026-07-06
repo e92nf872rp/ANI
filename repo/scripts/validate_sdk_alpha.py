@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import tempfile
 import re
 import subprocess
 import sys
@@ -77,7 +78,7 @@ def expected_metadata(root: Path, layer: str, spec_path: str) -> dict[str, Any]:
                 cursor_pagination_operations.append(op_id)
     schema_names = sorted(schemas.keys())
     servers = spec.get("servers") or []
-    server_url = servers[0].get("url", "") if servers else ""
+    server_url = normalize_sdk_server_url(servers[0].get("url", "") if servers else "")
     return {
         "layer": layer,
         "title": spec.get("info", {}).get("title", ""),
@@ -88,7 +89,13 @@ def expected_metadata(root: Path, layer: str, spec_path: str) -> dict[str, Any]:
         "idempotencyOperations": idempotency_operations,
         "cursorPaginationOperations": cursor_pagination_operations,
         "errorCodes": collect_error_codes(spec),
-    }
+}
+
+
+def normalize_sdk_server_url(server_url: str) -> str:
+    if "{" in server_url or "}" in server_url:
+        return "http://127.0.0.1:4010/api/v1"
+    return server_url
 
 
 def request_schema_requires_idempotency(operation: dict[str, Any], schemas: dict[str, Any]) -> bool:
@@ -212,16 +219,18 @@ def validate_idempotency_helpers(root: Path, errors: list[str]) -> None:
 
 
 def run_smoke(root: Path) -> None:
+    go_cache = Path(tempfile.gettempdir()) / "ani-go-build"
+    go_cache.mkdir(parents=True, exist_ok=True)
     go_env = {
         "GOWORK": "off",
-        "GOCACHE": "/private/tmp/ani-go-build",
+        "GOCACHE": str(go_cache),
         "GOMODCACHE": str(root / ".cache/gomod"),
     }
     for layer in LAYERS:
         base = root / "sdks" / layer
         run(["go", "test", "./..."], base / "go", go_env)
-        run(["python", "smoke.py"], base / "python")
-        run(["python", "examples/basic.py"], base / "python", {"PYTHONPATH": str(base / "python")})
+        run([sys.executable, "smoke.py"], base / "python")
+        run([sys.executable, "examples/basic.py"], base / "python", {"PYTHONPATH": str(base / "python")})
         run(["node", "--check", "src/index.mjs"], base / "typescript")
         run(["node", "smoke.mjs"], base / "typescript")
         run(["node", "examples/basic.mjs"], base / "typescript")

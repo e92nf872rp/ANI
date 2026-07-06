@@ -102,6 +102,7 @@
 | SPRINT13-KUBERNETES-REST-CREDENTIAL-RESOLVER-A | Kubernetes REST 凭证自动解析：新增 `ResolveKubernetesRESTClientConfig`（显式 env > kubeconfig > in-cluster SA）、`LoadKubernetesRESTEnvFromOS`、Gateway `kubernetes_runtime.go` 收敛；`client-go/clientcmd` 仅用于 kubeconfig 读取；本地开发可只设 provider mode + `KUBECONFIG`；不新增 live gate，不标 production ready | sprint13-kubernetes-rest-credential-resolver-a.md |
 | GATEWAY-INSTANCE-WORKLOAD-RUNTIME-A | Gateway `/instances` workload provider env 注入：对齐 M1-INSTANCE-P bootstrap；`workload_runtime.go` + router 注入；`dev_profile`/`demo_notice` 语义；Secret+Deployment 混合 apply 最小修复；gate：`make validate-gateway-instance-workload-runtime`；**不新增 live gate，不标 production ready** | gateway-instance-workload-runtime-a.md |
 | INSTANCE-NETWORK-KUBEOVN-A | 实例创建网络选择接 Kube-OVN：`CreateInstanceRequest.network`、`workload_instances.vpc_id/subnet_id/private_ip`、Gateway subnet/vpc/private_ip 校验、Deployment/Job/KubeVirt template Kube-OVN annotation 注入；真实集群 container Pod 在非重叠 `10.74.0.0/25` subnet 中 Running，annotation/IP/互 ping 通过；10.72 复现了旧重叠 subnet 干扰 | instance-network-kubeovn-a.md |
+| CORE-NET-OPENAPI-CONSOLE-A | Console 网络管理后端缺口：补 SG rules 整包 PATCH、route GET/DELETE、subnet `vpc_id` 服务端筛选、删除依赖 409、创建校验 404/409；更新 NetworkService/Gateway handler、OpenAPI、Core SDK 与 network contract validator；local/logic verified，不新增 Services/Console 前端代码 | core-net-openapi-console-a.md |
 
 ### Sprint 11 Kickoff（2026-06）
 

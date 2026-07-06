@@ -1,4 +1,4 @@
-FROM golang:1.23-alpine AS build
+FROM dockerproxy.net/library/golang:1.23-alpine AS build
 
 WORKDIR /src
 COPY pkg ./pkg
@@ -10,7 +10,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     cd services/ani-gateway && \
     CGO_ENABLED=0 go build -tags stdjson -ldflags "-s -w" -o /out/ani-gateway .
 
-FROM alpine:3.20 AS tools
+FROM dockerproxy.net/library/alpine:3.20 AS tools
 
 ARG HELM_VERSION=v3.19.0
 ARG VCLUSTER_VERSION=v0.34.1
@@ -22,7 +22,7 @@ RUN apk add --no-cache ca-certificates curl tar && \
     curl -fsSL "https://github.com/loft-sh/vcluster/releases/download/${VCLUSTER_VERSION}/vcluster-linux-amd64" -o /usr/local/bin/vcluster && \
     chmod 0755 /usr/local/bin/vcluster
 
-FROM alpine:3.20
+FROM dockerproxy.net/library/alpine:3.20
 
 RUN apk add --no-cache ca-certificates && \
     adduser -D -H -u 65532 ani

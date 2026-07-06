@@ -2,7 +2,7 @@
   "layer": "core",
   "title": "KuberCloud ANI Core API",
   "version": "1.0.0",
-  "serverURL": "https://{host}/api/v1",
+  "serverURL": "http://127.0.0.1:4010/api/v1",
   "operations": [
     {
       "operationId": "listAPIKeys",
@@ -51,6 +51,18 @@
       "method": "GET",
       "path": "/branding",
       "scope": ""
+    },
+    {
+      "operationId": "updateBranding",
+      "method": "PUT",
+      "path": "/branding",
+      "scope": "scope:platform:manage"
+    },
+    {
+      "operationId": "uploadBrandingLogo",
+      "method": "POST",
+      "path": "/branding/logo",
+      "scope": "scope:platform:manage"
     },
     {
       "operationId": "listStorageBuckets",
@@ -359,6 +371,18 @@
       "scope": "scope:networks:create"
     },
     {
+      "operationId": "deleteNetworkRoute",
+      "method": "DELETE",
+      "path": "/networks/routes/{route_id}",
+      "scope": "scope:networks:delete"
+    },
+    {
+      "operationId": "getNetworkRoute",
+      "method": "GET",
+      "path": "/networks/routes/{route_id}",
+      "scope": "scope:networks:read"
+    },
+    {
       "operationId": "listNetworkSecurityGroups",
       "method": "GET",
       "path": "/networks/security-groups",
@@ -381,6 +405,12 @@
       "method": "GET",
       "path": "/networks/security-groups/{security_group_id}",
       "scope": "scope:networks:read"
+    },
+    {
+      "operationId": "updateNetworkSecurityGroup",
+      "method": "PATCH",
+      "path": "/networks/security-groups/{security_group_id}",
+      "scope": "scope:networks:update"
     },
     {
       "operationId": "listNetworkSubnets",
@@ -461,6 +491,12 @@
       "scope": "scope:objects:read"
     },
     {
+      "operationId": "completeStorageObjectUpload",
+      "method": "POST",
+      "path": "/objects/{object_id}/complete",
+      "scope": "scope:objects:create"
+    },
+    {
       "operationId": "downloadStorageObject",
       "method": "GET",
       "path": "/objects/{object_id}/download",
@@ -530,6 +566,12 @@
       "operationId": "createRegistryProjectPullSecret",
       "method": "POST",
       "path": "/registry/projects/{project}/pull-secret",
+      "scope": "scope:registry:write"
+    },
+    {
+      "operationId": "applyRegistryProjectPullSecretToKubernetes",
+      "method": "POST",
+      "path": "/registry/projects/{project}/pull-secret/kubernetes-apply",
       "scope": "scope:registry:write"
     },
     {
@@ -676,6 +718,8 @@
     "AsyncTask",
     "BeginOIDCLoginRequest",
     "BeginOIDCLoginResponse",
+    "BrandingLogoUploadResponse",
+    "BrandingUpdateRequest",
     "CompleteOIDCLoginRequest",
     "CoreDevProfileInfo",
     "CreateAPIKeyRequest",
@@ -764,6 +808,7 @@
     "ObservabilityAlertRule",
     "ObservabilityAlertRuleListResponse",
     "ObservabilityQueryResponse",
+    "PlatformBranding",
     "RefreshAccessTokenRequest",
     "RefreshAccessTokenResponse",
     "RegistryArtifact",
@@ -773,6 +818,7 @@
     "RegistryProjectListResponse",
     "RegistryProjectScanReport",
     "RegistryPullSecret",
+    "RegistryPullSecretKubernetesApply",
     "RegistryRepository",
     "RegistryRepositoryListResponse",
     "RegistryScanResult",
@@ -803,6 +849,7 @@
     "StorageVolumeListResponse",
     "TokenPairResponse",
     "TokenUsageReport",
+    "UpdateNetworkSecurityGroupRequest",
     "UpdateObservabilityAlertRuleRequest",
     "VectorStore",
     "VectorStoreDocumentInsertRequest",
@@ -835,6 +882,7 @@
     "createNetworkLoadBalancer",
     "createNetworkRoute",
     "createNetworkSecurityGroup",
+    "updateNetworkSecurityGroup",
     "createNetworkSubnet",
     "createNetworkVPC",
     "createStorageObject",
@@ -843,6 +891,7 @@
     "updateObservabilityAlertRule",
     "createRegistryProject",
     "createRegistryProjectPullSecret",
+    "applyRegistryProjectPullSecretToKubernetes",
     "setRegistryRepositoryPermission",
     "createSecret",
     "createVectorStore",

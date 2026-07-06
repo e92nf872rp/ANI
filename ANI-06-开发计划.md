@@ -57,6 +57,7 @@ Sprint 13 production-shaped live gate 摘要：
 - Kubernetes REST 凭证解析：SPRINT13-KUBERNETES-REST-CREDENTIAL-RESOLVER-A；`ResolveKubernetesRESTClientConfig` + `LoadKubernetesRESTEnvFromOS` + Gateway `kubernetes_runtime.go`；本地可 `KUBECONFIG` 自动连集群；显式 `KUBERNETES_*` 仍覆盖 kubeconfig；**dev 便利批次，不标 production ready**。
 - Gateway 实例 workload 接线：GATEWAY-INSTANCE-WORKLOAD-RUNTIME-A；`services/ani-gateway/workload_runtime.go` 将 `WORKLOAD_PROVIDER=kubernetes_rest` 注入 `/instances` orchestrator（对齐 M1-INSTANCE-P bootstrap）；`dev_profile`/`demo_notice` 反映 provider 配置；gate：`make validate-gateway-instance-workload-runtime`；**不新增 live gate，不标 production ready**。
 - 实例网络选择接 Kube-OVN：INSTANCE-NETWORK-KUBEOVN-A；`CreateInstanceRequest.network` 支持 `vpc_id/subnet_id/private_ip`，写入 `workload_instances` 并返回 list/detail；Gateway 校验 tenant 下 subnet/vpc available 与 IPv4/CIDR/gateway；Deployment/Job pod template 与 KubeVirt VM template 注入 `ovn.kubernetes.io/logical_switch/ip_address`；真实 container Pod 在非重叠 `10.74.0.0/25` subnet 中 Running 且互 ping 通过。10.72 验证发现历史重叠 subnet 干扰，记录为后续 network provider 防重叠 CIDR 优化项；VM 仍为 manifest/template 单测覆盖，未标 VM live verified。
+- Console 网络管理后端契约补齐：CORE-NET-OPENAPI-CONSOLE-A；`/api/v1/networks/*` 补 SG rules 整包 PATCH、route GET/DELETE、subnet `vpc_id` 服务端筛选、delete 409 依赖冲突、subnet/LB/route create 404/409 校验；Gateway handler、NetworkService、metadata-backed dependency check、Core SDK 与 network contract validator 已更新；local/logic verified，不新增 Services 路径，不修改 Console 前端。
 
 Sprint 14 Core resilience 分支完成状态：
 - 分支：`feature/sprint14-core-resilience-semantics`。

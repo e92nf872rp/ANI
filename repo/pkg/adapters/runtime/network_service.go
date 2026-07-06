@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"sort"
 	"strings"
 	"sync"
@@ -13,24 +14,25 @@ import (
 )
 
 type LocalNetworkService struct {
-	mu                sync.RWMutex
-	now               func() time.Time
-	store             ports.NetworkResourceStore
-	providerRenderer  ports.NetworkProviderRenderer
-	providerDryRun    ports.NetworkProviderDryRun
-	providerApply     ports.NetworkProviderApply
-	providerStatus    ports.NetworkProviderStatusReader
-	providerExecution NetworkProviderExecutionConfig
-	vpcs              map[string]ports.NetworkVPCRecord
-	subnets           map[string]ports.NetworkSubnetRecord
-	securityGroup     map[string]ports.NetworkSecurityGroupRecord
-	loadBalancers     map[string]ports.NetworkLoadBalancerRecord
-	routes            map[string]ports.NetworkRouteRecord
-	vpcIdempotency    map[string]string
-	subnetIdempotency map[string]string
-	securityGroupIdem map[string]string
-	loadBalancerIdem  map[string]string
-	routeIdempotency  map[string]string
+	mu                      sync.RWMutex
+	now                     func() time.Time
+	store                   ports.NetworkResourceStore
+	providerRenderer        ports.NetworkProviderRenderer
+	providerDryRun          ports.NetworkProviderDryRun
+	providerApply           ports.NetworkProviderApply
+	providerStatus          ports.NetworkProviderStatusReader
+	providerExecution       NetworkProviderExecutionConfig
+	vpcs                    map[string]ports.NetworkVPCRecord
+	subnets                 map[string]ports.NetworkSubnetRecord
+	securityGroup           map[string]ports.NetworkSecurityGroupRecord
+	loadBalancers           map[string]ports.NetworkLoadBalancerRecord
+	routes                  map[string]ports.NetworkRouteRecord
+	vpcIdempotency          map[string]string
+	subnetIdempotency       map[string]string
+	securityGroupIdem       map[string]string
+	securityGroupUpdateIdem map[string]ports.NetworkSecurityGroupRecord
+	loadBalancerIdem        map[string]string
+	routeIdempotency        map[string]string
 }
 
 type NetworkServiceOption func(*LocalNetworkService)
@@ -82,17 +84,18 @@ func WithNetworkProvider(
 
 func NewLocalNetworkService(options ...NetworkServiceOption) *LocalNetworkService {
 	service := &LocalNetworkService{
-		now:               func() time.Time { return time.Now().UTC() },
-		vpcs:              map[string]ports.NetworkVPCRecord{},
-		subnets:           map[string]ports.NetworkSubnetRecord{},
-		securityGroup:     map[string]ports.NetworkSecurityGroupRecord{},
-		loadBalancers:     map[string]ports.NetworkLoadBalancerRecord{},
-		routes:            map[string]ports.NetworkRouteRecord{},
-		vpcIdempotency:    map[string]string{},
-		subnetIdempotency: map[string]string{},
-		securityGroupIdem: map[string]string{},
-		loadBalancerIdem:  map[string]string{},
-		routeIdempotency:  map[string]string{},
+		now:                     func() time.Time { return time.Now().UTC() },
+		vpcs:                    map[string]ports.NetworkVPCRecord{},
+		subnets:                 map[string]ports.NetworkSubnetRecord{},
+		securityGroup:           map[string]ports.NetworkSecurityGroupRecord{},
+		loadBalancers:           map[string]ports.NetworkLoadBalancerRecord{},
+		routes:                  map[string]ports.NetworkRouteRecord{},
+		vpcIdempotency:          map[string]string{},
+		subnetIdempotency:       map[string]string{},
+		securityGroupIdem:       map[string]string{},
+		securityGroupUpdateIdem: map[string]ports.NetworkSecurityGroupRecord{},
+		loadBalancerIdem:        map[string]string{},
+		routeIdempotency:        map[string]string{},
 	}
 	for _, option := range options {
 		option(service)
@@ -190,6 +193,9 @@ func (s *LocalNetworkService) DeleteVPC(ctx context.Context, request ports.Netwo
 		if err != nil {
 			return ports.NetworkVPCRecord{}, err
 		}
+		if err := s.ensureNoDeleteDependencies(ctx, request, "vpc"); err != nil {
+			return ports.NetworkVPCRecord{}, err
+		}
 		record.State = ports.NetworkResourceDeleted
 		record.Reason = "deleted by local network profile"
 		record.UpdatedAt = s.now().UTC()
@@ -203,6 +209,9 @@ func (s *LocalNetworkService) DeleteVPC(ctx context.Context, request ports.Netwo
 	record, ok := s.vpcs[request.ResourceID]
 	if !ok || record.TenantID != request.TenantID || record.State == ports.NetworkResourceDeleted {
 		return ports.NetworkVPCRecord{}, ports.ErrNotFound
+	}
+	if err := s.ensureNoDeleteDependenciesLocked(request, "vpc"); err != nil {
+		return ports.NetworkVPCRecord{}, err
 	}
 	now := s.now().UTC()
 	record.State = ports.NetworkResourceDeleted
@@ -251,6 +260,9 @@ func (s *LocalNetworkService) CreateSubnet(ctx context.Context, request ports.Ne
 	if _, err := s.lookupVPC(ctx, request.TenantID, record.VPCID); err != nil {
 		return ports.NetworkSubnetRecord{}, err
 	}
+	if err := validateGatewayInCIDR(record.Gateway, record.CIDR); err != nil {
+		return ports.NetworkSubnetRecord{}, err
+	}
 	if providerConfigured {
 		record.State = ports.NetworkResourcePending
 		record.Reason = "pending provider apply"
@@ -282,13 +294,20 @@ func (s *LocalNetworkService) CreateSubnet(ctx context.Context, request ports.Ne
 
 func (s *LocalNetworkService) ListSubnets(ctx context.Context, request ports.NetworkResourceListRequest) ([]ports.NetworkSubnetRecord, error) {
 	if s.store != nil {
-		return s.store.ListSubnets(ctx, request.TenantID)
+		items, err := s.store.ListSubnets(ctx, request.TenantID)
+		if err != nil {
+			return nil, err
+		}
+		return filterSubnetsByVPC(items, request.VPCID), nil
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	items := make([]ports.NetworkSubnetRecord, 0, len(s.subnets))
 	for _, record := range s.subnets {
 		if record.TenantID == request.TenantID && record.State != ports.NetworkResourceDeleted {
+			if strings.TrimSpace(request.VPCID) != "" && record.VPCID != strings.TrimSpace(request.VPCID) {
+				continue
+			}
 			items = append(items, record)
 		}
 	}
@@ -315,6 +334,9 @@ func (s *LocalNetworkService) DeleteSubnet(ctx context.Context, request ports.Ne
 		if err != nil {
 			return ports.NetworkSubnetRecord{}, err
 		}
+		if err := s.ensureNoDeleteDependencies(ctx, request, "subnet"); err != nil {
+			return ports.NetworkSubnetRecord{}, err
+		}
 		record.State = ports.NetworkResourceDeleted
 		record.Reason = "deleted by local network profile"
 		record.UpdatedAt = s.now().UTC()
@@ -328,6 +350,9 @@ func (s *LocalNetworkService) DeleteSubnet(ctx context.Context, request ports.Ne
 	record, ok := s.subnets[request.ResourceID]
 	if !ok || record.TenantID != request.TenantID || record.State == ports.NetworkResourceDeleted {
 		return ports.NetworkSubnetRecord{}, ports.ErrNotFound
+	}
+	if err := s.ensureNoDeleteDependenciesLocked(request, "subnet"); err != nil {
+		return ports.NetworkSubnetRecord{}, err
 	}
 	record.State = ports.NetworkResourceDeleted
 	record.Reason = "deleted by local network profile"
@@ -424,10 +449,49 @@ func (s *LocalNetworkService) GetSecurityGroup(ctx context.Context, request port
 	return record, nil
 }
 
+func (s *LocalNetworkService) UpdateSecurityGroup(ctx context.Context, request ports.NetworkSecurityGroupUpdateRequest) (ports.NetworkSecurityGroupRecord, error) {
+	idemKey, err := requireIdempotencyKey(request.TenantID, request.IdempotencyKey)
+	if err != nil {
+		return ports.NetworkSecurityGroupRecord{}, err
+	}
+	if strings.TrimSpace(request.ResourceID) == "" {
+		return ports.NetworkSecurityGroupRecord{}, fmt.Errorf("%w: security_group_id is required", ports.ErrInvalid)
+	}
+	s.mu.Lock()
+	if record, ok := s.securityGroupUpdateIdem[idemKey]; ok {
+		s.mu.Unlock()
+		return record, nil
+	}
+	s.mu.Unlock()
+	record, err := s.GetSecurityGroup(ctx, ports.NetworkResourceGetRequest{TenantID: request.TenantID, ResourceID: request.ResourceID})
+	if err != nil {
+		return ports.NetworkSecurityGroupRecord{}, err
+	}
+	record.Rules = append([]ports.NetworkSecurityGroupRule(nil), request.Rules...)
+	if request.UpdateDescription {
+		record.Description = strings.TrimSpace(request.Description)
+	}
+	record.UpdatedAt = s.now().UTC()
+	record.Reason = "updated by local network profile"
+	s.mu.Lock()
+	if _, exists := s.securityGroup[record.SecurityGroupID]; exists {
+		s.securityGroup[record.SecurityGroupID] = record
+	}
+	s.securityGroupUpdateIdem[idemKey] = record
+	s.mu.Unlock()
+	if err := s.upsertSecurityGroup(ctx, record); err != nil {
+		return ports.NetworkSecurityGroupRecord{}, err
+	}
+	return record, nil
+}
+
 func (s *LocalNetworkService) DeleteSecurityGroup(ctx context.Context, request ports.NetworkResourceGetRequest) (ports.NetworkSecurityGroupRecord, error) {
 	if s.store != nil {
 		record, err := s.store.GetSecurityGroup(ctx, request.TenantID, request.ResourceID)
 		if err != nil {
+			return ports.NetworkSecurityGroupRecord{}, err
+		}
+		if err := s.ensureNoDeleteDependencies(ctx, request, "security-group"); err != nil {
 			return ports.NetworkSecurityGroupRecord{}, err
 		}
 		record.State = ports.NetworkResourceDeleted
@@ -443,6 +507,9 @@ func (s *LocalNetworkService) DeleteSecurityGroup(ctx context.Context, request p
 	record, ok := s.securityGroup[request.ResourceID]
 	if !ok || record.TenantID != request.TenantID || record.State == ports.NetworkResourceDeleted {
 		return ports.NetworkSecurityGroupRecord{}, ports.ErrNotFound
+	}
+	if err := s.ensureNoDeleteDependenciesLocked(request, "security-group"); err != nil {
+		return ports.NetworkSecurityGroupRecord{}, err
 	}
 	record.State = ports.NetworkResourceDeleted
 	record.Reason = "deleted by local network profile"
@@ -491,6 +558,15 @@ func (s *LocalNetworkService) CreateLoadBalancer(ctx context.Context, request po
 	s.mu.Unlock()
 	if _, err := s.lookupVPC(ctx, request.TenantID, record.VPCID); err != nil {
 		return ports.NetworkLoadBalancerRecord{}, err
+	}
+	if record.SubnetID != "" {
+		subnet, err := s.lookupSubnet(ctx, request.TenantID, record.SubnetID)
+		if err != nil {
+			return ports.NetworkLoadBalancerRecord{}, err
+		}
+		if subnet.VPCID != record.VPCID {
+			return ports.NetworkLoadBalancerRecord{}, fmt.Errorf("%w: subnet_id %s does not belong to vpc_id %s", ports.ErrInvalid, record.SubnetID, record.VPCID)
+		}
 	}
 	if providerConfigured {
 		record.State = ports.NetworkResourcePending
@@ -556,6 +632,9 @@ func (s *LocalNetworkService) DeleteLoadBalancer(ctx context.Context, request po
 		if err != nil {
 			return ports.NetworkLoadBalancerRecord{}, err
 		}
+		if err := s.ensureNoDeleteDependencies(ctx, request, "load-balancer"); err != nil {
+			return ports.NetworkLoadBalancerRecord{}, err
+		}
 		record.State = ports.NetworkResourceDeleted
 		record.Reason = "deleted by local network profile"
 		record.UpdatedAt = s.now().UTC()
@@ -569,6 +648,9 @@ func (s *LocalNetworkService) DeleteLoadBalancer(ctx context.Context, request po
 	record, ok := s.loadBalancers[request.ResourceID]
 	if !ok || record.TenantID != request.TenantID || record.State == ports.NetworkResourceDeleted {
 		return ports.NetworkLoadBalancerRecord{}, ports.ErrNotFound
+	}
+	if err := s.ensureNoDeleteDependenciesLocked(request, "load-balancer"); err != nil {
+		return ports.NetworkLoadBalancerRecord{}, err
 	}
 	record.State = ports.NetworkResourceDeleted
 	record.Reason = "deleted by local network profile"
@@ -604,6 +686,9 @@ func (s *LocalNetworkService) CreateRoute(ctx context.Context, request ports.Net
 	}
 	s.mu.Unlock()
 	if _, err := s.lookupVPC(ctx, request.TenantID, strings.TrimSpace(request.VPCID)); err != nil {
+		return ports.NetworkRouteRecord{}, err
+	}
+	if err := s.ensureRouteDoesNotConflict(ctx, request.TenantID, strings.TrimSpace(request.VPCID), strings.TrimSpace(request.DestinationCIDR)); err != nil {
 		return ports.NetworkRouteRecord{}, err
 	}
 	providerConfigured := s.networkProviderConfigured()
@@ -672,6 +757,45 @@ func (s *LocalNetworkService) ListRoutes(ctx context.Context, request ports.Netw
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
 	return items, nil
+}
+
+func (s *LocalNetworkService) GetRoute(ctx context.Context, request ports.NetworkResourceGetRequest) (ports.NetworkRouteRecord, error) {
+	if s.store != nil {
+		return s.store.GetRoute(ctx, request.TenantID, request.ResourceID)
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	record, ok := s.routes[request.ResourceID]
+	if !ok || record.TenantID != request.TenantID || record.State == ports.NetworkResourceDeleted {
+		return ports.NetworkRouteRecord{}, ports.ErrNotFound
+	}
+	return record, nil
+}
+
+func (s *LocalNetworkService) DeleteRoute(ctx context.Context, request ports.NetworkResourceGetRequest) (ports.NetworkRouteRecord, error) {
+	if s.store != nil {
+		record, err := s.store.GetRoute(ctx, request.TenantID, request.ResourceID)
+		if err != nil {
+			return ports.NetworkRouteRecord{}, err
+		}
+		record.State = ports.NetworkResourceDeleted
+		if err := s.upsertRoute(ctx, record); err != nil {
+			return ports.NetworkRouteRecord{}, err
+		}
+		return record, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.routes[request.ResourceID]
+	if !ok || record.TenantID != request.TenantID || record.State == ports.NetworkResourceDeleted {
+		return ports.NetworkRouteRecord{}, ports.ErrNotFound
+	}
+	record.State = ports.NetworkResourceDeleted
+	s.routes[record.RouteID] = record
+	if err := s.upsertRoute(ctx, record); err != nil {
+		return ports.NetworkRouteRecord{}, err
+	}
+	return record, nil
 }
 
 func (s *LocalNetworkService) upsertVPC(ctx context.Context, record ports.NetworkVPCRecord) error {
@@ -928,6 +1052,39 @@ func requireIdempotencyKey(tenantID string, key string) (string, error) {
 	return tenantID + "\x00" + key, nil
 }
 
+func validateGatewayInCIDR(gateway string, cidr string) error {
+	gateway = strings.TrimSpace(gateway)
+	if gateway == "" {
+		return nil
+	}
+	prefix, err := netip.ParsePrefix(strings.TrimSpace(cidr))
+	if err != nil {
+		return fmt.Errorf("%w: subnet cidr is invalid", ports.ErrInvalid)
+	}
+	address, err := netip.ParseAddr(gateway)
+	if err != nil || !address.Is4() {
+		return fmt.Errorf("%w: gateway must be a valid IPv4 address", ports.ErrInvalid)
+	}
+	if !prefix.Contains(address) {
+		return fmt.Errorf("%w: gateway must be inside subnet cidr", ports.ErrInvalid)
+	}
+	return nil
+}
+
+func filterSubnetsByVPC(items []ports.NetworkSubnetRecord, vpcID string) []ports.NetworkSubnetRecord {
+	vpcID = strings.TrimSpace(vpcID)
+	if vpcID == "" {
+		return items
+	}
+	filtered := make([]ports.NetworkSubnetRecord, 0, len(items))
+	for _, item := range items {
+		if item.VPCID == vpcID {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
 func (s *LocalNetworkService) lookupVPC(ctx context.Context, tenantID, vpcID string) (ports.NetworkVPCRecord, error) {
 	if s.store != nil {
 		record, err := s.store.GetVPC(ctx, tenantID, vpcID)
@@ -946,6 +1103,89 @@ func (s *LocalNetworkService) lookupVPC(ctx context.Context, tenantID, vpcID str
 		return ports.NetworkVPCRecord{}, fmt.Errorf("%w: vpc not found", ports.ErrNotFound)
 	}
 	return record, nil
+}
+
+func (s *LocalNetworkService) lookupSubnet(ctx context.Context, tenantID, subnetID string) (ports.NetworkSubnetRecord, error) {
+	if s.store != nil {
+		record, err := s.store.GetSubnet(ctx, tenantID, subnetID)
+		if err != nil {
+			return ports.NetworkSubnetRecord{}, fmt.Errorf("%w: subnet not found", ports.ErrNotFound)
+		}
+		if record.State == ports.NetworkResourceDeleted {
+			return ports.NetworkSubnetRecord{}, fmt.Errorf("%w: subnet not found", ports.ErrNotFound)
+		}
+		return record, nil
+	}
+	s.mu.RLock()
+	record, ok := s.subnets[subnetID]
+	s.mu.RUnlock()
+	if !ok || record.TenantID != tenantID || record.State == ports.NetworkResourceDeleted {
+		return ports.NetworkSubnetRecord{}, fmt.Errorf("%w: subnet not found", ports.ErrNotFound)
+	}
+	return record, nil
+}
+
+func (s *LocalNetworkService) ensureRouteDoesNotConflict(ctx context.Context, tenantID string, vpcID string, destinationCIDR string) error {
+	routes, err := s.ListRoutes(ctx, ports.NetworkRouteListRequest{TenantID: tenantID, VPCID: vpcID})
+	if err != nil {
+		return err
+	}
+	for _, route := range routes {
+		if route.State != ports.NetworkResourceDeleted && route.DestinationCIDR == destinationCIDR {
+			return fmt.Errorf("%w: route destination %s already exists in VPC %s", ports.ErrConflict, destinationCIDR, vpcID)
+		}
+	}
+	return nil
+}
+
+func (s *LocalNetworkService) ensureNoDeleteDependencies(ctx context.Context, request ports.NetworkResourceGetRequest, resourceKind string) error {
+	if s.store == nil {
+		return nil
+	}
+	reasons, err := s.store.CountDeleteDependencies(ctx, request, resourceKind)
+	if err != nil {
+		return err
+	}
+	if len(reasons) > 0 {
+		return fmt.Errorf("%w: %s", ports.ErrConflict, strings.Join(reasons, "; "))
+	}
+	return nil
+}
+
+func (s *LocalNetworkService) ensureNoDeleteDependenciesLocked(request ports.NetworkResourceGetRequest, resourceKind string) error {
+	reasons := make([]string, 0)
+	switch resourceKind {
+	case "vpc":
+		for _, subnet := range s.subnets {
+			if subnet.TenantID == request.TenantID && subnet.VPCID == request.ResourceID && subnet.State != ports.NetworkResourceDeleted {
+				reasons = append(reasons, "VPC still has associated subnets")
+				break
+			}
+		}
+		for _, lb := range s.loadBalancers {
+			if lb.TenantID == request.TenantID && lb.VPCID == request.ResourceID && lb.State != ports.NetworkResourceDeleted {
+				reasons = append(reasons, "VPC still has associated load balancers")
+				break
+			}
+		}
+		for _, route := range s.routes {
+			if route.TenantID == request.TenantID && route.VPCID == request.ResourceID && route.State != ports.NetworkResourceDeleted {
+				reasons = append(reasons, "VPC still has associated routes")
+				break
+			}
+		}
+	case "subnet":
+		for _, lb := range s.loadBalancers {
+			if lb.TenantID == request.TenantID && lb.SubnetID == request.ResourceID && lb.State != ports.NetworkResourceDeleted {
+				reasons = append(reasons, "Subnet is still used by load balancers")
+				break
+			}
+		}
+	}
+	if len(reasons) > 0 {
+		return fmt.Errorf("%w: %s", ports.ErrConflict, strings.Join(reasons, "; "))
+	}
+	return nil
 }
 
 var _ ports.NetworkService = (*LocalNetworkService)(nil)

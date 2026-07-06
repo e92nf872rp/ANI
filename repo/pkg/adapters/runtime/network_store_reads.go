@@ -129,6 +129,75 @@ func (s *MetadataNetworkStore) GetRoute(ctx context.Context, tenantID string, ro
 	`, scanNetworkRoute)
 }
 
+func (s *MetadataNetworkStore) CountDeleteDependencies(ctx context.Context, request ports.NetworkResourceGetRequest, resourceKind string) ([]string, error) {
+	if s.store == nil {
+		return nil, ports.ErrNotConfigured
+	}
+	if strings.TrimSpace(request.TenantID) == "" || strings.TrimSpace(request.ResourceID) == "" {
+		return nil, fmt.Errorf("%w: tenant_id and resource id are required", ports.ErrInvalid)
+	}
+	checks := networkDependencyChecks(resourceKind)
+	reasons := make([]string, 0, len(checks))
+	err := s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		for _, check := range checks {
+			var count int64
+			if err := tx.QueryRow(ctx, check.query, request.TenantID, request.ResourceID).Scan(&count); err != nil {
+				return err
+			}
+			if count > 0 {
+				reasons = append(reasons, check.reason)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return reasons, nil
+}
+
+type networkDependencyCheck struct {
+	query  string
+	reason string
+}
+
+func networkDependencyChecks(resourceKind string) []networkDependencyCheck {
+	switch strings.TrimSpace(resourceKind) {
+	case "vpc":
+		return []networkDependencyCheck{
+			{
+				query:  "SELECT COUNT(*) FROM network_subnets WHERE tenant_id = $1::uuid AND vpc_id = $2 AND state <> 'deleted'",
+				reason: "VPC still has associated subnets",
+			},
+			{
+				query:  "SELECT COUNT(*) FROM network_load_balancers WHERE tenant_id = $1::uuid AND vpc_id = $2 AND state <> 'deleted'",
+				reason: "VPC still has associated load balancers",
+			},
+			{
+				query:  "SELECT COUNT(*) FROM network_routes WHERE tenant_id = $1::uuid AND vpc_id = $2 AND state <> 'deleted'",
+				reason: "VPC still has associated routes",
+			},
+			{
+				query:  "SELECT COUNT(*) FROM workload_instances WHERE tenant_id = $1::uuid AND vpc_id = $2 AND state NOT IN ('deleted', 'failed', 'terminated')",
+				reason: "VPC is still used by instances",
+			},
+		}
+	case "subnet":
+		return []networkDependencyCheck{
+			{
+				query:  "SELECT COUNT(*) FROM network_load_balancers WHERE tenant_id = $1::uuid AND subnet_id = $2 AND state <> 'deleted'",
+				reason: "Subnet is still used by load balancers",
+			},
+			{
+				query:  "SELECT COUNT(*) FROM workload_instances WHERE tenant_id = $1::uuid AND subnet_id = $2 AND state NOT IN ('deleted', 'failed', 'terminated')",
+				reason: "Subnet is still used by instances",
+			},
+		}
+	default:
+		return nil
+	}
+}
+
 type networkRecordScanner[T any] func(ports.Row, *T) error
 
 func listNetworkRecords[T any](ctx context.Context, store *MetadataNetworkStore, tenantID string, query string, scan networkRecordScanner[T]) ([]T, error) {

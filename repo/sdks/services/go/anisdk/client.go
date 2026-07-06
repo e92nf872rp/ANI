@@ -16,7 +16,7 @@ import (
 const Layer = "services"
 const Title = "KuberCloud ANI Services API"
 const Version = "1.0.0"
-const ServerURL = "https://{host}/api/v1/svc"
+const ServerURL = "http://127.0.0.1:4010/api/v1"
 
 var Operations = []string{
 	"listGpuContainers",
