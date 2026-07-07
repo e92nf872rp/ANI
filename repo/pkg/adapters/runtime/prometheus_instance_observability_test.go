@@ -192,11 +192,14 @@ func TestPrometheusInstanceObservabilityCreatesIdempotentShortLivedExecSession(t
 	if first.ID == "" || second.ID != first.ID || second.WSURL != first.WSURL {
 		t.Fatalf("replay = %+v, want same session as %+v", second, first)
 	}
-	if first.Token != "" {
-		t.Fatalf("token = %q, want no long-lived credential", first.Token)
+	if first.Token == "" {
+		t.Fatalf("token is empty, want short-lived websocket token")
 	}
 	if !strings.HasPrefix(first.WSURL, "wss://gateway.example.test/api/v1/instances/pod-a/exec/") {
 		t.Fatalf("ws_url = %q, want gateway exec URL", first.WSURL)
+	}
+	if !strings.Contains(first.WSURL, "token="+url.QueryEscape(first.Token)) {
+		t.Fatalf("ws_url = %q, want embedded websocket token", first.WSURL)
 	}
 	if !first.ExpiresAt.Equal(now.Add(15 * time.Minute)) {
 		t.Fatalf("expires_at = %s, want 15 minute TTL", first.ExpiresAt)

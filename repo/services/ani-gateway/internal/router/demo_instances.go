@@ -3,6 +3,9 @@ package router
 import (
 	"bytes"
 	"context"
+	"crypto/sha1"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +22,7 @@ import (
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/network"
 	"github.com/cloudwego/hertz/pkg/route"
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
@@ -467,6 +471,7 @@ func registerDemoInstancesWithObservability(v1 *route.RouterGroup, metadata port
 	v1.GET("/instances/:instance_id/events", api.listEvents)
 	v1.GET("/instances/:instance_id/metrics", api.getMetrics)
 	v1.POST("/instances/:instance_id/exec", api.createExecSession)
+	v1.GET("/instances/:instance_id/exec/:session_id", api.connectExecSession)
 	v1.GET("/instances/:instance_id/security-events", api.listSecurityEvents)
 	v1.GET("/instances/:instance_id/operations", api.listOperations)
 	v1.GET("/demo/instances", api.list)
@@ -858,6 +863,37 @@ func (api *demoInstanceAPI) createExecSession(ctx context.Context, c *app.Reques
 		return
 	}
 	c.JSON(http.StatusOK, demoInstanceExecSessionFromRecord(result))
+}
+
+func (api *demoInstanceAPI) connectExecSession(ctx context.Context, c *app.RequestContext) {
+	record, err := api.instanceForObservation(ctx, c)
+	if err != nil {
+		writeInstanceObservabilityError(c, err)
+		return
+	}
+	session, err := api.observability.GetExecSession(ctx, ports.InstanceExecSessionGetRequest{
+		TenantID:   demoTenantID(c),
+		InstanceID: api.observabilityTargetID(record),
+		SessionID:  c.Param("session_id"),
+		Token:      c.Query("token"),
+	})
+	if err != nil {
+		writeInstanceExecConnectError(c, err)
+		return
+	}
+	key := strings.TrimSpace(string(c.Request.Header.Peek("Sec-WebSocket-Key")))
+	if key == "" || !strings.EqualFold(string(c.Request.Header.Peek("Upgrade")), "websocket") {
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "websocket upgrade is required")
+		return
+	}
+	accept := websocketAcceptKey(key)
+	c.Response.SetStatusCode(http.StatusSwitchingProtocols)
+	c.Response.Header.Set("Upgrade", "websocket")
+	c.Response.Header.Set("Connection", "Upgrade")
+	c.Response.Header.Set("Sec-WebSocket-Accept", accept)
+	c.Hijack(func(conn network.Conn) {
+		_ = runLocalExecWebSocket(ctx, conn, session)
+	})
 }
 
 func (api *demoInstanceAPI) listSecurityEvents(ctx context.Context, c *app.RequestContext) {
@@ -1614,6 +1650,192 @@ func writeInstanceObservabilityError(c *app.RequestContext, err error) {
 	default:
 		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	}
+}
+
+func writeInstanceExecConnectError(c *app.RequestContext, err error) {
+	switch {
+	case errors.Is(err, ports.ErrUnauthorized):
+		writeDemoError(c, http.StatusUnauthorized, "UNAUTHORIZED", err.Error())
+	case errors.Is(err, ports.ErrExpired):
+		writeDemoError(c, http.StatusGone, "SESSION_EXPIRED", err.Error())
+	case errors.Is(err, ports.ErrNotFound):
+		writeDemoError(c, http.StatusNotFound, "INSTANCE_NOT_FOUND", err.Error())
+	case errors.Is(err, ports.ErrInvalid):
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+	default:
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+	}
+}
+
+func websocketAcceptKey(key string) string {
+	sum := sha1.Sum([]byte(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
+	return base64.StdEncoding.EncodeToString(sum[:])
+}
+
+func runLocalExecWebSocket(ctx context.Context, conn network.Conn, session ports.InstanceExecSessionRecord) error {
+	command := normalizeExecCommand(session.Command, session.TTY)
+	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
+	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	defer func() {
+		_ = stdin.Close()
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = cmd.Wait()
+	}()
+
+	var writeMu sync.Mutex
+	writeOutput := func(r io.Reader) {
+		buf := make([]byte, 4096)
+		for {
+			n, err := r.Read(buf)
+			if n > 0 {
+				writeMu.Lock()
+				_ = writeWebSocketFrame(conn, 2, buf[:n])
+				writeMu.Unlock()
+			}
+			if err != nil {
+				return
+			}
+		}
+	}
+	go writeOutput(stdout)
+	go writeOutput(stderr)
+
+	for {
+		opcode, payload, err := readWebSocketFrame(conn)
+		if err != nil {
+			return err
+		}
+		switch opcode {
+		case 1, 2:
+			if isResizeControlFrame(payload) {
+				continue
+			}
+			if _, err := stdin.Write(payload); err != nil {
+				return err
+			}
+		case 8:
+			writeMu.Lock()
+			_ = writeWebSocketFrame(conn, 8, nil)
+			writeMu.Unlock()
+			return nil
+		case 9:
+			writeMu.Lock()
+			_ = writeWebSocketFrame(conn, 10, payload)
+			writeMu.Unlock()
+		}
+	}
+}
+
+func normalizeExecCommand(command []string, tty bool) []string {
+	cleaned := make([]string, 0, len(command)+1)
+	for _, part := range command {
+		if strings.TrimSpace(part) != "" {
+			cleaned = append(cleaned, part)
+		}
+	}
+	if len(cleaned) == 0 {
+		cleaned = []string{"/bin/sh"}
+	}
+	if tty && len(cleaned) == 1 && (strings.HasSuffix(cleaned[0], "/sh") || strings.HasSuffix(cleaned[0], "/bash")) {
+		cleaned = append(cleaned, "-i")
+	}
+	return cleaned
+}
+
+func isResizeControlFrame(payload []byte) bool {
+	var msg struct {
+		Type string `json:"type"`
+		Cols int    `json:"cols"`
+		Rows int    `json:"rows"`
+	}
+	if len(payload) == 0 || payload[0] != '{' {
+		return false
+	}
+	if err := json.Unmarshal(payload, &msg); err != nil {
+		return false
+	}
+	return msg.Type == "resize" && msg.Cols > 0 && msg.Rows > 0
+}
+
+func readWebSocketFrame(r io.Reader) (byte, []byte, error) {
+	header := make([]byte, 2)
+	if _, err := io.ReadFull(r, header); err != nil {
+		return 0, nil, err
+	}
+	opcode := header[0] & 0x0f
+	masked := header[1]&0x80 != 0
+	length := uint64(header[1] & 0x7f)
+	switch length {
+	case 126:
+		extended := make([]byte, 2)
+		if _, err := io.ReadFull(r, extended); err != nil {
+			return 0, nil, err
+		}
+		length = uint64(binary.BigEndian.Uint16(extended))
+	case 127:
+		extended := make([]byte, 8)
+		if _, err := io.ReadFull(r, extended); err != nil {
+			return 0, nil, err
+		}
+		length = binary.BigEndian.Uint64(extended)
+	}
+	if length > 1<<20 {
+		return 0, nil, fmt.Errorf("websocket frame too large")
+	}
+	var mask [4]byte
+	if masked {
+		if _, err := io.ReadFull(r, mask[:]); err != nil {
+			return 0, nil, err
+		}
+	}
+	payload := make([]byte, length)
+	if _, err := io.ReadFull(r, payload); err != nil {
+		return 0, nil, err
+	}
+	if masked {
+		for i := range payload {
+			payload[i] ^= mask[i%4]
+		}
+	}
+	return opcode, payload, nil
+}
+
+func writeWebSocketFrame(w io.Writer, opcode byte, payload []byte) error {
+	header := []byte{0x80 | opcode}
+	length := len(payload)
+	switch {
+	case length < 126:
+		header = append(header, byte(length))
+	case length <= 65535:
+		header = append(header, 126, byte(length>>8), byte(length))
+	default:
+		header = append(header, 127)
+		var extended [8]byte
+		binary.BigEndian.PutUint64(extended[:], uint64(length))
+		header = append(header, extended[:]...)
+	}
+	if _, err := w.Write(header); err != nil {
+		return err
+	}
+	_, err := w.Write(payload)
+	return err
 }
 
 func demoLifecycleErrorStatus(err error) int {

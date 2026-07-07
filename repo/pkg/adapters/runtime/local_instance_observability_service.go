@@ -2,7 +2,10 @@ package runtime
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -154,13 +157,24 @@ func (s *LocalInstanceObservabilityService) CreateExecSession(_ context.Context,
 
 	now := s.now().UTC()
 	sessionID := uuid.NewString()
+	token, err := newInstanceExecToken()
+	if err != nil {
+		return ports.InstanceExecSessionRecord{}, err
+	}
 	record := ports.InstanceExecSessionRecord{
 		ID:         sessionID,
+		TenantID:   request.TenantID,
 		InstanceID: request.InstanceID,
-		WSURL:      "ws://127.0.0.1:8080/api/v1/instances/" + request.InstanceID + "/exec/" + sessionID,
+		Token:      token,
+		Container:  request.Container,
+		Command:    append([]string(nil), request.Command...),
+		TTY:        request.TTY,
+		Rows:       request.Rows,
+		Cols:       request.Cols,
 		ExpiresAt:  now.Add(15 * time.Minute),
 		DevProfile: instanceObservabilityDevProfile(),
 	}
+	record.WSURL = instanceExecWSURL("ws://127.0.0.1:8080/api/v1", request.InstanceID, sessionID, token)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if existing, ok := s.sessions[key]; ok {
@@ -168,6 +182,63 @@ func (s *LocalInstanceObservabilityService) CreateExecSession(_ context.Context,
 	}
 	s.sessions[key] = record
 	return record, nil
+}
+
+func (s *LocalInstanceObservabilityService) GetExecSession(_ context.Context, request ports.InstanceExecSessionGetRequest) (ports.InstanceExecSessionRecord, error) {
+	if err := validateInstanceObservationIdentity(request.TenantID, request.InstanceID); err != nil {
+		return ports.InstanceExecSessionRecord{}, err
+	}
+	if strings.TrimSpace(request.SessionID) == "" {
+		return ports.InstanceExecSessionRecord{}, fmt.Errorf("%w: session_id is required", ports.ErrInvalid)
+	}
+	if strings.TrimSpace(request.Token) == "" {
+		return ports.InstanceExecSessionRecord{}, fmt.Errorf("%w: token is required", ports.ErrUnauthorized)
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, record := range s.sessions {
+		if record.ID != request.SessionID {
+			continue
+		}
+		if record.TenantID != request.TenantID || record.InstanceID != request.InstanceID {
+			return ports.InstanceExecSessionRecord{}, ports.ErrNotFound
+		}
+		if record.Token != request.Token {
+			return ports.InstanceExecSessionRecord{}, ports.ErrUnauthorized
+		}
+		if !s.now().UTC().Before(record.ExpiresAt) {
+			return ports.InstanceExecSessionRecord{}, ports.ErrExpired
+		}
+		return record, nil
+	}
+	return ports.InstanceExecSessionRecord{}, ports.ErrNotFound
+}
+
+func newInstanceExecToken() (string, error) {
+	var b [32]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("generate exec session token: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b[:]), nil
+}
+
+func instanceExecWSURL(baseURL string, instanceID string, sessionID string, token string) string {
+	u := normalizeExecWSBaseURL(baseURL) + "/instances/" + url.PathEscape(instanceID) + "/exec/" + url.PathEscape(sessionID)
+	values := url.Values{}
+	values.Set("token", token)
+	return u + "?" + values.Encode()
+}
+
+func normalizeExecWSBaseURL(baseURL string) string {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	switch {
+	case strings.HasPrefix(baseURL, "http://"):
+		return "ws://" + strings.TrimPrefix(baseURL, "http://")
+	case strings.HasPrefix(baseURL, "https://"):
+		return "wss://" + strings.TrimPrefix(baseURL, "https://")
+	default:
+		return baseURL
+	}
 }
 
 func validateInstanceObservationIdentity(tenantID string, instanceID string) error {

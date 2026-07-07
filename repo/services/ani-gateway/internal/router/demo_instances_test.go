@@ -672,10 +672,21 @@ func TestDemoInstanceObservabilityResponsesUseLocalProfile(t *testing.T) {
 	if execResponse.InstanceID != created.Ref.InstanceID || execResponse.WSURL == "" {
 		t.Fatalf("exec response = %+v, want websocket session", execResponse)
 	}
-	if execResponse.Token != "" {
-		t.Fatalf("exec token = %q, want no long-lived credential", execResponse.Token)
+	if execResponse.Token == "" || !strings.Contains(execResponse.WSURL, "token=") {
+		t.Fatalf("exec response = %+v, want short-lived token embedded in websocket URL", execResponse)
 	}
 	requireLocalCoreDevProfile(t, execResponse.DevProfile, "local-instance-observability")
+}
+
+func TestDemoInstanceExecWebSocketRejectsMissingToken(t *testing.T) {
+	h := server.New()
+	RegisterWithOptions(h, RegisterOptions{})
+	instanceID := createDemoInstanceForLogs(t, h)
+
+	resp := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/instances/"+instanceID+"/exec/11111111-1111-1111-1111-111111111111", nil).Result()
+	if resp.StatusCode() != http.StatusUnauthorized {
+		t.Fatalf("exec websocket status = %d body=%s, want 401", resp.StatusCode(), resp.Body())
+	}
 }
 
 func TestDemoInstanceLogsEndpointUsesFollowParameterForSSE(t *testing.T) {

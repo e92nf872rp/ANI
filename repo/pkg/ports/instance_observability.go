@@ -105,11 +105,24 @@ type InstanceExecSessionCreateRequest struct {
 
 type InstanceExecSessionRecord struct {
 	ID         string
+	TenantID   string
 	InstanceID string
 	WSURL      string
 	Token      string
+	Container  string
+	Command    []string
+	TTY        bool
+	Rows       int
+	Cols       int
 	ExpiresAt  time.Time
 	DevProfile DevProfileInfo
+}
+
+type InstanceExecSessionGetRequest struct {
+	TenantID   string
+	InstanceID string
+	SessionID  string
+	Token      string
 }
 
 // InstanceObservability exposes local/real runtime observations without
@@ -121,4 +134,5 @@ type InstanceObservability interface {
 	GetMetrics(ctx context.Context, request InstanceObservationGetRequest) (InstanceMetricsRecord, error)
 	ListSecurityEvents(ctx context.Context, request InstanceObservationListRequest) (InstanceSecurityEventListResult, error)
 	CreateExecSession(ctx context.Context, request InstanceExecSessionCreateRequest) (InstanceExecSessionRecord, error)
+	GetExecSession(ctx context.Context, request InstanceExecSessionGetRequest) (InstanceExecSessionRecord, error)
 }

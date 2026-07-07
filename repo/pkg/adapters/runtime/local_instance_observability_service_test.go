@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -98,11 +100,33 @@ func TestLocalInstanceObservabilityExecSessionIsIdempotentAndShortLived(t *testi
 	if second.ID != first.ID || second.WSURL != first.WSURL {
 		t.Fatalf("idempotent replay = %+v, want same session as %+v", second, first)
 	}
-	if first.Token != "" {
-		t.Fatalf("token = %q, want no long-lived credential in local exec response", first.Token)
+	if first.Token == "" {
+		t.Fatalf("token is empty, want short-lived websocket token")
+	}
+	if !strings.Contains(first.WSURL, "token="+url.QueryEscape(first.Token)) {
+		t.Fatalf("ws_url = %q, want embedded websocket token", first.WSURL)
 	}
 	if !first.ExpiresAt.Equal(now.Add(15 * time.Minute)) {
 		t.Fatalf("expires_at = %s, want 15 minute TTL", first.ExpiresAt)
+	}
+	resolved, err := service.GetExecSession(context.Background(), ports.InstanceExecSessionGetRequest{
+		TenantID:   req.TenantID,
+		InstanceID: req.InstanceID,
+		SessionID:  first.ID,
+		Token:      first.Token,
+	})
+	if err != nil {
+		t.Fatalf("GetExecSession error = %v", err)
+	}
+	if resolved.ID != first.ID {
+		t.Fatalf("resolved session = %+v, want %+v", resolved, first)
+	}
+}
+
+func TestInstanceExecWSURLNormalizesHTTPBaseURL(t *testing.T) {
+	got := instanceExecWSURL("http://gateway.example.test/api/v1", "inst-a", "session-a", "token-a")
+	if !strings.HasPrefix(got, "ws://gateway.example.test/api/v1/instances/inst-a/exec/session-a?") {
+		t.Fatalf("ws_url = %q, want ws scheme", got)
 	}
 }
 

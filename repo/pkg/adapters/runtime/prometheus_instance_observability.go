@@ -236,10 +236,21 @@ func (o *PrometheusInstanceObservability) CreateExecSession(_ context.Context, r
 
 	now := o.now().UTC()
 	sessionID := uuid.NewString()
+	token, err := newInstanceExecToken()
+	if err != nil {
+		return ports.InstanceExecSessionRecord{}, err
+	}
 	record := ports.InstanceExecSessionRecord{
 		ID:         sessionID,
+		TenantID:   request.TenantID,
 		InstanceID: request.InstanceID,
-		WSURL:      o.execBaseURL + "/instances/" + url.PathEscape(request.InstanceID) + "/exec/" + sessionID,
+		WSURL:      instanceExecWSURL(o.execBaseURL, request.InstanceID, sessionID, token),
+		Token:      token,
+		Container:  request.Container,
+		Command:    append([]string(nil), request.Command...),
+		TTY:        request.TTY,
+		Rows:       request.Rows,
+		Cols:       request.Cols,
 		ExpiresAt:  now.Add(15 * time.Minute),
 		DevProfile: prometheusInstanceObservabilityDevProfile(),
 	}
@@ -250,6 +261,36 @@ func (o *PrometheusInstanceObservability) CreateExecSession(_ context.Context, r
 	}
 	o.sessions[key] = record
 	return record, nil
+}
+
+func (o *PrometheusInstanceObservability) GetExecSession(_ context.Context, request ports.InstanceExecSessionGetRequest) (ports.InstanceExecSessionRecord, error) {
+	if err := validateInstanceObservationIdentity(request.TenantID, request.InstanceID); err != nil {
+		return ports.InstanceExecSessionRecord{}, err
+	}
+	if strings.TrimSpace(request.SessionID) == "" {
+		return ports.InstanceExecSessionRecord{}, fmt.Errorf("%w: session_id is required", ports.ErrInvalid)
+	}
+	if strings.TrimSpace(request.Token) == "" {
+		return ports.InstanceExecSessionRecord{}, fmt.Errorf("%w: token is required", ports.ErrUnauthorized)
+	}
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	for _, record := range o.sessions {
+		if record.ID != request.SessionID {
+			continue
+		}
+		if record.TenantID != request.TenantID || record.InstanceID != request.InstanceID {
+			return ports.InstanceExecSessionRecord{}, ports.ErrNotFound
+		}
+		if record.Token != request.Token {
+			return ports.InstanceExecSessionRecord{}, ports.ErrUnauthorized
+		}
+		if !o.now().UTC().Before(record.ExpiresAt) {
+			return ports.InstanceExecSessionRecord{}, ports.ErrExpired
+		}
+		return record, nil
+	}
+	return ports.InstanceExecSessionRecord{}, ports.ErrNotFound
 }
 
 func (o *PrometheusInstanceObservability) readKubernetesEvents(ctx context.Context, tenantID string, instanceID string, podName string) ([]ports.InstanceEventRecord, error) {

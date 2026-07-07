@@ -81,6 +81,10 @@ func (s *postgresOIDCSessionStore) CreateSession(ctx context.Context, tenantName
 	if err := grantRoles(ctx, tx, userID, tenantID, roles); err != nil {
 		return refreshPrincipal{}, "", err
 	}
+	roles, err = listGrantedRoles(ctx, tx, userID)
+	if err != nil {
+		return refreshPrincipal{}, "", err
+	}
 
 	rawRefreshToken, err := generateRefreshToken()
 	if err != nil {
@@ -185,4 +189,31 @@ func grantRoles(ctx context.Context, tx pgx.Tx, userID, tenantID uuid.UUID, role
 		}
 	}
 	return nil
+}
+
+func listGrantedRoles(ctx context.Context, tx pgx.Tx, userID uuid.UUID) ([]string, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT r.name
+		FROM user_roles ur
+		JOIN roles r ON r.id = ur.role_id
+		WHERE ur.user_id = $1
+		ORDER BY r.name
+	`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list granted roles: %w", err)
+	}
+	defer rows.Close()
+
+	roles := []string{}
+	for rows.Next() {
+		var role string
+		if err := rows.Scan(&role); err != nil {
+			return nil, fmt.Errorf("scan granted role: %w", err)
+		}
+		roles = append(roles, role)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list granted roles: %w", err)
+	}
+	return roles, nil
 }

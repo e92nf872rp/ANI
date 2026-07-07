@@ -9,4 +9,6 @@ var (
 	ErrConflict           = errors.New("capability resource conflict")
 	ErrInvalid            = errors.New("capability request is invalid")
 	ErrFailedPrecondition = errors.New("capability precondition failed")
+	ErrUnauthorized       = errors.New("capability request is unauthorized")
+	ErrExpired            = errors.New("capability resource expired")
 )

@@ -73,6 +73,13 @@ func inferPermission(method, path string) (string, string) {
 			break
 		}
 	}
+	if resource == "instances" {
+		for _, part := range parts {
+			if part == "exec" {
+				return resource, "exec"
+			}
+		}
+	}
 	switch method {
 	case http.MethodGet, http.MethodHead:
 		return resource, "get"

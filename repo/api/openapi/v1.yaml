@@ -1564,9 +1564,14 @@ components:
       properties:
         id:          { type: string, format: uuid }
         instance_id: { type: string, format: uuid }
-        ws_url:      { type: string, format: uri }
-        token:       { type: string }
-        expires_at:  { type: string, format: date-time }
+        ws_url:
+          type: string
+          format: uri
+          description: "浏览器可直接连接的 WebSocket URL；必须包含短期一次性 token query 参数，客户端无需也不能依赖 Authorization header 完成握手。"
+        token:
+          type: string
+          description: "短期一次性 WebSocket 握手票据；与 ws_url query 中的 token 相同，供无法直接使用 ws_url 的客户端显式拼接。"
+        expires_at:  { type: string, format: date-time, description: "exec session 与 token 的过期时间；客户端必须在过期前完成 WebSocket 握手。" }
         dev_profile:
           $ref: '#/components/schemas/CoreDevProfileInfo'
 
@@ -2300,7 +2305,7 @@ paths:
     post:
       operationId: createInstanceExecSession
       summary: 创建实例终端 exec session
-      description: 返回 WebSocket URL，用于 exec/终端接入；不暴露长期凭据。
+      description: 返回可直接用于浏览器 WebSocket 握手的 ws_url 和短期一次性 token；不暴露长期凭据。
       tags: [Instances]
       x-ani-rbac-scope: "scope:instances:exec"
       parameters:
@@ -2320,6 +2325,30 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+
+  /instances/{instance_id}/exec/{session_id}:
+    get:
+      operationId: connectInstanceExecSession
+      summary: 连接实例终端 exec WebSocket
+      description: |
+        使用 createInstanceExecSession 返回的短期一次性 token 建立 WebSocket 连接。
+        浏览器客户端应直接连接 ws_url；握手鉴权通过 query 参数 token 完成，不要求也不支持依赖 Authorization header。
+        WebSocket 数据帧协议：普通 text/binary 帧作为 stdin 原始字节透传；stdout/stderr 由后端以 text/binary 原样回传；终端 resize 使用 JSON 控制帧 `{"type":"resize","cols":120,"rows":30}`。
+      tags: [Instances]
+      x-ani-rbac-scope: "scope:instances:exec"
+      parameters:
+        - { name: instance_id, in: path, required: true, schema: { type: string } }
+        - { name: session_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: token, in: query, required: true, schema: { type: string }, description: "createInstanceExecSession 返回的短期一次性 WebSocket token" }
+      responses:
+        "101":
+          description: WebSocket 协议切换成功
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "410":
+          description: exec session 已过期
 
   /instances/{instance_id}/security-events:
     get:

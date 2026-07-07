@@ -34,6 +34,7 @@
 | CORE-SVC-SUPPORT-NETSTORE-A | B2 网络/存储/K8s handler：新增 network routes、volume snapshots、filesystem mount-targets、K8s workloads；searchVectorStore 非 ready 与 createK8sCluster 前置不满足返回 422 PRECONDITION_FAILED；复审收口后 createVolumeSnapshot 202 按全局约定返回 AsyncTask；全部为 Tier1 local profile，响应带 dev_profile，不声明 runtime/production ready | core-svc-support-netstore-a.md |
 | CORE-SVC-SUPPORT-OBJVEC-A | B3 对象/向量 handler：新增 storage buckets、object upload/download 预签名 URL、vector document insert；复用 `ports.ObjectStore` 与 `ports.VectorStore.Upsert` 边界；全部为 Tier1 local profile，不声明 runtime/production ready | core-svc-support-objvec-a.md |
 | SPRINT12-CLOSURE-A | Sprint 12 收口：A/B1/B2/B3 全部 19 个 Core handler + 2 个 422 经 OpenAPI、ports/adapters、Gateway handler、测试和文档闭环；进入 Sprint 13 real provider/live gate 收敛 | sprint12-closure-core-svc-support.md |
+| INSTANCE-EXEC-WS-A | 实例交互式终端 WebSocket 契约与 Gateway path：`POST /instances/{id}/exec` 返回短期 token 与内嵌 token 的浏览器直连 `ws_url`，新增 `GET /instances/{id}/exec/{session}` WebSocket 握手入口，RBAC 固定 `scope:instances:exec`，local profile 支持原始 stdin/stdout 透传 | instance-exec-ws-a.md |
 
 ### Sprint 14 Planning / Execution（分支执行中，2026-06）
 

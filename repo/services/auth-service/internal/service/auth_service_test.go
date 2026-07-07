@@ -54,3 +54,36 @@ func TestCheckPermissionHonorsAPIKeyWildcardScope(t *testing.T) {
 		t.Fatalf("wildcard scope should allow delete, got deny: %s", resp.GetReason())
 	}
 }
+
+func TestCheckPermissionExecRequiresAdminOrExplicitScope(t *testing.T) {
+	svc := &AuthService{}
+	tenantID := uuid.New().String()
+
+	tests := []struct {
+		name  string
+		roles []string
+		want  bool
+	}{
+		{name: "platform admin", roles: []string{"platform-admin"}, want: true},
+		{name: "tenant admin", roles: []string{"tenant-admin"}, want: true},
+		{name: "explicit scope", roles: []string{"service-account", "scope:instances:exec"}, want: true},
+		{name: "ordinary user", roles: []string{"user"}, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, err := svc.CheckPermission(context.Background(), &authv1.CheckPermissionRequest{
+				TenantId: tenantID,
+				Roles:    tt.roles,
+				Resource: "instances",
+				Action:   "exec",
+			})
+			if err != nil {
+				t.Fatalf("CheckPermission error: %v", err)
+			}
+			if resp.GetAllowed() != tt.want {
+				t.Fatalf("allowed = %v, want %v, reason: %s", resp.GetAllowed(), tt.want, resp.GetReason())
+			}
+		})
+	}
+}
