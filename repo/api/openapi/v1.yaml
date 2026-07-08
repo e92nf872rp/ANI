@@ -2333,7 +2333,12 @@ paths:
       description: |
         使用 createInstanceExecSession 返回的短期一次性 token 建立 WebSocket 连接。
         浏览器客户端应直接连接 ws_url；握手鉴权通过 query 参数 token 完成，不要求也不支持依赖 Authorization header。
-        WebSocket 数据帧协议：普通 text/binary 帧作为 stdin 原始字节透传；stdout/stderr 由后端以 text/binary 原样回传；终端 resize 使用 JSON 控制帧 `{"type":"resize","cols":120,"rows":30}`。
+        WebSocket 数据帧协议使用 KubeCloud TerminalMessage JSON 文本帧：
+        stdin 输入发送 `{"Op":"stdin","Data":"<typed chars>"}`；
+        终端 resize 发送 `{"Op":"resize","Cols":120,"Rows":30}`；
+        后端终端可见输出统一发送 `{"Op":"stdout","Data":"<terminal output>"}`；toast 消息可使用 `{"Op":"toast","Data":"<message>"}`。
+        在 local profile TTY 模式下，后端会将 stdin 输入回显为 stdout，以匹配浏览器终端交互效果。
+        为兼容旧客户端，后端仍接受普通 text/binary 帧作为 stdin 原始字节透传，并接受旧 resize 控制帧 `{"type":"resize","cols":120,"rows":30}`。
       tags: [Instances]
       x-ani-rbac-scope: "scope:instances:exec"
       parameters:

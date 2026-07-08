@@ -185,8 +185,8 @@ func (s *LocalInstanceObservabilityService) CreateExecSession(_ context.Context,
 }
 
 func (s *LocalInstanceObservabilityService) GetExecSession(_ context.Context, request ports.InstanceExecSessionGetRequest) (ports.InstanceExecSessionRecord, error) {
-	if err := validateInstanceObservationIdentity(request.TenantID, request.InstanceID); err != nil {
-		return ports.InstanceExecSessionRecord{}, err
+	if strings.TrimSpace(request.InstanceID) == "" {
+		return ports.InstanceExecSessionRecord{}, fmt.Errorf("%w: instance_id is required", ports.ErrInvalid)
 	}
 	if strings.TrimSpace(request.SessionID) == "" {
 		return ports.InstanceExecSessionRecord{}, fmt.Errorf("%w: session_id is required", ports.ErrInvalid)
@@ -200,7 +200,10 @@ func (s *LocalInstanceObservabilityService) GetExecSession(_ context.Context, re
 		if record.ID != request.SessionID {
 			continue
 		}
-		if record.TenantID != request.TenantID || record.InstanceID != request.InstanceID {
+		if request.TenantID != "" && record.TenantID != request.TenantID {
+			return ports.InstanceExecSessionRecord{}, ports.ErrNotFound
+		}
+		if record.InstanceID != request.InstanceID {
 			return ports.InstanceExecSessionRecord{}, ports.ErrNotFound
 		}
 		if record.Token != request.Token {
@@ -233,12 +236,14 @@ func normalizeExecWSBaseURL(baseURL string) string {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	switch {
 	case strings.HasPrefix(baseURL, "http://"):
-		return "ws://" + strings.TrimPrefix(baseURL, "http://")
+		baseURL = "ws://" + strings.TrimPrefix(baseURL, "http://")
 	case strings.HasPrefix(baseURL, "https://"):
-		return "wss://" + strings.TrimPrefix(baseURL, "https://")
-	default:
-		return baseURL
+		baseURL = "wss://" + strings.TrimPrefix(baseURL, "https://")
 	}
+	if !strings.HasSuffix(baseURL, "/api/v1") {
+		baseURL += "/api/v1"
+	}
+	return baseURL
 }
 
 func validateInstanceObservationIdentity(tenantID string, instanceID string) error {

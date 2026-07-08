@@ -12,6 +12,7 @@ func TestAuthPublicPaths(t *testing.T) {
 		"/api/v1/auth/oidc/begin",
 		"/api/v1/auth/token",
 		"/api/v1/auth/refresh",
+		"/api/v1/instances/inst-1/exec/session-1",
 	}
 	for _, path := range publicPaths {
 		if !isPublicPath(path) {
@@ -35,6 +36,8 @@ func TestAuthProtectedPaths(t *testing.T) {
 		"/api/v1/auth/logout",
 		"/api/v1/auth/api-keys",
 		"/api/v1/instances",
+		"/api/v1/instances/inst-1/exec",
+		"/api/v1/instances/inst-1/logs",
 	}
 	for _, path := range protectedPaths {
 		if isPublicPath(path) {

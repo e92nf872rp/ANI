@@ -866,14 +866,9 @@ func (api *demoInstanceAPI) createExecSession(ctx context.Context, c *app.Reques
 }
 
 func (api *demoInstanceAPI) connectExecSession(ctx context.Context, c *app.RequestContext) {
-	record, err := api.instanceForObservation(ctx, c)
-	if err != nil {
-		writeInstanceObservabilityError(c, err)
-		return
-	}
 	session, err := api.observability.GetExecSession(ctx, ports.InstanceExecSessionGetRequest{
-		TenantID:   demoTenantID(c),
-		InstanceID: api.observabilityTargetID(record),
+		TenantID:   middleware.GetTenantID(c),
+		InstanceID: c.Param("instance_id"),
 		SessionID:  c.Param("session_id"),
 		Token:      c.Query("token"),
 	})
@@ -892,6 +887,10 @@ func (api *demoInstanceAPI) connectExecSession(ctx context.Context, c *app.Reque
 	c.Response.Header.Set("Connection", "Upgrade")
 	c.Response.Header.Set("Sec-WebSocket-Accept", accept)
 	c.Hijack(func(conn network.Conn) {
+		if connector, ok := api.observability.(ports.InstanceExecSessionConnector); ok {
+			_ = connector.ConnectExecSession(ctx, session, newExecWebSocketTerminalStream(conn))
+			return
+		}
 		_ = runLocalExecWebSocket(ctx, conn, session)
 	})
 }
@@ -1700,13 +1699,13 @@ func runLocalExecWebSocket(ctx context.Context, conn network.Conn, session ports
 	}()
 
 	var writeMu sync.Mutex
-	writeOutput := func(r io.Reader) {
+	writeOutput := func(stream string, r io.Reader) {
 		buf := make([]byte, 4096)
 		for {
 			n, err := r.Read(buf)
 			if n > 0 {
 				writeMu.Lock()
-				_ = writeWebSocketFrame(conn, 2, buf[:n])
+				_ = writeExecTerminalMessage(conn, execTerminalOutputOp(stream), buf[:n])
 				writeMu.Unlock()
 			}
 			if err != nil {
@@ -1714,8 +1713,8 @@ func runLocalExecWebSocket(ctx context.Context, conn network.Conn, session ports
 			}
 		}
 	}
-	go writeOutput(stdout)
-	go writeOutput(stderr)
+	go writeOutput("stdout", stdout)
+	go writeOutput("stderr", stderr)
 
 	for {
 		opcode, payload, err := readWebSocketFrame(conn)
@@ -1724,11 +1723,17 @@ func runLocalExecWebSocket(ctx context.Context, conn network.Conn, session ports
 		}
 		switch opcode {
 		case 1, 2:
-			if isResizeControlFrame(payload) {
+			input := execTerminalInputFrame(payload)
+			if !input.Write {
 				continue
 			}
-			if _, err := stdin.Write(payload); err != nil {
+			if _, err := stdin.Write(input.Shell); err != nil {
 				return err
+			}
+			if echo := execTerminalLocalEchoPayload(session.TTY, input.Echo); len(echo) > 0 {
+				writeMu.Lock()
+				_ = writeExecTerminalMessage(conn, "stdout", echo)
+				writeMu.Unlock()
 			}
 		case 8:
 			writeMu.Lock()
@@ -1759,6 +1764,81 @@ func normalizeExecCommand(command []string, tty bool) []string {
 	return cleaned
 }
 
+type execTerminalMessage struct {
+	Op   string `json:"Op"`
+	Data string `json:"Data,omitempty"`
+	Cols int    `json:"Cols,omitempty"`
+	Rows int    `json:"Rows,omitempty"`
+}
+
+type execTerminalInput struct {
+	Shell []byte
+	Echo  []byte
+	Write bool
+}
+
+func execTerminalInputPayload(payload []byte) ([]byte, bool) {
+	input := execTerminalInputFrame(payload)
+	return input.Shell, input.Write
+}
+
+func execTerminalInputFrame(payload []byte) execTerminalInput {
+	if len(payload) == 0 || payload[0] != '{' {
+		return execTerminalInput{Shell: execTerminalShellInputPayload(payload), Echo: payload, Write: true}
+	}
+	var msg struct {
+		Op   string `json:"Op"`
+		Data string `json:"Data"`
+		Cols int    `json:"Cols"`
+		Rows int    `json:"Rows"`
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(payload, &msg); err != nil {
+		return execTerminalInput{Shell: execTerminalShellInputPayload(payload), Echo: payload, Write: true}
+	}
+	switch msg.Op {
+	case "stdin":
+		data := []byte(msg.Data)
+		return execTerminalInput{Shell: execTerminalShellInputPayload(data), Echo: data, Write: true}
+	case "resize":
+		if msg.Cols > 0 && msg.Rows > 0 {
+			return execTerminalInput{}
+		}
+	}
+	if msg.Type == "resize" {
+		return execTerminalInput{}
+	}
+	return execTerminalInput{Shell: execTerminalShellInputPayload(payload), Echo: payload, Write: true}
+}
+
+func execTerminalShellInputPayload(input []byte) []byte {
+	return bytes.ReplaceAll(input, []byte("\r"), []byte("\n"))
+}
+
+func writeExecTerminalMessage(w io.Writer, op string, data []byte) error {
+	payload, err := json.Marshal(execTerminalMessage{Op: op, Data: string(data)})
+	if err != nil {
+		return err
+	}
+	return writeWebSocketFrame(w, 1, payload)
+}
+
+func execTerminalOutputOp(stream string) string {
+	switch stream {
+	case "stdout", "stderr":
+		return "stdout"
+	default:
+		return stream
+	}
+}
+
+func execTerminalLocalEchoPayload(tty bool, input []byte) []byte {
+	if !tty || len(input) == 0 {
+		return nil
+	}
+	return input
+}
+
 func isResizeControlFrame(payload []byte) bool {
 	var msg struct {
 		Type string `json:"type"`
@@ -1772,6 +1852,76 @@ func isResizeControlFrame(payload []byte) bool {
 		return false
 	}
 	return msg.Type == "resize" && msg.Cols > 0 && msg.Rows > 0
+}
+
+type execWebSocketTerminalStream struct {
+	conn    network.Conn
+	writeMu sync.Mutex
+}
+
+func newExecWebSocketTerminalStream(conn network.Conn) *execWebSocketTerminalStream {
+	return &execWebSocketTerminalStream{conn: conn}
+}
+
+func (s *execWebSocketTerminalStream) Recv(_ context.Context) (ports.InstanceExecTerminalClientMessage, error) {
+	for {
+		opcode, payload, err := readWebSocketFrame(s.conn)
+		if err != nil {
+			return ports.InstanceExecTerminalClientMessage{}, err
+		}
+		switch opcode {
+		case 1, 2:
+			msg, ok := execTerminalClientMessageFromPayload(payload)
+			if !ok {
+				continue
+			}
+			return msg, nil
+		case 8:
+			s.writeMu.Lock()
+			_ = writeWebSocketFrame(s.conn, 8, nil)
+			s.writeMu.Unlock()
+			return ports.InstanceExecTerminalClientMessage{}, io.EOF
+		case 9:
+			s.writeMu.Lock()
+			_ = writeWebSocketFrame(s.conn, 10, payload)
+			s.writeMu.Unlock()
+		}
+	}
+}
+
+func (s *execWebSocketTerminalStream) Send(_ context.Context, message ports.InstanceExecTerminalServerMessage) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return writeExecTerminalMessage(s.conn, execTerminalOutputOp(message.Op), message.Data)
+}
+
+func execTerminalClientMessageFromPayload(payload []byte) (ports.InstanceExecTerminalClientMessage, bool) {
+	if len(payload) == 0 || payload[0] != '{' {
+		return ports.InstanceExecTerminalClientMessage{Op: "stdin", Data: append([]byte(nil), payload...)}, true
+	}
+	var msg struct {
+		Op   string `json:"Op"`
+		Data string `json:"Data"`
+		Cols int    `json:"Cols"`
+		Rows int    `json:"Rows"`
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(payload, &msg); err != nil {
+		return ports.InstanceExecTerminalClientMessage{Op: "stdin", Data: append([]byte(nil), payload...)}, true
+	}
+	switch msg.Op {
+	case "stdin":
+		return ports.InstanceExecTerminalClientMessage{Op: "stdin", Data: []byte(msg.Data)}, true
+	case "resize":
+		if msg.Cols > 0 && msg.Rows > 0 {
+			return ports.InstanceExecTerminalClientMessage{Op: "resize", Cols: msg.Cols, Rows: msg.Rows}, true
+		}
+		return ports.InstanceExecTerminalClientMessage{}, false
+	}
+	if msg.Type == "resize" && msg.Cols > 0 && msg.Rows > 0 {
+		return ports.InstanceExecTerminalClientMessage{Op: "resize", Cols: msg.Cols, Rows: msg.Rows}, true
+	}
+	return ports.InstanceExecTerminalClientMessage{Op: "stdin", Data: append([]byte(nil), payload...)}, true
 }
 
 func readWebSocketFrame(r io.Reader) (byte, []byte, error) {

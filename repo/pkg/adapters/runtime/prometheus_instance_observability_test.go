@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -204,6 +205,108 @@ func TestPrometheusInstanceObservabilityCreatesIdempotentShortLivedExecSession(t
 	if !first.ExpiresAt.Equal(now.Add(15 * time.Minute)) {
 		t.Fatalf("expires_at = %s, want 15 minute TTL", first.ExpiresAt)
 	}
+}
+
+func TestPrometheusInstanceObservabilityConnectsKubernetesExecTerminalStream(t *testing.T) {
+	service := newTestPrometheusInstanceObservability(t, func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/api/v1/namespaces/ani-tenant-tenant-a/pods" {
+			t.Fatalf("unexpected HTTP request before exec dial: %s", r.URL.String())
+		}
+		return jsonResponse(http.StatusOK, `{
+			"items": [
+				{"metadata":{"name":"pod-a"},"status":{"phase":"Running","conditions":[{"type":"Ready","status":"True"}]}}
+			]
+		}`), nil
+	})
+	stream := &fakeInstanceExecTerminalStream{
+		recv: []ports.InstanceExecTerminalClientMessage{
+			{Op: "stdin", Data: []byte("ls\n")},
+			{Op: "resize", Cols: 120, Rows: 30},
+		},
+	}
+	conn := &fakeKubernetesExecConnection{
+		readFrames: [][]byte{
+			append([]byte{1}, []byte("ok\n")...),
+			append([]byte{2}, []byte("warn\n")...),
+		},
+	}
+	service.execDialer = func(ctx context.Context, request kubernetesExecRequest) (io.ReadWriteCloser, error) {
+		if request.Namespace != "ani-tenant-tenant-a" || request.PodName != "pod-a" {
+			t.Fatalf("exec target namespace=%q pod=%q, want resolved pod", request.Namespace, request.PodName)
+		}
+		if got := request.Query.Get("command"); got != "/bin/sh" {
+			t.Fatalf("exec command = %q, want /bin/sh", got)
+		}
+		if request.Query.Get("stdin") != "true" || request.Query.Get("stdout") != "true" || request.Query.Get("stderr") != "true" || request.Query.Get("tty") != "true" {
+			t.Fatalf("exec query = %s, want stdin/stdout/stderr/tty true", request.Query.Encode())
+		}
+		return conn, nil
+	}
+
+	err := service.ConnectExecSession(context.Background(), ports.InstanceExecSessionRecord{
+		TenantID:   "tenant-a",
+		InstanceID: "workload-a",
+		Command:    []string{"/bin/sh"},
+		TTY:        true,
+		Rows:       24,
+		Cols:       80,
+	}, stream)
+	if err != nil {
+		t.Fatalf("ConnectExecSession() error = %v", err)
+	}
+
+	if got := string(conn.writes[0]); got != "\x00ls\n" {
+		t.Fatalf("stdin frame = %q, want Kubernetes stdin channel frame", got)
+	}
+	if got := string(conn.writes[1]); got != "\x04{\"Width\":120,\"Height\":30}" {
+		t.Fatalf("resize frame = %q, want Kubernetes resize channel frame", got)
+	}
+	if len(stream.sent) != 2 || string(stream.sent[0].Data) != "ok\n" || string(stream.sent[1].Data) != "warn\n" {
+		t.Fatalf("terminal output = %+v, want stdout projection for Kubernetes stdout/stderr channels", stream.sent)
+	}
+}
+
+type fakeInstanceExecTerminalStream struct {
+	recv []ports.InstanceExecTerminalClientMessage
+	sent []ports.InstanceExecTerminalServerMessage
+}
+
+func (s *fakeInstanceExecTerminalStream) Recv(_ context.Context) (ports.InstanceExecTerminalClientMessage, error) {
+	if len(s.recv) == 0 {
+		return ports.InstanceExecTerminalClientMessage{}, io.EOF
+	}
+	msg := s.recv[0]
+	s.recv = s.recv[1:]
+	return msg, nil
+}
+
+func (s *fakeInstanceExecTerminalStream) Send(_ context.Context, msg ports.InstanceExecTerminalServerMessage) error {
+	s.sent = append(s.sent, msg)
+	return nil
+}
+
+type fakeKubernetesExecConnection struct {
+	readFrames [][]byte
+	writes     [][]byte
+}
+
+func (c *fakeKubernetesExecConnection) Read(payload []byte) (int, error) {
+	if len(c.readFrames) == 0 {
+		return 0, io.EOF
+	}
+	frame := c.readFrames[0]
+	c.readFrames = c.readFrames[1:]
+	copy(payload, frame)
+	return len(frame), nil
+}
+
+func (c *fakeKubernetesExecConnection) Write(payload []byte) (int, error) {
+	c.writes = append(c.writes, append([]byte(nil), payload...))
+	return len(payload), nil
+}
+
+func (c *fakeKubernetesExecConnection) Close() error {
+	return nil
 }
 
 func newTestPrometheusInstanceObservability(t *testing.T, roundTrip roundTripFunc) *PrometheusInstanceObservability {

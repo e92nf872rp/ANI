@@ -125,6 +125,27 @@ type InstanceExecSessionGetRequest struct {
 	Token      string
 }
 
+type InstanceExecTerminalClientMessage struct {
+	Op   string
+	Data []byte
+	Rows int
+	Cols int
+}
+
+type InstanceExecTerminalServerMessage struct {
+	Op   string
+	Data []byte
+}
+
+type InstanceExecTerminalStream interface {
+	Recv(ctx context.Context) (InstanceExecTerminalClientMessage, error)
+	Send(ctx context.Context, message InstanceExecTerminalServerMessage) error
+}
+
+type InstanceExecSessionConnector interface {
+	ConnectExecSession(ctx context.Context, session InstanceExecSessionRecord, stream InstanceExecTerminalStream) error
+}
+
 // InstanceObservability exposes local/real runtime observations without
 // leaking Kubernetes, kubelet, Prometheus, or terminal provider SDK objects.
 type InstanceObservability interface {

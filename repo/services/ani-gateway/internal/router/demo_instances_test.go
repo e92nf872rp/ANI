@@ -689,6 +689,102 @@ func TestDemoInstanceExecWebSocketRejectsMissingToken(t *testing.T) {
 	}
 }
 
+func TestExecTerminalInputPayloadUsesKubeCloudStdinData(t *testing.T) {
+	payload, write := execTerminalInputPayload([]byte(`{"Op":"stdin","Data":"echo ok\n"}`))
+	if !write {
+		t.Fatalf("execTerminalInputPayload write = false, want true")
+	}
+	if string(payload) != "echo ok\n" {
+		t.Fatalf("execTerminalInputPayload payload = %q, want stdin Data", payload)
+	}
+}
+
+func TestExecTerminalInputPayloadMapsCarriageReturnToShellNewline(t *testing.T) {
+	payload, write := execTerminalInputPayload([]byte(`{"Op":"stdin","Data":"\r"}`))
+	if !write {
+		t.Fatalf("execTerminalInputPayload write = false, want true")
+	}
+	if string(payload) != "\n" {
+		t.Fatalf("execTerminalInputPayload payload = %q, want shell newline", payload)
+	}
+	if got := string(execTerminalLocalEchoPayload(true, []byte("\r"))); got != "\r" {
+		t.Fatalf("execTerminalLocalEchoPayload = %q, want carriage return echo", got)
+	}
+}
+
+func TestExecTerminalClientMessagePreservesRawStdinForProviderExec(t *testing.T) {
+	msg, write := execTerminalClientMessageFromPayload([]byte(`{"Op":"stdin","Data":"\r"}`))
+	if !write {
+		t.Fatalf("execTerminalClientMessageFromPayload write = false, want true")
+	}
+	if msg.Op != "stdin" || string(msg.Data) != "\r" {
+		t.Fatalf("terminal client message = %+v data=%q, want raw carriage return stdin", msg, msg.Data)
+	}
+}
+
+func TestExecTerminalClientMessageMapsResizeForProviderExec(t *testing.T) {
+	msg, write := execTerminalClientMessageFromPayload([]byte(`{"Op":"resize","Cols":120,"Rows":30}`))
+	if !write {
+		t.Fatalf("execTerminalClientMessageFromPayload write = false, want true")
+	}
+	if msg.Op != "resize" || msg.Cols != 120 || msg.Rows != 30 {
+		t.Fatalf("terminal client message = %+v, want resize rows/cols", msg)
+	}
+}
+
+func TestExecTerminalInputPayloadConsumesKubeCloudResize(t *testing.T) {
+	payload, write := execTerminalInputPayload([]byte(`{"Op":"resize","Cols":120,"Rows":30}`))
+	if write || payload != nil {
+		t.Fatalf("execTerminalInputPayload = (%q, %v), want resize consumed", payload, write)
+	}
+}
+
+func TestExecTerminalInputPayloadKeepsRawInputCompatibility(t *testing.T) {
+	payload, write := execTerminalInputPayload([]byte("ls -la\n"))
+	if !write {
+		t.Fatalf("execTerminalInputPayload write = false, want true")
+	}
+	if string(payload) != "ls -la\n" {
+		t.Fatalf("execTerminalInputPayload payload = %q, want raw input", payload)
+	}
+}
+
+func TestWriteExecTerminalMessageFramesJSONData(t *testing.T) {
+	var buf bytes.Buffer
+	if err := writeExecTerminalMessage(&buf, "stdout", []byte("hello\n")); err != nil {
+		t.Fatalf("writeExecTerminalMessage error = %v", err)
+	}
+	opcode, payload, err := readWebSocketFrame(&buf)
+	if err != nil {
+		t.Fatalf("readWebSocketFrame error = %v", err)
+	}
+	if opcode != 1 {
+		t.Fatalf("opcode = %d, want text frame", opcode)
+	}
+	var msg execTerminalMessage
+	if err := json.Unmarshal(payload, &msg); err != nil {
+		t.Fatalf("terminal message JSON = %q error = %v", payload, err)
+	}
+	if msg.Op != "stdout" || msg.Data != "hello\n" {
+		t.Fatalf("terminal message = %+v, want stdout Data", msg)
+	}
+}
+
+func TestExecTerminalOutputOpFoldsStderrIntoStdout(t *testing.T) {
+	if got := execTerminalOutputOp("stderr"); got != "stdout" {
+		t.Fatalf("execTerminalOutputOp(stderr) = %q, want stdout", got)
+	}
+}
+
+func TestExecTerminalLocalEchoOnlyForTTYInput(t *testing.T) {
+	if got := string(execTerminalLocalEchoPayload(true, []byte("l"))); got != "l" {
+		t.Fatalf("execTerminalLocalEchoPayload tty = %q, want typed input", got)
+	}
+	if got := execTerminalLocalEchoPayload(false, []byte("l")); got != nil {
+		t.Fatalf("execTerminalLocalEchoPayload non-tty = %q, want nil", got)
+	}
+}
+
 func TestDemoInstanceLogsEndpointUsesFollowParameterForSSE(t *testing.T) {
 	h := server.New()
 	RegisterWithOptions(h, RegisterOptions{})

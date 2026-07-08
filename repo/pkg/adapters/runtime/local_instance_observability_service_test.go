@@ -123,10 +123,51 @@ func TestLocalInstanceObservabilityExecSessionIsIdempotentAndShortLived(t *testi
 	}
 }
 
+func TestLocalInstanceObservabilityExecSessionLookupAllowsTokenOnlyHandshake(t *testing.T) {
+	service := NewLocalInstanceObservabilityService()
+	req := ports.InstanceExecSessionCreateRequest{
+		TenantID:       "tenant-a",
+		InstanceID:     "instance-a",
+		IdempotencyKey: "exec-token-only",
+		Command:        []string{"/bin/sh"},
+		TTY:            true,
+	}
+	session, err := service.CreateExecSession(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CreateExecSession error = %v", err)
+	}
+
+	resolved, err := service.GetExecSession(context.Background(), ports.InstanceExecSessionGetRequest{
+		InstanceID: session.InstanceID,
+		SessionID:  session.ID,
+		Token:      session.Token,
+	})
+	if err != nil {
+		t.Fatalf("GetExecSession without tenant error = %v", err)
+	}
+	if resolved.TenantID != req.TenantID || resolved.ID != session.ID {
+		t.Fatalf("resolved session = %+v, want tenant %q session %q", resolved, req.TenantID, session.ID)
+	}
+	if _, err := service.GetExecSession(context.Background(), ports.InstanceExecSessionGetRequest{
+		InstanceID: session.InstanceID,
+		SessionID:  session.ID,
+		Token:      "wrong-token",
+	}); err == nil {
+		t.Fatalf("GetExecSession with wrong token succeeded, want error")
+	}
+}
+
 func TestInstanceExecWSURLNormalizesHTTPBaseURL(t *testing.T) {
 	got := instanceExecWSURL("http://gateway.example.test/api/v1", "inst-a", "session-a", "token-a")
 	if !strings.HasPrefix(got, "ws://gateway.example.test/api/v1/instances/inst-a/exec/session-a?") {
 		t.Fatalf("ws_url = %q, want ws scheme", got)
+	}
+}
+
+func TestInstanceExecWSURLAddsCoreAPIBasePath(t *testing.T) {
+	got := instanceExecWSURL("http://gateway.example.test", "inst-a", "session-a", "token-a")
+	if !strings.HasPrefix(got, "ws://gateway.example.test/api/v1/instances/inst-a/exec/session-a?") {
+		t.Fatalf("ws_url = %q, want /api/v1 base path", got)
 	}
 }
 

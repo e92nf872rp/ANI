@@ -110,10 +110,24 @@ func tenantContextFromIDs(tenantID, userID string, roles []string) (*types.Tenan
 }
 
 func isPublicPath(path string) bool {
+	if isExecWebSocketPath(path) {
+		return true
+	}
 	switch path {
 	case "/health", "/ready", "/healthz", "/readyz", "/api/v1/branding", "/api/v1/auth/oidc/begin", "/api/v1/auth/token", "/api/v1/auth/refresh":
 		return true
 	default:
 		return false
 	}
+}
+
+func isExecWebSocketPath(path string) bool {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	return len(parts) == 6 &&
+		parts[0] == "api" &&
+		parts[1] == "v1" &&
+		parts[2] == "instances" &&
+		parts[4] == "exec" &&
+		parts[3] != "" &&
+		parts[5] != ""
 }

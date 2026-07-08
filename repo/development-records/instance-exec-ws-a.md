@@ -16,7 +16,7 @@ Console 交互式终端使用浏览器原生 `WebSocket`，无法在握手时自
    - `InstanceExecSession.ws_url` 明确为浏览器可直连 URL，必须包含短期 `token` query。
    - `InstanceExecSession.token` 明确为短期一次性 WebSocket 握手票据，与 `ws_url` query 中的 token 相同。
    - 新增 `GET /api/v1/instances/{instance_id}/exec/{session_id}`，operationId `connectInstanceExecSession`，RBAC `scope:instances:exec`。
-   - WebSocket 帧协议固定为普通 text/binary 帧原始 stdin/stdout 透传；resize 使用 `{"type":"resize","cols":120,"rows":30}` 控制帧。
+   - WebSocket 帧协议固定为 KubeCloud TerminalMessage JSON：stdin 使用 `{"Op":"stdin","Data":"<typed chars>"}`，resize 使用 `{"Op":"resize","Cols":120,"Rows":30}`，终端可见输出统一使用 `{"Op":"stdout","Data":"<terminal output>"}`；local profile TTY 模式回显 stdin；兼容旧普通 text/binary stdin 与旧 `{"type":"resize","cols":120,"rows":30}` 控制帧。
 2. **Gateway / RBAC**
    - 注册 `GET /instances/:instance_id/exec/:session_id`。
    - `inferPermission` 将 `POST /instances/{id}/exec` 与 `GET /instances/{id}/exec/{session}` 映射到 `instances:exec`，不再误判为 `instances:create/get`。

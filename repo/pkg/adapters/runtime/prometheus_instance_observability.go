@@ -34,6 +34,7 @@ type PrometheusInstanceObservability struct {
 	prometheusURL string
 	kubeClient    *KubernetesRESTClient
 	execBaseURL   string
+	execDialer    kubernetesExecDialer
 	now           func() time.Time
 	mu            sync.RWMutex
 	sessions      map[string]ports.InstanceExecSessionRecord
@@ -66,6 +67,7 @@ func NewPrometheusInstanceObservability(config PrometheusInstanceObservabilityCo
 		prometheusURL: prometheusURL,
 		kubeClient:    client,
 		execBaseURL:   strings.TrimRight(firstNonEmpty(strings.TrimSpace(config.ExecBaseURL), "ws://127.0.0.1:8080/api/v1"), "/"),
+		execDialer:    dialKubernetesExecWebSocket,
 		now:           now,
 		sessions:      make(map[string]ports.InstanceExecSessionRecord),
 	}, nil
@@ -264,8 +266,8 @@ func (o *PrometheusInstanceObservability) CreateExecSession(_ context.Context, r
 }
 
 func (o *PrometheusInstanceObservability) GetExecSession(_ context.Context, request ports.InstanceExecSessionGetRequest) (ports.InstanceExecSessionRecord, error) {
-	if err := validateInstanceObservationIdentity(request.TenantID, request.InstanceID); err != nil {
-		return ports.InstanceExecSessionRecord{}, err
+	if strings.TrimSpace(request.InstanceID) == "" {
+		return ports.InstanceExecSessionRecord{}, fmt.Errorf("%w: instance_id is required", ports.ErrInvalid)
 	}
 	if strings.TrimSpace(request.SessionID) == "" {
 		return ports.InstanceExecSessionRecord{}, fmt.Errorf("%w: session_id is required", ports.ErrInvalid)
@@ -279,7 +281,10 @@ func (o *PrometheusInstanceObservability) GetExecSession(_ context.Context, requ
 		if record.ID != request.SessionID {
 			continue
 		}
-		if record.TenantID != request.TenantID || record.InstanceID != request.InstanceID {
+		if request.TenantID != "" && record.TenantID != request.TenantID {
+			return ports.InstanceExecSessionRecord{}, ports.ErrNotFound
+		}
+		if record.InstanceID != request.InstanceID {
 			return ports.InstanceExecSessionRecord{}, ports.ErrNotFound
 		}
 		if record.Token != request.Token {
