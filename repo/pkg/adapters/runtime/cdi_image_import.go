@@ -34,10 +34,9 @@ type CDIRESTClient interface {
 const (
 	cdiAPIGroupVersion       = "cdi.kubevirt.io/v1beta1"
 	cdiUploadAPIGroupVersion = "upload.cdi.kubevirt.io/v1beta1"
-	cdiDataVolumesResource   = "datavolumes"
-	cdiUploadTokensResource  = "uploadtokenrequests"
-	defaultCDIStorageClass   = "ani-rbd-ssd"
-	defaultCDIUploadPath     = "/v1beta1/upload"
+	cdiDataVolumesResource  = "datavolumes"
+	cdiUploadTokensResource = "uploadtokenrequests"
+	defaultCDIUploadPath    = "/v1beta1/upload"
 	cdiUploadSessionTTL      = 15 * time.Minute
 
 	cdiImmediateBindAnnotation  = "cdi.kubevirt.io/storage.bind.immediate.requested"
@@ -80,8 +79,11 @@ func NewCDIImageImportService(client CDIRESTClient, uploadBaseURL string, option
 	svc := &CDIImageImportService{
 		client:        client,
 		uploadBaseURL: strings.TrimRight(strings.TrimSpace(uploadBaseURL), "/"),
-		storageClass:  defaultCDIStorageClass,
-		now:           func() time.Time { return time.Now().UTC() },
+		// Empty storageClass omits storageClassName so CDI/K8s uses the
+		// cluster default StorageClass. Callers may override via request
+		// field or WithCDIStorageClass.
+		storageClass: "",
+		now:          func() time.Time { return time.Now().UTC() },
 	}
 	for _, option := range options {
 		option(svc)
@@ -199,6 +201,17 @@ func cdiDataVolumeManifest(namespace, name string, req ports.ImageUploadCreateRe
 	if contentType := strings.TrimSpace(req.ContentType); contentType != "" {
 		annotations[cdiContentTypeAnnotation] = contentType
 	}
+	// ISO uploads need Filesystem+RWO. Some StorageProfiles (e.g. ani-rbd-ssd)
+	// prefer Block+RWX by default, which breaks CDI uploadserver block device
+	// access (Permission denied). Force Filesystem+RWO on the DV itself.
+	storage := map[string]any{
+		"accessModes": []any{"ReadWriteOnce"},
+		"volumeMode":  "Filesystem",
+		"resources":   map[string]any{"requests": map[string]any{"storage": strconv.FormatInt(req.SizeGiB, 10) + "Gi"}},
+	}
+	if trimmed := strings.TrimSpace(storageClass); trimmed != "" {
+		storage["storageClassName"] = trimmed
+	}
 	return map[string]any{
 		"apiVersion": cdiAPIGroupVersion,
 		"kind":       "DataVolume",
@@ -211,11 +224,8 @@ func cdiDataVolumeManifest(namespace, name string, req ports.ImageUploadCreateRe
 			},
 		},
 		"spec": map[string]any{
-			"source": map[string]any{"upload": map[string]any{}},
-			"storage": map[string]any{
-				"resources":        map[string]any{"requests": map[string]any{"storage": strconv.FormatInt(req.SizeGiB, 10) + "Gi"}},
-				"storageClassName": storageClass,
-			},
+			"source":  map[string]any{"upload": map[string]any{}},
+			"storage": storage,
 		},
 	}
 }

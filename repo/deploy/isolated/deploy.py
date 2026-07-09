@@ -568,9 +568,19 @@ def deploy_ceph_cluster() -> None:
     wait_ceph_blockpool()
     wait_storage_class(STORAGE_CLASS)
     set_default_storage_class(STORAGE_CLASS)
+    apply_cdi_storage_profile()
     wait_crd("drivers.csi.ceph.io")
     ensure_rbd_csi_driver()
     wait_csi_rbd_driver()
+
+
+def apply_cdi_storage_profile() -> None:
+    """Prefer Filesystem+RWO on ani-rbd-ssd so CDI upload/importer can open volumes."""
+    profile = YAML_DIR / "09-cdi-storageprofile-filesystem.yaml"
+    if not profile.is_file():
+        raise DeployError(f"missing CDI StorageProfile manifest: {profile}")
+    log("foundation: CDI StorageProfile Filesystem+RWO for ani-rbd-ssd")
+    kubectl_apply(profile)
 
 
 def install_kubevirt() -> None:
@@ -649,6 +659,7 @@ def render_yaml() -> None:
         "06-cdi-operator.yaml",
         "07-cdi-cr.yaml",
         "08-cdi-uploadproxy-nodeport.yaml",
+        "09-cdi-storageprofile-filesystem.yaml",
         "03-rook-ceph-operator.yaml",
         "05-harbor.yaml",
     ):
@@ -848,11 +859,14 @@ def deploy_business(cfg: dict[str, str], version: str) -> None:
     kubectl_apply(DEPLOY / "business-stack.yaml")
 
     external_base = f"http://{node_ip()}"
+    external_https = f"https://{node_ip()}"
     kubectl(
         "-n", ns, "set", "env", "deploy/ani-gateway",
         f"INSTANCE_OBSERVABILITY_EXEC_BASE_URL={external_base}:30080",
         f"INSTANCE_CONSOLE_BASE_URL={external_base}:30080",
         f"OBJECT_STORE_PUBLIC_ENDPOINT={external_base}:30900",
+        f"CDI_UPLOADPROXY_URL={external_https}:31001",
+        "IMAGE_IMPORT_PROVIDER=cdi_rest",
     )
 
     issuer_host = urllib.parse.urlparse(cfg["oidc_issuer_url"]).hostname

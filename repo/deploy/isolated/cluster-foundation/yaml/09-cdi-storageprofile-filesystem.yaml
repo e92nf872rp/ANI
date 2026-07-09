@@ -1,0 +1,17 @@
+# Prefer Filesystem+RWO for ani-rbd-ssd so CDI upload/importer can open the
+# volume. Without this, StorageProfile may claim Block+RWX and CDI fails with
+# "blockdev: cannot open /dev/cdi-block-volume: Permission denied".
+# Application code also forces Filesystem+RWO on ISO upload / blank root DVs;
+# this profile keeps cluster defaults aligned for other CDI consumers.
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: StorageProfile
+metadata:
+  name: ani-rbd-ssd
+  labels:
+    app.kubernetes.io/name: cdi
+    ani.deploy/profile: isolated
+spec:
+  claimPropertySets:
+    - accessModes:
+        - ReadWriteOnce
+      volumeMode: Filesystem

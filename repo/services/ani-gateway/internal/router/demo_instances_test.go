@@ -231,7 +231,7 @@ func TestDemoInstanceServiceCreatesVMWithISOBootMediaRendersCdromManifestNotCont
 		"cdrom", "img-abc123", "rootdisk",
 		// Blank root disk must be self-creating via dataVolumeTemplates, not
 		// just a claimName reference to a PVC that apply never creates.
-		"dataVolumeTemplates", "vm-iso-create-root", `"blank"`, `"40Gi"`, "ani-rbd-ssd",
+		"dataVolumeTemplates", "vm-iso-create-root", `"blank"`, `"40Gi"`,
 	} {
 		if !strings.Contains(vmManifest, want) {
 			t.Fatalf("VM manifest missing %q:\n%s", want, vmManifest)

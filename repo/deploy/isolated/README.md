@@ -17,11 +17,13 @@
 
 ```text
 render → mirror → foundation:
-         KubeVirt → Rook operator → Ceph OSD 预备 → CephCluster → StorageClass ani-rbd-ssd → Harbor(PVC)
+         KubeVirt → CDI → Rook operator → Ceph OSD 预备 → CephCluster
+         → StorageClass ani-rbd-ssd（标为 default）→ Harbor(PVC)
        → base-infra(Postgres PVC + DB init) → business → verify
 ```
 
 **必须先有 `ani-rbd-ssd` StorageClass**，才会部署 Harbor 和 Postgres 等业务组件。
+`deploy.py` 会把 `ani-rbd-ssd` 标为集群 default StorageClass；Images/ISO 空白盘在未传 `storage_class` 时省略字段，走该默认类。
 
 ## 一键部署
 
@@ -68,6 +70,7 @@ base-infra 阶段会在 Postgres Ready 后执行 `deploy/postgres/ani-dev-databa
 | 服务 | 地址 |
 |---|---|
 | Gateway | `http://<node-ip>:30080` |
+| CDI uploadproxy | `https://<node-ip>:31001`（ISO 直传；自签证书需客户端跳过校验） |
 | MinIO | `http://<node-ip>:30900` |
 | Prometheus | `http://<node-ip>:31990` |
 | Dex | `http://console.example.local:30556/dex`（外部 issuer） / `http://<node-ip>:30556`（直连探针） |
@@ -75,6 +78,30 @@ base-infra 阶段会在 Postgres Ready 后执行 `deploy/postgres/ani-dev-databa
 | Harbor | `http://<node-ip>:30002`（admin / `ani-harbor-admin-dev`） |
 
 `deploy.py` 会把 OIDC issuer 里的主机名写入 `ani-auth-service` 的 `hostAliases`，默认指向首个节点 InternalIP；如需覆盖，设置 `OIDC_HOST_ALIAS_IP`。
+业务阶段还会把 Gateway 的 `INSTANCE_CONSOLE_BASE_URL`、`CDI_UPLOADPROXY_URL`、`IMAGE_IMPORT_PROVIDER=cdi_rest` 写成当前节点 IP。
+
+## ISO / Images 冒烟（可选）
+
+前置：foundation（含 CDI）+ business 已部署，Gateway Ready。
+
+```bash
+# 1) 创建上传会话（勿传 storage_class → 走集群 default SC）
+curl -sS -X POST "http://<node-ip>:30080/api/v1/images/uploads" \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: iso-smoke-1" \
+  -d '{"idempotency_key":"iso-smoke-1","name":"ubuntu-2204","format":"iso","size_gib":5}'
+
+# 2) 等 DV UploadReady 后，用返回的 upload_url + token 直传 ISO
+#    curl -k -X POST -H "Authorization: Bearer <upload-token>" \
+#      --data-binary @ubuntu.iso "<upload_url>"
+
+# 3) 轮询至 state=ready，再 CreateInstance：
+#    boot_media.type=iso + boot_media.image_id + root_disk_size_gib
+# 4) 控制台：POST /instances/{id}/actions/console → connect_url（noVNC）
+```
+
+注意：ISO 上传 DV 与空白系统盘强制 `Filesystem` + `ReadWriteOnce`（避免部分 StorageProfile 默认 Block+RWX 导致 CDI Permission denied）。Gateway ClusterRole 需含 `datavolumes` / `uploadtokenrequests`（已写入 `business-stack.yaml`）。
 
 ## 目录结构
 

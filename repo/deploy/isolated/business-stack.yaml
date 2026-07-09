@@ -84,6 +84,12 @@ rules:
       - "virtualmachineinstances/vnc"
       - "virtualmachineinstances/portforward"
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["cdi.kubevirt.io"]
+    resources: ["datavolumes"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["upload.cdi.kubevirt.io"]
+    resources: ["uploadtokenrequests"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -282,10 +288,11 @@ spec:
               value: "prometheus_kubernetes"
             - name: INSTANCE_OBSERVABILITY_PROMETHEUS_URL
               value: "http://prometheus.ani-system.svc.cluster.local:9090"
+            # deploy.py overwrites these with http://<node-ip>:30080 on business deploy.
             - name: INSTANCE_OBSERVABILITY_EXEC_BASE_URL
-              value: "http://192.168.102.51:30080"
+              value: "http://127.0.0.1:30080"
             - name: INSTANCE_CONSOLE_BASE_URL
-              value: "http://192.168.102.51:30080"
+              value: "http://127.0.0.1:30080"
             - name: NETWORK_PROVIDER
               value: "kubeovn_rest"
             - name: NETWORK_PROVIDER_APPLY_ENABLED
@@ -336,8 +343,9 @@ spec:
               value: "true"
             - name: IMAGE_IMPORT_PROVIDER
               value: "cdi_rest"
+            # deploy.py overwrites this with https://<node-ip>:31001 on business deploy.
             - name: CDI_UPLOADPROXY_URL
-              value: "https://192.168.102.51:31001"
+              value: "https://127.0.0.1:31001"
           readinessProbe:
             httpGet:
               path: /readyz

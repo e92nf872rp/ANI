@@ -119,8 +119,15 @@ func TestCDIImageImportCreateUploadCreatesDataVolumeAndUploadToken(t *testing.T)
 		t.Fatalf("spec.source = %+v, want upload source", source)
 	}
 	storage, _ := spec["storage"].(map[string]any)
-	if storage["storageClassName"] != "ani-rbd-ssd" {
-		t.Fatalf("storageClassName = %v, want ani-rbd-ssd", storage["storageClassName"])
+	if _, ok := storage["storageClassName"]; ok {
+		t.Fatalf("storageClassName = %v, want omitted (cluster default)", storage["storageClassName"])
+	}
+	if storage["volumeMode"] != "Filesystem" {
+		t.Fatalf("volumeMode = %v, want Filesystem", storage["volumeMode"])
+	}
+	modes, _ := storage["accessModes"].([]any)
+	if len(modes) != 1 || modes[0] != "ReadWriteOnce" {
+		t.Fatalf("accessModes = %v, want [ReadWriteOnce]", modes)
 	}
 	metadata, _ := dvCall.Body["metadata"].(map[string]any)
 	annotations, _ := metadata["annotations"].(map[string]any)
@@ -148,6 +155,28 @@ func TestCDIImageImportCreateUploadCreatesDataVolumeAndUploadToken(t *testing.T)
 	}
 	if session.Image.ID == "" {
 		t.Fatal("image id must not be empty")
+	}
+}
+
+func TestCDIImageImportCreateUploadUsesExplicitStorageClass(t *testing.T) {
+	fake := newFakeCDIRESTClient()
+	svc := NewCDIImageImportService(fake, "https://cdi-uploadproxy.example:31001", WithCDIImageImportClock(fixedCDIClock()))
+
+	_, err := svc.CreateUpload(context.Background(), ports.ImageUploadCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "iso-sc",
+		Name:           "ubuntu-2204",
+		Format:         ports.ImageFormatISO,
+		SizeGiB:        5,
+		StorageClass:   "custom-sc",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, _ := fake.createCalls[0].Body["spec"].(map[string]any)
+	storage, _ := spec["storage"].(map[string]any)
+	if storage["storageClassName"] != "custom-sc" {
+		t.Fatalf("storageClassName = %v, want custom-sc", storage["storageClassName"])
 	}
 }
 

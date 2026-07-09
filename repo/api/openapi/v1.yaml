@@ -698,7 +698,7 @@ components:
         storage_class:
           type: string
           nullable: true
-          description: "使用的存储类；未指定时由平台默认（如 ani-rbd-ssd）。"
+          description: "使用的存储类；未指定时省略 storageClassName，由集群默认 StorageClass 承接。"
         dev_profile:
           $ref: '#/components/schemas/CoreDevProfileInfo'
         created_at:  { type: string, format: date-time }
@@ -734,7 +734,7 @@ components:
         storage_class:
           type: string
           nullable: true
-          description: "可选；默认平台块存储类。"
+          description: "可选；未指定时省略，由集群默认 StorageClass 承接。"
 
     ImageUploadSession:
       type: object

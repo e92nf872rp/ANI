@@ -548,6 +548,17 @@ func vmISODataVolumeTemplates(spec ports.WorkloadSpec) []any {
 		if attachment.Kind != ports.StorageAttachmentRootDisk {
 			continue
 		}
+		// Match ISO upload DV: force Filesystem+RWO so CDI importer can open
+		// the volume even when the StorageProfile prefers Block+RWX.
+		// Omit storageClassName when unset so the cluster default SC is used.
+		storage := map[string]any{
+			"accessModes": []any{"ReadWriteOnce"},
+			"volumeMode":  "Filesystem",
+			"resources":   map[string]any{"requests": map[string]any{"storage": sizeGi(attachment.SizeGiB)}},
+		}
+		if sc := strings.TrimSpace(attachment.StorageClass); sc != "" {
+			storage["storageClassName"] = sc
+		}
 		return []any{
 			map[string]any{
 				"metadata": map[string]any{
@@ -557,11 +568,8 @@ func vmISODataVolumeTemplates(spec ports.WorkloadSpec) []any {
 					},
 				},
 				"spec": map[string]any{
-					"source": map[string]any{"blank": map[string]any{}},
-					"storage": map[string]any{
-						"resources":        map[string]any{"requests": map[string]any{"storage": sizeGi(attachment.SizeGiB)}},
-						"storageClassName": firstNonEmpty(attachment.StorageClass, defaultCDIStorageClass),
-					},
+					"source":  map[string]any{"blank": map[string]any{}},
+					"storage": storage,
 				},
 			},
 		}

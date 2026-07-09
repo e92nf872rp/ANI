@@ -77,7 +77,6 @@ func TestRenderVMWithISOBootMediaUsesCdromAndBlankRoot(t *testing.T) {
 		`"vm-iso-01-root"`,
 		`"blank"`,
 		`"40Gi"`,
-		`"ani-rbd-ssd"`,
 		`"cdi.kubevirt.io/storage.bind.immediate.requested": "true"`,
 		`"dataVolume"`,
 	} {
@@ -111,8 +110,15 @@ func TestRenderVMWithISOBootMediaUsesCdromAndBlankRoot(t *testing.T) {
 		t.Fatalf("dataVolumeTemplates[0].spec.source must be blank:\n%s", content)
 	}
 	storage, _ := templateSpec["storage"].(map[string]any)
-	if sc, _ := storage["storageClassName"].(string); sc != "ani-rbd-ssd" {
-		t.Fatalf("dataVolumeTemplates[0].spec.storage.storageClassName = %q, want %q", sc, "ani-rbd-ssd")
+	if _, ok := storage["storageClassName"]; ok {
+		t.Fatalf("dataVolumeTemplates[0].spec.storage.storageClassName = %v, want omitted (cluster default)", storage["storageClassName"])
+	}
+	if vm, _ := storage["volumeMode"].(string); vm != "Filesystem" {
+		t.Fatalf("dataVolumeTemplates[0].spec.storage.volumeMode = %q, want Filesystem", vm)
+	}
+	modes, _ := storage["accessModes"].([]any)
+	if len(modes) != 1 || modes[0] != "ReadWriteOnce" {
+		t.Fatalf("dataVolumeTemplates[0].spec.storage.accessModes = %v, want [ReadWriteOnce]", modes)
 	}
 	resources, _ := storage["resources"].(map[string]any)
 	requests, _ := resources["requests"].(map[string]any)

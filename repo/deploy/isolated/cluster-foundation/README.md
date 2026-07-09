@@ -25,6 +25,7 @@ file-backed loop device。两种路径都会把实际设备写入
 | `yaml/06-cdi-operator.yaml` | CDI v1.65.0 operator / CRD 官方 release manifest（镜像改为本地 mirror） |
 | `yaml/07-cdi-cr.yaml` | CDI CR，固定 `ani-rbd-ssd` scratch StorageClass；镜像 pin 由 operator manifest 承载 |
 | `yaml/08-cdi-uploadproxy-nodeport.yaml` | `cdi-uploadproxy-nodeport` NodePort `31001` |
+| `yaml/09-cdi-storageprofile-filesystem.yaml` | `ani-rbd-ssd` StorageProfile 偏好 `Filesystem`+`ReadWriteOnce`（避免 CDI Block Permission denied） |
 | `ceph-osd-prep.yaml` | 节点 OSD block device 预备（LVM 优先，loop fallback） |
 | `rook-ceph-cluster.yaml` | BlockPool + StorageClass 模板 |
 | `rook-ceph-install-values.yaml` | Rook operator 厂库镜像 |
