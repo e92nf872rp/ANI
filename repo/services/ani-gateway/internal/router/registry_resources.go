@@ -9,6 +9,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/route"
 	registryadapter "github.com/kubercloud/ani/pkg/adapters/registry"
 	"github.com/kubercloud/ani/pkg/ports"
+	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 )
 
 type registryAPI struct {
@@ -170,7 +171,7 @@ func registerHarborWithService(v1 *route.RouterGroup, service ports.ImageRegistr
 
 func (api *registryAPI) listProjects(ctx context.Context, c *app.RequestContext) {
 	result, err := api.service.ListProjects(ctx, ports.RegistryProjectListRequest{
-		TenantID: demoTenantID(c),
+		TenantID: middleware.GetTenantID(c),
 		Limit:    queryInt(c, "limit", 20),
 		Cursor:   c.Query("cursor"),
 	})
@@ -188,7 +189,7 @@ func (api *registryAPI) createProject(ctx context.Context, c *app.RequestContext
 		return
 	}
 	project, err := api.service.CreateProject(ctx, ports.RegistryProjectRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       middleware.GetTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
 		Public:         req.Public,
@@ -202,7 +203,7 @@ func (api *registryAPI) createProject(ctx context.Context, c *app.RequestContext
 
 func (api *registryAPI) listRepositories(ctx context.Context, c *app.RequestContext) {
 	result, err := api.service.ListRepositories(ctx, ports.RegistryRepositoryListRequest{
-		TenantID: demoTenantID(c),
+		TenantID: middleware.GetTenantID(c),
 		Project:  c.Param("project"),
 		Limit:    queryInt(c, "limit", 20),
 		Cursor:   c.Query("cursor"),
@@ -216,7 +217,7 @@ func (api *registryAPI) listRepositories(ctx context.Context, c *app.RequestCont
 
 func (api *registryAPI) listArtifacts(ctx context.Context, c *app.RequestContext) {
 	result, err := api.service.ListArtifacts(ctx, ports.RegistryArtifactListRequest{
-		TenantID:   demoTenantID(c),
+		TenantID:   middleware.GetTenantID(c),
 		Project:    c.Param("project"),
 		Repository: c.Param("repository"),
 		Limit:      queryInt(c, "limit", 20),
@@ -240,7 +241,7 @@ func (api *registryAPI) setPermission(ctx context.Context, c *app.RequestContext
 		actions = append(actions, ports.RegistryPermissionAction(action))
 	}
 	permission, err := api.service.SetRepositoryPermission(ctx, ports.RegistryPermissionRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       middleware.GetTenantID(c),
 		Project:        c.Param("project"),
 		Repository:     c.Param("repository"),
 		IdempotencyKey: req.IdempotencyKey,
@@ -261,7 +262,7 @@ func (api *registryAPI) createPullSecret(ctx context.Context, c *app.RequestCont
 		return
 	}
 	secret, err := api.service.CreatePullSecret(ctx, ports.RegistryPullSecretRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       middleware.GetTenantID(c),
 		Project:        c.Param("project"),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
@@ -285,7 +286,7 @@ func (api *registryAPI) applyPullSecretToKubernetes(ctx context.Context, c *app.
 		return
 	}
 	result, err := api.pullSecretKubernetesApply.ApplyPullSecretToKubernetes(ctx, ports.RegistryPullSecretKubernetesApplyRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       middleware.GetTenantID(c),
 		Project:        c.Param("project"),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
@@ -300,7 +301,7 @@ func (api *registryAPI) applyPullSecretToKubernetes(ctx context.Context, c *app.
 
 func (api *registryAPI) getProjectScanReport(ctx context.Context, c *app.RequestContext) {
 	result, err := api.service.GetProjectScanReport(ctx, ports.RegistryProjectScanReportRequest{
-		TenantID: demoTenantID(c),
+		TenantID: middleware.GetTenantID(c),
 		Project:  c.Param("project"),
 	})
 	if err != nil {
@@ -312,7 +313,7 @@ func (api *registryAPI) getProjectScanReport(ctx context.Context, c *app.Request
 
 func (api *registryAPI) getScanResult(ctx context.Context, c *app.RequestContext) {
 	result, err := api.service.GetScanResult(ctx, ports.RegistryScanResultRequest{
-		TenantID: demoTenantID(c),
+		TenantID: middleware.GetTenantID(c),
 		Image:    c.Query("image"),
 	})
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/route"
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
+	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 )
 
 type secretAPI struct {
@@ -86,7 +87,7 @@ func (api *secretAPI) createSecret(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	rec, err := api.service.CreateSecret(ctx, ports.SecretCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       middleware.GetTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
 		Type:           req.Type,
@@ -100,7 +101,7 @@ func (api *secretAPI) createSecret(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *secretAPI) listSecrets(ctx context.Context, c *app.RequestContext) {
-	records, err := api.service.ListSecrets(ctx, ports.SecretListRequest{TenantID: demoTenantID(c)})
+	records, err := api.service.ListSecrets(ctx, ports.SecretListRequest{TenantID: middleware.GetTenantID(c)})
 	if err != nil {
 		writeSecretError(c, err)
 		return
@@ -113,7 +114,7 @@ func (api *secretAPI) listSecrets(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *secretAPI) getSecret(ctx context.Context, c *app.RequestContext) {
-	rec, err := api.service.GetSecret(ctx, ports.SecretGetRequest{TenantID: demoTenantID(c), SecretID: c.Param("secret_id")})
+	rec, err := api.service.GetSecret(ctx, ports.SecretGetRequest{TenantID: middleware.GetTenantID(c), SecretID: c.Param("secret_id")})
 	if err != nil {
 		writeSecretError(c, err)
 		return
@@ -122,7 +123,7 @@ func (api *secretAPI) getSecret(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *secretAPI) deleteSecret(ctx context.Context, c *app.RequestContext) {
-	rec, err := api.service.DeleteSecret(ctx, ports.SecretGetRequest{TenantID: demoTenantID(c), SecretID: c.Param("secret_id")})
+	rec, err := api.service.DeleteSecret(ctx, ports.SecretGetRequest{TenantID: middleware.GetTenantID(c), SecretID: c.Param("secret_id")})
 	if err != nil {
 		writeSecretError(c, err)
 		return
@@ -137,7 +138,7 @@ func (api *secretAPI) bindSecret(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	rec, err := api.service.BindSecret(ctx, ports.SecretBindRequest{
-		TenantID:   demoTenantID(c),
+		TenantID:   middleware.GetTenantID(c),
 		SecretID:   c.Param("secret_id"),
 		TargetType: req.TargetType,
 		TargetID:   req.TargetID,

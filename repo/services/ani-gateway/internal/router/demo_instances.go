@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -495,19 +496,19 @@ func (api *demoInstanceAPI) create(ctx context.Context, c *app.RequestContext) {
 		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
 		return
 	}
-	spec, err := demoSpecFromRequest(req, demoTenantID(c))
+	spec, err := demoSpecFromRequest(req, middleware.GetTenantID(c))
 	if err != nil {
 		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 		return
 	}
-	if err := api.validateInstanceNetworkSelection(ctx, demoTenantID(c), &spec, req.Network); err != nil {
+	if err := api.validateInstanceNetworkSelection(ctx, middleware.GetTenantID(c), &spec, req.Network); err != nil {
 		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 		return
 	}
 	result, err := api.service.Create(ctx, ports.WorkloadInstanceCreateRequest{
 		IdempotencyKey:  req.IdempotencyKey,
 		Spec:            spec,
-		UserID:          demoUserID(c),
+		UserID:          middleware.GetUserID(c),
 		PermissionProof: "demo:instance:create",
 		RequestedAt:     time.Now().UTC(),
 	})
@@ -621,7 +622,7 @@ func applyPrimaryNetworkSelection(spec *ports.WorkloadSpec, vpcID string, subnet
 
 func (api *demoInstanceAPI) get(ctx context.Context, c *app.RequestContext) {
 	record, err := api.service.Get(ctx, ports.WorkloadInstanceGetRequest{
-		TenantID:   demoTenantID(c),
+		TenantID:   middleware.GetTenantID(c),
 		InstanceID: c.Param("instance_id"),
 	})
 	if err != nil {
@@ -634,7 +635,7 @@ func (api *demoInstanceAPI) get(ctx context.Context, c *app.RequestContext) {
 func (api *demoInstanceAPI) list(ctx context.Context, c *app.RequestContext) {
 	kind := ports.WorkloadKind(c.Query("kind"))
 	records, err := api.service.List(ctx, ports.WorkloadInstanceListRequest{
-		TenantID: demoTenantID(c),
+		TenantID: middleware.GetTenantID(c),
 		Kind:     kind,
 	})
 	if err != nil {
@@ -660,12 +661,12 @@ func (api *demoInstanceAPI) lifecycle(ctx context.Context, c *app.RequestContext
 	}
 	lifecycle := ports.WorkloadInstanceLifecycleRequest{
 		IdempotencyKey:  req.IdempotencyKey,
-		TenantID:        demoTenantID(c),
+		TenantID:        middleware.GetTenantID(c),
 		InstanceID:      c.Param("instance_id"),
 		SnapshotName:    req.SnapshotName,
 		VolumeID:        req.VolumeID,
 		Revision:        req.Revision,
-		UserID:          demoUserID(c),
+		UserID:          middleware.GetUserID(c),
 		PermissionProof: "demo:instance:lifecycle",
 		RequestedAt:     time.Now().UTC(),
 	}
@@ -716,7 +717,7 @@ func (api *demoInstanceAPI) lifecycle(ctx context.Context, c *app.RequestContext
 
 func (api *demoInstanceAPI) listOperations(ctx context.Context, c *app.RequestContext) {
 	result, err := api.operations.ListOperations(ctx, ports.WorkloadOperationListRequest{
-		TenantID:   demoTenantID(c),
+		TenantID:   middleware.GetTenantID(c),
 		InstanceID: c.Param("instance_id"),
 		Limit:      queryInt(c, "limit", 20),
 		Cursor:     c.Query("cursor"),
@@ -743,7 +744,7 @@ func (api *demoInstanceAPI) listLogs(ctx context.Context, c *app.RequestContext)
 		return
 	}
 	result, err := api.observability.ListLogs(ctx, ports.InstanceObservationListRequest{
-		TenantID:   demoTenantID(c),
+		TenantID:   middleware.GetTenantID(c),
 		InstanceID: api.observabilityTargetID(record),
 		Limit:      queryInt(c, "limit", 100),
 		Cursor:     c.Query("cursor"),
@@ -771,7 +772,7 @@ func (api *demoInstanceAPI) streamLogs(ctx context.Context, c *app.RequestContex
 	c.SetBodyStream(reader, -1)
 
 	request := ports.InstanceLogStreamRequest{
-		TenantID:   demoTenantID(c),
+		TenantID:   middleware.GetTenantID(c),
 		InstanceID: api.observabilityTargetID(record),
 		TailLines:  queryInt(c, "tail_lines", queryInt(c, "limit", 100)),
 		Level:      c.Query("level"),
@@ -798,7 +799,7 @@ func (api *demoInstanceAPI) listEvents(ctx context.Context, c *app.RequestContex
 		return
 	}
 	result, err := api.observability.ListEvents(ctx, ports.InstanceObservationListRequest{
-		TenantID:   demoTenantID(c),
+		TenantID:   middleware.GetTenantID(c),
 		InstanceID: api.observabilityTargetID(record),
 		Limit:      queryInt(c, "limit", 50),
 		Type:       c.Query("type"),
@@ -817,7 +818,7 @@ func (api *demoInstanceAPI) getMetrics(ctx context.Context, c *app.RequestContex
 		return
 	}
 	result, err := api.observability.GetMetrics(ctx, ports.InstanceObservationGetRequest{
-		TenantID:   demoTenantID(c),
+		TenantID:   middleware.GetTenantID(c),
 		InstanceID: api.observabilityTargetID(record),
 	})
 	if err != nil {
@@ -849,7 +850,7 @@ func (api *demoInstanceAPI) createExecSession(ctx context.Context, c *app.Reques
 		tty = *req.TTY
 	}
 	result, err := api.observability.CreateExecSession(ctx, ports.InstanceExecSessionCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       middleware.GetTenantID(c),
 		InstanceID:     api.observabilityTargetID(record),
 		IdempotencyKey: req.IdempotencyKey,
 		Container:      req.Container,
@@ -887,11 +888,17 @@ func (api *demoInstanceAPI) connectExecSession(ctx context.Context, c *app.Reque
 	c.Response.Header.Set("Connection", "Upgrade")
 	c.Response.Header.Set("Sec-WebSocket-Accept", accept)
 	c.Hijack(func(conn network.Conn) {
+		streamCtx, cancel := newExecWebSocketStreamContext(ctx)
+		defer cancel()
 		if connector, ok := api.observability.(ports.InstanceExecSessionConnector); ok {
-			_ = connector.ConnectExecSession(ctx, session, newExecWebSocketTerminalStream(conn))
+			if err := connector.ConnectExecSession(streamCtx, session, newExecWebSocketTerminalStream(conn)); err != nil {
+				slog.Error("instance exec websocket provider stream failed", "instance_id", session.InstanceID, "session_id", session.ID, "error", err)
+			}
 			return
 		}
-		_ = runLocalExecWebSocket(ctx, conn, session)
+		if err := runLocalExecWebSocket(streamCtx, conn, session); err != nil {
+			slog.Error("instance exec websocket local stream failed", "instance_id", session.InstanceID, "session_id", session.ID, "error", err)
+		}
 	})
 }
 
@@ -902,7 +909,7 @@ func (api *demoInstanceAPI) listSecurityEvents(ctx context.Context, c *app.Reque
 		return
 	}
 	result, err := api.observability.ListSecurityEvents(ctx, ports.InstanceObservationListRequest{
-		TenantID:   demoTenantID(c),
+		TenantID:   middleware.GetTenantID(c),
 		InstanceID: api.observabilityTargetID(record),
 		Limit:      queryInt(c, "limit", 50),
 		Severity:   c.Query("severity"),
@@ -915,7 +922,7 @@ func (api *demoInstanceAPI) listSecurityEvents(ctx context.Context, c *app.Reque
 }
 
 func (api *demoInstanceAPI) getOperation(ctx context.Context, c *app.RequestContext) {
-	record, err := api.operations.GetOperation(ctx, demoTenantID(c), c.Param("operation_id"))
+	record, err := api.operations.GetOperation(ctx, middleware.GetTenantID(c), c.Param("operation_id"))
 	if err != nil {
 		writeDemoError(c, http.StatusNotFound, "INSTANCE_OPERATION_NOT_FOUND", err.Error())
 		return
@@ -926,12 +933,12 @@ func (api *demoInstanceAPI) getOperation(ctx context.Context, c *app.RequestCont
 func (api *demoInstanceAPI) ops(ctx context.Context, c *app.RequestContext) {
 	action := ports.WorkloadInstanceOpsAction(c.Param("action"))
 	result, err := api.service.Ops(ctx, ports.WorkloadInstanceOpsRequest{
-		TenantID:        demoTenantID(c),
+		TenantID:        middleware.GetTenantID(c),
 		InstanceID:      c.Param("instance_id"),
 		Action:          action,
 		ContainerName:   "main",
 		Command:         []string{"sh", "-lc", "echo ani-demo"},
-		UserID:          demoUserID(c),
+		UserID:          middleware.GetUserID(c),
 		PermissionProof: "demo:instance:ops",
 		RequestedAt:     time.Now().UTC(),
 	})
@@ -952,11 +959,11 @@ func (api *demoInstanceAPI) console(ctx context.Context, c *app.RequestContext) 
 	}
 	action := consoleAction(req.Protocol)
 	result, err := api.service.Ops(ctx, ports.WorkloadInstanceOpsRequest{
-		TenantID:        demoTenantID(c),
+		TenantID:        middleware.GetTenantID(c),
 		InstanceID:      c.Param("instance_id"),
 		Action:          action,
 		Protocol:        firstNonEmpty(req.Protocol, string(action)),
-		UserID:          demoUserID(c),
+		UserID:          middleware.GetUserID(c),
 		PermissionProof: "demo:instance:console",
 		RequestedAt:     time.Now().UTC(),
 	})
@@ -974,7 +981,7 @@ func (api *demoInstanceAPI) consoleExec(ctx context.Context, c *app.RequestConte
 		return
 	}
 	record, err := api.service.Get(ctx, ports.WorkloadInstanceGetRequest{
-		TenantID:   demoTenantID(c),
+		TenantID:   middleware.GetTenantID(c),
 		InstanceID: c.Param("instance_id"),
 	})
 	if err != nil {
@@ -1004,7 +1011,7 @@ func (api *demoInstanceAPI) ensureInstanceExists(ctx context.Context, c *app.Req
 
 func (api *demoInstanceAPI) instanceForObservation(ctx context.Context, c *app.RequestContext) (ports.WorkloadInstanceRecord, error) {
 	return api.service.Get(ctx, ports.WorkloadInstanceGetRequest{
-		TenantID:   demoTenantID(c),
+		TenantID:   middleware.GetTenantID(c),
 		InstanceID: c.Param("instance_id"),
 	})
 }
@@ -1612,22 +1619,6 @@ func demoInstanceExecSessionFromRecord(record ports.InstanceExecSessionRecord) d
 	}
 }
 
-func demoTenantID(c *app.RequestContext) string {
-	if tenantID := middleware.GetTenantID(c); tenantID != "" {
-		return tenantID
-	}
-	return "demo-tenant"
-}
-
-func demoUserID(c *app.RequestContext) string {
-	if value, ok := c.Get("user_id"); ok {
-		if userID, ok := value.(string); ok && userID != "" {
-			return userID
-		}
-	}
-	return "demo-user"
-}
-
 func writeDemoError(c *app.RequestContext, status int, code string, message string) {
 	c.JSON(status, map[string]any{
 		"code":       code,
@@ -1669,6 +1660,10 @@ func writeInstanceExecConnectError(c *app.RequestContext, err error) {
 func websocketAcceptKey(key string) string {
 	sum := sha1.Sum([]byte(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
 	return base64.StdEncoding.EncodeToString(sum[:])
+}
+
+func newExecWebSocketStreamContext(_ context.Context) (context.Context, context.CancelFunc) {
+	return context.WithCancel(context.Background())
 }
 
 func runLocalExecWebSocket(ctx context.Context, conn network.Conn, session ports.InstanceExecSessionRecord) error {

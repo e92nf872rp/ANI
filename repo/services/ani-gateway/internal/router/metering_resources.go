@@ -11,6 +11,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/route"
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
+	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 )
 
 type meteringAPI struct {
@@ -91,7 +92,7 @@ func (api *meteringAPI) queryUsage(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	result, err := api.service.QueryUsage(ctx, ports.MeteringUsageQueryRequest{
-		TenantID:     demoTenantID(c),
+		TenantID:     middleware.GetTenantID(c),
 		StartTime:    startTime,
 		EndTime:      endTime,
 		ResourceType: ports.MeteringResourceType(strings.TrimSpace(c.Query("resource_type"))),
@@ -116,7 +117,7 @@ func (api *meteringAPI) reportTokenUsage(ctx context.Context, c *app.RequestCont
 		return
 	}
 	record, err := api.service.ReportTokenUsage(ctx, ports.TokenUsageReportRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       middleware.GetTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		Source:         req.Source,
 		Model:          req.Model,

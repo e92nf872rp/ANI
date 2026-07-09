@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
@@ -679,8 +680,7 @@ func TestDemoInstanceObservabilityResponsesUseLocalProfile(t *testing.T) {
 }
 
 func TestDemoInstanceExecWebSocketRejectsMissingToken(t *testing.T) {
-	h := server.New()
-	RegisterWithOptions(h, RegisterOptions{})
+	h := newDemoInstanceTestServerWithTenant()
 	instanceID := createDemoInstanceForLogs(t, h)
 
 	resp := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/instances/"+instanceID+"/exec/11111111-1111-1111-1111-111111111111", nil).Result()
@@ -785,9 +785,22 @@ func TestExecTerminalLocalEchoOnlyForTTYInput(t *testing.T) {
 	}
 }
 
+func TestExecWebSocketStreamContextSurvivesRequestCancellation(t *testing.T) {
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	cancelRequest()
+
+	streamCtx, cancelStream := newExecWebSocketStreamContext(requestCtx)
+	defer cancelStream()
+
+	select {
+	case <-streamCtx.Done():
+		t.Fatalf("stream context was canceled with request context")
+	default:
+	}
+}
+
 func TestDemoInstanceLogsEndpointUsesFollowParameterForSSE(t *testing.T) {
-	h := server.New()
-	RegisterWithOptions(h, RegisterOptions{})
+	h := newDemoInstanceTestServerWithTenant()
 	instanceID := createDemoInstanceForLogs(t, h)
 
 	listResp := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/instances/"+instanceID+"/logs?limit=1", nil).Result()
@@ -814,8 +827,7 @@ func TestDemoInstanceLogsEndpointUsesFollowParameterForSSE(t *testing.T) {
 }
 
 func TestDemoInstanceLogsStreamEndpointIsNotRegistered(t *testing.T) {
-	h := server.New()
-	RegisterWithOptions(h, RegisterOptions{})
+	h := newDemoInstanceTestServerWithTenant()
 	instanceID := createDemoInstanceForLogs(t, h)
 
 	resp := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/instances/"+instanceID+"/logs/stream", nil).Result()
@@ -895,6 +907,18 @@ func createDemoInstanceForLogs(t *testing.T, h *server.Hertz) string {
 		t.Fatalf("create response missing instance.id: %s", resp.Body())
 	}
 	return payload.Instance.ID
+}
+
+func newDemoInstanceTestServerWithTenant() *server.Hertz {
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "11111111-1111-1111-1111-111111111111")
+		c.Set("user_id", "22222222-2222-2222-2222-222222222222")
+		c.Set("roles", []string{"tenant-admin"})
+		c.Next(ctx)
+	})
+	RegisterWithOptions(h, RegisterOptions{})
+	return h
 }
 
 func TestDemoInstanceLogSSEEncoding(t *testing.T) {

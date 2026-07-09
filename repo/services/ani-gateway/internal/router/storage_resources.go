@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
+	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 )
 
 type storageAPI struct {
@@ -211,7 +212,7 @@ func (api *storageAPI) createVolume(ctx context.Context, c *app.RequestContext) 
 		return
 	}
 	record, err := api.service.CreateVolume(ctx, ports.StorageVolumeCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       middleware.GetTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
 		SizeGiB:        req.SizeGiB,
@@ -225,7 +226,7 @@ func (api *storageAPI) createVolume(ctx context.Context, c *app.RequestContext) 
 }
 
 func (api *storageAPI) listVolumes(ctx context.Context, c *app.RequestContext) {
-	records, err := api.service.ListVolumes(ctx, ports.StorageResourceListRequest{TenantID: demoTenantID(c)})
+	records, err := api.service.ListVolumes(ctx, ports.StorageResourceListRequest{TenantID: middleware.GetTenantID(c)})
 	if err != nil {
 		writeStorageError(c, err)
 		return
@@ -238,7 +239,7 @@ func (api *storageAPI) listVolumes(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *storageAPI) getVolume(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.GetVolume(ctx, ports.StorageResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("volume_id")})
+	record, err := api.service.GetVolume(ctx, ports.StorageResourceGetRequest{TenantID: middleware.GetTenantID(c), ResourceID: c.Param("volume_id")})
 	if err != nil {
 		writeStorageError(c, err)
 		return
@@ -247,7 +248,7 @@ func (api *storageAPI) getVolume(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *storageAPI) deleteVolume(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.DeleteVolume(ctx, ports.StorageResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("volume_id")})
+	record, err := api.service.DeleteVolume(ctx, ports.StorageResourceGetRequest{TenantID: middleware.GetTenantID(c), ResourceID: c.Param("volume_id")})
 	if err != nil {
 		writeStorageError(c, err)
 		return
@@ -262,7 +263,7 @@ func (api *storageAPI) createFilesystem(ctx context.Context, c *app.RequestConte
 		return
 	}
 	record, err := api.service.CreateFilesystem(ctx, ports.StorageFilesystemCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       middleware.GetTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
 		Protocol:       req.Protocol,
@@ -276,7 +277,7 @@ func (api *storageAPI) createFilesystem(ctx context.Context, c *app.RequestConte
 }
 
 func (api *storageAPI) listFilesystems(ctx context.Context, c *app.RequestContext) {
-	records, err := api.service.ListFilesystems(ctx, ports.StorageResourceListRequest{TenantID: demoTenantID(c)})
+	records, err := api.service.ListFilesystems(ctx, ports.StorageResourceListRequest{TenantID: middleware.GetTenantID(c)})
 	if err != nil {
 		writeStorageError(c, err)
 		return
@@ -289,7 +290,7 @@ func (api *storageAPI) listFilesystems(ctx context.Context, c *app.RequestContex
 }
 
 func (api *storageAPI) getFilesystem(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.GetFilesystem(ctx, ports.StorageResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("filesystem_id")})
+	record, err := api.service.GetFilesystem(ctx, ports.StorageResourceGetRequest{TenantID: middleware.GetTenantID(c), ResourceID: c.Param("filesystem_id")})
 	if err != nil {
 		writeStorageError(c, err)
 		return
@@ -298,7 +299,7 @@ func (api *storageAPI) getFilesystem(ctx context.Context, c *app.RequestContext)
 }
 
 func (api *storageAPI) deleteFilesystem(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.DeleteFilesystem(ctx, ports.StorageResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("filesystem_id")})
+	record, err := api.service.DeleteFilesystem(ctx, ports.StorageResourceGetRequest{TenantID: middleware.GetTenantID(c), ResourceID: c.Param("filesystem_id")})
 	if err != nil {
 		writeStorageError(c, err)
 		return
@@ -313,7 +314,7 @@ func (api *storageAPI) createObject(ctx context.Context, c *app.RequestContext) 
 		return
 	}
 	record, err := api.service.CreateObject(ctx, ports.StorageObjectCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       middleware.GetTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		Bucket:         req.Bucket,
 		Key:            req.Key,
@@ -328,7 +329,7 @@ func (api *storageAPI) createObject(ctx context.Context, c *app.RequestContext) 
 }
 
 func (api *storageAPI) listObjects(ctx context.Context, c *app.RequestContext) {
-	records, err := api.service.ListObjects(ctx, ports.StorageResourceListRequest{TenantID: demoTenantID(c)})
+	records, err := api.service.ListObjects(ctx, ports.StorageResourceListRequest{TenantID: middleware.GetTenantID(c)})
 	if err != nil {
 		writeStorageError(c, err)
 		return
@@ -341,7 +342,7 @@ func (api *storageAPI) listObjects(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *storageAPI) getObject(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.GetObject(ctx, ports.StorageResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("object_id")})
+	record, err := api.service.GetObject(ctx, ports.StorageResourceGetRequest{TenantID: middleware.GetTenantID(c), ResourceID: c.Param("object_id")})
 	if err != nil {
 		writeStorageError(c, err)
 		return
@@ -350,7 +351,7 @@ func (api *storageAPI) getObject(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *storageAPI) deleteObject(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.DeleteObject(ctx, ports.StorageResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("object_id")})
+	record, err := api.service.DeleteObject(ctx, ports.StorageResourceGetRequest{TenantID: middleware.GetTenantID(c), ResourceID: c.Param("object_id")})
 	if err != nil {
 		writeStorageError(c, err)
 		return
@@ -365,7 +366,7 @@ func (api *storageAPI) createStorageBucket(ctx context.Context, c *app.RequestCo
 		return
 	}
 	record, err := api.service.CreateStorageBucket(ctx, ports.StorageBucketCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       middleware.GetTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
 		Region:         req.Region,
@@ -380,7 +381,7 @@ func (api *storageAPI) createStorageBucket(ctx context.Context, c *app.RequestCo
 
 func (api *storageAPI) listStorageBuckets(ctx context.Context, c *app.RequestContext) {
 	records, err := api.service.ListStorageBuckets(ctx, ports.StorageResourceListRequest{
-		TenantID: demoTenantID(c),
+		TenantID: middleware.GetTenantID(c),
 		Limit:    queryInt(c, "limit", 20),
 		Cursor:   c.Query("cursor"),
 	})
@@ -398,7 +399,7 @@ func (api *storageAPI) uploadStorageObject(ctx context.Context, c *app.RequestCo
 		return
 	}
 	record, err := api.service.CreateStorageObjectUpload(ctx, ports.StorageObjectUploadRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       middleware.GetTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		BucketID:       req.BucketID,
 		Key:            req.Key,
@@ -413,7 +414,7 @@ func (api *storageAPI) uploadStorageObject(ctx context.Context, c *app.RequestCo
 
 func (api *storageAPI) completeStorageObjectUpload(ctx context.Context, c *app.RequestContext) {
 	record, err := api.service.CompleteStorageObjectUpload(ctx, ports.StorageObjectCompleteRequest{
-		TenantID: demoTenantID(c),
+		TenantID: middleware.GetTenantID(c),
 		ObjectID: c.Param("object_id"),
 	})
 	if err != nil {
@@ -425,7 +426,7 @@ func (api *storageAPI) completeStorageObjectUpload(ctx context.Context, c *app.R
 
 func (api *storageAPI) downloadStorageObject(ctx context.Context, c *app.RequestContext) {
 	record, err := api.service.GetStorageObjectDownload(ctx, ports.StorageObjectDownloadRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       middleware.GetTenantID(c),
 		ObjectID:       c.Param("object_id"),
 		ExpiresSeconds: queryInt(c, "expires_seconds", 3600),
 	})
@@ -443,7 +444,7 @@ func (api *storageAPI) createVolumeSnapshot(ctx context.Context, c *app.RequestC
 		return
 	}
 	record, err := api.service.CreateVolumeSnapshot(ctx, ports.VolumeSnapshotCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       middleware.GetTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		VolumeID:       c.Param("volume_id"),
 		Name:           req.Name,
@@ -460,7 +461,7 @@ func (api *storageAPI) createVolumeSnapshot(ctx context.Context, c *app.RequestC
 
 func (api *storageAPI) listVolumeSnapshots(ctx context.Context, c *app.RequestContext) {
 	records, err := api.service.ListVolumeSnapshots(ctx, ports.VolumeSnapshotListRequest{
-		TenantID: demoTenantID(c),
+		TenantID: middleware.GetTenantID(c),
 		VolumeID: c.Param("volume_id"),
 	})
 	if err != nil {
@@ -476,7 +477,7 @@ func (api *storageAPI) listVolumeSnapshots(ctx context.Context, c *app.RequestCo
 
 func (api *storageAPI) listFilesystemMountTargets(ctx context.Context, c *app.RequestContext) {
 	records, err := api.service.ListFilesystemMountTargets(ctx, ports.FilesystemMountTargetListRequest{
-		TenantID:     demoTenantID(c),
+		TenantID:     middleware.GetTenantID(c),
 		FilesystemID: c.Param("filesystem_id"),
 	})
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/route"
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
+	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 )
 
 type encryptionAPI struct{ service ports.EncryptionService }
@@ -101,7 +102,7 @@ func (api *encryptionAPI) createKey(ctx context.Context, c *app.RequestContext) 
 		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid encryption key request")
 		return
 	}
-	rec, err := api.service.CreateKey(ctx, ports.EncryptionKeyCreateRequest{TenantID: demoTenantID(c), IdempotencyKey: req.IdempotencyKey, Name: req.Name, Algorithm: req.Algorithm})
+	rec, err := api.service.CreateKey(ctx, ports.EncryptionKeyCreateRequest{TenantID: middleware.GetTenantID(c), IdempotencyKey: req.IdempotencyKey, Name: req.Name, Algorithm: req.Algorithm})
 	if err != nil {
 		writeEncryptionError(c, err)
 		return
@@ -109,7 +110,7 @@ func (api *encryptionAPI) createKey(ctx context.Context, c *app.RequestContext) 
 	c.JSON(http.StatusCreated, encryptionFromRecord(rec))
 }
 func (api *encryptionAPI) listKeys(ctx context.Context, c *app.RequestContext) {
-	recs, err := api.service.ListKeys(ctx, ports.EncryptionKeyListRequest{TenantID: demoTenantID(c)})
+	recs, err := api.service.ListKeys(ctx, ports.EncryptionKeyListRequest{TenantID: middleware.GetTenantID(c)})
 	if err != nil {
 		writeEncryptionError(c, err)
 		return
@@ -121,7 +122,7 @@ func (api *encryptionAPI) listKeys(ctx context.Context, c *app.RequestContext) {
 	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
 }
 func (api *encryptionAPI) getKey(ctx context.Context, c *app.RequestContext) {
-	rec, err := api.service.GetKey(ctx, ports.EncryptionKeyGetRequest{TenantID: demoTenantID(c), KeyID: c.Param("key_id")})
+	rec, err := api.service.GetKey(ctx, ports.EncryptionKeyGetRequest{TenantID: middleware.GetTenantID(c), KeyID: c.Param("key_id")})
 	if err != nil {
 		writeEncryptionError(c, err)
 		return
@@ -129,7 +130,7 @@ func (api *encryptionAPI) getKey(ctx context.Context, c *app.RequestContext) {
 	c.JSON(http.StatusOK, encryptionFromRecord(rec))
 }
 func (api *encryptionAPI) deleteKey(ctx context.Context, c *app.RequestContext) {
-	rec, err := api.service.DeleteKey(ctx, ports.EncryptionKeyGetRequest{TenantID: demoTenantID(c), KeyID: c.Param("key_id")})
+	rec, err := api.service.DeleteKey(ctx, ports.EncryptionKeyGetRequest{TenantID: middleware.GetTenantID(c), KeyID: c.Param("key_id")})
 	if err != nil {
 		writeEncryptionError(c, err)
 		return
@@ -142,7 +143,7 @@ func (api *encryptionAPI) rotateKey(ctx context.Context, c *app.RequestContext) 
 		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid encryption key rotation request")
 		return
 	}
-	rec, err := api.service.RotateKey(ctx, ports.EncryptionKeyRotateRequest{TenantID: demoTenantID(c), KeyID: c.Param("key_id"), IdempotencyKey: req.IdempotencyKey})
+	rec, err := api.service.RotateKey(ctx, ports.EncryptionKeyRotateRequest{TenantID: middleware.GetTenantID(c), KeyID: c.Param("key_id"), IdempotencyKey: req.IdempotencyKey})
 	if err != nil {
 		writeEncryptionError(c, err)
 		return
@@ -155,7 +156,7 @@ func (api *encryptionAPI) revokeKey(ctx context.Context, c *app.RequestContext) 
 		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid encryption key revoke request")
 		return
 	}
-	rec, err := api.service.RevokeKey(ctx, ports.EncryptionKeyRevokeRequest{TenantID: demoTenantID(c), KeyID: c.Param("key_id"), IdempotencyKey: req.IdempotencyKey, Reason: req.Reason})
+	rec, err := api.service.RevokeKey(ctx, ports.EncryptionKeyRevokeRequest{TenantID: middleware.GetTenantID(c), KeyID: c.Param("key_id"), IdempotencyKey: req.IdempotencyKey, Reason: req.Reason})
 	if err != nil {
 		writeEncryptionError(c, err)
 		return
@@ -168,7 +169,7 @@ func (api *encryptionAPI) seal(ctx context.Context, c *app.RequestContext) {
 		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid encryption seal request")
 		return
 	}
-	rec, err := api.service.Seal(ctx, ports.EncryptionSealRequest{TenantID: demoTenantID(c), IdempotencyKey: req.IdempotencyKey, KeyID: req.KeyID, ObjectURI: req.ObjectURI})
+	rec, err := api.service.Seal(ctx, ports.EncryptionSealRequest{TenantID: middleware.GetTenantID(c), IdempotencyKey: req.IdempotencyKey, KeyID: req.KeyID, ObjectURI: req.ObjectURI})
 	if err != nil {
 		writeEncryptionError(c, err)
 		return
@@ -181,7 +182,7 @@ func (api *encryptionAPI) createUnsealToken(ctx context.Context, c *app.RequestC
 		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid encryption unseal-token request")
 		return
 	}
-	rec, err := api.service.CreateUnsealToken(ctx, ports.EncryptionUnsealTokenRequest{TenantID: demoTenantID(c), KeyID: req.KeyID, SealedObjectURI: req.SealedObjectURI})
+	rec, err := api.service.CreateUnsealToken(ctx, ports.EncryptionUnsealTokenRequest{TenantID: middleware.GetTenantID(c), KeyID: req.KeyID, SealedObjectURI: req.SealedObjectURI})
 	if err != nil {
 		writeEncryptionError(c, err)
 		return

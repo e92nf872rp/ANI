@@ -11,6 +11,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/route"
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
+	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 )
 
 type observabilityAPI struct {
@@ -84,7 +85,7 @@ func registerObservability(v1 *route.RouterGroup) {
 
 func (api *observabilityAPI) query(ctx context.Context, c *app.RequestContext) {
 	result, err := api.service.Query(ctx, ports.ObservabilityQueryRequest{
-		TenantID: demoTenantID(c),
+		TenantID: middleware.GetTenantID(c),
 		Query:    c.Query("query"),
 	})
 	if err != nil {
@@ -106,7 +107,7 @@ func (api *observabilityAPI) createAlertRule(ctx context.Context, c *app.Request
 		return
 	}
 	record, err := api.service.CreateAlertRule(ctx, ports.ObservabilityAlertRuleCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       middleware.GetTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
 		PromQL:         req.PromQL,
@@ -125,7 +126,7 @@ func (api *observabilityAPI) createAlertRule(ctx context.Context, c *app.Request
 
 func (api *observabilityAPI) listAlertRules(ctx context.Context, c *app.RequestContext) {
 	records, err := api.service.ListAlertRules(ctx, ports.ObservabilityAlertRuleListRequest{
-		TenantID: demoTenantID(c),
+		TenantID: middleware.GetTenantID(c),
 		Limit:    queryInt(c, "limit", 20),
 		Cursor:   c.Query("cursor"),
 	})
@@ -142,7 +143,7 @@ func (api *observabilityAPI) listAlertRules(ctx context.Context, c *app.RequestC
 
 func (api *observabilityAPI) getAlertRule(ctx context.Context, c *app.RequestContext) {
 	record, err := api.service.GetAlertRule(ctx, ports.ObservabilityAlertRuleGetRequest{
-		TenantID: demoTenantID(c),
+		TenantID: middleware.GetTenantID(c),
 		RuleID:   c.Param("rule_id"),
 	})
 	if err != nil {
@@ -164,7 +165,7 @@ func (api *observabilityAPI) updateAlertRule(ctx context.Context, c *app.Request
 		return
 	}
 	record, err := api.service.UpdateAlertRule(ctx, ports.ObservabilityAlertRuleUpdateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       middleware.GetTenantID(c),
 		RuleID:         c.Param("rule_id"),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
@@ -184,7 +185,7 @@ func (api *observabilityAPI) updateAlertRule(ctx context.Context, c *app.Request
 
 func (api *observabilityAPI) deleteAlertRule(ctx context.Context, c *app.RequestContext) {
 	record, err := api.service.DeleteAlertRule(ctx, ports.ObservabilityAlertRuleGetRequest{
-		TenantID: demoTenantID(c),
+		TenantID: middleware.GetTenantID(c),
 		RuleID:   c.Param("rule_id"),
 	})
 	if err != nil {

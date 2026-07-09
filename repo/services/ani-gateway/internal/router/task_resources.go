@@ -10,6 +10,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/route"
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
+	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 )
 
 type taskAPI struct {
@@ -34,7 +35,7 @@ func newTaskAPI(service ports.AsyncTaskService) *taskAPI {
 }
 
 func (api *taskAPI) getTask(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.GetTask(ctx, demoTenantID(c), c.Param("task_id"))
+	record, err := api.service.GetTask(ctx, middleware.GetTenantID(c), c.Param("task_id"))
 	if err != nil {
 		writeTaskError(c, err)
 		return
@@ -43,7 +44,7 @@ func (api *taskAPI) getTask(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *taskAPI) cancelTask(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.CancelTask(ctx, demoTenantID(c), c.Param("task_id"))
+	record, err := api.service.CancelTask(ctx, middleware.GetTenantID(c), c.Param("task_id"))
 	if err != nil {
 		writeTaskError(c, err)
 		return

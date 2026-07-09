@@ -10,6 +10,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/route"
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
+	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 )
 
 type k8sClusterAPI struct{ service ports.K8sClusterService }
@@ -153,7 +154,7 @@ func (api *k8sClusterAPI) createCluster(ctx context.Context, c *app.RequestConte
 		writeDemoError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", "k8s cluster create precondition failed: real provider is not configured for this local profile")
 		return
 	}
-	rec, err := api.service.CreateCluster(ctx, ports.K8sClusterCreateRequest{TenantID: demoTenantID(c), IdempotencyKey: req.IdempotencyKey, Name: req.Name, Version: req.Version})
+	rec, err := api.service.CreateCluster(ctx, ports.K8sClusterCreateRequest{TenantID: middleware.GetTenantID(c), IdempotencyKey: req.IdempotencyKey, Name: req.Name, Version: req.Version})
 	if err != nil {
 		writeK8sClusterError(c, err)
 		return
@@ -161,7 +162,7 @@ func (api *k8sClusterAPI) createCluster(ctx context.Context, c *app.RequestConte
 	c.JSON(http.StatusCreated, k8sClusterFromRecord(rec))
 }
 func (api *k8sClusterAPI) listClusters(ctx context.Context, c *app.RequestContext) {
-	recs, err := api.service.ListClusters(ctx, ports.K8sClusterListRequest{TenantID: demoTenantID(c)})
+	recs, err := api.service.ListClusters(ctx, ports.K8sClusterListRequest{TenantID: middleware.GetTenantID(c)})
 	if err != nil {
 		writeK8sClusterError(c, err)
 		return
@@ -173,7 +174,7 @@ func (api *k8sClusterAPI) listClusters(ctx context.Context, c *app.RequestContex
 	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
 }
 func (api *k8sClusterAPI) getCluster(ctx context.Context, c *app.RequestContext) {
-	rec, err := api.service.GetCluster(ctx, ports.K8sClusterGetRequest{TenantID: demoTenantID(c), ClusterID: c.Param("cluster_id")})
+	rec, err := api.service.GetCluster(ctx, ports.K8sClusterGetRequest{TenantID: middleware.GetTenantID(c), ClusterID: c.Param("cluster_id")})
 	if err != nil {
 		writeK8sClusterError(c, err)
 		return
@@ -181,7 +182,7 @@ func (api *k8sClusterAPI) getCluster(ctx context.Context, c *app.RequestContext)
 	c.JSON(http.StatusOK, k8sClusterFromRecord(rec))
 }
 func (api *k8sClusterAPI) deleteCluster(ctx context.Context, c *app.RequestContext) {
-	rec, err := api.service.DeleteCluster(ctx, ports.K8sClusterGetRequest{TenantID: demoTenantID(c), ClusterID: c.Param("cluster_id")})
+	rec, err := api.service.DeleteCluster(ctx, ports.K8sClusterGetRequest{TenantID: middleware.GetTenantID(c), ClusterID: c.Param("cluster_id")})
 	if err != nil {
 		writeK8sClusterError(c, err)
 		return
@@ -194,7 +195,7 @@ func (api *k8sClusterAPI) upgradeCluster(ctx context.Context, c *app.RequestCont
 		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid k8s cluster upgrade request")
 		return
 	}
-	rec, err := api.service.UpgradeCluster(ctx, ports.K8sClusterUpgradeRequest{TenantID: demoTenantID(c), ClusterID: c.Param("cluster_id"), IdempotencyKey: req.IdempotencyKey, Version: req.Version})
+	rec, err := api.service.UpgradeCluster(ctx, ports.K8sClusterUpgradeRequest{TenantID: middleware.GetTenantID(c), ClusterID: c.Param("cluster_id"), IdempotencyKey: req.IdempotencyKey, Version: req.Version})
 	if err != nil {
 		writeK8sClusterError(c, err)
 		return
@@ -208,7 +209,7 @@ func (api *k8sClusterAPI) createNodePool(ctx context.Context, c *app.RequestCont
 		return
 	}
 	rec, err := api.service.CreateNodePool(ctx, ports.K8sClusterNodePoolCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       middleware.GetTenantID(c),
 		ClusterID:      c.Param("cluster_id"),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
@@ -223,7 +224,7 @@ func (api *k8sClusterAPI) createNodePool(ctx context.Context, c *app.RequestCont
 	c.JSON(http.StatusCreated, k8sClusterNodePoolFromRecord(rec))
 }
 func (api *k8sClusterAPI) listNodePools(ctx context.Context, c *app.RequestContext) {
-	recs, err := api.service.ListNodePools(ctx, ports.K8sClusterNodePoolListRequest{TenantID: demoTenantID(c), ClusterID: c.Param("cluster_id")})
+	recs, err := api.service.ListNodePools(ctx, ports.K8sClusterNodePoolListRequest{TenantID: middleware.GetTenantID(c), ClusterID: c.Param("cluster_id")})
 	if err != nil {
 		writeK8sClusterError(c, err)
 		return
@@ -235,7 +236,7 @@ func (api *k8sClusterAPI) listNodePools(ctx context.Context, c *app.RequestConte
 	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
 }
 func (api *k8sClusterAPI) getNodePool(ctx context.Context, c *app.RequestContext) {
-	rec, err := api.service.GetNodePool(ctx, ports.K8sClusterNodePoolGetRequest{TenantID: demoTenantID(c), ClusterID: c.Param("cluster_id"), NodePoolID: c.Param("node_pool_id")})
+	rec, err := api.service.GetNodePool(ctx, ports.K8sClusterNodePoolGetRequest{TenantID: middleware.GetTenantID(c), ClusterID: c.Param("cluster_id"), NodePoolID: c.Param("node_pool_id")})
 	if err != nil {
 		writeK8sClusterError(c, err)
 		return
@@ -249,7 +250,7 @@ func (api *k8sClusterAPI) updateNodePool(ctx context.Context, c *app.RequestCont
 		return
 	}
 	rec, err := api.service.UpdateNodePool(ctx, ports.K8sClusterNodePoolUpdateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       middleware.GetTenantID(c),
 		ClusterID:      c.Param("cluster_id"),
 		NodePoolID:     c.Param("node_pool_id"),
 		IdempotencyKey: req.IdempotencyKey,
@@ -264,7 +265,7 @@ func (api *k8sClusterAPI) updateNodePool(ctx context.Context, c *app.RequestCont
 	c.JSON(http.StatusOK, k8sClusterNodePoolFromRecord(rec))
 }
 func (api *k8sClusterAPI) deleteNodePool(ctx context.Context, c *app.RequestContext) {
-	rec, err := api.service.DeleteNodePool(ctx, ports.K8sClusterNodePoolGetRequest{TenantID: demoTenantID(c), ClusterID: c.Param("cluster_id"), NodePoolID: c.Param("node_pool_id")})
+	rec, err := api.service.DeleteNodePool(ctx, ports.K8sClusterNodePoolGetRequest{TenantID: middleware.GetTenantID(c), ClusterID: c.Param("cluster_id"), NodePoolID: c.Param("node_pool_id")})
 	if err != nil {
 		writeK8sClusterError(c, err)
 		return
@@ -272,7 +273,7 @@ func (api *k8sClusterAPI) deleteNodePool(ctx context.Context, c *app.RequestCont
 	c.JSON(http.StatusOK, k8sClusterNodePoolFromRecord(rec))
 }
 func (api *k8sClusterAPI) getKubeconfig(ctx context.Context, c *app.RequestContext) {
-	rec, err := api.service.GetKubeconfig(ctx, ports.K8sClusterKubeconfigRequest{TenantID: demoTenantID(c), ClusterID: c.Param("cluster_id")})
+	rec, err := api.service.GetKubeconfig(ctx, ports.K8sClusterKubeconfigRequest{TenantID: middleware.GetTenantID(c), ClusterID: c.Param("cluster_id")})
 	if err != nil {
 		writeK8sClusterError(c, err)
 		return
@@ -286,7 +287,7 @@ func (api *k8sClusterAPI) proxy(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	rec, err := api.service.Proxy(ctx, ports.K8sClusterProxyRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       middleware.GetTenantID(c),
 		ClusterID:      c.Param("cluster_id"),
 		IdempotencyKey: req.IdempotencyKey,
 		Method:         req.Method,
@@ -302,7 +303,7 @@ func (api *k8sClusterAPI) proxy(ctx context.Context, c *app.RequestContext) {
 }
 func (api *k8sClusterAPI) listWorkloads(ctx context.Context, c *app.RequestContext) {
 	recs, err := api.service.ListWorkloads(ctx, ports.K8sClusterWorkloadListRequest{
-		TenantID:  demoTenantID(c),
+		TenantID:  middleware.GetTenantID(c),
 		ClusterID: c.Param("cluster_id"),
 		Namespace: c.Query("namespace"),
 		Kind:      c.Query("kind"),

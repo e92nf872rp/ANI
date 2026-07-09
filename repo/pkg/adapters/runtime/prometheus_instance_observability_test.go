@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"crypto/tls"
 	"io"
 	"net/http"
 	"net/url"
@@ -263,6 +264,25 @@ func TestPrometheusInstanceObservabilityConnectsKubernetesExecTerminalStream(t *
 	}
 	if len(stream.sent) != 2 || string(stream.sent[0].Data) != "ok\n" || string(stream.sent[1].Data) != "warn\n" {
 		t.Fatalf("terminal output = %+v, want stdout projection for Kubernetes stdout/stderr channels", stream.sent)
+	}
+}
+
+func TestKubernetesExecTLSConfigForcesHTTP1WebSocketUpgrade(t *testing.T) {
+	client := &KubernetesRESTClient{
+		httpClient: &http.Client{Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				MinVersion: tls.VersionTLS12,
+				NextProtos: []string{"h2", "http/1.1"},
+			},
+		}},
+	}
+
+	config := kubernetesExecTLSConfig(client, "kubernetes.default.svc")
+	if got := strings.Join(config.NextProtos, ","); got != "http/1.1" {
+		t.Fatalf("exec TLS ALPN = %q, want http/1.1 only", got)
+	}
+	if config.ServerName != "kubernetes.default.svc" {
+		t.Fatalf("exec TLS server name = %q, want kubernetes.default.svc", config.ServerName)
 	}
 }
 

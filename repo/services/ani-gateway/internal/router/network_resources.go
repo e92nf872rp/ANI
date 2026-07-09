@@ -10,6 +10,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/route"
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
+	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 )
 
 type networkAPI struct {
@@ -192,7 +193,7 @@ func (api *networkAPI) createVPC(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	record, err := api.service.CreateVPC(ctx, ports.NetworkVPCCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       middleware.GetTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
 		CIDR:           req.CIDR,
@@ -205,7 +206,7 @@ func (api *networkAPI) createVPC(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *networkAPI) listVPCs(ctx context.Context, c *app.RequestContext) {
-	records, err := api.service.ListVPCs(ctx, ports.NetworkResourceListRequest{TenantID: demoTenantID(c)})
+	records, err := api.service.ListVPCs(ctx, ports.NetworkResourceListRequest{TenantID: middleware.GetTenantID(c)})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -218,7 +219,7 @@ func (api *networkAPI) listVPCs(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *networkAPI) getVPC(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.GetVPC(ctx, ports.NetworkResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("vpc_id")})
+	record, err := api.service.GetVPC(ctx, ports.NetworkResourceGetRequest{TenantID: middleware.GetTenantID(c), ResourceID: c.Param("vpc_id")})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -227,7 +228,7 @@ func (api *networkAPI) getVPC(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *networkAPI) deleteVPC(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.DeleteVPC(ctx, ports.NetworkResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("vpc_id")})
+	record, err := api.service.DeleteVPC(ctx, ports.NetworkResourceGetRequest{TenantID: middleware.GetTenantID(c), ResourceID: c.Param("vpc_id")})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -242,7 +243,7 @@ func (api *networkAPI) createSubnet(ctx context.Context, c *app.RequestContext) 
 		return
 	}
 	record, err := api.service.CreateSubnet(ctx, ports.NetworkSubnetCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       middleware.GetTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		VPCID:          req.VPCID,
 		Name:           req.Name,
@@ -258,7 +259,7 @@ func (api *networkAPI) createSubnet(ctx context.Context, c *app.RequestContext) 
 
 func (api *networkAPI) listSubnets(ctx context.Context, c *app.RequestContext) {
 	records, err := api.service.ListSubnets(ctx, ports.NetworkResourceListRequest{
-		TenantID: demoTenantID(c),
+		TenantID: middleware.GetTenantID(c),
 		VPCID:    c.Query("vpc_id"),
 	})
 	if err != nil {
@@ -273,7 +274,7 @@ func (api *networkAPI) listSubnets(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *networkAPI) getSubnet(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.GetSubnet(ctx, ports.NetworkResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("subnet_id")})
+	record, err := api.service.GetSubnet(ctx, ports.NetworkResourceGetRequest{TenantID: middleware.GetTenantID(c), ResourceID: c.Param("subnet_id")})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -282,7 +283,7 @@ func (api *networkAPI) getSubnet(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *networkAPI) deleteSubnet(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.DeleteSubnet(ctx, ports.NetworkResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("subnet_id")})
+	record, err := api.service.DeleteSubnet(ctx, ports.NetworkResourceGetRequest{TenantID: middleware.GetTenantID(c), ResourceID: c.Param("subnet_id")})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -297,7 +298,7 @@ func (api *networkAPI) createSecurityGroup(ctx context.Context, c *app.RequestCo
 		return
 	}
 	record, err := api.service.CreateSecurityGroup(ctx, ports.NetworkSecurityGroupCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       middleware.GetTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
 		Description:    req.Description,
@@ -311,7 +312,7 @@ func (api *networkAPI) createSecurityGroup(ctx context.Context, c *app.RequestCo
 }
 
 func (api *networkAPI) listSecurityGroups(ctx context.Context, c *app.RequestContext) {
-	records, err := api.service.ListSecurityGroups(ctx, ports.NetworkResourceListRequest{TenantID: demoTenantID(c)})
+	records, err := api.service.ListSecurityGroups(ctx, ports.NetworkResourceListRequest{TenantID: middleware.GetTenantID(c)})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -324,7 +325,7 @@ func (api *networkAPI) listSecurityGroups(ctx context.Context, c *app.RequestCon
 }
 
 func (api *networkAPI) getSecurityGroup(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.GetSecurityGroup(ctx, ports.NetworkResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("security_group_id")})
+	record, err := api.service.GetSecurityGroup(ctx, ports.NetworkResourceGetRequest{TenantID: middleware.GetTenantID(c), ResourceID: c.Param("security_group_id")})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -345,7 +346,7 @@ func (api *networkAPI) updateSecurityGroup(ctx context.Context, c *app.RequestCo
 		updateDescription = true
 	}
 	record, err := api.service.UpdateSecurityGroup(ctx, ports.NetworkSecurityGroupUpdateRequest{
-		TenantID:          demoTenantID(c),
+		TenantID:          middleware.GetTenantID(c),
 		ResourceID:        c.Param("security_group_id"),
 		IdempotencyKey:    req.IdempotencyKey,
 		Description:       description,
@@ -360,7 +361,7 @@ func (api *networkAPI) updateSecurityGroup(ctx context.Context, c *app.RequestCo
 }
 
 func (api *networkAPI) deleteSecurityGroup(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.DeleteSecurityGroup(ctx, ports.NetworkResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("security_group_id")})
+	record, err := api.service.DeleteSecurityGroup(ctx, ports.NetworkResourceGetRequest{TenantID: middleware.GetTenantID(c), ResourceID: c.Param("security_group_id")})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -375,7 +376,7 @@ func (api *networkAPI) createLoadBalancer(ctx context.Context, c *app.RequestCon
 		return
 	}
 	record, err := api.service.CreateLoadBalancer(ctx, ports.NetworkLoadBalancerCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       middleware.GetTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
 		VPCID:          req.VPCID,
@@ -391,7 +392,7 @@ func (api *networkAPI) createLoadBalancer(ctx context.Context, c *app.RequestCon
 }
 
 func (api *networkAPI) listLoadBalancers(ctx context.Context, c *app.RequestContext) {
-	records, err := api.service.ListLoadBalancers(ctx, ports.NetworkResourceListRequest{TenantID: demoTenantID(c)})
+	records, err := api.service.ListLoadBalancers(ctx, ports.NetworkResourceListRequest{TenantID: middleware.GetTenantID(c)})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -404,7 +405,7 @@ func (api *networkAPI) listLoadBalancers(ctx context.Context, c *app.RequestCont
 }
 
 func (api *networkAPI) getLoadBalancer(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.GetLoadBalancer(ctx, ports.NetworkResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("load_balancer_id")})
+	record, err := api.service.GetLoadBalancer(ctx, ports.NetworkResourceGetRequest{TenantID: middleware.GetTenantID(c), ResourceID: c.Param("load_balancer_id")})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -413,7 +414,7 @@ func (api *networkAPI) getLoadBalancer(ctx context.Context, c *app.RequestContex
 }
 
 func (api *networkAPI) deleteLoadBalancer(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.DeleteLoadBalancer(ctx, ports.NetworkResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("load_balancer_id")})
+	record, err := api.service.DeleteLoadBalancer(ctx, ports.NetworkResourceGetRequest{TenantID: middleware.GetTenantID(c), ResourceID: c.Param("load_balancer_id")})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -428,7 +429,7 @@ func (api *networkAPI) createRoute(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	record, err := api.service.CreateRoute(ctx, ports.NetworkRouteCreateRequest{
-		TenantID:        demoTenantID(c),
+		TenantID:        middleware.GetTenantID(c),
 		IdempotencyKey:  req.IdempotencyKey,
 		VPCID:           req.VPCID,
 		DestinationCIDR: req.DestinationCIDR,
@@ -445,7 +446,7 @@ func (api *networkAPI) createRoute(ctx context.Context, c *app.RequestContext) {
 
 func (api *networkAPI) listRoutes(ctx context.Context, c *app.RequestContext) {
 	records, err := api.service.ListRoutes(ctx, ports.NetworkRouteListRequest{
-		TenantID: demoTenantID(c),
+		TenantID: middleware.GetTenantID(c),
 		VPCID:    c.Query("vpc_id"),
 	})
 	if err != nil {
@@ -460,7 +461,7 @@ func (api *networkAPI) listRoutes(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *networkAPI) getRoute(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.GetRoute(ctx, ports.NetworkResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("route_id")})
+	record, err := api.service.GetRoute(ctx, ports.NetworkResourceGetRequest{TenantID: middleware.GetTenantID(c), ResourceID: c.Param("route_id")})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -469,7 +470,7 @@ func (api *networkAPI) getRoute(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *networkAPI) deleteRoute(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.DeleteRoute(ctx, ports.NetworkResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("route_id")})
+	record, err := api.service.DeleteRoute(ctx, ports.NetworkResourceGetRequest{TenantID: middleware.GetTenantID(c), ResourceID: c.Param("route_id")})
 	if err != nil {
 		writeNetworkError(c, err)
 		return

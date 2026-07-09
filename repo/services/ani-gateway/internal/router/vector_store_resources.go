@@ -10,6 +10,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/route"
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
+	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 )
 
 type vectorStoreAPI struct {
@@ -97,7 +98,7 @@ func (api *vectorStoreAPI) createVectorStore(ctx context.Context, c *app.Request
 		return
 	}
 	record, err := api.service.CreateVectorStore(ctx, ports.VectorStoreCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       middleware.GetTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
 		Dimension:      req.Dimension,
@@ -111,7 +112,7 @@ func (api *vectorStoreAPI) createVectorStore(ctx context.Context, c *app.Request
 }
 
 func (api *vectorStoreAPI) listVectorStores(ctx context.Context, c *app.RequestContext) {
-	records, err := api.service.ListVectorStores(ctx, ports.VectorStoreResourceListRequest{TenantID: demoTenantID(c)})
+	records, err := api.service.ListVectorStores(ctx, ports.VectorStoreResourceListRequest{TenantID: middleware.GetTenantID(c)})
 	if err != nil {
 		writeVectorStoreError(c, err)
 		return
@@ -124,7 +125,7 @@ func (api *vectorStoreAPI) listVectorStores(ctx context.Context, c *app.RequestC
 }
 
 func (api *vectorStoreAPI) getVectorStore(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.GetVectorStore(ctx, ports.VectorStoreResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("vector_store_id")})
+	record, err := api.service.GetVectorStore(ctx, ports.VectorStoreResourceGetRequest{TenantID: middleware.GetTenantID(c), ResourceID: c.Param("vector_store_id")})
 	if err != nil {
 		writeVectorStoreError(c, err)
 		return
@@ -133,7 +134,7 @@ func (api *vectorStoreAPI) getVectorStore(ctx context.Context, c *app.RequestCon
 }
 
 func (api *vectorStoreAPI) deleteVectorStore(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.DeleteVectorStore(ctx, ports.VectorStoreResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("vector_store_id")})
+	record, err := api.service.DeleteVectorStore(ctx, ports.VectorStoreResourceGetRequest{TenantID: middleware.GetTenantID(c), ResourceID: c.Param("vector_store_id")})
 	if err != nil {
 		writeVectorStoreError(c, err)
 		return
@@ -148,7 +149,7 @@ func (api *vectorStoreAPI) searchVectorStore(ctx context.Context, c *app.Request
 		return
 	}
 	results, err := api.service.SearchVectorStore(ctx, ports.VectorStoreResourceSearchRequest{
-		TenantID:   demoTenantID(c),
+		TenantID:   middleware.GetTenantID(c),
 		ResourceID: c.Param("vector_store_id"),
 		Vector:     req.Vector,
 		TopK:       req.TopK,
@@ -184,7 +185,7 @@ func (api *vectorStoreAPI) insertVectorStoreDocuments(ctx context.Context, c *ap
 		})
 	}
 	result, err := api.service.InsertDocuments(ctx, ports.VectorStoreDocumentInsertRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       middleware.GetTenantID(c),
 		ResourceID:     c.Param("vector_store_id"),
 		IdempotencyKey: req.IdempotencyKey,
 		Documents:      documents,

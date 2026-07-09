@@ -264,6 +264,7 @@ func kubernetesExecTLSConfig(client *KubernetesRESTClient, serverName string) *t
 	if config.MinVersion == 0 {
 		config.MinVersion = tls.VersionTLS12
 	}
+	config.NextProtos = []string{"http/1.1"}
 	return config
 }
 
