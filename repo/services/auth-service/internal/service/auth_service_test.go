@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -86,4 +88,77 @@ func TestCheckPermissionExecRequiresAdminOrExplicitScope(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCheckPermissionAllowsConfiguredRolePermission(t *testing.T) {
+	svc := &AuthService{
+		rolePerms: fakeRolePermissionResolver{
+			resolved: true,
+			allowed:  true,
+		},
+	}
+
+	resp, err := svc.CheckPermission(context.Background(), &authv1.CheckPermissionRequest{
+		TenantId: uuid.New().String(),
+		Roles:    []string{"user"},
+		Resource: "instances",
+		Action:   "exec",
+	})
+	if err != nil {
+		t.Fatalf("CheckPermission error: %v", err)
+	}
+	if !resp.GetAllowed() {
+		t.Fatalf("configured role permission should allow exec, got deny: %s", resp.GetReason())
+	}
+}
+
+func TestCheckPermissionReturnsErrorWhenRolePermissionResolverFails(t *testing.T) {
+	svc := &AuthService{
+		rolePerms: fakeRolePermissionResolver{
+			err: errors.New("database unavailable"),
+		},
+	}
+
+	if _, err := svc.CheckPermission(context.Background(), &authv1.CheckPermissionRequest{
+		TenantId: uuid.New().String(),
+		Roles:    []string{"user"},
+		Resource: "instances",
+		Action:   "exec",
+	}); err == nil {
+		t.Fatalf("CheckPermission error = nil, want resolver error")
+	}
+}
+
+func TestPermissionsAllowSupportsScopesAndStructuredPermissions(t *testing.T) {
+	tests := []struct {
+		name     string
+		raw      string
+		resource string
+		action   string
+		want     bool
+	}{
+		{name: "scope exact", raw: `["scope:instances:exec"]`, resource: "instances", action: "exec", want: true},
+		{name: "scope read alias", raw: `["instances:read"]`, resource: "instances", action: "get", want: true},
+		{name: "structured action", raw: `[{"resource":"instances","actions":["exec"]}]`, resource: "instances", action: "exec", want: true},
+		{name: "structured wildcard", raw: `[{"resource":"instances","actions":["*"]}]`, resource: "instances", action: "delete", want: true},
+		{name: "denied", raw: `["instances:read"]`, resource: "instances", action: "exec", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := permissionsAllow(json.RawMessage(tt.raw), tt.resource, tt.action); got != tt.want {
+				t.Fatalf("permissionsAllow() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+type fakeRolePermissionResolver struct {
+	resolved bool
+	allowed  bool
+	err      error
+}
+
+func (r fakeRolePermissionResolver) Allows(context.Context, string, []string, string, string) (bool, bool, error) {
+	return r.resolved, r.allowed, r.err
 }

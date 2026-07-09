@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -25,6 +26,7 @@ type AuthService struct {
 	refreshTokens refreshTokenStore
 	blocklist     tokenBlocklist
 	oidc          *oidcLoginManager
+	rolePerms     rolePermissionResolver
 }
 
 func NewAuthService(db *pgxpool.Pool, cache ports.CacheStore, jwtCfg JWTConfig) *AuthService {
@@ -44,6 +46,7 @@ func NewAuthService(db *pgxpool.Pool, cache ports.CacheStore, jwtCfg JWTConfig) 
 		refreshTokens: newRefreshTokenStore(db),
 		blocklist:     blocklist,
 		oidc:          newOIDCLoginManager(cache, jwtCfg, newOIDCSessionStore(db, newOIDCGroupRoleMapper(jwtCfg.OIDCGroupRoleMapJSON)), issuer),
+		rolePerms:     newDBRolePermissionResolver(db),
 	}
 }
 
@@ -126,7 +129,7 @@ func (s *AuthService) ValidateToken(ctx context.Context, req *authv1.ValidateTok
 	}, nil
 }
 
-func (s *AuthService) CheckPermission(_ context.Context, req *authv1.CheckPermissionRequest) (*authv1.CheckPermissionResponse, error) {
+func (s *AuthService) CheckPermission(ctx context.Context, req *authv1.CheckPermissionRequest) (*authv1.CheckPermissionResponse, error) {
 	if req.GetTenantId() == "" {
 		return deny("tenant_id required"), nil
 	}
@@ -138,6 +141,15 @@ func (s *AuthService) CheckPermission(_ context.Context, req *authv1.CheckPermis
 	}
 	if hasScope(req.GetRoles(), req.GetResource(), req.GetAction()) {
 		return allow(), nil
+	}
+	if s.rolePerms != nil {
+		_, allowed, err := s.rolePerms.Allows(ctx, req.GetTenantId(), req.GetRoles(), req.GetResource(), req.GetAction())
+		if err != nil {
+			return nil, status.Error(codes.Internal, "failed to resolve role permissions")
+		}
+		if allowed {
+			return allow(), nil
+		}
 	}
 	if hasRole(req.GetRoles(), "auditor") {
 		if isReadAction(req.GetAction()) {
@@ -152,6 +164,58 @@ func (s *AuthService) CheckPermission(_ context.Context, req *authv1.CheckPermis
 		return deny("user role cannot perform this action"), nil
 	}
 	return deny("no matching role or scope"), nil
+}
+
+type rolePermissionResolver interface {
+	Allows(ctx context.Context, tenantID string, roles []string, resource string, action string) (resolved bool, allowed bool, err error)
+}
+
+type dbRolePermissionResolver struct {
+	db *pgxpool.Pool
+}
+
+func newDBRolePermissionResolver(db *pgxpool.Pool) rolePermissionResolver {
+	if db == nil {
+		return nil
+	}
+	return &dbRolePermissionResolver{db: db}
+}
+
+func (r *dbRolePermissionResolver) Allows(ctx context.Context, tenantID string, roles []string, resource string, action string) (bool, bool, error) {
+	if r == nil || r.db == nil || len(roles) == 0 {
+		return false, false, nil
+	}
+	rows, err := r.db.Query(ctx, `
+		SELECT permissions
+		FROM roles
+		WHERE name = ANY($1)
+		  AND (tenant_id IS NULL OR tenant_id = NULLIF($2, '')::uuid)
+	`, roles, tenantID)
+	if err != nil {
+		return false, false, err
+	}
+	defer rows.Close()
+
+	resolved := false
+	for rows.Next() {
+		resolved = true
+		var raw json.RawMessage
+		if err := rows.Scan(&raw); err != nil {
+			return false, false, err
+		}
+		if permissionsAllow(raw, resource, action) {
+			return true, true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, false, err
+	}
+	return resolved, false, nil
+}
+
+type structuredPermission struct {
+	Resource string   `json:"resource"`
+	Actions  []string `json:"actions"`
 }
 
 func (s *AuthService) CreateAPIKey(ctx context.Context, req *authv1.CreateAPIKeyRequest) (*authv1.CreateAPIKeyResponse, error) {
@@ -207,6 +271,39 @@ func hasScope(roles []string, resource, action string) bool {
 		}
 	}
 	return false
+}
+
+func permissionsAllow(raw json.RawMessage, resource string, action string) bool {
+	var scopes []string
+	if err := json.Unmarshal(raw, &scopes); err == nil {
+		return hasScope(scopes, resource, action) || hasActionAliasScope(scopes, resource, action)
+	}
+	var permissions []structuredPermission
+	if err := json.Unmarshal(raw, &permissions); err != nil {
+		return false
+	}
+	for _, permission := range permissions {
+		if permission.Resource != "*" && permission.Resource != resource {
+			continue
+		}
+		for _, allowedAction := range permission.Actions {
+			if allowedAction == "*" || allowedAction == action || actionAliasMatches(allowedAction, action) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasActionAliasScope(scopes []string, resource string, action string) bool {
+	if action != "get" {
+		return false
+	}
+	return hasScope(scopes, resource, "read")
+}
+
+func actionAliasMatches(allowedAction string, action string) bool {
+	return action == "get" && allowedAction == "read"
 }
 
 func isAPIKey(token string) bool {

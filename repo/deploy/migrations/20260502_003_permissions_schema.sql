@@ -54,7 +54,7 @@ INSERT INTO roles (id, tenant_id, name, permissions) VALUES
         '00000000-0000-0000-0000-000000000003',
         NULL, 'user',
         '[
-            {"resource":"instances",    "actions":["create","read","list","start","stop","restart","delete"],"scope":"own"},
+            {"resource":"instances",    "actions":["create","read","list","start","stop","restart","delete","exec"],"scope":"own"},
             {"resource":"networks",     "actions":["read","list"],"scope":"tenant"},
             {"resource":"volumes",      "actions":["create","read","list","delete"],"scope":"own"},
             {"resource":"objects",      "actions":["read","list"],"scope":"tenant"},
