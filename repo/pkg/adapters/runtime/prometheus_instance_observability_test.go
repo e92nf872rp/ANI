@@ -130,6 +130,7 @@ func TestPrometheusInstanceObservabilityGetsMetricsFromPrometheus(t *testing.T) 
 
 func TestPrometheusInstanceObservabilityStreamsLogsFromResolvedPod(t *testing.T) {
 	var requests []string
+	var streamAccept string
 	service := newTestPrometheusInstanceObservability(t, func(r *http.Request) (*http.Response, error) {
 		requests = append(requests, r.URL.String())
 		switch r.URL.Path {
@@ -140,6 +141,7 @@ func TestPrometheusInstanceObservabilityStreamsLogsFromResolvedPod(t *testing.T)
 				]
 			}`), nil
 		case "/api/v1/namespaces/ani-tenant-tenant-a/pods/container-ttt-094ae46b-f6f97bd95-vwdv2/log":
+			streamAccept = r.Header.Get("Accept")
 			query, _ := url.QueryUnescape(r.URL.RawQuery)
 			if !strings.Contains(query, "follow=true") || !strings.Contains(query, "tailLines=25") {
 				t.Fatalf("log query = %q, want follow and tailLines", query)
@@ -161,6 +163,9 @@ func TestPrometheusInstanceObservabilityStreamsLogsFromResolvedPod(t *testing.T)
 	})
 	if err != nil {
 		t.Fatalf("StreamLogs() error = %v", err)
+	}
+	if streamAccept != "*/*" {
+		t.Fatalf("Accept = %q, want */* for Kubernetes log follow streams", streamAccept)
 	}
 	if len(entries) != 2 || entries[0].Message != "info booted" || entries[1].Level != "warn" {
 		t.Fatalf("entries = %+v, want streamed log entries", entries)

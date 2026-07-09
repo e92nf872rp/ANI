@@ -117,7 +117,9 @@ func (o *PrometheusInstanceObservability) StreamLogs(ctx context.Context, reques
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Accept", "text/plain")
+	// Kubernetes pod log follow streams reject Accept: text/plain with HTTP 406.
+	// Match kubectl / kubernetes_instance_ops and accept any content type.
+	req.Header.Set("Accept", "*/*")
 	if o.kubeClient.bearerToken != "" {
 		req.Header.Set("Authorization", "Bearer "+o.kubeClient.bearerToken)
 	}

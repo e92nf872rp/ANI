@@ -1,0 +1,96 @@
+---
+description: ANI Core 仓库开发守则（等价于 .codex/skills/ani-core-dev-rules）。实现、审查、重构、文档，或涉及 Core OpenAPI/SDK/CLI/Gateway/ports/adapters/K8s/provider/Sprint/架构边界时必须遵循。
+alwaysApply: true
+---
+
+# ANI Core 开发规则
+
+将本规则作为本仓库专用操作流程。`ANI-10-GPT审查提示词集.md` 只是审查提示词模板，不是当前开发范围的事实来源；事实必须来自当前项目真实来源。
+
+## 必须读取顺序
+
+修改或审查前，按顺序读取：
+
+1. `AGENTS.md`
+2. `CLAUDE.md`
+3. `.cursor/rules/ani-core-dev-rules.mdc`（本规则）
+4. `ANI-DOCS-INDEX.md`
+5. `repo/CURRENT-SPRINT.md`
+6. `ANI-06-开发计划.md` 的 Section 零和当前 Sprint 小节
+7. 本次任务相关的契约、代码、测试和开发记录
+
+冲突处理：
+
+- 当前 Sprint / 进度：以 `repo/CURRENT-SPRINT.md` + `ANI-06-开发计划.md` Section 零为准
+- 稳定工程规则 / 禁止越界：以 `CLAUDE.md` 为准
+- Core 公开契约：`repo/api/openapi/v1.yaml`
+- Services 公开契约：`repo/api/openapi/services/v1.yaml`
+
+不要从历史 handoff、旧批次记录、未来路线图，或 `ANI-10` 中的示例倒推当前工作。
+
+## 范围门禁
+
+编辑前先分类：
+
+- **允许的 ANI Core**：Core OpenAPI REST API、Core SDK、CLI、Gateway Core 路由、Core services/controllers、ports/adapters、provider 集成、架构校验、Core 文档和 Sprint 记录
+- **冻结的 ANI Services**：不得在 `repo/services/model-service/`、`repo/services/kb-service/`、`repo/ai/`、`repo/operators/inference-operator/`、`repo/frontends/` 中新增、修改、优化或补全 Services 实现/业务逻辑，除非人类明确改变项目边界
+- **契约分离**：Core 资源只在 `repo/api/openapi/v1.yaml`；`models` / `inference-services` / `knowledge-bases` 等只在 `repo/api/openapi/services/v1.yaml`，不得回流 Core
+
+若请求属于 Services 工作：停止实现并说明边界。
+
+## 实现规则
+
+Core 改动顺序：
+
+1. 定义成功条件和最小可验证改动
+2. 公开 Core API 行为变化：先改 OpenAPI，再实现
+3. 通过现有 Core service / controller / port / adapter 模式实现
+4. 在最接近且有意义的层级补聚焦测试
+5. 仅按 `CLAUDE.md` 批次类型规则更新开发记录
+6. 运行必要验证，或明确说明为何无法运行
+
+不变量：
+
+- Core API `servers[0].url` = `https://{host}/api/v1`；Services = `https://{host}/api/v1/svc`
+- POST 创建与有副作用 PUT/PATCH 必须支持 `idempotency_key`
+- Core SDK 只由 Core OpenAPI 生成；Services SDK 只由 Services OpenAPI 生成
+- Gateway handler、Core domain service、Services 业务服务不得直接导入 provider SDK
+- Kubernetes API 仅限 adapter / controller / preflight 等边界
+- 可替换产品能力必须经 `pkg/ports/` + `pkg/adapters/`
+- 不得为猜测性未来需求引入抽象、新组件、外部依赖、worker、队列、配置项或表
+
+## 审查清单
+
+实现或审查时显式检查：
+
+- **架构边界**：Core/Services 分离；REST/SDK 跨层控制面
+- **契约兼容性**：不删字段/端点、不改类型/HTTP 方法/错误语义
+- **幂等与重试**：创建与副作用操作可安全重试
+- **部分失败与对账**：DB/K8s/NATS/MinIO/Redis/provider 中途失败时状态可恢复或明确失败
+- **Provider 耦合**：MinIO/Milvus/NATS/Redis/Harbor/CNPG/Kube-OVN/KubeVirt/vCluster/KMS/GPU/K8s 细节是否限制在允许边界
+- **真实环境门禁**：声称 real-provider/runtime ready 时是否有 live gate / `REAL-K8S-LAB-A`，而非仅 local mock
+- **文档完整性**：动态进度不写 `CLAUDE.md`，写入 Sprint / development-record
+
+审查先按严重程度列具体问题（含文件与行号）；指出失败场景与最小修复方向，避免空泛建议。
+
+## 验证
+
+完成 Core 代码改动后，除非当前 Sprint 定义了更窄命令，否则在 `repo/` 运行：
+
+```bash
+make test
+make validate-architecture
+git diff --check
+```
+
+相关时还要：
+
+- 改文档入口后：`make validate-doc-entrypoints`
+- 声称真实 K8s/provider ready：`make validate-real-k8s-profile`
+- 触碰 OpenAPI/SDK/Mock/兼容性基线：按 `repo/CURRENT-SPRINT.md` 指定命令
+
+跳过验证必须报告确切原因。
+
+## 最终回复
+
+每次实现、修复或文档改动完成后的最终回复，必须包含本次已修改文件清单，并对每个文件用一句话说明修改内容。文件较多时可按「契约 / 代码 / 测试 / 文档记录」分组；不要只写总体摘要。
