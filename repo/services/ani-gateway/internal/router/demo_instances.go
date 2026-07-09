@@ -87,6 +87,7 @@ type demoInstanceAPI struct {
 	observability                 ports.InstanceObservability
 	observabilityUsesInstanceName bool
 	workloadProvider              string
+	workloadOps                   ports.WorkloadInstanceOps
 }
 
 type demoCreateInstanceRequest struct {
@@ -96,6 +97,8 @@ type demoCreateInstanceRequest struct {
 	CPU                   string                     `json:"cpu"`
 	Memory                string                     `json:"memory"`
 	BootImage             string                     `json:"boot_image"`
+	BootMedia             *demoBootMediaRequest      `json:"boot_media"`
+	RootDiskSizeGiB       *int64                     `json:"root_disk_size_gib"`
 	SSHUsername           string                     `json:"ssh_username"`
 	SSHKeyRef             string                     `json:"ssh_key_ref"`
 	Image                 string                     `json:"image"`
@@ -113,6 +116,15 @@ type demoCreateInstanceRequest struct {
 	SecretBindings        []demoSecretBindingRequest `json:"secret_bindings"`
 	Description           string                     `json:"description"`
 	IdempotencyKey        string                     `json:"idempotency_key"`
+}
+
+// demoBootMediaRequest mirrors OpenAPI InstanceBootMedia. type=iso uses a
+// Ready Image (ISO PVC) as CD-ROM plus a blank root disk; type=disk_image is
+// reserved and returns ErrUnsupported for now.
+type demoBootMediaRequest struct {
+	Type      string `json:"type"`
+	ImageID   string `json:"image_id"`
+	BootOrder *int32 `json:"boot_order"`
 }
 
 type demoCreateNetworkRequest struct {
@@ -383,18 +395,18 @@ type demoTimelineStep struct {
 }
 
 func newDemoInstanceAPI() *demoInstanceAPI {
-	return newDemoInstanceAPIWithOptions(nil, DefaultInstanceWorkloadRuntime(), nil, nil, nil, false)
+	return newDemoInstanceAPIWithOptions(nil, DefaultInstanceWorkloadRuntime(), nil, nil, nil, false, nil)
 }
 
 func newDemoInstanceAPIWithObservability(observability ports.InstanceObservability, useInstanceName bool) *demoInstanceAPI {
-	return newDemoInstanceAPIWithOptions(nil, DefaultInstanceWorkloadRuntime(), nil, nil, observability, useInstanceName)
+	return newDemoInstanceAPIWithOptions(nil, DefaultInstanceWorkloadRuntime(), nil, nil, observability, useInstanceName, nil)
 }
 
 func newDemoInstanceAPIWithNetworkService(network ports.NetworkService) *demoInstanceAPI {
-	return newDemoInstanceAPIWithOptions(nil, DefaultInstanceWorkloadRuntime(), network, nil, nil, false)
+	return newDemoInstanceAPIWithOptions(nil, DefaultInstanceWorkloadRuntime(), network, nil, nil, false, nil)
 }
 
-func newDemoInstanceAPIWithOptions(metadata ports.MetadataStore, workload InstanceWorkloadRuntime, network ports.NetworkService, gpuInventory ports.GPUInventory, observability ports.InstanceObservability, useInstanceName bool) *demoInstanceAPI {
+func newDemoInstanceAPIWithOptions(metadata ports.MetadataStore, workload InstanceWorkloadRuntime, network ports.NetworkService, gpuInventory ports.GPUInventory, observability ports.InstanceObservability, useInstanceName bool, imageImport ports.ImageImportService) *demoInstanceAPI {
 	var store ports.WorkloadInstanceStore
 	var operations ports.WorkloadOperationStore
 	var identity ports.WorkloadIdentityService
@@ -417,7 +429,11 @@ func newDemoInstanceAPIWithOptions(metadata ports.MetadataStore, workload Instan
 	if gpuInventory != nil {
 		inventory = gpuInventory
 	}
-	planner := runtimeadapter.NewPlanningRuntime(runtimeadapter.WithGPUInventory(inventory))
+	plannerOptions := []runtimeadapter.PlanningOption{runtimeadapter.WithGPUInventory(inventory)}
+	if imageImport != nil {
+		plannerOptions = append(plannerOptions, runtimeadapter.WithImageImportService(imageImport))
+	}
+	planner := runtimeadapter.NewPlanningRuntime(plannerOptions...)
 	orchestrator := runtimeadapter.NewLocalInstanceOrchestrator(
 		planner,
 		runtimeadapter.NewKubernetesDryRunRenderer(planner),
@@ -454,20 +470,22 @@ func newDemoInstanceAPIWithOptions(metadata ports.MetadataStore, workload Instan
 		observability:                 observability,
 		observabilityUsesInstanceName: useInstanceName,
 		workloadProvider:              strings.TrimSpace(workload.Provider),
+		workloadOps:                   workload.Ops,
 	}
 }
 
 func registerDemoInstances(v1 *route.RouterGroup) {
-	registerDemoInstancesWithObservability(v1, nil, DefaultInstanceWorkloadRuntime(), nil, nil, nil, false)
+	registerDemoInstancesWithObservability(v1, nil, DefaultInstanceWorkloadRuntime(), nil, nil, nil, false, nil)
 }
 
-func registerDemoInstancesWithObservability(v1 *route.RouterGroup, metadata ports.MetadataStore, workload InstanceWorkloadRuntime, network ports.NetworkService, gpuInventory ports.GPUInventory, observability ports.InstanceObservability, useInstanceName bool) {
-	api := newDemoInstanceAPIWithOptions(metadata, workload, network, gpuInventory, observability, useInstanceName)
+func registerDemoInstancesWithObservability(v1 *route.RouterGroup, metadata ports.MetadataStore, workload InstanceWorkloadRuntime, network ports.NetworkService, gpuInventory ports.GPUInventory, observability ports.InstanceObservability, useInstanceName bool, imageImport ports.ImageImportService) {
+	api := newDemoInstanceAPIWithOptions(metadata, workload, network, gpuInventory, observability, useInstanceName, imageImport)
 	v1.GET("/instances", api.list)
 	v1.POST("/instances", api.create)
 	v1.GET("/instances/:instance_id", api.get)
 	v1.POST("/instances/:instance_id/lifecycle", api.lifecycle)
 	v1.POST("/instances/:instance_id/console", api.console)
+	v1.GET("/instances/:instance_id/console/:session_id", api.connectConsoleSession)
 	v1.GET("/instances/:instance_id/logs", api.listLogs)
 	v1.GET("/instances/:instance_id/events", api.listEvents)
 	v1.GET("/instances/:instance_id/metrics", api.getMetrics)
@@ -1251,6 +1269,44 @@ func demoSpecFromRequest(req demoCreateInstanceRequest, tenantID string) (ports.
 	}
 	switch kind {
 	case ports.WorkloadKindVM:
+		bootMedia, err := demoBootMediaFromRequest(req.BootMedia)
+		if err != nil {
+			return ports.WorkloadSpec{}, err
+		}
+		if bootMedia != nil {
+			if strings.TrimSpace(req.BootImage) != "" {
+				return ports.WorkloadSpec{}, fmt.Errorf("boot_image and boot_media are mutually exclusive")
+			}
+			rootSizeGiB := int64(40)
+			if req.RootDiskSizeGiB != nil {
+				if *req.RootDiskSizeGiB <= 0 {
+					return ports.WorkloadSpec{}, fmt.Errorf("root_disk_size_gib must be a positive integer")
+				}
+				rootSizeGiB = *req.RootDiskSizeGiB
+			}
+			bootOrder := int32(1)
+			if bootMedia.BootOrder != nil {
+				if *bootMedia.BootOrder <= 0 {
+					return ports.WorkloadSpec{}, fmt.Errorf("boot_media.boot_order must be a positive integer")
+				}
+				bootOrder = *bootMedia.BootOrder
+			}
+			rootDisk := ports.WorkloadStorageAttachment{Name: name + "-root", Kind: ports.StorageAttachmentRootDisk, SizeGiB: rootSizeGiB, Required: true}
+			spec.Storage = []ports.WorkloadStorageAttachment{
+				rootDisk,
+				{Name: "iso", Kind: ports.StorageAttachmentCDROM, SourceRef: bootMedia.ImageID, Required: true},
+			}
+			spec.VM = &ports.VMInstanceSpec{
+				BootMedia:          ports.VMBootMediaISO,
+				BootMediaImageID:   bootMedia.ImageID,
+				BootMediaBootOrder: bootOrder,
+				SSHUsername:        firstNonEmpty(req.SSHUsername, "ubuntu"),
+				SSHKeySecret:       req.SSHKeyRef,
+				MachineType:        "q35",
+				RootDisk:           rootDisk,
+			}
+			break
+		}
 		spec.VM = &ports.VMInstanceSpec{
 			BootImage:    firstNonEmpty(req.BootImage, "quay.io/kubevirt/cirros-container-disk-demo:v1.2.0"),
 			SSHUsername:  firstNonEmpty(req.SSHUsername, "ubuntu"),
@@ -1285,6 +1341,26 @@ func demoSpecFromRequest(req demoCreateInstanceRequest, tenantID string) (ports.
 		return ports.WorkloadSpec{}, fmt.Errorf("unsupported demo instance kind %q", kind)
 	}
 	return spec, nil
+}
+
+// demoBootMediaFromRequest validates demoCreateInstanceRequest.BootMedia.
+// It returns (nil, nil) when boot_media was not provided, keeping the
+// existing containerDisk path unchanged.
+func demoBootMediaFromRequest(req *demoBootMediaRequest) (*demoBootMediaRequest, error) {
+	if req == nil || strings.TrimSpace(req.Type) == "" {
+		return nil, nil
+	}
+	switch strings.TrimSpace(req.Type) {
+	case "iso":
+		if strings.TrimSpace(req.ImageID) == "" {
+			return nil, fmt.Errorf("boot_media.image_id is required when boot_media.type=iso")
+		}
+		return req, nil
+	case "disk_image":
+		return nil, fmt.Errorf("%w: boot_media.type=disk_image", ports.ErrUnsupported)
+	default:
+		return nil, fmt.Errorf("boot_media.type must be iso or disk_image")
+	}
 }
 
 func demoInstanceKind(req demoCreateInstanceRequest) (ports.WorkloadKind, error) {

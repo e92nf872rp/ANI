@@ -173,6 +173,30 @@
       "scope": ""
     },
     {
+      "operationId": "listImages",
+      "method": "GET",
+      "path": "/images",
+      "scope": "scope:images:read"
+    },
+    {
+      "operationId": "createImageUpload",
+      "method": "POST",
+      "path": "/images/uploads",
+      "scope": "scope:images:create"
+    },
+    {
+      "operationId": "deleteImage",
+      "method": "DELETE",
+      "path": "/images/{image_id}",
+      "scope": "scope:images:delete"
+    },
+    {
+      "operationId": "getImage",
+      "method": "GET",
+      "path": "/images/{image_id}",
+      "scope": "scope:images:read"
+    },
+    {
       "operationId": "getInstanceOperation",
       "method": "GET",
       "path": "/instance-operations/{operation_id}",
@@ -736,6 +760,7 @@
     "CoreDevProfileInfo",
     "CreateAPIKeyRequest",
     "CreateAPIKeyResponse",
+    "CreateImageUploadRequest",
     "CreateInstanceConsoleSessionRequest",
     "CreateInstanceExecSessionRequest",
     "CreateInstanceRequest",
@@ -772,6 +797,12 @@
     "GPUInventoryRecord",
     "GPUOccupancyStats",
     "HealthCheck",
+    "Image",
+    "ImageFormat",
+    "ImageListResponse",
+    "ImageState",
+    "ImageUploadSession",
+    "InstanceBootMedia",
     "InstanceConsoleSession",
     "InstanceEvent",
     "InstanceEventListResponse",
@@ -882,6 +913,7 @@
     "rotateEncryptionKey",
     "sealEncryptionObject",
     "createStorageFilesystem",
+    "createImageUpload",
     "createInstance",
     "createInstanceExecSession",
     "applyInstanceLifecycle",
@@ -917,6 +949,7 @@
     "listStorageFilesystems",
     "listFilesystemMountTargets",
     "listGPUInventory",
+    "listImages",
     "listInstances",
     "listInstanceLogs",
     "listInstanceOperations",

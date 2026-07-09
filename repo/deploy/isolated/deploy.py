@@ -2,7 +2,7 @@
 """ANI isolated deployment — single entrypoint (co-located with deploy YAML).
 
 Deploy order (dependencies):
-  render → mirror → foundation (KubeVirt → Rook → Ceph SC → Harbor) → base-infra (PVC) → business → verify
+  render → mirror → foundation (KubeVirt → CDI → Rook → Ceph SC → Harbor) → base-infra (PVC) → business → verify
 
 Usage (from repo root):
   python3 deploy/isolated/deploy.py deploy [dev]
@@ -63,6 +63,13 @@ FOUNDATION_MIRRORS = [
     ("quay.io/kubevirt/virt-controller:v1.8.2", "kubevirt/virt-controller:v1.8.2"),
     ("quay.io/kubevirt/virt-handler:v1.8.2", "kubevirt/virt-handler:v1.8.2"),
     ("quay.io/kubevirt/virt-launcher:v1.8.2", "kubevirt/virt-launcher:v1.8.2"),
+    ("quay.io/kubevirt/cdi-operator:v1.65.0", "kubevirt/cdi-operator:v1.65.0"),
+    ("quay.io/kubevirt/cdi-controller:v1.65.0", "kubevirt/cdi-controller:v1.65.0"),
+    ("quay.io/kubevirt/cdi-apiserver:v1.65.0", "kubevirt/cdi-apiserver:v1.65.0"),
+    ("quay.io/kubevirt/cdi-uploadproxy:v1.65.0", "kubevirt/cdi-uploadproxy:v1.65.0"),
+    ("quay.io/kubevirt/cdi-importer:v1.65.0", "kubevirt/cdi-importer:v1.65.0"),
+    ("quay.io/kubevirt/cdi-uploadserver:v1.65.0", "kubevirt/cdi-uploadserver:v1.65.0"),
+    ("quay.io/kubevirt/cdi-cloner:v1.65.0", "kubevirt/cdi-cloner:v1.65.0"),
     ("dockerproxy.net/rook/ceph:v1.20.0", "rook/ceph:v1.20.0"),
     ("quay.io/ceph/ceph:v19.2.3", "ceph/ceph:v19.2.3"),
     ("quay.io/cephcsi/ceph-csi-operator:v1.0.1", "cephcsi/ceph-csi-operator:v1.0.1"),
@@ -219,6 +226,17 @@ def wait_kubevirt_crd() -> None:
             return
         time.sleep(5)
     raise DeployError("timeout waiting for kubevirts.kubevirt.io CRD")
+
+
+def wait_cdi_crd(name: str) -> None:
+    log(f"foundation: waiting for CDI CRD {name}")
+    for _ in range(60):
+        proc = kubectl("get", "crd", name, check=False)
+        if proc.returncode == 0:
+            wait_crd(name)
+            return
+        time.sleep(5)
+    raise DeployError(f"timeout waiting for {name} CRD")
 
 
 def get_k8s_nodes() -> list[str]:
@@ -566,6 +584,20 @@ def install_kubevirt() -> None:
     kubectl("-n", "kubevirt", "wait", "kubevirt", "kubevirt", "--for=condition=Available", "--timeout=600s")
 
 
+def install_cdi() -> None:
+    log("foundation: CDI operator")
+    kubectl_apply(YAML_DIR / "06-cdi-operator.yaml")
+    rollout("cdi", "deploy", "cdi-operator", timeout="300s")
+    wait_cdi_crd("cdis.cdi.kubevirt.io")
+    log("foundation: CDI CR")
+    kubectl_apply(YAML_DIR / "07-cdi-cr.yaml")
+    wait_cdi_crd("datavolumes.cdi.kubevirt.io")
+    kubectl("wait", "cdi", "cdi", "--for=condition=Available", "--timeout=600s")
+    log("foundation: CDI uploadproxy NodePort")
+    kubectl_apply(YAML_DIR / "08-cdi-uploadproxy-nodeport.yaml")
+    kubectl("-n", "cdi", "get", "svc", "cdi-uploadproxy-nodeport")
+
+
 def helm_dependency_update() -> None:
     helm("dependency", "update", cwd=CHART)
 
@@ -611,7 +643,15 @@ def render_yaml() -> None:
     (YAML_DIR / "05-harbor.yaml").write_text(proc.stdout)
 
     parts = []
-    for name in ("01-kubevirt-operator.yaml", "02-kubevirt-cr.yaml", "03-rook-ceph-operator.yaml", "05-harbor.yaml"):
+    for name in (
+        "01-kubevirt-operator.yaml",
+        "02-kubevirt-cr.yaml",
+        "06-cdi-operator.yaml",
+        "07-cdi-cr.yaml",
+        "08-cdi-uploadproxy-nodeport.yaml",
+        "03-rook-ceph-operator.yaml",
+        "05-harbor.yaml",
+    ):
         parts.append((YAML_DIR / name).read_text())
     (YAML_DIR / "cluster-foundation-all.yaml").write_text("\n---\n".join(parts))
     print(f"✅ rendered yaml under {YAML_DIR}")
@@ -688,6 +728,7 @@ def deploy_foundation(*, skip_harbor: bool = False, skip_ceph_cluster: bool = Fa
 
     helm_dependency_update()
     install_kubevirt()
+    install_cdi()
 
     log("foundation: Rook-Ceph operator")
     helm(

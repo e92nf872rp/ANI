@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -104,6 +105,173 @@ func TestDemoSpecFromRequestMapsContainerCommandAndArgs(t *testing.T) {
 	}
 	if strings.Join(spec.Command, " ") != "sh -c" || strings.Join(spec.Args, " ") != "sleep 3600" {
 		t.Fatalf("command=%#v args=%#v, want request command/args", spec.Command, spec.Args)
+	}
+}
+
+func TestDemoSpecFromRequestBuildsISOBootMediaCdromAndBlankRoot(t *testing.T) {
+	spec, err := demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind: "vm",
+		Name: "vm-iso",
+		BootMedia: &demoBootMediaRequest{
+			Type:    "iso",
+			ImageID: "img-abc123",
+		},
+		RootDiskSizeGiB: int64Ptr(40),
+	}, "tenant-a")
+	if err != nil {
+		t.Fatalf("demoSpecFromRequest error = %v", err)
+	}
+	if spec.VM == nil || spec.VM.BootMedia != ports.VMBootMediaISO || spec.VM.BootMediaImageID != "img-abc123" {
+		t.Fatalf("spec.VM = %+v, want ISO boot media with image_id", spec.VM)
+	}
+	if spec.VM.BootImage != "" {
+		t.Fatalf("spec.VM.BootImage = %q, want empty for ISO boot media", spec.VM.BootImage)
+	}
+	if spec.VM.RootDisk.SizeGiB != 40 {
+		t.Fatalf("root disk size = %d, want 40", spec.VM.RootDisk.SizeGiB)
+	}
+	foundCDROM := false
+	for _, attachment := range spec.Storage {
+		if attachment.Kind == ports.StorageAttachmentCDROM {
+			foundCDROM = true
+			if attachment.SourceRef != "img-abc123" {
+				t.Fatalf("cdrom sourceRef = %q, want img-abc123", attachment.SourceRef)
+			}
+		}
+	}
+	if !foundCDROM {
+		t.Fatalf("spec.Storage = %+v, want a cdrom attachment", spec.Storage)
+	}
+}
+
+func TestDemoSpecFromRequestRejectsBootImageAndBootMediaTogether(t *testing.T) {
+	_, err := demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind:      "vm",
+		Name:      "vm-both",
+		BootImage: "quay.io/kubevirt/cirros-container-disk-demo:v1.2.0",
+		BootMedia: &demoBootMediaRequest{Type: "iso", ImageID: "img-abc123"},
+	}, "tenant-a")
+	if err == nil {
+		t.Fatal("demoSpecFromRequest() error = nil, want mutual exclusion error")
+	}
+}
+
+func TestDemoSpecFromRequestRejectsISOBootMediaWithoutImageID(t *testing.T) {
+	_, err := demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind:      "vm",
+		Name:      "vm-no-image",
+		BootMedia: &demoBootMediaRequest{Type: "iso"},
+	}, "tenant-a")
+	if err == nil {
+		t.Fatal("demoSpecFromRequest() error = nil, want image_id required error")
+	}
+}
+
+func TestDemoSpecFromRequestRejectsUnsupportedDiskImageBootMedia(t *testing.T) {
+	_, err := demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind:      "vm",
+		Name:      "vm-disk-image",
+		BootMedia: &demoBootMediaRequest{Type: "disk_image", ImageID: "img-abc123"},
+	}, "tenant-a")
+	if !errors.Is(err, ports.ErrUnsupported) {
+		t.Fatalf("demoSpecFromRequest() error = %v, want ErrUnsupported", err)
+	}
+}
+
+func TestDemoSpecFromRequestUsesDefaultRootDiskSizeAndBootOrderForISOBootMedia(t *testing.T) {
+	spec, err := demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind:      "vm",
+		Name:      "vm-iso-defaults",
+		BootMedia: &demoBootMediaRequest{Type: "iso", ImageID: "img-abc123"},
+	}, "tenant-a")
+	if err != nil {
+		t.Fatalf("demoSpecFromRequest error = %v", err)
+	}
+	if spec.VM.RootDisk.SizeGiB != 40 {
+		t.Fatalf("default root disk size = %d, want 40", spec.VM.RootDisk.SizeGiB)
+	}
+	if spec.VM.BootMediaBootOrder != 1 {
+		t.Fatalf("default boot order = %d, want 1", spec.VM.BootMediaBootOrder)
+	}
+}
+
+func TestDemoInstanceServiceCreatesVMWithISOBootMediaRendersCdromManifestNotContainerDisk(t *testing.T) {
+	api := newDemoInstanceAPI()
+	spec, err := demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind: "vm",
+		Name: "vm-iso-create",
+		BootMedia: &demoBootMediaRequest{
+			Type:    "iso",
+			ImageID: "img-abc123",
+		},
+		RootDiskSizeGiB: int64Ptr(40),
+	}, "tenant-a")
+	if err != nil {
+		t.Fatalf("demoSpecFromRequest error = %v", err)
+	}
+	result, err := api.service.Create(context.Background(), ports.WorkloadInstanceCreateRequest{
+		Spec:            spec,
+		UserID:          "user-a",
+		PermissionProof: "demo:test",
+		RequestedAt:     time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	var vmManifest string
+	for _, manifest := range result.Manifests {
+		if manifest.Kind == "VirtualMachine" {
+			vmManifest = manifest.Content
+		}
+	}
+	if vmManifest == "" {
+		t.Fatal("Create() did not render a VirtualMachine manifest")
+	}
+	for _, want := range []string{
+		"cdrom", "img-abc123", "rootdisk",
+		// Blank root disk must be self-creating via dataVolumeTemplates, not
+		// just a claimName reference to a PVC that apply never creates.
+		"dataVolumeTemplates", "vm-iso-create-root", `"blank"`, `"40Gi"`, "ani-rbd-ssd",
+	} {
+		if !strings.Contains(vmManifest, want) {
+			t.Fatalf("VM manifest missing %q:\n%s", want, vmManifest)
+		}
+	}
+	for _, unwanted := range []string{"containerDisk", "containerdisk"} {
+		if strings.Contains(vmManifest, unwanted) {
+			t.Fatalf("VM manifest must not contain %q:\n%s", unwanted, vmManifest)
+		}
+	}
+}
+
+func int64Ptr(v int64) *int64 { return &v }
+
+func TestDemoInstanceServiceRejectsISOBootMediaWhenWiredImageNotReady(t *testing.T) {
+	imageImport := &fakeImageImportService{
+		record: ports.ImageRecord{ID: "img-uploading", TenantID: "tenant-a", Format: ports.ImageFormatISO, State: ports.ImageStateUploading},
+	}
+	api := newDemoInstanceAPIWithOptions(nil, DefaultInstanceWorkloadRuntime(), nil, nil, nil, false, imageImport)
+	spec, err := demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind:            "vm",
+		Name:            "vm-iso-wired",
+		BootMedia:       &demoBootMediaRequest{Type: "iso", ImageID: "img-uploading"},
+		RootDiskSizeGiB: int64Ptr(40),
+	}, "tenant-a")
+	if err != nil {
+		t.Fatalf("demoSpecFromRequest error = %v", err)
+	}
+
+	_, err = api.service.Create(context.Background(), ports.WorkloadInstanceCreateRequest{
+		Spec:            spec,
+		UserID:          "user-a",
+		PermissionProof: "demo:test",
+		RequestedAt:     time.Now().UTC(),
+	})
+	if !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("Create() error = %v, want ErrConflict (image not ready)", err)
+	}
+	if !imageImport.getCalled {
+		t.Fatal("wired ImageImportService.Get was not called during planning")
 	}
 }
 
@@ -1085,7 +1253,7 @@ func TestDemoInstanceServiceRealShellExecutesCommand(t *testing.T) {
 func TestDemoInstanceResponseMarksRealProviderWhenKubernetesWorkloadRuntimeConfigured(t *testing.T) {
 	workload := DefaultInstanceWorkloadRuntime()
 	workload.Provider = "kubernetes_rest"
-	api := newDemoInstanceAPIWithOptions(nil, workload, nil, nil, nil, false)
+	api := newDemoInstanceAPIWithOptions(nil, workload, nil, nil, nil, false, nil)
 	record := ports.WorkloadInstanceRecord{
 		TenantID:     "tenant-a",
 		InstanceID:   "instance-k8s",

@@ -17,6 +17,7 @@ type RegisterOptions struct {
 	K8sClusterService                     ports.K8sClusterService
 	EncryptionService                     ports.EncryptionService
 	SecretService                         ports.SecretService
+	ImageImportService                    ports.ImageImportService
 	GPUInventory                          ports.GPUInventory
 	ImageRegistry                         ports.ImageRegistry
 	RegistryPullSecretKubernetesApply     ports.RegistryPullSecretKubernetesApply
@@ -44,7 +45,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerObservability(v1)
 	registerMeteringWithService(v1, options.MeteringService)
 	registerHarborWithService(v1, options.ImageRegistry, options.RegistryPullSecretKubernetesApply)
-	registerDemoInstancesWithObservability(v1, options.MetadataStore, options.InstanceWorkloadRuntime, options.NetworkService, options.GPUInventory, options.InstanceObservability, options.InstanceObservabilityUsesInstanceName)
+	registerDemoInstancesWithObservability(v1, options.MetadataStore, options.InstanceWorkloadRuntime, options.NetworkService, options.GPUInventory, options.InstanceObservability, options.InstanceObservabilityUsesInstanceName, options.ImageImportService)
 	registerGPUInventoryResourcesWithInventory(v1, options.GPUInventory)
 	registerNetworkResourcesWithService(v1, options.NetworkService)
 	registerStorageResourcesWithService(v1, options.StorageService)
@@ -56,6 +57,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerK8sClusterResourcesWithService(v1, options.K8sClusterService)
 	registerEncryptionResourcesWithService(v1, options.EncryptionService)
 	registerSecretResourcesWithService(v1, options.SecretService)
+	registerImageResourcesWithService(v1, options.ImageImportService)
 
 	svc := h.Group("/api/v1/svc")
 	registerModels(svc)

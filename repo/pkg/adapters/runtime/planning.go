@@ -14,6 +14,7 @@ import (
 
 type PlanningRuntime struct {
 	gpuInventory ports.GPUInventory
+	imageImport  ports.ImageImportService
 	now          func() time.Time
 
 	mu        sync.RWMutex
@@ -26,6 +27,16 @@ type PlanningOption func(*PlanningRuntime)
 func WithGPUInventory(inventory ports.GPUInventory) PlanningOption {
 	return func(runtime *PlanningRuntime) {
 		runtime.gpuInventory = inventory
+	}
+}
+
+// WithImageImportService wires a Ready-state check for boot_media=iso VM
+// creation. When unset, planning only validates presence of image_id /
+// root_disk_size_gib and defers Ready-state enforcement to the provider apply
+// step.
+func WithImageImportService(service ports.ImageImportService) PlanningOption {
+	return func(runtime *PlanningRuntime) {
+		runtime.imageImport = service
 	}
 }
 
@@ -179,8 +190,8 @@ func (r *PlanningRuntime) plan(ctx context.Context, spec ports.WorkloadSpec) (po
 		if spec.VM == nil {
 			return ports.WorkloadSpec{}, fmt.Errorf("%w: vm spec is required", ports.ErrInvalid)
 		}
-		if strings.TrimSpace(spec.VM.BootImage) == "" {
-			return ports.WorkloadSpec{}, fmt.Errorf("%w: vm bootImage is required", ports.ErrInvalid)
+		if err := r.validateVMBootMedia(ctx, spec); err != nil {
+			return ports.WorkloadSpec{}, err
 		}
 		if spec.VM.RootDisk.Kind != ports.StorageAttachmentRootDisk || spec.VM.RootDisk.SizeGiB <= 0 {
 			return ports.WorkloadSpec{}, fmt.Errorf("%w: vm root disk must be a positive root_disk attachment", ports.ErrInvalid)
@@ -216,6 +227,43 @@ func (r *PlanningRuntime) plan(ctx context.Context, spec ports.WorkloadSpec) (po
 	}
 
 	return planned, nil
+}
+
+// validateVMBootMedia enforces boot_image/boot_media mutual exclusion and,
+// for boot_media=iso, that image_id and a positive root disk size are set.
+// When an ImageImportService is wired, it also requires the image to be
+// Ready.
+func (r *PlanningRuntime) validateVMBootMedia(ctx context.Context, spec ports.WorkloadSpec) error {
+	switch spec.VM.BootMedia {
+	case "":
+		if strings.TrimSpace(spec.VM.BootImage) == "" {
+			return fmt.Errorf("%w: vm bootImage is required", ports.ErrInvalid)
+		}
+		return nil
+	case ports.VMBootMediaISO:
+		if strings.TrimSpace(spec.VM.BootImage) != "" {
+			return fmt.Errorf("%w: vm bootImage and bootMedia are mutually exclusive", ports.ErrInvalid)
+		}
+		if strings.TrimSpace(spec.VM.BootMediaImageID) == "" {
+			return fmt.Errorf("%w: vm bootMedia.imageID is required for iso boot media", ports.ErrInvalid)
+		}
+		if spec.VM.RootDisk.SizeGiB <= 0 {
+			return fmt.Errorf("%w: vm rootDiskSizeGiB is required for iso boot media", ports.ErrInvalid)
+		}
+		if r.imageImport == nil {
+			return nil
+		}
+		record, err := r.imageImport.Get(ctx, ports.ImageGetRequest{TenantID: spec.TenantID, ImageID: spec.VM.BootMediaImageID})
+		if err != nil {
+			return err
+		}
+		if record.State != ports.ImageStateReady {
+			return fmt.Errorf("%w: boot_media image %q is not ready (state=%s)", ports.ErrConflict, spec.VM.BootMediaImageID, record.State)
+		}
+		return nil
+	default:
+		return fmt.Errorf("%w: unsupported boot_media type %q", ports.ErrUnsupported, spec.VM.BootMedia)
+	}
 }
 
 func supportedKind(kind ports.WorkloadKind) bool {
@@ -306,6 +354,14 @@ func normalizeStorageAttachments(spec ports.WorkloadSpec) []ports.WorkloadStorag
 	}
 	if spec.VM != nil {
 		storage := []ports.WorkloadStorageAttachment{spec.VM.RootDisk}
+		if spec.VM.BootMedia == ports.VMBootMediaISO {
+			storage = append(storage, ports.WorkloadStorageAttachment{
+				Name:      "iso",
+				Kind:      ports.StorageAttachmentCDROM,
+				SourceRef: spec.VM.BootMediaImageID,
+				Required:  true,
+			})
+		}
 		storage = append(storage, spec.VM.DataDisks...)
 		return storage
 	}
@@ -342,6 +398,9 @@ func validateStorageAttachments(kind ports.WorkloadKind, attachments []ports.Wor
 		}
 		if attachment.Kind == ports.StorageAttachmentObjectFuse && strings.TrimSpace(attachment.SourceRef) == "" {
 			return fmt.Errorf("%w: object_fuse storage requires sourceRef", ports.ErrInvalid)
+		}
+		if attachment.Kind == ports.StorageAttachmentCDROM && strings.TrimSpace(attachment.SourceRef) == "" {
+			return fmt.Errorf("%w: cdrom storage requires sourceRef (image_id)", ports.ErrInvalid)
 		}
 	}
 	return nil

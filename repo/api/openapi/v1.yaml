@@ -473,7 +473,7 @@ components:
             required: [name, kind]
             properties:
               name:       { type: string }
-              kind:       { type: string, enum: [root_disk, data_disk, shared_pvc, object_fuse, ephemeral] }
+              kind:       { type: string, enum: [root_disk, data_disk, cdrom, shared_pvc, object_fuse, ephemeral] }
               size_gib:   { type: integer, format: int64 }
               source_ref: { type: string, nullable: true }
               mount_path: { type: string, nullable: true }
@@ -595,7 +595,15 @@ components:
         cpu:            { type: string, example: "2" }
         memory:         { type: string, example: "4Gi" }
         auto_start:     { type: boolean, default: true }
-        boot_image:     { type: string, nullable: true, description: "VM boot image 引用" }
+        boot_image:     { type: string, nullable: true, description: "VM containerDisk 镜像引用；与 boot_media 互斥。未传 boot_media 时沿用既有 containerDisk 路径。" }
+        boot_media:
+          $ref: '#/components/schemas/InstanceBootMedia'
+        root_disk_size_gib:
+          type: integer
+          format: int64
+          minimum: 1
+          nullable: true
+          description: "VM 空白系统盘大小（GiB）。boot_media.type=iso 时必填（未传时服务端默认 40）；containerDisk 路径可忽略。"
         ssh_username:   { type: string, nullable: true, default: "ubuntu", description: "VM SSH 用户名；仅 VM 使用" }
         ssh_key_ref:    { type: string, nullable: true, description: "VM SSH key/secret 引用；不包含私钥内容" }
         command:
@@ -631,6 +639,124 @@ components:
           description: "Container/GPU Container 副本数；VM 固定为 1"
         sandbox_config:
           $ref: '#/components/schemas/SandboxConfig'
+
+    InstanceBootMedia:
+      type: object
+      nullable: true
+      description: |
+        VM 启动介质选择。与 boot_image 互斥。
+        type=iso：使用已上传且 Ready 的 Image（ISO PVC）作为 CD-ROM，并创建空白 root disk 供安装。
+        type=disk_image：预留；使用已上传的 qcow2/raw 作为系统盘（本期可不实现）。
+        不暴露 DataVolume、UploadToken、PVC 等 provider 对象。
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [iso, disk_image]
+        image_id:
+          type: string
+          description: "POST /images/uploads 返回的 Image.id；type=iso 或 disk_image 时必填。"
+        boot_order:
+          type: integer
+          minimum: 1
+          default: 1
+          description: "ISO CD-ROM 启动顺序；默认 1，优先于空白系统盘。"
+
+    ImageFormat:
+      type: string
+      description: "上传镜像格式。iso 用于 CD-ROM 安装；qcow2/raw 预留给系统盘直启。"
+      enum: [iso, qcow2, raw]
+
+    ImageState:
+      type: string
+      description: "镜像导入状态。uploading=等待/正在上传；processing=导入中；ready=可挂载；failed/deleting/deleted 为终态或删除中。"
+      enum: [pending, uploading, processing, ready, failed, deleting, deleted]
+
+    Image:
+      type: object
+      description: |
+        租户级可启动介质元数据（ISO/磁盘镜像）。
+        底层可由 CDI DataVolume/PVC 承载，但 API 不返回 provider CR 名称以外的实现细节。
+      required: [id, tenant_id, name, format, size_gib, state, created_at, updated_at]
+      properties:
+        id:          { type: string }
+        tenant_id:   { type: string }
+        name:        { type: string }
+        format:      { $ref: '#/components/schemas/ImageFormat' }
+        size_gib:    { type: integer, format: int64, minimum: 1, description: "目标 PVC/DataVolume 容量（GiB），须 ≥ 上传文件展开后大小。" }
+        content_type:
+          type: string
+          nullable: true
+          description: "可选 MIME，如 application/x-iso9660-image。"
+        state:       { $ref: '#/components/schemas/ImageState' }
+        reason:      { type: string, nullable: true }
+        message:     { type: string, nullable: true }
+        volume_id:
+          type: string
+          nullable: true
+          description: "可选：导入完成后关联的 Core StorageVolume.id（若平台将其登记为卷）。"
+        storage_class:
+          type: string
+          nullable: true
+          description: "使用的存储类；未指定时由平台默认（如 ani-rbd-ssd）。"
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        created_at:  { type: string, format: date-time }
+        updated_at:  { type: string, format: date-time }
+
+    ImageListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:       { type: array, items: { $ref: '#/components/schemas/Image' } }
+        total:       { type: integer }
+        next_cursor: { type: string, nullable: true }
+
+    CreateImageUploadRequest:
+      type: object
+      description: |
+        创建镜像上传会话。服务端准备导入目标并返回短期 upload_url + token；
+        客户端将文件直传至 upload_url，不经 Gateway 请求体中转大文件。
+      required: [idempotency_key, name, format, size_gib]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+        name:            { type: string, minLength: 1, maxLength: 128 }
+        format:          { $ref: '#/components/schemas/ImageFormat' }
+        size_gib:
+          type: integer
+          format: int64
+          minimum: 1
+          description: "目标卷容量 GiB。ISO 建议按文件大小向上取整并留余量。"
+        content_type:
+          type: string
+          nullable: true
+          description: "可选；ISO 可用 application/x-iso9660-image。"
+        storage_class:
+          type: string
+          nullable: true
+          description: "可选；默认平台块存储类。"
+
+    ImageUploadSession:
+      type: object
+      description: |
+        镜像上传会话。客户端使用 upload_url + token 直传文件（HTTP PUT/POST，由实现文档约定）。
+        token 为短期一次性票据；过期后须重新创建上传会话。
+      required: [image, upload_url, token, expires_at]
+      properties:
+        image:      { $ref: '#/components/schemas/Image' }
+        upload_url:
+          type: string
+          format: uri
+          description: "浏览器/脚本可直达的上传端点（通常为 CDI upload proxy 的平台暴露地址）。"
+        token:
+          type: string
+          description: "短期上传票据；放入 Authorization: Bearer <token> 或实现约定的 header/query。"
+        expires_at: { type: string, format: date-time }
+        method:
+          type: string
+          enum: [PUT, POST]
+          default: POST
+          description: "客户端上传应使用的 HTTP 方法。"
 
     SandboxNetworkEgressPolicy:
       type: string
@@ -2151,6 +2277,11 @@ paths:
       description: |
         创建 VM、container、gpu_container 或 sandbox。POST 创建必须携带 idempotency_key；
         同一 (tenant_id, idempotency_key) 在 24 小时内返回同一操作结果。
+        VM 启动介质：
+        - 既有路径：传 boot_image（containerDisk 引用）；
+        - ISO 安装路径：传 boot_media.type=iso + boot_media.image_id（须引用 Ready 的 Image），
+          并传 root_disk_size_gib（空白系统盘）；boot_image 与 boot_media 互斥。
+        ISO 路径下实例 volumes 将包含 root_disk 与 cdrom。
       tags: [Instances]
       x-ani-rbac-scope: "scope:instances:create"
       requestBody:
@@ -4370,6 +4501,94 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
 
+  # ── 可启动镜像 / ISO 上传（Core API Alpha）──────────────────────────────────
+  /images:
+    get:
+      operationId: listImages
+      summary: 查询可启动镜像列表
+      description: |
+        列出租户下已登记的 ISO/磁盘镜像元数据。
+        不返回 CDI DataVolume/PVC 等 provider 对象；客户端只使用 Image.id。
+      tags: [Images]
+      x-ani-rbac-scope: "scope:images:read"
+      parameters:
+        - { name: format, in: query, schema: { $ref: '#/components/schemas/ImageFormat' } }
+        - { name: state,  in: query, schema: { $ref: '#/components/schemas/ImageState' } }
+        - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: 镜像列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ImageListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /images/uploads:
+    post:
+      operationId: createImageUpload
+      summary: 创建镜像上传会话
+      description: |
+        为本地 ISO/qcow2/raw 创建上传会话。服务端准备导入目标并返回短期 upload_url 与 token；
+        客户端将文件直传至 upload_url（不经 Gateway 请求体中转大文件）。
+        POST 必须携带 idempotency_key。本期优先实现 format=iso。
+        上传完成后客户端轮询 GET /images/{image_id} 直至 state=ready。
+      tags: [Images]
+      x-ani-rbac-scope: "scope:images:create"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateImageUploadRequest' }
+      responses:
+        "201":
+          description: 上传会话已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ImageUploadSession' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /images/{image_id}:
+    get:
+      operationId: getImage
+      summary: 查询镜像详情与导入状态
+      tags: [Images]
+      x-ani-rbac-scope: "scope:images:read"
+      parameters:
+        - { name: image_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 镜像详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Image' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: deleteImage
+      summary: 删除镜像
+      description: |
+        删除镜像元数据及底层导入卷。若仍被 Running/Provisioning VM 的 CD-ROM/系统盘引用，返回 409。
+      tags: [Images]
+      x-ani-rbac-scope: "scope:images:delete"
+      parameters:
+        - { name: image_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 镜像已删除或进入 deleting
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Image' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
   # ── Sandbox 模板（Core API Alpha）────────────────────────────────────────────
   /sandbox-templates:
     get:
@@ -4396,6 +4615,7 @@ tags:
   - { name: Instances,      description: "计算实例（VM/Container/GPU/Sandbox/BM/K8s集群）" }
   - { name: Networks,       description: "VPC/子网/安全组/负载均衡/路由" }
   - { name: Volumes,        description: "块存储卷与快照" }
+  - { name: Images,         description: "可启动镜像（ISO/磁盘镜像上传与状态）" }
   - { name: Filesystems,    description: "文件存储（CephFS/NFS）" }
   - { name: ObjectStore,    description: "对象存储（S3兼容）与存储桶管理" }
   - { name: VectorStore,    description: "向量存储（Milvus）" }

@@ -2,6 +2,7 @@ package ports
 
 import (
 	"context"
+	"io"
 	"time"
 )
 
@@ -87,6 +88,16 @@ const (
 	StorageAttachmentSharedPVC  StorageAttachmentKind = "shared_pvc"
 	StorageAttachmentObjectFuse StorageAttachmentKind = "object_fuse"
 	StorageAttachmentEphemeral  StorageAttachmentKind = "ephemeral"
+	StorageAttachmentCDROM      StorageAttachmentKind = "cdrom"
+)
+
+// VMBootMediaType selects how a VM boots. Empty means the existing
+// containerDisk path (VMInstanceSpec.BootImage). VMBootMediaISO renders a
+// blank root disk PVC plus a cdrom PVC sourced from a Ready Image.
+type VMBootMediaType string
+
+const (
+	VMBootMediaISO VMBootMediaType = "iso"
 )
 
 type WorkloadResourceRequest struct {
@@ -134,14 +145,22 @@ type WorkloadSecretBinding struct {
 }
 
 type VMInstanceSpec struct {
-	BootImage       string
-	CloudInitSecret string
-	SSHKeySecret    string
-	SSHUsername     string
-	Firmware        string
-	MachineType     string
-	RootDisk        WorkloadStorageAttachment
-	DataDisks       []WorkloadStorageAttachment
+	BootImage string
+	// BootMedia selects the ISO boot path when set to VMBootMediaISO; empty
+	// keeps the existing containerDisk path driven by BootImage. Mutually
+	// exclusive with BootImage.
+	BootMedia VMBootMediaType
+	// BootMediaImageID is a Ready ports.ImageRecord.ID (CDI DataVolume/PVC
+	// name for the cdi_rest provider). Required when BootMedia is set.
+	BootMediaImageID   string
+	BootMediaBootOrder int32
+	CloudInitSecret    string
+	SSHKeySecret       string
+	SSHUsername        string
+	Firmware           string
+	MachineType        string
+	RootDisk           WorkloadStorageAttachment
+	DataDisks          []WorkloadStorageAttachment
 }
 
 type VMSSHConnectionInfo struct {

@@ -13,6 +13,15 @@
 
 ## 已完成批次（按完成时间排列）
 
+### ISO / CDI Image Upload（2026-07）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| CDI-FOUNDATION-A | isolated foundation 增加 CDI v1.65.0：官方 operator manifest 镜像切到 `docker.changqingyun.cn/mirror/kubevirt/*:v1.65.0`，CDI CR 固定 `ani-rbd-ssd` scratch StorageClass，`cdi-uploadproxy-nodeport` 暴露 NodePort `31001`；不实现 Images API/VM ISO boot，不标 production ready | cdi-foundation-a.md |
+| IMAGE-UPLOAD-CDI-A | Image upload Core port + local adapter：新增 `ImageImportService`、OpenAPI Image schema 对齐类型、local `iso` 上传会话/幂等/Get/List/Delete；非 `iso` 返回 `ErrUnsupported`；不实现 CDI adapter/Gateway routes/VM ISO boot，不标 runtime ready | image-upload-cdi-a.md |
+| IMAGE-UPLOAD-CDI-A（Task 3） | CDI adapter + Gateway routes：新增 `CDIImageImportService`/`CDIRESTClient`（DataVolume `source.upload` + immediate-bind annotation + `ani-rbd-ssd` + UploadTokenRequest；DV phase → `ImageState`），Gateway `GET/POST/DELETE /images*` 路由只调用 `ports.ImageImportService`，`image_import_runtime.go` 支持 `IMAGE_IMPORT_PROVIDER=local\|cdi_rest`；`business-stack.yaml` 增加 Gateway env；SDK 重生成含 Images 操作；无集群/Gateway 可达环境，未跑 live 冒烟，不标 runtime/production ready | image-upload-cdi-a.md |
+| VM-ISO-BOOT-A | CreateInstance `boot_media=iso`：`ports.VMInstanceSpec` 增加 `BootMedia`/`BootMediaImageID`/`BootMediaBootOrder` 与 `StorageAttachmentCDROM`；renderer 在 ISO 路径渲染 `rootdisk`+`iso` 两个 `persistentVolumeClaim`（`iso` 带 `bootOrder`），绝不产出 `containerDisk`；planning 校验 `boot_image`/`boot_media` 互斥、`image_id`/`root_disk_size_gib` 必填，并在注入 `ImageImportService` 时校验 Image Ready；Gateway 解析 `boot_media`/`root_disk_size_gib` 并把 `ImageImportService` 接到 planner；既有 containerDisk 路径未改动；无可达集群，Step 3 现场冒烟未执行，不标 runtime/production ready | vm-iso-boot-a.md |
+
 ### SDK Regression Fixes（2026-06）
 
 | 批次 | 内容摘要 | 文件 |

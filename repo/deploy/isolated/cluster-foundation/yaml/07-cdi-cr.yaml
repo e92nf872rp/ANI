@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cdi
+  labels:
+    app.kubernetes.io/name: cdi
+    app.kubernetes.io/part-of: ani-cluster-foundation
+    ani.deploy/profile: isolated
+---
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: CDI
+metadata:
+  name: cdi
+  labels:
+    app.kubernetes.io/name: cdi
+    app.kubernetes.io/part-of: ani-cluster-foundation
+    ani.deploy/profile: isolated
+spec:
+  config:
+    featureGates:
+    - HonorWaitForFirstConsumer
+    - WebhookPvcRendering
+    scratchSpaceStorageClass: ani-rbd-ssd
+  imagePullPolicy: IfNotPresent
+  infra:
+    nodeSelector:
+      kubernetes.io/os: linux
+  workload:
+    nodeSelector:
+      kubernetes.io/os: linux

@@ -33,6 +33,7 @@ type Capabilities struct {
 	VectorStore           ports.VectorStore
 	VectorStoreResources  ports.VectorStoreService
 	ImageRegistry         ports.ImageRegistry
+	ImageImport           ports.ImageImportService
 	GPUInventory          ports.GPUInventory
 	WorkloadRuntime       ports.WorkloadRuntime
 	WorkloadRenderer      ports.WorkloadRenderer
@@ -221,6 +222,7 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 		VectorStore:          vectorStore,
 		VectorStoreResources: runtimeadapter.NewLocalVectorStoreService(vectorStoreServiceOptions...),
 		ImageRegistry:        imageRegistry,
+		ImageImport:          runtimeadapter.NewLocalImageImportService(),
 		GPUInventory:         gpuInventory,
 		WorkloadRuntime:      planner,
 		WorkloadRenderer:     runtimeadapter.NewKubernetesDryRunRenderer(planner),

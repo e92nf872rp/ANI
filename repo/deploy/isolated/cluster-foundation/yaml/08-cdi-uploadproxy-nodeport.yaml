@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: cdi-uploadproxy-nodeport
+  namespace: cdi
+  labels:
+    app.kubernetes.io/name: cdi-uploadproxy-nodeport
+    app.kubernetes.io/part-of: ani-cluster-foundation
+    ani.deploy/profile: isolated
+spec:
+  type: NodePort
+  selector:
+    cdi.kubevirt.io: cdi-uploadproxy
+  ports:
+  - name: uploadproxy
+    protocol: TCP
+    port: 443
+    targetPort: 8443
+    nodePort: 31001

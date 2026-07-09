@@ -273,6 +273,9 @@ spec:
               value: "kubernetes_rest"
             - name: WORKLOAD_OPS_ENABLED
               value: "true"
+            # Multus NAD 未装时，VM 临时走 pod network（masquerade）；装好 Multus+NAD 后应关掉。
+            - name: WORKLOAD_VM_POD_NETWORK
+              value: "true"
             - name: ANI_RECONCILE_WORKER_HEALTH_URL
               value: "http://reconcile-worker.ani-system.svc.cluster.local:9205/healthz"
             - name: INSTANCE_OBSERVABILITY_PROVIDER
@@ -331,6 +334,10 @@ spec:
               value: "false"
             - name: REGISTRY_TLS_INSECURE
               value: "true"
+            - name: IMAGE_IMPORT_PROVIDER
+              value: "cdi_rest"
+            - name: CDI_UPLOADPROXY_URL
+              value: "https://192.168.102.51:31001"
           readinessProbe:
             httpGet:
               path: /readyz

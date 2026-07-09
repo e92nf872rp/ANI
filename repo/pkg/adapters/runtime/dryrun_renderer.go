@@ -52,30 +52,36 @@ func (r *KubernetesDryRunRenderer) Render(ctx context.Context, spec ports.Worklo
 }
 
 func renderVM(spec ports.WorkloadSpec) ports.WorkloadManifest {
+	vmSpec := map[string]any{
+		"running": spec.Lifecycle.AutoStart,
+		"template": map[string]any{
+			"metadata": map[string]any{
+				"labels":      labels(spec),
+				"annotations": annotationsWithInstancePlan(spec),
+			},
+			"spec": map[string]any{
+				"domain": map[string]any{
+					"machine": map[string]any{"type": firstNonEmpty(spec.VM.MachineType, "q35")},
+					"devices": vmDevices(spec),
+					"resources": map[string]any{
+						"requests": resourceRequests(spec),
+					},
+				},
+				"volumes":  vmVolumes(spec),
+				"networks": vmNetworkRefs(spec),
+			},
+		},
+	}
+	if spec.VM != nil && spec.VM.BootMedia == ports.VMBootMediaISO {
+		if templates := vmISODataVolumeTemplates(spec); len(templates) > 0 {
+			vmSpec["dataVolumeTemplates"] = templates
+		}
+	}
 	content := manifest(map[string]any{
 		"apiVersion": "kubevirt.io/v1",
 		"kind":       "VirtualMachine",
 		"metadata":   metadata(spec, "vm"),
-		"spec": map[string]any{
-			"running": spec.Lifecycle.AutoStart,
-			"template": map[string]any{
-				"metadata": map[string]any{
-					"labels":      labels(spec),
-					"annotations": annotationsWithInstancePlan(spec),
-				},
-				"spec": map[string]any{
-					"domain": map[string]any{
-						"machine": map[string]any{"type": firstNonEmpty(spec.VM.MachineType, "q35")},
-						"devices": vmDevices(spec),
-						"resources": map[string]any{
-							"requests": resourceRequests(spec),
-						},
-					},
-					"volumes":  vmVolumes(spec),
-					"networks": vmNetworkRefs(spec),
-				},
-			},
-		},
+		"spec":       vmSpec,
 	})
 	return ports.WorkloadManifest{Name: spec.Name, Kind: "VirtualMachine", Provider: "kubevirt", Content: content}
 }
@@ -470,6 +476,9 @@ func vmInterfaces(spec ports.WorkloadSpec) []any {
 }
 
 func vmVolumes(spec ports.WorkloadSpec) []any {
+	if spec.VM != nil && spec.VM.BootMedia == ports.VMBootMediaISO {
+		return vmISOVolumes(spec)
+	}
 	volumes := []any{
 		map[string]any{
 			"name": "containerdisk",
@@ -493,7 +502,83 @@ func vmVolumes(spec ports.WorkloadSpec) []any {
 	return volumes
 }
 
+// vmISOVolumes renders the boot_media=iso path: a blank root disk backed by
+// spec.dataVolumeTemplates (see vmISODataVolumeTemplates) plus a cdrom PVC
+// sourced from a Ready Image. It never emits a containerDisk volume.
+// DataVolume/PVC names are internal render details only; they are not
+// returned in any API response.
+func vmISOVolumes(spec ports.WorkloadSpec) []any {
+	volumes := make([]any, 0, len(spec.Storage)+1)
+	for _, attachment := range spec.Storage {
+		switch attachment.Kind {
+		case ports.StorageAttachmentRootDisk:
+			volumes = append(volumes, map[string]any{
+				"name": "rootdisk",
+				"dataVolume": map[string]any{
+					"name": vmISORootDiskName(spec, attachment),
+				},
+			})
+		case ports.StorageAttachmentCDROM:
+			volumes = append(volumes, map[string]any{
+				"name": "iso",
+				"persistentVolumeClaim": map[string]any{
+					"claimName": firstNonEmpty(attachment.SourceRef, spec.VM.BootMediaImageID),
+				},
+			})
+		default:
+			volumes = append(volumes, map[string]any{
+				"name": attachment.Name,
+				"persistentVolumeClaim": map[string]any{
+					"claimName": firstNonEmpty(attachment.SourceRef, spec.Name+"-"+attachment.Name),
+				},
+			})
+		}
+	}
+	volumes = append(volumes, secretVolumes(spec.SecretBindings)...)
+	return volumes
+}
+
+// vmISODataVolumeTemplates renders the spec.dataVolumeTemplates entry that
+// makes the boot_media=iso root disk self-creating: KubeVirt/CDI provisions
+// a blank PVC from this template (CDI blank source) sized from the
+// root_disk storage attachment, instead of assuming a pre-existing claim.
+// The template name matches vmISOVolumes' "rootdisk" dataVolume.name.
+func vmISODataVolumeTemplates(spec ports.WorkloadSpec) []any {
+	for _, attachment := range spec.Storage {
+		if attachment.Kind != ports.StorageAttachmentRootDisk {
+			continue
+		}
+		return []any{
+			map[string]any{
+				"metadata": map[string]any{
+					"name": vmISORootDiskName(spec, attachment),
+					"annotations": map[string]any{
+						cdiImmediateBindAnnotation: "true",
+					},
+				},
+				"spec": map[string]any{
+					"source": map[string]any{"blank": map[string]any{}},
+					"storage": map[string]any{
+						"resources":        map[string]any{"requests": map[string]any{"storage": sizeGi(attachment.SizeGiB)}},
+						"storageClassName": firstNonEmpty(attachment.StorageClass, defaultCDIStorageClass),
+					},
+				},
+			},
+		}
+	}
+	return nil
+}
+
+// vmISORootDiskName is the shared name for the blank root DataVolume
+// template, its PVC, and the "rootdisk" volume's dataVolume.name reference.
+func vmISORootDiskName(spec ports.WorkloadSpec, attachment ports.WorkloadStorageAttachment) string {
+	return firstNonEmpty(attachment.Name, spec.Name+"-root")
+}
+
 func vmDisks(spec ports.WorkloadSpec) []any {
+	if spec.VM != nil && spec.VM.BootMedia == ports.VMBootMediaISO {
+		return vmISODisks(spec)
+	}
 	disks := []any{
 		map[string]any{
 			"name": "containerdisk",
@@ -520,6 +605,48 @@ func vmDisks(spec ports.WorkloadSpec) []any {
 		})
 	}
 	return disks
+}
+
+func vmISODisks(spec ports.WorkloadSpec) []any {
+	disks := make([]any, 0, len(spec.Storage)+1)
+	for _, attachment := range spec.Storage {
+		switch attachment.Kind {
+		case ports.StorageAttachmentRootDisk:
+			disks = append(disks, map[string]any{
+				"name": "rootdisk",
+				"disk": map[string]any{"bus": "virtio"},
+			})
+		case ports.StorageAttachmentCDROM:
+			disks = append(disks, map[string]any{
+				"name":      "iso",
+				"cdrom":     map[string]any{"bus": "sata"},
+				"bootOrder": vmISOBootOrder(spec),
+			})
+		default:
+			disks = append(disks, map[string]any{
+				"name": attachment.Name,
+				"disk": map[string]any{"bus": "virtio"},
+			})
+		}
+	}
+	for i, binding := range spec.SecretBindings {
+		if binding.SecretID == "" || binding.MountPath == "" {
+			continue
+		}
+		disks = append(disks, map[string]any{
+			"name":     secretVolumeName(binding, i),
+			"disk":     map[string]any{"bus": "virtio"},
+			"readOnly": true,
+		})
+	}
+	return disks
+}
+
+func vmISOBootOrder(spec ports.WorkloadSpec) int32 {
+	if spec.VM != nil && spec.VM.BootMediaBootOrder > 0 {
+		return spec.VM.BootMediaBootOrder
+	}
+	return 1
 }
 
 func vmSecretMountAnnotation(bindings []ports.WorkloadSecretBinding) string {

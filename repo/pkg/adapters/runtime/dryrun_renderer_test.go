@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -36,6 +37,109 @@ func TestKubernetesDryRunRendererRendersVM(t *testing.T) {
 		if !strings.Contains(content, want) {
 			t.Fatalf("rendered VM manifest missing %q:\n%s", want, content)
 		}
+	}
+}
+
+func TestRenderVMWithISOBootMediaUsesCdromAndBlankRoot(t *testing.T) {
+	renderer := NewKubernetesDryRunRenderer(NewPlanningRuntime())
+
+	manifests, err := renderer.Render(context.Background(), ports.WorkloadSpec{
+		TenantID: "tenant-a",
+		Name:     "vm-iso-01",
+		Kind:     ports.WorkloadKindVM,
+		VM: &ports.VMInstanceSpec{
+			BootMedia:        ports.VMBootMediaISO,
+			BootMediaImageID: "img-abc123",
+			RootDisk: ports.WorkloadStorageAttachment{
+				Name:    "vm-iso-01-root",
+				Kind:    ports.StorageAttachmentRootDisk,
+				SizeGiB: 40,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	if len(manifests) != 1 {
+		t.Fatalf("manifests = %d, want 1", len(manifests))
+	}
+	content := manifests[0].Content
+	for _, want := range []string{
+		`"kind": "VirtualMachine"`,
+		`"cdrom"`,
+		`"persistentVolumeClaim"`,
+		`"img-abc123"`,
+		`"bootOrder": 1`,
+		`"rootdisk"`,
+		// Blank root disk must be self-creating via dataVolumeTemplates, not
+		// just a claimName reference to a PVC that apply never creates.
+		`"dataVolumeTemplates"`,
+		`"vm-iso-01-root"`,
+		`"blank"`,
+		`"40Gi"`,
+		`"ani-rbd-ssd"`,
+		`"cdi.kubevirt.io/storage.bind.immediate.requested": "true"`,
+		`"dataVolume"`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("rendered ISO VM manifest missing %q:\n%s", want, content)
+		}
+	}
+	for _, unwanted := range []string{"containerDisk", "containerdisk"} {
+		if strings.Contains(content, unwanted) {
+			t.Fatalf("rendered ISO VM manifest must not contain %q:\n%s", unwanted, content)
+		}
+	}
+
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(content), &doc); err != nil {
+		t.Fatalf("unmarshal rendered manifest: %v", err)
+	}
+	vmSpec, _ := doc["spec"].(map[string]any)
+	templates, _ := vmSpec["dataVolumeTemplates"].([]any)
+	if len(templates) != 1 {
+		t.Fatalf("dataVolumeTemplates = %d entries, want 1:\n%s", len(templates), content)
+	}
+	template, _ := templates[0].(map[string]any)
+	templateMeta, _ := template["metadata"].(map[string]any)
+	if name, _ := templateMeta["name"].(string); name != "vm-iso-01-root" {
+		t.Fatalf("dataVolumeTemplates[0].metadata.name = %q, want %q", name, "vm-iso-01-root")
+	}
+	templateSpec, _ := template["spec"].(map[string]any)
+	source, _ := templateSpec["source"].(map[string]any)
+	if _, ok := source["blank"]; !ok {
+		t.Fatalf("dataVolumeTemplates[0].spec.source must be blank:\n%s", content)
+	}
+	storage, _ := templateSpec["storage"].(map[string]any)
+	if sc, _ := storage["storageClassName"].(string); sc != "ani-rbd-ssd" {
+		t.Fatalf("dataVolumeTemplates[0].spec.storage.storageClassName = %q, want %q", sc, "ani-rbd-ssd")
+	}
+	resources, _ := storage["resources"].(map[string]any)
+	requests, _ := resources["requests"].(map[string]any)
+	if requested, _ := requests["storage"].(string); requested != "40Gi" {
+		t.Fatalf("dataVolumeTemplates[0].spec.storage.resources.requests.storage = %q, want %q", requested, "40Gi")
+	}
+
+	vmTemplate, _ := vmSpec["template"].(map[string]any)
+	podSpec, _ := vmTemplate["spec"].(map[string]any)
+	rawVolumes, _ := podSpec["volumes"].([]any)
+	var rootVolume map[string]any
+	for _, v := range rawVolumes {
+		volume, _ := v.(map[string]any)
+		if volume["name"] == "rootdisk" {
+			rootVolume = volume
+			break
+		}
+	}
+	if rootVolume == nil {
+		t.Fatalf("rootdisk volume not found:\n%s", content)
+	}
+	dataVolumeRef, _ := rootVolume["dataVolume"].(map[string]any)
+	if name, _ := dataVolumeRef["name"].(string); name != "vm-iso-01-root" {
+		t.Fatalf("rootdisk volume.dataVolume.name = %q, want %q", name, "vm-iso-01-root")
+	}
+	if _, hasPVC := rootVolume["persistentVolumeClaim"]; hasPVC {
+		t.Fatalf("rootdisk volume must reference dataVolume, not a pre-existing persistentVolumeClaim:\n%s", content)
 	}
 }
 

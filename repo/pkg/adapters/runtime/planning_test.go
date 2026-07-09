@@ -70,6 +70,155 @@ func TestPlanningRuntimeCreatesVMWithDefaultPlanesAndRootDisk(t *testing.T) {
 	}
 }
 
+func TestPlanningRuntimeRejectsVMWithBootImageAndBootMedia(t *testing.T) {
+	runtime := NewPlanningRuntime()
+
+	_, err := runtime.Create(context.Background(), ports.WorkloadSpec{
+		TenantID: "tenant-a",
+		Name:     "vm-both",
+		Kind:     ports.WorkloadKindVM,
+		VM: &ports.VMInstanceSpec{
+			BootImage:        "ubuntu.qcow2",
+			BootMedia:        ports.VMBootMediaISO,
+			BootMediaImageID: "img-1",
+			RootDisk:         ports.WorkloadStorageAttachment{Name: "root", Kind: ports.StorageAttachmentRootDisk, SizeGiB: 40},
+		},
+	})
+	if !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("Create() error = %v, want ErrInvalid", err)
+	}
+}
+
+func TestPlanningRuntimeRejectsVMISOBootMediaWithoutImageID(t *testing.T) {
+	runtime := NewPlanningRuntime()
+
+	_, err := runtime.Create(context.Background(), ports.WorkloadSpec{
+		TenantID: "tenant-a",
+		Name:     "vm-no-image",
+		Kind:     ports.WorkloadKindVM,
+		VM: &ports.VMInstanceSpec{
+			BootMedia: ports.VMBootMediaISO,
+			RootDisk:  ports.WorkloadStorageAttachment{Name: "root", Kind: ports.StorageAttachmentRootDisk, SizeGiB: 40},
+		},
+	})
+	if !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("Create() error = %v, want ErrInvalid", err)
+	}
+}
+
+func TestPlanningRuntimeRejectsVMISOBootMediaWithoutRootDiskSize(t *testing.T) {
+	runtime := NewPlanningRuntime()
+
+	_, err := runtime.Create(context.Background(), ports.WorkloadSpec{
+		TenantID: "tenant-a",
+		Name:     "vm-no-root-size",
+		Kind:     ports.WorkloadKindVM,
+		VM: &ports.VMInstanceSpec{
+			BootMedia:        ports.VMBootMediaISO,
+			BootMediaImageID: "img-1",
+			RootDisk:         ports.WorkloadStorageAttachment{Name: "root", Kind: ports.StorageAttachmentRootDisk},
+		},
+	})
+	if !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("Create() error = %v, want ErrInvalid", err)
+	}
+}
+
+type fakeImageImportServiceForPlanning struct {
+	state ports.ImageState
+	err   error
+}
+
+func (f fakeImageImportServiceForPlanning) CreateUpload(context.Context, ports.ImageUploadCreateRequest) (ports.ImageUploadSession, error) {
+	return ports.ImageUploadSession{}, nil
+}
+
+func (f fakeImageImportServiceForPlanning) Get(_ context.Context, req ports.ImageGetRequest) (ports.ImageRecord, error) {
+	if f.err != nil {
+		return ports.ImageRecord{}, f.err
+	}
+	return ports.ImageRecord{ID: req.ImageID, TenantID: req.TenantID, State: f.state}, nil
+}
+
+func (f fakeImageImportServiceForPlanning) List(context.Context, ports.ImageListRequest) (ports.ImageListResult, error) {
+	return ports.ImageListResult{}, nil
+}
+
+func (f fakeImageImportServiceForPlanning) Delete(context.Context, ports.ImageDeleteRequest) (ports.ImageRecord, error) {
+	return ports.ImageRecord{}, nil
+}
+
+func TestPlanningRuntimeCreatesVMWithISOBootMediaWhenImageReady(t *testing.T) {
+	runtime := NewPlanningRuntime(WithImageImportService(fakeImageImportServiceForPlanning{state: ports.ImageStateReady}))
+
+	ref, err := runtime.Create(context.Background(), ports.WorkloadSpec{
+		TenantID: "tenant-a",
+		Name:     "vm-iso-ready",
+		Kind:     ports.WorkloadKindVM,
+		VM: &ports.VMInstanceSpec{
+			BootMedia:        ports.VMBootMediaISO,
+			BootMediaImageID: "img-ready",
+			RootDisk:         ports.WorkloadStorageAttachment{Name: "vm-iso-ready-root", Kind: ports.StorageAttachmentRootDisk, SizeGiB: 40},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	status, err := runtime.Get(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	foundCDROM := false
+	for _, attachment := range status.Storage {
+		if attachment.Kind == ports.StorageAttachmentCDROM {
+			foundCDROM = true
+			if attachment.SourceRef != "img-ready" {
+				t.Fatalf("cdrom sourceRef = %q, want img-ready", attachment.SourceRef)
+			}
+		}
+	}
+	if !foundCDROM {
+		t.Fatalf("storage = %+v, want a cdrom attachment", status.Storage)
+	}
+}
+
+func TestPlanningRuntimeRejectsVMISOBootMediaWhenImageNotReady(t *testing.T) {
+	runtime := NewPlanningRuntime(WithImageImportService(fakeImageImportServiceForPlanning{state: ports.ImageStateUploading}))
+
+	_, err := runtime.Create(context.Background(), ports.WorkloadSpec{
+		TenantID: "tenant-a",
+		Name:     "vm-iso-not-ready",
+		Kind:     ports.WorkloadKindVM,
+		VM: &ports.VMInstanceSpec{
+			BootMedia:        ports.VMBootMediaISO,
+			BootMediaImageID: "img-uploading",
+			RootDisk:         ports.WorkloadStorageAttachment{Name: "vm-iso-not-ready-root", Kind: ports.StorageAttachmentRootDisk, SizeGiB: 40},
+		},
+	})
+	if !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("Create() error = %v, want ErrConflict", err)
+	}
+}
+
+func TestPlanningRuntimeRejectsVMISOBootMediaWhenImageNotFound(t *testing.T) {
+	runtime := NewPlanningRuntime(WithImageImportService(fakeImageImportServiceForPlanning{err: ports.ErrNotFound}))
+
+	_, err := runtime.Create(context.Background(), ports.WorkloadSpec{
+		TenantID: "tenant-a",
+		Name:     "vm-iso-missing",
+		Kind:     ports.WorkloadKindVM,
+		VM: &ports.VMInstanceSpec{
+			BootMedia:        ports.VMBootMediaISO,
+			BootMediaImageID: "img-missing",
+			RootDisk:         ports.WorkloadStorageAttachment{Name: "vm-iso-missing-root", Kind: ports.StorageAttachmentRootDisk, SizeGiB: 40},
+		},
+	})
+	if !errors.Is(err, ports.ErrNotFound) {
+		t.Fatalf("Create() error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestPlanningRuntimeRejectsContainerWithoutTenantVPC(t *testing.T) {
 	runtime := NewPlanningRuntime()
 
