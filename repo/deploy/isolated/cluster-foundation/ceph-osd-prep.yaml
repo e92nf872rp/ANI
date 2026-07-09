@@ -1,6 +1,7 @@
-# Prepare LVM-backed block devices for Rook OSD on nodes without spare raw disks.
-# Creates ubuntu-vg/rook-osd (50Gi LV) and /var/lib/rook/osd-block-device on each node.
-# Rook osd-prepare does not discover loop devices; LVM volumes are visible to ceph-volume.
+# Prepare block devices for Rook OSD on nodes without spare raw disks.
+# Prefer ubuntu-vg/rook-osd (50Gi LV). If ubuntu-vg is absent, create a
+# 50Gi file-backed loop device, put an LVM VG/LV on it, and record the LV in
+# /var/lib/rook/osd-block-device. Rook/ceph-volume skips raw loop devices.
 # Applied by deploy.py before CephCluster.
 
 apiVersion: apps/v1
@@ -40,7 +41,7 @@ spec:
               MARK=/host/var/lib/rook/osd-prep.done
               DEVFILE=/host/var/lib/rook/osd-block-device
               VERSIONFILE=/host/var/lib/rook/osd-prep-version
-              WANT=lvm-v1
+              WANT=block-v3
               if [ -f "$VERSIONFILE" ] && [ "$(cat "$VERSIONFILE")" = "$WANT" ] \
                  && [ -f "$MARK" ] && [ -f "$DEVFILE" ]; then
                 echo "already prepared: $(cat "$DEVFILE")"
@@ -48,19 +49,54 @@ spec:
                 mkdir -p /host/var/lib/rook
                 chroot /host sh -ec '
                   set -e
-                  VG=ubuntu-vg
                   LV=rook-osd
-                  DEV=/dev/${VG}/${LV}
-                  if losetup -j /var/lib/rook/osd-backing.img 2>/dev/null | grep -q .; then
-                    losetup -D /var/lib/rook/osd-backing.img 2>/dev/null || true
-                  fi
-                  rm -f /var/lib/rook/osd-backing.img /var/lib/rook/osd-loop-device
-                  if [ ! -b "${DEV}" ]; then
-                    flock -n /var/lib/rook/.lv-create.lock lvcreate -y -L 50G -n "${LV}" "${VG}"
+                  IMG=/var/lib/rook/osd-backing.img
+                  PRIMARY_VG=ubuntu-vg
+                  FALLBACK_VG=ani-rook-vg
+                  DEV=
+                  if vgs "${PRIMARY_VG}" >/dev/null 2>&1; then
+                    VG="${PRIMARY_VG}"
+                    LVDEV=/dev/${VG}/${LV}
+                    if losetup -j "${IMG}" 2>/dev/null | grep -q .; then
+                      old_loop="$(losetup -j "${IMG}" 2>/dev/null | awk -F: "NR==1 {print \$1}")"
+                      [ -n "${old_loop}" ] && losetup -d "${old_loop}" 2>/dev/null || true
+                    fi
+                    rm -f "${IMG}" /var/lib/rook/osd-loop-device
+                    if [ ! -b "${LVDEV}" ]; then
+                      flock -n /var/lib/rook/.lv-create.lock lvcreate -y -Zn -Wn --noudevsync -L 50G -n "${LV}" "${VG}"
+                    fi
+                    DEV="${LVDEV}"
+                  else
+                    VG="${FALLBACK_VG}"
+                    LVDEV=/dev/${VG}/${LV}
+                    mkdir -p /var/lib/rook
+                    if [ ! -f "${IMG}" ]; then
+                      if command -v fallocate >/dev/null 2>&1; then
+                        fallocate -l 50G "${IMG}"
+                      else
+                        dd if=/dev/zero of="${IMG}" bs=1M count=0 seek=51200
+                      fi
+                    fi
+                    DEV="$(losetup -j "${IMG}" 2>/dev/null | awk -F: "NR==1 {print \$1}")"
+                    if [ -z "${DEV}" ]; then
+                      DEV="$(flock -n /var/lib/rook/.loop-create.lock losetup --find --show "${IMG}")"
+                    fi
+                    echo "${DEV}" > /var/lib/rook/osd-loop-device
+                    if ! pvs "${DEV}" >/dev/null 2>&1; then
+                      pvcreate -ff -y "${DEV}"
+                    fi
+                    if ! vgs "${VG}" >/dev/null 2>&1; then
+                      vgcreate "${VG}" "${DEV}"
+                    fi
+                    vgchange -ay "${VG}" >/dev/null 2>&1 || true
+                    if [ ! -b "${LVDEV}" ]; then
+                      flock -n /var/lib/rook/.lv-create.lock lvcreate -y -Zn -Wn --noudevsync -L 49G -n "${LV}" "${VG}"
+                    fi
+                    DEV="${LVDEV}"
                   fi
                   test -b "${DEV}"
                   echo "${DEV}" > /var/lib/rook/osd-block-device
-                  echo lvm-v1 > /var/lib/rook/osd-prep-version
+                  echo block-v3 > /var/lib/rook/osd-prep-version
                   touch /var/lib/rook/osd-prep.done
                   echo "prepared ${DEV}"
                 '

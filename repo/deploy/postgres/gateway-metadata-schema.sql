@@ -1,11 +1,16 @@
 -- ANI Gateway metadata schema (idempotent).
--- Bundles migrations 20260629_014 (network_routes RLS), 015 (P1), 016 (P3), 017 (P5 registry).
+-- Bundles Gateway metadata migrations and the instance network-selection column alignment.
 -- Use on EXISTING PostgreSQL volumes; fresh `make deps` already includes this via ani-dev-database-init.sql.
 --
 --   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f deploy/postgres/gateway-metadata-schema.sql
 --   make db-upgrade-gateway-metadata
 
 BEGIN;
+
+ALTER TABLE workload_instances
+    ADD COLUMN IF NOT EXISTS vpc_id TEXT,
+    ADD COLUMN IF NOT EXISTS subnet_id TEXT,
+    ADD COLUMN IF NOT EXISTS private_ip TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_workload_instances_reconcile
     ON workload_instances (state, updated_at);

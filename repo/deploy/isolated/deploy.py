@@ -40,6 +40,9 @@ REGISTRY_ANI = os.environ.get("REGISTRY_ANI", "docker.changqingyun.cn/ani")
 DOCKER_CONFIG = Path(os.environ.get("DOCKER_CONFIG", Path.home() / ".docker/config.json"))
 STORAGE_CLASS = "ani-rbd-ssd"
 DB_INIT_SQL = ROOT / "deploy" / "postgres" / "ani-dev-database-init.sql"
+DB_ALIGNMENT_SQLS = [
+    ROOT / "deploy" / "migrations" / "20260706_001_instance_network_selection.sql",
+]
 
 BASE_MIRRORS = [
     ("dockerproxy.net/library/busybox:latest", "busybox:latest"),
@@ -280,6 +283,7 @@ def init_database(namespace: str) -> None:
     )
     if probe.stdout.strip() == "initialized":
         print("✅ database schema already initialized")
+        align_database_schema(namespace)
         return
     sql = DB_INIT_SQL.read_text(encoding="utf-8")
     run(
@@ -291,11 +295,27 @@ def init_database(namespace: str) -> None:
         input=sql,
         quiet=True,
     )
+    align_database_schema(namespace)
     print("✅ database schema initialized")
 
 
+def align_database_schema(namespace: str) -> None:
+    for sql_path in DB_ALIGNMENT_SQLS:
+        if not sql_path.exists():
+            raise DeployError(f"database alignment SQL not found: {sql_path}")
+        run(
+            [
+                "kubectl", "-n", namespace,
+                "exec", "-i", "ani-postgres-0", "--",
+                "psql", "-U", "ani", "-d", "ani", "-v", "ON_ERROR_STOP=1",
+            ],
+            input=sql_path.read_text(encoding="utf-8"),
+            quiet=True,
+        )
+
+
 def prep_ceph_osd_devices() -> None:
-    log("foundation: prepare OSD backing (50Gi LVM LV per node)")
+    log("foundation: prepare OSD backing (50Gi block device per node)")
     kubectl_apply(CF / "ceph-osd-prep.yaml")
     rollout("rook-ceph", "ds", "ceph-osd-prep", timeout="300s")
 
@@ -785,6 +805,13 @@ def deploy_business(cfg: dict[str, str], version: str) -> None:
         run(["kubectl", "apply", "-f", "-"], input=run(cmd, quiet=True).stdout)
 
     kubectl_apply(DEPLOY / "business-stack.yaml")
+
+    external_base = f"http://{node_ip()}"
+    kubectl(
+        "-n", ns, "set", "env", "deploy/ani-gateway",
+        f"INSTANCE_OBSERVABILITY_EXEC_BASE_URL={external_base}:30080",
+        f"OBJECT_STORE_PUBLIC_ENDPOINT={external_base}:30900",
+    )
 
     issuer_host = urllib.parse.urlparse(cfg["oidc_issuer_url"]).hostname
     if issuer_host and "." in issuer_host:

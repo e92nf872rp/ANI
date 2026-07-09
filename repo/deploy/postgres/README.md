@@ -4,8 +4,8 @@
 
 | 文件 | 用途 |
 |------|------|
-| `ani-dev-database-init.sql` | **新环境完整初始化**（auth + Core runtime + Gateway 元数据 P0–P3）。符号链接 → `deploy/real-k8s-lab/auth-dex-production-db-init.sql` |
-| `gateway-metadata-schema.sql` | **已有库增量升级**（幂等）。合并 migration `20260629_014`–`016` |
+| `ani-dev-database-init.sql` | **新环境完整初始化**（auth + Core runtime + Gateway 元数据与实例网络字段）。符号链接 → `deploy/real-k8s-lab/auth-dex-production-db-init.sql` |
+| `gateway-metadata-schema.sql` | **已有库增量升级**（幂等）。合并 Gateway 元数据表与实例网络字段对齐 |
 
 `deploy/docker/init-scripts/postgres/001-ani-dev-database-init.sql` 在 `make deps` 空卷时自动执行上述完整脚本。
 
@@ -22,7 +22,7 @@ export ANI_AUTH_MODE=dev
 export GATEWAY_REDIS_URL='redis://:ani_dev_password@127.0.0.1:6379/0'
 ```
 
-无需再手动执行 migration 014–016。
+无需再手动执行 Gateway 元数据和实例网络字段相关 migration。
 
 ## 已有 PostgreSQL 数据卷
 
@@ -41,7 +41,7 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f deploy/postgres/gateway-metadata-sche
 
 ## 生产 / 增量 migration 目录
 
-`deploy/migrations/` 保留按时间戳的增量脚本（含历史 014–016）。新装 dev 以 `ani-dev-database-init.sql` 为准；已有环境可逐条跑 migration 或使用 `gateway-metadata-schema.sql` 一次性补齐 Gateway 元数据表。
+`deploy/migrations/` 保留按时间戳的增量脚本。新装 dev 以 `ani-dev-database-init.sql` 为准；已有环境可逐条跑 migration 或使用 `gateway-metadata-schema.sql` 一次性补齐 Gateway 元数据表和实例网络字段。
 
 ## Gateway 元数据覆盖表
 
