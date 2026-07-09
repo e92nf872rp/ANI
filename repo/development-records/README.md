@@ -36,6 +36,7 @@
 | SPRINT12-CLOSURE-A | Sprint 12 收口：A/B1/B2/B3 全部 19 个 Core handler + 2 个 422 经 OpenAPI、ports/adapters、Gateway handler、测试和文档闭环；进入 Sprint 13 real provider/live gate 收敛 | sprint12-closure-core-svc-support.md |
 | INSTANCE-EXEC-WS-A | 实例交互式终端 WebSocket 契约与 Gateway path：`POST /instances/{id}/exec` 返回短期 token 与内嵌 token 的浏览器直连 `ws_url`，新增 `GET /instances/{id}/exec/{session}` WebSocket 握手入口，RBAC 固定 `scope:instances:exec`，local profile 使用 KubeCloud TerminalMessage JSON 帧，终端可见输出统一 `Op=stdout` 并兼容旧裸 stdin 输入 | instance-exec-ws-a.md |
 | INSTANCE-EXEC-KUBERNETES-STREAM-A | 真实容器 exec streaming adapter：Gateway WebSocket 鉴权后委托 `InstanceExecSessionConnector`，Prometheus/Kubernetes observability adapter 解析 Pod 并用 Kubernetes `v4.channel.k8s.io` WebSocket 执行 `/pods/{pod}/exec`，stdin/resize 映射 channel 0/4，stdout/stderr channel 1/2 映射回 TerminalMessage `Op=stdout`；local/logic verified，未连接集群验证 | instance-exec-kubernetes-stream-a.md |
+| INSTANCE-CONSOLE-VNC-WS-A | VM Console/VNC WebSocket 代理：修复创建 session 时对 KubeVirt `/vnc` 的普通 HTTP GET 探测；`POST /instances/{id}/console` 返回内嵌 token 的 `connect_url`，新增 `GET /instances/{id}/console/{session}` 供浏览器 noVNC 直连；Gateway 以 `plain.kubevirt.io` 转发到 KubeVirt；local/logic verified | instance-console-vnc-ws-a.md |
 
 ### Sprint 14 Planning / Execution（分支执行中，2026-06）
 

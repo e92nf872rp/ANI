@@ -854,6 +854,9 @@ func TestLocalInstanceServiceVMConsoleOpsCreatesSession(t *testing.T) {
 	if !result.Accepted || result.Protocol != "vnc" || result.ConnectURL == "" {
 		t.Fatalf("result accepted=%v protocol=%q connect=%q, want vnc session", result.Accepted, result.Protocol, result.ConnectURL)
 	}
+	if result.Token == "" || !strings.Contains(result.ConnectURL, "/console/") || !strings.Contains(result.ConnectURL, "token=") {
+		t.Fatalf("result token=%q connect=%q, want console websocket url with token", result.Token, result.ConnectURL)
+	}
 	if result.OperationID == "" || result.URL != result.ConnectURL || result.ExpiresAt.IsZero() {
 		t.Fatalf("result operation=%q url=%q connect=%q expires=%s, want operation/url/expires", result.OperationID, result.URL, result.ConnectURL, result.ExpiresAt)
 	}

@@ -280,7 +280,9 @@ spec:
             - name: INSTANCE_OBSERVABILITY_PROMETHEUS_URL
               value: "http://prometheus.ani-system.svc.cluster.local:9090"
             - name: INSTANCE_OBSERVABILITY_EXEC_BASE_URL
-              value: "http://192.168.102.75:30080"
+              value: "http://192.168.102.51:30080"
+            - name: INSTANCE_CONSOLE_BASE_URL
+              value: "http://192.168.102.51:30080"
             - name: NETWORK_PROVIDER
               value: "kubeovn_rest"
             - name: NETWORK_PROVIDER_APPLY_ENABLED

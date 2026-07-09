@@ -21,6 +21,10 @@ spec:
   certificateRotateStrategy: {}
   configuration:
     developerConfiguration: {}
+    # K8s <1.29 默认未开 SidecarContainers；guest-console-log 会卡在 Init。
+    # 关闭串口日志 sidecar，避免 virt-launcher 无法启动。
+    virtualMachineOptions:
+      disableSerialConsoleLog: {}
   customizeComponents: {}
   imagePullPolicy: IfNotPresent
   imageRegistry: docker.changqingyun.cn/mirror/kubevirt

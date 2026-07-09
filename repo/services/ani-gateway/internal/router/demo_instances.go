@@ -971,7 +971,56 @@ func (api *demoInstanceAPI) console(ctx context.Context, c *app.RequestContext) 
 		writeDemoError(c, http.StatusBadRequest, "INSTANCE_CONSOLE_FAILED", err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	c.JSON(http.StatusOK, map[string]any{
+		"operation_id": result.OperationID,
+		"session_id":   result.SessionID,
+		"protocol":     result.Protocol,
+		"connect_url":  result.ConnectURL,
+		"url":          firstNonEmpty(result.URL, result.ConnectURL),
+		"token":        result.Token,
+		"expires_at":   result.ExpiresAt,
+		"accepted":     result.Accepted,
+		"reason":       result.Reason,
+	})
+}
+
+func (api *demoInstanceAPI) connectConsoleSession(ctx context.Context, c *app.RequestContext) {
+	store, ok := api.workloadOps.(ports.WorkloadInstanceConsoleSessionStore)
+	if !ok || store == nil {
+		writeDemoError(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", "console websocket proxy is not configured")
+		return
+	}
+	session, err := store.GetConsoleSession(ctx, ports.WorkloadInstanceConsoleSessionGetRequest{
+		TenantID:   middleware.GetTenantID(c),
+		InstanceID: c.Param("instance_id"),
+		SessionID:  c.Param("session_id"),
+		Token:      c.Query("token"),
+	})
+	if err != nil {
+		writeInstanceExecConnectError(c, err)
+		return
+	}
+	key := strings.TrimSpace(string(c.Request.Header.Peek("Sec-WebSocket-Key")))
+	if key == "" || !strings.EqualFold(string(c.Request.Header.Peek("Upgrade")), "websocket") {
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "websocket upgrade is required")
+		return
+	}
+	accept := websocketAcceptKey(key)
+	c.Response.SetStatusCode(http.StatusSwitchingProtocols)
+	c.Response.Header.Set("Upgrade", "websocket")
+	c.Response.Header.Set("Connection", "Upgrade")
+	c.Response.Header.Set("Sec-WebSocket-Accept", accept)
+	c.Hijack(func(conn network.Conn) {
+		streamCtx, cancel := newExecWebSocketStreamContext(ctx)
+		defer cancel()
+		if connector, ok := api.workloadOps.(ports.WorkloadInstanceConsoleSessionConnector); ok {
+			if err := connector.ConnectConsoleSession(streamCtx, session, conn); err != nil {
+				slog.Error("instance console websocket provider stream failed", "instance_id", session.InstanceID, "session_id", session.ID, "error", err)
+			}
+			return
+		}
+		slog.Error("instance console websocket connector is not configured", "instance_id", session.InstanceID, "session_id", session.ID)
+	})
 }
 
 func (api *demoInstanceAPI) consoleExec(ctx context.Context, c *app.RequestContext) {

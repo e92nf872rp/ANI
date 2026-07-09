@@ -969,6 +969,9 @@ func TestDemoInstanceServiceVMConsoleSession(t *testing.T) {
 	if !console.Accepted || console.Protocol != "vnc" || console.ConnectURL == "" {
 		t.Fatalf("console accepted=%v protocol=%q connect=%q, want vnc connect session", console.Accepted, console.Protocol, console.ConnectURL)
 	}
+	if console.Token == "" || !strings.Contains(console.ConnectURL, "/api/v1/instances/"+created.Ref.InstanceID+"/console/") || !strings.Contains(console.ConnectURL, "token=") {
+		t.Fatalf("console token=%q connect=%q, want gateway console websocket url with token", console.Token, console.ConnectURL)
+	}
 }
 
 func TestDemoInstanceServiceVMSnapshot(t *testing.T) {

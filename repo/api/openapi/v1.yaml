@@ -842,6 +842,7 @@ components:
       type: object
       properties:
         protocol: { type: string, enum: [console, vnc, novnc, serial], default: "vnc" }
+        idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "可选；同一 tenant 下复用可返回同一短期 session" }
 
     InstanceConsoleSession:
       type: object
@@ -850,8 +851,13 @@ components:
         operation_id: { type: string, nullable: true, description: "对应 operation timeline，可通过 /instance-operations/{operation_id} 查询" }
         session_id:  { type: string }
         protocol:    { type: string, enum: [console, vnc, novnc, serial] }
-        connect_url: { type: string }
+        connect_url:
+          type: string
+          description: "浏览器 noVNC/WebSocket 可直接连接的 URL；必须包含短期一次性 token query 参数，客户端无需也不能依赖 Authorization header 完成握手。"
         url:         { type: string, description: "连接 URL，和 connect_url 等价，供 Console/SDK 直接使用" }
+        token:
+          type: string
+          description: "短期一次性 WebSocket 握手票据；与 connect_url query 中的 token 相同，供无法直接使用 connect_url 的客户端显式拼接。"
         expires_at:  { type: string, format: date-time }
 
     NetworkResourceState:
@@ -2214,7 +2220,10 @@ paths:
     post:
       operationId: createInstanceConsoleSession
       summary: 申请 VM console/VNC session
-      description: 返回短期 console/VNC/serial session 信息；不暴露 provider 长期凭据。
+      description: |
+        返回短期 console/VNC/serial session 信息；不暴露 provider 长期凭据。
+        connect_url 指向 Gateway WebSocket 代理，供浏览器 noVNC 直接连接；
+        创建 session 时只校验 VMI 可运行，不会对 KubeVirt /vnc 发起普通 HTTP GET。
       tags: [Instances]
       x-ani-rbac-scope: "scope:instances:console"
       parameters:
@@ -2234,6 +2243,31 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /instances/{instance_id}/console/{session_id}:
+    get:
+      operationId: connectInstanceConsoleSession
+      summary: 连接 VM console/VNC WebSocket
+      description: |
+        使用 createInstanceConsoleSession 返回的短期一次性 token 建立 WebSocket 连接。
+        浏览器 noVNC 应直接连接 connect_url；握手鉴权通过 query 参数 token 完成，不要求也不支持依赖 Authorization header。
+        Gateway 将浏览器 WebSocket 二进制帧双向转发到 KubeVirt subresource（vnc/console），
+        后端使用 KubeVirt plain stream 子协议 `plain.kubevirt.io`。
+      tags: [Instances]
+      x-ani-rbac-scope: "scope:instances:console"
+      parameters:
+        - { name: instance_id, in: path, required: true, schema: { type: string } }
+        - { name: session_id, in: path, required: true, schema: { type: string } }
+        - { name: token, in: query, required: true, schema: { type: string }, description: "createInstanceConsoleSession 返回的短期一次性 WebSocket token" }
+      responses:
+        "101":
+          description: WebSocket switching protocols
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
 
   /instances/{instance_id}/logs:
     get:

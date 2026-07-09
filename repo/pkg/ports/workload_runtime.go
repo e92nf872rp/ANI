@@ -450,11 +450,43 @@ type WorkloadInstanceOpsResult struct {
 	Protocol    string                    `json:"protocol"`
 	ConnectURL  string                    `json:"connect_url"`
 	URL         string                    `json:"url,omitempty"`
+	Token       string                    `json:"token,omitempty"`
 	Output      string                    `json:"output"`
 	Reason      string                    `json:"reason"`
 	Warnings    []string                  `json:"warnings"`
 	CheckedAt   time.Time                 `json:"checked_at"`
 	ExpiresAt   time.Time                 `json:"expires_at"`
+}
+
+// WorkloadInstanceConsoleSession is a short-lived browser console/VNC session.
+// connect_url/ws_url embed a one-time token; clients must not use cluster credentials.
+type WorkloadInstanceConsoleSession struct {
+	ID         string
+	TenantID   string
+	InstanceID string
+	VMName     string
+	Protocol   string
+	Subresource string
+	ConnectURL string
+	Token      string
+	ExpiresAt  time.Time
+}
+
+type WorkloadInstanceConsoleSessionGetRequest struct {
+	TenantID   string
+	InstanceID string
+	SessionID  string
+	Token      string
+}
+
+// WorkloadInstanceConsoleSessionStore issues and validates console/VNC websocket sessions.
+type WorkloadInstanceConsoleSessionStore interface {
+	GetConsoleSession(ctx context.Context, request WorkloadInstanceConsoleSessionGetRequest) (WorkloadInstanceConsoleSession, error)
+}
+
+// WorkloadInstanceConsoleSessionConnector proxies a browser websocket to KubeVirt console/VNC.
+type WorkloadInstanceConsoleSessionConnector interface {
+	ConnectConsoleSession(ctx context.Context, session WorkloadInstanceConsoleSession, browser io.ReadWriteCloser) error
 }
 
 type WorkloadInstanceRecord struct {

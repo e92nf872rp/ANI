@@ -13,14 +13,15 @@ import (
 )
 
 type gatewayWorkloadRuntimeConfig struct {
-	ProviderMode              string
-	ProviderApplyEnabled      bool
-	LifecycleProvider         string
-	LifecycleApplyEnabled     bool
-	OpsProvider               string
-	OpsEnabled                bool
-	KubernetesHTTPClient      *http.Client
-	KubernetesRequestTimeout  time.Duration
+	ProviderMode             string
+	ProviderApplyEnabled     bool
+	LifecycleProvider        string
+	LifecycleApplyEnabled    bool
+	OpsProvider              string
+	OpsEnabled               bool
+	ConsoleBaseURL           string
+	KubernetesHTTPClient     *http.Client
+	KubernetesRequestTimeout time.Duration
 }
 
 func gatewayWorkloadRuntimeConfigFromEnv() gatewayWorkloadRuntimeConfig {
@@ -31,8 +32,18 @@ func gatewayWorkloadRuntimeConfigFromEnv() gatewayWorkloadRuntimeConfig {
 		LifecycleApplyEnabled:    strings.EqualFold(strings.TrimSpace(os.Getenv("WORKLOAD_LIFECYCLE_APPLY_ENABLED")), "true"),
 		OpsProvider:              os.Getenv("WORKLOAD_OPS_PROVIDER"),
 		OpsEnabled:               strings.EqualFold(strings.TrimSpace(os.Getenv("WORKLOAD_OPS_ENABLED")), "true"),
+		ConsoleBaseURL:           firstNonEmptyEnv("INSTANCE_CONSOLE_BASE_URL", "INSTANCE_OBSERVABILITY_EXEC_BASE_URL"),
 		KubernetesRequestTimeout: gatewayDurationFromEnv("KUBERNETES_REQUEST_TIMEOUT"),
 	}
+}
+
+func firstNonEmptyEnv(keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func newGatewayInstanceWorkloadRuntime(cfg gatewayWorkloadRuntimeConfig) (router.InstanceWorkloadRuntime, error) {
@@ -71,6 +82,7 @@ func newGatewayInstanceWorkloadRuntime(cfg gatewayWorkloadRuntimeConfig) (router
 			runtime.Ops = runtimeadapter.NewKubernetesInstanceOps(
 				client,
 				runtimeadapter.WithKubernetesInstanceOpsEnabled(cfg.OpsEnabled),
+				runtimeadapter.WithKubernetesInstanceOpsConsoleBaseURL(cfg.ConsoleBaseURL),
 			)
 		default:
 			return router.InstanceWorkloadRuntime{}, fmt.Errorf("%w: unsupported WORKLOAD_OPS_PROVIDER %q", ports.ErrUnsupported, cfg.OpsProvider)

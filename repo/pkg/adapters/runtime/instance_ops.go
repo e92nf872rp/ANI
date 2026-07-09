@@ -3,14 +3,20 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
 type LocalInstanceOpsGuard struct {
-	enabled bool
-	now     func() time.Time
+	enabled     bool
+	now         func() time.Time
+	consoleBase string
+	mu          sync.RWMutex
+	consoleSess map[string]ports.WorkloadInstanceConsoleSession
 }
 
 type InstanceOpsOption func(*LocalInstanceOpsGuard)
@@ -29,8 +35,17 @@ func WithInstanceOpsClock(now func() time.Time) InstanceOpsOption {
 	}
 }
 
+func WithInstanceOpsConsoleBaseURL(baseURL string) InstanceOpsOption {
+	return func(ops *LocalInstanceOpsGuard) {
+		ops.consoleBase = strings.TrimSpace(baseURL)
+	}
+}
+
 func NewLocalInstanceOpsGuard(options ...InstanceOpsOption) *LocalInstanceOpsGuard {
-	ops := &LocalInstanceOpsGuard{now: time.Now}
+	ops := &LocalInstanceOpsGuard{
+		now:         time.Now,
+		consoleSess: make(map[string]ports.WorkloadInstanceConsoleSession),
+	}
 	for _, option := range options {
 		option(ops)
 	}
@@ -49,18 +64,89 @@ func (g *LocalInstanceOpsGuard) Run(_ context.Context, request ports.WorkloadIns
 			CheckedAt: g.now().UTC(),
 		}, nil
 	}
+	sessionID := opsSessionID(request)
+	protocol := opsProtocol(request)
 	connectURL := opsConnectURL(request, record, g.now().UTC())
+	token := ""
+	switch request.Action {
+	case ports.WorkloadInstanceOpsVMConsole, ports.WorkloadInstanceOpsVMVNC, ports.WorkloadInstanceOpsVMSerial:
+		session, err := g.issueConsoleSession(request, record)
+		if err != nil {
+			return ports.WorkloadInstanceOpsResult{}, err
+		}
+		sessionID = session.ID
+		protocol = session.Protocol
+		connectURL = session.ConnectURL
+		token = session.Token
+	}
 	return ports.WorkloadInstanceOpsResult{
 		Action:     request.Action,
 		Accepted:   true,
-		SessionID:  opsSessionID(request),
-		Protocol:   opsProtocol(request),
+		SessionID:  sessionID,
+		Protocol:   protocol,
 		ConnectURL: connectURL,
 		URL:        connectURL,
+		Token:      token,
 		Reason:     "accepted by local instance ops guard",
 		CheckedAt:  g.now().UTC(),
 		ExpiresAt:  g.now().UTC().Add(15 * time.Minute),
 	}, nil
+}
+
+func (g *LocalInstanceOpsGuard) GetConsoleSession(_ context.Context, request ports.WorkloadInstanceConsoleSessionGetRequest) (ports.WorkloadInstanceConsoleSession, error) {
+	if strings.TrimSpace(request.InstanceID) == "" {
+		return ports.WorkloadInstanceConsoleSession{}, fmt.Errorf("%w: instance_id is required", ports.ErrInvalid)
+	}
+	if strings.TrimSpace(request.SessionID) == "" {
+		return ports.WorkloadInstanceConsoleSession{}, fmt.Errorf("%w: session_id is required", ports.ErrInvalid)
+	}
+	if strings.TrimSpace(request.Token) == "" {
+		return ports.WorkloadInstanceConsoleSession{}, fmt.Errorf("%w: token is required", ports.ErrUnauthorized)
+	}
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	for _, record := range g.consoleSess {
+		if record.ID != request.SessionID {
+			continue
+		}
+		if request.TenantID != "" && record.TenantID != request.TenantID {
+			return ports.WorkloadInstanceConsoleSession{}, ports.ErrNotFound
+		}
+		if record.InstanceID != request.InstanceID {
+			return ports.WorkloadInstanceConsoleSession{}, ports.ErrNotFound
+		}
+		if record.Token != request.Token {
+			return ports.WorkloadInstanceConsoleSession{}, ports.ErrUnauthorized
+		}
+		if !g.now().UTC().Before(record.ExpiresAt) {
+			return ports.WorkloadInstanceConsoleSession{}, ports.ErrExpired
+		}
+		return record, nil
+	}
+	return ports.WorkloadInstanceConsoleSession{}, ports.ErrNotFound
+}
+
+func (g *LocalInstanceOpsGuard) issueConsoleSession(request ports.WorkloadInstanceOpsRequest, record ports.WorkloadInstanceRecord) (ports.WorkloadInstanceConsoleSession, error) {
+	token, err := newInstanceExecToken()
+	if err != nil {
+		return ports.WorkloadInstanceConsoleSession{}, err
+	}
+	sessionID := uuid.NewString()
+	session := ports.WorkloadInstanceConsoleSession{
+		ID:          sessionID,
+		TenantID:    record.TenantID,
+		InstanceID:  record.InstanceID,
+		VMName:      firstNonEmpty(record.Name, record.InstanceID),
+		Protocol:    opsProtocol(request),
+		Subresource: consoleSubresource(request.Action),
+		ConnectURL:  instanceConsoleWSURL(g.consoleBase, record.InstanceID, sessionID, token),
+		Token:       token,
+		ExpiresAt:   g.now().UTC().Add(15 * time.Minute),
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.consoleSess[sessionID] = session
+	return session, nil
 }
 
 func validateOpsRequest(request ports.WorkloadInstanceOpsRequest, record ports.WorkloadInstanceRecord) error {
@@ -135,4 +221,7 @@ func opsConnectURL(request ports.WorkloadInstanceOpsRequest, record ports.Worklo
 	return "/api/v1/demo/instances/" + record.InstanceID + "/sessions/" + string(request.Action) + "?protocol=" + protocol + "&issued_at=" + checkedAt.Format("20060102150405")
 }
 
-var _ ports.WorkloadInstanceOps = (*LocalInstanceOpsGuard)(nil)
+var (
+	_ ports.WorkloadInstanceOps                = (*LocalInstanceOpsGuard)(nil)
+	_ ports.WorkloadInstanceConsoleSessionStore = (*LocalInstanceOpsGuard)(nil)
+)

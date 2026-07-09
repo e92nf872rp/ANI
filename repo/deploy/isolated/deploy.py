@@ -810,6 +810,7 @@ def deploy_business(cfg: dict[str, str], version: str) -> None:
     kubectl(
         "-n", ns, "set", "env", "deploy/ani-gateway",
         f"INSTANCE_OBSERVABILITY_EXEC_BASE_URL={external_base}:30080",
+        f"INSTANCE_CONSOLE_BASE_URL={external_base}:30080",
         f"OBJECT_STORE_PUBLIC_ENDPOINT={external_base}:30900",
     )
 

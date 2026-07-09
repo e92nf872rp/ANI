@@ -203,6 +203,12 @@
       "scope": "scope:instances:console"
     },
     {
+      "operationId": "connectInstanceConsoleSession",
+      "method": "GET",
+      "path": "/instances/{instance_id}/console/{session_id}",
+      "scope": "scope:instances:console"
+    },
+    {
       "operationId": "listInstanceEvents",
       "method": "GET",
       "path": "/instances/{instance_id}/events",
@@ -212,6 +218,12 @@
       "operationId": "createInstanceExecSession",
       "method": "POST",
       "path": "/instances/{instance_id}/exec",
+      "scope": "scope:instances:exec"
+    },
+    {
+      "operationId": "connectInstanceExecSession",
+      "method": "GET",
+      "path": "/instances/{instance_id}/exec/{session_id}",
       "scope": "scope:instances:exec"
     },
     {

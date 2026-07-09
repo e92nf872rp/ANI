@@ -72,11 +72,12 @@ func TestKubernetesInstanceOpsExecCreatesSession(t *testing.T) {
 
 func TestKubernetesInstanceOpsVMVNCUsesKubeVirtSubresource(t *testing.T) {
 	var got string
-	var accept string
 	ops := newTestKubernetesInstanceOps(t, func(r *http.Request) (*http.Response, error) {
 		got = r.Method + " " + r.URL.String()
-		accept = r.Header.Get("Accept")
-		return jsonResponse(http.StatusOK, "vnc accepted"), nil
+		if strings.Contains(r.URL.Path, "/vnc") || strings.Contains(r.URL.Path, "/console") {
+			t.Fatalf("session create must not probe websocket-only subresource via plain HTTP: %s", got)
+		}
+		return jsonResponse(http.StatusOK, `{"kind":"VirtualMachineInstance","metadata":{"name":"vm-01"},"status":{"phase":"Running"}}`), nil
 	})
 	req := opsRequest(ports.WorkloadInstanceOpsVMVNC)
 	result, err := ops.Run(context.Background(), req, opsVMRecord())
@@ -86,11 +87,20 @@ func TestKubernetesInstanceOpsVMVNCUsesKubeVirtSubresource(t *testing.T) {
 	if result.Protocol != "vnc" || result.ConnectURL == "" || result.SessionID == "" {
 		t.Fatalf("result protocol=%q connect=%q session=%q, want vnc session", result.Protocol, result.ConnectURL, result.SessionID)
 	}
-	if !strings.Contains(got, "/apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachineinstances/vm-01/vnc") {
-		t.Fatalf("request = %q, want KubeVirt vnc subresource", got)
+	if result.Token == "" {
+		t.Fatalf("Token is empty, want short-lived websocket token")
 	}
-	if accept != "*/*" {
-		t.Fatalf("Accept = %q, want */*", accept)
+	if !strings.Contains(result.ConnectURL, "/api/v1/instances/"+req.InstanceID+"/console/") {
+		t.Fatalf("ConnectURL = %q, want gateway console websocket path", result.ConnectURL)
+	}
+	if !strings.Contains(result.ConnectURL, "token=") {
+		t.Fatalf("ConnectURL = %q, want embedded websocket token", result.ConnectURL)
+	}
+	if !strings.Contains(got, "/apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachineinstances/vm-01") {
+		t.Fatalf("request = %q, want VMI readiness GET", got)
+	}
+	if strings.Contains(got, "/subresources.kubevirt.io/") {
+		t.Fatalf("request = %q, must not call websocket subresource during session create", got)
 	}
 }
 
