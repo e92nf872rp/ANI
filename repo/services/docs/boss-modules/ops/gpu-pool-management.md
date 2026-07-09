@@ -30,17 +30,29 @@ Console 对照：[`gpu-management.md`](../../console-modules/compute/gpu-managem
 ## 页面结构
 
 ```text
-GPU 资源池管理
-├── GPU 总览 KPI
-├── 型号分布
-├── 节点列表（GPU 绑定）
-├── 租户占用排行（待 YAML）
-├── 利用率趋势
-├── 异常设备列表
+GPU 资源池管理（路由 /ops/gpu-pool）
+├── PageHeader: 全平台标题 + 刷新
+├── Alert: 范围说明（常驻 info，指向 Console）
+├── GPU 总览 KPI（集群级 occupancy）
+│   ├── 总量
+│   ├── 已分配
+│   ├── 空闲
+│   └── 异常设备
+├── 型号分布（by_gpu_type）
+├── Tabs
+│   ├── 节点（聚合 inventory by node）
+│   ├── 异常设备（filter fault|maintenance）
+│   └── 调度队列（只读全览，P0 无 CRUD）
+├── 租户占用排行（P0 仅占位 Alert，P1 替换为真实 Table）
 └── 操作
     ├── 查看监控
     └── 触发 drain（Phase 2 → maint-skills）
 ```
+
+**P0 关键约束（UX `ux-boss-gpu-pool.md` §8.2）：**
+- 租户排行 **仅占位**，不渲染空 Table 假数据，不前端循环调多租户 API
+- 调度队列 Tab **只读全览**，无新建/编辑/删除（P0 BOSS 不写队列）
+- 数据源复用 `GET /gpu-inventory/occupancy` 平台 scope（不新增 aggregate API）
 
 ## 数据来源与分层约束
 
@@ -255,3 +267,10 @@ GPU 资源池管理
 - [x] 400 + 403 错误示例
 - [ ] 平台 aggregate YAML 合入后回写
 - [x] PRD/SPEC/HTML 与本文同步
+
+## 相关阶段产物
+
+- PRD: `tasks/modules/prd/console/gpu-inventory/prd-k8s-gpu-hami-volcano-scheduling.md`
+- UX (BOSS): `tasks/modules/prd/console/gpu-inventory/ux-boss-gpu-pool.md`
+- SPEC (BOSS): `tasks/modules/spec/boss/gpu-inventory/spec-boss-gpu-pool.md`
+- SPEC (Core): `tasks/modules/spec/core/gpu-inventory/spec-core-gpu-scheduling.md`

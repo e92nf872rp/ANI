@@ -40,8 +40,12 @@ type GPUNodeClass struct {
 	Labels        map[string]string
 	Taints        []string
 	Devices       []GPUDeviceClass
-	Ready         bool
-	Reason        string
+	// Allocatable preserves the raw Kubernetes node allocatable map so
+	// PlanScheduling can check vendor-specific resource names such as
+	// nvidia.com/gpu (whole-card) and nvidia.com/vgpu (HAMi slice).
+	Allocatable map[string]string
+	Ready      bool
+	Reason     string
 }
 
 type GPUDiscoveryFilter struct {
@@ -60,6 +64,13 @@ type GPUSchedulingRequest struct {
 	VirtualizationModes  []GPUVirtualizationMode
 	RequiredCapabilities []string
 	Pool                 string
+	// QueueName is an explicit Volcano queue selection. When empty, the
+	// adapter resolves a default queue by WorkloadClass. When non-empty the
+	// adapter MUST verify the queue exists and belongs to the tenant.
+	QueueName string
+	// WorkloadClass drives the default queue selection when QueueName is
+	// empty: inference→ani-inference, training/batch→ani-training.
+	WorkloadClass WorkloadClass
 }
 
 type GPUSchedulingDecision struct {

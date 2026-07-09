@@ -13,6 +13,19 @@
 
 ## 已完成批次（按完成时间排列）
 
+### GPU 调度功能流（2026-07）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| GPU-SCHEDULING-ISSUE-01-A | OpenAPI 新增 GPU 调度队列 CRUD 5 端点 + 4 schema + 2 RBAC scope + InstanceRecord.gpu 扩展 + 5 错误码；修复 /branding schema bug；前端 core-schema.d.ts 重生成；validate-architecture 通过 | gpu-scheduling-issue-01-openapi-queue-crud.md |
+| GPU-SCHEDULING-ISSUE-02-A | Core Queue port + Volcano Queue CRD adapter + Gateway handler 5 端点；14 adapter 单测 + 12 handler 单测全通过；validate-architecture 通过 | gpu-scheduling-issue-02-queue-adapter-handler.md |
+| GPU-SCHEDULING-ISSUE-03-A | PlanScheduling 扩展：GPUSchedulingRequest 新增 QueueName/WorkloadClass；KubernetesGPUInventory 支持 queue 解析 + HAMi vGPU + 昇腾/MIG 拒绝；LocalGPUInventory 对齐；13 个新单测全通过；validate-architecture 通过 | gpu-scheduling-issue-03-plan-scheduling-extend.md |
+| GPU-SCHEDULING-ISSUE-07-A | Console Shell 组件（ConsolePage/ConsolePageHeader/ConsoleContentCard）；基于 TDesign Card/Space 封装；tsc + vite build 通过 | gpu-scheduling-issue-07-console-shell-components.md |
+| GPU-SCHEDULING-ISSUE-12-A | BOSS 前端骨架从零创建；package.json/vite/tsconfig/index.html/main.tsx/coreClient.ts/core-schema.d.ts/routes/__root.tsx + ops/gpu-pool.tsx 占位；tsc + vite build 通过 | gpu-scheduling-issue-12-boss-frontend-skeleton.md |
+| GPU-SCHEDULING-ISSUE-08-A | Console GPU 算力管理页（/compute/gpu）；KPI 5 卡 + ECharts 型号分布 + Tabs(节点/设备/占用) + DCGM 降级 + loading/empty/error/forbidden 三态；__root.tsx 新增「算力与云资源」菜单组；tsc + vite build 通过 | gpu-scheduling-issue-08-console-gpu-management-page.md |
+| GPU-SCHEDULING-ISSUE-09-A | Console GPU 容器实例列表 + 创建 Dialog + 详情页；消费 GET/POST /instances + GET /gpu-scheduling/queues；422 错误处理（InsufficientGPU/QueueNotFound）+ provisioning 提示 + 404 Empty；tsc + vite build 通过 | gpu-scheduling-issue-09-console-gpu-container-instance.md |
+| GPU-SCHEDULING-ISSUE-10-A | Console 队列设置页（/settings/gpu-queues）；平台默认只读 + 我的队列 CRUD；POST+Idempotency-Key + Popconfirm 删除 + 403 平台默认保护 + RBAC placeholder + empty CTA；tsc + vite build 通过 | gpu-scheduling-issue-10-console-queue-settings-page.md |
+
 ### SDK Regression Fixes（2026-06）
 
 | 批次 | 内容摘要 | 文件 |
