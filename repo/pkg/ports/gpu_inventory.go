@@ -44,8 +44,8 @@ type GPUNodeClass struct {
 	// PlanScheduling can check vendor-specific resource names such as
 	// nvidia.com/gpu (whole-card) and nvidia.com/vgpu (HAMi slice).
 	Allocatable map[string]string
-	Ready       bool
-	Reason      string
+	Ready      bool
+	Reason     string
 }
 
 type GPUDiscoveryFilter struct {

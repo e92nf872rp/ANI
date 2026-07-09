@@ -47,6 +47,11 @@ func main() {
 		logger.Error("failed to configure gpu inventory provider runtime", "err", err)
 		os.Exit(1)
 	}
+	gpuSchedulingQueueStore, err := newGatewayGPUSchedulingQueueStore(gatewayGPUSchedulingQueueRuntimeConfigFromEnv())
+	if err != nil {
+		logger.Error("failed to configure gpu scheduling queue store runtime", "err", err)
+		os.Exit(1)
+	}
 	networkService, err := newGatewayNetworkService(gatewayNetworkRuntimeConfigFromEnv())
 	if err != nil {
 		logger.Error("failed to configure network provider runtime", "err", err)
@@ -99,6 +104,7 @@ func main() {
 		EncryptionService:                     encryptionService,
 		SecretService:                         secretService,
 		GPUInventory:                          gpuInventory,
+		GPUSchedulingQueueStore:                gpuSchedulingQueueStore,
 		NetworkService:                        networkService,
 		StorageService:                        storageService,
 		VectorStoreService:                    vectorStoreService,

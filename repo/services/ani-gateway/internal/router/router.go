@@ -15,6 +15,7 @@ type RegisterOptions struct {
 	EncryptionService                     ports.EncryptionService
 	SecretService                         ports.SecretService
 	GPUInventory                          ports.GPUInventory
+	GPUSchedulingQueueStore               ports.GPUSchedulingQueueStore
 	NetworkService                        ports.NetworkService
 	StorageService                        ports.StorageService
 	VectorStoreService                    ports.VectorStoreService
@@ -40,6 +41,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerHarbor(v1)
 	registerDemoInstancesWithObservability(v1, options.InstanceObservability, options.InstanceObservabilityUsesInstanceName)
 	registerGPUInventoryResourcesWithInventory(v1, options.GPUInventory)
+	registerGPUSchedulingResourcesWithStore(v1, options.GPUSchedulingQueueStore)
 	registerNetworkResourcesWithService(v1, options.NetworkService)
 	registerStorageResourcesWithService(v1, options.StorageService)
 	if options.VectorStoreService != nil {

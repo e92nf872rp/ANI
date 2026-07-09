@@ -69,13 +69,15 @@
 
 ### GPU 摘要字段
 
-| 字段 | 说明 | 展示建议 |
-|---|---|---|
-| gpu.vendor | GPU 厂商 | 文本 |
-| gpu.model | GPU 型号 | 文本 |
-| gpu.count | GPU 数量 | 数字 |
-| gpu.scheduling_reason | 调度说明 | 文本 |
-| gpu.utilization_percent | GPU 利用率摘要 | 百分比 |
+| 字段 | 说明 | 展示建议 | 状态 |
+|---|---|---|---|
+| gpu.vendor | GPU 厂商 | 文本 | ✅ 已冻结 |
+| gpu.model | GPU 型号 | 文本 | ✅ 已冻结 |
+| gpu.count | GPU 数量 | 数字 | ✅ 已冻结 |
+| gpu.queue_name | 调度队列名 | 文本（可跳转队列设置页） | P0 待补 |
+| gpu.resource_name | 调度资源名 | `nvidia.com/gpu` / `nvidia.com/vgpu` | P0 待补 |
+| gpu.scheduling_reason | 调度说明 / 失败原因 | 文本（失败时 Alert 高亮） | P0 待补 |
+| gpu.utilization_percent | GPU 利用率摘要 | 百分比 | 待补 |
 
 ## 创建前置条件
 
@@ -84,9 +86,13 @@
 | 用户登录与租户上下文 | 已认证 | `401` / `403` |
 | `name` | 租户内唯一 | `409 CONFLICT` |
 | `image` | 镜像引用有效 | `422 PRECONDITION_FAILED`（YAML 已举例 `IMAGE_NOT_FOUND`） |
-| GPU 资源（若指定） | 调度可满足 | `422 PRECONDITION_FAILED`（具体 `code` 待 Core 冻结；建议语义：GPU 不可用） |
+| GPU 资源（若指定） | 调度可满足 | `422 InsufficientGPU`（具体 `code` 待 Core P0-① 冻结） |
+| 调度队列（若指定 `queue_name`） | 队列存在且属于该租户 | `422 QueueNotFound`（待 Core P0-① 冻结） |
+| GPU 节点兼容性 | 存在兼容 GPU 节点 | `422 GPUNodeIncompatible`（待 Core P0-① 冻结） |
 
 > **架构说明**：GPU 容器实例统一走 Core `POST /api/v1/instances`（`kind=gpu_container`）。`services/v1.yaml` 中 `/gpu-containers*` 已废弃，不得在新代码中使用。
+>
+> **P0 调度字段**：创建请求可传 `queue_name`（指定调度队列）和 GPU 分配模式（整卡 `nvidia.com/gpu` / vGPU `nvidia.com/vgpu`）。Core `PlanScheduling()` 解析队列并输出 `GPUSchedulingDecision`，见 SPEC `spec-core-gpu-scheduling.md` §5.1。
 
 ## 操作可用性矩阵
 

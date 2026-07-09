@@ -1,0 +1,37 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ani-gpu-smoke-a
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-gpu-smoke-a
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/test: gpu-smoke-a
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ani-gpu-smoke-a
+        app.kubernetes.io/part-of: ani-platform
+        ani.kubercloud.io/test: gpu-smoke-a
+    spec:
+      restartPolicy: Never
+      schedulerName: volcano
+      nodeSelector:
+        ani.kubercloud.io/gpu-node: "true"
+      containers:
+        - name: gpu-smoke
+          image: nvidia/cuda:12.4.1-base-ubuntu22.04
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              echo "=== Smoke A: whole-GPU scheduling ==="
+              nvidia-smi -L
+              echo "=== SCHEDULER: ${KUBE_SCHEDULER_NAME:-unknown} ==="
+              echo "SMOKE_A_PASS"
+          resources:
+            limits:
+              nvidia.com/gpu: "1"

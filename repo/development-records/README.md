@@ -6,24 +6,25 @@
 > - **当前冲刺任务** → `repo/CURRENT-SPRINT.md`（每冲刺更新）
 > - **已完成批次详情** → 本文件（每批次完成后追加）
 
-> 当前执行：**Sprint 13 / Core real provider 与 live gate 收敛**。Sprint 12 已完成 19 个 Core handler + 2 个 422 的 Tier1 local profile；Sprint 13 S01-S07 已通过 production-shaped live gate 并归档 `production_shape.status=passed` evidence。S05/S06/S07 关键 token：SPRINT13-OBJECTSTORE-MINIO-A-TRACK / validate-object-store-live-gate / MinIO / pre-signed URL / LIVE PENDING；SPRINT13-VECTOR-MILVUS-A-TRACK / validate-vector-store-live-gate / Milvus / LIVE PENDING；SPRINT13-INSTANCE-OBSERVABILITY-PROMETHEUS-A-TRACK / validate-instance-observability-live-gate / Prometheus / kubelet / LIVE PENDING。`S05-S07 B 轨可以继续` 仅保留作历史兼容语境；当前 S05/S06/S07 均已 passed。SPRINT13-AUTH-DEX-PRODUCTION-GATE 已通过，production-shaped Gateway 使用 `ANI_AUTH_MODE=auth_service`。Sprint14 分支 `feature/sprint14-core-resilience-semantics` 已完成 R-P0-0..R-P2-7 本地/逻辑批次，并通过 SPRINT14-CORE-RESILIENCE-LIVE-GATE / validate-sprint14-resilience-live-gate / Sprint14 resilience live gate：在 ani-sprint14-resilience 隔离 namespace 中完成 P0 strong backend kill、P1 weak dependency degraded、P2 controller primary kill / follower failover，并归档脱敏 evidence。该 production-ready 结论只限隔离 Sprint14 Core resilience fixture，不外推到现有 Sprint13 单副本后端或 full platform production ready；正式镜像发布/升级、长期 SLA/soak、备份/恢复和 release gate 仍需后续完成。Services 当前进入受控并行 PR 阶段，目录/API/handler/生成物/跨层边界由 CODEOWNERS、API split、Services boundary gate 和 architecture gate 约束；历史冻结原因不再作为当前 PR 规则。本文只做已完成批次归档，不作为当前任务清单使用。
+> 当前执行：**Sprint 13 / Core real provider 与 live gate 收敛**。Sprint 12 已完成 19 个 Core handler + 2 个 422 的 Tier1 local profile；Sprint 13 S01-S07 已通过 production-shaped live gate 并归档 `production_shape.status=passed` evidence。S05/S06/S07 关键 token：SPRINT13-OBJECTSTORE-MINIO-A-TRACK / validate-object-store-live-gate / MinIO / pre-signed URL / LIVE PENDING；SPRINT13-VECTOR-MILVUS-A-TRACK / validate-vector-store-live-gate / Milvus / LIVE PENDING；SPRINT13-INSTANCE-OBSERVABILITY-PROMETHEUS-A-TRACK / validate-instance-observability-live-gate / Prometheus / kubelet / LIVE PENDING。`S05-S07 B 轨可以继续` 仅保留作历史兼容语境；当前 S05/S06/S07 均已 passed。SPRINT13-AUTH-DEX-PRODUCTION-GATE 已通过，production-shaped Gateway 使用 `ANI_AUTH_MODE=auth_service`。Sprint14 分支 `feature/sprint14-core-resilience-semantics` 已完成 R-P0-0..R-P2-7 本地/逻辑批次，并通过 SPRINT14-CORE-RESILIENCE-LIVE-GATE / validate-sprint14-resilience-live-gate / Sprint14 resilience live gate：在 ani-sprint14-resilience 隔离 namespace 中完成 P0 strong backend kill、P1 weak dependency degraded、P2 controller primary kill / follower failover，并归档脱敏 evidence。该 production-ready 结论只限隔离 Sprint14 Core resilience fixture，不外推到现有 Sprint13 单副本后端或 full platform production ready；正式镜像发布/升级、长期 SLA/soak、备份/恢复和 release gate 仍需后续完成。本文只做已完成批次归档，不作为当前任务清单使用。
 > 历史校准记录（2026-05-20/2026-05-21）：Sprint 2/3/4 的 API、SDK、Mock、Docs 与记录闭环已归档；这些记录只解释历史切换，不代表当前执行阶段。
 
 ---
 
 ## 已完成批次（按完成时间排列）
 
-### Architecture Documentation（2026-06~07）
+### GPU 调度功能流（2026-07）
 
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
-| ARCH-HEXAGONAL-DOCS | ANI Core 六边形（Ports and Adapters）架构证据审查与 Go 仓库布局决策记录；仅沉淀文档和图示，不修改 Core 代码、Services 或当前 Sprint 状态 | core-hexagonal-architecture-review-2026-06-28.md、core-hexagonal-architecture-review-2026-06-28.docx、ani-go-layout-refactor-strategy.md |
-
-### Core API Contract（2026-07）
-
-| 批次 | 内容摘要 | 文件 |
-|---|---|---|
-| CORE-INSTANCE-CREATE-CONFIG-A | `CreateInstanceRequest` 按 kind 嵌套 `vm_config`/`container_config`/`gpu_container_config`（`sandbox_config` 既有）；扁平字段保留兼容别名；Gateway 冲突/跨类型 400；SDK/console 文档推荐 `*_config`；不拆 URL、不引入 oneOf | core-instance-create-config-a.md |
+| GPU-SCHEDULING-ISSUE-01-A | OpenAPI 新增 GPU 调度队列 CRUD 5 端点 + 4 schema + 2 RBAC scope + InstanceRecord.gpu 扩展 + 5 错误码；修复 /branding schema bug；前端 core-schema.d.ts 重生成；validate-architecture 通过 | gpu-scheduling-issue-01-openapi-queue-crud.md |
+| GPU-SCHEDULING-ISSUE-02-A | Core Queue port + Volcano Queue CRD adapter + Gateway handler 5 端点；14 adapter 单测 + 12 handler 单测全通过；validate-architecture 通过 | gpu-scheduling-issue-02-queue-adapter-handler.md |
+| GPU-SCHEDULING-ISSUE-03-A | PlanScheduling 扩展：GPUSchedulingRequest 新增 QueueName/WorkloadClass；KubernetesGPUInventory 支持 queue 解析 + HAMi vGPU + 昇腾/MIG 拒绝；LocalGPUInventory 对齐；13 个新单测全通过；validate-architecture 通过 | gpu-scheduling-issue-03-plan-scheduling-extend.md |
+| GPU-SCHEDULING-ISSUE-07-A | Console Shell 组件（ConsolePage/ConsolePageHeader/ConsoleContentCard）；基于 TDesign Card/Space 封装；tsc + vite build 通过 | gpu-scheduling-issue-07-console-shell-components.md |
+| GPU-SCHEDULING-ISSUE-12-A | BOSS 前端骨架从零创建；package.json/vite/tsconfig/index.html/main.tsx/coreClient.ts/core-schema.d.ts/routes/__root.tsx + ops/gpu-pool.tsx 占位；tsc + vite build 通过 | gpu-scheduling-issue-12-boss-frontend-skeleton.md |
+| GPU-SCHEDULING-ISSUE-08-A | Console GPU 算力管理页（/compute/gpu）；KPI 5 卡 + ECharts 型号分布 + Tabs(节点/设备/占用) + DCGM 降级 + loading/empty/error/forbidden 三态；__root.tsx 新增「算力与云资源」菜单组；tsc + vite build 通过 | gpu-scheduling-issue-08-console-gpu-management-page.md |
+| GPU-SCHEDULING-ISSUE-09-A | Console GPU 容器实例列表 + 创建 Dialog + 详情页；消费 GET/POST /instances + GET /gpu-scheduling/queues；422 错误处理（InsufficientGPU/QueueNotFound）+ provisioning 提示 + 404 Empty；tsc + vite build 通过 | gpu-scheduling-issue-09-console-gpu-container-instance.md |
+| GPU-SCHEDULING-ISSUE-10-A | Console 队列设置页（/settings/gpu-queues）；平台默认只读 + 我的队列 CRUD；POST+Idempotency-Key + Popconfirm 删除 + 403 平台默认保护 + RBAC placeholder + empty CTA；tsc + vite build 通过 | gpu-scheduling-issue-10-console-queue-settings-page.md |
 
 ### SDK Regression Fixes（2026-06）
 
@@ -64,7 +65,6 @@
 | r-p1-6-resilience-degradation.md | R-P1-6 resilience degradation：新增 strong/weak dependency policy，readyz 对 postgres/nats/redis/kubernetes-api strong 失败返回 `status=fail` + HTTP 503，对 object-store/vector-store weak 失败返回 `status=degraded` + HTTP 200；新增 `make validate-resilience-degradation` local gate；weak dependency down / recovery 已由 Sprint14 aggregate live gate 补齐，production-ready 范围仅限隔离 fixture | Execution（Core） |
 | r-p2-7-multi-endpoint-failover-config.md | R-P2-7 multi-endpoint failover config：Redis bootstrap/gateway 支持 `redis.UniversalClient`、Sentinel/Cluster 配置；MinIO/Milvus adapter 接受 endpoint list 或 LB/VIP，并在网络错误、`429`、`5xx` 时尝试下一个 endpoint；新增 `make validate-ha-failover-live-gate` local config/fallback gate；controller primary kill / follower lease failover 已由 Sprint14 aggregate live gate 补齐；PG 仍为单 `DatabaseURL`，后端自身 HA 拓扑不标 production ready | Execution（Core） |
 | r-sprint14-resilience-live-gate.md | SPRINT14-CORE-RESILIENCE-LIVE-GATE：新增并真实执行 `validate-sprint14-resilience-live-gate` + `ani-sprint14-resilience` 隔离 fixture，覆盖 P0 strong backend kill readyz fail、P1 weak object-store down degraded、P2 controller primary pod delete 后 follower lease failover；evidence 已脱敏归档；production-ready 范围仅限隔离 Sprint14 Core resilience fixture | Execution（Core） |
-| services-controlled-unfreeze-a.md | SERVICES-CONTROLLED-UNFREEZE-A：当前治理入口从旧 Services 冻结规则切换为受控并行 PR；明确目录 ownership、CODEOWNERS 共同审查、API split、Services boundary、OpenAPI/Gateway route contract、semantic contract、生成物漂移、architecture gate，以及精确 accepted baseline 的非生产就绪边界 | Governance（Core/Services） |
 
 ### Sprint 13 Planning（2026-06）
 
