@@ -24,6 +24,7 @@
 | ISO-CDI-LIVE-HARDENING-A | Live 冒烟收口：Gateway CDI RBAC；ISO/空白盘强制 Filesystem+RWO；去掉应用层写死 `ani-rbd-ssd`；isolated 增加 StorageProfile + deploy 注入 `CDI_UPLOADPROXY_URL`；附前端对接提示词 | iso-cdi-live-hardening-a.md |
 | IMAGE-UPLOAD-PROXY-VNC-AUTH-A | 浏览器上传/VNC 可达性：`upload_url` 改写为 Gateway `/images/upload-proxy` 流式转发 CDI；Auth 放行 `/instances/*/console/*` query-token WS（修复 noVNC 401）；isolated 注入 `CDI_UPLOADPROXY_INTERNAL_URL` | image-upload-proxy-vnc-auth-a.md |
 | ISO-CDI-VM-CDROM-DETACH-A | VM ISO 安装后卸载 CD-ROM：`detach_volume` 对 VM `cdrom` 调用 Kubernetes lifecycle provider，GET KubeVirt VM 后 merge-patch 删除 `iso` disk/volume，避免安装完成后重启继续进入 ISO 引导；local/logic verified，不标 production ready | iso-cdi-vm-cdrom-detach-a.md |
+| KUBEVIRT-VM-LIFECYCLE-SUBRESOURCE-A | KubeVirt VM start/stop subresource 修复：VM lifecycle 不再 PUT 主资源 `?stop=true/start=true`，改为 `subresources.kubevirt.io` 的 `/virtualmachines/{name}/stop|start` 并发送 `StopOptions`/`StartOptions`；修复真实 KubeVirt 返回 `Kind missing in {}` 的 400 | kubevirt-vm-lifecycle-subresource-a.md |
 
 ### SDK Regression Fixes（2026-06）
 

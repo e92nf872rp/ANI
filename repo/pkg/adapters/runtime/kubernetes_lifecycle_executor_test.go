@@ -84,6 +84,42 @@ func TestKubernetesLifecycleExecutorDeleteRemovesSecretAndDeployment(t *testing.
 	}
 }
 
+func TestKubernetesLifecycleExecutorUsesKubeVirtVMStartStopSubresources(t *testing.T) {
+	var requests []string
+	var bodies []string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		body, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(body))
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-test"}
+
+	if _, err := executor.Apply(context.Background(), lifecycleRequest(ports.WorkloadLifecycleStop), record); err != nil {
+		t.Fatalf("Stop Apply() error = %v", err)
+	}
+	if _, err := executor.Apply(context.Background(), lifecycleRequest(ports.WorkloadLifecycleStart), record); err != nil {
+		t.Fatalf("Start Apply() error = %v", err)
+	}
+
+	if len(requests) != 2 {
+		t.Fatalf("requests = %#v, want stop and start", requests)
+	}
+	if requests[0] != "PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-test/stop" {
+		t.Fatalf("stop request = %q", requests[0])
+	}
+	if requests[1] != "PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-test/start" {
+		t.Fatalf("start request = %q", requests[1])
+	}
+	for _, body := range bodies {
+		if body == "{}" || !strings.Contains(body, `"apiVersion":"subresources.kubevirt.io/v1"`) {
+			t.Fatalf("body = %s, want KubeVirt subresource options object", body)
+		}
+	}
+}
+
 func TestKubernetesLifecycleExecutorDetachesVMCDROM(t *testing.T) {
 	var requests []string
 	var patchBody string

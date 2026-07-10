@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -102,7 +103,7 @@ func (e *KubernetesLifecycleExecutor) execute(ctx context.Context, request ports
 
 func (e *KubernetesLifecycleExecutor) start(ctx context.Context, resource kubernetesResource) error {
 	if resource.Kind == "VirtualMachine" {
-		_, err := e.client.do(ctx, http.MethodPut, e.client.resourceURL(resource, "start=true"), "application/json", []byte(`{}`))
+		_, err := e.client.do(ctx, http.MethodPut, e.kubeVirtVMSubresourceURL(resource, "start"), "application/json", kubeVirtVMSubresourceOptions("StartOptions"))
 		return err
 	}
 	return e.patchScale(ctx, resource, 1)
@@ -110,7 +111,7 @@ func (e *KubernetesLifecycleExecutor) start(ctx context.Context, resource kubern
 
 func (e *KubernetesLifecycleExecutor) stop(ctx context.Context, resource kubernetesResource) error {
 	if resource.Kind == "VirtualMachine" {
-		_, err := e.client.do(ctx, http.MethodPut, e.client.resourceURL(resource, "stop=true"), "application/json", []byte(`{}`))
+		_, err := e.client.do(ctx, http.MethodPut, e.kubeVirtVMSubresourceURL(resource, "stop"), "application/json", kubeVirtVMSubresourceOptions("StopOptions"))
 		return err
 	}
 	return e.patchScale(ctx, resource, 0)
@@ -182,6 +183,14 @@ func (e *KubernetesLifecycleExecutor) patchScale(ctx context.Context, resource k
 	body := fmt.Sprintf(`{"spec":{"replicas":%d}}`, replicas)
 	_, err := e.client.do(ctx, http.MethodPatch, endpoint, "application/merge-patch+json", []byte(body))
 	return err
+}
+
+func (e *KubernetesLifecycleExecutor) kubeVirtVMSubresourceURL(resource kubernetesResource, action string) string {
+	return e.client.host + "/apis/subresources.kubevirt.io/v1/namespaces/" + url.PathEscape(resource.Namespace) + "/virtualmachines/" + url.PathEscape(resource.Name) + "/" + url.PathEscape(action)
+}
+
+func kubeVirtVMSubresourceOptions(kind string) []byte {
+	return []byte(`{"apiVersion":"subresources.kubevirt.io/v1","kind":"` + kind + `"}`)
 }
 
 func kubeVirtVMList(doc map[string]any, path []string) ([]any, error) {
