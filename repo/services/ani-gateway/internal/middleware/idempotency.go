@@ -33,6 +33,13 @@ func Idempotency(store GatewayStore) app.HandlerFunc {
 			c.Next(ctx)
 			return
 		}
+		// Binary ISO uploads must never enter the idempotency path: looking up
+		// idempotency_key from the JSON body would call Request.Body() and
+		// materialize multi-GiB payloads in Gateway memory (OOMKilled).
+		if isBinaryUploadPath(string(c.Path())) {
+			c.Next(ctx)
+			return
+		}
 
 		tenantID := GetTenantID(c)
 		key := idempotencyKeyFromRequest(c)
@@ -96,6 +103,15 @@ func idempotencyKeyFromRequest(c *app.RequestContext) string {
 	if key := strings.TrimSpace(string(c.GetHeader("Idempotency-Key"))); key != "" {
 		return key
 	}
+	// Only parse small JSON control-plane bodies. Never touch Request.Body()
+	// for octet-stream / multipart / unknown large uploads.
+	ct := strings.ToLower(string(c.GetHeader("Content-Type")))
+	if !strings.Contains(ct, "application/json") {
+		return ""
+	}
+	if n := c.Request.Header.ContentLength(); n < 0 || n > 1<<20 {
+		return ""
+	}
 	var payload struct {
 		IdempotencyKey string `json:"idempotency_key"`
 	}
@@ -103,6 +119,15 @@ func idempotencyKeyFromRequest(c *app.RequestContext) string {
 		return ""
 	}
 	return strings.TrimSpace(payload.IdempotencyKey)
+}
+
+func isBinaryUploadPath(path string) bool {
+	switch path {
+	case "/api/v1/images/upload-proxy", "/api/v1/objects/upload", "/api/v1/branding/logo":
+		return true
+	default:
+		return strings.HasSuffix(path, "/upload-proxy") || strings.HasSuffix(path, "/upload")
+	}
 }
 
 func idempotencyCacheKey(tenantID, method, path, idempotencyKey string) string {

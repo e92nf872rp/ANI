@@ -30,6 +30,7 @@
 - 当前只支持 `format: "iso"`；`qcow2`/`raw` 会失败。
 - **不要传 `storage_class`**，除非用户明确选择；省略后由集群默认 StorageClass 承接。
 - `size_gib` 按 ISO 文件大小向上取整并留余量（例如 2.5Gi 文件用 `3` 或 `5`）。
+- **大 DVD 必须给够容量**：`openEuler-*-dvd.iso` 常见约 10–20Gi，请用 `size_gib: 20` 或 `30`（不要用文档示例里的 `5`）。容量小于文件真实大小时，上传会在接近结束时失败。
 
 响应（`ImageUploadSession`）关键：
 
@@ -46,9 +47,12 @@
 `http://<node-ip>:30080/api/v1/images/upload-proxy`
 
 - Header：`Authorization: Bearer <token>`（会话返回的 **upload token**，不是用户 JWT）
-- Body：ISO 原始二进制（`Content-Type: application/octet-stream`）
+- Body：ISO **原始二进制**（`Content-Type: application/octet-stream`），并带正确的 `Content-Length`
+- **禁止 FormData / multipart**：不要用 `FormData.append('file', blob)`；那会把大 ISO 缓冲进 Gateway 内存并 OOM（表现：进度到 100% 后失败）
+- 用 `XMLHttpRequest` / `fetch` 直接 `POST` `File`/`Blob` 本体；进度条用 `xhr.upload.onprogress`
 - **不要**再直连 `https://<node>:31001`（CDI 自签证书 SAN 只有集群内 DNS，浏览器会连不上）
 - Gateway 会流式转发到集群内 `cdi-uploadproxy`；大文件走同源 HTTP，无需信任 NodePort 证书
+- 大 ISO（>5Gi）上传可能需数十分钟；浏览器进度到 100% 后仍需等 Gateway/CDI 返回 200，再轮询 `GET /images/{id}` 到 `ready`
 
 上传前可轮询 `GET /api/v1/images/{image_id}`，等到适合上传的状态（实现侧 DV 进入 UploadReady 后再传更稳）。
 

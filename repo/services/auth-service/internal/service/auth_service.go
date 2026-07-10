@@ -188,7 +188,7 @@ func (r *dbRolePermissionResolver) Allows(ctx context.Context, tenantID string, 
 	rows, err := r.db.Query(ctx, `
 		SELECT permissions
 		FROM roles
-		WHERE name = ANY($1)
+		WHERE name = ANY($1::text[])
 		  AND (tenant_id IS NULL OR tenant_id = NULLIF($2, '')::uuid)
 	`, roles, tenantID)
 	if err != nil {
@@ -264,7 +264,7 @@ func hasRole(roles []string, want string) bool {
 func hasScope(roles []string, resource, action string) bool {
 	for _, role := range roles {
 		switch role {
-		case "scope:*:*", "*:*", resource + ":" + action, "scope:" + resource + ":" + action:
+		case "*", "scope:*:*", "*:*", resource + ":" + action, "scope:" + resource + ":" + action:
 			return true
 		case resource + ":*", "scope:" + resource + ":*":
 			return true
@@ -334,7 +334,8 @@ func isReadAction(action string) bool {
 
 func isUserAction(action string) bool {
 	switch action {
-	case "get", "list", "read", "watch", "use", "create":
+	case "get", "list", "read", "watch", "use", "create", "update", "delete",
+		"start", "stop", "restart":
 		return true
 	default:
 		return false

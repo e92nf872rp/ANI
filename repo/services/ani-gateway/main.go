@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app/server"
+	"github.com/cloudwego/hertz/pkg/network/standard"
 
 	"github.com/kubercloud/ani/pkg/bootstrap"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
@@ -25,10 +26,13 @@ func main() {
 	h := server.Default(
 		server.WithHostPorts(gatewayHTTPAddrFromEnv()),
 		server.WithExitWaitTime(5),
-		// ISO uploads stream through /api/v1/images/upload-proxy; keep body
-		// streaming and raise the limit well above typical installer ISOs.
+		// ISO uploads stream through /api/v1/images/upload-proxy. Hertz
+		// StreamBody requires the standard net/http transporter; netpoll
+		// still buffers large bodies and OOMs on DVD-sized ISOs.
+		server.WithTransport(standard.NewTransporter),
 		server.WithStreamBody(true),
-		server.WithMaxRequestBodySize(16<<30),
+		server.WithDisablePreParseMultipartForm(true),
+		server.WithMaxRequestBodySize(32<<30),
 	)
 
 	runtimeCtx := context.Background()

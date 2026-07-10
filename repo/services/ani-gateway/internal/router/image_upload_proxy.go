@@ -44,13 +44,16 @@ func (api *imageAPI) proxyImageUpload(ctx context.Context, c *app.RequestContext
 		return
 	}
 
-	var body io.Reader
-	if raw := c.Request.Body(); len(raw) > 0 {
-		body = bytes.NewReader(raw)
-	} else if stream := c.RequestBodyStream(); stream != nil {
-		body = stream
-	} else {
-		body = bytes.NewReader(nil)
+	// Prefer the live request stream. Calling Request.Body() / GetBody() would
+	// materialize the entire ISO in Gateway memory and OOM on large DVDs
+	// (observed: openEuler ~18Gi → Gateway OOMKilled after browser hit 100%).
+	body := c.RequestBodyStream()
+	if body == nil {
+		if raw := c.Request.Body(); len(raw) > 0 {
+			body = bytes.NewReader(raw)
+		} else {
+			body = bytes.NewReader(nil)
+		}
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstream+defaultCDIUploadPath, body)
@@ -64,11 +67,13 @@ func (api *imageAPI) proxyImageUpload(ctx context.Context, c *app.RequestContext
 	} else {
 		req.Header.Set("Content-Type", "application/octet-stream")
 	}
-	// Only forward Content-Length when the body is a live stream; buffered
-	// bodies let net/http derive length from the reader.
+	// Forward Content-Length for live streams so CDI sees a known-length body.
+	// Buffered *bytes.Reader bodies let net/http derive length itself.
 	if _, ok := body.(*bytes.Reader); !ok {
 		if cl := string(c.GetHeader("Content-Length")); cl != "" {
 			req.ContentLength = parseContentLength(cl)
+		} else if n := c.Request.Header.ContentLength(); n > 0 {
+			req.ContentLength = int64(n)
 		}
 	}
 

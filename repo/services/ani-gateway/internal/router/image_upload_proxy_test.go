@@ -53,9 +53,11 @@ func TestCreateImageUploadRewritesUploadURLToGatewayProxy(t *testing.T) {
 func TestProxyImageUploadForwardsToCDI(t *testing.T) {
 	var gotAuth, gotCT string
 	var gotBody []byte
+	var gotContentLength int64
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
 		gotCT = r.Header.Get("Content-Type")
+		gotContentLength = r.ContentLength
 		gotBody, _ = io.ReadAll(r.Body)
 		if r.URL.Path != "/v1beta1/upload" {
 			http.Error(w, "bad path", http.StatusBadRequest)
@@ -70,7 +72,7 @@ func TestProxyImageUploadForwardsToCDI(t *testing.T) {
 	api.uploadProxyURL = upstream.URL
 	api.uploadHTTPClient = upstream.Client()
 
-	h := server.Default()
+	h := server.Default(server.WithStreamBody(true))
 	v1 := h.Group("/api/v1")
 	v1.POST("/images/upload-proxy", api.proxyImageUpload)
 
@@ -78,6 +80,7 @@ func TestProxyImageUploadForwardsToCDI(t *testing.T) {
 	resp := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/images/upload-proxy", &ut.Body{Body: bytes.NewReader(payload), Len: len(payload)},
 		ut.Header{Key: "Authorization", Value: "Bearer upload-tok"},
 		ut.Header{Key: "Content-Type", Value: "application/octet-stream"},
+		ut.Header{Key: "Content-Length", Value: "9"},
 	).Result()
 	if resp.StatusCode() != http.StatusOK {
 		t.Fatalf("status = %d body=%s", resp.StatusCode(), resp.Body())
@@ -90,6 +93,40 @@ func TestProxyImageUploadForwardsToCDI(t *testing.T) {
 	}
 	if string(gotBody) != "ISO-BYTES" {
 		t.Fatalf("upstream body = %q", gotBody)
+	}
+	if gotContentLength != 9 {
+		t.Fatalf("upstream content-length = %d, want 9", gotContentLength)
+	}
+}
+
+func TestProxyImageUploadPrefersRequestBodyStream(t *testing.T) {
+	var gotBody []byte
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	api := newImageAPIWithService(&fakeImageImportService{})
+	api.uploadProxyURL = upstream.URL
+	api.uploadHTTPClient = upstream.Client()
+
+	h := server.Default(server.WithStreamBody(true), server.WithMaxRequestBodySize(64<<20))
+	v1 := h.Group("/api/v1")
+	v1.POST("/images/upload-proxy", api.proxyImageUpload)
+
+	// Large-enough payload to make accidental full buffering obvious in tests
+	// that run with tight memory; still small for CI.
+	payload := bytes.Repeat([]byte("A"), 256*1024)
+	resp := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/images/upload-proxy", &ut.Body{Body: bytes.NewReader(payload), Len: len(payload)},
+		ut.Header{Key: "Authorization", Value: "Bearer upload-tok"},
+		ut.Header{Key: "Content-Type", Value: "application/octet-stream"},
+	).Result()
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("status = %d body=%s", resp.StatusCode(), resp.Body())
+	}
+	if !bytes.Equal(gotBody, payload) {
+		t.Fatalf("upstream body len = %d, want %d", len(gotBody), len(payload))
 	}
 }
 

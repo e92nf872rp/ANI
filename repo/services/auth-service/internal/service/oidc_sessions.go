@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -78,6 +79,12 @@ func (s *postgresOIDCSessionStore) CreateSession(ctx context.Context, tenantName
 	_ = displayName
 
 	roles := s.mapper.Map(claims.Groups)
+	// Dex v2.40 staticPasswords cannot emit groups; bootstrap the well-known
+	// local admin account to tenant-admin so lab/console admins are not stuck
+	// on the default least-privilege "user" role.
+	if isBootstrapAdminEmail(claims.Email) && !hasPrivilegedOIDCRole(roles) {
+		roles = []string{"tenant-admin"}
+	}
 	if err := grantRoles(ctx, tx, userID, tenantID, roles); err != nil {
 		return refreshPrincipal{}, "", err
 	}
@@ -162,6 +169,32 @@ func isAllowedOIDCRole(role string) bool {
 	default:
 		return false
 	}
+}
+
+func hasPrivilegedOIDCRole(roles []string) bool {
+	for _, role := range roles {
+		if role == "platform-admin" || role == "tenant-admin" {
+			return true
+		}
+	}
+	return false
+}
+
+func isBootstrapAdminEmail(email string) bool {
+	email = strings.TrimSpace(strings.ToLower(email))
+	if email == "" {
+		return false
+	}
+	raw := strings.TrimSpace(os.Getenv("AUTH_OIDC_BOOTSTRAP_ADMIN_EMAILS"))
+	if raw == "" {
+		raw = "admin@ani.local"
+	}
+	for _, item := range strings.Split(raw, ",") {
+		if strings.TrimSpace(strings.ToLower(item)) == email {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeOIDCGroup(group string) string {

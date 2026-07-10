@@ -836,8 +836,8 @@ CREATE POLICY tenant_isolation ON encryption_keys
 
 INSERT INTO roles (tenant_id, name, permissions) VALUES
     (NULL, 'platform-admin', '["*"]'),
-    (NULL, 'tenant-admin', '["tenant:read","networks:*","storage:*","gpu-inventory:*","k8s-clusters:*"]'),
-    (NULL, 'user', '["networks:read","storage:read","gpu-inventory:read","k8s-clusters:read","scope:instances:exec"]'),
+    (NULL, 'tenant-admin', '["*"]'),
+    (NULL, 'user', '["instances:*","images:*","networks:read","storage:*","volumes:*","gpu-inventory:read","k8s-clusters:read","scope:instances:exec"]'),
     (NULL, 'auditor', '["audit:read","metering:read","networks:read","storage:read"]')
 ON CONFLICT (tenant_id, name) DO NOTHING;
 

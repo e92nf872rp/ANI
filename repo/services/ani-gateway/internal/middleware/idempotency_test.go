@@ -99,3 +99,48 @@ func TestConcurrentIdempotentInProgressReturns409(t *testing.T) {
 		t.Fatalf("first status = %d, want 202", status)
 	}
 }
+
+func TestIdempotencySkipsBinaryUploadProxy(t *testing.T) {
+	store := newMemoryGatewayStoreForTest()
+	h := server.New()
+	h.Use(
+		RequestID(),
+		func(ctx context.Context, c *app.RequestContext) {
+			setTenantContext(c, "tenant-a", "user-a", []string{"tenant-admin"})
+			c.Next(ctx)
+		},
+		Idempotency(store),
+	)
+
+	var calls int32
+	h.POST("/api/v1/images/upload-proxy", func(ctx context.Context, c *app.RequestContext) {
+		atomic.AddInt32(&calls, 1)
+		// Handler must still see the raw body stream; middleware must not
+		// have consumed Request.Body() for idempotency_key JSON parsing.
+		if got := string(c.Request.Body()); got != "ISO-BYTES" {
+			t.Fatalf("handler body = %q, want ISO-BYTES (middleware buffered/consumed body)", got)
+		}
+		c.Status(http.StatusOK)
+	})
+
+	payload := []byte("ISO-BYTES")
+	resp := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/images/upload-proxy", &ut.Body{Body: bytes.NewReader(payload), Len: len(payload)},
+		ut.Header{Key: "Content-Type", Value: "application/octet-stream"},
+		ut.Header{Key: "Authorization", Value: "Bearer upload-tok"},
+	).Result()
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+	if calls != 1 {
+		t.Fatalf("handler calls = %d, want 1", calls)
+	}
+}
+
+func TestIsBinaryUploadPath(t *testing.T) {
+	if !isBinaryUploadPath("/api/v1/images/upload-proxy") {
+		t.Fatal("expected upload-proxy to be binary")
+	}
+	if isBinaryUploadPath("/api/v1/images/uploads") {
+		t.Fatal("JSON create-upload session must still use idempotency")
+	}
+}

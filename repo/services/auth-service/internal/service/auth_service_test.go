@@ -90,6 +90,22 @@ func TestCheckPermissionExecRequiresAdminOrExplicitScope(t *testing.T) {
 	}
 }
 
+func TestCheckPermissionUserCanDeleteOwnResources(t *testing.T) {
+	svc := &AuthService{}
+	resp, err := svc.CheckPermission(context.Background(), &authv1.CheckPermissionRequest{
+		TenantId: uuid.New().String(),
+		Roles:    []string{"user"},
+		Resource: "images",
+		Action:   "delete",
+	})
+	if err != nil {
+		t.Fatalf("CheckPermission error: %v", err)
+	}
+	if !resp.GetAllowed() {
+		t.Fatalf("user should be allowed to delete images, got deny: %s", resp.GetReason())
+	}
+}
+
 func TestCheckPermissionAllowsConfiguredRolePermission(t *testing.T) {
 	svc := &AuthService{
 		rolePerms: fakeRolePermissionResolver{
