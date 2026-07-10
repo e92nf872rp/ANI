@@ -34,18 +34,21 @@
 响应（`ImageUploadSession`）关键：
 
 - `image.id`：后续轮询与创建 VM 用的 `image_id`
-- `upload_url`：浏览器/客户端直传地址（CDI uploadproxy，常为 `https://<node>:31001/v1beta1/upload`）
+- `upload_url`：浏览器直传地址；isolated 下为 Gateway `http://<host>:30080/api/v1/images/upload-proxy`（勿用 NodePort 31001）
 - `token`：短期上传票据
 - `method`：通常为 `POST`
 - `expires_at`：过期后需重新创建会话
 
-## 2. 直传 ISO 文件（不经 Gateway 中转）
+## 2. 直传 ISO 文件（经 Gateway 代理）
 
-对 `upload_url` 发起上传（与会话 `method` 一致，一般为 POST）：
+对会话返回的 `upload_url` 发起上传（一般为 POST）。isolated/dev 下 `upload_url` 形如：
 
-- Header：`Authorization: Bearer <token>`（会话返回的 token，不是用户 JWT）
-- Body：ISO 原始二进制（`Content-Type: application/octet-stream` 或 ISO MIME）
-- uploadproxy 常为自签证书：开发环境允许 insecure TLS；生产需正确信任链
+`http://<node-ip>:30080/api/v1/images/upload-proxy`
+
+- Header：`Authorization: Bearer <token>`（会话返回的 **upload token**，不是用户 JWT）
+- Body：ISO 原始二进制（`Content-Type: application/octet-stream`）
+- **不要**再直连 `https://<node>:31001`（CDI 自签证书 SAN 只有集群内 DNS，浏览器会连不上）
+- Gateway 会流式转发到集群内 `cdi-uploadproxy`；大文件走同源 HTTP，无需信任 NodePort 证书
 
 上传前可轮询 `GET /api/v1/images/{image_id}`，等到适合上传的状态（实现侧 DV 进入 UploadReady 后再传更稳）。
 
@@ -95,9 +98,16 @@ ISO 装机路径（与 `boot_image` 互斥）：
 
 ## 5. 打开安装界面（noVNC）
 
-`POST /api/v1/instances/{instance_id}/actions/console`（或 OpenAPI 中等价 console action）
+`POST /api/v1/instances/{instance_id}/console`（body 可传 `{"protocol":"novnc"}`）
 
-响应里的 `connect_url` / `url` 交给前端 noVNC 组件打开（WebSocket 经 Gateway 代理）。用户在 VNC 里完成 OS 安装。
+响应里的 `connect_url` 已内嵌短期 `token`，直接交给 noVNC `RFB`：
+
+```ts
+const session = await POST(`/api/v1/instances/${id}/console`, { protocol: 'novnc' })
+new RFB(container, session.connect_url) // 形如 ws://<gw>:30080/api/v1/instances/{id}/console/{session}?token=...
+```
+
+注意：`connect_url` 的 WebSocket 握手**不要**再带用户 JWT；Gateway 对该路径按 query token 放行（与 exec 同源）。用户在 VNC 里完成 OS 安装。
 
 ## UI 建议流程
 
@@ -107,10 +117,12 @@ ISO 装机路径（与 `boot_image` 互斥）：
 
 ## 不要做的事
 
-- 不要把 ISO 文件 POST 到 Gateway `/images` 请求体（大文件必须走 `upload_url`）。
+- 不要把 ISO 文件 POST 到 Gateway `/images/uploads` JSON 请求体；创建会话后，文件应 POST 到返回的 `upload_url`（`/images/upload-proxy`）。
+- 不要直连 `https://<node>:31001`（自签证书，浏览器会失败）。
 - 不要写死 StorageClass 名（如 `ani-rbd-ssd`）；默认留空。
 - 不要绕过 Core 去调 KubeVirt/CDI CR。
 - 不要依赖 Services 层 API。
+- noVNC 打开 `connect_url` 时不要再附加 Authorization 头要求；token 已在 query 中。
 
 ## 联调环境提示（isolated）
 

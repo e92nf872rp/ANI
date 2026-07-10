@@ -343,9 +343,12 @@ spec:
               value: "true"
             - name: IMAGE_IMPORT_PROVIDER
               value: "cdi_rest"
-            # deploy.py overwrites this with https://<node-ip>:31001 on business deploy.
+            # Public NodePort URL used only as fallback; Gateway prefers the
+            # in-cluster service URL below for the upload-proxy upstream.
             - name: CDI_UPLOADPROXY_URL
               value: "https://127.0.0.1:31001"
+            - name: CDI_UPLOADPROXY_INTERNAL_URL
+              value: "https://cdi-uploadproxy.cdi.svc:443"
           readinessProbe:
             httpGet:
               path: /readyz

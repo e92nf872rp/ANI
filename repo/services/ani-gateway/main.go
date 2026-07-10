@@ -25,6 +25,10 @@ func main() {
 	h := server.Default(
 		server.WithHostPorts(gatewayHTTPAddrFromEnv()),
 		server.WithExitWaitTime(5),
+		// ISO uploads stream through /api/v1/images/upload-proxy; keep body
+		// streaming and raise the limit well above typical installer ISOs.
+		server.WithStreamBody(true),
+		server.WithMaxRequestBodySize(16<<30),
 	)
 
 	runtimeCtx := context.Background()
@@ -150,6 +154,8 @@ func main() {
 		EncryptionService:                     encryptionService,
 		SecretService:                         secretService,
 		ImageImportService:                    imageImportService,
+		ImageUploadProxyURL:                   firstGatewayEnv("CDI_UPLOADPROXY_INTERNAL_URL", "CDI_UPLOADPROXY_URL"),
+		ImagePublicBaseURL:                    firstGatewayEnv("INSTANCE_CONSOLE_BASE_URL", "INSTANCE_OBSERVABILITY_EXEC_BASE_URL"),
 		GPUInventory:                          gpuInventory,
 		ImageRegistry:                         imageRegistry,
 		RegistryPullSecretKubernetesApply:     registryPullSecretKubernetesApply,

@@ -110,24 +110,27 @@ func tenantContextFromIDs(tenantID, userID string, roles []string) (*types.Tenan
 }
 
 func isPublicPath(path string) bool {
-	if isExecWebSocketPath(path) {
+	if isInstanceSessionWebSocketPath(path) {
 		return true
 	}
 	switch path {
-	case "/health", "/ready", "/healthz", "/readyz", "/api/v1/branding", "/api/v1/auth/oidc/begin", "/api/v1/auth/token", "/api/v1/auth/refresh":
+	case "/health", "/ready", "/healthz", "/readyz", "/api/v1/branding", "/api/v1/auth/oidc/begin", "/api/v1/auth/token", "/api/v1/auth/refresh", "/api/v1/images/upload-proxy":
 		return true
 	default:
 		return false
 	}
 }
 
-func isExecWebSocketPath(path string) bool {
+// isInstanceSessionWebSocketPath allows browser noVNC/exec clients that only
+// carry a short-lived session token in the query string (no Authorization
+// header) to reach the Gateway WebSocket upgrade handlers.
+func isInstanceSessionWebSocketPath(path string) bool {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	return len(parts) == 6 &&
 		parts[0] == "api" &&
 		parts[1] == "v1" &&
 		parts[2] == "instances" &&
-		parts[4] == "exec" &&
+		(parts[4] == "exec" || parts[4] == "console") &&
 		parts[3] != "" &&
 		parts[5] != ""
 }

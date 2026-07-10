@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/route"
@@ -16,7 +17,10 @@ import (
 // details live entirely in pkg/adapters/runtime; this handler only maps
 // HTTP <-> ports.ImageImportService.
 type imageAPI struct {
-	service ports.ImageImportService
+	service          ports.ImageImportService
+	uploadProxyURL   string
+	publicBaseURL    string
+	uploadHTTPClient *http.Client
 }
 
 type imageUploadCreateRequest struct {
@@ -64,14 +68,33 @@ func newImageAPIWithService(service ports.ImageImportService) *imageAPI {
 	return &imageAPI{service: service}
 }
 
+type imageAPIOption func(*imageAPI)
+
+func withImageUploadProxyURL(url string) imageAPIOption {
+	return func(api *imageAPI) {
+		api.uploadProxyURL = strings.TrimSpace(url)
+	}
+}
+
+func withImagePublicBaseURL(url string) imageAPIOption {
+	return func(api *imageAPI) {
+		api.publicBaseURL = strings.TrimSpace(url)
+	}
+}
+
 func registerImageResources(v1 *route.RouterGroup) {
 	registerImageResourcesWithService(v1, nil)
 }
 
-func registerImageResourcesWithService(v1 *route.RouterGroup, service ports.ImageImportService) {
+func registerImageResourcesWithService(v1 *route.RouterGroup, service ports.ImageImportService, options ...imageAPIOption) {
 	api := newImageAPIWithService(service)
+	for _, option := range options {
+		option(api)
+	}
 	v1.GET("/images", api.listImages)
 	v1.POST("/images/uploads", api.createImageUpload)
+	v1.POST("/images/upload-proxy", api.proxyImageUpload)
+	v1.OPTIONS("/images/upload-proxy", api.proxyImageUpload)
 	v1.GET("/images/:image_id", api.getImage)
 	v1.DELETE("/images/:image_id", api.deleteImage)
 }
@@ -95,7 +118,11 @@ func (api *imageAPI) createImageUpload(ctx context.Context, c *app.RequestContex
 		writeImageError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, imageUploadSessionFromRecord(session))
+	resp := imageUploadSessionFromRecord(session)
+	// Browser clients cannot trust the CDI uploadproxy NodePort cert
+	// (SANs are cluster DNS only). Rewrite to the Gateway proxy path.
+	resp.UploadURL = gatewayPublicUploadProxyURL(c, api.publicBaseURL)
+	c.JSON(http.StatusCreated, resp)
 }
 
 func (api *imageAPI) listImages(ctx context.Context, c *app.RequestContext) {

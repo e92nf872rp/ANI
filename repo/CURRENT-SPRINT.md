@@ -95,6 +95,7 @@
 | ISO/CDI image upload CDI adapter + Gateway | CDI DataVolume/UploadTokenRequest REST adapter + Gateway `/images*`（2026-07-09） | `pkg/adapters/runtime/cdi_image_import.go` / `services/ani-gateway/internal/router/image_resources.go` / `services/ani-gateway/image_import_runtime.go` / `deploy/isolated/business-stack.yaml` | **local/logic verified + live 冒烟修复中**（`IMAGE-UPLOAD-CDI-A` Task 3；未传 `storage_class` 时省略 `storageClassName` 走集群 default；live 收口见下一行） |
 | ISO/CDI VM boot_media=iso | KubeVirt VM CD-ROM boot + 空白系统盘（2026-07-09） | `pkg/ports/workload_runtime.go` / `pkg/adapters/runtime/dryrun_renderer.go` / `pkg/adapters/runtime/planning.go` / `services/ani-gateway/internal/router/demo_instances.go` | **local/logic verified + live 冒烟修复中**（`VM-ISO-BOOT-A`；空白盘 `dataVolumeTemplates`/`source.blank`；未传 SC 省略字段；live 收口见下一行） |
 | ISO/CDI live hardening | Live 冒烟问题收口（2026-07-09） | `cdi_image_import.go` / `dryrun_renderer.go` / `business-stack.yaml` / `deploy.py` / `09-cdi-storageprofile-filesystem.yaml` | **local verified + isolated 可复跑**（`ISO-CDI-LIVE-HARDENING-A`；Gateway CDI RBAC；ISO/空白盘强制 Filesystem+RWO；去掉应用层写死 `ani-rbd-ssd`；deploy 注入 `CDI_UPLOADPROXY_URL`；前端提示词见 `frontend-prompt-images-iso-upload.md`；不标 production ready） |
+| ISO upload proxy + VNC auth | 浏览器上传/VNC 可达性（2026-07-10） | `image_upload_proxy.go` / `middleware/auth.go` / `business-stack.yaml` | **local verified + 待 redeploy 验证**（`IMAGE-UPLOAD-PROXY-VNC-AUTH-A`；`upload_url`→Gateway `/images/upload-proxy`；console WS public path 修复 401；不标 production ready） |
 
 ## Sprint 12 已完成切片
 

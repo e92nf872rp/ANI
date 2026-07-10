@@ -92,9 +92,10 @@ curl -sS -X POST "http://<node-ip>:30080/api/v1/images/uploads" \
   -H "Idempotency-Key: iso-smoke-1" \
   -d '{"idempotency_key":"iso-smoke-1","name":"ubuntu-2204","format":"iso","size_gib":5}'
 
-# 2) 等 DV UploadReady 后，用返回的 upload_url + token 直传 ISO
-#    curl -k -X POST -H "Authorization: Bearer <upload-token>" \
+# 2) 用返回的 upload_url（应为 http://<node>:30080/api/v1/images/upload-proxy）直传 ISO
+#    curl -X POST -H "Authorization: Bearer <upload-token>" \
 #      --data-binary @ubuntu.iso "<upload_url>"
+#    不要直连 https://<node>:31001（浏览器/客户端会因自签证书失败）
 
 # 3) 轮询至 state=ready，再 CreateInstance：
 #    boot_media.type=iso + boot_media.image_id + root_disk_size_gib

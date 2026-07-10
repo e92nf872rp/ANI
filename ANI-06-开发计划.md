@@ -65,6 +65,7 @@ Sprint 13 production-shaped live gate 摘要：
 - ISO/CDI image upload CDI adapter + Gateway routes：IMAGE-UPLOAD-CDI-A（Task 3）；新增 `CDIImageImportService`/`CDIRESTClient`，`CreateUpload` 创建 DataVolume（`source.upload` + immediate-bind；未传 `storage_class` 时省略 `storageClassName` 走集群 default）与 `UploadTokenRequest`；Gateway `/images*` 只调用 `ports.ImageImportService`；`IMAGE_IMPORT_PROVIDER=local|cdi_rest`；live 收口见 ISO-CDI-LIVE-HARDENING-A。
 - ISO/CDI VM boot_media=iso：VM-ISO-BOOT-A（Task 4）；`boot_media=iso` 时空白系统盘经 `dataVolumeTemplates`（`source.blank`），未传 SC 省略字段；CD-ROM 引用 Ready Image；不产出 `containerDisk`；`boot_media.type=disk_image` 保持 `ErrUnsupported`；live 收口见 ISO-CDI-LIVE-HARDENING-A。
 - ISO/CDI live hardening：ISO-CDI-LIVE-HARDENING-A；Gateway CDI RBAC；ISO 上传/空白盘强制 Filesystem+RWO；去掉应用层写死 `ani-rbd-ssd`；isolated 增加 StorageProfile 与 deploy 注入 `CDI_UPLOADPROXY_URL`；前端对接提示词见 `repo/development-records/frontend-prompt-images-iso-upload.md`；不标 production ready。
+- ISO upload proxy + VNC auth：IMAGE-UPLOAD-PROXY-VNC-AUTH-A；浏览器直连 CDI NodePort 因自签证书失败，改为 Gateway `/api/v1/images/upload-proxy` 流式转发；noVNC `connect_url` 因 Auth 未放行 `/console/{session}` 返回 401，已与 exec 同源放行 query-token WS；不标 production ready。
 
 Sprint 14 Core resilience 分支完成状态：
 - 分支：`feature/sprint14-core-resilience-semantics`。

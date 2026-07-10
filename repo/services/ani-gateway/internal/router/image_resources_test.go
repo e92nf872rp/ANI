@@ -90,9 +90,13 @@ func TestImageAPIUsesInjectedService(t *testing.T) {
 type fakeImageImportService struct {
 	getCalled bool
 	record    ports.ImageRecord
+	session   ports.ImageUploadSession
 }
 
 func (s *fakeImageImportService) CreateUpload(context.Context, ports.ImageUploadCreateRequest) (ports.ImageUploadSession, error) {
+	if s.session.Token != "" || s.session.UploadURL != "" {
+		return s.session, nil
+	}
 	return ports.ImageUploadSession{}, ports.ErrUnsupported
 }
 

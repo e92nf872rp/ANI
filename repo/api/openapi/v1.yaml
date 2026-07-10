@@ -747,7 +747,10 @@ components:
         upload_url:
           type: string
           format: uri
-          description: "浏览器/脚本可直达的上传端点（通常为 CDI upload proxy 的平台暴露地址）。"
+          description: |
+            浏览器/脚本可直达的上传端点。isolated/dev 下 Gateway 返回
+            `/api/v1/images/upload-proxy`（同源 HTTP，由 Gateway 流式转发到 CDI
+            uploadproxy），避免浏览器直连 NodePort 自签证书失败。
         token:
           type: string
           description: "短期上传票据；放入 Authorization: Bearer <token> 或实现约定的 header/query。"
@@ -4551,6 +4554,39 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "409": { $ref: '#/components/responses/Conflict' }
+
+  /images/upload-proxy:
+    post:
+      operationId: proxyImageUpload
+      summary: 代理 ISO 文件上传到 CDI uploadproxy
+      description: |
+        浏览器将 ISO 二进制 POST 到此路径；Gateway 流式转发到集群内 CDI uploadproxy。
+        鉴权使用创建上传会话返回的短期 upload token（Authorization: Bearer <token>），
+        不要求用户 JWT。此路径用于规避浏览器直连 NodePort 自签证书失败。
+      tags: [Images]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+          application/x-iso9660-image:
+            schema: { type: string, format: binary }
+      responses:
+        "200":
+          description: CDI 接受上传（或按 CDI 返回码透传）
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "502":
+          description: 上游 CDI uploadproxy 不可达
+    options:
+      operationId: proxyImageUploadOptions
+      summary: CORS preflight for image upload proxy
+      tags: [Images]
+      security: []
+      responses:
+        "204":
+          description: CORS preflight OK
 
   /images/{image_id}:
     get:

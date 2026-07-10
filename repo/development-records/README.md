@@ -22,6 +22,7 @@
 | IMAGE-UPLOAD-CDI-A（Task 3） | CDI adapter + Gateway routes：新增 `CDIImageImportService`/`CDIRESTClient`（DataVolume `source.upload` + immediate-bind annotation + UploadTokenRequest；未传 `storage_class` 时省略 `storageClassName` 走集群 default；DV phase → `ImageState`），Gateway `GET/POST/DELETE /images*` 路由只调用 `ports.ImageImportService`，`image_import_runtime.go` 支持 `IMAGE_IMPORT_PROVIDER=local\|cdi_rest`；`business-stack.yaml` 增加 Gateway env；SDK 重生成含 Images 操作；后续 live 修复见 `ISO-CDI-LIVE-HARDENING-A` | image-upload-cdi-a.md |
 | VM-ISO-BOOT-A | CreateInstance `boot_media=iso`：空白系统盘经 `dataVolumeTemplates`（`source.blank`）；未传附件 StorageClass 时省略字段走集群 default；CD-ROM 引用 Ready Image；不产出 `containerDisk`；后续 live 修复见 `ISO-CDI-LIVE-HARDENING-A` | vm-iso-boot-a.md |
 | ISO-CDI-LIVE-HARDENING-A | Live 冒烟收口：Gateway CDI RBAC；ISO/空白盘强制 Filesystem+RWO；去掉应用层写死 `ani-rbd-ssd`；isolated 增加 StorageProfile + deploy 注入 `CDI_UPLOADPROXY_URL`；附前端对接提示词 | iso-cdi-live-hardening-a.md |
+| IMAGE-UPLOAD-PROXY-VNC-AUTH-A | 浏览器上传/VNC 可达性：`upload_url` 改写为 Gateway `/images/upload-proxy` 流式转发 CDI；Auth 放行 `/instances/*/console/*` query-token WS（修复 noVNC 401）；isolated 注入 `CDI_UPLOADPROXY_INTERNAL_URL` | image-upload-proxy-vnc-auth-a.md |
 
 ### SDK Regression Fixes（2026-06）
 

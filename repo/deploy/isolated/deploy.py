@@ -866,6 +866,7 @@ def deploy_business(cfg: dict[str, str], version: str) -> None:
         f"INSTANCE_CONSOLE_BASE_URL={external_base}:30080",
         f"OBJECT_STORE_PUBLIC_ENDPOINT={external_base}:30900",
         f"CDI_UPLOADPROXY_URL={external_https}:31001",
+        "CDI_UPLOADPROXY_INTERNAL_URL=https://cdi-uploadproxy.cdi.svc:443",
         "IMAGE_IMPORT_PROVIDER=cdi_rest",
     )
 

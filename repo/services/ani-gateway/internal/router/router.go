@@ -18,6 +18,8 @@ type RegisterOptions struct {
 	EncryptionService                     ports.EncryptionService
 	SecretService                         ports.SecretService
 	ImageImportService                    ports.ImageImportService
+	ImageUploadProxyURL                   string
+	ImagePublicBaseURL                    string
 	GPUInventory                          ports.GPUInventory
 	ImageRegistry                         ports.ImageRegistry
 	RegistryPullSecretKubernetesApply     ports.RegistryPullSecretKubernetesApply
@@ -57,7 +59,10 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerK8sClusterResourcesWithService(v1, options.K8sClusterService)
 	registerEncryptionResourcesWithService(v1, options.EncryptionService)
 	registerSecretResourcesWithService(v1, options.SecretService)
-	registerImageResourcesWithService(v1, options.ImageImportService)
+	registerImageResourcesWithService(v1, options.ImageImportService,
+		withImageUploadProxyURL(options.ImageUploadProxyURL),
+		withImagePublicBaseURL(options.ImagePublicBaseURL),
+	)
 
 	svc := h.Group("/api/v1/svc")
 	registerModels(svc)
