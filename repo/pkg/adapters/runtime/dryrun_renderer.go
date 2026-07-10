@@ -621,14 +621,14 @@ func vmISODisks(spec ports.WorkloadSpec) []any {
 		switch attachment.Kind {
 		case ports.StorageAttachmentRootDisk:
 			disks = append(disks, map[string]any{
-				"name": "rootdisk",
-				"disk": map[string]any{"bus": "virtio"},
+				"name":      "rootdisk",
+				"disk":      map[string]any{"bus": "virtio"},
+				"bootOrder": vmISOBootOrder(spec),
 			})
 		case ports.StorageAttachmentCDROM:
 			disks = append(disks, map[string]any{
-				"name":      "iso",
-				"cdrom":     map[string]any{"bus": "sata"},
-				"bootOrder": vmISOBootOrder(spec),
+				"name":  "iso",
+				"cdrom": map[string]any{"bus": "sata"},
 			})
 		default:
 			disks = append(disks, map[string]any{

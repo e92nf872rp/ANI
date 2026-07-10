@@ -128,6 +128,30 @@ func TestRenderVMWithISOBootMediaUsesCdromAndBlankRoot(t *testing.T) {
 
 	vmTemplate, _ := vmSpec["template"].(map[string]any)
 	podSpec, _ := vmTemplate["spec"].(map[string]any)
+	domain, _ := podSpec["domain"].(map[string]any)
+	devices, _ := domain["devices"].(map[string]any)
+	rawDisks, _ := devices["disks"].([]any)
+	var rootDisk map[string]any
+	var isoDisk map[string]any
+	for _, d := range rawDisks {
+		disk, _ := d.(map[string]any)
+		switch disk["name"] {
+		case "rootdisk":
+			rootDisk = disk
+		case "iso":
+			isoDisk = disk
+		}
+	}
+	if rootDisk == nil || isoDisk == nil {
+		t.Fatalf("rootdisk/iso disk entries not found:\n%s", content)
+	}
+	if bootOrder, _ := rootDisk["bootOrder"].(float64); bootOrder != 1 {
+		t.Fatalf("rootdisk bootOrder = %v, want 1:\n%s", rootDisk["bootOrder"], content)
+	}
+	if _, hasBootOrder := isoDisk["bootOrder"]; hasBootOrder {
+		t.Fatalf("iso cdrom must not own bootOrder after install handoff:\n%s", content)
+	}
+
 	rawVolumes, _ := podSpec["volumes"].([]any)
 	var rootVolume map[string]any
 	for _, v := range rawVolumes {
