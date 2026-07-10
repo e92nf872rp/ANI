@@ -30,6 +30,7 @@ the object provided is unrecognized (must be of type VirtualMachine): Object 'Ki
   `PUT /apis/subresources.kubevirt.io/v1/namespaces/{namespace}/virtualmachines/{name}/start`
 - 请求体改为 KubeVirt subresource options object：
   `{"apiVersion":"subresources.kubevirt.io/v1","kind":"StopOptions"}` / `StartOptions`。
+- 请求头对 VM lifecycle subresource 使用 `Accept: */*`，避免 KubeVirt stop/start handler 对 `Accept: application/json` 返回 `406 Not Acceptable`。
 - Deployment/Job lifecycle 仍保持 scale subresource 行为不变。
 
 ## 验证
@@ -37,6 +38,7 @@ the object provided is unrecognized (must be of type VirtualMachine): Object 'Ki
 ```bash
 cd /root/kubercon/ANI/repo
 GOCACHE=/tmp/ani-go-cache go test ./pkg/adapters/runtime -run 'TestKubernetesLifecycleExecutor' -count=1
+GOCACHE=/tmp/ani-go-cache go test ./pkg/adapters/runtime -run TestKubernetesLifecycleExecutorUsesKubeVirtVMStartStopSubresources -count=1
 GOCACHE=/tmp/ani-go-cache go test ./pkg/adapters/runtime -count=1
 python3 scripts/validate_component_imports.py --root .
 python3 scripts/validate_doc_entrypoints.py

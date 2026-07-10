@@ -87,8 +87,10 @@ func TestKubernetesLifecycleExecutorDeleteRemovesSecretAndDeployment(t *testing.
 func TestKubernetesLifecycleExecutorUsesKubeVirtVMStartStopSubresources(t *testing.T) {
 	var requests []string
 	var bodies []string
+	var accepts []string
 	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
+		accepts = append(accepts, r.Header.Get("Accept"))
 		body, _ := io.ReadAll(r.Body)
 		bodies = append(bodies, string(body))
 		return lifecycleResponse(), nil
@@ -116,6 +118,11 @@ func TestKubernetesLifecycleExecutorUsesKubeVirtVMStartStopSubresources(t *testi
 	for _, body := range bodies {
 		if body == "{}" || !strings.Contains(body, `"apiVersion":"subresources.kubevirt.io/v1"`) {
 			t.Fatalf("body = %s, want KubeVirt subresource options object", body)
+		}
+	}
+	for _, accept := range accepts {
+		if accept != "*/*" {
+			t.Fatalf("Accept = %q, want */* for KubeVirt VM lifecycle subresources", accept)
 		}
 	}
 }
