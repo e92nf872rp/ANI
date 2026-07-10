@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -83,6 +84,75 @@ func TestKubernetesLifecycleExecutorDeleteRemovesSecretAndDeployment(t *testing.
 	}
 }
 
+func TestKubernetesLifecycleExecutorDetachesVMCDROM(t *testing.T) {
+	var requests []string
+	var patchBody string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		if r.Method == http.MethodGet {
+			return jsonResponse(http.StatusOK, `{
+				"spec": {
+					"template": {
+						"spec": {
+							"domain": {
+								"devices": {
+									"disks": [
+										{"name": "rootdisk", "disk": {"bus": "virtio"}},
+										{"name": "iso", "cdrom": {"bus": "sata"}, "bootOrder": 1}
+									]
+								}
+							},
+							"volumes": [
+								{"name": "rootdisk", "dataVolume": {"name": "vm-iso-01-root"}},
+								{"name": "iso", "persistentVolumeClaim": {"claimName": "img-abc123"}}
+							]
+						}
+					}
+				}
+			}`), nil
+		}
+		body, _ := io.ReadAll(r.Body)
+		patchBody = string(body)
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-iso-01"}
+
+	request := lifecycleRequest(ports.WorkloadLifecycleDetachVolume)
+	request.VolumeID = "iso"
+	result, err := executor.Apply(context.Background(), request, record)
+	if err != nil {
+		t.Fatalf("DetachVolume Apply() error = %v", err)
+	}
+	if !result.Accepted {
+		t.Fatalf("Accepted = false, reason = %s", result.Reason)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("requests = %#v, want GET then PATCH", requests)
+	}
+	for _, request := range requests {
+		if !strings.Contains(request, "/apis/kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-iso-01") {
+			t.Fatalf("request = %q, want KubeVirt VM path", request)
+		}
+	}
+	if !strings.HasPrefix(requests[0], "GET ") || !strings.HasPrefix(requests[1], "PATCH ") {
+		t.Fatalf("requests = %#v, want GET then PATCH", requests)
+	}
+	var patch map[string]any
+	if err := json.Unmarshal([]byte(patchBody), &patch); err != nil {
+		t.Fatalf("patch body is not JSON: %v\n%s", err, patchBody)
+	}
+	disks := nestedList(t, patch, "spec", "template", "spec", "domain", "devices", "disks")
+	volumes := nestedList(t, patch, "spec", "template", "spec", "volumes")
+	if hasNamedEntry(disks, "iso") || hasNamedEntry(volumes, "iso") {
+		t.Fatalf("patch body still contains iso disk/volume: %s", patchBody)
+	}
+	if !hasNamedEntry(disks, "rootdisk") || !hasNamedEntry(volumes, "rootdisk") {
+		t.Fatalf("patch body = %s, want rootdisk disk/volume preserved", patchBody)
+	}
+}
+
 func TestKubernetesLifecycleExecutorDisabledDoesNotCallProvider(t *testing.T) {
 	called := false
 	client := newLifecycleRESTClient(t, func(r *http.Request) (*http.Response, error) {
@@ -154,4 +224,31 @@ func lifecycleResponse() *http.Response {
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Body:       io.NopCloser(strings.NewReader(`{}`)),
 	}
+}
+
+func nestedList(t *testing.T, doc map[string]any, path ...string) []any {
+	t.Helper()
+	var current any = doc
+	for _, key := range path {
+		next, ok := current.(map[string]any)[key]
+		if !ok {
+			t.Fatalf("missing path %v in %#v", path, doc)
+		}
+		current = next
+	}
+	list, ok := current.([]any)
+	if !ok {
+		t.Fatalf("path %v = %#v, want list", path, current)
+	}
+	return list
+}
+
+func hasNamedEntry(items []any, name string) bool {
+	for _, item := range items {
+		entry, _ := item.(map[string]any)
+		if entry["name"] == name {
+			return true
+		}
+	}
+	return false
 }

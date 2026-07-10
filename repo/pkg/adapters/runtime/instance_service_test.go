@@ -678,6 +678,53 @@ func TestLocalInstanceServiceVMVolumeBindingLocalProfile(t *testing.T) {
 	}
 }
 
+func TestLocalInstanceServiceVMCDROMDetachCallsProviderLifecycle(t *testing.T) {
+	store := &fakeInstanceStore{
+		last: ports.WorkloadInstanceRecord{
+			TenantID:     "tenant-a",
+			InstanceID:   "vm-a",
+			Name:         "vm-iso-01",
+			Kind:         ports.WorkloadKindVM,
+			Provider:     "kubevirt",
+			ResourceRefs: []string{"kubevirt/VirtualMachine/vm-iso-01"},
+			Status: ports.WorkloadStatus{
+				State: ports.WorkloadStateRunning,
+				Storage: []ports.WorkloadStorageAttachment{
+					{Name: "rootdisk", Kind: ports.StorageAttachmentRootDisk, SourceRef: "vm-iso-01-root", SizeGiB: 40},
+					{Name: "iso", Kind: ports.StorageAttachmentCDROM, SourceRef: "img-abc123", Required: true},
+				},
+			},
+		},
+	}
+	lifecycle := &fakeLifecycleExecutor{}
+	service := NewLocalInstanceServiceWithOptions(
+		&fakeInstanceOrchestrator{},
+		store,
+		NewLocalInstanceOpsGuard(),
+		WithOperationStore(NewLocalOperationStore()),
+		WithInstanceLifecycleExecutor(lifecycle),
+	)
+
+	record, err := service.DetachVolume(context.Background(), ports.WorkloadInstanceLifecycleRequest{
+		IdempotencyKey:  "detach-iso-a",
+		TenantID:        "tenant-a",
+		InstanceID:      "vm-a",
+		VolumeID:        "iso",
+		UserID:          "user-a",
+		PermissionProof: "rbac:update:workload",
+		RequestedAt:     time.Unix(1700, 0),
+	})
+	if err != nil {
+		t.Fatalf("DetachVolume() error = %v", err)
+	}
+	if lifecycle.calls != 1 || lifecycle.action != ports.WorkloadLifecycleDetachVolume {
+		t.Fatalf("lifecycle calls=%d action=%s, want one detach_volume provider call", lifecycle.calls, lifecycle.action)
+	}
+	if len(record.Status.Storage) != 1 || record.Status.Storage[0].Kind != ports.StorageAttachmentRootDisk {
+		t.Fatalf("storage after detach = %#v, want root disk only", record.Status.Storage)
+	}
+}
+
 func TestLocalInstanceServiceContainerRollbackLocalProfile(t *testing.T) {
 	store := &fakeInstanceStore{
 		last: ports.WorkloadInstanceRecord{

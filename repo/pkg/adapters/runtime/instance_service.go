@@ -533,7 +533,7 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 	if !precheck.allowed {
 		return ports.WorkloadInstanceRecord{}, fmt.Errorf("%w: %s", ports.ErrConflict, precheck.message)
 	}
-	if s.lifecycle != nil && usesProviderLifecycle(request.Action) {
+	if s.lifecycle != nil && usesProviderLifecycleForRecord(request.Action, record, request) {
 		result, err := s.lifecycle.Apply(ctx, request, record)
 		if err != nil {
 			if opID != "" {
@@ -873,6 +873,13 @@ func usesProviderLifecycle(action ports.WorkloadLifecycleAction) bool {
 	}
 }
 
+func usesProviderLifecycleForRecord(action ports.WorkloadLifecycleAction, record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceLifecycleRequest) bool {
+	if action == ports.WorkloadLifecycleDetachVolume {
+		return record.Kind == ports.WorkloadKindVM && volumeKind(record.Status.Storage, request.VolumeID) == ports.StorageAttachmentCDROM
+	}
+	return usesProviderLifecycle(action)
+}
+
 func lifecycleApplyStepName(action ports.WorkloadLifecycleAction) string {
 	if action == ports.WorkloadLifecycleSnapshot {
 		return "create_snapshot"
@@ -1007,6 +1014,15 @@ func isRootVolume(storage []ports.WorkloadStorageAttachment, volumeID string) bo
 		}
 	}
 	return false
+}
+
+func volumeKind(storage []ports.WorkloadStorageAttachment, volumeID string) ports.StorageAttachmentKind {
+	for _, attachment := range storage {
+		if sameVolume(attachment, volumeID) {
+			return attachment.Kind
+		}
+	}
+	return ""
 }
 
 func sameVolume(attachment ports.WorkloadStorageAttachment, volumeID string) bool {

@@ -66,6 +66,7 @@ Sprint 13 production-shaped live gate 摘要：
 - ISO/CDI VM boot_media=iso：VM-ISO-BOOT-A（Task 4）；`boot_media=iso` 时空白系统盘经 `dataVolumeTemplates`（`source.blank`），未传 SC 省略字段；CD-ROM 引用 Ready Image；不产出 `containerDisk`；`boot_media.type=disk_image` 保持 `ErrUnsupported`；live 收口见 ISO-CDI-LIVE-HARDENING-A。
 - ISO/CDI live hardening：ISO-CDI-LIVE-HARDENING-A；Gateway CDI RBAC；ISO 上传/空白盘强制 Filesystem+RWO；去掉应用层写死 `ani-rbd-ssd`；isolated 增加 StorageProfile 与 deploy 注入 `CDI_UPLOADPROXY_URL`；前端对接提示词见 `repo/development-records/frontend-prompt-images-iso-upload.md`；不标 production ready。
 - ISO upload proxy + VNC auth：IMAGE-UPLOAD-PROXY-VNC-AUTH-A；浏览器直连 CDI NodePort 因自签证书失败，改为 Gateway `/api/v1/images/upload-proxy` 流式转发；noVNC `connect_url` 因 Auth 未放行 `/console/{session}` 返回 401，已与 exec 同源放行 query-token WS；不标 production ready。
+- ISO VM CD-ROM detach：ISO-CDI-VM-CDROM-DETACH-A；安装完成后若不移除 `bootOrder=1` 的 ISO CD-ROM，VM 重启会再次进入安装引导；`detach_volume volume_id=iso` 现在会在 VM `cdrom` 场景调用 Kubernetes lifecycle provider，GET KubeVirt VM 后 merge-patch 删除 `iso` disk/volume，使后续重启进入 root disk；local/logic verified，live 待验证，不标 production ready。
 
 Sprint 14 Core resilience 分支完成状态：
 - 分支：`feature/sprint14-core-resilience-semantics`。

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -60,7 +61,7 @@ func (e *KubernetesLifecycleExecutor) Apply(ctx context.Context, request ports.W
 	if err != nil {
 		return ports.WorkloadInstanceLifecycleResult{}, err
 	}
-	if err := e.execute(ctx, request.Action, resource, record); err != nil {
+	if err := e.execute(ctx, request, resource, record); err != nil {
 		return ports.WorkloadInstanceLifecycleResult{}, err
 	}
 	return ports.WorkloadInstanceLifecycleResult{
@@ -71,8 +72,8 @@ func (e *KubernetesLifecycleExecutor) Apply(ctx context.Context, request ports.W
 	}, nil
 }
 
-func (e *KubernetesLifecycleExecutor) execute(ctx context.Context, action ports.WorkloadLifecycleAction, resource kubernetesResource, record ports.WorkloadInstanceRecord) error {
-	switch action {
+func (e *KubernetesLifecycleExecutor) execute(ctx context.Context, request ports.WorkloadInstanceLifecycleRequest, resource kubernetesResource, record ports.WorkloadInstanceRecord) error {
+	switch request.Action {
 	case ports.WorkloadLifecycleStart:
 		return e.start(ctx, resource)
 	case ports.WorkloadLifecycleStop:
@@ -81,6 +82,8 @@ func (e *KubernetesLifecycleExecutor) execute(ctx context.Context, action ports.
 		return e.restart(ctx, resource)
 	case ports.WorkloadLifecycleResize:
 		return e.restart(ctx, resource)
+	case ports.WorkloadLifecycleDetachVolume:
+		return e.detachVolume(ctx, resource, request.VolumeID)
 	case ports.WorkloadLifecycleDelete:
 		for _, ref := range providerResourceRefsForLifecycleDelete(record.ResourceRefs) {
 			resource, err := resourceFromRecordRef(record, ref)
@@ -93,7 +96,7 @@ func (e *KubernetesLifecycleExecutor) execute(ctx context.Context, action ports.
 		}
 		return nil
 	default:
-		return fmt.Errorf("%w: unsupported Kubernetes lifecycle action %q", ports.ErrUnsupported, action)
+		return fmt.Errorf("%w: unsupported Kubernetes lifecycle action %q", ports.ErrUnsupported, request.Action)
 	}
 }
 
@@ -125,11 +128,88 @@ func (e *KubernetesLifecycleExecutor) restart(ctx context.Context, resource kube
 	return err
 }
 
+func (e *KubernetesLifecycleExecutor) detachVolume(ctx context.Context, resource kubernetesResource, volumeID string) error {
+	volumeID = strings.TrimSpace(volumeID)
+	if resource.Kind != "VirtualMachine" {
+		return fmt.Errorf("%w: detach_volume provider lifecycle is only supported for KubeVirt VirtualMachine", ports.ErrUnsupported)
+	}
+	if volumeID == "" {
+		return fmt.Errorf("%w: volumeID is required for provider detach_volume", ports.ErrInvalid)
+	}
+	data, err := e.client.do(ctx, http.MethodGet, e.client.resourceURL(resource, ""), "", nil)
+	if err != nil {
+		return err
+	}
+	var vm map[string]any
+	if err := json.Unmarshal(data, &vm); err != nil {
+		return fmt.Errorf("%w: decode KubeVirt VM for detach_volume: %v", ports.ErrInvalid, err)
+	}
+	disks, err := kubeVirtVMList(vm, []string{"spec", "template", "spec", "domain", "devices", "disks"})
+	if err != nil {
+		return err
+	}
+	volumes, err := kubeVirtVMList(vm, []string{"spec", "template", "spec", "volumes"})
+	if err != nil {
+		return err
+	}
+	nextDisks := removeNamedKubernetesEntries(disks, volumeID)
+	nextVolumes := removeNamedKubernetesEntries(volumes, volumeID)
+	if len(nextDisks) == len(disks) && len(nextVolumes) == len(volumes) {
+		return fmt.Errorf("%w: volume %q is not attached to KubeVirt VM", ports.ErrConflict, volumeID)
+	}
+	patch := map[string]any{
+		"spec": map[string]any{
+			"template": map[string]any{
+				"spec": map[string]any{
+					"domain": map[string]any{
+						"devices": map[string]any{"disks": nextDisks},
+					},
+					"volumes": nextVolumes,
+				},
+			},
+		},
+	}
+	body, err := json.Marshal(patch)
+	if err != nil {
+		return err
+	}
+	_, err = e.client.do(ctx, http.MethodPatch, e.client.resourceURL(resource, ""), "application/merge-patch+json", body)
+	return err
+}
+
 func (e *KubernetesLifecycleExecutor) patchScale(ctx context.Context, resource kubernetesResource, replicas int) error {
 	endpoint := e.client.host + resource.resourcePath() + "/scale"
 	body := fmt.Sprintf(`{"spec":{"replicas":%d}}`, replicas)
 	_, err := e.client.do(ctx, http.MethodPatch, endpoint, "application/merge-patch+json", []byte(body))
 	return err
+}
+
+func kubeVirtVMList(doc map[string]any, path []string) ([]any, error) {
+	var current any = doc
+	for _, key := range path {
+		object, ok := current.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("%w: KubeVirt VM field %q is not an object", ports.ErrInvalid, key)
+		}
+		current = object[key]
+	}
+	list, ok := current.([]any)
+	if !ok {
+		return nil, fmt.Errorf("%w: KubeVirt VM list field %s is missing", ports.ErrInvalid, strings.Join(path, "."))
+	}
+	return list, nil
+}
+
+func removeNamedKubernetesEntries(items []any, name string) []any {
+	next := make([]any, 0, len(items))
+	for _, item := range items {
+		entry, _ := item.(map[string]any)
+		if entry["name"] == name {
+			continue
+		}
+		next = append(next, item)
+	}
+	return next
 }
 
 func validateLifecycleExecutionRequest(request ports.WorkloadInstanceLifecycleRequest, record ports.WorkloadInstanceRecord) error {

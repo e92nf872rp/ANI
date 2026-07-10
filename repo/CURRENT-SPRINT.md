@@ -96,6 +96,7 @@
 | ISO/CDI VM boot_media=iso | KubeVirt VM CD-ROM boot + 空白系统盘（2026-07-09） | `pkg/ports/workload_runtime.go` / `pkg/adapters/runtime/dryrun_renderer.go` / `pkg/adapters/runtime/planning.go` / `services/ani-gateway/internal/router/demo_instances.go` | **local/logic verified + live 冒烟修复中**（`VM-ISO-BOOT-A`；空白盘 `dataVolumeTemplates`/`source.blank`；未传 SC 省略字段；live 收口见下一行） |
 | ISO/CDI live hardening | Live 冒烟问题收口（2026-07-09） | `cdi_image_import.go` / `dryrun_renderer.go` / `business-stack.yaml` / `deploy.py` / `09-cdi-storageprofile-filesystem.yaml` | **local verified + isolated 可复跑**（`ISO-CDI-LIVE-HARDENING-A`；Gateway CDI RBAC；ISO/空白盘强制 Filesystem+RWO；去掉应用层写死 `ani-rbd-ssd`；deploy 注入 `CDI_UPLOADPROXY_URL`；前端提示词见 `frontend-prompt-images-iso-upload.md`；不标 production ready） |
 | ISO upload proxy + VNC auth | 浏览器上传/VNC 可达性（2026-07-10） | `image_upload_proxy.go` / `middleware/auth.go` / `business-stack.yaml` | **local verified + 待 redeploy 验证**（`IMAGE-UPLOAD-PROXY-VNC-AUTH-A`；`upload_url`→Gateway `/images/upload-proxy`；console WS public path 修复 401；不标 production ready） |
+| ISO VM CD-ROM detach | 安装后从 ISO 引导切回系统盘（2026-07-10） | `instance_service.go` / `kubernetes_lifecycle_executor.go` | **local/logic verified + live 待验证**（`ISO-CDI-VM-CDROM-DETACH-A`；VM `cdrom` 的 `detach_volume` 会调用 Kubernetes lifecycle provider，GET KubeVirt VM 后 merge-patch 删除 `iso` disk/volume；用于安装完成后重启进入 root disk；不标 production ready） |
 
 ## Sprint 12 已完成切片
 
