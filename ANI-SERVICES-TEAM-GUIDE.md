@@ -401,6 +401,8 @@ git push origin feature/model-service-crud
 
 - PR 描述需说明：改了什么、影响哪些 API 接口、如何本地验证
 - 修改了 `services/v1.yaml` 的 PR，必须同时提交更新后的 Console 前端 API 类型生成结果
+- 所有 Services POST/PUT/PATCH 的 request schema 必须要求 `idempotency_key`；异步 `202` 必须返回 `AsyncTask`，操作必须声明认证要求。当前已存在的逐操作缺口只可按 `repo/architecture/services-contract-baseline.yaml` 精确登记并接受 warning，新增缺口或 stale 基线不能合并。
+- Services SDK 与静态 API docs 必须从 OpenAPI source 重新生成；`make validate-services` 会检查 `repo/sdks/core/`、`repo/sdks/services/`、`repo/docs/api/` 无生成漂移。
 - Services PR 的最短必跑命令：
 
 ```bash

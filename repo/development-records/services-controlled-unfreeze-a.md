@@ -33,7 +33,7 @@ Services 受控解冻后的 PR 顺序：
 1. API-first：先改 `repo/api/openapi/services/v1.yaml`；如触碰 Core 能力，先经 Core API 评审。
 2. 实现：再改 Services handler、业务服务、前端和生成物。
 3. 生成物：Services SDK、API docs 和前端 schema 必须由 OpenAPI 生成，不手工编辑。
-4. 边界：运行 `make validate-services`，它聚合 API split、Services boundary gate、Services OpenAPI YAML、SDK、model-service、RAG、Console schema drift 和现有 architecture gate。
+4. 边界与语义：运行 `make validate-services`，它聚合 API split、Services boundary gate、Services OpenAPI YAML、Services 语义合同、源驱动 SDK/API docs、SDK、model-service、RAG、Console schema drift 和现有 architecture gate。
 5. 共同审查：触碰 Core API/OpenAPI、Core 保护目录、Gateway shared/mixed handler、Services API 或生成物时按 CODEOWNERS review，并在 PR 描述中列出触碰原因。
 
 Services PR 最短必跑命令：
@@ -44,6 +44,14 @@ make validate-services
 make validate-doc-entrypoints
 git diff --check
 ```
+
+Services OpenAPI 语义门禁使用 `repo/architecture/services-contract-baseline.yaml` 登记精确的当前缺口：
+
+- `uploadKnowledgeBaseDocument` 当前 multipart request 未要求 `idempotency_key`；
+- 当前 Services spec 的操作没有 top-level/operation-level `security`，但保留了 `BearerAuth` 与 `ApiKeyAuth` scheme；
+- 当前若干 `202` 操作仍返回资源或没有 response schema，而不是 `AsyncTask`。
+
+这些条目只作为逐操作、warning-only 的 accepted baseline；新增缺口和失效基线均阻断 PR。`make validate-services` 还会重新运行 `gen_sdk_alpha.py` 与 `generate_api_docs.py`，并拒绝 `sdks/core/`、`sdks/services/`、`docs/api/` 生成物漂移。以上门禁通过不代表 Services 已 production-ready。
 
 ## 已知基线例外
 
@@ -67,10 +75,16 @@ git diff --check
 ## 后续聚合门禁与 final-review fix wave A（2026-07-14）
 
 - 历史验证保留：Task 5 中直接执行 `go test ./services/model-service/...` 时，依赖下载 `golang.org/x/net`、`golang.org/x/sys`、`golang.org/x/sync` 从 `proxy.golang.org` 超时；已做一次 require_escalated 重跑且结果相同。该 blocker 作为当时网络依赖下载环境问题保留，不改写为通过。
-- 后续聚合通过项已追加到本分支记录：Console `npm ci`、`npm run lint`、`npm run type-check`、`npm run build`，`make validate-doc-entrypoints`，`make validate-services`，`make lint-ts` 和 `git diff --check` 均已在后续 Task 6/fix 报告中记录为通过；`make validate-services` 仍输出三条 accepted baseline warning，属于本记录列明的精确存量例外。
+- 后续聚合通过项已追加到本分支记录：Console `npm ci`、`npm run lint`、`npm run type-check`、`npm run build`，`make validate-doc-entrypoints`，`make validate-services`，`make lint-ts` 和 `git diff --check` 均已在后续 Task 6/fix 报告中记录为通过；`make validate-services` 同时输出三条 boundary accepted baseline warning 与当前 Services OpenAPI 语义缺口的逐操作 accepted baseline warning，均属于本记录列明的精确存量例外。
 - final-review fix wave A 修正了 GitHub workflow discoverability：`repo/.github/workflows/ci.yml` 已移到 `.github/workflows/ci.yml`；各 job 的 `run` 步骤从 `repo/` 执行，Go/Python/Node cache dependency path 与 OpenAPI action file path 均指向 checkout root 下的 `repo/...`。
 - final-review fix wave A 加固了 Services boundary validator：立即分类 `repo/services/*`，未知 service root fail closed；docs-only roots 出现源文件 fail closed；Go import 扫描保持在 Services-owned source roots；AI provider SDK 扫描扩大到 `repo/ai/**/*.py`；现有 `pymilvus` 只保留 `ai/rag-engine/app/core/milvus.py` 精确 baseline。
 - final-review fix wave A 只修正当前入口中的歧义措辞：Core-only 表述限定为 Core 保护范围，Services 业务可继续在主责目录走受控 PR；历史冻结记录和旧 token 未批量改写。
+
+## final-review fix wave B（2026-07-14）
+
+- 新增 `repo/scripts/validate_services_contract.py` 及 fixture tests，对 Services 每个 operation 的写入幂等、安全声明和 `202`/`AsyncTask` 语义 fail closed；现状只有精确 baseline 才能 warning-only，新增或 stale 条目阻断。
+- 新增 `repo/architecture/services-contract-baseline.yaml`，逐 operation 记录当前真实缺口；未借此声称实现层或契约层已经 production-ready。
+- `make validate-services` 现在重新生成 SDK/API docs 并检查 Core/Services SDK 与 API docs 无生成漂移，避免只验证 Console schema 而漏掉 Services SDK/docs。
 
 ## 非目标
 
@@ -79,7 +93,7 @@ git diff --check
 - CODEOWNERS、CI、Makefile 和 Console gate 已纳入本分支；本 final-review fix wave 只修正 CI 发现路径/checkout-root 语义、Services boundary fail-closed 范围和当前入口措辞。
 - 不把 local/mock/contract 验证升级为 real-provider、runtime-ready 或 production-ready。
 - 不修复上述三项 baseline violation；本批次只把它们诚实记录到当前治理入口。
-- 不实现 semantic API validator，不做 SDK/doc generation 语义扩展；这些保留到后续独立 wave。
+- 不修复本 wave 登记的 Services API 语义缺口；本 wave 只把它们精确纳入 warning-only baseline，并阻断未来新增缺口。
 
 ## 验证命令
 
