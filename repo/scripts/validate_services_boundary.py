@@ -19,9 +19,10 @@ import validate_spec_split_contract as spec_split
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 BASELINE_STATUS = "accepted_baseline"
 GO_IMPORT_RE = re.compile(r'"([^"]+)"')
-GO_SCAN_ROOTS = ("services/model-service",)
+GO_SCAN_ROOTS = ("services/model-service", "services/kb-service")
 PYTHON_SCAN_ROOTS = ("ai/rag-engine/app",)
 GATEWAY_ROOT = "services/ani-gateway"
+SERVICE_IMPORT_PREFIX = "github.com/kubercloud/ani/services/"
 FORBIDDEN_GO_PREFIXES = (
     "github.com/kubercloud/ani/pkg/ports",
     "github.com/kubercloud/ani/pkg/adapters",
@@ -175,6 +176,23 @@ def iter_source_files(root: pathlib.Path, relative_root: str, suffix: str) -> It
     return sorted(path for path in target_root.rglob(f"*{suffix}") if path.is_file())
 
 
+def service_name_for_path(path: pathlib.Path, root: pathlib.Path) -> str | None:
+    rel_parts = normalize_path(path, root).split("/")
+    if len(rel_parts) < 2 or rel_parts[0] != "services":
+        return None
+    return rel_parts[1]
+
+
+def imported_service_internal_name(import_path: str) -> str | None:
+    if not import_path.startswith(SERVICE_IMPORT_PREFIX):
+        return None
+    remainder = import_path[len(SERVICE_IMPORT_PREFIX) :]
+    service_name, separator, internal_path = remainder.partition("/internal/")
+    if not separator or not service_name or not internal_path:
+        return None
+    return service_name
+
+
 def detect_go_findings(root: pathlib.Path) -> list[Finding]:
     findings: list[Finding] = []
     for relative_root in GO_SCAN_ROOTS:
@@ -182,6 +200,7 @@ def detect_go_findings(root: pathlib.Path) -> list[Finding]:
             if path.name.endswith("_test.go"):
                 continue
             rel_path = normalize_path(path, root)
+            current_service = service_name_for_path(path, root)
             for import_path in parse_go_imports(path):
                 if import_path.startswith(FORBIDDEN_GO_PREFIXES):
                     findings.append(
@@ -190,6 +209,17 @@ def detect_go_findings(root: pathlib.Path) -> list[Finding]:
                             rule="core_internal_go_import",
                             import_path=import_path,
                             detail="Services 业务代码不得直接导入 Core 内部 pkg 或 Core service internal 包",
+                        )
+                    )
+                    continue
+                imported_service = imported_service_internal_name(import_path)
+                if imported_service and imported_service != current_service:
+                    findings.append(
+                        Finding(
+                            path=rel_path,
+                            rule="cross_service_internal_go_import",
+                            import_path=import_path,
+                            detail="Services 业务模块只能导入自身 service 的 internal 包，不得跨 service 导入别的 /internal/ 实现",
                         )
                     )
     return findings
