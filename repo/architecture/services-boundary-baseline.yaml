@@ -1,0 +1,23 @@
+version: 1
+exceptions:
+  - path: services/model-service/main.go
+    rule: core_internal_go_import
+    import: github.com/kubercloud/ani/pkg/bootstrap
+    status: accepted_baseline
+    owner: ANI Services 外部产品团队
+    reason: model-service 入口仍直接调用 Core `pkg/bootstrap` 的连接与 gRPC 启动装配，属于 Services 冻结前保留的现存 wiring 事实
+    disposition: 受控解冻时迁移为 Services 自有启动与依赖装配；迁移前仅作为精确存量例外告警，不得扩散到新文件
+  - path: services/model-service/internal/config/config.go
+    rule: core_internal_go_import
+    import: github.com/kubercloud/ani/pkg/bootstrap
+    status: accepted_baseline
+    owner: ANI Services 外部产品团队
+    reason: model-service 配置仍直接返回 Core `bootstrap.Config`，属于 Services 冻结前保留的现存类型耦合事实
+    disposition: 受控解冻时迁移为 Services 自有配置类型；迁移前仅作为精确存量例外告警，不得扩散到新文件
+  - path: ai/rag-engine/app/core/milvus.py
+    rule: provider_sdk_python_import
+    import: pymilvus
+    status: accepted_baseline
+    owner: ANI Services 外部产品团队
+    reason: rag-engine 当前仍在业务代码中直接导入 Milvus provider SDK `pymilvus`，属于冻结前保留的现存 provider 直连事实
+    disposition: 保留为精确存量基线并告警；后续如继续演进需先明确保留理由或迁移到受控边界，不得新增未登记 provider 直连

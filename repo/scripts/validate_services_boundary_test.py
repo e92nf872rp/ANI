@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""Tests for Services boundary baseline validation."""
+
+from __future__ import annotations
+
+import tempfile
+import textwrap
+import unittest
+from pathlib import Path
+
+import validate_services_boundary as guard
+
+
+class ServicesBoundaryValidationTest(unittest.TestCase):
+    def test_repo_baseline_is_warn_only(self) -> None:
+        result = guard.validate_workspace(guard.ROOT, run_spec_split=False)
+
+        self.assertEqual(result.error_count, 0)
+        self.assertEqual(result.warning_count, 3)
+
+    def test_unregistered_core_internal_go_import_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_fixture_layout(root)
+            self._write_baseline(
+                root,
+                """
+                version: 1
+                exceptions: []
+                """,
+            )
+            (root / "services" / "model-service").mkdir(parents=True, exist_ok=True)
+            (root / "services" / "model-service" / "main.go").write_text(
+                textwrap.dedent(
+                    """\
+                    package main
+
+                    import "github.com/kubercloud/ani/pkg/bootstrap"
+
+                    func main() {}
+                    """
+                ),
+                encoding="utf-8",
+            )
+
+            result = guard.validate_workspace(root, run_spec_split=False)
+
+        self.assertEqual(result.warning_count, 0)
+        self.assertIn("services/model-service/main.go", "\n".join(result.errors))
+        self.assertIn("github.com/kubercloud/ani/pkg/bootstrap", "\n".join(result.errors))
+
+    def test_unregistered_provider_sdk_import_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_fixture_layout(root)
+            self._write_baseline(
+                root,
+                """
+                version: 1
+                exceptions: []
+                """,
+            )
+            (root / "ai" / "rag-engine" / "app" / "core").mkdir(parents=True, exist_ok=True)
+            (root / "ai" / "rag-engine" / "app" / "core" / "milvus.py").write_text(
+                "from pymilvus import connections\n",
+                encoding="utf-8",
+            )
+
+            result = guard.validate_workspace(root, run_spec_split=False)
+
+        self.assertEqual(result.warning_count, 0)
+        self.assertIn("ai/rag-engine/app/core/milvus.py", "\n".join(result.errors))
+        self.assertIn("pymilvus", "\n".join(result.errors))
+
+    def test_exact_registered_exception_is_warn_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_fixture_layout(root)
+            self._write_baseline(
+                root,
+                """
+                version: 1
+                exceptions:
+                  - path: services/model-service/main.go
+                    rule: core_internal_go_import
+                    import: github.com/kubercloud/ani/pkg/bootstrap
+                    status: accepted_baseline
+                    owner: ANI Services 外部产品团队
+                    reason: 保留冻结前 wiring 事实
+                    disposition: 受控解冻时迁移为 Services 自有启动装配
+                """,
+            )
+            (root / "services" / "model-service").mkdir(parents=True, exist_ok=True)
+            (root / "services" / "model-service" / "main.go").write_text(
+                textwrap.dedent(
+                    """\
+                    package main
+
+                    import "github.com/kubercloud/ani/pkg/bootstrap"
+
+                    func main() {}
+                    """
+                ),
+                encoding="utf-8",
+            )
+
+            result = guard.validate_workspace(root, run_spec_split=False)
+
+        self.assertEqual(result.error_count, 0)
+        self.assertEqual(result.warning_count, 1)
+        self.assertIn("accepted baseline", result.warnings[0])
+
+    def test_directory_wildcard_and_reasonless_exceptions_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_fixture_layout(root)
+            self._write_baseline(
+                root,
+                """
+                version: 1
+                exceptions:
+                  - path: services/model-service/*.go
+                    rule: core_internal_go_import
+                    import: github.com/kubercloud/ani/pkg/bootstrap
+                    status: accepted_baseline
+                    owner: ANI Services 外部产品团队
+                    reason: ""
+                    disposition: 受控解冻时迁移为 Services 自有启动装配
+                """,
+            )
+
+            with self.assertRaises(ValueError) as raised:
+                guard.load_baseline(root / "architecture" / "services-boundary-baseline.yaml", root)
+
+        self.assertIn("exact file path", str(raised.exception))
+
+    @staticmethod
+    def _write_fixture_layout(root: Path) -> None:
+        (root / "architecture").mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _write_baseline(root: Path, contents: str) -> None:
+        (root / "architecture" / "services-boundary-baseline.yaml").write_text(
+            textwrap.dedent(contents).strip() + "\n",
+            encoding="utf-8",
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
