@@ -80,7 +80,9 @@ ANI Core Phase 1 的交付对象分为两类：
 - dev/mock profile 必须与真实 API schema、状态机、错误码、RBAC scope 保持一致；release profile 禁止静态假成功。
 - AI 不得擅自提升成熟度标签。`contract → local-profile → real-provider → real-path → production` 的每次提升都必须有验收命令和 development record。
 - 2026-06-10 后，Services P0 依赖的 Core API 禁止删除字段、改路径、改状态机、改错误码或改变字段语义；新增可选字段允许，但必须保持 SDK 兼容。
-- 2026-06-15 至 2026-06-20，ANI Services 必须输出完整前端功能、Services 功能和接口定义；该定义评审通过后，旧 `model-service`、空 `kb-service`、RAG 原型、推理 operator 骨架和前端单 API Client 中与新定义冲突的部分必须删除或覆盖。
+- ANI Services 当前进入受控并行 PR 阶段：Services 主责目录可以按 API-first 开发；触碰 Core 保护目录、Gateway mixed handler、Services API 或生成物时必须按 CODEOWNERS 共同审查。旧 `model-service`、空 `kb-service`、RAG 原型、推理 operator 骨架和前端单 API Client 如与新定义冲突，必须通过评审后的 Services API/实现迁移，不得由 Core 基于猜测删除或覆盖。
+- Services 业务实现必须保持目录归属和跨层边界：Services 业务资源只进入 `repo/api/openapi/services/v1.yaml`，不得回流 Core API；新增实现不得 import Core `pkg/ports`、`pkg/adapters`、`pkg/bootstrap` 或 Core service `internal` 包；不得直接拼装底层 provider 对象。
+- Services 写入接口必须遵守幂等、租户、RBAC、审计和异步语义：有副作用的 POST/PUT/PATCH 支持 `idempotency_key`，租户身份来自 auth context，RBAC scope 与 audit event 随 API 契约/handler 同步，长任务返回 AsyncTask 或等价状态机，不用同步假成功代替。
 - 任何 breaking API change 必须在提交说明和 development record 中列出受影响的 Services 场景、迁移方式和批准人。
 
 ### 0.6 前端 Core API Client / Services API Client 强制拆分
@@ -93,7 +95,7 @@ ANI Core Phase 1 的交付对象分为两类：
 | Services API Client | 前端/SDK 中调用 ANI Services API 的类型安全代码 | `repo/api/openapi/services/v1.yaml` | `/api/v1/svc` | models、inference-services、knowledge-bases 等 Services 业务资源 |
 | API 调用方 | 发起 HTTP 请求的一方，可以是浏览器页面、CLI、SDK、第三方系统或测试脚本 | 不等同于生成代码 | 取决于调用目标 | 必须通过对应 API Client 或 SDK 调用 |
 
-Console/BOSS 可以同时使用两个 API Client，但不能用 Core API Client 调 `/models`、`/inference-services`、`/knowledge-bases`，也不能把 Services 资源补进 Core OpenAPI。当前 `frontends/console` 中如存在单 API Client 或旧 schema 使用，属于历史遗留；6.15-6.20 Services 功能与接口定义确认后必须按双 API Client 结构覆盖。
+Console/BOSS 可以同时使用两个 API Client，但不能用 Core API Client 调 `/models`、`/inference-services`、`/knowledge-bases`，也不能把 Services 资源补进 Core OpenAPI。当前 `frontends/console` 中如存在单 API Client 或旧 schema 使用，属于历史遗留；后续必须按双 API Client 结构迁移，并提交由 Core/Services OpenAPI 重新生成的类型文件，不得手工编辑生成物。
 
 ### 0.7 REST / SDK / gRPC 术语边界
 

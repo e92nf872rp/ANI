@@ -9,7 +9,9 @@ This file provides mandatory guidance for Claude Code / Codex / Cursor / GPT cod
 ## 0. 当前状态
 
 ```text
-本仓库范围：仅 ANI Core（基础设施平台底座）。ANI Services 已冻结并移交外部产品团队，本仓库不再开发任何 Services 代码。
+本仓库范围：ANI Core 继续负责基础设施平台底座；ANI Services 进入受控并行 PR 阶段。
+Core Sprint 13/14 既有事实继续有效：Sprint 13 production-shaped live gate 与 Sprint 14 resilience 隔离 fixture 结论不外推 full platform production ready。
+Services 受控并行 PR 阶段：目录、API、handler、生成物和跨层边界分别受 CODEOWNERS 共同审查、API split、Services boundary gate、make validate-architecture 约束。
 当前阶段：以 repo/CURRENT-SPRINT.md 为准
 当前重心：以 repo/CURRENT-SPRINT.md 为准
 当前不是 Phase 2：Phase 2 是 2026-10 以后延期能力
@@ -20,11 +22,11 @@ This file provides mandatory guidance for Claude Code / Codex / Cursor / GPT cod
 
 本文只维护稳定规则、读取顺序和不可破坏的工程边界。当前 Sprint 的详细完成项、未完成项、验收命令和下一步，只允许维护在 `repo/CURRENT-SPRINT.md`、`ANI-06-开发计划.md` Section 零和 `repo/development-records/README.md`。
 
-### 仓库范围与 Services 冻结（强制）
+### 仓库范围与 Services 受控解冻（强制）
 
 1. **本仓库只负责 ANI Core。** Core 是基础设施平台底座，对外输出 Core OpenAPI REST API、Core SDK、CLI。
-2. **ANI Services 在本仓库内全面冻结：一行 Services 代码都不再新增、修改或"优化"。** Services 已移交外部产品团队开发。`repo/services/model-service/`、`repo/services/kb-service/`、`repo/ai/`、`repo/operators/inference-operator/`、`repo/frontends/` 等旧 Services 骨架只读保留，不得继续开发；任何"补全 Services 逻辑"的改动都属于越界。
-3. **外部团队将于 2026-06-10 前后产出清晰的 ANI 产品功能、交互风格、API 列表与参数定义。** Core 的职责是按这些定义实现并支撑落地：以"AI Coding 快速循环——他们改产品/接口定义，Core 据此生成/调整代码"为协作模式。在该定义到位前，Core 不得基于猜测提前为 Services 建设具体业务能力边界，避免返工。
+2. **ANI Services 当前是受控并行 PR，不再按旧冻结规则处理。** Services 主责目录可按 `ANI-SERVICES-TEAM-GUIDE.md` 开发；触碰 Core 保护目录、Services API、Gateway mixed handler 或生成物时必须按 CODEOWNERS 共同审查。
+3. **Services 解冻不解除跨层门禁。** Services 业务资源只进 `repo/api/openapi/services/v1.yaml`；实现必须先改 API 契约，再改 handler/SDK/生成物；PR 必须通过 API split、`python scripts/validate_services_boundary.py --root .`（Services boundary gate）和既有 `make validate-architecture`。
 4. 跨层契约仍以 `repo/api/openapi/v1.yaml`（Core）为唯一真实来源；Services 业务资源不回流 Core API。
 
 ### 本地真实开发环境提示

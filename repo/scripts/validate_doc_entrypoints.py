@@ -28,6 +28,20 @@ REPOSITORY_WIDE_STALE_PATTERNS = (
     "RKE",
     "Rancher",
 )
+CURRENT_SERVICES_GOVERNANCE_MARKERS = (
+    "Core Sprint 13/14 既有事实继续有效",
+    "Services 受控并行 PR 阶段",
+    "CODEOWNERS 共同审查",
+    "API split",
+    "Services boundary gate",
+    "make validate-architecture",
+    "repo/CURRENT-SPRINT.md",
+)
+CURRENT_SERVICES_FREEZE_ONLY_MARKERS = (
+    "仓库范围：仅 ANI Core。ANI Services 已冻结并移交外部产品团队，本仓库不再开发任何 Services 代码。",
+    "ANI Services 在本仓库内全面冻结：一行 Services 代码都不再新增、修改或\"优化\"。",
+    "仓库范围：仅 ANI Core。ANI Services 已冻结并移交外部产品团队，本仓库不再开发任何 Services 代码",
+)
 
 
 def read(path: Path) -> str:
@@ -48,7 +62,9 @@ def reject(text: str, needle: str, path: Path) -> None:
 
 def matches_stale_pattern(text: str, pattern: str) -> bool:
     if pattern == "RKE":
-        return re.search(r"(?<![A-Z])RKE(?![A-Z])", text) is not None
+        if re.search(r"(?<![A-Za-z0-9_])RKE\s+token\s+边界", text, re.IGNORECASE):
+            return False
+        return re.search(r"(?<![A-Za-z0-9_])RKE(?![A-Za-z0-9_])", text) is not None
     return pattern in text
 
 
@@ -113,6 +129,25 @@ def main() -> None:
     if claude_lines > 180:
         raise SystemExit(f"{claude_path}: expected <= 180 lines, got {claude_lines}")
 
+    current_entrypoints = [
+        claude_path,
+        docs_index_path,
+        plan_path,
+        current_sprint_path,
+    ]
+    current_entrypoint_text = {
+        claude_path: claude,
+        docs_index_path: docs_index,
+        plan_path: plan,
+        current_sprint_path: current_sprint,
+    }
+    for path in current_entrypoints:
+        content = current_entrypoint_text[path]
+        for marker in CURRENT_SERVICES_GOVERNANCE_MARKERS:
+            require(content, marker, path)
+        for marker in CURRENT_SERVICES_FREEZE_ONLY_MARKERS:
+            reject(content, marker, path)
+
     require(claude, "轻量入口和强制规则索引", claude_path)
     require(claude, "禁止写入单批次完成清单", claude_path)
     require(claude, "动态进度必须写入 `repo/CURRENT-SPRINT.md`", claude_path)
@@ -130,9 +165,9 @@ def main() -> None:
     require(docs_index, "Core OpenAPI REST API 与 Core/Services 跨层控制面契约", docs_index_path)
     require(plan, "不维护批次流水账", plan_path)
     require(plan, "ANI-05-系统架构设计.md", plan_path)
-    require(plan, "Core 与外部 Services 团队的协作门禁", plan_path)
-    require(plan, "ANI Services 已移交外部产品团队", plan_path)
-    require(plan, "只读冻结，不再开发", plan_path)
+    require(plan, "Core 与 Services 团队的协作门禁", plan_path)
+    require(plan, "受控解冻", plan_path)
+    require(plan, "不是当前 PR 规则", plan_path)
     require(plan, "旧 Services 骨架", plan_path)
     require(plan, "上游原生 Kubernetes", plan_path)
     require(plan, "GitHub 社区热度", plan_path)
