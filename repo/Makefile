@@ -485,7 +485,7 @@ validate-gateway-instance-workload-runtime:
 	@echo "→ 校验 Gateway instance workload provider runtime wiring..."
 	python3 scripts/validate_gateway_instance_workload_runtime.py
 	$(GO_CACHE_ENV) go test ./services/ani-gateway -run 'TestGatewayInstanceWorkloadRuntime' -v
-	$(GO_CACHE_ENV) go test ./services/ani-gateway/internal/router -run 'TestDemoInstanceResponseMarksRealProviderWhenKubernetesWorkloadRuntimeConfigured' -v
+	$(GO_CACHE_ENV) go test ./services/ani-gateway/internal/router -run 'TestDemoInstance(ResponseMarksRealProviderWhenKubernetesWorkloadRuntimeConfigured|ServiceSandboxUsesKubernetesRuntimeWhenConfigured)' -v
 	@echo "✅ Gateway instance workload provider runtime wiring valid"
 
 validate-kubernetes-lifecycle-execution:

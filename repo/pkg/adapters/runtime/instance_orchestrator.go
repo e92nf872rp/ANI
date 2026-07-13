@@ -316,11 +316,51 @@ func instanceRecordFromResult(spec ports.WorkloadSpec, ref ports.WorkloadRef, au
 		SSH:          sshConnectionInfo(spec, ref, status),
 		Container:    containerStatusInfo(spec, status, createdAt),
 		GPU:          gpuStatusInfo(spec, status),
+		Sandbox:      sandboxStatusInfo(spec, ref, provider, status, createdAt),
 		Identity:     workloadIdentitySummary(spec.Identity),
 		ResourceRefs: append([]string(nil), resourceRefs...),
 		Status:       status,
 		CreatedAt:    createdAt,
 		UpdatedAt:    firstNonZeroTime(status.UpdatedAt, createdAt),
+	}
+}
+
+func sandboxStatusInfo(spec ports.WorkloadSpec, ref ports.WorkloadRef, provider string, status ports.WorkloadStatus, createdAt time.Time) *ports.SandboxInstanceStatus {
+	if spec.Kind != ports.WorkloadKindSandbox {
+		return nil
+	}
+	config := firstNonNilSandboxConfig(spec.Sandbox)
+	if config.RuntimeClass == "" {
+		config.RuntimeClass = spec.RuntimeClassName
+	}
+	config = normalizeSandboxConfig(config)
+	return &ports.SandboxInstanceStatus{
+		TenantID:   ref.TenantID,
+		InstanceID: ref.InstanceID,
+		Name:       spec.Name,
+		Kind:       ports.WorkloadKindSandbox,
+		Provider:   provider,
+		State:      sandboxStateFromWorkloadState(status.State),
+		Config:     config,
+		DevProfile: ports.DevProfileInfo{
+			Mode:         "real",
+			Provider:     provider,
+			RealProvider: provider == "kubernetes" || provider == "kubevirt",
+			Reason:       "sandbox materialized through workload provider orchestration",
+		},
+		CreatedAt: createdAt,
+		UpdatedAt: firstNonZeroTime(status.UpdatedAt, createdAt),
+	}
+}
+
+func sandboxStateFromWorkloadState(state ports.WorkloadState) ports.SandboxState {
+	switch state {
+	case ports.WorkloadStateRunning:
+		return ports.SandboxStateRunning
+	case ports.WorkloadStateStopped, ports.WorkloadStateDeleted:
+		return ports.SandboxStateStopped
+	default:
+		return ports.SandboxStatePending
 	}
 }
 

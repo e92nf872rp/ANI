@@ -1,0 +1,48 @@
+{
+  "batch_id": "SANDBOX-KATA-WORKLOAD-RUNTIME-A",
+  "status": "passed",
+  "date": "2026-07-13",
+  "scope": "Gateway /api/v1/instances kind=sandbox through kubernetes_rest workload provider and Kata RuntimeClass",
+  "proof_items": [
+    "gateway_auth_service_oidc_token_used",
+    "gateway_create_instance_returned_201",
+    "kubernetes_deployment_created_in_tenant_namespace",
+    "deployment_runtime_class_name_sandbox_kata",
+    "pod_running_ready",
+    "guest_kernel_logged_from_kata_pod",
+    "temporary_kubernetes_resources_cleaned"
+  ],
+  "gateway": {
+    "auth_mode": "auth_service",
+    "workload_provider": "kubernetes_rest",
+    "workload_provider_apply_enabled": true
+  },
+  "kubernetes": {
+    "runtime_class": "sandbox-kata",
+    "runtime_class_handler": "kata-qemu",
+    "tenant_namespace": "ani-tenant-00000000-0000-0000-0000-000000000001",
+    "node": "node2",
+    "deployment_ref": "kubernetes/Deployment/sandbox-sandbox-kata-live-1783937234-bb2610ab",
+    "secret_ref": "kubernetes/Secret/ani-wi-aa76f3fe-24d7-4d7c-b604"
+  },
+  "sandbox": {
+    "instance_id": "inst_4",
+    "dev_profile": {
+      "mode": "real",
+      "provider": "kubernetes_rest",
+      "real_provider": true
+    },
+    "guest_kernel_seen": true,
+    "guest_log_excerpt": "Linux sandbox-sandbox-kata-live-1783937234-bb2610ab-7bb6557d7d-6m27z 6.18.35 #1 SMP Mon Jun 15 12:55:58 UTC 2026 x86_64 GNU/Linux"
+  },
+  "cleanup": {
+    "api_delete_status": 404,
+    "fallback": "kubectl delete deployment",
+    "remaining_kubernetes_resources": "none"
+  },
+  "boundaries": [
+    "This validates a live sandbox create path through the existing workload provider orchestration; it does not declare full platform production ready.",
+    "The stable ANI RuntimeClass entrypoint is sandbox-kata; additional kata-* RuntimeClasses are Helm chart variants and not selected by ANI.",
+    "API DELETE returned 404 in this smoke run, so Kubernetes resource cleanup used kubectl for the temporary smoke Deployment."
+  ]
+}

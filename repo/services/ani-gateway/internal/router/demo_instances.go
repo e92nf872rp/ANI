@@ -451,6 +451,9 @@ func newDemoInstanceAPIWithOptions(metadata ports.MetadataStore, workload Instan
 		runtimeadapter.WithWorkloadIdentityService(identity),
 		runtimeadapter.WithSandboxRuntime(runtimeadapter.NewLocalSandboxRuntime()),
 	}
+	if strings.TrimSpace(workload.Provider) == "kubernetes_rest" {
+		serviceOptions = append(serviceOptions, runtimeadapter.WithSandboxWorkloadOrchestration(true))
+	}
 	if workload.Lifecycle != nil {
 		serviceOptions = append(serviceOptions, runtimeadapter.WithInstanceLifecycleExecutor(workload.Lifecycle))
 	}
@@ -1429,7 +1432,7 @@ func (api *demoInstanceAPI) demoInstanceFromRecord(record ports.WorkloadInstance
 		Snapshots:             demoSnapshotsFromRecord(record),
 		Container:             demoContainerFromRecord(record),
 		GPU:                   demoGPUFromRecord(record),
-		Sandbox:               demoSandboxFromRecord(record),
+		Sandbox:               api.demoSandboxFromRecord(record),
 		WorkloadIdentity:      demoIdentityFromRecord(record),
 		VPCID:                 optionalString(record.VPCID),
 		SubnetID:              optionalString(record.SubnetID),
@@ -1513,21 +1516,25 @@ func demoGPUFromRecord(record ports.WorkloadInstanceRecord) *demoGPU {
 	}
 }
 
-func demoSandboxFromRecord(record ports.WorkloadInstanceRecord) *demoSandbox {
+func (api *demoInstanceAPI) demoSandboxFromRecord(record ports.WorkloadInstanceRecord) *demoSandbox {
 	if record.Sandbox == nil {
 		return nil
+	}
+	devProfile := coreDevProfileResponse{
+		Mode:         record.Sandbox.DevProfile.Mode,
+		Provider:     record.Sandbox.DevProfile.Provider,
+		RealProvider: record.Sandbox.DevProfile.RealProvider,
+		Reason:       record.Sandbox.DevProfile.Reason,
+	}
+	if api.workloadProvider == "kubernetes_rest" && (record.Provider == "kubernetes" || record.Provider == "kubevirt") {
+		devProfile = api.instanceDevProfile(record)
 	}
 	return &demoSandbox{
 		RuntimeClass:        record.Sandbox.Config.RuntimeClass,
 		SessionTimeout:      record.Sandbox.Config.SessionTimeout.String(),
 		NetworkEgressPolicy: string(record.Sandbox.Config.NetworkEgressPolicy),
 		SessionState:        string(record.Sandbox.State),
-		DevProfile: coreDevProfileResponse{
-			Mode:         record.Sandbox.DevProfile.Mode,
-			Provider:     record.Sandbox.DevProfile.Provider,
-			RealProvider: record.Sandbox.DevProfile.RealProvider,
-			Reason:       record.Sandbox.DevProfile.Reason,
-		},
+		DevProfile:          devProfile,
 	}
 }
 

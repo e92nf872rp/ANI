@@ -556,6 +556,66 @@ func TestDemoInstanceServiceSandboxResponseIncludesLocalProfile(t *testing.T) {
 	}
 }
 
+func TestDemoInstanceServiceSandboxUsesKubernetesRuntimeWhenConfigured(t *testing.T) {
+	workload := DefaultInstanceWorkloadRuntime()
+	workload.Provider = "kubernetes_rest"
+	api := newDemoInstanceAPIWithOptions(nil, workload, nil, nil, nil, false, nil)
+	spec, err := demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind:  "sandbox",
+		Name:  "agent-session",
+		Image: "docker.changqingyun.cn/mirror/busybox:latest",
+		SandboxConfig: demoSandboxConfigRequest{
+			RuntimeClass:        "sandbox-kata",
+			SessionTimeout:      "45m",
+			NetworkEgressPolicy: "deny_all",
+		},
+	}, "tenant-a")
+	if err != nil {
+		t.Fatalf("demoSpecFromRequest error = %v", err)
+	}
+	created, err := api.service.Create(context.Background(), ports.WorkloadInstanceCreateRequest{
+		Spec:            spec,
+		UserID:          "user-a",
+		PermissionProof: "demo:test",
+		RequestedAt:     time.Unix(2100, 0),
+	})
+	if err != nil {
+		t.Fatalf("Create error = %v", err)
+	}
+	if len(created.Manifests) == 0 {
+		t.Fatalf("sandbox create rendered no Kubernetes manifests")
+	}
+	var deployment string
+	for _, manifest := range created.Manifests {
+		if manifest.Kind == "Deployment" {
+			deployment = manifest.Content
+		}
+	}
+	if deployment == "" || !strings.Contains(deployment, `"runtimeClassName": "sandbox-kata"`) {
+		t.Fatalf("deployment manifest = %s, want runtimeClassName sandbox-kata", deployment)
+	}
+	record, err := api.service.Get(context.Background(), ports.WorkloadInstanceGetRequest{
+		TenantID:   "tenant-a",
+		InstanceID: created.Ref.InstanceID,
+	})
+	if err != nil {
+		t.Fatalf("Get error = %v", err)
+	}
+	if len(record.ResourceRefs) == 0 || !strings.HasPrefix(record.ResourceRefs[0], "kubernetes/") {
+		t.Fatalf("resource refs = %#v, want Kubernetes refs", record.ResourceRefs)
+	}
+	response := api.demoInstanceFromRecord(record)
+	if response.Sandbox == nil {
+		t.Fatalf("response sandbox is nil")
+	}
+	if response.Sandbox.RuntimeClass != "sandbox-kata" || response.Sandbox.SessionState != "running" {
+		t.Fatalf("sandbox = %+v, want sandbox-kata/running", response.Sandbox)
+	}
+	if response.Sandbox.DevProfile.Mode != "real" || !response.Sandbox.DevProfile.RealProvider || response.Sandbox.DevProfile.Provider != "kubernetes_rest" {
+		t.Fatalf("sandbox dev profile = %+v, want real kubernetes_rest marker", response.Sandbox.DevProfile)
+	}
+}
+
 func TestDemoInstanceServiceLifecycleAndOps(t *testing.T) {
 	api := newDemoInstanceAPI()
 	spec, err := demoSpecFromRequest(demoCreateInstanceRequest{Kind: "container", Name: "demo-app"}, "tenant-a")

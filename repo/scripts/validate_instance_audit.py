@@ -20,6 +20,7 @@ REQUIRED_CONTRACT_KEYWORDS = (
 )
 REQUIRED_SCHEMA_KEYWORDS = (
     "CREATE TABLE instance_plan_audits",
+    "'sandbox'",
     "rendered_manifests  JSONB",
     "admission_allowed   BOOLEAN",
     "ALTER TABLE instance_plan_audits ENABLE ROW LEVEL SECURITY",

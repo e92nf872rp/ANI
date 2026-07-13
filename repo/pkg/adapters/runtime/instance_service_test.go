@@ -34,6 +34,45 @@ func TestLocalInstanceServiceCreatesContainerThroughOrchestrator(t *testing.T) {
 	}
 }
 
+func TestLocalInstanceServiceCanCreateSandboxThroughWorkloadOrchestrator(t *testing.T) {
+	orchestrator := &fakeInstanceOrchestrator{}
+	service := NewLocalInstanceServiceWithOptions(
+		orchestrator,
+		&fakeInstanceStore{},
+		NewLocalInstanceOpsGuard(),
+		WithSandboxRuntime(NewLocalSandboxRuntime()),
+		WithSandboxWorkloadOrchestration(true),
+	)
+	result, err := service.Create(context.Background(), ports.WorkloadInstanceCreateRequest{
+		Spec: ports.WorkloadSpec{
+			TenantID:         "tenant-a",
+			Name:             "agent-session",
+			Kind:             ports.WorkloadKindSandbox,
+			Image:            "harbor/sandbox:1",
+			RuntimeClassName: "sandbox-kata",
+			Sandbox: &ports.SandboxConfig{
+				RuntimeClass:        "sandbox-kata",
+				SessionTimeout:      45 * time.Minute,
+				NetworkEgressPolicy: ports.SandboxNetworkEgressDenyAll,
+			},
+		},
+		UserID:          "user-a",
+		PermissionProof: "rbac:create:workload",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if orchestrator.creates != 1 {
+		t.Fatalf("creates = %d, want sandbox create to use workload orchestrator", orchestrator.creates)
+	}
+	if result.Ref.Kind != ports.WorkloadKindSandbox {
+		t.Fatalf("kind = %s, want sandbox", result.Ref.Kind)
+	}
+	if len(result.Apply.ResourceRefs) != 1 || !strings.HasPrefix(result.Apply.ResourceRefs[0], "kubernetes/") {
+		t.Fatalf("resource refs = %#v, want Kubernetes refs", result.Apply.ResourceRefs)
+	}
+}
+
 func TestLocalInstanceServiceCreateRecordsOperationAndIdempotency(t *testing.T) {
 	orchestrator := &fakeInstanceOrchestrator{}
 	operations := NewLocalOperationStore(WithOperationStoreClock(func() time.Time {

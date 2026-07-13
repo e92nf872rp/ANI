@@ -214,7 +214,7 @@ CREATE TABLE instance_plan_audits (
     instance_id         TEXT,
     instance_name       TEXT NOT NULL,
     workload_kind       TEXT NOT NULL
-        CHECK (workload_kind IN ('vm','container','gpu_container','inference','notebook','agent_sandbox','batch_job')),
+        CHECK (workload_kind IN ('vm','container','gpu_container','inference','notebook','sandbox','agent_sandbox','batch_job')),
     vpc_id              TEXT,
     subnet_id           TEXT,
     private_ip          TEXT,
@@ -234,7 +234,7 @@ CREATE TABLE workload_instances (
     instance_id         TEXT NOT NULL,
     name                TEXT NOT NULL,
     workload_kind       TEXT NOT NULL
-        CHECK (workload_kind IN ('vm','container','gpu_container','inference','notebook','agent_sandbox','batch_job')),
+        CHECK (workload_kind IN ('vm','container','gpu_container','inference','notebook','sandbox','agent_sandbox','batch_job')),
     provider            TEXT,
     audit_id            UUID REFERENCES instance_plan_audits(id),
     provider_id         TEXT,
