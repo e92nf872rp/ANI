@@ -1,6 +1,7 @@
 # CODEOWNERS — ANI Monorepo
 #
 # 规则：从上到下匹配，最后一条匹配规则生效（GitHub 规范）。
+# 因此更精确的共享规则必须放在更宽泛的 Core 保护规则之后。
 # 格式：<路径模式> <GitHub 用户名>
 #
 # 现实约束：
@@ -64,7 +65,8 @@
 
 # ── Services 业务 handler（/api/v1/svc/* 对应 router 文件）─────────────────
 #
-# 来源：router.go 的 svc 路由组，精确列出当前 Services handler。
+# repo/services/ani-gateway/ 默认仍由 Core owner 保护；
+# 这里只为 /api/v1/svc/* 对应的精确 handler 模式追加共享审查。
 # 新增 /api/v1/svc 资源组时，在本节追加对应文件模式。
 # Core 新增 /api/v1 路由 handler 不影响本节。
 #
@@ -82,10 +84,18 @@
 /repo/services/ani-gateway/internal/router/tenant_resources*       @viccao-yue @e92nf872rp
 
 # ── Services 业务服务与产品侧代码（Services 主审，Core 关注边界）──────────────
+# 注意：不要添加覆盖整个 /repo/services/ 的 Services-only 规则，
+# 否则会错误解冻 ani-gateway、Core 受保护目录及其他非 Services 独占范围。
 /repo/services/model-service/                                      @viccao-yue @e92nf872rp
 /repo/services/kb-service/                                         @viccao-yue @e92nf872rp
+/repo/services/docs/                                               @viccao-yue @e92nf872rp
+/repo/services/tasks/                                              @viccao-yue @e92nf872rp
+/repo/services/prototypes/                                         @viccao-yue @e92nf872rp
+/repo/services/README.md                                           @viccao-yue @e92nf872rp
 /repo/ai/                                                          @viccao-yue @e92nf872rp
 /repo/frontends/                                                   @viccao-yue @e92nf872rp
+# bounded operator 共享范围：仅 inference-operator 共同审查；
+# 不意味着 Kubernetes operator、Core pkg/、deploy、scripts 或生成的 Core SDK 被一并解冻。
 /repo/operators/inference-operator/                                @viccao-yue @e92nf872rp
 
 # ── 当前团队任务入口 ───────────────────────────────────────────────────────
