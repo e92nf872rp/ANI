@@ -911,7 +911,7 @@ validate-services:
 	$(GO_CACHE_ENV) go test ./services/model-service/... -v
 	@echo "→ 检查 RAG Python compile/test..."
 	python -m compileall -q ai/rag-engine
-	@if find ai/rag-engine -type f \( -name 'test_*.py' -o -name '*_test.py' \) | grep -q .; then \
+	@if [ -n "$$(find ai/rag-engine -type f \( -name 'test_*.py' -o -name '*_test.py' \) -print -quit)" ]; then \
 		python -m pytest ai/rag-engine -q; \
 	else \
 		echo "ℹ️  no RAG pytest files found under ai/rag-engine; compile check completed"; \

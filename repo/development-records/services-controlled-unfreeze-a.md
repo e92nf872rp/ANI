@@ -30,18 +30,15 @@ Services 受控解冻后的 PR 顺序：
 1. API-first：先改 `repo/api/openapi/services/v1.yaml`；如触碰 Core 能力，先经 Core API 评审。
 2. 实现：再改 Services handler、业务服务、前端和生成物。
 3. 生成物：Services SDK、API docs 和前端 schema 必须由 OpenAPI 生成，不手工编辑。
-4. 边界：运行 API split、Services boundary gate 和现有 architecture gate。
-5. 共同审查：触碰 Core 保护目录、Gateway mixed handler、Services API 或生成物时按 CODEOWNERS review。
+4. 边界：运行 `make validate-services`，它聚合 API split、Services boundary gate、Services OpenAPI YAML、SDK、model-service、RAG、Console schema drift 和现有 architecture gate。
+5. 共同审查：触碰 Core API/OpenAPI、Core 保护目录、Gateway shared/mixed handler、Services API 或生成物时按 CODEOWNERS review，并在 PR 描述中列出触碰原因。
 
-最小验证命令：
+Services PR 最短必跑命令：
 
 ```bash
 cd /Users/zhangfan/ANI/repo
-python scripts/validate_doc_entrypoints.py
-python scripts/validate_doc_entrypoints_test.py
-python scripts/validate_services_boundary.py --root .
-python scripts/validate_spec_split_contract.py
-make validate-architecture
+make validate-services
+make validate-doc-entrypoints
 git diff --check
 ```
 

@@ -401,16 +401,16 @@ git push origin feature/model-service-crud
 
 - PR 描述需说明：改了什么、影响哪些 API 接口、如何本地验证
 - 修改了 `services/v1.yaml` 的 PR，必须同时提交更新后的 Console 前端 API 类型生成结果
-- Services PR 的最短边界检查命令：
+- Services PR 的最短必跑命令：
 
 ```bash
 cd /Users/zhangfan/ANI/repo
-python scripts/validate_services_boundary.py --root .
-python scripts/validate_spec_split_contract.py
-python scripts/validate_doc_entrypoints.py
-make validate-architecture
+make validate-services
+make validate-doc-entrypoints
 git diff --check
 ```
+
+- 共同审查触发条件：PR 触碰 `repo/api/openapi/v1.yaml`、Core 保护目录、Gateway shared/mixed handler、`repo/api/openapi/services/v1.yaml`、Services SDK/API docs/Console schema 等 generated artifacts 时，必须在 PR 描述中列出触碰原因，并按 CODEOWNERS 请求 Core/Services 共同 review。
 
 ### 4.3 本地开发环境变量
 
