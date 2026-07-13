@@ -146,7 +146,6 @@ help:
 COMPOSE = docker compose -f deploy/docker/docker-compose.yml
 GO_CACHE_ENV = GOCACHE=/private/tmp/ani-go-build GOMODCACHE=$(CURDIR)/.cache/gomod
 BUF_CACHE_ENV = BUF_CACHE_DIR=$(CURDIR)/.cache/buf
-NPM_CACHE_FLAGS = --cache $(CURDIR)/.cache/npm
 GO_PACKAGES = ./pkg/... ./services/ani-gateway/... ./services/auth-service/... ./services/model-service/... ./services/task-service/... ./services/reconcile-worker/...
 TOOLS_BIN = $(CURDIR)/.bin
 
@@ -917,9 +916,9 @@ validate-services:
 		echo "ℹ️  no RAG pytest files found under ai/rag-engine; compile check completed"; \
 	fi
 	@echo "→ 安装 Console npm dependencies from frontends/console/package-lock.json..."
-	npm --prefix frontends/console $(NPM_CACHE_FLAGS) ci
+	npm --prefix frontends/console ci
 	@echo "→ 从 Services OpenAPI source 重新生成 Console API schema..."
-	npm --prefix frontends/console $(NPM_CACHE_FLAGS) run gen-api
+	npm --prefix frontends/console run gen-api
 	git diff --exit-code -- frontends/console/src/api/schema.d.ts frontends/console/src/api/core-schema.d.ts
 	$(MAKE) validate-architecture
 	@echo "✅ Services PR gate valid"
@@ -943,7 +942,7 @@ lint-python:
 
 lint-ts:
 	@echo "→ TypeScript 代码检查..."
-	npm --prefix frontends/console $(NPM_CACHE_FLAGS) run lint
+	npm --prefix frontends/console run lint
 
 # ── 本地开发（热重载）────────────────────────────────────────────────────────
 dev-gateway:
@@ -952,7 +951,7 @@ dev-gateway:
 
 dev-console:
 	@echo "→ 启动 Console 前端（Vite HMR）..."
-	npm --prefix frontends/console $(NPM_CACHE_FLAGS) run dev
+	npm --prefix frontends/console run dev
 
 dev-core-mock:
 	@echo "→ 启动 Core API Mock Server..."
