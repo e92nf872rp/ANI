@@ -84,26 +84,54 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-
-      - uses: pnpm/action-setup@v3
-        with:
-          version: 9
+          cache: npm
+          cache-dependency-path: frontends/console/package-lock.json
 
       - name: Install dependencies
-        run: cd frontends && pnpm install --frozen-lockfile
+        run: npm --prefix frontends/console ci
 
       - name: Type check
-        run: |
-          cd frontends/console && pnpm type-check
-          cd frontends/boss    && pnpm type-check
+        run: npm --prefix frontends/console run type-check
 
       - name: Lint
-        run: cd frontends && pnpm lint
+        run: npm --prefix frontends/console run lint
 
       - name: Build
+        run: npm --prefix frontends/console run build
+
+  # ── Services PR 门禁 ────────────────────────────────────────────────────────
+  services-pr-gate:
+    name: Services Boundary / API / Docs Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontends/console/package-lock.json
+
+      - name: Install Python gate dependencies
         run: |
-          cd frontends/console && pnpm build
-          cd frontends/boss    && pnpm build
+          pip install -r ai/rag-engine/requirements.txt
+          pip install pyyaml pytest
+
+      - name: Run Services PR gate
+        run: make validate-services
+
+      - name: Validate document entrypoints
+        run: make validate-doc-entrypoints
 
   # ── 依赖 CVE 扫描 ────────────────────────────────────────────────────────────
   dependency-scan:

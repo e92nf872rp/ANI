@@ -5,7 +5,7 @@
         tools-proto gen-api gen-console-api gen-proto gen-core-sdk gen-api-docs \
         build build-gateway build-auth-service build-model-service build-task-service build-reconcile-worker build-cli \
         test test-go test-python test-cover \
-        validate-infra validate-gpu-preflight validate-gpu-contracts validate-runtime-contracts validate-instance-contracts validate-instance-planner validate-instance-renderer validate-instance-admission validate-instance-audit validate-instance-provider-dry-run validate-instance-provider-apply validate-instance-status-reconcile validate-instance-orchestrator validate-instance-store validate-instance-provider-adapter validate-instance-service validate-instance-lifecycle-ops validate-m1-e2e validate-kubernetes-provider-execution validate-kubernetes-rest-client validate-kubernetes-bootstrap-wiring validate-kubernetes-lifecycle-execution validate-kubernetes-ops-execution validate-m1-real-provider-profile validate-real-k8s-profile validate-vcluster-live-gate validate-vcluster-upgrade-live-gate validate-k8s-node-pool-live-gate validate-kubeovn-network-live-gate validate-kubevirt-vm-live-gate validate-reconcile-ha-live-gate validate-kms-sm4-live-gate validate-secrets-live-gate validate-storage-live-gate validate-gpu-inventory-live-gate validate-object-store-live-gate validate-vector-store-live-gate validate-instance-observability-live-gate validate-sprint13-b-track-production-shape validate-gateway-ratelimit validate-gateway-idempotency validate-adapter-resilience-timeout validate-resilience-faultinjection-live-gate validate-resilience-degradation validate-ha-failover-live-gate validate-readyz-dataplane-live-gate validate-sprint14-resilience-live-gate validate-core-installer validate-core-offline validate-core-cli validate-sprint7-core-regression validate-core-release-hardening validate-core-installer-live validate-core-offline-pack validate-core-doc-consistency validate-sprint8-core-release validate-core-release-evidence validate-sprint9-core-rc validate-sprint9-core-doc-consistency validate-sprint9-rc validate-core-artifact-manifest validate-core-version-policy validate-sprint10-final-readiness validate-sprint10-core-doc-consistency validate-sprint10-release-prep validate-sprint11-storage-disk-plan validate-sprint11-core-real-deployment validate-sprint11-rook-ceph-formal-deployment validate-sprint11-rook-ceph-live-deployment-result validate-sprint11-rook-ceph-vm-storage-smoke validate-sprint11-rook-ceph-reboot-resilience validate-sprint11-safe-completion validate-sprint11-core-doc-consistency validate-sprint11-real-deployment validate-demo-instances validate-core-alpha validate-network-alpha validate-storage-alpha validate-vector-alpha validate-workload-identity validate-core-dev-profile validate-sdk-alpha validate-sdk-beta validate-sdk-mock-smoke validate-sprint3-closure validate-sprint4-closure validate-spec-split validate-core-beta validate-core-api-compatibility validate-mock-a validate-doc-api validate-doc-entrypoints validate-auth-contract validate-auth-dex-smoke validate-auth-dex-production-gate validate-architecture \
+        validate-infra validate-gpu-preflight validate-gpu-contracts validate-runtime-contracts validate-instance-contracts validate-instance-planner validate-instance-renderer validate-instance-admission validate-instance-audit validate-instance-provider-dry-run validate-instance-provider-apply validate-instance-status-reconcile validate-instance-orchestrator validate-instance-store validate-instance-provider-adapter validate-instance-service validate-instance-lifecycle-ops validate-m1-e2e validate-kubernetes-provider-execution validate-kubernetes-rest-client validate-kubernetes-bootstrap-wiring validate-kubernetes-lifecycle-execution validate-kubernetes-ops-execution validate-m1-real-provider-profile validate-real-k8s-profile validate-vcluster-live-gate validate-vcluster-upgrade-live-gate validate-k8s-node-pool-live-gate validate-kubeovn-network-live-gate validate-kubevirt-vm-live-gate validate-reconcile-ha-live-gate validate-kms-sm4-live-gate validate-secrets-live-gate validate-storage-live-gate validate-gpu-inventory-live-gate validate-object-store-live-gate validate-vector-store-live-gate validate-instance-observability-live-gate validate-sprint13-b-track-production-shape validate-gateway-ratelimit validate-gateway-idempotency validate-adapter-resilience-timeout validate-resilience-faultinjection-live-gate validate-resilience-degradation validate-ha-failover-live-gate validate-readyz-dataplane-live-gate validate-sprint14-resilience-live-gate validate-core-installer validate-core-offline validate-core-cli validate-sprint7-core-regression validate-core-release-hardening validate-core-installer-live validate-core-offline-pack validate-core-doc-consistency validate-sprint8-core-release validate-core-release-evidence validate-sprint9-core-rc validate-sprint9-core-doc-consistency validate-sprint9-rc validate-core-artifact-manifest validate-core-version-policy validate-sprint10-final-readiness validate-sprint10-core-doc-consistency validate-sprint10-release-prep validate-sprint11-storage-disk-plan validate-sprint11-core-real-deployment validate-sprint11-rook-ceph-formal-deployment validate-sprint11-rook-ceph-live-deployment-result validate-sprint11-rook-ceph-vm-storage-smoke validate-sprint11-rook-ceph-reboot-resilience validate-sprint11-safe-completion validate-sprint11-core-doc-consistency validate-sprint11-real-deployment validate-demo-instances validate-core-alpha validate-network-alpha validate-storage-alpha validate-vector-alpha validate-workload-identity validate-core-dev-profile validate-sdk-alpha validate-sdk-beta validate-sdk-mock-smoke validate-sprint3-closure validate-sprint4-closure validate-spec-split validate-core-beta validate-core-api-compatibility validate-mock-a validate-doc-api validate-doc-entrypoints validate-auth-contract validate-auth-dex-smoke validate-auth-dex-production-gate validate-services validate-architecture \
         lint lint-go lint-python lint-ts \
         dev-gateway dev-console dev-core-mock \
         image image-gateway image-auth-service \
@@ -131,6 +131,7 @@ help:
 	@echo "    make validate-doc-entrypoints 校验 CLAUDE.md/文档入口职责边界"
 	@echo "    make validate-auth-contract 校验 M2.2 Auth Gateway/API 契约一致性"
 	@echo "    make validate-auth-dex-smoke 校验 M2.2 Docker Dex OIDC auth-code flow（需 Docker）"
+	@echo "    make validate-services 校验 Services PR boundary/spec/SDK/model/RAG/Console 真实门禁"
 	@echo "    make validate-architecture 校验 ports/adapters 组件边界"
 	@echo ""
 	@echo "  代码检查:"
@@ -145,6 +146,7 @@ help:
 COMPOSE = docker compose -f deploy/docker/docker-compose.yml
 GO_CACHE_ENV = GOCACHE=/private/tmp/ani-go-build GOMODCACHE=$(CURDIR)/.cache/gomod
 BUF_CACHE_ENV = BUF_CACHE_DIR=$(CURDIR)/.cache/buf
+NPM_CACHE_FLAGS = --cache $(CURDIR)/.cache/npm
 GO_PACKAGES = ./pkg/... ./services/ani-gateway/... ./services/auth-service/... ./services/model-service/... ./services/task-service/... ./services/reconcile-worker/...
 TOOLS_BIN = $(CURDIR)/.bin
 
@@ -899,6 +901,29 @@ validate-auth-dex-production-gate:
 	python scripts/validate_auth_dex_production_gate_test.py
 	@echo "✅ Sprint 13 Auth/Dex production-shaped gate valid"
 
+validate-services:
+	@echo "→ 校验 Services boundary baseline..."
+	python scripts/validate_services_boundary.py --root .
+	python scripts/validate_yaml.py api/openapi/services/v1.yaml
+	$(MAKE) validate-spec-split
+	$(MAKE) validate-sdk-beta
+	@echo "→ 运行 Services model-service Go tests..."
+	$(GO_CACHE_ENV) go test ./services/model-service/... -v
+	@echo "→ 检查 RAG Python compile/test..."
+	python -m compileall -q ai/rag-engine
+	@if find ai/rag-engine -type f \( -name 'test_*.py' -o -name '*_test.py' \) | grep -q .; then \
+		python -m pytest ai/rag-engine -q; \
+	else \
+		echo "ℹ️  no RAG pytest files found under ai/rag-engine; compile check completed"; \
+	fi
+	@echo "→ 安装 Console npm dependencies from frontends/console/package-lock.json..."
+	npm --prefix frontends/console $(NPM_CACHE_FLAGS) ci
+	@echo "→ 从 Services OpenAPI source 重新生成 Console API schema..."
+	npm --prefix frontends/console $(NPM_CACHE_FLAGS) run gen-api
+	git diff --exit-code -- frontends/console/src/api/schema.d.ts frontends/console/src/api/core-schema.d.ts
+	$(MAKE) validate-architecture
+	@echo "✅ Services PR gate valid"
+
 validate-architecture:
 	@echo "→ 校验开源组件 ports/adapters 边界..."
 	python scripts/validate_component_imports.py --root .
@@ -918,7 +943,7 @@ lint-python:
 
 lint-ts:
 	@echo "→ TypeScript 代码检查..."
-	cd frontends && pnpm lint
+	npm --prefix frontends/console $(NPM_CACHE_FLAGS) run lint
 
 # ── 本地开发（热重载）────────────────────────────────────────────────────────
 dev-gateway:
@@ -927,7 +952,7 @@ dev-gateway:
 
 dev-console:
 	@echo "→ 启动 Console 前端（Vite HMR）..."
-	cd frontends/console && pnpm dev
+	npm --prefix frontends/console $(NPM_CACHE_FLAGS) run dev
 
 dev-core-mock:
 	@echo "→ 启动 Core API Mock Server..."
