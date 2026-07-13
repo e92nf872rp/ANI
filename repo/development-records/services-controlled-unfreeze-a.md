@@ -83,3 +83,17 @@ go test ./services/model-service/...
 python -m compileall -q ai/rag-engine
 python scripts/validate_services_boundary_test.py
 ```
+
+审计友好的结果摘要：
+
+- 已通过：
+  - `python scripts/validate_services_boundary.py --root .`
+  - `python scripts/validate_component_imports.py --root .`
+  - `python scripts/validate_spec_split_contract.py`
+  - `python scripts/validate_sdk_beta.py`
+  - `python -m compileall -q ai/rag-engine`
+  - `python scripts/validate_services_boundary_test.py`
+- 阻塞项：
+  - `go test ./services/model-service/...`
+  - 阻塞原因：从 `proxy.golang.org` 下载 `golang.org/x/net`、`golang.org/x/sys`、`golang.org/x/sync` 依赖时超时
+  - 已做一次 require_escalated 重跑，结果相同；因此当前 blocker 属于外部依赖下载环境问题，而不是本批次已验证到的文档/边界事实回归
