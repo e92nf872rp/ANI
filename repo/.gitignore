@@ -5,6 +5,8 @@
 
 # 编译产物
 bin/
+cli/ani/ani
+services/*/tmp/
 dist/
 build/
 *.test

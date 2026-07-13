@@ -1,0 +1,18 @@
+contract_id: REPOSITORY-FILE-CONTRACT-A
+scope: ani-core-monorepo
+binary_files:
+  policy: no_new_binary_files
+  enforcement: make validate-no-binary-files
+  rationale: Source control must not add generated executables, packaged charts, images, or other binary artifacts.
+  allowed_existing_paths:
+    - Picture/AI专有云功能及架构图V1.0.png
+    - Picture/AI专有云功能图V1.0.png
+    - Picture/AI专有云功能图V2.0.png
+    - Picture/架构图V1.0.png
+    - Picture/架构图V2.0.png
+    - repo/assets/brand/Kubercloud_favicon.ico
+    - repo/assets/brand/d-logo.png
+    - repo/deploy/isolated/cluster-foundation/helm/ani-cluster-foundation/charts/harbor-1.19.1.tgz
+    - repo/deploy/isolated/cluster-foundation/helm/ani-cluster-foundation/charts/rook-ceph-v1.20.0.tgz
+    - repo/frontends/console/public/assets/brand/Kubercloud_favicon.ico
+    - repo/frontends/console/public/assets/brand/d-logo.png

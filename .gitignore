@@ -6,6 +6,8 @@
 # Build outputs and generated local binaries
 bin/
 repo/bin/
+repo/cli/ani/ani
+repo/services/*/tmp/
 dist/
 build/
 *.test
