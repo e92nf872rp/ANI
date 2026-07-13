@@ -60,6 +60,18 @@ allowed:
       - github.com/jackc/pgx/v5
       - github.com/jackc/pgx/v5/pgxpool
     reason: OIDC callback persists users, role mappings, and refresh tokens in a bounded auth metadata module
+  - path: services/auth-service/internal/service/password_login.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: Password login persists refresh tokens and reads users/tenants in a bounded auth metadata module
+  - path: services/auth-service/internal/service/platform_login.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: Platform password login persists refresh tokens and reads platform_users in a bounded auth metadata module
   - path: services/task-service/internal/service/task_service.go
     coupling_level: bounded_direct
     imports:

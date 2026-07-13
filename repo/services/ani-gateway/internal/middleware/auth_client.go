@@ -16,6 +16,8 @@ type AuthClient interface {
 	CheckPermission(ctx context.Context, req *authv1.CheckPermissionRequest) (*authv1.CheckPermissionResponse, error)
 	BeginOIDCLogin(ctx context.Context, req *authv1.BeginOIDCLoginRequest) (*authv1.BeginOIDCLoginResponse, error)
 	CompleteOIDCLogin(ctx context.Context, req *authv1.CompleteOIDCLoginRequest) (*authv1.TokenPair, error)
+	Login(ctx context.Context, req *authv1.LoginRequest) (*authv1.TokenPair, error)
+	PlatformPasswordLogin(ctx context.Context, req *authv1.PlatformPasswordLoginRequest) (*authv1.TokenPair, error)
 	RefreshToken(ctx context.Context, refreshToken string) (*authv1.AccessToken, error)
 	RevokeToken(ctx context.Context, jti string) error
 	CreateAPIKey(ctx context.Context, req *authv1.CreateAPIKeyRequest) (*authv1.CreateAPIKeyResponse, error)
@@ -66,6 +68,18 @@ func (c *grpcAuthClient) CompleteOIDCLogin(ctx context.Context, req *authv1.Comp
 	callCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 	return c.client.CompleteOIDCLogin(callCtx, req)
+}
+
+func (c *grpcAuthClient) Login(ctx context.Context, req *authv1.LoginRequest) (*authv1.TokenPair, error) {
+	callCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	return c.client.Login(callCtx, req)
+}
+
+func (c *grpcAuthClient) PlatformPasswordLogin(ctx context.Context, req *authv1.PlatformPasswordLoginRequest) (*authv1.TokenPair, error) {
+	callCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	return c.client.PlatformPasswordLogin(callCtx, req)
 }
 
 func (c *grpcAuthClient) RefreshToken(ctx context.Context, refreshToken string) (*authv1.AccessToken, error) {

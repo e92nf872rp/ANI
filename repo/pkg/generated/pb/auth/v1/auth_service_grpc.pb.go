@@ -21,16 +21,17 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	AuthService_Login_FullMethodName             = "/auth.v1.AuthService/Login"
-	AuthService_BeginOIDCLogin_FullMethodName    = "/auth.v1.AuthService/BeginOIDCLogin"
-	AuthService_CompleteOIDCLogin_FullMethodName = "/auth.v1.AuthService/CompleteOIDCLogin"
-	AuthService_RefreshToken_FullMethodName      = "/auth.v1.AuthService/RefreshToken"
-	AuthService_RevokeToken_FullMethodName       = "/auth.v1.AuthService/RevokeToken"
-	AuthService_ValidateToken_FullMethodName     = "/auth.v1.AuthService/ValidateToken"
-	AuthService_CheckPermission_FullMethodName   = "/auth.v1.AuthService/CheckPermission"
-	AuthService_CreateAPIKey_FullMethodName      = "/auth.v1.AuthService/CreateAPIKey"
-	AuthService_ListAPIKeys_FullMethodName       = "/auth.v1.AuthService/ListAPIKeys"
-	AuthService_RevokeAPIKey_FullMethodName      = "/auth.v1.AuthService/RevokeAPIKey"
+	AuthService_Login_FullMethodName                 = "/auth.v1.AuthService/Login"
+	AuthService_PlatformPasswordLogin_FullMethodName = "/auth.v1.AuthService/PlatformPasswordLogin"
+	AuthService_BeginOIDCLogin_FullMethodName        = "/auth.v1.AuthService/BeginOIDCLogin"
+	AuthService_CompleteOIDCLogin_FullMethodName     = "/auth.v1.AuthService/CompleteOIDCLogin"
+	AuthService_RefreshToken_FullMethodName          = "/auth.v1.AuthService/RefreshToken"
+	AuthService_RevokeToken_FullMethodName           = "/auth.v1.AuthService/RevokeToken"
+	AuthService_ValidateToken_FullMethodName         = "/auth.v1.AuthService/ValidateToken"
+	AuthService_CheckPermission_FullMethodName       = "/auth.v1.AuthService/CheckPermission"
+	AuthService_CreateAPIKey_FullMethodName          = "/auth.v1.AuthService/CreateAPIKey"
+	AuthService_ListAPIKeys_FullMethodName           = "/auth.v1.AuthService/ListAPIKeys"
+	AuthService_RevokeAPIKey_FullMethodName          = "/auth.v1.AuthService/RevokeAPIKey"
 )
 
 // AuthServiceClient is the client API for AuthService service.
@@ -38,6 +39,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AuthServiceClient interface {
 	Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*TokenPair, error)
+	PlatformPasswordLogin(ctx context.Context, in *PlatformPasswordLoginRequest, opts ...grpc.CallOption) (*TokenPair, error)
 	BeginOIDCLogin(ctx context.Context, in *BeginOIDCLoginRequest, opts ...grpc.CallOption) (*BeginOIDCLoginResponse, error)
 	CompleteOIDCLogin(ctx context.Context, in *CompleteOIDCLoginRequest, opts ...grpc.CallOption) (*TokenPair, error)
 	RefreshToken(ctx context.Context, in *RefreshTokenRequest, opts ...grpc.CallOption) (*AccessToken, error)
@@ -63,6 +65,15 @@ func NewAuthServiceClient(cc grpc.ClientConnInterface) AuthServiceClient {
 func (c *authServiceClient) Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*TokenPair, error) {
 	out := new(TokenPair)
 	err := c.cc.Invoke(ctx, AuthService_Login_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) PlatformPasswordLogin(ctx context.Context, in *PlatformPasswordLoginRequest, opts ...grpc.CallOption) (*TokenPair, error) {
+	out := new(TokenPair)
+	err := c.cc.Invoke(ctx, AuthService_PlatformPasswordLogin_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -155,6 +166,7 @@ func (c *authServiceClient) RevokeAPIKey(ctx context.Context, in *RevokeAPIKeyRe
 // for forward compatibility
 type AuthServiceServer interface {
 	Login(context.Context, *LoginRequest) (*TokenPair, error)
+	PlatformPasswordLogin(context.Context, *PlatformPasswordLoginRequest) (*TokenPair, error)
 	BeginOIDCLogin(context.Context, *BeginOIDCLoginRequest) (*BeginOIDCLoginResponse, error)
 	CompleteOIDCLogin(context.Context, *CompleteOIDCLoginRequest) (*TokenPair, error)
 	RefreshToken(context.Context, *RefreshTokenRequest) (*AccessToken, error)
@@ -176,6 +188,9 @@ type UnimplementedAuthServiceServer struct {
 
 func (UnimplementedAuthServiceServer) Login(context.Context, *LoginRequest) (*TokenPair, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Login not implemented")
+}
+func (UnimplementedAuthServiceServer) PlatformPasswordLogin(context.Context, *PlatformPasswordLoginRequest) (*TokenPair, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PlatformPasswordLogin not implemented")
 }
 func (UnimplementedAuthServiceServer) BeginOIDCLogin(context.Context, *BeginOIDCLoginRequest) (*BeginOIDCLoginResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BeginOIDCLogin not implemented")
@@ -231,6 +246,24 @@ func _AuthService_Login_Handler(srv interface{}, ctx context.Context, dec func(i
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AuthServiceServer).Login(ctx, req.(*LoginRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_PlatformPasswordLogin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PlatformPasswordLoginRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).PlatformPasswordLogin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_PlatformPasswordLogin_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).PlatformPasswordLogin(ctx, req.(*PlatformPasswordLoginRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -407,6 +440,10 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Login",
 			Handler:    _AuthService_Login_Handler,
+		},
+		{
+			MethodName: "PlatformPasswordLogin",
+			Handler:    _AuthService_PlatformPasswordLogin_Handler,
 		},
 		{
 			MethodName: "BeginOIDCLogin",

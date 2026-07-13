@@ -1336,6 +1336,23 @@ components:
       properties:
         refresh_token: { type: string }
 
+    PasswordLoginRequest:
+      type: object
+      required: [tenant_name, username, password]
+      properties:
+        tenant_name:    { type: string, minLength: 1, maxLength: 64, description: "租户 slug，用于定位 users 表所属 tenant" }
+        username:       { type: string, minLength: 1, maxLength: 64, description: "登录用户名（不含命名空间前缀，服务端自动拼接 local:<username>）" }
+        password:       { type: string, minLength: 1, maxLength: 256, format: password, description: "明文密码，仅用于 bcrypt 校验，不持久化" }
+        idempotency_key: { type: string, pattern: "^[A-Za-z0-9_-]{1,128}$", description: "可选幂等键，重复提交返回同一 TokenPair" }
+
+    PlatformPasswordLoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:       { type: string, minLength: 1, maxLength: 64, description: "平台管理员用户名（无命名空间前缀，查询 platform_users 表）" }
+        password:       { type: string, minLength: 1, maxLength: 256, format: password, description: "明文密码，仅用于 bcrypt 校验，不持久化" }
+        idempotency_key: { type: string, pattern: "^[A-Za-z0-9_-]{1,128}$", description: "可选幂等键，重复提交返回同一 TokenPair" }
+
     RefreshAccessTokenResponse:
       type: object
       required: [access_token, expires_in]
@@ -1890,6 +1907,61 @@ paths:
                   checks: { type: object, additionalProperties: true }
 
   # ── 认证 ────────────────────────────────────────────────────────────────────
+  /auth/password/login:
+    post:
+      operationId: passwordLogin
+      summary: 租户账密登录（账号密码 Tab）
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PasswordLoginRequest' }
+      responses:
+        "200":
+          description: 账密登录成功，返回 TokenPair
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPairResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401":
+          description: 用户名或密码错误（code=INVALID_CREDENTIALS）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: 租户不存在（code=TENANT_NOT_FOUND）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "429": { $ref: '#/components/responses/RateLimitExceeded' }
+
+  /auth/platform/password/login:
+    post:
+      operationId: platformPasswordLogin
+      summary: 平台管理员账密登录
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlatformPasswordLoginRequest' }
+      responses:
+        "200":
+          description: 平台账密登录成功，返回平台 TokenPair（scope=platform）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPairResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401":
+          description: 用户名或密码错误（code=INVALID_CREDENTIALS）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "429": { $ref: '#/components/responses/RateLimitExceeded' }
+
   /auth/oidc/begin:
     post:
       operationId: beginOIDCLogin

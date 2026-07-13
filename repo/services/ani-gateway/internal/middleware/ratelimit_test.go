@@ -21,7 +21,7 @@ func TestRateLimitRejectsOverQuotaAndRecoversAfterWindow(t *testing.T) {
 	h.Use(
 		RequestID(),
 		func(ctx context.Context, c *app.RequestContext) {
-			setTenantContext(c, "tenant-a", "user-a", []string{"tenant-admin"})
+			setTenantContext(c, "tenant-a", "user-a", []string{"tenant-admin"}, "tenant")
 			c.Next(ctx)
 		},
 		RateLimit(store),
