@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Alert, Button, Loading, Space, Tag } from 'tdesign-react'
 import { api } from '@/api/client'
 
@@ -39,11 +39,7 @@ export function DemoConsolePage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  useEffect(() => {
-    boot()
-  }, [])
-
-  async function boot() {
+  const boot = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
@@ -60,7 +56,11 @@ export function DemoConsolePage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [instanceID, protocol])
+
+  useEffect(() => {
+    boot()
+  }, [boot])
 
   async function execCommand() {
     if (!instance) return
@@ -139,15 +139,26 @@ export function DemoConsolePage() {
   )
 }
 
+type ApiResponse<T> = {
+  data?: T
+  error?: { message?: string }
+}
+
+type PathApiClient = {
+  GET: (path: string) => Promise<ApiResponse<unknown>>
+  POST: (path: string, init: { body?: unknown }) => Promise<ApiResponse<unknown>>
+}
+
 async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
+  const demoApi = api as unknown as PathApiClient
   const method = init?.method ?? 'GET'
   if (method === 'POST') {
     const body = init?.body ? JSON.parse(String(init.body)) : undefined
-    const response = await (api as any).POST(path.replace('/api/v1', ''), { body })
+    const response = await demoApi.POST(path.replace('/api/v1', ''), { body })
     if (response.error) throw new Error(response.error.message || '请求失败')
     return response.data as T
   }
-  const response = await (api as any).GET(path.replace('/api/v1', ''))
+  const response = await demoApi.GET(path.replace('/api/v1', ''))
   if (response.error) throw new Error(response.error.message || '请求失败')
   return response.data as T
 }

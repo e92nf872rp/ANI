@@ -65,6 +65,8 @@ def matches_stale_pattern(text: str, pattern: str) -> bool:
         if re.search(r"(?<![A-Za-z0-9_])RKE\s+token\s+边界", text, re.IGNORECASE):
             return False
         return re.search(r"(?<![A-Za-z0-9_])RKE(?![A-Za-z0-9_])", text) is not None
+    if re.match(r"^(GET|POST|PUT|PATCH|DELETE) /", pattern):
+        return re.search(rf"(?<![A-Za-z0-9_]){re.escape(pattern)}(?![A-Za-z0-9_/\{{-])", text) is not None
     return pattern in text
 
 
@@ -73,7 +75,7 @@ def contains_stale_pattern(text: str, patterns: tuple[str, ...] = REPOSITORY_WID
 
 
 def markdown_paths() -> list[Path]:
-    ignored_parts = {"node_modules", ".git"}
+    ignored_parts = {"node_modules", ".git", ".superpowers", ".worktrees"}
     paths: list[Path] = []
     for path in PROJECT_ROOT.rglob("*.md"):
         if ignored_parts.intersection(path.parts):

@@ -1,5 +1,4 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { Form, Input, Select, Button, Steps } from 'tdesign-react'
 
 export const Route = createFileRoute('/models/import')({
   component: ModelImport,

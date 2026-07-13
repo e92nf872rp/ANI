@@ -3,6 +3,11 @@ import { Button, Table, Tag, Space } from 'tdesign-react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
 
+type ModelRow = {
+  status?: string
+  capabilities?: string[]
+}
+
 export const Route = createFileRoute('/models/')({
   component: ModelList,
 })
@@ -16,9 +21,9 @@ function ModelList() {
   const columns = [
     { title: '名称', colKey: 'display_name' },
     { title: '状态', colKey: 'status',
-      cell: ({ row }: any) => <Tag theme={row.status === 'ready' ? 'success' : 'default'}>{row.status}</Tag> },
+      cell: ({ row }: { row: ModelRow }) => <Tag theme={row.status === 'ready' ? 'success' : 'default'}>{row.status}</Tag> },
     { title: '能力', colKey: 'capabilities',
-      cell: ({ row }: any) => row.capabilities?.join(', ') },
+      cell: ({ row }: { row: ModelRow }) => row.capabilities?.join(', ') },
     { title: '操作', colKey: 'actions',
       cell: () => <span style={{ color: 'var(--td-text-color-placeholder)' }}>详情（开发中）</span> },
   ]
