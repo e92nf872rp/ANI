@@ -449,10 +449,9 @@ func newDemoInstanceAPIWithOptions(metadata ports.MetadataStore, workload Instan
 	serviceOptions := []runtimeadapter.InstanceServiceOption{
 		runtimeadapter.WithOperationStore(operations),
 		runtimeadapter.WithWorkloadIdentityService(identity),
-		runtimeadapter.WithSandboxRuntime(runtimeadapter.NewLocalSandboxRuntime()),
 	}
-	if strings.TrimSpace(workload.Provider) == "kubernetes_rest" {
-		serviceOptions = append(serviceOptions, runtimeadapter.WithSandboxWorkloadOrchestration(true))
+	if strings.TrimSpace(workload.Provider) != "kubernetes_rest" {
+		serviceOptions = append(serviceOptions, runtimeadapter.WithSandboxRuntime(runtimeadapter.NewLocalSandboxRuntime()))
 	}
 	if workload.Lifecycle != nil {
 		serviceOptions = append(serviceOptions, runtimeadapter.WithInstanceLifecycleExecutor(workload.Lifecycle))

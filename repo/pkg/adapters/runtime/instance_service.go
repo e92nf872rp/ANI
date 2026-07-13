@@ -12,14 +12,13 @@ import (
 )
 
 type LocalInstanceService struct {
-	orchestrator                 ports.WorkloadInstanceOrchestrator
-	store                        ports.WorkloadInstanceStore
-	operations                   ports.WorkloadOperationStore
-	lifecycle                    ports.WorkloadInstanceLifecycleExecutor
-	identity                     ports.WorkloadIdentityService
-	sandbox                      ports.SandboxRuntime
-	ops                          ports.WorkloadInstanceOps
-	sandboxWorkloadOrchestration bool
+	orchestrator ports.WorkloadInstanceOrchestrator
+	store        ports.WorkloadInstanceStore
+	operations   ports.WorkloadOperationStore
+	lifecycle    ports.WorkloadInstanceLifecycleExecutor
+	identity     ports.WorkloadIdentityService
+	sandbox      ports.SandboxRuntime
+	ops          ports.WorkloadInstanceOps
 }
 
 type InstanceServiceOption func(*LocalInstanceService)
@@ -45,12 +44,6 @@ func WithWorkloadIdentityService(identity ports.WorkloadIdentityService) Instanc
 func WithSandboxRuntime(sandbox ports.SandboxRuntime) InstanceServiceOption {
 	return func(service *LocalInstanceService) {
 		service.sandbox = sandbox
-	}
-}
-
-func WithSandboxWorkloadOrchestration(enabled bool) InstanceServiceOption {
-	return func(service *LocalInstanceService) {
-		service.sandboxWorkloadOrchestration = enabled
 	}
 }
 
@@ -124,7 +117,7 @@ func (s *LocalInstanceService) Create(ctx context.Context, request ports.Workloa
 		}
 		preRecorded = true
 	}
-	if request.Spec.Kind == ports.WorkloadKindSandbox && !s.sandboxWorkloadOrchestration {
+	if request.Spec.Kind == ports.WorkloadKindSandbox && s.sandbox != nil {
 		return s.createSandbox(ctx, request, operation, preRecorded)
 	}
 	result, err := s.orchestrator.Create(ctx, request)

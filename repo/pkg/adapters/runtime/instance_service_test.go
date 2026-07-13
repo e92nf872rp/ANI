@@ -34,14 +34,12 @@ func TestLocalInstanceServiceCreatesContainerThroughOrchestrator(t *testing.T) {
 	}
 }
 
-func TestLocalInstanceServiceCanCreateSandboxThroughWorkloadOrchestrator(t *testing.T) {
+func TestLocalInstanceServiceCanCreateSandboxThroughWorkloadOrchestratorWhenNoSandboxRuntimeConfigured(t *testing.T) {
 	orchestrator := &fakeInstanceOrchestrator{}
 	service := NewLocalInstanceServiceWithOptions(
 		orchestrator,
 		&fakeInstanceStore{},
 		NewLocalInstanceOpsGuard(),
-		WithSandboxRuntime(NewLocalSandboxRuntime()),
-		WithSandboxWorkloadOrchestration(true),
 	)
 	result, err := service.Create(context.Background(), ports.WorkloadInstanceCreateRequest{
 		Spec: ports.WorkloadSpec{
