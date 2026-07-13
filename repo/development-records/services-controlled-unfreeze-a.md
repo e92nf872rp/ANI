@@ -52,6 +52,15 @@ git diff --check
 | `services/model-service/internal/config/config.go` | `core_internal_go_import` | `github.com/kubercloud/ani/pkg/bootstrap` | model-service 配置仍直接返回 Core `bootstrap.Config`；受控解冻时应迁移为 Services 自有配置类型 |
 | `ai/rag-engine/app/core/milvus.py` | `provider_sdk_python_import` | `pymilvus` | rag-engine 当前仍直接导入 Milvus provider SDK；后续继续演进需先明确保留理由或迁移到受控边界 |
 
+## Task 5 复核（2026-07-14）
+
+- 已按当前源码逐项复核三条 baseline finding，路径、rule、精确 import 与原因描述仍与源码一致；未发现需要改写 `repo/architecture/services-boundary-baseline.yaml` 的事实性偏差。
+- `repo/scripts/validate_services_boundary.py` 当前仍坚持精确文件级例外，不接受目录级/通配符放行；`validate_services_boundary_test.py` 继续覆盖未登记 Core import、未登记 provider import、跨 service internal import、空 metadata 与 wildcard path 拒绝。
+- validator 的当前作用域仍是受控最小范围：`services/model-service/`、`services/kb-service/`、`ai/rag-engine/app/`，外加 `services/ani-gateway/` 内禁止直接 import Services 业务实现；它不是对 `repo/services/*` 的全量扫描结论。
+- Services 仍处于非 production 状态：`/api/v1/svc/*` 资源 handler 目前是过渡 stub，租户、RBAC、幂等和审计主要依赖 `ani-gateway` 全局 middleware 链，而不是各资源自身实现；因此 baseline 告警只能说明“现存例外被精确登记”，不能外推为边界已收敛或服务已就绪。
+- Services OpenAPI 写接口的契约复核结果：绝大多数 POST/PUT/PATCH 已声明 `idempotency_key`，但 `POST /knowledge-bases/{kb_id}/documents` 当前 `multipart/form-data` 只要求 `file`，未声明幂等键；另外该规范虽声明了 `BearerAuth`/`ApiKeyAuth` scheme 与多处 `401`/`403` 响应，但当前文件未声明 top-level 或 operation-level `security` 块，应继续按“实现层已有 middleware，契约层仍待补齐”的非 production 状态看待。
+- `services/ani-gateway/internal/router/router.go` 仍将 `/api/v1/svc/*` 描述为“stubs return 501”，但当前各资源 stub 实际多返回 `200/204` 占位响应，和部分 OpenAPI `201/202` 异步语义仍未对齐；本批次只记录事实，不改 bootstrap、provider wiring 或 API 行为。
+
 ## 非目标
 
 - 不实现模型、推理、知识库、RAG、Console 或 BOSS 业务功能。
@@ -62,10 +71,15 @@ git diff --check
 
 ## 验证命令
 
-本批次要求的聚焦验证：
+Task 5 复核实际执行命令：
 
 ```bash
 cd /Users/zhangfan/ANI/repo
-python scripts/validate_doc_entrypoints.py
-python scripts/validate_doc_entrypoints_test.py
+python scripts/validate_services_boundary.py --root .
+python scripts/validate_component_imports.py --root .
+python scripts/validate_spec_split_contract.py
+python scripts/validate_sdk_beta.py
+go test ./services/model-service/...
+python -m compileall -q ai/rag-engine
+python scripts/validate_services_boundary_test.py
 ```
