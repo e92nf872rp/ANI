@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### Architecture Documentation（2026-06~07）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| ARCH-HEXAGONAL-DOCS | ANI Core 六边形（Ports and Adapters）架构证据审查与 Go 仓库布局决策记录；仅沉淀文档和图示，不修改 Core 代码、Services 或当前 Sprint 状态 | core-hexagonal-architecture-review-2026-06-28.md、core-hexagonal-architecture-review-2026-06-28.docx、ani-go-layout-refactor-strategy.md |
+
 ### SDK Regression Fixes（2026-06）
 
 | 批次 | 内容摘要 | 文件 |
