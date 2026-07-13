@@ -24,7 +24,7 @@ Services 受控并行 PR 阶段：目录、API、handler、生成物和跨层边
 
 ### 仓库范围与 Services 受控解冻（强制）
 
-1. **本仓库只负责 ANI Core。** Core 是基础设施平台底座，对外输出 Core OpenAPI REST API、Core SDK、CLI。
+1. **Core 保护范围只负责 ANI Core；本仓库同时允许 Services 受控 PR。** Core 是基础设施平台底座，对外输出 Core OpenAPI REST API、Core SDK、CLI。
 2. **ANI Services 当前是受控并行 PR，不再按旧冻结规则处理。** Services 主责目录可按 `ANI-SERVICES-TEAM-GUIDE.md` 开发；触碰 Core 保护目录、Services API、Gateway mixed handler 或生成物时必须按 CODEOWNERS 共同审查。
 3. **Services 解冻不解除跨层门禁。** Services 业务资源只进 `repo/api/openapi/services/v1.yaml`；实现必须先改 API 契约，再改 handler/SDK/生成物；PR 必须通过 API split、`python scripts/validate_services_boundary.py --root .`（Services boundary gate）和既有 `make validate-architecture`。
 4. 跨层契约仍以 `repo/api/openapi/v1.yaml`（Core）为唯一真实来源；Services 业务资源不回流 Core API。

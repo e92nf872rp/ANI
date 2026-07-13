@@ -90,7 +90,7 @@
 
 ## 当前事实边界
 
-- 本仓库只推进 ANI Core；Services/RAG/Console/BOSS/前端/推理/知识库业务均由外部团队负责。
+- Core 保护范围只推进 ANI Core；Services/RAG/Console/BOSS/前端/推理/知识库业务在 Services 主责目录以受控 PR 推进，触碰 Core 保护范围时按 CODEOWNERS 共同审查。
 - Sprint 11 未新增 Core OpenAPI path，Core API v1 兼容性基线保持有效。
 - Sprint 11 没有新增 `M1-REAL-LAB-*` guard。
 - 本阶段未执行手工 `wipefs`、`sgdisk`、`mkfs`、`mount`、`/etc/fstab` 修改、系统盘变更、默认 StorageClass 切换或已有 PVC 迁移；Rook-Ceph 按审批后的 manifest 自动完成 OSD prepare 和 OSD 认领。生产化 reboot resilience 已按审批逐台重启三台节点，未并发重启。

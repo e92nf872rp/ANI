@@ -11,7 +11,7 @@
 当前阶段：Phase 1 / Sprint 13 / Core real provider 与 live gate 收敛
 当前不是 Phase 2：Phase 2 指 2026-10 以后延期能力
 当前入口：repo/CURRENT-SPRINT.md
-代码边界：沿用 Sprint 12 已闭合的 api/openapi/v1.yaml operationId、pkg/ports、pkg/adapters 与 Gateway handler；不得绕过 port 或新增 Services 业务逻辑。
+代码边界：Core 保护范围沿用 Sprint 12 已闭合的 api/openapi/v1.yaml operationId、pkg/ports、pkg/adapters 与 Gateway handler；不得绕过 port，不得把 Services 业务逻辑新增到 Core API/handler/ports；Services 业务实现只在受控 Services PR 主责目录推进。
 Core Sprint 13/14 既有事实继续有效：Sprint 13 production-shaped evidence 与 Sprint 14 resilience 隔离 fixture 结论保留，不外推 full platform production ready。
 Services 受控并行 PR 阶段：不再按旧冻结规则处理；目录、API、handler、生成物和跨层边界分别受 CODEOWNERS 共同审查、API split、Services boundary gate、make validate-architecture 约束。
 Sprint 14 分支态：feature/sprint14-core-resilience-semantics 已完成 Core resilience R-P0-0..R-P2-7 local/logic 批次；SPRINT14-CORE-RESILIENCE-LIVE-GATE / validate-sprint14-resilience-live-gate / Sprint14 resilience live gate 已在 ani-sprint14-resilience 隔离 namespace 真实通过 P0 strong backend kill、P1 weak dependency degraded、P2 controller primary kill / follower failover，并归档脱敏 evidence；production-ready 范围仅限隔离 Sprint14 Core resilience fixture，不外推到现有 Sprint13 单副本后端或 full platform。

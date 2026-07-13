@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the precise Services boundary baseline for frozen ANI Services code."""
+"""Validate the precise Services boundary baseline for controlled ANI Services PRs."""
 
 from __future__ import annotations
 
@@ -19,8 +19,40 @@ import validate_spec_split_contract as spec_split
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 BASELINE_STATUS = "accepted_baseline"
 GO_IMPORT_RE = re.compile(r'"([^"]+)"')
-GO_SCAN_ROOTS = ("services/model-service", "services/kb-service")
-PYTHON_SCAN_ROOTS = ("ai/rag-engine/app",)
+CORE_PROTECTED_SERVICE_ROOTS = (
+    "ani-gateway",
+    "auth-service",
+    "task-service",
+    "metering-service",
+    "reconcile-worker",
+)
+SERVICES_OWNED_SOURCE_ROOTS = ("model-service", "kb-service")
+DOCS_ONLY_SERVICE_ROOTS = ("docs", "tasks", "prototypes")
+KNOWN_SERVICE_ROOTS = frozenset(
+    (*CORE_PROTECTED_SERVICE_ROOTS, *SERVICES_OWNED_SOURCE_ROOTS, *DOCS_ONLY_SERVICE_ROOTS)
+)
+DOCS_ONLY_SOURCE_SUFFIXES = (
+    ".go",
+    ".py",
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+    ".sh",
+    ".bash",
+    ".zsh",
+    ".sql",
+    ".rs",
+    ".java",
+    ".kt",
+    ".cs",
+    ".rb",
+    ".php",
+)
+GO_SCAN_ROOTS = tuple(f"services/{service}" for service in SERVICES_OWNED_SOURCE_ROOTS)
+PYTHON_SCAN_ROOTS = ("ai",)
 GATEWAY_ROOT = "services/ani-gateway"
 SERVICE_IMPORT_PREFIX = "github.com/kubercloud/ani/services/"
 FORBIDDEN_GO_PREFIXES = (
@@ -36,6 +68,7 @@ FORBIDDEN_GATEWAY_SERVICE_IMPORT_PREFIXES = (
     "github.com/kubercloud/ani/services/kb-service/",
     "github.com/kubercloud/ani/services/auth-service/",
     "github.com/kubercloud/ani/services/task-service/",
+    "github.com/kubercloud/ani/services/metering-service/",
     "github.com/kubercloud/ani/services/reconcile-worker/",
 )
 
@@ -176,6 +209,13 @@ def iter_source_files(root: pathlib.Path, relative_root: str, suffix: str) -> It
     return sorted(path for path in target_root.rglob(f"*{suffix}") if path.is_file())
 
 
+def iter_files_with_suffixes(root: pathlib.Path, relative_root: str, suffixes: tuple[str, ...]) -> Iterable[pathlib.Path]:
+    target_root = root / relative_root
+    if not target_root.exists():
+        return []
+    return sorted(path for path in target_root.rglob("*") if path.is_file() and path.suffix in suffixes)
+
+
 def service_name_for_path(path: pathlib.Path, root: pathlib.Path) -> str | None:
     rel_parts = normalize_path(path, root).split("/")
     if len(rel_parts) < 2 or rel_parts[0] != "services":
@@ -191,6 +231,40 @@ def imported_service_internal_name(import_path: str) -> str | None:
     if not separator or not service_name or not internal_path:
         return None
     return service_name
+
+
+def detect_service_root_classification_findings(root: pathlib.Path) -> list[Finding]:
+    findings: list[Finding] = []
+    services_root = root / "services"
+    if not services_root.exists():
+        return findings
+
+    for child in sorted(path for path in services_root.iterdir() if path.is_dir()):
+        rel_path = normalize_path(child, root)
+        if child.name not in KNOWN_SERVICE_ROOTS:
+            findings.append(
+                Finding(
+                    path=rel_path,
+                    rule="unknown_service_root",
+                    import_path=child.name,
+                    detail=(
+                        "repo/services immediate children must be classified as Core-protected, "
+                        "Services-owned source, or docs-only before Services PRs can proceed"
+                    ),
+                )
+            )
+            continue
+        if child.name in DOCS_ONLY_SERVICE_ROOTS:
+            for source_path in iter_files_with_suffixes(root, rel_path, DOCS_ONLY_SOURCE_SUFFIXES):
+                findings.append(
+                    Finding(
+                        path=normalize_path(source_path, root),
+                        rule="docs_only_service_source_file",
+                        import_path=child.name,
+                        detail="Services docs/tasks/prototypes roots are docs-only and must not contain source files",
+                    )
+                )
+    return findings
 
 
 def detect_go_findings(root: pathlib.Path) -> list[Finding]:
@@ -313,6 +387,7 @@ def validate_workspace(
     baseline_file = baseline_path or (root / "architecture" / "services-boundary-baseline.yaml")
     baseline = load_baseline(baseline_file, root)
     findings = [
+        *detect_service_root_classification_findings(root),
         *detect_go_findings(root),
         *detect_python_findings(root),
         *detect_gateway_cross_layer_findings(root),

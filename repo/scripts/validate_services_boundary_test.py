@@ -72,6 +72,72 @@ class ServicesBoundaryValidationTest(unittest.TestCase):
         self.assertIn("ai/rag-engine/app/core/milvus.py", "\n".join(result.errors))
         self.assertIn("pymilvus", "\n".join(result.errors))
 
+    def test_provider_sdk_import_anywhere_under_ai_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_fixture_layout(root)
+            self._write_baseline(
+                root,
+                """
+                version: 1
+                exceptions: []
+                """,
+            )
+            (root / "ai" / "experimental-worker").mkdir(parents=True, exist_ok=True)
+            (root / "ai" / "experimental-worker" / "provider.py").write_text(
+                "import pymilvus\n",
+                encoding="utf-8",
+            )
+
+            result = guard.validate_workspace(root, run_spec_split=False)
+
+        self.assertEqual(result.warning_count, 0)
+        self.assertIn("ai/experimental-worker/provider.py", "\n".join(result.errors))
+        self.assertIn("provider_sdk_python_import", "\n".join(result.errors))
+        self.assertIn("pymilvus", "\n".join(result.errors))
+
+    def test_unknown_immediate_services_root_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_fixture_layout(root)
+            self._write_baseline(
+                root,
+                """
+                version: 1
+                exceptions: []
+                """,
+            )
+            (root / "services" / "new-service").mkdir(parents=True, exist_ok=True)
+
+            result = guard.validate_workspace(root, run_spec_split=False)
+
+        self.assertEqual(result.warning_count, 0)
+        self.assertIn("services/new-service", "\n".join(result.errors))
+        self.assertIn("unknown_service_root", "\n".join(result.errors))
+
+    def test_docs_only_services_root_rejects_source_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_fixture_layout(root)
+            self._write_baseline(
+                root,
+                """
+                version: 1
+                exceptions: []
+                """,
+            )
+            (root / "services" / "tasks").mkdir(parents=True, exist_ok=True)
+            (root / "services" / "tasks" / "helper.py").write_text(
+                "print('not documentation')\n",
+                encoding="utf-8",
+            )
+
+            result = guard.validate_workspace(root, run_spec_split=False)
+
+        self.assertEqual(result.warning_count, 0)
+        self.assertIn("services/tasks/helper.py", "\n".join(result.errors))
+        self.assertIn("docs_only_service_source_file", "\n".join(result.errors))
+
     def test_exact_registered_exception_is_warn_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
