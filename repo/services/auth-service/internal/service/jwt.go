@@ -47,6 +47,7 @@ type Claims struct {
 	UserID   uuid.UUID
 	Roles    []string
 	JTI      string
+	Scope    string
 }
 
 type jwtHeader struct {
@@ -65,6 +66,7 @@ type jwtPayload struct {
 	TenantID  string   `json:"tid"`
 	UserID    string   `json:"uid"`
 	Roles     []string `json:"roles"`
+	Scope     string   `json:"scope,omitempty"`
 }
 
 func NewJWTValidator(cfg JWTConfig, blocklist tokenBlocklist) (*JWTValidator, error) {
@@ -125,7 +127,11 @@ func (v *JWTValidator) Validate(ctx context.Context, token string) (*Claims, err
 
 	tenantID, err := uuid.Parse(payload.TenantID)
 	if err != nil || tenantID == uuid.Nil {
-		return nil, errInvalidJWT
+		// Platform tokens carry no tenant_id (scope=platform). Tenant tokens must have a valid tenant_id.
+		if payload.Scope != "platform" {
+			return nil, errInvalidJWT
+		}
+		tenantID = uuid.Nil
 	}
 	userID, err := uuid.Parse(payload.UserID)
 	if err != nil || userID == uuid.Nil {
@@ -136,6 +142,7 @@ func (v *JWTValidator) Validate(ctx context.Context, token string) (*Claims, err
 		UserID:   userID,
 		Roles:    payload.Roles,
 		JTI:      payload.JTI,
+		Scope:    payload.Scope,
 	}, nil
 }
 

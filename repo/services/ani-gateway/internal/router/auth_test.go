@@ -218,18 +218,22 @@ func TestAuthRevokeAPIKeyMapsNotFound(t *testing.T) {
 }
 
 type fakeGatewayAuthClient struct {
-	beginOIDC    *authv1.BeginOIDCLoginResponse
-	completeOIDC *authv1.TokenPair
-	refresh      *authv1.AccessToken
-	create       *authv1.CreateAPIKeyResponse
-	list         *authv1.ListAPIKeysResponse
-	err          error
-	beginErr     error
-	completeErr  error
-	revokeErr    error
-	createErr    error
-	listErr      error
-	revokeKeyErr error
+	beginOIDC       *authv1.BeginOIDCLoginResponse
+	completeOIDC    *authv1.TokenPair
+	refresh         *authv1.AccessToken
+	create          *authv1.CreateAPIKeyResponse
+	list            *authv1.ListAPIKeysResponse
+	err             error
+	beginErr        error
+	completeErr     error
+	revokeErr       error
+	createErr       error
+	listErr         error
+	revokeKeyErr    error
+	login           *authv1.TokenPair
+	loginErr        error
+	platformLogin   *authv1.TokenPair
+	platformLoginErr error
 }
 
 func (f fakeGatewayAuthClient) ValidateToken(context.Context, string) (*commonv1.TenantContext, error) {
@@ -281,4 +285,158 @@ func (f fakeGatewayAuthClient) ListAPIKeys(context.Context, *authv1.ListAPIKeysR
 
 func (f fakeGatewayAuthClient) RevokeAPIKey(context.Context, *authv1.RevokeAPIKeyRequest) error {
 	return f.revokeKeyErr
+}
+
+func (f fakeGatewayAuthClient) Login(context.Context, *authv1.LoginRequest) (*authv1.TokenPair, error) {
+	if f.loginErr != nil {
+		return nil, f.loginErr
+	}
+	return f.login, nil
+}
+
+func (f fakeGatewayAuthClient) PlatformPasswordLogin(context.Context, *authv1.PlatformPasswordLoginRequest) (*authv1.TokenPair, error) {
+	if f.platformLoginErr != nil {
+		return nil, f.platformLoginErr
+	}
+	return f.platformLogin, nil
+}
+
+func TestPasswordLoginHandlerSuccess(t *testing.T) {
+	issuedAt := timestamppb.New(time.Date(2026, 7, 6, 8, 0, 0, 0, time.UTC))
+	api := authAPI{client: fakeGatewayAuthClient{
+		login: &authv1.TokenPair{
+			AccessToken:  "access-1",
+			RefreshToken: "refresh-1",
+			ExpiresIn:    3600,
+			IssuedAt:     issuedAt,
+		},
+	}}
+
+	resp, httpStatus, code, message := api.passwordLoginHandler(context.Background(), authPasswordLoginRequest{
+		TenantName: "tenant-a",
+		Username:   "alice",
+		Password:   "correct",
+	})
+	if code != "" || message != "" {
+		t.Fatalf("passwordLoginHandler error = %s/%s", code, message)
+	}
+	if httpStatus != 200 {
+		t.Fatalf("status = %d, want 200", httpStatus)
+	}
+	if resp.AccessToken != "access-1" || resp.RefreshToken != "refresh-1" {
+		t.Fatalf("response = %+v", resp)
+	}
+	if resp.IssuedAt != "2026-07-06T08:00:00Z" {
+		t.Fatalf("issued_at = %q", resp.IssuedAt)
+	}
+}
+
+func TestPasswordLoginHandlerRejectsMissingFields(t *testing.T) {
+	api := authAPI{client: fakeGatewayAuthClient{}}
+	for _, tc := range []authPasswordLoginRequest{
+		{Username: "alice", Password: "pwd"},
+		{TenantName: "tenant-a", Password: "pwd"},
+		{TenantName: "tenant-a", Username: "alice"},
+	} {
+		_, httpStatus, code, _ := api.passwordLoginHandler(context.Background(), tc)
+		if httpStatus != 400 || code != "BAD_REQUEST" {
+			t.Fatalf("status/code = %d/%s, want 400/BAD_REQUEST", httpStatus, code)
+		}
+	}
+}
+
+func TestPasswordLoginHandlerMapsInvalidCredentials(t *testing.T) {
+	api := authAPI{client: fakeGatewayAuthClient{
+		loginErr: status.Error(codes.Unauthenticated, "INVALID_CREDENTIALS"),
+	}}
+	_, httpStatus, code, _ := api.passwordLoginHandler(context.Background(), authPasswordLoginRequest{
+		TenantName: "tenant-a",
+		Username:   "alice",
+		Password:   "wrong",
+	})
+	if httpStatus != 401 || code != "INVALID_CREDENTIALS" {
+		t.Fatalf("status/code = %d/%s, want 401/INVALID_CREDENTIALS", httpStatus, code)
+	}
+}
+
+func TestPasswordLoginHandlerMapsTenantNotFound(t *testing.T) {
+	api := authAPI{client: fakeGatewayAuthClient{
+		loginErr: status.Error(codes.NotFound, "TENANT_NOT_FOUND"),
+	}}
+	_, httpStatus, code, _ := api.passwordLoginHandler(context.Background(), authPasswordLoginRequest{
+		TenantName: "missing",
+		Username:   "alice",
+		Password:   "pwd",
+	})
+	if httpStatus != 404 || code != "TENANT_NOT_FOUND" {
+		t.Fatalf("status/code = %d/%s, want 404/TENANT_NOT_FOUND", httpStatus, code)
+	}
+}
+
+func TestPlatformPasswordLoginHandlerSuccess(t *testing.T) {
+	issuedAt := timestamppb.New(time.Date(2026, 7, 7, 8, 0, 0, 0, time.UTC))
+	api := authAPI{client: fakeGatewayAuthClient{
+		platformLogin: &authv1.TokenPair{
+			AccessToken:  "platform-access-1",
+			RefreshToken: "platform-refresh-1",
+			ExpiresIn:    3600,
+			IssuedAt:     issuedAt,
+		},
+	}}
+
+	resp, httpStatus, code, message := api.platformPasswordLoginHandler(context.Background(), authPlatformPasswordLoginRequest{
+		Username: "admin",
+		Password: "correct",
+	})
+	if code != "" || message != "" {
+		t.Fatalf("platformPasswordLoginHandler error = %s/%s", code, message)
+	}
+	if httpStatus != 200 {
+		t.Fatalf("status = %d, want 200", httpStatus)
+	}
+	if resp.AccessToken != "platform-access-1" || resp.RefreshToken != "platform-refresh-1" {
+		t.Fatalf("response = %+v", resp)
+	}
+	if resp.IssuedAt != "2026-07-07T08:00:00Z" {
+		t.Fatalf("issued_at = %q", resp.IssuedAt)
+	}
+}
+
+func TestPlatformPasswordLoginHandlerRejectsMissingFields(t *testing.T) {
+	api := authAPI{client: fakeGatewayAuthClient{}}
+	for _, tc := range []authPlatformPasswordLoginRequest{
+		{Password: "pwd"},
+		{Username: "admin"},
+	} {
+		_, httpStatus, code, _ := api.platformPasswordLoginHandler(context.Background(), tc)
+		if httpStatus != 400 || code != "BAD_REQUEST" {
+			t.Fatalf("status/code = %d/%s, want 400/BAD_REQUEST", httpStatus, code)
+		}
+	}
+}
+
+func TestPlatformPasswordLoginHandlerMapsInvalidCredentials(t *testing.T) {
+	api := authAPI{client: fakeGatewayAuthClient{
+		platformLoginErr: status.Error(codes.Unauthenticated, "INVALID_CREDENTIALS"),
+	}}
+	_, httpStatus, code, _ := api.platformPasswordLoginHandler(context.Background(), authPlatformPasswordLoginRequest{
+		Username: "admin",
+		Password: "wrong",
+	})
+	if httpStatus != 401 || code != "INVALID_CREDENTIALS" {
+		t.Fatalf("status/code = %d/%s, want 401/INVALID_CREDENTIALS", httpStatus, code)
+	}
+}
+
+func TestPlatformPasswordLoginHandlerMapsBadGateway(t *testing.T) {
+	api := authAPI{client: fakeGatewayAuthClient{
+		platformLoginErr: status.Error(codes.Internal, "boom"),
+	}}
+	_, httpStatus, code, _ := api.platformPasswordLoginHandler(context.Background(), authPlatformPasswordLoginRequest{
+		Username: "admin",
+		Password: "pwd",
+	})
+	if httpStatus != 502 || code != "AUTH_SERVICE_ERROR" {
+		t.Fatalf("status/code = %d/%s, want 502/AUTH_SERVICE_ERROR", httpStatus, code)
+	}
 }

@@ -25,6 +25,8 @@ type AuthService struct {
 	refreshTokens refreshTokenStore
 	blocklist     tokenBlocklist
 	oidc          *oidcLoginManager
+	passwordLogin *passwordLoginManager
+	platformLogin *platformLoginManager
 }
 
 func NewAuthService(db *pgxpool.Pool, cache ports.CacheStore, jwtCfg JWTConfig) *AuthService {
@@ -44,6 +46,8 @@ func NewAuthService(db *pgxpool.Pool, cache ports.CacheStore, jwtCfg JWTConfig) 
 		refreshTokens: newRefreshTokenStore(db),
 		blocklist:     blocklist,
 		oidc:          newOIDCLoginManager(cache, jwtCfg, newOIDCSessionStore(db, newOIDCGroupRoleMapper(jwtCfg.OIDCGroupRoleMapJSON)), issuer),
+		passwordLogin: newPasswordLoginManager(newPostgresPasswordLoginStore(db), issuer),
+		platformLogin: newPlatformLoginManager(newPostgresPlatformLoginStore(db), issuer),
 	}
 }
 
@@ -51,8 +55,18 @@ func (s *AuthService) Register(server *grpc.Server) {
 	authv1.RegisterAuthServiceServer(server, s)
 }
 
-func (s *AuthService) Login(context.Context, *authv1.LoginRequest) (*authv1.TokenPair, error) {
-	return nil, status.Error(codes.Unimplemented, "login requires Dex/OIDC integration")
+func (s *AuthService) Login(ctx context.Context, req *authv1.LoginRequest) (*authv1.TokenPair, error) {
+	if s == nil || s.passwordLogin == nil {
+		return nil, status.Error(codes.Unimplemented, "login is not configured")
+	}
+	return s.passwordLogin.Login(ctx, req.GetTenantName(), req.GetUsername(), req.GetPassword())
+}
+
+func (s *AuthService) PlatformPasswordLogin(ctx context.Context, req *authv1.PlatformPasswordLoginRequest) (*authv1.TokenPair, error) {
+	if s == nil || s.platformLogin == nil {
+		return nil, status.Error(codes.Unimplemented, "platform login is not configured")
+	}
+	return s.platformLogin.Login(ctx, req.GetUsername(), req.GetPassword())
 }
 
 func (s *AuthService) BeginOIDCLogin(ctx context.Context, req *authv1.BeginOIDCLoginRequest) (*authv1.BeginOIDCLoginResponse, error) {
@@ -110,6 +124,7 @@ func (s *AuthService) ValidateToken(ctx context.Context, req *authv1.ValidateTok
 			TenantId: principal.TenantID.String(),
 			UserId:   uuidString(principal.UserID),
 			Roles:    append([]string{"service-account"}, principal.Scopes...),
+			Scope:    "tenant",
 		}, nil
 	}
 	if s.jwt == nil {
@@ -119,10 +134,15 @@ func (s *AuthService) ValidateToken(ctx context.Context, req *authv1.ValidateTok
 	if err != nil {
 		return nil, status.Error(codes.Unauthenticated, "invalid token")
 	}
+	scope := claims.Scope
+	if scope == "" {
+		scope = "tenant"
+	}
 	return &commonv1.TenantContext{
 		TenantId: claims.TenantID.String(),
 		UserId:   claims.UserID.String(),
 		Roles:    claims.Roles,
+		Scope:    scope,
 	}, nil
 }
 

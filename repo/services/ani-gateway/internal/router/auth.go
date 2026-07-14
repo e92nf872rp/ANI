@@ -35,6 +35,19 @@ type authCompleteOIDCRequest struct {
 	RedirectURI string `json:"redirect_uri"`
 }
 
+type authPasswordLoginRequest struct {
+	TenantName     string `json:"tenant_name"`
+	Username       string `json:"username"`
+	Password       string `json:"password"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+}
+
+type authPlatformPasswordLoginRequest struct {
+	Username       string `json:"username"`
+	Password       string `json:"password"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+}
+
 type authTokenPairResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
@@ -88,6 +101,8 @@ type authListAPIKeysResponse struct {
 
 func registerAuth(v1 *route.RouterGroup) {
 	api := authAPI{client: middleware.NewAuthClientFromEnv()}
+	v1.POST("/auth/password/login", api.passwordLogin)
+	v1.POST("/auth/platform/password/login", api.platformPasswordLogin)
 	v1.POST("/auth/oidc/begin", api.beginOIDC)
 	v1.POST("/auth/token", api.completeOIDC)
 	v1.POST("/auth/refresh", api.refresh)
@@ -95,6 +110,122 @@ func registerAuth(v1 *route.RouterGroup) {
 	v1.GET("/auth/api-keys", api.listAPIKeys)
 	v1.POST("/auth/api-keys", api.createAPIKey)
 	v1.DELETE("/auth/api-keys/:key_id", api.revokeAPIKey)
+}
+
+// 账号密码登录
+func (api authAPI) passwordLogin(ctx context.Context, c *app.RequestContext) {
+	var req authPasswordLoginRequest
+	if err := c.BindJSON(&req); err != nil {
+		writeAuthError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid password login request")
+		return
+	}
+	resp, httpStatus, errCode, message := api.passwordLoginHandler(ctx, req)
+	if errCode != "" {
+		writeAuthError(c, httpStatus, errCode, message)
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// 账号密码登录处理函数
+func (api authAPI) passwordLoginHandler(ctx context.Context, req authPasswordLoginRequest) (authTokenPairResponse, int, string, string) {
+	if strings.TrimSpace(req.TenantName) == "" {
+		return authTokenPairResponse{}, http.StatusBadRequest, "BAD_REQUEST", "tenant_name required"
+	}
+	if strings.TrimSpace(req.Username) == "" {
+		return authTokenPairResponse{}, http.StatusBadRequest, "BAD_REQUEST", "username required"
+	}
+	if req.Password == "" {
+		return authTokenPairResponse{}, http.StatusBadRequest, "BAD_REQUEST", "password required"
+	}
+	if api.client == nil {
+		return authTokenPairResponse{}, http.StatusServiceUnavailable, "AUTH_SERVICE_UNAVAILABLE", "auth service unavailable"
+	}
+	tokenPair, err := api.client.Login(ctx, &authv1.LoginRequest{
+		TenantName: strings.TrimSpace(req.TenantName),
+		Username:   strings.TrimSpace(req.Username),
+		Password:   req.Password,
+	})
+	if err != nil {
+		httpStatus, code, message := passwordLoginHTTPError(err)
+		return authTokenPairResponse{}, httpStatus, code, message
+	}
+	return authTokenPairFromProto(tokenPair), http.StatusOK, "", ""
+}
+
+// 账号密码登录错误映射函数
+func passwordLoginHTTPError(err error) (int, string, string) {
+	st, ok := status.FromError(err)
+	if !ok || st == nil {
+		return http.StatusBadGateway, "AUTH_SERVICE_ERROR", "auth service error"
+	}
+	switch st.Code() {
+	case codes.Unauthenticated:
+		return http.StatusUnauthorized, "INVALID_CREDENTIALS", "invalid credentials"
+	case codes.NotFound:
+		return http.StatusNotFound, "TENANT_NOT_FOUND", "tenant not found"
+	case codes.InvalidArgument:
+		return http.StatusBadRequest, "BAD_REQUEST", st.Message()
+	case codes.FailedPrecondition:
+		return http.StatusServiceUnavailable, "AUTH_NOT_CONFIGURED", st.Message()
+	default:
+		return http.StatusBadGateway, "AUTH_SERVICE_ERROR", "auth service error"
+	}
+}
+
+// 平台账密登录
+func (api authAPI) platformPasswordLogin(ctx context.Context, c *app.RequestContext) {
+	var req authPlatformPasswordLoginRequest
+	if err := c.BindJSON(&req); err != nil {
+		writeAuthError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid platform password login request")
+		return
+	}
+	resp, httpStatus, errCode, message := api.platformPasswordLoginHandler(ctx, req)
+	if errCode != "" {
+		writeAuthError(c, httpStatus, errCode, message)
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// 平台账密登录处理函数
+func (api authAPI) platformPasswordLoginHandler(ctx context.Context, req authPlatformPasswordLoginRequest) (authTokenPairResponse, int, string, string) {
+	if strings.TrimSpace(req.Username) == "" {
+		return authTokenPairResponse{}, http.StatusBadRequest, "BAD_REQUEST", "username required"
+	}
+	if req.Password == "" {
+		return authTokenPairResponse{}, http.StatusBadRequest, "BAD_REQUEST", "password required"
+	}
+	if api.client == nil {
+		return authTokenPairResponse{}, http.StatusServiceUnavailable, "AUTH_SERVICE_UNAVAILABLE", "auth service unavailable"
+	}
+	tokenPair, err := api.client.PlatformPasswordLogin(ctx, &authv1.PlatformPasswordLoginRequest{
+		Username: strings.TrimSpace(req.Username),
+		Password: req.Password,
+	})
+	if err != nil {
+		httpStatus, code, message := platformLoginHTTPError(err)
+		return authTokenPairResponse{}, httpStatus, code, message
+	}
+	return authTokenPairFromProto(tokenPair), http.StatusOK, "", ""
+}
+
+// 平台账密登录错误映射函数
+func platformLoginHTTPError(err error) (int, string, string) {
+	st, ok := status.FromError(err)
+	if !ok || st == nil {
+		return http.StatusBadGateway, "AUTH_SERVICE_ERROR", "auth service error"
+	}
+	switch st.Code() {
+	case codes.Unauthenticated:
+		return http.StatusUnauthorized, "INVALID_CREDENTIALS", "invalid credentials"
+	case codes.InvalidArgument:
+		return http.StatusBadRequest, "BAD_REQUEST", st.Message()
+	case codes.FailedPrecondition:
+		return http.StatusServiceUnavailable, "AUTH_NOT_CONFIGURED", st.Message()
+	default:
+		return http.StatusBadGateway, "AUTH_SERVICE_ERROR", "auth service error"
+	}
 }
 
 func (api authAPI) beginOIDC(ctx context.Context, c *app.RequestContext) {
@@ -409,6 +540,8 @@ func authHTTPError(err error) (int, string, string) {
 		return http.StatusServiceUnavailable, "AUTH_NOT_CONFIGURED", status.Convert(err).Message()
 	case codes.NotFound:
 		return http.StatusNotFound, "NOT_FOUND", status.Convert(err).Message()
+	case codes.ResourceExhausted:
+		return http.StatusTooManyRequests, "RATE_LIMIT_EXCEEDED", status.Convert(err).Message()
 	default:
 		return http.StatusBadGateway, "AUTH_SERVICE_ERROR", "auth service error"
 	}
