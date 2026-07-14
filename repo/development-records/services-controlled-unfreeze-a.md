@@ -11,7 +11,7 @@
 - `repo/api/openapi/v1.yaml` 仍是 Core OpenAPI REST API 与 Core/Services 跨层控制面契约来源。
 - `repo/api/openapi/services/v1.yaml` 仍是 Services API 来源，Services 路径使用 `/api/v1/svc`。
 - `.github/CODEOWNERS` 已在本分支纳入 Core/Services owner 分层：Core 保护目录由 `@e92nf872rp` 主责；Services API、Services SDK、Services handler、model-service、kb-service、Services docs/tasks/prototypes、AI、frontends、inference operator 由 `@viccao-yue` 与 `@e92nf872rp` 共同可见 review。
-- `repo/Makefile` 已在本分支提供 `make validate-services`，聚合 Services boundary、API split、SDK、model-service Go、RAG Python compile/test、Console schema drift 和既有 architecture gate。
+- `repo/Makefile` 已在本分支提供 `make validate-services`，聚合 Services boundary、API split、OpenAPI/Gateway route contract、Services semantic contract、SDK/API docs 生成漂移、model-service Go、RAG Python compile/test、Console schema drift 和既有 architecture gate。
 - `.github/workflows/ci.yml` 已在本 final-review fix wave 移到 GitHub 可发现的 checkout root；CI 中的 repo 命令以 `repo/` 为 working directory，Go/Python/Node cache 与 OpenAPI file path 均按 checkout-root 语义指向 `repo/...`。
 - `repo/frontends/console/` 的 npm lockfile、lint/type-check/build 与 OpenAPI schema 生成一致性检查已纳入本分支的 Console gate；生成物仍必须由 OpenAPI source 驱动，不手工改 generated schema。
 - Task 1 已新增并在本 final-review fix wave 加固 `repo/scripts/validate_services_boundary.py` 和 `repo/architecture/services-boundary-baseline.yaml`，用于阻断未知 Services root、docs-only root 源码、Services-owned Go 越界 import、Gateway 直连 Services 实现和未登记 AI provider SDK 直连。
@@ -33,7 +33,7 @@ Services 受控解冻后的 PR 顺序：
 1. API-first：先改 `repo/api/openapi/services/v1.yaml`；如触碰 Core 能力，先经 Core API 评审。
 2. 实现：再改 Services handler、业务服务、前端和生成物。
 3. 生成物：Services SDK、API docs 和前端 schema 必须由 OpenAPI 生成，不手工编辑。
-4. 边界与语义：运行 `make validate-services`，它聚合 API split、Services boundary gate、Services OpenAPI YAML、Services 语义合同、源驱动 SDK/API docs、SDK、model-service、RAG、Console schema drift 和现有 architecture gate。
+4. 边界与语义：运行 `make validate-services`，它聚合 API split、Services boundary gate、OpenAPI/Gateway route contract、Services OpenAPI YAML、Services 语义合同、源驱动 SDK/API docs、SDK、model-service、RAG、Console schema drift 和现有 architecture gate。
 5. 共同审查：触碰 Core API/OpenAPI、Core 保护目录、Gateway shared/mixed handler、Services API 或生成物时按 CODEOWNERS review，并在 PR 描述中列出触碰原因。
 
 Services PR 最短必跑命令：
@@ -45,11 +45,12 @@ make validate-doc-entrypoints
 git diff --check
 ```
 
-Services OpenAPI 语义门禁使用 `repo/architecture/services-contract-baseline.yaml` 登记精确的当前缺口：
+Services OpenAPI 语义门禁使用 `repo/architecture/services-contract-baseline.yaml` 登记精确的当前缺口；OpenAPI 与 Gateway 路由表面使用 `repo/architecture/services-route-baseline.yaml` 登记精确差异：
 
 - `uploadKnowledgeBaseDocument` 当前 multipart request 未要求 `idempotency_key`；
 - 当前 Services spec 的操作没有 top-level/operation-level `security`，但保留了 `BearerAuth` 与 `ApiKeyAuth` scheme；
 - 当前若干 `202` 操作仍返回资源或没有 response schema，而不是 `AsyncTask`。
+- 当前 Gateway 有 2 个 Services 路由未在 OpenAPI 声明，OpenAPI 有 11 个操作尚未在 Gateway 注册；差异按 method/path 精确登记，新增差异和失效基线阻断 PR。
 
 这些条目只作为逐操作、warning-only 的 accepted baseline；新增缺口和失效基线均阻断 PR。`make validate-services` 还会重新运行 `gen_sdk_alpha.py` 与 `generate_api_docs.py`，并拒绝 `sdks/core/`、`sdks/services/`、`docs/api/` 生成物漂移。以上门禁通过不代表 Services 已 production-ready。
 
@@ -70,12 +71,13 @@ Services OpenAPI 语义门禁使用 `repo/architecture/services-contract-baselin
 - validator 的当前作用域仍是受控最小范围，但已 fail-closed 覆盖 `repo/services/` immediate children：Core-protected service roots（`ani-gateway`、`auth-service`、`task-service`、`metering-service`、`reconcile-worker`）只分类不扫描业务实现；Services-owned source roots（`model-service`、`kb-service`）扫描 Go 越界 import；docs-only roots（`docs`、`tasks`、`prototypes`）禁止出现源文件；`repo/ai/**/*.py` 全量扫描未登记 provider SDK import；`services/ani-gateway/` 继续禁止直接 import Services 业务实现。
 - Services 仍处于非 production 状态：`/api/v1/svc/*` 资源 handler 目前是过渡 stub，租户、RBAC、幂等和审计主要依赖 `ani-gateway` 全局 middleware 链，而不是各资源自身实现；因此 baseline 告警只能说明“现存例外被精确登记”，不能外推为边界已收敛或服务已就绪。
 - Services OpenAPI 写接口的契约复核结果：绝大多数 POST/PUT/PATCH 已声明 `idempotency_key`，但 `POST /knowledge-bases/{kb_id}/documents` 当前 `multipart/form-data` 只要求 `file`，未声明幂等键；另外该规范虽声明了 `BearerAuth`/`ApiKeyAuth` scheme 与多处 `401`/`403` 响应，但当前文件未声明 top-level 或 operation-level `security` 块，应继续按“实现层已有 middleware，契约层仍待补齐”的非 production 状态看待。
-- `services/ani-gateway/internal/router/router.go` 仍将 `/api/v1/svc/*` 描述为“stubs return 501”，但当前各资源 stub 实际多返回 `200/204` 占位响应，和部分 OpenAPI `201/202` 异步语义仍未对齐；本批次只记录事实，不改 bootstrap、provider wiring 或 API 行为。
+- 源码复核发现原先 `services/ani-gateway/internal/router/router.go` 将 `/api/v1/svc/*` 描述为“stubs return 501”，但各资源 stub 实际多返回 `200/204` 占位响应，和部分 OpenAPI `201/202` 异步语义未对齐；本批次已将注释改为“transitional placeholders”，没有改 bootstrap、provider wiring 或 API 行为。
+- `repo/scripts/validate_services_route_contract.py` 只校验 method/path 表面，不把当前过渡 handler 的占位响应误报为已实现；正式开放某个操作前，仍须同步 OpenAPI、handler 响应语义、生成物和业务测试。
 
 ## 后续聚合门禁与 final-review fix wave A（2026-07-14）
 
 - 历史验证保留：Task 5 中直接执行 `go test ./services/model-service/...` 时，依赖下载 `golang.org/x/net`、`golang.org/x/sys`、`golang.org/x/sync` 从 `proxy.golang.org` 超时；已做一次 require_escalated 重跑且结果相同。该 blocker 作为当时网络依赖下载环境问题保留，不改写为通过。
-- 后续聚合通过项已追加到本分支记录：Console `npm ci`、`npm run lint`、`npm run type-check`、`npm run build`，`make validate-doc-entrypoints`，`make validate-services`，`make lint-ts` 和 `git diff --check` 均已在后续 Task 6/fix 报告中记录为通过；`make validate-services` 同时输出三条 boundary accepted baseline warning 与当前 Services OpenAPI 语义缺口的逐操作 accepted baseline warning，均属于本记录列明的精确存量例外。
+- 后续聚合通过项已追加到本分支记录：Console `npm ci`、`npm run lint`、`npm run type-check`、`npm run build`，`make validate-doc-entrypoints`，`make validate-services`，`make lint-ts` 和 `git diff --check` 均已在后续 Task 6/fix 报告中记录为通过；`make validate-services` 同时输出三条 boundary、70 条 semantic contract 和 13 条 route surface accepted baseline warning，均属于本记录列明的精确存量例外。
 - final-review fix wave A 修正了 GitHub workflow discoverability：`repo/.github/workflows/ci.yml` 已移到 `.github/workflows/ci.yml`；各 job 的 `run` 步骤从 `repo/` 执行，Go/Python/Node cache dependency path 与 OpenAPI action file path 均指向 checkout root 下的 `repo/...`。
 - final-review fix wave A 加固了 Services boundary validator：立即分类 `repo/services/*`，未知 service root fail closed；docs-only roots 出现源文件 fail closed；Go import 扫描保持在 Services-owned source roots；AI provider SDK 扫描扩大到 `repo/ai/**/*.py`；现有 `pymilvus` 只保留 `ai/rag-engine/app/core/milvus.py` 精确 baseline。
 - final-review fix wave A 只修正当前入口中的歧义措辞：Core-only 表述限定为 Core 保护范围，Services 业务可继续在主责目录走受控 PR；历史冻结记录和旧 token 未批量改写。

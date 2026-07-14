@@ -1,6 +1,6 @@
 # KuberCloud ANI · 文档导航与一致性矩阵
 
-> 最后更新：2026-06-23
+> 最后更新：2026-07-14
 > 目的：让人类开发者和 AI 工具在 5 分钟内判断当前开发阶段、文档职责、下一步入口和闭环规则。
 
 ---
@@ -13,7 +13,7 @@
 当前入口：repo/CURRENT-SPRINT.md
 代码边界：Core 保护范围沿用 Sprint 12 已闭合的 api/openapi/v1.yaml operationId、pkg/ports、pkg/adapters 与 Gateway handler；不得绕过 port，不得把 Services 业务逻辑新增到 Core API/handler/ports；Services 业务实现只在受控 Services PR 主责目录推进。
 Core Sprint 13/14 既有事实继续有效：Sprint 13 production-shaped evidence 与 Sprint 14 resilience 隔离 fixture 结论保留，不外推 full platform production ready。
-Services 受控并行 PR 阶段：不再按旧冻结规则处理；目录、API、handler、生成物和跨层边界分别受 CODEOWNERS 共同审查、API split、Services boundary gate、make validate-architecture 约束。
+Services 受控并行 PR 阶段：不再按旧冻结规则处理；目录、API、handler、生成物和跨层边界分别受 CODEOWNERS 共同审查。Services PR 必须运行 `make validate-services`，该门禁包含 API split、Services boundary gate、OpenAPI/Gateway route contract、语义契约、SDK/API docs 生成漂移、模块检查和 `make validate-architecture`。
 Sprint 14 分支态：feature/sprint14-core-resilience-semantics 已完成 Core resilience R-P0-0..R-P2-7 local/logic 批次；SPRINT14-CORE-RESILIENCE-LIVE-GATE / validate-sprint14-resilience-live-gate / Sprint14 resilience live gate 已在 ani-sprint14-resilience 隔离 namespace 真实通过 P0 strong backend kill、P1 weak dependency degraded、P2 controller primary kill / follower failover，并归档脱敏 evidence；production-ready 范围仅限隔离 Sprint14 Core resilience fixture，不外推到现有 Sprint13 单副本后端或 full platform。
 Sprint 13 结果：S01-S07 均已通过 --production-shaped live gate，七份 evidence 均为 production_shape.status=passed，并由 validate-sprint13-b-track-production-shape 固定 proof_items。
 S03 token：SPRINT13-STORAGE-ROOK-CEPH-A-TRACK / validate-storage-live-gate / Rook-Ceph / LIVE PENDING（历史兼容语境）。

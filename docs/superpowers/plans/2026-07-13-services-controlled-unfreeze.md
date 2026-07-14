@@ -100,6 +100,7 @@ rg -n "services/docs|services/tasks|services/prototypes|services/README|ani-gate
 - Modify `/Users/zhangfan/ANI/repo/.github/workflows/ci.yml`
 
 - [ ] 在 Makefile 增加 `validate-services` phony target，按顺序执行 Services boundary validator、`validate-spec-split`、`validate-sdk-beta`、Services 相关 Go 测试、RAG Python compile/test 和 Console API 生成一致性检查；失败即停止，不绕过 Core architecture gate。
+- [ ] `validate-services` 同时执行 OpenAPI 与 `/api/v1/svc` Gateway method/path route contract；当前已知差异只能在 `repo/architecture/services-route-baseline.yaml` 中逐条登记，新增差异和失效基线必须失败。
 - [ ] Services target 的 Console 检查使用仓库实际存在的 `repo/frontends/console/package-lock.json` 和 `npm ci`/`npm run` 脚本；不得继续引用当前树中不存在的 `frontends/boss` 或不存在的前端 workspace lockfile。
 - [ ] API 生成一致性检查执行 `npm --prefix frontends/console run gen-api`，随后只允许预期的生成文件变化；若生成文件已同步则用 `git diff --exit-code -- frontends/console/src/api/schema.d.ts frontends/console/src/api/core-schema.d.ts` 证明一致。不得手工编辑 generated schema 绕过 OpenAPI source。
 - [ ] 在 CI 中增加独立的 Services boundary/doc/API gate，使用当前仓库实际目录；同时修正前端 job 对 `frontends/console` 的安装、type-check、lint、build 命令，移除对不存在 `frontends/boss` 和 `frontends/pnpm-lock.yaml` 的引用。既有 Go/Python/security/dependency jobs 保持不削弱。

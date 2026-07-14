@@ -11,7 +11,7 @@ This file provides mandatory guidance for Claude Code / Codex / Cursor / GPT cod
 ```text
 本仓库范围：ANI Core 继续负责基础设施平台底座；ANI Services 进入受控并行 PR 阶段。
 Core Sprint 13/14 既有事实继续有效：Sprint 13 production-shaped live gate 与 Sprint 14 resilience 隔离 fixture 结论不外推 full platform production ready。
-Services 受控并行 PR 阶段：目录、API、handler、生成物和跨层边界分别受 CODEOWNERS 共同审查、API split、Services boundary gate、make validate-architecture 约束。
+Services 受控并行 PR 阶段：目录、API、handler、生成物和跨层边界分别受 CODEOWNERS 共同审查、API split、Services boundary gate、OpenAPI/Gateway route contract、make validate-architecture 约束。
 当前阶段：以 repo/CURRENT-SPRINT.md 为准
 当前重心：以 repo/CURRENT-SPRINT.md 为准
 当前不是 Phase 2：Phase 2 是 2026-10 以后延期能力
@@ -26,7 +26,7 @@ Services 受控并行 PR 阶段：目录、API、handler、生成物和跨层边
 
 1. **Core 保护范围只负责 ANI Core；本仓库同时允许 Services 受控 PR。** Core 是基础设施平台底座，对外输出 Core OpenAPI REST API、Core SDK、CLI。
 2. **ANI Services 当前是受控并行 PR，不再按旧冻结规则处理。** Services 主责目录可按 `ANI-SERVICES-TEAM-GUIDE.md` 开发；触碰 Core 保护目录、Services API、Gateway mixed handler 或生成物时必须按 CODEOWNERS 共同审查。
-3. **Services 解冻不解除跨层门禁。** Services 业务资源只进 `repo/api/openapi/services/v1.yaml`；实现必须先改 API 契约，再改 handler/SDK/生成物；PR 必须通过 API split、`python scripts/validate_services_boundary.py --root .`（Services boundary gate）和既有 `make validate-architecture`。
+3. **Services 解冻不解除跨层门禁。** Services 业务资源只进 `repo/api/openapi/services/v1.yaml`；实现必须先改 API 契约，再改 handler/SDK/生成物；PR 必须通过 `make validate-services`，其中包含 API split、Services boundary、OpenAPI/Gateway route contract、语义契约、生成物漂移和既有 architecture gate。
 4. 跨层契约仍以 `repo/api/openapi/v1.yaml`（Core）为唯一真实来源；Services 业务资源不回流 Core API。
 
 ### 本地真实开发环境提示

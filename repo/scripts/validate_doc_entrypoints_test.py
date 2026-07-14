@@ -16,6 +16,8 @@ class DocEntrypointValidationTest(unittest.TestCase):
             "Services 受控并行 PR 阶段",
             "CODEOWNERS 共同审查",
             "Services boundary gate",
+            "OpenAPI/Gateway route contract",
+            "make validate-services",
             "repo/CURRENT-SPRINT.md",
         }
 

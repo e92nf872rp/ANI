@@ -4,12 +4,12 @@
 
 `推理服务` 是 `Console` 的租户侧推理部署与运维页面，用于管理推理服务列表、部署、详情和删除。
 
-当前模块属于 `Services / InferenceServices`，一级权威源为 `ANI-main/repo/api/openapi/services/v1.yaml`，正式路径前缀为 `/api/v1/svc`。
+当前模块属于 `Services / InferenceServices`，一级权威源为 [`repo/api/openapi/services/v1.yaml`](../../../../api/openapi/services/v1.yaml)，正式路径前缀为 `/api/v1/svc`。
 
 ## 文档管理规则
 
 - 本文是 `推理服务` 的主维护文档，产品定义、边界约束与验收标准统一以本文为准
-- 如 `PRD`、`SPEC`、HTML 摘要与本文不一致，先回到 `ANI-main/repo/api/openapi/services/v1.yaml` 核对，再统一回写
+- 如 `PRD`、`SPEC`、HTML 摘要与本文不一致，先回到 [`repo/api/openapi/services/v1.yaml`](../../../../api/openapi/services/v1.yaml) 核对，再统一回写
 - 未冻结的 OpenAI 兼容、限流策略、观测资源等内容只能保留边界说明，不得写成当前正式页面承诺
 - 页面设计可补充状态流转与交互反馈，但不得扩写新的资源域或新增 `Core` 表述
 
@@ -19,8 +19,8 @@
 - 正式路径使用 `/api/v1/svc/inference-services*`
 - 页面不要求前端显式传 `tenant_id`
 - 页面不把 OpenAI 兼容 API、限流策略、生命周期子页写成独立资源域
-- 部署请求成功返回 `202 + InferenceService`
-- 删除请求成功返回 `202`
+- 契约规定部署请求成功返回 `202 + InferenceService`；当前过渡 handler 尚未对齐该响应语义
+- 契约规定删除请求成功返回 `202`；当前过渡 handler 尚未对齐该响应语义
 - 错误结构统一为 `{"code":"UPPER_SNAKE","message":"...","request_id":"..."}`
 
 ## 页面职责
@@ -136,7 +136,7 @@
 | 扩缩容/变配 (`PATCH`) | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
 | 删除 | ✅ | ⚠️ | ⚠️ 二次确认 | ❌ | ✅ | ✅ |
 
-`PATCH /api/v1/svc/inference-services/{service_id}` 仅在 `running` 时可提交；否则产品建议返回 `422 PRECONDITION_FAILED`（具体 `code` 待 Services 冻结；建议语义：服务状态不允许变配）。部署/删除成功均为 `202`，表示任务已提交。
+当前 Gateway 已注册 `PATCH /api/v1/svc/inference-services/{service_id}` 过渡路由，但 Services OpenAPI 尚未声明该操作，因此它不能作为前端可依赖的正式能力。若要正式开放，必须先补齐 OpenAPI、生成物、handler 响应语义和对应门禁；部署/删除契约成功均为 `202`，表示任务已提交。
 
 ### 按角色（RBAC）
 

@@ -34,6 +34,8 @@ CURRENT_SERVICES_GOVERNANCE_MARKERS = (
     "CODEOWNERS 共同审查",
     "API split",
     "Services boundary gate",
+    "OpenAPI/Gateway route contract",
+    "make validate-services",
     "make validate-architecture",
     "repo/CURRENT-SPRINT.md",
 )
@@ -94,6 +96,8 @@ def main() -> None:
     component_arch_path = PROJECT_ROOT / "ANI-13-开源组件松耦合适配器架构.md"
     coding_spec_path = PROJECT_ROOT / "ANI-11-代码实现规范.md"
     repo_readme_path = REPO_ROOT / "README.md"
+    services_readme_path = REPO_ROOT / "services/README.md"
+    inference_doc_path = REPO_ROOT / "services/docs/console-modules/inference/inference-service.md"
     current_sprint_path = REPO_ROOT / "CURRENT-SPRINT.md"
     infra_config_path = REPO_ROOT / "deploy/manifests/m1-infra-a/10-platform-config.yaml"
     infra_readme_path = REPO_ROOT / "deploy/manifests/m1-infra-a/README.md"
@@ -123,6 +127,8 @@ def main() -> None:
     component_arch = read(component_arch_path)
     coding_spec = read(coding_spec_path)
     repo_readme = read(repo_readme_path)
+    services_readme = read(services_readme_path)
+    inference_doc = read(inference_doc_path)
     current_sprint = read(current_sprint_path)
     infra_config = read(infra_config_path)
     infra_readme = read(infra_readme_path)
@@ -178,6 +184,16 @@ def main() -> None:
     require(plan, "Core/Services 跨层只走 Core OpenAPI REST API / Core SDK", plan_path)
     require(plan, "直接调用 Core 内部 gRPC service", plan_path)
     require(current_sprint, "## 文档入口边界", current_sprint_path)
+    require(services_readme, "../api/openapi/v1.yaml", services_readme_path)
+    require(services_readme, "../api/openapi/services/v1.yaml", services_readme_path)
+    require(inference_doc, "../../../../api/openapi/services/v1.yaml", inference_doc_path)
+    for source, target in (
+        (services_readme_path, REPO_ROOT / "api/openapi/v1.yaml"),
+        (services_readme_path, REPO_ROOT / "api/openapi/services/v1.yaml"),
+        (inference_doc_path, REPO_ROOT / "api/openapi/services/v1.yaml"),
+    ):
+        if not target.exists():
+            raise SystemExit(f"{source}: linked contract target is missing: {target}")
     require(current_sprint, "make validate-doc-entrypoints", current_sprint_path)
 
     require(architecture, "ANI Core 和 ANI Services", architecture_path)

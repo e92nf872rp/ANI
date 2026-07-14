@@ -2,7 +2,7 @@
 
 > 新开发者（人类或 AI 工具）的第一个入口文件。本文只描述当前真实执行状态；历史完成批次查 `repo/development-records/README.md`。
 
-> **仓库范围：ANI Core + 受控 Services PR。** ANI Core 继续负责基础设施平台底座；Services 受控并行 PR 阶段已经启动，不再按旧冻结规则处理。Services 的目录、API、handler、生成物和跨层边界分别受 CODEOWNERS 共同审查、API split、Services boundary gate、make validate-architecture 约束。
+> **仓库范围：ANI Core + 受控 Services PR。** ANI Core 继续负责基础设施平台底座；Services 受控并行 PR 阶段已经启动，不再按旧冻结规则处理。Services PR 统一运行 `make validate-services`，覆盖 CODEOWNERS 共同审查要求之外的 API split、Services boundary gate、OpenAPI/Gateway route contract、语义契约、生成物漂移、模块检查和 `make validate-architecture`。
 > **当前重心：Sprint 13 / Core real provider 与 live gate 收敛。** Core Sprint 13/14 既有事实继续有效：Sprint 12 已完成 Core「Services 支撑 Handler」A/B1/B2/B3 全部 19 个 handler + 2 个 422 的 Tier1 local profile 收口；Sprint 13 S01-S07 production-shaped live gate 事实保留；Sprint14 resilience 结论仅限隔离 fixture。未跑通对应 live gate 前，不得标记 real-provider、runtime ready 或 production ready。Services PR 可在主责目录推进业务实现，但不得绕过 Core OpenAPI REST API / Core SDK、Core review 或现有架构门禁。
 > **标准状态 marker：** 真实服务器只读验证已完成；Rook-Ceph 正式部署已完成。Sprint 11 执行环境：正式部署执行环境。
 
@@ -22,7 +22,7 @@
 | **Auth 边界** | SPRINT13-AUTH-DEX-PRODUCTION-GATE / Auth/Dex production gate 已通过；production-shaped Gateway 固定 ANI_AUTH_MODE=auth_service |
 | **执行入口** | `development-records/sprint13-real-provider-readiness-plan.md`、`development-records/README.md`、本文件验收命令 |
 | **执行环境** | 真实 provider 写操作前必须重新只读盘点并取得人工确认；evidence 不得包含凭据、服务器 IP 或完整内网端点 |
-| **最后校准日期** | 2026-06-23 |
+| **最后校准日期** | 2026-07-14 |
 
 ## Sprint 13 当前任务
 

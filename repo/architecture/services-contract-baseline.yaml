@@ -1,6 +1,6 @@
 version: 1
 status: accepted_baseline
-owner: ANI Services 外部产品团队
+owner: ANI Services 团队
 exceptions:
   - operation_id: uploadKnowledgeBaseDocument
     rule: write_requires_idempotency

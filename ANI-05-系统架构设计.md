@@ -72,7 +72,7 @@ ANI Services:
 | `repo/services/ani-gateway/` 混合 Gateway handler | `/api/v1/svc/*` Services handler 由 Services 主责、Core 共同 review；Core `/api/v1/*` handler 和 middleware/runtime 由 Core 主责 | handler 路由分区、API split、architecture gate |
 | `repo/pkg/`、`repo/api/openapi/v1.yaml`、`repo/deploy/`、`repo/scripts/`、`repo/sdks/core/`、`repo/cli/` | Core 保护目录 | Services PR 触碰时必须 Core review，不得自行合并 |
 
-解冻后的门禁顺序：先改 `repo/api/openapi/services/v1.yaml` 或 Core API 契约并完成共同审查 → 再改 Services handler/实现 → 再生成 SDK/前端类型 → 运行 API split、Services boundary gate（`python scripts/validate_services_boundary.py --root .`）→ 运行 `make validate-architecture` 与文档入口 gate。已登记的存量例外只代表当前代码事实告警，不代表边界合规或 production-ready。
+解冻后的门禁顺序：先改 `repo/api/openapi/services/v1.yaml` 或 Core API 契约并完成共同审查 → 再改 Services handler/实现 → 再生成 SDK/前端类型 → 运行 `make validate-services`。该聚合门禁包含 API split、Services boundary、OpenAPI/Gateway route contract、Services semantic contract、SDK/API docs 生成漂移、模块检查、`make validate-architecture` 与文档入口 gate。已登记的存量例外只代表当前代码事实告警，不代表边界合规或 production-ready。
 
 ---
 
