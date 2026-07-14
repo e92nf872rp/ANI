@@ -915,6 +915,10 @@
   ],
   "idempotencyOperations": [
     "createAPIKey",
+    "logout",
+    "beginOIDCLogin",
+    "postAuthRefresh",
+    "completeOIDCLogin",
     "updateBranding",
     "createStorageBucket",
     "createEncryptionKey",
@@ -953,6 +957,7 @@
     "bindSecret",
     "createVectorStore",
     "insertVectorStoreDocuments",
+    "searchVectorStore",
     "createStorageVolume",
     "createVolumeSnapshot"
   ],

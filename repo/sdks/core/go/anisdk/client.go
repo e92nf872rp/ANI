@@ -432,6 +432,10 @@ var Schemas = []string{
 }
 var IdempotencyOperations = []string{
 	"createAPIKey",
+	"logout",
+	"beginOIDCLogin",
+	"postAuthRefresh",
+	"completeOIDCLogin",
 	"updateBranding",
 	"createStorageBucket",
 	"createEncryptionKey",
@@ -470,6 +474,7 @@ var IdempotencyOperations = []string{
 	"bindSecret",
 	"createVectorStore",
 	"insertVectorStoreDocuments",
+	"searchVectorStore",
 	"createStorageVolume",
 	"createVolumeSnapshot",
 }

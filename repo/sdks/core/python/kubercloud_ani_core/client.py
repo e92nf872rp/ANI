@@ -421,6 +421,10 @@ SCHEMAS = [
 ]
 IDEMPOTENCY_OPERATIONS = [
     "createAPIKey",
+    "logout",
+    "beginOIDCLogin",
+    "postAuthRefresh",
+    "completeOIDCLogin",
     "updateBranding",
     "createStorageBucket",
     "createEncryptionKey",
@@ -459,6 +463,7 @@ IDEMPOTENCY_OPERATIONS = [
     "bindSecret",
     "createVectorStore",
     "insertVectorStoreDocuments",
+    "searchVectorStore",
     "createStorageVolume",
     "createVolumeSnapshot"
 ]

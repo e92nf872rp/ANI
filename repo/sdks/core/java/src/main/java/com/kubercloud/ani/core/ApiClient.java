@@ -439,6 +439,10 @@ public final class ApiClient {
     ));
     public static final List<String> IDEMPOTENCY_OPERATIONS = Collections.unmodifiableList(Arrays.asList(
         "createAPIKey",
+        "logout",
+        "beginOIDCLogin",
+        "postAuthRefresh",
+        "completeOIDCLogin",
         "updateBranding",
         "createStorageBucket",
         "createEncryptionKey",
@@ -477,6 +481,7 @@ public final class ApiClient {
         "bindSecret",
         "createVectorStore",
         "insertVectorStoreDocuments",
+        "searchVectorStore",
         "createStorageVolume",
         "createVolumeSnapshot"
     ));

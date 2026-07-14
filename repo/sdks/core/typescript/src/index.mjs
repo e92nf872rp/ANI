@@ -417,6 +417,10 @@ export const schemas = [
 ];
 export const idempotencyOperations = [
   "createAPIKey",
+  "logout",
+  "beginOIDCLogin",
+  "postAuthRefresh",
+  "completeOIDCLogin",
   "updateBranding",
   "createStorageBucket",
   "createEncryptionKey",
@@ -455,6 +459,7 @@ export const idempotencyOperations = [
   "bindSecret",
   "createVectorStore",
   "insertVectorStoreDocuments",
+  "searchVectorStore",
   "createStorageVolume",
   "createVolumeSnapshot"
 ];

@@ -25,9 +25,10 @@ type createVectorStoreRequest struct {
 }
 
 type searchVectorStoreRequest struct {
-	Vector []float32         `json:"vector"`
-	TopK   int               `json:"top_k"`
-	Filter map[string]string `json:"filter"`
+	IdempotencyKey string            `json:"idempotency_key"`
+	Vector         []float32         `json:"vector"`
+	TopK           int               `json:"top_k"`
+	Filter         map[string]string `json:"filter"`
 }
 
 type vectorStoreDocumentInsertRequest struct {

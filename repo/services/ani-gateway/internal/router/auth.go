@@ -20,8 +20,9 @@ type authAPI struct {
 }
 
 type authBeginOIDCRequest struct {
-	TenantName  string `json:"tenant_name"`
-	RedirectURI string `json:"redirect_uri"`
+	IdempotencyKey string `json:"idempotency_key"`
+	TenantName     string `json:"tenant_name"`
+	RedirectURI    string `json:"redirect_uri"`
 }
 
 type authBeginOIDCResponse struct {
@@ -30,9 +31,10 @@ type authBeginOIDCResponse struct {
 }
 
 type authCompleteOIDCRequest struct {
-	State       string `json:"state"`
-	Code        string `json:"code"`
-	RedirectURI string `json:"redirect_uri"`
+	IdempotencyKey string `json:"idempotency_key"`
+	State          string `json:"state"`
+	Code           string `json:"code"`
+	RedirectURI    string `json:"redirect_uri"`
 }
 
 type authTokenPairResponse struct {
@@ -43,11 +45,13 @@ type authTokenPairResponse struct {
 }
 
 type authRefreshRequest struct {
-	RefreshToken string `json:"refresh_token"`
+	IdempotencyKey string `json:"idempotency_key"`
+	RefreshToken   string `json:"refresh_token"`
 }
 
 type authLogoutRequest struct {
-	JTI string `json:"jti"`
+	IdempotencyKey string `json:"idempotency_key"`
+	JTI            string `json:"jti"`
 }
 
 type authAccessTokenResponse struct {
