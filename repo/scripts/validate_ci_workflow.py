@@ -75,6 +75,31 @@ def validate(
     workflow_text = str(workflow)
     if "swaggerhub-actions/validate-openapi" in workflow_text:
         errors.append("workflow must not use the unresolved SwaggerHub action")
+    if "@latest" in workflow_text:
+        errors.append("CI tools must not be installed from a mutable @latest reference")
+
+    go_ci = jobs.get("go-ci")
+    go_ci_text = str(go_ci)
+    if "scripts/list_go_modules.py" not in go_ci_text:
+        errors.append("Go CI must discover modules from go.work")
+    lint_text = "\n".join(
+        str(step.get("run", ""))
+        for step in (go_ci or {}).get("steps", [])
+        if isinstance(step, dict) and step.get("name") == "Lint (golangci-lint)"
+    )
+    if "golangci-lint run ./..." in lint_text and "read -r module" not in lint_text:
+        errors.append("Go lint must run per discovered module, not at the multi-module root")
+
+    dependency_scan = jobs.get("dependency-scan")
+    dependency_text = str(dependency_scan)
+    if "scripts/list_go_modules.py" not in dependency_text:
+        errors.append("dependency scan must discover modules from go.work")
+    if "for module in cli/ani pkg" in dependency_text:
+        errors.append("dependency scan must not use a static Go module list")
+
+    python_ci = jobs.get("python-ci")
+    if "scripts/validate_python_test_policy.py" not in str(python_ci):
+        errors.append("Python CI must enforce the changed-source test policy")
 
     portability_sources = {"Makefile": makefile_text}
     portability_sources.update(portability_texts or {})

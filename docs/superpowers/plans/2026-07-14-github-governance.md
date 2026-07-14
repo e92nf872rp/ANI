@@ -6,7 +6,13 @@
 
 **Architecture:** 开发和 CI job 并行，只有 main 合并受保护地收口。仓库内文档、模板和脚本负责人的日常动作，GitHub branch protection/CODEOWNERS/Required PR Gates 负责不可绕过的合并条件；跨层依赖用契约 PR 和 stacked PR 表达，而不是全局串行锁。
 
-**Tech Stack:** Markdown、GitHub Actions、Bash、Make、Go 1.23、Python 3.12、PyYAML、OpenAPI validator、npm。
+**Tech Stack:** Markdown、GitHub Actions、Bash、Make、Go 1.25、Python 3.12、PyYAML、OpenAPI validator、npm。
+
+## 当前执行状态（2026-07-14）
+
+- 已完成：ANI-15 协作规范、Services 速查手册、Issue/PR 模板、并行分支脚本、可执行 CI 修复和 fail-closed Required PR Gates。
+- 已补强：Go module 自动发现、Python AI 变更测试策略、Go 1.25 安全依赖闭环和 SDK Smoke 生成一致性。
+- 待人工/远端核验：GitHub Settings 的 main branch protection、Required PR Gates required status、CODEOWNERS approval 和故意失败 PR 的阻断效果。
 
 ## Global Constraints
 
@@ -105,4 +111,3 @@
 - [ ] 并行验证：两个独立 feature 分支可同时开发，互不覆盖；一个 PR 合并后另一 PR 通过更新 main 重新验证。
 - [ ] 安全验证：PR/Issue/Actions 日志不含 secrets、真实 IP、内部 URL。
 - [ ] 使用 `superpowers:finishing-a-development-branch` 做最终分支交付决策，不在未经核验时声称 main 已安全。
-

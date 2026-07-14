@@ -46,6 +46,31 @@ class CIWorkflowContractTest(unittest.TestCase):
         )
         self.assertTrue(any("validate_sdk_alpha.py" in error for error in errors))
 
+    def test_go_lint_must_use_workspace_module_discovery(self) -> None:
+        lint_step = next(
+            step for step in self.workflow["jobs"]["go-ci"]["steps"]
+            if step.get("name") == "Lint (golangci-lint)"
+        )
+        lint_step["run"] = "golangci-lint run ./..."
+        errors = validator.validate(self.workflow, self.makefile)
+        self.assertTrue(any("multi-module root" in error for error in errors))
+
+    def test_dependency_scan_must_not_use_static_module_list(self) -> None:
+        scan_step = next(
+            step for step in self.workflow["jobs"]["dependency-scan"]["steps"]
+            if step.get("name") == "Scan Go dependencies (govulncheck)"
+        )
+        scan_step["run"] = (
+            "for module in cli/ani pkg; do (cd $module && govulncheck ./...); done"
+        )
+        errors = validator.validate(self.workflow, self.makefile)
+        self.assertTrue(any("static Go module list" in error for error in errors))
+
+    def test_mutable_latest_tool_reference_is_blocked(self) -> None:
+        self.workflow["jobs"]["go-ci"]["steps"][0]["uses"] = "example/tool@latest"
+        errors = validator.validate(self.workflow, self.makefile)
+        self.assertTrue(any("mutable @latest" in error for error in errors))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,7 +6,14 @@
 
 **Architecture:** 保留现有 `make` 校验作为本地真实来源，在 GitHub Actions 中按职责拆分 Go、Python、Console、OpenAPI、Services contract 和依赖安全检查。所有必需检查由一个始终运行的聚合 job 汇总，避免某个 job 被跳过或初始化失败后仍可合并；`main` 分支保护只要求这个稳定的聚合状态和必要的人工审查。Services 的既有差异只能以精确 baseline 告警保留，新差异和过期 baseline 必须失败。
 
-**Tech Stack:** GitHub Actions、Make、Go 1.23、Python 3.12、PyYAML、pytest、OpenAPI validator、npm、CODEOWNERS。
+**Tech Stack:** GitHub Actions、Make、Go 1.25、Python 3.12、PyYAML、pytest、OpenAPI validator、npm、CODEOWNERS。
+
+## 当前执行状态（2026-07-14）
+
+- 已完成：本地 workflow 契约测试、仓库内 OpenAPI 校验、Services contract/boundary/route 门禁、Go workspace module 自动发现、Python AI 变更测试策略、Go 1.25 依赖同步、Java SDK Smoke 修复。
+- 已验证：Go 全量单元测试和全部服务构建通过；远端 Go 依赖漏洞和根目录 lint 问题已按真实日志修复方向处理。
+- 待验证：推送后的远端 CI 全部 job、预编译 golangci-lint、多 module govulncheck、GitHub branch protection 实际阻断效果。
+- 不得将上述待验证项标记为完成；Services 当前 3 条边界、70 条语义、13 条路由仍是精确存量 baseline 告警，不代表已清零。
 
 ## Global Constraints
 
@@ -378,4 +385,3 @@ git commit -m "docs: define Services CI and AI PR operating rules"
 - main 分支无法绕过 PR、required gate、CODEOWNERS review 和 unresolved conversation 规则。
 - PR 模板能让人和 AI Agent明确区分“代码失败”“CI 配置失败”“既有 baseline 告警”。
 - CI 修复本身的 PR 不得通过关闭检查、强制合并或把失败改成 warning 来完成。
-

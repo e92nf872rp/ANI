@@ -42,7 +42,7 @@ jobs:
 
       - name: Install tools
         run: |
-          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.27.1
           curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
             | sh -s -- -b $(go env GOPATH)/bin v1.59.0
 
@@ -55,14 +55,32 @@ jobs:
       - name: Security scan (gosec)
         run: gosec -severity high -quiet ./services/... ./operators/...
 
+      - name: Formatting
+        run: |
+          set -euo pipefail
+          unformatted="$(find . -name '*.go' -not -path './.cache/*' -print0 | xargs -0 gofmt -l)"
+          test -z "$unformatted" || {
+            echo "Unformatted Go files:"
+            echo "$unformatted"
+            exit 1
+          }
+
       - name: Lint (golangci-lint)
-        run: golangci-lint run ./...
+        run: |
+          set -euo pipefail
+          while IFS= read -r module; do
+            echo "→ golangci-lint $module"
+            (cd "$module" && golangci-lint run ./...)
+          done < <(python scripts/list_go_modules.py)
 
       - name: Coverage report
         run: |
-          go test ./services/... ./operators/... \
-            -coverprofile=coverage.out -covermode=atomic
-          go tool cover -func=coverage.out | tail -1
+          set -euo pipefail
+          while IFS= read -r module; do
+            profile="$RUNNER_TEMP/coverage-${module//\//-}.out"
+            (cd "$module" && go test ./... -coverprofile="$profile" -covermode=atomic)
+            go tool cover -func="$profile" | tail -1
+          done < <(python scripts/list_go_modules.py)
 
   # ── Python AI 层 CI ─────────────────────────────────────────────────────────
   python-ci:
@@ -74,6 +92,8 @@ jobs:
         working-directory: repo
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -100,6 +120,11 @@ jobs:
           else
             echo "No Python test files under ai; compile check completed."
           fi
+
+      - name: Enforce Python AI test policy
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python scripts/validate_python_test_policy.py --base "$BASE_SHA"
 
   # ── 前端 CI ─────────────────────────────────────────────────────────────────
   frontend-ci:
@@ -169,6 +194,9 @@ jobs:
       - name: Run Services PR gate
         run: make validate-services
 
+      - name: Validate CI policy contracts
+        run: make validate-ci-workflow
+
       - name: Validate document entrypoints
         run: make validate-doc-entrypoints
 
@@ -201,10 +229,11 @@ jobs:
       - name: Scan Go dependencies (govulncheck)
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
-          for module in cli/ani pkg services/ani-gateway services/auth-service services/model-service services/reconcile-worker services/task-service tools/kms-sm4-live-fixture; do
+          set -euo pipefail
+          while IFS= read -r module; do
             echo "→ govulncheck $module"
             (cd "$module" && govulncheck ./...)
-          done
+          done < <(python scripts/list_go_modules.py)
 
       - name: Scan Python dependencies
         run: |

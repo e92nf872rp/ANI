@@ -892,6 +892,8 @@ validate-openapi-spec:
 
 validate-ci-workflow:
 	@echo "→ 校验 GitHub Actions CI 工作流契约..."
+	python scripts/list_go_modules_test.py
+	python scripts/validate_python_test_policy_test.py
 	python scripts/validate_ci_workflow_test.py
 	@echo "✅ CI workflow contract valid"
 
