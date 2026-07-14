@@ -240,7 +240,7 @@ jobs:
 
       - name: Scan Python dependencies
         run: |
-          pip install pip-audit
+          pip install pip-audit==2.10.1
           pip-audit -r ai/rag-engine/requirements.txt
 
   # ── OpenAPI Spec 校验 ────────────────────────────────────────────────────────

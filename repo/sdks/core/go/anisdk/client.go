@@ -4,8 +4,8 @@ package anisdk
 import (
 	"bytes"
 	"crypto/rand"
-	"encoding/json"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
