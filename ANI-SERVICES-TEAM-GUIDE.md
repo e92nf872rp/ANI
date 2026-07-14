@@ -247,7 +247,9 @@ Services 层所有业务 API 接口的**唯一权威定义文件**（OpenAPI 3.0
 - 修改此文件的 PR 必须同时提供对应的后端实现或明确标注 `TODO`
 - `repo/sdks/services/`、`repo/docs/api/services.html` 和前端 schema 均为生成物；只能由 OpenAPI 生成流程更新，不得手工编辑绕过契约
 
-**当前已定义的接口路径（14条）：**
+**本文列举的基础/P0接口子集（14条）：**
+
+完整 Services contract 以 `repo/api/openapi/services/v1.yaml` 为准；当前规范包含 41 个 path、59 个 method。Gateway 的 method/path 注册一致性由 `make validate-services` 的 route contract 及 `repo/architecture/services-route-baseline.yaml` 校验，本文下方列表不代表完整接口数量。
 
 ```
 GET    /models                              列出模型列表（游标分页）

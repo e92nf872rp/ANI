@@ -44,7 +44,7 @@
 /repo/deploy/                                                     @e92nf872rp
 /repo/scripts/                                                    @e92nf872rp
 /repo/Makefile                                                    @e92nf872rp
-/repo/.github/workflows/                                          @e92nf872rp
+/.github/workflows/                                               @e92nf872rp
 /.github/CODEOWNERS                                               @e92nf872rp
 /CLAUDE.md                                                        @e92nf872rp
 /AGENTS.md                                                        @e92nf872rp

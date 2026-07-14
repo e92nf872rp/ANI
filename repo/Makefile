@@ -926,6 +926,7 @@ validate-services:
 	python scripts/generate_api_docs.py
 	git diff --exit-code -- sdks/core sdks/services docs/api
 	$(MAKE) validate-doc-api
+	$(MAKE) validate-doc-entrypoints
 	@echo "→ 运行 Services model-service Go tests..."
 	$(GO_CACHE_ENV) go test ./services/model-service/... -v
 	@echo "→ 检查 RAG Python compile/test..."

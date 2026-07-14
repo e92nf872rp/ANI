@@ -22,7 +22,8 @@ SPEC_PATH = ROOT / "api/openapi/services/v1.yaml"
 ROUTER_DIR = ROOT / "services/ani-gateway/internal/router"
 BASELINE_PATH = ROOT / "architecture/services-route-baseline.yaml"
 HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE"}
-ROUTE_PATTERN = re.compile(r'\bsvc\.(GET|POST|PUT|PATCH|DELETE)\(\s*"([^"]+)"')
+ROUTE_CALL_PATTERN = re.compile(r'\b([A-Za-z_]\w*)\.(GET|POST|PUT|PATCH|DELETE)\(\s*"([^"]+)"')
+ROUTE_GROUP_ALIAS_PATTERN = re.compile(r'\b([A-Za-z_]\w*)\s*:=\s*([A-Za-z_]\w*)\b')
 
 
 @dataclass(frozen=True, order=True)
@@ -91,7 +92,18 @@ def gateway_routes(router_dir: Path = ROUTER_DIR) -> set[Route]:
         if path.name.endswith("_test.go"):
             continue
         text = path.read_text(encoding="utf-8")
-        for method, route_path in ROUTE_PATTERN.findall(text):
+        service_receivers = {"svc"} if re.search(r"\bsvc\b", text) else set()
+        aliases = dict(ROUTE_GROUP_ALIAS_PATTERN.findall(text))
+        changed = True
+        while changed:
+            changed = False
+            for alias, receiver in aliases.items():
+                if receiver in service_receivers and alias not in service_receivers:
+                    service_receivers.add(alias)
+                    changed = True
+        for receiver, method, route_path in ROUTE_CALL_PATTERN.findall(text):
+            if receiver not in service_receivers:
+                continue
             routes.add(Route(method, normalize_path(route_path)))
     return routes
 

@@ -51,6 +51,19 @@ class ServicesRouteContractTest(unittest.TestCase):
     def test_go_path_parameters_normalize_to_openapi_style(self) -> None:
         self.assertEqual(validator.normalize_path("/models/:model_id/versions"), "/models/{model_id}/versions")
 
+    def test_gateway_routes_scan_router_go_and_other_non_test_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            router_dir = Path(directory)
+            (router_dir / "router.go").write_text(
+                'func register(svc *route.RouterGroup) { services := svc; services.GET("/router-level", handler) }\n',
+                encoding="utf-8",
+            )
+            (router_dir / "router_test.go").write_text(
+                'svc.GET("/test-only", handler)\n',
+                encoding="utf-8",
+            )
+            self.assertEqual(validator.gateway_routes(router_dir), {validator.Route("GET", "/router-level")})
+
     def test_baseline_file_round_trips(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "baseline.yaml"
