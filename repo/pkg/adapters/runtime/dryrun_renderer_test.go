@@ -40,6 +40,62 @@ func TestKubernetesDryRunRendererRendersVM(t *testing.T) {
 	}
 }
 
+func TestKubernetesDryRunRendererRendersVMWithUSBTabletInput(t *testing.T) {
+	renderer := NewKubernetesDryRunRenderer(NewPlanningRuntime())
+
+	manifests, err := renderer.Render(context.Background(), ports.WorkloadSpec{
+		TenantID: "tenant-a",
+		Name:     "vm-tablet",
+		Kind:     ports.WorkloadKindVM,
+		VM: &ports.VMInstanceSpec{
+			BootImage: "harbor/base/ubuntu.qcow2",
+			RootDisk: ports.WorkloadStorageAttachment{
+				Name:      "root",
+				Kind:      ports.StorageAttachmentRootDisk,
+				SizeGiB:   80,
+				SourceRef: "vm-tablet-root",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	if len(manifests) != 1 {
+		t.Fatalf("manifests = %d, want 1", len(manifests))
+	}
+
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(manifests[0].Content), &doc); err != nil {
+		t.Fatalf("unmarshal rendered manifest: %v", err)
+	}
+	vmSpec, _ := doc["spec"].(map[string]any)
+	template, _ := vmSpec["template"].(map[string]any)
+	podSpec, _ := template["spec"].(map[string]any)
+	domain, _ := podSpec["domain"].(map[string]any)
+	devices, _ := domain["devices"].(map[string]any)
+	inputs, _ := devices["inputs"].([]any)
+	if len(inputs) == 0 {
+		t.Fatalf("devices.inputs missing:\n%s", manifests[0].Content)
+	}
+	input, _ := inputs[0].(map[string]any)
+	if input["type"] != "tablet" || input["bus"] != "usb" {
+		t.Fatalf("devices.inputs[0] = %#v, want tablet/usb", input)
+	}
+}
+
+func TestAppendUSBTabletInputDoesNotDuplicateExistingTablet(t *testing.T) {
+	inputs := []any{
+		map[string]any{
+			"type": "tablet",
+			"bus":  "usb",
+		},
+	}
+	merged := appendUSBTabletInput(inputs)
+	if len(merged) != 1 {
+		t.Fatalf("inputs = %#v, want existing tablet reused", merged)
+	}
+}
+
 func TestRenderVMWithISOBootMediaUsesCdromAndBlankRoot(t *testing.T) {
 	renderer := NewKubernetesDryRunRenderer(NewPlanningRuntime())
 
@@ -70,6 +126,7 @@ func TestRenderVMWithISOBootMediaUsesCdromAndBlankRoot(t *testing.T) {
 		`"persistentVolumeClaim"`,
 		`"img-abc123"`,
 		`"bootOrder": 1`,
+		`"bootOrder": 2`,
 		`"rootdisk"`,
 		// Blank root disk must be self-creating via dataVolumeTemplates, not
 		// just a claimName reference to a PVC that apply never creates.
@@ -148,8 +205,8 @@ func TestRenderVMWithISOBootMediaUsesCdromAndBlankRoot(t *testing.T) {
 	if bootOrder, _ := rootDisk["bootOrder"].(float64); bootOrder != 1 {
 		t.Fatalf("rootdisk bootOrder = %v, want 1:\n%s", rootDisk["bootOrder"], content)
 	}
-	if _, hasBootOrder := isoDisk["bootOrder"]; hasBootOrder {
-		t.Fatalf("iso cdrom must not own bootOrder after install handoff:\n%s", content)
+	if bootOrder, _ := isoDisk["bootOrder"].(float64); bootOrder != 2 {
+		t.Fatalf("iso cdrom bootOrder = %v, want 2 (installer fallback after blank disk):\n%s", bootOrder, content)
 	}
 
 	rawVolumes, _ := podSpec["volumes"].([]any)

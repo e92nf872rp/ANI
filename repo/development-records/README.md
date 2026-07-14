@@ -23,7 +23,9 @@
 | VM-ISO-BOOT-A | CreateInstance `boot_media=iso`：空白系统盘经 `dataVolumeTemplates`（`source.blank`）；未传附件 StorageClass 时省略字段走集群 default；CD-ROM 引用 Ready Image；不产出 `containerDisk`；后续 live 修复见 `ISO-CDI-LIVE-HARDENING-A` | vm-iso-boot-a.md |
 | ISO-CDI-LIVE-HARDENING-A | Live 冒烟收口：Gateway CDI RBAC；ISO/空白盘强制 Filesystem+RWO；去掉应用层写死 `ani-rbd-ssd`；isolated 增加 StorageProfile + deploy 注入 `CDI_UPLOADPROXY_URL`；附前端对接提示词 | iso-cdi-live-hardening-a.md |
 | IMAGE-UPLOAD-PROXY-VNC-AUTH-A | 浏览器上传/VNC 可达性：`upload_url` 改写为 Gateway `/images/upload-proxy` 流式转发 CDI；Auth 放行 `/instances/*/console/*` query-token WS（修复 noVNC 401）；isolated 注入 `CDI_UPLOADPROXY_INTERNAL_URL` | image-upload-proxy-vnc-auth-a.md |
+| VM-NOVNC-USB-TABLET-A | noVNC 鼠标偏移后端修复：KubeVirt VM manifest 默认注入 `domain.devices.inputs[{type:tablet,bus:usb}]`，提供 absolute pointer；不改变 disks/interfaces/networks/console proxy；local/logic verified，不标 production ready | vm-novnc-usb-tablet-a.md |
 | ISO-CDI-VM-CDROM-DETACH-A | VM ISO 安装后卸载 CD-ROM：`detach_volume` 对 VM `cdrom` 调用 Kubernetes lifecycle provider，GET KubeVirt VM 后 merge-patch 删除 `iso` disk/volume；ISO VM 渲染改为 rootdisk 持有 `bootOrder=1`、ISO CD-ROM 不持有 bootOrder，避免安装完成后重启继续进入 ISO 引导；local/logic verified，不标 production ready | iso-cdi-vm-cdrom-detach-a.md |
+| ISO-VM-BOOTORDER-DISK-FIRST-A | ISO VM 系统盘优先引导：`rootdisk.bootOrder=1` + `iso.bootOrder=2`，首启空白盘回退进安装程序，装完访客自重启进系统，无需删 pod/detach；`boot_media.boot_order` 默认/最小为 2；local/logic verified，不标 production ready | iso-vm-bootorder-disk-first-a.md |
 | KUBEVIRT-VM-LIFECYCLE-SUBRESOURCE-A | KubeVirt VM start/stop subresource 修复：VM lifecycle 不再 PUT 主资源 `?stop=true/start=true`，改为 `subresources.kubevirt.io` 的 `/virtualmachines/{name}/stop|start` 并发送 `StopOptions`/`StartOptions`；subresource 请求使用 `Accept: */*`，修复真实 KubeVirt 返回 `Kind missing in {}` 的 400 和 `406 Not Acceptable` | kubevirt-vm-lifecycle-subresource-a.md |
 
 ### SDK Regression Fixes（2026-06）

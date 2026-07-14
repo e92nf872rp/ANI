@@ -1286,10 +1286,13 @@ func demoSpecFromRequest(req demoCreateInstanceRequest, tenantID string) (ports.
 				}
 				rootSizeGiB = *req.RootDiskSizeGiB
 			}
-			bootOrder := int32(1)
+			// ISO CD-ROM boot order (rootdisk always owns 1). Default 2 so a
+			// blank system disk falls through to the installer on first boot,
+			// then the guest's post-install reboot prefers the installed disk.
+			bootOrder := int32(2)
 			if bootMedia.BootOrder != nil {
-				if *bootMedia.BootOrder <= 0 {
-					return ports.WorkloadSpec{}, fmt.Errorf("boot_media.boot_order must be a positive integer")
+				if *bootMedia.BootOrder < 2 {
+					return ports.WorkloadSpec{}, fmt.Errorf("boot_media.boot_order must be >= 2 (rootdisk owns bootOrder 1)")
 				}
 				bootOrder = *bootMedia.BootOrder
 			}

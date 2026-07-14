@@ -190,8 +190,8 @@ func TestDemoSpecFromRequestUsesDefaultRootDiskSizeAndBootOrderForISOBootMedia(t
 	if spec.VM.RootDisk.SizeGiB != 40 {
 		t.Fatalf("default root disk size = %d, want 40", spec.VM.RootDisk.SizeGiB)
 	}
-	if spec.VM.BootMediaBootOrder != 1 {
-		t.Fatalf("default boot order = %d, want 1", spec.VM.BootMediaBootOrder)
+	if spec.VM.BootMediaBootOrder != 2 {
+		t.Fatalf("default ISO boot order = %d, want 2", spec.VM.BootMediaBootOrder)
 	}
 }
 
@@ -229,6 +229,7 @@ func TestDemoInstanceServiceCreatesVMWithISOBootMediaRendersCdromManifestNotCont
 	}
 	for _, want := range []string{
 		"cdrom", "img-abc123", "rootdisk",
+		`"bootOrder": 1`, `"bootOrder": 2`,
 		// Blank root disk must be self-creating via dataVolumeTemplates, not
 		// just a claimName reference to a PVC that apply never creates.
 		"dataVolumeTemplates", "vm-iso-create-root", `"blank"`, `"40Gi"`,

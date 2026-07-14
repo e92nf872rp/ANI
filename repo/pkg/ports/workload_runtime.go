@@ -153,6 +153,9 @@ type VMInstanceSpec struct {
 	// BootMediaImageID is a Ready ports.ImageRecord.ID (CDI DataVolume/PVC
 	// name for the cdi_rest provider). Required when BootMedia is set.
 	BootMediaImageID   string
+	// BootMediaBootOrder is the ISO CD-ROM KubeVirt bootOrder. Rootdisk always
+	// owns bootOrder 1; this value must be >= 2 (default 2) so first boot can
+	// fall through to the installer while post-install guest reboot prefers disk.
 	BootMediaBootOrder int32
 	CloudInitSecret    string
 	SSHKeySecret       string

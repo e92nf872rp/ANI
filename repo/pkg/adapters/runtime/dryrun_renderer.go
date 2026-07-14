@@ -448,12 +448,33 @@ func secretVolumeName(binding ports.WorkloadSecretBinding, index int) string {
 
 func vmDevices(spec ports.WorkloadSpec) map[string]any {
 	devices := map[string]any{
-		"disks": vmDisks(spec),
+		"disks":  vmDisks(spec),
+		"inputs": vmInputs(),
 	}
 	if ifaces := vmInterfaces(spec); len(ifaces) > 0 {
 		devices["interfaces"] = ifaces
 	}
 	return devices
+}
+
+func vmInputs() []any {
+	return appendUSBTabletInput(nil)
+}
+
+func appendUSBTabletInput(inputs []any) []any {
+	for _, input := range inputs {
+		item, ok := input.(map[string]any)
+		if !ok {
+			continue
+		}
+		if item["type"] == "tablet" && item["bus"] == "usb" {
+			return inputs
+		}
+	}
+	return append(inputs, map[string]any{
+		"type": "tablet",
+		"bus":  "usb",
+	})
 }
 
 func vmInterfaces(spec ports.WorkloadSpec) []any {
@@ -620,15 +641,21 @@ func vmISODisks(spec ports.WorkloadSpec) []any {
 	for _, attachment := range spec.Storage {
 		switch attachment.Kind {
 		case ports.StorageAttachmentRootDisk:
+			// Always prefer the system disk when it becomes bootable so the
+			// guest's own post-install reboot enters the installed OS without
+			// requiring a VMI recreate / detach.
 			disks = append(disks, map[string]any{
 				"name":      "rootdisk",
 				"disk":      map[string]any{"bus": "virtio"},
-				"bootOrder": vmISOBootOrder(spec),
+				"bootOrder": int32(1),
 			})
 		case ports.StorageAttachmentCDROM:
+			// ISO is a fallback (default 2): blank rootdisk fails first boot,
+			// firmware falls through to the installer; after install, disk wins.
 			disks = append(disks, map[string]any{
-				"name":  "iso",
-				"cdrom": map[string]any{"bus": "sata"},
+				"name":      "iso",
+				"cdrom":     map[string]any{"bus": "sata"},
+				"bootOrder": vmISOMediaBootOrder(spec),
 			})
 		default:
 			disks = append(disks, map[string]any{
@@ -650,11 +677,14 @@ func vmISODisks(spec ports.WorkloadSpec) []any {
 	return disks
 }
 
-func vmISOBootOrder(spec ports.WorkloadSpec) int32 {
-	if spec.VM != nil && spec.VM.BootMediaBootOrder > 0 {
+// vmISOMediaBootOrder is the ISO CD-ROM bootOrder. Root disk always owns 1;
+// the media order must be >= 2 so a blank disk can fall through to the installer
+// on first boot, then yield to the installed system on guest reboot.
+func vmISOMediaBootOrder(spec ports.WorkloadSpec) int32 {
+	if spec.VM != nil && spec.VM.BootMediaBootOrder >= 2 {
 		return spec.VM.BootMediaBootOrder
 	}
-	return 1
+	return 2
 }
 
 func vmSecretMountAnnotation(bindings []ports.WorkloadSecretBinding) string {
