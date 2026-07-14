@@ -146,6 +146,9 @@ jobs:
       - name: Install dependencies
         run: npm --prefix frontends/console ci
 
+      - name: Dependency audit
+        run: npm --prefix frontends/console audit --audit-level=high
+
       - name: Type check
         run: npm --prefix frontends/console run type-check
 

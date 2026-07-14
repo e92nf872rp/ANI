@@ -101,6 +101,10 @@ def validate(
     if "scripts/validate_python_test_policy.py" not in str(python_ci):
         errors.append("Python CI must enforce the changed-source test policy")
 
+    frontend_ci = jobs.get("frontend-ci")
+    if "npm --prefix frontends/console audit --audit-level=high" not in str(frontend_ci):
+        errors.append("Frontend CI must block high and critical npm audit findings")
+
     portability_sources = {"Makefile": makefile_text}
     portability_sources.update(portability_texts or {})
     for source, text in portability_sources.items():

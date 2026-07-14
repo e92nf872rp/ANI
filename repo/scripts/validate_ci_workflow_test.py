@@ -71,6 +71,14 @@ class CIWorkflowContractTest(unittest.TestCase):
         errors = validator.validate(self.workflow, self.makefile)
         self.assertTrue(any("mutable @latest" in error for error in errors))
 
+    def test_frontend_high_severity_audit_is_required(self) -> None:
+        frontend = self.workflow["jobs"]["frontend-ci"]
+        frontend["steps"] = [
+            step for step in frontend["steps"] if step.get("name") != "Dependency audit"
+        ]
+        errors = validator.validate(self.workflow, self.makefile)
+        self.assertTrue(any("high and critical npm audit" in error for error in errors))
+
 
 if __name__ == "__main__":
     unittest.main()
