@@ -1830,9 +1830,9 @@ export interface components {
              * @example model.import
              * @enum {string}
              */
-            task_type: "model.import" | "kb.parse" | "kb.index" | "inference.deploy";
+            task_type: "model.import" | "kb.parse" | "kb.index" | "inference.deploy" | "volume.snapshot.create";
             /** @enum {string|null} */
-            resource_type?: "inference_service" | "kb_document" | "model_version" | null;
+            resource_type?: "inference_service" | "kb_document" | "model_version" | "volume_snapshot" | null;
             /** Format: uuid */
             resource_id?: string | null;
             /** @enum {string} */
@@ -2763,7 +2763,9 @@ export interface components {
         };
         InstanceLogListResponse: {
             items: components["schemas"]["InstanceLogEntry"][];
+            total: number;
             next_cursor?: string | null;
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
         InstanceEvent: {
             id: string;
@@ -2779,7 +2781,9 @@ export interface components {
         };
         InstanceEventListResponse: {
             items: components["schemas"]["InstanceEvent"][];
+            total: number;
             next_cursor?: string | null;
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
         InstanceMetrics: {
             /** Format: uuid */
@@ -2794,6 +2798,7 @@ export interface components {
             gpu_memory_total_mb?: number | null;
             network_rx_bytes?: number | null;
             network_tx_bytes?: number | null;
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
         InstanceSecurityEvent: {
             /** Format: uuid */
@@ -2809,7 +2814,9 @@ export interface components {
         };
         InstanceSecurityEventListResponse: {
             items: components["schemas"]["InstanceSecurityEvent"][];
+            total: number;
             next_cursor?: string | null;
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
         InstanceExecSession: {
             /** Format: uuid */
@@ -2821,6 +2828,7 @@ export interface components {
             token?: string;
             /** Format: date-time */
             expires_at: string;
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
         CreateInstanceExecSessionRequest: {
             idempotency_key: string;
@@ -2839,38 +2847,33 @@ export interface components {
             cols: number;
         };
         NetworkRoute: {
-            /** Format: uuid */
             id: string;
-            /** Format: uuid */
             vpc_id: string;
             destination_cidr: string;
             /** @enum {string} */
             next_hop_type: "gateway" | "instance" | "nat";
-            /** Format: uuid */
             next_hop_id: string;
             description?: string | null;
             /** Format: date-time */
             created_at: string;
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
         NetworkRouteListResponse: {
             items: components["schemas"]["NetworkRoute"][];
+            total: number;
             next_cursor?: string | null;
         };
         CreateNetworkRouteRequest: {
             idempotency_key: string;
-            /** Format: uuid */
             vpc_id: string;
             destination_cidr: string;
             /** @enum {string} */
             next_hop_type: "gateway" | "instance" | "nat";
-            /** Format: uuid */
             next_hop_id: string;
             description?: string;
         };
         VolumeSnapshotRecord: {
-            /** Format: uuid */
             id: string;
-            /** Format: uuid */
             volume_id: string;
             name: string;
             /** @enum {string} */
@@ -2878,9 +2881,11 @@ export interface components {
             size_bytes: number;
             /** Format: date-time */
             created_at: string;
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
         VolumeSnapshotListResponse: {
             items: components["schemas"]["VolumeSnapshotRecord"][];
+            total: number;
             next_cursor?: string | null;
         };
         CreateVolumeSnapshotRequest: {
@@ -2889,20 +2894,19 @@ export interface components {
             description?: string;
         };
         FilesystemMountTarget: {
-            /** Format: uuid */
             id: string;
-            /** Format: uuid */
             filesystem_id: string;
-            /** Format: uuid */
             subnet_id: string;
             ip_address: string;
             /** @enum {string} */
             status: "creating" | "available" | "deleting" | "error";
             /** Format: date-time */
             created_at: string;
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
         FilesystemMountTargetListResponse: {
             items: components["schemas"]["FilesystemMountTarget"][];
+            total: number;
             next_cursor?: string | null;
         };
         StorageBucketRecord: {
@@ -2919,6 +2923,7 @@ export interface components {
         };
         StorageBucketListResponse: {
             items: components["schemas"]["StorageBucketRecord"][];
+            total: number;
             next_cursor?: string | null;
         };
         CreateStorageBucketRequest: {
@@ -2983,11 +2988,12 @@ export interface components {
             status: "running" | "pending" | "failed" | "succeeded";
             /** Format: date-time */
             created_at: string;
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
         K8sClusterWorkloadListResponse: {
             items: components["schemas"]["K8sClusterWorkload"][];
             next_cursor?: string | null;
-            total?: number;
+            total: number;
         };
         GPUInventoryRecord: {
             /** Format: uuid */
@@ -3003,11 +3009,13 @@ export interface components {
             tenant_id?: string | null;
             /** Format: uuid */
             instance_id?: string | null;
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
         GPUInventoryListResponse: {
             items: components["schemas"]["GPUInventoryRecord"][];
             next_cursor?: string | null;
-            total?: number;
+            total: number;
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
         GPUOccupancyStats: {
             total: number;
@@ -3020,6 +3028,7 @@ export interface components {
                 in_use?: number;
                 available?: number;
             }[];
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
         SandboxTemplate: {
             /** Format: uuid */
@@ -3034,10 +3043,13 @@ export interface components {
             is_builtin: boolean;
             /** Format: date-time */
             created_at: string;
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
         SandboxTemplateListResponse: {
             items: components["schemas"]["SandboxTemplate"][];
+            total: number;
             next_cursor?: string | null;
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
     };
     responses: {
@@ -4266,10 +4278,12 @@ export interface operations {
             /** @description 快照创建任务已提交 */
             202: {
                 headers: {
+                    /** @description 任务轮询 URL */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["VolumeSnapshotRecord"];
+                    "application/json": components["schemas"]["AsyncTask"];
                 };
             };
             400: components["responses"]["BadRequest"];

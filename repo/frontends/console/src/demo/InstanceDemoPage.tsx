@@ -710,15 +710,26 @@ function domainRows(domain: ResourceDomain): DomainRow[] {
   return rows[domain]
 }
 
+type ApiResponse<T> = {
+  data?: T
+  error?: { message?: string }
+}
+
+type PathApiClient = {
+  GET: (path: string) => Promise<ApiResponse<unknown>>
+  POST: (path: string, init: { body?: unknown }) => Promise<ApiResponse<unknown>>
+}
+
 async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
+  const demoApi = api as unknown as PathApiClient
   const method = init?.method ?? 'GET'
   if (method === 'POST') {
     const body = init?.body ? JSON.parse(String(init.body)) : undefined
-    const response = await (api as any).POST(path.replace('/api/v1', ''), { body })
+    const response = await demoApi.POST(path.replace('/api/v1', ''), { body })
     if (response.error) throw new Error(response.error.message || '请求失败')
     return response.data as T
   }
-  const response = await (api as any).GET(path.replace('/api/v1', ''))
+  const response = await demoApi.GET(path.replace('/api/v1', ''))
   if (response.error) throw new Error(response.error.message || '请求失败')
   return response.data as T
 }

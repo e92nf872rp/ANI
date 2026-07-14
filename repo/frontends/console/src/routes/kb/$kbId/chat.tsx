@@ -4,6 +4,17 @@ import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { api } from '@/api/client'
 
+type KBSource = {
+  file_name?: string
+  page?: string | number
+}
+
+type ChatMessage = {
+  role: 'user' | 'assistant'
+  content: string
+  sources?: KBSource[]
+}
+
 export const Route = createFileRoute('/kb/$kbId/chat')({
   component: KBChat,
 })
@@ -11,7 +22,7 @@ export const Route = createFileRoute('/kb/$kbId/chat')({
 function KBChat() {
   const { kbId } = Route.useParams()
   const [question, setQuestion] = useState('')
-  const [messages, setMessages] = useState<Array<{ role: string; content: string; sources?: any[] }>>([])
+  const [messages, setMessages] = useState<ChatMessage[]>([])
 
   const queryMutation = useMutation({
     mutationFn: (q: string) =>
@@ -22,7 +33,7 @@ function KBChat() {
     onSuccess: (data) => {
       setMessages(prev => [
         ...prev,
-        { role: 'assistant', content: data?.answer ?? '', sources: data?.sources },
+        { role: 'assistant', content: data?.answer ?? '', sources: data?.sources as KBSource[] | undefined },
       ])
     },
   })

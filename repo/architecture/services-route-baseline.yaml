@@ -1,0 +1,85 @@
+version: 1
+status: accepted_baseline
+owner: ANI Core 与 ANI Services 共同维护
+purpose: >-
+  当前 Services Gateway 仍是过渡占位实现；本文件精确登记 OpenAPI 与
+  /api/v1/svc 路由注册之间的已知差异。新增差异或失效条目阻断 PR。
+exceptions:
+  - kind: code_not_in_spec
+    method: GET
+    path: /models/{model_id}/versions
+    status: accepted_baseline
+    owner: ANI Core 与 ANI Services 共同维护
+    reason: Gateway 已注册模型版本列表过渡路由，但 Services OpenAPI 当前只声明创建模型版本。
+  - kind: code_not_in_spec
+    method: PATCH
+    path: /inference-services/{service_id}
+    status: accepted_baseline
+    owner: ANI Core 与 ANI Services 共同维护
+    reason: Gateway 已注册推理服务变配过渡路由，但 Services OpenAPI 尚未声明该操作。
+  - kind: spec_not_in_code
+    method: GET
+    path: /knowledge-bases/{kb_id}/citations
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明引用来源列表，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: GET
+    path: /knowledge-bases/{kb_id}/sessions
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明知识库会话列表，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: GET
+    path: /tenant/members/{member_id}
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明租户成员详情，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: GET
+    path: /tenant/webhooks/{webhook_id}/deliveries
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明 Webhook 投递记录，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: POST
+    path: /inference-services/{service_id}/test
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明推理服务调用测试，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: POST
+    path: /integrations
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明第三方集成创建，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: POST
+    path: /integrations/bots
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明集成 Bot 创建，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: GET
+    path: /integrations
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明第三方集成列表，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: PUT
+    path: /inference-services/{service_id}/policies
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明推理服务策略更新，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: PUT
+    path: /knowledge-bases/{kb_id}/permissions
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明知识库权限更新，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: PUT
+    path: /tenant/roles/{role_id}
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明租户角色更新，当前 Gateway 尚未注册对应过渡路由。

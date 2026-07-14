@@ -61,7 +61,18 @@ ANI Services:
 | Core 默认适配器 | `repo/pkg/adapters/` |
 | Services 暂存实现 | `repo/services/model-service/`、`repo/services/kb-service/`、`repo/ai/`、`repo/operators/inference-operator/`、`repo/frontends/console/` 中存在历史/临时 Services 逻辑；这些代码不定义最终 Services 边界，不允许被 Core 调用 |
 
-> **Services 重定义门禁：** 由于项目初期 Core/Services 边界尚未完全想清楚，Repo 中保留了一些早期 Services 逻辑。2026-06-15 至 2026-06-20，ANI Services 团队必须输出较完整的前端功能、Services 功能和接口定义；该定义评审通过后，Repo 中与之冲突的旧 Services 逻辑要删除或覆盖，后续 Services 代码以新定义和 Core OpenAPI/SDK 为准。
+> **Services 受控解冻门禁（原 Services 重定义门禁）：** 由于项目初期 Core/Services 边界尚未完全想清楚，Repo 中保留了一些早期 Services 逻辑。2026-06-15 至 2026-06-20 的前端功能、Services 功能和接口定义输出仍作为历史背景；当前不再按旧冻结规则处理 Services，也不要求 Core 基于猜测删除/覆盖旧逻辑。后续 Services 代码必须 API-first，以 Services 自有定义和 Core OpenAPI/SDK 为准，并通过 CODEOWNERS 共同审查、API split、Services boundary gate 与现有 architecture gate。
+
+当前 Services ownership matrix：
+
+| 范围 | 主责 | 当前门禁 |
+|---|---|---|
+| `repo/services/model-service/`、`repo/services/kb-service/`、`repo/ai/`、`repo/frontends/` | Services 主责，Core 关注跨层边界 | CODEOWNERS 共同审查；禁止新增 Core internal import；Services boundary gate |
+| `repo/api/openapi/services/v1.yaml`、`repo/sdks/services/`、`repo/docs/api/services.html` | Services 主责，Core 共同 review | API split；生成物必须来自 Services OpenAPI |
+| `repo/services/ani-gateway/` 混合 Gateway handler | `/api/v1/svc/*` Services handler 由 Services 主责、Core 共同 review；Core `/api/v1/*` handler 和 middleware/runtime 由 Core 主责 | handler 路由分区、API split、architecture gate |
+| `repo/pkg/`、`repo/api/openapi/v1.yaml`、`repo/deploy/`、`repo/scripts/`、`repo/sdks/core/`、`repo/cli/` | Core 保护目录 | Services PR 触碰时必须 Core review，不得自行合并 |
+
+解冻后的门禁顺序：先改 `repo/api/openapi/services/v1.yaml` 或 Core API 契约并完成共同审查 → 再改 Services handler/实现 → 再生成 SDK/前端类型 → 运行 `make validate-services`。该聚合门禁包含 API split、Services boundary、OpenAPI/Gateway route contract、Services semantic contract、SDK/API docs 生成漂移、模块检查、`make validate-architecture` 与文档入口 gate。已登记的存量例外只代表当前代码事实告警，不代表边界合规或 production-ready。
 
 ---
 
@@ -184,12 +195,12 @@ Services 的硬规则：
 
 ```text
 Services 只能通过 Core OpenAPI REST API / Core SDK 使用 Core 能力。
-Services 禁止 import Core 内部包。
+Services 禁止 import Core 内部包；已登记存量例外必须由 Services boundary gate 告警并逐步迁移，新增导入不得扩散。
 Services 禁止直接调用 Core 内部 gRPC service。
-Services 禁止直接调用底层 K8s、MinIO、Milvus、Redis、NATS、Harbor 等组件 SDK。
+Services 禁止新增直接调用底层 K8s、MinIO、Milvus、Redis、NATS、Harbor 等组件 SDK；已登记 provider SDK 例外不代表 production-ready。
 ```
 
-现有 Repo 中的 Services 相关目录如果与 2026-06-15 至 2026-06-20 输出的新功能/接口定义不一致，应按新定义删除或覆盖；不要把早期 `model-service`、空 `kb-service`、前端单 API Client 或推理 operator 骨架当成最终架构事实。
+现有 Repo 中的 Services 相关目录如果与评审后的功能/接口定义不一致，应以 API-first 的 PR 迁移；不要把早期 `model-service`、空 `kb-service`、前端单 API Client 或推理 operator 骨架当成最终架构事实，也不要把受控解冻理解为生产就绪结论。
 
 ---
 

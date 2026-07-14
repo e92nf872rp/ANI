@@ -4,6 +4,8 @@
 >
 > **维护者**：ANI 项目架构负责人
 > **版本**：2026-06-09
+>
+> **状态：历史快照（只读）**：本文记录 2026-06-09 的 API 对齐批次，不是当前 Services PR 规则或运行事实来源。当前规则以 `CLAUDE.md`、`repo/CURRENT-SPRINT.md` 和 `ANI-SERVICES-TEAM-GUIDE.md` 为准；当前 Services 门禁以 `make validate-services` 为准。
 > **下游文档**：执行本工作流后产生 `repo/docs/CORE-TEAM-TASKS.md` 和 `repo/docs/SERVICES-TEAM-TASKS.md`，分别触发两个团队的 AI coding 工作
 
 ---

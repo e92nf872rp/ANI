@@ -4,6 +4,8 @@
 > **契约来源**：`docs/console-modules/governance/YAML-EXPANSION-SUMMARY-2026-06-17.md`（Services active +12 ops，+ schema/422 修补）  
 > **总任务数**：16 | 待开始：13 | 进行中：0 | 已完成：3
 
+> **当前实现状态：** 本文件是 Services 规划与执行清单，不代表接口已在 Gateway 可用。状态为“待开始”的任务，其 OpenAPI 操作可能已经声明但尚未注册 handler；method/path 事实以 `repo/architecture/services-route-baseline.yaml` 和 `make validate-services` 为准。新增实现必须先更新 OpenAPI，再注册 `/api/v1/svc` handler、生成物和测试。
+
 > **不实现** deprecated 路径：`/gpu-containers*`、`/sandboxes*`
 
 ---
