@@ -19,6 +19,7 @@ type RegisterOptions struct {
 	VectorStoreService                    ports.VectorStoreService
 	InstanceObservability                 ports.InstanceObservability
 	InstanceObservabilityUsesInstanceName bool
+	EmailNotificationService              ports.EmailNotificationService
 }
 
 // Register wires all route groups onto the Hertz server.
@@ -49,6 +50,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerK8sClusterResourcesWithService(v1, options.K8sClusterService)
 	registerEncryptionResourcesWithService(v1, options.EncryptionService)
 	registerSecretResourcesWithService(v1, options.SecretService)
+	registerEmailNotificationsWithService(v1, options.EmailNotificationService)
 
 	svc := h.Group("/api/v1/svc")
 	registerModels(svc)

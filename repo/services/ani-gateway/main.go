@@ -88,6 +88,13 @@ func main() {
 		os.Exit(1)
 	}
 	defer closeGatewayStore()
+
+	emailNotificationService, err := newGatewayEmailNotificationService(gatewayEmailNotificationRuntimeConfigFromEnv())
+	if err != nil {
+		logger.Error("failed to configure email notification service", "err", err)
+		os.Exit(1)
+	}
+
 	middleware.StartAuditWorker()
 	middleware.Register(h, gatewayStore)
 	router.RegisterWithOptions(h, router.RegisterOptions{
@@ -100,6 +107,7 @@ func main() {
 		VectorStoreService:                    vectorStoreService,
 		InstanceObservability:                 instanceObservability,
 		InstanceObservabilityUsesInstanceName: instanceObservabilityUsesInstanceName,
+		EmailNotificationService:              emailNotificationService,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
