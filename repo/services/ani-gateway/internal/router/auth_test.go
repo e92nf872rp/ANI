@@ -151,10 +151,11 @@ func TestAuthCreateAPIKeyForTenant(t *testing.T) {
 	}}
 
 	resp, httpStatus, code, message := api.createAPIKeyForTenant(context.Background(), "tenant-1", "user-1", authCreateAPIKeyRequest{
-		Name:         "ci",
-		Scopes:       []string{"scope:models:create"},
-		RateLimitRPM: 120,
-		ExpiresAt:    time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
+		IdempotencyKey: "idem-api-key",
+		Name:           "ci",
+		Scopes:         []string{"scope:models:create"},
+		RateLimitRPM:   120,
+		ExpiresAt:      time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
 	})
 	if code != "" || message != "" {
 		t.Fatalf("createAPIKeyForTenant error = %s/%s", code, message)
@@ -164,6 +165,43 @@ func TestAuthCreateAPIKeyForTenant(t *testing.T) {
 	}
 	if resp.KeyID != "key-1" || resp.KeyValue == "" || resp.KeyPrefix != "ani_dev" {
 		t.Fatalf("response = %+v", resp)
+	}
+}
+
+func TestAuthCreateAPIKeyForTenantPassesIdempotencyKey(t *testing.T) {
+	var got string
+	api := authAPI{client: fakeGatewayAuthClient{
+		create: &authv1.CreateAPIKeyResponse{KeyId: "key-1", KeyValue: "ani_dev_secret", KeyPrefix: "ani_dev"},
+		createFunc: func(req *authv1.CreateAPIKeyRequest) {
+			got = req.GetIdempotencyKey()
+		},
+	}}
+
+	_, httpStatus, code, message := api.createAPIKeyForTenant(context.Background(), "tenant-1", "user-1", authCreateAPIKeyRequest{
+		IdempotencyKey: "idem-api-key",
+		Name:           "ci",
+		Scopes:         []string{"scope:models:create"},
+	})
+	if code != "" || message != "" || httpStatus != 201 {
+		t.Fatalf("createAPIKeyForTenant status/code/message = %d/%s/%s", httpStatus, code, message)
+	}
+	if got != "idem-api-key" {
+		t.Fatalf("idempotency_key = %q, want idem-api-key", got)
+	}
+}
+
+func TestAuthCreateAPIKeyMapsReplayExpired(t *testing.T) {
+	api := authAPI{client: fakeGatewayAuthClient{
+		createErr: status.Error(codes.Aborted, "api key idempotency replay expired"),
+	}}
+
+	_, httpStatus, code, message := api.createAPIKeyForTenant(context.Background(), "tenant-1", "user-1", authCreateAPIKeyRequest{
+		IdempotencyKey: "idem-api-key",
+		Name:           "ci",
+		Scopes:         []string{"scope:models:create"},
+	})
+	if httpStatus != 409 || code != "IDEMPOTENCY_REPLAY_EXPIRED" || message != "api key idempotency replay expired" {
+		t.Fatalf("status/code/message = %d/%s/%s, want 409/IDEMPOTENCY_REPLAY_EXPIRED/replay expired", httpStatus, code, message)
 	}
 }
 
@@ -228,6 +266,7 @@ type fakeGatewayAuthClient struct {
 	completeErr  error
 	revokeErr    error
 	createErr    error
+	createFunc   func(*authv1.CreateAPIKeyRequest)
 	listErr      error
 	revokeKeyErr error
 }
@@ -265,9 +304,12 @@ func (f fakeGatewayAuthClient) RevokeToken(context.Context, string) error {
 	return f.revokeErr
 }
 
-func (f fakeGatewayAuthClient) CreateAPIKey(context.Context, *authv1.CreateAPIKeyRequest) (*authv1.CreateAPIKeyResponse, error) {
+func (f fakeGatewayAuthClient) CreateAPIKey(_ context.Context, req *authv1.CreateAPIKeyRequest) (*authv1.CreateAPIKeyResponse, error) {
 	if f.createErr != nil {
 		return nil, f.createErr
+	}
+	if f.createFunc != nil {
+		f.createFunc(req)
 	}
 	return f.create, nil
 }

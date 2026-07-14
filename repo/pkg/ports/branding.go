@@ -7,18 +7,19 @@ import (
 )
 
 type BrandingRecord struct {
-	PlatformName  string
-	LogoLightURL  string
-	LogoDarkURL   string
-	FaviconURL    string
-	PrimaryColor  string
+	PlatformName   string
+	LogoLightURL   string
+	LogoDarkURL    string
+	FaviconURL     string
+	PrimaryColor   string
 	SecondaryColor string
-	LoginBgURL    string
-	ICPNumber     string
-	UpdatedAt     time.Time
+	LoginBgURL     string
+	ICPNumber      string
+	UpdatedAt      time.Time
 }
 
 type BrandingUpdateRequest struct {
+	IdempotencyKey string
 	PlatformName   string
 	LogoLightURL   string
 	LogoDarkURL    string
@@ -30,10 +31,11 @@ type BrandingUpdateRequest struct {
 }
 
 type BrandingLogoUploadRequest struct {
-	Variant     string
-	ContentType string
-	Body        io.Reader
-	SizeBytes   int64
+	IdempotencyKey string
+	Variant        string
+	ContentType    string
+	Body           io.Reader
+	SizeBytes      int64
 }
 
 type BrandingService interface {

@@ -29,6 +29,7 @@ type EncryptionSealRequest struct {
 
 type EncryptionUnsealTokenRequest struct {
 	TenantID        string
+	IdempotencyKey  string
 	KeyID           string
 	SealedObjectURI string
 }

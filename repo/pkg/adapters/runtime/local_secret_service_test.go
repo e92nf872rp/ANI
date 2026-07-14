@@ -40,6 +40,46 @@ func TestLocalSecretServiceAppliesSecretToConfiguredProvider(t *testing.T) {
 	}
 }
 
+func TestLocalSecretServiceBindSecretIsIdempotent(t *testing.T) {
+	service := NewLocalSecretService()
+	secret, err := service.CreateSecret(context.Background(), ports.SecretCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "create-bind-secret",
+		Name:           "db-password",
+		Type:           "opaque",
+		Data:           map[string]string{"password": "secret-value"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSecret() error = %v", err)
+	}
+
+	first, err := service.BindSecret(context.Background(), ports.SecretBindRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "bind-db-secret",
+		SecretID:       secret.SecretID,
+		TargetType:     "instance",
+		TargetID:       "inst-a",
+		EnvPrefix:      "DB_",
+	})
+	if err != nil {
+		t.Fatalf("BindSecret() error = %v", err)
+	}
+	second, err := service.BindSecret(context.Background(), ports.SecretBindRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "bind-db-secret",
+		SecretID:       secret.SecretID,
+		TargetType:     "instance",
+		TargetID:       "inst-a",
+		EnvPrefix:      "DB_",
+	})
+	if err != nil {
+		t.Fatalf("BindSecret() replay error = %v", err)
+	}
+	if first.BindingID != second.BindingID {
+		t.Fatalf("binding replay id = %s, want %s", second.BindingID, first.BindingID)
+	}
+}
+
 type fakeSecretProviderApply struct {
 	calls int
 	last  ports.SecretProviderApplyRequest

@@ -50,6 +50,7 @@ type encryptionSealRequest struct {
 	ObjectURI      string `json:"object_uri"`
 }
 type encryptionUnsealTokenRequest struct {
+	IdempotencyKey  string `json:"idempotency_key"`
 	KeyID           string `json:"key_id"`
 	SealedObjectURI string `json:"sealed_object_uri"`
 }
@@ -182,7 +183,7 @@ func (api *encryptionAPI) createUnsealToken(ctx context.Context, c *app.RequestC
 		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid encryption unseal-token request")
 		return
 	}
-	rec, err := api.service.CreateUnsealToken(ctx, ports.EncryptionUnsealTokenRequest{TenantID: middleware.GetTenantID(c), KeyID: req.KeyID, SealedObjectURI: req.SealedObjectURI})
+	rec, err := api.service.CreateUnsealToken(ctx, ports.EncryptionUnsealTokenRequest{TenantID: middleware.GetTenantID(c), IdempotencyKey: req.IdempotencyKey, KeyID: req.KeyID, SealedObjectURI: req.SealedObjectURI})
 	if err != nil {
 		writeEncryptionError(c, err)
 		return

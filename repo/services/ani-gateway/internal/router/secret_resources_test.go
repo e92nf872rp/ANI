@@ -39,11 +39,12 @@ func TestSecretAPIDevProfileIdempotencyAndBinding(t *testing.T) {
 	requireLocalCoreDevProfile(t, resp.DevProfile, "local-secret-service")
 
 	binding, err := api.service.BindSecret(context.Background(), ports.SecretBindRequest{
-		TenantID:   "t1",
-		SecretID:   a.SecretID,
-		TargetType: "instance",
-		TargetID:   "inst-1",
-		EnvPrefix:  "DB_",
+		TenantID:       "t1",
+		IdempotencyKey: "bind-secret-1",
+		SecretID:       a.SecretID,
+		TargetType:     "instance",
+		TargetID:       "inst-1",
+		EnvPrefix:      "DB_",
 	})
 	if err != nil {
 		t.Fatal(err)

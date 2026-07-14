@@ -91,12 +91,16 @@ CREATE TABLE api_keys (
     key_prefix      TEXT NOT NULL,                  -- 展示用前缀，如 "ani_prod_xxxx"
     scopes          TEXT[] NOT NULL DEFAULT '{}',   -- 权限范围
     rate_limit_rpm  INT NOT NULL DEFAULT 60,        -- 每分钟请求限制
+    idempotency_key TEXT,                           -- 创建请求幂等键；明文仅短 TTL 加密缓存
     expires_at      TIMESTAMPTZ,                    -- NULL = 永不过期
     last_used_at    TIMESTAMPTZ,
     revoked_at      TIMESTAMPTZ,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX idx_api_keys_tenant_id ON api_keys(tenant_id);
+CREATE UNIQUE INDEX idx_api_keys_idempotency
+    ON api_keys (tenant_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL AND idempotency_key <> '';
 
 CREATE TABLE jwt_blocklist (
     jti         TEXT PRIMARY KEY,                   -- JWT ID

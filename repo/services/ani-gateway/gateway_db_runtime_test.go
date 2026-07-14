@@ -100,9 +100,10 @@ func TestGatewayBrandingServiceWrapsObjectStoreWhenConfigured(t *testing.T) {
 		t.Fatal("service = nil, want branding service")
 	}
 	record, err := service.UploadBrandingLogo(t.Context(), ports.BrandingLogoUploadRequest{
-		Variant:     "favicon",
-		ContentType: "image/png",
-		Body:        strings.NewReader("png"),
+		IdempotencyKey: "branding-logo-gateway",
+		Variant:        "favicon",
+		ContentType:    "image/png",
+		Body:           strings.NewReader("png"),
 	})
 	if err != nil {
 		t.Fatalf("UploadBrandingLogo() error = %v", err)
@@ -116,15 +117,19 @@ type fakeBrandingObjectStoreGateway struct {
 	publicURL string
 }
 
-func (s *fakeBrandingObjectStoreGateway) EnsureBucket(context.Context, ports.BucketClass) error { return nil }
-func (s *fakeBrandingObjectStoreGateway) Health(context.Context) error                           { return nil }
+func (s *fakeBrandingObjectStoreGateway) EnsureBucket(context.Context, ports.BucketClass) error {
+	return nil
+}
+func (s *fakeBrandingObjectStoreGateway) Health(context.Context) error { return nil }
 func (s *fakeBrandingObjectStoreGateway) PutObject(context.Context, ports.PutObjectInput) (ports.ObjectMetadata, error) {
 	return ports.ObjectMetadata{}, nil
 }
 func (s *fakeBrandingObjectStoreGateway) GetObject(context.Context, ports.ObjectRef) (io.ReadCloser, ports.ObjectMetadata, error) {
 	return nil, ports.ObjectMetadata{}, ports.ErrUnsupported
 }
-func (s *fakeBrandingObjectStoreGateway) DeleteObject(context.Context, ports.ObjectRef) error { return ports.ErrUnsupported }
+func (s *fakeBrandingObjectStoreGateway) DeleteObject(context.Context, ports.ObjectRef) error {
+	return ports.ErrUnsupported
+}
 func (s *fakeBrandingObjectStoreGateway) StatObject(context.Context, ports.ObjectRef) (ports.ObjectMetadata, error) {
 	return ports.ObjectMetadata{}, ports.ErrUnsupported
 }

@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>111</dd></div>
-          <div><dt>Schemas</dt><dd>143</dd></div>
+          <div><dt>Operations</dt><dd>125</dd></div>
+          <div><dt>Schemas</dt><dd>156</dd></div>
         </dl>
       </section>
 
@@ -222,6 +222,22 @@
           <td>获取平台品牌配置</td>
           <td><code></code></td>
           <td>200</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/branding</code></td>
+          <td><code>updateBranding</code></td>
+          <td>更新平台品牌配置</td>
+          <td><code>scope:platform:manage</code></td>
+          <td>200, 400, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/branding/logo</code></td>
+          <td><code>uploadBrandingLogo</code></td>
+          <td>上传平台 Logo</td>
+          <td><code>scope:platform:manage</code></td>
+          <td>200, 400, 401, 403, 503</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -369,6 +385,46 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/images</code></td>
+          <td><code>listImages</code></td>
+          <td>查询可启动镜像列表</td>
+          <td><code>scope:images:read</code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/images/upload-proxy</code></td>
+          <td><code>proxyImageUpload</code></td>
+          <td>代理 ISO 文件上传到 CDI uploadproxy</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 502</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/images/uploads</code></td>
+          <td><code>createImageUpload</code></td>
+          <td>创建镜像上传会话</td>
+          <td><code>scope:images:create</code></td>
+          <td>201, 400, 401, 403, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/images/{image_id}</code></td>
+          <td><code>deleteImage</code></td>
+          <td>删除镜像</td>
+          <td><code>scope:images:delete</code></td>
+          <td>200, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/images/{image_id}</code></td>
+          <td><code>getImage</code></td>
+          <td>查询镜像详情与导入状态</td>
+          <td><code>scope:images:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/instance-operations/{operation_id}</code></td>
           <td><code>getInstanceOperation</code></td>
           <td>查询单个操作详情</td>
@@ -405,7 +461,15 @@
           <td><code>createInstanceConsoleSession</code></td>
           <td>申请 VM console/VNC session</td>
           <td><code>scope:instances:console</code></td>
-          <td>200, 400, 401, 403, 404</td>
+          <td>200, 400, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/instances/{instance_id}/console/{session_id}</code></td>
+          <td><code>connectInstanceConsoleSession</code></td>
+          <td>连接 VM console/VNC WebSocket</td>
+          <td><code>scope:instances:console</code></td>
+          <td>101, 400, 401, 403, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -422,6 +486,14 @@
           <td>创建实例终端 exec session</td>
           <td><code>scope:instances:exec</code></td>
           <td>200, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/instances/{instance_id}/exec/{session_id}</code></td>
+          <td><code>connectInstanceExecSession</code></td>
+          <td>连接实例终端 exec WebSocket</td>
+          <td><code>scope:instances:exec</code></td>
+          <td>101, 400, 401, 403, 404, 410</td>
         </tr>
         <tr>
           <td><span class="method method-post">POST</span></td>
@@ -597,7 +669,7 @@
           <td><code>createNetworkLoadBalancer</code></td>
           <td>创建负载入口</td>
           <td><code>scope:networks:create</code></td>
-          <td>201, 400, 401, 403, 404</td>
+          <td>201, 400, 401, 403, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-delete">DELETE</span></td>
@@ -605,7 +677,7 @@
           <td><code>deleteNetworkLoadBalancer</code></td>
           <td>删除负载入口</td>
           <td><code>scope:networks:delete</code></td>
-          <td>200, 401, 403, 404</td>
+          <td>200, 401, 403, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -629,7 +701,23 @@
           <td><code>createNetworkRoute</code></td>
           <td>创建路由条目</td>
           <td><code>scope:networks:create</code></td>
-          <td>201, 400, 401, 403, 404</td>
+          <td>201, 400, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/networks/routes/{route_id}</code></td>
+          <td><code>deleteNetworkRoute</code></td>
+          <td>删除路由条目</td>
+          <td><code>scope:networks:delete</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/networks/routes/{route_id}</code></td>
+          <td><code>getNetworkRoute</code></td>
+          <td>查询路由条目</td>
+          <td><code>scope:networks:read</code></td>
+          <td>200, 401, 403, 404</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -653,7 +741,7 @@
           <td><code>deleteNetworkSecurityGroup</code></td>
           <td>删除安全组</td>
           <td><code>scope:networks:delete</code></td>
-          <td>200, 401, 403, 404</td>
+          <td>200, 401, 403, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -662,6 +750,14 @@
           <td>查询安全组</td>
           <td><code>scope:networks:read</code></td>
           <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-patch">PATCH</span></td>
+          <td><code>/networks/security-groups/{security_group_id}</code></td>
+          <td><code>updateNetworkSecurityGroup</code></td>
+          <td>更新安全组规则</td>
+          <td><code>scope:networks:update</code></td>
+          <td>200, 400, 401, 403, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -677,7 +773,7 @@
           <td><code>createNetworkSubnet</code></td>
           <td>创建子网</td>
           <td><code>scope:networks:create</code></td>
-          <td>201, 400, 401, 403, 404</td>
+          <td>201, 400, 401, 403, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-delete">DELETE</span></td>
@@ -685,7 +781,7 @@
           <td><code>deleteNetworkSubnet</code></td>
           <td>删除子网</td>
           <td><code>scope:networks:delete</code></td>
-          <td>200, 401, 403, 404</td>
+          <td>200, 401, 403, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -717,7 +813,7 @@
           <td><code>deleteNetworkVPC</code></td>
           <td>删除 VPC</td>
           <td><code>scope:networks:delete</code></td>
-          <td>200, 401, 403, 404</td>
+          <td>200, 401, 403, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -766,6 +862,14 @@
           <td>查询对象元数据</td>
           <td><code>scope:objects:read</code></td>
           <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/objects/{object_id}/complete</code></td>
+          <td><code>completeStorageObjectUpload</code></td>
+          <td>确认对象上传完成并对齐对象存储元数据</td>
+          <td><code>scope:objects:create</code></td>
+          <td>200, 401, 403, 404, 422</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -862,6 +966,14 @@
           <td>创建镜像仓库拉取凭据引用</td>
           <td><code>scope:registry:write</code></td>
           <td>201, 400, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/registry/projects/{project}/pull-secret/kubernetes-apply</code></td>
+          <td><code>applyRegistryProjectPullSecretToKubernetes</code></td>
+          <td>创建 Harbor pull secret 并注入 Kubernetes imagePullSecret</td>
+          <td><code>scope:registry:write</code></td>
+          <td>201, 400, 401, 403, 409, 501</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1058,10 +1170,13 @@
         <li><code>AsyncTask</code></li>
         <li><code>BeginOIDCLoginRequest</code></li>
         <li><code>BeginOIDCLoginResponse</code></li>
+        <li><code>BrandingLogoUploadResponse</code></li>
+        <li><code>BrandingUpdateRequest</code></li>
         <li><code>CompleteOIDCLoginRequest</code></li>
         <li><code>CoreDevProfileInfo</code></li>
         <li><code>CreateAPIKeyRequest</code></li>
         <li><code>CreateAPIKeyResponse</code></li>
+        <li><code>CreateImageUploadRequest</code></li>
         <li><code>CreateInstanceConsoleSessionRequest</code></li>
         <li><code>CreateInstanceExecSessionRequest</code></li>
         <li><code>CreateInstanceRequest</code></li>
@@ -1098,6 +1213,12 @@
         <li><code>GPUInventoryRecord</code></li>
         <li><code>GPUOccupancyStats</code></li>
         <li><code>HealthCheck</code></li>
+        <li><code>Image</code></li>
+        <li><code>ImageFormat</code></li>
+        <li><code>ImageListResponse</code></li>
+        <li><code>ImageState</code></li>
+        <li><code>ImageUploadSession</code></li>
+        <li><code>InstanceBootMedia</code></li>
         <li><code>InstanceConsoleSession</code></li>
         <li><code>InstanceEvent</code></li>
         <li><code>InstanceEventListResponse</code></li>
@@ -1146,6 +1267,7 @@
         <li><code>ObservabilityAlertRule</code></li>
         <li><code>ObservabilityAlertRuleListResponse</code></li>
         <li><code>ObservabilityQueryResponse</code></li>
+        <li><code>PlatformBranding</code></li>
         <li><code>RefreshAccessTokenRequest</code></li>
         <li><code>RefreshAccessTokenResponse</code></li>
         <li><code>RegistryArtifact</code></li>
@@ -1155,6 +1277,7 @@
         <li><code>RegistryProjectListResponse</code></li>
         <li><code>RegistryProjectScanReport</code></li>
         <li><code>RegistryPullSecret</code></li>
+        <li><code>RegistryPullSecretKubernetesApply</code></li>
         <li><code>RegistryRepository</code></li>
         <li><code>RegistryRepositoryListResponse</code></li>
         <li><code>RegistryScanResult</code></li>
@@ -1176,6 +1299,7 @@
         <li><code>StorageFilesystem</code></li>
         <li><code>StorageFilesystemListResponse</code></li>
         <li><code>StorageObject</code></li>
+        <li><code>StorageObjectCompleteRequest</code></li>
         <li><code>StorageObjectDownloadInfo</code></li>
         <li><code>StorageObjectListResponse</code></li>
         <li><code>StorageObjectUploadRequest</code></li>
@@ -1185,6 +1309,7 @@
         <li><code>StorageVolumeListResponse</code></li>
         <li><code>TokenPairResponse</code></li>
         <li><code>TokenUsageReport</code></li>
+        <li><code>UpdateNetworkSecurityGroupRequest</code></li>
         <li><code>UpdateObservabilityAlertRuleRequest</code></li>
         <li><code>VectorStore</code></li>
         <li><code>VectorStoreDocumentInsertRequest</code></li>

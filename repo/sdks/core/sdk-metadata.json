@@ -179,6 +179,12 @@
       "scope": "scope:images:read"
     },
     {
+      "operationId": "proxyImageUpload",
+      "method": "POST",
+      "path": "/images/upload-proxy",
+      "scope": ""
+    },
+    {
       "operationId": "createImageUpload",
       "method": "POST",
       "path": "/images/uploads",
@@ -883,6 +889,7 @@
     "StorageFilesystem",
     "StorageFilesystemListResponse",
     "StorageObject",
+    "StorageObjectCompleteRequest",
     "StorageObjectDownloadInfo",
     "StorageObjectListResponse",
     "StorageObjectUploadRequest",
@@ -907,14 +914,18 @@
     "WorkloadIdentityBinding"
   ],
   "idempotencyOperations": [
+    "createAPIKey",
+    "updateBranding",
     "createStorageBucket",
     "createEncryptionKey",
     "revokeEncryptionKey",
     "rotateEncryptionKey",
     "sealEncryptionObject",
+    "createEncryptionUnsealToken",
     "createStorageFilesystem",
     "createImageUpload",
     "createInstance",
+    "createInstanceConsoleSession",
     "createInstanceExecSession",
     "applyInstanceLifecycle",
     "createK8sCluster",
@@ -931,6 +942,7 @@
     "createNetworkVPC",
     "createStorageObject",
     "uploadStorageObject",
+    "completeStorageObjectUpload",
     "createObservabilityAlertRule",
     "updateObservabilityAlertRule",
     "createRegistryProject",
@@ -938,6 +950,7 @@
     "applyRegistryProjectPullSecretToKubernetes",
     "setRegistryRepositoryPermission",
     "createSecret",
+    "bindSecret",
     "createVectorStore",
     "insertVectorStoreDocuments",
     "createStorageVolume",

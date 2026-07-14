@@ -59,6 +59,10 @@ type storageObjectUploadRequest struct {
 	ContentType    string `json:"content_type,omitempty"`
 }
 
+type storageObjectCompleteRequest struct {
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
 type storageVolumeResponse struct {
 	ID           string                 `json:"id"`
 	TenantID     string                 `json:"tenant_id"`
@@ -413,9 +417,15 @@ func (api *storageAPI) uploadStorageObject(ctx context.Context, c *app.RequestCo
 }
 
 func (api *storageAPI) completeStorageObjectUpload(ctx context.Context, c *app.RequestContext) {
+	var req storageObjectCompleteRequest
+	if err := c.BindJSON(&req); err != nil {
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid object complete request")
+		return
+	}
 	record, err := api.service.CompleteStorageObjectUpload(ctx, ports.StorageObjectCompleteRequest{
-		TenantID: middleware.GetTenantID(c),
-		ObjectID: c.Param("object_id"),
+		TenantID:       middleware.GetTenantID(c),
+		IdempotencyKey: req.IdempotencyKey,
+		ObjectID:       c.Param("object_id"),
 	})
 	if err != nil {
 		writeStorageCompleteError(c, err)

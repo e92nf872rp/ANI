@@ -217,6 +217,9 @@ def validate_api_contract(root: Path, errors: list[str]) -> None:
     lifecycle_required = set(schemas.get("InstanceLifecycleRequest", {}).get("required", []))
     if "idempotency_key" not in lifecycle_required:
         errors.append("InstanceLifecycleRequest must require idempotency_key")
+    console_required = set(schemas.get("CreateInstanceConsoleSessionRequest", {}).get("required", []))
+    if "idempotency_key" not in console_required:
+        errors.append("CreateInstanceConsoleSessionRequest must require idempotency_key")
     frozen_lifecycle_required = set(freeze_schemas.get("lifecycle_request_fields", {}).get("required", []))
     expected_lifecycle_required = {"action", "idempotency_key"}
     if frozen_lifecycle_required != expected_lifecycle_required:

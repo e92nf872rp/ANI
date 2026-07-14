@@ -261,9 +261,10 @@ components:
     EncryptionUnsealTokenRequest:
       type: object
       properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
         key_id:            { type: string }
         sealed_object_uri: { type: string }
-      required: [key_id, sealed_object_uri]
+      required: [idempotency_key, key_id, sealed_object_uri]
     EncryptionUnsealTokenResponse:
       type: object
       properties:
@@ -307,11 +308,12 @@ components:
     SecretBindingRequest:
       type: object
       properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
         target_type: { type: string, enum: [instance, k8s-cluster, service] }
         target_id:   { type: string }
         mount_path:  { type: string }
         env_prefix:  { type: string }
-      required: [target_type, target_id]
+      required: [idempotency_key, target_type, target_id]
     SecretBinding:
       type: object
       properties:
@@ -412,7 +414,9 @@ components:
         updated_at:      { type: string, format: date-time }
     BrandingUpdateRequest:
       type: object
+      required: [idempotency_key]
       properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
         platform_name:   { type: string }
         logo_light_url:  { type: string, format: uri }
         logo_dark_url:   { type: string, format: uri }
@@ -969,9 +973,10 @@ components:
 
     CreateInstanceConsoleSessionRequest:
       type: object
+      required: [idempotency_key]
       properties:
         protocol: { type: string, enum: [console, vnc, novnc, serial], default: "vnc" }
-        idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "可选；同一 tenant 下复用可返回同一短期 session" }
+        idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "必填；同一 tenant 下复用可返回同一短期 session" }
 
     InstanceConsoleSession:
       type: object
@@ -1568,8 +1573,13 @@ components:
 
     CreateAPIKeyRequest:
       type: object
-      required: [name, scopes]
+      required: [idempotency_key, name, scopes]
       properties:
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: "客户端生成；同一 tenant_id 下短 TTL 内返回同一 key_value 重放结果，过期后拒绝重复创建。"
         name:           { type: string, maxLength: 128 }
         user_id:        { type: string, description: "可选；为空时使用当前认证用户" }
         scopes:
@@ -1844,6 +1854,12 @@ components:
         bucket_id:    { type: string, format: uuid }
         key:          { type: string }
         content_type: { type: string }
+
+    StorageObjectCompleteRequest:
+      type: object
+      required: [idempotency_key]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
 
     StorageObjectUploadResponse:
       type: object
@@ -3285,6 +3301,12 @@ paths:
       x-ani-rbac-scope: "scope:objects:create"
       parameters:
         - { name: object_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StorageObjectCompleteRequest'
       responses:
         "200":
           description: 已对齐的对象元数据
@@ -3680,8 +3702,12 @@ paths:
           multipart/form-data:
             schema:
               type: object
-              required: [file]
+              required: [idempotency_key, file]
               properties:
+                idempotency_key:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
                 variant:
                   type: string
                   enum: [light, dark, favicon]

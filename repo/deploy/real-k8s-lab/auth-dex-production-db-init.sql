@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
     scopes          TEXT[] NOT NULL DEFAULT '{}',
     rate_limit_rpm  INT NOT NULL DEFAULT 60,
     instance_id     TEXT,
+    idempotency_key TEXT,
     expires_at      TIMESTAMPTZ,
     last_used_at    TIMESTAMPTZ,
     revoked_at      TIMESTAMPTZ,
@@ -69,6 +70,9 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_tenant_id ON api_keys(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_instance
     ON api_keys (tenant_id, instance_id)
     WHERE instance_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_idempotency
+    ON api_keys (tenant_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL AND idempotency_key <> '';
 
 CREATE TABLE IF NOT EXISTS jwt_blocklist (
     jti         TEXT PRIMARY KEY,

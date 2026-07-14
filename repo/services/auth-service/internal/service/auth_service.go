@@ -42,7 +42,7 @@ func NewAuthService(db *pgxpool.Pool, cache ports.CacheStore, jwtCfg JWTConfig) 
 	return &AuthService{
 		jwt:           validator,
 		issuer:        issuer,
-		apiKeys:       newAPIKeyStore(db, cache),
+		apiKeys:       newAPIKeyStore(db, cache, []byte(jwtCfg.PrivateKeyPEM), []byte(jwtCfg.OIDCClientSecret)),
 		refreshTokens: newRefreshTokenStore(db),
 		blocklist:     blocklist,
 		oidc:          newOIDCLoginManager(cache, jwtCfg, newOIDCSessionStore(db, newOIDCGroupRoleMapper(jwtCfg.OIDCGroupRoleMapJSON)), issuer),
@@ -221,6 +221,9 @@ type structuredPermission struct {
 func (s *AuthService) CreateAPIKey(ctx context.Context, req *authv1.CreateAPIKeyRequest) (*authv1.CreateAPIKeyResponse, error) {
 	resp, err := s.apiKeys.create(ctx, req)
 	if err != nil {
+		if errors.Is(err, errAPIKeyReplayExpired) {
+			return nil, status.Error(codes.Aborted, err.Error())
+		}
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 	return resp, nil

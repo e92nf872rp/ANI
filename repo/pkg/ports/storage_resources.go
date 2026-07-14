@@ -165,8 +165,9 @@ type StorageObjectDownloadRequest struct {
 }
 
 type StorageObjectCompleteRequest struct {
-	TenantID string
-	ObjectID string
+	TenantID       string
+	IdempotencyKey string
+	ObjectID       string
 }
 
 type VolumeSnapshotCreateRequest struct {

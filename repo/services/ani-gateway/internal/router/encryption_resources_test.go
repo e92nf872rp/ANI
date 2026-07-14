@@ -37,7 +37,7 @@ func TestEncryptionAPIDevProfileAndIdempotency(t *testing.T) {
 	sealResp := encryptionSealFromRecord(sealed)
 	requireLocalCoreDevProfile(t, sealResp.DevProfile, "local-encryption-service")
 
-	token, err := api.service.CreateUnsealToken(context.Background(), ports.EncryptionUnsealTokenRequest{TenantID: "t1", KeyID: a.KeyID, SealedObjectURI: sealed.SealedObjectURI})
+	token, err := api.service.CreateUnsealToken(context.Background(), ports.EncryptionUnsealTokenRequest{TenantID: "t1", IdempotencyKey: "unseal-1", KeyID: a.KeyID, SealedObjectURI: sealed.SealedObjectURI})
 	if err != nil {
 		t.Fatal(err)
 	}

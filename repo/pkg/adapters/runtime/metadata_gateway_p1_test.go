@@ -17,10 +17,10 @@ func TestMetadataBrandingServiceQueriesPlatformBranding(t *testing.T) {
 	now := time.Unix(200, 0).UTC()
 	tx := &fakeMetadataTx{
 		row: brandingFakeRow{
-			platformName:  "KuberCloud ANI",
-			primaryColor:  "#1677FF",
+			platformName:   "KuberCloud ANI",
+			primaryColor:   "#1677FF",
 			secondaryColor: "#13C2C2",
-			updatedAt:     now,
+			updatedAt:      now,
 		},
 	}
 	service := NewMetadataBrandingService(fakeMetadataStore{tx: tx})
@@ -48,6 +48,7 @@ func TestMetadataBrandingServiceUpdatesPlatformBranding(t *testing.T) {
 	}
 	service := NewMetadataBrandingService(fakeMetadataStore{tx: tx})
 	record, err := service.UpdateBranding(context.Background(), ports.BrandingUpdateRequest{
+		IdempotencyKey: "branding-update-a",
 		PlatformName:   "ANI Dev Platform",
 		PrimaryColor:   "#FF5500",
 		SecondaryColor: "#00AA88",

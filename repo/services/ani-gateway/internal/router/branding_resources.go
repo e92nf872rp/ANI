@@ -52,6 +52,7 @@ func (api *brandingAPI) updateBranding(ctx context.Context, c *app.RequestContex
 		return
 	}
 	record, err := api.service.UpdateBranding(ctx, ports.BrandingUpdateRequest{
+		IdempotencyKey: req.IdempotencyKey,
 		PlatformName:   req.PlatformName,
 		LogoLightURL:   req.LogoLightURL,
 		LogoDarkURL:    req.LogoDarkURL,
@@ -68,6 +69,7 @@ func (api *brandingAPI) updateBranding(ctx context.Context, c *app.RequestContex
 }
 
 type brandingUpdateRequest struct {
+	IdempotencyKey string `json:"idempotency_key"`
 	PlatformName   string `json:"platform_name"`
 	LogoLightURL   string `json:"logo_light_url"`
 	LogoDarkURL    string `json:"logo_dark_url"`
@@ -92,10 +94,11 @@ func (api *brandingAPI) uploadBrandingLogo(ctx context.Context, c *app.RequestCo
 	defer file.Close()
 	variant := strings.TrimSpace(string(c.FormValue("variant")))
 	record, err := api.service.UploadBrandingLogo(ctx, ports.BrandingLogoUploadRequest{
-		Variant:     variant,
-		ContentType: fileHeader.Header.Get("Content-Type"),
-		Body:        file,
-		SizeBytes:   fileHeader.Size,
+		IdempotencyKey: strings.TrimSpace(string(c.FormValue("idempotency_key"))),
+		Variant:        variant,
+		ContentType:    fileHeader.Header.Get("Content-Type"),
+		Body:           file,
+		SizeBytes:      fileHeader.Size,
 	})
 	if err != nil {
 		writeBrandingError(c, err)

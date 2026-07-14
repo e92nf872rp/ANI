@@ -23,12 +23,13 @@ type SecretListRequest struct {
 }
 
 type SecretBindRequest struct {
-	TenantID   string
-	SecretID   string
-	TargetType string
-	TargetID   string
-	MountPath  string
-	EnvPrefix  string
+	TenantID       string
+	IdempotencyKey string
+	SecretID       string
+	TargetType     string
+	TargetID       string
+	MountPath      string
+	EnvPrefix      string
 }
 
 type SecretRecord struct {

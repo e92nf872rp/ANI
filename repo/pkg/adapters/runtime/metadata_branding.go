@@ -71,6 +71,9 @@ func (s *MetadataBrandingService) UpdateBranding(ctx context.Context, request po
 	if s.store == nil {
 		return ports.BrandingRecord{}, ports.ErrNotConfigured
 	}
+	if strings.TrimSpace(request.IdempotencyKey) == "" {
+		return ports.BrandingRecord{}, fmt.Errorf("%w: idempotency_key is required", ports.ErrInvalid)
+	}
 	current, err := s.GetBranding(ctx)
 	if err != nil {
 		return ports.BrandingRecord{}, err
@@ -162,10 +165,11 @@ func defaultBrandingRecord() ports.BrandingRecord {
 type LocalBrandingService struct {
 	mu      sync.RWMutex
 	current *ports.BrandingRecord
+	idem    map[string]ports.BrandingRecord
 }
 
 func NewLocalBrandingService() *LocalBrandingService {
-	return &LocalBrandingService{}
+	return &LocalBrandingService{idem: map[string]ports.BrandingRecord{}}
 }
 
 func (s *LocalBrandingService) GetBranding(_ context.Context) (ports.BrandingRecord, error) {
@@ -178,6 +182,16 @@ func (s *LocalBrandingService) GetBranding(_ context.Context) (ports.BrandingRec
 }
 
 func (s *LocalBrandingService) UpdateBranding(_ context.Context, request ports.BrandingUpdateRequest) (ports.BrandingRecord, error) {
+	idemKey := strings.TrimSpace(request.IdempotencyKey)
+	if idemKey == "" {
+		return ports.BrandingRecord{}, fmt.Errorf("%w: idempotency_key is required", ports.ErrInvalid)
+	}
+	s.mu.RLock()
+	if record, ok := s.idem[idemKey]; ok {
+		s.mu.RUnlock()
+		return record, nil
+	}
+	s.mu.RUnlock()
 	current, err := s.GetBranding(context.Background())
 	if err != nil {
 		return ports.BrandingRecord{}, err
@@ -188,10 +202,14 @@ func (s *LocalBrandingService) UpdateBranding(_ context.Context, request ports.B
 	defer s.mu.Unlock()
 	copy := record
 	s.current = &copy
+	s.idem[idemKey] = copy
 	return record, nil
 }
 
-func (s *LocalBrandingService) UploadBrandingLogo(context.Context, ports.BrandingLogoUploadRequest) (ports.BrandingRecord, error) {
+func (s *LocalBrandingService) UploadBrandingLogo(_ context.Context, request ports.BrandingLogoUploadRequest) (ports.BrandingRecord, error) {
+	if strings.TrimSpace(request.IdempotencyKey) == "" {
+		return ports.BrandingRecord{}, fmt.Errorf("%w: idempotency_key is required", ports.ErrInvalid)
+	}
 	return ports.BrandingRecord{}, ports.ErrNotConfigured
 }
 

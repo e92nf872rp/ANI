@@ -25,10 +25,11 @@ type secretCreateRequest struct {
 }
 
 type secretBindRequest struct {
-	TargetType string `json:"target_type"`
-	TargetID   string `json:"target_id"`
-	MountPath  string `json:"mount_path"`
-	EnvPrefix  string `json:"env_prefix"`
+	IdempotencyKey string `json:"idempotency_key"`
+	TargetType     string `json:"target_type"`
+	TargetID       string `json:"target_id"`
+	MountPath      string `json:"mount_path"`
+	EnvPrefix      string `json:"env_prefix"`
 }
 
 type secretResponse struct {
@@ -138,12 +139,13 @@ func (api *secretAPI) bindSecret(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	rec, err := api.service.BindSecret(ctx, ports.SecretBindRequest{
-		TenantID:   middleware.GetTenantID(c),
-		SecretID:   c.Param("secret_id"),
-		TargetType: req.TargetType,
-		TargetID:   req.TargetID,
-		MountPath:  req.MountPath,
-		EnvPrefix:  req.EnvPrefix,
+		TenantID:       middleware.GetTenantID(c),
+		IdempotencyKey: req.IdempotencyKey,
+		SecretID:       c.Param("secret_id"),
+		TargetType:     req.TargetType,
+		TargetID:       req.TargetID,
+		MountPath:      req.MountPath,
+		EnvPrefix:      req.EnvPrefix,
 	})
 	if err != nil {
 		writeSecretError(c, err)

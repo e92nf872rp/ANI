@@ -25,6 +25,7 @@ type localEncryptionService struct {
 	rotationIdem map[string]ports.EncryptionKeyRotationRecord
 	revokeIdem   map[string]ports.EncryptionKeyRecord
 	sealIdem     map[string]ports.EncryptionSealRecord
+	unsealIdem   map[string]ports.EncryptionUnsealTokenRecord
 	provider     ports.EncryptionProvider
 	store        ports.EncryptionKeyResourceStore
 }
@@ -50,6 +51,7 @@ func NewLocalEncryptionService(options ...EncryptionServiceOption) ports.Encrypt
 		rotationIdem: map[string]ports.EncryptionKeyRotationRecord{},
 		revokeIdem:   map[string]ports.EncryptionKeyRecord{},
 		sealIdem:     map[string]ports.EncryptionSealRecord{},
+		unsealIdem:   map[string]ports.EncryptionUnsealTokenRecord{},
 	}
 	for _, option := range options {
 		option(service)
@@ -369,9 +371,16 @@ func (s *localEncryptionService) Seal(ctx context.Context, req ports.EncryptionS
 }
 
 func (s *localEncryptionService) CreateUnsealToken(ctx context.Context, req ports.EncryptionUnsealTokenRequest) (ports.EncryptionUnsealTokenRecord, error) {
-	if req.TenantID == "" || req.KeyID == "" || req.SealedObjectURI == "" {
-		return ports.EncryptionUnsealTokenRecord{}, fmt.Errorf("%w: tenant_id/key_id/sealed_object_uri required", ports.ErrInvalid)
+	if req.TenantID == "" || req.IdempotencyKey == "" || req.KeyID == "" || req.SealedObjectURI == "" {
+		return ports.EncryptionUnsealTokenRecord{}, fmt.Errorf("%w: tenant_id/idempotency_key/key_id/sealed_object_uri required", ports.ErrInvalid)
 	}
+	idemKey := req.TenantID + ":" + req.IdempotencyKey
+	s.mu.Lock()
+	if rec, ok := s.unsealIdem[idemKey]; ok {
+		s.mu.Unlock()
+		return rec, nil
+	}
+	s.mu.Unlock()
 	key, err := s.requireActiveKey(ctx, req.TenantID, req.KeyID)
 	if err != nil {
 		return ports.EncryptionUnsealTokenRecord{}, err
@@ -394,7 +403,7 @@ func (s *localEncryptionService) CreateUnsealToken(ctx context.Context, req port
 		if expiresAt.IsZero() {
 			expiresAt = time.Unix(now+3600, 0).UTC()
 		}
-		return ports.EncryptionUnsealTokenRecord{
+		rec := ports.EncryptionUnsealTokenRecord{
 			KeyID:           key.KeyID,
 			TenantID:        key.TenantID,
 			SealedObjectURI: req.SealedObjectURI,
@@ -404,16 +413,24 @@ func (s *localEncryptionService) CreateUnsealToken(ctx context.Context, req port
 			ProviderRefs:    append([]string(nil), result.ResourceRefs...),
 			ExpiresAt:       expiresAt.Unix(),
 			CreatedAt:       now,
-		}, nil
+		}
+		s.mu.Lock()
+		s.unsealIdem[idemKey] = rec
+		s.mu.Unlock()
+		return rec, nil
 	}
-	return ports.EncryptionUnsealTokenRecord{
+	rec := ports.EncryptionUnsealTokenRecord{
 		KeyID:           key.KeyID,
 		TenantID:        key.TenantID,
 		SealedObjectURI: req.SealedObjectURI,
 		UnsealToken:     "utok-" + uuid.NewString(),
 		ExpiresAt:       now + 3600,
 		CreatedAt:       now,
-	}, nil
+	}
+	s.mu.Lock()
+	s.unsealIdem[idemKey] = rec
+	s.mu.Unlock()
+	return rec, nil
 }
 
 func (s *localEncryptionService) SealObjectContent(ctx context.Context, req ports.EncryptionObjectContentSealRequest, plaintext io.Reader, sealed io.Writer) (ports.EncryptionObjectContentSealRecord, error) {

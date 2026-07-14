@@ -21,8 +21,8 @@ type objectStorePublicURL interface {
 }
 
 type ObjectStoreBrandingService struct {
-	base         ports.BrandingService
-	objectStore  ports.ObjectStore
+	base           ports.BrandingService
+	objectStore    ports.ObjectStore
 	platformTenant string
 }
 
@@ -60,6 +60,9 @@ func (s *ObjectStoreBrandingService) UploadBrandingLogo(ctx context.Context, req
 	if s.objectStore == nil {
 		return ports.BrandingRecord{}, ports.ErrNotConfigured
 	}
+	if strings.TrimSpace(request.IdempotencyKey) == "" {
+		return ports.BrandingRecord{}, fmt.Errorf("%w: idempotency_key is required", ports.ErrInvalid)
+	}
 	if request.Body == nil {
 		return ports.BrandingRecord{}, fmt.Errorf("%w: logo file body is required", ports.ErrInvalid)
 	}
@@ -92,7 +95,7 @@ func (s *ObjectStoreBrandingService) UploadBrandingLogo(ctx context.Context, req
 	if err != nil {
 		return ports.BrandingRecord{}, err
 	}
-	update := ports.BrandingUpdateRequest{}
+	update := ports.BrandingUpdateRequest{IdempotencyKey: request.IdempotencyKey}
 	switch variant {
 	case "light":
 		update.LogoLightURL = publicURL

@@ -56,11 +56,12 @@ type authAccessTokenResponse struct {
 }
 
 type authCreateAPIKeyRequest struct {
-	Name         string   `json:"name"`
-	UserID       string   `json:"user_id,omitempty"`
-	Scopes       []string `json:"scopes"`
-	RateLimitRPM int32    `json:"rate_limit_rpm,omitempty"`
-	ExpiresAt    string   `json:"expires_at,omitempty"`
+	IdempotencyKey string   `json:"idempotency_key"`
+	Name           string   `json:"name"`
+	UserID         string   `json:"user_id,omitempty"`
+	Scopes         []string `json:"scopes"`
+	RateLimitRPM   int32    `json:"rate_limit_rpm,omitempty"`
+	ExpiresAt      string   `json:"expires_at,omitempty"`
 }
 
 type authCreateAPIKeyResponse struct {
@@ -282,12 +283,13 @@ func (api authAPI) createAPIKeyForTenant(ctx context.Context, tenantID string, u
 		return authCreateAPIKeyResponse{}, httpStatus, errCode, message
 	}
 	resp, err := api.client.CreateAPIKey(ctx, &authv1.CreateAPIKeyRequest{
-		TenantId:     strings.TrimSpace(tenantID),
-		UserId:       strings.TrimSpace(userID),
-		Name:         req.Name,
-		Scopes:       req.Scopes,
-		RateLimitRpm: req.RateLimitRPM,
-		ExpiresAt:    expiresAt,
+		TenantId:       strings.TrimSpace(tenantID),
+		UserId:         strings.TrimSpace(userID),
+		IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
+		Name:           req.Name,
+		Scopes:         req.Scopes,
+		RateLimitRpm:   req.RateLimitRPM,
+		ExpiresAt:      expiresAt,
 	})
 	if err != nil {
 		httpStatus, code, message := authHTTPError(err)
@@ -405,6 +407,8 @@ func authHTTPError(err error) (int, string, string) {
 		return http.StatusUnauthorized, "UNAUTHORIZED", status.Convert(err).Message()
 	case codes.InvalidArgument:
 		return http.StatusBadRequest, "BAD_REQUEST", status.Convert(err).Message()
+	case codes.Aborted:
+		return http.StatusConflict, "IDEMPOTENCY_REPLAY_EXPIRED", status.Convert(err).Message()
 	case codes.FailedPrecondition:
 		return http.StatusServiceUnavailable, "AUTH_NOT_CONFIGURED", status.Convert(err).Message()
 	case codes.NotFound:

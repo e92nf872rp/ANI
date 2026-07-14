@@ -334,8 +334,8 @@ func (s *LocalStorageService) DeleteFilesystem(ctx context.Context, request port
 }
 
 func (s *LocalStorageService) CreateObject(ctx context.Context, request ports.StorageObjectCreateRequest) (ports.StorageObjectRecord, error) {
-	if strings.TrimSpace(request.TenantID) == "" {
-		return ports.StorageObjectRecord{}, fmt.Errorf("%w: tenant_id is required", ports.ErrInvalid)
+	if strings.TrimSpace(request.TenantID) == "" || strings.TrimSpace(request.IdempotencyKey) == "" {
+		return ports.StorageObjectRecord{}, fmt.Errorf("%w: tenant_id/idempotency_key required", ports.ErrInvalid)
 	}
 	idemKey, err := requireIdempotencyKey(request.TenantID, request.IdempotencyKey)
 	if err != nil {

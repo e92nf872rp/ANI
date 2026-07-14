@@ -18,10 +18,11 @@ func TestObjectStoreBrandingServiceUploadsLightLogo(t *testing.T) {
 	}
 	service := NewObjectStoreBrandingService(base, objectStore)
 	record, err := service.UploadBrandingLogo(context.Background(), ports.BrandingLogoUploadRequest{
-		Variant:     "light",
-		ContentType: "image/png",
-		SizeBytes:   4,
-		Body:        bytes.NewReader([]byte{0x89, 0x50, 0x4e, 0x47}),
+		IdempotencyKey: "branding-logo-light",
+		Variant:        "light",
+		ContentType:    "image/png",
+		SizeBytes:      4,
+		Body:           bytes.NewReader([]byte{0x89, 0x50, 0x4e, 0x47}),
 	})
 	if err != nil {
 		t.Fatalf("UploadBrandingLogo() error = %v", err)
@@ -37,6 +38,9 @@ func TestObjectStoreBrandingServiceUploadsLightLogo(t *testing.T) {
 	}
 	if objectStore.putRef.TenantID != "platform" {
 		t.Fatalf("tenant = %q, want platform", objectStore.putRef.TenantID)
+	}
+	if base.lastUpdate.IdempotencyKey != "branding-logo-light" {
+		t.Fatalf("branding update idempotency_key = %q, want branding-logo-light", base.lastUpdate.IdempotencyKey)
 	}
 }
 

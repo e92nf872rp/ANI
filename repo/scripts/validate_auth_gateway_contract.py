@@ -90,6 +90,11 @@ def validate_api_contract(root: Path, errors: list[str]) -> None:
     for schema in EXPECTED_SCHEMAS:
         if schema not in schemas:
             errors.append(f"api/openapi/v1.yaml missing schema {schema}")
+    create_api_key = schemas.get("CreateAPIKeyRequest", {})
+    create_api_key_required = set(create_api_key.get("required", []))
+    create_api_key_props = create_api_key.get("properties", {})
+    if "idempotency_key" not in create_api_key_required or "idempotency_key" not in create_api_key_props:
+        errors.append("CreateAPIKeyRequest must require idempotency_key")
 
 
 def validate_gateway_routes(root: Path, errors: list[str]) -> None:

@@ -16,6 +16,7 @@ type localSecretService struct {
 	byID          map[string]secretEntry
 	idem          map[string]string
 	bindings      map[string]ports.SecretBindingRecord
+	bindingIdem   map[string]string
 	providerApply ports.SecretProviderApply
 	store         ports.SecretResourceStore
 }
@@ -41,9 +42,10 @@ func WithSecretResourceStore(store ports.SecretResourceStore) SecretServiceOptio
 
 func NewLocalSecretService(options ...SecretServiceOption) ports.SecretService {
 	service := &localSecretService{
-		byID:     map[string]secretEntry{},
-		idem:     map[string]string{},
-		bindings: map[string]ports.SecretBindingRecord{},
+		byID:        map[string]secretEntry{},
+		idem:        map[string]string{},
+		bindings:    map[string]ports.SecretBindingRecord{},
+		bindingIdem: map[string]string{},
 	}
 	for _, option := range options {
 		option(service)
@@ -169,6 +171,17 @@ func (s *localSecretService) DeleteSecret(ctx context.Context, req ports.SecretG
 }
 
 func (s *localSecretService) BindSecret(ctx context.Context, req ports.SecretBindRequest) (ports.SecretBindingRecord, error) {
+	if req.TenantID == "" || req.IdempotencyKey == "" {
+		return ports.SecretBindingRecord{}, fmt.Errorf("%w: tenant_id/idempotency_key required", ports.ErrInvalid)
+	}
+	idemKey := req.TenantID + ":" + req.IdempotencyKey
+	s.mu.Lock()
+	if bindingID, ok := s.bindingIdem[idemKey]; ok {
+		binding := s.bindings[bindingID]
+		s.mu.Unlock()
+		return binding, nil
+	}
+	s.mu.Unlock()
 	rec, err := s.getSecretRecord(ctx, req.TenantID, req.SecretID)
 	if err != nil {
 		return ports.SecretBindingRecord{}, err
@@ -193,10 +206,12 @@ func (s *localSecretService) BindSecret(ctx context.Context, req ports.SecretBin
 	}
 	s.mu.Lock()
 	s.bindings[binding.BindingID] = binding
+	s.bindingIdem[idemKey] = binding.BindingID
 	s.mu.Unlock()
 	if err := s.upsertSecretBinding(ctx, binding); err != nil {
 		s.mu.Lock()
 		delete(s.bindings, binding.BindingID)
+		delete(s.bindingIdem, idemKey)
 		s.mu.Unlock()
 		return ports.SecretBindingRecord{}, err
 	}

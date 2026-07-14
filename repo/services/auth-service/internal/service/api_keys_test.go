@@ -9,6 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	authv1 "github.com/kubercloud/ani/pkg/generated/pb/auth/v1"
 )
 
 func TestGenerateAPIKeyEmbedsTenantID(t *testing.T) {
@@ -143,5 +145,62 @@ func TestAPIKeyRateLimitIsSkippedWithoutCache(t *testing.T) {
 	store := &apiKeyStore{}
 	if err := store.enforceRateLimit(context.Background(), "key-hash", 1); err != nil {
 		t.Fatalf("enforceRateLimit without cache error = %v", err)
+	}
+}
+
+func TestCreateAPIKeyRequiresIdempotencyKey(t *testing.T) {
+	store := &apiKeyStore{}
+
+	_, err := store.create(context.Background(), &authv1.CreateAPIKeyRequest{
+		TenantId: uuid.NewString(),
+		UserId:   uuid.NewString(),
+		Name:     "ci",
+		Scopes:   []string{"scope:instances:get"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "idempotency_key required") {
+		t.Fatalf("create without idempotency_key error = %v, want idempotency validation", err)
+	}
+}
+
+func TestCreateAPIKeyReplaysEncryptedResponseByIdempotencyKey(t *testing.T) {
+	tenantID := uuid.New()
+	userID := uuid.New()
+	keyID := uuid.New()
+	cache := newMemoryCache()
+	var inserts int
+	store := newAPIKeyStore(nil, cache, []byte("test-replay-key"))
+	store.createRecord = func(_ context.Context, record apiKeyCreateRecord) (uuid.UUID, error) {
+		inserts++
+		if record.IdempotencyKey != "idem-api-key" {
+			t.Fatalf("idempotency_key = %q, want idem-api-key", record.IdempotencyKey)
+		}
+		return keyID, nil
+	}
+
+	req := &authv1.CreateAPIKeyRequest{
+		TenantId:       tenantID.String(),
+		UserId:         userID.String(),
+		Name:           "ci",
+		Scopes:         []string{"scope:instances:get"},
+		IdempotencyKey: "idem-api-key",
+	}
+	first, err := store.create(context.Background(), req)
+	if err != nil {
+		t.Fatalf("first create error = %v", err)
+	}
+	second, err := store.create(context.Background(), req)
+	if err != nil {
+		t.Fatalf("second create error = %v", err)
+	}
+	if inserts != 1 {
+		t.Fatalf("insert calls = %d, want 1", inserts)
+	}
+	if first.GetKeyId() != second.GetKeyId() || first.GetKeyValue() != second.GetKeyValue() || first.GetKeyPrefix() != second.GetKeyPrefix() {
+		t.Fatalf("replayed response mismatch: first=%+v second=%+v", first, second)
+	}
+	for key, value := range cache.values {
+		if strings.Contains(string(value), first.GetKeyValue()) {
+			t.Fatalf("cache entry %s contains plaintext api key", key)
+		}
 	}
 }

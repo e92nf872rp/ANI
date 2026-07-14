@@ -291,8 +291,9 @@ func TestLocalStorageServiceBucketsAndSignedObjectURLsUseObjectStorePort(t *test
 		UpdatedAt:   objectStore.expiresAt,
 	}
 	completed, err := service.CompleteStorageObjectUpload(context.Background(), ports.StorageObjectCompleteRequest{
-		TenantID: "tenant-a",
-		ObjectID: upload.ObjectID,
+		TenantID:       "tenant-a",
+		IdempotencyKey: "complete-upload-a",
+		ObjectID:       upload.ObjectID,
 	})
 	if err != nil {
 		t.Fatalf("CompleteStorageObjectUpload() error = %v", err)

@@ -94,6 +94,7 @@ message CreateAPIKeyRequest {
   repeated string scopes = 4;
   int32  rate_limit_rpm  = 5;      // optional; <=0 defaults to 60, max 10000
   google.protobuf.Timestamp expires_at = 6;   // optional
+  string idempotency_key = 7;       // required; replay returns the same short-TTL key_value response
 }
 
 message CreateAPIKeyResponse {

@@ -2,12 +2,16 @@ package service
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -25,12 +29,16 @@ const apiKeyEnv = "dev"
 const maxAPIKeyNameLength = 128
 const defaultAPIKeyRateLimitRPM int32 = 60
 const maxAPIKeyRateLimitRPM int32 = 10000
+const apiKeyReplayTTL = 15 * time.Minute
 
 var errAPIKeyRateLimitExceeded = errors.New("api key rate limit exceeded")
+var errAPIKeyReplayExpired = errors.New("api key idempotency replay expired")
 
 type apiKeyStore struct {
-	db    *pgxpool.Pool
-	cache ports.CacheStore
+	db           *pgxpool.Pool
+	cache        ports.CacheStore
+	replayKey    [32]byte
+	createRecord func(context.Context, apiKeyCreateRecord) (uuid.UUID, error)
 }
 
 type apiKeyPrincipal struct {
@@ -39,14 +47,54 @@ type apiKeyPrincipal struct {
 	Scopes   []string
 }
 
-func newAPIKeyStore(db *pgxpool.Pool, cache ports.CacheStore) *apiKeyStore {
-	return &apiKeyStore{db: db, cache: cache}
+type apiKeyCreateRecord struct {
+	TenantID       uuid.UUID
+	UserID         uuid.UUID
+	Name           string
+	Scopes         []string
+	RateLimitRPM   int32
+	ExpiresAt      time.Time
+	RawKey         string
+	KeyHash        string
+	KeyPrefix      string
+	IdempotencyKey string
+}
+
+type apiKeyReplayRecord struct {
+	KeyID     string `json:"key_id"`
+	KeyValue  string `json:"key_value"`
+	KeyPrefix string `json:"key_prefix"`
+}
+
+func newAPIKeyStore(db *pgxpool.Pool, cache ports.CacheStore, replayKeyMaterial ...[]byte) *apiKeyStore {
+	store := &apiKeyStore{
+		db:        db,
+		cache:     cache,
+		replayKey: deriveAPIKeyReplayKey(replayKeyMaterial...),
+	}
+	store.createRecord = store.insertRecord
+	return store
 }
 
 func (s *apiKeyStore) create(ctx context.Context, req *authv1.CreateAPIKeyRequest) (*authv1.CreateAPIKeyResponse, error) {
 	tenantID, err := uuid.Parse(req.GetTenantId())
 	if err != nil || tenantID == uuid.Nil {
 		return nil, fmt.Errorf("invalid tenant_id")
+	}
+	idempotencyKey := strings.TrimSpace(req.GetIdempotencyKey())
+	if idempotencyKey == "" {
+		return nil, fmt.Errorf("idempotency_key required")
+	}
+	if len(idempotencyKey) > 128 {
+		return nil, fmt.Errorf("idempotency_key too long")
+	}
+	if s.cache == nil {
+		return nil, fmt.Errorf("api key idempotency replay cache required")
+	}
+	if replay, err := s.getReplay(ctx, tenantID, idempotencyKey); err == nil {
+		return replay, nil
+	} else if err != nil && !errors.Is(err, ports.ErrNotFound) {
+		return nil, err
 	}
 	name, err := normalizeAPIKeyName(req.GetName())
 	if err != nil {
@@ -76,46 +124,185 @@ func (s *apiKeyStore) create(ctx context.Context, req *authv1.CreateAPIKeyReques
 	keyPrefix := prefixAPIKey(rawKey)
 	ctx = types.WithTenant(ctx, &types.TenantContext{TenantID: tenantID, UserID: userID})
 
-	tx, err := s.db.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer rollbackTx(ctx, tx)
-	if err := types.SetDBTenant(ctx, tx); err != nil {
-		return nil, err
-	}
-
-	var keyID uuid.UUID
-	var expiresAt any
 	expiresAtTime, err := normalizeAPIKeyExpiresAt(req.GetExpiresAt(), time.Now())
 	if err != nil {
 		return nil, err
 	}
-	if !expiresAtTime.IsZero() {
-		expiresAt = expiresAtTime
-	}
-	var userIDArg any
-	if userID != uuid.Nil {
-		userIDArg = userID
-	}
-	err = tx.QueryRow(ctx, `
-		INSERT INTO api_keys (
-			tenant_id, user_id, name, key_hash, key_prefix, scopes, rate_limit_rpm, expires_at
-		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		RETURNING id
-	`, tenantID, userIDArg, name, keyHash, keyPrefix, scopes, rateLimit, expiresAt).Scan(&keyID)
+	keyID, err := s.createRecord(ctx, apiKeyCreateRecord{
+		TenantID:       tenantID,
+		UserID:         userID,
+		Name:           name,
+		Scopes:         scopes,
+		RateLimitRPM:   rateLimit,
+		ExpiresAt:      expiresAtTime,
+		RawKey:         rawKey,
+		KeyHash:        keyHash,
+		KeyPrefix:      keyPrefix,
+		IdempotencyKey: idempotencyKey,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("insert api key: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	return &authv1.CreateAPIKeyResponse{
+	resp := &authv1.CreateAPIKeyResponse{
 		KeyId:     keyID.String(),
 		KeyValue:  rawKey,
 		KeyPrefix: keyPrefix,
+	}
+	if err := s.putReplay(ctx, tenantID, idempotencyKey, resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (s *apiKeyStore) insertRecord(ctx context.Context, record apiKeyCreateRecord) (uuid.UUID, error) {
+	if s.db == nil {
+		return uuid.Nil, fmt.Errorf("api key db not configured")
+	}
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	defer rollbackTx(ctx, tx)
+	if err := types.SetDBTenant(ctx, tx); err != nil {
+		return uuid.Nil, err
+	}
+	var userIDArg any
+	if record.UserID != uuid.Nil {
+		userIDArg = record.UserID
+	}
+	var expiresAt any
+	if !record.ExpiresAt.IsZero() {
+		expiresAt = record.ExpiresAt
+	}
+	var keyID uuid.UUID
+	err = tx.QueryRow(ctx, `
+		INSERT INTO api_keys (
+			tenant_id, user_id, name, key_hash, key_prefix, scopes, rate_limit_rpm, expires_at, idempotency_key
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		ON CONFLICT DO NOTHING
+		RETURNING id
+	`, record.TenantID, userIDArg, record.Name, record.KeyHash, record.KeyPrefix, record.Scopes, record.RateLimitRPM, expiresAt, record.IdempotencyKey).Scan(&keyID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return uuid.Nil, errAPIKeyReplayExpired
+		}
+		return uuid.Nil, fmt.Errorf("insert api key: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return uuid.Nil, err
+	}
+	return keyID, nil
+}
+
+func (s *apiKeyStore) getReplay(ctx context.Context, tenantID uuid.UUID, idempotencyKey string) (*authv1.CreateAPIKeyResponse, error) {
+	if s.cache == nil {
+		return nil, ports.ErrNotFound
+	}
+	raw, err := s.cache.Get(ctx, apiKeyReplayCacheKey(tenantID, idempotencyKey))
+	if err != nil {
+		return nil, err
+	}
+	record, err := s.openReplay(raw)
+	if err != nil {
+		return nil, fmt.Errorf("api key idempotency replay decrypt: %w", err)
+	}
+	return &authv1.CreateAPIKeyResponse{
+		KeyId:     record.KeyID,
+		KeyValue:  record.KeyValue,
+		KeyPrefix: record.KeyPrefix,
 	}, nil
+}
+
+func (s *apiKeyStore) putReplay(ctx context.Context, tenantID uuid.UUID, idempotencyKey string, resp *authv1.CreateAPIKeyResponse) error {
+	if s.cache == nil {
+		return fmt.Errorf("api key idempotency replay cache required")
+	}
+	value, err := s.sealReplay(apiKeyReplayRecord{
+		KeyID:     resp.GetKeyId(),
+		KeyValue:  resp.GetKeyValue(),
+		KeyPrefix: resp.GetKeyPrefix(),
+	})
+	if err != nil {
+		return err
+	}
+	return s.cache.Set(ctx, apiKeyReplayCacheKey(tenantID, idempotencyKey), value, apiKeyReplayTTL)
+}
+
+func (s *apiKeyStore) sealReplay(record apiKeyReplayRecord) ([]byte, error) {
+	plaintext, err := json.Marshal(record)
+	if err != nil {
+		return nil, err
+	}
+	block, err := aes.NewCipher(s.replayKey[:])
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, err
+	}
+	return gcm.Seal(nonce, nonce, plaintext, nil), nil
+}
+
+func (s *apiKeyStore) openReplay(value []byte) (apiKeyReplayRecord, error) {
+	block, err := aes.NewCipher(s.replayKey[:])
+	if err != nil {
+		return apiKeyReplayRecord{}, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return apiKeyReplayRecord{}, err
+	}
+	if len(value) < gcm.NonceSize() {
+		return apiKeyReplayRecord{}, fmt.Errorf("ciphertext too short")
+	}
+	nonce := value[:gcm.NonceSize()]
+	ciphertext := value[gcm.NonceSize():]
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return apiKeyReplayRecord{}, err
+	}
+	var record apiKeyReplayRecord
+	if err := json.Unmarshal(plaintext, &record); err != nil {
+		return apiKeyReplayRecord{}, err
+	}
+	if record.KeyID == "" || record.KeyValue == "" || record.KeyPrefix == "" {
+		return apiKeyReplayRecord{}, fmt.Errorf("incomplete replay record")
+	}
+	return record, nil
+}
+
+func deriveAPIKeyReplayKey(materials ...[]byte) [32]byte {
+	hash := sha256.New()
+	wrote := false
+	for _, material := range materials {
+		material = []byte(strings.TrimSpace(string(material)))
+		if len(material) == 0 {
+			continue
+		}
+		_, _ = hash.Write(material)
+		wrote = true
+	}
+	if wrote {
+		var key [32]byte
+		copy(key[:], hash.Sum(nil))
+		return key
+	}
+	var key [32]byte
+	if _, err := io.ReadFull(rand.Reader, key[:]); err != nil {
+		return sha256.Sum256([]byte("ani-auth-api-key-replay-fallback"))
+	}
+	return key
+}
+
+func apiKeyReplayCacheKey(tenantID uuid.UUID, idempotencyKey string) string {
+	sum := sha256.Sum256([]byte(tenantID.String() + "\x00" + strings.TrimSpace(idempotencyKey)))
+	return "auth:api-key:create:" + hex.EncodeToString(sum[:])
 }
 
 func (s *apiKeyStore) list(ctx context.Context, req *authv1.ListAPIKeysRequest) (*authv1.ListAPIKeysResponse, error) {

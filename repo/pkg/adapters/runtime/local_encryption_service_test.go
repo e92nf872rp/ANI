@@ -80,6 +80,7 @@ func TestLocalEncryptionServiceDelegatesLifecycleAndSealToProvider(t *testing.T)
 
 	token, err := service.CreateUnsealToken(context.Background(), ports.EncryptionUnsealTokenRequest{
 		TenantID:        "tenant-a",
+		IdempotencyKey:  "unseal-object",
 		KeyID:           key.KeyID,
 		SealedObjectURI: sealed.SealedObjectURI,
 	})
@@ -91,6 +92,18 @@ func TestLocalEncryptionServiceDelegatesLifecycleAndSealToProvider(t *testing.T)
 	}
 	if !token.RealProvider || token.Provider != "kms-sm4" {
 		t.Fatalf("token provider evidence = %+v, want kms-sm4", token)
+	}
+	tokenAgain, err := service.CreateUnsealToken(context.Background(), ports.EncryptionUnsealTokenRequest{
+		TenantID:        "tenant-a",
+		IdempotencyKey:  "unseal-object",
+		KeyID:           key.KeyID,
+		SealedObjectURI: sealed.SealedObjectURI,
+	})
+	if err != nil {
+		t.Fatalf("CreateUnsealToken() replay error = %v", err)
+	}
+	if tokenAgain.UnsealToken != token.UnsealToken || provider.tokenCalls != 1 {
+		t.Fatalf("token replay = %+v provider token calls = %d, want same token without provider replay", tokenAgain, provider.tokenCalls)
 	}
 
 	rotation, err := service.RotateKey(context.Background(), ports.EncryptionKeyRotateRequest{
