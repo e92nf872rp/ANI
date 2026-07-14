@@ -35,6 +35,12 @@
 | CORE-SVC-SUPPORT-OBJVEC-A | B3 对象/向量 handler：新增 storage buckets、object upload/download 预签名 URL、vector document insert；复用 `ports.ObjectStore` 与 `ports.VectorStore.Upsert` 边界；全部为 Tier1 local profile，不声明 runtime/production ready | core-svc-support-objvec-a.md |
 | SPRINT12-CLOSURE-A | Sprint 12 收口：A/B1/B2/B3 全部 19 个 Core handler + 2 个 422 经 OpenAPI、ports/adapters、Gateway handler、测试和文档闭环；进入 Sprint 13 real provider/live gate 收敛 | sprint12-closure-core-svc-support.md |
 
+### Sprint 14 Email Notification（2026-07）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| EMAIL-NOTIFICATION-A | BOSS 邮件通知通道：新增 6 个 OpenAPI schema + 10 个端点路径（`/notifications/email/*`），`ports.EmailNotificationService` 接口 + `runtime.localEmailNotificationService` 内存实现 + `runtime.smtpProvider`（SSL/STARTTLS/plain），Gateway handler 完整实现（非 501 stub），环境变量 `EMAIL_SMTP_PROVIDER` 控制模拟 vs 真实发信；37 个单元测试 + 7 个 handler 测试；local/logic verified，不标 production ready | email-notification-a.md |
+
 ### Sprint 14 Planning / Execution（分支执行中，2026-06）
 
 > 当前官方入口仍保留 Sprint 13 production-shaped 边界；`feature/sprint14-core-resilience-semantics` 分支已完成 Sprint 14 Core 韧性前置批次，并通过 aggregate Sprint14 resilience live gate。单批次记录仍按当时 local/logic 边界归档；production-ready 范围仅限隔离 Sprint14 Core resilience fixture。

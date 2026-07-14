@@ -103,18 +103,17 @@ type EmailTestSendRequest struct {
 
 // EmailTestSendResult is the result of a test send.
 type EmailTestSendResult struct {
-	Status     string // "sent" or "failed"
-	Message    string
-	FromName   string // 发送人名称
-	FromEmail  string // 发送人邮箱
-	ToName     string // 接收人名称
-	ToEmails   string // 接收人邮箱（逗号分隔）
-	Subject    string // 邮件主题
-	Content    string // 邮件内容
-	SentAt     string // 发送时间
-	AuthMode   string // 认证模式: "auth_code" / "password" / "none"
-	Username   string // 登录账号
-	Password   string // 使用的密码或授权码（日志用）
+	Status    string // "sent" or "failed"
+	Message   string
+	FromName  string // 发送人名称
+	FromEmail string // 发送人邮箱
+	ToName    string // 接收人名称
+	ToEmails  string // 接收人邮箱（逗号分隔）
+	Subject   string // 邮件主题
+	Content   string // 邮件内容
+	SentAt    string // 发送时间
+	AuthMode  string // 认证模式: "auth_code" / "password" / "none"
+	Username  string // 登录账号
 }
 
 // SMTPProvider is the port for sending emails via SMTP.

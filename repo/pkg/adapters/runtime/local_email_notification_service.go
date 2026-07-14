@@ -95,7 +95,7 @@ func (s *localEmailNotificationService) PutSmtpConfig(ctx context.Context, req p
 	}
 
 	// Idempotency check
-	if id, ok := s.idem[req.IdempotencyKey]; ok {
+	if id, ok := s.idem["smtp:"+req.IdempotencyKey]; ok {
 		if id == "smtp" && s.smtpConfig != nil {
 			rec := *s.smtpConfig
 			rec.Password = ""
@@ -121,7 +121,6 @@ func (s *localEmailNotificationService) PutSmtpConfig(ctx context.Context, req p
 		return ports.EmailSmtpConfigRecord{}, fmt.Errorf("%w: 登录密码和授权码至少填写一个", ports.ErrInvalid)
 	}
 
-	now := time.Now().UTC()
 	s.smtpConfig = &ports.EmailSmtpConfigRecord{
 		SmtpHost:    req.SmtpHost,
 		SmtpPort:    req.SmtpPort,
@@ -132,8 +131,7 @@ func (s *localEmailNotificationService) PutSmtpConfig(ctx context.Context, req p
 		AuthCode:    authCode,
 		Configured:  true,
 	}
-	_ = now
-	s.idem[req.IdempotencyKey] = "smtp"
+	s.idem["smtp:"+req.IdempotencyKey] = "smtp"
 
 	rec := *s.smtpConfig
 	rec.Password = ""
@@ -170,7 +168,7 @@ func (s *localEmailNotificationService) CreateRecipient(ctx context.Context, req
 	}
 
 	// Idempotency
-	if id, ok := s.idem[req.IdempotencyKey]; ok {
+	if id, ok := s.idem["recipient:"+req.IdempotencyKey]; ok {
 		if rec, ok := s.recipients[id]; ok {
 			return rec, nil
 		}
@@ -193,7 +191,7 @@ func (s *localEmailNotificationService) CreateRecipient(ctx context.Context, req
 	}
 	s.recipients[id] = rec
 	s.recipientsById[req.Email] = id
-	s.idem[req.IdempotencyKey] = id
+	s.idem["recipient:"+req.IdempotencyKey] = id
 
 	return rec, nil
 }
@@ -216,7 +214,7 @@ func (s *localEmailNotificationService) UpdateRecipient(ctx context.Context, req
 	}
 
 	// Idempotency
-	if id, ok := s.idem[req.IdempotencyKey]; ok && id == req.ID {
+	if id, ok := s.idem["recipient_update:"+req.IdempotencyKey]; ok && id == req.ID {
 		return rec, nil
 	}
 
@@ -237,7 +235,7 @@ func (s *localEmailNotificationService) UpdateRecipient(ctx context.Context, req
 	}
 	rec.UpdatedAt = time.Now().UTC()
 	s.recipients[req.ID] = rec
-	s.idem[req.IdempotencyKey] = req.ID
+	s.idem["recipient_update:"+req.IdempotencyKey] = req.ID
 
 	return rec, nil
 }
@@ -294,7 +292,7 @@ func (s *localEmailNotificationService) PutSubscriptions(ctx context.Context, re
 	}
 
 	// Idempotency: if same key used, return current state
-	if _, ok := s.idem[req.IdempotencyKey]; ok {
+	if _, ok := s.idem["subscriptions:"+req.IdempotencyKey]; ok {
 		return s.listSubscriptionsLocked(), nil
 	}
 
@@ -305,7 +303,7 @@ func (s *localEmailNotificationService) PutSubscriptions(ctx context.Context, re
 	for _, sub := range req.Subscriptions {
 		s.subscriptions[sub.EventType] = sub.Enabled
 	}
-	s.idem[req.IdempotencyKey] = "subscriptions"
+	s.idem["subscriptions:"+req.IdempotencyKey] = "subscriptions"
 
 	return s.listSubscriptionsLocked(), nil
 }
@@ -444,7 +442,6 @@ func (s *localEmailNotificationService) SendTestEmail(ctx context.Context, req p
 				SentAt:    time.Now().UTC().Format(time.RFC3339),
 				AuthMode:  authMode,
 				Username:  s.smtpConfig.Username,
-				Password:  authPassword,
 			}
 			slog.Error("email test send FAILED",
 				"auth_mode", authMode,
@@ -468,7 +465,6 @@ func (s *localEmailNotificationService) SendTestEmail(ctx context.Context, req p
 				SentAt:    time.Now().UTC().Format(time.RFC3339),
 				AuthMode:  authMode,
 				Username:  s.smtpConfig.Username,
-				Password:  authPassword,
 			}
 			slog.Error("email test send FAILED",
 				"auth_mode", authMode,
@@ -491,7 +487,6 @@ func (s *localEmailNotificationService) SendTestEmail(ctx context.Context, req p
 			SentAt:    time.Now().UTC().Format(time.RFC3339),
 			AuthMode:  authMode,
 			Username:  s.smtpConfig.Username,
-			Password:  authPassword,
 		}
 		slog.Info("email test send SUCCESS",
 			"auth_mode", authMode,
