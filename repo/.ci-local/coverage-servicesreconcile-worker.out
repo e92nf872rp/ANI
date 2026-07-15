@@ -1,0 +1,10 @@
+mode: set
+github.com/kubercloud/ani/services/reconcile-worker/internal/config/config.go:10.30,20.2 1 1
+github.com/kubercloud/ani/services/reconcile-worker/internal/config/config.go:22.39,23.34 1 1
+github.com/kubercloud/ani/services/reconcile-worker/internal/config/config.go:23.34,25.3 1 0
+github.com/kubercloud/ani/services/reconcile-worker/internal/config/config.go:26.2,26.17 1 1
+github.com/kubercloud/ani/services/reconcile-worker/internal/config/config.go:29.43,31.13 2 1
+github.com/kubercloud/ani/services/reconcile-worker/internal/config/config.go:31.13,33.3 1 1
+github.com/kubercloud/ani/services/reconcile-worker/internal/config/config.go:34.2,35.16 2 0
+github.com/kubercloud/ani/services/reconcile-worker/internal/config/config.go:35.16,37.3 1 0
+github.com/kubercloud/ani/services/reconcile-worker/internal/config/config.go:38.2,38.10 1 0

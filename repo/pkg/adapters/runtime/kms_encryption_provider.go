@@ -136,10 +136,13 @@ func (p *KMSSM4HTTPEncryptionProvider) post(ctx context.Context, path string, bo
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
 	responseBody, err := io.ReadAll(resp.Body)
+	closeErr := resp.Body.Close()
 	if err != nil {
 		return err
+	}
+	if closeErr != nil {
+		return closeErr
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("%w: KMS provider returned status %d: %s", ports.ErrInvalid, resp.StatusCode, strings.TrimSpace(string(responseBody)))

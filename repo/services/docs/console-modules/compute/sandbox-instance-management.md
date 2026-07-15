@@ -20,7 +20,8 @@
 - Sandbox 实例通过 `kind=sandbox` 区分
 - 页面不要求前端显式传 `tenant_id`
 - 写操作必须按现有 schema 提供 `idempotency_key`
-- `CreateInstanceRequest.sandbox_config` 与 `InstanceRecord.sandbox` 是正式字段来源
+- `CreateInstanceRequest` 推荐按 kind 使用 `vm_config` / `container_config` / `gpu_container_config` / `sandbox_config`；`sandbox_config` 与 `InstanceRecord.sandbox` 是 Sandbox 正式字段来源
+- 扁平 `boot_image` / `ssh_*` / `replicas` / `gpu.*` 保留为 v1 兼容别名，与对应 `*_config` 冲突时返回 `400`
 - 当前模块不把 `templates / security-events / metrics / terminal / security-overview` 写成已冻结能力
 
 ## 页面职责

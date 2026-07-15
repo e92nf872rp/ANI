@@ -402,7 +402,7 @@ func (s *MinIOObjectStore) signRequest(req *http.Request, now time.Time, payload
 			value = req.URL.Host
 		}
 		if header != "host" {
-			value = req.Header.Get(http.CanonicalHeaderKey(header))
+			value = req.Header.Get(header)
 		}
 		canonicalHeaders.WriteString(header)
 		canonicalHeaders.WriteByte(':')

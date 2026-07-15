@@ -16,7 +16,7 @@ Services 受控并行 PR 阶段：目录、API、handler、生成物和跨层边
 当前重心：以 repo/CURRENT-SPRINT.md 为准
 当前不是 Phase 2：Phase 2 是 2026-10 以后延期能力
 下一步入口：repo/CURRENT-SPRINT.md
-文档导航：ANI-DOCS-INDEX.md
+文档导航：ANI-DOCS-INDEX.md；GitHub 协作规范：[ANI-15-GitHub-协作规范与提交纪律.md](ANI-15-GitHub-协作规范与提交纪律.md)，遵循“开发和 CI 并行，main 受保护串行收口”。
 首个正式版本目标：v1.0.0，2026-09-30
 ```
 

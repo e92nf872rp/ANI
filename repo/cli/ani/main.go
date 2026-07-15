@@ -55,19 +55,25 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 	if *showVersion {
 		if err := printVersion(stdout, *versionFormat); err != nil {
-			fmt.Fprintln(stderr, err)
+			if _, writeErr := fmt.Fprintln(stderr, err); writeErr != nil {
+				return 2
+			}
 			return 2
 		}
 		return 0
 	}
 	cmd, err := parseCommand(global.Args())
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		if _, writeErr := fmt.Fprintln(stderr, err); writeErr != nil {
+			return 2
+		}
 		return 2
 	}
 	body, err := execute(context.Background(), http.DefaultClient, strings.TrimRight(*baseURL, "/"), *token, cmd)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		if _, writeErr := fmt.Fprintln(stderr, err); writeErr != nil {
+			return 1
+		}
 		return 1
 	}
 	_, _ = stdout.Write(body)
@@ -222,13 +228,16 @@ func execute(ctx context.Context, client *http.Client, baseURL string, token str
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
 	responseBody, err := io.ReadAll(resp.Body)
+	closeErr := resp.Body.Close()
 	if err != nil {
 		return nil, err
 	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("Core API returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(responseBody)))
+		return nil, fmt.Errorf("core API returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(responseBody)))
 	}
 	return responseBody, nil
 }

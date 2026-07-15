@@ -3,7 +3,7 @@ package com.kubercloud.ani.services;
 
 public final class Smoke {
     public static void main(String[] args) {
-        ApiClient client = new ApiClient("", "token");
+        ApiClient client = new ApiClient("http://127.0.0.1:4010/api/v1/svc", "token");
         if (client.baseUrl().isEmpty() || ApiClient.TITLE.isEmpty() || ApiClient.VERSION.isEmpty()) {
             throw new IllegalStateException("invalid SDK metadata");
         }

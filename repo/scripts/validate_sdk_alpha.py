@@ -214,7 +214,7 @@ def validate_idempotency_helpers(root: Path, errors: list[str]) -> None:
 def run_smoke(root: Path) -> None:
     go_env = {
         "GOWORK": "off",
-        "GOCACHE": "/private/tmp/ani-go-build",
+        "GOCACHE": str(root / ".cache/go-build"),
         "GOMODCACHE": str(root / ".cache/gomod"),
     }
     for layer in LAYERS:

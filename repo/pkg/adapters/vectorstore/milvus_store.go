@@ -360,7 +360,7 @@ func milvusCodeError(response milvusResponse) error {
 	case strings.Contains(lower, "illegal") || strings.Contains(lower, "invalid"):
 		return fmt.Errorf("%w: %s", ports.ErrInvalid, message)
 	default:
-		return fmt.Errorf("Milvus returned code %d: %s", response.Code, message)
+		return fmt.Errorf("milvus returned code %d: %s", response.Code, message)
 	}
 }
 
@@ -373,7 +373,7 @@ func milvusHTTPError(statusCode int, body string) error {
 	case http.StatusBadRequest:
 		return fmt.Errorf("%w: Milvus HTTP %d: %s", ports.ErrInvalid, statusCode, strings.TrimSpace(body))
 	default:
-		return fmt.Errorf("Milvus HTTP %d: %s", statusCode, strings.TrimSpace(body))
+		return fmt.Errorf("milvus HTTP %d: %s", statusCode, strings.TrimSpace(body))
 	}
 }
 

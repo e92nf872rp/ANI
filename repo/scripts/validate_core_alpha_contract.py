@@ -265,6 +265,43 @@ def validate_api_contract(root: Path, errors: list[str]) -> None:
     for field in ("vendor", "model", "count"):
         if field not in create_gpu_properties:
             errors.append(f"CreateInstanceRequest.gpu missing Alpha field {field}")
+
+    for field, schema_name in (
+        ("vm_config", "CreateVMInstanceConfig"),
+        ("container_config", "CreateContainerInstanceConfig"),
+        ("gpu_container_config", "CreateGPUContainerInstanceConfig"),
+        ("sandbox_config", "SandboxConfig"),
+    ):
+        prop = create_properties.get(field, {})
+        if prop.get("$ref") != f"#/components/schemas/{schema_name}":
+            errors.append(f"CreateInstanceRequest.{field} must $ref {schema_name}")
+        if schema_name not in schemas:
+            errors.append(f"api/openapi/v1.yaml missing schema {schema_name}")
+
+    vm_config_properties = schemas.get("CreateVMInstanceConfig", {}).get("properties", {})
+    for field in ("boot_image", "ssh_username", "ssh_key_ref"):
+        if field not in vm_config_properties:
+            errors.append(f"CreateVMInstanceConfig missing field {field}")
+    container_config_properties = schemas.get("CreateContainerInstanceConfig", {}).get("properties", {})
+    if "replicas" not in container_config_properties:
+        errors.append("CreateContainerInstanceConfig missing field replicas")
+    gpu_container_config_properties = schemas.get("CreateGPUContainerInstanceConfig", {}).get("properties", {})
+    if "replicas" not in gpu_container_config_properties:
+        errors.append("CreateGPUContainerInstanceConfig missing field replicas")
+    gpu_container_gpu = gpu_container_config_properties.get("gpu", {}).get("properties", {})
+    for field in ("vendor", "model", "count"):
+        if field not in gpu_container_gpu:
+            errors.append(f"CreateGPUContainerInstanceConfig.gpu missing field {field}")
+
+    list_kind_enum = set()
+    for parameter in paths.get("/instances", {}).get("get", {}).get("parameters", []):
+        if isinstance(parameter, dict) and parameter.get("name") == "kind":
+            list_kind_enum = set(parameter.get("schema", {}).get("enum", []))
+            break
+    expected_list_kinds = {"vm", "container", "gpu_container", "sandbox"}
+    if not expected_list_kinds.issubset(list_kind_enum):
+        errors.append(f"listInstances query kind enum must include {sorted(expected_list_kinds)}")
+
     frozen_states = set(freeze.get("states", []))
     state_enum = set(schemas.get("InstanceRecord", {}).get("properties", {}).get("state", {}).get("enum", []))
     if frozen_states != state_enum:

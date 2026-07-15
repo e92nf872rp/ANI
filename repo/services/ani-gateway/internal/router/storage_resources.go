@@ -173,10 +173,6 @@ func newStorageAPIWithService(service ports.StorageService) *storageAPI {
 	return &storageAPI{service: service}
 }
 
-func registerStorageResources(v1 *route.RouterGroup) {
-	registerStorageResourcesWithService(v1, nil)
-}
-
 func registerStorageResourcesWithService(v1 *route.RouterGroup, service ports.StorageService) {
 	api := newStorageAPIWithService(service)
 	v1.GET("/volumes", api.listVolumes)

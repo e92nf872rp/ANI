@@ -66,10 +66,6 @@ func newSecretAPIWithService(service ports.SecretService) *secretAPI {
 	return &secretAPI{service: service}
 }
 
-func registerSecretResources(v1 *route.RouterGroup) {
-	registerSecretResourcesWithService(v1, nil)
-}
-
 func registerSecretResourcesWithService(v1 *route.RouterGroup, service ports.SecretService) {
 	api := newSecretAPIWithService(service)
 	v1.GET("/secrets", api.listSecrets)

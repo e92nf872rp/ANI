@@ -199,13 +199,20 @@ func (o *PrometheusInstanceObservability) queryPrometheusScalar(ctx context.Cont
 	if err != nil {
 		return prometheusScalarSample{}, err
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			return prometheusScalarSample{}, closeErr
+		}
 		return prometheusScalarSample{}, fmt.Errorf("%w: Prometheus query returned %d", ports.ErrInvalid, resp.StatusCode)
 	}
 	var payload prometheusQueryResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return prometheusScalarSample{}, err
+	decodeErr := json.NewDecoder(resp.Body).Decode(&payload)
+	closeErr := resp.Body.Close()
+	if decodeErr != nil {
+		return prometheusScalarSample{}, decodeErr
+	}
+	if closeErr != nil {
+		return prometheusScalarSample{}, closeErr
 	}
 	if payload.Status != "success" || len(payload.Data.Result) == 0 {
 		return prometheusScalarSample{}, fmt.Errorf("%w: Prometheus query returned no samples", ports.ErrInvalid)

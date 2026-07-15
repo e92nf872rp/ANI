@@ -87,7 +87,11 @@ func main() {
 		logger.Error("failed to configure gateway shared store", "err", err)
 		os.Exit(1)
 	}
-	defer closeGatewayStore()
+	defer func() {
+		if closeErr := closeGatewayStore(); closeErr != nil {
+			logger.Error("failed to close gateway shared store", "err", closeErr)
+		}
+	}()
 	middleware.StartAuditWorker()
 	middleware.Register(h, gatewayStore)
 	router.RegisterWithOptions(h, router.RegisterOptions{
@@ -107,7 +111,9 @@ func main() {
 
 	go func() {
 		<-ctx.Done()
-		h.Shutdown(context.Background())
+		if shutdownErr := h.Shutdown(context.Background()); shutdownErr != nil {
+			logger.Error("failed to shut down gateway", "err", shutdownErr)
+		}
 	}()
 
 	h.Spin()

@@ -124,9 +124,6 @@ func newK8sClusterAPIWithService(service ports.K8sClusterService) *k8sClusterAPI
 	}
 	return &k8sClusterAPI{service: service}
 }
-func registerK8sClusterResources(v1 *route.RouterGroup) {
-	registerK8sClusterResourcesWithService(v1, nil)
-}
 func registerK8sClusterResourcesWithService(v1 *route.RouterGroup, service ports.K8sClusterService) {
 	api := newK8sClusterAPIWithService(service)
 	v1.GET("/k8s-clusters", api.listClusters)

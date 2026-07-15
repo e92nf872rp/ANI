@@ -80,26 +80,44 @@ type demoInstanceAPI struct {
 }
 
 type demoCreateInstanceRequest struct {
-	Kind                  string                     `json:"kind"`
-	InstanceType          string                     `json:"instance_type"`
-	Name                  string                     `json:"name"`
-	CPU                   string                     `json:"cpu"`
-	Memory                string                     `json:"memory"`
-	BootImage             string                     `json:"boot_image"`
-	SSHUsername           string                     `json:"ssh_username"`
-	SSHKeyRef             string                     `json:"ssh_key_ref"`
-	Image                 string                     `json:"image"`
-	GPUVendor             string                     `json:"gpu_vendor"`
-	GPUModel              string                     `json:"gpu_model"`
-	GPUCount              int                        `json:"gpu_count"`
-	GPU                   demoCreateGPURequest       `json:"gpu"`
-	Replicas              int                        `json:"replicas"`
-	AutoStart             *bool                      `json:"auto_start"`
-	TerminationProtection bool                       `json:"termination_protection"`
-	SandboxConfig         demoSandboxConfigRequest   `json:"sandbox_config"`
-	SecretBindings        []demoSecretBindingRequest `json:"secret_bindings"`
-	Description           string                     `json:"description"`
-	IdempotencyKey        string                     `json:"idempotency_key"`
+	Kind                  string                         `json:"kind"`
+	InstanceType          string                         `json:"instance_type"`
+	Name                  string                         `json:"name"`
+	CPU                   string                         `json:"cpu"`
+	Memory                string                         `json:"memory"`
+	BootImage             string                         `json:"boot_image"`
+	SSHUsername           string                         `json:"ssh_username"`
+	SSHKeyRef             string                         `json:"ssh_key_ref"`
+	Image                 string                         `json:"image"`
+	GPUVendor             string                         `json:"gpu_vendor"`
+	GPUModel              string                         `json:"gpu_model"`
+	GPUCount              int                            `json:"gpu_count"`
+	GPU                   demoCreateGPURequest           `json:"gpu"`
+	Replicas              int                            `json:"replicas"`
+	AutoStart             *bool                          `json:"auto_start"`
+	TerminationProtection bool                           `json:"termination_protection"`
+	VMConfig              *demoVMConfigRequest           `json:"vm_config"`
+	ContainerConfig       *demoContainerConfigRequest    `json:"container_config"`
+	GPUContainerConfig    *demoGPUContainerConfigRequest `json:"gpu_container_config"`
+	SandboxConfig         demoSandboxConfigRequest       `json:"sandbox_config"`
+	SecretBindings        []demoSecretBindingRequest     `json:"secret_bindings"`
+	Description           string                         `json:"description"`
+	IdempotencyKey        string                         `json:"idempotency_key"`
+}
+
+type demoVMConfigRequest struct {
+	BootImage   string `json:"boot_image"`
+	SSHUsername string `json:"ssh_username"`
+	SSHKeyRef   string `json:"ssh_key_ref"`
+}
+
+type demoContainerConfigRequest struct {
+	Replicas int `json:"replicas"`
+}
+
+type demoGPUContainerConfigRequest struct {
+	Replicas int                  `json:"replicas"`
+	GPU      demoCreateGPURequest `json:"gpu"`
 }
 
 type demoSandboxConfigRequest struct {
@@ -398,10 +416,6 @@ func newDemoInstanceAPIWithObservability(observability ports.InstanceObservabili
 		observability:                 observability,
 		observabilityUsesInstanceName: useInstanceName,
 	}
-}
-
-func registerDemoInstances(v1 *route.RouterGroup) {
-	registerDemoInstancesWithObservability(v1, nil, false)
 }
 
 func registerDemoInstancesWithObservability(v1 *route.RouterGroup, observability ports.InstanceObservability, useInstanceName bool) {
@@ -793,11 +807,6 @@ func (api *demoInstanceAPI) consoleExec(ctx context.Context, c *app.RequestConte
 	c.JSON(http.StatusOK, result)
 }
 
-func (api *demoInstanceAPI) ensureInstanceExists(ctx context.Context, c *app.RequestContext) error {
-	_, err := api.instanceForObservation(ctx, c)
-	return err
-}
-
 func (api *demoInstanceAPI) instanceForObservation(ctx context.Context, c *app.RequestContext) (ports.WorkloadInstanceRecord, error) {
 	return api.service.Get(ctx, ports.WorkloadInstanceGetRequest{
 		TenantID:   demoTenantID(c),
@@ -926,6 +935,10 @@ func demoSpecFromRequest(req demoCreateInstanceRequest, tenantID string) (ports.
 	if kind == "" {
 		kind = ports.WorkloadKindVM
 	}
+	resolved, err := demoResolveCreateInstanceFields(req, kind)
+	if err != nil {
+		return ports.WorkloadSpec{}, err
+	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
 		name = "demo-" + string(kind)
@@ -952,7 +965,7 @@ func demoSpecFromRequest(req demoCreateInstanceRequest, tenantID string) (ports.
 			},
 		},
 		Storage: []ports.WorkloadStorageAttachment{
-			{Name: name + "-root", Kind: ports.StorageAttachmentRootDisk, SizeGiB: 40, SourceRef: firstNonEmpty(req.BootImage, "images/ubuntu-22.04.qcow2"), Required: true},
+			{Name: name + "-root", Kind: ports.StorageAttachmentRootDisk, SizeGiB: 40, SourceRef: firstNonEmpty(resolved.BootImage, "images/ubuntu-22.04.qcow2"), Required: true},
 		},
 		Lifecycle: ports.InstanceLifecyclePolicy{AutoStart: autoStart, TerminationProtection: req.TerminationProtection},
 		Labels: map[string]string{
@@ -966,27 +979,27 @@ func demoSpecFromRequest(req demoCreateInstanceRequest, tenantID string) (ports.
 	switch kind {
 	case ports.WorkloadKindVM:
 		spec.VM = &ports.VMInstanceSpec{
-			BootImage:    firstNonEmpty(req.BootImage, "images/ubuntu-22.04.qcow2"),
-			SSHUsername:  firstNonEmpty(req.SSHUsername, "ubuntu"),
-			SSHKeySecret: req.SSHKeyRef,
+			BootImage:    firstNonEmpty(resolved.BootImage, "images/ubuntu-22.04.qcow2"),
+			SSHUsername:  firstNonEmpty(resolved.SSHUsername, "ubuntu"),
+			SSHKeySecret: resolved.SSHKeyRef,
 			MachineType:  "q35",
 			RootDisk:     spec.Storage[0],
 		}
 	case ports.WorkloadKindContainer:
 		spec.Storage = nil
-		spec.Container = &ports.ContainerInstanceSpec{Ports: []int32{8080}, Replicas: int32(maxInt(req.Replicas, 1))}
+		spec.Container = &ports.ContainerInstanceSpec{Ports: []int32{8080}, Replicas: int32(maxInt(resolved.Replicas, 1))}
 	case ports.WorkloadKindGPUContainer:
 		spec.Storage = nil
-		spec.Container = &ports.ContainerInstanceSpec{Ports: []int32{8080}, Replicas: int32(maxInt(req.Replicas, 1))}
+		spec.Container = &ports.ContainerInstanceSpec{Ports: []int32{8080}, Replicas: int32(maxInt(resolved.Replicas, 1))}
 		spec.Resources.GPU = ports.GPUSchedulingRequest{
 			TenantID:         tenantID,
 			WorkloadID:       name,
-			PreferredVendors: []ports.GPUVendor{ports.GPUVendor(firstNonEmpty(req.GPU.Vendor, req.GPUVendor, "nvidia"))},
-			PreferredModels:  []string{firstNonEmpty(req.GPU.Model, req.GPUModel, "A100")},
-			RequiredCount:    maxInt(firstNonZeroInt(req.GPU.Count, req.GPUCount), 1),
+			PreferredVendors: []ports.GPUVendor{ports.GPUVendor(firstNonEmpty(resolved.GPUVendor, "nvidia"))},
+			PreferredModels:  []string{firstNonEmpty(resolved.GPUModel, "A100")},
+			RequiredCount:    maxInt(resolved.GPUCount, 1),
 		}
 	case ports.WorkloadKindSandbox:
-		sandboxConfig, err := demoSandboxConfigFromRequest(req.SandboxConfig)
+		sandboxConfig, err := demoSandboxConfigFromRequest(resolved.SandboxConfig)
 		if err != nil {
 			return ports.WorkloadSpec{}, err
 		}
@@ -999,6 +1012,125 @@ func demoSpecFromRequest(req demoCreateInstanceRequest, tenantID string) (ports.
 		return ports.WorkloadSpec{}, fmt.Errorf("unsupported demo instance kind %q", kind)
 	}
 	return spec, nil
+}
+
+type demoResolvedCreateFields struct {
+	BootImage     string
+	SSHUsername   string
+	SSHKeyRef     string
+	Replicas      int
+	GPUVendor     string
+	GPUModel      string
+	GPUCount      int
+	SandboxConfig demoSandboxConfigRequest
+}
+
+func demoResolveCreateInstanceFields(req demoCreateInstanceRequest, kind ports.WorkloadKind) (demoResolvedCreateFields, error) {
+	if err := demoValidateCreateInstanceConfigs(req, kind); err != nil {
+		return demoResolvedCreateFields{}, err
+	}
+	resolved := demoResolvedCreateFields{
+		BootImage:     req.BootImage,
+		SSHUsername:   req.SSHUsername,
+		SSHKeyRef:     req.SSHKeyRef,
+		Replicas:      req.Replicas,
+		GPUVendor:     firstNonEmpty(req.GPU.Vendor, req.GPUVendor),
+		GPUModel:      firstNonEmpty(req.GPU.Model, req.GPUModel),
+		GPUCount:      firstNonZeroInt(req.GPU.Count, req.GPUCount),
+		SandboxConfig: req.SandboxConfig,
+	}
+	switch kind {
+	case ports.WorkloadKindVM:
+		if req.VMConfig != nil {
+			if err := demoConflictString("boot_image", req.VMConfig.BootImage, req.BootImage); err != nil {
+				return demoResolvedCreateFields{}, err
+			}
+			if err := demoConflictString("ssh_username", req.VMConfig.SSHUsername, req.SSHUsername); err != nil {
+				return demoResolvedCreateFields{}, err
+			}
+			if err := demoConflictString("ssh_key_ref", req.VMConfig.SSHKeyRef, req.SSHKeyRef); err != nil {
+				return demoResolvedCreateFields{}, err
+			}
+			resolved.BootImage = firstNonEmpty(req.VMConfig.BootImage, req.BootImage)
+			resolved.SSHUsername = firstNonEmpty(req.VMConfig.SSHUsername, req.SSHUsername)
+			resolved.SSHKeyRef = firstNonEmpty(req.VMConfig.SSHKeyRef, req.SSHKeyRef)
+		}
+	case ports.WorkloadKindContainer:
+		if req.ContainerConfig != nil {
+			if err := demoConflictInt("replicas", req.ContainerConfig.Replicas, req.Replicas); err != nil {
+				return demoResolvedCreateFields{}, err
+			}
+			resolved.Replicas = firstNonZeroInt(req.ContainerConfig.Replicas, req.Replicas)
+		}
+	case ports.WorkloadKindGPUContainer:
+		if req.GPUContainerConfig != nil {
+			if err := demoConflictInt("replicas", req.GPUContainerConfig.Replicas, req.Replicas); err != nil {
+				return demoResolvedCreateFields{}, err
+			}
+			flatGPU := demoCreateGPURequest{
+				Vendor: firstNonEmpty(req.GPU.Vendor, req.GPUVendor),
+				Model:  firstNonEmpty(req.GPU.Model, req.GPUModel),
+				Count:  firstNonZeroInt(req.GPU.Count, req.GPUCount),
+			}
+			if err := demoConflictString("gpu.vendor", req.GPUContainerConfig.GPU.Vendor, flatGPU.Vendor); err != nil {
+				return demoResolvedCreateFields{}, err
+			}
+			if err := demoConflictString("gpu.model", req.GPUContainerConfig.GPU.Model, flatGPU.Model); err != nil {
+				return demoResolvedCreateFields{}, err
+			}
+			if err := demoConflictInt("gpu.count", req.GPUContainerConfig.GPU.Count, flatGPU.Count); err != nil {
+				return demoResolvedCreateFields{}, err
+			}
+			resolved.Replicas = firstNonZeroInt(req.GPUContainerConfig.Replicas, req.Replicas)
+			resolved.GPUVendor = firstNonEmpty(req.GPUContainerConfig.GPU.Vendor, flatGPU.Vendor)
+			resolved.GPUModel = firstNonEmpty(req.GPUContainerConfig.GPU.Model, flatGPU.Model)
+			resolved.GPUCount = firstNonZeroInt(req.GPUContainerConfig.GPU.Count, flatGPU.Count)
+		}
+	case ports.WorkloadKindSandbox:
+		// sandbox_config is already the nested path; no flat aliases.
+	}
+	return resolved, nil
+}
+
+func demoValidateCreateInstanceConfigs(req demoCreateInstanceRequest, kind ports.WorkloadKind) error {
+	configs := []struct {
+		name       string
+		present    bool
+		allowedFor ports.WorkloadKind
+	}{
+		{"vm_config", req.VMConfig != nil, ports.WorkloadKindVM},
+		{"container_config", req.ContainerConfig != nil, ports.WorkloadKindContainer},
+		{"gpu_container_config", req.GPUContainerConfig != nil, ports.WorkloadKindGPUContainer},
+		{"sandbox_config", demoSandboxConfigProvided(req.SandboxConfig), ports.WorkloadKindSandbox},
+	}
+	for _, cfg := range configs {
+		if cfg.present && cfg.allowedFor != kind {
+			return fmt.Errorf("%s is only valid when kind=%s", cfg.name, cfg.allowedFor)
+		}
+	}
+	return nil
+}
+
+func demoSandboxConfigProvided(cfg demoSandboxConfigRequest) bool {
+	return strings.TrimSpace(cfg.RuntimeClass) != "" ||
+		strings.TrimSpace(cfg.SessionTimeout) != "" ||
+		strings.TrimSpace(cfg.NetworkEgressPolicy) != ""
+}
+
+func demoConflictString(field, configValue, flatValue string) error {
+	configValue = strings.TrimSpace(configValue)
+	flatValue = strings.TrimSpace(flatValue)
+	if configValue != "" && flatValue != "" && configValue != flatValue {
+		return fmt.Errorf("%s conflicts between *_config and flat alias", field)
+	}
+	return nil
+}
+
+func demoConflictInt(field string, configValue, flatValue int) error {
+	if configValue != 0 && flatValue != 0 && configValue != flatValue {
+		return fmt.Errorf("%s conflicts between *_config and flat alias", field)
+	}
+	return nil
 }
 
 func demoInstanceKind(req demoCreateInstanceRequest) (ports.WorkloadKind, error) {
