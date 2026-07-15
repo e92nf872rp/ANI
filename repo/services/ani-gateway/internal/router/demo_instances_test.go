@@ -593,3 +593,175 @@ func TestDemoInstanceServiceRealShellExecutesCommand(t *testing.T) {
 		t.Fatalf("CWD is empty")
 	}
 }
+
+func TestDemoSpecFromRequestPrefersNestedConfigs(t *testing.T) {
+	vmSpec, err := demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind: "vm",
+		Name: "vm-config-path",
+		VMConfig: &demoVMConfigRequest{
+			BootImage:   "images/custom.qcow2",
+			SSHUsername: "ani",
+			SSHKeyRef:   "secret/ssh-ani",
+		},
+	}, "tenant-a")
+	if err != nil {
+		t.Fatalf("vm config path error = %v", err)
+	}
+	if vmSpec.VM == nil || vmSpec.VM.BootImage != "images/custom.qcow2" || vmSpec.VM.SSHUsername != "ani" || vmSpec.VM.SSHKeySecret != "secret/ssh-ani" {
+		t.Fatalf("vm config = %+v, want nested values", vmSpec.VM)
+	}
+
+	containerSpec, err := demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind:            "container",
+		Name:            "container-config-path",
+		ContainerConfig: &demoContainerConfigRequest{Replicas: 3},
+	}, "tenant-a")
+	if err != nil {
+		t.Fatalf("container config path error = %v", err)
+	}
+	if containerSpec.Container == nil || containerSpec.Container.Replicas != 3 {
+		t.Fatalf("container replicas = %+v, want 3", containerSpec.Container)
+	}
+
+	gpuSpec, err := demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind: "gpu_container",
+		Name: "gpu-config-path",
+		GPUContainerConfig: &demoGPUContainerConfigRequest{
+			Replicas: 2,
+			GPU:      demoCreateGPURequest{Vendor: "nvidia", Model: "H100", Count: 4},
+		},
+	}, "tenant-a")
+	if err != nil {
+		t.Fatalf("gpu config path error = %v", err)
+	}
+	if gpuSpec.Container == nil || gpuSpec.Container.Replicas != 2 {
+		t.Fatalf("gpu replicas = %+v, want 2", gpuSpec.Container)
+	}
+	if gpuSpec.Resources.GPU.RequiredCount != 4 || len(gpuSpec.Resources.GPU.PreferredModels) != 1 || gpuSpec.Resources.GPU.PreferredModels[0] != "H100" {
+		t.Fatalf("gpu resources = %+v, want H100 count=4", gpuSpec.Resources.GPU)
+	}
+
+	sandboxSpec, err := demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind: "sandbox",
+		Name: "sandbox-config-path",
+		SandboxConfig: demoSandboxConfigRequest{
+			RuntimeClass:        "sandbox-kata",
+			SessionTimeout:      "20m",
+			NetworkEgressPolicy: "allowlist",
+		},
+	}, "tenant-a")
+	if err != nil {
+		t.Fatalf("sandbox config path error = %v", err)
+	}
+	if sandboxSpec.Sandbox == nil || sandboxSpec.Sandbox.SessionTimeout != 20*time.Minute {
+		t.Fatalf("sandbox = %+v, want 20m", sandboxSpec.Sandbox)
+	}
+}
+
+func TestDemoSpecFromRequestAcceptsFlatAliases(t *testing.T) {
+	vmSpec, err := demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind:        "vm",
+		Name:        "vm-flat",
+		BootImage:   "images/flat.qcow2",
+		SSHUsername: "ubuntu",
+		SSHKeyRef:   "secret/flat",
+	}, "tenant-a")
+	if err != nil {
+		t.Fatalf("flat vm error = %v", err)
+	}
+	if vmSpec.VM == nil || vmSpec.VM.BootImage != "images/flat.qcow2" {
+		t.Fatalf("flat vm = %+v", vmSpec.VM)
+	}
+
+	containerSpec, err := demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind:     "container",
+		Name:     "container-flat",
+		Replicas: 5,
+	}, "tenant-a")
+	if err != nil {
+		t.Fatalf("flat container error = %v", err)
+	}
+	if containerSpec.Container == nil || containerSpec.Container.Replicas != 5 {
+		t.Fatalf("flat container = %+v", containerSpec.Container)
+	}
+
+	gpuSpec, err := demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind:     "gpu_container",
+		Name:     "gpu-flat",
+		Replicas: 2,
+		GPU:      demoCreateGPURequest{Vendor: "nvidia", Model: "A100", Count: 2},
+	}, "tenant-a")
+	if err != nil {
+		t.Fatalf("flat gpu error = %v", err)
+	}
+	if gpuSpec.Resources.GPU.RequiredCount != 2 {
+		t.Fatalf("flat gpu count = %d, want 2", gpuSpec.Resources.GPU.RequiredCount)
+	}
+}
+
+func TestDemoSpecFromRequestRejectsConfigConflictsAndCrossKind(t *testing.T) {
+	_, err := demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind:      "vm",
+		Name:      "conflict-vm",
+		BootImage: "images/flat.qcow2",
+		VMConfig:  &demoVMConfigRequest{BootImage: "images/nested.qcow2"},
+	}, "tenant-a")
+	if err == nil || !strings.Contains(err.Error(), "conflicts") {
+		t.Fatalf("expected boot_image conflict, got %v", err)
+	}
+
+	_, err = demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind:            "container",
+		Name:            "conflict-container",
+		Replicas:        2,
+		ContainerConfig: &demoContainerConfigRequest{Replicas: 3},
+	}, "tenant-a")
+	if err == nil || !strings.Contains(err.Error(), "conflicts") {
+		t.Fatalf("expected replicas conflict, got %v", err)
+	}
+
+	_, err = demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind: "gpu_container",
+		Name: "conflict-gpu",
+		GPU:  demoCreateGPURequest{Model: "A100"},
+		GPUContainerConfig: &demoGPUContainerConfigRequest{
+			GPU: demoCreateGPURequest{Model: "H100"},
+		},
+	}, "tenant-a")
+	if err == nil || !strings.Contains(err.Error(), "conflicts") {
+		t.Fatalf("expected gpu.model conflict, got %v", err)
+	}
+
+	_, err = demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind:               "vm",
+		Name:               "cross-kind",
+		GPUContainerConfig: &demoGPUContainerConfigRequest{Replicas: 1},
+	}, "tenant-a")
+	if err == nil || !strings.Contains(err.Error(), "gpu_container_config") {
+		t.Fatalf("expected cross-kind error, got %v", err)
+	}
+
+	_, err = demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind:      "container",
+		Name:      "cross-kind-vm-config",
+		VMConfig:  &demoVMConfigRequest{BootImage: "images/x.qcow2"},
+	}, "tenant-a")
+	if err == nil || !strings.Contains(err.Error(), "vm_config") {
+		t.Fatalf("expected vm_config cross-kind error, got %v", err)
+	}
+}
+
+func TestDemoSpecFromRequestAllowsMatchingConfigAndFlatAlias(t *testing.T) {
+	spec, err := demoSpecFromRequest(demoCreateInstanceRequest{
+		Kind:      "vm",
+		Name:      "matching-alias",
+		BootImage: "images/same.qcow2",
+		VMConfig:  &demoVMConfigRequest{BootImage: "images/same.qcow2"},
+	}, "tenant-a")
+	if err != nil {
+		t.Fatalf("matching alias error = %v", err)
+	}
+	if spec.VM == nil || spec.VM.BootImage != "images/same.qcow2" {
+		t.Fatalf("matching alias vm = %+v", spec.VM)
+	}
+}
