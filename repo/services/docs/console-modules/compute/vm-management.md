@@ -210,9 +210,9 @@
 | idempotency_key | 幂等键 | 写操作必填 |
 | cpu | CPU 规格 | 文本，如 `4` |
 | memory | 内存规格 | 文本，如 `8Gi` |
-| boot_image | 启动镜像引用 | 文本 |
-| ssh_username | SSH 用户名 | 文本 |
-| ssh_key_ref | SSH 密钥引用 | 文本 |
+| vm_config.boot_image | 启动镜像引用（推荐） | 文本；扁平 `boot_image` 为兼容别名 |
+| vm_config.ssh_username | SSH 用户名（推荐） | 文本；扁平 `ssh_username` 为兼容别名 |
+| vm_config.ssh_key_ref | SSH 密钥引用（推荐） | 文本；扁平 `ssh_key_ref` 为兼容别名 |
 | action | 生命周期动作 | 枚举 |
 | operation_id | 操作记录 ID | 文本；支持跳转 |
 
@@ -252,8 +252,8 @@
 |---|---|---|
 | 用户登录与租户上下文 | 已认证 | `401 UNAUTHORIZED` / `403 FORBIDDEN` |
 | `name` | 租户内唯一 | `409 CONFLICT` |
-| `boot_image` | 镜像引用有效 | `422 PRECONDITION_FAILED`（YAML 已举例 `IMAGE_NOT_FOUND`） |
-| `ssh_key_ref`（若填写） | 密钥引用存在 | `422 PRECONDITION_FAILED`（具体 `code` 待 Core 冻结；建议语义：SSH 密钥未找到） |
+| `vm_config.boot_image` / 兼容别名 `boot_image` | 镜像引用有效 | `422 PRECONDITION_FAILED`（YAML 已举例 `IMAGE_NOT_FOUND`） |
+| `vm_config.ssh_key_ref` / 兼容别名 `ssh_key_ref`（若填写） | 密钥引用存在 | `422 PRECONDITION_FAILED`（具体 `code` 待 Core 冻结；建议语义：SSH 密钥未找到） |
 | 租户配额（若启用） | 未超限 | `422 PRECONDITION_FAILED`（具体 `code` 待 Core 冻结；建议语义：配额超限） |
 
 说明：前置条件校验由后端在 `POST /api/v1/instances` 执行；前端在提交前应做基础必填校验，但不得替代服务端 422 判定。除 YAML `PreconditionFailed` 描述已举例者外，表中 `code` 仅为产品建议语义，不得当作已冻结契约。
@@ -341,7 +341,7 @@
 | tags | `["Instances"]` |
 | security | `[{BearerAuth: []}, {ApiKeyAuth: []}]` |
 | requestBody.required | `name`、`kind`、`idempotency_key` |
-| 关键字段 | `kind=vm`、`cpu`、`memory`、`boot_image`、`ssh_username`、`ssh_key_ref`、`termination_protection` |
+| 关键字段 | `kind=vm`、`cpu`、`memory`、`vm_config`（`boot_image`/`ssh_username`/`ssh_key_ref`）、`termination_protection`；扁平 `boot_image`/`ssh_*` 仍为兼容别名 |
 | success | `201 + CreateInstanceResponse` |
 | error responses | `400 BAD_REQUEST`、`401 UNAUTHORIZED`、`403 FORBIDDEN`、`409 CONFLICT` |
 
