@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -352,3 +353,8 @@ func prometheusInstanceObservabilityDevProfile() ports.DevProfileInfo {
 }
 
 var _ ports.InstanceObservability = (*PrometheusInstanceObservability)(nil)
+
+// CreateConsoleSession is a stub; real implementation arrives in PR3.
+func (p *PrometheusInstanceObservability) CreateConsoleSession(ctx context.Context, request ports.InstanceConsoleSessionCreateRequest) (ports.InstanceConsoleSessionRecord, error) {
+	return ports.InstanceConsoleSessionRecord{}, errors.New("CreateConsoleSession: not implemented yet, see PR3")
+}

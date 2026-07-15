@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -234,3 +235,8 @@ func firstNonZeroDuration(values ...time.Duration) time.Duration {
 }
 
 var _ ports.ObservabilityService = (*LocalObservabilityService)(nil)
+
+// QueryRange is a stub; real implementation arrives in PR3.
+func (s *LocalObservabilityService) QueryRange(ctx context.Context, request ports.ObservabilityRangeQueryRequest) (ports.ObservabilityRangeQueryResult, error) {
+	return ports.ObservabilityRangeQueryResult{}, errors.New("QueryRange: not implemented yet, see PR3")
+}
