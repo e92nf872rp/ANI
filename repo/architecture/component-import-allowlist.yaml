@@ -71,7 +71,7 @@ allowed:
     imports:
       - github.com/jackc/pgx/v5
       - github.com/jackc/pgx/v5/pgxpool
-    reason: Platform password login persists refresh tokens and reads platform_users in a bounded auth metadata module
+    reason: Platform password login persists refresh tokens and reads users(EXISTS user_roles→platform-admin)/user_roles in a bounded auth metadata module
   - path: services/task-service/internal/service/task_service.go
     coupling_level: bounded_direct
     imports:

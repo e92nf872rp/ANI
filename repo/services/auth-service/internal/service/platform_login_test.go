@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,9 +20,12 @@ import (
 type fakePlatformLoginStore struct {
 	user        platformUser
 	userErr     error
+	roles       []string
+	rolesErr    error
 	insertErr   error
 	touchErr    error
 	touchCalled bool
+	rolesCalled bool
 	insertArgs  struct {
 		userID    uuid.UUID
 		tokenHash string
@@ -30,11 +34,27 @@ type fakePlatformLoginStore struct {
 	}
 }
 
-func (s *fakePlatformLoginStore) LookupUser(context.Context, string) (platformUser, error) {
+func (s *fakePlatformLoginStore) LookupUser(_ context.Context, namespacedUsername string) (platformUser, error) {
 	if s.userErr != nil {
 		return platformUser{}, s.userErr
 	}
+	// Caller should pass `local:`-prefixed username; store assertion only.
+	if !strings.HasPrefix(namespacedUsername, "local:") {
+		// 模拟 DB 行为：未命中 `local:` 前缀的平台管理员记录
+		return platformUser{}, errInvalidCredentials
+	}
 	return s.user, nil
+}
+
+func (s *fakePlatformLoginStore) LoadRoles(context.Context, uuid.UUID) ([]string, error) {
+	s.rolesCalled = true
+	if s.rolesErr != nil {
+		return nil, s.rolesErr
+	}
+	if len(s.roles) == 0 {
+		return []string{"platform-admin"}, nil
+	}
+	return s.roles, nil
 }
 
 func (s *fakePlatformLoginStore) InsertRefreshToken(_ context.Context, userID uuid.UUID, tokenHash string, roles []string, expiresAt time.Time) error {
@@ -228,14 +248,18 @@ func TestPlatformPasswordLogin_OIDCOnlyUserRejected(t *testing.T) {
 }
 
 // TestPlatformPasswordLogin_TenantUserRejected 验证租户用户无法用平台端点登录。
-// platform_users 与 users 是物理隔离的两张表：postgresPlatformLoginStore.LookupUser
-// 只查 platform_users。即使某个 username 在 users 表中存在，platform_users 查询也返回
-// ErrNoRows，并被映射为 errInvalidCredentials → INVALID_CREDENTIALS。
-// 这证明了平台/租户存储天然隔离，租户用户用平台端点登录天然被拒绝。
+// 平台管理员与租户用户共享 users 表，username 均使用 `local:` 前缀，由 user_roles + roles
+// 关联区分：平台管理员在 user_roles 表中关联 roles.name='platform-admin'（roles.tenant_id
+// IS NULL 表示平台内置角色），租户用户在 user_roles 表中关联租户内自定义角色（roles.tenant_id
+// NOT NULL）或平台内置的 tenant-admin/user/auditor 角色。
+// postgresPlatformLoginStore.LookupUser 查询谓词为 `WHERE u.username='local:'+input AND EXISTS
+// (user_roles→roles.name='platform-admin' AND roles.tenant_id IS NULL)`。租户用户
+// 不满足该 EXISTS 子查询（无 platform-admin 角色绑定），返回 ErrNoRows → errInvalidCredentials。
+// 这证明了同表存储、同前缀下平台/租户通过 user_roles 角色绑定天然隔离，租户用户用平台端点登录天然被拒绝。
 func TestPlatformPasswordLogin_TenantUserRejected(t *testing.T) {
 	issuer := testPasswordLoginIssuer(t)
-	// fake store 模拟 platform_users 表查不到该用户（ErrNoRows → errInvalidCredentials）
-	// 即使该 username 可能存在于 users 表（这里是同名的"租户用户"）
+	// fake store 模拟 users 表中该 username 仅以租户用户身份存在（无 platform-admin 角色绑定），
+	// 平台查询 `WHERE username='local:'+input AND EXISTS platform-admin role` 返回 ErrNoRows → errInvalidCredentials
 	store := &fakePlatformLoginStore{
 		userErr: errInvalidCredentials,
 	}

@@ -271,16 +271,18 @@ func TestPasswordLogin_OIDCUserRejected(t *testing.T) {
 }
 
 // TestTenantPasswordLogin_PlatformUserRejected 验证平台用户无法用租户端点登录。
-// users 表通过 tenant_id NOT NULL 约束保证只能存租户用户（init_schema.sql:52）。
-// 平台管理员存储在独立的 platform_users 表中，与 users 物理隔离。
-// 即使某个 username 在 platform_users 中存在，users 表查询也返回 ErrNoRows，
-// 被映射为 errInvalidCredentials → INVALID_CREDENTIALS。
-// 这是平台/租户存储天然隔离的安全保证。
+// 平台管理员与租户用户共享 users 表，平台管理员在 user_roles 中关联 roles.name='platform-admin'
+// （roles.tenant_id IS NULL）。postgresPasswordLoginStore.LookupUser 查询
+// `WHERE tenant_id=$1 AND username='local:'+username`，使用 tenant_id 谓词排除平台管理员
+// （平台管理员 tenant_id IS NULL，NULL != $1 不匹配）。
+// 即使某个 username 在 users 表中以平台管理员身份存在（tenant_id IS NULL），
+// 租户端点查询也返回 ErrNoRows，被映射为 errInvalidCredentials → INVALID_CREDENTIALS。
+// 这是同表存储下平台/租户通过 tenant_id 谓词与 user_roles 角色绑定双重隔离的安全保证。
 func TestTenantPasswordLogin_PlatformUserRejected(t *testing.T) {
 	issuer := testPasswordLoginIssuer(t)
 	tenantID := uuid.New()
-	// fake store 模拟 users 表查不到该用户（ErrNoRows → errInvalidCredentials）
-	// 即使该 username 可能存在于 platform_users 表（这里是同名的"平台用户"）
+	// fake store 模拟 users 表中该 username 仅以平台管理员身份存在（tenant_id IS NULL），
+	// 租户端点查询 `WHERE tenant_id=$1 AND username=$2` 返回 ErrNoRows → errInvalidCredentials
 	store := &fakePasswordLoginStore{
 		tenantID: tenantID,
 		userErr:  errInvalidCredentials,

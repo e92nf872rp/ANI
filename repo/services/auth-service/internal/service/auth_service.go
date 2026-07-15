@@ -88,7 +88,18 @@ func (s *AuthService) RefreshToken(ctx context.Context, req *authv1.RefreshToken
 	if err != nil {
 		return nil, status.Error(codes.Unauthenticated, "invalid refresh token")
 	}
-	token, err := s.issuer.IssueAccessToken(principal, defaultAccessTokenTTL)
+	// 按 scope 分流：平台 refresh token (tenant_id IS NULL) 续期为平台 access token，
+	// 租户 refresh token 续期为租户 access token。混用会让平台 token 降级为
+	// scope=tenant + tid=零值 UUID，被 jwt.go 校验拒绝。
+	var token string
+	if principal.Scope == "platform" {
+		token, err = s.issuer.IssuePlatformAccessToken(
+			platformPrincipal{UserID: principal.UserID, Roles: principal.Roles},
+			defaultAccessTokenTTL,
+		)
+	} else {
+		token, err = s.issuer.IssueAccessToken(principal, defaultAccessTokenTTL)
+	}
 	if err != nil {
 		return nil, status.Error(codes.Internal, "failed to issue access token")
 	}

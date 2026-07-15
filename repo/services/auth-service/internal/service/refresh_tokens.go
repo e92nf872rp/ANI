@@ -24,6 +24,9 @@ type refreshPrincipal struct {
 	TenantID uuid.UUID
 	UserID   uuid.UUID
 	Roles    []string
+	// Scope 推断自 tenant_id：NULL→"platform"，非 NULL→"tenant"。
+	// RefreshToken RPC 按此分流到 IssuePlatformAccessToken / IssueAccessToken。
+	Scope string
 }
 
 type persistentRefreshTokenStore struct {
@@ -54,6 +57,12 @@ func (s *persistentRefreshTokenStore) Validate(ctx context.Context, rawToken str
 	}
 	if err != nil {
 		return refreshPrincipal{}, fmt.Errorf("validate refresh token: %w", err)
+	}
+	// 推断 scope：tenant_id IS NULL → 平台 refresh token，否则租户。
+	if principal.TenantID == uuid.Nil {
+		principal.Scope = "platform"
+	} else {
+		principal.Scope = "tenant"
 	}
 	_, err = s.db.Exec(ctx, `
 		UPDATE refresh_tokens

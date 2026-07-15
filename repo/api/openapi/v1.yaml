@@ -1349,7 +1349,7 @@ components:
       type: object
       required: [username, password]
       properties:
-        username:       { type: string, minLength: 1, maxLength: 64, description: "平台管理员用户名（无命名空间前缀，查询 platform_users 表）" }
+        username:       { type: string, minLength: 1, maxLength: 64, description: "平台管理员用户名（无命名空间前缀，存储为 local:&lt;username&gt;，查询 users 表 EXISTS user_roles→roles.name=platform-admin）" }
         password:       { type: string, minLength: 1, maxLength: 256, format: password, description: "明文密码，仅用于 bcrypt 校验，不持久化" }
         idempotency_key: { type: string, pattern: "^[A-Za-z0-9_-]{1,128}$", description: "可选幂等键，重复提交返回同一 TokenPair" }
 
