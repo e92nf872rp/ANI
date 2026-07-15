@@ -155,6 +155,36 @@
       "scope": "scope:gpu-inventory:read"
     },
     {
+      "operationId": "listGPUSchedulingQueues",
+      "method": "GET",
+      "path": "/gpu-scheduling/queues",
+      "scope": "scope:gpu-scheduling:read"
+    },
+    {
+      "operationId": "createGPUSchedulingQueue",
+      "method": "POST",
+      "path": "/gpu-scheduling/queues",
+      "scope": "scope:gpu-scheduling:write"
+    },
+    {
+      "operationId": "deleteGPUSchedulingQueue",
+      "method": "DELETE",
+      "path": "/gpu-scheduling/queues/{queue_id}",
+      "scope": "scope:gpu-scheduling:write"
+    },
+    {
+      "operationId": "getGPUSchedulingQueue",
+      "method": "GET",
+      "path": "/gpu-scheduling/queues/{queue_id}",
+      "scope": "scope:gpu-scheduling:read"
+    },
+    {
+      "operationId": "updateGPUSchedulingQueue",
+      "method": "PATCH",
+      "path": "/gpu-scheduling/queues/{queue_id}",
+      "scope": "scope:gpu-scheduling:write"
+    },
+    {
       "operationId": "liveness",
       "method": "GET",
       "path": "/healthz",
@@ -718,6 +748,10 @@
     "GPUInventoryListResponse",
     "GPUInventoryRecord",
     "GPUOccupancyStats",
+    "GPUSchedulingQueue",
+    "GPUSchedulingQueueCreateRequest",
+    "GPUSchedulingQueueListResponse",
+    "GPUSchedulingQueueUpdateRequest",
     "HealthCheck",
     "InstanceConsoleSession",
     "InstanceEvent",

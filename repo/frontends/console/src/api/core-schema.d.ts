@@ -1554,6 +1554,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/gpu-scheduling/queues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询 GPU 调度队列列表
+         * @description 返回当前租户可见的 GPU 调度队列，含平台默认队列和租户自定义队列。
+         */
+        get: operations["listGPUSchedulingQueues"];
+        put?: never;
+        /**
+         * 创建 GPU 调度队列
+         * @description 创建租户自定义调度队列，映射为 Volcano Queue CRD。平台默认队列不可通过此接口创建。
+         */
+        post: operations["createGPUSchedulingQueue"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gpu-scheduling/queues/{queue_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询单个 GPU 调度队列 */
+        get: operations["getGPUSchedulingQueue"];
+        put?: never;
+        post?: never;
+        /**
+         * 删除 GPU 调度队列
+         * @description 删除租户自定义队列。平台默认队列不可删除。
+         */
+        delete: operations["deleteGPUSchedulingQueue"];
+        options?: never;
+        head?: never;
+        /**
+         * 更新 GPU 调度队列
+         * @description 更新租户自定义队列的权重、可回收性等属性。平台默认队列不可修改。
+         */
+        patch: operations["updateGPUSchedulingQueue"];
+        trace?: never;
+    };
     "/sandbox-templates": {
         parameters: {
             query?: never;
@@ -1949,6 +1998,11 @@ export interface components {
                 vendor?: string | null;
                 model?: string | null;
                 count?: number;
+                /** @description 调度队列名（Volcano Queue） */
+                queue_name?: string | null;
+                /** @description 调度资源名，如 nvidia.com/gpu 或 nvidia.com/vgpu */
+                resource_name?: string | null;
+                /** @description 调度说明或失败原因，如 InsufficientGPU */
                 scheduling_reason?: string | null;
                 /** Format: float */
                 utilization_percent?: number | null;
@@ -2085,6 +2139,20 @@ export interface components {
                 model?: string;
                 /** @default 1 */
                 count: number;
+                /** @description 指定调度队列名；为空时按 workload_class 选默认队列 */
+                queue_name?: string | null;
+                /**
+                 * @description GPU 分配模式：dedicated=整卡，vgpu=HAMi vGPU
+                 * @default dedicated
+                 * @enum {string}
+                 */
+                allocation_mode: "dedicated" | "vgpu";
+                /**
+                 * @description 工作负载类型，用于选默认队列
+                 * @default inference
+                 * @enum {string}
+                 */
+                workload_class: "inference" | "training" | "batch";
             } | null;
             /**
              * @deprecated
@@ -2127,6 +2195,20 @@ export interface components {
                 model?: string;
                 /** @default 1 */
                 count: number;
+                /** @description 指定调度队列名；为空时按 workload_class 选默认队列 */
+                queue_name?: string | null;
+                /**
+                 * @description GPU 分配模式：dedicated=整卡，vgpu=HAMi vGPU
+                 * @default dedicated
+                 * @enum {string}
+                 */
+                allocation_mode: "dedicated" | "vgpu";
+                /**
+                 * @description 工作负载类型，用于选默认队列
+                 * @default inference
+                 * @enum {string}
+                 */
+                workload_class: "inference" | "training" | "batch";
             } | null;
         };
         /**
@@ -3089,6 +3171,52 @@ export interface components {
             }[];
             dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
+        /** @description GPU 调度队列，映射 Volcano Queue CRD */
+        GPUSchedulingQueue: {
+            /** Format: uuid */
+            id: string;
+            /** @description 租户内唯一队列名 */
+            name: string;
+            /** @default 10 */
+            weight: number;
+            /** @default false */
+            reclaimable: boolean;
+            /** @enum {string} */
+            workload_class: "inference" | "training" | "batch";
+            /** Format: uuid */
+            project_id?: string | null;
+            /** @description 平台默认队列不可删除或修改 */
+            is_platform_default: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        GPUSchedulingQueueListResponse: {
+            items: components["schemas"]["GPUSchedulingQueue"][];
+            total: number;
+            next_cursor?: string | null;
+        };
+        GPUSchedulingQueueCreateRequest: {
+            /** @description K8s 资源名规范 */
+            name: string;
+            /** @default 10 */
+            weight: number;
+            /** @default false */
+            reclaimable: boolean;
+            /** @enum {string} */
+            workload_class: "inference" | "training" | "batch";
+            /** Format: uuid */
+            project_id?: string | null;
+        };
+        GPUSchedulingQueueUpdateRequest: {
+            weight?: number;
+            reclaimable?: boolean;
+            /** @enum {string} */
+            workload_class?: "inference" | "training" | "batch";
+            /** Format: uuid */
+            project_id?: string | null;
+        };
         SandboxTemplate: {
             /** Format: uuid */
             id: string;
@@ -3497,6 +3625,13 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            /**
+             * @description GPU 调度前置条件不满足。可能的 code：
+             *     - InsufficientGPU: GPU 资源不足，当前无可用算力满足本次创建请求
+             *     - GPUNodeIncompatible: 无兼容 GPU 节点，请调整型号偏好或调度队列
+             *     - QueueNotFound: 所选调度队列不存在或已删除
+             */
+            422: components["responses"]["PreconditionFailed"];
         };
     };
     getInstance: {
@@ -6020,6 +6155,140 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    listGPUSchedulingQueues: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 队列列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GPUSchedulingQueueListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createGPUSchedulingQueue: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 幂等键，防止重复创建 */
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GPUSchedulingQueueCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description 队列创建成功 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GPUSchedulingQueue"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description 队列名称冲突，code: QueueNameConflict */
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getGPUSchedulingQueue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                queue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 队列详情 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GPUSchedulingQueue"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteGPUSchedulingQueue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                queue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 队列删除成功 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description 平台默认队列不可删除，code: PlatformDefaultProtected */
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateGPUSchedulingQueue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                queue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GPUSchedulingQueueUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 队列更新成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GPUSchedulingQueue"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description 平台默认队列不可修改，code: PlatformDefaultProtected */
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listSandboxTemplates: {
