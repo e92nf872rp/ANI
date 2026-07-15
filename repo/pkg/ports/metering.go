@@ -29,6 +29,8 @@ type MeteringUsageQueryRequest struct {
 	EndTime      time.Time
 	ResourceType MeteringResourceType
 	GroupBy      string
+	// IsPlatform 标记平台跨租户查询。true 时 TenantID 可为空（全平台）或指定单租户筛选。
+	IsPlatform bool
 }
 
 type MeteringUsageRecord struct {
@@ -74,5 +76,8 @@ type TokenUsageReportRecord struct {
 
 type MeteringService interface {
 	QueryUsage(ctx context.Context, request MeteringUsageQueryRequest) (MeteringUsageResult, error)
+	// QueryPlatformUsage 查询平台跨租户用量。平台视角下 items[].tenant_id 必填。
+	// 当 request.TenantID 非空时按单租户筛选，否则返回全平台聚合数据。
+	QueryPlatformUsage(ctx context.Context, request MeteringUsageQueryRequest) (MeteringUsageResult, error)
 	ReportTokenUsage(ctx context.Context, request TokenUsageReportRequest) (TokenUsageReportRecord, error)
 }
