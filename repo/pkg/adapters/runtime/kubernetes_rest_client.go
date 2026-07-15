@@ -367,10 +367,13 @@ func (c *KubernetesRESTClient) doOnce(ctx context.Context, method string, endpoi
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
 	data, readErr := io.ReadAll(resp.Body)
+	closeErr := resp.Body.Close()
 	if readErr != nil {
 		return nil, readErr
+	}
+	if closeErr != nil {
+		return nil, closeErr
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		statusErr := resilience.NewStatusError("Kubernetes API", method, req.URL.Path, resp.StatusCode, string(data))
@@ -380,10 +383,6 @@ func (c *KubernetesRESTClient) doOnce(ctx context.Context, method string, endpoi
 		return nil, fmt.Errorf("%w: %v", ports.ErrInvalid, statusErr)
 	}
 	return data, nil
-}
-
-func (c *KubernetesRESTClient) collectionURL(resource kubernetesResource, query string) string {
-	return c.host + resource.collectionPath() + querySuffix(query)
 }
 
 func (c *KubernetesRESTClient) resourceURL(resource kubernetesResource, query string) string {

@@ -185,7 +185,7 @@ export interface paths {
         };
         /**
          * 查询实例列表
-         * @description Services P0 依赖路径。返回 VM、container、gpu_container 的 Core 统一实例视图。
+         * @description Services P0 依赖路径。返回 VM、container、gpu_container、sandbox 的 Core 统一实例视图。
          *     当前 Alpha 冻结 path/schema/error/state/RBAC scope；dev/local profile 可使用本地 provider。
          */
         get: operations["listInstances"];
@@ -194,6 +194,8 @@ export interface paths {
          * 创建实例
          * @description 创建 VM、container、gpu_container 或 sandbox。POST 创建必须携带 idempotency_key；
          *     同一 (tenant_id, idempotency_key) 在 24 小时内返回同一操作结果。
+         *     推荐按 kind 填写对应 `vm_config` / `container_config` / `gpu_container_config` / `sandbox_config`；
+         *     扁平 boot_image/ssh_*\/replicas/gpu 字段仍接受，作为 v1 兼容别名。
          */
         post: operations["createInstance"];
         delete?: never;
@@ -1025,6 +1027,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
+                /** @description 异步任务状态 */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -2025,6 +2028,11 @@ export interface components {
             total: number;
             next_cursor?: string | null;
         };
+        /**
+         * @description 创建实例请求。共享字段（name/kind/image/cpu/memory 等）留在顶层；
+         *     按 kind 选用对应 `*_config`（推荐）。扁平 VM/容器/GPU 字段保留为 v1 兼容别名。
+         *     同名字段以 `*_config` 为准；与扁平别名冲突或传入跨类型 config 时返回 400。
+         */
         CreateInstanceRequest: {
             /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
             idempotency_key: string;
@@ -2044,17 +2052,32 @@ export interface components {
             memory?: string;
             /** @default true */
             auto_start: boolean;
-            /** @description VM boot image 引用 */
+            vm_config?: components["schemas"]["CreateVMInstanceConfig"];
+            container_config?: components["schemas"]["CreateContainerInstanceConfig"];
+            gpu_container_config?: components["schemas"]["CreateGPUContainerInstanceConfig"];
+            sandbox_config?: components["schemas"]["SandboxConfig"];
+            /**
+             * @deprecated
+             * @description 兼容别名；优先使用 vm_config.boot_image
+             */
             boot_image?: string | null;
             /**
-             * @description VM SSH 用户名；仅 VM 使用
+             * @deprecated
+             * @description 兼容别名；优先使用 vm_config.ssh_username
              * @default ubuntu
              */
             ssh_username: string | null;
-            /** @description VM SSH key/secret 引用；不包含私钥内容 */
+            /**
+             * @deprecated
+             * @description 兼容别名；优先使用 vm_config.ssh_key_ref
+             */
             ssh_key_ref?: string | null;
             /** @default false */
             termination_protection: boolean;
+            /**
+             * @deprecated
+             * @description 兼容别名；优先使用 gpu_container_config.gpu
+             */
             gpu?: {
                 /** @example nvidia */
                 vendor?: string;
@@ -2064,11 +2087,47 @@ export interface components {
                 count: number;
             } | null;
             /**
-             * @description Container/GPU Container 副本数；VM 固定为 1
+             * @deprecated
+             * @description 兼容别名；优先使用 container_config.replicas 或 gpu_container_config.replicas
              * @default 1
              */
             replicas: number;
-            sandbox_config?: components["schemas"]["SandboxConfig"];
+        };
+        /** @description kind=vm 专用配置；共享 image/cpu/memory 仍在 CreateInstanceRequest 顶层。 */
+        CreateVMInstanceConfig: {
+            /** @description VM boot image 引用 */
+            boot_image?: string | null;
+            /**
+             * @description VM SSH 用户名
+             * @default ubuntu
+             */
+            ssh_username: string | null;
+            /** @description VM SSH key/secret 引用；不包含私钥内容 */
+            ssh_key_ref?: string | null;
+        };
+        /** @description kind=container 专用配置；共享 image/cpu/memory 仍在 CreateInstanceRequest 顶层。 */
+        CreateContainerInstanceConfig: {
+            /**
+             * @description 容器副本数
+             * @default 1
+             */
+            replicas: number;
+        };
+        /** @description kind=gpu_container 专用配置；共享 image/cpu/memory 仍在 CreateInstanceRequest 顶层。 */
+        CreateGPUContainerInstanceConfig: {
+            /**
+             * @description GPU 容器副本数
+             * @default 1
+             */
+            replicas: number;
+            gpu?: {
+                /** @example nvidia */
+                vendor?: string;
+                /** @example A100 */
+                model?: string;
+                /** @default 1 */
+                count: number;
+            } | null;
         };
         /**
          * @description Sandbox 出口策略；local profile 仅记录意图，不代表真实网络隔离已执行。
@@ -3389,7 +3448,7 @@ export interface operations {
     listInstances: {
         parameters: {
             query?: {
-                kind?: "vm" | "container" | "gpu_container";
+                kind?: "vm" | "container" | "gpu_container" | "sandbox";
                 limit?: number;
                 cursor?: string;
             };
@@ -5266,6 +5325,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description K8s 集群列表 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5289,6 +5349,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description K8s 集群创建成功 */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -5315,6 +5376,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description K8s 集群详情 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5336,6 +5398,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description K8s 集群删除成功 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5357,6 +5420,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description K8s 集群 kubeconfig */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5384,6 +5448,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description K8s 集群升级结果 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5408,6 +5473,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description K8s 集群节点池列表 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5434,6 +5500,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description K8s 集群节点池创建成功 */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -5459,6 +5526,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description K8s 集群节点池详情 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5482,6 +5550,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description K8s 集群节点池删除成功 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5510,6 +5579,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description K8s 集群节点池更新成功 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5538,6 +5608,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description K8s 集群代理响应 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5593,6 +5664,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description 加密密钥列表 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5616,6 +5688,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description 加密密钥创建成功 */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -5637,6 +5710,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description 加密密钥详情 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5658,6 +5732,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description 加密密钥删除成功 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5683,6 +5758,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description 加密密钥轮换结果 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5710,6 +5786,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description 加密密钥吊销成功 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5735,6 +5812,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description 加密对象并生成解封令牌成功 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5760,6 +5838,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description 对象解封令牌创建成功 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5784,6 +5863,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Secret 元数据列表 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5807,6 +5887,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Secret 创建成功 */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -5828,6 +5909,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Secret 元数据详情 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5850,6 +5932,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Secret 删除成功 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5876,6 +5959,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Secret 绑定创建成功 */
             201: {
                 headers: {
                     [name: string]: unknown;

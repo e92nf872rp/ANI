@@ -119,7 +119,7 @@
 | summary | `创建实例` |
 | requestBody | `CreateInstanceRequest` |
 | 必填关键字段 | `idempotency_key`、`name`、`kind=gpu_container` |
-| 常用字段 | `image`、`cpu`、`memory`、`replicas`、`gpu.vendor`、`gpu.model`、`gpu.count` |
+| 常用字段 | `image`、`cpu`、`memory`、`gpu_container_config.replicas`、`gpu_container_config.gpu.vendor` / `model` / `count`；扁平 `replicas`/`gpu.*` 仍为兼容别名 |
 | success | `201 + CreateInstanceResponse` |
 | error responses | `400 BAD_REQUEST`、`401 UNAUTHORIZED`、`403 FORBIDDEN`、`409 CONFLICT` |
 

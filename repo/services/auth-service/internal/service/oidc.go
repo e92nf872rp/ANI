@@ -285,13 +285,19 @@ func (e oidcHTTPExchanger) Exchange(ctx context.Context, code, redirectURI strin
 	if err != nil {
 		return oidcTokenResponse{}, err
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			return oidcTokenResponse{}, closeErr
+		}
 		return oidcTokenResponse{}, fmt.Errorf("oidc token endpoint status %d", resp.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return oidcTokenResponse{}, err
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	closeErr := resp.Body.Close()
+	if readErr != nil {
+		return oidcTokenResponse{}, readErr
+	}
+	if closeErr != nil {
+		return oidcTokenResponse{}, closeErr
 	}
 	var decoded struct {
 		IDToken string `json:"id_token"`
@@ -410,13 +416,19 @@ func (v *oidcJWKSVerifier) keyFor(ctx context.Context, kid string) (*rsa.PublicK
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			return nil, closeErr
+		}
 		return nil, errInvalidJWT
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, err
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	closeErr := resp.Body.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if closeErr != nil {
+		return nil, closeErr
 	}
 	keys, err := parseJWKS(body)
 	if err != nil {

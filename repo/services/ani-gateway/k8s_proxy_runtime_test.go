@@ -376,9 +376,11 @@ func (t *gatewayK8sProxyRoundTripper) RoundTrip(req *http.Request) (*http.Respon
 	t.query = req.URL.RawQuery
 	t.authorization = req.Header.Get("Authorization")
 	if req.Body != nil {
-		defer req.Body.Close()
 		var body map[string]any
 		if err := json.NewDecoder(req.Body).Decode(&body); err != nil && err != io.EOF {
+			return nil, err
+		}
+		if err := req.Body.Close(); err != nil {
 			return nil, err
 		}
 	}

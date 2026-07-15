@@ -552,6 +552,10 @@ components:
     CreateInstanceRequest:
       type: object
       required: [name, kind, idempotency_key]
+      description: |
+        创建实例请求。共享字段（name/kind/image/cpu/memory 等）留在顶层；
+        按 kind 选用对应 `*_config`（推荐）。扁平 VM/容器/GPU 字段保留为 v1 兼容别名。
+        同名字段以 `*_config` 为准；与扁平别名冲突或传入跨类型 config 时返回 400。
       properties:
         idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
         name:           { type: string, minLength: 1, maxLength: 128 }
@@ -561,13 +565,36 @@ components:
         cpu:            { type: string, example: "2" }
         memory:         { type: string, example: "4Gi" }
         auto_start:     { type: boolean, default: true }
-        boot_image:     { type: string, nullable: true, description: "VM boot image 引用" }
-        ssh_username:   { type: string, nullable: true, default: "ubuntu", description: "VM SSH 用户名；仅 VM 使用" }
-        ssh_key_ref:    { type: string, nullable: true, description: "VM SSH key/secret 引用；不包含私钥内容" }
+        vm_config:
+          $ref: '#/components/schemas/CreateVMInstanceConfig'
+        container_config:
+          $ref: '#/components/schemas/CreateContainerInstanceConfig'
+        gpu_container_config:
+          $ref: '#/components/schemas/CreateGPUContainerInstanceConfig'
+        sandbox_config:
+          $ref: '#/components/schemas/SandboxConfig'
+        boot_image:
+          type: string
+          nullable: true
+          deprecated: true
+          description: "兼容别名；优先使用 vm_config.boot_image"
+        ssh_username:
+          type: string
+          nullable: true
+          default: "ubuntu"
+          deprecated: true
+          description: "兼容别名；优先使用 vm_config.ssh_username"
+        ssh_key_ref:
+          type: string
+          nullable: true
+          deprecated: true
+          description: "兼容别名；优先使用 vm_config.ssh_key_ref"
         termination_protection: { type: boolean, default: false }
         gpu:
           type: object
           nullable: true
+          deprecated: true
+          description: "兼容别名；优先使用 gpu_container_config.gpu"
           properties:
             vendor: { type: string, example: "nvidia" }
             model:  { type: string, example: "A100" }
@@ -576,9 +603,43 @@ components:
           type: integer
           minimum: 1
           default: 1
-          description: "Container/GPU Container 副本数；VM 固定为 1"
-        sandbox_config:
-          $ref: '#/components/schemas/SandboxConfig'
+          deprecated: true
+          description: "兼容别名；优先使用 container_config.replicas 或 gpu_container_config.replicas"
+
+    CreateVMInstanceConfig:
+      type: object
+      description: "kind=vm 专用配置；共享 image/cpu/memory 仍在 CreateInstanceRequest 顶层。"
+      properties:
+        boot_image:   { type: string, nullable: true, description: "VM boot image 引用" }
+        ssh_username: { type: string, nullable: true, default: "ubuntu", description: "VM SSH 用户名" }
+        ssh_key_ref:  { type: string, nullable: true, description: "VM SSH key/secret 引用；不包含私钥内容" }
+
+    CreateContainerInstanceConfig:
+      type: object
+      description: "kind=container 专用配置；共享 image/cpu/memory 仍在 CreateInstanceRequest 顶层。"
+      properties:
+        replicas:
+          type: integer
+          minimum: 1
+          default: 1
+          description: "容器副本数"
+
+    CreateGPUContainerInstanceConfig:
+      type: object
+      description: "kind=gpu_container 专用配置；共享 image/cpu/memory 仍在 CreateInstanceRequest 顶层。"
+      properties:
+        replicas:
+          type: integer
+          minimum: 1
+          default: 1
+          description: "GPU 容器副本数"
+        gpu:
+          type: object
+          nullable: true
+          properties:
+            vendor: { type: string, example: "nvidia" }
+            model:  { type: string, example: "A100" }
+            count:  { type: integer, minimum: 1, default: 1 }
 
     SandboxNetworkEgressPolicy:
       type: string
@@ -2036,12 +2097,12 @@ paths:
       operationId: listInstances
       summary: 查询实例列表
       description: |
-        Services P0 依赖路径。返回 VM、container、gpu_container 的 Core 统一实例视图。
+        Services P0 依赖路径。返回 VM、container、gpu_container、sandbox 的 Core 统一实例视图。
         当前 Alpha 冻结 path/schema/error/state/RBAC scope；dev/local profile 可使用本地 provider。
       tags: [Instances]
       x-ani-rbac-scope: "scope:instances:read"
       parameters:
-        - { name: kind,   in: query, schema: { type: string, enum: [vm, container, gpu_container] } }
+        - { name: kind,   in: query, schema: { type: string, enum: [vm, container, gpu_container, sandbox] } }
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
       responses:
@@ -2059,6 +2120,8 @@ paths:
       description: |
         创建 VM、container、gpu_container 或 sandbox。POST 创建必须携带 idempotency_key；
         同一 (tenant_id, idempotency_key) 在 24 小时内返回同一操作结果。
+        推荐按 kind 填写对应 `vm_config` / `container_config` / `gpu_container_config` / `sandbox_config`；
+        扁平 boot_image/ssh_*/replicas/gpu 字段仍接受，作为 v1 兼容别名。
       tags: [Instances]
       x-ani-rbac-scope: "scope:instances:create"
       requestBody:
@@ -3247,7 +3310,7 @@ paths:
                   logo_dark_url:  { type: string, format: uri }
                   favicon_url:    { type: string, format: uri }
                   primary_color:  { type: string, example: "#1677FF" }
-                  secondary_color:{ type: string }
+                  secondary_color: { type: string }
                   icp_number:     { type: string }
 
   # ── 实例操作历史（Control Plane 操作追踪）──────────────────────────────────
@@ -3308,6 +3371,7 @@ paths:
         - { name: task_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         "200":
+          description: 异步任务状态
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AsyncTask' }
@@ -3495,6 +3559,7 @@ paths:
         - { name: cursor, in: query, schema: { type: string } }
       responses:
         "200":
+          description: K8s 集群列表
           content:
             application/json:
               schema:
@@ -3512,6 +3577,7 @@ paths:
               $ref: "#/components/schemas/K8sClusterCreateRequest"
       responses:
         "201":
+          description: K8s 集群创建成功
           content:
             application/json:
               schema:
@@ -3537,6 +3603,7 @@ paths:
         - { name: cluster_id, in: path, required: true, schema: { type: string } }
       responses:
         "200":
+          description: K8s 集群详情
           content:
             application/json:
               schema:
@@ -3550,6 +3617,7 @@ paths:
         - { name: cluster_id, in: path, required: true, schema: { type: string } }
       responses:
         "200":
+          description: K8s 集群删除成功
           content:
             application/json:
               schema:
@@ -3566,6 +3634,7 @@ paths:
         - { name: cluster_id, in: path, required: true, schema: { type: string } }
       responses:
         "200":
+          description: K8s 集群 kubeconfig
           content:
             application/json:
               schema:
@@ -3592,6 +3661,7 @@ paths:
               $ref: "#/components/schemas/K8sClusterUpgradeRequest"
       responses:
         "200":
+          description: K8s 集群升级结果
           content:
             application/json:
               schema:
@@ -3614,6 +3684,7 @@ paths:
         - { name: cluster_id, in: path, required: true, schema: { type: string } }
       responses:
         "200":
+          description: K8s 集群节点池列表
           content:
             application/json:
               schema:
@@ -3636,6 +3707,7 @@ paths:
               $ref: "#/components/schemas/K8sClusterNodePoolCreateRequest"
       responses:
         "201":
+          description: K8s 集群节点池创建成功
           content:
             application/json:
               schema:
@@ -3658,6 +3730,7 @@ paths:
         - { name: node_pool_id, in: path, required: true, schema: { type: string } }
       responses:
         "200":
+          description: K8s 集群节点池详情
           content:
             application/json:
               schema:
@@ -3681,6 +3754,7 @@ paths:
               $ref: "#/components/schemas/K8sClusterNodePoolUpdateRequest"
       responses:
         "200":
+          description: K8s 集群节点池更新成功
           content:
             application/json:
               schema:
@@ -3701,6 +3775,7 @@ paths:
         - { name: node_pool_id, in: path, required: true, schema: { type: string } }
       responses:
         "200":
+          description: K8s 集群节点池删除成功
           content:
             application/json:
               schema:
@@ -3727,6 +3802,7 @@ paths:
               $ref: "#/components/schemas/K8sClusterProxyRequest"
       responses:
         "200":
+          description: K8s 集群代理响应
           content:
             application/json:
               schema:
@@ -3772,6 +3848,7 @@ paths:
         - { name: cursor, in: query, schema: { type: string } }
       responses:
         "200":
+          description: 加密密钥列表
           content:
             application/json:
               schema:
@@ -3789,6 +3866,7 @@ paths:
               $ref: "#/components/schemas/EncryptionKeyCreateRequest"
       responses:
         "201":
+          description: 加密密钥创建成功
           content:
             application/json:
               schema:
@@ -3804,6 +3882,7 @@ paths:
         - { name: key_id, in: path, required: true, schema: { type: string } }
       responses:
         "200":
+          description: 加密密钥详情
           content:
             application/json:
               schema:
@@ -3817,6 +3896,7 @@ paths:
         - { name: key_id, in: path, required: true, schema: { type: string } }
       responses:
         "200":
+          description: 加密密钥删除成功
           content:
             application/json:
               schema:
@@ -3839,6 +3919,7 @@ paths:
               $ref: "#/components/schemas/EncryptionKeyRotateRequest"
       responses:
         "200":
+          description: 加密密钥轮换结果
           content:
             application/json:
               schema:
@@ -3865,6 +3946,7 @@ paths:
               $ref: "#/components/schemas/EncryptionKeyRevokeRequest"
       responses:
         "200":
+          description: 加密密钥吊销成功
           content:
             application/json:
               schema:
@@ -3889,6 +3971,7 @@ paths:
               $ref: "#/components/schemas/EncryptionSealRequest"
       responses:
         "200":
+          description: 加密对象并生成解封令牌成功
           content:
             application/json:
               schema:
@@ -3913,6 +3996,7 @@ paths:
               $ref: "#/components/schemas/EncryptionUnsealTokenRequest"
       responses:
         "200":
+          description: 对象解封令牌创建成功
           content:
             application/json:
               schema:
@@ -3934,6 +4018,7 @@ paths:
         - { name: cursor, in: query, schema: { type: string } }
       responses:
         "200":
+          description: Secret 元数据列表
           content:
             application/json:
               schema:
@@ -3952,6 +4037,7 @@ paths:
               $ref: "#/components/schemas/SecretCreateRequest"
       responses:
         "201":
+          description: Secret 创建成功
           content:
             application/json:
               schema:
@@ -3967,6 +4053,7 @@ paths:
         - { name: secret_id, in: path, required: true, schema: { type: string } }
       responses:
         "200":
+          description: Secret 元数据详情
           content:
             application/json:
               schema:
@@ -3982,6 +4069,7 @@ paths:
         - { name: secret_id, in: path, required: true, schema: { type: string } }
       responses:
         "200":
+          description: Secret 删除成功
           content:
             application/json:
               schema:
@@ -4006,6 +4094,7 @@ paths:
               $ref: "#/components/schemas/SecretBindingRequest"
       responses:
         "201":
+          description: Secret 绑定创建成功
           content:
             application/json:
               schema:
