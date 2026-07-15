@@ -742,9 +742,9 @@ func TestDemoSpecFromRequestRejectsConfigConflictsAndCrossKind(t *testing.T) {
 	}
 
 	_, err = demoSpecFromRequest(demoCreateInstanceRequest{
-		Kind:      "container",
-		Name:      "cross-kind-vm-config",
-		VMConfig:  &demoVMConfigRequest{BootImage: "images/x.qcow2"},
+		Kind:     "container",
+		Name:     "cross-kind-vm-config",
+		VMConfig: &demoVMConfigRequest{BootImage: "images/x.qcow2"},
 	}, "tenant-a")
 	if err == nil || !strings.Contains(err.Error(), "vm_config") {
 		t.Fatalf("expected vm_config cross-kind error, got %v", err)

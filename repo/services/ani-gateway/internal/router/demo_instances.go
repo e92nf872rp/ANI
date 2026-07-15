@@ -80,29 +80,29 @@ type demoInstanceAPI struct {
 }
 
 type demoCreateInstanceRequest struct {
-	Kind                  string                          `json:"kind"`
-	InstanceType          string                          `json:"instance_type"`
-	Name                  string                          `json:"name"`
-	CPU                   string                          `json:"cpu"`
-	Memory                string                          `json:"memory"`
-	BootImage             string                          `json:"boot_image"`
-	SSHUsername           string                          `json:"ssh_username"`
-	SSHKeyRef             string                          `json:"ssh_key_ref"`
-	Image                 string                          `json:"image"`
-	GPUVendor             string                          `json:"gpu_vendor"`
-	GPUModel              string                          `json:"gpu_model"`
-	GPUCount              int                             `json:"gpu_count"`
-	GPU                   demoCreateGPURequest            `json:"gpu"`
-	Replicas              int                             `json:"replicas"`
-	AutoStart             *bool                           `json:"auto_start"`
-	TerminationProtection bool                            `json:"termination_protection"`
-	VMConfig              *demoVMConfigRequest            `json:"vm_config"`
-	ContainerConfig       *demoContainerConfigRequest     `json:"container_config"`
-	GPUContainerConfig    *demoGPUContainerConfigRequest  `json:"gpu_container_config"`
-	SandboxConfig         demoSandboxConfigRequest        `json:"sandbox_config"`
-	SecretBindings        []demoSecretBindingRequest      `json:"secret_bindings"`
-	Description           string                          `json:"description"`
-	IdempotencyKey        string                          `json:"idempotency_key"`
+	Kind                  string                         `json:"kind"`
+	InstanceType          string                         `json:"instance_type"`
+	Name                  string                         `json:"name"`
+	CPU                   string                         `json:"cpu"`
+	Memory                string                         `json:"memory"`
+	BootImage             string                         `json:"boot_image"`
+	SSHUsername           string                         `json:"ssh_username"`
+	SSHKeyRef             string                         `json:"ssh_key_ref"`
+	Image                 string                         `json:"image"`
+	GPUVendor             string                         `json:"gpu_vendor"`
+	GPUModel              string                         `json:"gpu_model"`
+	GPUCount              int                            `json:"gpu_count"`
+	GPU                   demoCreateGPURequest           `json:"gpu"`
+	Replicas              int                            `json:"replicas"`
+	AutoStart             *bool                          `json:"auto_start"`
+	TerminationProtection bool                           `json:"termination_protection"`
+	VMConfig              *demoVMConfigRequest           `json:"vm_config"`
+	ContainerConfig       *demoContainerConfigRequest    `json:"container_config"`
+	GPUContainerConfig    *demoGPUContainerConfigRequest `json:"gpu_container_config"`
+	SandboxConfig         demoSandboxConfigRequest       `json:"sandbox_config"`
+	SecretBindings        []demoSecretBindingRequest     `json:"secret_bindings"`
+	Description           string                         `json:"description"`
+	IdempotencyKey        string                         `json:"idempotency_key"`
 }
 
 type demoVMConfigRequest struct {
@@ -1094,8 +1094,8 @@ func demoResolveCreateInstanceFields(req demoCreateInstanceRequest, kind ports.W
 
 func demoValidateCreateInstanceConfigs(req demoCreateInstanceRequest, kind ports.WorkloadKind) error {
 	configs := []struct {
-		name      string
-		present   bool
+		name       string
+		present    bool
 		allowedFor ports.WorkloadKind
 	}{
 		{"vm_config", req.VMConfig != nil, ports.WorkloadKindVM},
