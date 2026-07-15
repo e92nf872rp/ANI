@@ -160,11 +160,17 @@ components:
       type: object
       required: [id, name, status, created_at]
       properties:
-        id:      { type: string, format: uuid }
-        name:    { type: string }
-        status:  { type: string, enum: [active, rebuilding, deleted] }
-        doc_count: { type: integer }
-        created_at: { type: string, format: date-time }
+        id:               { type: string, format: uuid }
+        name:             { type: string }
+        description:      { type: string, nullable: true }
+        embedding_model:  { type: string }
+        chunk_size:       { type: integer, minimum: 1 }
+        top_k:            { type: integer, minimum: 1 }
+        score_threshold:  { type: number, format: float }
+        status:           { type: string, enum: [active, rebuilding, deleted] }
+        doc_count:        { type: integer }
+        created_at:       { type: string, format: date-time }
+        updated_at:       { type: string, format: date-time, nullable: true }
 
     KBDocument:
       type: object
@@ -173,10 +179,15 @@ components:
         id:                { type: string, format: uuid }
         knowledge_base_id: { type: string, format: uuid }
         file_name:         { type: string }
+        file_type:         { type: string, nullable: true }
         content_type:      { type: string, nullable: true }
         size_bytes:        { type: integer, minimum: 0 }
+        checksum_sha256:   { type: string, nullable: true }
         status:            { type: string, enum: [uploaded, parsing, indexed, failed, deleted] }
+        chunk_count:       { type: integer, minimum: 0 }
+        error_message:     { type: string, nullable: true }
         created_at:        { type: string, format: date-time }
+        parsed_at:         { type: string, format: date-time, nullable: true }
 
     KBQueryRequest:
       type: object
@@ -201,9 +212,34 @@ components:
               page:      { type: integer }
               content:   { type: string }
               score:     { type: number }
-        session_id:    { type: string, format: uuid }
-        input_tokens:  { type: integer }
-        output_tokens: { type: integer }
+        session_id:      { type: string, format: uuid }
+        prompt_context:  { type: string, nullable: true, description: "检索到的上下文文本，供 Gateway 构建 LLM 请求" }
+        input_tokens:    { type: integer }
+        output_tokens:   { type: integer }
+
+    KBHitTestRequest:
+      type: object
+      required: [question]
+      properties:
+        question:         { type: string, minLength: 1, maxLength: 2000 }
+        top_k:            { type: integer, default: 5, minimum: 1, maximum: 20 }
+        score_threshold:  { type: number, format: float, default: 0.3, minimum: 0.0, maximum: 1.0 }
+
+    KBHitTestResponse:
+      type: object
+      required: [chunks, total]
+      properties:
+        chunks:
+          type: array
+          items:
+            type: object
+            properties:
+              doc_id:    { type: string, format: uuid }
+              file_name: { type: string }
+              page:      { type: integer, nullable: true }
+              content:   { type: string }
+              score:     { type: number, format: float }
+        total: { type: integer }
 
     GpuContainer:
       type: object
@@ -863,6 +899,7 @@ paths:
       operationId: listKnowledgeBases
       summary: 知识库列表
       tags: [KnowledgeBases]
+      security: [{ bearerAuth: [] }]
       responses:
         "200":
           description: 知识库列表
@@ -871,10 +908,13 @@ paths:
               schema:
                 properties:
                   items: { type: array, items: { $ref: '#/components/schemas/KnowledgeBase' } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
     post:
       operationId: createKnowledgeBase
       summary: 创建知识库
       tags: [KnowledgeBases]
+      security: [{ bearerAuth: [] }]
       requestBody:
         required: true
         content:
@@ -888,18 +928,24 @@ paths:
                 embedding_model: { type: string, default: "bge-m3" }
                 chunk_size:      { type: integer, default: 512 }
                 top_k:           { type: integer, default: 5 }
+                score_threshold: { type: number, format: float, default: 0.3 }
       responses:
         "201":
           description: 知识库已创建
           content:
             application/json:
               schema: { $ref: '#/components/schemas/KnowledgeBase' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "409": { $ref: '#/components/responses/Conflict' }
 
   /knowledge-bases/{kb_id}:
     get:
       operationId: getKnowledgeBase
       summary: 获取知识库详情
       tags: [KnowledgeBases]
+      security: [{ bearerAuth: [] }]
       parameters:
         - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -908,15 +954,20 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/KnowledgeBase' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
     delete:
       operationId: deleteKnowledgeBase
       summary: 删除知识库
       tags: [KnowledgeBases]
+      security: [{ bearerAuth: [] }]
       parameters:
         - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         "204": { description: 已删除 }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
 
   /knowledge-bases/{kb_id}/documents:
@@ -924,6 +975,7 @@ paths:
       operationId: listKnowledgeBaseDocuments
       summary: 文档列表
       tags: [KnowledgeBases]
+      security: [{ bearerAuth: [] }]
       parameters:
         - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -934,10 +986,14 @@ paths:
               schema:
                 properties:
                   items: { type: array, items: { $ref: '#/components/schemas/KBDocument' } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
     post:
       operationId: uploadKnowledgeBaseDocument
       summary: 上传文档
       tags: [KnowledgeBases]
+      security: [{ bearerAuth: [] }]
       parameters:
         - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -945,26 +1001,35 @@ paths:
         content:
           multipart/form-data:
             schema:
-              required: [file]
+              required: [file, idempotency_key]
               properties:
-                file: { type: string, format: binary }
+                file:            { type: string, format: binary }
+                idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
       responses:
         "202":
           description: 文档已上传，解析任务进行中
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/KBDocument' }
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
 
   /knowledge-bases/{kb_id}/documents/{doc_id}:
     delete:
       operationId: deleteKnowledgeBaseDocument
       summary: 删除知识库文档
       tags: [KnowledgeBases]
+      security: [{ bearerAuth: [] }]
       parameters:
         - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: doc_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         "204": { description: 已删除 }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
 
   /knowledge-bases/{kb_id}/query:
@@ -972,6 +1037,7 @@ paths:
       operationId: queryKnowledgeBase
       summary: 知识库问答
       tags: [KnowledgeBases]
+      security: [{ bearerAuth: [] }]
       parameters:
         - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -994,6 +1060,7 @@ paths:
               schema: { $ref: '#/components/schemas/KBQueryResponse' }
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
 
   /knowledge-bases/{kb_id}/query/stream:
@@ -1001,6 +1068,7 @@ paths:
       operationId: streamQueryKnowledgeBase
       summary: 知识库问答 SSE 流式
       tags: [KnowledgeBases]
+      security: [{ bearerAuth: [] }]
       parameters:
         - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: question, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 2000 } }
@@ -1013,12 +1081,40 @@ paths:
               schema: { type: string }
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /knowledge-bases/{kb_id}/hit-test:
+    post:
+      operationId: hitTestKnowledgeBase
+      summary: 命中测试（纯向量检索，不调用 LLM）
+      description: 独立检索调试端点，直接返回 Top-K chunks + score，用于验证向量检索质量。
+      tags: [KnowledgeBases]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/KBHitTestRequest' }
+      responses:
+        "200":
+          description: 命中测试结果
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KBHitTestResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
 
   /knowledge-bases/{kb_id}/citations:
     get:
       operationId: listKnowledgeBaseCitations
       summary: 知识库引用来源列表
       tags: [KnowledgeBases]
+      security: [{ bearerAuth: [] }]
       parameters:
         - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
@@ -1038,6 +1134,7 @@ paths:
       operationId: listKnowledgeBaseSessions
       summary: 知识库对话历史列表
       tags: [KnowledgeBases]
+      security: [{ bearerAuth: [] }]
       parameters:
         - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
@@ -1057,6 +1154,7 @@ paths:
       operationId: updateKnowledgeBasePermissions
       summary: 更新知识库访问权限
       tags: [KnowledgeBases]
+      security: [{ bearerAuth: [] }]
       parameters:
         - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
