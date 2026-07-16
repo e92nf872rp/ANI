@@ -1067,6 +1067,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/observability/query_range": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * PromQL 代理区间查询
+         * @description 通过 Core 代理 PromQL 区间查询（range query），返回时间区间内多个采样点，用于绘制时序曲线。不暴露底层 Prometheus 地址。
+         */
+        get: operations["queryRangeObservability"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/observability/alert-rules": {
         parameters: {
             query?: never;
@@ -2170,6 +2190,26 @@ export interface components {
                 value: number;
                 /** Format: date-time */
                 timestamp?: string | null;
+            }[];
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
+        };
+        /** @description PromQL 代理区间查询结果（matrix）；返回时间区间内多个采样点，用于绘制时序曲线。 */
+        ObservabilityRangeQueryResponse: {
+            query: string;
+            /** @enum {string} */
+            result_type: "matrix" | "vector" | "scalar" | "string";
+            /** @description 每条 series 含一组时间序列采样点。 */
+            results: {
+                metric: {
+                    [key: string]: string;
+                };
+                /** @description 时间序列采样点列表，每个点为 [timestamp, value]。 */
+                values: {
+                    /** Format: date-time */
+                    timestamp: string;
+                    /** Format: double */
+                    value: number;
+                }[];
             }[];
             dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
@@ -5147,6 +5187,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ObservabilityQueryResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    queryRangeObservability: {
+        parameters: {
+            query: {
+                query: string;
+                start: string;
+                end: string;
+                step: string;
+                timeout?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description PromQL 区间查询结果（matrix） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservabilityRangeQueryResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];

@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>111</dd></div>
-          <div><dt>Schemas</dt><dd>146</dd></div>
+          <div><dt>Operations</dt><dd>112</dd></div>
+          <div><dt>Schemas</dt><dd>147</dd></div>
         </dl>
       </section>
 
@@ -825,6 +825,14 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/observability/query_range</code></td>
+          <td><code>queryRangeObservability</code></td>
+          <td>PromQL 代理区间查询</td>
+          <td><code>scope:observability:read</code></td>
+          <td>200, 400, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/readyz</code></td>
           <td><code>readiness</code></td>
           <td>Readiness probe（服务就绪检查）</td>
@@ -1149,6 +1157,7 @@
         <li><code>ObservabilityAlertRule</code></li>
         <li><code>ObservabilityAlertRuleListResponse</code></li>
         <li><code>ObservabilityQueryResponse</code></li>
+        <li><code>ObservabilityRangeQueryResponse</code></li>
         <li><code>RefreshAccessTokenRequest</code></li>
         <li><code>RefreshAccessTokenResponse</code></li>
         <li><code>RegistryArtifact</code></li>

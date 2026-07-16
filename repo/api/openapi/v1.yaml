@@ -696,6 +696,35 @@ components:
         dev_profile:
           $ref: '#/components/schemas/CoreDevProfileInfo'
 
+    ObservabilityRangeQueryResponse:
+      type: object
+      description: "PromQL 代理区间查询结果（matrix）；返回时间区间内多个采样点，用于绘制时序曲线。"
+      required: [query, result_type, results, dev_profile]
+      properties:
+        query:       { type: string }
+        result_type: { type: string, enum: [matrix, vector, scalar, string] }
+        results:
+          type: array
+          description: "每条 series 含一组时间序列采样点。"
+          items:
+            type: object
+            required: [metric, values]
+            properties:
+              metric:
+                type: object
+                additionalProperties: { type: string }
+              values:
+                type: array
+                description: "时间序列采样点列表，每个点为 [timestamp, value]。"
+                items:
+                  type: object
+                  required: [timestamp, value]
+                  properties:
+                    timestamp: { type: string, format: date-time }
+                    value: { type: number, format: double }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+
     ObservabilityAlertRule:
       type: object
       required: [id, tenant_id, name, promql, severity, state, created_at, updated_at]
@@ -3396,6 +3425,29 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ObservabilityQueryResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /observability/query_range:
+    get:
+      operationId: queryRangeObservability
+      summary: PromQL 代理区间查询
+      description: 通过 Core 代理 PromQL 区间查询（range query），返回时间区间内多个采样点，用于绘制时序曲线。不暴露底层 Prometheus 地址。
+      tags: [Observability]
+      x-ani-rbac-scope: "scope:observability:read"
+      parameters:
+        - { name: query, in: query, required: true, schema: { type: string, minLength: 1 } }
+        - { name: start, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: end, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: step, in: query, required: true, schema: { type: string, description: "采样步长，如 15s / 30s / 1m" } }
+        - { name: timeout, in: query, required: false, schema: { type: string, default: 30s } }
+      responses:
+        "200":
+          description: PromQL 区间查询结果（matrix）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObservabilityRangeQueryResponse' }
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
