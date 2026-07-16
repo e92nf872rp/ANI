@@ -35,6 +35,18 @@
       "scope": ""
     },
     {
+      "operationId": "passwordLogin",
+      "method": "POST",
+      "path": "/auth/password/login",
+      "scope": ""
+    },
+    {
+      "operationId": "platformPasswordLogin",
+      "method": "POST",
+      "path": "/auth/platform/password/login",
+      "scope": ""
+    },
+    {
       "operationId": "postAuthRefresh",
       "method": "POST",
       "path": "/auth/refresh",
@@ -153,6 +165,36 @@
       "method": "GET",
       "path": "/gpu-inventory/occupancy",
       "scope": "scope:gpu-inventory:read"
+    },
+    {
+      "operationId": "listGPUSchedulingQueues",
+      "method": "GET",
+      "path": "/gpu-scheduling/queues",
+      "scope": "scope:gpu-scheduling:read"
+    },
+    {
+      "operationId": "createGPUSchedulingQueue",
+      "method": "POST",
+      "path": "/gpu-scheduling/queues",
+      "scope": "scope:gpu-scheduling:write"
+    },
+    {
+      "operationId": "deleteGPUSchedulingQueue",
+      "method": "DELETE",
+      "path": "/gpu-scheduling/queues/{queue_id}",
+      "scope": "scope:gpu-scheduling:write"
+    },
+    {
+      "operationId": "getGPUSchedulingQueue",
+      "method": "GET",
+      "path": "/gpu-scheduling/queues/{queue_id}",
+      "scope": "scope:gpu-scheduling:read"
+    },
+    {
+      "operationId": "updateGPUSchedulingQueue",
+      "method": "PATCH",
+      "path": "/gpu-scheduling/queues/{queue_id}",
+      "scope": "scope:gpu-scheduling:write"
     },
     {
       "operationId": "liveness",
@@ -320,7 +362,13 @@
       "operationId": "getMeteringUsage",
       "method": "GET",
       "path": "/metering/usage",
-      "scope": ""
+      "scope": "scope:metering:read"
+    },
+    {
+      "operationId": "getPlatformMeteringUsage",
+      "method": "GET",
+      "path": "/metering/usage/platform",
+      "scope": "scope:metering:platform:read"
     },
     {
       "operationId": "listNetworkLoadBalancers",
@@ -500,6 +548,12 @@
       "operationId": "queryObservability",
       "method": "GET",
       "path": "/observability/query",
+      "scope": "scope:observability:read"
+    },
+    {
+      "operationId": "queryRangeObservability",
+      "method": "GET",
+      "path": "/observability/query_range",
       "scope": "scope:observability:read"
     },
     {
@@ -715,6 +769,10 @@
     "GPUInventoryListResponse",
     "GPUInventoryRecord",
     "GPUOccupancyStats",
+    "GPUSchedulingQueue",
+    "GPUSchedulingQueueCreateRequest",
+    "GPUSchedulingQueueListResponse",
+    "GPUSchedulingQueueUpdateRequest",
     "HealthCheck",
     "InstanceConsoleSession",
     "InstanceEvent",
@@ -764,6 +822,9 @@
     "ObservabilityAlertRule",
     "ObservabilityAlertRuleListResponse",
     "ObservabilityQueryResponse",
+    "ObservabilityRangeQueryResponse",
+    "PasswordLoginRequest",
+    "PlatformPasswordLoginRequest",
     "RefreshAccessTokenRequest",
     "RefreshAccessTokenResponse",
     "RegistryArtifact",

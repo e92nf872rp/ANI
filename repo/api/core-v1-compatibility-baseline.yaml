@@ -1,7 +1,7 @@
 batch: SPEC-COMPAT-A
 phase: Phase 1 / Sprint 4
 source: api/openapi/v1.yaml
-generated_at: '2026-05-21'
+generated_at: '2026-07-15'
 compatibility_rules:
   allowed:
   - Add optional request fields.
@@ -138,6 +138,175 @@ paths:
       request_schema: '{}'
       responses:
         '200':
+          schema: 'type: object'
+  /buckets:
+    get:
+      operation_id: listStorageBuckets
+      rbac_scope: scope:objects:read
+      parameters:
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: StorageBucketListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+    post:
+      operation_id: createStorageBucket
+      rbac_scope: scope:objects:create
+      parameters: []
+      request_body_required: true
+      request_schema: CreateStorageBucketRequest
+      responses:
+        '201':
+          schema: StorageBucketRecord
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '409':
+          schema: '{}'
+  /encryption/keys:
+    get:
+      operation_id: listEncryptionKeys
+      rbac_scope: scope:encryption:read
+      parameters:
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: EncryptionKeyListResponse
+    post:
+      operation_id: createEncryptionKey
+      rbac_scope: scope:encryption:create
+      parameters: []
+      request_body_required: true
+      request_schema: EncryptionKeyCreateRequest
+      responses:
+        '201':
+          schema: EncryptionKey
+  /encryption/keys/{key_id}:
+    delete:
+      operation_id: deleteEncryptionKey
+      rbac_scope: scope:encryption:delete
+      parameters:
+      - in: path
+        name: key_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: EncryptionKey
+    get:
+      operation_id: getEncryptionKey
+      rbac_scope: scope:encryption:read
+      parameters:
+      - in: path
+        name: key_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: EncryptionKey
+  /encryption/keys/{key_id}/revoke:
+    post:
+      operation_id: revokeEncryptionKey
+      rbac_scope: scope:encryption:manage
+      parameters:
+      - in: path
+        name: key_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: EncryptionKeyRevokeRequest
+      responses:
+        '200':
+          schema: EncryptionKey
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+  /encryption/keys/{key_id}/rotate:
+    post:
+      operation_id: rotateEncryptionKey
+      rbac_scope: scope:encryption:manage
+      parameters:
+      - in: path
+        name: key_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: EncryptionKeyRotateRequest
+      responses:
+        '200':
+          schema: EncryptionKeyRotationResponse
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+  /encryption/seal:
+    post:
+      operation_id: sealEncryptionObject
+      rbac_scope: scope:encryption:use
+      parameters: []
+      request_body_required: true
+      request_schema: EncryptionSealRequest
+      responses:
+        '200':
+          schema: EncryptionSealResponse
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+  /encryption/unseal-token:
+    post:
+      operation_id: createEncryptionUnsealToken
+      rbac_scope: scope:encryption:use
+      parameters: []
+      request_body_required: true
+      request_schema: EncryptionUnsealTokenRequest
+      responses:
+        '200':
+          schema: EncryptionUnsealTokenResponse
+        '404':
+          schema: '{}'
+        '409':
           schema: '{}'
   /filesystems:
     get:
@@ -215,6 +384,197 @@ paths:
       responses:
         '200':
           schema: StorageFilesystem
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+  /filesystems/{filesystem_id}/mount-targets:
+    get:
+      operation_id: listFilesystemMountTargets
+      rbac_scope: scope:filesystems:read
+      parameters:
+      - in: path
+        name: filesystem_id
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: FilesystemMountTargetListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+  /gpu-inventory:
+    get:
+      operation_id: listGPUInventory
+      rbac_scope: scope:gpu-inventory:read
+      parameters:
+      - in: query
+        name: gpu_type
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: status
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: node_name
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: GPUInventoryListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+  /gpu-inventory/occupancy:
+    get:
+      operation_id: getGPUOccupancy
+      rbac_scope: scope:gpu-inventory:read
+      parameters: []
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: GPUOccupancyStats
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+  /gpu-scheduling/queues:
+    get:
+      operation_id: listGPUSchedulingQueues
+      rbac_scope: scope:gpu-scheduling:read
+      parameters: []
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: GPUSchedulingQueueListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+    post:
+      operation_id: createGPUSchedulingQueue
+      rbac_scope: scope:gpu-scheduling:write
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: true
+      request_schema: GPUSchedulingQueueCreateRequest
+      responses:
+        '201':
+          schema: GPUSchedulingQueue
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '409':
+          schema: '{}'
+  /gpu-scheduling/queues/{queue_id}:
+    delete:
+      operation_id: deleteGPUSchedulingQueue
+      rbac_scope: scope:gpu-scheduling:write
+      parameters:
+      - in: path
+        name: queue_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '204':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+    get:
+      operation_id: getGPUSchedulingQueue
+      rbac_scope: scope:gpu-scheduling:read
+      parameters:
+      - in: path
+        name: queue_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: GPUSchedulingQueue
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+    patch:
+      operation_id: updateGPUSchedulingQueue
+      rbac_scope: scope:gpu-scheduling:write
+      parameters:
+      - in: path
+        name: queue_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: true
+      request_schema: GPUSchedulingQueueUpdateRequest
+      responses:
+        '200':
+          schema: GPUSchedulingQueue
+        '400':
+          schema: '{}'
         '401':
           schema: '{}'
         '403':
@@ -302,6 +662,8 @@ paths:
           schema: '{}'
         '409':
           schema: '{}'
+        '422':
+          schema: '{}'
   /instances/{instance_id}:
     get:
       operation_id: getInstance
@@ -346,6 +708,62 @@ paths:
           schema: '{}'
         '404':
           schema: '{}'
+  /instances/{instance_id}/events:
+    get:
+      operation_id: listInstanceEvents
+      rbac_scope: scope:instances:read
+      parameters:
+      - in: path
+        name: instance_id
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+      - in: query
+        name: type
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: InstanceEventListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+  /instances/{instance_id}/exec:
+    post:
+      operation_id: createInstanceExecSession
+      rbac_scope: scope:instances:exec
+      parameters:
+      - in: path
+        name: instance_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: CreateInstanceExecSessionRequest
+      responses:
+        '200':
+          schema: InstanceExecSession
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
   /instances/{instance_id}/lifecycle:
     post:
       operation_id: applyInstanceLifecycle
@@ -370,6 +788,65 @@ paths:
         '404':
           schema: '{}'
         '409':
+          schema: '{}'
+  /instances/{instance_id}/logs:
+    get:
+      operation_id: listInstanceLogs
+      rbac_scope: scope:instances:read
+      parameters:
+      - in: path
+        name: instance_id
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 1000
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: level
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: InstanceLogListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+  /instances/{instance_id}/metrics:
+    get:
+      operation_id: getInstanceMetrics
+      rbac_scope: scope:instances:read
+      parameters:
+      - in: path
+        name: instance_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: InstanceMetrics
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
           schema: '{}'
   /instances/{instance_id}/operations:
     get:
@@ -408,6 +885,336 @@ paths:
           schema: '{}'
         '404':
           schema: '{}'
+  /instances/{instance_id}/security-events:
+    get:
+      operation_id: listInstanceSecurityEvents
+      rbac_scope: scope:instances:read
+      parameters:
+      - in: path
+        name: instance_id
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: severity
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: InstanceSecurityEventListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+  /k8s-clusters:
+    get:
+      operation_id: listK8sClusters
+      rbac_scope: scope:k8s-clusters:read
+      parameters:
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: K8sClusterListResponse
+    post:
+      operation_id: createK8sCluster
+      rbac_scope: scope:k8s-clusters:create
+      parameters: []
+      request_body_required: true
+      request_schema: K8sClusterCreateRequest
+      responses:
+        '201':
+          schema: K8sCluster
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '409':
+          schema: '{}'
+        '422':
+          schema: '{}'
+  /k8s-clusters/{cluster_id}:
+    delete:
+      operation_id: deleteK8sCluster
+      rbac_scope: scope:k8s-clusters:delete
+      parameters:
+      - in: path
+        name: cluster_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: K8sCluster
+    get:
+      operation_id: getK8sCluster
+      rbac_scope: scope:k8s-clusters:read
+      parameters:
+      - in: path
+        name: cluster_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: K8sCluster
+  /k8s-clusters/{cluster_id}/kubeconfig:
+    get:
+      operation_id: getK8sClusterKubeconfig
+      rbac_scope: scope:k8s-clusters:read
+      parameters:
+      - in: path
+        name: cluster_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: K8sClusterKubeconfig
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+  /k8s-clusters/{cluster_id}/node-pools:
+    get:
+      operation_id: listK8sClusterNodePools
+      rbac_scope: scope:k8s-clusters:read
+      parameters:
+      - in: path
+        name: cluster_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: K8sClusterNodePoolListResponse
+        '404':
+          schema: '{}'
+    post:
+      operation_id: createK8sClusterNodePool
+      rbac_scope: scope:k8s-clusters:manage
+      parameters:
+      - in: path
+        name: cluster_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: K8sClusterNodePoolCreateRequest
+      responses:
+        '201':
+          schema: K8sClusterNodePool
+        '400':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+  /k8s-clusters/{cluster_id}/node-pools/{node_pool_id}:
+    delete:
+      operation_id: deleteK8sClusterNodePool
+      rbac_scope: scope:k8s-clusters:manage
+      parameters:
+      - in: path
+        name: cluster_id
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: node_pool_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: K8sClusterNodePool
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+    get:
+      operation_id: getK8sClusterNodePool
+      rbac_scope: scope:k8s-clusters:read
+      parameters:
+      - in: path
+        name: cluster_id
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: node_pool_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: K8sClusterNodePool
+        '404':
+          schema: '{}'
+    patch:
+      operation_id: updateK8sClusterNodePool
+      rbac_scope: scope:k8s-clusters:manage
+      parameters:
+      - in: path
+        name: cluster_id
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: node_pool_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: K8sClusterNodePoolUpdateRequest
+      responses:
+        '200':
+          schema: K8sClusterNodePool
+        '400':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+  /k8s-clusters/{cluster_id}/proxy:
+    post:
+      operation_id: proxyK8sClusterAPI
+      rbac_scope: scope:k8s-clusters:proxy
+      parameters:
+      - in: path
+        name: cluster_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: K8sClusterProxyRequest
+      responses:
+        '200':
+          schema: K8sClusterProxyResponse
+        '400':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+  /k8s-clusters/{cluster_id}/upgrade:
+    post:
+      operation_id: upgradeK8sCluster
+      rbac_scope: scope:k8s-clusters:manage
+      parameters:
+      - in: path
+        name: cluster_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: K8sClusterUpgradeRequest
+      responses:
+        '200':
+          schema: K8sCluster
+        '400':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+  /k8s-clusters/{cluster_id}/workloads:
+    get:
+      operation_id: listK8sClusterWorkloads
+      rbac_scope: scope:k8s-clusters:read
+      parameters:
+      - in: path
+        name: cluster_id
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: namespace
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: kind
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: K8sClusterWorkloadListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+  /metering/token-usage:
+    post:
+      operation_id: reportTokenUsage
+      rbac_scope: scope:metering:write
+      parameters: []
+      request_body_required: true
+      request_schema: ReportTokenUsageRequest
+      responses:
+        '202':
+          schema: TokenUsageReport
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
   /metering/usage:
     get:
       operation_id: ''
@@ -439,6 +1246,12 @@ paths:
       request_schema: '{}'
       responses:
         '200':
+          schema: '{}'
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
           schema: '{}'
   /networks/load-balancers:
     get:
@@ -518,6 +1331,54 @@ paths:
       responses:
         '200':
           schema: NetworkLoadBalancer
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+  /networks/routes:
+    get:
+      operation_id: listNetworkRoutes
+      rbac_scope: scope:networks:read
+      parameters:
+      - in: query
+        name: vpc_id
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: NetworkRouteListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+    post:
+      operation_id: createNetworkRoute
+      rbac_scope: scope:networks:create
+      parameters: []
+      request_body_required: true
+      request_schema: CreateNetworkRouteRequest
+      responses:
+        '201':
+          schema: NetworkRoute
+        '400':
+          schema: '{}'
         '401':
           schema: '{}'
         '403':
@@ -813,6 +1674,22 @@ paths:
           schema: '{}'
         '403':
           schema: '{}'
+  /objects/upload:
+    post:
+      operation_id: uploadStorageObject
+      rbac_scope: scope:objects:create
+      parameters: []
+      request_body_required: true
+      request_schema: StorageObjectUploadRequest
+      responses:
+        '200':
+          schema: StorageObjectUploadResponse
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
   /objects/{object_id}:
     delete:
       operation_id: deleteStorageObject
@@ -854,6 +1731,171 @@ paths:
           schema: '{}'
         '404':
           schema: '{}'
+  /objects/{object_id}/download:
+    get:
+      operation_id: downloadStorageObject
+      rbac_scope: scope:objects:read
+      parameters:
+      - in: path
+        name: object_id
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: expires_seconds
+        required: false
+        schema:
+          type: integer
+          minimum: 60
+          maximum: 86400
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: StorageObjectDownloadInfo
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+  /observability/alert-rules:
+    get:
+      operation_id: listObservabilityAlertRules
+      rbac_scope: scope:observability:read
+      parameters:
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: ObservabilityAlertRuleListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+    post:
+      operation_id: createObservabilityAlertRule
+      rbac_scope: scope:observability:write
+      parameters: []
+      request_body_required: true
+      request_schema: CreateObservabilityAlertRuleRequest
+      responses:
+        '201':
+          schema: ObservabilityAlertRule
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+  /observability/alert-rules/{rule_id}:
+    delete:
+      operation_id: deleteObservabilityAlertRule
+      rbac_scope: scope:observability:write
+      parameters:
+      - in: path
+        name: rule_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: ObservabilityAlertRule
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+    get:
+      operation_id: getObservabilityAlertRule
+      rbac_scope: scope:observability:read
+      parameters:
+      - in: path
+        name: rule_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: ObservabilityAlertRule
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+    patch:
+      operation_id: updateObservabilityAlertRule
+      rbac_scope: scope:observability:write
+      parameters:
+      - in: path
+        name: rule_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: UpdateObservabilityAlertRuleRequest
+      responses:
+        '200':
+          schema: ObservabilityAlertRule
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+  /observability/query:
+    get:
+      operation_id: queryObservability
+      rbac_scope: scope:observability:read
+      parameters:
+      - in: query
+        name: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - in: query
+        name: time
+        required: false
+        schema:
+          type: string
+          format: date-time
+      - in: query
+        name: timeout
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: ObservabilityQueryResponse
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
   /readyz:
     get:
       operation_id: readiness
@@ -866,6 +1908,317 @@ paths:
           schema: 'type: object'
         '503':
           schema: 'type: object'
+  /registry/images/scan-result:
+    get:
+      operation_id: getRegistryImageScanResult
+      rbac_scope: scope:registry:read
+      parameters:
+      - in: query
+        name: image
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: RegistryScanResult
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+  /registry/projects:
+    get:
+      operation_id: listRegistryProjects
+      rbac_scope: scope:registry:read
+      parameters:
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: RegistryProjectListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+    post:
+      operation_id: createRegistryProject
+      rbac_scope: scope:registry:write
+      parameters: []
+      request_body_required: true
+      request_schema: CreateRegistryProjectRequest
+      responses:
+        '201':
+          schema: RegistryProject
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+  /registry/projects/{project}/pull-secret:
+    post:
+      operation_id: createRegistryProjectPullSecret
+      rbac_scope: scope:registry:write
+      parameters:
+      - in: path
+        name: project
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: CreateRegistryPullSecretRequest
+      responses:
+        '201':
+          schema: RegistryPullSecret
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+  /registry/projects/{project}/repositories:
+    get:
+      operation_id: listRegistryRepositories
+      rbac_scope: scope:registry:read
+      parameters:
+      - in: path
+        name: project
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: RegistryRepositoryListResponse
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+  /registry/projects/{project}/repositories/{repository}/artifacts:
+    get:
+      operation_id: listRegistryArtifacts
+      rbac_scope: scope:registry:read
+      parameters:
+      - in: path
+        name: project
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: repository
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: RegistryArtifactListResponse
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+  /registry/projects/{project}/repositories/{repository}/permissions:
+    post:
+      operation_id: setRegistryRepositoryPermission
+      rbac_scope: scope:registry:write
+      parameters:
+      - in: path
+        name: project
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: repository
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: SetRegistryPermissionRequest
+      responses:
+        '200':
+          schema: RegistryPermission
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+  /registry/projects/{project}/scan-report:
+    get:
+      operation_id: getRegistryProjectScanReport
+      rbac_scope: scope:registry:read
+      parameters:
+      - in: path
+        name: project
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: RegistryProjectScanReport
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+  /sandbox-templates:
+    get:
+      operation_id: listSandboxTemplates
+      rbac_scope: scope:instances:read
+      parameters:
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: SandboxTemplateListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+  /secrets:
+    get:
+      operation_id: listSecrets
+      rbac_scope: scope:secrets:read
+      parameters:
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: SecretListResponse
+    post:
+      operation_id: createSecret
+      rbac_scope: scope:secrets:create
+      parameters: []
+      request_body_required: true
+      request_schema: SecretCreateRequest
+      responses:
+        '201':
+          schema: Secret
+  /secrets/{secret_id}:
+    delete:
+      operation_id: deleteSecret
+      rbac_scope: scope:secrets:delete
+      parameters:
+      - in: path
+        name: secret_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: Secret
+        '404':
+          schema: '{}'
+    get:
+      operation_id: getSecret
+      rbac_scope: scope:secrets:read
+      parameters:
+      - in: path
+        name: secret_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: Secret
+        '404':
+          schema: '{}'
+  /secrets/{secret_id}/bindings:
+    post:
+      operation_id: bindSecret
+      rbac_scope: scope:secrets:bind
+      parameters:
+      - in: path
+        name: secret_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: SecretBindingRequest
+      responses:
+        '201':
+          schema: SecretBinding
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
   /tasks/{task_id}:
     get:
       operation_id: ''
@@ -966,6 +2319,31 @@ paths:
           schema: '{}'
         '404':
           schema: '{}'
+  /vector-stores/{vector_store_id}/documents:
+    post:
+      operation_id: insertVectorStoreDocuments
+      rbac_scope: scope:vector-stores:write
+      parameters:
+      - in: path
+        name: vector_store_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: VectorStoreDocumentInsertRequest
+      responses:
+        '202':
+          schema: VectorStoreDocumentInsertResponse
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '422':
+          schema: '{}'
   /vector-stores/{vector_store_id}/search:
     post:
       operation_id: searchVectorStore
@@ -988,6 +2366,8 @@ paths:
         '403':
           schema: '{}'
         '404':
+          schema: '{}'
+        '422':
           schema: '{}'
   /volumes:
     get:
@@ -1065,6 +2445,61 @@ paths:
       responses:
         '200':
           schema: StorageVolume
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+  /volumes/{volume_id}/snapshots:
+    get:
+      operation_id: listVolumeSnapshots
+      rbac_scope: scope:volumes:read
+      parameters:
+      - in: path
+        name: volume_id
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: VolumeSnapshotListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+    post:
+      operation_id: createVolumeSnapshot
+      rbac_scope: scope:volumes:create
+      parameters:
+      - in: path
+        name: volume_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: CreateVolumeSnapshotRequest
+      responses:
+        '202':
+          schema: AsyncTask
+        '400':
+          schema: '{}'
         '401':
           schema: '{}'
         '403':
@@ -1195,6 +2630,7 @@ schemas:
         - inference_service
         - kb_document
         - model_version
+        - volume_snapshot
       result:
         signature:
           type: object
@@ -1218,6 +2654,7 @@ schemas:
         - kb.parse
         - kb.index
         - inference.deploy
+        - volume.snapshot.create
   BeginOIDCLoginRequest:
     type: object
     required:
@@ -1346,6 +2783,29 @@ schemas:
         signature:
           type: string
         enum: []
+  CreateContainerInstanceConfig:
+    type: object
+    required: []
+    properties:
+      replicas:
+        signature:
+          type: integer
+          minimum: 1
+        enum: []
+  CreateGPUContainerInstanceConfig:
+    type: object
+    required: []
+    properties:
+      gpu:
+        signature:
+          type: object
+          nullable: true
+        enum: []
+      replicas:
+        signature:
+          type: integer
+          minimum: 1
+        enum: []
   CreateInstanceConsoleSessionRequest:
     type: object
     required: []
@@ -1358,6 +2818,38 @@ schemas:
         - vnc
         - novnc
         - serial
+  CreateInstanceExecSessionRequest:
+    type: object
+    required:
+    - idempotency_key
+    properties:
+      cols:
+        signature:
+          type: integer
+        enum: []
+      command:
+        signature:
+          type: array
+          items:
+            type: string
+        enum: []
+      container:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      idempotency_key:
+        signature:
+          type: string
+        enum: []
+      rows:
+        signature:
+          type: integer
+        enum: []
+      tty:
+        signature:
+          type: boolean
+        enum: []
   CreateInstanceRequest:
     type: object
     required:
@@ -1374,6 +2866,10 @@ schemas:
           type: string
           nullable: true
         enum: []
+      container_config:
+        signature:
+          $ref: '#/components/schemas/CreateContainerInstanceConfig'
+        enum: []
       cpu:
         signature:
           type: string
@@ -1382,6 +2878,10 @@ schemas:
         signature:
           type: object
           nullable: true
+        enum: []
+      gpu_container_config:
+        signature:
+          $ref: '#/components/schemas/CreateGPUContainerInstanceConfig'
         enum: []
       idempotency_key:
         signature:
@@ -1394,6 +2894,14 @@ schemas:
           type: string
           nullable: true
         enum: []
+      instance_type:
+        signature:
+          type: string
+        enum:
+        - vm
+        - container
+        - gpu_container
+        - sandbox
       kind:
         signature:
           type: string
@@ -1401,6 +2909,7 @@ schemas:
         - vm
         - container
         - gpu_container
+        - sandbox
       memory:
         signature:
           type: string
@@ -1416,6 +2925,10 @@ schemas:
           type: integer
           minimum: 1
         enum: []
+      sandbox_config:
+        signature:
+          $ref: '#/components/schemas/SandboxConfig'
+        enum: []
       ssh_key_ref:
         signature:
           type: string
@@ -1429,6 +2942,10 @@ schemas:
       termination_protection:
         signature:
           type: boolean
+        enum: []
+      vm_config:
+        signature:
+          $ref: '#/components/schemas/CreateVMInstanceConfig'
         enum: []
   CreateInstanceResponse:
     type: object
@@ -1485,6 +3002,42 @@ schemas:
           type: string
           nullable: true
         enum: []
+      vpc_id:
+        signature:
+          type: string
+        enum: []
+  CreateNetworkRouteRequest:
+    type: object
+    required:
+    - destination_cidr
+    - idempotency_key
+    - next_hop_id
+    - next_hop_type
+    - vpc_id
+    properties:
+      description:
+        signature:
+          type: string
+        enum: []
+      destination_cidr:
+        signature:
+          type: string
+        enum: []
+      idempotency_key:
+        signature:
+          type: string
+        enum: []
+      next_hop_id:
+        signature:
+          type: string
+        enum: []
+      next_hop_type:
+        signature:
+          type: string
+        enum:
+        - gateway
+        - instance
+        - nat
       vpc_id:
         signature:
           type: string
@@ -1571,6 +3124,128 @@ schemas:
           type: string
           minLength: 1
           maxLength: 128
+        enum: []
+  CreateObservabilityAlertRuleRequest:
+    type: object
+    required:
+    - idempotency_key
+    - name
+    - promql
+    - severity
+    properties:
+      annotations:
+        signature:
+          type: object
+          additionalProperties:
+            type: string
+        enum: []
+      duration:
+        signature:
+          type: string
+        enum: []
+      enabled:
+        signature:
+          type: boolean
+        enum: []
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      labels:
+        signature:
+          type: object
+          additionalProperties:
+            type: string
+        enum: []
+      name:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      promql:
+        signature:
+          type: string
+          minLength: 1
+        enum: []
+      severity:
+        signature:
+          type: string
+        enum:
+        - info
+        - warning
+        - critical
+  CreateRegistryProjectRequest:
+    type: object
+    required:
+    - idempotency_key
+    - name
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      name:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      public:
+        signature:
+          type: boolean
+        enum: []
+  CreateRegistryPullSecretRequest:
+    type: object
+    required:
+    - idempotency_key
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      name:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      namespace:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+  CreateStorageBucketRequest:
+    type: object
+    required:
+    - idempotency_key
+    - name
+    properties:
+      access_mode:
+        signature:
+          type: string
+        enum:
+        - private
+        - public_read
+      idempotency_key:
+        signature:
+          type: string
+        enum: []
+      name:
+        signature:
+          type: string
+          pattern: ^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$
+        enum: []
+      region:
+        signature:
+          type: string
         enum: []
   CreateStorageFilesystemRequest:
     type: object
@@ -1667,6 +3342,25 @@ schemas:
         signature:
           type: string
         enum: []
+  CreateVMInstanceConfig:
+    type: object
+    required: []
+    properties:
+      boot_image:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      ssh_key_ref:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      ssh_username:
+        signature:
+          type: string
+          nullable: true
+        enum: []
   CreateVectorStoreRequest:
     type: object
     required:
@@ -1698,6 +3392,24 @@ schemas:
           minLength: 1
           maxLength: 128
         enum: []
+  CreateVolumeSnapshotRequest:
+    type: object
+    required:
+    - idempotency_key
+    - name
+    properties:
+      description:
+        signature:
+          type: string
+        enum: []
+      idempotency_key:
+        signature:
+          type: string
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
   CursorPage:
     type: object
     required:
@@ -1712,6 +3424,233 @@ schemas:
       total:
         signature:
           type: integer
+        enum: []
+  EncryptionKey:
+    type: object
+    required: []
+    properties:
+      algorithm:
+        signature:
+          type: string
+        enum: []
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      id:
+        signature:
+          type: string
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+      state:
+        signature:
+          type: string
+        enum:
+        - active
+        - rotated
+        - revoked
+        - deleted
+      tenant_id:
+        signature:
+          type: string
+        enum: []
+      updated_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+  EncryptionKeyCreateRequest:
+    type: object
+    required:
+    - idempotency_key
+    - name
+    properties:
+      algorithm:
+        signature:
+          type: string
+        enum:
+        - SM4
+        - AES256
+      idempotency_key:
+        signature:
+          type: string
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+  EncryptionKeyListResponse:
+    type: object
+    required: []
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/EncryptionKey'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  EncryptionKeyRevokeRequest:
+    type: object
+    required:
+    - idempotency_key
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+        enum: []
+      reason:
+        signature:
+          type: string
+        enum: []
+  EncryptionKeyRotateRequest:
+    type: object
+    required:
+    - idempotency_key
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+        enum: []
+  EncryptionKeyRotationResponse:
+    type: object
+    required: []
+    properties:
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      previous_key_id:
+        signature:
+          type: string
+        enum: []
+      rotated_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      rotated_key:
+        signature:
+          $ref: '#/components/schemas/EncryptionKey'
+        enum: []
+      rotation_id:
+        signature:
+          type: string
+        enum: []
+      tenant_id:
+        signature:
+          type: string
+        enum: []
+  EncryptionSealRequest:
+    type: object
+    required:
+    - idempotency_key
+    - key_id
+    - object_uri
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+        enum: []
+      key_id:
+        signature:
+          type: string
+        enum: []
+      object_uri:
+        signature:
+          type: string
+        enum: []
+  EncryptionSealResponse:
+    type: object
+    required: []
+    properties:
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      expires_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      key_id:
+        signature:
+          type: string
+        enum: []
+      object_uri:
+        signature:
+          type: string
+        enum: []
+      sealed_object_uri:
+        signature:
+          type: string
+        enum: []
+      tenant_id:
+        signature:
+          type: string
+        enum: []
+      unseal_token:
+        signature:
+          type: string
+        enum: []
+  EncryptionUnsealTokenRequest:
+    type: object
+    required:
+    - key_id
+    - sealed_object_uri
+    properties:
+      key_id:
+        signature:
+          type: string
+        enum: []
+      sealed_object_uri:
+        signature:
+          type: string
+        enum: []
+  EncryptionUnsealTokenResponse:
+    type: object
+    required: []
+    properties:
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      expires_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      key_id:
+        signature:
+          type: string
+        enum: []
+      sealed_object_uri:
+        signature:
+          type: string
+        enum: []
+      tenant_id:
+        signature:
+          type: string
+        enum: []
+      unseal_token:
+        signature:
+          type: string
         enum: []
   ErrorResponse:
     type: object
@@ -1737,6 +3676,332 @@ schemas:
         signature:
           type: string
         enum: []
+  FilesystemMountTarget:
+    type: object
+    required:
+    - created_at
+    - dev_profile
+    - filesystem_id
+    - id
+    - ip_address
+    - status
+    - subnet_id
+    properties:
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      filesystem_id:
+        signature:
+          type: string
+        enum: []
+      id:
+        signature:
+          type: string
+        enum: []
+      ip_address:
+        signature:
+          type: string
+        enum: []
+      status:
+        signature:
+          type: string
+        enum:
+        - creating
+        - available
+        - deleting
+        - error
+      subnet_id:
+        signature:
+          type: string
+        enum: []
+  FilesystemMountTargetListResponse:
+    type: object
+    required:
+    - items
+    - total
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/FilesystemMountTarget'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  GPUInventoryListResponse:
+    type: object
+    required:
+    - dev_profile
+    - items
+    - total
+    properties:
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/GPUInventoryRecord'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  GPUInventoryRecord:
+    type: object
+    required:
+    - dev_profile
+    - gpu_index
+    - gpu_type
+    - id
+    - node_name
+    - status
+    properties:
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      driver_version:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      gpu_index:
+        signature:
+          type: integer
+        enum: []
+      gpu_type:
+        signature:
+          type: string
+        enum: []
+      id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      instance_id:
+        signature:
+          type: string
+          format: uuid
+          nullable: true
+        enum: []
+      memory_total_mb:
+        signature:
+          type: integer
+        enum: []
+      node_name:
+        signature:
+          type: string
+        enum: []
+      status:
+        signature:
+          type: string
+        enum:
+        - available
+        - in_use
+        - fault
+        - maintenance
+      tenant_id:
+        signature:
+          type: string
+          format: uuid
+          nullable: true
+        enum: []
+  GPUOccupancyStats:
+    type: object
+    required:
+    - available
+    - dev_profile
+    - fault
+    - in_use
+    - total
+    properties:
+      available:
+        signature:
+          type: integer
+        enum: []
+      by_gpu_type:
+        signature:
+          type: array
+          items:
+            type: object
+        enum: []
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      fault:
+        signature:
+          type: integer
+        enum: []
+      in_use:
+        signature:
+          type: integer
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  GPUSchedulingQueue:
+    type: object
+    required:
+    - created_at
+    - id
+    - is_platform_default
+    - name
+    - reclaimable
+    - updated_at
+    - weight
+    - workload_class
+    properties:
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      is_platform_default:
+        signature:
+          type: boolean
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+      project_id:
+        signature:
+          type: string
+          format: uuid
+          nullable: true
+        enum: []
+      reclaimable:
+        signature:
+          type: boolean
+        enum: []
+      updated_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      weight:
+        signature:
+          type: integer
+          minimum: 1
+        enum: []
+      workload_class:
+        signature:
+          type: string
+        enum:
+        - inference
+        - training
+        - batch
+  GPUSchedulingQueueCreateRequest:
+    type: object
+    required:
+    - name
+    - weight
+    - workload_class
+    properties:
+      name:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 63
+          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+        enum: []
+      project_id:
+        signature:
+          type: string
+          format: uuid
+          nullable: true
+        enum: []
+      reclaimable:
+        signature:
+          type: boolean
+        enum: []
+      weight:
+        signature:
+          type: integer
+          minimum: 1
+        enum: []
+      workload_class:
+        signature:
+          type: string
+        enum:
+        - inference
+        - training
+        - batch
+  GPUSchedulingQueueListResponse:
+    type: object
+    required:
+    - items
+    - total
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/GPUSchedulingQueue'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  GPUSchedulingQueueUpdateRequest:
+    type: object
+    required: []
+    properties:
+      project_id:
+        signature:
+          type: string
+          format: uuid
+          nullable: true
+        enum: []
+      reclaimable:
+        signature:
+          type: boolean
+        enum: []
+      weight:
+        signature:
+          type: integer
+          minimum: 1
+        enum: []
+      workload_class:
+        signature:
+          type: string
+        enum:
+        - inference
+        - training
+        - batch
   HealthCheck:
     type: object
     required:
@@ -1798,6 +4063,111 @@ schemas:
       url:
         signature:
           type: string
+        enum: []
+  InstanceEvent:
+    type: object
+    required:
+    - id
+    - instance_id
+    - message
+    - occurred_at
+    - reason
+    - type
+    properties:
+      count:
+        signature:
+          type: integer
+        enum: []
+      id:
+        signature:
+          type: string
+        enum: []
+      instance_id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      message:
+        signature:
+          type: string
+        enum: []
+      occurred_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      reason:
+        signature:
+          type: string
+        enum: []
+      type:
+        signature:
+          type: string
+        enum:
+        - Normal
+        - Warning
+  InstanceEventListResponse:
+    type: object
+    required:
+    - dev_profile
+    - items
+    - total
+    properties:
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstanceEvent'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  InstanceExecSession:
+    type: object
+    required:
+    - dev_profile
+    - expires_at
+    - id
+    - instance_id
+    - ws_url
+    properties:
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      expires_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      instance_id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      token:
+        signature:
+          type: string
+        enum: []
+      ws_url:
+        signature:
+          type: string
+          format: uri
         enum: []
   InstanceLifecycleRequest:
     type: object
@@ -1884,6 +4254,129 @@ schemas:
       total:
         signature:
           type: integer
+        enum: []
+  InstanceLogEntry:
+    type: object
+    required:
+    - level
+    - message
+    - timestamp
+    properties:
+      container:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      level:
+        signature:
+          type: string
+        enum:
+        - debug
+        - info
+        - warn
+        - error
+      message:
+        signature:
+          type: string
+        enum: []
+      stream:
+        signature:
+          type: string
+          nullable: true
+        enum:
+        - stdout
+        - stderr
+      timestamp:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+  InstanceLogListResponse:
+    type: object
+    required:
+    - dev_profile
+    - items
+    - total
+    properties:
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstanceLogEntry'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  InstanceMetrics:
+    type: object
+    required:
+    - dev_profile
+    - instance_id
+    - timestamp
+    properties:
+      cpu_utilization_pct:
+        signature:
+          type: number
+          nullable: true
+        enum: []
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      gpu_memory_total_mb:
+        signature:
+          type: number
+          nullable: true
+        enum: []
+      gpu_memory_used_mb:
+        signature:
+          type: number
+          nullable: true
+        enum: []
+      gpu_utilization_pct:
+        signature:
+          type: number
+          nullable: true
+        enum: []
+      instance_id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      memory_total_mb:
+        signature:
+          type: number
+          nullable: true
+        enum: []
+      memory_used_mb:
+        signature:
+          type: number
+          nullable: true
+        enum: []
+      network_rx_bytes:
+        signature:
+          type: integer
+          nullable: true
+        enum: []
+      network_tx_bytes:
+        signature:
+          type: integer
+          nullable: true
+        enum: []
+      timestamp:
+        signature:
+          type: string
+          format: date-time
         enum: []
   InstanceOperation:
     type: object
@@ -2032,6 +4525,19 @@ schemas:
         signature:
           type: string
         enum: []
+      instance_type:
+        signature:
+          type: string
+        enum:
+        - vm
+        - container
+        - gpu_container
+        - sandbox
+        - batch_job
+        - notebook
+        - k8s_cluster
+        - bare_metal
+        - dpu_node
       kind:
         signature:
           type: string
@@ -2063,6 +4569,10 @@ schemas:
           type: array
           items:
             type: string
+        enum: []
+      sandbox:
+        signature:
+          $ref: '#/components/schemas/SandboxInstanceStatus'
         enum: []
       snapshots:
         signature:
@@ -2121,6 +4631,522 @@ schemas:
         signature:
           $ref: '#/components/schemas/WorkloadIdentityBinding'
         enum: []
+  InstanceSecurityEvent:
+    type: object
+    required:
+    - event_type
+    - id
+    - instance_id
+    - occurred_at
+    - severity
+    properties:
+      description:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      event_type:
+        signature:
+          type: string
+        enum: []
+      id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      instance_id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      occurred_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      severity:
+        signature:
+          type: string
+        enum:
+        - info
+        - warning
+        - critical
+  InstanceSecurityEventListResponse:
+    type: object
+    required:
+    - dev_profile
+    - items
+    - total
+    properties:
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstanceSecurityEvent'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  K8sCluster:
+    type: object
+    required: []
+    properties:
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      id:
+        signature:
+          type: string
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+      reason:
+        signature:
+          type: string
+        enum: []
+      state:
+        signature:
+          type: string
+        enum:
+        - provisioning
+        - running
+        - deleting
+      tenant_id:
+        signature:
+          type: string
+        enum: []
+      updated_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      version:
+        signature:
+          type: string
+        enum: []
+  K8sClusterCreateRequest:
+    type: object
+    required:
+    - idempotency_key
+    - name
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+      version:
+        signature:
+          type: string
+        enum: []
+  K8sClusterKubeconfig:
+    type: object
+    required: []
+    properties:
+      ca_data:
+        signature:
+          type: string
+        enum: []
+      cluster_id:
+        signature:
+          type: string
+        enum: []
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      expires_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      kubeconfig:
+        signature:
+          type: string
+        enum: []
+      namespace:
+        signature:
+          type: string
+        enum: []
+      server:
+        signature:
+          type: string
+        enum: []
+      tenant_id:
+        signature:
+          type: string
+        enum: []
+      token:
+        signature:
+          type: string
+        enum: []
+  K8sClusterListResponse:
+    type: object
+    required: []
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/K8sCluster'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  K8sClusterNodePool:
+    type: object
+    required: []
+    properties:
+      cluster_id:
+        signature:
+          type: string
+        enum: []
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      gpu:
+        signature:
+          $ref: '#/components/schemas/K8sClusterNodePoolGPU'
+        enum: []
+      id:
+        signature:
+          type: string
+        enum: []
+      instance_type:
+        signature:
+          type: string
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+      node_count:
+        signature:
+          type: integer
+        enum: []
+      reason:
+        signature:
+          type: string
+        enum: []
+      state:
+        signature:
+          type: string
+        enum:
+        - running
+        - deleting
+      tenant_id:
+        signature:
+          type: string
+        enum: []
+      updated_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+  K8sClusterNodePoolCreateRequest:
+    type: object
+    required:
+    - idempotency_key
+    - instance_type
+    - name
+    - node_count
+    properties:
+      gpu:
+        signature:
+          $ref: '#/components/schemas/K8sClusterNodePoolGPU'
+        enum: []
+      idempotency_key:
+        signature:
+          type: string
+        enum: []
+      instance_type:
+        signature:
+          type: string
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+      node_count:
+        signature:
+          type: integer
+          minimum: 1
+        enum: []
+  K8sClusterNodePoolGPU:
+    type: object
+    required: []
+    properties:
+      count:
+        signature:
+          type: integer
+        enum: []
+      model:
+        signature:
+          type: string
+        enum: []
+      resource_name:
+        signature:
+          type: string
+        enum: []
+      vendor:
+        signature:
+          type: string
+        enum: []
+  K8sClusterNodePoolListResponse:
+    type: object
+    required: []
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/K8sClusterNodePool'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  K8sClusterNodePoolUpdateRequest:
+    type: object
+    required:
+    - idempotency_key
+    - instance_type
+    - node_count
+    properties:
+      gpu:
+        signature:
+          $ref: '#/components/schemas/K8sClusterNodePoolGPU'
+        enum: []
+      idempotency_key:
+        signature:
+          type: string
+        enum: []
+      instance_type:
+        signature:
+          type: string
+        enum: []
+      node_count:
+        signature:
+          type: integer
+          minimum: 0
+        enum: []
+  K8sClusterProxyRequest:
+    type: object
+    required:
+    - idempotency_key
+    - method
+    - path
+    properties:
+      body:
+        signature:
+          type: object
+          additionalProperties: true
+        enum: []
+      idempotency_key:
+        signature:
+          type: string
+        enum: []
+      method:
+        signature:
+          type: string
+        enum:
+        - GET
+        - POST
+        - PUT
+        - PATCH
+        - DELETE
+      path:
+        signature:
+          type: string
+        enum: []
+      query:
+        signature:
+          type: object
+          additionalProperties:
+            type: string
+        enum: []
+  K8sClusterProxyResponse:
+    type: object
+    required: []
+    properties:
+      body:
+        signature:
+          type: object
+          additionalProperties: true
+        enum: []
+      cluster_id:
+        signature:
+          type: string
+        enum: []
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      headers:
+        signature:
+          type: object
+          additionalProperties:
+            type: string
+        enum: []
+      method:
+        signature:
+          type: string
+        enum: []
+      path:
+        signature:
+          type: string
+        enum: []
+      proxied_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      query:
+        signature:
+          type: object
+          additionalProperties:
+            type: string
+        enum: []
+      status_code:
+        signature:
+          type: integer
+        enum: []
+      tenant_id:
+        signature:
+          type: string
+        enum: []
+  K8sClusterUpgradeRequest:
+    type: object
+    required:
+    - idempotency_key
+    - version
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+        enum: []
+      version:
+        signature:
+          type: string
+        enum: []
+  K8sClusterWorkload:
+    type: object
+    required:
+    - created_at
+    - dev_profile
+    - kind
+    - name
+    - namespace
+    - ready_replicas
+    - replicas
+    - status
+    properties:
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      image:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      kind:
+        signature:
+          type: string
+        enum:
+        - Deployment
+        - StatefulSet
+        - DaemonSet
+        - Job
+        - CronJob
+      name:
+        signature:
+          type: string
+        enum: []
+      namespace:
+        signature:
+          type: string
+        enum: []
+      ready_replicas:
+        signature:
+          type: integer
+        enum: []
+      replicas:
+        signature:
+          type: integer
+        enum: []
+      status:
+        signature:
+          type: string
+        enum:
+        - running
+        - pending
+        - failed
+        - succeeded
+  K8sClusterWorkloadListResponse:
+    type: object
+    required:
+    - items
+    - total
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/K8sClusterWorkload'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
   ListAPIKeysResponse:
     type: object
     required:
@@ -2145,6 +5171,63 @@ schemas:
       jti:
         signature:
           type: string
+        enum: []
+  MeteringUsageRecord:
+    type: object
+    required:
+    - resource_type
+    - total_quantity
+    - unit
+    properties:
+      period:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      resource_type:
+        signature:
+          type: string
+        enum:
+        - instance_cpu_seconds
+        - instance_memory_gib_seconds
+        - instance_gpu_seconds
+        - token_input
+        - token_output
+        - token_total
+      tenant_id:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total_quantity:
+        signature:
+          type: number
+          format: double
+        enum: []
+      unit:
+        signature:
+          type: string
+        enum: []
+  MeteringUsageResponse:
+    type: object
+    required:
+    - dev_profile
+    - items
+    - total
+    properties:
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/MeteringUsageRecord'
+        enum: []
+      total:
+        signature:
+          type: integer
         enum: []
   NetworkLoadBalancer:
     type: object
@@ -2271,6 +5354,75 @@ schemas:
     type: string
     required: []
     properties: {}
+  NetworkRoute:
+    type: object
+    required:
+    - created_at
+    - destination_cidr
+    - dev_profile
+    - id
+    - next_hop_id
+    - next_hop_type
+    - vpc_id
+    properties:
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      description:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      destination_cidr:
+        signature:
+          type: string
+        enum: []
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      id:
+        signature:
+          type: string
+        enum: []
+      next_hop_id:
+        signature:
+          type: string
+        enum: []
+      next_hop_type:
+        signature:
+          type: string
+        enum:
+        - gateway
+        - instance
+        - nat
+      vpc_id:
+        signature:
+          type: string
+        enum: []
+  NetworkRouteListResponse:
+    type: object
+    required:
+    - items
+    - total
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/NetworkRoute'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
   NetworkSecurityGroup:
     type: object
     required:
@@ -2538,6 +5690,133 @@ schemas:
         signature:
           type: integer
         enum: []
+  ObservabilityAlertRule:
+    type: object
+    required:
+    - created_at
+    - id
+    - name
+    - promql
+    - severity
+    - state
+    - tenant_id
+    - updated_at
+    properties:
+      annotations:
+        signature:
+          type: object
+          additionalProperties:
+            type: string
+        enum: []
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      duration:
+        signature:
+          type: string
+        enum: []
+      enabled:
+        signature:
+          type: boolean
+        enum: []
+      id:
+        signature:
+          type: string
+        enum: []
+      labels:
+        signature:
+          type: object
+          additionalProperties:
+            type: string
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+      promql:
+        signature:
+          type: string
+        enum: []
+      severity:
+        signature:
+          type: string
+        enum:
+        - info
+        - warning
+        - critical
+      state:
+        signature:
+          type: string
+        enum:
+        - active
+        - disabled
+        - deleted
+      tenant_id:
+        signature:
+          type: string
+        enum: []
+      updated_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+  ObservabilityAlertRuleListResponse:
+    type: object
+    required:
+    - items
+    - total
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/ObservabilityAlertRule'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  ObservabilityQueryResponse:
+    type: object
+    required:
+    - dev_profile
+    - query
+    - result_type
+    - results
+    properties:
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      query:
+        signature:
+          type: string
+        enum: []
+      result_type:
+        signature:
+          type: string
+        enum:
+        - vector
+        - matrix
+        - scalar
+        - string
+      results:
+        signature:
+          type: array
+          items:
+            type: object
+        enum: []
   RefreshAccessTokenRequest:
     type: object
     required:
@@ -2561,6 +5840,451 @@ schemas:
         signature:
           type: integer
         enum: []
+  RegistryArtifact:
+    type: object
+    required:
+    - digest
+    - media_type
+    - project
+    - repository
+    - size_bytes
+    - tags
+    properties:
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      digest:
+        signature:
+          type: string
+        enum: []
+      media_type:
+        signature:
+          type: string
+        enum: []
+      project:
+        signature:
+          type: string
+        enum: []
+      pushed_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      repository:
+        signature:
+          type: string
+        enum: []
+      scan_status:
+        signature:
+          $ref: '#/components/schemas/RegistryScanResult'
+        enum: []
+      size_bytes:
+        signature:
+          type: integer
+        enum: []
+      tags:
+        signature:
+          type: array
+          items:
+            type: string
+        enum: []
+  RegistryArtifactListResponse:
+    type: object
+    required:
+    - items
+    - total
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/RegistryArtifact'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  RegistryPermission:
+    type: object
+    required:
+    - actions
+    - project
+    - repository
+    - state
+    - subject
+    - updated_at
+    properties:
+      actions:
+        signature:
+          type: array
+          items:
+            type: string
+        enum: []
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      project:
+        signature:
+          type: string
+        enum: []
+      repository:
+        signature:
+          type: string
+        enum: []
+      state:
+        signature:
+          type: string
+        enum:
+        - active
+        - duplicate
+      subject:
+        signature:
+          type: string
+        enum: []
+      updated_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+  RegistryProject:
+    type: object
+    required:
+    - created_at
+    - id
+    - name
+    - public
+    - tenant_id
+    properties:
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      id:
+        signature:
+          type: string
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+      public:
+        signature:
+          type: boolean
+        enum: []
+      tenant_id:
+        signature:
+          type: string
+        enum: []
+  RegistryProjectListResponse:
+    type: object
+    required:
+    - items
+    - total
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/RegistryProject'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  RegistryProjectScanReport:
+    type: object
+    required:
+    - artifacts_total
+    - critical
+    - high
+    - low
+    - medium
+    - project
+    - scanned_artifacts
+    - status
+    properties:
+      artifacts_total:
+        signature:
+          type: integer
+        enum: []
+      critical:
+        signature:
+          type: integer
+        enum: []
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      high:
+        signature:
+          type: integer
+        enum: []
+      low:
+        signature:
+          type: integer
+        enum: []
+      medium:
+        signature:
+          type: integer
+        enum: []
+      project:
+        signature:
+          type: string
+        enum: []
+      provider_id:
+        signature:
+          type: string
+        enum: []
+      scanned_artifacts:
+        signature:
+          type: integer
+        enum: []
+      scanned_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      status:
+        signature:
+          type: string
+        enum:
+        - not_scanned
+        - pending
+        - running
+        - complete
+        - failed
+  RegistryPullSecret:
+    type: object
+    required:
+    - created_at
+    - name
+    - project
+    - registry
+    - secret_ref
+    - username
+    properties:
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+      namespace:
+        signature:
+          type: string
+        enum: []
+      project:
+        signature:
+          type: string
+        enum: []
+      registry:
+        signature:
+          type: string
+        enum: []
+      secret_ref:
+        signature:
+          type: string
+        enum: []
+      state:
+        signature:
+          type: string
+        enum:
+        - active
+        - duplicate
+      username:
+        signature:
+          type: string
+        enum: []
+  RegistryRepository:
+    type: object
+    required:
+    - artifact_count
+    - name
+    - project
+    - pull_count
+    properties:
+      artifact_count:
+        signature:
+          type: integer
+        enum: []
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+      permission:
+        signature:
+          $ref: '#/components/schemas/RegistryPermission'
+        enum: []
+      project:
+        signature:
+          type: string
+        enum: []
+      pull_count:
+        signature:
+          type: integer
+        enum: []
+  RegistryRepositoryListResponse:
+    type: object
+    required:
+    - items
+    - total
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/RegistryRepository'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  RegistryScanResult:
+    type: object
+    required:
+    - critical
+    - high
+    - image
+    - low
+    - medium
+    - status
+    properties:
+      critical:
+        signature:
+          type: integer
+        enum: []
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      high:
+        signature:
+          type: integer
+        enum: []
+      image:
+        signature:
+          type: string
+        enum: []
+      low:
+        signature:
+          type: integer
+        enum: []
+      medium:
+        signature:
+          type: integer
+        enum: []
+      provider_id:
+        signature:
+          type: string
+        enum: []
+      report_url:
+        signature:
+          type: string
+        enum: []
+      scanned_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      status:
+        signature:
+          type: string
+        enum:
+        - not_scanned
+        - pending
+        - running
+        - complete
+        - failed
+  ReportTokenUsageRequest:
+    type: object
+    required:
+    - idempotency_key
+    - input_tokens
+    - model
+    - output_tokens
+    - source
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      input_tokens:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+      instance_id:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      labels:
+        signature:
+          type: object
+          additionalProperties:
+            type: string
+        enum: []
+      model:
+        signature:
+          type: string
+        enum: []
+      occurred_at:
+        signature:
+          type: string
+          format: date-time
+          nullable: true
+        enum: []
+      output_tokens:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+      request_id:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      source:
+        signature:
+          type: string
+        enum: []
   RevokeStatusResponse:
     type: object
     required:
@@ -2571,6 +6295,389 @@ schemas:
           type: string
         enum:
         - revoked
+  SandboxConfig:
+    type: object
+    required: []
+    properties:
+      network_egress_policy:
+        signature:
+          $ref: '#/components/schemas/SandboxNetworkEgressPolicy'
+        enum: []
+      runtime_class:
+        signature:
+          type: string
+        enum: []
+      session_timeout:
+        signature:
+          type: string
+        enum: []
+  SandboxInstanceStatus:
+    type: object
+    required:
+    - network_egress_policy
+    - runtime_class
+    - session_state
+    - session_timeout
+    properties:
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      network_egress_policy:
+        signature:
+          $ref: '#/components/schemas/SandboxNetworkEgressPolicy'
+        enum: []
+      runtime_class:
+        signature:
+          type: string
+        enum: []
+      session_state:
+        signature:
+          type: string
+        enum:
+        - pending
+        - running
+        - expired
+        - stopped
+      session_timeout:
+        signature:
+          type: string
+        enum: []
+  SandboxNetworkEgressPolicy:
+    type: string
+    required: []
+    properties: {}
+  SandboxTemplate:
+    type: object
+    required:
+    - created_at
+    - dev_profile
+    - id
+    - image
+    - name
+    properties:
+      cpu_cores:
+        signature:
+          type: number
+          nullable: true
+        enum: []
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      description:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      image:
+        signature:
+          type: string
+        enum: []
+      is_builtin:
+        signature:
+          type: boolean
+        enum: []
+      memory_gb:
+        signature:
+          type: number
+          nullable: true
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+      storage_gb:
+        signature:
+          type: number
+          nullable: true
+        enum: []
+  SandboxTemplateListResponse:
+    type: object
+    required:
+    - dev_profile
+    - items
+    - total
+    properties:
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/SandboxTemplate'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  Secret:
+    type: object
+    required: []
+    properties:
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      id:
+        signature:
+          type: string
+        enum: []
+      keys:
+        signature:
+          type: array
+          items:
+            type: string
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+      state:
+        signature:
+          type: string
+        enum:
+        - active
+        - deleted
+      tenant_id:
+        signature:
+          type: string
+        enum: []
+      type:
+        signature:
+          type: string
+        enum: []
+      updated_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+  SecretBinding:
+    type: object
+    required: []
+    properties:
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      env_prefix:
+        signature:
+          type: string
+        enum: []
+      id:
+        signature:
+          type: string
+        enum: []
+      mount_path:
+        signature:
+          type: string
+        enum: []
+      secret_id:
+        signature:
+          type: string
+        enum: []
+      state:
+        signature:
+          type: string
+        enum: []
+      target_id:
+        signature:
+          type: string
+        enum: []
+      target_type:
+        signature:
+          type: string
+        enum: []
+      tenant_id:
+        signature:
+          type: string
+        enum: []
+  SecretBindingRequest:
+    type: object
+    required:
+    - target_id
+    - target_type
+    properties:
+      env_prefix:
+        signature:
+          type: string
+        enum: []
+      mount_path:
+        signature:
+          type: string
+        enum: []
+      target_id:
+        signature:
+          type: string
+        enum: []
+      target_type:
+        signature:
+          type: string
+        enum:
+        - instance
+        - k8s-cluster
+        - service
+  SecretCreateRequest:
+    type: object
+    required:
+    - data
+    - idempotency_key
+    - name
+    properties:
+      data:
+        signature:
+          type: object
+          additionalProperties:
+            type: string
+        enum: []
+      idempotency_key:
+        signature:
+          type: string
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+      type:
+        signature:
+          type: string
+        enum:
+        - opaque
+        - dockerconfigjson
+        - tls
+  SecretListResponse:
+    type: object
+    required: []
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/Secret'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  SetRegistryPermissionRequest:
+    type: object
+    required:
+    - actions
+    - idempotency_key
+    - subject
+    properties:
+      actions:
+        signature:
+          type: array
+          items:
+            type: string
+        enum: []
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      subject:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+  StorageBucketListResponse:
+    type: object
+    required:
+    - items
+    - total
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/StorageBucketRecord'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  StorageBucketRecord:
+    type: object
+    required:
+    - access_mode
+    - created_at
+    - id
+    - name
+    properties:
+      access_mode:
+        signature:
+          type: string
+        enum:
+        - private
+        - public_read
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+      object_count:
+        signature:
+          type: integer
+        enum: []
+      region:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      size_bytes:
+        signature:
+          type: integer
+        enum: []
   StorageFilesystem:
     type: object
     required:
@@ -2718,6 +6825,31 @@ schemas:
           type: string
           format: date-time
         enum: []
+  StorageObjectDownloadInfo:
+    type: object
+    required:
+    - download_url
+    properties:
+      content_type:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      download_url:
+        signature:
+          type: string
+          format: uri
+        enum: []
+      expires_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      size_bytes:
+        signature:
+          type: integer
+          nullable: true
+        enum: []
   StorageObjectListResponse:
     type: object
     required:
@@ -2738,6 +6870,51 @@ schemas:
       total:
         signature:
           type: integer
+        enum: []
+  StorageObjectUploadRequest:
+    type: object
+    required:
+    - bucket_id
+    - idempotency_key
+    - key
+    properties:
+      bucket_id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      content_type:
+        signature:
+          type: string
+        enum: []
+      idempotency_key:
+        signature:
+          type: string
+        enum: []
+      key:
+        signature:
+          type: string
+        enum: []
+  StorageObjectUploadResponse:
+    type: object
+    required:
+    - object_id
+    - upload_url
+    properties:
+      expires_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      object_id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      upload_url:
+        signature:
+          type: string
+          format: uri
         enum: []
   StorageResourceState:
     type: string
@@ -2845,6 +7022,124 @@ schemas:
         signature:
           type: string
         enum: []
+  TokenUsageReport:
+    type: object
+    required:
+    - created_at
+    - id
+    - input_tokens
+    - model
+    - output_tokens
+    - source
+    - state
+    - tenant_id
+    - total_tokens
+    properties:
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      id:
+        signature:
+          type: string
+        enum: []
+      input_tokens:
+        signature:
+          type: integer
+          format: int64
+        enum: []
+      instance_id:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      model:
+        signature:
+          type: string
+        enum: []
+      output_tokens:
+        signature:
+          type: integer
+          format: int64
+        enum: []
+      request_id:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      source:
+        signature:
+          type: string
+        enum: []
+      state:
+        signature:
+          type: string
+        enum:
+        - accepted
+        - duplicate
+      tenant_id:
+        signature:
+          type: string
+        enum: []
+      total_tokens:
+        signature:
+          type: integer
+          format: int64
+        enum: []
+  UpdateObservabilityAlertRuleRequest:
+    type: object
+    required:
+    - idempotency_key
+    properties:
+      annotations:
+        signature:
+          type: object
+          additionalProperties:
+            type: string
+        enum: []
+      duration:
+        signature:
+          type: string
+        enum: []
+      enabled:
+        signature:
+          type: boolean
+        enum: []
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      labels:
+        signature:
+          type: object
+          additionalProperties:
+            type: string
+        enum: []
+      name:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      promql:
+        signature:
+          type: string
+          minLength: 1
+        enum: []
+      severity:
+        signature:
+          type: string
+        enum:
+        - info
+        - warning
+        - critical
   VectorStore:
     type: object
     required:
@@ -2903,6 +7198,44 @@ schemas:
         signature:
           type: string
           format: date-time
+        enum: []
+  VectorStoreDocumentInsertRequest:
+    type: object
+    required:
+    - documents
+    - idempotency_key
+    properties:
+      documents:
+        signature:
+          type: array
+          items:
+            type: object
+        enum: []
+      idempotency_key:
+        signature:
+          type: string
+        enum: []
+  VectorStoreDocumentInsertResponse:
+    type: object
+    required:
+    - inserted_count
+    - task_id
+    properties:
+      inserted_count:
+        signature:
+          type: integer
+        enum: []
+      status:
+        signature:
+          type: string
+        enum:
+        - pending
+        - completed
+        - failed
+      task_id:
+        signature:
+          type: string
+          format: uuid
         enum: []
   VectorStoreListResponse:
     type: object
@@ -2991,6 +7324,71 @@ schemas:
     type: string
     required: []
     properties: {}
+  VolumeSnapshotListResponse:
+    type: object
+    required:
+    - items
+    - total
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/VolumeSnapshotRecord'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  VolumeSnapshotRecord:
+    type: object
+    required:
+    - created_at
+    - dev_profile
+    - id
+    - name
+    - size_bytes
+    - status
+    - volume_id
+    properties:
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      id:
+        signature:
+          type: string
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+      size_bytes:
+        signature:
+          type: integer
+        enum: []
+      status:
+        signature:
+          type: string
+        enum:
+        - creating
+        - available
+        - error
+        - deleting
+      volume_id:
+        signature:
+          type: string
+        enum: []
   WorkloadIdentityBinding:
     type: object
     required:

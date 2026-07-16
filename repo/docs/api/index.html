@@ -1,163 +1,273 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>ANI API Documentation</title>
-    <style>
-      :root {
-        color-scheme: light;
-        --ink: #17202a;
-        --muted: #667085;
-        --line: #d9dee8;
-        --bg: #f7f9fc;
-        --panel: #ffffff;
-        --blue: #1b5faa;
-        --green: #167c58;
-        --orange: #9a5b00;
-        --red: #b42318;
-      }
-      * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        color: var(--ink);
-        background: var(--bg);
-      }
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ANI API Documentation</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17202a;
+      --muted: #667085;
+      --line: #d9dee8;
+      --bg: #f7f9fc;
+      --panel: #ffffff;
+      --blue: #1b5faa;
+      --green: #167c58;
+      --orange: #9a5b00;
+      --red: #b42318;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+    }
+
+    main {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 32px 0 56px;
+    }
+
+    .hero {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 24px;
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--blue);
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: 32px;
+      line-height: 1.15;
+    }
+
+    h2 {
+      margin: 28px 0 12px;
+      font-size: 20px;
+    }
+
+    p {
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+    }
+
+    .facts {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 12px;
+      margin: 22px 0 0;
+    }
+
+    .facts div {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fbfcff;
+    }
+
+    dt {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    dd {
+      margin: 4px 0 0;
+      font-weight: 700;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    th,
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      font-size: 14px;
+    }
+
+    th {
+      color: var(--muted);
+      background: #eef3f8;
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .method {
+      display: inline-block;
+      min-width: 58px;
+      border-radius: 6px;
+      padding: 4px 8px;
+      color: #fff;
+      text-align: center;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .method-get {
+      background: var(--blue);
+    }
+
+    .method-post {
+      background: var(--green);
+    }
+
+    .method-put,
+    .method-patch {
+      background: var(--orange);
+    }
+
+    .method-delete {
+      background: var(--red);
+    }
+
+    .schema-list {
+      columns: 2;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px 28px;
+    }
+
+    .schema-list li {
+      margin: 6px 0;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      margin-top: 20px;
+    }
+
+    .doc-card {
+      display: block;
+      min-height: 150px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      background: var(--panel);
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .doc-card span {
+      color: var(--blue);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .doc-card strong {
+      display: block;
+      margin: 10px 0;
+      font-size: 21px;
+    }
+
+    .doc-card small {
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    @media (max-width: 760px) {
       main {
-        width: min(1180px, calc(100vw - 32px));
-        margin: 0 auto;
-        padding: 32px 0 56px;
+        width: min(100vw - 20px, 1180px);
+        padding-top: 18px;
       }
+
       .hero {
-        background: var(--panel);
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 24px;
-      }
-      .eyebrow {
-        margin: 0 0 8px;
-        color: var(--blue);
-        font-size: 13px;
-        font-weight: 700;
-        text-transform: uppercase;
-      }
-      h1 { margin: 0 0 12px; font-size: 32px; line-height: 1.15; }
-      h2 { margin: 28px 0 12px; font-size: 20px; }
-      p { color: var(--muted); line-height: 1.6; }
-      code {
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        font-size: 13px;
-      }
-      .facts {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-        gap: 12px;
-        margin: 22px 0 0;
-      }
-      .facts div {
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 12px;
-        background: #fbfcff;
-      }
-      dt { color: var(--muted); font-size: 12px; }
-      dd { margin: 4px 0 0; font-weight: 700; }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        background: var(--panel);
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        overflow: hidden;
-      }
-      th, td {
-        padding: 10px 12px;
-        border-bottom: 1px solid var(--line);
-        text-align: left;
-        vertical-align: top;
-        font-size: 14px;
-      }
-      th { color: var(--muted); background: #eef3f8; font-size: 12px; text-transform: uppercase; }
-      tr:last-child td { border-bottom: 0; }
-      .method {
-        display: inline-block;
-        min-width: 58px;
-        border-radius: 6px;
-        padding: 4px 8px;
-        color: #fff;
-        text-align: center;
-        font-size: 12px;
-        font-weight: 800;
-      }
-      .method-get { background: var(--blue); }
-      .method-post { background: var(--green); }
-      .method-put, .method-patch { background: var(--orange); }
-      .method-delete { background: var(--red); }
-      .schema-list {
-        columns: 2;
-        background: var(--panel);
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 18px 28px;
-      }
-      .schema-list li { margin: 6px 0; }
-      .cards {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-        gap: 16px;
-        margin-top: 20px;
-      }
-      .doc-card {
-        display: block;
-        min-height: 150px;
-        border: 1px solid var(--line);
-        border-radius: 8px;
         padding: 18px;
-        background: var(--panel);
-        color: inherit;
-        text-decoration: none;
       }
-      .doc-card span { color: var(--blue); font-size: 13px; font-weight: 800; }
-      .doc-card strong { display: block; margin: 10px 0; font-size: 21px; }
-      .doc-card small { color: var(--muted); line-height: 1.5; }
-      @media (max-width: 760px) {
-        main { width: min(100vw - 20px, 1180px); padding-top: 18px; }
-        .hero { padding: 18px; }
-        h1 { font-size: 26px; }
-        table { display: block; overflow-x: auto; }
-        .schema-list { columns: 1; }
+
+      h1 {
+        font-size: 26px;
       }
-    </style>
-  </head>
-  <body>
-    <main>
 
-      <section class="hero">
-        <p class="eyebrow">DOC-API-A</p>
-        <h1>ANI API Documentation</h1>
-        <p>Static API docs generated from the Core and Services API contracts. Core remains infrastructure-only; Services owns business APIs.</p>
-        <dl class="facts">
-          <div><dt>Core Operations</dt><dd>113</dd></div>
-          <div><dt>Services Operations</dt><dd>59</dd></div>
-          <div><dt>Core Spec</dt><dd><code>api/openapi/v1.yaml</code></dd></div>
-          <div><dt>Services Spec</dt><dd><code>api/openapi/services/v1.yaml</code></dd></div>
-        </dl>
-      </section>
+      table {
+        display: block;
+        overflow-x: auto;
+      }
 
-      <section class="cards">
-        <a class="doc-card" href="core.html">
-          <span>Core API</span>
-          <strong>Infrastructure platform API</strong>
-          <small>Instances, networks, storage, auth, operations, metering.</small>
-        </a>
-        <a class="doc-card" href="services.html">
-          <span>Services API</span>
-          <strong>Cloud services API</strong>
-          <small>Models, inference services, knowledge bases.</small>
-        </a>
-      </section>
+      .schema-list {
+        columns: 1;
+      }
+    }
+  </style>
+</head>
 
-    </main>
-  </body>
+<body>
+  <main>
+
+    <section class="hero">
+      <p class="eyebrow">DOC-API-A</p>
+      <h1>ANI API Documentation</h1>
+      <p>Static API docs generated from the Core and Services API contracts. Core remains infrastructure-only; Services
+        owns business APIs.</p>
+      <dl class="facts">
+        <div>
+          <dt>Core Operations</dt>
+          <dd>120</dd>
+        </div>
+        <div>
+          <dt>Services Operations</dt>
+          <dd>59</dd>
+        </div>
+        <div>
+          <dt>Core Spec</dt>
+          <dd><code>api/openapi/v1.yaml</code></dd>
+        </div>
+        <div>
+          <dt>Services Spec</dt>
+          <dd><code>api/openapi/services/v1.yaml</code></dd>
+        </div>
+      </dl>
+    </section>
+
+    <section class="cards">
+      <a class="doc-card" href="core.html">
+        <span>Core API</span>
+        <strong>Infrastructure platform API</strong>
+        <small>Instances, networks, storage, auth, operations, metering.</small>
+      </a>
+      <a class="doc-card" href="services.html">
+        <span>Services API</span>
+        <strong>Cloud services API</strong>
+        <small>Models, inference services, knowledge bases.</small>
+      </a>
+    </section>
+
+  </main>
+</body>
+
 </html>

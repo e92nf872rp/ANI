@@ -48,6 +48,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/password/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 租户账密登录（账号密码 Tab） */
+        post: operations["passwordLogin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/platform/password/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 平台管理员账密登录 */
+        post: operations["platformPasswordLogin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/oidc/begin": {
         parameters: {
             query?: never;
@@ -1064,6 +1098,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/observability/query_range": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * PromQL 代理区间查询
+         * @description 通过 Core 代理 PromQL 区间查询（range query），返回时间区间内多个采样点，用于绘制时序曲线。不暴露底层 Prometheus 地址。
+         */
+        get: operations["queryRangeObservability"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/observability/alert-rules": {
         parameters: {
             query?: never;
@@ -1108,44 +1162,35 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 查询租户用量统计 */
-        get: {
-            parameters: {
-                query: {
-                    start_time: string;
-                    end_time: string;
-                    resource_type?: string;
-                    group_by?: "resource_type" | "az" | "day" | "hour";
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description 租户用量统计 */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            items?: {
-                                resource_type?: string;
-                                total_quantity?: number;
-                                unit?: string;
-                                period?: string;
-                            }[];
-                            total?: number;
-                            dev_profile?: components["schemas"]["CoreDevProfileInfo"];
-                        };
-                    };
-                };
-                400: components["responses"]["BadRequest"];
-                401: components["responses"]["Unauthorized"];
-                403: components["responses"]["Forbidden"];
-            };
+        /**
+         * 查询租户用量统计
+         * @description 在租户 JWT 上下文中查询本租户的用量数据。
+         *     tenant_id 从 JWT 提取，忽略 query 中的 tenant_id 参数。
+         */
+        get: operations["getMeteringUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/metering/usage/platform": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
         };
+        /**
+         * 查询平台跨租户用量
+         * @description 在平台 RBAC 上下文中查询全平台或指定租户的用量数据。
+         *     需 scope:metering:platform:read 权限。
+         *     items[].tenant_id 在此端点下必填。
+         *     若带 tenant_id query 须二次 RBAC 校验。
+         */
+        get: operations["getPlatformMeteringUsage"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1551,6 +1596,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/gpu-scheduling/queues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询 GPU 调度队列列表
+         * @description 返回当前租户可见的 GPU 调度队列，含平台默认队列和租户自定义队列。
+         */
+        get: operations["listGPUSchedulingQueues"];
+        put?: never;
+        /**
+         * 创建 GPU 调度队列
+         * @description 创建租户自定义调度队列，映射为 Volcano Queue CRD。平台默认队列不可通过此接口创建。
+         */
+        post: operations["createGPUSchedulingQueue"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gpu-scheduling/queues/{queue_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询单个 GPU 调度队列 */
+        get: operations["getGPUSchedulingQueue"];
+        put?: never;
+        post?: never;
+        /**
+         * 删除 GPU 调度队列
+         * @description 删除租户自定义队列。平台默认队列不可删除。
+         */
+        delete: operations["deleteGPUSchedulingQueue"];
+        options?: never;
+        head?: never;
+        /**
+         * 更新 GPU 调度队列
+         * @description 更新租户自定义队列的权重、可回收性等属性。平台默认队列不可修改。
+         */
+        patch: operations["updateGPUSchedulingQueue"];
+        trace?: never;
+    };
     "/sandbox-templates": {
         parameters: {
             query?: never;
@@ -1946,6 +2040,11 @@ export interface components {
                 vendor?: string | null;
                 model?: string | null;
                 count?: number;
+                /** @description 调度队列名（Volcano Queue） */
+                queue_name?: string | null;
+                /** @description 调度资源名，如 nvidia.com/gpu 或 nvidia.com/vgpu */
+                resource_name?: string | null;
+                /** @description 调度说明或失败原因，如 InsufficientGPU */
                 scheduling_reason?: string | null;
                 /** Format: float */
                 utilization_percent?: number | null;
@@ -2062,13 +2161,76 @@ export interface components {
                 model?: string;
                 /** @default 1 */
                 count: number;
+                /** @description 指定调度队列名；为空时按 workload_class 选默认队列 */
+                queue_name?: string | null;
+                /**
+                 * @description GPU 分配模式：dedicated=整卡，vgpu=HAMi vGPU
+                 * @default dedicated
+                 * @enum {string}
+                 */
+                allocation_mode: "dedicated" | "vgpu";
+                /**
+                 * @description 工作负载类型，用于选默认队列
+                 * @default inference
+                 * @enum {string}
+                 */
+                workload_class: "inference" | "training" | "batch";
             } | null;
             /**
              * @description Container/GPU Container 副本数；VM 固定为 1
              * @default 1
              */
             replicas: number;
-            sandbox_config?: components["schemas"]["SandboxConfig"];
+        };
+        /** @description kind=vm 专用配置；共享 image/cpu/memory 仍在 CreateInstanceRequest 顶层。 */
+        CreateVMInstanceConfig: {
+            /** @description VM boot image 引用 */
+            boot_image?: string | null;
+            /**
+             * @description VM SSH 用户名
+             * @default ubuntu
+             */
+            ssh_username: string | null;
+            /** @description VM SSH key/secret 引用；不包含私钥内容 */
+            ssh_key_ref?: string | null;
+        };
+        /** @description kind=container 专用配置；共享 image/cpu/memory 仍在 CreateInstanceRequest 顶层。 */
+        CreateContainerInstanceConfig: {
+            /**
+             * @description 容器副本数
+             * @default 1
+             */
+            replicas: number;
+        };
+        /** @description kind=gpu_container 专用配置；共享 image/cpu/memory 仍在 CreateInstanceRequest 顶层。 */
+        CreateGPUContainerInstanceConfig: {
+            /**
+             * @description GPU 容器副本数
+             * @default 1
+             */
+            replicas: number;
+            gpu?: {
+                /** @example nvidia */
+                vendor?: string;
+                /** @example A100 */
+                model?: string;
+                /** @default 1 */
+                count: number;
+                /** @description 指定调度队列名；为空时按 workload_class 选默认队列 */
+                queue_name?: string | null;
+                /**
+                 * @description GPU 分配模式：dedicated=整卡，vgpu=HAMi vGPU
+                 * @default dedicated
+                 * @enum {string}
+                 */
+                allocation_mode: "dedicated" | "vgpu";
+                /**
+                 * @description 工作负载类型，用于选默认队列
+                 * @default inference
+                 * @enum {string}
+                 */
+                workload_class: "inference" | "training" | "batch";
+            } | null;
         };
         /**
          * @description Sandbox 出口策略；local profile 仅记录意图，不代表真实网络隔离已执行。
@@ -2111,6 +2273,26 @@ export interface components {
                 value: number;
                 /** Format: date-time */
                 timestamp?: string | null;
+            }[];
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
+        };
+        /** @description PromQL 代理区间查询结果（matrix）；返回时间区间内多个采样点，用于绘制时序曲线。 */
+        ObservabilityRangeQueryResponse: {
+            query: string;
+            /** @enum {string} */
+            result_type: "matrix" | "vector" | "scalar" | "string";
+            /** @description 每条 series 含一组时间序列采样点。 */
+            results: {
+                metric: {
+                    [key: string]: string;
+                };
+                /** @description 时间序列采样点列表，每个点为 [timestamp, value]。 */
+                values: {
+                    /** Format: date-time */
+                    timestamp: string;
+                    /** Format: double */
+                    value: number;
+                }[];
             }[];
             dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
@@ -2704,6 +2886,30 @@ export interface components {
         RefreshAccessTokenRequest: {
             refresh_token: string;
         };
+        PasswordLoginRequest: {
+            /** @description 租户 slug，用于定位 users 表所属 tenant */
+            tenant_name: string;
+            /** @description 登录用户名（不含命名空间前缀，服务端自动拼接 local:<username>） */
+            username: string;
+            /**
+             * Format: password
+             * @description 明文密码，仅用于 bcrypt 校验，不持久化
+             */
+            password: string;
+            /** @description 可选幂等键，重复提交返回同一 TokenPair */
+            idempotency_key?: string;
+        };
+        PlatformPasswordLoginRequest: {
+            /** @description 平台管理员用户名（无命名空间前缀，存储为 local:&lt;username&gt;，查询 users 表 EXISTS user_roles→roles.name=platform-admin） */
+            username: string;
+            /**
+             * Format: password
+             * @description 明文密码，仅用于 bcrypt 校验，不持久化
+             */
+            password: string;
+            /** @description 可选幂等键，重复提交返回同一 TokenPair */
+            idempotency_key?: string;
+        };
         RefreshAccessTokenResponse: {
             access_token: string;
             /** @example 3600 */
@@ -3030,6 +3236,52 @@ export interface components {
             }[];
             dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
+        /** @description GPU 调度队列，映射 Volcano Queue CRD */
+        GPUSchedulingQueue: {
+            /** Format: uuid */
+            id: string;
+            /** @description 租户内唯一队列名 */
+            name: string;
+            /** @default 10 */
+            weight: number;
+            /** @default false */
+            reclaimable: boolean;
+            /** @enum {string} */
+            workload_class: "inference" | "training" | "batch";
+            /** Format: uuid */
+            project_id?: string | null;
+            /** @description 平台默认队列不可删除或修改 */
+            is_platform_default: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        GPUSchedulingQueueListResponse: {
+            items: components["schemas"]["GPUSchedulingQueue"][];
+            total: number;
+            next_cursor?: string | null;
+        };
+        GPUSchedulingQueueCreateRequest: {
+            /** @description K8s 资源名规范 */
+            name: string;
+            /** @default 10 */
+            weight: number;
+            /** @default false */
+            reclaimable: boolean;
+            /** @enum {string} */
+            workload_class: "inference" | "training" | "batch";
+            /** Format: uuid */
+            project_id?: string | null;
+        };
+        GPUSchedulingQueueUpdateRequest: {
+            weight?: number;
+            reclaimable?: boolean;
+            /** @enum {string} */
+            workload_class?: "inference" | "training" | "batch";
+            /** Format: uuid */
+            project_id?: string | null;
+        };
         SandboxTemplate: {
             /** Format: uuid */
             id: string;
@@ -3226,6 +3478,85 @@ export interface operations {
                     };
                 };
             };
+        };
+    };
+    passwordLogin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description 账密登录成功，返回 TokenPair */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenPairResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description 用户名或密码错误（code=INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 租户不存在（code=TENANT_NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimitExceeded"];
+        };
+    };
+    platformPasswordLogin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformPasswordLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description 平台账密登录成功，返回平台 TokenPair（scope=platform） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenPairResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description 用户名或密码错误（code=INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimitExceeded"];
         };
     };
     beginOIDCLogin: {
@@ -3438,6 +3769,13 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            /**
+             * @description GPU 调度前置条件不满足。可能的 code：
+             *     - InsufficientGPU: GPU 资源不足，当前无可用算力满足本次创建请求
+             *     - GPUNodeIncompatible: 无兼容 GPU 节点，请调整型号偏好或调度队列
+             *     - QueueNotFound: 所选调度队列不存在或已删除
+             */
+            422: components["responses"]["PreconditionFailed"];
         };
     };
     getInstance: {
@@ -5095,6 +5433,35 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
+    queryRangeObservability: {
+        parameters: {
+            query: {
+                query: string;
+                start: string;
+                end: string;
+                step: string;
+                timeout?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description PromQL 区间查询结果（matrix） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservabilityRangeQueryResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
     listObservabilityAlertRules: {
         parameters: {
             query?: {
@@ -5225,6 +5592,73 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    getMeteringUsage: {
+        parameters: {
+            query: {
+                start_time: string;
+                end_time: string;
+                resource_type?: string;
+                group_by?: "resource_type" | "az" | "day" | "hour";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 租户用量统计 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items?: {
+                            resource_type?: string;
+                            total_quantity?: number;
+                            unit?: string;
+                            period?: string;
+                        }[];
+                        total?: number;
+                        dev_profile?: components["schemas"]["CoreDevProfileInfo"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getPlatformMeteringUsage: {
+        parameters: {
+            query: {
+                start_time: string;
+                end_time: string;
+                resource_type?: string;
+                group_by?: "tenant_id" | "day" | "hour";
+                /** @description 可选筛选单租户，须平台 RBAC 校验 */
+                tenant_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 平台用量查询成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeteringUsageResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     reportTokenUsage: {
@@ -5936,6 +6370,140 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    listGPUSchedulingQueues: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 队列列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GPUSchedulingQueueListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createGPUSchedulingQueue: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 幂等键，防止重复创建 */
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GPUSchedulingQueueCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description 队列创建成功 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GPUSchedulingQueue"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description 队列名称冲突，code: QueueNameConflict */
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getGPUSchedulingQueue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                queue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 队列详情 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GPUSchedulingQueue"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteGPUSchedulingQueue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                queue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 队列删除成功 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description 平台默认队列不可删除，code: PlatformDefaultProtected */
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateGPUSchedulingQueue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                queue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GPUSchedulingQueueUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 队列更新成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GPUSchedulingQueue"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description 平台默认队列不可修改，code: PlatformDefaultProtected */
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listSandboxTemplates: {
