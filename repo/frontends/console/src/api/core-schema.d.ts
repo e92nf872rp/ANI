@@ -48,6 +48,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/password/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 租户账密登录（账号密码 Tab） */
+        post: operations["passwordLogin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/platform/password/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 平台管理员账密登录 */
+        post: operations["platformPasswordLogin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/oidc/begin": {
         parameters: {
             query?: never;
@@ -2876,6 +2910,30 @@ export interface components {
         RefreshAccessTokenRequest: {
             refresh_token: string;
         };
+        PasswordLoginRequest: {
+            /** @description 租户 slug，用于定位 users 表所属 tenant */
+            tenant_name: string;
+            /** @description 登录用户名（不含命名空间前缀，服务端自动拼接 local:<username>） */
+            username: string;
+            /**
+             * Format: password
+             * @description 明文密码，仅用于 bcrypt 校验，不持久化
+             */
+            password: string;
+            /** @description 可选幂等键，重复提交返回同一 TokenPair */
+            idempotency_key?: string;
+        };
+        PlatformPasswordLoginRequest: {
+            /** @description 平台管理员用户名（无命名空间前缀，存储为 local:&lt;username&gt;，查询 users 表 EXISTS user_roles→roles.name=platform-admin） */
+            username: string;
+            /**
+             * Format: password
+             * @description 明文密码，仅用于 bcrypt 校验，不持久化
+             */
+            password: string;
+            /** @description 可选幂等键，重复提交返回同一 TokenPair */
+            idempotency_key?: string;
+        };
         RefreshAccessTokenResponse: {
             access_token: string;
             /** @example 3600 */
@@ -3444,6 +3502,85 @@ export interface operations {
                     };
                 };
             };
+        };
+    };
+    passwordLogin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description 账密登录成功，返回 TokenPair */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenPairResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description 用户名或密码错误（code=INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 租户不存在（code=TENANT_NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimitExceeded"];
+        };
+    };
+    platformPasswordLogin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformPasswordLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description 平台账密登录成功，返回平台 TokenPair（scope=platform） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenPairResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description 用户名或密码错误（code=INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimitExceeded"];
         };
     };
     beginOIDCLogin: {

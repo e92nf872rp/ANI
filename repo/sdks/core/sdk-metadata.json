@@ -35,6 +35,18 @@
       "scope": ""
     },
     {
+      "operationId": "passwordLogin",
+      "method": "POST",
+      "path": "/auth/password/login",
+      "scope": ""
+    },
+    {
+      "operationId": "platformPasswordLogin",
+      "method": "POST",
+      "path": "/auth/platform/password/login",
+      "scope": ""
+    },
+    {
       "operationId": "postAuthRefresh",
       "method": "POST",
       "path": "/auth/refresh",
@@ -814,6 +826,8 @@
     "ObservabilityAlertRuleListResponse",
     "ObservabilityQueryResponse",
     "ObservabilityRangeQueryResponse",
+    "PasswordLoginRequest",
+    "PlatformPasswordLoginRequest",
     "RefreshAccessTokenRequest",
     "RefreshAccessTokenResponse",
     "RegistryArtifact",
