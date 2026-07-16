@@ -1056,7 +1056,7 @@ export interface paths {
         };
         /**
          * PromQL 代理查询
-         * @description 通过 Core 代理 PromQL 查询，不暴露底层 Prometheus 地址。
+         * @description 通过 Core 代理 PromQL 瞬时查询（instant query），不暴露底层 Prometheus 地址。
          */
         get: operations["queryObservability"];
         put?: never;
