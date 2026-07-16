@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>111</dd></div>
-          <div><dt>Schemas</dt><dd>146</dd></div>
+          <div><dt>Operations</dt><dd>116</dd></div>
+          <div><dt>Schemas</dt><dd>150</dd></div>
         </dl>
       </section>
 
@@ -361,6 +361,46 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/gpu-scheduling/queues</code></td>
+          <td><code>listGPUSchedulingQueues</code></td>
+          <td>查询 GPU 调度队列列表</td>
+          <td><code>scope:gpu-scheduling:read</code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/gpu-scheduling/queues</code></td>
+          <td><code>createGPUSchedulingQueue</code></td>
+          <td>创建 GPU 调度队列</td>
+          <td><code>scope:gpu-scheduling:write</code></td>
+          <td>201, 400, 401, 403, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/gpu-scheduling/queues/{queue_id}</code></td>
+          <td><code>deleteGPUSchedulingQueue</code></td>
+          <td>删除 GPU 调度队列</td>
+          <td><code>scope:gpu-scheduling:write</code></td>
+          <td>204, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/gpu-scheduling/queues/{queue_id}</code></td>
+          <td><code>getGPUSchedulingQueue</code></td>
+          <td>查询单个 GPU 调度队列</td>
+          <td><code>scope:gpu-scheduling:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-patch">PATCH</span></td>
+          <td><code>/gpu-scheduling/queues/{queue_id}</code></td>
+          <td><code>updateGPUSchedulingQueue</code></td>
+          <td>更新 GPU 调度队列</td>
+          <td><code>scope:gpu-scheduling:write</code></td>
+          <td>200, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/healthz</code></td>
           <td><code>liveness</code></td>
           <td>Liveness probe（进程存活检查）</td>
@@ -389,7 +429,7 @@
           <td><code>createInstance</code></td>
           <td>创建实例</td>
           <td><code>scope:instances:create</code></td>
-          <td>201, 400, 401, 403, 409</td>
+          <td>201, 400, 401, 403, 409, 422</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1100,6 +1140,10 @@
         <li><code>GPUInventoryListResponse</code></li>
         <li><code>GPUInventoryRecord</code></li>
         <li><code>GPUOccupancyStats</code></li>
+        <li><code>GPUSchedulingQueue</code></li>
+        <li><code>GPUSchedulingQueueCreateRequest</code></li>
+        <li><code>GPUSchedulingQueueListResponse</code></li>
+        <li><code>GPUSchedulingQueueUpdateRequest</code></li>
         <li><code>HealthCheck</code></li>
         <li><code>InstanceConsoleSession</code></li>
         <li><code>InstanceEvent</code></li>
