@@ -140,7 +140,7 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>111</dd></div>
+          <div><dt>Operations</dt><dd>112</dd></div>
           <div><dt>Schemas</dt><dd>146</dd></div>
         </dl>
       </section>
@@ -580,7 +580,15 @@
           <td><code>/metering/usage</code></td>
           <td><code>getMeteringUsage</code></td>
           <td>查询租户用量统计</td>
-          <td><code></code></td>
+          <td><code>scope:metering:read</code></td>
+          <td>200, 400, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/metering/usage/platform</code></td>
+          <td><code>getPlatformMeteringUsage</code></td>
+          <td>查询平台跨租户用量</td>
+          <td><code>scope:metering:platform:read</code></td>
           <td>200, 400, 401, 403</td>
         </tr>
         <tr>

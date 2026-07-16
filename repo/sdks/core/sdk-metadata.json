@@ -320,7 +320,13 @@
       "operationId": "getMeteringUsage",
       "method": "GET",
       "path": "/metering/usage",
-      "scope": ""
+      "scope": "scope:metering:read"
+    },
+    {
+      "operationId": "getPlatformMeteringUsage",
+      "method": "GET",
+      "path": "/metering/usage/platform",
+      "scope": "scope:metering:platform:read"
     },
     {
       "operationId": "listNetworkLoadBalancers",

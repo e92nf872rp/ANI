@@ -1111,44 +1111,35 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 查询租户用量统计 */
-        get: {
-            parameters: {
-                query: {
-                    start_time: string;
-                    end_time: string;
-                    resource_type?: string;
-                    group_by?: "resource_type" | "az" | "day" | "hour";
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description 租户用量统计 */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            items?: {
-                                resource_type?: string;
-                                total_quantity?: number;
-                                unit?: string;
-                                period?: string;
-                            }[];
-                            total?: number;
-                            dev_profile?: components["schemas"]["CoreDevProfileInfo"];
-                        };
-                    };
-                };
-                400: components["responses"]["BadRequest"];
-                401: components["responses"]["Unauthorized"];
-                403: components["responses"]["Forbidden"];
-            };
+        /**
+         * 查询租户用量统计
+         * @description 在租户 JWT 上下文中查询本租户的用量数据。
+         *     tenant_id 从 JWT 提取，忽略 query 中的 tenant_id 参数。
+         */
+        get: operations["getMeteringUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/metering/usage/platform": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
         };
+        /**
+         * 查询平台跨租户用量
+         * @description 在平台 RBAC 上下文中查询全平台或指定租户的用量数据。
+         *     需 scope:metering:platform:read 权限。
+         *     items[].tenant_id 在此端点下必填。
+         *     若带 tenant_id query 须二次 RBAC 校验。
+         */
+        get: operations["getPlatformMeteringUsage"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5284,6 +5275,73 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    getMeteringUsage: {
+        parameters: {
+            query: {
+                start_time: string;
+                end_time: string;
+                resource_type?: string;
+                group_by?: "resource_type" | "az" | "day" | "hour";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 租户用量统计 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items?: {
+                            resource_type?: string;
+                            total_quantity?: number;
+                            unit?: string;
+                            period?: string;
+                        }[];
+                        total?: number;
+                        dev_profile?: components["schemas"]["CoreDevProfileInfo"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getPlatformMeteringUsage: {
+        parameters: {
+            query: {
+                start_time: string;
+                end_time: string;
+                resource_type?: string;
+                group_by?: "tenant_id" | "day" | "hour";
+                /** @description 可选筛选单租户，须平台 RBAC 校验 */
+                tenant_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 平台用量查询成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeteringUsageResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     reportTokenUsage: {

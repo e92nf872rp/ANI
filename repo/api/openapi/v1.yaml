@@ -3496,7 +3496,12 @@ paths:
   # ── 计量 ────────────────────────────────────────────────────────────────────
   /metering/usage:
     get:
+      operationId: getMeteringUsage
+      x-ani-rbac-scope: "scope:metering:read"
       summary: 查询租户用量统计
+      description: |
+        在租户 JWT 上下文中查询本租户的用量数据。
+        tenant_id 从 JWT 提取，忽略 query 中的 tenant_id 参数。
       tags: [Metering]
       parameters:
         - { name: start_time, in: query, required: true, schema: { type: string, format: date-time } }
@@ -3522,6 +3527,34 @@ paths:
                   total: { type: integer }
                   dev_profile:
                     $ref: '#/components/schemas/CoreDevProfileInfo'
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /metering/usage/platform:
+    get:
+      operationId: getPlatformMeteringUsage
+      x-ani-rbac-scope: "scope:metering:platform:read"
+      summary: 查询平台跨租户用量
+      description: |
+        在平台 RBAC 上下文中查询全平台或指定租户的用量数据。
+        需 scope:metering:platform:read 权限。
+        items[].tenant_id 在此端点下必填。
+        若带 tenant_id query 须二次 RBAC 校验。
+      tags: [Metering]
+      parameters:
+        - { name: start_time, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: end_time,   in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: resource_type, in: query, schema: { type: string } }
+        - { name: group_by, in: query, schema: { type: string, enum: [tenant_id, day, hour] } }
+        - { name: tenant_id, in: query, required: false, schema: { type: string }, description: "可选筛选单租户，须平台 RBAC 校验" }
+      responses:
+        "200":
+          description: 平台用量查询成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeteringUsageResponse'
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
