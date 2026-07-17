@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -234,3 +235,8 @@ func limitSecurityEventRecords(items []ports.InstanceSecurityEventRecord, limit 
 }
 
 var _ ports.InstanceObservability = (*LocalInstanceObservabilityService)(nil)
+
+// CreateConsoleSession is a stub; real implementation arrives in PR3.
+func (s *LocalInstanceObservabilityService) CreateConsoleSession(ctx context.Context, request ports.InstanceConsoleSessionCreateRequest) (ports.InstanceConsoleSessionRecord, error) {
+	return ports.InstanceConsoleSessionRecord{}, errors.New("CreateConsoleSession: not implemented yet, see PR3")
+}

@@ -50,6 +50,36 @@ type ObservabilityQueryResult struct {
 	DevProfile DevProfileInfo
 }
 
+// ObservabilityRangeQueryRequest 区间查询请求，用于绘制时序曲线。
+type ObservabilityRangeQueryRequest struct {
+	TenantID string
+	Query    string
+	Start    time.Time
+	End      time.Time
+	Step     time.Duration
+	Timeout  time.Duration
+}
+
+// ObservabilityRangePoint 单个时间序列采样点。
+type ObservabilityRangePoint struct {
+	Timestamp time.Time
+	Value     float64
+}
+
+// ObservabilityRangeSeries 一条时间序列，含 metric 标签与多个采样点。
+type ObservabilityRangeSeries struct {
+	Metric map[string]string
+	Values []ObservabilityRangePoint
+}
+
+// ObservabilityRangeQueryResult 区间查询结果（matrix）。
+type ObservabilityRangeQueryResult struct {
+	Query      string
+	ResultType ObservabilityResultType
+	Results    []ObservabilityRangeSeries
+	DevProfile DevProfileInfo
+}
+
 type ObservabilityAlertRuleRecord struct {
 	TenantID    string
 	RuleID      string
@@ -104,6 +134,7 @@ type ObservabilityAlertRuleListRequest struct {
 
 type ObservabilityService interface {
 	Query(ctx context.Context, request ObservabilityQueryRequest) (ObservabilityQueryResult, error)
+	QueryRange(ctx context.Context, request ObservabilityRangeQueryRequest) (ObservabilityRangeQueryResult, error)
 	CreateAlertRule(ctx context.Context, request ObservabilityAlertRuleCreateRequest) (ObservabilityAlertRuleRecord, error)
 	ListAlertRules(ctx context.Context, request ObservabilityAlertRuleListRequest) ([]ObservabilityAlertRuleRecord, error)
 	GetAlertRule(ctx context.Context, request ObservabilityAlertRuleGetRequest) (ObservabilityAlertRuleRecord, error)
