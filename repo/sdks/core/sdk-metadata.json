@@ -479,6 +479,66 @@
       "scope": "scope:networks:read"
     },
     {
+      "operationId": "listEmailEvents",
+      "method": "GET",
+      "path": "/notifications/email/events",
+      "scope": "scope:notifications:read"
+    },
+    {
+      "operationId": "listEmailRecipients",
+      "method": "GET",
+      "path": "/notifications/email/recipients",
+      "scope": "scope:notifications:read"
+    },
+    {
+      "operationId": "createEmailRecipient",
+      "method": "POST",
+      "path": "/notifications/email/recipients",
+      "scope": "scope:notifications:write"
+    },
+    {
+      "operationId": "deleteEmailRecipient",
+      "method": "DELETE",
+      "path": "/notifications/email/recipients/{recipient_id}",
+      "scope": "scope:notifications:write"
+    },
+    {
+      "operationId": "updateEmailRecipient",
+      "method": "PATCH",
+      "path": "/notifications/email/recipients/{recipient_id}",
+      "scope": "scope:notifications:write"
+    },
+    {
+      "operationId": "getEmailSmtpConfig",
+      "method": "GET",
+      "path": "/notifications/email/smtp",
+      "scope": "scope:notifications:read"
+    },
+    {
+      "operationId": "putEmailSmtpConfig",
+      "method": "PUT",
+      "path": "/notifications/email/smtp",
+      "scope": "scope:notifications:write"
+    },
+    {
+      "operationId": "listEmailSubscriptions",
+      "method": "GET",
+      "path": "/notifications/email/subscriptions",
+      "scope": "scope:notifications:read"
+    },
+    {
+      "operationId": "putEmailSubscriptions",
+      "method": "PUT",
+      "path": "/notifications/email/subscriptions",
+      "scope": "scope:notifications:write"
+    },
+    {
+      "operationId": "sendEmailTest",
+      "method": "POST",
+      "path": "/notifications/email/test",
+      "scope": "scope:notifications:write"
+    },
+    {
       "operationId": "listStorageObjects",
       "method": "GET",
       "path": "/objects",
@@ -735,6 +795,7 @@
     "CreateAPIKeyRequest",
     "CreateAPIKeyResponse",
     "CreateContainerInstanceConfig",
+    "CreateEmailRecipientRequest",
     "CreateGPUContainerInstanceConfig",
     "CreateInstanceConsoleSessionRequest",
     "CreateInstanceExecSessionRequest",
@@ -756,6 +817,15 @@
     "CreateVectorStoreRequest",
     "CreateVolumeSnapshotRequest",
     "CursorPage",
+    "EmailEventInfo",
+    "EmailEventListResponse",
+    "EmailRecipient",
+    "EmailRecipientListResponse",
+    "EmailSmtpConfig",
+    "EmailSubscription",
+    "EmailSubscriptionListResponse",
+    "EmailTestSendRequest",
+    "EmailTestSendResponse",
     "EncryptionKey",
     "EncryptionKeyCreateRequest",
     "EncryptionKeyListResponse",
@@ -828,6 +898,8 @@
     "ObservabilityRangeQueryResponse",
     "PasswordLoginRequest",
     "PlatformPasswordLoginRequest",
+    "PutEmailSmtpConfigRequest",
+    "PutEmailSubscriptionsRequest",
     "RefreshAccessTokenRequest",
     "RefreshAccessTokenResponse",
     "RegistryArtifact",
@@ -867,6 +939,7 @@
     "StorageVolumeListResponse",
     "TokenPairResponse",
     "TokenUsageReport",
+    "UpdateEmailRecipientRequest",
     "UpdateObservabilityAlertRuleRequest",
     "VectorStore",
     "VectorStoreDocumentInsertRequest",
@@ -901,6 +974,11 @@
     "createNetworkSecurityGroup",
     "createNetworkSubnet",
     "createNetworkVPC",
+    "createEmailRecipient",
+    "updateEmailRecipient",
+    "putEmailSmtpConfig",
+    "putEmailSubscriptions",
+    "sendEmailTest",
     "createStorageObject",
     "uploadStorageObject",
     "createObservabilityAlertRule",

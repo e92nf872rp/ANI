@@ -2106,6 +2106,13 @@ components:
         sent_at:
           type: string
           description: "发送时间"
+        auth_mode:
+          type: string
+          enum: [auth_code, password, none]
+          description: "认证模式"
+        username:
+          type: string
+          description: "登录账号"
 
   # 公共响应
   responses:
@@ -2145,11 +2152,6 @@ components:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
     PreconditionFailed:
       description: 前置条件不满足（code=PRECONDITION_FAILED）
-      content:
-        application/json:
-          schema: { $ref: '#/components/schemas/ErrorResponse' }
-    NotImplemented:
-      description: 接口尚未实现（code=NOT_IMPLEMENTED）
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -4685,7 +4687,6 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
-        "501": { $ref: '#/components/responses/NotImplemented' }
     put:
       operationId: putEmailSmtpConfig
       summary: 保存邮件发信通道配置
@@ -4708,7 +4709,6 @@ paths:
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
-        "501": { $ref: '#/components/responses/NotImplemented' }
 
   /notifications/email/recipients:
     get:
@@ -4727,7 +4727,6 @@ paths:
               schema: { $ref: '#/components/schemas/EmailRecipientListResponse' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
-        "501": { $ref: '#/components/responses/NotImplemented' }
     post:
       operationId: createEmailRecipient
       summary: 添加收件邮箱
@@ -4751,7 +4750,6 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "409": { $ref: '#/components/responses/Conflict' }
-        "501": { $ref: '#/components/responses/NotImplemented' }
 
   /notifications/email/recipients/{recipient_id}:
     patch:
@@ -4779,7 +4777,6 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
-        "501": { $ref: '#/components/responses/NotImplemented' }
     delete:
       operationId: deleteEmailRecipient
       summary: 删除收件邮箱
@@ -4796,7 +4793,6 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
-        "501": { $ref: '#/components/responses/NotImplemented' }
 
   /notifications/email/subscriptions:
     get:
@@ -4815,7 +4811,6 @@ paths:
               schema: { $ref: '#/components/schemas/EmailSubscriptionListResponse' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
-        "501": { $ref: '#/components/responses/NotImplemented' }
     put:
       operationId: putEmailSubscriptions
       summary: 保存事件邮件订阅
@@ -4838,7 +4833,6 @@ paths:
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
-        "501": { $ref: '#/components/responses/NotImplemented' }
 
   /notifications/email/events:
     get:
@@ -4857,7 +4851,6 @@ paths:
               schema: { $ref: '#/components/schemas/EmailEventListResponse' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
-        "501": { $ref: '#/components/responses/NotImplemented' }
 
   /notifications/email/test:
     post:
@@ -4883,7 +4876,6 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "422": { $ref: '#/components/responses/PreconditionFailed' }
-        "501": { $ref: '#/components/responses/NotImplemented' }
 
 # ── Tag 分组（Swagger UI 显示顺序）──────────────────────────────────────────
 tags:
