@@ -188,6 +188,8 @@ type GPUInstanceStatus struct {
 	Vendor             GPUVendor
 	Model              string
 	Count              int
+	QueueName          string
+	ResourceName       string
 	SchedulingReason   string
 	UtilizationPercent float64
 }
@@ -316,6 +318,7 @@ type WorkloadProviderObservation struct {
 	Reason       string
 	Networks     []WorkloadNetworkAttachment
 	Storage      []WorkloadStorageAttachment
+	GPUCount     int
 	ObservedAt   time.Time
 }
 

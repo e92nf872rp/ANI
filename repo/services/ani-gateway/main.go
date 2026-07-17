@@ -87,14 +87,11 @@ func main() {
 		logger.Error("failed to configure gateway shared store", "err", err)
 		os.Exit(1)
 	}
-	defer closeGatewayStore()
-
-	emailNotificationService, err := newGatewayEmailNotificationService(gatewayEmailNotificationRuntimeConfigFromEnv())
-	if err != nil {
-		logger.Error("failed to configure email notification service", "err", err)
-		os.Exit(1)
-	}
-
+	defer func() {
+		if closeErr := closeGatewayStore(); closeErr != nil {
+			logger.Error("failed to close gateway shared store", "err", closeErr)
+		}
+	}()
 	middleware.StartAuditWorker()
 	middleware.Register(h, gatewayStore)
 	router.RegisterWithOptions(h, router.RegisterOptions{
@@ -107,7 +104,6 @@ func main() {
 		VectorStoreService:                    vectorStoreService,
 		InstanceObservability:                 instanceObservability,
 		InstanceObservabilityUsesInstanceName: instanceObservabilityUsesInstanceName,
-		EmailNotificationService:              emailNotificationService,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -115,7 +111,9 @@ func main() {
 
 	go func() {
 		<-ctx.Done()
-		h.Shutdown(context.Background())
+		if shutdownErr := h.Shutdown(context.Background()); shutdownErr != nil {
+			logger.Error("failed to shut down gateway", "err", shutdownErr)
+		}
 	}()
 
 	h.Spin()

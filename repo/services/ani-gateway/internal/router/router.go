@@ -1,7 +1,8 @@
 // Package router registers all ANI Gateway API routes.
 // Core routes follow /api/v1/{resource}; Services transitional routes follow
-// /api/v1/svc/{resource}. Stubs return 501 until the backing service is
-// implemented by the owning team.
+// /api/v1/svc/{resource}. Resource handlers are transitional placeholders;
+// their method/path surface is checked against Services OpenAPI, while
+// response semantics remain non-production until the owning team implements it.
 package router
 
 import (

@@ -6,7 +6,7 @@
 ## 架构决策
 
 - GPU 容器 / Sandbox：**Core 统一实例**（`/api/v1/instances*`），不实现 deprecated Services 路径
-- OpenAPI 已声明（Phase 2）≠ handler 已实现（Phase 4）
+- OpenAPI 已声明（Phase 2）≠ handler 已实现（Phase 4）；当前 method/path 差异以 `repo/architecture/services-route-baseline.yaml` 和 `make validate-services` 为准
 
 ## Core 依赖链
 

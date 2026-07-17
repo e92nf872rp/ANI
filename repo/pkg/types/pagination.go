@@ -33,12 +33,6 @@ func (r *ListRequest) Normalize() {
 	}
 }
 
-// cursorPayload is the internal structure encoded in the cursor token.
-type cursorPayload struct {
-	CreatedAt time.Time `json:"t"`
-	ID        uuid.UUID `json:"id"`
-}
-
 // EncodeCursor encodes created_at + id into an opaque base64 cursor string.
 func EncodeCursor(createdAt time.Time, id uuid.UUID) string {
 	raw := fmt.Sprintf("%s|%s", createdAt.UTC().Format(time.RFC3339Nano), id.String())

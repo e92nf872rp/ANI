@@ -3,6 +3,11 @@ import { Button, Table, Tag } from 'tdesign-react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
 
+type KnowledgeBaseRow = {
+  id: string
+  status?: string
+}
+
 export const Route = createFileRoute('/kb/')({
   component: KBList,
 })
@@ -17,9 +22,9 @@ function KBList() {
     { title: '名称', colKey: 'name' },
     { title: '文档数', colKey: 'doc_count' },
     { title: '状态', colKey: 'status',
-      cell: ({ row }: any) => <Tag theme={row.status === 'active' ? 'success' : 'default'}>{row.status}</Tag> },
+      cell: ({ row }: { row: KnowledgeBaseRow }) => <Tag theme={row.status === 'active' ? 'success' : 'default'}>{row.status}</Tag> },
     { title: '操作', colKey: 'actions',
-      cell: ({ row }: any) => (
+      cell: ({ row }: { row: KnowledgeBaseRow }) => (
         <Link to="/kb/$kbId/chat" params={{ kbId: String(row.id) }}>问答</Link>
       ) },
   ]

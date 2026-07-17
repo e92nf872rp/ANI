@@ -137,6 +137,11 @@ def operation_id(method: str, path: str) -> str:
 
 def write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.suffix == ".go":
+        content = content.replace(
+            chr(9) + '"encoding/json"' + chr(10) + chr(9) + '"encoding/hex"',
+            chr(9) + '"encoding/hex"' + chr(10) + chr(9) + '"encoding/json"',
+        )
     path.write_text(content, encoding="utf-8")
 
 
@@ -1014,6 +1019,7 @@ def generate_java(root: Path, layer: str, config: dict[str, str], metadata: dict
     target = root / "sdks" / layer / "java"
     package = config["java_package"]
     package_path = Path(*package.split("."))
+    smoke_base_url = "http://127.0.0.1:4010/api/v1" + ("/svc" if layer == "services" else "")
     operations = [item["operationId"] for item in metadata["operations"]]
     paths = [f"{item['method']} {item['path']}" for item in metadata["operations"]]
     idempotency_operations = metadata["idempotencyOperations"]
@@ -1260,7 +1266,7 @@ public final class ApiClient {{
 
 public final class Smoke {{
     public static void main(String[] args) {{
-        ApiClient client = new ApiClient("", "token");
+        ApiClient client = new ApiClient({json.dumps(smoke_base_url)}, "token");
         if (client.baseUrl().isEmpty() || ApiClient.TITLE.isEmpty() || ApiClient.VERSION.isEmpty()) {{
             throw new IllegalStateException("invalid SDK metadata");
         }}

@@ -48,6 +48,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/password/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 租户账密登录（账号密码 Tab） */
+        post: operations["passwordLogin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/platform/password/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 平台管理员账密登录 */
+        post: operations["platformPasswordLogin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/oidc/begin": {
         parameters: {
             query?: never;
@@ -185,7 +219,7 @@ export interface paths {
         };
         /**
          * 查询实例列表
-         * @description Services P0 依赖路径。返回 VM、container、gpu_container 的 Core 统一实例视图。
+         * @description Services P0 依赖路径。返回 VM、container、gpu_container、sandbox 的 Core 统一实例视图。
          *     当前 Alpha 冻结 path/schema/error/state/RBAC scope；dev/local profile 可使用本地 provider。
          */
         get: operations["listInstances"];
@@ -194,6 +228,8 @@ export interface paths {
          * 创建实例
          * @description 创建 VM、container、gpu_container 或 sandbox。POST 创建必须携带 idempotency_key；
          *     同一 (tenant_id, idempotency_key) 在 24 小时内返回同一操作结果。
+         *     推荐按 kind 填写对应 `vm_config` / `container_config` / `gpu_container_config` / `sandbox_config`；
+         *     扁平 boot_image/ssh_*\/replicas/gpu 字段仍接受，作为 v1 兼容别名。
          */
         post: operations["createInstance"];
         delete?: never;
@@ -1025,6 +1061,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
+                /** @description 异步任务状态 */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -1056,6 +1093,26 @@ export interface paths {
          * @description 通过 Core 代理 PromQL 查询，不暴露底层 Prometheus 地址。
          */
         get: operations["queryObservability"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/observability/query_range": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * PromQL 代理区间查询
+         * @description 通过 Core 代理 PromQL 区间查询（range query），返回时间区间内多个采样点，用于绘制时序曲线。不暴露底层 Prometheus 地址。
+         */
+        get: operations["queryRangeObservability"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1108,44 +1165,35 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 查询租户用量统计 */
-        get: {
-            parameters: {
-                query: {
-                    start_time: string;
-                    end_time: string;
-                    resource_type?: string;
-                    group_by?: "resource_type" | "az" | "day" | "hour";
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description 租户用量统计 */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            items?: {
-                                resource_type?: string;
-                                total_quantity?: number;
-                                unit?: string;
-                                period?: string;
-                            }[];
-                            total?: number;
-                            dev_profile?: components["schemas"]["CoreDevProfileInfo"];
-                        };
-                    };
-                };
-                400: components["responses"]["BadRequest"];
-                401: components["responses"]["Unauthorized"];
-                403: components["responses"]["Forbidden"];
-            };
+        /**
+         * 查询租户用量统计
+         * @description 在租户 JWT 上下文中查询本租户的用量数据。
+         *     tenant_id 从 JWT 提取，忽略 query 中的 tenant_id 参数。
+         */
+        get: operations["getMeteringUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/metering/usage/platform": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
         };
+        /**
+         * 查询平台跨租户用量
+         * @description 在平台 RBAC 上下文中查询全平台或指定租户的用量数据。
+         *     需 scope:metering:platform:read 权限。
+         *     items[].tenant_id 在此端点下必填。
+         *     若带 tenant_id query 须二次 RBAC 校验。
+         */
+        get: operations["getPlatformMeteringUsage"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1551,6 +1599,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/gpu-scheduling/queues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询 GPU 调度队列列表
+         * @description 返回当前租户可见的 GPU 调度队列，含平台默认队列和租户自定义队列。
+         */
+        get: operations["listGPUSchedulingQueues"];
+        put?: never;
+        /**
+         * 创建 GPU 调度队列
+         * @description 创建租户自定义调度队列，映射为 Volcano Queue CRD。平台默认队列不可通过此接口创建。
+         */
+        post: operations["createGPUSchedulingQueue"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gpu-scheduling/queues/{queue_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询单个 GPU 调度队列 */
+        get: operations["getGPUSchedulingQueue"];
+        put?: never;
+        post?: never;
+        /**
+         * 删除 GPU 调度队列
+         * @description 删除租户自定义队列。平台默认队列不可删除。
+         */
+        delete: operations["deleteGPUSchedulingQueue"];
+        options?: never;
+        head?: never;
+        /**
+         * 更新 GPU 调度队列
+         * @description 更新租户自定义队列的权重、可回收性等属性。平台默认队列不可修改。
+         */
+        patch: operations["updateGPUSchedulingQueue"];
+        trace?: never;
+    };
     "/sandbox-templates": {
         parameters: {
             query?: never;
@@ -1830,9 +1927,9 @@ export interface components {
              * @example model.import
              * @enum {string}
              */
-            task_type: "model.import" | "kb.parse" | "kb.index" | "inference.deploy";
+            task_type: "model.import" | "kb.parse" | "kb.index" | "inference.deploy" | "volume.snapshot.create";
             /** @enum {string|null} */
-            resource_type?: "inference_service" | "kb_document" | "model_version" | null;
+            resource_type?: "inference_service" | "kb_document" | "model_version" | "volume_snapshot" | null;
             /** Format: uuid */
             resource_id?: string | null;
             /** @enum {string} */
@@ -1946,6 +2043,11 @@ export interface components {
                 vendor?: string | null;
                 model?: string | null;
                 count?: number;
+                /** @description 调度队列名（Volcano Queue） */
+                queue_name?: string | null;
+                /** @description 调度资源名，如 nvidia.com/gpu 或 nvidia.com/vgpu */
+                resource_name?: string | null;
+                /** @description 调度说明或失败原因，如 InsufficientGPU */
                 scheduling_reason?: string | null;
                 /** Format: float */
                 utilization_percent?: number | null;
@@ -2025,6 +2127,11 @@ export interface components {
             total: number;
             next_cursor?: string | null;
         };
+        /**
+         * @description 创建实例请求。共享字段（name/kind/image/cpu/memory 等）留在顶层；
+         *     按 kind 选用对应 `*_config`（推荐）。扁平 VM/容器/GPU 字段保留为 v1 兼容别名。
+         *     同名字段以 `*_config` 为准；与扁平别名冲突或传入跨类型 config 时返回 400。
+         */
         CreateInstanceRequest: {
             /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
             idempotency_key: string;
@@ -2044,17 +2151,32 @@ export interface components {
             memory?: string;
             /** @default true */
             auto_start: boolean;
-            /** @description VM boot image 引用 */
+            vm_config?: components["schemas"]["CreateVMInstanceConfig"];
+            container_config?: components["schemas"]["CreateContainerInstanceConfig"];
+            gpu_container_config?: components["schemas"]["CreateGPUContainerInstanceConfig"];
+            sandbox_config?: components["schemas"]["SandboxConfig"];
+            /**
+             * @deprecated
+             * @description 兼容别名；优先使用 vm_config.boot_image
+             */
             boot_image?: string | null;
             /**
-             * @description VM SSH 用户名；仅 VM 使用
+             * @deprecated
+             * @description 兼容别名；优先使用 vm_config.ssh_username
              * @default ubuntu
              */
             ssh_username: string | null;
-            /** @description VM SSH key/secret 引用；不包含私钥内容 */
+            /**
+             * @deprecated
+             * @description 兼容别名；优先使用 vm_config.ssh_key_ref
+             */
             ssh_key_ref?: string | null;
             /** @default false */
             termination_protection: boolean;
+            /**
+             * @deprecated
+             * @description 兼容别名；优先使用 gpu_container_config.gpu
+             */
             gpu?: {
                 /** @example nvidia */
                 vendor?: string;
@@ -2062,13 +2184,77 @@ export interface components {
                 model?: string;
                 /** @default 1 */
                 count: number;
+                /** @description 指定调度队列名；为空时按 workload_class 选默认队列 */
+                queue_name?: string | null;
+                /**
+                 * @description GPU 分配模式：dedicated=整卡，vgpu=HAMi vGPU
+                 * @default dedicated
+                 * @enum {string}
+                 */
+                allocation_mode: "dedicated" | "vgpu";
+                /**
+                 * @description 工作负载类型，用于选默认队列
+                 * @default inference
+                 * @enum {string}
+                 */
+                workload_class: "inference" | "training" | "batch";
             } | null;
             /**
-             * @description Container/GPU Container 副本数；VM 固定为 1
+             * @deprecated
+             * @description 兼容别名；优先使用 container_config.replicas 或 gpu_container_config.replicas
              * @default 1
              */
             replicas: number;
-            sandbox_config?: components["schemas"]["SandboxConfig"];
+        };
+        /** @description kind=vm 专用配置；共享 image/cpu/memory 仍在 CreateInstanceRequest 顶层。 */
+        CreateVMInstanceConfig: {
+            /** @description VM boot image 引用 */
+            boot_image?: string | null;
+            /**
+             * @description VM SSH 用户名
+             * @default ubuntu
+             */
+            ssh_username: string | null;
+            /** @description VM SSH key/secret 引用；不包含私钥内容 */
+            ssh_key_ref?: string | null;
+        };
+        /** @description kind=container 专用配置；共享 image/cpu/memory 仍在 CreateInstanceRequest 顶层。 */
+        CreateContainerInstanceConfig: {
+            /**
+             * @description 容器副本数
+             * @default 1
+             */
+            replicas: number;
+        };
+        /** @description kind=gpu_container 专用配置；共享 image/cpu/memory 仍在 CreateInstanceRequest 顶层。 */
+        CreateGPUContainerInstanceConfig: {
+            /**
+             * @description GPU 容器副本数
+             * @default 1
+             */
+            replicas: number;
+            gpu?: {
+                /** @example nvidia */
+                vendor?: string;
+                /** @example A100 */
+                model?: string;
+                /** @default 1 */
+                count: number;
+                /** @description 指定调度队列名；为空时按 workload_class 选默认队列 */
+                queue_name?: string | null;
+                /**
+                 * @description GPU 分配模式：dedicated=整卡，vgpu=HAMi vGPU
+                 * @default dedicated
+                 * @enum {string}
+                 */
+                allocation_mode: "dedicated" | "vgpu";
+                /**
+                 * @description 工作负载类型，用于选默认队列
+                 * @default inference
+                 * @enum {string}
+                 */
+                workload_class: "inference" | "training" | "batch";
+            } | null;
         };
         /**
          * @description Sandbox 出口策略；local profile 仅记录意图，不代表真实网络隔离已执行。
@@ -2111,6 +2297,26 @@ export interface components {
                 value: number;
                 /** Format: date-time */
                 timestamp?: string | null;
+            }[];
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
+        };
+        /** @description PromQL 代理区间查询结果（matrix）；返回时间区间内多个采样点，用于绘制时序曲线。 */
+        ObservabilityRangeQueryResponse: {
+            query: string;
+            /** @enum {string} */
+            result_type: "matrix" | "vector" | "scalar" | "string";
+            /** @description 每条 series 含一组时间序列采样点。 */
+            results: {
+                metric: {
+                    [key: string]: string;
+                };
+                /** @description 时间序列采样点列表，每个点为 [timestamp, value]。 */
+                values: {
+                    /** Format: date-time */
+                    timestamp: string;
+                    /** Format: double */
+                    value: number;
+                }[];
             }[];
             dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
@@ -2704,6 +2910,30 @@ export interface components {
         RefreshAccessTokenRequest: {
             refresh_token: string;
         };
+        PasswordLoginRequest: {
+            /** @description 租户 slug，用于定位 users 表所属 tenant */
+            tenant_name: string;
+            /** @description 登录用户名（不含命名空间前缀，服务端自动拼接 local:<username>） */
+            username: string;
+            /**
+             * Format: password
+             * @description 明文密码，仅用于 bcrypt 校验，不持久化
+             */
+            password: string;
+            /** @description 可选幂等键，重复提交返回同一 TokenPair */
+            idempotency_key?: string;
+        };
+        PlatformPasswordLoginRequest: {
+            /** @description 平台管理员用户名（无命名空间前缀，存储为 local:&lt;username&gt;，查询 users 表 EXISTS user_roles→roles.name=platform-admin） */
+            username: string;
+            /**
+             * Format: password
+             * @description 明文密码，仅用于 bcrypt 校验，不持久化
+             */
+            password: string;
+            /** @description 可选幂等键，重复提交返回同一 TokenPair */
+            idempotency_key?: string;
+        };
         RefreshAccessTokenResponse: {
             access_token: string;
             /** @example 3600 */
@@ -2763,7 +2993,9 @@ export interface components {
         };
         InstanceLogListResponse: {
             items: components["schemas"]["InstanceLogEntry"][];
+            total: number;
             next_cursor?: string | null;
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
         InstanceEvent: {
             id: string;
@@ -2779,7 +3011,9 @@ export interface components {
         };
         InstanceEventListResponse: {
             items: components["schemas"]["InstanceEvent"][];
+            total: number;
             next_cursor?: string | null;
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
         InstanceMetrics: {
             /** Format: uuid */
@@ -2794,6 +3028,7 @@ export interface components {
             gpu_memory_total_mb?: number | null;
             network_rx_bytes?: number | null;
             network_tx_bytes?: number | null;
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
         InstanceSecurityEvent: {
             /** Format: uuid */
@@ -2809,7 +3044,9 @@ export interface components {
         };
         InstanceSecurityEventListResponse: {
             items: components["schemas"]["InstanceSecurityEvent"][];
+            total: number;
             next_cursor?: string | null;
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
         InstanceExecSession: {
             /** Format: uuid */
@@ -2821,6 +3058,7 @@ export interface components {
             token?: string;
             /** Format: date-time */
             expires_at: string;
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
         CreateInstanceExecSessionRequest: {
             idempotency_key: string;
@@ -2839,38 +3077,33 @@ export interface components {
             cols: number;
         };
         NetworkRoute: {
-            /** Format: uuid */
             id: string;
-            /** Format: uuid */
             vpc_id: string;
             destination_cidr: string;
             /** @enum {string} */
             next_hop_type: "gateway" | "instance" | "nat";
-            /** Format: uuid */
             next_hop_id: string;
             description?: string | null;
             /** Format: date-time */
             created_at: string;
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
         NetworkRouteListResponse: {
             items: components["schemas"]["NetworkRoute"][];
+            total: number;
             next_cursor?: string | null;
         };
         CreateNetworkRouteRequest: {
             idempotency_key: string;
-            /** Format: uuid */
             vpc_id: string;
             destination_cidr: string;
             /** @enum {string} */
             next_hop_type: "gateway" | "instance" | "nat";
-            /** Format: uuid */
             next_hop_id: string;
             description?: string;
         };
         VolumeSnapshotRecord: {
-            /** Format: uuid */
             id: string;
-            /** Format: uuid */
             volume_id: string;
             name: string;
             /** @enum {string} */
@@ -2878,9 +3111,11 @@ export interface components {
             size_bytes: number;
             /** Format: date-time */
             created_at: string;
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
         VolumeSnapshotListResponse: {
             items: components["schemas"]["VolumeSnapshotRecord"][];
+            total: number;
             next_cursor?: string | null;
         };
         CreateVolumeSnapshotRequest: {
@@ -2889,20 +3124,19 @@ export interface components {
             description?: string;
         };
         FilesystemMountTarget: {
-            /** Format: uuid */
             id: string;
-            /** Format: uuid */
             filesystem_id: string;
-            /** Format: uuid */
             subnet_id: string;
             ip_address: string;
             /** @enum {string} */
             status: "creating" | "available" | "deleting" | "error";
             /** Format: date-time */
             created_at: string;
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
         FilesystemMountTargetListResponse: {
             items: components["schemas"]["FilesystemMountTarget"][];
+            total: number;
             next_cursor?: string | null;
         };
         StorageBucketRecord: {
@@ -2919,6 +3153,7 @@ export interface components {
         };
         StorageBucketListResponse: {
             items: components["schemas"]["StorageBucketRecord"][];
+            total: number;
             next_cursor?: string | null;
         };
         CreateStorageBucketRequest: {
@@ -2983,11 +3218,12 @@ export interface components {
             status: "running" | "pending" | "failed" | "succeeded";
             /** Format: date-time */
             created_at: string;
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
         K8sClusterWorkloadListResponse: {
             items: components["schemas"]["K8sClusterWorkload"][];
             next_cursor?: string | null;
-            total?: number;
+            total: number;
         };
         GPUInventoryRecord: {
             /** Format: uuid */
@@ -3003,11 +3239,13 @@ export interface components {
             tenant_id?: string | null;
             /** Format: uuid */
             instance_id?: string | null;
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
         GPUInventoryListResponse: {
             items: components["schemas"]["GPUInventoryRecord"][];
             next_cursor?: string | null;
-            total?: number;
+            total: number;
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
         GPUOccupancyStats: {
             total: number;
@@ -3020,6 +3258,53 @@ export interface components {
                 in_use?: number;
                 available?: number;
             }[];
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
+        };
+        /** @description GPU 调度队列，映射 Volcano Queue CRD */
+        GPUSchedulingQueue: {
+            /** Format: uuid */
+            id: string;
+            /** @description 租户内唯一队列名 */
+            name: string;
+            /** @default 10 */
+            weight: number;
+            /** @default false */
+            reclaimable: boolean;
+            /** @enum {string} */
+            workload_class: "inference" | "training" | "batch";
+            /** Format: uuid */
+            project_id?: string | null;
+            /** @description 平台默认队列不可删除或修改 */
+            is_platform_default: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        GPUSchedulingQueueListResponse: {
+            items: components["schemas"]["GPUSchedulingQueue"][];
+            total: number;
+            next_cursor?: string | null;
+        };
+        GPUSchedulingQueueCreateRequest: {
+            /** @description K8s 资源名规范 */
+            name: string;
+            /** @default 10 */
+            weight: number;
+            /** @default false */
+            reclaimable: boolean;
+            /** @enum {string} */
+            workload_class: "inference" | "training" | "batch";
+            /** Format: uuid */
+            project_id?: string | null;
+        };
+        GPUSchedulingQueueUpdateRequest: {
+            weight?: number;
+            reclaimable?: boolean;
+            /** @enum {string} */
+            workload_class?: "inference" | "training" | "batch";
+            /** Format: uuid */
+            project_id?: string | null;
         };
         SandboxTemplate: {
             /** Format: uuid */
@@ -3034,10 +3319,13 @@ export interface components {
             is_builtin: boolean;
             /** Format: date-time */
             created_at: string;
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
         SandboxTemplateListResponse: {
             items: components["schemas"]["SandboxTemplate"][];
+            total: number;
             next_cursor?: string | null;
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
     };
     responses: {
@@ -3216,6 +3504,85 @@ export interface operations {
             };
         };
     };
+    passwordLogin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description 账密登录成功，返回 TokenPair */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenPairResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description 用户名或密码错误（code=INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 租户不存在（code=TENANT_NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimitExceeded"];
+        };
+    };
+    platformPasswordLogin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformPasswordLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description 平台账密登录成功，返回平台 TokenPair（scope=platform） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenPairResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description 用户名或密码错误（code=INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimitExceeded"];
+        };
+    };
     beginOIDCLogin: {
         parameters: {
             query?: never;
@@ -3377,7 +3744,7 @@ export interface operations {
     listInstances: {
         parameters: {
             query?: {
-                kind?: "vm" | "container" | "gpu_container";
+                kind?: "vm" | "container" | "gpu_container" | "sandbox";
                 limit?: number;
                 cursor?: string;
             };
@@ -3426,6 +3793,13 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            /**
+             * @description GPU 调度前置条件不满足。可能的 code：
+             *     - InsufficientGPU: GPU 资源不足，当前无可用算力满足本次创建请求
+             *     - GPUNodeIncompatible: 无兼容 GPU 节点，请调整型号偏好或调度队列
+             *     - QueueNotFound: 所选调度队列不存在或已删除
+             */
+            422: components["responses"]["PreconditionFailed"];
         };
     };
     getInstance: {
@@ -4266,10 +4640,12 @@ export interface operations {
             /** @description 快照创建任务已提交 */
             202: {
                 headers: {
+                    /** @description 任务轮询 URL */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["VolumeSnapshotRecord"];
+                    "application/json": components["schemas"]["AsyncTask"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -5081,6 +5457,35 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
+    queryRangeObservability: {
+        parameters: {
+            query: {
+                query: string;
+                start: string;
+                end: string;
+                step: string;
+                timeout?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description PromQL 区间查询结果（matrix） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservabilityRangeQueryResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
     listObservabilityAlertRules: {
         parameters: {
             query?: {
@@ -5213,6 +5618,73 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    getMeteringUsage: {
+        parameters: {
+            query: {
+                start_time: string;
+                end_time: string;
+                resource_type?: string;
+                group_by?: "resource_type" | "az" | "day" | "hour";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 租户用量统计 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items?: {
+                            resource_type?: string;
+                            total_quantity?: number;
+                            unit?: string;
+                            period?: string;
+                        }[];
+                        total?: number;
+                        dev_profile?: components["schemas"]["CoreDevProfileInfo"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getPlatformMeteringUsage: {
+        parameters: {
+            query: {
+                start_time: string;
+                end_time: string;
+                resource_type?: string;
+                group_by?: "tenant_id" | "day" | "hour";
+                /** @description 可选筛选单租户，须平台 RBAC 校验 */
+                tenant_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 平台用量查询成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeteringUsageResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
     reportTokenUsage: {
         parameters: {
             query?: never;
@@ -5252,6 +5724,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description K8s 集群列表 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5275,6 +5748,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description K8s 集群创建成功 */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -5301,6 +5775,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description K8s 集群详情 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5322,6 +5797,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description K8s 集群删除成功 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5343,6 +5819,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description K8s 集群 kubeconfig */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5370,6 +5847,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description K8s 集群升级结果 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5394,6 +5872,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description K8s 集群节点池列表 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5420,6 +5899,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description K8s 集群节点池创建成功 */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -5445,6 +5925,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description K8s 集群节点池详情 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5468,6 +5949,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description K8s 集群节点池删除成功 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5496,6 +5978,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description K8s 集群节点池更新成功 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5524,6 +6007,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description K8s 集群代理响应 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5579,6 +6063,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description 加密密钥列表 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5602,6 +6087,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description 加密密钥创建成功 */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -5623,6 +6109,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description 加密密钥详情 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5644,6 +6131,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description 加密密钥删除成功 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5669,6 +6157,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description 加密密钥轮换结果 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5696,6 +6185,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description 加密密钥吊销成功 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5721,6 +6211,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description 加密对象并生成解封令牌成功 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5746,6 +6237,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description 对象解封令牌创建成功 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5770,6 +6262,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Secret 元数据列表 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5793,6 +6286,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Secret 创建成功 */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -5814,6 +6308,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Secret 元数据详情 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5836,6 +6331,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Secret 删除成功 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5862,6 +6358,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Secret 绑定创建成功 */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -5922,6 +6419,140 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    listGPUSchedulingQueues: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 队列列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GPUSchedulingQueueListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createGPUSchedulingQueue: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 幂等键，防止重复创建 */
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GPUSchedulingQueueCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description 队列创建成功 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GPUSchedulingQueue"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description 队列名称冲突，code: QueueNameConflict */
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getGPUSchedulingQueue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                queue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 队列详情 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GPUSchedulingQueue"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteGPUSchedulingQueue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                queue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 队列删除成功 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description 平台默认队列不可删除，code: PlatformDefaultProtected */
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateGPUSchedulingQueue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                queue_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GPUSchedulingQueueUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 队列更新成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GPUSchedulingQueue"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description 平台默认队列不可修改，code: PlatformDefaultProtected */
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listSandboxTemplates: {

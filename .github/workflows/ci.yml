@@ -1,0 +1,308 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+env:
+  GO_VERSION: "1.25.12"
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "20"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  # ── Go 服务 CI ──────────────────────────────────────────────────────────────
+  go-ci:
+    name: Go Build & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: repo
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: |
+            repo/go.work.sum
+            repo/pkg/go.sum
+            repo/services/*/go.sum
+
+      - name: Install tools
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.27.1
+          golangci_version=2.12.2
+          golangci_sha256=8df580d2670fed8fa984aac0507099af8df275e665215f5c7a2ae3943893a553
+          golangci_archive="$RUNNER_TEMP/golangci-lint-${golangci_version}-linux-amd64.tar.gz"
+          curl -sSfL \
+            "https://github.com/golangci/golangci-lint/releases/download/v${golangci_version}/golangci-lint-${golangci_version}-linux-amd64.tar.gz" \
+            -o "$golangci_archive"
+          echo "${golangci_sha256}  ${golangci_archive}" | sha256sum -c -
+          tar -xzf "$golangci_archive" -C "$RUNNER_TEMP"
+          install -m 0755 \
+            "$RUNNER_TEMP/golangci-lint-${golangci_version}-linux-amd64/golangci-lint" \
+            "$(go env GOPATH)/bin/golangci-lint"
+
+      - name: Build all Go services
+        run: make build
+
+      - name: Run tests
+        run: make test-go
+
+      - name: Security scan (gosec)
+        run: gosec -severity high -quiet ./services/... ./operators/...
+
+      - name: Formatting
+        run: |
+          set -euo pipefail
+          unformatted="$(find . -name '*.go' -not -path './.cache/*' -print0 | xargs -0 gofmt -l)"
+          test -z "$unformatted" || {
+            echo "Unformatted Go files:"
+            echo "$unformatted"
+            exit 1
+          }
+
+      - name: Lint (golangci-lint)
+        run: |
+          set -euo pipefail
+          while IFS= read -r module; do
+            echo "→ golangci-lint $module"
+            (cd "$module" && golangci-lint run ./...)
+          done < <(python scripts/list_go_modules.py)
+
+      - name: Coverage report
+        run: |
+          set -euo pipefail
+          while IFS= read -r module; do
+            profile="$RUNNER_TEMP/coverage-${module//\//-}.out"
+            (cd "$module" && go test ./... -coverprofile="$profile" -covermode=atomic)
+            go tool cover -func="$profile" | tail -1
+          done < <(python scripts/list_go_modules.py)
+
+  # ── Python AI 层 CI ─────────────────────────────────────────────────────────
+  python-ci:
+    name: Python AI Services
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: repo
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: repo/ai/rag-engine/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          pip install -r ai/rag-engine/requirements.txt
+          pip install ruff mypy pytest pytest-asyncio
+          pip check
+
+      - name: Lint
+        run: |
+          ruff check ai/
+          mypy ai/ --ignore-missing-imports
+
+      - name: Test
+        run: |
+          python -m compileall -q ai/rag-engine
+          if find ai -type f \( -name 'test_*.py' -o -name '*_test.py' \) -print -quit | grep -q .; then
+            pytest ai/ -v --tb=short
+          else
+            echo "No Python test files under ai; compile check completed."
+          fi
+
+      - name: Enforce Python AI test policy
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python scripts/validate_python_test_policy.py --base "$BASE_SHA"
+
+  # ── 前端 CI ─────────────────────────────────────────────────────────────────
+  frontend-ci:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: repo
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: repo/frontends/console/package-lock.json
+
+      - name: Install dependencies
+        run: npm --prefix frontends/console ci
+
+      - name: Dependency audit
+        run: npm --prefix frontends/console audit --audit-level=high
+
+      - name: Type check
+        run: npm --prefix frontends/console run type-check
+
+      - name: Lint
+        run: npm --prefix frontends/console run lint
+
+      - name: Build
+        run: npm --prefix frontends/console run build
+
+  # ── Services PR 门禁 ────────────────────────────────────────────────────────
+  services-pr-gate:
+    name: Services Boundary / API / Docs Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: repo
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: |
+            repo/go.work.sum
+            repo/pkg/go.sum
+            repo/services/*/go.sum
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: repo/ci/requirements-contract.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: repo/frontends/console/package-lock.json
+
+      - name: Install Python gate dependencies
+        run: |
+          pip install -r ci/requirements-contract.txt
+
+      - name: Run Services PR gate
+        run: make validate-services
+
+      - name: Validate CI policy contracts
+        run: make validate-ci-workflow
+
+      - name: Validate document entrypoints
+        run: make validate-doc-entrypoints
+
+  # ── 依赖 CVE 扫描 ────────────────────────────────────────────────────────────
+  dependency-scan:
+    name: Dependency CVE Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: repo
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: |
+            repo/go.work.sum
+            repo/pkg/go.sum
+            repo/services/*/go.sum
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: repo/ai/rag-engine/requirements.txt
+
+      - name: Scan Go dependencies (govulncheck)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+          set -euo pipefail
+          while IFS= read -r module; do
+            echo "→ govulncheck $module"
+            (cd "$module" && govulncheck ./...)
+          done < <(python scripts/list_go_modules.py)
+
+      - name: Scan Python dependencies
+        run: |
+          pip install pip-audit==2.10.1
+          pip-audit -r ai/rag-engine/requirements.txt
+
+  # ── OpenAPI Spec 校验 ────────────────────────────────────────────────────────
+  api-spec-lint:
+    name: OpenAPI Spec Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: repo
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: repo/ci/requirements-contract.txt
+
+      - name: Install OpenAPI validator
+        run: pip install -r ci/requirements-contract.txt
+
+      - name: Lint Core and Services OpenAPI specs
+        run: python scripts/validate_openapi_spec.py
+
+  required-gates:
+    name: Required PR Gates
+    if: ${{ always() }}
+    needs:
+      - go-ci
+      - python-ci
+      - frontend-ci
+      - services-pr-gate
+      - dependency-scan
+      - api-spec-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail closed unless every required job passed
+        env:
+          GO_RESULT: ${{ needs.go-ci.result }}
+          PYTHON_RESULT: ${{ needs.python-ci.result }}
+          FRONTEND_RESULT: ${{ needs.frontend-ci.result }}
+          SERVICES_RESULT: ${{ needs.services-pr-gate.result }}
+          DEPENDENCY_RESULT: ${{ needs.dependency-scan.result }}
+          OPENAPI_RESULT: ${{ needs.api-spec-lint.result }}
+        run: |
+          set -euo pipefail
+          for result in "$GO_RESULT" "$PYTHON_RESULT" "$FRONTEND_RESULT" "$SERVICES_RESULT" "$DEPENDENCY_RESULT" "$OPENAPI_RESULT"; do
+            test "$result" = success || {
+              echo "Required PR Gates blocked by job result: $result"
+              exit 1
+            }
+          done
+          echo "All required PR jobs passed."

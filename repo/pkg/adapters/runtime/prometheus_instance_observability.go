@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -199,13 +200,20 @@ func (o *PrometheusInstanceObservability) queryPrometheusScalar(ctx context.Cont
 	if err != nil {
 		return prometheusScalarSample{}, err
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			return prometheusScalarSample{}, closeErr
+		}
 		return prometheusScalarSample{}, fmt.Errorf("%w: Prometheus query returned %d", ports.ErrInvalid, resp.StatusCode)
 	}
 	var payload prometheusQueryResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return prometheusScalarSample{}, err
+	decodeErr := json.NewDecoder(resp.Body).Decode(&payload)
+	closeErr := resp.Body.Close()
+	if decodeErr != nil {
+		return prometheusScalarSample{}, decodeErr
+	}
+	if closeErr != nil {
+		return prometheusScalarSample{}, closeErr
 	}
 	if payload.Status != "success" || len(payload.Data.Result) == 0 {
 		return prometheusScalarSample{}, fmt.Errorf("%w: Prometheus query returned no samples", ports.ErrInvalid)
@@ -345,3 +353,8 @@ func prometheusInstanceObservabilityDevProfile() ports.DevProfileInfo {
 }
 
 var _ ports.InstanceObservability = (*PrometheusInstanceObservability)(nil)
+
+// CreateConsoleSession is a stub; real implementation arrives in PR3.
+func (p *PrometheusInstanceObservability) CreateConsoleSession(ctx context.Context, request ports.InstanceConsoleSessionCreateRequest) (ports.InstanceConsoleSessionRecord, error) {
+	return ports.InstanceConsoleSessionRecord{}, errors.New("CreateConsoleSession: not implemented yet, see PR3")
+}

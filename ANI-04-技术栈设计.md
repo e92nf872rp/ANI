@@ -256,7 +256,7 @@ AI/ML 生态几乎全是 Python，不存在能替代的选项。Go/Rust 调用 P
 
 | 语言 | 版本 | 用途 |
 |---|---|---|
-| Go | **1.23+** | 平台层（API Gateway、微服务、Operator、CLI、SDK） |
+| Go | **1.25+** | 平台层（API Gateway、微服务、Operator、CLI、SDK）；当前依赖安全修复要求 Go 1.25 |
 | Python | **3.12+** | AI 层（推理、RAG、文档解析、微调） |
 | TypeScript | **5.x** | 前端（Console、BOSS、移动端） |
 
