@@ -1217,8 +1217,8 @@ paths:
           schema: '{}'
   /metering/usage:
     get:
-      operation_id: ''
-      rbac_scope: ''
+      operation_id: getMeteringUsage
+      rbac_scope: scope:metering:read
       parameters:
       - in: query
         name: start_time

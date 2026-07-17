@@ -1025,6 +1025,165 @@ components:
         total: { type: integer }
         next_cursor: { type: string, nullable: true }
 
+    NetworkOverviewResourceKind:
+      type: string
+      enum: [vpc, subnet, security_group, load_balancer, route]
+
+    NetworkOverviewResourceSummary:
+      type: object
+      required: [kind, total, available, pending, failed, deleting]
+      properties:
+        kind:      { $ref: '#/components/schemas/NetworkOverviewResourceKind' }
+        total:     { type: integer, minimum: 0 }
+        available: { type: integer, minimum: 0 }
+        pending:   { type: integer, minimum: 0 }
+        failed:    { type: integer, minimum: 0 }
+        deleting:  { type: integer, minimum: 0 }
+
+    NetworkOverviewCapability:
+      type: object
+      required: [key, label, status]
+      properties:
+        key:
+          type: string
+          enum: [vpcs, subnets, security_groups, load_balancers, routes, subnet_ip_allocations, security_group_rules, security_group_bindings]
+        label:       { type: string }
+        status:      { type: string, enum: [available, planned] }
+        path:        { type: string, nullable: true }
+        description: { type: string, nullable: true }
+
+    NetworkOverviewRelationship:
+      type: object
+      required: [source, target, relation]
+      properties:
+        source:   { $ref: '#/components/schemas/NetworkOverviewResourceKind' }
+        target:   { $ref: '#/components/schemas/NetworkOverviewResourceKind' }
+        relation: { type: string }
+
+    NetworkOverviewDeleteRisk:
+      type: object
+      required: [kind, risk]
+      properties:
+        kind: { $ref: '#/components/schemas/NetworkOverviewResourceKind' }
+        risk: { type: string }
+
+    NetworkOverview:
+      type: object
+      required: [resources, capabilities, create_order, relationships, delete_risks]
+      properties:
+        resources:
+          type: array
+          items: { $ref: '#/components/schemas/NetworkOverviewResourceSummary' }
+        capabilities:
+          type: array
+          items: { $ref: '#/components/schemas/NetworkOverviewCapability' }
+        create_order:
+          type: array
+          items: { $ref: '#/components/schemas/NetworkOverviewResourceKind' }
+          example: [vpc, subnet, security_group, load_balancer]
+        relationships:
+          type: array
+          items: { $ref: '#/components/schemas/NetworkOverviewRelationship' }
+        delete_risks:
+          type: array
+          items: { $ref: '#/components/schemas/NetworkOverviewDeleteRisk' }
+
+    NetworkSubnetIPAllocation:
+      type: object
+      required: [id, subnet_id, ip_address, state, created_at]
+      properties:
+        id:            { type: string }
+        subnet_id:     { type: string }
+        ip_address:    { type: string }
+        resource_type: { type: string, nullable: true, enum: [instance, network_interface, load_balancer, null] }
+        resource_id:   { type: string, nullable: true }
+        state:         { type: string, enum: [available, allocated, reserved] }
+        created_at:    { type: string, format: date-time }
+        updated_at:    { type: string, format: date-time, nullable: true }
+
+    NetworkSubnetIPAllocationListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/NetworkSubnetIPAllocation' } }
+        total: { type: integer }
+        next_cursor: { type: string, nullable: true }
+
+    NetworkSecurityGroupRuleResource:
+      type: object
+      required: [id, security_group_id, direction, protocol, port_range, cidr, action, created_at]
+      properties:
+        id:                { type: string }
+        security_group_id: { type: string }
+        direction:         { type: string, enum: [ingress, egress] }
+        protocol:          { type: string, enum: [tcp, udp, icmp, all] }
+        port_range:        { type: string, example: "443" }
+        cidr:              { type: string, example: "0.0.0.0/0" }
+        action:            { type: string, enum: [allow, deny] }
+        description:       { type: string, nullable: true }
+        created_at:        { type: string, format: date-time }
+        updated_at:        { type: string, format: date-time, nullable: true }
+
+    NetworkSecurityGroupRuleListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/NetworkSecurityGroupRuleResource' } }
+        total: { type: integer }
+        next_cursor: { type: string, nullable: true }
+
+    CreateNetworkSecurityGroupRuleRequest:
+      type: object
+      required: [idempotency_key, direction, protocol, port_range, cidr, action]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
+        direction:       { type: string, enum: [ingress, egress] }
+        protocol:        { type: string, enum: [tcp, udp, icmp, all] }
+        port_range:      { type: string, example: "443" }
+        cidr:            { type: string, example: "0.0.0.0/0" }
+        action:          { type: string, enum: [allow, deny] }
+        description:     { type: string, nullable: true }
+
+    UpdateNetworkSecurityGroupRuleRequest:
+      type: object
+      properties:
+        direction:    { type: string, enum: [ingress, egress] }
+        protocol:     { type: string, enum: [tcp, udp, icmp, all] }
+        port_range:   { type: string, example: "443" }
+        cidr:         { type: string, example: "0.0.0.0/0" }
+        action:       { type: string, enum: [allow, deny] }
+        description:  { type: string, nullable: true }
+
+    NetworkSecurityGroupBindingTargetType:
+      type: string
+      enum: [instance, network_interface, load_balancer]
+
+    NetworkSecurityGroupBinding:
+      type: object
+      required: [id, security_group_id, target_type, target_id, created_at]
+      properties:
+        id:                { type: string }
+        security_group_id: { type: string }
+        target_type:       { $ref: '#/components/schemas/NetworkSecurityGroupBindingTargetType' }
+        target_id:         { type: string }
+        created_at:        { type: string, format: date-time }
+
+    NetworkSecurityGroupBindingListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/NetworkSecurityGroupBinding' } }
+        total: { type: integer }
+        next_cursor: { type: string, nullable: true }
+
+    CreateNetworkSecurityGroupBindingRequest:
+      type: object
+      required: [idempotency_key, target_type, target_id]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
+        target_type:     { $ref: '#/components/schemas/NetworkSecurityGroupBindingTargetType' }
+        target_id:       { type: string }
+
     CreateNetworkVPCRequest:
       type: object
       required: [name, idempotency_key]
@@ -2476,6 +2635,21 @@ paths:
         "404": { $ref: '#/components/responses/NotFound' }
 
   # ── 网络资源（Core API Alpha）──────────────────────────────────────────────
+  /networks/overview:
+    get:
+      operationId: getNetworkOverview
+      summary: 查询网络管理总览
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:read"
+      responses:
+        "200":
+          description: 网络管理总览
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkOverview' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
   /networks/vpcs:
     get:
       operationId: listNetworkVPCs
@@ -2483,6 +2657,8 @@ paths:
       tags: [Networks]
       x-ani-rbac-scope: "scope:networks:read"
       parameters:
+        - { name: name,   in: query, schema: { type: string }, description: "按 VPC 名称过滤；可选，服务端可做精确或前缀匹配。" }
+        - { name: state,  in: query, schema: { $ref: '#/components/schemas/NetworkResourceState' }, description: "按 VPC 状态过滤。" }
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
       responses:
@@ -2512,6 +2688,7 @@ paths:
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
+        "409": { $ref: '#/components/responses/Conflict' }
 
   /networks/vpcs/{vpc_id}:
     get:
@@ -2546,6 +2723,7 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
 
   /networks/subnets:
     get:
@@ -2554,6 +2732,8 @@ paths:
       tags: [Networks]
       x-ani-rbac-scope: "scope:networks:read"
       parameters:
+        - { name: vpc_id, in: query, schema: { type: string }, description: "按所属 VPC 过滤子网。" }
+        - { name: state,  in: query, schema: { $ref: '#/components/schemas/NetworkResourceState' }, description: "按子网状态过滤。" }
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
       responses:
@@ -2584,6 +2764,7 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
 
   /networks/subnets/{subnet_id}:
     get:
@@ -2618,6 +2799,29 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /networks/subnets/{subnet_id}/ip-allocations:
+    get:
+      operationId: listNetworkSubnetIPAllocations
+      summary: 查询子网 IP 分配列表
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:read"
+      parameters:
+        - { name: subnet_id, in: path, required: true, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string, enum: [available, allocated, reserved] }, description: "按 IP 分配状态过滤。" }
+        - { name: resource_type, in: query, schema: { type: string, enum: [instance, network_interface, load_balancer] }, description: "按绑定资源类型过滤。" }
+        - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: 子网 IP 分配列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkSubnetIPAllocationListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
 
   /networks/security-groups:
     get:
@@ -2626,6 +2830,8 @@ paths:
       tags: [Networks]
       x-ani-rbac-scope: "scope:networks:read"
       parameters:
+        - { name: name,   in: query, schema: { type: string }, description: "按安全组名称过滤；可选，服务端可做精确或前缀匹配。" }
+        - { name: state,  in: query, schema: { $ref: '#/components/schemas/NetworkResourceState' }, description: "按安全组状态过滤。" }
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
       responses:
@@ -2655,6 +2861,7 @@ paths:
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
+        "409": { $ref: '#/components/responses/Conflict' }
 
   /networks/security-groups/{security_group_id}:
     get:
@@ -2689,6 +2896,178 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /networks/security-groups/{security_group_id}/rules:
+    get:
+      operationId: listNetworkSecurityGroupRules
+      summary: 查询安全组规则列表
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:read"
+      parameters:
+        - { name: security_group_id, in: path, required: true, schema: { type: string } }
+        - { name: direction, in: query, schema: { type: string, enum: [ingress, egress] } }
+        - { name: protocol, in: query, schema: { type: string, enum: [tcp, udp, icmp, all] } }
+        - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: 安全组规则列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkSecurityGroupRuleListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: createNetworkSecurityGroupRule
+      summary: 创建安全组规则
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:create"
+      parameters:
+        - { name: security_group_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateNetworkSecurityGroupRuleRequest' }
+      responses:
+        "201":
+          description: 安全组规则已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkSecurityGroupRuleResource' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /networks/security-groups/{security_group_id}/rules/{rule_id}:
+    get:
+      operationId: getNetworkSecurityGroupRule
+      summary: 查询安全组规则
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:read"
+      parameters:
+        - { name: security_group_id, in: path, required: true, schema: { type: string } }
+        - { name: rule_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 安全组规则
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkSecurityGroupRuleResource' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: updateNetworkSecurityGroupRule
+      summary: 更新安全组规则
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:create"
+      parameters:
+        - { name: security_group_id, in: path, required: true, schema: { type: string } }
+        - { name: rule_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateNetworkSecurityGroupRuleRequest' }
+      responses:
+        "200":
+          description: 安全组规则已更新
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkSecurityGroupRuleResource' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+    delete:
+      operationId: deleteNetworkSecurityGroupRule
+      summary: 删除安全组规则
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:delete"
+      parameters:
+        - { name: security_group_id, in: path, required: true, schema: { type: string } }
+        - { name: rule_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 安全组规则已删除
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkSecurityGroupRuleResource' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /networks/security-groups/{security_group_id}/bindings:
+    get:
+      operationId: listNetworkSecurityGroupBindings
+      summary: 查询安全组绑定列表
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:read"
+      parameters:
+        - { name: security_group_id, in: path, required: true, schema: { type: string } }
+        - { name: target_type, in: query, schema: { $ref: '#/components/schemas/NetworkSecurityGroupBindingTargetType' } }
+        - { name: target_id, in: query, schema: { type: string } }
+        - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: 安全组绑定列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkSecurityGroupBindingListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: createNetworkSecurityGroupBinding
+      summary: 绑定安全组
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:create"
+      parameters:
+        - { name: security_group_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateNetworkSecurityGroupBindingRequest' }
+      responses:
+        "201":
+          description: 安全组绑定已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkSecurityGroupBinding' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /networks/security-groups/{security_group_id}/bindings/{binding_id}:
+    delete:
+      operationId: deleteNetworkSecurityGroupBinding
+      summary: 解绑安全组
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:delete"
+      parameters:
+        - { name: security_group_id, in: path, required: true, schema: { type: string } }
+        - { name: binding_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 安全组绑定已删除
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkSecurityGroupBinding' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
 
   /networks/load-balancers:
     get:
@@ -2697,6 +3076,9 @@ paths:
       tags: [Networks]
       x-ani-rbac-scope: "scope:networks:read"
       parameters:
+        - { name: vpc_id, in: query, schema: { type: string }, description: "按所属 VPC 过滤负载入口。" }
+        - { name: state,  in: query, schema: { $ref: '#/components/schemas/NetworkResourceState' }, description: "按负载入口状态过滤。" }
+        - { name: scheme, in: query, schema: { type: string, enum: [internal, public] }, description: "按负载入口类型过滤。" }
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
       responses:
@@ -2727,6 +3109,7 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
 
   /networks/load-balancers/{load_balancer_id}:
     get:
@@ -2761,6 +3144,7 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
 
   /networks/routes:
     get:
@@ -2770,6 +3154,7 @@ paths:
       x-ani-rbac-scope: "scope:networks:read"
       parameters:
         - { name: vpc_id, in: query, schema: { type: string } }
+        - { name: next_hop_type, in: query, schema: { type: string, enum: [gateway, instance, nat] }, description: "按下一跳类型过滤路由。" }
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
       responses:
@@ -2800,6 +3185,42 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /networks/routes/{route_id}:
+    get:
+      operationId: getNetworkRoute
+      summary: 查询路由条目
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:read"
+      parameters:
+        - { name: route_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 路由条目
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkRoute' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: deleteNetworkRoute
+      summary: 删除路由条目
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:delete"
+      parameters:
+        - { name: route_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 路由条目已删除
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkRoute' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
 
   # ── 存储资源（Core API Alpha）──────────────────────────────────────────────
   /volumes:
