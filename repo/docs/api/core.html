@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>130</dd></div>
-          <div><dt>Schemas</dt><dd>166</dd></div>
+          <div><dt>Operations</dt><dd>120</dd></div>
+          <div><dt>Schemas</dt><dd>153</dd></div>
         </dl>
       </section>
 
@@ -793,86 +793,6 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
-          <td><code>/notifications/email/events</code></td>
-          <td><code>listEmailEvents</code></td>
-          <td>列出可订阅的事件类型</td>
-          <td><code>scope:notifications:read</code></td>
-          <td>200, 401, 403</td>
-        </tr>
-        <tr>
-          <td><span class="method method-get">GET</span></td>
-          <td><code>/notifications/email/recipients</code></td>
-          <td><code>listEmailRecipients</code></td>
-          <td>列出收件邮箱</td>
-          <td><code>scope:notifications:read</code></td>
-          <td>200, 401, 403</td>
-        </tr>
-        <tr>
-          <td><span class="method method-post">POST</span></td>
-          <td><code>/notifications/email/recipients</code></td>
-          <td><code>createEmailRecipient</code></td>
-          <td>添加收件邮箱</td>
-          <td><code>scope:notifications:write</code></td>
-          <td>201, 400, 401, 403, 409</td>
-        </tr>
-        <tr>
-          <td><span class="method method-delete">DELETE</span></td>
-          <td><code>/notifications/email/recipients/{recipient_id}</code></td>
-          <td><code>deleteEmailRecipient</code></td>
-          <td>删除收件邮箱</td>
-          <td><code>scope:notifications:write</code></td>
-          <td>204, 401, 403, 404</td>
-        </tr>
-        <tr>
-          <td><span class="method method-patch">PATCH</span></td>
-          <td><code>/notifications/email/recipients/{recipient_id}</code></td>
-          <td><code>updateEmailRecipient</code></td>
-          <td>更新收件邮箱</td>
-          <td><code>scope:notifications:write</code></td>
-          <td>200, 400, 401, 403, 404</td>
-        </tr>
-        <tr>
-          <td><span class="method method-get">GET</span></td>
-          <td><code>/notifications/email/smtp</code></td>
-          <td><code>getEmailSmtpConfig</code></td>
-          <td>获取邮件发信通道配置</td>
-          <td><code>scope:notifications:read</code></td>
-          <td>200, 401, 403, 404</td>
-        </tr>
-        <tr>
-          <td><span class="method method-put">PUT</span></td>
-          <td><code>/notifications/email/smtp</code></td>
-          <td><code>putEmailSmtpConfig</code></td>
-          <td>保存邮件发信通道配置</td>
-          <td><code>scope:notifications:write</code></td>
-          <td>200, 400, 401, 403</td>
-        </tr>
-        <tr>
-          <td><span class="method method-get">GET</span></td>
-          <td><code>/notifications/email/subscriptions</code></td>
-          <td><code>listEmailSubscriptions</code></td>
-          <td>列出事件邮件订阅</td>
-          <td><code>scope:notifications:read</code></td>
-          <td>200, 401, 403</td>
-        </tr>
-        <tr>
-          <td><span class="method method-put">PUT</span></td>
-          <td><code>/notifications/email/subscriptions</code></td>
-          <td><code>putEmailSubscriptions</code></td>
-          <td>保存事件邮件订阅</td>
-          <td><code>scope:notifications:write</code></td>
-          <td>200, 400, 401, 403</td>
-        </tr>
-        <tr>
-          <td><span class="method method-post">POST</span></td>
-          <td><code>/notifications/email/test</code></td>
-          <td><code>sendEmailTest</code></td>
-          <td>发送测试邮件</td>
-          <td><code>scope:notifications:write</code></td>
-          <td>200, 401, 403, 422</td>
-        </tr>
-        <tr>
-          <td><span class="method method-get">GET</span></td>
           <td><code>/objects</code></td>
           <td><code>listStorageObjects</code></td>
           <td>查询对象元数据列表</td>
@@ -1215,7 +1135,6 @@
         <li><code>CreateAPIKeyRequest</code></li>
         <li><code>CreateAPIKeyResponse</code></li>
         <li><code>CreateContainerInstanceConfig</code></li>
-        <li><code>CreateEmailRecipientRequest</code></li>
         <li><code>CreateGPUContainerInstanceConfig</code></li>
         <li><code>CreateInstanceConsoleSessionRequest</code></li>
         <li><code>CreateInstanceExecSessionRequest</code></li>
@@ -1237,15 +1156,6 @@
         <li><code>CreateVectorStoreRequest</code></li>
         <li><code>CreateVolumeSnapshotRequest</code></li>
         <li><code>CursorPage</code></li>
-        <li><code>EmailEventInfo</code></li>
-        <li><code>EmailEventListResponse</code></li>
-        <li><code>EmailRecipient</code></li>
-        <li><code>EmailRecipientListResponse</code></li>
-        <li><code>EmailSmtpConfig</code></li>
-        <li><code>EmailSubscription</code></li>
-        <li><code>EmailSubscriptionListResponse</code></li>
-        <li><code>EmailTestSendRequest</code></li>
-        <li><code>EmailTestSendResponse</code></li>
         <li><code>EncryptionKey</code></li>
         <li><code>EncryptionKeyCreateRequest</code></li>
         <li><code>EncryptionKeyListResponse</code></li>
@@ -1318,8 +1228,6 @@
         <li><code>ObservabilityRangeQueryResponse</code></li>
         <li><code>PasswordLoginRequest</code></li>
         <li><code>PlatformPasswordLoginRequest</code></li>
-        <li><code>PutEmailSmtpConfigRequest</code></li>
-        <li><code>PutEmailSubscriptionsRequest</code></li>
         <li><code>RefreshAccessTokenRequest</code></li>
         <li><code>RefreshAccessTokenResponse</code></li>
         <li><code>RegistryArtifact</code></li>
@@ -1359,7 +1267,6 @@
         <li><code>StorageVolumeListResponse</code></li>
         <li><code>TokenPairResponse</code></li>
         <li><code>TokenUsageReport</code></li>
-        <li><code>UpdateEmailRecipientRequest</code></li>
         <li><code>UpdateObservabilityAlertRuleRequest</code></li>
         <li><code>VectorStore</code></li>
         <li><code>VectorStoreDocumentInsertRequest</code></li>

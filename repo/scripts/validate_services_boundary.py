@@ -26,7 +26,7 @@ CORE_PROTECTED_SERVICE_ROOTS = (
     "metering-service",
     "reconcile-worker",
 )
-SERVICES_OWNED_SOURCE_ROOTS = ("model-service", "kb-service")
+SERVICES_OWNED_SOURCE_ROOTS = ("model-service", "kb-service", "email-service")
 DOCS_ONLY_SERVICE_ROOTS = ("docs", "tasks", "prototypes")
 KNOWN_SERVICE_ROOTS = frozenset(
     (*CORE_PROTECTED_SERVICE_ROOTS, *SERVICES_OWNED_SOURCE_ROOTS, *DOCS_ONLY_SERVICE_ROOTS)

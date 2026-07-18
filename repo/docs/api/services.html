@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1/svc</code></dd></div>
-          <div><dt>Operations</dt><dd>59</dd></div>
-          <div><dt>Schemas</dt><dd>51</dd></div>
+          <div><dt>Operations</dt><dd>69</dd></div>
+          <div><dt>Schemas</dt><dd>64</dd></div>
         </dl>
       </section>
 
@@ -465,6 +465,86 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/notifications/email/events</code></td>
+          <td><code>listEmailEvents</code></td>
+          <td>列出可订阅的事件类型</td>
+          <td><code>scope:notifications:read</code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/notifications/email/recipients</code></td>
+          <td><code>listEmailRecipients</code></td>
+          <td>列出收件邮箱</td>
+          <td><code>scope:notifications:read</code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/notifications/email/recipients</code></td>
+          <td><code>createEmailRecipient</code></td>
+          <td>添加收件邮箱</td>
+          <td><code>scope:notifications:write</code></td>
+          <td>201, 400, 401, 403, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/notifications/email/recipients/{recipient_id}</code></td>
+          <td><code>deleteEmailRecipient</code></td>
+          <td>删除收件邮箱</td>
+          <td><code>scope:notifications:write</code></td>
+          <td>204, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-patch">PATCH</span></td>
+          <td><code>/notifications/email/recipients/{recipient_id}</code></td>
+          <td><code>updateEmailRecipient</code></td>
+          <td>更新收件邮箱</td>
+          <td><code>scope:notifications:write</code></td>
+          <td>200, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/notifications/email/smtp</code></td>
+          <td><code>getEmailSmtpConfig</code></td>
+          <td>获取邮件发信通道配置</td>
+          <td><code>scope:notifications:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/notifications/email/smtp</code></td>
+          <td><code>putEmailSmtpConfig</code></td>
+          <td>保存邮件发信通道配置</td>
+          <td><code>scope:notifications:write</code></td>
+          <td>200, 400, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/notifications/email/subscriptions</code></td>
+          <td><code>listEmailSubscriptions</code></td>
+          <td>列出事件邮件订阅</td>
+          <td><code>scope:notifications:read</code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/notifications/email/subscriptions</code></td>
+          <td><code>putEmailSubscriptions</code></td>
+          <td>保存事件邮件订阅</td>
+          <td><code>scope:notifications:write</code></td>
+          <td>200, 400, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/notifications/email/test</code></td>
+          <td><code>sendEmailTest</code></td>
+          <td>发送测试邮件</td>
+          <td><code>scope:notifications:write</code></td>
+          <td>200, 401, 403, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/sandboxes</code></td>
           <td><code>listSandboxes</code></td>
           <td>Sandbox列表（已废弃，请使用 /api/v1/instances?kind=sandbox）</td>
@@ -640,6 +720,7 @@
         <ul class="schema-list">
         <li><code>AsyncTask</code></li>
         <li><code>AvailableGpu</code></li>
+        <li><code>CreateEmailRecipientRequest</code></li>
         <li><code>CreateGpuContainerRequest</code></li>
         <li><code>CreateInferenceEndpointRequest</code></li>
         <li><code>CreateIntegrationBotRequest</code></li>
@@ -648,6 +729,15 @@
         <li><code>CreateSandboxRequest</code></li>
         <li><code>CreateWebhookRequest</code></li>
         <li><code>CursorPage</code></li>
+        <li><code>EmailEventInfo</code></li>
+        <li><code>EmailEventListResponse</code></li>
+        <li><code>EmailRecipient</code></li>
+        <li><code>EmailRecipientListResponse</code></li>
+        <li><code>EmailSmtpConfig</code></li>
+        <li><code>EmailSubscription</code></li>
+        <li><code>EmailSubscriptionListResponse</code></li>
+        <li><code>EmailTestSendRequest</code></li>
+        <li><code>EmailTestSendResponse</code></li>
         <li><code>ErrorResponse</code></li>
         <li><code>ExtendSandboxRequest</code></li>
         <li><code>GpuContainer</code></li>
@@ -676,12 +766,15 @@
         <li><code>ModelVersion</code></li>
         <li><code>PatchGpuContainerRequest</code></li>
         <li><code>PatchSandboxRequest</code></li>
+        <li><code>PutEmailSmtpConfigRequest</code></li>
+        <li><code>PutEmailSubscriptionsRequest</code></li>
         <li><code>Sandbox</code></li>
         <li><code>SecurityEvent</code></li>
         <li><code>SecurityOverview</code></li>
         <li><code>SsoConfig</code></li>
         <li><code>TenantMember</code></li>
         <li><code>TenantRole</code></li>
+        <li><code>UpdateEmailRecipientRequest</code></li>
         <li><code>UpdateInferenceServicePoliciesRequest</code></li>
         <li><code>UpdateKBPermissionsRequest</code></li>
         <li><code>UpdateSsoConfigRequest</code></li>
