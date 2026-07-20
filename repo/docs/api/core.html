@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>120</dd></div>
-          <div><dt>Schemas</dt><dd>153</dd></div>
+          <div><dt>Operations</dt><dd>132</dd></div>
+          <div><dt>Schemas</dt><dd>169</dd></div>
         </dl>
       </section>
 
@@ -661,7 +661,7 @@
           <td><code>createNetworkLoadBalancer</code></td>
           <td>创建负载入口</td>
           <td><code>scope:networks:create</code></td>
-          <td>201, 400, 401, 403, 404</td>
+          <td>201, 400, 401, 403, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-delete">DELETE</span></td>
@@ -669,7 +669,7 @@
           <td><code>deleteNetworkLoadBalancer</code></td>
           <td>删除负载入口</td>
           <td><code>scope:networks:delete</code></td>
-          <td>200, 401, 403, 404</td>
+          <td>200, 401, 403, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -678,6 +678,14 @@
           <td>查询负载入口</td>
           <td><code>scope:networks:read</code></td>
           <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/networks/overview</code></td>
+          <td><code>getNetworkOverview</code></td>
+          <td>查询网络管理总览</td>
+          <td><code>scope:networks:read</code></td>
+          <td>200, 401, 403</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -693,7 +701,23 @@
           <td><code>createNetworkRoute</code></td>
           <td>创建路由条目</td>
           <td><code>scope:networks:create</code></td>
-          <td>201, 400, 401, 403, 404</td>
+          <td>201, 400, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/networks/routes/{route_id}</code></td>
+          <td><code>deleteNetworkRoute</code></td>
+          <td>删除路由条目</td>
+          <td><code>scope:networks:delete</code></td>
+          <td>200, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/networks/routes/{route_id}</code></td>
+          <td><code>getNetworkRoute</code></td>
+          <td>查询路由条目</td>
+          <td><code>scope:networks:read</code></td>
+          <td>200, 401, 403, 404</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -709,7 +733,7 @@
           <td><code>createNetworkSecurityGroup</code></td>
           <td>创建安全组</td>
           <td><code>scope:networks:create</code></td>
-          <td>201, 400, 401, 403</td>
+          <td>201, 400, 401, 403, 409</td>
         </tr>
         <tr>
           <td><span class="method method-delete">DELETE</span></td>
@@ -717,7 +741,7 @@
           <td><code>deleteNetworkSecurityGroup</code></td>
           <td>删除安全组</td>
           <td><code>scope:networks:delete</code></td>
-          <td>200, 401, 403, 404</td>
+          <td>200, 401, 403, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -726,6 +750,70 @@
           <td>查询安全组</td>
           <td><code>scope:networks:read</code></td>
           <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/networks/security-groups/{security_group_id}/bindings</code></td>
+          <td><code>listNetworkSecurityGroupBindings</code></td>
+          <td>查询安全组绑定列表</td>
+          <td><code>scope:networks:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/networks/security-groups/{security_group_id}/bindings</code></td>
+          <td><code>createNetworkSecurityGroupBinding</code></td>
+          <td>绑定安全组</td>
+          <td><code>scope:networks:create</code></td>
+          <td>201, 400, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/networks/security-groups/{security_group_id}/bindings/{binding_id}</code></td>
+          <td><code>deleteNetworkSecurityGroupBinding</code></td>
+          <td>解绑安全组</td>
+          <td><code>scope:networks:delete</code></td>
+          <td>200, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/networks/security-groups/{security_group_id}/rules</code></td>
+          <td><code>listNetworkSecurityGroupRules</code></td>
+          <td>查询安全组规则列表</td>
+          <td><code>scope:networks:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/networks/security-groups/{security_group_id}/rules</code></td>
+          <td><code>createNetworkSecurityGroupRule</code></td>
+          <td>创建安全组规则</td>
+          <td><code>scope:networks:create</code></td>
+          <td>201, 400, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/networks/security-groups/{security_group_id}/rules/{rule_id}</code></td>
+          <td><code>deleteNetworkSecurityGroupRule</code></td>
+          <td>删除安全组规则</td>
+          <td><code>scope:networks:delete</code></td>
+          <td>200, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/networks/security-groups/{security_group_id}/rules/{rule_id}</code></td>
+          <td><code>getNetworkSecurityGroupRule</code></td>
+          <td>查询安全组规则</td>
+          <td><code>scope:networks:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/networks/security-groups/{security_group_id}/rules/{rule_id}</code></td>
+          <td><code>updateNetworkSecurityGroupRule</code></td>
+          <td>更新安全组规则</td>
+          <td><code>scope:networks:create</code></td>
+          <td>200, 400, 401, 403, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -741,7 +829,7 @@
           <td><code>createNetworkSubnet</code></td>
           <td>创建子网</td>
           <td><code>scope:networks:create</code></td>
-          <td>201, 400, 401, 403, 404</td>
+          <td>201, 400, 401, 403, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-delete">DELETE</span></td>
@@ -749,13 +837,21 @@
           <td><code>deleteNetworkSubnet</code></td>
           <td>删除子网</td>
           <td><code>scope:networks:delete</code></td>
-          <td>200, 401, 403, 404</td>
+          <td>200, 401, 403, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
           <td><code>/networks/subnets/{subnet_id}</code></td>
           <td><code>getNetworkSubnet</code></td>
           <td>查询子网</td>
+          <td><code>scope:networks:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/networks/subnets/{subnet_id}/ip-allocations</code></td>
+          <td><code>listNetworkSubnetIPAllocations</code></td>
+          <td>查询子网 IP 分配列表</td>
           <td><code>scope:networks:read</code></td>
           <td>200, 401, 403, 404</td>
         </tr>
@@ -773,7 +869,7 @@
           <td><code>createNetworkVPC</code></td>
           <td>创建 VPC</td>
           <td><code>scope:networks:create</code></td>
-          <td>201, 400, 401, 403</td>
+          <td>201, 400, 401, 403, 409</td>
         </tr>
         <tr>
           <td><span class="method method-delete">DELETE</span></td>
@@ -781,7 +877,7 @@
           <td><code>deleteNetworkVPC</code></td>
           <td>删除 VPC</td>
           <td><code>scope:networks:delete</code></td>
-          <td>200, 401, 403, 404</td>
+          <td>200, 401, 403, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1142,7 +1238,9 @@
         <li><code>CreateInstanceResponse</code></li>
         <li><code>CreateNetworkLoadBalancerRequest</code></li>
         <li><code>CreateNetworkRouteRequest</code></li>
+        <li><code>CreateNetworkSecurityGroupBindingRequest</code></li>
         <li><code>CreateNetworkSecurityGroupRequest</code></li>
+        <li><code>CreateNetworkSecurityGroupRuleRequest</code></li>
         <li><code>CreateNetworkSubnetRequest</code></li>
         <li><code>CreateNetworkVPCRequest</code></li>
         <li><code>CreateObservabilityAlertRuleRequest</code></li>
@@ -1212,13 +1310,26 @@
         <li><code>NetworkLoadBalancer</code></li>
         <li><code>NetworkLoadBalancerListResponse</code></li>
         <li><code>NetworkLoadBalancerListener</code></li>
+        <li><code>NetworkOverview</code></li>
+        <li><code>NetworkOverviewCapability</code></li>
+        <li><code>NetworkOverviewDeleteRisk</code></li>
+        <li><code>NetworkOverviewRelationship</code></li>
+        <li><code>NetworkOverviewResourceKind</code></li>
+        <li><code>NetworkOverviewResourceSummary</code></li>
         <li><code>NetworkResourceState</code></li>
         <li><code>NetworkRoute</code></li>
         <li><code>NetworkRouteListResponse</code></li>
         <li><code>NetworkSecurityGroup</code></li>
+        <li><code>NetworkSecurityGroupBinding</code></li>
+        <li><code>NetworkSecurityGroupBindingListResponse</code></li>
+        <li><code>NetworkSecurityGroupBindingTargetType</code></li>
         <li><code>NetworkSecurityGroupListResponse</code></li>
         <li><code>NetworkSecurityGroupRule</code></li>
+        <li><code>NetworkSecurityGroupRuleListResponse</code></li>
+        <li><code>NetworkSecurityGroupRuleResource</code></li>
         <li><code>NetworkSubnet</code></li>
+        <li><code>NetworkSubnetIPAllocation</code></li>
+        <li><code>NetworkSubnetIPAllocationListResponse</code></li>
         <li><code>NetworkSubnetListResponse</code></li>
         <li><code>NetworkVPC</code></li>
         <li><code>NetworkVPCListResponse</code></li>
@@ -1267,6 +1378,7 @@
         <li><code>StorageVolumeListResponse</code></li>
         <li><code>TokenPairResponse</code></li>
         <li><code>TokenUsageReport</code></li>
+        <li><code>UpdateNetworkSecurityGroupRuleRequest</code></li>
         <li><code>UpdateObservabilityAlertRuleRequest</code></li>
         <li><code>VectorStore</code></li>
         <li><code>VectorStoreDocumentInsertRequest</code></li>
