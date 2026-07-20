@@ -385,6 +385,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/networks/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询网络管理总览 */
+        get: operations["getNetworkOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/networks/vpcs": {
         parameters: {
             query?: never;
@@ -457,6 +474,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/networks/subnets/{subnet_id}/ip-allocations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询子网 IP 分配列表 */
+        get: operations["listNetworkSubnetIPAllocations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/networks/security-groups": {
         parameters: {
             query?: never;
@@ -488,6 +522,78 @@ export interface paths {
         post?: never;
         /** 删除安全组 */
         delete: operations["deleteNetworkSecurityGroup"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/networks/security-groups/{security_group_id}/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询安全组规则列表 */
+        get: operations["listNetworkSecurityGroupRules"];
+        put?: never;
+        /** 创建安全组规则 */
+        post: operations["createNetworkSecurityGroupRule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/networks/security-groups/{security_group_id}/rules/{rule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询安全组规则 */
+        get: operations["getNetworkSecurityGroupRule"];
+        /** 更新安全组规则 */
+        put: operations["updateNetworkSecurityGroupRule"];
+        post?: never;
+        /** 删除安全组规则 */
+        delete: operations["deleteNetworkSecurityGroupRule"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/networks/security-groups/{security_group_id}/bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询安全组绑定列表 */
+        get: operations["listNetworkSecurityGroupBindings"];
+        put?: never;
+        /** 绑定安全组 */
+        post: operations["createNetworkSecurityGroupBinding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/networks/security-groups/{security_group_id}/bindings/{binding_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 解绑安全组 */
+        delete: operations["deleteNetworkSecurityGroupBinding"];
         options?: never;
         head?: never;
         patch?: never;
@@ -542,6 +648,24 @@ export interface paths {
         /** 创建路由条目 */
         post: operations["createNetworkRoute"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/networks/routes/{route_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询路由条目 */
+        get: operations["getNetworkRoute"];
+        put?: never;
+        post?: never;
+        /** 删除路由条目 */
+        delete: operations["deleteNetworkRoute"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2577,6 +2701,147 @@ export interface components {
             total: number;
             next_cursor?: string | null;
         };
+        /** @enum {string} */
+        NetworkOverviewResourceKind: "vpc" | "subnet" | "security_group" | "load_balancer" | "route";
+        NetworkOverviewResourceSummary: {
+            kind: components["schemas"]["NetworkOverviewResourceKind"];
+            total: number;
+            available: number;
+            pending: number;
+            failed: number;
+            deleting: number;
+        };
+        NetworkOverviewCapability: {
+            /** @enum {string} */
+            key: "vpcs" | "subnets" | "security_groups" | "load_balancers" | "routes" | "subnet_ip_allocations" | "security_group_rules" | "security_group_bindings";
+            label: string;
+            /** @enum {string} */
+            status: "available" | "planned";
+            path?: string | null;
+            description?: string | null;
+        };
+        NetworkOverviewRelationship: {
+            source: components["schemas"]["NetworkOverviewResourceKind"];
+            target: components["schemas"]["NetworkOverviewResourceKind"];
+            relation: string;
+        };
+        NetworkOverviewDeleteRisk: {
+            kind: components["schemas"]["NetworkOverviewResourceKind"];
+            risk: string;
+        };
+        NetworkOverview: {
+            resources: components["schemas"]["NetworkOverviewResourceSummary"][];
+            capabilities: components["schemas"]["NetworkOverviewCapability"][];
+            /**
+             * @example [
+             *       "vpc",
+             *       "subnet",
+             *       "security_group",
+             *       "load_balancer"
+             *     ]
+             */
+            create_order: components["schemas"]["NetworkOverviewResourceKind"][];
+            relationships: components["schemas"]["NetworkOverviewRelationship"][];
+            delete_risks: components["schemas"]["NetworkOverviewDeleteRisk"][];
+        };
+        NetworkSubnetIPAllocation: {
+            id: string;
+            subnet_id: string;
+            ip_address: string;
+            /** @enum {string|null} */
+            resource_type?: "instance" | "network_interface" | "load_balancer" | null;
+            resource_id?: string | null;
+            /** @enum {string} */
+            state: "available" | "allocated" | "reserved";
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at?: string | null;
+        };
+        NetworkSubnetIPAllocationListResponse: {
+            items: components["schemas"]["NetworkSubnetIPAllocation"][];
+            total: number;
+            next_cursor?: string | null;
+        };
+        NetworkSecurityGroupRuleResource: {
+            id: string;
+            security_group_id: string;
+            /** @description 规则优先级，数值越小优先级越高。 */
+            priority: number;
+            /** @enum {string} */
+            direction: "ingress" | "egress";
+            /** @enum {string} */
+            protocol: "tcp" | "udp" | "icmp" | "all";
+            /** @example 443 */
+            port_range: string;
+            /** @example 0.0.0.0/0 */
+            cidr: string;
+            /** @enum {string} */
+            action: "allow" | "deny";
+            description?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at?: string | null;
+        };
+        NetworkSecurityGroupRuleListResponse: {
+            items: components["schemas"]["NetworkSecurityGroupRuleResource"][];
+            total: number;
+            next_cursor?: string | null;
+        };
+        CreateNetworkSecurityGroupRuleRequest: {
+            /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
+            idempotency_key: string;
+            /** @description 规则优先级，数值越小优先级越高。 */
+            priority: number;
+            /** @enum {string} */
+            direction: "ingress" | "egress";
+            /** @enum {string} */
+            protocol: "tcp" | "udp" | "icmp" | "all";
+            /** @example 443 */
+            port_range: string;
+            /** @example 0.0.0.0/0 */
+            cidr: string;
+            /** @enum {string} */
+            action: "allow" | "deny";
+            description?: string | null;
+        };
+        UpdateNetworkSecurityGroupRuleRequest: {
+            /** @description 规则优先级，数值越小优先级越高。 */
+            priority?: number;
+            /** @enum {string} */
+            direction?: "ingress" | "egress";
+            /** @enum {string} */
+            protocol?: "tcp" | "udp" | "icmp" | "all";
+            /** @example 443 */
+            port_range?: string;
+            /** @example 0.0.0.0/0 */
+            cidr?: string;
+            /** @enum {string} */
+            action?: "allow" | "deny";
+            description?: string | null;
+        };
+        /** @enum {string} */
+        NetworkSecurityGroupBindingTargetType: "instance" | "network_interface" | "load_balancer";
+        NetworkSecurityGroupBinding: {
+            id: string;
+            security_group_id: string;
+            target_type: components["schemas"]["NetworkSecurityGroupBindingTargetType"];
+            target_id: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        NetworkSecurityGroupBindingListResponse: {
+            items: components["schemas"]["NetworkSecurityGroupBinding"][];
+            total: number;
+            next_cursor?: string | null;
+        };
+        CreateNetworkSecurityGroupBindingRequest: {
+            /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
+            idempotency_key: string;
+            target_type: components["schemas"]["NetworkSecurityGroupBindingTargetType"];
+            target_id: string;
+        };
         CreateNetworkVPCRequest: {
             /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
             idempotency_key: string;
@@ -3356,6 +3621,15 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
+        /** @description 安全组不存在，或 rule_id 不属于该 security_group_id（code=NOT_FOUND） */
+        NetworkSecurityGroupRuleNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
         /** @description 请求参数不合法（code=BAD_REQUEST） */
         BadRequest: {
             headers: {
@@ -4028,9 +4302,35 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    getNetworkOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 网络管理总览 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkOverview"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
     listNetworkVPCs: {
         parameters: {
             query?: {
+                /** @description 按 VPC 名称过滤；可选，服务端可做精确或前缀匹配。 */
+                name?: string;
+                /** @description 按 VPC 状态过滤。 */
+                state?: components["schemas"]["NetworkResourceState"];
                 limit?: number;
                 cursor?: string;
             };
@@ -4078,6 +4378,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
         };
     };
     getNetworkVPC: {
@@ -4128,11 +4429,16 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     listNetworkSubnets: {
         parameters: {
             query?: {
+                /** @description 按所属 VPC 过滤子网。 */
+                vpc_id?: string;
+                /** @description 按子网状态过滤。 */
+                state?: components["schemas"]["NetworkResourceState"];
                 limit?: number;
                 cursor?: string;
             };
@@ -4181,6 +4487,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     getNetworkSubnet: {
@@ -4231,11 +4538,48 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listNetworkSubnetIPAllocations: {
+        parameters: {
+            query?: {
+                /** @description 按 IP 分配状态过滤。 */
+                state?: "available" | "allocated" | "reserved";
+                /** @description 按绑定资源类型过滤。 */
+                resource_type?: "instance" | "network_interface" | "load_balancer";
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                subnet_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 子网 IP 分配列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkSubnetIPAllocationListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listNetworkSecurityGroups: {
         parameters: {
             query?: {
+                /** @description 按安全组名称过滤；可选，服务端可做精确或前缀匹配。 */
+                name?: string;
+                /** @description 按安全组状态过滤。 */
+                state?: components["schemas"]["NetworkResourceState"];
                 limit?: number;
                 cursor?: string;
             };
@@ -4283,6 +4627,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
         };
     };
     getNetworkSecurityGroup: {
@@ -4333,11 +4678,252 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listNetworkSecurityGroupRules: {
+        parameters: {
+            query?: {
+                direction?: "ingress" | "egress";
+                protocol?: "tcp" | "udp" | "icmp" | "all";
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                security_group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 安全组规则列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkSecurityGroupRuleListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createNetworkSecurityGroupRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                security_group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateNetworkSecurityGroupRuleRequest"];
+            };
+        };
+        responses: {
+            /** @description 安全组规则已创建 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkSecurityGroupRuleResource"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getNetworkSecurityGroupRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                security_group_id: string;
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 安全组规则 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkSecurityGroupRuleResource"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NetworkSecurityGroupRuleNotFound"];
+        };
+    };
+    updateNetworkSecurityGroupRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                security_group_id: string;
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateNetworkSecurityGroupRuleRequest"];
+            };
+        };
+        responses: {
+            /** @description 安全组规则已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkSecurityGroupRuleResource"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NetworkSecurityGroupRuleNotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    deleteNetworkSecurityGroupRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                security_group_id: string;
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 安全组规则已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkSecurityGroupRuleResource"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NetworkSecurityGroupRuleNotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listNetworkSecurityGroupBindings: {
+        parameters: {
+            query?: {
+                target_type?: components["schemas"]["NetworkSecurityGroupBindingTargetType"];
+                target_id?: string;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                security_group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 安全组绑定列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkSecurityGroupBindingListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createNetworkSecurityGroupBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                security_group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateNetworkSecurityGroupBindingRequest"];
+            };
+        };
+        responses: {
+            /** @description 安全组绑定已创建 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkSecurityGroupBinding"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    deleteNetworkSecurityGroupBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                security_group_id: string;
+                binding_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 安全组绑定已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkSecurityGroupBinding"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     listNetworkLoadBalancers: {
         parameters: {
             query?: {
+                /** @description 按所属 VPC 过滤负载入口。 */
+                vpc_id?: string;
+                /** @description 按负载入口状态过滤。 */
+                state?: components["schemas"]["NetworkResourceState"];
+                /** @description 按负载入口类型过滤。 */
+                scheme?: "internal" | "public";
                 limit?: number;
                 cursor?: string;
             };
@@ -4386,6 +4972,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     getNetworkLoadBalancer: {
@@ -4436,12 +5023,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     listNetworkRoutes: {
         parameters: {
             query?: {
                 vpc_id?: string;
+                /** @description 按下一跳类型过滤路由。 */
+                next_hop_type?: "gateway" | "instance" | "nat";
                 limit?: number;
                 cursor?: string;
             };
@@ -4490,6 +5080,58 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getNetworkRoute: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                route_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 路由条目 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkRoute"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteNetworkRoute: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                route_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 路由条目已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkRoute"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     listStorageVolumes: {
