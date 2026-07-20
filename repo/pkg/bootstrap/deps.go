@@ -64,6 +64,7 @@ type Capabilities struct {
 	StorageStatus         ports.StorageProviderStatusReader
 	StorageReconcile      ports.StorageStatusReconciler
 	StorageResources      ports.StorageService
+	NotificationService  ports.NotificationService
 }
 
 // Deps holds all initialized external dependencies.
@@ -255,6 +256,7 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 		StorageStatus:         storageProvider,
 		StorageReconcile:      runtimeadapter.NewLocalStorageStatusReconciler(storageStore),
 		StorageResources:      runtimeadapter.NewLocalStorageService(storageServiceOptions...),
+		NotificationService:    runtimeadapter.NewLocalNotificationService(),
 	}, nil
 }
 

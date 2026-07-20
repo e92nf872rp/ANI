@@ -1750,9 +1750,13 @@ M5（9月）
   - Services 层注册 PaaS 服务的稳定内部域名（如 `postgres.prod.ani.internal`）
   - 底层：CoreDNS 自定义 zone 动态管理
 
-- [ ] `M1-NOTIFY-A`：事件通知 API
-  - `CRUD /api/v1/notifications/subscriptions`（订阅事件：webhook/email/内部消息）
-  - `GET /api/v1/notifications/events`（通知历史查询）
+- [x] `M1-NOTIFY-A`：事件通知 API（邮件通道/收件人/订阅/测试发送，CORE-NOTIFICATIONS-EMAIL-A）
+  - `CRUD /api/v1/notifications/subscriptions`（订阅事件：webhook/email/内部消息）—— 邮件通道拆为 `/notifications/email/subscriptions` 按 event_type 批量 upsert；webhook 通道待后续批次
+  - `GET /api/v1/notifications/events`（平台事件目录查询）—— 首期冻结 5 个枚举（告警 P0/P1、Incident 创建/升级、平台关键任务失败）
+  - `GET/PUT /api/v1/notifications/email/channel`（平台 SMTP 通道单例，`password` write-only）
+  - `GET/POST /notifications/email/recipients`、`GET/PATCH/DELETE /notifications/email/recipients/{recipient_id}`（平台级收件人 CRUD）
+  - `POST /api/v1/notifications/email/test-send`（测试发送，前置条件校验）
+  - Tier1 local profile 已落地：`ports.NotificationService` + `runtime.LocalNotificationService` + Gateway handler；`dev_profile.real_provider=false`；真实 SMTP provider 待后续批次
 
 ### 模块 M1-DPU：DPU 加速节点纳管
 

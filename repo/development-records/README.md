@@ -24,6 +24,7 @@
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
 | CORE-INSTANCE-CREATE-CONFIG-A | `CreateInstanceRequest` 按 kind 嵌套 `vm_config`/`container_config`/`gpu_container_config`（`sandbox_config` 既有）；扁平字段保留兼容别名；Gateway 冲突/跨类型 400；SDK/console 文档推荐 `*_config`；不拆 URL、不引入 oneOf | core-instance-create-config-a.md |
+| CORE-NOTIFICATIONS-EMAIL-A | 平台邮件通知 Core API 契约 + Tier1 local profile：SMTP 通道单例 upsert、平台级收件人 CRUD、事件目录（首期冻结 5 枚举）、邮件订阅批量 upsert、测试发送前置条件校验；`password` write-only；所有写操作 required `idempotency_key`；`scope:platform.notifications:read\|write`；纯 additive 不破坏 v1 兼容性；响应带 `dev_profile`，`real_provider=false` | core-notifications-email-a.md |
 
 ### SDK Regression Fixes（2026-06）
 

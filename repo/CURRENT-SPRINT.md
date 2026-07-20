@@ -36,6 +36,7 @@
 | S06 vector Milvus | production-shaped gate passed | `SPRINT13-VECTOR-MILVUS-A-TRACK`；`validate-vector-store-live-gate`；LIVE PENDING 仅作历史兼容 |
 | S07 instance observability Prometheus | production-shaped gate passed | `SPRINT13-INSTANCE-OBSERVABILITY-PROMETHEUS-A-TRACK`；`validate-instance-observability-live-gate`；Prometheus + kubelet；LIVE PENDING 仅作历史兼容 |
 | CORE-INSTANCE-CREATE-CONFIG-A | 契约/Gateway/SDK 已完成 | `core-instance-create-config-a.md`；create 按 kind 嵌套 `*_config`，扁平字段兼容；不拆 URL |
+| CORE-NOTIFICATIONS-EMAIL-A | 契约 + Tier1 local profile 已完成 | `core-notifications-email-a.md`；`ports.NotificationService` + `LocalNotificationService` + Gateway `/notifications/email/*` + `/notifications/events`；`dev_profile.real_provider=false`；不声明 runtime/production ready |
 
 闭环规则：每个 provider slice 必须具备 real adapter/provider runtime、live gate、非敏感 evidence JSON、development record 和全局 production-shape guard。S05-S07 B 轨可以继续 作为历史兼容 token 保留；截至 2026-06-21，S05/S06/S07 均已 passed。
 

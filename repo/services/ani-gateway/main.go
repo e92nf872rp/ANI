@@ -82,6 +82,11 @@ func main() {
 			"prometheus_configured", strings.TrimSpace(instanceObservabilityRuntimeConfig.PrometheusURL) != "",
 		)
 	}
+	notificationService, err := newGatewayNotificationService(gatewayNotificationRuntimeConfigFromEnv())
+	if err != nil {
+		logger.Error("failed to configure notification provider runtime", "err", err)
+		os.Exit(1)
+	}
 	gatewayStore, closeGatewayStore, err := bootstrap.ConnectRedisCacheStoreWithConfig(gatewayRedisConfigFromEnv())
 	if err != nil {
 		logger.Error("failed to configure gateway shared store", "err", err)
@@ -104,6 +109,7 @@ func main() {
 		VectorStoreService:                    vectorStoreService,
 		InstanceObservability:                 instanceObservability,
 		InstanceObservabilityUsesInstanceName: instanceObservabilityUsesInstanceName,
+		NotificationService:                   notificationService,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
