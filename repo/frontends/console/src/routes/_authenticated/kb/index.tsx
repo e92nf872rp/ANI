@@ -8,7 +8,7 @@ type KnowledgeBaseRow = {
   status?: string
 }
 
-export const Route = createFileRoute('/kb/')({
+export const Route = createFileRoute('/_authenticated/kb/')({
   component: KBList,
 })
 

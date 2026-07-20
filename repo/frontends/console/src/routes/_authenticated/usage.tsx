@@ -13,7 +13,7 @@ function usageWindow() {
   }
 }
 
-export const Route = createFileRoute('/usage')({
+export const Route = createFileRoute('/_authenticated/usage')({
   component: UsagePage,
 })
 

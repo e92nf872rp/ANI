@@ -8,7 +8,7 @@ type ModelRow = {
   capabilities?: string[]
 }
 
-export const Route = createFileRoute('/models/')({
+export const Route = createFileRoute('/_authenticated/models/')({
   component: ModelList,
 })
 

@@ -15,7 +15,7 @@ type ChatMessage = {
   sources?: KBSource[]
 }
 
-export const Route = createFileRoute('/kb/$kbId/chat')({
+export const Route = createFileRoute('/_authenticated/kb/$kbId/chat')({
   component: KBChat,
 })
 

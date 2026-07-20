@@ -3,32 +3,33 @@ import { Table } from 'tdesign-react'
 import { useQuery } from '@tanstack/react-query'
 import { coreApi } from '@/api/coreClient'
 
-export const Route = createFileRoute('/registry')({
-  component: RegistryPage,
+export const Route = createFileRoute('/_authenticated/settings/api-keys')({
+  component: ApiKeysPage,
 })
 
-function RegistryPage() {
+function ApiKeysPage() {
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['registry', 'projects'],
-    queryFn: () => coreApi.GET('/registry/projects').then(({ data }) => data),
+    queryKey: ['auth', 'api-keys'],
+    queryFn: () => coreApi.GET('/auth/api-keys').then(({ data }) => data),
   })
 
   const columns = [
-    { title: '项目', colKey: 'name' },
-    { title: '公开', colKey: 'public', cell: ({ row }: { row: { public?: boolean } }) => (row.public ? '是' : '否') },
+    { title: '名称', colKey: 'name' },
+    { title: 'Key 前缀', colKey: 'key_prefix' },
     { title: '创建时间', colKey: 'created_at' },
+    { title: '过期时间', colKey: 'expires_at' },
   ]
 
   return (
     <div>
-      <h2>容器镜像仓库</h2>
+      <h2>API Key 管理</h2>
       <p style={{ color: 'var(--td-text-color-secondary)', marginBottom: 16 }}>
-        Harbor 项目列表（Core API `/registry/projects`）
+        当前租户 API Key（Core API `/auth/api-keys`）
       </p>
       {isError ? (
         <p style={{ color: 'var(--td-error-color)' }}>加载失败，请确认 gateway 已启动且已登录。</p>
       ) : (
-        <Table loading={isLoading} data={data?.items ?? []} columns={columns} rowKey="name" />
+        <Table loading={isLoading} data={data?.items ?? []} columns={columns} rowKey="id" />
       )}
     </div>
   )

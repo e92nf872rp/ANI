@@ -3,7 +3,7 @@ import { Card, Col, Row, Statistic } from 'tdesign-react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
 
-export const Route = createFileRoute('/')({
+export const Route = createFileRoute('/_authenticated/')({
   component: Dashboard,
 })
 

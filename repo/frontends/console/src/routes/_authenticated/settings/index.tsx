@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { List } from 'tdesign-react'
 
-export const Route = createFileRoute('/settings/')({
+export const Route = createFileRoute('/_authenticated/settings/')({
   component: () => (
     <div>
       <h2>设置</h2>

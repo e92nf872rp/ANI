@@ -9,102 +9,132 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as UsageRouteImport } from './routes/usage'
-import { Route as RegistryRouteImport } from './routes/registry'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as SettingsIndexRouteImport } from './routes/settings/index'
-import { Route as ModelsIndexRouteImport } from './routes/models/index'
-import { Route as KbIndexRouteImport } from './routes/kb/index'
-import { Route as SettingsApiKeysRouteImport } from './routes/settings/api-keys'
-import { Route as ModelsImportRouteImport } from './routes/models/import'
-import { Route as KbKbIdChatRouteImport } from './routes/kb/$kbId/chat'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
+import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
+import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
+import { Route as AuthenticatedUsageRouteImport } from './routes/_authenticated/usage'
+import { Route as AuthenticatedRegistryRouteImport } from './routes/_authenticated/registry'
+import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
+import { Route as AuthenticatedModelsIndexRouteImport } from './routes/_authenticated/models/index'
+import { Route as AuthenticatedKbIndexRouteImport } from './routes/_authenticated/kb/index'
+import { Route as AuthenticatedSettingsApiKeysRouteImport } from './routes/_authenticated/settings/api-keys'
+import { Route as AuthenticatedModelsImportRouteImport } from './routes/_authenticated/models/import'
+import { Route as AuthenticatedKbKbIdChatRouteImport } from './routes/_authenticated/kb/$kbId/chat'
 
-const UsageRoute = UsageRouteImport.update({
-  id: '/usage',
-  path: '/usage',
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
-const RegistryRoute = RegistryRouteImport.update({
-  id: '/registry',
-  path: '/registry',
+const AuthenticatedRoute = AuthenticatedRouteImport.update({
+  id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
+const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthCallbackRoute = AuthCallbackRouteImport.update({
+  id: '/auth/callback',
+  path: '/auth/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
-const SettingsIndexRoute = SettingsIndexRouteImport.update({
-  id: '/settings/',
-  path: '/settings/',
-  getParentRoute: () => rootRouteImport,
+const AuthenticatedUsageRoute = AuthenticatedUsageRouteImport.update({
+  id: '/usage',
+  path: '/usage',
+  getParentRoute: () => AuthenticatedRoute,
 } as any)
-const ModelsIndexRoute = ModelsIndexRouteImport.update({
-  id: '/models/',
-  path: '/models/',
-  getParentRoute: () => rootRouteImport,
+const AuthenticatedRegistryRoute = AuthenticatedRegistryRouteImport.update({
+  id: '/registry',
+  path: '/registry',
+  getParentRoute: () => AuthenticatedRoute,
 } as any)
-const KbIndexRoute = KbIndexRouteImport.update({
+const AuthenticatedSettingsIndexRoute =
+  AuthenticatedSettingsIndexRouteImport.update({
+    id: '/settings/',
+    path: '/settings/',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedModelsIndexRoute =
+  AuthenticatedModelsIndexRouteImport.update({
+    id: '/models/',
+    path: '/models/',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedKbIndexRoute = AuthenticatedKbIndexRouteImport.update({
   id: '/kb/',
   path: '/kb/',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRoute,
 } as any)
-const SettingsApiKeysRoute = SettingsApiKeysRouteImport.update({
-  id: '/settings/api-keys',
-  path: '/settings/api-keys',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ModelsImportRoute = ModelsImportRouteImport.update({
-  id: '/models/import',
-  path: '/models/import',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const KbKbIdChatRoute = KbKbIdChatRouteImport.update({
+const AuthenticatedSettingsApiKeysRoute =
+  AuthenticatedSettingsApiKeysRouteImport.update({
+    id: '/settings/api-keys',
+    path: '/settings/api-keys',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedModelsImportRoute =
+  AuthenticatedModelsImportRouteImport.update({
+    id: '/models/import',
+    path: '/models/import',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedKbKbIdChatRoute = AuthenticatedKbKbIdChatRouteImport.update({
   id: '/kb/$kbId/chat',
   path: '/kb/$kbId/chat',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/registry': typeof RegistryRoute
-  '/usage': typeof UsageRoute
-  '/models/import': typeof ModelsImportRoute
-  '/settings/api-keys': typeof SettingsApiKeysRoute
-  '/kb/': typeof KbIndexRoute
-  '/models/': typeof ModelsIndexRoute
-  '/settings/': typeof SettingsIndexRoute
-  '/kb/$kbId/chat': typeof KbKbIdChatRoute
+  '/': typeof AuthenticatedIndexRoute
+  '/login': typeof LoginRoute
+  '/registry': typeof AuthenticatedRegistryRoute
+  '/usage': typeof AuthenticatedUsageRoute
+  '/auth/callback': typeof AuthCallbackRoute
+  '/models/import': typeof AuthenticatedModelsImportRoute
+  '/settings/api-keys': typeof AuthenticatedSettingsApiKeysRoute
+  '/kb/': typeof AuthenticatedKbIndexRoute
+  '/models/': typeof AuthenticatedModelsIndexRoute
+  '/settings/': typeof AuthenticatedSettingsIndexRoute
+  '/kb/$kbId/chat': typeof AuthenticatedKbKbIdChatRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/registry': typeof RegistryRoute
-  '/usage': typeof UsageRoute
-  '/models/import': typeof ModelsImportRoute
-  '/settings/api-keys': typeof SettingsApiKeysRoute
-  '/kb': typeof KbIndexRoute
-  '/models': typeof ModelsIndexRoute
-  '/settings': typeof SettingsIndexRoute
-  '/kb/$kbId/chat': typeof KbKbIdChatRoute
+  '/login': typeof LoginRoute
+  '/registry': typeof AuthenticatedRegistryRoute
+  '/usage': typeof AuthenticatedUsageRoute
+  '/auth/callback': typeof AuthCallbackRoute
+  '/': typeof AuthenticatedIndexRoute
+  '/models/import': typeof AuthenticatedModelsImportRoute
+  '/settings/api-keys': typeof AuthenticatedSettingsApiKeysRoute
+  '/kb': typeof AuthenticatedKbIndexRoute
+  '/models': typeof AuthenticatedModelsIndexRoute
+  '/settings': typeof AuthenticatedSettingsIndexRoute
+  '/kb/$kbId/chat': typeof AuthenticatedKbKbIdChatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
-  '/registry': typeof RegistryRoute
-  '/usage': typeof UsageRoute
-  '/models/import': typeof ModelsImportRoute
-  '/settings/api-keys': typeof SettingsApiKeysRoute
-  '/kb/': typeof KbIndexRoute
-  '/models/': typeof ModelsIndexRoute
-  '/settings/': typeof SettingsIndexRoute
-  '/kb/$kbId/chat': typeof KbKbIdChatRoute
+  '/_authenticated': typeof AuthenticatedRouteWithChildren
+  '/login': typeof LoginRoute
+  '/_authenticated/registry': typeof AuthenticatedRegistryRoute
+  '/_authenticated/usage': typeof AuthenticatedUsageRoute
+  '/auth/callback': typeof AuthCallbackRoute
+  '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/_authenticated/models/import': typeof AuthenticatedModelsImportRoute
+  '/_authenticated/settings/api-keys': typeof AuthenticatedSettingsApiKeysRoute
+  '/_authenticated/kb/': typeof AuthenticatedKbIndexRoute
+  '/_authenticated/models/': typeof AuthenticatedModelsIndexRoute
+  '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
+  '/_authenticated/kb/$kbId/chat': typeof AuthenticatedKbKbIdChatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/login'
     | '/registry'
     | '/usage'
+    | '/auth/callback'
     | '/models/import'
     | '/settings/api-keys'
     | '/kb/'
@@ -113,9 +143,11 @@ export interface FileRouteTypes {
     | '/kb/$kbId/chat'
   fileRoutesByTo: FileRoutesByTo
   to:
-    | '/'
+    | '/login'
     | '/registry'
     | '/usage'
+    | '/auth/callback'
+    | '/'
     | '/models/import'
     | '/settings/api-keys'
     | '/kb'
@@ -124,107 +156,147 @@ export interface FileRouteTypes {
     | '/kb/$kbId/chat'
   id:
     | '__root__'
-    | '/'
-    | '/registry'
-    | '/usage'
-    | '/models/import'
-    | '/settings/api-keys'
-    | '/kb/'
-    | '/models/'
-    | '/settings/'
-    | '/kb/$kbId/chat'
+    | '/_authenticated'
+    | '/login'
+    | '/_authenticated/registry'
+    | '/_authenticated/usage'
+    | '/auth/callback'
+    | '/_authenticated/'
+    | '/_authenticated/models/import'
+    | '/_authenticated/settings/api-keys'
+    | '/_authenticated/kb/'
+    | '/_authenticated/models/'
+    | '/_authenticated/settings/'
+    | '/_authenticated/kb/$kbId/chat'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
-  RegistryRoute: typeof RegistryRoute
-  UsageRoute: typeof UsageRoute
-  ModelsImportRoute: typeof ModelsImportRoute
-  SettingsApiKeysRoute: typeof SettingsApiKeysRoute
-  KbIndexRoute: typeof KbIndexRoute
-  ModelsIndexRoute: typeof ModelsIndexRoute
-  SettingsIndexRoute: typeof SettingsIndexRoute
-  KbKbIdChatRoute: typeof KbKbIdChatRoute
+  AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
+  LoginRoute: typeof LoginRoute
+  AuthCallbackRoute: typeof AuthCallbackRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/usage': {
-      id: '/usage'
-      path: '/usage'
-      fullPath: '/usage'
-      preLoaderRoute: typeof UsageRouteImport
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/registry': {
-      id: '/registry'
-      path: '/registry'
-      fullPath: '/registry'
-      preLoaderRoute: typeof RegistryRouteImport
+    '/_authenticated': {
+      id: '/_authenticated'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AuthenticatedRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
+    '/_authenticated/': {
+      id: '/_authenticated/'
       path: '/'
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+      preLoaderRoute: typeof AuthenticatedIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/auth/callback': {
+      id: '/auth/callback'
+      path: '/auth/callback'
+      fullPath: '/auth/callback'
+      preLoaderRoute: typeof AuthCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/settings/': {
-      id: '/settings/'
+    '/_authenticated/usage': {
+      id: '/_authenticated/usage'
+      path: '/usage'
+      fullPath: '/usage'
+      preLoaderRoute: typeof AuthenticatedUsageRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/registry': {
+      id: '/_authenticated/registry'
+      path: '/registry'
+      fullPath: '/registry'
+      preLoaderRoute: typeof AuthenticatedRegistryRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/settings/': {
+      id: '/_authenticated/settings/'
       path: '/settings'
       fullPath: '/settings/'
-      preLoaderRoute: typeof SettingsIndexRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedSettingsIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
-    '/models/': {
-      id: '/models/'
+    '/_authenticated/models/': {
+      id: '/_authenticated/models/'
       path: '/models'
       fullPath: '/models/'
-      preLoaderRoute: typeof ModelsIndexRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedModelsIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
-    '/kb/': {
-      id: '/kb/'
+    '/_authenticated/kb/': {
+      id: '/_authenticated/kb/'
       path: '/kb'
       fullPath: '/kb/'
-      preLoaderRoute: typeof KbIndexRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedKbIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
-    '/settings/api-keys': {
-      id: '/settings/api-keys'
+    '/_authenticated/settings/api-keys': {
+      id: '/_authenticated/settings/api-keys'
       path: '/settings/api-keys'
       fullPath: '/settings/api-keys'
-      preLoaderRoute: typeof SettingsApiKeysRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedSettingsApiKeysRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
-    '/models/import': {
-      id: '/models/import'
+    '/_authenticated/models/import': {
+      id: '/_authenticated/models/import'
       path: '/models/import'
       fullPath: '/models/import'
-      preLoaderRoute: typeof ModelsImportRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedModelsImportRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
-    '/kb/$kbId/chat': {
-      id: '/kb/$kbId/chat'
+    '/_authenticated/kb/$kbId/chat': {
+      id: '/_authenticated/kb/$kbId/chat'
       path: '/kb/$kbId/chat'
       fullPath: '/kb/$kbId/chat'
-      preLoaderRoute: typeof KbKbIdChatRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedKbKbIdChatRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
   }
 }
 
+interface AuthenticatedRouteChildren {
+  AuthenticatedRegistryRoute: typeof AuthenticatedRegistryRoute
+  AuthenticatedUsageRoute: typeof AuthenticatedUsageRoute
+  AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
+  AuthenticatedModelsImportRoute: typeof AuthenticatedModelsImportRoute
+  AuthenticatedSettingsApiKeysRoute: typeof AuthenticatedSettingsApiKeysRoute
+  AuthenticatedKbIndexRoute: typeof AuthenticatedKbIndexRoute
+  AuthenticatedModelsIndexRoute: typeof AuthenticatedModelsIndexRoute
+  AuthenticatedSettingsIndexRoute: typeof AuthenticatedSettingsIndexRoute
+  AuthenticatedKbKbIdChatRoute: typeof AuthenticatedKbKbIdChatRoute
+}
+
+const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
+  AuthenticatedRegistryRoute: AuthenticatedRegistryRoute,
+  AuthenticatedUsageRoute: AuthenticatedUsageRoute,
+  AuthenticatedIndexRoute: AuthenticatedIndexRoute,
+  AuthenticatedModelsImportRoute: AuthenticatedModelsImportRoute,
+  AuthenticatedSettingsApiKeysRoute: AuthenticatedSettingsApiKeysRoute,
+  AuthenticatedKbIndexRoute: AuthenticatedKbIndexRoute,
+  AuthenticatedModelsIndexRoute: AuthenticatedModelsIndexRoute,
+  AuthenticatedSettingsIndexRoute: AuthenticatedSettingsIndexRoute,
+  AuthenticatedKbKbIdChatRoute: AuthenticatedKbKbIdChatRoute,
+}
+
+const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(
+  AuthenticatedRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
-  RegistryRoute: RegistryRoute,
-  UsageRoute: UsageRoute,
-  ModelsImportRoute: ModelsImportRoute,
-  SettingsApiKeysRoute: SettingsApiKeysRoute,
-  KbIndexRoute: KbIndexRoute,
-  ModelsIndexRoute: ModelsIndexRoute,
-  SettingsIndexRoute: SettingsIndexRoute,
-  KbKbIdChatRoute: KbKbIdChatRoute,
+  AuthenticatedRoute: AuthenticatedRouteWithChildren,
+  LoginRoute: LoginRoute,
+  AuthCallbackRoute: AuthCallbackRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
