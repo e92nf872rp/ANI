@@ -40,11 +40,84 @@ type NetworkSubnetRecord struct {
 }
 
 type NetworkSecurityGroupRule struct {
+	Priority  int
 	Direction string
 	Protocol  string
 	PortRange string
 	CIDR      string
 	Action    string
+}
+
+type NetworkOverviewResourceSummary struct {
+	Kind      string
+	Total     int
+	Available int
+	Pending   int
+	Failed    int
+	Deleting  int
+}
+
+type NetworkOverviewCapability struct {
+	Key         string
+	Label       string
+	Status      string
+	Path        string
+	Description string
+}
+
+type NetworkOverviewRelationship struct {
+	Source   string
+	Target   string
+	Relation string
+}
+
+type NetworkOverviewDeleteRisk struct {
+	Kind string
+	Risk string
+}
+
+type NetworkOverviewRecord struct {
+	Resources     map[string]NetworkOverviewResourceSummary
+	Capabilities  []NetworkOverviewCapability
+	CreateOrder   []string
+	Relationships []NetworkOverviewRelationship
+	DeleteRisks   []NetworkOverviewDeleteRisk
+}
+
+type NetworkSubnetIPAllocationRecord struct {
+	TenantID     string
+	AllocationID string
+	SubnetID     string
+	IPAddress    string
+	ResourceType string
+	ResourceID   string
+	State        string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+type NetworkSecurityGroupRuleRecord struct {
+	TenantID        string
+	RuleID          string
+	SecurityGroupID string
+	Priority        int
+	Direction       string
+	Protocol        string
+	PortRange       string
+	CIDR            string
+	Action          string
+	Description     string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+type NetworkSecurityGroupBindingRecord struct {
+	TenantID        string
+	BindingID       string
+	SecurityGroupID string
+	TargetType      string
+	TargetID        string
+	CreatedAt       time.Time
 }
 
 type NetworkSecurityGroupRecord struct {
@@ -145,18 +218,102 @@ type NetworkResourceGetRequest struct {
 
 type NetworkResourceListRequest struct {
 	TenantID string
+	Name     string
+	State    NetworkResourceState
+	VPCID    string
+	Scheme   string
 	Limit    int
 	Cursor   string
 }
 
 type NetworkRouteListRequest struct {
+	TenantID    string
+	VPCID       string
+	NextHopType string
+	Limit       int
+	Cursor      string
+}
+
+type NetworkOverviewRequest struct {
 	TenantID string
-	VPCID    string
-	Limit    int
-	Cursor   string
+}
+
+type NetworkSubnetIPAllocationListRequest struct {
+	TenantID     string
+	SubnetID     string
+	State        string
+	ResourceType string
+	Limit        int
+	Cursor       string
+}
+
+type NetworkSecurityGroupRuleCreateRequest struct {
+	TenantID        string
+	SecurityGroupID string
+	IdempotencyKey  string
+	Priority        int
+	Direction       string
+	Protocol        string
+	PortRange       string
+	CIDR            string
+	Action          string
+	Description     string
+}
+
+type NetworkSecurityGroupRuleListRequest struct {
+	TenantID        string
+	SecurityGroupID string
+	Direction       string
+	Protocol        string
+	Limit           int
+	Cursor          string
+}
+
+type NetworkSecurityGroupRuleGetRequest struct {
+	TenantID        string
+	SecurityGroupID string
+	RuleID          string
+}
+
+type NetworkSecurityGroupRuleUpdateRequest struct {
+	TenantID        string
+	SecurityGroupID string
+	RuleID          string
+	Priority        int
+	Direction       string
+	Protocol        string
+	PortRange       string
+	CIDR            string
+	Action          string
+	Description     string
+}
+
+type NetworkSecurityGroupBindingCreateRequest struct {
+	TenantID        string
+	SecurityGroupID string
+	IdempotencyKey  string
+	TargetType      string
+	TargetID        string
+}
+
+type NetworkSecurityGroupBindingListRequest struct {
+	TenantID        string
+	SecurityGroupID string
+	TargetType      string
+	TargetID        string
+	Limit           int
+	Cursor          string
+}
+
+type NetworkSecurityGroupBindingDeleteRequest struct {
+	TenantID        string
+	SecurityGroupID string
+	BindingID       string
 }
 
 type NetworkService interface {
+	GetOverview(ctx context.Context, request NetworkOverviewRequest) (NetworkOverviewRecord, error)
+
 	CreateVPC(ctx context.Context, request NetworkVPCCreateRequest) (NetworkVPCRecord, error)
 	ListVPCs(ctx context.Context, request NetworkResourceListRequest) ([]NetworkVPCRecord, error)
 	GetVPC(ctx context.Context, request NetworkResourceGetRequest) (NetworkVPCRecord, error)
@@ -166,11 +323,20 @@ type NetworkService interface {
 	ListSubnets(ctx context.Context, request NetworkResourceListRequest) ([]NetworkSubnetRecord, error)
 	GetSubnet(ctx context.Context, request NetworkResourceGetRequest) (NetworkSubnetRecord, error)
 	DeleteSubnet(ctx context.Context, request NetworkResourceGetRequest) (NetworkSubnetRecord, error)
+	ListSubnetIPAllocations(ctx context.Context, request NetworkSubnetIPAllocationListRequest) ([]NetworkSubnetIPAllocationRecord, error)
 
 	CreateSecurityGroup(ctx context.Context, request NetworkSecurityGroupCreateRequest) (NetworkSecurityGroupRecord, error)
 	ListSecurityGroups(ctx context.Context, request NetworkResourceListRequest) ([]NetworkSecurityGroupRecord, error)
 	GetSecurityGroup(ctx context.Context, request NetworkResourceGetRequest) (NetworkSecurityGroupRecord, error)
 	DeleteSecurityGroup(ctx context.Context, request NetworkResourceGetRequest) (NetworkSecurityGroupRecord, error)
+	ListSecurityGroupRules(ctx context.Context, request NetworkSecurityGroupRuleListRequest) ([]NetworkSecurityGroupRuleRecord, error)
+	CreateSecurityGroupRule(ctx context.Context, request NetworkSecurityGroupRuleCreateRequest) (NetworkSecurityGroupRuleRecord, error)
+	GetSecurityGroupRule(ctx context.Context, request NetworkSecurityGroupRuleGetRequest) (NetworkSecurityGroupRuleRecord, error)
+	UpdateSecurityGroupRule(ctx context.Context, request NetworkSecurityGroupRuleUpdateRequest) (NetworkSecurityGroupRuleRecord, error)
+	DeleteSecurityGroupRule(ctx context.Context, request NetworkSecurityGroupRuleGetRequest) (NetworkSecurityGroupRuleRecord, error)
+	ListSecurityGroupBindings(ctx context.Context, request NetworkSecurityGroupBindingListRequest) ([]NetworkSecurityGroupBindingRecord, error)
+	CreateSecurityGroupBinding(ctx context.Context, request NetworkSecurityGroupBindingCreateRequest) (NetworkSecurityGroupBindingRecord, error)
+	DeleteSecurityGroupBinding(ctx context.Context, request NetworkSecurityGroupBindingDeleteRequest) (NetworkSecurityGroupBindingRecord, error)
 
 	CreateLoadBalancer(ctx context.Context, request NetworkLoadBalancerCreateRequest) (NetworkLoadBalancerRecord, error)
 	ListLoadBalancers(ctx context.Context, request NetworkResourceListRequest) ([]NetworkLoadBalancerRecord, error)
@@ -179,6 +345,8 @@ type NetworkService interface {
 
 	CreateRoute(ctx context.Context, request NetworkRouteCreateRequest) (NetworkRouteRecord, error)
 	ListRoutes(ctx context.Context, request NetworkRouteListRequest) ([]NetworkRouteRecord, error)
+	GetRoute(ctx context.Context, request NetworkResourceGetRequest) (NetworkRouteRecord, error)
+	DeleteRoute(ctx context.Context, request NetworkResourceGetRequest) (NetworkRouteRecord, error)
 }
 
 type NetworkResourceStore interface {

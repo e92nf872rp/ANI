@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
@@ -61,6 +62,33 @@ type networkCreateRouteRequest struct {
 	NextHopType     string `json:"next_hop_type"`
 	NextHopID       string `json:"next_hop_id"`
 	Description     string `json:"description,omitempty"`
+}
+
+type networkCreateSecurityGroupRuleRequest struct {
+	IdempotencyKey string `json:"idempotency_key"`
+	Priority       int    `json:"priority"`
+	Direction      string `json:"direction"`
+	Protocol       string `json:"protocol"`
+	PortRange      string `json:"port_range"`
+	CIDR           string `json:"cidr"`
+	Action         string `json:"action"`
+	Description    string `json:"description,omitempty"`
+}
+
+type networkUpdateSecurityGroupRuleRequest struct {
+	Priority    int    `json:"priority,omitempty"`
+	Direction   string `json:"direction,omitempty"`
+	Protocol    string `json:"protocol,omitempty"`
+	PortRange   string `json:"port_range,omitempty"`
+	CIDR        string `json:"cidr,omitempty"`
+	Action      string `json:"action,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+type networkCreateSecurityGroupBindingRequest struct {
+	IdempotencyKey string `json:"idempotency_key"`
+	TargetType     string `json:"target_type"`
+	TargetID       string `json:"target_id"`
 }
 
 type networkLBListenerRecord struct {
@@ -135,6 +163,75 @@ type networkRouteResponse struct {
 	DevProfile      coreDevProfileResponse `json:"dev_profile"`
 }
 
+type networkOverviewResourceSummaryResponse struct {
+	Kind      string `json:"kind"`
+	Total     int    `json:"total"`
+	Available int    `json:"available"`
+	Pending   int    `json:"pending"`
+	Failed    int    `json:"failed"`
+	Deleting  int    `json:"deleting"`
+}
+
+type networkOverviewCapabilityResponse struct {
+	Key         string `json:"key"`
+	Label       string `json:"label"`
+	Status      string `json:"status"`
+	Path        string `json:"path,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+type networkOverviewRelationshipResponse struct {
+	Source   string `json:"source"`
+	Target   string `json:"target"`
+	Relation string `json:"relation"`
+}
+
+type networkOverviewDeleteRiskResponse struct {
+	Kind string `json:"kind"`
+	Risk string `json:"risk"`
+}
+
+type networkOverviewResponse struct {
+	Resources     []networkOverviewResourceSummaryResponse `json:"resources"`
+	Capabilities  []networkOverviewCapabilityResponse      `json:"capabilities"`
+	CreateOrder   []string                                 `json:"create_order"`
+	Relationships []networkOverviewRelationshipResponse    `json:"relationships"`
+	DeleteRisks   []networkOverviewDeleteRiskResponse      `json:"delete_risks"`
+}
+
+type networkSubnetIPAllocationResponse struct {
+	ID           string `json:"id"`
+	SubnetID     string `json:"subnet_id"`
+	IPAddress    string `json:"ip_address"`
+	ResourceType string `json:"resource_type,omitempty"`
+	ResourceID   string `json:"resource_id,omitempty"`
+	State        string `json:"state"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at,omitempty"`
+}
+
+type networkSecurityGroupRuleResponse struct {
+	ID              string `json:"id"`
+	SecurityGroupID string `json:"security_group_id"`
+	Priority        int    `json:"priority"`
+	Direction       string `json:"direction"`
+	Protocol        string `json:"protocol"`
+	PortRange       string `json:"port_range"`
+	CIDR            string `json:"cidr"`
+	Action          string `json:"action"`
+	Description     string `json:"description,omitempty"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at,omitempty"`
+}
+
+type networkSecurityGroupBindingResponse struct {
+	ID              string `json:"id"`
+	SecurityGroupID string `json:"security_group_id"`
+	TargetType      string `json:"target_type"`
+	TargetID        string `json:"target_id"`
+	CreatedAt       string `json:"created_at"`
+}
+
 func newNetworkAPI() *networkAPI {
 	return newNetworkAPIWithService(nil)
 }
@@ -148,6 +245,8 @@ func newNetworkAPIWithService(service ports.NetworkService) *networkAPI {
 
 func registerNetworkResourcesWithService(v1 *route.RouterGroup, service ports.NetworkService) {
 	api := newNetworkAPIWithService(service)
+	v1.GET("/networks/overview", api.getOverview)
+
 	v1.GET("/networks/vpcs", api.listVPCs)
 	v1.POST("/networks/vpcs", api.createVPC)
 	v1.GET("/networks/vpcs/:vpc_id", api.getVPC)
@@ -157,11 +256,20 @@ func registerNetworkResourcesWithService(v1 *route.RouterGroup, service ports.Ne
 	v1.POST("/networks/subnets", api.createSubnet)
 	v1.GET("/networks/subnets/:subnet_id", api.getSubnet)
 	v1.DELETE("/networks/subnets/:subnet_id", api.deleteSubnet)
+	v1.GET("/networks/subnets/:subnet_id/ip-allocations", api.listSubnetIPAllocations)
 
 	v1.GET("/networks/security-groups", api.listSecurityGroups)
 	v1.POST("/networks/security-groups", api.createSecurityGroup)
 	v1.GET("/networks/security-groups/:security_group_id", api.getSecurityGroup)
 	v1.DELETE("/networks/security-groups/:security_group_id", api.deleteSecurityGroup)
+	v1.GET("/networks/security-groups/:security_group_id/rules", api.listSecurityGroupRules)
+	v1.POST("/networks/security-groups/:security_group_id/rules", api.createSecurityGroupRule)
+	v1.GET("/networks/security-groups/:security_group_id/rules/:rule_id", api.getSecurityGroupRule)
+	v1.PUT("/networks/security-groups/:security_group_id/rules/:rule_id", api.updateSecurityGroupRule)
+	v1.DELETE("/networks/security-groups/:security_group_id/rules/:rule_id", api.deleteSecurityGroupRule)
+	v1.GET("/networks/security-groups/:security_group_id/bindings", api.listSecurityGroupBindings)
+	v1.POST("/networks/security-groups/:security_group_id/bindings", api.createSecurityGroupBinding)
+	v1.DELETE("/networks/security-groups/:security_group_id/bindings/:binding_id", api.deleteSecurityGroupBinding)
 
 	v1.GET("/networks/load-balancers", api.listLoadBalancers)
 	v1.POST("/networks/load-balancers", api.createLoadBalancer)
@@ -170,6 +278,17 @@ func registerNetworkResourcesWithService(v1 *route.RouterGroup, service ports.Ne
 
 	v1.GET("/networks/routes", api.listRoutes)
 	v1.POST("/networks/routes", api.createRoute)
+	v1.GET("/networks/routes/:route_id", api.getRoute)
+	v1.DELETE("/networks/routes/:route_id", api.deleteRoute)
+}
+
+func (api *networkAPI) getOverview(ctx context.Context, c *app.RequestContext) {
+	record, err := api.service.GetOverview(ctx, ports.NetworkOverviewRequest{TenantID: demoTenantID(c)})
+	if err != nil {
+		writeNetworkError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, networkOverviewFromRecord(record))
 }
 
 func (api *networkAPI) createVPC(ctx context.Context, c *app.RequestContext) {
@@ -192,7 +311,11 @@ func (api *networkAPI) createVPC(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *networkAPI) listVPCs(ctx context.Context, c *app.RequestContext) {
-	records, err := api.service.ListVPCs(ctx, ports.NetworkResourceListRequest{TenantID: demoTenantID(c)})
+	records, err := api.service.ListVPCs(ctx, ports.NetworkResourceListRequest{
+		TenantID: demoTenantID(c),
+		Name:     c.Query("name"),
+		State:    ports.NetworkResourceState(c.Query("state")),
+	})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -244,7 +367,11 @@ func (api *networkAPI) createSubnet(ctx context.Context, c *app.RequestContext) 
 }
 
 func (api *networkAPI) listSubnets(ctx context.Context, c *app.RequestContext) {
-	records, err := api.service.ListSubnets(ctx, ports.NetworkResourceListRequest{TenantID: demoTenantID(c)})
+	records, err := api.service.ListSubnets(ctx, ports.NetworkResourceListRequest{
+		TenantID: demoTenantID(c),
+		VPCID:    c.Query("vpc_id"),
+		State:    ports.NetworkResourceState(c.Query("state")),
+	})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -274,6 +401,24 @@ func (api *networkAPI) deleteSubnet(ctx context.Context, c *app.RequestContext) 
 	c.JSON(http.StatusOK, networkSubnetFromRecord(record))
 }
 
+func (api *networkAPI) listSubnetIPAllocations(ctx context.Context, c *app.RequestContext) {
+	records, err := api.service.ListSubnetIPAllocations(ctx, ports.NetworkSubnetIPAllocationListRequest{
+		TenantID:     demoTenantID(c),
+		SubnetID:     c.Param("subnet_id"),
+		State:        c.Query("state"),
+		ResourceType: c.Query("resource_type"),
+	})
+	if err != nil {
+		writeNetworkError(c, err)
+		return
+	}
+	items := make([]networkSubnetIPAllocationResponse, 0, len(records))
+	for _, record := range records {
+		items = append(items, networkSubnetIPAllocationFromRecord(record))
+	}
+	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
+}
+
 func (api *networkAPI) createSecurityGroup(ctx context.Context, c *app.RequestContext) {
 	var req networkCreateSecurityGroupRequest
 	if err := c.BindJSON(&req); err != nil {
@@ -295,7 +440,11 @@ func (api *networkAPI) createSecurityGroup(ctx context.Context, c *app.RequestCo
 }
 
 func (api *networkAPI) listSecurityGroups(ctx context.Context, c *app.RequestContext) {
-	records, err := api.service.ListSecurityGroups(ctx, ports.NetworkResourceListRequest{TenantID: demoTenantID(c)})
+	records, err := api.service.ListSecurityGroups(ctx, ports.NetworkResourceListRequest{
+		TenantID: demoTenantID(c),
+		Name:     c.Query("name"),
+		State:    ports.NetworkResourceState(c.Query("state")),
+	})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -325,6 +474,151 @@ func (api *networkAPI) deleteSecurityGroup(ctx context.Context, c *app.RequestCo
 	c.JSON(http.StatusOK, networkSecurityGroupFromRecord(record))
 }
 
+func (api *networkAPI) listSecurityGroupRules(ctx context.Context, c *app.RequestContext) {
+	records, err := api.service.ListSecurityGroupRules(ctx, ports.NetworkSecurityGroupRuleListRequest{
+		TenantID:        demoTenantID(c),
+		SecurityGroupID: c.Param("security_group_id"),
+		Direction:       c.Query("direction"),
+		Protocol:        c.Query("protocol"),
+	})
+	if err != nil {
+		writeNetworkError(c, err)
+		return
+	}
+	items := make([]networkSecurityGroupRuleResponse, 0, len(records))
+	for _, record := range records {
+		items = append(items, networkSecurityGroupRuleFromRecord(record))
+	}
+	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
+}
+
+func (api *networkAPI) createSecurityGroupRule(ctx context.Context, c *app.RequestContext) {
+	var req networkCreateSecurityGroupRuleRequest
+	if err := c.BindJSON(&req); err != nil {
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid security group rule request")
+		return
+	}
+	record, err := api.service.CreateSecurityGroupRule(ctx, ports.NetworkSecurityGroupRuleCreateRequest{
+		TenantID:        demoTenantID(c),
+		SecurityGroupID: c.Param("security_group_id"),
+		IdempotencyKey:  req.IdempotencyKey,
+		Priority:        req.Priority,
+		Direction:       req.Direction,
+		Protocol:        req.Protocol,
+		PortRange:       req.PortRange,
+		CIDR:            req.CIDR,
+		Action:          req.Action,
+		Description:     req.Description,
+	})
+	if err != nil {
+		writeNetworkError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, networkSecurityGroupRuleFromRecord(record))
+}
+
+func (api *networkAPI) getSecurityGroupRule(ctx context.Context, c *app.RequestContext) {
+	record, err := api.service.GetSecurityGroupRule(ctx, ports.NetworkSecurityGroupRuleGetRequest{
+		TenantID:        demoTenantID(c),
+		SecurityGroupID: c.Param("security_group_id"),
+		RuleID:          c.Param("rule_id"),
+	})
+	if err != nil {
+		writeNetworkError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, networkSecurityGroupRuleFromRecord(record))
+}
+
+func (api *networkAPI) updateSecurityGroupRule(ctx context.Context, c *app.RequestContext) {
+	var req networkUpdateSecurityGroupRuleRequest
+	if err := c.BindJSON(&req); err != nil {
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid security group rule request")
+		return
+	}
+	record, err := api.service.UpdateSecurityGroupRule(ctx, ports.NetworkSecurityGroupRuleUpdateRequest{
+		TenantID:        demoTenantID(c),
+		SecurityGroupID: c.Param("security_group_id"),
+		RuleID:          c.Param("rule_id"),
+		Priority:        req.Priority,
+		Direction:       req.Direction,
+		Protocol:        req.Protocol,
+		PortRange:       req.PortRange,
+		CIDR:            req.CIDR,
+		Action:          req.Action,
+		Description:     req.Description,
+	})
+	if err != nil {
+		writeNetworkError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, networkSecurityGroupRuleFromRecord(record))
+}
+
+func (api *networkAPI) deleteSecurityGroupRule(ctx context.Context, c *app.RequestContext) {
+	record, err := api.service.DeleteSecurityGroupRule(ctx, ports.NetworkSecurityGroupRuleGetRequest{
+		TenantID:        demoTenantID(c),
+		SecurityGroupID: c.Param("security_group_id"),
+		RuleID:          c.Param("rule_id"),
+	})
+	if err != nil {
+		writeNetworkError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, networkSecurityGroupRuleFromRecord(record))
+}
+
+func (api *networkAPI) listSecurityGroupBindings(ctx context.Context, c *app.RequestContext) {
+	records, err := api.service.ListSecurityGroupBindings(ctx, ports.NetworkSecurityGroupBindingListRequest{
+		TenantID:        demoTenantID(c),
+		SecurityGroupID: c.Param("security_group_id"),
+		TargetType:      c.Query("target_type"),
+		TargetID:        c.Query("target_id"),
+	})
+	if err != nil {
+		writeNetworkError(c, err)
+		return
+	}
+	items := make([]networkSecurityGroupBindingResponse, 0, len(records))
+	for _, record := range records {
+		items = append(items, networkSecurityGroupBindingFromRecord(record))
+	}
+	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
+}
+
+func (api *networkAPI) createSecurityGroupBinding(ctx context.Context, c *app.RequestContext) {
+	var req networkCreateSecurityGroupBindingRequest
+	if err := c.BindJSON(&req); err != nil {
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid security group binding request")
+		return
+	}
+	record, err := api.service.CreateSecurityGroupBinding(ctx, ports.NetworkSecurityGroupBindingCreateRequest{
+		TenantID:        demoTenantID(c),
+		SecurityGroupID: c.Param("security_group_id"),
+		IdempotencyKey:  req.IdempotencyKey,
+		TargetType:      req.TargetType,
+		TargetID:        req.TargetID,
+	})
+	if err != nil {
+		writeNetworkError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, networkSecurityGroupBindingFromRecord(record))
+}
+
+func (api *networkAPI) deleteSecurityGroupBinding(ctx context.Context, c *app.RequestContext) {
+	record, err := api.service.DeleteSecurityGroupBinding(ctx, ports.NetworkSecurityGroupBindingDeleteRequest{
+		TenantID:        demoTenantID(c),
+		SecurityGroupID: c.Param("security_group_id"),
+		BindingID:       c.Param("binding_id"),
+	})
+	if err != nil {
+		writeNetworkError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, networkSecurityGroupBindingFromRecord(record))
+}
+
 func (api *networkAPI) createLoadBalancer(ctx context.Context, c *app.RequestContext) {
 	var req networkCreateLoadBalancerRequest
 	if err := c.BindJSON(&req); err != nil {
@@ -348,7 +642,12 @@ func (api *networkAPI) createLoadBalancer(ctx context.Context, c *app.RequestCon
 }
 
 func (api *networkAPI) listLoadBalancers(ctx context.Context, c *app.RequestContext) {
-	records, err := api.service.ListLoadBalancers(ctx, ports.NetworkResourceListRequest{TenantID: demoTenantID(c)})
+	records, err := api.service.ListLoadBalancers(ctx, ports.NetworkResourceListRequest{
+		TenantID: demoTenantID(c),
+		VPCID:    c.Query("vpc_id"),
+		State:    ports.NetworkResourceState(c.Query("state")),
+		Scheme:   c.Query("scheme"),
+	})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -402,8 +701,9 @@ func (api *networkAPI) createRoute(ctx context.Context, c *app.RequestContext) {
 
 func (api *networkAPI) listRoutes(ctx context.Context, c *app.RequestContext) {
 	records, err := api.service.ListRoutes(ctx, ports.NetworkRouteListRequest{
-		TenantID: demoTenantID(c),
-		VPCID:    c.Query("vpc_id"),
+		TenantID:    demoTenantID(c),
+		VPCID:       c.Query("vpc_id"),
+		NextHopType: c.Query("next_hop_type"),
 	})
 	if err != nil {
 		writeNetworkError(c, err)
@@ -414,6 +714,24 @@ func (api *networkAPI) listRoutes(ctx context.Context, c *app.RequestContext) {
 		items = append(items, networkRouteFromRecord(record))
 	}
 	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
+}
+
+func (api *networkAPI) getRoute(ctx context.Context, c *app.RequestContext) {
+	record, err := api.service.GetRoute(ctx, ports.NetworkResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("route_id")})
+	if err != nil {
+		writeNetworkError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, networkRouteFromRecord(record))
+}
+
+func (api *networkAPI) deleteRoute(ctx context.Context, c *app.RequestContext) {
+	record, err := api.service.DeleteRoute(ctx, ports.NetworkResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("route_id")})
+	if err != nil {
+		writeNetworkError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, networkRouteFromRecord(record))
 }
 
 func networkVPCFromRecord(record ports.NetworkVPCRecord) networkVPCResponse {
@@ -505,6 +823,93 @@ func networkRouteFromRecord(record ports.NetworkRouteRecord) networkRouteRespons
 	}
 }
 
+func networkOverviewFromRecord(record ports.NetworkOverviewRecord) networkOverviewResponse {
+	kinds := []string{"vpc", "subnet", "security_group", "load_balancer", "route"}
+	resources := make([]networkOverviewResourceSummaryResponse, 0, len(kinds))
+	for _, kind := range kinds {
+		summary := record.Resources[kind]
+		if summary.Kind == "" {
+			summary.Kind = kind
+		}
+		resources = append(resources, networkOverviewResourceSummaryResponse{
+			Kind:      summary.Kind,
+			Total:     summary.Total,
+			Available: summary.Available,
+			Pending:   summary.Pending,
+			Failed:    summary.Failed,
+			Deleting:  summary.Deleting,
+		})
+	}
+	capabilities := make([]networkOverviewCapabilityResponse, 0, len(record.Capabilities))
+	for _, capability := range record.Capabilities {
+		capabilities = append(capabilities, networkOverviewCapabilityResponse{
+			Key:         capability.Key,
+			Label:       capability.Label,
+			Status:      capability.Status,
+			Path:        capability.Path,
+			Description: capability.Description,
+		})
+	}
+	relationships := make([]networkOverviewRelationshipResponse, 0, len(record.Relationships))
+	for _, relationship := range record.Relationships {
+		relationships = append(relationships, networkOverviewRelationshipResponse{
+			Source:   relationship.Source,
+			Target:   relationship.Target,
+			Relation: relationship.Relation,
+		})
+	}
+	deleteRisks := make([]networkOverviewDeleteRiskResponse, 0, len(record.DeleteRisks))
+	for _, risk := range record.DeleteRisks {
+		deleteRisks = append(deleteRisks, networkOverviewDeleteRiskResponse{Kind: risk.Kind, Risk: risk.Risk})
+	}
+	return networkOverviewResponse{
+		Resources:     resources,
+		Capabilities:  capabilities,
+		CreateOrder:   append([]string(nil), record.CreateOrder...),
+		Relationships: relationships,
+		DeleteRisks:   deleteRisks,
+	}
+}
+
+func networkSubnetIPAllocationFromRecord(record ports.NetworkSubnetIPAllocationRecord) networkSubnetIPAllocationResponse {
+	return networkSubnetIPAllocationResponse{
+		ID:           record.AllocationID,
+		SubnetID:     record.SubnetID,
+		IPAddress:    record.IPAddress,
+		ResourceType: record.ResourceType,
+		ResourceID:   record.ResourceID,
+		State:        record.State,
+		CreatedAt:    networkTime(record.CreatedAt),
+		UpdatedAt:    networkTime(record.UpdatedAt),
+	}
+}
+
+func networkSecurityGroupRuleFromRecord(record ports.NetworkSecurityGroupRuleRecord) networkSecurityGroupRuleResponse {
+	return networkSecurityGroupRuleResponse{
+		ID:              record.RuleID,
+		SecurityGroupID: record.SecurityGroupID,
+		Priority:        record.Priority,
+		Direction:       record.Direction,
+		Protocol:        record.Protocol,
+		PortRange:       record.PortRange,
+		CIDR:            record.CIDR,
+		Action:          record.Action,
+		Description:     record.Description,
+		CreatedAt:       networkTime(record.CreatedAt),
+		UpdatedAt:       networkTime(record.UpdatedAt),
+	}
+}
+
+func networkSecurityGroupBindingFromRecord(record ports.NetworkSecurityGroupBindingRecord) networkSecurityGroupBindingResponse {
+	return networkSecurityGroupBindingResponse{
+		ID:              record.BindingID,
+		SecurityGroupID: record.SecurityGroupID,
+		TargetType:      record.TargetType,
+		TargetID:        record.TargetID,
+		CreatedAt:       networkTime(record.CreatedAt),
+	}
+}
+
 func networkRulesToPorts(items []networkSecurityGroupRule) []ports.NetworkSecurityGroupRule {
 	rules := make([]ports.NetworkSecurityGroupRule, 0, len(items))
 	for _, item := range items {
@@ -521,6 +926,12 @@ func networkRulesToPorts(items []networkSecurityGroupRule) []ports.NetworkSecuri
 
 func networkRulesFromPorts(items []ports.NetworkSecurityGroupRule) []networkSecurityGroupRule {
 	rules := make([]networkSecurityGroupRule, 0, len(items))
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Priority == items[j].Priority {
+			return items[i].Direction < items[j].Direction
+		}
+		return items[i].Priority < items[j].Priority
+	})
 	for _, item := range items {
 		rules = append(rules, networkSecurityGroupRule{
 			Direction: item.Direction,
