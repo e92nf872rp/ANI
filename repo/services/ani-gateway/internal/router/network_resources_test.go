@@ -121,6 +121,70 @@ func TestNetworkAPIDevProfileRoute(t *testing.T) {
 	requireLocalCoreDevProfile(t, got.DevProfile, "local-network-service")
 }
 
+func TestNetworkAPIOverviewRuleBindingAndIPAllocationResponses(t *testing.T) {
+	api := newNetworkAPI()
+	vpc, err := api.service.CreateVPC(context.Background(), ports.NetworkVPCCreateRequest{TenantID: "tenant-a", IdempotencyKey: "api-overview-vpc", Name: "vpc"})
+	if err != nil {
+		t.Fatalf("CreateVPC error = %v", err)
+	}
+	subnet, err := api.service.CreateSubnet(context.Background(), ports.NetworkSubnetCreateRequest{TenantID: "tenant-a", IdempotencyKey: "api-overview-subnet", VPCID: vpc.VPCID, Name: "subnet"})
+	if err != nil {
+		t.Fatalf("CreateSubnet error = %v", err)
+	}
+	sg, err := api.service.CreateSecurityGroup(context.Background(), ports.NetworkSecurityGroupCreateRequest{TenantID: "tenant-a", IdempotencyKey: "api-overview-sg", Name: "sg"})
+	if err != nil {
+		t.Fatalf("CreateSecurityGroup error = %v", err)
+	}
+	rule, err := api.service.CreateSecurityGroupRule(context.Background(), ports.NetworkSecurityGroupRuleCreateRequest{
+		TenantID:        "tenant-a",
+		SecurityGroupID: sg.SecurityGroupID,
+		IdempotencyKey:  "api-rule-a",
+		Priority:        100,
+		Direction:       "ingress",
+		Protocol:        "tcp",
+		PortRange:       "443",
+		CIDR:            "0.0.0.0/0",
+		Action:          "allow",
+		Description:     "https",
+	})
+	if err != nil {
+		t.Fatalf("CreateSecurityGroupRule error = %v", err)
+	}
+	ruleResponse := networkSecurityGroupRuleFromRecord(rule)
+	if ruleResponse.ID != rule.RuleID || ruleResponse.SecurityGroupID != sg.SecurityGroupID || ruleResponse.Priority != 100 {
+		t.Fatalf("rule response = %+v, want priority and parent identity", ruleResponse)
+	}
+	binding, err := api.service.CreateSecurityGroupBinding(context.Background(), ports.NetworkSecurityGroupBindingCreateRequest{
+		TenantID:        "tenant-a",
+		SecurityGroupID: sg.SecurityGroupID,
+		IdempotencyKey:  "api-binding-a",
+		TargetType:      "instance",
+		TargetID:        "inst-a",
+	})
+	if err != nil {
+		t.Fatalf("CreateSecurityGroupBinding error = %v", err)
+	}
+	bindingResponse := networkSecurityGroupBindingFromRecord(binding)
+	if bindingResponse.ID != binding.BindingID || bindingResponse.TargetType != "instance" || bindingResponse.SecurityGroupID != sg.SecurityGroupID {
+		t.Fatalf("binding response = %+v, want binding identity", bindingResponse)
+	}
+	overview, err := api.service.GetOverview(context.Background(), ports.NetworkOverviewRequest{TenantID: "tenant-a"})
+	if err != nil {
+		t.Fatalf("GetOverview error = %v", err)
+	}
+	overviewResponse := networkOverviewFromRecord(overview)
+	if len(overviewResponse.Resources) != 5 || len(overviewResponse.Capabilities) != 8 || len(overviewResponse.CreateOrder) != 4 {
+		t.Fatalf("overview response = %+v, want first-screen metadata", overviewResponse)
+	}
+	ipAllocations, err := api.service.ListSubnetIPAllocations(context.Background(), ports.NetworkSubnetIPAllocationListRequest{TenantID: "tenant-a", SubnetID: subnet.SubnetID})
+	if err != nil {
+		t.Fatalf("ListSubnetIPAllocations error = %v", err)
+	}
+	if len(ipAllocations) != 0 {
+		t.Fatalf("ip allocations = %#v, want empty local list", ipAllocations)
+	}
+}
+
 func TestNetworkAPIRouteResponseMarksRealProvider(t *testing.T) {
 	got := networkRouteFromRecord(ports.NetworkRouteRecord{
 		RouteID:         "rt-real",
