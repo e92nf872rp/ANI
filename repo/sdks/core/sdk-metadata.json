@@ -395,6 +395,12 @@
       "scope": "scope:networks:read"
     },
     {
+      "operationId": "getNetworkOverview",
+      "method": "GET",
+      "path": "/networks/overview",
+      "scope": "scope:networks:read"
+    },
+    {
       "operationId": "listNetworkRoutes",
       "method": "GET",
       "path": "/networks/routes",
@@ -405,6 +411,18 @@
       "method": "POST",
       "path": "/networks/routes",
       "scope": "scope:networks:create"
+    },
+    {
+      "operationId": "deleteNetworkRoute",
+      "method": "DELETE",
+      "path": "/networks/routes/{route_id}",
+      "scope": "scope:networks:delete"
+    },
+    {
+      "operationId": "getNetworkRoute",
+      "method": "GET",
+      "path": "/networks/routes/{route_id}",
+      "scope": "scope:networks:read"
     },
     {
       "operationId": "listNetworkSecurityGroups",
@@ -431,6 +449,54 @@
       "scope": "scope:networks:read"
     },
     {
+      "operationId": "listNetworkSecurityGroupBindings",
+      "method": "GET",
+      "path": "/networks/security-groups/{security_group_id}/bindings",
+      "scope": "scope:networks:read"
+    },
+    {
+      "operationId": "createNetworkSecurityGroupBinding",
+      "method": "POST",
+      "path": "/networks/security-groups/{security_group_id}/bindings",
+      "scope": "scope:networks:create"
+    },
+    {
+      "operationId": "deleteNetworkSecurityGroupBinding",
+      "method": "DELETE",
+      "path": "/networks/security-groups/{security_group_id}/bindings/{binding_id}",
+      "scope": "scope:networks:delete"
+    },
+    {
+      "operationId": "listNetworkSecurityGroupRules",
+      "method": "GET",
+      "path": "/networks/security-groups/{security_group_id}/rules",
+      "scope": "scope:networks:read"
+    },
+    {
+      "operationId": "createNetworkSecurityGroupRule",
+      "method": "POST",
+      "path": "/networks/security-groups/{security_group_id}/rules",
+      "scope": "scope:networks:create"
+    },
+    {
+      "operationId": "deleteNetworkSecurityGroupRule",
+      "method": "DELETE",
+      "path": "/networks/security-groups/{security_group_id}/rules/{rule_id}",
+      "scope": "scope:networks:delete"
+    },
+    {
+      "operationId": "getNetworkSecurityGroupRule",
+      "method": "GET",
+      "path": "/networks/security-groups/{security_group_id}/rules/{rule_id}",
+      "scope": "scope:networks:read"
+    },
+    {
+      "operationId": "updateNetworkSecurityGroupRule",
+      "method": "PUT",
+      "path": "/networks/security-groups/{security_group_id}/rules/{rule_id}",
+      "scope": "scope:networks:create"
+    },
+    {
       "operationId": "listNetworkSubnets",
       "method": "GET",
       "path": "/networks/subnets",
@@ -452,6 +518,12 @@
       "operationId": "getNetworkSubnet",
       "method": "GET",
       "path": "/networks/subnets/{subnet_id}",
+      "scope": "scope:networks:read"
+    },
+    {
+      "operationId": "listNetworkSubnetIPAllocations",
+      "method": "GET",
+      "path": "/networks/subnets/{subnet_id}/ip-allocations",
       "scope": "scope:networks:read"
     },
     {
@@ -742,7 +814,9 @@
     "CreateInstanceResponse",
     "CreateNetworkLoadBalancerRequest",
     "CreateNetworkRouteRequest",
+    "CreateNetworkSecurityGroupBindingRequest",
     "CreateNetworkSecurityGroupRequest",
+    "CreateNetworkSecurityGroupRuleRequest",
     "CreateNetworkSubnetRequest",
     "CreateNetworkVPCRequest",
     "CreateObservabilityAlertRuleRequest",
@@ -812,13 +886,26 @@
     "NetworkLoadBalancer",
     "NetworkLoadBalancerListResponse",
     "NetworkLoadBalancerListener",
+    "NetworkOverview",
+    "NetworkOverviewCapability",
+    "NetworkOverviewDeleteRisk",
+    "NetworkOverviewRelationship",
+    "NetworkOverviewResourceKind",
+    "NetworkOverviewResourceSummary",
     "NetworkResourceState",
     "NetworkRoute",
     "NetworkRouteListResponse",
     "NetworkSecurityGroup",
+    "NetworkSecurityGroupBinding",
+    "NetworkSecurityGroupBindingListResponse",
+    "NetworkSecurityGroupBindingTargetType",
     "NetworkSecurityGroupListResponse",
     "NetworkSecurityGroupRule",
+    "NetworkSecurityGroupRuleListResponse",
+    "NetworkSecurityGroupRuleResource",
     "NetworkSubnet",
+    "NetworkSubnetIPAllocation",
+    "NetworkSubnetIPAllocationListResponse",
     "NetworkSubnetListResponse",
     "NetworkVPC",
     "NetworkVPCListResponse",
@@ -867,6 +954,7 @@
     "StorageVolumeListResponse",
     "TokenPairResponse",
     "TokenUsageReport",
+    "UpdateNetworkSecurityGroupRuleRequest",
     "UpdateObservabilityAlertRuleRequest",
     "VectorStore",
     "VectorStoreDocumentInsertRequest",
@@ -899,6 +987,8 @@
     "createNetworkLoadBalancer",
     "createNetworkRoute",
     "createNetworkSecurityGroup",
+    "createNetworkSecurityGroupBinding",
+    "createNetworkSecurityGroupRule",
     "createNetworkSubnet",
     "createNetworkVPC",
     "createStorageObject",
@@ -928,7 +1018,10 @@
     "listNetworkLoadBalancers",
     "listNetworkRoutes",
     "listNetworkSecurityGroups",
+    "listNetworkSecurityGroupBindings",
+    "listNetworkSecurityGroupRules",
     "listNetworkSubnets",
+    "listNetworkSubnetIPAllocations",
     "listNetworkVPCs",
     "listStorageObjects",
     "listObservabilityAlertRules",

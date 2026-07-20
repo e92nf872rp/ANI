@@ -1111,10 +1111,11 @@ components:
 
     NetworkSecurityGroupRuleResource:
       type: object
-      required: [id, security_group_id, direction, protocol, port_range, cidr, action, created_at]
+      required: [id, security_group_id, priority, direction, protocol, port_range, cidr, action, created_at]
       properties:
         id:                { type: string }
         security_group_id: { type: string }
+        priority:          { type: integer, minimum: 1, maximum: 32766, description: "规则优先级，数值越小优先级越高。" }
         direction:         { type: string, enum: [ingress, egress] }
         protocol:          { type: string, enum: [tcp, udp, icmp, all] }
         port_range:        { type: string, example: "443" }
@@ -1134,9 +1135,10 @@ components:
 
     CreateNetworkSecurityGroupRuleRequest:
       type: object
-      required: [idempotency_key, direction, protocol, port_range, cidr, action]
+      required: [idempotency_key, priority, direction, protocol, port_range, cidr, action]
       properties:
         idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
+        priority:        { type: integer, minimum: 1, maximum: 32766, description: "规则优先级，数值越小优先级越高。" }
         direction:       { type: string, enum: [ingress, egress] }
         protocol:        { type: string, enum: [tcp, udp, icmp, all] }
         port_range:      { type: string, example: "443" }
@@ -1147,6 +1149,7 @@ components:
     UpdateNetworkSecurityGroupRuleRequest:
       type: object
       properties:
+        priority:     { type: integer, minimum: 1, maximum: 32766, description: "规则优先级，数值越小优先级越高。" }
         direction:    { type: string, enum: [ingress, egress] }
         protocol:     { type: string, enum: [tcp, udp, icmp, all] }
         port_range:   { type: string, example: "443" }
@@ -2100,6 +2103,11 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
+    NetworkSecurityGroupRuleNotFound:
+      description: 安全组不存在，或 rule_id 不属于该 security_group_id（code=NOT_FOUND）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
     BadRequest:
       description: 请求参数不合法（code=BAD_REQUEST）
       content:
@@ -2960,7 +2968,7 @@ paths:
               schema: { $ref: '#/components/schemas/NetworkSecurityGroupRuleResource' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
-        "404": { $ref: '#/components/responses/NotFound' }
+        "404": { $ref: '#/components/responses/NetworkSecurityGroupRuleNotFound' }
     put:
       operationId: updateNetworkSecurityGroupRule
       summary: 更新安全组规则
@@ -2983,7 +2991,7 @@ paths:
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
-        "404": { $ref: '#/components/responses/NotFound' }
+        "404": { $ref: '#/components/responses/NetworkSecurityGroupRuleNotFound' }
         "409": { $ref: '#/components/responses/Conflict' }
     delete:
       operationId: deleteNetworkSecurityGroupRule
@@ -3001,7 +3009,7 @@ paths:
               schema: { $ref: '#/components/schemas/NetworkSecurityGroupRuleResource' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
-        "404": { $ref: '#/components/responses/NotFound' }
+        "404": { $ref: '#/components/responses/NetworkSecurityGroupRuleNotFound' }
         "409": { $ref: '#/components/responses/Conflict' }
 
   /networks/security-groups/{security_group_id}/bindings:
