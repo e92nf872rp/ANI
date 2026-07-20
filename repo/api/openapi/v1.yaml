@@ -1559,6 +1559,169 @@ components:
           $ref: '#/components/schemas/CoreDevProfileInfo'
         scanned_at: { type: string, format: date-time }
 
+    RegistryOverviewResourceSummary:
+      type: object
+      required: [kind, total]
+      properties:
+        kind:       { type: string, enum: [project, repository, artifact, tag] }
+        total:      { type: integer }
+        available:  { type: integer, default: 0 }
+        pending:    { type: integer, default: 0 }
+        failed:     { type: integer, default: 0 }
+        size_bytes: { type: integer, format: int64, default: 0 }
+
+    RegistryOverviewVulnerabilitySummary:
+      type: object
+      required: [critical, high, medium, low]
+      properties:
+        critical: { type: integer }
+        high:     { type: integer }
+        medium:   { type: integer }
+        low:      { type: integer }
+
+    RegistryOverviewCapability:
+      type: object
+      required: [key, label, status]
+      properties:
+        key:
+          type: string
+          enum: [projects, repositories, tags, push_instructions, pull_commands, scan_summary, scan_policy, quota, garbage_collection]
+        label:       { type: string }
+        status:      { type: string, enum: [available, planned] }
+        path:        { type: string }
+        description: { type: string }
+
+    RegistryOverviewRelationship:
+      type: object
+      required: [source, target, relation]
+      properties:
+        source:   { type: string, enum: [project, repository, tag, workload] }
+        target:   { type: string, enum: [project, repository, tag, workload] }
+        relation: { type: string }
+
+    RegistryOverviewQuickAction:
+      type: object
+      required: [key, label]
+      properties:
+        key:         { type: string, enum: [create_project, push_instructions] }
+        label:       { type: string }
+        path:        { type: string }
+        description: { type: string }
+
+    RegistryOverviewDeleteRisk:
+      type: object
+      required: [kind, risk]
+      properties:
+        kind: { type: string, enum: [project, repository, artifact, tag] }
+        risk: { type: string }
+
+    RegistryOverview:
+      type: object
+      required: [resources, vulnerabilities, capabilities, create_order, relationships, quick_actions, delete_risks]
+      properties:
+        resources:
+          type: array
+          items: { $ref: '#/components/schemas/RegistryOverviewResourceSummary' }
+        vulnerabilities:
+          $ref: '#/components/schemas/RegistryOverviewVulnerabilitySummary'
+        capabilities:
+          type: array
+          items: { $ref: '#/components/schemas/RegistryOverviewCapability' }
+        create_order:
+          type: array
+          items: { type: string, enum: [project, login, tag, push] }
+          example: [project, login, tag, push]
+        relationships:
+          type: array
+          items: { $ref: '#/components/schemas/RegistryOverviewRelationship' }
+        quick_actions:
+          type: array
+          items: { $ref: '#/components/schemas/RegistryOverviewQuickAction' }
+        delete_risks:
+          type: array
+          items: { $ref: '#/components/schemas/RegistryOverviewDeleteRisk' }
+
+    RegistryImage:
+      type: object
+      required: [project, repository, tag, image, digest, media_type, size_bytes, pushed_at, scan_status]
+      properties:
+        project:      { type: string }
+        repository:   { type: string }
+        tag:          { type: string }
+        image:        { type: string, description: "完整镜像引用，例如 registry.local/project/repository:tag" }
+        registry:     { type: string }
+        digest:       { type: string }
+        media_type:   { type: string }
+        size_bytes:   { type: integer, format: int64 }
+        pull_command: { type: string }
+        pushed_at:    { type: string, format: date-time }
+        scan_status:
+          $ref: '#/components/schemas/RegistryScanResult'
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+
+    RegistryImageListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/RegistryImage' } }
+        total: { type: integer }
+        next_cursor: { type: string, nullable: true }
+
+    RegistryCommand:
+      type: object
+      required: [label, command]
+      properties:
+        label:   { type: string }
+        command: { type: string }
+
+    RegistryPushInstructions:
+      type: object
+      required: [project, registry, repository_example, commands]
+      properties:
+        project:            { type: string }
+        registry:           { type: string }
+        repository_example: { type: string }
+        commands:
+          type: array
+          items: { $ref: '#/components/schemas/RegistryCommand' }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+
+    RegistryDeletedTag:
+      type: object
+      required: [project, repository, tag, deleted_at]
+      properties:
+        project:    { type: string }
+        repository: { type: string }
+        tag:        { type: string }
+        digest:     { type: string }
+        deleted_at: { type: string, format: date-time }
+
+    RegistryImageReference:
+      type: object
+      required: [kind, id, name, route, state]
+      properties:
+        kind:  { type: string, enum: [container_instance, gpu_container_instance] }
+        id:    { type: string }
+        name:  { type: string }
+        route: { type: string }
+        state: { type: string }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+
+    RegistryImageReferenceListResponse:
+      type: object
+      required: [project, repository, tag, items, total, delete_blocked]
+      properties:
+        project:        { type: string }
+        repository:     { type: string }
+        tag:            { type: string }
+        image:          { type: string }
+        items:          { type: array, items: { $ref: '#/components/schemas/RegistryImageReference' } }
+        total:          { type: integer }
+        delete_blocked: { type: boolean }
+
     BeginOIDCLoginRequest:
       type: object
       required: [tenant_name, redirect_uri]
@@ -3716,6 +3879,45 @@ paths:
         "422": { $ref: '#/components/responses/PreconditionFailed' }
 
   # ── 镜像仓库 ────────────────────────────────────────────────────────────────
+  /registry/overview:
+    get:
+      operationId: getRegistryOverview
+      summary: 获取镜像仓库总览
+      description: 支撑 Console 镜像仓库首屏，聚合项目、仓库、artifact、tag、漏洞摘要、快捷动作和删除风险提示。
+      tags: [Registry]
+      x-ani-rbac-scope: "scope:registry:read"
+      responses:
+        "200":
+          description: 镜像仓库总览
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegistryOverview' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /registry/images:
+    get:
+      operationId: listRegistryImages
+      summary: 列出镜像 Tag 视图
+      description: 面向 Console 镜像仓库列表页的平铺视图；每一项表示一个可拉取镜像 tag，并携带漏洞扫描摘要和拉取命令。
+      tags: [Registry]
+      x-ani-rbac-scope: "scope:registry:read"
+      parameters:
+        - { name: project, in: query, schema: { type: string } }
+        - { name: repository, in: query, schema: { type: string } }
+        - { name: tag, in: query, schema: { type: string } }
+        - { name: scan_status, in: query, schema: { type: string, enum: [not_scanned, pending, running, complete, failed] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: 镜像 Tag 列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegistryImageListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
   /registry/projects:
     get:
       operationId: listRegistryProjects
@@ -3754,6 +3956,27 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
 
+  /registry/projects/{project}/push-instructions:
+    get:
+      operationId: getRegistryProjectPushInstructions
+      summary: 获取镜像推送说明
+      description: 返回登录、tag、push 命令模板；不返回任何凭据明文。
+      tags: [Registry]
+      x-ani-rbac-scope: "scope:registry:read"
+      parameters:
+        - { name: project, in: path, required: true, schema: { type: string } }
+        - { name: repository, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: 镜像推送说明
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegistryPushInstructions' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
   /registry/projects/{project}/repositories:
     get:
       operationId: listRegistryRepositories
@@ -3773,6 +3996,51 @@ paths:
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
+
+  /registry/projects/{project}/repositories/{repository}/tags/{tag}:
+    delete:
+      operationId: deleteRegistryRepositoryTag
+      summary: 删除镜像 Tag
+      description: 删除指定镜像 tag；若该 tag 被容器或 GPU 容器实例引用，返回 409；若该 tag 是 artifact 的最后引用，底层 provider 可同时清理对应 artifact。
+      tags: [Registry]
+      x-ani-rbac-scope: "scope:registry:write"
+      parameters:
+        - { name: project, in: path, required: true, schema: { type: string } }
+        - { name: repository, in: path, required: true, schema: { type: string } }
+        - { name: tag, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 镜像 Tag 已删除
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegistryDeletedTag' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /registry/projects/{project}/repositories/{repository}/tags/{tag}/references:
+    get:
+      operationId: listRegistryRepositoryTagReferences
+      summary: 列出镜像 Tag 引用方
+      description: 支撑 Console 镜像详情的关联资源页签和删除前风险提示；引用方包括容器实例和 GPU 容器实例。
+      tags: [Registry]
+      x-ani-rbac-scope: "scope:registry:read"
+      parameters:
+        - { name: project, in: path, required: true, schema: { type: string } }
+        - { name: repository, in: path, required: true, schema: { type: string } }
+        - { name: tag, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 镜像 Tag 引用方列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegistryImageReferenceListResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
 
   /registry/projects/{project}/repositories/{repository}/artifacts:
     get:
