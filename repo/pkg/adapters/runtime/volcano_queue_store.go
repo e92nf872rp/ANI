@@ -23,11 +23,13 @@ const (
 	volcanoQueueKind       = "Queue"
 
 	// Label keys stamped onto every Volcano Queue CRD managed by ANI.
-	volcanoLabelTenantID        = "ani.kubercloud.io/tenant"
-	volcanoLabelWorkloadClass   = "ani.kubercloud.io/workload-class"
-	volcanoLabelQueueID         = "ani.kubercloud.io/queue-id"
-	volcanoLabelPlatformDefault = "ani.kubercloud.io/platform-default"
-	volcanoLabelProjectID       = "ani.kubercloud.io/project-id"
+	volcanoLabelTenantID             = "ani.kubercloud.io/tenant"
+	volcanoLabelWorkloadClass        = "ani.kubercloud.io/workload-class"
+	volcanoLabelQueueID              = "ani.kubercloud.io/queue-id"
+	volcanoLabelPlatformDefault      = "ani.kubercloud.io/platform-default"
+	volcanoLabelProjectID            = "ani.kubercloud.io/project-id"
+	volcanoLabelIdempotencyKey       = "ani.kubercloud.io/idempotency-key"
+	volcanoLabelUpdateIdempotencyKey = "ani.kubercloud.io/update-idempotency-key"
 
 	// Legacy label key retained for backward compatibility with CRDs
 	// deployed before the workload-class key was unified. Only read;
@@ -227,20 +229,26 @@ func (s *VolcanoQueueStore) Get(ctx context.Context, tenantID, id string) (ports
 	return s.crdToQueue(crd), nil
 }
 
-func (s *VolcanoQueueStore) Create(ctx context.Context, tenantID string, req ports.GPUSchedulingQueueCreateRequest) (ports.GPUSchedulingQueue, error) {
+func (s *VolcanoQueueStore) Create(ctx context.Context, tenantID, idempotencyKey string, req ports.GPUSchedulingQueueCreateRequest) (ports.GPUSchedulingQueueCreateResult, error) {
 	if s.doer == nil {
-		return ports.GPUSchedulingQueue{}, ports.ErrQueueStoreUnavailable
+		return ports.GPUSchedulingQueueCreateResult{}, ports.ErrQueueStoreUnavailable
 	}
 	if err := validateQueueName(req.Name); err != nil {
-		return ports.GPUSchedulingQueue{}, err
+		return ports.GPUSchedulingQueueCreateResult{}, err
+	}
+	// Idempotency replay: check if a queue with this idempotency_key already exists.
+	if idempotencyKey != "" {
+		if existing, err := s.findByLabel(ctx, tenantID, volcanoLabelIdempotencyKey, idempotencyKey); err == nil {
+			return ports.GPUSchedulingQueueCreateResult{Queue: s.crdToQueue(existing), IdempotentReplay: true}, nil
+		}
 	}
 	existing, err := s.List(ctx, tenantID)
 	if err != nil {
-		return ports.GPUSchedulingQueue{}, err
+		return ports.GPUSchedulingQueueCreateResult{}, err
 	}
 	for _, q := range existing {
 		if q.Name == req.Name {
-			return ports.GPUSchedulingQueue{}, ports.ErrQueueNameConflict
+			return ports.GPUSchedulingQueueCreateResult{}, ports.ErrQueueNameConflict
 		}
 	}
 	queueID := uuid.New().String()
@@ -255,42 +263,54 @@ func (s *VolcanoQueueStore) Create(ctx context.Context, tenantID string, req por
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	})
+	if idempotencyKey != "" {
+		if crd.Metadata.Labels == nil {
+			crd.Metadata.Labels = map[string]string{}
+		}
+		crd.Metadata.Labels[volcanoLabelIdempotencyKey] = idempotencyKey
+	}
 	body, err := json.Marshal(crd)
 	if err != nil {
-		return ports.GPUSchedulingQueue{}, fmt.Errorf("%w: marshal queue CRD: %v", ports.ErrInvalid, err)
+		return ports.GPUSchedulingQueueCreateResult{}, fmt.Errorf("%w: marshal queue CRD: %v", ports.ErrInvalid, err)
 	}
 	respBody, status, err := s.doer.Do(ctx, http.MethodPost, s.collectionURL(""), "application/json", body)
 	if err != nil {
-		return ports.GPUSchedulingQueue{}, mapK8sError(err)
+		return ports.GPUSchedulingQueueCreateResult{}, mapK8sError(err)
 	}
 	if status == http.StatusConflict {
-		return ports.GPUSchedulingQueue{}, ports.ErrQueueNameConflict
+		return ports.GPUSchedulingQueueCreateResult{}, ports.ErrQueueNameConflict
 	}
 	if status < 200 || status >= 300 {
-		return ports.GPUSchedulingQueue{}, fmt.Errorf("%w: create queue HTTP %d: %s", ports.ErrInvalid, status, string(respBody))
+		return ports.GPUSchedulingQueueCreateResult{}, fmt.Errorf("%w: create queue HTTP %d: %s", ports.ErrInvalid, status, string(respBody))
 	}
 	var created volcanoQueueCRD
 	if err := json.Unmarshal(respBody, &created); err != nil {
-		return ports.GPUSchedulingQueue{}, fmt.Errorf("%w: decode created queue: %v", ports.ErrInvalid, err)
+		return ports.GPUSchedulingQueueCreateResult{}, fmt.Errorf("%w: decode created queue: %v", ports.ErrInvalid, err)
 	}
-	return s.crdToQueue(created), nil
+	return ports.GPUSchedulingQueueCreateResult{Queue: s.crdToQueue(created)}, nil
 }
 
-func (s *VolcanoQueueStore) Update(ctx context.Context, tenantID, id string, req ports.GPUSchedulingQueueUpdateRequest) (ports.GPUSchedulingQueue, error) {
+func (s *VolcanoQueueStore) Update(ctx context.Context, tenantID, id, idempotencyKey string, req ports.GPUSchedulingQueueUpdateRequest) (ports.GPUSchedulingQueueUpdateResult, error) {
 	if s.doer == nil {
-		return ports.GPUSchedulingQueue{}, ports.ErrQueueStoreUnavailable
+		return ports.GPUSchedulingQueueUpdateResult{}, ports.ErrQueueStoreUnavailable
+	}
+	// Idempotency replay: check if an update with this idempotency_key was already applied.
+	if idempotencyKey != "" {
+		if existing, err := s.findByLabel(ctx, tenantID, volcanoLabelUpdateIdempotencyKey, idempotencyKey); err == nil {
+			return ports.GPUSchedulingQueueUpdateResult{Queue: s.crdToQueue(existing), IdempotentReplay: true}, nil
+		}
 	}
 	// Resolve queue by name (queue ID is looked up from label first).
 	crd, err := s.lookupQueueByNameOrID(ctx, tenantID, id)
 	if err != nil {
-		return ports.GPUSchedulingQueue{}, err
+		return ports.GPUSchedulingQueueUpdateResult{}, err
 	}
 	if isPlatformDefaultCRD(crd) {
-		return ports.GPUSchedulingQueue{}, ports.ErrPlatformDefaultProtected
+		return ports.GPUSchedulingQueueUpdateResult{}, ports.ErrPlatformDefaultProtected
 	}
 	// For non-default queues, ensure tenant ownership.
 	if crd.Metadata.Labels[volcanoLabelTenantID] != tenantID {
-		return ports.GPUSchedulingQueue{}, ports.ErrQueueNotFound
+		return ports.GPUSchedulingQueueUpdateResult{}, ports.ErrQueueNotFound
 	}
 	if req.Weight != nil {
 		crd.Spec.Weight = *req.Weight
@@ -310,30 +330,36 @@ func (s *VolcanoQueueStore) Update(ctx context.Context, tenantID, id string, req
 		}
 		crd.Metadata.Labels[volcanoLabelProjectID] = *req.ProjectID
 	}
+	if idempotencyKey != "" {
+		if crd.Metadata.Labels == nil {
+			crd.Metadata.Labels = map[string]string{}
+		}
+		crd.Metadata.Labels[volcanoLabelUpdateIdempotencyKey] = idempotencyKey
+	}
 	if crd.Metadata.Annotations == nil {
 		crd.Metadata.Annotations = map[string]string{}
 	}
 	crd.Metadata.Annotations["ani.kubercloud.io/updated-at"] = s.now().UTC().Format(time.RFC3339)
 	body, err := json.Marshal(crd)
 	if err != nil {
-		return ports.GPUSchedulingQueue{}, fmt.Errorf("%w: marshal queue CRD: %v", ports.ErrInvalid, err)
+		return ports.GPUSchedulingQueueUpdateResult{}, fmt.Errorf("%w: marshal queue CRD: %v", ports.ErrInvalid, err)
 	}
 	endpoint := s.resourceURL(crd.Metadata.Name)
 	respBody, status, err := s.doer.Do(ctx, http.MethodPut, endpoint, "application/json", body)
 	if err != nil {
-		return ports.GPUSchedulingQueue{}, mapK8sError(err)
+		return ports.GPUSchedulingQueueUpdateResult{}, mapK8sError(err)
 	}
 	if status == http.StatusNotFound {
-		return ports.GPUSchedulingQueue{}, ports.ErrQueueNotFound
+		return ports.GPUSchedulingQueueUpdateResult{}, ports.ErrQueueNotFound
 	}
 	if status < 200 || status >= 300 {
-		return ports.GPUSchedulingQueue{}, fmt.Errorf("%w: update queue HTTP %d: %s", ports.ErrInvalid, status, string(respBody))
+		return ports.GPUSchedulingQueueUpdateResult{}, fmt.Errorf("%w: update queue HTTP %d: %s", ports.ErrInvalid, status, string(respBody))
 	}
 	var updated volcanoQueueCRD
 	if err := json.Unmarshal(respBody, &updated); err != nil {
-		return ports.GPUSchedulingQueue{}, fmt.Errorf("%w: decode updated queue: %v", ports.ErrInvalid, err)
+		return ports.GPUSchedulingQueueUpdateResult{}, fmt.Errorf("%w: decode updated queue: %v", ports.ErrInvalid, err)
 	}
-	return s.crdToQueue(updated), nil
+	return ports.GPUSchedulingQueueUpdateResult{Queue: s.crdToQueue(updated)}, nil
 }
 
 func (s *VolcanoQueueStore) Delete(ctx context.Context, tenantID, id string) error {
@@ -365,6 +391,25 @@ func (s *VolcanoQueueStore) Delete(ctx context.Context, tenantID, id string) err
 // Returns ErrQueueNotFound when the CRD doesn't exist or belongs to another tenant.
 func (s *VolcanoQueueStore) getCRDByID(ctx context.Context, tenantID, id string) (volcanoQueueCRD, error) {
 	endpoint := s.collectionURL(labelSelectorTenant(tenantID) + "," + labelSelectorQueueID(id))
+	body, _, err := s.doer.Do(ctx, http.MethodGet, endpoint, "", nil)
+	if err != nil {
+		return volcanoQueueCRD{}, mapK8sError(err)
+	}
+	var list volcanoQueueListCRD
+	if err := json.Unmarshal(body, &list); err != nil {
+		return volcanoQueueCRD{}, fmt.Errorf("%w: decode queue list: %v", ports.ErrInvalid, err)
+	}
+	if len(list.Items) == 0 {
+		return volcanoQueueCRD{}, ports.ErrQueueNotFound
+	}
+	return list.Items[0], nil
+}
+
+// findByLabel queries the Volcano Queue CRD list with a tenant + custom label
+// selector and returns the first matching CRD. Used for idempotency replay.
+func (s *VolcanoQueueStore) findByLabel(ctx context.Context, tenantID, labelKey, labelValue string) (volcanoQueueCRD, error) {
+	selector := labelSelectorTenant(tenantID) + "," + labelKey + "=" + labelValue
+	endpoint := s.collectionURL(selector)
 	body, _, err := s.doer.Do(ctx, http.MethodGet, endpoint, "", nil)
 	if err != nil {
 		return volcanoQueueCRD{}, mapK8sError(err)

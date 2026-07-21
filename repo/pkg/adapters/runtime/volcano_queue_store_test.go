@@ -217,7 +217,7 @@ func TestVolcanoQueueStoreCreateAndList(t *testing.T) {
 	api := newFakeK8sAPI()
 	store := newTestStore(api)
 
-	created, err := store.Create(context.Background(), "tenant-a", ports.GPUSchedulingQueueCreateRequest{
+	created, err := store.Create(context.Background(), "tenant-a", "create-key-1", ports.GPUSchedulingQueueCreateRequest{
 		Name:          "inference-a",
 		Weight:        10,
 		Reclaimable:   false,
@@ -226,7 +226,7 @@ func TestVolcanoQueueStoreCreateAndList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create error = %v", err)
 	}
-	if created.ID == "" || created.Name != "inference-a" {
+	if created.Queue.ID == "" || created.Queue.Name != "inference-a" {
 		t.Fatalf("created = %+v, want ID and Name=inference-a", created)
 	}
 
@@ -243,10 +243,10 @@ func TestVolcanoQueueStoreGet(t *testing.T) {
 	api := newFakeK8sAPI()
 	store := newTestStore(api)
 
-	created, _ := store.Create(context.Background(), "tenant-a", ports.GPUSchedulingQueueCreateRequest{
+	created, _ := store.Create(context.Background(), "tenant-a", "create-key-2", ports.GPUSchedulingQueueCreateRequest{
 		Name: "training-a", Weight: 20, WorkloadClass: ports.WorkloadClassTraining,
 	})
-	got, err := store.Get(context.Background(), "tenant-a", created.ID)
+	got, err := store.Get(context.Background(), "tenant-a", created.Queue.ID)
 	if err != nil {
 		t.Fatalf("Get error = %v", err)
 	}
@@ -259,18 +259,18 @@ func TestVolcanoQueueStoreUpdate(t *testing.T) {
 	api := newFakeK8sAPI()
 	store := newTestStore(api)
 
-	created, _ := store.Create(context.Background(), "tenant-a", ports.GPUSchedulingQueueCreateRequest{
+	created, _ := store.Create(context.Background(), "tenant-a", "create-key-3", ports.GPUSchedulingQueueCreateRequest{
 		Name: "batch-a", Weight: 5, WorkloadClass: ports.WorkloadClassBatch,
 	})
 	newWeight := 15
-	updated, err := store.Update(context.Background(), "tenant-a", created.ID, ports.GPUSchedulingQueueUpdateRequest{
+	updated, err := store.Update(context.Background(), "tenant-a", created.Queue.ID, "update-key-1", ports.GPUSchedulingQueueUpdateRequest{
 		Weight: &newWeight,
 	})
 	if err != nil {
 		t.Fatalf("Update error = %v", err)
 	}
-	if updated.Weight != 15 {
-		t.Fatalf("updated.Weight = %d, want 15", updated.Weight)
+	if updated.Queue.Weight != 15 {
+		t.Fatalf("updated.Weight = %d, want 15", updated.Queue.Weight)
 	}
 }
 
@@ -278,16 +278,16 @@ func TestVolcanoQueueStoreDelete(t *testing.T) {
 	api := newFakeK8sAPI()
 	store := newTestStore(api)
 
-	created, err := store.Create(context.Background(), "tenant-a", ports.GPUSchedulingQueueCreateRequest{
+	created, err := store.Create(context.Background(), "tenant-a", "", ports.GPUSchedulingQueueCreateRequest{
 		Name: "temp-a", Weight: 1, WorkloadClass: ports.WorkloadClassInference,
 	})
 	if err != nil {
 		t.Fatalf("Create error = %v", err)
 	}
-	if err := store.Delete(context.Background(), "tenant-a", created.ID); err != nil {
+	if err := store.Delete(context.Background(), "tenant-a", created.Queue.ID); err != nil {
 		t.Fatalf("Delete error = %v", err)
 	}
-	_, err = store.Get(context.Background(), "tenant-a", created.ID)
+	_, err = store.Get(context.Background(), "tenant-a", created.Queue.ID)
 	if !errors.Is(err, ports.ErrQueueNotFound) {
 		t.Fatalf("Get after delete error = %v, want ErrQueueNotFound", err)
 	}
@@ -297,7 +297,7 @@ func TestVolcanoQueueStoreTenantIsolation(t *testing.T) {
 	api := newFakeK8sAPI()
 	store := newTestStore(api)
 
-	_, _ = store.Create(context.Background(), "tenant-a", ports.GPUSchedulingQueueCreateRequest{
+	_, _ = store.Create(context.Background(), "tenant-a", "", ports.GPUSchedulingQueueCreateRequest{
 		Name: "queue-a", Weight: 10, WorkloadClass: ports.WorkloadClassInference,
 	})
 	queuesB, err := store.List(context.Background(), "tenant-b")
@@ -313,10 +313,10 @@ func TestVolcanoQueueStoreCrossTenantGetReturnsNotFound(t *testing.T) {
 	api := newFakeK8sAPI()
 	store := newTestStore(api)
 
-	created, _ := store.Create(context.Background(), "tenant-a", ports.GPUSchedulingQueueCreateRequest{
+	created, _ := store.Create(context.Background(), "tenant-a", "", ports.GPUSchedulingQueueCreateRequest{
 		Name: "secret-a", Weight: 1, WorkloadClass: ports.WorkloadClassInference,
 	})
-	_, err := store.Get(context.Background(), "tenant-b", created.ID)
+	_, err := store.Get(context.Background(), "tenant-b", created.Queue.ID)
 	if !errors.Is(err, ports.ErrQueueNotFound) {
 		t.Fatalf("cross-tenant Get error = %v, want ErrQueueNotFound", err)
 	}
@@ -326,10 +326,10 @@ func TestVolcanoQueueStoreCrossTenantDeleteReturnsNotFound(t *testing.T) {
 	api := newFakeK8sAPI()
 	store := newTestStore(api)
 
-	created, _ := store.Create(context.Background(), "tenant-a", ports.GPUSchedulingQueueCreateRequest{
+	created, _ := store.Create(context.Background(), "tenant-a", "", ports.GPUSchedulingQueueCreateRequest{
 		Name: "protected-a", Weight: 1, WorkloadClass: ports.WorkloadClassInference,
 	})
-	err := store.Delete(context.Background(), "tenant-b", created.ID)
+	err := store.Delete(context.Background(), "tenant-b", created.Queue.ID)
 	if !errors.Is(err, ports.ErrQueueNotFound) {
 		t.Fatalf("cross-tenant Delete error = %v, want ErrQueueNotFound", err)
 	}
@@ -346,7 +346,7 @@ func TestVolcanoQueueStorePlatformDefaultProtected(t *testing.T) {
 	}
 	queueID := queues[0].ID
 
-	_, err := store.Update(context.Background(), "tenant-a", queueID, ports.GPUSchedulingQueueUpdateRequest{
+	_, err := store.Update(context.Background(), "tenant-a", queueID, "", ports.GPUSchedulingQueueUpdateRequest{
 		Weight: intPtr(99),
 	})
 	if !errors.Is(err, ports.ErrPlatformDefaultProtected) {
@@ -363,10 +363,10 @@ func TestVolcanoQueueStoreCreateNameConflict(t *testing.T) {
 	api := newFakeK8sAPI()
 	store := newTestStore(api)
 
-	_, _ = store.Create(context.Background(), "tenant-a", ports.GPUSchedulingQueueCreateRequest{
+	_, _ = store.Create(context.Background(), "tenant-a", "", ports.GPUSchedulingQueueCreateRequest{
 		Name: "dup-a", Weight: 1, WorkloadClass: ports.WorkloadClassInference,
 	})
-	_, err := store.Create(context.Background(), "tenant-a", ports.GPUSchedulingQueueCreateRequest{
+	_, err := store.Create(context.Background(), "tenant-a", "", ports.GPUSchedulingQueueCreateRequest{
 		Name: "dup-a", Weight: 1, WorkloadClass: ports.WorkloadClassInference,
 	})
 	if !errors.Is(err, ports.ErrQueueNameConflict) {
@@ -380,7 +380,7 @@ func TestVolcanoQueueStoreCreateInvalidName(t *testing.T) {
 
 	cases := []string{"", "UPPER", "has spaces", "-leading", "trailing-", strings.Repeat("a", 64)}
 	for _, name := range cases {
-		_, err := store.Create(context.Background(), "tenant-a", ports.GPUSchedulingQueueCreateRequest{
+		_, err := store.Create(context.Background(), "tenant-a", "", ports.GPUSchedulingQueueCreateRequest{
 			Name: name, Weight: 1, WorkloadClass: ports.WorkloadClassInference,
 		})
 		if err == nil {
@@ -412,7 +412,7 @@ func TestVolcanoQueueStoreCreateSameNameDifferentTenantStillConflicts(t *testing
 	api := newFakeK8sAPI()
 	store := newTestStore(api)
 
-	_, err := store.Create(context.Background(), "tenant-a", ports.GPUSchedulingQueueCreateRequest{
+	_, err := store.Create(context.Background(), "tenant-a", "", ports.GPUSchedulingQueueCreateRequest{
 		Name: "shared-name", Weight: 1, WorkloadClass: ports.WorkloadClassInference,
 	})
 	if err != nil {
@@ -423,7 +423,7 @@ func TestVolcanoQueueStoreCreateSameNameDifferentTenantStillConflicts(t *testing
 	// adapter's List-based uniqueness check is tenant-scoped, but the POST
 	// surfaces the K8s 409 as ErrQueueNameConflict. Tenant prefixing of queue
 	// names is the production mitigation (SPEC §5.1 Create step 2).
-	_, err = store.Create(context.Background(), "tenant-b", ports.GPUSchedulingQueueCreateRequest{
+	_, err = store.Create(context.Background(), "tenant-b", "", ports.GPUSchedulingQueueCreateRequest{
 		Name: "shared-name", Weight: 1, WorkloadClass: ports.WorkloadClassInference,
 	})
 	if !errors.Is(err, ports.ErrQueueNameConflict) {

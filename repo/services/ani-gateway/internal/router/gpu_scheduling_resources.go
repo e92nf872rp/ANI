@@ -113,7 +113,7 @@ func (api *gpuSchedulingAPI) createGPUSchedulingQueue(ctx context.Context, c *ap
 		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "workload_class is required")
 		return
 	}
-	created, err := api.store.Create(ctx, tenantID, ports.GPUSchedulingQueueCreateRequest{
+	created, err := api.store.Create(ctx, tenantID, idempotencyKey, ports.GPUSchedulingQueueCreateRequest{
 		Name:          req.Name,
 		Weight:        req.Weight,
 		Reclaimable:   req.Reclaimable,
@@ -124,7 +124,12 @@ func (api *gpuSchedulingAPI) createGPUSchedulingQueue(ctx context.Context, c *ap
 		writeGPUSchedulingError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, queueToResponse(created))
+	if created.IdempotentReplay {
+		c.Header("Idempotent-Replay", "true")
+		c.JSON(http.StatusConflict, queueToResponse(created.Queue))
+		return
+	}
+	c.JSON(http.StatusCreated, queueToResponse(created.Queue))
 }
 
 func (api *gpuSchedulingAPI) getGPUSchedulingQueue(ctx context.Context, c *app.RequestContext) {
@@ -186,12 +191,15 @@ func (api *gpuSchedulingAPI) updateGPUSchedulingQueue(ctx context.Context, c *ap
 	if req.ProjectID != nil {
 		portReq.ProjectID = req.ProjectID
 	}
-	updated, err := api.store.Update(ctx, tenantID, id, portReq)
+	updated, err := api.store.Update(ctx, tenantID, id, idempotencyKey, portReq)
 	if err != nil {
 		writeGPUSchedulingError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, queueToResponse(updated))
+	if updated.IdempotentReplay {
+		c.Header("Idempotent-Replay", "true")
+	}
+	c.JSON(http.StatusOK, queueToResponse(updated.Queue))
 }
 
 func (api *gpuSchedulingAPI) deleteGPUSchedulingQueue(ctx context.Context, c *app.RequestContext) {

@@ -187,11 +187,11 @@ func (s stubQueueStore) List(context.Context, string) ([]ports.GPUSchedulingQueu
 func (s stubQueueStore) Get(context.Context, string, string) (ports.GPUSchedulingQueue, error) {
 	return ports.GPUSchedulingQueue{}, ports.ErrQueueNotFound
 }
-func (s stubQueueStore) Create(context.Context, string, ports.GPUSchedulingQueueCreateRequest) (ports.GPUSchedulingQueue, error) {
-	return ports.GPUSchedulingQueue{}, ports.ErrQueueStoreUnavailable
+func (s stubQueueStore) Create(context.Context, string, string, ports.GPUSchedulingQueueCreateRequest) (ports.GPUSchedulingQueueCreateResult, error) {
+	return ports.GPUSchedulingQueueCreateResult{}, ports.ErrQueueStoreUnavailable
 }
-func (s stubQueueStore) Update(context.Context, string, string, ports.GPUSchedulingQueueUpdateRequest) (ports.GPUSchedulingQueue, error) {
-	return ports.GPUSchedulingQueue{}, ports.ErrQueueStoreUnavailable
+func (s stubQueueStore) Update(context.Context, string, string, string, ports.GPUSchedulingQueueUpdateRequest) (ports.GPUSchedulingQueueUpdateResult, error) {
+	return ports.GPUSchedulingQueueUpdateResult{}, ports.ErrQueueStoreUnavailable
 }
 func (s stubQueueStore) Delete(context.Context, string, string) error {
 	return ports.ErrQueueStoreUnavailable

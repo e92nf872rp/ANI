@@ -23,16 +23,18 @@ type LocalGPUSchedulingQueueStore struct {
 }
 
 type localQueueRecord struct {
-	id              string
-	tenantID        string
-	name            string
-	weight          int
-	reclaimable     bool
-	workloadClass   ports.WorkloadClass
-	projectID       string
-	platformDefault bool
-	createdAt       time.Time
-	updatedAt       time.Time
+	id                   string
+	tenantID             string
+	name                 string
+	weight               int
+	reclaimable          bool
+	workloadClass        ports.WorkloadClass
+	projectID            string
+	platformDefault      bool
+	createdAt            time.Time
+	updatedAt            time.Time
+	createIdempotencyKey string
+	updateIdempotencyKey string
 }
 
 // NewLocalGPUSchedulingQueueStore creates a local queue store with two
@@ -99,52 +101,69 @@ func (s *LocalGPUSchedulingQueueStore) Get(_ context.Context, tenantID, id strin
 	return ports.GPUSchedulingQueue{}, ports.ErrQueueNotFound
 }
 
-func (s *LocalGPUSchedulingQueueStore) Create(_ context.Context, tenantID string, req ports.GPUSchedulingQueueCreateRequest) (ports.GPUSchedulingQueue, error) {
+func (s *LocalGPUSchedulingQueueStore) Create(_ context.Context, tenantID, idempotencyKey string, req ports.GPUSchedulingQueueCreateRequest) (ports.GPUSchedulingQueueCreateResult, error) {
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		return ports.GPUSchedulingQueue{}, fmt.Errorf("%w: name is required", ports.ErrInvalid)
+		return ports.GPUSchedulingQueueCreateResult{}, fmt.Errorf("%w: name is required", ports.ErrInvalid)
 	}
 	if !isValidQueueName(name) {
-		return ports.GPUSchedulingQueue{}, fmt.Errorf("%w: invalid queue name", ports.ErrInvalid)
+		return ports.GPUSchedulingQueueCreateResult{}, fmt.Errorf("%w: invalid queue name", ports.ErrInvalid)
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Idempotency replay: check if a queue with this idempotency_key already exists.
+	if idempotencyKey != "" {
+		for _, q := range s.queues {
+			if q.createIdempotencyKey == idempotencyKey && q.tenantID == tenantID {
+				return ports.GPUSchedulingQueueCreateResult{Queue: s.toPort(q), IdempotentReplay: true}, nil
+			}
+		}
+	}
 	// Check name conflict: queue names are cluster-scoped in Volcano, so the
 	// same name conflicts across all tenants.
 	for _, q := range s.queues {
 		if q.name == name {
-			return ports.GPUSchedulingQueue{}, ports.ErrQueueNameConflict
+			return ports.GPUSchedulingQueueCreateResult{}, ports.ErrQueueNameConflict
 		}
 	}
 
 	now := time.Now().UTC()
 	record := localQueueRecord{
-		id:              uuid.NewString(),
-		tenantID:        tenantID,
-		name:            name,
-		weight:          req.Weight,
-		reclaimable:     req.Reclaimable,
-		workloadClass:   req.WorkloadClass,
-		projectID:       req.ProjectID,
-		platformDefault: false,
-		createdAt:       now,
-		updatedAt:       now,
+		id:                   uuid.NewString(),
+		tenantID:             tenantID,
+		name:                 name,
+		weight:               req.Weight,
+		reclaimable:          req.Reclaimable,
+		workloadClass:        req.WorkloadClass,
+		projectID:            req.ProjectID,
+		platformDefault:      false,
+		createdAt:            now,
+		updatedAt:            now,
+		createIdempotencyKey: idempotencyKey,
 	}
 	s.queues = append(s.queues, record)
-	return s.toPort(record), nil
+	return ports.GPUSchedulingQueueCreateResult{Queue: s.toPort(record)}, nil
 }
 
-func (s *LocalGPUSchedulingQueueStore) Update(_ context.Context, tenantID, id string, req ports.GPUSchedulingQueueUpdateRequest) (ports.GPUSchedulingQueue, error) {
+func (s *LocalGPUSchedulingQueueStore) Update(_ context.Context, tenantID, id, idempotencyKey string, req ports.GPUSchedulingQueueUpdateRequest) (ports.GPUSchedulingQueueUpdateResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Idempotency replay: check if an update with this idempotency_key was already applied.
+	if idempotencyKey != "" {
+		for _, q := range s.queues {
+			if q.updateIdempotencyKey == idempotencyKey && q.tenantID == tenantID {
+				return ports.GPUSchedulingQueueUpdateResult{Queue: s.toPort(q), IdempotentReplay: true}, nil
+			}
+		}
+	}
 	for i, q := range s.queues {
 		if q.id == id {
 			if q.platformDefault {
-				return ports.GPUSchedulingQueue{}, ports.ErrPlatformDefaultProtected
+				return ports.GPUSchedulingQueueUpdateResult{}, ports.ErrPlatformDefaultProtected
 			}
 			if q.tenantID != tenantID {
-				return ports.GPUSchedulingQueue{}, ports.ErrQueueNotFound
+				return ports.GPUSchedulingQueueUpdateResult{}, ports.ErrQueueNotFound
 			}
 			if req.Weight != nil {
 				s.queues[i].weight = *req.Weight
@@ -158,11 +177,12 @@ func (s *LocalGPUSchedulingQueueStore) Update(_ context.Context, tenantID, id st
 			if req.ProjectID != nil {
 				s.queues[i].projectID = *req.ProjectID
 			}
+			s.queues[i].updateIdempotencyKey = idempotencyKey
 			s.queues[i].updatedAt = time.Now().UTC()
-			return s.toPort(s.queues[i]), nil
+			return ports.GPUSchedulingQueueUpdateResult{Queue: s.toPort(s.queues[i])}, nil
 		}
 	}
-	return ports.GPUSchedulingQueue{}, ports.ErrQueueNotFound
+	return ports.GPUSchedulingQueueUpdateResult{}, ports.ErrQueueNotFound
 }
 
 func (s *LocalGPUSchedulingQueueStore) Delete(_ context.Context, tenantID, id string) error {

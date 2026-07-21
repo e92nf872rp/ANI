@@ -20,6 +20,8 @@ import (
 type fakeQueueStore struct {
 	queues             map[string]ports.GPUSchedulingQueue
 	byName             map[string]string
+	byCreateKey        map[string]string // idempotencyKey -> queueID
+	byUpdateKey        map[string]string // idempotencyKey -> queueID
 	platformDefaultIDs map[string]bool
 	failNext           bool
 }
@@ -28,6 +30,8 @@ func newFakeQueueStore() *fakeQueueStore {
 	return &fakeQueueStore{
 		queues:             map[string]ports.GPUSchedulingQueue{},
 		byName:             map[string]string{},
+		byCreateKey:        map[string]string{},
+		byUpdateKey:        map[string]string{},
 		platformDefaultIDs: map[string]bool{},
 	}
 }
@@ -56,14 +60,20 @@ func (f *fakeQueueStore) Get(ctx context.Context, tenantID, id string) (ports.GP
 	return q, nil
 }
 
-func (f *fakeQueueStore) Create(ctx context.Context, tenantID string, req ports.GPUSchedulingQueueCreateRequest) (ports.GPUSchedulingQueue, error) {
+func (f *fakeQueueStore) Create(ctx context.Context, tenantID, idempotencyKey string, req ports.GPUSchedulingQueueCreateRequest) (ports.GPUSchedulingQueueCreateResult, error) {
 	if f.failNext {
 		f.failNext = false
-		return ports.GPUSchedulingQueue{}, ports.ErrQueueStoreUnavailable
+		return ports.GPUSchedulingQueueCreateResult{}, ports.ErrQueueStoreUnavailable
+	}
+	// Idempotency replay
+	if idempotencyKey != "" {
+		if existingID, ok := f.byCreateKey[idempotencyKey]; ok {
+			return ports.GPUSchedulingQueueCreateResult{Queue: f.queues[existingID], IdempotentReplay: true}, nil
+		}
 	}
 	key := tenantID + "|" + req.Name
 	if _, exists := f.byName[key]; exists {
-		return ports.GPUSchedulingQueue{}, ports.ErrQueueNameConflict
+		return ports.GPUSchedulingQueueCreateResult{}, ports.ErrQueueNameConflict
 	}
 	now := time.Now().UTC()
 	q := ports.GPUSchedulingQueue{
@@ -78,20 +88,29 @@ func (f *fakeQueueStore) Create(ctx context.Context, tenantID string, req ports.
 	}
 	f.queues[q.ID] = q
 	f.byName[key] = q.ID
-	return q, nil
+	if idempotencyKey != "" {
+		f.byCreateKey[idempotencyKey] = q.ID
+	}
+	return ports.GPUSchedulingQueueCreateResult{Queue: q}, nil
 }
 
-func (f *fakeQueueStore) Update(ctx context.Context, tenantID, id string, req ports.GPUSchedulingQueueUpdateRequest) (ports.GPUSchedulingQueue, error) {
+func (f *fakeQueueStore) Update(ctx context.Context, tenantID, id, idempotencyKey string, req ports.GPUSchedulingQueueUpdateRequest) (ports.GPUSchedulingQueueUpdateResult, error) {
 	if f.failNext {
 		f.failNext = false
-		return ports.GPUSchedulingQueue{}, ports.ErrQueueStoreUnavailable
+		return ports.GPUSchedulingQueueUpdateResult{}, ports.ErrQueueStoreUnavailable
+	}
+	// Idempotency replay
+	if idempotencyKey != "" {
+		if existingID, ok := f.byUpdateKey[idempotencyKey]; ok {
+			return ports.GPUSchedulingQueueUpdateResult{Queue: f.queues[existingID], IdempotentReplay: true}, nil
+		}
 	}
 	q, ok := f.queues[id]
 	if !ok {
-		return ports.GPUSchedulingQueue{}, ports.ErrQueueNotFound
+		return ports.GPUSchedulingQueueUpdateResult{}, ports.ErrQueueNotFound
 	}
 	if f.platformDefaultIDs[id] {
-		return ports.GPUSchedulingQueue{}, ports.ErrPlatformDefaultProtected
+		return ports.GPUSchedulingQueueUpdateResult{}, ports.ErrPlatformDefaultProtected
 	}
 	if req.Weight != nil {
 		q.Weight = *req.Weight
@@ -107,7 +126,10 @@ func (f *fakeQueueStore) Update(ctx context.Context, tenantID, id string, req po
 	}
 	q.UpdatedAt = time.Now().UTC()
 	f.queues[id] = q
-	return q, nil
+	if idempotencyKey != "" {
+		f.byUpdateKey[idempotencyKey] = id
+	}
+	return ports.GPUSchedulingQueueUpdateResult{Queue: q}, nil
 }
 
 func (f *fakeQueueStore) Delete(ctx context.Context, tenantID, id string) error {
@@ -147,7 +169,7 @@ func (f *fakeQueueStore) seedPlatformDefault(tenantID, name string) {
 
 func TestGPUSchedulingAPIListQueues(t *testing.T) {
 	store := newFakeQueueStore()
-	_, err := store.Create(context.Background(), "tenant-a", ports.GPUSchedulingQueueCreateRequest{
+	_, err := store.Create(context.Background(), "tenant-a", "", ports.GPUSchedulingQueueCreateRequest{
 		Name: "inference-a", Weight: 10, WorkloadClass: ports.WorkloadClassInference,
 	})
 	if err != nil {
