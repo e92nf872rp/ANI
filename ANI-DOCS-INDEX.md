@@ -41,6 +41,7 @@ Sprint 6-10 完成 contract/local/release-prep scaffold（installer、offline、
 | 系统架构图和模块边界 | `ANI-05-系统架构设计.md` | Core/Services、API/SDK、ports/adapters、local profile/real provider 的结构图以它为准 |
 | 路线图阶段 | `ANI-03-产品路线图.md` | Phase 1/2/3 与版本号关系以它为准 |
 | 工程约定和 AI 工作规则 | `CLAUDE.md` | AI/人类开发前必须先读；只维护稳定规则和入口，不维护批次流水账 |
+| GitHub 协作、提交纪律与 AI Coding | `ANI-15-GitHub-协作规范与提交纪律.md` | 多人/多 Agent 并行开发、PR 证据、main 受保护串行收口和 public 仓库安全的统一规范 |
 | API 契约 | `repo/api/openapi/v1.yaml` | Core OpenAPI REST API 与 Core/Services 跨层控制面契约的唯一真实来源 |
 | Services API 契约 | `repo/api/openapi/services/v1.yaml` | Services 层业务 API 契约 |
 | 当前团队任务清单 | `repo/services/tasks/execution/CORE-TEAM-TASKS.md`、`repo/services/tasks/execution/SERVICES-TEAM-TASKS.md` | Core/Services 当前待办、执行状态和 AI coding 输入；Services 团队维护于此（ANI-14 规范：评审后迁入 `repo/docs/`） |
@@ -58,10 +59,11 @@ Sprint 6-10 完成 contract/local/release-prep scaffold（installer、offline、
 
 1. `ANI-DOCS-INDEX.md`
 2. `CLAUDE.md` 的 5 分钟快速上手
-3. `repo/CURRENT-SPRINT.md`
-4. `ANI-06-开发计划.md` Section 零和当前 Sprint
-5. `ANI-05-系统架构设计.md`
-6. `repo/api/openapi/v1.yaml` + `repo/api/openapi/services/v1.yaml` + 相关代码入口
+3. `ANI-15-GitHub-协作规范与提交纪律.md`（提交、PR、并行协作和 AI Coding）
+4. `repo/CURRENT-SPRINT.md`
+5. `ANI-06-开发计划.md` Section 零和当前 Sprint
+6. `ANI-05-系统架构设计.md`
+7. `repo/api/openapi/v1.yaml` + `repo/api/openapi/services/v1.yaml` + 相关代码入口
 
 ### AI 编码工具
 
