@@ -554,6 +554,10 @@ components:
     CreateInstanceRequest:
       type: object
       required: [name, kind, idempotency_key]
+      description: |
+        创建实例请求。共享字段（name/kind/image/cpu/memory 等）留在顶层；
+        按 kind 选用对应 `*_config`（推荐）。扁平 VM/容器/GPU 字段保留为 v1 兼容别名。
+        同名字段以 `*_config` 为准；与扁平别名冲突或传入跨类型 config 时返回 400。
       properties:
         idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
         name:           { type: string, minLength: 1, maxLength: 128 }
@@ -563,13 +567,36 @@ components:
         cpu:            { type: string, example: "2" }
         memory:         { type: string, example: "4Gi" }
         auto_start:     { type: boolean, default: true }
-        boot_image:     { type: string, nullable: true, description: "VM boot image 引用" }
-        ssh_username:   { type: string, nullable: true, default: "ubuntu", description: "VM SSH 用户名；仅 VM 使用" }
-        ssh_key_ref:    { type: string, nullable: true, description: "VM SSH key/secret 引用；不包含私钥内容" }
+        vm_config:
+          $ref: '#/components/schemas/CreateVMInstanceConfig'
+        container_config:
+          $ref: '#/components/schemas/CreateContainerInstanceConfig'
+        gpu_container_config:
+          $ref: '#/components/schemas/CreateGPUContainerInstanceConfig'
+        sandbox_config:
+          $ref: '#/components/schemas/SandboxConfig'
+        boot_image:
+          type: string
+          nullable: true
+          deprecated: true
+          description: "兼容别名；优先使用 vm_config.boot_image"
+        ssh_username:
+          type: string
+          nullable: true
+          default: "ubuntu"
+          deprecated: true
+          description: "兼容别名；优先使用 vm_config.ssh_username"
+        ssh_key_ref:
+          type: string
+          nullable: true
+          deprecated: true
+          description: "兼容别名；优先使用 vm_config.ssh_key_ref"
         termination_protection: { type: boolean, default: false }
         gpu:
           type: object
           nullable: true
+          deprecated: true
+          description: "兼容别名；优先使用 gpu_container_config.gpu"
           properties:
             vendor:          { type: string, example: "nvidia" }
             model:           { type: string, example: "A100" }
@@ -581,9 +608,46 @@ components:
           type: integer
           minimum: 1
           default: 1
-          description: "Container/GPU Container 副本数；VM 固定为 1"
-        sandbox_config:
-          $ref: '#/components/schemas/SandboxConfig'
+          deprecated: true
+          description: "兼容别名；优先使用 container_config.replicas 或 gpu_container_config.replicas"
+
+    CreateVMInstanceConfig:
+      type: object
+      description: "kind=vm 专用配置；共享 image/cpu/memory 仍在 CreateInstanceRequest 顶层。"
+      properties:
+        boot_image:   { type: string, nullable: true, description: "VM boot image 引用" }
+        ssh_username: { type: string, nullable: true, default: "ubuntu", description: "VM SSH 用户名" }
+        ssh_key_ref:  { type: string, nullable: true, description: "VM SSH key/secret 引用；不包含私钥内容" }
+
+    CreateContainerInstanceConfig:
+      type: object
+      description: "kind=container 专用配置；共享 image/cpu/memory 仍在 CreateInstanceRequest 顶层。"
+      properties:
+        replicas:
+          type: integer
+          minimum: 1
+          default: 1
+          description: "容器副本数"
+
+    CreateGPUContainerInstanceConfig:
+      type: object
+      description: "kind=gpu_container 专用配置；共享 image/cpu/memory 仍在 CreateInstanceRequest 顶层。"
+      properties:
+        replicas:
+          type: integer
+          minimum: 1
+          default: 1
+          description: "GPU 容器副本数"
+        gpu:
+          type: object
+          nullable: true
+          properties:
+            vendor:          { type: string, example: "nvidia" }
+            model:           { type: string, example: "A100" }
+            count:           { type: integer, minimum: 1, default: 1 }
+            queue_name:      { type: string, nullable: true, description: "指定调度队列名；为空时按 workload_class 选默认队列" }
+            allocation_mode: { type: string, enum: [dedicated, vgpu], default: dedicated, description: "GPU 分配模式：dedicated=整卡，vgpu=HAMi vGPU" }
+            workload_class:  { type: string, enum: [inference, training, batch], default: inference, description: "工作负载类型，用于选默认队列" }
 
     SandboxNetworkEgressPolicy:
       type: string
@@ -637,6 +701,35 @@ components:
                 additionalProperties: { type: string }
               value: { type: number, format: double }
               timestamp: { type: string, format: date-time, nullable: true }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+
+    ObservabilityRangeQueryResponse:
+      type: object
+      description: "PromQL 代理区间查询结果（matrix）；返回时间区间内多个采样点，用于绘制时序曲线。"
+      required: [query, result_type, results, dev_profile]
+      properties:
+        query:       { type: string }
+        result_type: { type: string, enum: [matrix, vector, scalar, string] }
+        results:
+          type: array
+          description: "每条 series 含一组时间序列采样点。"
+          items:
+            type: object
+            required: [metric, values]
+            properties:
+              metric:
+                type: object
+                additionalProperties: { type: string }
+              values:
+                type: array
+                description: "时间序列采样点列表，每个点为 [timestamp, value]。"
+                items:
+                  type: object
+                  required: [timestamp, value]
+                  properties:
+                    timestamp: { type: string, format: date-time }
+                    value: { type: number, format: double }
         dev_profile:
           $ref: '#/components/schemas/CoreDevProfileInfo'
 
@@ -931,6 +1024,168 @@ components:
         items: { type: array, items: { $ref: '#/components/schemas/NetworkLoadBalancer' } }
         total: { type: integer }
         next_cursor: { type: string, nullable: true }
+
+    NetworkOverviewResourceKind:
+      type: string
+      enum: [vpc, subnet, security_group, load_balancer, route]
+
+    NetworkOverviewResourceSummary:
+      type: object
+      required: [kind, total, available, pending, failed, deleting]
+      properties:
+        kind:      { $ref: '#/components/schemas/NetworkOverviewResourceKind' }
+        total:     { type: integer, minimum: 0 }
+        available: { type: integer, minimum: 0 }
+        pending:   { type: integer, minimum: 0 }
+        failed:    { type: integer, minimum: 0 }
+        deleting:  { type: integer, minimum: 0 }
+
+    NetworkOverviewCapability:
+      type: object
+      required: [key, label, status]
+      properties:
+        key:
+          type: string
+          enum: [vpcs, subnets, security_groups, load_balancers, routes, subnet_ip_allocations, security_group_rules, security_group_bindings]
+        label:       { type: string }
+        status:      { type: string, enum: [available, planned] }
+        path:        { type: string, nullable: true }
+        description: { type: string, nullable: true }
+
+    NetworkOverviewRelationship:
+      type: object
+      required: [source, target, relation]
+      properties:
+        source:   { $ref: '#/components/schemas/NetworkOverviewResourceKind' }
+        target:   { $ref: '#/components/schemas/NetworkOverviewResourceKind' }
+        relation: { type: string }
+
+    NetworkOverviewDeleteRisk:
+      type: object
+      required: [kind, risk]
+      properties:
+        kind: { $ref: '#/components/schemas/NetworkOverviewResourceKind' }
+        risk: { type: string }
+
+    NetworkOverview:
+      type: object
+      required: [resources, capabilities, create_order, relationships, delete_risks]
+      properties:
+        resources:
+          type: array
+          items: { $ref: '#/components/schemas/NetworkOverviewResourceSummary' }
+        capabilities:
+          type: array
+          items: { $ref: '#/components/schemas/NetworkOverviewCapability' }
+        create_order:
+          type: array
+          items: { $ref: '#/components/schemas/NetworkOverviewResourceKind' }
+          example: [vpc, subnet, security_group, load_balancer]
+        relationships:
+          type: array
+          items: { $ref: '#/components/schemas/NetworkOverviewRelationship' }
+        delete_risks:
+          type: array
+          items: { $ref: '#/components/schemas/NetworkOverviewDeleteRisk' }
+
+    NetworkSubnetIPAllocation:
+      type: object
+      required: [id, subnet_id, ip_address, state, created_at]
+      properties:
+        id:            { type: string }
+        subnet_id:     { type: string }
+        ip_address:    { type: string }
+        resource_type: { type: string, nullable: true, enum: [instance, network_interface, load_balancer, null] }
+        resource_id:   { type: string, nullable: true }
+        state:         { type: string, enum: [available, allocated, reserved] }
+        created_at:    { type: string, format: date-time }
+        updated_at:    { type: string, format: date-time, nullable: true }
+
+    NetworkSubnetIPAllocationListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/NetworkSubnetIPAllocation' } }
+        total: { type: integer }
+        next_cursor: { type: string, nullable: true }
+
+    NetworkSecurityGroupRuleResource:
+      type: object
+      required: [id, security_group_id, priority, direction, protocol, port_range, cidr, action, created_at]
+      properties:
+        id:                { type: string }
+        security_group_id: { type: string }
+        priority:          { type: integer, minimum: 1, maximum: 32766, description: "规则优先级，数值越小优先级越高。" }
+        direction:         { type: string, enum: [ingress, egress] }
+        protocol:          { type: string, enum: [tcp, udp, icmp, all] }
+        port_range:        { type: string, example: "443" }
+        cidr:              { type: string, example: "0.0.0.0/0" }
+        action:            { type: string, enum: [allow, deny] }
+        description:       { type: string, nullable: true }
+        created_at:        { type: string, format: date-time }
+        updated_at:        { type: string, format: date-time, nullable: true }
+
+    NetworkSecurityGroupRuleListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/NetworkSecurityGroupRuleResource' } }
+        total: { type: integer }
+        next_cursor: { type: string, nullable: true }
+
+    CreateNetworkSecurityGroupRuleRequest:
+      type: object
+      required: [idempotency_key, priority, direction, protocol, port_range, cidr, action]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
+        priority:        { type: integer, minimum: 1, maximum: 32766, description: "规则优先级，数值越小优先级越高。" }
+        direction:       { type: string, enum: [ingress, egress] }
+        protocol:        { type: string, enum: [tcp, udp, icmp, all] }
+        port_range:      { type: string, example: "443" }
+        cidr:            { type: string, example: "0.0.0.0/0" }
+        action:          { type: string, enum: [allow, deny] }
+        description:     { type: string, nullable: true }
+
+    UpdateNetworkSecurityGroupRuleRequest:
+      type: object
+      properties:
+        priority:     { type: integer, minimum: 1, maximum: 32766, description: "规则优先级，数值越小优先级越高。" }
+        direction:    { type: string, enum: [ingress, egress] }
+        protocol:     { type: string, enum: [tcp, udp, icmp, all] }
+        port_range:   { type: string, example: "443" }
+        cidr:         { type: string, example: "0.0.0.0/0" }
+        action:       { type: string, enum: [allow, deny] }
+        description:  { type: string, nullable: true }
+
+    NetworkSecurityGroupBindingTargetType:
+      type: string
+      enum: [instance, network_interface, load_balancer]
+
+    NetworkSecurityGroupBinding:
+      type: object
+      required: [id, security_group_id, target_type, target_id, created_at]
+      properties:
+        id:                { type: string }
+        security_group_id: { type: string }
+        target_type:       { $ref: '#/components/schemas/NetworkSecurityGroupBindingTargetType' }
+        target_id:         { type: string }
+        created_at:        { type: string, format: date-time }
+
+    NetworkSecurityGroupBindingListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/NetworkSecurityGroupBinding' } }
+        total: { type: integer }
+        next_cursor: { type: string, nullable: true }
+
+    CreateNetworkSecurityGroupBindingRequest:
+      type: object
+      required: [idempotency_key, target_type, target_id]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
+        target_type:     { $ref: '#/components/schemas/NetworkSecurityGroupBindingTargetType' }
+        target_id:       { type: string }
 
     CreateNetworkVPCRequest:
       type: object
@@ -1304,6 +1559,169 @@ components:
           $ref: '#/components/schemas/CoreDevProfileInfo'
         scanned_at: { type: string, format: date-time }
 
+    RegistryOverviewResourceSummary:
+      type: object
+      required: [kind, total]
+      properties:
+        kind:       { type: string, enum: [project, repository, artifact, tag] }
+        total:      { type: integer }
+        available:  { type: integer, default: 0 }
+        pending:    { type: integer, default: 0 }
+        failed:     { type: integer, default: 0 }
+        size_bytes: { type: integer, format: int64, default: 0 }
+
+    RegistryOverviewVulnerabilitySummary:
+      type: object
+      required: [critical, high, medium, low]
+      properties:
+        critical: { type: integer }
+        high:     { type: integer }
+        medium:   { type: integer }
+        low:      { type: integer }
+
+    RegistryOverviewCapability:
+      type: object
+      required: [key, label, status]
+      properties:
+        key:
+          type: string
+          enum: [projects, repositories, tags, push_instructions, pull_commands, scan_summary, scan_policy, quota, garbage_collection]
+        label:       { type: string }
+        status:      { type: string, enum: [available, planned] }
+        path:        { type: string }
+        description: { type: string }
+
+    RegistryOverviewRelationship:
+      type: object
+      required: [source, target, relation]
+      properties:
+        source:   { type: string, enum: [project, repository, tag, workload] }
+        target:   { type: string, enum: [project, repository, tag, workload] }
+        relation: { type: string }
+
+    RegistryOverviewQuickAction:
+      type: object
+      required: [key, label]
+      properties:
+        key:         { type: string, enum: [create_project, push_instructions] }
+        label:       { type: string }
+        path:        { type: string }
+        description: { type: string }
+
+    RegistryOverviewDeleteRisk:
+      type: object
+      required: [kind, risk]
+      properties:
+        kind: { type: string, enum: [project, repository, artifact, tag] }
+        risk: { type: string }
+
+    RegistryOverview:
+      type: object
+      required: [resources, vulnerabilities, capabilities, create_order, relationships, quick_actions, delete_risks]
+      properties:
+        resources:
+          type: array
+          items: { $ref: '#/components/schemas/RegistryOverviewResourceSummary' }
+        vulnerabilities:
+          $ref: '#/components/schemas/RegistryOverviewVulnerabilitySummary'
+        capabilities:
+          type: array
+          items: { $ref: '#/components/schemas/RegistryOverviewCapability' }
+        create_order:
+          type: array
+          items: { type: string, enum: [project, login, tag, push] }
+          example: [project, login, tag, push]
+        relationships:
+          type: array
+          items: { $ref: '#/components/schemas/RegistryOverviewRelationship' }
+        quick_actions:
+          type: array
+          items: { $ref: '#/components/schemas/RegistryOverviewQuickAction' }
+        delete_risks:
+          type: array
+          items: { $ref: '#/components/schemas/RegistryOverviewDeleteRisk' }
+
+    RegistryImage:
+      type: object
+      required: [project, repository, tag, image, digest, media_type, size_bytes, pushed_at, scan_status]
+      properties:
+        project:      { type: string }
+        repository:   { type: string }
+        tag:          { type: string }
+        image:        { type: string, description: "完整镜像引用，例如 registry.local/project/repository:tag" }
+        registry:     { type: string }
+        digest:       { type: string }
+        media_type:   { type: string }
+        size_bytes:   { type: integer, format: int64 }
+        pull_command: { type: string }
+        pushed_at:    { type: string, format: date-time }
+        scan_status:
+          $ref: '#/components/schemas/RegistryScanResult'
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+
+    RegistryImageListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/RegistryImage' } }
+        total: { type: integer }
+        next_cursor: { type: string, nullable: true }
+
+    RegistryCommand:
+      type: object
+      required: [label, command]
+      properties:
+        label:   { type: string }
+        command: { type: string }
+
+    RegistryPushInstructions:
+      type: object
+      required: [project, registry, repository_example, commands]
+      properties:
+        project:            { type: string }
+        registry:           { type: string }
+        repository_example: { type: string }
+        commands:
+          type: array
+          items: { $ref: '#/components/schemas/RegistryCommand' }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+
+    RegistryDeletedTag:
+      type: object
+      required: [project, repository, tag, deleted_at]
+      properties:
+        project:    { type: string }
+        repository: { type: string }
+        tag:        { type: string }
+        digest:     { type: string }
+        deleted_at: { type: string, format: date-time }
+
+    RegistryImageReference:
+      type: object
+      required: [kind, id, name, route, state]
+      properties:
+        kind:  { type: string, enum: [container_instance, gpu_container_instance] }
+        id:    { type: string }
+        name:  { type: string }
+        route: { type: string }
+        state: { type: string }
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+
+    RegistryImageReferenceListResponse:
+      type: object
+      required: [project, repository, tag, items, total, delete_blocked]
+      properties:
+        project:        { type: string }
+        repository:     { type: string }
+        tag:            { type: string }
+        image:          { type: string }
+        items:          { type: array, items: { $ref: '#/components/schemas/RegistryImageReference' } }
+        total:          { type: integer }
+        delete_blocked: { type: boolean }
+
     BeginOIDCLoginRequest:
       type: object
       required: [tenant_name, redirect_uri]
@@ -1340,6 +1758,23 @@ components:
       required: [refresh_token]
       properties:
         refresh_token: { type: string }
+
+    PasswordLoginRequest:
+      type: object
+      required: [tenant_name, username, password]
+      properties:
+        tenant_name:    { type: string, minLength: 1, maxLength: 64, description: "租户 slug，用于定位 users 表所属 tenant" }
+        username:       { type: string, minLength: 1, maxLength: 64, description: "登录用户名（不含命名空间前缀，服务端自动拼接 local:<username>）" }
+        password:       { type: string, minLength: 1, maxLength: 256, format: password, description: "明文密码，仅用于 bcrypt 校验，不持久化" }
+        idempotency_key: { type: string, pattern: "^[A-Za-z0-9_-]{1,128}$", description: "可选幂等键，重复提交返回同一 TokenPair" }
+
+    PlatformPasswordLoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:       { type: string, minLength: 1, maxLength: 64, description: "平台管理员用户名（无命名空间前缀，存储为 local:&lt;username&gt;，查询 users 表 EXISTS user_roles→roles.name=platform-admin）" }
+        password:       { type: string, minLength: 1, maxLength: 256, format: password, description: "明文密码，仅用于 bcrypt 校验，不持久化" }
+        idempotency_key: { type: string, pattern: "^[A-Za-z0-9_-]{1,128}$", description: "可选幂等键，重复提交返回同一 TokenPair" }
 
     RefreshAccessTokenResponse:
       type: object
@@ -1762,11 +2197,13 @@ components:
 
     GPUSchedulingQueueListResponse:
       type: object
-      required: [items]
+      required: [items, total]
       properties:
         items:
           type: array
           items: { $ref: '#/components/schemas/GPUSchedulingQueue' }
+        total:       { type: integer }
+        next_cursor: { type: string, nullable: true }
 
     GPUSchedulingQueueCreateRequest:
       type: object
@@ -1826,6 +2263,11 @@ components:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
     NotFound:
       description: 资源不存在（code=NOT_FOUND）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    NetworkSecurityGroupRuleNotFound:
+      description: 安全组不存在，或 rule_id 不属于该 security_group_id（code=NOT_FOUND）
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -1936,6 +2378,61 @@ paths:
                   checks: { type: object, additionalProperties: true }
 
   # ── 认证 ────────────────────────────────────────────────────────────────────
+  /auth/password/login:
+    post:
+      operationId: passwordLogin
+      summary: 租户账密登录（账号密码 Tab）
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PasswordLoginRequest' }
+      responses:
+        "200":
+          description: 账密登录成功，返回 TokenPair
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPairResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401":
+          description: 用户名或密码错误（code=INVALID_CREDENTIALS）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: 租户不存在（code=TENANT_NOT_FOUND）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "429": { $ref: '#/components/responses/RateLimitExceeded' }
+
+  /auth/platform/password/login:
+    post:
+      operationId: platformPasswordLogin
+      summary: 平台管理员账密登录
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlatformPasswordLoginRequest' }
+      responses:
+        "200":
+          description: 平台账密登录成功，返回平台 TokenPair（scope=platform）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPairResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401":
+          description: 用户名或密码错误（code=INVALID_CREDENTIALS）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "429": { $ref: '#/components/responses/RateLimitExceeded' }
+
   /auth/oidc/begin:
     post:
       operationId: beginOIDCLogin
@@ -2082,12 +2579,12 @@ paths:
       operationId: listInstances
       summary: 查询实例列表
       description: |
-        Services P0 依赖路径。返回 VM、container、gpu_container 的 Core 统一实例视图。
+        Services P0 依赖路径。返回 VM、container、gpu_container、sandbox 的 Core 统一实例视图。
         当前 Alpha 冻结 path/schema/error/state/RBAC scope；dev/local profile 可使用本地 provider。
       tags: [Instances]
       x-ani-rbac-scope: "scope:instances:read"
       parameters:
-        - { name: kind,   in: query, schema: { type: string, enum: [vm, container, gpu_container] } }
+        - { name: kind,   in: query, schema: { type: string, enum: [vm, container, gpu_container, sandbox] } }
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
       responses:
@@ -2105,6 +2602,8 @@ paths:
       description: |
         创建 VM、container、gpu_container 或 sandbox。POST 创建必须携带 idempotency_key；
         同一 (tenant_id, idempotency_key) 在 24 小时内返回同一操作结果。
+        推荐按 kind 填写对应 `vm_config` / `container_config` / `gpu_container_config` / `sandbox_config`；
+        扁平 boot_image/ssh_*/replicas/gpu 字段仍接受，作为 v1 兼容别名。
       tags: [Instances]
       x-ani-rbac-scope: "scope:instances:create"
       requestBody:
@@ -2123,14 +2622,12 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "409": { $ref: '#/components/responses/Conflict' }
         "422":
+          $ref: '#/components/responses/PreconditionFailed'
           description: |
             GPU 调度前置条件不满足。可能的 code：
             - InsufficientGPU: GPU 资源不足，当前无可用算力满足本次创建请求
             - GPUNodeIncompatible: 无兼容 GPU 节点，请调整型号偏好或调度队列
             - QueueNotFound: 所选调度队列不存在或已删除
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponse' }
 
   /instances/{instance_id}:
     get:
@@ -2309,6 +2806,21 @@ paths:
         "404": { $ref: '#/components/responses/NotFound' }
 
   # ── 网络资源（Core API Alpha）──────────────────────────────────────────────
+  /networks/overview:
+    get:
+      operationId: getNetworkOverview
+      summary: 查询网络管理总览
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:read"
+      responses:
+        "200":
+          description: 网络管理总览
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkOverview' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
   /networks/vpcs:
     get:
       operationId: listNetworkVPCs
@@ -2316,6 +2828,8 @@ paths:
       tags: [Networks]
       x-ani-rbac-scope: "scope:networks:read"
       parameters:
+        - { name: name,   in: query, schema: { type: string }, description: "按 VPC 名称过滤；可选，服务端可做精确或前缀匹配。" }
+        - { name: state,  in: query, schema: { $ref: '#/components/schemas/NetworkResourceState' }, description: "按 VPC 状态过滤。" }
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
       responses:
@@ -2345,6 +2859,7 @@ paths:
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
+        "409": { $ref: '#/components/responses/Conflict' }
 
   /networks/vpcs/{vpc_id}:
     get:
@@ -2379,6 +2894,7 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
 
   /networks/subnets:
     get:
@@ -2387,6 +2903,8 @@ paths:
       tags: [Networks]
       x-ani-rbac-scope: "scope:networks:read"
       parameters:
+        - { name: vpc_id, in: query, schema: { type: string }, description: "按所属 VPC 过滤子网。" }
+        - { name: state,  in: query, schema: { $ref: '#/components/schemas/NetworkResourceState' }, description: "按子网状态过滤。" }
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
       responses:
@@ -2417,6 +2935,7 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
 
   /networks/subnets/{subnet_id}:
     get:
@@ -2451,6 +2970,29 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /networks/subnets/{subnet_id}/ip-allocations:
+    get:
+      operationId: listNetworkSubnetIPAllocations
+      summary: 查询子网 IP 分配列表
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:read"
+      parameters:
+        - { name: subnet_id, in: path, required: true, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string, enum: [available, allocated, reserved] }, description: "按 IP 分配状态过滤。" }
+        - { name: resource_type, in: query, schema: { type: string, enum: [instance, network_interface, load_balancer] }, description: "按绑定资源类型过滤。" }
+        - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: 子网 IP 分配列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkSubnetIPAllocationListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
 
   /networks/security-groups:
     get:
@@ -2459,6 +3001,8 @@ paths:
       tags: [Networks]
       x-ani-rbac-scope: "scope:networks:read"
       parameters:
+        - { name: name,   in: query, schema: { type: string }, description: "按安全组名称过滤；可选，服务端可做精确或前缀匹配。" }
+        - { name: state,  in: query, schema: { $ref: '#/components/schemas/NetworkResourceState' }, description: "按安全组状态过滤。" }
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
       responses:
@@ -2488,6 +3032,7 @@ paths:
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
+        "409": { $ref: '#/components/responses/Conflict' }
 
   /networks/security-groups/{security_group_id}:
     get:
@@ -2522,6 +3067,178 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /networks/security-groups/{security_group_id}/rules:
+    get:
+      operationId: listNetworkSecurityGroupRules
+      summary: 查询安全组规则列表
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:read"
+      parameters:
+        - { name: security_group_id, in: path, required: true, schema: { type: string } }
+        - { name: direction, in: query, schema: { type: string, enum: [ingress, egress] } }
+        - { name: protocol, in: query, schema: { type: string, enum: [tcp, udp, icmp, all] } }
+        - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: 安全组规则列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkSecurityGroupRuleListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: createNetworkSecurityGroupRule
+      summary: 创建安全组规则
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:create"
+      parameters:
+        - { name: security_group_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateNetworkSecurityGroupRuleRequest' }
+      responses:
+        "201":
+          description: 安全组规则已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkSecurityGroupRuleResource' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /networks/security-groups/{security_group_id}/rules/{rule_id}:
+    get:
+      operationId: getNetworkSecurityGroupRule
+      summary: 查询安全组规则
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:read"
+      parameters:
+        - { name: security_group_id, in: path, required: true, schema: { type: string } }
+        - { name: rule_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 安全组规则
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkSecurityGroupRuleResource' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NetworkSecurityGroupRuleNotFound' }
+    put:
+      operationId: updateNetworkSecurityGroupRule
+      summary: 更新安全组规则
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:create"
+      parameters:
+        - { name: security_group_id, in: path, required: true, schema: { type: string } }
+        - { name: rule_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateNetworkSecurityGroupRuleRequest' }
+      responses:
+        "200":
+          description: 安全组规则已更新
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkSecurityGroupRuleResource' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NetworkSecurityGroupRuleNotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+    delete:
+      operationId: deleteNetworkSecurityGroupRule
+      summary: 删除安全组规则
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:delete"
+      parameters:
+        - { name: security_group_id, in: path, required: true, schema: { type: string } }
+        - { name: rule_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 安全组规则已删除
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkSecurityGroupRuleResource' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NetworkSecurityGroupRuleNotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /networks/security-groups/{security_group_id}/bindings:
+    get:
+      operationId: listNetworkSecurityGroupBindings
+      summary: 查询安全组绑定列表
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:read"
+      parameters:
+        - { name: security_group_id, in: path, required: true, schema: { type: string } }
+        - { name: target_type, in: query, schema: { $ref: '#/components/schemas/NetworkSecurityGroupBindingTargetType' } }
+        - { name: target_id, in: query, schema: { type: string } }
+        - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: 安全组绑定列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkSecurityGroupBindingListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: createNetworkSecurityGroupBinding
+      summary: 绑定安全组
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:create"
+      parameters:
+        - { name: security_group_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateNetworkSecurityGroupBindingRequest' }
+      responses:
+        "201":
+          description: 安全组绑定已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkSecurityGroupBinding' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /networks/security-groups/{security_group_id}/bindings/{binding_id}:
+    delete:
+      operationId: deleteNetworkSecurityGroupBinding
+      summary: 解绑安全组
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:delete"
+      parameters:
+        - { name: security_group_id, in: path, required: true, schema: { type: string } }
+        - { name: binding_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 安全组绑定已删除
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkSecurityGroupBinding' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
 
   /networks/load-balancers:
     get:
@@ -2530,6 +3247,9 @@ paths:
       tags: [Networks]
       x-ani-rbac-scope: "scope:networks:read"
       parameters:
+        - { name: vpc_id, in: query, schema: { type: string }, description: "按所属 VPC 过滤负载入口。" }
+        - { name: state,  in: query, schema: { $ref: '#/components/schemas/NetworkResourceState' }, description: "按负载入口状态过滤。" }
+        - { name: scheme, in: query, schema: { type: string, enum: [internal, public] }, description: "按负载入口类型过滤。" }
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
       responses:
@@ -2560,6 +3280,7 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
 
   /networks/load-balancers/{load_balancer_id}:
     get:
@@ -2594,6 +3315,7 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
 
   /networks/routes:
     get:
@@ -2603,6 +3325,7 @@ paths:
       x-ani-rbac-scope: "scope:networks:read"
       parameters:
         - { name: vpc_id, in: query, schema: { type: string } }
+        - { name: next_hop_type, in: query, schema: { type: string, enum: [gateway, instance, nat] }, description: "按下一跳类型过滤路由。" }
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
       responses:
@@ -2633,6 +3356,42 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /networks/routes/{route_id}:
+    get:
+      operationId: getNetworkRoute
+      summary: 查询路由条目
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:read"
+      parameters:
+        - { name: route_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 路由条目
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkRoute' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: deleteNetworkRoute
+      summary: 删除路由条目
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:delete"
+      parameters:
+        - { name: route_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 路由条目已删除
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkRoute' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
 
   # ── 存储资源（Core API Alpha）──────────────────────────────────────────────
   /volumes:
@@ -3120,6 +3879,45 @@ paths:
         "422": { $ref: '#/components/responses/PreconditionFailed' }
 
   # ── 镜像仓库 ────────────────────────────────────────────────────────────────
+  /registry/overview:
+    get:
+      operationId: getRegistryOverview
+      summary: 获取镜像仓库总览
+      description: 支撑 Console 镜像仓库首屏，聚合项目、仓库、artifact、tag、漏洞摘要、快捷动作和删除风险提示。
+      tags: [Registry]
+      x-ani-rbac-scope: "scope:registry:read"
+      responses:
+        "200":
+          description: 镜像仓库总览
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegistryOverview' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /registry/images:
+    get:
+      operationId: listRegistryImages
+      summary: 列出镜像 Tag 视图
+      description: 面向 Console 镜像仓库列表页的平铺视图；每一项表示一个可拉取镜像 tag，并携带漏洞扫描摘要和拉取命令。
+      tags: [Registry]
+      x-ani-rbac-scope: "scope:registry:read"
+      parameters:
+        - { name: project, in: query, schema: { type: string } }
+        - { name: repository, in: query, schema: { type: string } }
+        - { name: tag, in: query, schema: { type: string } }
+        - { name: scan_status, in: query, schema: { type: string, enum: [not_scanned, pending, running, complete, failed] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: 镜像 Tag 列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegistryImageListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
   /registry/projects:
     get:
       operationId: listRegistryProjects
@@ -3158,6 +3956,27 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
 
+  /registry/projects/{project}/push-instructions:
+    get:
+      operationId: getRegistryProjectPushInstructions
+      summary: 获取镜像推送说明
+      description: 返回登录、tag、push 命令模板；不返回任何凭据明文。
+      tags: [Registry]
+      x-ani-rbac-scope: "scope:registry:read"
+      parameters:
+        - { name: project, in: path, required: true, schema: { type: string } }
+        - { name: repository, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: 镜像推送说明
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegistryPushInstructions' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
   /registry/projects/{project}/repositories:
     get:
       operationId: listRegistryRepositories
@@ -3177,6 +3996,51 @@ paths:
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
+
+  /registry/projects/{project}/repositories/{repository}/tags/{tag}:
+    delete:
+      operationId: deleteRegistryRepositoryTag
+      summary: 删除镜像 Tag
+      description: 删除指定镜像 tag；若该 tag 被容器或 GPU 容器实例引用，返回 409；若该 tag 是 artifact 的最后引用，底层 provider 可同时清理对应 artifact。
+      tags: [Registry]
+      x-ani-rbac-scope: "scope:registry:write"
+      parameters:
+        - { name: project, in: path, required: true, schema: { type: string } }
+        - { name: repository, in: path, required: true, schema: { type: string } }
+        - { name: tag, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 镜像 Tag 已删除
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegistryDeletedTag' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /registry/projects/{project}/repositories/{repository}/tags/{tag}/references:
+    get:
+      operationId: listRegistryRepositoryTagReferences
+      summary: 列出镜像 Tag 引用方
+      description: 支撑 Console 镜像详情的关联资源页签和删除前风险提示；引用方包括容器实例和 GPU 容器实例。
+      tags: [Registry]
+      x-ani-rbac-scope: "scope:registry:read"
+      parameters:
+        - { name: project, in: path, required: true, schema: { type: string } }
+        - { name: repository, in: path, required: true, schema: { type: string } }
+        - { name: tag, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 镜像 Tag 引用方列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegistryImageReferenceListResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
 
   /registry/projects/{project}/repositories/{repository}/artifacts:
     get:
@@ -3364,6 +4228,7 @@ paths:
         - { name: task_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         "200":
+          description: 异步任务状态
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AsyncTask' }
@@ -3388,6 +4253,29 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ObservabilityQueryResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /observability/query_range:
+    get:
+      operationId: queryRangeObservability
+      summary: PromQL 代理区间查询
+      description: 通过 Core 代理 PromQL 区间查询（range query），返回时间区间内多个采样点，用于绘制时序曲线。不暴露底层 Prometheus 地址。
+      tags: [Observability]
+      x-ani-rbac-scope: "scope:observability:read"
+      parameters:
+        - { name: query, in: query, required: true, schema: { type: string, minLength: 1 } }
+        - { name: start, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: end, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: step, in: query, required: true, schema: { type: string, description: "采样步长，如 15s / 30s / 1m" } }
+        - { name: timeout, in: query, required: false, schema: { type: string, default: 30s } }
+      responses:
+        "200":
+          description: PromQL 区间查询结果（matrix）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObservabilityRangeQueryResponse' }
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
@@ -3488,7 +4376,12 @@ paths:
   # ── 计量 ────────────────────────────────────────────────────────────────────
   /metering/usage:
     get:
+      operationId: getMeteringUsage
+      x-ani-rbac-scope: "scope:metering:read"
       summary: 查询租户用量统计
+      description: |
+        在租户 JWT 上下文中查询本租户的用量数据。
+        tenant_id 从 JWT 提取，忽略 query 中的 tenant_id 参数。
       tags: [Metering]
       parameters:
         - { name: start_time, in: query, required: true, schema: { type: string, format: date-time } }
@@ -3514,6 +4407,34 @@ paths:
                   total: { type: integer }
                   dev_profile:
                     $ref: '#/components/schemas/CoreDevProfileInfo'
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /metering/usage/platform:
+    get:
+      operationId: getPlatformMeteringUsage
+      x-ani-rbac-scope: "scope:metering:platform:read"
+      summary: 查询平台跨租户用量
+      description: |
+        在平台 RBAC 上下文中查询全平台或指定租户的用量数据。
+        需 scope:metering:platform:read 权限。
+        items[].tenant_id 在此端点下必填。
+        若带 tenant_id query 须二次 RBAC 校验。
+      tags: [Metering]
+      parameters:
+        - { name: start_time, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: end_time,   in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: resource_type, in: query, schema: { type: string } }
+        - { name: group_by, in: query, schema: { type: string, enum: [tenant_id, day, hour] } }
+        - { name: tenant_id, in: query, required: false, schema: { type: string }, description: "可选筛选单租户，须平台 RBAC 校验" }
+      responses:
+        "200":
+          description: 平台用量查询成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeteringUsageResponse'
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
@@ -3551,6 +4472,7 @@ paths:
         - { name: cursor, in: query, schema: { type: string } }
       responses:
         "200":
+          description: K8s 集群列表
           content:
             application/json:
               schema:
@@ -3568,6 +4490,7 @@ paths:
               $ref: "#/components/schemas/K8sClusterCreateRequest"
       responses:
         "201":
+          description: K8s 集群创建成功
           content:
             application/json:
               schema:
@@ -3593,6 +4516,7 @@ paths:
         - { name: cluster_id, in: path, required: true, schema: { type: string } }
       responses:
         "200":
+          description: K8s 集群详情
           content:
             application/json:
               schema:
@@ -3606,6 +4530,7 @@ paths:
         - { name: cluster_id, in: path, required: true, schema: { type: string } }
       responses:
         "200":
+          description: K8s 集群删除成功
           content:
             application/json:
               schema:
@@ -3622,6 +4547,7 @@ paths:
         - { name: cluster_id, in: path, required: true, schema: { type: string } }
       responses:
         "200":
+          description: K8s 集群 kubeconfig
           content:
             application/json:
               schema:
@@ -3648,6 +4574,7 @@ paths:
               $ref: "#/components/schemas/K8sClusterUpgradeRequest"
       responses:
         "200":
+          description: K8s 集群升级结果
           content:
             application/json:
               schema:
@@ -3670,6 +4597,7 @@ paths:
         - { name: cluster_id, in: path, required: true, schema: { type: string } }
       responses:
         "200":
+          description: K8s 集群节点池列表
           content:
             application/json:
               schema:
@@ -3692,6 +4620,7 @@ paths:
               $ref: "#/components/schemas/K8sClusterNodePoolCreateRequest"
       responses:
         "201":
+          description: K8s 集群节点池创建成功
           content:
             application/json:
               schema:
@@ -3714,6 +4643,7 @@ paths:
         - { name: node_pool_id, in: path, required: true, schema: { type: string } }
       responses:
         "200":
+          description: K8s 集群节点池详情
           content:
             application/json:
               schema:
@@ -3737,6 +4667,7 @@ paths:
               $ref: "#/components/schemas/K8sClusterNodePoolUpdateRequest"
       responses:
         "200":
+          description: K8s 集群节点池更新成功
           content:
             application/json:
               schema:
@@ -3757,6 +4688,7 @@ paths:
         - { name: node_pool_id, in: path, required: true, schema: { type: string } }
       responses:
         "200":
+          description: K8s 集群节点池删除成功
           content:
             application/json:
               schema:
@@ -3783,6 +4715,7 @@ paths:
               $ref: "#/components/schemas/K8sClusterProxyRequest"
       responses:
         "200":
+          description: K8s 集群代理响应
           content:
             application/json:
               schema:
@@ -3828,6 +4761,7 @@ paths:
         - { name: cursor, in: query, schema: { type: string } }
       responses:
         "200":
+          description: 加密密钥列表
           content:
             application/json:
               schema:
@@ -3845,6 +4779,7 @@ paths:
               $ref: "#/components/schemas/EncryptionKeyCreateRequest"
       responses:
         "201":
+          description: 加密密钥创建成功
           content:
             application/json:
               schema:
@@ -3860,6 +4795,7 @@ paths:
         - { name: key_id, in: path, required: true, schema: { type: string } }
       responses:
         "200":
+          description: 加密密钥详情
           content:
             application/json:
               schema:
@@ -3873,6 +4809,7 @@ paths:
         - { name: key_id, in: path, required: true, schema: { type: string } }
       responses:
         "200":
+          description: 加密密钥删除成功
           content:
             application/json:
               schema:
@@ -3895,6 +4832,7 @@ paths:
               $ref: "#/components/schemas/EncryptionKeyRotateRequest"
       responses:
         "200":
+          description: 加密密钥轮换结果
           content:
             application/json:
               schema:
@@ -3921,6 +4859,7 @@ paths:
               $ref: "#/components/schemas/EncryptionKeyRevokeRequest"
       responses:
         "200":
+          description: 加密密钥吊销成功
           content:
             application/json:
               schema:
@@ -3945,6 +4884,7 @@ paths:
               $ref: "#/components/schemas/EncryptionSealRequest"
       responses:
         "200":
+          description: 加密对象并生成解封令牌成功
           content:
             application/json:
               schema:
@@ -3969,6 +4909,7 @@ paths:
               $ref: "#/components/schemas/EncryptionUnsealTokenRequest"
       responses:
         "200":
+          description: 对象解封令牌创建成功
           content:
             application/json:
               schema:
@@ -3990,6 +4931,7 @@ paths:
         - { name: cursor, in: query, schema: { type: string } }
       responses:
         "200":
+          description: Secret 元数据列表
           content:
             application/json:
               schema:
@@ -4008,6 +4950,7 @@ paths:
               $ref: "#/components/schemas/SecretCreateRequest"
       responses:
         "201":
+          description: Secret 创建成功
           content:
             application/json:
               schema:
@@ -4023,6 +4966,7 @@ paths:
         - { name: secret_id, in: path, required: true, schema: { type: string } }
       responses:
         "200":
+          description: Secret 元数据详情
           content:
             application/json:
               schema:
@@ -4038,6 +4982,7 @@ paths:
         - { name: secret_id, in: path, required: true, schema: { type: string } }
       responses:
         "200":
+          description: Secret 删除成功
           content:
             application/json:
               schema:
@@ -4062,6 +5007,7 @@ paths:
               $ref: "#/components/schemas/SecretBindingRequest"
       responses:
         "201":
+          description: Secret 绑定创建成功
           content:
             application/json:
               schema:
@@ -4148,15 +5094,8 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "409":
-          description: 队列名称冲突
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  code: { type: string, example: "QueueNameConflict" }
-                  message: { type: string }
-                  request_id: { type: string }
+          $ref: '#/components/responses/Conflict'
+          description: "队列名称冲突，code: QueueNameConflict"
 
   /gpu-scheduling/queues/{queue_id}:
     get:
@@ -4197,15 +5136,8 @@ paths:
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403":
-          description: 平台默认队列不可修改
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  code: { type: string, example: "PlatformDefaultProtected" }
-                  message: { type: string }
-                  request_id: { type: string }
+          $ref: '#/components/responses/Forbidden'
+          description: "平台默认队列不可修改，code: PlatformDefaultProtected"
         "404": { $ref: '#/components/responses/NotFound' }
     delete:
       operationId: deleteGPUSchedulingQueue
@@ -4220,15 +5152,8 @@ paths:
           description: 队列删除成功
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403":
-          description: 平台默认队列不可删除
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  code: { type: string, example: "PlatformDefaultProtected" }
-                  message: { type: string }
-                  request_id: { type: string }
+          $ref: '#/components/responses/Forbidden'
+          description: "平台默认队列不可删除，code: PlatformDefaultProtected"
         "404": { $ref: '#/components/responses/NotFound' }
 
   # ── Sandbox 模板（Core API Alpha）────────────────────────────────────────────
