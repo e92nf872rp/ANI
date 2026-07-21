@@ -81,7 +81,11 @@ func postJSON(t *testing.T, url string, token string, payload any) map[string]an
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		content, _ := io.ReadAll(resp.Body)
 		t.Fatalf("POST %s status = %d: %s", url, resp.StatusCode, content)
@@ -130,7 +134,11 @@ func doBytes(t *testing.T, req *http.Request, want int) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	}()
 	content, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatal(err)

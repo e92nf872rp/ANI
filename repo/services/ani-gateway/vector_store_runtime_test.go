@@ -3,9 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
-	"strings"
 	"testing"
 
 	"github.com/kubercloud/ani/pkg/ports"
@@ -128,13 +126,5 @@ func TestGatewayVectorStoreConfigFromEnvIncludesMilvusProvider(t *testing.T) {
 func TestGatewayVectorStoreServiceRejectsUnsupportedProvider(t *testing.T) {
 	if _, err := newGatewayVectorStoreService(gatewayVectorStoreRuntimeConfig{VectorStoreProvider: "memory"}); err == nil {
 		t.Fatal("newGatewayVectorStoreService() error = nil, want unsupported provider error")
-	}
-}
-
-func vectorRuntimeJSONResponse(status int, body string) *http.Response {
-	return &http.Response{
-		StatusCode: status,
-		Header:     make(http.Header),
-		Body:       io.NopCloser(strings.NewReader(body)),
 	}
 }

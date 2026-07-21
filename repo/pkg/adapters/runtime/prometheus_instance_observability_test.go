@@ -15,10 +15,10 @@ func TestPrometheusInstanceObservabilityListsLogsEventsAndSecurityEvents(t *test
 	var requests []string
 	service := newTestPrometheusInstanceObservability(t, func(r *http.Request) (*http.Response, error) {
 		requests = append(requests, r.Method+" "+r.URL.String())
-		switch {
-		case r.URL.Path == "/api/v1/namespaces/ani-tenant-tenant-a/pods/pod-a/log":
+		switch r.URL.Path {
+		case "/api/v1/namespaces/ani-tenant-tenant-a/pods/pod-a/log":
 			return jsonResponse(http.StatusOK, "info booted\nwarn restarted\n"), nil
-		case r.URL.Path == "/api/v1/namespaces/ani-tenant-tenant-a/events":
+		case "/api/v1/namespaces/ani-tenant-tenant-a/events":
 			return jsonResponse(http.StatusOK, `{
 				"items": [
 					{"metadata":{"uid":"evt-a"},"type":"Normal","reason":"Scheduled","message":"pod scheduled","count":2,"lastTimestamp":"2026-06-19T08:29:00Z"},
@@ -152,7 +152,7 @@ func newTestPrometheusInstanceObservability(t *testing.T, roundTrip roundTripFun
 
 func newTestPrometheusInstanceObservabilityWithClock(t *testing.T, roundTrip roundTripFunc, now func() time.Time) *PrometheusInstanceObservability {
 	t.Helper()
-	var transport http.RoundTripper = http.DefaultTransport
+	transport := http.RoundTripper(http.DefaultTransport)
 	if roundTrip != nil {
 		transport = roundTrip
 	}

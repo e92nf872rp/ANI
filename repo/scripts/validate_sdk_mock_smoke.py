@@ -205,7 +205,7 @@ func main() {{
             )
             (tmp_path / "main.go").write_text(script, encoding="utf-8")
             env = os.environ.copy()
-            env.setdefault("GOCACHE", "/private/tmp/ani-go-build")
+            env.setdefault("GOCACHE", str(ROOT / ".cache/go-build"))
             result = subprocess.run(["go", "run", "."], cwd=tmp_path, text=True, capture_output=True, timeout=30, check=False, env=env)
             if result.returncode != 0:
                 fail(f"Core Go SDK mock smoke failed: {result.stderr or result.stdout}")

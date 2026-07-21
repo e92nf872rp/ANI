@@ -190,9 +190,12 @@ func (s *k8sClusterProxyForwardingService) ListWorkloads(ctx context.Context, re
 			return nil, err
 		}
 		body, readErr := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		closeErr := resp.Body.Close()
 		if readErr != nil {
 			return nil, readErr
+		}
+		if closeErr != nil {
+			return nil, closeErr
 		}
 		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 			return nil, fmt.Errorf("%w: Kubernetes workload list returned HTTP %d", ports.ErrInvalid, resp.StatusCode)
@@ -265,10 +268,13 @@ func (s *k8sClusterProxyForwardingService) Proxy(ctx context.Context, req ports.
 	if err != nil {
 		return ports.K8sClusterProxyRecord{}, err
 	}
-	defer resp.Body.Close()
 	respBody, err := io.ReadAll(resp.Body)
+	closeErr := resp.Body.Close()
 	if err != nil {
 		return ports.K8sClusterProxyRecord{}, err
+	}
+	if closeErr != nil {
+		return ports.K8sClusterProxyRecord{}, closeErr
 	}
 	decoded, err := k8sProxyResponseBody(respBody)
 	if err != nil {

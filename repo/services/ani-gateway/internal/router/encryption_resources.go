@@ -80,9 +80,6 @@ func newEncryptionAPIWithService(service ports.EncryptionService) *encryptionAPI
 	}
 	return &encryptionAPI{service: service}
 }
-func registerEncryptionResources(v1 *route.RouterGroup) {
-	registerEncryptionResourcesWithService(v1, nil)
-}
 
 func registerEncryptionResourcesWithService(v1 *route.RouterGroup, service ports.EncryptionService) {
 	api := newEncryptionAPIWithService(service)

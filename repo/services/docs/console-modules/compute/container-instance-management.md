@@ -263,9 +263,9 @@
 | `name` | 租户内唯一 | `409 CONFLICT` |
 | `kind=container` | 必须为 `container` | `400 BAD_REQUEST` |
 | `image` | 镜像引用有效 | `422 PRECONDITION_FAILED`（YAML 已举例 `IMAGE_NOT_FOUND`） |
-| `replicas`（若填写） | ≥ 1 | `400 BAD_REQUEST` |
+| `container_config.replicas` / 兼容别名 `replicas`（若填写） | ≥ 1 | `400 BAD_REQUEST` |
 
-首版创建只承接 `image`、`cpu`、`memory`、`replicas`、`auto_start`。
+首版创建只承接 `image`、`cpu`、`memory`、`container_config.replicas`（或兼容别名 `replicas`）、`auto_start`。
 
 ### 生命周期动作前置条件（`POST /api/v1/instances/{instance_id}/lifecycle`）
 
@@ -365,7 +365,7 @@
 | tags | `["Instances"]` |
 | security | `[{BearerAuth: []}, {ApiKeyAuth: []}]` |
 | requestBody.required | `name`、`kind`、`idempotency_key` |
-| 关键字段 | `kind=container`、`image`、`cpu`、`memory`、`replicas`、`auto_start` |
+| 关键字段 | `kind=container`、`image`、`cpu`、`memory`、`container_config.replicas`、`auto_start`；扁平 `replicas` 仍为兼容别名 |
 | success | `201 + CreateInstanceResponse` |
 | error responses | `400 BAD_REQUEST`、`401 UNAUTHORIZED`、`403 FORBIDDEN`、`409 CONFLICT` |
 

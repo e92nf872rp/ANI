@@ -4,8 +4,8 @@ package anisdk
 import (
 	"bytes"
 	"crypto/rand"
-	"encoding/json"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -295,6 +295,8 @@ var Schemas = []string{
 	"CoreDevProfileInfo",
 	"CreateAPIKeyRequest",
 	"CreateAPIKeyResponse",
+	"CreateContainerInstanceConfig",
+	"CreateGPUContainerInstanceConfig",
 	"CreateInstanceConsoleSessionRequest",
 	"CreateInstanceExecSessionRequest",
 	"CreateInstanceRequest",
@@ -313,6 +315,7 @@ var Schemas = []string{
 	"CreateStorageFilesystemRequest",
 	"CreateStorageObjectRequest",
 	"CreateStorageVolumeRequest",
+	"CreateVMInstanceConfig",
 	"CreateVectorStoreRequest",
 	"CreateVolumeSnapshotRequest",
 	"CursorPage",

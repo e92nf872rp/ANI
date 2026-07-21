@@ -243,10 +243,6 @@ func newNetworkAPIWithService(service ports.NetworkService) *networkAPI {
 	return &networkAPI{service: service}
 }
 
-func registerNetworkResources(v1 *route.RouterGroup) {
-	registerNetworkResourcesWithService(v1, nil)
-}
-
 func registerNetworkResourcesWithService(v1 *route.RouterGroup, service ports.NetworkService) {
 	api := newNetworkAPIWithService(service)
 	v1.GET("/networks/overview", api.getOverview)

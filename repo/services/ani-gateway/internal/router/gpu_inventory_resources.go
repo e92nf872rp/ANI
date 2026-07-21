@@ -100,10 +100,6 @@ func newGPUInventoryAPIWithInventory(inventory ports.GPUInventory) *gpuInventory
 	}
 }
 
-func registerGPUInventoryResources(v1 *route.RouterGroup) {
-	registerGPUInventoryResourcesWithInventory(v1, nil)
-}
-
 func registerGPUInventoryResourcesWithInventory(v1 *route.RouterGroup, inventory ports.GPUInventory) {
 	api := newGPUInventoryAPIWithInventory(inventory)
 	v1.GET("/gpu-inventory", api.listGPUInventory)
