@@ -948,6 +948,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/registry/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 获取镜像仓库总览
+         * @description 支撑 Console 镜像仓库首屏，聚合项目、仓库、artifact、tag、漏洞摘要、快捷动作和删除风险提示。
+         */
+        get: operations["getRegistryOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/registry/images": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 列出镜像 Tag 视图
+         * @description 面向 Console 镜像仓库列表页的平铺视图；每一项表示一个可拉取镜像 tag，并携带漏洞扫描摘要和拉取命令。
+         */
+        get: operations["listRegistryImages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/registry/projects": {
         parameters: {
             query?: never;
@@ -969,6 +1009,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/registry/projects/{project}/push-instructions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 获取镜像推送说明
+         * @description 返回登录、tag、push 命令模板；不返回任何凭据明文。
+         */
+        get: operations["getRegistryProjectPushInstructions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/registry/projects/{project}/repositories": {
         parameters: {
             query?: never;
@@ -978,6 +1038,46 @@ export interface paths {
         };
         /** 列出项目下镜像仓库 */
         get: operations["listRegistryRepositories"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/registry/projects/{project}/repositories/{repository}/tags/{tag}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * 删除镜像 Tag
+         * @description 删除指定镜像 tag；若该 tag 被容器或 GPU 容器实例引用，返回 409；若该 tag 是 artifact 的最后引用，底层 provider 可同时清理对应 artifact。
+         */
+        delete: operations["deleteRegistryRepositoryTag"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/registry/projects/{project}/repositories/{repository}/tags/{tag}/references": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 列出镜像 Tag 引用方
+         * @description 支撑 Console 镜像详情的关联资源页签和删除前风险提示；引用方包括容器实例和 GPU 容器实例。
+         */
+        get: operations["listRegistryRepositoryTagReferences"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1789,150 +1889,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/notifications/email/channel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * 获取平台邮件发信通道
-         * @description 返回平台级 SMTP 通道（单例）。敏感字段（password）不回显明文，
-         *     响应中只提供 has_password 布尔位。未配置时返回 200 + state=disabled + has_password=false，
-         *     不返回 404，便于前端区分「未配置」与「无权限」。
-         */
-        get: operations["getEmailChannel"];
-        /**
-         * 创建或更新平台邮件发信通道
-         * @description 单例资源 upsert：首次调用创建，后续调用覆盖。
-         *     password 为 write-only；留空或省略表示保留原值。
-         */
-        put: operations["updateEmailChannel"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/notifications/email/recipients": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * 列出平台邮件收件人
-         * @description 返回全局一份收件人列表；不按事件绑定区分。
-         */
-        get: operations["listEmailRecipients"];
-        put?: never;
-        /**
-         * 新增平台邮件收件人
-         * @description 平台级全局收件人；所有已开启订阅的事件共用此列表。
-         */
-        post: operations["createEmailRecipient"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/notifications/email/recipients/{recipient_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 获取单个平台邮件收件人 */
-        get: operations["getEmailRecipient"];
-        put?: never;
-        post?: never;
-        /**
-         * 删除平台邮件收件人
-         * @description 软删除；关联订阅不受影响，但该收件人不再收到任何邮件。
-         */
-        delete: operations["deleteEmailRecipient"];
-        options?: never;
-        head?: never;
-        /**
-         * 更新平台邮件收件人
-         * @description 支持 email、display_name、enabled 字段的部分更新。
-         */
-        patch: operations["updateEmailRecipient"];
-        trace?: never;
-    };
-    "/notifications/events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * 列出平台事件目录
-         * @description 返回首期冻结的事件枚举（告警 P0/P1、Incident 创建/升级、平台关键任务失败）。
-         *     客户端不应自造枚举，必须以本端点返回值为准。
-         */
-        get: operations["listNotificationEvents"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/notifications/email/subscriptions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * 列出邮件订阅开关
-         * @description 返回每个 event_type 的 enabled 状态；未显式设置的默认为 false。
-         */
-        get: operations["listEmailSubscriptions"];
-        /**
-         * 批量更新邮件订阅开关
-         * @description 按 event_type 做 upsert；整个 items 数组原子替换当前设置（前端按需先 GET 再合并后 PUT）。
-         *     event_type 必须来自 /notifications/events 返回的目录。
-         */
-        put: operations["updateEmailSubscriptions"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/notifications/email/test-send": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 发送测试邮件
-         * @description 前置条件：通道已配置（has_password=true + state=active）且至少有一个 enabled=true 的收件人。
-         *     不满足时返回 422 PRECONDITION_FAILED，code=EMAIL_CHANNEL_NOT_READY 或 NO_ENABLED_RECIPIENTS。
-         *     本端点不创建投递历史；仅返回入队结果（accepted / partial / failed）。
-         */
-        post: operations["sendEmailTest"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2650,193 +2606,6 @@ export interface components {
             };
             enabled?: boolean;
         };
-        /**
-         * @description 平台级 SMTP 发信通道（单例）。敏感字段（password、auth_code）不回显明文，
-         *     仅返回布尔 has_password / has_auth_code 表示是否已配置。平台管理员通过 PUT 写入或更新。
-         */
-        EmailChannel: {
-            /** @description 固定为 'platform-default'；单例资源 */
-            id: string;
-            host: string;
-            /** @example 587 */
-            port: number;
-            /**
-             * @description STARTTLS / SSL / 明文
-             * @enum {string}
-             */
-            encryption: "none" | "starttls" | "ssl";
-            username: string;
-            /** @description 服务端是否已持有密码；从不回显明文 */
-            has_password: boolean;
-            /** @description 服务端是否已持有 SMTP 授权码（QQ/163/Gmail 等）；从不回显明文 */
-            has_auth_code: boolean;
-            /**
-             * Format: email
-             * @description 发件人地址（MAIL FROM）
-             */
-            from_address?: string;
-            /** @description 发件人显示名（可选） */
-            from_name?: string | null;
-            /** Format: email */
-            reply_to?: string | null;
-            /** @enum {string} */
-            state: "active" | "disabled";
-            /**
-             * Format: date-time
-             * @description 最近一次测试发送成功时间
-             */
-            last_verified_at?: string | null;
-            dev_profile?: components["schemas"]["CoreDevProfileInfo"];
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at: string;
-        };
-        /**
-         * @description 创建或更新平台 SMTP 通道。password 与 auth_code 均为 write-only：
-         *     - 创建时按需填写（至少填写其一以通过测试发送前置校验）；
-         *     - 更新时若留空或省略，服务端保留原值；若提供非空值，则覆盖。
-         *     - 两者互不强制互斥，由用户根据邮箱服务商要求选择填写。
-         */
-        EmailChannelUpdateRequest: {
-            idempotency_key: string;
-            host: string;
-            port: number;
-            /** @enum {string} */
-            encryption: "none" | "starttls" | "ssl";
-            username: string;
-            /**
-             * Format: password
-             * @description write-only；响应中不回显；更新时留空表示保留原值
-             */
-            password?: string;
-            /**
-             * Format: password
-             * @description SMTP 授权码（QQ/163/Gmail 等），write-only；响应中不回显；更新时留空表示保留原值
-             */
-            auth_code?: string;
-            /** Format: email */
-            from_address: string;
-            from_name?: string;
-            /** Format: email */
-            reply_to?: string;
-            /**
-             * @default active
-             * @enum {string}
-             */
-            state: "active" | "disabled";
-        };
-        /** @description 平台级收件邮箱（全局一份列表，所有已开启订阅的事件共用）。 */
-        EmailRecipient: {
-            /** Format: uuid */
-            id: string;
-            /** Format: email */
-            email: string;
-            /** @description 备注名 / oncall 标签 */
-            display_name?: string | null;
-            /** @description 是否启用；停用的收件人不收到任何邮件 */
-            enabled: boolean;
-            /** @enum {string} */
-            state: "active" | "deleted";
-            dev_profile?: components["schemas"]["CoreDevProfileInfo"];
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at: string;
-        };
-        EmailRecipientCreateRequest: {
-            idempotency_key: string;
-            /** Format: email */
-            email: string;
-            display_name?: string;
-            /** @default true */
-            enabled: boolean;
-        };
-        EmailRecipientUpdateRequest: {
-            idempotency_key: string;
-            /** Format: email */
-            email?: string;
-            display_name?: string;
-            enabled?: boolean;
-        };
-        EmailRecipientListResponse: {
-            items: components["schemas"]["EmailRecipient"][];
-            total: number;
-            next_cursor?: string | null;
-        };
-        /** @description 平台事件目录条目。首期冻结枚举，后续可追加（追加属于兼容性新增）。 */
-        NotificationEvent: {
-            /**
-             * @description 事件类型枚举；首期冻结
-             * @enum {string}
-             */
-            event_type: "platform_alert_p0" | "platform_alert_p1" | "incident_created" | "incident_escalated" | "platform_critical_task_failed";
-            /** @description 事件展示名 */
-            name: string;
-            /** @description 事件描述 */
-            description: string;
-            /** @enum {string} */
-            category: "alert" | "incident" | "task";
-            /** @enum {string} */
-            severity: "info" | "warning" | "critical";
-        };
-        NotificationEventListResponse: {
-            items: components["schemas"]["NotificationEvent"][];
-            total: number;
-        };
-        /**
-         * @description 按事件类型粒度的邮件订阅开关。每个 event_type 一条记录。
-         *     所有 enabled=true 的事件共用全局启用中的收件人列表（PRD 决议 4：绑定模型 P2）。
-         */
-        EmailSubscription: {
-            /** @enum {string} */
-            event_type: "platform_alert_p0" | "platform_alert_p1" | "incident_created" | "incident_escalated" | "platform_critical_task_failed";
-            enabled: boolean;
-            /** Format: date-time */
-            updated_at: string;
-        };
-        EmailSubscriptionListResponse: {
-            items: components["schemas"]["EmailSubscription"][];
-            total: number;
-        };
-        /** @description 批量更新邮件订阅开关；服务端以 event_type 为 key 做 upsert。 */
-        EmailSubscriptionUpdateRequest: {
-            idempotency_key: string;
-            items: {
-                /** @enum {string} */
-                event_type: "platform_alert_p0" | "platform_alert_p1" | "incident_created" | "incident_escalated" | "platform_critical_task_failed";
-                enabled: boolean;
-            }[];
-        };
-        /**
-         * @description 触发一次测试发送。前置条件：
-         *     - 通道已配置（has_password=true 或 has_auth_code=true，state=active）
-         *     - 至少有一个 enabled=true 的收件人
-         *     若不满足，返回 422 PRECONDITION_FAILED。
-         */
-        EmailTestSendRequest: {
-            idempotency_key: string;
-            /** @description 测试发送的目标收件人 ID 列表；为空或不传则使用全部 enabled=true 的收件人 */
-            recipient_ids?: string[];
-            /** @description 可选自定义主题；默认 'ANI 平台测试邮件' */
-            subject?: string;
-        };
-        EmailTestSendResponse: {
-            /** @description 用于排查；同 ErrorResponse.request_id */
-            request_id: string;
-            /**
-             * @description accepted=全部入队；partial=部分入队；failed=全部失败
-             * @enum {string}
-             */
-            status: "accepted" | "partial" | "failed";
-            accepted_recipient_ids: string[];
-            rejected_recipient_ids: {
-                /** Format: uuid */
-                recipient_id: string;
-                code: string;
-                message: string;
-            }[];
-        };
         MeteringUsageRecord: {
             /** @enum {string} */
             resource_type: "instance_cpu_seconds" | "instance_memory_gib_seconds" | "instance_gpu_seconds" | "token_input" | "token_output" | "token_total";
@@ -3474,6 +3243,132 @@ export interface components {
             dev_profile?: components["schemas"]["CoreDevProfileInfo"];
             /** Format: date-time */
             scanned_at?: string;
+        };
+        RegistryOverviewResourceSummary: {
+            /** @enum {string} */
+            kind: "project" | "repository" | "artifact" | "tag";
+            total: number;
+            /** @default 0 */
+            available: number;
+            /** @default 0 */
+            pending: number;
+            /** @default 0 */
+            failed: number;
+            /**
+             * Format: int64
+             * @default 0
+             */
+            size_bytes: number;
+        };
+        RegistryOverviewVulnerabilitySummary: {
+            critical: number;
+            high: number;
+            medium: number;
+            low: number;
+        };
+        RegistryOverviewCapability: {
+            /** @enum {string} */
+            key: "projects" | "repositories" | "tags" | "push_instructions" | "pull_commands" | "scan_summary" | "scan_policy" | "quota" | "garbage_collection";
+            label: string;
+            /** @enum {string} */
+            status: "available" | "planned";
+            path?: string;
+            description?: string;
+        };
+        RegistryOverviewRelationship: {
+            /** @enum {string} */
+            source: "project" | "repository" | "tag" | "workload";
+            /** @enum {string} */
+            target: "project" | "repository" | "tag" | "workload";
+            relation: string;
+        };
+        RegistryOverviewQuickAction: {
+            /** @enum {string} */
+            key: "create_project" | "push_instructions";
+            label: string;
+            path?: string;
+            description?: string;
+        };
+        RegistryOverviewDeleteRisk: {
+            /** @enum {string} */
+            kind: "project" | "repository" | "artifact" | "tag";
+            risk: string;
+        };
+        RegistryOverview: {
+            resources: components["schemas"]["RegistryOverviewResourceSummary"][];
+            vulnerabilities: components["schemas"]["RegistryOverviewVulnerabilitySummary"];
+            capabilities: components["schemas"]["RegistryOverviewCapability"][];
+            /**
+             * @example [
+             *       "project",
+             *       "login",
+             *       "tag",
+             *       "push"
+             *     ]
+             */
+            create_order: ("project" | "login" | "tag" | "push")[];
+            relationships: components["schemas"]["RegistryOverviewRelationship"][];
+            quick_actions: components["schemas"]["RegistryOverviewQuickAction"][];
+            delete_risks: components["schemas"]["RegistryOverviewDeleteRisk"][];
+        };
+        RegistryImage: {
+            project: string;
+            repository: string;
+            tag: string;
+            /** @description 完整镜像引用，例如 registry.local/project/repository:tag */
+            image: string;
+            registry?: string;
+            digest: string;
+            media_type: string;
+            /** Format: int64 */
+            size_bytes: number;
+            pull_command?: string;
+            /** Format: date-time */
+            pushed_at: string;
+            scan_status: components["schemas"]["RegistryScanResult"];
+            dev_profile?: components["schemas"]["CoreDevProfileInfo"];
+        };
+        RegistryImageListResponse: {
+            items: components["schemas"]["RegistryImage"][];
+            total: number;
+            next_cursor?: string | null;
+        };
+        RegistryCommand: {
+            label: string;
+            command: string;
+        };
+        RegistryPushInstructions: {
+            project: string;
+            registry: string;
+            repository_example: string;
+            commands: components["schemas"]["RegistryCommand"][];
+            dev_profile?: components["schemas"]["CoreDevProfileInfo"];
+        };
+        RegistryDeletedTag: {
+            project: string;
+            repository: string;
+            tag: string;
+            digest?: string;
+            /** Format: date-time */
+            deleted_at: string;
+        };
+        RegistryImageReference: {
+            /** @enum {string} */
+            kind: "container_instance" | "gpu_container_instance";
+            id: string;
+            name: string;
+            route: string;
+            state: string;
+            dev_profile?: components["schemas"]["CoreDevProfileInfo"];
+        };
+        RegistryImageReferenceListResponse: {
+            project: string;
+            repository: string;
+            tag: string;
+            image?: string;
+            items: components["schemas"]["RegistryImageReference"][];
+            total: number;
+            delete_blocked: boolean;
         };
         BeginOIDCLoginRequest: {
             /** @description 租户 slug，用于限定登录上下文 */
@@ -6130,6 +6025,57 @@ export interface operations {
             422: components["responses"]["PreconditionFailed"];
         };
     };
+    getRegistryOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 镜像仓库总览 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistryOverview"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listRegistryImages: {
+        parameters: {
+            query?: {
+                project?: string;
+                repository?: string;
+                tag?: string;
+                scan_status?: "not_scanned" | "pending" | "running" | "complete" | "failed";
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 镜像 Tag 列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistryImageListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
     listRegistryProjects: {
         parameters: {
             query?: {
@@ -6182,6 +6128,34 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
+    getRegistryProjectPushInstructions: {
+        parameters: {
+            query?: {
+                repository?: string;
+            };
+            header?: never;
+            path: {
+                project: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 镜像推送说明 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistryPushInstructions"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     listRegistryRepositories: {
         parameters: {
             query?: {
@@ -6208,6 +6182,63 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    deleteRegistryRepositoryTag: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project: string;
+                repository: string;
+                tag: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 镜像 Tag 已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistryDeletedTag"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listRegistryRepositoryTagReferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project: string;
+                repository: string;
+                tag: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 镜像 Tag 引用方列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistryImageReferenceListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listRegistryArtifacts: {
@@ -7551,289 +7582,6 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-        };
-    };
-    getEmailChannel: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 通道配置 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EmailChannel"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-        };
-    };
-    updateEmailChannel: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EmailChannelUpdateRequest"];
-            };
-        };
-        responses: {
-            /** @description 通道已更新 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EmailChannel"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            422: components["responses"]["PreconditionFailed"];
-        };
-    };
-    listEmailRecipients: {
-        parameters: {
-            query?: {
-                limit?: number;
-                cursor?: string;
-                /** @description 可选过滤启停状态 */
-                enabled?: boolean;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 收件人列表 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EmailRecipientListResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-        };
-    };
-    createEmailRecipient: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EmailRecipientCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description 收件人已创建 */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EmailRecipient"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
-        };
-    };
-    getEmailRecipient: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                recipient_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 收件人详情 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EmailRecipient"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    deleteEmailRecipient: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                recipient_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 收件人已删除 */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    updateEmailRecipient: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                recipient_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EmailRecipientUpdateRequest"];
-            };
-        };
-        responses: {
-            /** @description 收件人已更新 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EmailRecipient"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    listNotificationEvents: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 事件目录 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["NotificationEventListResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-        };
-    };
-    listEmailSubscriptions: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 订阅列表 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EmailSubscriptionListResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-        };
-    };
-    updateEmailSubscriptions: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EmailSubscriptionUpdateRequest"];
-            };
-        };
-        responses: {
-            /** @description 订阅已更新 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EmailSubscriptionListResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            422: components["responses"]["PreconditionFailed"];
-        };
-    };
-    sendEmailTest: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EmailTestSendRequest"];
-            };
-        };
-        responses: {
-            /** @description 测试发送结果 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EmailTestSendResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            422: components["responses"]["PreconditionFailed"];
         };
     };
 }
