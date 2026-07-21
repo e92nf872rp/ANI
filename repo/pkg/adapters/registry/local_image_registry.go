@@ -100,6 +100,96 @@ func (r *LocalImageRegistry) ListProjects(_ context.Context, request ports.Regis
 	}, nil
 }
 
+func (r *LocalImageRegistry) GetOverview(_ context.Context, request ports.RegistryOverviewRequest) (ports.RegistryOverview, error) {
+	tenantID := strings.TrimSpace(request.TenantID)
+	if tenantID == "" {
+		return ports.RegistryOverview{}, fmt.Errorf("%w: tenant_id is required", ports.ErrInvalid)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ensureProjectLocked(tenantID)
+	return ports.RegistryOverview{
+		Resources: []ports.RegistryOverviewResourceSummary{
+			{Kind: "project", Total: 1, Available: 1},
+			{Kind: "repository", Total: 1, Available: 1},
+			{Kind: "artifact", Total: 1, Available: 1, SizeBytes: 1048576},
+			{Kind: "tag", Total: 1, Available: 1, SizeBytes: 1048576},
+		},
+		Vulnerabilities: ports.RegistryOverviewVulnerabilitySummary{},
+		Capabilities: []ports.RegistryOverviewCapability{
+			{Key: "projects", Label: "Projects", Status: "available", Path: "/registry/projects"},
+			{Key: "repositories", Label: "Repositories", Status: "available", Path: "/registry/projects/" + tenantID + "/repositories"},
+			{Key: "tags", Label: "Image tags", Status: "available", Path: "/registry/images"},
+			{Key: "push_instructions", Label: "Push instructions", Status: "available", Path: "/registry/projects/" + tenantID + "/push-instructions"},
+			{Key: "pull_commands", Label: "Pull commands", Status: "available", Path: "/registry/images"},
+			{Key: "scan_summary", Label: "Scan summary", Status: "available", Path: "/registry/projects/" + tenantID + "/scan-report"},
+			{Key: "scan_policy", Label: "Scan policy", Status: "planned"},
+			{Key: "quota", Label: "Quota", Status: "planned"},
+			{Key: "garbage_collection", Label: "Garbage collection", Status: "planned"},
+		},
+		CreateOrder: []string{"project", "login", "tag", "push"},
+		Relationships: []ports.RegistryOverviewRelationship{
+			{Source: "project", Target: "repository", Relation: "contains"},
+			{Source: "repository", Target: "tag", Relation: "publishes"},
+			{Source: "tag", Target: "workload", Relation: "referenced_by"},
+		},
+		QuickActions: []ports.RegistryOverviewQuickAction{
+			{Key: "create_project", Label: "Create project", Path: "/registry/projects"},
+			{Key: "push_instructions", Label: "Push image", Path: "/registry/projects/" + tenantID + "/push-instructions"},
+		},
+		DeleteRisks: []ports.RegistryOverviewDeleteRisk{
+			{Kind: "tag", Risk: "Deleting a tag can break workloads that still reference that image."},
+			{Kind: "artifact", Risk: "Deleting the last tag may remove the underlying artifact from the provider."},
+			{Kind: "repository", Risk: "Deleting a repository removes all tags and artifacts under it."},
+			{Kind: "project", Risk: "Deleting a project removes repository permissions and pull-secret relationships."},
+		},
+	}, nil
+}
+
+func (r *LocalImageRegistry) ListImages(_ context.Context, request ports.RegistryImageListRequest) (ports.RegistryImageListResult, error) {
+	tenantID := strings.TrimSpace(request.TenantID)
+	project := strings.TrimSpace(request.Project)
+	if project == "" {
+		project = tenantID
+	}
+	if err := validateTenantProject(tenantID, project); err != nil {
+		return ports.RegistryImageListResult{}, err
+	}
+	repository := strings.TrimSpace(request.Repository)
+	if repository == "" {
+		repository = "runtime"
+	}
+	tag := strings.TrimSpace(request.Tag)
+	if tag == "" {
+		tag = "latest"
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ensureProjectLocked(tenantID)
+	image := registryImage(project, repository, tag)
+	scan := r.scanResultLocked(project + "/" + repository + ":" + tag)
+	if request.ScanStatus != "" && scan.Status != request.ScanStatus {
+		return ports.RegistryImageListResult{DevProfile: registryDevProfile()}, nil
+	}
+	return ports.RegistryImageListResult{
+		Items: []ports.RegistryImage{{
+			Project:     project,
+			Repository:  repository,
+			Tag:         tag,
+			Image:       image,
+			Registry:    "registry.local",
+			Digest:      registryDigestForTag(tag),
+			MediaType:   "application/vnd.oci.image.manifest.v1+json",
+			SizeBytes:   1048576,
+			PullCommand: "docker pull " + image,
+			PushedAt:    r.now().UTC(),
+			ScanStatus:  scan,
+			DevProfile:  registryDevProfile(),
+		}},
+		DevProfile: registryDevProfile(),
+	}, nil
+}
+
 func (r *LocalImageRegistry) ListRepositories(_ context.Context, request ports.RegistryRepositoryListRequest) (ports.RegistryRepositoryListResult, error) {
 	if err := validateTenantProject(request.TenantID, request.Project); err != nil {
 		return ports.RegistryRepositoryListResult{}, err
@@ -149,6 +239,68 @@ func (r *LocalImageRegistry) ListArtifacts(_ context.Context, request ports.Regi
 	return ports.RegistryArtifactListResult{
 		Items:      []ports.RegistryArtifact{artifact},
 		DevProfile: registryDevProfile(),
+	}, nil
+}
+
+func (r *LocalImageRegistry) GetPushInstructions(_ context.Context, request ports.RegistryPushInstructionsRequest) (ports.RegistryPushInstructions, error) {
+	if err := validateTenantProject(request.TenantID, request.Project); err != nil {
+		return ports.RegistryPushInstructions{}, err
+	}
+	repository := strings.TrimSpace(request.Repository)
+	if repository == "" {
+		repository = "runtime"
+	}
+	project := strings.TrimSpace(request.Project)
+	example := registryImage(project, repository, "latest")
+	return ports.RegistryPushInstructions{
+		Project:           project,
+		Registry:          "registry.local",
+		RepositoryExample: example,
+		Commands: []ports.RegistryCommand{
+			{Label: "Login", Command: "docker login registry.local"},
+			{Label: "Tag", Command: "docker tag <local-image> " + example},
+			{Label: "Push", Command: "docker push " + example},
+		},
+		DevProfile: registryDevProfile(),
+	}, nil
+}
+
+func (r *LocalImageRegistry) DeleteTag(_ context.Context, request ports.RegistryTagDeleteRequest) (ports.RegistryDeletedTag, error) {
+	if err := validateRegistryTagRequest(request.TenantID, request.Project, request.Repository, request.Tag); err != nil {
+		return ports.RegistryDeletedTag{}, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ensureProjectLocked(strings.TrimSpace(request.TenantID))
+	references := r.tagReferencesLocked(request.Project, request.Repository, request.Tag)
+	if len(references) > 0 {
+		return ports.RegistryDeletedTag{}, fmt.Errorf("%w: image tag is still referenced", ports.ErrConflict)
+	}
+	return ports.RegistryDeletedTag{
+		Project:    strings.TrimSpace(request.Project),
+		Repository: strings.TrimSpace(request.Repository),
+		Tag:        strings.TrimSpace(request.Tag),
+		Digest:     registryDigestForTag(request.Tag),
+		DeletedAt:  r.now().UTC(),
+	}, nil
+}
+
+func (r *LocalImageRegistry) ListTagReferences(_ context.Context, request ports.RegistryTagReferenceListRequest) (ports.RegistryTagReferenceListResult, error) {
+	if err := validateRegistryTagRequest(request.TenantID, request.Project, request.Repository, request.Tag); err != nil {
+		return ports.RegistryTagReferenceListResult{}, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ensureProjectLocked(strings.TrimSpace(request.TenantID))
+	items := r.tagReferencesLocked(request.Project, request.Repository, request.Tag)
+	return ports.RegistryTagReferenceListResult{
+		Project:       strings.TrimSpace(request.Project),
+		Repository:    strings.TrimSpace(request.Repository),
+		Tag:           strings.TrimSpace(request.Tag),
+		Image:         registryImage(request.Project, request.Repository, request.Tag),
+		Items:         items,
+		DeleteBlocked: len(items) > 0,
+		DevProfile:    registryDevProfile(),
 	}, nil
 }
 
@@ -347,6 +499,19 @@ func validateTenantProject(tenantID, project string) error {
 	return nil
 }
 
+func validateRegistryTagRequest(tenantID, project, repository, tag string) error {
+	if err := validateTenantProject(tenantID, project); err != nil {
+		return err
+	}
+	if strings.TrimSpace(repository) == "" {
+		return fmt.Errorf("%w: repository is required", ports.ErrInvalid)
+	}
+	if strings.TrimSpace(tag) == "" {
+		return fmt.Errorf("%w: tag is required", ports.ErrInvalid)
+	}
+	return nil
+}
+
 func registryIdempotencyKey(tenantID, key string) (string, error) {
 	tenantID = strings.TrimSpace(tenantID)
 	key = strings.TrimSpace(key)
@@ -361,6 +526,32 @@ func registryIdempotencyKey(tenantID, key string) (string, error) {
 
 func permissionKey(project, repository, subject string) string {
 	return strings.TrimSpace(project) + "/" + strings.TrimSpace(repository) + ":" + strings.TrimSpace(subject)
+}
+
+func registryImage(project, repository, tag string) string {
+	return "registry.local/" + strings.TrimSpace(project) + "/" + strings.TrimSpace(repository) + ":" + strings.TrimSpace(tag)
+}
+
+func registryDigestForTag(tag string) string {
+	tag = strings.TrimSpace(tag)
+	if tag == "latest" {
+		return "sha256:local-runtime"
+	}
+	return "sha256:local-" + strings.ReplaceAll(tag, "/", "-")
+}
+
+func (r *LocalImageRegistry) tagReferencesLocked(project, repository, tag string) []ports.RegistryImageReference {
+	if strings.TrimSpace(repository) != "runtime" || strings.TrimSpace(tag) != "latest" {
+		return nil
+	}
+	return []ports.RegistryImageReference{{
+		Kind:       "container_instance",
+		ID:         "inst-" + strings.TrimSpace(project) + "-runtime",
+		Name:       "runtime",
+		Route:      "/instances/inst-" + strings.TrimSpace(project) + "-runtime",
+		State:      "running",
+		DevProfile: registryDevProfile(),
+	}}
 }
 
 func cloneRegistryPermission(permission ports.RegistryPermission) ports.RegistryPermission {

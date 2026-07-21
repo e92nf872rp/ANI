@@ -205,14 +205,166 @@ type RegistryProjectScanReport struct {
 	ScannedAt        time.Time
 }
 
+type RegistryOverviewRequest struct {
+	TenantID string
+}
+
+type RegistryOverviewResourceSummary struct {
+	Kind      string
+	Total     int
+	Available int
+	Pending   int
+	Failed    int
+	SizeBytes int64
+}
+
+type RegistryOverviewVulnerabilitySummary struct {
+	Critical int
+	High     int
+	Medium   int
+	Low      int
+}
+
+type RegistryOverviewCapability struct {
+	Key         string
+	Label       string
+	Status      string
+	Path        string
+	Description string
+}
+
+type RegistryOverviewRelationship struct {
+	Source   string
+	Target   string
+	Relation string
+}
+
+type RegistryOverviewQuickAction struct {
+	Key         string
+	Label       string
+	Path        string
+	Description string
+}
+
+type RegistryOverviewDeleteRisk struct {
+	Kind string
+	Risk string
+}
+
+type RegistryOverview struct {
+	Resources       []RegistryOverviewResourceSummary
+	Vulnerabilities RegistryOverviewVulnerabilitySummary
+	Capabilities    []RegistryOverviewCapability
+	CreateOrder     []string
+	Relationships   []RegistryOverviewRelationship
+	QuickActions    []RegistryOverviewQuickAction
+	DeleteRisks     []RegistryOverviewDeleteRisk
+}
+
+type RegistryImageListRequest struct {
+	TenantID   string
+	Project    string
+	Repository string
+	Tag        string
+	ScanStatus RegistryScanState
+	Limit      int
+	Cursor     string
+}
+
+type RegistryImage struct {
+	Project     string
+	Repository  string
+	Tag         string
+	Image       string
+	Registry    string
+	Digest      string
+	MediaType   string
+	SizeBytes   int64
+	PullCommand string
+	PushedAt    time.Time
+	ScanStatus  RegistryScanResult
+	DevProfile  DevProfileInfo
+}
+
+type RegistryImageListResult struct {
+	Items      []RegistryImage
+	NextCursor string
+	DevProfile DevProfileInfo
+}
+
+type RegistryPushInstructionsRequest struct {
+	TenantID   string
+	Project    string
+	Repository string
+}
+
+type RegistryCommand struct {
+	Label   string
+	Command string
+}
+
+type RegistryPushInstructions struct {
+	Project           string
+	Registry          string
+	RepositoryExample string
+	Commands          []RegistryCommand
+	DevProfile        DevProfileInfo
+}
+
+type RegistryTagDeleteRequest struct {
+	TenantID   string
+	Project    string
+	Repository string
+	Tag        string
+}
+
+type RegistryDeletedTag struct {
+	Project    string
+	Repository string
+	Tag        string
+	Digest     string
+	DeletedAt  time.Time
+}
+
+type RegistryTagReferenceListRequest struct {
+	TenantID   string
+	Project    string
+	Repository string
+	Tag        string
+}
+
+type RegistryImageReference struct {
+	Kind       string
+	ID         string
+	Name       string
+	Route      string
+	State      string
+	DevProfile DevProfileInfo
+}
+
+type RegistryTagReferenceListResult struct {
+	Project       string
+	Repository    string
+	Tag           string
+	Image         string
+	Items         []RegistryImageReference
+	DeleteBlocked bool
+	DevProfile    DevProfileInfo
+}
+
 type ImageRegistry interface {
 	EnsureProject(ctx context.Context, tenantID string) error
 	ListTags(ctx context.Context, repository string) ([]ImageTag, error)
 	GetScanStatus(ctx context.Context, ref ImageRef) (ImageScanStatus, error)
 	CreateProject(ctx context.Context, request RegistryProjectRequest) (RegistryProject, error)
 	ListProjects(ctx context.Context, request RegistryProjectListRequest) (RegistryProjectListResult, error)
+	GetOverview(ctx context.Context, request RegistryOverviewRequest) (RegistryOverview, error)
+	ListImages(ctx context.Context, request RegistryImageListRequest) (RegistryImageListResult, error)
 	ListRepositories(ctx context.Context, request RegistryRepositoryListRequest) (RegistryRepositoryListResult, error)
 	ListArtifacts(ctx context.Context, request RegistryArtifactListRequest) (RegistryArtifactListResult, error)
+	GetPushInstructions(ctx context.Context, request RegistryPushInstructionsRequest) (RegistryPushInstructions, error)
+	DeleteTag(ctx context.Context, request RegistryTagDeleteRequest) (RegistryDeletedTag, error)
+	ListTagReferences(ctx context.Context, request RegistryTagReferenceListRequest) (RegistryTagReferenceListResult, error)
 	SetRepositoryPermission(ctx context.Context, request RegistryPermissionRequest) (RegistryPermission, error)
 	GetScanResult(ctx context.Context, request RegistryScanResultRequest) (RegistryScanResult, error)
 	CreatePullSecret(ctx context.Context, request RegistryPullSecretRequest) (RegistryPullSecret, error)

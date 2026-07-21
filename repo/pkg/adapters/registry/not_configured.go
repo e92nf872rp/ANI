@@ -30,12 +30,32 @@ func (NotConfigured) ListProjects(context.Context, ports.RegistryProjectListRequ
 	return ports.RegistryProjectListResult{}, ports.ErrNotConfigured
 }
 
+func (NotConfigured) GetOverview(context.Context, ports.RegistryOverviewRequest) (ports.RegistryOverview, error) {
+	return ports.RegistryOverview{}, ports.ErrNotConfigured
+}
+
+func (NotConfigured) ListImages(context.Context, ports.RegistryImageListRequest) (ports.RegistryImageListResult, error) {
+	return ports.RegistryImageListResult{}, ports.ErrNotConfigured
+}
+
 func (NotConfigured) ListRepositories(context.Context, ports.RegistryRepositoryListRequest) (ports.RegistryRepositoryListResult, error) {
 	return ports.RegistryRepositoryListResult{}, ports.ErrNotConfigured
 }
 
 func (NotConfigured) ListArtifacts(context.Context, ports.RegistryArtifactListRequest) (ports.RegistryArtifactListResult, error) {
 	return ports.RegistryArtifactListResult{}, ports.ErrNotConfigured
+}
+
+func (NotConfigured) GetPushInstructions(context.Context, ports.RegistryPushInstructionsRequest) (ports.RegistryPushInstructions, error) {
+	return ports.RegistryPushInstructions{}, ports.ErrNotConfigured
+}
+
+func (NotConfigured) DeleteTag(context.Context, ports.RegistryTagDeleteRequest) (ports.RegistryDeletedTag, error) {
+	return ports.RegistryDeletedTag{}, ports.ErrNotConfigured
+}
+
+func (NotConfigured) ListTagReferences(context.Context, ports.RegistryTagReferenceListRequest) (ports.RegistryTagReferenceListResult, error) {
+	return ports.RegistryTagReferenceListResult{}, ports.ErrNotConfigured
 }
 
 func (NotConfigured) SetRepositoryPermission(context.Context, ports.RegistryPermissionRequest) (ports.RegistryPermission, error) {

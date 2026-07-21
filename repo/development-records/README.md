@@ -25,6 +25,12 @@
 |---|---|---|
 | CORE-INSTANCE-CREATE-CONFIG-A | `CreateInstanceRequest` 按 kind 嵌套 `vm_config`/`container_config`/`gpu_container_config`（`sandbox_config` 既有）；扁平字段保留兼容别名；Gateway 冲突/跨类型 400；SDK/console 文档推荐 `*_config`；不拆 URL、不引入 oneOf | core-instance-create-config-a.md |
 
+### Core API Implementation（2026-07）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| CORE-REGISTRY-CONSOLE-LOCAL-A | 镜像仓库 Console v1 契约后端实现：补齐 overview、images、push instructions、tag references 和 tag delete 的 port/local adapter/Gateway handler 与测试；仅 local profile，不代表 Harbor/Trivy real provider | core-registry-console-local-a.md |
+
 ### SDK Regression Fixes（2026-06）
 
 | 批次 | 内容摘要 | 文件 |

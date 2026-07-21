@@ -2,7 +2,7 @@
 
 > 版本 V8.3 | 广州常青云科技有限公司 | 内部产品规划文件
 > 最后更新：2026-07-15
-> 当前摘要：Sprint 12 Core handler/local profile 已闭环；Sprint 13 S01-S07 real provider live gate 均为 `production_shape.status=passed`。并行契约切片 `CORE-INSTANCE-CREATE-CONFIG-A` 已完成：`CreateInstanceRequest` 按 kind 嵌套 `*_config`（扁平字段兼容）。这只表示组件级 production-shaped acceptance passed，不等于 full platform production ready。
+> 当前摘要：Sprint 12 Core handler/local profile 已闭环；Sprint 13 S01-S07 real provider live gate 均为 `production_shape.status=passed`。并行契约切片 `CORE-INSTANCE-CREATE-CONFIG-A` 已完成：`CreateInstanceRequest` 按 kind 嵌套 `*_config`（扁平字段兼容）。并行实现切片 `CORE-REGISTRY-CONSOLE-LOCAL-A` 已基于合入后的 v1 契约补齐镜像仓库 Console 后端 local profile。这只表示组件级 production-shaped acceptance passed 或 local profile verified，不等于 full platform production ready。
 > Services 当前治理：Core Sprint 13/14 既有事实继续有效；Services 受控并行 PR 阶段由 CODEOWNERS 共同审查、API split、Services boundary gate、OpenAPI/Gateway route contract、Services semantic contract、生成物漂移和 make validate-architecture 约束，统一入口为 `make validate-services`，当前执行入口仍是 repo/CURRENT-SPRINT.md。
 > Sprint 14 分支执行：`feature/sprint14-core-resilience-semantics` 已完成 R-P0-0 gateway shared store 前置批次、R-P0-1 gateway rate limit、R-P0-2 gateway idempotency replay、R-P0-3 adapter per-call timeout、R-P0-4 data-plane readyz health、R-P1-5 retry/circuit-breaker foundation、R-P1-6 resilience degradation 与 R-P2-7 multi-endpoint failover config；这些单批次仍按 local/logic verified 归档。SPRINT14-CORE-RESILIENCE-LIVE-GATE / validate-sprint14-resilience-live-gate / Sprint14 resilience live gate 已在 ani-sprint14-resilience 隔离 namespace 真实通过 P0 strong backend kill、P1 weak dependency degraded、P2 controller primary kill / follower failover，并归档脱敏 evidence；production-ready 范围仅限隔离 Sprint14 Core resilience fixture，不外推到现有 Sprint13 单副本后端或 full platform。
 
