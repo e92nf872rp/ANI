@@ -34,7 +34,7 @@
 
 - 6 个 path：`/notifications/email/channel`（GET+PUT）、`/notifications/email/recipients`（GET+POST）、`/notifications/email/recipients/{recipient_id}`（GET+PATCH+DELETE）、`/notifications/events`（GET）、`/notifications/email/subscriptions`（GET+PUT）、`/notifications/email/test-send`（POST）
 - 13 个 schema：`EmailChannel`、`EmailChannelUpdateRequest`、`EmailRecipient`、`EmailRecipientCreateRequest`、`EmailRecipientUpdateRequest`、`EmailRecipientListResponse`、`NotificationEvent`、`NotificationEventListResponse`、`EmailSubscription`、`EmailSubscriptionListResponse`、`EmailSubscriptionUpdateRequest`、`EmailTestSendRequest`、`EmailTestSendResponse`
-- RBAC scope：`scope:platform.notifications:read` / `:write`
+- RBAC scope：`scope:notifications:read` / `:write`
 - 所有写操作 required `idempotency_key`；`password` write-only
 
 ## 完工标准达成

@@ -804,9 +804,9 @@ components:
     EmailChannel:
       type: object
       description: |
-        平台级 SMTP 发信通道（单例）。敏感字段（password）不回显明文，
-        仅返回布尔 has_password 表示是否已配置。平台管理员通过 PUT 写入或更新。
-      required: [id, host, port, encryption, username, has_password, state, created_at, updated_at]
+        平台级 SMTP 发信通道（单例）。敏感字段（password、auth_code）不回显明文，
+        仅返回布尔 has_password / has_auth_code 表示是否已配置。平台管理员通过 PUT 写入或更新。
+      required: [id, host, port, encryption, username, has_password, has_auth_code, state, created_at, updated_at]
       properties:
         id:              { type: string, description: "固定为 'platform-default'；单例资源" }
         host:            { type: string, minLength: 1, maxLength: 253 }
@@ -814,6 +814,7 @@ components:
         encryption:      { type: string, enum: [none, starttls, ssl], description: "STARTTLS / SSL / 明文" }
         username:        { type: string, minLength: 1, maxLength: 128 }
         has_password:    { type: boolean, description: "服务端是否已持有密码；从不回显明文" }
+        has_auth_code:   { type: boolean, description: "服务端是否已持有 SMTP 授权码（QQ/163/Gmail 等）；从不回显明文" }
         from_address:    { type: string, format: email, description: "发件人地址（MAIL FROM）" }
         from_name:       { type: string, maxLength: 128, nullable: true, description: "发件人显示名（可选）" }
         reply_to:        { type: string, format: email, nullable: true }
@@ -827,9 +828,10 @@ components:
     EmailChannelUpdateRequest:
       type: object
       description: |
-        创建或更新平台 SMTP 通道。password 为 write-only：
-        - 创建时必填；
+        创建或更新平台 SMTP 通道。password 与 auth_code 均为 write-only：
+        - 创建时按需填写（至少填写其一以通过测试发送前置校验）；
         - 更新时若留空或省略，服务端保留原值；若提供非空值，则覆盖。
+        - 两者互不强制互斥，由用户根据邮箱服务商要求选择填写。
       required: [idempotency_key, host, port, encryption, username, from_address]
       properties:
         idempotency_key: { type: string, minLength: 1, maxLength: 128 }
@@ -839,6 +841,8 @@ components:
         username:        { type: string, minLength: 1, maxLength: 128 }
         password:        { type: string, format: password, minLength: 1, maxLength: 256,
                            description: "write-only；响应中不回显；更新时留空表示保留原值" }
+        auth_code:       { type: string, format: password, minLength: 1, maxLength: 256,
+                           description: "SMTP 授权码（QQ/163/Gmail 等），write-only；响应中不回显；更新时留空表示保留原值" }
         from_address:    { type: string, format: email }
         from_name:       { type: string, maxLength: 128 }
         reply_to:        { type: string, format: email }
@@ -966,7 +970,7 @@ components:
       type: object
       description: |
         触发一次测试发送。前置条件：
-        - 通道已配置（has_password=true，state=active）
+        - 通道已配置（has_password=true 或 has_auth_code=true，state=active）
         - 至少有一个 enabled=true 的收件人
         若不满足，返回 422 PRECONDITION_FAILED。
       required: [idempotency_key]
@@ -5117,7 +5121,7 @@ paths:
         响应中只提供 has_password 布尔位。未配置时返回 200 + state=disabled + has_password=false，
         不返回 404，便于前端区分「未配置」与「无权限」。
       tags: [Notifications]
-      x-ani-rbac-scope: "scope:platform.notifications:read"
+      x-ani-rbac-scope: "scope:notifications:read"
       responses:
         "200":
           description: 通道配置
@@ -5133,7 +5137,7 @@ paths:
         单例资源 upsert：首次调用创建，后续调用覆盖。
         password 为 write-only；留空或省略表示保留原值。
       tags: [Notifications]
-      x-ani-rbac-scope: "scope:platform.notifications:write"
+      x-ani-rbac-scope: "scope:notifications:write"
       requestBody:
         required: true
         content:
@@ -5156,7 +5160,7 @@ paths:
       summary: 列出平台邮件收件人
       description: 返回全局一份收件人列表；不按事件绑定区分。
       tags: [Notifications]
-      x-ani-rbac-scope: "scope:platform.notifications:read"
+      x-ani-rbac-scope: "scope:notifications:read"
       parameters:
         - { name: limit,  in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
         - { name: cursor, in: query, schema: { type: string } }
@@ -5174,7 +5178,7 @@ paths:
       summary: 新增平台邮件收件人
       description: 平台级全局收件人；所有已开启订阅的事件共用此列表。
       tags: [Notifications]
-      x-ani-rbac-scope: "scope:platform.notifications:write"
+      x-ani-rbac-scope: "scope:notifications:write"
       requestBody:
         required: true
         content:
@@ -5196,7 +5200,7 @@ paths:
       operationId: getEmailRecipient
       summary: 获取单个平台邮件收件人
       tags: [Notifications]
-      x-ani-rbac-scope: "scope:platform.notifications:read"
+      x-ani-rbac-scope: "scope:notifications:read"
       parameters:
         - { name: recipient_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -5213,7 +5217,7 @@ paths:
       summary: 更新平台邮件收件人
       description: 支持 email、display_name、enabled 字段的部分更新。
       tags: [Notifications]
-      x-ani-rbac-scope: "scope:platform.notifications:write"
+      x-ani-rbac-scope: "scope:notifications:write"
       parameters:
         - { name: recipient_id, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -5236,7 +5240,7 @@ paths:
       summary: 删除平台邮件收件人
       description: 软删除；关联订阅不受影响，但该收件人不再收到任何邮件。
       tags: [Notifications]
-      x-ani-rbac-scope: "scope:platform.notifications:write"
+      x-ani-rbac-scope: "scope:notifications:write"
       parameters:
         - { name: recipient_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -5254,7 +5258,7 @@ paths:
         返回首期冻结的事件枚举（告警 P0/P1、Incident 创建/升级、平台关键任务失败）。
         客户端不应自造枚举，必须以本端点返回值为准。
       tags: [Notifications]
-      x-ani-rbac-scope: "scope:platform.notifications:read"
+      x-ani-rbac-scope: "scope:notifications:read"
       responses:
         "200":
           description: 事件目录
@@ -5270,7 +5274,7 @@ paths:
       summary: 列出邮件订阅开关
       description: 返回每个 event_type 的 enabled 状态；未显式设置的默认为 false。
       tags: [Notifications]
-      x-ani-rbac-scope: "scope:platform.notifications:read"
+      x-ani-rbac-scope: "scope:notifications:read"
       responses:
         "200":
           description: 订阅列表
@@ -5286,7 +5290,7 @@ paths:
         按 event_type 做 upsert；整个 items 数组原子替换当前设置（前端按需先 GET 再合并后 PUT）。
         event_type 必须来自 /notifications/events 返回的目录。
       tags: [Notifications]
-      x-ani-rbac-scope: "scope:platform.notifications:write"
+      x-ani-rbac-scope: "scope:notifications:write"
       requestBody:
         required: true
         content:
@@ -5312,7 +5316,7 @@ paths:
         不满足时返回 422 PRECONDITION_FAILED，code=EMAIL_CHANNEL_NOT_READY 或 NO_ENABLED_RECIPIENTS。
         本端点不创建投递历史；仅返回入队结果（accepted / partial / failed）。
       tags: [Notifications]
-      x-ani-rbac-scope: "scope:platform.notifications:write"
+      x-ani-rbac-scope: "scope:notifications:write"
       requestBody:
         required: true
         content:

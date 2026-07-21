@@ -554,67 +554,67 @@
       "operationId": "getEmailChannel",
       "method": "GET",
       "path": "/notifications/email/channel",
-      "scope": "scope:platform.notifications:read"
+      "scope": "scope:notifications:read"
     },
     {
       "operationId": "updateEmailChannel",
       "method": "PUT",
       "path": "/notifications/email/channel",
-      "scope": "scope:platform.notifications:write"
+      "scope": "scope:notifications:write"
     },
     {
       "operationId": "listEmailRecipients",
       "method": "GET",
       "path": "/notifications/email/recipients",
-      "scope": "scope:platform.notifications:read"
+      "scope": "scope:notifications:read"
     },
     {
       "operationId": "createEmailRecipient",
       "method": "POST",
       "path": "/notifications/email/recipients",
-      "scope": "scope:platform.notifications:write"
+      "scope": "scope:notifications:write"
     },
     {
       "operationId": "deleteEmailRecipient",
       "method": "DELETE",
       "path": "/notifications/email/recipients/{recipient_id}",
-      "scope": "scope:platform.notifications:write"
+      "scope": "scope:notifications:write"
     },
     {
       "operationId": "getEmailRecipient",
       "method": "GET",
       "path": "/notifications/email/recipients/{recipient_id}",
-      "scope": "scope:platform.notifications:read"
+      "scope": "scope:notifications:read"
     },
     {
       "operationId": "updateEmailRecipient",
       "method": "PATCH",
       "path": "/notifications/email/recipients/{recipient_id}",
-      "scope": "scope:platform.notifications:write"
+      "scope": "scope:notifications:write"
     },
     {
       "operationId": "listEmailSubscriptions",
       "method": "GET",
       "path": "/notifications/email/subscriptions",
-      "scope": "scope:platform.notifications:read"
+      "scope": "scope:notifications:read"
     },
     {
       "operationId": "updateEmailSubscriptions",
       "method": "PUT",
       "path": "/notifications/email/subscriptions",
-      "scope": "scope:platform.notifications:write"
+      "scope": "scope:notifications:write"
     },
     {
       "operationId": "sendEmailTest",
       "method": "POST",
       "path": "/notifications/email/test-send",
-      "scope": "scope:platform.notifications:write"
+      "scope": "scope:notifications:write"
     },
     {
       "operationId": "listNotificationEvents",
       "method": "GET",
       "path": "/notifications/events",
-      "scope": "scope:platform.notifications:read"
+      "scope": "scope:notifications:read"
     },
     {
       "operationId": "listStorageObjects",
