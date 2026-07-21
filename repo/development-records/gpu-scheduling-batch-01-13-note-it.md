@@ -225,6 +225,106 @@
 - **待确认：** HAMi 是否支持 `--resource-name=nvidia.com/vgpu` 配置？若支持，Issue #5 Smoke B 应重新验证 `nvidia.com/vgpu: 1` 请求路径。若不支持，Issue #3 `selectResourceName` 的 `VirtualizationVGPU → nvidia.com/vgpu` 逻辑需修正为 `nvidia.com/gpu`。
 - **影响范围：** `repo/pkg/adapters/runtime/kubernetes_gpu_inventory.go` `selectResourceName` 函数；PRD §10.2 表格；SPEC §5.1。
 
+---
+
+## 5. PR 1/2/3 三段式拆分实现 (2026-07-21)
+
+> **批次：** GPU-SCHEDULING-PR1-3-SPLIT
+> **PRD：** 同上
+> **覆盖 PR：** PR #21 (1/3 契约), PR #31 (2/3 接口), PR #46 (3/3 实现)
+> **状态：** PR #21 + #31 已合入 main；PR #46 OPEN 等待 review
+
+### 5.1 Design Decisions
+
+#### 5.1.1 三段式 PR 拆分策略
+
+- **歧义点：** GPU 调度功能涉及 104 文件、24902 行改动，单 PR 过大，review 困难。
+- **选择：** 按"契约 → 接口 → 实现"三段拆分：PR 1 只改 v1.yaml + 生成物，PR 2 只改 pkg/ports/，PR 3 改 adapters + gateway + 前端。
+- **理由：** 契约先行（CLAUDE.md §4.1），接口稳定后再做实现；每个 PR 可独立 review、squash、revert（ANI-15 §2.3）。
+
+#### 5.1.2 PR 2 ports 接口 cherry-pick 到 PR 3
+
+- **歧义点：** 组长建议 PR 3 包含 ports 改动，不再单独 review PR 2。
+- **选择：** 将 PR 2 的 ports commit cherry-pick 到 PR 3 分支，PR 3 包含完整 ports + 实现。
+- **理由：** 减少审查轮次；PR 2 已合入 main，cherry-pick 只是确保 PR 3 分支自洽。
+
+#### 5.1.3 mixed-provider 检查修复（primaryProvider 跳过辅助 Secret）
+
+- **歧义点：** PR 3 新增 workload identity Secret（provider=kubernetes）与 VM manifest（provider=kubevirt）混合，触发 mixed-provider 检查失败。
+- **选择：** `primaryProvider()` 跳过辅助 Secret manifest，只检查主 manifest 的 provider 一致性。
+- **理由：** 辅助 Secret 是支撑性资源，不应影响主 workload 的 provider 校验语义。
+
+### 5.2 Deviations (vs PRD/UX/SPEC)
+
+#### 5.2.1 PATCH 端点新增 Idempotency-Key 强制校验
+
+- **SPEC 说：** CLAUDE.md §4.5 要求"所有 POST 创建和有副作用的 PUT/PATCH 必须支持 idempotency_key"。
+- **实际实现：** review-it 发现 PATCH `updateGPUSchedulingQueue` 未校验 `Idempotency-Key`，已修复——空 header 返回 400。
+- **原因：** 契约合规，修复 review 发现的规则违反。
+
+#### 5.2.2 crdToQueue UID 切片防御性长度检查
+
+- **SPEC 说：** 无明确 spec。
+- **实际实现：** review-it 发现 `strings.ReplaceAll(...UID, "-", "")[:16]` 在 UID 为空时 panic，已修复为先判断长度。
+- **原因：** 防御性边界处理，K8s 边缘情况或测试 mock 可能返回空 UID。
+
+#### 5.2.3 labelSelector URL 编码
+
+- **SPEC 说：** 无明确 spec。
+- **实际实现：** review-it 发现 `labelSelector` 未 URL-escape，有注入风险，已修复为 `url.QueryEscape`。
+- **原因：** 安全默认拒绝（ANI-15 §2.7），与 `gpu_inventory_resources.go` 的 `fetchPodOccupancyFromK8s` 保持一致。
+
+### 5.3 Tradeoffs
+
+#### 5.3.1 initOnce 错误处理 — 延迟到 follow-up
+
+- **备选方案 A：** 在 PR 3 内修复 `initOnce.Do` 吞 `EnsurePlatformQueueDefaults` 错误的问题。
+- **备选方案 B：** 延迟到 follow-up PR，PR 3 只修复直接阻断的问题。
+- **选择：** 方案 B。
+- **理由：** 修复需要重构 `New()` 构造函数或引入错误返回机制，属于更深层的架构改动，不适合在 PR 3 内混入；当前 `initOnce` 行为在 K8s 可用时不触发问题。
+
+#### 5.3.2 LocalGPUSchedulingQueueStore 错误语义对齐
+
+- **备选方案 A：** 保留 `ErrQueueStoreUnavailable`（返回 503）。
+- **备选方案 B：** 改为 `ErrInvalid`（返回 400），与 VolcanoQueueStore 对齐。
+- **选择：** 方案 B。
+- **理由：** 校验错误（name 为空/非法）是客户端错误，应返回 400 而非 503；两个 store 实现语义应一致。
+
+### 5.4 Open Questions
+
+#### 5.4.1 VolcanoQueueStore initOnce 错误处理（follow-up）
+
+- **假设：** `initOnce.Do` 在首次 `List` 时触发 `EnsurePlatformQueueDefaults`，若失败则永不重试。
+- **待确认：** 是否应在 `New()` 构造函数中显式初始化并返回错误，还是改为 `sync.Once` + error field 模式？
+- **影响范围：** `volcano_queue_store.go` L190-216。
+
+#### 5.4.2 EnsurePlatformQueueDefaults 错误屏蔽（follow-up）
+
+- **假设：** `getCRDByName` 非 404 错误被 `continue` 吞掉，K8s API 故障时函数仍返回 nil。
+- **待确认：** 是否应在所有默认队列都无法确认时返回错误？
+- **影响范围：** `volcano_queue_store.go` L124-159。
+
+#### 5.4.3 lookupQueueByNameOrID 错误区分（follow-up）
+
+- **假设：** 所有 `getCRDByName` 错误统一替换为 `ErrQueueNotFound`，掩盖连接故障。
+- **待确认：** 是否应区分"确实 not found"和"查询失败"？
+- **影响范围：** `volcano_queue_store.go` L381-399。
+
+### 5.5 Verification Commands Run
+
+| 验证项 | 命令 | 结果 |
+|---|---|---|
+| Go build | `go build ./pkg/adapters/runtime/... ./services/ani-gateway/...` | BUILD: 0 |
+| Go test (adapters) | `go test ./pkg/adapters/runtime/...` | PASS |
+| Go test (router) | `go test ./services/ani-gateway/internal/router/...` | PASS (except Windows /bin/sh) |
+| gofmt | `gofmt -l <files>` | clean |
+| OpenAPI spec | `python scripts/validate_openapi_spec.py` | valid: 2 |
+| Architecture | `python scripts/validate_component_imports.py` | passed |
+| SDK drift | `gen_sdk_alpha.py` + `git diff --exit-code` | DRIFT_EXIT: 0 |
+| npm audit | `npm audit --audit-level=high` | 0 vulnerabilities |
+| ESLint | `eslint src --ext ts,tsx` | 0 errors, 1 warning |
+| review-it | branch diff vs origin/main | 4 fixed, 5 deferred |
+
 ### 4.2 control-plane 节点 GPU 工作负载（Issue #4）
 
 - **假设：** lab 环境 control-plane 节点（`kubercloud`）也承载 GPU 工作负载。

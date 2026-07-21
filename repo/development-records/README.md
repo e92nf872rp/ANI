@@ -25,6 +25,7 @@
 | GPU-SCHEDULING-ISSUE-08-A | Console GPU 算力管理页（/compute/gpu）；KPI 5 卡 + ECharts 型号分布 + Tabs(节点/设备/占用) + DCGM 降级 + loading/empty/error/forbidden 三态；__root.tsx 新增「算力与云资源」菜单组；tsc + vite build 通过 | gpu-scheduling-issue-08-console-gpu-management-page.md |
 | GPU-SCHEDULING-ISSUE-09-A | Console GPU 容器实例列表 + 创建 Dialog + 详情页；消费 GET/POST /instances + GET /gpu-scheduling/queues；422 错误处理（InsufficientGPU/QueueNotFound）+ provisioning 提示 + 404 Empty；tsc + vite build 通过 | gpu-scheduling-issue-09-console-gpu-container-instance.md |
 | GPU-SCHEDULING-ISSUE-10-A | Console 队列设置页（/settings/gpu-queues）；平台默认只读 + 我的队列 CRUD；POST+Idempotency-Key + Popconfirm 删除 + 403 平台默认保护 + RBAC placeholder + empty CTA；tsc + vite build 通过 | gpu-scheduling-issue-10-console-queue-settings-page.md |
+| GPU-SCHEDULING-PR1-3-SPLIT | GPU 调度功能三段式 PR 拆分：PR #21（契约 v1.yaml+生成物，已合入 main）、PR #31（pkg/ports 接口，已合入 main）、PR #46（adapters+gateway+前端实现，OPEN）；review-it 修复 4 项（UID panic/PATCH 幂等/URL 编码/错误语义）；5 项 follow-up 延迟 | gpu-scheduling-batch-01-13-note-it.md §5 |
 
 ### SDK Regression Fixes（2026-06）
 

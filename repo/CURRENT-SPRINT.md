@@ -59,6 +59,14 @@
 | #12 | BOSS 前端骨架 | ✅ 已完成 | `development-records/gpu-scheduling-issue-12-boss-frontend-skeleton.md`；10 项 AC 全部验证通过；tsc + vite build 通过 |
 | #13 | BOSS GPU 资源池页 | ✅ 已完成 | `development-records/gpu-scheduling-issue-13-boss-gpu-pool-page.md`；16 项 AC 全部验证通过；tsc + vite build 通过 |
 
+### GPU 调度三段式 PR 拆分（2026-07-21）
+
+| PR | 内容 | 状态 | 说明 |
+|---|---|---|---|
+| PR #21 (1/3) | v1.yaml 契约 + SDK/API docs/TS schema 生成物 | ✅ 已合入 main | `feat/core): add GPU scheduling queue CRUD contract to v1.yaml` |
+| PR #31 (2/3) | pkg/ports 接口（GPUSchedulingQueueStore + GPUInventory 扩展） | ✅ 已合入 main | `feat(core): add GPU scheduling queue interface to pkg/ports` |
+| PR #46 (3/3) | adapters + gateway + 前端 + manifests 实现 | 🟡 OPEN 等待 review | review-it 修复 4 项（UID panic/PATCH 幂等/URL 编码/错误语义）；5 项 follow-up 延迟；笔记 `gpu-scheduling-batch-01-13-note-it.md §5` |
+
 Issue 清单：`repo/services/tasks/issues/issue-01-openapi-queue-crud.md` ~ `issue-13-boss-gpu-pool-page.md`
 
 ## Sprint 13 执行矩阵
