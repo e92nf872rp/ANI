@@ -134,13 +134,13 @@ type EmailSubscriptionUpdateItem struct {
 
 type EmailSubscriptionUpdateRequest struct {
 	IdempotencyKey string
-	Items         []EmailSubscriptionUpdateItem
+	Items          []EmailSubscriptionUpdateItem
 }
 
 type EmailTestSendRequest struct {
 	IdempotencyKey string
-	RecipientIDs  []string
-	Subject       string
+	RecipientIDs   []string
+	Subject        string
 }
 
 type EmailTestSendRejectedRecipient struct {
