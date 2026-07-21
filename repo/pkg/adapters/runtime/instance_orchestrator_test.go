@@ -203,6 +203,61 @@ func TestLocalInstanceOrchestratorBuildsGPUStatus(t *testing.T) {
 	}
 }
 
+// TestResolvedGPUModelPrefersSelectedNodeModel verifies that when the
+// planning runtime writes the real selected node model into annotations
+// (ani.kubercloud.io/gpu-selected-model), gpuStatusInfo uses it instead of
+// the PreferredModels from the request. This ensures the demo API reports
+// the actual GPU hardware (e.g. RTX4090) rather than the requested default
+// (e.g. A100).
+func TestResolvedGPUModelPrefersSelectedNodeModel(t *testing.T) {
+	spec := ports.WorkloadSpec{
+		Kind: ports.WorkloadKindGPUContainer,
+		Resources: ports.WorkloadResourceRequest{
+			GPU: ports.GPUSchedulingRequest{
+				PreferredVendors: []ports.GPUVendor{ports.GPUVendorNVIDIA},
+				PreferredModels:  []string{"A100"},
+				RequiredCount:    1,
+			},
+		},
+		Annotations: map[string]string{
+			"ani.kubercloud.io/gpu-selected-model": "RTX4090",
+		},
+	}
+	info := gpuStatusInfo(spec, ports.WorkloadStatus{State: ports.WorkloadStateRunning})
+	if info == nil {
+		t.Fatalf("gpuStatusInfo returned nil")
+	}
+	if info.Model != "RTX4090" {
+		t.Fatalf("Model = %q, want RTX4090 (from annotation)", info.Model)
+	}
+	if !strings.Contains(info.SchedulingReason, "RTX4090") {
+		t.Fatalf("SchedulingReason = %q, want it to contain RTX4090", info.SchedulingReason)
+	}
+}
+
+// TestResolvedGPUModelFallsBackToPreferredModels verifies that without the
+// selected-node-model annotation, gpuStatusInfo falls back to the
+// PreferredModels in the request (preserving existing behavior).
+func TestResolvedGPUModelFallsBackToPreferredModels(t *testing.T) {
+	spec := ports.WorkloadSpec{
+		Kind: ports.WorkloadKindGPUContainer,
+		Resources: ports.WorkloadResourceRequest{
+			GPU: ports.GPUSchedulingRequest{
+				PreferredVendors: []ports.GPUVendor{ports.GPUVendorNVIDIA},
+				PreferredModels:  []string{"A100"},
+				RequiredCount:    1,
+			},
+		},
+	}
+	info := gpuStatusInfo(spec, ports.WorkloadStatus{State: ports.WorkloadStateRunning})
+	if info == nil {
+		t.Fatalf("gpuStatusInfo returned nil")
+	}
+	if info.Model != "A100" {
+		t.Fatalf("Model = %q, want A100 (fallback to PreferredModels)", info.Model)
+	}
+}
+
 func TestLocalInstanceOrchestratorRequiresPermissionProof(t *testing.T) {
 	_, err := newTestInstanceOrchestrator(true, &fakeInstanceStore{}).Create(context.Background(), ports.WorkloadInstanceCreateRequest{
 		Spec: ports.WorkloadSpec{

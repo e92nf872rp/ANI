@@ -24,7 +24,7 @@ func (fakeGPUInventory) PlanScheduling(context.Context, ports.GPUSchedulingReque
 		NodeSelector:     map[string]string{"ani.kubercloud.io/gpu-node": "true"},
 		ResourceName:     "nvidia.com/gpu",
 		ResourceQuantity: "1",
-		RuntimeClassName: "nvidia",
+		RuntimeClassName: "",
 		SchedulerName:    "volcano",
 		QueueName:        "ani-inference",
 	}, nil

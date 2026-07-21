@@ -47,9 +47,19 @@ func main() {
 		logger.Error("failed to configure gpu inventory provider runtime", "err", err)
 		os.Exit(1)
 	}
+	kubernetesRESTClient, err := newGatewayKubernetesClient(gatewayGPUInventoryRuntimeConfigFromEnv())
+	if err != nil {
+		logger.Error("failed to configure kubernetes rest client for orphan discovery", "err", err)
+		os.Exit(1)
+	}
 	gpuSchedulingQueueStore, err := newGatewayGPUSchedulingQueueStore(gatewayGPUSchedulingQueueRuntimeConfigFromEnv())
 	if err != nil {
 		logger.Error("failed to configure gpu scheduling queue store runtime", "err", err)
+		os.Exit(1)
+	}
+	gpuInstanceStore, err := newGatewayGPUInstanceStore(runtimeCtx, gatewayGPUInstanceStoreConfigFromEnv())
+	if err != nil {
+		logger.Error("failed to configure gpu instance store runtime", "err", err)
 		os.Exit(1)
 	}
 	networkService, err := newGatewayNetworkService(gatewayNetworkRuntimeConfigFromEnv())
@@ -104,12 +114,14 @@ func main() {
 		EncryptionService:                     encryptionService,
 		SecretService:                         secretService,
 		GPUInventory:                          gpuInventory,
-		GPUSchedulingQueueStore:                gpuSchedulingQueueStore,
+		GPUSchedulingQueueStore:               gpuSchedulingQueueStore,
+		GPUInstanceStore:                      gpuInstanceStore,
 		NetworkService:                        networkService,
 		StorageService:                        storageService,
 		VectorStoreService:                    vectorStoreService,
 		InstanceObservability:                 instanceObservability,
 		InstanceObservabilityUsesInstanceName: instanceObservabilityUsesInstanceName,
+		KubernetesRESTClient:                  kubernetesRESTClient,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

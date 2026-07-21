@@ -23,7 +23,7 @@ type gpuSchedulingQueueResponse struct {
 	ID                string    `json:"id"`
 	Name              string    `json:"name"`
 	Weight            int       `json:"weight"`
-	Reclaimable        bool      `json:"reclaimable"`
+	Reclaimable       bool      `json:"reclaimable"`
 	WorkloadClass     string    `json:"workload_class"`
 	ProjectID         *string   `json:"project_id,omitempty"`
 	IsPlatformDefault bool      `json:"is_platform_default"`
@@ -50,16 +50,8 @@ type gpuSchedulingQueueUpdateRequest struct {
 	ProjectID     *string `json:"project_id,omitempty"`
 }
 
-func newGPUSchedulingAPI() *gpuSchedulingAPI {
-	return &gpuSchedulingAPI{store: nil}
-}
-
 func newGPUSchedulingAPIWithStore(store ports.GPUSchedulingQueueStore) *gpuSchedulingAPI {
 	return &gpuSchedulingAPI{store: store}
-}
-
-func registerGPUSchedulingResources(v1 *route.RouterGroup) {
-	registerGPUSchedulingResourcesWithStore(v1, nil)
 }
 
 func registerGPUSchedulingResourcesWithStore(v1 *route.RouterGroup, store ports.GPUSchedulingQueueStore) {
@@ -168,6 +160,11 @@ func (api *gpuSchedulingAPI) updateGPUSchedulingQueue(ctx context.Context, c *ap
 		writeDemoError(c, http.StatusForbidden, "FORBIDDEN", "tenant context missing")
 		return
 	}
+	idempotencyKey := strings.TrimSpace(string(c.GetHeader("Idempotency-Key")))
+	if idempotencyKey == "" {
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "Idempotency-Key header is required")
+		return
+	}
 	id := c.Param("id")
 	if id == "" {
 		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "id is required")
@@ -229,7 +226,7 @@ func queueToResponse(q ports.GPUSchedulingQueue) gpuSchedulingQueueResponse {
 		ID:                q.ID,
 		Name:              q.Name,
 		Weight:            q.Weight,
-		Reclaimable:        q.Reclaimable,
+		Reclaimable:       q.Reclaimable,
 		WorkloadClass:     string(q.WorkloadClass),
 		ProjectID:         projectID,
 		IsPlatformDefault: q.IsPlatformDefault,

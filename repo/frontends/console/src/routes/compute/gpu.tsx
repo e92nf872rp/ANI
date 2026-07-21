@@ -29,7 +29,6 @@ export const Route = createFileRoute('/compute/gpu')({
 
 type GpuStatus = 'available' | 'in_use' | 'fault' | 'maintenance'
 type GpuDevice = components['schemas']['GPUInventoryRecord']
-type GpuOccupancy = components['schemas']['GPUOccupancyStats']
 type ObservabilityQueryResponse = components['schemas']['ObservabilityQueryResponse']
 
 const STATUS_THEME: Record<GpuStatus, 'success' | 'warning' | 'danger' | 'default'> = {

@@ -262,6 +262,7 @@ func TestGPUSchedulingHTTPEndpoints(t *testing.T) {
 		&ut.Body{Body: bytes.NewBufferString(patchBody), Len: len(patchBody)},
 		ut.Header{Key: "Content-Type", Value: "application/json"},
 		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-a"},
+		ut.Header{Key: "Idempotency-Key", Value: "patch-key-1"},
 	).Result()
 	if resp.StatusCode() != http.StatusOK {
 		t.Fatalf("PATCH status = %d, want 200", resp.StatusCode())
@@ -324,6 +325,7 @@ func TestGPUSchedulingHTTPPlatformDefaultProtected(t *testing.T) {
 		&ut.Body{Body: bytes.NewBufferString(patchBody), Len: len(patchBody)},
 		ut.Header{Key: "Content-Type", Value: "application/json"},
 		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-a"},
+		ut.Header{Key: "Idempotency-Key", Value: "patch-key-2"},
 	).Result()
 	if resp.StatusCode() != http.StatusForbidden {
 		t.Fatalf("PATCH platform default status = %d, want 403", resp.StatusCode())

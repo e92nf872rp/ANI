@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -16,9 +17,8 @@ import (
 // fakeK8sAPI simulates the Volcano Queue CRD subset of the K8s API server.
 // It stores queues in memory keyed by CRD name and enforces labelSelector filters.
 type fakeK8sAPI struct {
-	queues  map[string]volcanoQueueCRD // keyed by metadata.name
-	now     func() time.Time
-	tenant  string // label value used for created records
+	queues   map[string]volcanoQueueCRD // keyed by metadata.name
+	now      func() time.Time
 	failNext bool
 }
 
@@ -151,34 +151,16 @@ func (f *fakeK8sAPI) seedPlatformDefault(tenantID, name string) {
 	f.queues[name] = crd
 }
 
-func (f *fakeK8sAPI) seedTenantQueue(tenantID, name, queueID string, workloadClass ports.WorkloadClass) {
-	crd := volcanoQueueCRD{
-		APIVersion: volcanoQueueAPIGroup + "/" + volcanoQueueAPIVersion,
-		Kind:       volcanoQueueKind,
-		Metadata: volcanoQueueCRDMeta{
-			Name:      name,
-			Namespace: "volcano-system",
-			Labels: map[string]string{
-				volcanoLabelTenantID:      tenantID,
-				volcanoLabelWorkloadClass: string(workloadClass),
-				volcanoLabelQueueID:       queueID,
-			},
-			Annotations: map[string]string{
-				"ani.kubercloud.io/created-at": f.now().Format(time.RFC3339),
-				"ani.kubercloud.io/updated-at": f.now().Format(time.RFC3339),
-			},
-		},
-		Spec: volcanoQueueCRDSpec{Weight: 5, Reclaimable: true},
-	}
-	f.queues[name] = crd
-}
-
 func extractLabelSelector(endpoint string) string {
 	idx := strings.Index(endpoint, "labelSelector=")
 	if idx < 0 {
 		return ""
 	}
-	return endpoint[idx+len("labelSelector="):]
+	raw := endpoint[idx+len("labelSelector="):]
+	if decoded, err := url.QueryUnescape(raw); err == nil {
+		return decoded
+	}
+	return raw
 }
 
 func extractResourceName(endpoint string) string {
@@ -456,6 +438,95 @@ func TestVolcanoQueueStoreGetNonexistentReturnsNotFound(t *testing.T) {
 	_, err := store.Get(context.Background(), "tenant-a", "nonexistent-id")
 	if !errors.Is(err, ports.ErrQueueNotFound) {
 		t.Fatalf("Get nonexistent error = %v, want ErrQueueNotFound", err)
+	}
+}
+
+// TestVolcanoQueueStoreLegacyQueueClassLabel covers CRDs deployed before the
+// workload-class label was unified. Such CRDs only carry the legacy
+// "ani.kubercloud.io/queue-class" label; crdToQueue must still surface a
+// non-empty WorkloadClass so the UI's "工作负载类型" column is not blank.
+func TestVolcanoQueueStoreLegacyQueueClassLabel(t *testing.T) {
+	api := newFakeK8sAPI()
+	store := newTestStore(api)
+
+	// Simulate a CRD stamped only with the legacy queue-class label, as
+	// produced by the original 20-volcano-queue-template.yaml manifest.
+	legacy := volcanoQueueCRD{
+		APIVersion: volcanoQueueAPIGroup + "/" + volcanoQueueAPIVersion,
+		Kind:       volcanoQueueKind,
+		Metadata: volcanoQueueCRDMeta{
+			Name:      "ani-inference",
+			Namespace: "volcano-system",
+			UID:       "legacy-uid-ani-inference",
+			Labels: map[string]string{
+				volcanoLabelWorkloadClassLegacy: string(ports.WorkloadClassInference),
+				volcanoLabelPlatformDefault:     "true",
+			},
+		},
+		Spec: volcanoQueueCRDSpec{Weight: 10, Reclaimable: false},
+	}
+	api.queues["ani-inference"] = legacy
+
+	queues, err := store.List(context.Background(), "tenant-a")
+	if err != nil {
+		t.Fatalf("List error = %v", err)
+	}
+	var got ports.GPUSchedulingQueue
+	for _, q := range queues {
+		if q.Name == "ani-inference" {
+			got = q
+		}
+	}
+	if got.Name != "ani-inference" {
+		t.Fatalf("ani-inference not returned; queues = %+v", queues)
+	}
+	if got.WorkloadClass != ports.WorkloadClassInference {
+		t.Fatalf("WorkloadClass = %q, want %q (legacy label must be read)", got.WorkloadClass, ports.WorkloadClassInference)
+	}
+	if !got.IsPlatformDefault {
+		t.Fatalf("IsPlatformDefault = false, want true")
+	}
+}
+
+// TestVolcanoQueueStoreCanonicalLabelWinsOverLegacy ensures that when both
+// the canonical workload-class and the legacy queue-class labels are present
+// (e.g. during rollout migration), the canonical value wins.
+func TestVolcanoQueueStoreCanonicalLabelWinsOverLegacy(t *testing.T) {
+	api := newFakeK8sAPI()
+	store := newTestStore(api)
+
+	mixed := volcanoQueueCRD{
+		APIVersion: volcanoQueueAPIGroup + "/" + volcanoQueueAPIVersion,
+		Kind:       volcanoQueueKind,
+		Metadata: volcanoQueueCRDMeta{
+			Name:      "ani-training",
+			Namespace: "volcano-system",
+			UID:       "mixed-uid-ani-training",
+			Labels: map[string]string{
+				volcanoLabelWorkloadClass:       string(ports.WorkloadClassTraining),
+				volcanoLabelWorkloadClassLegacy: string(ports.WorkloadClassInference), // should be ignored
+				volcanoLabelPlatformDefault:     "true",
+			},
+		},
+		Spec: volcanoQueueCRDSpec{Weight: 5, Reclaimable: true},
+	}
+	api.queues["ani-training"] = mixed
+
+	queues, err := store.List(context.Background(), "tenant-a")
+	if err != nil {
+		t.Fatalf("List error = %v", err)
+	}
+	var got ports.GPUSchedulingQueue
+	for _, q := range queues {
+		if q.Name == "ani-training" {
+			got = q
+		}
+	}
+	if got.Name != "ani-training" {
+		t.Fatalf("ani-training not returned; queues = %+v", queues)
+	}
+	if got.WorkloadClass != ports.WorkloadClassTraining {
+		t.Fatalf("WorkloadClass = %q, want %q (canonical label must win)", got.WorkloadClass, ports.WorkloadClassTraining)
 	}
 }
 

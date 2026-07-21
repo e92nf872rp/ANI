@@ -15,9 +15,11 @@ const (
 	kubernetesNVIDIAGPUResource       = "nvidia.com/gpu"
 	kubernetesNVIDIAVGPUResource      = "nvidia.com/vgpu"
 	kubernetesNVIDIAGPUProductLabel   = "nvidia.com/gpu.product"
+	kubernetesANIGPUModelLabel        = "ani.kubercloud.io/gpu-model"
 	kubernetesHostnameLabel           = "kubernetes.io/hostname"
 	kubernetesANIGPUPoolLabel         = "ani.kubercloud.io/gpu-pool"
 	kubernetesVolcanoSchedulerName    = "volcano"
+	kubernetesHAMISchedulerName       = "hami-scheduler"
 	kubernetesDefaultInferenceQueue   = "ani-inference"
 	kubernetesDefaultTrainingQueue    = "ani-training"
 	kubernetesGPUNodeSelectorLabel    = "ani.kubercloud.io/gpu-node"
@@ -137,17 +139,23 @@ func (i *KubernetesGPUInventory) PlanScheduling(ctx context.Context, request por
 		if available < requiredCount {
 			continue
 		}
+		// HAMi-managed nodes require hami-scheduler; non-HAMi nodes use volcano.
+		schedulerName := kubernetesVolcanoSchedulerName
+		if isHAMINode(node) {
+			schedulerName = kubernetesHAMISchedulerName
+		}
 		return ports.GPUSchedulingDecision{
 			NodeSelector: map[string]string{
 				kubernetesHostnameLabel:        node.NodeName,
 				kubernetesGPUNodeSelectorLabel: "true",
 			},
-			ResourceName:     resourceName,
-			ResourceQuantity: strconv.Itoa(requiredCount),
-			RuntimeClassName: runtimeClassNameForMode(mode),
-			SchedulerName:    kubernetesVolcanoSchedulerName,
-			QueueName:        queueName,
-			Reasons:          []string{fmt.Sprintf("Kubernetes node %s provides %d %s", node.NodeName, available, resourceName)},
+			ResourceName:      resourceName,
+			ResourceQuantity:  strconv.Itoa(requiredCount),
+			RuntimeClassName:  runtimeClassNameForNode(node, mode),
+			SchedulerName:     schedulerName,
+			QueueName:         queueName,
+			Reasons:           []string{fmt.Sprintf("Kubernetes node %s provides %d %s", node.NodeName, available, resourceName)},
+			SelectedNodeModel: node.Model,
 		}, nil
 	}
 
@@ -266,13 +274,33 @@ func selectResourceName(request ports.GPUSchedulingRequest) (string, ports.GPUVi
 	return kubernetesNVIDIAGPUResource, ports.GPUVirtualizationNone
 }
 
-// runtimeClassNameForMode returns the runtime class for a virtualization mode.
-// HAMi vGPU uses the hami-vgpu runtime class; whole-card uses nvidia.
+// runtimeClassNameForNode returns the runtime class for a node given its
+// management type (HAMi vs Volcano/native) and the requested virtualization
+// mode. HAMi-managed nodes use the hami-vgpu runtime class for vGPU splits;
+// whole-card scheduling on HAMi nodes leaves the runtime class empty so the
+// HAMi device plugin takes over container creation. Non-HAMi (Volcano/native)
+// nodes leave the runtime class empty for both whole-card and vGPU, letting
+// the native NVIDIA device plugin or a cluster-defined RuntimeClass handle it.
+func runtimeClassNameForNode(node ports.GPUNodeClass, mode ports.GPUVirtualizationMode) string {
+	if isHAMINode(node) {
+		if mode == ports.GPUVirtualizationVGPU {
+			return kubernetesHAMILocalRuntimeClass
+		}
+		return ""
+	}
+	// Non-HAMi node: let the cluster's native device plugin handle GPU
+	// allocation. Returning an empty runtime class avoids requiring a
+	// "nvidia" RuntimeClass that may not exist in the cluster.
+	return ""
+}
+
+// runtimeClassNameForMode returns the runtime class for a virtualization mode
+// when the node management type is unknown. Prefer runtimeClassNameForNode.
 func runtimeClassNameForMode(mode ports.GPUVirtualizationMode) string {
 	if mode == ports.GPUVirtualizationVGPU {
 		return kubernetesHAMILocalRuntimeClass
 	}
-	return "nvidia"
+	return ""
 }
 
 // gpuAllocatableCount reads an extended resource from the node allocatable
@@ -288,6 +316,19 @@ func gpuAllocatableCount(node ports.GPUNodeClass, resourceName string) int {
 		return 0
 	}
 	return count
+}
+
+// isHAMINode returns true when any device on the node is managed by HAMi
+// (detected via the hami.io/node-nvidia-register annotation or devices with
+// VirtualizationMode == vgpu using nvidia.com/gpu).
+func isHAMINode(node ports.GPUNodeClass) bool {
+	for _, device := range node.Devices {
+		if device.VirtualizationMode == ports.GPUVirtualizationVGPU &&
+			device.ResourceName == kubernetesNVIDIAGPUResource {
+			return true
+		}
+	}
+	return false
 }
 
 type kubernetesNodeListDocument struct {
@@ -336,7 +377,11 @@ func gpuNodeClassesFromKubernetesNodeList(body []byte) ([]ports.GPUNodeClass, er
 			continue
 		}
 		nodeName := firstNonEmpty(item.Metadata.Labels[kubernetesHostnameLabel], item.Metadata.Name)
-		model := firstNonEmpty(item.Metadata.Labels[kubernetesNVIDIAGPUProductLabel], "nvidia-gpu")
+		model := firstNonEmpty(
+			item.Metadata.Labels[kubernetesNVIDIAGPUProductLabel],
+			item.Metadata.Labels[kubernetesANIGPUModelLabel],
+			"nvidia-gpu",
+		)
 		ready, reason := kubernetesNodeReady(item.Status.Conditions)
 
 		// HAMi-aware device parsing: when hami.io/node-nvidia-register
@@ -409,14 +454,14 @@ func gpuNodeClassesFromKubernetesNodeList(body []byte) ([]ports.GPUNodeClass, er
 // hamiPhysicalDevice represents a single physical GPU as reported by the
 // HAMi device plugin via the hami.io/node-nvidia-register node annotation.
 type hamiPhysicalDevice struct {
-	ID     string `json:"id"`
-	Index  int    `json:"index"`
-	Count  int    `json:"count"`
-	DevMem int64  `json:"devmem"`
-	DevCore int   `json:"devcore"`
-	Type   string `json:"type"`
-	Mode   string `json:"mode"`
-	Health bool   `json:"health"`
+	ID      string `json:"id"`
+	Index   int    `json:"index"`
+	Count   int    `json:"count"`
+	DevMem  int64  `json:"devmem"`
+	DevCore int    `json:"devcore"`
+	Type    string `json:"type"`
+	Mode    string `json:"mode"`
+	Health  bool   `json:"health"`
 }
 
 // parseHAMIAnnotation parses the hami.io/node-nvidia-register annotation
@@ -470,18 +515,18 @@ func kubernetesNodeReady(conditions []kubernetesNodeCondition) (bool, string) {
 }
 
 func gpuNodeSupportsSchedulingRequest(node ports.GPUNodeClass, request ports.GPUSchedulingRequest) bool {
+	// When PreferredModels is set, prefer matching nodes but do not reject
+	// others — HAMi nodes report device models from annotations which may
+	// not match the user-specified model name exactly. Falling through to
+	// any available GPU node is safer than failing to schedule.
 	if len(request.PreferredModels) > 0 {
-		found := false
 		for _, model := range request.PreferredModels {
 			if strings.EqualFold(node.Model, strings.TrimSpace(model)) {
-				found = true
-				break
+				return true
 			}
 		}
-		if !found {
-			return false
-		}
 	}
+	// No exact model match — still allow this node if it has GPUs available.
 	if request.RequiredMemoryMiB > 0 {
 		for _, device := range node.Devices {
 			if device.MemoryMiB >= request.RequiredMemoryMiB {

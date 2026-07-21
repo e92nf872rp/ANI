@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +28,11 @@ const (
 	volcanoLabelQueueID         = "ani.kubercloud.io/queue-id"
 	volcanoLabelPlatformDefault = "ani.kubercloud.io/platform-default"
 	volcanoLabelProjectID       = "ani.kubercloud.io/project-id"
+
+	// Legacy label key retained for backward compatibility with CRDs
+	// deployed before the workload-class key was unified. Only read;
+	// new CRDs always stamp volcanoLabelWorkloadClass.
+	volcanoLabelWorkloadClassLegacy = "ani.kubercloud.io/queue-class"
 )
 
 // VolcanoHTTPDoer is the minimal K8s REST surface the adapter needs.
@@ -416,7 +422,7 @@ func (s *VolcanoQueueStore) collectionURL(labelSelector string) string {
 	base := fmt.Sprintf("%s/apis/%s/%s/%s",
 		s.baseURL, volcanoQueueAPIGroup, volcanoQueueAPIVersion, volcanoQueueResource)
 	if labelSelector != "" {
-		base += "?labelSelector=" + labelSelector
+		base += "?labelSelector=" + url.QueryEscape(labelSelector)
 	}
 	return base
 }
@@ -441,19 +447,38 @@ func (s *VolcanoQueueStore) crdToQueue(crd volcanoQueueCRD) ports.GPUSchedulingQ
 	}
 	queueID := labels[volcanoLabelQueueID]
 	if queueID == "" {
-		queueID = strings.ReplaceAll(strings.TrimSpace(crd.Metadata.UID), "-", "")[:16]
+		uid := strings.ReplaceAll(strings.TrimSpace(crd.Metadata.UID), "-", "")
+		if len(uid) > 16 {
+			uid = uid[:16]
+		}
+		queueID = uid
 	}
+	workloadClass := resolveWorkloadClass(labels)
 	return ports.GPUSchedulingQueue{
 		ID:                queueID,
 		Name:              crd.Metadata.Name,
 		Weight:            crd.Spec.Weight,
 		Reclaimable:       crd.Spec.Reclaimable,
-		WorkloadClass:     ports.WorkloadClass(labels[volcanoLabelWorkloadClass]),
+		WorkloadClass:     workloadClass,
 		ProjectID:         labels[volcanoLabelProjectID],
 		IsPlatformDefault: isPlatformDefaultCRD(crd),
 		CreatedAt:         createdAt,
 		UpdatedAt:         updatedAt,
 	}
+}
+
+// resolveWorkloadClass reads the canonical workload-class label and falls
+// back to the legacy queue-class key for CRDs deployed before the label
+// unification. Values are normalized to the ports.WorkloadClass enum; an
+// unknown or empty value stays empty.
+func resolveWorkloadClass(labels map[string]string) ports.WorkloadClass {
+	if v := labels[volcanoLabelWorkloadClass]; v != "" {
+		return ports.WorkloadClass(v)
+	}
+	if v := labels[volcanoLabelWorkloadClassLegacy]; v != "" {
+		return ports.WorkloadClass(v)
+	}
+	return ""
 }
 
 func firstNonEmptyLabel(labels map[string]string, key string) string {

@@ -213,8 +213,8 @@ func TestPlanSchedulingWholeCardSelectsNVIDIAGPUResource(t *testing.T) {
 	if decision.ResourceQuantity != "2" {
 		t.Fatalf("quantity = %q, want 2", decision.ResourceQuantity)
 	}
-	if decision.RuntimeClassName != "nvidia" {
-		t.Fatalf("runtimeClassName = %q, want nvidia", decision.RuntimeClassName)
+	if decision.RuntimeClassName != "" {
+		t.Fatalf("runtimeClassName = %q, want empty for non-HAMi whole-card", decision.RuntimeClassName)
 	}
 	if decision.SchedulerName != "volcano" {
 		t.Fatalf("schedulerName = %q, want volcano", decision.SchedulerName)
@@ -245,14 +245,12 @@ func TestPlanSchedulingVGPUSelectsNVIDIAGVGPUResource(t *testing.T) {
 	if decision.ResourceQuantity != "2" {
 		t.Fatalf("quantity = %q, want 2", decision.ResourceQuantity)
 	}
-	if decision.RuntimeClassName != "hami-vgpu" {
-		t.Fatalf("runtimeClassName = %q, want hami-vgpu", decision.RuntimeClassName)
+	// Non-HAMi node: vGPU scheduling uses nvidia.com/vgpu resource, but
+	// leaves runtime class empty (no hami-vgpu on non-HAMi nodes).
+	if decision.RuntimeClassName != "" {
+		t.Fatalf("runtimeClassName = %q, want empty for non-HAMi vGPU", decision.RuntimeClassName)
 	}
 }
-
-// TestPlanSchedulingVGPUOnHAMiNodeUsesNVIDIAGPUResource verifies that when a
-// node has the HAMi annotation, vGPU scheduling requests use
-// nvidia.com/gpu (HAMi's actual resource name) instead of nvidia.com/vgpu.
 func TestPlanSchedulingVGPUOnHAMiNodeUsesNVIDIAGPUResource(t *testing.T) {
 	body := `{
   "items": [{

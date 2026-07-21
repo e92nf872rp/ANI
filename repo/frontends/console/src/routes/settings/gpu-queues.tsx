@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import {
   Alert,
@@ -185,13 +185,9 @@ export function GpuQueueSettingsPage() {
   function openEditDialog(queue: GPUSchedulingQueue) {
     setEditingQueue(queue)
     setDialogMode('edit')
-    form.setFieldsValue({
-      name: queue.name,
-      workload_class: queue.workload_class,
-      weight: queue.weight,
-      reclaimable: queue.reclaimable,
-      project_id: queue.project_id ?? '',
-    })
+    // Form field values are injected via initialData on each FormItem
+    // (see editInitialData below). This avoids the race between
+    // setFieldsValue and FormItem's mount-time registration effect.
   }
 
   function closeDialog() {
@@ -292,114 +288,152 @@ export function GpuQueueSettingsPage() {
 
   const isSubmitting = createMutation.isPending || updateMutation.isPending
 
-  return (
-    <ConsolePage>
-      <ConsolePageHeader
-        title="GPU 调度队列"
-        subtitle="设置 → GPU 调度队列"
-        actions={
-          writable ? (
-            <Button theme="primary" icon={<AddIcon />} onClick={openCreateDialog}>
-              新建队列
-            </Button>
-          ) : undefined
+    // In edit mode, seed FormItem initialData with the row's values so the
+    // form mounts with the correct values directly. The `key` on Form
+    // forces a fresh form instance whenever the edit target changes or
+    // we switch between create/edit, ensuring initialData is re-applied.
+    const formKey = dialogMode === 'edit'
+      ? `edit-${editingQueue?.id ?? ''}`
+      : dialogMode === 'create'
+        ? 'create'
+        : 'closed'
+    const editValues = dialogMode === 'edit' && editingQueue
+      ? {
+          name: editingQueue.name,
+          workload_class: editingQueue.workload_class,
+          weight: editingQueue.weight,
+          reclaimable: editingQueue.reclaimable,
+          project_id: editingQueue.project_id ?? '',
         }
-      />
+      : null
 
-      {!writable && (
-        <Alert theme="warning" message="仅租户管理员可管理队列" />
-      )}
-
-      {queuesQuery.isError && (
-        <Alert
-          theme="error"
-          message="加载队列列表失败"
-          operation={<Button variant="outline" onClick={() => queuesQuery.refetch()}>重试</Button>}
-        />
-      )}
-
-      <ConsoleContentCard title="平台默认队列（只读）">
-        <Table
-          loading={queuesQuery.isLoading}
-          data={platformDefaultQueues}
-          columns={platformDefaultColumns}
-          rowKey="id"
-        />
-      </ConsoleContentCard>
-
-      <ConsoleContentCard title="我的队列">
-        {customQueues.length === 0 && !queuesQuery.isLoading ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '32px 0' }}>
-            <Empty description="暂无自定义队列" />
-            {writable && (
+    return (
+      <ConsolePage>
+        <ConsolePageHeader
+          title="GPU 调度队列"
+          subtitle="设置 → GPU 调度队列"
+          actions={
+            writable ? (
               <Button theme="primary" icon={<AddIcon />} onClick={openCreateDialog}>
                 新建队列
               </Button>
-            )}
-          </div>
-        ) : (
-          <Table
-            loading={queuesQuery.isLoading}
-            data={customQueues}
-            columns={customColumns}
-            rowKey="id"
+            ) : undefined
+          }
+        />
+
+        {!writable && (
+          <Alert theme="warning" message="仅租户管理员可管理队列" />
+        )}
+
+        {queuesQuery.isError && (
+          <Alert
+            theme="error"
+            message="加载队列列表失败"
+            operation={<Button variant="outline" onClick={() => queuesQuery.refetch()}>重试</Button>}
           />
         )}
-      </ConsoleContentCard>
 
-      <Dialog
-        visible={dialogMode !== null}
-        header={dialogMode === 'create' ? '新建队列' : '编辑队列'}
-        width={480}
-        onClose={closeDialog}
-        footer={
-          <>
-            <Button variant="outline" onClick={closeDialog}>取消</Button>
-            <Button theme="primary" loading={isSubmitting} onClick={handleSubmit}>
-              {dialogMode === 'create' ? '创建' : '保存'}
-            </Button>
-          </>
-        }
-      >
-        <Form form={form} labelWidth={100} labelAlign="right">
-          <Form.FormItem
-            label="队列名称"
-            name="name"
-            rules={[
-              { required: true, message: '请输入队列名称' },
-              {
-                pattern: QUEUE_NAME_PATTERN.source,
-                message: '须符合 K8s 资源名规范：小写字母数字，连字符分隔',
-              },
-            ]}
+        <ConsoleContentCard title="平台默认队列（只读）">
+          <Table
+            loading={queuesQuery.isLoading}
+            data={platformDefaultQueues}
+            columns={platformDefaultColumns}
+            rowKey="id"
+          />
+        </ConsoleContentCard>
+
+        <ConsoleContentCard title="我的队列">
+          {customQueues.length === 0 && !queuesQuery.isLoading ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '32px 0' }}>
+              <Empty description="暂无自定义队列" />
+              {writable && (
+                <Button theme="primary" icon={<AddIcon />} onClick={openCreateDialog}>
+                  新建队列
+                </Button>
+              )}
+            </div>
+          ) : (
+            <Table
+              loading={queuesQuery.isLoading}
+              data={customQueues}
+              columns={customColumns}
+              rowKey="id"
+            />
+          )}
+        </ConsoleContentCard>
+
+        <Dialog
+          visible={dialogMode !== null}
+          header={dialogMode === 'create' ? '新建队列' : '编辑队列'}
+          width={480}
+          onClose={closeDialog}
+          footer={
+            <>
+              <Button variant="outline" onClick={closeDialog}>取消</Button>
+              <Button theme="primary" loading={isSubmitting} onClick={handleSubmit}>
+                {dialogMode === 'create' ? '创建' : '保存'}
+              </Button>
+            </>
+          }
+        >
+          <Form
+            form={form}
+            labelWidth={100}
+            labelAlign="right"
+            key={formKey}
           >
-            <Input placeholder="如 proj-a-infer" disabled={dialogMode === 'edit'} />
-          </Form.FormItem>
+            <Form.FormItem
+              label="队列名称"
+              name="name"
+              initialData={editValues?.name ?? ''}
+              rules={[
+                { required: true, message: '请输入队列名称' },
+                {
+                  pattern: QUEUE_NAME_PATTERN.source,
+                  message: '须符合 K8s 资源名规范：小写字母数字，连字符分隔',
+                },
+              ]}
+            >
+              <Input placeholder="如 proj-a-infer" disabled={dialogMode === 'edit'} />
+            </Form.FormItem>
 
-          <Form.FormItem
-            label="工作负载类型"
-            name="workload_class"
-            initialData="inference"
-            rules={[{ required: true, message: '请选择工作负载类型' }]}
-          >
-            <Select options={WORKLOAD_CLASS_OPTIONS} />
-          </Form.FormItem>
+            <Form.FormItem
+              label="工作负载类型"
+              name="workload_class"
+              initialData={editValues?.workload_class ?? 'inference'}
+              rules={[{ required: true, message: '请选择工作负载类型' }]}
+            >
+              <Select options={WORKLOAD_CLASS_OPTIONS} />
+            </Form.FormItem>
 
-          <Form.FormItem label="权重" name="weight" initialData={10} rules={[{ required: true }]}>
-            <InputNumber min={1} step={1} />
-          </Form.FormItem>
+            <Form.FormItem
+              label="权重"
+              name="weight"
+              initialData={editValues?.weight ?? 10}
+              rules={[{ required: true }]}
+            >
+              <InputNumber min={1} step={1} />
+            </Form.FormItem>
 
-          <Form.FormItem label="可被回收" name="reclaimable" initialData={false}>
-            <Switch />
-          </Form.FormItem>
+            <Form.FormItem
+              label="可被回收"
+              name="reclaimable"
+              initialData={editValues?.reclaimable ?? false}
+            >
+              <Switch />
+            </Form.FormItem>
 
-          <Form.FormItem label="关联项目" name="project_id">
-            <Input placeholder="可选" />
-          </Form.FormItem>
-        </Form>
-      </Dialog>
-    </ConsolePage>
-  )
-}
+            <Form.FormItem
+              label="关联项目"
+              name="project_id"
+              initialData={editValues?.project_id ?? ''}
+            >
+              <Input placeholder="可选" />
+            </Form.FormItem>
+          </Form>
+        </Dialog>
+      </ConsolePage>
+    )
+  }
 
 export default GpuQueueSettingsPage

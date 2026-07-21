@@ -98,13 +98,14 @@ func (i *LocalGPUInventory) PlanScheduling(_ context.Context, request ports.GPUS
 		}
 		quantity := fmt.Sprintf("%d", requiredCount)
 		return ports.GPUSchedulingDecision{
-			NodeSelector:     map[string]string{"ani.io/gpu-demo": "true"},
-			ResourceName:     resourceName,
-			ResourceQuantity: quantity,
-			RuntimeClassName: runtimeClassNameForMode(mode),
-			SchedulerName:    "volcano",
-			QueueName:        queueName,
-			Reasons:          []string{"local GPU scheduling decision; real GPU provider is gated separately"},
+			NodeSelector:      map[string]string{"ani.io/gpu-demo": "true"},
+			ResourceName:      resourceName,
+			ResourceQuantity:  quantity,
+			RuntimeClassName:  runtimeClassNameForMode(mode),
+			SchedulerName:     "volcano",
+			QueueName:         queueName,
+			Reasons:           []string{"local GPU scheduling decision; real GPU provider is gated separately"},
+			SelectedNodeModel: node.Model,
 		}, nil
 	}
 	return ports.GPUSchedulingDecision{

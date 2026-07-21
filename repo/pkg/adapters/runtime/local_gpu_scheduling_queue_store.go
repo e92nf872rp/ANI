@@ -12,11 +12,6 @@ import (
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
-const (
-	localQueueLabelTenant          = "ani.kubercloud.io/tenant"
-	localQueueLabelPlatformDefault = "ani.kubercloud.io/platform-default"
-)
-
 // LocalGPUSchedulingQueueStore is an in-memory implementation of
 // GPUSchedulingQueueStore for dev/local profile. It simulates Volcano Queue
 // CRD behavior including tenant isolation, platform-default queue
@@ -28,16 +23,16 @@ type LocalGPUSchedulingQueueStore struct {
 }
 
 type localQueueRecord struct {
-	id            string
-	tenantID      string
-	name          string
-	weight        int
-	reclaimable    bool
-	workloadClass ports.WorkloadClass
-	projectID     string
+	id              string
+	tenantID        string
+	name            string
+	weight          int
+	reclaimable     bool
+	workloadClass   ports.WorkloadClass
+	projectID       string
 	platformDefault bool
-	createdAt     time.Time
-	updatedAt     time.Time
+	createdAt       time.Time
+	updatedAt       time.Time
 }
 
 // NewLocalGPUSchedulingQueueStore creates a local queue store with two
@@ -67,8 +62,8 @@ func (s *LocalGPUSchedulingQueueStore) seedDefaults() {
 			id:              uuid.NewString(),
 			tenantID:        "",
 			name:            "ani-training",
-			weight:          10,
-			reclaimable:     false,
+			weight:          5,
+			reclaimable:     true,
 			workloadClass:   ports.WorkloadClassTraining,
 			projectID:       "",
 			platformDefault: true,
@@ -107,10 +102,10 @@ func (s *LocalGPUSchedulingQueueStore) Get(_ context.Context, tenantID, id strin
 func (s *LocalGPUSchedulingQueueStore) Create(_ context.Context, tenantID string, req ports.GPUSchedulingQueueCreateRequest) (ports.GPUSchedulingQueue, error) {
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		return ports.GPUSchedulingQueue{}, fmt.Errorf("%w: name is required", ports.ErrQueueStoreUnavailable)
+		return ports.GPUSchedulingQueue{}, fmt.Errorf("%w: name is required", ports.ErrInvalid)
 	}
 	if !isValidQueueName(name) {
-		return ports.GPUSchedulingQueue{}, fmt.Errorf("%w: invalid queue name", ports.ErrQueueStoreUnavailable)
+		return ports.GPUSchedulingQueue{}, fmt.Errorf("%w: invalid queue name", ports.ErrInvalid)
 	}
 
 	s.mu.Lock()
@@ -125,16 +120,16 @@ func (s *LocalGPUSchedulingQueueStore) Create(_ context.Context, tenantID string
 
 	now := time.Now().UTC()
 	record := localQueueRecord{
-		id:            uuid.NewString(),
-		tenantID:      tenantID,
-		name:          name,
-		weight:        req.Weight,
-		reclaimable:   req.Reclaimable,
-		workloadClass: req.WorkloadClass,
-		projectID:     req.ProjectID,
+		id:              uuid.NewString(),
+		tenantID:        tenantID,
+		name:            name,
+		weight:          req.Weight,
+		reclaimable:     req.Reclaimable,
+		workloadClass:   req.WorkloadClass,
+		projectID:       req.ProjectID,
 		platformDefault: false,
-		createdAt:     now,
-		updatedAt:     now,
+		createdAt:       now,
+		updatedAt:       now,
 	}
 	s.queues = append(s.queues, record)
 	return s.toPort(record), nil
