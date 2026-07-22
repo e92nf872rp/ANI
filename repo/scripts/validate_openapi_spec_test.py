@@ -8,7 +8,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import yaml
+
 import validate_openapi_spec as validator
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class OpenAPISpecValidatorTest(unittest.TestCase):
@@ -35,6 +39,40 @@ class OpenAPISpecValidatorTest(unittest.TestCase):
     def test_missing_spec_fails_before_invoking_validator(self) -> None:
         with self.assertRaises(FileNotFoundError):
             validator.validate_spec(Path("/tmp/ani-missing-openapi.yaml"))
+
+    def test_registry_console_flow_contract_is_frozen(self) -> None:
+        spec = yaml.safe_load((ROOT / "api/openapi/v1.yaml").read_text(encoding="utf-8"))
+        schemas = spec["components"]["schemas"]
+
+        registry_image = schemas["RegistryImage"]
+        self.assertEqual(
+            registry_image["properties"]["purpose"]["enum"],
+            ["container", "gpu", "sandbox", "system"],
+        )
+
+        image_filters = {
+            param["name"]: param
+            for param in spec["paths"]["/registry/images"]["get"]["parameters"]
+        }
+        self.assertEqual(
+            image_filters["purpose"]["schema"]["enum"],
+            ["container", "gpu", "sandbox", "system"],
+        )
+
+        reference_kind = schemas["RegistryImageReference"]["properties"]["kind"]
+        self.assertEqual(
+            reference_kind["enum"],
+            ["vm_instance", "container_instance", "gpu_container_instance", "sandbox_instance"],
+        )
+
+        create_instance_422 = spec["paths"]["/instances"]["post"]["responses"]["422"]["description"]
+        for code in (
+            "ImageNotFound",
+            "ImageScanning",
+            "ImageVulnerabilityBlocked",
+            "ImagePurposeMismatch",
+        ):
+            self.assertIn(code, create_instance_422)
 
 
 if __name__ == "__main__":

@@ -1649,6 +1649,7 @@ components:
         repository:   { type: string }
         tag:          { type: string }
         image:        { type: string, description: "完整镜像引用，例如 registry.local/project/repository:tag" }
+        purpose:      { type: string, enum: [container, gpu, sandbox, system], description: "镜像用途；用于 Console 创建向导筛选" }
         registry:     { type: string }
         digest:       { type: string }
         media_type:   { type: string }
@@ -1702,7 +1703,7 @@ components:
       type: object
       required: [kind, id, name, route, state]
       properties:
-        kind:  { type: string, enum: [container_instance, gpu_container_instance] }
+        kind:  { type: string, enum: [vm_instance, container_instance, gpu_container_instance, sandbox_instance] }
         id:    { type: string }
         name:  { type: string }
         route: { type: string }
@@ -2778,6 +2779,10 @@ paths:
             - InsufficientGPU: GPU 资源不足，当前无可用算力满足本次创建请求
             - GPUNodeIncompatible: 无兼容 GPU 节点，请调整型号偏好或调度队列
             - QueueNotFound: 所选调度队列不存在或已删除
+            - ImageNotFound: 镜像不存在或不属于当前租户镜像仓库
+            - ImageScanning: 镜像仍在安全扫描中，暂不能创建实例
+            - ImageVulnerabilityBlocked: 镜像存在高危或严重漏洞，策略禁止创建实例
+            - ImagePurposeMismatch: 镜像用途与实例 kind 不匹配
 
   /instances/{instance_id}:
     get:
@@ -4056,6 +4061,7 @@ paths:
         - { name: project, in: query, schema: { type: string } }
         - { name: repository, in: query, schema: { type: string } }
         - { name: tag, in: query, schema: { type: string } }
+        - { name: purpose, in: query, schema: { type: string, enum: [container, gpu, sandbox, system] } }
         - { name: scan_status, in: query, schema: { type: string, enum: [not_scanned, pending, running, complete, failed] } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }

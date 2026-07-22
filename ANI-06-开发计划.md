@@ -1,8 +1,8 @@
 # KuberCloud ANI · 开发计划
 
 > 版本 V8.3 | 广州常青云科技有限公司 | 内部产品规划文件
-> 最后更新：2026-07-15
-> 当前摘要：Sprint 12 Core handler/local profile 已闭环；Sprint 13 S01-S07 real provider live gate 均为 `production_shape.status=passed`。并行契约切片 `CORE-INSTANCE-CREATE-CONFIG-A` 已完成：`CreateInstanceRequest` 按 kind 嵌套 `*_config`（扁平字段兼容）。这只表示组件级 production-shaped acceptance passed，不等于 full platform production ready。
+> 最后更新：2026-07-22
+> 当前摘要：Sprint 12 Core handler/local profile 已闭环；Sprint 13 S01-S07 real provider live gate 均为 `production_shape.status=passed`。并行契约切片 `CORE-INSTANCE-CREATE-CONFIG-A` 已完成：`CreateInstanceRequest` 按 kind 嵌套 `*_config`（扁平字段兼容）；`CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A` 已按 7.22 原型补齐 Console 镜像仓库流程最小 v1 契约（不含 BOSS/权限/实现）。这只表示组件级 production-shaped acceptance passed 或契约完成，不等于 full platform production ready。
 > Services 当前治理：Core Sprint 13/14 既有事实继续有效；Services 受控并行 PR 阶段由 CODEOWNERS 共同审查、API split、Services boundary gate、OpenAPI/Gateway route contract、Services semantic contract、生成物漂移和 make validate-architecture 约束，统一入口为 `make validate-services`，当前执行入口仍是 repo/CURRENT-SPRINT.md。
 > Sprint 14 分支执行：`feature/sprint14-core-resilience-semantics` 已完成 R-P0-0 gateway shared store 前置批次、R-P0-1 gateway rate limit、R-P0-2 gateway idempotency replay、R-P0-3 adapter per-call timeout、R-P0-4 data-plane readyz health、R-P1-5 retry/circuit-breaker foundation、R-P1-6 resilience degradation 与 R-P2-7 multi-endpoint failover config；这些单批次仍按 local/logic verified 归档。SPRINT14-CORE-RESILIENCE-LIVE-GATE / validate-sprint14-resilience-live-gate / Sprint14 resilience live gate 已在 ani-sprint14-resilience 隔离 namespace 真实通过 P0 strong backend kill、P1 weak dependency degraded、P2 controller primary kill / follower failover，并归档脱敏 evidence；production-ready 范围仅限隔离 Sprint14 Core resilience fixture，不外推到现有 Sprint13 单副本后端或 full platform。
 
@@ -66,6 +66,9 @@ GPU 调度三段式 PR 拆分（2026-07-21）：
 - PR #21 (1/3 契约)：v1.yaml + SDK/API docs/TS schema 生成物，已合入 main。
 - PR #31 (2/3 接口)：pkg/ports 接口（GPUSchedulingQueueStore + GPUInventory 扩展），已合入 main。
 - PR #46 (3/3 实现)：adapters + gateway + 前端 + manifests 实现，OPEN 等待 review；review-it 修复 4 项，5 项 follow-up 延迟；笔记 `gpu-scheduling-batch-01-13-note-it.md §5`。
+
+Registry Console Flow（2026-07-22）：
+- CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A：按 7.22 原型“暂不考虑 BOSS 和权限”边界，Core v1 新增 `RegistryImage.purpose`、`/registry/images?purpose=`、四类算力引用 enum 与 createInstance 镜像门禁 422 语义；仅契约和 Console Core schema 生成物，不含 handler/adapter/Console 页面实现。
 ```
 
 | 阶段 | 状态 | 完成时间 | 说明 |

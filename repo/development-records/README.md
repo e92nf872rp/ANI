@@ -27,6 +27,12 @@
 | GPU-SCHEDULING-ISSUE-10-A | Console 队列设置页（/settings/gpu-queues）；平台默认只读 + 我的队列 CRUD；POST+Idempotency-Key + Popconfirm 删除 + 403 平台默认保护 + RBAC placeholder + empty CTA；tsc + vite build 通过 | gpu-scheduling-issue-10-console-queue-settings-page.md |
 | GPU-SCHEDULING-PR1-3-SPLIT | GPU 调度功能三段式 PR 拆分：PR #21（契约 v1.yaml+生成物，已合入 main）、PR #31（pkg/ports 接口，已合入 main）、PR #46（adapters+gateway+前端实现，OPEN）；review-it 修复 4 项（UID panic/PATCH 幂等/URL 编码/错误语义）；5 项 follow-up 延迟 | gpu-scheduling-batch-01-13-note-it.md §5 |
 
+### Registry Console Flow（2026-07）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A | Console 镜像仓库主流程契约补齐：`RegistryImage.purpose`、`/registry/images?purpose=`、四类算力引用 enum、createInstance 镜像门禁 422 语义；不含 BOSS、权限或实现 | core-registry-console-flow-contract-a.md |
+
 ### SDK Regression Fixes（2026-06）
 
 | 批次 | 内容摘要 | 文件 |
