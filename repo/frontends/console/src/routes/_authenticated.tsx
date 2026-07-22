@@ -8,7 +8,7 @@ import {
   SettingIcon,
 } from 'tdesign-icons-react'
 import { useEffect } from 'react'
-import { logout, setAuthToken } from '@/api/auth'
+import { logout, maybeRefresh, setAuthToken } from '@/api/auth'
 import { getSession, isSessionValid, safeReturnTo } from '@/auth/session'
 
 const { Header, Aside, Content } = Layout
@@ -24,7 +24,7 @@ const { Header, Aside, Content } = Layout
  * `/auth/callback` 留在 routes/ 根下，不进入此布局。
  */
 export const Route = createFileRoute('/_authenticated')({
-  beforeLoad: ({ location }) => {
+  beforeLoad: async ({ location }) => {
     const session = getSession()
     if (!session || !isSessionValid()) {
       const current = location.pathname + (location.searchStr ?? '')
@@ -33,6 +33,8 @@ export const Route = createFileRoute('/_authenticated')({
         search: { returnTo: safeReturnTo(current) === current ? current : '/' },
       })
     }
+    // 路由切换时检查 token 临近过期，自动续期（剩余 < 5 分钟触发）
+    await maybeRefresh()
     setAuthToken(session.access_token)
   },
   component: AuthenticatedLayout,

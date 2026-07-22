@@ -62,17 +62,19 @@ func (m *platformLoginManager) Login(ctx context.Context, username, password str
 		return nil, statusFromAuthError(newAuthError("BAD_REQUEST", "failed to load roles"))
 	}
 
+	// 先签发 access token（纯计算，不涉及 DB），成功后再持久化 refresh token。
+	// 避免 IssuePlatformAccessToken 失败时 refresh token 已入库成为孤儿数据。
+	accessToken, err := m.issuer.IssuePlatformAccessToken(platformPrincipal{UserID: user.ID, Roles: roles}, defaultAccessTokenTTL)
+	if err != nil {
+		return nil, statusFromAuthError(newAuthError("BAD_REQUEST", "failed to generate access token"))
+	}
+
 	rawRefresh, err := generateRefreshToken()
 	if err != nil {
 		return nil, statusFromAuthError(newAuthError("BAD_REQUEST", "failed to generate refresh token"))
 	}
 	if err := m.store.InsertRefreshToken(ctx, user.ID, hashRefreshToken(rawRefresh), roles, m.now().Add(defaultRefreshTokenTTL)); err != nil {
 		return nil, statusFromAuthError(newAuthError("BAD_REQUEST", "failed to insert refresh token"))
-	}
-
-	accessToken, err := m.issuer.IssuePlatformAccessToken(platformPrincipal{UserID: user.ID, Roles: roles}, defaultAccessTokenTTL)
-	if err != nil {
-		return nil, statusFromAuthError(newAuthError("BAD_REQUEST", "failed to generate access token"))
 	}
 
 	if err := m.store.TouchLastLogin(ctx, user.ID, m.now()); err != nil {

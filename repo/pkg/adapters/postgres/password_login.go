@@ -118,6 +118,7 @@ func (s *platformLoginStore) LookupUser(ctx context.Context, namespacedUsername 
 		SELECT u.id, u.password_hash, u.status
 		FROM users u
 		WHERE u.username=$1
+		  AND u.tenant_id IS NULL
 		  AND EXISTS (
 		    SELECT 1
 		    FROM user_roles ur

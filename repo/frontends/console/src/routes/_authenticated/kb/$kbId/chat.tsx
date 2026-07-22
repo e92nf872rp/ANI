@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { Input, Button, Card, Tag } from 'tdesign-react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { api } from '@/api/client'
 
@@ -23,14 +23,18 @@ function KBChat() {
   const { kbId } = Route.useParams()
   const [question, setQuestion] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  // 缓存当前问题的幂等键，同一问题的重试复用同一键以实现幂等去重
+  const idempotencyKeyRef = useRef<string | null>(null)
 
   const queryMutation = useMutation({
     mutationFn: (q: string) =>
+      // 生成或复用幂等键：新问题生成新键，重试复用同一键
       api.POST('/knowledge-bases/{kb_id}/query', {
         params: { path: { kb_id: kbId } },
-        body: { question: q, idempotency_key: `chat-${Date.now()}` },
+        body: { question: q, idempotency_key: idempotencyKeyRef.current ?? `ani_${crypto.randomUUID()}` },
       }).then(({ data }) => data),
     onSuccess: (data) => {
+      idempotencyKeyRef.current = null // 请求成功后清空，下一次提问生成新键
       setMessages(prev => [
         ...prev,
         { role: 'assistant', content: data?.answer ?? '', sources: data?.sources as KBSource[] | undefined },
@@ -40,6 +44,10 @@ function KBChat() {
 
   const handleSend = () => {
     if (!question.trim()) return
+    // 每次新提问生成新幂等键，重试时复用
+    if (!idempotencyKeyRef.current) {
+      idempotencyKeyRef.current = `ani_${crypto.randomUUID()}`
+    }
     setMessages(prev => [...prev, { role: 'user', content: question }])
     queryMutation.mutate(question)
     setQuestion('')

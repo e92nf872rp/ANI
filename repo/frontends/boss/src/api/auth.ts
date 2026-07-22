@@ -52,7 +52,11 @@ const response401Middleware = {
       const endpoint = pathname.startsWith(apiPrefix) ? pathname.slice(apiPrefix.length) : pathname
       const isAuthEndpoint = Array.from(AUTH_ENDPOINTS).some((e) => endpoint === e || endpoint.startsWith(`${e}/`))
       if (!isAuthEndpoint) {
-        handle401()
+        // 先尝试 refresh，成功则让调用方重试，失败才跳登录
+        const refreshed = await refreshAccessToken()
+        if (!refreshed) {
+          handle401()
+        }
       }
     }
     return response
