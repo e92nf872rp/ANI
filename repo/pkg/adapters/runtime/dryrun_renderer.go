@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -26,14 +27,21 @@ func (r *KubernetesDryRunRenderer) Render(ctx context.Context, spec ports.Worklo
 		return nil, err
 	}
 
+	var manifests []ports.WorkloadManifest
 	switch planned.Kind {
 	case ports.WorkloadKindVM:
-		return []ports.WorkloadManifest{renderVM(planned)}, nil
+		manifests = []ports.WorkloadManifest{renderVM(planned)}
 	case ports.WorkloadKindBatchJob:
-		return []ports.WorkloadManifest{renderJob(planned)}, nil
+		manifests = []ports.WorkloadManifest{renderJob(planned)}
 	default:
-		return []ports.WorkloadManifest{renderDeployment(planned)}, nil
+		manifests = []ports.WorkloadManifest{renderDeployment(planned)}
 	}
+	// When a workload identity binding exists, render the K8s Secret that
+	// backs the ANI_WORKLOAD_TOKEN env var so the Deployment can reference it.
+	if planned.Identity != nil && planned.Identity.KeyValue != "" {
+		manifests = append(manifests, renderWorkloadIdentitySecret(planned))
+	}
+	return manifests, nil
 }
 
 func renderVM(spec ports.WorkloadSpec) ports.WorkloadManifest {
@@ -211,9 +219,30 @@ func workloadIdentitySecretName(spec ports.WorkloadSpec) string {
 	seed = strings.ReplaceAll(seed, ":", "-")
 	seed = strings.Trim(seed, "-")
 	if len(seed) > 24 {
-		seed = seed[:24]
+		seed = strings.Trim(seed[:24], "-")
 	}
 	return "ani-wi-" + seed
+}
+
+func renderWorkloadIdentitySecret(spec ports.WorkloadSpec) ports.WorkloadManifest {
+	secretName := workloadIdentitySecretName(spec)
+	content := manifest(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Secret",
+		"metadata": map[string]any{
+			"name":      secretName,
+			"namespace": tenantNamespace(spec.TenantID),
+			"labels": mergeStringMap(labels(spec), map[string]string{
+				"app.kubernetes.io/component": "workload-identity",
+			}),
+			"annotations": annotationsWithInstancePlan(spec),
+		},
+		"type": "Opaque",
+		"data": map[string]string{
+			"token": base64.StdEncoding.EncodeToString([]byte(spec.Identity.KeyValue)),
+		},
+	})
+	return ports.WorkloadManifest{Name: secretName, Kind: "Secret", Provider: "kubernetes", Content: content}
 }
 
 func containerResources(spec ports.WorkloadSpec) map[string]any {

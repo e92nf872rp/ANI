@@ -45,9 +45,9 @@ func (e *LocalProviderDryRun) DryRun(_ context.Context, manifests []ports.Worklo
 		return ports.WorkloadProviderDryRunResult{}, fmt.Errorf("%w: at least one manifest is required", ports.ErrInvalid)
 	}
 
-	provider := manifests[0].Provider
+	provider := primaryProvider(manifests)
 	for _, manifest := range manifests {
-		if manifest.Provider != provider {
+		if !isAuxiliarySecretManifest(manifest) && manifest.Provider != provider {
 			return ports.WorkloadProviderDryRunResult{
 				Accepted:      false,
 				Provider:      provider,
@@ -123,6 +123,10 @@ func validateProviderDryRunDocument(provider string, doc map[string]any) error {
 			if apiVersion != "snapshot.storage.k8s.io/v1" {
 				return fmt.Errorf("kubernetes VolumeSnapshot requires snapshot.storage.k8s.io/v1")
 			}
+		case "Secret":
+			if apiVersion != "v1" {
+				return fmt.Errorf("kubernetes Secret requires v1")
+			}
 		default:
 			return fmt.Errorf("kubernetes provider does not allow kind %q", kind)
 		}
@@ -142,3 +146,30 @@ func validateProviderDryRunDocument(provider string, doc map[string]any) error {
 }
 
 var _ ports.WorkloadProviderDryRun = (*LocalProviderDryRun)(nil)
+
+// primaryProvider returns the provider of the first non-auxiliary manifest in
+// the batch. Workload identity Secrets are auxiliary Kubernetes resources that
+// may accompany a primary workload of a different provider (e.g. a kubevirt
+// VirtualMachine), so they must not be used to determine the batch's primary
+// provider.
+func primaryProvider(manifests []ports.WorkloadManifest) string {
+	for _, manifest := range manifests {
+		if !isAuxiliarySecretManifest(manifest) {
+			return manifest.Provider
+		}
+	}
+	if len(manifests) > 0 {
+		return manifests[0].Provider
+	}
+	return ""
+}
+
+// isAuxiliarySecretManifest reports whether the manifest is an auxiliary
+// Kubernetes Secret rendered to back the workload identity token. Such
+// Secrets always belong to the "kubernetes" provider regardless of the
+// primary workload's provider, so the dry-run and apply gates skip the
+// mixed-provider check for them while still validating them as kubernetes
+// resources.
+func isAuxiliarySecretManifest(manifest ports.WorkloadManifest) bool {
+	return manifest.Kind == "Secret" && manifest.Provider == "kubernetes"
+}

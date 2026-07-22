@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>132</dd></div>
-          <div><dt>Schemas</dt><dd>169</dd></div>
+          <div><dt>Operations</dt><dd>137</dd></div>
+          <div><dt>Schemas</dt><dd>183</dd></div>
         </dl>
       </section>
 
@@ -1001,11 +1001,27 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/registry/images</code></td>
+          <td><code>listRegistryImages</code></td>
+          <td>列出镜像 Tag 视图</td>
+          <td><code>scope:registry:read</code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/registry/images/scan-result</code></td>
           <td><code>getRegistryImageScanResult</code></td>
           <td>获取镜像安全扫描结果</td>
           <td><code>scope:registry:read</code></td>
           <td>200, 400, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/registry/overview</code></td>
+          <td><code>getRegistryOverview</code></td>
+          <td>获取镜像仓库总览</td>
+          <td><code>scope:registry:read</code></td>
+          <td>200, 401, 403</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1033,6 +1049,14 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/registry/projects/{project}/push-instructions</code></td>
+          <td><code>getRegistryProjectPushInstructions</code></td>
+          <td>获取镜像推送说明</td>
+          <td><code>scope:registry:read</code></td>
+          <td>200, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/registry/projects/{project}/repositories</code></td>
           <td><code>listRegistryRepositories</code></td>
           <td>列出项目下镜像仓库</td>
@@ -1054,6 +1078,22 @@
           <td>设置镜像仓库权限</td>
           <td><code>scope:registry:write</code></td>
           <td>200, 400, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/registry/projects/{project}/repositories/{repository}/tags/{tag}</code></td>
+          <td><code>deleteRegistryRepositoryTag</code></td>
+          <td>删除镜像 Tag</td>
+          <td><code>scope:registry:write</code></td>
+          <td>200, 400, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/registry/projects/{project}/repositories/{repository}/tags/{tag}/references</code></td>
+          <td><code>listRegistryRepositoryTagReferences</code></td>
+          <td>列出镜像 Tag 引用方</td>
+          <td><code>scope:registry:read</code></td>
+          <td>200, 400, 401, 403, 404</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1343,11 +1383,25 @@
         <li><code>RefreshAccessTokenResponse</code></li>
         <li><code>RegistryArtifact</code></li>
         <li><code>RegistryArtifactListResponse</code></li>
+        <li><code>RegistryCommand</code></li>
+        <li><code>RegistryDeletedTag</code></li>
+        <li><code>RegistryImage</code></li>
+        <li><code>RegistryImageListResponse</code></li>
+        <li><code>RegistryImageReference</code></li>
+        <li><code>RegistryImageReferenceListResponse</code></li>
+        <li><code>RegistryOverview</code></li>
+        <li><code>RegistryOverviewCapability</code></li>
+        <li><code>RegistryOverviewDeleteRisk</code></li>
+        <li><code>RegistryOverviewQuickAction</code></li>
+        <li><code>RegistryOverviewRelationship</code></li>
+        <li><code>RegistryOverviewResourceSummary</code></li>
+        <li><code>RegistryOverviewVulnerabilitySummary</code></li>
         <li><code>RegistryPermission</code></li>
         <li><code>RegistryProject</code></li>
         <li><code>RegistryProjectListResponse</code></li>
         <li><code>RegistryProjectScanReport</code></li>
         <li><code>RegistryPullSecret</code></li>
+        <li><code>RegistryPushInstructions</code></li>
         <li><code>RegistryRepository</code></li>
         <li><code>RegistryRepositoryListResponse</code></li>
         <li><code>RegistryScanResult</code></li>

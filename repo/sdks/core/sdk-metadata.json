@@ -635,9 +635,21 @@
       "scope": ""
     },
     {
+      "operationId": "listRegistryImages",
+      "method": "GET",
+      "path": "/registry/images",
+      "scope": "scope:registry:read"
+    },
+    {
       "operationId": "getRegistryImageScanResult",
       "method": "GET",
       "path": "/registry/images/scan-result",
+      "scope": "scope:registry:read"
+    },
+    {
+      "operationId": "getRegistryOverview",
+      "method": "GET",
+      "path": "/registry/overview",
       "scope": "scope:registry:read"
     },
     {
@@ -659,6 +671,12 @@
       "scope": "scope:registry:write"
     },
     {
+      "operationId": "getRegistryProjectPushInstructions",
+      "method": "GET",
+      "path": "/registry/projects/{project}/push-instructions",
+      "scope": "scope:registry:read"
+    },
+    {
       "operationId": "listRegistryRepositories",
       "method": "GET",
       "path": "/registry/projects/{project}/repositories",
@@ -675,6 +693,18 @@
       "method": "POST",
       "path": "/registry/projects/{project}/repositories/{repository}/permissions",
       "scope": "scope:registry:write"
+    },
+    {
+      "operationId": "deleteRegistryRepositoryTag",
+      "method": "DELETE",
+      "path": "/registry/projects/{project}/repositories/{repository}/tags/{tag}",
+      "scope": "scope:registry:write"
+    },
+    {
+      "operationId": "listRegistryRepositoryTagReferences",
+      "method": "GET",
+      "path": "/registry/projects/{project}/repositories/{repository}/tags/{tag}/references",
+      "scope": "scope:registry:read"
     },
     {
       "operationId": "getRegistryProjectScanReport",
@@ -919,11 +949,25 @@
     "RefreshAccessTokenResponse",
     "RegistryArtifact",
     "RegistryArtifactListResponse",
+    "RegistryCommand",
+    "RegistryDeletedTag",
+    "RegistryImage",
+    "RegistryImageListResponse",
+    "RegistryImageReference",
+    "RegistryImageReferenceListResponse",
+    "RegistryOverview",
+    "RegistryOverviewCapability",
+    "RegistryOverviewDeleteRisk",
+    "RegistryOverviewQuickAction",
+    "RegistryOverviewRelationship",
+    "RegistryOverviewResourceSummary",
+    "RegistryOverviewVulnerabilitySummary",
     "RegistryPermission",
     "RegistryProject",
     "RegistryProjectListResponse",
     "RegistryProjectScanReport",
     "RegistryPullSecret",
+    "RegistryPushInstructions",
     "RegistryRepository",
     "RegistryRepositoryListResponse",
     "RegistryScanResult",
@@ -1025,6 +1069,7 @@
     "listNetworkVPCs",
     "listStorageObjects",
     "listObservabilityAlertRules",
+    "listRegistryImages",
     "listRegistryProjects",
     "listRegistryRepositories",
     "listRegistryArtifacts",

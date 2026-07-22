@@ -4,7 +4,8 @@ metadata:
   name: ani-inference
   labels:
     app.kubernetes.io/part-of: ani-platform
-    ani.kubercloud.io/queue-class: inference
+    ani.kubercloud.io/workload-class: inference
+    ani.kubercloud.io/platform-default: "true"
 spec:
   weight: 10
   reclaimable: false
@@ -15,7 +16,8 @@ metadata:
   name: ani-training
   labels:
     app.kubernetes.io/part-of: ani-platform
-    ani.kubercloud.io/queue-class: training
+    ani.kubercloud.io/workload-class: training
+    ani.kubercloud.io/platform-default: "true"
 spec:
   weight: 5
   reclaimable: true

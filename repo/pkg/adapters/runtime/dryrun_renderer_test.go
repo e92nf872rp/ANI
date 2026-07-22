@@ -55,10 +55,13 @@ func TestKubernetesDryRunRendererRendersGPUDeployment(t *testing.T) {
 		t.Fatalf("Render() error = %v", err)
 	}
 	content := manifests[0].Content
-	for _, want := range []string{"Deployment", "nvidia.com/gpu", "runtimeClassName", "nvidia", "schedulerName", "volcano", "storage"} {
+	for _, want := range []string{"Deployment", "nvidia.com/gpu", "schedulerName", "volcano", "storage"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("rendered GPU manifest missing %q:\n%s", want, content)
 		}
+	}
+	if strings.Contains(content, "runtimeClassName") {
+		t.Fatalf("rendered GPU manifest should not contain runtimeClassName when decision leaves it empty:\n%s", content)
 	}
 }
 

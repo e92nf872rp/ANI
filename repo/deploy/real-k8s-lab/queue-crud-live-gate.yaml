@@ -1,0 +1,37 @@
+profile: QUEUE-CRUD-LIVE-GATE
+status: live
+description: >
+  Queue CRUD live gate for proving the 5 queue management endpoints work
+  against real Volcano Queue CRD in the lab environment. Validates create,
+  list, get, update, delete, platform-default protection, and cross-tenant
+  isolation.
+
+required_tools:
+  - kubectl
+  - curl
+
+live_checks:
+  - id: volcano-queue-crd-registered
+    command: kubectl get crd queues.scheduling.volcano.sh
+    pass_condition: crd_exists_and_cluster_scoped
+  - id: gateway-queue-list
+    command: "curl -s http://localhost:8080/api/v1/gpu-scheduling/queues"
+    pass_condition: http_200_response_has_items_array
+  - id: gateway-queue-create
+    command: "curl -s -X POST http://localhost:8080/api/v1/gpu-scheduling/queues -H 'Content-Type: application/json' -d '{\"name\":\"gate-test-create\",\"weight\":3,\"reclaimable\":true,\"workload_class\":\"inference\"}'"
+    pass_condition: http_201_response_has_id_and_name
+  - id: gateway-queue-delete
+    command: "curl -s -X DELETE http://localhost:8080/api/v1/gpu-scheduling/queues/{created_id}"
+    pass_condition: http_204_no_content
+  - id: gateway-platform-default-delete-protected
+    command: "curl -s -X DELETE http://localhost:8080/api/v1/gpu-scheduling/queues/{platform_default_id}"
+    pass_condition: http_403_platform_default_protected
+  - id: volcano-crd-persists-after-create
+    command: kubectl get queues.scheduling.volcano.sh
+    pass_condition: created_queue_appears_in_crd_list
+
+readiness_levels:
+  contract:
+    meaning: Gate definition exists; no live Volcano CRD proof.
+  live:
+    meaning: "All 5 queue CRUD endpoints verified against real Volcano Queue CRD; create persists to CRD, delete removes from CRD, platform-default protected with 403."

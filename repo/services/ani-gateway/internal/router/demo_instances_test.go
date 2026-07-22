@@ -35,8 +35,8 @@ func TestDemoInstanceServiceCreatesVMContainerAndGPUContainer(t *testing.T) {
 		if result.FinalStatus.State != ports.WorkloadStateRunning {
 			t.Fatalf("Create(%s) state = %s, want running", kind, result.FinalStatus.State)
 		}
-		if len(result.Manifests) != 1 {
-			t.Fatalf("Create(%s) manifests = %d, want 1", kind, len(result.Manifests))
+		if len(result.Manifests) < 1 {
+			t.Fatalf("Create(%s) manifests = %d, want at least 1", kind, len(result.Manifests))
 		}
 		record, err := api.service.Get(context.Background(), ports.WorkloadInstanceGetRequest{
 			TenantID:   result.Ref.TenantID,
@@ -422,7 +422,7 @@ func TestDemoInstanceObservabilityResponsesUseLocalProfile(t *testing.T) {
 }
 
 func TestDemoInstanceObservabilityCanUseInstanceNameForProviderTarget(t *testing.T) {
-	api := newDemoInstanceAPIWithObservability(nil, true)
+	api := newDemoInstanceAPIWithObservability(nil, true, nil, nil)
 	spec, err := demoSpecFromRequest(demoCreateInstanceRequest{Kind: "container", Name: "s07-observability-live"}, "tenant-a")
 	if err != nil {
 		t.Fatalf("demoSpecFromRequest error = %v", err)
@@ -448,7 +448,7 @@ func TestDemoInstanceObservabilityCanUseInstanceNameForProviderTarget(t *testing
 		t.Fatalf("observability target = %q, want instance name", got)
 	}
 
-	localAPI := newDemoInstanceAPIWithObservability(nil, false)
+	localAPI := newDemoInstanceAPIWithObservability(nil, false, nil, nil)
 	if got := localAPI.observabilityTargetID(record); got != created.Ref.InstanceID {
 		t.Fatalf("local observability target = %q, want instance id %q", got, created.Ref.InstanceID)
 	}

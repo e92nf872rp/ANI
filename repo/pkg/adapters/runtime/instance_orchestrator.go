@@ -351,11 +351,48 @@ func gpuStatusInfo(spec ports.WorkloadSpec, status ports.WorkloadStatus) *ports.
 	}
 	return &ports.GPUInstanceStatus{
 		Vendor:             firstGPUVendor(spec.Resources.GPU.PreferredVendors),
-		Model:              firstNonEmpty(firstString(spec.Resources.GPU.PreferredModels), "unspecified"),
+		Model:              resolvedGPUModel(spec),
 		Count:              count,
 		SchedulingReason:   gpuSchedulingReason(spec),
 		UtilizationPercent: gpuUtilizationPercent(status.State),
+		ResourceName:       annotationValue(spec, gpuResourceNameAnnotation),
+		QueueName:          annotationValue(spec, gpuQueueAnnotation),
 	}
+}
+
+// gpuResourceNameAnnotation and gpuQueueAnnotation carry the scheduling
+// decision's chosen resource name (e.g. nvidia.com/gpu / nvidia.com/vgpu) and
+// the Volcano/HAMi queue name. They are written by the planning runtime in
+// planning.go and read here so the API can surface the real allocation mode.
+const (
+	gpuResourceNameAnnotation = "ani.kubercloud.io/gpu-resource-name"
+	gpuQueueAnnotation        = "ani.kubercloud.io/gpu-queue"
+)
+
+// annotationValue returns the trimmed value of the annotation key, or "" when
+// the annotation is absent.
+func annotationValue(spec ports.WorkloadSpec, key string) string {
+	if spec.Annotations == nil {
+		return ""
+	}
+	return strings.TrimSpace(spec.Annotations[key])
+}
+
+// gpuSelectedModelAnnotation is the annotation key written by the planning
+// runtime when PlanScheduling selects a concrete GPU node. It carries the
+// real GPU model of the chosen node (e.g. "RTX4090") as opposed to the
+// PreferredModels in the request which is only a scheduling preference.
+const gpuSelectedModelAnnotation = "ani.kubercloud.io/gpu-selected-model"
+
+// resolvedGPUModel returns the real GPU model the workload is scheduled onto,
+// falling back to the requested PreferredModels and finally "unspecified".
+func resolvedGPUModel(spec ports.WorkloadSpec) string {
+	if spec.Annotations != nil {
+		if selected := strings.TrimSpace(spec.Annotations[gpuSelectedModelAnnotation]); selected != "" {
+			return selected
+		}
+	}
+	return firstNonEmpty(firstString(spec.Resources.GPU.PreferredModels), "unspecified")
 }
 
 func firstGPUVendor(vendors []ports.GPUVendor) ports.GPUVendor {
@@ -374,7 +411,10 @@ func firstString(values []string) string {
 
 func gpuSchedulingReason(spec ports.WorkloadSpec) string {
 	vendor := string(firstGPUVendor(spec.Resources.GPU.PreferredVendors))
-	model := firstNonEmpty(firstString(spec.Resources.GPU.PreferredModels), "any")
+	model := resolvedGPUModel(spec)
+	if model == "" {
+		model = "any"
+	}
 	pool := firstNonEmpty(spec.Resources.GPU.Pool, "local-profile")
 	count := spec.Resources.GPU.RequiredCount
 	if count <= 0 {

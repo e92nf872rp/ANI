@@ -54,10 +54,10 @@ func (e *LocalProviderApply) Apply(_ context.Context, request ports.WorkloadProv
 		return ports.WorkloadProviderApplyResult{}, err
 	}
 
-	provider := request.Manifests[0].Provider
+	provider := primaryProvider(request.Manifests)
 	refs := make([]string, 0, len(request.Manifests))
 	for _, manifest := range request.Manifests {
-		refs = append(refs, provider+"/"+manifest.Kind+"/"+manifest.Name)
+		refs = append(refs, manifest.Provider+"/"+manifest.Kind+"/"+manifest.Name)
 	}
 
 	return ports.WorkloadProviderApplyResult{
@@ -101,7 +101,7 @@ func validateProviderApplyRequest(request ports.WorkloadProviderApplyRequest) er
 		return fmt.Errorf("%w: at least one manifest is required", ports.ErrInvalid)
 	}
 
-	provider := request.Manifests[0].Provider
+	provider := primaryProvider(request.Manifests)
 	if provider == "" {
 		return fmt.Errorf("%w: manifest provider is required", ports.ErrInvalid)
 	}
@@ -112,7 +112,7 @@ func validateProviderApplyRequest(request ports.WorkloadProviderApplyRequest) er
 		return fmt.Errorf("%w: dry-run manifest count does not match apply request", ports.ErrInvalid)
 	}
 	for _, manifest := range request.Manifests {
-		if manifest.Provider != provider {
+		if !isAuxiliarySecretManifest(manifest) && manifest.Provider != provider {
 			return fmt.Errorf("%w: mixed providers are not allowed in one apply batch", ports.ErrInvalid)
 		}
 		var doc map[string]any

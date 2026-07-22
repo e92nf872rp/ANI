@@ -39,6 +39,36 @@
 
 闭环规则：每个 provider slice 必须具备 real adapter/provider runtime、live gate、非敏感 evidence JSON、development record 和全局 production-shape guard。S05-S07 B 轨可以继续 作为历史兼容 token 保留；截至 2026-06-21，S05/S06/S07 均已 passed。
 
+## GPU 调度功能流（skill 流水线推进中，2026-07）
+
+> 独立于 Sprint 13/14 real provider 收敛的 GPU 调度功能开发流，通过 `/prd-to-spec` → `/to-issues` → `/goal` skill 流水线推进。共 13 个 Issue，覆盖 Core OpenAPI 契约、Queue adapter/handler、Console 前端组件和 BOSS 前端页面。
+
+| Issue | 描述 | 状态 | 证据 |
+|---|---|---|---|
+| #1 | OpenAPI 新增队列 CRUD + InstanceGPU 扩展 | ✅ 已完成 | `development-records/gpu-scheduling-issue-01-openapi-queue-crud.md`；8 项 AC 全部验证通过 |
+| #2 | Core Queue adapter + handler | ✅ 已完成 | `development-records/gpu-scheduling-issue-02-queue-adapter-handler.md`；9 项 AC 全部验证通过；26 个单测通过 |
+| #3 | Plan/scheduling extend | ✅ 已完成 | `development-records/gpu-scheduling-issue-03-plan-scheduling-extend.md`；10 项 AC 全部验证通过；13 个新单测通过 |
+| #4 | Lab HAMi/Volcano/DCGM | ✅ 已完成 | `development-records/gpu-scheduling-issue-04-lab-hami-volcano-dcgm.md`；9 项 AC 全部验证通过；Volcano 1.15.0 + HAMi 2.9.0 + DCGM 在 3 节点集群部署成功 |
+| #5 | GPU smoke live gate | ✅ 已完成 | `development-records/gpu-scheduling-issue-05-gpu-smoke-live-gate.md`；4 项 AC 全部验证通过；Smoke A (volcano+整卡) + Smoke B (HAMi vGPU) 均调度成功 |
+| #6 | Queue CRUD live gate | ✅ 已完成 | `development-records/gpu-scheduling-issue-06-queue-crud-live-gate.md`；7 项 AC 全部验证通过；5 端点通过真实 Volcano CRD 验证 + 平台默认 403 + 跨租户 404 |
+| #7 | Console Shell 组件 | ✅ 已完成 | `development-records/gpu-scheduling-issue-07-console-shell-components.md`；6 项 AC 全部验证通过；tsc + vite build 通过 |
+| #8 | Console GPU 算力管理页 | ✅ 已完成 | `development-records/gpu-scheduling-issue-08-console-gpu-management-page.md`；12 项 AC 全部验证通过；tsc + vite build 通过 |
+| #9 | Console GPU 容器实例 | ✅ 已完成 | `development-records/gpu-scheduling-issue-09-console-gpu-container-instance.md`；14 项 AC 全部验证通过；tsc + vite build 通过 |
+| #10 | Console 队列设置页 | ✅ 已完成 | `development-records/gpu-scheduling-issue-10-console-queue-settings-page.md`；14 项 AC 全部验证通过；tsc + vite build 通过 |
+| #11 | Console 概览 GPU 卡片 | ✅ 已完成 | `development-records/gpu-scheduling-issue-11-console-overview-gpu-card.md`；8 项 AC 全部验证通过；tsc + vite build 通过 |
+| #12 | BOSS 前端骨架 | ✅ 已完成 | `development-records/gpu-scheduling-issue-12-boss-frontend-skeleton.md`；10 项 AC 全部验证通过；tsc + vite build 通过 |
+| #13 | BOSS GPU 资源池页 | ✅ 已完成 | `development-records/gpu-scheduling-issue-13-boss-gpu-pool-page.md`；16 项 AC 全部验证通过；tsc + vite build 通过 |
+
+### GPU 调度三段式 PR 拆分（2026-07-21）
+
+| PR | 内容 | 状态 | 说明 |
+|---|---|---|---|
+| PR #21 (1/3) | v1.yaml 契约 + SDK/API docs/TS schema 生成物 | ✅ 已合入 main | `feat/core): add GPU scheduling queue CRUD contract to v1.yaml` |
+| PR #31 (2/3) | pkg/ports 接口（GPUSchedulingQueueStore + GPUInventory 扩展） | ✅ 已合入 main | `feat(core): add GPU scheduling queue interface to pkg/ports` |
+| PR #46 (3/3) | adapters + gateway + 前端 + manifests 实现 | 🟡 OPEN 等待 review | review-it 修复 4 项（UID panic/PATCH 幂等/URL 编码/错误语义）；5 项 follow-up 延迟；笔记 `gpu-scheduling-batch-01-13-note-it.md §5` |
+
+Issue 清单：`repo/services/tasks/issues/issue-01-openapi-queue-crud.md` ~ `issue-13-boss-gpu-pool-page.md`
+
 ## Sprint 13 执行矩阵
 
 | 候选切片 | 真实组件方向 | 代码边界 | 当前状态 |

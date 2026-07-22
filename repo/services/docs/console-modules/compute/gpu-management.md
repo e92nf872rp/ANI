@@ -26,16 +26,21 @@
 
 当前一级权威源以 `ANI-main/repo/api/openapi/v1.yaml` 为准，可确认事实如下：
 
-- 顶部资源域说明中规划了 `gpu-inventory` 资源域；**Phase 2 已在 `v1.yaml` 声明** `GET /api/v1/gpu-inventory` 与 `GET /api/v1/gpu-inventory/occupancy`（handler 待实现）
-- `InstanceRecord` 存在 `gpu` 字段，但这是 `gpu_container` 实例摘要的一部分，不等于 GPU inventory 独立资源契约
-- 当前 `v1.yaml` 中**没有**冻结独立的 GPU 页面路径
-- 当前 `v1.yaml` 中**没有**冻结 `GpuOverviewResponse`、`GpuDistributionResponse`、`GpuNodeListResponse`、`GpuDeviceListResponse`、`GpuOccupancyResponse`
+- `GET /api/v1/gpu-inventory`（`listGPUInventory`）— ✅ 已冻结
+- `GET /api/v1/gpu-inventory/occupancy`（`getGPUOccupancy`）— ✅ 已冻结
+- `GET /api/v1/observability/query`（`queryObservability`）— ✅ 已冻结（DCGM 利用率 PromQL 代理）
+- `POST /api/v1/instances`（`kind=gpu_container`）— ✅ 已冻结
+- `InstanceRecord.gpu`（`vendor`/`model`/`count`）— ✅ 已冻结
+- **P0 待补**：`GET/POST/GET/PATCH/DELETE /api/v1/gpu-scheduling/queues` — 待 Core P0-① 冻结
+- **P0 待补**：`scope:gpu-scheduling:read` / `scope:gpu-scheduling:write` — 待 Core P0-① 冻结
+- **P0 待补**：`InstanceRecord.gpu.queue_name` / `resource_name` / `scheduling_reason` — 待 Core P0-① 冻结
+- **P0 待补**：DCGM PromQL 模板 `avg(DCGM_FI_DEV_GPU_UTIL{job="dcgm-exporter"})` — 待 Core P0-④ lab 验证
 
 结论：
 
-- 页面职责可以先定义
-- 字段口径可以先收口
-- 独立 GPU API 只能写成待补边界，不能写成已冻结契约
+- GPU 清单/占用 API 已冻结，页面可正式对接
+- 队列 CRUD API 为 P0 待补，先改 `v1.yaml` 再实现（SPEC `spec-core-gpu-scheduling.md` §4.1）
+- 不存在 `GpuOverviewResponse` 等自造 schema，一律使用已冻结的 `GPUInventoryListResponse` / `GPUOccupancyStats`
 
 ## 页面职责
 
@@ -47,44 +52,51 @@
 ## 页面结构
 
 ```text
-GPU 算力管理
-├── 资源总览
+GPU 算力管理（路由 /compute/gpu）
+├── 资源总览 KPI
 │   ├── GPU 总量
 │   ├── 已分配
 │   ├── 空闲
-│   ├── 平均利用率
+│   ├── 平均利用率（DCGM PromQL 代理）
 │   └── 异常设备数
 ├── GPU 型号分布
-├── GPU 节点列表
-├── GPU 设备列表
-├── 租户内占用分布
-└── 资源动作（待补）
-    ├── 分配 GPU
-    └── 回收 / 释放 GPU
+├── Tabs
+│   ├── 节点（聚合 inventory by node）
+│   ├── 设备（明细 GPUInventoryRecord）
+│   └── 占用分布
+├── 资源动作（待补）
+│   ├── 分配 GPU
+│   └── 回收 / 释放 GPU
+└── 调度队列设置（跳转 /settings/gpu-queues）
 ```
+
+**关联页面：**
+- `GPU 容器实例`（`/compute/gpu-containers`）— 创建 GPU 容器 + 选择调度队列
+- `调度队列设置`（`/settings/gpu-queues`）— 租户管理员 CRUD 队列
+- `概览页 GPU 卡`（`/`）— 复用 occupancy 数据
 
 ## 数据来源与分层约束
 
-### 当前可安全引用的权威源
+### 当前已冻结的权威源
 
 | 类型 | 来源 | 当前用途 |
 |---|---|---|
-| Core 资源域说明 | `ANI-main/repo/api/openapi/v1.yaml` | 证明 GPU 归属 `Core` |
-| Core schema | `InstanceRecord.gpu` | 仅承接 `gpu_container` 调度与利用率摘要 |
-| Core schema | `InstanceRecord.state_reason` | 可承接如 `InsufficientGPU` 的实例原因说明 |
-| Core 路径 | `/api/v1/instances` | 作为关联实例跳转事实来源 |
-| Core 路径 | `/api/v1/observability/query` | 仅作为后续监控联动参考 |
+| Core 路径 | `GET /api/v1/gpu-inventory`（`listGPUInventory`） | 设备列表 + 型号/节点筛选 |
+| Core 路径 | `GET /api/v1/gpu-inventory/occupancy`（`getGPUOccupancy`） | KPI 总量/已分配/空闲/异常 |
+| Core 路径 | `GET /api/v1/observability/query`（`queryObservability`） | DCGM 平均利用率 PromQL 代理 |
+| Core schema | `GPUInventoryRecord` | 设备明细字段 |
+| Core schema | `GPUOccupancyStats` | KPI + `by_gpu_type` 型号分布 |
+| Core schema | `InstanceRecord.gpu` | GPU 容器摘要（vendor/model/count） |
+| Core schema | `InstanceRecord.state_reason` | 实例创建失败原因（如 `InsufficientGPU`） |
 
-### 当前未冻结能力
+### P0 待补能力
 
 | 能力 | 当前状态 | 文档写法 |
 |---|---|---|
-| GPU 总览独立接口 | 未冻结 | 只写页面目标 |
-| GPU 型号分布独立接口 | 未冻结 | 只写页面目标 |
-| GPU 节点独立接口 | 未冻结 | 只写页面目标 |
-| GPU 设备独立接口 | 未冻结 | 只写页面目标 |
-| GPU 占用分布独立接口 | 未冻结 | 只写页面目标 |
-| GPU 分配 / 回收动作 | 未冻结 | 只写待补边界 |
+| 队列 CRUD API | 待 Core P0-① 冻结 | 写「P0 待补」+ 引用 SPEC `spec-core-gpu-scheduling.md` §4 |
+| `InstanceRecord.gpu.queue_name` | 待 Core P0-① 冻结 | 写「P0 待补」 |
+| DCGM PromQL 模板 | 待 Core P0-④ lab 验证 | 写「P0 待补」 |
+| GPU 分配 / 回收独立动作 | 未冻结 | 只写待补边界 |
 
 ### 关键边界
 
@@ -192,18 +204,25 @@ GPU 算力管理
 | 操作 | 当前状态 | 说明 |
 |---|---|---|
 | 查看页面结构和区块定义 | 可用 | 当前文档已收口 |
-| 查看 GPU 独立总览数据 | 部分 | Phase 2 已声明 `gpu-inventory*`；见 `gpu-inventory-ui.md` |
-| 查看 GPU 节点/设备明细 | 部分 | 同上；无独立 CRUD |
-| 查看 GPU 占用分布 | YAML 已声明 | `GET /api/v1/gpu-inventory/occupancy` <!-- ADDED-TO-YAML: GET /api/v1/gpu-inventory/occupancy (Core v1.yaml, Phase 2 2026-06-17) --> |
+| 查看 GPU 总览 KPI | ✅ 已冻结 | `GET /gpu-inventory/occupancy`（`GPUOccupancyStats`） |
+| 查看设备明细 | ✅ 已冻结 | `GET /gpu-inventory`（`GPUInventoryRecord`） |
+| 查看 GPU 型号分布 | ✅ 已冻结 | `GPUOccupancyStats.by_gpu_type` |
+| 查看 DCGM 平均利用率 | ✅ 已冻结 | `GET /observability/query`（PromQL 代理） |
+| 查看调度队列列表 | P0 待补 | `GET /gpu-scheduling/queues`（待 Core P0-①） |
+| 创建/编辑/删除调度队列 | P0 待补 | `/gpu-scheduling/queues` CRUD（待 Core P0-①） |
 | 提交 GPU 分配 / 回收动作 | 待补 | 需 `Core` 冻结独立写接口 |
 
 ## 接口冻结规则
 
 ### 当前正式结论
 
-- 当前 `ANI-main/repo/api/openapi/v1.yaml` 中没有独立的 GPU 页面接口路径
-- 当前不得使用 `GpuOverviewResponse`、`GpuDistributionResponse`、`GpuNodeListResponse`、`GpuDeviceListResponse`、`GpuOccupancyResponse`
-- 当前不得使用 `/api/v1/gpu-resources/*`、`/api/v1/gpu-allocations*`
+- ✅ `GET /api/v1/gpu-inventory`（`listGPUInventory`）— 已冻结
+- ✅ `GET /api/v1/gpu-inventory/occupancy`（`getGPUOccupancy`）— 已冻结
+- ✅ `GET /api/v1/observability/query`（`queryObservability`）— 已冻结
+- ✅ `POST /api/v1/instances`（`kind=gpu_container`）— 已冻结
+- **P0 待补**：`/api/v1/gpu-scheduling/queues` CRUD 5 端点 — 待 Core P0-① 冻结
+- 不得使用 `GpuOverviewResponse`、`GpuDistributionResponse` 等自造 schema
+- 不得使用 `/api/v1/gpu-resources/*`、`/api/v1/gpu-allocations*`、`/api/v1/console/*`
 
 ### 可安全引用的关联能力
 
@@ -245,8 +264,11 @@ GPU 算力管理
 
 ## 当前阶段产物
 
-- `tasks/modules/prd/console/compute/prd-console-gpu-management.md`
-- `tasks/modules/spec/console/compute/spec-console-gpu-management.md`
+- PRD: `tasks/modules/prd/console/gpu-inventory/prd-k8s-gpu-hami-volcano-scheduling.md`
+- UX: `tasks/modules/prd/console/gpu-inventory/ux-console-gpu-scheduling.md`
+- SPEC (Console): `tasks/modules/spec/console/gpu-inventory/spec-console-gpu-scheduling.md`
+- SPEC (Core): `tasks/modules/spec/core/gpu-inventory/spec-core-gpu-scheduling.md`
+- SPEC (BOSS): `tasks/modules/spec/boss/gpu-inventory/spec-boss-gpu-pool.md`
 - 上述文件用于追溯本轮设计过程；后续以本文件为主维护源
 
 ## 回填验收标准

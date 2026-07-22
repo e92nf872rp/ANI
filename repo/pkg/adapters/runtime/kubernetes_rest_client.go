@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -131,12 +132,12 @@ func readKubernetesServiceAccountToken(path string) (string, error) {
 }
 
 func kubernetesHTTPClient(caFile string, inCluster bool) (*http.Client, error) {
-	if !inCluster {
-		return http.DefaultClient, nil
-	}
 	caPath := strings.TrimSpace(caFile)
-	if caPath == "" {
+	if caPath == "" && inCluster {
 		caPath = defaultKubernetesServiceAccountCAFile
+	}
+	if caPath == "" {
+		return http.DefaultClient, nil
 	}
 	caData, err := os.ReadFile(caPath)
 	if err != nil {
@@ -331,6 +332,26 @@ func (c *KubernetesRESTClient) Observe(ctx context.Context, request ports.Worklo
 
 func (c *KubernetesRESTClient) do(ctx context.Context, method string, endpoint string, contentType string, body []byte) ([]byte, error) {
 	return c.doWithPolicy(ctx, c.policy, method, endpoint, contentType, body)
+}
+
+// Host returns the Kubernetes API base URL used by this client.
+func (c *KubernetesRESTClient) Host() string {
+	return c.host
+}
+
+// Do performs a raw K8s REST call and returns the response body, HTTP status
+// code, and error. It implements the VolcanoHTTPDoer interface so the
+// VolcanoQueueStore adapter can reuse the same K8s REST client.
+func (c *KubernetesRESTClient) Do(ctx context.Context, method string, endpoint string, contentType string, body []byte) ([]byte, int, error) {
+	data, err := c.do(ctx, method, endpoint, contentType, body)
+	if err != nil {
+		var statusErr *resilience.StatusError
+		if errors.As(err, &statusErr) {
+			return data, statusErr.StatusCode, err
+		}
+		return data, 0, err
+	}
+	return data, 200, nil
 }
 
 func (c *KubernetesRESTClient) doIdempotent(ctx context.Context, method string, endpoint string, contentType string, body []byte) ([]byte, error) {

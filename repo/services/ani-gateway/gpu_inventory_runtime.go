@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
+	"github.com/kubercloud/ani/pkg/bootstrap"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
@@ -61,4 +63,125 @@ func newGatewayGPUInventory(cfg gatewayGPUInventoryRuntimeConfig) (ports.GPUInve
 	default:
 		return nil, fmt.Errorf("%w: unsupported GPU_INVENTORY_PROVIDER %q", ports.ErrUnsupported, mode)
 	}
+}
+
+// newGatewayKubernetesClient builds a Kubernetes REST client that shares the
+// same in-cluster/out-of-cluster config as the GPU inventory runtime. It
+// returns nil (no error) when the provider mode is not kubernetes_rest so the
+// gateway can keep running without orphan discovery in local/dev profiles.
+func newGatewayKubernetesClient(cfg gatewayGPUInventoryRuntimeConfig) (*runtimeadapter.KubernetesRESTClient, error) {
+	if strings.TrimSpace(cfg.ProviderMode) != "kubernetes_rest" {
+		return nil, nil
+	}
+	client, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
+		Host:            cfg.KubernetesAPIHost,
+		ServiceHost:     cfg.KubernetesServiceHost,
+		ServicePort:     cfg.KubernetesServicePort,
+		BearerToken:     cfg.KubernetesBearerToken,
+		BearerTokenFile: cfg.KubernetesServiceAccountTokenFile,
+		CAFile:          cfg.KubernetesServiceAccountCAFile,
+		FieldManager:    cfg.KubernetesProviderManager,
+		HTTPClient:      cfg.KubernetesHTTPClient,
+		RequestTimeout:  cfg.KubernetesRequestTimeout,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return client, nil
+}
+
+type gatewayGPUSchedulingQueueRuntimeConfig struct {
+	ProviderMode                      string
+	KubernetesAPIHost                 string
+	KubernetesServiceHost             string
+	KubernetesServicePort             string
+	KubernetesBearerToken             string
+	KubernetesServiceAccountTokenFile string
+	KubernetesServiceAccountCAFile    string
+	VolcanoQueueNamespace             string
+	KubernetesHTTPClient              *http.Client
+	KubernetesRequestTimeout          time.Duration
+}
+
+func gatewayGPUSchedulingQueueRuntimeConfigFromEnv() gatewayGPUSchedulingQueueRuntimeConfig {
+	return gatewayGPUSchedulingQueueRuntimeConfig{
+		ProviderMode:                      os.Getenv("GPU_SCHEDULING_QUEUE_PROVIDER"),
+		KubernetesAPIHost:                 os.Getenv("KUBERNETES_API_HOST"),
+		KubernetesServiceHost:             os.Getenv("KUBERNETES_SERVICE_HOST"),
+		KubernetesServicePort:             os.Getenv("KUBERNETES_SERVICE_PORT"),
+		KubernetesBearerToken:             os.Getenv("KUBERNETES_BEARER_TOKEN"),
+		KubernetesServiceAccountTokenFile: os.Getenv("KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE"),
+		KubernetesServiceAccountCAFile:    os.Getenv("KUBERNETES_SERVICE_ACCOUNT_CA_FILE"),
+		VolcanoQueueNamespace:             os.Getenv("VOLCANO_QUEUE_NAMESPACE"),
+		KubernetesRequestTimeout:          gatewayDurationFromEnv("KUBERNETES_REQUEST_TIMEOUT"),
+	}
+}
+
+// newGatewayGPUSchedulingQueueStore builds the queue store for the current
+// runtime profile. "local" and unset default to an in-memory store so the
+// Console queue settings page is usable in dev without a real Volcano CRD.
+// "volcano_rest" wires the real Volcano CRD adapter.
+func newGatewayGPUSchedulingQueueStore(cfg gatewayGPUSchedulingQueueRuntimeConfig) (ports.GPUSchedulingQueueStore, error) {
+	switch mode := strings.TrimSpace(cfg.ProviderMode); mode {
+	case "", "local", "not_configured":
+		return runtimeadapter.NewLocalGPUSchedulingQueueStore(), nil
+	case "volcano_rest":
+		client, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
+			Host:            cfg.KubernetesAPIHost,
+			ServiceHost:     cfg.KubernetesServiceHost,
+			ServicePort:     cfg.KubernetesServicePort,
+			BearerToken:     cfg.KubernetesBearerToken,
+			BearerTokenFile: cfg.KubernetesServiceAccountTokenFile,
+			CAFile:          cfg.KubernetesServiceAccountCAFile,
+			HTTPClient:      cfg.KubernetesHTTPClient,
+			RequestTimeout:  cfg.KubernetesRequestTimeout,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("kubernetes REST client for volcano queue store: %w", err)
+		}
+		return runtimeadapter.NewVolcanoQueueStore(runtimeadapter.VolcanoQueueStoreConfig{
+			Doer:                   client,
+			BaseURL:                client.Host(),
+			Namespace:              cfg.VolcanoQueueNamespace,
+			EnsurePlatformDefaults: true,
+		}), nil
+	default:
+		return nil, fmt.Errorf("%w: unsupported GPU_SCHEDULING_QUEUE_PROVIDER %q", ports.ErrUnsupported, mode)
+	}
+}
+
+// gatewayGPUInstanceStoreConfig configures the GPU instance store used to
+// resolve "归属实例" on the GPU inventory page. When DATABASE_URL is empty
+// the store is nil and the inventory page falls back to the old behaviour
+// (no instance_id echo), keeping local/dev profile zero-dependency.
+type gatewayGPUInstanceStoreConfig struct {
+	DatabaseURL string
+}
+
+func gatewayGPUInstanceStoreConfigFromEnv() gatewayGPUInstanceStoreConfig {
+	return gatewayGPUInstanceStoreConfig{
+		DatabaseURL: strings.TrimSpace(os.Getenv("DATABASE_URL")),
+	}
+}
+
+// newGatewayGPUInstanceStore builds the WorkloadInstanceStore used by the GPU
+// inventory handler to echo back the owning instance per GPU card. Returns
+// (nil, nil) when DATABASE_URL is unset so local/dev profiles keep the old
+// "no instance_id" behaviour without requiring a running PostgreSQL.
+func newGatewayGPUInstanceStore(ctx context.Context, cfg gatewayGPUInstanceStoreConfig) (ports.WorkloadInstanceStore, error) {
+	if cfg.DatabaseURL == "" {
+		return nil, nil
+	}
+	metadata, closeStore, err := bootstrap.ConnectMetadataStore(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("connect metadata store for gpu instance store: %w", err)
+	}
+	// Gateway process owns the store for read-only echo; attach closer to
+	// the process lifecycle via a goroutine that closes on context done.
+	// The caller (main) does not keep a reference, so we detach here.
+	go func() {
+		<-ctx.Done()
+		closeStore()
+	}()
+	return runtimeadapter.NewMetadataInstanceStore(metadata), nil
 }

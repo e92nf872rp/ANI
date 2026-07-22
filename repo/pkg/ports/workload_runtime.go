@@ -185,10 +185,17 @@ type ContainerInstanceStatus struct {
 }
 
 type GPUInstanceStatus struct {
-	Vendor             GPUVendor
-	Model              string
-	Count              int
-	QueueName          string
+	Vendor GPUVendor
+	Model  string
+	Count  int
+	// QueueName is the Volcano/HAMi scheduling queue the workload is routed
+	// to, sourced from the planning annotation "ani.kubercloud.io/gpu-queue".
+	QueueName string
+	// ResourceName is the Kubernetes extended resource name the workload is
+	// scheduled against (e.g. "nvidia.com/gpu" for whole-card, "nvidia.com/vgpu"
+	// for vGPU slices). It is sourced from the planning annotation
+	// "ani.kubercloud.io/gpu-resource-name" and lets the API surface the real
+	// allocation mode (whole card vs vGPU) chosen at scheduling time.
 	ResourceName       string
 	SchedulingReason   string
 	UtilizationPercent float64

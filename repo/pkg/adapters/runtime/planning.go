@@ -210,6 +210,9 @@ func (r *PlanningRuntime) plan(ctx context.Context, spec ports.WorkloadSpec) (po
 		planned.Annotations["ani.kubercloud.io/gpu-resource-name"] = decision.ResourceName
 		planned.Annotations["ani.kubercloud.io/gpu-resource-quantity"] = firstNonEmpty(decision.ResourceQuantity, strconv.Itoa(spec.Resources.GPU.RequiredCount))
 		planned.Annotations["ani.kubercloud.io/gpu-queue"] = decision.QueueName
+		if decision.SelectedNodeModel != "" {
+			planned.Annotations["ani.kubercloud.io/gpu-selected-model"] = decision.SelectedNodeModel
+		}
 		if planned.Resources.GPU.Pool == "" {
 			planned.Resources.GPU.Pool = decision.QueueName
 		}

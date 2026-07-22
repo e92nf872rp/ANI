@@ -1,0 +1,32 @@
+profile: GPU-SCHEDULING-SMOKE-AB
+status: live
+description: >
+  GPU scheduling smoke live gate for proving Volcano scheduler + HAMi vGPU
+  integration works in the real lab environment. Smoke A validates whole-GPU
+  scheduling via Volcano; Smoke B validates HAMi vGPU fractional scheduling.
+
+required_tools:
+  - kubectl
+
+live_checks:
+  - id: volcano-scheduler-running
+    command: kubectl get pods -n volcano-system -l app.kubernetes.io/component=scheduler
+    pass_condition: volcano_scheduler_pod_running
+  - id: hami-scheduler-running
+    command: kubectl get pods -n kube-system -l app.kubernetes.io/name=hami
+    pass_condition: hami_scheduler_pod_running
+  - id: volcano-queues-exist
+    command: kubectl get queues.scheduling.volcano.sh ani-inference ani-training
+    pass_condition: both_ani_queues_exist
+  - id: smoke-a-whole-gpu-scheduling
+    command: kubectl apply -f deploy/real-k8s-lab/gpu-scheduling-smoke-a-job.yaml && kubectl -n ani-system wait job/ani-gpu-smoke-a --for=condition=complete --timeout=120s
+    pass_condition: smoke_a_job_exit_0_with_nvidia_smi_output
+  - id: smoke-b-vgpu-scheduling
+    command: kubectl apply -f deploy/real-k8s-lab/gpu-scheduling-smoke-b-job.yaml && kubectl -n ani-system wait job/ani-gpu-smoke-b --for=condition=complete --timeout=120s
+    pass_condition: smoke_b_job_exit_0_with_vgpu_resource
+
+readiness_levels:
+  contract:
+    meaning: Gate definition exists; no live Volcano/HAMi scheduling proof.
+  live:
+    meaning: Smoke A (whole-GPU) and Smoke B (HAMi vGPU) Jobs scheduled via Volcano and completed with nvidia-smi output on real GPU nodes.

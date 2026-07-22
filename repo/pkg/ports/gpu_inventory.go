@@ -82,6 +82,12 @@ type GPUSchedulingDecision struct {
 	SchedulerName    string
 	QueueName        string
 	Reasons          []string
+	// SelectedNodeModel is the GPU model of the node chosen by PlanScheduling,
+	// sourced from the node's nvidia.com/gpu.product label (K8s adapter) or
+	// the inventory's hardcoded model (local adapter). It reflects the real
+	// GPU hardware the workload is scheduled onto, as opposed to the
+	// PreferredModels in the request which is only a scheduling preference.
+	SelectedNodeModel string
 }
 
 // GPUInventory discovers heterogeneous GPU capacity and maps workload intent to

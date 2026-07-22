@@ -948,6 +948,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/registry/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 获取镜像仓库总览
+         * @description 支撑 Console 镜像仓库首屏，聚合项目、仓库、artifact、tag、漏洞摘要、快捷动作和删除风险提示。
+         */
+        get: operations["getRegistryOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/registry/images": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 列出镜像 Tag 视图
+         * @description 面向 Console 镜像仓库列表页的平铺视图；每一项表示一个可拉取镜像 tag，并携带漏洞扫描摘要和拉取命令。
+         */
+        get: operations["listRegistryImages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/registry/projects": {
         parameters: {
             query?: never;
@@ -969,6 +1009,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/registry/projects/{project}/push-instructions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 获取镜像推送说明
+         * @description 返回登录、tag、push 命令模板；不返回任何凭据明文。
+         */
+        get: operations["getRegistryProjectPushInstructions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/registry/projects/{project}/repositories": {
         parameters: {
             query?: never;
@@ -978,6 +1038,46 @@ export interface paths {
         };
         /** 列出项目下镜像仓库 */
         get: operations["listRegistryRepositories"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/registry/projects/{project}/repositories/{repository}/tags/{tag}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * 删除镜像 Tag
+         * @description 删除指定镜像 tag；若该 tag 被容器或 GPU 容器实例引用，返回 409；若该 tag 是 artifact 的最后引用，底层 provider 可同时清理对应 artifact。
+         */
+        delete: operations["deleteRegistryRepositoryTag"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/registry/projects/{project}/repositories/{repository}/tags/{tag}/references": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 列出镜像 Tag 引用方
+         * @description 支撑 Console 镜像详情的关联资源页签和删除前风险提示；引用方包括容器实例和 GPU 容器实例。
+         */
+        get: operations["listRegistryRepositoryTagReferences"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3143,6 +3243,132 @@ export interface components {
             dev_profile?: components["schemas"]["CoreDevProfileInfo"];
             /** Format: date-time */
             scanned_at?: string;
+        };
+        RegistryOverviewResourceSummary: {
+            /** @enum {string} */
+            kind: "project" | "repository" | "artifact" | "tag";
+            total: number;
+            /** @default 0 */
+            available: number;
+            /** @default 0 */
+            pending: number;
+            /** @default 0 */
+            failed: number;
+            /**
+             * Format: int64
+             * @default 0
+             */
+            size_bytes: number;
+        };
+        RegistryOverviewVulnerabilitySummary: {
+            critical: number;
+            high: number;
+            medium: number;
+            low: number;
+        };
+        RegistryOverviewCapability: {
+            /** @enum {string} */
+            key: "projects" | "repositories" | "tags" | "push_instructions" | "pull_commands" | "scan_summary" | "scan_policy" | "quota" | "garbage_collection";
+            label: string;
+            /** @enum {string} */
+            status: "available" | "planned";
+            path?: string;
+            description?: string;
+        };
+        RegistryOverviewRelationship: {
+            /** @enum {string} */
+            source: "project" | "repository" | "tag" | "workload";
+            /** @enum {string} */
+            target: "project" | "repository" | "tag" | "workload";
+            relation: string;
+        };
+        RegistryOverviewQuickAction: {
+            /** @enum {string} */
+            key: "create_project" | "push_instructions";
+            label: string;
+            path?: string;
+            description?: string;
+        };
+        RegistryOverviewDeleteRisk: {
+            /** @enum {string} */
+            kind: "project" | "repository" | "artifact" | "tag";
+            risk: string;
+        };
+        RegistryOverview: {
+            resources: components["schemas"]["RegistryOverviewResourceSummary"][];
+            vulnerabilities: components["schemas"]["RegistryOverviewVulnerabilitySummary"];
+            capabilities: components["schemas"]["RegistryOverviewCapability"][];
+            /**
+             * @example [
+             *       "project",
+             *       "login",
+             *       "tag",
+             *       "push"
+             *     ]
+             */
+            create_order: ("project" | "login" | "tag" | "push")[];
+            relationships: components["schemas"]["RegistryOverviewRelationship"][];
+            quick_actions: components["schemas"]["RegistryOverviewQuickAction"][];
+            delete_risks: components["schemas"]["RegistryOverviewDeleteRisk"][];
+        };
+        RegistryImage: {
+            project: string;
+            repository: string;
+            tag: string;
+            /** @description 完整镜像引用，例如 registry.local/project/repository:tag */
+            image: string;
+            registry?: string;
+            digest: string;
+            media_type: string;
+            /** Format: int64 */
+            size_bytes: number;
+            pull_command?: string;
+            /** Format: date-time */
+            pushed_at: string;
+            scan_status: components["schemas"]["RegistryScanResult"];
+            dev_profile?: components["schemas"]["CoreDevProfileInfo"];
+        };
+        RegistryImageListResponse: {
+            items: components["schemas"]["RegistryImage"][];
+            total: number;
+            next_cursor?: string | null;
+        };
+        RegistryCommand: {
+            label: string;
+            command: string;
+        };
+        RegistryPushInstructions: {
+            project: string;
+            registry: string;
+            repository_example: string;
+            commands: components["schemas"]["RegistryCommand"][];
+            dev_profile?: components["schemas"]["CoreDevProfileInfo"];
+        };
+        RegistryDeletedTag: {
+            project: string;
+            repository: string;
+            tag: string;
+            digest?: string;
+            /** Format: date-time */
+            deleted_at: string;
+        };
+        RegistryImageReference: {
+            /** @enum {string} */
+            kind: "container_instance" | "gpu_container_instance";
+            id: string;
+            name: string;
+            route: string;
+            state: string;
+            dev_profile?: components["schemas"]["CoreDevProfileInfo"];
+        };
+        RegistryImageReferenceListResponse: {
+            project: string;
+            repository: string;
+            tag: string;
+            image?: string;
+            items: components["schemas"]["RegistryImageReference"][];
+            total: number;
+            delete_blocked: boolean;
         };
         BeginOIDCLoginRequest: {
             /** @description 租户 slug，用于限定登录上下文 */
@@ -5799,6 +6025,57 @@ export interface operations {
             422: components["responses"]["PreconditionFailed"];
         };
     };
+    getRegistryOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 镜像仓库总览 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistryOverview"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listRegistryImages: {
+        parameters: {
+            query?: {
+                project?: string;
+                repository?: string;
+                tag?: string;
+                scan_status?: "not_scanned" | "pending" | "running" | "complete" | "failed";
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 镜像 Tag 列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistryImageListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
     listRegistryProjects: {
         parameters: {
             query?: {
@@ -5851,6 +6128,34 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
+    getRegistryProjectPushInstructions: {
+        parameters: {
+            query?: {
+                repository?: string;
+            };
+            header?: never;
+            path: {
+                project: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 镜像推送说明 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistryPushInstructions"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     listRegistryRepositories: {
         parameters: {
             query?: {
@@ -5877,6 +6182,63 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    deleteRegistryRepositoryTag: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project: string;
+                repository: string;
+                tag: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 镜像 Tag 已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistryDeletedTag"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listRegistryRepositoryTagReferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project: string;
+                repository: string;
+                tag: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 镜像 Tag 引用方列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistryImageReferenceListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listRegistryArtifacts: {
