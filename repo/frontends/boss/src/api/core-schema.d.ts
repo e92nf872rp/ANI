@@ -48,6 +48,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/password/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 租户账密登录（账号密码 Tab） */
+        post: operations["passwordLogin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/platform/password/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 平台管理员账密登录 */
+        post: operations["platformPasswordLogin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/oidc/begin": {
         parameters: {
             query?: never;
@@ -185,7 +219,7 @@ export interface paths {
         };
         /**
          * 查询实例列表
-         * @description Services P0 依赖路径。返回 VM、container、gpu_container 的 Core 统一实例视图。
+         * @description Services P0 依赖路径。返回 VM、container、gpu_container、sandbox 的 Core 统一实例视图。
          *     当前 Alpha 冻结 path/schema/error/state/RBAC scope；dev/local profile 可使用本地 provider。
          */
         get: operations["listInstances"];
@@ -194,6 +228,8 @@ export interface paths {
          * 创建实例
          * @description 创建 VM、container、gpu_container 或 sandbox。POST 创建必须携带 idempotency_key；
          *     同一 (tenant_id, idempotency_key) 在 24 小时内返回同一操作结果。
+         *     推荐按 kind 填写对应 `vm_config` / `container_config` / `gpu_container_config` / `sandbox_config`；
+         *     扁平 boot_image/ssh_*\/replicas/gpu 字段仍接受，作为 v1 兼容别名。
          */
         post: operations["createInstance"];
         delete?: never;
@@ -349,6 +385,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/networks/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询网络管理总览 */
+        get: operations["getNetworkOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/networks/vpcs": {
         parameters: {
             query?: never;
@@ -421,6 +474,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/networks/subnets/{subnet_id}/ip-allocations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询子网 IP 分配列表 */
+        get: operations["listNetworkSubnetIPAllocations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/networks/security-groups": {
         parameters: {
             query?: never;
@@ -452,6 +522,78 @@ export interface paths {
         post?: never;
         /** 删除安全组 */
         delete: operations["deleteNetworkSecurityGroup"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/networks/security-groups/{security_group_id}/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询安全组规则列表 */
+        get: operations["listNetworkSecurityGroupRules"];
+        put?: never;
+        /** 创建安全组规则 */
+        post: operations["createNetworkSecurityGroupRule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/networks/security-groups/{security_group_id}/rules/{rule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询安全组规则 */
+        get: operations["getNetworkSecurityGroupRule"];
+        /** 更新安全组规则 */
+        put: operations["updateNetworkSecurityGroupRule"];
+        post?: never;
+        /** 删除安全组规则 */
+        delete: operations["deleteNetworkSecurityGroupRule"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/networks/security-groups/{security_group_id}/bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询安全组绑定列表 */
+        get: operations["listNetworkSecurityGroupBindings"];
+        put?: never;
+        /** 绑定安全组 */
+        post: operations["createNetworkSecurityGroupBinding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/networks/security-groups/{security_group_id}/bindings/{binding_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 解绑安全组 */
+        delete: operations["deleteNetworkSecurityGroupBinding"];
         options?: never;
         head?: never;
         patch?: never;
@@ -506,6 +648,24 @@ export interface paths {
         /** 创建路由条目 */
         post: operations["createNetworkRoute"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/networks/routes/{route_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询路由条目 */
+        get: operations["getNetworkRoute"];
+        put?: never;
+        post?: never;
+        /** 删除路由条目 */
+        delete: operations["deleteNetworkRoute"];
         options?: never;
         head?: never;
         patch?: never;
@@ -788,6 +948,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/registry/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 获取镜像仓库总览
+         * @description 支撑 Console 镜像仓库首屏，聚合项目、仓库、artifact、tag、漏洞摘要、快捷动作和删除风险提示。
+         */
+        get: operations["getRegistryOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/registry/images": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 列出镜像 Tag 视图
+         * @description 面向 Console 镜像仓库列表页的平铺视图；每一项表示一个可拉取镜像 tag，并携带漏洞扫描摘要和拉取命令。
+         */
+        get: operations["listRegistryImages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/registry/projects": {
         parameters: {
             query?: never;
@@ -809,6 +1009,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/registry/projects/{project}/push-instructions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 获取镜像推送说明
+         * @description 返回登录、tag、push 命令模板；不返回任何凭据明文。
+         */
+        get: operations["getRegistryProjectPushInstructions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/registry/projects/{project}/repositories": {
         parameters: {
             query?: never;
@@ -818,6 +1038,46 @@ export interface paths {
         };
         /** 列出项目下镜像仓库 */
         get: operations["listRegistryRepositories"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/registry/projects/{project}/repositories/{repository}/tags/{tag}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * 删除镜像 Tag
+         * @description 删除指定镜像 tag；若该 tag 被容器或 GPU 容器实例引用，返回 409；若该 tag 是 artifact 的最后引用，底层 provider 可同时清理对应 artifact。
+         */
+        delete: operations["deleteRegistryRepositoryTag"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/registry/projects/{project}/repositories/{repository}/tags/{tag}/references": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 列出镜像 Tag 引用方
+         * @description 支撑 Console 镜像详情的关联资源页签和删除前风险提示；引用方包括容器实例和 GPU 容器实例。
+         */
+        get: operations["listRegistryRepositoryTagReferences"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1025,6 +1285,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
+                /** @description 异步任务状态 */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -1056,6 +1317,26 @@ export interface paths {
          * @description 通过 Core 代理 PromQL 查询，不暴露底层 Prometheus 地址。
          */
         get: operations["queryObservability"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/observability/query_range": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * PromQL 代理区间查询
+         * @description 通过 Core 代理 PromQL 区间查询（range query），返回时间区间内多个采样点，用于绘制时序曲线。不暴露底层 Prometheus 地址。
+         */
+        get: operations["queryRangeObservability"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1108,44 +1389,35 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 查询租户用量统计 */
-        get: {
-            parameters: {
-                query: {
-                    start_time: string;
-                    end_time: string;
-                    resource_type?: string;
-                    group_by?: "resource_type" | "az" | "day" | "hour";
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description 租户用量统计 */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            items?: {
-                                resource_type?: string;
-                                total_quantity?: number;
-                                unit?: string;
-                                period?: string;
-                            }[];
-                            total?: number;
-                            dev_profile?: components["schemas"]["CoreDevProfileInfo"];
-                        };
-                    };
-                };
-                400: components["responses"]["BadRequest"];
-                401: components["responses"]["Unauthorized"];
-                403: components["responses"]["Forbidden"];
-            };
+        /**
+         * 查询租户用量统计
+         * @description 在租户 JWT 上下文中查询本租户的用量数据。
+         *     tenant_id 从 JWT 提取，忽略 query 中的 tenant_id 参数。
+         */
+        get: operations["getMeteringUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/metering/usage/platform": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
         };
+        /**
+         * 查询平台跨租户用量
+         * @description 在平台 RBAC 上下文中查询全平台或指定租户的用量数据。
+         *     需 scope:metering:platform:read 权限。
+         *     items[].tenant_id 在此端点下必填。
+         *     若带 tenant_id query 须二次 RBAC 校验。
+         */
+        get: operations["getPlatformMeteringUsage"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1617,6 +1889,126 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/notifications/email/smtp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 获取邮件 SMTP 发信通道配置
+         * @description 返回平台级 SMTP 发信通道配置。
+         *     - configured=false 表示尚未配置（空态），其他字段可省略。
+         *     - configured=true 时返回完整字段；password / auth_code 明文永不回显，
+         *       仅返回 has_password / has_auth_code 布尔位。
+         */
+        get: operations["getEmailSmtpConfig"];
+        /**
+         * 保存邮件 SMTP 发信通道配置
+         * @description 保存平台级 SMTP 发信通道配置。
+         *     password 与 auth_code 独立保存、独立清除，服务端不强制二选一：
+         *     - 省略或 null：不修改已有值
+         *     - 空字符串 ""：清除已有值
+         *     - 非空字符串：加密后覆盖
+         *     发送邮件时若 auth_code 已设置则优先使用 auth_code，否则使用 password。
+         */
+        put: operations["putEmailSmtpConfig"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/email/recipients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 列出邮件收件人
+         * @description 返回平台级全局收件人列表；所有已开启订阅的事件共用此列表。
+         */
+        get: operations["listEmailRecipients"];
+        put?: never;
+        /** 新增收件人 */
+        post: operations["createEmailRecipient"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/email/recipients/{recipient_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除收件人 */
+        delete: operations["deleteEmailRecipient"];
+        options?: never;
+        head?: never;
+        /** 更新收件人（邮箱地址、备注、启停） */
+        patch: operations["updateEmailRecipient"];
+        trace?: never;
+    };
+    "/notifications/email/subscriptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 列出邮件事件订阅
+         * @description 返回首期冻结的 5 个事件订阅开关状态。
+         */
+        get: operations["listEmailSubscriptions"];
+        /**
+         * 批量保存邮件事件订阅
+         * @description 批量更新事件订阅开关；非行内 PATCH，整体提交。
+         */
+        put: operations["putEmailSubscriptions"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/email/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 发送测试邮件
+         * @description 向所有启用的收件人发送一封测试邮件，验证 SMTP 通道与收件人可用性。
+         *     前置条件：
+         *     - SMTP 通道已配置（configured=true）
+         *     - 至少一个启用中的收件人（enabled=true）
+         *     - password 或 auth_code 至少设置一个
+         *     不满足任一前置条件返回 422 PRECONDITION_FAILED。
+         */
+        post: operations["sendTestEmail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2079,6 +2471,11 @@ export interface components {
             total: number;
             next_cursor?: string | null;
         };
+        /**
+         * @description 创建实例请求。共享字段（name/kind/image/cpu/memory 等）留在顶层；
+         *     按 kind 选用对应 `*_config`（推荐）。扁平 VM/容器/GPU 字段保留为 v1 兼容别名。
+         *     同名字段以 `*_config` 为准；与扁平别名冲突或传入跨类型 config 时返回 400。
+         */
         CreateInstanceRequest: {
             /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
             idempotency_key: string;
@@ -2098,17 +2495,32 @@ export interface components {
             memory?: string;
             /** @default true */
             auto_start: boolean;
-            /** @description VM boot image 引用 */
+            vm_config?: components["schemas"]["CreateVMInstanceConfig"];
+            container_config?: components["schemas"]["CreateContainerInstanceConfig"];
+            gpu_container_config?: components["schemas"]["CreateGPUContainerInstanceConfig"];
+            sandbox_config?: components["schemas"]["SandboxConfig"];
+            /**
+             * @deprecated
+             * @description 兼容别名；优先使用 vm_config.boot_image
+             */
             boot_image?: string | null;
             /**
-             * @description VM SSH 用户名；仅 VM 使用
+             * @deprecated
+             * @description 兼容别名；优先使用 vm_config.ssh_username
              * @default ubuntu
              */
             ssh_username: string | null;
-            /** @description VM SSH key/secret 引用；不包含私钥内容 */
+            /**
+             * @deprecated
+             * @description 兼容别名；优先使用 vm_config.ssh_key_ref
+             */
             ssh_key_ref?: string | null;
             /** @default false */
             termination_protection: boolean;
+            /**
+             * @deprecated
+             * @description 兼容别名；优先使用 gpu_container_config.gpu
+             */
             gpu?: {
                 /** @example nvidia */
                 vendor?: string;
@@ -2132,11 +2544,61 @@ export interface components {
                 workload_class: "inference" | "training" | "batch";
             } | null;
             /**
-             * @description Container/GPU Container 副本数；VM 固定为 1
+             * @deprecated
+             * @description 兼容别名；优先使用 container_config.replicas 或 gpu_container_config.replicas
              * @default 1
              */
             replicas: number;
-            sandbox_config?: components["schemas"]["SandboxConfig"];
+        };
+        /** @description kind=vm 专用配置；共享 image/cpu/memory 仍在 CreateInstanceRequest 顶层。 */
+        CreateVMInstanceConfig: {
+            /** @description VM boot image 引用 */
+            boot_image?: string | null;
+            /**
+             * @description VM SSH 用户名
+             * @default ubuntu
+             */
+            ssh_username: string | null;
+            /** @description VM SSH key/secret 引用；不包含私钥内容 */
+            ssh_key_ref?: string | null;
+        };
+        /** @description kind=container 专用配置；共享 image/cpu/memory 仍在 CreateInstanceRequest 顶层。 */
+        CreateContainerInstanceConfig: {
+            /**
+             * @description 容器副本数
+             * @default 1
+             */
+            replicas: number;
+        };
+        /** @description kind=gpu_container 专用配置；共享 image/cpu/memory 仍在 CreateInstanceRequest 顶层。 */
+        CreateGPUContainerInstanceConfig: {
+            /**
+             * @description GPU 容器副本数
+             * @default 1
+             */
+            replicas: number;
+            gpu?: {
+                /** @example nvidia */
+                vendor?: string;
+                /** @example A100 */
+                model?: string;
+                /** @default 1 */
+                count: number;
+                /** @description 指定调度队列名；为空时按 workload_class 选默认队列 */
+                queue_name?: string | null;
+                /**
+                 * @description GPU 分配模式：dedicated=整卡，vgpu=HAMi vGPU
+                 * @default dedicated
+                 * @enum {string}
+                 */
+                allocation_mode: "dedicated" | "vgpu";
+                /**
+                 * @description 工作负载类型，用于选默认队列
+                 * @default inference
+                 * @enum {string}
+                 */
+                workload_class: "inference" | "training" | "batch";
+            } | null;
         };
         /**
          * @description Sandbox 出口策略；local profile 仅记录意图，不代表真实网络隔离已执行。
@@ -2179,6 +2641,26 @@ export interface components {
                 value: number;
                 /** Format: date-time */
                 timestamp?: string | null;
+            }[];
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
+        };
+        /** @description PromQL 代理区间查询结果（matrix）；返回时间区间内多个采样点，用于绘制时序曲线。 */
+        ObservabilityRangeQueryResponse: {
+            query: string;
+            /** @enum {string} */
+            result_type: "matrix" | "vector" | "scalar" | "string";
+            /** @description 每条 series 含一组时间序列采样点。 */
+            results: {
+                metric: {
+                    [key: string]: string;
+                };
+                /** @description 时间序列采样点列表，每个点为 [timestamp, value]。 */
+                values: {
+                    /** Format: date-time */
+                    timestamp: string;
+                    /** Format: double */
+                    value: number;
+                }[];
             }[];
             dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
@@ -2438,6 +2920,147 @@ export interface components {
             items: components["schemas"]["NetworkLoadBalancer"][];
             total: number;
             next_cursor?: string | null;
+        };
+        /** @enum {string} */
+        NetworkOverviewResourceKind: "vpc" | "subnet" | "security_group" | "load_balancer" | "route";
+        NetworkOverviewResourceSummary: {
+            kind: components["schemas"]["NetworkOverviewResourceKind"];
+            total: number;
+            available: number;
+            pending: number;
+            failed: number;
+            deleting: number;
+        };
+        NetworkOverviewCapability: {
+            /** @enum {string} */
+            key: "vpcs" | "subnets" | "security_groups" | "load_balancers" | "routes" | "subnet_ip_allocations" | "security_group_rules" | "security_group_bindings";
+            label: string;
+            /** @enum {string} */
+            status: "available" | "planned";
+            path?: string | null;
+            description?: string | null;
+        };
+        NetworkOverviewRelationship: {
+            source: components["schemas"]["NetworkOverviewResourceKind"];
+            target: components["schemas"]["NetworkOverviewResourceKind"];
+            relation: string;
+        };
+        NetworkOverviewDeleteRisk: {
+            kind: components["schemas"]["NetworkOverviewResourceKind"];
+            risk: string;
+        };
+        NetworkOverview: {
+            resources: components["schemas"]["NetworkOverviewResourceSummary"][];
+            capabilities: components["schemas"]["NetworkOverviewCapability"][];
+            /**
+             * @example [
+             *       "vpc",
+             *       "subnet",
+             *       "security_group",
+             *       "load_balancer"
+             *     ]
+             */
+            create_order: components["schemas"]["NetworkOverviewResourceKind"][];
+            relationships: components["schemas"]["NetworkOverviewRelationship"][];
+            delete_risks: components["schemas"]["NetworkOverviewDeleteRisk"][];
+        };
+        NetworkSubnetIPAllocation: {
+            id: string;
+            subnet_id: string;
+            ip_address: string;
+            /** @enum {string|null} */
+            resource_type?: "instance" | "network_interface" | "load_balancer" | null;
+            resource_id?: string | null;
+            /** @enum {string} */
+            state: "available" | "allocated" | "reserved";
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at?: string | null;
+        };
+        NetworkSubnetIPAllocationListResponse: {
+            items: components["schemas"]["NetworkSubnetIPAllocation"][];
+            total: number;
+            next_cursor?: string | null;
+        };
+        NetworkSecurityGroupRuleResource: {
+            id: string;
+            security_group_id: string;
+            /** @description 规则优先级，数值越小优先级越高。 */
+            priority: number;
+            /** @enum {string} */
+            direction: "ingress" | "egress";
+            /** @enum {string} */
+            protocol: "tcp" | "udp" | "icmp" | "all";
+            /** @example 443 */
+            port_range: string;
+            /** @example 0.0.0.0/0 */
+            cidr: string;
+            /** @enum {string} */
+            action: "allow" | "deny";
+            description?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at?: string | null;
+        };
+        NetworkSecurityGroupRuleListResponse: {
+            items: components["schemas"]["NetworkSecurityGroupRuleResource"][];
+            total: number;
+            next_cursor?: string | null;
+        };
+        CreateNetworkSecurityGroupRuleRequest: {
+            /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
+            idempotency_key: string;
+            /** @description 规则优先级，数值越小优先级越高。 */
+            priority: number;
+            /** @enum {string} */
+            direction: "ingress" | "egress";
+            /** @enum {string} */
+            protocol: "tcp" | "udp" | "icmp" | "all";
+            /** @example 443 */
+            port_range: string;
+            /** @example 0.0.0.0/0 */
+            cidr: string;
+            /** @enum {string} */
+            action: "allow" | "deny";
+            description?: string | null;
+        };
+        UpdateNetworkSecurityGroupRuleRequest: {
+            /** @description 规则优先级，数值越小优先级越高。 */
+            priority?: number;
+            /** @enum {string} */
+            direction?: "ingress" | "egress";
+            /** @enum {string} */
+            protocol?: "tcp" | "udp" | "icmp" | "all";
+            /** @example 443 */
+            port_range?: string;
+            /** @example 0.0.0.0/0 */
+            cidr?: string;
+            /** @enum {string} */
+            action?: "allow" | "deny";
+            description?: string | null;
+        };
+        /** @enum {string} */
+        NetworkSecurityGroupBindingTargetType: "instance" | "network_interface" | "load_balancer";
+        NetworkSecurityGroupBinding: {
+            id: string;
+            security_group_id: string;
+            target_type: components["schemas"]["NetworkSecurityGroupBindingTargetType"];
+            target_id: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        NetworkSecurityGroupBindingListResponse: {
+            items: components["schemas"]["NetworkSecurityGroupBinding"][];
+            total: number;
+            next_cursor?: string | null;
+        };
+        CreateNetworkSecurityGroupBindingRequest: {
+            /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
+            idempotency_key: string;
+            target_type: components["schemas"]["NetworkSecurityGroupBindingTargetType"];
+            target_id: string;
         };
         CreateNetworkVPCRequest: {
             /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
@@ -2741,6 +3364,132 @@ export interface components {
             /** Format: date-time */
             scanned_at?: string;
         };
+        RegistryOverviewResourceSummary: {
+            /** @enum {string} */
+            kind: "project" | "repository" | "artifact" | "tag";
+            total: number;
+            /** @default 0 */
+            available: number;
+            /** @default 0 */
+            pending: number;
+            /** @default 0 */
+            failed: number;
+            /**
+             * Format: int64
+             * @default 0
+             */
+            size_bytes: number;
+        };
+        RegistryOverviewVulnerabilitySummary: {
+            critical: number;
+            high: number;
+            medium: number;
+            low: number;
+        };
+        RegistryOverviewCapability: {
+            /** @enum {string} */
+            key: "projects" | "repositories" | "tags" | "push_instructions" | "pull_commands" | "scan_summary" | "scan_policy" | "quota" | "garbage_collection";
+            label: string;
+            /** @enum {string} */
+            status: "available" | "planned";
+            path?: string;
+            description?: string;
+        };
+        RegistryOverviewRelationship: {
+            /** @enum {string} */
+            source: "project" | "repository" | "tag" | "workload";
+            /** @enum {string} */
+            target: "project" | "repository" | "tag" | "workload";
+            relation: string;
+        };
+        RegistryOverviewQuickAction: {
+            /** @enum {string} */
+            key: "create_project" | "push_instructions";
+            label: string;
+            path?: string;
+            description?: string;
+        };
+        RegistryOverviewDeleteRisk: {
+            /** @enum {string} */
+            kind: "project" | "repository" | "artifact" | "tag";
+            risk: string;
+        };
+        RegistryOverview: {
+            resources: components["schemas"]["RegistryOverviewResourceSummary"][];
+            vulnerabilities: components["schemas"]["RegistryOverviewVulnerabilitySummary"];
+            capabilities: components["schemas"]["RegistryOverviewCapability"][];
+            /**
+             * @example [
+             *       "project",
+             *       "login",
+             *       "tag",
+             *       "push"
+             *     ]
+             */
+            create_order: ("project" | "login" | "tag" | "push")[];
+            relationships: components["schemas"]["RegistryOverviewRelationship"][];
+            quick_actions: components["schemas"]["RegistryOverviewQuickAction"][];
+            delete_risks: components["schemas"]["RegistryOverviewDeleteRisk"][];
+        };
+        RegistryImage: {
+            project: string;
+            repository: string;
+            tag: string;
+            /** @description 完整镜像引用，例如 registry.local/project/repository:tag */
+            image: string;
+            registry?: string;
+            digest: string;
+            media_type: string;
+            /** Format: int64 */
+            size_bytes: number;
+            pull_command?: string;
+            /** Format: date-time */
+            pushed_at: string;
+            scan_status: components["schemas"]["RegistryScanResult"];
+            dev_profile?: components["schemas"]["CoreDevProfileInfo"];
+        };
+        RegistryImageListResponse: {
+            items: components["schemas"]["RegistryImage"][];
+            total: number;
+            next_cursor?: string | null;
+        };
+        RegistryCommand: {
+            label: string;
+            command: string;
+        };
+        RegistryPushInstructions: {
+            project: string;
+            registry: string;
+            repository_example: string;
+            commands: components["schemas"]["RegistryCommand"][];
+            dev_profile?: components["schemas"]["CoreDevProfileInfo"];
+        };
+        RegistryDeletedTag: {
+            project: string;
+            repository: string;
+            tag: string;
+            digest?: string;
+            /** Format: date-time */
+            deleted_at: string;
+        };
+        RegistryImageReference: {
+            /** @enum {string} */
+            kind: "container_instance" | "gpu_container_instance";
+            id: string;
+            name: string;
+            route: string;
+            state: string;
+            dev_profile?: components["schemas"]["CoreDevProfileInfo"];
+        };
+        RegistryImageReferenceListResponse: {
+            project: string;
+            repository: string;
+            tag: string;
+            image?: string;
+            items: components["schemas"]["RegistryImageReference"][];
+            total: number;
+            delete_blocked: boolean;
+        };
         BeginOIDCLoginRequest: {
             /** @description 租户 slug，用于限定登录上下文 */
             tenant_name: string;
@@ -2771,6 +3520,30 @@ export interface components {
         };
         RefreshAccessTokenRequest: {
             refresh_token: string;
+        };
+        PasswordLoginRequest: {
+            /** @description 租户 slug，用于定位 users 表所属 tenant */
+            tenant_name: string;
+            /** @description 登录用户名（不含命名空间前缀，服务端自动拼接 local:<username>） */
+            username: string;
+            /**
+             * Format: password
+             * @description 明文密码，仅用于 bcrypt 校验，不持久化
+             */
+            password: string;
+            /** @description 可选幂等键，重复提交返回同一 TokenPair */
+            idempotency_key?: string;
+        };
+        PlatformPasswordLoginRequest: {
+            /** @description 平台管理员用户名（无命名空间前缀，存储为 local:&lt;username&gt;，查询 users 表 EXISTS user_roles→roles.name=platform-admin） */
+            username: string;
+            /**
+             * Format: password
+             * @description 明文密码，仅用于 bcrypt 校验，不持久化
+             */
+            password: string;
+            /** @description 可选幂等键，重复提交返回同一 TokenPair */
+            idempotency_key?: string;
         };
         RefreshAccessTokenResponse: {
             access_token: string;
@@ -3121,6 +3894,8 @@ export interface components {
         };
         GPUSchedulingQueueListResponse: {
             items: components["schemas"]["GPUSchedulingQueue"][];
+            total: number;
+            next_cursor?: string | null;
         };
         GPUSchedulingQueueCreateRequest: {
             /** @description K8s 资源名规范 */
@@ -3163,6 +3938,118 @@ export interface components {
             next_cursor?: string | null;
             dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
+        /** @description SMTP 发信通道配置响应；password / auth_code 明文永不回显 */
+        EmailSmtpConfigResponse: {
+            /** @description 是否已配置（false = 空态，其他字段可省略） */
+            configured: boolean;
+            smtp_host?: string;
+            smtp_port?: number;
+            /** @enum {string} */
+            encryption?: "none" | "starttls" | "ssl";
+            /** Format: email */
+            from_address?: string;
+            username?: string;
+            /** @description 是否已设置 SMTP 登录密码（明文不回显） */
+            has_password?: boolean;
+            /** @description 是否已设置 SMTP 授权码（明文不回显）；与 password 独立保存，不互斥 */
+            has_auth_code?: boolean;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            updated_at?: string;
+        };
+        /** @description 保存 SMTP 发信通道配置；password 与 auth_code 独立保存、独立清除，服务端不强制二选一 */
+        PutEmailSmtpConfigRequest: {
+            smtp_host: string;
+            smtp_port: number;
+            /** @enum {string} */
+            encryption: "none" | "starttls" | "ssl";
+            /** Format: email */
+            from_address: string;
+            username: string;
+            /**
+             * Format: password
+             * @description SMTP 登录密码（企业邮箱场景）。
+             *     - 省略或 null：不修改已有密码
+             *     - 空字符串 ""：清除已有密码
+             *     - 非空字符串：加密后覆盖
+             *     明文永不回显；与 auth_code 独立保存，不互斥。
+             */
+            password?: string;
+            /**
+             * Format: password
+             * @description SMTP 授权码（QQ/163/Gmail 等国内邮箱服务商 SMTP 授权登录）。
+             *     - 省略或 null：不修改已有授权码
+             *     - 空字符串 ""：清除已有授权码
+             *     - 非空字符串：加密后覆盖
+             *     明文永不回显；与 password 独立保存，不互斥。
+             *     发送邮件时若 auth_code 已设置则优先使用 auth_code，否则使用 password。
+             */
+            auth_code?: string;
+        };
+        /** @description 邮件收件人 */
+        EmailRecipient: {
+            /** Format: uuid */
+            id: string;
+            /** Format: email */
+            email: string;
+            label?: string | null;
+            enabled: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description 收件人列表 */
+        EmailRecipientListResponse: {
+            items: components["schemas"]["EmailRecipient"][];
+            total: number;
+        };
+        /** @description 新增收件人 */
+        CreateEmailRecipientRequest: {
+            /** Format: email */
+            email: string;
+            label?: string;
+        };
+        /** @description 更新收件人（邮箱地址、备注、启停） */
+        UpdateEmailRecipientRequest: {
+            /** Format: email */
+            email?: string;
+            label?: string | null;
+            enabled?: boolean;
+        };
+        /** @description 邮件事件订阅 */
+        EmailSubscription: {
+            /** @enum {string} */
+            event_type: "platform_alert_p0" | "platform_alert_p1" | "incident_created" | "incident_escalated" | "platform_task_failed";
+            description: string;
+            enabled: boolean;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description 订阅列表（首期固定 5 行） */
+        EmailSubscriptionListResponse: {
+            items: components["schemas"]["EmailSubscription"][];
+            total: number;
+        };
+        /** @description 批量保存邮件事件订阅 */
+        PutEmailSubscriptionsRequest: {
+            subscriptions: {
+                /** @enum {string} */
+                event_type: "platform_alert_p0" | "platform_alert_p1" | "incident_created" | "incident_escalated" | "platform_task_failed";
+                enabled: boolean;
+            }[];
+        };
+        /** @description 测试发送结果 */
+        SendTestEmailResponse: {
+            success: boolean;
+            /** @description 成功或失败的可读信息 */
+            message: string;
+            /** @description 请求 ID（用于排障） */
+            request_id: string;
+            /** Format: date-time */
+            sent_at?: string | null;
+        };
     };
     responses: {
         /** @description 未认证或 Token 无效（code=UNAUTHORIZED） */
@@ -3185,6 +4072,15 @@ export interface components {
         };
         /** @description 资源不存在（code=NOT_FOUND） */
         NotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 安全组不存在，或 rule_id 不属于该 security_group_id（code=NOT_FOUND） */
+        NetworkSecurityGroupRuleNotFound: {
             headers: {
                 [name: string]: unknown;
             };
@@ -3338,6 +4234,85 @@ export interface operations {
                     };
                 };
             };
+        };
+    };
+    passwordLogin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description 账密登录成功，返回 TokenPair */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenPairResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description 用户名或密码错误（code=INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 租户不存在（code=TENANT_NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimitExceeded"];
+        };
+    };
+    platformPasswordLogin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformPasswordLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description 平台账密登录成功，返回平台 TokenPair（scope=platform） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenPairResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description 用户名或密码错误（code=INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimitExceeded"];
         };
     };
     beginOIDCLogin: {
@@ -3501,7 +4476,7 @@ export interface operations {
     listInstances: {
         parameters: {
             query?: {
-                kind?: "vm" | "container" | "gpu_container";
+                kind?: "vm" | "container" | "gpu_container" | "sandbox";
                 limit?: number;
                 cursor?: string;
             };
@@ -3556,14 +4531,7 @@ export interface operations {
              *     - GPUNodeIncompatible: 无兼容 GPU 节点，请调整型号偏好或调度队列
              *     - QueueNotFound: 所选调度队列不存在或已删除
              */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
+            422: components["responses"]["PreconditionFailed"];
         };
     };
     getInstance: {
@@ -3792,9 +4760,35 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    getNetworkOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 网络管理总览 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkOverview"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
     listNetworkVPCs: {
         parameters: {
             query?: {
+                /** @description 按 VPC 名称过滤；可选，服务端可做精确或前缀匹配。 */
+                name?: string;
+                /** @description 按 VPC 状态过滤。 */
+                state?: components["schemas"]["NetworkResourceState"];
                 limit?: number;
                 cursor?: string;
             };
@@ -3842,6 +4836,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
         };
     };
     getNetworkVPC: {
@@ -3892,11 +4887,16 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     listNetworkSubnets: {
         parameters: {
             query?: {
+                /** @description 按所属 VPC 过滤子网。 */
+                vpc_id?: string;
+                /** @description 按子网状态过滤。 */
+                state?: components["schemas"]["NetworkResourceState"];
                 limit?: number;
                 cursor?: string;
             };
@@ -3945,6 +4945,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     getNetworkSubnet: {
@@ -3995,11 +4996,48 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listNetworkSubnetIPAllocations: {
+        parameters: {
+            query?: {
+                /** @description 按 IP 分配状态过滤。 */
+                state?: "available" | "allocated" | "reserved";
+                /** @description 按绑定资源类型过滤。 */
+                resource_type?: "instance" | "network_interface" | "load_balancer";
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                subnet_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 子网 IP 分配列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkSubnetIPAllocationListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listNetworkSecurityGroups: {
         parameters: {
             query?: {
+                /** @description 按安全组名称过滤；可选，服务端可做精确或前缀匹配。 */
+                name?: string;
+                /** @description 按安全组状态过滤。 */
+                state?: components["schemas"]["NetworkResourceState"];
                 limit?: number;
                 cursor?: string;
             };
@@ -4047,6 +5085,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
         };
     };
     getNetworkSecurityGroup: {
@@ -4097,11 +5136,252 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listNetworkSecurityGroupRules: {
+        parameters: {
+            query?: {
+                direction?: "ingress" | "egress";
+                protocol?: "tcp" | "udp" | "icmp" | "all";
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                security_group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 安全组规则列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkSecurityGroupRuleListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createNetworkSecurityGroupRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                security_group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateNetworkSecurityGroupRuleRequest"];
+            };
+        };
+        responses: {
+            /** @description 安全组规则已创建 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkSecurityGroupRuleResource"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getNetworkSecurityGroupRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                security_group_id: string;
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 安全组规则 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkSecurityGroupRuleResource"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NetworkSecurityGroupRuleNotFound"];
+        };
+    };
+    updateNetworkSecurityGroupRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                security_group_id: string;
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateNetworkSecurityGroupRuleRequest"];
+            };
+        };
+        responses: {
+            /** @description 安全组规则已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkSecurityGroupRuleResource"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NetworkSecurityGroupRuleNotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    deleteNetworkSecurityGroupRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                security_group_id: string;
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 安全组规则已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkSecurityGroupRuleResource"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NetworkSecurityGroupRuleNotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listNetworkSecurityGroupBindings: {
+        parameters: {
+            query?: {
+                target_type?: components["schemas"]["NetworkSecurityGroupBindingTargetType"];
+                target_id?: string;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                security_group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 安全组绑定列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkSecurityGroupBindingListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createNetworkSecurityGroupBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                security_group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateNetworkSecurityGroupBindingRequest"];
+            };
+        };
+        responses: {
+            /** @description 安全组绑定已创建 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkSecurityGroupBinding"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    deleteNetworkSecurityGroupBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                security_group_id: string;
+                binding_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 安全组绑定已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkSecurityGroupBinding"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     listNetworkLoadBalancers: {
         parameters: {
             query?: {
+                /** @description 按所属 VPC 过滤负载入口。 */
+                vpc_id?: string;
+                /** @description 按负载入口状态过滤。 */
+                state?: components["schemas"]["NetworkResourceState"];
+                /** @description 按负载入口类型过滤。 */
+                scheme?: "internal" | "public";
                 limit?: number;
                 cursor?: string;
             };
@@ -4150,6 +5430,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     getNetworkLoadBalancer: {
@@ -4200,12 +5481,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     listNetworkRoutes: {
         parameters: {
             query?: {
                 vpc_id?: string;
+                /** @description 按下一跳类型过滤路由。 */
+                next_hop_type?: "gateway" | "instance" | "nat";
                 limit?: number;
                 cursor?: string;
             };
@@ -4254,6 +5538,58 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getNetworkRoute: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                route_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 路由条目 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkRoute"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteNetworkRoute: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                route_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 路由条目已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkRoute"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     listStorageVolumes: {
@@ -4921,6 +6257,57 @@ export interface operations {
             422: components["responses"]["PreconditionFailed"];
         };
     };
+    getRegistryOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 镜像仓库总览 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistryOverview"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listRegistryImages: {
+        parameters: {
+            query?: {
+                project?: string;
+                repository?: string;
+                tag?: string;
+                scan_status?: "not_scanned" | "pending" | "running" | "complete" | "failed";
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 镜像 Tag 列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistryImageListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
     listRegistryProjects: {
         parameters: {
             query?: {
@@ -4973,6 +6360,34 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
+    getRegistryProjectPushInstructions: {
+        parameters: {
+            query?: {
+                repository?: string;
+            };
+            header?: never;
+            path: {
+                project: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 镜像推送说明 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistryPushInstructions"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     listRegistryRepositories: {
         parameters: {
             query?: {
@@ -4999,6 +6414,63 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    deleteRegistryRepositoryTag: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project: string;
+                repository: string;
+                tag: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 镜像 Tag 已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistryDeletedTag"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listRegistryRepositoryTagReferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project: string;
+                repository: string;
+                tag: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 镜像 Tag 引用方列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistryImageReferenceListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listRegistryArtifacts: {
@@ -5221,6 +6693,35 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
+    queryRangeObservability: {
+        parameters: {
+            query: {
+                query: string;
+                start: string;
+                end: string;
+                step: string;
+                timeout?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description PromQL 区间查询结果（matrix） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservabilityRangeQueryResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
     listObservabilityAlertRules: {
         parameters: {
             query?: {
@@ -5353,6 +6854,73 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    getMeteringUsage: {
+        parameters: {
+            query: {
+                start_time: string;
+                end_time: string;
+                resource_type?: string;
+                group_by?: "resource_type" | "az" | "day" | "hour";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 租户用量统计 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items?: {
+                            resource_type?: string;
+                            total_quantity?: number;
+                            unit?: string;
+                            period?: string;
+                        }[];
+                        total?: number;
+                        dev_profile?: components["schemas"]["CoreDevProfileInfo"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getPlatformMeteringUsage: {
+        parameters: {
+            query: {
+                start_time: string;
+                end_time: string;
+                resource_type?: string;
+                group_by?: "tenant_id" | "day" | "hour";
+                /** @description 可选筛选单租户，须平台 RBAC 校验 */
+                tenant_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 平台用量查询成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeteringUsageResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
     reportTokenUsage: {
         parameters: {
             query?: never;
@@ -5392,6 +6960,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description K8s 集群列表 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5415,6 +6984,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description K8s 集群创建成功 */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -5441,6 +7011,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description K8s 集群详情 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5462,6 +7033,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description K8s 集群删除成功 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5483,6 +7055,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description K8s 集群 kubeconfig */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5510,6 +7083,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description K8s 集群升级结果 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5534,6 +7108,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description K8s 集群节点池列表 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5560,6 +7135,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description K8s 集群节点池创建成功 */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -5585,6 +7161,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description K8s 集群节点池详情 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5608,6 +7185,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description K8s 集群节点池删除成功 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5636,6 +7214,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description K8s 集群节点池更新成功 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5664,6 +7243,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description K8s 集群代理响应 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5719,6 +7299,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description 加密密钥列表 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5742,6 +7323,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description 加密密钥创建成功 */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -5763,6 +7345,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description 加密密钥详情 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5784,6 +7367,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description 加密密钥删除成功 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5809,6 +7393,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description 加密密钥轮换结果 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5836,6 +7421,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description 加密密钥吊销成功 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5861,6 +7447,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description 加密对象并生成解封令牌成功 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5886,6 +7473,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description 对象解封令牌创建成功 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5910,6 +7498,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Secret 元数据列表 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5933,6 +7522,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Secret 创建成功 */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -5954,6 +7544,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Secret 元数据详情 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5976,6 +7567,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Secret 删除成功 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6002,6 +7594,7 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Secret 绑定创建成功 */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -6114,20 +7707,8 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description 队列名称冲突 */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @example QueueNameConflict */
-                        code?: string;
-                        message?: string;
-                        request_id?: string;
-                    };
-                };
-            };
+            /** @description 队列名称冲突，code: QueueNameConflict */
+            409: components["responses"]["Conflict"];
         };
     };
     getGPUSchedulingQueue: {
@@ -6174,20 +7755,8 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthorized"];
-            /** @description 平台默认队列不可删除 */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @example PlatformDefaultProtected */
-                        code?: string;
-                        message?: string;
-                        request_id?: string;
-                    };
-                };
-            };
+            /** @description 平台默认队列不可删除，code: PlatformDefaultProtected */
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -6217,20 +7786,8 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            /** @description 平台默认队列不可修改 */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @example PlatformDefaultProtected */
-                        code?: string;
-                        message?: string;
-                        request_id?: string;
-                    };
-                };
-            };
+            /** @description 平台默认队列不可修改，code: PlatformDefaultProtected */
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -6257,6 +7814,244 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    getEmailSmtpConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SMTP 配置（可能为空态） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailSmtpConfigResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    putEmailSmtpConfig: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 幂等键 */
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutEmailSmtpConfigRequest"];
+            };
+        };
+        responses: {
+            /** @description 配置已保存 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailSmtpConfigResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listEmailRecipients: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 收件人列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailRecipientListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createEmailRecipient: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateEmailRecipientRequest"];
+            };
+        };
+        responses: {
+            /** @description 收件人已创建 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailRecipient"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    deleteEmailRecipient: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                recipient_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 收件人已删除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateEmailRecipient: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                recipient_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateEmailRecipientRequest"];
+            };
+        };
+        responses: {
+            /** @description 收件人已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailRecipient"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listEmailSubscriptions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 订阅列表（固定 5 行） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailSubscriptionListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    putEmailSubscriptions: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutEmailSubscriptionsRequest"];
+            };
+        };
+        responses: {
+            /** @description 订阅已保存 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailSubscriptionListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    sendTestEmail: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 测试发送结果 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SendTestEmailResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description 前置条件不满足（SMTP 未配置 / 无启用收件人 / 无凭据） */
+            422: components["responses"]["PreconditionFailed"];
         };
     };
 }
