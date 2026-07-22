@@ -39,6 +39,24 @@
 
 闭环规则：每个 provider slice 必须具备 real adapter/provider runtime、live gate、非敏感 evidence JSON、development record 和全局 production-shape guard。S05-S07 B 轨可以继续 作为历史兼容 token 保留；截至 2026-06-21，S05/S06/S07 均已 passed。
 
+## 账密登录模块（2026-07）
+
+> 独立于 Sprint 13/14 的账密登录功能开发流。覆盖 Core Auth API（租户账密 + 平台账密）、Console 前端（OIDC + 账密 Tab）、BOSS 前端（平台账密登录）。
+
+| Issue | 描述 | 状态 | 证据 |
+|---|---|---|---|
+| Core #001 | 平台用户迁移（users 表扩展 tenant_id NULLABLE） | ✅ 已完成 | `development-records/auth-login-core-001.md` |
+| Core #002 | 租户账密登录 API | ✅ 已完成 | `development-records/auth-login-core-001.md` |
+| Core #003 | 平台账密登录 API | ✅ 已完成 | `development-records/auth-login-core-001.md` |
+| Console #004 | Console P0 OIDC 登录 | ✅ 已完成 | `development-records/auth-login-console-004.md` |
+| Console #005 | Console P1 账密 Tab | ✅ 已完成 | `development-records/auth-login-console-004.md` |
+| BOSS #006 | BOSS P1 账密登录 | ✅ 已完成 | `development-records/auth-login-boss-006.md` |
+| BOSS #006 | BOSS P1 OIDC 登录 | ⏸ 暂不实现 | auth-service Begin 方法需扩展平台路径 |
+
+**代码审查修复（review-it）：** P0-1 签发顺序、P0-3 BOSS redirect_uri、P1-1 SQL 约束、P1-2 maybeRefresh、P1-3 401 先 refresh、P1-5 幂等键、P2-1 RBAC scope。测试验证：auth-service PASS、ani-gateway middleware PASS、BOSS vite build PASS。
+
+**PRD/SPEC 文档体系：** 已按产品线拆分为 Console/BOSS/Core 三份 PRD 和三份 SPEC，分别放置在 `prd/{console,boss,core}/login/` 和 `spec/{console,boss,core}/login/` 目录。
+
 ## GPU 调度功能流（skill 流水线推进中，2026-07）
 
 > 独立于 Sprint 13/14 real provider 收敛的 GPU 调度功能开发流，通过 `/prd-to-spec` → `/to-issues` → `/goal` skill 流水线推进。共 13 个 Issue，覆盖 Core OpenAPI 契约、Queue adapter/handler、Console 前端组件和 BOSS 前端页面。

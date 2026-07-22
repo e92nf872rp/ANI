@@ -7,6 +7,7 @@
 ```text
 当前阶段：以 ../ANI-DOCS-INDEX.md、../ANI-06-开发计划.md Section 零和 CURRENT-SPRINT.md 为准
 当前执行：Phase 1 / Sprint 13 / Core real provider 与 live gate 收敛启动；Sprint 12 Core「Services 支撑 Handler」已完成 Tier1 local profile 收口
+并行功能流：账密登录模块已完成（Core Auth API + Console 账密 Tab + BOSS 平台登录）；PRD/SPEC 已按产品线拆分
 当前执行入口：CURRENT-SPRINT.md
 全局计划入口：../ANI-06-开发计划.md
 文档导航：../ANI-DOCS-INDEX.md

@@ -13,6 +13,14 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 账密登录模块（2026-07）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| AUTH-LOGIN-CORE-001 | Core Auth API：租户账密登录 + 平台账密登录 + 平台用户迁移；P0-1 签发顺序、P1-1 SQL 约束、P2-1 RBAC scope；auth-service 测试 PASS、ani-gateway middleware 测试 PASS | auth-login-core-001.md |
+| AUTH-LOGIN-CONSOLE-002 | Console 前端：OIDC + 账密 Tab + 会话管理 + 路由守卫；P1-2 maybeRefresh、P1-3 401 先 refresh、P1-5 幂等键；type-check + vite build PASS | auth-login-console-002.md |
+| AUTH-LOGIN-BOSS-003 | BOSS 前端：平台账密登录 + 会话隔离；P0-3 redirect_uri /boss 前缀、P1-2 maybeRefresh、P1-3 401 先 refresh；BOSS OIDC 暂不实现；vite build PASS | auth-login-boss-003.md |
+
 ### GPU 调度功能流（2026-07）
 
 | 批次 | 内容摘要 | 文件 |
