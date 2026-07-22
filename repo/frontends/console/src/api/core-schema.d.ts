@@ -219,18 +219,18 @@ export interface paths {
         };
         /**
          * 查询实例列表
-         *@description Services P0 依赖路径。返回 VM、container、gpu_container、sandbox 的 Core 统一实例视图。
+         * @description Services P0 依赖路径。返回 VM、container、gpu_container、sandbox 的 Core 统一实例视图。
          *     当前 Alpha 冻结 path/schema/error/state/RBAC scope；dev/local profile 可使用本地 provider。
          */
         get: operations["listInstances"];
         put?: never;
         /**
-        * 创建实例
-        * @description 创建 VM、container、gpu_container 或 sandbox。POST 创建必须携带 idempotency_key；
-        *     同一 (tenant_id, idempotency_key) 在 24 小时内返回同一操作结果。
-        *     推荐按 kind 填写对应 `vm_config` / `container_config` / `gpu_container_config` / `sandbox_config`；
-        *     扁平 boot_image/ssh_*\/replicas/gpu 字段仍接受，作为 v1 兼容别名。
-        */
+         * 创建实例
+         * @description 创建 VM、container、gpu_container 或 sandbox。POST 创建必须携带 idempotency_key；
+         *     同一 (tenant_id, idempotency_key) 在 24 小时内返回同一操作结果。
+         *     推荐按 kind 填写对应 `vm_config` / `container_config` / `gpu_container_config` / `sandbox_config`；
+         *     扁平 boot_image/ssh_*\/replicas/gpu 字段仍接受，作为 v1 兼容别名。
+         */
         post: operations["createInstance"];
         delete?: never;
         options?: never;
