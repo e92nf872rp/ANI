@@ -47,14 +47,29 @@ type GPUSchedulingQueueUpdateRequest struct {
 	ProjectID     *string
 }
 
+// GPUSchedulingQueueCreateResult wraps the created queue with replay metadata.
+type GPUSchedulingQueueCreateResult struct {
+	Queue            GPUSchedulingQueue
+	IdempotentReplay bool // true when the request reused an existing idempotency_key
+}
+
+// GPUSchedulingQueueUpdateResult wraps the updated queue with replay metadata.
+type GPUSchedulingQueueUpdateResult struct {
+	Queue            GPUSchedulingQueue
+	IdempotentReplay bool
+}
+
 // GPUSchedulingQueueStore abstracts queue CRUD over Volcano Queue CRD.
 // Implementations MUST enforce tenant isolation using the tenant_id from
 // the request context and MUST reject PATCH/DELETE on platform default queues.
+// Create and Update MUST use idempotencyKey for deduplication: a duplicate
+// request with the same (tenantID, idempotencyKey) returns the original result
+// with IdempotentReplay=true instead of performing a second mutation.
 type GPUSchedulingQueueStore interface {
 	List(ctx context.Context, tenantID string) ([]GPUSchedulingQueue, error)
 	Get(ctx context.Context, tenantID, id string) (GPUSchedulingQueue, error)
-	Create(ctx context.Context, tenantID string, req GPUSchedulingQueueCreateRequest) (GPUSchedulingQueue, error)
-	Update(ctx context.Context, tenantID, id string, req GPUSchedulingQueueUpdateRequest) (GPUSchedulingQueue, error)
+	Create(ctx context.Context, tenantID, idempotencyKey string, req GPUSchedulingQueueCreateRequest) (GPUSchedulingQueueCreateResult, error)
+	Update(ctx context.Context, tenantID, id, idempotencyKey string, req GPUSchedulingQueueUpdateRequest) (GPUSchedulingQueueUpdateResult, error)
 	Delete(ctx context.Context, tenantID, id string) error
 }
 

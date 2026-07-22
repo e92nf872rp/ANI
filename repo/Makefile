@@ -1,6 +1,10 @@
 # ANI Monorepo — 统一构建入口
 # 使用方式：make <target>
 
+# 自动加载 .env（存在则注入，不存在不报错），并导出到子进程环境
+-include .env
+export
+
 .PHONY: help deps deps-down deps-status deps-clean \
         tools-proto gen-api gen-console-api gen-proto gen-core-sdk gen-api-docs \
         build build-gateway build-auth-service build-model-service build-task-service build-reconcile-worker build-cli \
@@ -498,6 +502,16 @@ validate-vcluster-live-gate:
 	python scripts/validate_vcluster_live_gate.py
 	python scripts/validate_vcluster_live_gate_test.py
 	@echo "✅ M1-K8S-LIVE-A vCluster live validation gate valid"
+
+validate-gpu-scheduling-live-gate:
+	@echo "→ Checking GPU-SCHEDULING-SMOKE-AB live gate..."
+	python scripts/validate_gpu_scheduling_live_gate.py
+	@echo "[PASS] GPU-SCHEDULING-SMOKE-AB live gate valid"
+
+validate-queue-crud-live-gate:
+	@echo "→ Checking QUEUE-CRUD-LIVE-GATE..."
+	python scripts/validate_queue_crud_live_gate.py
+	@echo "[PASS] QUEUE-CRUD-LIVE-GATE valid"
 
 validate-vcluster-upgrade-live-gate:
 	@echo "→ 校验 Sprint 5 M1-K8S-LIVE-C vCluster upgrade live 验证门禁..."

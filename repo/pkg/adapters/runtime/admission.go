@@ -19,6 +19,7 @@ func NewLocalAdmissionGuard() *LocalAdmissionGuard {
 			"VirtualMachine": true,
 			"Deployment":     true,
 			"Job":            true,
+			"Secret":         true,
 		},
 	}
 }

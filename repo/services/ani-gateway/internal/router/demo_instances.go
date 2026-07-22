@@ -3,9 +3,12 @@ package router
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -77,6 +80,9 @@ type demoInstanceAPI struct {
 	operations                    ports.WorkloadOperationStore
 	observability                 ports.InstanceObservability
 	observabilityUsesInstanceName bool
+	gpuInventory                  ports.GPUInventory
+	k8sClient                     *runtimeadapter.KubernetesRESTClient
+	store                         *demoInstanceStore
 }
 
 type demoCreateInstanceRequest struct {
@@ -180,6 +186,7 @@ type demoInstanceResponse struct {
 	InstanceType          string                 `json:"instance_type"`
 	State                 string                 `json:"state"`
 	Status                string                 `json:"status"`
+	Reason                string                 `json:"reason,omitempty"`
 	Provider              string                 `json:"provider"`
 	DevProfile            coreDevProfileResponse `json:"dev_profile"`
 	OperationID           string                 `json:"operation_id,omitempty"`
@@ -243,6 +250,8 @@ type demoGPU struct {
 	Vendor             string  `json:"vendor,omitempty"`
 	Model              string  `json:"model,omitempty"`
 	Count              int     `json:"count"`
+	ResourceName       string  `json:"resource_name,omitempty"`
+	QueueName          string  `json:"queue_name,omitempty"`
 	SchedulingReason   string  `json:"scheduling_reason,omitempty"`
 	UtilizationPercent float64 `json:"utilization_percent"`
 }
@@ -379,33 +388,74 @@ type demoTimelineStep struct {
 }
 
 func newDemoInstanceAPI() *demoInstanceAPI {
-	return newDemoInstanceAPIWithObservability(nil, false)
+	return newDemoInstanceAPIWithObservability(nil, false, nil, nil)
 }
 
-func newDemoInstanceAPIWithObservability(observability ports.InstanceObservability, useInstanceName bool) *demoInstanceAPI {
+func newDemoInstanceAPIWithObservability(observability ports.InstanceObservability, useInstanceName bool, gpuInventory ports.GPUInventory, k8sClient *runtimeadapter.KubernetesRESTClient) *demoInstanceAPI {
 	store := newDemoInstanceStore()
 	operations := runtimeadapter.NewLocalOperationStore()
 	identity := runtimeadapter.NewLocalWorkloadIdentityService()
-	planner := runtimeadapter.NewPlanningRuntime(runtimeadapter.WithGPUInventory(demoGPUInventory{}))
+
+	// Use real K8s GPU inventory when available, otherwise fall back to demo.
+	var inventory ports.GPUInventory = demoGPUInventory{}
+	if gpuInventory != nil {
+		inventory = gpuInventory
+	}
+
+	planner := runtimeadapter.NewPlanningRuntime(runtimeadapter.WithGPUInventory(inventory))
+
+	var (
+		dryRun    ports.WorkloadProviderDryRun
+		apply     ports.WorkloadProviderApply
+		reader    ports.WorkloadProviderStatusReader
+		lifecycle ports.WorkloadInstanceLifecycleExecutor
+	)
+	if k8sClient != nil {
+		// Real K8s provider: dry-run, apply, observe, and lifecycle all go
+		// through the K8s REST client.
+		adapter := runtimeadapter.NewKubernetesProviderAdapter(
+			k8sClient,
+			runtimeadapter.WithKubernetesProviderApplyEnabled(true),
+		)
+		dryRun = adapter
+		apply = adapter
+		reader = adapter
+		lifecycle = runtimeadapter.NewKubernetesLifecycleExecutor(
+			k8sClient,
+			runtimeadapter.WithKubernetesLifecycleEnabled(true),
+		)
+	} else {
+		dryRun = runtimeadapter.NewLocalProviderDryRun()
+		apply = runtimeadapter.NewLocalProviderApply(runtimeadapter.WithProviderApplyEnabled(true))
+		reader = runtimeadapter.NewLocalProviderStatusReader()
+	}
+
 	orchestrator := runtimeadapter.NewLocalInstanceOrchestrator(
 		planner,
 		runtimeadapter.NewKubernetesDryRunRenderer(planner),
 		runtimeadapter.NewLocalAdmissionGuard(),
 		&demoPlanAuditStore{},
-		runtimeadapter.NewLocalProviderDryRun(),
-		runtimeadapter.NewLocalProviderApply(runtimeadapter.WithProviderApplyEnabled(true)),
-		runtimeadapter.NewLocalProviderStatusReader(),
+		dryRun,
+		apply,
+		reader,
 		runtimeadapter.NewLocalStatusReconciler(),
 		runtimeadapter.WithInstanceStore(store),
 		runtimeadapter.WithInstanceOrchestratorWorkloadIdentityService(identity),
 	)
+
+	serviceOpts := []runtimeadapter.InstanceServiceOption{
+		runtimeadapter.WithOperationStore(operations),
+		runtimeadapter.WithWorkloadIdentityService(identity),
+		runtimeadapter.WithSandboxRuntime(runtimeadapter.NewLocalSandboxRuntime()),
+	}
+	if lifecycle != nil {
+		serviceOpts = append(serviceOpts, runtimeadapter.WithInstanceLifecycleExecutor(lifecycle))
+	}
 	service := runtimeadapter.NewLocalInstanceServiceWithOptions(
 		orchestrator,
 		store,
 		runtimeadapter.NewLocalInstanceOpsGuard(runtimeadapter.WithInstanceOpsEnabled(true)),
-		runtimeadapter.WithOperationStore(operations),
-		runtimeadapter.WithWorkloadIdentityService(identity),
-		runtimeadapter.WithSandboxRuntime(runtimeadapter.NewLocalSandboxRuntime()),
+		serviceOpts...,
 	)
 	if observability == nil {
 		observability = runtimeadapter.NewLocalInstanceObservabilityService()
@@ -415,11 +465,14 @@ func newDemoInstanceAPIWithObservability(observability ports.InstanceObservabili
 		operations:                    operations,
 		observability:                 observability,
 		observabilityUsesInstanceName: useInstanceName,
+		gpuInventory:                  gpuInventory,
+		k8sClient:                     k8sClient,
+		store:                         store,
 	}
 }
 
-func registerDemoInstancesWithObservability(v1 *route.RouterGroup, observability ports.InstanceObservability, useInstanceName bool) {
-	api := newDemoInstanceAPIWithObservability(observability, useInstanceName)
+func registerDemoInstancesWithObservability(v1 *route.RouterGroup, observability ports.InstanceObservability, useInstanceName bool, gpuInventory ports.GPUInventory, k8sClient *runtimeadapter.KubernetesRESTClient) {
+	api := newDemoInstanceAPIWithObservability(observability, useInstanceName, gpuInventory, k8sClient)
 	v1.GET("/instances", api.list)
 	v1.POST("/instances", api.create)
 	v1.GET("/instances/:instance_id", api.get)
@@ -498,12 +551,526 @@ func (api *demoInstanceAPI) create(ctx context.Context, c *app.RequestContext) {
 	})
 }
 
+// orphanObservation holds the fields extracted from a live Kubernetes
+// Deployment that are needed to synthesize a WorkloadInstanceRecord for
+// instances that exist in the cluster but not in the in-memory store.
+type orphanObservation struct {
+	Phase     string
+	NodeName  string
+	GPUCount  int
+	CreatedAt time.Time
+	Reason    string
+}
+
+// refreshStoreStatuses queries the live Kubernetes cluster for each
+// store-backed record and rewrites its status (state, container replicas,
+// node name, reason) to reflect the real Deployment/Pod state. This is the
+// only mechanism that updates the in-memory demo store after create,
+// because the background reconcile controller is bound to the
+// PostgreSQL-backed MetadataInstanceStore, not the demo in-memory store.
+// Records whose Deployment is gone (NotFound) are marked failed so they do
+// not linger in "provisioning" forever.
+func (api *demoInstanceAPI) refreshStoreStatuses(ctx context.Context, tenantID string, kind ports.WorkloadKind) {
+	if api.k8sClient == nil || api.store == nil || strings.TrimSpace(tenantID) == "" {
+		return
+	}
+	records, err := api.store.List(ctx, tenantID, kind)
+	if err != nil || len(records) == 0 {
+		return
+	}
+	for i := range records {
+		api.refreshOneStoreStatus(ctx, &records[i])
+	}
+}
+
+// refreshOneStoreStatus refreshes a single store record from K8s. It reuses
+// the same Deployment GET + phase mapping as orphan discovery so the phase
+// semantics stay consistent.
+func (api *demoInstanceAPI) refreshOneStoreStatus(ctx context.Context, record *ports.WorkloadInstanceRecord) {
+	if record == nil || record.Name == "" || record.Provider != "kubernetes" {
+		return
+	}
+	namespace := demoTenantNamespace(record.TenantID)
+	depEndpoint := api.k8sClient.Host() + "/apis/apps/v1/namespaces/" + url.PathEscape(namespace) + "/deployments/" + url.PathEscape(record.Name)
+	body, status, err := api.k8sClient.Do(ctx, http.MethodGet, depEndpoint, "", nil)
+	if err != nil {
+		if status == http.StatusNotFound {
+			// Deployment gone: surface as failed instead of stale provisioning.
+			record.Status.State = ports.WorkloadStateFailed
+			record.Status.Reason = "deployment not found in cluster"
+			record.Status.UpdatedAt = time.Now().UTC()
+			record.UpdatedAt = record.Status.UpdatedAt
+			_ = api.store.UpsertStatus(ctx, *record)
+		}
+		return
+	}
+	var dep struct {
+		Status struct {
+			Replicas          int32 `json:"replicas"`
+			UpdatedReplicas   int32 `json:"updatedReplicas"`
+			ReadyReplicas     int32 `json:"readyReplicas"`
+			AvailableReplicas int32 `json:"availableReplicas"`
+			Conditions        []struct {
+				Type    string `json:"type"`
+				Status  string `json:"status"`
+				Reason  string `json:"reason"`
+				Message string `json:"message"`
+			} `json:"conditions"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal(body, &dep); err != nil {
+		return
+	}
+	var phase string
+	switch {
+	case dep.Status.AvailableReplicas > 0 || dep.Status.ReadyReplicas > 0:
+		phase = "Running"
+	case dep.Status.Replicas > 0 || dep.Status.UpdatedReplicas > 0:
+		phase = "Provisioning"
+	default:
+		phase = "Pending"
+	}
+	record.Status.State = mapProviderPhaseToState(phase)
+	record.Status.Reason = ""
+	for _, condition := range dep.Status.Conditions {
+		if strings.EqualFold(condition.Status, "False") {
+			if condition.Reason != "" {
+				record.Status.Reason = condition.Reason
+			} else if condition.Message != "" {
+				record.Status.Reason = condition.Message
+			}
+			break
+		}
+	}
+	if record.Container != nil {
+		record.Container.Replicas = dep.Status.Replicas
+		record.Container.ReadyReplicas = dep.Status.ReadyReplicas
+		switch phase {
+		case "Running":
+			record.Container.RolloutStatus = "running"
+		case "Provisioning":
+			record.Container.RolloutStatus = "progressing"
+		default:
+			record.Container.RolloutStatus = "pending"
+		}
+	}
+	// Discover the node name from Pods (HAMi stores it in spec.nodeName).
+	podEndpoint := api.k8sClient.Host() + "/api/v1/namespaces/" + url.PathEscape(namespace) + "/pods?labelSelector=" + url.QueryEscape("ani.kubercloud.io/instance="+record.Name)
+	podBody, _, podErr := api.k8sClient.Do(ctx, http.MethodGet, podEndpoint, "", nil)
+	if podErr == nil {
+		var podList struct {
+			Items []struct {
+				Spec struct {
+					NodeName string `json:"nodeName"`
+				} `json:"spec"`
+				Status struct {
+					NodeName   string `json:"nodeName"`
+					Conditions []struct {
+						Type    string `json:"type"`
+						Status  string `json:"status"`
+						Reason  string `json:"reason"`
+						Message string `json:"message"`
+					} `json:"conditions"`
+				} `json:"status"`
+			} `json:"items"`
+		}
+		if json.Unmarshal(podBody, &podList) == nil {
+			// A Deployment may own multiple Pods across rollouts (e.g. a stale
+			// Pending pod alongside a healthy Running pod). Prefer the
+			// scheduled pod for node name and only surface the scheduling
+			// failure reason when no pod has been scheduled.
+			scheduledPod := false
+			for _, pod := range podList.Items {
+				if pod.Spec.NodeName != "" || pod.Status.NodeName != "" {
+					scheduledPod = true
+					if pod.Spec.NodeName != "" {
+						record.Status.NodeName = pod.Spec.NodeName
+					} else if pod.Status.NodeName != "" {
+						record.Status.NodeName = pod.Status.NodeName
+					}
+				}
+			}
+			if scheduledPod {
+				// At least one pod is scheduled: clear any stale failure reason.
+				record.Status.Reason = ""
+			} else {
+				// No pod scheduled yet: surface the real scheduling failure
+				// reason from the PodScheduled condition (status=False).
+				for _, pod := range podList.Items {
+					for _, cond := range pod.Status.Conditions {
+						if !strings.EqualFold(cond.Type, "PodScheduled") {
+							continue
+						}
+						if strings.EqualFold(cond.Status, "False") {
+							if cond.Message != "" {
+								record.Status.Reason = cond.Message
+							} else if cond.Reason != "" {
+								record.Status.Reason = cond.Reason
+							}
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+	record.Status.UpdatedAt = time.Now().UTC()
+	record.UpdatedAt = record.Status.UpdatedAt
+	_ = api.store.UpsertStatus(ctx, *record)
+}
+
+// mapProviderPhaseToState mirrors the status_reconciler mapping for the
+// common provider phases surfaced by the Kubernetes REST client. It keeps
+// terminal/lifecycle states (stopping, stopped, deleting, deleted) intact
+// because those are driven by lifecycle actions, not by the Deployment
+// rollout state.
+func mapProviderPhaseToState(phase string) ports.WorkloadState {
+	switch strings.ToLower(phase) {
+	case "running":
+		return ports.WorkloadStateRunning
+	case "provisioning":
+		return ports.WorkloadStateProvisioning
+	case "pending":
+		return ports.WorkloadStatePending
+	case "failed":
+		return ports.WorkloadStateFailed
+	default:
+		return ports.WorkloadStateProvisioning
+	}
+}
+
+// discoverOrphanDeployments lists Kubernetes Deployments in the tenant
+// namespace and returns synthetic WorkloadInstanceRecord entries for any
+// Deployment that is not already tracked by the in-memory instance store.
+// This lets the list/get APIs surface instances that survived a gateway
+// restart even though the local store was empty.
+func (api *demoInstanceAPI) discoverOrphanDeployments(ctx context.Context, tenantID string) []ports.WorkloadInstanceRecord {
+	if api.k8sClient == nil || strings.TrimSpace(tenantID) == "" {
+		return nil
+	}
+	namespace := demoTenantNamespace(tenantID)
+	labelSelector := "ani.kubercloud.io/tenant-id=" + tenantID
+	endpoint := api.k8sClient.Host() + "/apis/apps/v1/namespaces/" + url.PathEscape(namespace) + "/deployments?labelSelector=" + url.QueryEscape(labelSelector)
+	body, status, err := api.k8sClient.Do(ctx, http.MethodGet, endpoint, "", nil)
+	if err != nil {
+		log.Printf("[LIST] orphan discovery failed to list deployments in namespace %s: status=%d err=%v", namespace, status, err)
+		return nil
+	}
+	var list struct {
+		Items []struct {
+			Metadata struct {
+				Name              string    `json:"name"`
+				CreationTimestamp time.Time `json:"creationTimestamp"`
+			} `json:"metadata"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(body, &list); err != nil {
+		log.Printf("[LIST] orphan discovery failed to decode deployment list: %v", err)
+		return nil
+	}
+	records := make([]ports.WorkloadInstanceRecord, 0, len(list.Items))
+	for _, item := range list.Items {
+		depName := strings.TrimSpace(item.Metadata.Name)
+		if depName == "" {
+			continue
+		}
+		// Skip deployments that already exist in the in-memory store.
+		// The store may key records by instance ID (e.g. "inst_1") rather
+		// than the deployment name, so check by listing and matching Name.
+		skip := false
+		if storeRecords, err := api.service.List(ctx, ports.WorkloadInstanceListRequest{
+			TenantID: tenantID,
+			Kind:     ports.WorkloadKindGPUContainer,
+		}); err == nil {
+			for _, sr := range storeRecords {
+				if sr.Name == depName {
+					skip = true
+					break
+				}
+			}
+		}
+		if skip {
+			continue
+		}
+		obs := api.observeOrphan(ctx, tenantID, depName)
+		record := ports.WorkloadInstanceRecord{
+			InstanceID:   depName,
+			TenantID:     tenantID,
+			Name:         depName,
+			Kind:         ports.WorkloadKindGPUContainer,
+			Provider:     "kubernetes",
+			ResourceRefs: []string{"kubernetes/Deployment/" + depName},
+			Status: ports.WorkloadStatus{
+				Ref: ports.WorkloadRef{
+					TenantID:   tenantID,
+					InstanceID: depName,
+					Kind:       ports.WorkloadKindGPUContainer,
+					ProviderID: "kubernetes",
+				},
+				State:    demoOrphanState(obs.Phase),
+				NodeName: obs.NodeName,
+				Reason:   obs.Reason,
+			},
+			CreatedAt: obs.CreatedAt,
+			UpdatedAt: time.Now().UTC(),
+		}
+		if obs.GPUCount > 0 {
+			record.GPU = api.orphanGPUStatus(ctx, obs.NodeName, obs.GPUCount, obs.Phase)
+		}
+		records = append(records, record)
+		log.Printf("[LIST] orphan discovery found untracked deployment %s/%s phase=%s node=%s gpu=%d", namespace, depName, obs.Phase, obs.NodeName, obs.GPUCount)
+	}
+	return records
+}
+
+// observeOrphan inspects a single Kubernetes Deployment and its Pods to
+// extract the observation fields needed to synthesize a WorkloadInstanceRecord.
+func (api *demoInstanceAPI) observeOrphan(ctx context.Context, tenantID string, depName string) orphanObservation {
+	namespace := demoTenantNamespace(tenantID)
+	obs := orphanObservation{}
+	depEndpoint := api.k8sClient.Host() + "/apis/apps/v1/namespaces/" + url.PathEscape(namespace) + "/deployments/" + url.PathEscape(depName)
+	body, status, err := api.k8sClient.Do(ctx, http.MethodGet, depEndpoint, "", nil)
+	if err != nil {
+		log.Printf("[GET] orphan observe failed to get deployment %s/%s: status=%d err=%v", namespace, depName, status, err)
+		return obs
+	}
+	var dep struct {
+		Metadata struct {
+			CreationTimestamp time.Time `json:"creationTimestamp"`
+		} `json:"metadata"`
+		Spec struct {
+			Template struct {
+				Spec struct {
+					Containers []struct {
+						Resources struct {
+							Limits map[string]any `json:"limits"`
+						} `json:"resources"`
+					} `json:"containers"`
+				} `json:"spec"`
+			} `json:"template"`
+		} `json:"spec"`
+		Status struct {
+			AvailableReplicas int `json:"availableReplicas"`
+			Replicas          int `json:"replicas"`
+			Conditions        []struct {
+				Type    string `json:"type"`
+				Status  string `json:"status"`
+				Reason  string `json:"reason"`
+				Message string `json:"message"`
+			} `json:"conditions"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal(body, &dep); err != nil {
+		log.Printf("[GET] orphan observe failed to decode deployment %s/%s: %v", namespace, depName, err)
+		return obs
+	}
+	obs.CreatedAt = dep.Metadata.CreationTimestamp
+	if dep.Status.AvailableReplicas > 0 {
+		obs.Phase = "Running"
+	} else if dep.Status.Replicas > 0 {
+		obs.Phase = "Provisioning"
+	} else {
+		obs.Phase = "Pending"
+	}
+	for _, condition := range dep.Status.Conditions {
+		if strings.EqualFold(condition.Status, "False") {
+			if condition.Reason != "" {
+				obs.Reason = condition.Reason
+			} else if condition.Message != "" {
+				obs.Reason = condition.Message
+			}
+			break
+		}
+	}
+	for _, container := range dep.Spec.Template.Spec.Containers {
+		if container.Resources.Limits == nil {
+			continue
+		}
+		for resourceName, raw := range container.Resources.Limits {
+			if !strings.HasPrefix(resourceName, "nvidia.com/gpu") && resourceName != "nvidia.com/gpu" {
+				continue
+			}
+			count := demoOrphanGPUCount(raw)
+			if count > 0 {
+				obs.GPUCount += count
+			}
+		}
+	}
+	// Query Pods to discover the node name. HAMi-scheduled pods store the
+	// node in spec.nodeName rather than status.nodeName.
+	podEndpoint := api.k8sClient.Host() + "/api/v1/namespaces/" + url.PathEscape(namespace) + "/pods?labelSelector=" + url.QueryEscape("ani.kubercloud.io/instance="+depName)
+	podBody, podStatus, podErr := api.k8sClient.Do(ctx, http.MethodGet, podEndpoint, "", nil)
+	if podErr != nil {
+		log.Printf("[GET] orphan observe failed to list pods for %s/%s: status=%d err=%v", namespace, depName, podStatus, podErr)
+		return obs
+	}
+	var podList struct {
+		Items []struct {
+			Spec struct {
+				NodeName string `json:"nodeName"`
+			} `json:"spec"`
+			Status struct {
+				NodeName   string `json:"nodeName"`
+				Conditions []struct {
+					Type    string `json:"type"`
+					Status  string `json:"status"`
+					Reason  string `json:"reason"`
+					Message string `json:"message"`
+				} `json:"conditions"`
+			} `json:"status"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(podBody, &podList); err != nil {
+		log.Printf("[GET] orphan observe failed to decode pod list for %s/%s: %v", namespace, depName, err)
+		return obs
+	}
+	// A Deployment may own multiple Pods across rollouts (e.g. a stale
+	// Pending pod from a failed ReplicaSet alongside a healthy Running pod).
+	// Prefer the scheduled/running pod for node name and only surface the
+	// scheduling failure reason when no pod has been scheduled.
+	scheduledPod := false
+	for _, pod := range podList.Items {
+		if pod.Spec.NodeName != "" || pod.Status.NodeName != "" {
+			scheduledPod = true
+			if pod.Spec.NodeName != "" {
+				obs.NodeName = pod.Spec.NodeName
+			} else if pod.Status.NodeName != "" {
+				obs.NodeName = pod.Status.NodeName
+			}
+		}
+	}
+	if scheduledPod {
+		// At least one pod is scheduled: clear any Deployment-level failure
+		// reason (e.g. stale ProgressDeadlineExceeded) since the workload
+		// is actually running.
+		obs.Reason = ""
+		return obs
+	}
+	// No pod scheduled yet: surface the real scheduling failure reason
+	// from the PodScheduled condition (status=False). This carries the
+	// scheduler's detailed message (e.g. "Unschedulable: ...") which is more
+	// actionable than the Deployment's "MinimumReplicasUnavailable".
+	for _, pod := range podList.Items {
+		for _, cond := range pod.Status.Conditions {
+			if !strings.EqualFold(cond.Type, "PodScheduled") {
+				continue
+			}
+			if strings.EqualFold(cond.Status, "False") {
+				if cond.Message != "" {
+					obs.Reason = cond.Message
+				} else if cond.Reason != "" {
+					obs.Reason = cond.Reason
+				}
+				break
+			}
+		}
+	}
+	return obs
+}
+
+// orphanGPUStatus builds a GPUInstanceStatus from the GPU inventory when the
+// node is known, falling back to a count-only status when inventory lookup
+// fails or the inventory is not configured. phase is the Deployment phase
+// (Running/Provisioning/Pending) used to produce a human-readable
+// scheduling_reason for the orphan record.
+func (api *demoInstanceAPI) orphanGPUStatus(ctx context.Context, nodeName string, count int, phase string) *ports.GPUInstanceStatus {
+	status := &ports.GPUInstanceStatus{Count: count}
+	if strings.TrimSpace(nodeName) == "" {
+		// Pod not scheduled yet: surface the pending phase as the reason.
+		if phase != "" {
+			status.SchedulingReason = fmt.Sprintf("%s: awaiting node scheduling", strings.ToLower(phase))
+		}
+		return status
+	}
+	if api.gpuInventory == nil {
+		status.SchedulingReason = fmt.Sprintf("scheduled on node %s", nodeName)
+		return status
+	}
+	nodeClass, err := api.gpuInventory.GetNodeClass(ctx, nodeName)
+	if err != nil {
+		log.Printf("[GET] orphan gpu inventory lookup failed for node %s: %v", nodeName, err)
+		status.SchedulingReason = fmt.Sprintf("scheduled on node %s", nodeName)
+		return status
+	}
+	status.Vendor = nodeClass.Vendor
+	status.Model = nodeClass.Model
+	resourceName := ""
+	if len(nodeClass.Devices) > 0 {
+		resourceName = nodeClass.Devices[0].ResourceName
+		status.ResourceName = resourceName
+	}
+	if resourceName != "" {
+		status.SchedulingReason = fmt.Sprintf("scheduled %d %s/%s GPU(s) on node %s", count, nodeClass.Vendor, nodeClass.Model, nodeName)
+	} else {
+		status.SchedulingReason = fmt.Sprintf("scheduled %d GPU(s) on node %s", count, nodeName)
+	}
+	return status
+}
+
+// demoOrphanState maps a Kubernetes Deployment phase string to an ANI
+// WorkloadState. Unknown phases default to Pending.
+func demoOrphanState(phase string) ports.WorkloadState {
+	switch strings.ToLower(strings.TrimSpace(phase)) {
+	case "running":
+		return ports.WorkloadStateRunning
+	case "provisioning", "starting":
+		return ports.WorkloadStateProvisioning
+	case "failed":
+		return ports.WorkloadStateFailed
+	case "pending":
+		return ports.WorkloadStatePending
+	default:
+		return ports.WorkloadStatePending
+	}
+}
+
+// demoOrphanGPUCount parses a Kubernetes resource quantity value for
+// nvidia.com/gpu into an integer count.
+func demoOrphanGPUCount(raw any) int {
+	switch value := raw.(type) {
+	case float64:
+		return int(value)
+	case int64:
+		return int(value)
+	case int:
+		return value
+	case string:
+		count, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil {
+			return 0
+		}
+		return count
+	default:
+		return 0
+	}
+}
+
+// demoTenantNamespace returns the Kubernetes namespace that hosts instances
+// for the given tenant. It mirrors the runtime adapter's tenantNamespace
+// helper without importing it from the router package.
+func demoTenantNamespace(tenantID string) string {
+	return "ani-tenant-" + strings.ReplaceAll(tenantID, "_", "-")
+}
+
 func (api *demoInstanceAPI) get(ctx context.Context, c *app.RequestContext) {
+	tenantID := demoTenantID(c)
+	instanceID := c.Param("instance_id")
 	record, err := api.service.Get(ctx, ports.WorkloadInstanceGetRequest{
-		TenantID:   demoTenantID(c),
-		InstanceID: c.Param("instance_id"),
+		TenantID:   tenantID,
+		InstanceID: instanceID,
 	})
 	if err != nil {
+		if errors.Is(err, ports.ErrNotFound) {
+			if orphans := api.discoverOrphanDeployments(ctx, tenantID); len(orphans) > 0 {
+				for _, orphan := range orphans {
+					if orphan.InstanceID == instanceID {
+						log.Printf("[GET] instance %s not in store, served from orphan discovery (tenant=%s)", instanceID, tenantID)
+						c.JSON(http.StatusOK, demoInstanceFromRecord(orphan))
+						return
+					}
+				}
+			}
+		}
 		writeDemoError(c, http.StatusNotFound, "INSTANCE_NOT_FOUND", err.Error())
 		return
 	}
@@ -511,14 +1078,41 @@ func (api *demoInstanceAPI) get(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *demoInstanceAPI) list(ctx context.Context, c *app.RequestContext) {
+	tenantID := demoTenantID(c)
 	kind := ports.WorkloadKind(c.Query("kind"))
+	// Refresh store-backed records against the live Kubernetes cluster so the
+	// demo API reflects real Deployment/Pod status instead of the stale
+	// "provisioning" captured at create time. This is an on-demand refresh
+	// triggered by the list request; there is no background reconcile loop
+	// for the in-memory demo store.
+	api.refreshStoreStatuses(ctx, tenantID, kind)
 	records, err := api.service.List(ctx, ports.WorkloadInstanceListRequest{
-		TenantID: demoTenantID(c),
+		TenantID: tenantID,
 		Kind:     kind,
 	})
 	if err != nil {
 		writeDemoError(c, http.StatusBadRequest, "INSTANCE_LIST_FAILED", err.Error())
 		return
+	}
+	// Merge orphan deployments discovered from the live Kubernetes cluster.
+	// Skip orphans whose InstanceID or Name is already present in the
+	// store-backed result set to avoid duplicates (store records use
+	// instance IDs like "inst_1" while orphans use deployment names).
+	existing := make(map[string]struct{}, len(records)*2)
+	for _, record := range records {
+		existing[record.InstanceID] = struct{}{}
+		existing[record.Name] = struct{}{}
+	}
+	orphans := api.discoverOrphanDeployments(ctx, tenantID)
+	for _, orphan := range orphans {
+		if _, found := existing[orphan.InstanceID]; found {
+			continue
+		}
+		if kind != "" && orphan.Kind != kind {
+			continue
+		}
+		records = append(records, orphan)
+		existing[orphan.InstanceID] = struct{}{}
 	}
 	items := make([]demoInstanceResponse, 0, len(records))
 	for _, record := range records {
@@ -951,7 +1545,7 @@ func demoSpecFromRequest(req demoCreateInstanceRequest, tenantID string) (ports.
 		TenantID: tenantID,
 		Name:     name,
 		Kind:     kind,
-		Image:    firstNonEmpty(req.Image, "registry.local/ani/demo-runtime:latest"),
+		Image:    firstNonEmpty(req.Image, "docker.io/nvidia/cuda:12.4.1-base-ubuntu22.04"),
 		Resources: ports.WorkloadResourceRequest{
 			CPU:    firstNonEmpty(req.CPU, "2"),
 			Memory: firstNonEmpty(req.Memory, "4Gi"),
@@ -991,6 +1585,9 @@ func demoSpecFromRequest(req demoCreateInstanceRequest, tenantID string) (ports.
 	case ports.WorkloadKindGPUContainer:
 		spec.Storage = nil
 		spec.Container = &ports.ContainerInstanceSpec{Ports: []int32{8080}, Replicas: int32(maxInt(resolved.Replicas, 1))}
+		if len(spec.Command) == 0 {
+			spec.Command = []string{"sleep", "infinity"}
+		}
 		spec.Resources.GPU = ports.GPUSchedulingRequest{
 			TenantID:         tenantID,
 			WorkloadID:       name,
@@ -1188,6 +1785,7 @@ func demoInstanceFromRecord(record ports.WorkloadInstanceRecord) demoInstanceRes
 		InstanceType:          string(record.Kind),
 		State:                 string(record.Status.State),
 		Status:                string(record.Status.State),
+		Reason:                record.Status.Reason,
 		Provider:              record.Provider,
 		DevProfile:            localCoreDevProfile("local-instance-service", "Core dev/local profile; provider execution is gated separately"),
 		OperationID:           record.OperationID,
@@ -1267,6 +1865,8 @@ func demoGPUFromRecord(record ports.WorkloadInstanceRecord) *demoGPU {
 		Vendor:             string(record.GPU.Vendor),
 		Model:              record.GPU.Model,
 		Count:              record.GPU.Count,
+		ResourceName:       record.GPU.ResourceName,
+		QueueName:          record.GPU.QueueName,
 		SchedulingReason:   record.GPU.SchedulingReason,
 		UtilizationPercent: record.GPU.UtilizationPercent,
 	}

@@ -21,13 +21,14 @@ func NewLocalGPUInventory() *LocalGPUInventory {
 			KernelVersion: "local-profile",
 			OSImage:       "ANI Core dev profile",
 			Pool:          "default",
-			Labels:        map[string]string{"ani.io/gpu-demo": "true", "kubernetes.io/hostname": "ani-gpu-a", "nvidia.com/gpu.product": "A100"},
+			Labels:        map[string]string{"ani.io/gpu-demo": "true", "kubernetes.io/hostname": "ani-gpu-a", "nvidia.com/gpu.product": "A100", "ani.kubercloud.io/gpu-node": "true"},
 			Devices: []ports.GPUDeviceClass{
 				{Vendor: ports.GPUVendorNVIDIA, Model: "A100", MemoryMiB: 40960, ResourceName: "nvidia.com/gpu", VirtualizationMode: ports.GPUVirtualizationNone, DriverVersion: "local-535", RuntimeVersion: "local", Capabilities: []string{"cuda", "compute"}},
 				{Vendor: ports.GPUVendorNVIDIA, Model: "A100", MemoryMiB: 40960, ResourceName: "nvidia.com/gpu", VirtualizationMode: ports.GPUVirtualizationNone, DriverVersion: "local-535", RuntimeVersion: "local", Capabilities: []string{"cuda", "compute"}},
 			},
-			Ready:  true,
-			Reason: "Core dev/local profile inventory; real GPU discovery is gated separately",
+			Allocatable: map[string]string{"nvidia.com/gpu": "2", "nvidia.com/vgpu": "4"},
+			Ready:       true,
+			Reason:      "Core dev/local profile inventory; real GPU discovery is gated separately",
 		},
 		{
 			NodeName:      "ani-gpu-b",
@@ -40,8 +41,9 @@ func NewLocalGPUInventory() *LocalGPUInventory {
 			Devices: []ports.GPUDeviceClass{
 				{Vendor: ports.GPUVendorNVIDIA, Model: "L40S", MemoryMiB: 46080, ResourceName: "nvidia.com/gpu", VirtualizationMode: ports.GPUVirtualizationNone, DriverVersion: "local-535", RuntimeVersion: "local", Capabilities: []string{"cuda", "graphics"}},
 			},
-			Ready:  false,
-			Reason: "local profile fault sample; not a production readiness signal",
+			Allocatable: map[string]string{"nvidia.com/gpu": "1"},
+			Ready:       false,
+			Reason:      "local profile fault sample; not a production readiness signal",
 		},
 	}}
 }
@@ -70,15 +72,47 @@ func (i *LocalGPUInventory) PlanScheduling(_ context.Context, request ports.GPUS
 	if strings.TrimSpace(request.TenantID) == "" || strings.TrimSpace(request.WorkloadID) == "" {
 		return ports.GPUSchedulingDecision{}, fmt.Errorf("%w: tenant_id and workload_id are required", ports.ErrInvalid)
 	}
-	quantity := fmt.Sprintf("%d", positiveInt(request.RequiredCount, 1))
+	// Local profile simulates the P0 vendor/MIG gates so dev consumers
+	// see the same Reasons as the real adapter.
+	if reasons := rejectUnsupportedVendorP0(request); len(reasons) > 0 {
+		return ports.GPUSchedulingDecision{Reasons: reasons}, nil
+	}
+	if reasons := rejectMIGModeP0(request); len(reasons) > 0 {
+		return ports.GPUSchedulingDecision{Reasons: reasons}, nil
+	}
+
+	queueName := strings.TrimSpace(request.QueueName)
+	if queueName == "" {
+		queueName = defaultQueueName(request.WorkloadClass)
+	}
+	requiredCount := positiveInt(request.RequiredCount, 1)
+	resourceName, mode := selectResourceName(request)
+
+	for _, node := range i.nodes {
+		if !node.Ready {
+			continue
+		}
+		available := gpuAllocatableCount(node, resourceName)
+		if available < requiredCount {
+			continue
+		}
+		quantity := fmt.Sprintf("%d", requiredCount)
+		return ports.GPUSchedulingDecision{
+			NodeSelector:      map[string]string{"ani.io/gpu-demo": "true"},
+			ResourceName:      resourceName,
+			ResourceQuantity:  quantity,
+			RuntimeClassName:  runtimeClassNameForMode(mode),
+			SchedulerName:     "volcano",
+			QueueName:         queueName,
+			Reasons:           []string{"local GPU scheduling decision; real GPU provider is gated separately"},
+			SelectedNodeModel: node.Model,
+		}, nil
+	}
 	return ports.GPUSchedulingDecision{
-		NodeSelector:     map[string]string{"ani.io/gpu-demo": "true"},
-		ResourceName:     "nvidia.com/gpu",
-		ResourceQuantity: quantity,
-		RuntimeClassName: "nvidia",
-		SchedulerName:    "volcano",
-		QueueName:        "local-gpu",
-		Reasons:          []string{"local GPU scheduling decision; real GPU provider is gated separately"},
+		SchedulerName: "volcano",
+		QueueName:     queueName,
+		ResourceName:  resourceName,
+		Reasons:       []string{fmt.Sprintf("no ready local GPU node satisfies %s >= %d", resourceName, requiredCount)},
 	}, nil
 }
 

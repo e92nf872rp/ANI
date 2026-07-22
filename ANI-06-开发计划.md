@@ -61,6 +61,11 @@ Sprint 14 Core resilience 分支完成状态：
 - 完成：R-P0-0..R-P2-7 已实现并归档；`SPRINT14-CORE-RESILIENCE-LIVE-GATE` 已在 `ani-sprint14-resilience` 隔离 namespace 真实通过 P0 strong backend kill、P1 weak dependency degraded、P2 controller primary kill / follower failover。
 - Evidence：`repo/development-records/live-evidence/sprint14-resilience-live-evidence.json`，已按规则脱敏；验证后隔离 namespace 已清理。
 - 边界：production-ready 只限隔离 Sprint14 Core resilience fixture；不声明现有 Sprint13 单副本后端自身 HA，不声明 full platform production ready；PG 读副本路由、MinIO/Milvus 命名 circuit breaker policy 与后端生产 Operator 拓扑仍属后续 release/operator gate。
+
+GPU 调度三段式 PR 拆分（2026-07-21）：
+- PR #21 (1/3 契约)：v1.yaml + SDK/API docs/TS schema 生成物，已合入 main。
+- PR #31 (2/3 接口)：pkg/ports 接口（GPUSchedulingQueueStore + GPUInventory 扩展），已合入 main。
+- PR #46 (3/3 实现)：adapters + gateway + 前端 + manifests 实现，OPEN 等待 review；review-it 修复 4 项，5 项 follow-up 延迟；笔记 `gpu-scheduling-batch-01-13-note-it.md §5`。
 ```
 
 | 阶段 | 状态 | 完成时间 | 说明 |

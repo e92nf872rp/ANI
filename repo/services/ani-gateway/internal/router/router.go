@@ -7,6 +7,7 @@ package router
 
 import (
 	"github.com/cloudwego/hertz/pkg/app/server"
+	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
@@ -15,12 +16,15 @@ type RegisterOptions struct {
 	EncryptionService                     ports.EncryptionService
 	SecretService                         ports.SecretService
 	GPUInventory                          ports.GPUInventory
+	GPUSchedulingQueueStore               ports.GPUSchedulingQueueStore
+	GPUInstanceStore                      ports.WorkloadInstanceStore
 	NetworkService                        ports.NetworkService
 	StorageService                        ports.StorageService
 	ImageRegistry                         ports.ImageRegistry
 	VectorStoreService                    ports.VectorStoreService
 	InstanceObservability                 ports.InstanceObservability
 	InstanceObservabilityUsesInstanceName bool
+	KubernetesRESTClient                  *runtimeadapter.KubernetesRESTClient
 }
 
 // Register wires all route groups onto the Hertz server.
@@ -39,8 +43,9 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerObservability(v1)
 	registerMetering(v1)
 	registerHarbor(v1, options.ImageRegistry)
-	registerDemoInstancesWithObservability(v1, options.InstanceObservability, options.InstanceObservabilityUsesInstanceName)
-	registerGPUInventoryResourcesWithInventory(v1, options.GPUInventory)
+	registerDemoInstancesWithObservability(v1, options.InstanceObservability, options.InstanceObservabilityUsesInstanceName, options.GPUInventory, options.KubernetesRESTClient)
+	registerGPUInventoryResourcesWithStore(v1, options.GPUInventory, options.GPUInstanceStore, options.KubernetesRESTClient)
+	registerGPUSchedulingResourcesWithStore(v1, options.GPUSchedulingQueueStore)
 	registerNetworkResourcesWithService(v1, options.NetworkService)
 	registerStorageResourcesWithService(v1, options.StorageService)
 	if options.VectorStoreService != nil {

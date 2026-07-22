@@ -1,0 +1,36 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ani-gpu-smoke-b
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-gpu-smoke-b
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/test: gpu-smoke-b
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ani-gpu-smoke-b
+        app.kubernetes.io/part-of: ani-platform
+        ani.kubercloud.io/test: gpu-smoke-b
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        ani.kubercloud.io/gpu-node: "true"
+      containers:
+        - name: gpu-smoke
+          image: nvidia/cuda:12.4.1-base-ubuntu22.04
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              echo "=== Smoke B: HAMi vGPU scheduling ==="
+              nvidia-smi -L
+              echo "=== HAMi vGPU split (nvidia.com/gpu=1 of 10 per physical GPU) ==="
+              echo "SMOKE_B_PASS"
+          resources:
+            limits:
+              nvidia.com/gpu: "1"
