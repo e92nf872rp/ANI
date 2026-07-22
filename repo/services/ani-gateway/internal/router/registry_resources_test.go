@@ -51,6 +51,16 @@ func (r *countingRegistry) CreateProject(ctx context.Context, request ports.Regi
 	return r.ImageRegistry.CreateProject(ctx, request)
 }
 
+type capturingRegistry struct {
+	ports.ImageRegistry
+	listImagesRequest ports.RegistryImageListRequest
+}
+
+func (r *capturingRegistry) ListImages(ctx context.Context, request ports.RegistryImageListRequest) (ports.RegistryImageListResult, error) {
+	r.listImagesRequest = request
+	return r.ImageRegistry.ListImages(ctx, request)
+}
+
 type registryIdempotencyStore struct {
 	mu     sync.Mutex
 	values map[string][]byte
@@ -216,4 +226,25 @@ func TestRegistryAPIProjectPullSecretAndScanReportResponses(t *testing.T) {
 		t.Fatalf("report response = %+v, want complete one-artifact report", reportResponse)
 	}
 	requireLocalCoreDevProfile(t, reportResponse.DevProfile, "local-image-registry")
+}
+
+func TestRegistryAPIListImagesPassesPurposeAndReturnsPurpose(t *testing.T) {
+	provider := &capturingRegistry{ImageRegistry: registryadapter.NewLocalImageRegistry()}
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Next(ctx)
+	})
+	registerHarbor(h.Group("/api/v1"), provider)
+
+	response := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/registry/images?purpose=gpu", nil).Result()
+	if response.StatusCode() != http.StatusOK {
+		t.Fatalf("status = %d body = %s, want 200", response.StatusCode(), response.Body())
+	}
+	if provider.listImagesRequest.Purpose != "gpu" {
+		t.Fatalf("purpose forwarded = %q, want gpu", provider.listImagesRequest.Purpose)
+	}
+	if !bytes.Contains(response.Body(), []byte(`"purpose":"gpu"`)) {
+		t.Fatalf("body = %s, want image purpose", response.Body())
+	}
 }

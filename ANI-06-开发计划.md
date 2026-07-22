@@ -69,6 +69,7 @@ GPU 调度三段式 PR 拆分（2026-07-21）：
 
 Registry Console Flow（2026-07-22）：
 - CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A：按 7.22 原型“暂不考虑 BOSS 和权限”边界，Core v1 新增 `RegistryImage.purpose`、`/registry/images?purpose=`、四类算力引用 enum 与 createInstance 镜像门禁 422 语义；仅契约和 Console Core schema 生成物，不含 handler/adapter/Console 页面实现。
+- CORE-REGISTRY-CONSOLE-FLOW-CORE-A：Core 镜像仓库后端实现已补齐 RegistryImage purpose port/adapter/router 流转和 `/registry/images?purpose=` 过滤；不含 instances、Console、BOSS 或权限实现。
 ```
 
 | 阶段 | 状态 | 完成时间 | 说明 |

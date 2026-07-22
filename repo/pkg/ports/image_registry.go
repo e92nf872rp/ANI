@@ -266,6 +266,7 @@ type RegistryImageListRequest struct {
 	Project    string
 	Repository string
 	Tag        string
+	Purpose    string
 	ScanStatus RegistryScanState
 	Limit      int
 	Cursor     string
@@ -275,6 +276,7 @@ type RegistryImage struct {
 	Project     string
 	Repository  string
 	Tag         string
+	Purpose     string
 	Image       string
 	Registry    string
 	Digest      string

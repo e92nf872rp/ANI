@@ -160,7 +160,31 @@ func TestLocalImageRegistryImplementsConsoleRegistryOperations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListImages() error = %v", err)
 	}
-	if len(images.Items) != 1 || images.Items[0].Image == "" {
-		t.Fatalf("images = %+v, want one local image", images)
+	if len(images.Items) < 4 || images.Items[0].Image == "" {
+		t.Fatalf("images = %+v, want local purpose image catalog", images)
+	}
+}
+
+func TestLocalImageRegistryListImagesFiltersByPurpose(t *testing.T) {
+	service := NewLocalImageRegistry(WithRegistryClock(func() time.Time {
+		return time.Unix(2800, 0).UTC()
+	}))
+
+	images, err := service.ListImages(context.Background(), ports.RegistryImageListRequest{
+		TenantID: "tenant-a",
+		Project:  "tenant-a",
+		Purpose:  "gpu",
+	})
+	if err != nil {
+		t.Fatalf("ListImages() error = %v", err)
+	}
+	if len(images.Items) != 1 {
+		t.Fatalf("images = %+v, want one GPU image", images.Items)
+	}
+	if images.Items[0].Purpose != "gpu" {
+		t.Fatalf("purpose = %q, want gpu", images.Items[0].Purpose)
+	}
+	if images.Items[0].Repository != "gpu-runtime" {
+		t.Fatalf("repository = %q, want gpu-runtime", images.Items[0].Repository)
 	}
 }
