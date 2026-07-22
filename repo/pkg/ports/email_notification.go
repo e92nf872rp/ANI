@@ -26,6 +26,7 @@ type EmailSmtpConfig struct {
 //   - nil  = do not modify existing value
 //   - &""  = clear existing value
 //   - &"x" = overwrite with new value (encrypted at storage layer)
+//
 // Password and AuthCode are independent; setting one does not affect the other.
 type EmailSmtpConfigWrite struct {
 	SmtpHost    string
