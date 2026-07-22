@@ -2,11 +2,14 @@ package middleware
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/google/uuid"
+	"github.com/kubercloud/ani/pkg/types"
 )
 
 // Auth validates JWT Bearer tokens or API Keys.
@@ -33,9 +36,11 @@ func AuthWithClient(authClient AuthClient) app.HandlerFunc {
 			if userID == "" {
 				userID = "00000000-0000-0000-0000-000000000001"
 			}
-			c.Set("tenant_id", tenantID)
-			c.Set("user_id", userID)
-			c.Set("roles", []string{"tenant-admin"})
+			setTenantContext(c, tenantID, userID, []string{"tenant-admin"})
+			// Inject TenantContext into Go context.Context so RLS-aware stores
+			// (MetadataInstanceStore via WithTenantTx -> SetDBTenant -> FromContext)
+			// do not panic when a real DB provider is wired.
+			ctx = withTenantContext(ctx, tenantID, userID, []string{"tenant-admin"})
 			c.Next(ctx)
 			return
 		}
@@ -54,6 +59,11 @@ func AuthWithClient(authClient AuthClient) app.HandlerFunc {
 				return
 			}
 			setTenantContext(c, tenantCtx.GetTenantId(), tenantCtx.GetUserId(), tenantCtx.GetRoles())
+			ctx, err = withTenantContextStrict(ctx, tenantCtx.GetTenantId(), tenantCtx.GetUserId(), tenantCtx.GetRoles())
+			if err != nil {
+				respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", err.Error())
+				return
+			}
 			c.Next(ctx)
 			return
 		}
@@ -71,6 +81,11 @@ func AuthWithClient(authClient AuthClient) app.HandlerFunc {
 				return
 			}
 			setTenantContext(c, tenantCtx.GetTenantId(), tenantCtx.GetUserId(), tenantCtx.GetRoles())
+			ctx, err = withTenantContextStrict(ctx, tenantCtx.GetTenantId(), tenantCtx.GetUserId(), tenantCtx.GetRoles())
+			if err != nil {
+				respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", err.Error())
+				return
+			}
 			c.Next(ctx)
 			return
 		}
@@ -83,6 +98,45 @@ func setTenantContext(c *app.RequestContext, tenantID, userID string, roles []st
 	c.Set("tenant_id", tenantID)
 	c.Set("user_id", userID)
 	c.Set("roles", roles)
+}
+
+// withTenantContext injects a types.TenantContext into the Go context.Context
+// so RLS-aware stores that call types.FromContext (e.g. MetadataInstanceStore via
+// WithTenantTx -> SetDBTenant) do not panic when a real DB provider is wired.
+// Invalid UUIDs fall back to the dev default to keep dev mode resilient.
+func withTenantContext(ctx context.Context, tenantID, userID string, roles []string) context.Context {
+	tID, err := uuid.Parse(tenantID)
+	if err != nil {
+		tID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	}
+	uID, err := uuid.Parse(userID)
+	if err != nil {
+		uID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	}
+	return types.WithTenant(ctx, &types.TenantContext{
+		TenantID: tID,
+		UserID:   uID,
+		Roles:    roles,
+	})
+}
+
+// withTenantContextStrict is the authenticated-path variant: it rejects
+// non-UUID tenant/user ids instead of silently falling back to the dev default,
+// preventing cross-tenant data access when an auth service returns malformed ids.
+func withTenantContextStrict(ctx context.Context, tenantID, userID string, roles []string) (context.Context, error) {
+	tID, err := uuid.Parse(tenantID)
+	if err != nil {
+		return ctx, fmt.Errorf("invalid tenant id from auth: %s", tenantID)
+	}
+	uID, err := uuid.Parse(userID)
+	if err != nil {
+		return ctx, fmt.Errorf("invalid user id from auth: %s", userID)
+	}
+	return types.WithTenant(ctx, &types.TenantContext{
+		TenantID: tID,
+		UserID:   uID,
+		Roles:    roles,
+	}), nil
 }
 
 func isPublicPath(path string) bool {

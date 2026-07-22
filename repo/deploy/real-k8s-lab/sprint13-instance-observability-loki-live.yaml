@@ -1,0 +1,485 @@
+# ============================================================
+# 推荐示例，非必须部署
+# ------------------------------------------------------------
+# 本 yaml 提供 Loki + Fluent Bit 的开箱即用部署示例，用于启用
+# 实例日志持久化（PRD US-007 / FR-11 / FR-12 / FR-13 / FR-20）。
+#
+# - 可替换为 ES/OpenSearch，只需新增对应 adapter
+#   （见 prd FR-11；port: repo/pkg/ports/log_store.go）。
+# - 前置依赖（运维必须先确认）：
+#   1. MinIO bucket `ani-loki-logs` 需先通过 ANI object store API
+#      `createStorageBucket` 或 MinIO Console 创建。
+#   2. MinIO 数据卷当前是 emptyDir（见
+#      sprint13-objectstore-minio-live.yaml），非持久化。Loki 日志
+#      chunk 存 MinIO，MinIO pod 重启会丢数据。运维需确认是否接受
+#      此风险，或先改 MinIO 用 PVC。
+#   3. S3 凭据需在 ani-s07-observability namespace 重建 MinIO 凭据
+#      Secret（K8s Secret 不能跨 namespace 直接引用）。
+# - 部署前必须替换 S3 凭据占位值为 MinIO 真实凭据（来自
+#   `ani-s05-minio-root`，位于 ani-s05-objectstore namespace）。
+#
+# 部署后验证：
+#   kubectl wait deployment/ani-loki -n ani-s07-observability \
+#     --for=condition=ready --timeout=120s
+#   curl http://ani-loki.ani-s07-observability:3100/ready
+#     # 返回 200
+#   curl http://ani-loki.ani-s07-observability:3100/loki/api/v1/labels
+#     # 返回 namespace/pod label
+#   curl 'http://ani-loki.ani-s07-observability:3100/loki/api/v1/query_range?query={namespace="ani-tenant-<id>",pod="<instance_id>"}&limit=10'
+#     # 可查到指定 pod 日志
+#
+# 适配 adapter：repo/pkg/adapters/runtime/loki_log_store.go
+# runtime 注入：repo/services/ani-gateway/instance_observability_runtime.go
+#              环境变量 INSTANCE_OBSERVABILITY_LOG_STORE=loki
+#              INSTANCE_OBSERVABILITY_LOKI_URL=http://ani-loki.ani-s07-observability:3100
+# ============================================================
+
+# Namespace — 复用 ani-s07-observability（见
+# sprint13-instance-observability-prometheus-live.yaml）。
+# 显式声明以便本 yaml 可独立 apply；若 namespace 已存在，kubectl apply
+# 会幂等返回 unchanged，不会报错。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ani-s07-observability
+  labels:
+    app.kubernetes.io/part-of: ani-core
+    ani.dev/sprint: "13"
+    ani.dev/slice: s07-instance-observability
+---
+# ============================================================
+# Loki S3 凭据 Secret
+# ============================================================
+# 注意：K8s Secret 不能跨 namespace 直接引用。部署前必须在
+# ani-s07-observability namespace 重建 MinIO 凭据（从
+# ani-s05-objectstore/ani-s05-minio-root 读取真实值）。
+# 下面的 access_key/secret_key 为占位值，部署前必须替换。
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ani-loki-s3-creds
+  namespace: ani-s07-observability
+  labels:
+    app.kubernetes.io/name: ani-loki
+    app.kubernetes.io/part-of: ani-core
+    ani.dev/sprint: "13"
+    ani.dev/slice: s07-instance-observability
+type: Opaque
+stringData:
+  # 部署前必须替换 <REPLACE_WITH_MINIO_ACCESS_KEY>
+  # （来自 ani-s05-objectstore/ani-s05-minio-root.access_key_id）
+  access_key: "<REPLACE_WITH_MINIO_ACCESS_KEY>"
+  # 部署前必须替换 <REPLACE_WITH_MINIO_SECRET_KEY>
+  # （来自 ani-s05-objectstore/ani-s05-minio-root.secret_access_key）
+  secret_key: "<REPLACE_WITH_MINIO_SECRET_KEY>"
+---
+# ============================================================
+# Loki ConfigMap — 单租户模式 + schema v13 + tsdb + 30d retention
+# ============================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-loki-config
+  namespace: ani-s07-observability
+  labels:
+    app.kubernetes.io/name: ani-loki
+    app.kubernetes.io/part-of: ani-core
+    ani.dev/sprint: "13"
+    ani.dev/slice: s07-instance-observability
+data:
+  loki-config.yaml: |
+    auth_enabled: false  # 单租户模式，多租户隔离通过 LogQL namespace label 过滤实现
+
+    server:
+      http_listen_port: 3100
+      grpc_listen_port: 9095
+
+    common:
+      path_prefix: /loki
+      replication_factor: 1
+      ring:
+        kvstore:
+          store: inmemory
+
+    schema_config:
+      configs:
+        - from: 2024-01-01
+          store: tsdb
+          object_store: s3
+          schema: v13
+          index:
+            prefix: loki_index_
+            period: 24h
+
+    storage_config:
+      tsdb_shipper:
+        active_index_directory: /loki/tsdb-index
+        cache_location: /loki/tsdb-cache
+      # S3 后端：复用现有 MinIO（见 sprint13-objectstore-minio-live.yaml）
+      # Loki 3.x storage_config.aws 是 S3 配置块：
+      #   - s3: S3 URL（含 host:port/bucket，不含凭据；凭据用单独字段）
+      #   - bucketnames: bucket 名（部署前需先创建）
+      #   - endpoint: MinIO 集群内 Service（ani-s05-minio.ani-s05-objectstore:9000）
+      #   - s3forcepathstyle: true（MinIO 必需）
+      #   - access_key_id / secret_access_key: 从 env Secret 注入
+      #     （-config.expand-env=true 展开 ${S3_ACCESS_KEY} / ${S3_SECRET_KEY}）
+      #   - insecure: true（MinIO 内网用 HTTP，非 HTTPS）
+      aws:
+        s3: "http://ani-s05-minio.ani-s05-objectstore:9000/ani-loki-logs"
+        bucketnames: ani-loki-logs
+        # endpoint 必须带 http:// scheme，否则 Loki 报 "not a valid URI"
+        endpoint: "http://ani-s05-minio.ani-s05-objectstore:9000"
+        # region 必须设置，否则 AWS SDK 报 "A region must be set"；
+        # MinIO 不校验 region，用 us-east-1 占位即可
+        region: us-east-1
+        s3forcepathstyle: true
+        insecure: true
+        access_key_id: ${S3_ACCESS_KEY}
+        secret_access_key: ${S3_SECRET_KEY}
+
+    limits_config:
+      retention_period: 30d  # 日志保留 30 天后自动清理（PRD FR-20 / Success Metrics）
+      max_query_parallelism: 16
+      max_streams_per_user: 0  # 单租户模式不限制
+      ingestion_rate_mb: 8
+      ingestion_burst_size_mb: 16
+
+    compactor:
+      working_directory: /loki/compactor
+      retention_enabled: true
+      retention_delete_delay: 2h
+      delete_request_store: s3
+      # Loki 3.x 已移除 shared_store 字段（2.x 遗留）
+
+    analytics:
+      reporting_enabled: false
+---
+# ============================================================
+# Loki Deployment — 单副本，资源与性能假设对齐（PRD §7.4）
+# ============================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ani-loki
+  namespace: ani-s07-observability
+  labels:
+    app.kubernetes.io/name: ani-loki
+    app.kubernetes.io/part-of: ani-core
+    ani.dev/sprint: "13"
+    ani.dev/slice: s07-instance-observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ani-loki
+      ani.dev/slice: s07-instance-observability
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ani-loki
+        app.kubernetes.io/part-of: ani-core
+        ani.dev/sprint: "13"
+        ani.dev/slice: s07-instance-observability
+    spec:
+      containers:
+        - name: loki
+          image: grafana/loki:3.6.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - -config.file=/etc/loki/loki-config.yaml
+            # 启用环境变量展开，使 storage_config.aws.s3 中的
+            # ${S3_ACCESS_KEY} / ${S3_SECRET_KEY} 能从 env Secret 注入
+            - -config.expand-env=true
+          env:
+            # 从 Secret 注入 MinIO S3 凭据（占位值，部署前必须替换）
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ani-loki-s3-creds
+                  key: access_key
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ani-loki-s3-creds
+                  key: secret_key
+          ports:
+            - name: http
+              containerPort: 3100
+            - name: grpc
+              containerPort: 9095
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            # 与 PRD §7.4 性能假设对齐：requests cpu 100m / memory 256Mi
+            # limits cpu 1 / memory 1Gi（单体模式）
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/loki
+              readOnly: true
+            - name: storage
+              mountPath: /loki
+      volumes:
+        - name: config
+          configMap:
+            name: ani-loki-config
+        # emptyDir 非持久化；生产环境需替换为 PVC（PRD §7.3 OQ-3）
+        - name: storage
+          emptyDir: {}
+---
+# ============================================================
+# Loki Service — 集群内访问 ani-loki:3100
+# ============================================================
+# adapter 默认 URL：http://ani-loki.ani-s07-observability:3100
+# （见 instance_observability_runtime.go::newGatewayInstanceObservability）
+apiVersion: v1
+kind: Service
+metadata:
+  name: ani-loki
+  namespace: ani-s07-observability
+  labels:
+    app.kubernetes.io/name: ani-loki
+    app.kubernetes.io/part-of: ani-core
+    ani.dev/sprint: "13"
+    ani.dev/slice: s07-instance-observability
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: ani-loki
+    ani.dev/slice: s07-instance-observability
+  ports:
+    - name: http
+      port: 3100
+      targetPort: http
+    - name: grpc
+      port: 9095
+      targetPort: grpc
+---
+# ============================================================
+# Fluent Bit — ServiceAccount / ClusterRole / ClusterRoleBinding
+# ============================================================
+# DaemonSet 需要读 pods/log 和 nodes/proxy 以采集 /var/log/pods/*
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ani-fluent-bit
+  namespace: ani-s07-observability
+  labels:
+    app.kubernetes.io/name: ani-fluent-bit
+    app.kubernetes.io/part-of: ani-core
+    ani.dev/sprint: "13"
+    ani.dev/slice: s07-instance-observability
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ani-fluent-bit-reader
+  labels:
+    app.kubernetes.io/name: ani-fluent-bit
+    app.kubernetes.io/part-of: ani-core
+    ani.dev/sprint: "13"
+    ani.dev/slice: s07-instance-observability
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["nodes", "nodes/proxy"]
+    verbs: ["get", "list", "watch"]
+  - nonResourceURLs: ["/metrics"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ani-fluent-bit-reader
+  labels:
+    app.kubernetes.io/name: ani-fluent-bit
+    app.kubernetes.io/part-of: ani-core
+    ani.dev/sprint: "13"
+    ani.dev/slice: s07-instance-observability
+subjects:
+  - kind: ServiceAccount
+    name: ani-fluent-bit
+    namespace: ani-s07-observability
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ani-fluent-bit-reader
+---
+# ============================================================
+# Fluent Bit ConfigMap — 采集 /var/log/pods/* + 提取 namespace/pod/container label
+# ============================================================
+# PRD US-007 AC：Fluent Bit 采集 /var/log/pods/*，提取 namespace/pod/container
+# 作为 Loki label（adapter LogQL 依赖 namespace + pod label 实现多租户隔离）。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-fluent-bit-config
+  namespace: ani-s07-observability
+  labels:
+    app.kubernetes.io/name: ani-fluent-bit
+    app.kubernetes.io/part-of: ani-core
+    ani.dev/sprint: "13"
+    ani.dev/slice: s07-instance-observability
+data:
+  fluent-bit.conf: |
+    [SERVICE]
+      Flush         5s
+      Log_Level     info
+      Pid_File      /var/run/fluent-bit.pid
+      # 加载镜像内置 parsers.conf（含 cri parser）。
+      # 不加这一行会报 "parser 'cri' is not registered"，
+      # 因为 Fluent Bit 3.x 默认不自动加载内置 parser 文件。
+      Parsers_File  /fluent-bit/etc/parsers.conf
+
+    [INPUT]
+      Name              tail
+      Path              /var/log/pods/*/*/*.log
+      Parser            cri
+      Tag               kube.*
+      Refresh_Interval  5
+      Mem_Buf_Limit     64MB
+      Skip_Long_Lines   On
+      # 持久化扫描位置到 emptyDir，避免 pod 重启后从头重扫
+      # 导致 fd/inotify 压力（实测 dev-phys-02 inotify max_user_instances=128
+      # 较低，重扫时触发 "Too many open files" 崩溃）。
+      DB                /tmp/flb_kube.db
+      # 某些节点 inotify watch 实例数受限，改用轮询避免
+      # "Too many open files (errno=24)" 导致 input 初始化失败。
+      Inotify_Watcher   false
+
+    # 提取 namespace/pod/container 作为 Loki label（PRD US-007 AC）
+    # CRI 日志路径格式：
+    #   /var/log/pods/<namespace>_<pod>_<uid>/<container>/<restart>.log
+    # tail 默认 Tag 为 kube.var.log.pods.<namespace>_<pod>_<uid>.<container>.<restart>.log
+    # 用 Lua 从 Tag 中提取 namespace、pod、container。
+    [FILTER]
+      Name           lua
+      Match          kube.*
+      script         /etc/fluent-bit/extract_labels.lua
+      call           extract
+
+    [OUTPUT]
+      Name            loki
+      Match           kube.*
+      Host            ani-loki.ani-s07-observability
+      Port            3100
+      Labels          namespace=$namespace,pod=$pod,container=$container
+      Line_Format     json
+      Auto_Kubernetes_Labels Off
+  extract_labels.lua: |
+    -- 从 Fluent Bit tail 的 Tag 提取 namespace/pod/container。
+    -- Tag 形如：kube.var.log.pods.<namespace>_<pod>_<uid>.<container>.<restart>.log
+    -- 路径分段用点号连接，<namespace>_<pod>_<uid> 是单个点分段，内部用下划线。
+    function extract(tag, timestamp, record)
+      local segments = {}
+      for part in string.gmatch(tag, "[^.]+") do
+        table.insert(segments, part)
+      end
+      -- 定位 "pods" 分段，其后紧跟 "<namespace>_<pod>_<uid>"，再后是 "<container>"
+      local i = 1
+      while i <= #segments do
+        if segments[i] == "pods" and i + 2 <= #segments then
+          local ns_pod_uid = segments[i + 1]
+          local container = segments[i + 2]
+          -- 从 "<namespace>_<pod>_<uid>" 拆出 namespace 和 pod
+          local sub = {}
+          for part in string.gmatch(ns_pod_uid, "[^_]+") do
+            table.insert(sub, part)
+          end
+          if #sub >= 2 then
+            record["namespace"] = sub[1]
+            record["pod"] = sub[2]
+          end
+          record["container"] = container
+          break
+        end
+        i = i + 1
+      end
+      return 1, timestamp, record
+    end
+---
+# ============================================================
+# Fluent Bit DaemonSet — 每节点一份，采集节点日志
+# ============================================================
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: ani-fluent-bit
+  namespace: ani-s07-observability
+  labels:
+    app.kubernetes.io/name: ani-fluent-bit
+    app.kubernetes.io/part-of: ani-core
+    ani.dev/sprint: "13"
+    ani.dev/slice: s07-instance-observability
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ani-fluent-bit
+      ani.dev/slice: s07-instance-observability
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ani-fluent-bit
+        app.kubernetes.io/part-of: ani-core
+        ani.dev/sprint: "13"
+        ani.dev/slice: s07-instance-observability
+    spec:
+      serviceAccountName: ani-fluent-bit
+      tolerations:
+        # 允许在所有节点（含 master/control-plane）运行，确保覆盖全部日志
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: fluent-bit
+          image: fluent/fluent-bit:3.2.0
+          imagePullPolicy: IfNotPresent
+          # 显式指定配置文件路径，避免加载镜像内置默认配置
+          # （默认配置含 cpu input + stdout output，会刷屏且不采集 pod 日志）
+          args:
+            - -c
+            - /etc/fluent-bit/fluent-bit.conf
+          resources:
+            # DaemonSet 每节点一份，限制资源占用（PRD §8.2）
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          volumeMounts:
+            - name: varlog
+              mountPath: /var/log
+              readOnly: true
+            # 用单个 volume 挂载整个 ConfigMap（含 fluent-bit.conf + extract_labels.lua）。
+            # 避免用两个 volume 重复挂载同一 ConfigMap + subPath 单文件挂载，
+            # 否则触发 "not a directory" mount 错误（实测在 containerd 1.7 + K8s 1.36）。
+            - name: config
+              mountPath: /etc/fluent-bit
+      volumes:
+        - name: varlog
+          hostPath:
+            path: /var/log
+        - name: config
+          configMap:
+            name: ani-fluent-bit-config

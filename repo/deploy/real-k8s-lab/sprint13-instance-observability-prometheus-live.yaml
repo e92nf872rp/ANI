@@ -24,7 +24,7 @@ metadata:
     ani.dev/slice: s07-instance-observability
 rules:
   - apiGroups: [""]
-    resources: ["nodes", "nodes/metrics", "nodes/proxy"]
+    resources: ["nodes", "nodes/metrics", "nodes/proxy", "pods"]
     verbs: ["get", "list", "watch"]
   - nonResourceURLs: ["/metrics", "/metrics/cadvisor"]
     verbs: ["get"]
@@ -67,6 +67,39 @@ data:
           insecure_skip_verify: true
         kubernetes_sd_configs:
           - role: node
+      # DCGM exporter for GPU 指标（PRD US-002 / FR-2）
+      # static_config 直接 HTTP 访问 ani-system namespace 中的 Service，
+      # 不需要跨 namespace RBAC，也不修改 Prometheus ClusterRole。
+      - job_name: 'dcgm-exporter'
+        metrics_path: /metrics
+        static_configs:
+          - targets: ['ani-dcgm-exporter.ani-system:9400']
+            labels:
+              component: 'dcgm-exporter'
+      # KubeVirt virt-handler for VM 指标（PRD US-008 / FR-14）
+      # kubernetes_sd_configs（role: pod）发现 kubevirt namespace 的 virt-handler pod，
+      # relabel_configs 过滤 kubevirt.io=virt-handler label 且端口为 8443。
+      # 采集 kubevirt_vmi_* 系列指标，无 VM 时指标为空 series（正常响应，非报错）。
+      - job_name: 'kubevirt-virt-handler'
+        metrics_path: /metrics
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        tls_config:
+          insecure_skip_verify: true
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names: ['kubevirt']
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_kubevirt_io]
+            regex: virt-handler
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_container_port_number]
+            regex: 8443
+            action: keep
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
 ---
 apiVersion: apps/v1
 kind: Deployment

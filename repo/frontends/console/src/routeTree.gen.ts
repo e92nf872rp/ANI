@@ -23,6 +23,7 @@ import { Route as ComputeGpuRouteImport } from './routes/compute/gpu'
 import { Route as ComputeGpuContainersIndexRouteImport } from './routes/compute/gpu-containers/index'
 import { Route as KbKbIdChatRouteImport } from './routes/kb/$kbId/chat'
 import { Route as ComputeGpuContainersInstanceIdRouteImport } from './routes/compute/gpu-containers/$instanceId'
+import { Route as ComputeInstancesInstanceIdRouteRouteImport } from './routes/compute/instances/$instanceId/route'
 
 const UsageRoute = UsageRouteImport.update({
   id: '/usage',
@@ -96,6 +97,12 @@ const ComputeGpuContainersInstanceIdRoute =
     path: '/compute/gpu-containers/$instanceId',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ComputeInstancesInstanceIdRouteRoute =
+  ComputeInstancesInstanceIdRouteRouteImport.update({
+    id: '/compute/instances/$instanceId',
+    path: '/compute/instances/$instanceId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -109,6 +116,7 @@ export interface FileRoutesByFullPath {
   '/kb/': typeof KbIndexRoute
   '/models/': typeof ModelsIndexRoute
   '/settings/': typeof SettingsIndexRoute
+  '/compute/instances/$instanceId': typeof ComputeInstancesInstanceIdRouteRoute
   '/compute/gpu-containers/$instanceId': typeof ComputeGpuContainersInstanceIdRoute
   '/kb/$kbId/chat': typeof KbKbIdChatRoute
   '/compute/gpu-containers/': typeof ComputeGpuContainersIndexRoute
@@ -125,6 +133,7 @@ export interface FileRoutesByTo {
   '/kb': typeof KbIndexRoute
   '/models': typeof ModelsIndexRoute
   '/settings': typeof SettingsIndexRoute
+  '/compute/instances/$instanceId': typeof ComputeInstancesInstanceIdRouteRoute
   '/compute/gpu-containers/$instanceId': typeof ComputeGpuContainersInstanceIdRoute
   '/kb/$kbId/chat': typeof KbKbIdChatRoute
   '/compute/gpu-containers': typeof ComputeGpuContainersIndexRoute
@@ -142,6 +151,7 @@ export interface FileRoutesById {
   '/kb/': typeof KbIndexRoute
   '/models/': typeof ModelsIndexRoute
   '/settings/': typeof SettingsIndexRoute
+  '/compute/instances/$instanceId': typeof ComputeInstancesInstanceIdRouteRoute
   '/compute/gpu-containers/$instanceId': typeof ComputeGpuContainersInstanceIdRoute
   '/kb/$kbId/chat': typeof KbKbIdChatRoute
   '/compute/gpu-containers/': typeof ComputeGpuContainersIndexRoute
@@ -160,6 +170,7 @@ export interface FileRouteTypes {
     | '/kb/'
     | '/models/'
     | '/settings/'
+    | '/compute/instances/$instanceId'
     | '/compute/gpu-containers/$instanceId'
     | '/kb/$kbId/chat'
     | '/compute/gpu-containers/'
@@ -176,6 +187,7 @@ export interface FileRouteTypes {
     | '/kb'
     | '/models'
     | '/settings'
+    | '/compute/instances/$instanceId'
     | '/compute/gpu-containers/$instanceId'
     | '/kb/$kbId/chat'
     | '/compute/gpu-containers'
@@ -192,6 +204,7 @@ export interface FileRouteTypes {
     | '/kb/'
     | '/models/'
     | '/settings/'
+    | '/compute/instances/$instanceId'
     | '/compute/gpu-containers/$instanceId'
     | '/kb/$kbId/chat'
     | '/compute/gpu-containers/'
@@ -209,6 +222,7 @@ export interface RootRouteChildren {
   KbIndexRoute: typeof KbIndexRoute
   ModelsIndexRoute: typeof ModelsIndexRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
+  ComputeInstancesInstanceIdRouteRoute: typeof ComputeInstancesInstanceIdRouteRoute
   ComputeGpuContainersInstanceIdRoute: typeof ComputeGpuContainersInstanceIdRoute
   KbKbIdChatRoute: typeof KbKbIdChatRoute
   ComputeGpuContainersIndexRoute: typeof ComputeGpuContainersIndexRoute
@@ -314,6 +328,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ComputeGpuContainersInstanceIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/compute/instances/$instanceId': {
+      id: '/compute/instances/$instanceId'
+      path: '/compute/instances/$instanceId'
+      fullPath: '/compute/instances/$instanceId'
+      preLoaderRoute: typeof ComputeInstancesInstanceIdRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -329,6 +350,7 @@ const rootRouteChildren: RootRouteChildren = {
   KbIndexRoute: KbIndexRoute,
   ModelsIndexRoute: ModelsIndexRoute,
   SettingsIndexRoute: SettingsIndexRoute,
+  ComputeInstancesInstanceIdRouteRoute: ComputeInstancesInstanceIdRouteRoute,
   ComputeGpuContainersInstanceIdRoute: ComputeGpuContainersInstanceIdRoute,
   KbKbIdChatRoute: KbKbIdChatRoute,
   ComputeGpuContainersIndexRoute: ComputeGpuContainersIndexRoute,

@@ -35,7 +35,6 @@
 | S05 object-store MinIO | production-shaped gate passed | `SPRINT13-OBJECTSTORE-MINIO-A-TRACK`；`validate-object-store-live-gate`；pre-signed URL；LIVE PENDING 仅作历史兼容 |
 | S06 vector Milvus | production-shaped gate passed | `SPRINT13-VECTOR-MILVUS-A-TRACK`；`validate-vector-store-live-gate`；LIVE PENDING 仅作历史兼容 |
 | S07 instance observability Prometheus | production-shaped gate passed | `SPRINT13-INSTANCE-OBSERVABILITY-PROMETHEUS-A-TRACK`；`validate-instance-observability-live-gate`；Prometheus + kubelet；LIVE PENDING 仅作历史兼容 |
-| CORE-INSTANCE-CREATE-CONFIG-A | 契约/Gateway/SDK 已完成 | `core-instance-create-config-a.md`；create 按 kind 嵌套 `*_config`，扁平字段兼容；不拆 URL |
 
 闭环规则：每个 provider slice 必须具备 real adapter/provider runtime、live gate、非敏感 evidence JSON、development record 和全局 production-shape guard。S05-S07 B 轨可以继续 作为历史兼容 token 保留；截至 2026-06-21，S05/S06/S07 均已 passed。
 
@@ -87,6 +86,75 @@ Issue 清单：`repo/services/tasks/issues/issue-01-openapi-queue-crud.md` ~ `is
 | K8s workloads | vCluster / Kubernetes API | `ports.K8sClusterService` / `local_k8s_cluster_service.go` / `k8s_cluster_resources.go` | **production-shaped gate passed**（`validate-vcluster-live-gate --production-shaped` 已固定 metadata target TLS passed 标准；`sprint13-k8s-workloads-vcluster-live-result.md`；production guard：`validate-sprint13-b-track-production-shape`；evidence：`development-records/live-evidence/sprint13-k8s-workloads-vcluster-live-evidence.json`；不代表 full platform production ready） |
 | 对象存储 bucket/upload/download | MinIO（已选 2026-06-19，S3 兼容 pre-signed URL） | `ports.ObjectStore` + `ports.StorageService` / `storage_resources.go` | **production-shaped gate passed**（`SPRINT13-OBJECTSTORE-MINIO-A-TRACK`；result：`sprint13-objectstore-minio-live-result.md`；evidence：`live-evidence/sprint13-objectstore-minio-live-evidence.json`；gate：`validate-object-store-live-gate`） |
 | 向量文档写入 | Milvus（已选 2026-06-19） | `ports.VectorStore` + `ports.VectorStoreService` / `vector_store_resources.go` | **production-shaped gate passed**（`SPRINT13-VECTOR-MILVUS-A-TRACK`；B 轨 live result `sprint13-vector-milvus-live-result.md`；evidence：`live-evidence/sprint13-vector-milvus-live-evidence.json`；readiness：`sprint13-vector-milvus-readiness.md`；gate：`validate-vector-store-live-gate`；历史 LIVE PENDING token 仅作门禁兼容语境；不代表 full platform production ready） |
+
+## Sprint 15：Console Instance Observability（✅ 已完成，2026-07-08）
+
+> 本节记录统一实例可观测性 PRD（`repo/services/tasks/modules/prd/console/compute/prd-console-instance-observability.md`）对应的 11 个 issue 执行完成事实。该 PRD 覆盖 Core 端 handler 补齐、Console UI 6 个 Tab 组件实现和 Gateway real K8s provider 链路接入，对应 9 种计算实例 kind（vm/container/gpu_container/sandbox/batch_job/notebook/k8s_cluster/bare_metal/dpu_node）的日志、事件、指标、终端/console 和安全事件能力。各 issue 的实现与验证细节见 `repo/development-records/` 对应批次记录。
+
+### Core 端实现（Issue #001 / #002 / #011）
+
+| 批次 | Issue | 内容摘要 | 状态 |
+|---|---|---|---|
+| CORE-CONSOLE-SESSION-HANDLER-A | #001 | VM console session handler 补全：新增 `CreateConsoleSession` port 方法 + Local/Prometheus adapter 实现 + 5 个 HTTP 测试；protocol 默认值在 adapter 层填充，白名单在 handler 层校验；`connect_url` 与 `url` 等价 | ✅ 已完成（2026-07-03） |
+| CORE-INSTANCE-METRICS-MULTI-EXPORTER-A | #002 | 多 exporter 聚合 adapter + range query 端点：通过 `InstanceObservationGetRequest.Kind` 路由 GPU 采集；逐字段降级（`if err == nil` 守卫）；新增 `GET /observability/query_range` 返回 matrix 时序采样点；PromQL label 重写（namespace/pod 映射）；NaN/Inf 过滤；正则 pod matcher 兼容 Deployment hash 后缀 | ✅ 已完成（2026-07-06，增量 2026-07-08） |
+| GATEWAY-INSTANCE-CREATE-REAL-K8S-PROVIDER-A | #011 | Gateway 实例创建链路接入 real K8s provider：新增 `bootstrap.ConnectInstanceService` helper；`instance_service_runtime.go` 按 `WORKLOAD_PROVIDER` env 切换；lazy re-observe（非终态实例 Get/List 时触发 K8s 状态同步）；Workload Identity Secret manifest 生成；auth.go 注入 `types.TenantContext`；Secret 脱敏；`make validate-architecture` 通过 | ✅ 已完成（2026-07-08） |
+
+### Console UI 端实现（Issue #003 - #010）
+
+| 批次 | Issue | 内容摘要 | 状态 |
+|---|---|---|---|
+| CONSOLE-INSTANCE-OBSERVABILITY-SHELL-A | #003 | 路由壳层 + 实例上下文：新建 `route.tsx`（PageHeader + Tab 栏 + Tab Panel + `?tab=` 深链 + deleted 拦截）、`InstanceContext.tsx`、`observabilityTabsConfig.ts`；深链回退双层判定；`InstanceContext` 暴露 `isDeleted`/`isRunning` 派生字段 | ✅ 已完成（2026-07-06） |
+| CONSOLE-INSTANCE-OBSERVABILITY-LOGS-A | #004 | 日志 Tab：`LogsTab.tsx` 使用 `useInfiniteQuery` cursor 分页 + 级别筛选 Select + Table 列展示；`levelFilter` 空字符串映射为 `undefined` | ✅ 已完成（2026-07-06） |
+| CONSOLE-INSTANCE-OBSERVABILITY-EVENTS-A | #005 | 事件 Tab：`EventsTab.tsx` 使用 `useQuery` 一次性加载 limit=100 + 类型筛选 Select；cursor 分页因 Core OpenAPI `listInstanceEvents` query 缺 `cursor` 入参而降级为一次性加载 | ✅ 已完成（2026-07-06） |
+| CONSOLE-INSTANCE-OBSERVABILITY-METRICS-A | #006 | 指标 Tab（双通道）：`MetricsTab.tsx` 双通道布局、`MetricsSnapshot.tsx` 快照卡片、`MetricsChart.tsx` PromQL 时序图、`promqlTemplates.ts` 冻结模板；403 判断 `error.code==='FORBIDDEN'`；自动刷新用 `invalidateQueries`；后改为 range query（`/observability/query_range`） | ✅ 已完成（2026-07-06，增量 2026-07-08） |
+| CONSOLE-INSTANCE-OBSERVABILITY-TERMINAL-A | #007 | 终端 Tab（exec）：`TerminalTab.tsx` — POST exec → ws_url → WebSocket + xterm.js；5 态状态机；`idempotency_key` 生命周期（重试复用，重连新生成）；xterm lazy 创建于 `ws.onopen` | ✅ 已完成（2026-07-06） |
+| CONSOLE-INSTANCE-OBSERVABILITY-CONSOLE-A | #008 | 控制台 Tab（VM console/VNC）：`ConsoleTab.tsx` — 协议 Select + POST console → connect_url → window.open；3 态状态机 | ✅ 已完成（2026-07-06） |
+| CONSOLE-INSTANCE-OBSERVABILITY-SECURITY-EVENTS-A | #009 | 安全事件 Tab（仅 sandbox）：`SecurityEventsTab.tsx` — severity 筛选 Select + Table 列展示；cursor 分页同样 blocked-by-core | ✅ 已完成（2026-07-07） |
+| CONSOLE-INSTANCE-OBSERVABILITY-BROWSER-VERIFICATION-A | #010 | 验证收口批次（verification-only，无代码改动）：9 条 AC 逐条代码审查映射到组件源码行号；验证 SPEC §1.1 五项 Core 端实现落地情况 | ✅ 已完成（2026-07-07） |
+
+### 关键设计决策与已知边界
+
+- **Kind × Tab 矩阵**：container/gpu_container→logs,events,metrics,terminal；sandbox→+security-events；vm→logs,events,metrics,console；batch_job/notebook→logs,events,metrics；k8s_cluster/bare_metal/dpu_node→logs,events（无 metrics）
+- **指标双通道**：快照（`getInstanceMetrics` ← adapter ← exporter）+ 时序（`/observability/query_range` PromQL 代理返回 matrix）
+- **多 exporter 聚合**：metrics.k8s.io（CPU/内存/网络）+ DCGM（GPU/显存），仅 `gpu_container` 采集 GPU
+- **cursor 分页 blocked-by-core**：`listInstanceEvents` 和 `listInstanceSecurityEvents` query 缺 `cursor` 入参（response 有 `next_cursor`），遵守契约不发明字段，降级为一次性加载
+- **后端 WebSocket exec 服务端未实现**：SPEC §11.2 已知边界，归后续 Core 批次
+- **Issue #011 lazy re-observe**：非终态实例在 Get/List 时触发 K8s 状态同步，避免引入后台 controller
+
+## Instance Observability Completion 增量补全（2026-07，PR4 分支）
+
+> 本节记录 `feat/instance-observability-pr4` 分支对 Sprint 15 实例可观测性的增量补全工作，对应 SPEC `spec-console-instance-observability-completion.md` 的 16 个设计决策（D-1~D-16）、12 个 User Story（US-001~US-012）和 8 个批次（B-1~B-8）。覆盖 LogStore port 抽象、Loki 日志持久化、Prometheus GPU/VM 指标采集、PromQL label 重写扩展和 VM 前端模板。各批次实现与验证细节见 `repo/development-records/instance-observability-completion-*.md`。
+
+### 批次执行状态
+
+| 批次 | Issue | 内容摘要 | 状态 |
+|---|---|---|---|
+| INSTANCE-OBSERVABILITY-COMPLETION-B1-HANDLER-PASS-KIND | #001 | Gateway `getMetrics` handler 透传 `record.Kind` 到 `InstanceObservationGetRequest`，修复 GPU 分支死分支问题；`metricsKindSpy` 端到端覆盖 container/gpu_container/vm 三种路径 | ✅ 已完成 |
+| INSTANCE-OBSERVABILITY-COMPLETION-B2-PROMETHEUS-DCGM-SCRAPE | #002 | Prometheus ConfigMap 新增 `dcgm-exporter` scrape job，使 `DCGM_FI_DEV_GPU_UTIL` 等 GPU 指标可被采集 | ✅ 已完成 |
+| INSTANCE-OBSERVABILITY-COMPLETION-B3-GPU-ADAPTER-E2E-VERIFY | #003 | GPU adapter 端到端集成测试 + live gate 缺陷修复：真实 DCGM 不暴露 `FB_TOTAL`，改用 `FB_FREE+FB_USED`；同步更新 SPEC D-2 | ✅ 已完成 |
+| INSTANCE-OBSERVABILITY-COMPLETION-B3-LOGSTORE-PORT | #004 | 新增 `pkg/ports/log_store.go` 定义日志持久化存储 port 抽象（`LogStore` interface + `LogQueryRequest`/`LogQueryResult`） | ✅ 已完成 |
+| INSTANCE-OBSERVABILITY-COMPLETION-B3-LOKI-LOG-STORE-ADAPTER | #005 | `LokiLogStore` adapter 实现：LogQL 查询 + cursor 分页 + level 解析；15 个单元测试覆盖 | ✅ 已完成 |
+| INSTANCE-OBSERVABILITY-COMPLETION-B4-LOKI-FLUENT-BIT-DEPLOY | #007 | Loki 3.6.0 + Fluent Bit 3.2.0 DaemonSet 部署示例（485 行，10 资源）；三节点 live 验证全通过 | ✅ 已完成 |
+| INSTANCE-OBSERVABILITY-COMPLETION-B5-LOKI-RANGE-CA-FIX | live gate 收尾 | 修复 Loki pod 正则匹配、K8s CA 加载和 metrics 时序图无数据三个阻断性缺陷 | ✅ 已完成 |
+| INSTANCE-OBSERVABILITY-COMPLETION-B5-PROMETHEUS-KUBEVIRT-SCRAPE | #008 | Prometheus ConfigMap 新增 `kubevirt-virt-handler` scrape job 采集 `kubevirt_vmi_*` 指标 | ✅ 已完成 |
+| INSTANCE-OBSERVABILITY-COMPLETION-B3-LOGSTORE-INJECTION | #006 | `PrometheusInstanceObservability` 新增可选 `logStore` 字段 + `SetLogStore` 方法；Gateway runtime 按 `INSTANCE_OBSERVABILITY_LOG_STORE` env 切换实现 | ✅ 已完成 |
+| INSTANCE-OBSERVABILITY-COMPLETION-B5-GETMETRICS-VM-BRANCH | #009 | `GetMetrics` 新增 VM 分支：查询 6 个 `kubevirt_vmi_*` 指标；`name` label 精确匹配；`MemoryUsedMB` 用 PRD FR-17 公式 `domain_bytes - usable_bytes` | ✅ 已完成 |
+| INSTANCE-OBSERVABILITY-COMPLETION-B6-REWRITE-PROMQL-NAME-LABEL | #010 | `rewritePromQLLabels` 扩展支持 `name` label（OQ-4 决策 D-13）；`name` 用精确匹配非正则 | ✅ 已完成 |
+| INSTANCE-OBSERVABILITY-COMPLETION-B7-VM-PROMQL-TEMPLATES | #011 | 前端 `promqlTemplates.ts` 新增 VM kind 冻结 PromQL 模板（CPU 利用率、内存使用率）；VM 配色复用 container 蓝绿 | ✅ 已完成 |
+| INSTANCE-OBSERVABILITY-COMPLETION-B8-VM-SNAPSHOT-VERIFY | #012 | VM 指标 Tab 快照卡片验证（纯验证批次）：确认 `getMetricsForVM` 查询 `kubevirt_vmi_*` 指标、null 字段显示「暂不可用」不伪造 0 | ✅ 已完成 |
+
+### 关键设计决策与已知边界
+
+- **LogStore port 抽象**：新增 `ports.LogStore` 单方法 interface（`QueryLogs`），复用现有 `InstanceLogEntry`，Cursor 为 opaque string
+- **Loki 方向偏离 SPEC**：实现使用 `direction=backward` + cursor→end（RFC3339↔Unix 纳秒），偏离 SPEC §3.3/§5.5 的 `forward`+cursor→start；继承 B5 live gate 修复语义，待 SPEC 同步
+- **Loki pod 正则匹配**：SPEC 指定精确 `{pod="<instance_id>"}`，实现用 `{pod=~"^<instance>(-.*)?$"}` 正则匹配兼容 ReplicaSet hash
+- **Level 推断**：SPEC 未规定，实现新增 `inferLogLevel` 从 message 推断 level，兼容 Fluent-Bit 采集的 nginx/stdout 日志无 level 字段的情况
+- **VM `resident_bytes` 查询但不赋值**：SPEC AC2/FR-15 要求"必须查询"，实现查询但只取 Timestamp，值丢弃（record 无对应字段）；`MemoryUsedMB` 用 PRD FR-17 公式 `domain_bytes - usable_bytes`
+- **GPU 显存公式**：live gate 复现真实 DCGM 不暴露 `DCGM_FI_DEV_FB_TOTAL`，改用 `FB_FREE + FB_USED`，单位为 MiB 非 bytes；已同步更新 SPEC D-2
+- **OQ-4 决策**：`rewritePromQLLabels` 扩展支持 `name` label，VM 用精确匹配（VMI `metadata.name` 无随机后缀）
+- **VM 端到端 live 验证待补**：当前系统无 VM，单元测试用 mock HTTP server 验证，依赖 KubeVirt scrape 配置部署 + VM 运行后补齐
+- **MinIO emptyDir 非持久化风险**：Loki 部署示例使用 MinIO S3 后端，emptyDir 重启后数据丢失，已在 yaml 头部标注
+- **Local mock GPU 返回 0 而非 nil**：`LocalInstanceObservabilityService` 对非 `gpu_container` kind 返回 GPU 字段为 `&0.0` 而非 nil，与 port 注释"缺失不等于 0"原则不一致，属已知边界
 
 ## Sprint 12 已完成切片
 
