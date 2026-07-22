@@ -36,7 +36,7 @@ func NewAuthClientFromEnv() AuthClient {
 		addr = "127.0.0.1:9101"
 	}
 	timeout := 2 * time.Second
-	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil
 	}
