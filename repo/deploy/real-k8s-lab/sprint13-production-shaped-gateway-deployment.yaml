@@ -44,6 +44,27 @@ spec:
               value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
             - name: KUBERNETES_PROVIDER_FIELD_MANAGER
               value: ani-gateway-sprint13-production-shaped
+            - name: REGISTRY_PROVIDER_MODE
+              value: harbor
+            - name: HARBOR_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: ani-harbor-runtime
+                  key: endpoint
+            - name: HARBOR_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: ani-harbor-runtime
+                  key: username
+            - name: HARBOR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ani-harbor-runtime
+                  key: password
+            - name: HARBOR_REQUEST_TIMEOUT
+              value: 10s
+            - name: REGISTRY_PULL_SECRET_FIELD_MANAGER
+              value: ani-gateway-registry
             - name: NETWORK_PROVIDER
               value: kubeovn_rest
             - name: NETWORK_PROVIDER_APPLY_ENABLED

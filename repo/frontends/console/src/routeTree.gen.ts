@@ -9,27 +9,26 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as LoginRouteImport } from './routes/login'
-import { Route as GpuInventoryRouteImport } from './routes/gpu-inventory'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
+import { Route as GpuInventoryRouteImport } from './routes/gpu-inventory'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
-import { Route as ComputeGpuRouteImport } from './routes/compute/gpu'
-import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
-import { Route as AuthenticatedUsageRouteImport } from './routes/_authenticated/usage'
 import { Route as AuthenticatedRegistryRouteImport } from './routes/_authenticated/registry'
-import { Route as ComputeGpuContainersIndexRouteImport } from './routes/compute/gpu-containers/index'
-import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
-import { Route as AuthenticatedModelsIndexRouteImport } from './routes/_authenticated/models/index'
+import { Route as AuthenticatedUsageRouteImport } from './routes/_authenticated/usage'
+import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
+import { Route as ComputeGpuRouteImport } from './routes/compute/gpu'
 import { Route as AuthenticatedKbIndexRouteImport } from './routes/_authenticated/kb/index'
-import { Route as ComputeGpuContainersInstanceIdRouteImport } from './routes/compute/gpu-containers/$instanceId'
-import { Route as AuthenticatedSettingsGpuQueuesRouteImport } from './routes/_authenticated/settings/gpu-queues'
-import { Route as AuthenticatedSettingsApiKeysRouteImport } from './routes/_authenticated/settings/api-keys'
+import { Route as AuthenticatedModelsIndexRouteImport } from './routes/_authenticated/models/index'
 import { Route as AuthenticatedModelsImportRouteImport } from './routes/_authenticated/models/import'
+import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
+import { Route as AuthenticatedSettingsApiKeysRouteImport } from './routes/_authenticated/settings/api-keys'
+import { Route as AuthenticatedSettingsGpuQueuesRouteImport } from './routes/_authenticated/settings/gpu-queues'
+import { Route as ComputeGpuContainersIndexRouteImport } from './routes/compute/gpu-containers/index'
+import { Route as ComputeGpuContainersInstanceIdRouteImport } from './routes/compute/gpu-containers/$instanceId'
 import { Route as AuthenticatedKbKbIdChatRouteImport } from './routes/_authenticated/kb/$kbId/chat'
 
-const LoginRoute = LoginRouteImport.update({
-  id: '/login',
-  path: '/login',
+const AuthenticatedRoute = AuthenticatedRouteImport.update({
+  id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
 } as any)
 const GpuInventoryRoute = GpuInventoryRouteImport.update({
@@ -37,8 +36,9 @@ const GpuInventoryRoute = GpuInventoryRouteImport.update({
   path: '/gpu-inventory',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthenticatedRoute = AuthenticatedRouteImport.update({
-  id: '/_authenticated',
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
@@ -46,59 +46,47 @@ const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
-const ComputeGpuRoute = ComputeGpuRouteImport.update({
-  id: '/compute/gpu',
-  path: '/compute/gpu',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuthCallbackRoute = AuthCallbackRouteImport.update({
-  id: '/auth/callback',
-  path: '/auth/callback',
-  getParentRoute: () => rootRouteImport,
+const AuthenticatedRegistryRoute = AuthenticatedRegistryRouteImport.update({
+  id: '/registry',
+  path: '/registry',
+  getParentRoute: () => AuthenticatedRoute,
 } as any)
 const AuthenticatedUsageRoute = AuthenticatedUsageRouteImport.update({
   id: '/usage',
   path: '/usage',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
-const AuthenticatedRegistryRoute = AuthenticatedRegistryRouteImport.update({
-  id: '/registry',
-  path: '/registry',
+const AuthCallbackRoute = AuthCallbackRouteImport.update({
+  id: '/auth/callback',
+  path: '/auth/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ComputeGpuRoute = ComputeGpuRouteImport.update({
+  id: '/compute/gpu',
+  path: '/compute/gpu',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedKbIndexRoute = AuthenticatedKbIndexRouteImport.update({
+  id: '/kb/',
+  path: '/kb/',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
-const ComputeGpuContainersIndexRoute =
-  ComputeGpuContainersIndexRouteImport.update({
-    id: '/compute/gpu-containers/',
-    path: '/compute/gpu-containers/',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const AuthenticatedSettingsIndexRoute =
-  AuthenticatedSettingsIndexRouteImport.update({
-    id: '/settings/',
-    path: '/settings/',
-    getParentRoute: () => AuthenticatedRoute,
-  } as any)
 const AuthenticatedModelsIndexRoute =
   AuthenticatedModelsIndexRouteImport.update({
     id: '/models/',
     path: '/models/',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
-const AuthenticatedKbIndexRoute = AuthenticatedKbIndexRouteImport.update({
-  id: '/kb/',
-  path: '/kb/',
-  getParentRoute: () => AuthenticatedRoute,
-} as any)
-const ComputeGpuContainersInstanceIdRoute =
-  ComputeGpuContainersInstanceIdRouteImport.update({
-    id: '/compute/gpu-containers/$instanceId',
-    path: '/compute/gpu-containers/$instanceId',
-    getParentRoute: () => rootRouteImport,
+const AuthenticatedModelsImportRoute =
+  AuthenticatedModelsImportRouteImport.update({
+    id: '/models/import',
+    path: '/models/import',
+    getParentRoute: () => AuthenticatedRoute,
   } as any)
-const AuthenticatedSettingsGpuQueuesRoute =
-  AuthenticatedSettingsGpuQueuesRouteImport.update({
-    id: '/settings/gpu-queues',
-    path: '/settings/gpu-queues',
+const AuthenticatedSettingsIndexRoute =
+  AuthenticatedSettingsIndexRouteImport.update({
+    id: '/settings/',
+    path: '/settings/',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
 const AuthenticatedSettingsApiKeysRoute =
@@ -107,11 +95,23 @@ const AuthenticatedSettingsApiKeysRoute =
     path: '/settings/api-keys',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
-const AuthenticatedModelsImportRoute =
-  AuthenticatedModelsImportRouteImport.update({
-    id: '/models/import',
-    path: '/models/import',
+const AuthenticatedSettingsGpuQueuesRoute =
+  AuthenticatedSettingsGpuQueuesRouteImport.update({
+    id: '/settings/gpu-queues',
+    path: '/settings/gpu-queues',
     getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const ComputeGpuContainersIndexRoute =
+  ComputeGpuContainersIndexRouteImport.update({
+    id: '/compute/gpu-containers/',
+    path: '/compute/gpu-containers/',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ComputeGpuContainersInstanceIdRoute =
+  ComputeGpuContainersInstanceIdRouteImport.update({
+    id: '/compute/gpu-containers/$instanceId',
+    path: '/compute/gpu-containers/$instanceId',
+    getParentRoute: () => rootRouteImport,
   } as any)
 const AuthenticatedKbKbIdChatRoute = AuthenticatedKbKbIdChatRouteImport.update({
   id: '/kb/$kbId/chat',
@@ -245,11 +245,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/login': {
-      id: '/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof LoginRouteImport
+    '/_authenticated': {
+      id: '/_authenticated'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AuthenticatedRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/gpu-inventory': {
@@ -259,11 +259,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GpuInventoryRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_authenticated': {
-      id: '/_authenticated'
-      path: ''
-      fullPath: '/'
-      preLoaderRoute: typeof AuthenticatedRouteImport
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/': {
@@ -273,19 +273,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedIndexRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
-    '/compute/gpu': {
-      id: '/compute/gpu'
-      path: '/compute/gpu'
-      fullPath: '/compute/gpu'
-      preLoaderRoute: typeof ComputeGpuRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/auth/callback': {
-      id: '/auth/callback'
-      path: '/auth/callback'
-      fullPath: '/auth/callback'
-      preLoaderRoute: typeof AuthCallbackRouteImport
-      parentRoute: typeof rootRouteImport
+    '/_authenticated/registry': {
+      id: '/_authenticated/registry'
+      path: '/registry'
+      fullPath: '/registry'
+      preLoaderRoute: typeof AuthenticatedRegistryRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/usage': {
       id: '/_authenticated/usage'
@@ -294,25 +287,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedUsageRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
-    '/_authenticated/registry': {
-      id: '/_authenticated/registry'
-      path: '/registry'
-      fullPath: '/registry'
-      preLoaderRoute: typeof AuthenticatedRegistryRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
-    '/compute/gpu-containers/': {
-      id: '/compute/gpu-containers/'
-      path: '/compute/gpu-containers'
-      fullPath: '/compute/gpu-containers/'
-      preLoaderRoute: typeof ComputeGpuContainersIndexRouteImport
+    '/auth/callback': {
+      id: '/auth/callback'
+      path: '/auth/callback'
+      fullPath: '/auth/callback'
+      preLoaderRoute: typeof AuthCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_authenticated/settings/': {
-      id: '/_authenticated/settings/'
-      path: '/settings'
-      fullPath: '/settings/'
-      preLoaderRoute: typeof AuthenticatedSettingsIndexRouteImport
+    '/compute/gpu': {
+      id: '/compute/gpu'
+      path: '/compute/gpu'
+      fullPath: '/compute/gpu'
+      preLoaderRoute: typeof ComputeGpuRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/kb/': {
+      id: '/_authenticated/kb/'
+      path: '/kb'
+      fullPath: '/kb/'
+      preLoaderRoute: typeof AuthenticatedKbIndexRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/models/': {
@@ -322,25 +315,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedModelsIndexRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
-    '/_authenticated/kb/': {
-      id: '/_authenticated/kb/'
-      path: '/kb'
-      fullPath: '/kb/'
-      preLoaderRoute: typeof AuthenticatedKbIndexRouteImport
+    '/_authenticated/models/import': {
+      id: '/_authenticated/models/import'
+      path: '/models/import'
+      fullPath: '/models/import'
+      preLoaderRoute: typeof AuthenticatedModelsImportRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
-    '/compute/gpu-containers/$instanceId': {
-      id: '/compute/gpu-containers/$instanceId'
-      path: '/compute/gpu-containers/$instanceId'
-      fullPath: '/compute/gpu-containers/$instanceId'
-      preLoaderRoute: typeof ComputeGpuContainersInstanceIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_authenticated/settings/gpu-queues': {
-      id: '/_authenticated/settings/gpu-queues'
-      path: '/settings/gpu-queues'
-      fullPath: '/settings/gpu-queues'
-      preLoaderRoute: typeof AuthenticatedSettingsGpuQueuesRouteImport
+    '/_authenticated/settings/': {
+      id: '/_authenticated/settings/'
+      path: '/settings'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof AuthenticatedSettingsIndexRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/settings/api-keys': {
@@ -350,12 +336,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSettingsApiKeysRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
-    '/_authenticated/models/import': {
-      id: '/_authenticated/models/import'
-      path: '/models/import'
-      fullPath: '/models/import'
-      preLoaderRoute: typeof AuthenticatedModelsImportRouteImport
+    '/_authenticated/settings/gpu-queues': {
+      id: '/_authenticated/settings/gpu-queues'
+      path: '/settings/gpu-queues'
+      fullPath: '/settings/gpu-queues'
+      preLoaderRoute: typeof AuthenticatedSettingsGpuQueuesRouteImport
       parentRoute: typeof AuthenticatedRoute
+    }
+    '/compute/gpu-containers/': {
+      id: '/compute/gpu-containers/'
+      path: '/compute/gpu-containers'
+      fullPath: '/compute/gpu-containers/'
+      preLoaderRoute: typeof ComputeGpuContainersIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/compute/gpu-containers/$instanceId': {
+      id: '/compute/gpu-containers/$instanceId'
+      path: '/compute/gpu-containers/$instanceId'
+      fullPath: '/compute/gpu-containers/$instanceId'
+      preLoaderRoute: typeof ComputeGpuContainersInstanceIdRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/_authenticated/kb/$kbId/chat': {
       id: '/_authenticated/kb/$kbId/chat'

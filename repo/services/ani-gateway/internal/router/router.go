@@ -20,6 +20,7 @@ type RegisterOptions struct {
 	GPUInstanceStore                      ports.WorkloadInstanceStore
 	NetworkService                        ports.NetworkService
 	StorageService                        ports.StorageService
+	ImageRegistry                         ports.ImageRegistry
 	VectorStoreService                    ports.VectorStoreService
 	InstanceObservability                 ports.InstanceObservability
 	InstanceObservabilityUsesInstanceName bool
@@ -41,7 +42,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerAuth(v1)
 	registerObservability(v1)
 	registerMetering(v1)
-	registerHarbor(v1)
+	registerHarbor(v1, options.ImageRegistry)
 	registerDemoInstancesWithObservability(v1, options.InstanceObservability, options.InstanceObservabilityUsesInstanceName, options.GPUInventory, options.KubernetesRESTClient)
 	registerGPUInventoryResourcesWithStore(v1, options.GPUInventory, options.GPUInstanceStore, options.KubernetesRESTClient)
 	registerGPUSchedulingResourcesWithStore(v1, options.GPUSchedulingQueueStore)

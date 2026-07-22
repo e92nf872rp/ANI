@@ -266,6 +266,105 @@ func (r *LocalImageRegistry) GetProjectScanReport(_ context.Context, request por
 	}, nil
 }
 
+func (r *LocalImageRegistry) GetOverview(_ context.Context, request ports.RegistryOverviewRequest) (ports.RegistryOverview, error) {
+	tenantID := strings.TrimSpace(request.TenantID)
+	if tenantID == "" {
+		return ports.RegistryOverview{}, fmt.Errorf("%w: tenant_id is required", ports.ErrInvalid)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ensureProjectLocked(tenantID)
+	return ports.RegistryOverview{
+		Resources: []ports.RegistryOverviewResourceSummary{
+			{Kind: "project", Total: 1, Available: 1},
+			{Kind: "repository", Total: 1, Available: 1},
+			{Kind: "artifact", Total: 1, Available: 1, SizeBytes: 1048576},
+			{Kind: "tag", Total: 1, Available: 1},
+		},
+		Capabilities: []ports.RegistryOverviewCapability{
+			{Key: "projects", Label: "Projects", Status: "available", Path: "/registry/projects"},
+			{Key: "scan", Label: "Vulnerability scan", Status: "available", Path: "/registry/images/scan-result"},
+		},
+		CreateOrder: []string{"project", "login", "tag", "push"},
+		Relationships: []ports.RegistryOverviewRelationship{
+			{Source: "project", Target: "repository", Relation: "contains"},
+			{Source: "repository", Target: "tag", Relation: "publishes"},
+		},
+		QuickActions: []ports.RegistryOverviewQuickAction{{Key: "create_project", Label: "Create project", Path: "/registry/projects"}},
+		DeleteRisks:  []ports.RegistryOverviewDeleteRisk{{Kind: "tag", Risk: "Deleting a tag can break workloads that still reference the image."}},
+	}, nil
+}
+
+func (r *LocalImageRegistry) ListImages(ctx context.Context, request ports.RegistryImageListRequest) (ports.RegistryImageListResult, error) {
+	project := strings.TrimSpace(request.Project)
+	if project == "" {
+		project = strings.TrimSpace(request.TenantID)
+	}
+	if err := validateTenantProject(request.TenantID, project); err != nil {
+		return ports.RegistryImageListResult{}, err
+	}
+	repository := strings.TrimSpace(request.Repository)
+	if repository == "" {
+		repository = "runtime"
+	}
+	tag := strings.TrimSpace(request.Tag)
+	if tag == "" {
+		tag = "latest"
+	}
+	scan, err := r.GetScanResult(ctx, ports.RegistryScanResultRequest{TenantID: request.TenantID, Image: project + "/" + repository + ":" + tag})
+	if err != nil {
+		return ports.RegistryImageListResult{}, err
+	}
+	if request.ScanStatus != "" && request.ScanStatus != scan.Status {
+		return ports.RegistryImageListResult{DevProfile: registryDevProfile()}, nil
+	}
+	image := registryImage(project, repository, tag)
+	return ports.RegistryImageListResult{Items: []ports.RegistryImage{{
+		Project: project, Repository: repository, Tag: tag, Image: image, Registry: "registry.local",
+		Digest: registryDigestForTag(tag), MediaType: "application/vnd.oci.image.manifest.v1+json", SizeBytes: 1048576,
+		PullCommand: "docker pull " + image, PushedAt: r.now().UTC(), ScanStatus: scan, DevProfile: registryDevProfile(),
+	}}, DevProfile: registryDevProfile()}, nil
+}
+
+func (r *LocalImageRegistry) GetPushInstructions(_ context.Context, request ports.RegistryPushInstructionsRequest) (ports.RegistryPushInstructions, error) {
+	if err := validateTenantProject(request.TenantID, request.Project); err != nil {
+		return ports.RegistryPushInstructions{}, err
+	}
+	repository := strings.TrimSpace(request.Repository)
+	if repository == "" {
+		repository = "runtime"
+	}
+	example := registryImage(request.Project, repository, "latest")
+	return ports.RegistryPushInstructions{Project: request.Project, Registry: "registry.local", RepositoryExample: example, Commands: []ports.RegistryCommand{
+		{Label: "Login", Command: "docker login registry.local"},
+		{Label: "Tag", Command: "docker tag <local-image> " + example},
+		{Label: "Push", Command: "docker push " + example},
+	}, DevProfile: registryDevProfile()}, nil
+}
+
+func (r *LocalImageRegistry) DeleteTag(_ context.Context, request ports.RegistryTagDeleteRequest) (ports.RegistryDeletedTag, error) {
+	references, err := r.ListTagReferences(context.Background(), ports.RegistryImageReferenceListRequest(request))
+	if err != nil {
+		return ports.RegistryDeletedTag{}, err
+	}
+	if references.DeleteBlocked {
+		return ports.RegistryDeletedTag{}, fmt.Errorf("%w: image tag is still referenced", ports.ErrConflict)
+	}
+	return ports.RegistryDeletedTag{Project: request.Project, Repository: request.Repository, Tag: request.Tag, Digest: registryDigestForTag(request.Tag), DeletedAt: r.now().UTC()}, nil
+}
+
+func (r *LocalImageRegistry) ListTagReferences(_ context.Context, request ports.RegistryImageReferenceListRequest) (ports.RegistryImageReferenceListResult, error) {
+	if err := validateRegistryTagRequest(request.TenantID, request.Project, request.Repository, request.Tag); err != nil {
+		return ports.RegistryImageReferenceListResult{}, err
+	}
+	result := ports.RegistryImageReferenceListResult{Project: request.Project, Repository: request.Repository, Tag: request.Tag, Image: registryImage(request.Project, request.Repository, request.Tag), DevProfile: registryDevProfile()}
+	if strings.TrimSpace(request.Repository) == "runtime" && strings.TrimSpace(request.Tag) == "latest" {
+		result.Items = []ports.RegistryImageReference{{Kind: "container_instance", ID: "inst-" + request.Project + "-runtime", Name: "runtime", Route: "/instances/inst-" + request.Project + "-runtime", State: "running", DevProfile: registryDevProfile()}}
+		result.DeleteBlocked = true
+	}
+	return result, nil
+}
+
 func (r *LocalImageRegistry) ListTags(ctx context.Context, repository string) ([]ports.ImageTag, error) {
 	artifacts, err := r.ListArtifacts(ctx, ports.RegistryArtifactListRequest{
 		TenantID:   "local",
@@ -366,6 +465,27 @@ func permissionKey(project, repository, subject string) string {
 func cloneRegistryPermission(permission ports.RegistryPermission) ports.RegistryPermission {
 	permission.Actions = append([]ports.RegistryPermissionAction(nil), permission.Actions...)
 	return permission
+}
+
+func validateRegistryTagRequest(tenantID, project, repository, tag string) error {
+	if err := validateTenantProject(tenantID, project); err != nil {
+		return err
+	}
+	if strings.TrimSpace(repository) == "" || strings.TrimSpace(tag) == "" {
+		return fmt.Errorf("%w: repository and tag are required", ports.ErrInvalid)
+	}
+	return nil
+}
+
+func registryImage(project, repository, tag string) string {
+	return "registry.local/" + strings.TrimSpace(project) + "/" + strings.TrimSpace(repository) + ":" + strings.TrimSpace(tag)
+}
+
+func registryDigestForTag(tag string) string {
+	if strings.TrimSpace(tag) == "latest" {
+		return "sha256:local-runtime"
+	}
+	return "sha256:local-" + strings.ReplaceAll(strings.TrimSpace(tag), "/", "-")
 }
 
 func registryDevProfile() ports.DevProfileInfo {
