@@ -721,7 +721,7 @@ func (r *HarborImageRegistry) getJSON(ctx context.Context, path string, target a
 	if err != nil {
 		return fmt.Errorf("%w: Harbor request failed", ports.ErrNotConfigured)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		return harborStatusError(response.StatusCode)
 	}
@@ -746,7 +746,7 @@ func (r *HarborImageRegistry) doJSON(ctx context.Context, method, path string, b
 	if err != nil {
 		return fmt.Errorf("%w: Harbor request failed", ports.ErrNotConfigured)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != expectedStatus {
 		return harborStatusError(response.StatusCode)
 	}

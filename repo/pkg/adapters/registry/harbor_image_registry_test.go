@@ -52,7 +52,7 @@ func TestHarborImageRegistryListsArtifactsWithTrivyOverview(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v2.0/projects/tenant-a/repositories/runtime/artifacts":
-			fmt.Fprint(w, `[{"digest":"sha256:artifact","size":1048576,"manifest_media_type":"application/vnd.oci.image.manifest.v1+json","tags":[{"name":"latest","push_time":"2026-07-21T00:00:00Z"}],"scan_overview":{"report":{"scan_status":"Success","summary":{"Critical":1,"High":2,"Medium":3,"Low":4}}}}]`)
+			_, _ = fmt.Fprint(w, `[{"digest":"sha256:artifact","size":1048576,"manifest_media_type":"application/vnd.oci.image.manifest.v1+json","tags":[{"name":"latest","push_time":"2026-07-21T00:00:00Z"}],"scan_overview":{"report":{"scan_status":"Success","summary":{"Critical":1,"High":2,"Medium":3,"Low":4}}}}]`)
 		default:
 			t.Fatalf("request path = %s", r.URL.Path)
 		}
@@ -76,9 +76,9 @@ func TestHarborImageRegistryListsProjectsAndRepositories(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v2.0/projects":
-			fmt.Fprint(w, `[{"project_id":7,"name":"tenant-a","public":false,"creation_time":"2026-07-21T00:00:00Z"}]`)
+			_, _ = fmt.Fprint(w, `[{"project_id":7,"name":"tenant-a","public":false,"creation_time":"2026-07-21T00:00:00Z"}]`)
 		case "/api/v2.0/projects/tenant-a/repositories":
-			fmt.Fprint(w, `[{"name":"tenant-a/runtime","artifact_count":2,"pull_count":3}]`)
+			_, _ = fmt.Fprint(w, `[{"name":"tenant-a/runtime","artifact_count":2,"pull_count":3}]`)
 		default:
 			t.Fatalf("request path = %s", r.URL.Path)
 		}
@@ -104,7 +104,7 @@ func TestHarborImageRegistryListsOnlyTheTenantProject(t *testing.T) {
 		if r.URL.Path != "/api/v2.0/projects" {
 			t.Fatalf("request path = %s", r.URL.Path)
 		}
-		fmt.Fprint(w, `[{"project_id":7,"name":"tenant-a","public":false},{"project_id":8,"name":"tenant-b","public":false}]`)
+		_, _ = fmt.Fprint(w, `[{"project_id":7,"name":"tenant-a","public":false},{"project_id":8,"name":"tenant-b","public":false}]`)
 	}))
 	defer server.Close()
 
@@ -122,7 +122,7 @@ func TestHarborImageRegistryMapsRepositoryPermissionToHarborProjectMember(t *tes
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method + " " + r.URL.Path {
 		case "GET /api/v2.0/projects/tenant-a/members":
-			fmt.Fprint(w, `[]`)
+			_, _ = fmt.Fprint(w, `[]`)
 		case "POST /api/v2.0/projects/tenant-a/members":
 			var payload struct {
 				RoleID     int `json:"role_id"`
@@ -159,7 +159,7 @@ func TestHarborImageRegistryUpdatesExistingProjectMemberPermission(t *testing.T)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method + " " + r.URL.Path {
 		case "GET /api/v2.0/projects/tenant-a/members":
-			fmt.Fprint(w, `[{"id":19,"role_id":4,"member_user":{"username":"developer"}}]`)
+			_, _ = fmt.Fprint(w, `[{"id":19,"role_id":4,"member_user":{"username":"developer"}}]`)
 		case "PUT /api/v2.0/projects/tenant-a/members/19":
 			var payload struct {
 				RoleID int `json:"role_id"`
@@ -195,7 +195,7 @@ func TestHarborImageRegistryGetsImageScanFromArtifact(t *testing.T) {
 		if r.URL.Path != "/api/v2.0/projects/tenant-a/repositories/runtime/artifacts" {
 			t.Fatalf("request path = %s", r.URL.Path)
 		}
-		fmt.Fprint(w, `[{"digest":"sha256:artifact","tags":[{"name":"latest"}],"scan_overview":{"report":{"scan_status":"Success","summary":{"High":2}}}}]`)
+		_, _ = fmt.Fprint(w, `[{"digest":"sha256:artifact","tags":[{"name":"latest"}],"scan_overview":{"report":{"scan_status":"Success","summary":{"High":2}}}}]`)
 	}))
 	defer server.Close()
 
@@ -214,7 +214,7 @@ func TestHarborImageRegistryGetsImageScanFromFullyQualifiedImageReference(t *tes
 		if r.URL.Path != "/api/v2.0/projects/tenant-a/repositories/runtime/artifacts" {
 			t.Fatalf("request path = %s", r.URL.Path)
 		}
-		fmt.Fprint(w, `[{"digest":"sha256:artifact","tags":[{"name":"latest"}],"scan_overview":{"report":{"scan_status":"Success","summary":{"High":2}}}}]`)
+		_, _ = fmt.Fprint(w, `[{"digest":"sha256:artifact","tags":[{"name":"latest"}],"scan_overview":{"report":{"scan_status":"Success","summary":{"High":2}}}}]`)
 	}))
 	defer server.Close()
 
@@ -232,11 +232,11 @@ func TestHarborImageRegistryBuildsOverviewAndPushInstructions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v2.0/projects":
-			fmt.Fprint(w, `[{"project_id":7,"name":"tenant-a","public":false}]`)
+			_, _ = fmt.Fprint(w, `[{"project_id":7,"name":"tenant-a","public":false}]`)
 		case "/api/v2.0/projects/tenant-a/repositories":
-			fmt.Fprint(w, `[{"name":"tenant-a/runtime","artifact_count":1}]`)
+			_, _ = fmt.Fprint(w, `[{"name":"tenant-a/runtime","artifact_count":1}]`)
 		case "/api/v2.0/projects/tenant-a/repositories/runtime/artifacts":
-			fmt.Fprint(w, `[{"digest":"sha256:artifact","size":12,"tags":[{"name":"latest"}],"scan_overview":{"report":{"scan_status":"Success","summary":{"Critical":1,"High":2}}}}]`)
+			_, _ = fmt.Fprint(w, `[{"digest":"sha256:artifact","size":12,"tags":[{"name":"latest"}],"scan_overview":{"report":{"scan_status":"Success","summary":{"Critical":1,"High":2}}}}]`)
 		default:
 			t.Fatalf("request path = %s", r.URL.Path)
 		}
@@ -261,7 +261,7 @@ func TestHarborImageRegistryDeletesOnlyAfterReferenceCheck(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method + " " + r.URL.Path {
 		case "GET /api/v2.0/projects/tenant-a/repositories/runtime/artifacts":
-			fmt.Fprint(w, `[{"digest":"sha256:artifact","tags":[{"name":"latest"}]}]`)
+			_, _ = fmt.Fprint(w, `[{"digest":"sha256:artifact","tags":[{"name":"latest"}]}]`)
 		case "DELETE /api/v2.0/projects/tenant-a/repositories/runtime/artifacts/latest":
 			w.WriteHeader(http.StatusOK)
 		default:
