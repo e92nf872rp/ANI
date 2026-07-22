@@ -9,29 +9,24 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as GpuInventoryRouteImport } from './routes/gpu-inventory'
-import { Route as RegistryRouteImport } from './routes/registry'
 import { Route as UsageRouteImport } from './routes/usage'
-import { Route as ComputeGpuRouteImport } from './routes/compute/gpu'
-import { Route as KbIndexRouteImport } from './routes/kb/index'
-import { Route as ModelsIndexRouteImport } from './routes/models/index'
-import { Route as ModelsImportRouteImport } from './routes/models/import'
+import { Route as RegistryRouteImport } from './routes/registry'
+import { Route as GpuInventoryRouteImport } from './routes/gpu-inventory'
+import { Route as IndexRouteImport } from './routes/index'
 import { Route as SettingsIndexRouteImport } from './routes/settings/index'
-import { Route as SettingsApiKeysRouteImport } from './routes/settings/api-keys'
+import { Route as ModelsIndexRouteImport } from './routes/models/index'
+import { Route as KbIndexRouteImport } from './routes/kb/index'
 import { Route as SettingsGpuQueuesRouteImport } from './routes/settings/gpu-queues'
+import { Route as SettingsApiKeysRouteImport } from './routes/settings/api-keys'
+import { Route as ModelsImportRouteImport } from './routes/models/import'
+import { Route as ComputeGpuRouteImport } from './routes/compute/gpu'
 import { Route as ComputeGpuContainersIndexRouteImport } from './routes/compute/gpu-containers/index'
-import { Route as ComputeGpuContainersInstanceIdRouteImport } from './routes/compute/gpu-containers/$instanceId'
 import { Route as KbKbIdChatRouteImport } from './routes/kb/$kbId/chat'
+import { Route as ComputeGpuContainersInstanceIdRouteImport } from './routes/compute/gpu-containers/$instanceId'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const GpuInventoryRoute = GpuInventoryRouteImport.update({
-  id: '/gpu-inventory',
-  path: '/gpu-inventory',
+const UsageRoute = UsageRouteImport.update({
+  id: '/usage',
+  path: '/usage',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RegistryRoute = RegistryRouteImport.update({
@@ -39,29 +34,14 @@ const RegistryRoute = RegistryRouteImport.update({
   path: '/registry',
   getParentRoute: () => rootRouteImport,
 } as any)
-const UsageRoute = UsageRouteImport.update({
-  id: '/usage',
-  path: '/usage',
+const GpuInventoryRoute = GpuInventoryRouteImport.update({
+  id: '/gpu-inventory',
+  path: '/gpu-inventory',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ComputeGpuRoute = ComputeGpuRouteImport.update({
-  id: '/compute/gpu',
-  path: '/compute/gpu',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const KbIndexRoute = KbIndexRouteImport.update({
-  id: '/kb/',
-  path: '/kb/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ModelsIndexRoute = ModelsIndexRouteImport.update({
-  id: '/models/',
-  path: '/models/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ModelsImportRoute = ModelsImportRouteImport.update({
-  id: '/models/import',
-  path: '/models/import',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsIndexRoute = SettingsIndexRouteImport.update({
@@ -69,14 +49,34 @@ const SettingsIndexRoute = SettingsIndexRouteImport.update({
   path: '/settings/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const SettingsApiKeysRoute = SettingsApiKeysRouteImport.update({
-  id: '/settings/api-keys',
-  path: '/settings/api-keys',
+const ModelsIndexRoute = ModelsIndexRouteImport.update({
+  id: '/models/',
+  path: '/models/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const KbIndexRoute = KbIndexRouteImport.update({
+  id: '/kb/',
+  path: '/kb/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsGpuQueuesRoute = SettingsGpuQueuesRouteImport.update({
   id: '/settings/gpu-queues',
   path: '/settings/gpu-queues',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsApiKeysRoute = SettingsApiKeysRouteImport.update({
+  id: '/settings/api-keys',
+  path: '/settings/api-keys',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ModelsImportRoute = ModelsImportRouteImport.update({
+  id: '/models/import',
+  path: '/models/import',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ComputeGpuRoute = ComputeGpuRouteImport.update({
+  id: '/compute/gpu',
+  path: '/compute/gpu',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ComputeGpuContainersIndexRoute =
@@ -85,17 +85,17 @@ const ComputeGpuContainersIndexRoute =
     path: '/compute/gpu-containers/',
     getParentRoute: () => rootRouteImport,
   } as any)
+const KbKbIdChatRoute = KbKbIdChatRouteImport.update({
+  id: '/kb/$kbId/chat',
+  path: '/kb/$kbId/chat',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ComputeGpuContainersInstanceIdRoute =
   ComputeGpuContainersInstanceIdRouteImport.update({
     id: '/compute/gpu-containers/$instanceId',
     path: '/compute/gpu-containers/$instanceId',
     getParentRoute: () => rootRouteImport,
   } as any)
-const KbKbIdChatRoute = KbKbIdChatRouteImport.update({
-  id: '/kb/$kbId/chat',
-  path: '/kb/$kbId/chat',
-  getParentRoute: () => rootRouteImport,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -149,52 +149,52 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    | '/'
-    | '/gpu-inventory'
-    | '/registry'
-    | '/usage'
-    | '/compute/gpu'
-    | '/models/import'
-    | '/settings/api-keys'
-    | '/settings/gpu-queues'
-    | '/kb/'
-    | '/models/'
-    | '/settings/'
-    | '/compute/gpu-containers/$instanceId'
-    | '/kb/$kbId/chat'
-    | '/compute/gpu-containers/'
+  | '/'
+  | '/gpu-inventory'
+  | '/registry'
+  | '/usage'
+  | '/compute/gpu'
+  | '/models/import'
+  | '/settings/api-keys'
+  | '/settings/gpu-queues'
+  | '/kb/'
+  | '/models/'
+  | '/settings/'
+  | '/compute/gpu-containers/$instanceId'
+  | '/kb/$kbId/chat'
+  | '/compute/gpu-containers/'
   fileRoutesByTo: FileRoutesByTo
   to:
-    | '/'
-    | '/gpu-inventory'
-    | '/registry'
-    | '/usage'
-    | '/compute/gpu'
-    | '/models/import'
-    | '/settings/api-keys'
-    | '/settings/gpu-queues'
-    | '/kb'
-    | '/models'
-    | '/settings'
-    | '/compute/gpu-containers/$instanceId'
-    | '/kb/$kbId/chat'
-    | '/compute/gpu-containers'
+  | '/'
+  | '/gpu-inventory'
+  | '/registry'
+  | '/usage'
+  | '/compute/gpu'
+  | '/models/import'
+  | '/settings/api-keys'
+  | '/settings/gpu-queues'
+  | '/kb'
+  | '/models'
+  | '/settings'
+  | '/compute/gpu-containers/$instanceId'
+  | '/kb/$kbId/chat'
+  | '/compute/gpu-containers'
   id:
-    | '__root__'
-    | '/'
-    | '/gpu-inventory'
-    | '/registry'
-    | '/usage'
-    | '/compute/gpu'
-    | '/models/import'
-    | '/settings/api-keys'
-    | '/settings/gpu-queues'
-    | '/kb/'
-    | '/models/'
-    | '/settings/'
-    | '/compute/gpu-containers/$instanceId'
-    | '/kb/$kbId/chat'
-    | '/compute/gpu-containers/'
+  | '__root__'
+  | '/'
+  | '/gpu-inventory'
+  | '/registry'
+  | '/usage'
+  | '/compute/gpu'
+  | '/models/import'
+  | '/settings/api-keys'
+  | '/settings/gpu-queues'
+  | '/kb/'
+  | '/models/'
+  | '/settings/'
+  | '/compute/gpu-containers/$instanceId'
+  | '/kb/$kbId/chat'
+  | '/compute/gpu-containers/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -216,18 +216,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/gpu-inventory': {
-      id: '/gpu-inventory'
-      path: '/gpu-inventory'
-      fullPath: '/gpu-inventory'
-      preLoaderRoute: typeof GpuInventoryRouteImport
+    '/usage': {
+      id: '/usage'
+      path: '/usage'
+      fullPath: '/usage'
+      preLoaderRoute: typeof UsageRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/registry': {
@@ -237,39 +230,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RegistryRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/usage': {
-      id: '/usage'
-      path: '/usage'
-      fullPath: '/usage'
-      preLoaderRoute: typeof UsageRouteImport
+    '/gpu-inventory': {
+      id: '/gpu-inventory'
+      path: '/gpu-inventory'
+      fullPath: '/gpu-inventory'
+      preLoaderRoute: typeof GpuInventoryRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/compute/gpu': {
-      id: '/compute/gpu'
-      path: '/compute/gpu'
-      fullPath: '/compute/gpu'
-      preLoaderRoute: typeof ComputeGpuRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/kb/': {
-      id: '/kb/'
-      path: '/kb'
-      fullPath: '/kb/'
-      preLoaderRoute: typeof KbIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/models/': {
-      id: '/models/'
-      path: '/models'
-      fullPath: '/models/'
-      preLoaderRoute: typeof ModelsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/models/import': {
-      id: '/models/import'
-      path: '/models/import'
-      fullPath: '/models/import'
-      preLoaderRoute: typeof ModelsImportRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings/': {
@@ -279,11 +251,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/settings/api-keys': {
-      id: '/settings/api-keys'
-      path: '/settings/api-keys'
-      fullPath: '/settings/api-keys'
-      preLoaderRoute: typeof SettingsApiKeysRouteImport
+    '/models/': {
+      id: '/models/'
+      path: '/models'
+      fullPath: '/models/'
+      preLoaderRoute: typeof ModelsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/kb/': {
+      id: '/kb/'
+      path: '/kb'
+      fullPath: '/kb/'
+      preLoaderRoute: typeof KbIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings/gpu-queues': {
@@ -293,6 +272,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsGpuQueuesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings/api-keys': {
+      id: '/settings/api-keys'
+      path: '/settings/api-keys'
+      fullPath: '/settings/api-keys'
+      preLoaderRoute: typeof SettingsApiKeysRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/models/import': {
+      id: '/models/import'
+      path: '/models/import'
+      fullPath: '/models/import'
+      preLoaderRoute: typeof ModelsImportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/compute/gpu': {
+      id: '/compute/gpu'
+      path: '/compute/gpu'
+      fullPath: '/compute/gpu'
+      preLoaderRoute: typeof ComputeGpuRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/compute/gpu-containers/': {
       id: '/compute/gpu-containers/'
       path: '/compute/gpu-containers'
@@ -300,18 +300,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ComputeGpuContainersIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/compute/gpu-containers/$instanceId': {
-      id: '/compute/gpu-containers/$instanceId'
-      path: '/compute/gpu-containers/$instanceId'
-      fullPath: '/compute/gpu-containers/$instanceId'
-      preLoaderRoute: typeof ComputeGpuContainersInstanceIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/kb/$kbId/chat': {
       id: '/kb/$kbId/chat'
       path: '/kb/$kbId/chat'
       fullPath: '/kb/$kbId/chat'
       preLoaderRoute: typeof KbKbIdChatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/compute/gpu-containers/$instanceId': {
+      id: '/compute/gpu-containers/$instanceId'
+      path: '/compute/gpu-containers/$instanceId'
+      fullPath: '/compute/gpu-containers/$instanceId'
+      preLoaderRoute: typeof ComputeGpuContainersInstanceIdRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
