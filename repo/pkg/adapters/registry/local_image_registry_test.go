@@ -139,3 +139,28 @@ func TestLocalImageRegistryProjectPullSecretAndScanReport(t *testing.T) {
 		t.Fatalf("report = %+v, want complete one-artifact scan report", report)
 	}
 }
+
+func TestLocalImageRegistryImplementsConsoleRegistryOperations(t *testing.T) {
+	service := NewLocalImageRegistry(WithRegistryClock(func() time.Time {
+		return time.Unix(2700, 0).UTC()
+	}))
+
+	overview, err := service.GetOverview(context.Background(), ports.RegistryOverviewRequest{TenantID: "tenant-a"})
+	if err != nil {
+		t.Fatalf("GetOverview() error = %v", err)
+	}
+	if len(overview.Resources) == 0 {
+		t.Fatalf("overview resources = %v, want local registry summaries", overview.Resources)
+	}
+
+	images, err := service.ListImages(context.Background(), ports.RegistryImageListRequest{
+		TenantID: "tenant-a",
+		Project:  "tenant-a",
+	})
+	if err != nil {
+		t.Fatalf("ListImages() error = %v", err)
+	}
+	if len(images.Items) != 1 || images.Items[0].Image == "" {
+		t.Fatalf("images = %+v, want one local image", images)
+	}
+}

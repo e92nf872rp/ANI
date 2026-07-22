@@ -2249,6 +2249,156 @@ components:
         dev_profile:
           $ref: '#/components/schemas/CoreDevProfileInfo'
 
+    # ── 邮件通知（BOSS 平台级 SMTP 发信通道、收件人、事件订阅、测试发送）──────────────
+    EmailSmtpConfigResponse:
+      type: object
+      description: "SMTP 发信通道配置响应；password / auth_code 明文永不回显"
+      required: [configured]
+      properties:
+        configured:
+          type: boolean
+          description: "是否已配置（false = 空态，其他字段可省略）"
+        smtp_host:    { type: string }
+        smtp_port:    { type: integer, minimum: 1, maximum: 65535 }
+        encryption:   { type: string, enum: [none, starttls, ssl] }
+        from_address: { type: string, format: email }
+        username:     { type: string }
+        has_password:
+          type: boolean
+          description: "是否已设置 SMTP 登录密码（明文不回显）"
+        has_auth_code:
+          type: boolean
+          description: "是否已设置 SMTP 授权码（明文不回显）；与 password 独立保存，不互斥"
+        created_at:  { type: string, format: date-time }
+        updated_at:  { type: string, format: date-time }
+
+    PutEmailSmtpConfigRequest:
+      type: object
+      description: "保存 SMTP 发信通道配置；password 与 auth_code 独立保存、独立清除，服务端不强制二选一"
+      required: [smtp_host, smtp_port, encryption, from_address, username]
+      properties:
+        smtp_host:    { type: string, minLength: 1 }
+        smtp_port:    { type: integer, minimum: 1, maximum: 65535 }
+        encryption:   { type: string, enum: [none, starttls, ssl] }
+        from_address: { type: string, format: email }
+        username:     { type: string }
+        password:
+          type: string
+          format: password
+          description: |
+            SMTP 登录密码（企业邮箱场景）。
+            - 省略或 null：不修改已有密码
+            - 空字符串 ""：清除已有密码
+            - 非空字符串：加密后覆盖
+            明文永不回显；与 auth_code 独立保存，不互斥。
+        auth_code:
+          type: string
+          format: password
+          description: |
+            SMTP 授权码（QQ/163/Gmail 等国内邮箱服务商 SMTP 授权登录）。
+            - 省略或 null：不修改已有授权码
+            - 空字符串 ""：清除已有授权码
+            - 非空字符串：加密后覆盖
+            明文永不回显；与 password 独立保存，不互斥。
+            发送邮件时若 auth_code 已设置则优先使用 auth_code，否则使用 password。
+      additionalProperties: false
+
+    EmailRecipient:
+      type: object
+      description: "邮件收件人"
+      required: [id, email, enabled, created_at, updated_at]
+      properties:
+        id:         { type: string, format: uuid }
+        email:      { type: string, format: email }
+        label:      { type: string, nullable: true }
+        enabled:    { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    EmailRecipientListResponse:
+      type: object
+      description: "收件人列表"
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/EmailRecipient' } }
+        total: { type: integer }
+
+    CreateEmailRecipientRequest:
+      type: object
+      description: "新增收件人"
+      required: [email]
+      properties:
+        email: { type: string, format: email }
+        label: { type: string }
+      additionalProperties: false
+
+    UpdateEmailRecipientRequest:
+      type: object
+      description: "更新收件人（邮箱地址、备注、启停）"
+      properties:
+        email:   { type: string, format: email }
+        label:   { type: string, nullable: true }
+        enabled: { type: boolean }
+      additionalProperties: false
+
+    EmailSubscription:
+      type: object
+      description: "邮件事件订阅"
+      required: [event_type, description, enabled, updated_at]
+      properties:
+        event_type:
+          type: string
+          enum:
+            - platform_alert_p0
+            - platform_alert_p1
+            - incident_created
+            - incident_escalated
+            - platform_task_failed
+        description: { type: string }
+        enabled:    { type: boolean }
+        updated_at: { type: string, format: date-time }
+
+    EmailSubscriptionListResponse:
+      type: object
+      description: "订阅列表（首期固定 5 行）"
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/EmailSubscription' } }
+        total: { type: integer }
+
+    PutEmailSubscriptionsRequest:
+      type: object
+      description: "批量保存邮件事件订阅"
+      required: [subscriptions]
+      properties:
+        subscriptions:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [event_type, enabled]
+            properties:
+              event_type:
+                type: string
+                enum:
+                  - platform_alert_p0
+                  - platform_alert_p1
+                  - incident_created
+                  - incident_escalated
+                  - platform_task_failed
+              enabled: { type: boolean }
+      additionalProperties: false
+
+    SendTestEmailResponse:
+      type: object
+      description: "测试发送结果"
+      required: [success, message, request_id]
+      properties:
+        success:    { type: boolean }
+        message:    { type: string, description: "成功或失败的可读信息" }
+        request_id: { type: string, description: "请求 ID（用于排障）" }
+        sent_at:    { type: string, format: date-time, nullable: true }
+
   # 公共响应
   responses:
     Unauthorized:
@@ -5174,6 +5324,197 @@ paths:
               schema: { $ref: '#/components/schemas/SandboxTemplateListResponse' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
+
+  # ── 邮件通知（BOSS 平台级 SMTP 发信通道、收件人、事件订阅、测试发送）──────────────
+  /notifications/email/smtp:
+    get:
+      operationId: getEmailSmtpConfig
+      summary: 获取邮件 SMTP 发信通道配置
+      description: |
+        返回平台级 SMTP 发信通道配置。
+        - configured=false 表示尚未配置（空态），其他字段可省略。
+        - configured=true 时返回完整字段；password / auth_code 明文永不回显，
+          仅返回 has_password / has_auth_code 布尔位。
+      tags: [Notifications]
+      x-ani-rbac-scope: "scope:notifications:read"
+      responses:
+        "200":
+          description: SMTP 配置（可能为空态）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EmailSmtpConfigResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+    put:
+      operationId: putEmailSmtpConfig
+      summary: 保存邮件 SMTP 发信通道配置
+      description: |
+        保存平台级 SMTP 发信通道配置。
+        password 与 auth_code 独立保存、独立清除，服务端不强制二选一：
+        - 省略或 null：不修改已有值
+        - 空字符串 ""：清除已有值
+        - 非空字符串：加密后覆盖
+        发送邮件时若 auth_code 已设置则优先使用 auth_code，否则使用 password。
+      tags: [Notifications]
+      x-ani-rbac-scope: "scope:notifications:write"
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid }, description: "幂等键" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PutEmailSmtpConfigRequest' }
+      responses:
+        "200":
+          description: 配置已保存
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EmailSmtpConfigResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /notifications/email/recipients:
+    get:
+      operationId: listEmailRecipients
+      summary: 列出邮件收件人
+      description: 返回平台级全局收件人列表；所有已开启订阅的事件共用此列表。
+      tags: [Notifications]
+      x-ani-rbac-scope: "scope:notifications:read"
+      responses:
+        "200":
+          description: 收件人列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EmailRecipientListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createEmailRecipient
+      summary: 新增收件人
+      tags: [Notifications]
+      x-ani-rbac-scope: "scope:notifications:write"
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateEmailRecipientRequest' }
+      responses:
+        "201":
+          description: 收件人已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EmailRecipient' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /notifications/email/recipients/{recipient_id}:
+    patch:
+      operationId: updateEmailRecipient
+      summary: 更新收件人（邮箱地址、备注、启停）
+      tags: [Notifications]
+      x-ani-rbac-scope: "scope:notifications:write"
+      parameters:
+        - { name: recipient_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateEmailRecipientRequest' }
+      responses:
+        "200":
+          description: 收件人已更新
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EmailRecipient' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: deleteEmailRecipient
+      summary: 删除收件人
+      tags: [Notifications]
+      x-ani-rbac-scope: "scope:notifications:write"
+      parameters:
+        - { name: recipient_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204":
+          description: 收件人已删除
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /notifications/email/subscriptions:
+    get:
+      operationId: listEmailSubscriptions
+      summary: 列出邮件事件订阅
+      description: 返回首期冻结的 5 个事件订阅开关状态。
+      tags: [Notifications]
+      x-ani-rbac-scope: "scope:notifications:read"
+      responses:
+        "200":
+          description: 订阅列表（固定 5 行）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EmailSubscriptionListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+    put:
+      operationId: putEmailSubscriptions
+      summary: 批量保存邮件事件订阅
+      description: 批量更新事件订阅开关；非行内 PATCH，整体提交。
+      tags: [Notifications]
+      x-ani-rbac-scope: "scope:notifications:write"
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PutEmailSubscriptionsRequest' }
+      responses:
+        "200":
+          description: 订阅已保存
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EmailSubscriptionListResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /notifications/email/test:
+    post:
+      operationId: sendTestEmail
+      summary: 发送测试邮件
+      description: |
+        向所有启用的收件人发送一封测试邮件，验证 SMTP 通道与收件人可用性。
+        前置条件：
+        - SMTP 通道已配置（configured=true）
+        - 至少一个启用中的收件人（enabled=true）
+        - password 或 auth_code 至少设置一个
+        不满足任一前置条件返回 422 PRECONDITION_FAILED。
+      tags: [Notifications]
+      x-ani-rbac-scope: "scope:notifications:write"
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 测试发送结果
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SendTestEmailResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422":
+          $ref: '#/components/responses/PreconditionFailed'
+          description: "前置条件不满足（SMTP 未配置 / 无启用收件人 / 无凭据）"
 
 # ── Tag 分组（Swagger UI 显示顺序）──────────────────────────────────────────
 tags:

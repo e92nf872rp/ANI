@@ -53,3 +53,23 @@ func (NotConfigured) CreatePullSecret(context.Context, ports.RegistryPullSecretR
 func (NotConfigured) GetProjectScanReport(context.Context, ports.RegistryProjectScanReportRequest) (ports.RegistryProjectScanReport, error) {
 	return ports.RegistryProjectScanReport{}, ports.ErrNotConfigured
 }
+
+func (NotConfigured) GetOverview(context.Context, ports.RegistryOverviewRequest) (ports.RegistryOverview, error) {
+	return ports.RegistryOverview{}, ports.ErrNotConfigured
+}
+
+func (NotConfigured) ListImages(context.Context, ports.RegistryImageListRequest) (ports.RegistryImageListResult, error) {
+	return ports.RegistryImageListResult{}, ports.ErrNotConfigured
+}
+
+func (NotConfigured) GetPushInstructions(context.Context, ports.RegistryPushInstructionsRequest) (ports.RegistryPushInstructions, error) {
+	return ports.RegistryPushInstructions{}, ports.ErrNotConfigured
+}
+
+func (NotConfigured) DeleteTag(context.Context, ports.RegistryTagDeleteRequest) (ports.RegistryDeletedTag, error) {
+	return ports.RegistryDeletedTag{}, ports.ErrNotConfigured
+}
+
+func (NotConfigured) ListTagReferences(context.Context, ports.RegistryImageReferenceListRequest) (ports.RegistryImageReferenceListResult, error) {
+	return ports.RegistryImageReferenceListResult{}, ports.ErrNotConfigured
+}

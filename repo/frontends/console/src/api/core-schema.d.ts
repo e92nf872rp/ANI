@@ -1889,6 +1889,126 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/notifications/email/smtp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 获取邮件 SMTP 发信通道配置
+         * @description 返回平台级 SMTP 发信通道配置。
+         *     - configured=false 表示尚未配置（空态），其他字段可省略。
+         *     - configured=true 时返回完整字段；password / auth_code 明文永不回显，
+         *       仅返回 has_password / has_auth_code 布尔位。
+         */
+        get: operations["getEmailSmtpConfig"];
+        /**
+         * 保存邮件 SMTP 发信通道配置
+         * @description 保存平台级 SMTP 发信通道配置。
+         *     password 与 auth_code 独立保存、独立清除，服务端不强制二选一：
+         *     - 省略或 null：不修改已有值
+         *     - 空字符串 ""：清除已有值
+         *     - 非空字符串：加密后覆盖
+         *     发送邮件时若 auth_code 已设置则优先使用 auth_code，否则使用 password。
+         */
+        put: operations["putEmailSmtpConfig"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/email/recipients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 列出邮件收件人
+         * @description 返回平台级全局收件人列表；所有已开启订阅的事件共用此列表。
+         */
+        get: operations["listEmailRecipients"];
+        put?: never;
+        /** 新增收件人 */
+        post: operations["createEmailRecipient"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/email/recipients/{recipient_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除收件人 */
+        delete: operations["deleteEmailRecipient"];
+        options?: never;
+        head?: never;
+        /** 更新收件人（邮箱地址、备注、启停） */
+        patch: operations["updateEmailRecipient"];
+        trace?: never;
+    };
+    "/notifications/email/subscriptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 列出邮件事件订阅
+         * @description 返回首期冻结的 5 个事件订阅开关状态。
+         */
+        get: operations["listEmailSubscriptions"];
+        /**
+         * 批量保存邮件事件订阅
+         * @description 批量更新事件订阅开关；非行内 PATCH，整体提交。
+         */
+        put: operations["putEmailSubscriptions"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/email/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 发送测试邮件
+         * @description 向所有启用的收件人发送一封测试邮件，验证 SMTP 通道与收件人可用性。
+         *     前置条件：
+         *     - SMTP 通道已配置（configured=true）
+         *     - 至少一个启用中的收件人（enabled=true）
+         *     - password 或 auth_code 至少设置一个
+         *     不满足任一前置条件返回 422 PRECONDITION_FAILED。
+         */
+        post: operations["sendTestEmail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3817,6 +3937,118 @@ export interface components {
             total: number;
             next_cursor?: string | null;
             dev_profile: components["schemas"]["CoreDevProfileInfo"];
+        };
+        /** @description SMTP 发信通道配置响应；password / auth_code 明文永不回显 */
+        EmailSmtpConfigResponse: {
+            /** @description 是否已配置（false = 空态，其他字段可省略） */
+            configured: boolean;
+            smtp_host?: string;
+            smtp_port?: number;
+            /** @enum {string} */
+            encryption?: "none" | "starttls" | "ssl";
+            /** Format: email */
+            from_address?: string;
+            username?: string;
+            /** @description 是否已设置 SMTP 登录密码（明文不回显） */
+            has_password?: boolean;
+            /** @description 是否已设置 SMTP 授权码（明文不回显）；与 password 独立保存，不互斥 */
+            has_auth_code?: boolean;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            updated_at?: string;
+        };
+        /** @description 保存 SMTP 发信通道配置；password 与 auth_code 独立保存、独立清除，服务端不强制二选一 */
+        PutEmailSmtpConfigRequest: {
+            smtp_host: string;
+            smtp_port: number;
+            /** @enum {string} */
+            encryption: "none" | "starttls" | "ssl";
+            /** Format: email */
+            from_address: string;
+            username: string;
+            /**
+             * Format: password
+             * @description SMTP 登录密码（企业邮箱场景）。
+             *     - 省略或 null：不修改已有密码
+             *     - 空字符串 ""：清除已有密码
+             *     - 非空字符串：加密后覆盖
+             *     明文永不回显；与 auth_code 独立保存，不互斥。
+             */
+            password?: string;
+            /**
+             * Format: password
+             * @description SMTP 授权码（QQ/163/Gmail 等国内邮箱服务商 SMTP 授权登录）。
+             *     - 省略或 null：不修改已有授权码
+             *     - 空字符串 ""：清除已有授权码
+             *     - 非空字符串：加密后覆盖
+             *     明文永不回显；与 password 独立保存，不互斥。
+             *     发送邮件时若 auth_code 已设置则优先使用 auth_code，否则使用 password。
+             */
+            auth_code?: string;
+        };
+        /** @description 邮件收件人 */
+        EmailRecipient: {
+            /** Format: uuid */
+            id: string;
+            /** Format: email */
+            email: string;
+            label?: string | null;
+            enabled: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description 收件人列表 */
+        EmailRecipientListResponse: {
+            items: components["schemas"]["EmailRecipient"][];
+            total: number;
+        };
+        /** @description 新增收件人 */
+        CreateEmailRecipientRequest: {
+            /** Format: email */
+            email: string;
+            label?: string;
+        };
+        /** @description 更新收件人（邮箱地址、备注、启停） */
+        UpdateEmailRecipientRequest: {
+            /** Format: email */
+            email?: string;
+            label?: string | null;
+            enabled?: boolean;
+        };
+        /** @description 邮件事件订阅 */
+        EmailSubscription: {
+            /** @enum {string} */
+            event_type: "platform_alert_p0" | "platform_alert_p1" | "incident_created" | "incident_escalated" | "platform_task_failed";
+            description: string;
+            enabled: boolean;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description 订阅列表（首期固定 5 行） */
+        EmailSubscriptionListResponse: {
+            items: components["schemas"]["EmailSubscription"][];
+            total: number;
+        };
+        /** @description 批量保存邮件事件订阅 */
+        PutEmailSubscriptionsRequest: {
+            subscriptions: {
+                /** @enum {string} */
+                event_type: "platform_alert_p0" | "platform_alert_p1" | "incident_created" | "incident_escalated" | "platform_task_failed";
+                enabled: boolean;
+            }[];
+        };
+        /** @description 测试发送结果 */
+        SendTestEmailResponse: {
+            success: boolean;
+            /** @description 成功或失败的可读信息 */
+            message: string;
+            /** @description 请求 ID（用于排障） */
+            request_id: string;
+            /** Format: date-time */
+            sent_at?: string | null;
         };
     };
     responses: {
@@ -7582,6 +7814,244 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    getEmailSmtpConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SMTP 配置（可能为空态） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailSmtpConfigResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    putEmailSmtpConfig: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 幂等键 */
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutEmailSmtpConfigRequest"];
+            };
+        };
+        responses: {
+            /** @description 配置已保存 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailSmtpConfigResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listEmailRecipients: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 收件人列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailRecipientListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createEmailRecipient: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateEmailRecipientRequest"];
+            };
+        };
+        responses: {
+            /** @description 收件人已创建 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailRecipient"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    deleteEmailRecipient: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                recipient_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 收件人已删除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateEmailRecipient: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                recipient_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateEmailRecipientRequest"];
+            };
+        };
+        responses: {
+            /** @description 收件人已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailRecipient"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listEmailSubscriptions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 订阅列表（固定 5 行） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailSubscriptionListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    putEmailSubscriptions: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutEmailSubscriptionsRequest"];
+            };
+        };
+        responses: {
+            /** @description 订阅已保存 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailSubscriptionListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    sendTestEmail: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 测试发送结果 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SendTestEmailResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description 前置条件不满足（SMTP 未配置 / 无启用收件人 / 无凭据） */
+            422: components["responses"]["PreconditionFailed"];
         };
     };
 }

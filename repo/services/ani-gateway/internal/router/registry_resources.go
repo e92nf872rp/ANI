@@ -130,20 +130,77 @@ type registryProjectScanReportResponse struct {
 	ScannedAt        string                 `json:"scanned_at"`
 }
 
-func newRegistryAPI() *registryAPI {
+func newRegistryAPI(services ...ports.ImageRegistry) *registryAPI {
+	if len(services) > 0 && services[0] != nil {
+		return &registryAPI{service: services[0]}
+	}
 	return &registryAPI{service: registryadapter.NewLocalImageRegistry()}
 }
 
-func registerHarbor(v1 *route.RouterGroup) {
-	api := newRegistryAPI()
+func registerHarbor(v1 *route.RouterGroup, service ports.ImageRegistry) {
+	api := newRegistryAPI(service)
+	v1.GET("/registry/overview", api.getOverview)
+	v1.GET("/registry/images", api.listImages)
 	v1.GET("/registry/projects", api.listProjects)
 	v1.POST("/registry/projects", api.createProject)
+	v1.GET("/registry/projects/:project/push-instructions", api.getPushInstructions)
 	v1.GET("/registry/projects/:project/repositories", api.listRepositories)
+	v1.DELETE("/registry/projects/:project/repositories/:repository/tags/:tag", api.deleteTag)
+	v1.GET("/registry/projects/:project/repositories/:repository/tags/:tag/references", api.listTagReferences)
 	v1.GET("/registry/projects/:project/repositories/:repository/artifacts", api.listArtifacts)
 	v1.POST("/registry/projects/:project/repositories/:repository/permissions", api.setPermission)
 	v1.POST("/registry/projects/:project/pull-secret", api.createPullSecret)
 	v1.GET("/registry/projects/:project/scan-report", api.getProjectScanReport)
 	v1.GET("/registry/images/scan-result", api.getScanResult)
+}
+
+func (api *registryAPI) getOverview(ctx context.Context, c *app.RequestContext) {
+	result, err := api.service.GetOverview(ctx, ports.RegistryOverviewRequest{TenantID: demoTenantID(c)})
+	if err != nil {
+		writeRegistryError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, registryOverviewFromRecord(result))
+}
+
+func (api *registryAPI) listImages(ctx context.Context, c *app.RequestContext) {
+	result, err := api.service.ListImages(ctx, ports.RegistryImageListRequest{TenantID: demoTenantID(c), Project: c.Query("project"), Repository: c.Query("repository"), Tag: c.Query("tag"), ScanStatus: ports.RegistryScanState(c.Query("scan_status")), Limit: queryInt(c, "limit", 20), Cursor: c.Query("cursor")})
+	if err != nil {
+		writeRegistryError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, registryImagesFromResult(result))
+}
+
+func (api *registryAPI) getPushInstructions(ctx context.Context, c *app.RequestContext) {
+	result, err := api.service.GetPushInstructions(ctx, ports.RegistryPushInstructionsRequest{TenantID: demoTenantID(c), Project: c.Param("project"), Repository: c.Query("repository")})
+	if err != nil {
+		writeRegistryError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, registryPushInstructionsFromRecord(result))
+}
+
+func (api *registryAPI) deleteTag(ctx context.Context, c *app.RequestContext) {
+	result, err := api.service.DeleteTag(ctx, ports.RegistryTagDeleteRequest{TenantID: demoTenantID(c), Project: c.Param("project"), Repository: c.Param("repository"), Tag: c.Param("tag")})
+	if err != nil {
+		writeRegistryError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, map[string]any{"project": result.Project, "repository": result.Repository, "tag": result.Tag, "digest": result.Digest, "deleted_at": networkTime(result.DeletedAt)})
+}
+
+func (api *registryAPI) listTagReferences(ctx context.Context, c *app.RequestContext) {
+	result, err := api.service.ListTagReferences(ctx, ports.RegistryImageReferenceListRequest{TenantID: demoTenantID(c), Project: c.Param("project"), Repository: c.Param("repository"), Tag: c.Param("tag")})
+	if err != nil {
+		writeRegistryError(c, err)
+		return
+	}
+	items := make([]map[string]any, 0, len(result.Items))
+	for _, item := range result.Items {
+		items = append(items, map[string]any{"kind": item.Kind, "id": item.ID, "name": item.Name, "route": item.Route, "state": item.State, "dev_profile": devProfileFromPort(item.DevProfile)})
+	}
+	c.JSON(http.StatusOK, map[string]any{"project": result.Project, "repository": result.Repository, "tag": result.Tag, "image": result.Image, "items": items, "total": len(items), "delete_blocked": result.DeleteBlocked, "dev_profile": devProfileFromPort(result.DevProfile)})
 }
 
 func (api *registryAPI) listProjects(ctx context.Context, c *app.RequestContext) {
@@ -393,10 +450,54 @@ func registryProjectScanReportFromRecord(record ports.RegistryProjectScanReport)
 	}
 }
 
+func registryOverviewFromRecord(record ports.RegistryOverview) map[string]any {
+	resources := make([]map[string]any, 0, len(record.Resources))
+	for _, item := range record.Resources {
+		resources = append(resources, map[string]any{"kind": item.Kind, "total": item.Total, "available": item.Available, "pending": item.Pending, "failed": item.Failed, "size_bytes": item.SizeBytes})
+	}
+	capabilities := make([]map[string]string, 0, len(record.Capabilities))
+	for _, item := range record.Capabilities {
+		capabilities = append(capabilities, map[string]string{"key": item.Key, "label": item.Label, "status": item.Status, "path": item.Path, "description": item.Description})
+	}
+	relationships := make([]map[string]string, 0, len(record.Relationships))
+	for _, item := range record.Relationships {
+		relationships = append(relationships, map[string]string{"source": item.Source, "target": item.Target, "relation": item.Relation})
+	}
+	quickActions := make([]map[string]string, 0, len(record.QuickActions))
+	for _, item := range record.QuickActions {
+		quickActions = append(quickActions, map[string]string{"key": item.Key, "label": item.Label, "path": item.Path, "description": item.Description})
+	}
+	deleteRisks := make([]map[string]string, 0, len(record.DeleteRisks))
+	for _, item := range record.DeleteRisks {
+		deleteRisks = append(deleteRisks, map[string]string{"kind": item.Kind, "risk": item.Risk})
+	}
+	return map[string]any{"resources": resources, "vulnerabilities": map[string]int{"critical": record.Vulnerabilities.Critical, "high": record.Vulnerabilities.High, "medium": record.Vulnerabilities.Medium, "low": record.Vulnerabilities.Low}, "capabilities": capabilities, "create_order": record.CreateOrder, "relationships": relationships, "quick_actions": quickActions, "delete_risks": deleteRisks}
+}
+
+func registryImagesFromResult(result ports.RegistryImageListResult) map[string]any {
+	items := make([]map[string]any, 0, len(result.Items))
+	for _, item := range result.Items {
+		items = append(items, map[string]any{"project": item.Project, "repository": item.Repository, "tag": item.Tag, "image": item.Image, "registry": item.Registry, "digest": item.Digest, "media_type": item.MediaType, "size_bytes": item.SizeBytes, "pull_command": item.PullCommand, "pushed_at": networkTime(item.PushedAt), "scan_status": registryScanResultFromRecord(item.ScanStatus), "dev_profile": devProfileFromPort(item.DevProfile)})
+	}
+	return map[string]any{"items": items, "total": len(items), "next_cursor": result.NextCursor}
+}
+
+func registryPushInstructionsFromRecord(record ports.RegistryPushInstructions) map[string]any {
+	commands := make([]map[string]string, 0, len(record.Commands))
+	for _, command := range record.Commands {
+		commands = append(commands, map[string]string{"label": command.Label, "command": command.Command})
+	}
+	return map[string]any{"project": record.Project, "registry": record.Registry, "repository_example": record.RepositoryExample, "commands": commands, "dev_profile": devProfileFromPort(record.DevProfile)}
+}
+
 func writeRegistryError(c *app.RequestContext, err error) {
 	switch {
 	case errors.Is(err, ports.ErrInvalid):
 		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+	case errors.Is(err, ports.ErrNotFound):
+		writeDemoError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
+	case errors.Is(err, ports.ErrConflict):
+		writeDemoError(c, http.StatusConflict, "CONFLICT", err.Error())
 	case errors.Is(err, ports.ErrNotConfigured):
 		writeDemoError(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", err.Error())
 	default:
