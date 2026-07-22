@@ -115,7 +115,7 @@ func (s *LokiLogStore) QueryLogs(ctx context.Context, req ports.LogQueryRequest)
 	if err != nil {
 		return ports.LogQueryResult{}, fmt.Errorf("loki query failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return ports.LogQueryResult{}, fmt.Errorf("loki returned status %d", resp.StatusCode)

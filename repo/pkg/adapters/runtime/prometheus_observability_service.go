@@ -193,7 +193,7 @@ func (s *PrometheusObservabilityService) queryPrometheusRange(ctx context.Contex
 	if err != nil {
 		return ports.ObservabilityRangeQueryResult{}, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return ports.ObservabilityRangeQueryResult{}, fmt.Errorf("%w: Prometheus range query returned %d", ports.ErrInvalid, resp.StatusCode)
 	}
@@ -327,7 +327,7 @@ func (s *PrometheusObservabilityService) queryPrometheus(ctx context.Context, qu
 	if err != nil {
 		return ports.ObservabilityQueryResult{}, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return ports.ObservabilityQueryResult{}, fmt.Errorf("%w: Prometheus query returned %d", ports.ErrInvalid, resp.StatusCode)
 	}
