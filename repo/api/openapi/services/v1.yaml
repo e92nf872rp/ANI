@@ -160,31 +160,46 @@ components:
       type: object
       required: [id, name, status, created_at]
       properties:
-        id:      { type: string, format: uuid }
-        name:    { type: string }
-        status:  { type: string, enum: [active, rebuilding, deleted] }
-        doc_count: { type: integer }
-        created_at: { type: string, format: date-time }
+        id:              { type: string, format: uuid }
+        tenant_id:       { type: string, format: uuid }
+        name:            { type: string }
+        description:     { type: string }
+        embedding_model: { type: string }
+        chunk_size:       { type: integer, default: 512 }
+        top_k:            { type: integer, default: 5 }
+        score_threshold: { type: number, format: float, default: 0.3, description: "相似度阈值，非零覆盖默认值" }
+        status:           { type: string, enum: [active, rebuilding, deleted] }
+        doc_count:        { type: integer }
+        created_at:       { type: string, format: date-time }
+        updated_at:       { type: string, format: date-time, nullable: true }
 
     KBDocument:
       type: object
-      required: [id, knowledge_base_id, file_name, status, created_at]
+      required: [id, kb_id, file_name, parse_status, created_at]
       properties:
         id:                { type: string, format: uuid }
-        knowledge_base_id: { type: string, format: uuid }
+        tenant_id:         { type: string, format: uuid }
+        kb_id:             { type: string, format: uuid }
         file_name:         { type: string }
-        content_type:      { type: string, nullable: true }
-        size_bytes:        { type: integer, minimum: 0 }
-        status:            { type: string, enum: [uploaded, parsing, indexed, failed, deleted] }
+        file_type:         { type: string, nullable: true, description: "pdf | docx | xlsx | pptx | md | txt" }
+        file_size_bytes:   { type: integer, format: int64, minimum: 0 }
+        parse_status:      { type: string, enum: [pending, parsing, indexing, ready, failed], description: "解析状态，对齐 kb_service.proto KBDocument.parse_status" }
+        chunk_count:       { type: integer, minimum: 0 }
+        error_message:     { type: string, nullable: true }
+        custom_metadata:   { type: object, additionalProperties: true, nullable: true, description: "客户端自定义元数据（JSONB，≤ 64KB）" }
         created_at:        { type: string, format: date-time }
+        parsed_at:         { type: string, format: date-time, nullable: true }
 
     KBQueryRequest:
       type: object
-      required: [question]
+      required: [question, idempotency_key]
       properties:
-        question:   { type: string }
-        top_k:      { type: integer, default: 5 }
-        session_id: { type: string, format: uuid, nullable: true }
+        question:                { type: string, minLength: 1, maxLength: 2000 }
+        session_id:              { type: string, format: uuid, nullable: true, description: "可选；为空则新建会话" }
+        idempotency_key:         { type: string, maxLength: 128, description: "防止重试导致重复计费" }
+        top_k:                   { type: integer, default: 5, minimum: 1, maximum: 20 }
+        score_threshold:         { type: number, format: float, default: 0.3, minimum: 0.0, maximum: 1.0, description: "相似度阈值，非零覆盖 KB 默认值" }
+        inference_service_name:  { type: string, nullable: true, description: "指定 vLLM 推理服务名；为空则用 default" }
 
     KBQueryResponse:
       type: object
@@ -204,6 +219,33 @@ components:
         session_id:    { type: string, format: uuid }
         input_tokens:  { type: integer }
         output_tokens: { type: integer }
+
+    GetDocumentUploadURLRequest:
+      type: object
+      required: [idempotency_key, file_name, file_type, file_size_bytes, checksum_sha256]
+      properties:
+        idempotency_key:    { type: string, maxLength: 128, description: "客户端生成，幂等预留 doc_id；重放返回同一 doc" }
+        file_name:          { type: string, minLength: 1, maxLength: 255 }
+        file_type:          { type: string, enum: [pdf, docx, xlsx, pptx, md, txt] }
+        file_size_bytes:    { type: integer, format: int64, minimum: 1, maximum: 104857600, description: "上限 100MB" }
+        checksum_sha256:    { type: string, description: "客户端计算的 SHA-256；上传后服务端校验" }
+        custom_metadata:    { type: object, additionalProperties: true, nullable: true, description: "客户端自定义元数据（JSONB，≤ 64KB）" }
+
+    GetDocumentUploadURLResponse:
+      type: object
+      required: [doc_id, upload_url, storage_path]
+      properties:
+        doc_id:        { type: string, format: uuid, description: "预预留的文档 ID" }
+        upload_url:    { type: string, format: uri, description: "MinIO presigned PUT URL（15 分钟有效）" }
+        storage_path:  { type: string, description: "MinIO 存储路径；需原样回传给 notifyDocumentUploaded" }
+
+    NotifyDocumentUploadedRequest:
+      type: object
+      required: [idempotency_key, doc_id, storage_path]
+      properties:
+        idempotency_key:    { type: string, maxLength: 128, description: "与 getDocumentUploadURL 使用同一键，幂等派发解析任务" }
+        doc_id:            { type: string, format: uuid }
+        storage_path:      { type: string, description: "由 getDocumentUploadURL 返回的对象存储路径" }
 
     GpuContainer:
       type: object
@@ -888,6 +930,7 @@ paths:
                 embedding_model: { type: string, default: "bge-m3" }
                 chunk_size:      { type: integer, default: 512 }
                 top_k:           { type: integer, default: 5 }
+                score_threshold: { type: number, format: float, default: 0.3, description: "相似度阈值，非零覆盖默认值" }
       responses:
         "201":
           description: 知识库已创建
@@ -935,25 +978,63 @@ paths:
                 properties:
                   items: { type: array, items: { $ref: '#/components/schemas/KBDocument' } }
     post:
-      operationId: uploadKnowledgeBaseDocument
-      summary: 上传文档
+      operationId: getDocumentUploadURL
+      summary: 获取文档预签名上传地址（两步式上传 step 1）
+      description: |
+        预留 doc_id 并创建 kb_documents 记录（parse_status=pending），返回 MinIO
+        presigned PUT URL（15 分钟有效）与 storage_path。客户端直接 PUT 文件到
+        MinIO 后，调用 notifyDocumentUploaded 触发解析任务。对齐
+        kb_service.proto GetDocumentUploadURL。
       tags: [KnowledgeBases]
       parameters:
         - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
         required: true
         content:
-          multipart/form-data:
-            schema:
-              required: [file]
-              properties:
-                file: { type: string, format: binary }
+          application/json:
+            schema: { $ref: '#/components/schemas/GetDocumentUploadURLRequest' }
       responses:
-        "202":
-          description: 文档已上传，解析任务进行中
+        "200":
+          description: 预签名上传地址与预留 doc_id
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/KBDocument' }
+              schema: { $ref: '#/components/schemas/GetDocumentUploadURLResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "413": { description: 文件大小超限（doc.too_large）, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        "422": { description: 不支持的文档格式（doc.unsupported_type）, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /knowledge-bases/{kb_id}/documents/notify-uploaded:
+    post:
+      operationId: notifyDocumentUploaded
+      summary: 通知文档已直传至对象存储（两步式上传 step 2）
+      description: |
+        校验对象存在性与 checksum_sha256，同事务写 kb_documents 更新、async_tasks
+        与 outbox_events，返回异步任务引用。对齐 kb_service.proto
+        NotifyDocumentUploaded。
+      tags: [KnowledgeBases]
+      parameters:
+        - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotifyDocumentUploadedRequest' }
+      responses:
+        "202":
+          description: 解析任务已派发
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { description: 校验和不匹配（doc.checksum_mismatch）, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        "503": { description: 对象存储/解析服务暂不可用（inference.unavailable）, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
 
   /knowledge-bases/{kb_id}/documents/{doc_id}:
     delete:
@@ -978,14 +1059,7 @@ paths:
         required: true
         content:
           application/json:
-            schema:
-              required: [question, idempotency_key]
-              properties:
-                question: { type: string, minLength: 1, maxLength: 2000 }
-                session_id: { type: string, format: uuid, nullable: true }
-                idempotency_key: { type: string, maxLength: 128 }
-                top_k: { type: integer, default: 5, minimum: 1, maximum: 20 }
-                score_threshold: { type: number, format: float, default: 0.3, minimum: 0.0, maximum: 1.0 }
+            schema: { $ref: '#/components/schemas/KBQueryRequest' }
       responses:
         "200":
           description: JSON 格式的问答结果
@@ -995,6 +1069,7 @@ paths:
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "503": { description: 推理服务暂不可用（inference.unavailable）, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
 
   /knowledge-bases/{kb_id}/query/stream:
     get:
