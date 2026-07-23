@@ -24,6 +24,12 @@ exceptions:
     owner: ANI Services
     reason: OpenAPI 已声明引用来源列表，当前 Gateway 尚未注册对应过渡路由。
   - kind: spec_not_in_code
+    method: POST
+    path: /knowledge-bases/{kb_id}/documents/notify-uploaded
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明两步式上传的 notifyDocumentUploaded（US-001 契约修复），当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
     method: GET
     path: /knowledge-bases/{kb_id}/sessions
     status: accepted_baseline

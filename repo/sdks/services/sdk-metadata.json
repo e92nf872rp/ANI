@@ -161,9 +161,15 @@
       "scope": ""
     },
     {
-      "operationId": "uploadKnowledgeBaseDocument",
+      "operationId": "getDocumentUploadURL",
       "method": "POST",
       "path": "/knowledge-bases/{kb_id}/documents",
+      "scope": ""
+    },
+    {
+      "operationId": "notifyDocumentUploaded",
+      "method": "POST",
+      "path": "/knowledge-bases/{kb_id}/documents/notify-uploaded",
       "scope": ""
     },
     {
@@ -372,6 +378,8 @@
     "CursorPage",
     "ErrorResponse",
     "ExtendSandboxRequest",
+    "GetDocumentUploadURLRequest",
+    "GetDocumentUploadURLResponse",
     "GpuContainer",
     "GpuContainerMetrics",
     "GpuContainerVersion",
@@ -396,6 +404,7 @@
     "KnowledgeBase",
     "Model",
     "ModelVersion",
+    "NotifyDocumentUploadedRequest",
     "PatchGpuContainerRequest",
     "PatchSandboxRequest",
     "Sandbox",
@@ -419,7 +428,10 @@
     "testInferenceService",
     "createIntegration",
     "createIntegrationBot",
+    "getDocumentUploadURL",
+    "notifyDocumentUploaded",
     "updateKnowledgeBasePermissions",
+    "queryKnowledgeBase",
     "createSandbox",
     "patchSandbox",
     "extendSandbox",
