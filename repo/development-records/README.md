@@ -93,6 +93,13 @@
 |---|---|---|
 | EMAIL-NOTIFY | 邮件通知 API + BOSS 发信设置页：9 个 Core endpoint（SMTP CRUD / 收件人 CRUD / 事件订阅批量更新 / 测试发送）；local 内存 adapter；BOSS 前端 SMTP 表单 + 收件人表格 + 订阅开关 + 测试发送；48 store 测试 + 34 handler 测试；RequestID store 层 UUID 生成 + handler 透传 | email-notify.md |
 
+### M2.1 Knowledge Base Platform Contract（2026-07）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| M2.1-TASK-A (issue-001) | 修复 Services OpenAPI 与 kb_service.proto 契约一致性：`KBDocument.parse_status` 枚举对齐、文档上传改两步式 pre-signed URL、`KBQueryRequest` 补齐三字段、双侧新增 `custom_metadata`(JSONB)；baseline/test lockstep；SDK/docs 重生成 | m2-1-task-a-contract-services-openapi.md |
+| M2.1-TASK-A (issue-002) | model proto 新增 OCR capability 标注：`CreateModelRequest.capabilities` 注释追加 `| ocr`，proto 生成物 `model_service.pb.go` 同步注释；纯注释 additive，无 wire schema 变更；validate-services 各门禁通过 | m2-1-task-a-model-proto-ocr-capability.md |
+
 ### SDK Regression Fixes（2026-06）
 
 | 批次 | 内容摘要 | 文件 |
