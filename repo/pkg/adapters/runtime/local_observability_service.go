@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -54,6 +53,23 @@ func (s *LocalObservabilityService) Query(_ context.Context, request ports.Obser
 		Query:      query,
 		ResultType: ports.ObservabilityResultVector,
 		Results:    []ports.ObservabilityQuerySample{},
+		DevProfile: observabilityDevProfile(),
+	}, nil
+}
+
+// QueryRange local profile 返回空 matrix，不伪造时序曲线。
+func (s *LocalObservabilityService) QueryRange(_ context.Context, request ports.ObservabilityRangeQueryRequest) (ports.ObservabilityRangeQueryResult, error) {
+	if strings.TrimSpace(request.TenantID) == "" {
+		return ports.ObservabilityRangeQueryResult{}, fmt.Errorf("%w: tenant_id is required", ports.ErrInvalid)
+	}
+	query := strings.TrimSpace(request.Query)
+	if query == "" {
+		return ports.ObservabilityRangeQueryResult{}, fmt.Errorf("%w: observability query is required", ports.ErrInvalid)
+	}
+	return ports.ObservabilityRangeQueryResult{
+		Query:      query,
+		ResultType: ports.ObservabilityResultMatrix,
+		Results:    []ports.ObservabilityRangeSeries{},
 		DevProfile: observabilityDevProfile(),
 	}, nil
 }
@@ -235,8 +251,3 @@ func firstNonZeroDuration(values ...time.Duration) time.Duration {
 }
 
 var _ ports.ObservabilityService = (*LocalObservabilityService)(nil)
-
-// QueryRange is a stub; real implementation arrives in PR3.
-func (s *LocalObservabilityService) QueryRange(ctx context.Context, request ports.ObservabilityRangeQueryRequest) (ports.ObservabilityRangeQueryResult, error) {
-	return ports.ObservabilityRangeQueryResult{}, errors.New("QueryRange: not implemented yet, see PR3")
-}

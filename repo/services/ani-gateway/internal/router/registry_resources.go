@@ -164,7 +164,7 @@ func (api *registryAPI) getOverview(ctx context.Context, c *app.RequestContext) 
 }
 
 func (api *registryAPI) listImages(ctx context.Context, c *app.RequestContext) {
-	result, err := api.service.ListImages(ctx, ports.RegistryImageListRequest{TenantID: demoTenantID(c), Project: c.Query("project"), Repository: c.Query("repository"), Tag: c.Query("tag"), ScanStatus: ports.RegistryScanState(c.Query("scan_status")), Limit: queryInt(c, "limit", 20), Cursor: c.Query("cursor")})
+	result, err := api.service.ListImages(ctx, ports.RegistryImageListRequest{TenantID: demoTenantID(c), Project: c.Query("project"), Repository: c.Query("repository"), Tag: c.Query("tag"), Purpose: c.Query("purpose"), ScanStatus: ports.RegistryScanState(c.Query("scan_status")), Limit: queryInt(c, "limit", 20), Cursor: c.Query("cursor")})
 	if err != nil {
 		writeRegistryError(c, err)
 		return
@@ -477,7 +477,7 @@ func registryOverviewFromRecord(record ports.RegistryOverview) map[string]any {
 func registryImagesFromResult(result ports.RegistryImageListResult) map[string]any {
 	items := make([]map[string]any, 0, len(result.Items))
 	for _, item := range result.Items {
-		items = append(items, map[string]any{"project": item.Project, "repository": item.Repository, "tag": item.Tag, "image": item.Image, "registry": item.Registry, "digest": item.Digest, "media_type": item.MediaType, "size_bytes": item.SizeBytes, "pull_command": item.PullCommand, "pushed_at": networkTime(item.PushedAt), "scan_status": registryScanResultFromRecord(item.ScanStatus), "dev_profile": devProfileFromPort(item.DevProfile)})
+		items = append(items, map[string]any{"project": item.Project, "repository": item.Repository, "tag": item.Tag, "purpose": item.Purpose, "image": item.Image, "registry": item.Registry, "digest": item.Digest, "media_type": item.MediaType, "size_bytes": item.SizeBytes, "pull_command": item.PullCommand, "pushed_at": networkTime(item.PushedAt), "scan_status": registryScanResultFromRecord(item.ScanStatus), "dev_profile": devProfileFromPort(item.DevProfile)})
 	}
 	return map[string]any{"items": items, "total": len(items), "next_cursor": result.NextCursor}
 }

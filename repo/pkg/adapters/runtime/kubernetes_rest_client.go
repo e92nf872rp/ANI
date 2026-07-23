@@ -131,21 +131,29 @@ func readKubernetesServiceAccountToken(path string) (string, error) {
 	return token, nil
 }
 
+// kubernetesHTTPClient 构造访问 Kubernetes API 的 HTTP client。
+//
+// CA 加载策略（按优先级）：
+//  1. inCluster=true：必须加载 CA，路径为空时回退到默认 service account CA。
+//  2. inCluster=false 但 caFile 显式非空：仍加载该 CA（外部 API server 使用
+//     自签证书的场景，如通过 KUBERNETES_API_HOST + KUBERNETES_SERVICE_ACCOUNT_CA_FILE
+//     显式配置的真实集群）。不加载会因 x509 unknown authority 失败。
+//  3. inCluster=false 且 caFile 为空：返回 http.DefaultClient（公网/标准 CA 场景）。
 func kubernetesHTTPClient(caFile string, inCluster bool) (*http.Client, error) {
 	caPath := strings.TrimSpace(caFile)
-	if caPath == "" && inCluster {
-		caPath = defaultKubernetesServiceAccountCAFile
+	if !inCluster && caPath == "" {
+		return http.DefaultClient, nil
 	}
 	if caPath == "" {
-		return http.DefaultClient, nil
+		caPath = defaultKubernetesServiceAccountCAFile
 	}
 	caData, err := os.ReadFile(caPath)
 	if err != nil {
-		return nil, fmt.Errorf("%w: Kubernetes in-cluster CA bundle is required: %v", ports.ErrInvalid, err)
+		return nil, fmt.Errorf("%w: Kubernetes CA bundle is required: %v", ports.ErrInvalid, err)
 	}
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(caData) {
-		return nil, fmt.Errorf("%w: Kubernetes in-cluster CA bundle is invalid", ports.ErrInvalid)
+		return nil, fmt.Errorf("%w: Kubernetes CA bundle is invalid", ports.ErrInvalid)
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}

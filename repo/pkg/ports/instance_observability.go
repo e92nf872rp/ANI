@@ -18,7 +18,8 @@ type InstanceObservationListRequest struct {
 type InstanceObservationGetRequest struct {
 	TenantID   string
 	InstanceID string
-	// 非 gpu_container 的 GPU 字段保持 nil（禁止用 0 代替缺失）。
+	// Kind 用于 adapter 判断是否查询 GPU 指标：仅 gpu_container 才查询 DCGM 并填充 GPU 字段，
+	// 其他类型对应的 GPU 字段保持 nil（缺失不等于 0，禁止用 0 代替缺失）。
 	Kind WorkloadKind
 }
 

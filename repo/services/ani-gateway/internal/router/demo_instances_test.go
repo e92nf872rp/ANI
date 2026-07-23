@@ -1,13 +1,21 @@
 package router
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"os/exec"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/app/server"
+	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
@@ -574,6 +582,10 @@ func TestDemoInstanceServiceVMVolumeBinding(t *testing.T) {
 }
 
 func TestDemoInstanceServiceRealShellExecutesCommand(t *testing.T) {
+	shell := firstNonEmpty(os.Getenv("ANI_DEMO_SHELL"), "/bin/sh")
+	if _, err := exec.LookPath(shell); err != nil {
+		t.Skipf("demo shell %q not available on %s: %v", shell, runtime.GOOS, err)
+	}
 	record := ports.WorkloadInstanceRecord{
 		TenantID:   "tenant-a",
 		InstanceID: "instance-shell",
@@ -592,6 +604,168 @@ func TestDemoInstanceServiceRealShellExecutesCommand(t *testing.T) {
 	if result.CWD == "" {
 		t.Fatalf("CWD is empty")
 	}
+}
+
+// newDemoConsoleEngine builds a Hertz engine with the demo instance routes and
+// a tenant-context middleware so createConsoleSession handler tests can issue
+// real HTTP requests. It creates a running vm instance via HTTP and returns the
+// engine plus the created instance id.
+func newDemoConsoleEngine(t *testing.T, denyScope bool) (*server.Hertz, string) {
+	t.Helper()
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		if denyScope {
+			writeDemoError(c, http.StatusForbidden, "FORBIDDEN", "permission denied")
+			c.Abort()
+			return
+		}
+		c.Set("tenant_id", "tenant-a")
+		c.Set("user_id", "user-a")
+		c.Next(ctx)
+	})
+	registerDemoInstancesWithObservability(h.Group("/api/v1"), nil, false, nil, nil)
+	if denyScope {
+		return h, "irrelevant"
+	}
+	createBody := `{"kind":"vm","name":"demo-vm-console","idempotency_key":"create-vm-console"}`
+	createResp := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/instances",
+		&ut.Body{Body: bytes.NewBufferString(createBody), Len: len(createBody)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+	).Result()
+	if createResp.StatusCode() != http.StatusCreated {
+		t.Fatalf("create vm status = %d, want 201; body=%s", createResp.StatusCode(), createResp.Body())
+	}
+	instanceID := extractInstanceID(string(createResp.Body()))
+	if instanceID == "" {
+		t.Fatalf("could not extract instance id from %s", createResp.Body())
+	}
+	return h, instanceID
+}
+
+func TestCreateConsoleSessionSuccessReturns200(t *testing.T) {
+	h, instanceID := newDemoConsoleEngine(t, false)
+	body := `{"protocol":"vnc"}`
+	resp := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/instances/"+instanceID+"/console",
+		&ut.Body{Body: bytes.NewBufferString(body), Len: len(body)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+	).Result()
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode(), resp.Body())
+	}
+	if !strings.Contains(string(resp.Body()), "session_id") || !strings.Contains(string(resp.Body()), "connect_url") {
+		t.Fatalf("body = %s, want session_id and connect_url", resp.Body())
+	}
+	if !strings.Contains(string(resp.Body()), `"protocol":"vnc"`) {
+		t.Fatalf("body = %s, want protocol vnc", resp.Body())
+	}
+}
+
+func TestCreateConsoleSessionNonVMReturns400(t *testing.T) {
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Set("user_id", "user-a")
+		c.Next(ctx)
+	})
+	registerDemoInstancesWithObservability(h.Group("/api/v1"), nil, false, nil, nil)
+	// create a container instance via HTTP
+	createBody := `{"kind":"container","name":"demo-console-nonvm","idempotency_key":"create-nonvm"}`
+	createResp := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/instances",
+		&ut.Body{Body: bytes.NewBufferString(createBody), Len: len(createBody)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+	).Result()
+	if createResp.StatusCode() != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201; body=%s", createResp.StatusCode(), createResp.Body())
+	}
+	instanceID := extractInstanceID(string(createResp.Body()))
+	if instanceID == "" {
+		t.Fatalf("could not extract instance id from %s", createResp.Body())
+	}
+	body := `{"protocol":"vnc"}`
+	resp := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/instances/"+instanceID+"/console",
+		&ut.Body{Body: bytes.NewBufferString(body), Len: len(body)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+	).Result()
+	if resp.StatusCode() != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", resp.StatusCode(), resp.Body())
+	}
+}
+
+func TestCreateConsoleSessionInvalidProtocolReturns400(t *testing.T) {
+	h, instanceID := newDemoConsoleEngine(t, false)
+	body := `{"protocol":"rdp"}`
+	resp := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/instances/"+instanceID+"/console",
+		&ut.Body{Body: bytes.NewBufferString(body), Len: len(body)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+	).Result()
+	if resp.StatusCode() != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", resp.StatusCode(), resp.Body())
+	}
+}
+
+func TestCreateConsoleSessionNotRunningReturns422(t *testing.T) {
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Set("user_id", "user-a")
+		c.Next(ctx)
+	})
+	registerDemoInstancesWithObservability(h.Group("/api/v1"), nil, false, nil, nil)
+	createBody := `{"kind":"vm","name":"demo-vm-stopped","idempotency_key":"create-stopped-vm"}`
+	createResp := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/instances",
+		&ut.Body{Body: bytes.NewBufferString(createBody), Len: len(createBody)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+	).Result()
+	if createResp.StatusCode() != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201; body=%s", createResp.StatusCode(), createResp.Body())
+	}
+	instanceID := extractInstanceID(string(createResp.Body()))
+	if instanceID == "" {
+		t.Fatalf("could not extract instance id from %s", createResp.Body())
+	}
+	// stop the vm
+	stopBody := `{"action":"stop","idempotency_key":"stop-vm-console"}`
+	stopResp := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/instances/"+instanceID+"/lifecycle",
+		&ut.Body{Body: bytes.NewBufferString(stopBody), Len: len(stopBody)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+	).Result()
+	if stopResp.StatusCode() != http.StatusOK {
+		t.Fatalf("stop status = %d, want 200; body=%s", stopResp.StatusCode(), stopResp.Body())
+	}
+	body := `{"protocol":"vnc"}`
+	resp := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/instances/"+instanceID+"/console",
+		&ut.Body{Body: bytes.NewBufferString(body), Len: len(body)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+	).Result()
+	if resp.StatusCode() != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422; body=%s", resp.StatusCode(), resp.Body())
+	}
+}
+
+func TestCreateConsoleSessionForbiddenReturns403(t *testing.T) {
+	h, _ := newDemoConsoleEngine(t, true)
+	body := `{"protocol":"vnc"}`
+	resp := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/instances/any/console",
+		&ut.Body{Body: bytes.NewBufferString(body), Len: len(body)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+	).Result()
+	if resp.StatusCode() != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", resp.StatusCode(), resp.Body())
+	}
+}
+
+func extractInstanceID(body string) string {
+	// the create response serializes to {"instance":{"id":"..."},...}
+	idx := strings.Index(body, `"id":"`)
+	if idx < 0 {
+		return ""
+	}
+	rest := body[idx+len(`"id":"`):]
+	end := strings.Index(rest, `"`)
+	if end < 0 {
+		return ""
+	}
+	return rest[:end]
 }
 
 func TestDemoSpecFromRequestPrefersNestedConfigs(t *testing.T) {
@@ -763,5 +937,117 @@ func TestDemoSpecFromRequestAllowsMatchingConfigAndFlatAlias(t *testing.T) {
 	}
 	if spec.VM == nil || spec.VM.BootImage != "images/same.qcow2" {
 		t.Fatalf("matching alias vm = %+v", spec.VM)
+	}
+}
+
+// metricsKindSpy 是一个 ports.InstanceObservability 实现，仅用于捕获 GetMetrics
+// 调用时传入的 request.Kind，以验证 handler 是否正确透传 record.Kind。
+// 其他方法走空实现，仅满足接口契约，保证 handler 不会因非 metrics 路径报错。
+type metricsKindSpy struct {
+	capturedKind ports.WorkloadKind
+	capturedMu   sync.Mutex
+}
+
+func newMetricsKindSpy() *metricsKindSpy {
+	return &metricsKindSpy{}
+}
+
+func (s *metricsKindSpy) GetMetrics(ctx context.Context, request ports.InstanceObservationGetRequest) (ports.InstanceMetricsRecord, error) {
+	s.capturedMu.Lock()
+	s.capturedKind = request.Kind
+	s.capturedMu.Unlock()
+	cpu := 18.5
+	memUsed := 1536.0
+	memTotal := 4096.0
+	rx := int64(1048576)
+	tx := int64(524288)
+	return ports.InstanceMetricsRecord{
+		InstanceID:        request.InstanceID,
+		Timestamp:         time.Now().UTC(),
+		CPUUtilizationPct: &cpu,
+		MemoryUsedMB:      &memUsed,
+		MemoryTotalMB:     &memTotal,
+		NetworkRXBytes:    &rx,
+		NetworkTXBytes:    &tx,
+		DevProfile: ports.DevProfileInfo{
+			Mode:         "local",
+			Provider:     "metrics-kind-spy",
+			RealProvider: false,
+			Reason:       "spy adapter captures Kind for handler pass-through verification",
+		},
+	}, nil
+}
+
+func (s *metricsKindSpy) ListLogs(ctx context.Context, request ports.InstanceObservationListRequest) (ports.InstanceLogListResult, error) {
+	return ports.InstanceLogListResult{}, nil
+}
+
+func (s *metricsKindSpy) ListEvents(ctx context.Context, request ports.InstanceObservationListRequest) (ports.InstanceEventListResult, error) {
+	return ports.InstanceEventListResult{}, nil
+}
+
+func (s *metricsKindSpy) ListSecurityEvents(ctx context.Context, request ports.InstanceObservationListRequest) (ports.InstanceSecurityEventListResult, error) {
+	return ports.InstanceSecurityEventListResult{}, nil
+}
+
+func (s *metricsKindSpy) CreateExecSession(ctx context.Context, request ports.InstanceExecSessionCreateRequest) (ports.InstanceExecSessionRecord, error) {
+	return ports.InstanceExecSessionRecord{}, nil
+}
+
+func (s *metricsKindSpy) CreateConsoleSession(ctx context.Context, request ports.InstanceConsoleSessionCreateRequest) (ports.InstanceConsoleSessionRecord, error) {
+	return ports.InstanceConsoleSessionRecord{}, nil
+}
+
+func (s *metricsKindSpy) capturedKindValue() ports.WorkloadKind {
+	s.capturedMu.Lock()
+	defer s.capturedMu.Unlock()
+	return s.capturedKind
+}
+
+// TestDemoInstanceGetMetricsHandlerPassesRecordKind 验证 getMetrics handler 把
+// record.Kind 透传到 InstanceObservationGetRequest.Kind，覆盖 container/gpu_container/vm
+// 三种路径。修复前 handler 未传 Kind，导致 adapter 的 GPU 分支恒不触发。
+func TestDemoInstanceGetMetricsHandlerPassesRecordKind(t *testing.T) {
+	for _, tc := range []struct {
+		kind     string
+		expected ports.WorkloadKind
+	}{
+		{kind: "container", expected: ports.WorkloadKindContainer},
+		{kind: "gpu_container", expected: ports.WorkloadKindGPUContainer},
+		{kind: "vm", expected: ports.WorkloadKindVM},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			spy := newMetricsKindSpy()
+			h := server.New()
+			h.Use(func(ctx context.Context, c *app.RequestContext) {
+				c.Set("tenant_id", "tenant-a")
+				c.Set("user_id", "user-a")
+				c.Next(ctx)
+			})
+			registerDemoInstancesWithObservability(h.Group("/api/v1"), spy, false, nil, nil)
+
+			createBody := fmt.Sprintf(`{"kind":%q,"name":"demo-metrics-%s","idempotency_key":"create-%s"}`, tc.kind, tc.kind, tc.kind)
+			createResp := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/instances",
+				&ut.Body{Body: bytes.NewBufferString(createBody), Len: len(createBody)},
+				ut.Header{Key: "Content-Type", Value: "application/json"},
+			).Result()
+			if createResp.StatusCode() != http.StatusCreated {
+				t.Fatalf("create %s status = %d, want 201; body=%s", tc.kind, createResp.StatusCode(), createResp.Body())
+			}
+			instanceID := extractInstanceID(string(createResp.Body()))
+			if instanceID == "" {
+				t.Fatalf("could not extract instance id from %s", createResp.Body())
+			}
+
+			metricsResp := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/instances/"+instanceID+"/metrics", nil).Result()
+			if metricsResp.StatusCode() != http.StatusOK {
+				t.Fatalf("getMetrics %s status = %d, want 200; body=%s", tc.kind, metricsResp.StatusCode(), metricsResp.Body())
+			}
+
+			got := spy.capturedKindValue()
+			if got != tc.expected {
+				t.Fatalf("captured Kind = %q, want %q (record.Kind should be passed through)", got, tc.expected)
+			}
+		})
 	}
 }

@@ -391,8 +391,12 @@ func (r *HarborImageRegistry) ListImages(ctx context.Context, request ports.Regi
 				if request.ScanStatus != "" && request.ScanStatus != artifact.ScanStatus.Status {
 					continue
 				}
+				purpose := registryImagePurpose(repository.Name, tag)
+				if requestedPurpose := strings.TrimSpace(request.Purpose); requestedPurpose != "" && requestedPurpose != purpose {
+					continue
+				}
 				image := registryHost + "/" + project + "/" + repository.Name + ":" + tag
-				items = append(items, ports.RegistryImage{Project: project, Repository: repository.Name, Tag: tag, Image: image, Registry: registryHost, Digest: artifact.Digest, MediaType: artifact.MediaType, SizeBytes: artifact.SizeBytes, PullCommand: "docker pull " + image, PushedAt: artifact.PushedAt, ScanStatus: artifact.ScanStatus, DevProfile: harborDevProfile()})
+				items = append(items, ports.RegistryImage{Project: project, Repository: repository.Name, Tag: tag, Purpose: purpose, Image: image, Registry: registryHost, Digest: artifact.Digest, MediaType: artifact.MediaType, SizeBytes: artifact.SizeBytes, PullCommand: "docker pull " + image, PushedAt: artifact.PushedAt, ScanStatus: artifact.ScanStatus, DevProfile: harborDevProfile()})
 			}
 		}
 	}
@@ -594,6 +598,20 @@ func parseRegistryImageReference(image string) (project, repository, tag string,
 		return "", "", "", fmt.Errorf("%w: image must include project and repository", ports.ErrInvalid)
 	}
 	return project, repository, tag, nil
+}
+
+func registryImagePurpose(repository, tag string) string {
+	value := strings.ToLower(strings.TrimSpace(repository) + ":" + strings.TrimSpace(tag))
+	switch {
+	case strings.HasPrefix(value, "gpu") || strings.Contains(value, "/gpu"):
+		return "gpu"
+	case strings.HasPrefix(value, "sandbox") || strings.Contains(value, "/sandbox"):
+		return "sandbox"
+	case strings.HasPrefix(value, "system") || strings.Contains(value, "/system"):
+		return "system"
+	default:
+		return "container"
+	}
 }
 
 func isRegistryHost(value string) bool {

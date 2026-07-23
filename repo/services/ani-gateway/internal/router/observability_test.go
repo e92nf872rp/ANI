@@ -8,7 +8,7 @@ import (
 )
 
 func TestObservabilityAPIQueryResponseMarksLocalProfile(t *testing.T) {
-	api := newObservabilityAPI()
+	api := newObservabilityAPI(nil)
 
 	result, err := api.service.Query(context.Background(), ports.ObservabilityQueryRequest{
 		TenantID: "tenant-a",
@@ -25,7 +25,7 @@ func TestObservabilityAPIQueryResponseMarksLocalProfile(t *testing.T) {
 }
 
 func TestObservabilityAPIAlertRuleCRUDResponse(t *testing.T) {
-	api := newObservabilityAPI()
+	api := newObservabilityAPI(nil)
 
 	rule, err := api.service.CreateAlertRule(context.Background(), ports.ObservabilityAlertRuleCreateRequest{
 		TenantID:       "tenant-a",

@@ -1,8 +1,7 @@
 // Package router registers all ANI Gateway API routes.
 // Core routes follow /api/v1/{resource}; Services transitional routes follow
-// /api/v1/svc/{resource}. Resource handlers are transitional placeholders;
-// their method/path surface is checked against Services OpenAPI, while
-// response semantics remain non-production until the owning team implements it.
+// /api/v1/svc/{resource}. Stubs return 501 until the backing service is
+// implemented by the owning team.
 package router
 
 import (
@@ -25,6 +24,7 @@ type RegisterOptions struct {
 	InstanceObservability                 ports.InstanceObservability
 	InstanceObservabilityUsesInstanceName bool
 	KubernetesRESTClient                  *runtimeadapter.KubernetesRESTClient
+	ObservabilityService                  ports.ObservabilityService
 }
 
 // Register wires all route groups onto the Hertz server.
@@ -40,10 +40,16 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerBranding(v1)
 	registerTasks(v1)
 	registerAuth(v1)
-	registerObservability(v1)
 	registerMetering(v1)
 	registerHarbor(v1, options.ImageRegistry)
-	registerDemoInstancesWithObservability(v1, options.InstanceObservability, options.InstanceObservabilityUsesInstanceName, options.GPUInventory, options.KubernetesRESTClient)
+	// demo instances 先注册，拿到其 instance service 作为 InstanceLookup，
+	// 注入到 ObservabilityService（时序图 PromQL 代理需要解析实例记录的
+	// namespace/pod 映射）。注入后再注册 observability 路由。
+	instanceLookup := registerDemoInstancesWithObservability(v1, options.InstanceObservability, options.InstanceObservabilityUsesInstanceName, options.GPUInventory, options.KubernetesRESTClient)
+	if promSvc, ok := options.ObservabilityService.(*runtimeadapter.PrometheusObservabilityService); ok {
+		promSvc.SetInstanceLookup(instanceLookup)
+	}
+	registerObservability(v1, options.ObservabilityService)
 	registerGPUInventoryResourcesWithStore(v1, options.GPUInventory, options.GPUInstanceStore, options.KubernetesRESTClient)
 	registerGPUSchedulingResourcesWithStore(v1, options.GPUSchedulingQueueStore)
 	registerNetworkResourcesWithService(v1, options.NetworkService)

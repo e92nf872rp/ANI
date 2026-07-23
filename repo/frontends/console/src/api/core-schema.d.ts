@@ -3437,6 +3437,11 @@ export interface components {
             tag: string;
             /** @description 完整镜像引用，例如 registry.local/project/repository:tag */
             image: string;
+            /**
+             * @description 镜像用途；用于 Console 创建向导筛选
+             * @enum {string}
+             */
+            purpose?: "container" | "gpu" | "sandbox" | "system";
             registry?: string;
             digest: string;
             media_type: string;
@@ -3474,7 +3479,7 @@ export interface components {
         };
         RegistryImageReference: {
             /** @enum {string} */
-            kind: "container_instance" | "gpu_container_instance";
+            kind: "vm_instance" | "container_instance" | "gpu_container_instance" | "sandbox_instance";
             id: string;
             name: string;
             route: string;
@@ -4530,6 +4535,10 @@ export interface operations {
              *     - InsufficientGPU: GPU 资源不足，当前无可用算力满足本次创建请求
              *     - GPUNodeIncompatible: 无兼容 GPU 节点，请调整型号偏好或调度队列
              *     - QueueNotFound: 所选调度队列不存在或已删除
+             *     - ImageNotFound: 镜像不存在或不属于当前租户镜像仓库
+             *     - ImageScanning: 镜像仍在安全扫描中，暂不能创建实例
+             *     - ImageVulnerabilityBlocked: 镜像存在高危或严重漏洞，策略禁止创建实例
+             *     - ImagePurposeMismatch: 镜像用途与实例 kind 不匹配
              */
             422: components["responses"]["PreconditionFailed"];
         };
@@ -6285,6 +6294,7 @@ export interface operations {
                 project?: string;
                 repository?: string;
                 tag?: string;
+                purpose?: "container" | "gpu" | "sandbox" | "system";
                 scan_status?: "not_scanned" | "pending" | "running" | "complete" | "failed";
                 limit?: number;
                 cursor?: string;

@@ -1,0 +1,77 @@
+{
+    "id": "sprint15-instance-observability-dcgm-live-gate",
+    "profile": "SPRINT15-INSTANCE-OBSERVABILITY-DCGM-E2E",
+    "status": "passed_with_fix",
+    "date": "2026-07-20",
+    "prometheus_endpoint": "http://10.10.1.66:31990/",
+    "dcgm_exporter_target": "ani-dcgm-exporter.ani-system:9400",
+    "prometheus_health_status": 200,
+    "prometheus_health_body": "Prometheus Server is Healthy.",
+    "dcgm_target_health": "up",
+    "dcgm_target_scrape_url": "http://ani-dcgm-exporter.ani-system:9400/metrics",
+    "gpu_model": "NVIDIA GeForce RTX 4090",
+    "gpu_count": 2,
+    "gpu_devices": ["nvidia0", "nvidia1"],
+    "dcgm_metrics_present": [
+        "DCGM_FI_DEV_GPU_UTIL",
+        "DCGM_FI_DEV_FB_USED",
+        "DCGM_FI_DEV_FB_FREE"
+    ],
+    "dcgm_metrics_absent": [
+        "DCGM_FI_DEV_FB_TOTAL"
+    ],
+    "dcgm_total_metric_count": 17,
+    "dcgm_fb_metric_strategy": "FB_TOTAL = FB_FREE + FB_USED (derived, not exported)",
+    "dcgm_unit": "MiB",
+    "live_query_evidence": {
+        "DCGM_FI_DEV_GPU_UTIL": {
+            "status": "success",
+            "result_count": 2,
+            "sample_value": "0",
+            "labels_present": ["Hostname", "UUID", "device", "gpu", "instance", "job", "modelName", "namespace", "pod", "pci_bus_id"]
+        },
+        "DCGM_FI_DEV_FB_USED": {
+            "status": "success",
+            "result_count": 2,
+            "sample_value": "0",
+            "unit": "MiB"
+        },
+        "DCGM_FI_DEV_FB_FREE": {
+            "status": "success",
+            "result_count": 2,
+            "sample_value": "48507",
+            "unit": "MiB"
+        },
+        "DCGM_FI_DEV_FB_TOTAL": {
+            "status": "success",
+            "result_count": 0,
+            "note": "metric not exported by real DCGM exporter"
+        },
+        "sum(DCGM_FI_DEV_FB_FREE)+sum(DCGM_FI_DEV_FB_USED)": {
+            "status": "success",
+            "result_count": 1,
+            "sample_value": "97014",
+            "unit": "MiB",
+            "note": "derived total for 2x RTX 4090"
+        }
+    },
+    "defect_found": {
+        "description": "adapter PromQL queried DCGM_FI_DEV_FB_TOTAL which real DCGM exporter does not expose, causing GPUMemoryTotalMB to be nil",
+        "root_cause": "NVIDIA dcgm-exporter exposes FB_FREE + FB_USED, not FB_TOTAL; FB_TOTAL must be derived",
+        "secondary_issue": "adapter divided by 1024/1024 assuming bytes, but DCGM unit is MiB",
+        "fix": "prometheus_instance_observability.go: FB_TOTAL query replaced with FB_FREE+FB_USED; removed /1024/1024 division",
+        "spec_updated": ["D-2", "§2.3.1 data flow", "§5.10 PromQL template"],
+        "plan_updated": "plan.md §3.1",
+        "regression_tests": [
+            "TestPrometheusInstanceObservabilityGetMetricsGPUContainerAggregatesDCGM",
+            "TestPrometheusInstanceObservabilityGetMetricsGPUContainerE2EIntegration"
+        ]
+    },
+    "verification": {
+        "make_test": "PASS",
+        "make_validate_architecture": "PASS (component import guard passed)",
+        "git_diff_check": "PASS",
+        "go_vet": "PASS",
+        "gofmt": "PASS"
+    }
+}

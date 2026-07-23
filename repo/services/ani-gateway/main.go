@@ -115,6 +115,16 @@ func main() {
 			logger.Error("failed to close gateway shared store", "err", closeErr)
 		}
 	}()
+	observabilityService, err := newGatewayObservabilityService(gatewayObservabilityRuntimeConfigFromEnv(nil))
+	if err != nil {
+		logger.Error("failed to configure observability provider runtime", "err", err)
+		os.Exit(1)
+	}
+	if observabilityService != nil {
+		logger.Info("observability provider runtime configured",
+			"provider", strings.TrimSpace(os.Getenv("INSTANCE_OBSERVABILITY_PROVIDER")),
+		)
+	}
 	middleware.StartAuditWorker()
 	middleware.Register(h, gatewayStore)
 	router.RegisterWithOptions(h, router.RegisterOptions{
@@ -131,6 +141,7 @@ func main() {
 		InstanceObservability:                 instanceObservability,
 		InstanceObservabilityUsesInstanceName: instanceObservabilityUsesInstanceName,
 		KubernetesRESTClient:                  kubernetesRESTClient,
+		ObservabilityService:                  observabilityService,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

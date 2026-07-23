@@ -189,3 +189,38 @@ func TestKubernetesDryRunRendererRendersBatchJob(t *testing.T) {
 		}
 	}
 }
+
+func TestKubernetesDryRunRendererContainerResourcesSetsLimitsAndRequests(t *testing.T) {
+	renderer := NewKubernetesDryRunRenderer(NewPlanningRuntime())
+
+	manifests, err := renderer.Render(context.Background(), ports.WorkloadSpec{
+		TenantID: "tenant-a",
+		Name:     "app-01",
+		Kind:     ports.WorkloadKindContainer,
+		Image:    "harbor/app:1",
+		Resources: ports.WorkloadResourceRequest{
+			CPU:    "500m",
+			Memory: "512Mi",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	content := manifests[0].Content
+	// CPU/Memory 应同时出现在 limits 和 requests 中，这样 Prometheus
+	// container_spec_memory_limit_bytes 才能采集到 memory_total。
+	for _, want := range []string{
+		`"limits": {`,
+		`"cpu": "500m"`,
+		`"memory": "512Mi"`,
+		`"requests": {`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("rendered manifest missing %q:\n%s", want, content)
+		}
+	}
+	// limits 里应有两个 key（cpu + memory），不含空 limits。
+	if strings.Contains(content, `"limits": {}`) {
+		t.Fatalf("rendered manifest has empty limits:\n%s", content)
+	}
+}
