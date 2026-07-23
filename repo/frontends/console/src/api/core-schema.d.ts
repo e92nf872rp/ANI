@@ -707,26 +707,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/volumes/{volume_id}/resize": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 扩容块存储卷
-         * @description 扩容块存储卷；只允许增加容量，不支持缩容；POST 必须携带 idempotency_key。
-         */
-        post: operations["resizeStorageVolume"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/volumes/{volume_id}/snapshots": {
         parameters: {
             query?: never;
@@ -813,23 +793,6 @@ export interface paths {
         put?: never;
         /** 创建对象存储桶 */
         post: operations["createStorageBucket"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/buckets/{bucket_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 查询对象存储桶 */
-        get: operations["getStorageBucket"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3137,15 +3100,6 @@ export interface components {
         };
         /** @enum {string} */
         StorageResourceState: "pending" | "available" | "failed" | "deleting" | "deleted";
-        StorageVolumeAttachment: {
-            /** @enum {string} */
-            resource_type: "instance" | "container" | "gpu_container";
-            resource_id: string;
-            resource_name?: string | null;
-            mount_path?: string | null;
-            /** Format: date-time */
-            attached_at: string;
-        };
         StorageVolume: {
             id: string;
             tenant_id: string;
@@ -3155,21 +3109,11 @@ export interface components {
             storage_class: string;
             state: components["schemas"]["StorageResourceState"];
             reason?: string | null;
-            attachments?: components["schemas"]["StorageVolumeAttachment"][];
             dev_profile?: components["schemas"]["CoreDevProfileInfo"];
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
-        };
-        ResizeStorageVolumeRequest: {
-            /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
-            idempotency_key: string;
-            /**
-             * Format: int64
-             * @description 目标容量；只允许大于当前 size_gib，不支持缩容。
-             */
-            size_gib: number;
         };
         StorageFilesystem: {
             id: string;
@@ -3182,9 +3126,6 @@ export interface components {
             endpoint?: string | null;
             state: components["schemas"]["StorageResourceState"];
             reason?: string | null;
-            mount_target_count?: number | null;
-            /** @description 面向租户的只读挂载命令示例；不得包含凭据明文。 */
-            mount_command?: string | null;
             dev_profile?: components["schemas"]["CoreDevProfileInfo"];
             /** Format: date-time */
             created_at: string;
@@ -3194,7 +3135,6 @@ export interface components {
         StorageObject: {
             id: string;
             tenant_id: string;
-            bucket_id?: string | null;
             bucket: string;
             key: string;
             /** Format: int64 */
@@ -3220,8 +3160,6 @@ export interface components {
         };
         StorageObjectListResponse: {
             items: components["schemas"]["StorageObject"][];
-            /** @description 当请求包含 delimiter 时返回对象浏览器前缀列表。 */
-            prefixes?: string[];
             total: number;
             next_cursor?: string | null;
         };
@@ -3249,7 +3187,6 @@ export interface components {
         CreateStorageObjectRequest: {
             /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
             idempotency_key: string;
-            bucket_id?: string | null;
             bucket: string;
             key: string;
             /**
@@ -3271,21 +3208,11 @@ export interface components {
             metric: "cosine" | "l2" | "ip";
             state: components["schemas"]["VectorStoreState"];
             reason?: string | null;
-            vector_count?: number | null;
-            /** @enum {string|null} */
-            index_status?: "building" | "ready" | "degraded" | "failed" | null;
-            linked_knowledge_bases?: components["schemas"]["VectorStoreKnowledgeBaseLink"][];
             dev_profile?: components["schemas"]["CoreDevProfileInfo"];
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
-        };
-        VectorStoreKnowledgeBaseLink: {
-            knowledge_base_id: string;
-            name: string;
-            /** Format: date-time */
-            linked_at?: string | null;
         };
         VectorStoreListResponse: {
             items: components["schemas"]["VectorStore"][];
@@ -5774,40 +5701,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-        };
-    };
-    resizeStorageVolume: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                volume_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ResizeStorageVolumeRequest"];
-            };
-        };
-        responses: {
-            /** @description 扩容任务已提交 */
-            202: {
-                headers: {
-                    /** @description 任务轮询 URL */
-                    Location?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AsyncTask"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            422: components["responses"]["PreconditionFailed"];
         };
     };
     listVolumeSnapshots: {
@@ -6053,42 +5946,11 @@ export interface operations {
             409: components["responses"]["Conflict"];
         };
     };
-    getStorageBucket: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                bucket_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 对象存储桶 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StorageBucketRecord"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
     listStorageObjects: {
         parameters: {
             query?: {
                 limit?: number;
                 cursor?: string;
-                /** @description 按桶 ID 过滤，用于对象浏览器。 */
-                bucket_id?: string;
-                /** @description 按对象 key 前缀过滤。 */
-                prefix?: string;
-                /** @description 对象浏览器分隔符；常用值为 /。 */
-                delimiter?: string;
             };
             header?: never;
             path?: never;

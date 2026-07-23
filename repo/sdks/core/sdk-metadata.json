@@ -77,12 +77,6 @@
       "scope": "scope:objects:create"
     },
     {
-      "operationId": "getStorageBucket",
-      "method": "GET",
-      "path": "/buckets/{bucket_id}",
-      "scope": "scope:objects:read"
-    },
-    {
       "operationId": "listEncryptionKeys",
       "method": "GET",
       "path": "/encryption/keys",
@@ -875,12 +869,6 @@
       "scope": "scope:volumes:read"
     },
     {
-      "operationId": "resizeStorageVolume",
-      "method": "POST",
-      "path": "/volumes/{volume_id}/resize",
-      "scope": "scope:volumes:update"
-    },
-    {
       "operationId": "listVolumeSnapshots",
       "method": "GET",
       "path": "/volumes/{volume_id}/snapshots",
@@ -1046,7 +1034,6 @@
     "RegistryRepositoryListResponse",
     "RegistryScanResult",
     "ReportTokenUsageRequest",
-    "ResizeStorageVolumeRequest",
     "RevokeStatusResponse",
     "SandboxConfig",
     "SandboxInstanceStatus",
@@ -1071,7 +1058,6 @@
     "StorageObjectUploadResponse",
     "StorageResourceState",
     "StorageVolume",
-    "StorageVolumeAttachment",
     "StorageVolumeListResponse",
     "TokenPairResponse",
     "TokenUsageReport",
@@ -1081,7 +1067,6 @@
     "VectorStore",
     "VectorStoreDocumentInsertRequest",
     "VectorStoreDocumentInsertResponse",
-    "VectorStoreKnowledgeBaseLink",
     "VectorStoreListResponse",
     "VectorStoreSearchHit",
     "VectorStoreSearchRequest",
@@ -1125,7 +1110,6 @@
     "createVectorStore",
     "insertVectorStoreDocuments",
     "createStorageVolume",
-    "resizeStorageVolume",
     "createVolumeSnapshot"
   ],
   "cursorPaginationOperations": [

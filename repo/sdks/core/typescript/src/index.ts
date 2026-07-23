@@ -16,7 +16,6 @@ export const operations = [
   "getBranding",
   "listStorageBuckets",
   "createStorageBucket",
-  "getStorageBucket",
   "listEncryptionKeys",
   "createEncryptionKey",
   "deleteEncryptionKey",
@@ -149,7 +148,6 @@ export const operations = [
   "createStorageVolume",
   "deleteStorageVolume",
   "getStorageVolume",
-  "resizeStorageVolume",
   "listVolumeSnapshots",
   "createVolumeSnapshot"
 ] as const;
@@ -166,7 +164,6 @@ export const paths = [
   "GET /branding",
   "GET /buckets",
   "POST /buckets",
-  "GET /buckets/{bucket_id}",
   "GET /encryption/keys",
   "POST /encryption/keys",
   "DELETE /encryption/keys/{key_id}",
@@ -299,7 +296,6 @@ export const paths = [
   "POST /volumes",
   "DELETE /volumes/{volume_id}",
   "GET /volumes/{volume_id}",
-  "POST /volumes/{volume_id}/resize",
   "GET /volumes/{volume_id}/snapshots",
   "POST /volumes/{volume_id}/snapshots"
 ] as const;
@@ -456,7 +452,6 @@ export const schemas = [
   "RegistryRepositoryListResponse",
   "RegistryScanResult",
   "ReportTokenUsageRequest",
-  "ResizeStorageVolumeRequest",
   "RevokeStatusResponse",
   "SandboxConfig",
   "SandboxInstanceStatus",
@@ -481,7 +476,6 @@ export const schemas = [
   "StorageObjectUploadResponse",
   "StorageResourceState",
   "StorageVolume",
-  "StorageVolumeAttachment",
   "StorageVolumeListResponse",
   "TokenPairResponse",
   "TokenUsageReport",
@@ -491,7 +485,6 @@ export const schemas = [
   "VectorStore",
   "VectorStoreDocumentInsertRequest",
   "VectorStoreDocumentInsertResponse",
-  "VectorStoreKnowledgeBaseLink",
   "VectorStoreListResponse",
   "VectorStoreSearchHit",
   "VectorStoreSearchRequest",
@@ -535,7 +528,6 @@ export const idempotencyOperations = [
   "createVectorStore",
   "insertVectorStoreDocuments",
   "createStorageVolume",
-  "resizeStorageVolume",
   "createVolumeSnapshot"
 ] as const;
 export const cursorPaginationOperations = [

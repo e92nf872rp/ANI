@@ -38,7 +38,6 @@ public final class ApiClient {
         "getBranding",
         "listStorageBuckets",
         "createStorageBucket",
-        "getStorageBucket",
         "listEncryptionKeys",
         "createEncryptionKey",
         "deleteEncryptionKey",
@@ -171,7 +170,6 @@ public final class ApiClient {
         "createStorageVolume",
         "deleteStorageVolume",
         "getStorageVolume",
-        "resizeStorageVolume",
         "listVolumeSnapshots",
         "createVolumeSnapshot"
     ));
@@ -188,7 +186,6 @@ public final class ApiClient {
         "GET /branding",
         "GET /buckets",
         "POST /buckets",
-        "GET /buckets/{bucket_id}",
         "GET /encryption/keys",
         "POST /encryption/keys",
         "DELETE /encryption/keys/{key_id}",
@@ -321,7 +318,6 @@ public final class ApiClient {
         "POST /volumes",
         "DELETE /volumes/{volume_id}",
         "GET /volumes/{volume_id}",
-        "POST /volumes/{volume_id}/resize",
         "GET /volumes/{volume_id}/snapshots",
         "POST /volumes/{volume_id}/snapshots"
     ));
@@ -478,7 +474,6 @@ public final class ApiClient {
         "RegistryRepositoryListResponse",
         "RegistryScanResult",
         "ReportTokenUsageRequest",
-        "ResizeStorageVolumeRequest",
         "RevokeStatusResponse",
         "SandboxConfig",
         "SandboxInstanceStatus",
@@ -503,7 +498,6 @@ public final class ApiClient {
         "StorageObjectUploadResponse",
         "StorageResourceState",
         "StorageVolume",
-        "StorageVolumeAttachment",
         "StorageVolumeListResponse",
         "TokenPairResponse",
         "TokenUsageReport",
@@ -513,7 +507,6 @@ public final class ApiClient {
         "VectorStore",
         "VectorStoreDocumentInsertRequest",
         "VectorStoreDocumentInsertResponse",
-        "VectorStoreKnowledgeBaseLink",
         "VectorStoreListResponse",
         "VectorStoreSearchHit",
         "VectorStoreSearchRequest",
@@ -557,7 +550,6 @@ public final class ApiClient {
         "createVectorStore",
         "insertVectorStoreDocuments",
         "createStorageVolume",
-        "resizeStorageVolume",
         "createVolumeSnapshot"
     ));
     public static final List<String> CURSOR_PAGINATION_OPERATIONS = Collections.unmodifiableList(Arrays.asList(

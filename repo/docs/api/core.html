@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>148</dd></div>
-          <div><dt>Schemas</dt><dd>196</dd></div>
+          <div><dt>Operations</dt><dd>146</dd></div>
+          <div><dt>Schemas</dt><dd>193</dd></div>
         </dl>
       </section>
 
@@ -254,14 +254,6 @@
           <td>创建对象存储桶</td>
           <td><code>scope:objects:create</code></td>
           <td>201, 400, 401, 403, 409</td>
-        </tr>
-        <tr>
-          <td><span class="method method-get">GET</span></td>
-          <td><code>/buckets/{bucket_id}</code></td>
-          <td><code>getStorageBucket</code></td>
-          <td>查询对象存储桶</td>
-          <td><code>scope:objects:read</code></td>
-          <td>200, 401, 403, 404</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1309,7 +1301,7 @@
           <td><code>deleteStorageVolume</code></td>
           <td>删除块存储卷</td>
           <td><code>scope:volumes:delete</code></td>
-          <td>200, 401, 403, 404, 409</td>
+          <td>200, 401, 403, 404</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1318,14 +1310,6 @@
           <td>查询块存储卷</td>
           <td><code>scope:volumes:read</code></td>
           <td>200, 401, 403, 404</td>
-        </tr>
-        <tr>
-          <td><span class="method method-post">POST</span></td>
-          <td><code>/volumes/{volume_id}/resize</code></td>
-          <td><code>resizeStorageVolume</code></td>
-          <td>扩容块存储卷</td>
-          <td><code>scope:volumes:update</code></td>
-          <td>202, 400, 401, 403, 404, 422</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1502,7 +1486,6 @@
         <li><code>RegistryRepositoryListResponse</code></li>
         <li><code>RegistryScanResult</code></li>
         <li><code>ReportTokenUsageRequest</code></li>
-        <li><code>ResizeStorageVolumeRequest</code></li>
         <li><code>RevokeStatusResponse</code></li>
         <li><code>SandboxConfig</code></li>
         <li><code>SandboxInstanceStatus</code></li>
@@ -1527,7 +1510,6 @@
         <li><code>StorageObjectUploadResponse</code></li>
         <li><code>StorageResourceState</code></li>
         <li><code>StorageVolume</code></li>
-        <li><code>StorageVolumeAttachment</code></li>
         <li><code>StorageVolumeListResponse</code></li>
         <li><code>TokenPairResponse</code></li>
         <li><code>TokenUsageReport</code></li>
@@ -1537,7 +1519,6 @@
         <li><code>VectorStore</code></li>
         <li><code>VectorStoreDocumentInsertRequest</code></li>
         <li><code>VectorStoreDocumentInsertResponse</code></li>
-        <li><code>VectorStoreKnowledgeBaseLink</code></li>
         <li><code>VectorStoreListResponse</code></li>
         <li><code>VectorStoreSearchHit</code></li>
         <li><code>VectorStoreSearchRequest</code></li>
