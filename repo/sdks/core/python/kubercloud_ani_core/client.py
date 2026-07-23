@@ -20,6 +20,7 @@ OPERATIONS = [
     "getBranding",
     "listStorageBuckets",
     "createStorageBucket",
+    "getStorageBucket",
     "listEncryptionKeys",
     "createEncryptionKey",
     "deleteEncryptionKey",
@@ -152,6 +153,7 @@ OPERATIONS = [
     "createStorageVolume",
     "deleteStorageVolume",
     "getStorageVolume",
+    "resizeStorageVolume",
     "listVolumeSnapshots",
     "createVolumeSnapshot"
 ]
@@ -168,6 +170,7 @@ PATHS = [
     "GET /branding",
     "GET /buckets",
     "POST /buckets",
+    "GET /buckets/{bucket_id}",
     "GET /encryption/keys",
     "POST /encryption/keys",
     "DELETE /encryption/keys/{key_id}",
@@ -300,6 +303,7 @@ PATHS = [
     "POST /volumes",
     "DELETE /volumes/{volume_id}",
     "GET /volumes/{volume_id}",
+    "POST /volumes/{volume_id}/resize",
     "GET /volumes/{volume_id}/snapshots",
     "POST /volumes/{volume_id}/snapshots"
 ]
@@ -456,6 +460,7 @@ SCHEMAS = [
     "RegistryRepositoryListResponse",
     "RegistryScanResult",
     "ReportTokenUsageRequest",
+    "ResizeStorageVolumeRequest",
     "RevokeStatusResponse",
     "SandboxConfig",
     "SandboxInstanceStatus",
@@ -480,6 +485,7 @@ SCHEMAS = [
     "StorageObjectUploadResponse",
     "StorageResourceState",
     "StorageVolume",
+    "StorageVolumeAttachment",
     "StorageVolumeListResponse",
     "TokenPairResponse",
     "TokenUsageReport",
@@ -489,6 +495,7 @@ SCHEMAS = [
     "VectorStore",
     "VectorStoreDocumentInsertRequest",
     "VectorStoreDocumentInsertResponse",
+    "VectorStoreKnowledgeBaseLink",
     "VectorStoreListResponse",
     "VectorStoreSearchHit",
     "VectorStoreSearchRequest",
@@ -532,6 +539,7 @@ IDEMPOTENCY_OPERATIONS = [
     "createVectorStore",
     "insertVectorStoreDocuments",
     "createStorageVolume",
+    "resizeStorageVolume",
     "createVolumeSnapshot"
 ]
 CURSOR_PAGINATION_OPERATIONS = [

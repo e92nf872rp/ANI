@@ -24,6 +24,7 @@ EXPECTED_PATHS = {
 EXPECTED_SCHEMAS = {
     "VectorStoreState",
     "VectorStore",
+    "VectorStoreKnowledgeBaseLink",
     "VectorStoreListResponse",
     "CreateVectorStoreRequest",
     "VectorStoreSearchRequest",
@@ -32,7 +33,8 @@ EXPECTED_SCHEMAS = {
 }
 
 EXPECTED_FIELDS = {
-    "VectorStore": {"id", "tenant_id", "name", "dimension", "metric", "state", "reason", "created_at", "updated_at"},
+    "VectorStore": {"id", "tenant_id", "name", "dimension", "metric", "state", "reason", "vector_count", "index_status", "linked_knowledge_bases", "created_at", "updated_at"},
+    "VectorStoreKnowledgeBaseLink": {"knowledge_base_id", "name", "linked_at"},
     "VectorStoreSearchHit": {"id", "score", "metadata"},
 }
 

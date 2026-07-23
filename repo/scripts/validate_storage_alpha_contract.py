@@ -14,7 +14,10 @@ EXPECTED_PATHS = {
     },
     "/volumes/{volume_id}": {
         "get": ("getStorageVolume", "scope:volumes:read", {"200", "401", "403", "404"}),
-        "delete": ("deleteStorageVolume", "scope:volumes:delete", {"200", "401", "403", "404"}),
+        "delete": ("deleteStorageVolume", "scope:volumes:delete", {"200", "401", "403", "404", "409"}),
+    },
+    "/volumes/{volume_id}/resize": {
+        "post": ("resizeStorageVolume", "scope:volumes:update", {"202", "400", "401", "403", "404", "422"}),
     },
     "/volumes/{volume_id}/snapshots": {
         "get": ("listVolumeSnapshots", "scope:volumes:read", {"200", "401", "403", "404"}),
@@ -31,6 +34,13 @@ EXPECTED_PATHS = {
     "/filesystems/{filesystem_id}/mount-targets": {
         "get": ("listFilesystemMountTargets", "scope:filesystems:read", {"200", "401", "403", "404"}),
     },
+    "/buckets": {
+        "get": ("listStorageBuckets", "scope:objects:read", {"200", "401", "403"}),
+        "post": ("createStorageBucket", "scope:objects:create", {"201", "400", "401", "403", "409"}),
+    },
+    "/buckets/{bucket_id}": {
+        "get": ("getStorageBucket", "scope:objects:read", {"200", "401", "403", "404"}),
+    },
     "/objects": {
         "get": ("listStorageObjects", "scope:objects:read", {"200", "401", "403"}),
         "post": ("createStorageObject", "scope:objects:create", {"201", "400", "401", "403"}),
@@ -44,12 +54,14 @@ EXPECTED_PATHS = {
 EXPECTED_SCHEMAS = {
     "StorageResourceState",
     "StorageVolume",
+    "StorageVolumeAttachment",
     "StorageFilesystem",
     "StorageObject",
     "StorageVolumeListResponse",
     "StorageFilesystemListResponse",
     "StorageObjectListResponse",
     "CreateStorageVolumeRequest",
+    "ResizeStorageVolumeRequest",
     "CreateStorageFilesystemRequest",
     "CreateStorageObjectRequest",
     "VolumeSnapshotRecord",
@@ -57,16 +69,27 @@ EXPECTED_SCHEMAS = {
     "CreateVolumeSnapshotRequest",
     "FilesystemMountTarget",
     "FilesystemMountTargetListResponse",
+    "StorageBucketRecord",
+    "StorageBucketListResponse",
+    "CreateStorageBucketRequest",
+    "StorageObjectUploadRequest",
+    "StorageObjectUploadResponse",
+    "StorageObjectDownloadInfo",
 }
 
 EXPECTED_FIELDS = {
-    "StorageVolume": {"id", "tenant_id", "name", "size_gib", "storage_class", "state", "reason", "created_at", "updated_at"},
-    "StorageFilesystem": {"id", "tenant_id", "name", "protocol", "size_gib", "endpoint", "state", "reason", "created_at", "updated_at"},
-    "StorageObject": {"id", "tenant_id", "bucket", "key", "size_bytes", "content_type", "state", "reason", "created_at", "updated_at"},
+    "StorageVolume": {"id", "tenant_id", "name", "size_gib", "storage_class", "state", "reason", "attachments", "created_at", "updated_at"},
+    "StorageVolumeAttachment": {"resource_type", "resource_id", "resource_name", "mount_path", "attached_at"},
+    "ResizeStorageVolumeRequest": {"idempotency_key", "size_gib"},
+    "StorageFilesystem": {"id", "tenant_id", "name", "protocol", "size_gib", "endpoint", "state", "reason", "mount_target_count", "mount_command", "created_at", "updated_at"},
+    "StorageObject": {"id", "tenant_id", "bucket_id", "bucket", "key", "size_bytes", "content_type", "state", "reason", "created_at", "updated_at"},
+    "StorageObjectListResponse": {"items", "prefixes", "total", "next_cursor"},
     "VolumeSnapshotRecord": {"id", "volume_id", "name", "status", "size_bytes", "created_at", "dev_profile"},
     "VolumeSnapshotListResponse": {"items", "total", "next_cursor"},
     "FilesystemMountTarget": {"id", "filesystem_id", "subnet_id", "ip_address", "status", "created_at", "dev_profile"},
     "FilesystemMountTargetListResponse": {"items", "total", "next_cursor"},
+    "StorageBucketRecord": {"id", "name", "region", "access_mode", "object_count", "size_bytes", "created_at"},
+    "StorageBucketListResponse": {"items", "total", "next_cursor"},
 }
 
 EXPECTED_ROUTES = {
@@ -79,6 +102,8 @@ EXPECTED_ROUTES = {
     'v1.GET("/filesystems"',
     'v1.POST("/filesystems"',
     'v1.GET("/filesystems/:filesystem_id/mount-targets"',
+    'v1.GET("/buckets"',
+    'v1.POST("/buckets"',
     'v1.GET("/objects"',
     'v1.POST("/objects"',
 }
@@ -129,6 +154,27 @@ def validate_openapi(root: Path, errors: list[str]) -> None:
                     errors.append("POST /volumes/{volume_id}/snapshots 202 response must return AsyncTask")
                 if "Location" not in response_202.get("headers", {}):
                     errors.append("POST /volumes/{volume_id}/snapshots 202 response must declare Location header")
+            if operation_id == "resizeStorageVolume":
+                response_202 = operation.get("responses", {}).get("202", {})
+                schema_ref = (
+                    response_202.get("content", {})
+                    .get("application/json", {})
+                    .get("schema", {})
+                    .get("$ref")
+                )
+                if schema_ref != "#/components/schemas/AsyncTask":
+                    errors.append("POST /volumes/{volume_id}/resize 202 response must return AsyncTask")
+                if "Location" not in response_202.get("headers", {}):
+                    errors.append("POST /volumes/{volume_id}/resize 202 response must declare Location header")
+            if operation_id == "listStorageObjects":
+                query_params = {
+                    parameter.get("name")
+                    for parameter in operation.get("parameters", [])
+                    if parameter.get("in") == "query"
+                }
+                for name in ("bucket_id", "prefix", "delimiter"):
+                    if name not in query_params:
+                        errors.append(f"GET /objects missing object browser query parameter {name}")
 
     for schema in EXPECTED_SCHEMAS:
         if schema not in schemas:
@@ -143,7 +189,7 @@ def validate_openapi(root: Path, errors: list[str]) -> None:
         errors.append(f"StorageResourceState enum must be {sorted(expected_states)}")
 
     service_paths = services.get("paths", {})
-    leaked = [path for path in service_paths if path.startswith(("/volumes", "/filesystems", "/objects"))]
+    leaked = [path for path in service_paths if path.startswith(("/volumes", "/filesystems", "/objects", "/buckets"))]
     if leaked:
         errors.append(f"Services API must not contain Core storage paths: {leaked}")
 

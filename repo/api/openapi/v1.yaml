@@ -1233,6 +1233,18 @@ components:
       type: string
       enum: [pending, available, failed, deleting, deleted]
 
+    StorageVolumeAttachment:
+      type: object
+      required: [resource_type, resource_id, attached_at]
+      properties:
+        resource_type:
+          type: string
+          enum: [instance, container, gpu_container]
+        resource_id:   { type: string }
+        resource_name: { type: string, nullable: true }
+        mount_path:    { type: string, nullable: true }
+        attached_at:   { type: string, format: date-time }
+
     StorageVolume:
       type: object
       required: [id, tenant_id, name, size_gib, storage_class, state, created_at, updated_at]
@@ -1244,10 +1256,24 @@ components:
         storage_class: { type: string }
         state:         { $ref: '#/components/schemas/StorageResourceState' }
         reason:        { type: string, nullable: true }
+        attachments:
+          type: array
+          items: { $ref: '#/components/schemas/StorageVolumeAttachment' }
         dev_profile:
           $ref: '#/components/schemas/CoreDevProfileInfo'
         created_at:    { type: string, format: date-time }
         updated_at:    { type: string, format: date-time }
+
+    ResizeStorageVolumeRequest:
+      type: object
+      required: [idempotency_key, size_gib]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
+        size_gib:
+          type: integer
+          format: int64
+          minimum: 1
+          description: "目标容量；只允许大于当前 size_gib，不支持缩容。"
 
     StorageFilesystem:
       type: object
@@ -1261,6 +1287,11 @@ components:
         endpoint:   { type: string, nullable: true }
         state:      { $ref: '#/components/schemas/StorageResourceState' }
         reason:     { type: string, nullable: true }
+        mount_target_count: { type: integer, minimum: 0, nullable: true }
+        mount_command:
+          type: string
+          nullable: true
+          description: "面向租户的只读挂载命令示例；不得包含凭据明文。"
         dev_profile:
           $ref: '#/components/schemas/CoreDevProfileInfo'
         created_at: { type: string, format: date-time }
@@ -1272,6 +1303,7 @@ components:
       properties:
         id:           { type: string }
         tenant_id:    { type: string }
+        bucket_id:    { type: string, nullable: true }
         bucket:       { type: string }
         key:          { type: string }
         size_bytes:   { type: integer, format: int64, minimum: 0 }
@@ -1304,6 +1336,10 @@ components:
       required: [items, total]
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/StorageObject' } }
+        prefixes:
+          type: array
+          items: { type: string }
+          description: "当请求包含 delimiter 时返回对象浏览器前缀列表。"
         total: { type: integer }
         next_cursor: { type: string, nullable: true }
 
@@ -1330,6 +1366,7 @@ components:
       required: [bucket, key, idempotency_key]
       properties:
         idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
+        bucket_id:       { type: string, nullable: true }
         bucket:          { type: string, minLength: 1, maxLength: 128 }
         key:             { type: string, minLength: 1, maxLength: 1024 }
         size_bytes:      { type: integer, format: int64, minimum: 0, default: 0 }
@@ -1350,10 +1387,26 @@ components:
         metric:    { type: string, enum: [cosine, l2, ip] }
         state:     { $ref: '#/components/schemas/VectorStoreState' }
         reason:    { type: string, nullable: true }
+        vector_count: { type: integer, minimum: 0, nullable: true }
+        index_status:
+          type: string
+          nullable: true
+          enum: [building, ready, degraded, failed]
+        linked_knowledge_bases:
+          type: array
+          items: { $ref: '#/components/schemas/VectorStoreKnowledgeBaseLink' }
         dev_profile:
           $ref: '#/components/schemas/CoreDevProfileInfo'
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+
+    VectorStoreKnowledgeBaseLink:
+      type: object
+      required: [knowledge_base_id, name]
+      properties:
+        knowledge_base_id: { type: string }
+        name:              { type: string }
+        linked_at:         { type: string, format: date-time, nullable: true }
 
     VectorStoreListResponse:
       type: object
@@ -3619,6 +3672,37 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /volumes/{volume_id}/resize:
+    post:
+      operationId: resizeStorageVolume
+      summary: 扩容块存储卷
+      description: 扩容块存储卷；只允许增加容量，不支持缩容；POST 必须携带 idempotency_key。
+      tags: [Volumes]
+      x-ani-rbac-scope: "scope:volumes:update"
+      parameters:
+        - { name: volume_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResizeStorageVolumeRequest' }
+      responses:
+        "202":
+          description: 扩容任务已提交
+          headers:
+            Location:
+              schema: { type: string }
+              description: 任务轮询 URL
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
 
   /volumes/{volume_id}/snapshots:
     get:
@@ -3797,6 +3881,24 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "409": { $ref: '#/components/responses/Conflict' }
 
+  /buckets/{bucket_id}:
+    get:
+      operationId: getStorageBucket
+      summary: 查询对象存储桶
+      tags: [ObjectStore]
+      x-ani-rbac-scope: "scope:objects:read"
+      parameters:
+        - { name: bucket_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 对象存储桶
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StorageBucketRecord' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
   /objects:
     get:
       operationId: listStorageObjects
@@ -3806,6 +3908,9 @@ paths:
       parameters:
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
+        - { name: bucket_id, in: query, schema: { type: string }, description: "按桶 ID 过滤，用于对象浏览器。" }
+        - { name: prefix, in: query, schema: { type: string }, description: "按对象 key 前缀过滤。" }
+        - { name: delimiter, in: query, schema: { type: string, maxLength: 8 }, description: "对象浏览器分隔符；常用值为 /。" }
       responses:
         "200":
           description: 对象元数据列表

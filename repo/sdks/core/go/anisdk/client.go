@@ -31,6 +31,7 @@ var Operations = []string{
 	"getBranding",
 	"listStorageBuckets",
 	"createStorageBucket",
+	"getStorageBucket",
 	"listEncryptionKeys",
 	"createEncryptionKey",
 	"deleteEncryptionKey",
@@ -163,6 +164,7 @@ var Operations = []string{
 	"createStorageVolume",
 	"deleteStorageVolume",
 	"getStorageVolume",
+	"resizeStorageVolume",
 	"listVolumeSnapshots",
 	"createVolumeSnapshot",
 }
@@ -179,6 +181,7 @@ var Paths = []string{
 	"GET /branding",
 	"GET /buckets",
 	"POST /buckets",
+	"GET /buckets/{bucket_id}",
 	"GET /encryption/keys",
 	"POST /encryption/keys",
 	"DELETE /encryption/keys/{key_id}",
@@ -311,6 +314,7 @@ var Paths = []string{
 	"POST /volumes",
 	"DELETE /volumes/{volume_id}",
 	"GET /volumes/{volume_id}",
+	"POST /volumes/{volume_id}/resize",
 	"GET /volumes/{volume_id}/snapshots",
 	"POST /volumes/{volume_id}/snapshots",
 }
@@ -467,6 +471,7 @@ var Schemas = []string{
 	"RegistryRepositoryListResponse",
 	"RegistryScanResult",
 	"ReportTokenUsageRequest",
+	"ResizeStorageVolumeRequest",
 	"RevokeStatusResponse",
 	"SandboxConfig",
 	"SandboxInstanceStatus",
@@ -491,6 +496,7 @@ var Schemas = []string{
 	"StorageObjectUploadResponse",
 	"StorageResourceState",
 	"StorageVolume",
+	"StorageVolumeAttachment",
 	"StorageVolumeListResponse",
 	"TokenPairResponse",
 	"TokenUsageReport",
@@ -500,6 +506,7 @@ var Schemas = []string{
 	"VectorStore",
 	"VectorStoreDocumentInsertRequest",
 	"VectorStoreDocumentInsertResponse",
+	"VectorStoreKnowledgeBaseLink",
 	"VectorStoreListResponse",
 	"VectorStoreSearchHit",
 	"VectorStoreSearchRequest",
@@ -543,6 +550,7 @@ var IdempotencyOperations = []string{
 	"createVectorStore",
 	"insertVectorStoreDocuments",
 	"createStorageVolume",
+	"resizeStorageVolume",
 	"createVolumeSnapshot",
 }
 var CursorPaginationOperations = []string{
