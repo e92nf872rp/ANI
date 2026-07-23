@@ -207,8 +207,36 @@ export interface paths {
         /** 文档列表 */
         get: operations["listKnowledgeBaseDocuments"];
         put?: never;
-        /** 上传文档 */
-        post: operations["uploadKnowledgeBaseDocument"];
+        /**
+         * 获取文档预签名上传地址（两步式上传 step 1）
+         * @description 预留 doc_id 并创建 kb_documents 记录（parse_status=pending），返回 MinIO
+         *     presigned PUT URL（15 分钟有效）与 storage_path。客户端直接 PUT 文件到
+         *     MinIO 后，调用 notifyDocumentUploaded 触发解析任务。对齐
+         *     kb_service.proto GetDocumentUploadURL。
+         */
+        post: operations["getDocumentUploadURL"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/knowledge-bases/{kb_id}/documents/notify-uploaded": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 通知文档已直传至对象存储（两步式上传 step 2）
+         * @description 校验对象存在性与 checksum_sha256，同事务写 kb_documents 更新、async_tasks
+         *     与 outbox_events，返回异步任务引用。对齐 kb_service.proto
+         *     NotifyDocumentUploaded。
+         */
+        post: operations["notifyDocumentUploaded"];
         delete?: never;
         options?: never;
         head?: never;
@@ -895,32 +923,76 @@ export interface components {
         KnowledgeBase: {
             /** Format: uuid */
             id: string;
+            /** Format: uuid */
+            tenant_id?: string;
             name: string;
+            description?: string;
+            embedding_model?: string;
+            /** @default 512 */
+            chunk_size: number;
+            /** @default 5 */
+            top_k: number;
+            /**
+             * Format: float
+             * @description 相似度阈值，非零覆盖默认值
+             * @default 0.3
+             */
+            score_threshold: number;
             /** @enum {string} */
             status: "active" | "rebuilding" | "deleted";
             doc_count?: number;
             /** Format: date-time */
             created_at: string;
+            /** Format: date-time */
+            updated_at?: string | null;
         };
         KBDocument: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
-            knowledge_base_id: string;
+            tenant_id?: string;
+            /** Format: uuid */
+            kb_id: string;
             file_name: string;
-            content_type?: string | null;
-            size_bytes?: number;
-            /** @enum {string} */
-            status: "uploaded" | "parsing" | "indexed" | "failed" | "deleted";
+            /** @description pdf | docx | xlsx | pptx | md | txt */
+            file_type?: string | null;
+            /** Format: int64 */
+            file_size_bytes?: number;
+            /**
+             * @description 解析状态，对齐 kb_service.proto KBDocument.parse_status
+             * @enum {string}
+             */
+            parse_status: "pending" | "parsing" | "indexing" | "ready" | "failed";
+            chunk_count?: number;
+            error_message?: string | null;
+            /** @description 客户端自定义元数据（JSONB，≤ 64KB） */
+            custom_metadata?: {
+                [key: string]: unknown;
+            } | null;
             /** Format: date-time */
             created_at: string;
+            /** Format: date-time */
+            parsed_at?: string | null;
         };
         KBQueryRequest: {
             question: string;
+            /**
+             * Format: uuid
+             * @description 可选；为空则新建会话
+             */
+            session_id?: string | null;
+            /** @description 防止重试导致重复计费 */
+            idempotency_key: string;
             /** @default 5 */
             top_k: number;
-            /** Format: uuid */
-            session_id?: string | null;
+            /**
+             * Format: float
+             * @description 相似度阈值，非零覆盖 KB 默认值
+             * @default 0.3
+             */
+            score_threshold: number;
+            /** @description 指定 vLLM 推理服务名；为空则用 default */
+            inference_service_name?: string | null;
         };
         KBQueryResponse: {
             answer: string;
@@ -936,6 +1008,46 @@ export interface components {
             session_id?: string;
             input_tokens?: number;
             output_tokens?: number;
+        };
+        GetDocumentUploadURLRequest: {
+            /** @description 客户端生成，幂等预留 doc_id；重放返回同一 doc */
+            idempotency_key: string;
+            file_name: string;
+            /** @enum {string} */
+            file_type: "pdf" | "docx" | "xlsx" | "pptx" | "md" | "txt";
+            /**
+             * Format: int64
+             * @description 上限 100MB
+             */
+            file_size_bytes: number;
+            /** @description 客户端计算的 SHA-256；上传后服务端校验 */
+            checksum_sha256: string;
+            /** @description 客户端自定义元数据（JSONB，≤ 64KB） */
+            custom_metadata?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        GetDocumentUploadURLResponse: {
+            /**
+             * Format: uuid
+             * @description 预预留的文档 ID
+             */
+            doc_id: string;
+            /**
+             * Format: uri
+             * @description MinIO presigned PUT URL（15 分钟有效）
+             */
+            upload_url: string;
+            /** @description MinIO 存储路径；需原样回传给 notifyDocumentUploaded */
+            storage_path: string;
+        };
+        NotifyDocumentUploadedRequest: {
+            /** @description 与 getDocumentUploadURL 使用同一键，幂等派发解析任务 */
+            idempotency_key: string;
+            /** Format: uuid */
+            doc_id: string;
+            /** @description 由 getDocumentUploadURL 返回的对象存储路径 */
+            storage_path: string;
         };
         GpuContainer: {
             /** Format: uuid */
@@ -1789,6 +1901,12 @@ export interface operations {
                     chunk_size?: number;
                     /** @default 5 */
                     top_k?: number;
+                    /**
+                     * Format: float
+                     * @description 相似度阈值，非零覆盖默认值
+                     * @default 0.3
+                     */
+                    score_threshold?: number;
                 };
             };
         };
@@ -1872,7 +1990,7 @@ export interface operations {
             };
         };
     };
-    uploadKnowledgeBaseDocument: {
+    getDocumentUploadURL: {
         parameters: {
             query?: never;
             header?: never;
@@ -1883,20 +2001,88 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "multipart/form-data": {
-                    /** Format: binary */
-                    file: string;
-                };
+                "application/json": components["schemas"]["GetDocumentUploadURLRequest"];
             };
         };
         responses: {
-            /** @description 文档已上传，解析任务进行中 */
+            /** @description 预签名上传地址与预留 doc_id */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GetDocumentUploadURLResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            /** @description 文件大小超限（doc.too_large） */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 不支持的文档格式（doc.unsupported_type） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    notifyDocumentUploaded: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotifyDocumentUploadedRequest"];
+            };
+        };
+        responses: {
+            /** @description 解析任务已派发 */
             202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["KBDocument"];
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            /** @description 校验和不匹配（doc.checksum_mismatch） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 对象存储/解析服务暂不可用（inference.unavailable） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -1934,19 +2120,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    question: string;
-                    /** Format: uuid */
-                    session_id?: string | null;
-                    idempotency_key: string;
-                    /** @default 5 */
-                    top_k?: number;
-                    /**
-                     * Format: float
-                     * @default 0.3
-                     */
-                    score_threshold?: number;
-                };
+                "application/json": components["schemas"]["KBQueryRequest"];
             };
         };
         responses: {
@@ -1962,6 +2136,15 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            /** @description 推理服务暂不可用（inference.unavailable） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     streamQueryKnowledgeBase: {

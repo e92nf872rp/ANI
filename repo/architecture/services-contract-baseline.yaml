@@ -2,9 +2,6 @@ version: 1
 status: accepted_baseline
 owner: ANI Services 团队
 exceptions:
-  - operation_id: uploadKnowledgeBaseDocument
-    rule: write_requires_idempotency
-    reason: 当前 multipart 上传契约只要求 file；补充幂等键需要 Services 团队同步上传协议与实现。
   - operation_id: listModels
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
@@ -59,7 +56,10 @@ exceptions:
   - operation_id: listKnowledgeBaseDocuments
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: uploadKnowledgeBaseDocument
+  - operation_id: getDocumentUploadURL
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: notifyDocumentUploaded
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
   - operation_id: deleteKnowledgeBaseDocument
@@ -185,9 +185,6 @@ exceptions:
   - operation_id: createInferenceService
     rule: async_202_requires_async_task
     reason: 当前异步部署响应仍返回 InferenceService；切换为任务响应需要 Services 团队同步实现。
-  - operation_id: uploadKnowledgeBaseDocument
-    rule: async_202_requires_async_task
-    reason: 当前异步上传响应仍返回 KBDocument；切换为任务响应需要 Services 团队同步实现。
   - operation_id: createGpuContainer
     rule: async_202_requires_async_task
     reason: 当前遗留 GPU 容器接口的 202 响应仍返回 GpuContainer。

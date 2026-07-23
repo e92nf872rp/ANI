@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1/svc</code></dd></div>
-          <div><dt>Operations</dt><dd>59</dd></div>
-          <div><dt>Schemas</dt><dd>51</dd></div>
+          <div><dt>Operations</dt><dd>60</dd></div>
+          <div><dt>Schemas</dt><dd>54</dd></div>
         </dl>
       </section>
 
@@ -370,10 +370,18 @@
         <tr>
           <td><span class="method method-post">POST</span></td>
           <td><code>/knowledge-bases/{kb_id}/documents</code></td>
-          <td><code>uploadKnowledgeBaseDocument</code></td>
-          <td>上传文档</td>
+          <td><code>getDocumentUploadURL</code></td>
+          <td>获取文档预签名上传地址（两步式上传 step 1）</td>
           <td><code></code></td>
-          <td>202</td>
+          <td>200, 400, 401, 403, 409, 413, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/knowledge-bases/{kb_id}/documents/notify-uploaded</code></td>
+          <td><code>notifyDocumentUploaded</code></td>
+          <td>通知文档已直传至对象存储（两步式上传 step 2）</td>
+          <td><code></code></td>
+          <td>202, 400, 401, 403, 404, 409, 422, 503</td>
         </tr>
         <tr>
           <td><span class="method method-delete">DELETE</span></td>
@@ -397,7 +405,7 @@
           <td><code>queryKnowledgeBase</code></td>
           <td>知识库问答</td>
           <td><code></code></td>
-          <td>200, 400, 401, 404</td>
+          <td>200, 400, 401, 404, 503</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -650,6 +658,8 @@
         <li><code>CursorPage</code></li>
         <li><code>ErrorResponse</code></li>
         <li><code>ExtendSandboxRequest</code></li>
+        <li><code>GetDocumentUploadURLRequest</code></li>
+        <li><code>GetDocumentUploadURLResponse</code></li>
         <li><code>GpuContainer</code></li>
         <li><code>GpuContainerMetrics</code></li>
         <li><code>GpuContainerVersion</code></li>
@@ -674,6 +684,7 @@
         <li><code>KnowledgeBase</code></li>
         <li><code>Model</code></li>
         <li><code>ModelVersion</code></li>
+        <li><code>NotifyDocumentUploadedRequest</code></li>
         <li><code>PatchGpuContainerRequest</code></li>
         <li><code>PatchSandboxRequest</code></li>
         <li><code>Sandbox</code></li>

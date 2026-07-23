@@ -73,10 +73,11 @@ message GetDocumentUploadURLRequest {
   string tenant_id       = 1;
   string kb_id           = 2;
   string file_name       = 3;
-  string file_type       = 4;   // pdf | docx | xlsx | txt | md
+  string file_type       = 4;   // pdf | docx | xlsx | pptx | md | txt
   int64  file_size_bytes = 5;
   string checksum_sha256 = 6;   // client-computed; validated after upload
   string idempotency_key = 7;   // collision-safe: resubmitting returns same doc
+  string custom_metadata = 8;  // JSONB string; client-defined key-value metadata (≤ 64KB)
 }
 
 message GetDocumentUploadURLResponse {
@@ -170,6 +171,7 @@ message KBDocument {
   string parse_status    = 7;   // pending | parsing | indexing | ready | failed
   int32  chunk_count     = 8;
   string error_message   = 9;
-  google.protobuf.Timestamp created_at = 10;
-  google.protobuf.Timestamp parsed_at  = 11;
+  string custom_metadata = 10;  // JSONB string; client-defined key-value metadata (≤ 64KB)
+  google.protobuf.Timestamp created_at = 11;
+  google.protobuf.Timestamp parsed_at  = 12;
 }
