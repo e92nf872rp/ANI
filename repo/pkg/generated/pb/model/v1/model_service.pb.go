@@ -32,7 +32,7 @@ type CreateModelRequest struct {
 	Name         string   `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                         // unique within tenant; pattern: [a-z0-9][a-z0-9.-]{0,62}
 	DisplayName  string   `protobuf:"bytes,3,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
 	Description  string   `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
-	Capabilities []string `protobuf:"bytes,5,rep,name=capabilities,proto3" json:"capabilities,omitempty"` // text-generation | embedding | speech-to-text
+	Capabilities []string `protobuf:"bytes,5,rep,name=capabilities,proto3" json:"capabilities,omitempty"` // text-generation | embedding | speech-to-text | ocr
 }
 
 func (x *CreateModelRequest) Reset() {
