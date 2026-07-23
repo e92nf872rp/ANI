@@ -32,11 +32,11 @@ type PasswordLoginStore interface {
 	// LoadRoles returns the role names bound to the given user. 根据用户ID查询用户角色
 	LoadRoles(ctx context.Context, userID uuid.UUID) ([]string, error)
 
-	// InsertRefreshToken persists a hashed refresh token for the user. 插入用户刷新令牌
-	InsertRefreshToken(ctx context.Context, tenantID, userID uuid.UUID, tokenHash string, roles []string, expiresAt time.Time) error
-
-	// TouchLastLogin updates the user's last_login_at timestamp. 更新用户最后登录时间
-	TouchLastLogin(ctx context.Context, userID uuid.UUID, at time.Time) error
+	// FinalizeLogin 在单事务内完成"持久化 refresh token + 更新 last_login_at"。
+	// 实现必须在事务内调用 types.SetDBTenant 以满足 refresh_tokens 的 RLS 策略：
+	//   tenant_id IS NULL OR tenant_id = current_setting('app.current_tenant_id')
+	// 任一步失败则回滚整事务，避免 access token 已签发但 refresh token 未入库的孤立状态。
+	FinalizeLogin(ctx context.Context, tenantID, userID uuid.UUID, tokenHash string, roles []string, expiresAt time.Time) error
 }
 
 // PlatformUser represents a platform admin user looked up for platform password login.
@@ -66,10 +66,8 @@ type PlatformLoginStore interface {
 	// Implementations should filter to roles WHERE tenant_id IS NULL. 根据用户ID查询平台管理员用户角色
 	LoadRoles(ctx context.Context, userID uuid.UUID) ([]string, error)
 
-	// InsertRefreshToken persists a hashed refresh token for the platform user.
-	// tenant_id is deliberately omitted — platform tokens have no tenant scope. 插入平台管理员用户刷新令牌
-	InsertRefreshToken(ctx context.Context, userID uuid.UUID, tokenHash string, roles []string, expiresAt time.Time) error
-
-	// TouchLastLogin updates the platform user's last_login_at timestamp. 更新平台管理员用户最后登录时间
-	TouchLastLogin(ctx context.Context, userID uuid.UUID, at time.Time) error
+	// FinalizeLogin 在单事务内完成"持久化平台 refresh token + 更新 last_login_at"。
+	// 平台账号无租户上下文，无需 SetDBTenant；refresh_tokens 的 RLS 策略
+	// 对 tenant_id IS NULL 的行直接放行。
+	FinalizeLogin(ctx context.Context, userID uuid.UUID, tokenHash string, roles []string, expiresAt time.Time) error
 }

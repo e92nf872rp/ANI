@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kubercloud/ani/pkg/ports"
+	"github.com/kubercloud/ani/pkg/types"
 )
 
 // passwordLoginStore implements ports.PasswordLoginStore using PostgreSQL.
@@ -85,20 +86,38 @@ func (s *passwordLoginStore) LoadRoles(ctx context.Context, userID uuid.UUID) ([
 	return roles, nil
 }
 
-func (s *passwordLoginStore) InsertRefreshToken(ctx context.Context, tenantID, userID uuid.UUID, tokenHash string, roles []string, expiresAt time.Time) error {
-	_, err := s.db.Exec(ctx, `
+// FinalizeLogin 在单事务内 SetDBTenant + 插入 refresh token + 更新 last_login_at。
+// 必须设 app.current_tenant_id，否则 refresh_tokens 的 RLS 策略
+// (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), ”)::uuid)
+// 对 tenant_id NOT NULL 的行求值为 false，INSERT 会被拒绝
+// （生产 ani_app_user 无 BYPASSRLS；dev superuser 绕过 RLS 会掩盖此 bug）。
+func (s *passwordLoginStore) FinalizeLogin(ctx context.Context, tenantID, userID uuid.UUID, tokenHash string, roles []string, expiresAt time.Time) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin finalize login: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	ctx = types.WithTenant(ctx, &types.TenantContext{TenantID: tenantID, UserID: userID, Roles: roles})
+	if err := types.SetDBTenant(ctx, tx); err != nil {
+		return fmt.Errorf("set db tenant: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO refresh_tokens (tenant_id, user_id, token_hash, roles, expires_at)
 		VALUES ($1, $2, $3, $4, $5)
-	`, tenantID, userID, tokenHash, roles, expiresAt)
-	if err != nil {
+	`, tenantID, userID, tokenHash, roles, expiresAt); err != nil {
 		return fmt.Errorf("insert refresh token: %w", err)
 	}
-	return nil
-}
 
-func (s *passwordLoginStore) TouchLastLogin(ctx context.Context, userID uuid.UUID, at time.Time) error {
-	_, err := s.db.Exec(ctx, `UPDATE users SET last_login_at=$1, updated_at=$1 WHERE id=$2`, at, userID)
-	return err
+	if _, err := tx.Exec(ctx, `UPDATE users SET last_login_at=$1, updated_at=$1 WHERE id=$2`, expiresAt, userID); err != nil {
+		return fmt.Errorf("touch last login: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit finalize login: %w", err)
+	}
+	return nil
 }
 
 // platformLoginStore implements ports.PlatformLoginStore using PostgreSQL.
@@ -165,18 +184,29 @@ func (s *platformLoginStore) LoadRoles(ctx context.Context, userID uuid.UUID) ([
 	return roles, nil
 }
 
-func (s *platformLoginStore) InsertRefreshToken(ctx context.Context, userID uuid.UUID, tokenHash string, roles []string, expiresAt time.Time) error {
-	_, err := s.db.Exec(ctx, `
+// FinalizeLogin 在单事务内插入平台 refresh token + 更新 last_login_at。
+// 平台账号 tenant_id=NULL，refresh_tokens 的 RLS 策略对 tenant_id IS NULL 的行
+// 直接放行，无需 SetDBTenant。与租户版保持一致的事务语义。
+func (s *platformLoginStore) FinalizeLogin(ctx context.Context, userID uuid.UUID, tokenHash string, roles []string, expiresAt time.Time) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin finalize platform login: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO refresh_tokens (tenant_id, user_id, token_hash, roles, expires_at)
 		VALUES (NULL, $1, $2, $3, $4)
-	`, userID, tokenHash, roles, expiresAt)
-	if err != nil {
+	`, userID, tokenHash, roles, expiresAt); err != nil {
 		return fmt.Errorf("insert platform refresh token: %w", err)
 	}
-	return nil
-}
 
-func (s *platformLoginStore) TouchLastLogin(ctx context.Context, userID uuid.UUID, at time.Time) error {
-	_, err := s.db.Exec(ctx, `UPDATE users SET last_login_at=$1, updated_at=$1 WHERE id=$2`, at, userID)
-	return err
+	if _, err := tx.Exec(ctx, `UPDATE users SET last_login_at=$1, updated_at=$1 WHERE id=$2`, expiresAt, userID); err != nil {
+		return fmt.Errorf("touch platform last login: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit finalize platform login: %w", err)
+	}
+	return nil
 }

@@ -60,7 +60,9 @@ func (s *fakePlatformLoginStore) LoadRoles(context.Context, uuid.UUID) ([]string
 	return s.roles, nil
 }
 
-func (s *fakePlatformLoginStore) InsertRefreshToken(_ context.Context, userID uuid.UUID, tokenHash string, roles []string, expiresAt time.Time) error {
+// FinalizeLogin 模拟事务化的"插入平台 refresh token + 更新 last_login_at"。
+// 用 insertErr/touchErr 分别控制两步失败，保持与原测试语义一致。
+func (s *fakePlatformLoginStore) FinalizeLogin(_ context.Context, userID uuid.UUID, tokenHash string, roles []string, expiresAt time.Time) error {
 	if s.insertErr != nil {
 		return s.insertErr
 	}
@@ -68,12 +70,11 @@ func (s *fakePlatformLoginStore) InsertRefreshToken(_ context.Context, userID uu
 	s.insertArgs.tokenHash = tokenHash
 	s.insertArgs.roles = roles
 	s.insertArgs.expiresAt = expiresAt
-	return nil
-}
-
-func (s *fakePlatformLoginStore) TouchLastLogin(context.Context, uuid.UUID, time.Time) error {
+	if s.touchErr != nil {
+		return s.touchErr
+	}
 	s.touchCalled = true
-	return s.touchErr
+	return nil
 }
 
 // 测试平台登录成功

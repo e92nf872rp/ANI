@@ -77,12 +77,10 @@ func (m *passwordLoginManager) Login(ctx context.Context, tenantName, username, 
 	if err != nil {
 		return nil, statusFromAuthError(newAuthError("BAD_REQUEST", "failed to generate refresh token"))
 	}
-	if err := m.store.InsertRefreshToken(ctx, tenantID, user.ID, hashRefreshToken(rawRefresh), roles, m.now().Add(defaultRefreshTokenTTL)); err != nil {
-		return nil, statusFromAuthError(newAuthError("BAD_REQUEST", "failed to insert refresh token"))
-	}
-
-	if err := m.store.TouchLastLogin(ctx, user.ID, m.now()); err != nil {
-		_ = err // best-effort
+	// 事务内 SetDBTenant + 插入 refresh token + 更新 last_login_at，任一步失败回滚。
+	// SetDBTenant 满足 refresh_tokens 的 RLS 策略（详见 ports.PasswordLoginStore.FinalizeLogin）。
+	if err := m.store.FinalizeLogin(ctx, tenantID, user.ID, hashRefreshToken(rawRefresh), roles, m.now().Add(defaultRefreshTokenTTL)); err != nil {
+		return nil, statusFromAuthError(newAuthError("BAD_REQUEST", "failed to persist refresh token"))
 	}
 
 	return &authv1.TokenPair{
