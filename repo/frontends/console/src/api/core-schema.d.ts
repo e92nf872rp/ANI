@@ -728,6 +728,128 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/volumes/{volume_id}/expand": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 扩容块存储卷
+         * @description 只允许扩容，不允许缩容；POST 必须携带 idempotency_key。
+         */
+        post: operations["expandStorageVolume"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/volumes/{volume_id}/mount": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 挂载块存储卷到实例 */
+        post: operations["mountStorageVolume"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/volumes/{volume_id}/unmount": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 卸载块存储卷 */
+        post: operations["unmountStorageVolume"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/volumes/{volume_id}/snapshots/{snapshot_id}/create-volume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 从快照创建新块存储卷 */
+        post: operations["createStorageVolumeFromSnapshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/volumes/{volume_id}/auto-snapshot-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 设置块存储自动快照策略 */
+        put: operations["setVolumeAutoSnapshotPolicy"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/volumes/{volume_id}/os-init-guide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询块存储 OS 初始化引导 */
+        get: operations["getVolumeOSInitGuide"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/volumes/{volume_id}/os-init-complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 标记块存储 OS 初始化状态 */
+        post: operations["completeVolumeOSInit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/filesystems": {
         parameters: {
             query?: never;
@@ -774,6 +896,75 @@ export interface paths {
         /** 查询文件存储挂载目标列表 */
         get: operations["listFilesystemMountTargets"];
         put?: never;
+        /** 创建文件存储挂载目标 */
+        post: operations["createFilesystemMountTarget"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/filesystems/{filesystem_id}/expand": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 扩容文件存储 */
+        post: operations["expandStorageFilesystem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/filesystems/{filesystem_id}/mount": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 一键挂载文件存储到实例 */
+        post: operations["mountStorageFilesystem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/filesystems/{filesystem_id}/unmount": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 卸载文件存储 */
+        post: operations["unmountStorageFilesystem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/filesystems/{filesystem_id}/mount-command": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询文件存储挂载命令 */
+        get: operations["getFilesystemMountCommand"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -794,6 +985,145 @@ export interface paths {
         /** 创建对象存储桶 */
         post: operations["createStorageBucket"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/buckets/{bucket_id}/objects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 按前缀浏览桶内对象 */
+        get: operations["listBucketObjects"];
+        put?: never;
+        post?: never;
+        /** 删除桶内对象 */
+        delete: operations["deleteBucketObject"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/buckets/{bucket_id}/objects/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 申请桶内对象上传预签名 URL */
+        post: operations["uploadBucketObject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/buckets/{bucket_id}/prefixes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 创建对象存储前缀 */
+        post: operations["createBucketPrefix"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/buckets/{bucket_id}/objects/presigned-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 生成桶内对象临时访问链接 */
+        post: operations["generateBucketObjectPresignedURL"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/buckets/{bucket_id}/acl": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 设置桶 ACL */
+        put: operations["setStorageBucketACL"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/buckets/{bucket_id}/storage-class": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 设置桶默认存储类型 */
+        put: operations["setStorageBucketClass"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/buckets/{bucket_id}/lifecycle-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询桶生命周期规则 */
+        get: operations["listStorageBucketLifecycleRules"];
+        /** 替换桶生命周期规则 */
+        put: operations["setStorageBucketLifecycleRules"];
+        /** 创建桶生命周期规则 */
+        post: operations["createStorageBucketLifecycleRule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/buckets/{bucket_id}/lifecycle-rules/{rule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除桶生命周期规则 */
+        delete: operations["deleteStorageBucketLifecycleRule"];
         options?: never;
         head?: never;
         patch?: never;
@@ -922,6 +1252,84 @@ export interface paths {
         put?: never;
         /** 搜索向量存储 */
         post: operations["searchVectorStore"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/vector-stores/{vector_store_id}/text-search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 使用文本检索测试向量存储
+         * @description 控制台输入文本后由 Core 负责嵌入并返回 TopK 召回结果。
+         */
+        post: operations["textSearchVectorStore"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/vector-stores/{vector_store_id}/rebuild-index": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 重建向量存储索引 */
+        post: operations["rebuildVectorStoreIndex"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/vector-stores/{vector_store_id}/knowledge-base-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 设置向量存储外部知识库引用
+         * @description 仅保存外部引用，不把 Services KnowledgeBase schema 回流 Core。
+         */
+        put: operations["setVectorStoreKnowledgeBaseLink"];
+        post?: never;
+        /** 解除向量存储知识库引用 */
+        delete: operations["deleteVectorStoreKnowledgeBaseLink"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/vector-stores/{vector_store_id}/delete-precheck": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 删除向量存储前置检查
+         * @description 删除前检查是否仍被知识库等资源引用。
+         */
+        get: operations["precheckVectorStoreDelete"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3107,6 +3515,22 @@ export interface components {
             /** Format: int64 */
             size_gib: number;
             storage_class: string;
+            zone?: string | null;
+            /** @enum {string|null} */
+            volume_type?: "ssd" | "hdd" | "high_performance_ssd" | null;
+            iops?: number | null;
+            encrypted?: boolean | null;
+            mount_instance_id?: string | null;
+            mount_route?: string | null;
+            mount_name?: string | null;
+            snapshots_count?: number | null;
+            auto_snapshot?: components["schemas"]["StorageVolumeAutoSnapshotPolicy"];
+            /** @enum {string|null} */
+            os_init_status?: "pending" | "done" | "skipped" | "n_a" | null;
+            os_init_device?: string | null;
+            mount_history?: components["schemas"]["StorageVolumeMountHistoryEntry"][];
+            from_snapshot_id?: string | null;
+            from_snapshot_name?: string | null;
             state: components["schemas"]["StorageResourceState"];
             reason?: string | null;
             dev_profile?: components["schemas"]["CoreDevProfileInfo"];
@@ -3114,6 +3538,28 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        StorageVolumeAutoSnapshotPolicy: {
+            enabled: boolean;
+            retain_days: number;
+            /** @description 自动快照计划，例如 daily@02:00 */
+            schedule: string;
+        };
+        StorageVolumeAutoSnapshotPolicyUpdateRequest: {
+            idempotency_key: string;
+            enabled: boolean;
+            retain_days: number;
+            /** @description 自动快照计划，例如 daily@02:00 */
+            schedule: string;
+        };
+        StorageVolumeMountHistoryEntry: {
+            /** Format: date-time */
+            at: string;
+            /** @enum {string} */
+            action: "mount" | "unmount" | "create_from_snapshot" | "os_init";
+            target?: string | null;
+            /** @enum {string} */
+            result: "success" | "failed";
         };
         StorageFilesystem: {
             id: string;
@@ -3124,6 +3570,13 @@ export interface components {
             /** Format: int64 */
             size_gib: number;
             endpoint?: string | null;
+            zone?: string | null;
+            /** @enum {string|null} */
+            performance_mode?: "standard" | "throughput" | null;
+            mount_targets?: components["schemas"]["FilesystemMountTarget"][];
+            mounts?: number | null;
+            mount_command?: string | null;
+            attached_instances?: components["schemas"]["FilesystemAttachment"][];
             state: components["schemas"]["StorageResourceState"];
             reason?: string | null;
             dev_profile?: components["schemas"]["CoreDevProfileInfo"];
@@ -3131,6 +3584,19 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        FilesystemAttachment: {
+            instance_id: string;
+            instance_name?: string | null;
+            instance_route: string;
+            mount_path: string;
+            ip_address?: string | null;
+            /** @enum {string} */
+            protocol?: "nfs" | "cephfs";
+            /** @default true */
+            auto_mount: boolean;
+            /** Format: date-time */
+            attached_at: string;
         };
         StorageObject: {
             id: string;
@@ -3140,6 +3606,8 @@ export interface components {
             /** Format: int64 */
             size_bytes: number;
             content_type: string;
+            /** @enum {string|null} */
+            storage_class?: "standard" | "infrequent_access" | "archive" | null;
             state: components["schemas"]["StorageResourceState"];
             reason?: string | null;
             dev_profile?: components["schemas"]["CoreDevProfileInfo"];
@@ -3171,6 +3639,16 @@ export interface components {
             size_gib: number;
             /** @default standard */
             storage_class: string;
+            zone?: string;
+            /**
+             * @default ssd
+             * @enum {string}
+             */
+            volume_type: "ssd" | "hdd" | "high_performance_ssd";
+            /** @default false */
+            encrypted: boolean;
+            mount_instance_id?: string | null;
+            mount_route?: string | null;
         };
         CreateStorageFilesystemRequest: {
             /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
@@ -3183,6 +3661,13 @@ export interface components {
             protocol: "nfs" | "cephfs";
             /** Format: int64 */
             size_gib: number;
+            zone?: string;
+            /**
+             * @default standard
+             * @enum {string}
+             */
+            performance_mode: "standard" | "throughput";
+            mount_target_subnet_id?: string | null;
         };
         CreateStorageObjectRequest: {
             /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
@@ -3196,9 +3681,99 @@ export interface components {
             size_bytes: number;
             /** @default application/octet-stream */
             content_type: string;
+            /**
+             * @default standard
+             * @enum {string}
+             */
+            storage_class: "standard" | "infrequent_access";
+        };
+        StorageVolumeExpandRequest: {
+            idempotency_key: string;
+            /**
+             * Format: int64
+             * @description 新容量；必须大于当前容量，不支持缩容
+             */
+            size_gib: number;
+        };
+        StorageVolumeMountRequest: {
+            idempotency_key: string;
+            instance_id: string;
+            /** @enum {string} */
+            instance_route: "/compute/instances/vm" | "/compute/instances/container" | "/compute/instances/gpu-container";
+            mount_name?: string | null;
+        };
+        StorageVolumeUnmountRequest: {
+            idempotency_key: string;
+        };
+        CreateStorageVolumeFromSnapshotRequest: {
+            idempotency_key: string;
+            name: string;
+            /**
+             * Format: int64
+             * @description 新盘容量；必须大于等于快照容量
+             */
+            size_gib: number;
+            zone?: string | null;
+        };
+        VolumeOSInitGuide: {
+            /** @enum {string} */
+            status: "pending" | "done" | "skipped" | "n_a";
+            device: string;
+            steps: {
+                title: string;
+                command: string;
+            }[];
+            hint: string;
+        };
+        VolumeOSInitCompleteRequest: {
+            idempotency_key: string;
+            /** @enum {string} */
+            mode: "done" | "skipped";
+        };
+        StorageFilesystemExpandRequest: {
+            idempotency_key: string;
+            /**
+             * Format: int64
+             * @description 新容量；必须大于当前容量，不支持缩容
+             */
+            size_gib: number;
+        };
+        FilesystemMountTargetCreateRequest: {
+            idempotency_key: string;
+            subnet_id: string;
+            vpc_id?: string | null;
+        };
+        StorageFilesystemMountRequest: {
+            idempotency_key: string;
+            instance_id: string;
+            /** @enum {string} */
+            instance_route: "/compute/instances/vm" | "/compute/instances/container" | "/compute/instances/gpu-container";
+            /** @default /mnt/nfs */
+            mount_path: string;
+            /** @default true */
+            auto_mount: boolean;
+        };
+        StorageFilesystemUnmountRequest: {
+            idempotency_key: string;
+            instance_id: string;
+        };
+        FilesystemMountCommand: {
+            command: string;
+            /** @enum {string} */
+            protocol: "nfs" | "cephfs";
+            ip_address?: string | null;
+            mount_path?: string | null;
         };
         /** @enum {string} */
         VectorStoreState: "pending" | "ready" | "failed" | "deleting" | "deleted";
+        /** @enum {string} */
+        VectorStoreIndexStatus: "building" | "ready" | "failed";
+        VectorStoreKnowledgeBaseRef: {
+            id: string | null;
+            name: string;
+            /** @enum {string} */
+            source: "services_knowledge_base" | "external";
+        };
         VectorStore: {
             id: string;
             tenant_id: string;
@@ -3207,6 +3782,13 @@ export interface components {
             /** @enum {string} */
             metric: "cosine" | "l2" | "ip";
             state: components["schemas"]["VectorStoreState"];
+            embedding_model?: string | null;
+            /** Format: int64 */
+            vector_count?: number | null;
+            index_status?: components["schemas"]["VectorStoreIndexStatus"];
+            /** Format: date-time */
+            last_indexed_at?: string | null;
+            knowledge_base_ref?: components["schemas"]["VectorStoreKnowledgeBaseRef"];
             reason?: string | null;
             dev_profile?: components["schemas"]["CoreDevProfileInfo"];
             /** Format: date-time */
@@ -3229,6 +3811,7 @@ export interface components {
              * @enum {string}
              */
             metric: "cosine" | "l2" | "ip";
+            embedding_model?: string | null;
         };
         VectorStoreSearchRequest: {
             vector: number[];
@@ -3238,10 +3821,21 @@ export interface components {
                 [key: string]: string;
             };
         };
+        VectorStoreTextSearchRequest: {
+            query: string;
+            /** @default 5 */
+            top_k: number;
+            filter?: {
+                [key: string]: string;
+            };
+        };
         VectorStoreSearchHit: {
             id: string;
+            rank?: number;
+            chunk?: string | null;
             /** Format: float */
             score: number;
+            source?: string | null;
             metadata: {
                 [key: string]: string;
             };
@@ -3249,6 +3843,19 @@ export interface components {
         VectorStoreSearchResponse: {
             items: components["schemas"]["VectorStoreSearchHit"][];
             total: number;
+        };
+        VectorStoreKnowledgeBaseLinkRequest: {
+            idempotency_key: string;
+            knowledge_base_ref: components["schemas"]["VectorStoreKnowledgeBaseRef"];
+        };
+        VectorStoreDeletePrecheck: {
+            deletable: boolean;
+            reason?: string | null;
+            blockers: {
+                kind: string;
+                id: string;
+                name: string;
+            }[];
         };
         RegistryProject: {
             id: string;
@@ -3743,6 +4350,7 @@ export interface components {
             id: string;
             filesystem_id: string;
             subnet_id: string;
+            vpc_id?: string | null;
             ip_address: string;
             /** @enum {string} */
             status: "creating" | "available" | "deleting" | "error";
@@ -3760,12 +4368,110 @@ export interface components {
             id: string;
             name: string;
             region?: string | null;
+            /** Format: uri */
+            endpoint?: string | null;
             /** @enum {string} */
             access_mode: "private" | "public_read";
+            /** @enum {string|null} */
+            acl?: "private" | "tenant_read" | null;
+            acl_label?: string | null;
+            /** @enum {string|null} */
+            storage_class?: "standard" | "infrequent_access" | null;
+            /** @enum {string|null} */
+            versioning?: "disabled" | "enabled" | null;
             object_count?: number;
             size_bytes?: number;
+            lifecycle_rules?: components["schemas"]["StorageBucketLifecycleRule"][];
+            lifecycle_note?: string | null;
             /** Format: date-time */
             created_at: string;
+            /** Format: date-time */
+            updated_at?: string | null;
+        };
+        StorageBucketObjectEntry: {
+            /** @enum {string} */
+            kind: "prefix" | "object";
+            name: string;
+            key: string;
+            /** Format: int64 */
+            size_bytes?: number | null;
+            size_label?: string | null;
+            /** Format: date-time */
+            updated_at?: string | null;
+            /** @enum {string|null} */
+            storage_class?: "standard" | "infrequent_access" | null;
+        };
+        StorageBucketObjectListResponse: {
+            items: components["schemas"]["StorageBucketObjectEntry"][];
+            total: number;
+            prefix: string;
+            next_cursor?: string | null;
+        };
+        BucketObjectUploadRequest: {
+            idempotency_key: string;
+            key: string;
+            /** @default application/octet-stream */
+            content_type: string;
+            /** Format: int64 */
+            size_bytes?: number | null;
+            /**
+             * @default standard
+             * @enum {string}
+             */
+            storage_class: "standard" | "infrequent_access";
+        };
+        BucketPrefixCreateRequest: {
+            idempotency_key: string;
+            prefix: string;
+        };
+        BucketObjectDeleteResponse: {
+            bucket_id: string;
+            key: string;
+            deleted: boolean;
+        };
+        BucketObjectPresignedURLRequest: {
+            key: string;
+            /** @default 24 */
+            expires_hours: number;
+            /**
+             * @default GET
+             * @enum {string}
+             */
+            method: "GET" | "PUT";
+        };
+        StorageBucketACLUpdateRequest: {
+            idempotency_key: string;
+            /** @enum {string} */
+            acl: "private" | "tenant_read";
+        };
+        StorageBucketClassUpdateRequest: {
+            idempotency_key: string;
+            /** @enum {string} */
+            storage_class: "standard" | "infrequent_access";
+        };
+        StorageBucketLifecycleRule: {
+            id: string;
+            name: string;
+            prefix: string;
+            expire_days: number;
+            to_infrequent_days: number;
+            enabled: boolean;
+        };
+        StorageBucketLifecycleRuleCreateRequest: {
+            idempotency_key: string;
+            name: string;
+            prefix: string;
+            expire_days: number;
+            to_infrequent_days: number;
+            enabled: boolean;
+        };
+        StorageBucketLifecycleRuleListResponse: {
+            items: components["schemas"]["StorageBucketLifecycleRule"][];
+            total: number;
+        };
+        StorageBucketLifecycleRulesUpdateRequest: {
+            idempotency_key: string;
+            rules: components["schemas"]["StorageBucketLifecycleRule"][];
         };
         StorageBucketListResponse: {
             items: components["schemas"]["StorageBucketRecord"][];
@@ -5763,6 +6469,217 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    expandStorageVolume: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                volume_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StorageVolumeExpandRequest"];
+            };
+        };
+        responses: {
+            /** @description 扩容任务已提交 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["PreconditionFailed"];
+        };
+    };
+    mountStorageVolume: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                volume_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StorageVolumeMountRequest"];
+            };
+        };
+        responses: {
+            /** @description 挂载任务已提交 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["PreconditionFailed"];
+        };
+    };
+    unmountStorageVolume: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                volume_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StorageVolumeUnmountRequest"];
+            };
+        };
+        responses: {
+            /** @description 卸载任务已提交 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["PreconditionFailed"];
+        };
+    };
+    createStorageVolumeFromSnapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                volume_id: string;
+                snapshot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateStorageVolumeFromSnapshotRequest"];
+            };
+        };
+        responses: {
+            /** @description 建盘任务已提交 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["PreconditionFailed"];
+        };
+    };
+    setVolumeAutoSnapshotPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                volume_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StorageVolumeAutoSnapshotPolicyUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 自动快照策略已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageVolume"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getVolumeOSInitGuide: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                volume_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OS 初始化引导 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VolumeOSInitGuide"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    completeVolumeOSInit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                volume_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VolumeOSInitCompleteRequest"];
+            };
+        };
+        responses: {
+            /** @description OS 初始化状态已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageVolume"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     listStorageFilesystems: {
         parameters: {
             query?: {
@@ -5893,6 +6810,156 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    createFilesystemMountTarget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                filesystem_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FilesystemMountTargetCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description 挂载目标创建任务已提交 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["PreconditionFailed"];
+        };
+    };
+    expandStorageFilesystem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                filesystem_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StorageFilesystemExpandRequest"];
+            };
+        };
+        responses: {
+            /** @description 扩容任务已提交 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["PreconditionFailed"];
+        };
+    };
+    mountStorageFilesystem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                filesystem_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StorageFilesystemMountRequest"];
+            };
+        };
+        responses: {
+            /** @description 挂载任务已提交 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["PreconditionFailed"];
+        };
+    };
+    unmountStorageFilesystem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                filesystem_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StorageFilesystemUnmountRequest"];
+            };
+        };
+        responses: {
+            /** @description 卸载任务已提交 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["PreconditionFailed"];
+        };
+    };
+    getFilesystemMountCommand: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                filesystem_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 挂载命令 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FilesystemMountCommand"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     listStorageBuckets: {
         parameters: {
             query?: {
@@ -5944,6 +7011,325 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+        };
+    };
+    listBucketObjects: {
+        parameters: {
+            query?: {
+                prefix?: string;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                bucket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 桶对象和前缀列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageBucketObjectListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteBucketObject: {
+        parameters: {
+            query: {
+                key: string;
+            };
+            header?: never;
+            path: {
+                bucket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 对象已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BucketObjectDeleteResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    uploadBucketObject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bucket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BucketObjectUploadRequest"];
+            };
+        };
+        responses: {
+            /** @description 预签名上传 URL */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageObjectUploadResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createBucketPrefix: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bucket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BucketPrefixCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description 前缀已创建 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageBucketObjectEntry"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    generateBucketObjectPresignedURL: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bucket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BucketObjectPresignedURLRequest"];
+            };
+        };
+        responses: {
+            /** @description 预签名 URL */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageObjectDownloadInfo"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    setStorageBucketACL: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bucket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StorageBucketACLUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 桶 ACL 已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageBucketRecord"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    setStorageBucketClass: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bucket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StorageBucketClassUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 桶存储类型已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageBucketRecord"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listStorageBucketLifecycleRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bucket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 生命周期规则列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageBucketLifecycleRuleListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    setStorageBucketLifecycleRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bucket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StorageBucketLifecycleRulesUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 生命周期规则已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageBucketLifecycleRuleListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createStorageBucketLifecycleRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bucket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StorageBucketLifecycleRuleCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description 生命周期规则已创建 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageBucketLifecycleRule"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteStorageBucketLifecycleRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                bucket_id: string;
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 生命周期规则已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageBucketLifecycleRuleListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listStorageObjects: {
@@ -6233,6 +7619,150 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["PreconditionFailed"];
+        };
+    };
+    textSearchVectorStore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                vector_store_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VectorStoreTextSearchRequest"];
+            };
+        };
+        responses: {
+            /** @description 文本检索结果 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VectorStoreSearchResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["PreconditionFailed"];
+        };
+    };
+    rebuildVectorStoreIndex: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                vector_store_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    idempotency_key: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 索引重建任务已提交 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["PreconditionFailed"];
+        };
+    };
+    setVectorStoreKnowledgeBaseLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                vector_store_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VectorStoreKnowledgeBaseLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description 知识库引用已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VectorStore"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteVectorStoreKnowledgeBaseLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                vector_store_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 知识库引用已解除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VectorStore"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    precheckVectorStoreDelete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                vector_store_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 删除前置检查结果 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VectorStoreDeletePrecheck"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     insertVectorStoreDocuments: {

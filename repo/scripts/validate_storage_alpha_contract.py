@@ -20,6 +20,27 @@ EXPECTED_PATHS = {
         "get": ("listVolumeSnapshots", "scope:volumes:read", {"200", "401", "403", "404"}),
         "post": ("createVolumeSnapshot", "scope:volumes:create", {"202", "400", "401", "403", "404"}),
     },
+    "/volumes/{volume_id}/expand": {
+        "post": ("expandStorageVolume", "scope:volumes:update", {"202", "400", "401", "403", "404", "422"}),
+    },
+    "/volumes/{volume_id}/mount": {
+        "post": ("mountStorageVolume", "scope:volumes:update", {"202", "400", "401", "403", "404", "409", "422"}),
+    },
+    "/volumes/{volume_id}/unmount": {
+        "post": ("unmountStorageVolume", "scope:volumes:update", {"202", "400", "401", "403", "404", "422"}),
+    },
+    "/volumes/{volume_id}/snapshots/{snapshot_id}/create-volume": {
+        "post": ("createStorageVolumeFromSnapshot", "scope:volumes:create", {"202", "400", "401", "403", "404", "422"}),
+    },
+    "/volumes/{volume_id}/auto-snapshot-policy": {
+        "put": ("setVolumeAutoSnapshotPolicy", "scope:volumes:update", {"200", "400", "401", "403", "404"}),
+    },
+    "/volumes/{volume_id}/os-init-guide": {
+        "get": ("getVolumeOSInitGuide", "scope:volumes:read", {"200", "401", "403", "404"}),
+    },
+    "/volumes/{volume_id}/os-init-complete": {
+        "post": ("completeVolumeOSInit", "scope:volumes:update", {"200", "400", "401", "403", "404"}),
+    },
     "/filesystems": {
         "get": ("listStorageFilesystems", "scope:filesystems:read", {"200", "401", "403"}),
         "post": ("createStorageFilesystem", "scope:filesystems:create", {"201", "400", "401", "403"}),
@@ -30,6 +51,46 @@ EXPECTED_PATHS = {
     },
     "/filesystems/{filesystem_id}/mount-targets": {
         "get": ("listFilesystemMountTargets", "scope:filesystems:read", {"200", "401", "403", "404"}),
+        "post": ("createFilesystemMountTarget", "scope:filesystems:update", {"202", "400", "401", "403", "404", "422"}),
+    },
+    "/filesystems/{filesystem_id}/expand": {
+        "post": ("expandStorageFilesystem", "scope:filesystems:update", {"202", "400", "401", "403", "404", "422"}),
+    },
+    "/filesystems/{filesystem_id}/mount": {
+        "post": ("mountStorageFilesystem", "scope:filesystems:update", {"202", "400", "401", "403", "404", "409", "422"}),
+    },
+    "/filesystems/{filesystem_id}/unmount": {
+        "post": ("unmountStorageFilesystem", "scope:filesystems:update", {"202", "400", "401", "403", "404", "422"}),
+    },
+    "/filesystems/{filesystem_id}/mount-command": {
+        "get": ("getFilesystemMountCommand", "scope:filesystems:read", {"200", "401", "403", "404"}),
+    },
+    "/buckets/{bucket_id}/objects": {
+        "get": ("listBucketObjects", "scope:objects:read", {"200", "401", "403", "404"}),
+        "delete": ("deleteBucketObject", "scope:objects:delete", {"200", "400", "401", "403", "404"}),
+    },
+    "/buckets/{bucket_id}/objects/upload": {
+        "post": ("uploadBucketObject", "scope:objects:create", {"200", "400", "401", "403", "404"}),
+    },
+    "/buckets/{bucket_id}/prefixes": {
+        "post": ("createBucketPrefix", "scope:objects:create", {"201", "400", "401", "403", "404", "409"}),
+    },
+    "/buckets/{bucket_id}/objects/presigned-url": {
+        "post": ("generateBucketObjectPresignedURL", "scope:objects:read", {"200", "400", "401", "403", "404"}),
+    },
+    "/buckets/{bucket_id}/acl": {
+        "put": ("setStorageBucketACL", "scope:objects:update", {"200", "400", "401", "403", "404"}),
+    },
+    "/buckets/{bucket_id}/storage-class": {
+        "put": ("setStorageBucketClass", "scope:objects:update", {"200", "400", "401", "403", "404"}),
+    },
+    "/buckets/{bucket_id}/lifecycle-rules": {
+        "get": ("listStorageBucketLifecycleRules", "scope:objects:read", {"200", "401", "403", "404"}),
+        "put": ("setStorageBucketLifecycleRules", "scope:objects:update", {"200", "400", "401", "403", "404"}),
+        "post": ("createStorageBucketLifecycleRule", "scope:objects:update", {"201", "400", "401", "403", "404"}),
+    },
+    "/buckets/{bucket_id}/lifecycle-rules/{rule_id}": {
+        "delete": ("deleteStorageBucketLifecycleRule", "scope:objects:update", {"200", "401", "403", "404"}),
     },
     "/objects": {
         "get": ("listStorageObjects", "scope:objects:read", {"200", "401", "403"}),
@@ -57,16 +118,65 @@ EXPECTED_SCHEMAS = {
     "CreateVolumeSnapshotRequest",
     "FilesystemMountTarget",
     "FilesystemMountTargetListResponse",
+    "StorageVolumeAutoSnapshotPolicy",
+    "StorageVolumeAutoSnapshotPolicyUpdateRequest",
+    "StorageVolumeMountHistoryEntry",
+    "StorageVolumeExpandRequest",
+    "StorageVolumeMountRequest",
+    "StorageVolumeUnmountRequest",
+    "CreateStorageVolumeFromSnapshotRequest",
+    "VolumeOSInitGuide",
+    "VolumeOSInitCompleteRequest",
+    "FilesystemMountTargetCreateRequest",
+    "StorageFilesystemExpandRequest",
+    "StorageFilesystemMountRequest",
+    "StorageFilesystemUnmountRequest",
+    "FilesystemMountCommand",
+    "FilesystemAttachment",
+    "StorageBucketObjectEntry",
+    "StorageBucketObjectListResponse",
+    "BucketObjectUploadRequest",
+    "BucketPrefixCreateRequest",
+    "BucketObjectDeleteResponse",
+    "BucketObjectPresignedURLRequest",
+    "StorageBucketACLUpdateRequest",
+    "StorageBucketClassUpdateRequest",
+    "StorageBucketLifecycleRule",
+    "StorageBucketLifecycleRuleCreateRequest",
+    "StorageBucketLifecycleRuleListResponse",
+    "StorageBucketLifecycleRulesUpdateRequest",
 }
 
 EXPECTED_FIELDS = {
-    "StorageVolume": {"id", "tenant_id", "name", "size_gib", "storage_class", "state", "reason", "created_at", "updated_at"},
-    "StorageFilesystem": {"id", "tenant_id", "name", "protocol", "size_gib", "endpoint", "state", "reason", "created_at", "updated_at"},
-    "StorageObject": {"id", "tenant_id", "bucket", "key", "size_bytes", "content_type", "state", "reason", "created_at", "updated_at"},
+    "StorageVolume": {"id", "tenant_id", "name", "size_gib", "storage_class", "state", "reason", "created_at", "updated_at", "zone", "volume_type", "iops", "encrypted", "mount_instance_id", "mount_route", "mount_name", "snapshots_count", "auto_snapshot", "os_init_status", "os_init_device", "mount_history", "from_snapshot_id", "from_snapshot_name"},
+    "StorageFilesystem": {"id", "tenant_id", "name", "protocol", "size_gib", "endpoint", "state", "reason", "created_at", "updated_at", "zone", "performance_mode", "mount_targets", "mounts", "mount_command", "attached_instances"},
+    "StorageObject": {"id", "tenant_id", "bucket", "key", "size_bytes", "content_type", "state", "reason", "created_at", "updated_at", "storage_class"},
     "VolumeSnapshotRecord": {"id", "volume_id", "name", "status", "size_bytes", "created_at", "dev_profile"},
     "VolumeSnapshotListResponse": {"items", "total", "next_cursor"},
-    "FilesystemMountTarget": {"id", "filesystem_id", "subnet_id", "ip_address", "status", "created_at", "dev_profile"},
+    "FilesystemMountTarget": {"id", "filesystem_id", "subnet_id", "vpc_id", "ip_address", "status", "created_at", "dev_profile"},
     "FilesystemMountTargetListResponse": {"items", "total", "next_cursor"},
+    "StorageBucketRecord": {"id", "name", "region", "endpoint", "access_mode", "acl", "acl_label", "storage_class", "versioning", "object_count", "size_bytes", "lifecycle_rules", "lifecycle_note", "created_at", "updated_at"},
+    "StorageBucketObjectEntry": {"kind", "name", "key", "size_bytes", "size_label", "updated_at", "storage_class"},
+    "StorageBucketLifecycleRule": {"id", "name", "prefix", "expire_days", "to_infrequent_days", "enabled"},
+}
+
+IDEMPOTENT_REQUEST_SCHEMAS = {
+    "StorageVolumeExpandRequest",
+    "StorageVolumeMountRequest",
+    "StorageVolumeUnmountRequest",
+    "CreateStorageVolumeFromSnapshotRequest",
+    "StorageVolumeAutoSnapshotPolicyUpdateRequest",
+    "VolumeOSInitCompleteRequest",
+    "StorageFilesystemExpandRequest",
+    "FilesystemMountTargetCreateRequest",
+    "StorageFilesystemMountRequest",
+    "StorageFilesystemUnmountRequest",
+    "BucketObjectUploadRequest",
+    "BucketPrefixCreateRequest",
+    "StorageBucketACLUpdateRequest",
+    "StorageBucketClassUpdateRequest",
+    "StorageBucketLifecycleRuleCreateRequest",
+    "StorageBucketLifecycleRulesUpdateRequest",
 }
 
 EXPECTED_ROUTES = {
@@ -138,6 +248,12 @@ def validate_openapi(root: Path, errors: list[str]) -> None:
         missing = fields - set(properties.keys())
         if missing:
             errors.append(f"schema {schema} missing fields: {sorted(missing)}")
+    for schema in IDEMPOTENT_REQUEST_SCHEMAS:
+        definition = schemas.get(schema, {})
+        required = set(definition.get("required", []))
+        properties = definition.get("properties", {})
+        if "idempotency_key" not in required or "idempotency_key" not in properties:
+            errors.append(f"schema {schema} must require idempotency_key")
     expected_states = {"pending", "available", "failed", "deleting", "deleted"}
     if set(schemas.get("StorageResourceState", {}).get("enum", [])) != expected_states:
         errors.append(f"StorageResourceState enum must be {sorted(expected_states)}")

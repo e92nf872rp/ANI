@@ -1242,12 +1242,54 @@ components:
         name:          { type: string }
         size_gib:      { type: integer, format: int64, minimum: 1 }
         storage_class: { type: string }
+        zone:          { type: string, nullable: true }
+        volume_type:   { type: string, enum: [ssd, hdd, high_performance_ssd], nullable: true }
+        iops:          { type: integer, minimum: 0, nullable: true }
+        encrypted:     { type: boolean, nullable: true }
+        mount_instance_id: { type: string, nullable: true }
+        mount_route:       { type: string, nullable: true }
+        mount_name:        { type: string, nullable: true }
+        snapshots_count:   { type: integer, minimum: 0, nullable: true }
+        auto_snapshot:     { $ref: '#/components/schemas/StorageVolumeAutoSnapshotPolicy' }
+        os_init_status:    { type: string, enum: [pending, done, skipped, n_a], nullable: true }
+        os_init_device:    { type: string, nullable: true }
+        mount_history:
+          type: array
+          items: { $ref: '#/components/schemas/StorageVolumeMountHistoryEntry' }
+        from_snapshot_id:   { type: string, nullable: true }
+        from_snapshot_name: { type: string, nullable: true }
         state:         { $ref: '#/components/schemas/StorageResourceState' }
         reason:        { type: string, nullable: true }
         dev_profile:
           $ref: '#/components/schemas/CoreDevProfileInfo'
         created_at:    { type: string, format: date-time }
         updated_at:    { type: string, format: date-time }
+
+    StorageVolumeAutoSnapshotPolicy:
+      type: object
+      required: [enabled, retain_days, schedule]
+      properties:
+        enabled:     { type: boolean }
+        retain_days: { type: integer, minimum: 1, maximum: 365 }
+        schedule:    { type: string, description: "自动快照计划，例如 daily@02:00" }
+
+    StorageVolumeAutoSnapshotPolicyUpdateRequest:
+      type: object
+      required: [idempotency_key, enabled, retain_days, schedule]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+        enabled:     { type: boolean }
+        retain_days: { type: integer, minimum: 1, maximum: 365 }
+        schedule:    { type: string, description: "自动快照计划，例如 daily@02:00" }
+
+    StorageVolumeMountHistoryEntry:
+      type: object
+      required: [at, action, result]
+      properties:
+        at:     { type: string, format: date-time }
+        action: { type: string, enum: [mount, unmount, create_from_snapshot, os_init] }
+        target: { type: string, nullable: true }
+        result: { type: string, enum: [success, failed] }
 
     StorageFilesystem:
       type: object
@@ -1259,12 +1301,35 @@ components:
         protocol:   { type: string, enum: [nfs, cephfs] }
         size_gib:   { type: integer, format: int64, minimum: 1 }
         endpoint:   { type: string, nullable: true }
+        zone:       { type: string, nullable: true }
+        performance_mode: { type: string, enum: [standard, throughput], nullable: true }
+        mount_targets:
+          type: array
+          items: { $ref: '#/components/schemas/FilesystemMountTarget' }
+        mounts: { type: integer, minimum: 0, nullable: true }
+        mount_command: { type: string, nullable: true }
+        attached_instances:
+          type: array
+          items: { $ref: '#/components/schemas/FilesystemAttachment' }
         state:      { $ref: '#/components/schemas/StorageResourceState' }
         reason:     { type: string, nullable: true }
         dev_profile:
           $ref: '#/components/schemas/CoreDevProfileInfo'
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+
+    FilesystemAttachment:
+      type: object
+      required: [instance_id, instance_route, mount_path, attached_at]
+      properties:
+        instance_id:    { type: string }
+        instance_name:  { type: string, nullable: true }
+        instance_route: { type: string }
+        mount_path:     { type: string }
+        ip_address:     { type: string, nullable: true }
+        protocol:       { type: string, enum: [nfs, cephfs] }
+        auto_mount:     { type: boolean, default: true }
+        attached_at:    { type: string, format: date-time }
 
     StorageObject:
       type: object
@@ -1276,6 +1341,7 @@ components:
         key:          { type: string }
         size_bytes:   { type: integer, format: int64, minimum: 0 }
         content_type: { type: string }
+        storage_class: { type: string, enum: [standard, infrequent_access, archive], nullable: true }
         state:        { $ref: '#/components/schemas/StorageResourceState' }
         reason:       { type: string, nullable: true }
         dev_profile:
@@ -1315,6 +1381,11 @@ components:
         name:            { type: string, minLength: 1, maxLength: 128 }
         size_gib:        { type: integer, format: int64, minimum: 1 }
         storage_class:   { type: string, default: standard }
+        zone:            { type: string }
+        volume_type:     { type: string, enum: [ssd, hdd, high_performance_ssd], default: ssd }
+        encrypted:       { type: boolean, default: false }
+        mount_instance_id: { type: string, nullable: true }
+        mount_route:       { type: string, nullable: true }
 
     CreateStorageFilesystemRequest:
       type: object
@@ -1324,6 +1395,9 @@ components:
         name:            { type: string, minLength: 1, maxLength: 128 }
         protocol:        { type: string, enum: [nfs, cephfs], default: nfs }
         size_gib:        { type: integer, format: int64, minimum: 1 }
+        zone:            { type: string }
+        performance_mode: { type: string, enum: [standard, throughput], default: standard }
+        mount_target_subnet_id: { type: string, nullable: true }
 
     CreateStorageObjectRequest:
       type: object
@@ -1334,10 +1408,118 @@ components:
         key:             { type: string, minLength: 1, maxLength: 1024 }
         size_bytes:      { type: integer, format: int64, minimum: 0, default: 0 }
         content_type:    { type: string, default: application/octet-stream }
+        storage_class:   { type: string, enum: [standard, infrequent_access], default: standard }
+
+    StorageVolumeExpandRequest:
+      type: object
+      required: [idempotency_key, size_gib]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+        size_gib: { type: integer, format: int64, minimum: 1, description: "新容量；必须大于当前容量，不支持缩容" }
+
+    StorageVolumeMountRequest:
+      type: object
+      required: [idempotency_key, instance_id, instance_route]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+        instance_id:    { type: string }
+        instance_route: { type: string, enum: [/compute/instances/vm, /compute/instances/container, /compute/instances/gpu-container] }
+        mount_name:     { type: string, nullable: true }
+
+    StorageVolumeUnmountRequest:
+      type: object
+      required: [idempotency_key]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+
+    CreateStorageVolumeFromSnapshotRequest:
+      type: object
+      required: [idempotency_key, name, size_gib]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+        name:     { type: string, minLength: 1, maxLength: 128 }
+        size_gib: { type: integer, format: int64, minimum: 1, description: "新盘容量；必须大于等于快照容量" }
+        zone:     { type: string, nullable: true }
+
+    VolumeOSInitGuide:
+      type: object
+      required: [status, device, steps, hint]
+      properties:
+        status: { type: string, enum: [pending, done, skipped, n_a] }
+        device: { type: string }
+        steps:
+          type: array
+          items:
+            type: object
+            required: [title, command]
+            properties:
+              title:   { type: string }
+              command: { type: string }
+        hint: { type: string }
+
+    VolumeOSInitCompleteRequest:
+      type: object
+      required: [idempotency_key, mode]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+        mode: { type: string, enum: [done, skipped] }
+
+    StorageFilesystemExpandRequest:
+      type: object
+      required: [idempotency_key, size_gib]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+        size_gib: { type: integer, format: int64, minimum: 1, description: "新容量；必须大于当前容量，不支持缩容" }
+
+    FilesystemMountTargetCreateRequest:
+      type: object
+      required: [idempotency_key, subnet_id]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+        subnet_id: { type: string }
+        vpc_id:    { type: string, nullable: true }
+
+    StorageFilesystemMountRequest:
+      type: object
+      required: [idempotency_key, instance_id, instance_route, mount_path]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+        instance_id:    { type: string }
+        instance_route: { type: string, enum: [/compute/instances/vm, /compute/instances/container, /compute/instances/gpu-container] }
+        mount_path:     { type: string, default: /mnt/nfs }
+        auto_mount:     { type: boolean, default: true }
+
+    StorageFilesystemUnmountRequest:
+      type: object
+      required: [idempotency_key, instance_id]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+        instance_id: { type: string }
+
+    FilesystemMountCommand:
+      type: object
+      required: [command, protocol]
+      properties:
+        command:   { type: string }
+        protocol:  { type: string, enum: [nfs, cephfs] }
+        ip_address: { type: string, nullable: true }
+        mount_path: { type: string, nullable: true }
 
     VectorStoreState:
       type: string
       enum: [pending, ready, failed, deleting, deleted]
+
+    VectorStoreIndexStatus:
+      type: string
+      enum: [building, ready, failed]
+
+    VectorStoreKnowledgeBaseRef:
+      type: object
+      required: [id, name, source]
+      properties:
+        id:     { type: string, nullable: true }
+        name:   { type: string }
+        source: { type: string, enum: [services_knowledge_base, external] }
 
     VectorStore:
       type: object
@@ -1349,6 +1531,12 @@ components:
         dimension: { type: integer, minimum: 1 }
         metric:    { type: string, enum: [cosine, l2, ip] }
         state:     { $ref: '#/components/schemas/VectorStoreState' }
+        embedding_model: { type: string, nullable: true }
+        vector_count:    { type: integer, format: int64, minimum: 0, nullable: true }
+        index_status:    { $ref: '#/components/schemas/VectorStoreIndexStatus' }
+        last_indexed_at: { type: string, format: date-time, nullable: true }
+        knowledge_base_ref:
+          $ref: '#/components/schemas/VectorStoreKnowledgeBaseRef'
         reason:    { type: string, nullable: true }
         dev_profile:
           $ref: '#/components/schemas/CoreDevProfileInfo'
@@ -1371,6 +1559,7 @@ components:
         name:            { type: string, minLength: 1, maxLength: 128 }
         dimension:       { type: integer, minimum: 1 }
         metric:          { type: string, enum: [cosine, l2, ip], default: cosine }
+        embedding_model: { type: string, nullable: true }
 
     VectorStoreSearchRequest:
       type: object
@@ -1385,12 +1574,25 @@ components:
           type: object
           additionalProperties: { type: string }
 
+    VectorStoreTextSearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query: { type: string, minLength: 1 }
+        top_k: { type: integer, minimum: 1, maximum: 20, default: 5 }
+        filter:
+          type: object
+          additionalProperties: { type: string }
+
     VectorStoreSearchHit:
       type: object
       required: [id, score, metadata]
       properties:
         id:       { type: string }
+        rank:     { type: integer, minimum: 1 }
+        chunk:    { type: string, nullable: true }
         score:    { type: number, format: float }
+        source:   { type: string, nullable: true }
         metadata:
           type: object
           additionalProperties: { type: string }
@@ -1401,6 +1603,30 @@ components:
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/VectorStoreSearchHit' } }
         total: { type: integer }
+
+    VectorStoreKnowledgeBaseLinkRequest:
+      type: object
+      required: [idempotency_key, knowledge_base_ref]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+        knowledge_base_ref:
+          $ref: '#/components/schemas/VectorStoreKnowledgeBaseRef'
+
+    VectorStoreDeletePrecheck:
+      type: object
+      required: [deletable, blockers]
+      properties:
+        deletable: { type: boolean }
+        reason:    { type: string, nullable: true }
+        blockers:
+          type: array
+          items:
+            type: object
+            required: [kind, id, name]
+            properties:
+              kind: { type: string }
+              id:   { type: string }
+              name: { type: string }
 
     RegistryProject:
       type: object
@@ -2018,6 +2244,7 @@ components:
         id:            { type: string }
         filesystem_id: { type: string }
         subnet_id:     { type: string }
+        vpc_id:        { type: string, nullable: true }
         ip_address:    { type: string }
         status:        { type: string, enum: [creating, available, deleting, error] }
         created_at:    { type: string, format: date-time }
@@ -2039,10 +2266,126 @@ components:
         id:           { type: string, format: uuid }
         name:         { type: string }
         region:       { type: string, nullable: true }
+        endpoint:     { type: string, format: uri, nullable: true }
         access_mode:  { type: string, enum: [private, public_read] }
+        acl:          { type: string, enum: [private, tenant_read], nullable: true }
+        acl_label:    { type: string, nullable: true }
+        storage_class: { type: string, enum: [standard, infrequent_access], nullable: true }
+        versioning:   { type: string, enum: [disabled, enabled], nullable: true }
         object_count: { type: integer }
         size_bytes:   { type: integer }
+        lifecycle_rules:
+          type: array
+          items: { $ref: '#/components/schemas/StorageBucketLifecycleRule' }
+        lifecycle_note: { type: string, nullable: true }
         created_at:   { type: string, format: date-time }
+        updated_at:   { type: string, format: date-time, nullable: true }
+
+    StorageBucketObjectEntry:
+      type: object
+      required: [kind, name, key]
+      properties:
+        kind: { type: string, enum: [prefix, object] }
+        name: { type: string }
+        key:  { type: string }
+        size_bytes: { type: integer, format: int64, minimum: 0, nullable: true }
+        size_label: { type: string, nullable: true }
+        updated_at: { type: string, format: date-time, nullable: true }
+        storage_class: { type: string, enum: [standard, infrequent_access], nullable: true }
+
+    StorageBucketObjectListResponse:
+      type: object
+      required: [items, total, prefix]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/StorageBucketObjectEntry' } }
+        total: { type: integer }
+        prefix: { type: string }
+        next_cursor: { type: string, nullable: true }
+
+    BucketObjectUploadRequest:
+      type: object
+      required: [idempotency_key, key]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+        key: { type: string, minLength: 1, maxLength: 1024 }
+        content_type: { type: string, default: application/octet-stream }
+        size_bytes: { type: integer, format: int64, minimum: 0, nullable: true }
+        storage_class: { type: string, enum: [standard, infrequent_access], default: standard }
+
+    BucketPrefixCreateRequest:
+      type: object
+      required: [idempotency_key, prefix]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+        prefix: { type: string, minLength: 1, maxLength: 1024 }
+
+    BucketObjectDeleteResponse:
+      type: object
+      required: [bucket_id, key, deleted]
+      properties:
+        bucket_id: { type: string }
+        key: { type: string }
+        deleted: { type: boolean }
+
+    BucketObjectPresignedURLRequest:
+      type: object
+      required: [key]
+      properties:
+        key: { type: string, minLength: 1, maxLength: 1024 }
+        expires_hours: { type: integer, minimum: 1, maximum: 168, default: 24 }
+        method: { type: string, enum: [GET, PUT], default: GET }
+
+    StorageBucketACLUpdateRequest:
+      type: object
+      required: [idempotency_key, acl]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+        acl: { type: string, enum: [private, tenant_read] }
+
+    StorageBucketClassUpdateRequest:
+      type: object
+      required: [idempotency_key, storage_class]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+        storage_class: { type: string, enum: [standard, infrequent_access] }
+
+    StorageBucketLifecycleRule:
+      type: object
+      required: [id, name, prefix, expire_days, to_infrequent_days, enabled]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        prefix: { type: string }
+        expire_days: { type: integer, minimum: 1 }
+        to_infrequent_days: { type: integer, minimum: 1 }
+        enabled: { type: boolean }
+
+    StorageBucketLifecycleRuleCreateRequest:
+      type: object
+      required: [idempotency_key, name, prefix, expire_days, to_infrequent_days, enabled]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+        name: { type: string }
+        prefix: { type: string }
+        expire_days: { type: integer, minimum: 1 }
+        to_infrequent_days: { type: integer, minimum: 1 }
+        enabled: { type: boolean }
+
+    StorageBucketLifecycleRuleListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/StorageBucketLifecycleRule' } }
+        total: { type: integer }
+
+    StorageBucketLifecycleRulesUpdateRequest:
+      type: object
+      required: [idempotency_key, rules]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+        rules:
+          type: array
+          items: { $ref: '#/components/schemas/StorageBucketLifecycleRule' }
 
     StorageBucketListResponse:
       type: object
@@ -3667,6 +4010,175 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
 
+  /volumes/{volume_id}/expand:
+    post:
+      operationId: expandStorageVolume
+      summary: 扩容块存储卷
+      description: 只允许扩容，不允许缩容；POST 必须携带 idempotency_key。
+      tags: [Volumes]
+      x-ani-rbac-scope: "scope:volumes:update"
+      parameters:
+        - { name: volume_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StorageVolumeExpandRequest' }
+      responses:
+        "202":
+          description: 扩容任务已提交
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+
+  /volumes/{volume_id}/mount:
+    post:
+      operationId: mountStorageVolume
+      summary: 挂载块存储卷到实例
+      tags: [Volumes]
+      x-ani-rbac-scope: "scope:volumes:update"
+      parameters:
+        - { name: volume_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StorageVolumeMountRequest' }
+      responses:
+        "202":
+          description: 挂载任务已提交
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+
+  /volumes/{volume_id}/unmount:
+    post:
+      operationId: unmountStorageVolume
+      summary: 卸载块存储卷
+      tags: [Volumes]
+      x-ani-rbac-scope: "scope:volumes:update"
+      parameters:
+        - { name: volume_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StorageVolumeUnmountRequest' }
+      responses:
+        "202":
+          description: 卸载任务已提交
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+
+  /volumes/{volume_id}/snapshots/{snapshot_id}/create-volume:
+    post:
+      operationId: createStorageVolumeFromSnapshot
+      summary: 从快照创建新块存储卷
+      tags: [Volumes]
+      x-ani-rbac-scope: "scope:volumes:create"
+      parameters:
+        - { name: volume_id, in: path, required: true, schema: { type: string } }
+        - { name: snapshot_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateStorageVolumeFromSnapshotRequest' }
+      responses:
+        "202":
+          description: 建盘任务已提交
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+
+  /volumes/{volume_id}/auto-snapshot-policy:
+    put:
+      operationId: setVolumeAutoSnapshotPolicy
+      summary: 设置块存储自动快照策略
+      tags: [Volumes]
+      x-ani-rbac-scope: "scope:volumes:update"
+      parameters:
+        - { name: volume_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StorageVolumeAutoSnapshotPolicyUpdateRequest' }
+      responses:
+        "200":
+          description: 自动快照策略已更新
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StorageVolume' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /volumes/{volume_id}/os-init-guide:
+    get:
+      operationId: getVolumeOSInitGuide
+      summary: 查询块存储 OS 初始化引导
+      tags: [Volumes]
+      x-ani-rbac-scope: "scope:volumes:read"
+      parameters:
+        - { name: volume_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OS 初始化引导
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VolumeOSInitGuide' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /volumes/{volume_id}/os-init-complete:
+    post:
+      operationId: completeVolumeOSInit
+      summary: 标记块存储 OS 初始化状态
+      tags: [Volumes]
+      x-ani-rbac-scope: "scope:volumes:update"
+      parameters:
+        - { name: volume_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VolumeOSInitCompleteRequest' }
+      responses:
+        "200":
+          description: OS 初始化状态已更新
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StorageVolume' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
   /filesystems:
     get:
       operationId: listStorageFilesystems
@@ -3757,6 +4269,123 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: createFilesystemMountTarget
+      summary: 创建文件存储挂载目标
+      tags: [Filesystems]
+      x-ani-rbac-scope: "scope:filesystems:update"
+      parameters:
+        - { name: filesystem_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FilesystemMountTargetCreateRequest' }
+      responses:
+        "202":
+          description: 挂载目标创建任务已提交
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+
+  /filesystems/{filesystem_id}/expand:
+    post:
+      operationId: expandStorageFilesystem
+      summary: 扩容文件存储
+      tags: [Filesystems]
+      x-ani-rbac-scope: "scope:filesystems:update"
+      parameters:
+        - { name: filesystem_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StorageFilesystemExpandRequest' }
+      responses:
+        "202":
+          description: 扩容任务已提交
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+
+  /filesystems/{filesystem_id}/mount:
+    post:
+      operationId: mountStorageFilesystem
+      summary: 一键挂载文件存储到实例
+      tags: [Filesystems]
+      x-ani-rbac-scope: "scope:filesystems:update"
+      parameters:
+        - { name: filesystem_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StorageFilesystemMountRequest' }
+      responses:
+        "202":
+          description: 挂载任务已提交
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+
+  /filesystems/{filesystem_id}/unmount:
+    post:
+      operationId: unmountStorageFilesystem
+      summary: 卸载文件存储
+      tags: [Filesystems]
+      x-ani-rbac-scope: "scope:filesystems:update"
+      parameters:
+        - { name: filesystem_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StorageFilesystemUnmountRequest' }
+      responses:
+        "202":
+          description: 卸载任务已提交
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+
+  /filesystems/{filesystem_id}/mount-command:
+    get:
+      operationId: getFilesystemMountCommand
+      summary: 查询文件存储挂载命令
+      tags: [Filesystems]
+      x-ani-rbac-scope: "scope:filesystems:read"
+      parameters:
+        - { name: filesystem_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 挂载命令
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FilesystemMountCommand' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
 
   # ── 对象存储桶（Core API Alpha）────────────────────────────────────────────
   /buckets:
@@ -3796,6 +4425,247 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "409": { $ref: '#/components/responses/Conflict' }
+
+  /buckets/{bucket_id}/objects:
+    get:
+      operationId: listBucketObjects
+      summary: 按前缀浏览桶内对象
+      tags: [ObjectStore]
+      x-ani-rbac-scope: "scope:objects:read"
+      parameters:
+        - { name: bucket_id, in: path, required: true, schema: { type: string } }
+        - { name: prefix, in: query, schema: { type: string, default: "/" } }
+        - { name: limit,  in: query, schema: { type: integer, default: 100, minimum: 1, maximum: 1000 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: 桶对象和前缀列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StorageBucketObjectListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: deleteBucketObject
+      summary: 删除桶内对象
+      tags: [ObjectStore]
+      x-ani-rbac-scope: "scope:objects:delete"
+      parameters:
+        - { name: bucket_id, in: path, required: true, schema: { type: string } }
+        - { name: key, in: query, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 对象已删除
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BucketObjectDeleteResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /buckets/{bucket_id}/objects/upload:
+    post:
+      operationId: uploadBucketObject
+      summary: 申请桶内对象上传预签名 URL
+      tags: [ObjectStore]
+      x-ani-rbac-scope: "scope:objects:create"
+      parameters:
+        - { name: bucket_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BucketObjectUploadRequest' }
+      responses:
+        "200":
+          description: 预签名上传 URL
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StorageObjectUploadResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /buckets/{bucket_id}/prefixes:
+    post:
+      operationId: createBucketPrefix
+      summary: 创建对象存储前缀
+      tags: [ObjectStore]
+      x-ani-rbac-scope: "scope:objects:create"
+      parameters:
+        - { name: bucket_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BucketPrefixCreateRequest' }
+      responses:
+        "201":
+          description: 前缀已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StorageBucketObjectEntry' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /buckets/{bucket_id}/objects/presigned-url:
+    post:
+      operationId: generateBucketObjectPresignedURL
+      summary: 生成桶内对象临时访问链接
+      tags: [ObjectStore]
+      x-ani-rbac-scope: "scope:objects:read"
+      parameters:
+        - { name: bucket_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BucketObjectPresignedURLRequest' }
+      responses:
+        "200":
+          description: 预签名 URL
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StorageObjectDownloadInfo' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /buckets/{bucket_id}/acl:
+    put:
+      operationId: setStorageBucketACL
+      summary: 设置桶 ACL
+      tags: [ObjectStore]
+      x-ani-rbac-scope: "scope:objects:update"
+      parameters:
+        - { name: bucket_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StorageBucketACLUpdateRequest' }
+      responses:
+        "200":
+          description: 桶 ACL 已更新
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StorageBucketRecord' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /buckets/{bucket_id}/storage-class:
+    put:
+      operationId: setStorageBucketClass
+      summary: 设置桶默认存储类型
+      tags: [ObjectStore]
+      x-ani-rbac-scope: "scope:objects:update"
+      parameters:
+        - { name: bucket_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StorageBucketClassUpdateRequest' }
+      responses:
+        "200":
+          description: 桶存储类型已更新
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StorageBucketRecord' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /buckets/{bucket_id}/lifecycle-rules:
+    get:
+      operationId: listStorageBucketLifecycleRules
+      summary: 查询桶生命周期规则
+      tags: [ObjectStore]
+      x-ani-rbac-scope: "scope:objects:read"
+      parameters:
+        - { name: bucket_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 生命周期规则列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StorageBucketLifecycleRuleListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: setStorageBucketLifecycleRules
+      summary: 替换桶生命周期规则
+      tags: [ObjectStore]
+      x-ani-rbac-scope: "scope:objects:update"
+      parameters:
+        - { name: bucket_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StorageBucketLifecycleRulesUpdateRequest' }
+      responses:
+        "200":
+          description: 生命周期规则已更新
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StorageBucketLifecycleRuleListResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: createStorageBucketLifecycleRule
+      summary: 创建桶生命周期规则
+      tags: [ObjectStore]
+      x-ani-rbac-scope: "scope:objects:update"
+      parameters:
+        - { name: bucket_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StorageBucketLifecycleRuleCreateRequest' }
+      responses:
+        "201":
+          description: 生命周期规则已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StorageBucketLifecycleRule' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /buckets/{bucket_id}/lifecycle-rules/{rule_id}:
+    delete:
+      operationId: deleteStorageBucketLifecycleRule
+      summary: 删除桶生命周期规则
+      tags: [ObjectStore]
+      x-ani-rbac-scope: "scope:objects:update"
+      parameters:
+        - { name: bucket_id, in: path, required: true, schema: { type: string } }
+        - { name: rule_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 生命周期规则已删除
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StorageBucketLifecycleRuleListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
 
   /objects:
     get:
@@ -4006,6 +4876,121 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
         "422": { $ref: '#/components/responses/PreconditionFailed' }
+
+  /vector-stores/{vector_store_id}/text-search:
+    post:
+      operationId: textSearchVectorStore
+      summary: 使用文本检索测试向量存储
+      description: 控制台输入文本后由 Core 负责嵌入并返回 TopK 召回结果。
+      tags: [VectorStore]
+      x-ani-rbac-scope: "scope:vector-stores:search"
+      parameters:
+        - { name: vector_store_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VectorStoreTextSearchRequest' }
+      responses:
+        "200":
+          description: 文本检索结果
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VectorStoreSearchResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+
+  /vector-stores/{vector_store_id}/rebuild-index:
+    post:
+      operationId: rebuildVectorStoreIndex
+      summary: 重建向量存储索引
+      tags: [VectorStore]
+      x-ani-rbac-scope: "scope:vector-stores:write"
+      parameters:
+        - { name: vector_store_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idempotency_key]
+              properties:
+                idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+      responses:
+        "202":
+          description: 索引重建任务已提交
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+
+  /vector-stores/{vector_store_id}/knowledge-base-link:
+    put:
+      operationId: setVectorStoreKnowledgeBaseLink
+      summary: 设置向量存储外部知识库引用
+      description: 仅保存外部引用，不把 Services KnowledgeBase schema 回流 Core。
+      tags: [VectorStore]
+      x-ani-rbac-scope: "scope:vector-stores:write"
+      parameters:
+        - { name: vector_store_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VectorStoreKnowledgeBaseLinkRequest' }
+      responses:
+        "200":
+          description: 知识库引用已更新
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VectorStore' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: deleteVectorStoreKnowledgeBaseLink
+      summary: 解除向量存储知识库引用
+      tags: [VectorStore]
+      x-ani-rbac-scope: "scope:vector-stores:write"
+      parameters:
+        - { name: vector_store_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 知识库引用已解除
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VectorStore' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /vector-stores/{vector_store_id}/delete-precheck:
+    get:
+      operationId: precheckVectorStoreDelete
+      summary: 删除向量存储前置检查
+      description: 删除前检查是否仍被知识库等资源引用。
+      tags: [VectorStore]
+      x-ani-rbac-scope: "scope:vector-stores:read"
+      parameters:
+        - { name: vector_store_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 删除前置检查结果
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VectorStoreDeletePrecheck' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
 
   /vector-stores/{vector_store_id}/documents:
     post:

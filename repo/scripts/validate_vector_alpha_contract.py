@@ -19,6 +19,19 @@ EXPECTED_PATHS = {
     "/vector-stores/{vector_store_id}/search": {
         "post": ("searchVectorStore", "scope:vector-stores:search", {"200", "400", "401", "403", "404", "422"}),
     },
+    "/vector-stores/{vector_store_id}/text-search": {
+        "post": ("textSearchVectorStore", "scope:vector-stores:search", {"200", "400", "401", "403", "404", "422"}),
+    },
+    "/vector-stores/{vector_store_id}/rebuild-index": {
+        "post": ("rebuildVectorStoreIndex", "scope:vector-stores:write", {"202", "400", "401", "403", "404", "422"}),
+    },
+    "/vector-stores/{vector_store_id}/knowledge-base-link": {
+        "put": ("setVectorStoreKnowledgeBaseLink", "scope:vector-stores:write", {"200", "400", "401", "403", "404"}),
+        "delete": ("deleteVectorStoreKnowledgeBaseLink", "scope:vector-stores:write", {"200", "401", "403", "404"}),
+    },
+    "/vector-stores/{vector_store_id}/delete-precheck": {
+        "get": ("precheckVectorStoreDelete", "scope:vector-stores:read", {"200", "401", "403", "404"}),
+    },
 }
 
 EXPECTED_SCHEMAS = {
@@ -27,13 +40,24 @@ EXPECTED_SCHEMAS = {
     "VectorStoreListResponse",
     "CreateVectorStoreRequest",
     "VectorStoreSearchRequest",
+    "VectorStoreTextSearchRequest",
     "VectorStoreSearchHit",
     "VectorStoreSearchResponse",
+    "VectorStoreIndexStatus",
+    "VectorStoreKnowledgeBaseRef",
+    "VectorStoreKnowledgeBaseLinkRequest",
+    "VectorStoreDeletePrecheck",
 }
 
 EXPECTED_FIELDS = {
-    "VectorStore": {"id", "tenant_id", "name", "dimension", "metric", "state", "reason", "created_at", "updated_at"},
-    "VectorStoreSearchHit": {"id", "score", "metadata"},
+    "VectorStore": {"id", "tenant_id", "name", "dimension", "metric", "state", "reason", "created_at", "updated_at", "embedding_model", "vector_count", "index_status", "last_indexed_at", "knowledge_base_ref"},
+    "VectorStoreSearchHit": {"id", "rank", "chunk", "score", "source", "metadata"},
+    "VectorStoreKnowledgeBaseRef": {"id", "name", "source"},
+    "VectorStoreDeletePrecheck": {"deletable", "reason", "blockers"},
+}
+
+IDEMPOTENT_REQUEST_SCHEMAS = {
+    "VectorStoreKnowledgeBaseLinkRequest",
 }
 
 EXPECTED_ROUTES = {
@@ -88,6 +112,12 @@ def validate_openapi(root: Path, errors: list[str]) -> None:
         missing = fields - set(properties.keys())
         if missing:
             errors.append(f"schema {schema} missing fields: {sorted(missing)}")
+    for schema in IDEMPOTENT_REQUEST_SCHEMAS:
+        definition = schemas.get(schema, {})
+        required = set(definition.get("required", []))
+        properties = definition.get("properties", {})
+        if "idempotency_key" not in required or "idempotency_key" not in properties:
+            errors.append(f"schema {schema} must require idempotency_key")
     expected_states = {"pending", "ready", "failed", "deleting", "deleted"}
     if set(schemas.get("VectorStoreState", {}).get("enum", [])) != expected_states:
         errors.append(f"VectorStoreState enum must be {sorted(expected_states)}")
