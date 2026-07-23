@@ -76,6 +76,7 @@
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
 | CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A | Console 镜像仓库主流程契约补齐：`RegistryImage.purpose`、`/registry/images?purpose=`、四类算力引用 enum、createInstance 镜像门禁 422 语义；不含 BOSS、权限或实现 | core-registry-console-flow-contract-a.md |
+| CORE-REGISTRY-CONSOLE-FLOW-CORE-A | Core 镜像仓库后端实现：RegistryImage purpose 贯通 port/adapter/router，`/registry/images?purpose=` 支持过滤；不含 instances、Console、BOSS 或权限实现 | core-registry-console-flow-core-a.md |
 
 ### SDK Regression Fixes（2026-06）
 
