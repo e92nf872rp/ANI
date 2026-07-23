@@ -102,3 +102,51 @@ func TestLocalInstanceObservabilityRejectsInvalidRequests(t *testing.T) {
 		t.Fatalf("CreateExecSession without idempotency key succeeded, want error")
 	}
 }
+
+func TestLocalInstanceObservabilityCreateConsoleSessionDefaultsToVNC(t *testing.T) {
+	now := time.Date(2026, 6, 19, 8, 30, 0, 0, time.UTC)
+	service := NewLocalInstanceObservabilityService(WithInstanceObservabilityClock(func() time.Time {
+		return now
+	}))
+	req := ports.InstanceConsoleSessionCreateRequest{
+		TenantID:       "tenant-a",
+		InstanceID:     "11111111-1111-1111-1111-111111111111",
+		IdempotencyKey: "console-once",
+	}
+	first, err := service.CreateConsoleSession(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CreateConsoleSession first error = %v", err)
+	}
+	if first.Protocol != "vnc" {
+		t.Fatalf("protocol = %q, want vnc default", first.Protocol)
+	}
+	if first.SessionID == "" || first.ConnectURL == "" || first.URL != first.ConnectURL {
+		t.Fatalf("console session = %+v, want session_id, connect_url and url", first)
+	}
+	if !first.ExpiresAt.Equal(now.Add(15 * time.Minute)) {
+		t.Fatalf("expires_at = %s, want 15 minute TTL", first.ExpiresAt)
+	}
+	if first.DevProfile.Mode != "local" || first.DevProfile.RealProvider {
+		t.Fatalf("dev profile = %+v, want local non-real marker", first.DevProfile)
+	}
+	// idempotent replay with the same key returns the same session
+	second, err := service.CreateConsoleSession(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CreateConsoleSession replay error = %v", err)
+	}
+	if second.SessionID != first.SessionID {
+		t.Fatalf("replay session_id = %q, want %q", second.SessionID, first.SessionID)
+	}
+	// explicit protocol is preserved
+	serial, err := service.CreateConsoleSession(context.Background(), ports.InstanceConsoleSessionCreateRequest{
+		TenantID:   "tenant-a",
+		InstanceID: "11111111-1111-1111-1111-111111111111",
+		Protocol:   "serial",
+	})
+	if err != nil {
+		t.Fatalf("CreateConsoleSession serial error = %v", err)
+	}
+	if serial.Protocol != "serial" {
+		t.Fatalf("serial protocol = %q, want serial", serial.Protocol)
+	}
+}

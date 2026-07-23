@@ -17,7 +17,7 @@ import { ConsolePageHeader } from '@/components/shell/ConsolePageHeader'
 import { ConsoleContentCard } from '@/components/shell/ConsoleContentCard'
 import { coreApi } from '@/api/coreClient'
 import type { components } from '@/api/core-schema'
-import { CreateGpuContainerDialog } from './create-dialog'
+import { CreateGpuContainerDialog } from './-create-dialog'
 
 export const Route = createFileRoute('/_authenticated/compute/gpu-containers/')({
   component: GpuContainerListPage,

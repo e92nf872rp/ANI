@@ -303,27 +303,35 @@ func (r *LocalImageRegistry) ListImages(ctx context.Context, request ports.Regis
 	if err := validateTenantProject(request.TenantID, project); err != nil {
 		return ports.RegistryImageListResult{}, err
 	}
-	repository := strings.TrimSpace(request.Repository)
-	if repository == "" {
-		repository = "runtime"
+	requestedRepository := strings.TrimSpace(request.Repository)
+	requestedTag := strings.TrimSpace(request.Tag)
+	requestedPurpose := strings.TrimSpace(request.Purpose)
+	items := make([]ports.RegistryImage, 0, len(localRegistryImageSeeds))
+	for _, seed := range localRegistryImageSeeds {
+		if requestedRepository != "" && requestedRepository != seed.repository {
+			continue
+		}
+		if requestedTag != "" && requestedTag != seed.tag {
+			continue
+		}
+		if requestedPurpose != "" && requestedPurpose != seed.purpose {
+			continue
+		}
+		scan, err := r.GetScanResult(ctx, ports.RegistryScanResultRequest{TenantID: request.TenantID, Image: project + "/" + seed.repository + ":" + seed.tag})
+		if err != nil {
+			return ports.RegistryImageListResult{}, err
+		}
+		if request.ScanStatus != "" && request.ScanStatus != scan.Status {
+			continue
+		}
+		image := registryImage(project, seed.repository, seed.tag)
+		items = append(items, ports.RegistryImage{
+			Project: project, Repository: seed.repository, Tag: seed.tag, Purpose: seed.purpose, Image: image, Registry: "registry.local",
+			Digest: registryDigestForTag(seed.tag), MediaType: "application/vnd.oci.image.manifest.v1+json", SizeBytes: seed.sizeBytes,
+			PullCommand: "docker pull " + image, PushedAt: r.now().UTC(), ScanStatus: scan, DevProfile: registryDevProfile(),
+		})
 	}
-	tag := strings.TrimSpace(request.Tag)
-	if tag == "" {
-		tag = "latest"
-	}
-	scan, err := r.GetScanResult(ctx, ports.RegistryScanResultRequest{TenantID: request.TenantID, Image: project + "/" + repository + ":" + tag})
-	if err != nil {
-		return ports.RegistryImageListResult{}, err
-	}
-	if request.ScanStatus != "" && request.ScanStatus != scan.Status {
-		return ports.RegistryImageListResult{DevProfile: registryDevProfile()}, nil
-	}
-	image := registryImage(project, repository, tag)
-	return ports.RegistryImageListResult{Items: []ports.RegistryImage{{
-		Project: project, Repository: repository, Tag: tag, Image: image, Registry: "registry.local",
-		Digest: registryDigestForTag(tag), MediaType: "application/vnd.oci.image.manifest.v1+json", SizeBytes: 1048576,
-		PullCommand: "docker pull " + image, PushedAt: r.now().UTC(), ScanStatus: scan, DevProfile: registryDevProfile(),
-	}}, DevProfile: registryDevProfile()}, nil
+	return ports.RegistryImageListResult{Items: items, DevProfile: registryDevProfile()}, nil
 }
 
 func (r *LocalImageRegistry) GetPushInstructions(_ context.Context, request ports.RegistryPushInstructionsRequest) (ports.RegistryPushInstructions, error) {
@@ -486,6 +494,20 @@ func registryDigestForTag(tag string) string {
 		return "sha256:local-runtime"
 	}
 	return "sha256:local-" + strings.ReplaceAll(strings.TrimSpace(tag), "/", "-")
+}
+
+type localRegistryImageSeed struct {
+	repository string
+	tag        string
+	purpose    string
+	sizeBytes  int64
+}
+
+var localRegistryImageSeeds = []localRegistryImageSeed{
+	{repository: "runtime", tag: "latest", purpose: "container", sizeBytes: 1048576},
+	{repository: "gpu-runtime", tag: "cuda-12.4", purpose: "gpu", sizeBytes: 2147483648},
+	{repository: "sandbox-runtime", tag: "kata-3.8", purpose: "sandbox", sizeBytes: 536870912},
+	{repository: "system-images", tag: "ubuntu-24.04", purpose: "system", sizeBytes: 1073741824},
 }
 
 func registryDevProfile() ports.DevProfileInfo {
