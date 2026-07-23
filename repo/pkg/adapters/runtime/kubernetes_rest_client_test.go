@@ -2,9 +2,15 @@ package runtime
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"os"
@@ -710,4 +716,75 @@ func jsonResponse(status int, body string) *http.Response {
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Body:       io.NopCloser(strings.NewReader(body)),
 	}
+}
+
+// TestKubernetesHTTPClientLoadsCAWhenExplicitlyConfigured 验证非 inCluster 模式下，
+// 当 CAFile 显式非空时（如通过 KUBERNETES_API_HOST + KUBERNETES_SERVICE_ACCOUNT_CA_FILE
+// 显式配置的真实集群，使用自签证书），仍加载该 CA 构造带自定义 RootCAs 的 client，
+// 而不是返回无 CA 的 http.DefaultClient 导致 x509 unknown authority 失败。
+func TestKubernetesHTTPClientLoadsCAWhenExplicitlyConfigured(t *testing.T) {
+	// 动态生成自签 CA 证书 PEM，保证 AppendCertsFromPEM 能成功解析。
+	caPath := filepath.Join(t.TempDir(), "ca.crt")
+	caPEM := mustGenerateTestCA(t)
+	if err := os.WriteFile(caPath, caPEM, 0o600); err != nil {
+		t.Fatalf("write CA: %v", err)
+	}
+
+	client, err := kubernetesHTTPClient(caPath, false)
+	if err != nil {
+		t.Fatalf("kubernetesHTTPClient(explicit CA, not inCluster) error = %v", err)
+	}
+	if client == http.DefaultClient {
+		t.Fatalf("client = http.DefaultClient, want custom client with RootCAs from explicit CA")
+	}
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("transport type = %T, want *http.Transport", client.Transport)
+	}
+	if transport.TLSClientConfig == nil || transport.TLSClientConfig.RootCAs == nil {
+		t.Fatalf("TLSClientConfig.RootCAs = nil, want pool from explicit CA")
+	}
+}
+
+// TestKubernetesHTTPClientReturnsDefaultWhenNoCAAndNotInCluster 验证非 inCluster 且
+// 未配置 CAFile 时返回 http.DefaultClient（公网/标准 CA 场景，零回归）。
+func TestKubernetesHTTPClientReturnsDefaultWhenNoCAAndNotInCluster(t *testing.T) {
+	client, err := kubernetesHTTPClient("", false)
+	if err != nil {
+		t.Fatalf("kubernetesHTTPClient(empty, not inCluster) error = %v", err)
+	}
+	if client != http.DefaultClient {
+		t.Fatalf("client = %p, want http.DefaultClient for public CA scenario", client)
+	}
+}
+
+// TestKubernetesHTTPClientRejectsMissingCAInCluster 验证 inCluster=true 时 CA 读取
+// 失败应返回错误，不伪造默认 client（已有行为，回归保护）。
+func TestKubernetesHTTPClientRejectsMissingCAInCluster(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing-ca.crt")
+	if _, err := kubernetesHTTPClient(missing, true); err == nil {
+		t.Fatalf("kubernetesHTTPClient(missing, inCluster) expected error, got nil")
+	}
+}
+
+// mustGenerateTestCA 动态生成一个自签 CA 证书并返回 PEM 编码，用于测试 CA 加载。
+func mustGenerateTestCA(t *testing.T) []byte {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	tmpl := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "test-ca"},
+		NotBefore:    time.Unix(0, 0),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		IsCA:         true,
+		KeyUsage:     x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("create certificate: %v", err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }

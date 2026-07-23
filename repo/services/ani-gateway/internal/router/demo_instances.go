@@ -374,6 +374,16 @@ type demoInstanceExecSessionResponse struct {
 	DevProfile coreDevProfileResponse `json:"dev_profile"`
 }
 
+type demoInstanceConsoleSessionResponse struct {
+	SessionID  string                 `json:"session_id"`
+	InstanceID string                 `json:"instance_id"`
+	Protocol   string                 `json:"protocol"`
+	ConnectURL string                 `json:"connect_url"`
+	URL        string                 `json:"url"`
+	ExpiresAt  string                 `json:"expires_at"`
+	DevProfile coreDevProfileResponse `json:"dev_profile"`
+}
+
 type demoManifest struct {
 	Name     string `json:"name"`
 	Kind     string `json:"kind"`
@@ -471,13 +481,13 @@ func newDemoInstanceAPIWithObservability(observability ports.InstanceObservabili
 	}
 }
 
-func registerDemoInstancesWithObservability(v1 *route.RouterGroup, observability ports.InstanceObservability, useInstanceName bool, gpuInventory ports.GPUInventory, k8sClient *runtimeadapter.KubernetesRESTClient) {
+func registerDemoInstancesWithObservability(v1 *route.RouterGroup, observability ports.InstanceObservability, useInstanceName bool, gpuInventory ports.GPUInventory, k8sClient *runtimeadapter.KubernetesRESTClient) ports.WorkloadInstanceService {
 	api := newDemoInstanceAPIWithObservability(observability, useInstanceName, gpuInventory, k8sClient)
 	v1.GET("/instances", api.list)
 	v1.POST("/instances", api.create)
 	v1.GET("/instances/:instance_id", api.get)
 	v1.POST("/instances/:instance_id/lifecycle", api.lifecycle)
-	v1.POST("/instances/:instance_id/console", api.console)
+	v1.POST("/instances/:instance_id/console", api.createConsoleSession)
 	v1.GET("/instances/:instance_id/logs", api.listLogs)
 	v1.GET("/instances/:instance_id/events", api.listEvents)
 	v1.GET("/instances/:instance_id/metrics", api.getMetrics)
@@ -493,6 +503,7 @@ func registerDemoInstancesWithObservability(v1 *route.RouterGroup, observability
 	v1.POST("/demo/instances/:instance_id/console", api.console)
 	v1.POST("/demo/instances/:instance_id/console/exec", api.consoleExec)
 	v1.GET("/instance-operations/:operation_id", api.getOperation)
+	return api.service
 }
 
 func (api *demoInstanceAPI) create(ctx context.Context, c *app.RequestContext) {
@@ -1253,6 +1264,10 @@ func (api *demoInstanceAPI) getMetrics(ctx context.Context, c *app.RequestContex
 	result, err := api.observability.GetMetrics(ctx, ports.InstanceObservationGetRequest{
 		TenantID:   demoTenantID(c),
 		InstanceID: api.observabilityTargetID(record),
+		// 透传 record.Kind，使 adapter 的 GPU/VM 分支在生产路径下能正确触发：
+		// gpu_container 走 DCGM 分支填充 GPU 字段，其他 kind 的 GPU 字段保持 nil。
+		// 修复前 handler 未传 Kind，导致 GPU 分支恒不触发，GPU 指标在 Console 中始终为 null。
+		Kind: record.Kind,
 	})
 	if err != nil {
 		writeInstanceObservabilityError(c, err)
@@ -1297,6 +1312,47 @@ func (api *demoInstanceAPI) createExecSession(ctx context.Context, c *app.Reques
 		return
 	}
 	c.JSON(http.StatusOK, demoInstanceExecSessionFromRecord(result))
+}
+
+func (api *demoInstanceAPI) createConsoleSession(ctx context.Context, c *app.RequestContext) {
+	record, err := api.instanceForObservation(ctx, c)
+	if err != nil {
+		writeInstanceObservabilityError(c, err)
+		return
+	}
+	if record.Kind != ports.WorkloadKindVM {
+		writeDemoError(c, http.StatusBadRequest, "UNSUPPORTED", "console session is only available for vm instances")
+		return
+	}
+	if record.Status.State != ports.WorkloadStateRunning {
+		writeDemoError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", "instance must be running to open a console session")
+		return
+	}
+	var req demoConsoleRequest
+	if len(c.Request.Body()) > 0 {
+		if err := c.BindJSON(&req); err != nil {
+			writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid console session request")
+			return
+		}
+	}
+	protocol := strings.ToLower(strings.TrimSpace(req.Protocol))
+	if protocol == "" {
+		protocol = "vnc"
+	}
+	if !isValidConsoleProtocol(protocol) {
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "protocol must be one of console, vnc, novnc, serial")
+		return
+	}
+	result, err := api.observability.CreateConsoleSession(ctx, ports.InstanceConsoleSessionCreateRequest{
+		TenantID:   demoTenantID(c),
+		InstanceID: api.observabilityTargetID(record),
+		Protocol:   protocol,
+	})
+	if err != nil {
+		writeInstanceObservabilityError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, demoInstanceConsoleSessionFromRecord(result))
 }
 
 func (api *demoInstanceAPI) listSecurityEvents(ctx context.Context, c *app.RequestContext) {
@@ -2065,6 +2121,27 @@ func demoInstanceExecSessionFromRecord(record ports.InstanceExecSessionRecord) d
 		Token:      record.Token,
 		ExpiresAt:  record.ExpiresAt.Format(time.RFC3339),
 		DevProfile: coreDevProfileFromPort(record.DevProfile),
+	}
+}
+
+func demoInstanceConsoleSessionFromRecord(record ports.InstanceConsoleSessionRecord) demoInstanceConsoleSessionResponse {
+	return demoInstanceConsoleSessionResponse{
+		SessionID:  record.SessionID,
+		InstanceID: record.InstanceID,
+		Protocol:   record.Protocol,
+		ConnectURL: record.ConnectURL,
+		URL:        record.URL,
+		ExpiresAt:  record.ExpiresAt.Format(time.RFC3339),
+		DevProfile: coreDevProfileFromPort(record.DevProfile),
+	}
+}
+
+func isValidConsoleProtocol(protocol string) bool {
+	switch protocol {
+	case "console", "vnc", "novnc", "serial":
+		return true
+	default:
+		return false
 	}
 }
 

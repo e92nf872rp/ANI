@@ -46,6 +46,23 @@ type observabilityQueryResponse struct {
 	DevProfile coreDevProfileResponse `json:"dev_profile"`
 }
 
+type observabilityRangeQueryResponse struct {
+	Query      string                     `json:"query"`
+	ResultType string                     `json:"result_type"`
+	Results    []observabilityRangeSeries `json:"results"`
+	DevProfile coreDevProfileResponse     `json:"dev_profile"`
+}
+
+type observabilityRangeSeries struct {
+	Metric map[string]string         `json:"metric"`
+	Values []observabilityRangePoint `json:"values"`
+}
+
+type observabilityRangePoint struct {
+	Timestamp string  `json:"timestamp"`
+	Value     float64 `json:"value"`
+}
+
 type observabilitySample struct {
 	Metric    map[string]string `json:"metric"`
 	Value     float64           `json:"value"`
@@ -68,13 +85,17 @@ type observabilityAlertRuleResponse struct {
 	UpdatedAt   string                 `json:"updated_at"`
 }
 
-func newObservabilityAPI() *observabilityAPI {
-	return &observabilityAPI{service: runtimeadapter.NewLocalObservabilityService()}
+func newObservabilityAPI(service ports.ObservabilityService) *observabilityAPI {
+	if service == nil {
+		service = runtimeadapter.NewLocalObservabilityService()
+	}
+	return &observabilityAPI{service: service}
 }
 
-func registerObservability(v1 *route.RouterGroup) {
-	api := newObservabilityAPI()
+func registerObservability(v1 *route.RouterGroup, service ports.ObservabilityService) {
+	api := newObservabilityAPI(service)
 	v1.GET("/observability/query", api.query)
+	v1.GET("/observability/query_range", api.queryRange)
 	v1.GET("/observability/alert-rules", api.listAlertRules)
 	v1.POST("/observability/alert-rules", api.createAlertRule)
 	v1.GET("/observability/alert-rules/:rule_id", api.getAlertRule)
@@ -92,6 +113,44 @@ func (api *observabilityAPI) query(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	c.JSON(http.StatusOK, observabilityQueryFromResult(result))
+}
+
+// queryRange 处理 GET /observability/query_range，转发 PromQL 区间查询。
+func (api *observabilityAPI) queryRange(ctx context.Context, c *app.RequestContext) {
+	startStr := strings.TrimSpace(c.Query("start"))
+	endStr := strings.TrimSpace(c.Query("end"))
+	stepStr := strings.TrimSpace(c.Query("step"))
+	if startStr == "" || endStr == "" || stepStr == "" {
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "start, end and step are required")
+		return
+	}
+	start, err := time.Parse(time.RFC3339, startStr)
+	if err != nil {
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "start must be RFC3339 timestamp")
+		return
+	}
+	end, err := time.Parse(time.RFC3339, endStr)
+	if err != nil {
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "end must be RFC3339 timestamp")
+		return
+	}
+	step, err := time.ParseDuration(stepStr)
+	if err != nil || step <= 0 {
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "step must be a positive Go duration string")
+		return
+	}
+	result, err := api.service.QueryRange(ctx, ports.ObservabilityRangeQueryRequest{
+		TenantID: demoTenantID(c),
+		Query:    c.Query("query"),
+		Start:    start,
+		End:      end,
+		Step:     step,
+	})
+	if err != nil {
+		writeObservabilityError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, observabilityRangeQueryFromResult(result))
 }
 
 func (api *observabilityAPI) createAlertRule(ctx context.Context, c *app.RequestContext) {
@@ -207,6 +266,26 @@ func observabilityQueryFromResult(result ports.ObservabilityQueryResult) observa
 		Query:      result.Query,
 		ResultType: string(result.ResultType),
 		Results:    items,
+		DevProfile: devProfileFromPort(result.DevProfile),
+	}
+}
+
+func observabilityRangeQueryFromResult(result ports.ObservabilityRangeQueryResult) observabilityRangeQueryResponse {
+	series := make([]observabilityRangeSeries, 0, len(result.Results))
+	for _, s := range result.Results {
+		points := make([]observabilityRangePoint, 0, len(s.Values))
+		for _, p := range s.Values {
+			points = append(points, observabilityRangePoint{
+				Timestamp: p.Timestamp.Format(time.RFC3339),
+				Value:     p.Value,
+			})
+		}
+		series = append(series, observabilityRangeSeries{Metric: s.Metric, Values: points})
+	}
+	return observabilityRangeQueryResponse{
+		Query:      result.Query,
+		ResultType: string(result.ResultType),
+		Results:    series,
 		DevProfile: devProfileFromPort(result.DevProfile),
 	}
 }

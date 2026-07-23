@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -13,9 +12,10 @@ import (
 )
 
 type LocalInstanceObservabilityService struct {
-	now      func() time.Time
-	mu       sync.RWMutex
-	sessions map[string]ports.InstanceExecSessionRecord
+	now             func() time.Time
+	mu              sync.RWMutex
+	sessions        map[string]ports.InstanceExecSessionRecord
+	consoleSessions map[string]ports.InstanceConsoleSessionRecord
 }
 
 type InstanceObservabilityOption func(*LocalInstanceObservabilityService)
@@ -30,8 +30,9 @@ func WithInstanceObservabilityClock(now func() time.Time) InstanceObservabilityO
 
 func NewLocalInstanceObservabilityService(options ...InstanceObservabilityOption) *LocalInstanceObservabilityService {
 	service := &LocalInstanceObservabilityService{
-		now:      time.Now,
-		sessions: make(map[string]ports.InstanceExecSessionRecord),
+		now:             time.Now,
+		sessions:        make(map[string]ports.InstanceExecSessionRecord),
+		consoleSessions: make(map[string]ports.InstanceConsoleSessionRecord),
 	}
 	for _, option := range options {
 		option(service)
@@ -142,6 +143,43 @@ func (s *LocalInstanceObservabilityService) CreateExecSession(_ context.Context,
 	return record, nil
 }
 
+// CreateConsoleSession 为 VM 实例创建本地 console 会话记录，支持幂等。
+func (s *LocalInstanceObservabilityService) CreateConsoleSession(_ context.Context, request ports.InstanceConsoleSessionCreateRequest) (ports.InstanceConsoleSessionRecord, error) {
+	if err := validateInstanceObservationIdentity(request.TenantID, request.InstanceID); err != nil {
+		return ports.InstanceConsoleSessionRecord{}, err
+	}
+	protocol := normalizeConsoleProtocol(request.Protocol)
+	key := request.TenantID + "/" + request.InstanceID + "/" + protocol
+	if strings.TrimSpace(request.IdempotencyKey) != "" {
+		key = request.TenantID + "/" + request.InstanceID + "/" + request.IdempotencyKey
+	}
+	s.mu.RLock()
+	if record, ok := s.consoleSessions[key]; ok {
+		s.mu.RUnlock()
+		return record, nil
+	}
+	s.mu.RUnlock()
+
+	now := s.now().UTC()
+	sessionID := uuid.NewString()
+	record := ports.InstanceConsoleSessionRecord{
+		SessionID:  sessionID,
+		InstanceID: request.InstanceID,
+		Protocol:   protocol,
+		ConnectURL: "ws://127.0.0.1:8080/api/v1/instances/" + request.InstanceID + "/console/" + sessionID,
+		URL:        "ws://127.0.0.1:8080/api/v1/instances/" + request.InstanceID + "/console/" + sessionID,
+		ExpiresAt:  now.Add(15 * time.Minute),
+		DevProfile: instanceObservabilityDevProfile(),
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existing, ok := s.consoleSessions[key]; ok {
+		return existing, nil
+	}
+	s.consoleSessions[key] = record
+	return record, nil
+}
+
 func validateInstanceObservationIdentity(tenantID string, instanceID string) error {
 	if strings.TrimSpace(tenantID) == "" {
 		return fmt.Errorf("%w: tenant_id is required", ports.ErrInvalid)
@@ -150,6 +188,14 @@ func validateInstanceObservationIdentity(tenantID string, instanceID string) err
 		return fmt.Errorf("%w: instance_id is required", ports.ErrInvalid)
 	}
 	return nil
+}
+
+func normalizeConsoleProtocol(protocol string) string {
+	protocol = strings.ToLower(strings.TrimSpace(protocol))
+	if protocol == "" {
+		return "vnc"
+	}
+	return protocol
 }
 
 func instanceObservabilityDevProfile() ports.DevProfileInfo {
@@ -235,8 +281,3 @@ func limitSecurityEventRecords(items []ports.InstanceSecurityEventRecord, limit 
 }
 
 var _ ports.InstanceObservability = (*LocalInstanceObservabilityService)(nil)
-
-// CreateConsoleSession is a stub; real implementation arrives in PR3.
-func (s *LocalInstanceObservabilityService) CreateConsoleSession(ctx context.Context, request ports.InstanceConsoleSessionCreateRequest) (ports.InstanceConsoleSessionRecord, error) {
-	return ports.InstanceConsoleSessionRecord{}, errors.New("CreateConsoleSession: not implemented yet, see PR3")
-}
