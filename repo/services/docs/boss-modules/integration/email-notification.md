@@ -271,6 +271,26 @@
 - `POST /api/v1/notifications/email/test`
 - 须 `Idempotency-Key` header
 - 错误：`400`、`401`、`403`、`422`（前置条件不满足）
+- `request_id`：store 层生成 UUID，handler 透传，成功和失败分支均返回，用于排障
+- `sent_at`：仅成功时返回非空时间戳；失败时为 `null`（omitempty 省略）
+- 幂等行为：当前实现不做幂等去重，`Idempotency-Key` 为契约预留；重复调用会发送多封邮件。生产化时应实现去重
+
+## 删除前置校验与当前契约边界
+
+### DELETE /api/v1/notifications/email/recipients/{recipient_id}
+
+- **作用范围**：仅删除单个收件人；不存在批量删除端点
+- **前置条件**：`recipient_id` 必须存在，否则返回 `404 NOT_FOUND`
+- **Idempotency-Key**：OpenAPI 标记为 `required: true`，handler 当前不校验此端点的 Idempotency-Key（与 PUT/PATCH 行为不一致，为已知偏差，生产化时统一）
+- **幂等行为**：删除已不存在的 recipient 返回 `404`（非幂等 204）；重复删除同一 ID 第一次 204、第二次 404
+- **级联影响**：删除收件人后，该邮箱不再接收后续邮件通知；已发出的邮件不受影响
+- **不可恢复**：删除后不可恢复，前端须 Popconfirm 二次确认
+
+### 当前契约边界
+
+- SMTP 配置无 DELETE 端点（只能覆盖更新，不能删除）
+- 事件订阅无 DELETE 端点（只能批量 PUT 开关，不能删除事件类型）
+- 测试发送无 DELETE 端点
 
 ## 使用规则
 
@@ -407,6 +427,26 @@
 }
 ```
 
+### 收件人不存在
+
+```json
+{
+  "code": "NOT_FOUND",
+  "message": "email recipient not found",
+  "request_id": "req-boss-email-404-001"
+}
+```
+
+### 邮件通知存储不可用
+
+```json
+{
+  "code": "STORE_UNAVAILABLE",
+  "message": "email notification store unavailable",
+  "request_id": "req-boss-email-503-001"
+}
+```
+
 ## 相关模块
 
 - [`enterprise-notification.md`](enterprise-notification.md)（企微/钉钉 IM Bot · 同域对照）
@@ -419,7 +459,11 @@
 - [x] 满配章节齐全（对照 [`boss-full-depth-checklist.md`](../governance/boss-full-depth-checklist.md)）
 - [x] 明确 Core `/notifications/email/*` 路径已声明
 - [x] 含字段展示规则、字段口径与单位、状态与能力口径
-- [x] 含响应示例与错误示例（400 + 403 + 422）
+- [x] 含响应示例与错误示例（400 + 403 + 422 + 404 + 503）
 - [x] 独立字段定义（SMTP / 收件人 / 订阅）
 - [x] `password` / `auth_code` 独立保存语义已声明
 - [x] PRD/UX/SPEC 与本文同步
+- [x] `SendTestEmailResponse.request_id` 在成功和失败分支均非空（store 层 UUID 生成）
+- [x] `sent_at` 仅成功时返回非空，失败时为 `null`（omitempty 省略）
+- [x] `删除前置校验与当前契约边界` 章节已补齐
+- [x] 测试发送幂等行为已声明（当前不做去重，`Idempotency-Key` 为契约预留）

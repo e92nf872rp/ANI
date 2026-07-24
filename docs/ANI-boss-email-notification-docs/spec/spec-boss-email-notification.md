@@ -773,13 +773,25 @@ SendTestEmailResponse:
       description: 成功或失败的可读信息
     request_id:
       type: string
-      description: 请求 ID（用于排障）
+      description: |
+        请求 ID（用于排障）。
+        store 层生成 UUID，handler 透传；成功和失败分支均返回非空值。
+        失败时可用于日志关联和排障追踪。
     sent_at:
       type: string
       format: date-time
       nullable: true
+      description: |
+        测试邮件发送时间戳。
+        仅 success=true 时返回非空 ISO 8601 时间戳；success=false 时为 null（omitempty 省略）。
   required: [success, message, request_id]
 ```
+
+**RequestID 生成策略：** store 层 `SendTestEmail` 在发送前生成 `requestID := uuid.NewString()`，成功和失败分支均返回此值。handler 层透传到响应。store 层无访问 gateway middleware `X-Request-ID` 的能力，独立生成 UUID 确保每次测试发送都有唯一标识。
+
+**sent_at 语义：** 仅成功时返回发送时间戳；失败时省略（`omitempty`）。实现中 handler 应在 `success=true` 时设置 `SentAt`，`success=false` 时不设置。
+
+**幂等行为：** 当前实现不做幂等去重，`Idempotency-Key` header required 为契约预留。重复调用同一 `Idempotency-Key` 会发送多封邮件。`PutSmtpConfig` 和 `CreateRecipient` 有幂等去重（返回首次快照），`SendTestEmail` 行为不一致。生产化时应实现去重。
 
 ### 4.4 Error Responses
 

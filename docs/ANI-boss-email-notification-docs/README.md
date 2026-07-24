@@ -38,4 +38,4 @@
 
 - `repo/api/openapi/v1.yaml` — OpenAPI 权威源（体积大，需在仓库内查看）
 - `ANI-06-开发计划.md` — PRD 规划参考（notifications 路径提及）
-- `repo/services/docs/boss-modules/integration/email-notification.md` — 模块主文档（待建）
+- `repo/services/docs/boss-modules/integration/email-notification.md` — 模块主文档（已建成）

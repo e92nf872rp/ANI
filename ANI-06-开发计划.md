@@ -79,15 +79,18 @@ GPU 调度三段式 PR 拆分（2026-07-21）：
 - PR #46 (3/3 实现)：adapters + gateway + 前端 + manifests 实现，OPEN 等待 review；review-it 修复 4 项，5 项 follow-up 延迟；笔记 `gpu-scheduling-batch-01-13-note-it.md §5`。
 
 Registry Console Flow（2026-07-22）：
-- CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A：按 7.22 原型“暂不考虑 BOSS 和权限”边界，Core v1 新增 `RegistryImage.purpose`、`/registry/images?purpose=`、四类算力引用 enum 与 createInstance 镜像门禁 422 语义；仅契约和 Console Core schema 生成物，不含 handler/adapter/Console 页面实现。
+- CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A：按 7.22 原型”暂不考虑 BOSS 和权限”边界，Core v1 新增 `RegistryImage.purpose`、`/registry/images?purpose=`、四类算力引用 enum 与 createInstance 镜像门禁 422 语义；仅契约和 Console Core schema 生成物，不含 handler/adapter/Console 页面实现。
 - CORE-REGISTRY-CONSOLE-FLOW-CORE-A：Core 镜像仓库后端实现已补齐 RegistryImage purpose port/adapter/router 流转和 `/registry/images?purpose=` 过滤；不含 instances、Console、BOSS 或权限实现。
 
 Instance Observability Completion 增量补全（2026-07，PR4 分支）：
 - 分支：`feat/instance-observability-pr4`，对应 SPEC `spec-console-instance-observability-completion.md` 的 16 个设计决策、12 个 User Story 和 8 个批次（B-1~B-8），共 13 个批次记录已归档。
 - 覆盖：LogStore port 抽象（`ports.LogStore`）+ Loki 日志持久化（`LokiLogStore` adapter + Fluent Bit DaemonSet 部署示例）+ Prometheus GPU/VM 指标采集（DCGM exporter + KubeVirt virt-handler scrape）+ PromQL label 重写扩展（`name` label）+ VM 前端 PromQL 模板。
 - 关键设计决策：LogStore 单方法 interface 复用 `InstanceLogEntry`；Loki `direction=backward` + cursor→end（偏离 SPEC `forward`+cursor→start，继承 live gate 修复语义）；Loki pod 正则匹配兼容 ReplicaSet hash；level 推断兼容 Fluent-Bit 无 level 字段日志；VM `resident_bytes` 查询但不赋值；GPU 显存 `FB_FREE+FB_USED`（live gate 复现 DCGM 不暴露 `FB_TOTAL`）；OQ-4 决策 `rewritePromQLLabels` 支持 `name` label 精确匹配。
-- 已知边界：VM 端到端 live 验证待补（当前系统无 VM）；MinIO emptyDir 非持久化风险；Local mock GPU 返回 0 而非 nil（与 port 注释"缺失不等于 0"原则不一致）；Loki 方向与 pod 匹配偏离 SPEC 待 SPEC 同步。
+- 已知边界：VM 端到端 live 验证待补（当前系统无 VM）；MinIO emptyDir 非持久化风险；Local mock GPU 返回 0 而非 nil（与 port 注释”缺失不等于 0”原则不一致）；Loki 方向与 pod 匹配偏离 SPEC 待 SPEC 同步。
 - 详细批次索引见 `repo/development-records/README.md`「Console Instance Observability Completion（2026-07）」章节；执行状态见 `repo/CURRENT-SPRINT.md`「Instance Observability Completion 增量补全」章节。
+
+邮件通知（2026-07-22）：
+- EMAIL-NOTIFY：9 个 Core `/api/v1/notifications/email/*` endpoint（SMTP CRUD / 收件人 CRUD / 事件订阅批量更新 / 测试发送）+ BOSS 前端发信设置页；local 内存 adapter；store 层 RequestID UUID 生成 + handler 透传；48 store 测试 + 34 handler 测试通过；`make validate-architecture` 和前端 `pnpm` 验证待补跑；详见 `repo/development-records/email-notify.md`。M1-NOTIFY-A 的 email 通道已完成，webhook/内部消息通道和通知历史查询待后续。
 ```
 
 | 阶段 | 状态 | 完成时间 | 说明 |
@@ -1802,9 +1805,11 @@ M5（9月）
   - Services 层注册 PaaS 服务的稳定内部域名（如 `postgres.prod.ani.internal`）
   - 底层：CoreDNS 自定义 zone 动态管理
 
-- [ ] `M1-NOTIFY-A`：事件通知 API
+- [x] `M1-NOTIFY-A`：事件通知 API（BOSS 邮件通知已完成，Console 侧待 P2）
   - `CRUD /api/v1/notifications/subscriptions`（订阅事件：webhook/email/内部消息）
   - `GET /api/v1/notifications/events`（通知历史查询）
+  - 已完成：EMAIL-NOTIFY 批次（2026-07-22）实现 9 个 Core `/api/v1/notifications/email/*` endpoint + BOSS 前端发信设置页；store 层 RequestID UUID 生成；48 store 测试 + 34 handler 测试通过；详见 `repo/development-records/email-notify.md`
+  - 未完成：webhook/内部消息通道、通知历史查询、Console 侧通知配置
 
 ### 模块 M1-DPU：DPU 加速节点纳管
 

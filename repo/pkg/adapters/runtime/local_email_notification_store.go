@@ -367,6 +367,11 @@ func (s *localEmailNotificationStore) SendTestEmail(ctx context.Context, idempot
 		auth = smtp.PlainAuth("", username, credential, smtpHost)
 	}
 
+	// Generate a request ID for troubleshooting this send attempt.
+	// The store layer does not have access to the gateway middleware's
+	// X-Request-ID, so we generate a UUID to correlate logs and errors.
+	requestID := uuid.NewString()
+
 	var sendErr error
 	if s.smtpDialerFunc != nil {
 		sendErr = sendViaCustomDialer(ctx, s.smtpDialerFunc, addr, fromAddress, enabledRecipients, encryption, auth)
@@ -378,13 +383,14 @@ func (s *localEmailNotificationStore) SendTestEmail(ctx context.Context, idempot
 		return &ports.EmailTestSendResult{
 			Success:   false,
 			Message:   sendErr.Error(),
-			RequestID: "",
+			RequestID: requestID,
 		}, nil
 	}
 
 	return &ports.EmailTestSendResult{
-		Success: true,
-		Message: "测试邮件已发送",
+		Success:   true,
+		Message:   "测试邮件已发送",
+		RequestID: requestID,
 	}, nil
 }
 

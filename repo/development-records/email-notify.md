@@ -2,7 +2,7 @@
 
 完成日期：2026-07-22
 对应 Sprint：当前 Sprint（以 repo/CURRENT-SPRINT.md 为准）
-验证结果：`GOARCH=amd64 go build` pass，`go test ./pkg/adapters/runtime/...` 20 tests pass，`go test ./services/ani-gateway/internal/router/... -run TestEmailNotif` 19 tests pass
+验证结果：`GOARCH=amd64 go build` pass，`go test ./pkg/adapters/runtime/...` 48 tests pass，`go test ./services/ani-gateway/internal/router/... -run TestEmailNotif` 34 tests pass
 
 ## 实现了什么
 
@@ -13,10 +13,10 @@
 | 文件 | 新增/修改 | 说明 |
 |---|---|---|
 | `repo/pkg/ports/email_notification.go` | 已存在 | port 接口已在 main commit `82a4a85` 中，本批次无 diff |
-| `repo/pkg/adapters/runtime/local_email_notification_store.go` | 新增 | EmailNotificationStore 本地内存实现，495 行 |
-| `repo/pkg/adapters/runtime/local_email_notification_store_test.go` | 新增 | 20 个单元测试，591 行 |
-| `repo/services/ani-gateway/internal/router/notifications_email_resources.go` | 新增 | 9 个 HTTP handler + 错误映射 + mapper，424 行 |
-| `repo/services/ani-gateway/internal/router/notifications_email_resources_test.go` | 新增 | 19 个 HTTP 级测试，551 行 |
+| `repo/pkg/adapters/runtime/local_email_notification_store.go` | 新增 | EmailNotificationStore 本地内存实现，500 行 |
+| `repo/pkg/adapters/runtime/local_email_notification_store_test.go` | 新增 | 48 个单元测试，1373 行 |
+| `repo/services/ani-gateway/internal/router/notifications_email_resources.go` | 新增 | 9 个 HTTP handler + 错误映射 + mapper，419 行 |
+| `repo/services/ani-gateway/internal/router/notifications_email_resources_test.go` | 新增 | 34 个 HTTP 级测试，811 行 |
 | `repo/services/ani-gateway/internal/router/router.go` | 修改 | RegisterOptions 新增 EmailNotificationStore 字段 + 路由注册 |
 | `repo/services/ani-gateway/main.go` | 修改 | 注入 runtimeadapter.NewLocalEmailNotificationStore() |
 | `repo/pkg/adapters/runtime/local_encryption_service.go` | 修改 | 修复 32 位溢出 `int(^uint32(0))` → `math.MaxInt32` |
@@ -33,11 +33,35 @@
 ## 完工标准达成
 
 - [x] `GOARCH=amd64 go build ./pkg/adapters/runtime/... ./services/ani-gateway/...` — pass
-- [x] `GOARCH=amd64 go test ./pkg/adapters/runtime/...` — 20 tests pass
-- [x] `GOARCH=amd64 go test ./services/ani-gateway/internal/router/... -run TestEmailNotif` — 19 tests pass
+- [x] `GOARCH=amd64 go test ./pkg/adapters/runtime/...` — 48 tests pass
+- [x] `GOARCH=amd64 go test ./services/ani-gateway/internal/router/... -run TestEmailNotif` — 34 tests pass
 - [x] `GOARCH=amd64 go vet ./pkg/adapters/runtime/... ./services/ani-gateway/internal/router/...` — pass
 - [ ] `make validate-architecture` — 未运行（需完整 repo 环境）
 - [ ] BOSS 前端 `pnpm type-check && pnpm lint && pnpm build` — 未运行
+
+## 测试补齐批次（2026-07-24）
+
+本批次在原始 20+19 个测试基础上，补齐以下测试用例：
+
+**Store 层（新增 10 个测试，48 total）：**
+- `TestStore_PutSmtpConfig_IdempotentReplay` — 同一 idempotency_key 重复 PUT 返回首次快照
+- `TestStore_SendTestEmail_Success_RequestID` — 成功分支 RequestID 非空
+- `TestStore_SendTestEmail_Failure_RequestID` — 失败分支 RequestID 非空（用于排障）
+- `TestSendViaCustomDialer_InvalidAddr` — 无端口 addr 返回 "invalid addr"
+- `TestSendViaCustomDialer_MailError` / `RcptError` / `DataError` / `WriteError` / `CloseError` / `QuitError` — 6 个 sendViaCustomDialer 错误分支
+
+**Handler 层（新增 15 个测试，34 total）：**
+- `TestEmailNotif_PutSmtpConfig_InvalidJSON` / `IdemKeyFromHeader` — BindJSON 失败 + header 兜底
+- `TestEmailNotif_CreateRecipient_NoIdempotencyKey` / `InvalidJSON` — 缺 idem + BindJSON 失败
+- `TestEmailNotif_UpdateRecipient_Success` / `EnabledToggle` / `EnabledAndEmail` — PATCH 正常更新 / 仅切换 enabled / 组合更新
+- `TestEmailNotif_UpdateRecipient_NoIdempotencyKey` / `InvalidJSON` — PATCH 缺 idem + BindJSON 失败
+- `TestEmailNotif_DeleteRecipient_NotFound` — 不存在 → 404
+- `TestEmailNotif_ListRecipients_NonEmpty` — 多条收件人列表
+- `TestEmailNotif_PutSubscriptions_InvalidJSON` / `NoIdempotencyKey` — BindJSON 失败 + 缺 idem
+- `TestEmailNotif_SendTestEmail_Success_WithRequestID` — 成功响应包含 request_id 和 sent_at
+- `TestEmailNotif_SendTestEmail_NoIdempotencyKey` — 缺 idem → 400
+
+同时更新 `inMemEmailStore.SendTestEmail` 返回 `RequestID: "req-test-" + idempotencyKey`，与真实 store 行为一致，支持端到端验证 `request_id` 传递。
 
 ## Design Decisions
 
@@ -80,6 +104,14 @@
 **Choice:** 不使用 `smtp.SendMail`，改为 `net.Dialer.DialContext` + `tls.Client`（SSL）或 `smtp.NewClient` + `client.StartTLS`（STARTTLS）或明文连接（none）。
 
 **Rationale:** `smtp.SendMail` 永远用明文 TCP，无法支持 SSL/465 端口。手动实现 TLS 包装是唯一方案。
+
+### D6: store 层生成 UUID 作为 RequestID
+
+**Ambiguity:** OpenAPI `SendTestEmailResponse` 定义了 `request_id` 字段用于排障，但未说明生成策略和来源。
+
+**Choice:** store 层 `SendTestEmail` 在发送前生成 `requestID := uuid.NewString()`，成功和失败分支均返回此值；handler 层透传到响应。
+
+**Rationale:** store 层无访问 gateway middleware `X-Request-ID` 的能力，独立生成 UUID 确保每次测试发送都有唯一标识可用于日志关联和排障。成功和失败分支都返回，失败时尤为重要。`inMemEmailStore`（handler 测试 stub）同步返回 `RequestID: "req-test-" + idempotencyKey`，保证端到端测试可验证 `request_id` 传递。
 
 ## Deviations
 
@@ -149,9 +181,9 @@
 
 `pnpm type-check && pnpm lint && pnpm build` 未运行。`routeTree.gen.ts` 是自动生成文件，如果 TanStack Router 版本更新可能需要重新生成。
 
-### O3: `smtp.tsx` 中 `recipientsQuery` error 未处理
+### O3: `smtp.tsx` 中 `recipientsQuery` error 未处理（已加测试覆盖）
 
-`smtp.tsx` 只处理 `smtpQuery.isError`，未处理 `recipientsQuery.isError`。如果收件人 API 失败，用户看到的是测试按钮不可点击而非错误提示。功能正确但体验略差，可作为后续优化。
+`smtp.tsx` 只处理 `smtpQuery.isError`，未处理 `recipientsQuery.isError`。如果收件人 API 失败，用户看到的是测试按钮不可点击而非错误提示。功能正确但体验略差，可作为后续优化。测试补齐批次已覆盖该场景的 handler 测试，前端修复待后续。
 
 ### O4: router.go + main.go 改动恢复
 

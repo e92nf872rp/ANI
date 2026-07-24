@@ -139,5 +139,5 @@
 | OpenAPI authority | **须 Core 变更批次**：先补 `v1.yaml`，再实现；禁止自造已冻结 path |
 | Frozen exclusions | Services `model-service`/`kb-service`；不得用租户 integrations 冒充平台邮件 API |
 | idempotency_key | 通道保存、收件人写操作、订阅保存、测试发送等写路径 |
-| Module main doc | 待建：`repo/services/docs/boss-modules/integration/email-notification.md` |
+| Module main doc | 已建成：`repo/services/docs/boss-modules/integration/email-notification.md` |
 | 对照模块 | `boss-modules/integration/enterprise-notification.md`（IM，非 Email） |
