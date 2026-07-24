@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -210,6 +211,9 @@ func TestLocalVectorStoreServiceInsertDocumentsRequiresReadyStore(t *testing.T) 
 type fakeVectorStore struct {
 	upsertRef     ports.VectorCollectionRef
 	upsertRecords []ports.VectorRecord
+	deleteExprRef ports.VectorCollectionRef
+	deleteExpr     string
+	deleteExprCount int
 }
 
 func (s *fakeVectorStore) EnsureCollection(context.Context, ports.VectorCollectionRef, int) error {
@@ -230,10 +234,130 @@ func (s *fakeVectorStore) Delete(context.Context, ports.VectorCollectionRef, []s
 	return nil
 }
 
+func (s *fakeVectorStore) DeleteByExpr(_ context.Context, ref ports.VectorCollectionRef, expr string) (int, error) {
+	s.deleteExprRef = ref
+	s.deleteExpr = expr
+	return s.deleteExprCount, nil
+}
+
 func (s *fakeVectorStore) Health(context.Context) error {
 	return nil
 }
 
 func (s *fakeVectorStore) CollectionHealth(context.Context, ports.VectorCollectionRef) (ports.VectorCollectionHealth, error) {
 	return ports.VectorCollectionHealth{Ready: true}, nil
+}
+
+func TestLocalVectorStoreServiceDeleteDocumentsRequiresFilter(t *testing.T) {
+	service := NewLocalVectorStoreService()
+	_, err := service.DeleteDocuments(context.Background(), ports.VectorStoreDocumentDeleteRequest{
+		TenantID:   "tenant-a",
+		ResourceID: "vst-any",
+		Filter:     "   ",
+	})
+	if !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("DeleteDocuments error = %v, want ErrInvalid", err)
+	}
+}
+
+func TestLocalVectorStoreServiceDeleteDocumentsRejectsOversizedFilter(t *testing.T) {
+	service := NewLocalVectorStoreService()
+	longFilter := strings.Repeat("a", 513)
+	_, err := service.DeleteDocuments(context.Background(), ports.VectorStoreDocumentDeleteRequest{
+		TenantID:   "tenant-a",
+		ResourceID: "vst-any",
+		Filter:     longFilter,
+	})
+	if !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("DeleteDocuments error = %v, want ErrInvalid for oversized filter", err)
+	}
+}
+
+func TestLocalVectorStoreServiceDeleteDocumentsRequiresExistingStore(t *testing.T) {
+	service := NewLocalVectorStoreService()
+	_, err := service.DeleteDocuments(context.Background(), ports.VectorStoreDocumentDeleteRequest{
+		TenantID:   "tenant-a",
+		ResourceID: "vst-missing",
+		Filter:     `doc_id == "abc"`,
+	})
+	if !errors.Is(err, ports.ErrNotFound) {
+		t.Fatalf("DeleteDocuments error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestLocalVectorStoreServiceDeleteDocumentsRequiresReadyStore(t *testing.T) {
+	service := NewLocalVectorStoreService()
+	store, err := service.CreateVectorStore(context.Background(), ports.VectorStoreCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "vector-store-delete-pending",
+		Name:           "pending-index",
+		Dimension:      3,
+	})
+	if err != nil {
+		t.Fatalf("CreateVectorStore() error = %v", err)
+	}
+	_, err = service.DeleteDocuments(context.Background(), ports.VectorStoreDocumentDeleteRequest{
+		TenantID:   "tenant-a",
+		ResourceID: store.StoreID,
+		Filter:     `doc_id == "abc"`,
+	})
+	if !errors.Is(err, ports.ErrFailedPrecondition) {
+		t.Fatalf("DeleteDocuments error = %v, want ErrFailedPrecondition", err)
+	}
+}
+
+func TestLocalVectorStoreServiceDeleteDocumentsUsesVectorStorePort(t *testing.T) {
+	backend := &fakeVectorStore{deleteExprCount: 5}
+	service := NewLocalVectorStoreService(WithVectorStoreBackend(backend))
+	store, err := service.CreateVectorStore(context.Background(), ports.VectorStoreCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "vector-store-delete-docs",
+		Name:           "kb-main",
+		Dimension:      3,
+	})
+	if err != nil {
+		t.Fatalf("CreateVectorStore() error = %v", err)
+	}
+
+	result, err := service.DeleteDocuments(context.Background(), ports.VectorStoreDocumentDeleteRequest{
+		TenantID:   "tenant-a",
+		ResourceID: store.StoreID,
+		Filter:     `doc_id == "abc"`,
+	})
+	if err != nil {
+		t.Fatalf("DeleteDocuments() error = %v", err)
+	}
+	if result.DeletedCount != 5 {
+		t.Fatalf("DeletedCount = %d, want 5", result.DeletedCount)
+	}
+	if backend.deleteExpr != `doc_id == "abc"` {
+		t.Fatalf("backend expr = %q, want filter expression", backend.deleteExpr)
+	}
+	if backend.deleteExprRef.TenantID != "tenant-a" || backend.deleteExprRef.KBID != store.StoreID {
+		t.Fatalf("backend ref = %#v, want tenant-a store collection", backend.deleteExprRef)
+	}
+}
+
+func TestLocalVectorStoreServiceDeleteDocumentsReturnsZeroWithoutBackend(t *testing.T) {
+	service := NewLocalVectorStoreService()
+	store, err := service.CreateVectorStore(context.Background(), ports.VectorStoreCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "vector-store-delete-no-backend",
+		Name:           "kb-main",
+		Dimension:      3,
+	})
+	if err != nil {
+		t.Fatalf("CreateVectorStore() error = %v", err)
+	}
+	result, err := service.DeleteDocuments(context.Background(), ports.VectorStoreDocumentDeleteRequest{
+		TenantID:   "tenant-a",
+		ResourceID: store.StoreID,
+		Filter:     `doc_id == "abc"`,
+	})
+	if err != nil {
+		t.Fatalf("DeleteDocuments() error = %v", err)
+	}
+	if result.DeletedCount != 0 {
+		t.Fatalf("DeletedCount = %d, want 0 without backend", result.DeletedCount)
+	}
 }

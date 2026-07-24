@@ -240,6 +240,30 @@ func (s *LocalVectorStoreService) InsertDocuments(ctx context.Context, request p
 	return result, nil
 }
 
+func (s *LocalVectorStoreService) DeleteDocuments(ctx context.Context, request ports.VectorStoreDocumentDeleteRequest) (ports.VectorStoreDocumentDeleteResult, error) {
+	if strings.TrimSpace(request.Filter) == "" {
+		return ports.VectorStoreDocumentDeleteResult{}, fmt.Errorf("%w: filter expression is required", ports.ErrInvalid)
+	}
+	if len(request.Filter) > 512 {
+		return ports.VectorStoreDocumentDeleteResult{}, fmt.Errorf("%w: filter expression must not exceed 512 characters", ports.ErrInvalid)
+	}
+	record, err := s.GetVectorStore(ctx, ports.VectorStoreResourceGetRequest{TenantID: request.TenantID, ResourceID: request.ResourceID})
+	if err != nil {
+		return ports.VectorStoreDocumentDeleteResult{}, err
+	}
+	if record.State != ports.VectorStoreReady {
+		return ports.VectorStoreDocumentDeleteResult{}, fmt.Errorf("%w: vector store is not ready", ports.ErrFailedPrecondition)
+	}
+	if s.backend == nil {
+		return ports.VectorStoreDocumentDeleteResult{DeletedCount: 0}, nil
+	}
+	count, err := s.backend.DeleteByExpr(ctx, vectorCollectionRef(record), request.Filter)
+	if err != nil {
+		return ports.VectorStoreDocumentDeleteResult{}, err
+	}
+	return ports.VectorStoreDocumentDeleteResult{DeletedCount: count}, nil
+}
+
 func requireVectorStoreTenantAndName(tenantID string, name string) error {
 	if strings.TrimSpace(tenantID) == "" {
 		return fmt.Errorf("%w: tenant_id is required", ports.ErrInvalid)

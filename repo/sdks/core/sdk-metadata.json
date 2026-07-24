@@ -833,6 +833,12 @@
       "scope": "scope:vector-stores:read"
     },
     {
+      "operationId": "deleteVectorStoreDocuments",
+      "method": "DELETE",
+      "path": "/vector-stores/{vector_store_id}/documents",
+      "scope": "scope:vector-stores:write"
+    },
+    {
       "operationId": "insertVectorStoreDocuments",
       "method": "POST",
       "path": "/vector-stores/{vector_store_id}/documents",
@@ -1065,6 +1071,7 @@
     "UpdateNetworkSecurityGroupRuleRequest",
     "UpdateObservabilityAlertRuleRequest",
     "VectorStore",
+    "VectorStoreDocumentDeleteResponse",
     "VectorStoreDocumentInsertRequest",
     "VectorStoreDocumentInsertResponse",
     "VectorStoreListResponse",
@@ -1148,10 +1155,13 @@
     "CONFLICT",
     "FORBIDDEN",
     "INTERNAL_ERROR",
+    "INVALID_FILTER",
     "NOT_FOUND",
     "NOT_IMPLEMENTED",
     "PRECONDITION_FAILED",
     "RATE_LIMIT_EXCEEDED",
-    "UNAUTHORIZED"
+    "UNAUTHORIZED",
+    "UNAVAILABLE",
+    "VECTOR_STORE_NOT_FOUND"
   ]
 }

@@ -157,6 +157,7 @@ var Operations = []string{
 	"createVectorStore",
 	"deleteVectorStore",
 	"getVectorStore",
+	"deleteVectorStoreDocuments",
 	"insertVectorStoreDocuments",
 	"searchVectorStore",
 	"listStorageVolumes",
@@ -305,6 +306,7 @@ var Paths = []string{
 	"POST /vector-stores",
 	"DELETE /vector-stores/{vector_store_id}",
 	"GET /vector-stores/{vector_store_id}",
+	"DELETE /vector-stores/{vector_store_id}/documents",
 	"POST /vector-stores/{vector_store_id}/documents",
 	"POST /vector-stores/{vector_store_id}/search",
 	"GET /volumes",
@@ -498,6 +500,7 @@ var Schemas = []string{
 	"UpdateNetworkSecurityGroupRuleRequest",
 	"UpdateObservabilityAlertRuleRequest",
 	"VectorStore",
+	"VectorStoreDocumentDeleteResponse",
 	"VectorStoreDocumentInsertRequest",
 	"VectorStoreDocumentInsertResponse",
 	"VectorStoreListResponse",
@@ -581,11 +584,14 @@ var ErrorCodes = []string{
 	"CONFLICT",
 	"FORBIDDEN",
 	"INTERNAL_ERROR",
+	"INVALID_FILTER",
 	"NOT_FOUND",
 	"NOT_IMPLEMENTED",
 	"PRECONDITION_FAILED",
 	"RATE_LIMIT_EXCEEDED",
 	"UNAUTHORIZED",
+	"UNAVAILABLE",
+	"VECTOR_STORE_NOT_FOUND",
 }
 
 type APIError struct {

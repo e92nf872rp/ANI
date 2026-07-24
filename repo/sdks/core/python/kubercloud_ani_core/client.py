@@ -146,6 +146,7 @@ OPERATIONS = [
     "createVectorStore",
     "deleteVectorStore",
     "getVectorStore",
+    "deleteVectorStoreDocuments",
     "insertVectorStoreDocuments",
     "searchVectorStore",
     "listStorageVolumes",
@@ -294,6 +295,7 @@ PATHS = [
     "POST /vector-stores",
     "DELETE /vector-stores/{vector_store_id}",
     "GET /vector-stores/{vector_store_id}",
+    "DELETE /vector-stores/{vector_store_id}/documents",
     "POST /vector-stores/{vector_store_id}/documents",
     "POST /vector-stores/{vector_store_id}/search",
     "GET /volumes",
@@ -487,6 +489,7 @@ SCHEMAS = [
     "UpdateNetworkSecurityGroupRuleRequest",
     "UpdateObservabilityAlertRuleRequest",
     "VectorStore",
+    "VectorStoreDocumentDeleteResponse",
     "VectorStoreDocumentInsertRequest",
     "VectorStoreDocumentInsertResponse",
     "VectorStoreListResponse",
@@ -570,11 +573,14 @@ ERROR_CODES = [
     "CONFLICT",
     "FORBIDDEN",
     "INTERNAL_ERROR",
+    "INVALID_FILTER",
     "NOT_FOUND",
     "NOT_IMPLEMENTED",
     "PRECONDITION_FAILED",
     "RATE_LIMIT_EXCEEDED",
-    "UNAUTHORIZED"
+    "UNAUTHORIZED",
+    "UNAVAILABLE",
+    "VECTOR_STORE_NOT_FOUND"
 ]
 
 

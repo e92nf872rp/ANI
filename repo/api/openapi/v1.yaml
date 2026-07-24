@@ -2112,6 +2112,15 @@ components:
         task_id:        { type: string, format: uuid }
         status:         { type: string, enum: [pending, completed, failed] }
 
+    VectorStoreDocumentDeleteResponse:
+      type: object
+      required: [deleted_count]
+      properties:
+        deleted_count:
+          type: integer
+          minimum: 0
+          description: 实际删除的向量数（best-effort，Milvus 可能不精确）
+
     K8sClusterWorkload:
       type: object
       required: [name, namespace, kind, replicas, ready_replicas, status, created_at, dev_profile]
@@ -2417,6 +2426,16 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
+    VectorStoreNotFound:
+      description: 向量存储不存在（code=VECTOR_STORE_NOT_FOUND）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    InvalidFilter:
+      description: filter 表达式非法（code=INVALID_FILTER）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
     NetworkSecurityGroupRuleNotFound:
       description: 安全组不存在，或 rule_id 不属于该 security_group_id（code=NOT_FOUND）
       content:
@@ -2443,6 +2462,11 @@ components:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
     PreconditionFailed:
       description: 前置条件不满足（code=PRECONDITION_FAILED）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    ServiceUnavailable:
+      description: 依赖服务暂不可用（code=UNAVAILABLE）
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -4032,6 +4056,27 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
         "422": { $ref: '#/components/responses/PreconditionFailed' }
+    delete:
+      operationId: deleteVectorStoreDocuments
+      summary: 按 filter 删除向量文档
+      description: 按 Milvus boolean expression 过滤删除指定向量存储中的文档向量；DELETE 天然幂等，不要求 idempotency_key。
+      tags: [VectorStore]
+      x-ani-rbac-scope: "scope:vector-stores:write"
+      parameters:
+        - { name: vector_store_id, in: path, required: true, schema: { type: string } }
+        - { name: filter, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 512 }, description: Milvus boolean expression，如 `doc_id == "abc"` }
+      responses:
+        "200":
+          description: 删除完成
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VectorStoreDocumentDeleteResponse' }
+        "400": { $ref: '#/components/responses/InvalidFilter' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/VectorStoreNotFound' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
 
   # ── 镜像仓库 ────────────────────────────────────────────────────────────────
   /registry/overview:

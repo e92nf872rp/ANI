@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/route"
@@ -65,6 +66,10 @@ type vectorStoreDocumentInsertResponse struct {
 	Status        string `json:"status"`
 }
 
+type vectorStoreDocumentDeleteResponse struct {
+	DeletedCount int `json:"deleted_count"`
+}
+
 func newVectorStoreAPI() *vectorStoreAPI {
 	return newVectorStoreAPIWithService(nil)
 }
@@ -88,6 +93,7 @@ func registerVectorStoreResourcesWithService(v1 *route.RouterGroup, service port
 	v1.DELETE("/vector-stores/:vector_store_id", api.deleteVectorStore)
 	v1.POST("/vector-stores/:vector_store_id/search", api.searchVectorStore)
 	v1.POST("/vector-stores/:vector_store_id/documents", api.insertVectorStoreDocuments)
+	v1.DELETE("/vector-stores/:vector_store_id/documents", api.deleteVectorStoreDocuments)
 }
 
 func (api *vectorStoreAPI) createVectorStore(ctx context.Context, c *app.RequestContext) {
@@ -197,6 +203,44 @@ func (api *vectorStoreAPI) insertVectorStoreDocuments(ctx context.Context, c *ap
 	c.JSON(http.StatusAccepted, vectorStoreDocumentInsertFromResult(result))
 }
 
+func (api *vectorStoreAPI) deleteVectorStoreDocuments(ctx context.Context, c *app.RequestContext) {
+	filter := strings.TrimSpace(string(c.QueryArgs().Peek("filter")))
+	if filter == "" {
+		writeDemoError(c, http.StatusBadRequest, "INVALID_FILTER", "filter 表达式不能为空")
+		return
+	}
+	if len(filter) > 512 {
+		writeDemoError(c, http.StatusBadRequest, "INVALID_FILTER", "filter 表达式长度不能超过 512")
+		return
+	}
+	result, err := api.service.DeleteDocuments(ctx, ports.VectorStoreDocumentDeleteRequest{
+		TenantID:   demoTenantID(c),
+		ResourceID: c.Param("vector_store_id"),
+		Filter:     filter,
+	})
+	if err != nil {
+		if errors.Is(err, ports.ErrNotFound) {
+			writeDemoError(c, http.StatusNotFound, "VECTOR_STORE_NOT_FOUND", "向量存储不存在")
+			return
+		}
+		if errors.Is(err, ports.ErrFailedPrecondition) {
+			writeDemoError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", err.Error())
+			return
+		}
+		if errors.Is(err, ports.ErrUnavailable) {
+			writeDemoError(c, http.StatusServiceUnavailable, "UNAVAILABLE", err.Error())
+			return
+		}
+		if errors.Is(err, ports.ErrInvalid) {
+			writeDemoError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", "filter 表达式非法")
+			return
+		}
+		writeVectorStoreError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, vectorStoreDocumentDeleteFromResult(result))
+}
+
 func vectorStoreFromRecord(record ports.VectorStoreRecord) vectorStoreResponse {
 	return vectorStoreResponse{
 		ID:         record.StoreID,
@@ -220,6 +264,10 @@ func vectorStoreDocumentInsertFromResult(result ports.VectorStoreDocumentInsertR
 	}
 }
 
+func vectorStoreDocumentDeleteFromResult(result ports.VectorStoreDocumentDeleteResult) vectorStoreDocumentDeleteResponse {
+	return vectorStoreDocumentDeleteResponse{DeletedCount: result.DeletedCount}
+}
+
 func stringMetadata(metadata map[string]any) map[string]string {
 	if len(metadata) == 0 {
 		return nil
@@ -239,6 +287,8 @@ func writeVectorStoreError(c *app.RequestContext, err error) {
 	switch {
 	case errors.Is(err, ports.ErrNotFound):
 		writeDemoError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
+	case errors.Is(err, ports.ErrUnavailable):
+		writeDemoError(c, http.StatusServiceUnavailable, "UNAVAILABLE", err.Error())
 	case errors.Is(err, ports.ErrUnsupported):
 		writeDemoError(c, http.StatusBadRequest, "UNSUPPORTED", err.Error())
 	case errors.Is(err, ports.ErrFailedPrecondition):

@@ -30,6 +30,10 @@ func (NotConfigured) Delete(context.Context, ports.VectorCollectionRef, []string
 	return ports.ErrNotConfigured
 }
 
+func (NotConfigured) DeleteByExpr(context.Context, ports.VectorCollectionRef, string) (int, error) {
+	return 0, ports.ErrNotConfigured
+}
+
 func (NotConfigured) CollectionHealth(context.Context, ports.VectorCollectionRef) (ports.VectorCollectionHealth, error) {
 	return ports.VectorCollectionHealth{}, ports.ErrNotConfigured
 }

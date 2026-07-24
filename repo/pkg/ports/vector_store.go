@@ -73,6 +73,16 @@ type VectorStoreDocumentInsertResult struct {
 	Status        string
 }
 
+type VectorStoreDocumentDeleteRequest struct {
+	TenantID   string
+	ResourceID string
+	Filter     string
+}
+
+type VectorStoreDocumentDeleteResult struct {
+	DeletedCount int
+}
+
 type VectorCollectionRef struct {
 	TenantID string
 	KBID     string
@@ -108,6 +118,7 @@ type VectorStore interface {
 	Upsert(ctx context.Context, ref VectorCollectionRef, records []VectorRecord) error
 	Search(ctx context.Context, query VectorSearchQuery) ([]VectorSearchResult, error)
 	Delete(ctx context.Context, ref VectorCollectionRef, ids []string) error
+	DeleteByExpr(ctx context.Context, ref VectorCollectionRef, expr string) (int, error)
 	CollectionHealth(ctx context.Context, ref VectorCollectionRef) (VectorCollectionHealth, error)
 }
 
@@ -118,4 +129,5 @@ type VectorStoreService interface {
 	DeleteVectorStore(ctx context.Context, request VectorStoreResourceGetRequest) (VectorStoreRecord, error)
 	SearchVectorStore(ctx context.Context, request VectorStoreResourceSearchRequest) ([]VectorSearchResult, error)
 	InsertDocuments(ctx context.Context, request VectorStoreDocumentInsertRequest) (VectorStoreDocumentInsertResult, error)
+	DeleteDocuments(ctx context.Context, request VectorStoreDocumentDeleteRequest) (VectorStoreDocumentDeleteResult, error)
 }

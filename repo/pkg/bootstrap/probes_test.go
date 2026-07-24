@@ -270,6 +270,10 @@ func (fakeVectorStoreHealth) Delete(context.Context, ports.VectorCollectionRef, 
 	return nil
 }
 
+func (fakeVectorStoreHealth) DeleteByExpr(context.Context, ports.VectorCollectionRef, string) (int, error) {
+	return 0, nil
+}
+
 type fakeHealthChecker struct {
 	err error
 }

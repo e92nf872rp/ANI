@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>146</dd></div>
-          <div><dt>Schemas</dt><dd>193</dd></div>
+          <div><dt>Operations</dt><dd>147</dd></div>
+          <div><dt>Schemas</dt><dd>194</dd></div>
         </dl>
       </section>
 
@@ -1264,6 +1264,14 @@
           <td>200, 401, 403, 404</td>
         </tr>
         <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/vector-stores/{vector_store_id}/documents</code></td>
+          <td><code>deleteVectorStoreDocuments</code></td>
+          <td>按 filter 删除向量文档</td>
+          <td><code>scope:vector-stores:write</code></td>
+          <td>200, 400, 401, 403, 404, 422, 503</td>
+        </tr>
+        <tr>
           <td><span class="method method-post">POST</span></td>
           <td><code>/vector-stores/{vector_store_id}/documents</code></td>
           <td><code>insertVectorStoreDocuments</code></td>
@@ -1517,6 +1525,7 @@
         <li><code>UpdateNetworkSecurityGroupRuleRequest</code></li>
         <li><code>UpdateObservabilityAlertRuleRequest</code></li>
         <li><code>VectorStore</code></li>
+        <li><code>VectorStoreDocumentDeleteResponse</code></li>
         <li><code>VectorStoreDocumentInsertRequest</code></li>
         <li><code>VectorStoreDocumentInsertResponse</code></li>
         <li><code>VectorStoreListResponse</code></li>

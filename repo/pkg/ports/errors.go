@@ -11,4 +11,5 @@ var (
 	ErrFailedPrecondition = errors.New("capability precondition failed")
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrTenantNotFound     = errors.New("tenant not found")
+	ErrUnavailable        = errors.New("capability dependency is unavailable")
 )

@@ -164,6 +164,7 @@ public final class ApiClient {
         "createVectorStore",
         "deleteVectorStore",
         "getVectorStore",
+        "deleteVectorStoreDocuments",
         "insertVectorStoreDocuments",
         "searchVectorStore",
         "listStorageVolumes",
@@ -312,6 +313,7 @@ public final class ApiClient {
         "POST /vector-stores",
         "DELETE /vector-stores/{vector_store_id}",
         "GET /vector-stores/{vector_store_id}",
+        "DELETE /vector-stores/{vector_store_id}/documents",
         "POST /vector-stores/{vector_store_id}/documents",
         "POST /vector-stores/{vector_store_id}/search",
         "GET /volumes",
@@ -505,6 +507,7 @@ public final class ApiClient {
         "UpdateNetworkSecurityGroupRuleRequest",
         "UpdateObservabilityAlertRuleRequest",
         "VectorStore",
+        "VectorStoreDocumentDeleteResponse",
         "VectorStoreDocumentInsertRequest",
         "VectorStoreDocumentInsertResponse",
         "VectorStoreListResponse",
@@ -588,11 +591,14 @@ public final class ApiClient {
         "CONFLICT",
         "FORBIDDEN",
         "INTERNAL_ERROR",
+        "INVALID_FILTER",
         "NOT_FOUND",
         "NOT_IMPLEMENTED",
         "PRECONDITION_FAILED",
         "RATE_LIMIT_EXCEEDED",
-        "UNAUTHORIZED"
+        "UNAUTHORIZED",
+        "UNAVAILABLE",
+        "VECTOR_STORE_NOT_FOUND"
     ));
 
     private final String baseUrl;
