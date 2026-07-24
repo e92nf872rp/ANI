@@ -1574,16 +1574,6 @@ components:
           type: object
           additionalProperties: { type: string }
 
-    VectorStoreTextSearchRequest:
-      type: object
-      required: [query]
-      properties:
-        query: { type: string, minLength: 1 }
-        top_k: { type: integer, minimum: 1, maximum: 20, default: 5 }
-        filter:
-          type: object
-          additionalProperties: { type: string }
-
     VectorStoreSearchHit:
       type: object
       required: [id, score, metadata]
@@ -4868,32 +4858,6 @@ paths:
       responses:
         "200":
           description: 向量检索结果
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/VectorStoreSearchResponse' }
-        "400": { $ref: '#/components/responses/BadRequest' }
-        "401": { $ref: '#/components/responses/Unauthorized' }
-        "403": { $ref: '#/components/responses/Forbidden' }
-        "404": { $ref: '#/components/responses/NotFound' }
-        "422": { $ref: '#/components/responses/PreconditionFailed' }
-
-  /vector-stores/{vector_store_id}/text-search:
-    post:
-      operationId: textSearchVectorStore
-      summary: 使用文本检索测试向量存储
-      description: 控制台输入文本后由 Core 负责嵌入并返回 TopK 召回结果。
-      tags: [VectorStore]
-      x-ani-rbac-scope: "scope:vector-stores:search"
-      parameters:
-        - { name: vector_store_id, in: path, required: true, schema: { type: string } }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/VectorStoreTextSearchRequest' }
-      responses:
-        "200":
-          description: 文本检索结果
           content:
             application/json:
               schema: { $ref: '#/components/schemas/VectorStoreSearchResponse' }

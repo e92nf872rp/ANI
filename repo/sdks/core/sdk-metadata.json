@@ -965,12 +965,6 @@
       "scope": "scope:vector-stores:search"
     },
     {
-      "operationId": "textSearchVectorStore",
-      "method": "POST",
-      "path": "/vector-stores/{vector_store_id}/text-search",
-      "scope": "scope:vector-stores:search"
-    },
-    {
       "operationId": "listStorageVolumes",
       "method": "GET",
       "path": "/volumes",
@@ -1269,7 +1263,6 @@
     "VectorStoreSearchRequest",
     "VectorStoreSearchResponse",
     "VectorStoreState",
-    "VectorStoreTextSearchRequest",
     "VolumeOSInitCompleteRequest",
     "VolumeOSInitGuide",
     "VolumeSnapshotListResponse",

@@ -19,9 +19,6 @@ EXPECTED_PATHS = {
     "/vector-stores/{vector_store_id}/search": {
         "post": ("searchVectorStore", "scope:vector-stores:search", {"200", "400", "401", "403", "404", "422"}),
     },
-    "/vector-stores/{vector_store_id}/text-search": {
-        "post": ("textSearchVectorStore", "scope:vector-stores:search", {"200", "400", "401", "403", "404", "422"}),
-    },
     "/vector-stores/{vector_store_id}/rebuild-index": {
         "post": ("rebuildVectorStoreIndex", "scope:vector-stores:write", {"202", "400", "401", "403", "404", "422"}),
     },
@@ -40,7 +37,6 @@ EXPECTED_SCHEMAS = {
     "VectorStoreListResponse",
     "CreateVectorStoreRequest",
     "VectorStoreSearchRequest",
-    "VectorStoreTextSearchRequest",
     "VectorStoreSearchHit",
     "VectorStoreSearchResponse",
     "VectorStoreIndexStatus",

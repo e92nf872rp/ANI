@@ -1258,26 +1258,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/vector-stores/{vector_store_id}/text-search": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 使用文本检索测试向量存储
-         * @description 控制台输入文本后由 Core 负责嵌入并返回 TopK 召回结果。
-         */
-        post: operations["textSearchVectorStore"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/vector-stores/{vector_store_id}/rebuild-index": {
         parameters: {
             query?: never;
@@ -3816,14 +3796,6 @@ export interface components {
         VectorStoreSearchRequest: {
             vector: number[];
             /** @default 10 */
-            top_k: number;
-            filter?: {
-                [key: string]: string;
-            };
-        };
-        VectorStoreTextSearchRequest: {
-            query: string;
-            /** @default 5 */
             top_k: number;
             filter?: {
                 [key: string]: string;
@@ -7606,37 +7578,6 @@ export interface operations {
         };
         responses: {
             /** @description 向量检索结果 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VectorStoreSearchResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            422: components["responses"]["PreconditionFailed"];
-        };
-    };
-    textSearchVectorStore: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                vector_store_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["VectorStoreTextSearchRequest"];
-            };
-        };
-        responses: {
-            /** @description 文本检索结果 */
             200: {
                 headers: {
                     [name: string]: unknown;
