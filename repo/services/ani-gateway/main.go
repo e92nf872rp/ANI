@@ -11,6 +11,7 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/app/server"
 
+	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/bootstrap"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/router"
@@ -142,6 +143,7 @@ func main() {
 		InstanceObservabilityUsesInstanceName: instanceObservabilityUsesInstanceName,
 		KubernetesRESTClient:                  kubernetesRESTClient,
 		ObservabilityService:                  observabilityService,
+		EmailNotificationStore:                runtimeadapter.NewLocalEmailNotificationStore(),
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
