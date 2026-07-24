@@ -1,6 +1,8 @@
 """Embedding model singleton."""
 from __future__ import annotations
+
 from sentence_transformers import SentenceTransformer
+
 from app.core.config import settings
 
 _model: SentenceTransformer | None = None
