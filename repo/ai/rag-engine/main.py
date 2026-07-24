@@ -6,7 +6,6 @@ Provides document parsing, vector indexing, and hybrid retrieval for knowledge b
 from contextlib import asynccontextmanager
 
 import uvicorn
-
 from app.core.config import settings
 from app.core.embeddings import init_embedding_model
 from app.core.milvus import init_milvus
