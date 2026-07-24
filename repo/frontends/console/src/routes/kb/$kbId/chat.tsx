@@ -28,7 +28,12 @@ function KBChat() {
     mutationFn: (q: string) =>
       api.POST('/knowledge-bases/{kb_id}/query', {
         params: { path: { kb_id: kbId } },
-        body: { question: q, idempotency_key: `chat-${Date.now()}` },
+        body: {
+          question: q,
+          idempotency_key: `chat-${Date.now()}`,
+          top_k: 5,
+          score_threshold: 0.3,
+        },
       }).then(({ data }) => data),
     onSuccess: (data) => {
       setMessages(prev => [
