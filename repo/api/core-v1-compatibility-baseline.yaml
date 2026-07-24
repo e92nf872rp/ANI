@@ -1,7 +1,7 @@
 batch: SPEC-COMPAT-A
 phase: Phase 1 / Sprint 4
 source: api/openapi/v1.yaml
-generated_at: '2026-07-15'
+generated_at: '2026-07-24'
 compatibility_rules:
   allowed:
   - Add optional request fields.
@@ -100,6 +100,40 @@ paths:
         '200':
           schema: BeginOIDCLoginResponse
         '400':
+          schema: '{}'
+  /auth/password/login:
+    post:
+      operation_id: passwordLogin
+      rbac_scope: ''
+      parameters: []
+      request_body_required: true
+      request_schema: PasswordLoginRequest
+      responses:
+        '200':
+          schema: TokenPairResponse
+        '400':
+          schema: '{}'
+        '401':
+          schema: ErrorResponse
+        '404':
+          schema: ErrorResponse
+        '429':
+          schema: '{}'
+  /auth/platform/password/login:
+    post:
+      operation_id: platformPasswordLogin
+      rbac_scope: ''
+      parameters: []
+      request_body_required: true
+      request_schema: PlatformPasswordLoginRequest
+      responses:
+        '200':
+          schema: TokenPairResponse
+        '400':
+          schema: '{}'
+        '401':
+          schema: ErrorResponse
+        '429':
           schema: '{}'
   /auth/refresh:
     post:
@@ -1253,11 +1287,69 @@ paths:
           schema: '{}'
         '403':
           schema: '{}'
+  /metering/usage/platform:
+    get:
+      operation_id: getPlatformMeteringUsage
+      rbac_scope: scope:metering:platform:read
+      parameters:
+      - in: query
+        name: start_time
+        required: true
+        schema:
+          type: string
+          format: date-time
+      - in: query
+        name: end_time
+        required: true
+        schema:
+          type: string
+          format: date-time
+      - in: query
+        name: resource_type
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: group_by
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: tenant_id
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: MeteringUsageResponse
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
   /networks/load-balancers:
     get:
       operation_id: listNetworkLoadBalancers
       rbac_scope: scope:networks:read
       parameters:
+      - in: query
+        name: vpc_id
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: state
+        required: false
+        schema:
+          $ref: '#/components/schemas/NetworkResourceState'
+      - in: query
+        name: scheme
+        required: false
+        schema:
+          type: string
       - in: query
         name: limit
         required: false
@@ -1296,6 +1388,8 @@ paths:
           schema: '{}'
         '404':
           schema: '{}'
+        '409':
+          schema: '{}'
   /networks/load-balancers/{load_balancer_id}:
     delete:
       operation_id: deleteNetworkLoadBalancer
@@ -1317,6 +1411,8 @@ paths:
           schema: '{}'
         '404':
           schema: '{}'
+        '409':
+          schema: '{}'
     get:
       operation_id: getNetworkLoadBalancer
       rbac_scope: scope:networks:read
@@ -1337,6 +1433,20 @@ paths:
           schema: '{}'
         '404':
           schema: '{}'
+  /networks/overview:
+    get:
+      operation_id: getNetworkOverview
+      rbac_scope: scope:networks:read
+      parameters: []
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: NetworkOverview
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
   /networks/routes:
     get:
       operation_id: listNetworkRoutes
@@ -1344,6 +1454,11 @@ paths:
       parameters:
       - in: query
         name: vpc_id
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: next_hop_type
         required: false
         schema:
           type: string
@@ -1385,11 +1500,66 @@ paths:
           schema: '{}'
         '404':
           schema: '{}'
+        '409':
+          schema: '{}'
+  /networks/routes/{route_id}:
+    delete:
+      operation_id: deleteNetworkRoute
+      rbac_scope: scope:networks:delete
+      parameters:
+      - in: path
+        name: route_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: NetworkRoute
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+    get:
+      operation_id: getNetworkRoute
+      rbac_scope: scope:networks:read
+      parameters:
+      - in: path
+        name: route_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: NetworkRoute
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
   /networks/security-groups:
     get:
       operation_id: listNetworkSecurityGroups
       rbac_scope: scope:networks:read
       parameters:
+      - in: query
+        name: name
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: state
+        required: false
+        schema:
+          $ref: '#/components/schemas/NetworkResourceState'
       - in: query
         name: limit
         required: false
@@ -1426,6 +1596,8 @@ paths:
           schema: '{}'
         '403':
           schema: '{}'
+        '409':
+          schema: '{}'
   /networks/security-groups/{security_group_id}:
     delete:
       operation_id: deleteNetworkSecurityGroup
@@ -1447,6 +1619,8 @@ paths:
           schema: '{}'
         '404':
           schema: '{}'
+        '409':
+          schema: '{}'
     get:
       operation_id: getNetworkSecurityGroup
       rbac_scope: scope:networks:read
@@ -1467,11 +1641,265 @@ paths:
           schema: '{}'
         '404':
           schema: '{}'
+  /networks/security-groups/{security_group_id}/bindings:
+    get:
+      operation_id: listNetworkSecurityGroupBindings
+      rbac_scope: scope:networks:read
+      parameters:
+      - in: path
+        name: security_group_id
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: target_type
+        required: false
+        schema:
+          $ref: '#/components/schemas/NetworkSecurityGroupBindingTargetType'
+      - in: query
+        name: target_id
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: NetworkSecurityGroupBindingListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+    post:
+      operation_id: createNetworkSecurityGroupBinding
+      rbac_scope: scope:networks:create
+      parameters:
+      - in: path
+        name: security_group_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: CreateNetworkSecurityGroupBindingRequest
+      responses:
+        '201':
+          schema: NetworkSecurityGroupBinding
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+  /networks/security-groups/{security_group_id}/bindings/{binding_id}:
+    delete:
+      operation_id: deleteNetworkSecurityGroupBinding
+      rbac_scope: scope:networks:delete
+      parameters:
+      - in: path
+        name: security_group_id
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: binding_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: NetworkSecurityGroupBinding
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+  /networks/security-groups/{security_group_id}/rules:
+    get:
+      operation_id: listNetworkSecurityGroupRules
+      rbac_scope: scope:networks:read
+      parameters:
+      - in: path
+        name: security_group_id
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: direction
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: protocol
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: NetworkSecurityGroupRuleListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+    post:
+      operation_id: createNetworkSecurityGroupRule
+      rbac_scope: scope:networks:create
+      parameters:
+      - in: path
+        name: security_group_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: CreateNetworkSecurityGroupRuleRequest
+      responses:
+        '201':
+          schema: NetworkSecurityGroupRuleResource
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+  /networks/security-groups/{security_group_id}/rules/{rule_id}:
+    delete:
+      operation_id: deleteNetworkSecurityGroupRule
+      rbac_scope: scope:networks:delete
+      parameters:
+      - in: path
+        name: security_group_id
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: rule_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: NetworkSecurityGroupRuleResource
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+    get:
+      operation_id: getNetworkSecurityGroupRule
+      rbac_scope: scope:networks:read
+      parameters:
+      - in: path
+        name: security_group_id
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: rule_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: NetworkSecurityGroupRuleResource
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+    put:
+      operation_id: updateNetworkSecurityGroupRule
+      rbac_scope: scope:networks:create
+      parameters:
+      - in: path
+        name: security_group_id
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: rule_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: UpdateNetworkSecurityGroupRuleRequest
+      responses:
+        '200':
+          schema: NetworkSecurityGroupRuleResource
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
   /networks/subnets:
     get:
       operation_id: listNetworkSubnets
       rbac_scope: scope:networks:read
       parameters:
+      - in: query
+        name: vpc_id
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: state
+        required: false
+        schema:
+          $ref: '#/components/schemas/NetworkResourceState'
       - in: query
         name: limit
         required: false
@@ -1510,6 +1938,8 @@ paths:
           schema: '{}'
         '404':
           schema: '{}'
+        '409':
+          schema: '{}'
   /networks/subnets/{subnet_id}:
     delete:
       operation_id: deleteNetworkSubnet
@@ -1531,6 +1961,8 @@ paths:
           schema: '{}'
         '404':
           schema: '{}'
+        '409':
+          schema: '{}'
     get:
       operation_id: getNetworkSubnet
       rbac_scope: scope:networks:read
@@ -1551,11 +1983,64 @@ paths:
           schema: '{}'
         '404':
           schema: '{}'
+  /networks/subnets/{subnet_id}/ip-allocations:
+    get:
+      operation_id: listNetworkSubnetIPAllocations
+      rbac_scope: scope:networks:read
+      parameters:
+      - in: path
+        name: subnet_id
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: state
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: resource_type
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: NetworkSubnetIPAllocationListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
   /networks/vpcs:
     get:
       operation_id: listNetworkVPCs
       rbac_scope: scope:networks:read
       parameters:
+      - in: query
+        name: name
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: state
+        required: false
+        schema:
+          $ref: '#/components/schemas/NetworkResourceState'
       - in: query
         name: limit
         required: false
@@ -1592,6 +2077,8 @@ paths:
           schema: '{}'
         '403':
           schema: '{}'
+        '409':
+          schema: '{}'
   /networks/vpcs/{vpc_id}:
     delete:
       operation_id: deleteNetworkVPC
@@ -1613,6 +2100,8 @@ paths:
           schema: '{}'
         '404':
           schema: '{}'
+        '409':
+          schema: '{}'
     get:
       operation_id: getNetworkVPC
       rbac_scope: scope:networks:read
@@ -1632,6 +2121,192 @@ paths:
         '403':
           schema: '{}'
         '404':
+          schema: '{}'
+  /notifications/email/recipients:
+    get:
+      operation_id: listEmailRecipients
+      rbac_scope: scope:notifications:read
+      parameters: []
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: EmailRecipientListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+    post:
+      operation_id: createEmailRecipient
+      rbac_scope: scope:notifications:write
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: true
+      request_schema: CreateEmailRecipientRequest
+      responses:
+        '201':
+          schema: EmailRecipient
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '409':
+          schema: '{}'
+  /notifications/email/recipients/{recipient_id}:
+    delete:
+      operation_id: deleteEmailRecipient
+      rbac_scope: scope:notifications:write
+      parameters:
+      - in: path
+        name: recipient_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '204':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+    patch:
+      operation_id: updateEmailRecipient
+      rbac_scope: scope:notifications:write
+      parameters:
+      - in: path
+        name: recipient_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: true
+      request_schema: UpdateEmailRecipientRequest
+      responses:
+        '200':
+          schema: EmailRecipient
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+  /notifications/email/smtp:
+    get:
+      operation_id: getEmailSmtpConfig
+      rbac_scope: scope:notifications:read
+      parameters: []
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: EmailSmtpConfigResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+    put:
+      operation_id: putEmailSmtpConfig
+      rbac_scope: scope:notifications:write
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: true
+      request_schema: PutEmailSmtpConfigRequest
+      responses:
+        '200':
+          schema: EmailSmtpConfigResponse
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+  /notifications/email/subscriptions:
+    get:
+      operation_id: listEmailSubscriptions
+      rbac_scope: scope:notifications:read
+      parameters: []
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: EmailSubscriptionListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+    put:
+      operation_id: putEmailSubscriptions
+      rbac_scope: scope:notifications:write
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: true
+      request_schema: PutEmailSubscriptionsRequest
+      responses:
+        '200':
+          schema: EmailSubscriptionListResponse
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+  /notifications/email/test:
+    post:
+      operation_id: sendTestEmail
+      rbac_scope: scope:notifications:write
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: SendTestEmailResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '422':
           schema: '{}'
   /objects:
     get:
@@ -1896,6 +2571,50 @@ paths:
           schema: '{}'
         '403':
           schema: '{}'
+  /observability/query_range:
+    get:
+      operation_id: queryRangeObservability
+      rbac_scope: scope:observability:read
+      parameters:
+      - in: query
+        name: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - in: query
+        name: start
+        required: true
+        schema:
+          type: string
+          format: date-time
+      - in: query
+        name: end
+        required: true
+        schema:
+          type: string
+          format: date-time
+      - in: query
+        name: step
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: timeout
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: ObservabilityRangeQueryResponse
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
   /readyz:
     get:
       operation_id: readiness
@@ -1908,6 +2627,57 @@ paths:
           schema: 'type: object'
         '503':
           schema: 'type: object'
+  /registry/images:
+    get:
+      operation_id: listRegistryImages
+      rbac_scope: scope:registry:read
+      parameters:
+      - in: query
+        name: project
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: repository
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: tag
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: purpose
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: scan_status
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: RegistryImageListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
   /registry/images/scan-result:
     get:
       operation_id: getRegistryImageScanResult
@@ -1926,6 +2696,20 @@ paths:
           schema: RegistryScanResult
         '400':
           schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+  /registry/overview:
+    get:
+      operation_id: getRegistryOverview
+      rbac_scope: scope:registry:read
+      parameters: []
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: RegistryOverview
         '401':
           schema: '{}'
         '403':
@@ -1991,6 +2775,34 @@ paths:
         '401':
           schema: '{}'
         '403':
+          schema: '{}'
+  /registry/projects/{project}/push-instructions:
+    get:
+      operation_id: getRegistryProjectPushInstructions
+      rbac_scope: scope:registry:read
+      parameters:
+      - in: path
+        name: project
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: repository
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: RegistryPushInstructions
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
           schema: '{}'
   /registry/projects/{project}/repositories:
     get:
@@ -2088,6 +2900,74 @@ paths:
         '401':
           schema: '{}'
         '403':
+          schema: '{}'
+  /registry/projects/{project}/repositories/{repository}/tags/{tag}:
+    delete:
+      operation_id: deleteRegistryRepositoryTag
+      rbac_scope: scope:registry:write
+      parameters:
+      - in: path
+        name: project
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: repository
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: tag
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: RegistryDeletedTag
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+  /registry/projects/{project}/repositories/{repository}/tags/{tag}/references:
+    get:
+      operation_id: listRegistryRepositoryTagReferences
+      rbac_scope: scope:registry:read
+      parameters:
+      - in: path
+        name: project
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: repository
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: tag
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: RegistryImageReferenceListResponse
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
           schema: '{}'
   /registry/projects/{project}/scan-report:
     get:
@@ -2320,6 +3200,39 @@ paths:
         '404':
           schema: '{}'
   /vector-stores/{vector_store_id}/documents:
+    delete:
+      operation_id: deleteVectorStoreDocuments
+      rbac_scope: scope:vector-stores:write
+      parameters:
+      - in: path
+        name: vector_store_id
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: filter
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 512
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: VectorStoreDocumentDeleteResponse
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '422':
+          schema: '{}'
+        '503':
+          schema: '{}'
     post:
       operation_id: insertVectorStoreDocuments
       rbac_scope: scope:vector-stores:write
@@ -2792,6 +3705,20 @@ schemas:
           type: integer
           minimum: 1
         enum: []
+  CreateEmailRecipientRequest:
+    type: object
+    required:
+    - email
+    properties:
+      email:
+        signature:
+          type: string
+          format: email
+        enum: []
+      label:
+        signature:
+          type: string
+        enum: []
   CreateGPUContainerInstanceConfig:
     type: object
     required: []
@@ -3042,6 +3969,27 @@ schemas:
         signature:
           type: string
         enum: []
+  CreateNetworkSecurityGroupBindingRequest:
+    type: object
+    required:
+    - idempotency_key
+    - target_id
+    - target_type
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      target_id:
+        signature:
+          type: string
+        enum: []
+      target_type:
+        signature:
+          $ref: '#/components/schemas/NetworkSecurityGroupBindingTargetType'
+        enum: []
   CreateNetworkSecurityGroupRequest:
     type: object
     required:
@@ -3071,6 +4019,62 @@ schemas:
           items:
             $ref: '#/components/schemas/NetworkSecurityGroupRule'
         enum: []
+  CreateNetworkSecurityGroupRuleRequest:
+    type: object
+    required:
+    - action
+    - cidr
+    - direction
+    - idempotency_key
+    - port_range
+    - priority
+    - protocol
+    properties:
+      action:
+        signature:
+          type: string
+        enum:
+        - allow
+        - deny
+      cidr:
+        signature:
+          type: string
+        enum: []
+      description:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      direction:
+        signature:
+          type: string
+        enum:
+        - ingress
+        - egress
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      port_range:
+        signature:
+          type: string
+        enum: []
+      priority:
+        signature:
+          type: integer
+          minimum: 1
+          maximum: 32766
+        enum: []
+      protocol:
+        signature:
+          type: string
+        enum:
+        - tcp
+        - udp
+        - icmp
+        - all
   CreateNetworkSubnetRequest:
     type: object
     required:
@@ -3420,6 +4424,159 @@ schemas:
         signature:
           type: string
           nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  EmailRecipient:
+    type: object
+    required:
+    - created_at
+    - email
+    - enabled
+    - id
+    - updated_at
+    properties:
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      email:
+        signature:
+          type: string
+          format: email
+        enum: []
+      enabled:
+        signature:
+          type: boolean
+        enum: []
+      id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      label:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      updated_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+  EmailRecipientListResponse:
+    type: object
+    required:
+    - items
+    - total
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmailRecipient'
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  EmailSmtpConfigResponse:
+    type: object
+    required:
+    - configured
+    properties:
+      configured:
+        signature:
+          type: boolean
+        enum: []
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      encryption:
+        signature:
+          type: string
+        enum:
+        - none
+        - starttls
+        - ssl
+      from_address:
+        signature:
+          type: string
+          format: email
+        enum: []
+      has_auth_code:
+        signature:
+          type: boolean
+        enum: []
+      has_password:
+        signature:
+          type: boolean
+        enum: []
+      smtp_host:
+        signature:
+          type: string
+        enum: []
+      smtp_port:
+        signature:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        enum: []
+      updated_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      username:
+        signature:
+          type: string
+        enum: []
+  EmailSubscription:
+    type: object
+    required:
+    - description
+    - enabled
+    - event_type
+    - updated_at
+    properties:
+      description:
+        signature:
+          type: string
+        enum: []
+      enabled:
+        signature:
+          type: boolean
+        enum: []
+      event_type:
+        signature:
+          type: string
+        enum:
+        - platform_alert_p0
+        - platform_alert_p1
+        - incident_created
+        - incident_escalated
+        - platform_task_failed
+      updated_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+  EmailSubscriptionListResponse:
+    type: object
+    required:
+    - items
+    - total
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmailSubscription'
         enum: []
       total:
         signature:
@@ -5350,6 +6507,160 @@ schemas:
           minimum: 1
           maximum: 65535
         enum: []
+  NetworkOverview:
+    type: object
+    required:
+    - capabilities
+    - create_order
+    - delete_risks
+    - relationships
+    - resources
+    properties:
+      capabilities:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/NetworkOverviewCapability'
+        enum: []
+      create_order:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/NetworkOverviewResourceKind'
+        enum: []
+      delete_risks:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/NetworkOverviewDeleteRisk'
+        enum: []
+      relationships:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/NetworkOverviewRelationship'
+        enum: []
+      resources:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/NetworkOverviewResourceSummary'
+        enum: []
+  NetworkOverviewCapability:
+    type: object
+    required:
+    - key
+    - label
+    - status
+    properties:
+      description:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      key:
+        signature:
+          type: string
+        enum:
+        - vpcs
+        - subnets
+        - security_groups
+        - load_balancers
+        - routes
+        - subnet_ip_allocations
+        - security_group_rules
+        - security_group_bindings
+      label:
+        signature:
+          type: string
+        enum: []
+      path:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      status:
+        signature:
+          type: string
+        enum:
+        - available
+        - planned
+  NetworkOverviewDeleteRisk:
+    type: object
+    required:
+    - kind
+    - risk
+    properties:
+      kind:
+        signature:
+          $ref: '#/components/schemas/NetworkOverviewResourceKind'
+        enum: []
+      risk:
+        signature:
+          type: string
+        enum: []
+  NetworkOverviewRelationship:
+    type: object
+    required:
+    - relation
+    - source
+    - target
+    properties:
+      relation:
+        signature:
+          type: string
+        enum: []
+      source:
+        signature:
+          $ref: '#/components/schemas/NetworkOverviewResourceKind'
+        enum: []
+      target:
+        signature:
+          $ref: '#/components/schemas/NetworkOverviewResourceKind'
+        enum: []
+  NetworkOverviewResourceKind:
+    type: string
+    required: []
+    properties: {}
+  NetworkOverviewResourceSummary:
+    type: object
+    required:
+    - available
+    - deleting
+    - failed
+    - kind
+    - pending
+    - total
+    properties:
+      available:
+        signature:
+          type: integer
+          minimum: 0
+        enum: []
+      deleting:
+        signature:
+          type: integer
+          minimum: 0
+        enum: []
+      failed:
+        signature:
+          type: integer
+          minimum: 0
+        enum: []
+      kind:
+        signature:
+          $ref: '#/components/schemas/NetworkOverviewResourceKind'
+        enum: []
+      pending:
+        signature:
+          type: integer
+          minimum: 0
+        enum: []
+      total:
+        signature:
+          type: integer
+          minimum: 0
+        enum: []
   NetworkResourceState:
     type: string
     required: []
@@ -5480,6 +6791,61 @@ schemas:
           type: string
           format: date-time
         enum: []
+  NetworkSecurityGroupBinding:
+    type: object
+    required:
+    - created_at
+    - id
+    - security_group_id
+    - target_id
+    - target_type
+    properties:
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      id:
+        signature:
+          type: string
+        enum: []
+      security_group_id:
+        signature:
+          type: string
+        enum: []
+      target_id:
+        signature:
+          type: string
+        enum: []
+      target_type:
+        signature:
+          $ref: '#/components/schemas/NetworkSecurityGroupBindingTargetType'
+        enum: []
+  NetworkSecurityGroupBindingListResponse:
+    type: object
+    required:
+    - items
+    - total
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/NetworkSecurityGroupBinding'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  NetworkSecurityGroupBindingTargetType:
+    type: string
+    required: []
+    properties: {}
   NetworkSecurityGroupListResponse:
     type: object
     required:
@@ -5538,6 +6904,98 @@ schemas:
         - udp
         - icmp
         - all
+  NetworkSecurityGroupRuleListResponse:
+    type: object
+    required:
+    - items
+    - total
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/NetworkSecurityGroupRuleResource'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  NetworkSecurityGroupRuleResource:
+    type: object
+    required:
+    - action
+    - cidr
+    - created_at
+    - direction
+    - id
+    - port_range
+    - priority
+    - protocol
+    - security_group_id
+    properties:
+      action:
+        signature:
+          type: string
+        enum:
+        - allow
+        - deny
+      cidr:
+        signature:
+          type: string
+        enum: []
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      description:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      direction:
+        signature:
+          type: string
+        enum:
+        - ingress
+        - egress
+      id:
+        signature:
+          type: string
+        enum: []
+      port_range:
+        signature:
+          type: string
+        enum: []
+      priority:
+        signature:
+          type: integer
+          minimum: 1
+          maximum: 32766
+        enum: []
+      protocol:
+        signature:
+          type: string
+        enum:
+        - tcp
+        - udp
+        - icmp
+        - all
+      security_group_id:
+        signature:
+          type: string
+        enum: []
+      updated_at:
+        signature:
+          type: string
+          format: date-time
+          nullable: true
+        enum: []
   NetworkSubnet:
     type: object
     required:
@@ -5597,6 +7055,80 @@ schemas:
       vpc_id:
         signature:
           type: string
+        enum: []
+  NetworkSubnetIPAllocation:
+    type: object
+    required:
+    - created_at
+    - id
+    - ip_address
+    - state
+    - subnet_id
+    properties:
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      id:
+        signature:
+          type: string
+        enum: []
+      ip_address:
+        signature:
+          type: string
+        enum: []
+      resource_id:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      resource_type:
+        signature:
+          type: string
+          nullable: true
+        enum:
+        - instance
+        - network_interface
+        - load_balancer
+        - null
+      state:
+        signature:
+          type: string
+        enum:
+        - available
+        - allocated
+        - reserved
+      subnet_id:
+        signature:
+          type: string
+        enum: []
+      updated_at:
+        signature:
+          type: string
+          format: date-time
+          nullable: true
+        enum: []
+  NetworkSubnetIPAllocationListResponse:
+    type: object
+    required:
+    - items
+    - total
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/NetworkSubnetIPAllocation'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
         enum: []
   NetworkSubnetListResponse:
     type: object
@@ -5817,6 +7349,148 @@ schemas:
           items:
             type: object
         enum: []
+  ObservabilityRangeQueryResponse:
+    type: object
+    required:
+    - dev_profile
+    - query
+    - result_type
+    - results
+    properties:
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      query:
+        signature:
+          type: string
+        enum: []
+      result_type:
+        signature:
+          type: string
+        enum:
+        - matrix
+        - vector
+        - scalar
+        - string
+      results:
+        signature:
+          type: array
+          items:
+            type: object
+        enum: []
+  PasswordLoginRequest:
+    type: object
+    required:
+    - password
+    - tenant_name
+    - username
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{1,128}$
+        enum: []
+      password:
+        signature:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 256
+        enum: []
+      tenant_name:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 64
+        enum: []
+      username:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 64
+        enum: []
+  PlatformPasswordLoginRequest:
+    type: object
+    required:
+    - password
+    - username
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{1,128}$
+        enum: []
+      password:
+        signature:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 256
+        enum: []
+      username:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 64
+        enum: []
+  PutEmailSmtpConfigRequest:
+    type: object
+    required:
+    - encryption
+    - from_address
+    - smtp_host
+    - smtp_port
+    - username
+    properties:
+      auth_code:
+        signature:
+          type: string
+          format: password
+        enum: []
+      encryption:
+        signature:
+          type: string
+        enum:
+        - none
+        - starttls
+        - ssl
+      from_address:
+        signature:
+          type: string
+          format: email
+        enum: []
+      password:
+        signature:
+          type: string
+          format: password
+        enum: []
+      smtp_host:
+        signature:
+          type: string
+          minLength: 1
+        enum: []
+      smtp_port:
+        signature:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        enum: []
+      username:
+        signature:
+          type: string
+        enum: []
+  PutEmailSubscriptionsRequest:
+    type: object
+    required:
+    - subscriptions
+    properties:
+      subscriptions:
+        signature:
+          type: array
+          items:
+            type: object
+        enum: []
   RefreshAccessTokenRequest:
     type: object
     required:
@@ -5907,6 +7581,435 @@ schemas:
           nullable: true
         enum: []
       total:
+        signature:
+          type: integer
+        enum: []
+  RegistryCommand:
+    type: object
+    required:
+    - command
+    - label
+    properties:
+      command:
+        signature:
+          type: string
+        enum: []
+      label:
+        signature:
+          type: string
+        enum: []
+  RegistryDeletedTag:
+    type: object
+    required:
+    - deleted_at
+    - project
+    - repository
+    - tag
+    properties:
+      deleted_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      digest:
+        signature:
+          type: string
+        enum: []
+      project:
+        signature:
+          type: string
+        enum: []
+      repository:
+        signature:
+          type: string
+        enum: []
+      tag:
+        signature:
+          type: string
+        enum: []
+  RegistryImage:
+    type: object
+    required:
+    - digest
+    - image
+    - media_type
+    - project
+    - pushed_at
+    - repository
+    - scan_status
+    - size_bytes
+    - tag
+    properties:
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      digest:
+        signature:
+          type: string
+        enum: []
+      image:
+        signature:
+          type: string
+        enum: []
+      media_type:
+        signature:
+          type: string
+        enum: []
+      project:
+        signature:
+          type: string
+        enum: []
+      pull_command:
+        signature:
+          type: string
+        enum: []
+      purpose:
+        signature:
+          type: string
+        enum:
+        - container
+        - gpu
+        - sandbox
+        - system
+      pushed_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      registry:
+        signature:
+          type: string
+        enum: []
+      repository:
+        signature:
+          type: string
+        enum: []
+      scan_status:
+        signature:
+          $ref: '#/components/schemas/RegistryScanResult'
+        enum: []
+      size_bytes:
+        signature:
+          type: integer
+          format: int64
+        enum: []
+      tag:
+        signature:
+          type: string
+        enum: []
+  RegistryImageListResponse:
+    type: object
+    required:
+    - items
+    - total
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/RegistryImage'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  RegistryImageReference:
+    type: object
+    required:
+    - id
+    - kind
+    - name
+    - route
+    - state
+    properties:
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      id:
+        signature:
+          type: string
+        enum: []
+      kind:
+        signature:
+          type: string
+        enum:
+        - vm_instance
+        - container_instance
+        - gpu_container_instance
+        - sandbox_instance
+      name:
+        signature:
+          type: string
+        enum: []
+      route:
+        signature:
+          type: string
+        enum: []
+      state:
+        signature:
+          type: string
+        enum: []
+  RegistryImageReferenceListResponse:
+    type: object
+    required:
+    - delete_blocked
+    - items
+    - project
+    - repository
+    - tag
+    - total
+    properties:
+      delete_blocked:
+        signature:
+          type: boolean
+        enum: []
+      image:
+        signature:
+          type: string
+        enum: []
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/RegistryImageReference'
+        enum: []
+      project:
+        signature:
+          type: string
+        enum: []
+      repository:
+        signature:
+          type: string
+        enum: []
+      tag:
+        signature:
+          type: string
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  RegistryOverview:
+    type: object
+    required:
+    - capabilities
+    - create_order
+    - delete_risks
+    - quick_actions
+    - relationships
+    - resources
+    - vulnerabilities
+    properties:
+      capabilities:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/RegistryOverviewCapability'
+        enum: []
+      create_order:
+        signature:
+          type: array
+          items:
+            type: string
+        enum: []
+      delete_risks:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/RegistryOverviewDeleteRisk'
+        enum: []
+      quick_actions:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/RegistryOverviewQuickAction'
+        enum: []
+      relationships:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/RegistryOverviewRelationship'
+        enum: []
+      resources:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/RegistryOverviewResourceSummary'
+        enum: []
+      vulnerabilities:
+        signature:
+          $ref: '#/components/schemas/RegistryOverviewVulnerabilitySummary'
+        enum: []
+  RegistryOverviewCapability:
+    type: object
+    required:
+    - key
+    - label
+    - status
+    properties:
+      description:
+        signature:
+          type: string
+        enum: []
+      key:
+        signature:
+          type: string
+        enum:
+        - projects
+        - repositories
+        - tags
+        - push_instructions
+        - pull_commands
+        - scan_summary
+        - scan_policy
+        - quota
+        - garbage_collection
+      label:
+        signature:
+          type: string
+        enum: []
+      path:
+        signature:
+          type: string
+        enum: []
+      status:
+        signature:
+          type: string
+        enum:
+        - available
+        - planned
+  RegistryOverviewDeleteRisk:
+    type: object
+    required:
+    - kind
+    - risk
+    properties:
+      kind:
+        signature:
+          type: string
+        enum:
+        - project
+        - repository
+        - artifact
+        - tag
+      risk:
+        signature:
+          type: string
+        enum: []
+  RegistryOverviewQuickAction:
+    type: object
+    required:
+    - key
+    - label
+    properties:
+      description:
+        signature:
+          type: string
+        enum: []
+      key:
+        signature:
+          type: string
+        enum:
+        - create_project
+        - push_instructions
+      label:
+        signature:
+          type: string
+        enum: []
+      path:
+        signature:
+          type: string
+        enum: []
+  RegistryOverviewRelationship:
+    type: object
+    required:
+    - relation
+    - source
+    - target
+    properties:
+      relation:
+        signature:
+          type: string
+        enum: []
+      source:
+        signature:
+          type: string
+        enum:
+        - project
+        - repository
+        - tag
+        - workload
+      target:
+        signature:
+          type: string
+        enum:
+        - project
+        - repository
+        - tag
+        - workload
+  RegistryOverviewResourceSummary:
+    type: object
+    required:
+    - kind
+    - total
+    properties:
+      available:
+        signature:
+          type: integer
+        enum: []
+      failed:
+        signature:
+          type: integer
+        enum: []
+      kind:
+        signature:
+          type: string
+        enum:
+        - project
+        - repository
+        - artifact
+        - tag
+      pending:
+        signature:
+          type: integer
+        enum: []
+      size_bytes:
+        signature:
+          type: integer
+          format: int64
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  RegistryOverviewVulnerabilitySummary:
+    type: object
+    required:
+    - critical
+    - high
+    - low
+    - medium
+    properties:
+      critical:
+        signature:
+          type: integer
+        enum: []
+      high:
+        signature:
+          type: integer
+        enum: []
+      low:
+        signature:
+          type: integer
+        enum: []
+      medium:
         signature:
           type: integer
         enum: []
@@ -6116,6 +8219,36 @@ schemas:
         - active
         - duplicate
       username:
+        signature:
+          type: string
+        enum: []
+  RegistryPushInstructions:
+    type: object
+    required:
+    - commands
+    - project
+    - registry
+    - repository_example
+    properties:
+      commands:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/RegistryCommand'
+        enum: []
+      dev_profile:
+        signature:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+        enum: []
+      project:
+        signature:
+          type: string
+        enum: []
+      registry:
+        signature:
+          type: string
+        enum: []
+      repository_example:
         signature:
           type: string
         enum: []
@@ -6590,6 +8723,31 @@ schemas:
       total:
         signature:
           type: integer
+        enum: []
+  SendTestEmailResponse:
+    type: object
+    required:
+    - message
+    - request_id
+    - success
+    properties:
+      message:
+        signature:
+          type: string
+        enum: []
+      request_id:
+        signature:
+          type: string
+        enum: []
+      sent_at:
+        signature:
+          type: string
+          format: date-time
+          nullable: true
+        enum: []
+      success:
+        signature:
+          type: boolean
         enum: []
   SetRegistryPermissionRequest:
     type: object
@@ -7091,6 +9249,67 @@ schemas:
           type: integer
           format: int64
         enum: []
+  UpdateEmailRecipientRequest:
+    type: object
+    required: []
+    properties:
+      email:
+        signature:
+          type: string
+          format: email
+        enum: []
+      enabled:
+        signature:
+          type: boolean
+        enum: []
+      label:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+  UpdateNetworkSecurityGroupRuleRequest:
+    type: object
+    required: []
+    properties:
+      action:
+        signature:
+          type: string
+        enum:
+        - allow
+        - deny
+      cidr:
+        signature:
+          type: string
+        enum: []
+      description:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      direction:
+        signature:
+          type: string
+        enum:
+        - ingress
+        - egress
+      port_range:
+        signature:
+          type: string
+        enum: []
+      priority:
+        signature:
+          type: integer
+          minimum: 1
+          maximum: 32766
+        enum: []
+      protocol:
+        signature:
+          type: string
+        enum:
+        - tcp
+        - udp
+        - icmp
+        - all
   UpdateObservabilityAlertRuleRequest:
     type: object
     required:
@@ -7198,6 +9417,16 @@ schemas:
         signature:
           type: string
           format: date-time
+        enum: []
+  VectorStoreDocumentDeleteResponse:
+    type: object
+    required:
+    - deleted_count
+    properties:
+      deleted_count:
+        signature:
+          type: integer
+          minimum: 0
         enum: []
   VectorStoreDocumentInsertRequest:
     type: object

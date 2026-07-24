@@ -77,72 +77,6 @@
       "scope": "scope:objects:create"
     },
     {
-      "operationId": "setStorageBucketACL",
-      "method": "PUT",
-      "path": "/buckets/{bucket_id}/acl",
-      "scope": "scope:objects:update"
-    },
-    {
-      "operationId": "listStorageBucketLifecycleRules",
-      "method": "GET",
-      "path": "/buckets/{bucket_id}/lifecycle-rules",
-      "scope": "scope:objects:read"
-    },
-    {
-      "operationId": "createStorageBucketLifecycleRule",
-      "method": "POST",
-      "path": "/buckets/{bucket_id}/lifecycle-rules",
-      "scope": "scope:objects:update"
-    },
-    {
-      "operationId": "setStorageBucketLifecycleRules",
-      "method": "PUT",
-      "path": "/buckets/{bucket_id}/lifecycle-rules",
-      "scope": "scope:objects:update"
-    },
-    {
-      "operationId": "deleteStorageBucketLifecycleRule",
-      "method": "DELETE",
-      "path": "/buckets/{bucket_id}/lifecycle-rules/{rule_id}",
-      "scope": "scope:objects:update"
-    },
-    {
-      "operationId": "deleteBucketObject",
-      "method": "DELETE",
-      "path": "/buckets/{bucket_id}/objects",
-      "scope": "scope:objects:delete"
-    },
-    {
-      "operationId": "listBucketObjects",
-      "method": "GET",
-      "path": "/buckets/{bucket_id}/objects",
-      "scope": "scope:objects:read"
-    },
-    {
-      "operationId": "generateBucketObjectPresignedURL",
-      "method": "POST",
-      "path": "/buckets/{bucket_id}/objects/presigned-url",
-      "scope": "scope:objects:read"
-    },
-    {
-      "operationId": "uploadBucketObject",
-      "method": "POST",
-      "path": "/buckets/{bucket_id}/objects/upload",
-      "scope": "scope:objects:create"
-    },
-    {
-      "operationId": "createBucketPrefix",
-      "method": "POST",
-      "path": "/buckets/{bucket_id}/prefixes",
-      "scope": "scope:objects:create"
-    },
-    {
-      "operationId": "setStorageBucketClass",
-      "method": "PUT",
-      "path": "/buckets/{bucket_id}/storage-class",
-      "scope": "scope:objects:update"
-    },
-    {
       "operationId": "listEncryptionKeys",
       "method": "GET",
       "path": "/encryption/keys",
@@ -215,40 +149,10 @@
       "scope": "scope:filesystems:read"
     },
     {
-      "operationId": "expandStorageFilesystem",
-      "method": "POST",
-      "path": "/filesystems/{filesystem_id}/expand",
-      "scope": "scope:filesystems:update"
-    },
-    {
-      "operationId": "mountStorageFilesystem",
-      "method": "POST",
-      "path": "/filesystems/{filesystem_id}/mount",
-      "scope": "scope:filesystems:update"
-    },
-    {
-      "operationId": "getFilesystemMountCommand",
-      "method": "GET",
-      "path": "/filesystems/{filesystem_id}/mount-command",
-      "scope": "scope:filesystems:read"
-    },
-    {
       "operationId": "listFilesystemMountTargets",
       "method": "GET",
       "path": "/filesystems/{filesystem_id}/mount-targets",
       "scope": "scope:filesystems:read"
-    },
-    {
-      "operationId": "createFilesystemMountTarget",
-      "method": "POST",
-      "path": "/filesystems/{filesystem_id}/mount-targets",
-      "scope": "scope:filesystems:update"
-    },
-    {
-      "operationId": "unmountStorageFilesystem",
-      "method": "POST",
-      "path": "/filesystems/{filesystem_id}/unmount",
-      "scope": "scope:filesystems:update"
     },
     {
       "operationId": "listGPUInventory",
@@ -929,33 +833,15 @@
       "scope": "scope:vector-stores:read"
     },
     {
-      "operationId": "precheckVectorStoreDelete",
-      "method": "GET",
-      "path": "/vector-stores/{vector_store_id}/delete-precheck",
-      "scope": "scope:vector-stores:read"
+      "operationId": "deleteVectorStoreDocuments",
+      "method": "DELETE",
+      "path": "/vector-stores/{vector_store_id}/documents",
+      "scope": "scope:vector-stores:write"
     },
     {
       "operationId": "insertVectorStoreDocuments",
       "method": "POST",
       "path": "/vector-stores/{vector_store_id}/documents",
-      "scope": "scope:vector-stores:write"
-    },
-    {
-      "operationId": "deleteVectorStoreKnowledgeBaseLink",
-      "method": "DELETE",
-      "path": "/vector-stores/{vector_store_id}/knowledge-base-link",
-      "scope": "scope:vector-stores:write"
-    },
-    {
-      "operationId": "setVectorStoreKnowledgeBaseLink",
-      "method": "PUT",
-      "path": "/vector-stores/{vector_store_id}/knowledge-base-link",
-      "scope": "scope:vector-stores:write"
-    },
-    {
-      "operationId": "rebuildVectorStoreIndex",
-      "method": "POST",
-      "path": "/vector-stores/{vector_store_id}/rebuild-index",
       "scope": "scope:vector-stores:write"
     },
     {
@@ -989,36 +875,6 @@
       "scope": "scope:volumes:read"
     },
     {
-      "operationId": "setVolumeAutoSnapshotPolicy",
-      "method": "PUT",
-      "path": "/volumes/{volume_id}/auto-snapshot-policy",
-      "scope": "scope:volumes:update"
-    },
-    {
-      "operationId": "expandStorageVolume",
-      "method": "POST",
-      "path": "/volumes/{volume_id}/expand",
-      "scope": "scope:volumes:update"
-    },
-    {
-      "operationId": "mountStorageVolume",
-      "method": "POST",
-      "path": "/volumes/{volume_id}/mount",
-      "scope": "scope:volumes:update"
-    },
-    {
-      "operationId": "completeVolumeOSInit",
-      "method": "POST",
-      "path": "/volumes/{volume_id}/os-init-complete",
-      "scope": "scope:volumes:update"
-    },
-    {
-      "operationId": "getVolumeOSInitGuide",
-      "method": "GET",
-      "path": "/volumes/{volume_id}/os-init-guide",
-      "scope": "scope:volumes:read"
-    },
-    {
       "operationId": "listVolumeSnapshots",
       "method": "GET",
       "path": "/volumes/{volume_id}/snapshots",
@@ -1029,18 +885,6 @@
       "method": "POST",
       "path": "/volumes/{volume_id}/snapshots",
       "scope": "scope:volumes:create"
-    },
-    {
-      "operationId": "createStorageVolumeFromSnapshot",
-      "method": "POST",
-      "path": "/volumes/{volume_id}/snapshots/{snapshot_id}/create-volume",
-      "scope": "scope:volumes:create"
-    },
-    {
-      "operationId": "unmountStorageVolume",
-      "method": "POST",
-      "path": "/volumes/{volume_id}/unmount",
-      "scope": "scope:volumes:update"
     }
   ],
   "schemas": [
@@ -1048,10 +892,6 @@
     "AsyncTask",
     "BeginOIDCLoginRequest",
     "BeginOIDCLoginResponse",
-    "BucketObjectDeleteResponse",
-    "BucketObjectPresignedURLRequest",
-    "BucketObjectUploadRequest",
-    "BucketPrefixCreateRequest",
     "CompleteOIDCLoginRequest",
     "CoreDevProfileInfo",
     "CreateAPIKeyRequest",
@@ -1076,7 +916,6 @@
     "CreateStorageBucketRequest",
     "CreateStorageFilesystemRequest",
     "CreateStorageObjectRequest",
-    "CreateStorageVolumeFromSnapshotRequest",
     "CreateStorageVolumeRequest",
     "CreateVMInstanceConfig",
     "CreateVectorStoreRequest",
@@ -1098,10 +937,7 @@
     "EncryptionUnsealTokenRequest",
     "EncryptionUnsealTokenResponse",
     "ErrorResponse",
-    "FilesystemAttachment",
-    "FilesystemMountCommand",
     "FilesystemMountTarget",
-    "FilesystemMountTargetCreateRequest",
     "FilesystemMountTargetListResponse",
     "GPUInventoryListResponse",
     "GPUInventoryRecord",
@@ -1217,21 +1053,10 @@
     "SecretListResponse",
     "SendTestEmailResponse",
     "SetRegistryPermissionRequest",
-    "StorageBucketACLUpdateRequest",
-    "StorageBucketClassUpdateRequest",
-    "StorageBucketLifecycleRule",
-    "StorageBucketLifecycleRuleCreateRequest",
-    "StorageBucketLifecycleRuleListResponse",
-    "StorageBucketLifecycleRulesUpdateRequest",
     "StorageBucketListResponse",
-    "StorageBucketObjectEntry",
-    "StorageBucketObjectListResponse",
     "StorageBucketRecord",
     "StorageFilesystem",
-    "StorageFilesystemExpandRequest",
     "StorageFilesystemListResponse",
-    "StorageFilesystemMountRequest",
-    "StorageFilesystemUnmountRequest",
     "StorageObject",
     "StorageObjectDownloadInfo",
     "StorageObjectListResponse",
@@ -1239,53 +1064,32 @@
     "StorageObjectUploadResponse",
     "StorageResourceState",
     "StorageVolume",
-    "StorageVolumeAutoSnapshotPolicy",
-    "StorageVolumeAutoSnapshotPolicyUpdateRequest",
-    "StorageVolumeExpandRequest",
     "StorageVolumeListResponse",
-    "StorageVolumeMountHistoryEntry",
-    "StorageVolumeMountRequest",
-    "StorageVolumeUnmountRequest",
     "TokenPairResponse",
     "TokenUsageReport",
     "UpdateEmailRecipientRequest",
     "UpdateNetworkSecurityGroupRuleRequest",
     "UpdateObservabilityAlertRuleRequest",
     "VectorStore",
-    "VectorStoreDeletePrecheck",
+    "VectorStoreDocumentDeleteResponse",
     "VectorStoreDocumentInsertRequest",
     "VectorStoreDocumentInsertResponse",
-    "VectorStoreIndexStatus",
-    "VectorStoreKnowledgeBaseLinkRequest",
-    "VectorStoreKnowledgeBaseRef",
     "VectorStoreListResponse",
     "VectorStoreSearchHit",
     "VectorStoreSearchRequest",
     "VectorStoreSearchResponse",
     "VectorStoreState",
-    "VolumeOSInitCompleteRequest",
-    "VolumeOSInitGuide",
     "VolumeSnapshotListResponse",
     "VolumeSnapshotRecord",
     "WorkloadIdentityBinding"
   ],
   "idempotencyOperations": [
     "createStorageBucket",
-    "setStorageBucketACL",
-    "createStorageBucketLifecycleRule",
-    "setStorageBucketLifecycleRules",
-    "uploadBucketObject",
-    "createBucketPrefix",
-    "setStorageBucketClass",
     "createEncryptionKey",
     "revokeEncryptionKey",
     "rotateEncryptionKey",
     "sealEncryptionObject",
     "createStorageFilesystem",
-    "expandStorageFilesystem",
-    "mountStorageFilesystem",
-    "createFilesystemMountTarget",
-    "unmountStorageFilesystem",
     "createInstance",
     "createInstanceExecSession",
     "applyInstanceLifecycle",
@@ -1312,19 +1116,11 @@
     "createSecret",
     "createVectorStore",
     "insertVectorStoreDocuments",
-    "setVectorStoreKnowledgeBaseLink",
     "createStorageVolume",
-    "setVolumeAutoSnapshotPolicy",
-    "expandStorageVolume",
-    "mountStorageVolume",
-    "completeVolumeOSInit",
-    "createVolumeSnapshot",
-    "createStorageVolumeFromSnapshot",
-    "unmountStorageVolume"
+    "createVolumeSnapshot"
   ],
   "cursorPaginationOperations": [
     "listStorageBuckets",
-    "listBucketObjects",
     "listEncryptionKeys",
     "listStorageFilesystems",
     "listFilesystemMountTargets",
@@ -1359,10 +1155,13 @@
     "CONFLICT",
     "FORBIDDEN",
     "INTERNAL_ERROR",
+    "INVALID_FILTER",
     "NOT_FOUND",
     "NOT_IMPLEMENTED",
     "PRECONDITION_FAILED",
     "RATE_LIMIT_EXCEEDED",
-    "UNAUTHORIZED"
+    "UNAUTHORIZED",
+    "UNAVAILABLE",
+    "VECTOR_STORE_NOT_FOUND"
   ]
 }
