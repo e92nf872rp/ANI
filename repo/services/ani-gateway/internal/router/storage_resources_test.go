@@ -486,16 +486,6 @@ func jsonStringField(t *testing.T, body []byte, key string) string {
 	return value
 }
 
-func jsonNumberField(t *testing.T, body []byte, key string) float64 {
-	t.Helper()
-	var decoded map[string]any
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		t.Fatalf("decode %s: %v", body, err)
-	}
-	value, _ := decoded[key].(float64)
-	return value
-}
-
 func jsonNestedStringField(t *testing.T, body []byte, first string, second string, third string) string {
 	t.Helper()
 	var decoded map[string]any
