@@ -39,18 +39,50 @@ const AuthenticatedOpsGpuPoolRoute = AuthenticatedOpsGpuPoolRouteImport.update({
   path: '/ops/gpu-pool',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const IntegrationNotificationSettingsEmailIndexRoute =
+  IntegrationNotificationSettingsEmailIndexRouteImport.update({
+    id: '/integration/notification-settings/email/',
+    path: '/integration/notification-settings/email/',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const IntegrationNotificationSettingsEmailSubscriptionsRoute =
+  IntegrationNotificationSettingsEmailSubscriptionsRouteImport.update({
+    id: '/integration/notification-settings/email/subscriptions',
+    path: '/integration/notification-settings/email/subscriptions',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const IntegrationNotificationSettingsEmailSmtpRoute =
+  IntegrationNotificationSettingsEmailSmtpRouteImport.update({
+    id: '/integration/notification-settings/email/smtp',
+    path: '/integration/notification-settings/email/smtp',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const IntegrationNotificationSettingsEmailRecipientsRoute =
+  IntegrationNotificationSettingsEmailRecipientsRouteImport.update({
+    id: '/integration/notification-settings/email/recipients',
+    path: '/integration/notification-settings/email/recipients',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
   '/login': typeof LoginRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/ops/gpu-pool': typeof AuthenticatedOpsGpuPoolRoute
+  '/integration/notification-settings/email/recipients': typeof IntegrationNotificationSettingsEmailRecipientsRoute
+  '/integration/notification-settings/email/smtp': typeof IntegrationNotificationSettingsEmailSmtpRoute
+  '/integration/notification-settings/email/subscriptions': typeof IntegrationNotificationSettingsEmailSubscriptionsRoute
+  '/integration/notification-settings/email/': typeof IntegrationNotificationSettingsEmailIndexRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/': typeof AuthenticatedIndexRoute
   '/ops/gpu-pool': typeof AuthenticatedOpsGpuPoolRoute
+  '/integration/notification-settings/email/recipients': typeof IntegrationNotificationSettingsEmailRecipientsRoute
+  '/integration/notification-settings/email/smtp': typeof IntegrationNotificationSettingsEmailSmtpRoute
+  '/integration/notification-settings/email/subscriptions': typeof IntegrationNotificationSettingsEmailSubscriptionsRoute
+  '/integration/notification-settings/email': typeof IntegrationNotificationSettingsEmailIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -59,12 +91,16 @@ export interface FileRoutesById {
   '/auth/callback': typeof AuthCallbackRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/ops/gpu-pool': typeof AuthenticatedOpsGpuPoolRoute
+  '/integration/notification-settings/email/recipients': typeof IntegrationNotificationSettingsEmailRecipientsRoute
+  '/integration/notification-settings/email/smtp': typeof IntegrationNotificationSettingsEmailSmtpRoute
+  '/integration/notification-settings/email/subscriptions': typeof IntegrationNotificationSettingsEmailSubscriptionsRoute
+  '/integration/notification-settings/email/': typeof IntegrationNotificationSettingsEmailIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/auth/callback' | '/ops/gpu-pool'
+  fullPaths: '/' | '/login' | '/auth/callback' | '/ops/gpu-pool' | '/integration/notification-settings/email/recipients' | '/integration/notification-settings/email/smtp' | '/integration/notification-settings/email/subscriptions' | '/integration/notification-settings/email/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/login' | '/auth/callback' | '/' | '/ops/gpu-pool'
+  to: '/login' | '/auth/callback' | '/' | '/ops/gpu-pool' | '/integration/notification-settings/email/recipients' | '/integration/notification-settings/email/smtp' | '/integration/notification-settings/email/subscriptions' | '/integration/notification-settings/email'
   id:
     | '__root__'
     | '/_authenticated'
@@ -72,12 +108,20 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/_authenticated/'
     | '/_authenticated/ops/gpu-pool'
+    | '/integration/notification-settings/email/recipients'
+    | '/integration/notification-settings/email/smtp'
+    | '/integration/notification-settings/email/subscriptions'
+    | '/integration/notification-settings/email/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
   LoginRoute: typeof LoginRoute
   AuthCallbackRoute: typeof AuthCallbackRoute
+  IntegrationNotificationSettingsEmailRecipientsRoute: typeof IntegrationNotificationSettingsEmailRecipientsRoute
+  IntegrationNotificationSettingsEmailSmtpRoute: typeof IntegrationNotificationSettingsEmailSmtpRoute
+  IntegrationNotificationSettingsEmailSubscriptionsRoute: typeof IntegrationNotificationSettingsEmailSubscriptionsRoute
+  IntegrationNotificationSettingsEmailIndexRoute: typeof IntegrationNotificationSettingsEmailIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -117,6 +161,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedOpsGpuPoolRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/integration/notification-settings/email/': {
+      id: '/integration/notification-settings/email/'
+      path: '/integration/notification-settings/email'
+      fullPath: '/integration/notification-settings/email/'
+      preLoaderRoute: typeof IntegrationNotificationSettingsEmailIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/integration/notification-settings/email/subscriptions': {
+      id: '/integration/notification-settings/email/subscriptions'
+      path: '/integration/notification-settings/email/subscriptions'
+      fullPath: '/integration/notification-settings/email/subscriptions'
+      preLoaderRoute: typeof IntegrationNotificationSettingsEmailSubscriptionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/integration/notification-settings/email/smtp': {
+      id: '/integration/notification-settings/email/smtp'
+      path: '/integration/notification-settings/email/smtp'
+      fullPath: '/integration/notification-settings/email/smtp'
+      preLoaderRoute: typeof IntegrationNotificationSettingsEmailSmtpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/integration/notification-settings/email/recipients': {
+      id: '/integration/notification-settings/email/recipients'
+      path: '/integration/notification-settings/email/recipients'
+      fullPath: '/integration/notification-settings/email/recipients'
+      preLoaderRoute: typeof IntegrationNotificationSettingsEmailRecipientsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -138,6 +210,14 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRoute: AuthenticatedRouteWithChildren,
   LoginRoute: LoginRoute,
   AuthCallbackRoute: AuthCallbackRoute,
+  IntegrationNotificationSettingsEmailRecipientsRoute:
+    IntegrationNotificationSettingsEmailRecipientsRoute,
+  IntegrationNotificationSettingsEmailSmtpRoute:
+    IntegrationNotificationSettingsEmailSmtpRoute,
+  IntegrationNotificationSettingsEmailSubscriptionsRoute:
+    IntegrationNotificationSettingsEmailSubscriptionsRoute,
+  IntegrationNotificationSettingsEmailIndexRoute:
+    IntegrationNotificationSettingsEmailIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

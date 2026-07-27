@@ -85,6 +85,12 @@
 | CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A | Console 镜像仓库主流程契约补齐：`RegistryImage.purpose`、`/registry/images?purpose=`、四类算力引用 enum、createInstance 镜像门禁 422 语义；不含 BOSS、权限或实现 | core-registry-console-flow-contract-a.md |
 | CORE-REGISTRY-CONSOLE-FLOW-CORE-A | Core 镜像仓库后端实现：RegistryImage purpose 贯通 port/adapter/router，`/registry/images?purpose=` 支持过滤；不含 instances、Console、BOSS 或权限实现 | core-registry-console-flow-core-a.md |
 
+### 邮件通知（2026-07）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| EMAIL-NOTIFY | 邮件通知 API + BOSS 发信设置页：9 个 Core endpoint（SMTP CRUD / 收件人 CRUD / 事件订阅批量更新 / 测试发送）；local 内存 adapter；BOSS 前端 SMTP 表单 + 收件人表格 + 订阅开关 + 测试发送；48 store 测试 + 34 handler 测试；RequestID store 层 UUID 生成 + handler 透传 | email-notify.md |
+
 ### SDK Regression Fixes（2026-06）
 
 | 批次 | 内容摘要 | 文件 |
