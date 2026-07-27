@@ -69,7 +69,7 @@ func TestMilvusVectorStoreCollectionNameStartsWithLetterForUUIDTenant(t *testing
 
 	name := store.collectionName(ports.VectorCollectionRef{
 		TenantID: "11111111-1111-1111-1111-111111111111",
-		KBID:    "vst-be914bbe-ad85-4b6b-9a6b-e9da3fc9a1c5",
+		KBID:     "vst-be914bbe-ad85-4b6b-9a6b-e9da3fc9a1c5",
 	})
 
 	if !strings.HasPrefix(name, "ani_") {
