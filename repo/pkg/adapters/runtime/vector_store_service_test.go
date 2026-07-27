@@ -182,6 +182,87 @@ func TestLocalVectorStoreServiceInsertDocumentsUsesVectorStorePort(t *testing.T)
 	if replay.TaskID != result.TaskID || replay.InsertedCount != result.InsertedCount {
 		t.Fatalf("replay result = %#v, want original %#v", replay, result)
 	}
+	updated, err := service.GetVectorStore(context.Background(), ports.VectorStoreResourceGetRequest{TenantID: "tenant-a", ResourceID: store.StoreID})
+	if err != nil {
+		t.Fatalf("GetVectorStore after insert error = %v", err)
+	}
+	if updated.VectorCount != 2 || updated.IndexStatus != "ready" || updated.LastIndexedAt.IsZero() {
+		t.Fatalf("updated store = %#v, want vector_count/index status updated", updated)
+	}
+}
+
+func TestLocalVectorStoreServiceManagementOperations(t *testing.T) {
+	service := NewLocalVectorStoreService()
+	store, err := service.CreateVectorStore(context.Background(), ports.VectorStoreCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "vector-store-management",
+		Name:           "kb-linked",
+		Dimension:      3,
+		EmbeddingModel: "bge-m3",
+	})
+	if err != nil {
+		t.Fatalf("CreateVectorStore() error = %v", err)
+	}
+	if store.EmbeddingModel != "bge-m3" || store.IndexStatus != "ready" {
+		t.Fatalf("store = %#v, want embedding model and ready index", store)
+	}
+	rebuilt, err := service.RebuildVectorStoreIndex(context.Background(), ports.VectorStoreResourceGetRequest{TenantID: "tenant-a", ResourceID: store.StoreID})
+	if err != nil {
+		t.Fatalf("RebuildVectorStoreIndex() error = %v", err)
+	}
+	if rebuilt.IndexStatus != "ready" || rebuilt.LastIndexedAt.IsZero() {
+		t.Fatalf("rebuilt = %#v, want ready index with last_indexed_at", rebuilt)
+	}
+	linked, err := service.SetVectorStoreKnowledgeBaseLink(context.Background(), ports.VectorStoreKnowledgeBaseLinkRequest{
+		TenantID:       "tenant-a",
+		ResourceID:     store.StoreID,
+		IdempotencyKey: "link-a",
+		KnowledgeBaseRef: ports.VectorStoreKnowledgeBaseRef{
+			ID:     "kb-001",
+			Name:   "知识库",
+			Source: "services_knowledge_base",
+		},
+	})
+	if err != nil {
+		t.Fatalf("SetVectorStoreKnowledgeBaseLink() error = %v", err)
+	}
+	if linked.KnowledgeBaseRef.ID != "kb-001" {
+		t.Fatalf("linked = %#v, want kb-001 ref", linked)
+	}
+	_, err = service.SetVectorStoreKnowledgeBaseLink(context.Background(), ports.VectorStoreKnowledgeBaseLinkRequest{
+		TenantID:       "tenant-a",
+		ResourceID:     store.StoreID,
+		IdempotencyKey: "link-invalid-source",
+		KnowledgeBaseRef: ports.VectorStoreKnowledgeBaseRef{
+			ID:     "kb-002",
+			Name:   "bad source",
+			Source: "rag_service",
+		},
+	})
+	if !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("SetVectorStoreKnowledgeBaseLink invalid source error = %v, want ErrInvalid", err)
+	}
+	precheck, err := service.PrecheckVectorStoreDelete(context.Background(), ports.VectorStoreResourceGetRequest{TenantID: "tenant-a", ResourceID: store.StoreID})
+	if err != nil {
+		t.Fatalf("PrecheckVectorStoreDelete() error = %v", err)
+	}
+	if precheck.Deletable || len(precheck.Blockers) != 1 {
+		t.Fatalf("precheck = %#v, want blocker while linked", precheck)
+	}
+	unlinked, err := service.DeleteVectorStoreKnowledgeBaseLink(context.Background(), ports.VectorStoreResourceGetRequest{TenantID: "tenant-a", ResourceID: store.StoreID})
+	if err != nil {
+		t.Fatalf("DeleteVectorStoreKnowledgeBaseLink() error = %v", err)
+	}
+	if unlinked.KnowledgeBaseRef.Name != "" {
+		t.Fatalf("unlinked = %#v, want empty knowledge base ref", unlinked)
+	}
+	precheck, err = service.PrecheckVectorStoreDelete(context.Background(), ports.VectorStoreResourceGetRequest{TenantID: "tenant-a", ResourceID: store.StoreID})
+	if err != nil {
+		t.Fatalf("PrecheckVectorStoreDelete after unlink error = %v", err)
+	}
+	if !precheck.Deletable || len(precheck.Blockers) != 0 {
+		t.Fatalf("precheck after unlink = %#v, want deletable", precheck)
+	}
 }
 
 func TestLocalVectorStoreServiceInsertDocumentsRequiresReadyStore(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/route"
@@ -21,6 +22,7 @@ type createVectorStoreRequest struct {
 	Name           string `json:"name"`
 	Dimension      int    `json:"dimension"`
 	Metric         string `json:"metric"`
+	EmbeddingModel string `json:"embedding_model,omitempty"`
 }
 
 type searchVectorStoreRequest struct {
@@ -34,6 +36,15 @@ type vectorStoreDocumentInsertRequest struct {
 	Documents      []vectorDocumentInputBody `json:"documents"`
 }
 
+type vectorStoreRebuildIndexRequest struct {
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+type vectorStoreKnowledgeBaseLinkRequest struct {
+	IdempotencyKey   string                          `json:"idempotency_key"`
+	KnowledgeBaseRef vectorStoreKnowledgeBaseRefJSON `json:"knowledge_base_ref"`
+}
+
 type vectorDocumentInputBody struct {
 	ID       string         `json:"id,omitempty"`
 	Content  string         `json:"content"`
@@ -41,16 +52,39 @@ type vectorDocumentInputBody struct {
 }
 
 type vectorStoreResponse struct {
-	ID         string                 `json:"id"`
-	TenantID   string                 `json:"tenant_id"`
-	Name       string                 `json:"name"`
-	Dimension  int                    `json:"dimension"`
-	Metric     string                 `json:"metric"`
-	State      string                 `json:"state"`
-	Reason     string                 `json:"reason,omitempty"`
-	DevProfile coreDevProfileResponse `json:"dev_profile"`
-	CreatedAt  string                 `json:"created_at"`
-	UpdatedAt  string                 `json:"updated_at"`
+	ID               string                           `json:"id"`
+	TenantID         string                           `json:"tenant_id"`
+	Name             string                           `json:"name"`
+	Dimension        int                              `json:"dimension"`
+	Metric           string                           `json:"metric"`
+	State            string                           `json:"state"`
+	EmbeddingModel   string                           `json:"embedding_model,omitempty"`
+	VectorCount      int64                            `json:"vector_count,omitempty"`
+	IndexStatus      string                           `json:"index_status,omitempty"`
+	LastIndexedAt    string                           `json:"last_indexed_at,omitempty"`
+	KnowledgeBaseRef *vectorStoreKnowledgeBaseRefJSON `json:"knowledge_base_ref,omitempty"`
+	Reason           string                           `json:"reason,omitempty"`
+	DevProfile       coreDevProfileResponse           `json:"dev_profile"`
+	CreatedAt        string                           `json:"created_at"`
+	UpdatedAt        string                           `json:"updated_at"`
+}
+
+type vectorStoreKnowledgeBaseRefJSON struct {
+	ID     string `json:"id,omitempty"`
+	Name   string `json:"name"`
+	Source string `json:"source"`
+}
+
+type vectorStoreDeletePrecheckResponse struct {
+	Deletable bool                           `json:"deletable"`
+	Reason    string                         `json:"reason,omitempty"`
+	Blockers  []vectorStoreDeleteBlockerJSON `json:"blockers"`
+}
+
+type vectorStoreDeleteBlockerJSON struct {
+	Kind string `json:"kind"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type vectorSearchHitResponse struct {
@@ -87,6 +121,10 @@ func registerVectorStoreResourcesWithService(v1 *route.RouterGroup, service port
 	v1.GET("/vector-stores/:vector_store_id", api.getVectorStore)
 	v1.DELETE("/vector-stores/:vector_store_id", api.deleteVectorStore)
 	v1.POST("/vector-stores/:vector_store_id/search", api.searchVectorStore)
+	v1.POST("/vector-stores/:vector_store_id/rebuild-index", api.rebuildVectorStoreIndex)
+	v1.PUT("/vector-stores/:vector_store_id/knowledge-base-link", api.setVectorStoreKnowledgeBaseLink)
+	v1.DELETE("/vector-stores/:vector_store_id/knowledge-base-link", api.deleteVectorStoreKnowledgeBaseLink)
+	v1.GET("/vector-stores/:vector_store_id/delete-precheck", api.precheckVectorStoreDelete)
 	v1.POST("/vector-stores/:vector_store_id/documents", api.insertVectorStoreDocuments)
 }
 
@@ -102,6 +140,7 @@ func (api *vectorStoreAPI) createVectorStore(ctx context.Context, c *app.Request
 		Name:           req.Name,
 		Dimension:      req.Dimension,
 		Metric:         req.Metric,
+		EmbeddingModel: req.EmbeddingModel,
 	})
 	if err != nil {
 		writeVectorStoreError(c, err)
@@ -169,6 +208,67 @@ func (api *vectorStoreAPI) searchVectorStore(ctx context.Context, c *app.Request
 	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items)})
 }
 
+func (api *vectorStoreAPI) rebuildVectorStoreIndex(ctx context.Context, c *app.RequestContext) {
+	var req vectorStoreRebuildIndexRequest
+	if err := c.BindJSON(&req); err != nil {
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid vector store rebuild request")
+		return
+	}
+	if strings.TrimSpace(req.IdempotencyKey) == "" {
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
+		return
+	}
+	record, err := api.service.RebuildVectorStoreIndex(ctx, ports.VectorStoreResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("vector_store_id")})
+	if err != nil {
+		writeVectorStoreError(c, err)
+		return
+	}
+	task := storageCompletedTask("vector_store.index.rebuild", "vector_store", req.IdempotencyKey, map[string]any{"vector_store": vectorStoreFromRecord(record)}, record.UpdatedAt)
+	c.Response.Header.Set("Location", "/api/v1/tasks/"+task.ID)
+	c.JSON(http.StatusAccepted, task)
+}
+
+func (api *vectorStoreAPI) setVectorStoreKnowledgeBaseLink(ctx context.Context, c *app.RequestContext) {
+	var req vectorStoreKnowledgeBaseLinkRequest
+	if err := c.BindJSON(&req); err != nil {
+		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid vector store knowledge base link request")
+		return
+	}
+	record, err := api.service.SetVectorStoreKnowledgeBaseLink(ctx, ports.VectorStoreKnowledgeBaseLinkRequest{
+		TenantID:       demoTenantID(c),
+		ResourceID:     c.Param("vector_store_id"),
+		IdempotencyKey: req.IdempotencyKey,
+		KnowledgeBaseRef: ports.VectorStoreKnowledgeBaseRef{
+			ID:     req.KnowledgeBaseRef.ID,
+			Name:   req.KnowledgeBaseRef.Name,
+			Source: req.KnowledgeBaseRef.Source,
+		},
+	})
+	if err != nil {
+		writeVectorStoreError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, vectorStoreFromRecord(record))
+}
+
+func (api *vectorStoreAPI) deleteVectorStoreKnowledgeBaseLink(ctx context.Context, c *app.RequestContext) {
+	record, err := api.service.DeleteVectorStoreKnowledgeBaseLink(ctx, ports.VectorStoreResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("vector_store_id")})
+	if err != nil {
+		writeVectorStoreError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, vectorStoreFromRecord(record))
+}
+
+func (api *vectorStoreAPI) precheckVectorStoreDelete(ctx context.Context, c *app.RequestContext) {
+	result, err := api.service.PrecheckVectorStoreDelete(ctx, ports.VectorStoreResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("vector_store_id")})
+	if err != nil {
+		writeVectorStoreError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, vectorStoreDeletePrecheckFromResult(result))
+}
+
 func (api *vectorStoreAPI) insertVectorStoreDocuments(ctx context.Context, c *app.RequestContext) {
 	var req vectorStoreDocumentInsertRequest
 	if err := c.BindJSON(&req); err != nil {
@@ -198,17 +298,50 @@ func (api *vectorStoreAPI) insertVectorStoreDocuments(ctx context.Context, c *ap
 }
 
 func vectorStoreFromRecord(record ports.VectorStoreRecord) vectorStoreResponse {
+	lastIndexedAt := ""
+	if !record.LastIndexedAt.IsZero() {
+		lastIndexedAt = networkTime(record.LastIndexedAt)
+	}
+	var knowledgeBaseRef *vectorStoreKnowledgeBaseRefJSON
+	if record.KnowledgeBaseRef.Name != "" {
+		knowledgeBaseRef = &vectorStoreKnowledgeBaseRefJSON{
+			ID:     record.KnowledgeBaseRef.ID,
+			Name:   record.KnowledgeBaseRef.Name,
+			Source: record.KnowledgeBaseRef.Source,
+		}
+	}
 	return vectorStoreResponse{
-		ID:         record.StoreID,
-		TenantID:   record.TenantID,
-		Name:       record.Name,
-		Dimension:  record.Dimension,
-		Metric:     record.Metric,
-		State:      string(record.State),
-		Reason:     record.Reason,
-		DevProfile: localCoreDevProfile("local-vector-store-service", "Core dev/local profile; provider execution is gated separately"),
-		CreatedAt:  networkTime(record.CreatedAt),
-		UpdatedAt:  networkTime(record.UpdatedAt),
+		ID:               record.StoreID,
+		TenantID:         record.TenantID,
+		Name:             record.Name,
+		Dimension:        record.Dimension,
+		Metric:           record.Metric,
+		State:            string(record.State),
+		EmbeddingModel:   record.EmbeddingModel,
+		VectorCount:      record.VectorCount,
+		IndexStatus:      record.IndexStatus,
+		LastIndexedAt:    lastIndexedAt,
+		KnowledgeBaseRef: knowledgeBaseRef,
+		Reason:           record.Reason,
+		DevProfile:       localCoreDevProfile("local-vector-store-service", "Core dev/local profile; provider execution is gated separately"),
+		CreatedAt:        networkTime(record.CreatedAt),
+		UpdatedAt:        networkTime(record.UpdatedAt),
+	}
+}
+
+func vectorStoreDeletePrecheckFromResult(result ports.VectorStoreDeletePrecheck) vectorStoreDeletePrecheckResponse {
+	blockers := make([]vectorStoreDeleteBlockerJSON, 0, len(result.Blockers))
+	for _, blocker := range result.Blockers {
+		blockers = append(blockers, vectorStoreDeleteBlockerJSON{
+			Kind: blocker.Kind,
+			ID:   blocker.ID,
+			Name: blocker.Name,
+		})
+	}
+	return vectorStoreDeletePrecheckResponse{
+		Deletable: result.Deletable,
+		Reason:    result.Reason,
+		Blockers:  blockers,
 	}
 }
 

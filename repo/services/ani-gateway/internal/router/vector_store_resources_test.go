@@ -2,8 +2,13 @@ package router
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 	"testing"
 
+	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/app/server"
+	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
@@ -33,6 +38,22 @@ func (s *recordingVectorStoreService) GetVectorStore(context.Context, ports.Vect
 
 func (s *recordingVectorStoreService) DeleteVectorStore(context.Context, ports.VectorStoreResourceGetRequest) (ports.VectorStoreRecord, error) {
 	return ports.VectorStoreRecord{}, ports.ErrNotFound
+}
+
+func (s *recordingVectorStoreService) RebuildVectorStoreIndex(context.Context, ports.VectorStoreResourceGetRequest) (ports.VectorStoreRecord, error) {
+	return ports.VectorStoreRecord{}, ports.ErrNotFound
+}
+
+func (s *recordingVectorStoreService) SetVectorStoreKnowledgeBaseLink(context.Context, ports.VectorStoreKnowledgeBaseLinkRequest) (ports.VectorStoreRecord, error) {
+	return ports.VectorStoreRecord{}, ports.ErrNotFound
+}
+
+func (s *recordingVectorStoreService) DeleteVectorStoreKnowledgeBaseLink(context.Context, ports.VectorStoreResourceGetRequest) (ports.VectorStoreRecord, error) {
+	return ports.VectorStoreRecord{}, ports.ErrNotFound
+}
+
+func (s *recordingVectorStoreService) PrecheckVectorStoreDelete(context.Context, ports.VectorStoreResourceGetRequest) (ports.VectorStoreDeletePrecheck, error) {
+	return ports.VectorStoreDeletePrecheck{}, ports.ErrNotFound
 }
 
 func (s *recordingVectorStoreService) SearchVectorStore(context.Context, ports.VectorStoreResourceSearchRequest) ([]ports.VectorSearchResult, error) {
@@ -129,6 +150,114 @@ func TestVectorStoreAPIDocumentInsertResponseMatchesCoreSchema(t *testing.T) {
 	if got := vectorStoreDocumentInsertFromResult(result); got.InsertedCount != 1 || got.TaskID == "" || got.Status != "completed" {
 		t.Fatalf("insert response = %+v, want VectorStoreDocumentInsertResponse fields", got)
 	}
+}
+
+func TestVectorStoreAPIManagementResponsesMatchCoreSchema(t *testing.T) {
+	api := newVectorStoreAPI()
+	store, err := api.service.CreateVectorStore(context.Background(), ports.VectorStoreCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "api-vector-management",
+		Name:           "kb-linked",
+		Dimension:      3,
+		EmbeddingModel: "bge-m3",
+	})
+	if err != nil {
+		t.Fatalf("CreateVectorStore error = %v", err)
+	}
+	rebuilt, err := api.service.RebuildVectorStoreIndex(context.Background(), ports.VectorStoreResourceGetRequest{TenantID: "tenant-a", ResourceID: store.StoreID})
+	if err != nil {
+		t.Fatalf("RebuildVectorStoreIndex error = %v", err)
+	}
+	if got := vectorStoreFromRecord(rebuilt); got.IndexStatus != "ready" || got.LastIndexedAt == "" || got.EmbeddingModel != "bge-m3" {
+		t.Fatalf("rebuilt response = %+v, want index status and embedding model", got)
+	}
+
+	linked, err := api.service.SetVectorStoreKnowledgeBaseLink(context.Background(), ports.VectorStoreKnowledgeBaseLinkRequest{
+		TenantID:       "tenant-a",
+		ResourceID:     store.StoreID,
+		IdempotencyKey: "api-vector-link",
+		KnowledgeBaseRef: ports.VectorStoreKnowledgeBaseRef{
+			ID:     "kb-001",
+			Name:   "知识库",
+			Source: "services_knowledge_base",
+		},
+	})
+	if err != nil {
+		t.Fatalf("SetVectorStoreKnowledgeBaseLink error = %v", err)
+	}
+	if got := vectorStoreFromRecord(linked); got.KnowledgeBaseRef == nil || got.KnowledgeBaseRef.ID != "kb-001" {
+		t.Fatalf("linked response = %+v, want knowledge base ref", got)
+	}
+
+	precheck, err := api.service.PrecheckVectorStoreDelete(context.Background(), ports.VectorStoreResourceGetRequest{TenantID: "tenant-a", ResourceID: store.StoreID})
+	if err != nil {
+		t.Fatalf("PrecheckVectorStoreDelete error = %v", err)
+	}
+	if got := vectorStoreDeletePrecheckFromResult(precheck); got.Deletable || len(got.Blockers) != 1 {
+		t.Fatalf("precheck response = %+v, want one blocker", got)
+	}
+
+	unlinked, err := api.service.DeleteVectorStoreKnowledgeBaseLink(context.Background(), ports.VectorStoreResourceGetRequest{TenantID: "tenant-a", ResourceID: store.StoreID})
+	if err != nil {
+		t.Fatalf("DeleteVectorStoreKnowledgeBaseLink error = %v", err)
+	}
+	if got := vectorStoreFromRecord(unlinked); got.KnowledgeBaseRef != nil {
+		t.Fatalf("unlinked response = %+v, want no knowledge base ref", got)
+	}
+}
+
+func TestVectorStoreHTTPManagementOperationsEndToEnd(t *testing.T) {
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Next(ctx)
+	})
+	registerVectorStoreResourcesWithService(h.Group("/api/v1"), runtimeadapter.NewLocalVectorStoreService())
+
+	created := performJSONRequest(t, h, http.MethodPost, "/api/v1/vector-stores", `{"idempotency_key":"http-vector-a","name":"kb-http","dimension":3,"metric":"cosine","embedding_model":"bge-m3"}`, http.StatusCreated)
+	storeID := jsonStringField(t, created, "id")
+	performJSONRequest(t, h, http.MethodPost, "/api/v1/vector-stores/"+storeID+"/rebuild-index", "", http.StatusBadRequest)
+	rebuilt := performJSONRequest(t, h, http.MethodPost, "/api/v1/vector-stores/"+storeID+"/rebuild-index", `{"idempotency_key":"http-vector-rebuild"}`, http.StatusAccepted)
+	if jsonStringField(t, rebuilt, "status") != "completed" {
+		t.Fatalf("rebuilt body = %s, want completed rebuild task", rebuilt)
+	}
+	reloaded := performJSONRequest(t, h, http.MethodGet, "/api/v1/vector-stores/"+storeID, "", http.StatusOK)
+	if jsonStringField(t, reloaded, "index_status") != "ready" {
+		t.Fatalf("rebuilt body = %s, want ready index", rebuilt)
+	}
+	linked := performJSONRequest(t, h, http.MethodPut, "/api/v1/vector-stores/"+storeID+"/knowledge-base-link", `{"idempotency_key":"http-vector-link","knowledge_base_ref":{"id":"kb-001","name":"知识库","source":"services_knowledge_base"}}`, http.StatusOK)
+	if jsonObjectStringField(t, linked, "knowledge_base_ref", "id") != "kb-001" {
+		t.Fatalf("linked body = %s, want kb-001", linked)
+	}
+	precheck := performJSONRequest(t, h, http.MethodGet, "/api/v1/vector-stores/"+storeID+"/delete-precheck", "", http.StatusOK)
+	if jsonBoolField(t, precheck, "deletable") {
+		t.Fatalf("precheck body = %s, want blocked while linked", precheck)
+	}
+	unlinked := performJSONRequest(t, h, http.MethodDelete, "/api/v1/vector-stores/"+storeID+"/knowledge-base-link", "", http.StatusOK)
+	if jsonStringField(t, unlinked, "reason") == "" {
+		t.Fatalf("unlinked body = %s, want reason", unlinked)
+	}
+}
+
+func jsonBoolField(t *testing.T, body []byte, key string) bool {
+	t.Helper()
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("decode %s: %v", body, err)
+	}
+	value, _ := decoded[key].(bool)
+	return value
+}
+
+func jsonObjectStringField(t *testing.T, body []byte, objectKey string, fieldKey string) string {
+	t.Helper()
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("decode %s: %v", body, err)
+	}
+	object, _ := decoded[objectKey].(map[string]any)
+	value, _ := object[fieldKey].(string)
+	return value
 }
 
 func TestVectorStoreAPIUsesInjectedService(t *testing.T) {

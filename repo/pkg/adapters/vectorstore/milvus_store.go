@@ -275,6 +275,9 @@ func (s *MilvusVectorStore) collectionName(ref ports.VectorCollectionRef) string
 	if safe == "" {
 		return "ani_vector_collection"
 	}
+	if safe[0] >= '0' && safe[0] <= '9' {
+		safe = "ani_" + safe
+	}
 	if len(safe) > 255 {
 		return safe[:255]
 	}

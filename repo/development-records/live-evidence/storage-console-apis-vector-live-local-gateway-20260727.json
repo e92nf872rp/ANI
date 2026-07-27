@@ -1,0 +1,16 @@
+{
+  "cleanup_api_key_revoke_status": 0,
+  "cleanup_api_key_status": 0,
+  "cleanup_enabled": false,
+  "cleanup_status": 0,
+  "document_insert_status": 202,
+  "id": "vector-store-live-gate",
+  "inserted_count": 1,
+  "milvus_health_ready": true,
+  "milvus_health_status": 200,
+  "profile": "SPRINT13-VECTOR-MILVUS-A",
+  "search_hit_count": 1,
+  "search_status": 200,
+  "status": "passed",
+  "vector_store_create_status": 201
+}

@@ -83,6 +83,7 @@
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
 | CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A | Console 镜像仓库主流程契约补齐：`RegistryImage.purpose`、`/registry/images?purpose=`、四类算力引用 enum、createInstance 镜像门禁 422 语义；不含 BOSS、权限或实现 | core-registry-console-flow-contract-a.md |
+| CORE-STORAGE-CONSOLE-APIS-BACKEND-A | 存储模块 Console 控制面后端：补齐 bucket objects/prefix/presigned-url/ACL/storage-class/lifecycle-rules、volume expand/mount/os-init/snapshot-origin/auto-snapshot、filesystem expand/mount-target/mount-command、vector rebuild/KB-link/delete-precheck 的 ports/local service/gateway handlers；2026-07-27 复验块/文件存储 Rook-Ceph snapshot/mount-target、对象存储 MinIO、向量库 Milvus 真实后端 E2E 通过，并修复 Milvus collection name 数字开头缺陷；本次使用本地 Gateway 连接真实依赖，不含前端实现，不升级为 production-shaped Gateway 结论 | core-storage-console-apis-backend-a.md |
 | CORE-REGISTRY-CONSOLE-FLOW-CORE-A | Core 镜像仓库后端实现：RegistryImage purpose 贯通 port/adapter/router，`/registry/images?purpose=` 支持过滤；不含 instances、Console、BOSS 或权限实现 | core-registry-console-flow-core-a.md |
 
 ### 邮件通知（2026-07）

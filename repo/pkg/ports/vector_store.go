@@ -16,15 +16,20 @@ const (
 )
 
 type VectorStoreRecord struct {
-	TenantID  string
-	StoreID   string
-	Name      string
-	Dimension int
-	Metric    string
-	State     VectorStoreState
-	Reason    string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	TenantID         string
+	StoreID          string
+	Name             string
+	Dimension        int
+	Metric           string
+	EmbeddingModel   string
+	VectorCount      int64
+	IndexStatus      string
+	LastIndexedAt    time.Time
+	KnowledgeBaseRef VectorStoreKnowledgeBaseRef
+	State            VectorStoreState
+	Reason           string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 type VectorStoreCreateRequest struct {
@@ -33,6 +38,7 @@ type VectorStoreCreateRequest struct {
 	Name           string
 	Dimension      int
 	Metric         string
+	EmbeddingModel string
 }
 
 type VectorStoreResourceGetRequest struct {
@@ -71,6 +77,31 @@ type VectorStoreDocumentInsertResult struct {
 	InsertedCount int
 	TaskID        string
 	Status        string
+}
+
+type VectorStoreKnowledgeBaseRef struct {
+	ID     string
+	Name   string
+	Source string
+}
+
+type VectorStoreKnowledgeBaseLinkRequest struct {
+	TenantID         string
+	ResourceID       string
+	IdempotencyKey   string
+	KnowledgeBaseRef VectorStoreKnowledgeBaseRef
+}
+
+type VectorStoreDeletePrecheck struct {
+	Deletable bool
+	Reason    string
+	Blockers  []VectorStoreDeleteBlocker
+}
+
+type VectorStoreDeleteBlocker struct {
+	Kind string
+	ID   string
+	Name string
 }
 
 type VectorCollectionRef struct {
@@ -117,5 +148,9 @@ type VectorStoreService interface {
 	GetVectorStore(ctx context.Context, request VectorStoreResourceGetRequest) (VectorStoreRecord, error)
 	DeleteVectorStore(ctx context.Context, request VectorStoreResourceGetRequest) (VectorStoreRecord, error)
 	SearchVectorStore(ctx context.Context, request VectorStoreResourceSearchRequest) ([]VectorSearchResult, error)
+	RebuildVectorStoreIndex(ctx context.Context, request VectorStoreResourceGetRequest) (VectorStoreRecord, error)
+	SetVectorStoreKnowledgeBaseLink(ctx context.Context, request VectorStoreKnowledgeBaseLinkRequest) (VectorStoreRecord, error)
+	DeleteVectorStoreKnowledgeBaseLink(ctx context.Context, request VectorStoreResourceGetRequest) (VectorStoreRecord, error)
+	PrecheckVectorStoreDelete(ctx context.Context, request VectorStoreResourceGetRequest) (VectorStoreDeletePrecheck, error)
 	InsertDocuments(ctx context.Context, request VectorStoreDocumentInsertRequest) (VectorStoreDocumentInsertResult, error)
 }

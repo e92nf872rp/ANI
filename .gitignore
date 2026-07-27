@@ -55,3 +55,4 @@ testdata/*/output/
 # Local document and presentation files (not synced to GitHub)
 doc/
 ppt/
+.codex

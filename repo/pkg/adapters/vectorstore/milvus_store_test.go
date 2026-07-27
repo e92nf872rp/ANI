@@ -57,6 +57,26 @@ func TestMilvusVectorStoreEnsuresCollectionWithQuickSetupSchema(t *testing.T) {
 	}
 }
 
+func TestMilvusVectorStoreCollectionNameStartsWithLetterForUUIDTenant(t *testing.T) {
+	t.Parallel()
+
+	store, err := NewMilvusVectorStore(MilvusVectorStoreConfig{
+		Endpoint: "http://milvus.test",
+	})
+	if err != nil {
+		t.Fatalf("NewMilvusVectorStore() error = %v", err)
+	}
+
+	name := store.collectionName(ports.VectorCollectionRef{
+		TenantID: "11111111-1111-1111-1111-111111111111",
+		KBID:    "vst-be914bbe-ad85-4b6b-9a6b-e9da3fc9a1c5",
+	})
+
+	if !strings.HasPrefix(name, "ani_") {
+		t.Fatalf("collectionName() = %q, want ani_ prefix for Milvus identifier", name)
+	}
+}
+
 func TestMilvusVectorStoreEnforcesRequestTimeout(t *testing.T) {
 	client := &http.Client{Transport: vectorRoundTripFunc(func(r *http.Request) (*http.Response, error) {
 		<-r.Context().Done()

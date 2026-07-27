@@ -404,3 +404,383 @@ func (p *fakeStorageProvider) Observe(_ context.Context, request ports.StoragePr
 var _ ports.StorageProviderDryRun = (*fakeStorageProvider)(nil)
 var _ ports.StorageProviderApply = (*fakeStorageProvider)(nil)
 var _ ports.StorageProviderStatusReader = (*fakeStorageProvider)(nil)
+
+func TestLocalStorageServiceBucketConsoleAPIs(t *testing.T) {
+	objectStore := &fakeObjectStore{
+		uploadURL:   "https://objects.local/upload/readme.md",
+		downloadURL: "https://objects.local/download/readme.md",
+		expiresAt:   time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC),
+	}
+	service := NewLocalStorageService(WithStorageObjectStore(objectStore))
+
+	bucket, err := service.CreateStorageBucket(context.Background(), ports.StorageBucketCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "bucket-console-a",
+		Name:           "datasets-a",
+		Region:         "cn-east-1",
+		AccessMode:     "private",
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageBucket() error = %v", err)
+	}
+	if bucket.Endpoint == "" || bucket.ACL != "private" || bucket.StorageClass != "standard" || bucket.Versioning != "disabled" {
+		t.Fatalf("bucket defaults = %#v, want endpoint/acl/storage_class/versioning defaults", bucket)
+	}
+
+	prefix, err := service.CreateBucketPrefix(context.Background(), ports.StorageBucketPrefixCreateRequest{
+		TenantID:       "tenant-a",
+		BucketID:       bucket.BucketID,
+		IdempotencyKey: "prefix-a",
+		Prefix:         "models",
+	})
+	if err != nil {
+		t.Fatalf("CreateBucketPrefix() error = %v", err)
+	}
+	if prefix.Kind != "prefix" || prefix.Key != "models/" {
+		t.Fatalf("prefix = %#v, want models/ prefix entry", prefix)
+	}
+
+	upload, err := service.CreateStorageObjectUpload(context.Background(), ports.StorageObjectUploadRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "upload-console-a",
+		BucketID:       bucket.BucketID,
+		Key:            "models/readme.md",
+		ContentType:    "text/markdown",
+		SizeBytes:      1200,
+		StorageClass:   "standard",
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageObjectUpload() error = %v", err)
+	}
+
+	objects, err := service.ListBucketObjects(context.Background(), ports.StorageBucketObjectListRequest{
+		TenantID: "tenant-a",
+		BucketID: bucket.BucketID,
+		Prefix:   "",
+	})
+	if err != nil {
+		t.Fatalf("ListBucketObjects() error = %v", err)
+	}
+	if objects.Total < 1 {
+		t.Fatalf("objects = %#v, want at least models/ prefix", objects)
+	}
+	foundPrefix := false
+	for _, item := range objects.Items {
+		if item.Kind == "prefix" && item.Key == "models/" {
+			foundPrefix = true
+		}
+	}
+	if !foundPrefix {
+		t.Fatalf("objects = %#v, want models/ prefix entry", objects)
+	}
+
+	listedUnderPrefix, err := service.ListBucketObjects(context.Background(), ports.StorageBucketObjectListRequest{
+		TenantID: "tenant-a",
+		BucketID: bucket.BucketID,
+		Prefix:   "models/",
+	})
+	if err != nil {
+		t.Fatalf("ListBucketObjects(models/) error = %v", err)
+	}
+	foundObject := false
+	for _, item := range listedUnderPrefix.Items {
+		if item.Kind == "object" && item.Key == "models/readme.md" {
+			foundObject = true
+			if item.SizeBytes == nil || *item.SizeBytes != 1200 {
+				t.Fatalf("object size = %#v, want 1200", item)
+			}
+		}
+	}
+	if !foundObject {
+		t.Fatalf("listedUnderPrefix = %#v, want models/readme.md object", listedUnderPrefix)
+	}
+
+	aclBucket, err := service.SetStorageBucketACL(context.Background(), ports.StorageBucketACLUpdateRequest{
+		TenantID:       "tenant-a",
+		BucketID:       bucket.BucketID,
+		IdempotencyKey: "acl-a",
+		ACL:            "tenant_read",
+	})
+	if err != nil {
+		t.Fatalf("SetStorageBucketACL() error = %v", err)
+	}
+	if aclBucket.ACL != "tenant_read" || aclBucket.AccessMode != "public_read" || aclBucket.ACLLabel == "" {
+		t.Fatalf("acl bucket = %#v, want tenant_read/public_read", aclBucket)
+	}
+
+	classBucket, err := service.SetStorageBucketClass(context.Background(), ports.StorageBucketClassUpdateRequest{
+		TenantID:       "tenant-a",
+		BucketID:       bucket.BucketID,
+		IdempotencyKey: "class-a",
+		StorageClass:   "infrequent_access",
+	})
+	if err != nil {
+		t.Fatalf("SetStorageBucketClass() error = %v", err)
+	}
+	if classBucket.StorageClass != "infrequent_access" {
+		t.Fatalf("class bucket = %#v, want infrequent_access", classBucket)
+	}
+
+	rule, err := service.CreateStorageBucketLifecycleRule(context.Background(), ports.StorageBucketLifecycleRuleCreateRequest{
+		TenantID:         "tenant-a",
+		BucketID:         bucket.BucketID,
+		IdempotencyKey:   "rule-a",
+		Name:             "日志过期",
+		Prefix:           "logs/",
+		ExpireDays:       90,
+		ToInfrequentDays: 30,
+		Enabled:          true,
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageBucketLifecycleRule() error = %v", err)
+	}
+	if rule.ID == "" || rule.Name != "日志过期" {
+		t.Fatalf("rule = %#v, want named lifecycle rule", rule)
+	}
+	rules, err := service.ListStorageBucketLifecycleRules(context.Background(), ports.StorageResourceGetRequest{
+		TenantID:   "tenant-a",
+		ResourceID: bucket.BucketID,
+	})
+	if err != nil {
+		t.Fatalf("ListStorageBucketLifecycleRules() error = %v", err)
+	}
+	if rules.Total != 1 {
+		t.Fatalf("rules = %#v, want 1 rule", rules)
+	}
+
+	presigned, err := service.GenerateBucketObjectPresignedURL(context.Background(), ports.StorageBucketPresignedURLRequest{
+		TenantID:     "tenant-a",
+		BucketID:     bucket.BucketID,
+		Key:          "models/readme.md",
+		Method:       "GET",
+		ExpiresHours: 2,
+	})
+	if err != nil {
+		t.Fatalf("GenerateBucketObjectPresignedURL() error = %v", err)
+	}
+	if presigned.DownloadURL != objectStore.downloadURL {
+		t.Fatalf("presigned = %#v, want download URL from object store", presigned)
+	}
+
+	deleted, err := service.DeleteBucketObject(context.Background(), ports.StorageBucketObjectDeleteRequest{
+		TenantID: "tenant-a",
+		BucketID: bucket.BucketID,
+		Key:      "models/readme.md",
+	})
+	if err != nil {
+		t.Fatalf("DeleteBucketObject() error = %v", err)
+	}
+	if !deleted.Deleted || deleted.Key != "models/readme.md" {
+		t.Fatalf("deleted = %#v, want deleted models/readme.md", deleted)
+	}
+	if objectStore.deleteRef.ObjectKey != "models/readme.md" {
+		t.Fatalf("delete ref = %#v, want models/readme.md", objectStore.deleteRef)
+	}
+
+	remaining, err := service.DeleteStorageBucketLifecycleRule(context.Background(), ports.StorageBucketLifecycleRuleDeleteRequest{
+		TenantID: "tenant-a",
+		BucketID: bucket.BucketID,
+		RuleID:   rule.ID,
+	})
+	if err != nil {
+		t.Fatalf("DeleteStorageBucketLifecycleRule() error = %v", err)
+	}
+	if remaining.Total != 0 {
+		t.Fatalf("remaining rules = %#v, want empty", remaining)
+	}
+
+	_ = upload
+}
+
+func TestLocalStorageServiceVolumeOperations(t *testing.T) {
+	service := NewLocalStorageService()
+	volume, err := service.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{
+		TenantID:        "tenant-a",
+		IdempotencyKey:  "volume-ops-a",
+		Name:            "data-ops",
+		SizeGiB:         100,
+		StorageClass:    "standard",
+		Zone:            "az-a",
+		VolumeType:      "high_performance_ssd",
+		Encrypted:       true,
+		MountInstanceID: "vm-001",
+		MountRoute:      "/compute/instances/vm",
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume() error = %v", err)
+	}
+	if volume.VolumeType != "high_performance_ssd" || volume.IOPS != 20000 || volume.OSInitStatus != "pending" || len(volume.MountHistory) != 1 {
+		t.Fatalf("volume defaults = %#v, want console fields", volume)
+	}
+	expanded, err := service.ExpandVolume(context.Background(), ports.StorageVolumeExpandRequest{
+		TenantID:       "tenant-a",
+		VolumeID:       volume.VolumeID,
+		IdempotencyKey: "volume-expand-a",
+		SizeGiB:        150,
+	})
+	if err != nil {
+		t.Fatalf("ExpandVolume() error = %v", err)
+	}
+	if expanded.SizeGiB != 150 {
+		t.Fatalf("expanded size = %d, want 150", expanded.SizeGiB)
+	}
+	mounted, err := service.MountVolume(context.Background(), ports.StorageVolumeMountRequest{
+		TenantID:       "tenant-a",
+		VolumeID:       volume.VolumeID,
+		IdempotencyKey: "volume-mount-a",
+		InstanceID:     "container-001",
+		InstanceRoute:  "/compute/instances/container",
+		MountName:      "data",
+	})
+	if err != nil {
+		t.Fatalf("MountVolume() error = %v", err)
+	}
+	if mounted.MountInstanceID != "container-001" || mounted.MountName != "data" {
+		t.Fatalf("mounted = %#v, want container mount", mounted)
+	}
+	policy, err := service.SetVolumeAutoSnapshotPolicy(context.Background(), ports.StorageVolumeAutoSnapshotPolicyUpdateRequest{
+		TenantID:       "tenant-a",
+		VolumeID:       volume.VolumeID,
+		IdempotencyKey: "volume-policy-a",
+		Enabled:        true,
+		RetainDays:     30,
+		Schedule:       "daily@02:00",
+	})
+	if err != nil {
+		t.Fatalf("SetVolumeAutoSnapshotPolicy() error = %v", err)
+	}
+	if !policy.AutoSnapshot.Enabled || policy.AutoSnapshot.RetainDays != 30 {
+		t.Fatalf("policy = %#v, want enabled 30-day policy", policy.AutoSnapshot)
+	}
+	guide, err := service.GetVolumeOSInitGuide(context.Background(), ports.StorageResourceGetRequest{TenantID: "tenant-a", ResourceID: volume.VolumeID})
+	if err != nil {
+		t.Fatalf("GetVolumeOSInitGuide() error = %v", err)
+	}
+	if guide.Device == "" || len(guide.Steps) == 0 {
+		t.Fatalf("guide = %#v, want device and steps", guide)
+	}
+	completed, err := service.CompleteVolumeOSInit(context.Background(), ports.VolumeOSInitCompleteRequest{
+		TenantID:       "tenant-a",
+		VolumeID:       volume.VolumeID,
+		IdempotencyKey: "volume-os-init-a",
+		Mode:           "done",
+	})
+	if err != nil {
+		t.Fatalf("CompleteVolumeOSInit() error = %v", err)
+	}
+	if completed.OSInitStatus != "done" {
+		t.Fatalf("os init status = %q, want done", completed.OSInitStatus)
+	}
+	snapshot, err := service.CreateVolumeSnapshot(context.Background(), ports.VolumeSnapshotCreateRequest{
+		TenantID:       "tenant-a",
+		VolumeID:       volume.VolumeID,
+		IdempotencyKey: "volume-snapshot-a",
+		Name:           "snap-a",
+	})
+	if err != nil {
+		t.Fatalf("CreateVolumeSnapshot() error = %v", err)
+	}
+	restored, err := service.CreateVolumeFromSnapshot(context.Background(), ports.StorageVolumeFromSnapshotRequest{
+		TenantID:       "tenant-a",
+		VolumeID:       volume.VolumeID,
+		SnapshotID:     snapshot.SnapshotID,
+		IdempotencyKey: "volume-restore-a",
+		Name:           "restored-a",
+		SizeGiB:        150,
+	})
+	if err != nil {
+		t.Fatalf("CreateVolumeFromSnapshot() error = %v", err)
+	}
+	if restored.FromSnapshotID != snapshot.SnapshotID || restored.SizeGiB != 150 {
+		t.Fatalf("restored = %#v, want snapshot origin", restored)
+	}
+	unmounted, err := service.UnmountVolume(context.Background(), ports.StorageVolumeUnmountRequest{
+		TenantID:       "tenant-a",
+		VolumeID:       volume.VolumeID,
+		IdempotencyKey: "volume-unmount-a",
+	})
+	if err != nil {
+		t.Fatalf("UnmountVolume() error = %v", err)
+	}
+	if unmounted.MountInstanceID != "" {
+		t.Fatalf("unmounted = %#v, want no mount target", unmounted)
+	}
+}
+
+func TestLocalStorageServiceFilesystemOperations(t *testing.T) {
+	service := NewLocalStorageService()
+	filesystem, err := service.CreateFilesystem(context.Background(), ports.StorageFilesystemCreateRequest{
+		TenantID:        "tenant-a",
+		IdempotencyKey:  "fs-ops-a",
+		Name:            "shared-ops",
+		Protocol:        "nfs",
+		SizeGiB:         500,
+		Zone:            "az-a",
+		PerformanceMode: "throughput",
+	})
+	if err != nil {
+		t.Fatalf("CreateFilesystem() error = %v", err)
+	}
+	if filesystem.PerformanceMode != "throughput" || filesystem.MountCommand == "" {
+		t.Fatalf("filesystem = %#v, want throughput and mount command", filesystem)
+	}
+	expanded, err := service.ExpandFilesystem(context.Background(), ports.StorageFilesystemExpandRequest{
+		TenantID:       "tenant-a",
+		FilesystemID:   filesystem.FilesystemID,
+		IdempotencyKey: "fs-expand-a",
+		SizeGiB:        700,
+	})
+	if err != nil {
+		t.Fatalf("ExpandFilesystem() error = %v", err)
+	}
+	if expanded.SizeGiB != 700 {
+		t.Fatalf("expanded size = %d, want 700", expanded.SizeGiB)
+	}
+	target, err := service.CreateFilesystemMountTarget(context.Background(), ports.FilesystemMountTargetCreateRequest{
+		TenantID:       "tenant-a",
+		FilesystemID:   filesystem.FilesystemID,
+		IdempotencyKey: "fs-target-a",
+		SubnetID:       "subnet-a",
+		VPCID:          "vpc-a",
+	})
+	if err != nil {
+		t.Fatalf("CreateFilesystemMountTarget() error = %v", err)
+	}
+	if target.SubnetID != "subnet-a" || target.IPAddress == "" {
+		t.Fatalf("target = %#v, want subnet and IP", target)
+	}
+	mounted, err := service.MountFilesystem(context.Background(), ports.StorageFilesystemMountRequest{
+		TenantID:       "tenant-a",
+		FilesystemID:   filesystem.FilesystemID,
+		IdempotencyKey: "fs-mount-a",
+		InstanceID:     "vm-001",
+		InstanceRoute:  "/compute/instances/vm",
+		MountPath:      "/mnt/share",
+		AutoMount:      true,
+	})
+	if err != nil {
+		t.Fatalf("MountFilesystem() error = %v", err)
+	}
+	if mounted.Mounts != 1 || len(mounted.AttachedInstances) != 1 || mounted.AttachedInstances[0].IPAddress == "" {
+		t.Fatalf("mounted = %#v, want one attachment with IP", mounted)
+	}
+	command, err := service.GetFilesystemMountCommand(context.Background(), ports.StorageResourceGetRequest{TenantID: "tenant-a", ResourceID: filesystem.FilesystemID})
+	if err != nil {
+		t.Fatalf("GetFilesystemMountCommand() error = %v", err)
+	}
+	if command.Command == "" || command.Protocol != "nfs" {
+		t.Fatalf("command = %#v, want nfs mount command", command)
+	}
+	unmounted, err := service.UnmountFilesystem(context.Background(), ports.StorageFilesystemUnmountRequest{
+		TenantID:       "tenant-a",
+		FilesystemID:   filesystem.FilesystemID,
+		IdempotencyKey: "fs-unmount-a",
+		InstanceID:     "vm-001",
+	})
+	if err != nil {
+		t.Fatalf("UnmountFilesystem() error = %v", err)
+	}
+	if unmounted.Mounts != 0 || len(unmounted.AttachedInstances) != 0 {
+		t.Fatalf("unmounted = %#v, want no attachments", unmounted)
+	}
+}

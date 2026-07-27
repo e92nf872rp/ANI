@@ -2,7 +2,7 @@
 
 > 版本 V8.3 | 广州常青云科技有限公司 | 内部产品规划文件
 > 最后更新：2026-07-22
-> 当前摘要：Sprint 12 Core handler/local profile 已闭环；Sprint 13 S01-S07 real provider live gate 均为 `production_shape.status=passed`。并行契约切片 `CORE-INSTANCE-CREATE-CONFIG-A` 已完成：`CreateInstanceRequest` 按 kind 嵌套 `*_config`（扁平字段兼容）；`CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A` 已按 7.22 原型补齐 Console 镜像仓库流程最小 v1 契约（不含 BOSS/权限/实现）。Instance Observability Completion 增量补全（`feat/instance-observability-pr4` 分支）已完成 8 个批次 13 个批次记录归档，覆盖 LogStore port 抽象、Loki 日志持久化、Prometheus GPU/VM 指标采集和 VM 前端模板。这只表示组件级 production-shaped acceptance passed 或契约完成，不等于 full platform production ready。
+> 当前摘要：Sprint 12 Core handler/local profile 已闭环；Sprint 13 S01-S07 real provider live gate 均为 `production_shape.status=passed`。并行契约切片 `CORE-INSTANCE-CREATE-CONFIG-A` 已完成：`CreateInstanceRequest` 按 kind 嵌套 `*_config`（扁平字段兼容）；`CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A` 已按 7.22 原型补齐 Console 镜像仓库流程最小 v1 契约（不含 BOSS/权限/实现）。`CORE-STORAGE-CONSOLE-APIS-BACKEND-A` 在上游 PR #71 契约合入后补齐对象桶、块卷、文件系统和向量库管理接口的 Core 后端闭环；2026-07-27 本地 Gateway + 真实依赖复验 Rook-Ceph/MinIO/Milvus 后端 E2E 通过，不含前端，不升级为 production-shaped Gateway 结论。Instance Observability Completion 增量补全（`feat/instance-observability-pr4` 分支）已完成 8 个批次 13 个批次记录归档，覆盖 LogStore port 抽象、Loki 日志持久化、Prometheus GPU/VM 指标采集和 VM 前端模板。这只表示组件级 production-shaped acceptance passed、契约完成或 local profile 后端闭环，不等于 full platform production ready。
 > Services 当前治理：Core Sprint 13/14 既有事实继续有效；Services 受控并行 PR 阶段由 CODEOWNERS 共同审查、API split、Services boundary gate、OpenAPI/Gateway route contract、Services semantic contract、生成物漂移和 make validate-architecture 约束，统一入口为 `make validate-services`，当前执行入口仍是 repo/CURRENT-SPRINT.md。
 > Sprint 14 分支执行：`feature/sprint14-core-resilience-semantics` 已完成 R-P0-0 gateway shared store 前置批次、R-P0-1 gateway rate limit、R-P0-2 gateway idempotency replay、R-P0-3 adapter per-call timeout、R-P0-4 data-plane readyz health、R-P1-5 retry/circuit-breaker foundation、R-P1-6 resilience degradation 与 R-P2-7 multi-endpoint failover config；这些单批次仍按 local/logic verified 归档。SPRINT14-CORE-RESILIENCE-LIVE-GATE / validate-sprint14-resilience-live-gate / Sprint14 resilience live gate 已在 ani-sprint14-resilience 隔离 namespace 真实通过 P0 strong backend kill、P1 weak dependency degraded、P2 controller primary kill / follower failover，并归档脱敏 evidence；production-ready 范围仅限隔离 Sprint14 Core resilience fixture，不外推到现有 Sprint13 单副本后端或 full platform。
 
@@ -81,6 +81,9 @@ GPU 调度三段式 PR 拆分（2026-07-21）：
 Registry Console Flow（2026-07-22）：
 - CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A：按 7.22 原型”暂不考虑 BOSS 和权限”边界，Core v1 新增 `RegistryImage.purpose`、`/registry/images?purpose=`、四类算力引用 enum 与 createInstance 镜像门禁 422 语义；仅契约和 Console Core schema 生成物，不含 handler/adapter/Console 页面实现。
 - CORE-REGISTRY-CONSOLE-FLOW-CORE-A：Core 镜像仓库后端实现已补齐 RegistryImage purpose port/adapter/router 流转和 `/registry/images?purpose=` 过滤；不含 instances、Console、BOSS 或权限实现。
+
+Storage Console APIs（2026-07-24）：
+- CORE-STORAGE-CONSOLE-APIS-BACKEND-A：上游 PR #71 存储模块 v1 契约合入后，Core 后端补齐对象桶、块卷、文件系统和向量库管理接口的 ports/local service/gateway handlers 与后端 HTTP E2E/API 测试；2026-07-27 本地 Gateway + 真实依赖复验 Rook-Ceph/MinIO/Milvus 后端 E2E 通过；不含 Console/BOSS 前端，不升级为 production-shaped Gateway 结论。
 
 Instance Observability Completion 增量补全（2026-07，PR4 分支）：
 - 分支：`feat/instance-observability-pr4`，对应 SPEC `spec-console-instance-observability-completion.md` 的 16 个设计决策、12 个 User Story 和 8 个批次（B-1~B-8），共 13 个批次记录已归档。
@@ -163,6 +166,7 @@ ANI Services 当前受控解冻并进入并行 PR：本仓库仍以 ANI Core（�
 | Sprint 13 ⭐ | 🔄 收敛中 | S01-S07 real provider 均已 production-shaped gate passed；仍不等于 full platform production ready。 |
 | Sprint 14 ⭐ | ✅ 分支完成 | Core resilience 三阶段 P0/P1/P2 已完成 aggregate live gate；代码、fixture、脱敏 evidence 与文档归档在 `feature/sprint14-core-resilience-semantics`。 |
 | 账密登录 ✅ | ✅ 已完成 | Core Auth API（租户账密 + 平台账密）+ Console 账密 Tab + BOSS 平台登录；代码审查修复 7 项（P0-1/P0-3/P1-1/P1-2/P1-3/P1-5/P2-1）；PRD/SPEC 按产品线拆分；BOSS OIDC 暂不实现 |
+| Storage Console APIs | ✅ 后端完成，真实依赖 E2E 已复验 | 对象桶、块卷、文件系统和向量库管理接口已补齐 ports/local service/gateway handlers 与后端 HTTP E2E/API 测试；2026-07-27 本地 Gateway + 真实依赖复验 Rook-Ceph/MinIO/Milvus 后端 E2E 通过；不含前端，不升级为 production-shaped Gateway 结论。 |
 | Instance Observability Completion | ✅ PR4 分支完成 | LogStore port 抽象 + Loki 日志持久化 + Prometheus GPU/VM 指标采集 + PromQL label 重写扩展 + VM 前端模板；8 批次 13 记录归档，VM live 验证待补。 |
 
 **→ 继续入口：** 当前切片、验收命令、受控目录见 [`repo/CURRENT-SPRINT.md`](repo/CURRENT-SPRINT.md)；破坏性磁盘操作、默认 StorageClass 切换、已有 PVC 迁移、HDD class 引入、并发重启或更大故障演练仍须单独审批。
