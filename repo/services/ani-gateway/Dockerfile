@@ -8,7 +8,7 @@ COPY services/ani-gateway ./services/ani-gateway
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     cd services/ani-gateway && \
-    CGO_ENABLED=0 go build -tags stdjson -ldflags "-s -w" -o /out/ani-gateway .
+    GOWORK=off CGO_ENABLED=0 go build -tags stdjson -ldflags "-s -w" -o /out/ani-gateway .
 
 FROM alpine:3.20 AS tools
 

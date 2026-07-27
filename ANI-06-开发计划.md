@@ -81,6 +81,7 @@ GPU 调度三段式 PR 拆分（2026-07-21）：
 Registry Console Flow（2026-07-22）：
 - CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A：按 7.22 原型”暂不考虑 BOSS 和权限”边界，Core v1 新增 `RegistryImage.purpose`、`/registry/images?purpose=`、四类算力引用 enum 与 createInstance 镜像门禁 422 语义；仅契约和 Console Core schema 生成物，不含 handler/adapter/Console 页面实现。
 - CORE-REGISTRY-CONSOLE-FLOW-CORE-A：Core 镜像仓库后端实现已补齐 RegistryImage purpose port/adapter/router 流转和 `/registry/images?purpose=` 过滤；不含 instances、Console、BOSS 或权限实现。
+- SPRINT13-REGISTRY-HARBOR-LIVE-A：镜像仓库 Harbor-backed live gate 已通过；`validate-registry-harbor-live-gate` 固定契约，2026-07-27 真实 Gateway 覆盖 Harbor project/list/push-instructions/pull-secret/scan-report 链路并归档脱敏 evidence；artifact/purpose 回读需提供 repository/tag；不含 Console/BOSS 或实例创建镜像门禁。
 
 Storage Console APIs（2026-07-24）：
 - CORE-STORAGE-CONSOLE-APIS-BACKEND-A：上游 PR #71 存储模块 v1 契约合入后，Core 后端补齐对象桶、块卷、文件系统和向量库管理接口的 ports/local service/gateway handlers 与后端 HTTP E2E/API 测试；2026-07-27 本地 Gateway + 真实依赖复验 Rook-Ceph/MinIO/Milvus 后端 E2E 通过；不含 Console/BOSS 前端，不升级为 production-shaped Gateway 结论。

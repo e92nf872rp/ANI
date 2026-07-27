@@ -228,6 +228,87 @@ func TestHarborImageRegistryGetsImageScanFromFullyQualifiedImageReference(t *tes
 	}
 }
 
+func TestHarborImageRegistryCreatesPullSecretViaGlobalRobotFallback(t *testing.T) {
+	writer := &capturingPullSecretWriter{}
+	seenProjectRobot := false
+	seenGlobalRobot := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v2.0/projects":
+			_, _ = fmt.Fprint(w, `[{"project_id":7,"name":"tenant-a","public":false}]`)
+		case "POST /api/v2.0/projects/tenant-a/robots":
+			seenProjectRobot = true
+			http.NotFound(w, r)
+		case "POST /api/v2.0/robots":
+			seenGlobalRobot = true
+			var payload harborRobotCreateRequest
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload.Level != "project" || len(payload.Permissions) != 1 || payload.Permissions[0].Namespace != "tenant-a" {
+				t.Fatalf("payload = %+v, want project-level tenant-a robot", payload)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = fmt.Fprint(w, `{"name":"robot$tenant-a+ani-registry-pull","token":"robot-token"}`)
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	service, err := NewHarborImageRegistry(HarborImageRegistryConfig{Endpoint: server.URL, Username: "admin", Password: "secret", PullSecretWriter: writer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := service.CreatePullSecret(context.Background(), ports.RegistryPullSecretRequest{TenantID: "tenant-a", Project: "tenant-a", IdempotencyKey: "pull-a", Name: "ani-registry-pull", Namespace: "ani-registry-live"})
+	if err != nil {
+		t.Fatalf("CreatePullSecret() error = %v", err)
+	}
+	if !seenProjectRobot || !seenGlobalRobot {
+		t.Fatalf("fallback paths seen project=%t global=%t", seenProjectRobot, seenGlobalRobot)
+	}
+	if secret.SecretRef != "ani-registry-live/ani-registry-pull" || writer.last.Namespace != "ani-registry-live" {
+		t.Fatalf("secret = %+v writer = %+v", secret, writer.last)
+	}
+}
+
+func TestHarborImageRegistryCreatesPullSecretFromRobotSecretField(t *testing.T) {
+	writer := &capturingPullSecretWriter{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v2.0/projects":
+			_, _ = fmt.Fprint(w, `[{"project_id":7,"name":"tenant-a","public":false}]`)
+		case "POST /api/v2.0/projects/tenant-a/robots":
+			w.WriteHeader(http.StatusCreated)
+			_, _ = fmt.Fprint(w, `{"name":"robot$tenant-a+ani-registry-pull","secret":"robot-secret"}`)
+		default:
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	service, err := NewHarborImageRegistry(HarborImageRegistryConfig{Endpoint: server.URL, Username: "admin", Password: "secret", PullSecretWriter: writer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := service.CreatePullSecret(context.Background(), ports.RegistryPullSecretRequest{TenantID: "tenant-a", Project: "tenant-a", IdempotencyKey: "pull-a", Name: "ani-registry-pull", Namespace: "ani-registry-live"})
+	if err != nil {
+		t.Fatalf("CreatePullSecret() error = %v", err)
+	}
+	if secret.Username != "robot$tenant-a+ani-registry-pull" || !strings.Contains(writer.last.DockerConfigJSON, "robot-secret") {
+		t.Fatalf("secret = %+v writer = %+v", secret, writer.last)
+	}
+}
+
+type capturingPullSecretWriter struct {
+	last ports.RegistryPullSecretWriteRequest
+}
+
+func (w *capturingPullSecretWriter) ApplyRegistryPullSecret(_ context.Context, request ports.RegistryPullSecretWriteRequest) error {
+	w.last = request
+	return nil
+}
+
 func TestHarborImageRegistryBuildsOverviewAndPushInstructions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

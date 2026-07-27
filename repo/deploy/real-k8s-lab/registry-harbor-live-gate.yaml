@@ -1,0 +1,32 @@
+profile: SPRINT13-REGISTRY-HARBOR-LIVE-A
+status: contract
+description: >
+  Harbor-backed Registry live gate for proving ANI Gateway registry APIs use a
+  real Harbor provider and create Kubernetes pull secrets through the provider
+  boundary.
+required_tools:
+  - curl
+  - kubectl
+required_endpoints:
+  - ani_gateway_api
+  - harbor_api
+  - kubernetes_secrets_api
+live_checks:
+  - id: gateway-registry-project-create
+    command: POST /api/v1/registry/projects
+    pass_condition: project_created_or_already_exists_in_real_harbor
+  - id: gateway-registry-project-list
+    command: GET /api/v1/registry/projects
+    pass_condition: tenant_project_returned_with_dev_profile_real_provider
+  - id: gateway-registry-push-instructions
+    command: GET /api/v1/registry/projects/{project}/push-instructions
+    pass_condition: registry_host_and_push_commands_returned
+  - id: gateway-registry-pull-secret
+    command: POST /api/v1/registry/projects/{project}/pull-secret
+    pass_condition: kubernetes_dockerconfigjson_secret_created
+  - id: gateway-registry-images-purpose
+    command: GET /api/v1/registry/images?purpose=container
+    pass_condition: optional_real_artifact_probe_returns_matching_purpose_when_repository_tag_is_supplied
+  - id: gateway-registry-scan-report
+    command: GET /api/v1/registry/projects/{project}/scan-report
+    pass_condition: harbor_trivy_scan_report_read_or_empty_real_provider_report_returned

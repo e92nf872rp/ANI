@@ -127,6 +127,9 @@ func TestLocalImageRegistryProjectPullSecretAndScanReport(t *testing.T) {
 	if secret.SecretRef == "" || secret.State != ports.RegistryPermissionActive {
 		t.Fatalf("secret = %+v, want active local pull secret reference", secret)
 	}
+	if secret.SecretRef != "ani-tenant-a/ani-registry-pull" {
+		t.Fatalf("secret ref = %q, want requested namespace", secret.SecretRef)
+	}
 
 	report, err := service.GetProjectScanReport(context.Background(), ports.RegistryProjectScanReportRequest{
 		TenantID: "tenant-a",

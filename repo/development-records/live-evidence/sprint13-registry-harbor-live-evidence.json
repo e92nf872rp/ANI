@@ -1,0 +1,38 @@
+{
+  "artifact_probe": {
+    "reason": "repository/tag not supplied",
+    "status": "skipped"
+  },
+  "cleanup": {
+    "resources": [
+      "secret/ani-tenant-11111111-1111-1111-1111-111111111111/ani-registry-pull-20260727v4e"
+    ],
+    "status": "deleted"
+  },
+  "generated_at": "2026-07-27T09:10:35.565436Z",
+  "id": "registry-harbor-live-gate",
+  "kubernetes_secret_type": "kubernetes.io/dockerconfigjson",
+  "production_shape": {
+    "missing_items": [
+      "artifact_push_or_preseeded_tag"
+    ],
+    "proof_items": [
+      "production_gateway",
+      "harbor_real_provider",
+      "kubernetes_pull_secret"
+    ],
+    "status": "passed",
+    "transport_profile": "production_gateway_to_harbor_and_kubernetes_secret"
+  },
+  "profile": "SPRINT13-REGISTRY-HARBOR-LIVE-A",
+  "project_create_status": 409,
+  "project_found": true,
+  "project_list_status": 200,
+  "pull_secret_ref": "ani-tenant-11111111-1111-1111-1111-111111111111/ani-registry-pull-20260727v4e",
+  "pull_secret_status": 201,
+  "push_instructions_status": 200,
+  "registry_host_observed": true,
+  "scan_report_provider": "harbor-trivy",
+  "scan_report_status": 200,
+  "status": "passed"
+}

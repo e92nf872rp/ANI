@@ -92,6 +92,7 @@ Issue 清单：`repo/services/tasks/issues/issue-01-openapi-queue-crud.md` ~ `is
 |---|---|---|
 | CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A | 契约/Console schema 已完成 | 按 7.22 原型”暂不考虑 BOSS 和权限”边界，Core v1 新增 `RegistryImage.purpose`、`/registry/images?purpose=`、四类算力引用 enum 与 createInstance 镜像门禁 422 语义；仅契约，不含 handler/adapter/Console 页面实现 |
 | CORE-REGISTRY-CONSOLE-FLOW-CORE-A | Core 镜像仓库后端实现已完成 | RegistryImage purpose 贯通 port/adapter/router，`/registry/images?purpose=` 支持过滤；不含 instances、Console、BOSS 或权限实现 |
+| SPRINT13-REGISTRY-HARBOR-LIVE-A | Harbor live gate passed | `validate-registry-harbor-live-gate` 契约通过；2026-07-27 通过真实 Gateway 验证 Harbor project/list/push-instructions/pull-secret/scan-report 并归档脱敏 evidence；artifact/purpose 回读需提供 repository/tag；不含 Console/BOSS/实例创建镜像门禁 |
 | CORE-STORAGE-CONSOLE-APIS-BACKEND-A | Core 存储模块后端实现已完成 | 上游 PR #71 契约合入后，补齐对象桶、块卷、文件系统和向量库管理接口的 ports/local service/gateway handlers 与后端 HTTP E2E/API 测试；2026-07-27 本地 Gateway + 真实依赖复验 Rook-Ceph/MinIO/Milvus 后端 E2E 通过；不含前端，不升级为 production-shaped Gateway 结论 |
 
 ## 邮件通知（2026-07-22）

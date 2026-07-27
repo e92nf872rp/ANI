@@ -1,25 +1,25 @@
 {
   "cleanup": {
     "resources": [
-      "service/lb-ani-s01-prodshape-gateway-lb3",
-      "networkpolicy/sg-ani-s01-prodshape-gateway-sg3",
-      "subnet/subnet-subnet-5b545381-1af4-45e5-97e6-b72418aa678f",
-      "vpc/vpc-vpc-eb2c25f7-228c-49cc-972e-548fc024816e",
-      "namespace/ani-tenant-tenant-a"
+      "service/lb-live-lb-20260727",
+      "networkpolicy/sg-live-sg-20260727",
+      "subnet/subnet-subnet-681f41c9-081b-4e98-8fdf-941478ce0215",
+      "vpc/vpc-vpc-78a09256-77f9-4cb2-929f-2371ab75af75",
+      "namespace/ani-tenant-11111111-1111-1111-1111-111111111111"
     ],
     "status": "deleted"
   },
   "gateway_route_count": 1,
   "gateway_route_create_status": 201,
-  "gateway_route_id": "rt_15c2b937-f51a-4d2a-bb22-8d80801dc402",
+  "gateway_route_id": "rt_7c821bca-b518-4204-9a61-f9c4d2011509",
   "gateway_route_list_status": 200,
   "gateway_subnet_create_status": 201,
-  "gateway_subnet_id": "subnet_5b545381-1af4-45e5-97e6-b72418aa678f",
+  "gateway_subnet_id": "subnet_681f41c9-081b-4e98-8fdf-941478ce0215",
   "gateway_vpc_create_status": 201,
-  "gateway_vpc_id": "vpc_eb2c25f7-228c-49cc-972e-548fc024816e",
+  "gateway_vpc_id": "vpc_78a09256-77f9-4cb2-929f-2371ab75af75",
   "id": "kubeovn-network-live-gate",
-  "load_balancer": "lb-ani-s01-prodshape-gateway-lb3",
-  "namespace": "ani-tenant-tenant-a",
+  "load_balancer": "lb-live-lb-20260727",
+  "namespace": "ani-tenant-11111111-1111-1111-1111-111111111111",
   "production_shape": {
     "missing_items": [],
     "proof_items": [
@@ -31,9 +31,9 @@
     "transport_profile": "production_gateway_in_cluster_serviceaccount"
   },
   "profile": "M1-NETWORK-LIVE-A",
-  "route": "route-rt-15c2b937-f51a-4d2a-bb22-8d80801dc402",
-  "security_group": "sg-ani-s01-prodshape-gateway-sg3",
+  "route": "route-rt-7c821bca-b518-4204-9a61-f9c4d2011509",
+  "security_group": "sg-live-sg-20260727",
   "status": "passed",
-  "subnet": "subnet-subnet-5b545381-1af4-45e5-97e6-b72418aa678f",
-  "vpc": "vpc-vpc-eb2c25f7-228c-49cc-972e-548fc024816e"
+  "subnet": "subnet-subnet-681f41c9-081b-4e98-8fdf-941478ce0215",
+  "vpc": "vpc-vpc-78a09256-77f9-4cb2-929f-2371ab75af75"
 }
