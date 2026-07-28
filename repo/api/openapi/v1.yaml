@@ -399,6 +399,151 @@ components:
         real_provider: { type: boolean }
         reason:        { type: string, nullable: true }
 
+    InstanceNetworkConfig:
+      type: object
+      description: "实例网络引用；只表达 Core 产品意图，不暴露 provider 对象。"
+      properties:
+        vpc_id:              { type: string, nullable: true }
+        subnet_id:           { type: string, nullable: true }
+        security_group_ids:  { type: array, items: { type: string } }
+        assign_private_ip:   { type: boolean, default: true }
+        private_ip:          { type: string, nullable: true }
+
+    InstanceDiskSpec:
+      type: object
+      description: "实例磁盘声明。volume_id 与新盘字段两种模式互斥。"
+      properties:
+        volume_id:            { type: string, minLength: 1 }
+        name:                 { type: string, minLength: 1 }
+        size_gib:             { type: integer, format: int64, minimum: 1 }
+        volume_type:          { type: string, nullable: true }
+        storage_class:        { type: string, nullable: true }
+        encrypted:            { type: boolean, default: false }
+        delete_on_failure:    { type: boolean, default: true }
+        delete_with_instance: { type: boolean, default: false }
+      oneOf:
+        - required: [volume_id]
+        - required: [name, size_gib]
+
+    InstanceVolumeMount:
+      type: object
+      required: [volume_id, mount_path]
+      properties:
+        volume_id:  { type: string }
+        mount_path: { type: string, minLength: 1 }
+        read_only:  { type: boolean, default: false }
+
+    InstanceFilesystemMount:
+      type: object
+      required: [filesystem_id, mount_path]
+      properties:
+        filesystem_id: { type: string }
+        mount_path:     { type: string, minLength: 1 }
+        read_only:      { type: boolean, default: false }
+
+    InstancePortSpec:
+      type: object
+      required: [container_port]
+      properties:
+        name:           { type: string, nullable: true }
+        container_port: { type: integer, minimum: 1, maximum: 65535 }
+        protocol:       { type: string, enum: [tcp, udp], default: tcp }
+
+    InstanceEnvVar:
+      type: object
+      required: [name]
+      description: "value 与 secret_ref 互斥；敏感值必须使用 secret_ref。"
+      properties:
+        name:       { type: string, minLength: 1 }
+        value:      { type: string }
+        secret_ref: { type: string, minLength: 1 }
+      oneOf:
+        - required: [value]
+        - required: [secret_ref]
+
+    InstanceWorkloadIdentityConfig:
+      type: object
+      properties:
+        enabled: { type: boolean, default: true }
+        scopes:
+          type: array
+          items: { type: string, pattern: "^scope:[a-z0-9_-]+:(\\*|[a-z0-9_-]+)$" }
+
+    InstanceImageSummary:
+      type: object
+      description: "实例固定的镜像摘要；不得包含 Registry 凭据。"
+      properties:
+        id:           { type: string, nullable: true }
+        ref:          { type: string, nullable: true }
+        digest:       { type: string, nullable: true }
+        name:         { type: string, nullable: true }
+        tag:          { type: string, nullable: true }
+        purpose:      { type: string, nullable: true, enum: [container, gpu, sandbox, system, null] }
+        architecture: { type: string, nullable: true }
+
+    InstanceComputeSummary:
+      type: object
+      properties:
+        cpu:               { type: string, nullable: true }
+        memory:            { type: string, nullable: true }
+        spec_id:           { type: string, nullable: true }
+        gpu_type:          { type: string, nullable: true }
+        gpu_shares:        { type: integer, minimum: 1, nullable: true }
+        gpu_mb_per_share:  { type: integer, minimum: 1, nullable: true }
+        availability_zone: { type: string, nullable: true }
+        node_name:         { type: string, nullable: true }
+
+    InstanceNetworkSummary:
+      type: object
+      properties:
+        vpc_id:      { type: string, nullable: true }
+        vpc_name:    { type: string, nullable: true }
+        subnet_id:   { type: string, nullable: true }
+        subnet_name: { type: string, nullable: true }
+        private_ip:  { type: string, nullable: true }
+        security_groups:
+          type: array
+          items:
+            type: object
+            required: [id]
+            properties:
+              id:   { type: string }
+              name: { type: string, nullable: true }
+        endpoints:
+          type: array
+          items:
+            type: object
+            required: [address]
+            properties:
+              name:     { type: string, nullable: true }
+              address:  { type: string }
+              protocol: { type: string, nullable: true }
+              port:     { type: integer, minimum: 1, maximum: 65535, nullable: true }
+        load_balancer_refs:
+          type: array
+          items: { type: string }
+
+    InstanceAccessSummary:
+      type: object
+      required: [ssh_available, console_available, exec_available]
+      properties:
+        ssh_available:     { type: boolean }
+        console_available: { type: boolean }
+        exec_available:    { type: boolean }
+        reason:            { type: string, nullable: true }
+
+    InstanceStorageAttachment:
+      type: object
+      required: [resource_type, resource_id, status]
+      properties:
+        resource_type: { type: string, enum: [volume, filesystem] }
+        resource_id:   { type: string }
+        name:          { type: string, nullable: true }
+        mount_path:    { type: string, nullable: true }
+        read_only:     { type: boolean, default: false }
+        status:        { type: string, enum: [pending, attached, mounted, detaching, failed] }
+        task_id:       { type: string, nullable: true }
+
     InstanceRecord:
       type: object
       description: ANI Core 计算实例（VM/Container/GPU/Sandbox/BM/K8s集群/Batch）
@@ -407,6 +552,10 @@ components:
         id:             { type: string }
         tenant_id:      { type: string }
         name:           { type: string }
+        description:    { type: string, nullable: true }
+        labels:
+          type: object
+          additionalProperties: { type: string }
         kind:           { type: string, enum: [vm, container, gpu_container, sandbox, batch_job, notebook, k8s_cluster, bare_metal, dpu_node] }
         instance_type:  { type: string, enum: [vm, container, gpu_container, sandbox, batch_job, notebook, k8s_cluster, bare_metal, dpu_node], description: "kind 的兼容别名；新客户端可用 instance_type 表达实例类型。" }
         state:          { type: string, enum: [pending, provisioning, starting, running, stopping, stopped, failed, deleting, deleted] }
@@ -419,6 +568,17 @@ components:
         resource_refs:  { type: array, items: { type: string } }
         endpoint:       { type: string, nullable: true }
         node_name:      { type: string, nullable: true }
+        image:
+          $ref: '#/components/schemas/InstanceImageSummary'
+        compute:
+          $ref: '#/components/schemas/InstanceComputeSummary'
+        network:
+          $ref: '#/components/schemas/InstanceNetworkSummary'
+        access:
+          $ref: '#/components/schemas/InstanceAccessSummary'
+        storage_attachments:
+          type: array
+          items: { $ref: '#/components/schemas/InstanceStorageAttachment' }
         termination_protection: { type: boolean, default: false, description: "VM 危险操作保护开关；开启后 stop/delete/rebuild 等操作必须先关闭保护" }
         ssh:
           type: object
@@ -467,11 +627,16 @@ components:
           nullable: true
           description: "GPU container 调度和利用率状态"
           properties:
+            spec_id:               { type: string, nullable: true }
+            gpu_type:              { type: string, nullable: true }
+            shares:                { type: integer, minimum: 1, nullable: true }
+            mb_per_share:          { type: integer, minimum: 1, nullable: true }
             vendor:                { type: string, nullable: true }
             model:                 { type: string, nullable: true }
             count:                 { type: integer, minimum: 0 }
             queue_name:            { type: string, nullable: true, description: "调度队列名（Volcano Queue）" }
             resource_name:         { type: string, nullable: true, description: "调度资源名，如 nvidia.com/gpu 或 nvidia.com/vgpu" }
+            scheduling_state:      { type: string, nullable: true, enum: [pending, queued, scheduled, running, failed, null] }
             scheduling_reason:     { type: string, nullable: true, description: "调度说明或失败原因，如 InsufficientGPU" }
             utilization_percent:   { type: number, format: float, minimum: 0, maximum: 100, nullable: true }
         sandbox:
@@ -517,7 +682,9 @@ components:
         id:               { type: string }
         instance_id:      { type: string }
         tenant_id:        { type: string }
-        operation:        { type: string, enum: [create, start, stop, restart, resize, rebuild, delete, snapshot, attach_volume, detach_volume, rollback, console_session] }
+        operation:
+          type: string
+          enum: [create, start, stop, restart, resize, rebuild, delete, snapshot, attach_volume, detach_volume, attach_filesystem, detach_filesystem, rollback, scale, update_image, bind_secret, unbind_secret, change_security_groups, set_termination_protection, pause, resume, extend, touch_idle, console_session]
         status:           { type: string, enum: [accepted, in_progress, succeeded, failed, cancelled] }
         idempotency_key:  { type: string, nullable: true, description: "客户端提供的幂等键" }
         requested_by:     { type: string, description: "发起操作的用户 ID" }
@@ -534,6 +701,9 @@ components:
               step_name:    { type: string, example: "admission_check" }
               status:       { type: string, enum: [pending, running, succeeded, failed, skipped] }
               message:      { type: string, nullable: true }
+              task_id:      { type: string, nullable: true, description: "关联异步任务 ID，例如 Storage task。" }
+              resource_type: { type: string, nullable: true, description: "关联资源类型；不得伪造 task_type。" }
+              resource_id:   { type: string, nullable: true }
               started_at:   { type: string, format: date-time, nullable: true }
               completed_at: { type: string, format: date-time, nullable: true }
         before_spec:      { type: object, nullable: true, description: "变更前的实例规格快照（用于 diff）" }
@@ -561,9 +731,15 @@ components:
       properties:
         idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
         name:           { type: string, minLength: 1, maxLength: 128 }
+        description:    { type: string, nullable: true }
+        labels:
+          type: object
+          additionalProperties: { type: string }
         kind:           { type: string, enum: [vm, container, gpu_container, sandbox] }
         instance_type:  { type: string, enum: [vm, container, gpu_container, sandbox], description: "kind 的兼容别名；两者同时传入时必须一致。" }
-        image:          { type: string, nullable: true, description: "容器镜像或运行时镜像引用" }
+        image_id:       { type: string, nullable: true, description: "推荐的 Registry 镜像 ID；创建前固定 digest。" }
+        image_ref:      { type: string, nullable: true, description: "兼容外部镜像引用；优先使用 image_id。" }
+        image:          { type: string, nullable: true, deprecated: true, description: "兼容字段；优先使用 image_id 或 image_ref。" }
         cpu:            { type: string, example: "2" }
         memory:         { type: string, example: "4Gi" }
         auto_start:     { type: boolean, default: true }
@@ -615,29 +791,80 @@ components:
       type: object
       description: "kind=vm 专用配置；共享 image/cpu/memory 仍在 CreateInstanceRequest 顶层。"
       properties:
-        boot_image:   { type: string, nullable: true, description: "VM boot image 引用" }
-        ssh_username: { type: string, nullable: true, default: "ubuntu", description: "VM SSH 用户名" }
-        ssh_key_ref:  { type: string, nullable: true, description: "VM SSH key/secret 引用；不包含私钥内容" }
+        network:
+          $ref: '#/components/schemas/InstanceNetworkConfig'
+        os_type:             { type: string, enum: [linux, windows], default: linux }
+        boot_image:          { type: string, nullable: true, deprecated: true, description: "兼容字段；优先使用 CreateInstanceRequest.image_id。" }
+        ssh_username:        { type: string, nullable: true, default: "ubuntu", description: "VM SSH 用户名" }
+        ssh_key_ref:         { type: string, nullable: true, description: "VM SSH key/secret 引用；不包含私钥内容" }
+        password_secret_ref: { type: string, nullable: true, description: "登录密码 Secret 引用；不返回明文。" }
+        user_data:           { type: string, nullable: true, description: "cloud-init user data；不得包含长期明文凭据。" }
+        system_disk:
+          $ref: '#/components/schemas/InstanceDiskSpec'
+        data_disks:
+          type: array
+          items: { $ref: '#/components/schemas/InstanceDiskSpec' }
+        filesystem_mounts:
+          type: array
+          items: { $ref: '#/components/schemas/InstanceFilesystemMount' }
 
     CreateContainerInstanceConfig:
       type: object
       description: "kind=container 专用配置；共享 image/cpu/memory 仍在 CreateInstanceRequest 顶层。"
       properties:
+        network:
+          $ref: '#/components/schemas/InstanceNetworkConfig'
         replicas:
           type: integer
           minimum: 1
           default: 1
           description: "容器副本数"
+        ports:
+          type: array
+          items: { $ref: '#/components/schemas/InstancePortSpec' }
+        env:
+          type: array
+          items: { $ref: '#/components/schemas/InstanceEnvVar' }
+        secret_ids:
+          type: array
+          items: { type: string }
+        volume_mounts:
+          type: array
+          items: { $ref: '#/components/schemas/InstanceVolumeMount' }
+        filesystem_mounts:
+          type: array
+          items: { $ref: '#/components/schemas/InstanceFilesystemMount' }
+        workload_identity:
+          $ref: '#/components/schemas/InstanceWorkloadIdentityConfig'
 
     CreateGPUContainerInstanceConfig:
       type: object
       description: "kind=gpu_container 专用配置；共享 image/cpu/memory 仍在 CreateInstanceRequest 顶层。"
       properties:
+        network:
+          $ref: '#/components/schemas/InstanceNetworkConfig'
         replicas:
           type: integer
           minimum: 1
           default: 1
           description: "GPU 容器副本数"
+        ports:
+          type: array
+          items: { $ref: '#/components/schemas/InstancePortSpec' }
+        env:
+          type: array
+          items: { $ref: '#/components/schemas/InstanceEnvVar' }
+        secret_ids:
+          type: array
+          items: { type: string }
+        volume_mounts:
+          type: array
+          items: { $ref: '#/components/schemas/InstanceVolumeMount' }
+        filesystem_mounts:
+          type: array
+          items: { $ref: '#/components/schemas/InstanceFilesystemMount' }
+        workload_identity:
+          $ref: '#/components/schemas/InstanceWorkloadIdentityConfig'
         gpu:
           type: object
           nullable: true
@@ -662,6 +889,10 @@ components:
       type: object
       description: "Sandbox 实例配置；表达 ANI 产品意图，不暴露 Kubernetes/Kata provider 对象。"
       properties:
+        template_id:
+          type: string
+          nullable: true
+          description: "SandboxTemplate ID；模板不可用时创建返回 422。"
         runtime_class:
           type: string
           default: sandbox-kata
@@ -670,8 +901,25 @@ components:
           type: string
           default: 30m
           description: "会话最大存活时间，Go duration 字符串，如 30m、2h。"
+        idle_timeout:
+          type: string
+          default: 10m
+          description: "空闲超时时间，Go duration 字符串。"
+        on_timeout:
+          type: string
+          enum: [pause, kill]
+          default: pause
         network_egress_policy:
           $ref: '#/components/schemas/SandboxNetworkEgressPolicy'
+        egress_allowlist:
+          type: array
+          items: { type: string }
+        env:
+          type: array
+          items: { $ref: '#/components/schemas/InstanceEnvVar' }
+        initial_ports:
+          type: array
+          items: { $ref: '#/components/schemas/InstancePortSpec' }
 
     SandboxInstanceStatus:
       type: object
@@ -679,11 +927,59 @@ components:
       description: "Sandbox 实例运行摘要；dev_profile.real_provider=false 时仅表示 local profile 状态机。"
       required: [runtime_class, session_timeout, network_egress_policy, session_state]
       properties:
+        template_id:            { type: string, nullable: true }
         runtime_class:          { type: string }
         session_timeout:        { type: string }
+        idle_timeout:           { type: string, nullable: true }
+        remain_seconds:         { type: integer, minimum: 0, nullable: true }
+        idle_remain_seconds:    { type: integer, minimum: 0, nullable: true }
+        on_timeout:             { type: string, nullable: true, enum: [pause, kill, null] }
         network_egress_policy:
           $ref: '#/components/schemas/SandboxNetworkEgressPolicy'
-        session_state:          { type: string, enum: [pending, running, expired, stopped] }
+        egress_allowlist:
+          type: array
+          items: { type: string }
+        ports:
+          type: array
+          items:
+            type: object
+            required: [port, status]
+            properties:
+              port:        { type: integer, minimum: 1, maximum: 65535 }
+              name:        { type: string, nullable: true }
+              protocol:    { type: string, enum: [tcp, http], default: tcp }
+              status:      { type: string, enum: [opening, available, closing, failed] }
+              preview_url: { type: string, nullable: true }
+        env:
+          type: array
+          items:
+            type: object
+            required: [name]
+            properties:
+              name:       { type: string }
+              secret_ref: { type: string, nullable: true }
+        checkpoints:
+          type: array
+          items:
+            type: object
+            required: [id, name, status]
+            properties:
+              id:     { type: string }
+              name:   { type: string }
+              status: { type: string, enum: [creating, available, restoring, failed, deleted] }
+        files_summary:
+          type: object
+          properties:
+            file_count:       { type: integer, minimum: 0 }
+            total_size_bytes: { type: integer, format: int64, minimum: 0 }
+        session_state:          { type: string, enum: [pending, running, paused, expired, stopped] }
+        agent_ref:              { type: string, nullable: true }
+        stop_reason:            { type: string, nullable: true, enum: [TTL_EXPIRED, IDLE_EXPIRED, USER_REQUESTED, RUNTIME_FAILED, null] }
+        connectivity:
+          type: object
+          properties:
+            token_available: { type: boolean }
+            ports_available: { type: boolean }
         dev_profile:
           $ref: '#/components/schemas/CoreDevProfileInfo'
 
@@ -870,16 +1166,37 @@ components:
     InstanceLifecycleRequest:
       type: object
       required: [action, idempotency_key]
+      description: |
+        各 action 只允许使用对应字段；缺失必填字段或携带跨 action 字段返回 400。
+        资源状态冲突返回 409，kind/provider 不支持或关联资源准入失败返回 422。
       properties:
         action:
           type: string
-          enum: [start, stop, restart, resize, rebuild, delete, snapshot, attach_volume, detach_volume, rollback]
+          enum: [start, stop, restart, resize, rebuild, delete, snapshot, attach_volume, detach_volume, attach_filesystem, detach_filesystem, rollback, scale, update_image, bind_secret, unbind_secret, change_security_groups, set_termination_protection, pause, resume, extend, touch_idle]
         idempotency_key: { type: string, minLength: 1, maxLength: 128 }
         cpu:            { type: string, nullable: true, description: "resize 时使用" }
         memory:         { type: string, nullable: true, description: "resize 时使用" }
-        snapshot_name:  { type: string, nullable: true, description: "snapshot 时指定快照名称；为空时由本地 profile 生成" }
-        revision:       { type: string, nullable: true, description: "rollback 时指定目标 revision；为空时回滚上一版本" }
+        snapshot_name:  { type: string, nullable: true, description: "snapshot 时指定快照名称" }
+        snapshot_id:    { type: string, nullable: true, description: "rollback 时指定目标快照" }
+        include_data_disks: { type: boolean, nullable: true, description: "snapshot 时是否包含数据盘" }
+        revision:       { type: string, nullable: true, description: "rollback 时指定目标 revision；与 snapshot_id 二选一" }
         volume_id:      { type: string, nullable: true, description: "attach_volume/detach_volume 时使用" }
+        filesystem_id:  { type: string, nullable: true, description: "attach_filesystem/detach_filesystem 时使用" }
+        mount_path:     { type: string, nullable: true, description: "attach_volume/attach_filesystem 时使用" }
+        read_only:      { type: boolean, nullable: true, description: "挂载资源时使用" }
+        replicas:       { type: integer, minimum: 1, nullable: true, description: "scale 时使用" }
+        image_id:       { type: string, nullable: true, description: "update_image 时使用" }
+        strategy:       { type: string, nullable: true, enum: [rolling, null], description: "update_image 策略" }
+        secret_id:      { type: string, nullable: true, description: "bind_secret/unbind_secret 时使用" }
+        binding_type:   { type: string, nullable: true, enum: [env, file, null], description: "bind_secret 时使用" }
+        env_name:       { type: string, nullable: true, description: "Secret 以环境变量绑定时使用" }
+        security_group_ids:
+          type: array
+          nullable: true
+          items: { type: string }
+          description: "change_security_groups 时使用"
+        enabled:        { type: boolean, nullable: true, description: "set_termination_protection 时使用" }
+        duration:       { type: string, nullable: true, description: "Sandbox extend 时使用" }
 
     InstanceLifecycleResponse:
       type: object
@@ -2590,15 +2907,29 @@ components:
       type: object
       required: [id, name, image, created_at, dev_profile]
       properties:
-        id:          { type: string, format: uuid }
-        name:        { type: string }
-        image:       { type: string }
-        description: { type: string, nullable: true }
-        cpu_cores:   { type: number, nullable: true }
-        memory_gb:   { type: number, nullable: true }
-        storage_gb:  { type: number, nullable: true }
-        is_builtin:  { type: boolean, default: false }
-        created_at:  { type: string, format: date-time }
+        id:                      { type: string, format: uuid }
+        name:                    { type: string }
+        image:                   { type: string, deprecated: true, description: "兼容字段；优先使用 image_id/image_ref。" }
+        image_id:                { type: string, nullable: true }
+        image_ref:               { type: string, nullable: true }
+        description:             { type: string, nullable: true }
+        cpu_cores:               { type: number, nullable: true, deprecated: true }
+        memory_gb:               { type: number, nullable: true, deprecated: true }
+        storage_gb:              { type: number, nullable: true }
+        default_cpu:             { type: string, nullable: true }
+        default_memory:          { type: string, nullable: true }
+        default_session_timeout: { type: string, nullable: true }
+        default_idle_timeout:    { type: string, nullable: true }
+        default_egress_policy:
+          allOf:
+            - $ref: '#/components/schemas/SandboxNetworkEgressPolicy'
+          nullable: true
+        default_ports:
+          type: array
+          items: { $ref: '#/components/schemas/InstancePortSpec' }
+        available:               { type: boolean, default: true }
+        is_builtin:              { type: boolean, default: false }
+        created_at:              { type: string, format: date-time }
         dev_profile:
           $ref: '#/components/schemas/CoreDevProfileInfo'
 
@@ -3097,9 +3428,23 @@ paths:
       tags: [Instances]
       x-ani-rbac-scope: "scope:instances:read"
       parameters:
-        - { name: kind,   in: query, schema: { type: string, enum: [vm, container, gpu_container, sandbox] } }
-        - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
-        - { name: cursor, in: query, schema: { type: string } }
+        - { name: kind,             in: query, schema: { type: string, enum: [vm, container, gpu_container, sandbox, batch_job, notebook, k8s_cluster, bare_metal, dpu_node] } }
+        - { name: state,            in: query, schema: { type: string, enum: [pending, provisioning, starting, running, stopping, stopped, failed, deleting, deleted] } }
+        - { name: keyword,          in: query, schema: { type: string }, description: "按实例名称、ID 或描述搜索。" }
+        - { name: created_after,    in: query, schema: { type: string, format: date-time } }
+        - { name: created_before,   in: query, schema: { type: string, format: date-time } }
+        - { name: spec_id,          in: query, schema: { type: string }, description: "VM/GPU 规格 ID。" }
+        - { name: image_id,         in: query, schema: { type: string } }
+        - { name: node_name,        in: query, schema: { type: string } }
+        - { name: rollout_status,   in: query, schema: { type: string, enum: [pending, progressing, healthy, degraded, rolled_back] } }
+        - { name: gpu_model,        in: query, schema: { type: string } }
+        - { name: queue_name,       in: query, schema: { type: string } }
+        - { name: scheduling_state, in: query, schema: { type: string, enum: [pending, queued, scheduled, running, failed] } }
+        - { name: template_id,      in: query, schema: { type: string } }
+        - { name: session_state,    in: query, schema: { type: string, enum: [pending, running, paused, expired, stopped] } }
+        - { name: limit,            in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor,           in: query, schema: { type: string } }
+        - { name: sort,             in: query, schema: { type: string, enum: [created_at_asc, created_at_desc, name_asc, name_desc], default: created_at_desc } }
       responses:
         "200":
           description: 实例列表
@@ -3172,9 +3517,9 @@ paths:
       operationId: applyInstanceLifecycle
       summary: 执行实例生命周期操作
       description: |
-        执行 start/stop/restart/resize/rebuild/delete/snapshot/attach_volume/detach_volume/rollback。
-        stop/delete 等有副作用操作必须携带 idempotency_key，VM 开启 termination_protection
-        时危险操作返回 CONFLICT，并在 operation precheck 中记录拒绝原因。
+        执行通用实例生命周期操作。每个请求必须携带 idempotency_key；VM 开启
+        termination_protection 时危险操作返回 409，并在 operation precheck 中记录拒绝原因。
+        kind 不支持对应 action、provider 能力不足或镜像/网络/存储准入失败时返回 422。
       tags: [Instances]
       x-ani-rbac-scope: "scope:instances:update"
       parameters:
@@ -3195,6 +3540,7 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
         "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
 
   /instances/{instance_id}/console:
     post:
@@ -3251,6 +3597,7 @@ paths:
       parameters:
         - { name: instance_id, in: path, required: true, schema: { type: string } }
         - { name: limit, in: query, schema: { type: integer, default: 50, minimum: 1, maximum: 500 } }
+        - { name: cursor, in: query, schema: { type: string } }
         - { name: type, in: query, schema: { type: string, enum: [Normal, Warning] } }
       responses:
         "200":
@@ -3315,6 +3662,7 @@ paths:
         - { name: instance_id, in: path, required: true, schema: { type: string } }
         - { name: severity, in: query, schema: { type: string, enum: [info, warning, critical] } }
         - { name: limit, in: query, schema: { type: integer, default: 50, minimum: 1, maximum: 500 } }
+        - { name: cursor, in: query, schema: { type: string } }
       responses:
         "200":
           description: 安全事件列表

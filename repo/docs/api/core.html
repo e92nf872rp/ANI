@@ -141,7 +141,7 @@
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
           <div><dt>Operations</dt><dd>175</dd></div>
-          <div><dt>Schemas</dt><dd>226</dd></div>
+          <div><dt>Schemas</dt><dd>238</dd></div>
         </dl>
       </section>
 
@@ -629,7 +629,7 @@
           <td><code>applyInstanceLifecycle</code></td>
           <td>执行实例生命周期操作</td>
           <td><code>scope:instances:update</code></td>
-          <td>200, 400, 401, 403, 404, 409</td>
+          <td>200, 400, 401, 403, 404, 409, 422</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1635,20 +1635,32 @@
         <li><code>GPUSpecListResponse</code></li>
         <li><code>GPUSpecSummary</code></li>
         <li><code>HealthCheck</code></li>
+        <li><code>InstanceAccessSummary</code></li>
+        <li><code>InstanceComputeSummary</code></li>
         <li><code>InstanceConsoleSession</code></li>
+        <li><code>InstanceDiskSpec</code></li>
+        <li><code>InstanceEnvVar</code></li>
         <li><code>InstanceEvent</code></li>
         <li><code>InstanceEventListResponse</code></li>
         <li><code>InstanceExecSession</code></li>
+        <li><code>InstanceFilesystemMount</code></li>
+        <li><code>InstanceImageSummary</code></li>
         <li><code>InstanceLifecycleRequest</code></li>
         <li><code>InstanceLifecycleResponse</code></li>
         <li><code>InstanceListResponse</code></li>
         <li><code>InstanceLogEntry</code></li>
         <li><code>InstanceLogListResponse</code></li>
         <li><code>InstanceMetrics</code></li>
+        <li><code>InstanceNetworkConfig</code></li>
+        <li><code>InstanceNetworkSummary</code></li>
         <li><code>InstanceOperation</code></li>
+        <li><code>InstancePortSpec</code></li>
         <li><code>InstanceRecord</code></li>
         <li><code>InstanceSecurityEvent</code></li>
         <li><code>InstanceSecurityEventListResponse</code></li>
+        <li><code>InstanceStorageAttachment</code></li>
+        <li><code>InstanceVolumeMount</code></li>
+        <li><code>InstanceWorkloadIdentityConfig</code></li>
         <li><code>K8sCluster</code></li>
         <li><code>K8sClusterCreateRequest</code></li>
         <li><code>K8sClusterKubeconfig</code></li>
