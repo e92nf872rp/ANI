@@ -836,7 +836,7 @@
       "operationId": "deleteVectorStoreDocuments",
       "method": "DELETE",
       "path": "/vector-stores/{vector_store_id}/documents",
-      "scope": "scope:vector-stores:write"
+      "scope": "scope:vector-stores:delete"
     },
     {
       "operationId": "insertVectorStoreDocuments",

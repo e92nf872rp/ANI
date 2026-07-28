@@ -5046,7 +5046,7 @@ paths:
       summary: 按 filter 删除向量文档
       description: 按 Milvus boolean expression 过滤删除指定向量存储中的文档向量；DELETE 天然幂等，不要求 idempotency_key。
       tags: [VectorStore]
-      x-ani-rbac-scope: "scope:vector-stores:write"
+      x-ani-rbac-scope: "scope:vector-stores:delete"
       parameters:
         - { name: vector_store_id, in: path, required: true, schema: { type: string } }
         - { name: filter, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 512 }, description: Milvus boolean expression，如 `doc_id == "abc"` }

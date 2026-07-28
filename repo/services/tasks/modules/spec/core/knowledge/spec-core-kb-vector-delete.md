@@ -23,7 +23,7 @@
 | 过滤机制 | `filter` 查询参数（Milvus boolean expression 字符串） | Milvus 原生 filter 表达式，直接透传，避免 Core 解析业务字段；kb-service 以 `doc_id == "..."` 形式调用 |
 | 响应 | `200 + VectorStoreDocumentDeleteResponse`（含 deleted_count） | 与现有 `insertVectorStoreDocuments` 的 202 语义区分：删除是同步立即完成 |
 | 幂等性 | DELETE 天然幂等；不引入 `idempotency_key` | 重复删除同一 filter 不产生副作用；遵循 Core API 「有副作用的 PUT/PATCH/DELETE 视语义决定」约定，集合级 DELETE 未强制 idempotency_key |
-| RBAC scope | `scope:vector-stores:write` | 与 `insertVectorStoreDocuments` 共享 write scope，文档级写入/删除属同一能力面 |
+| RBAC scope | `scope:vector-stores:delete` | 与 Core API 删除操作统一使用 `:delete` scope 规范一致 |
 | 路径参数名 | `vector_store_id` | 与现有 `/vector-stores/{vector_store_id}` 路径参数命名一致 |
 
 ---
@@ -38,7 +38,7 @@ kb-service DeleteDocument RPC
    │
    ▼
 DELETE /api/v1/vector-stores/{vector_store_id}/documents?filter=doc_id=="..."
-   │ (Core API, RBAC: scope:vector-stores:write)
+   │ (Core API, RBAC: scope:vector-stores:delete)
    ▼
 Core vector-store handler → Milvus delete by expr
 ```
@@ -87,7 +87,7 @@ N/A — 无新增实体。
 
 | Method | Path | operationId | Description | Auth | Request | Response |
 |--------|------|-------------|-------------|------|---------|----------|
-| DELETE | `/api/v1/vector-stores/{vector_store_id}/documents` | `deleteVectorStoreDocuments` | 按 filter 删除向量文档 | RBAC `scope:vector-stores:write` | `filter` query param | `200 + VectorStoreDocumentDeleteResponse` |
+| DELETE | `/api/v1/vector-stores/{vector_store_id}/documents` | `deleteVectorStoreDocuments` | 按 filter 删除向量文档 | RBAC `scope:vector-stores:delete` | `filter` query param | `200 + VectorStoreDocumentDeleteResponse` |
 
 ### 4.2 Request/Response Schemas
 
@@ -117,7 +117,7 @@ VectorStoreDocumentDeleteResponse:
 |------|------|-----------|--------------|
 | 400 | `INVALID_FILTER` | filter 为空 / 非法表达式 | filter 表达式非法 |
 | 401 | `UNAUTHORIZED` | 未认证 | — |
-| 403 | `FORBIDDEN` | 无 `scope:vector-stores:write` | — |
+| 403 | `FORBIDDEN` | 无 `scope:vector-stores:delete` | — |
 | 404 | `VECTOR_STORE_NOT_FOUND` | vector_store_id 不存在 | 向量存储不存在 |
 | 422 | `PRECONDITION_FAILED` | Milvus 集合未就绪 | 向量存储未就绪 |
 
@@ -139,7 +139,7 @@ VectorStoreDocumentDeleteResponse:
 
 ### 6.1 Core Algorithm
 ```
-1. 校验 RBAC scope:vector-stores:write
+1. 校验 RBAC scope:vector-stores:delete
 2. 解析 vector_store_id（路径）、filter（查询）
 3. 若 filter 为空 → 400 INVALID_FILTER
 4. 调用 Milvus adapter: collection=vector_store_id, delete(expr=filter)
@@ -181,7 +181,7 @@ Milvus 不可用时返回 503；kb-service 侧降级处理（见 spec-services-k
 
 ### 8.1 Authentication & Authorization
 - 认证：现有 Core API JWT 认证
-- 授权：RBAC `scope:vector-stores:write`（与 `insertVectorStoreDocuments` 共享）
+- 授权：RBAC `scope:vector-stores:delete`（与 Core API 删除操作统一 `:delete` scope 规范）
 - 租户隔离：kb-service 以服务账号调用，filter 由 kb-service 构造（`doc_id == "..."`），不含跨租户字段
 
 ### 8.2 Input Validation
