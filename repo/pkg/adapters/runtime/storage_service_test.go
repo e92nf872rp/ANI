@@ -235,6 +235,9 @@ func TestLocalStorageServiceSnapshotsAndMountTargets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateVolume error = %v", err)
 	}
+	if volume.VolumeType != "ssd" || volume.IOPS != 5000 {
+		t.Fatalf("default volume type/iops = %q/%d, want ssd/5000", volume.VolumeType, volume.IOPS)
+	}
 	snapshot, err := service.CreateVolumeSnapshot(context.Background(), ports.VolumeSnapshotCreateRequest{
 		TenantID:       "tenant-a",
 		IdempotencyKey: "snapshot-a",
@@ -899,6 +902,13 @@ func TestLocalStorageServiceFilesystemOperations(t *testing.T) {
 	}
 	if target.SubnetID != "subnet-a" || target.IPAddress == "" {
 		t.Fatalf("target = %#v, want subnet and IP", target)
+	}
+	filesystems, err := service.ListFilesystems(context.Background(), ports.StorageResourceListRequest{TenantID: "tenant-a"})
+	if err != nil {
+		t.Fatalf("ListFilesystems() error = %v", err)
+	}
+	if len(filesystems) != 1 || len(filesystems[0].MountTargets) != 1 || filesystems[0].MountTargets[0].MountTargetID != target.MountTargetID {
+		t.Fatalf("ListFilesystems() = %#v, want filesystem enriched with mount target %q", filesystems, target.MountTargetID)
 	}
 	mounted, err := service.MountFilesystem(context.Background(), ports.StorageFilesystemMountRequest{
 		TenantID:       "tenant-a",

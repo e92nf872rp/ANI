@@ -141,6 +141,7 @@ func (s *LocalStorageService) CreateVolume(ctx context.Context, request ports.St
 		}
 	}
 	now := s.now().UTC()
+	volumeType := firstNetworkNonEmpty(request.VolumeType, "ssd")
 	record := ports.StorageVolumeRecord{
 		TenantID:        request.TenantID,
 		VolumeID:        "vol_" + uuid.NewString(),
@@ -148,8 +149,8 @@ func (s *LocalStorageService) CreateVolume(ctx context.Context, request ports.St
 		SizeGiB:         request.SizeGiB,
 		StorageClass:    firstNetworkNonEmpty(request.StorageClass, "standard"),
 		Zone:            strings.TrimSpace(request.Zone),
-		VolumeType:      firstNetworkNonEmpty(request.VolumeType, "ssd"),
-		IOPS:            storageVolumeIOPS(request.VolumeType),
+		VolumeType:      volumeType,
+		IOPS:            storageVolumeIOPS(volumeType),
 		Encrypted:       request.Encrypted,
 		MountInstanceID: strings.TrimSpace(request.MountInstanceID),
 		MountRoute:      strings.TrimSpace(request.MountRoute),
@@ -533,7 +534,7 @@ func (s *LocalStorageService) ListFilesystems(_ context.Context, request ports.S
 	items := make([]ports.StorageFilesystemRecord, 0, len(s.filesystems))
 	for _, record := range s.filesystems {
 		if record.TenantID == request.TenantID && record.State != ports.StorageResourceDeleted {
-			items = append(items, record)
+			items = append(items, s.enrichFilesystemLocked(record))
 		}
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.After(items[j].UpdatedAt) })
@@ -1393,8 +1394,8 @@ func (s *LocalStorageService) SetStorageBucketLifecycleRules(_ context.Context, 
 		if strings.TrimSpace(item.ID) == "" {
 			item.ID = uuid.NewString()
 		}
-		if strings.TrimSpace(item.Name) == "" {
-			return ports.StorageBucketLifecycleRuleListResult{}, fmt.Errorf("%w: lifecycle rule name is required", ports.ErrInvalid)
+		if err := validateStorageBucketLifecycleRuleFields(item.Name, item.ExpireDays, item.ToInfrequentDays); err != nil {
+			return ports.StorageBucketLifecycleRuleListResult{}, err
 		}
 		rules = append(rules, item)
 	}
@@ -1407,11 +1408,8 @@ func (s *LocalStorageService) SetStorageBucketLifecycleRules(_ context.Context, 
 }
 
 func (s *LocalStorageService) CreateStorageBucketLifecycleRule(_ context.Context, request ports.StorageBucketLifecycleRuleCreateRequest) (ports.StorageBucketLifecycleRule, error) {
-	if strings.TrimSpace(request.Name) == "" {
-		return ports.StorageBucketLifecycleRule{}, fmt.Errorf("%w: name is required", ports.ErrInvalid)
-	}
-	if request.ExpireDays < 1 || request.ToInfrequentDays < 1 {
-		return ports.StorageBucketLifecycleRule{}, fmt.Errorf("%w: expire_days and to_infrequent_days must be >= 1", ports.ErrInvalid)
+	if err := validateStorageBucketLifecycleRuleFields(request.Name, request.ExpireDays, request.ToInfrequentDays); err != nil {
+		return ports.StorageBucketLifecycleRule{}, err
 	}
 	idemKey, err := requireIdempotencyKey(request.TenantID, request.IdempotencyKey)
 	if err != nil {
@@ -1810,6 +1808,16 @@ func requireStorageTenantAndName(tenantID string, name string) error {
 	}
 	if strings.TrimSpace(name) == "" {
 		return fmt.Errorf("%w: name is required", ports.ErrInvalid)
+	}
+	return nil
+}
+
+func validateStorageBucketLifecycleRuleFields(name string, expireDays int, toInfrequentDays int) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("%w: lifecycle rule name is required", ports.ErrInvalid)
+	}
+	if expireDays < 1 || toInfrequentDays < 1 {
+		return fmt.Errorf("%w: expire_days and to_infrequent_days must be >= 1", ports.ErrInvalid)
 	}
 	return nil
 }

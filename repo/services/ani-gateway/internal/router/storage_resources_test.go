@@ -376,6 +376,33 @@ func TestStorageAPIBucketConsoleResponsesMatchCoreSchema(t *testing.T) {
 	}
 }
 
+func TestStorageHTTPRejectsInvalidBatchLifecycleRuleDays(t *testing.T) {
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Next(ctx)
+	})
+	registerStorageResourcesWithService(h.Group("/api/v1"), runtimeadapter.NewLocalStorageService())
+
+	bucketBody := performJSONRequest(
+		t,
+		h,
+		http.MethodPost,
+		"/api/v1/buckets",
+		`{"idempotency_key":"http-lifecycle-bucket","name":"lifecycle-tests"}`,
+		http.StatusCreated,
+	)
+	bucketID := jsonStringField(t, bucketBody, "id")
+	performJSONRequest(
+		t,
+		h,
+		http.MethodPut,
+		"/api/v1/buckets/"+bucketID+"/lifecycle-rules",
+		`{"idempotency_key":"http-lifecycle-invalid","rules":[{"name":"x","prefix":"logs/","expire_days":0,"to_infrequent_days":7,"enabled":true}]}`,
+		http.StatusBadRequest,
+	)
+}
+
 func TestStorageAPIVolumeOperationResponsesMatchCoreSchema(t *testing.T) {
 	api := newStorageAPI()
 	volume, err := api.service.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{
@@ -508,6 +535,7 @@ func TestStorageHTTPVolumeFilesystemOperationsEndToEnd(t *testing.T) {
 		t.Fatalf("guide body = %s, want device", guide)
 	}
 	performJSONRequest(t, h, http.MethodPost, "/api/v1/volumes/"+volumeID+"/os-init-complete", `{"idempotency_key":"http-volume-os","mode":"done"}`, http.StatusOK)
+	performJSONRequest(t, h, http.MethodPost, "/api/v1/volumes/"+volumeID+"/unmount", `{"idempotency_key":"http-volume-unmount"}`, http.StatusAccepted)
 	snapshotTask := performJSONRequest(t, h, http.MethodPost, "/api/v1/volumes/"+volumeID+"/snapshots", `{"idempotency_key":"http-snapshot","name":"snap-http"}`, http.StatusAccepted)
 	snapshotID := jsonNestedStringField(t, snapshotTask, "result", "snapshot", "id")
 	restored := performJSONRequest(t, h, http.MethodPost, "/api/v1/volumes/"+volumeID+"/snapshots/"+snapshotID+"/create-volume", `{"idempotency_key":"http-restore","name":"restored-http","size_gib":150}`, http.StatusAccepted)
@@ -544,6 +572,20 @@ func performJSONRequest(t *testing.T, h *server.Hertz, method string, path strin
 	resp := ut.PerformRequest(h.Engine, method, path, reqBody, headers...).Result()
 	if resp.StatusCode() != wantStatus {
 		t.Fatalf("%s %s status = %d body = %s, want %d", method, path, resp.StatusCode(), resp.Body(), wantStatus)
+	}
+	if wantStatus == http.StatusAccepted {
+		var task struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(resp.Body(), &task); err != nil {
+			t.Fatalf("%s %s decode accepted task: %v", method, path, err)
+		}
+		if task.ID == "" {
+			t.Fatalf("%s %s accepted task has no id: %s", method, path, resp.Body())
+		}
+		if got, want := string(resp.Header.Get("Location")), "/api/v1/tasks/"+task.ID; got != want {
+			t.Fatalf("%s %s Location = %q, want %q", method, path, got, want)
+		}
 	}
 	return append([]byte(nil), resp.Body()...)
 }
