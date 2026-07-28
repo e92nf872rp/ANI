@@ -266,9 +266,9 @@ export interface paths {
         put?: never;
         /**
          * 执行实例生命周期操作
-         * @description 执行 start/stop/restart/resize/rebuild/delete/snapshot/attach_volume/detach_volume/rollback。
-         *     stop/delete 等有副作用操作必须携带 idempotency_key，VM 开启 termination_protection
-         *     时危险操作返回 CONFLICT，并在 operation precheck 中记录拒绝原因。
+         * @description 执行通用实例生命周期操作。每个请求必须携带 idempotency_key；VM 开启
+         *     termination_protection 时危险操作返回 409，并在 operation precheck 中记录拒绝原因。
+         *     kind 不支持对应 action、provider 能力不足或镜像/网络/存储准入失败时返回 422。
          */
         post: operations["applyInstanceLifecycle"];
         delete?: never;
@@ -2742,11 +2742,128 @@ export interface components {
             real_provider: boolean;
             reason?: string | null;
         };
+        /** @description 实例网络引用；只表达 Core 产品意图，不暴露 provider 对象。 */
+        InstanceNetworkConfig: {
+            vpc_id?: string | null;
+            subnet_id?: string | null;
+            security_group_ids?: string[];
+            /** @default true */
+            assign_private_ip: boolean;
+            private_ip?: string | null;
+        };
+        /** @description 实例磁盘声明。volume_id 与新盘字段两种模式互斥。 */
+        InstanceDiskSpec: {
+            volume_id?: string;
+            name?: string;
+            /** Format: int64 */
+            size_gib?: number;
+            volume_type?: string | null;
+            storage_class?: string | null;
+            /** @default false */
+            encrypted: boolean;
+            /** @default true */
+            delete_on_failure: boolean;
+            /** @default false */
+            delete_with_instance: boolean;
+        } & (unknown | unknown);
+        InstanceVolumeMount: {
+            volume_id: string;
+            mount_path: string;
+            /** @default false */
+            read_only: boolean;
+        };
+        InstanceFilesystemMount: {
+            filesystem_id: string;
+            mount_path: string;
+            /** @default false */
+            read_only: boolean;
+        };
+        InstancePortSpec: {
+            name?: string | null;
+            container_port: number;
+            /**
+             * @default tcp
+             * @enum {string}
+             */
+            protocol: "tcp" | "udp";
+        };
+        /** @description value 与 secret_ref 互斥；敏感值必须使用 secret_ref。 */
+        InstanceEnvVar: {
+            name: string;
+            value?: string;
+            secret_ref?: string;
+        } & (unknown | unknown);
+        InstanceWorkloadIdentityConfig: {
+            /** @default true */
+            enabled: boolean;
+            scopes?: string[];
+        };
+        /** @description 实例固定的镜像摘要；不得包含 Registry 凭据。 */
+        InstanceImageSummary: {
+            id?: string | null;
+            ref?: string | null;
+            digest?: string | null;
+            name?: string | null;
+            tag?: string | null;
+            /** @enum {string|null} */
+            purpose?: "container" | "gpu" | "sandbox" | "system" | null;
+            architecture?: string | null;
+        };
+        InstanceComputeSummary: {
+            cpu?: string | null;
+            memory?: string | null;
+            spec_id?: string | null;
+            gpu_type?: string | null;
+            gpu_shares?: number | null;
+            gpu_mb_per_share?: number | null;
+            availability_zone?: string | null;
+            node_name?: string | null;
+        };
+        InstanceNetworkSummary: {
+            vpc_id?: string | null;
+            vpc_name?: string | null;
+            subnet_id?: string | null;
+            subnet_name?: string | null;
+            private_ip?: string | null;
+            security_groups?: {
+                id: string;
+                name?: string | null;
+            }[];
+            endpoints?: {
+                name?: string | null;
+                address: string;
+                protocol?: string | null;
+                port?: number | null;
+            }[];
+            load_balancer_refs?: string[];
+        };
+        InstanceAccessSummary: {
+            ssh_available: boolean;
+            console_available: boolean;
+            exec_available: boolean;
+            reason?: string | null;
+        };
+        InstanceStorageAttachment: {
+            /** @enum {string} */
+            resource_type: "volume" | "filesystem";
+            resource_id: string;
+            name?: string | null;
+            mount_path?: string | null;
+            /** @default false */
+            read_only: boolean;
+            /** @enum {string} */
+            status: "pending" | "attached" | "mounted" | "detaching" | "failed";
+            task_id?: string | null;
+        };
         /** @description ANI Core 计算实例（VM/Container/GPU/Sandbox/BM/K8s集群/Batch） */
         InstanceRecord: {
             id: string;
             tenant_id: string;
             name: string;
+            description?: string | null;
+            labels?: {
+                [key: string]: string;
+            };
             /** @enum {string} */
             kind: "vm" | "container" | "gpu_container" | "sandbox" | "batch_job" | "notebook" | "k8s_cluster" | "bare_metal" | "dpu_node";
             /**
@@ -2767,6 +2884,11 @@ export interface components {
             resource_refs?: string[];
             endpoint?: string | null;
             node_name?: string | null;
+            image?: components["schemas"]["InstanceImageSummary"];
+            compute?: components["schemas"]["InstanceComputeSummary"];
+            network?: components["schemas"]["InstanceNetworkSummary"];
+            access?: components["schemas"]["InstanceAccessSummary"];
+            storage_attachments?: components["schemas"]["InstanceStorageAttachment"][];
             /**
              * @description VM 危险操作保护开关；开启后 stop/delete/rebuild 等操作必须先关闭保护
              * @default false
@@ -2814,6 +2936,10 @@ export interface components {
             } | null;
             /** @description GPU container 调度和利用率状态 */
             gpu?: {
+                spec_id?: string | null;
+                gpu_type?: string | null;
+                shares?: number | null;
+                mb_per_share?: number | null;
                 vendor?: string | null;
                 model?: string | null;
                 count?: number;
@@ -2821,6 +2947,8 @@ export interface components {
                 queue_name?: string | null;
                 /** @description 调度资源名，如 nvidia.com/gpu 或 nvidia.com/vgpu */
                 resource_name?: string | null;
+                /** @enum {string|null} */
+                scheduling_state?: "pending" | "queued" | "scheduled" | "running" | "failed" | null;
                 /** @description 调度说明或失败原因，如 InsufficientGPU */
                 scheduling_reason?: string | null;
                 /** Format: float */
@@ -2864,7 +2992,7 @@ export interface components {
             instance_id: string;
             tenant_id: string;
             /** @enum {string} */
-            operation: "create" | "start" | "stop" | "restart" | "resize" | "rebuild" | "delete" | "snapshot" | "attach_volume" | "detach_volume" | "rollback" | "console_session";
+            operation: "create" | "start" | "stop" | "restart" | "resize" | "rebuild" | "delete" | "snapshot" | "attach_volume" | "detach_volume" | "attach_filesystem" | "detach_filesystem" | "rollback" | "scale" | "update_image" | "bind_secret" | "unbind_secret" | "change_security_groups" | "set_termination_protection" | "pause" | "resume" | "extend" | "touch_idle" | "console_session";
             /** @enum {string} */
             status: "accepted" | "in_progress" | "succeeded" | "failed" | "cancelled";
             /** @description 客户端提供的幂等键 */
@@ -2882,6 +3010,11 @@ export interface components {
                 /** @enum {string} */
                 status: "pending" | "running" | "succeeded" | "failed" | "skipped";
                 message?: string | null;
+                /** @description 关联异步任务 ID，例如 Storage task。 */
+                task_id?: string | null;
+                /** @description 关联资源类型；不得伪造 task_type。 */
+                resource_type?: string | null;
+                resource_id?: string | null;
                 /** Format: date-time */
                 started_at?: string | null;
                 /** Format: date-time */
@@ -2910,6 +3043,10 @@ export interface components {
             /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
             idempotency_key: string;
             name: string;
+            description?: string | null;
+            labels?: {
+                [key: string]: string;
+            };
             /** @enum {string} */
             kind: "vm" | "container" | "gpu_container" | "sandbox";
             /**
@@ -2917,7 +3054,14 @@ export interface components {
              * @enum {string}
              */
             instance_type?: "vm" | "container" | "gpu_container" | "sandbox";
-            /** @description 容器镜像或运行时镜像引用 */
+            /** @description 推荐的 Registry 镜像 ID；创建前固定 digest。 */
+            image_id?: string | null;
+            /** @description 兼容外部镜像引用；优先使用 image_id。 */
+            image_ref?: string | null;
+            /**
+             * @deprecated
+             * @description 兼容字段；优先使用 image_id 或 image_ref。
+             */
             image?: string | null;
             /** @example 2 */
             cpu?: string;
@@ -2982,7 +3126,16 @@ export interface components {
         };
         /** @description kind=vm 专用配置；共享 image/cpu/memory 仍在 CreateInstanceRequest 顶层。 */
         CreateVMInstanceConfig: {
-            /** @description VM boot image 引用 */
+            network?: components["schemas"]["InstanceNetworkConfig"];
+            /**
+             * @default linux
+             * @enum {string}
+             */
+            os_type: "linux" | "windows";
+            /**
+             * @deprecated
+             * @description 兼容字段；优先使用 CreateInstanceRequest.image_id。
+             */
             boot_image?: string | null;
             /**
              * @description VM SSH 用户名
@@ -2991,22 +3144,43 @@ export interface components {
             ssh_username: string | null;
             /** @description VM SSH key/secret 引用；不包含私钥内容 */
             ssh_key_ref?: string | null;
+            /** @description 登录密码 Secret 引用；不返回明文。 */
+            password_secret_ref?: string | null;
+            /** @description cloud-init user data；不得包含长期明文凭据。 */
+            user_data?: string | null;
+            system_disk?: components["schemas"]["InstanceDiskSpec"];
+            data_disks?: components["schemas"]["InstanceDiskSpec"][];
+            filesystem_mounts?: components["schemas"]["InstanceFilesystemMount"][];
         };
         /** @description kind=container 专用配置；共享 image/cpu/memory 仍在 CreateInstanceRequest 顶层。 */
         CreateContainerInstanceConfig: {
+            network?: components["schemas"]["InstanceNetworkConfig"];
             /**
              * @description 容器副本数
              * @default 1
              */
             replicas: number;
+            ports?: components["schemas"]["InstancePortSpec"][];
+            env?: components["schemas"]["InstanceEnvVar"][];
+            secret_ids?: string[];
+            volume_mounts?: components["schemas"]["InstanceVolumeMount"][];
+            filesystem_mounts?: components["schemas"]["InstanceFilesystemMount"][];
+            workload_identity?: components["schemas"]["InstanceWorkloadIdentityConfig"];
         };
         /** @description kind=gpu_container 专用配置；共享 image/cpu/memory 仍在 CreateInstanceRequest 顶层。 */
         CreateGPUContainerInstanceConfig: {
+            network?: components["schemas"]["InstanceNetworkConfig"];
             /**
              * @description GPU 容器副本数
              * @default 1
              */
             replicas: number;
+            ports?: components["schemas"]["InstancePortSpec"][];
+            env?: components["schemas"]["InstanceEnvVar"][];
+            secret_ids?: string[];
+            volume_mounts?: components["schemas"]["InstanceVolumeMount"][];
+            filesystem_mounts?: components["schemas"]["InstanceFilesystemMount"][];
+            workload_identity?: components["schemas"]["InstanceWorkloadIdentityConfig"];
             /**
              * @description GPU 资源选择。推荐传 spec_id 引用 Core GPUSpec；规格模式只解析资源形态和调度参数，
              *     当前不表达租户配额扣减。旧字段保留用于 v1 兼容，和 spec_id 同时传入时必须一致。
@@ -3056,6 +3230,8 @@ export interface components {
         SandboxNetworkEgressPolicy: "deny_all" | "allowlist" | "internet";
         /** @description Sandbox 实例配置；表达 ANI 产品意图，不暴露 Kubernetes/Kata provider 对象。 */
         SandboxConfig: {
+            /** @description SandboxTemplate ID；模板不可用时创建返回 422。 */
+            template_id?: string | null;
             /**
              * @description 目标 RuntimeClass 名称，P0 默认 Kata Containers QEMU profile。
              * @default sandbox-kata
@@ -3066,15 +3242,69 @@ export interface components {
              * @default 30m
              */
             session_timeout: string;
+            /**
+             * @description 空闲超时时间，Go duration 字符串。
+             * @default 10m
+             */
+            idle_timeout: string;
+            /**
+             * @default pause
+             * @enum {string}
+             */
+            on_timeout: "pause" | "kill";
             network_egress_policy?: components["schemas"]["SandboxNetworkEgressPolicy"];
+            egress_allowlist?: string[];
+            env?: components["schemas"]["InstanceEnvVar"][];
+            initial_ports?: components["schemas"]["InstancePortSpec"][];
         };
         /** @description Sandbox 实例运行摘要；dev_profile.real_provider=false 时仅表示 local profile 状态机。 */
         SandboxInstanceStatus: {
+            template_id?: string | null;
             runtime_class: string;
             session_timeout: string;
+            idle_timeout?: string | null;
+            remain_seconds?: number | null;
+            idle_remain_seconds?: number | null;
+            /** @enum {string|null} */
+            on_timeout?: "pause" | "kill" | null;
             network_egress_policy: components["schemas"]["SandboxNetworkEgressPolicy"];
+            egress_allowlist?: string[];
+            ports?: {
+                port: number;
+                name?: string | null;
+                /**
+                 * @default tcp
+                 * @enum {string}
+                 */
+                protocol: "tcp" | "http";
+                /** @enum {string} */
+                status: "opening" | "available" | "closing" | "failed";
+                preview_url?: string | null;
+            }[];
+            env?: {
+                name: string;
+                secret_ref?: string | null;
+            }[];
+            checkpoints?: {
+                id: string;
+                name: string;
+                /** @enum {string} */
+                status: "creating" | "available" | "restoring" | "failed" | "deleted";
+            }[];
+            files_summary?: {
+                file_count?: number;
+                /** Format: int64 */
+                total_size_bytes?: number;
+            };
             /** @enum {string} */
-            session_state: "pending" | "running" | "expired" | "stopped";
+            session_state: "pending" | "running" | "paused" | "expired" | "stopped";
+            agent_ref?: string | null;
+            /** @enum {string|null} */
+            stop_reason?: "TTL_EXPIRED" | "IDLE_EXPIRED" | "USER_REQUESTED" | "RUNTIME_FAILED" | null;
+            connectivity?: {
+                token_available?: boolean;
+                ports_available?: boolean;
+            };
             dev_profile?: components["schemas"]["CoreDevProfileInfo"];
         } | null;
         /** @description PromQL 代理查询结果；不暴露底层 Prometheus 地址。 */
@@ -3230,20 +3460,58 @@ export interface components {
             operation_id: string;
             audit_id?: string | null;
         };
+        /**
+         * @description 各 action 只允许使用对应字段；缺失必填字段或携带跨 action 字段返回 400。
+         *     资源状态冲突返回 409，kind/provider 不支持或关联资源准入失败返回 422。
+         */
         InstanceLifecycleRequest: {
             /** @enum {string} */
-            action: "start" | "stop" | "restart" | "resize" | "rebuild" | "delete" | "snapshot" | "attach_volume" | "detach_volume" | "rollback";
+            action: "start" | "stop" | "restart" | "resize" | "rebuild" | "delete" | "snapshot" | "attach_volume" | "detach_volume" | "attach_filesystem" | "detach_filesystem" | "rollback" | "scale" | "update_image" | "bind_secret" | "unbind_secret" | "change_security_groups" | "set_termination_protection" | "pause" | "resume" | "extend" | "touch_idle";
             idempotency_key: string;
             /** @description resize 时使用 */
             cpu?: string | null;
             /** @description resize 时使用 */
             memory?: string | null;
-            /** @description snapshot 时指定快照名称；为空时由本地 profile 生成 */
+            /** @description snapshot 时指定快照名称 */
             snapshot_name?: string | null;
-            /** @description rollback 时指定目标 revision；为空时回滚上一版本 */
+            /** @description rollback 时指定目标快照 */
+            snapshot_id?: string | null;
+            /** @description snapshot 时是否包含数据盘 */
+            include_data_disks?: boolean | null;
+            /** @description rollback 时指定目标 revision；与 snapshot_id 二选一 */
             revision?: string | null;
             /** @description attach_volume/detach_volume 时使用 */
             volume_id?: string | null;
+            /** @description attach_filesystem/detach_filesystem 时使用 */
+            filesystem_id?: string | null;
+            /** @description attach_volume/attach_filesystem 时使用 */
+            mount_path?: string | null;
+            /** @description 挂载资源时使用 */
+            read_only?: boolean | null;
+            /** @description scale 时使用 */
+            replicas?: number | null;
+            /** @description update_image 时使用 */
+            image_id?: string | null;
+            /**
+             * @description update_image 策略
+             * @enum {string|null}
+             */
+            strategy?: "rolling" | null;
+            /** @description bind_secret/unbind_secret 时使用 */
+            secret_id?: string | null;
+            /**
+             * @description bind_secret 时使用
+             * @enum {string|null}
+             */
+            binding_type?: "env" | "file" | null;
+            /** @description Secret 以环境变量绑定时使用 */
+            env_name?: string | null;
+            /** @description change_security_groups 时使用 */
+            security_group_ids?: string[] | null;
+            /** @description set_termination_protection 时使用 */
+            enabled?: boolean | null;
+            /** @description Sandbox extend 时使用 */
+            duration?: string | null;
         };
         InstanceLifecycleResponse: {
             instance: components["schemas"]["InstanceRecord"];
@@ -4689,11 +4957,27 @@ export interface components {
             /** Format: uuid */
             id: string;
             name: string;
+            /**
+             * @deprecated
+             * @description 兼容字段；优先使用 image_id/image_ref。
+             */
             image: string;
+            image_id?: string | null;
+            image_ref?: string | null;
             description?: string | null;
+            /** @deprecated */
             cpu_cores?: number | null;
+            /** @deprecated */
             memory_gb?: number | null;
             storage_gb?: number | null;
+            default_cpu?: string | null;
+            default_memory?: string | null;
+            default_session_timeout?: string | null;
+            default_idle_timeout?: string | null;
+            default_egress_policy?: components["schemas"]["SandboxNetworkEgressPolicy"] | null;
+            default_ports?: components["schemas"]["InstancePortSpec"][];
+            /** @default true */
+            available: boolean;
             /** @default false */
             is_builtin: boolean;
             /** Format: date-time */
@@ -5244,9 +5528,25 @@ export interface operations {
     listInstances: {
         parameters: {
             query?: {
-                kind?: "vm" | "container" | "gpu_container" | "sandbox";
+                kind?: "vm" | "container" | "gpu_container" | "sandbox" | "batch_job" | "notebook" | "k8s_cluster" | "bare_metal" | "dpu_node";
+                state?: "pending" | "provisioning" | "starting" | "running" | "stopping" | "stopped" | "failed" | "deleting" | "deleted";
+                /** @description 按实例名称、ID 或描述搜索。 */
+                keyword?: string;
+                created_after?: string;
+                created_before?: string;
+                /** @description VM/GPU 规格 ID。 */
+                spec_id?: string;
+                image_id?: string;
+                node_name?: string;
+                rollout_status?: "pending" | "progressing" | "healthy" | "degraded" | "rolled_back";
+                gpu_model?: string;
+                queue_name?: string;
+                scheduling_state?: "pending" | "queued" | "scheduled" | "running" | "failed";
+                template_id?: string;
+                session_state?: "pending" | "running" | "paused" | "expired" | "stopped";
                 limit?: number;
                 cursor?: string;
+                sort?: "created_at_asc" | "created_at_desc" | "name_asc" | "name_desc";
             };
             header?: never;
             path?: never;
@@ -5363,6 +5663,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["PreconditionFailed"];
         };
     };
     createInstanceConsoleSession: {
@@ -5428,6 +5729,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                cursor?: string;
                 type?: "Normal" | "Warning";
             };
             header?: never;
@@ -5512,6 +5814,7 @@ export interface operations {
             query?: {
                 severity?: "info" | "warning" | "critical";
                 limit?: number;
+                cursor?: string;
             };
             header?: never;
             path: {

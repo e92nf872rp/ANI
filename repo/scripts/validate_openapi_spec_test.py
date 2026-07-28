@@ -110,6 +110,142 @@ class OpenAPISpecValidatorTest(unittest.TestCase):
         self.assertTrue(gpu_config["properties"]["count"]["deprecated"])
         self.assertTrue(gpu_config["properties"]["allocation_mode"]["deprecated"])
 
+    def test_instance_management_create_and_detail_contract_is_frozen(self) -> None:
+        spec = yaml.safe_load((ROOT / "api/openapi/v1.yaml").read_text(encoding="utf-8"))
+        schemas = spec["components"]["schemas"]
+
+        create_properties = schemas["CreateInstanceRequest"]["properties"]
+        for field in ("description", "labels", "image_id", "image_ref"):
+            self.assertIn(field, create_properties)
+
+        for schema_name in (
+            "InstanceNetworkConfig",
+            "InstanceDiskSpec",
+            "InstanceVolumeMount",
+            "InstanceFilesystemMount",
+            "InstancePortSpec",
+            "InstanceEnvVar",
+            "InstanceImageSummary",
+            "InstanceComputeSummary",
+            "InstanceNetworkSummary",
+            "InstanceAccessSummary",
+            "InstanceStorageAttachment",
+        ):
+            self.assertIn(schema_name, schemas)
+
+        instance_properties = schemas["InstanceRecord"]["properties"]
+        for field in (
+            "description",
+            "labels",
+            "image",
+            "compute",
+            "network",
+            "access",
+            "storage_attachments",
+        ):
+            self.assertIn(field, instance_properties)
+
+        for config_name in (
+            "CreateVMInstanceConfig",
+            "CreateContainerInstanceConfig",
+            "CreateGPUContainerInstanceConfig",
+        ):
+            self.assertIn("network", schemas[config_name]["properties"])
+
+        for field in (
+            "template_id",
+            "idle_timeout",
+            "on_timeout",
+            "egress_allowlist",
+            "env",
+            "initial_ports",
+        ):
+            self.assertIn(field, schemas["SandboxConfig"]["properties"])
+
+    def test_instance_management_list_and_observation_pagination_is_frozen(self) -> None:
+        spec = yaml.safe_load((ROOT / "api/openapi/v1.yaml").read_text(encoding="utf-8"))
+
+        list_parameters = {
+            parameter["name"]: parameter
+            for parameter in spec["paths"]["/instances"]["get"]["parameters"]
+        }
+        for parameter in (
+            "kind",
+            "state",
+            "keyword",
+            "created_after",
+            "created_before",
+            "spec_id",
+            "image_id",
+            "node_name",
+            "rollout_status",
+            "gpu_model",
+            "queue_name",
+            "scheduling_state",
+            "template_id",
+            "session_state",
+            "limit",
+            "cursor",
+            "sort",
+        ):
+            self.assertIn(parameter, list_parameters)
+
+        for path in (
+            "/instances/{instance_id}/events",
+            "/instances/{instance_id}/security-events",
+        ):
+            parameters = {
+                parameter["name"]: parameter
+                for parameter in spec["paths"][path]["get"]["parameters"]
+            }
+            self.assertIn("cursor", parameters)
+
+    def test_instance_management_lifecycle_contract_is_frozen(self) -> None:
+        spec = yaml.safe_load((ROOT / "api/openapi/v1.yaml").read_text(encoding="utf-8"))
+        schemas = spec["components"]["schemas"]
+
+        lifecycle = schemas["InstanceLifecycleRequest"]
+        lifecycle_actions = set(lifecycle["properties"]["action"]["enum"])
+        for action in (
+            "attach_filesystem",
+            "detach_filesystem",
+            "scale",
+            "update_image",
+            "bind_secret",
+            "unbind_secret",
+            "change_security_groups",
+            "set_termination_protection",
+            "pause",
+            "resume",
+            "extend",
+            "touch_idle",
+        ):
+            self.assertIn(action, lifecycle_actions)
+
+        for field in (
+            "snapshot_id",
+            "mount_path",
+            "read_only",
+            "filesystem_id",
+            "replicas",
+            "image_id",
+            "strategy",
+            "secret_id",
+            "binding_type",
+            "env_name",
+            "security_group_ids",
+            "enabled",
+            "duration",
+        ):
+            self.assertIn(field, lifecycle["properties"])
+
+        operation_actions = set(schemas["InstanceOperation"]["properties"]["operation"]["enum"])
+        self.assertTrue(lifecycle_actions.issubset(operation_actions))
+
+        operation_step = schemas["InstanceOperation"]["properties"]["steps"]["items"]
+        for field in ("task_id", "resource_type", "resource_id"):
+            self.assertIn(field, operation_step["properties"])
+
 
 if __name__ == "__main__":
     unittest.main()

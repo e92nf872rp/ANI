@@ -90,8 +90,8 @@ Issue 清单：`repo/services/tasks/issues/issue-01-openapi-queue-crud.md` ~ `is
 
 | 批次 | 状态 | 说明 |
 |---|---|---|
-| GPU-SPEC-CONTRACT-A | 契约与生成物完成，等待个人仓库 CI/契约评审 | 为实例 `spec_id` 提供 `GPUSpecSummary`、`GET /gpu-specs`、`GET /gpu-specs/{spec_id}` 只读契约；旧 GPU 字段 deprecated 保留；不含 handler/port/adapter/Console，不实现配额 check/acquire/release |
-| INSTANCE-CONTRACT-A | blocked-by-contract-review | 等 GPU-SPEC-CONTRACT-A 个人仓库 CI 通过并获得契约批准后，按 `../docs/superpowers/specs/2026-07-28-instance-management-design.md` 实施实例主契约 |
+| GPU-SPEC-CONTRACT-A | 个人仓库 CI passed，契约已确认 | 为实例 `spec_id` 提供 `GPUSpecSummary`、`GET /gpu-specs`、`GET /gpu-specs/{spec_id}` 只读契约；旧 GPU 字段 deprecated 保留；不含 handler/port/adapter/Console，不实现配额 check/acquire/release |
+| INSTANCE-CONTRACT-A | 契约与生成物完成，等待个人仓库 CI/契约评审 | 扩展统一实例创建、详情摘要、列表过滤/排序/cursor、观测 cursor 和 lifecycle/operation step；引用既有 Registry/Network/Storage/GPU Spec，不含 handler/port/adapter/Console |
 | INSTANCE-SANDBOX-CONTRACT-A | pending | 在实例主契约之后独立提交 Sandbox 子资源契约，不与运行时实现混合 |
 
 边界：本流程独立于既有 GPU 调度队列实现；当前只完成公开契约和生成物，不声明 GPU 规格 runtime ready、配额能力或实例管理闭环完成。
