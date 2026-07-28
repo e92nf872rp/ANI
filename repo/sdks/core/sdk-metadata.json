@@ -293,6 +293,18 @@
       "scope": "scope:gpu-scheduling:write"
     },
     {
+      "operationId": "listGPUSpecs",
+      "method": "GET",
+      "path": "/gpu-specs",
+      "scope": "scope:gpu-inventory:read"
+    },
+    {
+      "operationId": "getGPUSpec",
+      "method": "GET",
+      "path": "/gpu-specs/{spec_id}",
+      "scope": "scope:gpu-inventory:read"
+    },
+    {
       "operationId": "liveness",
       "method": "GET",
       "path": "/healthz",
@@ -1110,6 +1122,8 @@
     "GPUSchedulingQueueCreateRequest",
     "GPUSchedulingQueueListResponse",
     "GPUSchedulingQueueUpdateRequest",
+    "GPUSpecListResponse",
+    "GPUSpecSummary",
     "HealthCheck",
     "InstanceConsoleSession",
     "InstanceEvent",
@@ -1329,6 +1343,7 @@
     "listStorageFilesystems",
     "listFilesystemMountTargets",
     "listGPUInventory",
+    "listGPUSpecs",
     "listInstances",
     "listInstanceLogs",
     "listInstanceOperations",

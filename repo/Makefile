@@ -907,6 +907,7 @@ validate-services-contract:
 
 validate-openapi-spec:
 	@echo "→ 校验 Core/Services OpenAPI 结构..."
+	python scripts/validate_openapi_spec_test.py
 	python scripts/validate_openapi_spec.py
 	@echo "✅ Core/Services OpenAPI specs valid"
 

@@ -274,7 +274,9 @@ jobs:
         run: pip install -r ci/requirements-contract.txt
 
       - name: Lint Core and Services OpenAPI specs
-        run: python scripts/validate_openapi_spec.py
+        run: |
+          python scripts/validate_openapi_spec_test.py
+          python scripts/validate_openapi_spec.py
 
   required-gates:
     name: Required PR Gates
