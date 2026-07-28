@@ -2659,9 +2659,9 @@ export interface components {
              * @example model.import
              * @enum {string}
              */
-            task_type: "model.import" | "kb.parse" | "kb.index" | "inference.deploy" | "volume.snapshot.create";
+            task_type: "model.import" | "kb.parse" | "kb.index" | "inference.deploy" | "volume.snapshot.create" | "volume.expand" | "volume.mount" | "volume.unmount" | "volume.create_from_snapshot" | "filesystem.expand" | "filesystem.mount_target.create" | "filesystem.mount" | "filesystem.unmount" | "vector_store.index.rebuild";
             /** @enum {string|null} */
-            resource_type?: "inference_service" | "kb_document" | "model_version" | "volume_snapshot" | null;
+            resource_type?: "inference_service" | "kb_document" | "model_version" | "volume_snapshot" | "volume" | "filesystem" | "filesystem_mount_target" | "vector_store" | null;
             /** Format: uuid */
             resource_id?: string | null;
             /** @enum {string} */

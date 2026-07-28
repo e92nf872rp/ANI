@@ -353,9 +353,9 @@ components:
         id:               { type: string, format: uuid }
         idempotency_key:  { type: string, description: "客户端提供的幂等键" }
         task_type:        { type: string, example: "model.import",
-                            enum: [model.import, kb.parse, kb.index, inference.deploy, volume.snapshot.create] }
+                            enum: [model.import, kb.parse, kb.index, inference.deploy, volume.snapshot.create, volume.expand, volume.mount, volume.unmount, volume.create_from_snapshot, filesystem.expand, filesystem.mount_target.create, filesystem.mount, filesystem.unmount, vector_store.index.rebuild] }
         resource_type:    { type: string, nullable: true,
-                            enum: [inference_service, kb_document, model_version, volume_snapshot] }
+                            enum: [inference_service, kb_document, model_version, volume_snapshot, volume, filesystem, filesystem_mount_target, vector_store] }
         resource_id:      { type: string, format: uuid, nullable: true }
         status:           { type: string,
                             enum: [pending, running, completed, failed, cancelled, dead_letter] }

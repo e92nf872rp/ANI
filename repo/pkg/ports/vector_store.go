@@ -46,6 +46,12 @@ type VectorStoreResourceGetRequest struct {
 	ResourceID string
 }
 
+type VectorStoreRebuildIndexRequest struct {
+	TenantID       string
+	ResourceID     string
+	IdempotencyKey string
+}
+
 type VectorStoreResourceListRequest struct {
 	TenantID string
 	Limit    int
@@ -148,7 +154,7 @@ type VectorStoreService interface {
 	GetVectorStore(ctx context.Context, request VectorStoreResourceGetRequest) (VectorStoreRecord, error)
 	DeleteVectorStore(ctx context.Context, request VectorStoreResourceGetRequest) (VectorStoreRecord, error)
 	SearchVectorStore(ctx context.Context, request VectorStoreResourceSearchRequest) ([]VectorSearchResult, error)
-	RebuildVectorStoreIndex(ctx context.Context, request VectorStoreResourceGetRequest) (VectorStoreRecord, error)
+	RebuildVectorStoreIndex(ctx context.Context, request VectorStoreRebuildIndexRequest) (VectorStoreRecord, error)
 	SetVectorStoreKnowledgeBaseLink(ctx context.Context, request VectorStoreKnowledgeBaseLinkRequest) (VectorStoreRecord, error)
 	DeleteVectorStoreKnowledgeBaseLink(ctx context.Context, request VectorStoreResourceGetRequest) (VectorStoreRecord, error)
 	PrecheckVectorStoreDelete(ctx context.Context, request VectorStoreResourceGetRequest) (VectorStoreDeletePrecheck, error)

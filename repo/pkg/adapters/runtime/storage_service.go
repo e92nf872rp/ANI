@@ -189,7 +189,7 @@ func (s *LocalStorageService) ListVolumes(_ context.Context, request ports.Stora
 	items := make([]ports.StorageVolumeRecord, 0, len(s.volumes))
 	for _, record := range s.volumes {
 		if record.TenantID == request.TenantID && record.State != ports.StorageResourceDeleted {
-			items = append(items, record)
+			items = append(items, s.enrichStorageVolumeLocked(record))
 		}
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.After(items[j].UpdatedAt) })
@@ -203,7 +203,7 @@ func (s *LocalStorageService) GetVolume(_ context.Context, request ports.Storage
 	if !ok || record.TenantID != request.TenantID || record.State == ports.StorageResourceDeleted {
 		return ports.StorageVolumeRecord{}, ports.ErrNotFound
 	}
-	return record, nil
+	return s.enrichStorageVolumeLocked(record), nil
 }
 
 func (s *LocalStorageService) DeleteVolume(ctx context.Context, request ports.StorageResourceGetRequest) (ports.StorageVolumeRecord, error) {
@@ -401,8 +401,8 @@ func (s *LocalStorageService) SetVolumeAutoSnapshotPolicy(ctx context.Context, r
 	return record, nil
 }
 
-func (s *LocalStorageService) GetVolumeOSInitGuide(_ context.Context, request ports.StorageResourceGetRequest) (ports.VolumeOSInitGuide, error) {
-	record, err := s.GetVolume(context.Background(), request)
+func (s *LocalStorageService) GetVolumeOSInitGuide(ctx context.Context, request ports.StorageResourceGetRequest) (ports.VolumeOSInitGuide, error) {
+	record, err := s.GetVolume(ctx, request)
 	if err != nil {
 		return ports.VolumeOSInitGuide{}, err
 	}
@@ -1078,6 +1078,8 @@ func (s *LocalStorageService) ListBucketObjects(_ context.Context, request ports
 		return items[i].Key < items[j].Key
 	})
 	total := len(items)
+	// Local profile uses a simple offset cursor over an in-memory snapshot. Real
+	// object-store adapters must use provider-native continuation tokens.
 	start := 0
 	if request.Cursor != "" {
 		offset, err := strconv.Atoi(strings.TrimSpace(request.Cursor))
@@ -1845,6 +1847,17 @@ func replaceFilesystemAttachment(items []ports.FilesystemAttachment, next ports.
 		}
 	}
 	return result
+}
+
+func (s *LocalStorageService) enrichStorageVolumeLocked(record ports.StorageVolumeRecord) ports.StorageVolumeRecord {
+	count := 0
+	for _, snapshot := range s.snapshots {
+		if snapshot.TenantID == record.TenantID && snapshot.VolumeID == record.VolumeID {
+			count++
+		}
+	}
+	record.SnapshotsCount = count
+	return record
 }
 
 func (s *LocalStorageService) enrichFilesystemLocked(record ports.StorageFilesystemRecord) ports.StorageFilesystemRecord {

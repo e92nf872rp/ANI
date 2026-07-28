@@ -127,6 +127,20 @@ func TestLocalStorageServiceSnapshotsAndMountTargets(t *testing.T) {
 	if len(snapshots) != 1 || snapshots[0].Status != ports.VolumeSnapshotAvailable {
 		t.Fatalf("snapshots = %+v, want one available snapshot", snapshots)
 	}
+	reloadedVolume, err := service.GetVolume(context.Background(), ports.StorageResourceGetRequest{TenantID: "tenant-a", ResourceID: volume.VolumeID})
+	if err != nil {
+		t.Fatalf("GetVolume after snapshot error = %v", err)
+	}
+	if reloadedVolume.SnapshotsCount != 1 {
+		t.Fatalf("SnapshotsCount = %d, want 1", reloadedVolume.SnapshotsCount)
+	}
+	volumes, err := service.ListVolumes(context.Background(), ports.StorageResourceListRequest{TenantID: "tenant-a"})
+	if err != nil {
+		t.Fatalf("ListVolumes after snapshot error = %v", err)
+	}
+	if len(volumes) != 1 || volumes[0].SnapshotsCount != 1 {
+		t.Fatalf("ListVolumes = %+v, want one volume with snapshots_count=1", volumes)
+	}
 
 	filesystem, err := service.CreateFilesystem(context.Background(), ports.StorageFilesystemCreateRequest{
 		TenantID:       "tenant-a",

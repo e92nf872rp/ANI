@@ -13,13 +13,14 @@ import (
 )
 
 type LocalVectorStoreService struct {
-	mu                sync.RWMutex
-	now               func() time.Time
-	backend           ports.VectorStore
-	stores            map[string]ports.VectorStoreRecord
-	idempotency       map[string]string
-	linkIdempotency   map[string]string
-	insertIdempotency map[string]ports.VectorStoreDocumentInsertResult
+	mu                 sync.RWMutex
+	now                func() time.Time
+	backend            ports.VectorStore
+	stores             map[string]ports.VectorStoreRecord
+	idempotency        map[string]string
+	linkIdempotency    map[string]string
+	rebuildIdempotency map[string]string
+	insertIdempotency  map[string]ports.VectorStoreDocumentInsertResult
 }
 
 type VectorStoreServiceOption func(*LocalVectorStoreService)
@@ -40,11 +41,12 @@ func WithVectorStoreBackend(backend ports.VectorStore) VectorStoreServiceOption 
 
 func NewLocalVectorStoreService(options ...VectorStoreServiceOption) *LocalVectorStoreService {
 	service := &LocalVectorStoreService{
-		now:               func() time.Time { return time.Now().UTC() },
-		stores:            map[string]ports.VectorStoreRecord{},
-		idempotency:       map[string]string{},
-		linkIdempotency:   map[string]string{},
-		insertIdempotency: map[string]ports.VectorStoreDocumentInsertResult{},
+		now:                func() time.Time { return time.Now().UTC() },
+		stores:             map[string]ports.VectorStoreRecord{},
+		idempotency:        map[string]string{},
+		linkIdempotency:    map[string]string{},
+		rebuildIdempotency: map[string]string{},
+		insertIdempotency:  map[string]ports.VectorStoreDocumentInsertResult{},
 	}
 	for _, option := range options {
 		option(service)
@@ -176,14 +178,26 @@ func (s *LocalVectorStoreService) SearchVectorStore(ctx context.Context, request
 	})
 }
 
-func (s *LocalVectorStoreService) RebuildVectorStoreIndex(ctx context.Context, request ports.VectorStoreResourceGetRequest) (ports.VectorStoreRecord, error) {
-	record, err := s.GetVectorStore(ctx, request)
+func (s *LocalVectorStoreService) RebuildVectorStoreIndex(ctx context.Context, request ports.VectorStoreRebuildIndexRequest) (ports.VectorStoreRecord, error) {
+	idemKey, err := requireIdempotencyKey(request.TenantID, request.IdempotencyKey)
+	if err != nil {
+		return ports.VectorStoreRecord{}, err
+	}
+	record, err := s.GetVectorStore(ctx, ports.VectorStoreResourceGetRequest{TenantID: request.TenantID, ResourceID: request.ResourceID})
 	if err != nil {
 		return ports.VectorStoreRecord{}, err
 	}
 	if record.State != ports.VectorStoreReady {
 		return ports.VectorStoreRecord{}, fmt.Errorf("%w: vector store is not ready", ports.ErrFailedPrecondition)
 	}
+	s.mu.RLock()
+	if id, ok := s.rebuildIdempotency[idemKey]; ok && id == record.StoreID {
+		if replay, exists := s.stores[id]; exists {
+			s.mu.RUnlock()
+			return replay, nil
+		}
+	}
+	s.mu.RUnlock()
 	if s.backend != nil {
 		if err := s.backend.EnsureCollection(ctx, vectorCollectionRef(record), record.Dimension); err != nil {
 			return ports.VectorStoreRecord{}, err
@@ -196,6 +210,7 @@ func (s *LocalVectorStoreService) RebuildVectorStoreIndex(ctx context.Context, r
 	record.Reason = "index rebuilt by local vector store profile"
 	record.UpdatedAt = record.LastIndexedAt
 	s.stores[record.StoreID] = record
+	s.rebuildIdempotency[idemKey] = record.StoreID
 	return record, nil
 }
 

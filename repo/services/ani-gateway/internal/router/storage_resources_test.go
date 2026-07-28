@@ -155,6 +155,42 @@ func TestStorageAPIDevProfileSnapshotAndMountTarget(t *testing.T) {
 	}
 }
 
+func TestStorageHTTPAsyncTasksKeepOperationTypeAndLocation(t *testing.T) {
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Next(ctx)
+	})
+	registerStorageResourcesWithService(h.Group("/api/v1"), runtimeadapter.NewLocalStorageService())
+
+	created := performJSONRequest(t, h, http.MethodPost, "/api/v1/volumes", `{"idempotency_key":"http-volume-async","name":"async-data","size_gib":10}`, http.StatusCreated)
+	volumeID := jsonStringField(t, created, "id")
+
+	requestBody := `{"idempotency_key":"http-volume-expand","size_gib":20}`
+	req := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/volumes/"+volumeID+"/expand", &ut.Body{Body: bytes.NewBufferString(requestBody), Len: len(requestBody)}, ut.Header{Key: "Content-Type", Value: "application/json"})
+	resp := req.Result()
+	if resp.StatusCode() != http.StatusAccepted {
+		t.Fatalf("expand status = %d body=%s, want 202", resp.StatusCode(), resp.Body())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(resp.Body(), &body); err != nil {
+		t.Fatalf("unmarshal expand body: %v", err)
+	}
+	if got := body["task_type"]; got != "volume.expand" {
+		t.Fatalf("task_type = %v, want volume.expand", got)
+	}
+	if got := body["resource_type"]; got != "volume" {
+		t.Fatalf("resource_type = %v, want volume", got)
+	}
+	taskID, _ := body["id"].(string)
+	if taskID == "" {
+		t.Fatalf("task id missing in body %s", resp.Body())
+	}
+	if got := string(resp.Header.Get("Location")); got != "/api/v1/tasks/"+taskID {
+		t.Fatalf("Location = %q, want task URL for %s", got, taskID)
+	}
+}
+
 func TestStorageAPIBucketAndSignedURLResponsesMatchCoreSchema(t *testing.T) {
 	api := newStorageAPI()
 	bucket, err := api.service.CreateStorageBucket(context.Background(), ports.StorageBucketCreateRequest{

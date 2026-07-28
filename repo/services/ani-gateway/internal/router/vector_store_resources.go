@@ -218,7 +218,11 @@ func (api *vectorStoreAPI) rebuildVectorStoreIndex(ctx context.Context, c *app.R
 		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
 		return
 	}
-	record, err := api.service.RebuildVectorStoreIndex(ctx, ports.VectorStoreResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("vector_store_id")})
+	record, err := api.service.RebuildVectorStoreIndex(ctx, ports.VectorStoreRebuildIndexRequest{
+		TenantID:       demoTenantID(c),
+		ResourceID:     c.Param("vector_store_id"),
+		IdempotencyKey: req.IdempotencyKey,
+	})
 	if err != nil {
 		writeVectorStoreError(c, err)
 		return

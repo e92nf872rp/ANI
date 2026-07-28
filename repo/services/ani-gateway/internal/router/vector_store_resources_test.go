@@ -40,7 +40,7 @@ func (s *recordingVectorStoreService) DeleteVectorStore(context.Context, ports.V
 	return ports.VectorStoreRecord{}, ports.ErrNotFound
 }
 
-func (s *recordingVectorStoreService) RebuildVectorStoreIndex(context.Context, ports.VectorStoreResourceGetRequest) (ports.VectorStoreRecord, error) {
+func (s *recordingVectorStoreService) RebuildVectorStoreIndex(context.Context, ports.VectorStoreRebuildIndexRequest) (ports.VectorStoreRecord, error) {
 	return ports.VectorStoreRecord{}, ports.ErrNotFound
 }
 
@@ -164,7 +164,7 @@ func TestVectorStoreAPIManagementResponsesMatchCoreSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateVectorStore error = %v", err)
 	}
-	rebuilt, err := api.service.RebuildVectorStoreIndex(context.Background(), ports.VectorStoreResourceGetRequest{TenantID: "tenant-a", ResourceID: store.StoreID})
+	rebuilt, err := api.service.RebuildVectorStoreIndex(context.Background(), ports.VectorStoreRebuildIndexRequest{TenantID: "tenant-a", ResourceID: store.StoreID, IdempotencyKey: "api-vector-rebuild"})
 	if err != nil {
 		t.Fatalf("RebuildVectorStoreIndex error = %v", err)
 	}

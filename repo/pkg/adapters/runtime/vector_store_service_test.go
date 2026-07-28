@@ -206,12 +206,19 @@ func TestLocalVectorStoreServiceManagementOperations(t *testing.T) {
 	if store.EmbeddingModel != "bge-m3" || store.IndexStatus != "ready" {
 		t.Fatalf("store = %#v, want embedding model and ready index", store)
 	}
-	rebuilt, err := service.RebuildVectorStoreIndex(context.Background(), ports.VectorStoreResourceGetRequest{TenantID: "tenant-a", ResourceID: store.StoreID})
+	rebuilt, err := service.RebuildVectorStoreIndex(context.Background(), ports.VectorStoreRebuildIndexRequest{TenantID: "tenant-a", ResourceID: store.StoreID, IdempotencyKey: "rebuild-a"})
 	if err != nil {
 		t.Fatalf("RebuildVectorStoreIndex() error = %v", err)
 	}
 	if rebuilt.IndexStatus != "ready" || rebuilt.LastIndexedAt.IsZero() {
 		t.Fatalf("rebuilt = %#v, want ready index with last_indexed_at", rebuilt)
+	}
+	replay, err := service.RebuildVectorStoreIndex(context.Background(), ports.VectorStoreRebuildIndexRequest{TenantID: "tenant-a", ResourceID: store.StoreID, IdempotencyKey: "rebuild-a"})
+	if err != nil {
+		t.Fatalf("RebuildVectorStoreIndex replay error = %v", err)
+	}
+	if !replay.LastIndexedAt.Equal(rebuilt.LastIndexedAt) || replay.Reason != rebuilt.Reason {
+		t.Fatalf("replay = %#v, want original rebuild result %#v", replay, rebuilt)
 	}
 	linked, err := service.SetVectorStoreKnowledgeBaseLink(context.Background(), ports.VectorStoreKnowledgeBaseLinkRequest{
 		TenantID:       "tenant-a",
