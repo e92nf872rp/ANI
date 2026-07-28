@@ -337,6 +337,18 @@ func (s *notFoundVectorStoreService) InsertDocuments(context.Context, ports.Vect
 func (s *notFoundVectorStoreService) DeleteDocuments(context.Context, ports.VectorStoreDocumentDeleteRequest) (ports.VectorStoreDocumentDeleteResult, error) {
 	return ports.VectorStoreDocumentDeleteResult{}, ports.ErrNotFound
 }
+func (s *notFoundVectorStoreService) RebuildVectorStoreIndex(context.Context, ports.VectorStoreRebuildIndexRequest) (ports.VectorStoreRecord, error) {
+	return ports.VectorStoreRecord{}, ports.ErrNotFound
+}
+func (s *notFoundVectorStoreService) SetVectorStoreKnowledgeBaseLink(context.Context, ports.VectorStoreKnowledgeBaseLinkRequest) (ports.VectorStoreRecord, error) {
+	return ports.VectorStoreRecord{}, ports.ErrNotFound
+}
+func (s *notFoundVectorStoreService) DeleteVectorStoreKnowledgeBaseLink(context.Context, ports.VectorStoreResourceGetRequest) (ports.VectorStoreRecord, error) {
+	return ports.VectorStoreRecord{}, ports.ErrNotFound
+}
+func (s *notFoundVectorStoreService) PrecheckVectorStoreDelete(context.Context, ports.VectorStoreResourceGetRequest) (ports.VectorStoreDeletePrecheck, error) {
+	return ports.VectorStoreDeletePrecheck{}, ports.ErrNotFound
+}
 
 func setupVectorStoreTestServer(service ports.VectorStoreService) *server.Hertz {
 	h := server.Default()
@@ -400,6 +412,18 @@ func (s *errorVectorStoreService) InsertDocuments(context.Context, ports.VectorS
 }
 func (s *errorVectorStoreService) DeleteDocuments(context.Context, ports.VectorStoreDocumentDeleteRequest) (ports.VectorStoreDocumentDeleteResult, error) {
 	return ports.VectorStoreDocumentDeleteResult{}, s.deleteErr
+}
+func (s *errorVectorStoreService) RebuildVectorStoreIndex(context.Context, ports.VectorStoreRebuildIndexRequest) (ports.VectorStoreRecord, error) {
+	return ports.VectorStoreRecord{}, ports.ErrUnavailable
+}
+func (s *errorVectorStoreService) SetVectorStoreKnowledgeBaseLink(context.Context, ports.VectorStoreKnowledgeBaseLinkRequest) (ports.VectorStoreRecord, error) {
+	return ports.VectorStoreRecord{}, ports.ErrUnavailable
+}
+func (s *errorVectorStoreService) DeleteVectorStoreKnowledgeBaseLink(context.Context, ports.VectorStoreResourceGetRequest) (ports.VectorStoreRecord, error) {
+	return ports.VectorStoreRecord{}, ports.ErrUnavailable
+}
+func (s *errorVectorStoreService) PrecheckVectorStoreDelete(context.Context, ports.VectorStoreResourceGetRequest) (ports.VectorStoreDeletePrecheck, error) {
+	return ports.VectorStoreDeletePrecheck{}, ports.ErrUnavailable
 }
 
 func TestVectorStoreAPIDeleteDocumentsEmptyFilterReturnsInvalidFilter(t *testing.T) {
@@ -531,6 +555,18 @@ func (s *successVectorStoreService) InsertDocuments(context.Context, ports.Vecto
 }
 func (s *successVectorStoreService) DeleteDocuments(context.Context, ports.VectorStoreDocumentDeleteRequest) (ports.VectorStoreDocumentDeleteResult, error) {
 	return ports.VectorStoreDocumentDeleteResult{DeletedCount: 7}, nil
+}
+func (s *successVectorStoreService) RebuildVectorStoreIndex(context.Context, ports.VectorStoreRebuildIndexRequest) (ports.VectorStoreRecord, error) {
+	return ports.VectorStoreRecord{}, nil
+}
+func (s *successVectorStoreService) SetVectorStoreKnowledgeBaseLink(context.Context, ports.VectorStoreKnowledgeBaseLinkRequest) (ports.VectorStoreRecord, error) {
+	return ports.VectorStoreRecord{}, nil
+}
+func (s *successVectorStoreService) DeleteVectorStoreKnowledgeBaseLink(context.Context, ports.VectorStoreResourceGetRequest) (ports.VectorStoreRecord, error) {
+	return ports.VectorStoreRecord{}, nil
+}
+func (s *successVectorStoreService) PrecheckVectorStoreDelete(context.Context, ports.VectorStoreResourceGetRequest) (ports.VectorStoreDeletePrecheck, error) {
+	return ports.VectorStoreDeletePrecheck{Deletable: true}, nil
 }
 
 func TestVectorStoreAPIDeleteDocumentsSuccessReturnsDeletedCount(t *testing.T) {
