@@ -2,7 +2,7 @@
 
 > 日期: 2026-07-28
 > 类型: Core API 契约批次
-> 状态: 契约与生成物完成，等待个人仓库 CI 和契约评审
+> 状态: 个人仓库 CI passed，契约已确认
 
 ## 目标
 
@@ -59,8 +59,7 @@ make validate-instance-contracts
 make validate-instance-lifecycle-ops
 ```
 
-提交前继续执行 `make test`、`make build`、`make validate-architecture`、生成物校验和
-Console type-check/lint/build；最终以个人仓库 GitHub Actions 为准。
+完整本地 CI 和个人仓库 GitHub Actions run `30348851947` 已通过。
 
 ## 未包含
 

@@ -377,6 +377,72 @@
       "scope": "scope:instances:read"
     },
     {
+      "operationId": "listSandboxCheckpoints",
+      "method": "GET",
+      "path": "/instances/{instance_id}/sandbox/checkpoints",
+      "scope": "scope:instances:read"
+    },
+    {
+      "operationId": "createSandboxCheckpoint",
+      "method": "POST",
+      "path": "/instances/{instance_id}/sandbox/checkpoints",
+      "scope": "scope:instances:update"
+    },
+    {
+      "operationId": "cloneSandboxCheckpoint",
+      "method": "POST",
+      "path": "/instances/{instance_id}/sandbox/checkpoints/{checkpoint_id}/clone",
+      "scope": "scope:instances:create"
+    },
+    {
+      "operationId": "restoreSandboxCheckpoint",
+      "method": "POST",
+      "path": "/instances/{instance_id}/sandbox/checkpoints/{checkpoint_id}/restore",
+      "scope": "scope:instances:update"
+    },
+    {
+      "operationId": "createSandboxCodeRun",
+      "method": "POST",
+      "path": "/instances/{instance_id}/sandbox/code-runs",
+      "scope": "scope:instances:exec"
+    },
+    {
+      "operationId": "deleteSandboxFile",
+      "method": "DELETE",
+      "path": "/instances/{instance_id}/sandbox/files",
+      "scope": "scope:instances:update"
+    },
+    {
+      "operationId": "listSandboxFiles",
+      "method": "GET",
+      "path": "/instances/{instance_id}/sandbox/files",
+      "scope": "scope:instances:read"
+    },
+    {
+      "operationId": "writeSandboxFile",
+      "method": "POST",
+      "path": "/instances/{instance_id}/sandbox/files",
+      "scope": "scope:instances:update"
+    },
+    {
+      "operationId": "createSandboxPort",
+      "method": "POST",
+      "path": "/instances/{instance_id}/sandbox/ports",
+      "scope": "scope:instances:update"
+    },
+    {
+      "operationId": "deleteSandboxPort",
+      "method": "DELETE",
+      "path": "/instances/{instance_id}/sandbox/ports/{port}",
+      "scope": "scope:instances:update"
+    },
+    {
+      "operationId": "createSandboxToken",
+      "method": "POST",
+      "path": "/instances/{instance_id}/sandbox/tokens",
+      "scope": "scope:instances:exec"
+    },
+    {
       "operationId": "listInstanceSecurityEvents",
       "method": "GET",
       "path": "/instances/{instance_id}/security-events",
@@ -1064,6 +1130,7 @@
     "BucketObjectPresignedURLRequest",
     "BucketObjectUploadRequest",
     "BucketPrefixCreateRequest",
+    "CloneSandboxCheckpointRequest",
     "CompleteOIDCLoginRequest",
     "CoreDevProfileInfo",
     "CreateAPIKeyRequest",
@@ -1085,6 +1152,10 @@
     "CreateObservabilityAlertRuleRequest",
     "CreateRegistryProjectRequest",
     "CreateRegistryPullSecretRequest",
+    "CreateSandboxCheckpointRequest",
+    "CreateSandboxCodeRunRequest",
+    "CreateSandboxPortRequest",
+    "CreateSandboxTokenRequest",
     "CreateStorageBucketRequest",
     "CreateStorageFilesystemRequest",
     "CreateStorageObjectRequest",
@@ -1231,11 +1302,19 @@
     "RegistryScanResult",
     "ReportTokenUsageRequest",
     "RevokeStatusResponse",
+    "SandboxCheckpoint",
+    "SandboxCheckpointActionRequest",
+    "SandboxCheckpointListResponse",
+    "SandboxCodeRun",
     "SandboxConfig",
+    "SandboxFile",
+    "SandboxFileListResponse",
     "SandboxInstanceStatus",
     "SandboxNetworkEgressPolicy",
+    "SandboxPort",
     "SandboxTemplate",
     "SandboxTemplateListResponse",
+    "SandboxTokenResponse",
     "Secret",
     "SecretBinding",
     "SecretBindingRequest",
@@ -1293,7 +1372,8 @@
     "VolumeOSInitGuide",
     "VolumeSnapshotListResponse",
     "VolumeSnapshotRecord",
-    "WorkloadIdentityBinding"
+    "WorkloadIdentityBinding",
+    "WriteSandboxFileRequest"
   ],
   "idempotencyOperations": [
     "createStorageBucket",
@@ -1315,6 +1395,13 @@
     "createInstance",
     "createInstanceExecSession",
     "applyInstanceLifecycle",
+    "createSandboxCheckpoint",
+    "cloneSandboxCheckpoint",
+    "restoreSandboxCheckpoint",
+    "createSandboxCodeRun",
+    "writeSandboxFile",
+    "createSandboxPort",
+    "createSandboxToken",
     "createK8sCluster",
     "createK8sClusterNodePool",
     "updateK8sClusterNodePool",
@@ -1360,6 +1447,8 @@
     "listInstanceEvents",
     "listInstanceLogs",
     "listInstanceOperations",
+    "listSandboxCheckpoints",
+    "listSandboxFiles",
     "listInstanceSecurityEvents",
     "listK8sClusters",
     "listK8sClusterWorkloads",
