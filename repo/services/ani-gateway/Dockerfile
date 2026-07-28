@@ -1,14 +1,14 @@
 FROM golang:1.25.12-alpine AS build
 
 WORKDIR /src
-COPY go.work go.work.sum ./
 COPY pkg ./pkg
 COPY services/ani-gateway ./services/ani-gateway
 
+ENV GOWORK=off
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     cd services/ani-gateway && \
-    GOWORK=off CGO_ENABLED=0 go build -tags stdjson -ldflags "-s -w" -o /out/ani-gateway .
+    CGO_ENABLED=0 go build -tags stdjson -ldflags "-s -w" -o /out/ani-gateway .
 
 FROM alpine:3.20 AS tools
 
