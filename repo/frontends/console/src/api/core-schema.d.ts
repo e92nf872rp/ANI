@@ -6459,6 +6459,8 @@ export interface operations {
             /** @description 扩容任务已提交 */
             202: {
                 headers: {
+                    /** @description 任务轮询 URL */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -6490,6 +6492,8 @@ export interface operations {
             /** @description 挂载任务已提交 */
             202: {
                 headers: {
+                    /** @description 任务轮询 URL */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -6522,6 +6526,8 @@ export interface operations {
             /** @description 卸载任务已提交 */
             202: {
                 headers: {
+                    /** @description 任务轮询 URL */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -6554,6 +6560,8 @@ export interface operations {
             /** @description 建盘任务已提交 */
             202: {
                 headers: {
+                    /** @description 任务轮询 URL */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -6800,6 +6808,8 @@ export interface operations {
             /** @description 挂载目标创建任务已提交 */
             202: {
                 headers: {
+                    /** @description 任务轮询 URL */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -6831,6 +6841,8 @@ export interface operations {
             /** @description 扩容任务已提交 */
             202: {
                 headers: {
+                    /** @description 任务轮询 URL */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -6862,6 +6874,8 @@ export interface operations {
             /** @description 挂载任务已提交 */
             202: {
                 headers: {
+                    /** @description 任务轮询 URL */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -6894,6 +6908,8 @@ export interface operations {
             /** @description 卸载任务已提交 */
             202: {
                 headers: {
+                    /** @description 任务轮询 URL */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -7613,6 +7629,8 @@ export interface operations {
             /** @description 索引重建任务已提交 */
             202: {
                 headers: {
+                    /** @description 任务轮询 URL */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {

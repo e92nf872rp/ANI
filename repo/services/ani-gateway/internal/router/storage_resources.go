@@ -1426,6 +1426,7 @@ func storageCompletedTask(taskType string, resourceType string, idempotencyKey s
 }
 
 func storageWriteAcceptedTask(c *app.RequestContext, task storageSnapshotTaskResponse) {
+	storeCompletedTask(demoTenantID(c), task)
 	c.Response.Header.Set("Location", "/api/v1/tasks/"+task.ID)
 	c.JSON(http.StatusAccepted, task)
 }

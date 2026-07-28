@@ -228,8 +228,7 @@ func (api *vectorStoreAPI) rebuildVectorStoreIndex(ctx context.Context, c *app.R
 		return
 	}
 	task := storageCompletedTask("vector_store.index.rebuild", "vector_store", req.IdempotencyKey, map[string]any{"vector_store": vectorStoreFromRecord(record)}, record.UpdatedAt)
-	c.Response.Header.Set("Location", "/api/v1/tasks/"+task.ID)
-	c.JSON(http.StatusAccepted, task)
+	storageWriteAcceptedTask(c, task)
 }
 
 func (api *vectorStoreAPI) setVectorStoreKnowledgeBaseLink(ctx context.Context, c *app.RequestContext) {

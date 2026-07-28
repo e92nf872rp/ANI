@@ -2,12 +2,149 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"io"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/kubercloud/ani/pkg/ports"
 )
+
+func TestLocalStorageServiceConcurrentCreateVolumeReplaysIdempotencyKey(t *testing.T) {
+	provider := &blockingStorageProvider{
+		applyEntered: make(chan struct{}, 2),
+		releaseApply: make(chan struct{}),
+	}
+	service := NewLocalStorageService(WithStorageProvider(
+		NewKubernetesStorageRenderer(),
+		provider,
+		provider,
+		provider,
+		StorageProviderExecutionConfig{UserID: "test", PermissionProof: "test"},
+	))
+	request := ports.StorageVolumeCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "concurrent-volume",
+		Name:           "concurrent-volume",
+		SizeGiB:        10,
+	}
+	results := make(chan ports.StorageVolumeRecord, 2)
+	errs := make(chan error, 2)
+	create := func() {
+		record, err := service.CreateVolume(context.Background(), request)
+		results <- record
+		errs <- err
+	}
+
+	go create()
+	<-provider.applyEntered
+	go create()
+	select {
+	case <-provider.applyEntered:
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(provider.releaseApply)
+
+	first, second := <-results, <-results
+	if err := <-errs; err != nil {
+		t.Fatalf("CreateVolume() first error = %v", err)
+	}
+	if err := <-errs; err != nil {
+		t.Fatalf("CreateVolume() second error = %v", err)
+	}
+	if first.VolumeID != second.VolumeID {
+		t.Fatalf("concurrent volume IDs = %q and %q, want idempotent replay", first.VolumeID, second.VolumeID)
+	}
+	if got := provider.applies.Load(); got != 1 {
+		t.Fatalf("provider Apply() calls = %d, want 1", got)
+	}
+}
+
+type blockingStorageProvider struct {
+	applyEntered chan struct{}
+	releaseApply chan struct{}
+	applies      atomic.Int32
+}
+
+func (p *blockingStorageProvider) DryRun(_ context.Context, request ports.StorageProviderDryRunRequest) (ports.StorageProviderDryRunResult, error) {
+	return ports.StorageProviderDryRunResult{
+		Accepted:      true,
+		Provider:      "test",
+		ManifestCount: len(request.Manifests),
+		ResourceRefs:  []string{"test/resource"},
+	}, nil
+}
+
+func (p *blockingStorageProvider) Apply(_ context.Context, request ports.StorageProviderApplyRequest) (ports.StorageProviderApplyResult, error) {
+	p.applies.Add(1)
+	p.applyEntered <- struct{}{}
+	<-p.releaseApply
+	return ports.StorageProviderApplyResult{
+		Applied:       true,
+		Provider:      "test",
+		ManifestCount: len(request.Manifests),
+		Operation:     request.Operation,
+		ResourceRefs:  []string{"test/resource"},
+	}, nil
+}
+
+func (p *blockingStorageProvider) Observe(_ context.Context, request ports.StorageProviderStatusRequest) (ports.StorageProviderStatusResult, error) {
+	return ports.StorageProviderStatusResult{
+		TenantID:     request.TenantID,
+		ResourceKind: request.ResourceKind,
+		ResourceID:   request.ResourceID,
+		State:        ports.StorageResourceAvailable,
+	}, nil
+}
+
+func TestLocalStorageServiceMountFilesystemRequiresAvailableTarget(t *testing.T) {
+	service := NewLocalStorageService()
+	filesystem, err := service.CreateFilesystem(context.Background(), ports.StorageFilesystemCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "fs-no-target-create",
+		Name:           "shared-no-target",
+		Protocol:       "nfs",
+		SizeGiB:        10,
+	})
+	if err != nil {
+		t.Fatalf("CreateFilesystem() error = %v", err)
+	}
+
+	_, err = service.MountFilesystem(context.Background(), ports.StorageFilesystemMountRequest{
+		TenantID:       "tenant-a",
+		FilesystemID:   filesystem.FilesystemID,
+		IdempotencyKey: "fs-no-target-mount",
+		InstanceID:     "vm-001",
+		InstanceRoute:  "/compute/instances/vm-001",
+	})
+	if !errors.Is(err, ports.ErrFailedPrecondition) {
+		t.Fatalf("MountFilesystem() error = %v, want ErrFailedPrecondition", err)
+	}
+}
+
+func TestLocalStorageServiceUnmountFilesystemRequiresInstanceID(t *testing.T) {
+	service := NewLocalStorageService()
+	filesystem, err := service.CreateFilesystem(context.Background(), ports.StorageFilesystemCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "fs-empty-unmount-create",
+		Name:           "shared-empty-unmount",
+		Protocol:       "nfs",
+		SizeGiB:        10,
+	})
+	if err != nil {
+		t.Fatalf("CreateFilesystem() error = %v", err)
+	}
+
+	_, err = service.UnmountFilesystem(context.Background(), ports.StorageFilesystemUnmountRequest{
+		TenantID:       "tenant-a",
+		FilesystemID:   filesystem.FilesystemID,
+		IdempotencyKey: "fs-empty-unmount",
+	})
+	if !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("UnmountFilesystem() error = %v, want ErrInvalid", err)
+	}
+}
 
 func TestLocalStorageServiceVolumeDevProfile(t *testing.T) {
 	service := NewLocalStorageService()

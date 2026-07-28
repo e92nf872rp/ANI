@@ -16,6 +16,8 @@ import (
 
 type LocalStorageService struct {
 	mu                sync.RWMutex
+	idempotencyMu     sync.Mutex
+	idempotencyFlight map[string]chan struct{}
 	now               func() time.Time
 	store             ports.StorageResourceStore
 	objectStore       ports.ObjectStore
@@ -107,6 +109,7 @@ func NewLocalStorageService(options ...StorageServiceOption) *LocalStorageServic
 		snapshotIdem:      map[string]string{},
 		prefixIdem:        map[string]string{},
 		bucketUpdateIdem:  map[string]string{},
+		idempotencyFlight: map[string]chan struct{}{},
 	}
 	for _, option := range options {
 		option(service)
@@ -125,6 +128,11 @@ func (s *LocalStorageService) CreateVolume(ctx context.Context, request ports.St
 	if request.SizeGiB <= 0 {
 		return ports.StorageVolumeRecord{}, fmt.Errorf("%w: volume size_gib must be greater than zero", ports.ErrInvalid)
 	}
+	release, err := s.acquireStorageIdempotency(ctx, "volume.create/"+idemKey)
+	if err != nil {
+		return ports.StorageVolumeRecord{}, err
+	}
+	defer release()
 	s.mu.Lock()
 	if id, ok := s.volumeIdempotency[idemKey]; ok {
 		if record, exists := s.volumes[id]; exists {
@@ -469,6 +477,11 @@ func (s *LocalStorageService) CreateFilesystem(ctx context.Context, request port
 	if protocol != "nfs" && protocol != "cephfs" {
 		return ports.StorageFilesystemRecord{}, fmt.Errorf("%w: unsupported filesystem protocol %q", ports.ErrUnsupported, request.Protocol)
 	}
+	release, err := s.acquireStorageIdempotency(ctx, "filesystem.create/"+idemKey)
+	if err != nil {
+		return ports.StorageFilesystemRecord{}, err
+	}
+	defer release()
 	s.mu.Lock()
 	if id, ok := s.fsIdempotency[idemKey]; ok {
 		if record, exists := s.filesystems[id]; exists {
@@ -590,6 +603,11 @@ func (s *LocalStorageService) CreateFilesystemMountTarget(ctx context.Context, r
 	if strings.TrimSpace(request.SubnetID) == "" {
 		return ports.FilesystemMountTargetRecord{}, fmt.Errorf("%w: subnet_id is required", ports.ErrInvalid)
 	}
+	release, err := s.acquireStorageIdempotency(ctx, "filesystem.mount-target.create/"+idemKey)
+	if err != nil {
+		return ports.FilesystemMountTargetRecord{}, err
+	}
+	defer release()
 	s.mu.Lock()
 	filesystem, ok := s.filesystems[strings.TrimSpace(request.FilesystemID)]
 	if !ok || filesystem.TenantID != request.TenantID || filesystem.State == ports.StorageResourceDeleted {
@@ -661,10 +679,15 @@ func (s *LocalStorageService) MountFilesystem(ctx context.Context, request ports
 		AttachedAt:    s.now().UTC(),
 	}
 	for _, target := range s.mountTargets {
-		if target.FilesystemID == record.FilesystemID {
+		if target.FilesystemID == record.FilesystemID &&
+			target.Status == ports.MountTargetAvailable &&
+			strings.TrimSpace(target.IPAddress) != "" {
 			attachment.IPAddress = target.IPAddress
 			break
 		}
+	}
+	if attachment.IPAddress == "" {
+		return ports.StorageFilesystemRecord{}, fmt.Errorf("%w: an available filesystem mount target is required", ports.ErrFailedPrecondition)
 	}
 	record.AttachedInstances = append(replaceFilesystemAttachment(record.AttachedInstances, attachment), attachment)
 	record.Mounts = len(record.AttachedInstances)
@@ -683,6 +706,9 @@ func (s *LocalStorageService) UnmountFilesystem(ctx context.Context, request por
 	idemKey, err := requireIdempotencyKey(request.TenantID, request.IdempotencyKey)
 	if err != nil {
 		return ports.StorageFilesystemRecord{}, err
+	}
+	if strings.TrimSpace(request.InstanceID) == "" {
+		return ports.StorageFilesystemRecord{}, fmt.Errorf("%w: instance_id is required", ports.ErrInvalid)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -915,6 +941,11 @@ func (s *LocalStorageService) CreateStorageObjectUpload(ctx context.Context, req
 	if strings.TrimSpace(request.BucketID) == "" || strings.TrimSpace(request.Key) == "" {
 		return ports.StorageObjectUploadRecord{}, fmt.Errorf("%w: bucket_id and key are required", ports.ErrInvalid)
 	}
+	release, err := s.acquireStorageIdempotency(ctx, "object.upload.create/"+idemKey)
+	if err != nil {
+		return ports.StorageObjectUploadRecord{}, err
+	}
+	defer release()
 
 	s.mu.RLock()
 	if id, ok := s.uploadIdem[idemKey]; ok {
@@ -1812,6 +1843,30 @@ func storageVolumeHistory(at time.Time, action string, result string, target str
 
 func storageOperationIdempotencyKey(idempotencyKey string, operation string) string {
 	return operation + ":" + idempotencyKey
+}
+
+func (s *LocalStorageService) acquireStorageIdempotency(ctx context.Context, key string) (func(), error) {
+	for {
+		s.idempotencyMu.Lock()
+		if flight, ok := s.idempotencyFlight[key]; ok {
+			s.idempotencyMu.Unlock()
+			select {
+			case <-flight:
+				continue
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		flight := make(chan struct{})
+		s.idempotencyFlight[key] = flight
+		s.idempotencyMu.Unlock()
+		return func() {
+			s.idempotencyMu.Lock()
+			delete(s.idempotencyFlight, key)
+			close(flight)
+			s.idempotencyMu.Unlock()
+		}, nil
+	}
 }
 
 func storageFilesystemMountIP(offset int) string {
