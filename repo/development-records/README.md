@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### Core Knowledge Base Platform · 数据库迁移（2026-07）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| M2.1-TASK-A | issue-004（US-005）：新增 `repo/services/kb-service/migrations/` 两个 SQL 迁移脚本——`001_pg_trgm_extension.sql`（`CREATE EXTENSION IF NOT EXISTS pg_trgm`）与 `002_kb_chunks.sql`（`kb_chunks` 表 13 列与 SPEC §3.1 逐字段对齐 + 3 B-tree 索引 `idx_kb_chunks_kb_doc`/`parent`/`type` + 1 GIN trgm 索引 `idx_kb_chunks_content_trgm` + `GRANT ... TO ani_app` + `ENABLE/FORCE ROW LEVEL SECURITY` + `CREATE POLICY tenant_isolation AS RESTRICTIVE`）；全部 `CREATE ... IF NOT EXISTS` 幂等（SPEC §3.4）；`kb_id`/`doc_id`/`parent_chunk_id` 软 FK（SPEC §3.3）；review-it 修复 1 finding（F1 缺 RLS/GRANT，追加）；拒绝 2 findings（硬 FK、tenant_id REFERENCES，均因 SPEC 明确软 FK+RLS）；对齐 PRD US-005/FR-7/FR-14/FR-15 / SPEC §3.1/§3.3/§3.4/§8.1；`make validate-architecture` + `make test` + `git diff --check` 全通过 | m2.1-task-a-kb-chunks-pg-trgm.md |
+
 ### 账密登录模块（2026-07）
 
 | 批次 | 内容摘要 | 文件 |
