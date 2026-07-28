@@ -2,7 +2,7 @@
 
 > 日期: 2026-07-28
 > 类型: Core API 契约批次
-> 状态: 契约与生成物完成，等待个人仓库 CI 和契约评审
+> 状态: 个人仓库 CI passed，契约已确认
 
 ## 目标
 
@@ -43,15 +43,29 @@ DELETE 幂等 header，以及 code-run 的 `202 + AsyncTask + Location` 语义�
 
 ## 验收
 
-当前已通过:
+已通过:
 
 ```text
 python3 scripts/validate_openapi_spec_test.py
 make validate-openapi-spec
 make validate-core-api-compatibility
+make validate-sdk-alpha
+make validate-doc-api
+make validate-instance-contracts
+make validate-instance-lifecycle-ops
+make validate-doc-entrypoints
+make test
+make build
+make validate-architecture
+make validate-services
+npm --prefix frontends/console audit --audit-level=high
+npm --prefix frontends/console run type-check
+npm --prefix frontends/console run lint
+npm --prefix frontends/console run build
+git diff --check
 ```
 
-提交前继续执行完整本地 CI；最终以个人仓库 GitHub Actions 为准。
+个人仓库 GitHub Actions run `30351691537` 已通过。
 
 ## 未包含
 
