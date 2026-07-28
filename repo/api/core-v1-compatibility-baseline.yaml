@@ -216,6 +216,279 @@ paths:
           schema: '{}'
         '409':
           schema: '{}'
+  /buckets/{bucket_id}/acl:
+    put:
+      operation_id: setStorageBucketACL
+      rbac_scope: scope:objects:update
+      parameters:
+      - in: path
+        name: bucket_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: StorageBucketACLUpdateRequest
+      responses:
+        '200':
+          schema: StorageBucketRecord
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+  /buckets/{bucket_id}/lifecycle-rules:
+    get:
+      operation_id: listStorageBucketLifecycleRules
+      rbac_scope: scope:objects:read
+      parameters:
+      - in: path
+        name: bucket_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: StorageBucketLifecycleRuleListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+    post:
+      operation_id: createStorageBucketLifecycleRule
+      rbac_scope: scope:objects:update
+      parameters:
+      - in: path
+        name: bucket_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: StorageBucketLifecycleRuleCreateRequest
+      responses:
+        '201':
+          schema: StorageBucketLifecycleRule
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+    put:
+      operation_id: setStorageBucketLifecycleRules
+      rbac_scope: scope:objects:update
+      parameters:
+      - in: path
+        name: bucket_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: StorageBucketLifecycleRulesUpdateRequest
+      responses:
+        '200':
+          schema: StorageBucketLifecycleRuleListResponse
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+  /buckets/{bucket_id}/lifecycle-rules/{rule_id}:
+    delete:
+      operation_id: deleteStorageBucketLifecycleRule
+      rbac_scope: scope:objects:update
+      parameters:
+      - in: path
+        name: bucket_id
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: rule_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: StorageBucketLifecycleRuleListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+  /buckets/{bucket_id}/objects:
+    delete:
+      operation_id: deleteBucketObject
+      rbac_scope: scope:objects:delete
+      parameters:
+      - in: path
+        name: bucket_id
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: key
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: BucketObjectDeleteResponse
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+    get:
+      operation_id: listBucketObjects
+      rbac_scope: scope:objects:read
+      parameters:
+      - in: path
+        name: bucket_id
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: prefix
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 1000
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: StorageBucketObjectListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+  /buckets/{bucket_id}/objects/presigned-url:
+    post:
+      operation_id: generateBucketObjectPresignedURL
+      rbac_scope: scope:objects:read
+      parameters:
+      - in: path
+        name: bucket_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: BucketObjectPresignedURLRequest
+      responses:
+        '200':
+          schema: StorageObjectDownloadInfo
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+  /buckets/{bucket_id}/objects/upload:
+    post:
+      operation_id: uploadBucketObject
+      rbac_scope: scope:objects:create
+      parameters:
+      - in: path
+        name: bucket_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: BucketObjectUploadRequest
+      responses:
+        '200':
+          schema: StorageObjectUploadResponse
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+  /buckets/{bucket_id}/prefixes:
+    post:
+      operation_id: createBucketPrefix
+      rbac_scope: scope:objects:create
+      parameters:
+      - in: path
+        name: bucket_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: BucketPrefixCreateRequest
+      responses:
+        '201':
+          schema: StorageBucketObjectEntry
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+  /buckets/{bucket_id}/storage-class:
+    put:
+      operation_id: setStorageBucketClass
+      rbac_scope: scope:objects:update
+      parameters:
+      - in: path
+        name: bucket_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: StorageBucketClassUpdateRequest
+      responses:
+        '200':
+          schema: StorageBucketRecord
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
   /encryption/keys:
     get:
       operation_id: listEncryptionKeys
@@ -424,6 +697,79 @@ paths:
           schema: '{}'
         '404':
           schema: '{}'
+  /filesystems/{filesystem_id}/expand:
+    post:
+      operation_id: expandStorageFilesystem
+      rbac_scope: scope:filesystems:update
+      parameters:
+      - in: path
+        name: filesystem_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: StorageFilesystemExpandRequest
+      responses:
+        '202':
+          schema: AsyncTask
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '422':
+          schema: '{}'
+  /filesystems/{filesystem_id}/mount:
+    post:
+      operation_id: mountStorageFilesystem
+      rbac_scope: scope:filesystems:update
+      parameters:
+      - in: path
+        name: filesystem_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: StorageFilesystemMountRequest
+      responses:
+        '202':
+          schema: AsyncTask
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+        '422':
+          schema: '{}'
+  /filesystems/{filesystem_id}/mount-command:
+    get:
+      operation_id: getFilesystemMountCommand
+      rbac_scope: scope:filesystems:read
+      parameters:
+      - in: path
+        name: filesystem_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: FilesystemMountCommand
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
   /filesystems/{filesystem_id}/mount-targets:
     get:
       operation_id: listFilesystemMountTargets
@@ -456,6 +802,55 @@ paths:
         '403':
           schema: '{}'
         '404':
+          schema: '{}'
+    post:
+      operation_id: createFilesystemMountTarget
+      rbac_scope: scope:filesystems:update
+      parameters:
+      - in: path
+        name: filesystem_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: FilesystemMountTargetCreateRequest
+      responses:
+        '202':
+          schema: AsyncTask
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '422':
+          schema: '{}'
+  /filesystems/{filesystem_id}/unmount:
+    post:
+      operation_id: unmountStorageFilesystem
+      rbac_scope: scope:filesystems:update
+      parameters:
+      - in: path
+        name: filesystem_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: StorageFilesystemUnmountRequest
+      responses:
+        '202':
+          schema: AsyncTask
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '422':
           schema: '{}'
   /gpu-inventory:
     get:
@@ -3199,6 +3594,27 @@ paths:
           schema: '{}'
         '404':
           schema: '{}'
+  /vector-stores/{vector_store_id}/delete-precheck:
+    get:
+      operation_id: precheckVectorStoreDelete
+      rbac_scope: scope:vector-stores:read
+      parameters:
+      - in: path
+        name: vector_store_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: VectorStoreDeletePrecheck
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
   /vector-stores/{vector_store_id}/documents:
     delete:
       operation_id: deleteVectorStoreDocuments
@@ -3247,6 +3663,74 @@ paths:
       responses:
         '202':
           schema: VectorStoreDocumentInsertResponse
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '422':
+          schema: '{}'
+  /vector-stores/{vector_store_id}/knowledge-base-link:
+    delete:
+      operation_id: deleteVectorStoreKnowledgeBaseLink
+      rbac_scope: scope:vector-stores:write
+      parameters:
+      - in: path
+        name: vector_store_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: VectorStore
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+    put:
+      operation_id: setVectorStoreKnowledgeBaseLink
+      rbac_scope: scope:vector-stores:write
+      parameters:
+      - in: path
+        name: vector_store_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: VectorStoreKnowledgeBaseLinkRequest
+      responses:
+        '200':
+          schema: VectorStore
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+  /vector-stores/{vector_store_id}/rebuild-index:
+    post:
+      operation_id: rebuildVectorStoreIndex
+      rbac_scope: scope:vector-stores:write
+      parameters:
+      - in: path
+        name: vector_store_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: 'type: object'
+      responses:
+        '202':
+          schema: AsyncTask
         '400':
           schema: '{}'
         '401':
@@ -3364,6 +3848,125 @@ paths:
           schema: '{}'
         '404':
           schema: '{}'
+  /volumes/{volume_id}/auto-snapshot-policy:
+    put:
+      operation_id: setVolumeAutoSnapshotPolicy
+      rbac_scope: scope:volumes:update
+      parameters:
+      - in: path
+        name: volume_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: StorageVolumeAutoSnapshotPolicyUpdateRequest
+      responses:
+        '200':
+          schema: StorageVolume
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+  /volumes/{volume_id}/expand:
+    post:
+      operation_id: expandStorageVolume
+      rbac_scope: scope:volumes:update
+      parameters:
+      - in: path
+        name: volume_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: StorageVolumeExpandRequest
+      responses:
+        '202':
+          schema: AsyncTask
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '422':
+          schema: '{}'
+  /volumes/{volume_id}/mount:
+    post:
+      operation_id: mountStorageVolume
+      rbac_scope: scope:volumes:update
+      parameters:
+      - in: path
+        name: volume_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: StorageVolumeMountRequest
+      responses:
+        '202':
+          schema: AsyncTask
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+        '422':
+          schema: '{}'
+  /volumes/{volume_id}/os-init-complete:
+    post:
+      operation_id: completeVolumeOSInit
+      rbac_scope: scope:volumes:update
+      parameters:
+      - in: path
+        name: volume_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: VolumeOSInitCompleteRequest
+      responses:
+        '200':
+          schema: StorageVolume
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+  /volumes/{volume_id}/os-init-guide:
+    get:
+      operation_id: getVolumeOSInitGuide
+      rbac_scope: scope:volumes:read
+      parameters:
+      - in: path
+        name: volume_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: VolumeOSInitGuide
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
   /volumes/{volume_id}/snapshots:
     get:
       operation_id: listVolumeSnapshots
@@ -3418,6 +4021,61 @@ paths:
         '403':
           schema: '{}'
         '404':
+          schema: '{}'
+  /volumes/{volume_id}/snapshots/{snapshot_id}/create-volume:
+    post:
+      operation_id: createStorageVolumeFromSnapshot
+      rbac_scope: scope:volumes:create
+      parameters:
+      - in: path
+        name: volume_id
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: snapshot_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: CreateStorageVolumeFromSnapshotRequest
+      responses:
+        '202':
+          schema: AsyncTask
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '422':
+          schema: '{}'
+  /volumes/{volume_id}/unmount:
+    post:
+      operation_id: unmountStorageVolume
+      rbac_scope: scope:volumes:update
+      parameters:
+      - in: path
+        name: volume_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: StorageVolumeUnmountRequest
+      responses:
+        '202':
+          schema: AsyncTask
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '422':
           schema: '{}'
 schemas:
   APIKeyInfo:
@@ -3544,6 +4202,10 @@ schemas:
         - kb_document
         - model_version
         - volume_snapshot
+        - volume
+        - filesystem
+        - filesystem_mount_target
+        - vector_store
       result:
         signature:
           type: object
@@ -3568,6 +4230,15 @@ schemas:
         - kb.index
         - inference.deploy
         - volume.snapshot.create
+        - volume.expand
+        - volume.mount
+        - volume.unmount
+        - volume.create_from_snapshot
+        - filesystem.expand
+        - filesystem.mount_target.create
+        - filesystem.mount
+        - filesystem.unmount
+        - vector_store.index.rebuild
   BeginOIDCLoginRequest:
     type: object
     required:
@@ -3597,6 +4268,101 @@ schemas:
       state:
         signature:
           type: string
+        enum: []
+  BucketObjectDeleteResponse:
+    type: object
+    required:
+    - bucket_id
+    - deleted
+    - key
+    properties:
+      bucket_id:
+        signature:
+          type: string
+        enum: []
+      deleted:
+        signature:
+          type: boolean
+        enum: []
+      key:
+        signature:
+          type: string
+        enum: []
+  BucketObjectPresignedURLRequest:
+    type: object
+    required:
+    - key
+    properties:
+      expires_hours:
+        signature:
+          type: integer
+          minimum: 1
+          maximum: 168
+        enum: []
+      key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        enum: []
+      method:
+        signature:
+          type: string
+        enum:
+        - GET
+        - PUT
+  BucketObjectUploadRequest:
+    type: object
+    required:
+    - idempotency_key
+    - key
+    properties:
+      content_type:
+        signature:
+          type: string
+        enum: []
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        enum: []
+      size_bytes:
+        signature:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        enum: []
+      storage_class:
+        signature:
+          type: string
+        enum:
+        - standard
+        - infrequent_access
+  BucketPrefixCreateRequest:
+    type: object
+    required:
+    - idempotency_key
+    - prefix
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      prefix:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 1024
         enum: []
   CompleteOIDCLoginRequest:
     type: object
@@ -4264,12 +5030,23 @@ schemas:
           minLength: 1
           maxLength: 128
         enum: []
+      mount_target_subnet_id:
+        signature:
+          type: string
+          nullable: true
+        enum: []
       name:
         signature:
           type: string
           minLength: 1
           maxLength: 128
         enum: []
+      performance_mode:
+        signature:
+          type: string
+        enum:
+        - standard
+        - throughput
       protocol:
         signature:
           type: string
@@ -4281,6 +5058,10 @@ schemas:
           type: integer
           format: int64
           minimum: 1
+        enum: []
+      zone:
+        signature:
+          type: string
         enum: []
   CreateStorageObjectRequest:
     type: object
@@ -4317,7 +5098,13 @@ schemas:
           format: int64
           minimum: 0
         enum: []
-  CreateStorageVolumeRequest:
+      storage_class:
+        signature:
+          type: string
+        enum:
+        - standard
+        - infrequent_access
+  CreateStorageVolumeFromSnapshotRequest:
     type: object
     required:
     - idempotency_key
@@ -4342,7 +5129,62 @@ schemas:
           format: int64
           minimum: 1
         enum: []
+      zone:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+  CreateStorageVolumeRequest:
+    type: object
+    required:
+    - idempotency_key
+    - name
+    - size_gib
+    properties:
+      encrypted:
+        signature:
+          type: boolean
+        enum: []
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      mount_instance_id:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      mount_route:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      name:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      size_gib:
+        signature:
+          type: integer
+          format: int64
+          minimum: 1
+        enum: []
       storage_class:
+        signature:
+          type: string
+        enum: []
+      volume_type:
+        signature:
+          type: string
+        enum:
+        - ssd
+        - hdd
+        - high_performance_ssd
+      zone:
         signature:
           type: string
         enum: []
@@ -4376,6 +5218,11 @@ schemas:
         signature:
           type: integer
           minimum: 1
+        enum: []
+      embedding_model:
+        signature:
+          type: string
+          nullable: true
         enum: []
       idempotency_key:
         signature:
@@ -4833,6 +5680,77 @@ schemas:
         signature:
           type: string
         enum: []
+  FilesystemAttachment:
+    type: object
+    required:
+    - attached_at
+    - instance_id
+    - instance_route
+    - mount_path
+    properties:
+      attached_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      auto_mount:
+        signature:
+          type: boolean
+        enum: []
+      instance_id:
+        signature:
+          type: string
+        enum: []
+      instance_name:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      instance_route:
+        signature:
+          type: string
+        enum: []
+      ip_address:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      mount_path:
+        signature:
+          type: string
+        enum: []
+      protocol:
+        signature:
+          type: string
+        enum:
+        - nfs
+        - cephfs
+  FilesystemMountCommand:
+    type: object
+    required:
+    - command
+    - protocol
+    properties:
+      command:
+        signature:
+          type: string
+        enum: []
+      ip_address:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      mount_path:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      protocol:
+        signature:
+          type: string
+        enum:
+        - nfs
+        - cephfs
   FilesystemMountTarget:
     type: object
     required:
@@ -4876,6 +5794,32 @@ schemas:
       subnet_id:
         signature:
           type: string
+        enum: []
+      vpc_id:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+  FilesystemMountTargetCreateRequest:
+    type: object
+    required:
+    - idempotency_key
+    - subnet_id
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      subnet_id:
+        signature:
+          type: string
+        enum: []
+      vpc_id:
+        signature:
+          type: string
+          nullable: true
         enum: []
   FilesystemMountTargetListResponse:
     type: object
@@ -8774,6 +9718,150 @@ schemas:
           minLength: 1
           maxLength: 128
         enum: []
+  StorageBucketACLUpdateRequest:
+    type: object
+    required:
+    - acl
+    - idempotency_key
+    properties:
+      acl:
+        signature:
+          type: string
+        enum:
+        - private
+        - tenant_read
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+  StorageBucketClassUpdateRequest:
+    type: object
+    required:
+    - idempotency_key
+    - storage_class
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      storage_class:
+        signature:
+          type: string
+        enum:
+        - standard
+        - infrequent_access
+  StorageBucketLifecycleRule:
+    type: object
+    required:
+    - enabled
+    - expire_days
+    - id
+    - name
+    - prefix
+    - to_infrequent_days
+    properties:
+      enabled:
+        signature:
+          type: boolean
+        enum: []
+      expire_days:
+        signature:
+          type: integer
+          minimum: 1
+        enum: []
+      id:
+        signature:
+          type: string
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+      prefix:
+        signature:
+          type: string
+        enum: []
+      to_infrequent_days:
+        signature:
+          type: integer
+          minimum: 1
+        enum: []
+  StorageBucketLifecycleRuleCreateRequest:
+    type: object
+    required:
+    - enabled
+    - expire_days
+    - idempotency_key
+    - name
+    - prefix
+    - to_infrequent_days
+    properties:
+      enabled:
+        signature:
+          type: boolean
+        enum: []
+      expire_days:
+        signature:
+          type: integer
+          minimum: 1
+        enum: []
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+      prefix:
+        signature:
+          type: string
+        enum: []
+      to_infrequent_days:
+        signature:
+          type: integer
+          minimum: 1
+        enum: []
+  StorageBucketLifecycleRuleListResponse:
+    type: object
+    required:
+    - items
+    - total
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/StorageBucketLifecycleRule'
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
+  StorageBucketLifecycleRulesUpdateRequest:
+    type: object
+    required:
+    - idempotency_key
+    - rules
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      rules:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/StorageBucketLifecycleRule'
+        enum: []
   StorageBucketListResponse:
     type: object
     required:
@@ -8795,6 +9883,78 @@ schemas:
         signature:
           type: integer
         enum: []
+  StorageBucketObjectEntry:
+    type: object
+    required:
+    - key
+    - kind
+    - name
+    properties:
+      key:
+        signature:
+          type: string
+        enum: []
+      kind:
+        signature:
+          type: string
+        enum:
+        - prefix
+        - object
+      name:
+        signature:
+          type: string
+        enum: []
+      size_bytes:
+        signature:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        enum: []
+      size_label:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      storage_class:
+        signature:
+          type: string
+          nullable: true
+        enum:
+        - standard
+        - infrequent_access
+      updated_at:
+        signature:
+          type: string
+          format: date-time
+          nullable: true
+        enum: []
+  StorageBucketObjectListResponse:
+    type: object
+    required:
+    - items
+    - prefix
+    - total
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/StorageBucketObjectEntry'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      prefix:
+        signature:
+          type: string
+        enum: []
+      total:
+        signature:
+          type: integer
+        enum: []
   StorageBucketRecord:
     type: object
     required:
@@ -8809,15 +9969,44 @@ schemas:
         enum:
         - private
         - public_read
+      acl:
+        signature:
+          type: string
+          nullable: true
+        enum:
+        - private
+        - tenant_read
+      acl_label:
+        signature:
+          type: string
+          nullable: true
+        enum: []
       created_at:
         signature:
           type: string
           format: date-time
         enum: []
+      endpoint:
+        signature:
+          type: string
+          format: uri
+          nullable: true
+        enum: []
       id:
         signature:
           type: string
           format: uuid
+        enum: []
+      lifecycle_note:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      lifecycle_rules:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/StorageBucketLifecycleRule'
         enum: []
       name:
         signature:
@@ -8836,6 +10025,26 @@ schemas:
         signature:
           type: integer
         enum: []
+      storage_class:
+        signature:
+          type: string
+          nullable: true
+        enum:
+        - standard
+        - infrequent_access
+      updated_at:
+        signature:
+          type: string
+          format: date-time
+          nullable: true
+        enum: []
+      versioning:
+        signature:
+          type: string
+          nullable: true
+        enum:
+        - disabled
+        - enabled
   StorageFilesystem:
     type: object
     required:
@@ -8848,6 +10057,12 @@ schemas:
     - tenant_id
     - updated_at
     properties:
+      attached_instances:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/FilesystemAttachment'
+        enum: []
       created_at:
         signature:
           type: string
@@ -8866,10 +10081,34 @@ schemas:
         signature:
           type: string
         enum: []
+      mount_command:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      mount_targets:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/FilesystemMountTarget'
+        enum: []
+      mounts:
+        signature:
+          type: integer
+          nullable: true
+          minimum: 0
+        enum: []
       name:
         signature:
           type: string
         enum: []
+      performance_mode:
+        signature:
+          type: string
+          nullable: true
+        enum:
+        - standard
+        - throughput
       protocol:
         signature:
           type: string
@@ -8900,6 +10139,29 @@ schemas:
           type: string
           format: date-time
         enum: []
+      zone:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+  StorageFilesystemExpandRequest:
+    type: object
+    required:
+    - idempotency_key
+    - size_gib
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      size_gib:
+        signature:
+          type: integer
+          format: int64
+          minimum: 1
+        enum: []
   StorageFilesystemListResponse:
     type: object
     required:
@@ -8920,6 +10182,55 @@ schemas:
       total:
         signature:
           type: integer
+        enum: []
+  StorageFilesystemMountRequest:
+    type: object
+    required:
+    - idempotency_key
+    - instance_id
+    - instance_route
+    - mount_path
+    properties:
+      auto_mount:
+        signature:
+          type: boolean
+        enum: []
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      instance_id:
+        signature:
+          type: string
+        enum: []
+      instance_route:
+        signature:
+          type: string
+        enum:
+        - /compute/instances/vm
+        - /compute/instances/container
+        - /compute/instances/gpu-container
+      mount_path:
+        signature:
+          type: string
+        enum: []
+  StorageFilesystemUnmountRequest:
+    type: object
+    required:
+    - idempotency_key
+    - instance_id
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      instance_id:
+        signature:
+          type: string
         enum: []
   StorageObject:
     type: object
@@ -8974,6 +10285,14 @@ schemas:
         signature:
           $ref: '#/components/schemas/StorageResourceState'
         enum: []
+      storage_class:
+        signature:
+          type: string
+          nullable: true
+        enum:
+        - standard
+        - infrequent_access
+        - archive
       tenant_id:
         signature:
           type: string
@@ -9090,6 +10409,10 @@ schemas:
     - tenant_id
     - updated_at
     properties:
+      auto_snapshot:
+        signature:
+          $ref: '#/components/schemas/StorageVolumeAutoSnapshotPolicy'
+        enum: []
       created_at:
         signature:
           type: string
@@ -9099,14 +10422,70 @@ schemas:
         signature:
           $ref: '#/components/schemas/CoreDevProfileInfo'
         enum: []
+      encrypted:
+        signature:
+          type: boolean
+          nullable: true
+        enum: []
+      from_snapshot_id:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      from_snapshot_name:
+        signature:
+          type: string
+          nullable: true
+        enum: []
       id:
         signature:
           type: string
+        enum: []
+      iops:
+        signature:
+          type: integer
+          nullable: true
+          minimum: 0
+        enum: []
+      mount_history:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/StorageVolumeMountHistoryEntry'
+        enum: []
+      mount_instance_id:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      mount_name:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      mount_route:
+        signature:
+          type: string
+          nullable: true
         enum: []
       name:
         signature:
           type: string
         enum: []
+      os_init_device:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      os_init_status:
+        signature:
+          type: string
+          nullable: true
+        enum:
+        - pending
+        - done
+        - skipped
+        - n_a
       reason:
         signature:
           type: string
@@ -9117,6 +10496,12 @@ schemas:
           type: integer
           format: int64
           minimum: 1
+        enum: []
+      snapshots_count:
+        signature:
+          type: integer
+          nullable: true
+          minimum: 0
         enum: []
       state:
         signature:
@@ -9134,6 +10519,86 @@ schemas:
         signature:
           type: string
           format: date-time
+        enum: []
+      volume_type:
+        signature:
+          type: string
+          nullable: true
+        enum:
+        - ssd
+        - hdd
+        - high_performance_ssd
+      zone:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+  StorageVolumeAutoSnapshotPolicy:
+    type: object
+    required:
+    - enabled
+    - retain_days
+    - schedule
+    properties:
+      enabled:
+        signature:
+          type: boolean
+        enum: []
+      retain_days:
+        signature:
+          type: integer
+          minimum: 1
+          maximum: 365
+        enum: []
+      schedule:
+        signature:
+          type: string
+        enum: []
+  StorageVolumeAutoSnapshotPolicyUpdateRequest:
+    type: object
+    required:
+    - enabled
+    - idempotency_key
+    - retain_days
+    - schedule
+    properties:
+      enabled:
+        signature:
+          type: boolean
+        enum: []
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      retain_days:
+        signature:
+          type: integer
+          minimum: 1
+          maximum: 365
+        enum: []
+      schedule:
+        signature:
+          type: string
+        enum: []
+  StorageVolumeExpandRequest:
+    type: object
+    required:
+    - idempotency_key
+    - size_gib
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      size_gib:
+        signature:
+          type: integer
+          format: int64
+          minimum: 1
         enum: []
   StorageVolumeListResponse:
     type: object
@@ -9155,6 +10620,77 @@ schemas:
       total:
         signature:
           type: integer
+        enum: []
+  StorageVolumeMountHistoryEntry:
+    type: object
+    required:
+    - action
+    - at
+    - result
+    properties:
+      action:
+        signature:
+          type: string
+        enum:
+        - mount
+        - unmount
+        - create_from_snapshot
+        - os_init
+      at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      result:
+        signature:
+          type: string
+        enum:
+        - success
+        - failed
+      target:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+  StorageVolumeMountRequest:
+    type: object
+    required:
+    - idempotency_key
+    - instance_id
+    - instance_route
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      instance_id:
+        signature:
+          type: string
+        enum: []
+      instance_route:
+        signature:
+          type: string
+        enum:
+        - /compute/instances/vm
+        - /compute/instances/container
+        - /compute/instances/gpu-container
+      mount_name:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+  StorageVolumeUnmountRequest:
+    type: object
+    required:
+    - idempotency_key
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
         enum: []
   TokenPairResponse:
     type: object
@@ -9385,9 +10921,28 @@ schemas:
           type: integer
           minimum: 1
         enum: []
+      embedding_model:
+        signature:
+          type: string
+          nullable: true
+        enum: []
       id:
         signature:
           type: string
+        enum: []
+      index_status:
+        signature:
+          $ref: '#/components/schemas/VectorStoreIndexStatus'
+        enum: []
+      knowledge_base_ref:
+        signature:
+          $ref: '#/components/schemas/VectorStoreKnowledgeBaseRef'
+        enum: []
+      last_indexed_at:
+        signature:
+          type: string
+          format: date-time
+          nullable: true
         enum: []
       metric:
         signature:
@@ -9417,6 +10972,34 @@ schemas:
         signature:
           type: string
           format: date-time
+        enum: []
+      vector_count:
+        signature:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        enum: []
+  VectorStoreDeletePrecheck:
+    type: object
+    required:
+    - blockers
+    - deletable
+    properties:
+      blockers:
+        signature:
+          type: array
+          items:
+            type: object
+        enum: []
+      deletable:
+        signature:
+          type: boolean
+        enum: []
+      reason:
+        signature:
+          type: string
+          nullable: true
         enum: []
   VectorStoreDocumentDeleteResponse:
     type: object
@@ -9466,6 +11049,48 @@ schemas:
           type: string
           format: uuid
         enum: []
+  VectorStoreIndexStatus:
+    type: string
+    required: []
+    properties: {}
+  VectorStoreKnowledgeBaseLinkRequest:
+    type: object
+    required:
+    - idempotency_key
+    - knowledge_base_ref
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      knowledge_base_ref:
+        signature:
+          $ref: '#/components/schemas/VectorStoreKnowledgeBaseRef'
+        enum: []
+  VectorStoreKnowledgeBaseRef:
+    type: object
+    required:
+    - id
+    - name
+    - source
+    properties:
+      id:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+      source:
+        signature:
+          type: string
+        enum:
+        - services_knowledge_base
+        - external
   VectorStoreListResponse:
     type: object
     required:
@@ -9494,6 +11119,11 @@ schemas:
     - metadata
     - score
     properties:
+      chunk:
+        signature:
+          type: string
+          nullable: true
+        enum: []
       id:
         signature:
           type: string
@@ -9504,10 +11134,20 @@ schemas:
           additionalProperties:
             type: string
         enum: []
+      rank:
+        signature:
+          type: integer
+          minimum: 1
+        enum: []
       score:
         signature:
           type: number
           format: float
+        enum: []
+      source:
+        signature:
+          type: string
+          nullable: true
         enum: []
   VectorStoreSearchRequest:
     type: object
@@ -9553,6 +11193,54 @@ schemas:
     type: string
     required: []
     properties: {}
+  VolumeOSInitCompleteRequest:
+    type: object
+    required:
+    - idempotency_key
+    - mode
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      mode:
+        signature:
+          type: string
+        enum:
+        - done
+        - skipped
+  VolumeOSInitGuide:
+    type: object
+    required:
+    - device
+    - hint
+    - status
+    - steps
+    properties:
+      device:
+        signature:
+          type: string
+        enum: []
+      hint:
+        signature:
+          type: string
+        enum: []
+      status:
+        signature:
+          type: string
+        enum:
+        - pending
+        - done
+        - skipped
+        - n_a
+      steps:
+        signature:
+          type: array
+          items:
+            type: object
+        enum: []
   VolumeSnapshotListResponse:
     type: object
     required:
