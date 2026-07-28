@@ -74,6 +74,42 @@ class OpenAPISpecValidatorTest(unittest.TestCase):
         ):
             self.assertIn(code, create_instance_422)
 
+    def test_gpu_spec_selection_contract_is_frozen_without_quota_semantics(self) -> None:
+        spec = yaml.safe_load((ROOT / "api/openapi/v1.yaml").read_text(encoding="utf-8"))
+        schemas = spec["components"]["schemas"]
+
+        self.assertIn("GPUSpecSummary", schemas)
+        gpu_spec = schemas["GPUSpecSummary"]
+        self.assertEqual(
+            set(gpu_spec["required"]),
+            {"id", "name", "gpu_type", "shares", "mb_per_share", "available"},
+        )
+        self.assertNotIn("quota", gpu_spec["properties"])
+        self.assertNotIn("used_count", gpu_spec["properties"])
+
+        list_operation = spec["paths"]["/gpu-specs"]["get"]
+        self.assertEqual(list_operation["operationId"], "listGPUSpecs")
+        self.assertEqual(
+            list_operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/GPUSpecListResponse",
+        )
+
+        get_operation = spec["paths"]["/gpu-specs/{spec_id}"]["get"]
+        self.assertEqual(get_operation["operationId"], "getGPUSpec")
+        self.assertIn("404", get_operation["responses"])
+        self.assertNotIn("422", get_operation["responses"])
+
+        create_instance_422 = spec["paths"]["/instances"]["post"]["responses"]["422"]["description"]
+        for code in ("GPUSpecNotFound", "GPUSpecUnavailable", "GPUSpecInventoryMismatch"):
+            self.assertIn(code, create_instance_422)
+
+        gpu_config = schemas["CreateGPUContainerInstanceConfig"]["properties"]["gpu"]
+        self.assertIn("spec_id", gpu_config["properties"])
+        self.assertTrue(gpu_config["properties"]["vendor"]["deprecated"])
+        self.assertTrue(gpu_config["properties"]["model"]["deprecated"])
+        self.assertTrue(gpu_config["properties"]["count"]["deprecated"])
+        self.assertTrue(gpu_config["properties"]["allocation_mode"]["deprecated"])
+
 
 if __name__ == "__main__":
     unittest.main()

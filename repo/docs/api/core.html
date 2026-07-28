@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>173</dd></div>
-          <div><dt>Schemas</dt><dd>224</dd></div>
+          <div><dt>Operations</dt><dd>175</dd></div>
+          <div><dt>Schemas</dt><dd>226</dd></div>
         </dl>
       </section>
 
@@ -542,6 +542,22 @@
           <td>更新 GPU 调度队列</td>
           <td><code>scope:gpu-scheduling:write</code></td>
           <td>200, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/gpu-specs</code></td>
+          <td><code>listGPUSpecs</code></td>
+          <td>查询可选 GPU 规格</td>
+          <td><code>scope:gpu-inventory:read</code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/gpu-specs/{spec_id}</code></td>
+          <td><code>getGPUSpec</code></td>
+          <td>查询单个 GPU 规格</td>
+          <td><code>scope:gpu-inventory:read</code></td>
+          <td>200, 401, 403, 404</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1616,6 +1632,8 @@
         <li><code>GPUSchedulingQueueCreateRequest</code></li>
         <li><code>GPUSchedulingQueueListResponse</code></li>
         <li><code>GPUSchedulingQueueUpdateRequest</code></li>
+        <li><code>GPUSpecListResponse</code></li>
+        <li><code>GPUSpecSummary</code></li>
         <li><code>HealthCheck</code></li>
         <li><code>InstanceConsoleSession</code></li>
         <li><code>InstanceEvent</code></li>

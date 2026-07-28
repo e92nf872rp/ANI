@@ -2211,6 +2211,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/gpu-specs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询可选 GPU 规格
+         * @description 返回实例创建可引用的 Core 集群级 GPU 规格。规格只描述 GPU 类型、切分份数和显存，
+         *     不表示当前租户配额，也不触发配额扣减、占用或释放。
+         */
+        get: operations["listGPUSpecs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gpu-specs/{spec_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询单个 GPU 规格
+         * @description 实例服务使用该接口解析 spec_id。available=false 的规格仍可查询以支持历史实例展示，
+         *     但不得用于新实例创建；创建准入由 POST /instances 返回 422 GPUSpecUnavailable。
+         */
+        get: operations["getGPUSpec"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/gpu-scheduling/queues": {
         parameters: {
             query?: never;
@@ -2965,17 +3007,36 @@ export interface components {
              * @default 1
              */
             replicas: number;
+            /**
+             * @description GPU 资源选择。推荐传 spec_id 引用 Core GPUSpec；规格模式只解析资源形态和调度参数，
+             *     当前不表达租户配额扣减。旧字段保留用于 v1 兼容，和 spec_id 同时传入时必须一致。
+             */
             gpu?: {
-                /** @example nvidia */
+                /** @description Core GPUSpec ID；通过 /gpu-specs 查询可用规格。 */
+                spec_id?: string | null;
+                /**
+                 * @deprecated
+                 * @description 兼容字段；规格模式下由 spec_id 解析。
+                 * @example nvidia
+                 */
                 vendor?: string;
-                /** @example A100 */
+                /**
+                 * @deprecated
+                 * @description 兼容字段；规格模式下由 spec_id 解析。
+                 * @example A100
+                 */
                 model?: string;
-                /** @default 1 */
+                /**
+                 * @deprecated
+                 * @description 兼容字段；规格模式下由 shares 等规格字段解析。
+                 * @default 1
+                 */
                 count: number;
                 /** @description 指定调度队列名；为空时按 workload_class 选默认队列 */
                 queue_name?: string | null;
                 /**
-                 * @description GPU 分配模式：dedicated=整卡，vgpu=HAMi vGPU
+                 * @deprecated
+                 * @description 兼容字段；规格模式下由 shares=1 或切分规格确定。
                  * @default dedicated
                  * @enum {string}
                  */
@@ -4541,6 +4602,30 @@ export interface components {
             total: number;
             dev_profile: components["schemas"]["CoreDevProfileInfo"];
         };
+        /**
+         * @description Core 集群级 GPU 规格只读视图。spec_id 描述 GPU 资源形态，不代表租户配额；
+         *     本契约不执行 quota check、acquire 或 release。
+         */
+        GPUSpecSummary: {
+            /** @description 稳定规格 ID，实例创建通过 spec_id 引用。 */
+            id: string;
+            /** @description Console 展示名称。 */
+            name: string;
+            /** @description 必须与 GPU inventory 的 gpu_type 一致。 */
+            gpu_type: string;
+            memory_total_mb?: number | null;
+            /** @description 每张物理卡的切分份数；1 表示整卡规格。 */
+            shares: number;
+            /** @description 每份保证显存，单位 MiB。 */
+            mb_per_share: number;
+            /** @description 是否允许用于新的实例创建。 */
+            available: boolean;
+        };
+        GPUSpecListResponse: {
+            items: components["schemas"]["GPUSpecSummary"][];
+            total: number;
+            next_cursor?: string | null;
+        };
         GPUOccupancyStats: {
             total: number;
             in_use: number;
@@ -5217,6 +5302,9 @@ export interface operations {
              *     - ImageScanning: 镜像仍在安全扫描中，暂不能创建实例
              *     - ImageVulnerabilityBlocked: 镜像存在高危或严重漏洞，策略禁止创建实例
              *     - ImagePurposeMismatch: 镜像用途与实例 kind 不匹配
+             *     - GPUSpecNotFound: spec_id 对应的 GPU 规格不存在
+             *     - GPUSpecUnavailable: GPU 规格存在但不可用于新实例
+             *     - GPUSpecInventoryMismatch: GPU 规格与当前 inventory 不匹配
              */
             422: components["responses"]["PreconditionFailed"];
         };
@@ -9154,6 +9242,58 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    listGPUSpecs: {
+        parameters: {
+            query?: {
+                gpu_type?: string;
+                available?: boolean;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description GPU 规格列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GPUSpecListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getGPUSpec: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                spec_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description GPU 规格详情 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GPUSpecSummary"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listGPUSchedulingQueues: {

@@ -22,7 +22,7 @@
 | **Auth 边界** | SPRINT13-AUTH-DEX-PRODUCTION-GATE / Auth/Dex production gate 已通过；production-shaped Gateway 固定 ANI_AUTH_MODE=auth_service |
 | **执行入口** | `development-records/sprint13-real-provider-readiness-plan.md`、`development-records/README.md`、本文件验收命令 |
 | **执行环境** | 真实 provider 写操作前必须重新只读盘点并取得人工确认；evidence 不得包含凭据、服务器 IP 或完整内网端点 |
-| **最后校准日期** | 2026-07-15 |
+| **最后校准日期** | 2026-07-28 |
 
 ## Sprint 13 当前任务
 
@@ -85,6 +85,16 @@
 | PR #46 (3/3) | adapters + gateway + 前端 + manifests 实现 | 🟡 OPEN 等待 review | review-it 修复 4 项（UID panic/PATCH 幂等/URL 编码/错误语义）；5 项 follow-up 延迟；笔记 `gpu-scheduling-batch-01-13-note-it.md §5` |
 
 Issue 清单：`repo/services/tasks/issues/issue-01-openapi-queue-crud.md` ~ `issue-13-boss-gpu-pool-page.md`
+
+## Instance Management API-First（2026-07-28）
+
+| 批次 | 状态 | 说明 |
+|---|---|---|
+| GPU-SPEC-CONTRACT-A | 契约与生成物完成，等待个人仓库 CI/契约评审 | 为实例 `spec_id` 提供 `GPUSpecSummary`、`GET /gpu-specs`、`GET /gpu-specs/{spec_id}` 只读契约；旧 GPU 字段 deprecated 保留；不含 handler/port/adapter/Console，不实现配额 check/acquire/release |
+| INSTANCE-CONTRACT-A | blocked-by-contract-review | 等 GPU-SPEC-CONTRACT-A 个人仓库 CI 通过并获得契约批准后，按 `../docs/superpowers/specs/2026-07-28-instance-management-design.md` 实施实例主契约 |
+| INSTANCE-SANDBOX-CONTRACT-A | pending | 在实例主契约之后独立提交 Sandbox 子资源契约，不与运行时实现混合 |
+
+边界：本流程独立于既有 GPU 调度队列实现；当前只完成公开契约和生成物，不声明 GPU 规格 runtime ready、配额能力或实例管理闭环完成。
 
 ## Registry Console Flow（2026-07-22）
 
