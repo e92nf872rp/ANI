@@ -68,6 +68,7 @@
 
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
+| INSTANCE-SANDBOX-CONTRACT-A | Sandbox 子资源契约：新增短期 token、runtime 预览端口、文件、checkpoint 和异步 code-run 共 11 个操作；固定租户/kind 边界、幂等、202 AsyncTask + Location 与敏感输出审计约束；仅契约和生成物，不含运行时实现 | instance-sandbox-contract-a.md |
 | INSTANCE-CONTRACT-A | 统一实例主契约扩展：补齐四类 P0 创建配置、Registry/Network/Storage/GPU Spec 引用、稳定详情摘要、列表过滤/排序/cursor、观测 cursor 和结构化 lifecycle/operation step；仅契约和生成物，不含 Sandbox 子资源或运行时实现 | instance-contract-a.md |
 | GPU-SPEC-CONTRACT-A | 实例 `spec_id` 的前置只读契约：新增 `GPUSpecSummary`、`GET /gpu-specs`、`GET /gpu-specs/{spec_id}`，GPU Container config 增加可选 `spec_id`，旧 GPU 字段 deprecated 保留；明确不包含配额 check/acquire/release，不含 handler/port/adapter/Console 实现 | gpu-spec-contract-a.md |
 | GPU-SCHEDULING-ISSUE-01-A | OpenAPI 新增 GPU 调度队列 CRUD 5 端点 + 4 schema + 2 RBAC scope + InstanceRecord.gpu 扩展 + 5 错误码；修复 /branding schema bug；前端 core-schema.d.ts 重生成；validate-architecture 通过 | gpu-scheduling-issue-01-openapi-queue-crud.md |

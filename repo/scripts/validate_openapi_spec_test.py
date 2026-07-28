@@ -246,6 +246,78 @@ class OpenAPISpecValidatorTest(unittest.TestCase):
         for field in ("task_id", "resource_type", "resource_id"):
             self.assertIn(field, operation_step["properties"])
 
+    def test_sandbox_subresource_contract_is_frozen(self) -> None:
+        spec = yaml.safe_load((ROOT / "api/openapi/v1.yaml").read_text(encoding="utf-8"))
+        paths = spec["paths"]
+        schemas = spec["components"]["schemas"]
+
+        operations = {
+            ("/instances/{instance_id}/sandbox/tokens", "post"): "createSandboxToken",
+            ("/instances/{instance_id}/sandbox/ports", "post"): "createSandboxPort",
+            ("/instances/{instance_id}/sandbox/ports/{port}", "delete"): "deleteSandboxPort",
+            ("/instances/{instance_id}/sandbox/files", "get"): "listSandboxFiles",
+            ("/instances/{instance_id}/sandbox/files", "post"): "writeSandboxFile",
+            ("/instances/{instance_id}/sandbox/files", "delete"): "deleteSandboxFile",
+            ("/instances/{instance_id}/sandbox/checkpoints", "get"): "listSandboxCheckpoints",
+            ("/instances/{instance_id}/sandbox/checkpoints", "post"): "createSandboxCheckpoint",
+            (
+                "/instances/{instance_id}/sandbox/checkpoints/{checkpoint_id}/restore",
+                "post",
+            ): "restoreSandboxCheckpoint",
+            (
+                "/instances/{instance_id}/sandbox/checkpoints/{checkpoint_id}/clone",
+                "post",
+            ): "cloneSandboxCheckpoint",
+            ("/instances/{instance_id}/sandbox/code-runs", "post"): "createSandboxCodeRun",
+        }
+        for (path, method), operation_id in operations.items():
+            self.assertIn(path, paths)
+            self.assertIn(method, paths[path])
+            self.assertEqual(paths[path][method]["operationId"], operation_id)
+
+        for schema_name in (
+            "CreateSandboxTokenRequest",
+            "SandboxTokenResponse",
+            "CreateSandboxPortRequest",
+            "SandboxPort",
+            "SandboxFile",
+            "SandboxFileListResponse",
+            "WriteSandboxFileRequest",
+            "CreateSandboxCheckpointRequest",
+            "SandboxCheckpoint",
+            "SandboxCheckpointListResponse",
+            "SandboxCheckpointActionRequest",
+            "CloneSandboxCheckpointRequest",
+            "CreateSandboxCodeRunRequest",
+            "SandboxCodeRun",
+        ):
+            self.assertIn(schema_name, schemas)
+
+        for path, method in (
+            ("/instances/{instance_id}/sandbox/ports/{port}", "delete"),
+            ("/instances/{instance_id}/sandbox/files", "delete"),
+        ):
+            parameters = {
+                parameter["name"]: parameter
+                for parameter in paths[path][method]["parameters"]
+            }
+            self.assertEqual(parameters["Idempotency-Key"]["in"], "header")
+            self.assertTrue(parameters["Idempotency-Key"]["required"])
+
+        code_run_response = paths["/instances/{instance_id}/sandbox/code-runs"]["post"][
+            "responses"
+        ]["202"]
+        self.assertEqual(
+            code_run_response["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/AsyncTask",
+        )
+        self.assertIn("Location", code_run_response["headers"])
+
+        task_type = schemas["AsyncTask"]["properties"]["task_type"]["enum"]
+        resource_type = schemas["AsyncTask"]["properties"]["resource_type"]["enum"]
+        self.assertIn("sandbox.code_run.create", task_type)
+        self.assertIn("sandbox_code_run", resource_type)
+
 
 if __name__ == "__main__":
     unittest.main()

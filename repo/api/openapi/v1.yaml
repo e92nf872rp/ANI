@@ -353,9 +353,9 @@ components:
         id:               { type: string, format: uuid }
         idempotency_key:  { type: string, description: "客户端提供的幂等键" }
         task_type:        { type: string, example: "model.import",
-                            enum: [model.import, kb.parse, kb.index, inference.deploy, volume.snapshot.create, volume.expand, volume.mount, volume.unmount, volume.create_from_snapshot, filesystem.expand, filesystem.mount_target.create, filesystem.mount, filesystem.unmount, vector_store.index.rebuild] }
+                            enum: [model.import, kb.parse, kb.index, inference.deploy, volume.snapshot.create, volume.expand, volume.mount, volume.unmount, volume.create_from_snapshot, filesystem.expand, filesystem.mount_target.create, filesystem.mount, filesystem.unmount, vector_store.index.rebuild, sandbox.checkpoint.create, sandbox.checkpoint.restore, sandbox.code_run.create] }
         resource_type:    { type: string, nullable: true,
-                            enum: [inference_service, kb_document, model_version, volume_snapshot, volume, filesystem, filesystem_mount_target, vector_store] }
+                            enum: [inference_service, kb_document, model_version, volume_snapshot, volume, filesystem, filesystem_mount_target, vector_store, sandbox_checkpoint, sandbox_code_run] }
         resource_id:      { type: string, format: uuid, nullable: true }
         status:           { type: string,
                             enum: [pending, running, completed, failed, cancelled, dead_letter] }
@@ -982,6 +982,150 @@ components:
             ports_available: { type: boolean }
         dev_profile:
           $ref: '#/components/schemas/CoreDevProfileInfo'
+
+    CreateSandboxTokenRequest:
+      type: object
+      required: [idempotency_key]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+        expires_in:      { type: string, default: 15m, description: "Go duration，最大 1h。" }
+        scopes:
+          type: array
+          items: { type: string, enum: [connect, exec, files, ports] }
+          default: [connect]
+
+    SandboxTokenResponse:
+      type: object
+      required: [token, expires_at, scopes]
+      description: "token 只在响应中返回；不得写入日志、普通审计或异步任务。"
+      properties:
+        token:      { type: string }
+        expires_at: { type: string, format: date-time }
+        scopes:
+          type: array
+          items: { type: string, enum: [connect, exec, files, ports] }
+
+    CreateSandboxPortRequest:
+      type: object
+      required: [idempotency_key, port]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+        port:            { type: integer, minimum: 1, maximum: 65535 }
+        name:            { type: string, nullable: true }
+        protocol:        { type: string, enum: [tcp, http], default: tcp }
+
+    SandboxPort:
+      type: object
+      required: [port, protocol, status, preview_url]
+      properties:
+        port:        { type: integer, minimum: 1, maximum: 65535 }
+        name:        { type: string, nullable: true }
+        protocol:    { type: string, enum: [tcp, http] }
+        status:      { type: string, enum: [opening, available, closing, failed] }
+        preview_url: { type: string, format: uri, nullable: true }
+        expires_at:  { type: string, format: date-time, nullable: true }
+        reason:      { type: string, nullable: true }
+
+    SandboxFile:
+      type: object
+      required: [path, kind, size_bytes, updated_at]
+      properties:
+        path:       { type: string }
+        kind:       { type: string, enum: [file, directory] }
+        size_bytes: { type: integer, format: int64, minimum: 0 }
+        updated_at: { type: string, format: date-time }
+
+    SandboxFileListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/SandboxFile' }
+        total:       { type: integer, minimum: 0 }
+        next_cursor: { type: string, nullable: true }
+
+    WriteSandboxFileRequest:
+      type: object
+      required: [idempotency_key, path]
+      description: "content_base64 与 upload_id 互斥。"
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+        path:            { type: string, minLength: 1 }
+        content_base64:  { type: string, format: byte }
+        upload_id:       { type: string, minLength: 1 }
+        overwrite:       { type: boolean, default: false }
+      oneOf:
+        - required: [content_base64]
+        - required: [upload_id]
+
+    CreateSandboxCheckpointRequest:
+      type: object
+      required: [idempotency_key, name]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+        name:            { type: string, minLength: 1, maxLength: 128 }
+        keep_memory:     { type: boolean, default: false }
+
+    SandboxCheckpoint:
+      type: object
+      required: [id, name, status, keep_memory, created_at]
+      properties:
+        id:          { type: string }
+        name:        { type: string }
+        status:      { type: string, enum: [creating, available, restoring, failed, deleted] }
+        keep_memory: { type: boolean }
+        created_at:  { type: string, format: date-time }
+        size_bytes:  { type: integer, format: int64, minimum: 0, nullable: true }
+        reason:      { type: string, nullable: true }
+
+    SandboxCheckpointListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/SandboxCheckpoint' }
+        total:       { type: integer, minimum: 0 }
+        next_cursor: { type: string, nullable: true }
+
+    SandboxCheckpointActionRequest:
+      type: object
+      required: [idempotency_key]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+
+    CloneSandboxCheckpointRequest:
+      type: object
+      required: [idempotency_key, name]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+        name:            { type: string, minLength: 1, maxLength: 128 }
+
+    CreateSandboxCodeRunRequest:
+      type: object
+      required: [idempotency_key, language, code]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+        language:        { type: string, enum: [python, javascript] }
+        code:            { type: string, minLength: 1 }
+        timeout_seconds: { type: integer, minimum: 1, maximum: 300, default: 60 }
+        stdin:           { type: string, nullable: true }
+
+    SandboxCodeRun:
+      type: object
+      required: [id, status, language, created_at, truncated]
+      description: "code/stdin/stdout/stderr 不进入普通审计日志；输出必须执行服务端大小限制。"
+      properties:
+        id:           { type: string }
+        status:       { type: string, enum: [accepted, running, succeeded, failed, timed_out] }
+        language:     { type: string, enum: [python, javascript] }
+        stdout:       { type: string, nullable: true }
+        stderr:       { type: string, nullable: true }
+        exit_code:    { type: integer, nullable: true }
+        truncated:    { type: boolean }
+        created_at:   { type: string, format: date-time }
+        completed_at: { type: string, format: date-time, nullable: true }
 
     ObservabilityQueryResponse:
       type: object
@@ -3672,6 +3816,315 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+
+  /instances/{instance_id}/sandbox/tokens:
+    post:
+      operationId: createSandboxToken
+      summary: 签发 Sandbox 短期访问令牌
+      description: |
+        仅允许当前租户中处于 running 状态的 sandbox 实例。跨租户实例按 404 处理；
+        非 sandbox kind、状态或 provider 能力不满足时返回 422。同一幂等键在令牌有效期内
+        重放原结果；令牌过期后重放返回 409 IdempotencyResultExpired。
+      tags: [Instances]
+      x-ani-rbac-scope: "scope:instances:exec"
+      parameters:
+        - { name: instance_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateSandboxTokenRequest' }
+      responses:
+        "201":
+          description: 短期访问令牌
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SandboxTokenResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+
+  /instances/{instance_id}/sandbox/ports:
+    post:
+      operationId: createSandboxPort
+      summary: 开放 Sandbox 临时预览端口
+      description: |
+        创建由 sandbox runtime 管理的短期预览入口，不表达或创建产品语义的 Kubernetes Ingress。
+        跨租户实例按 404 处理；非 sandbox kind、状态或 provider 能力不满足时返回 422。
+      tags: [Instances]
+      x-ani-rbac-scope: "scope:instances:update"
+      parameters:
+        - { name: instance_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateSandboxPortRequest' }
+      responses:
+        "201":
+          description: 预览端口
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SandboxPort' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+
+  /instances/{instance_id}/sandbox/ports/{port}:
+    delete:
+      operationId: deleteSandboxPort
+      summary: 关闭 Sandbox 临时预览端口
+      description: "跨租户实例按 404 处理；非 sandbox kind、状态或 provider 能力不满足时返回 422。"
+      tags: [Instances]
+      x-ani-rbac-scope: "scope:instances:update"
+      parameters:
+        - { name: instance_id, in: path, required: true, schema: { type: string } }
+        - { name: port, in: path, required: true, schema: { type: integer, minimum: 1, maximum: 65535 } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      responses:
+        "200":
+          description: 预览端口关闭状态
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SandboxPort' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+
+  /instances/{instance_id}/sandbox/files:
+    get:
+      operationId: listSandboxFiles
+      summary: 查询 Sandbox 文件
+      description: "仅返回当前租户 sandbox 实例的目录项；非 sandbox kind 或 provider 能力不满足时返回 422。"
+      tags: [Instances]
+      x-ani-rbac-scope: "scope:instances:read"
+      parameters:
+        - { name: instance_id, in: path, required: true, schema: { type: string } }
+        - { name: path, in: query, schema: { type: string, default: "." } }
+        - { name: limit, in: query, schema: { type: integer, default: 100, minimum: 1, maximum: 500 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: 文件列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SandboxFileListResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+    post:
+      operationId: writeSandboxFile
+      summary: 写入 Sandbox 文件
+      description: |
+        content_base64 与 upload_id 二选一。文件超过 provider 限制时返回 413；目标已存在且
+        overwrite=false 时返回 409。跨租户实例按 404 处理；非 sandbox kind、状态或能力不满足时返回 422。
+      tags: [Instances]
+      x-ani-rbac-scope: "scope:instances:update"
+      parameters:
+        - { name: instance_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WriteSandboxFileRequest' }
+      responses:
+        "201":
+          description: 已写入文件
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SandboxFile' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "413":
+          description: 文件大小超过 provider 限制
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+    delete:
+      operationId: deleteSandboxFile
+      summary: 删除 Sandbox 文件
+      description: "跨租户实例按 404 处理；非 sandbox kind、状态或 provider 能力不满足时返回 422。"
+      tags: [Instances]
+      x-ani-rbac-scope: "scope:instances:update"
+      parameters:
+        - { name: instance_id, in: path, required: true, schema: { type: string } }
+        - { name: path, in: query, required: true, schema: { type: string, minLength: 1 } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      responses:
+        "204": { description: 文件已删除 }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+
+  /instances/{instance_id}/sandbox/checkpoints:
+    get:
+      operationId: listSandboxCheckpoints
+      summary: 查询 Sandbox checkpoint
+      description: "跨租户实例按 404 处理；非 sandbox kind 或 provider 能力不满足时返回 422。"
+      tags: [Instances]
+      x-ani-rbac-scope: "scope:instances:read"
+      parameters:
+        - { name: instance_id, in: path, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, minimum: 1, maximum: 500 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: checkpoint 列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SandboxCheckpointListResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+    post:
+      operationId: createSandboxCheckpoint
+      summary: 创建 Sandbox checkpoint
+      description: |
+        创建异步 checkpoint 任务。keep_memory=true 但 runtime 不支持内存 checkpoint 时返回 422；
+        跨租户实例按 404 处理，非 sandbox kind、状态或 provider 能力不满足时返回 422。
+      tags: [Instances]
+      x-ani-rbac-scope: "scope:instances:update"
+      parameters:
+        - { name: instance_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateSandboxCheckpointRequest' }
+      responses:
+        "202":
+          description: checkpoint 创建任务已接受
+          headers:
+            Location:
+              description: 任务查询 URL
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+
+  /instances/{instance_id}/sandbox/checkpoints/{checkpoint_id}/restore:
+    post:
+      operationId: restoreSandboxCheckpoint
+      summary: 恢复 Sandbox checkpoint
+      description: |
+        将 checkpoint 恢复到原 sandbox 实例并返回异步任务。跨租户资源按 404 处理；
+        非 sandbox kind、状态或 provider 能力不满足时返回 422。
+      tags: [Instances]
+      x-ani-rbac-scope: "scope:instances:update"
+      parameters:
+        - { name: instance_id, in: path, required: true, schema: { type: string } }
+        - { name: checkpoint_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SandboxCheckpointActionRequest' }
+      responses:
+        "202":
+          description: checkpoint 恢复任务已接受
+          headers:
+            Location:
+              description: 任务查询 URL
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+
+  /instances/{instance_id}/sandbox/checkpoints/{checkpoint_id}/clone:
+    post:
+      operationId: cloneSandboxCheckpoint
+      summary: 从 Sandbox checkpoint 克隆实例
+      description: |
+        使用独立 idempotency_key 和 name 创建新的 sandbox 实例。跨租户资源按 404 处理；
+        checkpoint 状态或 provider 能力不满足时返回 422。
+      tags: [Instances]
+      x-ani-rbac-scope: "scope:instances:create"
+      parameters:
+        - { name: instance_id, in: path, required: true, schema: { type: string } }
+        - { name: checkpoint_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CloneSandboxCheckpointRequest' }
+      responses:
+        "201":
+          description: 克隆实例已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreateInstanceResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+
+  /instances/{instance_id}/sandbox/code-runs:
+    post:
+      operationId: createSandboxCodeRun
+      summary: 在 Sandbox 中执行一次代码
+      description: |
+        创建异步代码执行任务，任务结果为 SandboxCodeRun。stdout/stderr 必须受大小限制并在截断时
+        标记 truncated；code、stdin 和输出内容不得写入普通日志或普通审计。跨租户实例按 404 处理；
+        非 sandbox kind、状态或 provider 能力不满足时返回 422。
+      tags: [Instances]
+      x-ani-rbac-scope: "scope:instances:exec"
+      parameters:
+        - { name: instance_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateSandboxCodeRunRequest' }
+      responses:
+        "202":
+          description: 代码执行任务已接受
+          headers:
+            Location:
+              description: 任务查询 URL
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
 
   # ── 网络资源（Core API Alpha）──────────────────────────────────────────────
   /networks/overview:
