@@ -297,10 +297,10 @@ func TestLocalVectorStoreServiceInsertDocumentsRequiresReadyStore(t *testing.T) 
 }
 
 type fakeVectorStore struct {
-	upsertRef     ports.VectorCollectionRef
-	upsertRecords []ports.VectorRecord
-	deleteExprRef ports.VectorCollectionRef
-	deleteExpr     string
+	upsertRef       ports.VectorCollectionRef
+	upsertRecords   []ports.VectorRecord
+	deleteExprRef   ports.VectorCollectionRef
+	deleteExpr      string
 	deleteExprCount int
 }
 
