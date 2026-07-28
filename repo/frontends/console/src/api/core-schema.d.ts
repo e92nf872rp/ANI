@@ -1330,7 +1330,11 @@ export interface paths {
          * @description 将文本内容写入向量存储，嵌入由 Core 负责；POST 必须携带 idempotency_key。
          */
         post: operations["insertVectorStoreDocuments"];
-        delete?: never;
+        /**
+         * 按 filter 删除向量文档
+         * @description 按 Milvus boolean expression 过滤删除指定向量存储中的文档向量；DELETE 天然幂等，不要求 idempotency_key。
+         */
+        delete: operations["deleteVectorStoreDocuments"];
         options?: never;
         head?: never;
         patch?: never;
@@ -4500,6 +4504,10 @@ export interface components {
             /** @enum {string} */
             status?: "pending" | "completed" | "failed";
         };
+        VectorStoreDocumentDeleteResponse: {
+            /** @description 实际删除的向量数（best-effort，Milvus 可能不精确） */
+            deleted_count: number;
+        };
         K8sClusterWorkload: {
             name: string;
             namespace: string;
@@ -4762,6 +4770,24 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
+        /** @description 向量存储不存在（code=VECTOR_STORE_NOT_FOUND） */
+        VectorStoreNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description filter 表达式非法（code=INVALID_FILTER） */
+        InvalidFilter: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
         /** @description 安全组不存在，或 rule_id 不属于该 security_group_id（code=NOT_FOUND） */
         NetworkSecurityGroupRuleNotFound: {
             headers: {
@@ -4802,6 +4828,15 @@ export interface components {
         };
         /** @description 前置条件不满足（code=PRECONDITION_FAILED） */
         PreconditionFailed: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 依赖服务暂不可用（code=UNAVAILABLE） */
+        ServiceUnavailable: {
             headers: {
                 [name: string]: unknown;
             };
@@ -7753,6 +7788,37 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["PreconditionFailed"];
+        };
+    };
+    deleteVectorStoreDocuments: {
+        parameters: {
+            query: {
+                /** @description Milvus boolean expression，如 `doc_id == "abc"` */
+                filter: string;
+            };
+            header?: never;
+            path: {
+                vector_store_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 删除完成 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VectorStoreDocumentDeleteResponse"];
+                };
+            };
+            400: components["responses"]["InvalidFilter"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["VectorStoreNotFound"];
+            422: components["responses"]["PreconditionFailed"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getRegistryOverview: {
