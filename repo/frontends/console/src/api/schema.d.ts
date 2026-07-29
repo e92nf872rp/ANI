@@ -345,6 +345,96 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/knowledge-bases/{kb_id}/documents/{doc_id}/reparse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 重新解析知识库文档
+         * @description 对失败或需重试的文档触发重新解析，parse_status 回到 pending。
+         *     对齐 SPEC §5 US-002 与 UX §6.3 reparse-confirm（Popconfirm「重新解析将覆盖现有分块」）。
+         *     KB 处于 rebuilding 期间返回 409 kb.rebuilding。
+         */
+        post: operations["reparseKnowledgeBaseDocument"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/knowledge-bases/{kb_id}/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 读取知识库配置
+         * @description 返回 KB 入库配置与问答配置。对齐 UX §4.3 概览配置区与 SPEC §5 US-002。
+         */
+        get: operations["getKnowledgeBaseConfig"];
+        /**
+         * 更新知识库配置
+         * @description 更新 KB 配置。修改 embedding_model 或 chunk_size 将触发全库重建
+         *     （UX §4.3 保存配置 → Popconfirm「修改配置将触发全库重建」）。
+         *     返回更新后的 KnowledgeBase（含新 status）。对齐 SPEC §5 US-002。
+         */
+        put: operations["updateKnowledgeBaseConfig"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/knowledge-bases/{kb_id}/rebuild": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 全库重建
+         * @description 触发全库重建，KB status 转为 rebuilding，重建期间拒绝写操作（409 kb.rebuilding）。
+         *     对齐 SPEC §5 US-002 与 UX §6.2 rebuilding 状态。
+         */
+        post: operations["rebuildKnowledgeBase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/knowledge-bases/{kb_id}/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 可用嵌入/推理模型列表
+         * @description 返回当前租户可用于该 KB 的嵌入模型与推理模型列表。
+         *     对齐 SPEC §5 US-002 与 UX §4.3 概览入库配置区 embedding_model 选择项。
+         */
+        get: operations["listKnowledgeBaseModels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/gpu-containers": {
         parameters: {
             query?: never;
@@ -1338,6 +1428,81 @@ export interface components {
             public_read?: boolean;
             allowed_user_ids?: string[];
         };
+        /**
+         * @description 知识库配置（入库 + 问答）。对齐 UX §4.3 概览配置：入库配置区
+         *     （embedding_model / chunk_size / ocr_enabled）与问答配置区
+         *     （top_k / score_threshold / retrieval_strategy）。
+         */
+        KBConfig: {
+            /** @description 嵌入模型名，修改触发全库重建（UX §4.3） */
+            embedding_model?: string;
+            /** @description 分块大小（tokens） */
+            chunk_size?: number;
+            /**
+             * @description 是否启用 OCR（入库配置）
+             * @default false
+             */
+            ocr_enabled: boolean;
+            /** @description 问答 TopK */
+            top_k?: number;
+            /**
+             * Format: float
+             * @description 相似度阈值
+             */
+            score_threshold?: number;
+            /**
+             * @description 检索策略：向量 / 混合
+             * @default vector
+             * @enum {string}
+             */
+            retrieval_strategy: "vector" | "hybrid";
+        };
+        /**
+         * @description 更新知识库配置。修改 embedding_model 或 chunk_size 将触发全库重建
+         *     （UX §4.3 保存配置 → Popconfirm「修改配置将触发全库重建」→ POST /rebuild）。
+         */
+        UpdateKBConfigRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
+            /** @description 嵌入模型名；修改触发全库重建 */
+            embedding_model?: string;
+            chunk_size?: number;
+            ocr_enabled?: boolean;
+            top_k?: number;
+            /** Format: float */
+            score_threshold?: number;
+            /** @enum {string} */
+            retrieval_strategy?: "vector" | "hybrid";
+        };
+        /**
+         * @description 知识库可用模型列表（嵌入 + 推理）。对齐 SPEC §5 US-002：
+         *     GET /knowledge-bases/{kb_id}/models 返回当前租户可用的嵌入与推理模型。
+         */
+        ModelList: {
+            /** @description 可用嵌入模型 */
+            embedding_models: components["schemas"]["Model"][];
+            /** @description 可用推理模型 */
+            inference_models: components["schemas"]["Model"][];
+        };
+        /** @description 重新解析知识库文档请求。对齐 SPEC §5 US-002。 */
+        ReparseDocumentRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
+        };
+        /** @description 全库重建请求。对齐 SPEC §5 US-002。 */
+        RebuildKnowledgeBaseRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
+        };
         UpdateTenantRoleRequest: {
             /** Format: uuid */
             idempotency_key: string;
@@ -1897,7 +2062,10 @@ export interface operations {
                     description?: string;
                     /** @default bge-m3 */
                     embedding_model?: string;
-                    /** @default 512 */
+                    /**
+                     * @description 分块大小（tokens），与 KBConfig 边界一致
+                     * @default 512
+                     */
                     chunk_size?: number;
                     /** @default 5 */
                     top_k?: number;
@@ -2255,6 +2423,159 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    reparseKnowledgeBaseDocument: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+                doc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReparseDocumentRequest"];
+            };
+        };
+        responses: {
+            /** @description 重新解析任务已提交 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            /** @description 解析服务暂不可用（inference.unavailable） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getKnowledgeBaseConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 知识库配置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KBConfig"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateKnowledgeBaseConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateKBConfigRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新后的知识库 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeBase"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    rebuildKnowledgeBase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RebuildKnowledgeBaseRequest"];
+            };
+        };
+        responses: {
+            /** @description 重建任务已提交 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listKnowledgeBaseModels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 可用模型列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelList"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];

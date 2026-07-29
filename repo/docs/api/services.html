@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1/svc</code></dd></div>
-          <div><dt>Operations</dt><dd>60</dd></div>
-          <div><dt>Schemas</dt><dd>54</dd></div>
+          <div><dt>Operations</dt><dd>65</dd></div>
+          <div><dt>Schemas</dt><dd>59</dd></div>
         </dl>
       </section>
 
@@ -361,6 +361,22 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/knowledge-bases/{kb_id}/config</code></td>
+          <td><code>getKnowledgeBaseConfig</code></td>
+          <td>读取知识库配置</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/knowledge-bases/{kb_id}/config</code></td>
+          <td><code>updateKnowledgeBaseConfig</code></td>
+          <td>更新知识库配置</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/knowledge-bases/{kb_id}/documents</code></td>
           <td><code>listKnowledgeBaseDocuments</code></td>
           <td>文档列表</td>
@@ -392,6 +408,22 @@
           <td>204, 404</td>
         </tr>
         <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/knowledge-bases/{kb_id}/documents/{doc_id}/reparse</code></td>
+          <td><code>reparseKnowledgeBaseDocument</code></td>
+          <td>重新解析知识库文档</td>
+          <td><code></code></td>
+          <td>202, 400, 401, 403, 404, 409, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/knowledge-bases/{kb_id}/models</code></td>
+          <td><code>listKnowledgeBaseModels</code></td>
+          <td>可用嵌入/推理模型列表</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
           <td><span class="method method-put">PUT</span></td>
           <td><code>/knowledge-bases/{kb_id}/permissions</code></td>
           <td><code>updateKnowledgeBasePermissions</code></td>
@@ -414,6 +446,14 @@
           <td>知识库问答 SSE 流式</td>
           <td><code></code></td>
           <td>200, 400, 401</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/knowledge-bases/{kb_id}/rebuild</code></td>
+          <td><code>rebuildKnowledgeBase</code></td>
+          <td>全库重建</td>
+          <td><code></code></td>
+          <td>202, 400, 401, 403, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -676,6 +716,7 @@
         <li><code>InviteMemberRequest</code></li>
         <li><code>KBCitation</code></li>
         <li><code>KBCitationListResponse</code></li>
+        <li><code>KBConfig</code></li>
         <li><code>KBDocument</code></li>
         <li><code>KBQueryRequest</code></li>
         <li><code>KBQueryResponse</code></li>
@@ -683,10 +724,13 @@
         <li><code>KBSessionListResponse</code></li>
         <li><code>KnowledgeBase</code></li>
         <li><code>Model</code></li>
+        <li><code>ModelList</code></li>
         <li><code>ModelVersion</code></li>
         <li><code>NotifyDocumentUploadedRequest</code></li>
         <li><code>PatchGpuContainerRequest</code></li>
         <li><code>PatchSandboxRequest</code></li>
+        <li><code>RebuildKnowledgeBaseRequest</code></li>
+        <li><code>ReparseDocumentRequest</code></li>
         <li><code>Sandbox</code></li>
         <li><code>SecurityEvent</code></li>
         <li><code>SecurityOverview</code></li>
@@ -694,6 +738,7 @@
         <li><code>TenantMember</code></li>
         <li><code>TenantRole</code></li>
         <li><code>UpdateInferenceServicePoliciesRequest</code></li>
+        <li><code>UpdateKBConfigRequest</code></li>
         <li><code>UpdateKBPermissionsRequest</code></li>
         <li><code>UpdateSsoConfigRequest</code></li>
         <li><code>UpdateTenantRoleRequest</code></li>

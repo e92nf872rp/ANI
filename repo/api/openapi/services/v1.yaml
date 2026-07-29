@@ -554,6 +554,65 @@ components:
         public_read:      { type: boolean }
         allowed_user_ids: { type: array, items: { type: string } }
 
+    KBConfig:
+      type: object
+      description: |
+        知识库配置（入库 + 问答）。对齐 UX §4.3 概览配置：入库配置区
+        （embedding_model / chunk_size / ocr_enabled）与问答配置区
+        （top_k / score_threshold / retrieval_strategy）。
+      properties:
+        embedding_model:    { type: string, description: "嵌入模型名，修改触发全库重建（UX §4.3）" }
+        chunk_size:         { type: integer, minimum: 1, maximum: 8192, description: "分块大小（tokens）" }
+        ocr_enabled:        { type: boolean, default: false, description: "是否启用 OCR（入库配置）" }
+        top_k:              { type: integer, minimum: 1, maximum: 20, description: "问答 TopK" }
+        score_threshold:    { type: number, format: float, minimum: 0.0, maximum: 1.0, description: "相似度阈值" }
+        retrieval_strategy: { type: string, enum: [vector, hybrid], default: vector, description: "检索策略：向量 / 混合" }
+
+    UpdateKBConfigRequest:
+      type: object
+      required: [idempotency_key]
+      description: |
+        更新知识库配置。修改 embedding_model 或 chunk_size 将触发全库重建
+        （UX §4.3 保存配置 → Popconfirm「修改配置将触发全库重建」→ POST /rebuild）。
+      properties:
+        idempotency_key:    { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+        embedding_model:    { type: string, description: "嵌入模型名；修改触发全库重建" }
+        chunk_size:         { type: integer, minimum: 1, maximum: 8192 }
+        ocr_enabled:        { type: boolean }
+        top_k:              { type: integer, minimum: 1, maximum: 20 }
+        score_threshold:    { type: number, format: float, minimum: 0.0, maximum: 1.0 }
+        retrieval_strategy: { type: string, enum: [vector, hybrid] }
+
+    ModelList:
+      type: object
+      description: |
+        知识库可用模型列表（嵌入 + 推理）。对齐 SPEC §5 US-002：
+        GET /knowledge-bases/{kb_id}/models 返回当前租户可用的嵌入与推理模型。
+      required: [embedding_models, inference_models]
+      properties:
+        embedding_models:
+          type: array
+          description: 可用嵌入模型
+          items: { $ref: '#/components/schemas/Model' }
+        inference_models:
+          type: array
+          description: 可用推理模型
+          items: { $ref: '#/components/schemas/Model' }
+
+    ReparseDocumentRequest:
+      type: object
+      required: [idempotency_key]
+      description: 重新解析知识库文档请求。对齐 SPEC §5 US-002。
+      properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+
+    RebuildKnowledgeBaseRequest:
+      type: object
+      required: [idempotency_key]
+      description: 全库重建请求。对齐 SPEC §5 US-002。
+      properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+
     UpdateTenantRoleRequest:
       type: object
       required: [idempotency_key, permissions]
@@ -928,8 +987,8 @@ paths:
                 name:            { type: string }
                 description:     { type: string }
                 embedding_model: { type: string, default: "bge-m3" }
-                chunk_size:      { type: integer, default: 512 }
-                top_k:           { type: integer, default: 5 }
+                chunk_size:      { type: integer, default: 512, minimum: 1, maximum: 8192, description: "分块大小（tokens），与 KBConfig 边界一致" }
+                top_k:           { type: integer, default: 5, minimum: 1, maximum: 20 }
                 score_threshold: { type: number, format: float, default: 0.3, description: "相似度阈值，非零覆盖默认值" }
       responses:
         "201":
@@ -1146,6 +1205,128 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/KnowledgeBase' }
         "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /knowledge-bases/{kb_id}/documents/{doc_id}/reparse:
+    post:
+      operationId: reparseKnowledgeBaseDocument
+      summary: 重新解析知识库文档
+      description: |
+        对失败或需重试的文档触发重新解析，parse_status 回到 pending。
+        对齐 SPEC §5 US-002 与 UX §6.3 reparse-confirm（Popconfirm「重新解析将覆盖现有分块」）。
+        KB 处于 rebuilding 期间返回 409 kb.rebuilding。
+      tags: [KnowledgeBases]
+      parameters:
+        - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: doc_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReparseDocumentRequest' }
+      responses:
+        "202":
+          description: 重新解析任务已提交
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "503": { description: 解析服务暂不可用（inference.unavailable）, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /knowledge-bases/{kb_id}/config:
+    get:
+      operationId: getKnowledgeBaseConfig
+      summary: 读取知识库配置
+      description: |
+        返回 KB 入库配置与问答配置。对齐 UX §4.3 概览配置区与 SPEC §5 US-002。
+      tags: [KnowledgeBases]
+      parameters:
+        - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 知识库配置
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KBConfig' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: updateKnowledgeBaseConfig
+      summary: 更新知识库配置
+      description: |
+        更新 KB 配置。修改 embedding_model 或 chunk_size 将触发全库重建
+        （UX §4.3 保存配置 → Popconfirm「修改配置将触发全库重建」）。
+        返回更新后的 KnowledgeBase（含新 status）。对齐 SPEC §5 US-002。
+      tags: [KnowledgeBases]
+      parameters:
+        - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateKBConfigRequest' }
+      responses:
+        "200":
+          description: 更新后的知识库
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KnowledgeBase' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /knowledge-bases/{kb_id}/rebuild:
+    post:
+      operationId: rebuildKnowledgeBase
+      summary: 全库重建
+      description: |
+        触发全库重建，KB status 转为 rebuilding，重建期间拒绝写操作（409 kb.rebuilding）。
+        对齐 SPEC §5 US-002 与 UX §6.2 rebuilding 状态。
+      tags: [KnowledgeBases]
+      parameters:
+        - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RebuildKnowledgeBaseRequest' }
+      responses:
+        "202":
+          description: 重建任务已提交
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /knowledge-bases/{kb_id}/models:
+    get:
+      operationId: listKnowledgeBaseModels
+      summary: 可用嵌入/推理模型列表
+      description: |
+        返回当前租户可用于该 KB 的嵌入模型与推理模型列表。
+        对齐 SPEC §5 US-002 与 UX §4.3 概览入库配置区 embedding_model 选择项。
+      tags: [KnowledgeBases]
+      parameters:
+        - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 可用模型列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelList' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }

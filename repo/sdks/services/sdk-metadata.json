@@ -155,6 +155,18 @@
       "scope": ""
     },
     {
+      "operationId": "getKnowledgeBaseConfig",
+      "method": "GET",
+      "path": "/knowledge-bases/{kb_id}/config",
+      "scope": ""
+    },
+    {
+      "operationId": "updateKnowledgeBaseConfig",
+      "method": "PUT",
+      "path": "/knowledge-bases/{kb_id}/config",
+      "scope": ""
+    },
+    {
       "operationId": "listKnowledgeBaseDocuments",
       "method": "GET",
       "path": "/knowledge-bases/{kb_id}/documents",
@@ -179,6 +191,18 @@
       "scope": ""
     },
     {
+      "operationId": "reparseKnowledgeBaseDocument",
+      "method": "POST",
+      "path": "/knowledge-bases/{kb_id}/documents/{doc_id}/reparse",
+      "scope": ""
+    },
+    {
+      "operationId": "listKnowledgeBaseModels",
+      "method": "GET",
+      "path": "/knowledge-bases/{kb_id}/models",
+      "scope": ""
+    },
+    {
       "operationId": "updateKnowledgeBasePermissions",
       "method": "PUT",
       "path": "/knowledge-bases/{kb_id}/permissions",
@@ -194,6 +218,12 @@
       "operationId": "streamQueryKnowledgeBase",
       "method": "GET",
       "path": "/knowledge-bases/{kb_id}/query/stream",
+      "scope": ""
+    },
+    {
+      "operationId": "rebuildKnowledgeBase",
+      "method": "POST",
+      "path": "/knowledge-bases/{kb_id}/rebuild",
       "scope": ""
     },
     {
@@ -396,6 +426,7 @@
     "InviteMemberRequest",
     "KBCitation",
     "KBCitationListResponse",
+    "KBConfig",
     "KBDocument",
     "KBQueryRequest",
     "KBQueryResponse",
@@ -403,10 +434,13 @@
     "KBSessionListResponse",
     "KnowledgeBase",
     "Model",
+    "ModelList",
     "ModelVersion",
     "NotifyDocumentUploadedRequest",
     "PatchGpuContainerRequest",
     "PatchSandboxRequest",
+    "RebuildKnowledgeBaseRequest",
+    "ReparseDocumentRequest",
     "Sandbox",
     "SecurityEvent",
     "SecurityOverview",
@@ -414,6 +448,7 @@
     "TenantMember",
     "TenantRole",
     "UpdateInferenceServicePoliciesRequest",
+    "UpdateKBConfigRequest",
     "UpdateKBPermissionsRequest",
     "UpdateSsoConfigRequest",
     "UpdateTenantRoleRequest",
@@ -428,10 +463,13 @@
     "testInferenceService",
     "createIntegration",
     "createIntegrationBot",
+    "updateKnowledgeBaseConfig",
     "getDocumentUploadURL",
     "notifyDocumentUploaded",
+    "reparseKnowledgeBaseDocument",
     "updateKnowledgeBasePermissions",
     "queryKnowledgeBase",
+    "rebuildKnowledgeBase",
     "createSandbox",
     "patchSandbox",
     "extendSandbox",
