@@ -99,6 +99,8 @@
 |---|---|---|
 | M2.1-TASK-A (issue-001) | 修复 Services OpenAPI 与 kb_service.proto 契约一致性：`KBDocument.parse_status` 枚举对齐、文档上传改两步式 pre-signed URL、`KBQueryRequest` 补齐三字段、双侧新增 `custom_metadata`(JSONB)；baseline/test lockstep；SDK/docs 重生成 | m2-1-task-a-contract-services-openapi.md |
 | M2.1-TASK-A (issue-002) | model proto 新增 OCR capability 标注：`CreateModelRequest.capabilities` 注释追加 `| ocr`，proto 生成物 `model_service.pb.go` 同步注释；纯注释 additive，无 wire schema 变更；validate-services 各门禁通过 | m2-1-task-a-model-proto-ocr-capability.md |
+| M2.1-TASK-A (issue-016) | SDK 重生成并校验一致性：基于 A1/A2/A3/A4 契约变更执行 `gen_sdk_alpha.py` + `generate_api_docs.py` 重生成四语言 SDK 与 API 文档；`validate-sdk-beta`/`validate-sdk-alpha`/`validate-api-docs-contract`/`validate-spec-split-contract` 全绿；重新生成后 `git diff --stat` 无差异证明 SDK 无漂移；`make validate-architecture` + Go test + Python compileall 通过 | m2-1-task-a-sdk-regenerate-validate-consistency.md |
+| M2.1-TASK-B (issue-006) | kb-service 骨架与 gRPC server：新建 `repo/services/kb-service/`（Dockerfile/requirements/main.py + app/api/grpc_server.py + p1_rpcs.py + core/config.py + protoc 生成 Python stubs + 19 测试）；`kb_service.proto` 追加 3 个 P1 RPC 声明（ListKBCitations/ListKBSessions/UpdateKBPermissions）+ 7 个对齐 services/v1.yaml 的 P1 消息；servicer 承接 13 RPC（10 P0 骨架 UNIMPLEMENTED + 3 P1 UNIMPLEMENTED）；config.py `extra="ignore"` 加载共享 .env、`__file__` 计算 sys.path 兼容 Docker；gRPC server 可启动并响应 RPC（smoke test AC5_OK）；review-it 删除 1 误导性空操作测试；`make validate-architecture` + Go test（pkg/ani-gateway）+ Python compileall + pytest 19 passed + git diff --check 全通过 | m2-1-task-b-kb-service-skeleton-grpc-server.md |
 
 ### SDK Regression Fixes（2026-06）
 
