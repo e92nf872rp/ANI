@@ -256,8 +256,8 @@ operationId：`listFilesystemMountTargets`
 
 ## TASK-CORE-014
 
-状态：**待定**（P0 YAML 草案暂缓评审）  
-接口：P0 告警事件 + 异步任务列表（**YAML 草案**）  
+状态：**部分完成**（任务列表/取消契约已定义、等待评审，handler 待实现；告警事件仍待定）
+接口：P0 告警事件 + 异步任务列表
 优先级：P0（排队中）  
 本任务依赖：无  
 模块详文：`alerts/alerts-pending-items.md`、`alerts/async-task-center.md`  
@@ -266,8 +266,8 @@ operationId：`listFilesystemMountTargets`
 | 项 | 建议路径 | operationId | 说明 |
 |---|---|---|---|
 | list | `GET /api/v1/observability/alerts` | `listObservabilityAlerts` | 告警事件只读；方案 A |
-| list | `GET /api/v1/tasks` | `listTasks` | AsyncTask cursor 分页 |
-| 可选 | `POST /api/v1/tasks/{task_id}/cancel` | `cancelTask` | 非 P0 阻塞 |
+| list | `GET /api/v1/tasks` | `listTasks` | AsyncTask cursor 分页；契约已定义，handler 待实现 |
+| cancel | `POST /api/v1/tasks/{task_id}/cancel` | `cancelTask` | pending 任务幂等取消；契约已定义，handler 待实现 |
 
 验收：评审通过后 YAML 合入；handler 200 + schema 非空；Console 详文 `TODO-YAML` 更新
 

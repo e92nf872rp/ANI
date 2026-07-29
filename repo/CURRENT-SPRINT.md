@@ -93,6 +93,7 @@ Issue 清单：`repo/services/tasks/issues/issue-01-openapi-queue-crud.md` ~ `is
 | GPU-SPEC-CONTRACT-A | 个人仓库 CI passed，契约已确认 | 为实例 `spec_id` 提供 `GPUSpecSummary`、`GET /gpu-specs`、`GET /gpu-specs/{spec_id}` 只读契约；旧 GPU 字段 deprecated 保留；不含 handler/port/adapter/Console，不实现配额 check/acquire/release |
 | INSTANCE-CONTRACT-A | 个人仓库 CI passed，契约已确认 | 扩展统一实例创建、详情摘要、列表过滤/排序/cursor、观测 cursor 和 lifecycle/operation step；引用既有 Registry/Network/Storage/GPU Spec，不含 handler/port/adapter/Console |
 | INSTANCE-SANDBOX-CONTRACT-A | 个人仓库 CI passed，契约已确认 | 新增 Sandbox token、预览端口、文件、checkpoint 和异步 code-run 共 11 个操作；固定租户/kind、幂等、任务轮询和敏感输出审计边界；不含 handler/port/adapter/Console |
+| INSTANCE-TASK-CENTER-CONTRACT-A | 本地契约门禁通过，等待个人仓库 CI 和契约评审 | 新增租户任务列表、pending 任务幂等取消、实例 task type 和 operation 关联；实例创建/lifecycle/Sandbox clone 增加带必填 instance_id/operation_id 的 `202 + InstanceAsyncTask + Location`；不含 handler/task-service/controller/Console |
 
 边界：本流程独立于既有 GPU 调度队列实现；当前只完成公开契约和生成物，不声明 GPU 规格 runtime ready、配额能力或实例管理闭环完成。
 

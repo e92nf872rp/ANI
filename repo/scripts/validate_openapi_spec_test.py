@@ -246,6 +246,86 @@ class OpenAPISpecValidatorTest(unittest.TestCase):
         for field in ("task_id", "resource_type", "resource_id"):
             self.assertIn(field, operation_step["properties"])
 
+    def test_instance_async_task_center_contract_is_frozen(self) -> None:
+        spec = yaml.safe_load((ROOT / "api/openapi/v1.yaml").read_text(encoding="utf-8"))
+        paths = spec["paths"]
+        schemas = spec["components"]["schemas"]
+
+        async_task = schemas["AsyncTask"]
+        task_types = set(async_task["properties"]["task_type"]["enum"])
+        for task_type in (
+            "instance.create",
+            "instance.start",
+            "instance.stop",
+            "instance.restart",
+            "instance.resize",
+            "instance.rebuild",
+            "instance.delete",
+            "instance.snapshot.create",
+            "instance.rollback",
+            "instance.scale",
+            "instance.image.update",
+            "instance.pause",
+            "instance.resume",
+            "instance.extend",
+            "sandbox.checkpoint.clone",
+        ):
+            self.assertIn(task_type, task_types)
+
+        self.assertIn("instance", async_task["properties"]["resource_type"]["enum"])
+        for field in ("resource_name", "instance_id", "operation_id", "started_at"):
+            self.assertIn(field, async_task["properties"])
+
+        instance_async_task = schemas["InstanceAsyncTask"]["allOf"][1]
+        self.assertEqual(
+            set(instance_async_task["required"]),
+            {"instance_id", "operation_id"},
+        )
+
+        list_tasks = paths["/tasks"]["get"]
+        self.assertEqual(list_tasks["operationId"], "listTasks")
+        self.assertEqual(
+            list_tasks["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/AsyncTaskListResponse",
+        )
+        list_parameters = {parameter["name"] for parameter in list_tasks["parameters"]}
+        for parameter in (
+            "status",
+            "task_type",
+            "resource_type",
+            "instance_id",
+            "created_after",
+            "created_before",
+            "limit",
+            "cursor",
+            "sort",
+        ):
+            self.assertIn(parameter, list_parameters)
+
+        cancel_task = paths["/tasks/{task_id}/cancel"]["post"]
+        self.assertEqual(cancel_task["operationId"], "cancelTask")
+        self.assertEqual(
+            cancel_task["requestBody"]["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/CancelAsyncTaskRequest",
+        )
+        self.assertEqual(
+            cancel_task["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/AsyncTask",
+        )
+        self.assertIn("409", cancel_task["responses"])
+
+        for path, success_code in (
+            ("/instances", "202"),
+            ("/instances/{instance_id}/lifecycle", "202"),
+            ("/instances/{instance_id}/sandbox/checkpoints/{checkpoint_id}/clone", "202"),
+        ):
+            response = paths[path]["post"]["responses"][success_code]
+            self.assertEqual(
+                response["content"]["application/json"]["schema"]["$ref"],
+                "#/components/schemas/InstanceAsyncTask",
+            )
+            self.assertIn("Location", response["headers"])
+
     def test_sandbox_subresource_contract_is_frozen(self) -> None:
         spec = yaml.safe_load((ROOT / "api/openapi/v1.yaml").read_text(encoding="utf-8"))
         paths = spec["paths"]

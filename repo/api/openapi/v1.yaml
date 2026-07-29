@@ -353,10 +353,13 @@ components:
         id:               { type: string, format: uuid }
         idempotency_key:  { type: string, description: "客户端提供的幂等键" }
         task_type:        { type: string, example: "model.import",
-                            enum: [model.import, kb.parse, kb.index, inference.deploy, volume.snapshot.create, volume.expand, volume.mount, volume.unmount, volume.create_from_snapshot, filesystem.expand, filesystem.mount_target.create, filesystem.mount, filesystem.unmount, vector_store.index.rebuild, sandbox.checkpoint.create, sandbox.checkpoint.restore, sandbox.code_run.create] }
+                            enum: [model.import, kb.parse, kb.index, inference.deploy, volume.snapshot.create, volume.expand, volume.mount, volume.unmount, volume.create_from_snapshot, filesystem.expand, filesystem.mount_target.create, filesystem.mount, filesystem.unmount, vector_store.index.rebuild, instance.create, instance.start, instance.stop, instance.restart, instance.resize, instance.rebuild, instance.delete, instance.snapshot.create, instance.rollback, instance.scale, instance.image.update, instance.pause, instance.resume, instance.extend, sandbox.checkpoint.create, sandbox.checkpoint.restore, sandbox.checkpoint.clone, sandbox.code_run.create] }
         resource_type:    { type: string, nullable: true,
-                            enum: [inference_service, kb_document, model_version, volume_snapshot, volume, filesystem, filesystem_mount_target, vector_store, sandbox_checkpoint, sandbox_code_run] }
+                            enum: [inference_service, kb_document, model_version, volume_snapshot, volume, filesystem, filesystem_mount_target, vector_store, instance, sandbox_checkpoint, sandbox_code_run] }
         resource_id:      { type: string, format: uuid, nullable: true }
+        resource_name:    { type: string, nullable: true, description: "任务中心展示用资源名称快照；资源重命名不反向修改历史任务。" }
+        instance_id:      { type: string, nullable: true, description: "关联实例 ID；实例 ID 不保证为 UUID，因此不复用 resource_id。" }
+        operation_id:     { type: string, nullable: true, description: "关联实例操作记录 ID；可通过 /instance-operations/{operation_id} 查询。" }
         status:           { type: string,
                             enum: [pending, running, completed, failed, cancelled, dead_letter] }
         attempt_count:    { type: integer, minimum: 0 }
@@ -366,7 +369,34 @@ components:
         error_message:    { type: string, nullable: true }
         dead_letter_at:   { type: string, format: date-time, nullable: true }
         created_at:       { type: string, format: date-time }
+        started_at:       { type: string, format: date-time, nullable: true }
         completed_at:     { type: string, format: date-time, nullable: true }
+
+    AsyncTaskListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AsyncTask' }
+        total:       { type: integer, minimum: 0 }
+        next_cursor: { type: string, nullable: true }
+
+    CancelAsyncTaskRequest:
+      type: object
+      required: [idempotency_key]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+
+    InstanceAsyncTask:
+      description: "实例长操作任务；实例记录与 operation 必须在返回 202 前创建。"
+      allOf:
+        - $ref: '#/components/schemas/AsyncTask'
+        - type: object
+          required: [instance_id, operation_id]
+          properties:
+            instance_id:  { type: string }
+            operation_id: { type: string }
 
     # Demo/Services schemas 已迁移：
     # - DemoInstance/DemoCreateInstanceRequest → api/openapi/dev.yaml
@@ -3615,10 +3645,19 @@ paths:
             schema: { $ref: '#/components/schemas/CreateInstanceRequest' }
       responses:
         "201":
-          description: 实例创建已提交并返回当前状态
+          description: 兼容同步 profile：实例创建完成并返回当前状态
           content:
             application/json:
               schema: { $ref: '#/components/schemas/CreateInstanceResponse' }
+        "202":
+          description: 实例创建任务已接受；task_type 为 instance.create
+          headers:
+            Location:
+              description: 任务轮询 URL
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InstanceAsyncTask' }
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
@@ -3675,10 +3714,21 @@ paths:
             schema: { $ref: '#/components/schemas/InstanceLifecycleRequest' }
       responses:
         "200":
-          description: 操作已接受并返回实例当前状态
+          description: 兼容同步 profile 或快速元数据操作：返回实例当前状态
           content:
             application/json:
               schema: { $ref: '#/components/schemas/InstanceLifecycleResponse' }
+        "202":
+          description: |
+            长操作任务已接受。实例运行时操作返回对应 instance.* task；
+            attach/detach volume/filesystem 返回真实 Storage task，并通过 operation_id 关联实例操作记录。
+          headers:
+            Location:
+              description: 任务轮询 URL
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InstanceAsyncTask' }
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
@@ -4081,10 +4131,19 @@ paths:
             schema: { $ref: '#/components/schemas/CloneSandboxCheckpointRequest' }
       responses:
         "201":
-          description: 克隆实例已创建
+          description: 兼容同步 profile：克隆实例已创建
           content:
             application/json:
               schema: { $ref: '#/components/schemas/CreateInstanceResponse' }
+        "202":
+          description: Sandbox 克隆任务已接受；task_type 为 sandbox.checkpoint.clone
+          headers:
+            Location:
+              description: 任务轮询 URL
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InstanceAsyncTask' }
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
@@ -6194,6 +6253,35 @@ paths:
         "404": { $ref: '#/components/responses/NotFound' }
 
   # ── 异步任务 ────────────────────────────────────────────────────────────────
+  /tasks:
+    get:
+      operationId: listTasks
+      summary: 查询当前租户异步任务列表
+      description: |
+        按创建时间倒序返回当前租户可见的统一异步任务。tenant_id 从认证上下文获取，
+        客户端不得通过 query 跨租户查询。
+      tags: [Tasks]
+      x-ani-rbac-scope: "scope:tasks:list"
+      parameters:
+        - { name: status,        in: query, schema: { type: string, enum: [pending, running, completed, failed, cancelled, dead_letter] } }
+        - { name: task_type,     in: query, schema: { type: string } }
+        - { name: resource_type, in: query, schema: { type: string } }
+        - { name: instance_id,   in: query, schema: { type: string } }
+        - { name: created_after, in: query, schema: { type: string, format: date-time } }
+        - { name: created_before, in: query, schema: { type: string, format: date-time } }
+        - { name: limit,         in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor,        in: query, schema: { type: string } }
+        - { name: sort,          in: query, schema: { type: string, enum: [created_at_asc, created_at_desc], default: created_at_desc } }
+      responses:
+        "200":
+          description: 异步任务列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTaskListResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
   /tasks/{task_id}:
     get:
       summary: 查询异步任务状态
@@ -6208,6 +6296,34 @@ paths:
               schema: { $ref: '#/components/schemas/AsyncTask' }
         "404":
           $ref: '#/components/responses/NotFound'
+
+  /tasks/{task_id}/cancel:
+    post:
+      operationId: cancelTask
+      summary: 取消排队中的异步任务
+      description: |
+        仅 pending 任务可取消。重复使用同一 idempotency_key 回放原取消结果；
+        running 或任一终态任务返回 409，跨租户任务按 404 处理。
+      tags: [Tasks]
+      x-ani-rbac-scope: "scope:tasks:cancel"
+      parameters:
+        - { name: task_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CancelAsyncTaskRequest' }
+      responses:
+        "200":
+          description: 任务已取消或幂等回放取消结果
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
 
   # ── 可观测性 ────────────────────────────────────────────────────────────────
   /observability/query:

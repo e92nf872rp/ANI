@@ -1835,6 +1835,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询当前租户异步任务列表
+         * @description 按创建时间倒序返回当前租户可见的统一异步任务。tenant_id 从认证上下文获取，
+         *     客户端不得通过 query 跨租户查询。
+         */
+        get: operations["listTasks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tasks/{task_id}": {
         parameters: {
             query?: never;
@@ -1868,6 +1889,27 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 取消排队中的异步任务
+         * @description 仅 pending 任务可取消。重复使用同一 idempotency_key 回放原取消结果；
+         *     running 或任一终态任务返回 409，跨租户任务按 404 处理。
+         */
+        post: operations["cancelTask"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2882,11 +2924,17 @@ export interface components {
              * @example model.import
              * @enum {string}
              */
-            task_type: "model.import" | "kb.parse" | "kb.index" | "inference.deploy" | "volume.snapshot.create" | "volume.expand" | "volume.mount" | "volume.unmount" | "volume.create_from_snapshot" | "filesystem.expand" | "filesystem.mount_target.create" | "filesystem.mount" | "filesystem.unmount" | "vector_store.index.rebuild" | "sandbox.checkpoint.create" | "sandbox.checkpoint.restore" | "sandbox.code_run.create";
+            task_type: "model.import" | "kb.parse" | "kb.index" | "inference.deploy" | "volume.snapshot.create" | "volume.expand" | "volume.mount" | "volume.unmount" | "volume.create_from_snapshot" | "filesystem.expand" | "filesystem.mount_target.create" | "filesystem.mount" | "filesystem.unmount" | "vector_store.index.rebuild" | "instance.create" | "instance.start" | "instance.stop" | "instance.restart" | "instance.resize" | "instance.rebuild" | "instance.delete" | "instance.snapshot.create" | "instance.rollback" | "instance.scale" | "instance.image.update" | "instance.pause" | "instance.resume" | "instance.extend" | "sandbox.checkpoint.create" | "sandbox.checkpoint.restore" | "sandbox.checkpoint.clone" | "sandbox.code_run.create";
             /** @enum {string|null} */
-            resource_type?: "inference_service" | "kb_document" | "model_version" | "volume_snapshot" | "volume" | "filesystem" | "filesystem_mount_target" | "vector_store" | "sandbox_checkpoint" | "sandbox_code_run" | null;
+            resource_type?: "inference_service" | "kb_document" | "model_version" | "volume_snapshot" | "volume" | "filesystem" | "filesystem_mount_target" | "vector_store" | "instance" | "sandbox_checkpoint" | "sandbox_code_run" | null;
             /** Format: uuid */
             resource_id?: string | null;
+            /** @description 任务中心展示用资源名称快照；资源重命名不反向修改历史任务。 */
+            resource_name?: string | null;
+            /** @description 关联实例 ID；实例 ID 不保证为 UUID，因此不复用 resource_id。 */
+            instance_id?: string | null;
+            /** @description 关联实例操作记录 ID；可通过 /instance-operations/{operation_id} 查询。 */
+            operation_id?: string | null;
             /** @enum {string} */
             status: "pending" | "running" | "completed" | "failed" | "cancelled" | "dead_letter";
             attempt_count?: number;
@@ -2899,7 +2947,22 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
+            started_at?: string | null;
+            /** Format: date-time */
             completed_at?: string | null;
+        };
+        AsyncTaskListResponse: {
+            items: components["schemas"]["AsyncTask"][];
+            total: number;
+            next_cursor?: string | null;
+        };
+        CancelAsyncTaskRequest: {
+            idempotency_key: string;
+        };
+        /** @description 实例长操作任务；实例记录与 operation 必须在返回 202 前创建。 */
+        InstanceAsyncTask: components["schemas"]["AsyncTask"] & {
+            instance_id: string;
+            operation_id: string;
         };
         HealthCheck: {
             /** @enum {string} */
@@ -5884,13 +5947,24 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 实例创建已提交并返回当前状态 */
+            /** @description 兼容同步 profile：实例创建完成并返回当前状态 */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["CreateInstanceResponse"];
+                };
+            };
+            /** @description 实例创建任务已接受；task_type 为 instance.create */
+            202: {
+                headers: {
+                    /** @description 任务轮询 URL */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstanceAsyncTask"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -5953,13 +6027,27 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 操作已接受并返回实例当前状态 */
+            /** @description 兼容同步 profile 或快速元数据操作：返回实例当前状态 */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["InstanceLifecycleResponse"];
+                };
+            };
+            /**
+             * @description 长操作任务已接受。实例运行时操作返回对应 instance.* task；
+             *     attach/detach volume/filesystem 返回真实 Storage task，并通过 operation_id 关联实例操作记录。
+             */
+            202: {
+                headers: {
+                    /** @description 任务轮询 URL */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstanceAsyncTask"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -6454,13 +6542,24 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 克隆实例已创建 */
+            /** @description 兼容同步 profile：克隆实例已创建 */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["CreateInstanceResponse"];
+                };
+            };
+            /** @description Sandbox 克隆任务已接受；task_type 为 sandbox.checkpoint.clone */
+            202: {
+                headers: {
+                    /** @description 任务轮询 URL */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstanceAsyncTask"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -9221,6 +9320,70 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    listTasks: {
+        parameters: {
+            query?: {
+                status?: "pending" | "running" | "completed" | "failed" | "cancelled" | "dead_letter";
+                task_type?: string;
+                resource_type?: string;
+                instance_id?: string;
+                created_after?: string;
+                created_before?: string;
+                limit?: number;
+                cursor?: string;
+                sort?: "created_at_asc" | "created_at_desc";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 异步任务列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTaskListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    cancelTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CancelAsyncTaskRequest"];
+            };
+        };
+        responses: {
+            /** @description 任务已取消或幂等回放取消结果 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     queryObservability: {

@@ -10,18 +10,17 @@
 
 - 本文是 `异步任务中心` 的主维护文档
 - `tasks/modules/prd/console/alerts/prd-console-async-task-center.md` 与 `tasks/modules/spec/console/alerts/spec-console-async-task-center.md` 为辅助材料
-- 一级权威源：`ANI-main/repo/api/openapi/v1.yaml`（`AsyncTask` schema 与 `GET /tasks/{task_id}`）
+- 一级权威源：`ANI-main/repo/api/openapi/v1.yaml`（`AsyncTask` schema 与 `/tasks` 查询/取消接口）
 - Services 侧 `202` 引用同一 `AsyncTask` 定义（见 `services/v1.yaml` components）
 - OpenAPI 已声明 ≠ handler 已实现
 
 ## Core 层要求
 
-- 正式路径：`GET /api/v1/tasks/{task_id}`
+- 正式路径：`GET /api/v1/tasks`、`GET /api/v1/tasks/{task_id}`、
+  `POST /api/v1/tasks/{task_id}/cancel`
 - 响应 schema：`AsyncTask`
 - 页面不要求前端显式传 `tenant_id`
 - 错误结构统一为 `{"code":"UPPER_SNAKE","message":"...","request_id":"..."}`
-
-<!-- TODO-YAML: 待 Core 冻结 GET /api/v1/tasks（list）或等价 cursor 分页；当前仅单任务查询 -->
 
 ### AsyncTask 冻结字段（展示用）
 
@@ -34,7 +33,9 @@
 | `status` | `pending` / `running` / `completed` / `failed` / `cancelled` / `dead_letter` |
 | `progress_pct` | 0–100 |
 | `error_message` | 失败原因，可空 |
-| `created_at` / `completed_at` | 时间戳 |
+| `resource_name` | 任务创建时的资源名称快照，可空 |
+| `instance_id` / `operation_id` | 实例任务与实例操作时间线关联，可空 |
+| `created_at` / `started_at` / `completed_at` | 时间戳 |
 
 ### 任务状态枚举
 
@@ -58,8 +59,8 @@
 
 ## 页面职责
 
-- 展示用户会话内或最近触达的异步任务列表（**list API 冻结前为客户端聚合**）
-- 支持按 `task_type`、`status` 筛选（UI 层）
+- 展示当前租户异步任务列表
+- 支持按 `task_type`、`resource_type`、`status`、`instance_id` 和时间筛选
 - 展示任务详情：进度、错误信息、关联资源跳转
 - 提供轮询刷新（推荐间隔 ≥ 2s，避免风暴）
 
@@ -81,23 +82,23 @@
 | 能力 | 路径 | 状态 |
 |---|---|---|
 | 查询单任务 | `GET /api/v1/tasks/{task_id}` | YAML 已声明；handler stub |
-| 列出任务 | **无** | `TODO-YAML` |
-| 取消任务 | **无** | 待补 |
+| 列出任务 | `GET /api/v1/tasks` | YAML 已声明；handler 待实现 |
+| 取消任务 | `POST /api/v1/tasks/{task_id}/cancel` | YAML 已声明；handler 待实现 |
 
 ### 关键边界
 
-- 不得自造 `TaskListResponse` 等未在 YAML 出现的 schema
-- list 未冻结前，任务中心只能展示「已知 task_id 集合」，不能声称全量租户任务视图
+- 列表响应必须使用 `AsyncTaskListResponse`
+- tenant_id 从认证上下文获取，不提供跨租户 query
 - `404` 表示 task_id 不存在或无权访问
 
 ## 创建前置条件
 
 | 依赖项 | 要求状态 | 未满足时的 HTTP 响应 |
 |---|---|---|
-| 用户登录 | 已认证 | `401 UNAUTHORIZED`（list 未冻结；单查 YAML 仅声明 404） |
+| 用户登录 | 已认证 | `401 UNAUTHORIZED` |
 | 查询 task_id | 来自合法 `202` 响应或会话缓存 | `404 NOT_FOUND` |
 
-本页无 POST/PUT；`idempotency_key` 由产生任务的来源写操作携带。
+取消请求必须提供 `idempotency_key`；重复请求回放原结果。
 
 ## 操作可用性矩阵
 
@@ -107,16 +108,16 @@
 |---|---|---|---|---|---|---|
 | 查看详情 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 轮询刷新 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 取消任务 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| 取消任务 | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
-取消能力待 Core 冻结前，UI 不展示取消按钮。
+running 或任一终态任务取消返回 409。
 
 ### 按角色
 
 | 操作 | 只读用户 | 租户成员 |
 |---|---|---|
 | 查看已知任务 | ✅ | ✅ |
-| 查看全量租户任务 | ❌ | ❌（待 list API） |
+| 查看全量租户任务 | ✅ | ✅ |
 
 ## 接口冻结规则
 
@@ -128,10 +129,9 @@
 
 ## 待补边界
 
-- `GET /api/v1/tasks` list + cursor 分页 — **TODO-YAML**
-- 任务取消 `POST /tasks/{task_id}/cancel` — **TODO-YAML**
-- 任务与租户成员权限绑定规则 — 待 Core 冻结
-- 跨模块 task_type 枚举完整清单 — 以 YAML `AsyncTask.task_type` 为准，新增须先扩 YAML
+- list/get/cancel handler、持久化 task-service 和执行取消传播
+- 任务与租户成员权限的实现验证
+- 跨模块 task_type 枚举完整清单以 YAML 为准，新增须先扩 YAML
 
 ## 与相关模块的关系
 
@@ -142,6 +142,6 @@
 ## 验收标准
 
 - [ ] 任务状态枚举与 `v1.yaml` `AsyncTask.status` 一致
-- [ ] 明确标注 list API 为 `TODO-YAML`
+- [ ] list/get/cancel 均消费 YAML schema，不自造客户端任务模型
 - [ ] 不宣称 handler 已实现
-- [ ] 接口冻结规则逐 operation 列出成功码与错误码
+- [ ] 取消按钮只对 pending 任务可用

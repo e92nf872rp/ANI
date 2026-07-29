@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>186</dd></div>
-          <div><dt>Schemas</dt><dd>252</dd></div>
+          <div><dt>Operations</dt><dd>188</dd></div>
+          <div><dt>Schemas</dt><dd>255</dd></div>
         </dl>
       </section>
 
@@ -589,7 +589,7 @@
           <td><code>createInstance</code></td>
           <td>创建实例</td>
           <td><code>scope:instances:create</code></td>
-          <td>201, 400, 401, 403, 409, 422</td>
+          <td>201, 202, 400, 401, 403, 409, 422</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -629,7 +629,7 @@
           <td><code>applyInstanceLifecycle</code></td>
           <td>执行实例生命周期操作</td>
           <td><code>scope:instances:update</code></td>
-          <td>200, 400, 401, 403, 404, 409, 422</td>
+          <td>200, 202, 400, 401, 403, 404, 409, 422</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -677,7 +677,7 @@
           <td><code>cloneSandboxCheckpoint</code></td>
           <td>从 Sandbox checkpoint 克隆实例</td>
           <td><code>scope:instances:create</code></td>
-          <td>201, 400, 401, 403, 404, 409, 422</td>
+          <td>201, 202, 400, 401, 403, 404, 409, 422</td>
         </tr>
         <tr>
           <td><span class="method method-post">POST</span></td>
@@ -1457,11 +1457,27 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/tasks</code></td>
+          <td><code>listTasks</code></td>
+          <td>查询当前租户异步任务列表</td>
+          <td><code>scope:tasks:list</code></td>
+          <td>200, 400, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/tasks/{task_id}</code></td>
           <td><code>getTasksTaskId</code></td>
           <td>查询异步任务状态</td>
           <td><code></code></td>
           <td>200, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tasks/{task_id}/cancel</code></td>
+          <td><code>cancelTask</code></td>
+          <td>取消排队中的异步任务</td>
+          <td><code>scope:tasks:cancel</code></td>
+          <td>200, 400, 401, 403, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1656,12 +1672,14 @@
         <ul class="schema-list">
         <li><code>APIKeyInfo</code></li>
         <li><code>AsyncTask</code></li>
+        <li><code>AsyncTaskListResponse</code></li>
         <li><code>BeginOIDCLoginRequest</code></li>
         <li><code>BeginOIDCLoginResponse</code></li>
         <li><code>BucketObjectDeleteResponse</code></li>
         <li><code>BucketObjectPresignedURLRequest</code></li>
         <li><code>BucketObjectUploadRequest</code></li>
         <li><code>BucketPrefixCreateRequest</code></li>
+        <li><code>CancelAsyncTaskRequest</code></li>
         <li><code>CloneSandboxCheckpointRequest</code></li>
         <li><code>CompleteOIDCLoginRequest</code></li>
         <li><code>CoreDevProfileInfo</code></li>
@@ -1729,6 +1747,7 @@
         <li><code>GPUSpecSummary</code></li>
         <li><code>HealthCheck</code></li>
         <li><code>InstanceAccessSummary</code></li>
+        <li><code>InstanceAsyncTask</code></li>
         <li><code>InstanceComputeSummary</code></li>
         <li><code>InstanceConsoleSession</code></li>
         <li><code>InstanceDiskSpec</code></li>

@@ -82,8 +82,9 @@ Instance Management API-First（2026-07-28）：
 - GPU-SPEC-CONTRACT-A：实例 `spec_id` 的前置只读 Core 契约已完成并通过个人仓库 CI，新增 `GPUSpecSummary`、`GET /gpu-specs`、`GET /gpu-specs/{spec_id}`，并在 GPU Container config 增加可选 `spec_id`；旧 GPU 字段 deprecated 保留。
 - INSTANCE-CONTRACT-A：统一实例主契约已补齐四类 P0 创建配置、Registry/Network/Storage/GPU Spec 引用、稳定详情摘要、列表过滤/排序/cursor、观测 cursor 和结构化 lifecycle/operation step；个人仓库 CI 已通过，契约已确认。
 - INSTANCE-SANDBOX-CONTRACT-A：已补齐 Sandbox token、runtime 预览端口、文件、checkpoint 和异步 code-run 共 11 个操作，固定租户/kind、幂等、任务轮询和敏感输出审计边界；个人仓库 CI 已通过，契约已确认。
+- INSTANCE-TASK-CENTER-CONTRACT-A：已补齐租户任务列表、pending 任务幂等取消、实例 task type/operation 关联，以及实例创建/lifecycle/Sandbox clone 的 `202 + InstanceAsyncTask + Location` 契约；instance_id/operation_id 为必填，本地契约门禁通过，等待个人仓库 CI 和评审，不含 handler/task-service/controller/Console。
 - 当前边界：规格只描述 GPU 资源形态，不表示租户配额；本期不实现 quota check/acquire/release，不新增 quota 表或 port。
-- 后续顺序：INSTANCE-SANDBOX-CONTRACT-A 个人仓库 CI 和契约评审通过后，停在运行时实现确认关卡；确认前不实现 handler、ports 或 adapters。
+- 后续顺序：INSTANCE-TASK-CENTER-CONTRACT-A 个人仓库 CI 和契约评审通过后，停在运行时实现确认关卡；确认前不实现 handler、ports 或 adapters。
 
 Registry Console Flow（2026-07-22）：
 - CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A：按 7.22 原型”暂不考虑 BOSS 和权限”边界，Core v1 新增 `RegistryImage.purpose`、`/registry/images?purpose=`、四类算力引用 enum 与 createInstance 镜像门禁 422 语义；仅契约和 Console Core schema 生成物，不含 handler/adapter/Console 页面实现。

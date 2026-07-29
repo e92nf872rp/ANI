@@ -723,7 +723,9 @@ InstanceLifecycleAction:
 
 跨 action 字段冲突返回 400。例如 `scale` 带 `volume_id`、`resize` 缺 cpu/memory、`update_image` 的镜像 purpose 不匹配均不得静默忽略。`strategy` P0 enum 为 `rolling`；GPU/Container 回滚继续使用 `revision`。
 
-Lifecycle 响应继续返回 `InstanceLifecycleResponse` 和 `operation_id`。长操作通过 `GET /instance-operations/{operation_id}` 轮询；实例 operation 的 `operation` enum 必须与新增 lifecycle action 同步扩展。与 Storage 关联的 operation steps 至少包含 `storage_precheck`、`storage_task_wait`、`runtime_apply`、`observe`，并在 step 中记录 Storage task ID，不复制或伪造 Storage task 类型。
+Lifecycle 保留 `200 + InstanceLifecycleResponse + operation_id` 作为兼容同步 profile 和快速元数据操作响应。实例创建、启停/重启、变配、重建、删除、快照/回滚、扩缩容、镜像更新以及 Sandbox pause/resume/extend 等长操作返回 `202 + InstanceAsyncTask + Location`。`InstanceAsyncTask` 继承 `AsyncTask`，并要求在返回 202 前已分配 `instance_id` 和 `operation_id`；任务中心通过 `GET /tasks` 聚合展示，实例详情继续通过 `GET /instance-operations/{operation_id}` 展示业务步骤。
+
+`AsyncTask` 和 `InstanceOperation` 不相互替代：前者负责统一执行状态、进度、取消和任务中心列表，后者负责实例维度的前置检查、资源编排、失败原因与步骤时间线。与 Storage 关联的 operation steps 至少包含 `storage_precheck`、`storage_task_wait`、`runtime_apply`、`observe`，并记录真实 Storage task ID。attach/detach volume/filesystem 返回 `volume.mount`、`volume.unmount`、`filesystem.mount`、`filesystem.unmount` 等真实任务类型，不复制或伪造为 `instance.*`。
 
 错误语义:
 
@@ -878,6 +880,7 @@ VM 新建系统盘和数据盘时，实例创建 orchestration 可以调用 Stor
 - Storage filesystem mount 信息: 文件系统挂载路径、实例绑定、mount target 状态。
 - `GET /instances/{instance_id}/operations`: 实例侧操作历史。
 - Storage async task: 任务列表显示真实 `task_type`，例如 `volume.mount`、`filesystem.unmount`，并通过 `Location: /api/v1/tasks/{task_id}` 轮询。
+- Instance async task: 创建和运行时长操作显示 `instance.create`、`instance.resize` 等真实类型，并通过 `operation_id` 下钻实例操作时间线。
 
 ### 8.5 明确不做
 
@@ -1208,10 +1211,11 @@ git diff --check
 | 选择网络 | 创建实例可绑定 VPC/Subnet/SecurityGroup | Network |
 | 选择存储 | VM 可创建系统盘/数据盘；VM/Container/GPU Container 可挂载卷和已有 NFS filesystem | Storage |
 | 选择 GPU 规格 | `/gpu-specs` 可查询，GPU Container 可传 `spec_id` 并解析为真实调度参数 | GPU spec contract |
-| 创建实例 | API 返回 `InstanceRecord` 和 operation | WorkloadRuntime |
+| 创建实例 | real profile 返回 `202 + InstanceAsyncTask + Location`，且包含 instance_id/operation_id；兼容同步 profile 可返回 `CreateInstanceResponse` | WorkloadRuntime / Task |
 | 查询详情 | 四类 P0 实例详情字段满足原型 tabs | Core API |
 | 生命周期 | 支持 P0 action 矩阵 | WorkloadRuntime |
 | 异步操作 | 所有 `202` 返回真实 `AsyncTask` 和 `Location`，Console 可轮询到终态 | Task/Operation |
+| 任务中心 | `GET /tasks` 支持租户内 cursor 分页与状态/类型/时间/实例筛选；仅 pending 任务可幂等取消 | Task |
 | 观测 | logs/events/metrics/exec/console/security-events 可用 | Observability |
 | Sandbox 子资源 | token/ports/files/checkpoints/code-runs 可用 | Sandbox runtime |
 | 真实后端 | VM、Container、GPU Container、Sandbox 分别通过自身 real-provider live gate | Cluster adapters |
