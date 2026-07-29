@@ -1,4 +1,5 @@
 """Milvus connection and collection helpers."""
+
 from pymilvus import connections
 
 from app.core.config import settings

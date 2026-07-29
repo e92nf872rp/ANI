@@ -194,6 +194,7 @@ public final class ApiClient {
         "deleteVectorStore",
         "getVectorStore",
         "precheckVectorStoreDelete",
+        "deleteVectorStoreDocuments",
         "insertVectorStoreDocuments",
         "deleteVectorStoreKnowledgeBaseLink",
         "setVectorStoreKnowledgeBaseLink",
@@ -382,6 +383,7 @@ public final class ApiClient {
         "DELETE /vector-stores/{vector_store_id}",
         "GET /vector-stores/{vector_store_id}",
         "GET /vector-stores/{vector_store_id}/delete-precheck",
+        "DELETE /vector-stores/{vector_store_id}/documents",
         "POST /vector-stores/{vector_store_id}/documents",
         "DELETE /vector-stores/{vector_store_id}/knowledge-base-link",
         "PUT /vector-stores/{vector_store_id}/knowledge-base-link",
@@ -638,6 +640,7 @@ public final class ApiClient {
         "UpdateObservabilityAlertRuleRequest",
         "VectorStore",
         "VectorStoreDeletePrecheck",
+        "VectorStoreDocumentDeleteResponse",
         "VectorStoreDocumentInsertRequest",
         "VectorStoreDocumentInsertResponse",
         "VectorStoreIndexStatus",
@@ -757,11 +760,14 @@ public final class ApiClient {
         "CONFLICT",
         "FORBIDDEN",
         "INTERNAL_ERROR",
+        "INVALID_FILTER",
         "NOT_FOUND",
         "NOT_IMPLEMENTED",
         "PRECONDITION_FAILED",
         "RATE_LIMIT_EXCEEDED",
-        "UNAUTHORIZED"
+        "UNAUTHORIZED",
+        "UNAVAILABLE",
+        "VECTOR_STORE_NOT_FOUND"
     ));
 
     private final String baseUrl;

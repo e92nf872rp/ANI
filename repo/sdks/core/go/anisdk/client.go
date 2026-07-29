@@ -187,6 +187,7 @@ var Operations = []string{
 	"deleteVectorStore",
 	"getVectorStore",
 	"precheckVectorStoreDelete",
+	"deleteVectorStoreDocuments",
 	"insertVectorStoreDocuments",
 	"deleteVectorStoreKnowledgeBaseLink",
 	"setVectorStoreKnowledgeBaseLink",
@@ -375,6 +376,7 @@ var Paths = []string{
 	"DELETE /vector-stores/{vector_store_id}",
 	"GET /vector-stores/{vector_store_id}",
 	"GET /vector-stores/{vector_store_id}/delete-precheck",
+	"DELETE /vector-stores/{vector_store_id}/documents",
 	"POST /vector-stores/{vector_store_id}/documents",
 	"DELETE /vector-stores/{vector_store_id}/knowledge-base-link",
 	"PUT /vector-stores/{vector_store_id}/knowledge-base-link",
@@ -631,6 +633,7 @@ var Schemas = []string{
 	"UpdateObservabilityAlertRuleRequest",
 	"VectorStore",
 	"VectorStoreDeletePrecheck",
+	"VectorStoreDocumentDeleteResponse",
 	"VectorStoreDocumentInsertRequest",
 	"VectorStoreDocumentInsertResponse",
 	"VectorStoreIndexStatus",
@@ -750,11 +753,14 @@ var ErrorCodes = []string{
 	"CONFLICT",
 	"FORBIDDEN",
 	"INTERNAL_ERROR",
+	"INVALID_FILTER",
 	"NOT_FOUND",
 	"NOT_IMPLEMENTED",
 	"PRECONDITION_FAILED",
 	"RATE_LIMIT_EXCEEDED",
 	"UNAUTHORIZED",
+	"UNAVAILABLE",
+	"VECTOR_STORE_NOT_FOUND",
 }
 
 type APIError struct {
