@@ -111,7 +111,8 @@ export function CreateGpuContainerDialog({
       const result = await createMutation.mutateAsync(payload)
       MessagePlugin.success('GPU 容器创建已提交')
       onClose()
-      navigate({ to: '/compute/gpu-containers/$instanceId', params: { instanceId: result.instance.id } })
+      const instanceId = 'instance' in result ? result.instance.id : result.instance_id
+      navigate({ to: '/compute/gpu-containers/$instanceId', params: { instanceId } })
     } catch (err) {
       const e = err as { code?: string; message?: string; status?: number }
       if (e.status === 422) {
