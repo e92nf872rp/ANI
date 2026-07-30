@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### Core Knowledge Base Platform · 数据库迁移（2026-07）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| M2.1-TASK-A | issue-004（US-005）：新增 `repo/services/kb-service/migrations/` 两个 SQL 迁移脚本——`001_pg_trgm_extension.sql`（`CREATE EXTENSION IF NOT EXISTS pg_trgm`）与 `002_kb_chunks.sql`（`kb_chunks` 表 13 列与 SPEC §3.1 逐字段对齐 + 3 B-tree 索引 `idx_kb_chunks_kb_doc`/`parent`/`type` + 1 GIN trgm 索引 `idx_kb_chunks_content_trgm` + `GRANT ... TO ani_app` + `ENABLE/FORCE ROW LEVEL SECURITY` + `CREATE POLICY tenant_isolation AS RESTRICTIVE`）；全部 `CREATE ... IF NOT EXISTS` 幂等（SPEC §3.4）；`kb_id`/`doc_id`/`parent_chunk_id` 软 FK（SPEC §3.3）；review-it 修复 1 finding（F1 缺 RLS/GRANT，追加）；拒绝 2 findings（硬 FK、tenant_id REFERENCES，均因 SPEC 明确软 FK+RLS）；对齐 PRD US-005/FR-7/FR-14/FR-15 / SPEC §3.1/§3.3/§3.4/§8.1；`make validate-architecture` + `make test` + `git diff --check` 全通过 | m2.1-task-a-kb-chunks-pg-trgm.md |
+
 ### 账密登录模块（2026-07）
 
 | 批次 | 内容摘要 | 文件 |
@@ -68,6 +74,9 @@
 
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
+| INSTANCE-SANDBOX-CONTRACT-A | Sandbox 子资源契约：新增短期 token、runtime 预览端口、文件、checkpoint 和异步 code-run 共 11 个操作；固定租户/kind 边界、幂等、202 AsyncTask + Location 与敏感输出审计约束；仅契约和生成物，不含运行时实现 | instance-sandbox-contract-a.md |
+| INSTANCE-CONTRACT-A | 统一实例主契约扩展：补齐四类 P0 创建配置、Registry/Network/Storage/GPU Spec 引用、稳定详情摘要、列表过滤/排序/cursor、观测 cursor 和结构化 lifecycle/operation step；仅契约和生成物，不含 Sandbox 子资源或运行时实现 | instance-contract-a.md |
+| GPU-SPEC-CONTRACT-A | 实例 `spec_id` 的前置只读契约：新增 `GPUSpecSummary`、`GET /gpu-specs`、`GET /gpu-specs/{spec_id}`，GPU Container config 增加可选 `spec_id`，旧 GPU 字段 deprecated 保留；明确不包含配额 check/acquire/release，不含 handler/port/adapter/Console 实现 | gpu-spec-contract-a.md |
 | GPU-SCHEDULING-ISSUE-01-A | OpenAPI 新增 GPU 调度队列 CRUD 5 端点 + 4 schema + 2 RBAC scope + InstanceRecord.gpu 扩展 + 5 错误码；修复 /branding schema bug；前端 core-schema.d.ts 重生成；validate-architecture 通过 | gpu-scheduling-issue-01-openapi-queue-crud.md |
 | GPU-SCHEDULING-ISSUE-02-A | Core Queue port + Volcano Queue CRD adapter + Gateway handler 5 端点；14 adapter 单测 + 12 handler 单测全通过；validate-architecture 通过 | gpu-scheduling-issue-02-queue-adapter-handler.md |
 | GPU-SCHEDULING-ISSUE-03-A | PlanScheduling 扩展：GPUSchedulingRequest 新增 QueueName/WorkloadClass；KubernetesGPUInventory 支持 queue 解析 + HAMi vGPU + 昇腾/MIG 拒绝；LocalGPUInventory 对齐；13 个新单测全通过；validate-architecture 通过 | gpu-scheduling-issue-03-plan-scheduling-extend.md |

@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>174</dd></div>
-          <div><dt>Schemas</dt><dd>225</dd></div>
+          <div><dt>Operations</dt><dd>187</dd></div>
+          <div><dt>Schemas</dt><dd>253</dd></div>
         </dl>
       </section>
 
@@ -545,6 +545,22 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/gpu-specs</code></td>
+          <td><code>listGPUSpecs</code></td>
+          <td>查询可选 GPU 规格</td>
+          <td><code>scope:gpu-inventory:read</code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/gpu-specs/{spec_id}</code></td>
+          <td><code>getGPUSpec</code></td>
+          <td>查询单个 GPU 规格</td>
+          <td><code>scope:gpu-inventory:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/healthz</code></td>
           <td><code>liveness</code></td>
           <td>Liveness probe（进程存活检查）</td>
@@ -613,7 +629,7 @@
           <td><code>applyInstanceLifecycle</code></td>
           <td>执行实例生命周期操作</td>
           <td><code>scope:instances:update</code></td>
-          <td>200, 400, 401, 403, 404, 409</td>
+          <td>200, 400, 401, 403, 404, 409, 422</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -638,6 +654,94 @@
           <td>查询实例操作历史</td>
           <td><code>scope:instances:read</code></td>
           <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/instances/{instance_id}/sandbox/checkpoints</code></td>
+          <td><code>listSandboxCheckpoints</code></td>
+          <td>查询 Sandbox checkpoint</td>
+          <td><code>scope:instances:read</code></td>
+          <td>200, 400, 401, 403, 404, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/instances/{instance_id}/sandbox/checkpoints</code></td>
+          <td><code>createSandboxCheckpoint</code></td>
+          <td>创建 Sandbox checkpoint</td>
+          <td><code>scope:instances:update</code></td>
+          <td>202, 400, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/instances/{instance_id}/sandbox/checkpoints/{checkpoint_id}/clone</code></td>
+          <td><code>cloneSandboxCheckpoint</code></td>
+          <td>从 Sandbox checkpoint 克隆实例</td>
+          <td><code>scope:instances:create</code></td>
+          <td>201, 400, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/instances/{instance_id}/sandbox/checkpoints/{checkpoint_id}/restore</code></td>
+          <td><code>restoreSandboxCheckpoint</code></td>
+          <td>恢复 Sandbox checkpoint</td>
+          <td><code>scope:instances:update</code></td>
+          <td>202, 400, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/instances/{instance_id}/sandbox/code-runs</code></td>
+          <td><code>createSandboxCodeRun</code></td>
+          <td>在 Sandbox 中执行一次代码</td>
+          <td><code>scope:instances:exec</code></td>
+          <td>202, 400, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/instances/{instance_id}/sandbox/files</code></td>
+          <td><code>deleteSandboxFile</code></td>
+          <td>删除 Sandbox 文件</td>
+          <td><code>scope:instances:update</code></td>
+          <td>204, 400, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/instances/{instance_id}/sandbox/files</code></td>
+          <td><code>listSandboxFiles</code></td>
+          <td>查询 Sandbox 文件</td>
+          <td><code>scope:instances:read</code></td>
+          <td>200, 400, 401, 403, 404, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/instances/{instance_id}/sandbox/files</code></td>
+          <td><code>writeSandboxFile</code></td>
+          <td>写入 Sandbox 文件</td>
+          <td><code>scope:instances:update</code></td>
+          <td>201, 400, 401, 403, 404, 409, 413, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/instances/{instance_id}/sandbox/ports</code></td>
+          <td><code>createSandboxPort</code></td>
+          <td>开放 Sandbox 临时预览端口</td>
+          <td><code>scope:instances:update</code></td>
+          <td>201, 400, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/instances/{instance_id}/sandbox/ports/{port}</code></td>
+          <td><code>deleteSandboxPort</code></td>
+          <td>关闭 Sandbox 临时预览端口</td>
+          <td><code>scope:instances:update</code></td>
+          <td>200, 400, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/instances/{instance_id}/sandbox/tokens</code></td>
+          <td><code>createSandboxToken</code></td>
+          <td>签发 Sandbox 短期访问令牌</td>
+          <td><code>scope:instances:exec</code></td>
+          <td>201, 400, 401, 403, 404, 409, 422</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1566,6 +1670,7 @@
         <li><code>BucketObjectPresignedURLRequest</code></li>
         <li><code>BucketObjectUploadRequest</code></li>
         <li><code>BucketPrefixCreateRequest</code></li>
+        <li><code>CloneSandboxCheckpointRequest</code></li>
         <li><code>CompleteOIDCLoginRequest</code></li>
         <li><code>CoreDevProfileInfo</code></li>
         <li><code>CreateAPIKeyRequest</code></li>
@@ -1587,6 +1692,10 @@
         <li><code>CreateObservabilityAlertRuleRequest</code></li>
         <li><code>CreateRegistryProjectRequest</code></li>
         <li><code>CreateRegistryPullSecretRequest</code></li>
+        <li><code>CreateSandboxCheckpointRequest</code></li>
+        <li><code>CreateSandboxCodeRunRequest</code></li>
+        <li><code>CreateSandboxPortRequest</code></li>
+        <li><code>CreateSandboxTokenRequest</code></li>
         <li><code>CreateStorageBucketRequest</code></li>
         <li><code>CreateStorageFilesystemRequest</code></li>
         <li><code>CreateStorageObjectRequest</code></li>
@@ -1624,21 +1733,35 @@
         <li><code>GPUSchedulingQueueCreateRequest</code></li>
         <li><code>GPUSchedulingQueueListResponse</code></li>
         <li><code>GPUSchedulingQueueUpdateRequest</code></li>
+        <li><code>GPUSpecListResponse</code></li>
+        <li><code>GPUSpecSummary</code></li>
         <li><code>HealthCheck</code></li>
+        <li><code>InstanceAccessSummary</code></li>
+        <li><code>InstanceComputeSummary</code></li>
         <li><code>InstanceConsoleSession</code></li>
+        <li><code>InstanceDiskSpec</code></li>
+        <li><code>InstanceEnvVar</code></li>
         <li><code>InstanceEvent</code></li>
         <li><code>InstanceEventListResponse</code></li>
         <li><code>InstanceExecSession</code></li>
+        <li><code>InstanceFilesystemMount</code></li>
+        <li><code>InstanceImageSummary</code></li>
         <li><code>InstanceLifecycleRequest</code></li>
         <li><code>InstanceLifecycleResponse</code></li>
         <li><code>InstanceListResponse</code></li>
         <li><code>InstanceLogEntry</code></li>
         <li><code>InstanceLogListResponse</code></li>
         <li><code>InstanceMetrics</code></li>
+        <li><code>InstanceNetworkConfig</code></li>
+        <li><code>InstanceNetworkSummary</code></li>
         <li><code>InstanceOperation</code></li>
+        <li><code>InstancePortSpec</code></li>
         <li><code>InstanceRecord</code></li>
         <li><code>InstanceSecurityEvent</code></li>
         <li><code>InstanceSecurityEventListResponse</code></li>
+        <li><code>InstanceStorageAttachment</code></li>
+        <li><code>InstanceVolumeMount</code></li>
+        <li><code>InstanceWorkloadIdentityConfig</code></li>
         <li><code>K8sCluster</code></li>
         <li><code>K8sClusterCreateRequest</code></li>
         <li><code>K8sClusterKubeconfig</code></li>
@@ -1719,11 +1842,19 @@
         <li><code>RegistryScanResult</code></li>
         <li><code>ReportTokenUsageRequest</code></li>
         <li><code>RevokeStatusResponse</code></li>
+        <li><code>SandboxCheckpoint</code></li>
+        <li><code>SandboxCheckpointActionRequest</code></li>
+        <li><code>SandboxCheckpointListResponse</code></li>
+        <li><code>SandboxCodeRun</code></li>
         <li><code>SandboxConfig</code></li>
+        <li><code>SandboxFile</code></li>
+        <li><code>SandboxFileListResponse</code></li>
         <li><code>SandboxInstanceStatus</code></li>
         <li><code>SandboxNetworkEgressPolicy</code></li>
+        <li><code>SandboxPort</code></li>
         <li><code>SandboxTemplate</code></li>
         <li><code>SandboxTemplateListResponse</code></li>
+        <li><code>SandboxTokenResponse</code></li>
         <li><code>Secret</code></li>
         <li><code>SecretBinding</code></li>
         <li><code>SecretBindingRequest</code></li>
@@ -1783,6 +1914,7 @@
         <li><code>VolumeSnapshotListResponse</code></li>
         <li><code>VolumeSnapshotRecord</code></li>
         <li><code>WorkloadIdentityBinding</code></li>
+        <li><code>WriteSandboxFileRequest</code></li>
         </ul>
       </section>
 

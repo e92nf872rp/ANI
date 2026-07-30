@@ -293,6 +293,18 @@
       "scope": "scope:gpu-scheduling:write"
     },
     {
+      "operationId": "listGPUSpecs",
+      "method": "GET",
+      "path": "/gpu-specs",
+      "scope": "scope:gpu-inventory:read"
+    },
+    {
+      "operationId": "getGPUSpec",
+      "method": "GET",
+      "path": "/gpu-specs/{spec_id}",
+      "scope": "scope:gpu-inventory:read"
+    },
+    {
       "operationId": "liveness",
       "method": "GET",
       "path": "/healthz",
@@ -363,6 +375,72 @@
       "method": "GET",
       "path": "/instances/{instance_id}/operations",
       "scope": "scope:instances:read"
+    },
+    {
+      "operationId": "listSandboxCheckpoints",
+      "method": "GET",
+      "path": "/instances/{instance_id}/sandbox/checkpoints",
+      "scope": "scope:instances:read"
+    },
+    {
+      "operationId": "createSandboxCheckpoint",
+      "method": "POST",
+      "path": "/instances/{instance_id}/sandbox/checkpoints",
+      "scope": "scope:instances:update"
+    },
+    {
+      "operationId": "cloneSandboxCheckpoint",
+      "method": "POST",
+      "path": "/instances/{instance_id}/sandbox/checkpoints/{checkpoint_id}/clone",
+      "scope": "scope:instances:create"
+    },
+    {
+      "operationId": "restoreSandboxCheckpoint",
+      "method": "POST",
+      "path": "/instances/{instance_id}/sandbox/checkpoints/{checkpoint_id}/restore",
+      "scope": "scope:instances:update"
+    },
+    {
+      "operationId": "createSandboxCodeRun",
+      "method": "POST",
+      "path": "/instances/{instance_id}/sandbox/code-runs",
+      "scope": "scope:instances:exec"
+    },
+    {
+      "operationId": "deleteSandboxFile",
+      "method": "DELETE",
+      "path": "/instances/{instance_id}/sandbox/files",
+      "scope": "scope:instances:update"
+    },
+    {
+      "operationId": "listSandboxFiles",
+      "method": "GET",
+      "path": "/instances/{instance_id}/sandbox/files",
+      "scope": "scope:instances:read"
+    },
+    {
+      "operationId": "writeSandboxFile",
+      "method": "POST",
+      "path": "/instances/{instance_id}/sandbox/files",
+      "scope": "scope:instances:update"
+    },
+    {
+      "operationId": "createSandboxPort",
+      "method": "POST",
+      "path": "/instances/{instance_id}/sandbox/ports",
+      "scope": "scope:instances:update"
+    },
+    {
+      "operationId": "deleteSandboxPort",
+      "method": "DELETE",
+      "path": "/instances/{instance_id}/sandbox/ports/{port}",
+      "scope": "scope:instances:update"
+    },
+    {
+      "operationId": "createSandboxToken",
+      "method": "POST",
+      "path": "/instances/{instance_id}/sandbox/tokens",
+      "scope": "scope:instances:exec"
     },
     {
       "operationId": "listInstanceSecurityEvents",
@@ -1058,6 +1136,7 @@
     "BucketObjectPresignedURLRequest",
     "BucketObjectUploadRequest",
     "BucketPrefixCreateRequest",
+    "CloneSandboxCheckpointRequest",
     "CompleteOIDCLoginRequest",
     "CoreDevProfileInfo",
     "CreateAPIKeyRequest",
@@ -1079,6 +1158,10 @@
     "CreateObservabilityAlertRuleRequest",
     "CreateRegistryProjectRequest",
     "CreateRegistryPullSecretRequest",
+    "CreateSandboxCheckpointRequest",
+    "CreateSandboxCodeRunRequest",
+    "CreateSandboxPortRequest",
+    "CreateSandboxTokenRequest",
     "CreateStorageBucketRequest",
     "CreateStorageFilesystemRequest",
     "CreateStorageObjectRequest",
@@ -1116,21 +1199,35 @@
     "GPUSchedulingQueueCreateRequest",
     "GPUSchedulingQueueListResponse",
     "GPUSchedulingQueueUpdateRequest",
+    "GPUSpecListResponse",
+    "GPUSpecSummary",
     "HealthCheck",
+    "InstanceAccessSummary",
+    "InstanceComputeSummary",
     "InstanceConsoleSession",
+    "InstanceDiskSpec",
+    "InstanceEnvVar",
     "InstanceEvent",
     "InstanceEventListResponse",
     "InstanceExecSession",
+    "InstanceFilesystemMount",
+    "InstanceImageSummary",
     "InstanceLifecycleRequest",
     "InstanceLifecycleResponse",
     "InstanceListResponse",
     "InstanceLogEntry",
     "InstanceLogListResponse",
     "InstanceMetrics",
+    "InstanceNetworkConfig",
+    "InstanceNetworkSummary",
     "InstanceOperation",
+    "InstancePortSpec",
     "InstanceRecord",
     "InstanceSecurityEvent",
     "InstanceSecurityEventListResponse",
+    "InstanceStorageAttachment",
+    "InstanceVolumeMount",
+    "InstanceWorkloadIdentityConfig",
     "K8sCluster",
     "K8sClusterCreateRequest",
     "K8sClusterKubeconfig",
@@ -1211,11 +1308,19 @@
     "RegistryScanResult",
     "ReportTokenUsageRequest",
     "RevokeStatusResponse",
+    "SandboxCheckpoint",
+    "SandboxCheckpointActionRequest",
+    "SandboxCheckpointListResponse",
+    "SandboxCodeRun",
     "SandboxConfig",
+    "SandboxFile",
+    "SandboxFileListResponse",
     "SandboxInstanceStatus",
     "SandboxNetworkEgressPolicy",
+    "SandboxPort",
     "SandboxTemplate",
     "SandboxTemplateListResponse",
+    "SandboxTokenResponse",
     "Secret",
     "SecretBinding",
     "SecretBindingRequest",
@@ -1274,7 +1379,8 @@
     "VolumeOSInitGuide",
     "VolumeSnapshotListResponse",
     "VolumeSnapshotRecord",
-    "WorkloadIdentityBinding"
+    "WorkloadIdentityBinding",
+    "WriteSandboxFileRequest"
   ],
   "idempotencyOperations": [
     "createStorageBucket",
@@ -1296,6 +1402,13 @@
     "createInstance",
     "createInstanceExecSession",
     "applyInstanceLifecycle",
+    "createSandboxCheckpoint",
+    "cloneSandboxCheckpoint",
+    "restoreSandboxCheckpoint",
+    "createSandboxCodeRun",
+    "writeSandboxFile",
+    "createSandboxPort",
+    "createSandboxToken",
     "createK8sCluster",
     "createK8sClusterNodePool",
     "updateK8sClusterNodePool",
@@ -1336,9 +1449,14 @@
     "listStorageFilesystems",
     "listFilesystemMountTargets",
     "listGPUInventory",
+    "listGPUSpecs",
     "listInstances",
+    "listInstanceEvents",
     "listInstanceLogs",
     "listInstanceOperations",
+    "listSandboxCheckpoints",
+    "listSandboxFiles",
+    "listInstanceSecurityEvents",
     "listK8sClusters",
     "listK8sClusterWorkloads",
     "listNetworkLoadBalancers",
