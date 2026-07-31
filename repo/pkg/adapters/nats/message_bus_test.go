@@ -305,12 +305,14 @@ func TestHandlerOwnNack(t *testing.T) {
 		return handlerCalled
 	}
 
-	bus.Subscribe(context.Background(), ports.SubscribeOptions{
+	if _, err := bus.Subscribe(context.Background(), ports.SubscribeOptions{
 		Subject: "event.test",
 	}, func(ctx context.Context, msg ports.Message) error {
 		_ = msg.Nack(context.Background())
 		return errors.New("retry later")
-	})
+	}); err != nil {
+		t.Fatalf("Subscribe 失败: %v", err)
+	}
 
 	js.triggerCall(&natsgo.Msg{Subject: "event.test", Data: []byte("data")})
 
@@ -329,11 +331,13 @@ func TestHandlerPanicBeforeAck(t *testing.T) {
 		return handlerCalled
 	}
 
-	bus.Subscribe(context.Background(), ports.SubscribeOptions{
+	if _, err := bus.Subscribe(context.Background(), ports.SubscribeOptions{
 		Subject: "event.test",
 	}, func(ctx context.Context, msg ports.Message) error {
 		panic("intentional panic before ack")
-	})
+	}); err != nil {
+		t.Fatalf("Subscribe 失败: %v", err)
+	}
 
 	func() {
 		defer func() {
@@ -359,12 +363,14 @@ func TestHandlerPanicAfterAck(t *testing.T) {
 		return handlerCalled
 	}
 
-	bus.Subscribe(context.Background(), ports.SubscribeOptions{
+	if _, err := bus.Subscribe(context.Background(), ports.SubscribeOptions{
 		Subject: "event.test",
 	}, func(ctx context.Context, msg ports.Message) error {
 		_ = msg.Ack(context.Background())
 		panic("intentional panic after ack")
-	})
+	}); err != nil {
+		t.Fatalf("Subscribe 失败: %v", err)
+	}
 
 	func() {
 		defer func() {
