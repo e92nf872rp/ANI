@@ -27,7 +27,7 @@ export const Route = createFileRoute('/_authenticated/compute/gpu')({
   component: GpuManagementPage,
 })
 
-type GpuStatus = 'available' | 'in_use' | 'fault' | 'maintenance'
+type GpuStatus = 'available' | 'in_use' | 'fault' | 'maintenance' | 'sliced'
 type GpuDevice = components['schemas']['GPUInventoryRecord']
 type ObservabilityQueryResponse = components['schemas']['ObservabilityQueryResponse']
 
@@ -36,6 +36,7 @@ const STATUS_THEME: Record<GpuStatus, 'success' | 'warning' | 'danger' | 'defaul
   in_use: 'warning',
   fault: 'danger',
   maintenance: 'default',
+  sliced: 'default',
 }
 
 const STATUS_LABEL: Record<GpuStatus, string> = {
@@ -43,6 +44,7 @@ const STATUS_LABEL: Record<GpuStatus, string> = {
   in_use: '占用中',
   fault: '故障',
   maintenance: '维护中',
+  sliced: '已切片',
 }
 
 const DCGM_UTIL_PROMQL = 'avg(DCGM_FI_DEV_GPU_UTIL{job="dcgm-exporter"})'
