@@ -77,16 +77,6 @@ func (f *fakeJS) triggerCall(msg *natsgo.Msg) {
 	}
 }
 
-// triggerQueueCall 模拟 QueueSubscribe 收到一条消息
-func (f *fakeJS) triggerQueueCall(msg *natsgo.Msg) {
-	f.mu.Lock()
-	cb := f.queueSubscribeCb
-	f.mu.Unlock()
-	if cb != nil {
-		cb(msg)
-	}
-}
-
 // =============================================================================
 // fakeMessage — 可追踪 Ack/Nack 调用的 ports.Message 实现
 // =============================================================================
@@ -236,11 +226,13 @@ func TestHandlerErrorNoAutoAck(t *testing.T) {
 		return handlerCalled
 	}
 
-	bus.Subscribe(context.Background(), ports.SubscribeOptions{
+	if _, err := bus.Subscribe(context.Background(), ports.SubscribeOptions{
 		Subject: "event.test",
 	}, func(ctx context.Context, msg ports.Message) error {
 		return errors.New("business error")
-	})
+	}); err != nil {
+		t.Fatalf("Subscribe 失败: %v", err)
+	}
 
 	js.triggerCall(&natsgo.Msg{Subject: "event.test", Data: []byte("data")})
 
@@ -262,11 +254,13 @@ func TestHandlerNilNoAutoAck(t *testing.T) {
 		return handlerCalled
 	}
 
-	bus.Subscribe(context.Background(), ports.SubscribeOptions{
+	if _, err := bus.Subscribe(context.Background(), ports.SubscribeOptions{
 		Subject: "event.test",
 	}, func(ctx context.Context, msg ports.Message) error {
 		return nil
-	})
+	}); err != nil {
+		t.Fatalf("Subscribe 失败: %v", err)
+	}
 
 	js.triggerCall(&natsgo.Msg{Subject: "event.test", Data: []byte("data")})
 
@@ -285,12 +279,14 @@ func TestHandlerOwnAck(t *testing.T) {
 		return handlerCalled
 	}
 
-	bus.Subscribe(context.Background(), ports.SubscribeOptions{
+	if _, err := bus.Subscribe(context.Background(), ports.SubscribeOptions{
 		Subject: "event.test",
 	}, func(ctx context.Context, msg ports.Message) error {
 		_ = msg.Ack(context.Background())
 		return nil
-	})
+	}); err != nil {
+		t.Fatalf("Subscribe 失败: %v", err)
+	}
 
 	js.triggerCall(&natsgo.Msg{Subject: "event.test", Data: []byte("data")})
 
