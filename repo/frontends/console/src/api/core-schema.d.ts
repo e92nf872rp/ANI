@@ -2410,7 +2410,13 @@ export interface paths {
          */
         get: operations["listGPUSpecs"];
         put?: never;
-        post?: never;
+        /**
+         * 创建 GPU 规格
+         * @description 定义 GPU 规格（卡型×档位，如 A100-80G-4）。gpu_type 必须存在于 inventory，否则返回 400。
+         *     spec_id 格式 {gpu_type}-{mem}-{shares}；整卡是 shares=1 的规格，统一模型。
+         *     支持幂等键，重复请求返回原结果。
+         */
+        post: operations["createGPUSpec"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2432,7 +2438,12 @@ export interface paths {
         get: operations["getGPUSpec"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * 删除 GPU 规格
+         * @description 删除 GPU 规格；有切片引用时返回 409 SPEC_HAS_SLICES 禁止删除。
+         *     支持幂等键。
+         */
+        delete: operations["deleteGPUSpec"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2485,6 +2496,148 @@ export interface paths {
          * @description 更新租户自定义队列的权重、可回收性等属性。平台默认队列不可修改。
          */
         patch: operations["updateGPUSchedulingQueue"];
+        trace?: never;
+    };
+    "/gpu-inventory/{device_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * 管理整卡设备状态
+         * @description 标维护/恢复空闲/整卡分给租户。收回预留不走此接口（走 DELETE /gpu-slices/{slice_id}/reservation）。
+         *     支持幂等键。
+         */
+        patch: operations["patchGPUInventoryDevice"];
+        trace?: never;
+    };
+    "/gpu-inventory/{device_id}/slices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询设备切片列表
+         * @description 列出指定物理 GPU 卡的所有切片。
+         */
+        get: operations["listGPUSlices"];
+        put?: never;
+        /**
+         * 对物理 GPU 卡做切分声明
+         * @description 按 spec_id + count 创建切片实体入 PG。切片入 gpu_slices 表（显式 tenant_id 列，初始 NULL=共享池未分配）。
+         *     支持幂等键。
+         */
+        post: operations["createGPUSlices"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gpu-slices/{slice_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * 回收未被占用的切片
+         * @description 回收未被占用的切片；status=in_use 时返回 409 SLICE_IN_USE。
+         *     支持幂等键。
+         */
+        delete: operations["deleteGPUSlice"];
+        options?: never;
+        head?: never;
+        /**
+         * 设置切片预留
+         * @description 把切片预留给某租户（tenant_id + reserved），或回收为共享池（tenant_id=null）。
+         *     预留后 PlanScheduling 只选 tenant_id=A AND reserved=false AND status=available。
+         *     支持幂等键。
+         */
+        patch: operations["patchGPUSlice"];
+        trace?: never;
+    };
+    "/gpu-slices/{slice_id}/reservation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * 收回租户预留
+         * @description 收回已分配但未使用的切片预留，切片回到共享池可再分配。
+         *     收回后 tenant_id=NULL, reserved=FALSE, instance_id=NULL, status=available。
+         *     切片被占用（status=in_use）时收回返回 409 SLICE_IN_USE。
+         *     支持幂等键。
+         */
+        delete: operations["deleteGPUSliceReservation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/quotas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询租户配额列表
+         * @description 列出所有租户的配额（BOSS 平台角色）。
+         */
+        get: operations["listQuotas"];
+        /**
+         * 分配租户配额
+         * @description 分配租户配额 total（BOSS 平台角色）。配额维度 (tenant_id, resource_type)，
+         *     resource_type = gpu_card / vcpu / memory_gib，1 槽位 = 1（整卡和 vGPU 切片都算 1）。
+         *     支持幂等键。
+         */
+        put: operations["putQuota"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/quotas/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询当前租户配额
+         * @description Console 查询自己的配额用量。按当前租户上下文返回，不跨租户。
+         */
+        get: operations["getMyQuota"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/sandbox-templates": {
@@ -3276,6 +3429,15 @@ export interface components {
             ssh_key_ref?: string | null;
             /** @default false */
             termination_protection: boolean;
+            /**
+             * @description 网络配置（非破坏性可选预留字段）。adapter 层未传时兜底默认值；
+             *     钧伟 VPC 合入后改读真实 VPC，契约不变。
+             */
+            network_config?: {
+                vpc_id?: string | null;
+                subnet_id?: string | null;
+                security_groups?: string[] | null;
+            } | null;
             /**
              * @deprecated
              * @description 兼容别名；优先使用 gpu_container_config.gpu
@@ -5168,13 +5330,18 @@ export interface components {
             gpu_index: number;
             memory_total_mb?: number;
             driver_version?: string | null;
-            /** @enum {string} */
-            status: "available" | "in_use" | "fault" | "maintenance";
+            /**
+             * @description 设备状态；sliced 表示已声明切分（非破坏性新增枚举值，旧消费者不匹配即忽略）。
+             * @enum {string}
+             */
+            status: "available" | "in_use" | "fault" | "maintenance" | "sliced";
             /** Format: uuid */
             tenant_id?: string | null;
             /** Format: uuid */
             instance_id?: string | null;
             dev_profile: components["schemas"]["CoreDevProfileInfo"];
+            /** @description 设备切片视图（非破坏性可选字段；未切分设备为 null 或缺省）。 */
+            slices?: components["schemas"]["GPUSliceView"][] | null;
         };
         GPUInventoryListResponse: {
             items: components["schemas"]["GPUInventoryRecord"][];
@@ -5211,6 +5378,10 @@ export interface components {
             in_use: number;
             available: number;
             fault: number;
+            /** @description 已声明切分的设备数（非破坏性可选字段，旧消费者可忽略）。 */
+            sliced?: number;
+            /** @description 已预留给租户的切片/设备数（非破坏性可选字段，旧消费者可忽略）。 */
+            reserved?: number;
             by_gpu_type?: {
                 gpu_type?: string;
                 total?: number;
@@ -5264,6 +5435,138 @@ export interface components {
             workload_class?: "inference" | "training" | "batch";
             /** Format: uuid */
             project_id?: string | null;
+        };
+        /** @description GPU 规格创建请求（可写）。spec_id 由服务端按 {gpu_type}-{mem}-{shares} 生成。 */
+        GPUSpecCreateRequest: {
+            /** @description 必须存在于 inventory，否则返回 400 INVALID_GPU_TYPE。 */
+            gpu_type: string;
+            memory_total_mb: number;
+            /**
+             * @description 1=整卡规格，2/4/8=切片规格。
+             * @enum {integer}
+             */
+            shares: 1 | 2 | 4 | 8;
+            /** @description 每份保证显存，单位 MiB。 */
+            mb_per_share: number;
+            /** @description 幂等键；重复请求返回原结果。 */
+            idempotency_key?: string;
+        };
+        /** @description GPU 切片视图（只读）。 */
+        GPUSliceView: {
+            /** Format: uuid */
+            slice_id: string;
+            /** Format: uuid */
+            device_id: string;
+            node_name?: string;
+            /** @description 引用 GPUSpec 的 spec_id。 */
+            spec_id: string;
+            gpu_type: string;
+            /** @description 切片份数（1/2/4/8）。 */
+            shares: number;
+            /** @description 每份保证显存，单位 MiB。 */
+            mb_per_share: number;
+            /**
+             * Format: uuid
+             * @description 归属租户；NULL=共享池未分配。
+             */
+            tenant_id?: string | null;
+            /**
+             * @description 预留锁；和 tenant_id 正交。
+             * @default false
+             */
+            reserved: boolean;
+            /**
+             * Format: uuid
+             * @description 占用实例 ID。
+             */
+            instance_id?: string | null;
+            /**
+             * @description 切片占用状态。
+             * @enum {string}
+             */
+            status: "available" | "in_use" | "released";
+            idempotency_key?: string | null;
+            /** Format: date-time */
+            created_at?: string | null;
+            /** Format: date-time */
+            updated_at?: string | null;
+        };
+        /** @description 对物理 GPU 卡做切分声明，生成切片实体入 PG。 */
+        GPUSliceCreateRequest: {
+            /** @description 引用已有 GPUSpec 的 spec_id。 */
+            spec_id: string;
+            /** @description 本次创建切片数。 */
+            count: number;
+            /**
+             * Format: uuid
+             * @description 可选：直接分配给租户；不传则入共享池。
+             */
+            tenant_id?: string | null;
+            /**
+             * @description 是否预留。
+             * @default false
+             */
+            reserved: boolean;
+            idempotency_key?: string;
+        };
+        GPUSliceListResponse: {
+            items: components["schemas"]["GPUSliceView"][];
+            total: number;
+            next_cursor?: string | null;
+        };
+        /** @description 切片预留设置（分配给租户 / 收回锁）。 */
+        GPUSlicePatchRequest: {
+            /**
+             * Format: uuid
+             * @description 归属租户；传 null 回收为共享池。
+             */
+            tenant_id?: string | null;
+            /** @description 预留锁开关。 */
+            reserved?: boolean;
+            idempotency_key?: string;
+        };
+        /** @description 整卡设备状态管理（标维护/恢复空闲/分配给租户）。 */
+        GPUInventoryDevicePatchRequest: {
+            /**
+             * @description 设备状态切换。
+             * @enum {string}
+             */
+            status?: "available" | "maintenance" | "fault";
+            /**
+             * Format: uuid
+             * @description 整卡分配给租户；传 null 回收为共享池。
+             */
+            tenant_id?: string | null;
+            /** @description 整卡预留锁开关。 */
+            reserved?: boolean;
+            idempotency_key?: string;
+        };
+        /** @description 配额数量（按资源维度）。 */
+        QuotaAmount: {
+            /** @description GPU 槽位数（整卡和 vGPU 切片都算 1）。 */
+            gpu_card?: number;
+            vcpu?: number;
+            memory_gib?: number;
+        };
+        /** @description 分配租户配额（BOSS 平台角色）。 */
+        QuotaPutRequest: {
+            /** Format: uuid */
+            tenant_id: string;
+            total: components["schemas"]["QuotaAmount"];
+            idempotency_key?: string;
+        };
+        /** @description 租户配额视图（含用量与预占）。 */
+        QuotaView: {
+            /** Format: uuid */
+            tenant_id: string;
+            total: components["schemas"]["QuotaAmount"];
+            used: components["schemas"]["QuotaAmount"];
+            reserved: components["schemas"]["QuotaAmount"];
+        };
+        QuotaListResponse: {
+            items: components["schemas"]["QuotaView"][];
+            total: number;
+            next_cursor?: string | null;
         };
         SandboxTemplate: {
             /** Format: uuid */
@@ -5501,6 +5804,60 @@ export interface components {
         };
         /** @description 前置条件不满足（code=PRECONDITION_FAILED） */
         PreconditionFailed: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description GPU 型号不存在于 inventory（code=INVALID_GPU_TYPE） */
+        InvalidGPUType: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 切片已被实例占用（code=SLICE_IN_USE） */
+        SliceInUse: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 有切片引用此规格，不可删除（code=SPEC_HAS_SLICES） */
+        SpecHasSlices: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 配额不足（code=QUOTA_EXCEEDED） */
+        QuotaExceeded: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 资源暂不可用（3 次重选切片失败，code=SLICE_UNAVAILABLE） */
+        SliceUnavailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 幂等键冲突且业务参数不同（code=IDEMPOTENCY_CONFLICT） */
+        IdempotencyConflict: {
             headers: {
                 [name: string]: unknown;
             };
@@ -10234,8 +10591,12 @@ export interface operations {
         parameters: {
             query?: {
                 gpu_type?: string;
-                status?: "available" | "in_use" | "fault" | "maintenance";
+                status?: "available" | "in_use" | "fault" | "maintenance" | "sliced";
                 node_name?: string;
+                model?: string;
+                state?: "available" | "in_use" | "fault" | "maintenance" | "sliced";
+                tenant?: string;
+                node?: string;
                 limit?: number;
                 cursor?: string;
             };
@@ -10307,6 +10668,39 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
+    createGPUSpec: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 幂等键，防止重复创建 */
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GPUSpecCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description GPU 规格创建成功 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GPUSpecSummary"];
+                };
+            };
+            /** @description gpu_type 不存在于 inventory（code=INVALID_GPU_TYPE） */
+            400: components["responses"]["InvalidGPUType"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description 幂等键冲突且业务参数不同（code=IDEMPOTENCY_CONFLICT） */
+            409: components["responses"]["IdempotencyConflict"];
+        };
+    };
     getGPUSpec: {
         parameters: {
             query?: never;
@@ -10330,6 +10724,33 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    deleteGPUSpec: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                spec_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description GPU 规格删除成功 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 有切片引用此规格，不可删除（code=SPEC_HAS_SLICES） */
+            409: components["responses"]["SpecHasSlices"];
         };
     };
     listGPUSchedulingQueues: {
@@ -10464,6 +10885,271 @@ export interface operations {
             /** @description 平台默认队列不可修改，code: PlatformDefaultProtected */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    patchGPUInventoryDevice: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                device_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GPUInventoryDevicePatchRequest"];
+            };
+        };
+        responses: {
+            /** @description 设备状态更新成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GPUInventoryRecord"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 设备已分片且切片被占用，不可直接标维护（code=SLICE_IN_USE） */
+            409: components["responses"]["SliceInUse"];
+        };
+    };
+    listGPUSlices: {
+        parameters: {
+            query?: {
+                status?: "available" | "in_use" | "released";
+                tenant_id?: string;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                device_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 设备切片列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GPUSliceListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createGPUSlices: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                device_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GPUSliceCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description 切片创建成功 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GPUSliceListResponse"];
+                };
+            };
+            /** @description spec_id 引用的规格不存在或 gpu_type 不匹配（code=INVALID_GPU_TYPE） */
+            400: components["responses"]["InvalidGPUType"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 幂等键冲突且业务参数不同（code=IDEMPOTENCY_CONFLICT） */
+            409: components["responses"]["IdempotencyConflict"];
+        };
+    };
+    deleteGPUSlice: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                slice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 切片回收成功 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 切片已被实例占用，不可回收（code=SLICE_IN_USE） */
+            409: components["responses"]["SliceInUse"];
+        };
+    };
+    patchGPUSlice: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                slice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GPUSlicePatchRequest"];
+            };
+        };
+        responses: {
+            /** @description 切片预留设置成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GPUSliceView"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 切片已占用，不可修改预留（code=SLICE_IN_USE） */
+            409: components["responses"]["SliceInUse"];
+        };
+    };
+    deleteGPUSliceReservation: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                slice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 预留收回成功 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 切片已被实例占用，不可收回预留（code=SLICE_IN_USE） */
+            409: components["responses"]["SliceInUse"];
+        };
+    };
+    listQuotas: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 租户配额列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuotaListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    putQuota: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuotaPutRequest"];
+            };
+        };
+        responses: {
+            /** @description 配额分配成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuotaView"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description 幂等键冲突且业务参数不同（code=IDEMPOTENCY_CONFLICT） */
+            409: components["responses"]["IdempotencyConflict"];
+        };
+    };
+    getMyQuota: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前租户配额 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuotaView"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     listSandboxTemplates: {
