@@ -29,12 +29,12 @@ func NewConsumer(bus ports.MessageBus, logger *slog.Logger) *Consumer {
 // Start 订阅 ani.events.instance.>，配置 AckWait=30s、MaxDeliver=10、MaxInflight=16。
 func (c *Consumer) Start(ctx context.Context) error {
 	sub, err := c.bus.Subscribe(ctx, ports.SubscribeOptions{
-		Subject:    "ani.events.instance.>",
-		Consumer:   "metering-example",
-		Queue:      "metering",
+		Subject:     "ani.events.instance.>",
+		Consumer:    "metering-example",
+		Queue:       "metering",
 		MaxInflight: 16,
-		AckWait:    30 * time.Second,
-		MaxDeliver: 10,
+		AckWait:     30 * time.Second,
+		MaxDeliver:  10,
 	}, c.handle)
 	if err != nil {
 		return err
@@ -70,12 +70,16 @@ func (c *Consumer) handle(ctx context.Context, msg ports.Message) error {
 	var event instanceEvent
 	if err := json.Unmarshal(msg.Data(), &event); err != nil {
 		// 毒丸消息：Ack 跳过 + error 日志。
-		c.safeLog(func(l *slog.Logger) { l.ErrorContext(ctx, "parse event failed (poison message), ack to skip", "err", err) })
+		c.safeLog(func(l *slog.Logger) {
+			l.ErrorContext(ctx, "parse event failed (poison message), ack to skip", "err", err)
+		})
 		_ = msg.Ack(ctx)
 		return nil
 	}
 
-	c.safeLog(func(l *slog.Logger) { l.InfoContext(ctx, "received instance event", "event_type", event.EventType, "instance_id", event.InstanceID) })
+	c.safeLog(func(l *slog.Logger) {
+		l.InfoContext(ctx, "received instance event", "event_type", event.EventType, "instance_id", event.InstanceID)
+	})
 
 	// 3. 示例阶段：链路验证通过即 Ack（真实逻辑接入后此处替换为 c.metering.StartCollection）。
 	_ = msg.Ack(ctx)

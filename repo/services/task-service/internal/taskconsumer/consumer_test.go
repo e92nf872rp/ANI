@@ -38,12 +38,12 @@ func (m *mockSubscription) Drain(ctx context.Context) error {
 
 // mockMessage 实现 ports.Message，可控 Headers/Data/Ack/Nack。
 type mockMessage struct {
-	headers     map[string][]string
-	data        []byte
-	ackCalled   int
-	nackCalled  int
-	ackErr      error
-	nackErr     error
+	headers    map[string][]string
+	data       []byte
+	ackCalled  int
+	nackCalled int
+	ackErr     error
+	nackErr    error
 }
 
 func (m *mockMessage) Subject() string { return "" }

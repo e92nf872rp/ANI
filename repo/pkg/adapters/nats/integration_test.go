@@ -252,15 +252,15 @@ func TestIntegrationPublishSubscribeHeaders(t *testing.T) {
 	instanceID := "inst-headers-001"
 
 	var (
-		got       atomic.Value // ports.Message
-		received  atomic.Bool
+		got      atomic.Value // ports.Message
+		received atomic.Bool
 	)
 	sub, err := env.bus.Subscribe(context.Background(), ports.SubscribeOptions{
-		Subject:    subject,
-		Consumer:   integrationConsumerPrefix + "-headers",
+		Subject:     subject,
+		Consumer:    integrationConsumerPrefix + "-headers",
 		MaxInflight: 16,
-		AckWait:    30 * time.Second,
-		MaxDeliver: 10,
+		AckWait:     30 * time.Second,
+		MaxDeliver:  10,
 	}, func(ctx context.Context, msg ports.Message) error {
 		got.Store(msg)
 		received.Store(true)
@@ -303,11 +303,11 @@ func TestIntegrationAckBusinessDecision(t *testing.T) {
 
 	var deliverCount atomic.Int64
 	sub, err := env.bus.Subscribe(context.Background(), ports.SubscribeOptions{
-		Subject:    subject,
-		Consumer:   integrationConsumerPrefix + "-ack",
+		Subject:     subject,
+		Consumer:    integrationConsumerPrefix + "-ack",
 		MaxInflight: 16,
-		AckWait:    integrationAckWait,
-		MaxDeliver: integrationMaxDeliver,
+		AckWait:     integrationAckWait,
+		MaxDeliver:  integrationMaxDeliver,
 	}, func(ctx context.Context, msg ports.Message) error {
 		deliverCount.Add(1)
 		return msg.Ack(ctx)
@@ -347,11 +347,11 @@ func TestIntegrationPanicRecover(t *testing.T) {
 		panicked     atomic.Bool
 	)
 	sub, err := env.bus.Subscribe(context.Background(), ports.SubscribeOptions{
-		Subject:    subject,
-		Consumer:   integrationConsumerPrefix + "-panic",
+		Subject:     subject,
+		Consumer:    integrationConsumerPrefix + "-panic",
 		MaxInflight: 16,
-		AckWait:    integrationAckWait,
-		MaxDeliver: integrationMaxDeliver,
+		AckWait:     integrationAckWait,
+		MaxDeliver:  integrationMaxDeliver,
 	}, func(ctx context.Context, msg ports.Message) error {
 		n := deliverCount.Add(1)
 		if n == 1 {
@@ -394,11 +394,11 @@ func TestIntegrationNakDelayedRedelivery(t *testing.T) {
 
 	var deliverCount atomic.Int64
 	sub, err := env.bus.Subscribe(context.Background(), ports.SubscribeOptions{
-		Subject:    subject,
-		Consumer:   integrationConsumerPrefix + "-nak",
+		Subject:     subject,
+		Consumer:    integrationConsumerPrefix + "-nak",
 		MaxInflight: 16,
-		AckWait:    integrationAckWait,
-		MaxDeliver: integrationMaxDeliver,
+		AckWait:     integrationAckWait,
+		MaxDeliver:  integrationMaxDeliver,
 	}, func(ctx context.Context, msg ports.Message) error {
 		n := deliverCount.Add(1)
 		if n == 1 {
@@ -436,11 +436,11 @@ func TestIntegrationMaxDeliverStop(t *testing.T) {
 
 	var deliverCount atomic.Int64
 	sub, err := env.bus.Subscribe(context.Background(), ports.SubscribeOptions{
-		Subject:    subject,
-		Consumer:   integrationConsumerPrefix + "-maxdeliver",
+		Subject:     subject,
+		Consumer:    integrationConsumerPrefix + "-maxdeliver",
 		MaxInflight: 16,
-		AckWait:    integrationAckWait,
-		MaxDeliver: integrationMaxDeliver,
+		AckWait:     integrationAckWait,
+		MaxDeliver:  integrationMaxDeliver,
 	}, func(ctx context.Context, msg ports.Message) error {
 		deliverCount.Add(1)
 		// 持续 Nak，直到 MaxDeliver 上限。
@@ -482,11 +482,11 @@ func TestIntegrationInterestFanout(t *testing.T) {
 	)
 
 	sub1, err := env.bus.Subscribe(context.Background(), ports.SubscribeOptions{
-		Subject:    subject,
-		Consumer:   integrationConsumerPrefix + "-fanout-1",
+		Subject:     subject,
+		Consumer:    integrationConsumerPrefix + "-fanout-1",
 		MaxInflight: 16,
-		AckWait:    30 * time.Second,
-		MaxDeliver: 10,
+		AckWait:     30 * time.Second,
+		MaxDeliver:  10,
 	}, func(ctx context.Context, msg ports.Message) error {
 		c1Count.Add(1)
 		return msg.Ack(ctx)
@@ -497,11 +497,11 @@ func TestIntegrationInterestFanout(t *testing.T) {
 	env.trackSub(toNatsSub(sub1))
 
 	sub2, err := env.bus.Subscribe(context.Background(), ports.SubscribeOptions{
-		Subject:    subject,
-		Consumer:   integrationConsumerPrefix + "-fanout-2",
+		Subject:     subject,
+		Consumer:    integrationConsumerPrefix + "-fanout-2",
 		MaxInflight: 16,
-		AckWait:    30 * time.Second,
-		MaxDeliver: 10,
+		AckWait:     30 * time.Second,
+		MaxDeliver:  10,
 	}, func(ctx context.Context, msg ports.Message) error {
 		c2Count.Add(1)
 		return msg.Ack(ctx)

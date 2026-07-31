@@ -30,12 +30,12 @@ func NewConsumer(bus ports.MessageBus, logger *slog.Logger) *Consumer {
 // Start 订阅 ani.tasks.model.import，配置 AckWait=30s、MaxDeliver=10、MaxInflight=16。
 func (c *Consumer) Start(ctx context.Context) error {
 	sub, err := c.bus.Subscribe(ctx, ports.SubscribeOptions{
-		Subject:    "ani.tasks.model.import",
-		Consumer:   "task-example",
-		Queue:      "task-workers",
+		Subject:     "ani.tasks.model.import",
+		Consumer:    "task-example",
+		Queue:       "task-workers",
 		MaxInflight: 16,
-		AckWait:    30 * time.Second,
-		MaxDeliver: 10,
+		AckWait:     30 * time.Second,
+		MaxDeliver:  10,
 	}, c.handle)
 	if err != nil {
 		return err
@@ -71,12 +71,16 @@ func (c *Consumer) handle(ctx context.Context, msg ports.Message) error {
 	var task modelImportTask
 	if err := json.Unmarshal(msg.Data(), &task); err != nil {
 		// 毒丸消息：Ack 跳过 + error 日志。
-		c.safeLog(func(l *slog.Logger) { l.ErrorContext(ctx, "parse task failed (poison message), ack to skip", "err", err) })
+		c.safeLog(func(l *slog.Logger) {
+			l.ErrorContext(ctx, "parse task failed (poison message), ack to skip", "err", err)
+		})
 		_ = msg.Ack(ctx)
 		return nil
 	}
 
-	c.safeLog(func(l *slog.Logger) { l.InfoContext(ctx, "received task", "task_id", task.TaskID, "repo_id", task.RepoID) })
+	c.safeLog(func(l *slog.Logger) {
+		l.InfoContext(ctx, "received task", "task_id", task.TaskID, "repo_id", task.RepoID)
+	})
 
 	// 3. 示例阶段：链路验证通过即 Ack（真实逻辑接入后此处替换为 lease 抢占 + task 执行）。
 	_ = msg.Ack(ctx)
