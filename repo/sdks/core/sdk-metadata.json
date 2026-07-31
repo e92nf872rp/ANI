@@ -263,6 +263,24 @@
       "scope": "scope:gpu-inventory:read"
     },
     {
+      "operationId": "patchGPUInventoryDevice",
+      "method": "PATCH",
+      "path": "/gpu-inventory/{device_id}",
+      "scope": "scope:gpu-inventory:write"
+    },
+    {
+      "operationId": "listGPUSlices",
+      "method": "GET",
+      "path": "/gpu-inventory/{device_id}/slices",
+      "scope": "scope:gpu-inventory:read"
+    },
+    {
+      "operationId": "createGPUSlices",
+      "method": "POST",
+      "path": "/gpu-inventory/{device_id}/slices",
+      "scope": "scope:gpu-inventory:write"
+    },
+    {
       "operationId": "listGPUSchedulingQueues",
       "method": "GET",
       "path": "/gpu-scheduling/queues",
@@ -293,10 +311,40 @@
       "scope": "scope:gpu-scheduling:write"
     },
     {
+      "operationId": "deleteGPUSlice",
+      "method": "DELETE",
+      "path": "/gpu-slices/{slice_id}",
+      "scope": "scope:gpu-inventory:write"
+    },
+    {
+      "operationId": "patchGPUSlice",
+      "method": "PATCH",
+      "path": "/gpu-slices/{slice_id}",
+      "scope": "scope:gpu-inventory:write"
+    },
+    {
+      "operationId": "deleteGPUSliceReservation",
+      "method": "DELETE",
+      "path": "/gpu-slices/{slice_id}/reservation",
+      "scope": "scope:gpu-inventory:write"
+    },
+    {
       "operationId": "listGPUSpecs",
       "method": "GET",
       "path": "/gpu-specs",
       "scope": "scope:gpu-inventory:read"
+    },
+    {
+      "operationId": "createGPUSpec",
+      "method": "POST",
+      "path": "/gpu-specs",
+      "scope": "scope:gpu-inventory:write"
+    },
+    {
+      "operationId": "deleteGPUSpec",
+      "method": "DELETE",
+      "path": "/gpu-specs/{spec_id}",
+      "scope": "scope:gpu-inventory:write"
     },
     {
       "operationId": "getGPUSpec",
@@ -857,6 +905,24 @@
       "scope": "scope:observability:read"
     },
     {
+      "operationId": "listQuotas",
+      "method": "GET",
+      "path": "/quotas",
+      "scope": "scope:quota:read"
+    },
+    {
+      "operationId": "putQuota",
+      "method": "PUT",
+      "path": "/quotas",
+      "scope": "scope:quota:write"
+    },
+    {
+      "operationId": "getMyQuota",
+      "method": "GET",
+      "path": "/quotas/me",
+      "scope": "scope:quota:read"
+    },
+    {
       "operationId": "readiness",
       "method": "GET",
       "path": "/readyz",
@@ -1192,6 +1258,7 @@
     "FilesystemMountTarget",
     "FilesystemMountTargetCreateRequest",
     "FilesystemMountTargetListResponse",
+    "GPUInventoryDevicePatchRequest",
     "GPUInventoryListResponse",
     "GPUInventoryRecord",
     "GPUOccupancyStats",
@@ -1199,6 +1266,11 @@
     "GPUSchedulingQueueCreateRequest",
     "GPUSchedulingQueueListResponse",
     "GPUSchedulingQueueUpdateRequest",
+    "GPUSliceCreateRequest",
+    "GPUSliceListResponse",
+    "GPUSlicePatchRequest",
+    "GPUSliceView",
+    "GPUSpecCreateRequest",
     "GPUSpecListResponse",
     "GPUSpecSummary",
     "HealthCheck",
@@ -1280,6 +1352,10 @@
     "PlatformPasswordLoginRequest",
     "PutEmailSmtpConfigRequest",
     "PutEmailSubscriptionsRequest",
+    "QuotaAmount",
+    "QuotaListResponse",
+    "QuotaPutRequest",
+    "QuotaView",
     "RefreshAccessTokenRequest",
     "RefreshAccessTokenResponse",
     "RegistryArtifact",
@@ -1449,6 +1525,7 @@
     "listStorageFilesystems",
     "listFilesystemMountTargets",
     "listGPUInventory",
+    "listGPUSlices",
     "listGPUSpecs",
     "listInstances",
     "listInstanceEvents",
@@ -1469,6 +1546,7 @@
     "listNetworkVPCs",
     "listStorageObjects",
     "listObservabilityAlertRules",
+    "listQuotas",
     "listRegistryImages",
     "listRegistryProjects",
     "listRegistryRepositories",
@@ -1483,12 +1561,18 @@
     "BAD_REQUEST",
     "CONFLICT",
     "FORBIDDEN",
+    "IDEMPOTENCY_CONFLICT",
     "INTERNAL_ERROR",
     "INVALID_FILTER",
+    "INVALID_GPU_TYPE",
     "NOT_FOUND",
     "NOT_IMPLEMENTED",
     "PRECONDITION_FAILED",
+    "QUOTA_EXCEEDED",
     "RATE_LIMIT_EXCEEDED",
+    "SLICE_IN_USE",
+    "SLICE_UNAVAILABLE",
+    "SPEC_HAS_SLICES",
     "UNAUTHORIZED",
     "UNAVAILABLE",
     "VECTOR_STORE_NOT_FOUND"
