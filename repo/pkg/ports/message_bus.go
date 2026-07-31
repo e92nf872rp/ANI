@@ -24,6 +24,7 @@ type Message interface {
 	Data() []byte
 	Ack(ctx context.Context) error
 	Nack(ctx context.Context) error
+	Headers() map[string][]string
 }
 
 type MessageHandler func(context.Context, Message) error
@@ -37,6 +38,8 @@ type SubscribeOptions struct {
 	Consumer    string
 	Queue       string
 	MaxInflight int
+	AckWait     time.Duration
+	MaxDeliver  int
 }
 
 type MessageBus interface {

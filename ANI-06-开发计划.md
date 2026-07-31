@@ -102,6 +102,9 @@ Instance Observability Completion 增量补全（2026-07，PR4 分支）：
 
 邮件通知（2026-07-22）：
 - EMAIL-NOTIFY：9 个 Core `/api/v1/notifications/email/*` endpoint（SMTP CRUD / 收件人 CRUD / 事件订阅批量更新 / 测试发送）+ BOSS 前端发信设置页；local 内存 adapter；store 层 RequestID UUID 生成 + handler 透传；48 store 测试 + 34 handler 测试通过；`make validate-architecture` 和前端 `pnpm` 验证待补跑；详见 `repo/development-records/email-notify.md`。M1-NOTIFY-A 的 email 通道已完成，webhook/内部消息通道和通知历史查询待后续。
+
+NATS 接入（2026-07）：
+- NATS-INTEGRATION-A：NATS JetStream 适配器健壮性 + 示例 consumer + 集成测试，覆盖 Issue #001-#009：ports 契约扩展（AckWait/MaxDeliver/Headers）、ANI_EVENTS stream 改 InterestPolicy、Publish 写入 NATS headers + 注入 logger、Subscribe 业务层 Ack/Nak + panic recover + AckWait/MaxDeliver 透传、`message.Headers()` 实现 + 内部 jetStream 接口、metering 示例 consumer、adapter 单元测试（fake/mock JetStream，9 场景 65.3% coverage）、adapter 集成测试（7 场景连真实 NATS）+ Consumer 端到端集成测试（2 场景）、task 流示例 consumer + 集成测试（2 场景，WorkQueuePolicy 语义验证）；`//go:build integration` build tag 隔离集成测试不影响默认 `make test`；关键设计决策：adapter 不自动 Ack/Nak 由业务层决策、`safeBuffer`（sync.Mutex + bytes.Buffer）解决并发数据竞争、测试清理 PurgeStream + Drain；详见 `repo/development-records/nats-integration-a.md`。
 ```
 
 | 阶段 | 状态 | 完成时间 | 说明 |

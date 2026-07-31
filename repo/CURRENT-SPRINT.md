@@ -119,6 +119,42 @@ go test ./services/ani-gateway/internal/router/... -run “TestEmailNotif_”
 go vet ./pkg/adapters/runtime/... ./services/ani-gateway/internal/router/...
 ```
 
+## NATS 接入（2026-07）
+
+> 独立于 Sprint 13/14 real provider 收敛的 NATS JetStream 适配器健壮性与示例 consumer 集成开发流，覆盖 ports 契约扩展、adapter 健壮性补全、metering/task 示例 consumer 端到端集成测试。批次 ID：`NATS-INTEGRATION-A`，对应 PRD `repo/services/tasks/modules/prd/core/messaging/prd-nats-integration.md` 和 SPEC `repo/services/tasks/modules/spec/core/messaging/spec-nats-integration.md`。
+
+| Issue | 描述 | 状态 | 证据 |
+|---|---|---|---|
+| #001 | 扩展 `ports.SubscribeOptions`（AckWait/MaxDeliver）和 `ports.Message`（Headers）契约 | ✅ 已完成 | `development-records/nats-integration-a.md` Issue #001 |
+| #002 | 修复 ANI_EVENTS stream 为 InterestPolicy（event fan-out） | ✅ 已完成 | `development-records/nats-integration-a.md` Issue #002 |
+| #003 | Publish 写入 NATS headers（tenant-id 等 5 个 key）+ 注入 logger | ✅ 已完成 | `development-records/nats-integration-a.md` Issue #003 |
+| #004 | Subscribe 业务层 Ack/Nak 决策 + panic recover + AckWait/MaxDeliver 透传 | ✅ 已完成 | `development-records/nats-integration-a.md` Issue #004 |
+| #005 | `message.Headers()` 实现 + 内部 jetStream 接口抽象 | ✅ 已完成 | `development-records/nats-integration-a.md` Issue #005 |
+| #006 | metering-service eventconsumer 示例 consumer | ✅ 已完成 | `development-records/nats-integration-a.md` Issue #006 |
+| #007 | adapter 单元测试（fake/mock JetStream，9 场景 65.3% coverage） | ✅ 已完成 | `development-records/nats-integration-a.md` Issue #007 |
+| #008 | adapter 集成测试（7 场景连真实 NATS）+ Consumer 端到端集成测试（2 场景） | ✅ 已完成 | `development-records/nats-integration-a.md` Issue #008 |
+| #009 | task 流示例 consumer + 集成测试（2 场景，WorkQueuePolicy 语义验证） | ✅ 已完成 | `development-records/nats-integration-a.md` Issue #009 |
+
+**关键设计决策：**
+- adapter 不自动处理消息确认，由业务层决定 Ack/Nak（避免在底层 adapter 耦合业务语义）
+- `//go:build integration` build tag 隔离集成测试，不影响默认 `make test`
+- `safeBuffer`（`sync.Mutex` + `bytes.Buffer`）跨 goroutine 安全捕获 slog 输出，解决并发数据竞争
+- 测试清理使用 `PurgeStream` + `Drain` 确保环境恢复
+
+验收命令：
+
+```bash
+# 单元测试（默认包含）
+go test ./pkg/adapters/nats/...
+go test ./services/metering-service/internal/eventconsumer/...
+go test ./services/task-service/internal/taskconsumer/...
+
+# 集成测试（需真实 NATS，build tag 隔离）
+go test -tags=integration ./pkg/adapters/nats/...
+go test -tags=integration ./services/metering-service/internal/eventconsumer/...
+go test -tags=integration ./services/task-service/internal/taskconsumer/...
+```
+
 ## Sprint 13 执行矩阵
 
 | 候选切片 | 真实组件方向 | 代码边界 | 当前状态 |

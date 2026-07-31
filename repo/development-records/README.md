@@ -102,6 +102,12 @@
 |---|---|---|
 | EMAIL-NOTIFY | 邮件通知 API + BOSS 发信设置页：9 个 Core endpoint（SMTP CRUD / 收件人 CRUD / 事件订阅批量更新 / 测试发送）；local 内存 adapter；BOSS 前端 SMTP 表单 + 收件人表格 + 订阅开关 + 测试发送；48 store 测试 + 34 handler 测试；RequestID store 层 UUID 生成 + handler 透传 | email-notify.md |
 
+### NATS 接入（2026-07）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| NATS-INTEGRATION-A | NATS JetStream 适配器健壮性 + 示例 consumer + 集成测试：Issue #001-#009 覆盖 ports 契约扩展（AckWait/MaxDeliver/Headers）、ANI_EVENTS stream 改 InterestPolicy、Publish 写入 NATS headers + 注入 logger、Subscribe 业务层 Ack/Nak + panic recover + AckWait/MaxDeliver 透传、`message.Headers()` 实现 + 内部 jetStream 接口、metering 示例 consumer、adapter 单元测试（fake/mock JetStream，9 场景 65.3% coverage）、adapter 集成测试（7 场景连真实 NATS）+ Consumer 端到端集成测试（2 场景）、task 流示例 consumer + 集成测试（2 场景，WorkQueuePolicy 语义验证）；`//go:build integration` 隔离集成测试不影响默认 `make test`；详见 `nats-integration-a.md` | nats-integration-a.md |
+
 ### M2.1 Knowledge Base Platform Contract（2026-07）
 
 | 批次 | 内容摘要 | 文件 |
