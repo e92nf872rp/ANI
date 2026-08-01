@@ -15,6 +15,11 @@ import (
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
+type instanceStorageBinder interface {
+	MountVolume(ctx context.Context, request ports.StorageVolumeMountRequest) (ports.StorageVolumeRecord, error)
+	MountFilesystem(ctx context.Context, request ports.StorageFilesystemMountRequest) (ports.StorageFilesystemRecord, error)
+}
+
 type LocalInstanceService struct {
 	orchestrator ports.WorkloadInstanceOrchestrator
 	store        ports.WorkloadInstanceStore
@@ -22,6 +27,7 @@ type LocalInstanceService struct {
 	lifecycle    ports.WorkloadInstanceLifecycleExecutor
 	identity     ports.WorkloadIdentityService
 	resources    ports.WorkloadInstanceResourceResolver
+	storage      instanceStorageBinder
 	sandbox      ports.SandboxRuntime
 	ops          ports.WorkloadInstanceOps
 }
@@ -55,6 +61,12 @@ func WithInstanceResourceResolver(resources ports.WorkloadInstanceResourceResolv
 func WithSandboxRuntime(sandbox ports.SandboxRuntime) InstanceServiceOption {
 	return func(service *LocalInstanceService) {
 		service.sandbox = sandbox
+	}
+}
+
+func WithInstanceStorageService(storage instanceStorageBinder) InstanceServiceOption {
+	return func(service *LocalInstanceService) {
+		service.storage = storage
 	}
 }
 
@@ -181,6 +193,30 @@ func (s *LocalInstanceService) Create(ctx context.Context, request ports.Workloa
 		}
 		return ports.WorkloadInstanceCreateResult{}, err
 	}
+	if err := s.bindCreateStorage(ctx, request, result); err != nil {
+		if preRecorded || s.operations != nil {
+			opID := operation.ID
+			if opID == "" && result.OperationID != "" {
+				opID = result.OperationID
+			}
+			if opID != "" {
+				_, _ = s.operations.AddOperationStep(ctx, opID, ports.WorkloadOperationStep{
+					StepName: "storage_mount",
+					Status:   ports.WorkloadOperationStepFailed,
+					Message:  err.Error(),
+				})
+				_, _ = s.operations.UpdateOperation(ctx, opID, ports.WorkloadOperationUpdate{
+					InstanceID:     result.Ref.InstanceID,
+					Status:         ports.WorkloadOperationFailed,
+					FailureReason:  "storage_mount_failed",
+					FailureMessage: err.Error(),
+					RetryEligible:  true,
+					UpdatedAt:      firstNonZeroTime(request.RequestedAt, result.FinalStatus.UpdatedAt),
+				})
+			}
+		}
+		return ports.WorkloadInstanceCreateResult{}, err
+	}
 	if s.operations == nil {
 		return result, nil
 	}
@@ -207,7 +243,7 @@ func (s *LocalInstanceService) Create(ctx context.Context, request ports.Workloa
 		}
 	}
 	result.OperationID = operation.ID
-	if err := s.recordCreateTimeline(ctx, operation.ID, result); err != nil {
+	if err := s.recordCreateTimeline(ctx, operation.ID, request.Spec, resolvedResourceRefs, result); err != nil {
 		return ports.WorkloadInstanceCreateResult{}, err
 	}
 	if s.identity != nil && result.Identity == nil {
@@ -1350,15 +1386,77 @@ func hasStorageResource(items []ports.WorkloadStorageAttachment, resourceType, r
 	return false
 }
 
-func (s *LocalInstanceService) recordCreateTimeline(ctx context.Context, operationID string, result ports.WorkloadInstanceCreateResult) error {
-	steps := []ports.WorkloadOperationStep{
-		{StepName: "plan", Status: ports.WorkloadOperationStepSucceeded, Message: "workload reference allocated"},
-		{StepName: "render", Status: ports.WorkloadOperationStepSucceeded, Message: fmt.Sprintf("%d provider manifest(s) rendered", len(result.Manifests))},
-		{StepName: "admission", Status: boolStepStatus(result.Admission.Allowed), Message: result.Admission.Reason},
-		{StepName: "audit", Status: nonEmptyStepStatus(result.AuditID), Message: "plan audit recorded"},
-		{StepName: "dry_run", Status: boolStepStatus(result.DryRun.Accepted), Message: result.DryRun.Reason},
-		{StepName: "apply", Status: applyStepStatus(result.Apply.Applied), Message: result.Apply.Reason},
+func (s *LocalInstanceService) bindCreateStorage(ctx context.Context, request ports.WorkloadInstanceCreateRequest, result ports.WorkloadInstanceCreateResult) error {
+	if s.storage == nil || (request.Spec.Kind != ports.WorkloadKindContainer && request.Spec.Kind != ports.WorkloadKindGPUContainer) {
+		return nil
 	}
+	attachments := renderStorageAttachments(request.Spec)
+	if len(attachments) == 0 {
+		return nil
+	}
+	instanceRoute := "instances/" + result.Ref.InstanceID
+	for _, attachment := range attachments {
+		switch attachment.ResourceType {
+		case "volume":
+			if _, err := s.storage.MountVolume(ctx, ports.StorageVolumeMountRequest{
+				TenantID:       result.Ref.TenantID,
+				VolumeID:       attachment.ResourceID,
+				IdempotencyKey: request.IdempotencyKey + ":mount-volume:" + attachment.ResourceID,
+				InstanceID:     result.Ref.InstanceID,
+				InstanceRoute:  instanceRoute,
+				MountName:      firstNonEmpty(attachment.Name, attachment.MountPath),
+			}); err != nil {
+				return fmt.Errorf("mount volume %q: %w", attachment.ResourceID, err)
+			}
+		case "filesystem":
+			if _, err := s.storage.MountFilesystem(ctx, ports.StorageFilesystemMountRequest{
+				TenantID:       result.Ref.TenantID,
+				FilesystemID:   attachment.ResourceID,
+				IdempotencyKey: request.IdempotencyKey + ":mount-filesystem:" + attachment.ResourceID,
+				InstanceID:     result.Ref.InstanceID,
+				InstanceRoute:  instanceRoute,
+				MountPath:      attachment.MountPath,
+				AutoMount:      true,
+			}); err != nil {
+				return fmt.Errorf("mount filesystem %q: %w", attachment.ResourceID, err)
+			}
+		}
+	}
+	return nil
+}
+
+func (s *LocalInstanceService) recordCreateTimeline(ctx context.Context, operationID string, spec ports.WorkloadSpec, resourceRefs []string, result ports.WorkloadInstanceCreateResult) error {
+	steps := []ports.WorkloadOperationStep{}
+	if len(resourceRefs) > 0 {
+		steps = append(steps, ports.WorkloadOperationStep{
+			StepName: "resolve_resources",
+			Status:   ports.WorkloadOperationStepSucceeded,
+			Message:  fmt.Sprintf("%d referenced resource(s) resolved", len(resourceRefs)),
+		})
+	}
+	if strings.TrimSpace(spec.Network.SubnetID) != "" || strings.TrimSpace(spec.Network.VPCID) != "" {
+		steps = append(steps, ports.WorkloadOperationStep{
+			StepName: "network_binding",
+			Status:   ports.WorkloadOperationStepSucceeded,
+			Message:  createNetworkBindingMessage(spec.Network),
+		})
+	}
+	if storageCount := len(renderStorageAttachments(spec)); storageCount > 0 {
+		status := ports.WorkloadOperationStepSucceeded
+		message := fmt.Sprintf("%d storage attachment(s) bound for create", storageCount)
+		if s.storage == nil {
+			message = fmt.Sprintf("%d storage attachment(s) rendered; storage binder not configured", storageCount)
+		}
+		steps = append(steps, ports.WorkloadOperationStep{StepName: "storage_mount", Status: status, Message: message})
+	}
+	steps = append(steps,
+		ports.WorkloadOperationStep{StepName: "plan", Status: ports.WorkloadOperationStepSucceeded, Message: "workload reference allocated"},
+		ports.WorkloadOperationStep{StepName: "render", Status: ports.WorkloadOperationStepSucceeded, Message: fmt.Sprintf("%d provider manifest(s) rendered", len(result.Manifests))},
+		ports.WorkloadOperationStep{StepName: "admission", Status: boolStepStatus(result.Admission.Allowed), Message: result.Admission.Reason},
+		ports.WorkloadOperationStep{StepName: "audit", Status: nonEmptyStepStatus(result.AuditID), Message: "plan audit recorded"},
+		ports.WorkloadOperationStep{StepName: "dry_run", Status: boolStepStatus(result.DryRun.Accepted), Message: result.DryRun.Reason},
+		ports.WorkloadOperationStep{StepName: "apply", Status: applyStepStatus(result.Apply.Applied), Message: result.Apply.Reason},
+	)
 	if result.Apply.Applied {
 		steps = append(steps,
 			ports.WorkloadOperationStep{StepName: "observe", Status: nonEmptyStepStatus(result.Observation.Provider), Message: result.Observation.Phase},
@@ -1371,6 +1469,23 @@ func (s *LocalInstanceService) recordCreateTimeline(ctx context.Context, operati
 		}
 	}
 	return nil
+}
+
+func createNetworkBindingMessage(network ports.WorkloadNetworkPolicy) string {
+	parts := make([]string, 0, 3)
+	if vpcID := strings.TrimSpace(network.VPCID); vpcID != "" {
+		parts = append(parts, "vpc="+vpcID)
+	}
+	if subnetID := strings.TrimSpace(network.SubnetID); subnetID != "" {
+		parts = append(parts, "subnet="+subnetID)
+	}
+	if len(network.SecurityGroupIDs) > 0 {
+		parts = append(parts, "security_groups="+joinSecurityGroupIDs(network.SecurityGroupIDs))
+	}
+	if len(parts) == 0 {
+		return "network policy accepted"
+	}
+	return strings.Join(parts, " ")
 }
 
 func (s *LocalInstanceService) withIdentity(ctx context.Context, record ports.WorkloadInstanceRecord) ports.WorkloadInstanceRecord {

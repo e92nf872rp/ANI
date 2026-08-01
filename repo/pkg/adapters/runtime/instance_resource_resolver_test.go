@@ -42,6 +42,45 @@ func TestLocalInstanceResourceResolverValidatesTenantAndReadyResources(t *testin
 	if len(result.ResourceRefs) != 2 || result.ResourceRefs[0] != "vpc/"+vpc.VPCID || result.ResourceRefs[1] != "volume/"+volume.VolumeID {
 		t.Fatalf("resource refs = %#v, want VPC and volume refs", result.ResourceRefs)
 	}
+	if len(result.Spec.Storage) != 1 ||
+		result.Spec.Storage[0].Kind != ports.StorageAttachmentSharedPVC ||
+		result.Spec.Storage[0].SourceRef != storageProviderName("vol", volume.VolumeID) ||
+		result.Spec.Storage[0].MountPath != "/data" {
+		t.Fatalf("storage attachments = %#v, want shared PVC claim for resolved volume", result.Spec.Storage)
+	}
+}
+
+func TestLocalInstanceResourceResolverAcceptsPendingVolumeForContainerMount(t *testing.T) {
+	storage := NewLocalStorageService()
+	volume, err := storage.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{
+		TenantID: "tenant-a", IdempotencyKey: "resolver-pending-volume", Name: "pending-data", SizeGiB: 5,
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume error = %v", err)
+	}
+	storage.mu.Lock()
+	pending := storage.volumes[volume.VolumeID]
+	pending.State = ports.StorageResourcePending
+	pending.Reason = "observed Kubernetes PVC phase Pending"
+	storage.volumes[volume.VolumeID] = pending
+	storage.mu.Unlock()
+	resolver := NewLocalInstanceResourceResolver(nil, storage)
+	result, err := resolver.ResolveCreate(context.Background(), ports.WorkloadResourceResolveRequest{
+		TenantID: "tenant-a",
+		Spec: ports.WorkloadSpec{
+			TenantID: "tenant-a",
+			Kind:     ports.WorkloadKindContainer,
+			Container: &ports.ContainerInstanceSpec{
+				VolumeMounts: []ports.InstanceVolumeMount{{VolumeID: volume.VolumeID, MountPath: "/data"}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveCreate error = %v", err)
+	}
+	if len(result.ResourceRefs) != 1 || result.ResourceRefs[0] != "volume/"+volume.VolumeID {
+		t.Fatalf("resource refs = %#v, want pending volume ref", result.ResourceRefs)
+	}
 }
 
 func TestLocalInstanceResourceResolverFailsClosedAcrossTenants(t *testing.T) {

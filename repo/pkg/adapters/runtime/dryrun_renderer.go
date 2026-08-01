@@ -211,10 +211,23 @@ func selectorLabels(spec ports.WorkloadSpec) map[string]string {
 func annotationsWithInstancePlan(spec ports.WorkloadSpec) map[string]string {
 	annotations := mergeStringMap(map[string]string{
 		"ani.kubercloud.io/network-planes":  networkPlanes(spec.Network.Attachments),
-		"ani.kubercloud.io/storage-kinds":   storageKinds(spec.Storage),
+		"ani.kubercloud.io/storage-kinds":   storageKinds(renderStorageAttachments(spec)),
 		"ani.kubercloud.io/render-mode":     "dry-run",
 		"ani.kubercloud.io/runtime-adapter": "planning",
 	}, spec.Annotations)
+	if vpcID := strings.TrimSpace(spec.Network.VPCID); vpcID != "" {
+		annotations["ani.kubercloud.io/vpc-id"] = vpcID
+	}
+	if subnetID := strings.TrimSpace(spec.Network.SubnetID); subnetID != "" {
+		annotations["ani.kubercloud.io/subnet-id"] = subnetID
+		annotations["ovn.kubernetes.io/logical_switch"] = networkProviderName("subnet", subnetID)
+	}
+	if privateIP := strings.TrimSpace(spec.Network.PrivateIP); privateIP != "" {
+		annotations["ovn.kubernetes.io/ip_address"] = privateIP
+	}
+	if securityGroups := joinSecurityGroupIDs(spec.Network.SecurityGroupIDs); securityGroups != "" {
+		annotations["ani.kubercloud.io/security-groups"] = securityGroups
+	}
 	if spec.Identity != nil {
 		annotations["ani.kubercloud.io/workload-identity-key-id"] = spec.Identity.KeyID
 		annotations["ani.kubercloud.io/workload-identity-secret"] = workloadIdentitySecretName(spec)
@@ -225,6 +238,18 @@ func annotationsWithInstancePlan(spec ports.WorkloadSpec) map[string]string {
 		}
 	}
 	return annotations
+}
+
+func joinSecurityGroupIDs(ids []string) string {
+	parts := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		parts = append(parts, id)
+	}
+	return strings.Join(parts, ",")
 }
 
 func workloadIdentityEnv(spec ports.WorkloadSpec) []any {
@@ -381,6 +406,7 @@ func renderStorageAttachments(spec ports.WorkloadSpec) []ports.WorkloadStorageAt
 	items := make([]ports.WorkloadStorageAttachment, 0, len(spec.Storage))
 	seen := map[string]struct{}{}
 	for _, item := range spec.Storage {
+		item = normalizeContainerStorageAttachment(item)
 		item.Name = firstNonEmpty(item.Name, storageMountName(item.ResourceType, item.ResourceID))
 		key := item.ResourceType + ":" + item.ResourceID + ":" + item.MountPath
 		if _, ok := seen[key]; ok {
@@ -393,7 +419,13 @@ func renderStorageAttachments(spec ports.WorkloadSpec) []ports.WorkloadStorageAt
 		return items
 	}
 	for _, mount := range spec.Container.VolumeMounts {
-		item := ports.WorkloadStorageAttachment{Name: storageMountName("volume", mount.VolumeID), ResourceType: "volume", ResourceID: mount.VolumeID, MountPath: mount.MountPath, ReadOnly: mount.ReadOnly}
+		item := normalizeContainerStorageAttachment(ports.WorkloadStorageAttachment{
+			Name:         storageMountName("volume", mount.VolumeID),
+			ResourceType: "volume",
+			ResourceID:   mount.VolumeID,
+			MountPath:    mount.MountPath,
+			ReadOnly:     mount.ReadOnly,
+		})
 		key := item.ResourceType + ":" + item.ResourceID + ":" + item.MountPath
 		if _, ok := seen[key]; !ok {
 			seen[key] = struct{}{}
@@ -401,7 +433,13 @@ func renderStorageAttachments(spec ports.WorkloadSpec) []ports.WorkloadStorageAt
 		}
 	}
 	for _, mount := range spec.Container.FilesystemMounts {
-		item := ports.WorkloadStorageAttachment{Name: storageMountName("filesystem", mount.FilesystemID), ResourceType: "filesystem", ResourceID: mount.FilesystemID, MountPath: mount.MountPath, ReadOnly: mount.ReadOnly}
+		item := normalizeContainerStorageAttachment(ports.WorkloadStorageAttachment{
+			Name:         storageMountName("filesystem", mount.FilesystemID),
+			ResourceType: "filesystem",
+			ResourceID:   mount.FilesystemID,
+			MountPath:    mount.MountPath,
+			ReadOnly:     mount.ReadOnly,
+		})
 		key := item.ResourceType + ":" + item.ResourceID + ":" + item.MountPath
 		if _, ok := seen[key]; !ok {
 			seen[key] = struct{}{}
@@ -409,6 +447,28 @@ func renderStorageAttachments(spec ports.WorkloadSpec) []ports.WorkloadStorageAt
 		}
 	}
 	return items
+}
+
+// normalizeContainerStorageAttachment maps resolved volume/filesystem refs onto
+// shared PVC claims so container pods mount existing Storage provider PVCs
+// instead of emptyDir placeholders.
+func normalizeContainerStorageAttachment(item ports.WorkloadStorageAttachment) ports.WorkloadStorageAttachment {
+	resourceID := strings.TrimSpace(item.ResourceID)
+	if resourceID == "" {
+		return item
+	}
+	switch strings.TrimSpace(item.ResourceType) {
+	case "filesystem":
+		item.Kind = ports.StorageAttachmentSharedPVC
+		item.SourceRef = firstNonEmpty(item.SourceRef, storageProviderName("fs", resourceID))
+	case "volume", "":
+		item.ResourceType = "volume"
+		if item.Kind == "" || item.Kind == ports.StorageAttachmentDataDisk || item.Kind == ports.StorageAttachmentSharedPVC {
+			item.Kind = ports.StorageAttachmentSharedPVC
+			item.SourceRef = firstNonEmpty(item.SourceRef, storageProviderName("vol", resourceID))
+		}
+	}
+	return item
 }
 
 func storageMountName(kind, resourceID string) string {

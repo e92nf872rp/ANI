@@ -236,7 +236,10 @@ func (r *LocalInstanceResourceResolver) resolveStorage(ctx context.Context, tena
 		if err != nil {
 			return fmt.Errorf("resolve instance volume %q: %w", volumeID, err)
 		}
-		if volume.State != ports.StorageResourceAvailable {
+		// WaitForFirstConsumer PVCs remain Pending until a consumer Pod mounts them.
+		// For container create-time orchestration, Pending means the PVC intent exists
+		// and is attachable; Failed/Deleting/Deleted remain reject states.
+		if volume.State != ports.StorageResourceAvailable && volume.State != ports.StorageResourcePending {
 			return fmt.Errorf("%w: instance volume %q is %s", ports.ErrConflict, volumeID, volume.State)
 		}
 		seenVolumes[volumeID] = struct{}{}
@@ -295,14 +298,49 @@ func (r *LocalInstanceResourceResolver) resolveStorage(ctx context.Context, tena
 			if err := checkVolume(mount.VolumeID); err != nil {
 				return nil, err
 			}
+			spec.Storage = upsertResolvedStorageAttachment(spec.Storage, ports.WorkloadStorageAttachment{
+				Name:         storageMountName("volume", mount.VolumeID),
+				Kind:         ports.StorageAttachmentSharedPVC,
+				ResourceType: "volume",
+				ResourceID:   strings.TrimSpace(mount.VolumeID),
+				MountPath:    strings.TrimSpace(mount.MountPath),
+				ReadOnly:     mount.ReadOnly,
+				SourceRef:    storageProviderName("vol", mount.VolumeID),
+				Required:     true,
+				Status:       "resolved",
+			})
 		}
 		for _, mount := range spec.Container.FilesystemMounts {
 			if err := checkFilesystem(mount.FilesystemID); err != nil {
 				return nil, err
 			}
+			spec.Storage = upsertResolvedStorageAttachment(spec.Storage, ports.WorkloadStorageAttachment{
+				Name:         storageMountName("filesystem", mount.FilesystemID),
+				Kind:         ports.StorageAttachmentSharedPVC,
+				ResourceType: "filesystem",
+				ResourceID:   strings.TrimSpace(mount.FilesystemID),
+				MountPath:    strings.TrimSpace(mount.MountPath),
+				ReadOnly:     mount.ReadOnly,
+				SourceRef:    storageProviderName("fs", mount.FilesystemID),
+				Required:     true,
+				Status:       "resolved",
+			})
 		}
 	}
 	return refs, nil
+}
+
+func upsertResolvedStorageAttachment(items []ports.WorkloadStorageAttachment, next ports.WorkloadStorageAttachment) []ports.WorkloadStorageAttachment {
+	if strings.TrimSpace(next.ResourceID) == "" || strings.TrimSpace(next.MountPath) == "" {
+		return items
+	}
+	for i, item := range items {
+		if item.ResourceType == next.ResourceType && item.ResourceID == next.ResourceID && item.MountPath == next.MountPath {
+			items[i] = next
+			return items
+		}
+	}
+	return append(items, next)
 }
 
 func (r *LocalInstanceResourceResolver) resolveSecrets(ctx context.Context, tenantID string, secretIDs []string) ([]string, error) {

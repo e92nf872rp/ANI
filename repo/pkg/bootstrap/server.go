@@ -54,24 +54,29 @@ type Config struct {
 	VectorStoreDatabase         string
 	VectorStoreCollectionPrefix string
 
-	WorkloadProvider                   string
-	WorkloadProviderApplyEnabled       bool
-	SecretService                      ports.SecretService
-	GPUInventoryProvider               string
-	NetworkProvider                    string
-	NetworkProviderApplyEnabled        bool
-	NetworkProviderUserID              string
-	NetworkProviderPermissionProof     string
-	StorageProvider                    string
-	StorageProviderApplyEnabled        bool
-	StorageProviderUserID              string
-	StorageProviderPermissionProof     string
-	RegistryProviderMode               string
-	HarborEndpoint                     string
-	HarborUsername                     string
-	HarborPassword                     string
-	HarborRequestTimeout               time.Duration
-	RegistryTLSInsecure                bool
+	WorkloadProvider               string
+	WorkloadProviderApplyEnabled   bool
+	SecretService                  ports.SecretService
+	GPUInventoryProvider           string
+	NetworkProvider                string
+	NetworkProviderApplyEnabled    bool
+	NetworkProviderUserID          string
+	NetworkProviderPermissionProof string
+	StorageProvider                string
+	StorageProviderApplyEnabled    bool
+	StorageProviderUserID          string
+	StorageProviderPermissionProof string
+	RegistryProviderMode           string
+	HarborEndpoint                 string
+	HarborUsername                 string
+	HarborPassword                 string
+	HarborRequestTimeout           time.Duration
+	RegistryTLSInsecure            bool
+	// Optional shared Core services for Gateway so /networks,/volumes and
+	// /instances resolve against the same in-process adapters.
+	SharedNetworkService               ports.NetworkService
+	SharedStorageService               ports.StorageService
+	SharedImageRegistry                ports.ImageRegistry
 	WorkloadLifecycleProvider          string
 	WorkloadLifecycleApplyEnabled      bool
 	WorkloadOpsProvider                string

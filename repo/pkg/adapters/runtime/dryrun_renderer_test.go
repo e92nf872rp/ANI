@@ -131,6 +131,50 @@ func TestKubernetesDryRunRendererUsesContainerIntent(t *testing.T) {
 	if len(container["volumeMounts"].([]any)) != 1 || container["volumeMounts"].([]any)[0].(map[string]any)["mountPath"] != "/data" {
 		t.Fatalf("volume mounts = %#v, want /data", container["volumeMounts"])
 	}
+	volumes := pod["volumes"].([]any)
+	if len(volumes) != 1 {
+		t.Fatalf("volumes = %#v, want one PVC volume", volumes)
+	}
+	pvc := volumes[0].(map[string]any)["persistentVolumeClaim"].(map[string]any)
+	if pvc["claimName"] != "vol-vol-1" {
+		t.Fatalf("claimName = %#v, want vol-vol-1", pvc["claimName"])
+	}
+}
+
+func TestKubernetesDryRunRendererBindsContainerNetworkAndFilesystem(t *testing.T) {
+	renderer := NewKubernetesDryRunRenderer(NewPlanningRuntime())
+	manifests, err := renderer.Render(context.Background(), ports.WorkloadSpec{
+		TenantID: "tenant-a",
+		Name:     "api-net",
+		Kind:     ports.WorkloadKindContainer,
+		Image:    "harbor/app:1",
+		Network: ports.WorkloadNetworkPolicy{
+			VPCID:            "vpc-main",
+			SubnetID:         "subnet-private",
+			SecurityGroupIDs: []string{"sg-web", "sg-db"},
+			PrivateIP:        "10.40.1.20",
+		},
+		Container: &ports.ContainerInstanceSpec{
+			FilesystemMounts: []ports.InstanceFilesystemMount{{FilesystemID: "fs-shared", MountPath: "/mnt/nfs"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	content := manifests[0].Content
+	for _, want := range []string{
+		`"ovn.kubernetes.io/logical_switch": "subnet-subnet-private"`,
+		`"ovn.kubernetes.io/ip_address": "10.40.1.20"`,
+		`"ani.kubercloud.io/vpc-id": "vpc-main"`,
+		`"ani.kubercloud.io/subnet-id": "subnet-private"`,
+		`"ani.kubercloud.io/security-groups": "sg-web,sg-db"`,
+		`"claimName": "fs-fs-shared"`,
+		`"/mnt/nfs"`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("manifest missing %q:\n%s", want, content)
+		}
+	}
 }
 
 func TestKubernetesDryRunRendererRendersContainerServiceForPorts(t *testing.T) {

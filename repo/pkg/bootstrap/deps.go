@@ -210,6 +210,21 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 	}
 	networkResources := runtimeadapter.NewLocalNetworkService(networkServiceOptions...)
 	storageResources := runtimeadapter.NewLocalStorageService(storageServiceOptions...)
+	resolverNetwork := ports.NetworkService(networkResources)
+	resolverStorage := ports.StorageService(storageResources)
+	if cfg.SharedNetworkService != nil {
+		resolverNetwork = cfg.SharedNetworkService
+	}
+	if cfg.SharedStorageService != nil {
+		resolverStorage = cfg.SharedStorageService
+	}
+	if cfg.SharedImageRegistry != nil {
+		imageRegistry = cfg.SharedImageRegistry
+		resourceRegistry = cfg.SharedImageRegistry
+		if _, notConfigured := imageRegistry.(registry.NotConfigured); notConfigured {
+			resourceRegistry = nil
+		}
+	}
 	secretService := cfg.SecretService
 	if secretService == nil {
 		secretService = runtimeadapter.NewLocalSecretService()
@@ -267,7 +282,8 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 			runtimeadapter.WithInstanceLifecycleExecutor(lifecycle),
 			runtimeadapter.WithWorkloadIdentityService(workloadIdentity),
 			runtimeadapter.WithSandboxRuntime(sandboxRuntime),
-			runtimeadapter.WithInstanceResourceResolver(runtimeadapter.NewLocalInstanceResourceResolverWithDependencies(networkResources, storageResources, gpuSpecs, resourceRegistry, secretService)),
+			runtimeadapter.WithInstanceStorageService(resolverStorage),
+			runtimeadapter.WithInstanceResourceResolver(runtimeadapter.NewLocalInstanceResourceResolverWithDependencies(resolverNetwork, resolverStorage, gpuSpecs, resourceRegistry, secretService)),
 		),
 		InstanceOps:           instanceOps,
 		InstanceObservability: instanceObservability,
@@ -277,14 +293,14 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 		NetworkApply:          networkProvider,
 		NetworkStatus:         networkProvider,
 		NetworkReconcile:      runtimeadapter.NewLocalNetworkStatusReconciler(networkStore),
-		NetworkResources:      networkResources,
+		NetworkResources:      resolverNetwork,
 		StorageStore:          storageStore,
 		StorageRenderer:       runtimeadapter.NewKubernetesStorageRenderer(),
 		StorageDryRun:         storageProvider,
 		StorageApply:          storageProvider,
 		StorageStatus:         storageProvider,
 		StorageReconcile:      runtimeadapter.NewLocalStorageStatusReconciler(storageStore),
-		StorageResources:      storageResources,
+		StorageResources:      resolverStorage,
 	}, nil
 }
 

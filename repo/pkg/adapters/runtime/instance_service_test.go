@@ -36,6 +36,77 @@ func TestLocalInstanceServiceCreatesContainerThroughOrchestrator(t *testing.T) {
 	}
 }
 
+func TestLocalInstanceServiceCreateOrchestratesNetworkAndStorage(t *testing.T) {
+	orchestrator := &fakeInstanceOrchestrator{}
+	operations := NewLocalOperationStore()
+	storage := &fakeInstanceStorageBinder{}
+	resolver := &capturingInstanceResourceResolver{
+		result: ports.WorkloadResourceResolveResult{
+			Spec: ports.WorkloadSpec{
+				Network: ports.WorkloadNetworkPolicy{
+					VPCID:            "vpc-main",
+					SubnetID:         "subnet-private",
+					SecurityGroupIDs: []string{"sg-web"},
+				},
+				Container: &ports.ContainerInstanceSpec{
+					VolumeMounts: []ports.InstanceVolumeMount{{VolumeID: "vol-data", MountPath: "/data"}},
+				},
+				Storage: []ports.WorkloadStorageAttachment{{
+					Name:         "volume-vol-data",
+					Kind:         ports.StorageAttachmentSharedPVC,
+					ResourceType: "volume",
+					ResourceID:   "vol-data",
+					MountPath:    "/data",
+					SourceRef:    "vol-vol-data",
+				}},
+			},
+			ResourceRefs: []string{"vpc/vpc-main", "subnet/subnet-private", "security_group/sg-web", "volume/vol-data"},
+		},
+	}
+	service := NewLocalInstanceServiceWithOptions(
+		orchestrator,
+		&fakeInstanceStore{},
+		NewLocalInstanceOpsGuard(),
+		WithOperationStore(operations),
+		WithInstanceResourceResolver(resolver),
+		WithInstanceStorageService(storage),
+	)
+	result, err := service.Create(context.Background(), ports.WorkloadInstanceCreateRequest{
+		IdempotencyKey: "create-orchestrated-01",
+		Spec: ports.WorkloadSpec{
+			TenantID: "tenant-a",
+			Name:     "app-orch",
+			Kind:     ports.WorkloadKindContainer,
+			Image:    "harbor/app:1",
+			Network: ports.WorkloadNetworkPolicy{
+				VPCID:            "vpc-main",
+				SubnetID:         "subnet-private",
+				SecurityGroupIDs: []string{"sg-web"},
+			},
+			Container: &ports.ContainerInstanceSpec{
+				VolumeMounts: []ports.InstanceVolumeMount{{VolumeID: "vol-data", MountPath: "/data"}},
+			},
+		},
+		UserID:          "user-a",
+		PermissionProof: "rbac:create:workload",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if storage.volumeMounts != 1 || storage.lastVolumeID != "vol-data" || storage.lastInstanceID != result.Ref.InstanceID {
+		t.Fatalf("storage binder = mounts=%d volume=%q instance=%q, want one mount for vol-data on created instance", storage.volumeMounts, storage.lastVolumeID, storage.lastInstanceID)
+	}
+	operation, err := operations.GetOperation(context.Background(), "tenant-a", result.OperationID)
+	if err != nil {
+		t.Fatalf("GetOperation error = %v", err)
+	}
+	for _, step := range []string{"resolve_resources", "network_binding", "storage_mount", "plan", "apply"} {
+		if !hasOperationStep(operation.Steps, step, ports.WorkloadOperationStepSucceeded) {
+			t.Fatalf("operation steps = %#v, want succeeded %s", operation.Steps, step)
+		}
+	}
+}
+
 func TestLocalInstanceServiceResolvesReferencedResourcesBeforeOrchestration(t *testing.T) {
 	orchestrator := &fakeInstanceOrchestrator{}
 	resolver := &capturingInstanceResourceResolver{
@@ -2091,6 +2162,35 @@ func (r *capturingInstanceResourceResolver) ResolveCreate(_ context.Context, req
 }
 
 var _ ports.WorkloadInstanceResourceResolver = (*capturingInstanceResourceResolver)(nil)
+
+type fakeInstanceStorageBinder struct {
+	volumeMounts     int
+	filesystemMounts int
+	lastVolumeID     string
+	lastFilesystemID string
+	lastInstanceID   string
+	err              error
+}
+
+func (f *fakeInstanceStorageBinder) MountVolume(_ context.Context, request ports.StorageVolumeMountRequest) (ports.StorageVolumeRecord, error) {
+	if f.err != nil {
+		return ports.StorageVolumeRecord{}, f.err
+	}
+	f.volumeMounts++
+	f.lastVolumeID = request.VolumeID
+	f.lastInstanceID = request.InstanceID
+	return ports.StorageVolumeRecord{VolumeID: request.VolumeID, MountInstanceID: request.InstanceID}, nil
+}
+
+func (f *fakeInstanceStorageBinder) MountFilesystem(_ context.Context, request ports.StorageFilesystemMountRequest) (ports.StorageFilesystemRecord, error) {
+	if f.err != nil {
+		return ports.StorageFilesystemRecord{}, f.err
+	}
+	f.filesystemMounts++
+	f.lastFilesystemID = request.FilesystemID
+	f.lastInstanceID = request.InstanceID
+	return ports.StorageFilesystemRecord{FilesystemID: request.FilesystemID}, nil
+}
 
 type fakeLifecycleExecutor struct {
 	calls  int

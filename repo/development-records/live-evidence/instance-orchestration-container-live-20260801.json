@@ -1,0 +1,50 @@
+{
+  "cleared_missing_items": [
+    "instance_registry_admission",
+    "instance_network_selection",
+    "instance_storage_attachment_orchestration"
+  ],
+  "create_operation_id": "2f8afcbd-5c0c-4000-abaf-dffd17f8f440",
+  "delete_operation_id": "afd007a2-74d1-48a1-82c8-6ba3bfbd262d",
+  "generated_at": "2026-08-01T10:23:17.427649Z",
+  "id": "instance-orchestration-container-live-gate",
+  "instance_id": "inst_b757cd1b-8567-4faf-8f39-b6fcb85e2c95",
+  "kind": "container",
+  "network_observe": {
+    "logical_switch": "subnet-subnet-ebf2e060-e1d1-45f4-901c-e5015e17c9b0",
+    "subnet_id": "subnet_ebf2e060-e1d1-45f4-901c-e5015e17c9b0",
+    "vpc_id": "vpc_0380f97a-7cd6-447a-8375-304715522e3e"
+  },
+  "operation_steps": [
+    "resolve_resources",
+    "network_binding",
+    "storage_mount",
+    "plan",
+    "render",
+    "admission",
+    "audit",
+    "dry_run",
+    "apply",
+    "observe",
+    "reconcile",
+    "workload_identity_bind"
+  ],
+  "production_shape": {
+    "missing_items": [],
+    "status": "passed"
+  },
+  "profile": "INSTANCE-ORCHESTRATION-A",
+  "start_operation_id": "3005dba7-5a45-4fcc-a375-8649a01a01c0",
+  "state_after_create": "running",
+  "state_after_delete": "deleted",
+  "state_after_start": "running",
+  "state_after_stop": "stopped",
+  "status": "passed",
+  "stop_operation_id": "3891b40a-51cc-4eec-8c42-55e3ec94cbc2",
+  "storage_observe": {
+    "claim_names": [
+      "vol-vol-18705b66-6304-49bf-8fc4-f88ba8c6b093"
+    ],
+    "expected_volume": "vol-vol-18705b66-6304-49bf-8fc4-f88ba8c6b093"
+  }
+}

@@ -53,30 +53,6 @@ func main() {
 		logger.Error("failed to configure kubernetes rest client for orphan discovery", "err", err)
 		os.Exit(1)
 	}
-	instanceRuntimeConfig := gatewayInstanceRuntimeConfigFromEnv()
-	instanceRuntime, closeInstanceRuntime, err := newGatewayInstanceRuntime(runtimeCtx, instanceRuntimeConfig, secretService)
-	if err != nil {
-		logger.Error("failed to configure instance provider runtime", "err", err)
-		os.Exit(1)
-	}
-	defer closeInstanceRuntime()
-	if instanceRuntime.KubernetesRESTClient != nil {
-		kubernetesRESTClient = instanceRuntime.KubernetesRESTClient
-		logger.Info("instance provider runtime configured",
-			"provider", strings.TrimSpace(instanceRuntimeConfig.WorkloadProvider),
-			"persistent_store", true,
-		)
-	}
-	gpuSchedulingQueueStore, err := newGatewayGPUSchedulingQueueStore(gatewayGPUSchedulingQueueRuntimeConfigFromEnv())
-	if err != nil {
-		logger.Error("failed to configure gpu scheduling queue store runtime", "err", err)
-		os.Exit(1)
-	}
-	gpuInstanceStore, err := newGatewayGPUInstanceStore(runtimeCtx, gatewayGPUInstanceStoreConfigFromEnv())
-	if err != nil {
-		logger.Error("failed to configure gpu instance store runtime", "err", err)
-		os.Exit(1)
-	}
 	networkService, err := newGatewayNetworkService(gatewayNetworkRuntimeConfigFromEnv())
 	if err != nil {
 		logger.Error("failed to configure network provider runtime", "err", err)
@@ -94,6 +70,34 @@ func main() {
 	}
 	if closeRegistryRuntime != nil {
 		defer closeRegistryRuntime()
+	}
+	instanceRuntimeConfig := gatewayInstanceRuntimeConfigFromEnv()
+	instanceRuntimeConfig.SharedNetworkService = networkService
+	instanceRuntimeConfig.SharedStorageService = storageService
+	instanceRuntimeConfig.SharedImageRegistry = imageRegistry
+	instanceRuntime, closeInstanceRuntime, err := newGatewayInstanceRuntime(runtimeCtx, instanceRuntimeConfig, secretService)
+	if err != nil {
+		logger.Error("failed to configure instance provider runtime", "err", err)
+		os.Exit(1)
+	}
+	defer closeInstanceRuntime()
+	if instanceRuntime.KubernetesRESTClient != nil {
+		kubernetesRESTClient = instanceRuntime.KubernetesRESTClient
+		logger.Info("instance provider runtime configured",
+			"provider", strings.TrimSpace(instanceRuntimeConfig.WorkloadProvider),
+			"persistent_store", true,
+			"shared_network_storage_registry", true,
+		)
+	}
+	gpuSchedulingQueueStore, err := newGatewayGPUSchedulingQueueStore(gatewayGPUSchedulingQueueRuntimeConfigFromEnv())
+	if err != nil {
+		logger.Error("failed to configure gpu scheduling queue store runtime", "err", err)
+		os.Exit(1)
+	}
+	gpuInstanceStore, err := newGatewayGPUInstanceStore(runtimeCtx, gatewayGPUInstanceStoreConfigFromEnv())
+	if err != nil {
+		logger.Error("failed to configure gpu instance store runtime", "err", err)
+		os.Exit(1)
 	}
 	vectorStoreRuntimeConfig := gatewayVectorStoreRuntimeConfigFromEnv()
 	vectorStoreService, err := newGatewayVectorStoreService(vectorStoreRuntimeConfig)

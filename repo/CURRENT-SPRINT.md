@@ -98,8 +98,9 @@ Issue 清单：`repo/services/tasks/issues/issue-01-openapi-queue-crud.md` ~ `is
 | INSTANCE-SANDBOX-ADAPTER-A | live passed（2026-08-01） | Kata `RuntimeClass/sandbox-kata`（kata-deploy 4.0.0）；`KubernetesSandboxRuntime` create/pause/resume/delete；Gateway `instance-sandbox-live-20260801-v2`；记录 `instance-sandbox-adapter-a.md` |
 | INSTANCE-SANDBOX-LIVE-GATE-A | live passed（2026-08-01） | create/lifecycle evidence `live-evidence/instance-sandbox-live-20260801.json`（busybox）；code-run 扩展见下一批次 |
 | INSTANCE-SANDBOX-CODERUN-A | live passed（2026-08-01） | code-run 真实 Pod exec（kubectl）；`code_run_status=succeeded`；Gateway `instance-sandbox-coderun-20260801-v1`；镜像 `sandbox-python:3.12`；evidence `live-evidence/instance-sandbox-coderun-live-20260801.json`；token/port/file/checkpoint 仍 local-session；记录 `instance-sandbox-coderun-a.md` |
+| INSTANCE-ORCHESTRATION-A | live passed（2026-08-01） | Container create-time Registry/Network/Storage 编排：OVN `logical_switch`、volume→PVC、`MountVolume`、operation steps；Gateway 共享 Network/Storage/Registry 给 Instance resolver；`validate-instance-orchestration-live-gate --live` passed；evidence `live-evidence/instance-orchestration-container-live-20260801.json`；Gateway `instance-orchestration-20260801-v3`；不含 Console/Exec/GPU/配额/Sandbox |
 
-边界：本流程独立于既有 GPU 调度队列实现；container、VM、Sandbox create/lifecycle 与 code-run adapter 已落地，但完整 Gateway 字段转换、跨 Registry/Network/Storage/GPU Spec 编排、其余 Sandbox 子资源 real-provider、分页 result、配额和 GPU live gate 尚未完成，不声明全部实例管理 runtime ready 或 full platform production ready。
+边界：本流程独立于既有 GPU 调度队列实现；container、VM、Sandbox create/lifecycle、code-run 与 Container ORCHESTRATION live 已落地，但其余 Sandbox 子资源 real-provider、分页 result、配额和 GPU live gate 尚未完成，不声明全部实例管理 runtime ready 或 full platform production ready。
 
 ## Registry Console Flow（2026-07-22）
 

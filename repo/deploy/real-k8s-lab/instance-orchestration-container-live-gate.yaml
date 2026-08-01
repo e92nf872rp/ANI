@@ -1,0 +1,40 @@
+profile: INSTANCE-ORCHESTRATION-A
+status: contract
+description: >
+  Container orchestration live gate for proving create-time Registry image
+  admission, Kube-OVN network binding, and Storage PVC mount orchestration go
+  through ANI Core /api/v1/instances. Kubernetes is observed read-only after
+  Core create. Console, Exec WS, scale/update_image, GPU Container, quota, and
+  Sandbox are intentionally out of scope.
+
+required_tools:
+  - kubectl
+
+required_endpoints:
+  - ani_core_instances_api
+  - kubernetes_read_api
+  - kubeovn_subnet_api
+  - storage_pvc_api
+
+live_checks:
+  - id: core-instance-container-orchestrated-create
+    command: POST /api/v1/instances kind=container with network and optional volume_or_filesystem
+    pass_condition: create_returns_instance_operation_and_real_provider
+  - id: core-instance-container-operation-steps
+    command: GET /api/v1/operations/{operation_id}
+    pass_condition: operation_includes_resolve_network_binding_and_storage_mount_steps
+  - id: kubernetes-deployment-network-observe
+    command: kubectl get deployment/{name} -n {namespace} -o json
+    pass_condition: pod_template_has_ovn_logical_switch_annotation
+  - id: kubernetes-pod-storage-observe
+    command: kubectl get pods -n {namespace} -l ani.kubercloud.io/instance={name} -o json
+    pass_condition: pod_mounts_storage_pvc_claim_when_volume_or_filesystem_requested
+  - id: core-instance-container-stop
+    command: POST /api/v1/instances/{instance_id}/lifecycle action=stop
+    pass_condition: stop_operation_accepted_through_core_api
+  - id: core-instance-container-start
+    command: POST /api/v1/instances/{instance_id}/lifecycle action=start
+    pass_condition: start_operation_accepted_through_core_api
+  - id: core-instance-container-delete
+    command: POST /api/v1/instances/{instance_id}/lifecycle action=delete
+    pass_condition: delete_operation_accepted_through_core_api
