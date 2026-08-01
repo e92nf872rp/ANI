@@ -71,16 +71,16 @@ func registerMetering(v1 *route.RouterGroup) {
 func (api *meteringAPI) queryUsage(ctx context.Context, c *app.RequestContext) {
 	startTime, err := optionalRFC3339(c.Query("start_time"))
 	if err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "start_time must be RFC3339")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "start_time must be RFC3339")
 		return
 	}
 	endTime, err := optionalRFC3339(c.Query("end_time"))
 	if err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "end_time must be RFC3339")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "end_time must be RFC3339")
 		return
 	}
 	result, err := api.service.QueryUsage(ctx, ports.MeteringUsageQueryRequest{
-		TenantID:     demoTenantID(c),
+		TenantID:     instanceTenantID(c),
 		StartTime:    startTime,
 		EndTime:      endTime,
 		ResourceType: ports.MeteringResourceType(strings.TrimSpace(c.Query("resource_type"))),
@@ -96,16 +96,16 @@ func (api *meteringAPI) queryUsage(ctx context.Context, c *app.RequestContext) {
 func (api *meteringAPI) reportTokenUsage(ctx context.Context, c *app.RequestContext) {
 	var req reportTokenUsageRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid token usage request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid token usage request")
 		return
 	}
 	occurredAt, err := optionalRFC3339(req.OccurredAt)
 	if err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "occurred_at must be RFC3339")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "occurred_at must be RFC3339")
 		return
 	}
 	record, err := api.service.ReportTokenUsage(ctx, ports.TokenUsageReportRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		Source:         req.Source,
 		Model:          req.Model,
@@ -172,8 +172,8 @@ func optionalRFC3339(value string) (time.Time, error) {
 func writeMeteringError(c *app.RequestContext, err error) {
 	switch {
 	case errors.Is(err, ports.ErrInvalid):
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	default:
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	}
 }

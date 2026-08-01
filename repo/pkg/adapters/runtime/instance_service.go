@@ -2,8 +2,12 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -17,6 +21,7 @@ type LocalInstanceService struct {
 	operations   ports.WorkloadOperationStore
 	lifecycle    ports.WorkloadInstanceLifecycleExecutor
 	identity     ports.WorkloadIdentityService
+	resources    ports.WorkloadInstanceResourceResolver
 	sandbox      ports.SandboxRuntime
 	ops          ports.WorkloadInstanceOps
 }
@@ -41,6 +46,12 @@ func WithWorkloadIdentityService(identity ports.WorkloadIdentityService) Instanc
 	}
 }
 
+func WithInstanceResourceResolver(resources ports.WorkloadInstanceResourceResolver) InstanceServiceOption {
+	return func(service *LocalInstanceService) {
+		service.resources = resources
+	}
+}
+
 func WithSandboxRuntime(sandbox ports.SandboxRuntime) InstanceServiceOption {
 	return func(service *LocalInstanceService) {
 		service.sandbox = sandbox
@@ -51,6 +62,7 @@ func NewLocalInstanceService(orchestrator ports.WorkloadInstanceOrchestrator, st
 	return &LocalInstanceService{
 		orchestrator: orchestrator,
 		store:        store,
+		operations:   NewLocalOperationStore(),
 		ops:          ops,
 	}
 }
@@ -70,6 +82,9 @@ func (s *LocalInstanceService) Create(ctx context.Context, request ports.Workloa
 	if strings.TrimSpace(request.Spec.TenantID) == "" {
 		return ports.WorkloadInstanceCreateResult{}, fmt.Errorf("%w: tenantID is required", ports.ErrInvalid)
 	}
+	if strings.TrimSpace(request.IdempotencyKey) == "" {
+		return ports.WorkloadInstanceCreateResult{}, fmt.Errorf("%w: idempotency key is required", ports.ErrInvalid)
+	}
 	if request.Spec.Kind != ports.WorkloadKindVM &&
 		request.Spec.Kind != ports.WorkloadKindContainer &&
 		request.Spec.Kind != ports.WorkloadKindGPUContainer &&
@@ -81,6 +96,29 @@ func (s *LocalInstanceService) Create(ctx context.Context, request ports.Workloa
 	}
 	if strings.TrimSpace(request.PermissionProof) == "" {
 		return ports.WorkloadInstanceCreateResult{}, fmt.Errorf("%w: permission proof is required", ports.ErrInvalid)
+	}
+	if request.Spec.Kind == ports.WorkloadKindSandbox && (s.sandbox == nil || s.store == nil) {
+		return ports.WorkloadInstanceCreateResult{}, ports.ErrNotConfigured
+	}
+	var resolvedResourceRefs []string
+	if s.resources != nil {
+		resolved, err := s.resources.ResolveCreate(ctx, ports.WorkloadResourceResolveRequest{
+			TenantID: request.Spec.TenantID,
+			UserID:   request.UserID,
+			Spec:     request.Spec,
+		})
+		if err != nil {
+			return ports.WorkloadInstanceCreateResult{}, err
+		}
+		request.Spec = resolved.Spec
+		resolvedResourceRefs = append([]string(nil), resolved.ResourceRefs...)
+	}
+	if err := validateCreateIntent(request.Spec); err != nil {
+		return ports.WorkloadInstanceCreateResult{}, err
+	}
+	requestFingerprint, err := createIntentFingerprint(request.Spec)
+	if err != nil {
+		return ports.WorkloadInstanceCreateResult{}, err
 	}
 	var operation ports.WorkloadOperationRecord
 	preRecorded := false
@@ -96,15 +134,25 @@ func (s *LocalInstanceService) Create(ctx context.Context, request ports.Workloa
 			Status:         ports.WorkloadOperationInProgress,
 			IdempotencyKey: request.IdempotencyKey,
 			RequestedBy:    request.UserID,
-			Precheck:       map[string]any{"allowed": true},
-			AfterSpec:      workloadSpecSummary(request.Spec),
-			CreatedAt:      firstNonZeroTime(request.RequestedAt),
-			UpdatedAt:      firstNonZeroTime(request.RequestedAt),
+			Precheck: map[string]any{
+				"allowed":             true,
+				"request_fingerprint": requestFingerprint,
+				"resource_refs":       resolvedResourceRefs,
+			},
+			AfterSpec: workloadSpecSummary(request.Spec),
+			CreatedAt: firstNonZeroTime(request.RequestedAt),
+			UpdatedAt: firstNonZeroTime(request.RequestedAt),
 		})
 		if err != nil {
 			return ports.WorkloadInstanceCreateResult{}, err
 		}
 		if existing {
+			if err := validateOperationReplayFingerprint(operation, requestFingerprint, "create"); err != nil {
+				return ports.WorkloadInstanceCreateResult{}, err
+			}
+			if operation.Status == ports.WorkloadOperationFailed {
+				return ports.WorkloadInstanceCreateResult{}, failedLifecycleReplayError(operation)
+			}
 			return ports.WorkloadInstanceCreateResult{
 				Ref: ports.WorkloadRef{
 					TenantID:   operation.TenantID,
@@ -125,7 +173,7 @@ func (s *LocalInstanceService) Create(ctx context.Context, request ports.Workloa
 		if preRecorded {
 			_, _ = s.operations.UpdateOperation(ctx, operation.ID, ports.WorkloadOperationUpdate{
 				Status:         ports.WorkloadOperationFailed,
-				FailureReason:  "create_failed",
+				FailureReason:  classifiedLifecycleFailureReason("create_failed", err),
 				FailureMessage: err.Error(),
 				RetryEligible:  true,
 				UpdatedAt:      firstNonZeroTime(request.RequestedAt),
@@ -144,11 +192,15 @@ func (s *LocalInstanceService) Create(ctx context.Context, request ports.Workloa
 			Status:         ports.WorkloadOperationInProgress,
 			IdempotencyKey: request.IdempotencyKey,
 			RequestedBy:    request.UserID,
-			Precheck:       map[string]any{"allowed": true},
-			AfterSpec:      workloadSpecSummary(request.Spec),
-			ProviderRefs:   result.Apply.ResourceRefs,
-			CreatedAt:      firstNonZeroTime(request.RequestedAt),
-			UpdatedAt:      firstNonZeroTime(request.RequestedAt),
+			Precheck: map[string]any{
+				"allowed":             true,
+				"request_fingerprint": requestFingerprint,
+				"resource_refs":       resolvedResourceRefs,
+			},
+			AfterSpec:    workloadSpecSummary(request.Spec),
+			ProviderRefs: result.Apply.ResourceRefs,
+			CreatedAt:    firstNonZeroTime(request.RequestedAt),
+			UpdatedAt:    firstNonZeroTime(request.RequestedAt),
 		})
 		if err != nil {
 			return ports.WorkloadInstanceCreateResult{}, err
@@ -205,6 +257,118 @@ func (s *LocalInstanceService) Create(ctx context.Context, request ports.Workloa
 	return result, nil
 }
 
+func validateCreateIntent(spec ports.WorkloadSpec) error {
+	switch spec.Kind {
+	case ports.WorkloadKindVM:
+		if spec.Container != nil || spec.Sandbox != nil || spec.GPUSpec != nil {
+			return fmt.Errorf("%w: vm create cannot include container, sandbox, or gpu spec config", ports.ErrInvalid)
+		}
+	case ports.WorkloadKindContainer:
+		if spec.VM != nil || spec.Sandbox != nil || spec.GPUSpec != nil {
+			return fmt.Errorf("%w: container create cannot include vm, sandbox, or gpu spec config", ports.ErrInvalid)
+		}
+	case ports.WorkloadKindGPUContainer:
+		if spec.VM != nil || spec.Sandbox != nil {
+			return fmt.Errorf("%w: gpu_container create cannot include vm or sandbox config", ports.ErrInvalid)
+		}
+	case ports.WorkloadKindSandbox:
+		if spec.VM != nil || spec.Container != nil || spec.GPUSpec != nil {
+			return fmt.Errorf("%w: sandbox create cannot include vm, container, or gpu spec config", ports.ErrInvalid)
+		}
+	}
+	if spec.VM != nil {
+		if spec.VM.SystemDisk != nil {
+			if err := validateInstanceDiskSpec(*spec.VM.SystemDisk); err != nil {
+				return err
+			}
+		}
+		for _, disk := range spec.VM.DataDiskSpecs {
+			if err := validateInstanceDiskSpec(disk); err != nil {
+				return err
+			}
+		}
+	}
+	if spec.Container != nil {
+		for _, env := range spec.Container.Env {
+			if err := validateInstanceEnvVar(env); err != nil {
+				return err
+			}
+		}
+	}
+	if spec.Sandbox != nil {
+		for _, env := range spec.Sandbox.Env {
+			if err := validateInstanceEnvVar(env); err != nil {
+				return err
+			}
+		}
+	}
+	if spec.GPUSpec != nil {
+		if strings.TrimSpace(spec.GPUSpec.SpecID) == "" || spec.GPUSpec.Shares < 1 || spec.GPUSpec.MBPerShare < 1 {
+			return fmt.Errorf("%w: gpu spec id, shares, and mb_per_share are required", ports.ErrInvalid)
+		}
+		if err := validateLegacyGPUSelectorsAgainstSpec(spec.Resources.GPU, *spec.GPUSpec); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateLegacyGPUSelectorsAgainstSpec(request ports.GPUSchedulingRequest, spec ports.InstanceGPUSpecReference) error {
+	if len(request.PreferredVendors) > 0 {
+		return fmt.Errorf("%w: gpu spec cannot be combined with legacy vendor", ports.ErrInvalid)
+	}
+	for _, model := range request.PreferredModels {
+		if strings.TrimSpace(spec.GPUType) == "" || !strings.EqualFold(strings.TrimSpace(model), strings.TrimSpace(spec.GPUType)) {
+			return fmt.Errorf("%w: gpu spec conflicts with legacy model", ports.ErrInvalid)
+		}
+	}
+	if request.RequiredCount > 1 {
+		return fmt.Errorf("%w: gpu spec conflicts with legacy count", ports.ErrInvalid)
+	}
+	if len(request.VirtualizationModes) > 0 {
+		expected := ports.GPUVirtualizationVGPU
+		if spec.Shares == 1 {
+			expected = ports.GPUVirtualizationNone
+		}
+		if len(request.VirtualizationModes) != 1 || request.VirtualizationModes[0] != expected {
+			return fmt.Errorf("%w: gpu spec conflicts with legacy allocation mode", ports.ErrInvalid)
+		}
+	}
+	return nil
+}
+
+func validateInstanceDiskSpec(disk ports.InstanceDiskSpec) error {
+	hasExisting := strings.TrimSpace(disk.VolumeID) != ""
+	hasNew := strings.TrimSpace(disk.Name) != "" || disk.SizeGiB > 0
+	if hasExisting == hasNew {
+		return fmt.Errorf("%w: disk must reference volume_id or declare name and size_gib", ports.ErrInvalid)
+	}
+	if hasNew && (strings.TrimSpace(disk.Name) == "" || disk.SizeGiB < 1) {
+		return fmt.Errorf("%w: new disk requires name and size_gib", ports.ErrInvalid)
+	}
+	return nil
+}
+
+func validateInstanceEnvVar(env ports.InstanceEnvVar) error {
+	if strings.TrimSpace(env.Name) == "" {
+		return fmt.Errorf("%w: environment variable name is required", ports.ErrInvalid)
+	}
+	hasValue := env.Value != nil
+	hasSecret := strings.TrimSpace(env.SecretRef) != ""
+	if hasValue == hasSecret {
+		return fmt.Errorf("%w: environment variable must use exactly one of value or secret_ref", ports.ErrInvalid)
+	}
+	return nil
+}
+
+func createIntentFingerprint(spec ports.WorkloadSpec) (string, error) {
+	payload, err := json.Marshal(spec)
+	if err != nil {
+		return "", fmt.Errorf("%w: marshal create intent: %v", ports.ErrInvalid, err)
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(payload)), nil
+}
+
 func (s *LocalInstanceService) createSandbox(ctx context.Context, request ports.WorkloadInstanceCreateRequest, operation ports.WorkloadOperationRecord, preRecorded bool) (ports.WorkloadInstanceCreateResult, error) {
 	if s.sandbox == nil {
 		return ports.WorkloadInstanceCreateResult{}, ports.ErrNotConfigured
@@ -224,7 +388,7 @@ func (s *LocalInstanceService) createSandbox(ctx context.Context, request ports.
 		if preRecorded {
 			_, _ = s.operations.UpdateOperation(ctx, operation.ID, ports.WorkloadOperationUpdate{
 				Status:         ports.WorkloadOperationFailed,
-				FailureReason:  "sandbox_create_failed",
+				FailureReason:  classifiedLifecycleFailureReason("sandbox_create_failed", err),
 				FailureMessage: err.Error(),
 				RetryEligible:  true,
 				UpdatedAt:      firstNonZeroTime(request.RequestedAt),
@@ -245,22 +409,38 @@ func (s *LocalInstanceService) createSandbox(ctx context.Context, request ports.
 		UpdatedAt: instance.UpdatedAt,
 	}
 	record := ports.WorkloadInstanceRecord{
-		TenantID:     instance.TenantID,
-		InstanceID:   instance.InstanceID,
-		Name:         instance.Name,
-		Kind:         ports.WorkloadKindSandbox,
-		Provider:     instance.Provider,
-		Lifecycle:    request.Spec.Lifecycle,
-		Sandbox:      &instance,
-		ResourceRefs: []string{"sandbox/local/" + instance.InstanceID},
-		Status:       status,
-		CreatedAt:    instance.CreatedAt,
-		UpdatedAt:    instance.UpdatedAt,
+		TenantID:           instance.TenantID,
+		InstanceID:         instance.InstanceID,
+		Name:               instance.Name,
+		Description:        request.Spec.Description,
+		Labels:             cloneInstanceLabels(request.Spec.Labels),
+		Kind:               ports.WorkloadKindSandbox,
+		Provider:           instance.Provider,
+		Image:              instanceImageSummary(request.Spec),
+		Compute:            instanceComputeSummary(request.Spec, status),
+		Network:            instanceNetworkSummary(request.Spec, status),
+		Access:             instanceAccessSummary(ports.WorkloadKindSandbox, status.State),
+		StorageAttachments: instanceStorageAttachments(request.Spec, status),
+		Lifecycle:          request.Spec.Lifecycle,
+		Sandbox:            &instance,
+		ResourceRefs:       sandboxResourceRefs(instance),
+		Status:             status,
+		CreatedAt:          instance.CreatedAt,
+		UpdatedAt:          instance.UpdatedAt,
 	}
 	if preRecorded {
 		record.OperationID = operation.ID
 	}
 	if err := s.store.UpsertStatus(ctx, record); err != nil {
+		if preRecorded {
+			_, _ = s.operations.UpdateOperation(ctx, operation.ID, ports.WorkloadOperationUpdate{
+				Status:         ports.WorkloadOperationFailed,
+				FailureReason:  classifiedLifecycleFailureReason("sandbox_status_persist_failed", err),
+				FailureMessage: err.Error(),
+				RetryEligible:  true,
+				UpdatedAt:      firstNonZeroTime(request.RequestedAt, instance.UpdatedAt),
+			})
+		}
 		return ports.WorkloadInstanceCreateResult{}, err
 	}
 
@@ -270,7 +450,8 @@ func (s *LocalInstanceService) createSandbox(ctx context.Context, request ports.
 		AuditID:     "sandbox_local_" + instance.InstanceID,
 		Apply: ports.WorkloadProviderApplyResult{
 			Applied:      true,
-			Reason:       "local sandbox profile created",
+			Provider:     instance.Provider,
+			Reason:       sandboxCreateReason(instance),
 			ResourceRefs: record.ResourceRefs,
 			AppliedAt:    instance.UpdatedAt,
 		},
@@ -281,7 +462,7 @@ func (s *LocalInstanceService) createSandbox(ctx context.Context, request ports.
 		if _, err := s.operations.AddOperationStep(ctx, operation.ID, ports.WorkloadOperationStep{
 			StepName: "sandbox_runtime_create",
 			Status:   ports.WorkloadOperationStepSucceeded,
-			Message:  "local sandbox runtime accepted Kata profile intent",
+			Message:  sandboxCreateReason(instance),
 		}); err != nil {
 			return ports.WorkloadInstanceCreateResult{}, err
 		}
@@ -321,14 +502,121 @@ func (s *LocalInstanceService) List(ctx context.Context, request ports.WorkloadI
 	if strings.TrimSpace(request.TenantID) == "" {
 		return nil, fmt.Errorf("%w: tenantID is required", ports.ErrInvalid)
 	}
+	if request.Limit < 0 || request.Limit > 100 {
+		return nil, fmt.Errorf("%w: limit must be between 1 and 100", ports.ErrInvalid)
+	}
+	if strings.TrimSpace(request.Cursor) != "" {
+		return nil, fmt.Errorf("%w: instance cursor pagination is not implemented in the service result boundary", ports.ErrUnsupported)
+	}
+	if request.Sort == "" {
+		request.Sort = "created_at_desc"
+	}
+	if !validInstanceListSort(request.Sort) {
+		return nil, fmt.Errorf("%w: unsupported instance sort %q", ports.ErrInvalid, request.Sort)
+	}
 	records, err := s.store.List(ctx, request.TenantID, request.Kind)
 	if err != nil {
 		return nil, err
 	}
-	for i := range records {
-		records[i] = s.withIdentity(ctx, records[i])
+	filtered := make([]ports.WorkloadInstanceRecord, 0, len(records))
+	for _, record := range records {
+		if !matchesInstanceList(record, request) {
+			continue
+		}
+		filtered = append(filtered, s.withIdentity(ctx, record))
 	}
-	return records, nil
+	sortInstanceRecords(filtered, request.Sort)
+	if request.Limit > 0 && len(filtered) > request.Limit {
+		filtered = filtered[:request.Limit]
+	}
+	return filtered, nil
+}
+
+func validInstanceListSort(value string) bool {
+	switch value {
+	case "created_at_asc", "created_at_desc", "name_asc", "name_desc":
+		return true
+	default:
+		return false
+	}
+}
+
+func matchesInstanceList(record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceListRequest) bool {
+	if request.State != "" && record.Status.State != request.State {
+		return false
+	}
+	if keyword := strings.ToLower(strings.TrimSpace(request.Keyword)); keyword != "" {
+		haystack := strings.ToLower(record.InstanceID + "\n" + record.Name + "\n" + record.Description)
+		if !strings.Contains(haystack, keyword) {
+			return false
+		}
+	}
+	if !request.CreatedAfter.IsZero() && !record.CreatedAt.After(request.CreatedAfter) {
+		return false
+	}
+	if !request.CreatedBefore.IsZero() && !record.CreatedAt.Before(request.CreatedBefore) {
+		return false
+	}
+	if request.SpecID != "" && record.Compute.SpecID != request.SpecID {
+		return false
+	}
+	if request.ImageID != "" && record.Image.ID != request.ImageID {
+		return false
+	}
+	if request.NodeName != "" && firstNonEmpty(record.Status.NodeName, record.Compute.NodeName) != request.NodeName {
+		return false
+	}
+	if request.RolloutStatus != "" && (record.Container == nil || record.Container.RolloutStatus != request.RolloutStatus) {
+		return false
+	}
+	if request.GPUModel != "" && (record.GPU == nil || record.GPU.Model != request.GPUModel) {
+		return false
+	}
+	if request.QueueName != "" && (record.GPU == nil || record.GPU.QueueName != request.QueueName) {
+		return false
+	}
+	if request.SchedulingState != "" && (record.GPU == nil || record.GPU.SchedulingState != request.SchedulingState) {
+		return false
+	}
+	if request.TemplateID != "" && (record.Sandbox == nil || record.Sandbox.TemplateID != request.TemplateID) {
+		return false
+	}
+	if request.SessionState != "" && (record.Sandbox == nil || record.Sandbox.SessionState != request.SessionState) {
+		return false
+	}
+	return true
+}
+
+func sortInstanceRecords(records []ports.WorkloadInstanceRecord, order string) {
+	sort.SliceStable(records, func(i, j int) bool {
+		left, right := records[i], records[j]
+		switch order {
+		case "created_at_asc":
+			if left.CreatedAt.Equal(right.CreatedAt) {
+				return left.InstanceID < right.InstanceID
+			}
+			return left.CreatedAt.Before(right.CreatedAt)
+		case "name_asc":
+			if left.Name == right.Name {
+				return left.InstanceID < right.InstanceID
+			}
+			return left.Name < right.Name
+		case "name_desc":
+			if left.Name == right.Name {
+				return left.InstanceID > right.InstanceID
+			}
+			return left.Name > right.Name
+		default:
+			if left.CreatedAt.Equal(right.CreatedAt) {
+				return left.InstanceID > right.InstanceID
+			}
+			return left.CreatedAt.After(right.CreatedAt)
+		}
+	})
+}
+
+func (s *LocalInstanceService) ApplyLifecycle(ctx context.Context, request ports.WorkloadInstanceLifecycleRequest) (ports.WorkloadInstanceRecord, error) {
+	return s.applyLifecycle(ctx, request)
 }
 
 func (s *LocalInstanceService) Start(ctx context.Context, request ports.WorkloadInstanceLifecycleRequest) (ports.WorkloadInstanceRecord, error) {
@@ -352,6 +640,7 @@ func (s *LocalInstanceService) Resize(ctx context.Context, request ports.Workloa
 		TenantID:        request.TenantID,
 		InstanceID:      request.InstanceID,
 		Action:          ports.WorkloadLifecycleResize,
+		Resources:       request.Resources,
 		UserID:          request.UserID,
 		PermissionProof: request.PermissionProof,
 		RequestedAt:     request.RequestedAt,
@@ -453,6 +742,9 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 	if strings.TrimSpace(request.TenantID) == "" || strings.TrimSpace(request.InstanceID) == "" {
 		return ports.WorkloadInstanceRecord{}, fmt.Errorf("%w: tenantID and instanceID are required", ports.ErrInvalid)
 	}
+	if strings.TrimSpace(request.IdempotencyKey) == "" {
+		return ports.WorkloadInstanceRecord{}, fmt.Errorf("%w: idempotency key is required", ports.ErrInvalid)
+	}
 	if strings.TrimSpace(request.UserID) == "" || strings.TrimSpace(request.PermissionProof) == "" {
 		return ports.WorkloadInstanceRecord{}, fmt.Errorf("%w: user id and permission proof are required", ports.ErrInvalid)
 	}
@@ -460,10 +752,24 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 	if err != nil {
 		return ports.WorkloadInstanceRecord{}, err
 	}
+	if err := validateLifecycleIntent(record, request); err != nil {
+		return ports.WorkloadInstanceRecord{}, err
+	}
+	requestFingerprint := ""
 	if s.operations != nil {
+		requestFingerprint, err = lifecycleIntentFingerprint(request)
+		if err != nil {
+			return ports.WorkloadInstanceRecord{}, err
+		}
 		if strings.TrimSpace(request.IdempotencyKey) != "" {
 			existing, err := s.operations.GetOperationByIdempotencyKey(ctx, request.TenantID, request.IdempotencyKey)
 			if err == nil {
+				if err := validateOperationReplayFingerprint(existing, requestFingerprint, "lifecycle"); err != nil {
+					return ports.WorkloadInstanceRecord{}, err
+				}
+				if existing.Status == ports.WorkloadOperationFailed {
+					return ports.WorkloadInstanceRecord{}, failedLifecycleReplayError(existing)
+				}
 				record.OperationID = existing.ID
 				return record, nil
 			}
@@ -474,6 +780,9 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 		return ports.WorkloadInstanceRecord{}, err
 	}
 	precheck := lifecyclePrecheck(record, request, next)
+	if requestFingerprint != "" {
+		precheck.details["request_fingerprint"] = requestFingerprint
+	}
 	snapshot := vmSnapshotFor(record, request)
 	volume := volumeAttachmentFor(request)
 	rollback := containerRollbackFor(record, request)
@@ -505,6 +814,12 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 		}
 		opID = operation.ID
 		if existing {
+			if err := validateOperationReplayFingerprint(operation, requestFingerprint, "lifecycle"); err != nil {
+				return ports.WorkloadInstanceRecord{}, err
+			}
+			if operation.Status == ports.WorkloadOperationFailed {
+				return ports.WorkloadInstanceRecord{}, failedLifecycleReplayError(operation)
+			}
 			record.OperationID = opID
 			return record, nil
 		}
@@ -529,13 +844,32 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 	if !precheck.allowed {
 		return ports.WorkloadInstanceRecord{}, fmt.Errorf("%w: %s", ports.ErrConflict, precheck.message)
 	}
-	if s.lifecycle != nil && usesProviderLifecycle(request.Action) {
+	if record.Kind == ports.WorkloadKindSandbox && usesSandboxRuntime(request.Action) {
+		if s.sandbox == nil {
+			err := ports.ErrNotConfigured
+			s.failLifecycleOperation(ctx, opID, "sandbox_lifecycle_failed", err, request.RequestedAt)
+			return ports.WorkloadInstanceRecord{}, err
+		}
+		sandbox, err := s.sandbox.ApplyLifecycle(ctx, ports.SandboxLifecycleRequest{
+			TenantID:    request.TenantID,
+			InstanceID:  request.InstanceID,
+			Action:      request.Action,
+			Duration:    request.Duration,
+			RequestedAt: request.RequestedAt,
+		})
+		if err != nil {
+			s.failLifecycleOperation(ctx, opID, "sandbox_lifecycle_failed", err, request.RequestedAt)
+			return ports.WorkloadInstanceRecord{}, err
+		}
+		record.Sandbox = &sandbox
+	}
+	if s.lifecycle != nil && record.Kind != ports.WorkloadKindSandbox && usesProviderLifecycle(request.Action) {
 		result, err := s.lifecycle.Apply(ctx, request, record)
 		if err != nil {
 			if opID != "" {
 				_, _ = s.operations.UpdateOperation(ctx, opID, ports.WorkloadOperationUpdate{
 					Status:         ports.WorkloadOperationFailed,
-					FailureReason:  "provider_lifecycle_failed",
+					FailureReason:  classifiedLifecycleFailureReason("provider_lifecycle_failed", err),
 					FailureMessage: err.Error(),
 					RetryEligible:  true,
 					UpdatedAt:      request.RequestedAt,
@@ -572,11 +906,14 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 		record.Snapshots = append(record.Snapshots, *snapshot)
 	}
 	record.Status.Storage = applyVolumeBinding(record.Status.Storage, request.Action, volume, request.VolumeID)
+	record.StorageAttachments = applyVolumeBinding(record.StorageAttachments, request.Action, volume, request.VolumeID)
 	if rollback != nil {
 		record.Container = rollback
 	}
+	applyApprovedLifecycleSummary(&record, request)
 	record.Status.State = next
 	record.Status.Reason = "lifecycle " + string(request.Action) + " requested"
+	record.Access = instanceAccessSummary(record.Kind, next)
 	if !request.RequestedAt.IsZero() {
 		record.Status.UpdatedAt = request.RequestedAt.UTC()
 		record.UpdatedAt = request.RequestedAt.UTC()
@@ -587,7 +924,7 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 	record.OperationID = opID
 	if opID != "" {
 		if _, err := s.operations.AddOperationStep(ctx, opID, ports.WorkloadOperationStep{
-			StepName: lifecycleApplyStepName(request.Action),
+			StepName: lifecycleApplyStepName(request),
 			Status:   ports.WorkloadOperationStepSucceeded,
 			Message:  "lifecycle " + string(request.Action) + " accepted",
 		}); err != nil {
@@ -639,6 +976,379 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 }
 
 var _ ports.WorkloadInstanceService = (*LocalInstanceService)(nil)
+
+func failedLifecycleReplayError(operation ports.WorkloadOperationRecord) error {
+	message := strings.TrimSpace(operation.FailureMessage)
+	if message == "" {
+		message = "prior lifecycle operation failed"
+	}
+	switch {
+	case strings.HasSuffix(operation.FailureReason, ".not_found"):
+		return fmt.Errorf("%w: %s", ports.ErrNotFound, message)
+	case strings.HasSuffix(operation.FailureReason, ".not_configured"):
+		return fmt.Errorf("%w: %s", ports.ErrNotConfigured, message)
+	case strings.HasSuffix(operation.FailureReason, ".unsupported"):
+		return fmt.Errorf("%w: %s", ports.ErrUnsupported, message)
+	case strings.HasSuffix(operation.FailureReason, ".invalid"):
+		return fmt.Errorf("%w: %s", ports.ErrInvalid, message)
+	default:
+		return fmt.Errorf("%w: %s", ports.ErrConflict, message)
+	}
+}
+
+func (s *LocalInstanceService) failLifecycleOperation(ctx context.Context, operationID, reason string, cause error, updatedAt time.Time) {
+	if s.operations == nil || operationID == "" {
+		return
+	}
+	message := cause.Error()
+	_, _ = s.operations.AddOperationStep(ctx, operationID, ports.WorkloadOperationStep{
+		StepName: "sandbox_runtime_lifecycle",
+		Status:   ports.WorkloadOperationStepFailed,
+		Message:  message,
+	})
+	_, _ = s.operations.UpdateOperation(ctx, operationID, ports.WorkloadOperationUpdate{
+		Status:         ports.WorkloadOperationFailed,
+		FailureReason:  classifiedLifecycleFailureReason(reason, cause),
+		FailureMessage: message,
+		RetryEligible:  true,
+		UpdatedAt:      updatedAt,
+	})
+}
+
+func classifiedLifecycleFailureReason(reason string, cause error) string {
+	switch {
+	case errors.Is(cause, ports.ErrNotFound):
+		return reason + ".not_found"
+	case errors.Is(cause, ports.ErrNotConfigured):
+		return reason + ".not_configured"
+	case errors.Is(cause, ports.ErrUnsupported):
+		return reason + ".unsupported"
+	case errors.Is(cause, ports.ErrInvalid):
+		return reason + ".invalid"
+	default:
+		return reason + ".conflict"
+	}
+}
+
+func lifecycleIntentFingerprint(request ports.WorkloadInstanceLifecycleRequest) (string, error) {
+	request.UserID = ""
+	request.PermissionProof = ""
+	request.RequestedAt = time.Time{}
+	payload, err := json.Marshal(request)
+	if err != nil {
+		return "", fmt.Errorf("%w: marshal lifecycle intent: %v", ports.ErrInvalid, err)
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(payload)), nil
+}
+
+func validateOperationReplayFingerprint(operation ports.WorkloadOperationRecord, expected string, intent string) error {
+	existing, _ := operation.Precheck["request_fingerprint"].(string)
+	if strings.TrimSpace(existing) == "" {
+		return fmt.Errorf("%w: existing %s operation has no request fingerprint and cannot be safely replayed", ports.ErrConflict, intent)
+	}
+	if existing != expected {
+		return fmt.Errorf("%w: idempotency_key was already used for a different %s intent", ports.ErrConflict, intent)
+	}
+	return nil
+}
+
+func validateLifecycleIntent(record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceLifecycleRequest) error {
+	if !isContractLifecycleAction(request.Action) {
+		return fmt.Errorf("%w: unsupported instance lifecycle action %q", ports.ErrUnsupported, request.Action)
+	}
+	if fields := unexpectedLifecycleFields(request); len(fields) > 0 {
+		return fmt.Errorf("%w: action %s does not allow fields %s", ports.ErrInvalid, request.Action, strings.Join(fields, ", "))
+	}
+	if record.Kind == ports.WorkloadKindSandbox && !usesSandboxRuntime(request.Action) {
+		return fmt.Errorf("%w: %s is not supported for sandbox instances", ports.ErrUnsupported, request.Action)
+	}
+	switch request.Action {
+	case ports.WorkloadLifecycleResize:
+		if strings.TrimSpace(request.Resources.CPU) == "" || strings.TrimSpace(request.Resources.Memory) == "" {
+			return fmt.Errorf("%w: cpu and memory are required for resize", ports.ErrInvalid)
+		}
+	case ports.WorkloadLifecycleRebuild:
+		if record.Kind != ports.WorkloadKindVM {
+			return fmt.Errorf("%w: rebuild is only supported for vm instances", ports.ErrUnsupported)
+		}
+	case ports.WorkloadLifecycleSnapshot:
+		if record.Kind != ports.WorkloadKindVM {
+			return fmt.Errorf("%w: snapshot is only supported for vm instances", ports.ErrUnsupported)
+		}
+		if strings.TrimSpace(request.SnapshotName) == "" {
+			return fmt.Errorf("%w: snapshot_name is required", ports.ErrInvalid)
+		}
+	case ports.WorkloadLifecycleAttachVolume:
+		if !supportsVolumeBinding(record.Kind) {
+			return fmt.Errorf("%w: volume binding is only supported for vm, container, and gpu_container instances", ports.ErrUnsupported)
+		}
+		if strings.TrimSpace(request.VolumeID) == "" || strings.TrimSpace(request.MountPath) == "" {
+			return fmt.Errorf("%w: volume_id and mount_path are required for attach_volume", ports.ErrInvalid)
+		}
+	case ports.WorkloadLifecycleDetachVolume:
+		if !supportsVolumeBinding(record.Kind) {
+			return fmt.Errorf("%w: volume binding is only supported for vm, container, and gpu_container instances", ports.ErrUnsupported)
+		}
+		if strings.TrimSpace(request.VolumeID) == "" {
+			return fmt.Errorf("%w: volume_id is required for detach_volume", ports.ErrInvalid)
+		}
+	case ports.WorkloadLifecycleRollback:
+		hasRevision := strings.TrimSpace(request.Revision) != ""
+		hasSnapshot := strings.TrimSpace(request.SnapshotID) != ""
+		if hasRevision == hasSnapshot {
+			return fmt.Errorf("%w: rollback requires exactly one of revision or snapshot_id", ports.ErrInvalid)
+		}
+		if record.Kind == ports.WorkloadKindVM && !hasSnapshot {
+			return fmt.Errorf("%w: vm rollback requires snapshot_id", ports.ErrInvalid)
+		}
+		if (record.Kind == ports.WorkloadKindContainer || record.Kind == ports.WorkloadKindGPUContainer) && !hasRevision {
+			return fmt.Errorf("%w: container rollback requires revision", ports.ErrInvalid)
+		}
+	case ports.WorkloadLifecycleAttachFilesystem, ports.WorkloadLifecycleDetachFilesystem:
+		if record.Kind == ports.WorkloadKindSandbox {
+			return fmt.Errorf("%w: filesystem binding is not supported for sandbox instances", ports.ErrUnsupported)
+		}
+		if strings.TrimSpace(request.FilesystemID) == "" {
+			return fmt.Errorf("%w: filesystem_id is required", ports.ErrInvalid)
+		}
+		if request.Action == ports.WorkloadLifecycleAttachFilesystem && strings.TrimSpace(request.MountPath) == "" {
+			return fmt.Errorf("%w: mount_path is required for attach_filesystem", ports.ErrInvalid)
+		}
+	case ports.WorkloadLifecycleScale:
+		if record.Kind != ports.WorkloadKindContainer && record.Kind != ports.WorkloadKindGPUContainer {
+			return fmt.Errorf("%w: scale is only supported for container and gpu_container instances", ports.ErrUnsupported)
+		}
+		if request.Replicas == nil || *request.Replicas < 1 {
+			return fmt.Errorf("%w: replicas must be at least 1", ports.ErrInvalid)
+		}
+	case ports.WorkloadLifecycleUpdateImage:
+		if record.Kind != ports.WorkloadKindContainer && record.Kind != ports.WorkloadKindGPUContainer {
+			return fmt.Errorf("%w: update_image is only supported for container and gpu_container instances", ports.ErrUnsupported)
+		}
+		if strings.TrimSpace(request.ImageID) == "" {
+			return fmt.Errorf("%w: image_id is required", ports.ErrInvalid)
+		}
+		if request.Strategy != "" && request.Strategy != "rolling" {
+			return fmt.Errorf("%w: strategy must be rolling", ports.ErrInvalid)
+		}
+	case ports.WorkloadLifecycleBindSecret:
+		if record.Kind != ports.WorkloadKindContainer && record.Kind != ports.WorkloadKindGPUContainer {
+			return fmt.Errorf("%w: bind_secret is only supported for container and gpu_container instances", ports.ErrUnsupported)
+		}
+		if strings.TrimSpace(request.SecretID) == "" || (request.BindingType != "env" && request.BindingType != "file") {
+			return fmt.Errorf("%w: secret_id and binding_type are required", ports.ErrInvalid)
+		}
+	case ports.WorkloadLifecycleUnbindSecret:
+		if record.Kind != ports.WorkloadKindContainer && record.Kind != ports.WorkloadKindGPUContainer {
+			return fmt.Errorf("%w: unbind_secret is only supported for container and gpu_container instances", ports.ErrUnsupported)
+		}
+		if strings.TrimSpace(request.SecretID) == "" {
+			return fmt.Errorf("%w: secret_id is required", ports.ErrInvalid)
+		}
+	case ports.WorkloadLifecycleChangeSecurityGroups:
+		if record.Kind == ports.WorkloadKindSandbox {
+			return fmt.Errorf("%w: change_security_groups is not supported for sandbox instances", ports.ErrUnsupported)
+		}
+		if request.SecurityGroupIDs == nil {
+			return fmt.Errorf("%w: security_group_ids are required", ports.ErrInvalid)
+		}
+	case ports.WorkloadLifecycleSetTerminationProtection:
+		if record.Kind != ports.WorkloadKindVM && record.Kind != ports.WorkloadKindContainer && record.Kind != ports.WorkloadKindGPUContainer {
+			return fmt.Errorf("%w: termination protection is not supported for %s instances", ports.ErrUnsupported, record.Kind)
+		}
+		if request.Enabled == nil {
+			return fmt.Errorf("%w: enabled is required", ports.ErrInvalid)
+		}
+	case ports.WorkloadLifecyclePause, ports.WorkloadLifecycleResume, ports.WorkloadLifecycleExtend, ports.WorkloadLifecycleTouchIdle:
+		if record.Kind != ports.WorkloadKindSandbox {
+			return fmt.Errorf("%w: %s is only supported for sandbox instances", ports.ErrUnsupported, request.Action)
+		}
+		if request.Action == ports.WorkloadLifecycleExtend && request.Duration <= 0 {
+			return fmt.Errorf("%w: duration must be positive", ports.ErrInvalid)
+		}
+	}
+	return nil
+}
+
+func isContractLifecycleAction(action ports.WorkloadLifecycleAction) bool {
+	switch action {
+	case ports.WorkloadLifecycleStart,
+		ports.WorkloadLifecycleStop,
+		ports.WorkloadLifecycleRestart,
+		ports.WorkloadLifecycleResize,
+		ports.WorkloadLifecycleRebuild,
+		ports.WorkloadLifecycleDelete,
+		ports.WorkloadLifecycleSnapshot,
+		ports.WorkloadLifecycleAttachVolume,
+		ports.WorkloadLifecycleDetachVolume,
+		ports.WorkloadLifecycleAttachFilesystem,
+		ports.WorkloadLifecycleDetachFilesystem,
+		ports.WorkloadLifecycleRollback,
+		ports.WorkloadLifecycleScale,
+		ports.WorkloadLifecycleUpdateImage,
+		ports.WorkloadLifecycleBindSecret,
+		ports.WorkloadLifecycleUnbindSecret,
+		ports.WorkloadLifecycleChangeSecurityGroups,
+		ports.WorkloadLifecycleSetTerminationProtection,
+		ports.WorkloadLifecyclePause,
+		ports.WorkloadLifecycleResume,
+		ports.WorkloadLifecycleExtend,
+		ports.WorkloadLifecycleTouchIdle:
+		return true
+	default:
+		return false
+	}
+}
+
+func unexpectedLifecycleFields(request ports.WorkloadInstanceLifecycleRequest) []string {
+	present := map[string]bool{
+		"cpu":                strings.TrimSpace(request.Resources.CPU) != "",
+		"memory":             strings.TrimSpace(request.Resources.Memory) != "",
+		"snapshot_name":      strings.TrimSpace(request.SnapshotName) != "",
+		"snapshot_id":        strings.TrimSpace(request.SnapshotID) != "",
+		"include_data_disks": request.IncludeDataDisks != nil,
+		"volume_id":          strings.TrimSpace(request.VolumeID) != "",
+		"filesystem_id":      strings.TrimSpace(request.FilesystemID) != "",
+		"mount_path":         strings.TrimSpace(request.MountPath) != "",
+		"read_only":          request.ReadOnly != nil,
+		"revision":           strings.TrimSpace(request.Revision) != "",
+		"replicas":           request.Replicas != nil,
+		"image_id":           strings.TrimSpace(request.ImageID) != "",
+		"strategy":           strings.TrimSpace(request.Strategy) != "",
+		"secret_id":          strings.TrimSpace(request.SecretID) != "",
+		"binding_type":       strings.TrimSpace(request.BindingType) != "",
+		"env_name":           strings.TrimSpace(request.EnvName) != "",
+		"security_group_ids": request.SecurityGroupIDs != nil,
+		"enabled":            request.Enabled != nil,
+		"duration":           request.Duration != 0,
+	}
+	allowed := map[ports.WorkloadLifecycleAction]map[string]bool{
+		ports.WorkloadLifecycleResize:                   fieldSet("cpu", "memory"),
+		ports.WorkloadLifecycleSnapshot:                 fieldSet("snapshot_name", "include_data_disks"),
+		ports.WorkloadLifecycleAttachVolume:             fieldSet("volume_id", "mount_path", "read_only"),
+		ports.WorkloadLifecycleDetachVolume:             fieldSet("volume_id"),
+		ports.WorkloadLifecycleAttachFilesystem:         fieldSet("filesystem_id", "mount_path", "read_only"),
+		ports.WorkloadLifecycleDetachFilesystem:         fieldSet("filesystem_id"),
+		ports.WorkloadLifecycleRollback:                 fieldSet("snapshot_id", "revision"),
+		ports.WorkloadLifecycleScale:                    fieldSet("replicas"),
+		ports.WorkloadLifecycleUpdateImage:              fieldSet("image_id", "strategy"),
+		ports.WorkloadLifecycleBindSecret:               fieldSet("secret_id", "binding_type", "env_name", "mount_path"),
+		ports.WorkloadLifecycleUnbindSecret:             fieldSet("secret_id"),
+		ports.WorkloadLifecycleChangeSecurityGroups:     fieldSet("security_group_ids"),
+		ports.WorkloadLifecycleSetTerminationProtection: fieldSet("enabled"),
+		ports.WorkloadLifecycleExtend:                   fieldSet("duration"),
+	}
+	actionFields := allowed[request.Action]
+	unexpected := make([]string, 0)
+	for field, isPresent := range present {
+		if isPresent && !actionFields[field] {
+			unexpected = append(unexpected, field)
+		}
+	}
+	sort.Strings(unexpected)
+	return unexpected
+}
+
+func fieldSet(fields ...string) map[string]bool {
+	set := make(map[string]bool, len(fields))
+	for _, field := range fields {
+		set[field] = true
+	}
+	return set
+}
+
+func isSandboxLifecycleAction(action ports.WorkloadLifecycleAction) bool {
+	switch action {
+	case ports.WorkloadLifecyclePause, ports.WorkloadLifecycleResume, ports.WorkloadLifecycleExtend, ports.WorkloadLifecycleTouchIdle:
+		return true
+	default:
+		return false
+	}
+}
+
+func usesSandboxRuntime(action ports.WorkloadLifecycleAction) bool {
+	return isSandboxLifecycleAction(action) || action == ports.WorkloadLifecycleDelete
+}
+
+func sandboxResourceRefs(instance ports.SandboxInstanceStatus) []string {
+	if len(instance.ResourceRefs) > 0 {
+		return append([]string(nil), instance.ResourceRefs...)
+	}
+	return []string{"sandbox/local/" + instance.InstanceID}
+}
+
+func sandboxCreateReason(instance ports.SandboxInstanceStatus) string {
+	if instance.DevProfile.RealProvider {
+		return "kubernetes sandbox runtime applied Kata RuntimeClass workload"
+	}
+	return "local sandbox runtime accepted Kata profile intent"
+}
+
+func applyApprovedLifecycleSummary(record *ports.WorkloadInstanceRecord, request ports.WorkloadInstanceLifecycleRequest) {
+	switch request.Action {
+	case ports.WorkloadLifecycleResize:
+		record.Compute.CPU = strings.TrimSpace(request.Resources.CPU)
+		record.Compute.Memory = strings.TrimSpace(request.Resources.Memory)
+	case ports.WorkloadLifecycleScale:
+		if record.Container != nil && request.Replicas != nil {
+			record.Container.Replicas = *request.Replicas
+			if record.Container.ReadyReplicas > *request.Replicas {
+				record.Container.ReadyReplicas = *request.Replicas
+			}
+			record.Container.RolloutStatus = "progressing"
+		}
+	case ports.WorkloadLifecycleUpdateImage:
+		record.Image = ports.InstanceImageSummary{ID: strings.TrimSpace(request.ImageID)}
+	case ports.WorkloadLifecycleAttachFilesystem:
+		attachment := ports.WorkloadStorageAttachment{
+			Name:         strings.TrimSpace(request.FilesystemID),
+			Kind:         ports.StorageAttachmentSharedPVC,
+			ResourceType: "filesystem",
+			ResourceID:   strings.TrimSpace(request.FilesystemID),
+			MountPath:    strings.TrimSpace(request.MountPath),
+			ReadOnly:     request.ReadOnly != nil && *request.ReadOnly,
+			Required:     true,
+			SourceRef:    strings.TrimSpace(request.FilesystemID),
+			Status:       "mounted",
+		}
+		record.Status.Storage = append(record.Status.Storage, attachment)
+		record.StorageAttachments = append(record.StorageAttachments, attachment)
+	case ports.WorkloadLifecycleDetachFilesystem:
+		record.Status.Storage = removeStorageResource(record.Status.Storage, "filesystem", request.FilesystemID)
+		record.StorageAttachments = removeStorageResource(record.StorageAttachments, "filesystem", request.FilesystemID)
+	case ports.WorkloadLifecycleChangeSecurityGroups:
+		record.Network.SecurityGroups = make([]ports.InstanceSecurityGroupSummary, 0, len(request.SecurityGroupIDs))
+		for _, id := range request.SecurityGroupIDs {
+			if id = strings.TrimSpace(id); id != "" {
+				record.Network.SecurityGroups = append(record.Network.SecurityGroups, ports.InstanceSecurityGroupSummary{ID: id})
+			}
+		}
+	case ports.WorkloadLifecycleSetTerminationProtection:
+		record.Lifecycle.TerminationProtection = *request.Enabled
+	}
+}
+
+func removeStorageResource(items []ports.WorkloadStorageAttachment, resourceType, resourceID string) []ports.WorkloadStorageAttachment {
+	resourceID = strings.TrimSpace(resourceID)
+	next := make([]ports.WorkloadStorageAttachment, 0, len(items))
+	for _, item := range items {
+		if item.ResourceType == resourceType && item.ResourceID == resourceID {
+			continue
+		}
+		next = append(next, item)
+	}
+	return next
+}
+
+func hasStorageResource(items []ports.WorkloadStorageAttachment, resourceType, resourceID string) bool {
+	resourceID = strings.TrimSpace(resourceID)
+	for _, item := range items {
+		if item.ResourceType == resourceType && item.ResourceID == resourceID {
+			return true
+		}
+	}
+	return false
+}
 
 func (s *LocalInstanceService) recordCreateTimeline(ctx context.Context, operationID string, result ports.WorkloadInstanceCreateResult) error {
 	steps := []ports.WorkloadOperationStep{
@@ -770,8 +1480,7 @@ func lifecyclePrecheck(record ports.WorkloadInstanceRecord, request ports.Worklo
 		"to_state":               string(next),
 		"termination_protection": record.Lifecycle.TerminationProtection,
 	}
-	if record.Kind == ports.WorkloadKindVM &&
-		record.Lifecycle.TerminationProtection &&
+	if record.Lifecycle.TerminationProtection &&
 		terminationProtectedAction(request.Action) {
 		message := "termination_protection is enabled; disable it before " + string(request.Action)
 		details["allowed"] = false
@@ -784,24 +1493,14 @@ func lifecyclePrecheck(record ports.WorkloadInstanceRecord, request ports.Worklo
 			details:       details,
 		}
 	}
-	if request.Action == ports.WorkloadLifecycleSnapshot && record.Kind != ports.WorkloadKindVM {
-		message := "snapshot is only supported for vm instances in the local profile"
-		details["allowed"] = false
-		details["reason"] = "snapshot_requires_vm"
-		return lifecyclePrecheckResult{
-			allowed:       false,
-			failureReason: "snapshot_requires_vm",
-			message:       message,
-			retryEligible: false,
-			details:       details,
-		}
+	if request.Action == ports.WorkloadLifecycleResize &&
+		record.Kind == ports.WorkloadKindVM &&
+		record.Status.State != ports.WorkloadStateStopped {
+		return blockedLifecyclePrecheck(details, "vm_resize_requires_stopped", "vm resize requires a stopped instance")
 	}
 	if request.Action == ports.WorkloadLifecycleAttachVolume || request.Action == ports.WorkloadLifecycleDetachVolume {
 		volumeID := strings.TrimSpace(request.VolumeID)
 		details["volume_id"] = volumeID
-		if record.Kind != ports.WorkloadKindVM {
-			return blockedLifecyclePrecheck(details, "volume_binding_requires_vm", "volume binding is only supported for vm instances in the local profile")
-		}
 		if volumeID == "" {
 			return blockedLifecyclePrecheck(details, "volume_id_required", "volume_id is required for volume binding")
 		}
@@ -818,20 +1517,50 @@ func lifecyclePrecheck(record ports.WorkloadInstanceRecord, request ports.Worklo
 			}
 		}
 	}
+	if request.Action == ports.WorkloadLifecycleAttachFilesystem || request.Action == ports.WorkloadLifecycleDetachFilesystem {
+		filesystemID := strings.TrimSpace(request.FilesystemID)
+		details["filesystem_id"] = filesystemID
+		attached := hasStorageResource(record.Status.Storage, "filesystem", filesystemID) ||
+			hasStorageResource(record.StorageAttachments, "filesystem", filesystemID)
+		if request.Action == ports.WorkloadLifecycleAttachFilesystem && attached {
+			return blockedLifecyclePrecheck(details, "filesystem_already_attached", "filesystem is already attached")
+		}
+		if request.Action == ports.WorkloadLifecycleDetachFilesystem && !attached {
+			return blockedLifecyclePrecheck(details, "filesystem_not_attached", "filesystem is not attached")
+		}
+	}
 	if request.Action == ports.WorkloadLifecycleRollback {
-		revision := strings.TrimSpace(request.Revision)
-		details["revision"] = revision
-		if record.Kind != ports.WorkloadKindContainer && record.Kind != ports.WorkloadKindGPUContainer {
-			return blockedLifecyclePrecheck(details, "rollback_requires_container", "rollback is only supported for container and gpu_container instances in the local profile")
-		}
-		if record.Container == nil {
-			return blockedLifecyclePrecheck(details, "container_status_missing", "container rollout status is required for rollback")
-		}
-		if _, ok := rollbackTarget(record.Container, revision); !ok {
-			return blockedLifecyclePrecheck(details, "rollback_revision_not_found", "rollback revision was not found in rollout history")
+		if record.Kind == ports.WorkloadKindVM {
+			snapshotID := strings.TrimSpace(request.SnapshotID)
+			details["snapshot_id"] = snapshotID
+			snapshot, ok := vmRollbackSnapshot(record, snapshotID)
+			if !ok {
+				return blockedLifecyclePrecheck(details, "rollback_snapshot_not_found", "rollback snapshot was not found for this instance")
+			}
+			if snapshot.State != "ready" {
+				return blockedLifecyclePrecheck(details, "rollback_snapshot_not_ready", "rollback snapshot is not ready")
+			}
+		} else {
+			revision := strings.TrimSpace(request.Revision)
+			details["revision"] = revision
+			if record.Kind != ports.WorkloadKindContainer && record.Kind != ports.WorkloadKindGPUContainer {
+				return blockedLifecyclePrecheck(details, "rollback_unsupported_kind", "rollback is not supported for this instance kind")
+			}
+			if record.Container == nil {
+				return blockedLifecyclePrecheck(details, "container_status_missing", "container rollout status is required for rollback")
+			}
+			if _, ok := rollbackTarget(record.Container, revision); !ok {
+				return blockedLifecyclePrecheck(details, "rollback_revision_not_found", "rollback revision was not found in rollout history")
+			}
 		}
 	}
 	return lifecyclePrecheckResult{allowed: true, details: details}
+}
+
+func supportsVolumeBinding(kind ports.WorkloadKind) bool {
+	return kind == ports.WorkloadKindVM ||
+		kind == ports.WorkloadKindContainer ||
+		kind == ports.WorkloadKindGPUContainer
 }
 
 func blockedLifecyclePrecheck(details map[string]any, reason string, message string) lifecyclePrecheckResult {
@@ -857,14 +1586,18 @@ func terminationProtectedAction(action ports.WorkloadLifecycleAction) bool {
 
 func usesProviderLifecycle(action ports.WorkloadLifecycleAction) bool {
 	switch action {
-	case ports.WorkloadLifecycleSnapshot, ports.WorkloadLifecycleAttachVolume, ports.WorkloadLifecycleDetachVolume, ports.WorkloadLifecycleRollback:
+	case ports.WorkloadLifecycleSnapshot,
+		ports.WorkloadLifecycleAttachVolume,
+		ports.WorkloadLifecycleDetachVolume,
+		ports.WorkloadLifecycleSetTerminationProtection:
 		return false
 	default:
 		return true
 	}
 }
 
-func lifecycleApplyStepName(action ports.WorkloadLifecycleAction) string {
+func lifecycleApplyStepName(request ports.WorkloadInstanceLifecycleRequest) string {
+	action := request.Action
 	if action == ports.WorkloadLifecycleSnapshot {
 		return "create_snapshot"
 	}
@@ -875,6 +1608,9 @@ func lifecycleApplyStepName(action ports.WorkloadLifecycleAction) string {
 		return "detach_volume"
 	}
 	if action == ports.WorkloadLifecycleRollback {
+		if strings.TrimSpace(request.SnapshotID) != "" {
+			return "rollback_snapshot"
+		}
 		return "rollback_revision"
 	}
 	return "apply_lifecycle"
@@ -906,6 +1642,9 @@ func lifecycleAfterSpec(record ports.WorkloadInstanceRecord, request ports.Workl
 		after["container_revision"] = rollback.Revision
 		after["container_rollout_status"] = rollback.RolloutStatus
 		after["container_history_count"] = len(rollback.History)
+	}
+	if request.Action == ports.WorkloadLifecycleRollback && strings.TrimSpace(request.SnapshotID) != "" {
+		after["snapshot_id"] = strings.TrimSpace(request.SnapshotID)
 	}
 	return after
 }
@@ -950,11 +1689,15 @@ func volumeAttachmentFor(request ports.WorkloadInstanceLifecycleRequest) *ports.
 		return nil
 	}
 	return &ports.WorkloadStorageAttachment{
-		Name:      volumeID,
-		Kind:      ports.StorageAttachmentDataDisk,
-		MountPath: "/mnt/" + sanitizeSnapshotID(volumeID),
-		SourceRef: volumeID,
-		Required:  true,
+		Name:         volumeID,
+		Kind:         ports.StorageAttachmentDataDisk,
+		ResourceType: "volume",
+		ResourceID:   volumeID,
+		MountPath:    strings.TrimSpace(request.MountPath),
+		ReadOnly:     request.ReadOnly != nil && *request.ReadOnly,
+		SourceRef:    volumeID,
+		Required:     true,
+		Status:       "mounted",
 	}
 }
 
@@ -1002,7 +1745,7 @@ func isRootVolume(storage []ports.WorkloadStorageAttachment, volumeID string) bo
 
 func sameVolume(attachment ports.WorkloadStorageAttachment, volumeID string) bool {
 	volumeID = strings.TrimSpace(volumeID)
-	return volumeID != "" && (attachment.Name == volumeID || attachment.SourceRef == volumeID)
+	return volumeID != "" && (attachment.ResourceID == volumeID || attachment.Name == volumeID || attachment.SourceRef == volumeID)
 }
 
 func containerRollbackFor(record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceLifecycleRequest) *ports.ContainerInstanceStatus {
@@ -1042,6 +1785,16 @@ func rollbackTarget(container *ports.ContainerInstanceStatus, revision string) (
 		}
 	}
 	return ports.ContainerRevisionHistory{}, false
+}
+
+func vmRollbackSnapshot(record ports.WorkloadInstanceRecord, snapshotID string) (ports.VMInstanceSnapshot, bool) {
+	snapshotID = strings.TrimSpace(snapshotID)
+	for _, snapshot := range record.Snapshots {
+		if snapshot.ID == snapshotID && snapshot.SourceInstanceID == record.InstanceID {
+			return snapshot, true
+		}
+	}
+	return ports.VMInstanceSnapshot{}, false
 }
 
 func isSessionOpsAction(action ports.WorkloadInstanceOpsAction) bool {

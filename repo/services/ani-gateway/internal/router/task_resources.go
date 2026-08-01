@@ -23,12 +23,12 @@ func registerTasks(v1 *route.RouterGroup) {
 }
 
 func getTask(ctx context.Context, c *app.RequestContext) {
-	tenantID := demoTenantID(c)
+	tenantID := instanceTenantID(c)
 	completedTasks.RLock()
 	task, ok := completedTasks.byTenant[tenantID][c.Param("task_id")]
 	completedTasks.RUnlock()
 	if !ok {
-		writeDemoError(c, http.StatusNotFound, "NOT_FOUND", "task not found")
+		writeInstanceError(c, http.StatusNotFound, "NOT_FOUND", "task not found")
 		return
 	}
 	c.JSON(http.StatusOK, task)

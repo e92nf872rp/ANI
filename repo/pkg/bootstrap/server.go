@@ -56,6 +56,7 @@ type Config struct {
 
 	WorkloadProvider                   string
 	WorkloadProviderApplyEnabled       bool
+	SecretService                      ports.SecretService
 	GPUInventoryProvider               string
 	NetworkProvider                    string
 	NetworkProviderApplyEnabled        bool
@@ -65,6 +66,12 @@ type Config struct {
 	StorageProviderApplyEnabled        bool
 	StorageProviderUserID              string
 	StorageProviderPermissionProof     string
+	RegistryProviderMode               string
+	HarborEndpoint                     string
+	HarborUsername                     string
+	HarborPassword                     string
+	HarborRequestTimeout               time.Duration
+	RegistryTLSInsecure                bool
 	WorkloadLifecycleProvider          string
 	WorkloadLifecycleApplyEnabled      bool
 	WorkloadOpsProvider                string
@@ -197,6 +204,26 @@ func (c Config) withEnvironmentOverrides() Config {
 	}
 	if value := os.Getenv("STORAGE_PROVIDER_PERMISSION_PROOF"); value != "" {
 		c.StorageProviderPermissionProof = value
+	}
+	if value := os.Getenv("REGISTRY_PROVIDER_MODE"); value != "" {
+		c.RegistryProviderMode = value
+	}
+	if value := os.Getenv("HARBOR_ENDPOINT"); value != "" {
+		c.HarborEndpoint = value
+	}
+	if value := os.Getenv("HARBOR_USERNAME"); value != "" {
+		c.HarborUsername = value
+	}
+	if value := os.Getenv("HARBOR_PASSWORD"); value != "" {
+		c.HarborPassword = value
+	}
+	if value := os.Getenv("HARBOR_REQUEST_TIMEOUT"); value != "" {
+		if parsed, err := time.ParseDuration(value); err == nil {
+			c.HarborRequestTimeout = parsed
+		}
+	}
+	if value := os.Getenv("REGISTRY_TLS_INSECURE"); value != "" {
+		c.RegistryTLSInsecure = parseBool(value)
 	}
 	if value := os.Getenv("WORKLOAD_LIFECYCLE_PROVIDER"); value != "" {
 		c.WorkloadLifecycleProvider = value

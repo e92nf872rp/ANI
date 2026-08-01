@@ -35,6 +35,9 @@ func (r *KubernetesDryRunRenderer) Render(ctx context.Context, spec ports.Worklo
 		manifests = []ports.WorkloadManifest{renderJob(planned)}
 	default:
 		manifests = []ports.WorkloadManifest{renderDeployment(planned)}
+		if planned.Container != nil && len(containerPortSpecs(planned)) > 0 {
+			manifests = append(manifests, renderService(planned))
+		}
 	}
 	// When a workload identity binding exists, render the K8s Secret that
 	// backs the ANI_WORKLOAD_TOKEN env var so the Deployment can reference it.
@@ -45,6 +48,7 @@ func (r *KubernetesDryRunRenderer) Render(ctx context.Context, spec ports.Worklo
 }
 
 func renderVM(spec ports.WorkloadSpec) ports.WorkloadManifest {
+	networks, interfaces := vmNetworksAndInterfaces(spec)
 	content := manifest(map[string]any{
 		"apiVersion": "kubevirt.io/v1",
 		"kind":       "VirtualMachine",
@@ -60,14 +64,18 @@ func renderVM(spec ports.WorkloadSpec) ports.WorkloadManifest {
 					"domain": map[string]any{
 						"machine": map[string]any{"type": firstNonEmpty(spec.VM.MachineType, "q35")},
 						"devices": map[string]any{
-							"disks": vmDisks(spec),
+							// K8s 1.28 without SidecarContainers treats guest-console-log
+							// (virt-tail) as a blocking init container; disable for lab/live.
+							"logSerialConsole": false,
+							"disks":            vmDisks(spec),
+							"interfaces":       interfaces,
 						},
 						"resources": map[string]any{
 							"requests": resourceRequests(spec),
 						},
 					},
 					"volumes":  vmVolumes(spec),
-					"networks": networkRefs(spec),
+					"networks": networks,
 				},
 			},
 		},
@@ -81,12 +89,40 @@ func renderDeployment(spec ports.WorkloadSpec) ports.WorkloadManifest {
 		"kind":       "Deployment",
 		"metadata":   metadata(spec, "workload"),
 		"spec": map[string]any{
-			"replicas": 1,
+			"replicas": containerReplicas(spec),
 			"selector": map[string]any{"matchLabels": selectorLabels(spec)},
 			"template": podTemplate(spec),
 		},
 	})
 	return ports.WorkloadManifest{Name: spec.Name, Kind: "Deployment", Provider: "kubernetes", Content: content}
+}
+
+func renderService(spec ports.WorkloadSpec) ports.WorkloadManifest {
+	portsSpec := containerPortSpecs(spec)
+	servicePorts := make([]any, 0, len(portsSpec))
+	for index, port := range portsSpec {
+		name := strings.TrimSpace(port.Name)
+		if name == "" {
+			name = "port-" + strconv.Itoa(index+1)
+		}
+		servicePorts = append(servicePorts, map[string]any{
+			"name":       name,
+			"port":       port.ContainerPort,
+			"targetPort": port.ContainerPort,
+			"protocol":   strings.ToUpper(firstNonEmpty(port.Protocol, "TCP")),
+		})
+	}
+	content := manifest(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata":   metadata(spec, "service"),
+		"spec": map[string]any{
+			"type":     "ClusterIP",
+			"selector": selectorLabels(spec),
+			"ports":    servicePorts,
+		},
+	})
+	return ports.WorkloadManifest{Name: spec.Name, Kind: "Service", Provider: "kubernetes", Content: content}
 }
 
 func renderJob(spec ports.WorkloadSpec) ports.WorkloadManifest {
@@ -103,6 +139,9 @@ func renderJob(spec ports.WorkloadSpec) ports.WorkloadManifest {
 }
 
 func podTemplate(spec ports.WorkloadSpec) map[string]any {
+	storage := renderStorageAttachments(spec)
+	envFrom := secretEnvFromIDs(spec)
+	envFrom = append(envFrom, secretEnvFrom(spec.SecretBindings)...)
 	podSpec := map[string]any{
 		"restartPolicy": "Always",
 		"containers": []any{
@@ -111,14 +150,14 @@ func podTemplate(spec ports.WorkloadSpec) map[string]any {
 				"image":        spec.Image,
 				"command":      omitEmptySlice(spec.Command),
 				"args":         omitEmptySlice(spec.Args),
-				"env":          workloadIdentityEnv(spec),
-				"envFrom":      secretEnvFrom(spec.SecretBindings),
+				"env":          containerEnv(spec),
+				"envFrom":      envFrom,
 				"resources":    containerResources(spec),
 				"ports":        containerPorts(spec),
-				"volumeMounts": append(volumeMounts(spec.Storage), secretVolumeMounts(spec.SecretBindings)...),
+				"volumeMounts": append(volumeMounts(storage), secretVolumeMounts(spec.SecretBindings)...),
 			},
 		},
-		"volumes": append(volumes(spec.Storage), secretVolumes(spec.SecretBindings)...),
+		"volumes": append(volumes(storage), secretVolumes(spec.SecretBindings)...),
 	}
 	if spec.Kind == ports.WorkloadKindBatchJob {
 		podSpec["restartPolicy"] = "Never"
@@ -210,6 +249,23 @@ func workloadIdentityEnv(spec ports.WorkloadSpec) []any {
 	}
 }
 
+func containerEnv(spec ports.WorkloadSpec) []any {
+	items := workloadIdentityEnv(spec)
+	if spec.Container == nil {
+		return items
+	}
+	for _, env := range spec.Container.Env {
+		entry := map[string]any{"name": env.Name}
+		if env.SecretRef != "" {
+			entry["valueFrom"] = map[string]any{"secretKeyRef": map[string]any{"name": env.SecretRef, "key": env.Name}}
+		} else if env.Value != nil {
+			entry["value"] = *env.Value
+		}
+		items = append(items, entry)
+	}
+	return items
+}
+
 func workloadIdentitySecretName(spec ports.WorkloadSpec) string {
 	if spec.Identity == nil {
 		return ""
@@ -282,11 +338,86 @@ func containerPorts(spec ports.WorkloadSpec) []any {
 	if spec.Container == nil {
 		return nil
 	}
+	if len(spec.Container.PortSpecs) > 0 {
+		items := make([]any, 0, len(spec.Container.PortSpecs))
+		for _, port := range spec.Container.PortSpecs {
+			entry := map[string]any{"containerPort": port.ContainerPort, "protocol": strings.ToUpper(firstNonEmpty(port.Protocol, "TCP"))}
+			if port.Name != "" {
+				entry["name"] = port.Name
+			}
+			items = append(items, entry)
+		}
+		return items
+	}
 	ports := make([]any, 0, len(spec.Container.Ports))
 	for _, port := range spec.Container.Ports {
-		ports = append(ports, map[string]any{"containerPort": port})
+		ports = append(ports, map[string]any{"containerPort": port, "protocol": "TCP"})
 	}
 	return ports
+}
+
+func containerPortSpecs(spec ports.WorkloadSpec) []ports.InstancePortSpec {
+	if spec.Container == nil {
+		return nil
+	}
+	if len(spec.Container.PortSpecs) > 0 {
+		return append([]ports.InstancePortSpec(nil), spec.Container.PortSpecs...)
+	}
+	items := make([]ports.InstancePortSpec, 0, len(spec.Container.Ports))
+	for _, port := range spec.Container.Ports {
+		items = append(items, ports.InstancePortSpec{ContainerPort: port, Protocol: "TCP"})
+	}
+	return items
+}
+
+func containerReplicas(spec ports.WorkloadSpec) int32 {
+	if spec.Container == nil || spec.Container.Replicas < 1 {
+		return 1
+	}
+	return spec.Container.Replicas
+}
+
+func renderStorageAttachments(spec ports.WorkloadSpec) []ports.WorkloadStorageAttachment {
+	items := make([]ports.WorkloadStorageAttachment, 0, len(spec.Storage))
+	seen := map[string]struct{}{}
+	for _, item := range spec.Storage {
+		item.Name = firstNonEmpty(item.Name, storageMountName(item.ResourceType, item.ResourceID))
+		key := item.ResourceType + ":" + item.ResourceID + ":" + item.MountPath
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		items = append(items, item)
+	}
+	if spec.Container == nil {
+		return items
+	}
+	for _, mount := range spec.Container.VolumeMounts {
+		item := ports.WorkloadStorageAttachment{Name: storageMountName("volume", mount.VolumeID), ResourceType: "volume", ResourceID: mount.VolumeID, MountPath: mount.MountPath, ReadOnly: mount.ReadOnly}
+		key := item.ResourceType + ":" + item.ResourceID + ":" + item.MountPath
+		if _, ok := seen[key]; !ok {
+			seen[key] = struct{}{}
+			items = append(items, item)
+		}
+	}
+	for _, mount := range spec.Container.FilesystemMounts {
+		item := ports.WorkloadStorageAttachment{Name: storageMountName("filesystem", mount.FilesystemID), ResourceType: "filesystem", ResourceID: mount.FilesystemID, MountPath: mount.MountPath, ReadOnly: mount.ReadOnly}
+		key := item.ResourceType + ":" + item.ResourceID + ":" + item.MountPath
+		if _, ok := seen[key]; !ok {
+			seen[key] = struct{}{}
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+func storageMountName(kind, resourceID string) string {
+	name := strings.TrimSpace(resourceID)
+	if name == "" {
+		name = kind
+	}
+	name = strings.NewReplacer("/", "-", "_", "-", ".", "-").Replace(name)
+	return kind + "-" + name
 }
 
 func volumeMounts(storage []ports.WorkloadStorageAttachment) []any {
@@ -314,6 +445,33 @@ func secretEnvFrom(bindings []ports.WorkloadSecretBinding) []any {
 			"prefix": binding.EnvPrefix,
 			"secretRef": map[string]any{
 				"name": binding.SecretID,
+			},
+		})
+	}
+	if len(envFrom) == 0 {
+		return nil
+	}
+	return envFrom
+}
+
+func secretEnvFromIDs(spec ports.WorkloadSpec) []any {
+	if spec.Container == nil {
+		return nil
+	}
+	envFrom := make([]any, 0, len(spec.Container.SecretIDs))
+	seen := map[string]struct{}{}
+	for _, secretID := range spec.Container.SecretIDs {
+		secretID = strings.TrimSpace(secretID)
+		if secretID == "" {
+			continue
+		}
+		if _, ok := seen[secretID]; ok {
+			continue
+		}
+		seen[secretID] = struct{}{}
+		envFrom = append(envFrom, map[string]any{
+			"secretRef": map[string]any{
+				"name": secretID,
 			},
 		})
 	}
@@ -409,12 +567,18 @@ func vmVolumes(spec ports.WorkloadSpec) []any {
 		},
 	}
 	for _, attachment := range spec.Storage {
+		if isContainerDiskPlaceholderRoot(spec, attachment) {
+			continue
+		}
 		volumes = append(volumes, map[string]any{
 			"name": attachment.Name,
 			"persistentVolumeClaim": map[string]any{
-				"claimName": firstNonEmpty(attachment.SourceRef, spec.Name+"-"+attachment.Name),
+				"claimName": firstNonEmpty(attachment.ResourceID, attachment.SourceRef, spec.Name+"-"+attachment.Name),
 			},
 		})
+	}
+	if cloudInit := vmCloudInitVolume(spec); cloudInit != nil {
+		volumes = append(volumes, cloudInit)
 	}
 	volumes = append(volumes, secretVolumes(spec.SecretBindings)...)
 	return volumes
@@ -428,8 +592,17 @@ func vmDisks(spec ports.WorkloadSpec) []any {
 		},
 	}
 	for _, attachment := range spec.Storage {
+		if isContainerDiskPlaceholderRoot(spec, attachment) {
+			continue
+		}
 		disks = append(disks, map[string]any{
 			"name": attachment.Name,
+			"disk": map[string]any{"bus": "virtio"},
+		})
+	}
+	if spec.VM != nil && (strings.TrimSpace(spec.VM.CloudInitSecret) != "" || strings.TrimSpace(spec.VM.UserData) != "") {
+		disks = append(disks, map[string]any{
+			"name": "cloudinitdisk",
 			"disk": map[string]any{"bus": "virtio"},
 		})
 	}
@@ -438,12 +611,31 @@ func vmDisks(spec ports.WorkloadSpec) []any {
 			continue
 		}
 		disks = append(disks, map[string]any{
-			"name":     secretVolumeName(binding, i),
-			"disk":     map[string]any{"bus": "virtio"},
-			"readOnly": true,
+			"name": secretVolumeName(binding, i),
+			"disk": map[string]any{"bus": "virtio"},
 		})
 	}
 	return disks
+}
+
+func vmCloudInitVolume(spec ports.WorkloadSpec) map[string]any {
+	if spec.VM == nil {
+		return nil
+	}
+	cloudInit := map[string]any{}
+	if secretID := strings.TrimSpace(spec.VM.CloudInitSecret); secretID != "" {
+		cloudInit["secretRef"] = map[string]any{"name": secretID}
+	}
+	if userData := strings.TrimSpace(spec.VM.UserData); userData != "" {
+		cloudInit["userData"] = userData
+	}
+	if len(cloudInit) == 0 {
+		return nil
+	}
+	return map[string]any{
+		"name":             "cloudinitdisk",
+		"cloudInitNoCloud": cloudInit,
+	}
 }
 
 func vmSecretMountAnnotation(bindings []ports.WorkloadSecretBinding) string {
@@ -457,17 +649,89 @@ func vmSecretMountAnnotation(bindings []ports.WorkloadSecretBinding) string {
 	return strings.Join(mounts, ",")
 }
 
-func networkRefs(spec ports.WorkloadSpec) []any {
-	networks := make([]any, 0, len(spec.Network.Attachments))
+func isContainerDiskPlaceholderRoot(spec ports.WorkloadSpec, attachment ports.WorkloadStorageAttachment) bool {
+	if attachment.Kind != ports.StorageAttachmentRootDisk {
+		return false
+	}
+	if strings.TrimSpace(attachment.ResourceID) != "" {
+		return false
+	}
+	source := strings.TrimSpace(attachment.SourceRef)
+	if source == "" {
+		return true
+	}
+	if spec.VM != nil && source == strings.TrimSpace(spec.VM.BootImage) {
+		return true
+	}
+	// Gateway defaults SourceRef to an image path when no concrete PVC/volume is chosen.
+	return looksLikeImageReference(source)
+}
+
+func looksLikeImageReference(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	if strings.Contains(value, ":") {
+		return true
+	}
+	return strings.Contains(value, "/") && strings.Contains(value, ".")
+}
+
+func isPlaceholderNetworkAttachment(attachment ports.WorkloadNetworkAttachment) bool {
+	networkID := strings.TrimSpace(attachment.NetworkID)
+	plane := strings.TrimSpace(string(attachment.Plane))
+	if networkID == "" || networkID == plane {
+		return true
+	}
+	if strings.ReplaceAll(networkID, "-", "_") == plane {
+		return true
+	}
+	switch networkID {
+	case "tenant-vpc", "foundation-mesh", "management", "storage":
+		return true
+	default:
+		return false
+	}
+}
+
+// vmNetworksAndInterfaces renders KubeVirt networks/interfaces as a matched pair.
+// Planning/Gateway defaults use plane-like NetworkIDs as placeholders; those fall
+// back to the pod network until a real Multus NAD is supplied.
+func vmNetworksAndInterfaces(spec ports.WorkloadSpec) (networks []any, interfaces []any) {
 	for _, attachment := range spec.Network.Attachments {
+		if isPlaceholderNetworkAttachment(attachment) {
+			continue
+		}
+		networkID := strings.TrimSpace(attachment.NetworkID)
+		plane := strings.TrimSpace(string(attachment.Plane))
+		name := firstNonEmpty(plane, networkID)
 		networks = append(networks, map[string]any{
-			"name": string(attachment.Plane),
+			"name": name,
 			"multus": map[string]any{
-				"networkName": attachment.NetworkID,
+				"networkName": networkID,
 			},
 		})
+		interfaces = append(interfaces, map[string]any{
+			"name":   name,
+			"bridge": map[string]any{},
+		})
 	}
-	return networks
+	if len(networks) == 0 {
+		networks = []any{
+			map[string]any{
+				"name": "default",
+				"pod":  map[string]any{},
+			},
+		}
+		interfaces = []any{
+			map[string]any{
+				"name":       "default",
+				"masquerade": map[string]any{},
+			},
+		}
+	}
+	return networks, interfaces
 }
 
 func manifest(value map[string]any) string {

@@ -238,22 +238,125 @@ var _ ports.WorkloadInstanceOrchestrator = (*LocalInstanceOrchestrator)(nil)
 func instanceRecordFromResult(spec ports.WorkloadSpec, ref ports.WorkloadRef, auditID string, provider string, resourceRefs []string, status ports.WorkloadStatus, createdAt time.Time) ports.WorkloadInstanceRecord {
 	status.Ref = ref
 	return ports.WorkloadInstanceRecord{
-		TenantID:     spec.TenantID,
-		InstanceID:   ref.InstanceID,
-		Name:         spec.Name,
-		Kind:         spec.Kind,
-		Provider:     provider,
-		AuditID:      auditID,
-		Lifecycle:    spec.Lifecycle,
-		SSH:          sshConnectionInfo(spec, ref, status),
-		Container:    containerStatusInfo(spec, status, createdAt),
-		GPU:          gpuStatusInfo(spec, status),
-		Identity:     workloadIdentitySummary(spec.Identity),
-		ResourceRefs: append([]string(nil), resourceRefs...),
-		Status:       status,
-		CreatedAt:    createdAt,
-		UpdatedAt:    firstNonZeroTime(status.UpdatedAt, createdAt),
+		TenantID:           spec.TenantID,
+		InstanceID:         ref.InstanceID,
+		Name:               spec.Name,
+		Description:        spec.Description,
+		Labels:             cloneInstanceLabels(spec.Labels),
+		Kind:               spec.Kind,
+		Provider:           provider,
+		AuditID:            auditID,
+		Image:              instanceImageSummary(spec),
+		Compute:            instanceComputeSummary(spec, status),
+		Network:            instanceNetworkSummary(spec, status),
+		Access:             instanceAccessSummary(spec.Kind, status.State),
+		StorageAttachments: instanceStorageAttachments(spec, status),
+		Lifecycle:          spec.Lifecycle,
+		SSH:                sshConnectionInfo(spec, ref, status),
+		Container:          containerStatusInfo(spec, status, createdAt),
+		GPU:                gpuStatusInfo(spec, status),
+		Identity:           workloadIdentitySummary(spec.Identity),
+		ResourceRefs:       append([]string(nil), resourceRefs...),
+		Status:             status,
+		CreatedAt:          createdAt,
+		UpdatedAt:          firstNonZeroTime(status.UpdatedAt, createdAt),
 	}
+}
+
+func cloneInstanceLabels(labels map[string]string) map[string]string {
+	if len(labels) == 0 {
+		return nil
+	}
+	cloned := make(map[string]string, len(labels))
+	for key, value := range labels {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func instanceImageSummary(spec ports.WorkloadSpec) ports.InstanceImageSummary {
+	summary := spec.ImageSummary
+	summary.ID = firstNonEmpty(summary.ID, spec.ImageID)
+	summary.Ref = firstNonEmpty(summary.Ref, spec.ImageRef, spec.Image)
+	return summary
+}
+
+func instanceComputeSummary(spec ports.WorkloadSpec, status ports.WorkloadStatus) ports.InstanceComputeSummary {
+	summary := ports.InstanceComputeSummary{
+		CPU:      spec.Resources.CPU,
+		Memory:   spec.Resources.Memory,
+		NodeName: status.NodeName,
+	}
+	if spec.GPUSpec != nil {
+		summary.SpecID = spec.GPUSpec.SpecID
+		summary.GPUType = spec.GPUSpec.GPUType
+		summary.GPUShares = spec.GPUSpec.Shares
+		summary.GPUMBPerShare = spec.GPUSpec.MBPerShare
+	}
+	return summary
+}
+
+func instanceNetworkSummary(spec ports.WorkloadSpec, status ports.WorkloadStatus) ports.InstanceNetworkSummary {
+	summary := ports.InstanceNetworkSummary{
+		VPCID:     spec.Network.VPCID,
+		SubnetID:  spec.Network.SubnetID,
+		PrivateIP: firstNonEmpty(spec.Network.PrivateIP, primaryIPAddress(status.Networks)),
+	}
+	for _, id := range spec.Network.SecurityGroupIDs {
+		if trimmed := strings.TrimSpace(id); trimmed != "" {
+			summary.SecurityGroups = append(summary.SecurityGroups, ports.InstanceSecurityGroupSummary{ID: trimmed})
+		}
+	}
+	if endpoint := strings.TrimSpace(status.Endpoint); endpoint != "" {
+		summary.Endpoints = []ports.InstanceEndpointSummary{{Address: endpoint}}
+	}
+	return summary
+}
+
+func instanceAccessSummary(kind ports.WorkloadKind, state ports.WorkloadState) ports.InstanceAccessSummary {
+	available := state == ports.WorkloadStateRunning
+	summary := ports.InstanceAccessSummary{
+		SSHAvailable:     available && kind == ports.WorkloadKindVM,
+		ConsoleAvailable: available && kind == ports.WorkloadKindVM,
+		ExecAvailable: available && (kind == ports.WorkloadKindContainer ||
+			kind == ports.WorkloadKindGPUContainer ||
+			kind == ports.WorkloadKindSandbox),
+	}
+	if !available {
+		summary.Reason = "instance state does not allow interactive access"
+	}
+	return summary
+}
+
+func instanceStorageAttachments(spec ports.WorkloadSpec, status ports.WorkloadStatus) []ports.WorkloadStorageAttachment {
+	source := status.Storage
+	if len(source) == 0 {
+		source = spec.Storage
+	}
+	if len(source) == 0 {
+		return nil
+	}
+	attachments := make([]ports.WorkloadStorageAttachment, 0, len(source))
+	for _, item := range source {
+		if item.ResourceType == "" {
+			switch item.Kind {
+			case ports.StorageAttachmentSharedPVC, ports.StorageAttachmentObjectFuse:
+				item.ResourceType = "filesystem"
+			default:
+				item.ResourceType = "volume"
+			}
+		}
+		item.ResourceID = firstNonEmpty(item.ResourceID, item.SourceRef, item.Name)
+		if item.Status == "" {
+			if item.ResourceType == "filesystem" || strings.TrimSpace(item.MountPath) != "" {
+				item.Status = "mounted"
+			} else {
+				item.Status = "attached"
+			}
+		}
+		attachments = append(attachments, item)
+	}
+	return attachments
 }
 
 func workloadIdentitySummary(identity *ports.WorkloadIdentityBinding) *ports.WorkloadIdentityBinding {
@@ -349,14 +452,38 @@ func gpuStatusInfo(spec ports.WorkloadSpec, status ports.WorkloadStatus) *ports.
 	if count <= 0 {
 		count = 1
 	}
-	return &ports.GPUInstanceStatus{
+	result := &ports.GPUInstanceStatus{
 		Vendor:             firstGPUVendor(spec.Resources.GPU.PreferredVendors),
 		Model:              resolvedGPUModel(spec),
 		Count:              count,
+		SchedulingState:    gpuSchedulingState(status),
 		SchedulingReason:   gpuSchedulingReason(spec),
 		UtilizationPercent: gpuUtilizationPercent(status.State),
 		ResourceName:       annotationValue(spec, gpuResourceNameAnnotation),
 		QueueName:          annotationValue(spec, gpuQueueAnnotation),
+	}
+	if spec.GPUSpec != nil {
+		result.SpecID = spec.GPUSpec.SpecID
+		result.GPUType = spec.GPUSpec.GPUType
+		result.Shares = spec.GPUSpec.Shares
+		result.MBPerShare = spec.GPUSpec.MBPerShare
+	}
+	return result
+}
+
+func gpuSchedulingState(status ports.WorkloadStatus) string {
+	switch status.State {
+	case ports.WorkloadStateRunning:
+		return "running"
+	case ports.WorkloadStateProvisioning, ports.WorkloadStateStarting:
+		if strings.TrimSpace(status.NodeName) != "" {
+			return "scheduled"
+		}
+		return "pending"
+	case ports.WorkloadStateFailed:
+		return "failed"
+	default:
+		return "pending"
 	}
 }
 

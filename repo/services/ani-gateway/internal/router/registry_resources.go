@@ -155,7 +155,7 @@ func registerHarbor(v1 *route.RouterGroup, service ports.ImageRegistry) {
 }
 
 func (api *registryAPI) getOverview(ctx context.Context, c *app.RequestContext) {
-	result, err := api.service.GetOverview(ctx, ports.RegistryOverviewRequest{TenantID: demoTenantID(c)})
+	result, err := api.service.GetOverview(ctx, ports.RegistryOverviewRequest{TenantID: instanceTenantID(c)})
 	if err != nil {
 		writeRegistryError(c, err)
 		return
@@ -164,7 +164,7 @@ func (api *registryAPI) getOverview(ctx context.Context, c *app.RequestContext) 
 }
 
 func (api *registryAPI) listImages(ctx context.Context, c *app.RequestContext) {
-	result, err := api.service.ListImages(ctx, ports.RegistryImageListRequest{TenantID: demoTenantID(c), Project: c.Query("project"), Repository: c.Query("repository"), Tag: c.Query("tag"), Purpose: c.Query("purpose"), ScanStatus: ports.RegistryScanState(c.Query("scan_status")), Limit: queryInt(c, "limit", 20), Cursor: c.Query("cursor")})
+	result, err := api.service.ListImages(ctx, ports.RegistryImageListRequest{TenantID: instanceTenantID(c), Project: c.Query("project"), Repository: c.Query("repository"), Tag: c.Query("tag"), Purpose: c.Query("purpose"), ScanStatus: ports.RegistryScanState(c.Query("scan_status")), Limit: queryInt(c, "limit", 20), Cursor: c.Query("cursor")})
 	if err != nil {
 		writeRegistryError(c, err)
 		return
@@ -173,7 +173,7 @@ func (api *registryAPI) listImages(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *registryAPI) getPushInstructions(ctx context.Context, c *app.RequestContext) {
-	result, err := api.service.GetPushInstructions(ctx, ports.RegistryPushInstructionsRequest{TenantID: demoTenantID(c), Project: c.Param("project"), Repository: c.Query("repository")})
+	result, err := api.service.GetPushInstructions(ctx, ports.RegistryPushInstructionsRequest{TenantID: instanceTenantID(c), Project: c.Param("project"), Repository: c.Query("repository")})
 	if err != nil {
 		writeRegistryError(c, err)
 		return
@@ -182,7 +182,7 @@ func (api *registryAPI) getPushInstructions(ctx context.Context, c *app.RequestC
 }
 
 func (api *registryAPI) deleteTag(ctx context.Context, c *app.RequestContext) {
-	result, err := api.service.DeleteTag(ctx, ports.RegistryTagDeleteRequest{TenantID: demoTenantID(c), Project: c.Param("project"), Repository: c.Param("repository"), Tag: c.Param("tag")})
+	result, err := api.service.DeleteTag(ctx, ports.RegistryTagDeleteRequest{TenantID: instanceTenantID(c), Project: c.Param("project"), Repository: c.Param("repository"), Tag: c.Param("tag")})
 	if err != nil {
 		writeRegistryError(c, err)
 		return
@@ -191,7 +191,7 @@ func (api *registryAPI) deleteTag(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *registryAPI) listTagReferences(ctx context.Context, c *app.RequestContext) {
-	result, err := api.service.ListTagReferences(ctx, ports.RegistryImageReferenceListRequest{TenantID: demoTenantID(c), Project: c.Param("project"), Repository: c.Param("repository"), Tag: c.Param("tag")})
+	result, err := api.service.ListTagReferences(ctx, ports.RegistryImageReferenceListRequest{TenantID: instanceTenantID(c), Project: c.Param("project"), Repository: c.Param("repository"), Tag: c.Param("tag")})
 	if err != nil {
 		writeRegistryError(c, err)
 		return
@@ -205,7 +205,7 @@ func (api *registryAPI) listTagReferences(ctx context.Context, c *app.RequestCon
 
 func (api *registryAPI) listProjects(ctx context.Context, c *app.RequestContext) {
 	result, err := api.service.ListProjects(ctx, ports.RegistryProjectListRequest{
-		TenantID: demoTenantID(c),
+		TenantID: instanceTenantID(c),
 		Limit:    queryInt(c, "limit", 20),
 		Cursor:   c.Query("cursor"),
 	})
@@ -219,11 +219,11 @@ func (api *registryAPI) listProjects(ctx context.Context, c *app.RequestContext)
 func (api *registryAPI) createProject(ctx context.Context, c *app.RequestContext) {
 	var req createRegistryProjectRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid registry project request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid registry project request")
 		return
 	}
 	project, err := api.service.CreateProject(ctx, ports.RegistryProjectRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
 		Public:         req.Public,
@@ -237,7 +237,7 @@ func (api *registryAPI) createProject(ctx context.Context, c *app.RequestContext
 
 func (api *registryAPI) listRepositories(ctx context.Context, c *app.RequestContext) {
 	result, err := api.service.ListRepositories(ctx, ports.RegistryRepositoryListRequest{
-		TenantID: demoTenantID(c),
+		TenantID: instanceTenantID(c),
 		Project:  c.Param("project"),
 		Limit:    queryInt(c, "limit", 20),
 		Cursor:   c.Query("cursor"),
@@ -251,7 +251,7 @@ func (api *registryAPI) listRepositories(ctx context.Context, c *app.RequestCont
 
 func (api *registryAPI) listArtifacts(ctx context.Context, c *app.RequestContext) {
 	result, err := api.service.ListArtifacts(ctx, ports.RegistryArtifactListRequest{
-		TenantID:   demoTenantID(c),
+		TenantID:   instanceTenantID(c),
 		Project:    c.Param("project"),
 		Repository: c.Param("repository"),
 		Limit:      queryInt(c, "limit", 20),
@@ -267,7 +267,7 @@ func (api *registryAPI) listArtifacts(ctx context.Context, c *app.RequestContext
 func (api *registryAPI) setPermission(ctx context.Context, c *app.RequestContext) {
 	var req setRegistryPermissionRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid registry permission request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid registry permission request")
 		return
 	}
 	actions := make([]ports.RegistryPermissionAction, 0, len(req.Actions))
@@ -275,7 +275,7 @@ func (api *registryAPI) setPermission(ctx context.Context, c *app.RequestContext
 		actions = append(actions, ports.RegistryPermissionAction(action))
 	}
 	permission, err := api.service.SetRepositoryPermission(ctx, ports.RegistryPermissionRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		Project:        c.Param("project"),
 		Repository:     c.Param("repository"),
 		IdempotencyKey: req.IdempotencyKey,
@@ -292,11 +292,11 @@ func (api *registryAPI) setPermission(ctx context.Context, c *app.RequestContext
 func (api *registryAPI) createPullSecret(ctx context.Context, c *app.RequestContext) {
 	var req createRegistryPullSecretRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid registry pull secret request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid registry pull secret request")
 		return
 	}
 	secret, err := api.service.CreatePullSecret(ctx, ports.RegistryPullSecretRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		Project:        c.Param("project"),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
@@ -311,7 +311,7 @@ func (api *registryAPI) createPullSecret(ctx context.Context, c *app.RequestCont
 
 func (api *registryAPI) getProjectScanReport(ctx context.Context, c *app.RequestContext) {
 	result, err := api.service.GetProjectScanReport(ctx, ports.RegistryProjectScanReportRequest{
-		TenantID: demoTenantID(c),
+		TenantID: instanceTenantID(c),
 		Project:  c.Param("project"),
 	})
 	if err != nil {
@@ -323,7 +323,7 @@ func (api *registryAPI) getProjectScanReport(ctx context.Context, c *app.Request
 
 func (api *registryAPI) getScanResult(ctx context.Context, c *app.RequestContext) {
 	result, err := api.service.GetScanResult(ctx, ports.RegistryScanResultRequest{
-		TenantID: demoTenantID(c),
+		TenantID: instanceTenantID(c),
 		Image:    c.Query("image"),
 	})
 	if err != nil {
@@ -493,14 +493,14 @@ func registryPushInstructionsFromRecord(record ports.RegistryPushInstructions) m
 func writeRegistryError(c *app.RequestContext, err error) {
 	switch {
 	case errors.Is(err, ports.ErrInvalid):
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	case errors.Is(err, ports.ErrNotFound):
-		writeDemoError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
+		writeInstanceError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
 	case errors.Is(err, ports.ErrConflict):
-		writeDemoError(c, http.StatusConflict, "CONFLICT", err.Error())
+		writeInstanceError(c, http.StatusConflict, "CONFLICT", err.Error())
 	case errors.Is(err, ports.ErrNotConfigured):
-		writeDemoError(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", err.Error())
+		writeInstanceError(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", err.Error())
 	default:
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	}
 }

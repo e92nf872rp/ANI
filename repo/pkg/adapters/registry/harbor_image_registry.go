@@ -3,6 +3,7 @@ package registry
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -18,13 +19,14 @@ import (
 const defaultHarborRequestTimeout = 10 * time.Second
 
 type HarborImageRegistryConfig struct {
-	Endpoint         string
-	Username         string
-	Password         string
-	HTTPClient       *http.Client
-	RequestTimeout   time.Duration
-	PullSecretWriter ports.RegistryPullSecretWriter
-	ReferenceReader  ports.RegistryImageReferenceReader
+	Endpoint           string
+	Username           string
+	Password           string
+	HTTPClient         *http.Client
+	RequestTimeout     time.Duration
+	InsecureSkipVerify bool
+	PullSecretWriter   ports.RegistryPullSecretWriter
+	ReferenceReader    ports.RegistryImageReferenceReader
 }
 
 type HarborImageRegistry struct {
@@ -53,6 +55,11 @@ func NewHarborImageRegistry(config HarborImageRegistryConfig) (*HarborImageRegis
 	client := config.HTTPClient
 	if client == nil {
 		client = &http.Client{}
+		if config.InsecureSkipVerify {
+			client.Transport = &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // intentional for lab/self-signed Harbor
+			}
+		}
 	}
 	clientCopy := *client
 	if config.RequestTimeout > 0 {

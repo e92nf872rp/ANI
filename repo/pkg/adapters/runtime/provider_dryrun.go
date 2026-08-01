@@ -47,7 +47,7 @@ func (e *LocalProviderDryRun) DryRun(_ context.Context, manifests []ports.Worklo
 
 	provider := primaryProvider(manifests)
 	for _, manifest := range manifests {
-		if !isAuxiliarySecretManifest(manifest) && manifest.Provider != provider {
+		if !isAuxiliaryKubernetesManifest(manifest) && manifest.Provider != provider {
 			return ports.WorkloadProviderDryRunResult{
 				Accepted:      false,
 				Provider:      provider,
@@ -148,13 +148,12 @@ func validateProviderDryRunDocument(provider string, doc map[string]any) error {
 var _ ports.WorkloadProviderDryRun = (*LocalProviderDryRun)(nil)
 
 // primaryProvider returns the provider of the first non-auxiliary manifest in
-// the batch. Workload identity Secrets are auxiliary Kubernetes resources that
-// may accompany a primary workload of a different provider (e.g. a kubevirt
-// VirtualMachine), so they must not be used to determine the batch's primary
-// provider.
+// the batch. Auxiliary Kubernetes resources may accompany a primary workload of
+// a different provider (e.g. a kubevirt VirtualMachine), so they must not be
+// used to determine the batch's primary provider.
 func primaryProvider(manifests []ports.WorkloadManifest) string {
 	for _, manifest := range manifests {
-		if !isAuxiliarySecretManifest(manifest) {
+		if !isAuxiliaryKubernetesManifest(manifest) {
 			return manifest.Provider
 		}
 	}
@@ -164,12 +163,18 @@ func primaryProvider(manifests []ports.WorkloadManifest) string {
 	return ""
 }
 
-// isAuxiliarySecretManifest reports whether the manifest is an auxiliary
-// Kubernetes Secret rendered to back the workload identity token. Such
-// Secrets always belong to the "kubernetes" provider regardless of the
-// primary workload's provider, so the dry-run and apply gates skip the
-// mixed-provider check for them while still validating them as kubernetes
-// resources.
-func isAuxiliarySecretManifest(manifest ports.WorkloadManifest) bool {
-	return manifest.Kind == "Secret" && manifest.Provider == "kubernetes"
+// isAuxiliaryKubernetesManifest reports whether the manifest is an auxiliary
+// Kubernetes resource rendered to back a provider-owned workload. These
+// resources still validate as kubernetes objects, but do not make a kubevirt VM
+// batch a mixed-provider write.
+func isAuxiliaryKubernetesManifest(manifest ports.WorkloadManifest) bool {
+	if manifest.Provider != "kubernetes" {
+		return false
+	}
+	switch manifest.Kind {
+	case "Secret", "PersistentVolumeClaim":
+		return true
+	default:
+		return false
+	}
 }

@@ -139,7 +139,7 @@ func (api *emailNotificationAPI) getEmailSmtpConfig(ctx context.Context, c *app.
 func (api *emailNotificationAPI) putEmailSmtpConfig(ctx context.Context, c *app.RequestContext) {
 	var req putEmailSmtpConfigRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid smtp config request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid smtp config request")
 		return
 	}
 	idemKey := strings.TrimSpace(req.IdempotencyKey)
@@ -147,7 +147,7 @@ func (api *emailNotificationAPI) putEmailSmtpConfig(ctx context.Context, c *app.
 		idemKey = strings.TrimSpace(string(c.GetHeader("Idempotency-Key")))
 	}
 	if idemKey == "" {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
 		return
 	}
 	cfg, err := api.store.PutSmtpConfig(ctx, idemKey, ports.EmailSmtpConfigWrite{
@@ -182,7 +182,7 @@ func (api *emailNotificationAPI) listEmailRecipients(ctx context.Context, c *app
 func (api *emailNotificationAPI) createEmailRecipient(ctx context.Context, c *app.RequestContext) {
 	var req createEmailRecipientRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid recipient request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid recipient request")
 		return
 	}
 	idemKey := strings.TrimSpace(req.IdempotencyKey)
@@ -190,7 +190,7 @@ func (api *emailNotificationAPI) createEmailRecipient(ctx context.Context, c *ap
 		idemKey = strings.TrimSpace(string(c.GetHeader("Idempotency-Key")))
 	}
 	if idemKey == "" {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
 		return
 	}
 	rec, err := api.store.CreateRecipient(ctx, idemKey, ports.EmailRecipientWrite{
@@ -207,12 +207,12 @@ func (api *emailNotificationAPI) createEmailRecipient(ctx context.Context, c *ap
 func (api *emailNotificationAPI) updateEmailRecipient(ctx context.Context, c *app.RequestContext) {
 	var req updateEmailRecipientRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid recipient update request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid recipient update request")
 		return
 	}
 	id := c.Param("recipient_id")
 	if id == "" {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "recipient_id is required")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "recipient_id is required")
 		return
 	}
 	idemKey := strings.TrimSpace(req.IdempotencyKey)
@@ -220,7 +220,7 @@ func (api *emailNotificationAPI) updateEmailRecipient(ctx context.Context, c *ap
 		idemKey = strings.TrimSpace(string(c.GetHeader("Idempotency-Key")))
 	}
 	if idemKey == "" {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
 		return
 	}
 
@@ -276,7 +276,7 @@ func (api *emailNotificationAPI) updateEmailRecipient(ctx context.Context, c *ap
 func (api *emailNotificationAPI) deleteEmailRecipient(ctx context.Context, c *app.RequestContext) {
 	id := c.Param("recipient_id")
 	if id == "" {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "recipient_id is required")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "recipient_id is required")
 		return
 	}
 	if err := api.store.DeleteRecipient(ctx, id); err != nil {
@@ -302,7 +302,7 @@ func (api *emailNotificationAPI) listEmailSubscriptions(ctx context.Context, c *
 func (api *emailNotificationAPI) putEmailSubscriptions(ctx context.Context, c *app.RequestContext) {
 	var req putEmailSubscriptionsRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid subscriptions request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid subscriptions request")
 		return
 	}
 	idemKey := strings.TrimSpace(req.IdempotencyKey)
@@ -310,7 +310,7 @@ func (api *emailNotificationAPI) putEmailSubscriptions(ctx context.Context, c *a
 		idemKey = strings.TrimSpace(string(c.GetHeader("Idempotency-Key")))
 	}
 	if idemKey == "" {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
 		return
 	}
 	subs := make(map[string]bool, len(req.Subscriptions))
@@ -340,7 +340,7 @@ func (api *emailNotificationAPI) sendTestEmail(ctx context.Context, c *app.Reque
 		idemKey = strings.TrimSpace(string(c.GetHeader("Idempotency-Key")))
 	}
 	if idemKey == "" {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
 		return
 	}
 	result, err := api.store.SendTestEmail(ctx, idemKey)
@@ -401,19 +401,19 @@ func subscriptionToResponse(s ports.EmailSubscription) emailSubscriptionResponse
 func writeEmailNotificationError(c *app.RequestContext, err error) {
 	switch {
 	case errors.Is(err, ports.ErrEmailRecipientNotFound):
-		writeDemoError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
+		writeInstanceError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
 	case errors.Is(err, ports.ErrEmailSmtpNotConfigured),
 		errors.Is(err, ports.ErrEmailNoEnabledRecipient),
 		errors.Is(err, ports.ErrEmailNoCredentials),
 		errors.Is(err, ports.ErrFailedPrecondition):
-		writeDemoError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", err.Error())
+		writeInstanceError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", err.Error())
 	case errors.Is(err, ports.ErrConflict):
-		writeDemoError(c, http.StatusConflict, "CONFLICT", err.Error())
+		writeInstanceError(c, http.StatusConflict, "CONFLICT", err.Error())
 	case errors.Is(err, ports.ErrInvalid), errors.Is(err, ports.ErrEmailInvalidEventType):
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	case errors.Is(err, ports.ErrEmailStoreUnavailable):
-		writeDemoError(c, http.StatusServiceUnavailable, "STORE_UNAVAILABLE", err.Error())
+		writeInstanceError(c, http.StatusServiceUnavailable, "STORE_UNAVAILABLE", err.Error())
 	default:
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	}
 }

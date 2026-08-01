@@ -23,6 +23,7 @@ type RegisterOptions struct {
 	VectorStoreService                    ports.VectorStoreService
 	InstanceObservability                 ports.InstanceObservability
 	InstanceObservabilityUsesInstanceName bool
+	InstanceRuntime                       *InstanceRuntime
 	KubernetesRESTClient                  *runtimeadapter.KubernetesRESTClient
 	ObservabilityService                  ports.ObservabilityService
 	EmailNotificationStore                ports.EmailNotificationStore
@@ -34,6 +35,9 @@ func Register(h *server.Hertz) {
 }
 
 func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
+	if options.SecretService == nil {
+		options.SecretService = runtimeadapter.NewLocalSecretService()
+	}
 	// Health/readiness probes (no auth required)
 	registerHealth(h.Group(""))
 
@@ -43,10 +47,10 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerAuth(v1)
 	registerMetering(v1)
 	registerHarbor(v1, options.ImageRegistry)
-	// demo instances 先注册，拿到其 instance service 作为 InstanceLookup，
+	// Instances register first so their service can act as InstanceLookup.
 	// 注入到 ObservabilityService（时序图 PromQL 代理需要解析实例记录的
 	// namespace/pod 映射）。注入后再注册 observability 路由。
-	instanceLookup := registerDemoInstancesWithObservability(v1, options.InstanceObservability, options.InstanceObservabilityUsesInstanceName, options.GPUInventory, options.KubernetesRESTClient)
+	instanceLookup := registerInstancesWithRuntime(v1, options.InstanceObservability, options.InstanceObservabilityUsesInstanceName, options.GPUInventory, options.KubernetesRESTClient, options.SecretService, options.InstanceRuntime)
 	if promSvc, ok := options.ObservabilityService.(*runtimeadapter.PrometheusObservabilityService); ok {
 		promSvc.SetInstanceLookup(instanceLookup)
 	}

@@ -493,6 +493,43 @@ func TestKubernetesRESTClientSupportsKubeVirtVirtualMachine(t *testing.T) {
 	}
 }
 
+func TestKubernetesRESTClientObservesKubeVirtVMIForPhaseAndNode(t *testing.T) {
+	var paths []string
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		paths = append(paths, r.URL.Path)
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/virtualmachines/vm-01"):
+			return jsonResponse(http.StatusOK, `{"kind":"VirtualMachine","status":{"printableStatus":"Running"}}`), nil
+		case strings.HasSuffix(r.URL.Path, "/virtualmachineinstances/vm-01"):
+			return jsonResponse(http.StatusOK, `{"kind":"VirtualMachineInstance","status":{"phase":"Running","nodeName":"node-a"}}`), nil
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+			return nil, nil
+		}
+	})
+
+	client := newTestKubernetesRESTClient(t, transport)
+	observation, err := client.Observe(context.Background(), ports.WorkloadProviderStatusRequest{
+		TenantID:   "tenant-a",
+		InstanceID: "instance-a",
+		Kind:       ports.WorkloadKindVM,
+		ApplyResult: ports.WorkloadProviderApplyResult{
+			Applied:      true,
+			Provider:     "kubevirt",
+			ResourceRefs: []string{"kubevirt/VirtualMachine/vm-01"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Observe() error = %v", err)
+	}
+	if observation.Phase != "Running" || observation.NodeName != "node-a" {
+		t.Fatalf("observation = %#v, want VMI phase/node", observation)
+	}
+	if len(paths) != 2 {
+		t.Fatalf("paths = %#v, want VirtualMachine and VMI reads", paths)
+	}
+}
+
 func TestKubernetesRESTClientSupportsKubeOVNNetworkResources(t *testing.T) {
 	var paths []string
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {

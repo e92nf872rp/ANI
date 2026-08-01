@@ -53,6 +53,20 @@ func main() {
 		logger.Error("failed to configure kubernetes rest client for orphan discovery", "err", err)
 		os.Exit(1)
 	}
+	instanceRuntimeConfig := gatewayInstanceRuntimeConfigFromEnv()
+	instanceRuntime, closeInstanceRuntime, err := newGatewayInstanceRuntime(runtimeCtx, instanceRuntimeConfig, secretService)
+	if err != nil {
+		logger.Error("failed to configure instance provider runtime", "err", err)
+		os.Exit(1)
+	}
+	defer closeInstanceRuntime()
+	if instanceRuntime.KubernetesRESTClient != nil {
+		kubernetesRESTClient = instanceRuntime.KubernetesRESTClient
+		logger.Info("instance provider runtime configured",
+			"provider", strings.TrimSpace(instanceRuntimeConfig.WorkloadProvider),
+			"persistent_store", true,
+		)
+	}
 	gpuSchedulingQueueStore, err := newGatewayGPUSchedulingQueueStore(gatewayGPUSchedulingQueueRuntimeConfigFromEnv())
 	if err != nil {
 		logger.Error("failed to configure gpu scheduling queue store runtime", "err", err)
@@ -128,6 +142,17 @@ func main() {
 	}
 	middleware.StartAuditWorker()
 	middleware.Register(h, gatewayStore)
+	var routeInstanceRuntime *router.InstanceRuntime
+	if instanceRuntime.Service != nil {
+		routeInstanceRuntime = &router.InstanceRuntime{
+			Service:        instanceRuntime.Service,
+			Store:          instanceRuntime.Store,
+			Operations:     instanceRuntime.Operations,
+			SandboxRuntime: instanceRuntime.SandboxRuntime,
+			RealProvider:   true,
+			Provider:       strings.TrimSpace(instanceRuntimeConfig.WorkloadProvider),
+		}
+	}
 	router.RegisterWithOptions(h, router.RegisterOptions{
 		K8sClusterService:                     k8sClusterService,
 		EncryptionService:                     encryptionService,
@@ -141,6 +166,7 @@ func main() {
 		VectorStoreService:                    vectorStoreService,
 		InstanceObservability:                 instanceObservability,
 		InstanceObservabilityUsesInstanceName: instanceObservabilityUsesInstanceName,
+		InstanceRuntime:                       routeInstanceRuntime,
 		KubernetesRESTClient:                  kubernetesRESTClient,
 		ObservabilityService:                  observabilityService,
 		EmailNotificationStore:                runtimeadapter.NewLocalEmailNotificationStore(),

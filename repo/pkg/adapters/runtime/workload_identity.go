@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
@@ -332,17 +333,20 @@ func scanWorkloadIdentityBinding(row scanner, binding *ports.WorkloadIdentityBin
 		&expiresAt,
 		&revokedAt,
 	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ports.ErrNotFound
+		}
 		return err
 	}
 	if expiresAt != "" {
-		parsed, err := time.Parse(time.RFC3339Nano, expiresAt)
+		parsed, err := parseWorkloadIdentityTimestamp(expiresAt)
 		if err != nil {
 			return err
 		}
 		binding.ExpiresAt = parsed
 	}
 	if revokedAt != "" {
-		parsed, err := time.Parse(time.RFC3339Nano, revokedAt)
+		parsed, err := parseWorkloadIdentityTimestamp(revokedAt)
 		if err != nil {
 			return err
 		}
@@ -351,4 +355,20 @@ func scanWorkloadIdentityBinding(row scanner, binding *ports.WorkloadIdentityBin
 	binding.KeyValue = ""
 	binding.Scopes = append([]string(nil), binding.Scopes...)
 	return nil
+}
+
+func parseWorkloadIdentityTimestamp(value string) (time.Time, error) {
+	var lastErr error
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05.999999999Z07:00",
+		"2006-01-02 15:04:05.999999999Z07",
+	} {
+		parsed, err := time.Parse(layout, value)
+		if err == nil {
+			return parsed, nil
+		}
+		lastErr = err
+	}
+	return time.Time{}, lastErr
 }

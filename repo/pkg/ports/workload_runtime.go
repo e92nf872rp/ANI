@@ -35,18 +35,30 @@ const (
 type WorkloadLifecycleAction string
 
 const (
-	WorkloadLifecycleCreate         WorkloadLifecycleAction = "create"
-	WorkloadLifecycleStart          WorkloadLifecycleAction = "start"
-	WorkloadLifecycleStop           WorkloadLifecycleAction = "stop"
-	WorkloadLifecycleRestart        WorkloadLifecycleAction = "restart"
-	WorkloadLifecycleResize         WorkloadLifecycleAction = "resize"
-	WorkloadLifecycleRebuild        WorkloadLifecycleAction = "rebuild"
-	WorkloadLifecycleDelete         WorkloadLifecycleAction = "delete"
-	WorkloadLifecycleSnapshot       WorkloadLifecycleAction = "snapshot"
-	WorkloadLifecycleAttachVolume   WorkloadLifecycleAction = "attach_volume"
-	WorkloadLifecycleDetachVolume   WorkloadLifecycleAction = "detach_volume"
-	WorkloadLifecycleRollback       WorkloadLifecycleAction = "rollback"
-	WorkloadLifecycleConsoleSession WorkloadLifecycleAction = "console_session"
+	WorkloadLifecycleCreate                   WorkloadLifecycleAction = "create"
+	WorkloadLifecycleStart                    WorkloadLifecycleAction = "start"
+	WorkloadLifecycleStop                     WorkloadLifecycleAction = "stop"
+	WorkloadLifecycleRestart                  WorkloadLifecycleAction = "restart"
+	WorkloadLifecycleResize                   WorkloadLifecycleAction = "resize"
+	WorkloadLifecycleRebuild                  WorkloadLifecycleAction = "rebuild"
+	WorkloadLifecycleDelete                   WorkloadLifecycleAction = "delete"
+	WorkloadLifecycleSnapshot                 WorkloadLifecycleAction = "snapshot"
+	WorkloadLifecycleAttachVolume             WorkloadLifecycleAction = "attach_volume"
+	WorkloadLifecycleDetachVolume             WorkloadLifecycleAction = "detach_volume"
+	WorkloadLifecycleAttachFilesystem         WorkloadLifecycleAction = "attach_filesystem"
+	WorkloadLifecycleDetachFilesystem         WorkloadLifecycleAction = "detach_filesystem"
+	WorkloadLifecycleRollback                 WorkloadLifecycleAction = "rollback"
+	WorkloadLifecycleScale                    WorkloadLifecycleAction = "scale"
+	WorkloadLifecycleUpdateImage              WorkloadLifecycleAction = "update_image"
+	WorkloadLifecycleBindSecret               WorkloadLifecycleAction = "bind_secret"
+	WorkloadLifecycleUnbindSecret             WorkloadLifecycleAction = "unbind_secret"
+	WorkloadLifecycleChangeSecurityGroups     WorkloadLifecycleAction = "change_security_groups"
+	WorkloadLifecycleSetTerminationProtection WorkloadLifecycleAction = "set_termination_protection"
+	WorkloadLifecyclePause                    WorkloadLifecycleAction = "pause"
+	WorkloadLifecycleResume                   WorkloadLifecycleAction = "resume"
+	WorkloadLifecycleExtend                   WorkloadLifecycleAction = "extend"
+	WorkloadLifecycleTouchIdle                WorkloadLifecycleAction = "touch_idle"
+	WorkloadLifecycleConsoleSession           WorkloadLifecycleAction = "console_session"
 )
 
 type WorkloadOperationStatus string
@@ -114,17 +126,87 @@ type WorkloadNetworkPolicy struct {
 	AllowEgressToInternet   bool
 	AllowedEgressCIDRs      []string
 	Attachments             []WorkloadNetworkAttachment
+	VPCID                   string
+	SubnetID                string
+	SecurityGroupIDs        []string
+	AssignPrivateIP         bool
+	PrivateIP               string
 }
 
 type WorkloadStorageAttachment struct {
+	Name               string
+	Kind               StorageAttachmentKind
+	ResourceType       string
+	ResourceID         string
+	MountPath          string
+	SizeGiB            int64
+	StorageClass       string
+	ReadOnly           bool
+	Required           bool
+	SourceRef          string
+	Status             string
+	TaskID             string
+	Encrypted          bool
+	DeleteOnFailure    bool
+	DeleteWithInstance bool
+}
+
+type InstanceImageSummary struct {
+	ID           string
+	Ref          string
+	Digest       string
 	Name         string
-	Kind         StorageAttachmentKind
-	MountPath    string
-	SizeGiB      int64
-	StorageClass string
-	ReadOnly     bool
-	Required     bool
-	SourceRef    string
+	Tag          string
+	Purpose      string
+	Architecture string
+}
+
+type InstanceGPUSpecReference struct {
+	SpecID     string
+	GPUType    string
+	Shares     int
+	MBPerShare int
+}
+
+type InstanceComputeSummary struct {
+	CPU              string
+	Memory           string
+	SpecID           string
+	GPUType          string
+	GPUShares        int
+	GPUMBPerShare    int
+	AvailabilityZone string
+	NodeName         string
+}
+
+type InstanceSecurityGroupSummary struct {
+	ID   string
+	Name string
+}
+
+type InstanceEndpointSummary struct {
+	Name     string
+	Address  string
+	Protocol string
+	Port     int
+}
+
+type InstanceNetworkSummary struct {
+	VPCID            string
+	VPCName          string
+	SubnetID         string
+	SubnetName       string
+	PrivateIP        string
+	SecurityGroups   []InstanceSecurityGroupSummary
+	Endpoints        []InstanceEndpointSummary
+	LoadBalancerRefs []string
+}
+
+type InstanceAccessSummary struct {
+	SSHAvailable     bool
+	ConsoleAvailable bool
+	ExecAvailable    bool
+	Reason           string
 }
 
 type WorkloadSecretBinding struct {
@@ -133,15 +215,61 @@ type WorkloadSecretBinding struct {
 	EnvPrefix string
 }
 
+type InstanceDiskSpec struct {
+	VolumeID           string
+	Name               string
+	SizeGiB            int64
+	VolumeType         string
+	StorageClass       string
+	Encrypted          bool
+	DeleteOnFailure    bool
+	DeleteWithInstance bool
+}
+
+type InstanceVolumeMount struct {
+	VolumeID  string
+	MountPath string
+	ReadOnly  bool
+}
+
+type InstanceFilesystemMount struct {
+	FilesystemID string
+	MountPath    string
+	ReadOnly     bool
+}
+
+type InstancePortSpec struct {
+	Name          string
+	ContainerPort int32
+	Protocol      string
+}
+
+type InstanceEnvVar struct {
+	Name      string
+	Value     *string
+	SecretRef string
+}
+
+type InstanceWorkloadIdentityConfig struct {
+	Enabled bool
+	Scopes  []string
+}
+
 type VMInstanceSpec struct {
-	BootImage       string
-	CloudInitSecret string
-	SSHKeySecret    string
-	SSHUsername     string
-	Firmware        string
-	MachineType     string
-	RootDisk        WorkloadStorageAttachment
-	DataDisks       []WorkloadStorageAttachment
+	BootImage        string
+	CloudInitSecret  string
+	SSHKeySecret     string
+	SSHUsername      string
+	PasswordSecret   string
+	UserData         string
+	OSType           string
+	Firmware         string
+	MachineType      string
+	RootDisk         WorkloadStorageAttachment
+	DataDisks        []WorkloadStorageAttachment
+	SystemDisk       *InstanceDiskSpec
+	DataDiskSpecs    []InstanceDiskSpec
+	FilesystemMounts []InstanceFilesystemMount
 }
 
 type VMSSHConnectionInfo struct {
@@ -164,10 +292,16 @@ type VMInstanceSnapshot struct {
 }
 
 type ContainerInstanceSpec struct {
-	ImagePullSecret string
-	Ports           []int32
-	Replicas        int32
-	Volumes         []WorkloadStorageAttachment
+	ImagePullSecret  string
+	Ports            []int32
+	PortSpecs        []InstancePortSpec
+	Env              []InstanceEnvVar
+	SecretIDs        []string
+	VolumeMounts     []InstanceVolumeMount
+	FilesystemMounts []InstanceFilesystemMount
+	WorkloadIdentity InstanceWorkloadIdentityConfig
+	Replicas         int32
+	Volumes          []WorkloadStorageAttachment
 }
 
 type ContainerRevisionHistory struct {
@@ -185,9 +319,13 @@ type ContainerInstanceStatus struct {
 }
 
 type GPUInstanceStatus struct {
-	Vendor GPUVendor
-	Model  string
-	Count  int
+	SpecID     string
+	GPUType    string
+	Shares     int
+	MBPerShare int
+	Vendor     GPUVendor
+	Model      string
+	Count      int
 	// QueueName is the Volcano/HAMi scheduling queue the workload is routed
 	// to, sourced from the planning annotation "ani.kubercloud.io/gpu-queue".
 	QueueName string
@@ -197,6 +335,7 @@ type GPUInstanceStatus struct {
 	// "ani.kubercloud.io/gpu-resource-name" and lets the API surface the real
 	// allocation mode (whole card vs vGPU) chosen at scheduling time.
 	ResourceName       string
+	SchedulingState    string
 	SchedulingReason   string
 	UtilizationPercent float64
 }
@@ -214,11 +353,16 @@ type InstanceLifecyclePolicy struct {
 type WorkloadSpec struct {
 	TenantID           string
 	Name               string
+	Description        string
 	Kind               WorkloadKind
 	Image              string
+	ImageID            string
+	ImageRef           string
+	ImageSummary       InstanceImageSummary
 	Command            []string
 	Args               []string
 	Resources          WorkloadResourceRequest
+	GPUSpec            *InstanceGPUSpecReference
 	Network            WorkloadNetworkPolicy
 	Storage            []WorkloadStorageAttachment
 	VM                 *VMInstanceSpec
@@ -387,23 +531,53 @@ type WorkloadInstanceGetRequest struct {
 }
 
 type WorkloadInstanceListRequest struct {
-	TenantID string
-	Kind     WorkloadKind
+	TenantID        string
+	Kind            WorkloadKind
+	State           WorkloadState
+	Keyword         string
+	CreatedAfter    time.Time
+	CreatedBefore   time.Time
+	SpecID          string
+	ImageID         string
+	NodeName        string
+	RolloutStatus   string
+	GPUModel        string
+	QueueName       string
+	SchedulingState string
+	TemplateID      string
+	SessionState    string
+	Limit           int
+	Cursor          string
+	Sort            string
 }
 
 type WorkloadInstanceLifecycleRequest struct {
 	// IdempotencyKey prevents duplicate lifecycle actions on retry.
-	// Required for stop/delete; optional but recommended for start/restart.
-	IdempotencyKey  string
-	TenantID        string
-	InstanceID      string
-	Action          WorkloadLifecycleAction
-	SnapshotName    string
-	VolumeID        string
-	Revision        string
-	UserID          string
-	PermissionProof string
-	RequestedAt     time.Time
+	IdempotencyKey   string
+	TenantID         string
+	InstanceID       string
+	Action           WorkloadLifecycleAction
+	Resources        WorkloadResourceRequest
+	SnapshotName     string
+	SnapshotID       string
+	IncludeDataDisks *bool
+	VolumeID         string
+	FilesystemID     string
+	MountPath        string
+	ReadOnly         *bool
+	Revision         string
+	Replicas         *int32
+	ImageID          string
+	Strategy         string
+	SecretID         string
+	BindingType      string
+	EnvName          string
+	SecurityGroupIDs []string
+	Enabled          *bool
+	Duration         time.Duration
+	UserID           string
+	PermissionProof  string
+	RequestedAt      time.Time
 }
 
 type WorkloadInstanceLifecycleResult struct {
@@ -468,24 +642,31 @@ type WorkloadInstanceOpsResult struct {
 }
 
 type WorkloadInstanceRecord struct {
-	TenantID     string
-	InstanceID   string
-	OperationID  string
-	Name         string
-	Kind         WorkloadKind
-	Provider     string
-	AuditID      string
-	Lifecycle    InstanceLifecyclePolicy
-	SSH          *VMSSHConnectionInfo
-	Snapshots    []VMInstanceSnapshot
-	Container    *ContainerInstanceStatus
-	GPU          *GPUInstanceStatus
-	Sandbox      *SandboxInstanceStatus
-	Identity     *WorkloadIdentityBinding
-	ResourceRefs []string
-	Status       WorkloadStatus
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	TenantID           string
+	InstanceID         string
+	OperationID        string
+	Name               string
+	Description        string
+	Labels             map[string]string
+	Kind               WorkloadKind
+	Provider           string
+	AuditID            string
+	Image              InstanceImageSummary
+	Compute            InstanceComputeSummary
+	Network            InstanceNetworkSummary
+	Access             InstanceAccessSummary
+	StorageAttachments []WorkloadStorageAttachment
+	Lifecycle          InstanceLifecyclePolicy
+	SSH                *VMSSHConnectionInfo
+	Snapshots          []VMInstanceSnapshot
+	Container          *ContainerInstanceStatus
+	GPU                *GPUInstanceStatus
+	Sandbox            *SandboxInstanceStatus
+	Identity           *WorkloadIdentityBinding
+	ResourceRefs       []string
+	Status             WorkloadStatus
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 type WorkloadIdentityBinding struct {
@@ -521,12 +702,15 @@ type WorkloadIdentityRevokeRequest struct {
 }
 
 type WorkloadOperationStep struct {
-	StepName    string
-	Status      WorkloadOperationStepStatus
-	Message     string
-	StartedAt   time.Time
-	CompletedAt time.Time
-	CreatedAt   time.Time
+	StepName     string
+	Status       WorkloadOperationStepStatus
+	Message      string
+	TaskID       string
+	ResourceType string
+	ResourceID   string
+	StartedAt    time.Time
+	CompletedAt  time.Time
+	CreatedAt    time.Time
 }
 
 type WorkloadOperationRecord struct {
@@ -648,6 +832,25 @@ type WorkloadInstanceOrchestrator interface {
 	Create(ctx context.Context, request WorkloadInstanceCreateRequest) (WorkloadInstanceCreateResult, error)
 }
 
+// WorkloadInstanceResourceResolver validates and enriches references to other
+// Core resources before an instance is handed to the provider orchestrator.
+// It is intentionally provider-neutral: implementations may use local
+// metadata services or real Registry/Network/Storage adapters.
+type WorkloadInstanceResourceResolver interface {
+	ResolveCreate(ctx context.Context, request WorkloadResourceResolveRequest) (WorkloadResourceResolveResult, error)
+}
+
+type WorkloadResourceResolveRequest struct {
+	TenantID string
+	UserID   string
+	Spec     WorkloadSpec
+}
+
+type WorkloadResourceResolveResult struct {
+	Spec         WorkloadSpec
+	ResourceRefs []string
+}
+
 // WorkloadInstanceStore persists queryable instance state, provider resource
 // references, and audit correlation. Runtime adapters may keep local planning
 // state, but business queries should use this store-backed boundary.
@@ -664,6 +867,7 @@ type WorkloadInstanceService interface {
 	Create(ctx context.Context, request WorkloadInstanceCreateRequest) (WorkloadInstanceCreateResult, error)
 	Get(ctx context.Context, request WorkloadInstanceGetRequest) (WorkloadInstanceRecord, error)
 	List(ctx context.Context, request WorkloadInstanceListRequest) ([]WorkloadInstanceRecord, error)
+	ApplyLifecycle(ctx context.Context, request WorkloadInstanceLifecycleRequest) (WorkloadInstanceRecord, error)
 	Start(ctx context.Context, request WorkloadInstanceLifecycleRequest) (WorkloadInstanceRecord, error)
 	Stop(ctx context.Context, request WorkloadInstanceLifecycleRequest) (WorkloadInstanceRecord, error)
 	Restart(ctx context.Context, request WorkloadInstanceLifecycleRequest) (WorkloadInstanceRecord, error)

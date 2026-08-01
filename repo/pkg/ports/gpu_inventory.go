@@ -54,6 +54,28 @@ type GPUDiscoveryFilter struct {
 	Labels  map[string]string
 }
 
+type GPUSpec struct {
+	ID            string
+	Name          string
+	GPUType       string
+	MemoryTotalMB int64
+	Shares        int
+	MBPerShare    int
+	Available     bool
+}
+
+type GPUSpecListRequest struct {
+	GPUType   string
+	Available *bool
+	Limit     int
+	Cursor    string
+}
+
+type GPUSpecService interface {
+	ListGPUSpecs(ctx context.Context, request GPUSpecListRequest) ([]GPUSpec, error)
+	GetGPUSpec(ctx context.Context, specID string) (GPUSpec, error)
+}
+
 type GPUSchedulingRequest struct {
 	TenantID             string
 	WorkloadID           string

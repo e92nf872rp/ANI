@@ -22,7 +22,7 @@
 | **Auth 边界** | SPRINT13-AUTH-DEX-PRODUCTION-GATE / Auth/Dex production gate 已通过；production-shaped Gateway 固定 ANI_AUTH_MODE=auth_service |
 | **执行入口** | `development-records/sprint13-real-provider-readiness-plan.md`、`development-records/README.md`、本文件验收命令 |
 | **执行环境** | 真实 provider 写操作前必须重新只读盘点并取得人工确认；evidence 不得包含凭据、服务器 IP 或完整内网端点 |
-| **最后校准日期** | 2026-07-28 |
+| **最后校准日期** | 2026-08-01 |
 
 ## Sprint 13 当前任务
 
@@ -93,8 +93,13 @@ Issue 清单：`repo/services/tasks/issues/issue-01-openapi-queue-crud.md` ~ `is
 | GPU-SPEC-CONTRACT-A | 个人仓库 CI passed，契约已确认 | 为实例 `spec_id` 提供 `GPUSpecSummary`、`GET /gpu-specs`、`GET /gpu-specs/{spec_id}` 只读契约；旧 GPU 字段 deprecated 保留；不含 handler/port/adapter/Console，不实现配额 check/acquire/release |
 | INSTANCE-CONTRACT-A | 个人仓库 CI passed，契约已确认 | 扩展统一实例创建、详情摘要、列表过滤/排序/cursor、观测 cursor 和 lifecycle/operation step；引用既有 Registry/Network/Storage/GPU Spec，不含 handler/port/adapter/Console |
 | INSTANCE-SANDBOX-CONTRACT-A | 个人仓库 CI passed，契约已确认 | 新增 Sandbox token、预览端口、文件、checkpoint 和异步 code-run 共 11 个操作；固定租户/kind、幂等、任务轮询和敏感输出审计边界；不含 handler/port/adapter/Console |
+| INSTANCE-PORTS-SERVICE-A | container E2E passed，已提交 | 已补统一实例 ports/service/metadata、Gateway PostgreSQL/Kubernetes runtime 注入和独立 reconcile-worker；真实验证 Harbor 镜像、Kubernetes Pod/Kube-OVN IP、operation、启停、删除及 reconcile 终态；与 VM/Sandbox/code-run live 同批提交；不含完整 ORCHESTRATION/配额/GPU Container live |
+| INSTANCE-MANAGEMENT-LIVE-GATE-A | VM live gate passed（2026-08-01） | `validate-instance-management-live-gate --live` 已通过；写路径 Core /api/v1/instances；镜像 `docker.kubercon.local/.../system-cirros:v1.8.2`；evidence `live-evidence/instance-management-vm-live-20260731.json`；KubeVirt 只读观测；Sandbox/GPU live 与完整编排仍属后续 |
+| INSTANCE-SANDBOX-ADAPTER-A | live passed（2026-08-01） | Kata `RuntimeClass/sandbox-kata`（kata-deploy 4.0.0）；`KubernetesSandboxRuntime` create/pause/resume/delete；Gateway `instance-sandbox-live-20260801-v2`；记录 `instance-sandbox-adapter-a.md` |
+| INSTANCE-SANDBOX-LIVE-GATE-A | live passed（2026-08-01） | create/lifecycle evidence `live-evidence/instance-sandbox-live-20260801.json`（busybox）；code-run 扩展见下一批次 |
+| INSTANCE-SANDBOX-CODERUN-A | live passed（2026-08-01） | code-run 真实 Pod exec（kubectl）；`code_run_status=succeeded`；Gateway `instance-sandbox-coderun-20260801-v1`；镜像 `sandbox-python:3.12`；evidence `live-evidence/instance-sandbox-coderun-live-20260801.json`；token/port/file/checkpoint 仍 local-session；记录 `instance-sandbox-coderun-a.md` |
 
-边界：本流程独立于既有 GPU 调度队列实现；当前只完成公开契约和生成物，不声明 GPU 规格 runtime ready、配额能力或实例管理闭环完成。
+边界：本流程独立于既有 GPU 调度队列实现；container、VM、Sandbox create/lifecycle 与 code-run adapter 已落地，但完整 Gateway 字段转换、跨 Registry/Network/Storage/GPU Spec 编排、其余 Sandbox 子资源 real-provider、分页 result、配额和 GPU live gate 尚未完成，不声明全部实例管理 runtime ready 或 full platform production ready。
 
 ## Registry Console Flow（2026-07-22）
 

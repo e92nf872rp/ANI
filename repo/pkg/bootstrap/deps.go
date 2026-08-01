@@ -34,6 +34,7 @@ type Capabilities struct {
 	VectorStoreResources  ports.VectorStoreService
 	ImageRegistry         ports.ImageRegistry
 	GPUInventory          ports.GPUInventory
+	GPUSpecs              ports.GPUSpecService
 	WorkloadRuntime       ports.WorkloadRuntime
 	WorkloadRenderer      ports.WorkloadRenderer
 	WorkloadAdmission     ports.WorkloadAdmission
@@ -47,6 +48,8 @@ type Capabilities struct {
 	WorkloadStore         ports.WorkloadInstanceStore
 	WorkloadOperations    ports.WorkloadOperationStore
 	WorkloadIdentity      ports.WorkloadIdentityService
+	SandboxRuntime        ports.SandboxRuntime
+	SecretService         ports.SecretService
 	InstanceService       ports.WorkloadInstanceService
 	InstanceOps           ports.WorkloadInstanceOps
 	InstanceObservability ports.InstanceObservability
@@ -102,6 +105,7 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 	if err != nil {
 		return Capabilities{}, err
 	}
+	gpuSpecs := runtimeadapter.NewLocalGPUSpecService(gpuInventory)
 	planner := runtimeadapter.NewPlanningRuntime(runtimeadapter.WithGPUInventory(gpuInventory))
 	lifecycle, err := workloadLifecycleExecutor(cfg, kubeClient)
 	if err != nil {
@@ -132,6 +136,14 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 	}
 	operationStore := runtimeadapter.NewMetadataOperationStore(metadata)
 	workloadIdentity := runtimeadapter.NewMetadataWorkloadIdentityService(metadata)
+	imageRegistry, err := imageRegistryAdapter(cfg, instanceStore, kubeClient)
+	if err != nil {
+		return Capabilities{}, err
+	}
+	resourceRegistry := imageRegistry
+	if _, notConfigured := imageRegistry.(registry.NotConfigured); notConfigured {
+		resourceRegistry = nil
+	}
 	networkStore := runtimeadapter.NewMetadataNetworkStore(metadata)
 	networkRenderer := runtimeadapter.NewKubeOVNNetworkRenderer()
 	networkProvider, err := networkProviderAdapter(cfg, kubeClient)
@@ -196,6 +208,19 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 	if strings.TrimSpace(cfg.VectorStoreProvider) == "milvus" {
 		vectorStoreServiceOptions = append(vectorStoreServiceOptions, runtimeadapter.WithVectorStoreBackend(vectorStore))
 	}
+	networkResources := runtimeadapter.NewLocalNetworkService(networkServiceOptions...)
+	storageResources := runtimeadapter.NewLocalStorageService(storageServiceOptions...)
+	secretService := cfg.SecretService
+	if secretService == nil {
+		secretService = runtimeadapter.NewLocalSecretService()
+	}
+	var sandboxRuntime ports.SandboxRuntime = runtimeadapter.NewLocalSandboxRuntime()
+	if cfg.WorkloadProviderApplyEnabled && kubeClient != nil {
+		sandboxRuntime = runtimeadapter.NewKubernetesSandboxRuntime(
+			kubeClient,
+			runtimeadapter.WithKubernetesSandboxApplyEnabled(true),
+		)
+	}
 	orchestrator := runtimeadapter.NewLocalInstanceOrchestrator(
 		planner,
 		runtimeadapter.NewKubernetesDryRunRenderer(planner),
@@ -216,8 +241,9 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 		ObjectStore:          objectStore,
 		VectorStore:          vectorStore,
 		VectorStoreResources: runtimeadapter.NewLocalVectorStoreService(vectorStoreServiceOptions...),
-		ImageRegistry:        registry.NotConfigured{},
+		ImageRegistry:        imageRegistry,
 		GPUInventory:         gpuInventory,
+		GPUSpecs:             gpuSpecs,
 		WorkloadRuntime:      planner,
 		WorkloadRenderer:     runtimeadapter.NewKubernetesDryRunRenderer(planner),
 		WorkloadAdmission:    admission,
@@ -230,6 +256,8 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 		WorkloadStore:        instanceStore,
 		WorkloadOperations:   operationStore,
 		WorkloadIdentity:     workloadIdentity,
+		SandboxRuntime:       sandboxRuntime,
+		SecretService:        secretService,
 		WorkloadInstances:    orchestrator,
 		InstanceService: runtimeadapter.NewLocalInstanceServiceWithOptions(
 			orchestrator,
@@ -238,6 +266,8 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 			runtimeadapter.WithOperationStore(operationStore),
 			runtimeadapter.WithInstanceLifecycleExecutor(lifecycle),
 			runtimeadapter.WithWorkloadIdentityService(workloadIdentity),
+			runtimeadapter.WithSandboxRuntime(sandboxRuntime),
+			runtimeadapter.WithInstanceResourceResolver(runtimeadapter.NewLocalInstanceResourceResolverWithDependencies(networkResources, storageResources, gpuSpecs, resourceRegistry, secretService)),
 		),
 		InstanceOps:           instanceOps,
 		InstanceObservability: instanceObservability,
@@ -247,14 +277,14 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 		NetworkApply:          networkProvider,
 		NetworkStatus:         networkProvider,
 		NetworkReconcile:      runtimeadapter.NewLocalNetworkStatusReconciler(networkStore),
-		NetworkResources:      runtimeadapter.NewLocalNetworkService(networkServiceOptions...),
+		NetworkResources:      networkResources,
 		StorageStore:          storageStore,
 		StorageRenderer:       runtimeadapter.NewKubernetesStorageRenderer(),
 		StorageDryRun:         storageProvider,
 		StorageApply:          storageProvider,
 		StorageStatus:         storageProvider,
 		StorageReconcile:      runtimeadapter.NewLocalStorageStatusReconciler(storageStore),
-		StorageResources:      runtimeadapter.NewLocalStorageService(storageServiceOptions...),
+		StorageResources:      storageResources,
 	}, nil
 }
 
@@ -274,6 +304,33 @@ func gpuInventoryAdapter(cfg Config, kubeClient *runtimeadapter.KubernetesRESTCl
 		return runtimeadapter.NewKubernetesGPUInventory(client), nil
 	default:
 		return nil, fmt.Errorf("%w: unsupported GPU inventory provider %q", ports.ErrUnsupported, cfg.GPUInventoryProvider)
+	}
+}
+
+func imageRegistryAdapter(cfg Config, instanceStore ports.WorkloadInstanceStore, kubeClient *runtimeadapter.KubernetesRESTClient) (ports.ImageRegistry, error) {
+	switch strings.TrimSpace(cfg.RegistryProviderMode) {
+	case "", "local", "not_configured":
+		return registry.NotConfigured{}, nil
+	case "harbor":
+		client := kubeClient
+		if client == nil {
+			var err error
+			client, err = runtimeadapter.NewKubernetesRESTClient(kubernetesRESTClientConfig(cfg))
+			if err != nil {
+				return nil, err
+			}
+		}
+		return registry.NewHarborImageRegistry(registry.HarborImageRegistryConfig{
+			Endpoint:           cfg.HarborEndpoint,
+			Username:           cfg.HarborUsername,
+			Password:           cfg.HarborPassword,
+			RequestTimeout:     cfg.HarborRequestTimeout,
+			InsecureSkipVerify: cfg.RegistryTLSInsecure,
+			PullSecretWriter:   registry.NewKubernetesPullSecretWriter(client),
+			ReferenceReader:    registry.NewWorkloadImageReferenceReader(instanceStore),
+		})
+	default:
+		return nil, fmt.Errorf("%w: unsupported REGISTRY_PROVIDER_MODE %q", ports.ErrUnsupported, cfg.RegistryProviderMode)
 	}
 }
 

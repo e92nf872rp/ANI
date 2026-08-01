@@ -371,6 +371,22 @@ func TestHarborImageRegistryDoesNotDeleteWithoutReferenceReader(t *testing.T) {
 	}
 }
 
+func TestHarborImageRegistryInsecureSkipVerifyTransport(t *testing.T) {
+	service, err := NewHarborImageRegistry(HarborImageRegistryConfig{
+		Endpoint:           "https://harbor.test",
+		Username:           "admin",
+		Password:           "secret",
+		InsecureSkipVerify: true,
+	})
+	if err != nil {
+		t.Fatalf("NewHarborImageRegistry() error = %v", err)
+	}
+	transport, ok := service.httpClient.Transport.(*http.Transport)
+	if !ok || transport.TLSClientConfig == nil || !transport.TLSClientConfig.InsecureSkipVerify {
+		t.Fatalf("httpClient transport = %#v, want InsecureSkipVerify TLS config", service.httpClient.Transport)
+	}
+}
+
 type fakeRegistryImageReferenceReader struct{}
 
 func (fakeRegistryImageReferenceReader) ListRegistryImageReferences(context.Context, ports.RegistryImageReferenceListRequest) (ports.RegistryImageReferenceListResult, error) {

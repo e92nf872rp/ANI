@@ -61,8 +61,39 @@ func TestMetadataOperationStoreRecordOperationUsesAtomicIdempotencyInsert(t *tes
 	}
 }
 
+func TestMetadataOperationStorePersistsAndReadsStepTaskCorrelation(t *testing.T) {
+	started := time.Unix(200, 0)
+	completed := time.Unix(201, 0)
+	tx := &fakeOperationMetadataTx{stepRows: fakeRows{values: [][]any{{
+		"provision_volume", "succeeded", "done", "task-a", "volume", "volume-a",
+		started, completed, completed,
+	}}}}
+	store := NewMetadataOperationStore(fakeOperationMetadataStore{tx: tx})
+	step := ports.WorkloadOperationStep{
+		StepName: "provision_volume", TaskID: "task-a", ResourceType: "volume", ResourceID: "volume-a",
+	}
+	if _, err := store.AddOperationStep(context.Background(), "00000000-0000-4000-8000-000000000001", step); err != nil {
+		t.Fatalf("AddOperationStep() error = %v", err)
+	}
+	if len(tx.execSQL) != 1 ||
+		!strings.Contains(tx.execSQL[0], "task_id") ||
+		!strings.Contains(tx.execSQL[0], "resource_type") ||
+		!strings.Contains(tx.execSQL[0], "resource_id") {
+		t.Fatalf("step insert SQL = %q, want task correlation columns", tx.execSQL)
+	}
+	steps, err := store.listSteps(context.Background(), "00000000-0000-4000-8000-000000000001")
+	if err != nil {
+		t.Fatalf("listSteps() error = %v", err)
+	}
+	if len(steps) != 1 || steps[0].TaskID != "task-a" || steps[0].ResourceType != "volume" || steps[0].ResourceID != "volume-a" {
+		t.Fatalf("steps = %+v, want persisted task correlation", steps)
+	}
+}
+
 type fakeOperationMetadataTx struct {
 	queries    []string
+	execSQL    []string
+	execArgs   [][]any
 	insertRows fakeRows
 	stepRows   fakeRows
 }
@@ -83,7 +114,9 @@ func (s fakeOperationMetadataStore) WithPlatformTx(ctx context.Context, fn func(
 	return fn(ctx, s.tx)
 }
 
-func (tx *fakeOperationMetadataTx) Exec(context.Context, string, ...any) (ports.CommandTag, error) {
+func (tx *fakeOperationMetadataTx) Exec(_ context.Context, sql string, args ...any) (ports.CommandTag, error) {
+	tx.execSQL = append(tx.execSQL, sql)
+	tx.execArgs = append(tx.execArgs, args)
 	return ports.CommandTag{RowsAffected: 1}, nil
 }
 
@@ -139,6 +172,9 @@ func assignScanValues(dest []any, values []any) error {
 			*ptr = values[i].(bool)
 		case *time.Time:
 			*ptr = values[i].(time.Time)
+		case **time.Time:
+			value := values[i].(time.Time)
+			*ptr = &value
 		default:
 			return ports.ErrUnsupported
 		}

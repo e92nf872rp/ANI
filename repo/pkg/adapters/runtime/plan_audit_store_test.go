@@ -29,6 +29,8 @@ type fakeMetadataTx struct {
 	sql          string
 	args         []any
 	execs        []string
+	querySQL     string
+	rows         ports.Rows
 	queryRowSQL  string
 	queryRowArgs []any
 	row          fakeMetadataRow
@@ -41,7 +43,11 @@ func (tx *fakeMetadataTx) Exec(_ context.Context, sql string, args ...any) (port
 	return ports.CommandTag{RowsAffected: 1}, nil
 }
 
-func (tx *fakeMetadataTx) Query(context.Context, string, ...any) (ports.Rows, error) {
+func (tx *fakeMetadataTx) Query(_ context.Context, sql string, _ ...any) (ports.Rows, error) {
+	tx.querySQL = sql
+	if tx.rows != nil {
+		return tx.rows, nil
+	}
 	return nil, ports.ErrUnsupported
 }
 

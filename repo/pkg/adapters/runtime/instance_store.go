@@ -88,6 +88,34 @@ func (s *MetadataInstanceStore) UpsertStatus(ctx context.Context, record ports.W
 	if err != nil {
 		return fmt.Errorf("marshal gpu status: %w", err)
 	}
+	labels, err := json.Marshal(firstNonNilStringMap(record.Labels))
+	if err != nil {
+		return fmt.Errorf("marshal labels: %w", err)
+	}
+	imageSummary, err := json.Marshal(record.Image)
+	if err != nil {
+		return fmt.Errorf("marshal image summary: %w", err)
+	}
+	computeSummary, err := json.Marshal(record.Compute)
+	if err != nil {
+		return fmt.Errorf("marshal compute summary: %w", err)
+	}
+	networkSummary, err := json.Marshal(record.Network)
+	if err != nil {
+		return fmt.Errorf("marshal network summary: %w", err)
+	}
+	accessSummary, err := json.Marshal(record.Access)
+	if err != nil {
+		return fmt.Errorf("marshal access summary: %w", err)
+	}
+	storageAttachments, err := json.Marshal(record.StorageAttachments)
+	if err != nil {
+		return fmt.Errorf("marshal storage attachments: %w", err)
+	}
+	sandboxStatus, err := json.Marshal(firstNonNilSandbox(record.Sandbox))
+	if err != nil {
+		return fmt.Errorf("marshal sandbox status: %w", err)
+	}
 	now := s.now().UTC()
 	createdAt := firstNonZeroTime(record.CreatedAt, now)
 	updatedAt := firstNonZeroTime(record.UpdatedAt, record.Status.UpdatedAt, now)
@@ -97,12 +125,16 @@ func (s *MetadataInstanceStore) UpsertStatus(ctx context.Context, record ports.W
 			INSERT INTO workload_instances (
 				tenant_id, instance_id, name, workload_kind, provider, audit_id,
 				provider_id, resource_refs, state, endpoint, node_name, reason,
-				networks, storage, lifecycle_policy, ssh_connection, snapshots, container_status, gpu_status, created_at, updated_at
+				networks, storage, lifecycle_policy, ssh_connection, snapshots, container_status, gpu_status,
+				description, labels, image_summary, compute_summary, network_summary, access_summary,
+				storage_attachments, sandbox_status, created_at, updated_at
 			)
 			VALUES (
 				$1::uuid, $2, $3, $4, NULLIF($5, ''), NULLIF($6, '')::uuid,
 				NULLIF($7, ''), $8::jsonb, $9, NULLIF($10, ''), NULLIF($11, ''),
-				NULLIF($12, ''), $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb, $17::jsonb, $18::jsonb, $19::jsonb, $20, $21
+				NULLIF($12, ''), $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb, $17::jsonb, $18::jsonb, $19::jsonb,
+				NULLIF($20, ''), $21::jsonb, $22::jsonb, $23::jsonb, $24::jsonb, $25::jsonb,
+				$26::jsonb, $27::jsonb, $28, $29
 			)
 			ON CONFLICT (tenant_id, instance_id) DO UPDATE SET
 				name = EXCLUDED.name,
@@ -122,11 +154,21 @@ func (s *MetadataInstanceStore) UpsertStatus(ctx context.Context, record ports.W
 				snapshots = EXCLUDED.snapshots,
 				container_status = EXCLUDED.container_status,
 				gpu_status = EXCLUDED.gpu_status,
+				description = EXCLUDED.description,
+				labels = EXCLUDED.labels,
+				image_summary = EXCLUDED.image_summary,
+				compute_summary = EXCLUDED.compute_summary,
+				network_summary = EXCLUDED.network_summary,
+				access_summary = EXCLUDED.access_summary,
+				storage_attachments = EXCLUDED.storage_attachments,
+				sandbox_status = EXCLUDED.sandbox_status,
 				updated_at = EXCLUDED.updated_at
 		`, record.TenantID, record.InstanceID, record.Name, string(record.Kind), record.Provider,
 			record.AuditID, record.Status.Ref.ProviderID, string(resourceRefs), string(record.Status.State),
 			record.Status.Endpoint, record.Status.NodeName, record.Status.Reason, string(networks), string(storage),
-			string(lifecyclePolicy), string(sshConnection), string(snapshots), string(containerStatus), string(gpuStatus), createdAt, updatedAt)
+			string(lifecyclePolicy), string(sshConnection), string(snapshots), string(containerStatus), string(gpuStatus),
+			record.Description, string(labels), string(imageSummary), string(computeSummary), string(networkSummary),
+			string(accessSummary), string(storageAttachments), string(sandboxStatus), createdAt, updatedAt)
 		if err != nil {
 			return fmt.Errorf("upsert workload instance: %w", err)
 		}
@@ -148,7 +190,9 @@ func (s *MetadataInstanceStore) Get(ctx context.Context, tenantID string, instan
 			SELECT tenant_id::text, instance_id, name, workload_kind, COALESCE(provider, ''),
 				COALESCE(audit_id::text, ''), COALESCE(provider_id, ''), resource_refs,
 				state, COALESCE(endpoint, ''), COALESCE(node_name, ''), COALESCE(reason, ''),
-				networks, storage, lifecycle_policy, ssh_connection, snapshots, container_status, gpu_status, created_at, updated_at
+				networks, storage, lifecycle_policy, ssh_connection, snapshots, container_status, gpu_status,
+				COALESCE(description, ''), labels, image_summary, compute_summary, network_summary,
+				access_summary, storage_attachments, sandbox_status, created_at, updated_at
 			FROM workload_instances
 			WHERE tenant_id = $1::uuid AND instance_id = $2
 		`, tenantID, instanceID)
@@ -174,7 +218,9 @@ func (s *MetadataInstanceStore) List(ctx context.Context, tenantID string, kind 
 			SELECT tenant_id::text, instance_id, name, workload_kind, COALESCE(provider, ''),
 				COALESCE(audit_id::text, ''), COALESCE(provider_id, ''), resource_refs,
 				state, COALESCE(endpoint, ''), COALESCE(node_name, ''), COALESCE(reason, ''),
-				networks, storage, lifecycle_policy, ssh_connection, snapshots, container_status, gpu_status, created_at, updated_at
+				networks, storage, lifecycle_policy, ssh_connection, snapshots, container_status, gpu_status,
+				COALESCE(description, ''), labels, image_summary, compute_summary, network_summary,
+				access_summary, storage_attachments, sandbox_status, created_at, updated_at
 			FROM workload_instances
 			WHERE tenant_id = $1::uuid AND ($2 = '' OR workload_kind = $2)
 			ORDER BY updated_at DESC
@@ -216,7 +262,8 @@ func (s *MetadataInstanceStore) ListReconcileTargets(ctx context.Context, reques
 		rows, err := tx.Query(ctx, `
 			SELECT tenant_id::text, instance_id, workload_kind, state, COALESCE(provider, ''), updated_at
 			FROM workload_instances
-			WHERE state NOT IN ('stopped', 'failed', 'deleted') OR updated_at < $1
+			WHERE state NOT IN ('deleting', 'deleted')
+				AND (state NOT IN ('stopped', 'failed') OR updated_at < $1)
 			ORDER BY updated_at ASC
 			LIMIT $2
 		`, staleBefore.UTC(), limit)
@@ -258,6 +305,13 @@ func scanWorkloadInstance(row scanner, record *ports.WorkloadInstanceRecord) err
 	var snapshotsJSON []byte
 	var containerStatusJSON []byte
 	var gpuStatusJSON []byte
+	var labelsJSON []byte
+	var imageSummaryJSON []byte
+	var computeSummaryJSON []byte
+	var networkSummaryJSON []byte
+	var accessSummaryJSON []byte
+	var storageAttachmentsJSON []byte
+	var sandboxStatusJSON []byte
 	if err := row.Scan(
 		&record.TenantID,
 		&record.InstanceID,
@@ -278,6 +332,14 @@ func scanWorkloadInstance(row scanner, record *ports.WorkloadInstanceRecord) err
 		&snapshotsJSON,
 		&containerStatusJSON,
 		&gpuStatusJSON,
+		&record.Description,
+		&labelsJSON,
+		&imageSummaryJSON,
+		&computeSummaryJSON,
+		&networkSummaryJSON,
+		&accessSummaryJSON,
+		&storageAttachmentsJSON,
+		&sandboxStatusJSON,
 		&record.CreatedAt,
 		&record.UpdatedAt,
 	); err != nil {
@@ -332,6 +394,31 @@ func scanWorkloadInstance(row scanner, record *ports.WorkloadInstanceRecord) err
 		}
 		record.GPU = &gpu
 	}
+	if err := json.Unmarshal(labelsJSON, &record.Labels); err != nil {
+		return fmt.Errorf("unmarshal labels: %w", err)
+	}
+	if err := json.Unmarshal(imageSummaryJSON, &record.Image); err != nil {
+		return fmt.Errorf("unmarshal image summary: %w", err)
+	}
+	if err := json.Unmarshal(computeSummaryJSON, &record.Compute); err != nil {
+		return fmt.Errorf("unmarshal compute summary: %w", err)
+	}
+	if err := json.Unmarshal(networkSummaryJSON, &record.Network); err != nil {
+		return fmt.Errorf("unmarshal network summary: %w", err)
+	}
+	if err := json.Unmarshal(accessSummaryJSON, &record.Access); err != nil {
+		return fmt.Errorf("unmarshal access summary: %w", err)
+	}
+	if err := json.Unmarshal(storageAttachmentsJSON, &record.StorageAttachments); err != nil {
+		return fmt.Errorf("unmarshal storage attachments: %w", err)
+	}
+	if len(sandboxStatusJSON) > 0 && string(sandboxStatusJSON) != "{}" {
+		var sandbox ports.SandboxInstanceStatus
+		if err := json.Unmarshal(sandboxStatusJSON, &sandbox); err != nil {
+			return fmt.Errorf("unmarshal sandbox status: %w", err)
+		}
+		record.Sandbox = &sandbox
+	}
 	return nil
 }
 
@@ -357,4 +444,18 @@ func firstNonNilGPU(gpu *ports.GPUInstanceStatus) any {
 		return map[string]any{}
 	}
 	return gpu
+}
+
+func firstNonNilSandbox(sandbox *ports.SandboxInstanceStatus) any {
+	if sandbox == nil {
+		return map[string]any{}
+	}
+	return sandbox
+}
+
+func firstNonNilStringMap(values map[string]string) map[string]string {
+	if values == nil {
+		return map[string]string{}
+	}
+	return values
 }

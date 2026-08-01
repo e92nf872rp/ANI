@@ -70,6 +70,27 @@ func TestPlanningRuntimeCreatesVMWithDefaultPlanesAndRootDisk(t *testing.T) {
 	}
 }
 
+func TestPlanningRuntimeInstanceIDsDoNotRepeatAcrossRuntimeRestarts(t *testing.T) {
+	spec := ports.WorkloadSpec{
+		TenantID: "tenant-a",
+		Name:     "app",
+		Kind:     ports.WorkloadKindContainer,
+		Image:    "harbor/app:1",
+	}
+
+	first, err := NewPlanningRuntime().Create(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("first Create() error = %v", err)
+	}
+	second, err := NewPlanningRuntime().Create(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("second Create() error = %v", err)
+	}
+	if first.InstanceID == second.InstanceID {
+		t.Fatalf("instance IDs repeated across runtime restarts: %q", first.InstanceID)
+	}
+}
+
 func TestPlanningRuntimeRejectsContainerWithoutTenantVPC(t *testing.T) {
 	runtime := NewPlanningRuntime()
 

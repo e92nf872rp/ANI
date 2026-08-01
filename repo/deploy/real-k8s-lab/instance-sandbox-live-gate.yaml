@@ -1,0 +1,36 @@
+profile: INSTANCE-SANDBOX-LIVE-GATE-A
+status: contract
+description: >
+  Sandbox live gate for proving kind=sandbox create/lifecycle uses ANI Core
+  /api/v1/instances and applies a Kubernetes Deployment with
+  runtimeClassName=sandbox-kata, plus a minimal real code-run that executes
+  inside the ready Pod. Token/files/checkpoint remain local-session until a
+  later real-provider batch. Live image must include python3 (e.g. sandbox-python:3.12).
+
+required_tools:
+  - kubectl
+
+required_endpoints:
+  - ani_core_instances_api
+  - kubernetes_read_api
+  - kata_runtimeclass
+
+live_checks:
+  - id: core-instance-sandbox-create
+    command: POST /api/v1/instances kind=sandbox
+    pass_condition: sandbox_create_returns_instance_and_real_provider_refs
+  - id: kubernetes-deployment-runtimeclass-observe
+    command: kubectl get deployment {name} -n {namespace} -o json
+    pass_condition: deployment_spec_template_runtimeClassName_is_sandbox-kata
+  - id: core-instance-sandbox-code-run
+    command: POST /api/v1/instances/{instance_id}/sandbox/code-runs
+    pass_condition: code_run_task_result_status_succeeded_with_stdout
+  - id: core-instance-sandbox-pause
+    command: POST /api/v1/instances/{instance_id}/lifecycle action=pause
+    pass_condition: pause_operation_accepted_through_core_api
+  - id: core-instance-sandbox-resume
+    command: POST /api/v1/instances/{instance_id}/lifecycle action=resume
+    pass_condition: resume_operation_accepted_through_core_api
+  - id: core-instance-sandbox-delete
+    command: POST /api/v1/instances/{instance_id}/lifecycle action=delete
+    pass_condition: delete_operation_accepted_through_core_api

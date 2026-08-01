@@ -71,6 +71,62 @@ func TestKubernetesProviderExecutionProfileOrchestratesCreate(t *testing.T) {
 	}
 }
 
+func TestKubernetesProviderAdapterAllowsAuxiliaryIdentitySecretForKubeVirtVM(t *testing.T) {
+	client := &profileKubernetesProviderClient{}
+	provider := NewKubernetesProviderAdapter(client, WithKubernetesProviderApplyEnabled(true))
+	admission := ports.WorkloadAdmissionResult{Allowed: true}
+	manifests := []ports.WorkloadManifest{
+		{
+			Name:     "vm-01",
+			Kind:     "VirtualMachine",
+			Provider: "kubevirt",
+			Content:  `{"apiVersion":"kubevirt.io/v1","kind":"VirtualMachine","metadata":{"name":"vm-01","namespace":"ani-tenant-tenant-a"}}`,
+		},
+		{
+			Name:     "ani-wi-vm-01",
+			Kind:     "Secret",
+			Provider: "kubernetes",
+			Content:  `{"apiVersion":"v1","kind":"Secret","metadata":{"name":"ani-wi-vm-01","namespace":"ani-tenant-tenant-a"}}`,
+		},
+	}
+
+	result, err := provider.DryRun(context.Background(), manifests, admission)
+	if err != nil {
+		t.Fatalf("DryRun() error = %v", err)
+	}
+	if !result.Accepted || result.Provider != "kubevirt" {
+		t.Fatalf("DryRun() = %#v, want accepted kubevirt batch", result)
+	}
+}
+
+func TestKubernetesProviderAdapterAllowsAuxiliaryPVCForKubeVirtVM(t *testing.T) {
+	client := &profileKubernetesProviderClient{}
+	provider := NewKubernetesProviderAdapter(client, WithKubernetesProviderApplyEnabled(true))
+	admission := ports.WorkloadAdmissionResult{Allowed: true}
+	manifests := []ports.WorkloadManifest{
+		{
+			Name:     "vm-01",
+			Kind:     "VirtualMachine",
+			Provider: "kubevirt",
+			Content:  `{"apiVersion":"kubevirt.io/v1","kind":"VirtualMachine","metadata":{"name":"vm-01","namespace":"ani-tenant-tenant-a"}}`,
+		},
+		{
+			Name:     "vm-01-root",
+			Kind:     "PersistentVolumeClaim",
+			Provider: "kubernetes",
+			Content:  `{"apiVersion":"v1","kind":"PersistentVolumeClaim","metadata":{"name":"vm-01-root","namespace":"ani-tenant-tenant-a"},"spec":{"accessModes":["ReadWriteOnce"],"resources":{"requests":{"storage":"40Gi"}}}}`,
+		},
+	}
+
+	result, err := provider.DryRun(context.Background(), manifests, admission)
+	if err != nil {
+		t.Fatalf("DryRun() error = %v", err)
+	}
+	if !result.Accepted || result.Provider != "kubevirt" {
+		t.Fatalf("DryRun() = %#v, want accepted kubevirt batch", result)
+	}
+}
+
 type profileKubernetesProviderClient struct {
 	serverSideDryRuns int
 	applies           int

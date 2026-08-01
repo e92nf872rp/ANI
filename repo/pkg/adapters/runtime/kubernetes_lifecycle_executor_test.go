@@ -36,6 +36,62 @@ func TestKubernetesLifecycleExecutorScalesDeploymentStartStop(t *testing.T) {
 	}
 }
 
+func TestKubernetesLifecycleExecutorUsesKubeVirtStartStopSubresources(t *testing.T) {
+	var requests []string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		if r.Method != http.MethodPut {
+			t.Fatalf("method = %s, want PUT", r.Method)
+		}
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+
+	if _, err := executor.Apply(context.Background(), lifecycleRequest(ports.WorkloadLifecycleStop), record); err != nil {
+		t.Fatalf("Stop Apply() error = %v", err)
+	}
+	if _, err := executor.Apply(context.Background(), lifecycleRequest(ports.WorkloadLifecycleStart), record); err != nil {
+		t.Fatalf("Start Apply() error = %v", err)
+	}
+
+	want := []string{
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/stop",
+		"PUT /apis/subresources.kubevirt.io/v1/namespaces/ani-tenant-tenant-a/virtualmachines/vm-01/start",
+	}
+	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("requests = %#v, want %#v", requests, want)
+	}
+}
+
+func TestKubernetesLifecycleExecutorTreatsAlreadyRunningStartAsSuccess(t *testing.T) {
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusConflict,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(strings.NewReader(
+				`{"kind":"Status","status":"Failure","message":"VM is already running","reason":"Conflict","code":409}`,
+			)),
+		}, nil
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindVM
+	record.Name = "vm-01"
+	record.Provider = "kubevirt"
+	record.ResourceRefs = []string{"kubevirt/VirtualMachine/vm-01"}
+
+	result, err := executor.Apply(context.Background(), lifecycleRequest(ports.WorkloadLifecycleStart), record)
+	if err != nil {
+		t.Fatalf("Start Apply() error = %v", err)
+	}
+	if !result.Accepted {
+		t.Fatalf("Accepted = false, want idempotent start success")
+	}
+}
+
 func TestKubernetesLifecycleExecutorDeletesResource(t *testing.T) {
 	var got string
 	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
@@ -51,6 +107,51 @@ func TestKubernetesLifecycleExecutorDeletesResource(t *testing.T) {
 	}
 	if !strings.HasPrefix(got, "DELETE /apis/apps/v1/namespaces/ani-tenant-tenant-a/deployments/app-01") {
 		t.Fatalf("request = %q, want deployment delete", got)
+	}
+}
+
+func TestKubernetesLifecycleExecutorDeletesAllReferencedResources(t *testing.T) {
+	var requests []string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.ResourceRefs = append(record.ResourceRefs, "kubernetes/Secret/ani-wi-instance-a")
+
+	if _, err := executor.Apply(context.Background(), lifecycleRequest(ports.WorkloadLifecycleDelete), record); err != nil {
+		t.Fatalf("Delete Apply() error = %v", err)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("requests = %#v, want deployment and secret deletes", requests)
+	}
+	if !strings.Contains(requests[1], "/api/v1/namespaces/ani-tenant-tenant-a/secrets/ani-wi-instance-a") {
+		t.Fatalf("second request = %q, want workload identity secret delete", requests[1])
+	}
+}
+
+func TestKubernetesLifecycleExecutorDeleteIgnoresAlreadyMissingResources(t *testing.T) {
+	var requests []string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		if strings.Contains(r.URL.Path, "/deployments/") {
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"reason":"NotFound"}`)),
+			}, nil
+		}
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	record.ResourceRefs = append(record.ResourceRefs, "kubernetes/Secret/ani-wi-instance-a")
+
+	result, err := executor.Apply(context.Background(), lifecycleRequest(ports.WorkloadLifecycleDelete), record)
+	if err != nil {
+		t.Fatalf("Delete Apply() error = %v", err)
+	}
+	if !result.Accepted || len(requests) != 2 {
+		t.Fatalf("result = %+v requests = %#v, want accepted cleanup of both refs", result, requests)
 	}
 }
 

@@ -17,6 +17,7 @@ func TestLocalSandboxRuntimeCreatesRunningSessionWithDevProfile(t *testing.T) {
 		TenantID: "tenant-a",
 		Name:     "agent-session",
 		Config: ports.SandboxConfig{
+			TemplateID:          "sandbox-template-python",
 			RuntimeClass:        "sandbox-kata",
 			SessionTimeout:      45 * time.Minute,
 			NetworkEgressPolicy: ports.SandboxNetworkEgressDenyAll,
@@ -28,6 +29,9 @@ func TestLocalSandboxRuntimeCreatesRunningSessionWithDevProfile(t *testing.T) {
 	}
 	if instance.Kind != ports.WorkloadKindSandbox || instance.State != ports.SandboxStateRunning {
 		t.Fatalf("kind/state = %s/%s, want sandbox/running", instance.Kind, instance.State)
+	}
+	if instance.TemplateID != "sandbox-template-python" || instance.SessionState != "running" {
+		t.Fatalf("template/session = %q/%q, want sandbox-template-python/running", instance.TemplateID, instance.SessionState)
 	}
 	if instance.Config.RuntimeClass != "sandbox-kata" || instance.Config.SessionTimeout != 45*time.Minute || instance.Config.NetworkEgressPolicy != ports.SandboxNetworkEgressDenyAll {
 		t.Fatalf("config = %+v, want request config", instance.Config)
@@ -69,5 +73,35 @@ func TestLocalSandboxRuntimeDefaultsToKataAndPendingWhenNotAutoStarted(t *testin
 	}
 	if instance.State != ports.SandboxStatePending {
 		t.Fatalf("state = %s, want pending", instance.State)
+	}
+}
+
+func TestLocalSandboxRuntimeDeleteRemovesSession(t *testing.T) {
+	runtime := NewLocalSandboxRuntime()
+	instance, err := runtime.Create(context.Background(), ports.SandboxCreateRequest{
+		TenantID:  "tenant-a",
+		Name:      "delete-session",
+		AutoStart: true,
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	deleted, err := runtime.ApplyLifecycle(context.Background(), ports.SandboxLifecycleRequest{
+		TenantID:   "tenant-a",
+		InstanceID: instance.InstanceID,
+		Action:     ports.WorkloadLifecycleDelete,
+	})
+	if err != nil {
+		t.Fatalf("ApplyLifecycle(delete) error = %v", err)
+	}
+	if deleted.State != ports.SandboxStateStopped {
+		t.Fatalf("deleted state = %s, want stopped tombstone", deleted.State)
+	}
+	if _, err := runtime.Get(context.Background(), ports.SandboxGetRequest{
+		TenantID:   "tenant-a",
+		InstanceID: instance.InstanceID,
+	}); err != ports.ErrNotFound {
+		t.Fatalf("Get() after delete error = %v, want ErrNotFound", err)
 	}
 }

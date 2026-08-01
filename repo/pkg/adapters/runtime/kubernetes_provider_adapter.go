@@ -147,9 +147,9 @@ func validateProviderManifestBatch(manifests []ports.WorkloadManifest) error {
 	if len(manifests) == 0 {
 		return fmt.Errorf("%w: at least one manifest is required", ports.ErrInvalid)
 	}
-	provider := manifests[0].Provider
+	provider := primaryProvider(manifests)
 	for _, manifest := range manifests {
-		if manifest.Provider != provider {
+		if !isAuxiliaryKubernetesManifest(manifest) && manifest.Provider != provider {
 			return fmt.Errorf("%w: mixed providers are not allowed in one provider batch", ports.ErrInvalid)
 		}
 		doc, err := parseManifestDocument(manifest.Content)
