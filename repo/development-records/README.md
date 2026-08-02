@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### Instance Sandbox 无状态化（2026-08）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-SANDBOX-STATELESS-A | live passed：PG 请求上下文驱动 Kubernetes Sandbox、UUID、PG AsyncTaskStore、端口摘要、Redis DELETE/指纹/Token 过期幂等与 checkpoint 422；真实 Gateway rollout 后实例/文件/端口/task 可恢复，原请求可重放、不同 intent 冲突，清理后 provider 资源为 0；evidence `live-evidence/instance-sandbox-stateless-live-20260802.json`；Gateway `instance-sandbox-stateless-20260802-v1` | instance-sandbox-stateless-a.md |
+
 ### Core Knowledge Base Platform · 数据库迁移（2026-07）
 
 | 批次 | 内容摘要 | 文件 |
@@ -83,6 +89,10 @@
 | INSTANCE-SANDBOX-CODERUN-A | Sandbox code-run real provider 最小闭环：Ready Pod + kubectl exec（python3/node）；AsyncTask result 含 stdout/stderr/exit_code；live passed（2026-08-01）`code_run_status=succeeded`；evidence `live-evidence/instance-sandbox-coderun-live-20260801.json`；Gateway `instance-sandbox-coderun-20260801-v1`；token/port/file/checkpoint 仍 local-session | instance-sandbox-coderun-a.md |
 | INSTANCE-ORCHESTRATION-A | Container create-time Registry/Network/Storage 编排：OVN 注解 + PVC mount + MountVolume + operation steps；Gateway 共享 Network/Storage/Registry 到 Instance resolver；Harbor TLS insecure 修通；live passed（2026-08-01）evidence `live-evidence/instance-orchestration-container-live-20260801.json`；Gateway `instance-orchestration-20260801-v3` | instance-orchestration-a.md |
 | INSTANCE-SANDBOX-SUBRESOURCES-A | Sandbox files real-provider：Pod `/workspace` write/list/delete + code-run 读回校验；live passed（2026-08-01）evidence `live-evidence/instance-sandbox-files-live-20260801.json`；Gateway `instance-sandbox-files-20260801-v1`；token/port/checkpoint 仍 local-session；不改 v1 | instance-sandbox-subresources-a.md |
+| INSTANCE-SANDBOX-FILE-SAFETY-A | Sandbox files containment 安全加固：独立 `emptyDir` 挂载 `/workspace`，Pod 脚本使用目录 fd、`O_NOFOLLOW`、`dir_fd` 并拒绝多硬链接写入目标；unsafe path 映射 v1 HTTP 400；真实脚本回归覆盖 symlink/hard-link；local/logic verified，未重跑 live | instance-sandbox-file-safety-a.md |
+| INSTANCE-SANDBOX-FILE-SAFETY-LIVE-GATE-A | Sandbox files real-provider 安全验收：真实 Kata Pod `/workspace=emptyDir`；code-run 构造 symlink/hard-link；5 个 unsafe list/write/delete 均返回 400，跨文件系统 hard-link blocked，外部内容 unchanged；live passed，evidence `live-evidence/instance-sandbox-file-safety-live-20260802.json`；Gateway `instance-sandbox-file-safety-20260802-v1` | instance-sandbox-file-safety-live-gate-a.md |
+| INSTANCE-PG-CLEAN-REVALIDATION-A | 清除历史实例管理 PG 数据并从空基线重跑 Sandbox live gate；清理 26 instances / 104 operations / 381 steps / 27 plan audits / 27 workload identities；重验后只保留 1 条当次 `deleted` Sandbox 审计历史，Kubernetes 资源无残留；evidence `live-evidence/instance-sandbox-post-clean-live-20260802.json` | instance-pg-clean-revalidation-a.md |
+| INSTANCE-RECONCILE-PROVIDER-404-A | Kubernetes 主资源 404 映射 `ports.ErrNotFound`，并收口 Sandbox `kubernetes_sandbox_runtime` 逻辑 provider 与 `kubernetes/Deployment` 物理 ref 匹配；真实验证集群侧删除后 PG `running→failed/ProviderResourceLost`，重复 reconcile 幂等，Core delete 后无资源残留；worker `instance-provider-404-20260802-v2` | instance-reconcile-provider-404-a.md |
 | INSTANCE-SANDBOX-PORTS-A | Sandbox preview ports real-provider：NodePort Service + preview_url；live passed（2026-08-02）evidence `live-evidence/instance-sandbox-ports-live-20260801.json`；Gateway `instance-sandbox-ports-20260801-v1`；token/checkpoint 仍 local-session | instance-sandbox-ports-a.md |
 | INSTANCE-SANDBOX-TOKEN-A | Sandbox signed token：HMAC `ani.sbx.*` 签发 + Gateway Auth/RBAC 子资源鉴权；live passed（2026-08-02）evidence `live-evidence/instance-sandbox-token-live-20260802.json`；Gateway `instance-sandbox-token-20260802-v1`；checkpoint 仍 local-session | instance-sandbox-token-a.md |
 | GPU-SCHEDULING-ISSUE-01-A | OpenAPI 新增 GPU 调度队列 CRUD 5 端点 + 4 schema + 2 RBAC scope + InstanceRecord.gpu 扩展 + 5 错误码；修复 /branding schema bug；前端 core-schema.d.ts 重生成；validate-architecture 通过 | gpu-scheduling-issue-01-openapi-queue-crud.md |

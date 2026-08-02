@@ -2,50 +2,96 @@ package router
 
 import (
 	"context"
+	"errors"
 	"net/http"
-	"sync"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/route"
-	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
+	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
+	"github.com/kubercloud/ani/pkg/ports"
 )
 
-var completedTasks = struct {
-	sync.RWMutex
-	byTenant map[string]map[string]storageSnapshotTaskResponse
-}{
-	byTenant: make(map[string]map[string]storageSnapshotTaskResponse),
+var defaultTaskStore ports.AsyncTaskStore = runtimeadapter.NewLocalAsyncTaskStore()
+
+type taskAPI struct {
+	store ports.AsyncTaskStore
 }
 
 func registerTasks(v1 *route.RouterGroup) {
-	v1.GET("/tasks/:task_id", getTask)
-	v1.DELETE("/tasks/:task_id", cancelTask)
+	registerTasksWithStore(v1, defaultTaskStore)
 }
 
-func getTask(ctx context.Context, c *app.RequestContext) {
-	tenantID := instanceTenantID(c)
-	completedTasks.RLock()
-	task, ok := completedTasks.byTenant[tenantID][c.Param("task_id")]
-	completedTasks.RUnlock()
-	if !ok {
+func registerTasksWithStore(v1 *route.RouterGroup, store ports.AsyncTaskStore) {
+	if store == nil {
+		store = defaultTaskStore
+	}
+	api := &taskAPI{store: store}
+	v1.GET("/tasks/:task_id", api.get)
+	v1.DELETE("/tasks/:task_id", api.cancel)
+}
+
+func (api *taskAPI) get(ctx context.Context, c *app.RequestContext) {
+	task, err := api.store.Get(ctx, instanceTenantID(c), c.Param("task_id"))
+	if errors.Is(err, ports.ErrNotFound) {
 		writeInstanceError(c, http.StatusNotFound, "NOT_FOUND", "task not found")
 		return
 	}
-	c.JSON(http.StatusOK, task)
-	_ = ctx
-}
-
-func storeCompletedTask(tenantID string, task storageSnapshotTaskResponse) {
-	completedTasks.Lock()
-	defer completedTasks.Unlock()
-	if completedTasks.byTenant[tenantID] == nil {
-		completedTasks.byTenant[tenantID] = make(map[string]storageSnapshotTaskResponse)
+	if err != nil {
+		writeInstanceError(c, http.StatusInternalServerError, "TASK_LOOKUP_FAILED", err.Error())
+		return
 	}
-	completedTasks.byTenant[tenantID][task.ID] = task
+	c.JSON(http.StatusOK, taskResponseFromRecord(task))
 }
 
-func cancelTask(ctx context.Context, c *app.RequestContext) {
-	_ = middleware.GetTenantID(c)
+func (api *taskAPI) cancel(ctx context.Context, c *app.RequestContext) {
+	task, err := api.store.Get(ctx, instanceTenantID(c), c.Param("task_id"))
+	if errors.Is(err, ports.ErrNotFound) {
+		writeInstanceError(c, http.StatusNotFound, "NOT_FOUND", "task not found")
+		return
+	}
+	if err != nil {
+		writeInstanceError(c, http.StatusInternalServerError, "TASK_LOOKUP_FAILED", err.Error())
+		return
+	}
+	if task.Status == "completed" || task.Status == "failed" || task.Status == "cancelled" || task.Status == "dead_letter" {
+		c.Status(http.StatusNoContent)
+		return
+	}
+	_, err = api.store.Update(ctx, ports.AsyncTaskUpdate{
+		TenantID: task.TenantID, ID: task.ID, Status: "cancelled",
+		AttemptCount: task.AttemptCount, ProgressPct: task.ProgressPct, Result: task.Result,
+	})
+	if err != nil {
+		writeInstanceError(c, http.StatusInternalServerError, "TASK_CANCEL_FAILED", err.Error())
+		return
+	}
 	c.Status(http.StatusNoContent)
-	_ = ctx
+}
+
+func taskResponseFromRecord(record ports.AsyncTaskRecord) storageSnapshotTaskResponse {
+	return storageSnapshotTaskResponse{
+		ID: record.ID, IdempotencyKey: record.IdempotencyKey, TaskType: record.TaskType,
+		ResourceType: record.ResourceType, Status: record.Status, AttemptCount: record.AttemptCount,
+		MaxAttempts: record.MaxAttempts, ProgressPct: record.ProgressPct, Result: record.Result,
+		CreatedAt: networkTime(record.CreatedAt), CompletedAt: networkTime(record.CompletedAt),
+	}
+}
+
+func taskRecordFromResponse(tenantID string, task storageSnapshotTaskResponse) ports.AsyncTaskRecord {
+	createdAt, _ := timeFromNetwork(task.CreatedAt)
+	completedAt, _ := timeFromNetwork(task.CompletedAt)
+	return ports.AsyncTaskRecord{
+		TenantID: tenantID, ID: task.ID, IdempotencyKey: task.IdempotencyKey,
+		TaskType: task.TaskType, ResourceType: task.ResourceType, Status: task.Status,
+		AttemptCount: task.AttemptCount, MaxAttempts: task.MaxAttempts, ProgressPct: task.ProgressPct,
+		Result: task.Result, CreatedAt: createdAt, CompletedAt: completedAt,
+	}
+}
+
+func timeFromNetwork(value string) (time.Time, error) {
+	if value == "" {
+		return time.Time{}, nil
+	}
+	return time.Parse(time.RFC3339, value)
 }

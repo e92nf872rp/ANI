@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -82,6 +83,61 @@ func TestLocalWorkloadReconcileControllerMarksProviderMissing(t *testing.T) {
 	}
 	if updated.Status.State != ports.WorkloadStateFailed || updated.Status.Reason != "ProviderResourceLost" {
 		t.Fatalf("stored status = %+v, want failed ProviderResourceLost", updated.Status)
+	}
+}
+
+func TestLocalWorkloadReconcileControllerPersistsKubernetesPrimaryResourceLoss(t *testing.T) {
+	store := newReconcileMemoryStore()
+	record := reconcileTestRecord(ports.WorkloadStateRunning)
+	record.Name = "app-a"
+	record.Kind = ports.WorkloadKindSandbox
+	record.Provider = "kubernetes_sandbox_runtime"
+	record.ResourceRefs = []string{"kubernetes/Deployment/app-a"}
+	record.Status.Ref.Kind = ports.WorkloadKindSandbox
+	if err := store.UpsertStatus(context.Background(), record); err != nil {
+		t.Fatal(err)
+	}
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return jsonResponse(http.StatusNotFound, `{"message":"deployments.apps app-a not found"}`), nil
+	})
+	client := newTestKubernetesRESTClient(t, transport)
+	controller := NewLocalWorkloadReconcileController(
+		store,
+		store,
+		NewKubernetesProviderAdapter(client),
+		NewLocalStatusReconciler(),
+		ports.ReconcileControllerConfig{},
+		WithReconcileControllerClock(func() time.Time { return time.Unix(300, 0) }),
+	)
+	target := ports.ReconcileTarget{
+		TenantID:   record.TenantID,
+		InstanceID: record.InstanceID,
+		Kind:       record.Kind,
+		Provider:   record.Provider,
+		State:      record.Status.State,
+	}
+
+	first, err := controller.ReconcileNow(context.Background(), target)
+	if err != nil {
+		t.Fatalf("ReconcileNow(first) error = %v", err)
+	}
+	if !first.ProviderMissing || !first.StateChanged || first.CurrentState != ports.WorkloadStateFailed || first.Reason != "ProviderResourceLost" {
+		t.Fatalf("first reconcile result = %+v, want changed failed ProviderResourceLost", first)
+	}
+	stored, err := store.Get(context.Background(), record.TenantID, record.InstanceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status.State != ports.WorkloadStateFailed || stored.Status.Reason != "ProviderResourceLost" {
+		t.Fatalf("stored status = %+v, want failed ProviderResourceLost", stored.Status)
+	}
+
+	second, err := controller.ReconcileNow(context.Background(), target)
+	if err != nil {
+		t.Fatalf("ReconcileNow(second) error = %v", err)
+	}
+	if !second.ProviderMissing || second.StateChanged || second.CurrentState != ports.WorkloadStateFailed || second.Reason != "ProviderResourceLost" {
+		t.Fatalf("second reconcile result = %+v, want stable failed ProviderResourceLost", second)
 	}
 }
 

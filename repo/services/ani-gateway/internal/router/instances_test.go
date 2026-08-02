@@ -1046,6 +1046,10 @@ func TestCreateAndDeleteSandboxPort(t *testing.T) {
 	if !strings.Contains(string(openResp.Body()), `"port":8080`) || !strings.Contains(string(openResp.Body()), `"status":"available"`) || !strings.Contains(string(openResp.Body()), `"preview_url":"`) {
 		t.Fatalf("open port body = %s, want available preview port", openResp.Body())
 	}
+	getAfterOpen := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/instances/"+instanceID, nil).Result()
+	if getAfterOpen.StatusCode() != http.StatusOK || !strings.Contains(string(getAfterOpen.Body()), `"ports":[{"port":8080`) {
+		t.Fatalf("instance after open = %d %s, want persisted port summary", getAfterOpen.StatusCode(), getAfterOpen.Body())
+	}
 
 	deleteResp := ut.PerformRequest(h.Engine, http.MethodDelete, "/api/v1/instances/"+instanceID+"/sandbox/ports/8080",
 		nil,
@@ -1056,6 +1060,10 @@ func TestCreateAndDeleteSandboxPort(t *testing.T) {
 	}
 	if !strings.Contains(string(deleteResp.Body()), `"port":8080`) || !strings.Contains(string(deleteResp.Body()), `"status":"closing"`) {
 		t.Fatalf("delete port body = %s, want closing preview port", deleteResp.Body())
+	}
+	getAfterDelete := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/instances/"+instanceID, nil).Result()
+	if getAfterDelete.StatusCode() != http.StatusOK || strings.Contains(string(getAfterDelete.Body()), `"port":8080`) {
+		t.Fatalf("instance after delete = %d %s, want port summary removed", getAfterDelete.StatusCode(), getAfterDelete.Body())
 	}
 }
 

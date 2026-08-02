@@ -26,6 +26,7 @@ REQUIRED_CHECKS = {
     "core-instance-sandbox-create",
     "kubernetes-deployment-runtimeclass-observe",
     "core-instance-sandbox-files",
+    "core-instance-sandbox-file-safety",
     "core-instance-sandbox-token",
     "core-instance-sandbox-ports",
     "core-instance-sandbox-code-run",
@@ -194,7 +195,31 @@ def observe_deployment(name: str, namespace: str, kubeconfig: str) -> dict[str, 
     )
     if runtime_class != "sandbox-kata":
         fail(f"deployment runtimeClassName must be sandbox-kata, got {runtime_class!r}")
+    validate_workspace_mount(document)
     return document
+
+
+def validate_workspace_mount(document: dict[str, Any]) -> None:
+    pod_spec = document.get("spec", {}).get("template", {}).get("spec", {})
+    containers = pod_spec.get("containers")
+    volumes = pod_spec.get("volumes")
+    if not isinstance(containers, list) or not containers or not isinstance(containers[0], dict):
+        fail("sandbox deployment must include a container")
+    mounts = containers[0].get("volumeMounts")
+    if not isinstance(mounts, list) or not any(
+        isinstance(mount, dict)
+        and mount.get("name") == "sandbox-workspace"
+        and mount.get("mountPath") == "/workspace"
+        for mount in mounts
+    ):
+        fail("sandbox deployment must mount sandbox-workspace at /workspace")
+    if not isinstance(volumes, list) or not any(
+        isinstance(volume, dict)
+        and volume.get("name") == "sandbox-workspace"
+        and isinstance(volume.get("emptyDir"), dict)
+        for volume in volumes
+    ):
+        fail("sandbox deployment sandbox-workspace must use emptyDir")
 
 
 def lifecycle(base: str, token: str, tenant_id: str, instance_id_value: str, action: str, idem: str) -> dict[str, Any]:
@@ -543,6 +568,141 @@ def run_files(base: str, token: str, tenant_id: str, instance_id_value: str, ide
     return {"path": path, "verify_status": code_run.get("status")}
 
 
+def run_file_safety(base: str, token: str, tenant_id: str, instance_id_value: str, idem: str) -> dict[str, Any]:
+    client = HTTPClient()
+
+    def run_python(label: str, code: str) -> dict[str, Any]:
+        status, document = client.request(
+            "POST",
+            gateway_url(base, f"/instances/{urllib.parse.quote(instance_id_value)}/sandbox/code-runs"),
+            token,
+            tenant_id,
+            {
+                "idempotency_key": f"{idem}-{label}",
+                "language": "python",
+                "code": code,
+                "timeout_seconds": 60,
+            },
+        )
+        result = document.get("result") if isinstance(document.get("result"), dict) else {}
+        code_run = result.get("code_run") if isinstance(result.get("code_run"), dict) else {}
+        if status != 202 or code_run.get("status") != "succeeded":
+            fail(f"sandbox file safety {label} code-run failed: status={status} result={document}")
+        return code_run
+
+    setup = run_python(
+        "file-safety-setup",
+        """import errno, os
+outside_dir = '/tmp/ani-file-safety'
+outside_file = outside_dir + '/outside.txt'
+os.makedirs(outside_dir, exist_ok=True)
+open(outside_file, 'w').write('outside-original')
+for path in ['/workspace/escape-dir', '/workspace/escape-file', '/workspace/hardlink-target']:
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+os.symlink(outside_dir, '/workspace/escape-dir')
+os.symlink(outside_file, '/workspace/escape-file')
+open('/workspace/hardlink-source', 'w').write('workspace-original')
+os.link('/workspace/hardlink-source', '/workspace/hardlink-target')
+try:
+    os.link(outside_file, '/workspace/cross-fs-hardlink')
+except OSError as exc:
+    if exc.errno != errno.EXDEV:
+        raise
+else:
+    raise RuntimeError('cross-filesystem hard link unexpectedly succeeded')
+print('safety-fixtures-ready')
+""",
+    )
+    if "safety-fixtures-ready" not in str(setup.get("stdout") or ""):
+        fail(f"sandbox file safety setup did not complete: {setup}")
+
+    unsafe_checks: list[tuple[str, str, str, dict[str, Any] | None]] = [
+        ("list-symlink-dir", "GET", "?path=escape-dir", None),
+        (
+            "write-symlink-dir",
+            "POST",
+            "",
+            {
+                "idempotency_key": f"{idem}-write-symlink-dir",
+                "path": "escape-dir/owned.txt",
+                "content_base64": "b3duZWQ=",
+                "overwrite": True,
+            },
+        ),
+        (
+            "write-symlink-file",
+            "POST",
+            "",
+            {
+                "idempotency_key": f"{idem}-write-symlink-file",
+                "path": "escape-file",
+                "content_base64": "Y2hhbmdlZA==",
+                "overwrite": True,
+            },
+        ),
+        (
+            "write-hardlink-file",
+            "POST",
+            "",
+            {
+                "idempotency_key": f"{idem}-write-hardlink-file",
+                "path": "hardlink-target",
+                "content_base64": "Y2hhbmdlZA==",
+                "overwrite": True,
+            },
+        ),
+    ]
+    statuses: dict[str, int] = {}
+    files_url = gateway_url(base, f"/instances/{urllib.parse.quote(instance_id_value)}/sandbox/files")
+    for label, method, suffix, body in unsafe_checks:
+        status, document = client.request(method, files_url + suffix, token, tenant_id, body)
+        if status != 400:
+            fail(f"sandbox {label} must return 400, got {status}: {document}")
+        statuses[label] = status
+
+    delete_request = urllib.request.Request(
+        files_url + "?path=escape-dir%2Foutside.txt",
+        method="DELETE",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "X-Tenant-ID": tenant_id,
+            "Idempotency-Key": f"{idem}-delete-symlink-dir",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(delete_request, timeout=120) as response:
+            delete_status = response.status
+            delete_document: Any = response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as err:
+        delete_status = err.code
+        delete_document = err.read().decode("utf-8", errors="replace")
+    if delete_status != 400:
+        fail(f"sandbox delete-symlink-dir must return 400, got {delete_status}: {delete_document}")
+    statuses["delete-symlink-dir"] = delete_status
+
+    verify = run_python(
+        "file-safety-verify",
+        """import os
+assert open('/tmp/ani-file-safety/outside.txt').read() == 'outside-original'
+assert not os.path.exists('/tmp/ani-file-safety/owned.txt')
+assert open('/workspace/hardlink-source').read() == 'workspace-original'
+print('outside-content-unchanged')
+""",
+    )
+    if "outside-content-unchanged" not in str(verify.get("stdout") or ""):
+        fail(f"sandbox file safety verification did not complete: {verify}")
+    return {
+        "workspace_volume": "emptyDir",
+        "cross_filesystem_hardlink": "blocked",
+        "outside_content": "unchanged",
+        "unsafe_statuses": statuses,
+    }
+
+
 def run_code_run(base: str, token: str, tenant_id: str, instance_id_value: str, idem: str) -> dict[str, Any]:
     client = HTTPClient()
     status, document = client.request(
@@ -616,6 +776,7 @@ def run_live(
     running = wait_for_state(gateway, token, tenant_id, sid, {"running", "pending", "provisioning"})
     pod_name = wait_sandbox_pod_ready(name, namespace, kubeconfig)
     files = run_files(gateway, token, tenant_id, sid, idem)
+    file_safety = run_file_safety(gateway, token, tenant_id, sid, idem)
     token_proof = run_token(gateway, token, tenant_id, sid, idem)
     ports = run_ports(gateway, token, tenant_id, sid, name, kubeconfig, idem)
     code_run = run_code_run(gateway, token, tenant_id, sid, idem)
@@ -631,6 +792,10 @@ def run_live(
         "pod_name": pod_name,
         "files_path": files.get("path"),
         "files_verify_status": files.get("verify_status"),
+        "files_workspace_volume": file_safety.get("workspace_volume"),
+        "files_cross_filesystem_hardlink": file_safety.get("cross_filesystem_hardlink"),
+        "files_outside_content": file_safety.get("outside_content"),
+        "files_unsafe_statuses": file_safety.get("unsafe_statuses"),
         "token_prefix": token_proof.get("token_prefix"),
         "token_files_list_status": token_proof.get("files_list_status"),
         "token_mint_denied_status": token_proof.get("mint_denied_status"),
@@ -649,6 +814,18 @@ def run_live(
 
 
 def write_evidence(path: Path, evidence: dict[str, object]) -> None:
+    preview_url = evidence.get("ports_preview_url")
+    if isinstance(preview_url, str) and preview_url:
+        parsed = urllib.parse.urlsplit(preview_url)
+        redacted_host = "<redacted-host>"
+        if parsed.port is not None:
+            redacted_host += f":{parsed.port}"
+        evidence = {
+            **evidence,
+            "ports_preview_url": urllib.parse.urlunsplit(
+                (parsed.scheme, redacted_host, parsed.path, parsed.query, parsed.fragment)
+            ),
+        }
     identified = {
         "id": GATE_ID,
         "profile": PROFILE,

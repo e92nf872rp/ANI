@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1855,7 +1856,8 @@ func TestLocalInstanceServiceUpdatesSandboxRuntimeLifecycle(t *testing.T) {
 		t.Fatalf("sandbox.Create() error = %v", err)
 	}
 	store := &fakeInstanceStore{last: ports.WorkloadInstanceRecord{
-		TenantID: "tenant-a", InstanceID: status.InstanceID, Kind: ports.WorkloadKindSandbox,
+		TenantID: "tenant-a", InstanceID: status.InstanceID, Name: status.Name,
+		Kind: ports.WorkloadKindSandbox, Provider: status.Provider,
 		Status: ports.WorkloadStatus{State: ports.WorkloadStateRunning}, Sandbox: &status,
 	}}
 	lifecycle := &fakeLifecycleExecutor{}
@@ -1908,13 +1910,115 @@ func TestLocalInstanceServiceUpdatesSandboxRuntimeLifecycle(t *testing.T) {
 	}
 }
 
+func TestSandboxExecutionContextFromRecord(t *testing.T) {
+	createdAt := time.Unix(100, 0).UTC()
+	updatedAt := time.Unix(200, 0).UTC()
+	record := ports.WorkloadInstanceRecord{
+		TenantID:     "tenant-a",
+		InstanceID:   "11111111-1111-4111-8111-111111111111",
+		Name:         "sandbox-a",
+		Kind:         ports.WorkloadKindSandbox,
+		Provider:     "kubernetes_sandbox_runtime",
+		ResourceRefs: []string{"kubernetes/Deployment/sandbox-a"},
+		CreatedAt:    createdAt,
+		UpdatedAt:    updatedAt,
+		Sandbox: &ports.SandboxInstanceStatus{
+			TenantID:     "tenant-a",
+			InstanceID:   "11111111-1111-4111-8111-111111111111",
+			State:        ports.SandboxStatePaused,
+			SessionState: "paused",
+			Config: ports.SandboxConfig{
+				RuntimeClass:   "sandbox-kata",
+				SessionTimeout: 30 * time.Minute,
+			},
+		},
+	}
+
+	got, err := SandboxExecutionContextFromRecord(record)
+	if err != nil {
+		t.Fatalf("sandboxExecutionContextFromRecord() error = %v", err)
+	}
+	if got.TenantID != record.TenantID || got.InstanceID != record.InstanceID || got.Name != record.Name {
+		t.Fatalf("identity = %+v, want record identity", got)
+	}
+	if got.Provider != record.Provider || !reflect.DeepEqual(got.ResourceRefs, record.ResourceRefs) {
+		t.Fatalf("provider context = %+v, want provider=%q refs=%v", got, record.Provider, record.ResourceRefs)
+	}
+	if got.State != ports.SandboxStatePaused || got.SessionState != "paused" || got.Config.RuntimeClass != "sandbox-kata" {
+		t.Fatalf("sandbox state = %+v, want persisted sandbox state", got)
+	}
+	if !got.CreatedAt.Equal(createdAt) || !got.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("timestamps = (%s, %s), want (%s, %s)", got.CreatedAt, got.UpdatedAt, createdAt, updatedAt)
+	}
+}
+
+func TestSandboxExecutionContextFromRecordRejectsInconsistentPersistence(t *testing.T) {
+	tests := []struct {
+		name   string
+		record ports.WorkloadInstanceRecord
+		want   error
+	}{
+		{
+			name: "non sandbox",
+			record: ports.WorkloadInstanceRecord{
+				TenantID: "tenant-a", InstanceID: "instance-a", Kind: ports.WorkloadKindVM,
+			},
+			want: ports.ErrInvalid,
+		},
+		{
+			name: "missing sandbox payload",
+			record: ports.WorkloadInstanceRecord{
+				TenantID: "tenant-a", InstanceID: "instance-a", Name: "sandbox-a",
+				Kind: ports.WorkloadKindSandbox, Provider: "local_sandbox_runtime",
+			},
+			want: ports.ErrFailedPrecondition,
+		},
+		{
+			name: "missing provider",
+			record: ports.WorkloadInstanceRecord{
+				TenantID: "tenant-a", InstanceID: "instance-a", Name: "sandbox-a", Kind: ports.WorkloadKindSandbox,
+				Sandbox: &ports.SandboxInstanceStatus{TenantID: "tenant-a", InstanceID: "instance-a"},
+			},
+			want: ports.ErrFailedPrecondition,
+		},
+		{
+			name: "tenant mismatch",
+			record: ports.WorkloadInstanceRecord{
+				TenantID: "tenant-a", InstanceID: "instance-a", Name: "sandbox-a",
+				Kind: ports.WorkloadKindSandbox, Provider: "local_sandbox_runtime",
+				Sandbox: &ports.SandboxInstanceStatus{TenantID: "tenant-b", InstanceID: "instance-a"},
+			},
+			want: ports.ErrFailedPrecondition,
+		},
+		{
+			name: "instance mismatch",
+			record: ports.WorkloadInstanceRecord{
+				TenantID: "tenant-a", InstanceID: "instance-a", Name: "sandbox-a",
+				Kind: ports.WorkloadKindSandbox, Provider: "local_sandbox_runtime",
+				Sandbox: &ports.SandboxInstanceStatus{TenantID: "tenant-a", InstanceID: "instance-b"},
+			},
+			want: ports.ErrFailedPrecondition,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := SandboxExecutionContextFromRecord(tt.record)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("sandboxExecutionContextFromRecord() error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestLocalInstanceServiceFinalizesFailedSandboxLifecycleOperation(t *testing.T) {
 	status := ports.SandboxInstanceStatus{
 		TenantID: "tenant-a", InstanceID: "sandbox-missing", Kind: ports.WorkloadKindSandbox,
 		State: ports.SandboxStateRunning, SessionState: "running",
 	}
 	store := &fakeInstanceStore{last: ports.WorkloadInstanceRecord{
-		TenantID: "tenant-a", InstanceID: status.InstanceID, Kind: ports.WorkloadKindSandbox,
+		TenantID: "tenant-a", InstanceID: status.InstanceID, Name: "sandbox-missing",
+		Kind: ports.WorkloadKindSandbox, Provider: "local_sandbox_runtime",
 		Status: ports.WorkloadStatus{State: ports.WorkloadStateRunning}, Sandbox: &status,
 	}}
 	operations := NewLocalOperationStore()

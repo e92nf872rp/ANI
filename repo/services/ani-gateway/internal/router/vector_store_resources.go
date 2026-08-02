@@ -15,6 +15,7 @@ import (
 
 type vectorStoreAPI struct {
 	service ports.VectorStoreService
+	tasks   ports.AsyncTaskStore
 }
 
 type createVectorStoreRequest struct {
@@ -112,14 +113,25 @@ func registerVectorStoreResources(v1 *route.RouterGroup) {
 }
 
 func newVectorStoreAPIWithService(service ports.VectorStoreService) *vectorStoreAPI {
+	return newVectorStoreAPIWithServiceAndTasks(service, defaultTaskStore)
+}
+
+func newVectorStoreAPIWithServiceAndTasks(service ports.VectorStoreService, tasks ports.AsyncTaskStore) *vectorStoreAPI {
 	if service == nil {
 		service = runtimeadapter.NewLocalVectorStoreService()
 	}
-	return &vectorStoreAPI{service: service}
+	if tasks == nil {
+		tasks = defaultTaskStore
+	}
+	return &vectorStoreAPI{service: service, tasks: tasks}
 }
 
 func registerVectorStoreResourcesWithService(v1 *route.RouterGroup, service ports.VectorStoreService) {
-	api := newVectorStoreAPIWithService(service)
+	registerVectorStoreResourcesWithServiceAndTasks(v1, service, defaultTaskStore)
+}
+
+func registerVectorStoreResourcesWithServiceAndTasks(v1 *route.RouterGroup, service ports.VectorStoreService, tasks ports.AsyncTaskStore) {
+	api := newVectorStoreAPIWithServiceAndTasks(service, tasks)
 	v1.GET("/vector-stores", api.listVectorStores)
 	v1.POST("/vector-stores", api.createVectorStore)
 	v1.GET("/vector-stores/:vector_store_id", api.getVectorStore)
@@ -233,7 +245,7 @@ func (api *vectorStoreAPI) rebuildVectorStoreIndex(ctx context.Context, c *app.R
 		return
 	}
 	task := storageCompletedTask("vector_store.index.rebuild", "vector_store", req.IdempotencyKey, map[string]any{"vector_store": vectorStoreFromRecord(record)}, record.UpdatedAt)
-	storageWriteAcceptedTask(c, task)
+	storageWriteAcceptedTask(ctx, c, api.tasks, task)
 }
 
 func (api *vectorStoreAPI) setVectorStoreKnowledgeBaseLink(ctx context.Context, c *app.RequestContext) {

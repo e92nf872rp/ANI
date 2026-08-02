@@ -72,8 +72,15 @@ func (r fakeMetadataRow) Scan(dest ...any) error {
 			*ptr = r.values[i].(string)
 		case *bool:
 			*ptr = r.values[i].(bool)
+		case *int:
+			*ptr = r.values[i].(int)
 		case *time.Time:
 			*ptr = r.values[i].(time.Time)
+		case **time.Time:
+			if r.values[i] != nil {
+				value := r.values[i].(time.Time)
+				*ptr = &value
+			}
 		case *[]byte:
 			*ptr = r.values[i].([]byte)
 		default:

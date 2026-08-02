@@ -159,6 +159,18 @@ func podTemplate(spec ports.WorkloadSpec) map[string]any {
 		},
 		"volumes": append(volumes(storage), secretVolumes(spec.SecretBindings)...),
 	}
+	if spec.Kind == ports.WorkloadKindSandbox {
+		containers := podSpec["containers"].([]any)
+		container := containers[0].(map[string]any)
+		container["volumeMounts"] = append(container["volumeMounts"].([]any), map[string]any{
+			"name":      "sandbox-workspace",
+			"mountPath": sandboxWorkspaceRoot,
+		})
+		podSpec["volumes"] = append(podSpec["volumes"].([]any), map[string]any{
+			"name":     "sandbox-workspace",
+			"emptyDir": map[string]any{},
+		})
+	}
 	if spec.Kind == ports.WorkloadKindBatchJob {
 		podSpec["restartPolicy"] = "Never"
 	}

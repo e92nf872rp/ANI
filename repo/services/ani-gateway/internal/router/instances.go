@@ -85,6 +85,7 @@ type instanceAPI struct {
 	k8sClient                     *runtimeadapter.KubernetesRESTClient
 	store                         ports.WorkloadInstanceStore
 	sandboxRuntime                ports.SandboxRuntime
+	tasks                         ports.AsyncTaskStore
 	realProvider                  bool
 	providerName                  string
 }
@@ -94,6 +95,7 @@ type InstanceRuntime struct {
 	Store          ports.WorkloadInstanceStore
 	Operations     ports.WorkloadOperationStore
 	SandboxRuntime ports.SandboxRuntime
+	TaskStore      ports.AsyncTaskStore
 	RealProvider   bool
 	Provider       string
 }
@@ -511,11 +513,20 @@ type instanceGPUResponse struct {
 }
 
 type instanceSandboxResponse struct {
-	RuntimeClass        string                 `json:"runtime_class"`
-	SessionTimeout      string                 `json:"session_timeout"`
-	NetworkEgressPolicy string                 `json:"network_egress_policy"`
-	SessionState        string                 `json:"session_state"`
-	DevProfile          coreDevProfileResponse `json:"dev_profile"`
+	RuntimeClass        string                        `json:"runtime_class"`
+	SessionTimeout      string                        `json:"session_timeout"`
+	NetworkEgressPolicy string                        `json:"network_egress_policy"`
+	SessionState        string                        `json:"session_state"`
+	Ports               []instanceSandboxPortResponse `json:"ports,omitempty"`
+	DevProfile          coreDevProfileResponse        `json:"dev_profile"`
+}
+
+type instanceSandboxPortResponse struct {
+	Port       int    `json:"port"`
+	Name       string `json:"name,omitempty"`
+	Protocol   string `json:"protocol"`
+	Status     string `json:"status"`
+	PreviewURL string `json:"preview_url,omitempty"`
 }
 
 type instanceIdentityResponse struct {
@@ -741,6 +752,7 @@ func newInstanceAPIWithObservability(observability ports.InstanceObservability, 
 		k8sClient:                     k8sClient,
 		store:                         store,
 		sandboxRuntime:                sandboxRuntime,
+		tasks:                         defaultTaskStore,
 	}
 }
 
@@ -758,6 +770,9 @@ func registerInstancesWithRuntime(v1 *route.RouterGroup, observability ports.Ins
 		api.store = runtime.Store
 		api.operations = runtime.Operations
 		api.sandboxRuntime = runtime.SandboxRuntime
+		if runtime.TaskStore != nil {
+			api.tasks = runtime.TaskStore
+		}
 		api.realProvider = runtime.RealProvider
 		api.providerName = strings.TrimSpace(runtime.Provider)
 	}
@@ -1795,9 +1810,15 @@ func (api *instanceAPI) createSandboxToken(ctx context.Context, c *app.RequestCo
 			return
 		}
 	}
+	execution, err := sandboxExecutionForRecord(record)
+	if err != nil {
+		writeSandboxRuntimeError(c, err)
+		return
+	}
 	result, err := api.sandboxRuntime.CreateToken(ctx, ports.SandboxTokenRequest{
 		TenantID:       instanceTenantID(c),
 		InstanceID:     record.InstanceID,
+		Execution:      execution,
 		IdempotencyKey: req.IdempotencyKey,
 		ExpiresIn:      expiresIn,
 		Scopes:         append([]string(nil), req.Scopes...),
@@ -1837,9 +1858,15 @@ func (api *instanceAPI) createSandboxPort(ctx context.Context, c *app.RequestCon
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
 		return
 	}
+	execution, err := sandboxExecutionForRecord(record)
+	if err != nil {
+		writeSandboxRuntimeError(c, err)
+		return
+	}
 	result, err := api.sandboxRuntime.CreatePort(ctx, ports.SandboxPortRequest{
 		TenantID:       instanceTenantID(c),
 		InstanceID:     record.InstanceID,
+		Execution:      execution,
 		IdempotencyKey: req.IdempotencyKey,
 		Port:           req.Port,
 		Name:           req.Name,
@@ -1848,6 +1875,10 @@ func (api *instanceAPI) createSandboxPort(ctx context.Context, c *app.RequestCon
 	})
 	if err != nil {
 		writeSandboxRuntimeError(c, err)
+		return
+	}
+	if err := api.persistSandboxPort(ctx, record, result, false); err != nil {
+		writeInstanceError(c, http.StatusInternalServerError, "SANDBOX_STATUS_PERSIST_FAILED", err.Error())
 		return
 	}
 	c.JSON(http.StatusCreated, sandboxPortResponseFromResult(result))
@@ -1877,15 +1908,25 @@ func (api *instanceAPI) deleteSandboxPort(ctx context.Context, c *app.RequestCon
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "port must be an integer")
 		return
 	}
+	execution, err := sandboxExecutionForRecord(record)
+	if err != nil {
+		writeSandboxRuntimeError(c, err)
+		return
+	}
 	result, err := api.sandboxRuntime.DeletePort(ctx, ports.SandboxPortDeleteRequest{
 		TenantID:       instanceTenantID(c),
 		InstanceID:     record.InstanceID,
+		Execution:      execution,
 		IdempotencyKey: idempotencyKey,
 		Port:           port,
 		RequestedAt:    time.Now().UTC(),
 	})
 	if err != nil {
 		writeSandboxRuntimeError(c, err)
+		return
+	}
+	if err := api.persistSandboxPort(ctx, record, result, true); err != nil {
+		writeInstanceError(c, http.StatusInternalServerError, "SANDBOX_STATUS_PERSIST_FAILED", err.Error())
 		return
 	}
 	c.JSON(http.StatusOK, sandboxPortResponseFromResult(result))
@@ -1905,6 +1946,26 @@ func sandboxPortResponseFromResult(result ports.SandboxPortResult) sandboxPortRe
 	return response
 }
 
+func (api *instanceAPI) persistSandboxPort(ctx context.Context, record ports.WorkloadInstanceRecord, result ports.SandboxPortResult, remove bool) error {
+	if api.store == nil || record.Sandbox == nil {
+		return fmt.Errorf("%w: sandbox persistence is not configured", ports.ErrFailedPrecondition)
+	}
+	sandbox := *record.Sandbox
+	items := make([]ports.SandboxPortResult, 0, len(sandbox.Ports)+1)
+	for _, item := range sandbox.Ports {
+		if item.Port != result.Port {
+			items = append(items, item)
+		}
+	}
+	if !remove {
+		items = append(items, result)
+	}
+	sandbox.Ports = items
+	record.Sandbox = &sandbox
+	record.UpdatedAt = time.Now().UTC()
+	return api.store.UpsertStatus(ctx, record)
+}
+
 func (api *instanceAPI) listSandboxFiles(ctx context.Context, c *app.RequestContext) {
 	record, err := api.instanceForObservation(ctx, c)
 	if err != nil {
@@ -1919,9 +1980,15 @@ func (api *instanceAPI) listSandboxFiles(ctx context.Context, c *app.RequestCont
 		writeInstanceError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", "sandbox runtime is not configured")
 		return
 	}
+	execution, err := sandboxExecutionForRecord(record)
+	if err != nil {
+		writeSandboxRuntimeError(c, err)
+		return
+	}
 	result, err := api.sandboxRuntime.ListFiles(ctx, ports.SandboxFileListRequest{
 		TenantID:   instanceTenantID(c),
 		InstanceID: record.InstanceID,
+		Execution:  execution,
 		Path:       c.Query("path"),
 		Limit:      queryInt(c, "limit", 100),
 		Cursor:     c.Query("cursor"),
@@ -1960,9 +2027,15 @@ func (api *instanceAPI) writeSandboxFile(ctx context.Context, c *app.RequestCont
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
 		return
 	}
+	execution, err := sandboxExecutionForRecord(record)
+	if err != nil {
+		writeSandboxRuntimeError(c, err)
+		return
+	}
 	result, err := api.sandboxRuntime.WriteFile(ctx, ports.SandboxFileWriteRequest{
 		TenantID:       instanceTenantID(c),
 		InstanceID:     record.InstanceID,
+		Execution:      execution,
 		IdempotencyKey: req.IdempotencyKey,
 		Path:           req.Path,
 		ContentBase64:  req.ContentBase64,
@@ -1996,9 +2069,15 @@ func (api *instanceAPI) deleteSandboxFile(ctx context.Context, c *app.RequestCon
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "Idempotency-Key header is required")
 		return
 	}
+	execution, err := sandboxExecutionForRecord(record)
+	if err != nil {
+		writeSandboxRuntimeError(c, err)
+		return
+	}
 	if err := api.sandboxRuntime.DeleteFile(ctx, ports.SandboxFileDeleteRequest{
 		TenantID:       instanceTenantID(c),
 		InstanceID:     record.InstanceID,
+		Execution:      execution,
 		IdempotencyKey: idempotencyKey,
 		Path:           c.Query("path"),
 		RequestedAt:    time.Now().UTC(),
@@ -2032,9 +2111,15 @@ func (api *instanceAPI) listSandboxCheckpoints(ctx context.Context, c *app.Reque
 		writeInstanceError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", "sandbox runtime is not configured")
 		return
 	}
+	execution, err := sandboxExecutionForRecord(record)
+	if err != nil {
+		writeSandboxRuntimeError(c, err)
+		return
+	}
 	result, err := api.sandboxRuntime.ListCheckpoints(ctx, ports.SandboxCheckpointListRequest{
 		TenantID:   instanceTenantID(c),
 		InstanceID: record.InstanceID,
+		Execution:  execution,
 		Limit:      queryInt(c, "limit", 50),
 		Cursor:     c.Query("cursor"),
 	})
@@ -2072,9 +2157,15 @@ func (api *instanceAPI) createSandboxCheckpoint(ctx context.Context, c *app.Requ
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
 		return
 	}
+	execution, err := sandboxExecutionForRecord(record)
+	if err != nil {
+		writeSandboxRuntimeError(c, err)
+		return
+	}
 	result, err := api.sandboxRuntime.CreateCheckpoint(ctx, ports.SandboxCheckpointCreateRequest{
 		TenantID:       instanceTenantID(c),
 		InstanceID:     record.InstanceID,
+		Execution:      execution,
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
 		KeepMemory:     req.KeepMemory,
@@ -2085,7 +2176,7 @@ func (api *instanceAPI) createSandboxCheckpoint(ctx context.Context, c *app.Requ
 		return
 	}
 	task := storageCompletedTask("sandbox.checkpoint.create", "sandbox_checkpoint", req.IdempotencyKey, map[string]any{"checkpoint": sandboxCheckpointResponseFromResult(result)}, result.CreatedAt)
-	storageWriteAcceptedTask(c, task)
+	storageWriteAcceptedTask(ctx, c, api.tasks, task)
 }
 
 func (api *instanceAPI) restoreSandboxCheckpoint(ctx context.Context, c *app.RequestContext) {
@@ -2111,9 +2202,15 @@ func (api *instanceAPI) restoreSandboxCheckpoint(ctx context.Context, c *app.Req
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
 		return
 	}
+	execution, err := sandboxExecutionForRecord(record)
+	if err != nil {
+		writeSandboxRuntimeError(c, err)
+		return
+	}
 	result, err := api.sandboxRuntime.RestoreCheckpoint(ctx, ports.SandboxCheckpointRestoreRequest{
 		TenantID:       instanceTenantID(c),
 		InstanceID:     record.InstanceID,
+		Execution:      execution,
 		CheckpointID:   c.Param("checkpoint_id"),
 		IdempotencyKey: req.IdempotencyKey,
 		RequestedAt:    time.Now().UTC(),
@@ -2123,7 +2220,7 @@ func (api *instanceAPI) restoreSandboxCheckpoint(ctx context.Context, c *app.Req
 		return
 	}
 	task := storageCompletedTask("sandbox.checkpoint.restore", "sandbox_checkpoint", req.IdempotencyKey, map[string]any{"checkpoint": sandboxCheckpointResponseFromResult(result)}, time.Now().UTC())
-	storageWriteAcceptedTask(c, task)
+	storageWriteAcceptedTask(ctx, c, api.tasks, task)
 }
 
 func (api *instanceAPI) cloneSandboxCheckpoint(ctx context.Context, c *app.RequestContext) {
@@ -2149,9 +2246,15 @@ func (api *instanceAPI) cloneSandboxCheckpoint(ctx context.Context, c *app.Reque
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
 		return
 	}
+	execution, err := sandboxExecutionForRecord(record)
+	if err != nil {
+		writeSandboxRuntimeError(c, err)
+		return
+	}
 	checkpoint, err := api.sandboxRuntime.CloneCheckpoint(ctx, ports.SandboxCheckpointCloneRequest{
 		TenantID:       instanceTenantID(c),
 		InstanceID:     record.InstanceID,
+		Execution:      execution,
 		CheckpointID:   c.Param("checkpoint_id"),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
@@ -2218,9 +2321,15 @@ func (api *instanceAPI) createSandboxCodeRun(ctx context.Context, c *app.Request
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
 		return
 	}
+	execution, err := sandboxExecutionForRecord(record)
+	if err != nil {
+		writeSandboxRuntimeError(c, err)
+		return
+	}
 	result, err := api.sandboxRuntime.CreateCodeRun(ctx, ports.SandboxCodeRunRequest{
 		TenantID:       instanceTenantID(c),
 		InstanceID:     record.InstanceID,
+		Execution:      execution,
 		IdempotencyKey: req.IdempotencyKey,
 		Language:       req.Language,
 		Code:           req.Code,
@@ -2254,7 +2363,7 @@ func (api *instanceAPI) createSandboxCodeRun(ctx context.Context, c *app.Request
 	task := storageCompletedTask("sandbox.code_run.create", "sandbox_code_run", req.IdempotencyKey, map[string]any{
 		"code_run": codeRun,
 	}, result.CreatedAt)
-	storageWriteAcceptedTask(c, task)
+	storageWriteAcceptedTask(ctx, c, api.tasks, task)
 }
 
 func sandboxCheckpointResponseFromResult(result ports.SandboxCheckpointResult) sandboxCheckpointResponse {
@@ -3146,7 +3255,7 @@ func sandboxResponseFromRecord(record ports.WorkloadInstanceRecord) *instanceSan
 	if record.Sandbox == nil {
 		return nil
 	}
-	return &instanceSandboxResponse{
+	response := &instanceSandboxResponse{
 		RuntimeClass:        record.Sandbox.Config.RuntimeClass,
 		SessionTimeout:      record.Sandbox.Config.SessionTimeout.String(),
 		NetworkEgressPolicy: string(record.Sandbox.Config.NetworkEgressPolicy),
@@ -3158,6 +3267,12 @@ func sandboxResponseFromRecord(record ports.WorkloadInstanceRecord) *instanceSan
 			Reason:       record.Sandbox.DevProfile.Reason,
 		},
 	}
+	for _, item := range record.Sandbox.Ports {
+		response.Ports = append(response.Ports, instanceSandboxPortResponse{
+			Port: item.Port, Name: item.Name, Protocol: item.Protocol, Status: item.Status, PreviewURL: item.PreviewURL,
+		})
+	}
+	return response
 }
 
 func identityResponseFromRecord(record ports.WorkloadInstanceRecord) *instanceIdentityResponse {
@@ -3413,6 +3528,14 @@ func writeSandboxRuntimeError(c *app.RequestContext, err error) {
 	default:
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	}
+}
+
+func sandboxExecutionForRecord(record ports.WorkloadInstanceRecord) (*ports.SandboxExecutionContext, error) {
+	execution, err := runtimeadapter.SandboxExecutionContextFromRecord(record)
+	if err != nil {
+		return nil, err
+	}
+	return &execution, nil
 }
 
 func instanceLifecycleErrorStatus(err error) int {

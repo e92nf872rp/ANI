@@ -49,6 +49,7 @@ type Capabilities struct {
 	WorkloadOperations    ports.WorkloadOperationStore
 	WorkloadIdentity      ports.WorkloadIdentityService
 	SandboxRuntime        ports.SandboxRuntime
+	AsyncTasks            ports.AsyncTaskStore
 	SecretService         ports.SecretService
 	InstanceService       ports.WorkloadInstanceService
 	InstanceOps           ports.WorkloadInstanceOps
@@ -272,6 +273,7 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 		WorkloadOperations:   operationStore,
 		WorkloadIdentity:     workloadIdentity,
 		SandboxRuntime:       sandboxRuntime,
+		AsyncTasks:           runtimeadapter.NewMetadataAsyncTaskStore(metadata),
 		SecretService:        secretService,
 		WorkloadInstances:    orchestrator,
 		InstanceService: runtimeadapter.NewLocalInstanceServiceWithOptions(

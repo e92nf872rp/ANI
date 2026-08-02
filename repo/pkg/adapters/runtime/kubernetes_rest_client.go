@@ -312,12 +312,19 @@ func (c *KubernetesRESTClient) Observe(ctx context.Context, request ports.Worklo
 		return ports.WorkloadProviderObservation{}, fmt.Errorf("%w: resource refs are required for Kubernetes observation", ports.ErrInvalid)
 	}
 
-	resource, err := resourceFromRef(request.ApplyResult.Provider, tenantNamespace(request.TenantID), request.ApplyResult.ResourceRefs[0])
+	resourceProvider := request.ApplyResult.Provider
+	if request.Kind == ports.WorkloadKindSandbox && resourceProvider == "kubernetes_sandbox_runtime" {
+		resourceProvider = "kubernetes"
+	}
+	resource, err := resourceFromRef(resourceProvider, tenantNamespace(request.TenantID), request.ApplyResult.ResourceRefs[0])
 	if err != nil {
 		return ports.WorkloadProviderObservation{}, err
 	}
 	body, err := c.doIdempotent(ctx, http.MethodGet, c.resourceURL(resource, ""), "", nil)
 	if err != nil {
+		if isKubernetesNotFound(err) {
+			return ports.WorkloadProviderObservation{}, fmt.Errorf("%w: Kubernetes %s %s was not found", ports.ErrNotFound, resource.Kind, resource.Name)
+		}
 		return ports.WorkloadProviderObservation{}, err
 	}
 	var doc map[string]any

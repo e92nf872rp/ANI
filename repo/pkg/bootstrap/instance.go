@@ -14,6 +14,7 @@ type InstanceRuntime struct {
 	Store                ports.WorkloadInstanceStore
 	Operations           ports.WorkloadOperationStore
 	SandboxRuntime       ports.SandboxRuntime
+	AsyncTasks           ports.AsyncTaskStore
 	KubernetesRESTClient *runtimeadapter.KubernetesRESTClient
 }
 
@@ -43,6 +44,7 @@ func ConnectInstanceService(ctx context.Context, cfg Config) (InstanceRuntime, f
 		Store:                capabilities.WorkloadStore,
 		Operations:           capabilities.WorkloadOperations,
 		SandboxRuntime:       capabilities.SandboxRuntime,
+		AsyncTasks:           capabilities.AsyncTasks,
 		KubernetesRESTClient: kubernetesRESTClient,
 	}, pool.Close, nil
 }

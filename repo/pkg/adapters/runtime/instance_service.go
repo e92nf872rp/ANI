@@ -886,9 +886,15 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 			s.failLifecycleOperation(ctx, opID, "sandbox_lifecycle_failed", err, request.RequestedAt)
 			return ports.WorkloadInstanceRecord{}, err
 		}
+		execution, err := SandboxExecutionContextFromRecord(record)
+		if err != nil {
+			s.failLifecycleOperation(ctx, opID, "sandbox_lifecycle_failed", err, request.RequestedAt)
+			return ports.WorkloadInstanceRecord{}, err
+		}
 		sandbox, err := s.sandbox.ApplyLifecycle(ctx, ports.SandboxLifecycleRequest{
 			TenantID:    request.TenantID,
 			InstanceID:  request.InstanceID,
+			Execution:   &execution,
 			Action:      request.Action,
 			Duration:    request.Duration,
 			RequestedAt: request.RequestedAt,
@@ -1009,6 +1015,40 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 		}
 	}
 	return record, nil
+}
+
+// SandboxExecutionContextFromRecord validates and projects the durable instance
+// record into the request-scoped context consumed by a sandbox provider.
+func SandboxExecutionContextFromRecord(record ports.WorkloadInstanceRecord) (ports.SandboxExecutionContext, error) {
+	if record.Kind != ports.WorkloadKindSandbox {
+		return ports.SandboxExecutionContext{}, fmt.Errorf("%w: instance kind %q is not sandbox", ports.ErrInvalid, record.Kind)
+	}
+	if strings.TrimSpace(record.TenantID) == "" || strings.TrimSpace(record.InstanceID) == "" || strings.TrimSpace(record.Name) == "" || strings.TrimSpace(record.Provider) == "" {
+		return ports.SandboxExecutionContext{}, fmt.Errorf("%w: persisted sandbox identity is incomplete", ports.ErrFailedPrecondition)
+	}
+	if record.Sandbox == nil {
+		return ports.SandboxExecutionContext{}, fmt.Errorf("%w: persisted sandbox status is missing", ports.ErrFailedPrecondition)
+	}
+	if record.Sandbox.TenantID != "" && record.Sandbox.TenantID != record.TenantID {
+		return ports.SandboxExecutionContext{}, fmt.Errorf("%w: persisted sandbox tenant does not match instance", ports.ErrFailedPrecondition)
+	}
+	if record.Sandbox.InstanceID != "" && record.Sandbox.InstanceID != record.InstanceID {
+		return ports.SandboxExecutionContext{}, fmt.Errorf("%w: persisted sandbox id does not match instance", ports.ErrFailedPrecondition)
+	}
+	return ports.SandboxExecutionContext{
+		TenantID:     record.TenantID,
+		InstanceID:   record.InstanceID,
+		Name:         record.Name,
+		Provider:     record.Provider,
+		State:        record.Sandbox.State,
+		SessionState: record.Sandbox.SessionState,
+		Config:       record.Sandbox.Config,
+		DevProfile:   record.Sandbox.DevProfile,
+		Ports:        append([]ports.SandboxPortResult(nil), record.Sandbox.Ports...),
+		ResourceRefs: append([]string(nil), record.ResourceRefs...),
+		CreatedAt:    record.CreatedAt,
+		UpdatedAt:    record.UpdatedAt,
+	}, nil
 }
 
 var _ ports.WorkloadInstanceService = (*LocalInstanceService)(nil)

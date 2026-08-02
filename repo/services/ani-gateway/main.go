@@ -153,6 +153,7 @@ func main() {
 			Store:          instanceRuntime.Store,
 			Operations:     instanceRuntime.Operations,
 			SandboxRuntime: instanceRuntime.SandboxRuntime,
+			TaskStore:      instanceRuntime.AsyncTasks,
 			RealProvider:   true,
 			Provider:       strings.TrimSpace(instanceRuntimeConfig.WorkloadProvider),
 		}
@@ -174,6 +175,7 @@ func main() {
 		KubernetesRESTClient:                  kubernetesRESTClient,
 		ObservabilityService:                  observabilityService,
 		EmailNotificationStore:                runtimeadapter.NewLocalEmailNotificationStore(),
+		AsyncTaskStore:                        instanceRuntime.AsyncTasks,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

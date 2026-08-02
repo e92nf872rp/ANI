@@ -15,6 +15,7 @@ import (
 
 type storageAPI struct {
 	service ports.StorageService
+	tasks   ports.AsyncTaskStore
 }
 
 type storageCreateVolumeRequest struct {
@@ -397,14 +398,25 @@ func newStorageAPI() *storageAPI {
 }
 
 func newStorageAPIWithService(service ports.StorageService) *storageAPI {
+	return newStorageAPIWithServiceAndTasks(service, defaultTaskStore)
+}
+
+func newStorageAPIWithServiceAndTasks(service ports.StorageService, tasks ports.AsyncTaskStore) *storageAPI {
 	if service == nil {
 		service = runtimeadapter.NewLocalStorageService()
 	}
-	return &storageAPI{service: service}
+	if tasks == nil {
+		tasks = defaultTaskStore
+	}
+	return &storageAPI{service: service, tasks: tasks}
 }
 
 func registerStorageResourcesWithService(v1 *route.RouterGroup, service ports.StorageService) {
-	api := newStorageAPIWithService(service)
+	registerStorageResourcesWithServiceAndTasks(v1, service, defaultTaskStore)
+}
+
+func registerStorageResourcesWithServiceAndTasks(v1 *route.RouterGroup, service ports.StorageService, tasks ports.AsyncTaskStore) {
+	api := newStorageAPIWithServiceAndTasks(service, tasks)
 	v1.GET("/volumes", api.listVolumes)
 	v1.POST("/volumes", api.createVolume)
 	v1.GET("/volumes/:volume_id", api.getVolume)
@@ -519,7 +531,7 @@ func (api *storageAPI) expandVolume(ctx context.Context, c *app.RequestContext) 
 		writeStorageError(c, err)
 		return
 	}
-	storageWriteAcceptedTask(c, storageCompletedTask("volume.expand", "volume", req.IdempotencyKey, map[string]any{"volume": storageVolumeFromRecord(record)}, record.UpdatedAt))
+	storageWriteAcceptedTask(ctx, c, api.tasks, storageCompletedTask("volume.expand", "volume", req.IdempotencyKey, map[string]any{"volume": storageVolumeFromRecord(record)}, record.UpdatedAt))
 }
 
 func (api *storageAPI) mountVolume(ctx context.Context, c *app.RequestContext) {
@@ -540,7 +552,7 @@ func (api *storageAPI) mountVolume(ctx context.Context, c *app.RequestContext) {
 		writeStorageError(c, err)
 		return
 	}
-	storageWriteAcceptedTask(c, storageCompletedTask("volume.mount", "volume", req.IdempotencyKey, map[string]any{"volume": storageVolumeFromRecord(record)}, record.UpdatedAt))
+	storageWriteAcceptedTask(ctx, c, api.tasks, storageCompletedTask("volume.mount", "volume", req.IdempotencyKey, map[string]any{"volume": storageVolumeFromRecord(record)}, record.UpdatedAt))
 }
 
 func (api *storageAPI) unmountVolume(ctx context.Context, c *app.RequestContext) {
@@ -558,7 +570,7 @@ func (api *storageAPI) unmountVolume(ctx context.Context, c *app.RequestContext)
 		writeStorageError(c, err)
 		return
 	}
-	storageWriteAcceptedTask(c, storageCompletedTask("volume.unmount", "volume", req.IdempotencyKey, map[string]any{"volume": storageVolumeFromRecord(record)}, record.UpdatedAt))
+	storageWriteAcceptedTask(ctx, c, api.tasks, storageCompletedTask("volume.unmount", "volume", req.IdempotencyKey, map[string]any{"volume": storageVolumeFromRecord(record)}, record.UpdatedAt))
 }
 
 func (api *storageAPI) createVolumeFromSnapshot(ctx context.Context, c *app.RequestContext) {
@@ -580,7 +592,7 @@ func (api *storageAPI) createVolumeFromSnapshot(ctx context.Context, c *app.Requ
 		writeStorageError(c, err)
 		return
 	}
-	storageWriteAcceptedTask(c, storageCompletedTask("volume.create_from_snapshot", "volume", req.IdempotencyKey, map[string]any{"volume": storageVolumeFromRecord(record)}, record.UpdatedAt))
+	storageWriteAcceptedTask(ctx, c, api.tasks, storageCompletedTask("volume.create_from_snapshot", "volume", req.IdempotencyKey, map[string]any{"volume": storageVolumeFromRecord(record)}, record.UpdatedAt))
 }
 
 func (api *storageAPI) setVolumeAutoSnapshotPolicy(ctx context.Context, c *app.RequestContext) {
@@ -701,7 +713,7 @@ func (api *storageAPI) expandFilesystem(ctx context.Context, c *app.RequestConte
 		writeStorageError(c, err)
 		return
 	}
-	storageWriteAcceptedTask(c, storageCompletedTask("filesystem.expand", "filesystem", req.IdempotencyKey, map[string]any{"filesystem": storageFilesystemFromRecord(record)}, record.UpdatedAt))
+	storageWriteAcceptedTask(ctx, c, api.tasks, storageCompletedTask("filesystem.expand", "filesystem", req.IdempotencyKey, map[string]any{"filesystem": storageFilesystemFromRecord(record)}, record.UpdatedAt))
 }
 
 func (api *storageAPI) createFilesystemMountTarget(ctx context.Context, c *app.RequestContext) {
@@ -721,7 +733,7 @@ func (api *storageAPI) createFilesystemMountTarget(ctx context.Context, c *app.R
 		writeStorageError(c, err)
 		return
 	}
-	storageWriteAcceptedTask(c, storageCompletedTask("filesystem.mount_target.create", "filesystem_mount_target", req.IdempotencyKey, map[string]any{"mount_target": storageMountTargetFromRecord(record)}, record.CreatedAt))
+	storageWriteAcceptedTask(ctx, c, api.tasks, storageCompletedTask("filesystem.mount_target.create", "filesystem_mount_target", req.IdempotencyKey, map[string]any{"mount_target": storageMountTargetFromRecord(record)}, record.CreatedAt))
 }
 
 func (api *storageAPI) mountFilesystem(ctx context.Context, c *app.RequestContext) {
@@ -743,7 +755,7 @@ func (api *storageAPI) mountFilesystem(ctx context.Context, c *app.RequestContex
 		writeStorageError(c, err)
 		return
 	}
-	storageWriteAcceptedTask(c, storageCompletedTask("filesystem.mount", "filesystem", req.IdempotencyKey, map[string]any{"filesystem": storageFilesystemFromRecord(record)}, record.UpdatedAt))
+	storageWriteAcceptedTask(ctx, c, api.tasks, storageCompletedTask("filesystem.mount", "filesystem", req.IdempotencyKey, map[string]any{"filesystem": storageFilesystemFromRecord(record)}, record.UpdatedAt))
 }
 
 func (api *storageAPI) unmountFilesystem(ctx context.Context, c *app.RequestContext) {
@@ -762,7 +774,7 @@ func (api *storageAPI) unmountFilesystem(ctx context.Context, c *app.RequestCont
 		writeStorageError(c, err)
 		return
 	}
-	storageWriteAcceptedTask(c, storageCompletedTask("filesystem.unmount", "filesystem", req.IdempotencyKey, map[string]any{"filesystem": storageFilesystemFromRecord(record)}, record.UpdatedAt))
+	storageWriteAcceptedTask(ctx, c, api.tasks, storageCompletedTask("filesystem.unmount", "filesystem", req.IdempotencyKey, map[string]any{"filesystem": storageFilesystemFromRecord(record)}, record.UpdatedAt))
 }
 
 func (api *storageAPI) getFilesystemMountCommand(ctx context.Context, c *app.RequestContext) {
@@ -1425,10 +1437,15 @@ func storageCompletedTask(taskType string, resourceType string, idempotencyKey s
 	}
 }
 
-func storageWriteAcceptedTask(c *app.RequestContext, task storageSnapshotTaskResponse) {
-	storeCompletedTask(instanceTenantID(c), task)
-	c.Response.Header.Set("Location", "/api/v1/tasks/"+task.ID)
-	c.JSON(http.StatusAccepted, task)
+func storageWriteAcceptedTask(ctx context.Context, c *app.RequestContext, store ports.AsyncTaskStore, task storageSnapshotTaskResponse) {
+	created, _, err := store.Create(ctx, taskRecordFromResponse(instanceTenantID(c), task))
+	if err != nil {
+		writeInstanceError(c, http.StatusInternalServerError, "TASK_PERSIST_FAILED", err.Error())
+		return
+	}
+	response := taskResponseFromRecord(created)
+	c.Response.Header.Set("Location", "/api/v1/tasks/"+response.ID)
+	c.JSON(http.StatusAccepted, response)
 }
 
 func stringPtrOrNil(value string) *string {

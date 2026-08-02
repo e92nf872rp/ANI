@@ -60,9 +60,28 @@ type SandboxListRequest struct {
 	TenantID string
 }
 
+// SandboxExecutionContext is the persisted sandbox state supplied by the
+// application layer for one runtime operation. Provider runtimes must not rely
+// on process-local instance registries as the source of truth.
+type SandboxExecutionContext struct {
+	TenantID     string
+	InstanceID   string
+	Name         string
+	Provider     string
+	State        SandboxState
+	SessionState string
+	Config       SandboxConfig
+	DevProfile   DevProfileInfo
+	Ports        []SandboxPortResult
+	ResourceRefs []string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
 type SandboxLifecycleRequest struct {
 	TenantID    string
 	InstanceID  string
+	Execution   *SandboxExecutionContext
 	Action      WorkloadLifecycleAction
 	Duration    time.Duration
 	RequestedAt time.Time
@@ -71,6 +90,7 @@ type SandboxLifecycleRequest struct {
 type SandboxTokenRequest struct {
 	TenantID       string
 	InstanceID     string
+	Execution      *SandboxExecutionContext
 	IdempotencyKey string
 	ExpiresIn      time.Duration
 	Scopes         []string
@@ -86,6 +106,7 @@ type SandboxTokenResult struct {
 type SandboxPortRequest struct {
 	TenantID       string
 	InstanceID     string
+	Execution      *SandboxExecutionContext
 	IdempotencyKey string
 	Port           int
 	Name           string
@@ -96,6 +117,7 @@ type SandboxPortRequest struct {
 type SandboxPortDeleteRequest struct {
 	TenantID       string
 	InstanceID     string
+	Execution      *SandboxExecutionContext
 	IdempotencyKey string
 	Port           int
 	RequestedAt    time.Time
@@ -113,6 +135,7 @@ type SandboxPortResult struct {
 type SandboxFileListRequest struct {
 	TenantID   string
 	InstanceID string
+	Execution  *SandboxExecutionContext
 	Path       string
 	Limit      int
 	Cursor     string
@@ -121,6 +144,7 @@ type SandboxFileListRequest struct {
 type SandboxFileWriteRequest struct {
 	TenantID       string
 	InstanceID     string
+	Execution      *SandboxExecutionContext
 	IdempotencyKey string
 	Path           string
 	ContentBase64  string
@@ -132,6 +156,7 @@ type SandboxFileWriteRequest struct {
 type SandboxFileDeleteRequest struct {
 	TenantID       string
 	InstanceID     string
+	Execution      *SandboxExecutionContext
 	IdempotencyKey string
 	Path           string
 	RequestedAt    time.Time
@@ -153,6 +178,7 @@ type SandboxFileListResult struct {
 type SandboxCheckpointCreateRequest struct {
 	TenantID       string
 	InstanceID     string
+	Execution      *SandboxExecutionContext
 	IdempotencyKey string
 	Name           string
 	KeepMemory     bool
@@ -162,6 +188,7 @@ type SandboxCheckpointCreateRequest struct {
 type SandboxCheckpointListRequest struct {
 	TenantID   string
 	InstanceID string
+	Execution  *SandboxExecutionContext
 	Limit      int
 	Cursor     string
 }
@@ -169,6 +196,7 @@ type SandboxCheckpointListRequest struct {
 type SandboxCheckpointRestoreRequest struct {
 	TenantID       string
 	InstanceID     string
+	Execution      *SandboxExecutionContext
 	CheckpointID   string
 	IdempotencyKey string
 	RequestedAt    time.Time
@@ -177,6 +205,7 @@ type SandboxCheckpointRestoreRequest struct {
 type SandboxCheckpointCloneRequest struct {
 	TenantID       string
 	InstanceID     string
+	Execution      *SandboxExecutionContext
 	CheckpointID   string
 	IdempotencyKey string
 	Name           string
@@ -202,6 +231,7 @@ type SandboxCheckpointListResult struct {
 type SandboxCodeRunRequest struct {
 	TenantID       string
 	InstanceID     string
+	Execution      *SandboxExecutionContext
 	IdempotencyKey string
 	Language       string
 	Code           string
@@ -233,6 +263,7 @@ type SandboxInstanceStatus struct {
 	SessionState string
 	Config       SandboxConfig
 	DevProfile   DevProfileInfo
+	Ports        []SandboxPortResult
 	// ResourceRefs are opaque provider refs (e.g. kubernetes/Deployment/name) when a
 	// real provider applied sandbox workload objects. Local profile leaves this empty.
 	ResourceRefs []string

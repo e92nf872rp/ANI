@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
@@ -22,8 +22,6 @@ type KubernetesSandboxRuntime struct {
 	executor sandboxPodExecutor
 	enabled  bool
 	now      func() time.Time
-	mu       sync.Mutex
-	refs     map[string][]string
 }
 
 type KubernetesSandboxRuntimeOption func(*KubernetesSandboxRuntime)
@@ -65,7 +63,6 @@ func NewKubernetesSandboxRuntime(client *KubernetesRESTClient, options ...Kubern
 		renderer: NewKubernetesDryRunRenderer(NewPlanningRuntime()),
 		executor: newKubectlSandboxPodExecutor(),
 		now:      time.Now,
-		refs:     make(map[string][]string),
 	}
 	for _, option := range options {
 		option(runtime)
@@ -89,6 +86,12 @@ func (r *KubernetesSandboxRuntime) Create(ctx context.Context, request ports.San
 	if !r.enabled {
 		return instance, nil
 	}
+	oldInstanceID := instance.InstanceID
+	instance.InstanceID = uuid.NewString()
+	r.local.mu.Lock()
+	delete(r.local.instances, sandboxKey(instance.TenantID, oldInstanceID))
+	r.local.instances[sandboxKey(instance.TenantID, instance.InstanceID)] = instance
+	r.local.mu.Unlock()
 	if r.client == nil || r.renderer == nil {
 		_ = r.rollbackLocal(ctx, instance)
 		return ports.SandboxInstanceStatus{}, ports.ErrNotConfigured
@@ -140,9 +143,6 @@ func (r *KubernetesSandboxRuntime) Create(ctx context.Context, request ports.San
 	}
 	instance.UpdatedAt = firstNonZeroTime(request.CreatedAt, r.now().UTC())
 	r.local.upsertInstance(instance)
-	r.mu.Lock()
-	r.refs[sandboxKey(instance.TenantID, instance.InstanceID)] = append([]string(nil), refs...)
-	r.mu.Unlock()
 	return instance, nil
 }
 
@@ -155,20 +155,12 @@ func (r *KubernetesSandboxRuntime) List(ctx context.Context, request ports.Sandb
 }
 
 func (r *KubernetesSandboxRuntime) ApplyLifecycle(ctx context.Context, request ports.SandboxLifecycleRequest) (ports.SandboxInstanceStatus, error) {
-	key := sandboxKey(request.TenantID, request.InstanceID)
-	r.mu.Lock()
-	refs := append([]string(nil), r.refs[key]...)
-	r.mu.Unlock()
-	if len(refs) == 0 {
-		if current, err := r.local.Get(ctx, ports.SandboxGetRequest{TenantID: request.TenantID, InstanceID: request.InstanceID}); err == nil {
-			refs = append([]string(nil), current.ResourceRefs...)
-		}
+	current, err := r.hydrateExecution(ctx, request.TenantID, request.InstanceID, request.Execution)
+	if err != nil {
+		return ports.SandboxInstanceStatus{}, err
 	}
-
-	var instanceName string
-	if current, err := r.local.Get(ctx, ports.SandboxGetRequest{TenantID: request.TenantID, InstanceID: request.InstanceID}); err == nil {
-		instanceName = current.Name
-	}
+	refs := append([]string(nil), current.ResourceRefs...)
+	instanceName := current.Name
 
 	if r.enabled && r.client != nil && len(refs) > 0 {
 		switch request.Action {
@@ -187,9 +179,6 @@ func (r *KubernetesSandboxRuntime) ApplyLifecycle(ctx context.Context, request p
 			if err := r.deleteRefs(ctx, request.TenantID, refs); err != nil {
 				return ports.SandboxInstanceStatus{}, err
 			}
-			r.mu.Lock()
-			delete(r.refs, key)
-			r.mu.Unlock()
 		}
 	}
 
@@ -214,50 +203,126 @@ func (r *KubernetesSandboxRuntime) ApplyLifecycle(ctx context.Context, request p
 }
 
 func (r *KubernetesSandboxRuntime) CreateToken(ctx context.Context, request ports.SandboxTokenRequest) (ports.SandboxTokenResult, error) {
+	if _, err := r.hydrateExecution(ctx, request.TenantID, request.InstanceID, request.Execution); err != nil {
+		return ports.SandboxTokenResult{}, err
+	}
 	return r.local.CreateToken(ctx, request)
 }
 
 func (r *KubernetesSandboxRuntime) CreatePort(ctx context.Context, request ports.SandboxPortRequest) (ports.SandboxPortResult, error) {
+	if _, err := r.hydrateExecution(ctx, request.TenantID, request.InstanceID, request.Execution); err != nil {
+		return ports.SandboxPortResult{}, err
+	}
 	return r.local.CreatePort(ctx, request)
 }
 
 func (r *KubernetesSandboxRuntime) DeletePort(ctx context.Context, request ports.SandboxPortDeleteRequest) (ports.SandboxPortResult, error) {
+	instance, err := r.hydrateExecution(ctx, request.TenantID, request.InstanceID, request.Execution)
+	if err != nil {
+		return ports.SandboxPortResult{}, err
+	}
+	if r.enabled {
+		if err := validateSandboxPortIdentity(request.TenantID, request.InstanceID, request.IdempotencyKey, request.Port); err != nil {
+			return ports.SandboxPortResult{}, err
+		}
+		if instance.State != ports.SandboxStateRunning {
+			return ports.SandboxPortResult{}, fmt.Errorf("%w: sandbox port requires running sandbox", ports.ErrFailedPrecondition)
+		}
+		return r.closePortService(ctx, request, instance, ports.SandboxPortResult{Port: request.Port})
+	}
 	return r.local.DeletePort(ctx, request)
 }
 
 func (r *KubernetesSandboxRuntime) ListFiles(ctx context.Context, request ports.SandboxFileListRequest) (ports.SandboxFileListResult, error) {
+	if _, err := r.hydrateExecution(ctx, request.TenantID, request.InstanceID, request.Execution); err != nil {
+		return ports.SandboxFileListResult{}, err
+	}
 	return r.local.ListFiles(ctx, request)
 }
 
 func (r *KubernetesSandboxRuntime) WriteFile(ctx context.Context, request ports.SandboxFileWriteRequest) (ports.SandboxFileResult, error) {
+	if _, err := r.hydrateExecution(ctx, request.TenantID, request.InstanceID, request.Execution); err != nil {
+		return ports.SandboxFileResult{}, err
+	}
 	return r.local.WriteFile(ctx, request)
 }
 
 func (r *KubernetesSandboxRuntime) DeleteFile(ctx context.Context, request ports.SandboxFileDeleteRequest) error {
+	if _, err := r.hydrateExecution(ctx, request.TenantID, request.InstanceID, request.Execution); err != nil {
+		return err
+	}
 	return r.local.DeleteFile(ctx, request)
 }
 
 func (r *KubernetesSandboxRuntime) CreateCheckpoint(ctx context.Context, request ports.SandboxCheckpointCreateRequest) (ports.SandboxCheckpointResult, error) {
+	if _, err := r.hydrateExecution(ctx, request.TenantID, request.InstanceID, request.Execution); err != nil {
+		return ports.SandboxCheckpointResult{}, err
+	}
+	if r.enabled {
+		return ports.SandboxCheckpointResult{}, fmt.Errorf("%w: kubernetes sandbox checkpoint provider is not configured", ports.ErrUnsupported)
+	}
 	return r.local.CreateCheckpoint(ctx, request)
 }
 
 func (r *KubernetesSandboxRuntime) ListCheckpoints(ctx context.Context, request ports.SandboxCheckpointListRequest) (ports.SandboxCheckpointListResult, error) {
+	if _, err := r.hydrateExecution(ctx, request.TenantID, request.InstanceID, request.Execution); err != nil {
+		return ports.SandboxCheckpointListResult{}, err
+	}
+	if r.enabled {
+		return ports.SandboxCheckpointListResult{}, fmt.Errorf("%w: kubernetes sandbox checkpoint provider is not configured", ports.ErrUnsupported)
+	}
 	return r.local.ListCheckpoints(ctx, request)
 }
 
 func (r *KubernetesSandboxRuntime) RestoreCheckpoint(ctx context.Context, request ports.SandboxCheckpointRestoreRequest) (ports.SandboxCheckpointResult, error) {
+	if _, err := r.hydrateExecution(ctx, request.TenantID, request.InstanceID, request.Execution); err != nil {
+		return ports.SandboxCheckpointResult{}, err
+	}
+	if r.enabled {
+		return ports.SandboxCheckpointResult{}, fmt.Errorf("%w: kubernetes sandbox checkpoint provider is not configured", ports.ErrUnsupported)
+	}
 	return r.local.RestoreCheckpoint(ctx, request)
 }
 
 func (r *KubernetesSandboxRuntime) CloneCheckpoint(ctx context.Context, request ports.SandboxCheckpointCloneRequest) (ports.SandboxCheckpointResult, error) {
+	if _, err := r.hydrateExecution(ctx, request.TenantID, request.InstanceID, request.Execution); err != nil {
+		return ports.SandboxCheckpointResult{}, err
+	}
+	if r.enabled {
+		return ports.SandboxCheckpointResult{}, fmt.Errorf("%w: kubernetes sandbox checkpoint provider is not configured", ports.ErrUnsupported)
+	}
 	return r.local.CloneCheckpoint(ctx, request)
 }
 
 func (r *KubernetesSandboxRuntime) CreateCodeRun(ctx context.Context, request ports.SandboxCodeRunRequest) (ports.SandboxCodeRunResult, error) {
+	if _, err := r.hydrateExecution(ctx, request.TenantID, request.InstanceID, request.Execution); err != nil {
+		return ports.SandboxCodeRunResult{}, err
+	}
 	if r.enabled && r.local.codeRunner == nil {
 		r.local.codeRunner = r.runCodeInPod
 	}
 	return r.local.CreateCodeRun(ctx, request)
+}
+
+func (r *KubernetesSandboxRuntime) hydrateExecution(ctx context.Context, tenantID, instanceID string, execution *ports.SandboxExecutionContext) (ports.SandboxInstanceStatus, error) {
+	if execution == nil {
+		return r.local.Get(ctx, ports.SandboxGetRequest{TenantID: tenantID, InstanceID: instanceID})
+	}
+	if execution.TenantID != tenantID || execution.InstanceID != instanceID {
+		return ports.SandboxInstanceStatus{}, fmt.Errorf("%w: sandbox execution identity does not match request", ports.ErrFailedPrecondition)
+	}
+	if r.enabled && execution.Provider != "kubernetes_sandbox_runtime" {
+		return ports.SandboxInstanceStatus{}, fmt.Errorf("%w: sandbox provider %q is not kubernetes_sandbox_runtime", ports.ErrFailedPrecondition, execution.Provider)
+	}
+	instance := ports.SandboxInstanceStatus{
+		TenantID: execution.TenantID, InstanceID: execution.InstanceID, Name: execution.Name,
+		Kind: ports.WorkloadKindSandbox, Provider: execution.Provider, State: execution.State,
+		SessionState: execution.SessionState, Config: execution.Config, TemplateID: execution.Config.TemplateID,
+		DevProfile: execution.DevProfile, Ports: append([]ports.SandboxPortResult(nil), execution.Ports...), ResourceRefs: append([]string(nil), execution.ResourceRefs...),
+		CreatedAt: execution.CreatedAt, UpdatedAt: execution.UpdatedAt,
+	}
+	r.local.upsertInstance(instance)
+	return instance, nil
 }
 
 func (r *KubernetesSandboxRuntime) rollbackLocal(ctx context.Context, instance ports.SandboxInstanceStatus) error {

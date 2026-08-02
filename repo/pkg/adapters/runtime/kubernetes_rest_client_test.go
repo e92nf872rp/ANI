@@ -461,6 +461,45 @@ func TestKubernetesRESTClientObserveDeploymentStatus(t *testing.T) {
 	}
 }
 
+func TestKubernetesRESTClientObserveClassifiesPrimaryResourceNotFound(t *testing.T) {
+	tests := []struct {
+		name         string
+		status       int
+		wantNotFound bool
+	}{
+		{name: "not found", status: http.StatusNotFound, wantNotFound: true},
+		{name: "forbidden", status: http.StatusForbidden, wantNotFound: false},
+		{name: "too many requests", status: http.StatusTooManyRequests, wantNotFound: false},
+		{name: "server error", status: http.StatusInternalServerError, wantNotFound: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				return jsonResponse(tt.status, `{"message":"provider read failed"}`), nil
+			})
+			client := newTestKubernetesRESTClient(t, transport)
+
+			_, err := client.Observe(context.Background(), ports.WorkloadProviderStatusRequest{
+				TenantID:   "tenant-a",
+				InstanceID: "instance-a",
+				Kind:       ports.WorkloadKindContainer,
+				ApplyResult: ports.WorkloadProviderApplyResult{
+					Applied:      true,
+					Provider:     "kubernetes",
+					ResourceRefs: []string{"kubernetes/Deployment/app-01"},
+				},
+			})
+			if err == nil {
+				t.Fatal("Observe() error = nil, want provider read error")
+			}
+			if got := errors.Is(err, ports.ErrNotFound); got != tt.wantNotFound {
+				t.Fatalf("errors.Is(err, ErrNotFound) = %v, want %v for %v", got, tt.wantNotFound, err)
+			}
+		})
+	}
+}
+
 func TestKubernetesRESTClientSupportsKubeVirtVirtualMachine(t *testing.T) {
 	var paths []string
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
