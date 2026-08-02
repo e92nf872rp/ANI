@@ -34,7 +34,11 @@ func (r *KubernetesDryRunRenderer) Render(ctx context.Context, spec ports.Worklo
 	case ports.WorkloadKindBatchJob:
 		manifests = []ports.WorkloadManifest{renderJob(planned)}
 	default:
-		manifests = []ports.WorkloadManifest{renderDeployment(planned)}
+		if planned.Kind == ports.WorkloadKindSandbox {
+			manifests = []ports.WorkloadManifest{renderSandboxWorkspacePVC(planned), renderDeployment(planned)}
+		} else {
+			manifests = []ports.WorkloadManifest{renderDeployment(planned)}
+		}
 		if planned.Container != nil && len(containerPortSpecs(planned)) > 0 {
 			manifests = append(manifests, renderService(planned))
 		}
@@ -167,8 +171,10 @@ func podTemplate(spec ports.WorkloadSpec) map[string]any {
 			"mountPath": sandboxWorkspaceRoot,
 		})
 		podSpec["volumes"] = append(podSpec["volumes"].([]any), map[string]any{
-			"name":     "sandbox-workspace",
-			"emptyDir": map[string]any{},
+			"name": "sandbox-workspace",
+			"persistentVolumeClaim": map[string]any{
+				"claimName": sandboxWorkspacePVCName(spec.Name),
+			},
 		})
 	}
 	if spec.Kind == ports.WorkloadKindBatchJob {
@@ -191,6 +197,46 @@ func podTemplate(spec ports.WorkloadSpec) map[string]any {
 		},
 		"spec": podSpec,
 	}
+}
+
+func renderSandboxWorkspacePVC(spec ports.WorkloadSpec) ports.WorkloadManifest {
+	name := sandboxWorkspacePVCName(spec.Name)
+	meta := metadata(spec, "sandbox-workspace")
+	meta["name"] = name
+	pvcSpec := map[string]any{
+		"accessModes": []any{"ReadWriteOnce"},
+		"resources": map[string]any{
+			"requests": map[string]any{"storage": "5Gi"},
+		},
+	}
+	if snapshotName := sandboxCheckpointSnapshotName(spec.SandboxCheckpointSourceRef); snapshotName != "" {
+		pvcSpec["dataSource"] = map[string]any{
+			"apiGroup": "snapshot.storage.k8s.io",
+			"kind":     "VolumeSnapshot",
+			"name":     snapshotName,
+		}
+	}
+	return ports.WorkloadManifest{
+		Name: name, Kind: "PersistentVolumeClaim", Provider: "kubernetes",
+		Content: manifest(map[string]any{
+			"apiVersion": "v1",
+			"kind":       "PersistentVolumeClaim",
+			"metadata":   meta,
+			"spec":       pvcSpec,
+		}),
+	}
+}
+
+func sandboxWorkspacePVCName(instanceName string) string {
+	return instanceName + "-workspace"
+}
+
+func sandboxCheckpointSnapshotName(ref string) string {
+	parts := strings.Split(strings.TrimSpace(ref), "/")
+	if len(parts) == 3 && parts[0] == "kubernetes" && parts[1] == "VolumeSnapshot" {
+		return parts[2]
+	}
+	return ""
 }
 
 func metadata(spec ports.WorkloadSpec, component string) map[string]any {

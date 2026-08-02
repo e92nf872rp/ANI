@@ -2269,8 +2269,13 @@ func (api *instanceAPI) cloneSandboxCheckpoint(ctx context.Context, c *app.Reque
 		config = record.Sandbox.Config
 	}
 	result, err := api.service.Create(ctx, ports.WorkloadInstanceCreateRequest{
-		IdempotencyKey:  req.IdempotencyKey,
-		Spec:            ports.WorkloadSpec{TenantID: instanceTenantID(c), Name: checkpoint.Name, Kind: ports.WorkloadKindSandbox, Sandbox: &config, Lifecycle: ports.InstanceLifecyclePolicy{AutoStart: true}},
+		IdempotencyKey: req.IdempotencyKey,
+		Spec: ports.WorkloadSpec{
+			TenantID: instanceTenantID(c), Name: checkpoint.Name, Kind: ports.WorkloadKindSandbox,
+			Image: record.Image.Ref, Sandbox: &config,
+			SandboxCheckpointSourceRef: checkpoint.ProviderRef,
+			Lifecycle:                  ports.InstanceLifecyclePolicy{AutoStart: true},
+		},
 		UserID:          instanceUserID(c),
 		PermissionProof: "instance:sandbox:checkpoint:clone",
 		RequestedAt:     time.Now().UTC(),

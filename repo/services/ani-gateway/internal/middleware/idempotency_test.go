@@ -114,6 +114,32 @@ func TestIdempotencyRejectsSameKeyWithDifferentJSONBody(t *testing.T) {
 	}
 }
 
+func TestCheckpointRestoreIdempotencyIsolatedByCheckpointPath(t *testing.T) {
+	store := newMemoryGatewayStoreForTest()
+	h := server.New()
+	h.Use(Idempotency(store))
+	var calls int32
+	h.POST("/api/v1/instances/:instance_id/sandbox/checkpoints/:checkpoint_id/restore", func(ctx context.Context, c *app.RequestContext) {
+		call := atomic.AddInt32(&calls, 1)
+		c.JSON(http.StatusAccepted, map[string]any{"call": call, "checkpoint_id": c.Param("checkpoint_id")})
+	})
+	body := `{"idempotency_key":"restore-shared-key"}`
+	perform := func(checkpointID string) *protocol.Response {
+		return ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/instances/sandbox-a/sandbox/checkpoints/"+checkpointID+"/restore",
+			&ut.Body{Body: bytes.NewBufferString(body), Len: len(body)},
+			ut.Header{Key: "Content-Type", Value: "application/json"},
+		).Result()
+	}
+	first := perform("checkpoint-a")
+	second := perform("checkpoint-b")
+	if first.StatusCode() != http.StatusAccepted || second.StatusCode() != http.StatusAccepted {
+		t.Fatalf("restore statuses = (%d, %d), want 202", first.StatusCode(), second.StatusCode())
+	}
+	if calls != 2 || bytes.Equal(first.Body(), second.Body()) {
+		t.Fatalf("restore calls = %d, bodies = (%s, %s); paths must have isolated idempotency scope", calls, first.Body(), second.Body())
+	}
+}
+
 func TestSandboxTokenIdempotencyExpiresResponseButKeepsTombstone(t *testing.T) {
 	store := newMemoryGatewayStoreForTest()
 	h := server.New()

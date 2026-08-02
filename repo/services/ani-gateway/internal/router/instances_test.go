@@ -1125,7 +1125,7 @@ func TestCreateListAndRestoreSandboxCheckpoint(t *testing.T) {
 		c.Next(ctx)
 	})
 	registerInstancesWithObservability(h.Group("/api/v1"), nil, false, nil, nil)
-	createBody := `{"kind":"sandbox","name":"agent-checkpoint-session","idempotency_key":"create-checkpoint-sandbox","sandbox_config":{"runtime_class":"sandbox-kata"}}`
+	createBody := `{"kind":"sandbox","name":"agent-checkpoint-session","image":"registry.example/ani/sandbox:3.12","idempotency_key":"create-checkpoint-sandbox","sandbox_config":{"runtime_class":"sandbox-kata"}}`
 	createResp := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/instances",
 		&ut.Body{Body: bytes.NewBufferString(createBody), Len: len(createBody)},
 		ut.Header{Key: "Content-Type", Value: "application/json"},
@@ -1182,7 +1182,7 @@ func TestCreateListAndRestoreSandboxCheckpoint(t *testing.T) {
 	if cloneResp.StatusCode() != http.StatusCreated {
 		t.Fatalf("clone checkpoint status = %d, want 201; body=%s", cloneResp.StatusCode(), cloneResp.Body())
 	}
-	if !strings.Contains(string(cloneResp.Body()), `"name":"agent-checkpoint-clone"`) || !strings.Contains(string(cloneResp.Body()), `"kind":"sandbox"`) {
+	if !strings.Contains(string(cloneResp.Body()), `"name":"agent-checkpoint-clone"`) || !strings.Contains(string(cloneResp.Body()), `"kind":"sandbox"`) || !strings.Contains(string(cloneResp.Body()), `"ref":"registry.example/ani/sandbox:3.12"`) {
 		t.Fatalf("clone checkpoint body = %s, want cloned sandbox instance", cloneResp.Body())
 	}
 }

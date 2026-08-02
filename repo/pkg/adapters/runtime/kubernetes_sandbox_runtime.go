@@ -103,13 +103,14 @@ func (r *KubernetesSandboxRuntime) Create(ctx context.Context, request ports.San
 
 	config := instance.Config
 	spec := ports.WorkloadSpec{
-		TenantID:         request.TenantID,
-		Name:             request.Name,
-		Kind:             ports.WorkloadKindSandbox,
-		Image:            request.Image,
-		RuntimeClassName: config.RuntimeClass,
-		Sandbox:          &config,
-		Lifecycle:        ports.InstanceLifecyclePolicy{AutoStart: request.AutoStart},
+		TenantID:                   request.TenantID,
+		Name:                       request.Name,
+		Kind:                       ports.WorkloadKindSandbox,
+		Image:                      request.Image,
+		RuntimeClassName:           config.RuntimeClass,
+		Sandbox:                    &config,
+		SandboxCheckpointSourceRef: request.CheckpointSourceRef,
+		Lifecycle:                  ports.InstanceLifecyclePolicy{AutoStart: request.AutoStart},
 		Annotations: map[string]string{
 			"ani.kubercloud.io/sandbox-instance-id": instance.InstanceID,
 			"ani.kubercloud.io/runtime-adapter":     "kubernetes-sandbox-runtime",
@@ -139,7 +140,7 @@ func (r *KubernetesSandboxRuntime) Create(ctx context.Context, request ports.San
 		Mode:         "provider",
 		Provider:     "kata-runtimeclass",
 		RealProvider: true,
-		Reason:       "applied Kubernetes Deployment with RuntimeClass; code-run/files/ports are real-provider; token/checkpoint remain local-session",
+		Reason:       "applied Kubernetes Deployment with RuntimeClass; code-run/files/ports/checkpoint are real-provider; token remains local-session",
 	}
 	instance.UpdatedAt = firstNonZeroTime(request.CreatedAt, r.now().UTC())
 	r.local.upsertInstance(instance)
@@ -179,6 +180,9 @@ func (r *KubernetesSandboxRuntime) ApplyLifecycle(ctx context.Context, request p
 			if err := r.deleteRefs(ctx, request.TenantID, refs); err != nil {
 				return ports.SandboxInstanceStatus{}, err
 			}
+			if err := r.cleanupWorkspaceCheckpoints(ctx, request.TenantID, request.InstanceID); err != nil {
+				return ports.SandboxInstanceStatus{}, err
+			}
 		}
 	}
 
@@ -194,7 +198,7 @@ func (r *KubernetesSandboxRuntime) ApplyLifecycle(ctx context.Context, request p
 				Mode:         "provider",
 				Provider:     "kata-runtimeclass",
 				RealProvider: true,
-				Reason:       "applied Kubernetes Deployment with RuntimeClass; code-run/files/ports are real-provider; token/checkpoint remain local-session",
+				Reason:       "applied Kubernetes Deployment with RuntimeClass; code-run/files/ports/checkpoint are real-provider; token remains local-session",
 			}
 			r.local.upsertInstance(instance)
 		}
@@ -255,41 +259,51 @@ func (r *KubernetesSandboxRuntime) DeleteFile(ctx context.Context, request ports
 }
 
 func (r *KubernetesSandboxRuntime) CreateCheckpoint(ctx context.Context, request ports.SandboxCheckpointCreateRequest) (ports.SandboxCheckpointResult, error) {
-	if _, err := r.hydrateExecution(ctx, request.TenantID, request.InstanceID, request.Execution); err != nil {
+	instance, err := r.hydrateExecution(ctx, request.TenantID, request.InstanceID, request.Execution)
+	if err != nil {
 		return ports.SandboxCheckpointResult{}, err
 	}
 	if r.enabled {
-		return ports.SandboxCheckpointResult{}, fmt.Errorf("%w: kubernetes sandbox checkpoint provider is not configured", ports.ErrUnsupported)
+		if request.KeepMemory {
+			return ports.SandboxCheckpointResult{}, fmt.Errorf("%w: sandbox memory checkpoint is not supported", ports.ErrUnsupported)
+		}
+		if _, ok := sandboxWorkspacePVCRef(instance.ResourceRefs); !ok {
+			return ports.SandboxCheckpointResult{}, fmt.Errorf("%w: legacy emptyDir sandbox must be recreated before checkpoint", ports.ErrUnsupported)
+		}
+		return r.createWorkspaceCheckpoint(ctx, request, instance)
 	}
 	return r.local.CreateCheckpoint(ctx, request)
 }
 
 func (r *KubernetesSandboxRuntime) ListCheckpoints(ctx context.Context, request ports.SandboxCheckpointListRequest) (ports.SandboxCheckpointListResult, error) {
-	if _, err := r.hydrateExecution(ctx, request.TenantID, request.InstanceID, request.Execution); err != nil {
+	instance, err := r.hydrateExecution(ctx, request.TenantID, request.InstanceID, request.Execution)
+	if err != nil {
 		return ports.SandboxCheckpointListResult{}, err
 	}
 	if r.enabled {
-		return ports.SandboxCheckpointListResult{}, fmt.Errorf("%w: kubernetes sandbox checkpoint provider is not configured", ports.ErrUnsupported)
+		return r.listWorkspaceCheckpoints(ctx, request, instance)
 	}
 	return r.local.ListCheckpoints(ctx, request)
 }
 
 func (r *KubernetesSandboxRuntime) RestoreCheckpoint(ctx context.Context, request ports.SandboxCheckpointRestoreRequest) (ports.SandboxCheckpointResult, error) {
-	if _, err := r.hydrateExecution(ctx, request.TenantID, request.InstanceID, request.Execution); err != nil {
+	instance, err := r.hydrateExecution(ctx, request.TenantID, request.InstanceID, request.Execution)
+	if err != nil {
 		return ports.SandboxCheckpointResult{}, err
 	}
 	if r.enabled {
-		return ports.SandboxCheckpointResult{}, fmt.Errorf("%w: kubernetes sandbox checkpoint provider is not configured", ports.ErrUnsupported)
+		return r.restoreWorkspaceCheckpoint(ctx, request, instance)
 	}
 	return r.local.RestoreCheckpoint(ctx, request)
 }
 
 func (r *KubernetesSandboxRuntime) CloneCheckpoint(ctx context.Context, request ports.SandboxCheckpointCloneRequest) (ports.SandboxCheckpointResult, error) {
-	if _, err := r.hydrateExecution(ctx, request.TenantID, request.InstanceID, request.Execution); err != nil {
+	instance, err := r.hydrateExecution(ctx, request.TenantID, request.InstanceID, request.Execution)
+	if err != nil {
 		return ports.SandboxCheckpointResult{}, err
 	}
 	if r.enabled {
-		return ports.SandboxCheckpointResult{}, fmt.Errorf("%w: kubernetes sandbox checkpoint provider is not configured", ports.ErrUnsupported)
+		return r.cloneWorkspaceCheckpoint(ctx, request, instance)
 	}
 	return r.local.CloneCheckpoint(ctx, request)
 }
@@ -337,7 +351,8 @@ func (r *KubernetesSandboxRuntime) rollbackLocal(ctx context.Context, instance p
 
 func (r *KubernetesSandboxRuntime) deleteRefs(ctx context.Context, tenantID string, refs []string) error {
 	namespace := tenantNamespace(tenantID)
-	for _, ref := range refs {
+	for index := len(refs) - 1; index >= 0; index-- {
+		ref := refs[index]
 		resource, err := resourceFromRef("", namespace, ref)
 		if err != nil {
 			return err
@@ -351,19 +366,37 @@ func (r *KubernetesSandboxRuntime) deleteRefs(ctx context.Context, tenantID stri
 }
 
 func (r *KubernetesSandboxRuntime) scaleDeployment(ctx context.Context, tenantID string, refs []string, replicas int) error {
-	if len(refs) == 0 {
-		return fmt.Errorf("%w: sandbox resource refs are required for scale", ports.ErrInvalid)
-	}
-	resource, err := resourceFromRef("kubernetes", tenantNamespace(tenantID), refs[0])
+	ref, err := sandboxDeploymentRef(refs)
 	if err != nil {
 		return err
 	}
-	if !strings.EqualFold(resource.Kind, "Deployment") {
-		return fmt.Errorf("%w: sandbox scale requires Deployment ref, got %s", ports.ErrInvalid, resource.Kind)
+	resource, err := resourceFromRef("kubernetes", tenantNamespace(tenantID), ref)
+	if err != nil {
+		return err
 	}
 	body := fmt.Sprintf(`{"spec":{"replicas":%d}}`, replicas)
 	_, err = r.client.do(ctx, http.MethodPatch, r.client.host+resource.resourcePath()+"/scale", "application/merge-patch+json", []byte(body))
 	return err
+}
+
+func sandboxDeploymentRef(refs []string) (string, error) {
+	for _, ref := range refs {
+		resource, err := resourceFromRef("kubernetes", "", ref)
+		if err == nil && resource.Kind == "Deployment" {
+			return ref, nil
+		}
+	}
+	return "", fmt.Errorf("%w: sandbox Deployment ref is required", ports.ErrInvalid)
+}
+
+func sandboxWorkspacePVCRef(refs []string) (string, bool) {
+	for _, ref := range refs {
+		resource, err := resourceFromRef("kubernetes", "", ref)
+		if err == nil && resource.Kind == "PersistentVolumeClaim" {
+			return ref, true
+		}
+	}
+	return "", false
 }
 
 var _ ports.SandboxRuntime = (*KubernetesSandboxRuntime)(nil)

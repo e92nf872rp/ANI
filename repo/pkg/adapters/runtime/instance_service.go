@@ -413,12 +413,13 @@ func (s *LocalInstanceService) createSandbox(ctx context.Context, request ports.
 		return ports.WorkloadInstanceCreateResult{}, ports.ErrNotConfigured
 	}
 	instance, err := s.sandbox.Create(ctx, ports.SandboxCreateRequest{
-		TenantID:  request.Spec.TenantID,
-		Name:      request.Spec.Name,
-		Image:     request.Spec.Image,
-		Config:    firstNonNilSandboxConfig(request.Spec.Sandbox),
-		AutoStart: request.Spec.Lifecycle.AutoStart,
-		CreatedAt: request.RequestedAt,
+		TenantID:            request.Spec.TenantID,
+		Name:                request.Spec.Name,
+		Image:               request.Spec.Image,
+		Config:              firstNonNilSandboxConfig(request.Spec.Sandbox),
+		CheckpointSourceRef: request.Spec.SandboxCheckpointSourceRef,
+		AutoStart:           request.Spec.Lifecycle.AutoStart,
+		CreatedAt:           request.RequestedAt,
 	})
 	if err != nil {
 		if preRecorded {

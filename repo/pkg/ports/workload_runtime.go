@@ -351,32 +351,33 @@ type InstanceLifecyclePolicy struct {
 }
 
 type WorkloadSpec struct {
-	TenantID           string
-	Name               string
-	Description        string
-	Kind               WorkloadKind
-	Image              string
-	ImageID            string
-	ImageRef           string
-	ImageSummary       InstanceImageSummary
-	Command            []string
-	Args               []string
-	Resources          WorkloadResourceRequest
-	GPUSpec            *InstanceGPUSpecReference
-	Network            WorkloadNetworkPolicy
-	Storage            []WorkloadStorageAttachment
-	VM                 *VMInstanceSpec
-	Container          *ContainerInstanceSpec
-	Lifecycle          InstanceLifecyclePolicy
-	Labels             map[string]string
-	Annotations        map[string]string
-	RuntimeClassName   string
-	SchedulerName      string
-	ServiceAccountName string
-	Sandbox            *SandboxConfig
-	Identity           *WorkloadIdentityBinding
-	SecretBindings     []WorkloadSecretBinding
-	TTL                time.Duration
+	TenantID                   string
+	Name                       string
+	Description                string
+	Kind                       WorkloadKind
+	Image                      string
+	ImageID                    string
+	ImageRef                   string
+	ImageSummary               InstanceImageSummary
+	Command                    []string
+	Args                       []string
+	Resources                  WorkloadResourceRequest
+	GPUSpec                    *InstanceGPUSpecReference
+	Network                    WorkloadNetworkPolicy
+	Storage                    []WorkloadStorageAttachment
+	VM                         *VMInstanceSpec
+	Container                  *ContainerInstanceSpec
+	Lifecycle                  InstanceLifecyclePolicy
+	Labels                     map[string]string
+	Annotations                map[string]string
+	RuntimeClassName           string
+	SchedulerName              string
+	ServiceAccountName         string
+	Sandbox                    *SandboxConfig
+	SandboxCheckpointSourceRef string
+	Identity                   *WorkloadIdentityBinding
+	SecretBindings             []WorkloadSecretBinding
+	TTL                        time.Duration
 }
 
 type WorkloadRef struct {

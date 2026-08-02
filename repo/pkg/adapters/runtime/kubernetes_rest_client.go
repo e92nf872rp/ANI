@@ -313,10 +313,16 @@ func (c *KubernetesRESTClient) Observe(ctx context.Context, request ports.Worklo
 	}
 
 	resourceProvider := request.ApplyResult.Provider
+	resourceRef := request.ApplyResult.ResourceRefs[0]
 	if request.Kind == ports.WorkloadKindSandbox && resourceProvider == "kubernetes_sandbox_runtime" {
 		resourceProvider = "kubernetes"
+		var err error
+		resourceRef, err = sandboxDeploymentRef(request.ApplyResult.ResourceRefs)
+		if err != nil {
+			return ports.WorkloadProviderObservation{}, err
+		}
 	}
-	resource, err := resourceFromRef(resourceProvider, tenantNamespace(request.TenantID), request.ApplyResult.ResourceRefs[0])
+	resource, err := resourceFromRef(resourceProvider, tenantNamespace(request.TenantID), resourceRef)
 	if err != nil {
 		return ports.WorkloadProviderObservation{}, err
 	}

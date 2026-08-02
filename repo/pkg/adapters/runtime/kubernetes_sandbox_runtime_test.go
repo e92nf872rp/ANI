@@ -43,7 +43,7 @@ func TestKubernetesSandboxRuntimeCreateAppliesDeploymentWithRuntimeClass(t *test
 	if _, err := uuid.Parse(instance.InstanceID); err != nil {
 		t.Fatalf("InstanceID = %q, want UUID: %v", instance.InstanceID, err)
 	}
-	if len(instance.ResourceRefs) != 1 || !strings.Contains(instance.ResourceRefs[0], "Deployment/sbx-01") {
+	if len(instance.ResourceRefs) != 2 || !strings.Contains(instance.ResourceRefs[0], "PersistentVolumeClaim/sbx-01-workspace") || !strings.Contains(instance.ResourceRefs[1], "Deployment/sbx-01") {
 		t.Fatalf("ResourceRefs = %#v", instance.ResourceRefs)
 	}
 	if !strings.Contains(provider.applyBody, `"runtimeClassName":"sandbox-kata"`) && !strings.Contains(provider.applyBody, `"runtimeClassName": "sandbox-kata"`) {
@@ -52,8 +52,27 @@ func TestKubernetesSandboxRuntimeCreateAppliesDeploymentWithRuntimeClass(t *test
 	if !strings.Contains(provider.applyBody, `"mountPath":"/workspace"`) && !strings.Contains(provider.applyBody, `"mountPath": "/workspace"`) {
 		t.Fatalf("apply body missing isolated /workspace mount: %s", provider.applyBody)
 	}
-	if !strings.Contains(provider.applyBody, `"emptyDir":{}`) && !strings.Contains(provider.applyBody, `"emptyDir": {}`) {
-		t.Fatalf("apply body missing workspace emptyDir: %s", provider.applyBody)
+	if !strings.Contains(provider.applyBody, `"claimName":"sbx-01-workspace"`) && !strings.Contains(provider.applyBody, `"claimName": "sbx-01-workspace"`) {
+		t.Fatalf("apply body missing workspace PVC claim: %s", provider.applyBody)
+	}
+	if strings.Contains(provider.applyBody, `"emptyDir":{}`) || strings.Contains(provider.applyBody, `"emptyDir": {}`) {
+		t.Fatalf("apply body must not use workspace emptyDir: %s", provider.applyBody)
+	}
+}
+
+func TestKubernetesSandboxRuntimeCreateRestoresWorkspaceFromCheckpoint(t *testing.T) {
+	provider := &sandboxApplyTransport{}
+	runtime := NewKubernetesSandboxRuntime(newTestKubernetesRESTClient(t, provider), WithKubernetesSandboxApplyEnabled(true))
+
+	_, err := runtime.Create(context.Background(), ports.SandboxCreateRequest{
+		TenantID: "tenant-a", Name: "sbx-clone", Image: "busybox:1.36", AutoStart: true,
+		CheckpointSourceRef: "kubernetes/VolumeSnapshot/sandbox-checkpoint-a",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if !strings.Contains(provider.pvcApplyBody, `"kind": "VolumeSnapshot"`) || !strings.Contains(provider.pvcApplyBody, `"name": "sandbox-checkpoint-a"`) {
+		t.Fatalf("PVC apply body = %s, want checkpoint dataSource", provider.pvcApplyBody)
 	}
 }
 
@@ -126,6 +145,41 @@ func TestKubernetesSandboxRuntimeRejectsUnsupportedCheckpoints(t *testing.T) {
 				t.Fatalf("checkpoint call error = %v, want ErrUnsupported", err)
 			}
 		})
+	}
+}
+
+func TestKubernetesSandboxRuntimeRejectsLegacyEmptyDirCheckpoint(t *testing.T) {
+	runtime := NewKubernetesSandboxRuntime(newTestKubernetesRESTClient(t, &recordingProviderTransport{}), WithKubernetesSandboxApplyEnabled(true))
+	execution := &ports.SandboxExecutionContext{
+		TenantID: "tenant-a", InstanceID: uuid.NewString(), Name: "sbx-legacy",
+		Provider: "kubernetes_sandbox_runtime", State: ports.SandboxStateRunning,
+		ResourceRefs: []string{"kubernetes/Deployment/sbx-legacy"},
+	}
+	_, err := runtime.CreateCheckpoint(context.Background(), ports.SandboxCheckpointCreateRequest{
+		TenantID: execution.TenantID, InstanceID: execution.InstanceID, Execution: execution,
+		IdempotencyKey: "checkpoint-legacy", Name: "before-change",
+	})
+	if !errors.Is(err, ports.ErrUnsupported) || !strings.Contains(err.Error(), "legacy emptyDir") {
+		t.Fatalf("CreateCheckpoint() error = %v, want legacy emptyDir ErrUnsupported", err)
+	}
+}
+
+func TestKubernetesSandboxRuntimeRejectsMemoryCheckpoint(t *testing.T) {
+	runtime := NewKubernetesSandboxRuntime(newTestKubernetesRESTClient(t, &recordingProviderTransport{}), WithKubernetesSandboxApplyEnabled(true))
+	execution := &ports.SandboxExecutionContext{
+		TenantID: "tenant-a", InstanceID: uuid.NewString(), Name: "sbx-pvc",
+		Provider: "kubernetes_sandbox_runtime", State: ports.SandboxStateRunning,
+		ResourceRefs: []string{
+			"kubernetes/PersistentVolumeClaim/sbx-pvc-workspace",
+			"kubernetes/Deployment/sbx-pvc",
+		},
+	}
+	_, err := runtime.CreateCheckpoint(context.Background(), ports.SandboxCheckpointCreateRequest{
+		TenantID: execution.TenantID, InstanceID: execution.InstanceID, Execution: execution,
+		IdempotencyKey: "checkpoint-memory", Name: "memory", KeepMemory: true,
+	})
+	if !errors.Is(err, ports.ErrUnsupported) || !strings.Contains(err.Error(), "memory checkpoint") {
+		t.Fatalf("CreateCheckpoint() error = %v, want memory checkpoint ErrUnsupported", err)
 	}
 }
 
@@ -672,14 +726,20 @@ func (e *fakeSandboxPodExecutor) Exec(_ context.Context, request sandboxPodExecR
 
 type sandboxApplyTransport struct {
 	recordingProviderTransport
-	applyBody string
+	applyBody    string
+	pvcApplyBody string
 }
 
 func (t *sandboxApplyTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	if request.Body != nil && request.Method == http.MethodPatch && strings.Contains(request.URL.Path, "/deployments/") && !strings.HasSuffix(request.URL.Path, "/scale") {
+	if request.Body != nil && request.Method == http.MethodPatch && !strings.HasSuffix(request.URL.Path, "/scale") {
 		buf := make([]byte, 1<<20)
 		n, _ := request.Body.Read(buf)
-		t.applyBody = string(buf[:n])
+		if strings.Contains(request.URL.Path, "/deployments/") {
+			t.applyBody = string(buf[:n])
+		}
+		if strings.Contains(request.URL.Path, "/persistentvolumeclaims/") {
+			t.pvcApplyBody = string(buf[:n])
+		}
 		request.Body = http.NoBody
 	}
 	return t.recordingProviderTransport.RoundTrip(request)

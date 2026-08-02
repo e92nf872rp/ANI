@@ -43,12 +43,13 @@ type SandboxConfig struct {
 }
 
 type SandboxCreateRequest struct {
-	TenantID  string
-	Name      string
-	Image     string
-	Config    SandboxConfig
-	AutoStart bool
-	CreatedAt time.Time
+	TenantID            string
+	Name                string
+	Image               string
+	Config              SandboxConfig
+	CheckpointSourceRef string
+	AutoStart           bool
+	CreatedAt           time.Time
 }
 
 type SandboxGetRequest struct {
@@ -220,6 +221,9 @@ type SandboxCheckpointResult struct {
 	CreatedAt  time.Time
 	SizeBytes  int64
 	Reason     string
+	// ProviderRef is an internal provider object reference used by clone. It is
+	// intentionally omitted from the public checkpoint response.
+	ProviderRef string
 }
 
 type SandboxCheckpointListResult struct {
