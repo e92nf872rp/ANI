@@ -3,9 +3,11 @@ status: contract
 description: >
   Sandbox live gate for proving kind=sandbox create/lifecycle uses ANI Core
   /api/v1/instances and applies a Kubernetes Deployment with
-  runtimeClassName=sandbox-kata, plus a minimal real code-run that executes
-  inside the ready Pod. Token/files/checkpoint remain local-session until a
-  later real-provider batch. Live image must include python3 (e.g. sandbox-python:3.12).
+  runtimeClassName=sandbox-kata, plus real code-run, workspace files,
+  preview ports (NodePort Service, not Ingress), and signed sandbox tokens
+  (HMAC Bearer) against the ready Pod. Checkpoint remains local-session
+  until a later real-provider batch. Live image must include python3
+  (e.g. sandbox-python:3.12).
 
 required_tools:
   - kubectl
@@ -22,6 +24,15 @@ live_checks:
   - id: kubernetes-deployment-runtimeclass-observe
     command: kubectl get deployment {name} -n {namespace} -o json
     pass_condition: deployment_spec_template_runtimeClassName_is_sandbox-kata
+  - id: core-instance-sandbox-files
+    command: POST/GET/DELETE /api/v1/instances/{instance_id}/sandbox/files
+    pass_condition: write_list_delete_workspace_file_in_ready_pod
+  - id: core-instance-sandbox-token
+    command: POST /api/v1/instances/{instance_id}/sandbox/tokens
+    pass_condition: signed_token_authorizes_scoped_sandbox_subresources
+  - id: core-instance-sandbox-ports
+    command: POST/DELETE /api/v1/instances/{instance_id}/sandbox/ports
+    pass_condition: nodeport_service_endpoints_and_in_pod_http_ok
   - id: core-instance-sandbox-code-run
     command: POST /api/v1/instances/{instance_id}/sandbox/code-runs
     pass_condition: code_run_task_result_status_succeeded_with_stdout

@@ -22,7 +22,7 @@
 | **Auth 边界** | SPRINT13-AUTH-DEX-PRODUCTION-GATE / Auth/Dex production gate 已通过；production-shaped Gateway 固定 ANI_AUTH_MODE=auth_service |
 | **执行入口** | `development-records/sprint13-real-provider-readiness-plan.md`、`development-records/README.md`、本文件验收命令 |
 | **执行环境** | 真实 provider 写操作前必须重新只读盘点并取得人工确认；evidence 不得包含凭据、服务器 IP 或完整内网端点 |
-| **最后校准日期** | 2026-08-01 |
+| **最后校准日期** | 2026-08-02 |
 
 ## Sprint 13 当前任务
 
@@ -99,8 +99,11 @@ Issue 清单：`repo/services/tasks/issues/issue-01-openapi-queue-crud.md` ~ `is
 | INSTANCE-SANDBOX-LIVE-GATE-A | live passed（2026-08-01） | create/lifecycle evidence `live-evidence/instance-sandbox-live-20260801.json`（busybox）；code-run 扩展见下一批次 |
 | INSTANCE-SANDBOX-CODERUN-A | live passed（2026-08-01） | code-run 真实 Pod exec（kubectl）；`code_run_status=succeeded`；Gateway `instance-sandbox-coderun-20260801-v1`；镜像 `sandbox-python:3.12`；evidence `live-evidence/instance-sandbox-coderun-live-20260801.json`；token/port/file/checkpoint 仍 local-session；记录 `instance-sandbox-coderun-a.md` |
 | INSTANCE-ORCHESTRATION-A | live passed（2026-08-01） | Container create-time Registry/Network/Storage 编排：OVN `logical_switch`、volume→PVC、`MountVolume`、operation steps；Gateway 共享 Network/Storage/Registry 给 Instance resolver；`validate-instance-orchestration-live-gate --live` passed；evidence `live-evidence/instance-orchestration-container-live-20260801.json`；Gateway `instance-orchestration-20260801-v3`；不含 Console/Exec/GPU/配额/Sandbox |
+| INSTANCE-SANDBOX-SUBRESOURCES-A | live passed（2026-08-01） | Sandbox files real-provider：write/list/delete → Pod `/workspace`；code-run 读回校验；Gateway `instance-sandbox-files-20260801-v1`；evidence `live-evidence/instance-sandbox-files-live-20260801.json`；token/port/checkpoint 仍 local-session；不改 v1 契约；记录 `instance-sandbox-subresources-a.md` |
+| INSTANCE-SANDBOX-PORTS-A | live passed（2026-08-02） | Sandbox preview ports real-provider：NodePort Service + `preview_url`；Endpoints + Pod 内 HTTP 校验（Kata 不兼容 port-forward / VPC 阻外部 NodePort）；Gateway `instance-sandbox-ports-20260801-v1`；evidence `live-evidence/instance-sandbox-ports-live-20260801.json`；token/checkpoint 仍 local-session；不改 v1；记录 `instance-sandbox-ports-a.md` |
+| INSTANCE-SANDBOX-TOKEN-A | live passed（2026-08-02） | Sandbox signed token：HMAC `ani.sbx.*` + Gateway Auth/RBAC 子资源鉴权；live 证明 files=200 / 再签发=403 / 错 instance=403；Gateway `instance-sandbox-token-20260802-v1`；evidence `live-evidence/instance-sandbox-token-live-20260802.json`；checkpoint 仍 local-session；不改 v1；记录 `instance-sandbox-token-a.md` |
 
-边界：本流程独立于既有 GPU 调度队列实现；container、VM、Sandbox create/lifecycle、code-run 与 Container ORCHESTRATION live 已落地，但其余 Sandbox 子资源 real-provider、分页 result、配额和 GPU live gate 尚未完成，不声明全部实例管理 runtime ready 或 full platform production ready。
+边界：本流程独立于既有 GPU 调度队列实现；container、VM、Sandbox create/lifecycle、code-run、files、ports、signed token 与 Container ORCHESTRATION live 已落地，但 checkpoint、分页 result、配额和 GPU live gate 尚未完成，不声明全部实例管理 runtime ready 或 full platform production ready。
 
 ## Registry Console Flow（2026-07-22）
 

@@ -12,9 +12,9 @@ import (
 )
 
 // KubernetesSandboxRuntime applies sandbox workload objects through Kubernetes
-// with runtimeClassName (default sandbox-kata). Token/port/file/checkpoint remain
-// on the embedded local session profile; code-run executes inside the ready Pod
-// when apply is enabled.
+// with runtimeClassName (default sandbox-kata). Code-run, workspace files, and
+// preview ports (NodePort Service) are real when apply is enabled; token and
+// checkpoint remain on the embedded local session profile.
 type KubernetesSandboxRuntime struct {
 	local    *LocalSandboxRuntime
 	client   *KubernetesRESTClient
@@ -75,6 +75,8 @@ func NewKubernetesSandboxRuntime(client *KubernetesRESTClient, options ...Kubern
 	}
 	if runtime.enabled {
 		runtime.local.codeRunner = runtime.runCodeInPod
+		runtime.wireFileBackend()
+		runtime.wirePortBackend()
 	}
 	return runtime
 }
@@ -134,7 +136,7 @@ func (r *KubernetesSandboxRuntime) Create(ctx context.Context, request ports.San
 		Mode:         "provider",
 		Provider:     "kata-runtimeclass",
 		RealProvider: true,
-		Reason:       "applied Kubernetes Deployment with RuntimeClass; code-run executes in Pod; token/port/file/checkpoint remain local-session",
+		Reason:       "applied Kubernetes Deployment with RuntimeClass; code-run/files/ports are real-provider; token/checkpoint remain local-session",
 	}
 	instance.UpdatedAt = firstNonZeroTime(request.CreatedAt, r.now().UTC())
 	r.local.upsertInstance(instance)
@@ -163,6 +165,11 @@ func (r *KubernetesSandboxRuntime) ApplyLifecycle(ctx context.Context, request p
 		}
 	}
 
+	var instanceName string
+	if current, err := r.local.Get(ctx, ports.SandboxGetRequest{TenantID: request.TenantID, InstanceID: request.InstanceID}); err == nil {
+		instanceName = current.Name
+	}
+
 	if r.enabled && r.client != nil && len(refs) > 0 {
 		switch request.Action {
 		case ports.WorkloadLifecyclePause:
@@ -174,6 +181,9 @@ func (r *KubernetesSandboxRuntime) ApplyLifecycle(ctx context.Context, request p
 				return ports.SandboxInstanceStatus{}, err
 			}
 		case ports.WorkloadLifecycleDelete:
+			if err := r.cleanupPortServices(ctx, request.TenantID, instanceName); err != nil {
+				return ports.SandboxInstanceStatus{}, err
+			}
 			if err := r.deleteRefs(ctx, request.TenantID, refs); err != nil {
 				return ports.SandboxInstanceStatus{}, err
 			}
@@ -195,7 +205,7 @@ func (r *KubernetesSandboxRuntime) ApplyLifecycle(ctx context.Context, request p
 				Mode:         "provider",
 				Provider:     "kata-runtimeclass",
 				RealProvider: true,
-				Reason:       "applied Kubernetes Deployment with RuntimeClass; code-run executes in Pod; token/port/file/checkpoint remain local-session",
+				Reason:       "applied Kubernetes Deployment with RuntimeClass; code-run/files/ports are real-provider; token/checkpoint remain local-session",
 			}
 			r.local.upsertInstance(instance)
 		}

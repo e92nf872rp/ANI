@@ -180,6 +180,199 @@ func TestKubernetesSandboxRuntimeCreateCodeRunExecutesInPod(t *testing.T) {
 	}
 }
 
+func TestKubernetesSandboxRuntimeFilesExecuteInPod(t *testing.T) {
+	provider := &sandboxPodListTransport{
+		podList: `{"items":[{"metadata":{"name":"sbx-files-abc"},"status":{"phase":"Running","containerStatuses":[{"name":"sbx-files","ready":true}]}}]}`,
+	}
+	client := newTestKubernetesRESTClient(t, provider)
+	executor := &fakeSandboxPodExecutor{
+		handler: func(request sandboxPodExecRequest) (sandboxPodExecResult, error) {
+			script := ""
+			if len(request.Command) >= 3 {
+				script = request.Command[2]
+			}
+			switch {
+			case strings.Contains(script, "write_bytes"):
+				if request.Stdin != "hello-sandbox" {
+					t.Fatalf("write stdin = %q", request.Stdin)
+				}
+				return sandboxPodExecResult{Stdout: "13\n", ExitCode: 0}, nil
+			case strings.Contains(script, "rglob"):
+				return sandboxPodExecResult{
+					Stdout:   `[{"path":"workspace/hello.txt","kind":"file","size_bytes":13,"updated_at":"2026-08-01T10:00:00Z"}]`,
+					ExitCode: 0,
+				}, nil
+			case strings.Contains(script, "unlink"):
+				return sandboxPodExecResult{ExitCode: 0}, nil
+			default:
+				return sandboxPodExecResult{ExitCode: 1, Stderr: "unexpected command"}, nil
+			}
+		},
+	}
+	runtime := NewKubernetesSandboxRuntime(
+		client,
+		WithKubernetesSandboxApplyEnabled(true),
+		WithKubernetesSandboxPodExecutor(executor),
+		WithKubernetesSandboxClock(func() time.Time { return time.Unix(1900, 0) }),
+	)
+	instance, err := runtime.Create(context.Background(), ports.SandboxCreateRequest{
+		TenantID:  "tenant-a",
+		Name:      "sbx-files",
+		Image:     "python:3.12-alpine",
+		AutoStart: true,
+		CreatedAt: time.Unix(1900, 0),
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	written, err := runtime.WriteFile(context.Background(), ports.SandboxFileWriteRequest{
+		TenantID:       instance.TenantID,
+		InstanceID:     instance.InstanceID,
+		IdempotencyKey: "file-1",
+		Path:           "workspace/hello.txt",
+		ContentBase64:  "aGVsbG8tc2FuZGJveA==",
+		RequestedAt:    time.Unix(1900, 0),
+	})
+	if err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if written.Path != "workspace/hello.txt" || written.SizeBytes != 13 {
+		t.Fatalf("WriteFile() = %#v", written)
+	}
+
+	listed, err := runtime.ListFiles(context.Background(), ports.SandboxFileListRequest{
+		TenantID:   instance.TenantID,
+		InstanceID: instance.InstanceID,
+		Path:       "workspace",
+	})
+	if err != nil {
+		t.Fatalf("ListFiles() error = %v", err)
+	}
+	if listed.Total != 1 || len(listed.Items) != 1 || listed.Items[0].Path != "workspace/hello.txt" {
+		t.Fatalf("ListFiles() = %#v", listed)
+	}
+
+	if err := runtime.DeleteFile(context.Background(), ports.SandboxFileDeleteRequest{
+		TenantID:       instance.TenantID,
+		InstanceID:     instance.InstanceID,
+		IdempotencyKey: "file-rm-1",
+		Path:           "workspace/hello.txt",
+	}); err != nil {
+		t.Fatalf("DeleteFile() error = %v", err)
+	}
+	if len(executor.requests) < 3 {
+		t.Fatalf("expected write/list/delete execs, got %#v", executor.requests)
+	}
+
+	again, err := runtime.WriteFile(context.Background(), ports.SandboxFileWriteRequest{
+		TenantID:       instance.TenantID,
+		InstanceID:     instance.InstanceID,
+		IdempotencyKey: "file-1",
+		Path:           "workspace/hello.txt",
+		ContentBase64:  "aGVsbG8tc2FuZGJveA==",
+	})
+	if err != nil {
+		t.Fatalf("idempotent WriteFile() error = %v", err)
+	}
+	if again.Path != written.Path {
+		t.Fatalf("idempotent WriteFile() = %#v", again)
+	}
+}
+
+func TestKubernetesSandboxRuntimeCreatePortAppliesNodePortService(t *testing.T) {
+	provider := &sandboxPortTransport{
+		podList:    `{"items":[{"metadata":{"name":"sbx-port-abc"},"status":{"phase":"Running","hostIP":"10.0.0.8","containerStatuses":[{"name":"sbx-port","ready":true}]}}]}`,
+		serviceGet: `{"spec":{"ports":[{"port":8765,"nodePort":30065}]}}`,
+	}
+	t.Setenv(sandboxPortPreviewHostEnv, "")
+	client := newTestKubernetesRESTClient(t, provider)
+	runtime := NewKubernetesSandboxRuntime(
+		client,
+		WithKubernetesSandboxApplyEnabled(true),
+		WithKubernetesSandboxClock(func() time.Time { return time.Unix(2100, 0) }),
+	)
+	instance, err := runtime.Create(context.Background(), ports.SandboxCreateRequest{
+		TenantID:  "tenant-a",
+		Name:      "sbx-port",
+		Image:     "python:3.12-alpine",
+		AutoStart: true,
+		CreatedAt: time.Unix(2100, 0),
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	result, err := runtime.CreatePort(context.Background(), ports.SandboxPortRequest{
+		TenantID:       instance.TenantID,
+		InstanceID:     instance.InstanceID,
+		IdempotencyKey: "port-1",
+		Port:           8765,
+		Protocol:       "http",
+		RequestedAt:    time.Unix(2100, 0),
+	})
+	if err != nil {
+		t.Fatalf("CreatePort() error = %v", err)
+	}
+	if result.Status != "available" || result.PreviewURL != "http://10.0.0.8:30065" {
+		t.Fatalf("CreatePort() = %#v", result)
+	}
+	if !strings.Contains(provider.applyBody, `"kind":"Service"`) || !strings.Contains(provider.applyBody, `"type":"NodePort"`) {
+		t.Fatalf("expected NodePort Service apply, got %s", provider.applyBody)
+	}
+
+	closed, err := runtime.DeletePort(context.Background(), ports.SandboxPortDeleteRequest{
+		TenantID:       instance.TenantID,
+		InstanceID:     instance.InstanceID,
+		IdempotencyKey: "port-close-1",
+		Port:           8765,
+	})
+	if err != nil {
+		t.Fatalf("DeletePort() error = %v", err)
+	}
+	if closed.Status != "closing" {
+		t.Fatalf("DeletePort() = %#v", closed)
+	}
+	if provider.deletePath == "" || !strings.Contains(provider.deletePath, "/services/") {
+		t.Fatalf("expected service delete, got %q", provider.deletePath)
+	}
+}
+
+func TestKubernetesSandboxRuntimeWriteFileConflict(t *testing.T) {
+	provider := &sandboxPodListTransport{
+		podList: `{"items":[{"metadata":{"name":"sbx-conflict-abc"},"status":{"phase":"Running","containerStatuses":[{"name":"sbx-conflict","ready":true}]}}]}`,
+	}
+	client := newTestKubernetesRESTClient(t, provider)
+	executor := &fakeSandboxPodExecutor{
+		result: sandboxPodExecResult{ExitCode: sandboxFileExitConflict},
+	}
+	runtime := NewKubernetesSandboxRuntime(
+		client,
+		WithKubernetesSandboxApplyEnabled(true),
+		WithKubernetesSandboxPodExecutor(executor),
+		WithKubernetesSandboxClock(func() time.Time { return time.Unix(2000, 0) }),
+	)
+	instance, err := runtime.Create(context.Background(), ports.SandboxCreateRequest{
+		TenantID:  "tenant-a",
+		Name:      "sbx-conflict",
+		Image:     "python:3.12-alpine",
+		AutoStart: true,
+		CreatedAt: time.Unix(2000, 0),
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	_, err = runtime.WriteFile(context.Background(), ports.SandboxFileWriteRequest{
+		TenantID:       instance.TenantID,
+		InstanceID:     instance.InstanceID,
+		IdempotencyKey: "conflict-1",
+		Path:           "workspace/exists.txt",
+		ContentBase64:  "eA==",
+	})
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("WriteFile() error = %v, want conflict", err)
+	}
+}
+
 type sandboxPodListTransport struct {
 	recordingProviderTransport
 	podList string
@@ -197,10 +390,14 @@ type fakeSandboxPodExecutor struct {
 	requests []sandboxPodExecRequest
 	result   sandboxPodExecResult
 	err      error
+	handler  func(request sandboxPodExecRequest) (sandboxPodExecResult, error)
 }
 
 func (e *fakeSandboxPodExecutor) Exec(_ context.Context, request sandboxPodExecRequest) (sandboxPodExecResult, error) {
 	e.requests = append(e.requests, request)
+	if e.handler != nil {
+		return e.handler(request)
+	}
 	return e.result, e.err
 }
 
@@ -217,4 +414,35 @@ func (t *sandboxApplyTransport) RoundTrip(request *http.Request) (*http.Response
 		request.Body = http.NoBody
 	}
 	return t.recordingProviderTransport.RoundTrip(request)
+}
+
+type sandboxPortTransport struct {
+	recordingProviderTransport
+	podList    string
+	serviceGet string
+	applyBody  string
+	deletePath string
+}
+
+func (t *sandboxPortTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	path := request.URL.Path
+	switch {
+	case request.Method == http.MethodGet && strings.Contains(path, "/pods") && !strings.Contains(path, "/exec"):
+		return jsonResponse(http.StatusOK, t.podList), nil
+	case request.Method == http.MethodGet && strings.Contains(path, "/services/"):
+		return jsonResponse(http.StatusOK, t.serviceGet), nil
+	case request.Method == http.MethodPatch && strings.Contains(path, "/services/"):
+		if request.Body != nil {
+			buf := make([]byte, 1<<20)
+			n, _ := request.Body.Read(buf)
+			t.applyBody = string(buf[:n])
+			request.Body = http.NoBody
+		}
+		return jsonResponse(http.StatusOK, t.serviceGet), nil
+	case request.Method == http.MethodDelete && strings.Contains(path, "/services/"):
+		t.deletePath = path
+		return jsonResponse(http.StatusOK, `{}`), nil
+	default:
+		return t.recordingProviderTransport.RoundTrip(request)
+	}
 }

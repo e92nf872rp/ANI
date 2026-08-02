@@ -25,6 +25,9 @@ GATE_ID = "instance-sandbox-live-gate"
 REQUIRED_CHECKS = {
     "core-instance-sandbox-create",
     "kubernetes-deployment-runtimeclass-observe",
+    "core-instance-sandbox-files",
+    "core-instance-sandbox-token",
+    "core-instance-sandbox-ports",
     "core-instance-sandbox-code-run",
     "core-instance-sandbox-pause",
     "core-instance-sandbox-resume",
@@ -256,6 +259,290 @@ def wait_sandbox_pod_ready(name: str, namespace: str, kubeconfig: str, attempts:
     fail(f"sandbox pod for instance={name} not ready; last={last!r}")
 
 
+def run_ports(
+    base: str,
+    token: str,
+    tenant_id: str,
+    instance_id_value: str,
+    name: str,
+    kubeconfig: str,
+    idem: str,
+) -> dict[str, Any]:
+    client = HTTPClient()
+    namespace = tenant_namespace(tenant_id)
+    target_port = 8765
+    # Start a short-lived HTTP server inside the ready Pod so NodePort can be probed.
+    pod_name = wait_sandbox_pod_ready(name, namespace, kubeconfig, attempts=12, interval=2.0)
+    run_kubectl(
+        kubeconfig,
+        [
+            "-n",
+            namespace,
+            "exec",
+            pod_name,
+            "--",
+            "sh",
+            "-c",
+            f"nohup python3 -m http.server {target_port} --bind 0.0.0.0 >/tmp/ani-preview.log 2>&1 &",
+        ],
+    )
+    time.sleep(2)
+
+    status, opened = client.request(
+        "POST",
+        gateway_url(base, f"/instances/{urllib.parse.quote(instance_id_value)}/sandbox/ports"),
+        token,
+        tenant_id,
+        {
+            "idempotency_key": f"{idem}-port-open",
+            "port": target_port,
+            "protocol": "http",
+            "name": "preview",
+        },
+    )
+    if status != 201:
+        fail(f"sandbox create port must return 201, got {status}: {opened}")
+    preview_url = str(opened.get("preview_url") or "")
+    if not preview_url.startswith("http://") or "127.0.0.1" in preview_url:
+        fail(f"sandbox preview_url must be a real NodePort URL, got {preview_url!r}")
+    if opened.get("status") != "available":
+        fail(f"sandbox port status must be available, got {opened!r}")
+
+    service_name = f"{name}-p-{target_port}"
+    raw = run_kubectl(kubeconfig, ["-n", namespace, "get", "svc", service_name, "-o", "json"])
+    try:
+        service = json.loads(raw)
+    except json.JSONDecodeError as err:
+        fail(f"sandbox preview service must return JSON: {err}")
+    if service.get("spec", {}).get("type") != "NodePort":
+        fail(f"sandbox preview service type must be NodePort, got {service.get('spec', {}).get('type')!r}")
+    selector = service.get("spec", {}).get("selector") if isinstance(service.get("spec"), dict) else {}
+    if not isinstance(selector, dict) or selector.get("ani.kubercloud.io/instance") != name:
+        fail(f"sandbox preview service selector mismatch: {selector!r}")
+
+    # Tenant VPC blocks external NodePort; sandbox-kata also breaks kubectl
+    # port-forward (host CNI netns localhost != Kata guest listener).
+    # Prove real wiring via Endpoints + in-guest HTTP through kubectl exec.
+    ep_raw = run_kubectl(kubeconfig, ["-n", namespace, "get", "endpoints", service_name, "-o", "json"])
+    try:
+        endpoints = json.loads(ep_raw)
+    except json.JSONDecodeError as err:
+        fail(f"sandbox preview endpoints must return JSON: {err}")
+    subsets = endpoints.get("subsets") if isinstance(endpoints, dict) else None
+    if not isinstance(subsets, list) or not subsets:
+        fail(f"sandbox preview endpoints missing subsets: {endpoints!r}")
+    addrs = subsets[0].get("addresses") if isinstance(subsets[0], dict) else None
+    ports = subsets[0].get("ports") if isinstance(subsets[0], dict) else None
+    if not isinstance(addrs, list) or not addrs:
+        fail(f"sandbox preview endpoints have no ready addresses: {endpoints!r}")
+    if not isinstance(ports, list) or not any(
+        isinstance(p, dict) and int(p.get("port") or 0) == target_port for p in ports
+    ):
+        fail(f"sandbox preview endpoints missing port {target_port}: {endpoints!r}")
+
+    reachable = False
+    last_body = ""
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        try:
+            last_body = run_kubectl(
+                kubeconfig,
+                [
+                    "-n",
+                    namespace,
+                    "exec",
+                    pod_name,
+                    "--",
+                    "sh",
+                    "-c",
+                    f"curl -sS -m 3 http://127.0.0.1:{target_port}/ "
+                    f"|| wget -qO- -T 3 http://127.0.0.1:{target_port}/",
+                ],
+            )
+            if "Directory listing" in last_body:
+                reachable = True
+                break
+        except SystemExit:
+            pass
+        time.sleep(0.5)
+    if not reachable:
+        fail(
+            f"sandbox preview HTTP not reachable inside Pod via exec "
+            f"(service={service_name}, preview_url={preview_url!r}, body={last_body[:200]!r})"
+        )
+
+    del_req = urllib.request.Request(
+        gateway_url(base, f"/instances/{urllib.parse.quote(instance_id_value)}/sandbox/ports/{target_port}"),
+        method="DELETE",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "X-Tenant-ID": tenant_id,
+            "Idempotency-Key": f"{idem}-port-close",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(del_req, timeout=120) as resp:
+            raw_body = resp.read().decode("utf-8")
+            closed = json.loads(raw_body) if raw_body.strip() else {}
+            status = resp.status
+    except urllib.error.HTTPError as err:
+        raw_body = err.read().decode("utf-8", errors="replace")
+        try:
+            closed = json.loads(raw_body) if raw_body.strip() else {}
+        except json.JSONDecodeError:
+            closed = {"raw": raw_body}
+        status = err.code
+    if status != 200:
+        fail(f"sandbox delete port must return 200, got {status}: {closed}")
+    if not isinstance(closed, dict) or closed.get("status") != "closing":
+        fail(f"sandbox delete port status must be closing, got {closed!r}")
+
+    return {
+        "port": target_port,
+        "preview_url": preview_url,
+        "service_name": service_name,
+        "reachable": reachable,
+    }
+
+
+def run_token(base: str, platform_token: str, tenant_id: str, instance_id_value: str, idem: str) -> dict[str, Any]:
+    client = HTTPClient()
+    status, minted = client.request(
+        "POST",
+        gateway_url(base, f"/instances/{urllib.parse.quote(instance_id_value)}/sandbox/tokens"),
+        platform_token,
+        tenant_id,
+        {
+            "idempotency_key": f"{idem}-sandbox-token",
+            "expires_in": "15m",
+            "scopes": ["files", "ports", "exec"],
+        },
+    )
+    if status != 201:
+        fail(f"sandbox create token must return 201, got {status}: {minted}")
+    sandbox_token = str(minted.get("token") or "")
+    if not sandbox_token.startswith("ani.sbx."):
+        fail(f"sandbox token must be signed ani.sbx.* token, got {sandbox_token[:32]!r}")
+    scopes = minted.get("scopes")
+    if not isinstance(scopes, list) or "files" not in scopes:
+        fail(f"sandbox token scopes must include files: {minted}")
+
+    status, listed = client.request(
+        "GET",
+        gateway_url(base, f"/instances/{urllib.parse.quote(instance_id_value)}/sandbox/files?path=."),
+        sandbox_token,
+        tenant_id,
+    )
+    if status != 200:
+        fail(f"sandbox token must authorize files list with 200, got {status}: {listed}")
+
+    status, denied_mint = client.request(
+        "POST",
+        gateway_url(base, f"/instances/{urllib.parse.quote(instance_id_value)}/sandbox/tokens"),
+        sandbox_token,
+        tenant_id,
+        {
+            "idempotency_key": f"{idem}-sandbox-token-denied",
+            "expires_in": "15m",
+            "scopes": ["files"],
+        },
+    )
+    if status not in {401, 403}:
+        fail(f"sandbox token must not mint tokens, got {status}: {denied_mint}")
+    mint_denied_status = status
+
+    status, denied_other = client.request(
+        "GET",
+        gateway_url(base, "/instances/sandbox_wrong_instance/sandbox/files?path=."),
+        sandbox_token,
+        tenant_id,
+    )
+    if status != 403:
+        fail(f"sandbox token wrong instance must return 403, got {status}: {denied_other}")
+
+    return {
+        "token_prefix": "ani.sbx.",
+        "files_list_status": 200,
+        "mint_denied_status": mint_denied_status,
+        "wrong_instance_status": status,
+        "scopes": scopes,
+    }
+
+
+def run_files(base: str, token: str, tenant_id: str, instance_id_value: str, idem: str) -> dict[str, Any]:
+    client = HTTPClient()
+    path = "live-hello.txt"
+    content_b64 = "aGVsbG8tbGl2ZQ=="  # hello-live
+    status, written = client.request(
+        "POST",
+        gateway_url(base, f"/instances/{urllib.parse.quote(instance_id_value)}/sandbox/files"),
+        token,
+        tenant_id,
+        {
+            "idempotency_key": f"{idem}-file-write",
+            "path": path,
+            "content_base64": content_b64,
+            "overwrite": True,
+        },
+    )
+    if status != 201:
+        fail(f"sandbox write file must return 201, got {status}: {written}")
+    if str(written.get("path") or "") != path:
+        fail(f"sandbox write file path mismatch: {written}")
+
+    status, listed = client.request(
+        "GET",
+        gateway_url(base, f"/instances/{urllib.parse.quote(instance_id_value)}/sandbox/files?path=."),
+        token,
+        tenant_id,
+    )
+    if status != 200:
+        fail(f"sandbox list files must return 200, got {status}: {listed}")
+    items = listed.get("items")
+    if not isinstance(items, list) or not any(isinstance(item, dict) and item.get("path") == path for item in items):
+        fail(f"sandbox list files must include {path}: {listed}")
+
+    # Prove content landed in the Pod by reading it via code-run.
+    status, document = client.request(
+        "POST",
+        gateway_url(base, f"/instances/{urllib.parse.quote(instance_id_value)}/sandbox/code-runs"),
+        token,
+        tenant_id,
+        {
+            "idempotency_key": f"{idem}-file-verify",
+            "language": "python",
+            "code": "print(open('/workspace/live-hello.txt').read())",
+            "timeout_seconds": 60,
+        },
+    )
+    if status != 202:
+        fail(f"sandbox file verify code-run must return 202, got {status}: {document}")
+    result = document.get("result") if isinstance(document.get("result"), dict) else {}
+    code_run = result.get("code_run") if isinstance(result.get("code_run"), dict) else {}
+    if code_run.get("status") != "succeeded" or "hello-live" not in str(code_run.get("stdout") or ""):
+        fail(f"sandbox file verify code-run must read written content, got {code_run!r}")
+
+    req = urllib.request.Request(
+        gateway_url(base, f"/instances/{urllib.parse.quote(instance_id_value)}/sandbox/files?path={urllib.parse.quote(path)}"),
+        method="DELETE",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "X-Tenant-ID": tenant_id,
+            "Idempotency-Key": f"{idem}-file-delete",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            if resp.status != 204:
+                fail(f"sandbox delete file must return 204, got {resp.status}")
+    except urllib.error.HTTPError as err:
+        fail(f"sandbox delete file must return 204, got {err.code}: {err.read().decode('utf-8', errors='replace')}")
+
+    return {"path": path, "verify_status": code_run.get("status")}
+
+
 def run_code_run(base: str, token: str, tenant_id: str, instance_id_value: str, idem: str) -> dict[str, Any]:
     client = HTTPClient()
     status, document = client.request(
@@ -328,6 +615,9 @@ def run_live(
     deployment = observe_deployment(name, namespace, kubeconfig)
     running = wait_for_state(gateway, token, tenant_id, sid, {"running", "pending", "provisioning"})
     pod_name = wait_sandbox_pod_ready(name, namespace, kubeconfig)
+    files = run_files(gateway, token, tenant_id, sid, idem)
+    token_proof = run_token(gateway, token, tenant_id, sid, idem)
+    ports = run_ports(gateway, token, tenant_id, sid, name, kubeconfig, idem)
     code_run = run_code_run(gateway, token, tenant_id, sid, idem)
     paused = lifecycle(gateway, token, tenant_id, sid, "pause", idem)
     resumed = lifecycle(gateway, token, tenant_id, sid, "resume", idem)
@@ -339,13 +629,22 @@ def run_live(
         "runtime_class": "sandbox-kata",
         "deployment_name": deployment.get("metadata", {}).get("name"),
         "pod_name": pod_name,
+        "files_path": files.get("path"),
+        "files_verify_status": files.get("verify_status"),
+        "token_prefix": token_proof.get("token_prefix"),
+        "token_files_list_status": token_proof.get("files_list_status"),
+        "token_mint_denied_status": token_proof.get("mint_denied_status"),
+        "token_wrong_instance_status": token_proof.get("wrong_instance_status"),
+        "ports_preview_url": ports.get("preview_url"),
+        "ports_service_name": ports.get("service_name"),
+        "ports_reachable": ports.get("reachable"),
         "code_run_status": code_run.get("status"),
         "state_after_create": running.get("state"),
         "state_after_pause": paused.get("state"),
         "state_after_resume": resumed.get("state"),
         "state_after_delete": deleted.get("state"),
         "write_path": "Core /api/v1/instances",
-        "subresources": "code-run-real; token/port/file/checkpoint local-session-deferred",
+        "subresources": "code-run-real; files-real; ports-real; token-signed; checkpoint local-session-deferred",
     }
 
 

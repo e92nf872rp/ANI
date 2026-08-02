@@ -2,10 +2,12 @@ package runtime
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/kubercloud/ani/pkg/ports"
+	"github.com/kubercloud/ani/pkg/security/sandboxtoken"
 )
 
 func TestLocalSandboxRuntimeCreatesRunningSessionWithDevProfile(t *testing.T) {
@@ -73,6 +75,60 @@ func TestLocalSandboxRuntimeDefaultsToKataAndPendingWhenNotAutoStarted(t *testin
 	}
 	if instance.State != ports.SandboxStatePending {
 		t.Fatalf("state = %s, want pending", instance.State)
+	}
+}
+
+func TestLocalSandboxRuntimeCreateTokenIssuesSignedToken(t *testing.T) {
+	now := time.Unix(2_200, 0).UTC()
+	key := []byte("local-sandbox-token-test-key")
+	runtime := NewLocalSandboxRuntime(
+		WithSandboxRuntimeClock(func() time.Time { return now }),
+		WithSandboxTokenSigningKey(key),
+	)
+	instance, err := runtime.Create(context.Background(), ports.SandboxCreateRequest{
+		TenantID:  "tenant-a",
+		Name:      "token-session",
+		AutoStart: true,
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	first, err := runtime.CreateToken(context.Background(), ports.SandboxTokenRequest{
+		TenantID:       "tenant-a",
+		InstanceID:     instance.InstanceID,
+		IdempotencyKey: "token-idem-1",
+		ExpiresIn:      15 * time.Minute,
+		Scopes:         []string{"files", "exec"},
+		RequestedAt:    now,
+	})
+	if err != nil {
+		t.Fatalf("CreateToken() error = %v", err)
+	}
+	if !strings.HasPrefix(first.Token, sandboxtoken.Prefix) {
+		t.Fatalf("token = %q, want signed prefix", first.Token)
+	}
+	claims, err := sandboxtoken.Parse(first.Token, key, now)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if claims.InstanceID != instance.InstanceID || !sandboxtoken.HasScope(claims, "files") {
+		t.Fatalf("claims = %+v", claims)
+	}
+
+	second, err := runtime.CreateToken(context.Background(), ports.SandboxTokenRequest{
+		TenantID:       "tenant-a",
+		InstanceID:     instance.InstanceID,
+		IdempotencyKey: "token-idem-1",
+		ExpiresIn:      15 * time.Minute,
+		Scopes:         []string{"files", "exec"},
+		RequestedAt:    now.Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("CreateToken() replay error = %v", err)
+	}
+	if second.Token != first.Token {
+		t.Fatalf("idempotent token mismatch")
 	}
 }
 

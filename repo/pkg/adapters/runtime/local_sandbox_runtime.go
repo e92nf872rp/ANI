@@ -13,11 +13,23 @@ import (
 	"time"
 
 	"github.com/kubercloud/ani/pkg/ports"
+	"github.com/kubercloud/ani/pkg/security/sandboxtoken"
 )
 
 // SandboxCodeRunner executes sandbox code against a concrete provider (optional).
 // Local profile leaves this nil and returns accepted without stdout.
 type SandboxCodeRunner func(ctx context.Context, request ports.SandboxCodeRunRequest, instance ports.SandboxInstanceStatus) (ports.SandboxCodeRunResult, error)
+
+// SandboxFileBackend performs workspace file IO against a concrete provider.
+// Local profile leaves these nil and keeps files in process memory.
+type SandboxFileLister func(ctx context.Context, request ports.SandboxFileListRequest, instance ports.SandboxInstanceStatus) (ports.SandboxFileListResult, error)
+type SandboxFileWriter func(ctx context.Context, request ports.SandboxFileWriteRequest, content []byte, instance ports.SandboxInstanceStatus) (ports.SandboxFileResult, error)
+type SandboxFileDeleter func(ctx context.Context, request ports.SandboxFileDeleteRequest, instance ports.SandboxInstanceStatus) error
+
+// SandboxPortBackend opens/closes concrete preview endpoints for a sandbox.
+// Local profile leaves these nil and returns loopback preview URLs.
+type SandboxPortOpener func(ctx context.Context, request ports.SandboxPortRequest, instance ports.SandboxInstanceStatus) (ports.SandboxPortResult, error)
+type SandboxPortCloser func(ctx context.Context, request ports.SandboxPortDeleteRequest, instance ports.SandboxInstanceStatus, current ports.SandboxPortResult) (ports.SandboxPortResult, error)
 
 type LocalSandboxRuntime struct {
 	now            func() time.Time
@@ -37,6 +49,12 @@ type LocalSandboxRuntime struct {
 	cloneKeys      map[string]ports.SandboxCheckpointResult
 	codeRunKeys    map[string]ports.SandboxCodeRunResult
 	codeRunner     SandboxCodeRunner
+	fileLister     SandboxFileLister
+	fileWriter     SandboxFileWriter
+	fileDeleter    SandboxFileDeleter
+	portOpener     SandboxPortOpener
+	portCloser     SandboxPortCloser
+	tokenKey       []byte
 }
 
 type SandboxRuntimeOption func(*LocalSandboxRuntime)
@@ -52,6 +70,31 @@ func WithSandboxRuntimeClock(now func() time.Time) SandboxRuntimeOption {
 func WithSandboxCodeRunner(runner SandboxCodeRunner) SandboxRuntimeOption {
 	return func(runtime *LocalSandboxRuntime) {
 		runtime.codeRunner = runner
+	}
+}
+
+func WithSandboxFileBackend(lister SandboxFileLister, writer SandboxFileWriter, deleter SandboxFileDeleter) SandboxRuntimeOption {
+	return func(runtime *LocalSandboxRuntime) {
+		runtime.fileLister = lister
+		runtime.fileWriter = writer
+		runtime.fileDeleter = deleter
+	}
+}
+
+func WithSandboxPortBackend(opener SandboxPortOpener, closer SandboxPortCloser) SandboxRuntimeOption {
+	return func(runtime *LocalSandboxRuntime) {
+		runtime.portOpener = opener
+		runtime.portCloser = closer
+	}
+}
+
+// WithSandboxTokenSigningKey overrides the HMAC key used by CreateToken.
+// When unset, CreateToken uses sandboxtoken.SigningKey() (env or process-local).
+func WithSandboxTokenSigningKey(key []byte) SandboxRuntimeOption {
+	return func(runtime *LocalSandboxRuntime) {
+		if len(key) > 0 {
+			runtime.tokenKey = append([]byte(nil), key...)
+		}
 	}
 }
 
@@ -156,16 +199,32 @@ func (r *LocalSandboxRuntime) CreateToken(_ context.Context, request ports.Sandb
 		}
 		return ports.SandboxTokenResult{}, fmt.Errorf("%w: IdempotencyResultExpired", ports.ErrConflict)
 	}
+	expiresAt := now.Add(expiresIn)
+	jti := "sbx_" + strconv.FormatUint(r.sequence.Add(1), 10)
+	tokenKey := r.tokenKey
+	if len(tokenKey) == 0 {
+		tokenKey = sandboxtoken.SigningKey()
+	}
+	token, err := sandboxtoken.Issue(sandboxtoken.Claims{
+		TenantID:   request.TenantID,
+		InstanceID: request.InstanceID,
+		Scopes:     scopes,
+		ExpiresAt:  expiresAt.Unix(),
+		JTI:        jti,
+	}, tokenKey, now)
+	if err != nil {
+		return ports.SandboxTokenResult{}, fmt.Errorf("%w: issue sandbox token: %v", ports.ErrInvalid, err)
+	}
 	result := ports.SandboxTokenResult{
-		Token:     "sandbox_token_" + strconv.FormatUint(r.sequence.Add(1), 10),
-		ExpiresAt: now.Add(expiresIn),
+		Token:     token,
+		ExpiresAt: expiresAt,
 		Scopes:    scopes,
 	}
 	r.tokens[key] = result
 	return result, nil
 }
 
-func (r *LocalSandboxRuntime) CreatePort(_ context.Context, request ports.SandboxPortRequest) (ports.SandboxPortResult, error) {
+func (r *LocalSandboxRuntime) CreatePort(ctx context.Context, request ports.SandboxPortRequest) (ports.SandboxPortResult, error) {
 	if err := validateSandboxPortIdentity(request.TenantID, request.InstanceID, request.IdempotencyKey, request.Port); err != nil {
 		return ports.SandboxPortResult{}, err
 	}
@@ -176,20 +235,23 @@ func (r *LocalSandboxRuntime) CreatePort(_ context.Context, request ports.Sandbo
 	if protocol != "http" && protocol != "tcp" {
 		return ports.SandboxPortResult{}, fmt.Errorf("%w: protocol must be http or tcp", ports.ErrInvalid)
 	}
+	request.Protocol = protocol
 	now := firstNonZeroTime(request.RequestedAt, r.now().UTC())
 	instanceKey := sandboxKey(request.TenantID, request.InstanceID)
 	idempotencyKey := sandboxTokenKey(request.TenantID, request.InstanceID, request.IdempotencyKey)
 
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	instance, ok := r.instances[instanceKey]
 	if !ok {
+		r.mu.Unlock()
 		return ports.SandboxPortResult{}, ports.ErrNotFound
 	}
 	if instance.State != ports.SandboxStateRunning {
+		r.mu.Unlock()
 		return ports.SandboxPortResult{}, fmt.Errorf("%w: sandbox port requires running sandbox", ports.ErrFailedPrecondition)
 	}
 	if existing, ok := r.portKeys[idempotencyKey]; ok {
+		r.mu.Unlock()
 		return existing, nil
 	}
 	if r.ports[instanceKey] == nil {
@@ -197,22 +259,62 @@ func (r *LocalSandboxRuntime) CreatePort(_ context.Context, request ports.Sandbo
 	}
 	if existing, ok := r.ports[instanceKey][request.Port]; ok {
 		r.portKeys[idempotencyKey] = existing
+		r.mu.Unlock()
 		return existing, nil
 	}
-	result := ports.SandboxPortResult{
-		Port:       request.Port,
-		Name:       strings.TrimSpace(request.Name),
-		Protocol:   protocol,
-		Status:     "available",
-		PreviewURL: fmt.Sprintf("http://127.0.0.1/sandboxes/%s/ports/%d", request.InstanceID, request.Port),
-		ExpiresAt:  now.Add(time.Hour),
+	opener := r.portOpener
+	if opener == nil {
+		result := ports.SandboxPortResult{
+			Port:       request.Port,
+			Name:       strings.TrimSpace(request.Name),
+			Protocol:   protocol,
+			Status:     "available",
+			PreviewURL: fmt.Sprintf("http://127.0.0.1/sandboxes/%s/ports/%d", request.InstanceID, request.Port),
+			ExpiresAt:  now.Add(time.Hour),
+		}
+		r.ports[instanceKey][request.Port] = result
+		r.portKeys[idempotencyKey] = result
+		r.mu.Unlock()
+		return result, nil
+	}
+	r.mu.Unlock()
+
+	result, err := opener(ctx, request, instance)
+	if err != nil {
+		return ports.SandboxPortResult{}, err
+	}
+	if result.Port == 0 {
+		result.Port = request.Port
+	}
+	if strings.TrimSpace(result.Protocol) == "" {
+		result.Protocol = protocol
+	}
+	if strings.TrimSpace(result.Status) == "" {
+		result.Status = "available"
+	}
+	if result.ExpiresAt.IsZero() {
+		result.ExpiresAt = now.Add(time.Hour)
+	}
+	r.mu.Lock()
+	if existing, ok := r.portKeys[idempotencyKey]; ok {
+		r.mu.Unlock()
+		return existing, nil
+	}
+	if r.ports[instanceKey] == nil {
+		r.ports[instanceKey] = make(map[int]ports.SandboxPortResult)
+	}
+	if existing, ok := r.ports[instanceKey][request.Port]; ok {
+		r.portKeys[idempotencyKey] = existing
+		r.mu.Unlock()
+		return existing, nil
 	}
 	r.ports[instanceKey][request.Port] = result
 	r.portKeys[idempotencyKey] = result
+	r.mu.Unlock()
 	return result, nil
 }
 
-func (r *LocalSandboxRuntime) DeletePort(_ context.Context, request ports.SandboxPortDeleteRequest) (ports.SandboxPortResult, error) {
+func (r *LocalSandboxRuntime) DeletePort(ctx context.Context, request ports.SandboxPortDeleteRequest) (ports.SandboxPortResult, error) {
 	if err := validateSandboxPortIdentity(request.TenantID, request.InstanceID, request.IdempotencyKey, request.Port); err != nil {
 		return ports.SandboxPortResult{}, err
 	}
@@ -220,52 +322,95 @@ func (r *LocalSandboxRuntime) DeletePort(_ context.Context, request ports.Sandbo
 	instanceKey := sandboxKey(request.TenantID, request.InstanceID)
 
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if existing, ok := r.closeKeys[idempotencyKey]; ok {
+		r.mu.Unlock()
 		return existing, nil
 	}
 	instance, ok := r.instances[instanceKey]
 	if !ok {
+		r.mu.Unlock()
 		return ports.SandboxPortResult{}, ports.ErrNotFound
 	}
 	if instance.State != ports.SandboxStateRunning {
+		r.mu.Unlock()
 		return ports.SandboxPortResult{}, fmt.Errorf("%w: sandbox port requires running sandbox", ports.ErrFailedPrecondition)
 	}
 	openPorts := r.ports[instanceKey]
 	if openPorts == nil {
+		r.mu.Unlock()
 		return ports.SandboxPortResult{}, ports.ErrNotFound
 	}
-	result, ok := openPorts[request.Port]
+	current, ok := openPorts[request.Port]
 	if !ok {
+		r.mu.Unlock()
 		return ports.SandboxPortResult{}, ports.ErrNotFound
 	}
-	delete(openPorts, request.Port)
-	result.Status = "closing"
+	closer := r.portCloser
+	if closer == nil {
+		delete(openPorts, request.Port)
+		current.Status = "closing"
+		r.closeKeys[idempotencyKey] = current
+		r.mu.Unlock()
+		return current, nil
+	}
+	r.mu.Unlock()
+
+	result, err := closer(ctx, request, instance, current)
+	if err != nil {
+		return ports.SandboxPortResult{}, err
+	}
+	if strings.TrimSpace(result.Status) == "" {
+		result.Status = "closing"
+	}
+	r.mu.Lock()
+	if existing, ok := r.closeKeys[idempotencyKey]; ok {
+		r.mu.Unlock()
+		return existing, nil
+	}
+	if r.ports[instanceKey] != nil {
+		delete(r.ports[instanceKey], request.Port)
+	}
 	r.closeKeys[idempotencyKey] = result
+	r.mu.Unlock()
 	return result, nil
 }
 
-func (r *LocalSandboxRuntime) ListFiles(_ context.Context, request ports.SandboxFileListRequest) (ports.SandboxFileListResult, error) {
+func (r *LocalSandboxRuntime) ListFiles(ctx context.Context, request ports.SandboxFileListRequest) (ports.SandboxFileListResult, error) {
 	dir, err := normalizeSandboxFilePath(request.Path, true)
 	if err != nil {
 		return ports.SandboxFileListResult{}, err
 	}
+	request.Path = dir
 	instanceKey := sandboxKey(request.TenantID, request.InstanceID)
 
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 	instance, ok := r.instances[instanceKey]
+	lister := r.fileLister
+	var records map[string]ports.SandboxFileResult
+	if ok {
+		records = r.files[instanceKey]
+	}
+	r.mu.RUnlock()
 	if !ok {
 		return ports.SandboxFileListResult{}, ports.ErrNotFound
 	}
 	if instance.State != ports.SandboxStateRunning {
 		return ports.SandboxFileListResult{}, fmt.Errorf("%w: sandbox files require running sandbox", ports.ErrFailedPrecondition)
 	}
-	records := r.files[instanceKey]
-	items := make([]ports.SandboxFileResult, 0, len(records))
-	for filePath, record := range records {
-		if sandboxFileMatchesDir(filePath, dir) {
-			items = append(items, record)
+
+	var items []ports.SandboxFileResult
+	if lister != nil {
+		listed, listErr := lister(ctx, request, instance)
+		if listErr != nil {
+			return ports.SandboxFileListResult{}, listErr
+		}
+		items = listed.Items
+	} else {
+		items = make([]ports.SandboxFileResult, 0, len(records))
+		for filePath, record := range records {
+			if sandboxFileMatchesDir(filePath, dir) {
+				items = append(items, record)
+			}
 		}
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Path < items[j].Path })
@@ -299,7 +444,7 @@ func (r *LocalSandboxRuntime) ListFiles(_ context.Context, request ports.Sandbox
 	}, nil
 }
 
-func (r *LocalSandboxRuntime) WriteFile(_ context.Context, request ports.SandboxFileWriteRequest) (ports.SandboxFileResult, error) {
+func (r *LocalSandboxRuntime) WriteFile(ctx context.Context, request ports.SandboxFileWriteRequest) (ports.SandboxFileResult, error) {
 	if strings.TrimSpace(request.TenantID) == "" || strings.TrimSpace(request.InstanceID) == "" {
 		return ports.SandboxFileResult{}, fmt.Errorf("%w: tenantID and instanceID are required", ports.ErrInvalid)
 	}
@@ -310,6 +455,7 @@ func (r *LocalSandboxRuntime) WriteFile(_ context.Context, request ports.Sandbox
 	if err != nil {
 		return ports.SandboxFileResult{}, err
 	}
+	request.Path = filePath
 	hasInline := strings.TrimSpace(request.ContentBase64) != ""
 	hasUpload := strings.TrimSpace(request.UploadID) != ""
 	if hasInline == hasUpload {
@@ -322,40 +468,77 @@ func (r *LocalSandboxRuntime) WriteFile(_ context.Context, request ports.Sandbox
 	if err != nil {
 		return ports.SandboxFileResult{}, fmt.Errorf("%w: content_base64 is invalid", ports.ErrInvalid)
 	}
+	if len(content) > sandboxFileMaxBytes {
+		return ports.SandboxFileResult{}, fmt.Errorf("%w: sandbox file exceeds %d bytes", ports.ErrPayloadTooLarge, sandboxFileMaxBytes)
+	}
 	now := firstNonZeroTime(request.RequestedAt, r.now().UTC())
 	instanceKey := sandboxKey(request.TenantID, request.InstanceID)
 	idempotencyKey := sandboxTokenKey(request.TenantID, request.InstanceID, request.IdempotencyKey)
 
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	instance, ok := r.instances[instanceKey]
 	if !ok {
+		r.mu.Unlock()
 		return ports.SandboxFileResult{}, ports.ErrNotFound
 	}
 	if instance.State != ports.SandboxStateRunning {
+		r.mu.Unlock()
 		return ports.SandboxFileResult{}, fmt.Errorf("%w: sandbox files require running sandbox", ports.ErrFailedPrecondition)
 	}
 	if existing, ok := r.fileKeys[idempotencyKey]; ok {
+		r.mu.Unlock()
+		return existing, nil
+	}
+	writer := r.fileWriter
+	if writer == nil {
+		if r.files[instanceKey] == nil {
+			r.files[instanceKey] = make(map[string]ports.SandboxFileResult)
+		}
+		if _, ok := r.files[instanceKey][filePath]; ok && !request.Overwrite {
+			r.mu.Unlock()
+			return ports.SandboxFileResult{}, fmt.Errorf("%w: sandbox file already exists", ports.ErrConflict)
+		}
+		result := ports.SandboxFileResult{
+			Path:      filePath,
+			Kind:      "file",
+			SizeBytes: int64(len(content)),
+			UpdatedAt: now,
+		}
+		r.files[instanceKey][filePath] = result
+		r.fileKeys[idempotencyKey] = result
+		r.mu.Unlock()
+		return result, nil
+	}
+	r.mu.Unlock()
+
+	result, writeErr := writer(ctx, request, content, instance)
+	if writeErr != nil {
+		return ports.SandboxFileResult{}, writeErr
+	}
+	if strings.TrimSpace(result.Path) == "" {
+		result.Path = filePath
+	}
+	if strings.TrimSpace(result.Kind) == "" {
+		result.Kind = "file"
+	}
+	if result.UpdatedAt.IsZero() {
+		result.UpdatedAt = now
+	}
+	r.mu.Lock()
+	if existing, ok := r.fileKeys[idempotencyKey]; ok {
+		r.mu.Unlock()
 		return existing, nil
 	}
 	if r.files[instanceKey] == nil {
 		r.files[instanceKey] = make(map[string]ports.SandboxFileResult)
 	}
-	if _, ok := r.files[instanceKey][filePath]; ok && !request.Overwrite {
-		return ports.SandboxFileResult{}, fmt.Errorf("%w: sandbox file already exists", ports.ErrConflict)
-	}
-	result := ports.SandboxFileResult{
-		Path:      filePath,
-		Kind:      "file",
-		SizeBytes: int64(len(content)),
-		UpdatedAt: now,
-	}
-	r.files[instanceKey][filePath] = result
+	r.files[instanceKey][result.Path] = result
 	r.fileKeys[idempotencyKey] = result
+	r.mu.Unlock()
 	return result, nil
 }
 
-func (r *LocalSandboxRuntime) DeleteFile(_ context.Context, request ports.SandboxFileDeleteRequest) error {
+func (r *LocalSandboxRuntime) DeleteFile(ctx context.Context, request ports.SandboxFileDeleteRequest) error {
 	if strings.TrimSpace(request.TenantID) == "" || strings.TrimSpace(request.InstanceID) == "" {
 		return fmt.Errorf("%w: tenantID and instanceID are required", ports.ErrInvalid)
 	}
@@ -366,29 +549,54 @@ func (r *LocalSandboxRuntime) DeleteFile(_ context.Context, request ports.Sandbo
 	if err != nil {
 		return err
 	}
+	request.Path = filePath
 	instanceKey := sandboxKey(request.TenantID, request.InstanceID)
 	idempotencyKey := sandboxTokenKey(request.TenantID, request.InstanceID, request.IdempotencyKey)
 
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if _, ok := r.rmKeys[idempotencyKey]; ok {
+		r.mu.Unlock()
 		return nil
 	}
 	instance, ok := r.instances[instanceKey]
 	if !ok {
+		r.mu.Unlock()
 		return ports.ErrNotFound
 	}
 	if instance.State != ports.SandboxStateRunning {
+		r.mu.Unlock()
 		return fmt.Errorf("%w: sandbox files require running sandbox", ports.ErrFailedPrecondition)
 	}
-	if r.files[instanceKey] == nil {
-		return ports.ErrNotFound
+	deleter := r.fileDeleter
+	if deleter == nil {
+		if r.files[instanceKey] == nil {
+			r.mu.Unlock()
+			return ports.ErrNotFound
+		}
+		if _, ok := r.files[instanceKey][filePath]; !ok {
+			r.mu.Unlock()
+			return ports.ErrNotFound
+		}
+		delete(r.files[instanceKey], filePath)
+		r.rmKeys[idempotencyKey] = struct{}{}
+		r.mu.Unlock()
+		return nil
 	}
-	if _, ok := r.files[instanceKey][filePath]; !ok {
-		return ports.ErrNotFound
+	r.mu.Unlock()
+
+	if err := deleter(ctx, request, instance); err != nil {
+		return err
 	}
-	delete(r.files[instanceKey], filePath)
+	r.mu.Lock()
+	if _, ok := r.rmKeys[idempotencyKey]; ok {
+		r.mu.Unlock()
+		return nil
+	}
+	if r.files[instanceKey] != nil {
+		delete(r.files[instanceKey], filePath)
+	}
 	r.rmKeys[idempotencyKey] = struct{}{}
+	r.mu.Unlock()
 	return nil
 }
 

@@ -3404,6 +3404,8 @@ func writeSandboxRuntimeError(c *app.RequestContext, err error) {
 		writeInstanceError(c, http.StatusNotFound, "INSTANCE_NOT_FOUND", err.Error())
 	case errors.Is(err, ports.ErrConflict):
 		writeInstanceError(c, http.StatusConflict, "CONFLICT", err.Error())
+	case errors.Is(err, ports.ErrPayloadTooLarge):
+		writeInstanceError(c, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", err.Error())
 	case errors.Is(err, ports.ErrInvalid):
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	case errors.Is(err, ports.ErrFailedPrecondition), errors.Is(err, ports.ErrUnsupported), errors.Is(err, ports.ErrNotConfigured):

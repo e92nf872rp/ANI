@@ -1008,8 +1008,9 @@ func TestCreateSandboxTokenReturnsIdempotentToken(t *testing.T) {
 	if string(first.Body()) != string(second.Body()) {
 		t.Fatalf("idempotent token response mismatch: first=%s second=%s", first.Body(), second.Body())
 	}
-	if !strings.Contains(string(first.Body()), `"token":"`) || !strings.Contains(string(first.Body()), `"expires_at":"`) || !strings.Contains(string(first.Body()), `"connect"`) {
-		t.Fatalf("token body = %s, want token/expires_at/scopes", first.Body())
+	bodyText := string(first.Body())
+	if !strings.Contains(bodyText, `"token":"ani.sbx.`) || !strings.Contains(bodyText, `"expires_at":"`) || !strings.Contains(bodyText, `"connect"`) {
+		t.Fatalf("token body = %s, want signed token/expires_at/scopes", first.Body())
 	}
 }
 

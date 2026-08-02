@@ -173,6 +173,11 @@ func truncateSandboxOutput(value string, limit int) (string, bool) {
 }
 
 func (r *KubernetesSandboxRuntime) waitReadySandboxPod(ctx context.Context, instance ports.SandboxInstanceStatus, budget time.Duration) (string, string, error) {
+	podName, containerName, _, err := r.waitReadySandboxPodInfo(ctx, instance, budget)
+	return podName, containerName, err
+}
+
+func (r *KubernetesSandboxRuntime) waitReadySandboxPodInfo(ctx context.Context, instance ports.SandboxInstanceStatus, budget time.Duration) (string, string, string, error) {
 	if budget <= 0 {
 		budget = 60 * time.Second
 	}
@@ -180,13 +185,13 @@ func (r *KubernetesSandboxRuntime) waitReadySandboxPod(ctx context.Context, inst
 	deadline := time.Now().Add(budget)
 	var lastErr error
 	for {
-		podName, containerName, err := r.findReadySandboxPod(ctx, instance)
+		podName, containerName, hostIP, err := r.findReadySandboxPod(ctx, instance)
 		if err == nil {
-			return podName, containerName, nil
+			return podName, containerName, hostIP, nil
 		}
 		lastErr = err
 		if !errors.Is(err, ports.ErrFailedPrecondition) {
-			return "", "", err
+			return "", "", "", err
 		}
 		if !time.Now().Before(deadline) {
 			break
@@ -195,17 +200,17 @@ func (r *KubernetesSandboxRuntime) waitReadySandboxPod(ctx context.Context, inst
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return "", "", ctx.Err()
+			return "", "", "", ctx.Err()
 		case <-timer.C:
 		}
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("%w: sandbox pod is not ready", ports.ErrFailedPrecondition)
 	}
-	return "", "", lastErr
+	return "", "", "", lastErr
 }
 
-func (r *KubernetesSandboxRuntime) findReadySandboxPod(ctx context.Context, instance ports.SandboxInstanceStatus) (string, string, error) {
+func (r *KubernetesSandboxRuntime) findReadySandboxPod(ctx context.Context, instance ports.SandboxInstanceStatus) (string, string, string, error) {
 	namespace := tenantNamespace(instance.TenantID)
 	selector := url.Values{}
 	selector.Set("labelSelector", fmt.Sprintf(
@@ -216,7 +221,7 @@ func (r *KubernetesSandboxRuntime) findReadySandboxPod(ctx context.Context, inst
 	endpoint := r.client.host + "/api/v1/namespaces/" + url.PathEscape(namespace) + "/pods?" + selector.Encode()
 	body, err := r.client.do(ctx, http.MethodGet, endpoint, "", nil)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	var list struct {
 		Items []struct {
@@ -225,6 +230,7 @@ func (r *KubernetesSandboxRuntime) findReadySandboxPod(ctx context.Context, inst
 			} `json:"metadata"`
 			Status struct {
 				Phase             string `json:"phase"`
+				HostIP            string `json:"hostIP"`
 				ContainerStatuses []struct {
 					Name  string `json:"name"`
 					Ready bool   `json:"ready"`
@@ -233,7 +239,7 @@ func (r *KubernetesSandboxRuntime) findReadySandboxPod(ctx context.Context, inst
 		} `json:"items"`
 	}
 	if err := json.Unmarshal(body, &list); err != nil {
-		return "", "", fmt.Errorf("%w: decode sandbox pod list: %v", ports.ErrInvalid, err)
+		return "", "", "", fmt.Errorf("%w: decode sandbox pod list: %v", ports.ErrInvalid, err)
 	}
 	for _, item := range list.Items {
 		if !strings.EqualFold(item.Status.Phase, "Running") {
@@ -249,8 +255,8 @@ func (r *KubernetesSandboxRuntime) findReadySandboxPod(ctx context.Context, inst
 			}
 		}
 		if ready {
-			return item.Metadata.Name, container, nil
+			return item.Metadata.Name, container, strings.TrimSpace(item.Status.HostIP), nil
 		}
 	}
-	return "", "", fmt.Errorf("%w: sandbox pod is not ready", ports.ErrFailedPrecondition)
+	return "", "", "", fmt.Errorf("%w: sandbox pod is not ready", ports.ErrFailedPrecondition)
 }
