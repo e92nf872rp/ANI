@@ -52,11 +52,11 @@ func (r *KubernetesSandboxRuntime) openPortService(ctx context.Context, request 
 				"name":      serviceName,
 				"namespace": namespace,
 				"labels": map[string]string{
-					"app.kubernetes.io/part-of":    "ani-platform",
-					"ani.kubercloud.io/tenant-id":  instance.TenantID,
-					"ani.kubercloud.io/instance":   instance.Name,
-					sandboxPortLabelManaged:        "true",
-					sandboxPortLabelTargetPort:     strconv.Itoa(request.Port),
+					"app.kubernetes.io/part-of":   "ani-platform",
+					"ani.kubercloud.io/tenant-id": instance.TenantID,
+					"ani.kubercloud.io/instance":  instance.Name,
+					sandboxPortLabelManaged:       "true",
+					sandboxPortLabelTargetPort:    strconv.Itoa(request.Port),
 				},
 			},
 			"spec": map[string]any{
