@@ -122,8 +122,9 @@ func TestIntegrationTaskConsumerEndToEnd(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), taskWaitTimeout)
 	defer cancel()
+	_ = ctx
 
-	if err := consumer.Start(ctx); err != nil {
+	if err := consumer.Start(); err != nil {
 		t.Fatalf("Consumer.Start 失败: %v", err)
 	}
 	defer func() {
@@ -233,8 +234,9 @@ func TestIntegrationTaskConsumerPoisonMessage(t *testing.T) {
 	consumer := NewConsumer(bus, logger)
 	ctx, cancel := context.WithTimeout(context.Background(), taskWaitTimeout)
 	defer cancel()
+	_ = ctx
 
-	if err := consumer.Start(ctx); err != nil {
+	if err := consumer.Start(); err != nil {
 		t.Fatalf("Consumer.Start 失败: %v", err)
 	}
 	defer func() {

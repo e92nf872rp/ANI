@@ -1086,3 +1086,108 @@ None — 实现严格遵循 SPEC §5.1 Subscribe 算法和 Issue #004 Scope。
 
 > 注：`make test` 的 `validate-architecture` 目标在 Windows 环境失败，原因是 Makefile 用了 Unix 专用的 `date -u` 命令，与本次代码改动无关；底层校验脚本单独运行通过。
 
+---
+
+## v4 修订 — Subscribe 删 ctx + ack/nak 失败打日志
+
+修订日期：2026-08-03
+前置文档：`kjs-study/plan-nats-integration-v4.md`（v3 已实现，v4 为增量修订）
+修订范围：v3 已落地代码 + 单测 + 集成测试
+
+### 实现了什么
+
+基于 v3 review 提出的两点改进，对已落地的 NATS 接入代码做增量修订：
+
+1. **Subscribe 删除 ctx 参数**：`ports.MessageBus.Subscribe` 签名从 `Subscribe(ctx, opts, handler)` 改为 `Subscribe(opts, handler)`。v3 已确认 ctx 不透传给 handler（handler 固定用 `context.Background()`）、NATS 异步回调模型也不消费该 ctx，是死参数。删除后级联修改 adapter 实现、两个 consumer 的 `Start()`、所有测试调用点。`consumer.Start()` 同步删 ctx（唯一用途是传给 Subscribe）；`Stop(ctx)` 保留（Drain 需要超时控制）。
+2. **ack/nak 返回值不再忽略**：adapter handlerFunc 内三处 `_ = msg.Nak()` / `_ = msg.Ack()` 改为接住 error，非 nil 时打 Error 日志。Ack/Nak 调用本身失败（连接断开、JetStream 不可用）时不再静默。
+
+### 关键文件改动
+
+| 文件 | 类型 | 改动 |
+|---|---|---|
+| `pkg/ports/message_bus.go` | 修改 | `MessageBus.Subscribe` 签名删除 ctx |
+| `pkg/adapters/nats/message_bus.go` | 修改 | Subscribe 签名删 ctx；三处 ack/nak 从 `_ =` 改为 `if err := ...; err != nil { log }` |
+| `pkg/adapters/nats/message_bus_test.go` | 修改 | 3 处 Subscribe 去 ctx；删除 `TestHandlerBackgroundCtx` |
+| `pkg/adapters/nats/integration_test.go` | 修改 | 7 处 Subscribe 去 ctx |
+| `services/metering-service/internal/eventconsumer/consumer.go` | 修改 | `Start` 删 ctx；Subscribe 调用去 ctx |
+| `services/metering-service/internal/eventconsumer/consumer_test.go` | 修改 | `mockMessageBus.Subscribe` 去 ctx；2 处 `Start` 去 ctx |
+| `services/metering-service/internal/eventconsumer/integration_test.go` | 修改 | 2 处 `Start` 去 ctx；未使用 ctx 改 `_ = ctx` |
+| `services/task-service/internal/taskconsumer/consumer.go` | 修改 | 同 eventconsumer |
+| `services/task-service/internal/taskconsumer/consumer_test.go` | 修改 | 同 eventconsumer |
+| `services/task-service/internal/taskconsumer/integration_test.go` | 修改 | 同 eventconsumer |
+
+### 实现笔记
+
+#### 1. Design Decisions（设计决策）
+
+**D-1：consumer `Start()` 也删 ctx，`Stop(ctx)` 保留**
+
+- **歧义：** 删了 Subscribe 的 ctx 后，consumer `Start(ctx)` 的 ctx 唯一用途（传给 Subscribe）消失，是否保留？
+- **选择：** Start 删 ctx，Stop 保留 ctx。
+- **理由：** (1) Start 的 ctx 已是死参数，保留违反 Karpathy 原则五"如无必要勿增实体"；(2) Stop 调用 `Subscription.Drain(ctx)`，Drain 是同步操作，ctx 控制超时合理，保留。
+
+**D-2：`TestHandlerBackgroundCtx` 用例删除**
+
+- **歧义：** 该用例验证"传入被取消的 ctx，handler 仍收到 `context.Background()`"。删了 Subscribe ctx 后前提不存在了，如何处理？
+- **选择：** 删除。
+- **理由：** (1) Subscribe 不再接收 ctx，"传入被取消的 ctx"这个测试前提不存在了；(2) handler 收到 `context.Background()` 是 adapter 实现细节，靠集成测试覆盖更合适。
+
+**D-3：ack/nak 失败日志用 Error 级别**
+
+- **歧义：** Ack/Nak 返回 error 时的日志级别选择？
+- **选择：** Error 级别。
+- **理由：** (1) Ack/Nak 失败指向 NATS 连接断开/JetStream 不可用，消息可能丢或重复投递，严重程度高；(2) 后续如果噪音大统一降到 Warn 或 Debug。
+
+**D-4：不抽 ack/nak helper，内联三处**
+
+- **歧义：** 三处 ack/nak 失败日志模式重复，是否抽 `ackWithLog`/`nakWithLog` helper？
+- **选择：** 不抽，内联。
+- **理由：** (1) 三处调用模式相似但场景不同（两处 Nak、一处 Ack），内联更直接可读；(2) helper 只省 2-3 行，增加间接性不划算（Karpathy 原则二/五）。
+
+#### 2. Deviations（与 v3 的偏离）
+
+**DEV-1：v3 Subscribe ctx "保留不用"决策反转**
+
+- **v3 说：** D-1 决策"保留 Subscribe 的 ctx 参数签名（零破坏），但 handler 固定收到 `context.Background()`"。
+- **v4 实现：** Subscribe 签名删除 ctx 参数。
+- **为什么偏离是必要的：** review 认为 ctx 是死参数，保留违反"如无必要勿增实体"。v3 保留的理由是"零破坏 port 契约"，但 v2/v3 尚未发布（v1.0.0 目标 2026-09-30），现在改接口零兼容性成本。
+
+**DEV-2：v3 `_ = msg.Nak()` / `_ = msg.Ack()` 忽略返回值改为打日志**
+
+- **v3 说：** handlerFunc 内三处 `_ = msg.Nak()` / `_ = msg.Ack()` 忽略返回值。
+- **v4 实现：** 改为 `if err := ...; err != nil { b.logger.Error(...) }`。
+- **为什么偏离是必要的：** review 认为 Ack/Nak 调用本身失败时静默无观测性，连接断开/JetStream 不可用等场景需要日志排查。
+
+#### 3. Tradeoffs（取舍）
+
+**T-1：Subscribe 删 ctx vs 保留死参数**
+
+- **备选 A（采纳）：** 删 ctx，级联改接口+实现+调用方+测试。
+- **备选 B（拒绝）：** 保留 ctx 参数不用，注释说明"仅建立订阅语义"。
+- **取舍：** 备选 A 胜出。理由：(1) 死参数违反 Karpathy 原则五；(2) 当前未发布，改接口零兼容性成本；(3) 备选 B 的注释无法阻止后续误用。
+
+**T-2：ack/nak 失败日志 Error vs Warn 级别**
+
+- **备选 A（采纳）：** Error 级别。
+- **备选 B（拒绝）：** Warn 级别。
+- **取舍：** 备选 A 胜出。理由：(1) 组长明确说"先打、后面发现没用调低"，初始用 Error 保守；(2) Ack/Nak 失败都指向 NATS 连接/JetStream 异常，严重程度对等；(3) 后续如需降级统一降即可。
+
+#### 4. Open Questions（待确认/后续）
+
+**OQ-1：ack/nak 失败日志 Error 级别是否噪音过大**
+
+- **假设：** Ack/Nak 失败在 NATS 断连场景下可能批量出现，Error 级别可能触发告警噪音。
+- **需确认：** 上线观察后如果噪音大，统一降到 Warn 或 Debug。
+
+### 验证命令执行记录
+
+| 命令 | 范围 | 结果 |
+|---|---|---|
+| `go build ./pkg/ports/... ./pkg/adapters/nats/... ./services/metering-service/internal/eventconsumer/... ./services/task-service/internal/taskconsumer/...` | 编译 | EXIT:0 |
+| `go test ./pkg/adapters/nats/... ./services/metering-service/internal/eventconsumer/... ./services/task-service/internal/taskconsumer/... -v -count=1` | 单元测试 | 14/14 PASS（adapter 4 + eventconsumer 5 + taskconsumer 5） |
+| `gofmt -l`（10 个改动文件） | 格式检查 | 无输出（全部格式正确） |
+| `python scripts/validate_component_imports.py --root .` | 架构边界校验 | component import guard passed |
+| `ANI_TEST_NATS_URL=nats://10.10.1.66:31062 go test ./pkg/adapters/nats/ -v -run Integration -tags integration` | adapter 集成测试（真实 NATS） | 7/7 PASS (8.6s) |
+| `ANI_TEST_NATS_URL=nats://10.10.1.66:31062 go test ./services/metering-service/internal/eventconsumer/ -v -run Integration -tags integration` | eventconsumer 集成测试（真实 NATS） | 2/2 PASS (1.7s) |
+| `ANI_TEST_NATS_URL=nats://10.10.1.66:31062 go test ./services/task-service/internal/taskconsumer/ -v -run Integration -tags integration` | taskconsumer 集成测试（真实 NATS） | 2/2 PASS (1.7s) |
+

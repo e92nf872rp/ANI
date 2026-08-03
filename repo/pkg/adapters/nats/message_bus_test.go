@@ -164,46 +164,13 @@ func TestSubscribeEmptySubject(t *testing.T) {
 	js := newFakeJS()
 	bus := NewMessageBus(js, nil)
 
-	_, err := bus.Subscribe(context.Background(), ports.SubscribeOptions{
+	_, err := bus.Subscribe(ports.SubscribeOptions{
 		Subject: "",
 	}, func(ctx context.Context, msg ports.Message) error {
 		return nil
 	})
 	if err == nil {
 		t.Fatal("期望返回 error，实际 nil")
-	}
-}
-
-// TestHandlerBackgroundCtx 验证 handler 收到的 ctx 是 context.Background()（未被取消）。
-// 覆盖改进一：每条消息独立上下文，不绑定 Subscribe 调用方 ctx。
-func TestHandlerBackgroundCtx(t *testing.T) {
-	js := newFakeJS()
-	// 传入一个会被立即取消的 ctx，验证 handler 收到的仍是 Background（未被取消）。
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	bus := NewMessageBus(js, nil)
-
-	bus.msgFactory = func(natsMsg *natsgo.Msg) ports.Message {
-		return newFakeMessage(natsMsg.Subject, natsMsg.Data, nil)
-	}
-
-	var gotCtx context.Context
-	if _, err := bus.Subscribe(ctx, ports.SubscribeOptions{
-		Subject: "event.test",
-	}, func(ctx context.Context, msg ports.Message) error {
-		gotCtx = ctx
-		return nil
-	}); err != nil {
-		t.Fatalf("Subscribe 失败: %v", err)
-	}
-
-	js.triggerCall(&natsgo.Msg{Subject: "event.test", Data: []byte("data")})
-
-	if gotCtx == nil {
-		t.Fatal("handler 未被调用，gotCtx 为 nil")
-	}
-	if gotCtx.Err() != nil {
-		t.Errorf("handler ctx 期望未被取消（context.Background()），实际 err=%v", gotCtx.Err())
 	}
 }
 
@@ -217,7 +184,7 @@ func TestHandlerPanicNoCrash(t *testing.T) {
 		return newFakeMessage(natsMsg.Subject, natsMsg.Data, nil)
 	}
 
-	if _, err := bus.Subscribe(context.Background(), ports.SubscribeOptions{
+	if _, err := bus.Subscribe(ports.SubscribeOptions{
 		Subject: "event.test",
 	}, func(ctx context.Context, msg ports.Message) error {
 		panic("intentional panic in handler")

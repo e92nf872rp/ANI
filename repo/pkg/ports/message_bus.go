@@ -61,5 +61,5 @@ type SubscribeOptions struct {
 
 type MessageBus interface {
 	Publish(ctx context.Context, event EventEnvelope, opts PublishOptions) error
-	Subscribe(ctx context.Context, opts SubscribeOptions, handler MessageHandler) (Subscription, error)
+	Subscribe(opts SubscribeOptions, handler MessageHandler) (Subscription, error)
 }

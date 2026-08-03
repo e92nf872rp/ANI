@@ -29,8 +29,8 @@ func NewConsumer(bus ports.MessageBus, logger *slog.Logger) *Consumer {
 }
 
 // Start 订阅 ani.tasks.model.import，配置 AckWait=30s、MaxDeliver=10、MaxInflight=16。
-func (c *Consumer) Start(ctx context.Context) error {
-	sub, err := c.bus.Subscribe(ctx, ports.SubscribeOptions{
+func (c *Consumer) Start() error {
+	sub, err := c.bus.Subscribe(ports.SubscribeOptions{
 		Subject:     "ani.tasks.model.import",
 		Consumer:    "task-example",
 		Queue:       "task-workers",

@@ -20,7 +20,7 @@ func (m *mockMessageBus) Publish(ctx context.Context, event ports.EventEnvelope,
 	return nil
 }
 
-func (m *mockMessageBus) Subscribe(ctx context.Context, opts ports.SubscribeOptions, handler ports.MessageHandler) (ports.Subscription, error) {
+func (m *mockMessageBus) Subscribe(opts ports.SubscribeOptions, handler ports.MessageHandler) (ports.Subscription, error) {
 	m.subscribeOpts = append(m.subscribeOpts, opts)
 	m.subscribeHdlr = append(m.subscribeHdlr, handler)
 	if m.subscribeSub == nil {
@@ -50,8 +50,7 @@ func TestConsumerStart(t *testing.T) {
 	mbus := &mockMessageBus{}
 	c := NewConsumer(mbus, nil)
 
-	ctx := context.Background()
-	err := c.Start(ctx)
+	err := c.Start()
 	if err != nil {
 		t.Fatalf("Start unexpected error: %v", err)
 	}
@@ -114,12 +113,12 @@ func TestConsumerStop(t *testing.T) {
 	mbus := &mockMessageBus{}
 	c := NewConsumer(mbus, nil)
 
-	ctx := context.Background()
-	err := c.Start(ctx)
+	err := c.Start()
 	if err != nil {
 		t.Fatalf("Start unexpected error: %v", err)
 	}
 
+	ctx := context.Background()
 	err = c.Stop(ctx)
 	if err != nil {
 		t.Fatalf("Stop unexpected error: %v", err)

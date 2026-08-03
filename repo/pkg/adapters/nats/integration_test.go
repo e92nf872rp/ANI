@@ -255,7 +255,7 @@ func TestIntegrationPublishSubscribeHeaders(t *testing.T) {
 		got      atomic.Value // ports.Message
 		received atomic.Bool
 	)
-	sub, err := env.bus.Subscribe(context.Background(), ports.SubscribeOptions{
+	sub, err := env.bus.Subscribe(ports.SubscribeOptions{
 		Subject:     subject,
 		Consumer:    integrationConsumerPrefix + "-headers",
 		MaxInflight: 16,
@@ -302,7 +302,7 @@ func TestIntegrationAckBusinessDecision(t *testing.T) {
 	instanceID := "inst-ack-002"
 
 	var deliverCount atomic.Int64
-	sub, err := env.bus.Subscribe(context.Background(), ports.SubscribeOptions{
+	sub, err := env.bus.Subscribe(ports.SubscribeOptions{
 		Subject:     subject,
 		Consumer:    integrationConsumerPrefix + "-ack",
 		MaxInflight: 16,
@@ -346,7 +346,7 @@ func TestIntegrationPanicRecover(t *testing.T) {
 		deliverCount atomic.Int64
 		panicked     atomic.Bool
 	)
-	sub, err := env.bus.Subscribe(context.Background(), ports.SubscribeOptions{
+	sub, err := env.bus.Subscribe(ports.SubscribeOptions{
 		Subject:     subject,
 		Consumer:    integrationConsumerPrefix + "-panic",
 		MaxInflight: 16,
@@ -393,7 +393,7 @@ func TestIntegrationNakDelayedRedelivery(t *testing.T) {
 	instanceID := "inst-nak-004"
 
 	var deliverCount atomic.Int64
-	sub, err := env.bus.Subscribe(context.Background(), ports.SubscribeOptions{
+	sub, err := env.bus.Subscribe(ports.SubscribeOptions{
 		Subject:     subject,
 		Consumer:    integrationConsumerPrefix + "-nak",
 		MaxInflight: 16,
@@ -435,7 +435,7 @@ func TestIntegrationMaxDeliverStop(t *testing.T) {
 	instanceID := "inst-maxdeliver-005"
 
 	var deliverCount atomic.Int64
-	sub, err := env.bus.Subscribe(context.Background(), ports.SubscribeOptions{
+	sub, err := env.bus.Subscribe(ports.SubscribeOptions{
 		Subject:     subject,
 		Consumer:    integrationConsumerPrefix + "-maxdeliver",
 		MaxInflight: 16,
@@ -481,7 +481,7 @@ func TestIntegrationInterestFanout(t *testing.T) {
 		c2Count atomic.Int64
 	)
 
-	sub1, err := env.bus.Subscribe(context.Background(), ports.SubscribeOptions{
+	sub1, err := env.bus.Subscribe(ports.SubscribeOptions{
 		Subject:     subject,
 		Consumer:    integrationConsumerPrefix + "-fanout-1",
 		MaxInflight: 16,
@@ -496,7 +496,7 @@ func TestIntegrationInterestFanout(t *testing.T) {
 	}
 	env.trackSub(toNatsSub(sub1))
 
-	sub2, err := env.bus.Subscribe(context.Background(), ports.SubscribeOptions{
+	sub2, err := env.bus.Subscribe(ports.SubscribeOptions{
 		Subject:     subject,
 		Consumer:    integrationConsumerPrefix + "-fanout-2",
 		MaxInflight: 16,

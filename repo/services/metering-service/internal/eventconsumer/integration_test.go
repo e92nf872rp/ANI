@@ -127,8 +127,9 @@ func TestIntegrationConsumerEndToEnd(t *testing.T) {
 	// 注意：Consumer 名固定为 "metering-example"，可能残留，清理时统一删除。
 	ctx, cancel := context.WithTimeout(context.Background(), consumerWaitTimeout)
 	defer cancel()
+	_ = ctx
 
-	if err := consumer.Start(ctx); err != nil {
+	if err := consumer.Start(); err != nil {
 		t.Fatalf("Consumer.Start 失败: %v", err)
 	}
 	defer func() {
@@ -224,8 +225,9 @@ func TestIntegrationConsumerPoisonMessage(t *testing.T) {
 	consumer := NewConsumer(bus, logger)
 	ctx, cancel := context.WithTimeout(context.Background(), consumerWaitTimeout)
 	defer cancel()
+	_ = ctx
 
-	if err := consumer.Start(ctx); err != nil {
+	if err := consumer.Start(); err != nil {
 		t.Fatalf("Consumer.Start 失败: %v", err)
 	}
 	defer func() {
