@@ -1,10 +1,10 @@
 # PRD: 统一实例可观测性（Core + Console）
 
-> Revised: 2026-07-03  
-> 状态：已确认（含 OQ 决策）  
-> 扩展/替代：`prd-console-container-observability.md`（2026-06-17 简版）  
-> 详文：`repo/services/docs/console-modules/compute/container-observability.md`  
-> UX：`repo/services/tasks/modules/ux/console/compute/ux-console-instance-observability.md`  
+> Revised: 2026-07-03
+> 状态：已确认（含 OQ 决策）
+> 扩展/替代：`prd-console-container-observability.md`（2026-06-17 简版）
+> 详文：`repo/services/docs/console-modules/compute/container-observability.md`
+> UX：`repo/services/tasks/modules/ux/console/compute/ux-console-instance-observability.md`
 > Handler 契约：`TASK-CORE-005` + VM console + Sandbox security-events
 
 ## 1. Introduction / Overview

@@ -19,3 +19,5 @@ export const coreApi = createClient<paths>({
     'Content-Type': 'application/json',
   },
 })
+
+export { setAuthToken } from './auth'

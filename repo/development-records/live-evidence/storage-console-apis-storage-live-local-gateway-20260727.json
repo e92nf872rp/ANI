@@ -1,0 +1,16 @@
+{
+  "cleanup": "deleted",
+  "filesystem_backend": "nfs",
+  "filesystem_status": 201,
+  "id": "storage-live-gate",
+  "mount_target_count": 1,
+  "namespace": "ani-tenant-11111111-1111-1111-1111-111111111111",
+  "profile": "SPRINT13-STORAGE-ROOK-CEPH-A",
+  "snapshot_class": "csi-rbdplugin-snapclass",
+  "snapshot_count": 1,
+  "snapshot_status": 202,
+  "status": "passed",
+  "storage_class": "ani-rbd-ssd",
+  "tenant_id": "11111111-1111-1111-1111-111111111111",
+  "volume_status": 201
+}

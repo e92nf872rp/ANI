@@ -53,11 +53,6 @@ class ServicesContractTest(unittest.TestCase):
         result = self.validate_fixture(spec)
         self.assertTrue(any("newWrite/write_requires_idempotency" in error for error in result.errors))
 
-    def test_exact_existing_idempotency_exception_is_warning_only(self) -> None:
-        result = self.validate_fixture(copy.deepcopy(self.spec))
-        self.assertTrue(any("uploadKnowledgeBaseDocument/write_requires_idempotency" in warning for warning in result.warnings))
-        self.assertFalse(any("uploadKnowledgeBaseDocument/write_requires_idempotency" in error for error in result.errors))
-
     def test_new_operation_without_security_is_blocked(self) -> None:
         spec = copy.deepcopy(self.spec)
         self.add_operation(

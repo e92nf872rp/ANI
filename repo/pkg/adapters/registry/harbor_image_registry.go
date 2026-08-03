@@ -508,43 +508,33 @@ func (r *HarborImageRegistry) CreatePullSecret(ctx context.Context, request port
 		return ports.RegistryPullSecret{}, err
 	}
 	robotName := harborRobotName(name)
-	payload, err := json.Marshal(struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Duration    int    `json:"duration"`
-		Disable     bool   `json:"disable"`
-		Permissions []struct {
-			Kind      string `json:"kind"`
-			Namespace string `json:"namespace"`
-			Access    []struct {
-				Resource string `json:"resource"`
-				Action   string `json:"action"`
-			} `json:"access"`
-		} `json:"permissions"`
-	}{Name: robotName, Description: "ANI pull-only workload credential", Duration: -1, Permissions: []struct {
-		Kind      string `json:"kind"`
-		Namespace string `json:"namespace"`
-		Access    []struct {
-			Resource string `json:"resource"`
-			Action   string `json:"action"`
-		} `json:"access"`
-	}{{Kind: "project", Namespace: request.Project, Access: []struct {
-		Resource string `json:"resource"`
-		Action   string `json:"action"`
-	}{{Resource: "repository", Action: "pull"}}}}})
+	robotRequest := harborRobotCreateRequest{Name: robotName, Description: "ANI pull-only workload credential", Duration: -1, Permissions: harborRobotProjectPullPermissions(request.Project)}
+	payload, err := json.Marshal(robotRequest)
 	if err != nil {
 		return ports.RegistryPullSecret{}, fmt.Errorf("%w: encode Harbor robot request", ports.ErrInvalid)
 	}
 	var robot harborRobot
 	path := "/api/v2.0/projects/" + url.PathEscape(request.Project) + "/robots"
 	if err := r.doJSON(ctx, http.MethodPost, path, payload, http.StatusCreated, &robot); err != nil {
-		return ports.RegistryPullSecret{}, err
+		if !errors.Is(err, ports.ErrNotFound) {
+			return ports.RegistryPullSecret{}, err
+		}
+		globalRequest := robotRequest
+		globalRequest.Level = "project"
+		payload, err = json.Marshal(globalRequest)
+		if err != nil {
+			return ports.RegistryPullSecret{}, fmt.Errorf("%w: encode Harbor robot request", ports.ErrInvalid)
+		}
+		if err := r.doJSON(ctx, http.MethodPost, "/api/v2.0/robots", payload, http.StatusCreated, &robot); err != nil {
+			return ports.RegistryPullSecret{}, err
+		}
 	}
-	if strings.TrimSpace(robot.Token) == "" || strings.TrimSpace(robot.Name) == "" {
+	credential := strings.TrimSpace(robot.Credential())
+	if credential == "" || strings.TrimSpace(robot.Name) == "" {
 		return ports.RegistryPullSecret{}, fmt.Errorf("%w: Harbor did not return robot credentials", ports.ErrInvalid)
 	}
 	registryHost := harborRegistryHost(r.endpoint)
-	dockerConfigJSON, err := dockerConfigJSON(registryHost, robot.Name, robot.Token)
+	dockerConfigJSON, err := dockerConfigJSON(registryHost, robot.Name, credential)
 	if err != nil {
 		return ports.RegistryPullSecret{}, err
 	}
@@ -554,9 +544,41 @@ func (r *HarborImageRegistry) CreatePullSecret(ctx context.Context, request port
 	return ports.RegistryPullSecret{Project: request.Project, Name: name, SecretRef: request.Namespace + "/" + name, Registry: registryHost, Username: robot.Name, Namespace: request.Namespace, State: ports.RegistryPermissionActive, DevProfile: harborDevProfile(), CreatedAt: r.now().UTC()}, nil
 }
 
+type harborRobotCreateRequest struct {
+	Name        string                  `json:"name"`
+	Description string                  `json:"description"`
+	Duration    int                     `json:"duration"`
+	Disable     bool                    `json:"disable"`
+	Level       string                  `json:"level,omitempty"`
+	Permissions []harborRobotPermission `json:"permissions"`
+}
+
+type harborRobotPermission struct {
+	Kind      string              `json:"kind"`
+	Namespace string              `json:"namespace"`
+	Access    []harborRobotAccess `json:"access"`
+}
+
+type harborRobotAccess struct {
+	Resource string `json:"resource"`
+	Action   string `json:"action"`
+}
+
+func harborRobotProjectPullPermissions(project string) []harborRobotPermission {
+	return []harborRobotPermission{{Kind: "project", Namespace: project, Access: []harborRobotAccess{{Resource: "repository", Action: "pull"}}}}
+}
+
 type harborRobot struct {
-	Name  string `json:"name"`
-	Token string `json:"token"`
+	Name   string `json:"name"`
+	Token  string `json:"token"`
+	Secret string `json:"secret"`
+}
+
+func (r harborRobot) Credential() string {
+	if strings.TrimSpace(r.Token) != "" {
+		return r.Token
+	}
+	return r.Secret
 }
 
 func harborRobotName(secretName string) string {

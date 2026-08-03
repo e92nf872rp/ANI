@@ -3,14 +3,14 @@ ANI RAG Engine Service
 Provides document parsing, vector indexing, and hybrid retrieval for knowledge bases.
 """
 
-from fastapi import FastAPI
 from contextlib import asynccontextmanager
-import uvicorn
 
-from app.routers import documents, query
+import uvicorn
 from app.core.config import settings
-from app.core.milvus import init_milvus
 from app.core.embeddings import init_embedding_model
+from app.core.milvus import init_milvus
+from app.routers import documents, query
+from fastapi import FastAPI
 
 
 @asynccontextmanager

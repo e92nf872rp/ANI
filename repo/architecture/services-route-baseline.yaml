@@ -24,6 +24,12 @@ exceptions:
     owner: ANI Services
     reason: OpenAPI 已声明引用来源列表，当前 Gateway 尚未注册对应过渡路由。
   - kind: spec_not_in_code
+    method: POST
+    path: /knowledge-bases/{kb_id}/documents/notify-uploaded
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明两步式上传的 notifyDocumentUploaded（US-001 契约修复），当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
     method: GET
     path: /knowledge-bases/{kb_id}/sessions
     status: accepted_baseline
@@ -77,6 +83,36 @@ exceptions:
     status: accepted_baseline
     owner: ANI Services
     reason: OpenAPI 已声明知识库权限更新，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: POST
+    path: /knowledge-bases/{kb_id}/documents/{doc_id}/reparse
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明知识库文档重新解析（US-002），当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: GET
+    path: /knowledge-bases/{kb_id}/config
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明知识库配置读取（US-002），当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: PUT
+    path: /knowledge-bases/{kb_id}/config
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明知识库配置更新（US-002），当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: POST
+    path: /knowledge-bases/{kb_id}/rebuild
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明知识库全库重建（US-002），当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: GET
+    path: /knowledge-bases/{kb_id}/models
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明知识库可用模型列表（US-002），当前 Gateway 尚未注册对应过渡路由。
   - kind: spec_not_in_code
     method: PUT
     path: /tenant/roles/{role_id}

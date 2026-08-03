@@ -11,6 +11,7 @@ option go_package = "github.com/kubercloud/ani/pkg/generated/pb/auth/v1;authv1";
 // AuthService handles authentication and authorization.
 service AuthService {
   rpc Login(LoginRequest) returns (TokenPair);
+  rpc PlatformPasswordLogin(PlatformPasswordLoginRequest) returns (TokenPair);
   rpc BeginOIDCLogin(BeginOIDCLoginRequest) returns (BeginOIDCLoginResponse);
   rpc CompleteOIDCLogin(CompleteOIDCLoginRequest) returns (TokenPair);
   rpc RefreshToken(RefreshTokenRequest) returns (AccessToken);
@@ -32,6 +33,13 @@ message LoginRequest {
   string username = 1;
   string password = 2;
   string tenant_name = 3;   // tenant slug to scope the login
+  string idempotency_key = 4;   // optional; pattern ^[A-Za-z0-9_-]{1,128}$
+}
+
+message PlatformPasswordLoginRequest {
+  string username = 1;
+  string password = 2;
+  string idempotency_key = 3;   // optional; pattern ^[A-Za-z0-9_-]{1,128}$
 }
 
 message BeginOIDCLoginRequest {

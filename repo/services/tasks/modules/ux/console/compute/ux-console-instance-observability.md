@@ -1,8 +1,8 @@
 # UX: 统一实例可观测性（Console）
 
-> Interaction specification derived from: `repo/services/tasks/modules/prd/console/compute/prd-console-instance-observability.md`  
-> Part of ani-workflow artifact triad — next: `/prd-to-spec`  
-> Generated: 2026-07-03 | Product: **Console** | UI stack: **TDesign React + TanStack Router + React Query + ECharts**  
+> Interaction specification derived from: `repo/services/tasks/modules/prd/console/compute/prd-console-instance-observability.md`
+> Part of ani-workflow artifact triad — next: `/prd-to-spec`
+> Generated: 2026-07-03 | Product: **Console** | UI stack: **TDesign React + TanStack Router + React Query + ECharts**
 > Module main doc: `repo/services/docs/console-modules/compute/container-observability.md`
 
 **范围：** 实例详情内的可观测性 Tab（日志 / 事件 / 指标 / 终端或控制台 / Sandbox 安全事件）；不含 Core handler、PromQL 模板正文、exec WebSocket 协议（→ SPEC）。

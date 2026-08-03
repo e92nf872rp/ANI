@@ -77,6 +77,72 @@
       "scope": "scope:objects:create"
     },
     {
+      "operationId": "setStorageBucketACL",
+      "method": "PUT",
+      "path": "/buckets/{bucket_id}/acl",
+      "scope": "scope:objects:update"
+    },
+    {
+      "operationId": "listStorageBucketLifecycleRules",
+      "method": "GET",
+      "path": "/buckets/{bucket_id}/lifecycle-rules",
+      "scope": "scope:objects:read"
+    },
+    {
+      "operationId": "createStorageBucketLifecycleRule",
+      "method": "POST",
+      "path": "/buckets/{bucket_id}/lifecycle-rules",
+      "scope": "scope:objects:update"
+    },
+    {
+      "operationId": "setStorageBucketLifecycleRules",
+      "method": "PUT",
+      "path": "/buckets/{bucket_id}/lifecycle-rules",
+      "scope": "scope:objects:update"
+    },
+    {
+      "operationId": "deleteStorageBucketLifecycleRule",
+      "method": "DELETE",
+      "path": "/buckets/{bucket_id}/lifecycle-rules/{rule_id}",
+      "scope": "scope:objects:update"
+    },
+    {
+      "operationId": "deleteBucketObject",
+      "method": "DELETE",
+      "path": "/buckets/{bucket_id}/objects",
+      "scope": "scope:objects:delete"
+    },
+    {
+      "operationId": "listBucketObjects",
+      "method": "GET",
+      "path": "/buckets/{bucket_id}/objects",
+      "scope": "scope:objects:read"
+    },
+    {
+      "operationId": "generateBucketObjectPresignedURL",
+      "method": "POST",
+      "path": "/buckets/{bucket_id}/objects/presigned-url",
+      "scope": "scope:objects:read"
+    },
+    {
+      "operationId": "uploadBucketObject",
+      "method": "POST",
+      "path": "/buckets/{bucket_id}/objects/upload",
+      "scope": "scope:objects:create"
+    },
+    {
+      "operationId": "createBucketPrefix",
+      "method": "POST",
+      "path": "/buckets/{bucket_id}/prefixes",
+      "scope": "scope:objects:create"
+    },
+    {
+      "operationId": "setStorageBucketClass",
+      "method": "PUT",
+      "path": "/buckets/{bucket_id}/storage-class",
+      "scope": "scope:objects:update"
+    },
+    {
       "operationId": "listEncryptionKeys",
       "method": "GET",
       "path": "/encryption/keys",
@@ -149,10 +215,40 @@
       "scope": "scope:filesystems:read"
     },
     {
+      "operationId": "expandStorageFilesystem",
+      "method": "POST",
+      "path": "/filesystems/{filesystem_id}/expand",
+      "scope": "scope:filesystems:update"
+    },
+    {
+      "operationId": "mountStorageFilesystem",
+      "method": "POST",
+      "path": "/filesystems/{filesystem_id}/mount",
+      "scope": "scope:filesystems:update"
+    },
+    {
+      "operationId": "getFilesystemMountCommand",
+      "method": "GET",
+      "path": "/filesystems/{filesystem_id}/mount-command",
+      "scope": "scope:filesystems:read"
+    },
+    {
       "operationId": "listFilesystemMountTargets",
       "method": "GET",
       "path": "/filesystems/{filesystem_id}/mount-targets",
       "scope": "scope:filesystems:read"
+    },
+    {
+      "operationId": "createFilesystemMountTarget",
+      "method": "POST",
+      "path": "/filesystems/{filesystem_id}/mount-targets",
+      "scope": "scope:filesystems:update"
+    },
+    {
+      "operationId": "unmountStorageFilesystem",
+      "method": "POST",
+      "path": "/filesystems/{filesystem_id}/unmount",
+      "scope": "scope:filesystems:update"
     },
     {
       "operationId": "listGPUInventory",
@@ -195,6 +291,18 @@
       "method": "PATCH",
       "path": "/gpu-scheduling/queues/{queue_id}",
       "scope": "scope:gpu-scheduling:write"
+    },
+    {
+      "operationId": "listGPUSpecs",
+      "method": "GET",
+      "path": "/gpu-specs",
+      "scope": "scope:gpu-inventory:read"
+    },
+    {
+      "operationId": "getGPUSpec",
+      "method": "GET",
+      "path": "/gpu-specs/{spec_id}",
+      "scope": "scope:gpu-inventory:read"
     },
     {
       "operationId": "liveness",
@@ -267,6 +375,72 @@
       "method": "GET",
       "path": "/instances/{instance_id}/operations",
       "scope": "scope:instances:read"
+    },
+    {
+      "operationId": "listSandboxCheckpoints",
+      "method": "GET",
+      "path": "/instances/{instance_id}/sandbox/checkpoints",
+      "scope": "scope:instances:read"
+    },
+    {
+      "operationId": "createSandboxCheckpoint",
+      "method": "POST",
+      "path": "/instances/{instance_id}/sandbox/checkpoints",
+      "scope": "scope:instances:update"
+    },
+    {
+      "operationId": "cloneSandboxCheckpoint",
+      "method": "POST",
+      "path": "/instances/{instance_id}/sandbox/checkpoints/{checkpoint_id}/clone",
+      "scope": "scope:instances:create"
+    },
+    {
+      "operationId": "restoreSandboxCheckpoint",
+      "method": "POST",
+      "path": "/instances/{instance_id}/sandbox/checkpoints/{checkpoint_id}/restore",
+      "scope": "scope:instances:update"
+    },
+    {
+      "operationId": "createSandboxCodeRun",
+      "method": "POST",
+      "path": "/instances/{instance_id}/sandbox/code-runs",
+      "scope": "scope:instances:exec"
+    },
+    {
+      "operationId": "deleteSandboxFile",
+      "method": "DELETE",
+      "path": "/instances/{instance_id}/sandbox/files",
+      "scope": "scope:instances:update"
+    },
+    {
+      "operationId": "listSandboxFiles",
+      "method": "GET",
+      "path": "/instances/{instance_id}/sandbox/files",
+      "scope": "scope:instances:read"
+    },
+    {
+      "operationId": "writeSandboxFile",
+      "method": "POST",
+      "path": "/instances/{instance_id}/sandbox/files",
+      "scope": "scope:instances:update"
+    },
+    {
+      "operationId": "createSandboxPort",
+      "method": "POST",
+      "path": "/instances/{instance_id}/sandbox/ports",
+      "scope": "scope:instances:update"
+    },
+    {
+      "operationId": "deleteSandboxPort",
+      "method": "DELETE",
+      "path": "/instances/{instance_id}/sandbox/ports/{port}",
+      "scope": "scope:instances:update"
+    },
+    {
+      "operationId": "createSandboxToken",
+      "method": "POST",
+      "path": "/instances/{instance_id}/sandbox/tokens",
+      "scope": "scope:instances:exec"
     },
     {
       "operationId": "listInstanceSecurityEvents",
@@ -833,9 +1007,39 @@
       "scope": "scope:vector-stores:read"
     },
     {
+      "operationId": "precheckVectorStoreDelete",
+      "method": "GET",
+      "path": "/vector-stores/{vector_store_id}/delete-precheck",
+      "scope": "scope:vector-stores:read"
+    },
+    {
+      "operationId": "deleteVectorStoreDocuments",
+      "method": "DELETE",
+      "path": "/vector-stores/{vector_store_id}/documents",
+      "scope": "scope:vector-stores:delete"
+    },
+    {
       "operationId": "insertVectorStoreDocuments",
       "method": "POST",
       "path": "/vector-stores/{vector_store_id}/documents",
+      "scope": "scope:vector-stores:write"
+    },
+    {
+      "operationId": "deleteVectorStoreKnowledgeBaseLink",
+      "method": "DELETE",
+      "path": "/vector-stores/{vector_store_id}/knowledge-base-link",
+      "scope": "scope:vector-stores:write"
+    },
+    {
+      "operationId": "setVectorStoreKnowledgeBaseLink",
+      "method": "PUT",
+      "path": "/vector-stores/{vector_store_id}/knowledge-base-link",
+      "scope": "scope:vector-stores:write"
+    },
+    {
+      "operationId": "rebuildVectorStoreIndex",
+      "method": "POST",
+      "path": "/vector-stores/{vector_store_id}/rebuild-index",
       "scope": "scope:vector-stores:write"
     },
     {
@@ -869,6 +1073,36 @@
       "scope": "scope:volumes:read"
     },
     {
+      "operationId": "setVolumeAutoSnapshotPolicy",
+      "method": "PUT",
+      "path": "/volumes/{volume_id}/auto-snapshot-policy",
+      "scope": "scope:volumes:update"
+    },
+    {
+      "operationId": "expandStorageVolume",
+      "method": "POST",
+      "path": "/volumes/{volume_id}/expand",
+      "scope": "scope:volumes:update"
+    },
+    {
+      "operationId": "mountStorageVolume",
+      "method": "POST",
+      "path": "/volumes/{volume_id}/mount",
+      "scope": "scope:volumes:update"
+    },
+    {
+      "operationId": "completeVolumeOSInit",
+      "method": "POST",
+      "path": "/volumes/{volume_id}/os-init-complete",
+      "scope": "scope:volumes:update"
+    },
+    {
+      "operationId": "getVolumeOSInitGuide",
+      "method": "GET",
+      "path": "/volumes/{volume_id}/os-init-guide",
+      "scope": "scope:volumes:read"
+    },
+    {
       "operationId": "listVolumeSnapshots",
       "method": "GET",
       "path": "/volumes/{volume_id}/snapshots",
@@ -879,6 +1113,18 @@
       "method": "POST",
       "path": "/volumes/{volume_id}/snapshots",
       "scope": "scope:volumes:create"
+    },
+    {
+      "operationId": "createStorageVolumeFromSnapshot",
+      "method": "POST",
+      "path": "/volumes/{volume_id}/snapshots/{snapshot_id}/create-volume",
+      "scope": "scope:volumes:create"
+    },
+    {
+      "operationId": "unmountStorageVolume",
+      "method": "POST",
+      "path": "/volumes/{volume_id}/unmount",
+      "scope": "scope:volumes:update"
     }
   ],
   "schemas": [
@@ -886,6 +1132,11 @@
     "AsyncTask",
     "BeginOIDCLoginRequest",
     "BeginOIDCLoginResponse",
+    "BucketObjectDeleteResponse",
+    "BucketObjectPresignedURLRequest",
+    "BucketObjectUploadRequest",
+    "BucketPrefixCreateRequest",
+    "CloneSandboxCheckpointRequest",
     "CompleteOIDCLoginRequest",
     "CoreDevProfileInfo",
     "CreateAPIKeyRequest",
@@ -907,9 +1158,14 @@
     "CreateObservabilityAlertRuleRequest",
     "CreateRegistryProjectRequest",
     "CreateRegistryPullSecretRequest",
+    "CreateSandboxCheckpointRequest",
+    "CreateSandboxCodeRunRequest",
+    "CreateSandboxPortRequest",
+    "CreateSandboxTokenRequest",
     "CreateStorageBucketRequest",
     "CreateStorageFilesystemRequest",
     "CreateStorageObjectRequest",
+    "CreateStorageVolumeFromSnapshotRequest",
     "CreateStorageVolumeRequest",
     "CreateVMInstanceConfig",
     "CreateVectorStoreRequest",
@@ -931,7 +1187,10 @@
     "EncryptionUnsealTokenRequest",
     "EncryptionUnsealTokenResponse",
     "ErrorResponse",
+    "FilesystemAttachment",
+    "FilesystemMountCommand",
     "FilesystemMountTarget",
+    "FilesystemMountTargetCreateRequest",
     "FilesystemMountTargetListResponse",
     "GPUInventoryListResponse",
     "GPUInventoryRecord",
@@ -940,21 +1199,35 @@
     "GPUSchedulingQueueCreateRequest",
     "GPUSchedulingQueueListResponse",
     "GPUSchedulingQueueUpdateRequest",
+    "GPUSpecListResponse",
+    "GPUSpecSummary",
     "HealthCheck",
+    "InstanceAccessSummary",
+    "InstanceComputeSummary",
     "InstanceConsoleSession",
+    "InstanceDiskSpec",
+    "InstanceEnvVar",
     "InstanceEvent",
     "InstanceEventListResponse",
     "InstanceExecSession",
+    "InstanceFilesystemMount",
+    "InstanceImageSummary",
     "InstanceLifecycleRequest",
     "InstanceLifecycleResponse",
     "InstanceListResponse",
     "InstanceLogEntry",
     "InstanceLogListResponse",
     "InstanceMetrics",
+    "InstanceNetworkConfig",
+    "InstanceNetworkSummary",
     "InstanceOperation",
+    "InstancePortSpec",
     "InstanceRecord",
     "InstanceSecurityEvent",
     "InstanceSecurityEventListResponse",
+    "InstanceStorageAttachment",
+    "InstanceVolumeMount",
+    "InstanceWorkloadIdentityConfig",
     "K8sCluster",
     "K8sClusterCreateRequest",
     "K8sClusterKubeconfig",
@@ -1035,11 +1308,19 @@
     "RegistryScanResult",
     "ReportTokenUsageRequest",
     "RevokeStatusResponse",
+    "SandboxCheckpoint",
+    "SandboxCheckpointActionRequest",
+    "SandboxCheckpointListResponse",
+    "SandboxCodeRun",
     "SandboxConfig",
+    "SandboxFile",
+    "SandboxFileListResponse",
     "SandboxInstanceStatus",
     "SandboxNetworkEgressPolicy",
+    "SandboxPort",
     "SandboxTemplate",
     "SandboxTemplateListResponse",
+    "SandboxTokenResponse",
     "Secret",
     "SecretBinding",
     "SecretBindingRequest",
@@ -1047,10 +1328,21 @@
     "SecretListResponse",
     "SendTestEmailResponse",
     "SetRegistryPermissionRequest",
+    "StorageBucketACLUpdateRequest",
+    "StorageBucketClassUpdateRequest",
+    "StorageBucketLifecycleRule",
+    "StorageBucketLifecycleRuleCreateRequest",
+    "StorageBucketLifecycleRuleListResponse",
+    "StorageBucketLifecycleRulesUpdateRequest",
     "StorageBucketListResponse",
+    "StorageBucketObjectEntry",
+    "StorageBucketObjectListResponse",
     "StorageBucketRecord",
     "StorageFilesystem",
+    "StorageFilesystemExpandRequest",
     "StorageFilesystemListResponse",
+    "StorageFilesystemMountRequest",
+    "StorageFilesystemUnmountRequest",
     "StorageObject",
     "StorageObjectDownloadInfo",
     "StorageObjectListResponse",
@@ -1058,34 +1350,65 @@
     "StorageObjectUploadResponse",
     "StorageResourceState",
     "StorageVolume",
+    "StorageVolumeAutoSnapshotPolicy",
+    "StorageVolumeAutoSnapshotPolicyUpdateRequest",
+    "StorageVolumeExpandRequest",
     "StorageVolumeListResponse",
+    "StorageVolumeMountHistoryEntry",
+    "StorageVolumeMountRequest",
+    "StorageVolumeUnmountRequest",
     "TokenPairResponse",
     "TokenUsageReport",
     "UpdateEmailRecipientRequest",
     "UpdateNetworkSecurityGroupRuleRequest",
     "UpdateObservabilityAlertRuleRequest",
     "VectorStore",
+    "VectorStoreDeletePrecheck",
+    "VectorStoreDocumentDeleteResponse",
     "VectorStoreDocumentInsertRequest",
     "VectorStoreDocumentInsertResponse",
+    "VectorStoreIndexStatus",
+    "VectorStoreKnowledgeBaseLinkRequest",
+    "VectorStoreKnowledgeBaseRef",
     "VectorStoreListResponse",
     "VectorStoreSearchHit",
     "VectorStoreSearchRequest",
     "VectorStoreSearchResponse",
     "VectorStoreState",
+    "VolumeOSInitCompleteRequest",
+    "VolumeOSInitGuide",
     "VolumeSnapshotListResponse",
     "VolumeSnapshotRecord",
-    "WorkloadIdentityBinding"
+    "WorkloadIdentityBinding",
+    "WriteSandboxFileRequest"
   ],
   "idempotencyOperations": [
     "createStorageBucket",
+    "setStorageBucketACL",
+    "createStorageBucketLifecycleRule",
+    "setStorageBucketLifecycleRules",
+    "uploadBucketObject",
+    "createBucketPrefix",
+    "setStorageBucketClass",
     "createEncryptionKey",
     "revokeEncryptionKey",
     "rotateEncryptionKey",
     "sealEncryptionObject",
     "createStorageFilesystem",
+    "expandStorageFilesystem",
+    "mountStorageFilesystem",
+    "createFilesystemMountTarget",
+    "unmountStorageFilesystem",
     "createInstance",
     "createInstanceExecSession",
     "applyInstanceLifecycle",
+    "createSandboxCheckpoint",
+    "cloneSandboxCheckpoint",
+    "restoreSandboxCheckpoint",
+    "createSandboxCodeRun",
+    "writeSandboxFile",
+    "createSandboxPort",
+    "createSandboxToken",
     "createK8sCluster",
     "createK8sClusterNodePool",
     "updateK8sClusterNodePool",
@@ -1109,18 +1432,31 @@
     "createSecret",
     "createVectorStore",
     "insertVectorStoreDocuments",
+    "setVectorStoreKnowledgeBaseLink",
     "createStorageVolume",
-    "createVolumeSnapshot"
+    "setVolumeAutoSnapshotPolicy",
+    "expandStorageVolume",
+    "mountStorageVolume",
+    "completeVolumeOSInit",
+    "createVolumeSnapshot",
+    "createStorageVolumeFromSnapshot",
+    "unmountStorageVolume"
   ],
   "cursorPaginationOperations": [
     "listStorageBuckets",
+    "listBucketObjects",
     "listEncryptionKeys",
     "listStorageFilesystems",
     "listFilesystemMountTargets",
     "listGPUInventory",
+    "listGPUSpecs",
     "listInstances",
+    "listInstanceEvents",
     "listInstanceLogs",
     "listInstanceOperations",
+    "listSandboxCheckpoints",
+    "listSandboxFiles",
+    "listInstanceSecurityEvents",
     "listK8sClusters",
     "listK8sClusterWorkloads",
     "listNetworkLoadBalancers",
@@ -1148,10 +1484,13 @@
     "CONFLICT",
     "FORBIDDEN",
     "INTERNAL_ERROR",
+    "INVALID_FILTER",
     "NOT_FOUND",
     "NOT_IMPLEMENTED",
     "PRECONDITION_FAILED",
     "RATE_LIMIT_EXCEEDED",
-    "UNAUTHORIZED"
+    "UNAUTHORIZED",
+    "UNAVAILABLE",
+    "VECTOR_STORE_NOT_FOUND"
   ]
 }

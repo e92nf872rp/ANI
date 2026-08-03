@@ -67,7 +67,7 @@ B4 已完成 Loki + Fluent Bit 推荐部署示例 yaml，live 部署在三节点
 - `rewritePromQLLabels` 在 lookup nil 时返回 error（不 panic），QueryRange 降级返回空结果
 - router.go 调整注册顺序：demo instances 先注册，拿其 service（实现 InstanceLookup 接口）注入到 ObservabilityService，再注册 observability 路由
 
-**Rationale:** 
+**Rationale:**
 - 前端 `renderPromQL` 把 `instance.id`（如 `inst_1`）同时注入 namespace/pod 占位符，后端 `rewritePromQLLabels` 用它查实例记录，拿到真实 namespace（`ani-tenant-00000000-...`）和 pod 正则（`^demo-preview-nginx(-.*)?$`），链路完全正确
 - 延迟注入避免破坏现有契约（其他调用方仍可在构造时传入 lookup）
 - 类型断言注入（`*PrometheusObservabilityService`）只在 router 启动阶段执行一次，无运行时并发风险

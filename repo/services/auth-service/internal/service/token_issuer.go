@@ -56,7 +56,38 @@ func (i *JWTIssuer) IssueAccessToken(principal refreshPrincipal, ttl time.Durati
 		TenantID:  principal.TenantID.String(),
 		UserID:    principal.UserID.String(),
 		Roles:     principal.Roles,
+		Scope:     "tenant",
 	}
+	return i.sign(payload)
+}
+
+// IssuePlatformAccessToken signs an access token for a platform admin.
+// The token carries scope=platform, no tenant_id, and roles=["platform-admin"].
+func (i *JWTIssuer) IssuePlatformAccessToken(principal platformPrincipal, ttl time.Duration) (string, error) {
+	if ttl <= 0 {
+		ttl = defaultAccessTokenTTL
+	}
+	now := i.now()
+	roles := principal.Roles
+	if len(roles) == 0 {
+		roles = []string{"platform-admin"}
+	}
+	payload := jwtPayload{
+		Subject:   principal.UserID.String(),
+		Issuer:    i.issuer,
+		Expires:   now.Add(ttl).Unix(),
+		NotBefore: now.Unix(),
+		IssuedAt:  now.Unix(),
+		JTI:       uuid.NewString(),
+		TenantID:  "",
+		UserID:    principal.UserID.String(),
+		Roles:     roles,
+		Scope:     "platform",
+	}
+	return i.sign(payload)
+}
+
+func (i *JWTIssuer) sign(payload jwtPayload) (string, error) {
 	header := jwtHeader{Alg: "RS256", Typ: "JWT"}
 	headerSegment, err := encodeJWTJSON(header)
 	if err != nil {

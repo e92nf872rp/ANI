@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/kubercloud/ani/pkg/adapters/postgres"
 	authv1 "github.com/kubercloud/ani/pkg/generated/pb/auth/v1"
 	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 	"github.com/kubercloud/ani/pkg/ports"
@@ -25,6 +26,8 @@ type AuthService struct {
 	refreshTokens refreshTokenStore
 	blocklist     tokenBlocklist
 	oidc          *oidcLoginManager
+	passwordLogin *passwordLoginManager
+	platformLogin *platformLoginManager
 }
 
 func NewAuthService(db *pgxpool.Pool, cache ports.CacheStore, jwtCfg JWTConfig) *AuthService {
@@ -44,6 +47,8 @@ func NewAuthService(db *pgxpool.Pool, cache ports.CacheStore, jwtCfg JWTConfig) 
 		refreshTokens: newRefreshTokenStore(db),
 		blocklist:     blocklist,
 		oidc:          newOIDCLoginManager(cache, jwtCfg, newOIDCSessionStore(db, newOIDCGroupRoleMapper(jwtCfg.OIDCGroupRoleMapJSON)), issuer),
+		passwordLogin: newPasswordLoginManager(postgres.NewPasswordLoginStore(db), issuer),
+		platformLogin: newPlatformLoginManager(postgres.NewPlatformLoginStore(db), issuer),
 	}
 }
 
@@ -51,8 +56,18 @@ func (s *AuthService) Register(server *grpc.Server) {
 	authv1.RegisterAuthServiceServer(server, s)
 }
 
-func (s *AuthService) Login(context.Context, *authv1.LoginRequest) (*authv1.TokenPair, error) {
-	return nil, status.Error(codes.Unimplemented, "login requires Dex/OIDC integration")
+func (s *AuthService) Login(ctx context.Context, req *authv1.LoginRequest) (*authv1.TokenPair, error) {
+	if s == nil || s.passwordLogin == nil {
+		return nil, status.Error(codes.Unimplemented, "login is not configured")
+	}
+	return s.passwordLogin.Login(ctx, req.GetTenantName(), req.GetUsername(), req.GetPassword())
+}
+
+func (s *AuthService) PlatformPasswordLogin(ctx context.Context, req *authv1.PlatformPasswordLoginRequest) (*authv1.TokenPair, error) {
+	if s == nil || s.platformLogin == nil {
+		return nil, status.Error(codes.Unimplemented, "platform login is not configured")
+	}
+	return s.platformLogin.Login(ctx, req.GetUsername(), req.GetPassword())
 }
 
 func (s *AuthService) BeginOIDCLogin(ctx context.Context, req *authv1.BeginOIDCLoginRequest) (*authv1.BeginOIDCLoginResponse, error) {
@@ -74,7 +89,18 @@ func (s *AuthService) RefreshToken(ctx context.Context, req *authv1.RefreshToken
 	if err != nil {
 		return nil, status.Error(codes.Unauthenticated, "invalid refresh token")
 	}
-	token, err := s.issuer.IssueAccessToken(principal, defaultAccessTokenTTL)
+	// 按 scope 分流：平台 refresh token (tenant_id IS NULL) 续期为平台 access token，
+	// 租户 refresh token 续期为租户 access token。混用会让平台 token 降级为
+	// scope=tenant + tid=零值 UUID，被 jwt.go 校验拒绝。
+	var token string
+	if principal.Scope == "platform" {
+		token, err = s.issuer.IssuePlatformAccessToken(
+			platformPrincipal{UserID: principal.UserID, Roles: principal.Roles},
+			defaultAccessTokenTTL,
+		)
+	} else {
+		token, err = s.issuer.IssueAccessToken(principal, defaultAccessTokenTTL)
+	}
 	if err != nil {
 		return nil, status.Error(codes.Internal, "failed to issue access token")
 	}
@@ -110,6 +136,7 @@ func (s *AuthService) ValidateToken(ctx context.Context, req *authv1.ValidateTok
 			TenantId: principal.TenantID.String(),
 			UserId:   uuidString(principal.UserID),
 			Roles:    append([]string{"service-account"}, principal.Scopes...),
+			Scope:    "tenant",
 		}, nil
 	}
 	if s.jwt == nil {
@@ -119,10 +146,15 @@ func (s *AuthService) ValidateToken(ctx context.Context, req *authv1.ValidateTok
 	if err != nil {
 		return nil, status.Error(codes.Unauthenticated, "invalid token")
 	}
+	scope := claims.Scope
+	if scope == "" {
+		scope = "tenant"
+	}
 	return &commonv1.TenantContext{
 		TenantId: claims.TenantID.String(),
 		UserId:   claims.UserID.String(),
 		Roles:    claims.Roles,
+		Scope:    scope,
 	}, nil
 }
 

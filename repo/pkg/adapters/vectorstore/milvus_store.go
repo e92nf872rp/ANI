@@ -143,6 +143,19 @@ func (s *MilvusVectorStore) Delete(ctx context.Context, ref ports.VectorCollecti
 	return s.doMilvus(ctx, "/v2/vectordb/entities/delete", body, nil, nil)
 }
 
+func (s *MilvusVectorStore) DeleteByExpr(ctx context.Context, ref ports.VectorCollectionRef, expr string) (int, error) {
+	if strings.TrimSpace(expr) == "" {
+		return 0, fmt.Errorf("%w: filter expression is required", ports.ErrInvalid)
+	}
+	body := s.collectionPayload(ref)
+	body["filter"] = expr
+	var response milvusResponse
+	if err := s.doMilvus(ctx, "/v2/vectordb/entities/delete", body, &response, nil); err != nil {
+		return 0, err
+	}
+	return milvusDeleteCount(response.Data), nil
+}
+
 func (s *MilvusVectorStore) Health(ctx context.Context) error {
 	body := map[string]any{}
 	if s.database != "" {
@@ -275,6 +288,9 @@ func (s *MilvusVectorStore) collectionName(ref ports.VectorCollectionRef) string
 	if safe == "" {
 		return "ani_vector_collection"
 	}
+	if safe[0] >= '0' && safe[0] <= '9' {
+		safe = "ani_" + safe
+	}
 	if len(safe) > 255 {
 		return safe[:255]
 	}
@@ -372,6 +388,8 @@ func milvusHTTPError(statusCode int, body string) error {
 		return fmt.Errorf("%w: Milvus HTTP %d", ports.ErrFailedPrecondition, statusCode)
 	case http.StatusBadRequest:
 		return fmt.Errorf("%w: Milvus HTTP %d: %s", ports.ErrInvalid, statusCode, strings.TrimSpace(body))
+	case http.StatusServiceUnavailable:
+		return fmt.Errorf("%w: Milvus HTTP %d: %s", ports.ErrUnavailable, statusCode, strings.TrimSpace(body))
 	default:
 		return fmt.Errorf("milvus HTTP %d: %s", statusCode, strings.TrimSpace(body))
 	}
@@ -405,6 +423,22 @@ func milvusSearchResults(data json.RawMessage) []ports.VectorSearchResult {
 		results = append(results, ports.VectorSearchResult{ID: id, Score: score, Metadata: metadata})
 	}
 	return results
+}
+
+func milvusDeleteCount(data json.RawMessage) int {
+	var payload struct {
+		DeleteCount int `json:"deleteCount"`
+	}
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return 0
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return 0
+	}
+	if payload.DeleteCount < 0 {
+		return 0
+	}
+	return payload.DeleteCount
 }
 
 func float32Number(value any) float32 {

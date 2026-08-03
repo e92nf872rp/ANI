@@ -28,7 +28,8 @@ func RBACWithClient(authClient AuthClient) app.HandlerFunc {
 			return
 		}
 		tenantID := GetTenantID(c)
-		if tenantID == "" {
+		scope := GetScope(c)
+		if tenantID == "" && scope != "platform" {
 			// Auth middleware should have already rejected unauthenticated requests.
 			respondError(c, http.StatusForbidden, "FORBIDDEN", "tenant context missing")
 			return
