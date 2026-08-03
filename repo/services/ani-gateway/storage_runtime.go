@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -38,6 +39,8 @@ type gatewayStorageRuntimeConfig struct {
 	ObjectStoreBucketPrefix           string
 	ObjectStoreHTTPClient             *http.Client
 	ObjectStoreRequestTimeout         time.Duration
+	DatabaseURL                       string
+	MetadataStore                     ports.MetadataStore
 }
 
 func gatewayStorageRuntimeConfigFromEnv() gatewayStorageRuntimeConfig {
@@ -65,11 +68,24 @@ func gatewayStorageRuntimeConfigFromEnv() gatewayStorageRuntimeConfig {
 		ObjectStoreSecure:                 strings.EqualFold(strings.TrimSpace(os.Getenv("OBJECT_STORE_SECURE")), "true"),
 		ObjectStoreBucketPrefix:           os.Getenv("OBJECT_STORE_BUCKET_PREFIX"),
 		ObjectStoreRequestTimeout:         gatewayDurationFromEnv("OBJECT_STORE_REQUEST_TIMEOUT"),
+		DatabaseURL:                       os.Getenv("DATABASE_URL"),
 	}
 }
 
-func newGatewayStorageService(cfg gatewayStorageRuntimeConfig) (ports.StorageService, error) {
+func newGatewayStorageService(ctx context.Context, cfg gatewayStorageRuntimeConfig) (ports.StorageService, func(), error) {
+	closeRuntime := func() {}
 	options := []runtimeadapter.StorageServiceOption{}
+
+	needsStore := storageNeedsControlPlaneStore(cfg)
+	if needsStore {
+		store, closeStore, err := connectStorageControlPlaneStore(ctx, cfg.DatabaseURL, cfg.MetadataStore)
+		if err != nil {
+			return nil, closeRuntime, err
+		}
+		closeRuntime = closeStore
+		options = append(options, runtimeadapter.WithStorageResourceStore(runtimeadapter.NewMetadataStorageStore(store)))
+	}
+
 	if strings.TrimSpace(cfg.ObjectStoreProvider) == "minio" {
 		store, err := objectstore.NewMinIOObjectStore(objectstore.MinIOObjectStoreConfig{
 			Endpoint:        cfg.ObjectStoreEndpoint,
@@ -85,7 +101,8 @@ func newGatewayStorageService(cfg gatewayStorageRuntimeConfig) (ports.StorageSer
 			RequestTimeout:  cfg.ObjectStoreRequestTimeout,
 		})
 		if err != nil {
-			return nil, err
+			closeRuntime()
+			return nil, func() {}, err
 		}
 		options = append(options, runtimeadapter.WithStorageObjectStore(store))
 	}
@@ -93,12 +110,13 @@ func newGatewayStorageService(cfg gatewayStorageRuntimeConfig) (ports.StorageSer
 	switch mode := strings.TrimSpace(cfg.ProviderMode); mode {
 	case "", "local", "not_configured":
 		if len(options) > 0 {
-			return runtimeadapter.NewLocalStorageService(options...), nil
+			return runtimeadapter.NewLocalStorageService(options...), closeRuntime, nil
 		}
-		return nil, nil
+		return nil, closeRuntime, nil
 	case "kubernetes_rest":
 		if strings.TrimSpace(cfg.ProviderUserID) == "" || strings.TrimSpace(cfg.ProviderProof) == "" {
-			return nil, fmt.Errorf("%w: storage provider requires STORAGE_PROVIDER_USER_ID and STORAGE_PROVIDER_PERMISSION_PROOF", ports.ErrInvalid)
+			closeRuntime()
+			return nil, func() {}, fmt.Errorf("%w: storage provider requires STORAGE_PROVIDER_USER_ID and STORAGE_PROVIDER_PERMISSION_PROOF", ports.ErrInvalid)
 		}
 		client, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
 			Host:            cfg.KubernetesAPIHost,
@@ -112,7 +130,8 @@ func newGatewayStorageService(cfg gatewayStorageRuntimeConfig) (ports.StorageSer
 			RequestTimeout:  cfg.KubernetesRequestTimeout,
 		})
 		if err != nil {
-			return nil, err
+			closeRuntime()
+			return nil, func() {}, err
 		}
 		provider := runtimeadapter.NewKubernetesStorageProviderAdapter(
 			client,
@@ -130,8 +149,9 @@ func newGatewayStorageService(cfg gatewayStorageRuntimeConfig) (ports.StorageSer
 				},
 			),
 		)
-		return runtimeadapter.NewLocalStorageService(options...), nil
+		return runtimeadapter.NewLocalStorageService(options...), closeRuntime, nil
 	default:
-		return nil, fmt.Errorf("%w: unsupported STORAGE_PROVIDER %q", ports.ErrUnsupported, mode)
+		closeRuntime()
+		return nil, func() {}, fmt.Errorf("%w: unsupported STORAGE_PROVIDER %q", ports.ErrUnsupported, mode)
 	}
 }

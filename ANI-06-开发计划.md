@@ -107,6 +107,7 @@ Registry Console Flow（2026-07-22）：
 Storage Console APIs（2026-07-24）：
 - CORE-STORAGE-CONSOLE-APIS-BACKEND-A：上游 PR #71 存储模块 v1 契约合入后，Core 后端补齐对象桶、块卷、文件系统和向量库管理接口的 ports/local service/gateway handlers 与后端 HTTP E2E/API 测试；2026-07-27 本地 Gateway + 真实依赖复验 Rook-Ceph/MinIO/Milvus 后端 E2E 通过；不含 Console/BOSS 前端，不升级为 production-shaped Gateway 结论。
 - STORAGE-ASYNC-CORRECTNESS-A：2026-08-03 live passed；保持 Core v1 Vector 文档写入 `202 + VectorStoreDocumentInsertResponse`，补齐 `Location`、`vector_store.document.insert` 和 PG AsyncTask；真实 Milvus 写入后任务落 PG，Gateway rollout 后原 task ID 仍返回 200；evidence `repo/development-records/live-evidence/storage-async-vector-task-live-20260803.json`；不外推为 full platform production ready。
+- STORAGE-CONTROL-PLANE-STATE-A：2026-08-03 B4 live passed；B1 冻结现有 v1；B2 `20260803_001_storage_control_plane_state.sql` 真实 PG 已 apply；B3 Storage/Vector Store+Service 以 PG 为权威；B4 Gateway 缺 `DATABASE_URL`/schema fail-closed + `validate-storage-control-plane-state` / `validate-storage-control-plane-state-live-gate` production-shaped passed（Gateway rollout 后回读/幂等/墓碑）；evidence `repo/development-records/live-evidence/storage-control-plane-state-live-20260803.json`；记录 `repo/development-records/storage-control-plane-state-a.md`；不含 Console / full platform production ready。
 
 Instance Observability Completion 增量补全（2026-07，PR4 分支）：
 - 分支：`feat/instance-observability-pr4`，对应 SPEC `spec-console-instance-observability-completion.md` 的 16 个设计决策、12 个 User Story 和 8 个批次（B-1~B-8），共 13 个批次记录已归档。

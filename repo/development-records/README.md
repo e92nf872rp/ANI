@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### Storage Control Plane State（2026-08）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| STORAGE-CONTROL-PLANE-STATE-A | B4 live passed：现有 v1 冻结；PG migration 已 apply；Store/Service 以 PG 为权威；Gateway 缺 `DATABASE_URL`/schema fail-closed + `validate-storage-control-plane-state-live-gate` production-shaped passed（rollout 回读/幂等/墓碑）；evidence `live-evidence/storage-control-plane-state-live-20260803.json`；不含 Console | storage-control-plane-state-a.md |
+
 ### Storage Async Correctness（2026-08）
 
 | 批次 | 内容摘要 | 文件 |

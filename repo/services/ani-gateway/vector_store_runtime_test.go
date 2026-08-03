@@ -4,18 +4,30 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
 func TestGatewayVectorStoreServiceFromConfigDefaultsToRouterLocalService(t *testing.T) {
-	service, err := newGatewayVectorStoreService(gatewayVectorStoreRuntimeConfig{})
+	service, closeRuntime, err := newGatewayVectorStoreService(context.Background(), gatewayVectorStoreRuntimeConfig{})
 	if err != nil {
 		t.Fatalf("newGatewayVectorStoreService() error = %v", err)
 	}
+	defer closeRuntime()
 	if service != nil {
 		t.Fatalf("service = %T, want nil so router keeps local default", service)
+	}
+}
+
+func TestGatewayVectorStoreServiceRequiresDatabaseURLForMilvus(t *testing.T) {
+	_, _, err := newGatewayVectorStoreService(context.Background(), gatewayVectorStoreRuntimeConfig{
+		VectorStoreProvider: "milvus",
+		VectorStoreEndpoint: "http://milvus.internal:19530",
+	})
+	if err == nil || !strings.Contains(err.Error(), "DATABASE_URL") {
+		t.Fatalf("newGatewayVectorStoreService() error = %v, want DATABASE_URL required", err)
 	}
 }
 
@@ -48,23 +60,25 @@ func TestGatewayVectorStoreServiceCanInjectMilvusBackend(t *testing.T) {
 		}
 	})}
 
-	service, err := newGatewayVectorStoreService(gatewayVectorStoreRuntimeConfig{
+	service, closeRuntime, err := newGatewayVectorStoreService(context.Background(), gatewayVectorStoreRuntimeConfig{
 		VectorStoreProvider:         "milvus",
 		VectorStoreEndpoint:         "http://milvus.internal:19530",
 		VectorStoreToken:            "milvus-token",
 		VectorStoreDatabase:         "ani",
 		VectorStoreCollectionPrefix: "ani_s13_",
 		VectorStoreHTTPClient:       client,
+		MetadataStore:               newStubControlPlaneMetadataStore(),
 	})
 	if err != nil {
 		t.Fatalf("newGatewayVectorStoreService() error = %v", err)
 	}
+	defer closeRuntime()
 	if service == nil {
 		t.Fatal("service = nil, want Milvus-backed vector store service")
 	}
 
 	store, err := service.CreateVectorStore(context.Background(), ports.VectorStoreCreateRequest{
-		TenantID:       "tenant-a",
+		TenantID:       "11111111-1111-1111-1111-111111111111",
 		IdempotencyKey: "vector-create-a",
 		Name:           "kb-main",
 		Dimension:      3,
@@ -74,7 +88,7 @@ func TestGatewayVectorStoreServiceCanInjectMilvusBackend(t *testing.T) {
 		t.Fatalf("CreateVectorStore() error = %v", err)
 	}
 	result, err := service.InsertDocuments(context.Background(), ports.VectorStoreDocumentInsertRequest{
-		TenantID:       "tenant-a",
+		TenantID:       "11111111-1111-1111-1111-111111111111",
 		ResourceID:     store.StoreID,
 		IdempotencyKey: "vector-insert-a",
 		Documents: []ports.VectorDocumentInput{
@@ -85,7 +99,7 @@ func TestGatewayVectorStoreServiceCanInjectMilvusBackend(t *testing.T) {
 		t.Fatalf("InsertDocuments() error = %v", err)
 	}
 	hits, err := service.SearchVectorStore(context.Background(), ports.VectorStoreResourceSearchRequest{
-		TenantID:   "tenant-a",
+		TenantID:   "11111111-1111-1111-1111-111111111111",
 		ResourceID: store.StoreID,
 		Vector:     []float32{0.1, 0.2, 0.3},
 		TopK:       1,
@@ -110,6 +124,7 @@ func TestGatewayVectorStoreConfigFromEnvIncludesMilvusProvider(t *testing.T) {
 	t.Setenv("VECTOR_STORE_TOKEN", "milvus-token")
 	t.Setenv("VECTOR_STORE_DATABASE", "ani")
 	t.Setenv("VECTOR_STORE_COLLECTION_PREFIX", "ani_s13_")
+	t.Setenv("DATABASE_URL", "postgres://ani@ani-postgres:5432/ani")
 
 	cfg := gatewayVectorStoreRuntimeConfigFromEnv()
 	if cfg.VectorStoreProvider != "milvus" || cfg.VectorStoreEndpoint != "http://milvus.example:19530" {
@@ -121,10 +136,13 @@ func TestGatewayVectorStoreConfigFromEnvIncludesMilvusProvider(t *testing.T) {
 	if cfg.VectorStoreToken == "" || cfg.VectorStoreDatabase != "ani" || cfg.VectorStoreCollectionPrefix != "ani_s13_" {
 		t.Fatalf("vector store credentials/database/prefix not loaded from env")
 	}
+	if cfg.DatabaseURL == "" {
+		t.Fatal("DatabaseURL not loaded from env")
+	}
 }
 
 func TestGatewayVectorStoreServiceRejectsUnsupportedProvider(t *testing.T) {
-	if _, err := newGatewayVectorStoreService(gatewayVectorStoreRuntimeConfig{VectorStoreProvider: "memory"}); err == nil {
+	if _, _, err := newGatewayVectorStoreService(context.Background(), gatewayVectorStoreRuntimeConfig{VectorStoreProvider: "memory"}); err == nil {
 		t.Fatal("newGatewayVectorStoreService() error = nil, want unsupported provider error")
 	}
 }

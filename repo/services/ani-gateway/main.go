@@ -58,10 +58,13 @@ func main() {
 		logger.Error("failed to configure network provider runtime", "err", err)
 		os.Exit(1)
 	}
-	storageService, err := newGatewayStorageService(gatewayStorageRuntimeConfigFromEnv())
+	storageService, closeStorageRuntime, err := newGatewayStorageService(runtimeCtx, gatewayStorageRuntimeConfigFromEnv())
 	if err != nil {
 		logger.Error("failed to configure storage provider runtime", "err", err)
 		os.Exit(1)
+	}
+	if closeStorageRuntime != nil {
+		defer closeStorageRuntime()
 	}
 	imageRegistry, closeRegistryRuntime, err := newGatewayImageRegistry(runtimeCtx, gatewayRegistryRuntimeConfigFromEnv())
 	if err != nil {
@@ -100,16 +103,20 @@ func main() {
 		os.Exit(1)
 	}
 	vectorStoreRuntimeConfig := gatewayVectorStoreRuntimeConfigFromEnv()
-	vectorStoreService, err := newGatewayVectorStoreService(vectorStoreRuntimeConfig)
+	vectorStoreService, closeVectorStoreRuntime, err := newGatewayVectorStoreService(runtimeCtx, vectorStoreRuntimeConfig)
 	if err != nil {
 		logger.Error("failed to configure vector store provider runtime", "err", err)
 		os.Exit(1)
+	}
+	if closeVectorStoreRuntime != nil {
+		defer closeVectorStoreRuntime()
 	}
 	if vectorStoreService != nil {
 		logger.Info("vector store provider runtime configured",
 			"provider", strings.TrimSpace(vectorStoreRuntimeConfig.VectorStoreProvider),
 			"database_configured", strings.TrimSpace(vectorStoreRuntimeConfig.VectorStoreDatabase) != "",
 			"collection_prefix_configured", strings.TrimSpace(vectorStoreRuntimeConfig.VectorStoreCollectionPrefix) != "",
+			"control_plane_store", true,
 		)
 	}
 	instanceObservabilityRuntimeConfig := gatewayInstanceObservabilityRuntimeConfigFromEnv()

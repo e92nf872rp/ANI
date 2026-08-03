@@ -392,6 +392,52 @@ class OpenAPISpecValidatorTest(unittest.TestCase):
             schemas["AsyncTask"]["properties"]["task_type"]["enum"],
         )
 
+    def test_storage_p0_keeps_existing_v1_without_contract_changes(self) -> None:
+        """STORAGE-CONTROL-PLANE-STATE-A / B1: reuse current Core v1; no additive fields."""
+        spec = yaml.safe_load((ROOT / "api/openapi/v1.yaml").read_text(encoding="utf-8"))
+        schemas = spec["components"]["schemas"]
+
+        # P0 control-plane persistence must not invent VectorStore.description or similar.
+        self.assertNotIn("description", schemas["CreateVectorStoreRequest"]["properties"])
+        self.assertNotIn("description", schemas["VectorStore"]["properties"])
+
+        # Text-to-vector stays out of Core; search continues to accept vector only.
+        search_props = schemas["VectorStoreSearchRequest"]["properties"]
+        self.assertIn("vector", search_props)
+        self.assertNotIn("text", search_props)
+        self.assertNotIn("query", search_props)
+        self.assertEqual(schemas["VectorStoreSearchRequest"]["required"], ["vector"])
+
+        # Filesystem NFS client/CIDR ACL and SMB remain out of P0 contract surface.
+        for schema_name in (
+            "CreateStorageFilesystemRequest",
+            "StorageFilesystem",
+            "CreateStorageVolumeRequest",
+            "StorageVolume",
+        ):
+            props = schemas[schema_name]["properties"]
+            for forbidden in (
+                "client_cidrs",
+                "nfs_acl",
+                "smb_enabled",
+                "acl_rules",
+                "static_website",
+            ):
+                self.assertNotIn(forbidden, props, msg=f"{schema_name}.{forbidden}")
+
+        # Existing storage/vector resource surfaces required by P0 remain present.
+        for schema_name in (
+            "StorageVolume",
+            "VolumeSnapshotRecord",
+            "StorageFilesystem",
+            "FilesystemMountTarget",
+            "StorageBucketRecord",
+            "StorageObject",
+            "VectorStore",
+            "VectorStoreKnowledgeBaseRef",
+        ):
+            self.assertIn(schema_name, schemas)
+
     def test_async_accepted_responses_declare_polling_location(self) -> None:
         spec = yaml.safe_load((ROOT / "api/openapi/v1.yaml").read_text(encoding="utf-8"))
         schemas = spec["components"]["schemas"]

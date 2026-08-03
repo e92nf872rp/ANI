@@ -106,24 +106,21 @@ NETWORK-P0-CONTRACT-A             |
 
 ## 工作流 B：存储 `STORAGE-CONTROL-PLANE-STATE-A`
 
-### Task B1：提交存储 P0 纯契约 PR
+### Task B1：冻结存储 P0 现有契约范围（不改 v1）
 
 **文件：**
-- 修改：`repo/api/openapi/v1.yaml`
-- 修改：`repo/api/core-v1-compatibility-baseline.yaml`
 - 修改：`repo/scripts/validate_openapi_spec_test.py`
-- 生成：Core SDK 与静态 API 文档生成物
 
-**契约产出：**
-- `CreateVectorStoreRequest` 和 `VectorStore` 增加可选 `description`。
+**契约边界：**
+- 不修改 `repo/api/openapi/v1.yaml`；存储 P0 控制面状态收敛复用现有 volume/snapshot/filesystem/mount-target/object/vector/KB-link 契约。
+- 不新增 `VectorStore.description` 或其他公开字段。
 - 原型“文件系统权限”在本批只使用现有租户 RLS、挂载 attachment `read_only` 和安全组边界展示；未冻结 NFS client/CIDR ACL 语义前不新增字段。
 - 文本转向量不加入 Core；`VectorStoreSearchRequest` 继续只接收 vector。
 - SMB、跨区域对象复制、静态网站和完整 ACL 矩阵不进入 P0。
 
-- [ ] 写失败契约测试并验证现有 v1 不满足新增字段。
-- [ ] 修改契约、兼容性基线和生成物。
-- [ ] 运行 OpenAPI、兼容性、SDK 和架构门禁。
-- [ ] 停止等待契约 PR 批准；批准前不得在迁移中加入新字段。
+- [x] 增加契约回归断言，证明现有 v1 已覆盖 P0 存储资源面，且不引入 description/ACL/SMB/text-search 等新字段。
+- [x] 运行 `make validate-openapi-spec`、`make validate-core-api-compatibility` 和 `git diff --check`，证明不需要存储 v1 变更。
+- [x] 未发现必须改契约才能进入 B2；后续如发现缺口，停止实现并重新进入独立契约评审。
 
 ### Task B2：建立存储独立 PG migration 和 schema gate
 
@@ -133,12 +130,12 @@ NETWORK-P0-CONTRACT-A             |
 - 创建：`repo/scripts/validate_storage_control_plane_state_test.py`
 - 修改：`repo/Makefile`
 
-- [ ] 写 validator 失败用例，要求 volume、snapshot、mount history、filesystem、mount target、attachment、bucket、lifecycle rule、Core object metadata、vector store 和 KB link 表。
-- [ ] migration 使用 tenant-first key、复合外键、forced RLS、soft delete、state check 和资源内 create idempotency 唯一约束。
-- [ ] 旧 JSONB/旧列只做可验证的 additive backfill；格式异常时 migration 失败，不静默丢行。
-- [ ] 不保存对象正文、预签名 URL、embedding 或向量检索结果。
-- [ ] 运行 schema validator、迁移临时库测试和 `git diff --check`。
-- [ ] 停止等待真实 PG migration 人工批准。
+- [x] 写 validator 失败用例，要求 volume、snapshot、mount history、filesystem、mount target、attachment、bucket、lifecycle rule、Core object metadata、vector store 和 KB link 表。
+- [x] migration 使用 tenant-first key、复合外键、forced RLS、soft delete、state check 和资源内 create idempotency 唯一约束。
+- [x] 旧 JSONB/旧列只做可验证的 additive backfill；格式异常时 migration 失败，不静默丢行。
+- [x] 不保存对象正文、预签名 URL、embedding 或向量检索结果。
+- [x] 运行 schema validator（`make validate-storage-control-plane-state`）和 `git diff --check`；真实库 apply 待人工批准后执行。
+- [x] 真实 PG migration 已人工批准并 apply：`ani-system/ani-postgres-0` 上 `20260803_001_storage_control_plane_state.sql` COMMIT；brownfield 兼容已有 `storage_buckets`/`vector_stores`（`store_id`→`vector_store_id`，`idempotency_key` backfill）。
 
 ### Task B3：让 Storage Store 和 Service 以 PG 为权威
 
@@ -154,13 +151,13 @@ NETWORK-P0-CONTRACT-A             |
 - 修改：`repo/pkg/adapters/runtime/vector_store_service.go`
 - 修改：`repo/pkg/adapters/runtime/vector_store_service_test.go`
 
-- [ ] 先写两个 Service 实例共享同一 Store 的失败测试，覆盖 create/get/list/replay/delete 和跨租户隔离。
-- [ ] 为所有现有 v1 存储资源增加 typed Get/List/child aggregation Store 方法。
-- [ ] persistent Store 存在时，每次 GET/LIST 直接查询 PG，不从进程 map 返回。
-- [ ] Provider create 前提交 pending 行，Provider 调用后回写 available/failed；失败保留 reason 和可 reconcile 意图。
-- [ ] MinIO 保持对象内容和浏览权威；Milvus 保持 embedding/collection 数据权威；PG 保存控制面定义和摘要。
-- [ ] local profile 无 Store 时保留内存行为。
-- [ ] 跑 storage/vector store、service、provider 和 async task 测试。
+- [x] 先写两个 Service 实例共享同一 Store 的失败测试，覆盖 create/get/list/replay/delete 和跨租户隔离（`TestLocalStorageServiceSharedStoreIsReadAuthority`、`TestLocalVectorStoreServiceSharedStoreIsReadAuthority`）。
+- [x] 为现有 v1 存储资源增加 typed Get/List/child aggregation Store 方法：volume/filesystem/object/bucket/lifecycle/snapshot/mount-target + `VectorStoreResourceStore`（含 KB-link）；filesystem attachment 仍随 filesystem enrich，未独立 Store 表读写接口。
+- [x] persistent Store 存在时 GET/LIST 直读 Store：上述资源已切；MinIO 对象浏览与 signed URL 仍走 ObjectStore。
+- [x] Provider create 前提交 pending：volume/bucket/snapshot/mount-target/vector（有 backend 时）已按 pending→apply→回写。
+- [x] MinIO 保持对象内容和浏览权威；Milvus 保持 embedding/collection 数据权威；PG 保存控制面定义和摘要。
+- [x] local profile 无 Store 时保留内存行为。
+- [x] 跑 storage/vector store、service 聚焦测试通过；Gateway `DATABASE_URL` 接线留给 B4。
 
 ### Task B4：完成存储真实 Provider 行为和重启 gate
 
@@ -175,11 +172,11 @@ NETWORK-P0-CONTRACT-A             |
 - 创建：`repo/development-records/storage-control-plane-state-a.md`
 - 创建（执行后）：`repo/development-records/live-evidence/storage-control-plane-state-live-20260803.json`
 
-- [ ] real storage/vector profile 缺 DATABASE_URL、schema 不完整或 PG 不可达时 Gateway 启动失败。
-- [ ] live gate 创建最小 volume/snapshot/filesystem/mount-target/bucket/object/vector/KB-link 图。
-- [ ] Gateway rollout 后按原 ID 查询全部资源、关系和 async task。
-- [ ] 重放原 key 不增加 PG/Provider 资源；同 key 不同 intent 返回冲突。
-- [ ] 删除后 API 隐藏资源，PG 保留墓碑，Provider 临时资源清理为零。
+- [x] real storage/vector profile 缺 DATABASE_URL、schema 不完整或 PG 不可达时 Gateway 启动失败（runtime 单测 + `storage_control_plane_runtime.go`）。
+- [x] live gate 契约与 runner 覆盖最小 volume/snapshot/filesystem/mount-target/bucket/object/vector/KB-link 图（`validate-storage-control-plane-state-live-gate`）。
+- [x] Gateway rollout 后按原 ID/list 查询全部资源与关系（live passed；evidence `storage-control-plane-state-live-20260803.json`）。
+- [x] 重放原 key 不增加重复资源；同 key 不同 intent 返回冲突（live passed）。
+- [x] 删除后 API 隐藏资源，PG 保留墓碑，Provider 临时资源清理为零（live passed）。
 
 ---
 
