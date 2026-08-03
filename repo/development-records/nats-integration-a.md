@@ -974,3 +974,115 @@ None — 实现严格遵循 SPEC §5.1 Subscribe 算法和 Issue #004 Scope。
 
 > 注：集成测试输出 `WorkQueuePolicy 清理验证通过：消息被 Ack 后已从 stream 移除`，确认 WorkQueuePolicy 语义在真实 NATS 下端到端生效。
 
+---
+
+## v3 修订 — 消息独立上下文 + 返回值驱动 ack/nak
+
+修订日期：2026-08-03
+前置文档：`repo/services/tasks/modules/plan/plan-nats-integration-v3.md`（v2 已实现，v3 为增量修订）
+修订范围：v2 全部 Issue #001-#009 已落地代码 + 单测 + 集成测试
+
+### 实现了什么
+
+基于 v2 review 提出的两点改进，对已落地的 NATS 接入代码做增量修订：
+
+1. **消息处理上下文独立化**：[message_bus.go](file:///e:/go/project/ANI/repo/pkg/adapters/nats/message_bus.go) handler 调用从 `handler(ctx, pMsg)` 改为 `handler(context.Background(), pMsg)`。每条消息的处理不再绑定 `Subscribe` 调用方 ctx，避免订阅 ctx 取消时正在处理的消息被中断。
+2. **Ack/Nak 收回 adapter，业务侧用返回值表达意图**：不再由业务 handler 显式调 `msg.Ack/Nack`，改由 adapter 根据 handler 返回值统一 ack/nak（`nil→Ack`、`error→Nak`、`panic→Nak`）。`ports.Message` 接口去掉 `Ack/Nack` 方法，编译期禁止业务侧调用。
+
+### 关键文件改动
+
+| 文件 | 类型 | 改动 |
+|---|---|---|
+| `pkg/ports/message_bus.go` | 修改 | `Message` 接口去掉 `Ack/Nack`；`MessageHandler` 注释更新语义和兼容契约 |
+| `pkg/adapters/nats/message_bus.go` | 修改 | handler 用 `context.Background()`；handlerFunc 改返回值驱动 ack/nak；`message` struct 去掉 Ack/Nack；Subscribe ctx 加注释 |
+| `pkg/adapters/nats/message_bus_test.go` | 修改 | `fakeMessage` 去 Ack/Nack 追踪；删除 4 个旧用例；保留 panic 不崩溃用例；新增 `TestHandlerBackgroundCtx` |
+| `pkg/adapters/nats/integration_test.go` | 修改 | 6 处 handler 的 `msg.Ack/Nack(ctx)` 改返回值（`nil`/`errors.New`） |
+| `services/metering-service/internal/eventconsumer/consumer.go` | 修改 | `handle` 去掉 `msg.Ack` 改 `return nil`；注释更新契约 |
+| `services/metering-service/internal/eventconsumer/consumer_test.go` | 修改 | `mockMessage` 去 Ack/Nack；断言改 `err == nil` |
+| `services/metering-service/internal/eventconsumer/integration_test.go` | 不动 | 日志断言不变 |
+| `services/task-service/internal/taskconsumer/consumer.go` | 修改 | 同 eventconsumer |
+| `services/task-service/internal/taskconsumer/consumer_test.go` | 修改 | 同 eventconsumer |
+| `services/task-service/internal/taskconsumer/integration_test.go` | 不动 | 日志断言不变 |
+
+### 实现笔记
+
+#### 1. Design Decisions（设计决策）
+
+**D-1：handler 固定用 `context.Background()`，Subscribe ctx 保留不用**
+
+- **歧义：** 改进一要求"每条消息独立上下文"，但 `Subscribe(ctx, ...)` 签名已有 ctx 参数，是否去掉该参数？
+- **选择：** 保留 `Subscribe` 的 ctx 参数签名（零破坏 port 契约和调用方），但 handler 固定收到 `context.Background()`。Subscribe 的 ctx 仅用于建立订阅的语义契约，当前 NATS 异步回调模型未使用该 ctx。
+- **理由：** (1) 去掉 ctx 参数会破坏 `ports.MessageBus` 接口签名，级联修改所有调用方，违反最小改动；(2) 接口实现方法的未用参数 lint 默认豁免；(3) 注释明确说明 ctx 的语义（"仅用于建立订阅语义"），未来若 NATS 支持 ctx 取消订阅可平滑接入。
+
+**D-2：Ack/Nak 用返回值驱动，业务侧吞错误表达"跳过"**
+
+- **歧义：** 改进二要求"返回值表达 ack/nak 意图"，但 error 在 Go 中既表示"失败"也可能表示"毒丸跳过"，二义性如何处理？
+- **选择：** adapter 只认 `nil→Ack / error→Nak`，不区分 error 类型。毒丸/幂等跳过场景由业务侧记 error/warn 日志后吞掉错误返回 nil；可恢复失败返回 error 触发 Nak 重投。
+- **理由：** (1) "有问题让业务层来兼容"——adapter 不负责区分 error 语义，业务侧自行判断"该跳过"还是"该重投"；(2) 两层日志保证观测性：跳过看业务日志，重投看 adapter 日志；(3) 唯一键冲突（跳过 Ack）和 DB 连接失败（重投 Nak）都是 error，由业务侧自己区分。
+
+**D-3：`ports.Message` 接口去掉 `Ack/Nack`（编译期禁止）**
+
+- **歧义：** 不让业务调 ack/nak 有两种实现：从接口去掉方法（方案 A，编译期拦截）vs 保留接口仅靠文档约束（方案 B）。
+- **选择：** 方案 A，从 `ports.Message` 接口去掉 `Ack/Nack`。
+- **理由：** (1) 编译期禁止业务调 ack/nak，彻底落实"不让业务 ack/nak"；(2) 编译失败即暴露所有调用点，逐一改，无遗漏；(3) 方案 B 仅靠文档约束，新人易顺手调 `msg.Ack()` 绕过返回值契约。
+
+**D-4：单测不追踪 ack/nak，靠集成测试覆盖**
+
+- **歧义：** v2 单测用 `fakeMessage` 追踪 Ack/Nack 调用次数验证 adapter 行为。v3 去掉 Ack/Nack 后，单测如何验证 ack/nak 正确性？
+- **选择：** 单测不追踪 ack/nak，adapter 直接调底层 `msg.Ack()/msg.Nak()`（无内部接口）；ack/nak 正确性靠集成测试覆盖。
+- **理由：** (1) 符合 Karpathy 原则五——不为了单测追踪引入内部接口抽象；(2) 集成测试在真实 NATS 上验证 ack/nak 行为与 v2 等价，是更合适的验证载体；(3) 单测只保留 panic 不崩溃用例 + 新增 BackgroundCtx 验证用例。
+
+#### 2. Deviations（与 v2/SPEC 的偏离）
+
+**DEV-1：v2 §4.3「Ack/Nak 业务层决定」整体反转**
+
+- **v2/SPEC 说：** SPEC §5.1 step 7b 明确"handler 返回 error → logger.Warn（不自动 Ack/Nak）"，ack/nak 由业务层决定（v2 Issue #004 实现）。
+- **v3 实现：** adapter 重新接管 ack/nak，根据 handler 返回值统一执行（`nil→Ack`、`error→Nak`）。业务侧不再触碰 Message 的 Ack/Nack。
+- **为什么偏离是必要的：** review 后认为业务层显式调 ack/nak 增加了出错面（忘记 Ack 导致消息卡到 AckWait 超时、错误调用顺序等），收回 adapter 统一管理更健壮。业务侧只需用返回值表达意图，其他语义差异自行映射。
+
+**DEV-2：毒丸消息处理从"业务 Ack 跳过"改为"业务返回 nil 让 adapter Ack"**
+
+- **v2 说：** 毒丸消息 → 业务调 `msg.Ack(ctx)` 跳过 + error 日志。
+- **v3 实现：** 毒丸消息 → 业务记 error 日志后返回 nil → adapter 调 `msg.Ack()` 跳过。
+- **为什么偏离是必要的：** ack/nak 归属反转的直接结果。行为等价（毒丸都被 Ack 跳过），但调用方从业务侧变为 adapter 侧。
+
+#### 3. Tradeoffs（取舍）
+
+**T-1：是否从 `ports.Message` 接口去掉 Ack/Nack**
+
+- **备选 A（采纳）：** 方案 A，从接口去掉 Ack/Nack，编译期禁止业务调用。
+- **备选 B（拒绝）：** 方案 B，保留接口方法，仅靠文档约束"业务不要调"。
+- **取舍：** 备选 A 胜出。理由：(1) 编译期拦截彻底，新人无法误调；(2) 编译失败即暴露所有调用点，逐一改无遗漏；(3) 代价是接口破坏性变更——但 v2 尚未发布（v1.0.0 目标 2026-09-30），现在改接口零兼容性成本。
+
+**T-2：单测是否追踪 ack/nak 调用**
+
+- **备选 A（采纳）：** 选项 2，不追踪。adapter 直接调 `msg.Ack()/msg.Nak()`，无内部接口；ack/nak 正确性靠集成测试覆盖。
+- **备选 B（拒绝）：** 选项 1，引入内部接口（如 `ackableMessage`）让 fakeMessage 实现以追踪调用。
+- **取舍：** 备选 A 胜出。理由：(1) 符合 Karpathy 原则五"如无必要勿增实体"——不为了单测追踪引入内部接口抽象；(2) 集成测试在真实 NATS 上验证更可靠；(3) 代价是单测无法验证"Nak 确实被调用"——但 panic 不崩溃 + BackgroundCtx 验证已覆盖核心逻辑，Nak 调用由集成测试 7 个场景充分覆盖。
+
+#### 4. Open Questions（待确认/后续）
+
+**OQ-1：`context.Background()` 丢失订阅 ctx 的 trace/超时**
+
+- **假设：** handler 固定用 `context.Background()`，不再携带订阅 ctx 的 trace span 或超时。业务侧需 timeout 时自行 `context.WithTimeout(context.Background(), ...)`。
+- **需确认：** 现有 consumer 用 Headers 重建租户上下文，不依赖 ctx 携带 tenant 信息。但后续若需要 trace span 透传（如 OpenTelemetry），需在 adapter 层从订阅 ctx 提取 span context 注入到 `context.Background()`。当前判断：YAGNI，无 trace 需求时不引入。
+
+**OQ-2：Feature batch 四文件更新时机**
+
+- v3 是对 v2 已落地代码的增量修订，整个 NATS integration 批次（Issue #1-#10）尚未标记完工。`README.md` 完整列表、`CURRENT-SPRINT.md`、`ANI-06` Section 零的更新，待整个批次完工后统一执行。
+
+### 验证命令执行记录
+
+| 命令 | 范围 | 结果 |
+|---|---|---|
+| `go test ./pkg/adapters/nats/ ./pkg/ports/ ./services/metering-service/internal/eventconsumer/ ./services/task-service/internal/taskconsumer/` | 单元测试 | 全部 ok |
+| `go test ./pkg/... ./services/metering-service/... ./services/task-service/...` | 全模块单元测试 | 全部 ok |
+| `python scripts/validate_component_imports.py --root .` | 架构边界校验 | component import guard passed |
+| `git diff --check` | 全仓库 | 无空白错误 |
+| `ANI_TEST_NATS_URL=nats://10.10.1.66:31062 go test ./pkg/adapters/nats/ -v -run Integration -tags integration` | adapter 集成测试（真实 NATS） | 7/7 PASS (9.1s) |
+| `ANI_TEST_NATS_URL=nats://10.10.1.66:31062 go test ./services/metering-service/internal/eventconsumer/ -v -run Integration -tags integration` | eventconsumer 集成测试（真实 NATS） | 2/2 PASS (1.4s) |
+| `ANI_TEST_NATS_URL=nats://10.10.1.66:31062 go test ./services/task-service/internal/taskconsumer/ -v -run Integration -tags integration` | taskconsumer 集成测试（真实 NATS） | 2/2 PASS (1.6s) |
+| review-it | 未提交改动（8 文件） | clean，无 actionable finding |
+
+> 注：`make test` 的 `validate-architecture` 目标在 Windows 环境失败，原因是 Makefile 用了 Unix 专用的 `date -u` 命令，与本次代码改动无关；底层校验脚本单独运行通过。
+

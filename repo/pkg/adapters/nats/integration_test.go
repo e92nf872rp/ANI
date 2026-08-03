@@ -264,7 +264,7 @@ func TestIntegrationPublishSubscribeHeaders(t *testing.T) {
 	}, func(ctx context.Context, msg ports.Message) error {
 		got.Store(msg)
 		received.Store(true)
-		return msg.Ack(ctx)
+		return nil
 	})
 	if err != nil {
 		t.Fatalf("Subscribe 失败: %v", err)
@@ -291,11 +291,11 @@ func TestIntegrationPublishSubscribeHeaders(t *testing.T) {
 }
 
 // =============================================================================
-// 场景 2：Ack/Nak 业务层决定，adapter 不干预
+// 场景 2：handler 返回 nil → adapter Ack，消息不再重投
 // =============================================================================
 
-// TestIntegrationAckBusinessDecision 覆盖 AC: handler 自己调 Ack，
-// adapter 不干预，消息不再重投。
+// TestIntegrationAckBusinessDecision 覆盖 AC: handler 返回 nil，
+// adapter 调 Ack，消息不再重投。
 func TestIntegrationAckBusinessDecision(t *testing.T) {
 	env := newIntegrationEnv(t)
 	subject := integrationSubjectPrefix + ".ack"
@@ -310,7 +310,7 @@ func TestIntegrationAckBusinessDecision(t *testing.T) {
 		MaxDeliver:  integrationMaxDeliver,
 	}, func(ctx context.Context, msg ports.Message) error {
 		deliverCount.Add(1)
-		return msg.Ack(ctx)
+		return nil
 	})
 	if err != nil {
 		t.Fatalf("Subscribe 失败: %v", err)
@@ -358,8 +358,8 @@ func TestIntegrationPanicRecover(t *testing.T) {
 			panicked.Store(true)
 			panic("intentional panic in handler")
 		}
-		// 第二次投递正常 Ack，结束循环。
-		return msg.Ack(ctx)
+		// 第二次投递正常返回 nil，让 adapter Ack，结束循环。
+		return nil
 	})
 	if err != nil {
 		t.Fatalf("Subscribe 失败: %v", err)
@@ -383,10 +383,10 @@ func TestIntegrationPanicRecover(t *testing.T) {
 }
 
 // =============================================================================
-// 场景 4：Nak 延迟重投，handler 调 Nak → 延迟后重投 → 第二次 Ack
+// 场景 4：handler 返回 error → adapter Nak → 延迟后重投 → 第二次返回 nil → Ack
 // =============================================================================
 
-// TestIntegrationNakDelayedRedelivery 覆盖 AC: handler 调 Nak → 消息延迟重投 → 第二次 handler 调 Ack。
+// TestIntegrationNakDelayedRedelivery 覆盖 AC: handler 返回 error → adapter Nak 重投 → 第二次返回 nil 让 adapter Ack。
 func TestIntegrationNakDelayedRedelivery(t *testing.T) {
 	env := newIntegrationEnv(t)
 	subject := integrationSubjectPrefix + ".nak"
@@ -402,11 +402,11 @@ func TestIntegrationNakDelayedRedelivery(t *testing.T) {
 	}, func(ctx context.Context, msg ports.Message) error {
 		n := deliverCount.Add(1)
 		if n == 1 {
-			// 第一次：Nak 触发重投。
-			return msg.Nack(ctx)
+			// 第一次：返回 error 触发 Nak 重投。
+			return errors.New("retry later")
 		}
-		// 第二次：Ack 结束。
-		return msg.Ack(ctx)
+		// 第二次：返回 nil 让 adapter Ack，结束。
+		return nil
 	})
 	if err != nil {
 		t.Fatalf("Subscribe 失败: %v", err)
@@ -428,7 +428,7 @@ func TestIntegrationNakDelayedRedelivery(t *testing.T) {
 // 场景 5：MaxDeliver 满后停投
 // =============================================================================
 
-// TestIntegrationMaxDeliverStop 覆盖 AC: handler 持续 Nak → 到顶后 NATS 不再投递。
+// TestIntegrationMaxDeliverStop 覆盖 AC: handler 持续返回 error → adapter 持续 Nak → 到顶后 NATS 不再投递。
 func TestIntegrationMaxDeliverStop(t *testing.T) {
 	env := newIntegrationEnv(t)
 	subject := integrationSubjectPrefix + ".maxdeliver"
@@ -443,8 +443,8 @@ func TestIntegrationMaxDeliverStop(t *testing.T) {
 		MaxDeliver:  integrationMaxDeliver,
 	}, func(ctx context.Context, msg ports.Message) error {
 		deliverCount.Add(1)
-		// 持续 Nak，直到 MaxDeliver 上限。
-		return msg.Nack(ctx)
+		// 持续返回 error 触发 Nak，直到 MaxDeliver 上限。
+		return errors.New("always fail")
 	})
 	if err != nil {
 		t.Fatalf("Subscribe 失败: %v", err)
@@ -489,7 +489,7 @@ func TestIntegrationInterestFanout(t *testing.T) {
 		MaxDeliver:  10,
 	}, func(ctx context.Context, msg ports.Message) error {
 		c1Count.Add(1)
-		return msg.Ack(ctx)
+		return nil
 	})
 	if err != nil {
 		t.Fatalf("Subscribe consumer1 失败: %v", err)
@@ -504,7 +504,7 @@ func TestIntegrationInterestFanout(t *testing.T) {
 		MaxDeliver:  10,
 	}, func(ctx context.Context, msg ports.Message) error {
 		c2Count.Add(1)
-		return msg.Ack(ctx)
+		return nil
 	})
 	if err != nil {
 		t.Fatalf("Subscribe consumer2 失败: %v", err)

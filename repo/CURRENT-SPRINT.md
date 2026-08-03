@@ -136,7 +136,8 @@ go vet ./pkg/adapters/runtime/... ./services/ani-gateway/internal/router/...
 | #009 | task 流示例 consumer + 集成测试（2 场景，WorkQueuePolicy 语义验证） | ✅ 已完成 | `development-records/nats-integration-a.md` Issue #009 |
 
 **关键设计决策：**
-- adapter 不自动处理消息确认，由业务层决定 Ack/Nak（避免在底层 adapter 耦合业务语义）
+- adapter 根据 handler 返回值统一 ack/nak（`nil→Ack`/`error→Nak`/`panic→Nak`），`ports.Message` 接口去掉 `Ack/Nack` 方法编译期禁止业务显式确认（v3 修订，基于 `plan-nats-integration-v3.md`）
+- handler 每条消息用 `context.Background()` 独立上下文，避免订阅 ctx 取消中断正在处理的消息
 - `//go:build integration` build tag 隔离集成测试，不影响默认 `make test`
 - `safeBuffer`（`sync.Mutex` + `bytes.Buffer`）跨 goroutine 安全捕获 slog 输出，解决并发数据竞争
 - 测试清理使用 `PurgeStream` + `Drain` 确保环境恢复

@@ -2,9 +2,7 @@ package nats
 
 import (
 	"context"
-	"errors"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -78,17 +76,13 @@ func (f *fakeJS) triggerCall(msg *natsgo.Msg) {
 }
 
 // =============================================================================
-// fakeMessage — 可追踪 Ack/Nack 调用的 ports.Message 实现
+// fakeMessage — ports.Message 的纯数据 fake 实现（无 Ack/Nack，业务侧不再具备该能力）
 // =============================================================================
 
 type fakeMessage struct {
-	subject    string
-	data       []byte
-	headers    map[string][]string
-	acked      atomic.Bool
-	nacked     atomic.Bool
-	ackCalled  int64
-	nackCalled int64
+	subject string
+	data    []byte
+	headers map[string][]string
 }
 
 func newFakeMessage(subject string, data []byte, headers map[string][]string) *fakeMessage {
@@ -99,45 +93,9 @@ func newFakeMessage(subject string, data []byte, headers map[string][]string) *f
 	}
 }
 
-func (f *fakeMessage) Subject() string {
-	return f.subject
-}
-
-func (f *fakeMessage) Data() []byte {
-	return f.data
-}
-
-func (f *fakeMessage) Ack(context.Context) error {
-	atomic.AddInt64(&f.ackCalled, 1)
-	f.acked.Store(true)
-	return nil
-}
-
-func (f *fakeMessage) Nack(context.Context) error {
-	atomic.AddInt64(&f.nackCalled, 1)
-	f.nacked.Store(true)
-	return nil
-}
-
-func (f *fakeMessage) Headers() map[string][]string {
-	return f.headers
-}
-
-func (f *fakeMessage) AckCount() int64 {
-	return atomic.LoadInt64(&f.ackCalled)
-}
-
-func (f *fakeMessage) NackCount() int64 {
-	return atomic.LoadInt64(&f.nackCalled)
-}
-
-func (f *fakeMessage) WasAcked() bool {
-	return f.acked.Load()
-}
-
-func (f *fakeMessage) WasNacked() bool {
-	return f.nacked.Load()
-}
+func (f *fakeMessage) Subject() string                   { return f.subject }
+func (f *fakeMessage) Data() []byte                      { return f.data }
+func (f *fakeMessage) Headers() map[string][]string      { return f.headers }
 
 // =============================================================================
 // Test cases
@@ -216,47 +174,24 @@ func TestSubscribeEmptySubject(t *testing.T) {
 	}
 }
 
-// TestHandlerErrorNoAutoAck 验证 handler 返回 error 时，adapter 仅记日志，未调 msg.Ack/Nack。
-func TestHandlerErrorNoAutoAck(t *testing.T) {
+// TestHandlerBackgroundCtx 验证 handler 收到的 ctx 是 context.Background()（未被取消）。
+// 覆盖改进一：每条消息独立上下文，不绑定 Subscribe 调用方 ctx。
+func TestHandlerBackgroundCtx(t *testing.T) {
 	js := newFakeJS()
+	// 传入一个会被立即取消的 ctx，验证 handler 收到的仍是 Background（未被取消）。
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 	bus := NewMessageBus(js, nil)
 
-	handlerCalled := newFakeMessage("event.test", []byte("data"), nil)
 	bus.msgFactory = func(natsMsg *natsgo.Msg) ports.Message {
-		return handlerCalled
+		return newFakeMessage(natsMsg.Subject, natsMsg.Data, nil)
 	}
 
-	if _, err := bus.Subscribe(context.Background(), ports.SubscribeOptions{
+	var gotCtx context.Context
+	if _, err := bus.Subscribe(ctx, ports.SubscribeOptions{
 		Subject: "event.test",
 	}, func(ctx context.Context, msg ports.Message) error {
-		return errors.New("business error")
-	}); err != nil {
-		t.Fatalf("Subscribe 失败: %v", err)
-	}
-
-	js.triggerCall(&natsgo.Msg{Subject: "event.test", Data: []byte("data")})
-
-	if handlerCalled.WasAcked() {
-		t.Error("handler 返回 error 时 adapter 不应自动调 Ack")
-	}
-	if handlerCalled.WasNacked() {
-		t.Error("handler 返回 error 时 adapter 不应调 Nak")
-	}
-}
-
-// TestHandlerNilNoAutoAck 验证 handler 返回 nil 时，adapter 不自动调 Ack。
-func TestHandlerNilNoAutoAck(t *testing.T) {
-	js := newFakeJS()
-	bus := NewMessageBus(js, nil)
-
-	handlerCalled := newFakeMessage("event.test", []byte("data"), nil)
-	bus.msgFactory = func(natsMsg *natsgo.Msg) ports.Message {
-		return handlerCalled
-	}
-
-	if _, err := bus.Subscribe(context.Background(), ports.SubscribeOptions{
-		Subject: "event.test",
-	}, func(ctx context.Context, msg ports.Message) error {
+		gotCtx = ctx
 		return nil
 	}); err != nil {
 		t.Fatalf("Subscribe 失败: %v", err)
@@ -264,77 +199,28 @@ func TestHandlerNilNoAutoAck(t *testing.T) {
 
 	js.triggerCall(&natsgo.Msg{Subject: "event.test", Data: []byte("data")})
 
-	if handlerCalled.WasAcked() {
-		t.Error("handler 返回 nil 时 adapter 不应自动调 Ack")
+	if gotCtx == nil {
+		t.Fatal("handler 未被调用，gotCtx 为 nil")
+	}
+	if gotCtx.Err() != nil {
+		t.Errorf("handler ctx 期望未被取消（context.Background()），实际 err=%v", gotCtx.Err())
 	}
 }
 
-// TestHandlerOwnAck 验证 handler 自己调 Ack 且返回 nil：Ack 仅被业务层调一次。
-func TestHandlerOwnAck(t *testing.T) {
+// TestHandlerPanicNoCrash 验证 handler panic 时 adapter recover 兜底，进程不崩溃。
+// ack/nak 正确性（panic → Nak）由集成测试覆盖，单测只验证不崩溃。
+func TestHandlerPanicNoCrash(t *testing.T) {
 	js := newFakeJS()
 	bus := NewMessageBus(js, nil)
 
-	handlerCalled := newFakeMessage("event.test", []byte("data"), nil)
 	bus.msgFactory = func(natsMsg *natsgo.Msg) ports.Message {
-		return handlerCalled
+		return newFakeMessage(natsMsg.Subject, natsMsg.Data, nil)
 	}
 
 	if _, err := bus.Subscribe(context.Background(), ports.SubscribeOptions{
 		Subject: "event.test",
 	}, func(ctx context.Context, msg ports.Message) error {
-		_ = msg.Ack(context.Background())
-		return nil
-	}); err != nil {
-		t.Fatalf("Subscribe 失败: %v", err)
-	}
-
-	js.triggerCall(&natsgo.Msg{Subject: "event.test", Data: []byte("data")})
-
-	if count := handlerCalled.AckCount(); count != 1 {
-		t.Errorf("期望 Ack 被调用 1 次，实际 %d 次", count)
-	}
-}
-
-// TestHandlerOwnNack 验证 handler 自己调 Nack 且返回 error：Nack 仅被业务层调一次。
-func TestHandlerOwnNack(t *testing.T) {
-	js := newFakeJS()
-	bus := NewMessageBus(js, nil)
-
-	handlerCalled := newFakeMessage("event.test", []byte("data"), nil)
-	bus.msgFactory = func(natsMsg *natsgo.Msg) ports.Message {
-		return handlerCalled
-	}
-
-	if _, err := bus.Subscribe(context.Background(), ports.SubscribeOptions{
-		Subject: "event.test",
-	}, func(ctx context.Context, msg ports.Message) error {
-		_ = msg.Nack(context.Background())
-		return errors.New("retry later")
-	}); err != nil {
-		t.Fatalf("Subscribe 失败: %v", err)
-	}
-
-	js.triggerCall(&natsgo.Msg{Subject: "event.test", Data: []byte("data")})
-
-	if count := handlerCalled.NackCount(); count != 1 {
-		t.Errorf("期望 Nack 被调用 1 次，实际 %d 次", count)
-	}
-}
-
-// TestHandlerPanicBeforeAck 验证 handler panic（Ack 调用前）：recover + Nak 被调 + 不崩溃。
-func TestHandlerPanicBeforeAck(t *testing.T) {
-	js := newFakeJS()
-	bus := NewMessageBus(js, nil)
-
-	handlerCalled := newFakeMessage("event.test", []byte("data"), nil)
-	bus.msgFactory = func(natsMsg *natsgo.Msg) ports.Message {
-		return handlerCalled
-	}
-
-	if _, err := bus.Subscribe(context.Background(), ports.SubscribeOptions{
-		Subject: "event.test",
-	}, func(ctx context.Context, msg ports.Message) error {
-		panic("intentional panic before ack")
+		panic("intentional panic in handler")
 	}); err != nil {
 		t.Fatalf("Subscribe 失败: %v", err)
 	}
@@ -347,50 +233,6 @@ func TestHandlerPanicBeforeAck(t *testing.T) {
 		}()
 		js.triggerCall(&natsgo.Msg{Subject: "event.test", Data: []byte("data")})
 	}()
-
-	if !handlerCalled.WasNacked() {
-		t.Error("handler panic 时 adapter 应调 Nak")
-	}
-}
-
-// TestHandlerPanicAfterAck 验证 handler panic（Ack 调用后）：recover + Nak 被调。
-func TestHandlerPanicAfterAck(t *testing.T) {
-	js := newFakeJS()
-	bus := NewMessageBus(js, nil)
-
-	handlerCalled := newFakeMessage("event.test", []byte("data"), nil)
-	bus.msgFactory = func(natsMsg *natsgo.Msg) ports.Message {
-		return handlerCalled
-	}
-
-	if _, err := bus.Subscribe(context.Background(), ports.SubscribeOptions{
-		Subject: "event.test",
-	}, func(ctx context.Context, msg ports.Message) error {
-		_ = msg.Ack(context.Background())
-		panic("intentional panic after ack")
-	}); err != nil {
-		t.Fatalf("Subscribe 失败: %v", err)
-	}
-
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				t.Fatalf("adapter 未捕获 panic，外层崩溃: %v", r)
-			}
-		}()
-		js.triggerCall(&natsgo.Msg{Subject: "event.test", Data: []byte("data")})
-	}()
-
-	// Ack 被业务层调 1 次
-	if count := handlerCalled.AckCount(); count != 1 {
-		t.Errorf("期望 Ack 被调用 1 次，实际 %d 次", count)
-	}
-
-	// panic 兜底会调 Nak（通过 panic recover 创建新 fakeMessage 实例）
-	// 本测试主要验证不崩溃且 Ack 被正确调用
-	if !handlerCalled.WasAcked() {
-		t.Error("handler 应先调 Ack 再 panic")
-	}
 }
 
 // =============================================================================

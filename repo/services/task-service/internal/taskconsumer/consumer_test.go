@@ -36,27 +36,15 @@ func (m *mockSubscription) Drain(ctx context.Context) error {
 	return nil
 }
 
-// mockMessage 实现 ports.Message，可控 Headers/Data/Ack/Nack。
+// mockMessage 实现 ports.Message，可控 Headers/Data。
 type mockMessage struct {
-	headers    map[string][]string
-	data       []byte
-	ackCalled  int
-	nackCalled int
-	ackErr     error
-	nackErr    error
+	headers map[string][]string
+	data    []byte
 }
 
-func (m *mockMessage) Subject() string { return "" }
-func (m *mockMessage) Data() []byte    { return m.data }
-func (m *mockMessage) Ack(ctx context.Context) error {
-	m.ackCalled++
-	return m.ackErr
-}
-func (m *mockMessage) Nack(ctx context.Context) error {
-	m.nackCalled++
-	return m.nackErr
-}
-func (m *mockMessage) Headers() map[string][]string { return m.headers }
+func (m *mockMessage) Subject() string                   { return "" }
+func (m *mockMessage) Data() []byte                       { return m.data }
+func (m *mockMessage) Headers() map[string][]string        { return m.headers }
 
 func TestConsumerStart(t *testing.T) {
 	mbus := &mockMessageBus{}
@@ -103,13 +91,7 @@ func TestConsumerHandlePoisonMessage(t *testing.T) {
 
 	err := c.handle(context.Background(), msg)
 	if err != nil {
-		t.Fatalf("handle unexpected error: %v", err)
-	}
-	if msg.ackCalled != 1 {
-		t.Fatalf("expected Ack called once for poison message, got %d", msg.ackCalled)
-	}
-	if msg.nackCalled != 0 {
-		t.Fatalf("expected Nack not called, got %d", msg.nackCalled)
+		t.Fatalf("handle 期望返回 nil（毒丸吞错误让 adapter Ack），实际 err=%v", err)
 	}
 }
 
@@ -124,13 +106,7 @@ func TestConsumerHandleSuccess(t *testing.T) {
 
 	err := c.handle(context.Background(), msg)
 	if err != nil {
-		t.Fatalf("handle unexpected error: %v", err)
-	}
-	if msg.ackCalled != 1 {
-		t.Fatalf("expected Ack called once for success, got %d", msg.ackCalled)
-	}
-	if msg.nackCalled != 0 {
-		t.Fatalf("expected Nack not called, got %d", msg.nackCalled)
+		t.Fatalf("handle 期望返回 nil（成功让 adapter Ack），实际 err=%v", err)
 	}
 }
 

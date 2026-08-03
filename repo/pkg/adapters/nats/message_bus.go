@@ -56,6 +56,9 @@ func (b *MessageBus) Publish(ctx context.Context, event ports.EventEnvelope, opt
 	return nil
 }
 
+// Subscribe 订阅 subject。
+// ctx 仅用于建立订阅的语义契约，当前 NATS 异步回调模型未使用该 ctx；
+// handler 固定收到 context.Background()，消息处理不受订阅 ctx 生命周期影响。
 func (b *MessageBus) Subscribe(ctx context.Context, opts ports.SubscribeOptions, handler ports.MessageHandler) (ports.Subscription, error) {
 	if opts.Subject == "" {
 		return nil, fmt.Errorf("message bus subscribe: subject required")
@@ -77,17 +80,24 @@ func (b *MessageBus) Subscribe(ctx context.Context, opts ports.SubscribeOptions,
 		defer func() {
 			if r := recover(); r != nil {
 				if b.logger != nil {
-					b.logger.Error("handler panic recovered", "error", r)
+					b.logger.Error("handler panic recovered, nacking for redelivery",
+						"subject", msg.Subject, "panic", r)
 				}
-				_ = pMsg.Nack(context.Background())
+				// panic 兜底：消息状态未知，Nak 触发重投
+				_ = msg.Nak()
 			}
 		}()
-		err := handler(ctx, pMsg)
-		if err != nil {
+		// 每条消息独立上下文：不绑定 Subscribe 调用方 ctx，
+		// 避免订阅 ctx 取消时正在处理的消息被中断；业务侧需 timeout 自行 WithTimeout
+		if err := handler(context.Background(), pMsg); err != nil {
 			if b.logger != nil {
-				b.logger.Warn("handler returned error, ack/nack is handler's responsibility")
+				b.logger.Warn("handler returned error, nacking for redelivery",
+					"subject", msg.Subject, "err", err)
 			}
+			_ = msg.Nak()
+			return
 		}
+		_ = msg.Ack()
 	}
 	var (
 		sub *natsgo.Subscription
@@ -120,14 +130,6 @@ func (m message) Subject() string {
 
 func (m message) Data() []byte {
 	return m.msg.Data
-}
-
-func (m message) Ack(context.Context) error {
-	return m.msg.Ack()
-}
-
-func (m message) Nack(context.Context) error {
-	return m.msg.Nak()
 }
 
 // Headers 返回 NATS 消息头的 map 视图。
