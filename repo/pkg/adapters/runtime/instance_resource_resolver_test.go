@@ -3,11 +3,80 @@ package runtime
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	registryadapter "github.com/kubercloud/ani/pkg/adapters/registry"
 	"github.com/kubercloud/ani/pkg/ports"
 )
+
+type stubImageRegistry struct {
+	images []ports.RegistryImage
+	err    error
+}
+
+func (s *stubImageRegistry) EnsureProject(context.Context, string) error { return nil }
+func (s *stubImageRegistry) ListTags(context.Context, string) ([]ports.ImageTag, error) {
+	return nil, ports.ErrNotConfigured
+}
+func (s *stubImageRegistry) GetScanStatus(context.Context, ports.ImageRef) (ports.ImageScanStatus, error) {
+	return ports.ImageScanStatus{}, ports.ErrNotConfigured
+}
+func (s *stubImageRegistry) CreateProject(context.Context, ports.RegistryProjectRequest) (ports.RegistryProject, error) {
+	return ports.RegistryProject{}, ports.ErrNotConfigured
+}
+func (s *stubImageRegistry) ListProjects(context.Context, ports.RegistryProjectListRequest) (ports.RegistryProjectListResult, error) {
+	return ports.RegistryProjectListResult{}, ports.ErrNotConfigured
+}
+func (s *stubImageRegistry) ListRepositories(context.Context, ports.RegistryRepositoryListRequest) (ports.RegistryRepositoryListResult, error) {
+	return ports.RegistryRepositoryListResult{}, ports.ErrNotConfigured
+}
+func (s *stubImageRegistry) ListArtifacts(context.Context, ports.RegistryArtifactListRequest) (ports.RegistryArtifactListResult, error) {
+	return ports.RegistryArtifactListResult{}, ports.ErrNotConfigured
+}
+func (s *stubImageRegistry) SetRepositoryPermission(context.Context, ports.RegistryPermissionRequest) (ports.RegistryPermission, error) {
+	return ports.RegistryPermission{}, ports.ErrNotConfigured
+}
+func (s *stubImageRegistry) GetScanResult(context.Context, ports.RegistryScanResultRequest) (ports.RegistryScanResult, error) {
+	return ports.RegistryScanResult{}, ports.ErrNotConfigured
+}
+func (s *stubImageRegistry) CreatePullSecret(context.Context, ports.RegistryPullSecretRequest) (ports.RegistryPullSecret, error) {
+	return ports.RegistryPullSecret{}, ports.ErrNotConfigured
+}
+func (s *stubImageRegistry) GetProjectScanReport(context.Context, ports.RegistryProjectScanReportRequest) (ports.RegistryProjectScanReport, error) {
+	return ports.RegistryProjectScanReport{}, ports.ErrNotConfigured
+}
+func (s *stubImageRegistry) GetOverview(context.Context, ports.RegistryOverviewRequest) (ports.RegistryOverview, error) {
+	return ports.RegistryOverview{}, ports.ErrNotConfigured
+}
+func (s *stubImageRegistry) ListImages(context.Context, ports.RegistryImageListRequest) (ports.RegistryImageListResult, error) {
+	if s.err != nil {
+		return ports.RegistryImageListResult{}, s.err
+	}
+	return ports.RegistryImageListResult{Items: append([]ports.RegistryImage(nil), s.images...)}, nil
+}
+func (s *stubImageRegistry) GetPushInstructions(context.Context, ports.RegistryPushInstructionsRequest) (ports.RegistryPushInstructions, error) {
+	return ports.RegistryPushInstructions{}, ports.ErrNotConfigured
+}
+func (s *stubImageRegistry) DeleteTag(context.Context, ports.RegistryTagDeleteRequest) (ports.RegistryDeletedTag, error) {
+	return ports.RegistryDeletedTag{}, ports.ErrNotConfigured
+}
+func (s *stubImageRegistry) ListTagReferences(context.Context, ports.RegistryImageReferenceListRequest) (ports.RegistryImageReferenceListResult, error) {
+	return ports.RegistryImageReferenceListResult{}, ports.ErrNotConfigured
+}
+
+func stubContainerImage(scan ports.RegistryScanResult) ports.RegistryImage {
+	return ports.RegistryImage{
+		Project:    "tenant-a",
+		Repository: "runtime",
+		Tag:        "latest",
+		Purpose:    "container",
+		Image:      "registry.local/tenant-a/runtime:latest",
+		Registry:   "registry.local",
+		Digest:     "sha256:stub-runtime",
+		ScanStatus: scan,
+	}
+}
 
 func TestLocalInstanceResourceResolverValidatesTenantAndReadyResources(t *testing.T) {
 	network := NewLocalNetworkService()
@@ -337,5 +406,145 @@ func TestLocalInstanceResourceResolverValidatesVMSecretRefs(t *testing.T) {
 	})
 	if !errors.Is(err, ports.ErrNotFound) {
 		t.Fatalf("ResolveCreate cross-tenant VM secret error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestLocalInstanceResourceResolverRejectsImageScanStates(t *testing.T) {
+	cases := []struct {
+		name   string
+		status ports.RegistryScanState
+	}{
+		{"not_scanned", ports.RegistryScanNotScanned},
+		{"pending", ports.RegistryScanPending},
+		{"running", ports.RegistryScanRunning},
+		{"failed", ports.RegistryScanFailed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			registry := &stubImageRegistry{images: []ports.RegistryImage{stubContainerImage(ports.RegistryScanResult{
+				Status: tc.status,
+			})}}
+			resolver := NewLocalInstanceResourceResolverWithRegistry(nil, nil, nil, registry)
+			resolver.imageVulnGate = ImageVulnGateEnforce
+			_, err := resolver.ResolveCreate(context.Background(), ports.WorkloadResourceResolveRequest{
+				TenantID: "tenant-a",
+				Spec: ports.WorkloadSpec{
+					TenantID: "tenant-a",
+					Kind:     ports.WorkloadKindContainer,
+					ImageID:  "tenant-a/runtime:latest",
+				},
+			})
+			if !errors.Is(err, ports.ErrFailedPrecondition) {
+				t.Fatalf("ResolveCreate error = %v, want ErrFailedPrecondition", err)
+			}
+			if !strings.Contains(err.Error(), "ImageScanning") {
+				t.Fatalf("ResolveCreate error = %v, want ImageScanning code", err)
+			}
+		})
+	}
+}
+
+func TestLocalInstanceResourceResolverRejectsCriticalAndHighVulnerabilities(t *testing.T) {
+	cases := []struct {
+		name string
+		scan ports.RegistryScanResult
+	}{
+		{"critical", ports.RegistryScanResult{Status: ports.RegistryScanComplete, Critical: 1}},
+		{"high", ports.RegistryScanResult{Status: ports.RegistryScanComplete, High: 2}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			registry := &stubImageRegistry{images: []ports.RegistryImage{stubContainerImage(tc.scan)}}
+			resolver := NewLocalInstanceResourceResolverWithRegistry(nil, nil, nil, registry)
+			resolver.imageVulnGate = ImageVulnGateEnforce
+			_, err := resolver.ResolveCreate(context.Background(), ports.WorkloadResourceResolveRequest{
+				TenantID: "tenant-a",
+				Spec: ports.WorkloadSpec{
+					TenantID: "tenant-a",
+					Kind:     ports.WorkloadKindContainer,
+					ImageID:  "tenant-a/runtime:latest",
+				},
+			})
+			if !errors.Is(err, ports.ErrFailedPrecondition) {
+				t.Fatalf("ResolveCreate error = %v, want ErrFailedPrecondition", err)
+			}
+			if !strings.Contains(err.Error(), "ImageVulnerabilityBlocked") {
+				t.Fatalf("ResolveCreate error = %v, want ImageVulnerabilityBlocked code", err)
+			}
+		})
+	}
+}
+
+func TestLocalInstanceResourceResolverAllowsCleanCompleteScan(t *testing.T) {
+	registry := &stubImageRegistry{images: []ports.RegistryImage{stubContainerImage(ports.RegistryScanResult{
+		Status: ports.RegistryScanComplete,
+		Medium: 3,
+		Low:    4,
+	})}}
+	resolver := NewLocalInstanceResourceResolverWithRegistry(nil, nil, nil, registry)
+	resolver.imageVulnGate = ImageVulnGateEnforce
+	result, err := resolver.ResolveCreate(context.Background(), ports.WorkloadResourceResolveRequest{
+		TenantID: "tenant-a",
+		Spec: ports.WorkloadSpec{
+			TenantID: "tenant-a",
+			Kind:     ports.WorkloadKindContainer,
+			ImageID:  "tenant-a/runtime:latest",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveCreate error = %v", err)
+	}
+	if result.Spec.Annotations["ani.kubercloud.io/image-scan-status"] != "complete" {
+		t.Fatalf("annotations = %#v, want complete scan audit markers", result.Spec.Annotations)
+	}
+}
+
+func TestLocalInstanceResourceResolverObservePolicyAllowsVulnerableImageWithAudit(t *testing.T) {
+	registry := &stubImageRegistry{images: []ports.RegistryImage{stubContainerImage(ports.RegistryScanResult{
+		Status:   ports.RegistryScanComplete,
+		Critical: 2,
+		High:     5,
+	})}}
+	resolver := NewLocalInstanceResourceResolverWithRegistry(nil, nil, nil, registry)
+	resolver.imageVulnGate = ImageVulnGateObserve
+	result, err := resolver.ResolveCreate(context.Background(), ports.WorkloadResourceResolveRequest{
+		TenantID: "tenant-a",
+		Spec: ports.WorkloadSpec{
+			TenantID: "tenant-a",
+			Kind:     ports.WorkloadKindContainer,
+			ImageID:  "tenant-a/runtime:latest",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveCreate error = %v, want allow under observe policy", err)
+	}
+	if result.Spec.Annotations["ani.kubercloud.io/image-vuln-gate"] != "observe" {
+		t.Fatalf("vuln gate annotation = %#v, want observe", result.Spec.Annotations)
+	}
+	if result.Spec.Annotations["ani.kubercloud.io/image-scan-critical"] != "2" ||
+		result.Spec.Annotations["ani.kubercloud.io/image-scan-high"] != "5" {
+		t.Fatalf("vuln count annotations = %#v, want critical=2 high=5", result.Spec.Annotations)
+	}
+}
+
+func TestLocalInstanceResourceResolverInfersPurposeFromRepositoryWhenMetadataMissing(t *testing.T) {
+	image := stubContainerImage(ports.RegistryScanResult{Status: ports.RegistryScanComplete})
+	image.Purpose = ""
+	image.Repository = "sandbox-runtime"
+	image.Tag = "kata-3.8"
+	image.Image = "registry.local/tenant-a/sandbox-runtime:kata-3.8"
+	registry := &stubImageRegistry{images: []ports.RegistryImage{image}}
+	resolver := NewLocalInstanceResourceResolverWithRegistry(nil, nil, nil, registry)
+	resolver.imageVulnGate = ImageVulnGateEnforce
+	_, err := resolver.ResolveCreate(context.Background(), ports.WorkloadResourceResolveRequest{
+		TenantID: "tenant-a",
+		Spec: ports.WorkloadSpec{
+			TenantID: "tenant-a",
+			Kind:     ports.WorkloadKindContainer,
+			ImageID:  "tenant-a/sandbox-runtime:kata-3.8",
+		},
+	})
+	if !errors.Is(err, ports.ErrConflict) || !strings.Contains(err.Error(), "ImagePurposeMismatch") {
+		t.Fatalf("ResolveCreate error = %v, want ErrConflict ImagePurposeMismatch", err)
 	}
 }

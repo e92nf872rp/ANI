@@ -3,6 +3,7 @@ package router
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"sync"
 	"testing"
@@ -54,6 +55,14 @@ func (r *countingRegistry) CreateProject(ctx context.Context, request ports.Regi
 type capturingRegistry struct {
 	ports.ImageRegistry
 	listImagesRequest ports.RegistryImageListRequest
+}
+
+type unavailableListImagesRegistry struct {
+	ports.ImageRegistry
+}
+
+func (r *unavailableListImagesRegistry) ListImages(context.Context, ports.RegistryImageListRequest) (ports.RegistryImageListResult, error) {
+	return ports.RegistryImageListResult{}, fmt.Errorf("%w: Harbor Trivy summary is unavailable", ports.ErrUnavailable)
 }
 
 func (r *capturingRegistry) ListImages(ctx context.Context, request ports.RegistryImageListRequest) (ports.RegistryImageListResult, error) {
@@ -246,6 +255,23 @@ func TestRegistryAPIListImagesPassesPurposeAndReturnsPurpose(t *testing.T) {
 	}
 	if !bytes.Contains(response.Body(), []byte(`"purpose":"gpu"`)) {
 		t.Fatalf("body = %s, want image purpose", response.Body())
+	}
+}
+
+func TestRegistryAPIListImagesReturnsUnavailableWhenScanSummaryIsUnavailable(t *testing.T) {
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Next(ctx)
+	})
+	registerHarbor(h.Group("/api/v1"), &unavailableListImagesRegistry{ImageRegistry: registryadapter.NewLocalImageRegistry()})
+
+	response := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/registry/images", nil).Result()
+	if response.StatusCode() != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d body = %s, want 503", response.StatusCode(), response.Body())
+	}
+	if !bytes.Contains(response.Body(), []byte(`"code":"UNAVAILABLE"`)) {
+		t.Fatalf("body = %s, want UNAVAILABLE error", response.Body())
 	}
 }
 

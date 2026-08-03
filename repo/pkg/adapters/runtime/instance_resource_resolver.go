@@ -3,9 +3,28 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 
 	"github.com/kubercloud/ani/pkg/ports"
+)
+
+// Image vulnerability gate mode for instance create.
+// enforce (default): block non-complete scans and critical/high findings.
+// observe: allow create but keep scan audit annotations on the resolved spec.
+type ImageVulnGateMode string
+
+const (
+	ImageVulnGateEnforce ImageVulnGateMode = "enforce"
+	ImageVulnGateObserve ImageVulnGateMode = "observe"
+
+	imageScanStatusAnnotation   = "ani.kubercloud.io/image-scan-status"
+	imageScanCriticalAnnotation = "ani.kubercloud.io/image-scan-critical"
+	imageScanHighAnnotation     = "ani.kubercloud.io/image-scan-high"
+	imageScanMediumAnnotation   = "ani.kubercloud.io/image-scan-medium"
+	imageScanLowAnnotation      = "ani.kubercloud.io/image-scan-low"
+	imageVulnGateAnnotation     = "ani.kubercloud.io/image-vuln-gate"
 )
 
 // LocalInstanceResourceResolver keeps instance creation provider-neutral while
@@ -13,11 +32,12 @@ import (
 // The concrete Network/Storage services decide whether the lookup is local or
 // backed by a real provider adapter.
 type LocalInstanceResourceResolver struct {
-	network  ports.NetworkService
-	storage  ports.StorageService
-	gpuSpecs ports.GPUSpecService
-	registry ports.ImageRegistry
-	secrets  ports.SecretService
+	network       ports.NetworkService
+	storage       ports.StorageService
+	gpuSpecs      ports.GPUSpecService
+	registry      ports.ImageRegistry
+	secrets       ports.SecretService
+	imageVulnGate ImageVulnGateMode
 }
 
 func NewLocalInstanceResourceResolver(network ports.NetworkService, storage ports.StorageService, gpuSpecServices ...ports.GPUSpecService) *LocalInstanceResourceResolver {
@@ -25,15 +45,24 @@ func NewLocalInstanceResourceResolver(network ports.NetworkService, storage port
 	if len(gpuSpecServices) > 0 {
 		gpuSpecs = gpuSpecServices[0]
 	}
-	return &LocalInstanceResourceResolver{network: network, storage: storage, gpuSpecs: gpuSpecs}
+	return &LocalInstanceResourceResolver{network: network, storage: storage, gpuSpecs: gpuSpecs, imageVulnGate: imageVulnGateFromEnv()}
 }
 
 func NewLocalInstanceResourceResolverWithRegistry(network ports.NetworkService, storage ports.StorageService, gpuSpecs ports.GPUSpecService, registry ports.ImageRegistry) *LocalInstanceResourceResolver {
-	return &LocalInstanceResourceResolver{network: network, storage: storage, gpuSpecs: gpuSpecs, registry: registry}
+	return &LocalInstanceResourceResolver{network: network, storage: storage, gpuSpecs: gpuSpecs, registry: registry, imageVulnGate: imageVulnGateFromEnv()}
 }
 
 func NewLocalInstanceResourceResolverWithDependencies(network ports.NetworkService, storage ports.StorageService, gpuSpecs ports.GPUSpecService, registry ports.ImageRegistry, secrets ports.SecretService) *LocalInstanceResourceResolver {
-	return &LocalInstanceResourceResolver{network: network, storage: storage, gpuSpecs: gpuSpecs, registry: registry, secrets: secrets}
+	return &LocalInstanceResourceResolver{network: network, storage: storage, gpuSpecs: gpuSpecs, registry: registry, secrets: secrets, imageVulnGate: imageVulnGateFromEnv()}
+}
+
+func imageVulnGateFromEnv() ImageVulnGateMode {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ANI_INSTANCE_IMAGE_VULN_GATE"))) {
+	case "observe", "off", "allow", "0", "false":
+		return ImageVulnGateObserve
+	default:
+		return ImageVulnGateEnforce
+	}
 }
 
 func (r *LocalInstanceResourceResolver) ResolveCreate(ctx context.Context, request ports.WorkloadResourceResolveRequest) (ports.WorkloadResourceResolveResult, error) {
@@ -76,13 +105,20 @@ func (r *LocalInstanceResourceResolver) ResolveCreate(ctx context.Context, reque
 		if err != nil {
 			return ports.WorkloadResourceResolveResult{}, err
 		}
+		if strings.TrimSpace(resolved.Purpose) == "" {
+			resolved.Purpose = inferImagePurpose(resolved.Repository, resolved.Tag)
+		}
 		if err := validateImagePurposeForInstanceKind(spec.Kind, resolved); err != nil {
+			return ports.WorkloadResourceResolveResult{}, err
+		}
+		if err := r.validateImageScanForCreate(resolved); err != nil {
 			return ports.WorkloadResourceResolveResult{}, err
 		}
 		spec.Image = resolved.Image
 		spec.ImageRef = resolved.Image
 		spec.ImageID = imageID
 		spec.ImageSummary = ports.InstanceImageSummary{ID: imageID, Ref: resolved.Image, Digest: resolved.Digest, Name: resolved.Repository, Tag: resolved.Tag, Purpose: resolved.Purpose}
+		spec.Annotations = withImageScanAuditAnnotations(spec.Annotations, resolved.ScanStatus, r.imageVulnGate)
 		if spec.Kind == ports.WorkloadKindVM && spec.VM != nil {
 			spec.VM.BootImage = resolved.Image
 		}
@@ -131,7 +167,79 @@ func validateImagePurposeForInstanceKind(kind ports.WorkloadKind, image ports.Re
 	if expected == "" || strings.TrimSpace(image.Purpose) == "" || image.Purpose == expected {
 		return nil
 	}
-	return fmt.Errorf("%w: image purpose %q is not valid for %s instance", ports.ErrConflict, image.Purpose, kind)
+	return fmt.Errorf("%w: ImagePurposeMismatch: image purpose %q is not valid for %s instance", ports.ErrConflict, image.Purpose, kind)
+}
+
+func (r *LocalInstanceResourceResolver) validateImageScanForCreate(image ports.RegistryImage) error {
+	scan := image.ScanStatus
+	switch scan.Status {
+	case ports.RegistryScanComplete:
+		// continue to vulnerability checks
+	case ports.RegistryScanNotScanned, ports.RegistryScanPending, ports.RegistryScanRunning, ports.RegistryScanFailed, "":
+		if r.imageVulnGate == ImageVulnGateObserve {
+			return nil
+		}
+		status := scan.Status
+		if status == "" {
+			status = ports.RegistryScanNotScanned
+		}
+		return fmt.Errorf("%w: ImageScanning: image %q scan status is %s", ports.ErrFailedPrecondition, image.Image, status)
+	default:
+		if r.imageVulnGate == ImageVulnGateObserve {
+			return nil
+		}
+		return fmt.Errorf("%w: ImageScanning: image %q scan status is %s", ports.ErrFailedPrecondition, image.Image, scan.Status)
+	}
+	if scan.Critical > 0 || scan.High > 0 {
+		if r.imageVulnGate == ImageVulnGateObserve {
+			return nil
+		}
+		return fmt.Errorf("%w: ImageVulnerabilityBlocked: image %q has critical=%d high=%d", ports.ErrFailedPrecondition, image.Image, scan.Critical, scan.High)
+	}
+	return nil
+}
+
+func withImageScanAuditAnnotations(annotations map[string]string, scan ports.RegistryScanResult, gate ImageVulnGateMode) map[string]string {
+	if annotations == nil {
+		annotations = map[string]string{}
+	} else {
+		cloned := make(map[string]string, len(annotations)+6)
+		for key, value := range annotations {
+			cloned[key] = value
+		}
+		annotations = cloned
+	}
+	status := string(scan.Status)
+	if status == "" {
+		status = string(ports.RegistryScanNotScanned)
+	}
+	gateMode := string(gate)
+	if gateMode == "" {
+		gateMode = string(ImageVulnGateEnforce)
+	}
+	annotations[imageScanStatusAnnotation] = status
+	annotations[imageScanCriticalAnnotation] = strconv.Itoa(scan.Critical)
+	annotations[imageScanHighAnnotation] = strconv.Itoa(scan.High)
+	annotations[imageScanMediumAnnotation] = strconv.Itoa(scan.Medium)
+	annotations[imageScanLowAnnotation] = strconv.Itoa(scan.Low)
+	annotations[imageVulnGateAnnotation] = gateMode
+	return annotations
+}
+
+// inferImagePurpose mirrors Harbor/local registry naming fallback for historical
+// artifacts that lack ani-purpose-* provider labels.
+func inferImagePurpose(repository, tag string) string {
+	value := strings.ToLower(strings.TrimSpace(repository) + ":" + strings.TrimSpace(tag))
+	switch {
+	case strings.HasPrefix(value, "gpu") || strings.Contains(value, "/gpu"):
+		return "gpu"
+	case strings.HasPrefix(value, "sandbox") || strings.Contains(value, "/sandbox"):
+		return "sandbox"
+	case strings.HasPrefix(value, "system") || strings.Contains(value, "/system"):
+		return "system"
+	default:
+		return "container"
+	}
 }
 
 func (r *LocalInstanceResourceResolver) resolveImage(ctx context.Context, tenantID, imageRef string) (ports.RegistryImage, error) {
@@ -151,7 +259,7 @@ func (r *LocalInstanceResourceResolver) resolveImage(ctx context.Context, tenant
 			return item, nil
 		}
 	}
-	return ports.RegistryImage{}, fmt.Errorf("%w: image %q was not found for tenant %q", ports.ErrNotFound, imageRef, tenantID)
+	return ports.RegistryImage{}, fmt.Errorf("%w: ImageNotFound: image %q was not found for tenant %q", ports.ErrNotFound, imageRef, tenantID)
 }
 
 func parseImageReference(value string) (registryHost, project, repository, tag, digest string) {

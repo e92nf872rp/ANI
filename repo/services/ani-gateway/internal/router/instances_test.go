@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -1301,11 +1302,12 @@ func TestCreateInstanceRejectsRegistryPurposeMismatch(t *testing.T) {
 		&ut.Body{Body: bytes.NewBufferString(body), Len: len(body)},
 		ut.Header{Key: "Content-Type", Value: "application/json"},
 	).Result()
-	if resp.StatusCode() != http.StatusBadRequest {
-		t.Fatalf("create status = %d, want 400; body=%s", resp.StatusCode(), resp.Body())
+	if resp.StatusCode() != http.StatusUnprocessableEntity {
+		t.Fatalf("create status = %d, want 422; body=%s", resp.StatusCode(), resp.Body())
 	}
-	if !strings.Contains(string(resp.Body()), "image purpose") {
-		t.Fatalf("create body = %s, want purpose mismatch error", resp.Body())
+	bodyText := string(resp.Body())
+	if !strings.Contains(bodyText, `"code":"ImagePurposeMismatch"`) || !strings.Contains(bodyText, "image purpose") {
+		t.Fatalf("create body = %s, want ImagePurposeMismatch", resp.Body())
 	}
 }
 
@@ -1730,5 +1732,26 @@ func TestInstanceObservationHandlersForwardEventCursors(t *testing.T) {
 	}
 	if securityCursor != "sec-cursor-a" {
 		t.Fatalf("ListSecurityEvents cursor = %q, want sec-cursor-a", securityCursor)
+	}
+}
+
+func TestInstanceCreatePreconditionCodeMapsImageGateReasons(t *testing.T) {
+	cases := []struct {
+		err  error
+		code string
+		ok   bool
+	}{
+		{fmt.Errorf("%w: ImageScanning: image still scanning", ports.ErrFailedPrecondition), "ImageScanning", true},
+		{fmt.Errorf("%w: ImageVulnerabilityBlocked: critical=1", ports.ErrFailedPrecondition), "ImageVulnerabilityBlocked", true},
+		{fmt.Errorf("%w: ImagePurposeMismatch: purpose sandbox", ports.ErrConflict), "ImagePurposeMismatch", true},
+		{fmt.Errorf("%w: ImageNotFound: missing", ports.ErrNotFound), "ImageNotFound", true},
+		{fmt.Errorf("%w: unrelated", ports.ErrFailedPrecondition), "", false},
+		{errors.New("plain"), "", false},
+	}
+	for _, tc := range cases {
+		code, ok := instanceCreatePreconditionCode(tc.err)
+		if ok != tc.ok || code != tc.code {
+			t.Fatalf("instanceCreatePreconditionCode(%v) = (%q, %v), want (%q, %v)", tc.err, code, ok, tc.code, tc.ok)
+		}
 	}
 }

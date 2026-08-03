@@ -500,6 +500,8 @@ func writeRegistryError(c *app.RequestContext, err error) {
 		writeInstanceError(c, http.StatusConflict, "CONFLICT", err.Error())
 	case errors.Is(err, ports.ErrNotConfigured):
 		writeInstanceError(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", err.Error())
+	case errors.Is(err, ports.ErrUnavailable):
+		writeInstanceError(c, http.StatusServiceUnavailable, "UNAVAILABLE", err.Error())
 	default:
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	}

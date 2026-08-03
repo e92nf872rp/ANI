@@ -833,7 +833,7 @@ func (api *instanceAPI) create(ctx context.Context, c *app.RequestContext) {
 		RequestedAt:     time.Now().UTC(),
 	})
 	if err != nil {
-		writeInstanceError(c, http.StatusBadRequest, "INSTANCE_CREATE_FAILED", err.Error())
+		writeInstanceCreateError(c, err)
 		return
 	}
 	if result.IdempotentReplay && strings.HasPrefix(result.Ref.InstanceID, "pending:") {
@@ -3501,6 +3501,43 @@ func writeInstanceError(c *app.RequestContext, status int, code string, message 
 		"message":    message,
 		"request_id": middleware.GetRequestID(c),
 	})
+}
+
+func writeInstanceCreateError(c *app.RequestContext, err error) {
+	if code, ok := instanceCreatePreconditionCode(err); ok {
+		writeInstanceError(c, http.StatusUnprocessableEntity, code, err.Error())
+		return
+	}
+	switch {
+	case errors.Is(err, ports.ErrNotFound):
+		writeInstanceError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
+	case errors.Is(err, ports.ErrConflict):
+		writeInstanceError(c, http.StatusConflict, "CONFLICT", err.Error())
+	case errors.Is(err, ports.ErrFailedPrecondition):
+		writeInstanceError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", err.Error())
+	case errors.Is(err, ports.ErrInvalid):
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+	default:
+		writeInstanceError(c, http.StatusBadRequest, "INSTANCE_CREATE_FAILED", err.Error())
+	}
+}
+
+func instanceCreatePreconditionCode(err error) (string, bool) {
+	if err == nil {
+		return "", false
+	}
+	message := err.Error()
+	for _, code := range []string{
+		"ImageNotFound",
+		"ImageScanning",
+		"ImageVulnerabilityBlocked",
+		"ImagePurposeMismatch",
+	} {
+		if strings.Contains(message, code+":") {
+			return code, true
+		}
+	}
+	return "", false
 }
 
 func writeInstanceObservabilityError(c *app.RequestContext, err error) {

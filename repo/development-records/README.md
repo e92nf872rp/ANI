@@ -120,6 +120,7 @@
 | CORE-STORAGE-CONSOLE-APIS-BACKEND-A | 存储模块 Console 控制面后端：补齐 bucket objects/prefix/presigned-url/ACL/storage-class/lifecycle-rules、volume expand/mount/os-init/snapshot-origin/auto-snapshot、filesystem expand/mount-target/mount-command、vector rebuild/KB-link/delete-precheck 的 ports/local service/gateway handlers；2026-07-27 复验块/文件存储 Rook-Ceph snapshot/mount-target、对象存储 MinIO、向量库 Milvus 真实后端 E2E 通过，并修复 Milvus collection name 数字开头缺陷；本次使用本地 Gateway 连接真实依赖，不含前端实现，不升级为 production-shaped Gateway 结论 | core-storage-console-apis-backend-a.md |
 | CORE-REGISTRY-CONSOLE-FLOW-CORE-A | Core 镜像仓库后端实现：RegistryImage purpose 贯通 port/adapter/router，`/registry/images?purpose=` 支持过滤；不含 instances、Console、BOSS 或权限实现 | core-registry-console-flow-core-a.md |
 | SPRINT13-REGISTRY-HARBOR-LIVE-A | 镜像仓库 Harbor-backed live gate：`validate-registry-harbor-live-gate` 契约通过；2026-07-27 真实 Gateway 验证 Harbor project/list/push-instructions/pull-secret/scan-report 并归档脱敏 evidence，artifact/purpose 回读在提供 repository/tag 时执行；不含 Console/BOSS/实例创建镜像门禁 | sprint13-registry-harbor-live-gate.md |
+| REGISTRY-P0-CLOSURE-A | Registry P0 闭环：purpose/scan terminal=`complete`/实例引用/删除 409；live passed（evidence `registry-p0-closure-live-20260803.json`）；不含 BOSS quota/GC | registry-p0-closure-a.md |
 
 ### 邮件通知（2026-07）
 

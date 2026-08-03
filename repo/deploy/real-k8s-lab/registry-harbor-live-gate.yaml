@@ -1,9 +1,11 @@
-profile: SPRINT13-REGISTRY-HARBOR-LIVE-A
+profile: REGISTRY-P0-CLOSURE-A
 status: contract
 description: >
-  Harbor-backed Registry live gate for proving ANI Gateway registry APIs use a
-  real Harbor provider and create Kubernetes pull secrets through the provider
-  boundary.
+  Registry P0 closure live gate for proving ANI Gateway registry APIs use a
+  real Harbor provider: project/push-instructions, artifact purpose and scan
+  status, instance image reference, and delete-tag 409 while referenced.
+  Pull-secret Kubernetes proof remains included. Checkpoint of BOSS quota/GC
+  is out of scope.
 required_tools:
   - curl
   - kubectl
@@ -21,12 +23,24 @@ live_checks:
   - id: gateway-registry-push-instructions
     command: GET /api/v1/registry/projects/{project}/push-instructions
     pass_condition: registry_host_and_push_commands_returned
+  - id: gateway-registry-artifact-push
+    command: docker/oras push or preseeded repository/tag
+    pass_condition: real_artifact_exists_for_closure_repository_tag
   - id: gateway-registry-pull-secret
     command: POST /api/v1/registry/projects/{project}/pull-secret
     pass_condition: kubernetes_dockerconfigjson_secret_created
   - id: gateway-registry-images-purpose
-    command: GET /api/v1/registry/images?purpose=container
-    pass_condition: optional_real_artifact_probe_returns_matching_purpose_when_repository_tag_is_supplied
+    command: GET /api/v1/registry/images?purpose=
+    pass_condition: purpose_filter_returns_matching_real_artifact
+  - id: gateway-registry-scan-status
+    command: GET /api/v1/registry/images and /registry/images/scan-result
+    pass_condition: scan_status_and_vulnerability_counts_readable
   - id: gateway-registry-scan-report
     command: GET /api/v1/registry/projects/{project}/scan-report
     pass_condition: harbor_trivy_scan_report_read_or_empty_real_provider_report_returned
+  - id: gateway-registry-instance-reference
+    command: POST /api/v1/instances then GET tag references
+    pass_condition: create_instance_registers_image_reference
+  - id: gateway-registry-delete-tag-blocked
+    command: DELETE /api/v1/registry/.../tags/{tag}
+    pass_condition: delete_returns_409_while_instance_references_tag

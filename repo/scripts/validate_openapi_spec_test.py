@@ -74,6 +74,63 @@ class OpenAPISpecValidatorTest(unittest.TestCase):
         ):
             self.assertIn(code, create_instance_422)
 
+    def test_registry_p0_scan_reference_and_delete_contract_is_frozen(self) -> None:
+        spec = yaml.safe_load((ROOT / "api/openapi/v1.yaml").read_text(encoding="utf-8"))
+        schemas = spec["components"]["schemas"]
+
+        scan_result = schemas["RegistryScanResult"]
+        self.assertEqual(
+            set(scan_result["required"]),
+            {"image", "status", "critical", "high", "medium", "low"},
+        )
+        self.assertEqual(
+            scan_result["properties"]["status"]["enum"],
+            ["not_scanned", "pending", "running", "complete", "failed"],
+        )
+
+        registry_image = schemas["RegistryImage"]
+        self.assertEqual(
+            registry_image["properties"]["scan_status"]["$ref"],
+            "#/components/schemas/RegistryScanResult",
+        )
+
+        scan_report = spec["paths"]["/registry/projects/{project}/scan-report"]["get"]
+        self.assertEqual(scan_report["operationId"], "getRegistryProjectScanReport")
+        self.assertEqual(
+            scan_report["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/RegistryProjectScanReport",
+        )
+
+        scan_result_operation = spec["paths"]["/registry/images/scan-result"]["get"]
+        scan_result_parameters = {
+            parameter["name"]: parameter
+            for parameter in scan_result_operation["parameters"]
+        }
+        self.assertTrue(scan_result_parameters["image"]["required"])
+        self.assertEqual(
+            scan_result_operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/RegistryScanResult",
+        )
+
+        references = spec["paths"][
+            "/registry/projects/{project}/repositories/{repository}/tags/{tag}/references"
+        ]["get"]
+        self.assertEqual(references["operationId"], "listRegistryRepositoryTagReferences")
+        self.assertEqual(
+            references["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/RegistryImageReferenceListResponse",
+        )
+
+        delete_tag = spec["paths"][
+            "/registry/projects/{project}/repositories/{repository}/tags/{tag}"
+        ]["delete"]
+        self.assertEqual(delete_tag["operationId"], "deleteRegistryRepositoryTag")
+        self.assertIn("409", delete_tag["responses"])
+        self.assertEqual(
+            delete_tag["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/RegistryDeletedTag",
+        )
+
     def test_gpu_spec_selection_contract_is_frozen_without_quota_semantics(self) -> None:
         spec = yaml.safe_load((ROOT / "api/openapi/v1.yaml").read_text(encoding="utf-8"))
         schemas = spec["components"]["schemas"]

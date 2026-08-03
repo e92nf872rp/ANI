@@ -587,10 +587,10 @@ validate-instance-observability-live-gate:
 	@echo "✅ SPRINT13-INSTANCE-OBSERVABILITY-PROMETHEUS-A instance observability live gate contract valid"
 
 validate-registry-harbor-live-gate:
-	@echo "→ 校验 Sprint 13 Registry Harbor live gate 契约..."
+	@echo "→ 校验 Registry P0 Harbor closure live gate 契约..."
 	python scripts/validate_registry_harbor_live_gate.py
 	python scripts/validate_registry_harbor_live_gate_test.py
-	@echo "✅ SPRINT13-REGISTRY-HARBOR-LIVE-A registry Harbor live gate contract valid"
+	@echo "✅ REGISTRY-P0-CLOSURE-A registry Harbor live gate contract valid"
 
 validate-instance-management-live-gate:
 	@echo "→ 校验 Instance Management VM live gate 契约..."
