@@ -37,10 +37,6 @@ func storageNeedsControlPlaneStore(cfg gatewayStorageRuntimeConfig) bool {
 	}
 }
 
-func vectorNeedsControlPlaneStore(cfg gatewayVectorStoreRuntimeConfig) bool {
-	return strings.TrimSpace(cfg.VectorStoreProvider) == "milvus"
-}
-
 func connectStorageControlPlaneStore(ctx context.Context, databaseURL string, injected ports.MetadataStore) (ports.MetadataStore, func(), error) {
 	closeStore := func() {}
 	var store ports.MetadataStore
