@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/route"
@@ -309,8 +310,27 @@ func (api *vectorStoreAPI) insertVectorStoreDocuments(ctx context.Context, c *ap
 		writeVectorStoreError(c, err)
 		return
 	}
-	c.Response.Header.Set("Location", "/api/v1/tasks/"+result.TaskID)
-	c.JSON(http.StatusAccepted, vectorStoreDocumentInsertFromResult(result))
+	task := storageCompletedTask(
+		"vector_store.document.insert",
+		"vector_store",
+		req.IdempotencyKey,
+		map[string]any{
+			"vector_store_id": c.Param("vector_store_id"),
+			"inserted_count":  result.InsertedCount,
+		},
+		time.Time{},
+		result.TaskID,
+	)
+	createdTask, _, err := api.tasks.Create(ctx, taskRecordFromResponse(instanceTenantID(c), task))
+	if err != nil {
+		writeInstanceError(c, http.StatusInternalServerError, "TASK_PERSIST_FAILED", err.Error())
+		return
+	}
+	response := vectorStoreDocumentInsertFromResult(result)
+	response.TaskID = createdTask.ID
+	response.Status = createdTask.Status
+	c.Response.Header.Set("Location", "/api/v1/tasks/"+createdTask.ID)
+	c.JSON(http.StatusAccepted, response)
 }
 
 func (api *vectorStoreAPI) deleteVectorStoreDocuments(ctx context.Context, c *app.RequestContext) {

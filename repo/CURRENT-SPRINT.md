@@ -10,6 +10,8 @@
 
 > **INSTANCE-SANDBOX-STATELESS-A（2026-08-02，历史前置）：** live passed。Core 使用请求级 PG 上下文、UUID、PG AsyncTaskStore、Redis DELETE/指纹/Token 过期幂等和端口摘要写回；Gateway `instance-sandbox-stateless-20260802-v1` 重启验证通过。该批次当时的 `emptyDir/checkpoint 422` 边界已由 `INSTANCE-SANDBOX-CHECKPOINT-A` 取代，历史 evidence 仍保留在 `development-records/live-evidence/instance-sandbox-stateless-live-20260802.json`。
 
+> **STORAGE-ASYNC-CORRECTNESS-A（2026-08-03）：** live passed。Core v1 Vector 文档写入保持 `202 + VectorStoreDocumentInsertResponse`，补齐 `Location` 和 `vector_store.document.insert`；任务写入 PG，Gateway rollout 后原 task ID 仍返回 200；evidence：`development-records/live-evidence/storage-async-vector-task-live-20260803.json`。
+
 > **Sprint 13（当前活跃冲刺，2026-06-19 起）：** Core real provider 与 live gate 收敛。前置 Sprint 12 已闭合 19 个 Core handler + 2 个 422；Sprint 13 不重写 Core handler，不把 Services 业务资源回流 Core API，而是在既有 `pkg/ports` / `pkg/adapters` / Gateway handler 边界接入真实组件，并形成可复跑 live gate 与 evidence JSON。历史冻结原因和历史结论仍保留在旧批次记录中，但不是当前 PR 规则。计划见 [`development-records/sprint13-real-provider-readiness-plan.md`](development-records/sprint13-real-provider-readiness-plan.md)。
 
 > **Sprint 14 计划与分支状态：** Sprint 14 Core 韧性与服务语义计划见 [`development-records/sprint14-core-resilience-plan.md`](development-records/sprint14-core-resilience-plan.md)（限流/幂等重放/超时/readyz/重试断路/降级/failover）。配套交付 Services 的前端加速设计：[`development-records/frontend-acceleration-design-for-services.md`](development-records/frontend-acceleration-design-for-services.md)。当前主线入口仍保留 Sprint 13 production-shaped 边界；`feature/sprint14-core-resilience-semantics` 已完成 Sprint14 aggregate live gate，待 PR/评审后再进入主线状态。
@@ -26,7 +28,7 @@
 | **Auth 边界** | SPRINT13-AUTH-DEX-PRODUCTION-GATE / Auth/Dex production gate 已通过；production-shaped Gateway 固定 ANI_AUTH_MODE=auth_service |
 | **执行入口** | `development-records/sprint13-real-provider-readiness-plan.md`、`development-records/README.md`、本文件验收命令 |
 | **执行环境** | 真实 provider 写操作前必须重新只读盘点并取得人工确认；evidence 不得包含凭据、服务器 IP 或完整内网端点 |
-| **最后校准日期** | 2026-08-02 |
+| **最后校准日期** | 2026-08-03 |
 
 ## Sprint 13 当前任务
 

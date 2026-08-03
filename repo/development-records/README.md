@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### Storage Async Correctness（2026-08）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| STORAGE-ASYNC-CORRECTNESS-A | live passed：保持 Core v1 Vector 文档写入 `202` 自定义响应，补齐 `Location` 和 `vector_store.document.insert`；任务落 PG，Gateway rollout 后原 task ID 仍可查询；Milvus 临时夹具已清理；evidence `live-evidence/storage-async-vector-task-live-20260803.json` | storage-async-correctness-a.md |
+
 ### Instance Sandbox 无状态化（2026-08）
 
 | 批次 | 内容摘要 | 文件 |

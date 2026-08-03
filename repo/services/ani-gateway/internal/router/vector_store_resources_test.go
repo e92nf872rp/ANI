@@ -1,6 +1,7 @@
 package router
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -158,6 +159,126 @@ func TestVectorStoreAPIDocumentInsertResponseMatchesCoreSchema(t *testing.T) {
 	}
 	if got := vectorStoreDocumentInsertFromResult(result); got.InsertedCount != 1 || got.TaskID == "" || got.Status != "completed" {
 		t.Fatalf("insert response = %+v, want VectorStoreDocumentInsertResponse fields", got)
+	}
+}
+
+func TestVectorStoreHTTPDocumentInsertPersistsPollableTask(t *testing.T) {
+	tasks := runtimeadapter.NewLocalAsyncTaskStore()
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		tenantID := string(c.GetHeader("X-Dev-Tenant-ID"))
+		if tenantID == "" {
+			tenantID = "tenant-a"
+		}
+		c.Set("tenant_id", tenantID)
+		c.Next(ctx)
+	})
+	v1 := h.Group("/api/v1")
+	registerVectorStoreResourcesWithServiceAndTasks(v1, runtimeadapter.NewLocalVectorStoreService(), tasks)
+	registerTasksWithStore(v1, tasks)
+
+	created := performJSONRequest(t, h, http.MethodPost, "/api/v1/vector-stores", `{"idempotency_key":"http-vector-doc-task-create","name":"kb-doc-task","dimension":3}`, http.StatusCreated)
+	storeID := jsonStringField(t, created, "id")
+	requestBody := `{"idempotency_key":"http-vector-doc-task-insert","documents":[{"id":"doc-a","content":"hello vector"}]}`
+	resp := ut.PerformRequest(
+		h.Engine,
+		http.MethodPost,
+		"/api/v1/vector-stores/"+storeID+"/documents",
+		&ut.Body{Body: bytes.NewBufferString(requestBody), Len: len(requestBody)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+	).Result()
+	if resp.StatusCode() != http.StatusAccepted {
+		t.Fatalf("insert status = %d body=%s, want 202", resp.StatusCode(), resp.Body())
+	}
+	var inserted map[string]any
+	if err := json.Unmarshal(resp.Body(), &inserted); err != nil {
+		t.Fatalf("unmarshal insert body: %v", err)
+	}
+	taskID, _ := inserted["task_id"].(string)
+	if taskID == "" || inserted["status"] != "completed" || inserted["inserted_count"] != float64(1) {
+		t.Fatalf("insert body = %s, want existing v1 response fields", resp.Body())
+	}
+	location := string(resp.Header.Get("Location"))
+	if location != "/api/v1/tasks/"+taskID {
+		t.Fatalf("Location = %q, want task URL for %s", location, taskID)
+	}
+
+	taskResp := ut.PerformRequest(h.Engine, http.MethodGet, location, nil).Result()
+	if taskResp.StatusCode() != http.StatusOK {
+		t.Fatalf("task status = %d body=%s, want 200", taskResp.StatusCode(), taskResp.Body())
+	}
+	var task map[string]any
+	if err := json.Unmarshal(taskResp.Body(), &task); err != nil {
+		t.Fatalf("unmarshal task body: %v", err)
+	}
+	if task["id"] != taskID || task["task_type"] != "vector_store.document.insert" || task["resource_type"] != "vector_store" || task["status"] != "completed" {
+		t.Fatalf("task body = %s, want completed vector document insert task", taskResp.Body())
+	}
+	result, _ := task["result"].(map[string]any)
+	if result["vector_store_id"] != storeID || result["inserted_count"] != float64(1) {
+		t.Fatalf("task result = %v, want vector store ID and inserted count", result)
+	}
+
+	replayResp := ut.PerformRequest(
+		h.Engine,
+		http.MethodPost,
+		"/api/v1/vector-stores/"+storeID+"/documents",
+		&ut.Body{Body: bytes.NewBufferString(requestBody), Len: len(requestBody)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+	).Result()
+	if replayResp.StatusCode() != http.StatusAccepted {
+		t.Fatalf("replay status = %d body=%s, want 202", replayResp.StatusCode(), replayResp.Body())
+	}
+	if replayedTaskID := jsonStringField(t, replayResp.Body(), "task_id"); replayedTaskID != taskID {
+		t.Fatalf("replayed task ID = %q, want %q", replayedTaskID, taskID)
+	}
+
+	crossTenant := ut.PerformRequest(
+		h.Engine,
+		http.MethodGet,
+		location,
+		nil,
+		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-b"},
+	).Result()
+	if crossTenant.StatusCode() != http.StatusNotFound {
+		t.Fatalf("cross-tenant task status = %d body=%s, want 404", crossTenant.StatusCode(), crossTenant.Body())
+	}
+
+	persistedTaskID := "33333333-3333-4333-8333-333333333333"
+	_, _, err := tasks.Create(context.Background(), ports.AsyncTaskRecord{
+		TenantID:       "tenant-a",
+		ID:             persistedTaskID,
+		IdempotencyKey: "http-vector-doc-task-pg-replay",
+		TaskType:       "vector_store.document.insert",
+		ResourceType:   "vector_store",
+		Status:         "completed",
+		AttemptCount:   1,
+		MaxAttempts:    1,
+		ProgressPct:    100,
+		Result: map[string]any{
+			"vector_store_id": storeID,
+			"inserted_count":  1,
+		},
+	})
+	if err != nil {
+		t.Fatalf("seed persisted task: %v", err)
+	}
+	persistedReplayBody := `{"idempotency_key":"http-vector-doc-task-pg-replay","documents":[{"id":"doc-b","content":"persisted replay"}]}`
+	persistedReplay := ut.PerformRequest(
+		h.Engine,
+		http.MethodPost,
+		"/api/v1/vector-stores/"+storeID+"/documents",
+		&ut.Body{Body: bytes.NewBufferString(persistedReplayBody), Len: len(persistedReplayBody)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+	).Result()
+	if persistedReplay.StatusCode() != http.StatusAccepted {
+		t.Fatalf("persisted replay status = %d body=%s, want 202", persistedReplay.StatusCode(), persistedReplay.Body())
+	}
+	if got := jsonStringField(t, persistedReplay.Body(), "task_id"); got != persistedTaskID {
+		t.Fatalf("persisted replay task ID = %q, want %q", got, persistedTaskID)
+	}
+	if got := string(persistedReplay.Header.Get("Location")); got != "/api/v1/tasks/"+persistedTaskID {
+		t.Fatalf("persisted replay Location = %q, want existing task URL", got)
 	}
 }
 

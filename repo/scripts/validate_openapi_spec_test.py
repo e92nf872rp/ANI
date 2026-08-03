@@ -318,6 +318,48 @@ class OpenAPISpecValidatorTest(unittest.TestCase):
         self.assertIn("sandbox.code_run.create", task_type)
         self.assertIn("sandbox_code_run", resource_type)
 
+    def test_vector_document_insert_async_contract_is_pollable(self) -> None:
+        spec = yaml.safe_load((ROOT / "api/openapi/v1.yaml").read_text(encoding="utf-8"))
+        schemas = spec["components"]["schemas"]
+
+        accepted = spec["paths"]["/vector-stores/{vector_store_id}/documents"]["post"][
+            "responses"
+        ]["202"]
+        self.assertEqual(
+            accepted["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/VectorStoreDocumentInsertResponse",
+        )
+        self.assertIn("Location", accepted.get("headers", {}))
+        self.assertIn(
+            "vector_store.document.insert",
+            schemas["AsyncTask"]["properties"]["task_type"]["enum"],
+        )
+
+    def test_async_accepted_responses_declare_polling_location(self) -> None:
+        spec = yaml.safe_load((ROOT / "api/openapi/v1.yaml").read_text(encoding="utf-8"))
+        schemas = spec["components"]["schemas"]
+
+        for path, path_item in spec["paths"].items():
+            for method in ("get", "post", "put", "patch", "delete"):
+                operation = path_item.get(method)
+                if operation is None or "202" not in operation.get("responses", {}):
+                    continue
+                accepted = operation["responses"]["202"]
+                schema_ref = (
+                    accepted.get("content", {})
+                    .get("application/json", {})
+                    .get("schema", {})
+                    .get("$ref", "")
+                )
+                schema_name = schema_ref.rsplit("/", 1)[-1]
+                response_schema = schemas.get(schema_name, {})
+                exposes_task = schema_name == "AsyncTask" or "task_id" in response_schema.get(
+                    "required", []
+                )
+                if exposes_task:
+                    with self.subTest(method=method, path=path):
+                        self.assertIn("Location", accepted.get("headers", {}))
+
 
 if __name__ == "__main__":
     unittest.main()
