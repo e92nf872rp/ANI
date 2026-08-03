@@ -42,9 +42,9 @@ type mockMessage struct {
 	data    []byte
 }
 
-func (m *mockMessage) Subject() string                   { return "" }
-func (m *mockMessage) Data() []byte                       { return m.data }
-func (m *mockMessage) Headers() map[string][]string        { return m.headers }
+func (m *mockMessage) Subject() string              { return "" }
+func (m *mockMessage) Data() []byte                 { return m.data }
+func (m *mockMessage) Headers() map[string][]string { return m.headers }
 
 func TestConsumerStart(t *testing.T) {
 	mbus := &mockMessageBus{}

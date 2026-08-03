@@ -93,9 +93,9 @@ func newFakeMessage(subject string, data []byte, headers map[string][]string) *f
 	}
 }
 
-func (f *fakeMessage) Subject() string                   { return f.subject }
-func (f *fakeMessage) Data() []byte                      { return f.data }
-func (f *fakeMessage) Headers() map[string][]string      { return f.headers }
+func (f *fakeMessage) Subject() string              { return f.subject }
+func (f *fakeMessage) Data() []byte                 { return f.data }
+func (f *fakeMessage) Headers() map[string][]string { return f.headers }
 
 // =============================================================================
 // Test cases
