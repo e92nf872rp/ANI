@@ -37,7 +37,7 @@ type gatewayRegistryRuntimeConfig struct {
 func gatewayRegistryRuntimeConfigFromEnv() gatewayRegistryRuntimeConfig {
 	return gatewayRegistryRuntimeConfig{
 		ProviderMode: os.Getenv("REGISTRY_PROVIDER_MODE"), HarborEndpoint: os.Getenv("HARBOR_ENDPOINT"), HarborUsername: os.Getenv("HARBOR_USERNAME"), HarborPassword: os.Getenv("HARBOR_PASSWORD"), HarborRequestTimeout: gatewayDurationFromEnv("HARBOR_REQUEST_TIMEOUT"),
-		KubernetesAPIHost: os.Getenv("KUBERNETES_API_HOST"), KubernetesServiceHost: os.Getenv("KUBERNETES_SERVICE_HOST"), KubernetesServicePort: os.Getenv("KUBERNETES_SERVICE_PORT"), KubernetesBearerToken: os.Getenv("KUBERNETES_BEARER_TOKEN"), KubernetesServiceAccountTokenFile: os.Getenv("KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE"), KubernetesServiceAccountCAFile: os.Getenv("KUBERNETES_SERVICE_ACCOUNT_CA_FILE"), KubernetesProviderManager: firstGatewayEnv("REGISTRY_PULL_SECRET_FIELD_MANAGER", "KUBERNETES_PROVIDER_FIELD_MANAGER"), KubernetesRequestTimeout: gatewayDurationFromEnv("KUBERNETES_REQUEST_TIMEOUT"), DatabaseURL: os.Getenv("DATABASE_URL"),
+		KubernetesAPIHost: os.Getenv("KUBERNETES_API_HOST"), KubernetesServiceHost: os.Getenv("KUBERNETES_SERVICE_HOST"), KubernetesServicePort: os.Getenv("KUBERNETES_SERVICE_PORT"), KubernetesBearerToken: os.Getenv("KUBERNETES_BEARER_TOKEN"), KubernetesServiceAccountTokenFile: os.Getenv("KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE"), KubernetesServiceAccountCAFile: os.Getenv("KUBERNETES_SERVICE_ACCOUNT_CA_FILE"), KubernetesProviderManager: os.Getenv("REGISTRY_PULL_SECRET_FIELD_MANAGER"), KubernetesRequestTimeout: gatewayDurationFromEnv("KUBERNETES_REQUEST_TIMEOUT"), DatabaseURL: os.Getenv("DATABASE_URL"),
 	}
 }
 

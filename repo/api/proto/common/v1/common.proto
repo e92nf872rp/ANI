@@ -12,6 +12,7 @@ message TenantContext {
   string tenant_id = 1;   // UUID string
   string user_id   = 2;   // UUID string; empty when request uses API Key
   repeated string roles = 3;
+  string scope     = 4;   // "tenant" (default) or "platform"; routes by scope whitelist
 }
 
 // CursorPageRequest is the standard pagination request included in list RPCs.

@@ -1,8 +1,8 @@
 # KuberCloud ANI · 开发计划
 
 > 版本 V8.3 | 广州常青云科技有限公司 | 内部产品规划文件
-> 最后更新：2026-07-22
-> 当前摘要：Sprint 12 Core handler/local profile 已闭环；Sprint 13 S01-S07 real provider live gate 均为 `production_shape.status=passed`。并行契约切片 `CORE-INSTANCE-CREATE-CONFIG-A` 已完成：`CreateInstanceRequest` 按 kind 嵌套 `*_config`（扁平字段兼容）；`CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A` 已按 7.22 原型补齐 Console 镜像仓库流程最小 v1 契约（不含 BOSS/权限/实现）。Instance Observability Completion 增量补全（`feat/instance-observability-pr4` 分支）已完成 8 个批次 13 个批次记录归档，覆盖 LogStore port 抽象、Loki 日志持久化、Prometheus GPU/VM 指标采集和 VM 前端模板。这只表示组件级 production-shaped acceptance passed 或契约完成，不等于 full platform production ready。
+> 最后更新：2026-07-28
+> 当前摘要：Sprint 12 Core handler/local profile 已闭环；Sprint 13 S01-S07 real provider live gate 均为 `production_shape.status=passed`。并行契约切片 `CORE-INSTANCE-CREATE-CONFIG-A` 已完成：`CreateInstanceRequest` 按 kind 嵌套 `*_config`（扁平字段兼容）；`GPU-SPEC-CONTRACT-A`、`INSTANCE-CONTRACT-A` 与 `INSTANCE-SANDBOX-CONTRACT-A` 均已通过个人仓库 CI，补齐实例 `spec_id` 前置只读规格、四类 P0 实例主契约以及 token、预览端口、文件、checkpoint 和 code-run 子资源契约，明确本期不做配额 check/acquire/release，且尚不含运行时实现；`CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A` 已按 7.22 原型补齐 Console 镜像仓库流程最小 v1 契约（不含 BOSS/权限/实现）。`CORE-STORAGE-CONSOLE-APIS-BACKEND-A` 在上游 PR #71 契约合入后补齐对象桶、块卷、文件系统和向量库管理接口的 Core 后端闭环；2026-07-27 本地 Gateway + 真实依赖复验 Rook-Ceph/MinIO/Milvus 后端 E2E 通过，不含前端，不升级为 production-shaped Gateway 结论。Instance Observability Completion 增量补全（`feat/instance-observability-pr4` 分支）已完成 8 个批次 13 个批次记录归档，覆盖 LogStore port 抽象、Loki 日志持久化、Prometheus GPU/VM 指标采集和 VM 前端模板。这只表示组件级 production-shaped acceptance passed、契约完成或 local profile 后端闭环，不等于 full platform production ready。
 > Services 当前治理：Core Sprint 13/14 既有事实继续有效；Services 受控并行 PR 阶段由 CODEOWNERS 共同审查、API split、Services boundary gate、OpenAPI/Gateway route contract、Services semantic contract、生成物漂移和 make validate-architecture 约束，统一入口为 `make validate-services`，当前执行入口仍是 repo/CURRENT-SPRINT.md。
 > Sprint 14 分支执行：`feature/sprint14-core-resilience-semantics` 已完成 R-P0-0 gateway shared store 前置批次、R-P0-1 gateway rate limit、R-P0-2 gateway idempotency replay、R-P0-3 adapter per-call timeout、R-P0-4 data-plane readyz health、R-P1-5 retry/circuit-breaker foundation、R-P1-6 resilience degradation 与 R-P2-7 multi-endpoint failover config；这些单批次仍按 local/logic verified 归档。SPRINT14-CORE-RESILIENCE-LIVE-GATE / validate-sprint14-resilience-live-gate / Sprint14 resilience live gate 已在 ani-sprint14-resilience 隔离 namespace 真实通过 P0 strong backend kill、P1 weak dependency degraded、P2 controller primary kill / follower failover，并归档脱敏 evidence；production-ready 范围仅限隔离 Sprint14 Core resilience fixture，不外推到现有 Sprint13 单副本后端或 full platform。
 
@@ -78,16 +78,30 @@ GPU 调度三段式 PR 拆分（2026-07-21）：
 - PR #31 (2/3 接口)：pkg/ports 接口（GPUSchedulingQueueStore + GPUInventory 扩展），已合入 main。
 - PR #46 (3/3 实现)：adapters + gateway + 前端 + manifests 实现，OPEN 等待 review；review-it 修复 4 项，5 项 follow-up 延迟；笔记 `gpu-scheduling-batch-01-13-note-it.md §5`。
 
+Instance Management API-First（2026-07-28）：
+- GPU-SPEC-CONTRACT-A：实例 `spec_id` 的前置只读 Core 契约已完成并通过个人仓库 CI，新增 `GPUSpecSummary`、`GET /gpu-specs`、`GET /gpu-specs/{spec_id}`，并在 GPU Container config 增加可选 `spec_id`；旧 GPU 字段 deprecated 保留。
+- INSTANCE-CONTRACT-A：统一实例主契约已补齐四类 P0 创建配置、Registry/Network/Storage/GPU Spec 引用、稳定详情摘要、列表过滤/排序/cursor、观测 cursor 和结构化 lifecycle/operation step；个人仓库 CI 已通过，契约已确认。
+- INSTANCE-SANDBOX-CONTRACT-A：已补齐 Sandbox token、runtime 预览端口、文件、checkpoint 和异步 code-run 共 11 个操作，固定租户/kind、幂等、任务轮询和敏感输出审计边界；个人仓库 CI 已通过，契约已确认。
+- 当前边界：规格只描述 GPU 资源形态，不表示租户配额；本期不实现 quota check/acquire/release，不新增 quota 表或 port。
+- 后续顺序：INSTANCE-SANDBOX-CONTRACT-A 个人仓库 CI 和契约评审通过后，停在运行时实现确认关卡；确认前不实现 handler、ports 或 adapters。
+
 Registry Console Flow（2026-07-22）：
-- CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A：按 7.22 原型“暂不考虑 BOSS 和权限”边界，Core v1 新增 `RegistryImage.purpose`、`/registry/images?purpose=`、四类算力引用 enum 与 createInstance 镜像门禁 422 语义；仅契约和 Console Core schema 生成物，不含 handler/adapter/Console 页面实现。
+- CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A：按 7.22 原型”暂不考虑 BOSS 和权限”边界，Core v1 新增 `RegistryImage.purpose`、`/registry/images?purpose=`、四类算力引用 enum 与 createInstance 镜像门禁 422 语义；仅契约和 Console Core schema 生成物，不含 handler/adapter/Console 页面实现。
 - CORE-REGISTRY-CONSOLE-FLOW-CORE-A：Core 镜像仓库后端实现已补齐 RegistryImage purpose port/adapter/router 流转和 `/registry/images?purpose=` 过滤；不含 instances、Console、BOSS 或权限实现。
+- SPRINT13-REGISTRY-HARBOR-LIVE-A：镜像仓库 Harbor-backed live gate 已通过；`validate-registry-harbor-live-gate` 固定契约，2026-07-27 真实 Gateway 覆盖 Harbor project/list/push-instructions/pull-secret/scan-report 链路并归档脱敏 evidence；artifact/purpose 回读需提供 repository/tag；不含 Console/BOSS 或实例创建镜像门禁。
+
+Storage Console APIs（2026-07-24）：
+- CORE-STORAGE-CONSOLE-APIS-BACKEND-A：上游 PR #71 存储模块 v1 契约合入后，Core 后端补齐对象桶、块卷、文件系统和向量库管理接口的 ports/local service/gateway handlers 与后端 HTTP E2E/API 测试；2026-07-27 本地 Gateway + 真实依赖复验 Rook-Ceph/MinIO/Milvus 后端 E2E 通过；不含 Console/BOSS 前端，不升级为 production-shaped Gateway 结论。
 
 Instance Observability Completion 增量补全（2026-07，PR4 分支）：
 - 分支：`feat/instance-observability-pr4`，对应 SPEC `spec-console-instance-observability-completion.md` 的 16 个设计决策、12 个 User Story 和 8 个批次（B-1~B-8），共 13 个批次记录已归档。
 - 覆盖：LogStore port 抽象（`ports.LogStore`）+ Loki 日志持久化（`LokiLogStore` adapter + Fluent Bit DaemonSet 部署示例）+ Prometheus GPU/VM 指标采集（DCGM exporter + KubeVirt virt-handler scrape）+ PromQL label 重写扩展（`name` label）+ VM 前端 PromQL 模板。
 - 关键设计决策：LogStore 单方法 interface 复用 `InstanceLogEntry`；Loki `direction=backward` + cursor→end（偏离 SPEC `forward`+cursor→start，继承 live gate 修复语义）；Loki pod 正则匹配兼容 ReplicaSet hash；level 推断兼容 Fluent-Bit 无 level 字段日志；VM `resident_bytes` 查询但不赋值；GPU 显存 `FB_FREE+FB_USED`（live gate 复现 DCGM 不暴露 `FB_TOTAL`）；OQ-4 决策 `rewritePromQLLabels` 支持 `name` label 精确匹配。
-- 已知边界：VM 端到端 live 验证待补（当前系统无 VM）；MinIO emptyDir 非持久化风险；Local mock GPU 返回 0 而非 nil（与 port 注释"缺失不等于 0"原则不一致）；Loki 方向与 pod 匹配偏离 SPEC 待 SPEC 同步。
+- 已知边界：VM 端到端 live 验证待补（当前系统无 VM）；MinIO emptyDir 非持久化风险；Local mock GPU 返回 0 而非 nil（与 port 注释”缺失不等于 0”原则不一致）；Loki 方向与 pod 匹配偏离 SPEC 待 SPEC 同步。
 - 详细批次索引见 `repo/development-records/README.md`「Console Instance Observability Completion（2026-07）」章节；执行状态见 `repo/CURRENT-SPRINT.md`「Instance Observability Completion 增量补全」章节。
+
+邮件通知（2026-07-22）：
+- EMAIL-NOTIFY：9 个 Core `/api/v1/notifications/email/*` endpoint（SMTP CRUD / 收件人 CRUD / 事件订阅批量更新 / 测试发送）+ BOSS 前端发信设置页；local 内存 adapter；store 层 RequestID UUID 生成 + handler 透传；48 store 测试 + 34 handler 测试通过；`make validate-architecture` 和前端 `pnpm` 验证待补跑；详见 `repo/development-records/email-notify.md`。M1-NOTIFY-A 的 email 通道已完成，webhook/内部消息通道和通知历史查询待后续。
 ```
 
 | 阶段 | 状态 | 完成时间 | 说明 |
@@ -159,6 +173,8 @@ ANI Services 当前受控解冻并进入并行 PR：本仓库仍以 ANI Core（�
 | Sprint 5 ⭐ | ✅ 真实验证完成 | K8s 集群/proxy/upgrade/node-pool、KMS/SM4、Secrets、reconcile 的契约 + local profile + 代码边界 + live gate 全部完成，并在真实 lab 跑通归档 evidence。逐项 live gate 与 caveat 见 [当前真实底座环境状态](#当前真实底座环境状态)。 |
 | Sprint 13 ⭐ | 🔄 收敛中 | S01-S07 real provider 均已 production-shaped gate passed；仍不等于 full platform production ready。 |
 | Sprint 14 ⭐ | ✅ 分支完成 | Core resilience 三阶段 P0/P1/P2 已完成 aggregate live gate；代码、fixture、脱敏 evidence 与文档归档在 `feature/sprint14-core-resilience-semantics`。 |
+| 账密登录 ✅ | ✅ 已完成 | Core Auth API（租户账密 + 平台账密）+ Console 账密 Tab + BOSS 平台登录；代码审查修复 7 项（P0-1/P0-3/P1-1/P1-2/P1-3/P1-5/P2-1）；PRD/SPEC 按产品线拆分；BOSS OIDC 暂不实现 |
+| Storage Console APIs | ✅ 后端完成，真实依赖 E2E 已复验 | 对象桶、块卷、文件系统和向量库管理接口已补齐 ports/local service/gateway handlers 与后端 HTTP E2E/API 测试；2026-07-27 本地 Gateway + 真实依赖复验 Rook-Ceph/MinIO/Milvus 后端 E2E 通过；不含前端，不升级为 production-shaped Gateway 结论。 |
 | Instance Observability Completion | ✅ PR4 分支完成 | LogStore port 抽象 + Loki 日志持久化 + Prometheus GPU/VM 指标采集 + PromQL label 重写扩展 + VM 前端模板；8 批次 13 记录归档，VM live 验证待补。 |
 
 **→ 继续入口：** 当前切片、验收命令、受控目录见 [`repo/CURRENT-SPRINT.md`](repo/CURRENT-SPRINT.md)；破坏性磁盘操作、默认 StorageClass 切换、已有 PVC 迁移、HDD class 引入、并发重启或更大故障演练仍须单独审批。
@@ -1801,9 +1817,11 @@ M5（9月）
   - Services 层注册 PaaS 服务的稳定内部域名（如 `postgres.prod.ani.internal`）
   - 底层：CoreDNS 自定义 zone 动态管理
 
-- [ ] `M1-NOTIFY-A`：事件通知 API
+- [x] `M1-NOTIFY-A`：事件通知 API（BOSS 邮件通知已完成，Console 侧待 P2）
   - `CRUD /api/v1/notifications/subscriptions`（订阅事件：webhook/email/内部消息）
   - `GET /api/v1/notifications/events`（通知历史查询）
+  - 已完成：EMAIL-NOTIFY 批次（2026-07-22）实现 9 个 Core `/api/v1/notifications/email/*` endpoint + BOSS 前端发信设置页；store 层 RequestID UUID 生成；48 store 测试 + 34 handler 测试通过；详见 `repo/development-records/email-notify.md`
+  - 未完成：webhook/内部消息通道、通知历史查询、Console 侧通知配置
 
 ### 模块 M1-DPU：DPU 加速节点纳管
 

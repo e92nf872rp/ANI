@@ -35,6 +35,14 @@ service KBService {
   // Query performs a synchronous RAG query and returns a JSON answer.
   // For streaming answers use the SSE endpoint in the gateway directly.
   rpc Query(QueryRequest) returns (QueryResponse);
+
+  // ── Phase A P1 RPC declarations (P0 returns UNIMPLEMENTED) ─────────────────
+  // ListKBCitations returns the citation sources used by a KB (P1).
+  rpc ListKBCitations(ListKBCitationsRequest) returns (ListKBCitationsResponse);
+  // ListKBSessions returns the chat sessions of a KB (P1).
+  rpc ListKBSessions(ListKBSessionsRequest) returns (ListKBSessionsResponse);
+  // UpdateKBPermissions updates KB access permissions (P1).
+  rpc UpdateKBPermissions(UpdateKBPermissionsRequest) returns (KnowledgeBase);
 }
 
 // ── Request / Response messages ───────────────────────────────────────────────
@@ -73,10 +81,11 @@ message GetDocumentUploadURLRequest {
   string tenant_id       = 1;
   string kb_id           = 2;
   string file_name       = 3;
-  string file_type       = 4;   // pdf | docx | xlsx | txt | md
+  string file_type       = 4;   // pdf | docx | xlsx | pptx | md | txt
   int64  file_size_bytes = 5;
   string checksum_sha256 = 6;   // client-computed; validated after upload
   string idempotency_key = 7;   // collision-safe: resubmitting returns same doc
+  string custom_metadata = 8;  // JSONB string; client-defined key-value metadata (≤ 64KB)
 }
 
 message GetDocumentUploadURLResponse {
@@ -170,6 +179,58 @@ message KBDocument {
   string parse_status    = 7;   // pending | parsing | indexing | ready | failed
   int32  chunk_count     = 8;
   string error_message   = 9;
-  google.protobuf.Timestamp created_at = 10;
-  google.protobuf.Timestamp parsed_at  = 11;
+  string custom_metadata = 10;  // JSONB string; client-defined key-value metadata (≤ 64KB)
+  google.protobuf.Timestamp created_at = 11;
+  google.protobuf.Timestamp parsed_at  = 12;
+}
+
+// ── Phase A P1 messages (declarations only; P0 returns UNIMPLEMENTED) ─────────
+message ListKBCitationsRequest {
+  string tenant_id = 1;
+  string kb_id     = 2;
+  common.v1.CursorPageRequest page = 3;
+}
+
+message KBCitation {
+  string id         = 1;
+  string kb_id      = 2;
+  string doc_id     = 3;
+  string file_name  = 4;
+  int32  page       = 5;
+  string content    = 6;
+  float  score      = 7;
+  google.protobuf.Timestamp created_at = 8;
+}
+
+message ListKBCitationsResponse {
+  repeated KBCitation items = 1;
+  string next_cursor        = 2;
+}
+
+message ListKBSessionsRequest {
+  string tenant_id = 1;
+  string kb_id     = 2;
+  common.v1.CursorPageRequest page = 3;
+}
+
+message KBSession {
+  string id             = 1;
+  string kb_id          = 2;
+  int32  message_count  = 3;
+  string last_query     = 4;
+  google.protobuf.Timestamp created_at     = 5;
+  google.protobuf.Timestamp last_active_at = 6;
+}
+
+message ListKBSessionsResponse {
+  repeated KBSession items = 1;
+  string next_cursor        = 2;
+}
+
+message UpdateKBPermissionsRequest {
+  string tenant_id       = 1;
+  string kb_id           = 2;
+  string idempotency_key = 3;
+  bool   public_read     = 4;
+  repeated string allowed_user_ids = 5;
 }

@@ -36,12 +36,13 @@ func Idempotency(store GatewayStore) app.HandlerFunc {
 
 		tenantID := GetTenantID(c)
 		key := idempotencyKeyFromRequest(c)
-		if tenantID == "" || key == "" {
+		if key == "" {
 			c.Next(ctx)
 			return
 		}
 
-		cacheKey := idempotencyCacheKey(tenantID, string(c.Method()), string(c.Path()), key)
+		scope := GetScope(c)
+		cacheKey := idempotencyCacheKey(scope, tenantID, string(c.Method()), string(c.Path()), key)
 		existing, err := readIdempotencyRecord(ctx, store, cacheKey)
 		if err == nil {
 			writeIdempotencyRecord(c, existing)
@@ -105,9 +106,9 @@ func idempotencyKeyFromRequest(c *app.RequestContext) string {
 	return strings.TrimSpace(payload.IdempotencyKey)
 }
 
-func idempotencyCacheKey(tenantID, method, path, idempotencyKey string) string {
+func idempotencyCacheKey(scope, tenantID, method, path, idempotencyKey string) string {
 	digest := sha256.Sum256([]byte(idempotencyKey))
-	return "idempotency:" + tenantID + ":" + method + ":" + path + ":" + hex.EncodeToString(digest[:])
+	return "idempotency:" + scope + ":" + tenantID + ":" + method + ":" + path + ":" + hex.EncodeToString(digest[:])
 }
 
 func readIdempotencyRecord(ctx context.Context, store GatewayStore, key string) (idempotencyRecord, error) {

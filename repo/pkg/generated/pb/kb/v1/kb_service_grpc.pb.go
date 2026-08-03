@@ -31,6 +31,9 @@ const (
 	KBService_ListDocuments_FullMethodName          = "/kb.v1.KBService/ListDocuments"
 	KBService_DeleteDocument_FullMethodName         = "/kb.v1.KBService/DeleteDocument"
 	KBService_Query_FullMethodName                  = "/kb.v1.KBService/Query"
+	KBService_ListKBCitations_FullMethodName        = "/kb.v1.KBService/ListKBCitations"
+	KBService_ListKBSessions_FullMethodName         = "/kb.v1.KBService/ListKBSessions"
+	KBService_UpdateKBPermissions_FullMethodName    = "/kb.v1.KBService/UpdateKBPermissions"
 )
 
 // KBServiceClient is the client API for KBService service.
@@ -56,6 +59,13 @@ type KBServiceClient interface {
 	// Query performs a synchronous RAG query and returns a JSON answer.
 	// For streaming answers use the SSE endpoint in the gateway directly.
 	Query(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (*QueryResponse, error)
+	// ── Phase A P1 RPC declarations (P0 returns UNIMPLEMENTED) ─────────────────
+	// ListKBCitations returns the citation sources used by a KB (P1).
+	ListKBCitations(ctx context.Context, in *ListKBCitationsRequest, opts ...grpc.CallOption) (*ListKBCitationsResponse, error)
+	// ListKBSessions returns the chat sessions of a KB (P1).
+	ListKBSessions(ctx context.Context, in *ListKBSessionsRequest, opts ...grpc.CallOption) (*ListKBSessionsResponse, error)
+	// UpdateKBPermissions updates KB access permissions (P1).
+	UpdateKBPermissions(ctx context.Context, in *UpdateKBPermissionsRequest, opts ...grpc.CallOption) (*KnowledgeBase, error)
 }
 
 type kBServiceClient struct {
@@ -156,6 +166,33 @@ func (c *kBServiceClient) Query(ctx context.Context, in *QueryRequest, opts ...g
 	return out, nil
 }
 
+func (c *kBServiceClient) ListKBCitations(ctx context.Context, in *ListKBCitationsRequest, opts ...grpc.CallOption) (*ListKBCitationsResponse, error) {
+	out := new(ListKBCitationsResponse)
+	err := c.cc.Invoke(ctx, KBService_ListKBCitations_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kBServiceClient) ListKBSessions(ctx context.Context, in *ListKBSessionsRequest, opts ...grpc.CallOption) (*ListKBSessionsResponse, error) {
+	out := new(ListKBSessionsResponse)
+	err := c.cc.Invoke(ctx, KBService_ListKBSessions_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kBServiceClient) UpdateKBPermissions(ctx context.Context, in *UpdateKBPermissionsRequest, opts ...grpc.CallOption) (*KnowledgeBase, error) {
+	out := new(KnowledgeBase)
+	err := c.cc.Invoke(ctx, KBService_UpdateKBPermissions_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // KBServiceServer is the server API for KBService service.
 // All implementations must embed UnimplementedKBServiceServer
 // for forward compatibility
@@ -179,6 +216,13 @@ type KBServiceServer interface {
 	// Query performs a synchronous RAG query and returns a JSON answer.
 	// For streaming answers use the SSE endpoint in the gateway directly.
 	Query(context.Context, *QueryRequest) (*QueryResponse, error)
+	// ── Phase A P1 RPC declarations (P0 returns UNIMPLEMENTED) ─────────────────
+	// ListKBCitations returns the citation sources used by a KB (P1).
+	ListKBCitations(context.Context, *ListKBCitationsRequest) (*ListKBCitationsResponse, error)
+	// ListKBSessions returns the chat sessions of a KB (P1).
+	ListKBSessions(context.Context, *ListKBSessionsRequest) (*ListKBSessionsResponse, error)
+	// UpdateKBPermissions updates KB access permissions (P1).
+	UpdateKBPermissions(context.Context, *UpdateKBPermissionsRequest) (*KnowledgeBase, error)
 	mustEmbedUnimplementedKBServiceServer()
 }
 
@@ -215,6 +259,15 @@ func (UnimplementedKBServiceServer) DeleteDocument(context.Context, *DeleteDocum
 }
 func (UnimplementedKBServiceServer) Query(context.Context, *QueryRequest) (*QueryResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Query not implemented")
+}
+func (UnimplementedKBServiceServer) ListKBCitations(context.Context, *ListKBCitationsRequest) (*ListKBCitationsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListKBCitations not implemented")
+}
+func (UnimplementedKBServiceServer) ListKBSessions(context.Context, *ListKBSessionsRequest) (*ListKBSessionsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListKBSessions not implemented")
+}
+func (UnimplementedKBServiceServer) UpdateKBPermissions(context.Context, *UpdateKBPermissionsRequest) (*KnowledgeBase, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateKBPermissions not implemented")
 }
 func (UnimplementedKBServiceServer) mustEmbedUnimplementedKBServiceServer() {}
 
@@ -409,6 +462,60 @@ func _KBService_Query_Handler(srv interface{}, ctx context.Context, dec func(int
 	return interceptor(ctx, in, info, handler)
 }
 
+func _KBService_ListKBCitations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListKBCitationsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KBServiceServer).ListKBCitations(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KBService_ListKBCitations_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KBServiceServer).ListKBCitations(ctx, req.(*ListKBCitationsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KBService_ListKBSessions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListKBSessionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KBServiceServer).ListKBSessions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KBService_ListKBSessions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KBServiceServer).ListKBSessions(ctx, req.(*ListKBSessionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KBService_UpdateKBPermissions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateKBPermissionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KBServiceServer).UpdateKBPermissions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KBService_UpdateKBPermissions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KBServiceServer).UpdateKBPermissions(ctx, req.(*UpdateKBPermissionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // KBService_ServiceDesc is the grpc.ServiceDesc for KBService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -455,6 +562,18 @@ var KBService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Query",
 			Handler:    _KBService_Query_Handler,
+		},
+		{
+			MethodName: "ListKBCitations",
+			Handler:    _KBService_ListKBCitations_Handler,
+		},
+		{
+			MethodName: "ListKBSessions",
+			Handler:    _KBService_ListKBSessions_Handler,
+		},
+		{
+			MethodName: "UpdateKBPermissions",
+			Handler:    _KBService_UpdateKBPermissions_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>146</dd></div>
-          <div><dt>Schemas</dt><dd>193</dd></div>
+          <div><dt>Operations</dt><dd>187</dd></div>
+          <div><dt>Schemas</dt><dd>253</dd></div>
         </dl>
       </section>
 
@@ -256,6 +256,94 @@
           <td>201, 400, 401, 403, 409</td>
         </tr>
         <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/buckets/{bucket_id}/acl</code></td>
+          <td><code>setStorageBucketACL</code></td>
+          <td>设置桶 ACL</td>
+          <td><code>scope:objects:update</code></td>
+          <td>200, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/buckets/{bucket_id}/lifecycle-rules</code></td>
+          <td><code>listStorageBucketLifecycleRules</code></td>
+          <td>查询桶生命周期规则</td>
+          <td><code>scope:objects:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/buckets/{bucket_id}/lifecycle-rules</code></td>
+          <td><code>createStorageBucketLifecycleRule</code></td>
+          <td>创建桶生命周期规则</td>
+          <td><code>scope:objects:update</code></td>
+          <td>201, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/buckets/{bucket_id}/lifecycle-rules</code></td>
+          <td><code>setStorageBucketLifecycleRules</code></td>
+          <td>替换桶生命周期规则</td>
+          <td><code>scope:objects:update</code></td>
+          <td>200, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/buckets/{bucket_id}/lifecycle-rules/{rule_id}</code></td>
+          <td><code>deleteStorageBucketLifecycleRule</code></td>
+          <td>删除桶生命周期规则</td>
+          <td><code>scope:objects:update</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/buckets/{bucket_id}/objects</code></td>
+          <td><code>deleteBucketObject</code></td>
+          <td>删除桶内对象</td>
+          <td><code>scope:objects:delete</code></td>
+          <td>200, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/buckets/{bucket_id}/objects</code></td>
+          <td><code>listBucketObjects</code></td>
+          <td>按前缀浏览桶内对象</td>
+          <td><code>scope:objects:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/buckets/{bucket_id}/objects/presigned-url</code></td>
+          <td><code>generateBucketObjectPresignedURL</code></td>
+          <td>生成桶内对象临时访问链接</td>
+          <td><code>scope:objects:read</code></td>
+          <td>200, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/buckets/{bucket_id}/objects/upload</code></td>
+          <td><code>uploadBucketObject</code></td>
+          <td>申请桶内对象上传预签名 URL</td>
+          <td><code>scope:objects:create</code></td>
+          <td>200, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/buckets/{bucket_id}/prefixes</code></td>
+          <td><code>createBucketPrefix</code></td>
+          <td>创建对象存储前缀</td>
+          <td><code>scope:objects:create</code></td>
+          <td>201, 400, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/buckets/{bucket_id}/storage-class</code></td>
+          <td><code>setStorageBucketClass</code></td>
+          <td>设置桶默认存储类型</td>
+          <td><code>scope:objects:update</code></td>
+          <td>200, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
           <td><span class="method method-get">GET</span></td>
           <td><code>/encryption/keys</code></td>
           <td><code>listEncryptionKeys</code></td>
@@ -352,12 +440,52 @@
           <td>200, 401, 403, 404</td>
         </tr>
         <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/filesystems/{filesystem_id}/expand</code></td>
+          <td><code>expandStorageFilesystem</code></td>
+          <td>扩容文件存储</td>
+          <td><code>scope:filesystems:update</code></td>
+          <td>202, 400, 401, 403, 404, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/filesystems/{filesystem_id}/mount</code></td>
+          <td><code>mountStorageFilesystem</code></td>
+          <td>一键挂载文件存储到实例</td>
+          <td><code>scope:filesystems:update</code></td>
+          <td>202, 400, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/filesystems/{filesystem_id}/mount-command</code></td>
+          <td><code>getFilesystemMountCommand</code></td>
+          <td>查询文件存储挂载命令</td>
+          <td><code>scope:filesystems:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
           <td><span class="method method-get">GET</span></td>
           <td><code>/filesystems/{filesystem_id}/mount-targets</code></td>
           <td><code>listFilesystemMountTargets</code></td>
           <td>查询文件存储挂载目标列表</td>
           <td><code>scope:filesystems:read</code></td>
           <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/filesystems/{filesystem_id}/mount-targets</code></td>
+          <td><code>createFilesystemMountTarget</code></td>
+          <td>创建文件存储挂载目标</td>
+          <td><code>scope:filesystems:update</code></td>
+          <td>202, 400, 401, 403, 404, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/filesystems/{filesystem_id}/unmount</code></td>
+          <td><code>unmountStorageFilesystem</code></td>
+          <td>卸载文件存储</td>
+          <td><code>scope:filesystems:update</code></td>
+          <td>202, 400, 401, 403, 404, 422</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -414,6 +542,22 @@
           <td>更新 GPU 调度队列</td>
           <td><code>scope:gpu-scheduling:write</code></td>
           <td>200, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/gpu-specs</code></td>
+          <td><code>listGPUSpecs</code></td>
+          <td>查询可选 GPU 规格</td>
+          <td><code>scope:gpu-inventory:read</code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/gpu-specs/{spec_id}</code></td>
+          <td><code>getGPUSpec</code></td>
+          <td>查询单个 GPU 规格</td>
+          <td><code>scope:gpu-inventory:read</code></td>
+          <td>200, 401, 403, 404</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -485,7 +629,7 @@
           <td><code>applyInstanceLifecycle</code></td>
           <td>执行实例生命周期操作</td>
           <td><code>scope:instances:update</code></td>
-          <td>200, 400, 401, 403, 404, 409</td>
+          <td>200, 400, 401, 403, 404, 409, 422</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -510,6 +654,94 @@
           <td>查询实例操作历史</td>
           <td><code>scope:instances:read</code></td>
           <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/instances/{instance_id}/sandbox/checkpoints</code></td>
+          <td><code>listSandboxCheckpoints</code></td>
+          <td>查询 Sandbox checkpoint</td>
+          <td><code>scope:instances:read</code></td>
+          <td>200, 400, 401, 403, 404, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/instances/{instance_id}/sandbox/checkpoints</code></td>
+          <td><code>createSandboxCheckpoint</code></td>
+          <td>创建 Sandbox checkpoint</td>
+          <td><code>scope:instances:update</code></td>
+          <td>202, 400, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/instances/{instance_id}/sandbox/checkpoints/{checkpoint_id}/clone</code></td>
+          <td><code>cloneSandboxCheckpoint</code></td>
+          <td>从 Sandbox checkpoint 克隆实例</td>
+          <td><code>scope:instances:create</code></td>
+          <td>201, 400, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/instances/{instance_id}/sandbox/checkpoints/{checkpoint_id}/restore</code></td>
+          <td><code>restoreSandboxCheckpoint</code></td>
+          <td>恢复 Sandbox checkpoint</td>
+          <td><code>scope:instances:update</code></td>
+          <td>202, 400, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/instances/{instance_id}/sandbox/code-runs</code></td>
+          <td><code>createSandboxCodeRun</code></td>
+          <td>在 Sandbox 中执行一次代码</td>
+          <td><code>scope:instances:exec</code></td>
+          <td>202, 400, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/instances/{instance_id}/sandbox/files</code></td>
+          <td><code>deleteSandboxFile</code></td>
+          <td>删除 Sandbox 文件</td>
+          <td><code>scope:instances:update</code></td>
+          <td>204, 400, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/instances/{instance_id}/sandbox/files</code></td>
+          <td><code>listSandboxFiles</code></td>
+          <td>查询 Sandbox 文件</td>
+          <td><code>scope:instances:read</code></td>
+          <td>200, 400, 401, 403, 404, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/instances/{instance_id}/sandbox/files</code></td>
+          <td><code>writeSandboxFile</code></td>
+          <td>写入 Sandbox 文件</td>
+          <td><code>scope:instances:update</code></td>
+          <td>201, 400, 401, 403, 404, 409, 413, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/instances/{instance_id}/sandbox/ports</code></td>
+          <td><code>createSandboxPort</code></td>
+          <td>开放 Sandbox 临时预览端口</td>
+          <td><code>scope:instances:update</code></td>
+          <td>201, 400, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/instances/{instance_id}/sandbox/ports/{port}</code></td>
+          <td><code>deleteSandboxPort</code></td>
+          <td>关闭 Sandbox 临时预览端口</td>
+          <td><code>scope:instances:update</code></td>
+          <td>200, 400, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/instances/{instance_id}/sandbox/tokens</code></td>
+          <td><code>createSandboxToken</code></td>
+          <td>签发 Sandbox 短期访问令牌</td>
+          <td><code>scope:instances:exec</code></td>
+          <td>201, 400, 401, 403, 404, 409, 422</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1264,10 +1496,50 @@
           <td>200, 401, 403, 404</td>
         </tr>
         <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/vector-stores/{vector_store_id}/delete-precheck</code></td>
+          <td><code>precheckVectorStoreDelete</code></td>
+          <td>删除向量存储前置检查</td>
+          <td><code>scope:vector-stores:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/vector-stores/{vector_store_id}/documents</code></td>
+          <td><code>deleteVectorStoreDocuments</code></td>
+          <td>按 filter 删除向量文档</td>
+          <td><code>scope:vector-stores:delete</code></td>
+          <td>200, 400, 401, 403, 404, 422, 503</td>
+        </tr>
+        <tr>
           <td><span class="method method-post">POST</span></td>
           <td><code>/vector-stores/{vector_store_id}/documents</code></td>
           <td><code>insertVectorStoreDocuments</code></td>
           <td>批量写入向量文档</td>
+          <td><code>scope:vector-stores:write</code></td>
+          <td>202, 400, 401, 403, 404, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/vector-stores/{vector_store_id}/knowledge-base-link</code></td>
+          <td><code>deleteVectorStoreKnowledgeBaseLink</code></td>
+          <td>解除向量存储知识库引用</td>
+          <td><code>scope:vector-stores:write</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/vector-stores/{vector_store_id}/knowledge-base-link</code></td>
+          <td><code>setVectorStoreKnowledgeBaseLink</code></td>
+          <td>设置向量存储外部知识库引用</td>
+          <td><code>scope:vector-stores:write</code></td>
+          <td>200, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/vector-stores/{vector_store_id}/rebuild-index</code></td>
+          <td><code>rebuildVectorStoreIndex</code></td>
+          <td>重建向量存储索引</td>
           <td><code>scope:vector-stores:write</code></td>
           <td>202, 400, 401, 403, 404, 422</td>
         </tr>
@@ -1312,6 +1584,46 @@
           <td>200, 401, 403, 404</td>
         </tr>
         <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/volumes/{volume_id}/auto-snapshot-policy</code></td>
+          <td><code>setVolumeAutoSnapshotPolicy</code></td>
+          <td>设置块存储自动快照策略</td>
+          <td><code>scope:volumes:update</code></td>
+          <td>200, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/volumes/{volume_id}/expand</code></td>
+          <td><code>expandStorageVolume</code></td>
+          <td>扩容块存储卷</td>
+          <td><code>scope:volumes:update</code></td>
+          <td>202, 400, 401, 403, 404, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/volumes/{volume_id}/mount</code></td>
+          <td><code>mountStorageVolume</code></td>
+          <td>挂载块存储卷到实例</td>
+          <td><code>scope:volumes:update</code></td>
+          <td>202, 400, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/volumes/{volume_id}/os-init-complete</code></td>
+          <td><code>completeVolumeOSInit</code></td>
+          <td>标记块存储 OS 初始化状态</td>
+          <td><code>scope:volumes:update</code></td>
+          <td>200, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/volumes/{volume_id}/os-init-guide</code></td>
+          <td><code>getVolumeOSInitGuide</code></td>
+          <td>查询块存储 OS 初始化引导</td>
+          <td><code>scope:volumes:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
           <td><span class="method method-get">GET</span></td>
           <td><code>/volumes/{volume_id}/snapshots</code></td>
           <td><code>listVolumeSnapshots</code></td>
@@ -1327,6 +1639,22 @@
           <td><code>scope:volumes:create</code></td>
           <td>202, 400, 401, 403, 404</td>
         </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/volumes/{volume_id}/snapshots/{snapshot_id}/create-volume</code></td>
+          <td><code>createStorageVolumeFromSnapshot</code></td>
+          <td>从快照创建新块存储卷</td>
+          <td><code>scope:volumes:create</code></td>
+          <td>202, 400, 401, 403, 404, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/volumes/{volume_id}/unmount</code></td>
+          <td><code>unmountStorageVolume</code></td>
+          <td>卸载块存储卷</td>
+          <td><code>scope:volumes:update</code></td>
+          <td>202, 400, 401, 403, 404, 422</td>
+        </tr>
           </tbody>
         </table>
       </section>
@@ -1338,6 +1666,11 @@
         <li><code>AsyncTask</code></li>
         <li><code>BeginOIDCLoginRequest</code></li>
         <li><code>BeginOIDCLoginResponse</code></li>
+        <li><code>BucketObjectDeleteResponse</code></li>
+        <li><code>BucketObjectPresignedURLRequest</code></li>
+        <li><code>BucketObjectUploadRequest</code></li>
+        <li><code>BucketPrefixCreateRequest</code></li>
+        <li><code>CloneSandboxCheckpointRequest</code></li>
         <li><code>CompleteOIDCLoginRequest</code></li>
         <li><code>CoreDevProfileInfo</code></li>
         <li><code>CreateAPIKeyRequest</code></li>
@@ -1359,9 +1692,14 @@
         <li><code>CreateObservabilityAlertRuleRequest</code></li>
         <li><code>CreateRegistryProjectRequest</code></li>
         <li><code>CreateRegistryPullSecretRequest</code></li>
+        <li><code>CreateSandboxCheckpointRequest</code></li>
+        <li><code>CreateSandboxCodeRunRequest</code></li>
+        <li><code>CreateSandboxPortRequest</code></li>
+        <li><code>CreateSandboxTokenRequest</code></li>
         <li><code>CreateStorageBucketRequest</code></li>
         <li><code>CreateStorageFilesystemRequest</code></li>
         <li><code>CreateStorageObjectRequest</code></li>
+        <li><code>CreateStorageVolumeFromSnapshotRequest</code></li>
         <li><code>CreateStorageVolumeRequest</code></li>
         <li><code>CreateVMInstanceConfig</code></li>
         <li><code>CreateVectorStoreRequest</code></li>
@@ -1383,7 +1721,10 @@
         <li><code>EncryptionUnsealTokenRequest</code></li>
         <li><code>EncryptionUnsealTokenResponse</code></li>
         <li><code>ErrorResponse</code></li>
+        <li><code>FilesystemAttachment</code></li>
+        <li><code>FilesystemMountCommand</code></li>
         <li><code>FilesystemMountTarget</code></li>
+        <li><code>FilesystemMountTargetCreateRequest</code></li>
         <li><code>FilesystemMountTargetListResponse</code></li>
         <li><code>GPUInventoryListResponse</code></li>
         <li><code>GPUInventoryRecord</code></li>
@@ -1392,21 +1733,35 @@
         <li><code>GPUSchedulingQueueCreateRequest</code></li>
         <li><code>GPUSchedulingQueueListResponse</code></li>
         <li><code>GPUSchedulingQueueUpdateRequest</code></li>
+        <li><code>GPUSpecListResponse</code></li>
+        <li><code>GPUSpecSummary</code></li>
         <li><code>HealthCheck</code></li>
+        <li><code>InstanceAccessSummary</code></li>
+        <li><code>InstanceComputeSummary</code></li>
         <li><code>InstanceConsoleSession</code></li>
+        <li><code>InstanceDiskSpec</code></li>
+        <li><code>InstanceEnvVar</code></li>
         <li><code>InstanceEvent</code></li>
         <li><code>InstanceEventListResponse</code></li>
         <li><code>InstanceExecSession</code></li>
+        <li><code>InstanceFilesystemMount</code></li>
+        <li><code>InstanceImageSummary</code></li>
         <li><code>InstanceLifecycleRequest</code></li>
         <li><code>InstanceLifecycleResponse</code></li>
         <li><code>InstanceListResponse</code></li>
         <li><code>InstanceLogEntry</code></li>
         <li><code>InstanceLogListResponse</code></li>
         <li><code>InstanceMetrics</code></li>
+        <li><code>InstanceNetworkConfig</code></li>
+        <li><code>InstanceNetworkSummary</code></li>
         <li><code>InstanceOperation</code></li>
+        <li><code>InstancePortSpec</code></li>
         <li><code>InstanceRecord</code></li>
         <li><code>InstanceSecurityEvent</code></li>
         <li><code>InstanceSecurityEventListResponse</code></li>
+        <li><code>InstanceStorageAttachment</code></li>
+        <li><code>InstanceVolumeMount</code></li>
+        <li><code>InstanceWorkloadIdentityConfig</code></li>
         <li><code>K8sCluster</code></li>
         <li><code>K8sClusterCreateRequest</code></li>
         <li><code>K8sClusterKubeconfig</code></li>
@@ -1487,11 +1842,19 @@
         <li><code>RegistryScanResult</code></li>
         <li><code>ReportTokenUsageRequest</code></li>
         <li><code>RevokeStatusResponse</code></li>
+        <li><code>SandboxCheckpoint</code></li>
+        <li><code>SandboxCheckpointActionRequest</code></li>
+        <li><code>SandboxCheckpointListResponse</code></li>
+        <li><code>SandboxCodeRun</code></li>
         <li><code>SandboxConfig</code></li>
+        <li><code>SandboxFile</code></li>
+        <li><code>SandboxFileListResponse</code></li>
         <li><code>SandboxInstanceStatus</code></li>
         <li><code>SandboxNetworkEgressPolicy</code></li>
+        <li><code>SandboxPort</code></li>
         <li><code>SandboxTemplate</code></li>
         <li><code>SandboxTemplateListResponse</code></li>
+        <li><code>SandboxTokenResponse</code></li>
         <li><code>Secret</code></li>
         <li><code>SecretBinding</code></li>
         <li><code>SecretBindingRequest</code></li>
@@ -1499,10 +1862,21 @@
         <li><code>SecretListResponse</code></li>
         <li><code>SendTestEmailResponse</code></li>
         <li><code>SetRegistryPermissionRequest</code></li>
+        <li><code>StorageBucketACLUpdateRequest</code></li>
+        <li><code>StorageBucketClassUpdateRequest</code></li>
+        <li><code>StorageBucketLifecycleRule</code></li>
+        <li><code>StorageBucketLifecycleRuleCreateRequest</code></li>
+        <li><code>StorageBucketLifecycleRuleListResponse</code></li>
+        <li><code>StorageBucketLifecycleRulesUpdateRequest</code></li>
         <li><code>StorageBucketListResponse</code></li>
+        <li><code>StorageBucketObjectEntry</code></li>
+        <li><code>StorageBucketObjectListResponse</code></li>
         <li><code>StorageBucketRecord</code></li>
         <li><code>StorageFilesystem</code></li>
+        <li><code>StorageFilesystemExpandRequest</code></li>
         <li><code>StorageFilesystemListResponse</code></li>
+        <li><code>StorageFilesystemMountRequest</code></li>
+        <li><code>StorageFilesystemUnmountRequest</code></li>
         <li><code>StorageObject</code></li>
         <li><code>StorageObjectDownloadInfo</code></li>
         <li><code>StorageObjectListResponse</code></li>
@@ -1510,23 +1884,37 @@
         <li><code>StorageObjectUploadResponse</code></li>
         <li><code>StorageResourceState</code></li>
         <li><code>StorageVolume</code></li>
+        <li><code>StorageVolumeAutoSnapshotPolicy</code></li>
+        <li><code>StorageVolumeAutoSnapshotPolicyUpdateRequest</code></li>
+        <li><code>StorageVolumeExpandRequest</code></li>
         <li><code>StorageVolumeListResponse</code></li>
+        <li><code>StorageVolumeMountHistoryEntry</code></li>
+        <li><code>StorageVolumeMountRequest</code></li>
+        <li><code>StorageVolumeUnmountRequest</code></li>
         <li><code>TokenPairResponse</code></li>
         <li><code>TokenUsageReport</code></li>
         <li><code>UpdateEmailRecipientRequest</code></li>
         <li><code>UpdateNetworkSecurityGroupRuleRequest</code></li>
         <li><code>UpdateObservabilityAlertRuleRequest</code></li>
         <li><code>VectorStore</code></li>
+        <li><code>VectorStoreDeletePrecheck</code></li>
+        <li><code>VectorStoreDocumentDeleteResponse</code></li>
         <li><code>VectorStoreDocumentInsertRequest</code></li>
         <li><code>VectorStoreDocumentInsertResponse</code></li>
+        <li><code>VectorStoreIndexStatus</code></li>
+        <li><code>VectorStoreKnowledgeBaseLinkRequest</code></li>
+        <li><code>VectorStoreKnowledgeBaseRef</code></li>
         <li><code>VectorStoreListResponse</code></li>
         <li><code>VectorStoreSearchHit</code></li>
         <li><code>VectorStoreSearchRequest</code></li>
         <li><code>VectorStoreSearchResponse</code></li>
         <li><code>VectorStoreState</code></li>
+        <li><code>VolumeOSInitCompleteRequest</code></li>
+        <li><code>VolumeOSInitGuide</code></li>
         <li><code>VolumeSnapshotListResponse</code></li>
         <li><code>VolumeSnapshotRecord</code></li>
         <li><code>WorkloadIdentityBinding</code></li>
+        <li><code>WriteSandboxFileRequest</code></li>
         </ul>
       </section>
 

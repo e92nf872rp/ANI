@@ -248,3 +248,22 @@ func TestRegistryAPIListImagesPassesPurposeAndReturnsPurpose(t *testing.T) {
 		t.Fatalf("body = %s, want image purpose", response.Body())
 	}
 }
+
+func TestRegistryAPIPullSecretRouteMatchesProjectPath(t *testing.T) {
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "11111111-1111-1111-1111-111111111111")
+		c.Next(ctx)
+	})
+	registerHarbor(h.Group("/api/v1"), registryadapter.NewLocalImageRegistry())
+
+	body := `{"idempotency_key":"registry-pull-route","name":"ani-registry-pull","namespace":"ani-registry-live"}`
+	response := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/registry/projects/11111111-1111-1111-1111-111111111111/pull-secret", &ut.Body{Body: bytes.NewBufferString(body), Len: len(body)}, ut.Header{Key: "Content-Type", Value: "application/json"}).Result()
+
+	if response.StatusCode() != http.StatusCreated {
+		t.Fatalf("status = %d body = %s, want 201", response.StatusCode(), response.Body())
+	}
+	if !bytes.Contains(response.Body(), []byte(`"secret_ref":"ani-registry-live/ani-registry-pull"`)) {
+		t.Fatalf("body = %s, want requested namespace secret ref", response.Body())
+	}
+}

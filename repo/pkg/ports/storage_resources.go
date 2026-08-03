@@ -16,28 +16,48 @@ const (
 )
 
 type StorageVolumeRecord struct {
-	TenantID     string
-	VolumeID     string
-	Name         string
-	SizeGiB      int64
-	StorageClass string
-	State        StorageResourceState
-	Reason       string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	TenantID         string
+	VolumeID         string
+	Name             string
+	SizeGiB          int64
+	StorageClass     string
+	Zone             string
+	VolumeType       string
+	IOPS             int
+	Encrypted        bool
+	MountInstanceID  string
+	MountRoute       string
+	MountName        string
+	SnapshotsCount   int
+	AutoSnapshot     StorageVolumeAutoSnapshotPolicy
+	OSInitStatus     string
+	OSInitDevice     string
+	MountHistory     []StorageVolumeMountHistoryEntry
+	FromSnapshotID   string
+	FromSnapshotName string
+	State            StorageResourceState
+	Reason           string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 type StorageFilesystemRecord struct {
-	TenantID     string
-	FilesystemID string
-	Name         string
-	Protocol     string
-	SizeGiB      int64
-	Endpoint     string
-	State        StorageResourceState
-	Reason       string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	TenantID          string
+	FilesystemID      string
+	Name              string
+	Protocol          string
+	SizeGiB           int64
+	Endpoint          string
+	Zone              string
+	PerformanceMode   string
+	MountTargets      []FilesystemMountTargetRecord
+	Mounts            int
+	MountCommand      string
+	AttachedInstances []FilesystemAttachment
+	State             StorageResourceState
+	Reason            string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 type StorageObjectRecord struct {
@@ -54,14 +74,126 @@ type StorageObjectRecord struct {
 }
 
 type StorageBucketRecord struct {
-	TenantID    string
-	BucketID    string
-	Name        string
-	Region      string
-	AccessMode  string
-	ObjectCount int
-	SizeBytes   int64
-	CreatedAt   time.Time
+	TenantID       string
+	BucketID       string
+	Name           string
+	Region         string
+	Endpoint       string
+	AccessMode     string
+	ACL            string
+	ACLLabel       string
+	StorageClass   string
+	Versioning     string
+	ObjectCount    int
+	SizeBytes      int64
+	LifecycleRules []StorageBucketLifecycleRule
+	LifecycleNote  string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+type StorageBucketLifecycleRule struct {
+	ID               string
+	Name             string
+	Prefix           string
+	ExpireDays       int
+	ToInfrequentDays int
+	Enabled          bool
+}
+
+type StorageBucketObjectEntry struct {
+	Kind         string
+	Name         string
+	Key          string
+	SizeBytes    *int64
+	SizeLabel    string
+	StorageClass string
+	UpdatedAt    time.Time
+}
+
+type StorageBucketObjectListResult struct {
+	Items      []StorageBucketObjectEntry
+	Total      int
+	Prefix     string
+	NextCursor string
+}
+
+type StorageBucketObjectListRequest struct {
+	TenantID string
+	BucketID string
+	Prefix   string
+	Limit    int
+	Cursor   string
+}
+
+type StorageBucketObjectDeleteRequest struct {
+	TenantID string
+	BucketID string
+	Key      string
+}
+
+type StorageBucketObjectDeleteResult struct {
+	BucketID string
+	Key      string
+	Deleted  bool
+}
+
+type StorageBucketPrefixCreateRequest struct {
+	TenantID       string
+	BucketID       string
+	IdempotencyKey string
+	Prefix         string
+}
+
+type StorageBucketPresignedURLRequest struct {
+	TenantID     string
+	BucketID     string
+	Key          string
+	Method       string
+	ExpiresHours int
+}
+
+type StorageBucketACLUpdateRequest struct {
+	TenantID       string
+	BucketID       string
+	IdempotencyKey string
+	ACL            string
+}
+
+type StorageBucketClassUpdateRequest struct {
+	TenantID       string
+	BucketID       string
+	IdempotencyKey string
+	StorageClass   string
+}
+
+type StorageBucketLifecycleRulesUpdateRequest struct {
+	TenantID       string
+	BucketID       string
+	IdempotencyKey string
+	Rules          []StorageBucketLifecycleRule
+}
+
+type StorageBucketLifecycleRuleCreateRequest struct {
+	TenantID         string
+	BucketID         string
+	IdempotencyKey   string
+	Name             string
+	Prefix           string
+	ExpireDays       int
+	ToInfrequentDays int
+	Enabled          bool
+}
+
+type StorageBucketLifecycleRuleDeleteRequest struct {
+	TenantID string
+	BucketID string
+	RuleID   string
+}
+
+type StorageBucketLifecycleRuleListResult struct {
+	Items []StorageBucketLifecycleRule
+	Total int
 }
 
 type StorageObjectUploadRecord struct {
@@ -111,25 +243,76 @@ type FilesystemMountTargetRecord struct {
 	MountTargetID string
 	FilesystemID  string
 	SubnetID      string
+	VPCID         string
 	IPAddress     string
 	Status        MountTargetStatus
 	CreatedAt     time.Time
 }
 
+type StorageVolumeAutoSnapshotPolicy struct {
+	Enabled    bool
+	RetainDays int
+	Schedule   string
+}
+
+type StorageVolumeMountHistoryEntry struct {
+	At     time.Time
+	Action string
+	Result string
+	Target string
+}
+
+type VolumeOSInitGuide struct {
+	Status string
+	Device string
+	Steps  []VolumeOSInitStep
+	Hint   string
+}
+
+type VolumeOSInitStep struct {
+	Title   string
+	Command string
+}
+
+type FilesystemAttachment struct {
+	InstanceID    string
+	InstanceName  string
+	InstanceRoute string
+	MountPath     string
+	IPAddress     string
+	Protocol      string
+	AutoMount     bool
+	AttachedAt    time.Time
+}
+
+type FilesystemMountCommand struct {
+	Command   string
+	Protocol  string
+	IPAddress string
+	MountPath string
+}
+
 type StorageVolumeCreateRequest struct {
-	TenantID       string
-	IdempotencyKey string
-	Name           string
-	SizeGiB        int64
-	StorageClass   string
+	TenantID        string
+	IdempotencyKey  string
+	Name            string
+	SizeGiB         int64
+	StorageClass    string
+	Zone            string
+	VolumeType      string
+	Encrypted       bool
+	MountInstanceID string
+	MountRoute      string
 }
 
 type StorageFilesystemCreateRequest struct {
-	TenantID       string
-	IdempotencyKey string
-	Name           string
-	Protocol       string
-	SizeGiB        int64
+	TenantID        string
+	IdempotencyKey  string
+	Name            string
+	Protocol        string
+	SizeGiB         int64
+	Zone            string
+	PerformanceMode string
 }
 
 type StorageObjectCreateRequest struct {
@@ -155,6 +338,8 @@ type StorageObjectUploadRequest struct {
 	BucketID       string
 	Key            string
 	ContentType    string
+	SizeBytes      int64
+	StorageClass   string
 	ExpiresSeconds int
 }
 
@@ -170,6 +355,86 @@ type VolumeSnapshotCreateRequest struct {
 	VolumeID       string
 	Name           string
 	Description    string
+}
+
+type StorageVolumeExpandRequest struct {
+	TenantID       string
+	VolumeID       string
+	IdempotencyKey string
+	SizeGiB        int64
+}
+
+type StorageVolumeMountRequest struct {
+	TenantID       string
+	VolumeID       string
+	IdempotencyKey string
+	InstanceID     string
+	InstanceRoute  string
+	MountName      string
+}
+
+type StorageVolumeUnmountRequest struct {
+	TenantID       string
+	VolumeID       string
+	IdempotencyKey string
+}
+
+type StorageVolumeFromSnapshotRequest struct {
+	TenantID       string
+	VolumeID       string
+	SnapshotID     string
+	IdempotencyKey string
+	Name           string
+	SizeGiB        int64
+	Zone           string
+}
+
+type StorageVolumeAutoSnapshotPolicyUpdateRequest struct {
+	TenantID       string
+	VolumeID       string
+	IdempotencyKey string
+	Enabled        bool
+	RetainDays     int
+	Schedule       string
+}
+
+type VolumeOSInitCompleteRequest struct {
+	TenantID       string
+	VolumeID       string
+	IdempotencyKey string
+	Mode           string
+}
+
+type StorageFilesystemExpandRequest struct {
+	TenantID       string
+	FilesystemID   string
+	IdempotencyKey string
+	SizeGiB        int64
+}
+
+type FilesystemMountTargetCreateRequest struct {
+	TenantID       string
+	FilesystemID   string
+	IdempotencyKey string
+	SubnetID       string
+	VPCID          string
+}
+
+type StorageFilesystemMountRequest struct {
+	TenantID       string
+	FilesystemID   string
+	IdempotencyKey string
+	InstanceID     string
+	InstanceRoute  string
+	MountPath      string
+	AutoMount      bool
+}
+
+type StorageFilesystemUnmountRequest struct {
+	TenantID       string
+	FilesystemID   string
+	IdempotencyKey string
+	InstanceID     string
 }
 
 type StorageResourceGetRequest struct {
@@ -202,11 +467,23 @@ type StorageService interface {
 	ListVolumes(ctx context.Context, request StorageResourceListRequest) ([]StorageVolumeRecord, error)
 	GetVolume(ctx context.Context, request StorageResourceGetRequest) (StorageVolumeRecord, error)
 	DeleteVolume(ctx context.Context, request StorageResourceGetRequest) (StorageVolumeRecord, error)
+	ExpandVolume(ctx context.Context, request StorageVolumeExpandRequest) (StorageVolumeRecord, error)
+	MountVolume(ctx context.Context, request StorageVolumeMountRequest) (StorageVolumeRecord, error)
+	UnmountVolume(ctx context.Context, request StorageVolumeUnmountRequest) (StorageVolumeRecord, error)
+	CreateVolumeFromSnapshot(ctx context.Context, request StorageVolumeFromSnapshotRequest) (StorageVolumeRecord, error)
+	SetVolumeAutoSnapshotPolicy(ctx context.Context, request StorageVolumeAutoSnapshotPolicyUpdateRequest) (StorageVolumeRecord, error)
+	GetVolumeOSInitGuide(ctx context.Context, request StorageResourceGetRequest) (VolumeOSInitGuide, error)
+	CompleteVolumeOSInit(ctx context.Context, request VolumeOSInitCompleteRequest) (StorageVolumeRecord, error)
 
 	CreateFilesystem(ctx context.Context, request StorageFilesystemCreateRequest) (StorageFilesystemRecord, error)
 	ListFilesystems(ctx context.Context, request StorageResourceListRequest) ([]StorageFilesystemRecord, error)
 	GetFilesystem(ctx context.Context, request StorageResourceGetRequest) (StorageFilesystemRecord, error)
 	DeleteFilesystem(ctx context.Context, request StorageResourceGetRequest) (StorageFilesystemRecord, error)
+	ExpandFilesystem(ctx context.Context, request StorageFilesystemExpandRequest) (StorageFilesystemRecord, error)
+	CreateFilesystemMountTarget(ctx context.Context, request FilesystemMountTargetCreateRequest) (FilesystemMountTargetRecord, error)
+	MountFilesystem(ctx context.Context, request StorageFilesystemMountRequest) (StorageFilesystemRecord, error)
+	UnmountFilesystem(ctx context.Context, request StorageFilesystemUnmountRequest) (StorageFilesystemRecord, error)
+	GetFilesystemMountCommand(ctx context.Context, request StorageResourceGetRequest) (FilesystemMountCommand, error)
 
 	CreateObject(ctx context.Context, request StorageObjectCreateRequest) (StorageObjectRecord, error)
 	ListObjects(ctx context.Context, request StorageResourceListRequest) ([]StorageObjectRecord, error)
@@ -215,6 +492,17 @@ type StorageService interface {
 
 	CreateStorageBucket(ctx context.Context, request StorageBucketCreateRequest) (StorageBucketRecord, error)
 	ListStorageBuckets(ctx context.Context, request StorageResourceListRequest) ([]StorageBucketRecord, error)
+	GetStorageBucket(ctx context.Context, request StorageResourceGetRequest) (StorageBucketRecord, error)
+	ListBucketObjects(ctx context.Context, request StorageBucketObjectListRequest) (StorageBucketObjectListResult, error)
+	DeleteBucketObject(ctx context.Context, request StorageBucketObjectDeleteRequest) (StorageBucketObjectDeleteResult, error)
+	CreateBucketPrefix(ctx context.Context, request StorageBucketPrefixCreateRequest) (StorageBucketObjectEntry, error)
+	GenerateBucketObjectPresignedURL(ctx context.Context, request StorageBucketPresignedURLRequest) (StorageObjectDownloadRecord, error)
+	SetStorageBucketACL(ctx context.Context, request StorageBucketACLUpdateRequest) (StorageBucketRecord, error)
+	SetStorageBucketClass(ctx context.Context, request StorageBucketClassUpdateRequest) (StorageBucketRecord, error)
+	ListStorageBucketLifecycleRules(ctx context.Context, request StorageResourceGetRequest) (StorageBucketLifecycleRuleListResult, error)
+	SetStorageBucketLifecycleRules(ctx context.Context, request StorageBucketLifecycleRulesUpdateRequest) (StorageBucketLifecycleRuleListResult, error)
+	CreateStorageBucketLifecycleRule(ctx context.Context, request StorageBucketLifecycleRuleCreateRequest) (StorageBucketLifecycleRule, error)
+	DeleteStorageBucketLifecycleRule(ctx context.Context, request StorageBucketLifecycleRuleDeleteRequest) (StorageBucketLifecycleRuleListResult, error)
 	CreateStorageObjectUpload(ctx context.Context, request StorageObjectUploadRequest) (StorageObjectUploadRecord, error)
 	GetStorageObjectDownload(ctx context.Context, request StorageObjectDownloadRequest) (StorageObjectDownloadRecord, error)
 

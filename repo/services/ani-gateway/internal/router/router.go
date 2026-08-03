@@ -25,6 +25,7 @@ type RegisterOptions struct {
 	InstanceObservabilityUsesInstanceName bool
 	KubernetesRESTClient                  *runtimeadapter.KubernetesRESTClient
 	ObservabilityService                  ports.ObservabilityService
+	EmailNotificationStore                ports.EmailNotificationStore
 }
 
 // Register wires all route groups onto the Hertz server.
@@ -62,6 +63,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerK8sClusterResourcesWithService(v1, options.K8sClusterService)
 	registerEncryptionResourcesWithService(v1, options.EncryptionService)
 	registerSecretResourcesWithService(v1, options.SecretService)
+	registerEmailNotificationResourcesWithService(v1, options.EmailNotificationStore)
 
 	svc := h.Group("/api/v1/svc")
 	registerModels(svc)

@@ -22,7 +22,7 @@
 | **Auth 边界** | SPRINT13-AUTH-DEX-PRODUCTION-GATE / Auth/Dex production gate 已通过；production-shaped Gateway 固定 ANI_AUTH_MODE=auth_service |
 | **执行入口** | `development-records/sprint13-real-provider-readiness-plan.md`、`development-records/README.md`、本文件验收命令 |
 | **执行环境** | 真实 provider 写操作前必须重新只读盘点并取得人工确认；evidence 不得包含凭据、服务器 IP 或完整内网端点 |
-| **最后校准日期** | 2026-07-15 |
+| **最后校准日期** | 2026-07-28 |
 
 ## Sprint 13 当前任务
 
@@ -37,6 +37,24 @@
 | S07 instance observability Prometheus | production-shaped gate passed | `SPRINT13-INSTANCE-OBSERVABILITY-PROMETHEUS-A-TRACK`；`validate-instance-observability-live-gate`；Prometheus + kubelet；LIVE PENDING 仅作历史兼容 |
 
 闭环规则：每个 provider slice 必须具备 real adapter/provider runtime、live gate、非敏感 evidence JSON、development record 和全局 production-shape guard。S05-S07 B 轨可以继续 作为历史兼容 token 保留；截至 2026-06-21，S05/S06/S07 均已 passed。
+
+## 账密登录模块（2026-07）
+
+> 独立于 Sprint 13/14 的账密登录功能开发流。覆盖 Core Auth API（租户账密 + 平台账密）、Console 前端（OIDC + 账密 Tab）、BOSS 前端（平台账密登录）。
+
+| Issue | 描述 | 状态 | 证据 |
+|---|---|---|---|
+| Core #001 | 平台用户迁移（users 表扩展 tenant_id NULLABLE） | ✅ 已完成 | `development-records/auth-login-core-001.md` |
+| Core #002 | 租户账密登录 API | ✅ 已完成 | `development-records/auth-login-core-001.md` |
+| Core #003 | 平台账密登录 API | ✅ 已完成 | `development-records/auth-login-core-001.md` |
+| Console #004 | Console P0 OIDC 登录 | ✅ 已完成 | `development-records/auth-login-console-004.md` |
+| Console #005 | Console P1 账密 Tab | ✅ 已完成 | `development-records/auth-login-console-004.md` |
+| BOSS #006 | BOSS P1 账密登录 | ✅ 已完成 | `development-records/auth-login-boss-006.md` |
+| BOSS #006 | BOSS P1 OIDC 登录 | ⏸ 暂不实现 | auth-service Begin 方法需扩展平台路径 |
+
+**代码审查修复（review-it）：** P0-1 签发顺序、P0-3 BOSS redirect_uri、P1-1 SQL 约束、P1-2 maybeRefresh、P1-3 401 先 refresh、P1-5 幂等键、P2-1 RBAC scope。测试验证：auth-service PASS、ani-gateway middleware PASS、BOSS vite build PASS。
+
+**PRD/SPEC 文档体系：** 已按产品线拆分为 Console/BOSS/Core 三份 PRD 和三份 SPEC，分别放置在 `prd/{console,boss,core}/login/` 和 `spec/{console,boss,core}/login/` 目录。
 
 ## GPU 调度功能流（skill 流水线推进中，2026-07）
 
@@ -68,13 +86,38 @@
 
 Issue 清单：`repo/services/tasks/issues/issue-01-openapi-queue-crud.md` ~ `issue-13-boss-gpu-pool-page.md`
 
+## Instance Management API-First（2026-07-28）
+
+| 批次 | 状态 | 说明 |
+|---|---|---|
+| GPU-SPEC-CONTRACT-A | 个人仓库 CI passed，契约已确认 | 为实例 `spec_id` 提供 `GPUSpecSummary`、`GET /gpu-specs`、`GET /gpu-specs/{spec_id}` 只读契约；旧 GPU 字段 deprecated 保留；不含 handler/port/adapter/Console，不实现配额 check/acquire/release |
+| INSTANCE-CONTRACT-A | 个人仓库 CI passed，契约已确认 | 扩展统一实例创建、详情摘要、列表过滤/排序/cursor、观测 cursor 和 lifecycle/operation step；引用既有 Registry/Network/Storage/GPU Spec，不含 handler/port/adapter/Console |
+| INSTANCE-SANDBOX-CONTRACT-A | 个人仓库 CI passed，契约已确认 | 新增 Sandbox token、预览端口、文件、checkpoint 和异步 code-run 共 11 个操作；固定租户/kind、幂等、任务轮询和敏感输出审计边界；不含 handler/port/adapter/Console |
+
+边界：本流程独立于既有 GPU 调度队列实现；当前只完成公开契约和生成物，不声明 GPU 规格 runtime ready、配额能力或实例管理闭环完成。
+
 ## Registry Console Flow（2026-07-22）
 
 | 批次 | 状态 | 说明 |
 |---|---|---|
-| CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A | 契约/Console schema 已完成 | 按 7.22 原型“暂不考虑 BOSS 和权限”边界，Core v1 新增 `RegistryImage.purpose`、`/registry/images?purpose=`、四类算力引用 enum 与 createInstance 镜像门禁 422 语义；仅契约，不含 handler/adapter/Console 页面实现 |
+| CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A | 契约/Console schema 已完成 | 按 7.22 原型”暂不考虑 BOSS 和权限”边界，Core v1 新增 `RegistryImage.purpose`、`/registry/images?purpose=`、四类算力引用 enum 与 createInstance 镜像门禁 422 语义；仅契约，不含 handler/adapter/Console 页面实现 |
 | CORE-REGISTRY-CONSOLE-FLOW-CORE-A | Core 镜像仓库后端实现已完成 | RegistryImage purpose 贯通 port/adapter/router，`/registry/images?purpose=` 支持过滤；不含 instances、Console、BOSS 或权限实现 |
+| SPRINT13-REGISTRY-HARBOR-LIVE-A | Harbor live gate passed | `validate-registry-harbor-live-gate` 契约通过；2026-07-27 通过真实 Gateway 验证 Harbor project/list/push-instructions/pull-secret/scan-report 并归档脱敏 evidence；artifact/purpose 回读需提供 repository/tag；不含 Console/BOSS/实例创建镜像门禁 |
+| CORE-STORAGE-CONSOLE-APIS-BACKEND-A | Core 存储模块后端实现已完成 | 上游 PR #71 契约合入后，补齐对象桶、块卷、文件系统和向量库管理接口的 ports/local service/gateway handlers 与后端 HTTP E2E/API 测试；2026-07-27 本地 Gateway + 真实依赖复验 Rook-Ceph/MinIO/Milvus 后端 E2E 通过；不含前端，不升级为 production-shaped Gateway 结论 |
 
+## 邮件通知（2026-07-22）
+
+| 批次 | 状态 | 说明 |
+|---|---|---|
+| EMAIL-NOTIFY | 后端 API + BOSS 前端已完成 | 9 个 Core endpoint（SMTP CRUD / 收件人 CRUD / 事件订阅批量更新 / 测试发送）；local 内存 adapter；BOSS 前端 SMTP 表单 + 收件人表格 + 订阅开关 + 测试发送；store 层 RequestID UUID 生成 + handler 透传；48 store 测试 + 34 handler 测试通过；`make validate-architecture` 和前端 `pnpm` 验证待补跑 |
+
+验收命令：
+
+```bash
+go test ./pkg/adapters/runtime/... -run “TestStore_|TestSendVia”
+go test ./services/ani-gateway/internal/router/... -run “TestEmailNotif_”
+go vet ./pkg/adapters/runtime/... ./services/ani-gateway/internal/router/...
+```
 
 ## Sprint 13 执行矩阵
 

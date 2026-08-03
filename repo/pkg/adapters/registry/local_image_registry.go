@@ -230,7 +230,7 @@ func (r *LocalImageRegistry) CreatePullSecret(_ context.Context, request ports.R
 	secret := ports.RegistryPullSecret{
 		Project:    strings.TrimSpace(request.Project),
 		Name:       name,
-		SecretRef:  strings.TrimSpace(request.Project) + "/" + name,
+		SecretRef:  registryPullSecretNamespace(request) + "/" + name,
 		Registry:   "registry.local",
 		Username:   "robot$" + strings.TrimSpace(request.Project),
 		Namespace:  strings.TrimSpace(request.Namespace),
@@ -242,6 +242,13 @@ func (r *LocalImageRegistry) CreatePullSecret(_ context.Context, request ports.R
 	r.pullSecrets[key] = secret
 	r.idempotency[idemKey] = key
 	return secret, nil
+}
+
+func registryPullSecretNamespace(request ports.RegistryPullSecretRequest) string {
+	if namespace := strings.TrimSpace(request.Namespace); namespace != "" {
+		return namespace
+	}
+	return strings.TrimSpace(request.Project)
 }
 
 func (r *LocalImageRegistry) GetProjectScanReport(_ context.Context, request ports.RegistryProjectScanReportRequest) (ports.RegistryProjectScanReport, error) {

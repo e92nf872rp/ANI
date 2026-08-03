@@ -1,8 +1,8 @@
 # PRD: 实例可观测性补全（GPU 指标 / 日志持久化 / VM 指标）
 
-> 基于 `prd-console-instance-observability.md` 当前实现现状，闭环三个未解决问题。  
-> Source plan: `repo/services/tasks/modules/prd/console/compute/plan.md`  
-> 生成日期：2026-07-20  
+> 基于 `prd-console-instance-observability.md` 当前实现现状，闭环三个未解决问题。
+> Source plan: `repo/services/tasks/modules/prd/console/compute/plan.md`
+> 生成日期：2026-07-20
 > 状态：已确认
 
 ---

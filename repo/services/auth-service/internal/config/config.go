@@ -52,6 +52,7 @@ func Load() Config {
 	}
 }
 
+// 从环境变量中获取配置项
 func env(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -59,6 +60,7 @@ func env(key, fallback string) string {
 	return fallback
 }
 
+// 从环境变量中获取配置项（整数类型）
 func envInt(key string, fallback int) int {
 	v := os.Getenv(key)
 	if v == "" {
