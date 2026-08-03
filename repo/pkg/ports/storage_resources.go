@@ -16,32 +16,32 @@ const (
 )
 
 type StorageVolumeRecord struct {
-	TenantID                   string
-	VolumeID                   string
-	Name                       string
-	SizeGiB                    int64
-	StorageClass               string
-	Zone                       string
-	VolumeType                 string
-	IOPS                       int
-	Encrypted                  bool
-	MountInstanceID            string
-	MountRoute                 string
-	MountName                  string
-	SnapshotsCount             int
-	AutoSnapshot               StorageVolumeAutoSnapshotPolicy
-	OSInitStatus               string
-	OSInitDevice               string
-	MountHistory               []StorageVolumeMountHistoryEntry
-	FromSnapshotID             string
-	FromSnapshotName           string
-	State                      StorageResourceState
-	Reason                     string
-	CreatedAt                  time.Time
-	UpdatedAt                  time.Time
-	DeletedAt                  time.Time
-	CreateIdempotencyKey       string
-	CreateRequestFingerprint   string
+	TenantID                 string
+	VolumeID                 string
+	Name                     string
+	SizeGiB                  int64
+	StorageClass             string
+	Zone                     string
+	VolumeType               string
+	IOPS                     int
+	Encrypted                bool
+	MountInstanceID          string
+	MountRoute               string
+	MountName                string
+	SnapshotsCount           int
+	AutoSnapshot             StorageVolumeAutoSnapshotPolicy
+	OSInitStatus             string
+	OSInitDevice             string
+	MountHistory             []StorageVolumeMountHistoryEntry
+	FromSnapshotID           string
+	FromSnapshotName         string
+	State                    StorageResourceState
+	Reason                   string
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
+	DeletedAt                time.Time
+	CreateIdempotencyKey     string
+	CreateRequestFingerprint string
 }
 
 type StorageFilesystemRecord struct {

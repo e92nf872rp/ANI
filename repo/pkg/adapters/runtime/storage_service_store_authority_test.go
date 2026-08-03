@@ -12,17 +12,17 @@ import (
 // sharedMemoryStorageStore is a process-local StorageResourceStore used to prove
 // two LocalStorageService instances share PG-shaped authority without a real DB.
 type sharedMemoryStorageStore struct {
-	mu         sync.Mutex
-	volumes    map[string]ports.StorageVolumeRecord
-	byCreate   map[string]string
-	buckets    map[string]ports.StorageBucketRecord
-	bucketIdem map[string]string
-	snapshots  map[string]ports.VolumeSnapshotRecord
-	snapIdem   map[string]string
-	mounts     map[string]ports.FilesystemMountTargetRecord
-	mountIdem  map[string]string
+	mu          sync.Mutex
+	volumes     map[string]ports.StorageVolumeRecord
+	byCreate    map[string]string
+	buckets     map[string]ports.StorageBucketRecord
+	bucketIdem  map[string]string
+	snapshots   map[string]ports.VolumeSnapshotRecord
+	snapIdem    map[string]string
+	mounts      map[string]ports.FilesystemMountTargetRecord
+	mountIdem   map[string]string
 	filesystems map[string]ports.StorageFilesystemRecord
-	objects    map[string]ports.StorageObjectRecord
+	objects     map[string]ports.StorageObjectRecord
 }
 
 func newSharedMemoryStorageStore() *sharedMemoryStorageStore {
