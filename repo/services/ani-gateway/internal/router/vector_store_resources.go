@@ -108,10 +108,6 @@ func newVectorStoreAPI() *vectorStoreAPI {
 	return newVectorStoreAPIWithService(nil)
 }
 
-func registerVectorStoreResources(v1 *route.RouterGroup) {
-	registerVectorStoreResourcesWithService(v1, nil)
-}
-
 func newVectorStoreAPIWithService(service ports.VectorStoreService) *vectorStoreAPI {
 	return newVectorStoreAPIWithServiceAndTasks(service, defaultTaskStore)
 }

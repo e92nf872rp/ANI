@@ -18,10 +18,6 @@ type taskAPI struct {
 	store ports.AsyncTaskStore
 }
 
-func registerTasks(v1 *route.RouterGroup) {
-	registerTasksWithStore(v1, defaultTaskStore)
-}
-
 func registerTasksWithStore(v1 *route.RouterGroup, store ports.AsyncTaskStore) {
 	if store == nil {
 		store = defaultTaskStore
