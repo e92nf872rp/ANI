@@ -224,3 +224,51 @@ exceptions:
   - operation_id: inviteTenantMember
     rule: async_202_requires_async_task
     reason: 当前遗留租户邀请接口的 202 响应仍返回 TenantMember。
+  - operation_id: listTenantPlans
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: createTenantPlan
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: createTenantPlan
+    rule: write_requires_idempotency
+    reason: 当前 Services OpenAPI 写操作通过 Idempotency-Key 请求头传递幂等键，未在 request body 中声明 idempotency_key 必填字段。
+  - operation_id: getTenantPlan
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: deleteTenantPlan
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: getTenantPlanQuotaLimits
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: updateTenantPlanQuotaLimits
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: updateTenantPlanQuotaLimits
+    rule: write_requires_idempotency
+    reason: 当前 Services OpenAPI 写操作通过 Idempotency-Key 请求头传递幂等键，未在 request body 中声明 idempotency_key 必填字段。
+  - operation_id: activateTenantPlan
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: activateTenantPlan
+    rule: write_requires_idempotency
+    reason: 当前 Services OpenAPI 写操作通过 Idempotency-Key 请求头传递幂等键，未在 request body 中声明 idempotency_key 必填字段。
+  - operation_id: disableTenantPlan
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: disableTenantPlan
+    rule: write_requires_idempotency
+    reason: 当前 Services OpenAPI 写操作通过 Idempotency-Key 请求头传递幂等键，未在 request body 中声明 idempotency_key 必填字段。
+  - operation_id: listTenantPlanBoundTenants
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: listTenantPlanAuditLogs
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: bindTenantPlan
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: bindTenantPlan
+    rule: write_requires_idempotency
+    reason: 当前 Services OpenAPI 写操作通过 Idempotency-Key 请求头传递幂等键，未在 request body 中声明 idempotency_key 必填字段。
