@@ -894,6 +894,145 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenant-plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询套餐列表 */
+        get: operations["listTenantPlans"];
+        put?: never;
+        /** 创建套餐 */
+        post: operations["createTenantPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenant-plans/{planId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询套餐详情 */
+        get: operations["getTenantPlan"];
+        put?: never;
+        post?: never;
+        /** 删除套餐（软删除） */
+        delete: operations["deleteTenantPlan"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenant-plans/{planId}/quota-limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询套餐限额 */
+        get: operations["getTenantPlanQuotaLimits"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** 修改套餐限额（同步存量租户） */
+        patch: operations["updateTenantPlanQuotaLimits"];
+        trace?: never;
+    };
+    "/tenant-plans/{planId}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 发布套餐 */
+        post: operations["activateTenantPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenant-plans/{planId}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 禁用套餐 */
+        post: operations["disableTenantPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenant-plans/{planId}/tenants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询套餐绑定的租户列表 */
+        get: operations["listTenantPlanBoundTenants"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenant-plans/{planId}/audit-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询套餐操作历史 */
+        get: operations["listTenantPlanAuditLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenantId}/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 绑定套餐（按套餐限额更新配额） */
+        post: operations["bindTenantPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1582,6 +1721,124 @@ export interface components {
             app_id: string;
             app_secret: string;
         };
+        TenantPlan: {
+            /** Format: uuid */
+            id: string;
+            /** @description 套餐代码 */
+            code: string;
+            /** @description 套餐名称 */
+            name: string;
+            description?: string | null;
+            /** @enum {string} */
+            status: "draft" | "active" | "disabled";
+            /** @description 绑定租户数量 */
+            tenant_count: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        TenantPlanListItem: {
+            /** Format: uuid */
+            id: string;
+            code: string;
+            name: string;
+            /** @enum {string} */
+            status: "draft" | "active" | "disabled";
+            tenant_count: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        TenantPlanListResponse: {
+            items: components["schemas"]["TenantPlanListItem"][];
+            total: number;
+            page: number;
+            page_size: number;
+        };
+        CreateTenantPlanRequest: {
+            /** @description 套餐代码 */
+            code: string;
+            name: string;
+            description?: string;
+            /** @description 各维度配额上限；total 为 null 表示用 default_quota */
+            quota_limits?: components["schemas"]["PlanQuotaLimitInput"][];
+        };
+        PlanQuotaLimitInput: {
+            /** @description 配额维度标识 */
+            resource_type: string;
+            /**
+             * Format: int64
+             * @description 限额值；null = 用 default_quota
+             */
+            total?: number | null;
+        };
+        PlanQuotaLimitView: {
+            resource_type: string;
+            /** @description 展示名（来自 resource_quota_meta） */
+            display_name: string;
+            /** @description 单位（来自 resource_quota_meta） */
+            unit: string;
+            /**
+             * Format: int64
+             * @description 当前限额值；null = 用 default_quota
+             */
+            total: number | null;
+        };
+        PlanQuotaLimitsResponse: {
+            items: components["schemas"]["PlanQuotaLimitView"][];
+        };
+        UpdateQuotaLimitsRequest: {
+            items: components["schemas"]["PlanQuotaLimitInput"][];
+        };
+        BindPlanRequest: {
+            /** Format: uuid */
+            plan_id: string;
+        };
+        BoundTenant: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            display_name: string;
+            /** @enum {string} */
+            status: "active" | "frozen" | "disabled";
+        };
+        BoundTenantsResponse: {
+            items: components["schemas"]["BoundTenant"][];
+        };
+        PlanAuditLog: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            tenant_id?: string | null;
+            /** Format: uuid */
+            user_id?: string | null;
+            /** Format: uuid */
+            request_id?: string | null;
+            action: string;
+            resource: string;
+            /** @enum {string} */
+            result: "success" | "failed";
+            details?: {
+                [key: string]: unknown;
+            } | null;
+            ip_address?: string | null;
+            user_agent?: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        PlanAuditLogListResponse: {
+            items: components["schemas"]["PlanAuditLog"][];
+            total: number;
+            page: number;
+            page_size: number;
+        };
+        IdempotentResult: {
+            /** Format: uuid */
+            id: string;
+            message: string;
+        };
     };
     responses: {
         /** @description 请求参数错误 */
@@ -1631,6 +1888,15 @@ export interface components {
         };
         /** @description 前置条件不满足（code=PRECONDITION_FAILED） */
         PreconditionFailed: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 前置条件不满足（如配额维度未注册 code=QUOTA_RESOURCE_NOT_REGISTERED） */
+        UnprocessableEntity: {
             headers: {
                 [name: string]: unknown;
             };
@@ -3447,6 +3713,317 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listTenantPlans: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                status?: "draft" | "active" | "disabled";
+                /** @description 模糊匹配 name */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 套餐列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantPlanListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createTenantPlan: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 幂等键 */
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTenantPlanRequest"];
+            };
+        };
+        responses: {
+            /** @description 套餐已创建 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    getTenantPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                planId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 套餐详情 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantPlan"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteTenantPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                planId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 套餐已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getTenantPlanQuotaLimits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                planId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 套餐限额列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanQuotaLimitsResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateTenantPlanQuotaLimits: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 幂等键 */
+                "Idempotency-Key": string;
+            };
+            path: {
+                planId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateQuotaLimitsRequest"];
+            };
+        };
+        responses: {
+            /** @description 限额已修改 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    activateTenantPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                planId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 套餐已发布 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    disableTenantPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                planId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 套餐已禁用 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listTenantPlanBoundTenants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                planId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 绑定租户列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundTenantsResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listTenantPlanAuditLogs: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                /** @description 过滤操作类型 */
+                action?: string;
+                result?: "success" | "failed";
+            };
+            header?: never;
+            path: {
+                planId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 操作历史列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanAuditLogListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    bindTenantPlan: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 幂等键 */
+                "Idempotency-Key": string;
+            };
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BindPlanRequest"];
+            };
+        };
+        responses: {
+            /** @description 套餐已绑定，配额已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
         };
     };
