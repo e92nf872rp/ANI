@@ -13,6 +13,7 @@ from unittest.mock import patch
 class FakeHTTPClient:
     def __init__(self) -> None:
         self.requests: list[tuple[str, str, dict[str, object] | None]] = []
+        self.state = "running"
 
     def request(self, method: str, url: str, token: str, tenant_id: str, body: dict[str, object] | None = None) -> tuple[int, dict[str, object]]:
         self.requests.append((method, url, body))
@@ -20,7 +21,7 @@ class FakeHTTPClient:
             "id": "vm-live-1",
             "name": "vm-live",
             "kind": "vm",
-            "state": "running",
+            "state": self.state,
             "provider": "kubernetes",
             "dev_profile": {"provider": "kubernetes", "real_provider": True},
             "access": {"console_available": True},
@@ -31,8 +32,8 @@ class FakeHTTPClient:
             return 200, instance
         if method == "POST" and url.endswith("/instances/vm-live-1/lifecycle"):
             action = str((body or {}).get("action", ""))
-            state = "stopped" if action == "stop" else "running"
-            changed = {**instance, "state": state}
+            self.state = {"stop": "stopped", "start": "running", "delete": "deleted"}[action]
+            changed = {**instance, "state": self.state}
             return 200, {"instance": changed, "operation_id": f"op-{action}"}
         if method == "POST" and url.endswith("/instances/vm-live-1/console"):
             protocol = str((body or {}).get("protocol", "vnc"))
@@ -124,6 +125,27 @@ class InstanceManagementLiveGateTests(unittest.TestCase):
                 self.assertNotIn("vm-live-1", command)
         self.assertEqual("passed", evidence["status"])
         self.assertEqual("vm-live-1", evidence["instance_id"])
+        lifecycle_sequence = [
+            (method, (body or {}).get("action", "get"))
+            for method, url, body in http.requests
+            if url.endswith("/instances/vm-live-1/lifecycle")
+            or (method == "GET" and url.endswith("/instances/vm-live-1"))
+        ]
+        self.assertEqual(
+            [
+                ("GET", "get"),
+                ("POST", "stop"),
+                ("GET", "get"),
+                ("POST", "start"),
+                ("GET", "get"),
+                ("POST", "delete"),
+                ("GET", "get"),
+            ],
+            lifecycle_sequence,
+        )
+        self.assertEqual("stopped", evidence["state_after_stop"])
+        self.assertEqual("running", evidence["state_after_start"])
+        self.assertEqual("deleted", evidence["state_after_delete"])
 
 
 if __name__ == "__main__":

@@ -274,7 +274,22 @@ def extract_nested_id(document: dict[str, Any], *path: str) -> str:
     return ""
 
 
-def pg_scalar(config: LiveConfig, runner: LiveRunner, sql: str) -> str:
+def pg_scalar(
+    config: LiveConfig,
+    runner: LiveRunner,
+    sql: str,
+    variables: dict[str, str] | None = None,
+) -> str:
+    psql_args = [
+        "psql",
+        "-U",
+        config.postgres_user,
+        "-d",
+        config.postgres_db,
+    ]
+    for name, value in (variables or {}).items():
+        psql_args.extend(["-v", f"{name}={value}"])
+    psql_args.extend(["-At", "-c", sql])
     output = runner.run(
         kubectl(
             config,
@@ -284,18 +299,34 @@ def pg_scalar(config: LiveConfig, runner: LiveRunner, sql: str) -> str:
                 config.postgres_namespace,
                 config.postgres_pod,
                 "--",
-                "psql",
-                "-U",
-                config.postgres_user,
-                "-d",
-                config.postgres_db,
-                "-At",
-                "-c",
-                sql,
+                *psql_args,
             ],
         )
     )
     return output.strip()
+
+
+def pg_tombstone_count(
+    config: LiveConfig,
+    runner: LiveRunner,
+    table: str,
+    resource_column: str,
+    resource_id: str,
+) -> str:
+    allowed = {
+        "storage_volumes": "volume_id",
+        "vector_stores": "vector_store_id",
+    }
+    if allowed.get(table) != resource_column:
+        fail("unsupported PostgreSQL tombstone query")
+    return pg_scalar(
+        config,
+        runner,
+        f"SELECT COUNT(*) FROM {table} "
+        f"WHERE tenant_id = :'tenant_id'::uuid AND {resource_column} = :'resource_id' "
+        "AND deleted_at IS NOT NULL",
+        {"tenant_id": config.tenant_id, "resource_id": resource_id},
+    )
 
 
 def run_live(
@@ -583,20 +614,8 @@ def run_live(
         )
         require_status(f"{name} after delete", get_status, {404})
 
-    tombstone_volume = pg_scalar(
-        config,
-        runner,
-        "SELECT COUNT(*) FROM storage_volumes "
-        f"WHERE tenant_id = '{config.tenant_id}'::uuid AND volume_id = '{volume_id}' "
-        "AND deleted_at IS NOT NULL",
-    )
-    tombstone_vector = pg_scalar(
-        config,
-        runner,
-        "SELECT COUNT(*) FROM vector_stores "
-        f"WHERE tenant_id = '{config.tenant_id}'::uuid AND vector_store_id = '{vector_id}' "
-        "AND deleted_at IS NOT NULL",
-    )
+    tombstone_volume = pg_tombstone_count(config, runner, "storage_volumes", "volume_id", volume_id)
+    tombstone_vector = pg_tombstone_count(config, runner, "vector_stores", "vector_store_id", vector_id)
     if tombstone_volume != "1" or tombstone_vector != "1":
         raise RuntimeError(
             f"expected PG tombstones volume={tombstone_volume} vector={tombstone_vector}"

@@ -258,6 +258,8 @@ def wait_for_state(
             config.ani_bearer_token,
             config.tenant_id,
         )
+        if status == 404 and "deleted" in states:
+            return {"id": instance_id_value, "state": "deleted"}
         if status != 200:
             fail("instance get must return 200")
         last = require_instance(document, "instance get")
@@ -359,9 +361,12 @@ def run_live(
     vm, vmi = observe_kubevirt(config, runner, vm_id)
     vnc = console_probe(config, http_client, vm_id, "vnc")
     serial = console_probe(config, http_client, vm_id, "console")
-    stopped, stop_operation = lifecycle(config, http_client, vm_id, "stop")
-    started, start_operation = lifecycle(config, http_client, vm_id, "start")
-    deleted, delete_operation = lifecycle(config, http_client, vm_id, "delete")
+    _, stop_operation = lifecycle(config, http_client, vm_id, "stop")
+    stopped = wait_for_state(config, http_client, vm_id, {"stopped"})
+    _, start_operation = lifecycle(config, http_client, vm_id, "start")
+    started = wait_for_state(config, http_client, vm_id, {"running"})
+    _, delete_operation = lifecycle(config, http_client, vm_id, "delete")
+    deleted = wait_for_state(config, http_client, vm_id, {"deleted"})
     return {
         "status": "passed",
         "kind": "vm",

@@ -68,50 +68,82 @@ def strip_sql_comments(sql: str) -> str:
     return re.sub(r"--[^\n]*", "", without_block)
 
 
+def normalize_sql(sql: str) -> str:
+    return re.sub(r"\s+", " ", strip_sql_comments(sql)).strip().lower()
+
+
+def table_statements(sql: str, table: str) -> list[str]:
+    pattern = re.compile(
+        rf"\b(?:create\s+table(?:\s+if\s+not\s+exists)?|alter\s+table(?:\s+only)?)\s+{re.escape(table)}\b",
+        flags=re.IGNORECASE,
+    )
+    return [statement for statement in strip_sql_comments(sql).split(";") if pattern.search(statement)]
+
+
+def tenant_policy_statements(sql: str, table: str) -> list[str]:
+    pattern = re.compile(
+        rf"\bcreate\s+policy\s+tenant_isolation\s+on\s+{re.escape(table)}\b",
+        flags=re.IGNORECASE,
+    )
+    return [statement for statement in strip_sql_comments(sql).split(";") if pattern.search(statement)]
+
+
 def validate_migration_sql(sql: str) -> None:
-    lowered = sql.lower()
     payload_surface = strip_sql_comments(sql).lower()
+    normalized = normalize_sql(sql)
 
     for pattern, label in FORBIDDEN_PATTERNS:
         require(re.search(pattern, payload_surface) is None, f"migration must not persist {label}")
 
-    require(LEGACY_SESSION_KEY not in sql, "migration must not use ani.tenant_id session key")
-    require(REQUIRED_SESSION_KEY in sql, "migration must use app.current_tenant_id")
+    require(LEGACY_SESSION_KEY not in payload_surface, "migration must not use ani.tenant_id session key")
+    require(REQUIRED_SESSION_KEY in payload_surface, "migration must use app.current_tenant_id")
 
     for table in REQUIRED_TABLES:
-        require(table in sql, f"migration missing table {table}")
+        statements = table_statements(sql, table)
+        require(statements, f"migration missing table {table}")
         require(
-            f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY" in sql
-            or f"alter table {table} enable row level security" in lowered,
+            re.search(rf"\balter\s+table(?:\s+only)?\s+{re.escape(table)}\s+enable\s+row\s+level\s+security\b", payload_surface, re.IGNORECASE) is not None,
             f"migration missing ENABLE RLS for {table}",
         )
         require(
-            f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY" in sql
-            or f"alter table {table} force row level security" in lowered,
+            re.search(rf"\balter\s+table(?:\s+only)?\s+{re.escape(table)}\s+force\s+row\s+level\s+security\b", payload_surface, re.IGNORECASE) is not None,
             f"migration missing FORCE RLS for {table}",
         )
-        require(
-            f"ON {table}" in sql and "tenant_isolation" in sql,
-            f"migration missing tenant_isolation policy for {table}",
+        policies = tenant_policy_statements(sql, table)
+        require(policies, f"migration missing tenant_isolation policy for {table}")
+        policy = normalize_sql("\n".join(policies))
+        tenant_setting = (
+            r"nullif\s*\(\s*current_setting\s*\(\s*['\"]app\.current_tenant_id['\"]"
+            r"\s*,\s*true\s*\)\s*,\s*['\"]{2}\s*\)\s*::\s*uuid"
         )
         require(
-            f"PRIMARY KEY (tenant_id" in sql or f"primary key (tenant_id" in lowered,
-            "migration must use tenant-first primary keys",
+            re.search(rf"\busing\s*\(\s*tenant_id\s*=\s*{tenant_setting}", policy) is not None,
+            f"migration tenant_isolation policy missing tenant predicate for {table}",
         )
+        require(
+            re.search(rf"\bwith\s+check\s*\(\s*tenant_id\s*=\s*{tenant_setting}", policy) is not None,
+            f"migration tenant_isolation policy missing WITH CHECK tenant predicate for {table}",
+        )
+        create_statements = [statement for statement in statements if re.search(r"\bcreate\s+table\b", statement, re.IGNORECASE)]
+        if create_statements:
+            require(
+                any(re.search(r"\bprimary\s+key\s*\(\s*tenant_id\s*,", statement, re.IGNORECASE) for statement in create_statements),
+                f"migration must use tenant-first primary key for {table}",
+            )
 
     for table in CREATE_IDEMPOTENT_TABLES:
+        statements = "\n".join(table_statements(sql, table)).lower()
         require(
-            f"create_idempotency_key" in sql and table in sql,
+            "create_idempotency_key" in statements,
             f"migration must declare create_idempotency_key for {table}",
         )
         require(
-            "create_request_fingerprint" in sql,
-            "migration must declare create_request_fingerprint",
+            "create_request_fingerprint" in statements,
+            f"migration must declare create_request_fingerprint for {table}",
         )
 
     require("deleted_at" in sql, "migration must add soft-delete deleted_at")
-    require("WITH CHECK" in sql, "migration RLS policies must include WITH CHECK")
-    collapsed = re.sub(r"\s+", " ", lowered)
+    collapsed = normalized
     require(
         "foreign key (tenant_id, volume_id) references storage_volumes(tenant_id, volume_id)"
         in collapsed,
@@ -128,11 +160,11 @@ def validate_migration_sql(sql: str) -> None:
         "mount targets must use composite FK to network_subnets",
     )
     require(
-        "UNIQUE INDEX" in sql or "unique index" in lowered or "UNIQUE (" in sql,
+        "unique index" in normalized or "unique (" in normalized,
         "migration must declare create idempotency unique constraints",
     )
     require(
-        "CHECK (state IN" in sql or "check (state in" in lowered,
+        "check (state in" in normalized,
         "migration must keep state check constraints",
     )
     require(

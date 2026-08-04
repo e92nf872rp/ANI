@@ -1,11 +1,29 @@
 package main
 
 import (
+	"bytes"
+	"log/slog"
+	"strings"
 	"testing"
 
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/bootstrap"
 )
+
+func TestGatewayIntFromEnvLogsInvalidValue(t *testing.T) {
+	t.Setenv("ANI_TEST_INVALID_INTEGER", "not-an-integer")
+	var output bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&output, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	if got := gatewayIntFromEnv("ANI_TEST_INVALID_INTEGER"); got != 0 {
+		t.Fatalf("gatewayIntFromEnv() = %d, want 0", got)
+	}
+	if text := output.String(); !strings.Contains(text, "invalid integer environment variable") || !strings.Contains(text, "ANI_TEST_INVALID_INTEGER") {
+		t.Fatalf("diagnostic = %q, want invalid integer and key", text)
+	}
+}
 
 func TestGatewayInstanceRuntimeConfigFromEnv(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://instance-runtime")

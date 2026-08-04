@@ -14,7 +14,7 @@ FROM alpine:3.20 AS tools
 
 ARG HELM_VERSION=v3.19.0
 ARG VCLUSTER_VERSION=v0.34.1
-ARG KUBECTL_VERSION=v1.28.15
+ARG KUBECTL_VERSION=v1.36.1
 
 RUN apk add --no-cache ca-certificates curl tar && \
     curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" -o /tmp/helm.tar.gz && \
@@ -22,8 +22,10 @@ RUN apk add --no-cache ca-certificates curl tar && \
     install -m 0755 /tmp/linux-amd64/helm /usr/local/bin/helm && \
     curl -fsSL "https://github.com/loft-sh/vcluster/releases/download/${VCLUSTER_VERSION}/vcluster-linux-amd64" -o /usr/local/bin/vcluster && \
     chmod 0755 /usr/local/bin/vcluster && \
-    curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" -o /usr/local/bin/kubectl && \
-    chmod 0755 /usr/local/bin/kubectl
+    curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" -o /tmp/kubectl && \
+    curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl.sha256" -o /tmp/kubectl.sha256 && \
+    echo "$(cat /tmp/kubectl.sha256)  /tmp/kubectl" | sha256sum -c - && \
+    install -m 0755 /tmp/kubectl /usr/local/bin/kubectl
 
 FROM alpine:3.20
 

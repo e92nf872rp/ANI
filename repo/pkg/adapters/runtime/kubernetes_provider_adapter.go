@@ -97,7 +97,7 @@ func (a *KubernetesProviderAdapter) Apply(ctx context.Context, request ports.Wor
 		return ports.WorkloadProviderApplyResult{}, err
 	}
 	if result.Provider == "" {
-		result.Provider = request.Manifests[0].Provider
+		result.Provider = primaryProvider(request.Manifests)
 	}
 	if result.ManifestCount == 0 {
 		result.ManifestCount = len(request.Manifests)

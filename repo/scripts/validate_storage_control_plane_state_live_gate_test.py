@@ -77,7 +77,11 @@ class FakeHTTPClient:
 
 
 class FakeRunner:
+    def __init__(self) -> None:
+        self.commands: list[list[str]] = []
+
     def run(self, command: list[str], input_text: str | None = None) -> str:
+        self.commands.append(command)
         joined = " ".join(command)
         if "psql" in joined and "storage_volumes" in joined:
             return "1\n"
@@ -89,6 +93,33 @@ class FakeRunner:
 
 
 class StorageControlPlaneStateLiveGateTest(unittest.TestCase):
+    def test_tombstone_count_passes_values_as_psql_variables(self) -> None:
+        payload = "vol-1'; DROP TABLE storage_volumes; --"
+        config = gate.LiveConfig(
+            gateway_url="http://gateway.example/api/v1",
+            ani_bearer_token="token",
+            tenant_id="11111111-1111-1111-1111-111111111111'; SELECT 1; --",
+            namespace="ani-tenant-a",
+            subnet_id="subnet-a",
+            vpc_id="vpc-a",
+            storage_class="ani-rbd-ssd",
+            gateway_deployment="ani-gateway",
+            gateway_namespace="ani-system",
+            postgres_namespace="ani-system",
+            postgres_pod="ani-postgres-0",
+            postgres_db="ani",
+            postgres_user="ani",
+            idempotency_prefix="storage-cp-live",
+        )
+        runner = FakeRunner()
+        self.assertEqual("1", gate.pg_tombstone_count(config, runner, "storage_volumes", "volume_id", payload))
+        command = runner.commands[-1]
+        sql = command[-1]
+        self.assertNotIn(payload, sql)
+        self.assertIn(":'tenant_id'", sql)
+        self.assertIn(":'resource_id'", sql)
+        self.assertIn(f"resource_id={payload}", command)
+
     def test_contract_defines_restart_and_tombstone_checks(self) -> None:
         document = gate.load_gate(gate.DEFAULT_GATE)
         gate.validate_contract(document)

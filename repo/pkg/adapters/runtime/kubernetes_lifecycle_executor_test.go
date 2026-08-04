@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -152,6 +153,36 @@ func TestKubernetesLifecycleExecutorDeleteIgnoresAlreadyMissingResources(t *test
 	}
 	if !result.Accepted || len(requests) != 2 {
 		t.Fatalf("result = %+v requests = %#v, want accepted cleanup of both refs", result, requests)
+	}
+}
+
+func TestKubernetesLifecycleExecutorDeleteAttemptsAllResourcesAndJoinsErrors(t *testing.T) {
+	errDeployment := errors.New("deployment delete failed")
+	errPVC := errors.New("pvc delete failed")
+	var requests []string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.URL.Path)
+		switch {
+		case strings.Contains(r.URL.Path, "/deployments/"):
+			return nil, errDeployment
+		case strings.Contains(r.URL.Path, "/persistentvolumeclaims/"):
+			return nil, errPVC
+		default:
+			return lifecycleResponse(), nil
+		}
+	})
+	record := lifecycleRecord()
+	record.ResourceRefs = append(record.ResourceRefs,
+		"kubernetes/Secret/ani-wi-instance-a",
+		"kubernetes/PersistentVolumeClaim/app-data",
+	)
+
+	_, err := executor.Apply(context.Background(), lifecycleRequest(ports.WorkloadLifecycleDelete), record)
+	if len(requests) != 3 {
+		t.Fatalf("requests = %#v, want all three deletes", requests)
+	}
+	if !errors.Is(err, errDeployment) || !errors.Is(err, errPVC) {
+		t.Fatalf("Delete Apply() error = %v, want both delete errors", err)
 	}
 }
 

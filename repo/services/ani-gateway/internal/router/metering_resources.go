@@ -174,6 +174,6 @@ func writeMeteringError(c *app.RequestContext, err error) {
 	case errors.Is(err, ports.ErrInvalid):
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	default:
-		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeInstanceError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
 	}
 }

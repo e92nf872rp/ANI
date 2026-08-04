@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -50,6 +51,7 @@ func gatewayIntFromEnv(key string) int {
 	}
 	parsed, err := strconv.Atoi(value)
 	if err != nil {
+		slog.Warn("invalid integer environment variable", "key", key, "err", err)
 		return 0
 	}
 	return parsed

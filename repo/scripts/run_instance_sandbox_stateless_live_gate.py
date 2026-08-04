@@ -110,11 +110,15 @@ def postgres_count(kubeconfig: str, table: str, tenant_id: str, key_column: str,
         fail("unsupported PostgreSQL evidence query")
     sql = (
         f"SELECT count(*) FROM {table} "
-        f"WHERE tenant_id='{tenant_id}'::uuid AND {key_column}='{key}';"
+        f"WHERE tenant_id=:'tenant_id'::uuid AND {key_column}=:'key';"
     )
     raw = run_kubectl(
         kubeconfig,
-        ["-n", "ani-system", "exec", "ani-postgres-0", "--", "psql", "-U", "ani", "-d", "ani", "-tAc", sql],
+        [
+            "-n", "ani-system", "exec", "ani-postgres-0", "--", "psql",
+            "-U", "ani", "-d", "ani", "-v", f"tenant_id={tenant_id}",
+            "-v", f"key={key}", "-tAc", sql,
+        ],
     ).strip()
     try:
         return int(raw)

@@ -86,6 +86,12 @@ help:
 	@echo "    make validate-object-store-live-gate 校验 Sprint 13 S05 object-store MinIO live gate 契约"
 	@echo "    make validate-vector-store-live-gate 校验 Sprint 13 S06 vector-store Milvus live gate 契约"
 	@echo "    make validate-instance-observability-live-gate 校验 Sprint 13 S07 instance observability Prometheus live gate 契约"
+	@echo "    make validate-instance-management-live-gate 校验 INSTANCE-MANAGEMENT-LIVE-GATE-A VM 管理 live gate 契约"
+	@echo "    make validate-sandbox-live-gate 校验 INSTANCE-SANDBOX-LIVE-GATE-A sandbox live gate 契约"
+	@echo "    make validate-async-task-store 校验 ASYNC-TASK-STORE-A PostgreSQL 持久化契约"
+	@echo "    make validate-instance-sandbox-stateless-live-gate 校验 INSTANCE-SANDBOX-STATELESS-LIVE-GATE-A sandbox runtime 重启契约"
+	@echo "    make validate-instance-sandbox-checkpoint-live-gate 校验 INSTANCE-SANDBOX-CHECKPOINT-LIVE-GATE-A sandbox checkpoint 真实契约"
+	@echo "    make validate-instance-reconcile-provider-loss-live-gate 校验 INSTANCE-RECONCILE-PROVIDER-404-A provider-loss reconcile live gate 契约"
 	@echo "    make validate-instance-orchestration-live-gate 校验 INSTANCE-ORCHESTRATION-A Container 编排 live gate 契约"
 	@echo "    make validate-sprint13-b-track-production-shape 校验 Sprint 13 S01-S04/S05-S07 B轨生产形态验收标准"
 	@echo "    make validate-resilience-faultinjection-live-gate 校验 Sprint 14 R-P1-5 resilience fault-injection local gate"
@@ -622,11 +628,14 @@ validate-async-task-store:
 	@echo "→ 校验 Core AsyncTask PostgreSQL 持久化契约..."
 	python3 scripts/validate_async_task_store.py
 	python3 scripts/validate_async_task_store_test.py
+	@echo "✅ ASYNC-TASK-STORE-A async task persistence contract valid"
 
 validate-instance-sandbox-stateless-live-gate:
 	@echo "→ 校验 Sandbox Runtime 重启门禁契约..."
 	python3 scripts/validate_instance_sandbox_stateless_live_gate.py
 	python3 scripts/validate_instance_sandbox_stateless_live_gate_test.py
+	python3 scripts/run_instance_sandbox_stateless_live_gate_test.py
+	@echo "✅ INSTANCE-SANDBOX-STATELESS-LIVE-GATE-A sandbox runtime restart contract valid"
 
 validate-instance-sandbox-checkpoint-live-gate:
 	@echo "→ 校验 Sandbox Checkpoint 真实门禁契约..."

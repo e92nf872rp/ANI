@@ -65,13 +65,13 @@ func validateStorageControlPlaneSchema(ctx context.Context, store ports.Metadata
 		return fmt.Errorf("%w: metadata store is required", ports.ErrNotConfigured)
 	}
 	if err := store.Ping(ctx); err != nil {
-		return fmt.Errorf("%w: storage control-plane database unreachable: %v", ports.ErrUnavailable, err)
+		return fmt.Errorf("%w: storage control-plane database unreachable: %w", ports.ErrUnavailable, err)
 	}
 	return store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
 		for _, table := range storageControlPlaneRequiredTables {
 			var reg *string
 			if err := tx.QueryRow(ctx, `SELECT to_regclass($1)::text`, "public."+table).Scan(&reg); err != nil {
-				return fmt.Errorf("%w: inspect storage control-plane table %s: %v", ports.ErrUnavailable, table, err)
+				return fmt.Errorf("%w: inspect storage control-plane table %s: %w", ports.ErrUnavailable, table, err)
 			}
 			if reg == nil || strings.TrimSpace(*reg) == "" {
 				return fmt.Errorf("%w: storage control-plane schema incomplete: missing table %s", ports.ErrNotConfigured, table)

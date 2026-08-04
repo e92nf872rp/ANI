@@ -88,19 +88,21 @@ func (e *KubernetesLifecycleExecutor) Apply(ctx context.Context, request ports.W
 
 func (e *KubernetesLifecycleExecutor) deleteResources(ctx context.Context, record ports.WorkloadInstanceRecord) error {
 	namespace := tenantNamespace(record.TenantID)
+	var deleteErrors []error
 	for _, ref := range record.ResourceRefs {
 		// Each ref encodes its own provider (kubevirt/... vs kubernetes/Secret/...).
 		// Do not force record.Provider onto every ref or mixed-provider cleanup fails.
 		resource, err := resourceFromRef("", namespace, ref)
 		if err != nil {
-			return err
+			deleteErrors = append(deleteErrors, err)
+			continue
 		}
 		_, status, err := e.client.Do(ctx, http.MethodDelete, e.client.resourceURL(resource, ""), "", nil)
 		if err != nil && status != http.StatusNotFound {
-			return err
+			deleteErrors = append(deleteErrors, err)
 		}
 	}
-	return nil
+	return errors.Join(deleteErrors...)
 }
 
 func (e *KubernetesLifecycleExecutor) execute(ctx context.Context, action ports.WorkloadLifecycleAction, resource kubernetesResource) error {

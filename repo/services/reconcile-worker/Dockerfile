@@ -8,7 +8,7 @@ ENV GOWORK=off
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     cd services/reconcile-worker && \
-    CGO_ENABLED=0 go build -ldflags "-s -w" -o /out/reconcile-worker .
+    CGO_ENABLED=0 go build -tags stdjson -ldflags "-s -w" -o /out/reconcile-worker .
 
 FROM alpine:3.20
 

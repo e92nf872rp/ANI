@@ -25,15 +25,17 @@ func NewLocalAsyncTaskStore() *LocalAsyncTaskStore {
 }
 
 func (s *LocalAsyncTaskStore) Create(_ context.Context, record ports.AsyncTaskRecord) (ports.AsyncTaskRecord, bool, error) {
-	if err := validateAsyncTaskRecord(record); err != nil {
+	if err := validateAsyncTaskCreate(record); err != nil {
 		return ports.AsyncTaskRecord{}, false, err
 	}
 	if record.ID == "" {
 		record.ID = uuid.NewString()
-	} else if _, err := uuid.Parse(record.ID); err != nil {
-		return ports.AsyncTaskRecord{}, false, fmt.Errorf("%w: task ID must be UUID", ports.ErrInvalid)
 	}
 	normalizeAsyncTaskRecord(&record)
+	cloned, err := cloneAsyncTaskRecord(record)
+	if err != nil {
+		return ports.AsyncTaskRecord{}, false, err
+	}
 	key := record.TenantID + "\x00" + record.IdempotencyKey
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -42,11 +44,13 @@ func (s *LocalAsyncTaskStore) Create(_ context.Context, record ports.AsyncTaskRe
 		if existing.TaskType != record.TaskType || existing.ResourceType != record.ResourceType || existing.ResourceID != record.ResourceID {
 			return ports.AsyncTaskRecord{}, false, fmt.Errorf("%w: idempotency key reused for different task", ports.ErrConflict)
 		}
-		return cloneAsyncTaskRecord(existing), true, nil
+		clonedExisting, cloneErr := cloneAsyncTaskRecord(existing)
+		return clonedExisting, true, cloneErr
 	}
 	s.byKey[key] = record.ID
-	s.byID[record.TenantID+"\x00"+record.ID] = cloneAsyncTaskRecord(record)
-	return cloneAsyncTaskRecord(record), false, nil
+	s.byID[record.TenantID+"\x00"+record.ID] = cloned
+	created, err := cloneAsyncTaskRecord(cloned)
+	return created, false, err
 }
 
 func (s *LocalAsyncTaskStore) Get(_ context.Context, tenantID, taskID string) (ports.AsyncTaskRecord, error) {
@@ -56,12 +60,16 @@ func (s *LocalAsyncTaskStore) Get(_ context.Context, tenantID, taskID string) (p
 	if !ok {
 		return ports.AsyncTaskRecord{}, ports.ErrNotFound
 	}
-	return cloneAsyncTaskRecord(record), nil
+	return cloneAsyncTaskRecord(record)
 }
 
-func (s *LocalAsyncTaskStore) Update(ctx context.Context, update ports.AsyncTaskUpdate) (ports.AsyncTaskRecord, error) {
-	if strings.TrimSpace(update.TenantID) == "" || strings.TrimSpace(update.ID) == "" || !validAsyncTaskStatus(update.Status) {
-		return ports.AsyncTaskRecord{}, fmt.Errorf("%w: tenant, task ID, and valid status are required", ports.ErrInvalid)
+func (s *LocalAsyncTaskStore) Update(_ context.Context, update ports.AsyncTaskUpdate) (ports.AsyncTaskRecord, error) {
+	if err := validateAsyncTaskUpdate(update); err != nil {
+		return ports.AsyncTaskRecord{}, err
+	}
+	result, err := cloneAnyMap(update.Result)
+	if err != nil {
+		return ports.AsyncTaskRecord{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -71,11 +79,10 @@ func (s *LocalAsyncTaskStore) Update(ctx context.Context, update ports.AsyncTask
 		return ports.AsyncTaskRecord{}, ports.ErrNotFound
 	}
 	record.Status, record.AttemptCount, record.ProgressPct = update.Status, update.AttemptCount, update.ProgressPct
-	record.Result, record.ErrorMessage = cloneAnyMap(update.Result), update.ErrorMessage
+	record.Result, record.ErrorMessage = result, update.ErrorMessage
 	record.DeadLetterAt, record.CompletedAt = update.DeadLetterAt, update.CompletedAt
 	s.byID[key] = record
-	_ = ctx
-	return cloneAsyncTaskRecord(record), nil
+	return cloneAsyncTaskRecord(record)
 }
 
 type MetadataAsyncTaskStore struct {
@@ -91,7 +98,7 @@ func (s *MetadataAsyncTaskStore) Create(ctx context.Context, record ports.AsyncT
 	if s.store == nil {
 		return ports.AsyncTaskRecord{}, false, ports.ErrNotConfigured
 	}
-	if err := validateAsyncTaskRecord(record); err != nil {
+	if err := validateAsyncTaskCreate(record); err != nil {
 		return ports.AsyncTaskRecord{}, false, err
 	}
 	if _, err := uuid.Parse(record.TenantID); err != nil {
@@ -105,9 +112,9 @@ func (s *MetadataAsyncTaskStore) Create(ctx context.Context, record ports.AsyncT
 	if err != nil {
 		return ports.AsyncTaskRecord{}, false, fmt.Errorf("marshal async task result: %w", err)
 	}
-	resourceID := ""
-	if parsed, parseErr := uuid.Parse(record.ResourceID); parseErr == nil {
-		resourceID = parsed.String()
+	resourceID := record.ResourceID
+	if resourceID != "" {
+		resourceID = uuid.MustParse(resourceID).String()
 	}
 	created := ports.AsyncTaskRecord{}
 	replay := false
@@ -170,8 +177,11 @@ func (s *MetadataAsyncTaskStore) Update(ctx context.Context, update ports.AsyncT
 	if s.store == nil {
 		return ports.AsyncTaskRecord{}, ports.ErrNotConfigured
 	}
-	if !validAsyncTaskStatus(update.Status) || update.ProgressPct < 0 || update.ProgressPct > 100 {
-		return ports.AsyncTaskRecord{}, fmt.Errorf("%w: invalid async task update", ports.ErrInvalid)
+	if err := validateAsyncTaskUpdate(update); err != nil {
+		return ports.AsyncTaskRecord{}, err
+	}
+	if _, err := uuid.Parse(update.TenantID); err != nil {
+		return ports.AsyncTaskRecord{}, fmt.Errorf("%w: tenant ID must be UUID", ports.ErrInvalid)
 	}
 	resultJSON, err := json.Marshal(update.Result)
 	if err != nil {
@@ -229,11 +239,37 @@ func scanAsyncTask(row ports.Row, record *ports.AsyncTaskRecord) error {
 	return nil
 }
 
-func validateAsyncTaskRecord(record ports.AsyncTaskRecord) error {
+func validateAsyncTaskCreate(record ports.AsyncTaskRecord) error {
 	if strings.TrimSpace(record.TenantID) == "" || strings.TrimSpace(record.IdempotencyKey) == "" || strings.TrimSpace(record.TaskType) == "" || !validAsyncTaskStatus(record.Status) {
 		return fmt.Errorf("%w: idempotency key, task type, and valid status are required", ports.ErrInvalid)
 	}
+	if record.ID != "" {
+		if _, err := uuid.Parse(record.ID); err != nil {
+			return fmt.Errorf("%w: task ID must be UUID", ports.ErrInvalid)
+		}
+	}
+	if record.ResourceID != "" {
+		if _, err := uuid.Parse(record.ResourceID); err != nil {
+			return fmt.Errorf("%w: resource ID must be UUID", ports.ErrInvalid)
+		}
+	}
 	if record.ProgressPct < 0 || record.ProgressPct > 100 {
+		return fmt.Errorf("%w: progress must be between 0 and 100", ports.ErrInvalid)
+	}
+	return nil
+}
+
+func validateAsyncTaskUpdate(update ports.AsyncTaskUpdate) error {
+	if strings.TrimSpace(update.TenantID) == "" {
+		return fmt.Errorf("%w: tenant ID is required", ports.ErrInvalid)
+	}
+	if _, err := uuid.Parse(update.ID); err != nil {
+		return fmt.Errorf("%w: task ID must be UUID", ports.ErrInvalid)
+	}
+	if !validAsyncTaskStatus(update.Status) {
+		return fmt.Errorf("%w: valid status is required", ports.ErrInvalid)
+	}
+	if update.ProgressPct < 0 || update.ProgressPct > 100 {
 		return fmt.Errorf("%w: progress must be between 0 and 100", ports.ErrInvalid)
 	}
 	return nil
@@ -263,19 +299,31 @@ func normalizeAsyncTaskRecord(record *ports.AsyncTaskRecord) {
 	}
 }
 
-func cloneAsyncTaskRecord(record ports.AsyncTaskRecord) ports.AsyncTaskRecord {
-	record.Result = cloneAnyMap(record.Result)
-	return record
+func cloneAsyncTaskRecord(record ports.AsyncTaskRecord) (ports.AsyncTaskRecord, error) {
+	result, err := cloneAnyMap(record.Result)
+	if err != nil {
+		return ports.AsyncTaskRecord{}, err
+	}
+	record.Result = result
+	return record, nil
 }
 
-func cloneAnyMap(value map[string]any) map[string]any {
+func cloneAnyMap(value map[string]any) (map[string]any, error) {
 	if value == nil {
-		return map[string]any{}
+		return map[string]any{}, nil
 	}
-	data, _ := json.Marshal(value)
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("clone async task result: %w", err)
+	}
 	var clone map[string]any
-	_ = json.Unmarshal(data, &clone)
-	return clone
+	if err := json.Unmarshal(data, &clone); err != nil {
+		return nil, fmt.Errorf("clone async task result: %w", err)
+	}
+	if clone == nil {
+		clone = map[string]any{}
+	}
+	return clone, nil
 }
 
 func nullTime(value time.Time) any {

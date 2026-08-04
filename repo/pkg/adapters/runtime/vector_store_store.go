@@ -90,7 +90,7 @@ func (s *MetadataVectorStoreStore) Upsert(ctx context.Context, record ports.Vect
 			return fmt.Errorf("upsert vector store: %w", err)
 		}
 		if record.KnowledgeBaseRef.Name != "" || record.KnowledgeBaseRef.ID != "" {
-			return upsertVectorStoreKBLink(ctx, tx, record.TenantID, record.StoreID, record.KnowledgeBaseRef)
+			return upsertVectorStoreKBLink(ctx, tx, record.TenantID, record.StoreID, record.KnowledgeBaseRef, s.now().UTC())
 		}
 		return nil
 	})
@@ -199,7 +199,7 @@ func (s *MetadataVectorStoreStore) SetKnowledgeBaseLink(ctx context.Context, ten
 		return ports.ErrNotConfigured
 	}
 	return s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
-		return upsertVectorStoreKBLink(ctx, tx, tenantID, storeID, ref)
+		return upsertVectorStoreKBLink(ctx, tx, tenantID, storeID, ref, s.now().UTC())
 	})
 }
 
@@ -279,8 +279,7 @@ func loadVectorStoreKBLink(ctx context.Context, tx ports.MetadataTx, tenantID st
 	return ref, nil
 }
 
-func upsertVectorStoreKBLink(ctx context.Context, tx ports.MetadataTx, tenantID string, storeID string, ref ports.VectorStoreKnowledgeBaseRef) error {
-	now := time.Now().UTC()
+func upsertVectorStoreKBLink(ctx context.Context, tx ports.MetadataTx, tenantID string, storeID string, ref ports.VectorStoreKnowledgeBaseRef, now time.Time) error {
 	kbID := firstNetworkNonEmpty(strings.TrimSpace(ref.ID), strings.TrimSpace(ref.Name))
 	if kbID == "" {
 		return fmt.Errorf("%w: knowledge_base_ref id or name is required", ports.ErrInvalid)

@@ -15,6 +15,7 @@ type stubControlPlaneMetadataStore struct {
 	mu           sync.Mutex
 	missingTable string
 	pingErr      error
+	queryErr     error
 	volumes      map[string]ports.StorageVolumeRecord
 	buckets      map[string]ports.StorageBucketRecord
 	vectors      map[string]ports.VectorStoreRecord
@@ -113,6 +114,9 @@ func (t *stubControlPlaneMetadataTx) Query(context.Context, string, ...any) (por
 func (t *stubControlPlaneMetadataTx) QueryRow(_ context.Context, sql string, args ...any) ports.Row {
 	lowered := strings.ToLower(sql)
 	if strings.Contains(lowered, "to_regclass") {
+		if t.store.queryErr != nil {
+			return stubControlPlaneRow{err: t.store.queryErr}
+		}
 		table := ""
 		if len(args) > 0 {
 			table, _ = args[0].(string)
@@ -271,6 +275,24 @@ func TestValidateStorageControlPlaneSchemaRejectsMissingTable(t *testing.T) {
 	err := validateStorageControlPlaneSchema(context.Background(), store)
 	if err == nil || !strings.Contains(err.Error(), "vector_stores") {
 		t.Fatalf("validateStorageControlPlaneSchema() error = %v, want missing vector_stores", err)
+	}
+}
+
+func TestValidateStorageControlPlaneSchemaPreservesUnderlyingErrors(t *testing.T) {
+	pingErr := errors.New("ping failed")
+	store := newStubControlPlaneMetadataStore()
+	store.pingErr = pingErr
+	err := validateStorageControlPlaneSchema(context.Background(), store)
+	if !errors.Is(err, ports.ErrUnavailable) || !errors.Is(err, pingErr) {
+		t.Fatalf("ping error = %v, want ErrUnavailable and underlying error", err)
+	}
+
+	queryErr := errors.New("query failed")
+	store = newStubControlPlaneMetadataStore()
+	store.queryErr = queryErr
+	err = validateStorageControlPlaneSchema(context.Background(), store)
+	if !errors.Is(err, ports.ErrUnavailable) || !errors.Is(err, queryErr) {
+		t.Fatalf("query error = %v, want ErrUnavailable and underlying error", err)
 	}
 }
 
