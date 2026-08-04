@@ -2,7 +2,6 @@
 
 > 基于 `prd-console-instance-observability.md` 当前实现现状，针对三个未闭环问题给出可行方案。
 > 生成日期：2026-07-17
-> 状态：待人工审核
 
 ---
 

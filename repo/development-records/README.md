@@ -102,6 +102,12 @@
 |---|---|---|
 | EMAIL-NOTIFY | 邮件通知 API + BOSS 发信设置页：9 个 Core endpoint（SMTP CRUD / 收件人 CRUD / 事件订阅批量更新 / 测试发送）；local 内存 adapter；BOSS 前端 SMTP 表单 + 收件人表格 + 订阅开关 + 测试发送；48 store 测试 + 34 handler 测试；RequestID store 层 UUID 生成 + handler 透传 | email-notify.md |
 
+### NATS 接入（2026-07）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| NATS-INTEGRATION-A | NATS JetStream 适配器健壮性 + 示例 consumer + 集成测试：Issue #001-#009 覆盖 ports 契约扩展（AckWait/MaxDeliver/Headers）、ANI_EVENTS stream 改 InterestPolicy、Publish 写入 NATS headers + 注入 logger、Subscribe 业务层 Ack/Nak + panic recover + AckWait/MaxDeliver 透传、`message.Headers()` 实现 + 内部 jetStream 接口、metering 示例 consumer、adapter 单元测试（fake/mock JetStream，9 场景 65.3% coverage）、adapter 集成测试（7 场景连真实 NATS）+ Consumer 端到端集成测试（2 场景）、task 流示例 consumer + 集成测试（2 场景，WorkQueuePolicy 语义验证）；`//go:build integration` 隔离集成测试不影响默认 `make test`；**v3 修订**（基于 `plan-nats-integration-v3.md`）：每条消息 handler 改用 `context.Background()` 独立上下文避免订阅 ctx 取消中断正在处理的消息、adapter 根据 handler 返回值统一 ack/nak（`nil→Ack`/`error→Nak`/`panic→Nak`）、从 `ports.Message` 接口去掉 `Ack/Nack` 方法编译期禁止业务显式确认、毒丸消息业务侧记 error 后返回 nil 吞错误让 adapter Ack 跳过、两 service consumer 与 adapter 单测/集成测试同步改造、单测不追踪 ack/nak 靠集成测试覆盖；**v4 修订**（基于 `plan-nats-integration-v4.md`）：Subscribe 签名删除 ctx 死参数（v3 已确认不透传给 handler、NATS 异步回调不消费）、consumer `Start()` 同步删 ctx `Stop(ctx)` 保留（Drain 需超时控制）、三处 `_ = msg.Nak()`/`_ = msg.Ack()` 忽略返回值改为接住 error 打 Error 日志（Ack/Nak 调用本身失败不再静默）、删除 `TestHandlerBackgroundCtx` 用例（前提不存在了）；详见 `nats-integration-a.md` | nats-integration-a.md |
+
 ### M2.1 Knowledge Base Platform Contract（2026-07）
 
 | 批次 | 内容摘要 | 文件 |

@@ -210,7 +210,7 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 	)
 	return Capabilities{
 		Metadata:             metadata,
-		MessageBus:           natsadapter.NewMessageBus(js),
+		MessageBus:           natsadapter.NewMessageBus(js, slog.Default()),
 		Cache:                redisadapter.NewCacheStore(redisClient),
 		KubernetesAPI:        kubeClient,
 		ObjectStore:          objectStore,
