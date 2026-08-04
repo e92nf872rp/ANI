@@ -3895,7 +3895,17 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description 客户端生成UUID，防重复提交
+                     */
+                    idempotency_key: string;
+                };
+            };
+        };
         responses: {
             /** @description 套餐已发布 */
             200: {
@@ -3921,7 +3931,17 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description 客户端生成UUID，防重复提交
+                     */
+                    idempotency_key: string;
+                };
+            };
+        };
         responses: {
             /** @description 套餐已禁用 */
             200: {

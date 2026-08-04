@@ -2186,6 +2186,15 @@ paths:
       tags: [TenantPlans]
       parameters:
         - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idempotency_key]
+              properties:
+                idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
       responses:
         "200":
           description: 套餐已发布
@@ -2204,6 +2213,15 @@ paths:
       tags: [TenantPlans]
       parameters:
         - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idempotency_key]
+              properties:
+                idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
       responses:
         "200":
           description: 套餐已禁用
