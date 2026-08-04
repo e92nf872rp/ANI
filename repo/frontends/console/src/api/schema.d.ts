@@ -3889,23 +3889,16 @@ export interface operations {
     activateTenantPlan: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 幂等键 */
+                "Idempotency-Key": string;
+            };
             path: {
                 planId: string;
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /**
-                     * Format: uuid
-                     * @description 客户端生成UUID，防重复提交
-                     */
-                    idempotency_key: string;
-                };
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description 套餐已发布 */
             200: {
@@ -3925,23 +3918,16 @@ export interface operations {
     disableTenantPlan: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 幂等键 */
+                "Idempotency-Key": string;
+            };
             path: {
                 planId: string;
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /**
-                     * Format: uuid
-                     * @description 客户端生成UUID，防重复提交
-                     */
-                    idempotency_key: string;
-                };
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description 套餐已禁用 */
             200: {
