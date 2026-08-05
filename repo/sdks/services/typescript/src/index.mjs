@@ -251,10 +251,13 @@ export const idempotencyOperations = [
   "createSandbox",
   "patchSandbox",
   "extendSandbox",
+  "createTenantPlan",
+  "updateTenantPlanQuotaLimits",
   "inviteTenantMember",
   "updateTenantRole",
   "updateSsoConfig",
-  "createWebhook"
+  "createWebhook",
+  "bindTenantPlan"
 ];
 export const cursorPaginationOperations = [
   "listGpuContainers",

@@ -255,10 +255,13 @@ IDEMPOTENCY_OPERATIONS = [
     "createSandbox",
     "patchSandbox",
     "extendSandbox",
+    "createTenantPlan",
+    "updateTenantPlanQuotaLimits",
     "inviteTenantMember",
     "updateTenantRole",
     "updateSsoConfig",
-    "createWebhook"
+    "createWebhook",
+    "bindTenantPlan"
 ]
 CURSOR_PAGINATION_OPERATIONS = [
     "listGpuContainers",

@@ -266,10 +266,13 @@ var IdempotencyOperations = []string{
 	"createSandbox",
 	"patchSandbox",
 	"extendSandbox",
+	"createTenantPlan",
+	"updateTenantPlanQuotaLimits",
 	"inviteTenantMember",
 	"updateTenantRole",
 	"updateSsoConfig",
 	"createWebhook",
+	"bindTenantPlan",
 }
 var CursorPaginationOperations = []string{
 	"listGpuContainers",

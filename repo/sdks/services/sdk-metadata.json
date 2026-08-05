@@ -553,10 +553,13 @@
     "createSandbox",
     "patchSandbox",
     "extendSandbox",
+    "createTenantPlan",
+    "updateTenantPlanQuotaLimits",
     "inviteTenantMember",
     "updateTenantRole",
     "updateSsoConfig",
-    "createWebhook"
+    "createWebhook",
+    "bindTenantPlan"
   ],
   "cursorPaginationOperations": [
     "listGpuContainers",

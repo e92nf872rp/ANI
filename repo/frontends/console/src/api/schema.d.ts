@@ -1758,6 +1758,11 @@ export interface components {
             page_size: number;
         };
         CreateTenantPlanRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
             /** @description 套餐代码 */
             code: string;
             name: string;
@@ -1790,9 +1795,19 @@ export interface components {
             items: components["schemas"]["PlanQuotaLimitView"][];
         };
         UpdateQuotaLimitsRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
             items: components["schemas"]["PlanQuotaLimitInput"][];
         };
         BindPlanRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
             /** Format: uuid */
             plan_id: string;
         };
@@ -3747,10 +3762,7 @@ export interface operations {
     createTenantPlan: {
         parameters: {
             query?: never;
-            header: {
-                /** @description 幂等键 */
-                "Idempotency-Key": string;
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
@@ -3855,10 +3867,7 @@ export interface operations {
     updateTenantPlanQuotaLimits: {
         parameters: {
             query?: never;
-            header: {
-                /** @description 幂等键 */
-                "Idempotency-Key": string;
-            };
+            header?: never;
             path: {
                 planId: string;
             };
@@ -3889,16 +3898,23 @@ export interface operations {
     activateTenantPlan: {
         parameters: {
             query?: never;
-            header: {
-                /** @description 幂等键 */
-                "Idempotency-Key": string;
-            };
+            header?: never;
             path: {
                 planId: string;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description 客户端生成UUID，防重复提交
+                     */
+                    idempotency_key: string;
+                };
+            };
+        };
         responses: {
             /** @description 套餐已发布 */
             200: {
@@ -3918,16 +3934,23 @@ export interface operations {
     disableTenantPlan: {
         parameters: {
             query?: never;
-            header: {
-                /** @description 幂等键 */
-                "Idempotency-Key": string;
-            };
+            header?: never;
             path: {
                 planId: string;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description 客户端生成UUID，防重复提交
+                     */
+                    idempotency_key: string;
+                };
+            };
+        };
         responses: {
             /** @description 套餐已禁用 */
             200: {
@@ -4003,10 +4026,7 @@ export interface operations {
     bindTenantPlan: {
         parameters: {
             query?: never;
-            header: {
-                /** @description 幂等键 */
-                "Idempotency-Key": string;
-            };
+            header?: never;
             path: {
                 tenantId: string;
             };

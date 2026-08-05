@@ -735,8 +735,9 @@ components:
 
     CreateTenantPlanRequest:
       type: object
-      required: [code, name]
+      required: [idempotency_key, code, name]
       properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
         code:         { type: string, pattern: '^[a-z0-9-]{3,40}$', description: "套餐代码" }
         name:         { type: string, minLength: 1, maxLength: 64 }
         description:  { type: string, maxLength: 512 }
@@ -769,8 +770,9 @@ components:
 
     UpdateQuotaLimitsRequest:
       type: object
-      required: [items]
+      required: [idempotency_key, items]
       properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
         items:
           type: array
           minItems: 1
@@ -778,8 +780,9 @@ components:
 
     BindPlanRequest:
       type: object
-      required: [plan_id]
+      required: [idempotency_key, plan_id]
       properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
         plan_id: { type: string, format: uuid }
 
     BoundTenant:
@@ -2087,8 +2090,6 @@ paths:
       operationId: createTenantPlan
       summary: 创建套餐
       tags: [TenantPlans]
-      parameters:
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid }, description: "幂等键" }
       requestBody:
         required: true
         content:
@@ -2161,7 +2162,6 @@ paths:
       tags: [TenantPlans]
       parameters:
         - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid }, description: "幂等键" }
       requestBody:
         required: true
         content:
@@ -2186,7 +2186,15 @@ paths:
       tags: [TenantPlans]
       parameters:
         - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid }, description: "幂等键" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idempotency_key]
+              properties:
+                idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
       responses:
         "200":
           description: 套餐已发布
@@ -2205,7 +2213,15 @@ paths:
       tags: [TenantPlans]
       parameters:
         - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid }, description: "幂等键" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idempotency_key]
+              properties:
+                idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
       responses:
         "200":
           description: 套餐已禁用
@@ -2262,7 +2278,6 @@ paths:
       tags: [TenantPlans]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid }, description: "幂等键" }
       requestBody:
         required: true
         content:

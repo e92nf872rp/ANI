@@ -273,10 +273,13 @@ public final class ApiClient {
         "createSandbox",
         "patchSandbox",
         "extendSandbox",
+        "createTenantPlan",
+        "updateTenantPlanQuotaLimits",
         "inviteTenantMember",
         "updateTenantRole",
         "updateSsoConfig",
-        "createWebhook"
+        "createWebhook",
+        "bindTenantPlan"
     ));
     public static final List<String> CURSOR_PAGINATION_OPERATIONS = Collections.unmodifiableList(Arrays.asList(
         "listGpuContainers",
