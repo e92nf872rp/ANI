@@ -438,6 +438,157 @@ class OpenAPISpecValidatorTest(unittest.TestCase):
         ):
             self.assertIn(schema_name, schemas)
 
+    def test_network_p0_contract_adds_fields_and_lb_subresources(self) -> None:
+        """NETWORK-P0-CONTRACT-A / C1: additive network fields + LB child CRUD paths."""
+        spec = yaml.safe_load((ROOT / "api/openapi/v1.yaml").read_text(encoding="utf-8"))
+        schemas = spec["components"]["schemas"]
+        paths = spec["paths"]
+
+        self.assertIn("description", schemas["CreateNetworkVPCRequest"]["properties"])
+        self.assertIn("description", schemas["NetworkVPC"]["properties"])
+        self.assertIn("subnet_count", schemas["NetworkVPC"]["properties"])
+        self.assertNotIn("subnet_count", schemas["CreateNetworkVPCRequest"]["properties"])
+
+        self.assertIn("zone", schemas["CreateNetworkSubnetRequest"]["properties"])
+        self.assertIn("zone", schemas["NetworkSubnet"]["properties"])
+        self.assertIn("available_ip_count", schemas["NetworkSubnet"]["properties"])
+        self.assertNotIn("available_ip_count", schemas["CreateNetworkSubnetRequest"]["properties"])
+
+        security_group = schemas["NetworkSecurityGroup"]
+        self.assertIn("vpc_id", security_group["properties"])
+        self.assertNotIn("vpc_id", security_group["required"])
+        for field in ("rule_count", "bound_instance_count"):
+            self.assertIn(field, security_group["properties"])
+            self.assertTrue(security_group["properties"][field]["readOnly"])
+
+        create_security_group = schemas["CreateNetworkSecurityGroupRequest"]
+        self.assertIn("vpc_id", create_security_group["properties"])
+        self.assertNotIn("vpc_id", create_security_group["required"])
+        security_group_filters = {
+            param["name"]: param for param in paths["/networks/security-groups"]["get"]["parameters"]
+        }
+        self.assertIn("vpc_id", security_group_filters)
+
+        for schema_name in (
+            "NetworkSecurityGroupRule",
+            "NetworkSecurityGroupRuleResource",
+            "CreateNetworkSecurityGroupRuleRequest",
+            "UpdateNetworkSecurityGroupRuleRequest",
+        ):
+            props = schemas[schema_name]["properties"]
+            self.assertIn("cidr", props, msg=f"{schema_name} must keep historical cidr")
+            self.assertNotIn(
+                "peer_security_group_id",
+                props,
+                msg=f"{schema_name} must not prebuild peers absent from the 7.29 prototype",
+            )
+        for schema_name in (
+            "NetworkSecurityGroupRule",
+            "NetworkSecurityGroupRuleResource",
+            "CreateNetworkSecurityGroupRuleRequest",
+        ):
+            self.assertIn("cidr", schemas[schema_name]["required"])
+
+        self.assertIn("priority", schemas["NetworkRoute"]["properties"])
+        self.assertIn("priority", schemas["CreateNetworkRouteRequest"]["properties"])
+        self.assertEqual(
+            schemas["NetworkRoute"]["properties"]["next_hop_type"]["enum"],
+            ["gateway", "instance", "nat", "local"],
+        )
+        self.assertEqual(
+            schemas["CreateNetworkRouteRequest"]["properties"]["next_hop_type"]["enum"],
+            ["gateway", "instance", "nat"],
+        )
+        route_filters = {
+            param["name"]: param for param in paths["/networks/routes"]["get"]["parameters"]
+        }
+        self.assertEqual(
+            route_filters["next_hop_type"]["schema"]["enum"],
+            ["gateway", "instance", "nat", "local"],
+        )
+
+        lb = schemas["NetworkLoadBalancer"]["properties"]
+        self.assertIn("listener_count", lb)
+        self.assertIn("backend_count", lb)
+        self.assertEqual(
+            schemas["NetworkLoadBalancerBackendGroup"]["properties"]["algorithm"]["enum"],
+            ["round_robin", "weighted_round_robin"],
+        )
+        health = schemas["NetworkLoadBalancerHealthCheck"]
+        for field in (
+            "protocol",
+            "port",
+            "interval_seconds",
+            "timeout_seconds",
+            "healthy_threshold",
+            "unhealthy_threshold",
+        ):
+            self.assertIn(field, health["properties"])
+            self.assertIn(field, health["required"])
+        self.assertIn("path", health["properties"])
+        self.assertNotIn("expected_codes", health["properties"])
+
+        embedded_listener = schemas["NetworkLoadBalancerListener"]
+        self.assertIn("backend_group_id", embedded_listener["properties"])
+        self.assertNotIn("backend_group_id", embedded_listener["required"])
+        self.assertNotIn("certificate_id", embedded_listener["properties"])
+        self.assertNotIn("udp", embedded_listener["properties"]["protocol"]["enum"])
+
+        for schema_name in (
+            "NetworkLoadBalancerListenerResource",
+            "CreateNetworkLoadBalancerListenerRequest",
+        ):
+            listener = schemas[schema_name]
+            self.assertIn("backend_group_id", listener["properties"])
+            self.assertIn("backend_group_id", listener["required"])
+            self.assertNotIn("certificate_id", listener["properties"])
+            self.assertNotIn("udp", listener["properties"]["protocol"]["enum"])
+        update_listener = schemas["UpdateNetworkLoadBalancerListenerRequest"]
+        self.assertIn("backend_group_id", update_listener["properties"])
+        self.assertNotIn("backend_group_id", update_listener["required"])
+
+        member_health = schemas["NetworkLoadBalancerBackendMember"]["properties"]["health_status"]
+        self.assertEqual(member_health["enum"], ["unknown", "healthy", "unhealthy"])
+        self.assertTrue(member_health["readOnly"])
+        self.assertIn("health_status", schemas["NetworkLoadBalancerBackendMember"]["required"])
+
+        for path, methods in (
+            ("/networks/load-balancers/{load_balancer_id}/listeners", ("get", "post")),
+            (
+                "/networks/load-balancers/{load_balancer_id}/listeners/{listener_id}",
+                ("get", "put", "delete"),
+            ),
+            ("/networks/load-balancers/{load_balancer_id}/backend-groups", ("get", "post")),
+            (
+                "/networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}",
+                ("get", "put", "delete"),
+            ),
+            (
+                "/networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}/members",
+                ("get", "post"),
+            ),
+            (
+                "/networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}/members/{member_id}",
+                ("get", "put", "delete"),
+            ),
+        ):
+            self.assertIn(path, paths)
+            for method in methods:
+                self.assertIn(method, paths[path], msg=f"{method.upper()} {path}")
+                if method in ("post", "put"):
+                    operation = paths[path][method]
+                    request_schema = operation["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+                    request_name = request_schema.rsplit("/", 1)[-1]
+                    self.assertIn("idempotency_key", schemas[request_name]["properties"])
+                    self.assertIn("idempotency_key", schemas[request_name]["required"])
+                    self.assertIn("409", operation["responses"])
+
+        create_lb = paths["/networks/load-balancers"]["post"]
+        self.assertIn("422", create_lb["responses"])
+        create_lb_422 = create_lb["responses"]["422"]
+        create_lb_422_text = create_lb_422.get("description", "") + yaml.dump(create_lb_422)
+        self.assertIn("EIP", create_lb_422_text)
+
     def test_async_accepted_responses_declare_polling_location(self) -> None:
         spec = yaml.safe_load((ROOT / "api/openapi/v1.yaml").read_text(encoding="utf-8"))
         schemas = spec["components"]["schemas"]

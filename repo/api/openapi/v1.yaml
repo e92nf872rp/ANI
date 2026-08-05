@@ -1376,7 +1376,13 @@ components:
         id:         { type: string }
         tenant_id:  { type: string }
         name:       { type: string }
+        description: { type: string, nullable: true }
         cidr:       { type: string, example: "10.20.0.0/16" }
+        subnet_count:
+          type: integer
+          minimum: 0
+          readOnly: true
+          description: "该 VPC 下活跃子网数量；只读聚合字段。"
         state:      { $ref: '#/components/schemas/NetworkResourceState' }
         reason:     { type: string, nullable: true }
         dev_profile:
@@ -1394,6 +1400,12 @@ components:
         name:       { type: string }
         cidr:       { type: string, example: "10.20.1.0/24" }
         gateway:    { type: string, nullable: true }
+        zone:       { type: string, nullable: true, description: "可选可用区。" }
+        available_ip_count:
+          type: integer
+          minimum: 0
+          readOnly: true
+          description: "子网内当前可分配 IP 数量；只读聚合字段。"
         state:      { $ref: '#/components/schemas/NetworkResourceState' }
         reason:     { type: string, nullable: true }
         dev_profile:
@@ -1418,10 +1430,21 @@ components:
         id:          { type: string }
         tenant_id:   { type: string }
         name:        { type: string }
+        vpc_id:      { type: string, nullable: true, description: "所属 VPC；7.29 Console 创建流程提供，历史资源可为空。" }
         description: { type: string, nullable: true }
         rules:
           type: array
           items: { $ref: '#/components/schemas/NetworkSecurityGroupRule' }
+        rule_count:
+          type: integer
+          minimum: 0
+          readOnly: true
+          description: "安全组规则总数；只读聚合字段。"
+        bound_instance_count:
+          type: integer
+          minimum: 0
+          readOnly: true
+          description: "关联实例总数；只读聚合字段。"
         state:      { $ref: '#/components/schemas/NetworkResourceState' }
         reason:     { type: string, nullable: true }
         dev_profile:
@@ -1436,6 +1459,160 @@ components:
         protocol:    { type: string, enum: [http, https, tcp] }
         port:        { type: integer, minimum: 1, maximum: 65535 }
         target_port: { type: integer, minimum: 1, maximum: 65535 }
+        backend_group_id: { type: string, description: "关联后端组；历史 listeners 摘要可不返回。" }
+
+    NetworkLoadBalancerListenerResource:
+      type: object
+      required: [id, load_balancer_id, backend_group_id, protocol, port, target_port, created_at, updated_at]
+      properties:
+        id:               { type: string }
+        load_balancer_id: { type: string }
+        backend_group_id: { type: string }
+        protocol:         { type: string, enum: [http, https, tcp] }
+        port:             { type: integer, minimum: 1, maximum: 65535 }
+        target_port:      { type: integer, minimum: 1, maximum: 65535 }
+        description:      { type: string, nullable: true }
+        created_at:       { type: string, format: date-time }
+        updated_at:       { type: string, format: date-time }
+
+    NetworkLoadBalancerListenerListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/NetworkLoadBalancerListenerResource' } }
+        total: { type: integer }
+        next_cursor: { type: string, nullable: true }
+
+    CreateNetworkLoadBalancerListenerRequest:
+      type: object
+      required: [idempotency_key, backend_group_id, protocol, port, target_port]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
+        backend_group_id: { type: string }
+        protocol:        { type: string, enum: [http, https, tcp] }
+        port:            { type: integer, minimum: 1, maximum: 65535 }
+        target_port:     { type: integer, minimum: 1, maximum: 65535 }
+        description:     { type: string, nullable: true }
+
+    UpdateNetworkLoadBalancerListenerRequest:
+      type: object
+      required: [idempotency_key]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
+        backend_group_id: { type: string }
+        protocol:        { type: string, enum: [http, https, tcp] }
+        port:            { type: integer, minimum: 1, maximum: 65535 }
+        target_port:     { type: integer, minimum: 1, maximum: 65535 }
+        description:     { type: string, nullable: true }
+
+    NetworkLoadBalancerHealthCheck:
+      type: object
+      required: [protocol, port, interval_seconds, timeout_seconds, healthy_threshold, unhealthy_threshold]
+      properties:
+        protocol:            { type: string, enum: [http, https, tcp] }
+        port:                { type: integer, minimum: 1, maximum: 65535 }
+        path:                { type: string, nullable: true, description: "HTTP/HTTPS 健康检查路径；TCP 可为空。" }
+        interval_seconds:    { type: integer, minimum: 1 }
+        timeout_seconds:     { type: integer, minimum: 1 }
+        healthy_threshold:   { type: integer, minimum: 1 }
+        unhealthy_threshold: { type: integer, minimum: 1 }
+
+    NetworkLoadBalancerBackendGroup:
+      type: object
+      required: [id, load_balancer_id, name, algorithm, health_check, state, created_at, updated_at]
+      properties:
+        id:               { type: string }
+        load_balancer_id: { type: string }
+        name:             { type: string }
+        algorithm:        { type: string, enum: [round_robin, weighted_round_robin] }
+        health_check:     { $ref: '#/components/schemas/NetworkLoadBalancerHealthCheck' }
+        member_count:
+          type: integer
+          minimum: 0
+          readOnly: true
+          description: "后端组成员数量；只读聚合字段。"
+        state:            { $ref: '#/components/schemas/NetworkResourceState' }
+        reason:           { type: string, nullable: true }
+        created_at:       { type: string, format: date-time }
+        updated_at:       { type: string, format: date-time }
+
+    NetworkLoadBalancerBackendGroupListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/NetworkLoadBalancerBackendGroup' } }
+        total: { type: integer }
+        next_cursor: { type: string, nullable: true }
+
+    CreateNetworkLoadBalancerBackendGroupRequest:
+      type: object
+      required: [idempotency_key, name, algorithm, health_check]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
+        name:            { type: string, minLength: 1, maxLength: 128 }
+        algorithm:       { type: string, enum: [round_robin, weighted_round_robin] }
+        health_check:    { $ref: '#/components/schemas/NetworkLoadBalancerHealthCheck' }
+
+    UpdateNetworkLoadBalancerBackendGroupRequest:
+      type: object
+      required: [idempotency_key]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
+        name:            { type: string, minLength: 1, maxLength: 128 }
+        algorithm:       { type: string, enum: [round_robin, weighted_round_robin] }
+        health_check:    { $ref: '#/components/schemas/NetworkLoadBalancerHealthCheck' }
+
+    NetworkLoadBalancerBackendMemberTargetType:
+      type: string
+      enum: [instance, ip]
+
+    NetworkLoadBalancerBackendMember:
+      type: object
+      required: [id, backend_group_id, target_type, target, port, weight, health_status, state, created_at, updated_at]
+      properties:
+        id:               { type: string }
+        backend_group_id: { type: string }
+        target_type:      { $ref: '#/components/schemas/NetworkLoadBalancerBackendMemberTargetType' }
+        target:           { type: string, description: "instance_id 或 IP 地址。" }
+        port:             { type: integer, minimum: 1, maximum: 65535 }
+        weight:           { type: integer, minimum: 0, maximum: 1000, description: "weighted_round_robin 权重；round_robin 可忽略。" }
+        health_status:
+          type: string
+          enum: [unknown, healthy, unhealthy]
+          readOnly: true
+          description: "Provider 探活结果；与资源生命周期 state 分离。"
+        state:            { $ref: '#/components/schemas/NetworkResourceState' }
+        reason:           { type: string, nullable: true }
+        created_at:       { type: string, format: date-time }
+        updated_at:       { type: string, format: date-time }
+
+    NetworkLoadBalancerBackendMemberListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/NetworkLoadBalancerBackendMember' } }
+        total: { type: integer }
+        next_cursor: { type: string, nullable: true }
+
+    CreateNetworkLoadBalancerBackendMemberRequest:
+      type: object
+      required: [idempotency_key, target_type, target, port]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
+        target_type:     { $ref: '#/components/schemas/NetworkLoadBalancerBackendMemberTargetType' }
+        target:          { type: string }
+        port:            { type: integer, minimum: 1, maximum: 65535 }
+        weight:          { type: integer, minimum: 0, maximum: 1000, default: 100 }
+
+    UpdateNetworkLoadBalancerBackendMemberRequest:
+      type: object
+      required: [idempotency_key]
+      properties:
+        idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
+        target_type:     { $ref: '#/components/schemas/NetworkLoadBalancerBackendMemberTargetType' }
+        target:          { type: string }
+        port:            { type: integer, minimum: 1, maximum: 65535 }
+        weight:          { type: integer, minimum: 0, maximum: 1000 }
 
     NetworkLoadBalancer:
       type: object
@@ -1451,6 +1628,16 @@ components:
         listeners:
           type: array
           items: { $ref: '#/components/schemas/NetworkLoadBalancerListener' }
+        listener_count:
+          type: integer
+          minimum: 0
+          readOnly: true
+          description: "监听器数量；只读聚合字段。"
+        backend_count:
+          type: integer
+          minimum: 0
+          readOnly: true
+          description: "后端组成员总数量；只读聚合字段。"
         state:      { $ref: '#/components/schemas/NetworkResourceState' }
         reason:     { type: string, nullable: true }
         dev_profile:
@@ -1658,6 +1845,7 @@ components:
       properties:
         idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
         name: { type: string, minLength: 1, maxLength: 128 }
+        description: { type: string, nullable: true }
         cidr: { type: string, default: "10.0.0.0/16" }
 
     CreateNetworkSubnetRequest:
@@ -1669,6 +1857,7 @@ components:
         name:            { type: string, minLength: 1, maxLength: 128 }
         cidr:            { type: string, default: "10.0.1.0/24" }
         gateway:         { type: string, nullable: true }
+        zone:            { type: string, nullable: true, description: "可选可用区。" }
 
     CreateNetworkSecurityGroupRequest:
       type: object
@@ -1676,6 +1865,7 @@ components:
       properties:
         idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
         name:            { type: string, minLength: 1, maxLength: 128 }
+        vpc_id:          { type: string, nullable: true, description: "所属 VPC；7.29 Console 创建流程始终提供。" }
         description:     { type: string, nullable: true }
         rules:
           type: array
@@ -2637,8 +2827,12 @@ components:
         id:               { type: string }
         vpc_id:           { type: string }
         destination_cidr: { type: string }
-        next_hop_type:    { type: string, enum: [gateway, instance, nat] }
+        next_hop_type:
+          type: string
+          enum: [gateway, instance, nat, local]
+          description: "响应可包含系统生成的 local 路由；客户端不得通过 create 创建 local。"
         next_hop_id:      { type: string }
+        priority:         { type: integer, minimum: 1, maximum: 32766, nullable: true, description: "路由优先级，数值越小优先级越高。" }
         description:      { type: string, nullable: true }
         created_at:       { type: string, format: date-time }
         dev_profile:
@@ -2655,12 +2849,14 @@ components:
     CreateNetworkRouteRequest:
       type: object
       required: [idempotency_key, vpc_id, destination_cidr, next_hop_type, next_hop_id]
+      description: "create 禁止 next_hop_type=local；local 路由仅由系统返回。"
       properties:
         idempotency_key:  { type: string }
         vpc_id:           { type: string }
         destination_cidr: { type: string }
         next_hop_type:    { type: string, enum: [gateway, instance, nat] }
         next_hop_id:      { type: string }
+        priority:         { type: integer, minimum: 1, maximum: 32766, nullable: true, description: "路由优先级，数值越小优先级越高。" }
         description:      { type: string }
 
     VolumeSnapshotRecord:
@@ -4347,6 +4543,7 @@ paths:
       x-ani-rbac-scope: "scope:networks:read"
       parameters:
         - { name: name,   in: query, schema: { type: string }, description: "按安全组名称过滤；可选，服务端可做精确或前缀匹配。" }
+        - { name: vpc_id, in: query, schema: { type: string }, description: "按所属 VPC 过滤安全组。" }
         - { name: state,  in: query, schema: { $ref: '#/components/schemas/NetworkResourceState' }, description: "按安全组状态过滤。" }
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
@@ -4608,6 +4805,9 @@ paths:
     post:
       operationId: createNetworkLoadBalancer
       summary: 创建负载入口
+      description: |
+        scheme=public 且平台当前不具备 EIP 能力时返回 422（code=EIPNotAvailable）；
+        不新增虚假 EIP 占位资源。内网 VIP（scheme=internal）不受此限制。
       tags: [Networks]
       x-ani-rbac-scope: "scope:networks:create"
       requestBody:
@@ -4626,6 +4826,11 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
         "409": { $ref: '#/components/responses/Conflict' }
+        "422":
+          $ref: '#/components/responses/PreconditionFailed'
+          description: |
+            公网负载入口前置条件不满足。可能的 code：
+            - EIPNotAvailable: 当前环境无 EIP 能力，禁止创建 scheme=public 的负载入口
 
   /networks/load-balancers/{load_balancer_id}:
     get:
@@ -4662,6 +4867,323 @@ paths:
         "404": { $ref: '#/components/responses/NotFound' }
         "409": { $ref: '#/components/responses/Conflict' }
 
+  /networks/load-balancers/{load_balancer_id}/listeners:
+    get:
+      operationId: listNetworkLoadBalancerListeners
+      summary: 查询负载入口监听器列表
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:read"
+      parameters:
+        - { name: load_balancer_id, in: path, required: true, schema: { type: string } }
+        - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: 监听器列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkLoadBalancerListenerListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: createNetworkLoadBalancerListener
+      summary: 创建负载入口监听器
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:create"
+      parameters:
+        - { name: load_balancer_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateNetworkLoadBalancerListenerRequest' }
+      responses:
+        "201":
+          description: 监听器已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkLoadBalancerListenerResource' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /networks/load-balancers/{load_balancer_id}/listeners/{listener_id}:
+    get:
+      operationId: getNetworkLoadBalancerListener
+      summary: 查询负载入口监听器
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:read"
+      parameters:
+        - { name: load_balancer_id, in: path, required: true, schema: { type: string } }
+        - { name: listener_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 监听器
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkLoadBalancerListenerResource' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: updateNetworkLoadBalancerListener
+      summary: 更新负载入口监听器
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:create"
+      parameters:
+        - { name: load_balancer_id, in: path, required: true, schema: { type: string } }
+        - { name: listener_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateNetworkLoadBalancerListenerRequest' }
+      responses:
+        "200":
+          description: 监听器已更新
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkLoadBalancerListenerResource' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+    delete:
+      operationId: deleteNetworkLoadBalancerListener
+      summary: 删除负载入口监听器
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:delete"
+      parameters:
+        - { name: load_balancer_id, in: path, required: true, schema: { type: string } }
+        - { name: listener_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 监听器已删除
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkLoadBalancerListenerResource' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /networks/load-balancers/{load_balancer_id}/backend-groups:
+    get:
+      operationId: listNetworkLoadBalancerBackendGroups
+      summary: 查询负载入口后端组列表
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:read"
+      parameters:
+        - { name: load_balancer_id, in: path, required: true, schema: { type: string } }
+        - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: 后端组列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkLoadBalancerBackendGroupListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: createNetworkLoadBalancerBackendGroup
+      summary: 创建负载入口后端组
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:create"
+      parameters:
+        - { name: load_balancer_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateNetworkLoadBalancerBackendGroupRequest' }
+      responses:
+        "201":
+          description: 后端组已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkLoadBalancerBackendGroup' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}:
+    get:
+      operationId: getNetworkLoadBalancerBackendGroup
+      summary: 查询负载入口后端组
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:read"
+      parameters:
+        - { name: load_balancer_id, in: path, required: true, schema: { type: string } }
+        - { name: backend_group_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 后端组
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkLoadBalancerBackendGroup' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: updateNetworkLoadBalancerBackendGroup
+      summary: 更新负载入口后端组
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:create"
+      parameters:
+        - { name: load_balancer_id, in: path, required: true, schema: { type: string } }
+        - { name: backend_group_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateNetworkLoadBalancerBackendGroupRequest' }
+      responses:
+        "200":
+          description: 后端组已更新
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkLoadBalancerBackendGroup' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+    delete:
+      operationId: deleteNetworkLoadBalancerBackendGroup
+      summary: 删除负载入口后端组
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:delete"
+      parameters:
+        - { name: load_balancer_id, in: path, required: true, schema: { type: string } }
+        - { name: backend_group_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 后端组已删除
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkLoadBalancerBackendGroup' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}/members:
+    get:
+      operationId: listNetworkLoadBalancerBackendMembers
+      summary: 查询负载入口后端组成员列表
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:read"
+      parameters:
+        - { name: load_balancer_id, in: path, required: true, schema: { type: string } }
+        - { name: backend_group_id, in: path, required: true, schema: { type: string } }
+        - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: 后端组成员列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkLoadBalancerBackendMemberListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: createNetworkLoadBalancerBackendMember
+      summary: 创建负载入口后端组成员
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:create"
+      parameters:
+        - { name: load_balancer_id, in: path, required: true, schema: { type: string } }
+        - { name: backend_group_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateNetworkLoadBalancerBackendMemberRequest' }
+      responses:
+        "201":
+          description: 后端组成员已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkLoadBalancerBackendMember' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}/members/{member_id}:
+    get:
+      operationId: getNetworkLoadBalancerBackendMember
+      summary: 查询负载入口后端组成员
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:read"
+      parameters:
+        - { name: load_balancer_id, in: path, required: true, schema: { type: string } }
+        - { name: backend_group_id, in: path, required: true, schema: { type: string } }
+        - { name: member_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 后端组成员
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkLoadBalancerBackendMember' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: updateNetworkLoadBalancerBackendMember
+      summary: 更新负载入口后端组成员
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:create"
+      parameters:
+        - { name: load_balancer_id, in: path, required: true, schema: { type: string } }
+        - { name: backend_group_id, in: path, required: true, schema: { type: string } }
+        - { name: member_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateNetworkLoadBalancerBackendMemberRequest' }
+      responses:
+        "200":
+          description: 后端组成员已更新
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkLoadBalancerBackendMember' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+    delete:
+      operationId: deleteNetworkLoadBalancerBackendMember
+      summary: 删除负载入口后端组成员
+      tags: [Networks]
+      x-ani-rbac-scope: "scope:networks:delete"
+      parameters:
+        - { name: load_balancer_id, in: path, required: true, schema: { type: string } }
+        - { name: backend_group_id, in: path, required: true, schema: { type: string } }
+        - { name: member_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 后端组成员已删除
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkLoadBalancerBackendMember' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
   /networks/routes:
     get:
       operationId: listNetworkRoutes
@@ -4670,7 +5192,7 @@ paths:
       x-ani-rbac-scope: "scope:networks:read"
       parameters:
         - { name: vpc_id, in: query, schema: { type: string } }
-        - { name: next_hop_type, in: query, schema: { type: string, enum: [gateway, instance, nat] }, description: "按下一跳类型过滤路由。" }
+        - { name: next_hop_type, in: query, schema: { type: string, enum: [gateway, instance, nat, local] }, description: "按下一跳类型过滤路由；可包含系统 local 路由。" }
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
       responses:

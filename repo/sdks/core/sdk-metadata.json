@@ -569,6 +569,96 @@
       "scope": "scope:networks:read"
     },
     {
+      "operationId": "listNetworkLoadBalancerBackendGroups",
+      "method": "GET",
+      "path": "/networks/load-balancers/{load_balancer_id}/backend-groups",
+      "scope": "scope:networks:read"
+    },
+    {
+      "operationId": "createNetworkLoadBalancerBackendGroup",
+      "method": "POST",
+      "path": "/networks/load-balancers/{load_balancer_id}/backend-groups",
+      "scope": "scope:networks:create"
+    },
+    {
+      "operationId": "deleteNetworkLoadBalancerBackendGroup",
+      "method": "DELETE",
+      "path": "/networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}",
+      "scope": "scope:networks:delete"
+    },
+    {
+      "operationId": "getNetworkLoadBalancerBackendGroup",
+      "method": "GET",
+      "path": "/networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}",
+      "scope": "scope:networks:read"
+    },
+    {
+      "operationId": "updateNetworkLoadBalancerBackendGroup",
+      "method": "PUT",
+      "path": "/networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}",
+      "scope": "scope:networks:create"
+    },
+    {
+      "operationId": "listNetworkLoadBalancerBackendMembers",
+      "method": "GET",
+      "path": "/networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}/members",
+      "scope": "scope:networks:read"
+    },
+    {
+      "operationId": "createNetworkLoadBalancerBackendMember",
+      "method": "POST",
+      "path": "/networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}/members",
+      "scope": "scope:networks:create"
+    },
+    {
+      "operationId": "deleteNetworkLoadBalancerBackendMember",
+      "method": "DELETE",
+      "path": "/networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}/members/{member_id}",
+      "scope": "scope:networks:delete"
+    },
+    {
+      "operationId": "getNetworkLoadBalancerBackendMember",
+      "method": "GET",
+      "path": "/networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}/members/{member_id}",
+      "scope": "scope:networks:read"
+    },
+    {
+      "operationId": "updateNetworkLoadBalancerBackendMember",
+      "method": "PUT",
+      "path": "/networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}/members/{member_id}",
+      "scope": "scope:networks:create"
+    },
+    {
+      "operationId": "listNetworkLoadBalancerListeners",
+      "method": "GET",
+      "path": "/networks/load-balancers/{load_balancer_id}/listeners",
+      "scope": "scope:networks:read"
+    },
+    {
+      "operationId": "createNetworkLoadBalancerListener",
+      "method": "POST",
+      "path": "/networks/load-balancers/{load_balancer_id}/listeners",
+      "scope": "scope:networks:create"
+    },
+    {
+      "operationId": "deleteNetworkLoadBalancerListener",
+      "method": "DELETE",
+      "path": "/networks/load-balancers/{load_balancer_id}/listeners/{listener_id}",
+      "scope": "scope:networks:delete"
+    },
+    {
+      "operationId": "getNetworkLoadBalancerListener",
+      "method": "GET",
+      "path": "/networks/load-balancers/{load_balancer_id}/listeners/{listener_id}",
+      "scope": "scope:networks:read"
+    },
+    {
+      "operationId": "updateNetworkLoadBalancerListener",
+      "method": "PUT",
+      "path": "/networks/load-balancers/{load_balancer_id}/listeners/{listener_id}",
+      "scope": "scope:networks:create"
+    },
+    {
       "operationId": "getNetworkOverview",
       "method": "GET",
       "path": "/networks/overview",
@@ -1148,6 +1238,9 @@
     "CreateInstanceExecSessionRequest",
     "CreateInstanceRequest",
     "CreateInstanceResponse",
+    "CreateNetworkLoadBalancerBackendGroupRequest",
+    "CreateNetworkLoadBalancerBackendMemberRequest",
+    "CreateNetworkLoadBalancerListenerRequest",
     "CreateNetworkLoadBalancerRequest",
     "CreateNetworkRouteRequest",
     "CreateNetworkSecurityGroupBindingRequest",
@@ -1247,8 +1340,16 @@
     "MeteringUsageRecord",
     "MeteringUsageResponse",
     "NetworkLoadBalancer",
+    "NetworkLoadBalancerBackendGroup",
+    "NetworkLoadBalancerBackendGroupListResponse",
+    "NetworkLoadBalancerBackendMember",
+    "NetworkLoadBalancerBackendMemberListResponse",
+    "NetworkLoadBalancerBackendMemberTargetType",
+    "NetworkLoadBalancerHealthCheck",
     "NetworkLoadBalancerListResponse",
     "NetworkLoadBalancerListener",
+    "NetworkLoadBalancerListenerListResponse",
+    "NetworkLoadBalancerListenerResource",
     "NetworkOverview",
     "NetworkOverviewCapability",
     "NetworkOverviewDeleteRisk",
@@ -1360,6 +1461,9 @@
     "TokenPairResponse",
     "TokenUsageReport",
     "UpdateEmailRecipientRequest",
+    "UpdateNetworkLoadBalancerBackendGroupRequest",
+    "UpdateNetworkLoadBalancerBackendMemberRequest",
+    "UpdateNetworkLoadBalancerListenerRequest",
     "UpdateNetworkSecurityGroupRuleRequest",
     "UpdateObservabilityAlertRuleRequest",
     "VectorStore",
@@ -1416,6 +1520,12 @@
     "upgradeK8sCluster",
     "reportTokenUsage",
     "createNetworkLoadBalancer",
+    "createNetworkLoadBalancerBackendGroup",
+    "updateNetworkLoadBalancerBackendGroup",
+    "createNetworkLoadBalancerBackendMember",
+    "updateNetworkLoadBalancerBackendMember",
+    "createNetworkLoadBalancerListener",
+    "updateNetworkLoadBalancerListener",
     "createNetworkRoute",
     "createNetworkSecurityGroup",
     "createNetworkSecurityGroupBinding",
@@ -1460,6 +1570,9 @@
     "listK8sClusters",
     "listK8sClusterWorkloads",
     "listNetworkLoadBalancers",
+    "listNetworkLoadBalancerBackendGroups",
+    "listNetworkLoadBalancerBackendMembers",
+    "listNetworkLoadBalancerListeners",
     "listNetworkRoutes",
     "listNetworkSecurityGroups",
     "listNetworkSecurityGroupBindings",

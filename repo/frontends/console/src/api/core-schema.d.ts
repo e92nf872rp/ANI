@@ -790,7 +790,11 @@ export interface paths {
         /** 查询负载入口列表 */
         get: operations["listNetworkLoadBalancers"];
         put?: never;
-        /** 创建负载入口 */
+        /**
+         * 创建负载入口
+         * @description scheme=public 且平台当前不具备 EIP 能力时返回 422（code=EIPNotAvailable）；
+         *     不新增虚假 EIP 占位资源。内网 VIP（scheme=internal）不受此限制。
+         */
         post: operations["createNetworkLoadBalancer"];
         delete?: never;
         options?: never;
@@ -811,6 +815,117 @@ export interface paths {
         post?: never;
         /** 删除负载入口 */
         delete: operations["deleteNetworkLoadBalancer"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/networks/load-balancers/{load_balancer_id}/listeners": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询负载入口监听器列表 */
+        get: operations["listNetworkLoadBalancerListeners"];
+        put?: never;
+        /** 创建负载入口监听器 */
+        post: operations["createNetworkLoadBalancerListener"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/networks/load-balancers/{load_balancer_id}/listeners/{listener_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询负载入口监听器 */
+        get: operations["getNetworkLoadBalancerListener"];
+        /** 更新负载入口监听器 */
+        put: operations["updateNetworkLoadBalancerListener"];
+        post?: never;
+        /** 删除负载入口监听器 */
+        delete: operations["deleteNetworkLoadBalancerListener"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/networks/load-balancers/{load_balancer_id}/backend-groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询负载入口后端组列表 */
+        get: operations["listNetworkLoadBalancerBackendGroups"];
+        put?: never;
+        /** 创建负载入口后端组 */
+        post: operations["createNetworkLoadBalancerBackendGroup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询负载入口后端组 */
+        get: operations["getNetworkLoadBalancerBackendGroup"];
+        /** 更新负载入口后端组 */
+        put: operations["updateNetworkLoadBalancerBackendGroup"];
+        post?: never;
+        /** 删除负载入口后端组 */
+        delete: operations["deleteNetworkLoadBalancerBackendGroup"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询负载入口后端组成员列表 */
+        get: operations["listNetworkLoadBalancerBackendMembers"];
+        put?: never;
+        /** 创建负载入口后端组成员 */
+        post: operations["createNetworkLoadBalancerBackendMember"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}/members/{member_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询负载入口后端组成员 */
+        get: operations["getNetworkLoadBalancerBackendMember"];
+        /** 更新负载入口后端组成员 */
+        put: operations["updateNetworkLoadBalancerBackendMember"];
+        post?: never;
+        /** 删除负载入口后端组成员 */
+        delete: operations["deleteNetworkLoadBalancerBackendMember"];
         options?: never;
         head?: never;
         patch?: never;
@@ -3850,8 +3965,11 @@ export interface components {
             id: string;
             tenant_id: string;
             name: string;
+            description?: string | null;
             /** @example 10.20.0.0/16 */
             cidr: string;
+            /** @description 该 VPC 下活跃子网数量；只读聚合字段。 */
+            readonly subnet_count?: number;
             state: components["schemas"]["NetworkResourceState"];
             reason?: string | null;
             dev_profile?: components["schemas"]["CoreDevProfileInfo"];
@@ -3868,6 +3986,10 @@ export interface components {
             /** @example 10.20.1.0/24 */
             cidr: string;
             gateway?: string | null;
+            /** @description 可选可用区。 */
+            zone?: string | null;
+            /** @description 子网内当前可分配 IP 数量；只读聚合字段。 */
+            readonly available_ip_count?: number;
             state: components["schemas"]["NetworkResourceState"];
             reason?: string | null;
             dev_profile?: components["schemas"]["CoreDevProfileInfo"];
@@ -3892,8 +4014,14 @@ export interface components {
             id: string;
             tenant_id: string;
             name: string;
+            /** @description 所属 VPC；7.29 Console 创建流程提供，历史资源可为空。 */
+            vpc_id?: string | null;
             description?: string | null;
             rules: components["schemas"]["NetworkSecurityGroupRule"][];
+            /** @description 安全组规则总数；只读聚合字段。 */
+            readonly rule_count?: number;
+            /** @description 关联实例总数；只读聚合字段。 */
+            readonly bound_instance_count?: number;
             state: components["schemas"]["NetworkResourceState"];
             reason?: string | null;
             dev_profile?: components["schemas"]["CoreDevProfileInfo"];
@@ -3907,6 +4035,140 @@ export interface components {
             protocol: "http" | "https" | "tcp";
             port: number;
             target_port: number;
+            /** @description 关联后端组；历史 listeners 摘要可不返回。 */
+            backend_group_id?: string;
+        };
+        NetworkLoadBalancerListenerResource: {
+            id: string;
+            load_balancer_id: string;
+            backend_group_id: string;
+            /** @enum {string} */
+            protocol: "http" | "https" | "tcp";
+            port: number;
+            target_port: number;
+            description?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        NetworkLoadBalancerListenerListResponse: {
+            items: components["schemas"]["NetworkLoadBalancerListenerResource"][];
+            total: number;
+            next_cursor?: string | null;
+        };
+        CreateNetworkLoadBalancerListenerRequest: {
+            /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
+            idempotency_key: string;
+            backend_group_id: string;
+            /** @enum {string} */
+            protocol: "http" | "https" | "tcp";
+            port: number;
+            target_port: number;
+            description?: string | null;
+        };
+        UpdateNetworkLoadBalancerListenerRequest: {
+            /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
+            idempotency_key: string;
+            backend_group_id?: string;
+            /** @enum {string} */
+            protocol?: "http" | "https" | "tcp";
+            port?: number;
+            target_port?: number;
+            description?: string | null;
+        };
+        NetworkLoadBalancerHealthCheck: {
+            /** @enum {string} */
+            protocol: "http" | "https" | "tcp";
+            port: number;
+            /** @description HTTP/HTTPS 健康检查路径；TCP 可为空。 */
+            path?: string | null;
+            interval_seconds: number;
+            timeout_seconds: number;
+            healthy_threshold: number;
+            unhealthy_threshold: number;
+        };
+        NetworkLoadBalancerBackendGroup: {
+            id: string;
+            load_balancer_id: string;
+            name: string;
+            /** @enum {string} */
+            algorithm: "round_robin" | "weighted_round_robin";
+            health_check: components["schemas"]["NetworkLoadBalancerHealthCheck"];
+            /** @description 后端组成员数量；只读聚合字段。 */
+            readonly member_count?: number;
+            state: components["schemas"]["NetworkResourceState"];
+            reason?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        NetworkLoadBalancerBackendGroupListResponse: {
+            items: components["schemas"]["NetworkLoadBalancerBackendGroup"][];
+            total: number;
+            next_cursor?: string | null;
+        };
+        CreateNetworkLoadBalancerBackendGroupRequest: {
+            /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
+            idempotency_key: string;
+            name: string;
+            /** @enum {string} */
+            algorithm: "round_robin" | "weighted_round_robin";
+            health_check: components["schemas"]["NetworkLoadBalancerHealthCheck"];
+        };
+        UpdateNetworkLoadBalancerBackendGroupRequest: {
+            /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
+            idempotency_key: string;
+            name?: string;
+            /** @enum {string} */
+            algorithm?: "round_robin" | "weighted_round_robin";
+            health_check?: components["schemas"]["NetworkLoadBalancerHealthCheck"];
+        };
+        /** @enum {string} */
+        NetworkLoadBalancerBackendMemberTargetType: "instance" | "ip";
+        NetworkLoadBalancerBackendMember: {
+            id: string;
+            backend_group_id: string;
+            target_type: components["schemas"]["NetworkLoadBalancerBackendMemberTargetType"];
+            /** @description instance_id 或 IP 地址。 */
+            target: string;
+            port: number;
+            /** @description weighted_round_robin 权重；round_robin 可忽略。 */
+            weight: number;
+            /**
+             * @description Provider 探活结果；与资源生命周期 state 分离。
+             * @enum {string}
+             */
+            readonly health_status: "unknown" | "healthy" | "unhealthy";
+            state: components["schemas"]["NetworkResourceState"];
+            reason?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        NetworkLoadBalancerBackendMemberListResponse: {
+            items: components["schemas"]["NetworkLoadBalancerBackendMember"][];
+            total: number;
+            next_cursor?: string | null;
+        };
+        CreateNetworkLoadBalancerBackendMemberRequest: {
+            /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
+            idempotency_key: string;
+            target_type: components["schemas"]["NetworkLoadBalancerBackendMemberTargetType"];
+            target: string;
+            port: number;
+            /** @default 100 */
+            weight: number;
+        };
+        UpdateNetworkLoadBalancerBackendMemberRequest: {
+            /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
+            idempotency_key: string;
+            target_type?: components["schemas"]["NetworkLoadBalancerBackendMemberTargetType"];
+            target?: string;
+            port?: number;
+            weight?: number;
         };
         NetworkLoadBalancer: {
             id: string;
@@ -3918,6 +4180,10 @@ export interface components {
             scheme: "internal" | "public";
             vip?: string | null;
             listeners: components["schemas"]["NetworkLoadBalancerListener"][];
+            /** @description 监听器数量；只读聚合字段。 */
+            readonly listener_count?: number;
+            /** @description 后端组成员总数量；只读聚合字段。 */
+            readonly backend_count?: number;
             state: components["schemas"]["NetworkResourceState"];
             reason?: string | null;
             dev_profile?: components["schemas"]["CoreDevProfileInfo"];
@@ -4091,6 +4357,7 @@ export interface components {
             /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
             idempotency_key: string;
             name: string;
+            description?: string | null;
             /** @default 10.0.0.0/16 */
             cidr: string;
         };
@@ -4102,11 +4369,15 @@ export interface components {
             /** @default 10.0.1.0/24 */
             cidr: string;
             gateway?: string | null;
+            /** @description 可选可用区。 */
+            zone?: string | null;
         };
         CreateNetworkSecurityGroupRequest: {
             /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
             idempotency_key: string;
             name: string;
+            /** @description 所属 VPC；7.29 Console 创建流程始终提供。 */
+            vpc_id?: string | null;
             description?: string | null;
             rules?: components["schemas"]["NetworkSecurityGroupRule"][];
         };
@@ -4912,9 +5183,14 @@ export interface components {
             id: string;
             vpc_id: string;
             destination_cidr: string;
-            /** @enum {string} */
-            next_hop_type: "gateway" | "instance" | "nat";
+            /**
+             * @description 响应可包含系统生成的 local 路由；客户端不得通过 create 创建 local。
+             * @enum {string}
+             */
+            next_hop_type: "gateway" | "instance" | "nat" | "local";
             next_hop_id: string;
+            /** @description 路由优先级，数值越小优先级越高。 */
+            priority?: number | null;
             description?: string | null;
             /** Format: date-time */
             created_at: string;
@@ -4925,6 +5201,7 @@ export interface components {
             total: number;
             next_cursor?: string | null;
         };
+        /** @description create 禁止 next_hop_type=local；local 路由仅由系统返回。 */
         CreateNetworkRouteRequest: {
             idempotency_key: string;
             vpc_id: string;
@@ -4932,6 +5209,8 @@ export interface components {
             /** @enum {string} */
             next_hop_type: "gateway" | "instance" | "nat";
             next_hop_id: string;
+            /** @description 路由优先级，数值越小优先级越高。 */
+            priority?: number | null;
             description?: string;
         };
         VolumeSnapshotRecord: {
@@ -6816,6 +7095,8 @@ export interface operations {
             query?: {
                 /** @description 按安全组名称过滤；可选，服务端可做精确或前缀匹配。 */
                 name?: string;
+                /** @description 按所属 VPC 过滤安全组。 */
+                vpc_id?: string;
                 /** @description 按安全组状态过滤。 */
                 state?: components["schemas"]["NetworkResourceState"];
                 limit?: number;
@@ -7211,6 +7492,11 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            /**
+             * @description 公网负载入口前置条件不满足。可能的 code：
+             *     - EIPNotAvailable: 当前环境无 EIP 能力，禁止创建 scheme=public 的负载入口
+             */
+            422: components["responses"]["PreconditionFailed"];
         };
     };
     getNetworkLoadBalancer: {
@@ -7264,12 +7550,449 @@ export interface operations {
             409: components["responses"]["Conflict"];
         };
     };
+    listNetworkLoadBalancerListeners: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                load_balancer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 监听器列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkLoadBalancerListenerListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createNetworkLoadBalancerListener: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                load_balancer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateNetworkLoadBalancerListenerRequest"];
+            };
+        };
+        responses: {
+            /** @description 监听器已创建 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkLoadBalancerListenerResource"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getNetworkLoadBalancerListener: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                load_balancer_id: string;
+                listener_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 监听器 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkLoadBalancerListenerResource"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateNetworkLoadBalancerListener: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                load_balancer_id: string;
+                listener_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateNetworkLoadBalancerListenerRequest"];
+            };
+        };
+        responses: {
+            /** @description 监听器已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkLoadBalancerListenerResource"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    deleteNetworkLoadBalancerListener: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                load_balancer_id: string;
+                listener_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 监听器已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkLoadBalancerListenerResource"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listNetworkLoadBalancerBackendGroups: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                load_balancer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 后端组列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkLoadBalancerBackendGroupListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createNetworkLoadBalancerBackendGroup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                load_balancer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateNetworkLoadBalancerBackendGroupRequest"];
+            };
+        };
+        responses: {
+            /** @description 后端组已创建 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkLoadBalancerBackendGroup"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getNetworkLoadBalancerBackendGroup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                load_balancer_id: string;
+                backend_group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 后端组 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkLoadBalancerBackendGroup"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateNetworkLoadBalancerBackendGroup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                load_balancer_id: string;
+                backend_group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateNetworkLoadBalancerBackendGroupRequest"];
+            };
+        };
+        responses: {
+            /** @description 后端组已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkLoadBalancerBackendGroup"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    deleteNetworkLoadBalancerBackendGroup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                load_balancer_id: string;
+                backend_group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 后端组已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkLoadBalancerBackendGroup"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listNetworkLoadBalancerBackendMembers: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                load_balancer_id: string;
+                backend_group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 后端组成员列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkLoadBalancerBackendMemberListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createNetworkLoadBalancerBackendMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                load_balancer_id: string;
+                backend_group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateNetworkLoadBalancerBackendMemberRequest"];
+            };
+        };
+        responses: {
+            /** @description 后端组成员已创建 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkLoadBalancerBackendMember"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getNetworkLoadBalancerBackendMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                load_balancer_id: string;
+                backend_group_id: string;
+                member_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 后端组成员 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkLoadBalancerBackendMember"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateNetworkLoadBalancerBackendMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                load_balancer_id: string;
+                backend_group_id: string;
+                member_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateNetworkLoadBalancerBackendMemberRequest"];
+            };
+        };
+        responses: {
+            /** @description 后端组成员已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkLoadBalancerBackendMember"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    deleteNetworkLoadBalancerBackendMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                load_balancer_id: string;
+                backend_group_id: string;
+                member_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 后端组成员已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkLoadBalancerBackendMember"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
     listNetworkRoutes: {
         parameters: {
             query?: {
                 vpc_id?: string;
-                /** @description 按下一跳类型过滤路由。 */
-                next_hop_type?: "gateway" | "instance" | "nat";
+                /** @description 按下一跳类型过滤路由；可包含系统 local 路由。 */
+                next_hop_type?: "gateway" | "instance" | "nat" | "local";
                 limit?: number;
                 cursor?: string;
             };

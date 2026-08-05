@@ -188,19 +188,29 @@ NETWORK-P0-CONTRACT-A             |
 - 修改：`repo/api/openapi/v1.yaml`
 - 修改：`repo/api/core-v1-compatibility-baseline.yaml`
 - 修改：`repo/scripts/validate_openapi_spec_test.py`
+- 修改：`repo/services/docs/console-modules/compute/network/load-balancer.md`
+- 修改：`repo/services/tasks/modules/prd/console/compute/prd-console-network-load-balancer.md`
+- 修改：`repo/services/tasks/modules/spec/console/compute/spec-console-network-load-balancer.md`
 - 生成：Core SDK 与静态 API 文档生成物
 
 **契约产出：**
 - VPC create/response 增加可选 `description` 和只读 `subnet_count`。
 - Subnet create/response 增加可选 `zone`，response 增加只读 `available_ip_count`。
-- SG rule 增加可选 `peer_security_group_id`；保留历史 `cidr` 字符串字段以兼容旧客户端，并声明二者互斥。
+- SG create/response 增加可选 `vpc_id`，列表增加可选 `vpc_id` 过滤；7.29 Console 创建流程始终传入，既有 v1 客户端仍可省略。
+- SG response 增加只读 `rule_count/bound_instance_count`，用于 7.29 原型列表字段；保留既有 `rules`。
+- SG rule 保持历史 `cidr` 字符串字段为 required；不引入 7.29 原型未要求的安全组/实例 peer，兼容性 baseline 不得掩盖 required 字段删除。
 - Route request/response 增加可选 `priority`；response/filter 的 next-hop 增加 `local`，create request 仍禁止创建 local route。
-- LB 增加只读 `listener_count/backend_count`；新增 listener、backend-group、backend-member typed schemas 和 CRUD 路径；算法为 `round_robin/weighted_round_robin`，健康检查包含 protocol、port、interval_seconds、timeout_seconds、healthy_threshold、unhealthy_threshold。
+- LB 增加只读 `listener_count/backend_count`；新增 listener、backend-group、backend-member typed schemas 和 CRUD 路径。
+- 新增 listener 必须通过 `backend_group_id` 关联后端组；历史父资源 `listeners[]` 摘要只兼容新增可选字段，update 可选传入以支持改绑。算法为 `round_robin/weighted_round_robin`，健康检查包含 protocol、port、path、interval_seconds、timeout_seconds、healthy_threshold、unhealthy_threshold。
+- backend member 增加只读 `health_status=unknown/healthy/unhealthy`，与资源生命周期 `state` 分离。
 - 公网 LB 在没有 EIP 能力时返回 422；不新增虚假的 EIP 占位资源。
+- 7.29 原型未要求 UDP、HTTPS 证书、expected status code、静态 VIP 或 EIP 资源字段，本批不预建。
+- 同步 LB PRD/SPEC/模块文档：listener/backend 管理进入 P0，不再保留首版只读或 TODO-YAML 表述。
 
-- [ ] 先写失败契约测试，覆盖新增字段、SG peer 互斥、local route 只读、LB 子资源 CRUD、幂等和错误响应。
-- [ ] 修改 v1、兼容性基线和生成物。
-- [ ] 运行 OpenAPI、兼容性、SDK、Gateway route contract 和架构门禁。
+- [x] 调整契约测试并先确认失败，覆盖 SG VPC/聚合字段、历史 `cidr` required、local route 只读、listener 后端组关联、member 健康状态、LB 子资源 CRUD、幂等和错误响应。
+- [x] 修改 v1 和 LB 需求文档；只做兼容新增，并纠正当前工作区中的 SG required 退化。
+- [x] 重新生成兼容性 baseline、Core SDK 和静态 API 文档；baseline 只接受 additive surface。
+- [x] 运行 OpenAPI、兼容性、SDK、Mock/API docs、architecture 和 `git diff --check` 门禁。
 - [ ] 停止并等待契约 PR 批准；未批准前不得建立对应 PG 列/表。
 
 ### Task C2：建立网络独立 PG migration 和 schema gate
