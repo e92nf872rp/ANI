@@ -15,6 +15,9 @@ func TestLocalAdmissionGuardAcceptsRenderedManifest(t *testing.T) {
 		Name:     "app-01",
 		Kind:     ports.WorkloadKindContainer,
 		Image:    "harbor/app:1",
+		Container: &ports.ContainerInstanceSpec{
+			PortSpecs: []ports.InstancePortSpec{{Name: "http", ContainerPort: 8080, Protocol: "TCP"}},
+		},
 	})
 	if err != nil {
 		t.Fatalf("Render() error = %v", err)

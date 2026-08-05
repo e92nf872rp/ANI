@@ -3,10 +3,13 @@ package runtime
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kubercloud/ani/pkg/ports"
+	"github.com/kubercloud/ani/pkg/types"
 )
 
 func TestLocalWorkloadReconcileControllerReconcileNowUpdatesStore(t *testing.T) {
@@ -83,6 +86,90 @@ func TestLocalWorkloadReconcileControllerMarksProviderMissing(t *testing.T) {
 	}
 }
 
+func TestLocalWorkloadReconcileControllerPersistsKubernetesPrimaryResourceLoss(t *testing.T) {
+	store := newReconcileMemoryStore()
+	record := reconcileTestRecord(ports.WorkloadStateRunning)
+	record.Name = "app-a"
+	record.Kind = ports.WorkloadKindSandbox
+	record.Provider = "kubernetes_sandbox_runtime"
+	record.ResourceRefs = []string{"kubernetes/Deployment/app-a"}
+	record.Status.Ref.Kind = ports.WorkloadKindSandbox
+	if err := store.UpsertStatus(context.Background(), record); err != nil {
+		t.Fatal(err)
+	}
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return jsonResponse(http.StatusNotFound, `{"message":"deployments.apps app-a not found"}`), nil
+	})
+	client := newTestKubernetesRESTClient(t, transport)
+	controller := NewLocalWorkloadReconcileController(
+		store,
+		store,
+		NewKubernetesProviderAdapter(client),
+		NewLocalStatusReconciler(),
+		ports.ReconcileControllerConfig{},
+		WithReconcileControllerClock(func() time.Time { return time.Unix(300, 0) }),
+	)
+	target := ports.ReconcileTarget{
+		TenantID:   record.TenantID,
+		InstanceID: record.InstanceID,
+		Kind:       record.Kind,
+		Provider:   record.Provider,
+		State:      record.Status.State,
+	}
+
+	first, err := controller.ReconcileNow(context.Background(), target)
+	if err != nil {
+		t.Fatalf("ReconcileNow(first) error = %v", err)
+	}
+	if !first.ProviderMissing || !first.StateChanged || first.CurrentState != ports.WorkloadStateFailed || first.Reason != "ProviderResourceLost" {
+		t.Fatalf("first reconcile result = %+v, want changed failed ProviderResourceLost", first)
+	}
+	stored, err := store.Get(context.Background(), record.TenantID, record.InstanceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status.State != ports.WorkloadStateFailed || stored.Status.Reason != "ProviderResourceLost" {
+		t.Fatalf("stored status = %+v, want failed ProviderResourceLost", stored.Status)
+	}
+
+	second, err := controller.ReconcileNow(context.Background(), target)
+	if err != nil {
+		t.Fatalf("ReconcileNow(second) error = %v", err)
+	}
+	if !second.ProviderMissing || second.StateChanged || second.CurrentState != ports.WorkloadStateFailed || second.Reason != "ProviderResourceLost" {
+		t.Fatalf("second reconcile result = %+v, want stable failed ProviderResourceLost", second)
+	}
+}
+
+func TestLocalWorkloadReconcileControllerDoesNotReconcileDeletedInstance(t *testing.T) {
+	store := newReconcileMemoryStore()
+	record := reconcileTestRecord(ports.WorkloadStateDeleted)
+	if err := store.UpsertStatus(context.Background(), record); err != nil {
+		t.Fatal(err)
+	}
+	controller := NewLocalWorkloadReconcileController(
+		store,
+		store,
+		missingProviderStatusReader{},
+		NewLocalStatusReconciler(),
+		ports.ReconcileControllerConfig{},
+	)
+
+	result, err := controller.ReconcileNow(context.Background(), ports.ReconcileTarget{
+		TenantID:   record.TenantID,
+		InstanceID: record.InstanceID,
+		Kind:       record.Kind,
+		Provider:   record.Provider,
+		State:      record.Status.State,
+	})
+	if err != nil {
+		t.Fatalf("ReconcileNow() error = %v", err)
+	}
+	if result.CurrentState != ports.WorkloadStateDeleted || result.ProviderMissing || result.StateChanged {
+		t.Fatalf("result = %+v, want unchanged deleted state", result)
+	}
+}
+
 func TestLocalWorkloadReconcileControllerRunOnceUsesTargetLister(t *testing.T) {
 	store := newReconcileMemoryStore()
 	record := reconcileTestRecord(ports.WorkloadStateProvisioning)
@@ -107,6 +194,38 @@ func TestLocalWorkloadReconcileControllerRunOnceUsesTargetLister(t *testing.T) {
 	}
 	if store.listRequests != 1 {
 		t.Fatalf("ListReconcileTargets calls = %d, want 1", store.listRequests)
+	}
+}
+
+func TestLocalWorkloadReconcileControllerInjectsTargetTenantContext(t *testing.T) {
+	store := newReconcileMemoryStore()
+	record := reconcileTestRecord(ports.WorkloadStateProvisioning)
+	record.TenantID = "5dbb1d01-0000-4000-8000-000000000001"
+	record.Status.Ref.TenantID = record.TenantID
+	if err := store.UpsertStatus(context.Background(), record); err != nil {
+		t.Fatal(err)
+	}
+	tenantStore := &tenantContextReconcileStore{
+		reconcileMemoryStore: store,
+		expectedTenantID:     uuid.MustParse(record.TenantID),
+	}
+	controller := NewLocalWorkloadReconcileController(
+		tenantStore,
+		tenantStore,
+		NewLocalProviderStatusReader(),
+		NewLocalStatusReconciler(),
+		ports.ReconcileControllerConfig{},
+	)
+
+	_, err := controller.ReconcileNow(context.Background(), ports.ReconcileTarget{
+		TenantID:   record.TenantID,
+		InstanceID: record.InstanceID,
+		Kind:       record.Kind,
+		Provider:   record.Provider,
+		State:      record.Status.State,
+	})
+	if err != nil {
+		t.Fatalf("ReconcileNow() error = %v", err)
 	}
 }
 
@@ -232,6 +351,27 @@ type missingProviderStatusReader struct{}
 
 func (missingProviderStatusReader) Observe(context.Context, ports.WorkloadProviderStatusRequest) (ports.WorkloadProviderObservation, error) {
 	return ports.WorkloadProviderObservation{}, ports.ErrNotFound
+}
+
+type tenantContextReconcileStore struct {
+	*reconcileMemoryStore
+	expectedTenantID uuid.UUID
+}
+
+func (s *tenantContextReconcileStore) Get(ctx context.Context, tenantID string, instanceID string) (ports.WorkloadInstanceRecord, error) {
+	tenant, ok := types.TryFromContext(ctx)
+	if !ok || tenant.TenantID != s.expectedTenantID {
+		return ports.WorkloadInstanceRecord{}, errors.New("target tenant context missing")
+	}
+	return s.reconcileMemoryStore.Get(ctx, tenantID, instanceID)
+}
+
+func (s *tenantContextReconcileStore) UpsertStatus(ctx context.Context, record ports.WorkloadInstanceRecord) error {
+	tenant, ok := types.TryFromContext(ctx)
+	if !ok || tenant.TenantID != s.expectedTenantID {
+		return errors.New("target tenant context missing")
+	}
+	return s.reconcileMemoryStore.UpsertStatus(ctx, record)
 }
 
 type fakeReconcileDelegate struct {

@@ -57,14 +57,20 @@ func ensureStreams(js nats.JetStreamContext) error {
 	streams := []struct {
 		name     string
 		subjects []string
+		// retention 决定 stream 的消息删除语义：
+		// ANI_TASKS 用 WorkQueuePolicy：首个消费者 Ack 后即删除，适合点对点 task 消费。
+		// ANI_EVENTS 用 InterestPolicy：只要还有订阅者未消费消息就保留，支持 event fan-out 给多消费者。
+		retention nats.RetentionPolicy
 	}{
 		{
-			name:     "ANI_TASKS",
-			subjects: []string{"ani.tasks.>"},
+			name:      "ANI_TASKS",
+			subjects:  []string{"ani.tasks.>"},
+			retention: nats.WorkQueuePolicy,
 		},
 		{
-			name:     "ANI_EVENTS",
-			subjects: []string{"ani.events.>"},
+			name:      "ANI_EVENTS",
+			subjects:  []string{"ani.events.>"},
+			retention: nats.InterestPolicy,
 		},
 	}
 
@@ -74,7 +80,7 @@ func ensureStreams(js nats.JetStreamContext) error {
 			_, err = js.AddStream(&nats.StreamConfig{
 				Name:      s.name,
 				Subjects:  s.subjects,
-				Retention: nats.WorkQueuePolicy, // consumed messages are deleted
+				Retention: s.retention,
 				MaxAge:    24 * time.Hour,
 				Storage:   nats.FileStorage,
 				Replicas:  1, // increase to 3 in production HA deployments

@@ -96,6 +96,7 @@ func TestM1RealProviderProfileCreateLifecycleAndOps(t *testing.T) {
 
 func lifecycleRequestFor(instanceID string, action ports.WorkloadLifecycleAction) ports.WorkloadInstanceLifecycleRequest {
 	return ports.WorkloadInstanceLifecycleRequest{
+		IdempotencyKey:  string(action) + "-" + instanceID,
 		TenantID:        "tenant-a",
 		InstanceID:      instanceID,
 		Action:          action,

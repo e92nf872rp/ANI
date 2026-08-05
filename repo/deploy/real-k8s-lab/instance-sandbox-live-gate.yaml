@@ -1,0 +1,52 @@
+profile: INSTANCE-SANDBOX-LIVE-GATE-A
+status: contract
+description: >
+  Sandbox live gate for proving kind=sandbox create/lifecycle uses ANI Core
+  /api/v1/instances and applies a Kubernetes Deployment with
+  runtimeClassName=sandbox-kata, plus real code-run, workspace files,
+  preview ports (NodePort Service, not Ingress), and signed sandbox tokens
+  (HMAC Bearer) against the ready Pod. The file safety check requires an
+  isolated /workspace emptyDir and rejects symlink/hard-link escapes without
+  external mutation. Checkpoint remains local-session until a later real-provider batch.
+  Live image must include python3
+  (e.g. sandbox-python:3.12).
+
+required_tools:
+  - kubectl
+
+required_endpoints:
+  - ani_core_instances_api
+  - kubernetes_read_api
+  - kata_runtimeclass
+
+live_checks:
+  - id: core-instance-sandbox-create
+    command: POST /api/v1/instances kind=sandbox
+    pass_condition: sandbox_create_returns_instance_and_real_provider_refs
+  - id: kubernetes-deployment-runtimeclass-observe
+    command: kubectl get deployment {name} -n {namespace} -o json
+    pass_condition: deployment_spec_template_runtimeClassName_is_sandbox-kata
+  - id: core-instance-sandbox-files
+    command: POST/GET/DELETE /api/v1/instances/{instance_id}/sandbox/files
+    pass_condition: write_list_delete_workspace_file_in_ready_pod
+  - id: core-instance-sandbox-file-safety
+    command: code-run creates symlink/hard-link fixtures; files API attempts list/write/delete escapes
+    pass_condition: workspace_is_isolated_emptyDir_and_all_unsafe_paths_return_400_without_external_mutation
+  - id: core-instance-sandbox-token
+    command: POST /api/v1/instances/{instance_id}/sandbox/tokens
+    pass_condition: signed_token_authorizes_scoped_sandbox_subresources
+  - id: core-instance-sandbox-ports
+    command: POST/DELETE /api/v1/instances/{instance_id}/sandbox/ports
+    pass_condition: nodeport_service_endpoints_and_in_pod_http_ok
+  - id: core-instance-sandbox-code-run
+    command: POST /api/v1/instances/{instance_id}/sandbox/code-runs
+    pass_condition: code_run_task_result_status_succeeded_with_stdout
+  - id: core-instance-sandbox-pause
+    command: POST /api/v1/instances/{instance_id}/lifecycle action=pause
+    pass_condition: pause_operation_accepted_through_core_api
+  - id: core-instance-sandbox-resume
+    command: POST /api/v1/instances/{instance_id}/lifecycle action=resume
+    pass_condition: resume_operation_accepted_through_core_api
+  - id: core-instance-sandbox-delete
+    command: POST /api/v1/instances/{instance_id}/lifecycle action=delete
+    pass_condition: delete_operation_accepted_through_core_api

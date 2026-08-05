@@ -1,0 +1,68 @@
+{
+  "checks": [
+    {
+      "http_status": 422,
+      "id": "checkpoint-provider-capability-422",
+      "status": "passed",
+      "task_created": false
+    },
+    {
+      "id": "core-sandbox-create-running",
+      "instance_state": "running-or-ready",
+      "status": "passed"
+    },
+    {
+      "file_written": true,
+      "id": "file-port-coderun-before-restart",
+      "port_opened": true,
+      "status": "passed",
+      "task_created": true
+    },
+    {
+      "file_visible": true,
+      "id": "file-port-task-after-restart",
+      "instance_loaded": true,
+      "port_closed": true,
+      "port_summary_loaded": true,
+      "status": "passed",
+      "task_loaded": true
+    },
+    {
+      "id": "gateway-rollout-restart",
+      "pod_replaced": true,
+      "ready_replicas": 1,
+      "status": "passed"
+    },
+    {
+      "different_intent_rejected": true,
+      "id": "idempotency-replay-after-restart",
+      "replayed_original_task": true,
+      "status": "passed"
+    },
+    {
+      "deleted_instance_audit_rows": 1,
+      "id": "postgres-and-kubernetes-cleanup",
+      "provider_resources_absent": true,
+      "status": "passed",
+      "task_audit_rows": 1
+    },
+    {
+      "delete": "deleted",
+      "id": "sandbox-pause-resume-delete",
+      "pause": "stopped/session-paused",
+      "resume": "running-or-ready",
+      "status": "passed"
+    },
+    {
+      "body_removed_after_expiry": true,
+      "id": "token-expiry-conflict",
+      "replayed_before_expiry": true,
+      "status": "passed"
+    }
+  ],
+  "generated_at": "2026-08-02T08:28:28.901729Z",
+  "image": "docker.changqingyun.cn/ani/ani-gateway:instance-sandbox-stateless-20260802-v1",
+  "image_digest": "sha256:5817757f11e845b355fb6c1f4bee2a81b5d76cc43ebcf9d5ba37ba73d29ca563",
+  "profile": "INSTANCE-SANDBOX-STATELESS-LIVE-GATE-A",
+  "status": "passed"
+}

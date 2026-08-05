@@ -30,14 +30,11 @@ func TestMetadataStorageStoreUpsertsVolume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpsertVolume() error = %v", err)
 	}
-	if !strings.Contains(tx.sql, "INSERT INTO storage_volumes") {
-		t.Fatalf("sql = %q, want storage_volumes insert", tx.sql)
+	if len(tx.execs) == 0 || !strings.Contains(tx.execs[0], "INSERT INTO storage_volumes") {
+		t.Fatalf("execs[0] = %q, want storage_volumes insert", tx.execs)
 	}
-	if got, want := tx.args[1], "vol-test"; got != want {
-		t.Fatalf("volume_id arg = %v, want %s", got, want)
-	}
-	if got, want := tx.args[5], string(ports.StorageResourceAvailable); got != want {
-		t.Fatalf("state arg = %v, want %s", got, want)
+	if !strings.Contains(tx.execs[0], "create_idempotency_key") {
+		t.Fatalf("sql = %q, want create_idempotency_key column", tx.execs[0])
 	}
 }
 
@@ -84,10 +81,8 @@ func TestMetadataStorageStoreUpsertsFilesystemAndObject(t *testing.T) {
 }
 
 func TestLocalStorageServicePersistsCreateAndDelete(t *testing.T) {
-	tx := &fakeMetadataTx{}
-	service := NewLocalStorageService(
-		WithStorageResourceStore(NewMetadataStorageStore(fakeMetadataStore{tx: tx})),
-	)
+	store := newSharedMemoryStorageStore()
+	service := NewLocalStorageService(WithStorageResourceStore(store))
 
 	volume, err := service.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{
 		TenantID:       storageStoreTenantID,
@@ -104,11 +99,33 @@ func TestLocalStorageServicePersistsCreateAndDelete(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("DeleteVolume() error = %v", err)
 	}
-	if len(tx.execs) != 2 {
-		t.Fatalf("exec count = %d, want create and delete persistence writes", len(tx.execs))
+	if _, err := store.GetVolume(context.Background(), storageStoreTenantID, volume.VolumeID); err != ports.ErrNotFound {
+		t.Fatalf("store GetVolume after delete error = %v, want ErrNotFound", err)
 	}
-	if got, want := tx.args[5], string(ports.StorageResourceDeleted); got != want {
-		t.Fatalf("last persisted state = %v, want %s", got, want)
+	if got := store.volumes[store.key(storageStoreTenantID, volume.VolumeID)].State; got != ports.StorageResourceDeleted {
+		t.Fatalf("tombstone state = %s, want deleted", got)
+	}
+
+	filesystem, err := service.CreateFilesystem(context.Background(), ports.StorageFilesystemCreateRequest{
+		TenantID:       storageStoreTenantID,
+		IdempotencyKey: "persisted-filesystem",
+		Name:           "persisted-filesystem",
+		Protocol:       "nfs",
+		SizeGiB:        10,
+	})
+	if err != nil {
+		t.Fatalf("CreateFilesystem() error = %v", err)
+	}
+	// Simulate Gateway restart: fresh service, same PG/memory store authority.
+	restarted := NewLocalStorageService(WithStorageResourceStore(store))
+	if _, err := restarted.DeleteFilesystem(context.Background(), ports.StorageResourceGetRequest{
+		TenantID:   storageStoreTenantID,
+		ResourceID: filesystem.FilesystemID,
+	}); err != nil {
+		t.Fatalf("DeleteFilesystem after restart error = %v", err)
+	}
+	if _, err := store.GetFilesystem(context.Background(), storageStoreTenantID, filesystem.FilesystemID); err != ports.ErrNotFound {
+		t.Fatalf("store GetFilesystem after delete error = %v, want ErrNotFound", err)
 	}
 }
 

@@ -1,0 +1,56 @@
+profile: INSTANCE-SANDBOX-CHECKPOINT-LIVE-GATE-A
+status: live
+evidence: development-records/live-evidence/instance-sandbox-checkpoint-live-20260802.json
+description: >
+  Core Sandbox filesystem checkpoint gate proving Rook-Ceph PVC persistence,
+  CSI VolumeSnapshot create/list/restore/clone, PostgreSQL task persistence,
+  Gateway restart recovery, capability errors, and provider cleanup.
+
+required_tools:
+  - kubectl
+  - curl
+  - psql
+
+required_endpoints:
+  - ani_core_instances_api
+  - ani_core_tasks_api
+  - postgresql
+  - kubernetes_api
+
+required_manifests:
+  - instance-sandbox-checkpoint-csi-rbac.yaml
+
+live_checks:
+  - id: sandbox-workspace-pvc-bound
+    pass_condition: a new sandbox mounts a Bound persistent volume claim at /workspace
+  - id: checkpoint-create-ready
+    pass_condition: checkpoint creation produces a readyToUse CSI VolumeSnapshot
+  - id: checkpoint-list-after-gateway-restart
+    pass_condition: checkpoint list reads the same VolumeSnapshot after Gateway rollout restart
+  - id: workspace-restore-content
+    pass_condition: restore replaces the source workspace with checkpoint content
+  - id: checkpoint-clone-content
+    pass_condition: clone creates a distinct sandbox whose workspace contains checkpoint content
+  - id: keep-memory-capability-422
+    pass_condition: keep_memory=true returns 422 without creating a task or VolumeSnapshot
+  - id: legacy-emptydir-capability-422
+    pass_condition: legacy emptyDir sandbox checkpoint returns 422 without provider mutation
+  - id: postgres-task-persistence
+    pass_condition: checkpoint create and restore completed tasks remain queryable from PostgreSQL
+  - id: sandbox-checkpoint-cleanup
+    pass_condition: deleting source and clone removes managed Deployment Pod PVC and VolumeSnapshot resources
+
+evidence_policy:
+  required_fields:
+    - profile
+    - status
+    - image
+    - image_digest
+    - checks
+  forbidden_content:
+    - authorization
+    - bearer_token
+    - jwt
+    - database_url
+    - preview_url
+    - internal_ip

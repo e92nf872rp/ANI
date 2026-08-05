@@ -123,3 +123,9 @@ Register completed tasks immediately before writing each accepted response and m
 - [x] **Step 3: Run `PATH=/tmp/ani-pybin:$PATH make validate-architecture`.**
 - [x] **Step 4: Run `git diff --check` and inspect `git status --short`.**
 - [x] **Step 5: Report changed files and verification without committing.**
+
+## 后续演进说明（2026-08-03）
+
+- 本计划最初约束的 Gateway 内存任务注册表已被 2026-08-02 的 PG `AsyncTaskStore` 持久化方案取代；该约束仅保留为历史实施上下文。
+- Vector 文档写入继续遵循现有 Core v1 `202 + VectorStoreDocumentInsertResponse`，已补齐 `Location`、`vector_store.document.insert` 和任务落 PG。
+- 真实 Milvus + PostgreSQL 环境完成 Gateway rollout restart 闭环，原 task ID 重启后查询仍为 200；证据见 `repo/development-records/live-evidence/storage-async-vector-task-live-20260803.json`。

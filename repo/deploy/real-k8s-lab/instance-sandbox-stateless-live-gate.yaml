@@ -1,0 +1,56 @@
+profile: INSTANCE-SANDBOX-STATELESS-LIVE-GATE-A
+status: live
+description: >
+  Core Sandbox restart gate proving PostgreSQL instance/task authority, Redis
+  idempotency continuity, and request-scoped Kubernetes resource discovery.
+
+required_tools:
+  - kubectl
+  - curl
+  - psql
+
+required_endpoints:
+  - ani_core_instances_api
+  - ani_core_tasks_api
+  - postgresql
+  - redis
+  - kubernetes_api
+
+live_checks:
+  - id: core-sandbox-create-running
+    pass_condition: create returns UUID instance with real provider and running state
+  - id: file-port-coderun-before-restart
+    pass_condition: real Pod file, NodePort, and code-run operations succeed and task is stored
+  - id: gateway-rollout-restart
+    pass_condition: ani-gateway rollout completes with a new Pod identity
+  - id: file-port-task-after-restart
+    pass_condition: file read, port close, and task GET succeed after restart
+  - id: idempotency-replay-after-restart
+    pass_condition: same intent replays and different intent with the same key returns 409
+  - id: token-expiry-conflict
+    pass_condition: token replays before expiry and returns IdempotencyResultExpired after expiry
+  - id: checkpoint-provider-capability-422
+    pass_condition: Kubernetes checkpoint create returns 422 and creates no task
+  - id: sandbox-pause-resume-delete
+    pass_condition: lifecycle actions discover resources from persisted context after restart
+  - id: postgres-and-kubernetes-cleanup
+    pass_condition: deleted instance and provider Deployment, Pod, and Service are absent
+
+evidence_policy:
+  required_fields:
+    - profile
+    - status
+    - image
+    - image_digest
+    - checks
+  forbidden_content:
+    - bearer_token
+    - jwt
+    - sandbox_token
+    - code
+    - stdin
+    - stdout
+    - stderr
+    - preview_url
+    - ip_address
+    - database_url

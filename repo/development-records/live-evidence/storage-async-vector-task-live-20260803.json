@@ -1,0 +1,52 @@
+{
+  "checks": [
+    {
+      "http_status": 201,
+      "id": "vector-store-create",
+      "provider": "milvus",
+      "status": "passed"
+    },
+    {
+      "http_status": 202,
+      "id": "vector-document-insert-location",
+      "inserted_count": 1,
+      "location_matches_task_id": true,
+      "status": "passed"
+    },
+    {
+      "http_status": 200,
+      "id": "task-query-before-restart",
+      "status": "passed",
+      "task_status": "completed",
+      "task_type": "vector_store.document.insert"
+    },
+    {
+      "id": "postgres-task-persistence",
+      "matching_rows": 1,
+      "result_inserted_count": 1,
+      "status": "passed",
+      "tenant_scoped": true
+    },
+    {
+      "id": "gateway-rollout-restart",
+      "pod_replaced": true,
+      "ready_replicas": 1,
+      "status": "passed"
+    },
+    {
+      "http_status": 200,
+      "id": "task-query-after-restart",
+      "status": "passed",
+      "task_fields_stable": true
+    },
+    {
+      "id": "milvus-fixture-cleanup",
+      "status": "passed"
+    }
+  ],
+  "generated_at": "2026-08-03T10:08:08+08:00",
+  "image": "docker.changqingyun.cn/ani/ani-gateway:storage-async-correctness-20260803-v1",
+  "image_digest": "sha256:9f8063fa6e94a9048ad114f150d4559845cf78bc9fb43452a2eede1322a8963b",
+  "profile": "STORAGE-ASYNC-VECTOR-TASK-LIVE-A",
+  "status": "passed"
+}

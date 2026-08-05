@@ -156,14 +156,15 @@ func TestStorageAPIDevProfileSnapshotAndMountTarget(t *testing.T) {
 }
 
 func TestStorageHTTPAsyncTasksKeepOperationTypeAndLocation(t *testing.T) {
+	tasks := runtimeadapter.NewLocalAsyncTaskStore()
 	h := server.New()
 	h.Use(func(ctx context.Context, c *app.RequestContext) {
 		c.Set("tenant_id", "tenant-a")
 		c.Next(ctx)
 	})
 	v1 := h.Group("/api/v1")
-	registerStorageResourcesWithService(v1, runtimeadapter.NewLocalStorageService())
-	registerTasks(v1)
+	registerStorageResourcesWithServiceAndTasks(v1, runtimeadapter.NewLocalStorageService(), tasks)
+	registerTasksWithStore(v1, tasks)
 
 	created := performJSONRequest(t, h, http.MethodPost, "/api/v1/volumes", `{"idempotency_key":"http-volume-async","name":"async-data","size_gib":10}`, http.StatusCreated)
 	volumeID := jsonStringField(t, created, "id")
@@ -210,6 +211,17 @@ func TestStorageHTTPAsyncTasksKeepOperationTypeAndLocation(t *testing.T) {
 		t.Fatalf("fetched task = %s, want completed volume.expand task %s", taskResp.Body(), taskID)
 	}
 
+	restarted := server.New()
+	restarted.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Next(ctx)
+	})
+	registerTasksWithStore(restarted.Group("/api/v1"), tasks)
+	restartedReq := ut.PerformRequest(restarted.Engine, http.MethodGet, "/api/v1/tasks/"+taskID, nil)
+	if got := restartedReq.Result().StatusCode(); got != http.StatusOK {
+		t.Fatalf("task status after router restart = %d body=%s, want 200", got, restartedReq.Result().Body())
+	}
+
 	unknownReq := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/tasks/00000000-0000-0000-0000-000000000000", nil)
 	if got := unknownReq.Result().StatusCode(); got != http.StatusNotFound {
 		t.Fatalf("unknown task status = %d, want 404", got)
@@ -220,7 +232,7 @@ func TestStorageHTTPAsyncTasksKeepOperationTypeAndLocation(t *testing.T) {
 		c.Set("tenant_id", "tenant-b")
 		c.Next(ctx)
 	})
-	registerTasks(otherTenant.Group("/api/v1"))
+	registerTasksWithStore(otherTenant.Group("/api/v1"), tasks)
 	crossTenantReq := ut.PerformRequest(otherTenant.Engine, http.MethodGet, "/api/v1/tasks/"+taskID, nil)
 	if got := crossTenantReq.Result().StatusCode(); got != http.StatusNotFound {
 		t.Fatalf("cross-tenant task status = %d, want 404", got)

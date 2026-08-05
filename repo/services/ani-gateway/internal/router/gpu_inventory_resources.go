@@ -20,6 +20,7 @@ import (
 
 type gpuInventoryAPI struct {
 	inventory     ports.GPUInventory
+	specs         ports.GPUSpecService
 	templates     ports.SandboxTemplateCatalog
 	instanceStore ports.WorkloadInstanceStore
 	k8sClient     *runtimeadapter.KubernetesRESTClient
@@ -58,6 +59,22 @@ type gpuInventoryRecordResponse struct {
 	TenantID      *string                `json:"tenant_id"`
 	InstanceID    *string                `json:"instance_id"`
 	DevProfile    coreDevProfileResponse `json:"dev_profile"`
+}
+
+type gpuSpecResponse struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	GPUType       string `json:"gpu_type"`
+	MemoryTotalMB int64  `json:"memory_total_mb,omitempty"`
+	Shares        int    `json:"shares"`
+	MBPerShare    int    `json:"mb_per_share"`
+	Available     bool   `json:"available"`
+}
+
+type gpuSpecListResponse struct {
+	Items      []gpuSpecResponse `json:"items"`
+	Total      int               `json:"total"`
+	NextCursor *string           `json:"next_cursor"`
 }
 
 type gpuOccupancyResponse struct {
@@ -104,7 +121,7 @@ func newGPUInventoryAPIWithInventory(inventory ports.GPUInventory) *gpuInventory
 	return newGPUInventoryAPIWithStore(inventory, nil, nil)
 }
 
-func newGPUInventoryAPIWithStore(inventory ports.GPUInventory, store ports.WorkloadInstanceStore, k8sClient *runtimeadapter.KubernetesRESTClient) *gpuInventoryAPI {
+func newGPUInventoryAPIWithStore(inventory ports.GPUInventory, store ports.WorkloadInstanceStore, k8sClient *runtimeadapter.KubernetesRESTClient, specServices ...ports.GPUSpecService) *gpuInventoryAPI {
 	profile := localCoreDevProfile("local-gpu-inventory", "Core dev/local profile; real GPU discovery is gated separately")
 	if inventory == nil {
 		inventory = runtimeadapter.NewLocalGPUInventory()
@@ -116,8 +133,16 @@ func newGPUInventoryAPIWithStore(inventory ports.GPUInventory, store ports.Workl
 			Reason:       "GPU inventory is read from the configured Kubernetes provider",
 		}
 	}
+	var specs ports.GPUSpecService
+	if len(specServices) > 0 {
+		specs = specServices[0]
+	}
+	if specs == nil {
+		specs = runtimeadapter.NewLocalGPUSpecService(inventory)
+	}
 	return &gpuInventoryAPI{
 		inventory:     inventory,
+		specs:         specs,
 		templates:     runtimeadapter.NewLocalSandboxTemplateCatalog(),
 		instanceStore: store,
 		k8sClient:     k8sClient,
@@ -125,11 +150,44 @@ func newGPUInventoryAPIWithStore(inventory ports.GPUInventory, store ports.Workl
 	}
 }
 
-func registerGPUInventoryResourcesWithStore(v1 *route.RouterGroup, inventory ports.GPUInventory, store ports.WorkloadInstanceStore, k8sClient *runtimeadapter.KubernetesRESTClient) {
-	api := newGPUInventoryAPIWithStore(inventory, store, k8sClient)
+func registerGPUInventoryResourcesWithStore(v1 *route.RouterGroup, inventory ports.GPUInventory, store ports.WorkloadInstanceStore, k8sClient *runtimeadapter.KubernetesRESTClient, specServices ...ports.GPUSpecService) {
+	api := newGPUInventoryAPIWithStore(inventory, store, k8sClient, specServices...)
 	v1.GET("/gpu-inventory", api.listGPUInventory)
 	v1.GET("/gpu-inventory/occupancy", api.getGPUOccupancy)
+	v1.GET("/gpu-specs", api.listGPUSpecs)
+	v1.GET("/gpu-specs/:spec_id", api.getGPUSpec)
 	v1.GET("/sandbox-templates", api.listSandboxTemplates)
+}
+
+func (api *gpuInventoryAPI) listGPUSpecs(ctx context.Context, c *app.RequestContext) {
+	var available *bool
+	if raw := strings.TrimSpace(c.Query("available")); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "available must be a boolean")
+			return
+		}
+		available = &value
+	}
+	items, err := api.specs.ListGPUSpecs(ctx, ports.GPUSpecListRequest{GPUType: strings.TrimSpace(c.Query("gpu_type")), Available: available, Limit: queryInt(c, "limit", 50), Cursor: c.Query("cursor")})
+	if err != nil {
+		writeGPUInventoryError(c, err)
+		return
+	}
+	response := gpuSpecListResponse{Items: make([]gpuSpecResponse, 0, len(items)), Total: len(items)}
+	for _, item := range items {
+		response.Items = append(response.Items, gpuSpecResponse{ID: item.ID, Name: item.Name, GPUType: item.GPUType, MemoryTotalMB: item.MemoryTotalMB, Shares: item.Shares, MBPerShare: item.MBPerShare, Available: item.Available})
+	}
+	c.JSON(http.StatusOK, response)
+}
+
+func (api *gpuInventoryAPI) getGPUSpec(ctx context.Context, c *app.RequestContext) {
+	item, err := api.specs.GetGPUSpec(ctx, c.Param("spec_id"))
+	if err != nil {
+		writeGPUInventoryError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gpuSpecResponse{ID: item.ID, Name: item.Name, GPUType: item.GPUType, MemoryTotalMB: item.MemoryTotalMB, Shares: item.Shares, MBPerShare: item.MBPerShare, Available: item.Available})
 }
 
 func (api *gpuInventoryAPI) listGPUInventory(ctx context.Context, c *app.RequestContext) {
@@ -383,7 +441,7 @@ func (api *gpuInventoryAPI) fetchPodOccupancyFromK8s(ctx context.Context, tenant
 	if api.k8sClient == nil {
 		return nil
 	}
-	namespace := demoTenantNamespace(tenantID)
+	namespace := instanceTenantNamespace(tenantID)
 	selector := url.QueryEscape("ani.kubercloud.io/tenant-id=" + tenantID)
 	endpoint := api.k8sClient.Host() + "/api/v1/namespaces/" + url.PathEscape(namespace) + "/pods?labelSelector=" + selector
 	body, _, err := api.k8sClient.Do(ctx, http.MethodGet, endpoint, "", nil)
@@ -429,14 +487,14 @@ func cloneRouterStringMap(input map[string]string) map[string]string {
 func writeGPUInventoryError(c *app.RequestContext, err error) {
 	switch {
 	case errors.Is(err, ports.ErrNotFound):
-		writeDemoError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
+		writeInstanceError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
 	case errors.Is(err, ports.ErrConflict):
-		writeDemoError(c, http.StatusConflict, "CONFLICT", err.Error())
+		writeInstanceError(c, http.StatusConflict, "CONFLICT", err.Error())
 	case errors.Is(err, ports.ErrInvalid):
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	case errors.Is(err, ports.ErrUnsupported):
-		writeDemoError(c, http.StatusBadRequest, "UNSUPPORTED", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "UNSUPPORTED", err.Error())
 	default:
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	}
 }

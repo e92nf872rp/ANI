@@ -1,0 +1,16 @@
+{
+  "deployment_name": "ani-sandbox-live-b",
+  "generated_at": "2026-08-01T08:33:59.476657Z",
+  "id": "instance-sandbox-live-gate",
+  "instance_id": "sandbox_1",
+  "kind": "sandbox",
+  "profile": "INSTANCE-SANDBOX-LIVE-GATE-A",
+  "runtime_class": "sandbox-kata",
+  "state_after_create": "running",
+  "state_after_delete": "deleted",
+  "state_after_pause": "stopped",
+  "state_after_resume": "running",
+  "status": "passed",
+  "subresources": "local-session-deferred",
+  "write_path": "Core /api/v1/instances"
+}

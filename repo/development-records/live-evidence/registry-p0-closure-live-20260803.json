@@ -1,0 +1,56 @@
+{
+  "artifact_push": {
+    "source": "repository/tag supplied without --source-image",
+    "status": "preseeded"
+  },
+  "cleanup": {
+    "resources": [
+      "instance/inst_478514d7-f937-4c19-b746-229c8aab4a27",
+      "secret/ani-tenant-11111111-1111-1111-1111-111111111111/ani-registry-p0-pull-150914"
+    ],
+    "status": "deleted"
+  },
+  "delete_tag_status": 409,
+  "generated_at": "2026-08-03T07:09:16.296225Z",
+  "id": "registry-p0-closure-live-gate",
+  "image_digest_prefix": "sha256:1d40e3eb3bf4",
+  "instance_create_status": 201,
+  "instance_id": "inst_478514d7-f937-4c19-b746-229c8aab4a27",
+  "kubernetes_secret_type": "kubernetes.io/dockerconfigjson",
+  "production_shape": {
+    "missing_items": [],
+    "proof_items": [
+      "production_gateway",
+      "harbor_real_provider",
+      "purpose_filter",
+      "scan_status",
+      "instance_reference",
+      "delete_tag_409",
+      "kubernetes_pull_secret"
+    ],
+    "status": "passed",
+    "transport_profile": "production_gateway_to_harbor_scan_reference_and_kubernetes_secret"
+  },
+  "profile": "REGISTRY-P0-CLOSURE-A",
+  "project_create_status": 409,
+  "project_found": true,
+  "project_list_status": 200,
+  "pull_secret_ref": "ani-tenant-11111111-1111-1111-1111-111111111111/ani-registry-p0-pull-150914",
+  "pull_secret_status": 201,
+  "purpose_filter": "container",
+  "push_instructions_status": 200,
+  "references_count": 1,
+  "registry_host_observed": true,
+  "response_hashes": {
+    "images": "1f56d35ffbf56b67",
+    "references": "8ac06c1377a4f6e5",
+    "scan_result": "536c8842fd51dbab"
+  },
+  "scan_critical": 0,
+  "scan_high": 0,
+  "scan_list_status": "complete",
+  "scan_report_provider": "harbor-trivy",
+  "scan_report_status": 200,
+  "scan_result_status": "complete",
+  "status": "passed"
+}

@@ -1,0 +1,57 @@
+{
+  "profile": "INSTANCE-SANDBOX-CHECKPOINT-LIVE-GATE-A",
+  "status": "passed",
+  "image": "docker.changqingyun.cn/ani/ani-gateway:instance-sandbox-checkpoint-20260802-v1",
+  "image_digest": "sha256:e6ca3965932cd0ca092a195b401f87829d08b8f27bef5c5c234d7656f81c20e8",
+  "network_profile": "default",
+  "storage_class": "ani-rbd-ssd",
+  "volume_snapshot_class": "csi-rbdplugin-snapclass",
+  "checks": [
+    {
+      "id": "sandbox-workspace-pvc-bound",
+      "status": "passed",
+      "detail": "new Sandbox workspace used a Bound 5Gi RBD PVC"
+    },
+    {
+      "id": "checkpoint-create-ready",
+      "status": "passed",
+      "detail": "filesystem checkpoint reached readyToUse with a 5Gi restore size"
+    },
+    {
+      "id": "checkpoint-list-after-gateway-restart",
+      "status": "passed",
+      "detail": "checkpoint list remained available after Gateway rollout restart"
+    },
+    {
+      "id": "workspace-restore-content",
+      "status": "passed",
+      "detail": "source content changed from version-2 back to version-1"
+    },
+    {
+      "id": "checkpoint-clone-content",
+      "status": "passed",
+      "detail": "clone used a snapshot-backed PVC and read version-1"
+    },
+    {
+      "id": "keep-memory-capability-422",
+      "status": "passed",
+      "detail": "keep_memory=true returned 422 and did not create a snapshot"
+    },
+    {
+      "id": "legacy-emptydir-capability-422",
+      "status": "passed",
+      "detail": "an existing Deployment-only Sandbox record returned 422"
+    },
+    {
+      "id": "postgres-task-persistence",
+      "status": "passed",
+      "detail": "checkpoint create and restore tasks remained completed after restart and instance deletion"
+    },
+    {
+      "id": "sandbox-checkpoint-cleanup",
+      "status": "passed",
+      "detail": "source and clone Deployment, Pod, PVC, and managed VolumeSnapshot resources reached zero"
+    }
+  ],
+  "infrastructure_observation": "ceph-csi required explicit VolumeSnapshot status subresource permissions; the minimal RBAC manifest is included in the gate"
+}
