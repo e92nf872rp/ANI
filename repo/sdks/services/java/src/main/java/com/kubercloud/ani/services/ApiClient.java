@@ -289,6 +289,8 @@ public final class ApiClient {
         "listKnowledgeBaseSessions",
         "listModels",
         "listSandboxes",
+        "listTenantPlans",
+        "listTenantPlanAuditLogs",
         "listWebhookDeliveries"
     ));
     public static final List<String> ERROR_CODES = Collections.unmodifiableList(Arrays.asList(

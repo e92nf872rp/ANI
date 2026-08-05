@@ -1753,9 +1753,8 @@ export interface components {
         };
         TenantPlanListResponse: {
             items: components["schemas"]["TenantPlanListItem"][];
-            total: number;
-            page: number;
-            page_size: number;
+            /** @description 下一页游标；null 表示已无更多数据 */
+            next_cursor?: string | null;
         };
         CreateTenantPlanRequest: {
             /**
@@ -1834,7 +1833,7 @@ export interface components {
             action: string;
             resource: string;
             /** @enum {string} */
-            result: "success" | "failed";
+            result: "success" | "failure";
             details?: {
                 [key: string]: unknown;
             } | null;
@@ -1845,9 +1844,8 @@ export interface components {
         };
         PlanAuditLogListResponse: {
             items: components["schemas"]["PlanAuditLog"][];
-            total: number;
-            page: number;
-            page_size: number;
+            /** @description 下一页游标；null 表示已无更多数据 */
+            next_cursor?: string | null;
         };
         IdempotentResult: {
             /** Format: uuid */
@@ -3734,8 +3732,10 @@ export interface operations {
     listTenantPlans: {
         parameters: {
             query?: {
-                page?: number;
-                page_size?: number;
+                /** @description 每页数量 */
+                limit?: number;
+                /** @description 上一页返回的 next_cursor */
+                cursor?: string;
                 status?: "draft" | "active" | "disabled";
                 /** @description 模糊匹配 name */
                 search?: string;
@@ -3995,11 +3995,13 @@ export interface operations {
     listTenantPlanAuditLogs: {
         parameters: {
             query?: {
-                page?: number;
-                page_size?: number;
+                /** @description 每页数量 */
+                limit?: number;
+                /** @description 上一页返回的 next_cursor */
+                cursor?: string;
                 /** @description 过滤操作类型 */
                 action?: string;
-                result?: "success" | "failed";
+                result?: "success" | "failure";
             };
             header?: never;
             path: {

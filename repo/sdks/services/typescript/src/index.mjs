@@ -267,6 +267,8 @@ export const cursorPaginationOperations = [
   "listKnowledgeBaseSessions",
   "listModels",
   "listSandboxes",
+  "listTenantPlans",
+  "listTenantPlanAuditLogs",
   "listWebhookDeliveries"
 ];
 export const errorCodes = [

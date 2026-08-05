@@ -282,6 +282,8 @@ var CursorPaginationOperations = []string{
 	"listKnowledgeBaseSessions",
 	"listModels",
 	"listSandboxes",
+	"listTenantPlans",
+	"listTenantPlanAuditLogs",
 	"listWebhookDeliveries",
 }
 var ErrorCodes = []string{

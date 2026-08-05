@@ -569,6 +569,8 @@
     "listKnowledgeBaseSessions",
     "listModels",
     "listSandboxes",
+    "listTenantPlans",
+    "listTenantPlanAuditLogs",
     "listWebhookDeliveries"
   ],
   "errorCodes": [

@@ -4740,6 +4740,7 @@ schemas:
         - filesystem.mount
         - filesystem.unmount
         - vector_store.index.rebuild
+        - vector_store.document.insert
         - sandbox.checkpoint.create
         - sandbox.checkpoint.restore
         - sandbox.code_run.create

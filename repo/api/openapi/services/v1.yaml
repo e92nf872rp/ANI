@@ -726,12 +726,10 @@ components:
 
     TenantPlanListResponse:
       type: object
-      required: [items, total, page, page_size]
+      required: [items]
       properties:
-        items:     { type: array, items: { $ref: '#/components/schemas/TenantPlanListItem' } }
-        total:     { type: integer }
-        page:      { type: integer }
-        page_size: { type: integer }
+        items:       { type: array, items: { $ref: '#/components/schemas/TenantPlanListItem' } }
+        next_cursor: { type: string, nullable: true, description: "下一页游标；null 表示已无更多数据" }
 
     CreateTenantPlanRequest:
       type: object
@@ -810,7 +808,7 @@ components:
         request_id:   { type: string, format: uuid, nullable: true }
         action:       { type: string }
         resource:     { type: string }
-        result:       { type: string, enum: [success, failed] }
+        result:       { type: string, enum: [success, failure] }
         details:      { type: object, additionalProperties: true, nullable: true }
         ip_address:   { type: string, nullable: true }
         user_agent:   { type: string, nullable: true }
@@ -818,12 +816,10 @@ components:
 
     PlanAuditLogListResponse:
       type: object
-      required: [items, total, page, page_size]
+      required: [items]
       properties:
-        items:     { type: array, items: { $ref: '#/components/schemas/PlanAuditLog' } }
-        total:     { type: integer }
-        page:      { type: integer }
-        page_size: { type: integer }
+        items:       { type: array, items: { $ref: '#/components/schemas/PlanAuditLog' } }
+        next_cursor: { type: string, nullable: true, description: "下一页游标；null 表示已无更多数据" }
 
     IdempotentResult:
       type: object
@@ -2074,8 +2070,8 @@ paths:
       summary: 查询套餐列表
       tags: [TenantPlans]
       parameters:
-        - { name: page, in: query, schema: { type: integer, default: 1, minimum: 1 } }
-        - { name: page_size, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 }, description: "每页数量" }
+        - { name: cursor, in: query, schema: { type: string }, description: "上一页返回的 next_cursor" }
         - { name: status, in: query, schema: { type: string, enum: [draft, active, disabled] } }
         - { name: search, in: query, schema: { type: string }, description: "模糊匹配 name" }
       responses:
@@ -2257,10 +2253,10 @@ paths:
       tags: [TenantPlans]
       parameters:
         - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: page, in: query, schema: { type: integer, default: 1, minimum: 1 } }
-        - { name: page_size, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 }, description: "每页数量" }
+        - { name: cursor, in: query, schema: { type: string }, description: "上一页返回的 next_cursor" }
         - { name: action, in: query, schema: { type: string }, description: "过滤操作类型" }
-        - { name: result, in: query, schema: { type: string, enum: [success, failed] } }
+        - { name: result, in: query, schema: { type: string, enum: [success, failure] } }
       responses:
         "200":
           description: 操作历史列表

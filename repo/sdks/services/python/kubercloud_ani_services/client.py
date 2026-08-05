@@ -271,6 +271,8 @@ CURSOR_PAGINATION_OPERATIONS = [
     "listKnowledgeBaseSessions",
     "listModels",
     "listSandboxes",
+    "listTenantPlans",
+    "listTenantPlanAuditLogs",
     "listWebhookDeliveries"
 ]
 ERROR_CODES = [
