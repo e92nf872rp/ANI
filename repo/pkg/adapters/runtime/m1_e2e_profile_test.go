@@ -23,7 +23,7 @@ func TestM1E2EProfileVMContainerAndGPUContainer(t *testing.T) {
 			},
 		},
 	})
-	assertE2ELifecycle(t, service, vm.Ref.InstanceID)
+	assertE2ELifecycle(t, service, vm.Ref.InstanceID, ports.WorkloadKindVM)
 	assertE2EQuery(t, service, vm.Ref.InstanceID, ports.WorkloadKindVM)
 	if _, err := service.Ops(context.Background(), ports.WorkloadInstanceOpsRequest{
 		TenantID:        "tenant-a",
@@ -42,7 +42,7 @@ func TestM1E2EProfileVMContainerAndGPUContainer(t *testing.T) {
 		Kind:     ports.WorkloadKindContainer,
 		Image:    "harbor/app:1",
 	})
-	assertE2ELifecycle(t, service, container.Ref.InstanceID)
+	assertE2ELifecycle(t, service, container.Ref.InstanceID, ports.WorkloadKindContainer)
 	assertE2EQuery(t, service, container.Ref.InstanceID, ports.WorkloadKindContainer)
 	assertE2EOps(t, service, container.Ref.InstanceID, ports.WorkloadInstanceOpsLogs)
 	assertE2EOps(t, service, container.Ref.InstanceID, ports.WorkloadInstanceOpsTerminal)
@@ -59,7 +59,7 @@ func TestM1E2EProfileVMContainerAndGPUContainer(t *testing.T) {
 			},
 		},
 	})
-	assertE2ELifecycle(t, service, gpu.Ref.InstanceID)
+	assertE2ELifecycle(t, service, gpu.Ref.InstanceID, ports.WorkloadKindGPUContainer)
 	assertE2EQuery(t, service, gpu.Ref.InstanceID, ports.WorkloadKindGPUContainer)
 	assertE2EOps(t, service, gpu.Ref.InstanceID, ports.WorkloadInstanceOpsMetrics)
 	assertE2EOps(t, service, gpu.Ref.InstanceID, ports.WorkloadInstanceOpsExec)
@@ -86,6 +86,7 @@ func newM1E2EService() ports.WorkloadInstanceService {
 func createE2EInstance(t *testing.T, service ports.WorkloadInstanceService, spec ports.WorkloadSpec) ports.WorkloadInstanceCreateResult {
 	t.Helper()
 	result, err := service.Create(context.Background(), ports.WorkloadInstanceCreateRequest{
+		IdempotencyKey:  "create-" + string(spec.Kind) + "-" + spec.Name,
 		Spec:            spec,
 		UserID:          "user-a",
 		PermissionProof: "rbac:create:workload",
@@ -105,9 +106,10 @@ func createE2EInstance(t *testing.T, service ports.WorkloadInstanceService, spec
 	return result
 }
 
-func assertE2ELifecycle(t *testing.T, service ports.WorkloadInstanceService, instanceID string) {
+func assertE2ELifecycle(t *testing.T, service ports.WorkloadInstanceService, instanceID string, kind ports.WorkloadKind) {
 	t.Helper()
 	stop, err := service.Stop(context.Background(), ports.WorkloadInstanceLifecycleRequest{
+		IdempotencyKey:  "stop-" + instanceID,
 		TenantID:        "tenant-a",
 		InstanceID:      instanceID,
 		UserID:          "user-a",
@@ -120,6 +122,7 @@ func assertE2ELifecycle(t *testing.T, service ports.WorkloadInstanceService, ins
 		t.Fatalf("Stop(%s) state = %s, want stopped", instanceID, stop.Status.State)
 	}
 	start, err := service.Start(context.Background(), ports.WorkloadInstanceLifecycleRequest{
+		IdempotencyKey:  "start-" + instanceID,
 		TenantID:        "tenant-a",
 		InstanceID:      instanceID,
 		UserID:          "user-a",
@@ -132,6 +135,7 @@ func assertE2ELifecycle(t *testing.T, service ports.WorkloadInstanceService, ins
 		t.Fatalf("Start(%s) state = %s, want running", instanceID, start.Status.State)
 	}
 	restart, err := service.Restart(context.Background(), ports.WorkloadInstanceLifecycleRequest{
+		IdempotencyKey:  "restart-" + instanceID,
 		TenantID:        "tenant-a",
 		InstanceID:      instanceID,
 		UserID:          "user-a",
@@ -143,7 +147,25 @@ func assertE2ELifecycle(t *testing.T, service ports.WorkloadInstanceService, ins
 	if restart.Status.State != ports.WorkloadStateRunning {
 		t.Fatalf("Restart(%s) state = %s, want running", instanceID, restart.Status.State)
 	}
+	expectedResizeState := ports.WorkloadStateRunning
+	if kind == ports.WorkloadKindVM {
+		stopped, err := service.Stop(context.Background(), ports.WorkloadInstanceLifecycleRequest{
+			IdempotencyKey:  "stop-for-resize-" + instanceID,
+			TenantID:        "tenant-a",
+			InstanceID:      instanceID,
+			UserID:          "user-a",
+			PermissionProof: "rbac:update:workload",
+		})
+		if err != nil {
+			t.Fatalf("Stop before resize(%s) error = %v", instanceID, err)
+		}
+		if stopped.Status.State != ports.WorkloadStateStopped {
+			t.Fatalf("Stop before resize(%s) state = %s, want stopped", instanceID, stopped.Status.State)
+		}
+		expectedResizeState = ports.WorkloadStateStopped
+	}
 	resize, err := service.Resize(context.Background(), ports.WorkloadInstanceResizeRequest{
+		IdempotencyKey:  "resize-" + instanceID,
 		TenantID:        "tenant-a",
 		InstanceID:      instanceID,
 		UserID:          "user-a",
@@ -156,8 +178,8 @@ func assertE2ELifecycle(t *testing.T, service ports.WorkloadInstanceService, ins
 	if err != nil {
 		t.Fatalf("Resize(%s) error = %v", instanceID, err)
 	}
-	if resize.Status.State != ports.WorkloadStateRunning {
-		t.Fatalf("Resize(%s) state = %s, want running", instanceID, resize.Status.State)
+	if resize.Status.State != expectedResizeState {
+		t.Fatalf("Resize(%s) state = %s, want %s", instanceID, resize.Status.State, expectedResizeState)
 	}
 }
 
@@ -205,6 +227,7 @@ func assertE2EOps(t *testing.T, service ports.WorkloadInstanceService, instanceI
 func assertE2EDelete(t *testing.T, service ports.WorkloadInstanceService, instanceID string) {
 	t.Helper()
 	result, err := service.Delete(context.Background(), ports.WorkloadInstanceLifecycleRequest{
+		IdempotencyKey:  "delete-" + instanceID,
 		TenantID:        "tenant-a",
 		InstanceID:      instanceID,
 		UserID:          "user-a",

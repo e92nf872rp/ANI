@@ -1,0 +1,90 @@
+{
+  "checks": [
+    {
+      "id": "core-storage-graph-create",
+      "status": "passed"
+    },
+    {
+      "id": "core-storage-graph-reread-after-restart",
+      "status": "passed"
+    },
+    {
+      "id": "gateway-fail-closed-database-url",
+      "status": "passed"
+    },
+    {
+      "id": "gateway-rollout-restart",
+      "status": "passed"
+    },
+    {
+      "id": "idempotency-conflict-different-intent",
+      "status": "passed"
+    },
+    {
+      "id": "idempotency-replay-no-duplicate",
+      "status": "passed"
+    },
+    {
+      "id": "provider-temp-cleanup",
+      "status": "passed"
+    },
+    {
+      "id": "soft-delete-api-hide-pg-tombstone",
+      "status": "passed"
+    }
+  ],
+  "cleanup": {
+    "namespace": "ani-tenant-11111111-1111-1111-1111-111111111111",
+    "status": "requested"
+  },
+  "conflict_status": 409,
+  "create_statuses": {
+    "bucket": 201,
+    "filesystem": 201,
+    "kb_link": 200,
+    "mount_target": 202,
+    "object": 201,
+    "snapshot": 202,
+    "vector": 201,
+    "volume": 201
+  },
+  "fail_closed_unit_proof": "gateway runtime tests require control-plane DB URL for kubernetes_rest/minio/milvus",
+  "generated_at": "2026-08-03T09:07:16.997035Z",
+  "id": "storage-control-plane-state-live-gate",
+  "namespace": "ani-tenant-11111111-1111-1111-1111-111111111111",
+  "production_shape": {
+    "missing_items": [],
+    "proof_items": [
+      "gateway_rollout_restart",
+      "pg_authority_reread",
+      "idempotency_replay",
+      "idempotency_conflict",
+      "soft_delete_tombstone"
+    ],
+    "status": "passed",
+    "transport_profile": "production_gateway_pg_storage_vector_control_plane"
+  },
+  "profile": "STORAGE-CONTROL-PLANE-STATE-A",
+  "replay_status": 201,
+  "resource_ids": {
+    "bucket_id": "5061ba3f-7538-428c-89dd-0d3740d41651",
+    "filesystem_id": "fs_696a56b5-91fd-4ee9-a247-e2b00e008fb2",
+    "mount_target_id": "mt_0250964e-daf9-479c-a6b0-b845b419e649",
+    "object_id": "obj_204e0f9f-a324-4224-9218-30c737531899",
+    "snapshot_id": "snap_c762f016-e406-4e08-b9fc-e8d26c055653",
+    "vector_store_id": "vst_0775e56c-c8ef-40c7-85c4-c056ea39fd7e",
+    "volume_id": "vol_42d05318-e763-44f8-b05a-d2f5b6f20278"
+  },
+  "response_hashes": {
+    "bucket": "aea0b2eb8d1e7df5",
+    "filesystem": "7c76e53e3bb8d7e5",
+    "vector": "0d99018745ecb225",
+    "volume": "135b3c41cd887151"
+  },
+  "status": "passed",
+  "tenant_id": "11111111-1111-1111-1111-111111111111",
+  "tombstones": {
+    "vector": "1",
+    "volume": "1"
+  }
+}

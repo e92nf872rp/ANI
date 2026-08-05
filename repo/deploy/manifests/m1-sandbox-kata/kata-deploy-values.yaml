@@ -1,0 +1,45 @@
+# Lab values for kata-deploy (ANI sandbox RuntimeClass prep).
+# Installs Kata on all Ready nodes including control-plane/worker hybrids.
+# Does not claim ANI Sandbox real-provider readiness by itself.
+
+deploymentMode: daemonset
+
+# Lab nodes cannot reliably pull quay.io (large image). Mirror used by DaemonSet:
+image:
+  reference: docker.kubercon.local/common/kata-deploy
+  tag: "4.0.0"
+imagePullPolicy: IfNotPresent
+
+# Keep install lean for the first lab pass.
+snapshotter:
+  setup: []
+
+shims:
+  disableAll: true
+  qemu:
+    enabled: true
+
+# Arch-keyed default shim (chart schema). Create alias RuntimeClass sandbox-kata.
+defaultShim:
+  amd64: qemu
+
+runtimeClasses:
+  enabled: true
+  createDefault: true
+  defaultName: sandbox-kata
+  overheadEnabled: true
+
+# node1 is control-plane+worker; tolerate so DaemonSet lands on both nodes.
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+  - key: node-role.kubernetes.io/master
+    operator: Exists
+    effect: NoSchedule
+
+# Avoid pulling/managing NFD in this lab pass; nodes already expose vmx via KubeVirt labels.
+node-feature-discovery:
+  enabled: false
+
+debug: true

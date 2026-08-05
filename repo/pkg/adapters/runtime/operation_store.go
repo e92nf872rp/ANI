@@ -366,12 +366,18 @@ func (s *MetadataOperationStore) AddOperationStep(ctx context.Context, operation
 	err := s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO workload_instance_operation_steps (
-				tenant_id, operation_id, step_name, status, message, started_at, completed_at, created_at
+				tenant_id, operation_id, step_name, status, message,
+				task_id, resource_type, resource_id,
+				started_at, completed_at, created_at
 			)
-			SELECT tenant_id, id, $2, $3, NULLIF($4, ''), $5, $6, $7
+			SELECT tenant_id, id, $2, $3, NULLIF($4, ''),
+				NULLIF($5, ''), NULLIF($6, ''), NULLIF($7, ''),
+				$8, $9, $10
 			FROM workload_instance_operations
 			WHERE id = $1::uuid
-		`, operationID, step.StepName, string(step.Status), step.Message, nullableTime(step.StartedAt), nullableTime(step.CompletedAt), step.CreatedAt)
+		`, operationID, step.StepName, string(step.Status), step.Message,
+			step.TaskID, step.ResourceType, step.ResourceID,
+			nullableTime(step.StartedAt), nullableTime(step.CompletedAt), step.CreatedAt)
 		return err
 	})
 	return step, err
@@ -523,7 +529,9 @@ func (s *MetadataOperationStore) listSteps(ctx context.Context, operationID stri
 	var steps []ports.WorkloadOperationStep
 	err := s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT step_name, status, COALESCE(message, ''), started_at, completed_at, created_at
+			SELECT step_name, status, COALESCE(message, ''),
+				COALESCE(task_id, ''), COALESCE(resource_type, ''), COALESCE(resource_id, ''),
+				started_at, completed_at, created_at
 			FROM workload_instance_operation_steps
 			WHERE operation_id = $1::uuid
 			ORDER BY created_at ASC
@@ -537,7 +545,11 @@ func (s *MetadataOperationStore) listSteps(ctx context.Context, operationID stri
 			var status string
 			var startedAt *time.Time
 			var completedAt *time.Time
-			if err := rows.Scan(&step.StepName, &status, &step.Message, &startedAt, &completedAt, &step.CreatedAt); err != nil {
+			if err := rows.Scan(
+				&step.StepName, &status, &step.Message,
+				&step.TaskID, &step.ResourceType, &step.ResourceID,
+				&startedAt, &completedAt, &step.CreatedAt,
+			); err != nil {
 				return err
 			}
 			step.Status = ports.WorkloadOperationStepStatus(status)

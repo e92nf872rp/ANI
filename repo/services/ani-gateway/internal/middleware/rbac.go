@@ -8,6 +8,7 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/app"
 	authv1 "github.com/kubercloud/ani/pkg/generated/pb/auth/v1"
+	"github.com/kubercloud/ani/pkg/security/sandboxtoken"
 )
 
 // RBAC checks whether the authenticated user has permission to access the route.
@@ -29,6 +30,14 @@ func RBACWithClient(authClient AuthClient) app.HandlerFunc {
 		}
 		tenantID := GetTenantID(c)
 		scope := GetScope(c)
+		if scope == sandboxtoken.ScopeSandbox {
+			if !sandboxTokenAllows(c, string(c.Path())) {
+				respondError(c, http.StatusForbidden, "FORBIDDEN", "sandbox token scope denied for this path")
+				return
+			}
+			c.Next(ctx)
+			return
+		}
 		if tenantID == "" && scope != "platform" {
 			// Auth middleware should have already rejected unauthenticated requests.
 			respondError(c, http.StatusForbidden, "FORBIDDEN", "tenant context missing")

@@ -1,0 +1,41 @@
+profile: INSTANCE-MANAGEMENT-LIVE-GATE-A
+status: contract
+description: >
+  Instance management live gate for proving VM lifecycle uses ANI Core
+  /api/v1/instances as the product write path. Kubernetes and KubeVirt are
+  observed read-only after Core creates or changes the instance. Sandbox is
+  intentionally separate and will be validated after VM.
+
+required_tools:
+  - kubectl
+
+required_endpoints:
+  - ani_core_instances_api
+  - kubernetes_read_api
+  - kubevirt_read_api
+
+live_checks:
+  - id: core-instance-vm-create
+    command: POST /api/v1/instances kind=vm
+    pass_condition: vm_create_returns_instance_and_operation_from_real_provider
+  - id: core-instance-vm-running
+    command: GET /api/v1/instances/{instance_id}
+    pass_condition: instance_reaches_running_state
+  - id: kubevirt-vm-read-observe
+    command: kubectl get virtualmachines {instance_id} -n {namespace} -o json
+    pass_condition: virtualmachine_exists_after_core_create
+  - id: kubevirt-vmi-read-observe
+    command: kubectl get virtualmachineinstances {instance_id} -n {namespace} -o json
+    pass_condition: virtualmachineinstance_reports_phase_and_node
+  - id: core-instance-vm-console-vnc
+    command: POST /api/v1/instances/{instance_id}/console protocol=vnc and protocol=console
+    pass_condition: core_returns_short_lived_console_sessions
+  - id: core-instance-vm-stop
+    command: POST /api/v1/instances/{instance_id}/lifecycle action=stop
+    pass_condition: stop_operation_accepted_through_core_api
+  - id: core-instance-vm-start
+    command: POST /api/v1/instances/{instance_id}/lifecycle action=start
+    pass_condition: start_operation_accepted_through_core_api
+  - id: core-instance-vm-delete
+    command: POST /api/v1/instances/{instance_id}/lifecycle action=delete
+    pass_condition: delete_operation_accepted_through_core_api

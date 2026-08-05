@@ -1,0 +1,55 @@
+{
+  "cleanup": {
+    "provider_resources_remaining": 0,
+    "status": "deleted"
+  },
+  "executed_at": "2026-07-30",
+  "gateway_image": "docker.changqingyun.cn/ani/ani-gateway:instance-e2e-20260730-v6",
+  "id": "instance-management-container-e2e-20260730",
+  "production_shape": {
+    "missing_items": [
+      "instance_registry_admission",
+      "instance_network_selection",
+      "instance_storage_attachment_orchestration",
+      "vm_gpu_sandbox_live_gates",
+      "quota_reservation"
+    ],
+    "proof_items": [
+      "gateway_auth_service_bearer_validation",
+      "gateway_postgresql_instance_persistence",
+      "gateway_kubernetes_rest_provider",
+      "harbor_internal_image_pull",
+      "kubeovn_pod_address",
+      "instance_operation_persistence",
+      "container_stop_start",
+      "multi_resource_delete_cleanup",
+      "deleted_terminal_state_survives_reconcile"
+    ],
+    "status": "partial",
+    "transport_profile": "production_gateway_in_cluster_serviceaccount"
+  },
+  "profile": "INSTANCE-PORTS-SERVICE-A",
+  "reconcile_worker_image": "docker.changqingyun.cn/ani/reconcile-worker:instance-e2e-20260730-v2",
+  "results": {
+    "cluster_network_ip_assigned": true,
+    "create_http_status": 201,
+    "create_operation_status": "succeeded",
+    "delete_state": "deleted",
+    "harbor_image_pull": true,
+    "operation_types": [
+      "create",
+      "delete",
+      "start",
+      "stop"
+    ],
+    "pod_running": true,
+    "post_reconcile_state": "deleted",
+    "post_reconcile_wait_seconds": 50,
+    "provider": "kubernetes",
+    "real_provider": true,
+    "start_state": "running",
+    "stop_state": "stopped"
+  },
+  "scope": "container base lifecycle only",
+  "status": "passed"
+}

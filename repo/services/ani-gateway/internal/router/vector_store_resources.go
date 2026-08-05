@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/route"
@@ -15,6 +16,7 @@ import (
 
 type vectorStoreAPI struct {
 	service ports.VectorStoreService
+	tasks   ports.AsyncTaskStore
 }
 
 type createVectorStoreRequest struct {
@@ -107,19 +109,26 @@ func newVectorStoreAPI() *vectorStoreAPI {
 	return newVectorStoreAPIWithService(nil)
 }
 
-func registerVectorStoreResources(v1 *route.RouterGroup) {
-	registerVectorStoreResourcesWithService(v1, nil)
+func newVectorStoreAPIWithService(service ports.VectorStoreService) *vectorStoreAPI {
+	return newVectorStoreAPIWithServiceAndTasks(service, defaultTaskStore)
 }
 
-func newVectorStoreAPIWithService(service ports.VectorStoreService) *vectorStoreAPI {
+func newVectorStoreAPIWithServiceAndTasks(service ports.VectorStoreService, tasks ports.AsyncTaskStore) *vectorStoreAPI {
 	if service == nil {
 		service = runtimeadapter.NewLocalVectorStoreService()
 	}
-	return &vectorStoreAPI{service: service}
+	if tasks == nil {
+		tasks = defaultTaskStore
+	}
+	return &vectorStoreAPI{service: service, tasks: tasks}
 }
 
 func registerVectorStoreResourcesWithService(v1 *route.RouterGroup, service ports.VectorStoreService) {
-	api := newVectorStoreAPIWithService(service)
+	registerVectorStoreResourcesWithServiceAndTasks(v1, service, defaultTaskStore)
+}
+
+func registerVectorStoreResourcesWithServiceAndTasks(v1 *route.RouterGroup, service ports.VectorStoreService, tasks ports.AsyncTaskStore) {
+	api := newVectorStoreAPIWithServiceAndTasks(service, tasks)
 	v1.GET("/vector-stores", api.listVectorStores)
 	v1.POST("/vector-stores", api.createVectorStore)
 	v1.GET("/vector-stores/:vector_store_id", api.getVectorStore)
@@ -136,11 +145,11 @@ func registerVectorStoreResourcesWithService(v1 *route.RouterGroup, service port
 func (api *vectorStoreAPI) createVectorStore(ctx context.Context, c *app.RequestContext) {
 	var req createVectorStoreRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid vector store request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid vector store request")
 		return
 	}
 	record, err := api.service.CreateVectorStore(ctx, ports.VectorStoreCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
 		Dimension:      req.Dimension,
@@ -155,7 +164,7 @@ func (api *vectorStoreAPI) createVectorStore(ctx context.Context, c *app.Request
 }
 
 func (api *vectorStoreAPI) listVectorStores(ctx context.Context, c *app.RequestContext) {
-	records, err := api.service.ListVectorStores(ctx, ports.VectorStoreResourceListRequest{TenantID: demoTenantID(c)})
+	records, err := api.service.ListVectorStores(ctx, ports.VectorStoreResourceListRequest{TenantID: instanceTenantID(c)})
 	if err != nil {
 		writeVectorStoreError(c, err)
 		return
@@ -168,7 +177,7 @@ func (api *vectorStoreAPI) listVectorStores(ctx context.Context, c *app.RequestC
 }
 
 func (api *vectorStoreAPI) getVectorStore(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.GetVectorStore(ctx, ports.VectorStoreResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("vector_store_id")})
+	record, err := api.service.GetVectorStore(ctx, ports.VectorStoreResourceGetRequest{TenantID: instanceTenantID(c), ResourceID: c.Param("vector_store_id")})
 	if err != nil {
 		writeVectorStoreError(c, err)
 		return
@@ -177,7 +186,7 @@ func (api *vectorStoreAPI) getVectorStore(ctx context.Context, c *app.RequestCon
 }
 
 func (api *vectorStoreAPI) deleteVectorStore(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.DeleteVectorStore(ctx, ports.VectorStoreResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("vector_store_id")})
+	record, err := api.service.DeleteVectorStore(ctx, ports.VectorStoreResourceGetRequest{TenantID: instanceTenantID(c), ResourceID: c.Param("vector_store_id")})
 	if err != nil {
 		writeVectorStoreError(c, err)
 		return
@@ -188,11 +197,11 @@ func (api *vectorStoreAPI) deleteVectorStore(ctx context.Context, c *app.Request
 func (api *vectorStoreAPI) searchVectorStore(ctx context.Context, c *app.RequestContext) {
 	var req searchVectorStoreRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid vector search request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid vector search request")
 		return
 	}
 	results, err := api.service.SearchVectorStore(ctx, ports.VectorStoreResourceSearchRequest{
-		TenantID:   demoTenantID(c),
+		TenantID:   instanceTenantID(c),
 		ResourceID: c.Param("vector_store_id"),
 		Vector:     req.Vector,
 		TopK:       req.TopK,
@@ -216,15 +225,15 @@ func (api *vectorStoreAPI) searchVectorStore(ctx context.Context, c *app.Request
 func (api *vectorStoreAPI) rebuildVectorStoreIndex(ctx context.Context, c *app.RequestContext) {
 	var req vectorStoreRebuildIndexRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid vector store rebuild request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid vector store rebuild request")
 		return
 	}
 	if strings.TrimSpace(req.IdempotencyKey) == "" {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
 		return
 	}
 	record, err := api.service.RebuildVectorStoreIndex(ctx, ports.VectorStoreRebuildIndexRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		ResourceID:     c.Param("vector_store_id"),
 		IdempotencyKey: req.IdempotencyKey,
 	})
@@ -233,17 +242,17 @@ func (api *vectorStoreAPI) rebuildVectorStoreIndex(ctx context.Context, c *app.R
 		return
 	}
 	task := storageCompletedTask("vector_store.index.rebuild", "vector_store", req.IdempotencyKey, map[string]any{"vector_store": vectorStoreFromRecord(record)}, record.UpdatedAt)
-	storageWriteAcceptedTask(c, task)
+	storageWriteAcceptedTask(ctx, c, api.tasks, task)
 }
 
 func (api *vectorStoreAPI) setVectorStoreKnowledgeBaseLink(ctx context.Context, c *app.RequestContext) {
 	var req vectorStoreKnowledgeBaseLinkRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid vector store knowledge base link request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid vector store knowledge base link request")
 		return
 	}
 	record, err := api.service.SetVectorStoreKnowledgeBaseLink(ctx, ports.VectorStoreKnowledgeBaseLinkRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		ResourceID:     c.Param("vector_store_id"),
 		IdempotencyKey: req.IdempotencyKey,
 		KnowledgeBaseRef: ports.VectorStoreKnowledgeBaseRef{
@@ -260,7 +269,7 @@ func (api *vectorStoreAPI) setVectorStoreKnowledgeBaseLink(ctx context.Context, 
 }
 
 func (api *vectorStoreAPI) deleteVectorStoreKnowledgeBaseLink(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.DeleteVectorStoreKnowledgeBaseLink(ctx, ports.VectorStoreResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("vector_store_id")})
+	record, err := api.service.DeleteVectorStoreKnowledgeBaseLink(ctx, ports.VectorStoreResourceGetRequest{TenantID: instanceTenantID(c), ResourceID: c.Param("vector_store_id")})
 	if err != nil {
 		writeVectorStoreError(c, err)
 		return
@@ -269,7 +278,7 @@ func (api *vectorStoreAPI) deleteVectorStoreKnowledgeBaseLink(ctx context.Contex
 }
 
 func (api *vectorStoreAPI) precheckVectorStoreDelete(ctx context.Context, c *app.RequestContext) {
-	result, err := api.service.PrecheckVectorStoreDelete(ctx, ports.VectorStoreResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("vector_store_id")})
+	result, err := api.service.PrecheckVectorStoreDelete(ctx, ports.VectorStoreResourceGetRequest{TenantID: instanceTenantID(c), ResourceID: c.Param("vector_store_id")})
 	if err != nil {
 		writeVectorStoreError(c, err)
 		return
@@ -280,7 +289,7 @@ func (api *vectorStoreAPI) precheckVectorStoreDelete(ctx context.Context, c *app
 func (api *vectorStoreAPI) insertVectorStoreDocuments(ctx context.Context, c *app.RequestContext) {
 	var req vectorStoreDocumentInsertRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid vector document insert request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid vector document insert request")
 		return
 	}
 	documents := make([]ports.VectorDocumentInput, 0, len(req.Documents))
@@ -292,7 +301,7 @@ func (api *vectorStoreAPI) insertVectorStoreDocuments(ctx context.Context, c *ap
 		})
 	}
 	result, err := api.service.InsertDocuments(ctx, ports.VectorStoreDocumentInsertRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		ResourceID:     c.Param("vector_store_id"),
 		IdempotencyKey: req.IdempotencyKey,
 		Documents:      documents,
@@ -301,40 +310,59 @@ func (api *vectorStoreAPI) insertVectorStoreDocuments(ctx context.Context, c *ap
 		writeVectorStoreError(c, err)
 		return
 	}
-	c.Response.Header.Set("Location", "/api/v1/tasks/"+result.TaskID)
-	c.JSON(http.StatusAccepted, vectorStoreDocumentInsertFromResult(result))
+	task := storageCompletedTask(
+		"vector_store.document.insert",
+		"vector_store",
+		req.IdempotencyKey,
+		map[string]any{
+			"vector_store_id": c.Param("vector_store_id"),
+			"inserted_count":  result.InsertedCount,
+		},
+		time.Time{},
+		result.TaskID,
+	)
+	createdTask, _, err := api.tasks.Create(ctx, taskRecordFromResponse(instanceTenantID(c), task))
+	if err != nil {
+		writeInstanceError(c, http.StatusInternalServerError, "TASK_PERSIST_FAILED", err.Error())
+		return
+	}
+	response := vectorStoreDocumentInsertFromResult(result)
+	response.TaskID = createdTask.ID
+	response.Status = createdTask.Status
+	c.Response.Header.Set("Location", "/api/v1/tasks/"+createdTask.ID)
+	c.JSON(http.StatusAccepted, response)
 }
 
 func (api *vectorStoreAPI) deleteVectorStoreDocuments(ctx context.Context, c *app.RequestContext) {
 	filter := strings.TrimSpace(string(c.QueryArgs().Peek("filter")))
 	if filter == "" {
-		writeDemoError(c, http.StatusBadRequest, "INVALID_FILTER", "filter 表达式不能为空")
+		writeInstanceError(c, http.StatusBadRequest, "INVALID_FILTER", "filter 表达式不能为空")
 		return
 	}
 	if len(filter) > 512 {
-		writeDemoError(c, http.StatusBadRequest, "INVALID_FILTER", "filter 表达式长度不能超过 512")
+		writeInstanceError(c, http.StatusBadRequest, "INVALID_FILTER", "filter 表达式长度不能超过 512")
 		return
 	}
 	result, err := api.service.DeleteDocuments(ctx, ports.VectorStoreDocumentDeleteRequest{
-		TenantID:   demoTenantID(c),
+		TenantID:   instanceTenantID(c),
 		ResourceID: c.Param("vector_store_id"),
 		Filter:     filter,
 	})
 	if err != nil {
 		if errors.Is(err, ports.ErrNotFound) {
-			writeDemoError(c, http.StatusNotFound, "VECTOR_STORE_NOT_FOUND", "向量存储不存在")
+			writeInstanceError(c, http.StatusNotFound, "VECTOR_STORE_NOT_FOUND", "向量存储不存在")
 			return
 		}
 		if errors.Is(err, ports.ErrFailedPrecondition) {
-			writeDemoError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", err.Error())
+			writeInstanceError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", err.Error())
 			return
 		}
 		if errors.Is(err, ports.ErrUnavailable) {
-			writeDemoError(c, http.StatusServiceUnavailable, "UNAVAILABLE", err.Error())
+			writeInstanceError(c, http.StatusServiceUnavailable, "UNAVAILABLE", err.Error())
 			return
 		}
 		if errors.Is(err, ports.ErrInvalid) {
-			writeDemoError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", "filter 表达式非法")
+			writeInstanceError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", "filter 表达式非法")
 			return
 		}
 		writeVectorStoreError(c, err)
@@ -421,16 +449,16 @@ func stringMetadata(metadata map[string]any) map[string]string {
 func writeVectorStoreError(c *app.RequestContext, err error) {
 	switch {
 	case errors.Is(err, ports.ErrNotFound):
-		writeDemoError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
+		writeInstanceError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
 	case errors.Is(err, ports.ErrUnavailable):
-		writeDemoError(c, http.StatusServiceUnavailable, "UNAVAILABLE", err.Error())
+		writeInstanceError(c, http.StatusServiceUnavailable, "UNAVAILABLE", err.Error())
 	case errors.Is(err, ports.ErrUnsupported):
-		writeDemoError(c, http.StatusBadRequest, "UNSUPPORTED", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "UNSUPPORTED", err.Error())
 	case errors.Is(err, ports.ErrFailedPrecondition):
-		writeDemoError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", err.Error())
+		writeInstanceError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", err.Error())
 	case errors.Is(err, ports.ErrInvalid):
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	default:
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	}
 }

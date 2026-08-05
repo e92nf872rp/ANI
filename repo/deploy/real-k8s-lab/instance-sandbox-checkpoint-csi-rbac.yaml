@@ -1,0 +1,27 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ani-rook-rbd-csi-snapshot-status
+  labels:
+    ani.deploy/profile: real-k8s-lab
+    ani.kubercloud.io/gate: instance-sandbox-checkpoint
+rules:
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshotcontents/status", "volumesnapshots/status"]
+    verbs: ["patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ani-rook-rbd-csi-snapshot-status
+  labels:
+    ani.deploy/profile: real-k8s-lab
+    ani.kubercloud.io/gate: instance-sandbox-checkpoint
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ani-rook-rbd-csi-snapshot-status
+subjects:
+  - kind: ServiceAccount
+    name: ceph-csi
+    namespace: rook-ceph

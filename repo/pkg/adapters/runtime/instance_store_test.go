@@ -16,12 +16,40 @@ func TestMetadataInstanceStoreUpsertsStatus(t *testing.T) {
 	}))
 
 	err := store.UpsertStatus(context.Background(), ports.WorkloadInstanceRecord{
-		TenantID:   "5dbb1d01-0000-4000-8000-000000000001",
-		InstanceID: "inst_1",
-		Name:       "app-01",
-		Kind:       ports.WorkloadKindContainer,
-		Provider:   "kubernetes",
-		AuditID:    "5dbb1d01-0000-4000-8000-000000000002",
+		TenantID:    "5dbb1d01-0000-4000-8000-000000000001",
+		InstanceID:  "inst_1",
+		Name:        "app-01",
+		Description: "approved instance summary",
+		Labels:      map[string]string{"team": "platform"},
+		Kind:        ports.WorkloadKindContainer,
+		Provider:    "kubernetes",
+		AuditID:     "5dbb1d01-0000-4000-8000-000000000002",
+		Image: ports.InstanceImageSummary{
+			ID:     "image-a",
+			Ref:    "harbor/app@sha256:abc",
+			Digest: "sha256:abc",
+		},
+		Compute: ports.InstanceComputeSummary{
+			CPU:    "4",
+			Memory: "16Gi",
+			SpecID: "gpu-spec-a",
+		},
+		Network: ports.InstanceNetworkSummary{
+			VPCID:     "vpc-a",
+			SubnetID:  "subnet-a",
+			PrivateIP: "10.20.0.8",
+		},
+		Access: ports.InstanceAccessSummary{
+			ExecAvailable: true,
+		},
+		StorageAttachments: []ports.WorkloadStorageAttachment{
+			{
+				ResourceType: "volume",
+				ResourceID:   "volume-a",
+				Status:       "attached",
+				TaskID:       "task-a",
+			},
+		},
 		Lifecycle: ports.InstanceLifecyclePolicy{
 			TerminationProtection: true,
 		},
@@ -88,6 +116,20 @@ func TestMetadataInstanceStoreUpsertsStatus(t *testing.T) {
 	if !strings.Contains(tx.sql, "gpu_status") {
 		t.Fatalf("sql = %q, want gpu status persistence", tx.sql)
 	}
+	for _, column := range []string{
+		"description",
+		"labels",
+		"image_summary",
+		"compute_summary",
+		"network_summary",
+		"access_summary",
+		"storage_attachments",
+		"sandbox_status",
+	} {
+		if !strings.Contains(tx.sql, column) {
+			t.Fatalf("sql = %q, want %s persistence", tx.sql, column)
+		}
+	}
 	if got, want := tx.args[2], "app-01"; got != want {
 		t.Fatalf("name arg = %v, want %s", got, want)
 	}
@@ -128,3 +170,22 @@ func TestMetadataInstanceStoreRejectsMissingInstanceID(t *testing.T) {
 		t.Fatalf("error = %q, want instanceID", err)
 	}
 }
+
+func TestMetadataInstanceStoreNeverSelectsDeletingOrDeletedReconcileTargets(t *testing.T) {
+	tx := &fakeMetadataTx{rows: emptyMetadataRows{}}
+	store := NewMetadataInstanceStore(fakeMetadataStore{tx: tx})
+
+	if _, err := store.ListReconcileTargets(context.Background(), ports.ReconcileTargetListRequest{}); err != nil {
+		t.Fatalf("ListReconcileTargets() error = %v", err)
+	}
+	if !strings.Contains(tx.querySQL, "state NOT IN ('deleting', 'deleted')") {
+		t.Fatalf("query = %q, want deleting/deleted exclusion", tx.querySQL)
+	}
+}
+
+type emptyMetadataRows struct{}
+
+func (emptyMetadataRows) Next() bool        { return false }
+func (emptyMetadataRows) Scan(...any) error { return nil }
+func (emptyMetadataRows) Err() error        { return nil }
+func (emptyMetadataRows) Close()            {}

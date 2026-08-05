@@ -6,6 +6,12 @@
 > **当前重心：Sprint 13 / Core real provider 与 live gate 收敛。** Core Sprint 13/14 既有事实继续有效：Sprint 12 已完成 Core「Services 支撑 Handler」A/B1/B2/B3 全部 19 个 handler + 2 个 422 的 Tier1 local profile 收口；Sprint 13 S01-S07 production-shaped live gate 事实保留；Sprint14 resilience 结论仅限隔离 fixture。未跑通对应 live gate 前，不得标记 real-provider、runtime ready 或 production ready。Services PR 可在主责目录推进业务实现，但不得绕过 Core OpenAPI REST API / Core SDK、Core review 或现有架构门禁。
 > **标准状态 marker：** 真实服务器只读验证已完成；Rook-Ceph 正式部署已完成。Sprint 11 执行环境：正式部署执行环境。
 
+> **INSTANCE-SANDBOX-CHECKPOINT-A（2026-08-02）：** live passed。新 Sandbox `/workspace` 使用 5Gi RBD PVC，CSI VolumeSnapshot create/list/restore/clone、Gateway 重启后 provider list、PG create/restore task、keep_memory/legacy emptyDir 422 和删除级联清理均已在 default 网络验证。Gateway `instance-sandbox-checkpoint-20260802-v1`；evidence：`development-records/live-evidence/instance-sandbox-checkpoint-live-20260802.json`。仅 filesystem checkpoint，不含内存状态；私有 VPC 尚未打通。
+
+> **INSTANCE-SANDBOX-STATELESS-A（2026-08-02，历史前置）：** live passed。Core 使用请求级 PG 上下文、UUID、PG AsyncTaskStore、Redis DELETE/指纹/Token 过期幂等和端口摘要写回；Gateway `instance-sandbox-stateless-20260802-v1` 重启验证通过。该批次当时的 `emptyDir/checkpoint 422` 边界已由 `INSTANCE-SANDBOX-CHECKPOINT-A` 取代，历史 evidence 仍保留在 `development-records/live-evidence/instance-sandbox-stateless-live-20260802.json`。
+
+> **STORAGE-ASYNC-CORRECTNESS-A（2026-08-03）：** live passed。Core v1 Vector 文档写入保持 `202 + VectorStoreDocumentInsertResponse`，补齐 `Location` 和 `vector_store.document.insert`；任务写入 PG，Gateway rollout 后原 task ID 仍返回 200；evidence：`development-records/live-evidence/storage-async-vector-task-live-20260803.json`。
+
 > **Sprint 13（当前活跃冲刺，2026-06-19 起）：** Core real provider 与 live gate 收敛。前置 Sprint 12 已闭合 19 个 Core handler + 2 个 422；Sprint 13 不重写 Core handler，不把 Services 业务资源回流 Core API，而是在既有 `pkg/ports` / `pkg/adapters` / Gateway handler 边界接入真实组件，并形成可复跑 live gate 与 evidence JSON。历史冻结原因和历史结论仍保留在旧批次记录中，但不是当前 PR 规则。计划见 [`development-records/sprint13-real-provider-readiness-plan.md`](development-records/sprint13-real-provider-readiness-plan.md)。
 
 > **Sprint 14 计划与分支状态：** Sprint 14 Core 韧性与服务语义计划见 [`development-records/sprint14-core-resilience-plan.md`](development-records/sprint14-core-resilience-plan.md)（限流/幂等重放/超时/readyz/重试断路/降级/failover）。配套交付 Services 的前端加速设计：[`development-records/frontend-acceleration-design-for-services.md`](development-records/frontend-acceleration-design-for-services.md)。当前主线入口仍保留 Sprint 13 production-shaped 边界；`feature/sprint14-core-resilience-semantics` 已完成 Sprint14 aggregate live gate，待 PR/评审后再进入主线状态。
@@ -22,7 +28,7 @@
 | **Auth 边界** | SPRINT13-AUTH-DEX-PRODUCTION-GATE / Auth/Dex production gate 已通过；production-shaped Gateway 固定 ANI_AUTH_MODE=auth_service |
 | **执行入口** | `development-records/sprint13-real-provider-readiness-plan.md`、`development-records/README.md`、本文件验收命令 |
 | **执行环境** | 真实 provider 写操作前必须重新只读盘点并取得人工确认；evidence 不得包含凭据、服务器 IP 或完整内网端点 |
-| **最后校准日期** | 2026-07-28 |
+| **最后校准日期** | 2026-08-03 |
 
 ## Sprint 13 当前任务
 
@@ -93,8 +99,22 @@ Issue 清单：`repo/services/tasks/issues/issue-01-openapi-queue-crud.md` ~ `is
 | GPU-SPEC-CONTRACT-A | 个人仓库 CI passed，契约已确认 | 为实例 `spec_id` 提供 `GPUSpecSummary`、`GET /gpu-specs`、`GET /gpu-specs/{spec_id}` 只读契约；旧 GPU 字段 deprecated 保留；不含 handler/port/adapter/Console，不实现配额 check/acquire/release |
 | INSTANCE-CONTRACT-A | 个人仓库 CI passed，契约已确认 | 扩展统一实例创建、详情摘要、列表过滤/排序/cursor、观测 cursor 和 lifecycle/operation step；引用既有 Registry/Network/Storage/GPU Spec，不含 handler/port/adapter/Console |
 | INSTANCE-SANDBOX-CONTRACT-A | 个人仓库 CI passed，契约已确认 | 新增 Sandbox token、预览端口、文件、checkpoint 和异步 code-run 共 11 个操作；固定租户/kind、幂等、任务轮询和敏感输出审计边界；不含 handler/port/adapter/Console |
+| INSTANCE-PORTS-SERVICE-A | container E2E passed，已提交 | 已补统一实例 ports/service/metadata、Gateway PostgreSQL/Kubernetes runtime 注入和独立 reconcile-worker；真实验证 Harbor 镜像、Kubernetes Pod/Kube-OVN IP、operation、启停、删除及 reconcile 终态；与 VM/Sandbox/code-run live 同批提交；不含完整 ORCHESTRATION/配额/GPU Container live |
+| INSTANCE-MANAGEMENT-LIVE-GATE-A | VM live gate passed（2026-08-01） | `validate-instance-management-live-gate --live` 已通过；写路径 Core /api/v1/instances；镜像 `docker.kubercon.local/.../system-cirros:v1.8.2`；evidence `live-evidence/instance-management-vm-live-20260731.json`；KubeVirt 只读观测；Sandbox/GPU live 与完整编排仍属后续 |
+| INSTANCE-SANDBOX-ADAPTER-A | live passed（2026-08-01） | Kata `RuntimeClass/sandbox-kata`（kata-deploy 4.0.0）；`KubernetesSandboxRuntime` create/pause/resume/delete；Gateway `instance-sandbox-live-20260801-v2`；记录 `instance-sandbox-adapter-a.md` |
+| INSTANCE-SANDBOX-LIVE-GATE-A | live passed（2026-08-01） | create/lifecycle evidence `live-evidence/instance-sandbox-live-20260801.json`（busybox）；code-run 扩展见下一批次 |
+| INSTANCE-SANDBOX-CODERUN-A | live passed（2026-08-01） | code-run 真实 Pod exec（kubectl）；`code_run_status=succeeded`；Gateway `instance-sandbox-coderun-20260801-v1`；镜像 `sandbox-python:3.12`；evidence `live-evidence/instance-sandbox-coderun-live-20260801.json`；token/port/file/checkpoint 仍 local-session；记录 `instance-sandbox-coderun-a.md` |
+| INSTANCE-ORCHESTRATION-A | live passed（2026-08-01） | Container create-time Registry/Network/Storage 编排：OVN `logical_switch`、volume→PVC、`MountVolume`、operation steps；Gateway 共享 Network/Storage/Registry 给 Instance resolver；`validate-instance-orchestration-live-gate --live` passed；evidence `live-evidence/instance-orchestration-container-live-20260801.json`；Gateway `instance-orchestration-20260801-v3`；不含 Console/Exec/GPU/配额/Sandbox |
+| INSTANCE-SANDBOX-SUBRESOURCES-A | live passed（2026-08-01） | Sandbox files real-provider：write/list/delete → Pod `/workspace`；code-run 读回校验；Gateway `instance-sandbox-files-20260801-v1`；evidence `live-evidence/instance-sandbox-files-live-20260801.json`；token/port/checkpoint 仍 local-session；不改 v1 契约；记录 `instance-sandbox-subresources-a.md` |
+| INSTANCE-SANDBOX-FILE-SAFETY-A | local/logic verified（2026-08-02） | 独立 `emptyDir` 挂载 `/workspace`；files list/write/delete 使用目录 fd + `O_NOFOLLOW` + `dir_fd` 并拒绝多硬链接写入目标，阻断 symlink/hard-link/rename 越界；不改 v1，unsafe path 延续 400；focused/full test 与架构门禁通过，未重跑 live；记录 `instance-sandbox-file-safety-a.md` |
+| INSTANCE-SANDBOX-FILE-SAFETY-LIVE-GATE-A | live passed（2026-08-02） | 真实 Kata Pod `/workspace=emptyDir`；code-run 构造 symlink/hard-link；5 个 unsafe files 操作均返回 400，跨文件系统 hard-link blocked，外部内容 unchanged；Gateway `instance-sandbox-file-safety-20260802-v1`；evidence `live-evidence/instance-sandbox-file-safety-live-20260802.json`；checkpoint 仍 local-session；记录 `instance-sandbox-file-safety-live-gate-a.md` |
+| INSTANCE-PG-CLEAN-REVALIDATION-A | live passed（2026-08-02） | 备份后清除历史实例 PG 链路数据，空基线 API 返回 `items=[]`；重跑 Sandbox create/pause/resume/delete 及文件安全门禁通过；PG 只留当次 1 条 `deleted` Sandbox、4 条成功 operation、8 条成功 step，Kubernetes 无残留；当时发现的 provider 404 问题已由下一批次闭合；记录 `instance-pg-clean-revalidation-a.md` |
+| INSTANCE-RECONCILE-PROVIDER-404-A | live passed（2026-08-02） | 主资源 404 转 `ports.ErrNotFound`；Sandbox 逻辑 provider 与 Kubernetes 物理 ref 对齐；真实 Sandbox 集群侧删除后 Core/PG `running→failed/ProviderResourceLost`，重复 reconcile 仍稳定，Core delete 后资源残留 0；worker `instance-provider-404-20260802-v2`；evidence `live-evidence/instance-reconcile-provider-loss-live-20260802.json`；记录 `instance-reconcile-provider-404-a.md` |
+| INSTANCE-SANDBOX-PORTS-A | live passed（2026-08-02） | Sandbox preview ports real-provider：NodePort Service + `preview_url`；Endpoints + Pod 内 HTTP 校验（Kata 不兼容 port-forward / VPC 阻外部 NodePort）；Gateway `instance-sandbox-ports-20260801-v1`；evidence `live-evidence/instance-sandbox-ports-live-20260801.json`；token/checkpoint 仍 local-session；不改 v1；记录 `instance-sandbox-ports-a.md` |
+| INSTANCE-SANDBOX-TOKEN-A | live passed（2026-08-02） | Sandbox signed token：HMAC `ani.sbx.*` + Gateway Auth/RBAC 子资源鉴权；live 证明 files=200 / 再签发=403 / 错 instance=403；Gateway `instance-sandbox-token-20260802-v1`；evidence `live-evidence/instance-sandbox-token-live-20260802.json`；checkpoint 仍 local-session；不改 v1；记录 `instance-sandbox-token-a.md` |
+| INSTANCE-SANDBOX-STATELESS-A | live passed（2026-08-02） | Gateway 真实 rollout 后从 PG 恢复实例/端口/task，从 Redis 重放原请求并拒绝不同 intent；文件继续可读、既有端口可关闭；Token 过期 tombstone、checkpoint 422、pause/resume/delete 和 PG/Kubernetes 清理通过；evidence `live-evidence/instance-sandbox-stateless-live-20260802.json`；不改 v1；Pod 重建仍不保留 `emptyDir` |
 
-边界：本流程独立于既有 GPU 调度队列实现；当前只完成公开契约和生成物，不声明 GPU 规格 runtime ready、配额能力或实例管理闭环完成。
+边界：本流程独立于既有 GPU 调度队列实现；container、VM、Sandbox create/lifecycle、code-run、files（含 symlink/hard-link containment）、ports、signed token 与 Container ORCHESTRATION live 已落地，但 checkpoint、分页 result、配额和 GPU live gate 尚未完成，不声明全部实例管理 runtime ready 或 full platform production ready。
 
 ## Registry Console Flow（2026-07-22）
 
@@ -103,6 +123,8 @@ Issue 清单：`repo/services/tasks/issues/issue-01-openapi-queue-crud.md` ~ `is
 | CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A | 契约/Console schema 已完成 | 按 7.22 原型”暂不考虑 BOSS 和权限”边界，Core v1 新增 `RegistryImage.purpose`、`/registry/images?purpose=`、四类算力引用 enum 与 createInstance 镜像门禁 422 语义；仅契约，不含 handler/adapter/Console 页面实现 |
 | CORE-REGISTRY-CONSOLE-FLOW-CORE-A | Core 镜像仓库后端实现已完成 | RegistryImage purpose 贯通 port/adapter/router，`/registry/images?purpose=` 支持过滤；不含 instances、Console、BOSS 或权限实现 |
 | SPRINT13-REGISTRY-HARBOR-LIVE-A | Harbor live gate passed | `validate-registry-harbor-live-gate` 契约通过；2026-07-27 通过真实 Gateway 验证 Harbor project/list/push-instructions/pull-secret/scan-report 并归档脱敏 evidence；artifact/purpose 回读需提供 repository/tag；不含 Console/BOSS/实例创建镜像门禁 |
+| REGISTRY-P0-CLOSURE-A | live passed | P0 闭环 gate：purpose/scan/实例引用/删除 409；`validate-registry-harbor-live-gate`；evidence `registry-p0-closure-live-20260803.json`；scan terminal=`complete`；不含 BOSS quota/GC / Console |
+| STORAGE-CONTROL-PLANE-STATE-A | B4 live passed | B1 冻结现有 v1；B2 真实 PG 已 apply；B3 Store/Service 以 PG 为权威；B4 Gateway 缺 `DATABASE_URL`/schema fail-closed + `validate-storage-control-plane-state-live-gate` production-shaped passed（rollout 后回读/幂等/墓碑）；evidence `live-evidence/storage-control-plane-state-live-20260803.json`；不含 Console / full platform production ready |
 | CORE-STORAGE-CONSOLE-APIS-BACKEND-A | Core 存储模块后端实现已完成 | 上游 PR #71 契约合入后，补齐对象桶、块卷、文件系统和向量库管理接口的 ports/local service/gateway handlers 与后端 HTTP E2E/API 测试；2026-07-27 本地 Gateway + 真实依赖复验 Rook-Ceph/MinIO/Milvus 后端 E2E 通过；不含前端，不升级为 production-shaped Gateway 结论 |
 
 ## 邮件通知（2026-07-22）

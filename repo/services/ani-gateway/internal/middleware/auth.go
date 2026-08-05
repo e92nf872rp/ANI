@@ -2,13 +2,16 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/google/uuid"
+	"github.com/kubercloud/ani/pkg/security/sandboxtoken"
 	"github.com/kubercloud/ani/pkg/types"
 )
 
@@ -49,6 +52,33 @@ func AuthWithClient(authClient AuthClient) app.HandlerFunc {
 		authHeader := string(c.GetHeader("Authorization"))
 		if strings.HasPrefix(authHeader, "Bearer ") {
 			token := strings.TrimPrefix(authHeader, "Bearer ")
+
+			// Sandbox short-lived tokens are verified locally (HMAC), not via auth-service.
+			if sandboxtoken.LooksLike(token) {
+				claims, err := sandboxtoken.Parse(token, sandboxtoken.SigningKey(), time.Now().UTC())
+				if err != nil {
+					if errors.Is(err, sandboxtoken.ErrExpiredToken) {
+						respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", "sandbox token expired")
+						return
+					}
+					respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", "invalid sandbox token")
+					return
+				}
+				if !scopeAllowedForPath(string(c.Path()), sandboxtoken.ScopeSandbox) {
+					respondError(c, http.StatusForbidden, "FORBIDDEN", "sandbox token not allowed for this path")
+					return
+				}
+				setTenantContext(c, claims.TenantID, sandboxtoken.SandboxActorUID, []string{"sandbox-token"}, sandboxtoken.ScopeSandbox)
+				setSandboxContext(c, claims)
+				ctx, err = withTenantContextStrict(ctx, claims.TenantID, sandboxtoken.SandboxActorUID, []string{"sandbox-token"})
+				if err != nil {
+					respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", err.Error())
+					return
+				}
+				c.Next(ctx)
+				return
+			}
+
 			if authClient == nil {
 				respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", "auth service unavailable")
 				return
@@ -183,8 +213,12 @@ func isPublicPath(path string) bool {
 
 // scopeAllowedForPath 平台 token 与租户 token 路由白名单隔离
 // - 平台路由前缀 /auth/platform/* 仅 scope=platform 可访问
+// - sandbox token 仅可访问 /api/v1/instances/{id}/sandbox/* 子资源
 // - 其他路由仅 scope=tenant 可访问（API key 默认 tenant scope）
 func scopeAllowedForPath(path, scope string) bool {
+	if scope == sandboxtoken.ScopeSandbox {
+		return isSandboxSubresourcePath(path)
+	}
 	if strings.HasPrefix(path, "/api/v1/auth/platform/") {
 		return scope == "platform"
 	}

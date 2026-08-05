@@ -72,6 +72,106 @@ func TestHarborImageRegistryListsArtifactsWithTrivyOverview(t *testing.T) {
 	}
 }
 
+func TestHarborImageRegistryListImagesUsesPurposeMetadataWithCombinedFilters(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v2.0/projects/tenant-a/repositories/runtime/artifacts" {
+			t.Fatalf("request path = %s", r.URL.Path)
+		}
+		for _, parameter := range []string{"with_tag", "with_label", "with_scan_overview"} {
+			if value := r.URL.Query().Get(parameter); value != "true" {
+				t.Fatalf("query %s = %q, want true", parameter, value)
+			}
+		}
+		_, _ = fmt.Fprint(w, `[
+			{"digest":"sha256:gpu","tags":[{"name":"release"}],"labels":[{"name":"ani-purpose-gpu"}],"scan_overview":{"report":{"scan_status":"Success","summary":{"Critical":1,"High":2,"Medium":3,"Low":4}}}},
+			{"digest":"sha256:other","tags":[{"name":"other"}],"labels":[{"name":"ani-purpose-container"}],"scan_overview":{"report":{"scan_status":"Success","summary":{"Critical":0,"High":0,"Medium":0,"Low":0}}}}
+		]`)
+	}))
+	defer server.Close()
+
+	service, err := NewHarborImageRegistry(HarborImageRegistryConfig{Endpoint: server.URL, Username: "admin", Password: "secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.ListImages(context.Background(), ports.RegistryImageListRequest{
+		TenantID:   "tenant-a",
+		Project:    "tenant-a",
+		Repository: "runtime",
+		Tag:        "release",
+		Purpose:    "gpu",
+		ScanStatus: ports.RegistryScanComplete,
+	})
+	if err != nil {
+		t.Fatalf("ListImages() error = %v", err)
+	}
+	if len(result.Items) != 1 || result.Items[0].Purpose != "gpu" || result.Items[0].Digest != "sha256:gpu" {
+		t.Fatalf("images = %+v, want metadata-classified GPU release image", result.Items)
+	}
+}
+
+func TestHarborArtifactPurposeRequiresANILabelPrefix(t *testing.T) {
+	artifact := harborArtifact{Labels: []harborArtifactLabel{{Name: "gpu"}}}
+	if purpose := artifact.purpose(); purpose != "" {
+		t.Fatalf("purpose = %q, want no purpose for an unprefixed Harbor label", purpose)
+	}
+}
+
+func TestHarborImageRegistryListImagesRejectsCrossTenantProject(t *testing.T) {
+	service, err := NewHarborImageRegistry(HarborImageRegistryConfig{Endpoint: "http://harbor.test", Username: "admin", Password: "secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.ListImages(context.Background(), ports.RegistryImageListRequest{TenantID: "tenant-a", Project: "tenant-b"})
+	if !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("ListImages() error = %v, want ErrInvalid", err)
+	}
+}
+
+func TestHarborImageRegistryFailsWhenCompletedScanSummaryIsUnavailable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v2.0/projects/tenant-a/repositories/runtime/artifacts" {
+			t.Fatalf("request path = %s", r.URL.Path)
+		}
+		_, _ = fmt.Fprint(w, `[{"digest":"sha256:artifact","tags":[{"name":"latest"}],"scan_overview":{"report":{"scan_status":"Success"}}}]`)
+	}))
+	defer server.Close()
+
+	service, err := NewHarborImageRegistry(HarborImageRegistryConfig{Endpoint: server.URL, Username: "admin", Password: "secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.ListImages(context.Background(), ports.RegistryImageListRequest{TenantID: "tenant-a", Project: "tenant-a", Repository: "runtime"})
+	if !errors.Is(err, ports.ErrUnavailable) {
+		t.Fatalf("ListImages() error = %v, want ErrUnavailable", err)
+	}
+}
+
+func TestHarborImageRegistryAcceptsNestedHarborScanSummary(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v2.0/projects/tenant-a/repositories/nginx/artifacts" {
+			t.Fatalf("request path = %s", r.URL.Path)
+		}
+		_, _ = fmt.Fprint(w, `[{"digest":"sha256:artifact","tags":[{"name":"latest"}],"labels":null,"scan_overview":{"application/vnd.security.vulnerability.report; version=1.1":{"scan_status":"Success","severity":"None","summary":{"total":3,"fixable":1,"summary":{"Critical":1,"High":2,"Medium":0,"Low":0}}}}}]`)
+	}))
+	defer server.Close()
+
+	service, err := NewHarborImageRegistry(HarborImageRegistryConfig{Endpoint: server.URL, Username: "admin", Password: "secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.ListImages(context.Background(), ports.RegistryImageListRequest{TenantID: "tenant-a", Project: "tenant-a", Repository: "nginx"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("items = %d, want 1", len(result.Items))
+	}
+	scan := result.Items[0].ScanStatus
+	if scan.Status != ports.RegistryScanComplete || scan.Critical != 1 || scan.High != 2 {
+		t.Fatalf("scan = %+v, want complete Critical=1 High=2", scan)
+	}
+}
+
 func TestHarborImageRegistryListsProjectsAndRepositories(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -368,6 +468,22 @@ func TestHarborImageRegistryDoesNotDeleteWithoutReferenceReader(t *testing.T) {
 	_, err = service.DeleteTag(context.Background(), ports.RegistryTagDeleteRequest{TenantID: "tenant-a", Project: "tenant-a", Repository: "runtime", Tag: "latest"})
 	if !errors.Is(err, ports.ErrNotConfigured) {
 		t.Fatalf("DeleteTag() error = %v, want ErrNotConfigured", err)
+	}
+}
+
+func TestHarborImageRegistryInsecureSkipVerifyTransport(t *testing.T) {
+	service, err := NewHarborImageRegistry(HarborImageRegistryConfig{
+		Endpoint:           "https://harbor.test",
+		Username:           "admin",
+		Password:           "secret",
+		InsecureSkipVerify: true,
+	})
+	if err != nil {
+		t.Fatalf("NewHarborImageRegistry() error = %v", err)
+	}
+	transport, ok := service.httpClient.Transport.(*http.Transport)
+	if !ok || transport.TLSClientConfig == nil || !transport.TLSClientConfig.InsecureSkipVerify {
+		t.Fatalf("httpClient transport = %#v, want InsecureSkipVerify TLS config", service.httpClient.Transport)
 	}
 }
 

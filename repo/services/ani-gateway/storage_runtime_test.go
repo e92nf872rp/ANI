@@ -11,33 +11,50 @@ import (
 )
 
 func TestGatewayStorageServiceFromConfigDefaultsToRouterLocalService(t *testing.T) {
-	service, err := newGatewayStorageService(gatewayStorageRuntimeConfig{})
+	service, closeRuntime, err := newGatewayStorageService(context.Background(), gatewayStorageRuntimeConfig{})
 	if err != nil {
 		t.Fatalf("newGatewayStorageService() error = %v", err)
 	}
+	defer closeRuntime()
 	if service != nil {
 		t.Fatalf("service = %T, want nil so router keeps local default", service)
 	}
 }
 
-func TestGatewayStorageServiceFromConfigUsesKubernetesProvider(t *testing.T) {
+func TestGatewayStorageServiceRequiresDatabaseURLForKubernetesProvider(t *testing.T) {
+	_, _, err := newGatewayStorageService(context.Background(), gatewayStorageRuntimeConfig{
+		ProviderMode:         "kubernetes_rest",
+		ProviderApply:        true,
+		ProviderUserID:       "ani-core-storage-provider",
+		ProviderProof:        "rbac-scope:storage.write",
+		KubernetesAPIHost:    "https://kubernetes.example.test",
+		KubernetesHTTPClient: &http.Client{Transport: &gatewayStorageRoundTripper{}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "DATABASE_URL") {
+		t.Fatalf("newGatewayStorageService() error = %v, want DATABASE_URL required", err)
+	}
+}
+
+func TestGatewayStorageServiceFromConfigUsesKubernetesProviderWithControlPlaneStore(t *testing.T) {
 	transport := &gatewayStorageRoundTripper{}
-	service, err := newGatewayStorageService(gatewayStorageRuntimeConfig{
+	service, closeRuntime, err := newGatewayStorageService(context.Background(), gatewayStorageRuntimeConfig{
 		ProviderMode:         "kubernetes_rest",
 		ProviderApply:        true,
 		ProviderUserID:       "ani-core-storage-provider",
 		ProviderProof:        "rbac-scope:storage.write",
 		KubernetesAPIHost:    "https://kubernetes.example.test",
 		KubernetesHTTPClient: &http.Client{Transport: transport},
+		MetadataStore:        newStubControlPlaneMetadataStore(),
 	})
 	if err != nil {
 		t.Fatalf("newGatewayStorageService() error = %v", err)
 	}
+	defer closeRuntime()
 	if service == nil {
 		t.Fatalf("service = nil, want provider-backed storage service")
 	}
 	volume, err := service.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{
-		TenantID:       "tenant-a",
+		TenantID:       "11111111-1111-1111-1111-111111111111",
 		IdempotencyKey: "storage-volume-a",
 		Name:           "data-a",
 		SizeGiB:        1,
@@ -47,7 +64,7 @@ func TestGatewayStorageServiceFromConfigUsesKubernetesProvider(t *testing.T) {
 		t.Fatalf("CreateVolume() error = %v", err)
 	}
 	snapshot, err := service.CreateVolumeSnapshot(context.Background(), ports.VolumeSnapshotCreateRequest{
-		TenantID:       "tenant-a",
+		TenantID:       "11111111-1111-1111-1111-111111111111",
 		IdempotencyKey: "storage-snapshot-a",
 		VolumeID:       volume.VolumeID,
 		Name:           "data-a-snap",
@@ -64,11 +81,24 @@ func TestGatewayStorageServiceFromConfigUsesKubernetesProvider(t *testing.T) {
 }
 
 func TestGatewayStorageServiceRejectsKubernetesProviderWithoutProof(t *testing.T) {
-	if _, err := newGatewayStorageService(gatewayStorageRuntimeConfig{
+	if _, _, err := newGatewayStorageService(context.Background(), gatewayStorageRuntimeConfig{
 		ProviderMode:      "kubernetes_rest",
 		KubernetesAPIHost: "https://kubernetes.example.test",
+		MetadataStore:     newStubControlPlaneMetadataStore(),
 	}); err == nil {
 		t.Fatalf("newGatewayStorageService() error = nil, want missing proof error")
+	}
+}
+
+func TestGatewayStorageServiceRequiresDatabaseURLForMinIO(t *testing.T) {
+	_, _, err := newGatewayStorageService(context.Background(), gatewayStorageRuntimeConfig{
+		ObjectStoreProvider:        "minio",
+		ObjectStoreEndpoint:        "http://minio.internal:9000",
+		ObjectStoreAccessKeyID:     "minio",
+		ObjectStoreSecretAccessKey: "secret",
+	})
+	if err == nil || !strings.Contains(err.Error(), "DATABASE_URL") {
+		t.Fatalf("newGatewayStorageService() error = %v, want DATABASE_URL required", err)
 	}
 }
 
@@ -80,7 +110,7 @@ func TestGatewayStorageServiceCanInjectMinIOObjectStore(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("")), Header: http.Header{}}, nil
 	})
 
-	service, err := newGatewayStorageService(gatewayStorageRuntimeConfig{
+	service, closeRuntime, err := newGatewayStorageService(context.Background(), gatewayStorageRuntimeConfig{
 		ObjectStoreProvider:        "minio",
 		ObjectStoreEndpoint:        "http://minio.internal:9000",
 		ObjectStorePublicEndpoint:  "http://minio-public.example:30900",
@@ -88,15 +118,17 @@ func TestGatewayStorageServiceCanInjectMinIOObjectStore(t *testing.T) {
 		ObjectStoreSecretAccessKey: "secret",
 		ObjectStoreBucketPrefix:    "ani-s13-",
 		ObjectStoreHTTPClient:      &http.Client{Transport: objectStoreTransport},
+		MetadataStore:              newStubControlPlaneMetadataStore(),
 	})
 	if err != nil {
 		t.Fatalf("newGatewayStorageService() error = %v", err)
 	}
+	defer closeRuntime()
 	if service == nil {
 		t.Fatal("service = nil, want object-store-backed storage service")
 	}
 	bucket, err := service.CreateStorageBucket(context.Background(), ports.StorageBucketCreateRequest{
-		TenantID:       "tenant-a",
+		TenantID:       "11111111-1111-1111-1111-111111111111",
 		IdempotencyKey: "bucket-a",
 		Name:           "models",
 	})
@@ -104,7 +136,7 @@ func TestGatewayStorageServiceCanInjectMinIOObjectStore(t *testing.T) {
 		t.Fatalf("CreateStorageBucket() error = %v", err)
 	}
 	upload, err := service.CreateStorageObjectUpload(context.Background(), ports.StorageObjectUploadRequest{
-		TenantID:       "tenant-a",
+		TenantID:       "11111111-1111-1111-1111-111111111111",
 		IdempotencyKey: "object-a",
 		BucketID:       bucket.BucketID,
 		Key:            "live.txt",
@@ -123,6 +155,7 @@ func TestGatewayStorageConfigFromEnvIncludesInClusterKubernetesService(t *testin
 	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
 	t.Setenv("KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE", "/var/run/secrets/kubernetes.io/serviceaccount/token")
 	t.Setenv("KUBERNETES_SERVICE_ACCOUNT_CA_FILE", "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
+	t.Setenv("DATABASE_URL", "postgres://ani@ani-postgres:5432/ani")
 
 	cfg := gatewayStorageRuntimeConfigFromEnv()
 	if cfg.KubernetesServiceHost != "10.96.0.1" || cfg.KubernetesServicePort != "443" {
@@ -130,6 +163,9 @@ func TestGatewayStorageConfigFromEnvIncludesInClusterKubernetesService(t *testin
 	}
 	if cfg.KubernetesServiceAccountTokenFile == "" || cfg.KubernetesServiceAccountCAFile == "" {
 		t.Fatalf("service account files not loaded from env: %#v", cfg)
+	}
+	if cfg.DatabaseURL == "" {
+		t.Fatal("DatabaseURL not loaded from env")
 	}
 }
 

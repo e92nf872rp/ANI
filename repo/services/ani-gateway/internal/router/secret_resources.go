@@ -78,11 +78,11 @@ func registerSecretResourcesWithService(v1 *route.RouterGroup, service ports.Sec
 func (api *secretAPI) createSecret(ctx context.Context, c *app.RequestContext) {
 	var req secretCreateRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid secret request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid secret request")
 		return
 	}
 	rec, err := api.service.CreateSecret(ctx, ports.SecretCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
 		Type:           req.Type,
@@ -96,7 +96,7 @@ func (api *secretAPI) createSecret(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *secretAPI) listSecrets(ctx context.Context, c *app.RequestContext) {
-	records, err := api.service.ListSecrets(ctx, ports.SecretListRequest{TenantID: demoTenantID(c)})
+	records, err := api.service.ListSecrets(ctx, ports.SecretListRequest{TenantID: instanceTenantID(c)})
 	if err != nil {
 		writeSecretError(c, err)
 		return
@@ -109,7 +109,7 @@ func (api *secretAPI) listSecrets(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *secretAPI) getSecret(ctx context.Context, c *app.RequestContext) {
-	rec, err := api.service.GetSecret(ctx, ports.SecretGetRequest{TenantID: demoTenantID(c), SecretID: c.Param("secret_id")})
+	rec, err := api.service.GetSecret(ctx, ports.SecretGetRequest{TenantID: instanceTenantID(c), SecretID: c.Param("secret_id")})
 	if err != nil {
 		writeSecretError(c, err)
 		return
@@ -118,7 +118,7 @@ func (api *secretAPI) getSecret(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *secretAPI) deleteSecret(ctx context.Context, c *app.RequestContext) {
-	rec, err := api.service.DeleteSecret(ctx, ports.SecretGetRequest{TenantID: demoTenantID(c), SecretID: c.Param("secret_id")})
+	rec, err := api.service.DeleteSecret(ctx, ports.SecretGetRequest{TenantID: instanceTenantID(c), SecretID: c.Param("secret_id")})
 	if err != nil {
 		writeSecretError(c, err)
 		return
@@ -129,11 +129,11 @@ func (api *secretAPI) deleteSecret(ctx context.Context, c *app.RequestContext) {
 func (api *secretAPI) bindSecret(ctx context.Context, c *app.RequestContext) {
 	var req secretBindRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid secret binding request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid secret binding request")
 		return
 	}
 	rec, err := api.service.BindSecret(ctx, ports.SecretBindRequest{
-		TenantID:   demoTenantID(c),
+		TenantID:   instanceTenantID(c),
 		SecretID:   c.Param("secret_id"),
 		TargetType: req.TargetType,
 		TargetID:   req.TargetID,
@@ -188,12 +188,12 @@ func secretBindingFromRecord(r ports.SecretBindingRecord) secretBindingResponse 
 func writeSecretError(c *app.RequestContext, err error) {
 	switch {
 	case errors.Is(err, ports.ErrNotFound):
-		writeDemoError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
+		writeInstanceError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
 	case errors.Is(err, ports.ErrConflict):
-		writeDemoError(c, http.StatusConflict, "CONFLICT", err.Error())
+		writeInstanceError(c, http.StatusConflict, "CONFLICT", err.Error())
 	case errors.Is(err, ports.ErrInvalid):
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	default:
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	}
 }

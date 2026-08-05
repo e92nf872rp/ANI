@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -189,5 +190,28 @@ func TestLocalImageRegistryListImagesFiltersByPurpose(t *testing.T) {
 	}
 	if images.Items[0].Repository != "gpu-runtime" {
 		t.Fatalf("repository = %q, want gpu-runtime", images.Items[0].Repository)
+	}
+}
+
+func TestLocalImageRegistryListImagesAppliesCombinedFiltersAndTenantIsolation(t *testing.T) {
+	service := NewLocalImageRegistry()
+	images, err := service.ListImages(context.Background(), ports.RegistryImageListRequest{
+		TenantID:   "tenant-a",
+		Project:    "tenant-a",
+		Repository: "gpu-runtime",
+		Tag:        "cuda-12.4",
+		Purpose:    "gpu",
+		ScanStatus: ports.RegistryScanComplete,
+	})
+	if err != nil {
+		t.Fatalf("ListImages() error = %v", err)
+	}
+	if len(images.Items) != 1 || images.Items[0].Repository != "gpu-runtime" {
+		t.Fatalf("images = %+v, want one matching GPU image", images.Items)
+	}
+
+	_, err = service.ListImages(context.Background(), ports.RegistryImageListRequest{TenantID: "tenant-a", Project: "tenant-b"})
+	if !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("cross-tenant ListImages() error = %v, want ErrInvalid", err)
 	}
 }

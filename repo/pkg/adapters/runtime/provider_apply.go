@@ -112,7 +112,7 @@ func validateProviderApplyRequest(request ports.WorkloadProviderApplyRequest) er
 		return fmt.Errorf("%w: dry-run manifest count does not match apply request", ports.ErrInvalid)
 	}
 	for _, manifest := range request.Manifests {
-		if !isAuxiliarySecretManifest(manifest) && manifest.Provider != provider {
+		if !isAuxiliaryKubernetesManifest(manifest) && manifest.Provider != provider {
 			return fmt.Errorf("%w: mixed providers are not allowed in one apply batch", ports.ErrInvalid)
 		}
 		var doc map[string]any

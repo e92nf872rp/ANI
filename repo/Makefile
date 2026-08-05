@@ -9,7 +9,7 @@ export
         tools-proto gen-api gen-console-api gen-proto gen-core-sdk gen-api-docs \
         build build-gateway build-auth-service build-model-service build-task-service build-reconcile-worker build-cli \
         test test-go test-python test-cover \
-	validate-infra validate-gpu-preflight validate-gpu-contracts validate-runtime-contracts validate-instance-contracts validate-instance-planner validate-instance-renderer validate-instance-admission validate-instance-audit validate-instance-provider-dry-run validate-instance-provider-apply validate-instance-status-reconcile validate-instance-orchestrator validate-instance-store validate-instance-provider-adapter validate-instance-service validate-instance-lifecycle-ops validate-m1-e2e validate-kubernetes-provider-execution validate-kubernetes-rest-client validate-kubernetes-bootstrap-wiring validate-kubernetes-lifecycle-execution validate-kubernetes-ops-execution validate-m1-real-provider-profile validate-real-k8s-profile validate-vcluster-live-gate validate-vcluster-upgrade-live-gate validate-k8s-node-pool-live-gate validate-kubeovn-network-live-gate validate-kubevirt-vm-live-gate validate-reconcile-ha-live-gate validate-kms-sm4-live-gate validate-secrets-live-gate validate-storage-live-gate validate-gpu-inventory-live-gate validate-object-store-live-gate validate-vector-store-live-gate validate-instance-observability-live-gate validate-registry-harbor-live-gate validate-sprint13-b-track-production-shape validate-gateway-ratelimit validate-gateway-idempotency validate-adapter-resilience-timeout validate-resilience-faultinjection-live-gate validate-resilience-degradation validate-ha-failover-live-gate validate-readyz-dataplane-live-gate validate-sprint14-resilience-live-gate validate-core-installer validate-core-offline validate-core-cli validate-sprint7-core-regression validate-core-release-hardening validate-core-installer-live validate-core-offline-pack validate-core-doc-consistency validate-sprint8-core-release validate-core-release-evidence validate-sprint9-core-rc validate-sprint9-core-doc-consistency validate-sprint9-rc validate-core-artifact-manifest validate-core-version-policy validate-sprint10-final-readiness validate-sprint10-core-doc-consistency validate-sprint10-release-prep validate-sprint11-storage-disk-plan validate-sprint11-core-real-deployment validate-sprint11-rook-ceph-formal-deployment validate-sprint11-rook-ceph-live-deployment-result validate-sprint11-rook-ceph-vm-storage-smoke validate-sprint11-rook-ceph-reboot-resilience validate-sprint11-safe-completion validate-sprint11-core-doc-consistency validate-sprint11-real-deployment validate-demo-instances validate-core-alpha validate-network-alpha validate-storage-alpha validate-vector-alpha validate-workload-identity validate-core-dev-profile validate-sdk-alpha validate-sdk-beta validate-sdk-mock-smoke validate-sprint3-closure validate-sprint4-closure validate-spec-split validate-core-beta validate-core-api-compatibility validate-mock-a validate-doc-api validate-openapi-spec validate-doc-entrypoints validate-auth-contract validate-auth-dex-smoke validate-auth-dex-production-gate validate-services validate-services-contract validate-services-route-contract validate-ci-workflow validate-architecture \
+	validate-infra validate-gpu-preflight validate-gpu-contracts validate-runtime-contracts validate-instance-contracts validate-instance-planner validate-instance-renderer validate-instance-admission validate-instance-audit validate-instance-provider-dry-run validate-instance-provider-apply validate-instance-status-reconcile validate-instance-orchestrator validate-instance-store validate-instance-provider-adapter validate-instance-service validate-instance-lifecycle-ops validate-m1-e2e validate-kubernetes-provider-execution validate-kubernetes-rest-client validate-kubernetes-bootstrap-wiring validate-kubernetes-lifecycle-execution validate-kubernetes-ops-execution validate-m1-real-provider-profile validate-real-k8s-profile validate-vcluster-live-gate validate-vcluster-upgrade-live-gate validate-k8s-node-pool-live-gate validate-kubeovn-network-live-gate validate-kubevirt-vm-live-gate validate-reconcile-ha-live-gate validate-kms-sm4-live-gate validate-secrets-live-gate validate-storage-live-gate validate-storage-control-plane-state validate-storage-control-plane-state-live-gate validate-gpu-inventory-live-gate validate-object-store-live-gate validate-vector-store-live-gate validate-instance-observability-live-gate validate-registry-harbor-live-gate validate-instance-management-live-gate validate-sandbox-live-gate validate-instance-sandbox-stateless-live-gate validate-instance-sandbox-checkpoint-live-gate validate-instance-reconcile-provider-loss-live-gate validate-instance-orchestration-live-gate validate-sprint13-b-track-production-shape validate-gateway-ratelimit validate-gateway-idempotency validate-adapter-resilience-timeout validate-resilience-faultinjection-live-gate validate-resilience-degradation validate-ha-failover-live-gate validate-readyz-dataplane-live-gate validate-sprint14-resilience-live-gate validate-core-installer validate-core-offline validate-core-cli validate-sprint7-core-regression validate-core-release-hardening validate-core-installer-live validate-core-offline-pack validate-core-doc-consistency validate-sprint8-core-release validate-core-release-evidence validate-sprint9-core-rc validate-sprint9-core-doc-consistency validate-sprint9-rc validate-core-artifact-manifest validate-core-version-policy validate-sprint10-final-readiness validate-sprint10-core-doc-consistency validate-sprint10-release-prep validate-sprint11-storage-disk-plan validate-sprint11-core-real-deployment validate-sprint11-rook-ceph-formal-deployment validate-sprint11-rook-ceph-live-deployment-result validate-sprint11-rook-ceph-vm-storage-smoke validate-sprint11-rook-ceph-reboot-resilience validate-sprint11-safe-completion validate-sprint11-core-doc-consistency validate-sprint11-real-deployment validate-demo-instances validate-core-alpha validate-network-alpha validate-storage-alpha validate-vector-alpha validate-workload-identity validate-core-dev-profile validate-sdk-alpha validate-sdk-beta validate-sdk-mock-smoke validate-sprint3-closure validate-sprint4-closure validate-spec-split validate-core-beta validate-core-api-compatibility validate-mock-a validate-doc-api validate-openapi-spec validate-doc-entrypoints validate-auth-contract validate-auth-dex-smoke validate-auth-dex-production-gate validate-services validate-services-contract validate-services-route-contract validate-ci-workflow validate-architecture validate-async-task-store \
         lint lint-go lint-python lint-ts \
         dev-gateway dev-console dev-core-mock \
         image image-gateway image-auth-service \
@@ -80,10 +80,19 @@ help:
 	@echo "    make validate-kms-sm4-live-gate 校验 Sprint 5 M1-ENCRYPT-LIVE-A KMS/SM4 live 验证门禁"
 	@echo "    make validate-secrets-live-gate 校验 Sprint 5 M1-SECRETS-LIVE-A Secret live 验证门禁"
 	@echo "    make validate-storage-live-gate 校验 Sprint 13 S03 storage snapshot/mount-target live gate 契约"
+	@echo "    make validate-storage-control-plane-state 校验 STORAGE-CONTROL-PLANE-STATE-A 存储控制面 PG schema migration"
+	@echo "    make validate-storage-control-plane-state-live-gate 校验 STORAGE-CONTROL-PLANE-STATE-A 重启/幂等 live gate 契约"
 	@echo "    make validate-gpu-inventory-live-gate 校验 Sprint 13 S04 GPU inventory/occupancy live gate 契约"
 	@echo "    make validate-object-store-live-gate 校验 Sprint 13 S05 object-store MinIO live gate 契约"
 	@echo "    make validate-vector-store-live-gate 校验 Sprint 13 S06 vector-store Milvus live gate 契约"
 	@echo "    make validate-instance-observability-live-gate 校验 Sprint 13 S07 instance observability Prometheus live gate 契约"
+	@echo "    make validate-instance-management-live-gate 校验 INSTANCE-MANAGEMENT-LIVE-GATE-A VM 管理 live gate 契约"
+	@echo "    make validate-sandbox-live-gate 校验 INSTANCE-SANDBOX-LIVE-GATE-A sandbox live gate 契约"
+	@echo "    make validate-async-task-store 校验 ASYNC-TASK-STORE-A PostgreSQL 持久化契约"
+	@echo "    make validate-instance-sandbox-stateless-live-gate 校验 INSTANCE-SANDBOX-STATELESS-LIVE-GATE-A sandbox runtime 重启契约"
+	@echo "    make validate-instance-sandbox-checkpoint-live-gate 校验 INSTANCE-SANDBOX-CHECKPOINT-LIVE-GATE-A sandbox checkpoint 真实契约"
+	@echo "    make validate-instance-reconcile-provider-loss-live-gate 校验 INSTANCE-RECONCILE-PROVIDER-404-A provider-loss reconcile live gate 契约"
+	@echo "    make validate-instance-orchestration-live-gate 校验 INSTANCE-ORCHESTRATION-A Container 编排 live gate 契约"
 	@echo "    make validate-sprint13-b-track-production-shape 校验 Sprint 13 S01-S04/S05-S07 B轨生产形态验收标准"
 	@echo "    make validate-resilience-faultinjection-live-gate 校验 Sprint 14 R-P1-5 resilience fault-injection local gate"
 	@echo "    make validate-resilience-degradation 校验 Sprint 14 R-P1-6 strong/weak dependency degradation local gate"
@@ -561,6 +570,18 @@ validate-storage-live-gate:
 	python scripts/validate_storage_live_gate_test.py
 	@echo "✅ SPRINT13-STORAGE-ROOK-CEPH-A storage live gate contract valid"
 
+validate-storage-control-plane-state:
+	@echo "→ 校验 STORAGE-CONTROL-PLANE-STATE-A 存储控制面 PG schema migration..."
+	python scripts/validate_storage_control_plane_state.py
+	python scripts/validate_storage_control_plane_state_test.py
+	@echo "✅ STORAGE-CONTROL-PLANE-STATE-A storage control-plane schema migration valid"
+
+validate-storage-control-plane-state-live-gate:
+	@echo "→ 校验 STORAGE-CONTROL-PLANE-STATE-A 重启/幂等 live gate 契约..."
+	python scripts/validate_storage_control_plane_state_live_gate.py
+	python scripts/validate_storage_control_plane_state_live_gate_test.py
+	@echo "✅ STORAGE-CONTROL-PLANE-STATE-A storage control-plane state live gate contract valid"
+
 validate-gpu-inventory-live-gate:
 	@echo "→ 校验 Sprint 13 S04 GPU inventory/occupancy live gate 契约..."
 	python scripts/validate_gpu_inventory_live_gate.py
@@ -586,10 +607,53 @@ validate-instance-observability-live-gate:
 	@echo "✅ SPRINT13-INSTANCE-OBSERVABILITY-PROMETHEUS-A instance observability live gate contract valid"
 
 validate-registry-harbor-live-gate:
-	@echo "→ 校验 Sprint 13 Registry Harbor live gate 契约..."
+	@echo "→ 校验 Registry P0 Harbor closure live gate 契约..."
 	python scripts/validate_registry_harbor_live_gate.py
 	python scripts/validate_registry_harbor_live_gate_test.py
-	@echo "✅ SPRINT13-REGISTRY-HARBOR-LIVE-A registry Harbor live gate contract valid"
+	@echo "✅ REGISTRY-P0-CLOSURE-A registry Harbor live gate contract valid"
+
+validate-instance-management-live-gate:
+	@echo "→ 校验 Instance Management VM live gate 契约..."
+	python3 scripts/validate_instance_management_live_gate.py
+	python3 scripts/validate_instance_management_live_gate_test.py
+	@echo "✅ INSTANCE-MANAGEMENT-LIVE-GATE-A instance management VM live gate contract valid"
+
+validate-sandbox-live-gate:
+	@echo "→ 校验 Instance Sandbox live gate 契约..."
+	python3 scripts/validate_sandbox_live_gate.py
+	python3 scripts/validate_sandbox_live_gate_test.py
+	@echo "✅ INSTANCE-SANDBOX-LIVE-GATE-A sandbox live gate contract valid"
+
+validate-async-task-store:
+	@echo "→ 校验 Core AsyncTask PostgreSQL 持久化契约..."
+	python3 scripts/validate_async_task_store.py
+	python3 scripts/validate_async_task_store_test.py
+	@echo "✅ ASYNC-TASK-STORE-A async task persistence contract valid"
+
+validate-instance-sandbox-stateless-live-gate:
+	@echo "→ 校验 Sandbox Runtime 重启门禁契约..."
+	python3 scripts/validate_instance_sandbox_stateless_live_gate.py
+	python3 scripts/validate_instance_sandbox_stateless_live_gate_test.py
+	python3 scripts/run_instance_sandbox_stateless_live_gate_test.py
+	@echo "✅ INSTANCE-SANDBOX-STATELESS-LIVE-GATE-A sandbox runtime restart contract valid"
+
+validate-instance-sandbox-checkpoint-live-gate:
+	@echo "→ 校验 Sandbox Checkpoint 真实门禁契约..."
+	python3 scripts/validate_instance_sandbox_checkpoint_live_gate.py
+	python3 scripts/validate_instance_sandbox_checkpoint_live_gate_test.py
+	@echo "✅ INSTANCE-SANDBOX-CHECKPOINT-LIVE-GATE-A contract valid"
+
+validate-instance-reconcile-provider-loss-live-gate:
+	@echo "→ 校验 Instance provider-loss reconcile live gate 契约..."
+	python3 scripts/validate_instance_reconcile_provider_loss_live_gate.py
+	python3 scripts/validate_instance_reconcile_provider_loss_live_gate_test.py
+	@echo "✅ INSTANCE-RECONCILE-PROVIDER-404-A provider-loss live gate contract valid"
+
+validate-instance-orchestration-live-gate:
+	@echo "→ 校验 Instance Orchestration Container live gate 契约..."
+	python3 scripts/validate_instance_orchestration_live_gate.py
+	python3 scripts/validate_instance_orchestration_live_gate_test.py
+	@echo "✅ INSTANCE-ORCHESTRATION-A container orchestration live gate contract valid"
 
 validate-sprint13-b-track-production-shape:
 	@echo "→ 校验 Sprint 13 S01-S04/S05-S07 B轨生产形态验收标准..."

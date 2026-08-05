@@ -7,7 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kubercloud/ani/pkg/ports"
+	"github.com/kubercloud/ani/pkg/types"
 )
 
 type LocalWorkloadReconcileController struct {
@@ -91,9 +93,20 @@ func (c *LocalWorkloadReconcileController) ReconcileNow(ctx context.Context, tar
 	if target.TenantID == "" || target.InstanceID == "" || target.Kind == "" {
 		return ports.ReconcileResult{}, fmt.Errorf("%w: tenant_id/instance_id/kind required for reconcile target", ports.ErrInvalid)
 	}
+	ctx = reconcileTargetTenantContext(ctx, target.TenantID)
 	current, err := c.store.Get(ctx, target.TenantID, target.InstanceID)
 	if err != nil {
 		return ports.ReconcileResult{}, err
+	}
+	if current.Status.State == ports.WorkloadStateDeleting || current.Status.State == ports.WorkloadStateDeleted {
+		return ports.ReconcileResult{
+			TenantID:      current.TenantID,
+			InstanceID:    current.InstanceID,
+			PreviousState: current.Status.State,
+			CurrentState:  current.Status.State,
+			Reason:        current.Status.Reason,
+			ReconciledAt:  c.now().UTC(),
+		}, nil
 	}
 	apply := ports.WorkloadProviderApplyResult{
 		Applied:      true,
@@ -141,6 +154,17 @@ func (c *LocalWorkloadReconcileController) ReconcileNow(ctx context.Context, tar
 		Reason:        reconciled.Reason,
 		ReconciledAt:  reconciled.ReconciledAt,
 	}, nil
+}
+
+func reconcileTargetTenantContext(ctx context.Context, tenantID string) context.Context {
+	if _, ok := types.TryFromContext(ctx); ok {
+		return ctx
+	}
+	parsed, err := uuid.Parse(tenantID)
+	if err != nil {
+		return ctx
+	}
+	return types.WithTenant(ctx, &types.TenantContext{TenantID: parsed})
 }
 
 func (c *LocalWorkloadReconcileController) runOnce(ctx context.Context) (bool, error) {

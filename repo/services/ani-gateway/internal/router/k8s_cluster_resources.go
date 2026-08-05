@@ -143,14 +143,14 @@ func registerK8sClusterResourcesWithService(v1 *route.RouterGroup, service ports
 func (api *k8sClusterAPI) createCluster(ctx context.Context, c *app.RequestContext) {
 	var req k8sClusterCreateRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid k8s cluster request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid k8s cluster request")
 		return
 	}
 	if req.Version == "requires-real-provider" {
-		writeDemoError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", "k8s cluster create precondition failed: real provider is not configured for this local profile")
+		writeInstanceError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", "k8s cluster create precondition failed: real provider is not configured for this local profile")
 		return
 	}
-	rec, err := api.service.CreateCluster(ctx, ports.K8sClusterCreateRequest{TenantID: demoTenantID(c), IdempotencyKey: req.IdempotencyKey, Name: req.Name, Version: req.Version})
+	rec, err := api.service.CreateCluster(ctx, ports.K8sClusterCreateRequest{TenantID: instanceTenantID(c), IdempotencyKey: req.IdempotencyKey, Name: req.Name, Version: req.Version})
 	if err != nil {
 		writeK8sClusterError(c, err)
 		return
@@ -158,7 +158,7 @@ func (api *k8sClusterAPI) createCluster(ctx context.Context, c *app.RequestConte
 	c.JSON(http.StatusCreated, k8sClusterFromRecord(rec))
 }
 func (api *k8sClusterAPI) listClusters(ctx context.Context, c *app.RequestContext) {
-	recs, err := api.service.ListClusters(ctx, ports.K8sClusterListRequest{TenantID: demoTenantID(c)})
+	recs, err := api.service.ListClusters(ctx, ports.K8sClusterListRequest{TenantID: instanceTenantID(c)})
 	if err != nil {
 		writeK8sClusterError(c, err)
 		return
@@ -170,7 +170,7 @@ func (api *k8sClusterAPI) listClusters(ctx context.Context, c *app.RequestContex
 	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
 }
 func (api *k8sClusterAPI) getCluster(ctx context.Context, c *app.RequestContext) {
-	rec, err := api.service.GetCluster(ctx, ports.K8sClusterGetRequest{TenantID: demoTenantID(c), ClusterID: c.Param("cluster_id")})
+	rec, err := api.service.GetCluster(ctx, ports.K8sClusterGetRequest{TenantID: instanceTenantID(c), ClusterID: c.Param("cluster_id")})
 	if err != nil {
 		writeK8sClusterError(c, err)
 		return
@@ -178,7 +178,7 @@ func (api *k8sClusterAPI) getCluster(ctx context.Context, c *app.RequestContext)
 	c.JSON(http.StatusOK, k8sClusterFromRecord(rec))
 }
 func (api *k8sClusterAPI) deleteCluster(ctx context.Context, c *app.RequestContext) {
-	rec, err := api.service.DeleteCluster(ctx, ports.K8sClusterGetRequest{TenantID: demoTenantID(c), ClusterID: c.Param("cluster_id")})
+	rec, err := api.service.DeleteCluster(ctx, ports.K8sClusterGetRequest{TenantID: instanceTenantID(c), ClusterID: c.Param("cluster_id")})
 	if err != nil {
 		writeK8sClusterError(c, err)
 		return
@@ -188,10 +188,10 @@ func (api *k8sClusterAPI) deleteCluster(ctx context.Context, c *app.RequestConte
 func (api *k8sClusterAPI) upgradeCluster(ctx context.Context, c *app.RequestContext) {
 	var req k8sClusterUpgradeRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid k8s cluster upgrade request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid k8s cluster upgrade request")
 		return
 	}
-	rec, err := api.service.UpgradeCluster(ctx, ports.K8sClusterUpgradeRequest{TenantID: demoTenantID(c), ClusterID: c.Param("cluster_id"), IdempotencyKey: req.IdempotencyKey, Version: req.Version})
+	rec, err := api.service.UpgradeCluster(ctx, ports.K8sClusterUpgradeRequest{TenantID: instanceTenantID(c), ClusterID: c.Param("cluster_id"), IdempotencyKey: req.IdempotencyKey, Version: req.Version})
 	if err != nil {
 		writeK8sClusterError(c, err)
 		return
@@ -201,11 +201,11 @@ func (api *k8sClusterAPI) upgradeCluster(ctx context.Context, c *app.RequestCont
 func (api *k8sClusterAPI) createNodePool(ctx context.Context, c *app.RequestContext) {
 	var req k8sClusterNodePoolCreateRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid k8s cluster node pool request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid k8s cluster node pool request")
 		return
 	}
 	rec, err := api.service.CreateNodePool(ctx, ports.K8sClusterNodePoolCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		ClusterID:      c.Param("cluster_id"),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
@@ -220,7 +220,7 @@ func (api *k8sClusterAPI) createNodePool(ctx context.Context, c *app.RequestCont
 	c.JSON(http.StatusCreated, k8sClusterNodePoolFromRecord(rec))
 }
 func (api *k8sClusterAPI) listNodePools(ctx context.Context, c *app.RequestContext) {
-	recs, err := api.service.ListNodePools(ctx, ports.K8sClusterNodePoolListRequest{TenantID: demoTenantID(c), ClusterID: c.Param("cluster_id")})
+	recs, err := api.service.ListNodePools(ctx, ports.K8sClusterNodePoolListRequest{TenantID: instanceTenantID(c), ClusterID: c.Param("cluster_id")})
 	if err != nil {
 		writeK8sClusterError(c, err)
 		return
@@ -232,7 +232,7 @@ func (api *k8sClusterAPI) listNodePools(ctx context.Context, c *app.RequestConte
 	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
 }
 func (api *k8sClusterAPI) getNodePool(ctx context.Context, c *app.RequestContext) {
-	rec, err := api.service.GetNodePool(ctx, ports.K8sClusterNodePoolGetRequest{TenantID: demoTenantID(c), ClusterID: c.Param("cluster_id"), NodePoolID: c.Param("node_pool_id")})
+	rec, err := api.service.GetNodePool(ctx, ports.K8sClusterNodePoolGetRequest{TenantID: instanceTenantID(c), ClusterID: c.Param("cluster_id"), NodePoolID: c.Param("node_pool_id")})
 	if err != nil {
 		writeK8sClusterError(c, err)
 		return
@@ -242,11 +242,11 @@ func (api *k8sClusterAPI) getNodePool(ctx context.Context, c *app.RequestContext
 func (api *k8sClusterAPI) updateNodePool(ctx context.Context, c *app.RequestContext) {
 	var req k8sClusterNodePoolUpdateRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid k8s cluster node pool update request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid k8s cluster node pool update request")
 		return
 	}
 	rec, err := api.service.UpdateNodePool(ctx, ports.K8sClusterNodePoolUpdateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		ClusterID:      c.Param("cluster_id"),
 		NodePoolID:     c.Param("node_pool_id"),
 		IdempotencyKey: req.IdempotencyKey,
@@ -261,7 +261,7 @@ func (api *k8sClusterAPI) updateNodePool(ctx context.Context, c *app.RequestCont
 	c.JSON(http.StatusOK, k8sClusterNodePoolFromRecord(rec))
 }
 func (api *k8sClusterAPI) deleteNodePool(ctx context.Context, c *app.RequestContext) {
-	rec, err := api.service.DeleteNodePool(ctx, ports.K8sClusterNodePoolGetRequest{TenantID: demoTenantID(c), ClusterID: c.Param("cluster_id"), NodePoolID: c.Param("node_pool_id")})
+	rec, err := api.service.DeleteNodePool(ctx, ports.K8sClusterNodePoolGetRequest{TenantID: instanceTenantID(c), ClusterID: c.Param("cluster_id"), NodePoolID: c.Param("node_pool_id")})
 	if err != nil {
 		writeK8sClusterError(c, err)
 		return
@@ -269,7 +269,7 @@ func (api *k8sClusterAPI) deleteNodePool(ctx context.Context, c *app.RequestCont
 	c.JSON(http.StatusOK, k8sClusterNodePoolFromRecord(rec))
 }
 func (api *k8sClusterAPI) getKubeconfig(ctx context.Context, c *app.RequestContext) {
-	rec, err := api.service.GetKubeconfig(ctx, ports.K8sClusterKubeconfigRequest{TenantID: demoTenantID(c), ClusterID: c.Param("cluster_id")})
+	rec, err := api.service.GetKubeconfig(ctx, ports.K8sClusterKubeconfigRequest{TenantID: instanceTenantID(c), ClusterID: c.Param("cluster_id")})
 	if err != nil {
 		writeK8sClusterError(c, err)
 		return
@@ -279,11 +279,11 @@ func (api *k8sClusterAPI) getKubeconfig(ctx context.Context, c *app.RequestConte
 func (api *k8sClusterAPI) proxy(ctx context.Context, c *app.RequestContext) {
 	var req k8sClusterProxyRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid k8s cluster proxy request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid k8s cluster proxy request")
 		return
 	}
 	rec, err := api.service.Proxy(ctx, ports.K8sClusterProxyRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		ClusterID:      c.Param("cluster_id"),
 		IdempotencyKey: req.IdempotencyKey,
 		Method:         req.Method,
@@ -299,7 +299,7 @@ func (api *k8sClusterAPI) proxy(ctx context.Context, c *app.RequestContext) {
 }
 func (api *k8sClusterAPI) listWorkloads(ctx context.Context, c *app.RequestContext) {
 	recs, err := api.service.ListWorkloads(ctx, ports.K8sClusterWorkloadListRequest{
-		TenantID:  demoTenantID(c),
+		TenantID:  instanceTenantID(c),
 		ClusterID: c.Param("cluster_id"),
 		Namespace: c.Query("namespace"),
 		Kind:      c.Query("kind"),
@@ -371,14 +371,14 @@ func k8sClusterNodePoolGPUFromRequest(gpu k8sClusterNodePoolGPURequest) ports.K8
 func writeK8sClusterError(c *app.RequestContext, err error) {
 	switch {
 	case errors.Is(err, ports.ErrNotFound):
-		writeDemoError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
+		writeInstanceError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
 	case errors.Is(err, ports.ErrConflict):
-		writeDemoError(c, http.StatusConflict, "CONFLICT", err.Error())
+		writeInstanceError(c, http.StatusConflict, "CONFLICT", err.Error())
 	case errors.Is(err, ports.ErrFailedPrecondition):
-		writeDemoError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", err.Error())
+		writeInstanceError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", err.Error())
 	case errors.Is(err, ports.ErrInvalid):
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	default:
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	}
 }

@@ -27,6 +27,7 @@ func TestGatewayRegistryRuntimeConfigReadsCanonicalRegistryEnv(t *testing.T) {
 	t.Setenv("HARBOR_USERNAME", "admin")
 	t.Setenv("HARBOR_PASSWORD", "secret")
 	t.Setenv("HARBOR_REQUEST_TIMEOUT", "3s")
+	t.Setenv("REGISTRY_TLS_INSECURE", "true")
 	t.Setenv("REGISTRY_PULL_SECRET_FIELD_MANAGER", "ani-registry")
 
 	cfg := gatewayRegistryRuntimeConfigFromEnv()
@@ -42,6 +43,9 @@ func TestGatewayRegistryRuntimeConfigReadsCanonicalRegistryEnv(t *testing.T) {
 	}
 	if cfg.HarborRequestTimeout != 3*time.Second {
 		t.Fatalf("HarborRequestTimeout = %v, want 3s", cfg.HarborRequestTimeout)
+	}
+	if !cfg.RegistryTLSInsecure {
+		t.Fatal("RegistryTLSInsecure = false, want true")
 	}
 	if cfg.KubernetesProviderManager != "ani-registry" {
 		t.Fatalf("KubernetesProviderManager = %q, want ani-registry", cfg.KubernetesProviderManager)

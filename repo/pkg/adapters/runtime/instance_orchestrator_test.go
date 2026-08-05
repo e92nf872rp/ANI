@@ -52,6 +52,158 @@ func TestLocalInstanceOrchestratorCreatesAndReconciles(t *testing.T) {
 	}
 }
 
+func TestInstanceAccessSummaryRequiresRunningState(t *testing.T) {
+	for _, state := range []ports.WorkloadState{
+		ports.WorkloadStatePending,
+		ports.WorkloadStateProvisioning,
+		ports.WorkloadStateStopped,
+		ports.WorkloadStateFailed,
+	} {
+		vm := instanceAccessSummary(ports.WorkloadKindVM, state)
+		container := instanceAccessSummary(ports.WorkloadKindContainer, state)
+		if vm.SSHAvailable || vm.ConsoleAvailable || container.ExecAvailable {
+			t.Fatalf("state %s reports interactive access: vm=%+v container=%+v", state, vm, container)
+		}
+	}
+	if running := instanceAccessSummary(ports.WorkloadKindContainer, ports.WorkloadStateRunning); !running.ExecAvailable {
+		t.Fatalf("running container access = %+v, want exec available", running)
+	}
+}
+
+func TestInstanceStorageAttachmentsNormalizesLegacyEntries(t *testing.T) {
+	attachments := instanceStorageAttachments(ports.WorkloadSpec{
+		Storage: []ports.WorkloadStorageAttachment{
+			{Name: "root", Kind: ports.StorageAttachmentRootDisk},
+			{Name: "shared", Kind: ports.StorageAttachmentSharedPVC, MountPath: "/shared"},
+		},
+	}, ports.WorkloadStatus{})
+
+	if len(attachments) != 2 {
+		t.Fatalf("attachments = %+v, want two", attachments)
+	}
+	if got := attachments[0]; got.ResourceType != "volume" || got.ResourceID != "root" || got.Status != "attached" {
+		t.Fatalf("root attachment = %+v, want contract-valid volume summary", got)
+	}
+	if got := attachments[1]; got.ResourceType != "filesystem" || got.ResourceID != "shared" || got.Status != "mounted" {
+		t.Fatalf("filesystem attachment = %+v, want contract-valid filesystem summary", got)
+	}
+}
+
+func TestGPUStatusInfoRequiresNodeEvidenceForScheduledState(t *testing.T) {
+	spec := ports.WorkloadSpec{Kind: ports.WorkloadKindGPUContainer}
+	pending := gpuStatusInfo(spec, ports.WorkloadStatus{State: ports.WorkloadStateProvisioning})
+	scheduled := gpuStatusInfo(spec, ports.WorkloadStatus{
+		State: ports.WorkloadStateProvisioning, NodeName: "gpu-node-a",
+	})
+
+	if pending.SchedulingState != "pending" {
+		t.Fatalf("pending scheduling state = %q, want pending", pending.SchedulingState)
+	}
+	if scheduled.SchedulingState != "scheduled" {
+		t.Fatalf("scheduled state = %q, want scheduled", scheduled.SchedulingState)
+	}
+}
+
+func TestLocalInstanceOrchestratorPersistsApprovedInstanceSummaries(t *testing.T) {
+	store := &fakeInstanceStore{}
+	orchestrator := newTestInstanceOrchestrator(true, store)
+
+	_, err := orchestrator.Create(context.Background(), ports.WorkloadInstanceCreateRequest{
+		Spec: ports.WorkloadSpec{
+			TenantID:    "tenant-a",
+			Name:        "gpu-app-01",
+			Description: "approved contract summary",
+			Kind:        ports.WorkloadKindGPUContainer,
+			ImageID:     "image-a",
+			ImageRef:    "harbor.example/tenant-a/gpu-app@sha256:abc",
+			Image:       "harbor.example/tenant-a/gpu-app:1",
+			ImageSummary: ports.InstanceImageSummary{
+				ID:           "image-a",
+				Ref:          "harbor.example/tenant-a/gpu-app@sha256:abc",
+				Digest:       "sha256:abc",
+				Name:         "gpu-app",
+				Tag:          "1",
+				Purpose:      "gpu",
+				Architecture: "amd64",
+			},
+			Resources: ports.WorkloadResourceRequest{
+				CPU:    "4",
+				Memory: "16Gi",
+				GPU: ports.GPUSchedulingRequest{
+					PreferredModels: []string{"A100"},
+					RequiredCount:   1,
+					VirtualizationModes: []ports.GPUVirtualizationMode{
+						ports.GPUVirtualizationVGPU,
+					},
+				},
+			},
+			GPUSpec: &ports.InstanceGPUSpecReference{
+				SpecID:     "gpu-spec-a100-10g",
+				GPUType:    "A100",
+				Shares:     8,
+				MBPerShare: 10240,
+			},
+			Network: ports.WorkloadNetworkPolicy{
+				TenantIsolated:   true,
+				VPCID:            "vpc-a",
+				SubnetID:         "subnet-a",
+				SecurityGroupIDs: []string{"sg-a"},
+				PrivateIP:        "10.20.0.8",
+			},
+			Storage: []ports.WorkloadStorageAttachment{
+				{
+					Name:         "data-a",
+					Kind:         ports.StorageAttachmentDataDisk,
+					ResourceType: "volume",
+					ResourceID:   "volume-a",
+					MountPath:    "/data",
+					Status:       "attached",
+					TaskID:       "task-volume-a",
+				},
+				{
+					Name:         "shared-a",
+					Kind:         ports.StorageAttachmentSharedPVC,
+					ResourceType: "filesystem",
+					ResourceID:   "filesystem-a",
+					MountPath:    "/shared",
+					Status:       "mounted",
+				},
+			},
+			Container: &ports.ContainerInstanceSpec{Replicas: 1},
+			Labels:    map[string]string{"team": "platform"},
+			Lifecycle: ports.InstanceLifecyclePolicy{AutoStart: true},
+		},
+		UserID:          "user-a",
+		PermissionProof: "rbac:create:workload",
+		RequestedAt:     time.Unix(505, 0),
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	if store.last.Description != "approved contract summary" || store.last.Labels["team"] != "platform" {
+		t.Fatalf("stored description/labels = %q/%v", store.last.Description, store.last.Labels)
+	}
+	if store.last.Image.ID != "image-a" || store.last.Image.Digest != "sha256:abc" {
+		t.Fatalf("stored image = %+v", store.last.Image)
+	}
+	if store.last.Compute.SpecID != "gpu-spec-a100-10g" || store.last.Compute.GPUShares != 8 {
+		t.Fatalf("stored compute = %+v", store.last.Compute)
+	}
+	if store.last.GPU == nil || store.last.GPU.SpecID != "gpu-spec-a100-10g" || store.last.GPU.Shares != 8 {
+		t.Fatalf("stored gpu = %+v", store.last.GPU)
+	}
+	if store.last.Network.VPCID != "vpc-a" || store.last.Network.SubnetID != "subnet-a" {
+		t.Fatalf("stored network = %+v", store.last.Network)
+	}
+	if len(store.last.StorageAttachments) != 2 || store.last.StorageAttachments[0].TaskID != "task-volume-a" {
+		t.Fatalf("stored attachments = %+v", store.last.StorageAttachments)
+	}
+	if !store.last.Access.ExecAvailable || store.last.Access.ConsoleAvailable {
+		t.Fatalf("stored access = %+v", store.last.Access)
+	}
+}
+
 func TestLocalInstanceOrchestratorStopsBeforeObservationWhenApplyDisabled(t *testing.T) {
 	store := &fakeInstanceStore{}
 	orchestrator := newTestInstanceOrchestrator(false, store)
@@ -305,6 +457,7 @@ var _ ports.WorkloadPlanAuditStore = fakePlanAuditStore{}
 type fakeInstanceStore struct {
 	upserts int
 	last    ports.WorkloadInstanceRecord
+	records []ports.WorkloadInstanceRecord
 }
 
 func (s *fakeInstanceStore) UpsertStatus(_ context.Context, record ports.WorkloadInstanceRecord) error {
@@ -318,6 +471,9 @@ func (s *fakeInstanceStore) Get(context.Context, string, string) (ports.Workload
 }
 
 func (s *fakeInstanceStore) List(context.Context, string, ports.WorkloadKind) ([]ports.WorkloadInstanceRecord, error) {
+	if s.records != nil {
+		return append([]ports.WorkloadInstanceRecord(nil), s.records...), nil
+	}
 	return []ports.WorkloadInstanceRecord{s.last}, nil
 }
 
