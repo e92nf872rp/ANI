@@ -8,6 +8,11 @@ TITLE = "KuberCloud ANI Core API"
 VERSION = "1.0.0"
 SERVER_URL = "https://{host}/api/v1"
 OPERATIONS = [
+    "listQuotaMeta",
+    "deleteTenantQuota",
+    "getTenantQuota",
+    "createTenantQuota",
+    "updateTenantQuota",
     "listAPIKeys",
     "createAPIKey",
     "revokeAPIKey",
@@ -197,6 +202,11 @@ OPERATIONS = [
     "unmountStorageVolume"
 ]
 PATHS = [
+    "GET /admin/quota-meta",
+    "DELETE /admin/tenants/{tenant_id}/quota",
+    "GET /admin/tenants/{tenant_id}/quota",
+    "POST /admin/tenants/{tenant_id}/quota",
+    "PUT /admin/tenants/{tenant_id}/quota",
     "GET /auth/api-keys",
     "POST /auth/api-keys",
     "DELETE /auth/api-keys/{key_id}",
@@ -538,6 +548,15 @@ SCHEMAS = [
     "PlatformPasswordLoginRequest",
     "PutEmailSmtpConfigRequest",
     "PutEmailSubscriptionsRequest",
+    "Quota",
+    "QuotaCreateItem",
+    "QuotaCreateRequest",
+    "QuotaDeleteResponse",
+    "QuotaItem",
+    "QuotaMeta",
+    "QuotaMetaListResponse",
+    "QuotaUpdateItem",
+    "QuotaUpdateRequest",
     "RefreshAccessTokenRequest",
     "RefreshAccessTokenResponse",
     "RegistryArtifact",
@@ -746,9 +765,14 @@ ERROR_CODES = [
     "NOT_FOUND",
     "NOT_IMPLEMENTED",
     "PRECONDITION_FAILED",
+    "QUOTA_ALREADY_EXISTS",
+    "QUOTA_NOT_FOUND",
+    "QUOTA_RESOURCE_NOT_REGISTERED",
     "RATE_LIMIT_EXCEEDED",
+    "TENANT_NOT_FOUND",
     "UNAUTHORIZED",
     "UNAVAILABLE",
+    "VALIDATION_FAILED",
     "VECTOR_STORE_NOT_FOUND"
 ]
 
