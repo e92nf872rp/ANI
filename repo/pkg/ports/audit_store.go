@@ -19,15 +19,15 @@ import (
 // AuditLog 表示一条审计日志记录（对应 audit_logs 表一行）。
 type AuditLog struct {
 	ID        uuid.UUID
-	TenantID  *uuid.UUID // 平台级操作（如套餐管理）为 NULL
-	UserID    *uuid.UUID // 操作者；系统/后台触发可为 NULL
-	RequestID *uuid.UUID // 关联请求（幂等/追踪）
-	Action    string     // 操作类型，如 plan.create / plan.activate / tenant.bind_plan_quota
-	Resource  string     // 资源类型，如 tenant_plan
-	Result    string     // success | failure
+	TenantID  *uuid.UUID     // 平台级操作（如套餐管理）为 NULL
+	UserID    *uuid.UUID     // 操作者；系统/后台触发可为 NULL
+	RequestID *uuid.UUID     // 关联请求（幂等/追踪）
+	Action    string         // 操作类型，如 plan.create / plan.activate / tenant.bind_plan_quota
+	Resource  string         // 资源类型，如 tenant_plan
+	Result    string         // success | failure
 	Details   map[string]any // 扩展信息，如 {plan_id, skipped_approved, updated}
-	IPAddress string     // 来源 IP
-	UserAgent string     // UA
+	IPAddress string         // 来源 IP
+	UserAgent string         // UA
 	CreatedAt time.Time
 }
 

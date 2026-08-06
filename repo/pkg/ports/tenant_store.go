@@ -24,16 +24,16 @@ import (
 // Status 状态机：active → frozen → disabled。
 // 注意：MFA/SSO 与配额均不在本结构体内（分别由 TenantAuthStore / Core QuotaService 承载）。
 type Tenant struct {
-	ID          uuid.UUID // 主键
-	Name        string    // 租户标识
-	DisplayName string    // 展示名
-	ContactEmail string   // 联系邮箱
-	Status      string    // active | frozen | disabled
-	PlanID      uuid.UUID // 外键 → tenant_plans.id
-	FrozenAt    *time.Time
-	DisabledAt  *time.Time
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID           uuid.UUID // 主键
+	Name         string    // 租户标识
+	DisplayName  string    // 展示名
+	ContactEmail string    // 联系邮箱
+	Status       string    // active | frozen | disabled
+	PlanID       uuid.UUID // 外键 → tenant_plans.id
+	FrozenAt     *time.Time
+	DisabledAt   *time.Time
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // =============================================================================
