@@ -1,7 +1,7 @@
 batch: SPEC-COMPAT-A
 phase: Phase 1 / Sprint 4
 source: api/openapi/v1.yaml
-generated_at: '2026-08-05'
+generated_at: '2026-08-06'
 compatibility_rules:
   allowed:
   - Add optional request fields.
