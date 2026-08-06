@@ -9,6 +9,7 @@ use (
 	./services/model-service
 	./services/reconcile-worker
 	./services/task-service
+	./services/tenant-service
 	./tools/kms-sm4-live-fixture
 )
 
