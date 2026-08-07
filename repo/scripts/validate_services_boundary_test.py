@@ -16,7 +16,7 @@ class ServicesBoundaryValidationTest(unittest.TestCase):
         result = guard.validate_workspace(guard.ROOT, run_spec_split=False)
 
         self.assertEqual(result.error_count, 0)
-        self.assertEqual(result.warning_count, 5)
+        self.assertEqual(result.warning_count, 3)
 
     def test_unregistered_core_internal_go_import_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

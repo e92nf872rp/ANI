@@ -4,7 +4,7 @@ import (
 	"context"
 
 	tenantv1 "github.com/kubercloud/ani/pkg/generated/pb/tenant/v1"
-	"github.com/kubercloud/ani/pkg/ports"
+	"github.com/kubercloud/ani/services/tenant-service/internal/repo/ports"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 )

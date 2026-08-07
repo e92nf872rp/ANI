@@ -10,7 +10,7 @@ import (
 // Core 的通用资源配额与计量落地方案中已实现：
 //   PUT /api/v1/admin/tenants/{tenant_id}/quota  （批量下发/更新配额）
 // tenant-service 仅作为调用方访问此 Core API，不重复实现配额逻辑。
-// 实现：repo/pkg/adapters/core/quota_svc_client.go。
+// 实现：services/tenant-service/internal/repo/adapters（tenant-service 自有 repo 层）。
 
 // CoreQuotaItem 表示下发给 Core 的单个配额维度项（请求侧）。
 type CoreQuotaItem struct {

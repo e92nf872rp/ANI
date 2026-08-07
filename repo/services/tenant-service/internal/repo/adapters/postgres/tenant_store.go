@@ -5,7 +5,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/kubercloud/ani/pkg/ports"
+	"github.com/kubercloud/ani/services/tenant-service/internal/repo/ports"
 )
 
 // PostgresTenantStore 基于 PostgreSQL 实现 ports.TenantStore（最小版）。

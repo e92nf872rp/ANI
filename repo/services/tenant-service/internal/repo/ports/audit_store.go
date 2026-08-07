@@ -49,7 +49,7 @@ type AuditLogListResult struct {
 }
 
 // AuditStore 定义审计日志的数据访问接口。
-// 实现：repo/pkg/adapters/postgres/audit_store.go。
+// 实现：services/tenant-service/internal/repo/adapters（tenant-service 自有 repo 层）。
 type AuditStore interface {
 	// Create 写入一条审计日志并返回其 ID。
 	Create(ctx context.Context, log AuditLog) (uuid.UUID, error)

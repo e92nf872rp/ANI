@@ -41,7 +41,7 @@ type Tenant struct {
 // =============================================================================
 
 // TenantStore 定义租户数据的最小访问接口（配额套餐链所需）。
-// 实现：repo/pkg/adapters/postgres/tenant_store.go（PostgresTenantStore）。
+// 实现：services/tenant-service/internal/repo/adapters（PostgresTenantStore）。
 type TenantStore interface {
 	// GetByID 按主键查询租户，返回 status / plan_id 等字段。
 	// 绑定套餐（issue-007）据此判断租户是否已 disabled（disabled → 409 TENANT_STATE_INVALID）。

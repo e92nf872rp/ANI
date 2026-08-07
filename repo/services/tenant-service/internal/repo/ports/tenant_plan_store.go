@@ -118,7 +118,7 @@ type ApprovedQuotaChange struct {
 // =============================================================================
 
 // TenantPlanStore 定义配额套餐的数据访问接口。
-// 实现：repo/pkg/adapters/postgres/tenant_plan_store.go（PostgresTenantPlanStore）。
+// 实现：services/tenant-service/internal/repo/adapters（PostgresTenantPlanStore）。
 type TenantPlanStore interface {
 	// Create 创建套餐及其配额维度（INSERT tenant_plans + plan_quota_limits，事务内完成）。
 	Create(ctx context.Context, in CreateTenantPlanInput) (TenantPlan, error)

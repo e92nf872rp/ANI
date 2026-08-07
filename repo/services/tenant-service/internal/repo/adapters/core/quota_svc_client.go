@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
-	"github.com/kubercloud/ani/pkg/ports"
+	"github.com/kubercloud/ani/services/tenant-service/internal/repo/ports"
 )
 
 // QuotaSvcClient 是 ports.QuotaSvcClient 的 Core API HTTP 客户端实现。
