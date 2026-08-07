@@ -15,10 +15,10 @@ type TenantService struct {
 	// 嵌入未实现接口，确保 proto 新增 RPC 后本结构仍能向后兼容（栅栏模式）。
 	tenantv1.UnimplementedTenantServiceServer
 
-	store ports.TenantStore           // tenants 表最小访问（GetByID 判状态 / UpdatePlan 换 plan_id）
-	plans ports.TenantPlanStore       // 套餐 store（GetQuotaLimitViews 取有效限额 / GetApprovedQuotaChanges 取已审批维度）
-	core  ports.QuotaSvcClient        // Core 配额 API 客户端（批量下发配额）
-	audit ports.TenantPlanAuditStore  // 审计日志（配额套餐域）
+	store ports.TenantStore          // tenants 表最小访问（GetByID 判状态 / UpdatePlan 换 plan_id）
+	plans ports.TenantPlanStore      // 套餐 store（GetQuotaLimitViews 取有效限额 / GetApprovedQuotaChanges 取已审批维度）
+	core  ports.QuotaSvcClient       // Core 配额 API 客户端（批量下发配额）
+	audit ports.TenantPlanAuditStore // 审计日志（配额套餐域）
 }
 
 // NewTenantService 构造租户 gRPC 服务实例。
