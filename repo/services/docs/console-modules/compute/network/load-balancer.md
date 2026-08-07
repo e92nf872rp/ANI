@@ -35,6 +35,12 @@ POST 创建必须带 `idempotency_key`。
 - 创建负载均衡后管理监听器、后端组、后端成员和健康检查
 - 关联 VPC / 子网跳转
 
+## 端口与创建顺序
+
+- `listener.port` 是前端监听端口。
+- typed backend group 模式下，后端端口只取 backend member 的 `port`；`target_port` 仅为 deprecated legacy 兼容字段，存在 `backend_group_id` 时忽略。
+- 新客户端固定按“空 LB → backend groups → members → listeners”创建。父资源 `listeners[]` 只兼容 legacy listener，不负责创建 backend group/member 关联；item 携带 `backend_group_id` 时返回 `400`。
+
 ## 创建前置条件
 
 | 依赖项 | 要求状态 | 未满足时的 HTTP 响应 |
@@ -85,6 +91,12 @@ POST 创建必须带 `idempotency_key`。
 - 后端组承载轮询算法与健康检查配置
 - 负载均衡主资源更新 PATCH 当前未声明
 - UDP、HTTPS 证书、静态 VIP 和独立 EIP 资源不在本批 7.29 P0 范围
+
+## 实现边界
+
+- PostgreSQL 保存 LB、listener、backend group/member 的控制面定义、租户隔离、幂等信息和 apply/observe 状态。
+- Network Service 负责关系与端口校验；`NetworkLoadBalancerProvider` port 负责产品意图到 provider 的边界；Kube-OVN adapter 负责 Kubernetes/Kube-OVN 资源的渲染、apply 和 observe。
+- Gateway handler 不直接操作 Kubernetes。provider observe 回写 VIP 和 member 健康状态；无 EIP provider 能力的公网 LB 返回 `422 EIPNotAvailable`。
 
 ## 验收标准
 

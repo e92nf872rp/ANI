@@ -531,6 +531,9 @@ class OpenAPISpecValidatorTest(unittest.TestCase):
         embedded_listener = schemas["NetworkLoadBalancerListener"]
         self.assertIn("backend_group_id", embedded_listener["properties"])
         self.assertNotIn("backend_group_id", embedded_listener["required"])
+        self.assertNotIn("target_port", embedded_listener["required"])
+        self.assertTrue(embedded_listener["properties"]["target_port"]["deprecated"])
+        self.assertIn("member.port", embedded_listener["properties"]["target_port"]["description"])
         self.assertNotIn("certificate_id", embedded_listener["properties"])
         self.assertNotIn("udp", embedded_listener["properties"]["protocol"]["enum"])
 
@@ -541,11 +544,21 @@ class OpenAPISpecValidatorTest(unittest.TestCase):
             listener = schemas[schema_name]
             self.assertIn("backend_group_id", listener["properties"])
             self.assertIn("backend_group_id", listener["required"])
+            self.assertNotIn("target_port", listener["required"])
+            self.assertTrue(listener["properties"]["target_port"]["deprecated"])
+            self.assertIn("member.port", listener["properties"]["target_port"]["description"])
             self.assertNotIn("certificate_id", listener["properties"])
             self.assertNotIn("udp", listener["properties"]["protocol"]["enum"])
         update_listener = schemas["UpdateNetworkLoadBalancerListenerRequest"]
         self.assertIn("backend_group_id", update_listener["properties"])
         self.assertNotIn("backend_group_id", update_listener["required"])
+        self.assertNotIn("target_port", update_listener["required"])
+        self.assertTrue(update_listener["properties"]["target_port"]["deprecated"])
+        self.assertIn("member.port", update_listener["properties"]["target_port"]["description"])
+
+        create_lb_schema = schemas["CreateNetworkLoadBalancerRequest"]
+        create_lb_listeners = create_lb_schema["properties"]["listeners"]
+        self.assertIn("backend_group_id", create_lb_listeners["description"])
 
         member_health = schemas["NetworkLoadBalancerBackendMember"]["properties"]["health_status"]
         self.assertEqual(member_health["enum"], ["unknown", "healthy", "unhealthy"])
@@ -584,6 +597,9 @@ class OpenAPISpecValidatorTest(unittest.TestCase):
                     self.assertIn("409", operation["responses"])
 
         create_lb = paths["/networks/load-balancers"]["post"]
+        self.assertIn("400", create_lb["responses"])
+        self.assertIn("listeners[]", create_lb["description"])
+        self.assertIn("backend groups", create_lb["description"])
         self.assertIn("422", create_lb["responses"])
         create_lb_422 = create_lb["responses"]["422"]
         create_lb_422_text = create_lb_422.get("description", "") + yaml.dump(create_lb_422)

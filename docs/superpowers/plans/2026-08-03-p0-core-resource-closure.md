@@ -202,6 +202,8 @@ NETWORK-P0-CONTRACT-A             |
 - Route request/response 增加可选 `priority`；response/filter 的 next-hop 增加 `local`，create request 仍禁止创建 local route。
 - LB 增加只读 `listener_count/backend_count`；新增 listener、backend-group、backend-member typed schemas 和 CRUD 路径。
 - 新增 listener 必须通过 `backend_group_id` 关联后端组；历史父资源 `listeners[]` 摘要只兼容新增可选字段，update 可选传入以支持改绑。算法为 `round_robin/weighted_round_robin`，健康检查包含 protocol、port、path、interval_seconds、timeout_seconds、healthy_threshold、unhealthy_threshold。
+- 冻结 listener 端口语义：`listener.port` 是前端监听端口；typed backend group 模式下唯一后端端口来源是 member `port`。`target_port` 在摘要、typed resource 和 create/update request 中均为可选 deprecated 兼容字段；存在 `backend_group_id` 时 provider 必须忽略它，无该字段的 legacy listener 才使用它。
+- 冻结 LB 创建顺序为“空 LB → backend groups → members → listeners”。父资源 `CreateNetworkLoadBalancerRequest.listeners[]` 仅兼容 legacy listener 输入，不支持 backend group/member 原子关联；item 携带 `backend_group_id` 时 Core 必须返回 400，不得静默忽略。
 - backend member 增加只读 `health_status=unknown/healthy/unhealthy`，与资源生命周期 `state` 分离。
 - 公网 LB 在没有 EIP 能力时返回 422；不新增虚假的 EIP 占位资源。
 - 7.29 原型未要求 UDP、HTTPS 证书、expected status code、静态 VIP 或 EIP 资源字段，本批不预建。
@@ -261,6 +263,8 @@ NETWORK-P0-CONTRACT-A             |
 - [ ] provider apply 使用稳定 tenant/resource ID 命名；重复 apply 不创建第二套资源。
 - [ ] health 状态由 provider observe 回写 PG，不由 Gateway 内存定时器保存。
 - [ ] 公网方案无 EIP 时返回 422，内网 VIP 完成最小闭环。
+
+**实现方式冻结：** Network Service/PG authoritative Store 保存控制面关系与状态；`NetworkLoadBalancerProvider` port 只接收 ANI 产品意图；Kube-OVN adapter 将 internal LB 渲染为稳定命名的 Kubernetes/Kube-OVN 资源并执行 apply/observe。Gateway handler 不直接调用 Kubernetes SDK，provider observe 负责把 VIP 和 member `health_status` 回写 PG。
 
 ### Task C5：执行 `NETWORK-PRIVATE-VPC-LIVE-A`
 

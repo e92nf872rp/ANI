@@ -1,7 +1,7 @@
 batch: SPEC-COMPAT-A
 phase: Phase 1 / Sprint 4
 source: api/openapi/v1.yaml
-generated_at: '2026-08-06'
+generated_at: '2026-08-07'
 compatibility_rules:
   allowed:
   - Add optional request fields.
@@ -5799,7 +5799,6 @@ schemas:
     - idempotency_key
     - port
     - protocol
-    - target_port
     properties:
       backend_group_id:
         signature:
@@ -9571,7 +9570,6 @@ schemas:
     required:
     - port
     - protocol
-    - target_port
     properties:
       backend_group_id:
         signature:
@@ -9626,7 +9624,6 @@ schemas:
     - load_balancer_id
     - port
     - protocol
-    - target_port
     - updated_at
     properties:
       backend_group_id:

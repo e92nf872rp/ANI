@@ -794,6 +794,9 @@ export interface paths {
          * 创建负载入口
          * @description scheme=public 且平台当前不具备 EIP 能力时返回 422（code=EIPNotAvailable）；
          *     不新增虚假 EIP 占位资源。内网 VIP（scheme=internal）不受此限制。
+         *     新客户端应先创建空 LB，再按 backend groups → members → listeners 的顺序创建 typed 关联；
+         *     request.listeners[] 仅兼容 legacy listener 输入，不支持 backend group/member 原子创建。
+         *     listeners[] item 携带 backend_group_id 时返回 400，不得静默忽略；省略 backend_group_id 的 legacy item 必须提供 target_port。
          */
         post: operations["createNetworkLoadBalancer"];
         delete?: never;
@@ -4034,8 +4037,12 @@ export interface components {
             /** @enum {string} */
             protocol: "http" | "https" | "tcp";
             port: number;
-            target_port: number;
-            /** @description 关联后端组；历史 listeners 摘要可不返回。 */
+            /**
+             * @deprecated
+             * @description 遗留 listener 的后端目标端口。backend_group_id 存在时不得作为端口来源，provider 必须以该后端组成员的 member.port 为准并忽略此字段；无 backend_group_id 的 legacy listener 必须提供此字段。
+             */
+            target_port?: number;
+            /** @description 关联后端组；历史 listeners 摘要可不返回。typed listener 必须通过子资源 endpoint 创建。 */
             backend_group_id?: string;
         };
         NetworkLoadBalancerListenerResource: {
@@ -4045,7 +4052,11 @@ export interface components {
             /** @enum {string} */
             protocol: "http" | "https" | "tcp";
             port: number;
-            target_port: number;
+            /**
+             * @deprecated
+             * @description 遗留 listener 的后端目标端口。typed backend group listener 的后端端口唯一来自成员的 member.port；provider 必须忽略此字段。
+             */
+            target_port?: number;
             description?: string | null;
             /** Format: date-time */
             created_at: string;
@@ -4064,7 +4075,11 @@ export interface components {
             /** @enum {string} */
             protocol: "http" | "https" | "tcp";
             port: number;
-            target_port: number;
+            /**
+             * @deprecated
+             * @description 遗留兼容字段。backend_group_id 存在时 provider 必须忽略它并以该组成员的 member.port 为准；无 backend_group_id 的 legacy listener 才使用它。
+             */
+            target_port?: number;
             description?: string | null;
         };
         UpdateNetworkLoadBalancerListenerRequest: {
@@ -4074,6 +4089,10 @@ export interface components {
             /** @enum {string} */
             protocol?: "http" | "https" | "tcp";
             port?: number;
+            /**
+             * @deprecated
+             * @description 遗留兼容字段。backend_group_id 存在时 provider 必须忽略它并以该组成员的 member.port 为准；无 backend_group_id 的 legacy listener 才使用它。
+             */
             target_port?: number;
             description?: string | null;
         };
@@ -4179,6 +4198,7 @@ export interface components {
             /** @enum {string} */
             scheme: "internal" | "public";
             vip?: string | null;
+            /** @description 历史兼容摘要。新客户端不得依赖此字段创建 typed backend association，应按空 LB → backend groups → members → listeners 的顺序调用子资源 endpoint。数组项不得携带 backend_group_id；携带时 Core 必须返回 400。省略 backend_group_id 的 legacy item 必须提供 target_port。 */
             listeners: components["schemas"]["NetworkLoadBalancerListener"][];
             /** @description 监听器数量；只读聚合字段。 */
             readonly listener_count?: number;
@@ -4392,6 +4412,7 @@ export interface components {
              * @enum {string}
              */
             scheme: "internal" | "public";
+            /** @description 仅保留 legacy listener 兼容输入，不提供 backend group/member 的原子创建能力。新客户端应先创建空 LB，再依次创建 backend groups、members 和 typed listeners。数组项携带 backend_group_id 时 Core 必须显式返回 400，不得静默忽略；legacy item 省略 backend_group_id 时必须提供 target_port。 */
             listeners?: components["schemas"]["NetworkLoadBalancerListener"][];
         };
         /** @enum {string} */
