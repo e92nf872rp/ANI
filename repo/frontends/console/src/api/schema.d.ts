@@ -1753,6 +1753,8 @@ export interface components {
         };
         TenantPlanListResponse: {
             items: components["schemas"]["TenantPlanListItem"][];
+            /** @description 满足筛选条件的总条数（用于前端分页） */
+            total?: number;
             /** @description 下一页游标；null 表示已无更多数据 */
             next_cursor?: string | null;
         };
@@ -1786,9 +1788,9 @@ export interface components {
             unit: string;
             /**
              * Format: int64
-             * @description 当前限额值；null = 用 default_quota
+             * @description 展示限额值；未显式设置时已用 resource_quota_meta.default_quota 兜底为具体数值，不返回 null
              */
-            total: number | null;
+            total: number;
         };
         PlanQuotaLimitsResponse: {
             items: components["schemas"]["PlanQuotaLimitView"][];
@@ -1844,6 +1846,8 @@ export interface components {
         };
         PlanAuditLogListResponse: {
             items: components["schemas"]["PlanAuditLog"][];
+            /** @description 满足筛选条件的总条数（用于前端分页） */
+            total?: number;
             /** @description 下一页游标；null 表示已无更多数据 */
             next_cursor?: string | null;
         };

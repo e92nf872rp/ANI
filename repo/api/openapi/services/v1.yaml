@@ -729,6 +729,7 @@ components:
       required: [items]
       properties:
         items:       { type: array, items: { $ref: '#/components/schemas/TenantPlanListItem' } }
+        total:       { type: integer, description: "满足筛选条件的总条数（用于前端分页）" }
         next_cursor: { type: string, nullable: true, description: "下一页游标；null 表示已无更多数据" }
 
     CreateTenantPlanRequest:
@@ -758,7 +759,7 @@ components:
         resource_type: { type: string }
         display_name:  { type: string, description: "展示名（来自 resource_quota_meta）" }
         unit:          { type: string, description: "单位（来自 resource_quota_meta）" }
-        total:         { type: integer, format: int64, nullable: true, description: "当前限额值；null = 用 default_quota" }
+        total:         { type: integer, format: int64, minimum: 0, description: "展示限额值；未显式设置时已用 resource_quota_meta.default_quota 兜底为具体数值，不返回 null" }
 
     PlanQuotaLimitsResponse:
       type: object
@@ -819,6 +820,7 @@ components:
       required: [items]
       properties:
         items:       { type: array, items: { $ref: '#/components/schemas/PlanAuditLog' } }
+        total:       { type: integer, description: "满足筛选条件的总条数（用于前端分页）" }
         next_cursor: { type: string, nullable: true, description: "下一页游标；null 表示已无更多数据" }
 
     IdempotentResult:
