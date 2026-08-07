@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>187</dd></div>
-          <div><dt>Schemas</dt><dd>253</dd></div>
+          <div><dt>Operations</dt><dd>202</dd></div>
+          <div><dt>Schemas</dt><dd>267</dd></div>
         </dl>
       </section>
 
@@ -893,7 +893,7 @@
           <td><code>createNetworkLoadBalancer</code></td>
           <td>创建负载入口</td>
           <td><code>scope:networks:create</code></td>
-          <td>201, 400, 401, 403, 404, 409</td>
+          <td>201, 400, 401, 403, 404, 409, 422</td>
         </tr>
         <tr>
           <td><span class="method method-delete">DELETE</span></td>
@@ -910,6 +910,126 @@
           <td>查询负载入口</td>
           <td><code>scope:networks:read</code></td>
           <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/networks/load-balancers/{load_balancer_id}/backend-groups</code></td>
+          <td><code>listNetworkLoadBalancerBackendGroups</code></td>
+          <td>查询负载入口后端组列表</td>
+          <td><code>scope:networks:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/networks/load-balancers/{load_balancer_id}/backend-groups</code></td>
+          <td><code>createNetworkLoadBalancerBackendGroup</code></td>
+          <td>创建负载入口后端组</td>
+          <td><code>scope:networks:create</code></td>
+          <td>201, 400, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}</code></td>
+          <td><code>deleteNetworkLoadBalancerBackendGroup</code></td>
+          <td>删除负载入口后端组</td>
+          <td><code>scope:networks:delete</code></td>
+          <td>200, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}</code></td>
+          <td><code>getNetworkLoadBalancerBackendGroup</code></td>
+          <td>查询负载入口后端组</td>
+          <td><code>scope:networks:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}</code></td>
+          <td><code>updateNetworkLoadBalancerBackendGroup</code></td>
+          <td>更新负载入口后端组</td>
+          <td><code>scope:networks:create</code></td>
+          <td>200, 400, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}/members</code></td>
+          <td><code>listNetworkLoadBalancerBackendMembers</code></td>
+          <td>查询负载入口后端组成员列表</td>
+          <td><code>scope:networks:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}/members</code></td>
+          <td><code>createNetworkLoadBalancerBackendMember</code></td>
+          <td>创建负载入口后端组成员</td>
+          <td><code>scope:networks:create</code></td>
+          <td>201, 400, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}/members/{member_id}</code></td>
+          <td><code>deleteNetworkLoadBalancerBackendMember</code></td>
+          <td>删除负载入口后端组成员</td>
+          <td><code>scope:networks:delete</code></td>
+          <td>200, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}/members/{member_id}</code></td>
+          <td><code>getNetworkLoadBalancerBackendMember</code></td>
+          <td>查询负载入口后端组成员</td>
+          <td><code>scope:networks:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}/members/{member_id}</code></td>
+          <td><code>updateNetworkLoadBalancerBackendMember</code></td>
+          <td>更新负载入口后端组成员</td>
+          <td><code>scope:networks:create</code></td>
+          <td>200, 400, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/networks/load-balancers/{load_balancer_id}/listeners</code></td>
+          <td><code>listNetworkLoadBalancerListeners</code></td>
+          <td>查询负载入口监听器列表</td>
+          <td><code>scope:networks:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/networks/load-balancers/{load_balancer_id}/listeners</code></td>
+          <td><code>createNetworkLoadBalancerListener</code></td>
+          <td>创建负载入口监听器</td>
+          <td><code>scope:networks:create</code></td>
+          <td>201, 400, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/networks/load-balancers/{load_balancer_id}/listeners/{listener_id}</code></td>
+          <td><code>deleteNetworkLoadBalancerListener</code></td>
+          <td>删除负载入口监听器</td>
+          <td><code>scope:networks:delete</code></td>
+          <td>200, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/networks/load-balancers/{load_balancer_id}/listeners/{listener_id}</code></td>
+          <td><code>getNetworkLoadBalancerListener</code></td>
+          <td>查询负载入口监听器</td>
+          <td><code>scope:networks:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/networks/load-balancers/{load_balancer_id}/listeners/{listener_id}</code></td>
+          <td><code>updateNetworkLoadBalancerListener</code></td>
+          <td>更新负载入口监听器</td>
+          <td><code>scope:networks:create</code></td>
+          <td>200, 400, 401, 403, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1682,6 +1802,9 @@
         <li><code>CreateInstanceExecSessionRequest</code></li>
         <li><code>CreateInstanceRequest</code></li>
         <li><code>CreateInstanceResponse</code></li>
+        <li><code>CreateNetworkLoadBalancerBackendGroupRequest</code></li>
+        <li><code>CreateNetworkLoadBalancerBackendMemberRequest</code></li>
+        <li><code>CreateNetworkLoadBalancerListenerRequest</code></li>
         <li><code>CreateNetworkLoadBalancerRequest</code></li>
         <li><code>CreateNetworkRouteRequest</code></li>
         <li><code>CreateNetworkSecurityGroupBindingRequest</code></li>
@@ -1781,8 +1904,16 @@
         <li><code>MeteringUsageRecord</code></li>
         <li><code>MeteringUsageResponse</code></li>
         <li><code>NetworkLoadBalancer</code></li>
+        <li><code>NetworkLoadBalancerBackendGroup</code></li>
+        <li><code>NetworkLoadBalancerBackendGroupListResponse</code></li>
+        <li><code>NetworkLoadBalancerBackendMember</code></li>
+        <li><code>NetworkLoadBalancerBackendMemberListResponse</code></li>
+        <li><code>NetworkLoadBalancerBackendMemberTargetType</code></li>
+        <li><code>NetworkLoadBalancerHealthCheck</code></li>
         <li><code>NetworkLoadBalancerListResponse</code></li>
         <li><code>NetworkLoadBalancerListener</code></li>
+        <li><code>NetworkLoadBalancerListenerListResponse</code></li>
+        <li><code>NetworkLoadBalancerListenerResource</code></li>
         <li><code>NetworkOverview</code></li>
         <li><code>NetworkOverviewCapability</code></li>
         <li><code>NetworkOverviewDeleteRisk</code></li>
@@ -1894,6 +2025,9 @@
         <li><code>TokenPairResponse</code></li>
         <li><code>TokenUsageReport</code></li>
         <li><code>UpdateEmailRecipientRequest</code></li>
+        <li><code>UpdateNetworkLoadBalancerBackendGroupRequest</code></li>
+        <li><code>UpdateNetworkLoadBalancerBackendMemberRequest</code></li>
+        <li><code>UpdateNetworkLoadBalancerListenerRequest</code></li>
         <li><code>UpdateNetworkSecurityGroupRuleRequest</code></li>
         <li><code>UpdateObservabilityAlertRuleRequest</code></li>
         <li><code>VectorStore</code></li>
