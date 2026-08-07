@@ -164,7 +164,7 @@
           <td><code>/admin/quota-meta</code></td>
           <td><code>listQuotaMeta</code></td>
           <td>查询可用配额元数据</td>
-          <td><code>scope:platform</code></td>
+          <td><code>scope:quota:read</code></td>
           <td>200, 401, 403</td>
         </tr>
         <tr>
@@ -172,7 +172,7 @@
           <td><code>/admin/tenants/{tenant_id}/quota</code></td>
           <td><code>deleteTenantQuota</code></td>
           <td>删除租户所有配额</td>
-          <td><code>scope:platform</code></td>
+          <td><code>scope:quota:write</code></td>
           <td>200, 401, 403, 404</td>
         </tr>
         <tr>
@@ -180,7 +180,7 @@
           <td><code>/admin/tenants/{tenant_id}/quota</code></td>
           <td><code>getTenantQuota</code></td>
           <td>查询租户配额</td>
-          <td><code>scope:platform</code></td>
+          <td><code>scope:quota:read</code></td>
           <td>200, 401, 403, 404</td>
         </tr>
         <tr>
@@ -188,7 +188,7 @@
           <td><code>/admin/tenants/{tenant_id}/quota</code></td>
           <td><code>createTenantQuota</code></td>
           <td>批量新建租户配额</td>
-          <td><code>scope:platform</code></td>
+          <td><code>scope:quota:write</code></td>
           <td>200, 400, 401, 403, 404, 409, 422</td>
         </tr>
         <tr>
@@ -196,7 +196,7 @@
           <td><code>/admin/tenants/{tenant_id}/quota</code></td>
           <td><code>updateTenantQuota</code></td>
           <td>批量修改租户配额上限</td>
-          <td><code>scope:platform</code></td>
+          <td><code>scope:quota:write</code></td>
           <td>200, 400, 401, 403, 404, 422</td>
         </tr>
         <tr>

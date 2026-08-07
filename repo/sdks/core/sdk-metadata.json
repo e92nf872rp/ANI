@@ -8,31 +8,31 @@
       "operationId": "listQuotaMeta",
       "method": "GET",
       "path": "/admin/quota-meta",
-      "scope": "scope:platform"
+      "scope": "scope:quota:read"
     },
     {
       "operationId": "deleteTenantQuota",
       "method": "DELETE",
       "path": "/admin/tenants/{tenant_id}/quota",
-      "scope": "scope:platform"
+      "scope": "scope:quota:write"
     },
     {
       "operationId": "getTenantQuota",
       "method": "GET",
       "path": "/admin/tenants/{tenant_id}/quota",
-      "scope": "scope:platform"
+      "scope": "scope:quota:read"
     },
     {
       "operationId": "createTenantQuota",
       "method": "POST",
       "path": "/admin/tenants/{tenant_id}/quota",
-      "scope": "scope:platform"
+      "scope": "scope:quota:write"
     },
     {
       "operationId": "updateTenantQuota",
       "method": "PUT",
       "path": "/admin/tenants/{tenant_id}/quota",
-      "scope": "scope:platform"
+      "scope": "scope:quota:write"
     },
     {
       "operationId": "listAPIKeys",

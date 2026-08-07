@@ -2634,7 +2634,8 @@ export interface paths {
         /**
          * 查询租户配额
          * @description 查询指定租户所有维度的 total/used/reserved + unit/display_name/is_discrete
-         *     （JOIN resource_quota_meta）。租户不存在或无配额行返回空 items。
+         *     （JOIN resource_quota_meta）。租户不存在返回 404 TENANT_NOT_FOUND；租户存在但
+         *     无配额行时返回空 items。
          */
         get: operations["getTenantQuota"];
         /**
@@ -2649,7 +2650,7 @@ export interface paths {
          * 批量新建租户配额
          * @description 为指定租户初始化多个资源维度配额行（used/reserved 初始为 0）。
          *     - items.resource_type 必须在 resource_quota_meta 已注册且 enabled=true
-         *     - items.total 未提供（<=0）时取 resource_quota_meta.default_quota
+         *     - items.total 未提供或为 null 时取 resource_quota_meta.default_quota
          *     - 已存在的维度跳过（ON CONFLICT DO NOTHING），不阻断其余维度创建
          */
         post: operations["createTenantQuota"];
@@ -5479,15 +5480,15 @@ export interface components {
         QuotaCreateRequest: {
             items: components["schemas"]["QuotaCreateItem"][];
         };
-        /** @description 新建配额维度项；total 未提供时取 resource_quota_meta.default_quota */
+        /** @description 新建配额维度项；total 未提供或为 null 时取 resource_quota_meta.default_quota */
         QuotaCreateItem: {
             /** @description 配额维度标识（需在 resource_quota_meta 已注册且 enabled=true） */
             resource_type: string;
             /**
              * Format: int64
-             * @description 配额上限；未提供（<=0）时取 resource_quota_meta.default_quota
+             * @description 配额上限；未提供或为 null 时取 resource_quota_meta.default_quota
              */
-            total?: number;
+            total?: number | null;
         };
         /** @description 批量修改租户配额上限请求（PUT /admin/tenants/{tenant_id}/quota） */
         QuotaUpdateRequest: {
@@ -5537,7 +5538,7 @@ export interface components {
             unit?: string;
             /** @description 展示名称（来自 resource_quota_meta，GET 时返回） */
             display_name?: string;
-            /** @description 是否离散计数（来自 resource_quota_meta，GET 时返回，用于校验 total 值类型） */
+            /** @description 是否离散计数（来自 resource_quota_meta，当前统一为整数计数；GET 时返回） */
             is_discrete?: boolean;
         };
         /** @description 删除租户配额响应（DELETE /admin/tenants/{tenant_id}/quota） */
@@ -5567,10 +5568,10 @@ export interface components {
             unit: string;
             /**
              * Format: int64
-             * @description 默认上限（新建配额未提供 total 时兜底）
+             * @description 默认上限（新建配额未提供或为 null 时兜底）
              */
             default_quota: number;
-            /** @description 是否离散计数（true=整数，false=允许小数），用于校验新增/修改 total 的值类型 */
+            /** @description 是否离散计数（当前统一为整数计数） */
             is_discrete: boolean;
         };
     };
@@ -5694,7 +5695,7 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
-        /** @description 配额行已存在（code=QUOTA_ALREADY_EXISTS） */
+        /** @description 部分成功：存在已存在的配额维度被跳过（code=QUOTA_ALREADY_EXISTS），其余维度已正常创建 */
         QuotaAlreadyExists: {
             headers: {
                 [name: string]: unknown;
