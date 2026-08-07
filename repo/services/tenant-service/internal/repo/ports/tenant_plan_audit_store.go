@@ -48,13 +48,19 @@ type AuditLogListResult struct {
 	NextCursor string     // 下一页游标；空串 = 已无更多数据
 }
 
-// AuditStore 定义审计日志的数据访问接口。
+// TenantPlanAuditStore 定义【配额套餐域】的审计日志数据访问接口。
 // 实现：services/tenant-service/internal/repo/adapters（tenant-service 自有 repo 层）。
-type AuditStore interface {
-	// Create 写入一条审计日志并返回其 ID。
+//
+// 审计按业务域拆分：本接口仅覆盖“配额套餐”域（resource='tenant_plan'）。
+// 其余业务域（租户列表 tenant / 租户管理员 tenant-admin / 平台运营账户 platform-admin）
+// 各自拥有独立的审计 store，留待对应 PR 在 internal/repo/ports 下新增，不入本接口。
+type TenantPlanAuditStore interface {
+	// Create 写入一条配额套餐域审计日志并返回其 ID。
+	// 调用方（service 层）负责构造完整的 AuditLog（含 action/resource/details）。
+	// 各业务操作的 action/details 约定见接口顶部注释。
 	Create(ctx context.Context, log AuditLog) (uuid.UUID, error)
 
-	// ListByResource 按资源标记（如 plan_id）与过滤条件，游标分页查询审计日志。
-	// 用于 GET /tenant-plans/{planId}/audit-logs 等操作历史查询。
-	ListByResource(ctx context.Context, resourceID string, filter AuditLogFilter) (AuditLogListResult, error)
+	// ListPlanAuditLogs 按套餐（details->>'plan_id' = planID）查询配额套餐操作历史，
+	// 支持 action/result 过滤与游标分页。用于 GET /tenant-plans/{planId}/audit-logs。
+	ListPlanAuditLogs(ctx context.Context, planID uuid.UUID, filter AuditLogFilter) (AuditLogListResult, error)
 }

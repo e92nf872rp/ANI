@@ -13,13 +13,13 @@ type TenantPlanService struct {
 	// 嵌入未实现接口，确保 proto 新增 RPC 后本结构仍能向后兼容（栅栏模式）。
 	tenantv1.UnimplementedTenantPlanServiceServer
 
-	plans ports.TenantPlanStore // 套餐持久化存储（ports 双模型的 store 层）
-	audit ports.AuditStore      // 审计日志存储
-	core  ports.QuotaSvcClient  // Core 配额 API 客户端（下发/同步存量租户）
+	plans ports.TenantPlanStore      // 套餐持久化存储（ports 双模型的 store 层）
+	audit ports.TenantPlanAuditStore // 审计日志存储（配额套餐域）
+	core  ports.QuotaSvcClient       // Core 配额 API 客户端（下发/同步存量租户）
 }
 
 // NewTenantPlanService 构造套餐 gRPC 服务实例。
-func NewTenantPlanService(plans ports.TenantPlanStore, audit ports.AuditStore, core ports.QuotaSvcClient) *TenantPlanService {
+func NewTenantPlanService(plans ports.TenantPlanStore, audit ports.TenantPlanAuditStore, core ports.QuotaSvcClient) *TenantPlanService {
 	return &TenantPlanService{plans: plans, audit: audit, core: core}
 }
 
