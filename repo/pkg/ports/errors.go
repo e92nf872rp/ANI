@@ -20,4 +20,5 @@ var (
 	ErrQuotaIdempotencyConflict   = errors.New("quota idempotency key conflict")
 	ErrQuotaNotFound              = errors.New("quota not found")
 	ErrQuotaAlreadyExists         = errors.New("quota already exists")
+	ErrReservationNotFound        = errors.New("resource reservation not found")
 )

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -305,8 +306,8 @@ func TestPostgresQuotaConfirmIdempotent(t *testing.T) {
 	}
 	beforeSkip := len(tx.execSQLs)
 
-	// 第二次 Confirm：state 已非 reserved → QueryRow 返回 ErrNoRows → 跳过
-	tx.enqueueRows(quotaFakeRow{err: pgx.ErrNoRows})
+	// 第二次 Confirm：state 已非 reserved → QueryRow 返回 ErrNoRows → 存在性校验通过 → 跳过
+	tx.enqueueRows(quotaFakeRow{err: pgx.ErrNoRows}, quotaFakeRow{values: []any{true}})
 	if err := q.Confirm(context.Background(), tx, []string{"tx-0001"}, "res-1"); err != nil {
 		t.Fatalf("Confirm() 重复 error = %v, want nil (幂等跳过)", err)
 	}
@@ -331,7 +332,7 @@ func TestPostgresQuotaCancelIdempotent(t *testing.T) {
 	}
 	beforeSkip := len(tx.execSQLs)
 
-	tx.enqueueRows(quotaFakeRow{err: pgx.ErrNoRows})
+	tx.enqueueRows(quotaFakeRow{err: pgx.ErrNoRows}, quotaFakeRow{values: []any{true}})
 	if err := q.Cancel(context.Background(), tx, []string{"tx-0001"}); err != nil {
 		t.Fatalf("Cancel() 重复 error = %v, want nil (幂等跳过)", err)
 	}
@@ -356,7 +357,7 @@ func TestPostgresQuotaReleaseIdempotent(t *testing.T) {
 	}
 	beforeSkip := len(tx.execSQLs)
 
-	tx.enqueueRows(quotaFakeRow{err: pgx.ErrNoRows})
+	tx.enqueueRows(quotaFakeRow{err: pgx.ErrNoRows}, quotaFakeRow{values: []any{true}})
 	if err := q.Release(context.Background(), tx, []string{"tx-0001"}); err != nil {
 		t.Fatalf("Release() 重复 error = %v, want nil (幂等跳过)", err)
 	}
@@ -426,8 +427,8 @@ func TestPostgresQuotaReleaseSkipsNonConfirmed(t *testing.T) {
 	tx := &quotaFakeTx{}
 	q := NewPostgresQuota(&quotaFakeStore{tx: tx})
 
-	// 流水当前是 reserved（非 confirmed）→ 状态守卫返回 ErrNoRows → 跳过
-	tx.enqueueRows(quotaFakeRow{err: pgx.ErrNoRows})
+	// 流水当前是 reserved（非 confirmed）→ 状态守卫返回 ErrNoRows → 存在性校验通过 → 跳过
+	tx.enqueueRows(quotaFakeRow{err: pgx.ErrNoRows}, quotaFakeRow{values: []any{true}})
 	if err := q.Release(context.Background(), tx, []string{"tx-0001"}); err != nil {
 		t.Fatalf("Release() 对非 confirmed 流水 error = %v, want nil (跳过)", err)
 	}
@@ -449,4 +450,35 @@ func hasExec(tx *quotaFakeTx, substr string) bool {
 // joinExecs 拼接所有 exec SQL 便于子串断言。
 func joinExecs(tx *quotaFakeTx) string {
 	return strings.Join(tx.execSQLs, "\n")
+}
+
+// TestPostgresQuotaReservationNotFound 验证无效 tx_id（流水不存在）时
+// Confirm/Cancel/Release 都返回 ErrReservationNotFound，而不是静默跳过。
+func TestPostgresQuotaReservationNotFound(t *testing.T) {
+	cases := []struct {
+		name string
+		call func(q *PostgresQuota, tx *quotaFakeTx) error
+	}{
+		{"Confirm", func(q *PostgresQuota, tx *quotaFakeTx) error {
+			return q.Confirm(context.Background(), tx, []string{"no-such-tx"}, "res-1")
+		}},
+		{"Cancel", func(q *PostgresQuota, tx *quotaFakeTx) error {
+			return q.Cancel(context.Background(), tx, []string{"no-such-tx"})
+		}},
+		{"Release", func(q *PostgresQuota, tx *quotaFakeTx) error {
+			return q.Release(context.Background(), tx, []string{"no-such-tx"})
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tx := &quotaFakeTx{}
+			q := NewPostgresQuota(&quotaFakeStore{tx: tx})
+			// 状态守卫返回 ErrNoRows；存在性校验返回 false（流水不存在）
+			tx.enqueueRows(quotaFakeRow{err: pgx.ErrNoRows}, quotaFakeRow{values: []any{false}})
+			err := c.call(q, tx)
+			if !errors.Is(err, ports.ErrReservationNotFound) {
+				t.Fatalf("%s() error = %v, want ErrReservationNotFound", c.name, err)
+			}
+		})
+	}
 }

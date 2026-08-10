@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/google/uuid"
@@ -153,6 +154,19 @@ func (q *PostgresQuota) TryMany(ctx context.Context, reqs []ports.QuotaTryReques
 	return reservations, nil
 }
 
+// reservationExists 判断指定 tx_id 的预占流水是否存在。用于 UPDATE 状态守卫返回
+// ErrNoRows 时区分"流水存在但 state 已变更（幂等重放）"与"流水不存在（tx_id 无效）"，
+// 避免把无效 tx_id 静默吞掉。存在返回 true；不存在返回 false；查询本身出错返回 err。
+func reservationExists(ctx context.Context, tx ports.MetadataTx, txID string) (bool, error) {
+	var exists bool
+	if err := tx.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM resource_reservations WHERE tx_id = $1)`,
+		txID).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
 // Confirm 预占转实扣。不自己开事务，用调用方传入的 tx。
 // 幂等：WHERE state='reserved' RETURNING 空 = 已确认，跳过着（不重复扣减）。
 func (q *PostgresQuota) Confirm(ctx context.Context, tx ports.MetadataTx, txIDs []string, resourceRef string) error {
@@ -166,9 +180,18 @@ func (q *PostgresQuota) Confirm(ctx context.Context, tx ports.MetadataTx, txIDs 
 			RETURNING state
 		`, txID, resourceRef).Scan(&state)
 		if errors.Is(err, pgx.ErrNoRows) {
+			// 区分两种情况：流水存在但 state 已非 reserved（幂等重放，跳过）
+			// vs 流水不存在（tx_id 无效，报错），避免把无效 tx_id 静默吞掉。
+			exists, err := reservationExists(ctx, tx, txID)
+			if err != nil {
+				return err
+			}
+			if !exists {
+				return fmt.Errorf("quota Confirm: reservation %q not found: %w", txID, ports.ErrReservationNotFound)
+			}
 			slog.Warn("quota Confirm: reservation not in reserved state, skipping",
 				"tx_id", txID, "resource_ref", resourceRef,
-				"reason", "already confirmed/cancelled or not found")
+				"reason", "already confirmed/cancelled")
 			continue // 已 confirmed/cancelled → 幂等成功，跳过
 		}
 		if err != nil {
@@ -204,9 +227,18 @@ func (q *PostgresQuota) Cancel(ctx context.Context, tx ports.MetadataTx, txIDs [
 			RETURNING state
 		`, txID).Scan(&state)
 		if errors.Is(err, pgx.ErrNoRows) {
+			// 区分两种情况：流水存在但 state 已非 reserved（幂等重放，跳过）
+			// vs 流水不存在（tx_id 无效，报错），避免把无效 tx_id 静默吞掉。
+			exists, err := reservationExists(ctx, tx, txID)
+			if err != nil {
+				return err
+			}
+			if !exists {
+				return fmt.Errorf("quota Cancel: reservation %q not found: %w", txID, ports.ErrReservationNotFound)
+			}
 			slog.Warn("quota Cancel: reservation not in reserved state, skipping",
 				"tx_id", txID,
-				"reason", "already cancelled/confirmed or not found")
+				"reason", "already cancelled/confirmed")
 			continue // 已 cancelled/confirmed → 幂等跳过
 		}
 		if err != nil {
@@ -241,9 +273,18 @@ func (q *PostgresQuota) Release(ctx context.Context, tx ports.MetadataTx, txIDs 
 			RETURNING state
 		`, txID).Scan(&state)
 		if errors.Is(err, pgx.ErrNoRows) {
+			// 区分两种情况：流水存在但 state 已非 confirmed（幂等重放，跳过）
+			// vs 流水不存在（tx_id 无效，报错），避免把无效 tx_id 静默吞掉。
+			exists, err := reservationExists(ctx, tx, txID)
+			if err != nil {
+				return err
+			}
+			if !exists {
+				return fmt.Errorf("quota Release: reservation %q not found: %w", txID, ports.ErrReservationNotFound)
+			}
 			slog.Warn("quota Release: reservation not in confirmed state, skipping",
 				"tx_id", txID,
-				"reason", "already released/cancelled or not found")
+				"reason", "already released/cancelled")
 			continue // 已 released/cancelled → 幂等跳过
 		}
 		if err != nil {
