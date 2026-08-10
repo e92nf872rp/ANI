@@ -987,7 +987,7 @@ paths:
                 name:            { type: string }
                 description:     { type: string }
                 embedding_model: { type: string, default: "bge-m3" }
-                chunk_size:      { type: integer, default: 512, minimum: 1, maximum: 8192, description: "分块大小（tokens），与 KBConfig 边界一致" }
+                chunk_size:      { type: integer, default: 1024, minimum: 1, maximum: 8192, description: "分块大小（tokens），与 KBConfig 边界一致" }
                 top_k:           { type: integer, default: 5, minimum: 1, maximum: 20 }
                 score_threshold: { type: number, format: float, default: 0.3, description: "相似度阈值，非零覆盖默认值" }
       responses:

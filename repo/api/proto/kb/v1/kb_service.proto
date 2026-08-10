@@ -52,9 +52,10 @@ message CreateKBRequest {
   string name            = 2;
   string description     = 3;
   string embedding_model = 4;   // default "bge-m3"
-  int32  chunk_size      = 5;   // default 512
+  int32  chunk_size      = 5;   // default 1024
   int32  top_k           = 6;   // default 5
   float  score_threshold = 7;   // default 0.3
+  string retrieval_mode  = 8;   // vector | hybrid(默认) | keyword
 }
 
 message GetKBRequest {
@@ -131,9 +132,10 @@ message QueryRequest {
   string question         = 3;
   string session_id       = 4;   // optional; empty creates new session
   string idempotency_key  = 5;   // prevents duplicate billing on retry
-  int32  top_k            = 6;   // override default if nonzero
-  float  score_threshold  = 7;   // override default if nonzero
+  int32  top_k            = 6;   // override KB default if nonzero
+  float  score_threshold  = 7;   // override KB default if nonzero
   string inference_service_name = 8; // which vLLM service to use; "default" if empty
+  string retrieval_mode   = 9;   // override KB retrieval mode; empty = use KB
 }
 
 message QueryResponse {
@@ -163,6 +165,7 @@ message KnowledgeBase {
   int32  chunk_size      = 6;
   int32  top_k           = 7;
   float  score_threshold = 8;
+  string retrieval_mode  = 13;  // vector | hybrid | keyword
   string status          = 9;   // active | rebuilding | deleted
   int32  doc_count       = 10;
   google.protobuf.Timestamp created_at = 11;
