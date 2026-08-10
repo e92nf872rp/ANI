@@ -186,6 +186,8 @@ func toQuotaItems(info []ports.QuotaInfo) []quotaItem {
 // writeQuotaError 将 adapter 哨兵错误映射为 HTTP 三段式错误响应。
 func writeQuotaError(c *app.RequestContext, err error) {
 	switch {
+	case errors.Is(err, ports.ErrInvalid):
+		writeDemoError(c, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
 	case errors.Is(err, ports.ErrTenantNotFound):
 		writeDemoError(c, http.StatusNotFound, "TENANT_NOT_FOUND", err.Error())
 	case errors.Is(err, ports.ErrQuotaNotFound):
