@@ -1452,3 +1452,99 @@ None — 本次修正是对契约改动 3/4 的对齐，adapter 其余方法（U
 - 契约：v1.yaml 5 处审核意见（RBAC scope / total nullable / POST 409 / GET 404 / is_discrete 描述），来源 `feat/core-quota-openapi-sdk` PR 审核 commit `291c2b9`
 - 代码：issue-005 `QuotaAdminService` adapter（`postgres_quota.go`）、issue-006 handler 错误映射（`quota_resources.go`）
 - 本次仅修正改动 3/4 对应的 adapter 行为与测试；改动 1/2/5（RBAC scope / total nullable / is_discrete）经确认无需改代码
+
+---
+
+## 补充批次 审核意见整改（4 处，2026-08-10）
+
+> 批次类型：Feature batch（组长审核意见引发的契约、port、adapter、handler 与测试同步整改）
+> 完成日期：2026-08-10
+> 分支：`feat/quota-service-tcc`
+> 背景：上一补充批次（v1.yaml 审核意见回添）之后，组长对 `feat/quota-service-tcc` 现有代码提出 4 处审核意见，本批次逐项整改并统一提交。四个 commit：`03d5abe`（header 改名）、`518b6a5`（批量创建部分成功）、`d00ddb7`（校验错误映射 400）、`1d17218`（tx_id 存在性校验）。
+
+### 完成摘要
+
+本批次共 4 处整改：
+
+1. **幂等 header 参数名统一**（commit `03d5abe`）：v1.yaml 中 `POST/PUT /admin/tenants/{tenant_id}/quota` 的幂等 header 参数名由 `idempotency_key` 统一为 `Idempotency-Key`，与全站 header 命名规范一致（契约层修改，无 Go 代码依赖旧名）。
+2. **批量创建部分成功语义**（commit `518b6a5`）：`CreateTenantQuota` 由"某维度重复即整体报 409 回滚"改为"已存在维度跳过（部分成功）"，返回回读的已生效 items；handler 返回 200 + `QuotaCreateResponse`。此点相对上一补充批次的方案 b（重复即 409 中断）做了修正，见 T1。适配器测试（`postgres_quota_admin_test.go`）与集成测试（`integration_test.go`）同步改期望。
+3. **校验错误映射为 400**（commit `d00ddb7`）：`CreateTenantQuota` 空 items 走 `ErrInvalid` 分支，此前 handler `writeQuotaError` 无 `ErrInvalid` 分支落到 500 INTERNAL，与契约 400 VALIDATION_FAILED 不符。补 `ErrInvalid → 400 VALIDATION_FAILED` 分支，与全站其他 handler 一致（一处覆盖 Create/Update 两方法）。新增 `writeQuotaError` 映射表驱动测试。
+4. **tx_id 存在性校验**（commit `1d17218`）：Confirm/Cancel/Release 用 `WHERE state='...'` 守卫实现幂等重放，`pgx.ErrNoRows` 可能同时覆盖"流水存在但 state 已变"与"流水不存在（tx_id 无效）"两种情况。此前统一 `continue` 静默跳过，会把无效 tx_id 吞掉。新增 `SELECT EXISTS` 存在性校验，区分两种情况：流水不存在返回 `ports.ErrReservationNotFound`，存在但 state 已变则幂等跳过。Confirm/Cancel/Release 复用抽出的 `reservationExists` helper。新增 `ErrReservationNotFound` 哨兵错误。新增 `TestPostgresQuotaReservationNotFound`。
+
+### 关键文件
+
+| 文件 | 类型 | 说明 |
+|---|---|---|
+| `api/openapi/v1.yaml` | 修改 | 幂等 header 参数名 `idempotency_key` → `Idempotency-Key`（commit `03d5abe`） |
+| `pkg/ports/errors.go` | 修改 | 新增 `ErrReservationNotFound` 哨兵错误（commit `1d17218`） |
+| `pkg/adapters/runtime/postgres_quota.go` | 修改 | `CreateTenantQuota` 改部分成功语义；Confirm/Cancel/Release 补 tx_id 存在性校验；新增 `reservationExists` helper（commit `518b6a5`/`1d17218`） |
+| `pkg/adapters/runtime/postgres_quota_admin_test.go` | 修改 | `CreateTenantQuota` 部分成功测试（commit `518b6a5`） |
+| `pkg/adapters/runtime/postgres_quota_test.go` | 修改 | 4 个幂等测试 enqueue exists=true row + 新增 `TestPostgresQuotaReservationNotFound`（commit `1d17218`） |
+| `pkg/adapters/runtime/integration_test.go` | 修改 | 幂等测试改期望 409（commit `518b6a5`） |
+| `services/ani-gateway/internal/router/quota_resources.go` | 修改 | `writeQuotaError` 补 `ErrInvalid → 400 VALIDATION_FAILED` 分支（commit `d00ddb7`） |
+| `services/ani-gateway/internal/router/quota_resources_test.go` | 新增 | `TestWriteQuotaErrorMapping` 表驱动测试（commit `d00ddb7`） |
+
+### 验证命令与结果
+
+| 命令 | 结果 |
+|---|---|
+| `go test ./pkg/adapters/runtime -run Quota` | ✅ PASS |
+| `go test ./services/ani-gateway/...` | ✅ PASS |
+| `go build`（adapter / ports / gateway） | ✅ 通过 |
+| `make validate-architecture` | ✅ PASS |
+| `git diff --check` | ✅ 无空白错误 |
+| `make test` / `go test ./pkg/adapters/runtime/...` | 仅 2 个 K8s Sandbox POSIX 测试预存失败（symlink/hardlink 环境问题，Windows 无特权），与 quota 改动无关 |
+
+### Implementation Notes
+
+#### 1. Design Decisions
+
+**D1：幂等 header 参数名统一为 `Idempotency-Key`（契约层）**
+Karpathy 原则二"最小代码、拒绝猜想"：header 名只影响契约与客户端，Go 侧无代码依赖旧名 `idempotency_key`，因此仅改 `api/openapi/v1.yaml` 参数名，不触碰 handler/port。与全站其他 API 的幂等 header 命名保持一致，避免 SDK/客户端出现两种命名。
+
+**D2：`CreateTenantQuota` 改为部分成功语义（已存在维度幂等跳过）**
+组长指出上一补充批次方案 b（重复即 409 中断）对批量创建不友好：单个重复维度会让整个请求失败。改为：对每条 INSERT 捕获 `RowsAffected`，命中已存在维度（RowsAffected=0）跳过该条，其余维度照常写入，返回"实际生效 items"。真正的中断（如资源未注册→422、租户不存在→404）仍整体报错。部分成功语义符合"POST 批量创建幂等重放"直觉，也避免先 SELECT 判断的额外往返。
+
+**D3：`writeQuotaError` 补 `ErrInvalid → 400 VALIDATION_FAILED`**
+`CreateTenantQuota` 空 items 返回 `ports.ErrInvalid`，但 `writeQuotaError` 缺该分支，落到 default → 500，与契约 400 不符。在 switch 补 `ErrInvalid → 400 VALIDATION_FAILED`，与其他 handler 一致，一处覆盖 Create/Update 两个方法。用表驱动测试锁定 6 种哨兵错误 → HTTP 映射，防回归。
+
+**D4：Confirm/Cancel/Release 补 tx_id 存在性校验，新增 `ErrReservationNotFound`**
+幂等重放的 `WHERE state='...'` 守卫遇到 `pgx.ErrNoRows` 时，无法区分"流水存在但 state 已变（幂等重放，应跳过）"与"流水不存在（tx_id 无效，应报错）"。为不发一次额外查询就想区分，策略是**在 ErrNoRows 分支内再做一次 `SELECT EXISTS`**：存在（state 已变）→ 幂等跳过；不存在（tx_id 无效）→ 返回 `ErrReservationNotFound`。新增独立哨兵错误，便于 handler 后续映射特定 HTTP 语义。tenant 归属无需额外校验：Confirm/Cancel/Release 均走 `WithTenantTx`，RLS self policy 已在行级兜底。
+
+**D5：抽取 `reservationExists` helper 消除三处重复**
+Confirm/Cancel/Release 三处存在性校验 SQL 完全一致，抽成包级 `reservationExists(ctx, tx, txID)` helper，保留每处调用点特有的错误消息前缀（`quota Confirm`/`quota Cancel`/`quota Release`）以便日志定位，符合"复用>复制"。
+
+#### 2. Deviations
+
+**De1（相对上一补充批次）：`CreateTenantQuota` 由"重复即 409 中断"（方案 b）改为"已存在维度跳过、部分成功 200"**
+上一补充批次按用户选择采用了方案 b（重复维度 → `ErrQuotaAlreadyExists` → 409，整体回滚）。本批次组长审核后认为该语义对批量幂等请求不友好，改为部分成功：跳过已存在维度，返回回读 items。此偏离是对上一批次决策的修正，Handler 无需改动（两种语义均由 adapter 返回最终 items / 或错误完成）。注意：**该修正已推翻上一补充批次 T1 中"方案 b 更优"的旧结论**，本批次以部分成功语义为准。
+
+#### 3. Tradeoffs
+
+**T1：批量创建"部分成功（跳过已存在）" vs "任一重复即 409 中断" vs "整体回滚"**
+- 方案 a（契约原描述 / 上一批次之前的静默跳过）：`ON CONFLICT DO NOTHING` 静默跳过 + 返回 200。缺点：调用方无法感知哪些维度跳过。
+- 方案 b（上一批次选择）：任一重复即 `ErrQuotaAlreadyExists` → 409 中断。优点：严格暴露重复；缺点：批量中一个重复维度使整个请求失败，影响幂等重放体验。
+- 方案 c（本批次最终选择，部分成功）：逐条 INSERT，已存在维度 `RowsAffected=0` 跳过，返回回读 items。优点：符合"批量创建幂等重放"直觉，不因单个重复失败整批；缺点：调用方需通过回读 items 判断实际生效集合。选择 c 是因为组长与调用方视角都更贴近幂等批量语义。
+
+**T2：存在性校验"ErrNoRows 后补一次 `SELECT EXISTS`" vs "UPDATE 前先 SELECT" vs "依赖 ERRCODE 24P01 唯一约束"**
+- 方案 1（本批次）：`UPDATE ... WHERE state` 命中 0 行（ErrNoRows）时再查一次 exists。只在异常路径（幂等重放或无效 tx_id）多一次查询，正常路径零额外开销。
+- 方案 2：UPDATE 前先 SELECT 是否存在 + 状态。每调用多一次查询，且存在竞态窗口。
+- 方案 3：不查 exists，仅凭 ErrNoRows 一律跳过。实现最简单，但会吞掉无效 tx_id（组长点名的缺陷）。
+选择方案 1：只在异常路径支付一次 exists 查询，正常路径无开销，语义正确。
+
+**T3：新增 `ErrReservationNotFound` 哨兵错误 vs 复用 `ErrQuotaNotFound`**
+`ErrQuotaNotFound` 语义是"租户配额配置不存在"，与"预占流水不存在"是两种资源。若复用，handler/客户端无法区分；新增独立哨兵错误语义清晰，也便于后续为该错误单独映射 HTTP 语义（当前未在 `writeQuotaError` 添加映射，默认 500，见 OQ-1）。
+
+#### 4. Open Questions
+
+**Q1：`ErrReservationNotFound` 是否需要独立 HTTP 映射（如 404）？**
+当前 `writeQuotaError` 未给 `ErrReservationNotFound` 配置分支，落到 default → 500 INTERNAL。该错误由 Confirm/Cancel/Release 的租户侧内部方法返回，是否需要对协议层暴露明确的 4xx 语义（如 404 RESERVATION_NOT_FOUND）待契约确认（v1.yaml 当前是否定义该错误响应？）。契约确认后再决定是否补 handler 映射 + 契约 error response。
+
+**Q2：部分成功语义下，"已存在维度跳过"是否需要向调用方显式回报？**
+当前返回回读 items（只含生效维度），不显式区分"本次新建"与"本次跳过"。若后续需要区分，需在 `QuotaCreateItem`/响应中增加标记位。当前认为回读 items 已足够，未做该扩展。
+
+### 对齐文档
+
+- 契约：`api/openapi/v1.yaml`（幂等 header 改名），Quota TCC 预留状态机
+- 代码：issue-003 `QuotaService` adapter（`postgres_quota.go`）、issue-005 `QuotaAdminService` adapter、issue-006 handler 错误映射（`quota_resources.go`）、issue-002 port 哨兵错误（`ports/errors.go`）
+- 本批次为 `feat/quota-service-tcc` 的审核意见整改，向前兼容，未新增 v1.yaml 端点或破坏既有字段

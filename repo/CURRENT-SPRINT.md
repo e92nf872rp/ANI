@@ -198,7 +198,8 @@ go test -tags=integration ./services/task-service/internal/taskconsumer/...
 | #010 | 管理单元测试 | ✅ 已完成 | `development-records/quota-service.md` |
 | #011 | 集成测试（连 PG，双角色验证 RLS） | ✅ 已完成 | `development-records/quota-service.md` |
 | #012 | 全量验收（note-it） | ✅ 已完成 | `development-records/quota-service.md` |
-| 补充批次 | v1.yaml 审核意见回添（改动 3/4 契约修正，2026-08-10） | ✅ 已完成 | `development-records/quota-service.md`；改动 4 GET 404 + 改动 3 POST 409；45 个 quota 单测 PASS |
+| 补充批次1 | v1.yaml 审核意见回添（改动 3/4 契约修正，2026-08-10） | ✅ 已完成 | `development-records/quota-service.md`；改动 4 GET 404 + 改动 3 POST 409；45 个 quota 单测 PASS |
+| 补充批次2 | `feat/quota-service-tcc` 审核意见整改（4 处，2026-08-10） | ✅ 已完成 | `development-records/quota-service.md`；幂等 header 改名 `Idempotency-Key`（`03d5abe`）、`CreateTenantQuota` 部分成功语义（`518b6a5`，推翻批次1 的 409 中断）、`writeQuotaError` 补 `ErrInvalid → 400`（`d00ddb7`）、Confirm/Cancel/Release 补 tx_id 存在性校验 + `ErrReservationNotFound`（`1d17218`）；三处 quota 单测 + Gateway 单测 + `make validate-architecture` + `git diff --check` 全通过 |
 
 验收命令：
 
