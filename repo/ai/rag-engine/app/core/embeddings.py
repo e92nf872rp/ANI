@@ -156,7 +156,7 @@ async def init_embedding_model(model_name: str | None = None) -> None:
     if _model is not None:
         try:
             _model._client.close()
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001, S110 — best-effort close at shutdown
             pass
     name = model_name or settings.embedding_model
     _model = OpenAICompatibleEmbedding(

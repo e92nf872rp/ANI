@@ -18,9 +18,9 @@ import (
 // sources so the SSE handler can exercise the retrieval→prompt→vLLM path
 // without a real rag-engine.
 type fakeRagEngineClient struct {
-	resp  *ragQueryResponse
-	err   error
-	called bool
+	resp    *ragQueryResponse
+	err     error
+	called  bool
 	lastReq *ragQueryRequest
 }
 

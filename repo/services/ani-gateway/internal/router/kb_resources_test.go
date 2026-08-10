@@ -41,7 +41,7 @@ type fakeKBClient struct {
 	deleteKbErr error
 
 	listDocsResp *kbv1.ListDocumentsResponse
-	listDocsErr   error
+	listDocsErr  error
 
 	uploadURLResp *kbv1.GetDocumentUploadURLResponse
 	uploadURLErr  error
@@ -51,8 +51,8 @@ type fakeKBClient struct {
 	queryResp *kbv1.QueryResponse
 	queryErr  error
 
-	citationsErr error
-	sessionsErr  error
+	citationsErr    error
+	sessionsErr     error
 	permissionsResp *kbv1.KnowledgeBase
 	permissionsErr  error
 }
@@ -150,10 +150,10 @@ func setupKBTestServer(client KBGRPCClient) *server.Hertz {
 // fails the test.
 func TestKBRoutes_AllTwelveEndpointsRegistered(t *testing.T) {
 	h := setupKBTestServer(&fakeKBClient{
-		listKbsResp:   &kbv1.ListKBsResponse{},
-		listDocsResp:  &kbv1.ListDocumentsResponse{},
-		citationsErr:  status.Error(codes.Unimplemented, "P1"),
-		sessionsErr:   status.Error(codes.Unimplemented, "P1"),
+		listKbsResp:    &kbv1.ListKBsResponse{},
+		listDocsResp:   &kbv1.ListDocumentsResponse{},
+		citationsErr:   status.Error(codes.Unimplemented, "P1"),
+		sessionsErr:    status.Error(codes.Unimplemented, "P1"),
 		permissionsErr: status.Error(codes.Unimplemented, "P1"),
 	})
 
@@ -197,8 +197,8 @@ func TestKBRoutes_AllTwelveEndpointsRegistered(t *testing.T) {
 // kb-service and surface UNIMPLEMENTED as HTTP 501 (SPEC §4.1, US-016 AC1).
 func TestKBRoutes_P1EndpointsReturn501(t *testing.T) {
 	h := setupKBTestServer(&fakeKBClient{
-		citationsErr:  status.Error(codes.Unimplemented, "ListKBCitations P1"),
-		sessionsErr:   status.Error(codes.Unimplemented, "ListKBSessions P1"),
+		citationsErr:   status.Error(codes.Unimplemented, "ListKBCitations P1"),
+		sessionsErr:    status.Error(codes.Unimplemented, "ListKBSessions P1"),
 		permissionsErr: status.Error(codes.Unimplemented, "UpdateKBPermissions P1"),
 	})
 

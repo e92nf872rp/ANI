@@ -11,17 +11,23 @@ Run from repo root: python -m pytest ai/rag-engine/tests/test_e2e_parse.py -v -s
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 
 # Load .env so Settings picks up MINIO_ENDPOINT etc.
 os.chdir(Path(__file__).resolve().parents[3])
 
 import pytest
-
 from app.clients.minio_client import ImageUploader
-from app.services.parse_service import ParseService, ParsedNode
+from app.services.parse_service import ParseService
 
+# These are end-to-end integration tests that require a REAL MinIO server
+# (10.10.1.66:30900) plus real docling/docx/PDF parsing libraries. They cannot
+# run in the standard unit-test CI job, so they are skipped by default and
+# executed explicitly with RUN_E2E=1 (e.g. a dedicated integration runner).
+pytestmark = pytest.mark.skipif(
+    os.environ.get("RUN_E2E") != "1",
+    reason="e2e tests require real MinIO + parsing libraries (set RUN_E2E=1)",
+)
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -120,6 +126,7 @@ def test_e2e_image_placeholder_in_parse(service):
     ``[图片: caption](OSS_URL)`` placeholder nodes.
     """
     import tempfile
+
     from docx import Document
     from docx.shared import Inches
 
@@ -171,6 +178,7 @@ def test_e2e_unsupported_type_raises(service):
 def test_e2e_pdf_heading_detection(service):
     """PDF: large-font lines are detected as headings with section_path."""
     import tempfile
+
     import fitz
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -200,7 +208,7 @@ def test_e2e_pdf_heading_detection(service):
         assert headings[1].metadata["heading_level"] == 3  # 16 >= 12 * 1.25
 
         # Paragraph under Section A should carry the full section_path.
-        section_text = [n for n in nodes if "Detail paragraph" in n.content][0]
+        section_text = next(n for n in nodes if "Detail paragraph" in n.content)
         assert section_text.metadata["section_path"] == "Chapter One > Section A"
 
 
@@ -230,7 +238,7 @@ def test_e2e_docx_heading_detection():
     assert headings[1].metadata["heading_level"] == 3
 
     # Paragraph under Section A carries section_path breadcrumb.
-    detail = [n for n in nodes if "Detail paragraph" in n.content][0]
+    detail = next(n for n in nodes if "Detail paragraph" in n.content)
     assert detail.metadata["section_path"] == "Chapter One > Section A"
 
 

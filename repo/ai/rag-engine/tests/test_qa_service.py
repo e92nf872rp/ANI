@@ -19,6 +19,7 @@ validate the pure-logic parts that matter for the AC:
 from __future__ import annotations
 
 import sys
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -40,6 +41,11 @@ for _mod in (
     "llama_index.core.retrievers",
     "llama_index.core.chat_engine",
     "llama_index.core.memory",
+    "llama_index.core.settings",
+    "llama_index.core.indices",
+    "llama_index.core.indices.prompt_helper",
+    "llama_index.core.callbacks",
+    "llama_index.core.callbacks.base",
     "llama_index.embeddings",
     "llama_index.vector_stores",
     "llama_index.vector_stores.milvus",
@@ -74,21 +80,21 @@ class _FakeContextChatEngine:
         return cls()
 
 
-sys.modules["llama_index.core.chat_engine"].ContextChatEngine = _FakeContextChatEngine
+_chat_engine_stub: Any = sys.modules["llama_index.core.chat_engine"]
+_chat_engine_stub.ContextChatEngine = _FakeContextChatEngine
 
 
 class _FakeChatMemoryBuffer:
-    def __init__(self, *, chat_store, session_id, token_limit=None) -> None:
+    def __init__(self, *, chat_store, chat_store_key, token_limit=None) -> None:
         self.chat_store = chat_store
-        self.session_id = session_id
+        self.chat_store_key = chat_store_key
         self.token_limit = token_limit
 
 
-sys.modules["llama_index.core.memory"].ChatMemoryBuffer = _FakeChatMemoryBuffer
+_memory_stub: Any = sys.modules["llama_index.core.memory"]
+_memory_stub.ChatMemoryBuffer = _FakeChatMemoryBuffer
 
-from app.services import qa_service  # noqa: E402
-from app.services.retrieve_service import RetrievedSource  # noqa: E402
-
+from app.services import qa_service
 
 # ── constants ───────────────────────────────────────────────────────────────
 
@@ -227,7 +233,7 @@ def test_extract_tokens_returns_zero_when_no_raw():
 
 def test_extract_tokens_returns_zero_when_no_usage():
     class _Raw:
-        raw = {}
+        raw = {}  # noqa: RUF012
 
     class _R:
         raw = _Raw()
@@ -287,7 +293,7 @@ def test_build_engine_uses_context_chat_engine_from_defaults(monkeypatch):
         _chat_engine_captured["memory"], _FakeChatMemoryBuffer
     )
     assert _chat_engine_captured["memory"].chat_store is fake_store
-    assert _chat_engine_captured["memory"].session_id == "s1"
+    assert _chat_engine_captured["memory"].chat_store_key == "s1"
     assert _chat_engine_captured["retriever"] is fake_retriever
     assert _chat_engine_captured["llm"] is fake_llm
 
@@ -370,7 +376,7 @@ def _make_retrieve_service_stub(*, pre_nodes=None):
 def _make_source_node(*, chunk_id="c1", doc_id="d1", content="child",
                       chunk_type="child", parent_content="parent", score=0.9):
     """Build a fake NodeWithScore for response.source_nodes."""
-    from tests.test_retrieve_service import _FakeTextNode, _FakeNodeWithScore
+    from tests.test_retrieve_service import _FakeNodeWithScore, _FakeTextNode
     node = _FakeTextNode(
         id_=chunk_id,
         text=content,
@@ -403,7 +409,7 @@ def test_chat_returns_answer_sources_session_id_tokens(monkeypatch):
     class _Response:
         response = "the answer"
         raw = _Raw()
-        source_nodes = [_make_source_node()]
+        source_nodes = [_make_source_node()]  # noqa: RUF012
 
     fake_engine = MagicMock()
     fake_engine.chat = lambda question: _Response()
@@ -452,7 +458,7 @@ def test_chat_no_result_returns_no_result_answer(monkeypatch):
     class _Response:
         response = ""
         raw = None
-        source_nodes = []  # no sources
+        source_nodes = []  # no sources  # noqa: RUF012
 
     fake_engine = MagicMock()
     fake_engine.chat = lambda question: _Response()
@@ -509,7 +515,7 @@ def test_chat_above_score_threshold_returns_answer(monkeypatch):
     class _Response:
         response = "real answer"
         raw = None
-        source_nodes = [_make_source_node(score=0.9)]
+        source_nodes = [_make_source_node(score=0.9)]  # noqa: RUF012
 
     fake_engine = MagicMock()
     fake_engine.chat = lambda question: _Response()

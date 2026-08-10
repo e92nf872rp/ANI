@@ -34,13 +34,13 @@ for _mod in (
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()
 
-from app.services.parse_service import (  # noqa: E402
-    ParsedNode,
+from app.services.parse_service import (
     _build_image_placeholder,
     _caption_for,
     _compose_table,
     _decompose_html_table,
     _detect_heading,
+    _emit_text_table_nodes,
     _estimate_tokens,
     _extract_html_table,
     _is_pipe_table,
@@ -48,12 +48,7 @@ from app.services.parse_service import (  # noqa: E402
     _split_large_table,
     _split_tables_and_text,
     _split_text_by_page,
-    _emit_text_table_nodes,
-    ParseService,
-    SUPPORTED_EXTS,
-    TABLE_TOKEN_THRESHOLD,
 )
-
 
 # ── _estimate_tokens ──────────────────────────────────────────────────────────
 
@@ -296,7 +291,7 @@ def test_parse_service_text_only_path(tmp_path: Path):
     # Stub DoclingReader to return canned markdown.
     fake_doc = MagicMock()
     fake_doc.text = "hello\n\n| A | B |\n|---|---|\n| 1 | 2 |"
-    ps.DoclingReader = MagicMock(return_value=MagicMock(load_data=lambda file_path: [fake_doc]))
+    ps.DoclingReader = MagicMock(return_value=MagicMock(load_data=lambda file_path: [fake_doc]))  # type: ignore[misc]
 
     # Use .docx so the parser routes through DoclingReader (TXT/MD read directly).
     f = tmp_path / "doc.docx"
@@ -355,7 +350,7 @@ def test_emit_nodes_section_path_breadcrumbs():
     md = "# Chapter\n\nIntro text.\n\n## Section\n\nDetail text."
     nodes = _emit_text_table_nodes(md)
     # Find the node under "## Section"
-    section_node = [n for n in nodes if "Detail text" in n.content][0]
+    section_node = next(n for n in nodes if "Detail text" in n.content)
     assert section_node.metadata["section_path"] == "Chapter > Section"
 
 
@@ -364,7 +359,7 @@ def test_emit_nodes_section_path_pop_on_higher_level():
     md = "# A\n\n## B\n\n# C\n\ntext"
     nodes = _emit_text_table_nodes(md)
     # The last text node is under "# C", section_path should be just "C"
-    last_text = [n for n in nodes if "text" in n.content][0]
+    last_text = next(n for n in nodes if "text" in n.content)
     assert last_text.metadata["section_path"] == "C"
 
 
@@ -372,7 +367,7 @@ def test_emit_nodes_table_metadata():
     """Table nodes get sub_type=table + row_count + table_index."""
     md = "| A | B |\n|---|---|\n| 1 | 2 |"
     nodes = _emit_text_table_nodes(md)
-    tbl = [n for n in nodes if n.content_type == "table"][0]
+    tbl = next(n for n in nodes if n.content_type == "table")
     assert tbl.metadata["sub_type"] == "table"
     assert tbl.metadata["row_count"] == 2  # header + 1 data row
     assert tbl.metadata["table_index"] == 1
@@ -390,7 +385,7 @@ def test_emit_nodes_table_inherits_section_path():
     """Table nodes carry the section_path of their surrounding headings."""
     md = "# Report\n\n| Col | Val |\n|---|---|\n| x | 1 |"
     nodes = _emit_text_table_nodes(md)
-    tbl = [n for n in nodes if n.content_type == "table"][0]
+    tbl = next(n for n in nodes if n.content_type == "table")
     assert tbl.metadata["section_path"] == "Report"
 
 

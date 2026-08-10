@@ -20,6 +20,7 @@ validate the pure-logic parts that matter for the AC:
 from __future__ import annotations
 
 import sys
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -52,7 +53,7 @@ for _mod in (
 
 # Configure the llama_index.core.schema stub to return a real-ish object so
 # ``_build_text_node`` can set attributes on it.
-_schema_stub = sys.modules["llama_index.core.schema"]
+_schema_stub: Any = sys.modules["llama_index.core.schema"]
 
 
 class _FakeRelatedNodeInfo:
@@ -72,11 +73,10 @@ _schema_stub.TextNode = _FakeTextNode
 _schema_stub.NodeRelationship = MagicMock(PARENT="PARENT")
 _schema_stub.RelatedNodeInfo = _FakeRelatedNodeInfo
 
-from app.core.config import settings  # noqa: E402
-from app.core import milvus  # noqa: E402
-from app.services import embed_service  # noqa: E402
-from app.services.chunk_service import ChildChunk, ParentChunk  # noqa: E402
-
+from app.core import milvus
+from app.core.config import settings
+from app.services import embed_service
+from app.services.chunk_service import ChildChunk, ParentChunk
 
 # ── kb_collection_name ───────────────────────────────────────────────────────
 
@@ -182,7 +182,7 @@ def test_build_vector_store_index_uses_from_vector_store(monkeypatch):
     )
 
     fake_embed = MagicMock(name="embed_model")
-    idx = milvus.build_vector_store_index("kb1", dim=512, embed_model=fake_embed)
+    milvus.build_vector_store_index("kb1", dim=512, embed_model=fake_embed)
 
     # The Index must be built via from_vector_store (not from_documents).
     assert isinstance(idx_captured["vector_store"], _FakeMilvusVectorStore)
@@ -374,10 +374,12 @@ def test_nodes_from_chunks_order_and_counts():
         children=children,
         summaries=summaries,
     )
-    # Order: parents first, then children, then summaries (FK order).
-    assert len(nodes) == 3
+    # Order: children, then summaries. Parents are deliberately NOT indexed
+    # (SPEC §5.1 parent-child: parent blocks exist only as aggregators in
+    # kb_chunks; retrieval returns the backfilled parent block).
+    assert len(nodes) == 2
     types = [n.metadata["chunk_type"] for n in nodes]
-    assert types == ["parent", "child", "doc_summary"]
+    assert types == ["child", "doc_summary"]
 
 
 def test_nodes_from_chunks_no_summary():
@@ -390,7 +392,7 @@ def test_nodes_from_chunks_no_summary():
         children=[_make_child()],
         summaries=None,
     )
-    assert len(nodes) == 2
+    assert len(nodes) == 1
     assert all(n.metadata["chunk_type"] != "doc_summary" for n in nodes)
 
 
@@ -417,7 +419,7 @@ def test_nodes_from_chunks_child_inherits_parent_metadata():
         parents=[_make_parent(pid="p1")],
         children=[_make_child(cid="c1", pid="p1")],
     )
-    child_node = [n for n in nodes if n.metadata["chunk_type"] == "child"][0]
+    child_node = next(n for n in nodes if n.metadata["chunk_type"] == "child")
     assert child_node.metadata["parent_chunk_id"] == "p1"
     assert child_node.metadata["parent_content"] == "parent text"
 
@@ -449,10 +451,12 @@ def test_embed_and_write_inserts_nodes_and_returns_summary(monkeypatch):
         summaries=[_make_summary()],
     )
 
-    assert result.nodes_written == 3
+    # Parents are excluded from embedded nodes (SPEC §5.1 parent-child), so
+    # nodes_written = children + summaries; counts still tally all chunks.
+    assert result.nodes_written == 2
     assert result.collection_name == "kb_550e8400e29b41d4a716446655440000"
     assert result.counts == {"parent": 1, "child": 1, "doc_summary": 1}
-    assert len(inserted_nodes) == 3
+    assert len(inserted_nodes) == 2
     # Index layer handles embedding — embed_and_write must NOT pre-embed.
     # (We can't assert the negative directly, but we verify insert_nodes was
     # the only write call and no embed was invoked on the embed_model.)
@@ -516,8 +520,6 @@ def test_embed_and_write_uses_shared_embed_model(monkeypatch):
 
 
 def test_as_retriever_passes_top_k(monkeypatch):
-    captured_top_k = {}
-
     def _fake_build_vector_store_index(kb_id, *, dim=None, embed_model=None):
         idx = MagicMock()
         idx.as_retriever = lambda similarity_top_k: similarity_top_k

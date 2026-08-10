@@ -1,5 +1,6 @@
 """Document ingestion and parsing endpoints."""
 import logging
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -68,7 +69,7 @@ async def parse_document(kb_id: str, doc_id: str, req: ParseRequest) -> ParseRes
         status = await updater.current(tenant_id=req.tenant_id, doc_id=doc_id)
         if status is None:
             status = "unknown"
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — degrade to unknown status
         logger.warning("parse endpoint: could not read final status: %s", exc)
         status = "unknown"
 
@@ -83,7 +84,7 @@ async def parse_document(kb_id: str, doc_id: str, req: ParseRequest) -> ParseRes
                 )
                 if row:
                     chunk_count = row["chunk_count"]
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — degrade to 0 chunk_count
         logger.warning("parse endpoint: could not read chunk_count: %s", exc)
 
     return ParseResponse(doc_id=doc_id, chunk_count=chunk_count, status=status)
@@ -94,7 +95,6 @@ async def delete_document_index(kb_id: str, doc_id: str) -> dict:
     """Remove all vectors for a document from Milvus. Idempotent."""
     try:
         from app.core.milvus import get_milvus_client
-        from app.core.config import settings
 
         client = get_milvus_client()
         if client is None:
@@ -109,6 +109,6 @@ async def delete_document_index(kb_id: str, doc_id: str) -> dict:
         # Delete by expression
         client.delete(collection_name=collection_name, expr=f'doc_id == "{doc_id}"')
         return {"deleted": True, "doc_id": doc_id}
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — report failure without raising
         logger.warning("delete index failed: %s", exc)
         return {"deleted": False, "doc_id": doc_id, "error": str(exc)}

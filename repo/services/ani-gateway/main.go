@@ -157,8 +157,8 @@ func main() {
 		KubernetesRESTClient:                  kubernetesRESTClient,
 		ObservabilityService:                  observabilityService,
 		EmailNotificationStore:                runtimeadapter.NewLocalEmailNotificationStore(),
-		KBServiceClient:                      kbServiceClient,
-		KBSSEConfig:                          newGatewaySSEConfig(gatewaySSERuntimeConfigFromEnv()),
+		KBServiceClient:                       kbServiceClient,
+		KBSSEConfig:                           newGatewaySSEConfig(gatewaySSERuntimeConfigFromEnv()),
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

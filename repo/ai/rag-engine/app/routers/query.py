@@ -14,9 +14,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
-from app.services.qa_service import build_production_qa_service, QAService
+from app.services.qa_service import QAService, build_production_qa_service
 from app.services.retrieve_service import (
-    DEFAULT_TOP_K,
     DEFAULT_SCORE_THRESHOLD,
 )
 
@@ -84,7 +83,7 @@ async def _kb_exists(kb_id: str, tenant_id: str) -> bool:
 
     try:
         conn = await asyncpg.connect(dsn=settings.pg_dsn, timeout=5)
-    except Exception:  # noqa: BLE001 — cannot reach PG; degrade to "exists" so
+    except Exception:
         # the query still runs rather than failing closed on a DB hiccup.
         logger.warning("kb_exists: PG unavailable, assuming KB exists", exc_info=True)
         return True
@@ -103,7 +102,7 @@ async def _kb_exists(kb_id: str, tenant_id: str) -> bool:
                 kb_id, tenant_id,
             )
         return row is not None
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.warning("kb_exists: query failed, assuming KB exists", exc_info=True)
         return True
     finally:
@@ -145,7 +144,7 @@ async def query_kb(kb_id: str, req: QueryRequest) -> QueryResponse:
         raise HTTPException(status_code=504, detail="LLM timed out")
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
-    except Exception as exc:  # noqa: BLE001
+    except Exception:
         logger.exception("query_kb internal error")
         raise HTTPException(status_code=500, detail="internal server error")
 

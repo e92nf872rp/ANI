@@ -21,6 +21,7 @@ The tests validate the pure-logic parts that matter for the AC:
 from __future__ import annotations
 
 import sys
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -54,7 +55,7 @@ for _mod in (
 
 # Configure the llama_index.core.schema stub to return real-ish objects so
 # the PgTrgmRetriever can build TextNode / NodeWithScore instances.
-_schema_stub = sys.modules["llama_index.core.schema"]
+_schema_stub: Any = sys.modules["llama_index.core.schema"]
 
 
 class _FakeTextNode:
@@ -99,11 +100,11 @@ class _FakeBaseRetriever:
         return self._retrieve(bundle)
 
 
-_core_stub = sys.modules["llama_index.core"]
+_core_stub: Any = sys.modules["llama_index.core"]
 _core_stub.BaseRetriever = _FakeBaseRetriever
 # retrieve_service imports BaseRetriever from llama_index.core.retrievers
 # (LlamaIndex 0.14.x), so the fake base class must be set there too.
-_retrievers_stub = sys.modules["llama_index.core.retrievers"]
+_retrievers_stub: Any = sys.modules["llama_index.core.retrievers"]
 _retrievers_stub.BaseRetriever = _FakeBaseRetriever
 
 
@@ -113,24 +114,24 @@ _fusion_captured: dict = {}
 
 
 class _FakeQueryFusionRetriever:
-    def __init__(self, *, retrievers, num_queries, mode, llm=None) -> None:
+    def __init__(self, *, retrievers, num_queries, mode, llm=None, use_async=None) -> None:
         _fusion_captured["retrievers"] = retrievers
         _fusion_captured["num_queries"] = num_queries
         _fusion_captured["mode"] = mode
         _fusion_captured["llm"] = llm
+        _fusion_captured["use_async"] = use_async
         self._retrievers = retrievers
         self._num_queries = num_queries
         self._mode = mode
         self._llm = llm
         # The retrieve path uses ``fusion.retrieve(question)``; return an
         # empty list by default. Tests monkeypatch this on the instance.
-        self.retrieve = lambda query: []
+        self.retrieve: Any = lambda query: []
 
 
-sys.modules["llama_index.core.retrievers"].QueryFusionRetriever = _FakeQueryFusionRetriever
+_retrievers_stub.QueryFusionRetriever = _FakeQueryFusionRetriever
 
-from app.services import retrieve_service  # noqa: E402
-
+from app.services import retrieve_service
 
 # ── constants (SPEC §5.1) ────────────────────────────────────────────────────
 
@@ -778,7 +779,8 @@ def test_keyword_retrieve_uses_pg_trgm_retriever(monkeypatch):
 
     assert len(result.sources) == 1
     assert result.sources[0].chunk_id == "kw1"
-    assert result.sources[0].content == "keyword hit"
+    # SPEC §5.1 parent-child: child hits surface the parent block as content.
+    assert result.sources[0].content == "parent ctx"
     assert result.sources[0].parent_content == "parent ctx"
     assert result.sources[0].score == 0.7
 

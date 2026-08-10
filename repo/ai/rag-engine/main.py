@@ -106,32 +106,32 @@ async def lifespan(app: FastAPI):
     if _parse_worker is not None:
         try:
             await _parse_worker.stop()
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001, S110 — best-effort shutdown
             pass
         _parse_worker = None
     if _nats_client is not None:
         try:
             await _nats_client.drain()
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001, S110 — best-effort shutdown
             pass
         _nats_client = None
     if _grpc_server is not None:
         try:
             _grpc_server.stop()
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001, S110 — best-effort shutdown
             pass
         _grpc_server = None
     if _db_pool is not None:
         try:
             await _db_pool.close()
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001, S110 — best-effort shutdown
             pass
         _db_pool = None
     # Close the CoreApiClient singleton to release its httpx connection pool.
     try:
         from app.clients.core_api import close_core_client
         await close_core_client()
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001, S110 — best-effort shutdown
         pass
 
 

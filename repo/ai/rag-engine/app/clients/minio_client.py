@@ -8,9 +8,10 @@ from __future__ import annotations
 import io
 import uuid
 
-from app.core.config import settings
 from minio import Minio
 from minio.error import S3Error
+
+from app.core.config import settings
 
 
 class ImageUploader:

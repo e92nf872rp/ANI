@@ -11,19 +11,33 @@ import (
 	kbv1 "github.com/kubercloud/ani/pkg/generated/pb/kb/v1"
 )
 
+// kbInjectedClient / kbInjectedSSEConfig are the KB gRPC client and SSE wiring
+// injected by RegisterWithOptions before routes are registered. They are kept
+// package-level so the Spec-split contract can register the whole KB surface
+// with a single-argument registerKnowledgeBases(svc) call while still allowing
+// tests to inject clients directly via registerKnowledgeBasesWithClient.
+var (
+	kbInjectedClient    KBGRPCClient
+	kbInjectedSSEConfig KbSSEConfig
+)
+
 // registerKnowledgeBases wires the 12 KB endpoints (SPEC §4.1 端点表):
 //   - 9 P0 endpoints routed to kb-service via gRPC (replacing the previous stubs)
 //   - 1 SSE streaming query endpoint held by the gateway
 //   - 3 P1 endpoints (citations/sessions/permissions) routed to kb-service;
 //     kb-service returns UNIMPLEMENTED which maps to HTTP 501.
 //
+// Dependencies (client / SSE config) are injected via RegisterWithOptions.
+func registerKnowledgeBases(svc *route.RouterGroup) {
+	registerKnowledgeBasesWithClient(svc, kbInjectedClient, kbInjectedSSEConfig)
+}
+
+// registerKnowledgeBasesWithClient wires the 12 KB endpoints using an explicit
+// gRPC client and SSE config, so tests can inject fakes directly.
+//
 // When client is nil the 9 gRPC handlers return 503 UNAVAILABLE so the gateway
 // stays up if kb-service is not configured at boot. The SSE and P1 handlers do
 // not require the client for their pre-flight responses.
-func registerKnowledgeBases(svc *route.RouterGroup) {
-	registerKnowledgeBasesWithClient(svc, nil, KbSSEConfig{})
-}
-
 func registerKnowledgeBasesWithClient(svc *route.RouterGroup, client KBGRPCClient, sseCfg KbSSEConfig) {
 	api := &kbAPI{client: client}
 	svc.GET("/knowledge-bases", api.listKnowledgeBases)
@@ -68,27 +82,27 @@ type createKnowledgeBaseRequest struct {
 
 type getDocumentUploadURLRequest struct {
 	IdempotencyKey string `json:"idempotency_key"`
-	FileName      string `json:"file_name"`
-	FileType      string `json:"file_type"`
-	FileSizeBytes int64  `json:"file_size_bytes"`
+	FileName       string `json:"file_name"`
+	FileType       string `json:"file_type"`
+	FileSizeBytes  int64  `json:"file_size_bytes"`
 	ChecksumSha256 string `json:"checksum_sha256"`
 	CustomMetadata string `json:"custom_metadata"`
 }
 
 type queryKnowledgeBaseRequest struct {
-	IdempotencyKey         string  `json:"idempotency_key"`
-	Question               string  `json:"question"`
-	SessionID              string  `json:"session_id"`
-	TopK                   int32   `json:"top_k"`
-	ScoreThreshold         float32 `json:"score_threshold"`
-	InferenceServiceName   string  `json:"inference_service_name"`
-	RetrievalMode          string  `json:"retrieval_mode"`
+	IdempotencyKey       string  `json:"idempotency_key"`
+	Question             string  `json:"question"`
+	SessionID            string  `json:"session_id"`
+	TopK                 int32   `json:"top_k"`
+	ScoreThreshold       float32 `json:"score_threshold"`
+	InferenceServiceName string  `json:"inference_service_name"`
+	RetrievalMode        string  `json:"retrieval_mode"`
 }
 
 type updateKBPermissionsRequest struct {
-	IdempotencyKey   string   `json:"idempotency_key"`
-	PublicRead       bool     `json:"public_read"`
-	AllowedUserIDs   []string `json:"allowed_user_ids"`
+	IdempotencyKey string   `json:"idempotency_key"`
+	PublicRead     bool     `json:"public_read"`
+	AllowedUserIDs []string `json:"allowed_user_ids"`
 }
 
 // ── 9 P0 handlers (gRPC passthrough) ────────────────────────────────────────
@@ -232,11 +246,11 @@ func (a *kbAPI) uploadKnowledgeBaseDocument(ctx context.Context, c *app.RequestC
 		return
 	}
 	resp, err := a.client.GetDocumentUploadURL(ctx, demoTenantID(c), c.Param("kb_id"), req.IdempotencyKey, &kbv1.GetDocumentUploadURLRequest{
-		FileName:        req.FileName,
-		FileType:        req.FileType,
-		FileSizeBytes:   req.FileSizeBytes,
-		ChecksumSha256:  req.ChecksumSha256,
-		CustomMetadata:  req.CustomMetadata,
+		FileName:       req.FileName,
+		FileType:       req.FileType,
+		FileSizeBytes:  req.FileSizeBytes,
+		ChecksumSha256: req.ChecksumSha256,
+		CustomMetadata: req.CustomMetadata,
 	})
 	if err != nil {
 		writeKBError(c, err)
@@ -302,12 +316,12 @@ func (a *kbAPI) queryKnowledgeBase(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	resp, err := a.client.Query(ctx, demoTenantID(c), c.Param("kb_id"), req.IdempotencyKey, &kbv1.QueryRequest{
-		Question:               req.Question,
-		SessionId:              req.SessionID,
-		TopK:                   req.TopK,
-		ScoreThreshold:         req.ScoreThreshold,
-		InferenceServiceName:   req.InferenceServiceName,
-		RetrievalMode:          req.RetrievalMode,
+		Question:             req.Question,
+		SessionId:            req.SessionID,
+		TopK:                 req.TopK,
+		ScoreThreshold:       req.ScoreThreshold,
+		InferenceServiceName: req.InferenceServiceName,
+		RetrievalMode:        req.RetrievalMode,
 	})
 	if err != nil {
 		writeKBError(c, err)
@@ -395,8 +409,8 @@ func (a *kbAPI) updateKnowledgeBasePermissions(ctx context.Context, c *app.Reque
 		return
 	}
 	kb, err := a.client.UpdateKBPermissions(ctx, demoTenantID(c), c.Param("kb_id"), req.IdempotencyKey, &kbv1.UpdateKBPermissionsRequest{
-		PublicRead:      req.PublicRead,
-		AllowedUserIds:  req.AllowedUserIDs,
+		PublicRead:     req.PublicRead,
+		AllowedUserIds: req.AllowedUserIDs,
 	})
 	if err != nil {
 		writeKBError(c, err)
@@ -411,19 +425,19 @@ func (a *kbAPI) updateKnowledgeBasePermissions(ctx context.Context, c *app.Reque
 // shape matches the OpenAPI contract that Console/BOSS codegen against.
 
 type knowledgeBaseJSON struct {
-	TenantID       string `json:"tenant_id"`
-	ID             string `json:"id"`
-	Name           string `json:"name"`
-	Description    string `json:"description"`
-	EmbeddingModel string `json:"embedding_model"`
-	ChunkSize      int32  `json:"chunk_size"`
-	TopK           int32  `json:"top_k"`
+	TenantID       string  `json:"tenant_id"`
+	ID             string  `json:"id"`
+	Name           string  `json:"name"`
+	Description    string  `json:"description"`
+	EmbeddingModel string  `json:"embedding_model"`
+	ChunkSize      int32   `json:"chunk_size"`
+	TopK           int32   `json:"top_k"`
 	ScoreThreshold float32 `json:"score_threshold"`
-	RetrievalMode  string `json:"retrieval_mode"`
-	Status         string `json:"status"`
-	DocCount       int32  `json:"doc_count"`
-	CreatedAt      string `json:"created_at"`
-	UpdatedAt      string `json:"updated_at"`
+	RetrievalMode  string  `json:"retrieval_mode"`
+	Status         string  `json:"status"`
+	DocCount       int32   `json:"doc_count"`
+	CreatedAt      string  `json:"created_at"`
+	UpdatedAt      string  `json:"updated_at"`
 }
 
 type kbDocumentJSON struct {
@@ -461,12 +475,12 @@ type kbCitationJSON struct {
 }
 
 type kbSessionJSON struct {
-	ID            string `json:"id"`
-	KbID          string `json:"kb_id"`
-	MessageCount  int32  `json:"message_count"`
-	LastQuery     string `json:"last_query"`
-	CreatedAt     string `json:"created_at"`
-	LastActiveAt  string `json:"last_active_at"`
+	ID           string `json:"id"`
+	KbID         string `json:"kb_id"`
+	MessageCount int32  `json:"message_count"`
+	LastQuery    string `json:"last_query"`
+	CreatedAt    string `json:"created_at"`
+	LastActiveAt string `json:"last_active_at"`
 }
 
 func kbToJSON(kb *kbv1.KnowledgeBase) knowledgeBaseJSON {

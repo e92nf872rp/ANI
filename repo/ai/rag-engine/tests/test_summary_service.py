@@ -17,6 +17,7 @@ validate the pure-logic parts that matter for the AC:
 from __future__ import annotations
 
 import sys
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -50,7 +51,7 @@ for _mod in (
 # Configure the llama_index.core.schema stub to return a real-ish object so
 # ``embed_service._build_text_node`` can set attributes on it (reuses the same
 # pattern as test_embed_service.py for the end-to-end wiring test below).
-_schema_stub = sys.modules["llama_index.core.schema"]
+_schema_stub: Any = sys.modules["llama_index.core.schema"]
 
 
 class _FakeRelatedNodeInfo:
@@ -70,9 +71,11 @@ _schema_stub.TextNode = _FakeTextNode
 _schema_stub.NodeRelationship = MagicMock(PARENT="PARENT")
 _schema_stub.RelatedNodeInfo = _FakeRelatedNodeInfo
 
-from app.services.chunk_service import ParentChunk  # noqa: E402
-from app.services import embed_service  # noqa: E402
-from app.services import summary_service  # noqa: E402
+from app.services import (
+    embed_service,
+    summary_service,
+)
+from app.services.chunk_service import ParentChunk
 
 # ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -101,7 +104,7 @@ class _FakeLLM:
         self._summary = summary_text
         self.prompts: list[str] = []
 
-    def complete(self, prompt: str):  # noqa: D401 - LlamaIndex surface
+    def complete(self, prompt: str):
         self.prompts.append(prompt)
         return _FakeCompletion(self._summary)
 
@@ -109,7 +112,7 @@ class _FakeLLM:
 class _RaisingLLM:
     """LLM stub that always raises to exercise the degradation path."""
 
-    def complete(self, prompt: str):  # noqa: D401
+    def complete(self, prompt: str):
         raise TimeoutError("vLLM timeout")
 
 

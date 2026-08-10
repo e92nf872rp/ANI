@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from pymilvus import connections
+from pymilvus import MilvusClient, connections
 
 from app.core.config import settings
 
@@ -62,7 +62,7 @@ async def init_milvus() -> None:
         logging.getLogger(__name__).info(
             "Milvus connected (host=%s, port=%s)", settings.milvus_host, settings.milvus_port,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — degrade gracefully on connect failure
         logging.getLogger(__name__).warning(
             "Milvus connection failed (host=%s, port=%s): %s — "
             "parse/query will degrade gracefully",
@@ -87,6 +87,25 @@ def _milvus_uri() -> str:
     used for a plain gRPC connection to a standalone/cluster Milvus.
     """
     return f"tcp://{settings.milvus_host}:{settings.milvus_port}"
+
+
+def get_milvus_client() -> MilvusClient | None:
+    """Return a connected :class:`MilvusClient` or ``None`` if Milvus is down.
+
+    Used by low-level admin/document endpoints (e.g. vector delete) that
+    need pymilvus's ``list_collections`` / ``delete`` API directly. Returns
+    ``None`` when the connection cannot be established so callers can degrade
+    gracefully.
+    """
+    try:
+        return MilvusClient(uri=_milvus_uri())
+    except Exception as exc:  # noqa: BLE001 — degrade to None when Milvus is down
+        logging.getLogger(__name__).warning(
+            "MilvusClient unavailable (host=%s, port=%s): %s",
+            settings.milvus_host, settings.milvus_port, exc,
+        )
+        return None
+
 
 
 def build_vector_store(kb_id: str, *, dim: int | None = None):

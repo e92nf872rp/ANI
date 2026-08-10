@@ -17,12 +17,14 @@ Post-processing rules applied to all formats:
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator, Literal
+from typing import Any, Literal
+
+from llama_index.readers.docling import DoclingReader
 
 from app.clients.minio_client import ImageUploader
-from llama_index.readers.docling import DoclingReader
 
 # Markdown table token threshold for row-group splitting (plan.md §4.2).
 TABLE_TOKEN_THRESHOLD = 2048
@@ -79,9 +81,7 @@ def _is_list_line(line: str) -> bool:
     stripped = line.strip()
     if stripped.startswith(("- ", "* ", "+ ")):
         return True
-    if re.match(r"^\d+\.\s", stripped):
-        return True
-    return False
+    return bool(re.match(r"^\d+\.\s", stripped))
 
 
 def _is_list_block(text: str) -> bool:
@@ -322,8 +322,9 @@ def _caption_for(alt: str) -> str | None:
 
 def _build_image_placeholder(alt: str, url: str, caption: str | None = None) -> str:
     cap = caption or alt or "图片"
-    # 标准 markdown 图片标记，前端可按 ![alt](url) 直接渲染为 <img>。
-    return f"![{cap}]({url})"
+    # Placeholder format ``[图片: caption](OSS_URL)`` (SPEC §5.1 parse) so the
+    # frontend can distinguish image nodes from regular markdown images.
+    return f"[图片: {cap}]({url})"
 
 
 class ParseService:
@@ -410,7 +411,6 @@ def _emit_text_table_nodes(
     for kind, segment in _split_tables_and_text(markdown):
         if kind == "table":
             table_index += 1
-            row_count = segment.count("<tr>")
             is_large = _estimate_tokens(segment) > TABLE_TOKEN_THRESHOLD
             for group in _split_large_table(segment):
                 group_rows = group.count("<tr>")
@@ -472,7 +472,7 @@ def _extract_office_images(
             nodes = _extract_xlsx_images(file_path, uploader, object_prefix)
         elif ext == ".pptx":
             nodes = _extract_pptx_images(file_path, uploader, object_prefix)
-    except Exception:
+    except Exception:  # noqa: BLE001, S110 — best-effort image extraction
         # Image extraction is best-effort; text/table nodes are already emitted.
         pass
     return nodes
@@ -502,7 +502,7 @@ def _extract_docx_images(
                         metadata={"sub_type": "image", "image_index": img_idx},
                     )
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 — skip unreadable image
                 pass
     return nodes
 
@@ -531,7 +531,7 @@ def _extract_xlsx_images(
                         metadata={"sub_type": "image", "image_index": img_idx},
                     )
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 — skip unreadable image
                 pass
     return nodes
 
@@ -562,7 +562,7 @@ def _extract_pptx_images(
                             metadata={"sub_type": "image", "image_index": img_idx},
                         )
                     )
-                except Exception:
+                except Exception:  # noqa: BLE001, S110 — skip unreadable image
                     pass
     return nodes
 
@@ -577,11 +577,10 @@ def _pdf_text_with_headings(page: Any) -> str:
 
     Falls back to plain ``get_text("text")`` if dict extraction fails.
     """
-    import fitz  # noqa: F811
 
     try:
         d = page.get_text("dict")
-    except Exception:
+    except Exception:  # noqa: BLE001 — fall back to plain text extraction
         return page.get_text("text").strip()
 
     # Collect font sizes to determine the body-text baseline (most common size).
@@ -596,7 +595,7 @@ def _pdf_text_with_headings(page: Any) -> str:
         return page.get_text("text").strip()
 
     # Body size = the most frequently occurring font size (mode).
-    body_size = max(size_counts, key=size_counts.get)
+    body_size = max(size_counts, key=size_counts.__getitem__)
 
     lines: list[str] = []
     for block in d.get("blocks", []):
@@ -671,7 +670,7 @@ def _parse_pdf_lightweight(
                                 },
                             )
                         )
-                    except Exception:
+                    except Exception:  # noqa: BLE001, S110 — skip unreadable image
                         # Skip images that cannot be extracted.
                         pass
     return nodes

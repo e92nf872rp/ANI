@@ -25,7 +25,8 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any, Callable, Protocol
+from collections.abc import Callable
+from typing import Any, Protocol
 
 from app.services.chunk_service import ChildChunk, ParentChunk
 
@@ -218,14 +219,14 @@ class SummaryService:
                 # Lazily build once and cache on self._llm so the long-lived
                 # service reuses one OpenAILike client across many documents.
                 llm = self._llm = self._llm_factory()
-            except Exception as exc:  # factory failure path (covered by tests)
+            except Exception as exc:  # noqa: BLE001 — factory failure path (covered by tests)
                 logger.warning("summary_service: LLM factory failed: %s; degrading", exc)
                 return None
 
         prompt = _build_prompt(combined)
         try:
             raw = llm.complete(prompt)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — degrade to parent-child only
             logger.warning(
                 "summary_service: LLM complete failed (%s); degrading to parent-child only",
                 exc,

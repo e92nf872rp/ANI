@@ -16,7 +16,6 @@ import logging
 import os
 import re
 import tempfile
-from typing import Any
 
 import httpx
 
@@ -102,7 +101,7 @@ class CoreApiClient:
             await self._client.aclose()
             self._client = None
 
-    async def __aenter__(self) -> "CoreApiClient":
+    async def __aenter__(self) -> CoreApiClient:  # noqa: PYI034 — returns self
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
@@ -148,7 +147,7 @@ class CoreApiClient:
         if resp.status_code != 200:
             try:
                 detail = resp.json().get("detail", resp.text)
-            except Exception:
+            except Exception:  # noqa: BLE001 — best-effort detail extraction
                 detail = resp.text
             raise CoreApiError(
                 f"Core API download request failed ({resp.status_code}): {detail}"
@@ -162,11 +161,11 @@ class CoreApiClient:
         # 2. Stream the object bytes to a temp file.
         # #12: only use a sanitized extension as suffix.
         suffix = _safe_suffix(file_name)
-        tmp = tempfile.NamedTemporaryFile(
+        tmp = tempfile.NamedTemporaryFile(  # noqa: SIM115 — closed in try/finally below
             dir=dest_dir, suffix=suffix, delete=False, mode="wb"
         )
         try:
-            async with httpx.AsyncClient(timeout=self._download_timeout) as dl_client:
+            async with httpx.AsyncClient(timeout=self._download_timeout) as dl_client:  # noqa: SIM117
                 async with dl_client.stream("GET", download_url) as dl_resp:
                     if dl_resp.status_code != 200:
                         raise CoreApiError(

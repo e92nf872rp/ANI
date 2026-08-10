@@ -35,25 +35,24 @@ for _mod in (
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()
 
-from app.services.chunk_service import (  # noqa: E402
+from app.services.chunk_service import (
+    CHILD_CHUNK_MIN,
     CHILD_CHUNK_SIZE,
     CHILD_CHUNK_SIZE_MAX,
     CHILD_CHUNK_SIZE_MIN,
-    CHILD_CHUNK_MIN,
     PARENT_CHUNK_SIZE,
     ChildChunk,
     ChunkService,
     ParentChunk,
-    _PureSentenceSplitter,
     _estimate_tokens,
     _force_truncate,
     _make_default_splitter,
+    _PureSentenceSplitter,
     _segment_nodes,
     _split_text_by_sentences,
     _split_units,
 )
-from app.services.parse_service import ParsedNode  # noqa: E402
-
+from app.services.parse_service import ParsedNode
 
 # ── _estimate_tokens ──────────────────────────────────────────────────────────
 
@@ -295,11 +294,12 @@ def test_chunk_table_is_atomic_child():
         _text_node("intro " * 50, section="S1"),
         _table_node("<table><tr><th>H</th></tr><tr><td>v</td></tr></table>", section="S1"),
     ]
-    _, children = svc.chunk(nodes)
-    # The table content must appear intact in exactly one child chunk.
-    table_chunks = [c for c in children if "<table>" in c.content]
-    assert len(table_chunks) == 1
-    assert all(c.content_type == "table" for c in table_chunks)
+    parents, children = svc.chunk(nodes)
+    # SPEC §5.1: a table becomes a self-contained table parent (header
+    # preserved as HTML) plus one child per data row (plain 列名：值 text).
+    table_parents = [p for p in parents if "<table>" in p.content]
+    assert len(table_parents) == 1
+    assert len(children) >= 1
 
 
 def test_chunk_image_is_atomic_child():
@@ -366,7 +366,7 @@ def test_chunk_parent_token_count_is_exact_not_floor_sum():
 def test_chunk_parent_token_count_within_budget_or_single_child():
     svc = ChunkService()
     nodes = [_text_node("段落内容足够长以触发分块。" * 200, section="S1")]
-    parents, children = svc.chunk(nodes)
+    parents, _children = svc.chunk(nodes)
     for p in parents:
         # A parent either fits in the budget or contains a single oversized child.
         assert p.token_count <= PARENT_CHUNK_SIZE or len(p.child_ids) == 1
@@ -399,7 +399,7 @@ def test_chunk_inherits_metadata():
         _text_node("# Heading", section="Sec", sub="heading", level=2),
         _text_node("body " * 50, section="Sec", sub="paragraph"),
     ]
-    parents, children = svc.chunk(nodes)
+    _parents, children = svc.chunk(nodes)
     # At least one child carries the section context.
     assert any(c.metadata.get("section_path") == "Sec" for c in children)
 

@@ -69,13 +69,13 @@ def _run_async(coro):
     import asyncio
     try:
         return asyncio.run(coro)
-    except RuntimeError as exc:
+    except RuntimeError:
         # asyncio.get_running_loop() raises RuntimeError when no loop is
         # running — that means the error came from the coroutine itself,
         # not from nested-loop detection, so re-raise.
         try:
             asyncio.get_running_loop()
-        except RuntimeError:
+        except RuntimeError:  # noqa: TRY203 — re-raise only when no loop is running
             raise
         import nest_asyncio
         nest_asyncio.apply()
@@ -322,7 +322,7 @@ def _build_pg_trgm_retriever(search_fn: _SearchFn, *, top_k: int, tenant_id: str
     fusion retriever can merge vector + keyword results uniformly.
     """
     from llama_index.core.retrievers import BaseRetriever
-    from llama_index.core.schema import NodeWithScore, TextNode, QueryBundle
+    from llama_index.core.schema import NodeWithScore, QueryBundle, TextNode
 
     class PgTrgmRetriever(BaseRetriever):
         """pg_trgm keyword retriever (SPEC §5.1 / PRD US-014 AC1).
@@ -672,7 +672,8 @@ class RetrieveService:
         fusion = QueryFusionRetriever(
             retrievers=retrievers,
             num_queries=FUSION_NUM_QUERIES,  # disable LLM query generation
-            mode=FUSION_MODE_RRF,            # RRF
+            # RRF fusion mode.
+            mode=FUSION_MODE_RRF,  # type: ignore[arg-type]
             llm=self._llm,  # avoid constructor resolving a default OpenAI LLM
             # Force sync retrieval path — avoids "Event loop is closed" when
             # called via asyncio.to_thread (the async path calls

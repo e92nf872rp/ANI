@@ -64,11 +64,11 @@ func newGatewayKBServiceClient(ctx context.Context, cfg gatewayKBServiceRuntimeC
 
 // gatewaySSERuntimeConfig configures the SSE streaming query dependencies.
 type gatewaySSERuntimeConfig struct {
-	RagEngineURL      string
-	VLLMBaseURL       string
-	VLLMAPIKey        string
-	VLLMModel         string
-	RagEngineTimeout  time.Duration
+	RagEngineURL     string
+	VLLMBaseURL      string
+	VLLMAPIKey       string
+	VLLMModel        string
+	RagEngineTimeout time.Duration
 }
 
 func gatewaySSERuntimeConfigFromEnv() gatewaySSERuntimeConfig {
@@ -98,7 +98,7 @@ func newGatewaySSEConfig(cfg gatewaySSERuntimeConfig) router.KbSSEConfig {
 		vllmStreamer = router.NewVLLMHTTPStreamer(cfg.VLLMBaseURL, cfg.VLLMAPIKey)
 	}
 	return router.KbSSEConfig{
-		RagClient:   ragClient,
+		RagClient:    ragClient,
 		VLLMStreamer: vllmStreamer,
 		VLLMModel:    cfg.VLLMModel,
 	}

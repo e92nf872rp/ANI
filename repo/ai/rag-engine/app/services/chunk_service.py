@@ -39,7 +39,7 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 from app.services.parse_service import ParsedNode, _compose_table, _html_table_rows
 
@@ -71,7 +71,7 @@ CHARS_PER_TOKEN = 2
 # become ``![caption](oss_url)`` markdown image links, which we let flow into the
 # surrounding text/parent segment (a standalone image chunk is not useful for
 # semantic retrieval). The link itself remains atomically intact via _LINK_RE.
-INDIVISIBLE_TYPES = {"table", "code"}
+INDIVISIBLE_TYPES = {"table", "code", "image"}
 
 # Sentence boundary: CJK terminal punctuation （。！？）and ASCII (.!?) followed
 # by whitespace, plus newlines. Keep CJK punctuation glued to its sentence.
@@ -255,8 +255,7 @@ def _split_text_by_sentences(
         # Plain sentence.
         if ulen > max_chars:
             flush()
-            for piece in _force_truncate(unit, chunk_size):
-                chunks.append(piece)
+            chunks.extend(_force_truncate(unit, chunk_size))
             continue
         # If adding this sentence would exceed the hard cap, flush first.
         if current and current_chars + ulen > max_chars:
@@ -304,7 +303,7 @@ def _make_default_splitter(chunk_size: int, chunk_min: int = CHILD_CHUNK_MIN) ->
         if not isinstance(probe, list) or not all(isinstance(x, str) for x in probe):
             raise TypeError("SentenceSplitter probe returned non-list[str]")
         return sp
-    except Exception:
+    except Exception:  # noqa: BLE001 — fall back to pure splitter
         return _PureSentenceSplitter(chunk_size, chunk_min)
 
 
@@ -446,10 +445,9 @@ class ChunkService:
                 f"child_chunk_size must be in [{CHILD_CHUNK_SIZE_MIN}, "
                 f"{CHILD_CHUNK_SIZE_MAX}]; got {child_chunk_size}"
             )
-        if child_chunk_min > child_chunk_size:
-            # v1.yaml allows chunk_size down to 1; never let the preferred
-            # cut threshold exceed the chunk size, clamp instead of erroring.
-            child_chunk_min = child_chunk_size
+        # v1.yaml allows chunk_size down to 1; never let the preferred
+        # cut threshold exceed the chunk size, clamp instead of erroring.
+        child_chunk_min = min(child_chunk_min, child_chunk_size)
         if child_chunk_min < 1:
             raise ValueError(
                 f"child_chunk_min must be >= 1; got {child_chunk_min}"

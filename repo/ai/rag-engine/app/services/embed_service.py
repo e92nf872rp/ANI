@@ -77,7 +77,7 @@ def _build_text_node(
     The metadata fields mirror the Milvus collection schema (SPEC §3.1) so
     the Index layer can persist them alongside the embedding vector.
     """
-    from llama_index.core.schema import TextNode, NodeRelationship, RelatedNodeInfo
+    from llama_index.core.schema import NodeRelationship, RelatedNodeInfo, TextNode
 
     node = TextNode(
         id_=chunk_id,

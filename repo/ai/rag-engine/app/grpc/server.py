@@ -30,17 +30,19 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-from typing import Any
 
 import grpc
 
+from app.core.config import settings
 from app.grpc import rag_pb2 as rag_pb
 from app.grpc import rag_pb2_grpc as rag_grpc
-from app.core.config import settings
-from app.services.qa_service import QAService, NO_RESULT_ANSWER, build_production_qa_service
+from app.services.qa_service import (
+    QAService,
+    build_production_qa_service,
+)
 from app.services.retrieve_service import (
-    DEFAULT_TOP_K,
     DEFAULT_SCORE_THRESHOLD,
+    DEFAULT_TOP_K,
 )
 
 logger = logging.getLogger(__name__)
@@ -98,23 +100,23 @@ class RagEngineServicer(rag_grpc.RagEngineServicer):
             await context.abort(
                 grpc.StatusCode.INVALID_ARGUMENT, "tenant_id is required"
             )
-            return
+            return  # type: ignore[return-value]  # abort() does not return
         if not request.kb_id:
             await context.abort(
                 grpc.StatusCode.INVALID_ARGUMENT, "kb_id is required"
             )
-            return
+            return  # type: ignore[return-value]  # abort() does not return
         if not request.question or len(request.question) < QUESTION_MIN_LEN:
             await context.abort(
                 grpc.StatusCode.INVALID_ARGUMENT, "question must not be empty"
             )
-            return  # unreachable; for type checkers
+            return  # type: ignore[return-value]  # abort() does not return
         if len(request.question) > QUESTION_MAX_LEN:
             await context.abort(
                 grpc.StatusCode.INVALID_ARGUMENT,
                 f"question length must be <= {QUESTION_MAX_LEN}",
             )
-            return
+            return  # type: ignore[return-value]  # abort() does not return
         # top_k: proto default 0 means "use service default" (SPEC §4.1).
         top_k = request.top_k if request.top_k else DEFAULT_TOP_K
         if not (TOP_K_MIN <= top_k <= TOP_K_MAX):
@@ -122,7 +124,7 @@ class RagEngineServicer(rag_grpc.RagEngineServicer):
                 grpc.StatusCode.INVALID_ARGUMENT,
                 f"top_k must be in [{TOP_K_MIN}, {TOP_K_MAX}]; got {top_k}",
             )
-            return
+            return  # type: ignore[return-value]  # abort() does not return
         # score_threshold: proto default 0.0 means "use service default".
         # Nonzero values are used as-is (negative = disable thresholding).
         score_threshold = (
@@ -137,7 +139,7 @@ class RagEngineServicer(rag_grpc.RagEngineServicer):
                 grpc.StatusCode.INVALID_ARGUMENT,
                 f"retrieval_mode must be one of vector|hybrid|keyword; got {retrieval_mode}",
             )
-            return
+            return  # type: ignore[return-value]  # abort() does not return
 
         # ── Run RAG QA in a thread (#6: avoid blocking the aio event loop) ─
         try:
@@ -155,16 +157,16 @@ class RagEngineServicer(rag_grpc.RagEngineServicer):
         except TimeoutError as exc:
             logger.warning("rag-engine Query LLM timeout: %s", exc)
             await context.abort(grpc.StatusCode.DEADLINE_EXCEEDED, "LLM timed out")
-            return
+            return  # type: ignore[return-value]  # abort() does not return
         except RuntimeError as exc:
             # vLLM/Milvus unavailable → UNAVAILABLE (SPEC §4.4).
             logger.warning("rag-engine Query backend unavailable: %s", exc)
             await context.abort(grpc.StatusCode.UNAVAILABLE, str(exc))
-            return
-        except Exception as exc:  # noqa: BLE001 — surface as INTERNAL
+            return  # type: ignore[return-value]  # abort() does not return
+        except Exception as exc:
             logger.exception("rag-engine Query failed")
             await context.abort(grpc.StatusCode.INTERNAL, str(exc))
-            return
+            return  # type: ignore[return-value]  # abort() does not return
 
         # ── Build response ──────────────────────────────────────────────────
         response = rag_pb.QueryResponse(
@@ -198,7 +200,7 @@ class GrpcServer:
         bind_addr: str | None = None,
         servicer: RagEngineServicer | None = None,
     ) -> None:
-        self._bind_addr = bind_addr or getattr(settings, "grpc_bind_addr", DEFAULT_GRPC_BIND)
+        self._bind_addr = bind_addr or str(getattr(settings, "grpc_bind_addr", DEFAULT_GRPC_BIND))
         self._servicer = servicer or RagEngineServicer()
         self._server: grpc.aio.Server | None = None
         self._thread: threading.Thread | None = None

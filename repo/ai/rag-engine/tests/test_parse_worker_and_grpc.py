@@ -12,10 +12,10 @@ dependencies are injected as fakes/mocks. They validate:
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import sys
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -64,8 +64,10 @@ for _mod in (
 # grpc.__version__ is read by the generated rag_pb2_grpc stub; the MagicMock
 # default does not expose it, so set it explicitly. Also stub
 # first_version_is_lower so the version check passes.
-sys.modules["grpc"].__version__ = "1.83.0"
-sys.modules["grpc._utilities"].first_version_is_lower = lambda a, b: False
+_grpc_stub: Any = sys.modules["grpc"]
+_grpc_stub.__version__ = "1.83.0"
+_grpc_utilities_stub: Any = sys.modules["grpc._utilities"]
+_grpc_utilities_stub.first_version_is_lower = lambda a, b: False
 
 # Make rag-engine root importable (app.* imports).
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -73,12 +75,11 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(_HERE))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, os.path.join(_REPO_ROOT, "ai", "rag-engine"))
 
-from app.grpc import rag_pb2 as rag_pb  # noqa: E402
-from app.grpc.server import RagEngineServicer  # noqa: E402
-from app.services.retrieve_service import RetrievedSource  # noqa: E402
-from app.services.qa_service import QAResult  # noqa: E402
-from app.workers.parse_worker import ParseWorker  # noqa: E402
-
+from app.grpc import rag_pb2 as rag_pb
+from app.grpc.server import RagEngineServicer
+from app.services.qa_service import QAResult
+from app.services.retrieve_service import RetrievedSource
+from app.workers.parse_worker import ParseWorker
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -110,7 +111,7 @@ class FakeCoreApi:
 
     def __init__(self, local_path: str = "/tmp/fake.docx") -> None:
         self._path = local_path
-        self.downloads = []
+        self.downloads: list[Any] = []
 
     async def download_object(self, object_id, *, dest_dir=None, file_name=None):
         self.downloads.append(object_id)
@@ -179,7 +180,7 @@ def _make_worker(
         return 0
     return ParseWorker(
         nats_client=nats_client,
-        core_api=core_api or FakeCoreApi(),
+        core_api=core_api or FakeCoreApi(),  # type: ignore[arg-type]
         parse_service=parse_service or MagicMock(),
         chunk_service=chunk_service or MagicMock(),
         summary_service=summary_service or MagicMock(),
@@ -342,7 +343,7 @@ class FakeContext:
     async def abort(self, code, details):
         self.aborted_code = code
         self.aborted_details = details
-        raise Exception(f"aborted: {code} {details}")
+        raise Exception(f"aborted: {code} {details}")  # noqa: TRY002
 
 
 class FakeQAService:
@@ -351,7 +352,7 @@ class FakeQAService:
     def __init__(self, result: QAResult | None = None, exc: Exception | None = None) -> None:
         self._result = result
         self._exc = exc
-        self.calls = []
+        self.calls: list[Any] = []
 
     def chat(self, **kwargs):
         self.calls.append(kwargs)
@@ -402,7 +403,7 @@ async def test_grpc_query_empty_question_invalid_argument():
     servicer = RagEngineServicer(qa_service=FakeQAService())
     ctx = FakeContext()
     req = _make_request(tenant_id="t1", kb_id="k1", question="")
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017
         await servicer.Query(req, ctx)
     assert ctx.aborted_code is not None  # abort was called
 
@@ -413,7 +414,7 @@ async def test_grpc_query_top_k_out_of_range():
     servicer = RagEngineServicer(qa_service=FakeQAService())
     ctx = FakeContext()
     req = _make_request(tenant_id="t1", kb_id="k1", question="q", top_k=100)
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017
         await servicer.Query(req, ctx)
     assert ctx.aborted_code is not None
 
@@ -425,7 +426,7 @@ async def test_grpc_query_llm_timeout_deadline_exceeded():
     servicer = RagEngineServicer(qa_service=qa)
     ctx = FakeContext()
     req = _make_request(tenant_id="t1", kb_id="k1", question="q")
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017
         await servicer.Query(req, ctx)
     assert ctx.aborted_code is not None
 
@@ -437,7 +438,7 @@ async def test_grpc_query_backend_unavailable():
     servicer = RagEngineServicer(qa_service=qa)
     ctx = FakeContext()
     req = _make_request(tenant_id="t1", kb_id="k1", question="q")
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017
         await servicer.Query(req, ctx)
     assert ctx.aborted_code is not None
 
@@ -448,7 +449,7 @@ async def test_grpc_query_question_too_long():
     servicer = RagEngineServicer(qa_service=FakeQAService())
     ctx = FakeContext()
     req = _make_request(tenant_id="t1", kb_id="k1", question="x" * 2001)
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017
         await servicer.Query(req, ctx)
     assert ctx.aborted_code is not None
 
@@ -474,7 +475,7 @@ async def test_grpc_query_missing_tenant_id():
     servicer = RagEngineServicer(qa_service=FakeQAService())
     ctx = FakeContext()
     req = _make_request(tenant_id="", kb_id="k1", question="q")
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017
         await servicer.Query(req, ctx)
     assert ctx.aborted_code is not None
 
@@ -485,7 +486,7 @@ async def test_grpc_query_missing_kb_id():
     servicer = RagEngineServicer(qa_service=FakeQAService())
     ctx = FakeContext()
     req = _make_request(tenant_id="t1", kb_id="", question="q")
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017
         await servicer.Query(req, ctx)
     assert ctx.aborted_code is not None
 

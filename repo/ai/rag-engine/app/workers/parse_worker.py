@@ -36,13 +36,13 @@ import re
 import uuid
 from typing import Any, Protocol
 
-from app.core.config import settings
 from app.clients.core_api import CoreApiClient
-from app.services.parse_service import ParseService
-from app.services.chunk_service import ChunkService
-from app.services.summary_service import SummaryService
-from app.services.embed_service import EmbedService
+from app.core.config import settings
 from app.repositories.chunks import write_chunks
+from app.services.chunk_service import ChunkService
+from app.services.embed_service import EmbedService
+from app.services.parse_service import ParseService
+from app.services.summary_service import SummaryService
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ DEFAULT_MAX_CONCURRENCY = 4
 
 # Patterns that may leak sensitive info (file paths, tokens) from exceptions
 # into the user-visible ``error_message`` column.
-_SENSITIVE_PATTERN = re.compile(r"(/[\w/.\-]+|Bearer\s+[\w.\-]+|token[=:]\s*\S+)", re.I)
+_SENSITIVE_PATTERN = re.compile(r"(/[\w/.\-]+|Bearer\s+[\w.\-]+|token[=:]\s*\S+)", re.IGNORECASE)
 
 
 def _sanitize_error(msg: str) -> str:
@@ -121,15 +121,14 @@ class _AsyncpgStatusUpdater:
         # silently corrupts tenant isolation or no-ops the UPDATE.
         if not tenant_id:
             raise ValueError("tenant_id must not be empty for RLS-scoped update")
-        async with self._pool.acquire() as conn:
-            async with conn.transaction():
-                await conn.execute(
-                    "SELECT set_config('app.current_tenant_id', $1, true)",
-                    tenant_id,
-                )
-                if parse_status == STATUS_READY:
-                    result = await conn.execute(
-                        """
+        async with self._pool.acquire() as conn, conn.transaction():
+            await conn.execute(
+                "SELECT set_config('app.current_tenant_id', $1, true)",
+                tenant_id,
+            )
+            if parse_status == STATUS_READY:
+                result = await conn.execute(
+                    """
                         UPDATE kb_documents
                            SET parse_status = $3,
                                error_message = $4,
@@ -137,35 +136,37 @@ class _AsyncpgStatusUpdater:
                                parsed_at = now()
                          WHERE id = $2 AND tenant_id = $1
                         """,
-                        tenant_id,
-                        uuid.UUID(doc_id),
-                        parse_status,
-                        error_message,
-                        chunk_count,
-                    )
-                else:
-                    result = await conn.execute(
-                        """
+                    tenant_id,
+                    uuid.UUID(doc_id),
+                    parse_status,
+                    error_message,
+                    chunk_count,
+                )
+            else:
+                result = await conn.execute(
+                    """
                         UPDATE kb_documents
                            SET parse_status = $3,
                                error_message = $4,
                                chunk_count = COALESCE($5, chunk_count)
                          WHERE id = $2 AND tenant_id = $1
                         """,
-                        tenant_id,
-                        uuid.UUID(doc_id),
-                        parse_status,
-                        error_message,
-                        chunk_count,
-                    )
-                return result == "UPDATE 1"
+                    tenant_id,
+                    uuid.UUID(doc_id),
+                    parse_status,
+                    error_message,
+                    chunk_count,
+                )
+            return result == "UPDATE 1"
 
     async def current(self, *, tenant_id: str, doc_id: str) -> str | None:
         # #r3: Guard against empty tenant_id (same as update).
         if not tenant_id:
             raise ValueError("tenant_id must not be empty for RLS-scoped read")
-        async with self._pool.acquire() as conn:
-            async with conn.transaction():
+        async with (
+            self._pool.acquire() as conn,
+            conn.transaction(),
+        ):
                 await conn.execute(
                     "SELECT set_config('app.current_tenant_id', $1, true)",
                     tenant_id,
@@ -297,7 +298,7 @@ class ParseWorker:
         if self._subscription is not None:
             try:
                 await self._subscription.unsubscribe()
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001, S110 — best-effort unsubscribe during drain
                 pass
             self._subscription = None
         if self._pending:
@@ -373,9 +374,15 @@ class ParseWorker:
         # /parse endpoint), resolve it from kb_documents before downloading.
         if not object_id:
             try:
-                updater = await self._get_updater()
-                async with updater._pool.acquire() as conn:
-                    async with conn.transaction():
+                if self._db_pool is None:
+                    # No asyncpg pool available; the fallback below sets
+                    # object_id from storage_path.
+                    object_id = ""
+                else:
+                    async with (
+                        self._db_pool.acquire() as conn,
+                        conn.transaction(),
+                    ):
                         await conn.execute(
                             "SELECT set_config('app.current_tenant_id', $1, true)",
                             tenant_id,
@@ -495,7 +502,7 @@ class ParseWorker:
                 "parse_worker: doc %s ready (parents=%d children=%d summaries=%d)",
                 doc_id, len(parents), len(children), len(summaries),
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.exception("parse_worker: doc %s failed", doc_id)
             try:
                 await updater.update(
@@ -504,7 +511,7 @@ class ParseWorker:
                     parse_status=STATUS_FAILED,
                     error_message=_sanitize_error(str(exc)),
                 )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.exception("parse_worker: failed to mark doc %s as failed", doc_id)
         finally:
             if local_path:

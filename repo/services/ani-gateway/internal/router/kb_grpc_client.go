@@ -32,7 +32,6 @@ import (
 // while still bounding a hung rag-engine (SPEC §5.1 含超时).
 const queryRPCTimeout = 120 * time.Second
 
-
 // KBGRPCClient wraps the generated KBServiceClient with a typed surface and
 // gRPC-status→HTTP-status mapping. The gateway handlers depend on this
 // interface (not the concrete grpc.ClientConn) so tests can inject a fake.
@@ -237,9 +236,11 @@ func (e *kbError) Error() string {
 
 // mapGRPCError converts a gRPC status error to a kbError with the HTTP status
 // and error code matching SPEC §5.1 step 4:
-//   NOT_FOUND=404, INVALID_ARGUMENT=400, UNIMPLEMENTED=501,
-//   FAILED_PRECONDITION=409, UNAVAILABLE=503, PERMISSION_DENIED=403,
-//   DEADLINE_EXCEEDED=504.
+//
+//	NOT_FOUND=404, INVALID_ARGUMENT=400, UNIMPLEMENTED=501,
+//	FAILED_PRECONDITION=409, UNAVAILABLE=503, PERMISSION_DENIED=403,
+//	DEADLINE_EXCEEDED=504.
+//
 // Unknown codes map to 500 so we never mask a server fault as 400.
 func mapGRPCError(err error) *kbError {
 	if err == nil {
@@ -342,9 +343,9 @@ type ragSourceChunk struct {
 type ragQueryResponse struct {
 	Answer       string           `json:"answer"`
 	Sources      []ragSourceChunk `json:"sources"`
-	SessionID     string          `json:"session_id"`
-	InputTokens  int32           `json:"input_tokens"`
-	OutputTokens int32           `json:"output_tokens"`
+	SessionID    string           `json:"session_id"`
+	InputTokens  int32            `json:"input_tokens"`
+	OutputTokens int32            `json:"output_tokens"`
 }
 
 // ragEngineHTTPClient is the production implementation backed by rag-engine
@@ -432,9 +433,9 @@ type VLLMStreamer interface {
 
 // vllmChatRequest is the OpenAI-compatible chat completion request body.
 type vllmChatRequest struct {
-	Model    string         `json:"model"`
-	Messages []vllmMessage  `json:"messages"`
-	Stream   bool           `json:"stream"`
+	Model    string        `json:"model"`
+	Messages []vllmMessage `json:"messages"`
+	Stream   bool          `json:"stream"`
 	// StreamOptions enables usage reporting in the final stream chunk so
 	// the done event can carry accurate input/output token counts.
 	StreamOptions *vllmStreamOptions `json:"stream_options,omitempty"`

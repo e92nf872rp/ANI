@@ -30,8 +30,9 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 from app.core.config import settings
 from app.services.retrieve_service import (
@@ -39,9 +40,9 @@ from app.services.retrieve_service import (
     DEFAULT_TOP_K,
     RetrievedSource,
     RetrieveService,
-    _node_to_source,
     _backfill_parent_for_child,
     _backfill_parents_for_summary,
+    _node_to_source,
     _return_parent_and_dedup,
 )
 
@@ -85,6 +86,9 @@ class _LLM(Protocol):
     """Minimal LLM surface used by :class:`QAService` (LlamaIndex-compatible)."""
 
     def chat(self, messages: Any, **kwargs: Any) -> Any: ...
+
+    @property
+    def metadata(self) -> Any: ...
 
 
 def _default_llm_factory() -> _LLM:
@@ -247,7 +251,7 @@ class _UsageCapturingHandler:
                 self._usage = _usage_from_chat_response(
                     payload[EventPayload.RESPONSE]
                 )
-        except Exception:  # noqa: BLE001 — best-effort token capture
+        except Exception:  # noqa: BLE001, S110 — best-effort token capture
             pass
 
     @property
@@ -354,7 +358,7 @@ class QAService:
             chat_store = self._chat_store = self._chat_store_factory()
 
         memory = ChatMemoryBuffer(
-            chat_store=chat_store,
+            chat_store=chat_store,  # type: ignore[arg-type]  # actual store is a BaseChatStore
             chat_store_key=session_id,  # per-session Redis key (not the shared default)
             token_limit=settings.vllm_context_window,  # LlamaIndex 0.14.x requires token_limit > 0
         )
@@ -380,7 +384,7 @@ class QAService:
         engine = ContextChatEngine.from_defaults(
             retriever=fusion_retriever,
             memory=memory,
-            llm=llm,
+            llm=llm,  # type: ignore[arg-type]  # _LLM is a LlamaIndex-compatible LLM
         )
         return engine
 
@@ -600,7 +604,7 @@ def build_production_qa_service(llm: _LLM | None = None) -> QAService:
     This makes ``retrieval_mode=keyword`` and the keyword leg of ``hybrid``
     work in production (SPEC §5.1 全文检索).
     """
-    from app.services.retrieve_service import make_pg_trgm_search_fn, RetrieveService
+    from app.services.retrieve_service import RetrieveService, make_pg_trgm_search_fn
 
     keyword_search_fn = make_pg_trgm_search_fn(
         settings.pg_dsn,  # DSN (not pool) — binds to the current loop safely

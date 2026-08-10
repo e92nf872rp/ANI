@@ -46,8 +46,8 @@ import (
 // stays functional without backend services configured.
 type KbSSEConfig struct {
 	RagClient    RagEngineClient
-	VLLMStreamer  VLLMStreamer
-	VLLMModel     string // default model name for /v1/chat/completions
+	VLLMStreamer VLLMStreamer
+	VLLMModel    string // default model name for /v1/chat/completions
 }
 
 // sseEvent represents one SSE event frame written to the response stream.
@@ -130,12 +130,12 @@ func streamQueryKnowledgeBaseSSE(cfg KbSSEConfig) app.HandlerFunc {
 		// "首部 400/401/404 不进入流") by overwriting the status/content-type
 		// via writeDemoError (c.JSON) before any SSE body bytes are written.
 		c.Response.Header.Set("Content-Type", "text/event-stream")
-	c.Response.Header.Set("Cache-Control", "no-cache")
-	c.Response.Header.Set("Connection", "keep-alive")
-	// X-Accel-Buffering: no tells nginx (and compatible reverse proxies) not
-	// to buffer the SSE response — critical for real-time token streaming.
-	c.Response.Header.Set("X-Accel-Buffering", "no")
-	c.Response.SetStatusCode(http.StatusOK)
+		c.Response.Header.Set("Cache-Control", "no-cache")
+		c.Response.Header.Set("Connection", "keep-alive")
+		// X-Accel-Buffering: no tells nginx (and compatible reverse proxies) not
+		// to buffer the SSE response — critical for real-time token streaming.
+		c.Response.Header.Set("X-Accel-Buffering", "no")
+		c.Response.SetStatusCode(http.StatusOK)
 
 		// ── Step 3: rag-engine retrieval (SPEC §5.1) ───────────────────────
 		// When ragClient is nil (rag-engine not configured) degrade to an
@@ -145,12 +145,12 @@ func streamQueryKnowledgeBaseSSE(cfg KbSSEConfig) app.HandlerFunc {
 		if cfg.RagClient != nil {
 			ragReq := &ragQueryRequest{
 				TenantID:             tenantID,
-				KbID:                  c.Param("kb_id"),
-				Question:              question,
-				SessionID:             sessionID,
-				TopK:                  topK,
-				ScoreThreshold:        scoreThreshold,
-				InferenceServiceName:  inferenceServiceName,
+				KbID:                 c.Param("kb_id"),
+				Question:             question,
+				SessionID:            sessionID,
+				TopK:                 topK,
+				ScoreThreshold:       scoreThreshold,
+				InferenceServiceName: inferenceServiceName,
 			}
 			ragResp, err := cfg.RagClient.Query(ctx, ragReq)
 			if err != nil {
@@ -188,38 +188,38 @@ func streamQueryKnowledgeBaseSSE(cfg KbSSEConfig) app.HandlerFunc {
 		prompt := buildRAGPrompt(question, sources)
 
 		// ── Step 5-6: vLLM streaming + token passthrough (SPEC §5.1) ───────
-	var vllmUsage vllmTokenUsage
-	if cfg.VLLMStreamer != nil && cfg.VLLMModel != "" {
-		vllmReq := &vllmChatRequest{
-			Model: cfg.VLLMModel,
-			Messages: []vllmMessage{
-				{Role: "system", Content: "You are a helpful assistant. Answer the user's question based on the provided context. If the context is insufficient, say so."},
-				{Role: "user", Content: prompt},
-			},
-			StreamOptions: &vllmStreamOptions{IncludeUsage: true},
+		var vllmUsage vllmTokenUsage
+		if cfg.VLLMStreamer != nil && cfg.VLLMModel != "" {
+			vllmReq := &vllmChatRequest{
+				Model: cfg.VLLMModel,
+				Messages: []vllmMessage{
+					{Role: "system", Content: "You are a helpful assistant. Answer the user's question based on the provided context. If the context is insufficient, say so."},
+					{Role: "user", Content: prompt},
+				},
+				StreamOptions: &vllmStreamOptions{IncludeUsage: true},
+			}
+			usage, streamErr := streamVLLMTokens(ctx, c, cfg.VLLMStreamer, vllmReq)
+			if streamErr != nil {
+				// Mid-stream error: emit error event and close (SPEC §4.3).
+				_ = writeSSEEvent(c, sseEvent{event: "error", data: map[string]string{
+					"code":    "STREAM_INTERRUPTED",
+					"message": streamErr.Error(),
+				}})
+				return
+			}
+			vllmUsage = usage
 		}
-		usage, streamErr := streamVLLMTokens(ctx, c, cfg.VLLMStreamer, vllmReq)
-		if streamErr != nil {
-			// Mid-stream error: emit error event and close (SPEC §4.3).
-			_ = writeSSEEvent(c, sseEvent{event: "error", data: map[string]string{
-				"code":    "STREAM_INTERRUPTED",
-				"message": streamErr.Error(),
-			}})
-			return
+
+		// ── Step 7: sources event (SPEC §4.3) ──────────────────────────────
+		_ = writeSSEEvent(c, sseEvent{event: "sources", data: sourcesToJSON(sources)})
+
+		// ── Step 8: done event (SPEC §4.3) ─────────────────────────────────
+		doneData := map[string]any{
+			"session_id":    retrieveSessionID,
+			"input_tokens":  vllmUsage.inputTokens,
+			"output_tokens": vllmUsage.outputTokens,
 		}
-		vllmUsage = usage
-	}
-
-	// ── Step 7: sources event (SPEC §4.3) ──────────────────────────────
-	_ = writeSSEEvent(c, sseEvent{event: "sources", data: sourcesToJSON(sources)})
-
-	// ── Step 8: done event (SPEC §4.3) ─────────────────────────────────
-	doneData := map[string]any{
-		"session_id":    retrieveSessionID,
-		"input_tokens":  vllmUsage.inputTokens,
-		"output_tokens": vllmUsage.outputTokens,
-	}
-	_ = writeSSEEvent(c, sseEvent{event: "done", data: doneData})
+		_ = writeSSEEvent(c, sseEvent{event: "done", data: doneData})
 	}
 }
 
