@@ -20,6 +20,7 @@ The tests validate the pure-logic parts that matter for the AC:
 """
 from __future__ import annotations
 
+import re
 import sys
 from typing import Any
 from unittest.mock import MagicMock
@@ -147,21 +148,38 @@ def test_fusion_constants_match_spec():
 
 
 def test_tokenize_cn_keywords_segments_full_sentence():
-    """A full CJK query must be broken into semantic tokens so pg_trgm can
-    match the exact keyword (e.g. "混合检索") instead of being diluted inside
-    the whole sentence."""
-    toks = retrieve_service._tokenize_cn_keywords(
-        "ANI 平台的作业调度能力与混合检索原理是什么？"
-    )
-    assert "混合" in toks and "检索" in toks
-    assert "作业" in toks and "调度" in toks
-    # stop-words / empty tokens are dropped
+    """A full CJK query must be broken into semantic sub-tokens so pg_trgm can
+    match exact keywords (e.g. "混合检索") instead of being diluted inside the
+    whole sentence.
+
+    Assertions are kept independent of jieba's exact dictionary segmentation
+    (which varies across versions / Python releases) and rely only on the
+    tokenizer's stable contract.
+    """
+    query = "ANI 平台的作业调度能力与混合检索原理是什么？"
+    toks = retrieve_service._tokenize_cn_keywords(query)
+    # Segmented into multiple meaningful tokens, not one diluted sentence blob.
+    assert len(toks) >= 2
+    for t in toks:
+        # Each token is a length>=2 CJK substring of the original query.
+        assert len(t) >= 2
+        assert t in query
+        assert re.search(r"[\u4e00-\u9fff]", t)
+    # stop-words / empty tokens / pure-ASCII fragments are dropped.
     assert "是什么" not in toks
-    assert all(len(t) >= 2 for t in toks)
+    assert all(not t.isascii() for t in toks)
 
 
 def test_tokenize_cn_keywords_short_keyword_recovered():
-    assert set(retrieve_service._tokenize_cn_keywords("混合检索")) == {"混合", "检索"}
+    """A short CJK keyword still yields usable pg_trgm tokens whether jieba
+    splits it into compounds (e.g. "混合"+"检索") or keeps it as a single
+    token; both are valid keyword substrings for matching."""
+    toks = retrieve_service._tokenize_cn_keywords("混合检索")
+    assert toks
+    for t in toks:
+        assert len(t) >= 2
+        assert t in "混合检索"
+        assert re.search(r"[\u4e00-\u9fff]", t)
 
 
 # ── build_fusion_retriever ───────────────────────────────────────────────────

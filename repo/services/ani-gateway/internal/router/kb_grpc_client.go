@@ -354,7 +354,6 @@ type ragQueryResponse struct {
 // indefinitely hold the SSE handler goroutine (SPEC §5.1 "同步检索").
 type ragEngineHTTPClient struct {
 	baseURL    string
-	apiKey     string
 	httpClient *http.Client
 }
 
@@ -389,7 +388,7 @@ func (c *ragEngineHTTPClient) Query(ctx context.Context, req *ragQueryRequest) (
 	if err != nil {
 		return nil, fmt.Errorf("rag-engine request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return nil, &ragEngineError{status: resp.StatusCode, body: string(raw)}
@@ -510,7 +509,7 @@ func (s *vllmHTTPStreamer) StreamChat(ctx context.Context, req *vllmChatRequest)
 	}
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, &vllmError{status: resp.StatusCode, body: string(raw)}
 	}
 	return resp.Body, nil

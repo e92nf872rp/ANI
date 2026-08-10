@@ -120,7 +120,7 @@ func TestSSE_TokenPassthroughAndSourcesAndDone(t *testing.T) {
 	if doneIdx < 0 {
 		t.Fatalf("body missing done event: %q", body)
 	}
-	if !(tokenIdx < sourcesIdx && sourcesIdx < doneIdx) {
+	if tokenIdx >= sourcesIdx || sourcesIdx >= doneIdx {
 		t.Fatalf("event order wrong: token=%d sources=%d done=%d", tokenIdx, sourcesIdx, doneIdx)
 	}
 	// Two token events expected.

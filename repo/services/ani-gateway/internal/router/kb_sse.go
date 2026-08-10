@@ -242,7 +242,7 @@ func streamVLLMTokens(ctx context.Context, c *app.RequestContext, streamer VLLMS
 		}
 		return usage, fmt.Errorf("vLLM stream start failed: %w", err)
 	}
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 
 	scanner := bufio.NewScanner(body)
 	// Increase buffer for large SSE lines.
@@ -322,8 +322,8 @@ func buildRAGPrompt(question string, sources []ragSourceChunk) string {
 	var b strings.Builder
 	b.WriteString("Context:\n")
 	for i, s := range sources {
-		b.WriteString(fmt.Sprintf("[%d] %s (page %d, score %.2f):\n%s\n\n",
-			i+1, s.FileName, s.Page, s.Score, s.Content))
+		fmt.Fprintf(&b, "[%d] %s (page %d, score %.2f):\n%s\n\n",
+			i+1, s.FileName, s.Page, s.Score, s.Content)
 	}
 	b.WriteString("Question: ")
 	b.WriteString(question)
