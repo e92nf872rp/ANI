@@ -10966,7 +10966,7 @@ export interface operations {
             query?: never;
             header: {
                 /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
-                idempotency_key: string;
+                "Idempotency-Key": string;
             };
             path: {
                 tenant_id: string;
@@ -11000,7 +11000,7 @@ export interface operations {
             query?: never;
             header: {
                 /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
-                idempotency_key: string;
+                "Idempotency-Key": string;
             };
             path: {
                 tenant_id: string;
@@ -11035,7 +11035,7 @@ export interface operations {
             query?: never;
             header: {
                 /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
-                idempotency_key: string;
+                "Idempotency-Key": string;
             };
             path: {
                 tenant_id: string;
