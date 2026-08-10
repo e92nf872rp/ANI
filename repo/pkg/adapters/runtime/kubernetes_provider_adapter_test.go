@@ -61,6 +61,30 @@ func TestKubernetesProviderAdapterAppliesWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestKubernetesProviderAdapterApplyFallbackUsesPrimaryProvider(t *testing.T) {
+	client := &fakeKubernetesProviderClient{returnEmptyProvider: true}
+	request := validProviderApplyRequest(t)
+	request.Manifests = []ports.WorkloadManifest{
+		{
+			Name: "ani-wi-vm-01", Kind: "Secret", Provider: "kubernetes",
+			Content: `{"apiVersion":"v1","kind":"Secret","metadata":{"name":"ani-wi-vm-01","namespace":"ani-tenant-tenant-a"}}`,
+		},
+		{
+			Name: "vm-01", Kind: "VirtualMachine", Provider: "kubevirt",
+			Content: `{"apiVersion":"kubevirt.io/v1","kind":"VirtualMachine","metadata":{"name":"vm-01","namespace":"ani-tenant-tenant-a"}}`,
+		},
+	}
+	request.DryRunResult.Provider = "kubevirt"
+	request.DryRunResult.ManifestCount = len(request.Manifests)
+	result, err := NewKubernetesProviderAdapter(client, WithKubernetesProviderApplyEnabled(true)).Apply(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if result.Provider != "kubevirt" {
+		t.Fatalf("Provider = %q, want primary provider kubevirt", result.Provider)
+	}
+}
+
 func TestKubernetesProviderAdapterObservesProviderStatus(t *testing.T) {
 	client := &fakeKubernetesProviderClient{}
 	observation, err := NewKubernetesProviderAdapter(client).Observe(context.Background(), ports.WorkloadProviderStatusRequest{
@@ -100,9 +124,10 @@ func renderedDeployment(t *testing.T) []ports.WorkloadManifest {
 }
 
 type fakeKubernetesProviderClient struct {
-	dryRuns  int
-	applies  int
-	observes int
+	dryRuns             int
+	applies             int
+	observes            int
+	returnEmptyProvider bool
 }
 
 func (c *fakeKubernetesProviderClient) ServerSideDryRun(_ context.Context, manifests []ports.WorkloadManifest) (ports.WorkloadProviderDryRunResult, error) {
@@ -117,9 +142,13 @@ func (c *fakeKubernetesProviderClient) ServerSideDryRun(_ context.Context, manif
 
 func (c *fakeKubernetesProviderClient) Apply(_ context.Context, request ports.WorkloadProviderApplyRequest) (ports.WorkloadProviderApplyResult, error) {
 	c.applies++
+	provider := request.Manifests[0].Provider
+	if c.returnEmptyProvider {
+		provider = ""
+	}
 	return ports.WorkloadProviderApplyResult{
 		Applied:       true,
-		Provider:      request.Manifests[0].Provider,
+		Provider:      provider,
 		ManifestCount: len(request.Manifests),
 		Operation:     request.Operation,
 		ResourceRefs:  []string{request.Manifests[0].Provider + "/" + request.Manifests[0].Kind + "/" + request.Manifests[0].Name},

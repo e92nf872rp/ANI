@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/ut"
+	"github.com/cloudwego/hertz/pkg/protocol"
 )
 
 func TestIdempotentReplayReturnsSameResponseForPublicPlatformEndpoint(t *testing.T) {
@@ -52,6 +55,124 @@ func TestIdempotentReplayReturnsSameResponseForPublicPlatformEndpoint(t *testing
 	}
 	if calls != 1 {
 		t.Fatalf("handler calls = %d, want 1", calls)
+	}
+}
+
+func TestIdempotencyReplaysDeleteAndRejectsDifferentIntent(t *testing.T) {
+	store := newMemoryGatewayStoreForTest()
+	h := server.New()
+	h.Use(Idempotency(store))
+	var calls int32
+	h.DELETE("/api/v1/instances/:id/sandbox/files", func(ctx context.Context, c *app.RequestContext) {
+		atomic.AddInt32(&calls, 1)
+		c.Status(http.StatusNoContent)
+	})
+
+	request := func(path string) *protocol.Response {
+		return ut.PerformRequest(h.Engine, http.MethodDelete, path, nil,
+			ut.Header{Key: "Idempotency-Key", Value: "delete-a"},
+		).Result()
+	}
+	first := request("/api/v1/instances/sandbox-a/sandbox/files?path=workspace/a.txt")
+	second := request("/api/v1/instances/sandbox-a/sandbox/files?path=workspace/a.txt")
+	conflict := request("/api/v1/instances/sandbox-a/sandbox/files?path=workspace/b.txt")
+	if first.StatusCode() != http.StatusNoContent || second.StatusCode() != http.StatusNoContent {
+		t.Fatalf("DELETE statuses = (%d, %d), want 204", first.StatusCode(), second.StatusCode())
+	}
+	if conflict.StatusCode() != http.StatusConflict || !bytes.Contains(conflict.Body(), []byte("IDEMPOTENCY_KEY_REUSED")) {
+		t.Fatalf("different DELETE intent = %d %s, want 409 IDEMPOTENCY_KEY_REUSED", conflict.StatusCode(), conflict.Body())
+	}
+	if calls != 1 {
+		t.Fatalf("handler calls = %d, want 1", calls)
+	}
+}
+
+func TestIdempotencyRejectsSameKeyWithDifferentJSONBody(t *testing.T) {
+	store := newMemoryGatewayStoreForTest()
+	h := server.New()
+	h.Use(Idempotency(store))
+	var calls int32
+	h.POST("/api/v1/resources", func(ctx context.Context, c *app.RequestContext) {
+		atomic.AddInt32(&calls, 1)
+		c.JSON(http.StatusCreated, map[string]any{"ok": true})
+	})
+	perform := func(body string) *protocol.Response {
+		return ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/resources",
+			&ut.Body{Body: bytes.NewBufferString(body), Len: len(body)},
+			ut.Header{Key: "Content-Type", Value: "application/json"},
+		).Result()
+	}
+	if got := perform(`{"idempotency_key":"same","name":"a"}`).StatusCode(); got != http.StatusCreated {
+		t.Fatalf("first status = %d, want 201", got)
+	}
+	conflict := perform(`{"name":"b","idempotency_key":"same"}`)
+	if conflict.StatusCode() != http.StatusConflict || !bytes.Contains(conflict.Body(), []byte("IDEMPOTENCY_KEY_REUSED")) {
+		t.Fatalf("different body = %d %s, want 409", conflict.StatusCode(), conflict.Body())
+	}
+	if calls != 1 {
+		t.Fatalf("handler calls = %d, want 1", calls)
+	}
+}
+
+func TestCheckpointRestoreIdempotencyIsolatedByCheckpointPath(t *testing.T) {
+	store := newMemoryGatewayStoreForTest()
+	h := server.New()
+	h.Use(Idempotency(store))
+	var calls int32
+	h.POST("/api/v1/instances/:instance_id/sandbox/checkpoints/:checkpoint_id/restore", func(ctx context.Context, c *app.RequestContext) {
+		call := atomic.AddInt32(&calls, 1)
+		c.JSON(http.StatusAccepted, map[string]any{"call": call, "checkpoint_id": c.Param("checkpoint_id")})
+	})
+	body := `{"idempotency_key":"restore-shared-key"}`
+	perform := func(checkpointID string) *protocol.Response {
+		return ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/instances/sandbox-a/sandbox/checkpoints/"+checkpointID+"/restore",
+			&ut.Body{Body: bytes.NewBufferString(body), Len: len(body)},
+			ut.Header{Key: "Content-Type", Value: "application/json"},
+		).Result()
+	}
+	first := perform("checkpoint-a")
+	second := perform("checkpoint-b")
+	if first.StatusCode() != http.StatusAccepted || second.StatusCode() != http.StatusAccepted {
+		t.Fatalf("restore statuses = (%d, %d), want 202", first.StatusCode(), second.StatusCode())
+	}
+	if calls != 2 || bytes.Equal(first.Body(), second.Body()) {
+		t.Fatalf("restore calls = %d, bodies = (%s, %s); paths must have isolated idempotency scope", calls, first.Body(), second.Body())
+	}
+}
+
+func TestSandboxTokenIdempotencyExpiresResponseButKeepsTombstone(t *testing.T) {
+	store := newMemoryGatewayStoreForTest()
+	h := server.New()
+	h.Use(Idempotency(store))
+	var calls int32
+	h.POST("/api/v1/instances/:id/sandbox/tokens", func(ctx context.Context, c *app.RequestContext) {
+		atomic.AddInt32(&calls, 1)
+		c.JSON(http.StatusCreated, map[string]any{
+			"token": "sensitive-token", "expires_at": time.Now().Add(30 * time.Millisecond).Format(time.RFC3339Nano),
+		})
+	})
+	body := `{"idempotency_key":"token-a","expires_in":"30ms"}`
+	perform := func() *protocol.Response {
+		return ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/instances/sandbox-a/sandbox/tokens",
+			&ut.Body{Body: bytes.NewBufferString(body), Len: len(body)},
+			ut.Header{Key: "Content-Type", Value: "application/json"},
+		).Result()
+	}
+	first, replay := perform(), perform()
+	if first.StatusCode() != http.StatusCreated || replay.StatusCode() != http.StatusCreated || calls != 1 {
+		t.Fatalf("token responses = (%d, %d) calls=%d, want 201 replay", first.StatusCode(), replay.StatusCode(), calls)
+	}
+	time.Sleep(50 * time.Millisecond)
+	expired := perform()
+	if expired.StatusCode() != http.StatusConflict || !bytes.Contains(expired.Body(), []byte("IdempotencyResultExpired")) {
+		t.Fatalf("expired response = %d %s, want 409 IdempotencyResultExpired", expired.StatusCode(), expired.Body())
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	for key, entry := range store.entries {
+		if strings.HasSuffix(key, ":metadata") && bytes.Contains(entry.value, []byte("sensitive-token")) {
+			t.Fatalf("token leaked into idempotency tombstone: %s", entry.value)
+		}
 	}
 }
 

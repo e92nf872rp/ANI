@@ -9,6 +9,7 @@ var (
 	ErrConflict           = errors.New("capability resource conflict")
 	ErrInvalid            = errors.New("capability request is invalid")
 	ErrFailedPrecondition = errors.New("capability precondition failed")
+	ErrPayloadTooLarge    = errors.New("capability payload is too large")
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrTenantNotFound     = errors.New("tenant not found")
 	ErrUnavailable        = errors.New("capability dependency is unavailable")

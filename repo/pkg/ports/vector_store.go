@@ -16,20 +16,23 @@ const (
 )
 
 type VectorStoreRecord struct {
-	TenantID         string
-	StoreID          string
-	Name             string
-	Dimension        int
-	Metric           string
-	EmbeddingModel   string
-	VectorCount      int64
-	IndexStatus      string
-	LastIndexedAt    time.Time
-	KnowledgeBaseRef VectorStoreKnowledgeBaseRef
-	State            VectorStoreState
-	Reason           string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	TenantID                 string
+	StoreID                  string
+	Name                     string
+	Dimension                int
+	Metric                   string
+	EmbeddingModel           string
+	VectorCount              int64
+	IndexStatus              string
+	LastIndexedAt            time.Time
+	KnowledgeBaseRef         VectorStoreKnowledgeBaseRef
+	State                    VectorStoreState
+	Reason                   string
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
+	DeletedAt                time.Time
+	CreateIdempotencyKey     string
+	CreateRequestFingerprint string
 }
 
 type VectorStoreCreateRequest struct {
@@ -171,4 +174,15 @@ type VectorStoreService interface {
 	PrecheckVectorStoreDelete(ctx context.Context, request VectorStoreResourceGetRequest) (VectorStoreDeletePrecheck, error)
 	InsertDocuments(ctx context.Context, request VectorStoreDocumentInsertRequest) (VectorStoreDocumentInsertResult, error)
 	DeleteDocuments(ctx context.Context, request VectorStoreDocumentDeleteRequest) (VectorStoreDocumentDeleteResult, error)
+}
+
+// VectorStoreResourceStore is the PostgreSQL control-plane authority for vector store metadata.
+// Milvus remains the embedding/collection data authority.
+type VectorStoreResourceStore interface {
+	Upsert(ctx context.Context, record VectorStoreRecord) error
+	Get(ctx context.Context, tenantID string, storeID string) (VectorStoreRecord, error)
+	List(ctx context.Context, tenantID string) ([]VectorStoreRecord, error)
+	FindByCreateIdempotency(ctx context.Context, tenantID string, idempotencyKey string) (VectorStoreRecord, error)
+	SetKnowledgeBaseLink(ctx context.Context, tenantID string, storeID string, ref VectorStoreKnowledgeBaseRef) error
+	ClearKnowledgeBaseLink(ctx context.Context, tenantID string, storeID string) error
 }

@@ -1,0 +1,55 @@
+profile: STORAGE-CONTROL-PLANE-STATE-A
+status: live
+description: >
+  Storage control-plane state live gate: prove PostgreSQL is the authority for
+  Core storage/vector control-plane identity after Gateway restart. Creates a
+  minimal volume/snapshot/filesystem/mount-target/bucket/object/vector/KB-link
+  graph, rolls out Gateway, rereads by original IDs, replays create idempotency,
+  verifies conflict on different intent, soft-delete API hide + PG tombstone,
+  and cleans provider temporary resources. Does not change OpenAPI v1.
+required_tools:
+  - curl
+  - kubectl
+required_endpoints:
+  - ani_gateway_api
+  - postgres_control_plane
+  - rook_ceph_or_storage_provider
+  - minio_object_store
+  - milvus_vector_store
+live_checks:
+  - id: gateway-fail-closed-database-url
+    command: unit/runtime newGatewayStorageService / newGatewayVectorStoreService
+    pass_condition: real_provider_without_DATABASE_URL_or_schema_fails_startup
+  - id: core-storage-graph-create
+    command: POST volumes/snapshots/filesystems/mount-targets/buckets/objects/vector-stores + PUT knowledge-base-link
+    pass_condition: minimal_storage_vector_graph_created_with_stable_ids
+  - id: gateway-rollout-restart
+    command: kubectl rollout restart deployment/ani-gateway
+    pass_condition: gateway_rollout_completed_and_ready
+  - id: core-storage-graph-reread-after-restart
+    command: GET original resource IDs and lists
+    pass_condition: pre_restart_ids_and_relationship_fields_still_queryable
+  - id: idempotency-replay-no-duplicate
+    command: POST create with original idempotency keys
+    pass_condition: same_ids_returned_no_extra_pg_or_provider_resources
+  - id: idempotency-conflict-different-intent
+    command: POST create same key different fingerprint
+    pass_condition: conflict_status_returned
+  - id: soft-delete-api-hide-pg-tombstone
+    command: DELETE resources then GET + PG tombstone probe
+    pass_condition: api_404_or_filtered_and_pg_deleted_at_retained
+  - id: provider-temp-cleanup
+    command: kubectl/MinIO/Milvus cleanup probes
+    pass_condition: temporary_provider_resources_cleaned_to_zero
+readiness_levels:
+  contract:
+    meaning: Gate definition, fail-closed unit tests, and static validator exist; no live restart proof yet.
+  live:
+    meaning: Approved real lab run proved PG authority across Gateway restart with sanitized evidence.
+evidence_policy:
+  forbidden_content:
+    - bearer_token
+    - password
+    - database_url
+    - presigned_url
+    - private_endpoint_credentials

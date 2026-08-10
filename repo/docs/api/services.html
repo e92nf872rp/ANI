@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1/svc</code></dd></div>
-          <div><dt>Operations</dt><dd>65</dd></div>
-          <div><dt>Schemas</dt><dd>59</dd></div>
+          <div><dt>Operations</dt><dd>76</dd></div>
+          <div><dt>Schemas</dt><dd>73</dd></div>
         </dl>
       </section>
 
@@ -585,6 +585,86 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant-plans</code></td>
+          <td><code>listTenantPlans</code></td>
+          <td>查询套餐列表</td>
+          <td><code></code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenant-plans</code></td>
+          <td><code>createTenantPlan</code></td>
+          <td>创建套餐</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/tenant-plans/{planId}</code></td>
+          <td><code>deleteTenantPlan</code></td>
+          <td>删除套餐（软删除）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant-plans/{planId}</code></td>
+          <td><code>getTenantPlan</code></td>
+          <td>查询套餐详情</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenant-plans/{planId}/activate</code></td>
+          <td><code>activateTenantPlan</code></td>
+          <td>发布套餐</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant-plans/{planId}/audit-logs</code></td>
+          <td><code>listTenantPlanAuditLogs</code></td>
+          <td>查询套餐操作历史</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenant-plans/{planId}/disable</code></td>
+          <td><code>disableTenantPlan</code></td>
+          <td>禁用套餐</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant-plans/{planId}/quota-limits</code></td>
+          <td><code>getTenantPlanQuotaLimits</code></td>
+          <td>查询套餐限额</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-patch">PATCH</span></td>
+          <td><code>/tenant-plans/{planId}/quota-limits</code></td>
+          <td><code>updateTenantPlanQuotaLimits</code></td>
+          <td>修改套餐限额（同步存量租户）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant-plans/{planId}/tenants</code></td>
+          <td><code>listTenantPlanBoundTenants</code></td>
+          <td>查询套餐绑定的租户列表</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/tenant/members</code></td>
           <td><code>listTenantMembers</code></td>
           <td>租户成员列表</td>
@@ -679,6 +759,14 @@
           <td><code></code></td>
           <td>200, 401, 403, 404</td>
         </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenants/{tenantId}/plan</code></td>
+          <td><code>bindTenantPlan</code></td>
+          <td>绑定套餐（按套餐限额更新配额）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 409</td>
+        </tr>
           </tbody>
         </table>
       </section>
@@ -688,12 +776,16 @@
         <ul class="schema-list">
         <li><code>AsyncTask</code></li>
         <li><code>AvailableGpu</code></li>
+        <li><code>BindPlanRequest</code></li>
+        <li><code>BoundTenant</code></li>
+        <li><code>BoundTenantsResponse</code></li>
         <li><code>CreateGpuContainerRequest</code></li>
         <li><code>CreateInferenceEndpointRequest</code></li>
         <li><code>CreateIntegrationBotRequest</code></li>
         <li><code>CreateIntegrationRequest</code></li>
         <li><code>CreateModelRequest</code></li>
         <li><code>CreateSandboxRequest</code></li>
+        <li><code>CreateTenantPlanRequest</code></li>
         <li><code>CreateWebhookRequest</code></li>
         <li><code>CursorPage</code></li>
         <li><code>ErrorResponse</code></li>
@@ -703,6 +795,7 @@
         <li><code>GpuContainer</code></li>
         <li><code>GpuContainerMetrics</code></li>
         <li><code>GpuContainerVersion</code></li>
+        <li><code>IdempotentResult</code></li>
         <li><code>InferenceEndpoint</code></li>
         <li><code>InferenceService</code></li>
         <li><code>InferenceServiceLogEntry</code></li>
@@ -729,6 +822,11 @@
         <li><code>NotifyDocumentUploadedRequest</code></li>
         <li><code>PatchGpuContainerRequest</code></li>
         <li><code>PatchSandboxRequest</code></li>
+        <li><code>PlanAuditLog</code></li>
+        <li><code>PlanAuditLogListResponse</code></li>
+        <li><code>PlanQuotaLimitInput</code></li>
+        <li><code>PlanQuotaLimitView</code></li>
+        <li><code>PlanQuotaLimitsResponse</code></li>
         <li><code>RebuildKnowledgeBaseRequest</code></li>
         <li><code>ReparseDocumentRequest</code></li>
         <li><code>Sandbox</code></li>
@@ -736,10 +834,14 @@
         <li><code>SecurityOverview</code></li>
         <li><code>SsoConfig</code></li>
         <li><code>TenantMember</code></li>
+        <li><code>TenantPlan</code></li>
+        <li><code>TenantPlanListItem</code></li>
+        <li><code>TenantPlanListResponse</code></li>
         <li><code>TenantRole</code></li>
         <li><code>UpdateInferenceServicePoliciesRequest</code></li>
         <li><code>UpdateKBConfigRequest</code></li>
         <li><code>UpdateKBPermissionsRequest</code></li>
+        <li><code>UpdateQuotaLimitsRequest</code></li>
         <li><code>UpdateSsoConfigRequest</code></li>
         <li><code>UpdateTenantRoleRequest</code></li>
         <li><code>Webhook</code></li>

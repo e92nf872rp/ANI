@@ -98,17 +98,17 @@ func streamQueryKnowledgeBaseSSE(cfg KbSSEConfig) app.HandlerFunc {
 		// Tenant id from Auth middleware (SPEC §7.1).
 		tenantID := middleware.GetTenantID(c)
 		if tenantID == "" {
-			tenantID = demoTenantID(c)
+			tenantID = instanceTenantID(c)
 		}
 
 		// ── Validate query params (SPEC §4.3, §5.2) ────────────────────────
 		question := string(c.QueryArgs().Peek("question"))
 		if len(question) == 0 {
-			writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "question is required")
+			writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "question is required")
 			return
 		}
 		if len(question) > 2000 {
-			writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "question must be at most 2000 characters")
+			writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "question must be at most 2000 characters")
 			return
 		}
 		sessionID := string(c.QueryArgs().Peek("session_id"))
@@ -128,7 +128,7 @@ func streamQueryKnowledgeBaseSSE(cfg KbSSEConfig) app.HandlerFunc {
 		// committed until the first c.Write or handler return. This lets us
 		// still return JSON 400/401/404 for retrieval-stage errors (SPEC §4.3:
 		// "首部 400/401/404 不进入流") by overwriting the status/content-type
-		// via writeDemoError (c.JSON) before any SSE body bytes are written.
+		// via writeInstanceError (c.JSON) before any SSE body bytes are written.
 		c.Response.Header.Set("Content-Type", "text/event-stream")
 		c.Response.Header.Set("Cache-Control", "no-cache")
 		c.Response.Header.Set("Connection", "keep-alive")
@@ -155,7 +155,7 @@ func streamQueryKnowledgeBaseSSE(cfg KbSSEConfig) app.HandlerFunc {
 			ragResp, err := cfg.RagClient.Query(ctx, ragReq)
 			if err != nil {
 				// SPEC §4.3 错误处理: 400/401/404 are pre-stream → return JSON
-				// (no SSE body written yet, so writeDemoError can override
+				// (no SSE body written yet, so writeInstanceError can override
 				// the status/content-type). Other retrieval failures (503,
 				// timeouts, etc.) emit an SSE error event and close the
 				// stream (SPEC §4.3 line 172: 检索失败 → event: error).
@@ -163,13 +163,13 @@ func streamQueryKnowledgeBaseSSE(cfg KbSSEConfig) app.HandlerFunc {
 					switch re.status {
 					case http.StatusNotFound:
 						// KB_NOT_FOUND → JSON 404 (pre-stream).
-						writeDemoError(c, http.StatusNotFound, "KB_NOT_FOUND", "knowledge base not found")
+						writeInstanceError(c, http.StatusNotFound, "KB_NOT_FOUND", "knowledge base not found")
 						return
 					case http.StatusBadRequest:
-						writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", re.body)
+						writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", re.body)
 						return
 					case http.StatusUnauthorized:
-						writeDemoError(c, http.StatusUnauthorized, "UNAUTHORIZED", "unauthorized")
+						writeInstanceError(c, http.StatusUnauthorized, "UNAUTHORIZED", "unauthorized")
 						return
 					}
 				}

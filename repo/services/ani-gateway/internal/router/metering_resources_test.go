@@ -2,10 +2,40 @@ package router
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"strings"
 	"testing"
 
+	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/kubercloud/ani/pkg/ports"
 )
+
+func TestWriteMeteringErrorMapsInvalidAndSanitizesUnexpectedErrors(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantBody   string
+		forbidden  string
+	}{
+		{name: "invalid", err: ports.ErrInvalid, wantStatus: http.StatusBadRequest, wantBody: "BAD_REQUEST"},
+		{name: "unexpected", err: errors.New("database password leaked"), wantStatus: http.StatusInternalServerError, wantBody: "INTERNAL_ERROR", forbidden: "password"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			c := &app.RequestContext{}
+			writeMeteringError(c, test.err)
+			body := string(c.Response.Body())
+			if c.Response.StatusCode() != test.wantStatus || !strings.Contains(body, test.wantBody) {
+				t.Fatalf("response = (%d, %s), want status %d body containing %q", c.Response.StatusCode(), body, test.wantStatus, test.wantBody)
+			}
+			if test.forbidden != "" && strings.Contains(strings.ToLower(body), test.forbidden) {
+				t.Fatalf("response body leaked %q: %s", test.forbidden, body)
+			}
+		})
+	}
+}
 
 func TestMeteringAPIUsageResponseMarksLocalProfile(t *testing.T) {
 	api := newMeteringAPI()

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -21,6 +22,8 @@ type gatewayVectorStoreRuntimeConfig struct {
 	VectorStoreCollectionPrefix string
 	VectorStoreHTTPClient       *http.Client
 	VectorStoreRequestTimeout   time.Duration
+	DatabaseURL                 string
+	MetadataStore               ports.MetadataStore
 }
 
 func gatewayVectorStoreRuntimeConfigFromEnv() gatewayVectorStoreRuntimeConfig {
@@ -32,15 +35,22 @@ func gatewayVectorStoreRuntimeConfigFromEnv() gatewayVectorStoreRuntimeConfig {
 		VectorStoreDatabase:         os.Getenv("VECTOR_STORE_DATABASE"),
 		VectorStoreCollectionPrefix: os.Getenv("VECTOR_STORE_COLLECTION_PREFIX"),
 		VectorStoreRequestTimeout:   gatewayDurationFromEnv("VECTOR_STORE_REQUEST_TIMEOUT"),
+		DatabaseURL:                 os.Getenv("DATABASE_URL"),
 	}
 }
 
-func newGatewayVectorStoreService(cfg gatewayVectorStoreRuntimeConfig) (ports.VectorStoreService, error) {
+func newGatewayVectorStoreService(ctx context.Context, cfg gatewayVectorStoreRuntimeConfig) (ports.VectorStoreService, func(), error) {
+	closeRuntime := func() {}
 	switch provider := strings.TrimSpace(cfg.VectorStoreProvider); provider {
 	case "", "local", "not_configured":
-		return nil, nil
+		return nil, closeRuntime, nil
 	case "milvus":
-		store, err := vectorstore.NewMilvusVectorStore(vectorstore.MilvusVectorStoreConfig{
+		store, closeStore, err := connectStorageControlPlaneStore(ctx, cfg.DatabaseURL, cfg.MetadataStore)
+		if err != nil {
+			return nil, closeRuntime, err
+		}
+		closeRuntime = closeStore
+		backend, err := vectorstore.NewMilvusVectorStore(vectorstore.MilvusVectorStoreConfig{
 			Endpoint:         cfg.VectorStoreEndpoint,
 			Endpoints:        cfg.VectorStoreEndpoints,
 			Token:            cfg.VectorStoreToken,
@@ -50,10 +60,15 @@ func newGatewayVectorStoreService(cfg gatewayVectorStoreRuntimeConfig) (ports.Ve
 			RequestTimeout:   cfg.VectorStoreRequestTimeout,
 		})
 		if err != nil {
-			return nil, err
+			closeRuntime()
+			return nil, func() {}, err
 		}
-		return runtimeadapter.NewLocalVectorStoreService(runtimeadapter.WithVectorStoreBackend(store)), nil
+		service := runtimeadapter.NewLocalVectorStoreService(
+			runtimeadapter.WithVectorStoreBackend(backend),
+			runtimeadapter.WithVectorStoreResourceStore(runtimeadapter.NewMetadataVectorStoreStore(store)),
+		)
+		return service, closeRuntime, nil
 	default:
-		return nil, fmt.Errorf("%w: unsupported VECTOR_STORE_PROVIDER %q", ports.ErrUnsupported, provider)
+		return nil, closeRuntime, fmt.Errorf("%w: unsupported VECTOR_STORE_PROVIDER %q", ports.ErrUnsupported, provider)
 	}
 }

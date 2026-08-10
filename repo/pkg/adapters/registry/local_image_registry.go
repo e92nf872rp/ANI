@@ -138,6 +138,7 @@ func (r *LocalImageRegistry) ListArtifacts(_ context.Context, request ports.Regi
 	artifact := ports.RegistryArtifact{
 		Project:    strings.TrimSpace(request.Project),
 		Repository: strings.TrimSpace(request.Repository),
+		Purpose:    registryImagePurpose(request.Repository, "latest"),
 		Digest:     "sha256:local-runtime",
 		Tags:       []string{"latest"},
 		MediaType:  "application/vnd.oci.image.manifest.v1+json",

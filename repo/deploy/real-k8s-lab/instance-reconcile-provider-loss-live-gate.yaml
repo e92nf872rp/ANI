@@ -1,0 +1,30 @@
+profile: INSTANCE-RECONCILE-PROVIDER-404-A
+status: contract
+description: >
+  Core provider-loss live gate. A Sandbox is created through the frozen Core
+  /api/v1/instances write path, its Kubernetes Deployment is deleted
+  out-of-band, and reconcile-worker must persist failed/ProviderResourceLost.
+
+required_tools:
+  - kubectl
+
+required_endpoints:
+  - ani_core_instances_api
+  - kubernetes_workload_api
+
+live_checks:
+  - id: core-instance-create-running
+    command: POST /api/v1/instances kind=sandbox
+    pass_condition: core_instance_and_kubernetes_deployment_reach_running
+  - id: kubernetes-provider-resource-delete
+    command: kubectl delete deployment {name} -n {tenant_namespace}
+    pass_condition: deployment_is_deleted_out_of_band
+  - id: reconcile-provider-resource-lost
+    command: GET /api/v1/instances/{instance_id}
+    pass_condition: instance_reaches_failed_with_reason_ProviderResourceLost
+  - id: reconcile-provider-resource-lost-idempotent
+    command: GET /api/v1/instances/{instance_id} after one normal reconcile interval
+    pass_condition: instance_remains_failed_with_reason_ProviderResourceLost
+  - id: core-instance-cleanup
+    command: POST /api/v1/instances/{instance_id}/lifecycle action=delete
+    pass_condition: instance_reaches_deleted_and_no_provider_resources_remain

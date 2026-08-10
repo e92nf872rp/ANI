@@ -104,19 +104,19 @@ func validateReconcileRequest(request ports.WorkloadReconcileRequest) error {
 
 func mapProviderPhase(phase string) (ports.WorkloadState, error) {
 	switch strings.ToLower(strings.TrimSpace(phase)) {
-	case "pending", "creating", "provisioning", "scheduled":
+	case "pending", "creating", "provisioning", "scheduled", "starting", "waitingforvolumebinding":
 		return ports.WorkloadStateProvisioning, nil
 	case "ready", "running", "started":
 		return ports.WorkloadStateRunning, nil
 	case "stopping", "terminating":
 		return ports.WorkloadStateStopping, nil
-	case "stopped", "succeeded", "completed":
+	case "stopped", "succeeded", "completed", "halted":
 		return ports.WorkloadStateStopped, nil
 	case "deleting":
 		return ports.WorkloadStateDeleting, nil
 	case "deleted":
 		return ports.WorkloadStateDeleted, nil
-	case "failed", "error", "crashloopbackoff":
+	case "failed", "error", "crashloopbackoff", "errimagepull", "imagepullbackoff", "pvcnotfound", "datavolumeerror":
 		return ports.WorkloadStateFailed, nil
 	default:
 		return "", fmt.Errorf("%w: unsupported provider phase %q", ports.ErrUnsupported, phase)

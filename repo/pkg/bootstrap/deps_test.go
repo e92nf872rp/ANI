@@ -32,6 +32,23 @@ func TestConnectMetadataStoreRejectsInvalidDatabaseURL(t *testing.T) {
 	closeStore()
 }
 
+func TestConnectInstanceServiceRejectsInvalidDatabaseURL(t *testing.T) {
+	runtime, closeRuntime, err := ConnectInstanceService(t.Context(), Config{
+		DatabaseURL:      ":// invalid",
+		WorkloadProvider: "kubernetes_rest",
+	})
+	if err == nil {
+		t.Fatalf("ConnectInstanceService() error = nil, want invalid database URL error")
+	}
+	if runtime.Service != nil || runtime.Store != nil || runtime.Operations != nil || runtime.KubernetesRESTClient != nil {
+		t.Fatalf("runtime = %+v, want empty runtime", runtime)
+	}
+	if closeRuntime == nil {
+		t.Fatal("closeRuntime = nil, want no-op close function")
+	}
+	closeRuntime()
+}
+
 func TestNewCapabilitiesDefaultsToLocalProviderAdapters(t *testing.T) {
 	capabilities, err := NewCapabilitiesWithConfig(nil, nil, nil, Config{})
 	if err != nil {

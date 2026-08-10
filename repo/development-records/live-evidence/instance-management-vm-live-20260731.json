@@ -1,0 +1,25 @@
+{
+  "console_protocols": [
+    "vnc",
+    "console"
+  ],
+  "create_operation_id": "2a6823c0-f583-4e2f-a46a-5fb6912f73b8",
+  "delete_operation_id": "bd0191f1-1bc7-4648-88ac-65cbe54a7819",
+  "generated_at": "2026-08-01T02:19:07.662024Z",
+  "id": "instance-management-live-gate",
+  "instance_id": "inst_80139694-d72e-4b16-92a9-82ff2bc19ab3",
+  "kind": "vm",
+  "kubernetes_write_observe": "read-only",
+  "kubevirt_vm_observed": true,
+  "kubevirt_vmi_node_observed": true,
+  "kubevirt_vmi_phase": "Running",
+  "profile": "INSTANCE-MANAGEMENT-LIVE-GATE-A",
+  "start_operation_id": "053ef176-7d06-4118-84bc-2a46d49b8591",
+  "state_after_create": "running",
+  "state_after_delete": "deleted",
+  "state_after_start": "running",
+  "state_after_stop": "stopped",
+  "status": "passed",
+  "stop_operation_id": "ee255fc2-9d0a-4e52-af0f-d07d1ff30fbe",
+  "write_path": "Core /api/v1/instances"
+}

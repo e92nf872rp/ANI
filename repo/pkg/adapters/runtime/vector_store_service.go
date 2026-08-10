@@ -2,8 +2,10 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +18,7 @@ type LocalVectorStoreService struct {
 	mu                 sync.RWMutex
 	now                func() time.Time
 	backend            ports.VectorStore
+	store              ports.VectorStoreResourceStore
 	stores             map[string]ports.VectorStoreRecord
 	idempotency        map[string]string
 	linkIdempotency    map[string]string
@@ -36,6 +39,12 @@ func WithVectorStoreServiceClock(now func() time.Time) VectorStoreServiceOption 
 func WithVectorStoreBackend(backend ports.VectorStore) VectorStoreServiceOption {
 	return func(service *LocalVectorStoreService) {
 		service.backend = backend
+	}
+}
+
+func WithVectorStoreResourceStore(store ports.VectorStoreResourceStore) VectorStoreServiceOption {
+	return func(service *LocalVectorStoreService) {
+		service.store = store
 	}
 }
 
@@ -70,6 +79,14 @@ func (s *LocalVectorStoreService) CreateVectorStore(ctx context.Context, request
 		return ports.VectorStoreRecord{}, fmt.Errorf("%w: unsupported vector store metric %q", ports.ErrUnsupported, request.Metric)
 	}
 
+	if s.store != nil {
+		if existing, err := s.store.FindByCreateIdempotency(ctx, request.TenantID, request.IdempotencyKey); err == nil {
+			return existing, nil
+		} else if !errors.Is(err, ports.ErrNotFound) {
+			return ports.VectorStoreRecord{}, err
+		}
+	}
+
 	s.mu.Lock()
 	if id, ok := s.idempotency[idemKey]; ok {
 		if record, exists := s.stores[id]; exists {
@@ -86,21 +103,41 @@ func (s *LocalVectorStoreService) CreateVectorStore(ctx context.Context, request
 		state = ports.VectorStorePending
 		reason = "local vector store profile is still building the index"
 	}
-	record := ports.VectorStoreRecord{
-		TenantID:       request.TenantID,
-		StoreID:        "vst_" + uuid.NewString(),
-		Name:           strings.TrimSpace(request.Name),
-		Dimension:      request.Dimension,
-		Metric:         metric,
-		EmbeddingModel: strings.TrimSpace(request.EmbeddingModel),
-		IndexStatus:    vectorStoreIndexStatusFromState(state),
-		State:          state,
-		Reason:         reason,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+	if s.backend != nil && state == ports.VectorStoreReady {
+		state = ports.VectorStorePending
+		reason = "pending vector provider apply"
 	}
-	if s.backend != nil && record.State == ports.VectorStoreReady {
+	record := ports.VectorStoreRecord{
+		TenantID:                 request.TenantID,
+		StoreID:                  "vst_" + uuid.NewString(),
+		Name:                     strings.TrimSpace(request.Name),
+		Dimension:                request.Dimension,
+		Metric:                   metric,
+		EmbeddingModel:           strings.TrimSpace(request.EmbeddingModel),
+		IndexStatus:              vectorStoreIndexStatusFromState(state),
+		State:                    state,
+		Reason:                   reason,
+		CreatedAt:                now,
+		UpdatedAt:                now,
+		CreateIdempotencyKey:     request.IdempotencyKey,
+		CreateRequestFingerprint: strings.Join([]string{strings.TrimSpace(request.Name), metric, strconv.Itoa(request.Dimension)}, "|"),
+	}
+	if err := s.upsertVectorStore(ctx, record); err != nil {
+		return ports.VectorStoreRecord{}, err
+	}
+	if s.backend != nil && !strings.HasPrefix(strings.ToLower(record.Name), "pending-") {
 		if err := s.backend.EnsureCollection(ctx, vectorCollectionRef(record), record.Dimension); err != nil {
+			record.State = ports.VectorStoreFailed
+			record.Reason = err.Error()
+			record.UpdatedAt = s.now().UTC()
+			_ = s.upsertVectorStore(ctx, record)
+			return ports.VectorStoreRecord{}, err
+		}
+		record.State = ports.VectorStoreReady
+		record.IndexStatus = "ready"
+		record.Reason = "created by local vector store profile"
+		record.UpdatedAt = s.now().UTC()
+		if err := s.upsertVectorStore(ctx, record); err != nil {
 			return ports.VectorStoreRecord{}, err
 		}
 	}
@@ -112,7 +149,15 @@ func (s *LocalVectorStoreService) CreateVectorStore(ctx context.Context, request
 	return record, nil
 }
 
-func (s *LocalVectorStoreService) ListVectorStores(_ context.Context, request ports.VectorStoreResourceListRequest) ([]ports.VectorStoreRecord, error) {
+func (s *LocalVectorStoreService) ListVectorStores(ctx context.Context, request ports.VectorStoreResourceListRequest) ([]ports.VectorStoreRecord, error) {
+	if s.store != nil {
+		items, err := s.store.List(ctx, request.TenantID)
+		if err != nil {
+			return nil, err
+		}
+		sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.After(items[j].UpdatedAt) })
+		return items, nil
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	items := make([]ports.VectorStoreRecord, 0, len(s.stores))
@@ -125,7 +170,10 @@ func (s *LocalVectorStoreService) ListVectorStores(_ context.Context, request po
 	return items, nil
 }
 
-func (s *LocalVectorStoreService) GetVectorStore(_ context.Context, request ports.VectorStoreResourceGetRequest) (ports.VectorStoreRecord, error) {
+func (s *LocalVectorStoreService) GetVectorStore(ctx context.Context, request ports.VectorStoreResourceGetRequest) (ports.VectorStoreRecord, error) {
+	if s.store != nil {
+		return s.store.Get(ctx, request.TenantID, request.ResourceID)
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	record, ok := s.stores[request.ResourceID]
@@ -135,16 +183,20 @@ func (s *LocalVectorStoreService) GetVectorStore(_ context.Context, request port
 	return record, nil
 }
 
-func (s *LocalVectorStoreService) DeleteVectorStore(_ context.Context, request ports.VectorStoreResourceGetRequest) (ports.VectorStoreRecord, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	record, ok := s.stores[request.ResourceID]
-	if !ok || record.TenantID != request.TenantID || record.State == ports.VectorStoreDeleted {
-		return ports.VectorStoreRecord{}, ports.ErrNotFound
+func (s *LocalVectorStoreService) DeleteVectorStore(ctx context.Context, request ports.VectorStoreResourceGetRequest) (ports.VectorStoreRecord, error) {
+	record, err := s.GetVectorStore(ctx, request)
+	if err != nil {
+		return ports.VectorStoreRecord{}, err
 	}
 	record.State = ports.VectorStoreDeleted
 	record.Reason = "deleted by local vector store profile"
 	record.UpdatedAt = s.now().UTC()
+	record.DeletedAt = record.UpdatedAt
+	if err := s.upsertVectorStore(ctx, record); err != nil {
+		return ports.VectorStoreRecord{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.stores[record.StoreID] = record
 	return record, nil
 }
@@ -203,18 +255,21 @@ func (s *LocalVectorStoreService) RebuildVectorStoreIndex(ctx context.Context, r
 			return ports.VectorStoreRecord{}, err
 		}
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	record.IndexStatus = "ready"
 	record.LastIndexedAt = s.now().UTC()
 	record.Reason = "index rebuilt by local vector store profile"
 	record.UpdatedAt = record.LastIndexedAt
+	if err := s.upsertVectorStore(ctx, record); err != nil {
+		return ports.VectorStoreRecord{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.stores[record.StoreID] = record
 	s.rebuildIdempotency[idemKey] = record.StoreID
 	return record, nil
 }
 
-func (s *LocalVectorStoreService) SetVectorStoreKnowledgeBaseLink(_ context.Context, request ports.VectorStoreKnowledgeBaseLinkRequest) (ports.VectorStoreRecord, error) {
+func (s *LocalVectorStoreService) SetVectorStoreKnowledgeBaseLink(ctx context.Context, request ports.VectorStoreKnowledgeBaseLinkRequest) (ports.VectorStoreRecord, error) {
 	idemKey, err := requireIdempotencyKey(request.TenantID, request.IdempotencyKey)
 	if err != nil {
 		return ports.VectorStoreRecord{}, err
@@ -226,47 +281,67 @@ func (s *LocalVectorStoreService) SetVectorStoreKnowledgeBaseLink(_ context.Cont
 	if source != "services_knowledge_base" && source != "external" {
 		return ports.VectorStoreRecord{}, fmt.Errorf("%w: knowledge_base_ref source must be services_knowledge_base or external", ports.ErrInvalid)
 	}
+	record, err := s.GetVectorStore(ctx, ports.VectorStoreResourceGetRequest{TenantID: request.TenantID, ResourceID: request.ResourceID})
+	if err != nil {
+		return ports.VectorStoreRecord{}, err
+	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	record, ok := s.stores[strings.TrimSpace(request.ResourceID)]
-	if !ok || record.TenantID != request.TenantID || record.State == ports.VectorStoreDeleted {
-		return ports.VectorStoreRecord{}, ports.ErrNotFound
-	}
 	if id, ok := s.linkIdempotency[idemKey]; ok && id == record.StoreID {
-		return record, nil
+		if replay, exists := s.stores[id]; exists {
+			s.mu.Unlock()
+			return replay, nil
+		}
 	}
-	record.KnowledgeBaseRef = ports.VectorStoreKnowledgeBaseRef{
+	s.mu.Unlock()
+	ref := ports.VectorStoreKnowledgeBaseRef{
 		ID:     strings.TrimSpace(request.KnowledgeBaseRef.ID),
 		Name:   strings.TrimSpace(request.KnowledgeBaseRef.Name),
 		Source: source,
 	}
+	if s.store != nil {
+		if err := s.store.SetKnowledgeBaseLink(ctx, request.TenantID, record.StoreID, ref); err != nil {
+			return ports.VectorStoreRecord{}, err
+		}
+	}
+	record.KnowledgeBaseRef = ref
 	record.Reason = "knowledge base link updated by local vector store profile"
 	record.UpdatedAt = s.now().UTC()
+	if err := s.upsertVectorStore(ctx, record); err != nil {
+		return ports.VectorStoreRecord{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.stores[record.StoreID] = record
 	s.linkIdempotency[idemKey] = record.StoreID
 	return record, nil
 }
 
-func (s *LocalVectorStoreService) DeleteVectorStoreKnowledgeBaseLink(_ context.Context, request ports.VectorStoreResourceGetRequest) (ports.VectorStoreRecord, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	record, ok := s.stores[strings.TrimSpace(request.ResourceID)]
-	if !ok || record.TenantID != request.TenantID || record.State == ports.VectorStoreDeleted {
-		return ports.VectorStoreRecord{}, ports.ErrNotFound
+func (s *LocalVectorStoreService) DeleteVectorStoreKnowledgeBaseLink(ctx context.Context, request ports.VectorStoreResourceGetRequest) (ports.VectorStoreRecord, error) {
+	record, err := s.GetVectorStore(ctx, request)
+	if err != nil {
+		return ports.VectorStoreRecord{}, err
+	}
+	if s.store != nil {
+		if err := s.store.ClearKnowledgeBaseLink(ctx, request.TenantID, record.StoreID); err != nil {
+			return ports.VectorStoreRecord{}, err
+		}
 	}
 	record.KnowledgeBaseRef = ports.VectorStoreKnowledgeBaseRef{}
 	record.Reason = "knowledge base link removed by local vector store profile"
 	record.UpdatedAt = s.now().UTC()
+	if err := s.upsertVectorStore(ctx, record); err != nil {
+		return ports.VectorStoreRecord{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.stores[record.StoreID] = record
 	return record, nil
 }
 
-func (s *LocalVectorStoreService) PrecheckVectorStoreDelete(_ context.Context, request ports.VectorStoreResourceGetRequest) (ports.VectorStoreDeletePrecheck, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	record, ok := s.stores[strings.TrimSpace(request.ResourceID)]
-	if !ok || record.TenantID != request.TenantID || record.State == ports.VectorStoreDeleted {
-		return ports.VectorStoreDeletePrecheck{}, ports.ErrNotFound
+func (s *LocalVectorStoreService) PrecheckVectorStoreDelete(ctx context.Context, request ports.VectorStoreResourceGetRequest) (ports.VectorStoreDeletePrecheck, error) {
+	record, err := s.GetVectorStore(ctx, request)
+	if err != nil {
+		return ports.VectorStoreDeletePrecheck{}, err
 	}
 	if record.KnowledgeBaseRef.Name == "" {
 		return ports.VectorStoreDeletePrecheck{Deletable: true, Blockers: []ports.VectorStoreDeleteBlocker{}}, nil
@@ -411,6 +486,13 @@ func localDocumentVector(content string, dimension int, ordinal int) []float32 {
 		vector[i] = float32((seed+i)%17) / 17
 	}
 	return vector
+}
+
+func (s *LocalVectorStoreService) upsertVectorStore(ctx context.Context, record ports.VectorStoreRecord) error {
+	if s.store == nil {
+		return nil
+	}
+	return s.store.Upsert(ctx, record)
 }
 
 func vectorCollectionRef(record ports.VectorStoreRecord) ports.VectorCollectionRef {

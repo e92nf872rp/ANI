@@ -114,6 +114,7 @@ type RegistryArtifactListRequest struct {
 type RegistryArtifact struct {
 	Project    string
 	Repository string
+	Purpose    string
 	Digest     string
 	Tags       []string
 	MediaType  string

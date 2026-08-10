@@ -13,6 +13,25 @@
 
 ## 已完成批次（按完成时间排列）
 
+### Storage Control Plane State（2026-08）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| STORAGE-CONTROL-PLANE-STATE-A | B4 live passed：现有 v1 冻结；PG migration 已 apply；Store/Service 以 PG 为权威；Gateway 缺 `DATABASE_URL`/schema fail-closed + `validate-storage-control-plane-state-live-gate` production-shaped passed（rollout 回读/幂等/墓碑）；evidence `live-evidence/storage-control-plane-state-live-20260803.json`；不含 Console | storage-control-plane-state-a.md |
+
+### Storage Async Correctness（2026-08）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| STORAGE-ASYNC-CORRECTNESS-A | live passed：保持 Core v1 Vector 文档写入 `202` 自定义响应，补齐 `Location` 和 `vector_store.document.insert`；任务落 PG，Gateway rollout 后原 task ID 仍可查询；Milvus 临时夹具已清理；evidence `live-evidence/storage-async-vector-task-live-20260803.json` | storage-async-correctness-a.md |
+
+### Instance Sandbox 无状态化（2026-08）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-SANDBOX-CHECKPOINT-A | live passed：新 Sandbox `/workspace` 使用 5Gi RBD PVC；CSI VolumeSnapshot create/list/restore/clone，Gateway restart 后 provider list 与 PG task 可恢复；filesystem-only，keep_memory/legacy emptyDir 返回 422；删除 Sandbox 级联清理 managed snapshots；default 网络 evidence `live-evidence/instance-sandbox-checkpoint-live-20260802.json`；Gateway `instance-sandbox-checkpoint-20260802-v1` | instance-sandbox-checkpoint-a.md |
+| INSTANCE-SANDBOX-STATELESS-A | live passed：PG 请求上下文驱动 Kubernetes Sandbox、UUID、PG AsyncTaskStore、端口摘要、Redis DELETE/指纹/Token 过期幂等与 checkpoint 422；真实 Gateway rollout 后实例/文件/端口/task 可恢复，原请求可重放、不同 intent 冲突，清理后 provider 资源为 0；evidence `live-evidence/instance-sandbox-stateless-live-20260802.json`；Gateway `instance-sandbox-stateless-20260802-v1` | instance-sandbox-stateless-a.md |
+
 ### Core Knowledge Base Platform · 数据库迁移（2026-07）
 
 | 批次 | 内容摘要 | 文件 |
@@ -77,6 +96,18 @@
 | INSTANCE-SANDBOX-CONTRACT-A | Sandbox 子资源契约：新增短期 token、runtime 预览端口、文件、checkpoint 和异步 code-run 共 11 个操作；固定租户/kind 边界、幂等、202 AsyncTask + Location 与敏感输出审计约束；仅契约和生成物，不含运行时实现 | instance-sandbox-contract-a.md |
 | INSTANCE-CONTRACT-A | 统一实例主契约扩展：补齐四类 P0 创建配置、Registry/Network/Storage/GPU Spec 引用、稳定详情摘要、列表过滤/排序/cursor、观测 cursor 和结构化 lifecycle/operation step；仅契约和生成物，不含 Sandbox 子资源或运行时实现 | instance-contract-a.md |
 | GPU-SPEC-CONTRACT-A | 实例 `spec_id` 的前置只读契约：新增 `GPUSpecSummary`、`GET /gpu-specs`、`GET /gpu-specs/{spec_id}`，GPU Container config 增加可选 `spec_id`，旧 GPU 字段 deprecated 保留；明确不包含配额 check/acquire/release，不含 handler/port/adapter/Console 实现 | gpu-spec-contract-a.md |
+| INSTANCE-PORTS-SERVICE-A | 统一实例 ports/service/metadata 与 container real-provider 基础闭环：Gateway 注入 PostgreSQL/Kubernetes runtime，独立 reconcile-worker，稳定详情摘要、intent 指纹幂等、动作矩阵、操作持久化；真实 E2E 已验证 Harbor 镜像、Kubernetes Pod/Kube-OVN IP、启停、删除和 reconcile 终态。VM/Sandbox/code-run live 见后续同批记录；不含完整 ORCHESTRATION、配额或 GPU Container 统一实例 live | INSTANCE-PORTS-SERVICE-A.md |
+| INSTANCE-MANAGEMENT-LIVE-GATE-A | VM 实例管理真实门禁：契约 + 2026-08-01 live passed；`validate-instance-management-live-gate --live` 覆盖 Core /api/v1/instances create/get/console/stop/start/delete，KubeVirt 只读观测；镜像走 `docker.kubercon.local`；evidence `live-evidence/instance-management-vm-live-20260731.json`；随修 KubeVirt PUT lifecycle、混 provider delete、Harbor hostAliases；不含 GPU Container live 与完整编排 | instance-management-live-gate-a.md |
+| INSTANCE-SANDBOX-ADAPTER-A / INSTANCE-SANDBOX-LIVE-GATE-A | Sandbox real provider create/lifecycle：kata-deploy 4.0.0 + RuntimeClass `sandbox-kata`；`KubernetesSandboxRuntime` Apply Deployment；live passed create→runtimeClass 观测→pause/resume→delete；evidence `live-evidence/instance-sandbox-live-20260801.json`；子资源仍 local-session；Gateway `instance-sandbox-live-20260801-v2` | instance-sandbox-adapter-a.md |
+| INSTANCE-SANDBOX-CODERUN-A | Sandbox code-run real provider 最小闭环：Ready Pod + kubectl exec（python3/node）；AsyncTask result 含 stdout/stderr/exit_code；live passed（2026-08-01）`code_run_status=succeeded`；evidence `live-evidence/instance-sandbox-coderun-live-20260801.json`；Gateway `instance-sandbox-coderun-20260801-v1`；token/port/file/checkpoint 仍 local-session | instance-sandbox-coderun-a.md |
+| INSTANCE-ORCHESTRATION-A | Container create-time Registry/Network/Storage 编排：OVN 注解 + PVC mount + MountVolume + operation steps；Gateway 共享 Network/Storage/Registry 到 Instance resolver；Harbor TLS insecure 修通；live passed（2026-08-01）evidence `live-evidence/instance-orchestration-container-live-20260801.json`；Gateway `instance-orchestration-20260801-v3` | instance-orchestration-a.md |
+| INSTANCE-SANDBOX-SUBRESOURCES-A | Sandbox files real-provider：Pod `/workspace` write/list/delete + code-run 读回校验；live passed（2026-08-01）evidence `live-evidence/instance-sandbox-files-live-20260801.json`；Gateway `instance-sandbox-files-20260801-v1`；token/port/checkpoint 仍 local-session；不改 v1 | instance-sandbox-subresources-a.md |
+| INSTANCE-SANDBOX-FILE-SAFETY-A | Sandbox files containment 安全加固：独立 `emptyDir` 挂载 `/workspace`，Pod 脚本使用目录 fd、`O_NOFOLLOW`、`dir_fd` 并拒绝多硬链接写入目标；unsafe path 映射 v1 HTTP 400；真实脚本回归覆盖 symlink/hard-link；local/logic verified，未重跑 live | instance-sandbox-file-safety-a.md |
+| INSTANCE-SANDBOX-FILE-SAFETY-LIVE-GATE-A | Sandbox files real-provider 安全验收：真实 Kata Pod `/workspace=emptyDir`；code-run 构造 symlink/hard-link；5 个 unsafe list/write/delete 均返回 400，跨文件系统 hard-link blocked，外部内容 unchanged；live passed，evidence `live-evidence/instance-sandbox-file-safety-live-20260802.json`；Gateway `instance-sandbox-file-safety-20260802-v1` | instance-sandbox-file-safety-live-gate-a.md |
+| INSTANCE-PG-CLEAN-REVALIDATION-A | 清除历史实例管理 PG 数据并从空基线重跑 Sandbox live gate；清理 26 instances / 104 operations / 381 steps / 27 plan audits / 27 workload identities；重验后只保留 1 条当次 `deleted` Sandbox 审计历史，Kubernetes 资源无残留；evidence `live-evidence/instance-sandbox-post-clean-live-20260802.json` | instance-pg-clean-revalidation-a.md |
+| INSTANCE-RECONCILE-PROVIDER-404-A | Kubernetes 主资源 404 映射 `ports.ErrNotFound`，并收口 Sandbox `kubernetes_sandbox_runtime` 逻辑 provider 与 `kubernetes/Deployment` 物理 ref 匹配；真实验证集群侧删除后 PG `running→failed/ProviderResourceLost`，重复 reconcile 幂等，Core delete 后无资源残留；worker `instance-provider-404-20260802-v2` | instance-reconcile-provider-404-a.md |
+| INSTANCE-SANDBOX-PORTS-A | Sandbox preview ports real-provider：NodePort Service + preview_url；live passed（2026-08-02）evidence `live-evidence/instance-sandbox-ports-live-20260801.json`；Gateway `instance-sandbox-ports-20260801-v1`；token/checkpoint 仍 local-session | instance-sandbox-ports-a.md |
+| INSTANCE-SANDBOX-TOKEN-A | Sandbox signed token：HMAC `ani.sbx.*` 签发 + Gateway Auth/RBAC 子资源鉴权；live passed（2026-08-02）evidence `live-evidence/instance-sandbox-token-live-20260802.json`；Gateway `instance-sandbox-token-20260802-v1`；checkpoint 仍 local-session | instance-sandbox-token-a.md |
 | GPU-SCHEDULING-ISSUE-01-A | OpenAPI 新增 GPU 调度队列 CRUD 5 端点 + 4 schema + 2 RBAC scope + InstanceRecord.gpu 扩展 + 5 错误码；修复 /branding schema bug；前端 core-schema.d.ts 重生成；validate-architecture 通过 | gpu-scheduling-issue-01-openapi-queue-crud.md |
 | GPU-SCHEDULING-ISSUE-02-A | Core Queue port + Volcano Queue CRD adapter + Gateway handler 5 端点；14 adapter 单测 + 12 handler 单测全通过；validate-architecture 通过 | gpu-scheduling-issue-02-queue-adapter-handler.md |
 | GPU-SCHEDULING-ISSUE-03-A | PlanScheduling 扩展：GPUSchedulingRequest 新增 QueueName/WorkloadClass；KubernetesGPUInventory 支持 queue 解析 + HAMi vGPU + 昇腾/MIG 拒绝；LocalGPUInventory 对齐；13 个新单测全通过；validate-architecture 通过 | gpu-scheduling-issue-03-plan-scheduling-extend.md |
@@ -95,12 +126,19 @@
 | CORE-STORAGE-CONSOLE-APIS-BACKEND-A | 存储模块 Console 控制面后端：补齐 bucket objects/prefix/presigned-url/ACL/storage-class/lifecycle-rules、volume expand/mount/os-init/snapshot-origin/auto-snapshot、filesystem expand/mount-target/mount-command、vector rebuild/KB-link/delete-precheck 的 ports/local service/gateway handlers；2026-07-27 复验块/文件存储 Rook-Ceph snapshot/mount-target、对象存储 MinIO、向量库 Milvus 真实后端 E2E 通过，并修复 Milvus collection name 数字开头缺陷；本次使用本地 Gateway 连接真实依赖，不含前端实现，不升级为 production-shaped Gateway 结论 | core-storage-console-apis-backend-a.md |
 | CORE-REGISTRY-CONSOLE-FLOW-CORE-A | Core 镜像仓库后端实现：RegistryImage purpose 贯通 port/adapter/router，`/registry/images?purpose=` 支持过滤；不含 instances、Console、BOSS 或权限实现 | core-registry-console-flow-core-a.md |
 | SPRINT13-REGISTRY-HARBOR-LIVE-A | 镜像仓库 Harbor-backed live gate：`validate-registry-harbor-live-gate` 契约通过；2026-07-27 真实 Gateway 验证 Harbor project/list/push-instructions/pull-secret/scan-report 并归档脱敏 evidence，artifact/purpose 回读在提供 repository/tag 时执行；不含 Console/BOSS/实例创建镜像门禁 | sprint13-registry-harbor-live-gate.md |
+| REGISTRY-P0-CLOSURE-A | Registry P0 闭环：purpose/scan terminal=`complete`/实例引用/删除 409；live passed（evidence `registry-p0-closure-live-20260803.json`）；不含 BOSS quota/GC | registry-p0-closure-a.md |
 
 ### 邮件通知（2026-07）
 
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
 | EMAIL-NOTIFY | 邮件通知 API + BOSS 发信设置页：9 个 Core endpoint（SMTP CRUD / 收件人 CRUD / 事件订阅批量更新 / 测试发送）；local 内存 adapter；BOSS 前端 SMTP 表单 + 收件人表格 + 订阅开关 + 测试发送；48 store 测试 + 34 handler 测试；RequestID store 层 UUID 生成 + handler 透传 | email-notify.md |
+
+### NATS 接入（2026-07）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| NATS-INTEGRATION-A | NATS JetStream 适配器健壮性 + 示例 consumer + 集成测试：Issue #001-#009 覆盖 ports 契约扩展（AckWait/MaxDeliver/Headers）、ANI_EVENTS stream 改 InterestPolicy、Publish 写入 NATS headers + 注入 logger、Subscribe 业务层 Ack/Nak + panic recover + AckWait/MaxDeliver 透传、`message.Headers()` 实现 + 内部 jetStream 接口、metering 示例 consumer、adapter 单元测试（fake/mock JetStream，9 场景 65.3% coverage）、adapter 集成测试（7 场景连真实 NATS）+ Consumer 端到端集成测试（2 场景）、task 流示例 consumer + 集成测试（2 场景，WorkQueuePolicy 语义验证）；`//go:build integration` 隔离集成测试不影响默认 `make test`；**v3 修订**（基于 `plan-nats-integration-v3.md`）：每条消息 handler 改用 `context.Background()` 独立上下文避免订阅 ctx 取消中断正在处理的消息、adapter 根据 handler 返回值统一 ack/nak（`nil→Ack`/`error→Nak`/`panic→Nak`）、从 `ports.Message` 接口去掉 `Ack/Nack` 方法编译期禁止业务显式确认、毒丸消息业务侧记 error 后返回 nil 吞错误让 adapter Ack 跳过、两 service consumer 与 adapter 单测/集成测试同步改造、单测不追踪 ack/nak 靠集成测试覆盖；**v4 修订**（基于 `plan-nats-integration-v4.md`）：Subscribe 签名删除 ctx 死参数（v3 已确认不透传给 handler、NATS 异步回调不消费）、consumer `Start()` 同步删 ctx `Stop(ctx)` 保留（Drain 需超时控制）、三处 `_ = msg.Nak()`/`_ = msg.Ack()` 忽略返回值改为接住 error 打 Error 日志（Ack/Nak 调用本身失败不再静默）、删除 `TestHandlerBackgroundCtx` 用例（前提不存在了）；详见 `nats-integration-a.md` | nats-integration-a.md |
 
 ### M2.1 Knowledge Base Platform Contract（2026-07）
 

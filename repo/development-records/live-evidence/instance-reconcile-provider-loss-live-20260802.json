@@ -1,0 +1,16 @@
+{
+  "generated_at": "2026-08-02T06:13:53.158035Z",
+  "id": "instance-reconcile-provider-loss-live-gate",
+  "instance_id": "sandbox_9",
+  "kind": "sandbox",
+  "profile": "INSTANCE-RECONCILE-PROVIDER-404-A",
+  "provider_resources_after_cleanup": 0,
+  "reason_after_provider_loss": "ProviderResourceLost",
+  "reason_after_repeat_reconcile": "ProviderResourceLost",
+  "state_after_cleanup": "deleted",
+  "state_after_provider_loss": "failed",
+  "state_after_repeat_reconcile": "failed",
+  "state_before_provider_loss": "running",
+  "status": "passed",
+  "write_path": "Core /api/v1/instances"
+}

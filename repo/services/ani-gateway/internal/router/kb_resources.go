@@ -109,7 +109,7 @@ type updateKBPermissionsRequest struct {
 
 func (a *kbAPI) listKnowledgeBases(ctx context.Context, c *app.RequestContext) {
 	if a.client == nil {
-		writeDemoError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
+		writeInstanceError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
 		return
 	}
 	limit := queryInt(c, "limit", 20)
@@ -117,7 +117,7 @@ func (a *kbAPI) listKnowledgeBases(ctx context.Context, c *app.RequestContext) {
 		limit = 20
 	}
 	cursor := string(c.QueryArgs().Peek("cursor"))
-	resp, err := a.client.ListKBs(ctx, demoTenantID(c), int32(limit), cursor)
+	resp, err := a.client.ListKBs(ctx, instanceTenantID(c), int32(limit), cursor)
 	if err != nil {
 		writeKBError(c, err)
 		return
@@ -139,23 +139,23 @@ func (a *kbAPI) listKnowledgeBases(ctx context.Context, c *app.RequestContext) {
 
 func (a *kbAPI) createKnowledgeBase(ctx context.Context, c *app.RequestContext) {
 	if a.client == nil {
-		writeDemoError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
+		writeInstanceError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
 		return
 	}
 	var req createKnowledgeBaseRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid knowledge base request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid knowledge base request")
 		return
 	}
 	if strings.TrimSpace(req.Name) == "" {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "name is required")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "name is required")
 		return
 	}
 	if strings.TrimSpace(req.IdempotencyKey) == "" {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
 		return
 	}
-	kb, err := a.client.CreateKB(ctx, demoTenantID(c), req.IdempotencyKey, &kbv1.CreateKBRequest{
+	kb, err := a.client.CreateKB(ctx, instanceTenantID(c), req.IdempotencyKey, &kbv1.CreateKBRequest{
 		Name:           req.Name,
 		Description:    req.Description,
 		EmbeddingModel: req.EmbeddingModel,
@@ -173,10 +173,10 @@ func (a *kbAPI) createKnowledgeBase(ctx context.Context, c *app.RequestContext) 
 
 func (a *kbAPI) getKnowledgeBase(ctx context.Context, c *app.RequestContext) {
 	if a.client == nil {
-		writeDemoError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
+		writeInstanceError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
 		return
 	}
-	kb, err := a.client.GetKB(ctx, demoTenantID(c), c.Param("kb_id"))
+	kb, err := a.client.GetKB(ctx, instanceTenantID(c), c.Param("kb_id"))
 	if err != nil {
 		writeKBError(c, err)
 		return
@@ -186,10 +186,10 @@ func (a *kbAPI) getKnowledgeBase(ctx context.Context, c *app.RequestContext) {
 
 func (a *kbAPI) deleteKnowledgeBase(ctx context.Context, c *app.RequestContext) {
 	if a.client == nil {
-		writeDemoError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
+		writeInstanceError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
 		return
 	}
-	if _, err := a.client.DeleteKB(ctx, demoTenantID(c), c.Param("kb_id")); err != nil {
+	if _, err := a.client.DeleteKB(ctx, instanceTenantID(c), c.Param("kb_id")); err != nil {
 		writeKBError(c, err)
 		return
 	}
@@ -198,7 +198,7 @@ func (a *kbAPI) deleteKnowledgeBase(ctx context.Context, c *app.RequestContext) 
 
 func (a *kbAPI) listKnowledgeBaseDocuments(ctx context.Context, c *app.RequestContext) {
 	if a.client == nil {
-		writeDemoError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
+		writeInstanceError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
 		return
 	}
 	limit := queryInt(c, "limit", 20)
@@ -207,7 +207,7 @@ func (a *kbAPI) listKnowledgeBaseDocuments(ctx context.Context, c *app.RequestCo
 	}
 	cursor := string(c.QueryArgs().Peek("cursor"))
 	parseStatus := string(c.QueryArgs().Peek("parse_status"))
-	resp, err := a.client.ListDocuments(ctx, demoTenantID(c), c.Param("kb_id"), parseStatus, int32(limit), cursor)
+	resp, err := a.client.ListDocuments(ctx, instanceTenantID(c), c.Param("kb_id"), parseStatus, int32(limit), cursor)
 	if err != nil {
 		writeKBError(c, err)
 		return
@@ -229,23 +229,23 @@ func (a *kbAPI) listKnowledgeBaseDocuments(ctx context.Context, c *app.RequestCo
 
 func (a *kbAPI) uploadKnowledgeBaseDocument(ctx context.Context, c *app.RequestContext) {
 	if a.client == nil {
-		writeDemoError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
+		writeInstanceError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
 		return
 	}
 	var req getDocumentUploadURLRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid document upload request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid document upload request")
 		return
 	}
 	if strings.TrimSpace(req.IdempotencyKey) == "" {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
 		return
 	}
 	if strings.TrimSpace(req.FileName) == "" || strings.TrimSpace(req.FileType) == "" {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "file_name and file_type are required")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "file_name and file_type are required")
 		return
 	}
-	resp, err := a.client.GetDocumentUploadURL(ctx, demoTenantID(c), c.Param("kb_id"), req.IdempotencyKey, &kbv1.GetDocumentUploadURLRequest{
+	resp, err := a.client.GetDocumentUploadURL(ctx, instanceTenantID(c), c.Param("kb_id"), req.IdempotencyKey, &kbv1.GetDocumentUploadURLRequest{
 		FileName:       req.FileName,
 		FileType:       req.FileType,
 		FileSizeBytes:  req.FileSizeBytes,
@@ -265,7 +265,7 @@ func (a *kbAPI) uploadKnowledgeBaseDocument(ctx context.Context, c *app.RequestC
 
 func (a *kbAPI) notifyDocumentUploaded(ctx context.Context, c *app.RequestContext) {
 	if a.client == nil {
-		writeDemoError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
+		writeInstanceError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
 		return
 	}
 	var req struct {
@@ -274,7 +274,7 @@ func (a *kbAPI) notifyDocumentUploaded(ctx context.Context, c *app.RequestContex
 	}
 	_ = c.BindJSON(&req) // optional body; storage_path may be empty
 	storagePath := req.StoragePath
-	taskRef, err := a.client.NotifyDocumentUploaded(ctx, demoTenantID(c), c.Param("kb_id"), req.DocID, storagePath)
+	taskRef, err := a.client.NotifyDocumentUploaded(ctx, instanceTenantID(c), c.Param("kb_id"), req.DocID, storagePath)
 	if err != nil {
 		writeKBError(c, err)
 		return
@@ -288,10 +288,10 @@ func (a *kbAPI) notifyDocumentUploaded(ctx context.Context, c *app.RequestContex
 
 func (a *kbAPI) deleteKnowledgeBaseDocument(ctx context.Context, c *app.RequestContext) {
 	if a.client == nil {
-		writeDemoError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
+		writeInstanceError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
 		return
 	}
-	if _, err := a.client.DeleteDocument(ctx, demoTenantID(c), c.Param("kb_id"), c.Param("doc_id")); err != nil {
+	if _, err := a.client.DeleteDocument(ctx, instanceTenantID(c), c.Param("kb_id"), c.Param("doc_id")); err != nil {
 		writeKBError(c, err)
 		return
 	}
@@ -300,23 +300,23 @@ func (a *kbAPI) deleteKnowledgeBaseDocument(ctx context.Context, c *app.RequestC
 
 func (a *kbAPI) queryKnowledgeBase(ctx context.Context, c *app.RequestContext) {
 	if a.client == nil {
-		writeDemoError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
+		writeInstanceError(c, http.StatusServiceUnavailable, "UNAVAILABLE", "kb-service gRPC client not configured")
 		return
 	}
 	var req queryKnowledgeBaseRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid knowledge base query request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid knowledge base query request")
 		return
 	}
 	if strings.TrimSpace(req.Question) == "" {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "question is required")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "question is required")
 		return
 	}
 	if strings.TrimSpace(req.IdempotencyKey) == "" {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
 		return
 	}
-	resp, err := a.client.Query(ctx, demoTenantID(c), c.Param("kb_id"), req.IdempotencyKey, &kbv1.QueryRequest{
+	resp, err := a.client.Query(ctx, instanceTenantID(c), c.Param("kb_id"), req.IdempotencyKey, &kbv1.QueryRequest{
 		Question:             req.Question,
 		SessionId:            req.SessionID,
 		TopK:                 req.TopK,
@@ -347,7 +347,7 @@ func (a *kbAPI) listKnowledgeBaseCitations(ctx context.Context, c *app.RequestCo
 	if a.client == nil {
 		// Without a client we cannot even reach kb-service; return 501 to mirror
 		// the P1 UNIMPLEMENTED status so the route surface is consistent.
-		writeDemoError(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", "kb-service P1 RPC ListKBCitations not implemented")
+		writeInstanceError(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", "kb-service P1 RPC ListKBCitations not implemented")
 		return
 	}
 	limit := queryInt(c, "limit", 20)
@@ -355,7 +355,7 @@ func (a *kbAPI) listKnowledgeBaseCitations(ctx context.Context, c *app.RequestCo
 		limit = 20
 	}
 	cursor := string(c.QueryArgs().Peek("cursor"))
-	resp, err := a.client.ListKBCitations(ctx, demoTenantID(c), c.Param("kb_id"), int32(limit), cursor)
+	resp, err := a.client.ListKBCitations(ctx, instanceTenantID(c), c.Param("kb_id"), int32(limit), cursor)
 	if err != nil {
 		writeKBError(c, err)
 		return
@@ -372,7 +372,7 @@ func (a *kbAPI) listKnowledgeBaseCitations(ctx context.Context, c *app.RequestCo
 
 func (a *kbAPI) listKnowledgeBaseSessions(ctx context.Context, c *app.RequestContext) {
 	if a.client == nil {
-		writeDemoError(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", "kb-service P1 RPC ListKBSessions not implemented")
+		writeInstanceError(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", "kb-service P1 RPC ListKBSessions not implemented")
 		return
 	}
 	limit := queryInt(c, "limit", 20)
@@ -380,7 +380,7 @@ func (a *kbAPI) listKnowledgeBaseSessions(ctx context.Context, c *app.RequestCon
 		limit = 20
 	}
 	cursor := string(c.QueryArgs().Peek("cursor"))
-	resp, err := a.client.ListKBSessions(ctx, demoTenantID(c), c.Param("kb_id"), int32(limit), cursor)
+	resp, err := a.client.ListKBSessions(ctx, instanceTenantID(c), c.Param("kb_id"), int32(limit), cursor)
 	if err != nil {
 		writeKBError(c, err)
 		return
@@ -397,19 +397,19 @@ func (a *kbAPI) listKnowledgeBaseSessions(ctx context.Context, c *app.RequestCon
 
 func (a *kbAPI) updateKnowledgeBasePermissions(ctx context.Context, c *app.RequestContext) {
 	if a.client == nil {
-		writeDemoError(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", "kb-service P1 RPC UpdateKBPermissions not implemented")
+		writeInstanceError(c, http.StatusNotImplemented, "NOT_IMPLEMENTED", "kb-service P1 RPC UpdateKBPermissions not implemented")
 		return
 	}
 	var req updateKBPermissionsRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid knowledge base permissions request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid knowledge base permissions request")
 		return
 	}
 	if strings.TrimSpace(req.IdempotencyKey) == "" {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
 		return
 	}
-	kb, err := a.client.UpdateKBPermissions(ctx, demoTenantID(c), c.Param("kb_id"), req.IdempotencyKey, &kbv1.UpdateKBPermissionsRequest{
+	kb, err := a.client.UpdateKBPermissions(ctx, instanceTenantID(c), c.Param("kb_id"), req.IdempotencyKey, &kbv1.UpdateKBPermissionsRequest{
 		PublicRead:     req.PublicRead,
 		AllowedUserIds: req.AllowedUserIDs,
 	})

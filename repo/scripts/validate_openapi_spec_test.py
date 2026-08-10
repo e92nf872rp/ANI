@@ -74,6 +74,63 @@ class OpenAPISpecValidatorTest(unittest.TestCase):
         ):
             self.assertIn(code, create_instance_422)
 
+    def test_registry_p0_scan_reference_and_delete_contract_is_frozen(self) -> None:
+        spec = yaml.safe_load((ROOT / "api/openapi/v1.yaml").read_text(encoding="utf-8"))
+        schemas = spec["components"]["schemas"]
+
+        scan_result = schemas["RegistryScanResult"]
+        self.assertEqual(
+            set(scan_result["required"]),
+            {"image", "status", "critical", "high", "medium", "low"},
+        )
+        self.assertEqual(
+            scan_result["properties"]["status"]["enum"],
+            ["not_scanned", "pending", "running", "complete", "failed"],
+        )
+
+        registry_image = schemas["RegistryImage"]
+        self.assertEqual(
+            registry_image["properties"]["scan_status"]["$ref"],
+            "#/components/schemas/RegistryScanResult",
+        )
+
+        scan_report = spec["paths"]["/registry/projects/{project}/scan-report"]["get"]
+        self.assertEqual(scan_report["operationId"], "getRegistryProjectScanReport")
+        self.assertEqual(
+            scan_report["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/RegistryProjectScanReport",
+        )
+
+        scan_result_operation = spec["paths"]["/registry/images/scan-result"]["get"]
+        scan_result_parameters = {
+            parameter["name"]: parameter
+            for parameter in scan_result_operation["parameters"]
+        }
+        self.assertTrue(scan_result_parameters["image"]["required"])
+        self.assertEqual(
+            scan_result_operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/RegistryScanResult",
+        )
+
+        references = spec["paths"][
+            "/registry/projects/{project}/repositories/{repository}/tags/{tag}/references"
+        ]["get"]
+        self.assertEqual(references["operationId"], "listRegistryRepositoryTagReferences")
+        self.assertEqual(
+            references["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/RegistryImageReferenceListResponse",
+        )
+
+        delete_tag = spec["paths"][
+            "/registry/projects/{project}/repositories/{repository}/tags/{tag}"
+        ]["delete"]
+        self.assertEqual(delete_tag["operationId"], "deleteRegistryRepositoryTag")
+        self.assertIn("409", delete_tag["responses"])
+        self.assertEqual(
+            delete_tag["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/RegistryDeletedTag",
+        )
+
     def test_gpu_spec_selection_contract_is_frozen_without_quota_semantics(self) -> None:
         spec = yaml.safe_load((ROOT / "api/openapi/v1.yaml").read_text(encoding="utf-8"))
         schemas = spec["components"]["schemas"]
@@ -317,6 +374,94 @@ class OpenAPISpecValidatorTest(unittest.TestCase):
         resource_type = schemas["AsyncTask"]["properties"]["resource_type"]["enum"]
         self.assertIn("sandbox.code_run.create", task_type)
         self.assertIn("sandbox_code_run", resource_type)
+
+    def test_vector_document_insert_async_contract_is_pollable(self) -> None:
+        spec = yaml.safe_load((ROOT / "api/openapi/v1.yaml").read_text(encoding="utf-8"))
+        schemas = spec["components"]["schemas"]
+
+        accepted = spec["paths"]["/vector-stores/{vector_store_id}/documents"]["post"][
+            "responses"
+        ]["202"]
+        self.assertEqual(
+            accepted["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/VectorStoreDocumentInsertResponse",
+        )
+        self.assertIn("Location", accepted.get("headers", {}))
+        self.assertIn(
+            "vector_store.document.insert",
+            schemas["AsyncTask"]["properties"]["task_type"]["enum"],
+        )
+
+    def test_storage_p0_keeps_existing_v1_without_contract_changes(self) -> None:
+        """STORAGE-CONTROL-PLANE-STATE-A / B1: reuse current Core v1; no additive fields."""
+        spec = yaml.safe_load((ROOT / "api/openapi/v1.yaml").read_text(encoding="utf-8"))
+        schemas = spec["components"]["schemas"]
+
+        # P0 control-plane persistence must not invent VectorStore.description or similar.
+        self.assertNotIn("description", schemas["CreateVectorStoreRequest"]["properties"])
+        self.assertNotIn("description", schemas["VectorStore"]["properties"])
+
+        # Text-to-vector stays out of Core; search continues to accept vector only.
+        search_props = schemas["VectorStoreSearchRequest"]["properties"]
+        self.assertIn("vector", search_props)
+        self.assertNotIn("text", search_props)
+        self.assertNotIn("query", search_props)
+        self.assertEqual(schemas["VectorStoreSearchRequest"]["required"], ["vector"])
+
+        # Filesystem NFS client/CIDR ACL and SMB remain out of P0 contract surface.
+        for schema_name in (
+            "CreateStorageFilesystemRequest",
+            "StorageFilesystem",
+            "CreateStorageVolumeRequest",
+            "StorageVolume",
+        ):
+            props = schemas[schema_name]["properties"]
+            for forbidden in (
+                "client_cidrs",
+                "nfs_acl",
+                "smb_enabled",
+                "acl_rules",
+                "static_website",
+            ):
+                self.assertNotIn(forbidden, props, msg=f"{schema_name}.{forbidden}")
+
+        # Existing storage/vector resource surfaces required by P0 remain present.
+        for schema_name in (
+            "StorageVolume",
+            "VolumeSnapshotRecord",
+            "StorageFilesystem",
+            "FilesystemMountTarget",
+            "StorageBucketRecord",
+            "StorageObject",
+            "VectorStore",
+            "VectorStoreKnowledgeBaseRef",
+        ):
+            self.assertIn(schema_name, schemas)
+
+    def test_async_accepted_responses_declare_polling_location(self) -> None:
+        spec = yaml.safe_load((ROOT / "api/openapi/v1.yaml").read_text(encoding="utf-8"))
+        schemas = spec["components"]["schemas"]
+
+        for path, path_item in spec["paths"].items():
+            for method in ("get", "post", "put", "patch", "delete"):
+                operation = path_item.get(method)
+                if operation is None or "202" not in operation.get("responses", {}):
+                    continue
+                accepted = operation["responses"]["202"]
+                schema_ref = (
+                    accepted.get("content", {})
+                    .get("application/json", {})
+                    .get("schema", {})
+                    .get("$ref", "")
+                )
+                schema_name = schema_ref.rsplit("/", 1)[-1]
+                response_schema = schemas.get(schema_name, {})
+                exposes_task = schema_name == "AsyncTask" or "task_id" in response_schema.get(
+                    "required", []
+                )
+                if exposes_task:
+                    with self.subTest(method=method, path=path):
+                        self.assertIn("Location", accepted.get("headers", {}))
 
 
 if __name__ == "__main__":

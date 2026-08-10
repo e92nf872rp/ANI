@@ -57,6 +57,16 @@ export const operations = [
   "pauseSandbox",
   "listSandboxSecurityEvents",
   "getSandboxSecurityOverview",
+  "listTenantPlans",
+  "createTenantPlan",
+  "deleteTenantPlan",
+  "getTenantPlan",
+  "activateTenantPlan",
+  "listTenantPlanAuditLogs",
+  "disableTenantPlan",
+  "getTenantPlanQuotaLimits",
+  "updateTenantPlanQuotaLimits",
+  "listTenantPlanBoundTenants",
   "listTenantMembers",
   "inviteTenantMember",
   "removeTenantMember",
@@ -68,7 +78,8 @@ export const operations = [
   "listWebhooks",
   "createWebhook",
   "deleteWebhook",
-  "listWebhookDeliveries"
+  "listWebhookDeliveries",
+  "bindTenantPlan"
 ] as const;
 export const paths = [
   "GET /gpu-containers",
@@ -124,6 +135,16 @@ export const paths = [
   "POST /sandboxes/{sandbox_id}/pause",
   "GET /sandboxes/{sandbox_id}/security-events",
   "GET /sandboxes/{sandbox_id}/security-overview",
+  "GET /tenant-plans",
+  "POST /tenant-plans",
+  "DELETE /tenant-plans/{planId}",
+  "GET /tenant-plans/{planId}",
+  "POST /tenant-plans/{planId}/activate",
+  "GET /tenant-plans/{planId}/audit-logs",
+  "POST /tenant-plans/{planId}/disable",
+  "GET /tenant-plans/{planId}/quota-limits",
+  "PATCH /tenant-plans/{planId}/quota-limits",
+  "GET /tenant-plans/{planId}/tenants",
   "GET /tenant/members",
   "POST /tenant/members",
   "DELETE /tenant/members/{member_id}",
@@ -135,17 +156,22 @@ export const paths = [
   "GET /tenant/webhooks",
   "POST /tenant/webhooks",
   "DELETE /tenant/webhooks/{webhook_id}",
-  "GET /tenant/webhooks/{webhook_id}/deliveries"
+  "GET /tenant/webhooks/{webhook_id}/deliveries",
+  "POST /tenants/{tenantId}/plan"
 ] as const;
 export const schemas = [
   "AsyncTask",
   "AvailableGpu",
+  "BindPlanRequest",
+  "BoundTenant",
+  "BoundTenantsResponse",
   "CreateGpuContainerRequest",
   "CreateInferenceEndpointRequest",
   "CreateIntegrationBotRequest",
   "CreateIntegrationRequest",
   "CreateModelRequest",
   "CreateSandboxRequest",
+  "CreateTenantPlanRequest",
   "CreateWebhookRequest",
   "CursorPage",
   "ErrorResponse",
@@ -155,6 +181,7 @@ export const schemas = [
   "GpuContainer",
   "GpuContainerMetrics",
   "GpuContainerVersion",
+  "IdempotentResult",
   "InferenceEndpoint",
   "InferenceService",
   "InferenceServiceLogEntry",
@@ -181,6 +208,11 @@ export const schemas = [
   "NotifyDocumentUploadedRequest",
   "PatchGpuContainerRequest",
   "PatchSandboxRequest",
+  "PlanAuditLog",
+  "PlanAuditLogListResponse",
+  "PlanQuotaLimitInput",
+  "PlanQuotaLimitView",
+  "PlanQuotaLimitsResponse",
   "RebuildKnowledgeBaseRequest",
   "ReparseDocumentRequest",
   "Sandbox",
@@ -188,10 +220,14 @@ export const schemas = [
   "SecurityOverview",
   "SsoConfig",
   "TenantMember",
+  "TenantPlan",
+  "TenantPlanListItem",
+  "TenantPlanListResponse",
   "TenantRole",
   "UpdateInferenceServicePoliciesRequest",
   "UpdateKBConfigRequest",
   "UpdateKBPermissionsRequest",
+  "UpdateQuotaLimitsRequest",
   "UpdateSsoConfigRequest",
   "UpdateTenantRoleRequest",
   "Webhook",
@@ -215,10 +251,13 @@ export const idempotencyOperations = [
   "createSandbox",
   "patchSandbox",
   "extendSandbox",
+  "createTenantPlan",
+  "updateTenantPlanQuotaLimits",
   "inviteTenantMember",
   "updateTenantRole",
   "updateSsoConfig",
-  "createWebhook"
+  "createWebhook",
+  "bindTenantPlan"
 ] as const;
 export const cursorPaginationOperations = [
   "listGpuContainers",
@@ -228,6 +267,8 @@ export const cursorPaginationOperations = [
   "listKnowledgeBaseSessions",
   "listModels",
   "listSandboxes",
+  "listTenantPlans",
+  "listTenantPlanAuditLogs",
   "listWebhookDeliveries"
 ] as const;
 export const errorCodes = [
@@ -236,6 +277,7 @@ export const errorCodes = [
   "FORBIDDEN",
   "NOT_FOUND",
   "PRECONDITION_FAILED",
+  "QUOTA_RESOURCE_NOT_REGISTERED",
   "UNAUTHORIZED"
 ] as const;
 

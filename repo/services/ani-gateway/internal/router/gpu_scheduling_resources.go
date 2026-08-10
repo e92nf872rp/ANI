@@ -70,7 +70,7 @@ func (api *gpuSchedulingAPI) listGPUSchedulingQueues(ctx context.Context, c *app
 	}
 	tenantID := middleware.GetTenantID(c)
 	if tenantID == "" {
-		writeDemoError(c, http.StatusForbidden, "FORBIDDEN", "tenant context missing")
+		writeInstanceError(c, http.StatusForbidden, "FORBIDDEN", "tenant context missing")
 		return
 	}
 	queues, err := api.store.List(ctx, tenantID)
@@ -92,25 +92,25 @@ func (api *gpuSchedulingAPI) createGPUSchedulingQueue(ctx context.Context, c *ap
 	}
 	tenantID := middleware.GetTenantID(c)
 	if tenantID == "" {
-		writeDemoError(c, http.StatusForbidden, "FORBIDDEN", "tenant context missing")
+		writeInstanceError(c, http.StatusForbidden, "FORBIDDEN", "tenant context missing")
 		return
 	}
 	idempotencyKey := strings.TrimSpace(string(c.GetHeader("Idempotency-Key")))
 	if idempotencyKey == "" {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "Idempotency-Key header is required")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "Idempotency-Key header is required")
 		return
 	}
 	var req gpuSchedulingQueueCreateRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
 		return
 	}
 	if strings.TrimSpace(req.Name) == "" {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "name is required")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "name is required")
 		return
 	}
 	if strings.TrimSpace(req.WorkloadClass) == "" {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "workload_class is required")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "workload_class is required")
 		return
 	}
 	created, err := api.store.Create(ctx, tenantID, idempotencyKey, ports.GPUSchedulingQueueCreateRequest{
@@ -139,12 +139,12 @@ func (api *gpuSchedulingAPI) getGPUSchedulingQueue(ctx context.Context, c *app.R
 	}
 	tenantID := middleware.GetTenantID(c)
 	if tenantID == "" {
-		writeDemoError(c, http.StatusForbidden, "FORBIDDEN", "tenant context missing")
+		writeInstanceError(c, http.StatusForbidden, "FORBIDDEN", "tenant context missing")
 		return
 	}
 	id := c.Param("id")
 	if id == "" {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "id is required")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "id is required")
 		return
 	}
 	queue, err := api.store.Get(ctx, tenantID, id)
@@ -162,22 +162,22 @@ func (api *gpuSchedulingAPI) updateGPUSchedulingQueue(ctx context.Context, c *ap
 	}
 	tenantID := middleware.GetTenantID(c)
 	if tenantID == "" {
-		writeDemoError(c, http.StatusForbidden, "FORBIDDEN", "tenant context missing")
+		writeInstanceError(c, http.StatusForbidden, "FORBIDDEN", "tenant context missing")
 		return
 	}
 	idempotencyKey := strings.TrimSpace(string(c.GetHeader("Idempotency-Key")))
 	if idempotencyKey == "" {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "Idempotency-Key header is required")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "Idempotency-Key header is required")
 		return
 	}
 	id := c.Param("id")
 	if id == "" {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "id is required")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "id is required")
 		return
 	}
 	var req gpuSchedulingQueueUpdateRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
 		return
 	}
 	portReq := ports.GPUSchedulingQueueUpdateRequest{
@@ -209,12 +209,12 @@ func (api *gpuSchedulingAPI) deleteGPUSchedulingQueue(ctx context.Context, c *ap
 	}
 	tenantID := middleware.GetTenantID(c)
 	if tenantID == "" {
-		writeDemoError(c, http.StatusForbidden, "FORBIDDEN", "tenant context missing")
+		writeInstanceError(c, http.StatusForbidden, "FORBIDDEN", "tenant context missing")
 		return
 	}
 	id := c.Param("id")
 	if id == "" {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "id is required")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "id is required")
 		return
 	}
 	if err := api.store.Delete(ctx, tenantID, id); err != nil {
@@ -246,16 +246,16 @@ func queueToResponse(q ports.GPUSchedulingQueue) gpuSchedulingQueueResponse {
 func writeGPUSchedulingError(c *app.RequestContext, err error) {
 	switch {
 	case errors.Is(err, ports.ErrQueueNotFound):
-		writeDemoError(c, http.StatusNotFound, "QueueNotFound", "队列不存在")
+		writeInstanceError(c, http.StatusNotFound, "QueueNotFound", "队列不存在")
 	case errors.Is(err, ports.ErrQueueNameConflict):
-		writeDemoError(c, http.StatusConflict, "QueueNameConflict", "队列名称已存在")
+		writeInstanceError(c, http.StatusConflict, "QueueNameConflict", "队列名称已存在")
 	case errors.Is(err, ports.ErrPlatformDefaultProtected):
-		writeDemoError(c, http.StatusForbidden, "PlatformDefaultProtected", "平台默认队列不可修改或删除")
+		writeInstanceError(c, http.StatusForbidden, "PlatformDefaultProtected", "平台默认队列不可修改或删除")
 	case errors.Is(err, ports.ErrQueueStoreUnavailable):
-		writeDemoError(c, http.StatusServiceUnavailable, "QueueStoreUnavailable", "队列服务暂时不可用")
+		writeInstanceError(c, http.StatusServiceUnavailable, "QueueStoreUnavailable", "队列服务暂时不可用")
 	case errors.Is(err, ports.ErrInvalid):
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	default:
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	}
 }

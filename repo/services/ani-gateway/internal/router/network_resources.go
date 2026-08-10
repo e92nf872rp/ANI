@@ -283,7 +283,7 @@ func registerNetworkResourcesWithService(v1 *route.RouterGroup, service ports.Ne
 }
 
 func (api *networkAPI) getOverview(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.GetOverview(ctx, ports.NetworkOverviewRequest{TenantID: demoTenantID(c)})
+	record, err := api.service.GetOverview(ctx, ports.NetworkOverviewRequest{TenantID: instanceTenantID(c)})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -294,11 +294,11 @@ func (api *networkAPI) getOverview(ctx context.Context, c *app.RequestContext) {
 func (api *networkAPI) createVPC(ctx context.Context, c *app.RequestContext) {
 	var req networkCreateVPCRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid vpc request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid vpc request")
 		return
 	}
 	record, err := api.service.CreateVPC(ctx, ports.NetworkVPCCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
 		CIDR:           req.CIDR,
@@ -312,7 +312,7 @@ func (api *networkAPI) createVPC(ctx context.Context, c *app.RequestContext) {
 
 func (api *networkAPI) listVPCs(ctx context.Context, c *app.RequestContext) {
 	records, err := api.service.ListVPCs(ctx, ports.NetworkResourceListRequest{
-		TenantID: demoTenantID(c),
+		TenantID: instanceTenantID(c),
 		Name:     c.Query("name"),
 		State:    ports.NetworkResourceState(c.Query("state")),
 	})
@@ -328,7 +328,7 @@ func (api *networkAPI) listVPCs(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *networkAPI) getVPC(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.GetVPC(ctx, ports.NetworkResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("vpc_id")})
+	record, err := api.service.GetVPC(ctx, ports.NetworkResourceGetRequest{TenantID: instanceTenantID(c), ResourceID: c.Param("vpc_id")})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -337,7 +337,7 @@ func (api *networkAPI) getVPC(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *networkAPI) deleteVPC(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.DeleteVPC(ctx, ports.NetworkResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("vpc_id")})
+	record, err := api.service.DeleteVPC(ctx, ports.NetworkResourceGetRequest{TenantID: instanceTenantID(c), ResourceID: c.Param("vpc_id")})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -348,11 +348,11 @@ func (api *networkAPI) deleteVPC(ctx context.Context, c *app.RequestContext) {
 func (api *networkAPI) createSubnet(ctx context.Context, c *app.RequestContext) {
 	var req networkCreateSubnetRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid subnet request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid subnet request")
 		return
 	}
 	record, err := api.service.CreateSubnet(ctx, ports.NetworkSubnetCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		VPCID:          req.VPCID,
 		Name:           req.Name,
@@ -368,7 +368,7 @@ func (api *networkAPI) createSubnet(ctx context.Context, c *app.RequestContext) 
 
 func (api *networkAPI) listSubnets(ctx context.Context, c *app.RequestContext) {
 	records, err := api.service.ListSubnets(ctx, ports.NetworkResourceListRequest{
-		TenantID: demoTenantID(c),
+		TenantID: instanceTenantID(c),
 		VPCID:    c.Query("vpc_id"),
 		State:    ports.NetworkResourceState(c.Query("state")),
 	})
@@ -384,7 +384,7 @@ func (api *networkAPI) listSubnets(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *networkAPI) getSubnet(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.GetSubnet(ctx, ports.NetworkResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("subnet_id")})
+	record, err := api.service.GetSubnet(ctx, ports.NetworkResourceGetRequest{TenantID: instanceTenantID(c), ResourceID: c.Param("subnet_id")})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -393,7 +393,7 @@ func (api *networkAPI) getSubnet(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *networkAPI) deleteSubnet(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.DeleteSubnet(ctx, ports.NetworkResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("subnet_id")})
+	record, err := api.service.DeleteSubnet(ctx, ports.NetworkResourceGetRequest{TenantID: instanceTenantID(c), ResourceID: c.Param("subnet_id")})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -403,7 +403,7 @@ func (api *networkAPI) deleteSubnet(ctx context.Context, c *app.RequestContext) 
 
 func (api *networkAPI) listSubnetIPAllocations(ctx context.Context, c *app.RequestContext) {
 	records, err := api.service.ListSubnetIPAllocations(ctx, ports.NetworkSubnetIPAllocationListRequest{
-		TenantID:     demoTenantID(c),
+		TenantID:     instanceTenantID(c),
 		SubnetID:     c.Param("subnet_id"),
 		State:        c.Query("state"),
 		ResourceType: c.Query("resource_type"),
@@ -422,11 +422,11 @@ func (api *networkAPI) listSubnetIPAllocations(ctx context.Context, c *app.Reque
 func (api *networkAPI) createSecurityGroup(ctx context.Context, c *app.RequestContext) {
 	var req networkCreateSecurityGroupRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid security group request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid security group request")
 		return
 	}
 	record, err := api.service.CreateSecurityGroup(ctx, ports.NetworkSecurityGroupCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
 		Description:    req.Description,
@@ -441,7 +441,7 @@ func (api *networkAPI) createSecurityGroup(ctx context.Context, c *app.RequestCo
 
 func (api *networkAPI) listSecurityGroups(ctx context.Context, c *app.RequestContext) {
 	records, err := api.service.ListSecurityGroups(ctx, ports.NetworkResourceListRequest{
-		TenantID: demoTenantID(c),
+		TenantID: instanceTenantID(c),
 		Name:     c.Query("name"),
 		State:    ports.NetworkResourceState(c.Query("state")),
 	})
@@ -457,7 +457,7 @@ func (api *networkAPI) listSecurityGroups(ctx context.Context, c *app.RequestCon
 }
 
 func (api *networkAPI) getSecurityGroup(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.GetSecurityGroup(ctx, ports.NetworkResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("security_group_id")})
+	record, err := api.service.GetSecurityGroup(ctx, ports.NetworkResourceGetRequest{TenantID: instanceTenantID(c), ResourceID: c.Param("security_group_id")})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -466,7 +466,7 @@ func (api *networkAPI) getSecurityGroup(ctx context.Context, c *app.RequestConte
 }
 
 func (api *networkAPI) deleteSecurityGroup(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.DeleteSecurityGroup(ctx, ports.NetworkResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("security_group_id")})
+	record, err := api.service.DeleteSecurityGroup(ctx, ports.NetworkResourceGetRequest{TenantID: instanceTenantID(c), ResourceID: c.Param("security_group_id")})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -476,7 +476,7 @@ func (api *networkAPI) deleteSecurityGroup(ctx context.Context, c *app.RequestCo
 
 func (api *networkAPI) listSecurityGroupRules(ctx context.Context, c *app.RequestContext) {
 	records, err := api.service.ListSecurityGroupRules(ctx, ports.NetworkSecurityGroupRuleListRequest{
-		TenantID:        demoTenantID(c),
+		TenantID:        instanceTenantID(c),
 		SecurityGroupID: c.Param("security_group_id"),
 		Direction:       c.Query("direction"),
 		Protocol:        c.Query("protocol"),
@@ -495,11 +495,11 @@ func (api *networkAPI) listSecurityGroupRules(ctx context.Context, c *app.Reques
 func (api *networkAPI) createSecurityGroupRule(ctx context.Context, c *app.RequestContext) {
 	var req networkCreateSecurityGroupRuleRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid security group rule request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid security group rule request")
 		return
 	}
 	record, err := api.service.CreateSecurityGroupRule(ctx, ports.NetworkSecurityGroupRuleCreateRequest{
-		TenantID:        demoTenantID(c),
+		TenantID:        instanceTenantID(c),
 		SecurityGroupID: c.Param("security_group_id"),
 		IdempotencyKey:  req.IdempotencyKey,
 		Priority:        req.Priority,
@@ -519,7 +519,7 @@ func (api *networkAPI) createSecurityGroupRule(ctx context.Context, c *app.Reque
 
 func (api *networkAPI) getSecurityGroupRule(ctx context.Context, c *app.RequestContext) {
 	record, err := api.service.GetSecurityGroupRule(ctx, ports.NetworkSecurityGroupRuleGetRequest{
-		TenantID:        demoTenantID(c),
+		TenantID:        instanceTenantID(c),
 		SecurityGroupID: c.Param("security_group_id"),
 		RuleID:          c.Param("rule_id"),
 	})
@@ -533,11 +533,11 @@ func (api *networkAPI) getSecurityGroupRule(ctx context.Context, c *app.RequestC
 func (api *networkAPI) updateSecurityGroupRule(ctx context.Context, c *app.RequestContext) {
 	var req networkUpdateSecurityGroupRuleRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid security group rule request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid security group rule request")
 		return
 	}
 	record, err := api.service.UpdateSecurityGroupRule(ctx, ports.NetworkSecurityGroupRuleUpdateRequest{
-		TenantID:        demoTenantID(c),
+		TenantID:        instanceTenantID(c),
 		SecurityGroupID: c.Param("security_group_id"),
 		RuleID:          c.Param("rule_id"),
 		Priority:        req.Priority,
@@ -557,7 +557,7 @@ func (api *networkAPI) updateSecurityGroupRule(ctx context.Context, c *app.Reque
 
 func (api *networkAPI) deleteSecurityGroupRule(ctx context.Context, c *app.RequestContext) {
 	record, err := api.service.DeleteSecurityGroupRule(ctx, ports.NetworkSecurityGroupRuleGetRequest{
-		TenantID:        demoTenantID(c),
+		TenantID:        instanceTenantID(c),
 		SecurityGroupID: c.Param("security_group_id"),
 		RuleID:          c.Param("rule_id"),
 	})
@@ -570,7 +570,7 @@ func (api *networkAPI) deleteSecurityGroupRule(ctx context.Context, c *app.Reque
 
 func (api *networkAPI) listSecurityGroupBindings(ctx context.Context, c *app.RequestContext) {
 	records, err := api.service.ListSecurityGroupBindings(ctx, ports.NetworkSecurityGroupBindingListRequest{
-		TenantID:        demoTenantID(c),
+		TenantID:        instanceTenantID(c),
 		SecurityGroupID: c.Param("security_group_id"),
 		TargetType:      c.Query("target_type"),
 		TargetID:        c.Query("target_id"),
@@ -589,11 +589,11 @@ func (api *networkAPI) listSecurityGroupBindings(ctx context.Context, c *app.Req
 func (api *networkAPI) createSecurityGroupBinding(ctx context.Context, c *app.RequestContext) {
 	var req networkCreateSecurityGroupBindingRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid security group binding request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid security group binding request")
 		return
 	}
 	record, err := api.service.CreateSecurityGroupBinding(ctx, ports.NetworkSecurityGroupBindingCreateRequest{
-		TenantID:        demoTenantID(c),
+		TenantID:        instanceTenantID(c),
 		SecurityGroupID: c.Param("security_group_id"),
 		IdempotencyKey:  req.IdempotencyKey,
 		TargetType:      req.TargetType,
@@ -608,7 +608,7 @@ func (api *networkAPI) createSecurityGroupBinding(ctx context.Context, c *app.Re
 
 func (api *networkAPI) deleteSecurityGroupBinding(ctx context.Context, c *app.RequestContext) {
 	record, err := api.service.DeleteSecurityGroupBinding(ctx, ports.NetworkSecurityGroupBindingDeleteRequest{
-		TenantID:        demoTenantID(c),
+		TenantID:        instanceTenantID(c),
 		SecurityGroupID: c.Param("security_group_id"),
 		BindingID:       c.Param("binding_id"),
 	})
@@ -622,11 +622,11 @@ func (api *networkAPI) deleteSecurityGroupBinding(ctx context.Context, c *app.Re
 func (api *networkAPI) createLoadBalancer(ctx context.Context, c *app.RequestContext) {
 	var req networkCreateLoadBalancerRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid load balancer request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid load balancer request")
 		return
 	}
 	record, err := api.service.CreateLoadBalancer(ctx, ports.NetworkLoadBalancerCreateRequest{
-		TenantID:       demoTenantID(c),
+		TenantID:       instanceTenantID(c),
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
 		VPCID:          req.VPCID,
@@ -643,7 +643,7 @@ func (api *networkAPI) createLoadBalancer(ctx context.Context, c *app.RequestCon
 
 func (api *networkAPI) listLoadBalancers(ctx context.Context, c *app.RequestContext) {
 	records, err := api.service.ListLoadBalancers(ctx, ports.NetworkResourceListRequest{
-		TenantID: demoTenantID(c),
+		TenantID: instanceTenantID(c),
 		VPCID:    c.Query("vpc_id"),
 		State:    ports.NetworkResourceState(c.Query("state")),
 		Scheme:   c.Query("scheme"),
@@ -660,7 +660,7 @@ func (api *networkAPI) listLoadBalancers(ctx context.Context, c *app.RequestCont
 }
 
 func (api *networkAPI) getLoadBalancer(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.GetLoadBalancer(ctx, ports.NetworkResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("load_balancer_id")})
+	record, err := api.service.GetLoadBalancer(ctx, ports.NetworkResourceGetRequest{TenantID: instanceTenantID(c), ResourceID: c.Param("load_balancer_id")})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -669,7 +669,7 @@ func (api *networkAPI) getLoadBalancer(ctx context.Context, c *app.RequestContex
 }
 
 func (api *networkAPI) deleteLoadBalancer(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.DeleteLoadBalancer(ctx, ports.NetworkResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("load_balancer_id")})
+	record, err := api.service.DeleteLoadBalancer(ctx, ports.NetworkResourceGetRequest{TenantID: instanceTenantID(c), ResourceID: c.Param("load_balancer_id")})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -680,11 +680,11 @@ func (api *networkAPI) deleteLoadBalancer(ctx context.Context, c *app.RequestCon
 func (api *networkAPI) createRoute(ctx context.Context, c *app.RequestContext) {
 	var req networkCreateRouteRequest
 	if err := c.BindJSON(&req); err != nil {
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid route request")
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid route request")
 		return
 	}
 	record, err := api.service.CreateRoute(ctx, ports.NetworkRouteCreateRequest{
-		TenantID:        demoTenantID(c),
+		TenantID:        instanceTenantID(c),
 		IdempotencyKey:  req.IdempotencyKey,
 		VPCID:           req.VPCID,
 		DestinationCIDR: req.DestinationCIDR,
@@ -701,7 +701,7 @@ func (api *networkAPI) createRoute(ctx context.Context, c *app.RequestContext) {
 
 func (api *networkAPI) listRoutes(ctx context.Context, c *app.RequestContext) {
 	records, err := api.service.ListRoutes(ctx, ports.NetworkRouteListRequest{
-		TenantID:    demoTenantID(c),
+		TenantID:    instanceTenantID(c),
 		VPCID:       c.Query("vpc_id"),
 		NextHopType: c.Query("next_hop_type"),
 	})
@@ -717,7 +717,7 @@ func (api *networkAPI) listRoutes(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *networkAPI) getRoute(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.GetRoute(ctx, ports.NetworkResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("route_id")})
+	record, err := api.service.GetRoute(ctx, ports.NetworkResourceGetRequest{TenantID: instanceTenantID(c), ResourceID: c.Param("route_id")})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -726,7 +726,7 @@ func (api *networkAPI) getRoute(ctx context.Context, c *app.RequestContext) {
 }
 
 func (api *networkAPI) deleteRoute(ctx context.Context, c *app.RequestContext) {
-	record, err := api.service.DeleteRoute(ctx, ports.NetworkResourceGetRequest{TenantID: demoTenantID(c), ResourceID: c.Param("route_id")})
+	record, err := api.service.DeleteRoute(ctx, ports.NetworkResourceGetRequest{TenantID: instanceTenantID(c), ResourceID: c.Param("route_id")})
 	if err != nil {
 		writeNetworkError(c, err)
 		return
@@ -978,12 +978,12 @@ func networkTime(value time.Time) string {
 func writeNetworkError(c *app.RequestContext, err error) {
 	switch {
 	case errors.Is(err, ports.ErrNotFound):
-		writeDemoError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
+		writeInstanceError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
 	case errors.Is(err, ports.ErrConflict):
-		writeDemoError(c, http.StatusConflict, "CONFLICT", err.Error())
+		writeInstanceError(c, http.StatusConflict, "CONFLICT", err.Error())
 	case errors.Is(err, ports.ErrInvalid):
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	default:
-		writeDemoError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	}
 }

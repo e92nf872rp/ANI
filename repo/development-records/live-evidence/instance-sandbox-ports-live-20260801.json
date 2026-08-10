@@ -1,0 +1,23 @@
+{
+  "code_run_status": "succeeded",
+  "deployment_name": "ani-sandbox-ports-live4",
+  "files_path": "live-hello.txt",
+  "files_verify_status": "succeeded",
+  "generated_at": "2026-08-02T00:53:57.153624Z",
+  "id": "instance-sandbox-live-gate",
+  "instance_id": "sandbox_6",
+  "kind": "sandbox",
+  "pod_name": "ani-sandbox-ports-live4-6799f4468b-6kvb6",
+  "ports_preview_url": "http://<node-hostip>:<nodePort>",
+  "ports_reachable": true,
+  "ports_service_name": "ani-sandbox-ports-live4-p-8765",
+  "profile": "INSTANCE-SANDBOX-LIVE-GATE-A",
+  "runtime_class": "sandbox-kata",
+  "state_after_create": "running",
+  "state_after_delete": "deleted",
+  "state_after_pause": "stopped",
+  "state_after_resume": "running",
+  "status": "passed",
+  "subresources": "code-run-real; files-real; ports-real; token/checkpoint local-session-deferred",
+  "write_path": "Core /api/v1/instances"
+}

@@ -1,7 +1,7 @@
 batch: SPEC-COMPAT-A
 phase: Phase 1 / Sprint 4
 source: api/openapi/v1.yaml
-generated_at: '2026-07-28'
+generated_at: '2026-08-06'
 compatibility_rules:
   allowed:
   - Add optional request fields.
@@ -1010,6 +1010,63 @@ paths:
           schema: '{}'
         '404':
           schema: '{}'
+  /gpu-specs:
+    get:
+      operation_id: listGPUSpecs
+      rbac_scope: scope:gpu-inventory:read
+      parameters:
+      - in: query
+        name: gpu_type
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: available
+        required: false
+        schema:
+          type: boolean
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: GPUSpecListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+  /gpu-specs/{spec_id}:
+    get:
+      operation_id: getGPUSpec
+      rbac_scope: scope:gpu-inventory:read
+      parameters:
+      - in: path
+        name: spec_id
+        required: true
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: GPUSpecSummary
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
   /healthz:
     get:
       operation_id: liveness
@@ -1054,6 +1111,73 @@ paths:
         schema:
           type: string
       - in: query
+        name: state
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: keyword
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: created_after
+        required: false
+        schema:
+          type: string
+          format: date-time
+      - in: query
+        name: created_before
+        required: false
+        schema:
+          type: string
+          format: date-time
+      - in: query
+        name: spec_id
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: image_id
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: node_name
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: rollout_status
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: gpu_model
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: queue_name
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: scheduling_state
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: template_id
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: session_state
+        required: false
+        schema:
+          type: string
+      - in: query
         name: limit
         required: false
         schema:
@@ -1062,6 +1186,11 @@ paths:
           maximum: 100
       - in: query
         name: cursor
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: sort
         required: false
         schema:
           type: string
@@ -1155,6 +1284,11 @@ paths:
           minimum: 1
           maximum: 500
       - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      - in: query
         name: type
         required: false
         schema:
@@ -1217,6 +1351,8 @@ paths:
         '404':
           schema: '{}'
         '409':
+          schema: '{}'
+        '422':
           schema: '{}'
   /instances/{instance_id}/logs:
     get:
@@ -1314,6 +1450,364 @@ paths:
           schema: '{}'
         '404':
           schema: '{}'
+  /instances/{instance_id}/sandbox/checkpoints:
+    get:
+      operation_id: listSandboxCheckpoints
+      rbac_scope: scope:instances:read
+      parameters:
+      - in: path
+        name: instance_id
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: SandboxCheckpointListResponse
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '422':
+          schema: '{}'
+    post:
+      operation_id: createSandboxCheckpoint
+      rbac_scope: scope:instances:update
+      parameters:
+      - in: path
+        name: instance_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: CreateSandboxCheckpointRequest
+      responses:
+        '202':
+          schema: AsyncTask
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+        '422':
+          schema: '{}'
+  /instances/{instance_id}/sandbox/checkpoints/{checkpoint_id}/clone:
+    post:
+      operation_id: cloneSandboxCheckpoint
+      rbac_scope: scope:instances:create
+      parameters:
+      - in: path
+        name: instance_id
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: checkpoint_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: CloneSandboxCheckpointRequest
+      responses:
+        '201':
+          schema: CreateInstanceResponse
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+        '422':
+          schema: '{}'
+  /instances/{instance_id}/sandbox/checkpoints/{checkpoint_id}/restore:
+    post:
+      operation_id: restoreSandboxCheckpoint
+      rbac_scope: scope:instances:update
+      parameters:
+      - in: path
+        name: instance_id
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: checkpoint_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: SandboxCheckpointActionRequest
+      responses:
+        '202':
+          schema: AsyncTask
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+        '422':
+          schema: '{}'
+  /instances/{instance_id}/sandbox/code-runs:
+    post:
+      operation_id: createSandboxCodeRun
+      rbac_scope: scope:instances:exec
+      parameters:
+      - in: path
+        name: instance_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: CreateSandboxCodeRunRequest
+      responses:
+        '202':
+          schema: AsyncTask
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+        '422':
+          schema: '{}'
+  /instances/{instance_id}/sandbox/files:
+    delete:
+      operation_id: deleteSandboxFile
+      rbac_scope: scope:instances:update
+      parameters:
+      - in: path
+        name: instance_id
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '204':
+          schema: '{}'
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+        '422':
+          schema: '{}'
+    get:
+      operation_id: listSandboxFiles
+      rbac_scope: scope:instances:read
+      parameters:
+      - in: path
+        name: instance_id
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: path
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: SandboxFileListResponse
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '422':
+          schema: '{}'
+    post:
+      operation_id: writeSandboxFile
+      rbac_scope: scope:instances:update
+      parameters:
+      - in: path
+        name: instance_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: WriteSandboxFileRequest
+      responses:
+        '201':
+          schema: SandboxFile
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+        '413':
+          schema: ErrorResponse
+        '422':
+          schema: '{}'
+  /instances/{instance_id}/sandbox/ports:
+    post:
+      operation_id: createSandboxPort
+      rbac_scope: scope:instances:update
+      parameters:
+      - in: path
+        name: instance_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: CreateSandboxPortRequest
+      responses:
+        '201':
+          schema: SandboxPort
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+        '422':
+          schema: '{}'
+  /instances/{instance_id}/sandbox/ports/{port}:
+    delete:
+      operation_id: deleteSandboxPort
+      rbac_scope: scope:instances:update
+      parameters:
+      - in: path
+        name: instance_id
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: port
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 65535
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: SandboxPort
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+        '422':
+          schema: '{}'
+  /instances/{instance_id}/sandbox/tokens:
+    post:
+      operation_id: createSandboxToken
+      rbac_scope: scope:instances:exec
+      parameters:
+      - in: path
+        name: instance_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: CreateSandboxTokenRequest
+      responses:
+        '201':
+          schema: SandboxTokenResponse
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+        '422':
+          schema: '{}'
   /instances/{instance_id}/security-events:
     get:
       operation_id: listInstanceSecurityEvents
@@ -1336,6 +1830,11 @@ paths:
           type: integer
           minimum: 1
           maximum: 500
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
       request_body_required: false
       request_schema: '{}'
       responses:
@@ -4206,6 +4705,8 @@ schemas:
         - filesystem
         - filesystem_mount_target
         - vector_store
+        - sandbox_checkpoint
+        - sandbox_code_run
       result:
         signature:
           type: object
@@ -4239,6 +4740,10 @@ schemas:
         - filesystem.mount
         - filesystem.unmount
         - vector_store.index.rebuild
+        - vector_store.document.insert
+        - sandbox.checkpoint.create
+        - sandbox.checkpoint.restore
+        - sandbox.code_run.create
   BeginOIDCLoginRequest:
     type: object
     required:
@@ -4364,6 +4869,24 @@ schemas:
           minLength: 1
           maxLength: 1024
         enum: []
+  CloneSandboxCheckpointRequest:
+    type: object
+    required:
+    - idempotency_key
+    - name
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      name:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
   CompleteOIDCLoginRequest:
     type: object
     required:
@@ -4466,10 +4989,48 @@ schemas:
     type: object
     required: []
     properties:
+      env:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstanceEnvVar'
+        enum: []
+      filesystem_mounts:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstanceFilesystemMount'
+        enum: []
+      network:
+        signature:
+          $ref: '#/components/schemas/InstanceNetworkConfig'
+        enum: []
+      ports:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstancePortSpec'
+        enum: []
       replicas:
         signature:
           type: integer
           minimum: 1
+        enum: []
+      secret_ids:
+        signature:
+          type: array
+          items:
+            type: string
+        enum: []
+      volume_mounts:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstanceVolumeMount'
+        enum: []
+      workload_identity:
+        signature:
+          $ref: '#/components/schemas/InstanceWorkloadIdentityConfig'
         enum: []
   CreateEmailRecipientRequest:
     type: object
@@ -4489,15 +5050,53 @@ schemas:
     type: object
     required: []
     properties:
+      env:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstanceEnvVar'
+        enum: []
+      filesystem_mounts:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstanceFilesystemMount'
+        enum: []
       gpu:
         signature:
           type: object
           nullable: true
         enum: []
+      network:
+        signature:
+          $ref: '#/components/schemas/InstanceNetworkConfig'
+        enum: []
+      ports:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstancePortSpec'
+        enum: []
       replicas:
         signature:
           type: integer
           minimum: 1
+        enum: []
+      secret_ids:
+        signature:
+          type: array
+          items:
+            type: string
+        enum: []
+      volume_mounts:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstanceVolumeMount'
+        enum: []
+      workload_identity:
+        signature:
+          $ref: '#/components/schemas/InstanceWorkloadIdentityConfig'
         enum: []
   CreateInstanceConsoleSessionRequest:
     type: object
@@ -4567,6 +5166,11 @@ schemas:
         signature:
           type: string
         enum: []
+      description:
+        signature:
+          type: string
+          nullable: true
+        enum: []
       gpu:
         signature:
           type: object
@@ -4587,6 +5191,16 @@ schemas:
           type: string
           nullable: true
         enum: []
+      image_id:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      image_ref:
+        signature:
+          type: string
+          nullable: true
+        enum: []
       instance_type:
         signature:
           type: string
@@ -4603,6 +5217,12 @@ schemas:
         - container
         - gpu_container
         - sandbox
+      labels:
+        signature:
+          type: object
+          additionalProperties:
+            type: string
+        enum: []
       memory:
         signature:
           type: string
@@ -4992,6 +5612,113 @@ schemas:
           minLength: 1
           maxLength: 128
         enum: []
+  CreateSandboxCheckpointRequest:
+    type: object
+    required:
+    - idempotency_key
+    - name
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      keep_memory:
+        signature:
+          type: boolean
+        enum: []
+      name:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+  CreateSandboxCodeRunRequest:
+    type: object
+    required:
+    - code
+    - idempotency_key
+    - language
+    properties:
+      code:
+        signature:
+          type: string
+          minLength: 1
+        enum: []
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      language:
+        signature:
+          type: string
+        enum:
+        - python
+        - javascript
+      stdin:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      timeout_seconds:
+        signature:
+          type: integer
+          minimum: 1
+          maximum: 300
+        enum: []
+  CreateSandboxPortRequest:
+    type: object
+    required:
+    - idempotency_key
+    - port
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      name:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      port:
+        signature:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        enum: []
+      protocol:
+        signature:
+          type: string
+        enum:
+        - tcp
+        - http
+  CreateSandboxTokenRequest:
+    type: object
+    required:
+    - idempotency_key
+    properties:
+      expires_in:
+        signature:
+          type: string
+        enum: []
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      scopes:
+        signature:
+          type: array
+          items:
+            type: string
+        enum: []
   CreateStorageBucketRequest:
     type: object
     required:
@@ -5197,12 +5924,48 @@ schemas:
           type: string
           nullable: true
         enum: []
+      data_disks:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstanceDiskSpec'
+        enum: []
+      filesystem_mounts:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstanceFilesystemMount'
+        enum: []
+      network:
+        signature:
+          $ref: '#/components/schemas/InstanceNetworkConfig'
+        enum: []
+      os_type:
+        signature:
+          type: string
+        enum:
+        - linux
+        - windows
+      password_secret_ref:
+        signature:
+          type: string
+          nullable: true
+        enum: []
       ssh_key_ref:
         signature:
           type: string
           nullable: true
         enum: []
       ssh_username:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      system_disk:
+        signature:
+          $ref: '#/components/schemas/InstanceDiskSpec'
+        enum: []
+      user_data:
         signature:
           type: string
           nullable: true
@@ -6103,6 +6866,70 @@ schemas:
         - inference
         - training
         - batch
+  GPUSpecListResponse:
+    type: object
+    required:
+    - items
+    - total
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/GPUSpecSummary'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+          minimum: 0
+        enum: []
+  GPUSpecSummary:
+    type: object
+    required:
+    - available
+    - gpu_type
+    - id
+    - mb_per_share
+    - name
+    - shares
+    properties:
+      available:
+        signature:
+          type: boolean
+        enum: []
+      gpu_type:
+        signature:
+          type: string
+        enum: []
+      id:
+        signature:
+          type: string
+        enum: []
+      mb_per_share:
+        signature:
+          type: integer
+          minimum: 1
+        enum: []
+      memory_total_mb:
+        signature:
+          type: integer
+          nullable: true
+          minimum: 1
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+      shares:
+        signature:
+          type: integer
+          minimum: 1
+        enum: []
   HealthCheck:
     type: object
     required:
@@ -6125,6 +6952,76 @@ schemas:
       version:
         signature:
           type: string
+        enum: []
+  InstanceAccessSummary:
+    type: object
+    required:
+    - console_available
+    - exec_available
+    - ssh_available
+    properties:
+      console_available:
+        signature:
+          type: boolean
+        enum: []
+      exec_available:
+        signature:
+          type: boolean
+        enum: []
+      reason:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      ssh_available:
+        signature:
+          type: boolean
+        enum: []
+  InstanceComputeSummary:
+    type: object
+    required: []
+    properties:
+      availability_zone:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      cpu:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      gpu_mb_per_share:
+        signature:
+          type: integer
+          nullable: true
+          minimum: 1
+        enum: []
+      gpu_shares:
+        signature:
+          type: integer
+          nullable: true
+          minimum: 1
+        enum: []
+      gpu_type:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      memory:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      node_name:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      spec_id:
+        signature:
+          type: string
+          nullable: true
         enum: []
   InstanceConsoleSession:
     type: object
@@ -6162,6 +7059,67 @@ schemas:
           type: string
         enum: []
       url:
+        signature:
+          type: string
+        enum: []
+  InstanceDiskSpec:
+    type: object
+    required: []
+    properties:
+      delete_on_failure:
+        signature:
+          type: boolean
+        enum: []
+      delete_with_instance:
+        signature:
+          type: boolean
+        enum: []
+      encrypted:
+        signature:
+          type: boolean
+        enum: []
+      name:
+        signature:
+          type: string
+          minLength: 1
+        enum: []
+      size_gib:
+        signature:
+          type: integer
+          format: int64
+          minimum: 1
+        enum: []
+      storage_class:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      volume_id:
+        signature:
+          type: string
+          minLength: 1
+        enum: []
+      volume_type:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+  InstanceEnvVar:
+    type: object
+    required:
+    - name
+    properties:
+      name:
+        signature:
+          type: string
+          minLength: 1
+        enum: []
+      secret_ref:
+        signature:
+          type: string
+          minLength: 1
+        enum: []
+      value:
         signature:
           type: string
         enum: []
@@ -6270,6 +7228,69 @@ schemas:
           type: string
           format: uri
         enum: []
+  InstanceFilesystemMount:
+    type: object
+    required:
+    - filesystem_id
+    - mount_path
+    properties:
+      filesystem_id:
+        signature:
+          type: string
+        enum: []
+      mount_path:
+        signature:
+          type: string
+          minLength: 1
+        enum: []
+      read_only:
+        signature:
+          type: boolean
+        enum: []
+  InstanceImageSummary:
+    type: object
+    required: []
+    properties:
+      architecture:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      digest:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      id:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      name:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      purpose:
+        signature:
+          type: string
+          nullable: true
+        enum:
+        - container
+        - gpu
+        - sandbox
+        - system
+        - null
+      ref:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      tag:
+        signature:
+          type: string
+          nullable: true
+        enum: []
   InstanceLifecycleRequest:
     type: object
     required:
@@ -6289,8 +7310,48 @@ schemas:
         - snapshot
         - attach_volume
         - detach_volume
+        - attach_filesystem
+        - detach_filesystem
         - rollback
+        - scale
+        - update_image
+        - bind_secret
+        - unbind_secret
+        - change_security_groups
+        - set_termination_protection
+        - pause
+        - resume
+        - extend
+        - touch_idle
+      binding_type:
+        signature:
+          type: string
+          nullable: true
+        enum:
+        - env
+        - file
+        - null
       cpu:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      duration:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      enabled:
+        signature:
+          type: boolean
+          nullable: true
+        enum: []
+      env_name:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      filesystem_id:
         signature:
           type: string
           nullable: true
@@ -6301,12 +7362,55 @@ schemas:
           minLength: 1
           maxLength: 128
         enum: []
+      image_id:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      include_data_disks:
+        signature:
+          type: boolean
+          nullable: true
+        enum: []
       memory:
         signature:
           type: string
           nullable: true
         enum: []
+      mount_path:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      read_only:
+        signature:
+          type: boolean
+          nullable: true
+        enum: []
+      replicas:
+        signature:
+          type: integer
+          nullable: true
+          minimum: 1
+        enum: []
       revision:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      secret_id:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      security_group_ids:
+        signature:
+          type: array
+          nullable: true
+          items:
+            type: string
+        enum: []
+      snapshot_id:
         signature:
           type: string
           nullable: true
@@ -6316,6 +7420,13 @@ schemas:
           type: string
           nullable: true
         enum: []
+      strategy:
+        signature:
+          type: string
+          nullable: true
+        enum:
+        - rolling
+        - null
       volume_id:
         signature:
           type: string
@@ -6479,6 +7590,82 @@ schemas:
           type: string
           format: date-time
         enum: []
+  InstanceNetworkConfig:
+    type: object
+    required: []
+    properties:
+      assign_private_ip:
+        signature:
+          type: boolean
+        enum: []
+      private_ip:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      security_group_ids:
+        signature:
+          type: array
+          items:
+            type: string
+        enum: []
+      subnet_id:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      vpc_id:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+  InstanceNetworkSummary:
+    type: object
+    required: []
+    properties:
+      endpoints:
+        signature:
+          type: array
+          items:
+            type: object
+        enum: []
+      load_balancer_refs:
+        signature:
+          type: array
+          items:
+            type: string
+        enum: []
+      private_ip:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      security_groups:
+        signature:
+          type: array
+          items:
+            type: object
+        enum: []
+      subnet_id:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      subnet_name:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      vpc_id:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      vpc_name:
+        signature:
+          type: string
+          nullable: true
+        enum: []
   InstanceOperation:
     type: object
     required:
@@ -6542,7 +7729,19 @@ schemas:
         - snapshot
         - attach_volume
         - detach_volume
+        - attach_filesystem
+        - detach_filesystem
         - rollback
+        - scale
+        - update_image
+        - bind_secret
+        - unbind_secret
+        - change_security_groups
+        - set_termination_protection
+        - pause
+        - resume
+        - extend
+        - touch_idle
         - console_session
       precheck_result:
         signature:
@@ -6581,6 +7780,28 @@ schemas:
           type: string
           format: date-time
         enum: []
+  InstancePortSpec:
+    type: object
+    required:
+    - container_port
+    properties:
+      container_port:
+        signature:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        enum: []
+      name:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      protocol:
+        signature:
+          type: string
+        enum:
+        - tcp
+        - udp
   InstanceRecord:
     type: object
     required:
@@ -6593,10 +7814,18 @@ schemas:
     - tenant_id
     - updated_at
     properties:
+      access:
+        signature:
+          $ref: '#/components/schemas/InstanceAccessSummary'
+        enum: []
       audit_id:
         signature:
           type: string
           nullable: true
+        enum: []
+      compute:
+        signature:
+          $ref: '#/components/schemas/InstanceComputeSummary'
         enum: []
       container:
         signature:
@@ -6607,6 +7836,11 @@ schemas:
         signature:
           type: string
           format: date-time
+        enum: []
+      description:
+        signature:
+          type: string
+          nullable: true
         enum: []
       dev_profile:
         signature:
@@ -6625,6 +7859,10 @@ schemas:
       id:
         signature:
           type: string
+        enum: []
+      image:
+        signature:
+          $ref: '#/components/schemas/InstanceImageSummary'
         enum: []
       instance_type:
         signature:
@@ -6652,9 +7890,19 @@ schemas:
         - k8s_cluster
         - bare_metal
         - dpu_node
+      labels:
+        signature:
+          type: object
+          additionalProperties:
+            type: string
+        enum: []
       name:
         signature:
           type: string
+        enum: []
+      network:
+        signature:
+          $ref: '#/components/schemas/InstanceNetworkSummary'
         enum: []
       node_name:
         signature:
@@ -6708,6 +7956,12 @@ schemas:
         signature:
           type: string
           nullable: true
+        enum: []
+      storage_attachments:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstanceStorageAttachment'
         enum: []
       tenant_id:
         signature:
@@ -6797,6 +8051,85 @@ schemas:
       total:
         signature:
           type: integer
+        enum: []
+  InstanceStorageAttachment:
+    type: object
+    required:
+    - resource_id
+    - resource_type
+    - status
+    properties:
+      mount_path:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      name:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      read_only:
+        signature:
+          type: boolean
+        enum: []
+      resource_id:
+        signature:
+          type: string
+        enum: []
+      resource_type:
+        signature:
+          type: string
+        enum:
+        - volume
+        - filesystem
+      status:
+        signature:
+          type: string
+        enum:
+        - pending
+        - attached
+        - mounted
+        - detaching
+        - failed
+      task_id:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+  InstanceVolumeMount:
+    type: object
+    required:
+    - mount_path
+    - volume_id
+    properties:
+      mount_path:
+        signature:
+          type: string
+          minLength: 1
+        enum: []
+      read_only:
+        signature:
+          type: boolean
+        enum: []
+      volume_id:
+        signature:
+          type: string
+        enum: []
+  InstanceWorkloadIdentityConfig:
+    type: object
+    required: []
+    properties:
+      enabled:
+        signature:
+          type: boolean
+        enum: []
+      scopes:
+        signature:
+          type: array
+          items:
+            type: string
+            pattern: ^scope:[a-z0-9_-]+:(\*|[a-z0-9_-]+)$
         enum: []
   K8sCluster:
     type: object
@@ -9372,14 +10705,180 @@ schemas:
           type: string
         enum:
         - revoked
+  SandboxCheckpoint:
+    type: object
+    required:
+    - created_at
+    - id
+    - keep_memory
+    - name
+    - status
+    properties:
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      id:
+        signature:
+          type: string
+        enum: []
+      keep_memory:
+        signature:
+          type: boolean
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+      reason:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      size_bytes:
+        signature:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        enum: []
+      status:
+        signature:
+          type: string
+        enum:
+        - creating
+        - available
+        - restoring
+        - failed
+        - deleted
+  SandboxCheckpointActionRequest:
+    type: object
+    required:
+    - idempotency_key
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+  SandboxCheckpointListResponse:
+    type: object
+    required:
+    - items
+    - total
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/SandboxCheckpoint'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+          minimum: 0
+        enum: []
+  SandboxCodeRun:
+    type: object
+    required:
+    - created_at
+    - id
+    - language
+    - status
+    - truncated
+    properties:
+      completed_at:
+        signature:
+          type: string
+          format: date-time
+          nullable: true
+        enum: []
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      exit_code:
+        signature:
+          type: integer
+          nullable: true
+        enum: []
+      id:
+        signature:
+          type: string
+        enum: []
+      language:
+        signature:
+          type: string
+        enum:
+        - python
+        - javascript
+      status:
+        signature:
+          type: string
+        enum:
+        - accepted
+        - running
+        - succeeded
+        - failed
+        - timed_out
+      stderr:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      stdout:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      truncated:
+        signature:
+          type: boolean
+        enum: []
   SandboxConfig:
     type: object
     required: []
     properties:
+      egress_allowlist:
+        signature:
+          type: array
+          items:
+            type: string
+        enum: []
+      env:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstanceEnvVar'
+        enum: []
+      idle_timeout:
+        signature:
+          type: string
+        enum: []
+      initial_ports:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstancePortSpec'
+        enum: []
       network_egress_policy:
         signature:
           $ref: '#/components/schemas/SandboxNetworkEgressPolicy'
         enum: []
+      on_timeout:
+        signature:
+          type: string
+        enum:
+        - pause
+        - kill
       runtime_class:
         signature:
           type: string
@@ -9387,6 +10886,62 @@ schemas:
       session_timeout:
         signature:
           type: string
+        enum: []
+      template_id:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+  SandboxFile:
+    type: object
+    required:
+    - kind
+    - path
+    - size_bytes
+    - updated_at
+    properties:
+      kind:
+        signature:
+          type: string
+        enum:
+        - file
+        - directory
+      path:
+        signature:
+          type: string
+        enum: []
+      size_bytes:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+      updated_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+  SandboxFileListResponse:
+    type: object
+    required:
+    - items
+    - total
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/SandboxFile'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+          minimum: 0
         enum: []
   SandboxInstanceStatus:
     type: object
@@ -9396,13 +10951,75 @@ schemas:
     - session_state
     - session_timeout
     properties:
+      agent_ref:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      checkpoints:
+        signature:
+          type: array
+          items:
+            type: object
+        enum: []
+      connectivity:
+        signature:
+          type: object
+        enum: []
       dev_profile:
         signature:
           $ref: '#/components/schemas/CoreDevProfileInfo'
         enum: []
+      egress_allowlist:
+        signature:
+          type: array
+          items:
+            type: string
+        enum: []
+      env:
+        signature:
+          type: array
+          items:
+            type: object
+        enum: []
+      files_summary:
+        signature:
+          type: object
+        enum: []
+      idle_remain_seconds:
+        signature:
+          type: integer
+          nullable: true
+          minimum: 0
+        enum: []
+      idle_timeout:
+        signature:
+          type: string
+          nullable: true
+        enum: []
       network_egress_policy:
         signature:
           $ref: '#/components/schemas/SandboxNetworkEgressPolicy'
+        enum: []
+      on_timeout:
+        signature:
+          type: string
+          nullable: true
+        enum:
+        - pause
+        - kill
+        - null
+      ports:
+        signature:
+          type: array
+          items:
+            type: object
+        enum: []
+      remain_seconds:
+        signature:
+          type: integer
+          nullable: true
+          minimum: 0
         enum: []
       runtime_class:
         signature:
@@ -9414,16 +11031,82 @@ schemas:
         enum:
         - pending
         - running
+        - paused
         - expired
         - stopped
       session_timeout:
         signature:
           type: string
         enum: []
+      stop_reason:
+        signature:
+          type: string
+          nullable: true
+        enum:
+        - TTL_EXPIRED
+        - IDLE_EXPIRED
+        - USER_REQUESTED
+        - RUNTIME_FAILED
+        - null
+      template_id:
+        signature:
+          type: string
+          nullable: true
+        enum: []
   SandboxNetworkEgressPolicy:
     type: string
     required: []
     properties: {}
+  SandboxPort:
+    type: object
+    required:
+    - port
+    - preview_url
+    - protocol
+    - status
+    properties:
+      expires_at:
+        signature:
+          type: string
+          format: date-time
+          nullable: true
+        enum: []
+      name:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      port:
+        signature:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        enum: []
+      preview_url:
+        signature:
+          type: string
+          format: uri
+          nullable: true
+        enum: []
+      protocol:
+        signature:
+          type: string
+        enum:
+        - tcp
+        - http
+      reason:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      status:
+        signature:
+          type: string
+        enum:
+        - opening
+        - available
+        - closing
+        - failed
   SandboxTemplate:
     type: object
     required:
@@ -9433,6 +11116,10 @@ schemas:
     - image
     - name
     properties:
+      available:
+        signature:
+          type: boolean
+        enum: []
       cpu_cores:
         signature:
           type: number
@@ -9442,6 +11129,38 @@ schemas:
         signature:
           type: string
           format: date-time
+        enum: []
+      default_cpu:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      default_egress_policy:
+        signature:
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/SandboxNetworkEgressPolicy'
+        enum: []
+      default_idle_timeout:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      default_memory:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      default_ports:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstancePortSpec'
+        enum: []
+      default_session_timeout:
+        signature:
+          type: string
+          nullable: true
         enum: []
       description:
         signature:
@@ -9460,6 +11179,16 @@ schemas:
       image:
         signature:
           type: string
+        enum: []
+      image_id:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      image_ref:
+        signature:
+          type: string
+          nullable: true
         enum: []
       is_builtin:
         signature:
@@ -9504,6 +11233,28 @@ schemas:
       total:
         signature:
           type: integer
+        enum: []
+  SandboxTokenResponse:
+    type: object
+    required:
+    - expires_at
+    - scopes
+    - token
+    properties:
+      expires_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      scopes:
+        signature:
+          type: array
+          items:
+            type: string
+        enum: []
+      token:
+        signature:
+          type: string
         enum: []
   Secret:
     type: object
@@ -11343,4 +13094,35 @@ schemas:
           items:
             type: string
             pattern: ^scope:[a-z0-9_-]+:(\*|[a-z0-9_-]+)$
+        enum: []
+  WriteSandboxFileRequest:
+    type: object
+    required:
+    - idempotency_key
+    - path
+    properties:
+      content_base64:
+        signature:
+          type: string
+          format: byte
+        enum: []
+      idempotency_key:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      overwrite:
+        signature:
+          type: boolean
+        enum: []
+      path:
+        signature:
+          type: string
+          minLength: 1
+        enum: []
+      upload_id:
+        signature:
+          type: string
+          minLength: 1
         enum: []

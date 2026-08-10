@@ -289,7 +289,7 @@ func writeKBError(c *app.RequestContext, err error) {
 	} else {
 		ke = mapGRPCError(err)
 	}
-	writeDemoError(c, ke.httpStatus, ke.code, ke.message)
+	writeInstanceError(c, ke.httpStatus, ke.code, ke.message)
 }
 
 // ── rag-engine retrieval client (SSE handler dependency) ─────────────────────

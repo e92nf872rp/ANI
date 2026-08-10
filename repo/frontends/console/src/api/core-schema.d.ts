@@ -2624,6 +2624,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/tenants/{tenant_id}/quota": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询租户配额
+         * @description 查询指定租户所有维度的 total/used/reserved + unit/display_name/is_discrete
+         *     （JOIN resource_quota_meta）。租户不存在返回 404 TENANT_NOT_FOUND；租户存在但
+         *     无配额行时返回空 items。
+         */
+        get: operations["getTenantQuota"];
+        /**
+         * 批量修改租户配额上限
+         * @description 只改 total，不影响 used/reserved。允许 total < used（缩容，已有资源继续运行，
+         *     仅阻止后续新建 Try → ErrQuotaExceeded）。缩容时服务端用 GREATEST(total, used+reserved)
+         *     clamp 到 used+reserved，并在返回的 items 中将 tightened 置 true。
+         *     维度行不存在返回 QUOTA_NOT_FOUND（需先调 createTenantQuota）。
+         */
+        put: operations["updateTenantQuota"];
+        /**
+         * 批量新建租户配额
+         * @description 为指定租户初始化多个资源维度配额行（used/reserved 初始为 0）。
+         *     - items.resource_type 必须在 resource_quota_meta 已注册且 enabled=true
+         *     - items.total 未提供或为 null 时取 resource_quota_meta.default_quota
+         *     - 已存在的维度跳过（ON CONFLICT DO NOTHING），不阻断其余维度创建
+         */
+        post: operations["createTenantQuota"];
+        /**
+         * 删除租户所有配额
+         * @description 删除该租户所有 resource_quota 行 + resource_reservations 流水。
+         *     用于租户禁用/资源清理场景。由调用方保证此时无在用资源（本方法不强制守卫 used/reserved）。
+         */
+        delete: operations["deleteTenantQuota"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/quota-meta": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询可用配额元数据
+         * @description 列出 resource_quota_meta 中 enabled=true 的所有维度，用于创建租户/套餐时
+         *     展示可选项（前端据此渲染配额维度表单）。只读查询，无分页需求。
+         */
+        get: operations["listQuotaMeta"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2886,7 +2948,7 @@ export interface components {
              * @example model.import
              * @enum {string}
              */
-            task_type: "model.import" | "kb.parse" | "kb.index" | "inference.deploy" | "volume.snapshot.create" | "volume.expand" | "volume.mount" | "volume.unmount" | "volume.create_from_snapshot" | "filesystem.expand" | "filesystem.mount_target.create" | "filesystem.mount" | "filesystem.unmount" | "vector_store.index.rebuild" | "sandbox.checkpoint.create" | "sandbox.checkpoint.restore" | "sandbox.code_run.create";
+            task_type: "model.import" | "kb.parse" | "kb.index" | "inference.deploy" | "volume.snapshot.create" | "volume.expand" | "volume.mount" | "volume.unmount" | "volume.create_from_snapshot" | "filesystem.expand" | "filesystem.mount_target.create" | "filesystem.mount" | "filesystem.unmount" | "vector_store.index.rebuild" | "vector_store.document.insert" | "sandbox.checkpoint.create" | "sandbox.checkpoint.restore" | "sandbox.code_run.create";
             /** @enum {string|null} */
             resource_type?: "inference_service" | "kb_document" | "model_version" | "volume_snapshot" | "volume" | "filesystem" | "filesystem_mount_target" | "vector_store" | "sandbox_checkpoint" | "sandbox_code_run" | null;
             /** Format: uuid */
@@ -5414,6 +5476,104 @@ export interface components {
             /** Format: date-time */
             sent_at?: string | null;
         };
+        /** @description 批量新建租户配额请求（POST /admin/tenants/{tenant_id}/quota） */
+        QuotaCreateRequest: {
+            items: components["schemas"]["QuotaCreateItem"][];
+        };
+        /** @description 新建配额维度项；total 未提供或为 null 时取 resource_quota_meta.default_quota */
+        QuotaCreateItem: {
+            /** @description 配额维度标识（需在 resource_quota_meta 已注册且 enabled=true） */
+            resource_type: string;
+            /**
+             * Format: int64
+             * @description 配额上限；未提供或为 null 时取 resource_quota_meta.default_quota
+             */
+            total?: number | null;
+        };
+        /** @description 批量修改租户配额上限请求（PUT /admin/tenants/{tenant_id}/quota） */
+        QuotaUpdateRequest: {
+            items: components["schemas"]["QuotaUpdateItem"][];
+        };
+        /** @description 修改配额维度项；只改 total，不影响 used/reserved */
+        QuotaUpdateItem: {
+            /** @description 配额维度标识 */
+            resource_type: string;
+            /**
+             * Format: int64
+             * @description 新配额上限；允许低于当前 used（缩容，由服务端 GREATEST clamp 到 used+reserved）
+             */
+            total: number;
+        };
+        /** @description 租户配额视图（GET/POST/PUT 共用响应） */
+        Quota: {
+            /**
+             * Format: uuid
+             * @description 租户 ID
+             */
+            tenant_id: string;
+            items: components["schemas"]["QuotaItem"][];
+        };
+        /** @description 单维度配额项 */
+        QuotaItem: {
+            /** @description 配额维度标识 */
+            resource_type: string;
+            /**
+             * Format: int64
+             * @description 配额上限
+             */
+            total: number;
+            /**
+             * Format: int64
+             * @description 已实扣（已 Confirm）
+             */
+            used: number;
+            /**
+             * Format: int64
+             * @description 已预占（已 Try 未 Confirm/Cancel）
+             */
+            reserved: number;
+            /** @description PUT 缩容自动收紧标记（请求 total<used+reserved 时收紧为 used+reserved，置 true）；GET 响应中为零值 false */
+            tightened?: boolean;
+            /** @description 单位（来自 resource_quota_meta，GET 时返回） */
+            unit?: string;
+            /** @description 展示名称（来自 resource_quota_meta，GET 时返回） */
+            display_name?: string;
+            /** @description 是否离散计数（来自 resource_quota_meta，当前统一为整数计数；GET 时返回） */
+            is_discrete?: boolean;
+        };
+        /** @description 删除租户配额响应（DELETE /admin/tenants/{tenant_id}/quota） */
+        QuotaDeleteResponse: {
+            /**
+             * Format: uuid
+             * @description 租户 ID
+             */
+            tenant_id: string;
+            /**
+             * @description 操作结果描述
+             * @example quota deleted
+             */
+            message: string;
+        };
+        /** @description 可用配额元数据列表（GET /admin/quota-meta） */
+        QuotaMetaListResponse: {
+            items: components["schemas"]["QuotaMeta"][];
+        };
+        /** @description 配额元数据（resource_quota_meta 只读视图） */
+        QuotaMeta: {
+            /** @description 配额维度标识 */
+            resource_type: string;
+            /** @description 展示名称 */
+            display_name: string;
+            /** @description 单位 */
+            unit: string;
+            /**
+             * Format: int64
+             * @description 默认上限（新建配额未提供或为 null 时兜底）
+             */
+            default_quota: number;
+            /** @description 是否离散计数（当前统一为整数计数） */
+            is_discrete: boolean;
+        };
     };
     responses: {
         /** @description 未认证或 Token 无效（code=UNAUTHORIZED） */
@@ -5510,6 +5670,51 @@ export interface components {
         };
         /** @description 依赖服务暂不可用（code=UNAVAILABLE） */
         ServiceUnavailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 租户不存在（code=TENANT_NOT_FOUND） */
+        TenantNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 配额行不存在（code=QUOTA_NOT_FOUND） */
+        QuotaNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 部分成功：存在已存在的配额维度被跳过（code=QUOTA_ALREADY_EXISTS），其余维度已正常创建 */
+        QuotaAlreadyExists: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 资源类型未注册或已禁用（code=QUOTA_RESOURCE_NOT_REGISTERED） */
+        QuotaResourceNotRegistered: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 参数校验失败（code=VALIDATION_FAILED） */
+        QuotaValidationFailed: {
             headers: {
                 [name: string]: unknown;
             };
@@ -8835,6 +9040,8 @@ export interface operations {
             /** @description 文档写入任务已提交 */
             202: {
                 headers: {
+                    /** @description 任务轮询 URL */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -10727,6 +10934,150 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description 前置条件不满足（SMTP 未配置 / 无启用收件人 / 无凭据） */
             422: components["responses"]["PreconditionFailed"];
+        };
+    };
+    getTenantQuota: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 租户配额视图 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Quota"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["TenantNotFound"];
+        };
+    };
+    updateTenantQuota: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
+                idempotency_key: string;
+            };
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuotaUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 修改结果（含 tightened 标记） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Quota"];
+                };
+            };
+            400: components["responses"]["QuotaValidationFailed"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["QuotaNotFound"];
+            422: components["responses"]["QuotaResourceNotRegistered"];
+        };
+    };
+    createTenantQuota: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
+                idempotency_key: string;
+            };
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuotaCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description 新建结果（含已存在跳过的维度） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Quota"];
+                };
+            };
+            400: components["responses"]["QuotaValidationFailed"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["TenantNotFound"];
+            409: components["responses"]["QuotaAlreadyExists"];
+            422: components["responses"]["QuotaResourceNotRegistered"];
+        };
+    };
+    deleteTenantQuota: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
+                idempotency_key: string;
+            };
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 删除结果 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuotaDeleteResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["TenantNotFound"];
+        };
+    };
+    listQuotaMeta: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 可用配额元数据列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuotaMetaListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
 }

@@ -5,15 +5,16 @@ use (
 	./pkg
 	./services/ani-gateway
 	./services/auth-service
+	./services/metering-service
 	./services/model-service
 	./services/reconcile-worker
 	./services/task-service
+	./services/tenant-service
 	./tools/kms-sm4-live-fixture
 )
 
 // Services added as they are scaffolded:
 // ./services/kb-service
-// ./services/metering-service
 // ./operators/inference-operator
 // ./operators/upgrade-operator
 // ./installer/ani-installer

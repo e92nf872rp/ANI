@@ -323,6 +323,66 @@
       "scope": ""
     },
     {
+      "operationId": "listTenantPlans",
+      "method": "GET",
+      "path": "/tenant-plans",
+      "scope": ""
+    },
+    {
+      "operationId": "createTenantPlan",
+      "method": "POST",
+      "path": "/tenant-plans",
+      "scope": ""
+    },
+    {
+      "operationId": "deleteTenantPlan",
+      "method": "DELETE",
+      "path": "/tenant-plans/{planId}",
+      "scope": ""
+    },
+    {
+      "operationId": "getTenantPlan",
+      "method": "GET",
+      "path": "/tenant-plans/{planId}",
+      "scope": ""
+    },
+    {
+      "operationId": "activateTenantPlan",
+      "method": "POST",
+      "path": "/tenant-plans/{planId}/activate",
+      "scope": ""
+    },
+    {
+      "operationId": "listTenantPlanAuditLogs",
+      "method": "GET",
+      "path": "/tenant-plans/{planId}/audit-logs",
+      "scope": ""
+    },
+    {
+      "operationId": "disableTenantPlan",
+      "method": "POST",
+      "path": "/tenant-plans/{planId}/disable",
+      "scope": ""
+    },
+    {
+      "operationId": "getTenantPlanQuotaLimits",
+      "method": "GET",
+      "path": "/tenant-plans/{planId}/quota-limits",
+      "scope": ""
+    },
+    {
+      "operationId": "updateTenantPlanQuotaLimits",
+      "method": "PATCH",
+      "path": "/tenant-plans/{planId}/quota-limits",
+      "scope": ""
+    },
+    {
+      "operationId": "listTenantPlanBoundTenants",
+      "method": "GET",
+      "path": "/tenant-plans/{planId}/tenants",
+      "scope": ""
+    },
+    {
       "operationId": "listTenantMembers",
       "method": "GET",
       "path": "/tenant/members",
@@ -393,17 +453,27 @@
       "method": "GET",
       "path": "/tenant/webhooks/{webhook_id}/deliveries",
       "scope": ""
+    },
+    {
+      "operationId": "bindTenantPlan",
+      "method": "POST",
+      "path": "/tenants/{tenantId}/plan",
+      "scope": ""
     }
   ],
   "schemas": [
     "AsyncTask",
     "AvailableGpu",
+    "BindPlanRequest",
+    "BoundTenant",
+    "BoundTenantsResponse",
     "CreateGpuContainerRequest",
     "CreateInferenceEndpointRequest",
     "CreateIntegrationBotRequest",
     "CreateIntegrationRequest",
     "CreateModelRequest",
     "CreateSandboxRequest",
+    "CreateTenantPlanRequest",
     "CreateWebhookRequest",
     "CursorPage",
     "ErrorResponse",
@@ -413,6 +483,7 @@
     "GpuContainer",
     "GpuContainerMetrics",
     "GpuContainerVersion",
+    "IdempotentResult",
     "InferenceEndpoint",
     "InferenceService",
     "InferenceServiceLogEntry",
@@ -439,6 +510,11 @@
     "NotifyDocumentUploadedRequest",
     "PatchGpuContainerRequest",
     "PatchSandboxRequest",
+    "PlanAuditLog",
+    "PlanAuditLogListResponse",
+    "PlanQuotaLimitInput",
+    "PlanQuotaLimitView",
+    "PlanQuotaLimitsResponse",
     "RebuildKnowledgeBaseRequest",
     "ReparseDocumentRequest",
     "Sandbox",
@@ -446,10 +522,14 @@
     "SecurityOverview",
     "SsoConfig",
     "TenantMember",
+    "TenantPlan",
+    "TenantPlanListItem",
+    "TenantPlanListResponse",
     "TenantRole",
     "UpdateInferenceServicePoliciesRequest",
     "UpdateKBConfigRequest",
     "UpdateKBPermissionsRequest",
+    "UpdateQuotaLimitsRequest",
     "UpdateSsoConfigRequest",
     "UpdateTenantRoleRequest",
     "Webhook",
@@ -473,10 +553,13 @@
     "createSandbox",
     "patchSandbox",
     "extendSandbox",
+    "createTenantPlan",
+    "updateTenantPlanQuotaLimits",
     "inviteTenantMember",
     "updateTenantRole",
     "updateSsoConfig",
-    "createWebhook"
+    "createWebhook",
+    "bindTenantPlan"
   ],
   "cursorPaginationOperations": [
     "listGpuContainers",
@@ -486,6 +569,8 @@
     "listKnowledgeBaseSessions",
     "listModels",
     "listSandboxes",
+    "listTenantPlans",
+    "listTenantPlanAuditLogs",
     "listWebhookDeliveries"
   ],
   "errorCodes": [
@@ -494,6 +579,7 @@
     "FORBIDDEN",
     "NOT_FOUND",
     "PRECONDITION_FAILED",
+    "QUOTA_RESOURCE_NOT_REGISTERED",
     "UNAUTHORIZED"
   ]
 }
