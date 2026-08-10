@@ -18,12 +18,6 @@ exceptions:
     owner: ANI Core 与 ANI Services 共同维护
     reason: Gateway 已注册推理服务变配过渡路由，但 Services OpenAPI 尚未声明该操作。
   - kind: spec_not_in_code
-    method: POST
-    path: /knowledge-bases/{kb_id}/documents/notify-uploaded
-    status: accepted_baseline
-    owner: ANI Services
-    reason: OpenAPI 已声明两步式上传的 notifyDocumentUploaded（US-001 契约修复），当前 Gateway 尚未注册对应过渡路由。
-  - kind: spec_not_in_code
     method: GET
     path: /tenant/members/{member_id}
     status: accepted_baseline

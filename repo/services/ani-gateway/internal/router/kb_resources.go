@@ -46,7 +46,7 @@ func registerKnowledgeBasesWithClient(svc *route.RouterGroup, client KBGRPCClien
 	svc.DELETE("/knowledge-bases/:kb_id", api.deleteKnowledgeBase)
 	svc.GET("/knowledge-bases/:kb_id/documents", api.listKnowledgeBaseDocuments)
 	svc.POST("/knowledge-bases/:kb_id/documents", api.uploadKnowledgeBaseDocument)
-	svc.POST("/knowledge-bases/:kb_id/documents/:doc_id/notify-uploaded", api.notifyDocumentUploaded)
+	svc.POST("/knowledge-bases/:kb_id/documents/notify-uploaded", api.notifyDocumentUploaded)
 	svc.DELETE("/knowledge-bases/:kb_id/documents/:doc_id", api.deleteKnowledgeBaseDocument)
 	svc.POST("/knowledge-bases/:kb_id/query", api.queryKnowledgeBase)
 	// SSE streaming query (SPEC §4.3 / US-017): gateway-held, orchestrates
@@ -269,11 +269,12 @@ func (a *kbAPI) notifyDocumentUploaded(ctx context.Context, c *app.RequestContex
 		return
 	}
 	var req struct {
+		DocID       string `json:"doc_id"`
 		StoragePath string `json:"storage_path"`
 	}
 	_ = c.BindJSON(&req) // optional body; storage_path may be empty
 	storagePath := req.StoragePath
-	taskRef, err := a.client.NotifyDocumentUploaded(ctx, demoTenantID(c), c.Param("kb_id"), c.Param("doc_id"), storagePath)
+	taskRef, err := a.client.NotifyDocumentUploaded(ctx, demoTenantID(c), c.Param("kb_id"), req.DocID, storagePath)
 	if err != nil {
 		writeKBError(c, err)
 		return
