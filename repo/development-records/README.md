@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### Core Quota Service（2026-08）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| QUOTA-SERVICE | Core Quota Service 全量实现（issue-000 ~ issue-012）：以 RLS 双 policy（`platform_bypass` + `self`）为前提，契约先行在 `repo/api/openapi/v1.yaml` 新增配额管理 5 端点 + 9 schema + 5 error responses（issue-001）；三个解耦 port `QuotaService`/`QuotaStoreService`/`QuotaAdminService` + 哨兵错误（issue-002）；Try/Confirm/Cancel/Release TCC 扣减 adapter（issue-003）、配置查询 adapter（issue-004）、租户生命周期管理 adapter（issue-005，`WithPlatformTx` 绕过 RLS）；Core API handler + 鉴权扩展 + router 接线（issue-006）；SDK 重生成（issue-007）；扣减/配置/管理单测（issue-008/009/010）；集成测试连真实 PG 双角色验证 RLS（issue-011）；全量验收（issue-012）。**补充批次（2026-08-10）：** `feat/core-quota-openapi-sdk` PR v1.yaml 审核意见（commit `291c2b9`，5 处）随 main 合入后同步修正——改动 4 `GetTenantQuota` 补 `requireTenantExists` 返回 404、改动 3 `CreateTenantQuota` 捕获 `RowsAffected` 对重复维度返回 `ErrQuotaAlreadyExists` → 409；45 个 quota 单测 + Gateway 单测 + `make validate-architecture` + `git diff --check` 全通过（仅 2 个 K8s Sandbox POSIX 测试因 Windows 无符号链接特权预存失败，与本次无关） | quota-service.md |
+
 ### Storage Control Plane State（2026-08）
 
 | 批次 | 内容摘要 | 文件 |

@@ -212,14 +212,17 @@ func isPublicPath(path string) bool {
 }
 
 // scopeAllowedForPath 平台 token 与租户 token 路由白名单隔离
-// - 平台路由前缀 /auth/platform/* 仅 scope=platform 可访问
+// - 平台/管理路由前缀 /auth/platform/*、/platform/*、/admin/* 仅 scope=platform 可访问
 // - sandbox token 仅可访问 /api/v1/instances/{id}/sandbox/* 子资源
 // - 其他路由仅 scope=tenant 可访问（API key 默认 tenant scope）
 func scopeAllowedForPath(path, scope string) bool {
 	if scope == sandboxtoken.ScopeSandbox {
 		return isSandboxSubresourcePath(path)
 	}
-	if strings.HasPrefix(path, "/api/v1/auth/platform/") {
+	// 平台/管理路由前缀：/auth/platform/*、/platform/*、/admin/*（含 /admin/tenants/*、/admin/quota-meta）
+	if strings.HasPrefix(path, "/api/v1/auth/platform/") ||
+		strings.HasPrefix(path, "/api/v1/platform/") ||
+		strings.HasPrefix(path, "/api/v1/admin/") {
 		return scope == "platform"
 	}
 	return scope == "tenant"

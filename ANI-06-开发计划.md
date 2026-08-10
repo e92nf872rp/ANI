@@ -98,6 +98,10 @@ Instance Management API-First（2026-07-28）：
 - 当前边界：规格只描述 GPU 资源形态，不表示租户配额；本期不实现 quota check/acquire/release，不新增 quota 表或 port。不因 VM/Sandbox/files/ports/token/ORCHESTRATION 声明 full platform production ready。
 - 后续顺序：Sandbox checkpoint real-provider、配额和 GPU Container 统一实例 live 分批实施（GPU 可暂缓）。
 
+Core Quota Service（2026-08，TCC 预留状态机）：
+- QUOTA-SERVICE（issue-000 ~ issue-012）：Core Quota Service 全量实现，批次统一归档 `repo/development-records/quota-service.md`。以 RLS 双 policy（`platform_bypass` + `self`）为前提：`WithPlatformTx`（绕过 RLS）用于管理方法，`WithTenantTx`（触发 self policy）用于租户侧扣减。契约先行在 `repo/api/openapi/v1.yaml` 新增配额管理 `POST/PUT/GET/DELETE /admin/tenants/{tenant_id}/quota` + `GET /admin/quota-meta` 共 5 端点、9 schema 与 5 个专用 error responses（404 TenantNotFound/QuotaNotFound、409 QuotaAlreadyExists、422 QuotaResourceNotRegistered、400 QuotaValidationFailed）；三个解耦 port `QuotaService`/`QuotaStoreService`/`QuotaAdminService`；Try/Confirm/Cancel/Release TCC 扣减、配置查询、租户生命周期管理三组 adapter；Core handler + 鉴权扩展 + router 接线；SDK 重生成；扣减/配置/管理单测 + 连真实 PG 双角色 RLS 集成测试。
+- 补充批次（2026-08-10）：`feat/core-quota-openapi-sdk` PR v1.yaml 审核意见（commit `291c2b9`，5 处）经 main 合入后同步修正——改动 4 `GetTenantQuota` 复用 `requireTenantExists` 补租户存在校验返回 404、改动 3 `CreateTenantQuota` 捕获 `ON CONFLICT DO NOTHING` 的 `RowsAffected` 对重复维度返回 `ErrQuotaAlreadyExists` → 409（用户选方案 b）；45 个 quota 单测 + Gateway 单测 + `make validate-architecture` + `git diff --check` 全通过（仅 2 个 K8s Sandbox POSIX 测试因 Windows 无符号链接特权预存失败，与 quota 改动无关）。三处改动（RBAC scope 三段式、`QuotaCreateItem.total` nullable、`is_discrete` 描述统一）经核对为契约声明层语义等价，无需改代码。
+
 Registry Console Flow（2026-07-22）：
 - CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A：按 7.22 原型”暂不考虑 BOSS 和权限”边界，Core v1 新增 `RegistryImage.purpose`、`/registry/images?purpose=`、四类算力引用 enum 与 createInstance 镜像门禁 422 语义；仅契约和 Console Core schema 生成物，不含 handler/adapter/Console 页面实现。
 - CORE-REGISTRY-CONSOLE-FLOW-CORE-A：Core 镜像仓库后端实现已补齐 RegistryImage purpose port/adapter/router 流转和 `/registry/images?purpose=` 过滤；不含 instances、Console、BOSS 或权限实现。

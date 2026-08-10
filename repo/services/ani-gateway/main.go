@@ -153,6 +153,12 @@ func main() {
 	}
 	middleware.StartAuditWorker()
 	middleware.Register(h, gatewayStore)
+	quotaAdminService, closeQuotaStore, err := newGatewayQuotaStore(runtimeCtx)
+	if err != nil {
+		logger.Error("failed to configure quota admin store", "err", err)
+		os.Exit(1)
+	}
+	defer closeQuotaStore()
 	var routeInstanceRuntime *router.InstanceRuntime
 	if instanceRuntime.Service != nil {
 		routeInstanceRuntime = &router.InstanceRuntime{
@@ -183,6 +189,7 @@ func main() {
 		ObservabilityService:                  observabilityService,
 		EmailNotificationStore:                runtimeadapter.NewLocalEmailNotificationStore(),
 		AsyncTaskStore:                        instanceRuntime.AsyncTasks,
+		QuotaAdminService:                     quotaAdminService,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
