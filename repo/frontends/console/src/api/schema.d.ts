@@ -2064,7 +2064,7 @@ export interface operations {
                     embedding_model?: string;
                     /**
                      * @description 分块大小（tokens），与 KBConfig 边界一致
-                     * @default 512
+                     * @default 1024
                      */
                     chunk_size?: number;
                     /** @default 5 */
