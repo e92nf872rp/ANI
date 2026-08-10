@@ -114,17 +114,29 @@ func TestPostgresQuotaAdminCreateTenantQuotaResourceNotRegistered(t *testing.T) 
 	}
 }
 
-// TestPostgresQuotaAdminCreateTenantQuotaConflict 验证 CreateTenantQuota 遇到已存在维度
-// → ON CONFLICT DO NOTHING RowsAffected=0 → 返回 ErrQuotaAlreadyExists（handler 映射 409）。
+// TestPostgresQuotaAdminCreateTenantQuotaConflict 验证 CreateTenantQuota 部分成功语义：
+// 已存在维度 ON CONFLICT DO NOTHING 跳过（不中断循环、不回滚），其余维度正常创建并提交，
+// 最终返回 ports.ErrQuotaAlreadyExists（handler 映射 409 QUOTA_ALREADY_EXISTS）。
 func TestPostgresQuotaAdminCreateTenantQuotaConflict(t *testing.T) {
 	tx := &quotaFakeTx{}
+	now := time.Unix(100, 0)
+	// 流程 QueryRow 顺序：租户 EXISTS → 两维度 meta 校验
 	tx.enqueueRows(
 		tenantExistsRow(true),
-		adminMetaRow(true, int64(100)), // 已存在维度 meta（仍校验通过，INSERT 被忽略）
+		adminMetaRow(true, int64(100)),
+		adminMetaRow(true, int64(100)),
 	)
-	// 第二个 INSERT（新维度）正常；第一个 INSERT（已存在维度）RowsAffected=0
+	// 回读 quotaInfoByTypes -> Query（多行，两个维度都返回）
+	tx.enqueueQuery(&quotaFakeRows{rows: []quotaFakeRow{
+		adminInfoRow(testTenantID, string(ports.QuotaGPUCount), 100, 0, 0, "张", "GPU 数量", true, now),
+		adminInfoRow(testTenantID, string(ports.QuotaCPUCore), 200, 0, 0, "核", "CPU 核数", false, now),
+	}})
+	// 第一次 INSERT（已存在维度）RowsAffected=0 → 标记冲突并跳过；
+	// 第二次 INSERT（新维度）RowsAffected=1 → 正常创建，循环不中断。
+	insertCnt := 0
 	tx.execFn = func(sql string, _ []any) int64 {
 		if strings.Contains(sql, "INSERT INTO resource_quota") {
+			insertCnt++
 			return 0
 		}
 		return 1
@@ -134,9 +146,18 @@ func TestPostgresQuotaAdminCreateTenantQuotaConflict(t *testing.T) {
 
 	_, err := q.CreateTenantQuota(context.Background(), testTenantID, []ports.QuotaItemInput{
 		{ResourceType: ports.QuotaGPUCount, Total: 10},
+		{ResourceType: ports.QuotaCPUCore, Total: 200},
 	})
 	if err != ports.ErrQuotaAlreadyExists {
 		t.Fatalf("CreateTenantQuota() error = %v, want ErrQuotaAlreadyExists", err)
+	}
+	// 部分成功：两个维度的 INSERT 都应执行（冲突维度跳过不代表中断整个循环）
+	if insertCnt != 2 {
+		t.Fatalf("CreateTenantQuota() INSERT 执行次数 = %d, want 2（冲突维度跳过但其余维度继续创建）", insertCnt)
+	}
+	// 回读应执行，确认事务内 QUERY（quotaInfoByTypes）走完
+	if len(tx.queryResults) != 0 {
+		t.Fatalf("CreateTenantQuota() should consume 回读 query，remaining = %d", len(tx.queryResults))
 	}
 }
 

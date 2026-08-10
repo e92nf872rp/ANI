@@ -612,6 +612,7 @@ func TestIntegrationQuotaAdminCreateBatch(t *testing.T) {
 }
 
 // TestIntegrationQuotaAdminCreateIdempotent 管理场景 17：CreateTenantQuota 幂等（ON CONFLICT DO NOTHING 不覆盖）。
+// 部分成功语义：重复创建同一维度 → 该维度已存在被跳过，事务提交不回滚，返回 ErrQuotaAlreadyExists(409)。
 func TestIntegrationQuotaAdminCreateIdempotent(t *testing.T) {
 	env := newQuotaIntegrationEnv(t)
 
@@ -622,12 +623,12 @@ func TestIntegrationQuotaAdminCreateIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("首次 CreateTenantQuota 失败: %v", err)
 	}
-	// 再次创建同一维度不同 total=99 → ON CONFLICT DO NOTHING，不覆盖。
+	// 再次创建同一维度不同 total=99 → ON CONFLICT DO NOTHING 跳过，不覆盖；部分成功返回 409 哨兵错误。
 	_, err = env.adminQuota.CreateTenantQuota(context.Background(), env.tenantA.String(), []ports.QuotaItemInput{
 		{ResourceType: ports.QuotaGPUCount, Total: 99},
 	})
-	if err != nil {
-		t.Fatalf("重复 CreateTenantQuota 失败: %v", err)
+	if !errors.Is(err, ports.ErrQuotaAlreadyExists) {
+		t.Fatalf("重复 CreateTenantQuota 应返回 ErrQuotaAlreadyExists(409)，实际 %v", err)
 	}
 	var total int64
 	err = env.adminPool.QueryRow(context.Background(), `
@@ -639,7 +640,7 @@ func TestIntegrationQuotaAdminCreateIdempotent(t *testing.T) {
 	if total != 6 {
 		t.Fatalf("CreateTenantQuota 幂等失败：total 应保持 6（DO NOTHING 不覆盖），实际 %d", total)
 	}
-	t.Logf("CreateTenantQuota 幂等正确：total 保持 %d", total)
+	t.Logf("CreateTenantQuota 幂等正确：total 保持 %d，重复创建已跳过并返回 409", total)
 }
 
 // TestIntegrationQuotaAdminUpdate 管理场景 18：UpdateTenantQuota 改 total（tightened=false）。

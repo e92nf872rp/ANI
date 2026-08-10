@@ -552,15 +552,18 @@ func (q *PostgresQuota) getMetaDefault(ctx context.Context, tx ports.MetadataTx,
 }
 
 // CreateTenantQuota 批量初始化租户配额（平台管理员）。自开 WithPlatformTx (bypass RLS)。
-// 校验租户存在 + 每维度 meta enabled → total<=0 取 default_quota → 已存在维度
-// 返回 ports.ErrQuotaAlreadyExists（handler 映射 409 QUOTA_ALREADY_EXISTS，非部分成功）
-// → 回读 items 涉及维度返回 []QuotaInfo。
+// 部分成功语义：校验租户存在 + 每维度 meta enabled → total<=0 取 default_quota →
+// 已存在维度 ON CONFLICT DO NOTHING 跳过（不阻断其余维度创建，事务提交不回滚）；
+// 只要存在跳过维度即返回 ports.ErrQuotaAlreadyExists（handler 映射 409
+// QUOTA_ALREADY_EXISTS），否则返回 nil。已创建的维度已落库，最终状态可由调用方 GET。
 func (q *PostgresQuota) CreateTenantQuota(ctx context.Context, tenantID string, items []ports.QuotaItemInput) ([]ports.QuotaInfo, error) {
 	if len(items) == 0 {
 		return nil, ports.ErrInvalid
 	}
 
 	infos := make([]ports.QuotaInfo, 0, len(items))
+	// conflict 标记是否跳过（已存在）了某个维度，用于所有维度处理完后决定是否返回 409
+	var conflict bool
 	var err error
 	err = q.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
 		if err := q.requireTenantExists(ctx, tx, tenantID); err != nil {
@@ -579,8 +582,8 @@ func (q *PostgresQuota) CreateTenantQuota(ctx context.Context, tenantID string, 
 				total = defaultQuota
 			}
 
-			// 已存在维度 ON CONFLICT DO NOTHING 跳过；RowsAffected=0 说明该行已被占用，
-			// 返回 ErrQuotaAlreadyExists（handler 映射 409 QUOTA_ALREADY_EXISTS）
+			// 已存在维度 ON CONFLICT DO NOTHING 跳过，不阻断其余维度创建（部分成功）。
+			// RowsAffected=0 说明该行已被占用，仅标记冲突，不回滚、不中断循环。
 			tag, err := tx.Exec(ctx, `
 				INSERT INTO resource_quota (tenant_id, resource_type, total, reserved, used)
 				VALUES ($1, $2, $3, 0, 0)
@@ -590,11 +593,11 @@ func (q *PostgresQuota) CreateTenantQuota(ctx context.Context, tenantID string, 
 				return err
 			}
 			if tag.RowsAffected == 0 {
-				return ports.ErrQuotaAlreadyExists
+				conflict = true
 			}
 		}
 
-		// 回读 items 涉及维度，返回带 meta 信息的 QuotaInfo
+		// 回读 items 涉及维度，带 meta 信息（用于校验；部分成功后此处不再作为响应使用）
 		types := make([]ports.ResourceType, len(items))
 		for i, item := range items {
 			types[i] = item.ResourceType
@@ -604,6 +607,10 @@ func (q *PostgresQuota) CreateTenantQuota(ctx context.Context, tenantID string, 
 	})
 	if err != nil {
 		return nil, err
+	}
+	// 事务已提交（不回滚）：只要存在已跳过维度就返回 409 哨兵错误，handler 映射 QUOTA_ALREADY_EXISTS
+	if conflict {
+		return infos, ports.ErrQuotaAlreadyExists
 	}
 	return infos, nil
 }
