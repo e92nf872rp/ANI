@@ -277,7 +277,6 @@ export const errorCodes = [
   "FORBIDDEN",
   "NOT_FOUND",
   "PRECONDITION_FAILED",
-  "QUOTA_RESOURCE_NOT_REGISTERED",
   "UNAUTHORIZED"
 ];
 

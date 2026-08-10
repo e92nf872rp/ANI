@@ -51,7 +51,7 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
     UnprocessableEntity:
-      description: 前置条件不满足（如配额维度未注册 code=QUOTA_RESOURCE_NOT_REGISTERED）
+      description: 前置条件不满足，code 可为 QUOTA_RESOURCE_NOT_REGISTERED（配额维度未注册或已禁用）或 PLAN_NOT_ACTIVE（绑定套餐时套餐状态非 active）
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -2287,10 +2287,12 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
         "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/UnprocessableEntity' }
 
 tags:
   - { name: Models, description: "模型仓库" }

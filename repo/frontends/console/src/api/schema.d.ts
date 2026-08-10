@@ -1912,7 +1912,7 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
-        /** @description 前置条件不满足（如配额维度未注册 code=QUOTA_RESOURCE_NOT_REGISTERED） */
+        /** @description 前置条件不满足，code 可为 QUOTA_RESOURCE_NOT_REGISTERED（配额维度未注册或已禁用）或 PLAN_NOT_ACTIVE（绑定套餐时套餐状态非 active） */
         UnprocessableEntity: {
             headers: {
                 [name: string]: unknown;
@@ -4053,10 +4053,12 @@ export interface operations {
                     "application/json": components["schemas"]["IdempotentResult"];
                 };
             };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
 }
