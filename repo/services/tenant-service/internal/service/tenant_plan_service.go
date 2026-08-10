@@ -6,7 +6,6 @@ import (
 	tenantv1 "github.com/kubercloud/ani/pkg/generated/pb/tenant/v1"
 	"github.com/kubercloud/ani/services/tenant-service/internal/repo/ports"
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type TenantPlanService struct {
@@ -36,7 +35,7 @@ func (s *TenantPlanService) ListTenantPlans(ctx context.Context, req *tenantv1.L
 
 // ── RPC：CreateTenantPlan ────────────────────────────────────────────────
 // US-001 创建套餐：校验 code/name/quota_limits，冲突返回 PLAN_CODE_CONFLICT。
-func (s *TenantPlanService) CreateTenantPlan(ctx context.Context, req *tenantv1.CreateTenantPlanRequest) (*tenantv1.TenantPlan, error) {
+func (s *TenantPlanService) CreateTenantPlan(ctx context.Context, req *tenantv1.CreateTenantPlanRequest) (*tenantv1.IdempotentResult, error) {
 	panic("not implemented: issue-005")
 }
 
@@ -48,7 +47,7 @@ func (s *TenantPlanService) GetTenantPlan(ctx context.Context, req *tenantv1.Get
 
 // ── RPC：DeleteTenantPlan ───────────────────────────────────────────────
 // US-007 删除套餐：软删除，有租户关联返回 TENANT_PLAN_IN_USE。
-func (s *TenantPlanService) DeleteTenantPlan(ctx context.Context, req *tenantv1.DeleteTenantPlanRequest) (*emptypb.Empty, error) {
+func (s *TenantPlanService) DeleteTenantPlan(ctx context.Context, req *tenantv1.DeleteTenantPlanRequest) (*tenantv1.IdempotentResult, error) {
 	panic("not implemented: issue-005")
 }
 
@@ -60,19 +59,19 @@ func (s *TenantPlanService) GetTenantPlanQuotaLimits(ctx context.Context, req *t
 
 // ── RPC：UpdateTenantPlanQuotaLimits ────────────────────────────────────
 // issue-006 修改套餐限额并同步存量租户到 Core。
-func (s *TenantPlanService) UpdateTenantPlanQuotaLimits(ctx context.Context, req *tenantv1.UpdateTenantPlanQuotaLimitsRequest) (*emptypb.Empty, error) {
+func (s *TenantPlanService) UpdateTenantPlanQuotaLimits(ctx context.Context, req *tenantv1.UpdateTenantPlanQuotaLimitsRequest) (*tenantv1.IdempotentResult, error) {
 	panic("not implemented: issue-006")
 }
 
 // ── RPC：ActivateTenantPlan ─────────────────────────────────────────────
 // US-005 发布套餐：draft/disabled → active。
-func (s *TenantPlanService) ActivateTenantPlan(ctx context.Context, req *tenantv1.ActivateTenantPlanRequest) (*tenantv1.TenantPlan, error) {
+func (s *TenantPlanService) ActivateTenantPlan(ctx context.Context, req *tenantv1.ActivateTenantPlanRequest) (*tenantv1.IdempotentResult, error) {
 	panic("not implemented: issue-005")
 }
 
 // ── RPC：DisableTenantPlan ──────────────────────────────────────────────
 // US-006 禁用套餐：active → disabled。
-func (s *TenantPlanService) DisableTenantPlan(ctx context.Context, req *tenantv1.DisableTenantPlanRequest) (*tenantv1.TenantPlan, error) {
+func (s *TenantPlanService) DisableTenantPlan(ctx context.Context, req *tenantv1.DisableTenantPlanRequest) (*tenantv1.IdempotentResult, error) {
 	panic("not implemented: issue-005")
 }
 
