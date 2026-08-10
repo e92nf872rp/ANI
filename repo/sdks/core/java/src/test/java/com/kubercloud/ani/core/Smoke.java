@@ -31,7 +31,7 @@ public final class Smoke {
         if (ApiClient.OPERATIONS.isEmpty()) {
             throw new IllegalStateException("expected generated operations");
         }
-        if (!client.hasOperation("listAPIKeys")) {
+        if (!client.hasOperation("listQuotaMeta")) {
             throw new IllegalStateException("missing expected operation");
         }
 
