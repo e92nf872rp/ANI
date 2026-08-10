@@ -143,7 +143,7 @@ export const paths = [
   "GET /tenant-plans/{planId}/audit-logs",
   "POST /tenant-plans/{planId}/disable",
   "GET /tenant-plans/{planId}/quota-limits",
-  "PATCH /tenant-plans/{planId}/quota-limits",
+  "PUT /tenant-plans/{planId}/quota-limits",
   "GET /tenant-plans/{planId}/tenants",
   "GET /tenant/members",
   "POST /tenant/members",

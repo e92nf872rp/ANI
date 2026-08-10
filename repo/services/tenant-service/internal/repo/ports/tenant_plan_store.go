@@ -155,7 +155,7 @@ type TenantPlanStore interface {
 	GetQuotaLimitViews(ctx context.Context, planID uuid.UUID) ([]PlanQuotaLimitView, error)
 
 	// UpdateQuotaLimits 更新套餐各维度的限额（UPSERT plan_quota_limits）。
-	// 供 TenantPlanService.UpdateQuotaLimits（issue-006，PATCH /tenant-plans/{planId}/quota-limits）使用：
+	// 供 TenantPlanService.UpdateQuotaLimits（issue-006，PUT /tenant-plans/{planId}/quota-limits）使用：
 	// 维度已存在则 UPDATE total，不存在则 INSERT；Total 为 nil 表示用默认值。
 	UpdateQuotaLimits(ctx context.Context, planID uuid.UUID, items []PlanQuotaLimitInput) error
 

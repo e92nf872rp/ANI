@@ -939,13 +939,13 @@ export interface paths {
         };
         /** 查询套餐限额 */
         get: operations["getTenantPlanQuotaLimits"];
-        put?: never;
+        /** 修改套餐限额（同步存量租户） */
+        put: operations["updateTenantPlanQuotaLimits"];
         post?: never;
         delete?: never;
         options?: never;
         head?: never;
-        /** 修改套餐限额（同步存量租户） */
-        patch: operations["updateTenantPlanQuotaLimits"];
+        patch?: never;
         trace?: never;
     };
     "/tenant-plans/{planId}/activate": {

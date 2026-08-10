@@ -372,7 +372,7 @@
     },
     {
       "operationId": "updateTenantPlanQuotaLimits",
-      "method": "PATCH",
+      "method": "PUT",
       "path": "/tenant-plans/{planId}/quota-limits",
       "scope": ""
     },

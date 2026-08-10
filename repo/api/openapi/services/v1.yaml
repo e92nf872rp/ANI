@@ -2154,7 +2154,7 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
-    patch:
+    put:
       operationId: updateTenantPlanQuotaLimits
       summary: 修改套餐限额（同步存量租户）
       tags: [TenantPlans]
