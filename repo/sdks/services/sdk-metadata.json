@@ -323,6 +323,12 @@
       "scope": ""
     },
     {
+      "operationId": "listAllTenantAdmins",
+      "method": "GET",
+      "path": "/tenant-admins",
+      "scope": ""
+    },
+    {
       "operationId": "listTenantPlans",
       "method": "GET",
       "path": "/tenant-plans",
@@ -455,13 +461,82 @@
       "scope": ""
     },
     {
+      "operationId": "inviteTenantAdmin",
+      "method": "POST",
+      "path": "/tenants/{tenantId}/admins/invite",
+      "scope": ""
+    },
+    {
+      "operationId": "deleteTenantAdmin",
+      "method": "DELETE",
+      "path": "/tenants/{tenantId}/admins/{userId}",
+      "scope": ""
+    },
+    {
+      "operationId": "getTenantAdminDetail",
+      "method": "GET",
+      "path": "/tenants/{tenantId}/admins/{userId}",
+      "scope": ""
+    },
+    {
+      "operationId": "listTenantAdminAuditLogs",
+      "method": "GET",
+      "path": "/tenants/{tenantId}/admins/{userId}/audit-logs",
+      "scope": ""
+    },
+    {
+      "operationId": "disableTenantAdmin",
+      "method": "POST",
+      "path": "/tenants/{tenantId}/admins/{userId}/disable",
+      "scope": ""
+    },
+    {
+      "operationId": "enableTenantAdmin",
+      "method": "POST",
+      "path": "/tenants/{tenantId}/admins/{userId}/enable",
+      "scope": ""
+    },
+    {
+      "operationId": "resendTenantAdminInvitation",
+      "method": "POST",
+      "path": "/tenants/{tenantId}/admins/{userId}/invitation/resend",
+      "scope": ""
+    },
+    {
+      "operationId": "resetTenantAdminPassword",
+      "method": "POST",
+      "path": "/tenants/{tenantId}/admins/{userId}/reset-password",
+      "scope": ""
+    },
+    {
+      "operationId": "getTenantAdminRole",
+      "method": "GET",
+      "path": "/tenants/{tenantId}/admins/{userId}/role",
+      "scope": ""
+    },
+    {
+      "operationId": "updateTenantAdminRole",
+      "method": "PUT",
+      "path": "/tenants/{tenantId}/admins/{userId}/role",
+      "scope": ""
+    },
+    {
       "operationId": "bindTenantPlan",
       "method": "POST",
       "path": "/tenants/{tenantId}/plan",
       "scope": ""
+    },
+    {
+      "operationId": "transferTenantOwnership",
+      "method": "POST",
+      "path": "/tenants/{tenantId}/transfer-ownership",
+      "scope": ""
     }
   ],
   "schemas": [
+    "AdminDetail",
+    "AdminListResponse",
+    "AdminWithTenant",
     "AsyncTask",
     "AvailableGpu",
     "BindPlanRequest",
@@ -483,6 +558,7 @@
     "GpuContainer",
     "GpuContainerMetrics",
     "GpuContainerVersion",
+    "IdempotentOnlyRequest",
     "IdempotentResult",
     "InferenceEndpoint",
     "InferenceService",
@@ -494,6 +570,8 @@
     "Integration",
     "IntegrationBot",
     "IntegrationListResponse",
+    "InvitationResult",
+    "InviteAdminRequest",
     "InviteMemberRequest",
     "KBCitation",
     "KBCitationListResponse",
@@ -517,21 +595,29 @@
     "PlanQuotaLimitsResponse",
     "RebuildKnowledgeBaseRequest",
     "ReparseDocumentRequest",
+    "ResendInvitationRequest",
+    "ResetPasswordRequest",
     "Sandbox",
     "SecurityEvent",
     "SecurityOverview",
     "SsoConfig",
+    "TenantAdminAuditLog",
+    "TenantAdminAuditLogListResponse",
     "TenantMember",
     "TenantPlan",
     "TenantPlanListItem",
     "TenantPlanListResponse",
+    "TenantRef",
     "TenantRole",
+    "TransferOwnershipRequest",
     "UpdateInferenceServicePoliciesRequest",
     "UpdateKBConfigRequest",
     "UpdateKBPermissionsRequest",
     "UpdateQuotaLimitsRequest",
+    "UpdateRoleRequest",
     "UpdateSsoConfigRequest",
     "UpdateTenantRoleRequest",
+    "UserPermissions",
     "Webhook",
     "WebhookDelivery",
     "WebhookDeliveryListResponse"
@@ -559,7 +645,14 @@
     "updateTenantRole",
     "updateSsoConfig",
     "createWebhook",
-    "bindTenantPlan"
+    "inviteTenantAdmin",
+    "disableTenantAdmin",
+    "enableTenantAdmin",
+    "resendTenantAdminInvitation",
+    "resetTenantAdminPassword",
+    "updateTenantAdminRole",
+    "bindTenantPlan",
+    "transferTenantOwnership"
   ],
   "cursorPaginationOperations": [
     "listGpuContainers",
@@ -569,9 +662,11 @@
     "listKnowledgeBaseSessions",
     "listModels",
     "listSandboxes",
+    "listAllTenantAdmins",
     "listTenantPlans",
     "listTenantPlanAuditLogs",
-    "listWebhookDeliveries"
+    "listWebhookDeliveries",
+    "listTenantAdminAuditLogs"
   ],
   "errorCodes": [
     "BAD_REQUEST",
