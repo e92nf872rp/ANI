@@ -13,4 +13,12 @@ var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrTenantNotFound     = errors.New("tenant not found")
 	ErrUnavailable        = errors.New("capability dependency is unavailable")
+
+	// Quota sentinel errors.
+	ErrQuotaExceeded              = errors.New("quota exceeded")
+	ErrQuotaResourceNotRegistered = errors.New("quota resource type not registered")
+	ErrQuotaIdempotencyConflict   = errors.New("quota idempotency key conflict")
+	ErrQuotaNotFound              = errors.New("quota not found")
+	ErrQuotaAlreadyExists         = errors.New("quota already exists")
+	ErrReservationNotFound        = errors.New("resource reservation not found")
 )

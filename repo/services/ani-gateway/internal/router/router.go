@@ -28,6 +28,7 @@ type RegisterOptions struct {
 	ObservabilityService                  ports.ObservabilityService
 	EmailNotificationStore                ports.EmailNotificationStore
 	AsyncTaskStore                        ports.AsyncTaskStore
+	QuotaAdminService                     ports.QuotaAdminService
 }
 
 // Register wires all route groups onto the Hertz server.
@@ -72,6 +73,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerEncryptionResourcesWithService(v1, options.EncryptionService)
 	registerSecretResourcesWithService(v1, options.SecretService)
 	registerEmailNotificationResourcesWithService(v1, options.EmailNotificationStore)
+	registerQuotaResources(v1, options.QuotaAdminService)
 
 	svc := h.Group("/api/v1/svc")
 	registerModels(svc)
