@@ -2,17 +2,22 @@
 
 Verifies the SPEC §6.1 algorithms that were left as TODO in US-009:
 
-1. NotifyDocumentUploaded writes kb_documents + async_tasks + outbox_events
-   in a single transaction and returns a deterministic AsyncTaskRef; a retry
-   with the same (tenant, kb, doc) returns the same task (idempotent replay).
-2. Query persists kb_messages (user + assistant) and appends both to the
-   Redis session cache, then returns the rag-engine response with the
-   resolved session_id.
+1. NotifyDocumentUploaded folds kb_documents UPDATE + async_tasks INSERT +
+   outbox_events INSERT into a single CTE-based data_query call (SPEC §4.2
+   cross-table atomic fold, issue-030) and returns a deterministic
+   AsyncTaskRef; a retry with the same (tenant, kb, doc) returns the same
+   task (idempotent replay).
+2. Query persists kb_messages (user + assistant) via the Core data plane
+   (issue-030: user message via create_session_and_message CTE fold,
+   assistant message via insert_message) and appends both to the Redis
+   session cache, then returns the rag-engine response with the resolved
+   session_id. The KB config load also goes through the data plane (issue
+   #029).
 
-These tests use a mock asyncpg pool/conn, a mock rag-engine client factory,
-and a mock SessionCache factory so no real DB/rag-engine/Redis is required.
-They focus on the wiring (transaction atomicity, idempotency, cache + DB
-writes) rather than the SQL behavior (covered by repository tests).
+These tests use a mock CoreClient (data_query), a mock rag-engine client
+factory, and a mock SessionCache factory so no real DB/Core/rag-engine/Redis
+is required. They focus on the wiring (idempotency, cache + DB writes) rather
+than the SQL behavior (covered by repository tests).
 """
 import os
 import sys
@@ -38,86 +43,61 @@ KB_ID = "22222222-2222-2222-2222-222222222222"
 DOC_ID = "33333333-3333-3333-3333-333333333333"
 
 
-# ── Mock DB (records writes to verify atomicity) ──────────────────────────────
+# ── Mock CoreClient (data plane, issue #029 / #030) ──────────────────────────
 
 
-class _NotifyMockConn:
-    """Records every write so we can assert all three tables are touched in
-    one transaction (atomic outbox)."""
+class _MockCoreClient:
+    """Mock CoreClient whose data_query records calls and returns canned rows.
 
-    def __init__(self, *, doc_exists=True, existing_task=None):
-        self.doc_exists = doc_exists
-        self.existing_task = existing_task
-        # record of operations in order
-        self.events: list[tuple] = []
-        # tx nesting tracking
-        self._tx_depth = 0
+    The repos call ``core.data_query(sql=..., params=[...])`` and interpret
+    ``{rows, rowcount}``. Tests customize ``data_query_returns`` / the
+    ``data_query`` AsyncMock side_effect to drive specific scenarios.
+    """
 
-    def transaction(self):
-        @asynccontextmanager
-        async def _tx():
-            self._tx_depth += 1
-            self.events.append(("BEGIN",))
-            try:
-                yield self
-            finally:
-                self._tx_depth -= 1
-                self.events.append(("COMMIT",))
-        return _tx()
-
-    async def execute(self, sql, *args):
-        # update_parse_status_in_tx → returns "UPDATE 1" or "UPDATE 0"
-        if "UPDATE kb_documents" in sql:
-            self.events.append(("update_kb_documents", args))
-            return "UPDATE 1" if self.doc_exists else "UPDATE 0"
-        # mark_dispatched not used in notify path; stub
-        return "UPDATE 1"
-
-    async def fetchrow(self, sql, *args):
-        # find_by_idempotency_key → returns existing task or None
-        if "FROM async_tasks" in sql and "idempotency_key" in sql:
-            self.events.append(("find_idempotency", args))
-            if self.existing_task is not None:
-                return self.existing_task
-            return None
-        # create_task_in_tx / insert_event RETURNING
-        if "INSERT INTO async_tasks" in sql:
-            self.events.append(("insert_async_tasks", args))
-            return {"id": uuid.UUID(DOC_ID), "task_type": "kb.parse", "status": "pending"}
-        if "INSERT INTO outbox_events" in sql:
-            self.events.append(("insert_outbox_events", args))
-            return {"id": 1}
-        return None
-
-    async def fetch(self, sql, *args):
-        return []
-
-    async def fetchval(self, sql, *args):
-        return 0
+    def __init__(self, *, data_query_returns=None):
+        self.data_query = AsyncMock()
+        self.aclose = AsyncMock()
+        self.__aenter__ = AsyncMock(return_value=self)
+        self.__aexit__ = AsyncMock(return_value=None)
+        if data_query_returns is not None:
+            self.data_query.return_value = data_query_returns
+        else:
+            # Default: empty result (no rows, zero rowcount).
+            self.data_query.return_value = {"rows": [], "rowcount": 0}
 
 
-class _NotifyMockPool:
-    def __init__(self, conn):
-        self._conn = conn
-
+def _core_factory(core_client):
     @asynccontextmanager
-    async def acquire(self):
-        yield self._conn
+    async def factory(tenant_id):
+        yield core_client
+    return factory
 
 
-# ── NotifyDocumentUploaded: atomic outbox transaction ─────────────────────────
+# ── NotifyDocumentUploaded: 3-table fold via single data_query ──────────────
 
 
-def _make_notify_servicer(conn):
-    pool = _NotifyMockPool(conn)
-    return KBServiceServicer(pool=pool)
+def _make_notify_servicer(core_client=None):
+    """Build a servicer with a mock CoreClient (data plane only)."""
+    core = core_client or _MockCoreClient()
+    return KBServiceServicer(
+        pool=object(),  # non-None sentinel: DB-backed RPCs are enabled
+        core_client_factory=_core_factory(core),
+    ), core
 
 
-def test_notify_writes_three_tables_in_one_transaction():
-    """AC1: NotifyDocumentUploaded writes kb_documents + async_tasks +
-    outbox_events in a single transaction."""
-    conn = _NotifyMockConn(doc_exists=True)
-    servicer = _make_notify_servicer(conn)
+def test_notify_folds_three_tables_into_single_data_query():
+    """AC1: NotifyDocumentUploaded folds idempotency check + kb_documents
+    UPDATE + async_tasks INSERT + outbox_events INSERT into a single CTE-based
+    data_query call (SPEC §4.2 cross-table atomic fold, issue-030). This
+    eliminates the TOCTOU race — the check and insert are atomic."""
+    core = _MockCoreClient()
+    task_id = str(uuid.uuid4())
+    # Single data_query call: fold_sql returns the new task_id
+    core.data_query.return_value = {
+        "rows": [{"task_id": task_id, "status": "pending"}],
+        "rowcount": 1,
+    }
+    servicer, _ = _make_notify_servicer(core)
 
     ctx = _make_context()
     req = kb_pb.NotifyDocumentUploadedRequest(
@@ -128,48 +108,36 @@ def test_notify_writes_three_tables_in_one_transaction():
         servicer._notify_document_uploaded(req, ctx)
     )
 
-    # The three writes (update_kb_documents, insert_async_tasks,
-    # insert_outbox_events) must all occur between a single BEGIN/COMMIT pair
-    # (the atomic outbox transaction). find_by_idempotency_key runs in its own
-    # earlier transaction, so we locate the transaction that contains the
-    # update and verify the inserts share it.
-    events = conn.events
-    # find the BEGIN that precedes the update_kb_documents event
-    up_idx = next(i for i, e in enumerate(events) if e[0] == "update_kb_documents")
-    # walk back to the most recent BEGIN
-    begin_idx = max(i for i, e in enumerate(events[:up_idx]) if e[0] == "BEGIN")
-    # find the next COMMIT after the update
-    commit_idx = next(i for i, e in enumerate(events[up_idx:], start=up_idx) if e[0] == "COMMIT")
-    between = events[begin_idx + 1:commit_idx]
-    kinds = [e[0] for e in between]
-    assert "update_kb_documents" in kinds
-    assert "insert_async_tasks" in kinds
-    assert "insert_outbox_events" in kinds
-    # No nested BEGIN inside this transaction (the three writes are atomic)
-    assert kinds.count("BEGIN") == 0
-    # The three writes happen in SPEC §6.1 order: doc update → async_task → outbox
-    write_order = [k for k in kinds if k in (
-        "update_kb_documents", "insert_async_tasks", "insert_outbox_events"
-    )]
-    assert write_order == [
-        "update_kb_documents", "insert_async_tasks", "insert_outbox_events"
-    ]
+    # Exactly 1 data_query call: idempotency check folded into the CTE
+    assert core.data_query.call_count == 1
+
+    # The fold_sql contains all three table writes + idempotency check in one statement
+    fold_sql = core.data_query.call_args_list[0].kwargs["sql"]
+    assert "UPDATE kb_documents" in fold_sql
+    assert "INSERT INTO async_tasks" in fold_sql
+    assert "INSERT INTO outbox_events" in fold_sql
+    assert "ON CONFLICT (tenant_id, idempotency_key) DO NOTHING" in fold_sql
+    # CTE-based fold (single statement, atomic in one data-plane transaction)
+    assert "WITH doc_upd AS" in fold_sql
+    assert "existing AS" in fold_sql
 
     assert result.task_type == "kb.parse"
     assert result.status == "pending"
-    assert result.task_id  # non-empty
+    assert result.task_id == task_id
 
 
 def test_notify_idempotent_replay_returns_same_task():
-    """A retry for the same (tenant, kb, doc) returns the same AsyncTaskRef
-    without re-writing the outbox."""
-    existing_task = {
-        "id": uuid.uuid4(),
-        "task_type": "kb.parse",
-        "status": "pending",
+    """A retry for the same (tenant, kb, doc) returns the same AsyncTaskRef.
+    The CTE's ON CONFLICT DO NOTHING on async_tasks means the INSERT produces
+    no row, and the UNION ALL branch returns the existing task."""
+    existing_task_id = str(uuid.uuid4())
+    core = _MockCoreClient()
+    # Single data_query call: fold_sql returns the existing task (via UNION ALL)
+    core.data_query.return_value = {
+        "rows": [{"task_id": existing_task_id, "status": "pending"}],
+        "rowcount": 1,
     }
-    conn = _NotifyMockConn(doc_exists=True, existing_task=existing_task)
-    servicer = _make_notify_servicer(conn)
+    servicer, _ = _make_notify_servicer(core)
 
     ctx = _make_context()
     req = kb_pb.NotifyDocumentUploadedRequest(
@@ -179,16 +147,15 @@ def test_notify_idempotent_replay_returns_same_task():
     result = asyncio.new_event_loop().run_until_complete(
         servicer._notify_document_uploaded(req, ctx)
     )
-    assert str(result.task_id) == str(existing_task["id"])
-    # No outbox insert on replay
-    kinds = [e[0] for e in conn.events]
-    assert "insert_outbox_events" not in kinds
-    assert "insert_async_tasks" not in kinds
+    assert result.task_id == existing_task_id
+    # Only 1 data_query call (fold with idempotency check inside)
+    assert core.data_query.call_count == 1
+    fold_sql = core.data_query.call_args_list[0].kwargs["sql"]
+    assert "ON CONFLICT (tenant_id, idempotency_key) DO NOTHING" in fold_sql
 
 
 def test_notify_missing_ids_returns_invalid_argument():
-    conn = _NotifyMockConn(doc_exists=True)
-    servicer = _make_notify_servicer(conn)
+    servicer, _ = _make_notify_servicer()
     ctx = _make_context()
     req = kb_pb.NotifyDocumentUploadedRequest(
         tenant_id="", kb_id=KB_ID, doc_id=DOC_ID
@@ -201,73 +168,27 @@ def test_notify_missing_ids_returns_invalid_argument():
 
 
 def test_notify_doc_not_found_aborts_without_outbox_write():
-    """If the document doesn't exist, abort before writing outbox/async_task."""
-    conn = _NotifyMockConn(doc_exists=False)
-    servicer = _make_notify_servicer(conn)
+    """If the document doesn't exist (fold_sql returns no rows), abort before
+    returning a task. The CTE's doc_upd returns no rows → no task/outbox
+    inserts → final SELECT returns empty → NOT_FOUND."""
+    core = _MockCoreClient()
+    # Single data_query call: fold_sql → empty rows (doc not found)
+    core.data_query.return_value = {"rows": [], "rowcount": 0}
+    servicer, _ = _make_notify_servicer(core)
     ctx = _make_context()
     req = kb_pb.NotifyDocumentUploadedRequest(
         tenant_id=TENANT_ID, kb_id=KB_ID, doc_id=DOC_ID, storage_path="kb-docs/kb1/d"
     )
     import asyncio
-    # context.abort raises in our fake context; that's the expected path.
     with pytest.raises(RuntimeError, match="NOT_FOUND"):
         asyncio.new_event_loop().run_until_complete(
             servicer._notify_document_uploaded(req, ctx)
         )
-    # The outbox and async_tasks inserts must NOT have happened
-    kinds = [e[0] for e in conn.events]
-    assert "insert_outbox_events" not in kinds
-    assert "insert_async_tasks" not in kinds
+    # Only 1 data_query call (fold with idempotency check inside); no extra writes
+    assert core.data_query.call_count == 1
 
 
-# ── Query: kb_messages + Redis session cache ──────────────────────────────────
-
-
-class _QueryMockConn:
-    """Records create_session + insert_message calls for the Query flow."""
-
-    def __init__(self):
-        self.events: list[tuple] = []
-
-    def transaction(self):
-        @asynccontextmanager
-        async def _tx():
-            self.events.append(("BEGIN",))
-            try:
-                yield self
-            finally:
-                self.events.append(("COMMIT",))
-        return _tx()
-
-    async def execute(self, sql, *args):
-        return "UPDATE 1"
-
-    async def fetchrow(self, sql, *args):
-        # create_session returns id; insert_message returns a row
-        if "kb_sessions" in sql:
-            self.events.append(("create_session", args))
-            return {"id": uuid.uuid4()}
-        if "kb_messages" in sql:
-            self.events.append(("insert_message", args))
-            return {"id": uuid.uuid4()}
-        return None
-
-    async def fetch(self, sql, *args):
-        return []
-
-    async def fetchval(self, sql, *args):
-        return 0
-
-
-class _QueryMockPool:
-    def __init__(self):
-        self.conns: list[_QueryMockConn] = []
-
-    @asynccontextmanager
-    async def acquire(self):
-        conn = _QueryMockConn()
-        self.conns.append(conn)
-        yield conn
+# ── Query: kb_messages + Redis session cache ─────────────────────────────────
 
 
 class _MockRagClient:
@@ -310,7 +231,7 @@ class _MockSessionCache:
         return []
 
 
-def _make_query_servicer(*, pool=None, rag_client=None, cache=None):
+def _make_query_servicer(*, rag_client=None, cache=None, core_client=None):
     rag = rag_client or _MockRagClient()
 
     @asynccontextmanager
@@ -322,16 +243,47 @@ def _make_query_servicer(*, pool=None, rag_client=None, cache=None):
     def cache_factory():
         return target_cache
 
+    core = core_client or _MockCoreClient()
+
     return KBServiceServicer(
-        pool=pool, rag_engine_client_factory=rag_factory,
+        pool=object(),  # non-None sentinel: DB-backed RPCs are enabled
+        rag_engine_client_factory=rag_factory,
         session_cache_factory=cache_factory,
-    ), target_cache
+        core_client_factory=_core_factory(core),
+    ), target_cache, core
+
+
+def _query_core_side_effects(*, kb_found=True):
+    """Build data_query side_effects for the Query flow.
+
+    Call 1: get_kb (SELECT FROM knowledge_bases) → kb config row or empty
+    Call 2: create_session_and_message (CTE fold) → user message row
+    Call 3: insert_message (INSERT INTO kb_messages) → assistant message row
+    """
+    if kb_found:
+        kb_row = {
+            "id": KB_ID, "top_k": 5, "score_threshold": 0.0,
+            "retrieval_mode": "hybrid",
+        }
+    else:
+        kb_row = None
+    return [
+        {"rows": [kb_row] if kb_row else [], "rowcount": 1 if kb_row else 0},
+        {"rows": [{"id": str(uuid.uuid4()), "session_id": str(uuid.uuid4()),
+                    "role": "user", "content": "hi"}], "rowcount": 1},
+        {"rows": [{"id": str(uuid.uuid4()), "session_id": str(uuid.uuid4()),
+                    "role": "assistant", "content": "hello"}], "rowcount": 1},
+    ]
 
 
 def test_query_persists_user_and_assistant_messages_and_caches():
-    """AC3: Query writes kb_messages (user + assistant) + Redis session cache."""
-    pool = _QueryMockPool()
-    servicer, cache = _make_query_servicer(pool=pool)
+    """AC3: Query writes kb_messages (user + assistant) via the data plane
+    (issue-030) + Redis session cache. KB config is loaded via the data plane
+    (issue #029). User message uses create_session_and_message CTE fold;
+    assistant message uses insert_message."""
+    core = _MockCoreClient()
+    core.data_query.side_effect = _query_core_side_effects()
+    servicer, cache, core = _make_query_servicer(core_client=core)
     ctx = _make_context()
     req = kb_pb.QueryRequest(
         tenant_id=TENANT_ID, kb_id=KB_ID, question="hi",
@@ -342,30 +294,27 @@ def test_query_persists_user_and_assistant_messages_and_caches():
         servicer._query(req, ctx)
     )
 
-    # Two DB connections acquired (user msg, assistant msg) — each wrote
-    assert len(pool.conns) == 2
-    user_events = [e[0] for e in pool.conns[0].events]
-    asst_events = [e[0] for e in pool.conns[1].events]
-    # user connection: create_session + insert_message(user)
-    assert "create_session" in user_events
-    assert "insert_message" in user_events
-    # assistant connection: insert_message(assistant)
-    assert "insert_message" in asst_events
+    # 3 data_query calls: get_kb + create_session_and_message + insert_message
+    assert core.data_query.call_count == 3
 
-    # C2 invariant: create_session + insert_message(user) share one
-    # transaction (a single BEGIN/COMMIT pair wraps both writes on the user
-    # connection) so a crash mid-RPC can't leave a session row without its
-    # user message.
-    u_ev = pool.conns[0].events
-    cs_idx = next(i for i, e in enumerate(u_ev) if e[0] == "create_session")
-    im_idx = next(i for i, e in enumerate(u_ev) if e[0] == "insert_message")
-    begin_before_cs = max(i for i, e in enumerate(u_ev[:cs_idx]) if e[0] == "BEGIN")
-    commit_after_im = next(i for i, e in enumerate(u_ev[im_idx:], start=im_idx) if e[0] == "COMMIT")
-    # Both writes are between the same BEGIN/COMMIT pair (one transaction)
-    between = u_ev[begin_before_cs + 1:commit_after_im]
-    assert "create_session" in [e[0] for e in between]
-    assert "insert_message" in [e[0] for e in between]
-    assert [e[0] for e in between].count("BEGIN") == 0  # no nested tx
+    # Call 1: KB config load via data_query (CoreClient).
+    kb_sql = core.data_query.call_args_list[0].kwargs["sql"]
+    assert "FROM knowledge_bases" in kb_sql
+
+    # Call 2: user message via create_session_and_message (CTE fold)
+    user_sql = core.data_query.call_args_list[1].kwargs["sql"]
+    assert "WITH sess AS" in user_sql
+    assert "INSERT INTO kb_sessions" in user_sql
+    assert "INSERT INTO kb_messages" in user_sql
+
+    # Call 3: assistant message via insert_message
+    asst_sql = core.data_query.call_args_list[2].kwargs["sql"]
+    assert "INSERT INTO kb_messages" in asst_sql
+    assert "WITH sess AS" not in asst_sql  # not a CTE fold
+
+    # C2 invariant: create_session + insert_message(user) are folded into a
+    # single data_query call (one atomic statement), so a crash mid-RPC can't
+    # leave a session row without its user message.
 
     # Redis cache: both user and assistant appended
     assert len(cache.appended) == 2
@@ -384,8 +333,7 @@ def test_query_persists_user_and_assistant_messages_and_caches():
 
 
 def test_query_missing_idempotency_key_returns_invalid_argument():
-    pool = _QueryMockPool()
-    servicer, _ = _make_query_servicer(pool=pool)
+    servicer, _, _ = _make_query_servicer()
     ctx = _make_context()
     req = kb_pb.QueryRequest(
         tenant_id=TENANT_ID, kb_id=KB_ID, question="hi"
@@ -396,8 +344,7 @@ def test_query_missing_idempotency_key_returns_invalid_argument():
 
 
 def test_query_missing_question_returns_invalid_argument():
-    pool = _QueryMockPool()
-    servicer, _ = _make_query_servicer(pool=pool)
+    servicer, _, _ = _make_query_servicer()
     ctx = _make_context()
     req = kb_pb.QueryRequest(
         tenant_id=TENANT_ID, kb_id=KB_ID, idempotency_key=str(uuid.uuid4())
@@ -409,8 +356,9 @@ def test_query_missing_question_returns_invalid_argument():
 
 def test_query_resolves_session_id_when_not_provided():
     """SPEC §6.1 step 2: session_id empty → generate UUID."""
-    pool = _QueryMockPool()
-    servicer, _ = _make_query_servicer(pool=pool)
+    core = _MockCoreClient()
+    core.data_query.side_effect = _query_core_side_effects()
+    servicer, _, _ = _make_query_servicer(core_client=core)
     ctx = _make_context()
     req = kb_pb.QueryRequest(
         tenant_id=TENANT_ID, kb_id=KB_ID, question="hi",
@@ -425,8 +373,9 @@ def test_query_resolves_session_id_when_not_provided():
 
 def test_query_reuses_provided_session_id():
     """When session_id is provided, it is used for cache + messages."""
-    pool = _QueryMockPool()
-    servicer, cache = _make_query_servicer(pool=pool)
+    core = _MockCoreClient()
+    core.data_query.side_effect = _query_core_side_effects()
+    servicer, cache, _ = _make_query_servicer(core_client=core)
     ctx = _make_context()
     provided_session = str(uuid.uuid4())
     req = kb_pb.QueryRequest(
@@ -443,7 +392,8 @@ def test_query_reuses_provided_session_id():
 def test_query_works_without_cache_factory_returning_none():
     """Query degrades to DB-only when session cache factory returns None
     (Redis unavailable, SPEC §7.3)."""
-    pool = _QueryMockPool()
+    core = _MockCoreClient()
+    core.data_query.side_effect = _query_core_side_effects()
 
     @asynccontextmanager
     async def rag_factory():
@@ -453,8 +403,9 @@ def test_query_works_without_cache_factory_returning_none():
         return None
 
     servicer = KBServiceServicer(
-        pool=pool, rag_engine_client_factory=rag_factory,
+        pool=object(), rag_engine_client_factory=rag_factory,
         session_cache_factory=cache_factory,
+        core_client_factory=_core_factory(core),
     )
     ctx = _make_context()
     req = kb_pb.QueryRequest(
@@ -464,12 +415,13 @@ def test_query_works_without_cache_factory_returning_none():
     import asyncio
     resp = asyncio.new_event_loop().run_until_complete(servicer._query(req, ctx))
     # Still persists both messages to DB (cache is best-effort)
-    assert len(pool.conns) == 2
+    assert core.data_query.call_count == 3
     assert resp.answer == "hello"
 
 
 def test_query_rag_engine_error_returns_unavailable():
-    pool = _QueryMockPool()
+    core = _MockCoreClient()
+    core.data_query.side_effect = _query_core_side_effects()
 
     class _FailingRag:
         async def query(self, **kwargs):
@@ -490,8 +442,9 @@ def test_query_rag_engine_error_returns_unavailable():
         return _MockSessionCache()
 
     servicer = KBServiceServicer(
-        pool=pool, rag_engine_client_factory=rag_factory,
+        pool=object(), rag_engine_client_factory=rag_factory,
         session_cache_factory=cache_factory,
+        core_client_factory=_core_factory(core),
     )
     ctx = _make_context()
     req = kb_pb.QueryRequest(
@@ -503,6 +456,22 @@ def test_query_rag_engine_error_returns_unavailable():
         asyncio.new_event_loop().run_until_complete(servicer._query(req, ctx))
     # The gRPC context.abort raises; we verify the abort path was taken by
     # the exception (grpc abort raises ValueError/RuntimeError in test).
+
+
+def test_query_kb_not_found_aborts():
+    """When the KB doesn't exist (data_query returns no rows), Query aborts
+    with NOT_FOUND."""
+    core = _MockCoreClient()
+    core.data_query.side_effect = _query_core_side_effects(kb_found=False)
+    servicer, _, _ = _make_query_servicer(core_client=core)
+    ctx = _make_context()
+    req = kb_pb.QueryRequest(
+        tenant_id=TENANT_ID, kb_id=KB_ID, question="hi",
+        idempotency_key=str(uuid.uuid4()),
+    )
+    import asyncio
+    with pytest.raises(RuntimeError, match="NOT_FOUND"):
+        asyncio.new_event_loop().run_until_complete(servicer._query(req, ctx))
 
 
 # ── gRPC server-level regression: skeleton mode still works ───────────────────

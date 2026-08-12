@@ -173,6 +173,18 @@
       "scope": "scope:objects:update"
     },
     {
+      "operationId": "dataQuery",
+      "method": "POST",
+      "path": "/data/query",
+      "scope": ""
+    },
+    {
+      "operationId": "dataCreateTable",
+      "method": "POST",
+      "path": "/data/tables",
+      "scope": ""
+    },
+    {
       "operationId": "listEncryptionKeys",
       "method": "GET",
       "path": "/encryption/keys",
@@ -1201,6 +1213,9 @@
     "CreateVectorStoreRequest",
     "CreateVolumeSnapshotRequest",
     "CursorPage",
+    "DataQueryRequest",
+    "DataQueryResponse",
+    "DataTableCreateRequest",
     "EmailRecipient",
     "EmailRecipientListResponse",
     "EmailSmtpConfigResponse",

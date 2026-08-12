@@ -306,11 +306,11 @@ def main():
     print(f"      RESPONSE({r.status_code}): {r.text[:120]}")
     record("真实文件 PUT 上传 MinIO", r.status_code == 200, f"status={r.status_code}, bytes={len(content_bytes)}")
 
-    sep("⑥ P0-5  NotifyDocumentUploaded   POST .../documents/{doc_id}/notify-uploaded")
-    req = {"storage_path": body.get("storage_path")}
-    r = requests.post(f"{GATEWAY}/api/v1/svc/knowledge-bases/{kb_id}/documents/{doc_id}/notify-uploaded",
+    sep("⑥ P0-5  NotifyDocumentUploaded   POST .../documents/notify-uploaded")
+    req = {"doc_id": doc_id, "storage_path": body.get("storage_path")}
+    r = requests.post(f"{GATEWAY}/api/v1/svc/knowledge-bases/{kb_id}/documents/notify-uploaded",
                       headers=HEADERS, json=req, timeout=30)
-    trunc_print(6, "POST", f"/svc/knowledge-bases/{kb_id}/documents/{doc_id}/notify-uploaded", req, r)
+    trunc_print(6, "POST", f"/svc/knowledge-bases/{kb_id}/documents/notify-uploaded", req, r)
     record("NotifyDocumentUploaded", r.status_code == 202, "")
 
     sep("⑦ P0-6  ListDocuments(轮询解析)   GET /svc/knowledge-bases/{kb_id}/documents")

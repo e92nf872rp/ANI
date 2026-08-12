@@ -60,9 +60,25 @@ func gatewayIntFromEnv(key string) int {
 func newGatewayInstanceRuntime(ctx context.Context, cfg bootstrap.Config, secrets ports.SecretService) (bootstrap.InstanceRuntime, func(), error) {
 	cfg.SecretService = secrets
 	closeRuntime := func() {}
-	switch strings.TrimSpace(cfg.WorkloadProvider) {
+	provider := strings.TrimSpace(cfg.WorkloadProvider)
+	switch provider {
 	case "", "local":
-		return bootstrap.InstanceRuntime{}, closeRuntime, nil
+		// Local profile: skip the full instance-service runtime, but still
+		// wire the Core data plane when DATABASE_URL is configured so the
+		// gateway can serve /data/query for service-identity callers.
+		if strings.TrimSpace(cfg.DatabaseURL) == "" {
+			return bootstrap.InstanceRuntime{}, closeRuntime, nil
+		}
+		rt, closeFn, err := bootstrap.ConnectInstanceService(ctx, cfg)
+		if err != nil {
+			return bootstrap.InstanceRuntime{}, closeFn, err
+		}
+		// Discard the K8s-bound instance-service surface; keep only the
+		// data plane and async task store for local development.
+		return bootstrap.InstanceRuntime{
+			DataPlane:  rt.DataPlane,
+			AsyncTasks: rt.AsyncTasks,
+		}, closeFn, nil
 	default:
 		return bootstrap.ConnectInstanceService(ctx, cfg)
 	}

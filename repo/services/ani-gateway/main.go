@@ -164,6 +164,9 @@ func main() {
 			"addr", strings.TrimSpace(os.Getenv("KB_SERVICE_GRPC_ADDR")),
 		)
 	}
+	if instanceRuntime.DataPlane != nil {
+		logger.Info("core data plane configured", "provider", "postgres")
+	}
 	middleware.StartAuditWorker()
 	middleware.Register(h, gatewayStore)
 	var routeInstanceRuntime *router.InstanceRuntime
@@ -198,6 +201,8 @@ func main() {
 		KBServiceClient:                       kbServiceClient,
 		KBSSEConfig:                           newGatewaySSEConfig(gatewaySSERuntimeConfigFromEnv()),
 		AsyncTaskStore:                        instanceRuntime.AsyncTasks,
+		DataPlane:                             instanceRuntime.DataPlane,
+		Store:                                 gatewayStore,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

@@ -178,6 +178,125 @@ async def test_head_object():
     assert resp["id"] == "obj-1"
 
 
+# ── data plane (dataQuery / dataCreateTable, SPEC §4.1) ────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_data_query_posts_correct_request():
+    captured: dict = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["method"] = req.method
+        captured["path"] = req.url.path
+        captured["json"] = json.loads(req.content)
+        return _ok({"columns": ["id", "name"], "rows": [{"id": 1, "name": "kb1"}], "rowcount": 1, "last_result": True})
+
+    async with _make_client(handler) as core:
+        resp = await core.data_query(
+            sql="SELECT id, name FROM knowledge_bases WHERE tenant_id = $1",
+            params=[TENANT_ID],
+        )
+
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/api/v1/data/query"
+    assert captured["json"]["sql"].startswith("SELECT id, name")
+    assert captured["json"]["params"] == [TENANT_ID]
+    assert captured["json"]["role"] == "tenant"
+    assert resp["rowcount"] == 1
+    assert resp["rows"][0]["name"] == "kb1"
+
+
+@pytest.mark.asyncio
+async def test_data_query_defaults_params_to_empty_list():
+    captured: dict = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["json"] = json.loads(req.content)
+        return _ok({"rows": [], "rowcount": 0})
+
+    async with _make_client(handler) as core:
+        resp = await core.data_query(sql="SELECT 1")
+
+    assert captured["json"]["params"] == []
+    assert resp["rowcount"] == 0
+
+
+@pytest.mark.asyncio
+async def test_data_query_role_service_for_outbox_dispatcher():
+    """role=service 跨租户，供 outbox 派发器使用（SPEC §4.1, §4.2）."""
+    captured: dict = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["json"] = json.loads(req.content)
+        return _ok({"rows": [{"id": "ev1"}], "rowcount": 1})
+
+    async with _make_client(handler) as core:
+        await core.data_query(
+            sql="SELECT id FROM outbox_events WHERE dispatched = $1",
+            params=[False],
+            role="service",
+        )
+
+    assert captured["json"]["role"] == "service"
+
+
+@pytest.mark.asyncio
+async def test_data_query_error_maps_to_core_api_error():
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(422, json={"code": "UNSUPPORTED_QUERY", "message": "DROP rejected"})
+
+    async with _make_client(handler) as core:
+        with pytest.raises(CoreAPIError) as exc:
+            await core.data_query(sql="DROP TABLE x")
+    assert exc.value.status_code == 422
+    assert exc.value.code == "UNSUPPORTED_QUERY"
+
+
+@pytest.mark.asyncio
+async def test_create_table_posts_correct_request():
+    captured: dict = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["method"] = req.method
+        captured["path"] = req.url.path
+        captured["json"] = json.loads(req.content)
+        return _created({"name": "knowledge_bases", "status": "created"})
+
+    async with _make_client(handler) as core:
+        resp = await core.create_table(
+            name="knowledge_bases",
+            definition="CREATE TABLE knowledge_bases (id uuid PRIMARY KEY)",
+        )
+
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/api/v1/data/tables"
+    assert captured["json"]["name"] == "knowledge_bases"
+    assert captured["json"]["definition"].startswith("CREATE TABLE")
+    assert resp["status"] == "created"
+
+
+@pytest.mark.asyncio
+async def test_create_table_applied_status():
+    def handler(req: httpx.Request) -> httpx.Response:
+        return _created({"name": "kb_chunks", "status": "applied"})
+
+    async with _make_client(handler) as core:
+        resp = await core.create_table(name="kb_chunks", definition="ALTER TABLE kb_chunks ADD COLUMN x text")
+    assert resp["status"] == "applied"
+
+
+@pytest.mark.asyncio
+async def test_create_table_error_maps_to_core_api_error():
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(422, json={"code": "UNSUPPORTED_QUERY", "message": "DROP not allowed"})
+
+    async with _make_client(handler) as core:
+        with pytest.raises(CoreAPIError) as exc:
+            await core.create_table(name="x", definition="DROP TABLE x")
+    assert exc.value.status_code == 422
+    assert exc.value.code == "UNSUPPORTED_QUERY"
+
+
 # ── error mapping ─────────────────────────────────────────────────────────────
 
 
@@ -217,3 +336,73 @@ async def test_tenant_header_sent():
     async with _make_client(handler) as core:
         await core.list_vector_stores()
     assert captured["tenant"] == TENANT_ID
+
+
+# ── data-plane reachability probe (issue-031 SPEC §4.3) ──────────────────────
+
+
+@pytest.mark.asyncio
+async def test_ping_returns_true_on_2xx():
+    """ping() returns True when the gateway /healthz responds 2xx."""
+    captured: dict = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["path"] = req.url.path
+        captured["method"] = req.method
+        return httpx.Response(200, json={"status": "ok"})
+
+    async with _make_client(handler) as core:
+        ok = await core.ping()
+    assert ok is True
+    # /healthz is at the gateway root, not under /api/v1.
+    assert captured["method"] == "GET"
+    assert captured["path"] == "/healthz"
+
+
+@pytest.mark.asyncio
+async def test_ping_returns_false_on_transport_error():
+    """ping() returns False (does not raise) on a transport error."""
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("gateway unreachable")
+
+    async with _make_client(handler) as core:
+        ok = await core.ping()
+    assert ok is False
+
+
+@pytest.mark.asyncio
+async def test_ping_returns_false_on_non_2xx():
+    """ping() returns False on a non-2xx response (e.g. 503)."""
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"status": "unavailable"})
+
+    async with _make_client(handler) as core:
+        ok = await core.ping()
+    assert ok is False
+
+
+@pytest.mark.asyncio
+async def test_ping_handles_ipv6_base_url():
+    """ping() targets the gateway root /healthz and preserves IPv6 brackets.
+
+    Regression: using URL.host (unbracketed) would produce an ambiguous
+    URL like http://::1:8080/healthz. Using URL.netloc keeps the brackets
+    so IPv6 literals resolve correctly.
+    """
+    captured: dict = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["url"] = str(req.url)
+        captured["path"] = req.url.path
+        return httpx.Response(200, json={"status": "ok"})
+
+    # IPv6 loopback with the /api/v1 prefix.
+    async with _make_client(handler, base_url="http://[::1]:8080/api/v1") as core:
+        ok = await core.ping()
+    assert ok is True
+    # The request must target the gateway root /healthz with IPv6 brackets
+    # preserved in the host (not http://::1:8080/healthz which is ambiguous).
+    assert captured["path"] == "/healthz"
+    assert "[::1]:8080" in captured["url"]

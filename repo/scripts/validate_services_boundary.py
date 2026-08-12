@@ -202,18 +202,33 @@ def parse_python_imports(path: pathlib.Path) -> list[str]:
     return modules
 
 
+_IGNORED_DIR_NAMES = frozenset({".venv", "venv", "__pycache__", ".git", "node_modules", "dist", "build"})
+
+
+def _is_ignored_path(path: pathlib.Path) -> bool:
+    return any(part in _IGNORED_DIR_NAMES for part in path.parts)
+
+
 def iter_source_files(root: pathlib.Path, relative_root: str, suffix: str) -> Iterable[pathlib.Path]:
     target_root = root / relative_root
     if not target_root.exists():
         return []
-    return sorted(path for path in target_root.rglob(f"*{suffix}") if path.is_file())
+    return sorted(
+        path
+        for path in target_root.rglob(f"*{suffix}")
+        if path.is_file() and not _is_ignored_path(path)
+    )
 
 
 def iter_files_with_suffixes(root: pathlib.Path, relative_root: str, suffixes: tuple[str, ...]) -> Iterable[pathlib.Path]:
     target_root = root / relative_root
     if not target_root.exists():
         return []
-    return sorted(path for path in target_root.rglob("*") if path.is_file() and path.suffix in suffixes)
+    return sorted(
+        path
+        for path in target_root.rglob("*")
+        if path.is_file() and path.suffix in suffixes and not _is_ignored_path(path)
+    )
 
 
 def service_name_for_path(path: pathlib.Path, root: pathlib.Path) -> str | None:

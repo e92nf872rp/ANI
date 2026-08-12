@@ -224,8 +224,8 @@ def upload_doc(kb_id, ftype, content_bytes):
     ntf = {}
     if up.status_code in (200, 204):
         nn = request("POST",
-                     f"{GATEWAY}/api/v1/svc/knowledge-bases/{kb_id}/documents/{body.get('doc_id')}/notify-uploaded",
-                     json={"storage_path": body.get("storage_path")})
+                     f"{GATEWAY}/api/v1/svc/knowledge-bases/{kb_id}/documents/notify-uploaded",
+                     json={"doc_id": body.get("doc_id"), "storage_path": body.get("storage_path")})
         ntf = {"notify_status": nn.status_code}
     return r, body, up, ntf
 

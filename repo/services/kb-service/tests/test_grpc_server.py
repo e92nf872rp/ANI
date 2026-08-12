@@ -193,10 +193,11 @@ def test_query_missing_idempotency_key_invalid_argument(stub):
 
 
 def test_query_no_pool_returns_unavailable_or_precondition(stub):
-    # Query uses rag-engine (no DB pool needed directly), so it will attempt
-    # to call rag-engine and fail with UNAVAILABLE (connection refused).
-    # The exact code depends on whether the rag-engine addr is reachable;
-    # either UNAVAILABLE or FAILED_PRECONDITION is acceptable here.
+    # Query loads the KB config first; without a pool the KB lookup fails
+    # before rag-engine is reached, so the RPC aborts. The exact code depends
+    # on which step fails first (NOT_FOUND when KB lookup returns no row,
+    # UNAVAILABLE when rag-engine is unreachable, FAILED_PRECONDITION when
+    # the data plane is unreachable). All three are acceptable here.
     with pytest.raises(grpc.RpcError) as exc:
         stub.Query(
             kb_pb.QueryRequest(
@@ -207,6 +208,7 @@ def test_query_no_pool_returns_unavailable_or_precondition(stub):
     assert exc.value.code() in (
         grpc.StatusCode.UNAVAILABLE,
         grpc.StatusCode.FAILED_PRECONDITION,
+        grpc.StatusCode.NOT_FOUND,
     )
 
 

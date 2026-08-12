@@ -6,7 +6,7 @@ Verifies:
 - The 10 P0 RPCs are still declared on the servicer (regression of issue-006).
 - The 3 P1 RPCs still return UNIMPLEMENTED.
 
-These tests use a mock asyncpg pool and a mock CoreClient factory so no real
+These tests use a mock pool sentinel and a mock CoreClient factory so no real
 DB or Core gateway is required. They focus on the wiring logic (Core API call
 happens, correct vector_store_id derived, errors mapped) rather than the SQL
 behavior (covered by the repository layer + integration tests).
@@ -106,6 +106,13 @@ class _MockCoreClient:
 
     def fail_next(self):
         self._fail = True
+
+    async def data_query(self, *, sql, params=None, role="tenant"):
+        """Mock data_query for the migrated repositories (issue #029)."""
+        self.calls.append(("data_query", {"sql": sql, "params": params, "role": role}))
+        # Return a default empty result; tests that need rows set them up
+        # via side_effect on this method when needed.
+        return {"rows": [], "rowcount": 0}
 
     async def create_vector_store(self, **kwargs):
         self.calls.append(("create_vector_store", kwargs))

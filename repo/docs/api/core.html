@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>192</dd></div>
-          <div><dt>Schemas</dt><dd>262</dd></div>
+          <div><dt>Operations</dt><dd>194</dd></div>
+          <div><dt>Schemas</dt><dd>265</dd></div>
         </dl>
       </section>
 
@@ -382,6 +382,22 @@
           <td>设置桶默认存储类型</td>
           <td><code>scope:objects:update</code></td>
           <td>200, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/data/query</code></td>
+          <td><code>dataQuery</code></td>
+          <td>参数化 SQL 执行（单事务）</td>
+          <td><code></code></td>
+          <td>200, 400, 403, 422, 429</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/data/tables</code></td>
+          <td><code>dataCreateTable</code></td>
+          <td>受管建表（受管迁移）</td>
+          <td><code></code></td>
+          <td>201, 400, 403, 422</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1745,6 +1761,9 @@
         <li><code>CreateVectorStoreRequest</code></li>
         <li><code>CreateVolumeSnapshotRequest</code></li>
         <li><code>CursorPage</code></li>
+        <li><code>DataQueryRequest</code></li>
+        <li><code>DataQueryResponse</code></li>
+        <li><code>DataTableCreateRequest</code></li>
         <li><code>EmailRecipient</code></li>
         <li><code>EmailRecipientListResponse</code></li>
         <li><code>EmailSmtpConfigResponse</code></li>

@@ -26,6 +26,7 @@ import (
 // Existing raw clients stay available during the ARCH-ADAPTER migration window.
 type Capabilities struct {
 	Metadata              ports.MetadataStore
+	DataPlane             ports.SQLDataPlane
 	MessageBus            ports.MessageBus
 	Cache                 ports.CacheStore
 	KubernetesAPI         ports.HealthChecker
@@ -251,6 +252,7 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 	)
 	return Capabilities{
 		Metadata:             metadata,
+		DataPlane:            postgresadapter.NewSQLDataPlane(db),
 		MessageBus:           natsadapter.NewMessageBus(js, slog.Default()),
 		Cache:                redisadapter.NewCacheStore(redisClient),
 		KubernetesAPI:        kubeClient,

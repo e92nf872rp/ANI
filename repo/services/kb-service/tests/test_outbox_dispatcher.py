@@ -1,20 +1,21 @@
-"""Tests for the outbox dispatcher (issue-008 / US-010, SPEC §6.1).
+"""Tests for the outbox dispatcher (issue-008 / US-010, SPEC §6.1, §4.2).
 
 Verifies:
-- The dispatcher polls outbox_events and publishes undispatched rows to NATS
-  `ani.tasks.kb.parse` (100/batch).
-- Each published event is marked published=TRUE in its own short transaction.
+- The dispatcher polls outbox_events (via CoreClient.data_query role="service")
+  and publishes undispatched rows to NATS `ani.tasks.kb.parse` (100/batch).
+- Each published event is marked published=TRUE in a single batched UPDATE
+  (via CoreClient.data_query role="service").
 - The dispatcher loop survives transient errors (does not die).
 - stop() drains the background task.
 
-Uses a mock asyncpg pool and a mock NATS client so no real DB/NATS is required.
+Uses a mock CoreClient (data_query) and a mock NATS client so no real
+Core gateway / DB / NATS is required (issue-030: data plane mock).
 """
 import asyncio
 import json
 import os
 import sys
 import uuid
-from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -52,9 +53,9 @@ def _make_event(event_id: int, payload: dict | None = None):
     return {
         "id": event_id,
         "aggregate_type": "kb_documents",
-        "aggregate_id": uuid.UUID(DOC_ID),
+        "aggregate_id": DOC_ID,
         "event_type": "kb.parse",
-        "tenant_id": uuid.UUID(TENANT_ID),
+        "tenant_id": TENANT_ID,
         "payload": payload or {"doc_id": DOC_ID, "kb_id": "kb-1"},
         "published": False,
         "published_at": None,
@@ -62,53 +63,33 @@ def _make_event(event_id: int, payload: dict | None = None):
     }
 
 
-class _MockConn:
-    """Minimal asyncpg.Connection mock for outbox repo calls."""
+def _mock_core(*, list_rows=None, mark_return=None):
+    """Build a mock CoreClient whose data_query returns canned responses.
 
-    def __init__(self, rows=None):
-        self._rows = rows if rows is not None else []
-        self._marked: list[int] = []
+    - list_undispatched: returns list_rows (role="service")
+    - mark_dispatched_batch: returns mark_return (role="service")
+    """
+    core = MagicMock()
+    core.data_query = AsyncMock()
+    core.aclose = AsyncMock()
+    # Default: list returns list_rows, mark returns rowcount
+    list_rows = list_rows if list_rows is not None else []
+    mark_return = mark_return if mark_return is not None else {"rowcount": 0}
 
-    async def fetch(self, sql, *args):
-        # list_undispatched passes LIMIT $1 as the last arg; honor it so
-        # batch_size is respected.
-        limit = None
-        for a in args:
-            if isinstance(a, int):
-                limit = a
-                break
-        if limit is not None:
-            return list(self._rows[:limit])
-        return list(self._rows)
+    call_count = [0]
 
-    async def execute(self, sql, *args):
-        # mark_dispatched: UPDATE ... WHERE id = $1 (single)
-        # mark_dispatched_batch: UPDATE ... WHERE id = ANY($1::int[]) (list)
-        if args:
-            if isinstance(args[0], int):
-                self._marked.append(args[0])
-            elif isinstance(args[0], list):
-                self._marked.extend(args[0])
-        # Return "UPDATE N" where N matches the affected count for batch.
-        if args and isinstance(args[0], list):
-            return f"UPDATE {len(args[0])}"
-        return "UPDATE 1"
+    async def _data_query(*, sql, params=None, role="tenant"):
+        call_count[0] += 1
+        if "SELECT" in sql and "outbox_events" in sql:
+            # list_undispatched
+            return {"rows": list_rows, "rowcount": len(list_rows)}
+        if "UPDATE outbox_events" in sql:
+            # mark_dispatched or mark_dispatched_batch
+            return mark_return
+        return {"rows": [], "rowcount": 0}
 
-
-class _MockPool:
-    """Returns _MockConn instances from acquire(); each acquire returns a
-    fresh conn so the dispatcher's list + mark use independent conns (as in
-    the real pool path)."""
-
-    def __init__(self, rows=None):
-        self._rows = rows
-        self._conns: list[_MockConn] = []
-
-    @asynccontextmanager
-    async def acquire(self):
-        conn = _MockConn(rows=self._rows)
-        self._conns.append(conn)
-        yield conn
+    core.data_query.side_effect = _data_query
+    return core
 
 
 # ── _dispatch_once ────────────────────────────────────────────────────────────
@@ -117,10 +98,11 @@ class _MockPool:
 @pytest.mark.asyncio
 async def test_dispatch_once_publishes_and_marks_all_events():
     rows = [_make_event(1), _make_event(2), _make_event(3)]
-    pool = _MockPool(rows=rows)
+    core = _mock_core(list_rows=rows, mark_return={"rowcount": 3})
     nats = _MockNATS()
     dispatcher = OutboxDispatcher(
-        pool=pool, nats_client=nats, subject="ani.tasks.kb.parse", batch_size=100
+        core_client=core, nats_client=nats, subject="ani.tasks.kb.parse",
+        batch_size=100,
     )
     dispatched = await dispatcher._dispatch_once()
     assert dispatched == 3
@@ -129,31 +111,38 @@ async def test_dispatch_once_publishes_and_marks_all_events():
     # payload is JSON-encoded bytes
     payloads = [json.loads(p) for _, p in nats.published]
     assert payloads[0]["doc_id"] == DOC_ID
+    # The mark call used role="service" (cross-tenant, SPEC §4.2)
+    mark_call = [c for c in core.data_query.call_args_list
+                 if "UPDATE outbox_events" in c.kwargs["sql"]][0]
+    assert mark_call.kwargs["role"] == "service"
 
 
 @pytest.mark.asyncio
 async def test_dispatch_once_batch_marks_all_published_ids():
-    """Issue 2 fix: all published events are marked in ONE batched UPDATE on
-    ONE connection, not one connection per event."""
+    """Issue 2 fix: all published events are marked in ONE batched UPDATE."""
     rows = [_make_event(1), _make_event(2), _make_event(3)]
-    pool = _MockPool(rows=rows)
+    core = _mock_core(list_rows=rows, mark_return={"rowcount": 3})
     nats = _MockNATS()
     dispatcher = OutboxDispatcher(
-        pool=pool, nats_client=nats, subject="ani.tasks.kb.parse", batch_size=100
+        core_client=core, nats_client=nats, subject="ani.tasks.kb.parse",
+        batch_size=100,
     )
     await dispatcher._dispatch_once()
-    # The mark connection is the SECOND acquire (list=1, mark=1); verify it
-    # received all three event ids in a single batch call.
-    assert len(pool._conns) == 2  # one for list, one for batch mark
-    mark_conn = pool._conns[1]
-    assert mark_conn._marked == [1, 2, 3]  # batched, single execute call
+    # Verify the mark call received all three event ids in a single batch
+    mark_calls = [c for c in core.data_query.call_args_list
+                  if "UPDATE outbox_events" in c.kwargs["sql"]]
+    assert len(mark_calls) == 1  # single batched mark call
+    params = mark_calls[0].kwargs["params"]
+    assert params[0] == [1, 2, 3]  # event_ids passed as a list
 
 
 @pytest.mark.asyncio
 async def test_dispatch_once_empty_returns_zero():
-    pool = _MockPool(rows=[])
+    core = _mock_core(list_rows=[])
     nats = _MockNATS()
-    dispatcher = OutboxDispatcher(pool=pool, nats_client=nats, subject="ani.tasks.kb.parse")
+    dispatcher = OutboxDispatcher(
+        core_client=core, nats_client=nats, subject="ani.tasks.kb.parse"
+    )
     dispatched = await dispatcher._dispatch_once()
     assert dispatched == 0
     assert nats.published == []
@@ -162,10 +151,11 @@ async def test_dispatch_once_empty_returns_zero():
 @pytest.mark.asyncio
 async def test_dispatch_once_respects_batch_size():
     rows = [_make_event(i) for i in range(5)]
-    pool = _MockPool(rows=rows)
+    core = _mock_core(list_rows=rows[:2], mark_return={"rowcount": 2})
     nats = _MockNATS()
     dispatcher = OutboxDispatcher(
-        pool=pool, nats_client=nats, subject="ani.tasks.kb.parse", batch_size=2
+        core_client=core, nats_client=nats, subject="ani.tasks.kb.parse",
+        batch_size=2,
     )
     dispatched = await dispatcher._dispatch_once()
     assert dispatched == 2
@@ -175,13 +165,30 @@ async def test_dispatch_once_respects_batch_size():
 @pytest.mark.asyncio
 async def test_publish_uses_subject_from_settings():
     rows = [_make_event(1)]
-    pool = _MockPool(rows=rows)
+    core = _mock_core(list_rows=rows, mark_return={"rowcount": 1})
     nats = _MockNATS()
     dispatcher = OutboxDispatcher(
-        pool=pool, nats_client=nats, subject="ani.tasks.kb.parse"
+        core_client=core, nats_client=nats, subject="ani.tasks.kb.parse"
     )
     await dispatcher._dispatch_once()
     assert nats.published[0][0] == "ani.tasks.kb.parse"
+
+
+@pytest.mark.asyncio
+async def test_list_undispatched_uses_service_role():
+    """AC: list_undispatched uses role='service' for cross-tenant access
+    (SPEC §4.2)."""
+    rows = [_make_event(1)]
+    core = _mock_core(list_rows=rows, mark_return={"rowcount": 1})
+    nats = _MockNATS()
+    dispatcher = OutboxDispatcher(
+        core_client=core, nats_client=nats, subject="ani.tasks.kb.parse"
+    )
+    await dispatcher._dispatch_once()
+    # The list call used role="service"
+    list_call = [c for c in core.data_query.call_args_list
+                 if "SELECT" in c.kwargs["sql"]][0]
+    assert list_call.kwargs["role"] == "service"
 
 
 # ── lifecycle ─────────────────────────────────────────────────────────────────
@@ -190,10 +197,10 @@ async def test_publish_uses_subject_from_settings():
 @pytest.mark.asyncio
 async def test_start_stop_lifecycle_drains_task():
     rows = [_make_event(1)]
-    pool = _MockPool(rows=rows)
+    core = _mock_core(list_rows=rows, mark_return={"rowcount": 1})
     nats = _MockNATS()
     dispatcher = OutboxDispatcher(
-        pool=pool, nats_client=nats, subject="ani.tasks.kb.parse",
+        core_client=core, nats_client=nats, subject="ani.tasks.kb.parse",
         poll_interval=0.01,
     )
     task = dispatcher.start()
@@ -209,15 +216,12 @@ async def test_start_stop_lifecycle_drains_task():
 @pytest.mark.asyncio
 async def test_loop_survives_transient_nats_error():
     """A transient NATS publish error must not kill the dispatcher loop."""
-    # First publish fails, subsequent succeed; one event so only one publish
-    # attempt per iteration. We give 3 rows so the failing one is skipped and
-    # the rest still dispatch on that iteration.
     rows = [_make_event(1), _make_event(2)]
-    pool = _MockPool(rows=rows)
+    core = _mock_core(list_rows=rows, mark_return={"rowcount": 2})
     nats = _MockNATS()
     nats.fail_next()
     dispatcher = OutboxDispatcher(
-        pool=pool, nats_client=nats, subject="ani.tasks.kb.parse",
+        core_client=core, nats_client=nats, subject="ani.tasks.kb.parse",
         poll_interval=0.01,
     )
     task = dispatcher.start()
@@ -238,18 +242,16 @@ async def test_run_loop_backs_off_on_consecutive_failures():
     grows exponentially and is capped at MAX_BACKOFF_INTERVAL_SECONDS."""
     from app.outbox.dispatcher import MAX_BACKOFF_INTERVAL_SECONDS
 
-    pool = _MockPool(rows=[_make_event(1)])
+    core = _mock_core(list_rows=[_make_event(1)])
     nats = _MockNATS()
-    # Make every publish fail so _dispatch_once always raises.
-    nats._fail = True
 
     class _AlwaysFailNATS(_MockNATS):
         async def publish(self, subject, payload):
             raise RuntimeError("NATS down")
 
     dispatcher = OutboxDispatcher(
-        pool=pool, nats_client=_AlwaysFailNATS(), subject="ani.tasks.kb.parse",
-        poll_interval=0.01,
+        core_client=core, nats_client=_AlwaysFailNATS(),
+        subject="ani.tasks.kb.parse", poll_interval=0.01,
     )
     # Simulate consecutive failures by exercising the backoff formula used
     # in _run_loop: backoff = min(poll_interval * 2**min(n-1, 8), cap).
@@ -283,10 +285,10 @@ async def test_run_loop_backs_off_on_consecutive_failures():
 @pytest.mark.asyncio
 async def test_payload_dict_is_json_encoded():
     rows = [_make_event(1, payload={"doc_id": DOC_ID, "kb_id": "kb-1", "n": 5})]
-    pool = _MockPool(rows=rows)
+    core = _mock_core(list_rows=rows, mark_return={"rowcount": 1})
     nats = _MockNATS()
     dispatcher = OutboxDispatcher(
-        pool=pool, nats_client=nats, subject="ani.tasks.kb.parse"
+        core_client=core, nats_client=nats, subject="ani.tasks.kb.parse"
     )
     await dispatcher._dispatch_once()
     _, payload_bytes = nats.published[0]
@@ -300,10 +302,10 @@ async def test_payload_string_is_passed_through():
     """If the DB returns payload as a JSON string, it is published as-is."""
     event = _make_event(1)
     event["payload"] = json.dumps({"doc_id": DOC_ID})
-    pool = _MockPool(rows=[event])
+    core = _mock_core(list_rows=[event], mark_return={"rowcount": 1})
     nats = _MockNATS()
     dispatcher = OutboxDispatcher(
-        pool=pool, nats_client=nats, subject="ani.tasks.kb.parse"
+        core_client=core, nats_client=nats, subject="ani.tasks.kb.parse"
     )
     await dispatcher._dispatch_once()
     decoded = json.loads(nats.published[0][1].decode("utf-8"))

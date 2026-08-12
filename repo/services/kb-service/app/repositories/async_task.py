@@ -1,21 +1,23 @@
-"""async_tasks repository (SPEC §2.4, §6.1).
+"""async_tasks repository (SPEC §2.4, §6.1, §4.2).
 
 Covers the async_tasks table used for idempotency replay and parse task
 tracking. CreateKB / NotifyDocumentUploaded write a task here to record the
 idempotency_key result so retries return the same response.
+
+All access goes through the Core data plane (`CoreClient.data_query`). RLS
+tenant filtering is applied by Core based on the `X-Tenant-Id` header carried
+by the CoreClient (role="tenant").
 """
 from __future__ import annotations
 
-import uuid
+import json
 from typing import Any
 
-import asyncpg
-
-from .rls import set_tenant_context
+from app.core_api.client import CoreClient
 
 
 async def find_by_idempotency_key(
-    conn: asyncpg.Connection,
+    core: CoreClient,
     *,
     tenant_id: str,
     idempotency_key: str,
@@ -25,25 +27,21 @@ async def find_by_idempotency_key(
     Returns the row (including `result`) if a prior call with the same key
     succeeded, enabling idempotent replay (SPEC §6.1, §6.4).
     """
-    async with conn.transaction():
-        await set_tenant_context(conn, tenant_id)
-        row = await conn.fetchrow(
-            """
-            SELECT id, tenant_id, idempotency_key, task_type, resource_type,
-                   resource_id, status, attempt_count, max_attempts,
-                   progress_pct, payload, result, error_message,
-                   started_at, completed_at, created_at, updated_at
-              FROM async_tasks
-             WHERE tenant_id = $1 AND idempotency_key = $2
-            """,
-            uuid.UUID(tenant_id),
-            idempotency_key,
-        )
-    return dict(row) if row else None
+    sql = """
+        SELECT id, tenant_id, idempotency_key, task_type, resource_type,
+               resource_id, status, attempt_count, max_attempts,
+               progress_pct, payload, result, error_message,
+               started_at, completed_at, created_at, updated_at
+          FROM async_tasks
+         WHERE tenant_id = $1 AND idempotency_key = $2
+    """
+    result = await core.data_query(sql=sql, params=[tenant_id, idempotency_key])
+    rows = result.get("rows", [])
+    return rows[0] if rows else None
 
 
 async def create_task(
-    conn: asyncpg.Connection,
+    core: CoreClient,
     *,
     tenant_id: str,
     idempotency_key: str,
@@ -53,51 +51,14 @@ async def create_task(
     payload: dict[str, Any] | None = None,
     status: str = "pending",
 ) -> dict[str, Any]:
-    """INSERT a new async_tasks row and return it (RLS-scoped).
+    """INSERT a new async_tasks row and return it (RLS-scoped via Core).
 
-    `idempotency_key` is UNIQUE per tenant so a duplicate insert raises
-    asyncpg.UniqueViolationError; callers should check find_by_idempotency_key
-    first.
+    `idempotency_key` is UNIQUE per tenant so a duplicate insert raises a
+    unique violation (mapped to CoreAPIError by the data plane); callers
+    should check find_by_idempotency_key first.
     """
-    import json
-
     payload_json = json.dumps(payload or {}, default=str)
-    async with conn.transaction():
-        return await create_task_in_tx(
-            conn,
-            tenant_id=tenant_id,
-            idempotency_key=idempotency_key,
-            task_type=task_type,
-            resource_type=resource_type,
-            resource_id=resource_id,
-            payload=payload,
-            status=status,
-        )
-
-
-async def create_task_in_tx(
-    conn: asyncpg.Connection,
-    *,
-    tenant_id: str,
-    idempotency_key: str,
-    task_type: str,
-    resource_type: str | None = None,
-    resource_id: str | None = None,
-    payload: dict[str, Any] | None = None,
-    status: str = "pending",
-) -> dict[str, Any]:
-    """INSERT an async_tasks row inside the caller's transaction (RLS-scoped).
-
-    Does NOT open its own transaction. Used by NotifyDocumentUploaded (SPEC §6.1,
-    US-010) so the async_tasks insert commits atomically with the kb_documents
-    update and outbox_events insert. `idempotency_key` is UNIQUE per tenant.
-    """
-    import json
-
-    payload_json = json.dumps(payload or {}, default=str)
-    await set_tenant_context(conn, tenant_id)
-    row = await conn.fetchrow(
-        """
+    sql = """
         INSERT INTO async_tasks
             (tenant_id, idempotency_key, task_type, resource_type,
              resource_id, status, payload)
@@ -107,61 +68,54 @@ async def create_task_in_tx(
                   max_attempts, progress_pct, payload, result,
                   error_message, started_at, completed_at,
                   created_at, updated_at
-        """,
-        uuid.UUID(tenant_id),
-        idempotency_key,
-        task_type,
-        resource_type,
-        uuid.UUID(resource_id) if resource_id else None,
-        status,
-        payload_json,
+    """
+    result = await core.data_query(
+        sql=sql,
+        params=[
+            tenant_id, idempotency_key, task_type,
+            resource_type, resource_id, status, payload_json,
+        ],
     )
-    return dict(row)
+    rows = result.get("rows", [])
+    if not rows:
+        raise RuntimeError("async_tasks INSERT returned no row")
+    return rows[0]
 
 
 async def complete_task(
-    conn: asyncpg.Connection,
+    core: CoreClient,
     *,
     tenant_id: str,
     task_id: str,
     result: dict[str, Any] | None = None,
     status: str = "completed",
 ) -> bool:
-    """Mark a task completed with its result (RLS-scoped)."""
-    import json
-
+    """Mark a task completed with its result (RLS-scoped via Core)."""
     result_json = json.dumps(result, default=str) if result else None
-    async with conn.transaction():
-        await set_tenant_context(conn, tenant_id)
-        res = await conn.execute(
-            """
-            UPDATE async_tasks
-               SET status = $2, result = $3, completed_at = now(),
-                   updated_at = now()
-             WHERE id = $1
-            """,
-            uuid.UUID(task_id),
-            status,
-            result_json,
-        )
-    return res == "UPDATE 1"
+    sql = """
+        UPDATE async_tasks
+           SET status = $2, result = $3, completed_at = now(),
+               updated_at = now()
+         WHERE id = $1
+    """
+    res = await core.data_query(
+        sql=sql, params=[task_id, status, result_json]
+    )
+    return res.get("rowcount", 0) == 1
 
 
 async def get_task(
-    conn: asyncpg.Connection, *, tenant_id: str, task_id: str
+    core: CoreClient, *, tenant_id: str, task_id: str
 ) -> dict[str, Any] | None:
-    """SELECT a single async_tasks row by id (RLS-scoped)."""
-    async with conn.transaction():
-        await set_tenant_context(conn, tenant_id)
-        row = await conn.fetchrow(
-            """
-            SELECT id, tenant_id, idempotency_key, task_type, resource_type,
-                   resource_id, status, attempt_count, max_attempts,
-                   progress_pct, payload, result, error_message,
-                   started_at, completed_at, created_at, updated_at
-              FROM async_tasks
-             WHERE id = $1
-            """,
-            uuid.UUID(task_id),
-        )
-    return dict(row) if row else None
+    """SELECT a single async_tasks row by id (RLS-scoped via Core)."""
+    sql = """
+        SELECT id, tenant_id, idempotency_key, task_type, resource_type,
+               resource_id, status, attempt_count, max_attempts,
+               progress_pct, payload, result, error_message,
+               started_at, completed_at, created_at, updated_at
+          FROM async_tasks
+         WHERE id = $1
+    """
+    result = await core.data_query(sql=sql, params=[task_id])
+    rows = result.get("rows", [])
+    return rows[0] if rows else None

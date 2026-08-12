@@ -1,5 +1,7 @@
 # kb-service dependencies (Python 3.11 + FastAPI + gRPC)
 # Pinned to versions verified in the local dev environment.
+# issue-031: asyncpg removed — all data access goes through the Core data
+# plane (CoreClient.data_query) via the gateway /data/query endpoint.
 fastapi==0.116.1
 uvicorn==0.35.0
 grpcio==1.83.0
@@ -8,7 +10,6 @@ protobuf==7.35.1
 pydantic==2.11.7
 pydantic-settings==2.14.2
 httpx==0.28.1
-asyncpg==0.30.0
 nats-py==2.9.0
 redis==5.2.0
 
