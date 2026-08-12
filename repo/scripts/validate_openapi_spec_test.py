@@ -438,8 +438,8 @@ class OpenAPISpecValidatorTest(unittest.TestCase):
         ):
             self.assertIn(schema_name, schemas)
 
-    def test_network_p0_contract_adds_fields_and_lb_subresources(self) -> None:
-        """NETWORK-P0-CONTRACT-A / C1: additive network fields + LB child CRUD paths."""
+    def test_network_p0_contract_adds_non_lb_fields(self) -> None:
+        """NETWORK-P0-CONTRACT-A / C1: additive VPC, subnet, SG, and route fields."""
         spec = yaml.safe_load((ROOT / "api/openapi/v1.yaml").read_text(encoding="utf-8"))
         schemas = spec["components"]["schemas"]
         paths = spec["paths"]
@@ -506,104 +506,6 @@ class OpenAPISpecValidatorTest(unittest.TestCase):
             route_filters["next_hop_type"]["schema"]["enum"],
             ["gateway", "instance", "nat", "local"],
         )
-
-        lb = schemas["NetworkLoadBalancer"]["properties"]
-        self.assertIn("listener_count", lb)
-        self.assertIn("backend_count", lb)
-        self.assertEqual(
-            schemas["NetworkLoadBalancerBackendGroup"]["properties"]["algorithm"]["enum"],
-            ["round_robin", "weighted_round_robin"],
-        )
-        health = schemas["NetworkLoadBalancerHealthCheck"]
-        for field in (
-            "protocol",
-            "port",
-            "interval_seconds",
-            "timeout_seconds",
-            "healthy_threshold",
-            "unhealthy_threshold",
-        ):
-            self.assertIn(field, health["properties"])
-            self.assertIn(field, health["required"])
-        self.assertIn("path", health["properties"])
-        self.assertNotIn("expected_codes", health["properties"])
-
-        embedded_listener = schemas["NetworkLoadBalancerListener"]
-        self.assertIn("backend_group_id", embedded_listener["properties"])
-        self.assertNotIn("backend_group_id", embedded_listener["required"])
-        self.assertNotIn("target_port", embedded_listener["required"])
-        self.assertTrue(embedded_listener["properties"]["target_port"]["deprecated"])
-        self.assertIn("member.port", embedded_listener["properties"]["target_port"]["description"])
-        self.assertNotIn("certificate_id", embedded_listener["properties"])
-        self.assertNotIn("udp", embedded_listener["properties"]["protocol"]["enum"])
-
-        for schema_name in (
-            "NetworkLoadBalancerListenerResource",
-            "CreateNetworkLoadBalancerListenerRequest",
-        ):
-            listener = schemas[schema_name]
-            self.assertIn("backend_group_id", listener["properties"])
-            self.assertIn("backend_group_id", listener["required"])
-            self.assertNotIn("target_port", listener["required"])
-            self.assertTrue(listener["properties"]["target_port"]["deprecated"])
-            self.assertIn("member.port", listener["properties"]["target_port"]["description"])
-            self.assertNotIn("certificate_id", listener["properties"])
-            self.assertNotIn("udp", listener["properties"]["protocol"]["enum"])
-        update_listener = schemas["UpdateNetworkLoadBalancerListenerRequest"]
-        self.assertIn("backend_group_id", update_listener["properties"])
-        self.assertNotIn("backend_group_id", update_listener["required"])
-        self.assertNotIn("target_port", update_listener["required"])
-        self.assertTrue(update_listener["properties"]["target_port"]["deprecated"])
-        self.assertIn("member.port", update_listener["properties"]["target_port"]["description"])
-
-        create_lb_schema = schemas["CreateNetworkLoadBalancerRequest"]
-        create_lb_listeners = create_lb_schema["properties"]["listeners"]
-        self.assertIn("backend_group_id", create_lb_listeners["description"])
-
-        member_health = schemas["NetworkLoadBalancerBackendMember"]["properties"]["health_status"]
-        self.assertEqual(member_health["enum"], ["unknown", "healthy", "unhealthy"])
-        self.assertTrue(member_health["readOnly"])
-        self.assertIn("health_status", schemas["NetworkLoadBalancerBackendMember"]["required"])
-
-        for path, methods in (
-            ("/networks/load-balancers/{load_balancer_id}/listeners", ("get", "post")),
-            (
-                "/networks/load-balancers/{load_balancer_id}/listeners/{listener_id}",
-                ("get", "put", "delete"),
-            ),
-            ("/networks/load-balancers/{load_balancer_id}/backend-groups", ("get", "post")),
-            (
-                "/networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}",
-                ("get", "put", "delete"),
-            ),
-            (
-                "/networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}/members",
-                ("get", "post"),
-            ),
-            (
-                "/networks/load-balancers/{load_balancer_id}/backend-groups/{backend_group_id}/members/{member_id}",
-                ("get", "put", "delete"),
-            ),
-        ):
-            self.assertIn(path, paths)
-            for method in methods:
-                self.assertIn(method, paths[path], msg=f"{method.upper()} {path}")
-                if method in ("post", "put"):
-                    operation = paths[path][method]
-                    request_schema = operation["requestBody"]["content"]["application/json"]["schema"]["$ref"]
-                    request_name = request_schema.rsplit("/", 1)[-1]
-                    self.assertIn("idempotency_key", schemas[request_name]["properties"])
-                    self.assertIn("idempotency_key", schemas[request_name]["required"])
-                    self.assertIn("409", operation["responses"])
-
-        create_lb = paths["/networks/load-balancers"]["post"]
-        self.assertIn("400", create_lb["responses"])
-        self.assertIn("listeners[]", create_lb["description"])
-        self.assertIn("backend groups", create_lb["description"])
-        self.assertIn("422", create_lb["responses"])
-        create_lb_422 = create_lb["responses"]["422"]
-        create_lb_422_text = create_lb_422.get("description", "") + yaml.dump(create_lb_422)
-        self.assertIn("EIP", create_lb_422_text)
 
     def test_async_accepted_responses_declare_polling_location(self) -> None:
         spec = yaml.safe_load((ROOT / "api/openapi/v1.yaml").read_text(encoding="utf-8"))

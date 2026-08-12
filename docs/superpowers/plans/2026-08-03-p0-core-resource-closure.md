@@ -188,9 +188,6 @@ NETWORK-P0-CONTRACT-A             |
 - 修改：`repo/api/openapi/v1.yaml`
 - 修改：`repo/api/core-v1-compatibility-baseline.yaml`
 - 修改：`repo/scripts/validate_openapi_spec_test.py`
-- 修改：`repo/services/docs/console-modules/compute/network/load-balancer.md`
-- 修改：`repo/services/tasks/modules/prd/console/compute/prd-console-network-load-balancer.md`
-- 修改：`repo/services/tasks/modules/spec/console/compute/spec-console-network-load-balancer.md`
 - 生成：Core SDK 与静态 API 文档生成物
 
 **契约产出：**
@@ -200,17 +197,10 @@ NETWORK-P0-CONTRACT-A             |
 - SG response 增加只读 `rule_count/bound_instance_count`，用于 7.29 原型列表字段；保留既有 `rules`。
 - SG rule 保持历史 `cidr` 字符串字段为 required；不引入 7.29 原型未要求的安全组/实例 peer，兼容性 baseline 不得掩盖 required 字段删除。
 - Route request/response 增加可选 `priority`；response/filter 的 next-hop 增加 `local`，create request 仍禁止创建 local route。
-- LB 增加只读 `listener_count/backend_count`；新增 listener、backend-group、backend-member typed schemas 和 CRUD 路径。
-- 新增 listener 必须通过 `backend_group_id` 关联后端组；历史父资源 `listeners[]` 摘要只兼容新增可选字段，update 可选传入以支持改绑。算法为 `round_robin/weighted_round_robin`，健康检查包含 protocol、port、path、interval_seconds、timeout_seconds、healthy_threshold、unhealthy_threshold。
-- 冻结 listener 端口语义：`listener.port` 是前端监听端口；typed backend group 模式下唯一后端端口来源是 member `port`。`target_port` 在摘要、typed resource 和 create/update request 中均为可选 deprecated 兼容字段；存在 `backend_group_id` 时 provider 必须忽略它，无该字段的 legacy listener 才使用它。
-- 冻结 LB 创建顺序为“空 LB → backend groups → members → listeners”。父资源 `CreateNetworkLoadBalancerRequest.listeners[]` 仅兼容 legacy listener 输入，不支持 backend group/member 原子关联；item 携带 `backend_group_id` 时 Core 必须返回 400，不得静默忽略。
-- backend member 增加只读 `health_status=unknown/healthy/unhealthy`，与资源生命周期 `state` 分离。
-- 公网 LB 在没有 EIP 能力时返回 422；不新增虚假的 EIP 占位资源。
-- 7.29 原型未要求 UDP、HTTPS 证书、expected status code、静态 VIP 或 EIP 资源字段，本批不预建。
-- 同步 LB PRD/SPEC/模块文档：listener/backend 管理进入 P0，不再保留首版只读或 TODO-YAML 表述。
+- LB 数据面和完整产品语义尚未冻结，本批不新增 LB typed 子资源、端口/权重/健康检查或 EIP 错误契约。
 
-- [x] 调整契约测试并先确认失败，覆盖 SG VPC/聚合字段、历史 `cidr` required、local route 只读、listener 后端组关联、member 健康状态、LB 子资源 CRUD、幂等和错误响应。
-- [x] 修改 v1 和 LB 需求文档；只做兼容新增，并纠正当前工作区中的 SG required 退化。
+- [x] 调整契约测试并先确认失败，覆盖 SG VPC/聚合字段、历史 `cidr` required 和 local route 只读语义。
+- [x] 修改 v1；只做兼容新增，并纠正当前工作区中的 SG required 退化。
 - [x] 重新生成兼容性 baseline、Core SDK 和静态 API 文档；baseline 只接受 additive surface。
 - [x] 运行 OpenAPI、兼容性、SDK、Mock/API docs、architecture 和 `git diff --check` 门禁。
 - [ ] 停止并等待契约 PR 批准；未批准前不得建立对应 PG 列/表。
@@ -223,11 +213,11 @@ NETWORK-P0-CONTRACT-A             |
 - 创建：`repo/scripts/validate_network_control_plane_state_test.py`
 - 修改：`repo/Makefile`
 
-- [ ] migration 覆盖 VPC、Subnet、IP allocation、SG、rule、binding、route、LB、listener、backend group、backend member。
+- [ ] migration 覆盖 VPC、Subnet、IP allocation、SG、rule、binding 和 route；LB 相关表延期到方案冻结后。
 - [ ] 所有表使用 tenant-first key、复合外键、forced RLS、soft delete 和 create idempotency/fingerprint。
 - [ ] 修复 route RLS session key 为 `app.current_tenant_id`，validator 明确拒绝 `ani.tenant_id`。
 - [ ] CIDR 使用 `CIDR/INET` 类型；同事务校验 VPC overlap、Subnet containment 和 active overlap。
-- [ ] legacy SG rules/LB listeners 可验证 backfill；异常数据阻止 migration。
+- [ ] legacy SG rules 可验证 backfill；异常数据阻止 migration。
 - [ ] 运行 schema validator、临时 PG migration 测试和 `git diff --check`。
 - [ ] 停止等待真实 PG migration 人工批准。
 
@@ -242,29 +232,16 @@ NETWORK-P0-CONTRACT-A             |
 - 修改：`repo/services/ani-gateway/network_runtime.go`
 - 修改：`repo/services/ani-gateway/network_runtime_test.go`
 
-- [ ] 写两个 Service 实例共享 Store 的失败测试，覆盖全部主/子资源、游标、聚合计数、重放和跨租户隔离。
+- [ ] 写两个 Service 实例共享 Store 的失败测试，覆盖本批 VPC/Subnet/SG/route 主子资源、游标、聚合计数、重放和跨租户隔离。
 - [ ] persistent Store 模式下每次 GET/LIST 查询 PG；overview、VPC subnet_count、Subnet available_ip_count 从 PG 聚合。
-- [ ] CIDR 冲突返回现有 400/409；有关联的 VPC/Subnet/SG/LB 删除返回 409。
+- [ ] CIDR 冲突返回现有 400/409；有关联的 VPC/Subnet/SG 删除返回 409。
 - [ ] Provider create 前写 pending；apply/observe 后回写终态；Provider 调用不占用长事务。
 - [ ] real network profile 缺 PG 或 schema 时 Gateway 启动失败；local profile 保留内存行为。
 - [ ] 跑 network store/service/provider/router 全量聚焦测试。
 
-### Task C4：实现基础 LB 后端闭环
+### Task C4：LB 延期
 
-**文件：**
-- 修改：`repo/pkg/ports/network_resources.go`
-- 修改：`repo/pkg/adapters/runtime/kubeovn_network_provider.go`
-- 修改：`repo/pkg/adapters/runtime/kubeovn_network_provider_test.go`
-- 修改：`repo/services/ani-gateway/internal/router/network_resources.go`
-- 修改：`repo/services/ani-gateway/internal/router/network_resources_test.go`
-
-- [ ] 先写失败测试覆盖 listener、backend group、instance/IP member、weight、health-check 和安全组端口 precheck。
-- [ ] renderer 只接收 ANI 产品意图，不把 Kubernetes Service/EndpointSlice 对象泄漏到 port。
-- [ ] provider apply 使用稳定 tenant/resource ID 命名；重复 apply 不创建第二套资源。
-- [ ] health 状态由 provider observe 回写 PG，不由 Gateway 内存定时器保存。
-- [ ] 公网方案无 EIP 时返回 422，内网 VIP 完成最小闭环。
-
-**实现方式冻结：** Network Service/PG authoritative Store 保存控制面关系与状态；`NetworkLoadBalancerProvider` port 只接收 ANI 产品意图；Kube-OVN adapter 将 internal LB 渲染为稳定命名的 Kubernetes/Kube-OVN 资源并执行 apply/observe。Gateway handler 不直接调用 Kubernetes SDK，provider observe 负责把 VIP 和 member `health_status` 回写 PG。
+LB 的数据面、Provider 资源图、端口/权重/健康检查语义和 public EIP 边界尚未形成明确方案。本计划暂不实现 LB 契约、migration、handler、port、adapter 或 live gate；方案评审冻结后再独立立项。
 
 ### Task C5：执行 `NETWORK-PRIVATE-VPC-LIVE-A`
 
@@ -275,9 +252,8 @@ NETWORK-P0-CONTRACT-A             |
 - 创建：`repo/development-records/network-private-vpc-live-a.md`
 - 创建（执行后）：`repo/development-records/live-evidence/network-private-vpc-live-20260803.json`
 
-- [ ] 静态 gate 要求 VPC/Subnet/SG/rule/route/LB、Gateway rollout、tenant isolation 和 cleanup proof。
+- [ ] 静态 gate 要求 VPC/Subnet/SG/rule/route、Gateway rollout、tenant isolation 和 cleanup proof。
 - [ ] 经人工确认后创建两个私有子网和最小实例，验证同子网、跨子网、自定义 route、SG allow/deny。
-- [ ] 验证 internal LB listener/backend/health 和业务端口可达。
 - [ ] Gateway rollout 后原网络 ID、关系和实例网络摘要保持一致。
 - [ ] 清理全部临时实例、Service、Kube-OVN 对象和 PG 活跃行，保留脱敏墓碑证据。
 
@@ -381,6 +357,6 @@ NETWORK-P0-CONTRACT-A             |
 
 - 镜像：真实 push/scan/用途门禁/实例引用/删除保护闭环。
 - 存储：PG 权威控制面，Gateway 重启后卷、文件、桶、向量和任务一致。
-- 网络：P0 契约、PG 权威、私有 VPC、SG、route、internal LB 真实闭环。
+- 网络：非 LB P0 契约、PG 权威、私有 VPC、SG 和 route 真实闭环；LB 待方案冻结后另行规划。
 - 实例：VM、Container、GPU Container、Sandbox 使用真实镜像/网络/存储依赖，Gateway 重启后状态一致。
 - 所有结论均有脱敏 evidence；未覆盖的 BOSS quota/GC、SMB、复杂混合路由、完整 ACL、跨区域能力继续明确排除。
