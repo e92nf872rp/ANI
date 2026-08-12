@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.3.0
 // - protoc             (unknown)
-// source: tenant/v1/tenant_service.proto
+// source: tenant/v1/tenant_plan.proto
 
 package tenantv1
 
@@ -11,7 +11,6 @@ import (
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
-	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -39,19 +38,19 @@ type TenantPlanServiceClient interface {
 	// ListTenantPlans returns a cursor-paginated list of plans.
 	ListTenantPlans(ctx context.Context, in *ListTenantPlansRequest, opts ...grpc.CallOption) (*ListTenantPlansResponse, error)
 	// CreateTenantPlan creates a plan with its quota dimensions.
-	CreateTenantPlan(ctx context.Context, in *CreateTenantPlanRequest, opts ...grpc.CallOption) (*TenantPlan, error)
+	CreateTenantPlan(ctx context.Context, in *CreateTenantPlanRequest, opts ...grpc.CallOption) (*IdempotentResult, error)
 	// GetTenantPlan returns a plan by ID.
 	GetTenantPlan(ctx context.Context, in *GetTenantPlanRequest, opts ...grpc.CallOption) (*TenantPlan, error)
 	// DeleteTenantPlan soft-deletes a plan (fails if tenants are bound).
-	DeleteTenantPlan(ctx context.Context, in *DeleteTenantPlanRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	DeleteTenantPlan(ctx context.Context, in *DeleteTenantPlanRequest, opts ...grpc.CallOption) (*IdempotentResult, error)
 	// GetTenantPlanQuotaLimits returns the display views of a plan's quota limits.
 	GetTenantPlanQuotaLimits(ctx context.Context, in *GetTenantPlanQuotaLimitsRequest, opts ...grpc.CallOption) (*GetTenantPlanQuotaLimitsResponse, error)
 	// UpdateTenantPlanQuotaLimits updates a plan's quota limits and syncs bound tenants.
-	UpdateTenantPlanQuotaLimits(ctx context.Context, in *UpdateTenantPlanQuotaLimitsRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	UpdateTenantPlanQuotaLimits(ctx context.Context, in *UpdateTenantPlanQuotaLimitsRequest, opts ...grpc.CallOption) (*IdempotentResult, error)
 	// ActivateTenantPlan publishes a plan (draft/disabled -> active).
-	ActivateTenantPlan(ctx context.Context, in *ActivateTenantPlanRequest, opts ...grpc.CallOption) (*TenantPlan, error)
+	ActivateTenantPlan(ctx context.Context, in *ActivateTenantPlanRequest, opts ...grpc.CallOption) (*IdempotentResult, error)
 	// DisableTenantPlan disables a plan (active -> disabled).
-	DisableTenantPlan(ctx context.Context, in *DisableTenantPlanRequest, opts ...grpc.CallOption) (*TenantPlan, error)
+	DisableTenantPlan(ctx context.Context, in *DisableTenantPlanRequest, opts ...grpc.CallOption) (*IdempotentResult, error)
 	// ListTenantPlanBoundTenants returns bound tenant summaries.
 	ListTenantPlanBoundTenants(ctx context.Context, in *ListTenantPlanBoundTenantsRequest, opts ...grpc.CallOption) (*ListTenantPlanBoundTenantsResponse, error)
 	// ListTenantPlanAuditLogs returns paginated audit logs for a plan.
@@ -75,8 +74,8 @@ func (c *tenantPlanServiceClient) ListTenantPlans(ctx context.Context, in *ListT
 	return out, nil
 }
 
-func (c *tenantPlanServiceClient) CreateTenantPlan(ctx context.Context, in *CreateTenantPlanRequest, opts ...grpc.CallOption) (*TenantPlan, error) {
-	out := new(TenantPlan)
+func (c *tenantPlanServiceClient) CreateTenantPlan(ctx context.Context, in *CreateTenantPlanRequest, opts ...grpc.CallOption) (*IdempotentResult, error) {
+	out := new(IdempotentResult)
 	err := c.cc.Invoke(ctx, TenantPlanService_CreateTenantPlan_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -93,8 +92,8 @@ func (c *tenantPlanServiceClient) GetTenantPlan(ctx context.Context, in *GetTena
 	return out, nil
 }
 
-func (c *tenantPlanServiceClient) DeleteTenantPlan(ctx context.Context, in *DeleteTenantPlanRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	out := new(emptypb.Empty)
+func (c *tenantPlanServiceClient) DeleteTenantPlan(ctx context.Context, in *DeleteTenantPlanRequest, opts ...grpc.CallOption) (*IdempotentResult, error) {
+	out := new(IdempotentResult)
 	err := c.cc.Invoke(ctx, TenantPlanService_DeleteTenantPlan_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -111,8 +110,8 @@ func (c *tenantPlanServiceClient) GetTenantPlanQuotaLimits(ctx context.Context, 
 	return out, nil
 }
 
-func (c *tenantPlanServiceClient) UpdateTenantPlanQuotaLimits(ctx context.Context, in *UpdateTenantPlanQuotaLimitsRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	out := new(emptypb.Empty)
+func (c *tenantPlanServiceClient) UpdateTenantPlanQuotaLimits(ctx context.Context, in *UpdateTenantPlanQuotaLimitsRequest, opts ...grpc.CallOption) (*IdempotentResult, error) {
+	out := new(IdempotentResult)
 	err := c.cc.Invoke(ctx, TenantPlanService_UpdateTenantPlanQuotaLimits_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -120,8 +119,8 @@ func (c *tenantPlanServiceClient) UpdateTenantPlanQuotaLimits(ctx context.Contex
 	return out, nil
 }
 
-func (c *tenantPlanServiceClient) ActivateTenantPlan(ctx context.Context, in *ActivateTenantPlanRequest, opts ...grpc.CallOption) (*TenantPlan, error) {
-	out := new(TenantPlan)
+func (c *tenantPlanServiceClient) ActivateTenantPlan(ctx context.Context, in *ActivateTenantPlanRequest, opts ...grpc.CallOption) (*IdempotentResult, error) {
+	out := new(IdempotentResult)
 	err := c.cc.Invoke(ctx, TenantPlanService_ActivateTenantPlan_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -129,8 +128,8 @@ func (c *tenantPlanServiceClient) ActivateTenantPlan(ctx context.Context, in *Ac
 	return out, nil
 }
 
-func (c *tenantPlanServiceClient) DisableTenantPlan(ctx context.Context, in *DisableTenantPlanRequest, opts ...grpc.CallOption) (*TenantPlan, error) {
-	out := new(TenantPlan)
+func (c *tenantPlanServiceClient) DisableTenantPlan(ctx context.Context, in *DisableTenantPlanRequest, opts ...grpc.CallOption) (*IdempotentResult, error) {
+	out := new(IdempotentResult)
 	err := c.cc.Invoke(ctx, TenantPlanService_DisableTenantPlan_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -163,19 +162,19 @@ type TenantPlanServiceServer interface {
 	// ListTenantPlans returns a cursor-paginated list of plans.
 	ListTenantPlans(context.Context, *ListTenantPlansRequest) (*ListTenantPlansResponse, error)
 	// CreateTenantPlan creates a plan with its quota dimensions.
-	CreateTenantPlan(context.Context, *CreateTenantPlanRequest) (*TenantPlan, error)
+	CreateTenantPlan(context.Context, *CreateTenantPlanRequest) (*IdempotentResult, error)
 	// GetTenantPlan returns a plan by ID.
 	GetTenantPlan(context.Context, *GetTenantPlanRequest) (*TenantPlan, error)
 	// DeleteTenantPlan soft-deletes a plan (fails if tenants are bound).
-	DeleteTenantPlan(context.Context, *DeleteTenantPlanRequest) (*emptypb.Empty, error)
+	DeleteTenantPlan(context.Context, *DeleteTenantPlanRequest) (*IdempotentResult, error)
 	// GetTenantPlanQuotaLimits returns the display views of a plan's quota limits.
 	GetTenantPlanQuotaLimits(context.Context, *GetTenantPlanQuotaLimitsRequest) (*GetTenantPlanQuotaLimitsResponse, error)
 	// UpdateTenantPlanQuotaLimits updates a plan's quota limits and syncs bound tenants.
-	UpdateTenantPlanQuotaLimits(context.Context, *UpdateTenantPlanQuotaLimitsRequest) (*emptypb.Empty, error)
+	UpdateTenantPlanQuotaLimits(context.Context, *UpdateTenantPlanQuotaLimitsRequest) (*IdempotentResult, error)
 	// ActivateTenantPlan publishes a plan (draft/disabled -> active).
-	ActivateTenantPlan(context.Context, *ActivateTenantPlanRequest) (*TenantPlan, error)
+	ActivateTenantPlan(context.Context, *ActivateTenantPlanRequest) (*IdempotentResult, error)
 	// DisableTenantPlan disables a plan (active -> disabled).
-	DisableTenantPlan(context.Context, *DisableTenantPlanRequest) (*TenantPlan, error)
+	DisableTenantPlan(context.Context, *DisableTenantPlanRequest) (*IdempotentResult, error)
 	// ListTenantPlanBoundTenants returns bound tenant summaries.
 	ListTenantPlanBoundTenants(context.Context, *ListTenantPlanBoundTenantsRequest) (*ListTenantPlanBoundTenantsResponse, error)
 	// ListTenantPlanAuditLogs returns paginated audit logs for a plan.
@@ -190,25 +189,25 @@ type UnimplementedTenantPlanServiceServer struct {
 func (UnimplementedTenantPlanServiceServer) ListTenantPlans(context.Context, *ListTenantPlansRequest) (*ListTenantPlansResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListTenantPlans not implemented")
 }
-func (UnimplementedTenantPlanServiceServer) CreateTenantPlan(context.Context, *CreateTenantPlanRequest) (*TenantPlan, error) {
+func (UnimplementedTenantPlanServiceServer) CreateTenantPlan(context.Context, *CreateTenantPlanRequest) (*IdempotentResult, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateTenantPlan not implemented")
 }
 func (UnimplementedTenantPlanServiceServer) GetTenantPlan(context.Context, *GetTenantPlanRequest) (*TenantPlan, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetTenantPlan not implemented")
 }
-func (UnimplementedTenantPlanServiceServer) DeleteTenantPlan(context.Context, *DeleteTenantPlanRequest) (*emptypb.Empty, error) {
+func (UnimplementedTenantPlanServiceServer) DeleteTenantPlan(context.Context, *DeleteTenantPlanRequest) (*IdempotentResult, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteTenantPlan not implemented")
 }
 func (UnimplementedTenantPlanServiceServer) GetTenantPlanQuotaLimits(context.Context, *GetTenantPlanQuotaLimitsRequest) (*GetTenantPlanQuotaLimitsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetTenantPlanQuotaLimits not implemented")
 }
-func (UnimplementedTenantPlanServiceServer) UpdateTenantPlanQuotaLimits(context.Context, *UpdateTenantPlanQuotaLimitsRequest) (*emptypb.Empty, error) {
+func (UnimplementedTenantPlanServiceServer) UpdateTenantPlanQuotaLimits(context.Context, *UpdateTenantPlanQuotaLimitsRequest) (*IdempotentResult, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateTenantPlanQuotaLimits not implemented")
 }
-func (UnimplementedTenantPlanServiceServer) ActivateTenantPlan(context.Context, *ActivateTenantPlanRequest) (*TenantPlan, error) {
+func (UnimplementedTenantPlanServiceServer) ActivateTenantPlan(context.Context, *ActivateTenantPlanRequest) (*IdempotentResult, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ActivateTenantPlan not implemented")
 }
-func (UnimplementedTenantPlanServiceServer) DisableTenantPlan(context.Context, *DisableTenantPlanRequest) (*TenantPlan, error) {
+func (UnimplementedTenantPlanServiceServer) DisableTenantPlan(context.Context, *DisableTenantPlanRequest) (*IdempotentResult, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DisableTenantPlan not implemented")
 }
 func (UnimplementedTenantPlanServiceServer) ListTenantPlanBoundTenants(context.Context, *ListTenantPlanBoundTenantsRequest) (*ListTenantPlanBoundTenantsResponse, error) {
@@ -459,7 +458,7 @@ var TenantPlanService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "tenant/v1/tenant_service.proto",
+	Metadata: "tenant/v1/tenant_plan.proto",
 }
 
 const (
@@ -471,7 +470,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type TenantServiceClient interface {
 	// BindPlanQuota binds a quota plan to a tenant and pushes effective quota to Core.
-	BindPlanQuota(ctx context.Context, in *BindPlanQuotaRequest, opts ...grpc.CallOption) (*BindPlanQuotaResponse, error)
+	BindPlanQuota(ctx context.Context, in *BindPlanQuotaRequest, opts ...grpc.CallOption) (*IdempotentResult, error)
 }
 
 type tenantServiceClient struct {
@@ -482,8 +481,8 @@ func NewTenantServiceClient(cc grpc.ClientConnInterface) TenantServiceClient {
 	return &tenantServiceClient{cc}
 }
 
-func (c *tenantServiceClient) BindPlanQuota(ctx context.Context, in *BindPlanQuotaRequest, opts ...grpc.CallOption) (*BindPlanQuotaResponse, error) {
-	out := new(BindPlanQuotaResponse)
+func (c *tenantServiceClient) BindPlanQuota(ctx context.Context, in *BindPlanQuotaRequest, opts ...grpc.CallOption) (*IdempotentResult, error) {
+	out := new(IdempotentResult)
 	err := c.cc.Invoke(ctx, TenantService_BindPlanQuota_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -496,7 +495,7 @@ func (c *tenantServiceClient) BindPlanQuota(ctx context.Context, in *BindPlanQuo
 // for forward compatibility
 type TenantServiceServer interface {
 	// BindPlanQuota binds a quota plan to a tenant and pushes effective quota to Core.
-	BindPlanQuota(context.Context, *BindPlanQuotaRequest) (*BindPlanQuotaResponse, error)
+	BindPlanQuota(context.Context, *BindPlanQuotaRequest) (*IdempotentResult, error)
 	mustEmbedUnimplementedTenantServiceServer()
 }
 
@@ -504,7 +503,7 @@ type TenantServiceServer interface {
 type UnimplementedTenantServiceServer struct {
 }
 
-func (UnimplementedTenantServiceServer) BindPlanQuota(context.Context, *BindPlanQuotaRequest) (*BindPlanQuotaResponse, error) {
+func (UnimplementedTenantServiceServer) BindPlanQuota(context.Context, *BindPlanQuotaRequest) (*IdempotentResult, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BindPlanQuota not implemented")
 }
 func (UnimplementedTenantServiceServer) mustEmbedUnimplementedTenantServiceServer() {}
@@ -551,5 +550,5 @@ var TenantService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "tenant/v1/tenant_service.proto",
+	Metadata: "tenant/v1/tenant_plan.proto",
 }

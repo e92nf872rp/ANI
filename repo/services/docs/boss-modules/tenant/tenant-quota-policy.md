@@ -18,9 +18,9 @@ Console **无对等页**；租户不可自助修改硬配额。用量只读参�
 ## Core 层要求
 
 - 配额归属 **Core** 租户治理面（ANI-02 tenants 域）
-- 当前 **ADDED-TO-YAML** `GET/PATCH /api/v1/tenants/{tenant_id}/quota`
+- 当前 **ADDED-TO-YAML** `GET/PUT /api/v1/tenants/{tenant_id}/quota`
 - Core 资源配额（GPU/CPU/内存/存储）与 Services 业务配额（推理服务数、知识库数）可能 **分属两层** — 正文须标注来源层
-- PATCH/PUT 调整配额须 `idempotency_key` + 平台 RBAC
+- PUT 调整配额须 `idempotency_key` + 平台 RBAC
 - 调整配额 **必须** 写 `audit_note`（产品要求）；审计 API 见 audit 域 **TODO-YAML**
 - **不得** 把 Console 用量页 `resource_type` 枚举冒充 quota 维度
 - 统一错误结构；`422` 仅 YAML 已声明 operation 可写冻结（§2.10）
@@ -51,7 +51,7 @@ Console **无对等页**；租户不可自助修改硬配额。用量只读参�
     ├── 影响说明（必填）
     ├── effective_at（立即 / 预约）
     ├── audit_note（必填）
-    └── 提交 PATCH + idempotency_key
+    └── 提交 PUT + idempotency_key
 ```
 
 ## 数据来源与分层约束
@@ -81,7 +81,7 @@ Console **无对等页**；租户不可自助修改硬配额。用量只读参�
 | 筛选区 | tenants/quota list **待 YAML** | 超额筛选 query | 刷新表格 |
 | 概览 KPI | 平台 aggregate **待 YAML** | 全平台 quota 使用率 | — |
 | 配额表格 | GET quota list **待 YAML** | max + used 分列 | 打开抽屉 |
-| 调整抽屉 | PATCH quota **待 YAML** | idempotency_key + audit_note | 刷新行 |
+| 调整抽屉 | PUT quota **待 YAML** | idempotency_key + audit_note | 刷新行 |
 | 用量钻取 | tenant-usage-billing | 单租户用量 | billing |
 | 边界说明 | 规划项 | Core vs Services 配额 | tenant-list |
 
@@ -112,7 +112,7 @@ Console **无对等页**；租户不可自助修改硬配额。用量只读参�
 | 能力 | 建议路径 | 归属 |
 |---|---|---|
 | 查询租户配额 | `GET /api/v1/tenants/{tenant_id}/quota` | Core |
-| 更新配额 | `PATCH /api/v1/tenants/{tenant_id}/quota` | Core |
+| 更新配额 | `PUT /api/v1/tenants/{tenant_id}/quota` | Core |
 | 列出租户配额摘要 | `GET /api/v1/tenants?include=quota` | Core |
 
 ## 字段级定义
@@ -211,13 +211,13 @@ Console **无对等页**；租户不可自助修改硬配额。用量只读参�
 | 查看配额表格 | ✅（待 YAML） | ✅ | ✅ | GET |
 | 筛选超额租户 | ✅ | ✅ | ✅ | query |
 | 打开调整抽屉 | ❌ | ✅ | ✅ | — |
-| 提交配额变更 | ❌ | ✅ | ✅ | PATCH |
+| 提交配额变更 | ❌ | ✅ | ✅ | PUT |
 | 批量调整 | ❌ | Phase 2 | Phase 2 | — |
 | 查看用量明细 | ✅ → billing | ✅ | ✅ | 深链 |
 
 ## 删除前置校验与当前契约边界
 
-本页 **无 DELETE 配额**；归零配额通过 PATCH 设置 max=0（**待 YAML** 语义与 422 规则）。
+本页 **无 DELETE 配额**；归零配额通过 PUT 设置 max=0（**待 YAML** 语义与 422 规则）。
 
 ## 接口冻结规则
 
@@ -225,22 +225,22 @@ Console **无对等页**；租户不可自助修改硬配额。用量只读参�
 
 - `operationId`：**未声明**
 - `query.required`：`start_time`、`end_time`
-- 用途：钻取单租户 **used** 参考；**不是** quota PATCH
+- 用途：钻取单租户 **used** 参考；**不是** quota PUT
 
 ### Core quota API（**ADDED-TO-YAML**）
 
-<!-- TODO-YAML: GET/PATCH /api/v1/tenants/{tenant_id}/quota -->
+<!-- TODO-YAML: GET/PUT /api/v1/tenants/{tenant_id}/quota -->
 
-- PATCH 须 `idempotency_key` + `audit_note`（目标）
+- PUT 须 `idempotency_key` + `audit_note`（目标）
 - 合入前不得写入「已冻结」表
 
 ## 使用规则
 
 - 表格须 **分列** max（quota）与 used（metering/inventory）
-- **不得** 在无 quota API 时启用生产环境 PATCH
+- **不得** 在无 quota API 时启用生产环境 PUT
 - 调低配额 **必须** 后端校验 used 量；不得仅前端校验
 - audit_note **必填**；须写入 audit 域（API 待 YAML）
-- Services 业务配额与 Core 资源配额 **不得** 混为同一 PATCH 而不标注层
+- Services 业务配额与 Core 资源配额 **不得** 混为同一 PUT 而不标注层
 
 ## 待补能力边界
 
@@ -298,7 +298,7 @@ Console **无对等页**；租户不可自助修改硬配额。用量只读参�
 }
 ```
 
-> **注**：适用于 **quota PATCH（TODO-YAML）** 场景。`message` 为示例文案，**非** YAML 已冻结 scope 名。
+> **注**：适用于 **quota PUT（TODO-YAML）** 场景。`message` 为示例文案，**非** YAML 已冻结 scope 名。
 
 ### 调低低于已用量（目标契约）
 

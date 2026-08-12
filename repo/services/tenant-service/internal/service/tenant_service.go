@@ -33,6 +33,6 @@ func (s *TenantService) Register(server *grpc.Server) {
 
 // BindPlanQuota 绑定配额套餐到租户：读套餐有效限额 → 跳已审批维度 → 批量下发 Core → 更新 tenants.plan_id。
 // US-008 绑定套餐：plan 非 active → 404 TENANT_PLAN_NOT_FOUND；租户 disabled → 409 TENANT_STATE_INVALID。
-func (s *TenantService) BindPlanQuota(ctx context.Context, req *tenantv1.BindPlanQuotaRequest) (*tenantv1.BindPlanQuotaResponse, error) {
+func (s *TenantService) BindPlanQuota(ctx context.Context, req *tenantv1.BindPlanQuotaRequest) (*tenantv1.IdempotentResult, error) {
 	panic("not implemented: issue-007")
 }

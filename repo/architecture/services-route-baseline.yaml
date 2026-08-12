@@ -126,7 +126,7 @@ exceptions:
     owner: ANI Services
     reason: OpenAPI 已声明套餐限额查询，当前 Gateway 尚未注册对应过渡路由。
   - kind: spec_not_in_code
-    method: PATCH
+    method: PUT
     path: /tenant-plans/{planId}/quota-limits
     status: accepted_baseline
     owner: ANI Services
@@ -161,3 +161,75 @@ exceptions:
     status: accepted_baseline
     owner: ANI Services
     reason: OpenAPI 已声明租户绑定套餐，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: GET
+    path: /tenant-admins
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明跨租户管理员列表，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: POST
+    path: /tenants/{tenantId}/admins/invite
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明邀请租户管理员，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: POST
+    path: /tenants/{tenantId}/admins/{userId}/invitation/resend
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明重发租户管理员邀请，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: GET
+    path: /tenants/{tenantId}/admins/{userId}
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明查询管理员详情，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: DELETE
+    path: /tenants/{tenantId}/admins/{userId}
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明软删除管理员，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: GET
+    path: /tenants/{tenantId}/admins/{userId}/role
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明查询管理员角色与权限，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: PUT
+    path: /tenants/{tenantId}/admins/{userId}/role
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明修改管理员角色，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: POST
+    path: /tenants/{tenantId}/transfer-ownership
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明移交租户所有者，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: POST
+    path: /tenants/{tenantId}/admins/{userId}/reset-password
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明重置管理员密码，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: POST
+    path: /tenants/{tenantId}/admins/{userId}/disable
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明禁用管理员，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: POST
+    path: /tenants/{tenantId}/admins/{userId}/enable
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明启用管理员，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: GET
+    path: /tenants/{tenantId}/admins/{userId}/audit-logs
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明查询管理员操作历史，当前 Gateway 尚未注册对应过渡路由。

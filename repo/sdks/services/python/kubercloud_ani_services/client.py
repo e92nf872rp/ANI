@@ -61,6 +61,7 @@ OPERATIONS = [
     "pauseSandbox",
     "listSandboxSecurityEvents",
     "getSandboxSecurityOverview",
+    "listAllTenantAdmins",
     "listTenantPlans",
     "createTenantPlan",
     "deleteTenantPlan",
@@ -83,7 +84,18 @@ OPERATIONS = [
     "createWebhook",
     "deleteWebhook",
     "listWebhookDeliveries",
-    "bindTenantPlan"
+    "inviteTenantAdmin",
+    "deleteTenantAdmin",
+    "getTenantAdminDetail",
+    "listTenantAdminAuditLogs",
+    "disableTenantAdmin",
+    "enableTenantAdmin",
+    "resendTenantAdminInvitation",
+    "resetTenantAdminPassword",
+    "getTenantAdminRole",
+    "updateTenantAdminRole",
+    "bindTenantPlan",
+    "transferTenantOwnership"
 ]
 PATHS = [
     "GET /gpu-containers",
@@ -139,6 +151,7 @@ PATHS = [
     "POST /sandboxes/{sandbox_id}/pause",
     "GET /sandboxes/{sandbox_id}/security-events",
     "GET /sandboxes/{sandbox_id}/security-overview",
+    "GET /tenant-admins",
     "GET /tenant-plans",
     "POST /tenant-plans",
     "DELETE /tenant-plans/{planId}",
@@ -147,7 +160,7 @@ PATHS = [
     "GET /tenant-plans/{planId}/audit-logs",
     "POST /tenant-plans/{planId}/disable",
     "GET /tenant-plans/{planId}/quota-limits",
-    "PATCH /tenant-plans/{planId}/quota-limits",
+    "PUT /tenant-plans/{planId}/quota-limits",
     "GET /tenant-plans/{planId}/tenants",
     "GET /tenant/members",
     "POST /tenant/members",
@@ -161,9 +174,23 @@ PATHS = [
     "POST /tenant/webhooks",
     "DELETE /tenant/webhooks/{webhook_id}",
     "GET /tenant/webhooks/{webhook_id}/deliveries",
-    "POST /tenants/{tenantId}/plan"
+    "POST /tenants/{tenantId}/admins/invite",
+    "DELETE /tenants/{tenantId}/admins/{userId}",
+    "GET /tenants/{tenantId}/admins/{userId}",
+    "GET /tenants/{tenantId}/admins/{userId}/audit-logs",
+    "POST /tenants/{tenantId}/admins/{userId}/disable",
+    "POST /tenants/{tenantId}/admins/{userId}/enable",
+    "POST /tenants/{tenantId}/admins/{userId}/invitation/resend",
+    "POST /tenants/{tenantId}/admins/{userId}/reset-password",
+    "GET /tenants/{tenantId}/admins/{userId}/role",
+    "PUT /tenants/{tenantId}/admins/{userId}/role",
+    "POST /tenants/{tenantId}/plan",
+    "POST /tenants/{tenantId}/transfer-ownership"
 ]
 SCHEMAS = [
+    "AdminDetail",
+    "AdminListResponse",
+    "AdminWithTenant",
     "AsyncTask",
     "AvailableGpu",
     "BindPlanRequest",
@@ -185,6 +212,7 @@ SCHEMAS = [
     "GpuContainer",
     "GpuContainerMetrics",
     "GpuContainerVersion",
+    "IdempotentOnlyRequest",
     "IdempotentResult",
     "InferenceEndpoint",
     "InferenceService",
@@ -196,6 +224,8 @@ SCHEMAS = [
     "Integration",
     "IntegrationBot",
     "IntegrationListResponse",
+    "InvitationResult",
+    "InviteAdminRequest",
     "InviteMemberRequest",
     "KBCitation",
     "KBCitationListResponse",
@@ -219,21 +249,29 @@ SCHEMAS = [
     "PlanQuotaLimitsResponse",
     "RebuildKnowledgeBaseRequest",
     "ReparseDocumentRequest",
+    "ResendInvitationRequest",
+    "ResetPasswordRequest",
     "Sandbox",
     "SecurityEvent",
     "SecurityOverview",
     "SsoConfig",
+    "TenantAdminAuditLog",
+    "TenantAdminAuditLogListResponse",
     "TenantMember",
     "TenantPlan",
     "TenantPlanListItem",
     "TenantPlanListResponse",
+    "TenantRef",
     "TenantRole",
+    "TransferOwnershipRequest",
     "UpdateInferenceServicePoliciesRequest",
     "UpdateKBConfigRequest",
     "UpdateKBPermissionsRequest",
     "UpdateQuotaLimitsRequest",
+    "UpdateRoleRequest",
     "UpdateSsoConfigRequest",
     "UpdateTenantRoleRequest",
+    "UserPermissions",
     "Webhook",
     "WebhookDelivery",
     "WebhookDeliveryListResponse"
@@ -261,7 +299,14 @@ IDEMPOTENCY_OPERATIONS = [
     "updateTenantRole",
     "updateSsoConfig",
     "createWebhook",
-    "bindTenantPlan"
+    "inviteTenantAdmin",
+    "disableTenantAdmin",
+    "enableTenantAdmin",
+    "resendTenantAdminInvitation",
+    "resetTenantAdminPassword",
+    "updateTenantAdminRole",
+    "bindTenantPlan",
+    "transferTenantOwnership"
 ]
 CURSOR_PAGINATION_OPERATIONS = [
     "listGpuContainers",
@@ -271,9 +316,11 @@ CURSOR_PAGINATION_OPERATIONS = [
     "listKnowledgeBaseSessions",
     "listModels",
     "listSandboxes",
+    "listAllTenantAdmins",
     "listTenantPlans",
     "listTenantPlanAuditLogs",
-    "listWebhookDeliveries"
+    "listWebhookDeliveries",
+    "listTenantAdminAuditLogs"
 ]
 ERROR_CODES = [
     "BAD_REQUEST",
@@ -281,7 +328,6 @@ ERROR_CODES = [
     "FORBIDDEN",
     "NOT_FOUND",
     "PRECONDITION_FAILED",
-    "QUOTA_RESOURCE_NOT_REGISTERED",
     "UNAUTHORIZED"
 ]
 

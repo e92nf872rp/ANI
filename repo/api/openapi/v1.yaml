@@ -7563,7 +7563,7 @@ paths:
       x-ani-rbac-scope: "scope:quota:write"
       parameters:
         - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: idempotency_key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 }, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 }, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
       requestBody:
         required: true
         content:
@@ -7593,7 +7593,7 @@ paths:
       x-ani-rbac-scope: "scope:quota:write"
       parameters:
         - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: idempotency_key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 }, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 }, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
       requestBody:
         required: true
         content:
@@ -7640,7 +7640,7 @@ paths:
       x-ani-rbac-scope: "scope:quota:write"
       parameters:
         - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: idempotency_key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 }, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 }, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
       responses:
         "200":
           description: 删除结果
