@@ -34,8 +34,8 @@ type RegisterOptions struct {
 	// KBSSEConfig wires the SSE streaming query endpoint (US-017). When
 	// ragClient or vllmStreamer is nil the SSE handler degrades to an
 	// empty stream so the gateway stays functional without backends.
-	KBSSEConfig KbSSEConfig
-	AsyncTaskStore                        ports.AsyncTaskStore
+	KBSSEConfig    KbSSEConfig
+	AsyncTaskStore ports.AsyncTaskStore
 	// DataPlane is the Core-owned generic SQL data plane (SPEC
 	// design-kb-persistence-to-core-datapipe §3.2). When nil the
 	// /data/query and /data/tables handlers return 503 UNAVAILABLE so

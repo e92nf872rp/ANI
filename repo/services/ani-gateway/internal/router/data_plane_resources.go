@@ -55,7 +55,7 @@ const dataPlaneQueryTimeout = 30 * time.Second
 // service identity gets its own counter so one service cannot starve another.
 const (
 	dataPlaneRateLimitRequests = 200
-	dataPlaneRateLimitWindow    = time.Second
+	dataPlaneRateLimitWindow   = time.Second
 )
 
 // dataPlaneAllowedTables is the white-list of Services business tables that
@@ -124,7 +124,7 @@ type DataPlaneQueryRequest struct {
 // can consume column order deterministically (Go map keys are alphabetically
 // sorted by encoding/json, not insertion-ordered).
 type DataPlaneQueryResponse struct {
-	Columns    []string        `json:"columns,omitempty"`
+	Columns    []string         `json:"columns,omitempty"`
 	Rows       []map[string]any `json:"rows"`
 	RowCount   int64            `json:"rowcount"`
 	LastResult bool             `json:"last_result"`
