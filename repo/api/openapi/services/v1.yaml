@@ -1203,7 +1203,7 @@ paths:
         "413": { description: 文件大小超限（doc.too_large）, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
         "422": { description: 不支持的文档格式（doc.unsupported_type）, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
 
-  /knowledge-bases/{kb_id}/documents/notify-uploaded:
+  /knowledge-bases/{kb_id}/documents/{doc_id}/notify-uploaded:
     post:
       operationId: notifyDocumentUploaded
       summary: 通知文档已直传至对象存储（两步式上传 step 2）
@@ -1214,6 +1214,7 @@ paths:
       tags: [KnowledgeBases]
       parameters:
         - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: doc_id, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
         required: true
         content:

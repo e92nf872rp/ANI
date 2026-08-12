@@ -34,8 +34,8 @@ type RegisterOptions struct {
 	// KBSSEConfig wires the SSE streaming query endpoint (US-017). When
 	// ragClient or vllmStreamer is nil the SSE handler degrades to an
 	// empty stream so the gateway stays functional without backends.
-	KBSSEConfig KbSSEConfig
-	AsyncTaskStore                        ports.AsyncTaskStore
+	KBSSEConfig    KbSSEConfig
+	AsyncTaskStore ports.AsyncTaskStore
 }
 
 // Register wires all route groups onto the Hertz server.
