@@ -66,7 +66,7 @@ func newGatewayInstanceRuntime(ctx context.Context, cfg bootstrap.Config, secret
 		// Local profile: skip the full instance-service runtime, but still
 		// wire the Core data plane when DATABASE_URL is configured so the
 		// gateway can serve /data/query for service-identity callers.
-		if strings.TrimSpace(cfg.DatabaseURL) == "" {
+		if strings.TrimSpace(cfg.DatabaseURL) == "" || !strings.HasPrefix(strings.TrimSpace(cfg.DatabaseURL), "postgres") {
 			return bootstrap.InstanceRuntime{}, closeRuntime, nil
 		}
 		rt, closeFn, err := bootstrap.ConnectInstanceService(ctx, cfg)
