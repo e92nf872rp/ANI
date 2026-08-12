@@ -2232,7 +2232,7 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
     post:
       operationId: createTenantPlan
-      summary: 创建套餐
+      summary: 创建套餐（需 platform-admin / platform-ops）
       tags: [TenantPlans]
       requestBody:
         required: true
@@ -2254,7 +2254,7 @@ paths:
   /tenant-plans/{planId}:
     get:
       operationId: getTenantPlan
-      summary: 查询套餐详情
+      summary: 查询套餐详情（需 platform-admin / platform-ops / platform-readonly）
       tags: [TenantPlans]
       parameters:
         - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2269,7 +2269,7 @@ paths:
         "404": { $ref: '#/components/responses/NotFound' }
     delete:
       operationId: deleteTenantPlan
-      summary: 删除套餐（软删除）
+      summary: 删除套餐（软删除）（需 platform-admin / platform-ops）
       tags: [TenantPlans]
       parameters:
         - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2287,7 +2287,7 @@ paths:
   /tenant-plans/{planId}/quota-limits:
     get:
       operationId: getTenantPlanQuotaLimits
-      summary: 查询套餐限额
+      summary: 查询套餐限额（需 platform-admin / platform-ops / platform-readonly）
       tags: [TenantPlans]
       parameters:
         - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2302,7 +2302,7 @@ paths:
         "404": { $ref: '#/components/responses/NotFound' }
     put:
       operationId: updateTenantPlanQuotaLimits
-      summary: 修改套餐限额（同步存量租户）
+      summary: 修改套餐限额（同步存量租户）（需 platform-admin / platform-ops）
       tags: [TenantPlans]
       parameters:
         - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2326,7 +2326,7 @@ paths:
   /tenant-plans/{planId}/activate:
     post:
       operationId: activateTenantPlan
-      summary: 发布套餐
+      summary: 发布套餐（需 platform-admin / platform-ops）
       tags: [TenantPlans]
       parameters:
         - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2353,7 +2353,7 @@ paths:
   /tenant-plans/{planId}/disable:
     post:
       operationId: disableTenantPlan
-      summary: 禁用套餐
+      summary: 禁用套餐（需 platform-admin / platform-ops）
       tags: [TenantPlans]
       parameters:
         - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2380,7 +2380,7 @@ paths:
   /tenant-plans/{planId}/tenants:
     get:
       operationId: listTenantPlanBoundTenants
-      summary: 查询套餐绑定的租户列表
+      summary: 查询套餐绑定的租户列表（需 platform-admin / platform-ops / platform-readonly）
       tags: [TenantPlans]
       parameters:
         - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2397,7 +2397,7 @@ paths:
   /tenant-plans/{planId}/audit-logs:
     get:
       operationId: listTenantPlanAuditLogs
-      summary: 查询套餐操作历史
+      summary: 查询套餐操作历史（需 platform-admin / platform-ops / platform-readonly）
       tags: [TenantPlans]
       parameters:
         - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2418,7 +2418,7 @@ paths:
   /tenants/{tenantId}/plan:
     post:
       operationId: bindTenantPlan
-      summary: 绑定套餐（按套餐限额更新配额）
+      summary: 绑定套餐（按套餐限额更新配额）（需 platform-admin / platform-ops）
       tags: [TenantPlans]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2445,7 +2445,7 @@ paths:
   /tenant-admins:
     get:
       operationId: listAllTenantAdmins
-      summary: 跨租户管理员列表（仅返回 owner/admin/邀请中）
+      summary: 跨租户管理员列表（仅返回 owner/admin/邀请中）（需 platform-admin / platform-ops / platform-readonly）
       tags: [TenantAdmins]
       parameters:
         - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 }, description: "每页数量" }
@@ -2467,7 +2467,7 @@ paths:
   /tenants/{tenantId}/admins/invite:
     post:
       operationId: inviteTenantAdmin
-      summary: 邀请租户管理员
+      summary: 邀请租户管理员（需 platform-admin / platform-ops）
       tags: [TenantAdmins]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2491,7 +2491,7 @@ paths:
   /tenants/{tenantId}/admins/{userId}/invitation/resend:
     post:
       operationId: resendTenantAdminInvitation
-      summary: 重发租户管理员邀请
+      summary: 重发租户管理员邀请（需 platform-admin / platform-ops）
       tags: [TenantAdmins]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2515,7 +2515,7 @@ paths:
   /tenants/{tenantId}/admins/{userId}:
     get:
       operationId: getTenantAdminDetail
-      summary: 查询管理员详情
+      summary: 查询管理员详情（需 platform-admin / platform-ops / platform-readonly）
       tags: [TenantAdmins]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2531,7 +2531,7 @@ paths:
         "404": { $ref: '#/components/responses/NotFound', description: "TENANT_ADMIN_NOT_FOUND" }
     delete:
       operationId: deleteTenantAdmin
-      summary: 软删除管理员（不幂等，不携带幂等键）
+      summary: 软删除管理员（不幂等，不携带幂等键）（需 platform-admin / platform-ops）
       tags: [TenantAdmins]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2551,7 +2551,7 @@ paths:
   /tenants/{tenantId}/admins/{userId}/role:
     get:
       operationId: getTenantAdminRole
-      summary: 查询指定管理员角色与权限（4 维权限模型）
+      summary: 查询指定管理员角色与权限（4 维权限模型）（需 platform-admin / platform-ops / platform-readonly）
       tags: [TenantAdmins]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2567,7 +2567,7 @@ paths:
         "404": { $ref: '#/components/responses/NotFound', description: "TENANT_ADMIN_NOT_FOUND" }
     put:
       operationId: updateTenantAdminRole
-      summary: 修改管理员角色
+      summary: 修改管理员角色（需 platform-admin / platform-ops）
       tags: [TenantAdmins]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2593,7 +2593,7 @@ paths:
   /tenants/{tenantId}/transfer-ownership:
     post:
       operationId: transferTenantOwnership
-      summary: 移交租户所有者（对 tenant-admin 行发起，原 owner 降级为 admin）
+      summary: 移交租户所有者（对 tenant-admin 行发起，原 owner 降级为 admin）（需 platform-admin / platform-ops）
       tags: [TenantAdmins]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2617,7 +2617,7 @@ paths:
   /tenants/{tenantId}/admins/{userId}/reset-password:
     post:
       operationId: resetTenantAdminPassword
-      summary: 重置管理员密码
+      summary: 重置管理员密码（需 platform-admin / platform-ops）
       tags: [TenantAdmins]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2643,7 +2643,7 @@ paths:
   /tenants/{tenantId}/admins/{userId}/disable:
     post:
       operationId: disableTenantAdmin
-      summary: 禁用管理员
+      summary: 禁用管理员（需 platform-admin / platform-ops）
       tags: [TenantAdmins]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2668,7 +2668,7 @@ paths:
   /tenants/{tenantId}/admins/{userId}/enable:
     post:
       operationId: enableTenantAdmin
-      summary: 启用管理员
+      summary: 启用管理员（需 platform-admin / platform-ops）
       tags: [TenantAdmins]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2692,7 +2692,7 @@ paths:
   /tenants/{tenantId}/admins/{userId}/audit-logs:
     get:
       operationId: listTenantAdminAuditLogs
-      summary: 查询管理员操作历史
+      summary: 查询管理员操作历史（需 platform-admin / platform-ops / platform-readonly）
       tags: [TenantAdmins]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }

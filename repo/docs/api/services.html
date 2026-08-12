@@ -587,7 +587,7 @@
           <td><span class="method method-get">GET</span></td>
           <td><code>/tenant-admins</code></td>
           <td><code>listAllTenantAdmins</code></td>
-          <td>跨租户管理员列表（仅返回 owner/admin/邀请中）</td>
+          <td>跨租户管理员列表（仅返回 owner/admin/邀请中）（需 platform-admin / platform-ops / platform-readonly）</td>
           <td><code></code></td>
           <td>200, 401, 403</td>
         </tr>
@@ -603,7 +603,7 @@
           <td><span class="method method-post">POST</span></td>
           <td><code>/tenant-plans</code></td>
           <td><code>createTenantPlan</code></td>
-          <td>创建套餐</td>
+          <td>创建套餐（需 platform-admin / platform-ops）</td>
           <td><code></code></td>
           <td>200, 400, 401, 403, 409, 422</td>
         </tr>
@@ -611,7 +611,7 @@
           <td><span class="method method-delete">DELETE</span></td>
           <td><code>/tenant-plans/{planId}</code></td>
           <td><code>deleteTenantPlan</code></td>
-          <td>删除套餐（软删除）</td>
+          <td>删除套餐（软删除）（需 platform-admin / platform-ops）</td>
           <td><code></code></td>
           <td>200, 401, 403, 404, 409</td>
         </tr>
@@ -619,7 +619,7 @@
           <td><span class="method method-get">GET</span></td>
           <td><code>/tenant-plans/{planId}</code></td>
           <td><code>getTenantPlan</code></td>
-          <td>查询套餐详情</td>
+          <td>查询套餐详情（需 platform-admin / platform-ops / platform-readonly）</td>
           <td><code></code></td>
           <td>200, 401, 403, 404</td>
         </tr>
@@ -627,7 +627,7 @@
           <td><span class="method method-post">POST</span></td>
           <td><code>/tenant-plans/{planId}/activate</code></td>
           <td><code>activateTenantPlan</code></td>
-          <td>发布套餐</td>
+          <td>发布套餐（需 platform-admin / platform-ops）</td>
           <td><code></code></td>
           <td>200, 401, 403, 404, 409</td>
         </tr>
@@ -635,7 +635,7 @@
           <td><span class="method method-get">GET</span></td>
           <td><code>/tenant-plans/{planId}/audit-logs</code></td>
           <td><code>listTenantPlanAuditLogs</code></td>
-          <td>查询套餐操作历史</td>
+          <td>查询套餐操作历史（需 platform-admin / platform-ops / platform-readonly）</td>
           <td><code></code></td>
           <td>200, 401, 403, 404</td>
         </tr>
@@ -643,7 +643,7 @@
           <td><span class="method method-post">POST</span></td>
           <td><code>/tenant-plans/{planId}/disable</code></td>
           <td><code>disableTenantPlan</code></td>
-          <td>禁用套餐</td>
+          <td>禁用套餐（需 platform-admin / platform-ops）</td>
           <td><code></code></td>
           <td>200, 401, 403, 404, 409</td>
         </tr>
@@ -651,7 +651,7 @@
           <td><span class="method method-get">GET</span></td>
           <td><code>/tenant-plans/{planId}/quota-limits</code></td>
           <td><code>getTenantPlanQuotaLimits</code></td>
-          <td>查询套餐限额</td>
+          <td>查询套餐限额（需 platform-admin / platform-ops / platform-readonly）</td>
           <td><code></code></td>
           <td>200, 401, 403, 404</td>
         </tr>
@@ -659,7 +659,7 @@
           <td><span class="method method-put">PUT</span></td>
           <td><code>/tenant-plans/{planId}/quota-limits</code></td>
           <td><code>updateTenantPlanQuotaLimits</code></td>
-          <td>修改套餐限额（同步存量租户）</td>
+          <td>修改套餐限额（同步存量租户）（需 platform-admin / platform-ops）</td>
           <td><code></code></td>
           <td>200, 400, 401, 403, 404, 422</td>
         </tr>
@@ -667,7 +667,7 @@
           <td><span class="method method-get">GET</span></td>
           <td><code>/tenant-plans/{planId}/tenants</code></td>
           <td><code>listTenantPlanBoundTenants</code></td>
-          <td>查询套餐绑定的租户列表</td>
+          <td>查询套餐绑定的租户列表（需 platform-admin / platform-ops / platform-readonly）</td>
           <td><code></code></td>
           <td>200, 401, 403, 404</td>
         </tr>
@@ -771,7 +771,7 @@
           <td><span class="method method-post">POST</span></td>
           <td><code>/tenants/{tenantId}/admins/invite</code></td>
           <td><code>inviteTenantAdmin</code></td>
-          <td>邀请租户管理员</td>
+          <td>邀请租户管理员（需 platform-admin / platform-ops）</td>
           <td><code></code></td>
           <td>200, 400, 401, 403, 404, 409</td>
         </tr>
@@ -779,7 +779,7 @@
           <td><span class="method method-delete">DELETE</span></td>
           <td><code>/tenants/{tenantId}/admins/{userId}</code></td>
           <td><code>deleteTenantAdmin</code></td>
-          <td>软删除管理员（不幂等，不携带幂等键）</td>
+          <td>软删除管理员（不幂等，不携带幂等键）（需 platform-admin / platform-ops）</td>
           <td><code></code></td>
           <td>200, 401, 403, 404, 409, 422</td>
         </tr>
@@ -787,7 +787,7 @@
           <td><span class="method method-get">GET</span></td>
           <td><code>/tenants/{tenantId}/admins/{userId}</code></td>
           <td><code>getTenantAdminDetail</code></td>
-          <td>查询管理员详情</td>
+          <td>查询管理员详情（需 platform-admin / platform-ops / platform-readonly）</td>
           <td><code></code></td>
           <td>200, 401, 403, 404</td>
         </tr>
@@ -795,7 +795,7 @@
           <td><span class="method method-get">GET</span></td>
           <td><code>/tenants/{tenantId}/admins/{userId}/audit-logs</code></td>
           <td><code>listTenantAdminAuditLogs</code></td>
-          <td>查询管理员操作历史</td>
+          <td>查询管理员操作历史（需 platform-admin / platform-ops / platform-readonly）</td>
           <td><code></code></td>
           <td>200, 401, 403, 404</td>
         </tr>
@@ -803,7 +803,7 @@
           <td><span class="method method-post">POST</span></td>
           <td><code>/tenants/{tenantId}/admins/{userId}/disable</code></td>
           <td><code>disableTenantAdmin</code></td>
-          <td>禁用管理员</td>
+          <td>禁用管理员（需 platform-admin / platform-ops）</td>
           <td><code></code></td>
           <td>200, 401, 403, 404, 409, 422</td>
         </tr>
@@ -811,7 +811,7 @@
           <td><span class="method method-post">POST</span></td>
           <td><code>/tenants/{tenantId}/admins/{userId}/enable</code></td>
           <td><code>enableTenantAdmin</code></td>
-          <td>启用管理员</td>
+          <td>启用管理员（需 platform-admin / platform-ops）</td>
           <td><code></code></td>
           <td>200, 401, 403, 404, 409</td>
         </tr>
@@ -819,7 +819,7 @@
           <td><span class="method method-post">POST</span></td>
           <td><code>/tenants/{tenantId}/admins/{userId}/invitation/resend</code></td>
           <td><code>resendTenantAdminInvitation</code></td>
-          <td>重发租户管理员邀请</td>
+          <td>重发租户管理员邀请（需 platform-admin / platform-ops）</td>
           <td><code></code></td>
           <td>200, 401, 403, 404, 409</td>
         </tr>
@@ -827,7 +827,7 @@
           <td><span class="method method-post">POST</span></td>
           <td><code>/tenants/{tenantId}/admins/{userId}/reset-password</code></td>
           <td><code>resetTenantAdminPassword</code></td>
-          <td>重置管理员密码</td>
+          <td>重置管理员密码（需 platform-admin / platform-ops）</td>
           <td><code></code></td>
           <td>200, 400, 401, 403, 404, 409, 422</td>
         </tr>
@@ -835,7 +835,7 @@
           <td><span class="method method-get">GET</span></td>
           <td><code>/tenants/{tenantId}/admins/{userId}/role</code></td>
           <td><code>getTenantAdminRole</code></td>
-          <td>查询指定管理员角色与权限（4 维权限模型）</td>
+          <td>查询指定管理员角色与权限（4 维权限模型）（需 platform-admin / platform-ops / platform-readonly）</td>
           <td><code></code></td>
           <td>200, 401, 403, 404</td>
         </tr>
@@ -843,7 +843,7 @@
           <td><span class="method method-put">PUT</span></td>
           <td><code>/tenants/{tenantId}/admins/{userId}/role</code></td>
           <td><code>updateTenantAdminRole</code></td>
-          <td>修改管理员角色</td>
+          <td>修改管理员角色（需 platform-admin / platform-ops）</td>
           <td><code></code></td>
           <td>200, 400, 401, 403, 404, 409, 422</td>
         </tr>
@@ -851,7 +851,7 @@
           <td><span class="method method-post">POST</span></td>
           <td><code>/tenants/{tenantId}/plan</code></td>
           <td><code>bindTenantPlan</code></td>
-          <td>绑定套餐（按套餐限额更新配额）</td>
+          <td>绑定套餐（按套餐限额更新配额）（需 platform-admin / platform-ops）</td>
           <td><code></code></td>
           <td>200, 400, 401, 403, 404, 409, 422</td>
         </tr>
@@ -859,7 +859,7 @@
           <td><span class="method method-post">POST</span></td>
           <td><code>/tenants/{tenantId}/transfer-ownership</code></td>
           <td><code>transferTenantOwnership</code></td>
-          <td>移交租户所有者（对 tenant-admin 行发起，原 owner 降级为 admin）</td>
+          <td>移交租户所有者（对 tenant-admin 行发起，原 owner 降级为 admin）（需 platform-admin / platform-ops）</td>
           <td><code></code></td>
           <td>200, 401, 403, 404, 409, 422</td>
         </tr>

@@ -904,7 +904,7 @@ export interface paths {
         /** 查询套餐列表 */
         get: operations["listTenantPlans"];
         put?: never;
-        /** 创建套餐 */
+        /** 创建套餐（需 platform-admin / platform-ops） */
         post: operations["createTenantPlan"];
         delete?: never;
         options?: never;
@@ -919,11 +919,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 查询套餐详情 */
+        /** 查询套餐详情（需 platform-admin / platform-ops / platform-readonly） */
         get: operations["getTenantPlan"];
         put?: never;
         post?: never;
-        /** 删除套餐（软删除） */
+        /** 删除套餐（软删除）（需 platform-admin / platform-ops） */
         delete: operations["deleteTenantPlan"];
         options?: never;
         head?: never;
@@ -937,9 +937,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 查询套餐限额 */
+        /** 查询套餐限额（需 platform-admin / platform-ops / platform-readonly） */
         get: operations["getTenantPlanQuotaLimits"];
-        /** 修改套餐限额（同步存量租户） */
+        /** 修改套餐限额（同步存量租户）（需 platform-admin / platform-ops） */
         put: operations["updateTenantPlanQuotaLimits"];
         post?: never;
         delete?: never;
@@ -957,7 +957,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 发布套餐 */
+        /** 发布套餐（需 platform-admin / platform-ops） */
         post: operations["activateTenantPlan"];
         delete?: never;
         options?: never;
@@ -974,7 +974,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 禁用套餐 */
+        /** 禁用套餐（需 platform-admin / platform-ops） */
         post: operations["disableTenantPlan"];
         delete?: never;
         options?: never;
@@ -989,7 +989,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 查询套餐绑定的租户列表 */
+        /** 查询套餐绑定的租户列表（需 platform-admin / platform-ops / platform-readonly） */
         get: operations["listTenantPlanBoundTenants"];
         put?: never;
         post?: never;
@@ -1006,7 +1006,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 查询套餐操作历史 */
+        /** 查询套餐操作历史（需 platform-admin / platform-ops / platform-readonly） */
         get: operations["listTenantPlanAuditLogs"];
         put?: never;
         post?: never;
@@ -1025,7 +1025,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 绑定套餐（按套餐限额更新配额） */
+        /** 绑定套餐（按套餐限额更新配额）（需 platform-admin / platform-ops） */
         post: operations["bindTenantPlan"];
         delete?: never;
         options?: never;
@@ -1040,7 +1040,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 跨租户管理员列表（仅返回 owner/admin/邀请中） */
+        /** 跨租户管理员列表（仅返回 owner/admin/邀请中）（需 platform-admin / platform-ops / platform-readonly） */
         get: operations["listAllTenantAdmins"];
         put?: never;
         post?: never;
@@ -1059,7 +1059,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 邀请租户管理员 */
+        /** 邀请租户管理员（需 platform-admin / platform-ops） */
         post: operations["inviteTenantAdmin"];
         delete?: never;
         options?: never;
@@ -1076,7 +1076,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 重发租户管理员邀请 */
+        /** 重发租户管理员邀请（需 platform-admin / platform-ops） */
         post: operations["resendTenantAdminInvitation"];
         delete?: never;
         options?: never;
@@ -1091,11 +1091,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 查询管理员详情 */
+        /** 查询管理员详情（需 platform-admin / platform-ops / platform-readonly） */
         get: operations["getTenantAdminDetail"];
         put?: never;
         post?: never;
-        /** 软删除管理员（不幂等，不携带幂等键） */
+        /** 软删除管理员（不幂等，不携带幂等键）（需 platform-admin / platform-ops） */
         delete: operations["deleteTenantAdmin"];
         options?: never;
         head?: never;
@@ -1109,9 +1109,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 查询指定管理员角色与权限（4 维权限模型） */
+        /** 查询指定管理员角色与权限（4 维权限模型）（需 platform-admin / platform-ops / platform-readonly） */
         get: operations["getTenantAdminRole"];
-        /** 修改管理员角色 */
+        /** 修改管理员角色（需 platform-admin / platform-ops） */
         put: operations["updateTenantAdminRole"];
         post?: never;
         delete?: never;
@@ -1129,7 +1129,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 移交租户所有者（对 tenant-admin 行发起，原 owner 降级为 admin） */
+        /** 移交租户所有者（对 tenant-admin 行发起，原 owner 降级为 admin）（需 platform-admin / platform-ops） */
         post: operations["transferTenantOwnership"];
         delete?: never;
         options?: never;
@@ -1146,7 +1146,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 重置管理员密码 */
+        /** 重置管理员密码（需 platform-admin / platform-ops） */
         post: operations["resetTenantAdminPassword"];
         delete?: never;
         options?: never;
@@ -1163,7 +1163,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 禁用管理员 */
+        /** 禁用管理员（需 platform-admin / platform-ops） */
         post: operations["disableTenantAdmin"];
         delete?: never;
         options?: never;
@@ -1180,7 +1180,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 启用管理员 */
+        /** 启用管理员（需 platform-admin / platform-ops） */
         post: operations["enableTenantAdmin"];
         delete?: never;
         options?: never;
@@ -1195,7 +1195,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 查询管理员操作历史 */
+        /** 查询管理员操作历史（需 platform-admin / platform-ops / platform-readonly） */
         get: operations["listTenantAdminAuditLogs"];
         put?: never;
         post?: never;
