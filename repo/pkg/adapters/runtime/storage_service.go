@@ -1153,20 +1153,15 @@ func (s *LocalStorageService) CreateStorageObjectUpload(ctx context.Context, req
 	}
 	bucket, ok := s.buckets[strings.TrimSpace(request.BucketID)]
 	s.mu.RUnlock()
+	if !ok && s.store != nil {
+		loaded, err := s.store.GetBucket(ctx, request.TenantID, strings.TrimSpace(request.BucketID))
+		if err == nil && loaded.BucketID != "" {
+			bucket = loaded
+			ok = true
+		}
+	}
 	if !ok || bucket.TenantID != request.TenantID {
-		// Fallback to the persistent store when the bucket is not in the
-		// in-memory map (e.g. created by a previous gateway process). This
-		// fixes the "bucket not found" error after gateway restart.
-		if s.store != nil {
-			storedBucket, err := s.store.GetBucket(ctx, request.TenantID, strings.TrimSpace(request.BucketID))
-			if err == nil && storedBucket.TenantID == request.TenantID && storedBucket.State != ports.StorageResourceDeleted {
-				bucket = storedBucket
-				ok = true
-			}
-		}
-		if !ok {
-			return ports.StorageObjectUploadRecord{}, fmt.Errorf("%w: bucket not found", ports.ErrNotFound)
-		}
+		return ports.StorageObjectUploadRecord{}, fmt.Errorf("%w: bucket not found", ports.ErrNotFound)
 	}
 
 	now := s.now().UTC()

@@ -13,10 +13,7 @@ class Settings(BaseSettings):
     # gRPC server
     grpc_port: int = 50053
 
-    # PostgreSQL — maps to env DATABASE_URL.
-    # issue-031: kb-service no longer connects to PostgreSQL directly (no
-    # asyncpg). DATABASE_URL is retained for the Core data plane / managed
-    # migrations; kb-service accesses data via CoreClient.data_query.
+    # PostgreSQL (asyncpg) — maps to env DATABASE_URL
     database_url: str = "postgresql://ani:ani@localhost:5432/ani"
 
     # Core OpenAPI REST base (vector-stores / objects).

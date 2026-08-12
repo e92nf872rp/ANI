@@ -34,17 +34,8 @@ type RegisterOptions struct {
 	// KBSSEConfig wires the SSE streaming query endpoint (US-017). When
 	// ragClient or vllmStreamer is nil the SSE handler degrades to an
 	// empty stream so the gateway stays functional without backends.
-	KBSSEConfig    KbSSEConfig
-	AsyncTaskStore ports.AsyncTaskStore
-	// DataPlane is the Core-owned generic SQL data plane (SPEC
-	// design-kb-persistence-to-core-datapipe §3.2). When nil the
-	// /data/query and /data/tables handlers return 503 UNAVAILABLE so
-	// the gateway still boots in environments without a Core PG pool.
-	DataPlane ports.SQLDataPlane
-	// Store is the shared gateway cache store used for per-service-identity
-	// rate limiting on the data plane (SPEC §3.3-5). When nil rate limiting
-	// is skipped; the handler still enforces SQL/params/timeout limits.
-	Store ports.CacheStore
+	KBSSEConfig KbSSEConfig
+	AsyncTaskStore                        ports.AsyncTaskStore
 }
 
 // Register wires all route groups onto the Hertz server.
@@ -102,11 +93,6 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerGpuContainers(svc)
 	registerSandboxes(svc)
 	registerTenant(svc)
-
-	// Core generic data plane (SQL-over-HTTP). Registered on the Core v1
-	// group, not the Services svc group, because it is Core infrastructure
-	// (SPEC §7.2). The handlers enforce service-identity-only access.
-	registerDataPlaneResources(v1, options.DataPlane, options.Store)
 
 	// OpenAI-compatible inference proxy (separate URL prefix, no /api prefix)
 	h.Group("/v1").POST("/chat/completions", inferenceProxy)

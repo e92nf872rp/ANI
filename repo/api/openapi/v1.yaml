@@ -57,16 +57,6 @@ components:
       in: header
       name: X-API-Key
       description: 长期 API Key（在 Console → 设置 → API Key 中创建）
-    serviceIdentity:
-      type: http
-      scheme: bearer
-      description: >
-        Services 服务身份（service-to-service）。供 Services 托管服务经 Core OpenAPI
-        调用通用数据面（/data/*）等服务内部端点时使用；不可用于租户最终用户直连。
-    platformAdmin:
-      type: http
-      scheme: bearer
-      description: 平台管理员服务身份；用于受管建表（/data/tables）等平台级管理操作。
 
 # ── 公共 Schema ───────────────────────────────────────────────────────────────
   schemas:
@@ -398,59 +388,6 @@ components:
               status:     { type: string, enum: [ok, fail] }
               latency_ms: { type: integer }
               error:      { type: string, nullable: true }
-
-    # ── 通用数据面（SQL-over-HTTP）Schemas（SPEC design-kb-persistence-to-core-datapipe §3.1）──
-    DataQueryRequest:
-      type: object
-      description: >
-        参数化 SQL 执行请求（单事务）。占位符 $1..$n，绑定参数必须走 params 数组，
-        禁止拼接进 SQL。role 决定租户上下文：tenant 按 X-Tenant-Id 设 RLS；service 跨租户
-        （outbox 派发器等场景专用，仅平台受管 service identity）。
-      required: [sql, params]
-      properties:
-        sql:
-          type: string
-          minLength: 1
-          maxLength: 16384
-          description: |
-            参数化 SQL（DML/查询），占位符 $1..$n；一条或多条（同一事务）。
-            长度上限 16KiB，超出返回 400（SPEC §3.3 限流与超时）。
-        params:
-          type: array
-          maxItems: 100
-          description: 绑定参数（string/number/boolean/null 标量），禁止拼接进 SQL 字符串。
-          items:
-            type: [string, number, boolean, 'null']
-        role:
-          type: string
-          enum: [tenant, service]
-          default: tenant
-          description: >
-            tenant=按租户上下文（X-Tenant-Id，由服务身份/middleware 从 JWT 注入、不信任客户端直传）设 RLS；
-            service=跨租户（outbox 派发器专用）。缺省为 tenant。
-    DataQueryResponse:
-      type: object
-      description: >
-        /data/query 成功响应。columns 为最后一条查询的列名顺序；rows 为最后执行的查询结果集；
-        rowcount 为该事务中受影响（或返回）的行数；last_result 表示事务执行是否成功完成。
-      properties:
-        columns:     { type: array, items: { type: string }, description: "最后一条查询的列名顺序" }
-        rows:        { type: array, items: { type: object }, description: "最后一条查询的结果集行" }
-        rowcount:    { type: integer, description: "事务内受影响/返回的总行数" }
-        last_result: { type: boolean, description: "事务是否成功执行为 true" }
-    DataTableCreateRequest:
-      type: object
-      description: >
-        受管建表请求（受管迁移）。definition 为受管 DDL（create/alter），经白名单校验；
-        禁止 DROP/TRUNCATE/ALTER SYSTEM 等破坏性语句，未命中受管定义返回 422。
-      required: [name, definition]
-      properties:
-        name:
-          type: string
-          description: 受管表名（如 knowledge_bases、kb_documents 等已登记 Services 表）。
-        definition:
-          type: string
-          description: 受管 DDL 定义（create/alter），仅平台管理员可提交。
 
     CoreDevProfileInfo:
       type: object
@@ -5220,100 +5157,6 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
 
-  # ── 通用数据面（SQL-over-HTTP）────────────────────────────────────────────────
-  # 供 Services 托管服务经 Core OpenAPI 托管控建表与读写，而非直连 PostgreSQL。
-  # SPEC: design-kb-persistence-to-core-datapipe §3.1（Phase A 契约）。
-  # 仅向 Services service identity / 平台管理员开放，不对租户最终用户直连。
-  /data/query:
-    post:
-      operationId: dataQuery
-      summary: 参数化 SQL 执行（单事务）
-      description: |
-        读写（DML + 查询）。一次调用 = 一个事务；多语句在同一 BEGIN/COMMIT 内。
-        所有业务 SQL 必须使用 $1..$n 绑定参数，禁止拼接 params 进 SQL；
-        仅命中已注册的 Services 表，未命中或越权返回 403；破坏性语句/多语句注入返回 422。
-        role=tenant 时按租户上下文（X-Tenant-Id，由服务身份/middleware 从 JWT 注入，不信任客户端
-        直传）设 RLS；role=service 跨租户（outbox 派发器专用）。
-      tags: [DataPlane]
-      x-internal: services-data-plane
-      security:
-        - serviceIdentity: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/DataQueryRequest' }
-      responses:
-        "200":
-          description: 执行成功
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/DataQueryResponse' }
-        "400":
-          $ref: '#/components/responses/BadRequest'
-          description: |
-            参数非法（code=BAD_REQUEST）：sql 为空、params 与占位符不匹配、
-            SQL 长度超限、结果集超上限（>10_000 行）等。
-        "403":
-          $ref: '#/components/responses/Forbidden'
-          description: |
-            越权（code=FORBIDDEN）：目标表未注册、service role 未授权、租户越权等。
-        "422":
-          $ref: '#/components/responses/PreconditionFailed'
-          description: |
-            不支持的查询（code=UNSUPPORTED_QUERY）：包含 DROP/TRUNCATE/ALTER SYSTEM、
-            COPY 到外部、pg_read_file 等多语句注入或被拒语句。
-        "429": { $ref: '#/components/responses/RateLimitExceeded' }
-      x-errors:
-        - 400 INVALID_PARAMETER
-        - 403 FORBIDDEN
-        - 422 UNSUPPORTED_QUERY
-        - 429 RATE_LIMITED
-
-  /data/tables:
-    post:
-      operationId: dataCreateTable
-      summary: 受管建表（受管迁移）
-      description: |
-        受限 DDL：仅接受受管 schema 定义（create/alter），走 Core 迁移编排并记录审计。
-        非受管 DDL（DROP/TRUNCATE/ALTER SYSTEM 等破坏性语句）返回 422。
-        仅平台管理员安全；不产生幂等语义（受管迁移由 Core 编排保证）。
-      tags: [DataPlane]
-      x-internal: services-data-plane-admin
-      security:
-        - platformAdmin: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/DataTableCreateRequest' }
-      responses:
-        "201":
-          description: 表已创建（或受管定义已应用）
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [name, status]
-                properties:
-                  name:   { type: string, description: "受管表名" }
-                  status: { type: string, enum: [created, applied], description: "created=新建；applied=已应用变更" }
-        "400":
-          $ref: '#/components/responses/BadRequest'
-          description: 参数非法（code=BAD_REQUEST）：name/definition 缺失或为空。
-        "403":
-          $ref: '#/components/responses/Forbidden'
-          description: 非平台管理员（code=FORBIDDEN）。
-        "422":
-          $ref: '#/components/responses/PreconditionFailed'
-          description: |
-            非受管 DDL 被拒（code=UNSUPPORTED_QUERY）：definition 未命中受管白名单，
-            或包含 DROP/TRUNCATE/ALTER SYSTEM 等破坏性语句。
-      x-errors:
-        - 400 INVALID_PARAMETER
-        - 403 FORBIDDEN
-        - 422 UNSUPPORTED_QUERY
-
   /filesystems:
     get:
       operationId: listStorageFilesystems
@@ -7835,7 +7678,6 @@ tags:
   - { name: Volumes,        description: "块存储卷与快照" }
   - { name: Filesystems,    description: "文件存储（CephFS/NFS）" }
   - { name: ObjectStore,    description: "对象存储（S3兼容）与存储桶管理" }
-  - { name: DataPlane,      description: "通用数据面（SQL-over-HTTP，供 Services 托管读写与受管建表）" }
   - { name: VectorStore,    description: "向量存储（Milvus）" }
   - { name: K8sClusters,    description: "K8s 集群管理" }
   - { name: BareMetalHosts, description: "裸金属硬件库存管理" }

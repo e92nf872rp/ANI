@@ -85,6 +85,11 @@ $env:OBJECT_STORE_REGION           = "us-east-1"
 $env:OBJECT_STORE_SECURE           = "false"
 $env:OBJECT_STORE_BUCKET_PREFIX    = "ani-"
 
+# 向量存储配置 (Core /vector-stores 依赖真实 Milvus)
+$env:VECTOR_STORE_PROVIDER         = "milvus"
+$env:VECTOR_STORE_ENDPOINT         = $env:MILVUS_ADDR
+$env:VECTOR_STORE_COLLECTION_PREFIX = "ani_"
+
 Start-AniBg "gateway" (Join-Path $repo "bin\ani-gateway.exe") @() $repo
 
 Write-Host ""

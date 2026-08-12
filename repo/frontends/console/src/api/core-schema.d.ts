@@ -1031,52 +1031,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/data/query": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 参数化 SQL 执行（单事务）
-         * @description 读写（DML + 查询）。一次调用 = 一个事务；多语句在同一 BEGIN/COMMIT 内。
-         *     所有业务 SQL 必须使用 $1..$n 绑定参数，禁止拼接 params 进 SQL；
-         *     仅命中已注册的 Services 表，未命中或越权返回 403；破坏性语句/多语句注入返回 422。
-         *     role=tenant 时按租户上下文（X-Tenant-Id，由服务身份/middleware 从 JWT 注入，不信任客户端
-         *     直传）设 RLS；role=service 跨租户（outbox 派发器专用）。
-         */
-        post: operations["dataQuery"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/data/tables": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 受管建表（受管迁移）
-         * @description 受限 DDL：仅接受受管 schema 定义（create/alter），走 Core 迁移编排并记录审计。
-         *     非受管 DDL（DROP/TRUNCATE/ALTER SYSTEM 等破坏性语句）返回 422。
-         *     仅平台管理员安全；不产生幂等语义（受管迁移由 Core 编排保证）。
-         */
-        post: operations["dataCreateTable"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/filesystems": {
         parameters: {
             query?: never;
@@ -3026,40 +2980,6 @@ export interface components {
                     error?: string | null;
                 };
             };
-        };
-        /** @description 参数化 SQL 执行请求（单事务）。占位符 $1..$n，绑定参数必须走 params 数组， 禁止拼接进 SQL。role 决定租户上下文：tenant 按 X-Tenant-Id 设 RLS；service 跨租户 （outbox 派发器等场景专用，仅平台受管 service identity）。 */
-        DataQueryRequest: {
-            /**
-             * @description 参数化 SQL（DML/查询），占位符 $1..$n；一条或多条（同一事务）。
-             *     长度上限 16KiB，超出返回 400（SPEC §3.3 限流与超时）。
-             */
-            sql: string;
-            /** @description 绑定参数（string/number/boolean/null 标量），禁止拼接进 SQL 字符串。 */
-            params: (string | number | boolean | null)[];
-            /**
-             * @description tenant=按租户上下文（X-Tenant-Id，由服务身份/middleware 从 JWT 注入、不信任客户端直传）设 RLS； service=跨租户（outbox 派发器专用）。缺省为 tenant。
-             * @default tenant
-             * @enum {string}
-             */
-            role: "tenant" | "service";
-        };
-        /** @description /data/query 成功响应。columns 为最后一条查询的列名顺序；rows 为最后执行的查询结果集； rowcount 为该事务中受影响（或返回）的行数；last_result 表示事务执行是否成功完成。 */
-        DataQueryResponse: {
-            /** @description 最后一条查询的列名顺序 */
-            columns?: string[];
-            /** @description 最后一条查询的结果集行 */
-            rows?: Record<string, never>[];
-            /** @description 事务内受影响/返回的总行数 */
-            rowcount?: number;
-            /** @description 事务是否成功执行为 true */
-            last_result?: boolean;
-        };
-        /** @description 受管建表请求（受管迁移）。definition 为受管 DDL（create/alter），经白名单校验； 禁止 DROP/TRUNCATE/ALTER SYSTEM 等破坏性语句，未命中受管定义返回 422。 */
-        DataTableCreateRequest: {
-            /** @description 受管表名（如 knowledge_bases、kb_documents 等已登记 Services 表）。 */
-            name: string;
-            /** @description 受管 DDL 定义（create/alter），仅平台管理员可提交。 */
-            definition: string;
         };
         /** @description Core dev/local profile 标记；用于区分本地联调成功与真实 provider 执行成功。 */
         CoreDevProfileInfo: {
@@ -8036,84 +7956,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-        };
-    };
-    dataQuery: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DataQueryRequest"];
-            };
-        };
-        responses: {
-            /** @description 执行成功 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataQueryResponse"];
-                };
-            };
-            /**
-             * @description 参数非法（code=BAD_REQUEST）：sql 为空、params 与占位符不匹配、
-             *     SQL 长度超限、结果集超上限（>10_000 行）等。
-             */
-            400: components["responses"]["BadRequest"];
-            /** @description 越权（code=FORBIDDEN）：目标表未注册、service role 未授权、租户越权等。 */
-            403: components["responses"]["Forbidden"];
-            /**
-             * @description 不支持的查询（code=UNSUPPORTED_QUERY）：包含 DROP/TRUNCATE/ALTER SYSTEM、
-             *     COPY 到外部、pg_read_file 等多语句注入或被拒语句。
-             */
-            422: components["responses"]["PreconditionFailed"];
-            429: components["responses"]["RateLimitExceeded"];
-        };
-    };
-    dataCreateTable: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DataTableCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description 表已创建（或受管定义已应用） */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @description 受管表名 */
-                        name: string;
-                        /**
-                         * @description created=新建；applied=已应用变更
-                         * @enum {string}
-                         */
-                        status: "created" | "applied";
-                    };
-                };
-            };
-            /** @description 参数非法（code=BAD_REQUEST）：name/definition 缺失或为空。 */
-            400: components["responses"]["BadRequest"];
-            /** @description 非平台管理员（code=FORBIDDEN）。 */
-            403: components["responses"]["Forbidden"];
-            /**
-             * @description 非受管 DDL 被拒（code=UNSUPPORTED_QUERY）：definition 未命中受管白名单，
-             *     或包含 DROP/TRUNCATE/ALTER SYSTEM 等破坏性语句。
-             */
-            422: components["responses"]["PreconditionFailed"];
         };
     };
     listStorageFilesystems: {

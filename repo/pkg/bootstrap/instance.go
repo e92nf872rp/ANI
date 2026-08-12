@@ -16,11 +16,6 @@ type InstanceRuntime struct {
 	SandboxRuntime       ports.SandboxRuntime
 	AsyncTasks           ports.AsyncTaskStore
 	KubernetesRESTClient *runtimeadapter.KubernetesRESTClient
-	// DataPlane is the Core generic SQL data plane (SPEC
-	// design-kb-persistence-to-core-datapipe §3.2) backed by the same PG
-	// pool as the rest of the runtime. It is nil when no DatabaseURL is
-	// configured.
-	DataPlane ports.SQLDataPlane
 }
 
 func ConnectInstanceService(ctx context.Context, cfg Config) (InstanceRuntime, func(), error) {
@@ -51,7 +46,6 @@ func ConnectInstanceService(ctx context.Context, cfg Config) (InstanceRuntime, f
 		SandboxRuntime:       capabilities.SandboxRuntime,
 		AsyncTasks:           capabilities.AsyncTasks,
 		KubernetesRESTClient: kubernetesRESTClient,
-		DataPlane:            capabilities.DataPlane,
 	}, pool.Close, nil
 }
 

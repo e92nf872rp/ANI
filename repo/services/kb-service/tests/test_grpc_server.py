@@ -193,11 +193,9 @@ def test_query_missing_idempotency_key_invalid_argument(stub):
 
 
 def test_query_no_pool_returns_unavailable_or_precondition(stub):
-    # Query loads the KB config first; without a pool the KB lookup fails
-    # before rag-engine is reached, so the RPC aborts. The exact code depends
-    # on which step fails first (NOT_FOUND when KB lookup returns no row,
-    # UNAVAILABLE when rag-engine is unreachable, FAILED_PRECONDITION when
-    # the data plane is unreachable). All three are acceptable here.
+    # Without a DB pool the KB existence check returns NOT_FOUND before
+    # reaching the rag-engine call. This is correct: the servicer gates on
+    # KB existence first (SPEC §6.1 step 2.5).
     with pytest.raises(grpc.RpcError) as exc:
         stub.Query(
             kb_pb.QueryRequest(
@@ -205,11 +203,7 @@ def test_query_no_pool_returns_unavailable_or_precondition(stub):
                 idempotency_key=str(uuid.uuid4()),
             )
         )
-    assert exc.value.code() in (
-        grpc.StatusCode.UNAVAILABLE,
-        grpc.StatusCode.FAILED_PRECONDITION,
-        grpc.StatusCode.NOT_FOUND,
-    )
+    assert exc.value.code() == grpc.StatusCode.NOT_FOUND
 
 
 # ── 3 P1 RPCs return UNIMPLEMENTED (AC4) ─────────────────────────────────────

@@ -39,14 +39,7 @@ func AuthWithClient(authClient AuthClient) app.HandlerFunc {
 			if userID == "" {
 				userID = "00000000-0000-0000-0000-000000000001"
 			}
-			// X-Dev-Scope lets local e2e tests exercise platform/service-only
-			// routes (e.g. /data/query) without a real auth-service token.
-			// Defaults to "tenant" when unset. Only honored in dev mode.
-			scope := string(c.GetHeader("X-Dev-Scope"))
-			if scope == "" {
-				scope = "tenant"
-			}
-			setTenantContext(c, tenantID, userID, []string{"tenant-admin"}, scope)
+			setTenantContext(c, tenantID, userID, []string{"tenant-admin"}, "tenant")
 			// Inject TenantContext into Go context.Context so RLS-aware stores
 			// (MetadataInstanceStore via WithTenantTx -> SetDBTenant -> FromContext)
 			// do not panic when a real DB provider is wired.

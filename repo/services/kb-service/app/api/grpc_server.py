@@ -9,14 +9,12 @@ persistence + Redis session cache.
 from __future__ import annotations
 
 import asyncio
-import json
-import logging
-import os
 import threading
 import uuid
 from datetime import datetime
 from typing import Any
 
+import asyncpg
 import grpc
 from google.protobuf import empty_pb2
 from google.protobuf import timestamp_pb2
@@ -33,15 +31,14 @@ from app.repositories import knowledge_base as kb_repo
 
 
 # ── async bridge for gRPC ThreadPoolExecutor worker threads ──────────────────
-# gRPC servicer methods run in a ThreadPoolExecutor worker thread. The
-# CoreClient (httpx) and Redis client bind to the event loop they were
-# created on, so sharing clients created on the uvicorn loop across gRPC
-# threads causes "Future attached to a different loop" errors.
+# gRPC servicer methods run in a ThreadPoolExecutor worker thread. asyncpg
+# connections are bound to the event loop they were created on, so sharing
+# a pool created on the uvicorn loop across gRPC threads causes
+# "Future attached to a different loop" errors.
 #
-# Fix: a single dedicated event loop runs on a background thread. The
-# CoreClient, Redis client, and all async work live on that loop. gRPC
-# worker threads submit coroutines via run_coroutine_threadsafe and block
-# on the result.
+# Fix: a single dedicated event loop runs on a background thread. The pool,
+# Redis client, and all async work live on that loop. gRPC worker threads
+# submit coroutines via run_coroutine_threadsafe and block on the result.
 _grpc_loop: asyncio.AbstractEventLoop | None = None
 _grpc_loop_thread: threading.Thread | None = None
 
@@ -68,8 +65,8 @@ def _start_grpc_loop():
 def _run_async(coro):
     """Submit a coroutine to the dedicated gRPC event loop and block on it.
 
-    The loop is shared across all gRPC worker threads so CoreClient (httpx)
-    and Redis clients always run on the same loop they were created on.
+    The loop is shared across all gRPC worker threads so asyncpg connections
+    from the pool always run on the same loop they were created on.
     """
     if _grpc_loop is None:
         _start_grpc_loop()
@@ -88,24 +85,10 @@ def _run_async_bg(coro):
     return asyncio.run_coroutine_threadsafe(coro, _grpc_loop)
 
 
-def _ts(dt: datetime | str | None) -> timestamp_pb2.Timestamp:
-    """Convert a datetime or ISO-format string to a protobuf Timestamp.
-
-    The Core data plane returns PostgreSQL timestamp values as ISO 8601
-    strings in JSON rows. Handle both ISO strings and datetime objects.
-    """
+def _ts(dt: datetime | None) -> timestamp_pb2.Timestamp:
+    """Convert a datetime to a protobuf Timestamp."""
     ts = timestamp_pb2.Timestamp()
-    if dt is None:
-        return ts
-    if isinstance(dt, str):
-        # Core data plane JSON: "2026-08-11T07:12:34.567890+00:00" or
-        # "2026-08-11 07:12:34.567890+00:00" (PostgreSQL timestamptz).
-        dt = dt.replace(" ", "T", 1) if " " in dt and "T" not in dt else dt
-        try:
-            dt = datetime.fromisoformat(dt)
-        except ValueError:
-            return ts
-    if isinstance(dt, datetime):
+    if dt is not None:
         ts.FromDatetime(dt)
     return ts
 
@@ -121,16 +104,14 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
     def __init__(
         self,
         *,
-        pool: Any | None = None,
+        pool: asyncpg.Pool | None = None,
         core_client_factory: Any | None = None,
         rag_engine_client_factory: Any | None = None,
         session_cache_factory: Any | None = None,
     ) -> None:
         # When pool is None the servicer still serves RPCs that don't need DB
         # (used by the skeleton tests in test_grpc_server.py). DB-backed RPCs
-        # abort with FAILED_PRECONDITION when pool is unset. The pool is a
-        # configuration sentinel — actual data access goes through the
-        # CoreClient data plane (issue-031, SPEC §4.3).
+        # abort with FAILED_PRECONDITION when pool is unset.
         self._pool = pool
         # core_client_factory(tenant_id) -> CoreClient; injected for testing.
         # In production, constructed from settings in main.py.
@@ -189,23 +170,23 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
 
         idem_key = idem or f"create_kb:{tenant_id}:{request.name}"
 
-        # 2. idempotency replay: return existing result (data plane, SPEC §4.2)
-        async with self._core_client_factory(tenant_id) as core:
+        # 2. idempotency replay: return existing result
+        async with self._pool.acquire() as conn:
             existing = await async_task_repo.find_by_idempotency_key(
-                core, tenant_id=tenant_id, idempotency_key=idem_key
+                conn, tenant_id=tenant_id, idempotency_key=idem_key
             )
-        if existing and existing.get("result"):
-            # result is JSONB; the data plane returns it as a dict or a JSON
-            # string depending on the column codec. Normalize.
-            result = existing["result"]
-            if isinstance(result, str):
-                result = json.loads(result)
-            return _kb_row_to_pb(result)
+            if existing and existing.get("result"):
+                # result is JSONB; asyncpg may return it as a str or already-
+                # parsed dict depending on the codec config. Normalize.
+                result = existing["result"]
+                if isinstance(result, str):
+                    import json
+                    result = json.loads(result)
+                return _kb_row_to_pb(result)
 
-        # 3. INSERT knowledge_bases (data plane, SPEC §4.2)
-        async with self._core_client_factory(tenant_id) as core:
+            # 3. INSERT knowledge_bases
             kb_row = await kb_repo.create_kb(
-                core,
+                conn,
                 tenant_id=tenant_id,
                 name=request.name,
                 description=request.description,
@@ -217,7 +198,7 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
                 score_threshold=request.score_threshold or 0.0,
                 retrieval_mode=request.retrieval_mode or "hybrid",
             )
-        kb_id = str(kb_row["id"])
+            kb_id = str(kb_row["id"])
 
         # 4. Core POST /vector-stores (SPEC §6.1)
         try:
@@ -234,8 +215,8 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         except CoreAPIError as e:
             # Best-effort cleanup: soft-delete the KB row so retries can
             # re-create. We don't abort here on cleanup failure.
-            async with self._core_client_factory(tenant_id) as core:
-                await kb_repo.soft_delete_kb(core, tenant_id=tenant_id, kb_id=kb_id)
+            async with self._pool.acquire() as conn:
+                await kb_repo.soft_delete_kb(conn, tenant_id=tenant_id, kb_id=kb_id)
             context.abort(
                 grpc.StatusCode.UNAVAILABLE,
                 f"Core vector-store creation failed: {e}",
@@ -243,10 +224,9 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             return  # unreachable
 
         # 5. write async_tasks(idempotency_key, result=kb) for replay
-        #    (data plane, SPEC §4.2)
-        async with self._core_client_factory(tenant_id) as core:
+        async with self._pool.acquire() as conn:
             task_row = await async_task_repo.create_task(
-                core,
+                conn,
                 tenant_id=tenant_id,
                 idempotency_key=idem_key,
                 task_type="kb.create",
@@ -256,7 +236,7 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
                 status="pending",
             )
             await async_task_repo.complete_task(
-                core,
+                conn,
                 tenant_id=tenant_id,
                 task_id=str(task_row["id"]),
                 result=kb_row,
@@ -271,9 +251,9 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         if self._pool is None:
             context.abort(grpc.StatusCode.FAILED_PRECONDITION, "DB pool not configured")
             return
-        async with self._core_client_factory(request.tenant_id) as core:
+        async with self._pool.acquire() as conn:
             row = await kb_repo.get_kb(
-                core, tenant_id=request.tenant_id, kb_id=request.kb_id
+                conn, tenant_id=request.tenant_id, kb_id=request.kb_id
             )
         if not row:
             context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
@@ -289,9 +269,9 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             return
         limit = request.page.limit or 20
         cursor = request.page.cursor or None
-        async with self._core_client_factory(request.tenant_id) as core:
+        async with self._pool.acquire() as conn:
             rows, total = await kb_repo.list_kbs(
-                core, tenant_id=request.tenant_id, limit=limit, cursor=cursor
+                conn, tenant_id=request.tenant_id, limit=limit, cursor=cursor
             )
         kbs = [_kb_row_to_pb(r) for r in rows]
         next_cursor = str(rows[-1]["id"]) if rows and len(rows) >= limit else ""
@@ -311,9 +291,9 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         kb_id = request.kb_id
 
         # 1. soft-delete KB
-        async with self._core_client_factory(tenant_id) as core:
+        async with self._pool.acquire() as conn:
             deleted = await kb_repo.soft_delete_kb(
-                core, tenant_id=tenant_id, kb_id=kb_id
+                conn, tenant_id=tenant_id, kb_id=kb_id
             )
         if not deleted:
             context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
@@ -358,9 +338,9 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         # 0. verify the KB exists BEFORE resolving an upload URL / reserving a
         # kb_documents row. Otherwise a non-existent kb_id trips the
         # kb_documents.kb_id FK constraint (→ 500) instead of a clean 404.
-        async with self._core_client_factory(request.tenant_id) as core:
+        async with self._pool.acquire() as conn:
             kb_row = await kb_repo.get_kb(
-                core, tenant_id=request.tenant_id, kb_id=request.kb_id
+                conn, tenant_id=request.tenant_id, kb_id=request.kb_id
             )
         if kb_row is None:
             context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
@@ -395,10 +375,10 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         upload_url = upload.get("upload_url", "")
         object_id = upload.get("object_id", doc_id)
 
-        # 2. write kb_documents (parse_status=pending) (SPEC §6.1, data plane §4.2)
-        async with self._core_client_factory(request.tenant_id) as core:
+        # 2. write kb_documents (parse_status=pending) (SPEC §6.1)
+        async with self._pool.acquire() as conn:
             await document_repo.create_document(
-                core,
+                conn,
                 tenant_id=request.tenant_id,
                 kb_id=request.kb_id,
                 file_name=request.file_name,
@@ -426,12 +406,9 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         """NotifyDocumentUploaded — atomic outbox write (SPEC §6.1, US-010).
 
         Writes kb_documents (parse_status=pending) + async_tasks + outbox_events
-        in a single data-plane transaction so the parse task is durably enqueued
-        only if the document update commits. The Core data plane runs each
-        /data/query call as a single transaction (BEGIN/COMMIT), so a single
-        CTE-based SQL statement folding all three writes is atomic (SPEC §4.2
-        cross-table atomic fold). The outbox dispatcher publishes the event to
-        NATS `ani.tasks.kb.parse` asynchronously (outbox/dispatcher.py).
+        in a single transaction so the parse task is durably enqueued only if
+        the document update commits. The outbox dispatcher publishes the event
+        to NATS `ani.tasks.kb.parse` asynchronously (outbox/dispatcher.py).
         """
         if self._pool is None:
             context.abort(grpc.StatusCode.FAILED_PRECONDITION, "DB pool not configured")
@@ -451,117 +428,91 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         # safe and return the same AsyncTaskRef.
         idem_key = f"kb.parse:{tenant_id}:{kb_id}:{doc_id}"
 
-        # Fold the idempotency check + kb_documents UPDATE + async_tasks
-        # INSERT + outbox_events INSERT into a single CTE-based data_query
-        # call so the check and all three writes commit atomically in one
-        # data-plane transaction (SPEC §4.2 cross-table atomic fold). This
-        # eliminates the TOCTOU race between a separate find_by_idempotency_key
-        # call and the fold: two concurrent RPCs for the same doc will both
-        # hit the ON CONFLICT (idempotency_key) DO NOTHING on async_tasks,
-        # and the final SELECT returns the existing task id to both.
-        #
-        # CTE chain:
-        #   doc_upd — UPDATE kb_documents, RETURNING id+object_id (0 rows if
-        #             doc not found → downstream CTEs produce nothing)
-        #   kb_cfg  — read chunk_size from knowledge_bases
-        #   existing — SELECT any prior async_tasks row with this idempotency_key
-        #   task    — INSERT async_tasks with ON CONFLICT (idempotency_key)
-        #             DO NOTHING, only if doc_upd returned a row (new doc)
-        #   obx     — INSERT outbox_events, only if doc_upd returned a row
-        # Final SELECT: return the task id (new from `task` or existing from
-        #   `existing`), or empty if the document was not found.
-        payload_json = json.dumps(
-            {
-                "doc_id": doc_id,
-                "kb_id": kb_id,
-                "object_id": None,  # filled from doc_upd in the CTE
-            },
-            default=str,
-        )
-        outbox_payload_json = json.dumps(
-            {
-                "doc_id": doc_id,
-                "kb_id": kb_id,
-                "storage_path": request.storage_path,
-                "tenant_id": tenant_id,
-                "file_name": "",
-                "object_id": None,  # filled from doc_upd in the CTE
-                "chunk_size": None,  # filled from kb_cfg in the CTE
-            },
-            default=str,
-        )
-        fold_sql = """
-            WITH doc_upd AS (
-                UPDATE kb_documents
-                   SET parse_status = 'pending',
-                       error_message = NULL
-                 WHERE id = $1
-             RETURNING id, object_id
-            ),
-            kb_cfg AS (
-                SELECT chunk_size FROM knowledge_bases WHERE id = $2
-            ),
-            existing AS (
-                SELECT id, status FROM async_tasks
-                 WHERE tenant_id = $3 AND idempotency_key = $4
-            ),
-            task AS (
-                INSERT INTO async_tasks
-                    (tenant_id, idempotency_key, task_type, resource_type,
-                     resource_id, status, payload)
-                SELECT $3, $4, 'kb.parse', 'kb_document', $1, 'pending',
-                       jsonb_set(
-                         jsonb_set($5::jsonb, '{object_id}',
-                                   COALESCE(to_jsonb(doc_upd.object_id), 'null'::jsonb)),
-                         '{doc_id}', to_jsonb($1::text))
-                  FROM doc_upd
-                ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
-                RETURNING id
-            ),
-            obx AS (
-                INSERT INTO outbox_events
-                    (aggregate_type, aggregate_id, event_type, tenant_id,
-                     payload)
-                SELECT 'kb_documents', $1::uuid, 'kb.parse', $3,
-                       jsonb_set(
-                         jsonb_set(
-                           jsonb_set($6::jsonb, '{object_id}',
-                                     COALESCE(to_jsonb(doc_upd.object_id), 'null'::jsonb)),
-                           '{chunk_size}',
-                           COALESCE(to_jsonb(kb_cfg.chunk_size), 'null'::jsonb)),
-                         '{storage_path}', to_jsonb($7::text))
-                  FROM doc_upd, kb_cfg
-                  WHERE NOT EXISTS (SELECT 1 FROM existing)
-             RETURNING id
+        async with self._pool.acquire() as conn:
+            # 1. idempotency replay: if a prior notify for this doc completed,
+            #    return the same AsyncTaskRef (SPEC §6.4 idempotent replay).
+            existing = await async_task_repo.find_by_idempotency_key(
+                conn, tenant_id=tenant_id, idempotency_key=idem_key
             )
-            SELECT t.id AS task_id, 'pending' AS status
-              FROM task t
-            UNION ALL
-            SELECT e.id AS task_id, e.status AS status
-              FROM existing e
-            WHERE NOT EXISTS (SELECT 1 FROM task)
-        """
-        async with self._core_client_factory(tenant_id) as core:
-            result = await core.data_query(
-                sql=fold_sql,
-                params=[
-                    doc_id, kb_id, tenant_id, idem_key,
-                    payload_json, outbox_payload_json, request.storage_path,
-                ],
-            )
-        rows = result.get("rows", [])
-        if not rows:
-            # document not found → the UPDATE returned no rows → no task/outbox
-            # were inserted (SPEC §6.1: abort before enqueuing parse task).
-            context.abort(grpc.StatusCode.NOT_FOUND, "document not found")
-            return  # unreachable; for type checkers
-        task_id = str(rows[0]["task_id"])
-        task_status = rows[0].get("status") or "pending"
+            if existing and existing.get("status") in ("pending", "completed"):
+                # Return the recorded task id + status.
+                return common_pb2.AsyncTaskRef(
+                    task_id=str(existing["id"]),
+                    task_type=existing.get("task_type") or "kb.parse",
+                    status=existing.get("status") or "pending",
+                    location_url="",
+                )
+
+            # 2. atomic write: kb_documents + async_tasks + outbox_events.
+            #    outbox.insert_event and create_task_in_tx / update_parse_status_in_tx
+            #    do NOT open their own transactions; they run inside this one.
+            async with conn.transaction():
+                # a. mark the document parse_status=pending (idempotent update).
+                updated = await document_repo.update_parse_status_in_tx(
+                    conn,
+                    tenant_id=tenant_id,
+                    doc_id=doc_id,
+                    parse_status="pending",
+                    error_message=None,
+                )
+                if not updated:
+                    # document not found → abort before writing outbox/async_task
+                    context.abort(grpc.StatusCode.NOT_FOUND, "document not found")
+                    return  # unreachable; for type checkers
+
+                # b. insert async_tasks row for idempotent replay + status tracking.
+                doc_row = await document_repo.get_document(
+                    conn, tenant_id=tenant_id, kb_id=kb_id, doc_id=doc_id
+                )
+                object_id = (doc_row or {}).get("object_id") or ""
+
+                task_row = await async_task_repo.create_task_in_tx(
+                    conn,
+                    tenant_id=tenant_id,
+                    idempotency_key=idem_key,
+                    task_type="kb.parse",
+                    resource_type="kb_document",
+                    resource_id=doc_id,
+                    payload={
+                        "doc_id": doc_id,
+                        "kb_id": kb_id,
+                        "object_id": object_id,
+                    },
+                    status="pending",
+                )
+                task_id = str(task_row["id"])
+
+                # c. insert outbox_events row; dispatcher publishes to NATS.
+                from app.repositories import outbox as outbox_repo
+                from app.repositories import knowledge_base as kb_repo
+
+                # Carry the KB's chunk_size through to the parse_worker so each
+                # task chunks with the KB's configured size (default 1024 when
+                # the KB row is missing or has no chunk_size set).
+                kb_row = await kb_repo.get_kb(conn, tenant_id=tenant_id, kb_id=kb_id)
+                kb_chunk_size = (kb_row or {}).get("chunk_size") or 1024
+
+                await outbox_repo.insert_event(
+                    conn,
+                    tenant_id=tenant_id,
+                    aggregate_type="kb_documents",
+                    aggregate_id=doc_id,
+                    event_type="kb.parse",
+                    payload={
+                        "doc_id": doc_id,
+                        "kb_id": kb_id,
+                        "storage_path": request.storage_path,
+                        "tenant_id": tenant_id,
+                        "file_name": "",
+                        "object_id": object_id,
+                        "chunk_size": kb_chunk_size,
+                    },
+                )
 
         return common_pb2.AsyncTaskRef(
             task_id=task_id,
             task_type="kb.parse",
-            status=task_status,
+            status="pending",
             location_url="",
         )
 
@@ -572,9 +523,9 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         if self._pool is None:
             context.abort(grpc.StatusCode.FAILED_PRECONDITION, "DB pool not configured")
             return
-        async with self._core_client_factory(request.tenant_id) as core:
+        async with self._pool.acquire() as conn:
             row = await document_repo.get_document(
-                core,
+                conn,
                 tenant_id=request.tenant_id,
                 kb_id=request.kb_id,
                 doc_id=request.doc_id,
@@ -593,9 +544,9 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             return
         limit = request.page.limit or 20
         cursor = request.page.cursor or None
-        async with self._core_client_factory(request.tenant_id) as core:
+        async with self._pool.acquire() as conn:
             rows, total = await document_repo.list_documents(
-                core,
+                conn,
                 tenant_id=request.tenant_id,
                 kb_id=request.kb_id,
                 parse_status=request.parse_status or None,
@@ -617,9 +568,9 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             context.abort(grpc.StatusCode.FAILED_PRECONDITION, "DB pool not configured")
             return
         # 1. soft-delete document
-        async with self._core_client_factory(request.tenant_id) as core:
+        async with self._pool.acquire() as conn:
             deleted = await document_repo.soft_delete_document(
-                core,
+                conn,
                 tenant_id=request.tenant_id,
                 kb_id=request.kb_id,
                 doc_id=request.doc_id,
@@ -684,15 +635,12 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         kb_row = None
         if self._pool is not None:
             try:
-                async with self._core_client_factory(tenant_id) as core:
+                async with self._pool.acquire() as conn:
                     kb_row = await kb_repo.get_kb(
-                        core, tenant_id=tenant_id, kb_id=kb_id
+                        conn, tenant_id=tenant_id, kb_id=kb_id
                     )
             except Exception:  # noqa: BLE001 — degrade to defaults below
-                logging.getLogger(__name__).warning(
-                    "kb-service: failed to load KB config, using defaults",
-                    exc_info=True,
-                )
+                logger.warning("kb-service: failed to load KB config, using defaults", exc_info=True)
                 kb_row = None
         if kb_row is None:
             context.abort(
@@ -708,22 +656,26 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         }
 
         # 3-4. persist user message + Redis cache (best-effort).
-        # create_session + insert_message(user) are folded into a single
-        # CTE-based data_query call so both writes commit atomically in one
-        # data-plane transaction (SPEC §4.2 cross-table atomic fold). A
-        # partial user-message write can't survive a crash mid-RPC.
+        # create_session + insert_message(user) run in a single transaction so
+        # a partial user-message write can't survive a crash mid-RPC (SPEC §6.1).
         if self._pool is not None:
-            from app.repositories import message as message_repo
+            async with self._pool.acquire() as conn:
+                from app.repositories import message as message_repo
 
-            async with self._core_client_factory(tenant_id) as core:
-                await message_repo.create_session_and_message(
-                    core,
-                    tenant_id=tenant_id,
-                    kb_id=kb_id,
-                    session_id=session_id,
-                    role="user",
-                    content=request.question,
-                )
+                async with conn.transaction():
+                    await message_repo.create_session_in_tx(
+                        conn,
+                        tenant_id=tenant_id,
+                        kb_id=kb_id,
+                        session_id=session_id,
+                    )
+                    await message_repo.insert_message_in_tx(
+                        conn,
+                        tenant_id=tenant_id,
+                        session_id=session_id,
+                        role="user",
+                        content=request.question,
+                    )
 
         cache = self._session_cache_factory()
         if cache is not None:
@@ -765,11 +717,11 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
 
         # 6-7. persist assistant message + Redis cache (best-effort).
         if self._pool is not None:
-            from app.repositories import message as message_repo
+            async with self._pool.acquire() as conn:
+                from app.repositories import message as message_repo
 
-            async with self._core_client_factory(tenant_id) as core:
                 await message_repo.insert_message(
-                    core,
+                    conn,
                     tenant_id=tenant_id,
                     session_id=session_id,
                     role="assistant",
@@ -823,24 +775,12 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
 
 
 def _default_core_client(tenant_id: str) -> CoreClient:
-    """Build a CoreClient from app settings (production default).
-
-    In dev auth mode (ANI_AUTH_MODE=dev) the gateway identifies service
-    callers via the X-Dev-Scope header. kb-service is a Services-layer
-    process and must use scope=service so the data-plane handler accepts
-    its /data/query calls (SPEC §3.3-7 service-identity-only).
-    """
+    """Build a CoreClient from app settings (production default)."""
     from app.core.config import settings
-
-    extra_headers: dict[str, str] = {}
-    auth_mode = os.environ.get("ANI_AUTH_MODE", "").lower()
-    if auth_mode == "dev":
-        extra_headers["X-Dev-Scope"] = "service"
 
     return CoreClient(
         base_url=settings.core_api_base_url,
         tenant_id=tenant_id,
-        extra_headers=extra_headers or None,
     )
 
 
@@ -920,6 +860,8 @@ def _kb_row_to_pb(row: dict[str, Any]) -> kb_pb.KnowledgeBase:
 
 def _doc_row_to_pb(row: dict[str, Any]) -> kb_pb.KBDocument:
     """Convert a kb_documents repository row to a proto KBDocument."""
+    import json
+
     metadata = row.get("custom_metadata")
     if isinstance(metadata, (dict, list)):
         metadata_str = json.dumps(metadata, default=str)
