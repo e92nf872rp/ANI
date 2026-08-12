@@ -482,3 +482,219 @@ func TestPostgresQuotaReservationNotFound(t *testing.T) {
 		})
 	}
 }
+
+// --- TryTx / TryManyTx 单元测试（v2） ---
+
+// TestPostgresQuotaTryTxSuccess 验证 TryTx 成功：meta enabled + lazy init +
+// 预占成功，返回带 tx_id 和 expires_at 的预占流水。TryTx 直接使用传入的 tx，
+// 不经过 WithTenantTx。
+func TestPostgresQuotaTryTxSuccess(t *testing.T) {
+	tx := &quotaFakeTx{}
+	expires := time.Unix(200, 0)
+	tx.enqueueRows(existingMeta(), quotaFakeRow{values: []any{"tx-0001", expires}})
+	store := &quotaFakeStore{tx: tx}
+	q := NewPostgresQuota(store)
+
+	res, err := q.TryTx(context.Background(), tx, ports.QuotaTryRequest{
+		TenantID:     testTenantID,
+		ResourceType: ports.QuotaGPUCount,
+		Amount:       4,
+	})
+	if err != nil {
+		t.Fatalf("TryTx() error = %v", err)
+	}
+	if res.TxID != "tx-0001" {
+		t.Fatalf("TryTx() TxID = %q, want tx-0001", res.TxID)
+	}
+	if !res.ExpiresAt.Equal(expires) {
+		t.Fatalf("TryTx() ExpiresAt = %v, want %v", res.ExpiresAt, expires)
+	}
+	if !hasExec(tx, "INSERT INTO resource_quota") {
+		t.Fatalf("TryTx() 未执行 lazy-init INSERT")
+	}
+	if !hasExec(tx, "UPDATE resource_quota") {
+		t.Fatalf("TryTx() 未执行预占 UPDATE")
+	}
+	// TryTx 不应触发 WithTenantTx（store.tenantRolledBack 保持 false）
+	if store.tenantRolledBack {
+		t.Fatalf("TryTx() 不应调用 WithTenantTx")
+	}
+}
+
+// TestPostgresQuotaTryTxDisabledMeta 验证 TryTx 在 meta disabled 时返回
+// ErrQuotaResourceNotRegistered。
+func TestPostgresQuotaTryTxDisabledMeta(t *testing.T) {
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(quotaFakeRow{values: []any{false, int64(100)}}) // enabled=false
+	q := NewPostgresQuota(&quotaFakeStore{tx: tx})
+
+	_, err := q.TryTx(context.Background(), tx, ports.QuotaTryRequest{
+		TenantID:     testTenantID,
+		ResourceType: ports.QuotaGPUCount,
+		Amount:       4,
+	})
+	if err != ports.ErrQuotaResourceNotRegistered {
+		t.Fatalf("TryTx() error = %v, want ErrQuotaResourceNotRegistered", err)
+	}
+}
+
+// TestPostgresQuotaTryTxMetaNotFound 验证 TryTx 在 meta 不存在时返回
+// ErrQuotaResourceNotRegistered。
+func TestPostgresQuotaTryTxMetaNotFound(t *testing.T) {
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(quotaFakeRow{err: pgx.ErrNoRows})
+	q := NewPostgresQuota(&quotaFakeStore{tx: tx})
+
+	_, err := q.TryTx(context.Background(), tx, ports.QuotaTryRequest{
+		TenantID:     testTenantID,
+		ResourceType: ports.QuotaGPUCount,
+		Amount:       4,
+	})
+	if err != ports.ErrQuotaResourceNotRegistered {
+		t.Fatalf("TryTx() error = %v, want ErrQuotaResourceNotRegistered", err)
+	}
+}
+
+// TestPostgresQuotaTryTxExceeded 验证 TryTx 余量不足 → ErrQuotaExceeded。
+func TestPostgresQuotaTryTxExceeded(t *testing.T) {
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(existingMeta())
+	tx.execFn = func(_ string, _ []any) int64 { return 0 } // UPDATE RowsAffected=0
+	q := NewPostgresQuota(&quotaFakeStore{tx: tx})
+
+	_, err := q.TryTx(context.Background(), tx, ports.QuotaTryRequest{
+		TenantID:     testTenantID,
+		ResourceType: ports.QuotaGPUCount,
+		Amount:       500,
+	})
+	if err != ports.ErrQuotaExceeded {
+		t.Fatalf("TryTx() error = %v, want ErrQuotaExceeded", err)
+	}
+}
+
+// TestPostgresQuotaTryTxInvalidAmount 验证 TryTx amount<=0 → ErrInvalid。
+func TestPostgresQuotaTryTxInvalidAmount(t *testing.T) {
+	tx := &quotaFakeTx{}
+	q := NewPostgresQuota(&quotaFakeStore{tx: tx})
+
+	_, err := q.TryTx(context.Background(), tx, ports.QuotaTryRequest{
+		TenantID:     testTenantID,
+		ResourceType: ports.QuotaGPUCount,
+		Amount:       0,
+	})
+	if err != ports.ErrInvalid {
+		t.Fatalf("TryTx() error = %v, want ErrInvalid", err)
+	}
+}
+
+// TestPostgresQuotaTryTxNoRollback 验证 TryTx 失败时不自己回滚：
+// 返回 err 但不触发 WithTenantTx 回滚（回滚由调用方的外层事务负责）。
+func TestPostgresQuotaTryTxNoRollback(t *testing.T) {
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(existingMeta())
+	tx.execFn = func(_ string, _ []any) int64 { return 0 } // 余量不足
+	store := &quotaFakeStore{tx: tx}
+	q := NewPostgresQuota(store)
+
+	_, err := q.TryTx(context.Background(), tx, ports.QuotaTryRequest{
+		TenantID:     testTenantID,
+		ResourceType: ports.QuotaGPUCount,
+		Amount:       500,
+	})
+	if err == nil {
+		t.Fatalf("TryTx() 应返回错误")
+	}
+	if store.tenantRolledBack {
+		t.Fatalf("TryTx() 不应自己回滚，回滚由外层事务负责")
+	}
+}
+
+// TestPostgresQuotaTryManyTxSuccess 验证 TryManyTx 多维度全占成功。
+// TryManyTx 直接使用传入的 tx，不经过 WithTenantTx。
+func TestPostgresQuotaTryManyTxSuccess(t *testing.T) {
+	tx := &quotaFakeTx{}
+	expires := time.Unix(300, 0)
+	tx.enqueueRows(
+		existingMeta(), quotaFakeRow{values: []any{"tx-0001", expires}},
+		existingMeta(), quotaFakeRow{values: []any{"tx-0002", expires}},
+	)
+	store := &quotaFakeStore{tx: tx}
+	q := NewPostgresQuota(store)
+
+	res, err := q.TryManyTx(context.Background(), tx, []ports.QuotaTryRequest{
+		{TenantID: testTenantID, ResourceType: ports.QuotaGPUCount, Amount: 4},
+		{TenantID: testTenantID, ResourceType: ports.QuotaCPUCore, Amount: 8},
+	})
+	if err != nil {
+		t.Fatalf("TryManyTx() error = %v", err)
+	}
+	if len(res) != 2 {
+		t.Fatalf("TryManyTx() len = %d, want 2", len(res))
+	}
+	if res[0].TxID != "tx-0001" || res[1].TxID != "tx-0002" {
+		t.Fatalf("TryManyTx() TxIDs = %v, %v; want tx-0001, tx-0002", res[0].TxID, res[1].TxID)
+	}
+	if store.tenantRolledBack {
+		t.Fatalf("TryManyTx() 不应调用 WithTenantTx")
+	}
+}
+
+// TestPostgresQuotaTryManyTxAtomicFailure 验证 TryManyTx 任一维度失败 →
+// 返回 err + nil reservations（不自己回滚，由调用方的外层事务统一回滚）。
+func TestPostgresQuotaTryManyTxAtomicFailure(t *testing.T) {
+	tx := &quotaFakeTx{}
+	expires := time.Unix(300, 0)
+	// 维度一成功
+	tx.enqueueRows(existingMeta(), quotaFakeRow{values: []any{"tx-0001", expires}})
+	// 维度二 meta 成功后预占 UPDATE 返回 0 → 余量不足
+	tx.enqueueRows(existingMeta())
+	updateCount := 0
+	tx.execFn = func(sql string, _ []any) int64 {
+		if strings.Contains(sql, "UPDATE resource_quota") {
+			updateCount++
+			if updateCount > 1 {
+				return 0 // 维度二余量不足
+			}
+		}
+		return 1
+	}
+	store := &quotaFakeStore{tx: tx}
+	q := NewPostgresQuota(store)
+
+	res, err := q.TryManyTx(context.Background(), tx, []ports.QuotaTryRequest{
+		{TenantID: testTenantID, ResourceType: ports.QuotaGPUCount, Amount: 4},
+		{TenantID: testTenantID, ResourceType: ports.QuotaCPUCore, Amount: 500},
+	})
+	if err != ports.ErrQuotaExceeded {
+		t.Fatalf("TryManyTx() error = %v, want ErrQuotaExceeded", err)
+	}
+	if res != nil {
+		t.Fatalf("TryManyTx() 失败时应返回 nil reservations，got %v", res)
+	}
+	// TryManyTx 不自己回滚，不触发 WithTenantTx
+	if store.tenantRolledBack {
+		t.Fatalf("TryManyTx() 不应自己回滚，回滚由外层事务负责")
+	}
+}
+
+// TestPostgresQuotaTryManyTxEmpty 验证 TryManyTx 空入参 → nil, nil。
+func TestPostgresQuotaTryManyTxEmpty(t *testing.T) {
+	tx := &quotaFakeTx{}
+	q := NewPostgresQuota(&quotaFakeStore{tx: tx})
+
+	res, err := q.TryManyTx(context.Background(), tx, nil)
+	if err != nil {
+		t.Fatalf("TryManyTx(nil) error = %v", err)
+	}
+	if res != nil {
+		t.Fatalf("TryManyTx(nil) 应返回 nil，got %v", res)
+	}
+
+	res, err = q.TryManyTx(context.Background(), tx, []ports.QuotaTryRequest{})
+	if err != nil {
+		t.Fatalf("TryManyTx([]) error = %v", err)
+	}
+	if res != nil {
+		t.Fatalf("TryManyTx([]) 应返回 nil，got %v", res)
+	}
+}
