@@ -221,7 +221,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/knowledge-bases/{kb_id}/documents/notify-uploaded": {
+    "/knowledge-bases/{kb_id}/documents/{doc_id}/notify-uploaded": {
         parameters: {
             query?: never;
             header?: never;
@@ -2853,6 +2853,7 @@ export interface operations {
             header?: never;
             path: {
                 kb_id: string;
+                doc_id: string;
             };
             cookie?: never;
         };
