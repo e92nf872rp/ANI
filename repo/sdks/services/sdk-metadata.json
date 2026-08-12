@@ -179,15 +179,15 @@
       "scope": ""
     },
     {
-      "operationId": "notifyDocumentUploaded",
-      "method": "POST",
-      "path": "/knowledge-bases/{kb_id}/documents/notify-uploaded",
-      "scope": ""
-    },
-    {
       "operationId": "deleteKnowledgeBaseDocument",
       "method": "DELETE",
       "path": "/knowledge-bases/{kb_id}/documents/{doc_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "notifyDocumentUploaded",
+      "method": "POST",
+      "path": "/knowledge-bases/{kb_id}/documents/{doc_id}/notify-uploaded",
       "scope": ""
     },
     {
