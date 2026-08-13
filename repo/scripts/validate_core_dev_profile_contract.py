@@ -33,7 +33,7 @@ CORE_DEV_PROFILE_SCHEMAS = (
 )
 
 GATEWAY_RESPONSE_FILES = (
-    "services/ani-gateway/internal/router/demo_instances.go",
+    "services/ani-gateway/internal/router/instances.go",
     "services/ani-gateway/internal/router/network_resources.go",
     "services/ani-gateway/internal/router/storage_resources.go",
     "services/ani-gateway/internal/router/vector_store_resources.go",
@@ -133,7 +133,7 @@ def validate_gateway() -> None:
 def validate_tests() -> None:
     test_files = (
         "services/ani-gateway/internal/router/core_dev_profile_test.go",
-        "services/ani-gateway/internal/router/demo_instances_test.go",
+        "services/ani-gateway/internal/router/instances_test.go",
         "services/ani-gateway/internal/router/network_resources_test.go",
         "services/ani-gateway/internal/router/storage_resources_test.go",
         "services/ani-gateway/internal/router/vector_store_resources_test.go",

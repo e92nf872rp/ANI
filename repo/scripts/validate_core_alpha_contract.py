@@ -53,7 +53,7 @@ EXPECTED_GATEWAY_ROUTES = {
     'v1.POST("/instances", api.create)',
     'v1.GET("/instances/:instance_id", api.get)',
     'v1.POST("/instances/:instance_id/lifecycle", api.lifecycle)',
-    'v1.POST("/instances/:instance_id/console", api.console)',
+    'v1.POST("/instances/:instance_id/console", api.createConsoleSession)',
     'v1.GET("/instances/:instance_id/operations", api.listOperations)',
     'v1.GET("/instance-operations/:operation_id", api.getOperation)',
 }
@@ -348,22 +348,22 @@ def validate_runtime_contract(root: Path, errors: list[str]) -> None:
 
 
 def validate_gateway_routes(root: Path, errors: list[str]) -> None:
-    routes_go = (root / "services/ani-gateway/internal/router/demo_instances.go").read_text(encoding="utf-8")
+    routes_go = (root / "services/ani-gateway/internal/router/instances.go").read_text(encoding="utf-8")
     for route in EXPECTED_GATEWAY_ROUTES:
         if route not in routes_go:
-            errors.append(f"router/demo_instances.go missing route registration: {route}")
+            errors.append(f"router/instances.go missing route registration: {route}")
     for token in ('case "snapshot":', 'case "attach_volume":', 'case "detach_volume":', 'case "rollback":'):
         if token not in routes_go:
-            errors.append(f"router/demo_instances.go missing lifecycle handler token: {token}")
+            errors.append(f"router/instances.go missing lifecycle handler token: {token}")
     for token in ('json:"gpu"', 'req.GPU.Vendor', 'req.GPU.Model', 'req.GPU.Count'):
         if token not in routes_go:
-            errors.append(f"router/demo_instances.go missing OpenAPI GPU create token: {token}")
+            errors.append(f"router/instances.go missing OpenAPI GPU create token: {token}")
     for token in ("errors.Is(err, ports.ErrConflict)", "http.StatusConflict"):
         if token not in routes_go:
-            errors.append(f"router/demo_instances.go missing lifecycle conflict mapping token: {token}")
+            errors.append(f"router/instances.go missing lifecycle conflict mapping token: {token}")
     for token in ("hasIdempotencyKey(req.IdempotencyKey)", '"idempotency_key is required"'):
         if token not in routes_go:
-            errors.append(f"router/demo_instances.go missing idempotency requirement token: {token}")
+            errors.append(f"router/instances.go missing idempotency requirement token: {token}")
 
     stubs_go = (root / "services/ani-gateway/internal/router/stubs.go").read_text(encoding="utf-8")
     for token in ('"/instances"', '"/instances/', '"/instance-operations/'):
