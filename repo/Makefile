@@ -944,6 +944,7 @@ validate-spec-split:
 
 validate-core-beta:
 	@echo "→ 校验 Sprint 4 SPEC-CORE-BETA Core API Beta 准备矩阵..."
+	python scripts/validate_core_router_filename_test.py
 	python scripts/validate_core_beta_contract.py
 	$(GO_CACHE_ENV) go test ./pkg/adapters/runtime ./services/ani-gateway/internal/router -run 'TestLocalNetworkService|TestLocalStorageService|TestLocalVectorStoreService|TestNetworkAPI|TestStorageAPI|TestVectorStoreAPI' -v
 	@echo "✅ SPEC-CORE-BETA contract valid"
