@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### Inference Platform Workload Contract（2026-08）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INFERENCE-PLATFORM-WORKLOAD-CONTRACT-A | Core `platform-workloads` additive v1 契约本地验证完成、待人工评审/独立 PR：7 个 `service-only + internal exposure` operation、统一 AsyncTask、CPU single-node 示例、可选 GPUSpec accelerator、leader-worker role topology、ClusterIP-only internal endpoint；部署层不得通过租户或公网 Ingress 发布；不含 handler/port/adapter/runtime/live evidence | inference-platform-workload-contract-a.md |
+
 ### Storage Control Plane State（2026-08）
 
 | 批次 | 内容摘要 | 文件 |

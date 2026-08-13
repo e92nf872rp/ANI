@@ -51,7 +51,10 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: JWT AccessToken（有效期1小时，通过 /auth/token 获取）
+      description: |
+        JWT AccessToken（有效期1小时，通过 /auth/token 获取）。标记 x-ani-principal-kind=service 的操作只接受
+        aud=ani-core、principal_kind=service、包含 tenant_id 与所需 scope 的短期服务 JWT；租户用户 JWT 必须返回 403。
+        服务身份令牌的签发/轮换由 Auth 控制面负责，不通过本 API 请求体传递 tenant_id 或服务密钥。
     ApiKeyAuth:
       type: apiKey
       in: header
@@ -353,9 +356,9 @@ components:
         id:               { type: string, format: uuid }
         idempotency_key:  { type: string, description: "客户端提供的幂等键" }
         task_type:        { type: string, example: "model.import",
-                            enum: [model.import, kb.parse, kb.index, inference.deploy, volume.snapshot.create, volume.expand, volume.mount, volume.unmount, volume.create_from_snapshot, filesystem.expand, filesystem.mount_target.create, filesystem.mount, filesystem.unmount, vector_store.index.rebuild, vector_store.document.insert, sandbox.checkpoint.create, sandbox.checkpoint.restore, sandbox.code_run.create] }
+                            enum: [model.import, kb.parse, kb.index, inference.deploy, platform_workload.create, platform_workload.scale, platform_workload.start, platform_workload.stop, platform_workload.restart, platform_workload.delete, volume.snapshot.create, volume.expand, volume.mount, volume.unmount, volume.create_from_snapshot, filesystem.expand, filesystem.mount_target.create, filesystem.mount, filesystem.unmount, vector_store.index.rebuild, vector_store.document.insert, sandbox.checkpoint.create, sandbox.checkpoint.restore, sandbox.code_run.create] }
         resource_type:    { type: string, nullable: true,
-                            enum: [inference_service, kb_document, model_version, volume_snapshot, volume, filesystem, filesystem_mount_target, vector_store, sandbox_checkpoint, sandbox_code_run] }
+                            enum: [inference_service, platform_workload, kb_document, model_version, volume_snapshot, volume, filesystem, filesystem_mount_target, vector_store, sandbox_checkpoint, sandbox_code_run] }
         resource_id:      { type: string, format: uuid, nullable: true }
         status:           { type: string,
                             enum: [pending, running, completed, failed, cancelled, dead_letter] }
@@ -367,6 +370,392 @@ components:
         dead_letter_at:   { type: string, format: date-time, nullable: true }
         created_at:       { type: string, format: date-time }
         completed_at:     { type: string, format: date-time, nullable: true }
+
+    # ── 平台内部工作负载（仅服务身份）────────────────────────────────────────
+    PlatformWorkloadAcceleratorCapability:
+      type: object
+      required: [spec_id, available, max_single_node_count]
+      properties:
+        spec_id:
+          type: string
+          description: Core GPUSpec ID；只表达资源形态，不表达租户配额。
+        available:
+          type: boolean
+          description: 当前是否允许用于新的 PlatformWorkload 准入。
+        max_single_node_count:
+          type: integer
+          minimum: 0
+          description: 能力查询时单节点最大可准入数量；这是提示，不是资源预留。
+
+    PlatformWorkloadCapabilities:
+      type: object
+      required: [supported_topology_modes, leader_worker_set_ready, gang_scheduling_ready, accelerator_specs]
+      properties:
+        supported_topology_modes:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: string, enum: [single_node, leader_worker] }
+        leader_worker_set_ready:
+          type: boolean
+          description: LeaderWorkerSet CRD 与 controller 是否满足准入前置条件。
+        gang_scheduling_ready:
+          type: boolean
+          description: gang scheduler、PodGroup CRD/controller 与 inference queue 是否就绪。
+        supported_topology_profiles:
+          type: array
+          items:
+            type: object
+            required: [id, version, mode]
+            properties:
+              id: { type: string }
+              version: { type: string }
+              mode: { type: string, enum: [single_node, leader_worker] }
+        accelerator_specs:
+          type: array
+          items: { $ref: '#/components/schemas/PlatformWorkloadAcceleratorCapability' }
+
+    PlatformWorkloadAcceleratorResources:
+      type: object
+      required: [spec_id, count]
+      additionalProperties: false
+      properties:
+        spec_id:
+          type: string
+          minLength: 1
+          description: Core GPUSpec ID。P0 只准入已通过 live gate 的整卡 GPU 规格。
+        count:
+          type: integer
+          minimum: 1
+          description: 当前 Pod role 或单节点副本申请的 accelerator 数量。
+
+    PlatformWorkloadResources:
+      type: object
+      required: [cpu, memory]
+      additionalProperties: false
+      properties:
+        cpu:
+          type: string
+          minLength: 1
+          description: Kubernetes quantity 语义的 CPU request，例如 4 或 4000m。
+        memory:
+          type: string
+          minLength: 1
+          description: Kubernetes quantity 语义的内存 request，例如 16Gi。
+        accelerator:
+          $ref: '#/components/schemas/PlatformWorkloadAcceleratorResources'
+
+    PlatformWorkloadRole:
+      type: object
+      required: [resources]
+      additionalProperties: false
+      properties:
+        count:
+          type: integer
+          minimum: 1
+          default: 1
+          description: role Pod 数；leader 固定为 1，workers 必须显式给出。
+        resources:
+          $ref: '#/components/schemas/PlatformWorkloadResources'
+
+    PlatformWorkloadTopology:
+      type: object
+      required: [mode, profile_id, profile_version]
+      additionalProperties: false
+      properties:
+        mode:
+          type: string
+          enum: [single_node, leader_worker]
+        profile_id:
+          type: string
+          minLength: 1
+          description: Core admission allowlist 中的通用 Pod 拓扑 profile ID。
+        profile_version:
+          type: string
+          minLength: 1
+        leader:
+          $ref: '#/components/schemas/PlatformWorkloadRole'
+        workers:
+          $ref: '#/components/schemas/PlatformWorkloadRole'
+      allOf:
+        - if:
+            properties: { mode: { const: single_node } }
+            required: [mode]
+          then:
+            not:
+              anyOf:
+                - required: [leader]
+                - required: [workers]
+        - if:
+            properties: { mode: { const: leader_worker } }
+            required: [mode]
+          then:
+            required: [leader, workers]
+            properties:
+              leader:
+                allOf:
+                  - $ref: '#/components/schemas/PlatformWorkloadRole'
+                  - required: [count]
+                    properties: { count: { const: 1 } }
+              workers:
+                allOf:
+                  - $ref: '#/components/schemas/PlatformWorkloadRole'
+                  - required: [count]
+      description: |
+        single_node 不得提交 leader/workers。leader_worker 必须同时提交 leader/workers，leader.count 必须为 1；
+        P0 leader_worker 只接受顶层 replicas=1。Core 从 role resources 派生 LWS 与一个 PodGroup，调用方不能提交原生字段。
+
+    PlatformWorkloadScheduling:
+      type: object
+      required: [queue_class, gang]
+      additionalProperties: false
+      properties:
+        queue_class:
+          type: string
+          enum: [inference]
+          description: P0 固定映射到 Core 管理的 inference 调度队列，调用方不提交 provider queue 名。
+        gang:
+          type: boolean
+          description: single_node 固定 false；leader_worker 固定 true。
+
+    PlatformWorkloadPort:
+      type: object
+      required: [name, port]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 63
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+
+    PlatformWorkloadNetwork:
+      type: object
+      required: [exposure, ports]
+      additionalProperties: false
+      properties:
+        exposure:
+          type: string
+          enum: [cluster_internal]
+          description: 只允许 ClusterIP；不创建 Ingress、NodePort 或 LoadBalancer。
+        ports:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/PlatformWorkloadPort' }
+
+    PlatformWorkloadArtifact:
+      type: object
+      required: [object_ref, mount_path]
+      additionalProperties: false
+      properties:
+        object_ref:
+          type: string
+          minLength: 1
+          description: Core 可解析的租户内 artifact/object opaque reference。
+        mount_path:
+          type: string
+          pattern: '^/'
+
+    PlatformWorkloadSecretBinding:
+      type: object
+      required: [secret_ref, mount_path]
+      additionalProperties: false
+      properties:
+        secret_ref:
+          type: string
+          minLength: 1
+          description: Core Secret reference；响应和日志不得回显明文。
+        mount_path:
+          type: string
+          pattern: '^/'
+
+    PlatformWorkloadHealthCheck:
+      type: object
+      required: [protocol, path, port_name]
+      additionalProperties: false
+      properties:
+        protocol: { type: string, enum: [http] }
+        path: { type: string, pattern: '^/' }
+        port_name: { type: string, minLength: 1 }
+
+    PlatformWorkloadMetadata:
+      type: object
+      required: [owner_ref]
+      additionalProperties: false
+      properties:
+        owner_ref:
+          type: string
+          minLength: 1
+          description: 调用服务提供的 opaque correlation reference；真正 provider owner 始终是 Core PlatformWorkload。
+        labels:
+          type: object
+          additionalProperties: { type: string }
+          description: 仅允许非保留 label；ani.* 保留键由 Core 写入。
+
+    PlatformWorkloadCreateRequest:
+      type: object
+      required: [idempotency_key, name, workload_class, runtime_kind, image_ref, command, replicas, resources, topology, scheduling, network, health_check, metadata]
+      additionalProperties: false
+      properties:
+        idempotency_key: { type: string, format: uuid }
+        name:
+          type: string
+          minLength: 1
+          maxLength: 63
+          pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+        workload_class:
+          type: string
+          enum: [inference]
+          description: 通用调度分类；不携带模型、引擎或 Services 业务状态。
+        runtime_kind: { type: string, enum: [container] }
+        image_ref:
+          type: string
+          minLength: 1
+          pattern: '^.+@sha256:[a-f0-9]{64}$'
+          description: 必须是批准 registry 中的 digest-pinned image；tag 和 latest 必须拒绝。
+        command:
+          type: array
+          minItems: 1
+          items: { type: string }
+          description: 必须匹配 workload_class + topology profile 的 Core admission allowlist。
+        args:
+          type: array
+          items: { type: string }
+        replicas:
+          type: integer
+          minimum: 1
+          description: single_node 表示 Pod 副本；leader_worker 表示 LWS group，P0 只接受 1。
+        resources:
+          $ref: '#/components/schemas/PlatformWorkloadResources'
+        topology:
+          $ref: '#/components/schemas/PlatformWorkloadTopology'
+        scheduling:
+          $ref: '#/components/schemas/PlatformWorkloadScheduling'
+        network:
+          $ref: '#/components/schemas/PlatformWorkloadNetwork'
+        artifacts:
+          type: array
+          items: { $ref: '#/components/schemas/PlatformWorkloadArtifact' }
+        secret_bindings:
+          type: array
+          items: { $ref: '#/components/schemas/PlatformWorkloadSecretBinding' }
+        health_check:
+          $ref: '#/components/schemas/PlatformWorkloadHealthCheck'
+        metadata:
+          $ref: '#/components/schemas/PlatformWorkloadMetadata'
+      allOf:
+        - if:
+            properties:
+              topology:
+                properties: { mode: { const: single_node } }
+                required: [mode]
+          then:
+            properties:
+              scheduling:
+                properties: { gang: { const: false } }
+        - if:
+            properties:
+              topology:
+                properties: { mode: { const: leader_worker } }
+                required: [mode]
+          then:
+            properties:
+              replicas: { const: 1 }
+              scheduling:
+                properties: { gang: { const: true } }
+      example:
+        idempotency_key: 1df72d71-9d49-46c4-a48a-52bb37b082ab
+        name: inference-cpu-example
+        workload_class: inference
+        runtime_kind: container
+        image_ref: registry.ani.internal/platform/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        command: [/opt/platform-runtime/serve]
+        args: [--listen, '0.0.0.0:8000', --artifact-path, /models]
+        replicas: 1
+        resources: { cpu: '4', memory: 16Gi }
+        topology: { mode: single_node, profile_id: container-single-node, profile_version: v1 }
+        scheduling: { queue_class: inference, gang: false }
+        network:
+          exposure: cluster_internal
+          ports: [{ name: http, port: 8000 }]
+        artifacts: [{ object_ref: object://tenant-artifact/example, mount_path: /models }]
+        health_check: { protocol: http, path: /health, port_name: http }
+        metadata:
+          owner_ref: 05f6f46f-3db8-4551-8497-c46debb4be22
+          labels: { services.ani.io/inference-service-id: 05f6f46f-3db8-4551-8497-c46debb4be22 }
+
+    PlatformWorkloadUpdateRequest:
+      type: object
+      required: [idempotency_key, replicas]
+      additionalProperties: false
+      properties:
+        idempotency_key: { type: string, format: uuid }
+        replicas:
+          type: integer
+          minimum: 1
+          description: P0 只允许修改 single_node 独立副本；leader_worker 固定为 1。
+
+    PlatformWorkloadLifecycleRequest:
+      type: object
+      required: [idempotency_key, action]
+      additionalProperties: false
+      properties:
+        idempotency_key: { type: string, format: uuid }
+        action: { type: string, enum: [start, stop, restart] }
+
+    PlatformWorkload:
+      type: object
+      required: [id, tenant_id, name, state, generation, observed_generation, desired_replicas, ready_replicas, runtime_shape, topology_profile_id, topology_profile_version, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        name: { type: string }
+        state: { type: string, enum: [pending, provisioning, running, starting, stopping, stopped, failed, deleting, deleted] }
+        generation: { type: integer, minimum: 1 }
+        observed_generation: { type: integer, minimum: 0 }
+        desired_replicas:
+          type: integer
+          minimum: 0
+          description: Deployment 为 Pod 数；LeaderWorkerSet 为 group 数。
+        ready_replicas:
+          type: integer
+          minimum: 0
+          description: 与 desired_replicas 同单位；LeaderWorkerSet 直接投影 group 级 readyReplicas。
+        runtime_shape: { type: string, enum: [deployment, leader_worker_set] }
+        topology_profile_id: { type: string }
+        topology_profile_version: { type: string }
+        internal_endpoint:
+          type: string
+          format: uri
+          nullable: true
+          description: Only an authorized platform service identity may read this cluster-internal endpoint; never expose it through /instances or tenant-facing Services APIs.
+        reason: { type: string, nullable: true }
+        message: { type: string, nullable: true, description: 脱敏后的诊断信息，不包含 provider 对象或凭据。 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    PlatformWorkloadLogEntry:
+      type: object
+      required: [timestamp, level, message]
+      properties:
+        timestamp: { type: string, format: date-time }
+        level: { type: string, enum: [debug, info, warn, error] }
+        message: { type: string }
+        replica: { type: string, nullable: true, description: 稳定的副本或 role 标识，不返回 Pod UID。 }
+        container: { type: string, nullable: true }
+        stream: { type: string, enum: [stdout, stderr], nullable: true }
+
+    PlatformWorkloadLogListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/PlatformWorkloadLogEntry' }
+        next_cursor: { type: string, nullable: true }
 
     # Demo/Services schemas 已迁移：
     # - DemoInstance/DemoCreateInstanceRequest → api/openapi/dev.yaml
@@ -3616,6 +4005,225 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+
+  # ── 平台内部工作负载（仅授权服务身份）──────────────────────────────────────
+  # x-ani-exposure=internal 表示部署层不得通过租户/公网 Ingress 发布这些路径；
+  # inference-service 只可通过集群内部 Core endpoint + service JWT 调用。
+  /platform-workload-capabilities:
+    get:
+      operationId: getPlatformWorkloadCapabilities
+      summary: 查询平台工作负载能力
+      description: |
+        仅授权平台服务身份可用。返回 provider-neutral 的 topology、LWS/gang readiness 和 GPUSpec 准入提示；
+        响应不是资源预留，最终创建仍由 Core 原子准入。普通租户 token/API key 即使具有同名 tenant scope 也返回 403。
+      tags: [PlatformWorkloads]
+      x-ani-rbac-scope: "scope:platform-workloads:read"
+      x-ani-service-only: true
+      x-ani-principal-kind: service
+      x-ani-exposure: internal
+      security: [{ BearerAuth: [] }]
+      responses:
+        "200":
+          description: 平台工作负载能力
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformWorkloadCapabilities' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /platform-workloads:
+    post:
+      operationId: createPlatformWorkload
+      summary: 创建平台内部工作负载
+      description: |
+        仅授权平台服务身份可用。请求表达通用容器、资源、拓扑、网络、artifact 和 secret binding 意图；
+        禁止提交 Kubernetes、LWS、Volcano 或推理业务对象。AsyncTask.resource_id 在接收时即确定。
+      tags: [PlatformWorkloads]
+      x-ani-rbac-scope: "scope:platform-workloads:write"
+      x-ani-service-only: true
+      x-ani-principal-kind: service
+      x-ani-exposure: internal
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlatformWorkloadCreateRequest' }
+      responses:
+        "202":
+          description: 平台工作负载创建任务已接受
+          headers:
+            Location:
+              description: Core AsyncTask 查询 URL
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422":
+          $ref: '#/components/responses/PreconditionFailed'
+          description: 未批准镜像/profile、GPUSpec 不可用、资源不足或 topology/gang 前置条件不满足。
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /platform-workloads/{workload_id}:
+    get:
+      operationId: getPlatformWorkload
+      summary: 查询平台内部工作负载
+      description: |
+        仅授权平台服务身份可用。跨租户资源返回 404。internal_endpoint 仅在当前服务身份具有 read scope 时返回，
+        且只表示当前 generation 的 ClusterIP endpoint。
+      tags: [PlatformWorkloads]
+      x-ani-rbac-scope: "scope:platform-workloads:read"
+      x-ani-service-only: true
+      x-ani-principal-kind: service
+      x-ani-exposure: internal
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { name: workload_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 平台工作负载规范化状态
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformWorkload' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
+    patch:
+      operationId: updatePlatformWorkload
+      summary: 修改平台内部工作负载副本数
+      description: |
+        P0 只允许修改 single_node 独立副本数。leader_worker 固定 replicas=1；资源、镜像、topology、network、
+        artifact、secret 和 profile 均不可通过 PATCH 修改。
+      tags: [PlatformWorkloads]
+      x-ani-rbac-scope: "scope:platform-workloads:write"
+      x-ani-service-only: true
+      x-ani-principal-kind: service
+      x-ani-exposure: internal
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { name: workload_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlatformWorkloadUpdateRequest' }
+      responses:
+        "202":
+          description: 副本伸缩任务已接受
+          headers:
+            Location:
+              description: Core AsyncTask 查询 URL
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
+    delete:
+      operationId: deletePlatformWorkload
+      summary: 删除平台内部工作负载
+      description: 删除 provider runtime、PlatformWorkload 资源和内部 endpoint；内部 tombstone 可继续用于幂等清理与审计。
+      tags: [PlatformWorkloads]
+      x-ani-rbac-scope: "scope:platform-workloads:write"
+      x-ani-service-only: true
+      x-ani-principal-kind: service
+      x-ani-exposure: internal
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { name: workload_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "202":
+          description: 删除任务已接受
+          headers:
+            Location:
+              description: Core AsyncTask 查询 URL
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /platform-workloads/{workload_id}/lifecycle:
+    post:
+      operationId: applyPlatformWorkloadLifecycle
+      summary: 执行平台内部工作负载生命周期动作
+      description: |
+        stop 删除 provider 侧 Deployment/LWS、Service 和 PodGroup并释放计算资源，但保留 PlatformWorkload ID 与 applied spec；
+        start 在同一 workload ID 下重建 provider runtime；restart 不修改当前 generation 的规格。
+      tags: [PlatformWorkloads]
+      x-ani-rbac-scope: "scope:platform-workloads:write"
+      x-ani-service-only: true
+      x-ani-principal-kind: service
+      x-ani-exposure: internal
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { name: workload_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlatformWorkloadLifecycleRequest' }
+      responses:
+        "202":
+          description: 生命周期任务已接受
+          headers:
+            Location:
+              description: Core AsyncTask 查询 URL
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /platform-workloads/{workload_id}/logs:
+    get:
+      operationId: getPlatformWorkloadLogs
+      summary: 查询平台内部工作负载日志
+      description: 返回规范化、分页并脱敏的 runtime 日志；不暴露 Pod UID、Secret、Authorization 或临时对象 URL。
+      tags: [PlatformWorkloads]
+      x-ani-rbac-scope: "scope:platform-workloads:read"
+      x-ani-service-only: true
+      x-ani-principal-kind: service
+      x-ani-exposure: internal
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - { name: workload_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, default: 100, minimum: 1, maximum: 1000 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: level, in: query, schema: { type: string, enum: [debug, info, warn, error] } }
+      responses:
+        "200":
+          description: 平台工作负载日志
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformWorkloadLogListResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
 
   # ── 计算实例（Core API Alpha）──────────────────────────────────────────────
   /instances:
@@ -7472,6 +8080,7 @@ tags:
   - { name: Health,         description: "健康检查（K8s liveness/readiness probe）" }
   - { name: Auth,           description: "认证与授权" }
   - { name: Instances,      description: "计算实例（VM/Container/GPU/Sandbox/BM/K8s集群）" }
+  - { name: PlatformWorkloads, description: "仅授权平台服务身份使用的通用工作负载" }
   - { name: Networks,       description: "VPC/子网/安全组/负载均衡/路由" }
   - { name: Volumes,        description: "块存储卷与快照" }
   - { name: Filesystems,    description: "文件存储（CephFS/NFS）" }

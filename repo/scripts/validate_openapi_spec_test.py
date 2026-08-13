@@ -392,6 +392,143 @@ class OpenAPISpecValidatorTest(unittest.TestCase):
             schemas["AsyncTask"]["properties"]["task_type"]["enum"],
         )
 
+    def test_platform_workload_service_contract_is_frozen(self) -> None:
+        spec = yaml.safe_load((ROOT / "api/openapi/v1.yaml").read_text(encoding="utf-8"))
+        schemas = spec["components"]["schemas"]
+        paths = spec["paths"]
+
+        expected_operations = {
+            ("/platform-workload-capabilities", "get"): (
+                "getPlatformWorkloadCapabilities",
+                "scope:platform-workloads:read",
+            ),
+            ("/platform-workloads", "post"): (
+                "createPlatformWorkload",
+                "scope:platform-workloads:write",
+            ),
+            ("/platform-workloads/{workload_id}", "get"): (
+                "getPlatformWorkload",
+                "scope:platform-workloads:read",
+            ),
+            ("/platform-workloads/{workload_id}", "patch"): (
+                "updatePlatformWorkload",
+                "scope:platform-workloads:write",
+            ),
+            ("/platform-workloads/{workload_id}", "delete"): (
+                "deletePlatformWorkload",
+                "scope:platform-workloads:write",
+            ),
+            ("/platform-workloads/{workload_id}/lifecycle", "post"): (
+                "applyPlatformWorkloadLifecycle",
+                "scope:platform-workloads:write",
+            ),
+            ("/platform-workloads/{workload_id}/logs", "get"): (
+                "getPlatformWorkloadLogs",
+                "scope:platform-workloads:read",
+            ),
+        }
+        for (path, method), (operation_id, scope) in expected_operations.items():
+            with self.subTest(path=path, method=method):
+                operation = paths[path][method]
+                self.assertEqual(operation["operationId"], operation_id)
+                self.assertEqual(operation["x-ani-rbac-scope"], scope)
+                self.assertTrue(operation["x-ani-service-only"])
+                self.assertEqual(operation["x-ani-principal-kind"], "service")
+                self.assertEqual(operation["x-ani-exposure"], "internal")
+                self.assertEqual(operation["security"], [{"BearerAuth": []}])
+
+        for schema_name in (
+            "PlatformWorkloadCapabilities",
+            "PlatformWorkloadAcceleratorResources",
+            "PlatformWorkloadResources",
+            "PlatformWorkloadRole",
+            "PlatformWorkloadTopology",
+            "PlatformWorkloadScheduling",
+            "PlatformWorkloadNetwork",
+            "PlatformWorkloadArtifact",
+            "PlatformWorkloadSecretBinding",
+            "PlatformWorkloadHealthCheck",
+            "PlatformWorkloadMetadata",
+            "PlatformWorkloadCreateRequest",
+            "PlatformWorkloadUpdateRequest",
+            "PlatformWorkloadLifecycleRequest",
+            "PlatformWorkload",
+            "PlatformWorkloadLogEntry",
+            "PlatformWorkloadLogListResponse",
+        ):
+            self.assertIn(schema_name, schemas)
+
+        create = schemas["PlatformWorkloadCreateRequest"]
+        self.assertEqual(
+            set(create["required"]),
+            {
+                "idempotency_key",
+                "name",
+                "workload_class",
+                "runtime_kind",
+                "image_ref",
+                "command",
+                "replicas",
+                "resources",
+                "topology",
+                "scheduling",
+                "network",
+                "health_check",
+                "metadata",
+            },
+        )
+        cpu_example = create["example"]
+        self.assertNotIn("accelerator", cpu_example["resources"])
+        self.assertEqual(cpu_example["topology"]["mode"], "single_node")
+        self.assertEqual(cpu_example["network"]["exposure"], "cluster_internal")
+        self.assertIn("@sha256:", cpu_example["image_ref"])
+
+        topology = schemas["PlatformWorkloadTopology"]
+        self.assertEqual(topology["properties"]["mode"]["enum"], ["single_node", "leader_worker"])
+        self.assertIn("leader", topology["properties"])
+        self.assertIn("workers", topology["properties"])
+        self.assertEqual(len(topology["allOf"]), 2)
+        self.assertEqual(len(create["allOf"]), 2)
+        self.assertEqual(
+            create["properties"]["image_ref"]["pattern"],
+            r"^.+@sha256:[a-f0-9]{64}$",
+        )
+
+        workload = schemas["PlatformWorkload"]
+        self.assertEqual(
+            workload["properties"]["runtime_shape"]["enum"],
+            ["deployment", "leader_worker_set"],
+        )
+        self.assertIn("service identity", workload["properties"]["internal_endpoint"]["description"])
+
+        task_types = schemas["AsyncTask"]["properties"]["task_type"]["enum"]
+        for task_type in (
+            "platform_workload.create",
+            "platform_workload.scale",
+            "platform_workload.start",
+            "platform_workload.stop",
+            "platform_workload.restart",
+            "platform_workload.delete",
+        ):
+            self.assertIn(task_type, task_types)
+        self.assertIn(
+            "platform_workload",
+            schemas["AsyncTask"]["properties"]["resource_type"]["enum"],
+        )
+
+        for path, method in (
+            ("/platform-workloads", "post"),
+            ("/platform-workloads/{workload_id}", "patch"),
+            ("/platform-workloads/{workload_id}", "delete"),
+            ("/platform-workloads/{workload_id}/lifecycle", "post"),
+        ):
+            accepted = paths[path][method]["responses"]["202"]
+            self.assertEqual(
+                accepted["content"]["application/json"]["schema"]["$ref"],
+                "#/components/schemas/AsyncTask",
+            )
+            self.assertIn("Location", accepted["headers"])
+
     def test_storage_p0_keeps_existing_v1_without_contract_changes(self) -> None:
         """STORAGE-CONTROL-PLANE-STATE-A / B1: reuse current Core v1; no additive fields."""
         spec = yaml.safe_load((ROOT / "api/openapi/v1.yaml").read_text(encoding="utf-8"))
