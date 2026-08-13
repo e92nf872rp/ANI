@@ -2982,15 +2982,20 @@ components:
       description: |
         Core 集群级 GPU 规格只读视图。spec_id 描述 GPU 资源形态，不代表租户配额；
         本契约不执行 quota check、acquire 或 release。
+        gpu_mode/node_affinity/volcano_resources 为可选扩展字段，对齐 GPUSpec 写视图，
+        使 GET /gpu-specs 与 POST /gpu-specs 读写闭环（向后兼容，老客户端可忽略）。
       required: [id, name, gpu_type, shares, mb_per_share, available]
       properties:
         id:              { type: string, description: "稳定规格 ID，实例创建通过 spec_id 引用。" }
         name:            { type: string, description: "Console 展示名称。" }
         gpu_type:        { type: string, description: "必须与 GPU inventory 的 gpu_type 一致。" }
+        gpu_mode:        { type: string, enum: [wholecard, vgpu], description: "GPU 隔离模式（可选扩展，对齐 GPUSpec）" }
         memory_total_mb: { type: integer, minimum: 1, nullable: true }
         shares:          { type: integer, minimum: 1, description: "每张物理卡的切分份数；1 表示整卡规格。" }
         mb_per_share:    { type: integer, minimum: 1, description: "每份保证显存，单位 MiB。" }
         available:       { type: boolean, description: "是否允许用于新的实例创建。" }
+        node_affinity:   { $ref: '#/components/schemas/GPUSpecNodeAffinity' }
+        volcano_resources: { $ref: '#/components/schemas/GPUSpecVolcanoResources' }
 
     GPUSpecListResponse:
       type: object

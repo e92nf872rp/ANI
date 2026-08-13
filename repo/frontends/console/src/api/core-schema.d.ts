@@ -5399,6 +5399,8 @@ export interface components {
         /**
          * @description Core 集群级 GPU 规格只读视图。spec_id 描述 GPU 资源形态，不代表租户配额；
          *     本契约不执行 quota check、acquire 或 release。
+         *     gpu_mode/node_affinity/volcano_resources 为可选扩展字段，对齐 GPUSpec 写视图，
+         *     使 GET /gpu-specs 与 POST /gpu-specs 读写闭环（向后兼容，老客户端可忽略）。
          */
         GPUSpecSummary: {
             /** @description 稳定规格 ID，实例创建通过 spec_id 引用。 */
@@ -5407,6 +5409,11 @@ export interface components {
             name: string;
             /** @description 必须与 GPU inventory 的 gpu_type 一致。 */
             gpu_type: string;
+            /**
+             * @description GPU 隔离模式（可选扩展，对齐 GPUSpec）
+             * @enum {string}
+             */
+            gpu_mode?: "wholecard" | "vgpu";
             memory_total_mb?: number | null;
             /** @description 每张物理卡的切分份数；1 表示整卡规格。 */
             shares: number;
@@ -5414,6 +5421,8 @@ export interface components {
             mb_per_share: number;
             /** @description 是否允许用于新的实例创建。 */
             available: boolean;
+            node_affinity?: components["schemas"]["GPUSpecNodeAffinity"];
+            volcano_resources?: components["schemas"]["GPUSpecVolcanoResources"];
         };
         GPUSpecListResponse: {
             items: components["schemas"]["GPUSpecSummary"][];
