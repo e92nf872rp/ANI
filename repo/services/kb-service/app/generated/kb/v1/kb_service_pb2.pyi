@@ -12,7 +12,7 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class CreateKBRequest(_message.Message):
-    __slots__ = ("tenant_id", "name", "description", "embedding_model", "chunk_size", "top_k", "score_threshold")
+    __slots__ = ("tenant_id", "name", "description", "embedding_model", "chunk_size", "top_k", "score_threshold", "retrieval_mode")
     TENANT_ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
@@ -20,6 +20,7 @@ class CreateKBRequest(_message.Message):
     CHUNK_SIZE_FIELD_NUMBER: _ClassVar[int]
     TOP_K_FIELD_NUMBER: _ClassVar[int]
     SCORE_THRESHOLD_FIELD_NUMBER: _ClassVar[int]
+    RETRIEVAL_MODE_FIELD_NUMBER: _ClassVar[int]
     tenant_id: str
     name: str
     description: str
@@ -27,7 +28,8 @@ class CreateKBRequest(_message.Message):
     chunk_size: int
     top_k: int
     score_threshold: float
-    def __init__(self, tenant_id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., embedding_model: _Optional[str] = ..., chunk_size: _Optional[int] = ..., top_k: _Optional[int] = ..., score_threshold: _Optional[float] = ...) -> None: ...
+    retrieval_mode: str
+    def __init__(self, tenant_id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., embedding_model: _Optional[str] = ..., chunk_size: _Optional[int] = ..., top_k: _Optional[int] = ..., score_threshold: _Optional[float] = ..., retrieval_mode: _Optional[str] = ...) -> None: ...
 
 class GetKBRequest(_message.Message):
     __slots__ = ("tenant_id", "kb_id")
@@ -144,7 +146,7 @@ class DeleteDocumentRequest(_message.Message):
     def __init__(self, tenant_id: _Optional[str] = ..., kb_id: _Optional[str] = ..., doc_id: _Optional[str] = ...) -> None: ...
 
 class QueryRequest(_message.Message):
-    __slots__ = ("tenant_id", "kb_id", "question", "session_id", "idempotency_key", "top_k", "score_threshold", "inference_service_name")
+    __slots__ = ("tenant_id", "kb_id", "question", "session_id", "idempotency_key", "top_k", "score_threshold", "inference_service_name", "retrieval_mode")
     TENANT_ID_FIELD_NUMBER: _ClassVar[int]
     KB_ID_FIELD_NUMBER: _ClassVar[int]
     QUESTION_FIELD_NUMBER: _ClassVar[int]
@@ -153,6 +155,7 @@ class QueryRequest(_message.Message):
     TOP_K_FIELD_NUMBER: _ClassVar[int]
     SCORE_THRESHOLD_FIELD_NUMBER: _ClassVar[int]
     INFERENCE_SERVICE_NAME_FIELD_NUMBER: _ClassVar[int]
+    RETRIEVAL_MODE_FIELD_NUMBER: _ClassVar[int]
     tenant_id: str
     kb_id: str
     question: str
@@ -161,7 +164,8 @@ class QueryRequest(_message.Message):
     top_k: int
     score_threshold: float
     inference_service_name: str
-    def __init__(self, tenant_id: _Optional[str] = ..., kb_id: _Optional[str] = ..., question: _Optional[str] = ..., session_id: _Optional[str] = ..., idempotency_key: _Optional[str] = ..., top_k: _Optional[int] = ..., score_threshold: _Optional[float] = ..., inference_service_name: _Optional[str] = ...) -> None: ...
+    retrieval_mode: str
+    def __init__(self, tenant_id: _Optional[str] = ..., kb_id: _Optional[str] = ..., question: _Optional[str] = ..., session_id: _Optional[str] = ..., idempotency_key: _Optional[str] = ..., top_k: _Optional[int] = ..., score_threshold: _Optional[float] = ..., inference_service_name: _Optional[str] = ..., retrieval_mode: _Optional[str] = ...) -> None: ...
 
 class QueryResponse(_message.Message):
     __slots__ = ("answer", "sources", "session_id", "input_tokens", "output_tokens")
@@ -192,7 +196,7 @@ class SourceChunk(_message.Message):
     def __init__(self, doc_id: _Optional[str] = ..., file_name: _Optional[str] = ..., page: _Optional[int] = ..., content: _Optional[str] = ..., score: _Optional[float] = ...) -> None: ...
 
 class KnowledgeBase(_message.Message):
-    __slots__ = ("tenant_id", "id", "name", "description", "embedding_model", "chunk_size", "top_k", "score_threshold", "status", "doc_count", "created_at", "updated_at")
+    __slots__ = ("tenant_id", "id", "name", "description", "embedding_model", "chunk_size", "top_k", "score_threshold", "retrieval_mode", "status", "doc_count", "created_at", "updated_at")
     TENANT_ID_FIELD_NUMBER: _ClassVar[int]
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
@@ -201,6 +205,7 @@ class KnowledgeBase(_message.Message):
     CHUNK_SIZE_FIELD_NUMBER: _ClassVar[int]
     TOP_K_FIELD_NUMBER: _ClassVar[int]
     SCORE_THRESHOLD_FIELD_NUMBER: _ClassVar[int]
+    RETRIEVAL_MODE_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
     DOC_COUNT_FIELD_NUMBER: _ClassVar[int]
     CREATED_AT_FIELD_NUMBER: _ClassVar[int]
@@ -213,11 +218,12 @@ class KnowledgeBase(_message.Message):
     chunk_size: int
     top_k: int
     score_threshold: float
+    retrieval_mode: str
     status: str
     doc_count: int
     created_at: _timestamp_pb2.Timestamp
     updated_at: _timestamp_pb2.Timestamp
-    def __init__(self, tenant_id: _Optional[str] = ..., id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., embedding_model: _Optional[str] = ..., chunk_size: _Optional[int] = ..., top_k: _Optional[int] = ..., score_threshold: _Optional[float] = ..., status: _Optional[str] = ..., doc_count: _Optional[int] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., updated_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+    def __init__(self, tenant_id: _Optional[str] = ..., id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., embedding_model: _Optional[str] = ..., chunk_size: _Optional[int] = ..., top_k: _Optional[int] = ..., score_threshold: _Optional[float] = ..., retrieval_mode: _Optional[str] = ..., status: _Optional[str] = ..., doc_count: _Optional[int] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., updated_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class KBDocument(_message.Message):
     __slots__ = ("tenant_id", "kb_id", "id", "file_name", "file_type", "file_size_bytes", "parse_status", "chunk_count", "error_message", "custom_metadata", "created_at", "parsed_at")

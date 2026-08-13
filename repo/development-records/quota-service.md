@@ -1548,3 +1548,88 @@ Confirm/Cancel/Release 三处存在性校验 SQL 完全一致，抽成包级 `re
 - 契约：`api/openapi/v1.yaml`（幂等 header 改名），Quota TCC 预留状态机
 - 代码：issue-003 `QuotaService` adapter（`postgres_quota.go`）、issue-005 `QuotaAdminService` adapter、issue-006 handler 错误映射（`quota_resources.go`）、issue-002 port 哨兵错误（`ports/errors.go`）
 - 本批次为 `feat/quota-service-tcc` 的审核意见整改，向前兼容，未新增 v1.yaml 端点或破坏既有字段
+
+---
+
+## 补充批次 TryTx / TryManyTx 新增外部事务变体（2026-08-12）
+
+> 批次类型：Feature batch（Core quota 模块 TCC Try 侧外部事务支持）
+> 完成日期：2026-08-12
+> 分支：`feat/quota-service-tcc-v2`（从 main `17b5008` 切出）
+> 背景：v1 的 `Try` / `TryMany` 自开事务（`WithTenantTx`），预占与实例落库是两个独立事务。若实例落库事务在预占提交后失败，预占变成孤儿，依赖 TTL worker 回收。0812 方案要求 `锁 allocated → 锁 quota → 校验 → TryManyTx → InsertPendingTx` 原子提交，即预占和实例行在同一事务内，任一失败整体回滚，无悬挂预占。因此需要新增接受外部 tx 的 `TryTx` / `TryManyTx` 两个方法。
+
+### 完成摘要
+
+在 `QuotaService` interface 新增 `TryTx` / `TryManyTx` 两个方法，接收外部 `MetadataTx`，供 TCC 调用方在创建实例同事务内做配额预占。实现零侵入：v1 已将单维度预占逻辑提取为 `tryInTx(ctx, tx, req)` 内部方法，v2 的 `TryTx` / `TryManyTx` 直接复用 `tryInTx`，**无需新增任何 SQL**。`Confirm` / `Cancel` / `Release` 在 v1 已是接收外部 tx 的签名，无需改动。
+
+集成测试连接真实 PG `10.10.1.66:30945`，双角色（admin `ani` + tenant `ani_app_user`）验证 RLS，7 个场景全部通过：TryTx 成功/回滚/并发不超卖/RLS 隔离、TryManyTx 成功/维度不足回滚、TryTx+Confirm 端到端。修复 `newQuotaIntegrationEnv` 的 `plan_id` NOT NULL 约束（真实 PG `tenants` 表新增 `plan_id` 列，v1 集成测试编写时该列允许 NULL 或尚未存在）。
+
+### 关键文件
+
+| 文件 | 类型 | 说明 |
+|---|---|---|
+| `pkg/ports/quota.go` | 修改 | `QuotaService` interface 新增 `TryTx` / `TryManyTx` 两个方法签名 |
+| `pkg/adapters/runtime/postgres_quota.go` | 修改 | 实现 `TryTx` / `TryManyTx`；复用已有 `tryInTx`，各 3-5 行 |
+| `pkg/adapters/runtime/postgres_quota_test.go` | 修改 | 新增 9 个单元测试（TryTx 6 + TryManyTx 3） |
+| `pkg/adapters/runtime/integration_test.go` | 修改 | 新增 7 个集成测试场景（#24-#30）；修复 `newQuotaIntegrationEnv` 的 `plan_id` NOT NULL 约束 |
+| `services/tasks/modules/plan/plan-quota-service-v2.md` | 新增 | 本任务方案文档 |
+
+### 验证命令与结果
+
+| 命令 | 结果 |
+|---|---|
+| `go build ./pkg/...` | PASS |
+| `go build -tags integration ./pkg/adapters/runtime/` | PASS |
+| `go test ./pkg/adapters/runtime/ -run TestPostgresQuota -count=1 -v` | PASS（54/54，含原有 45 + 新增 9） |
+| `go test ./pkg/adapters/runtime/ -run 'TestIntegrationQuota.*TryTx\|TestIntegrationQuota.*TryManyTx' -tags integration -timeout 120s -count=1` | PASS（7/7，连真实 PG） |
+| `git diff --check` | PASS |
+
+集成测试环境变量：
+- `ANI_TEST_ADMIN_DSN=postgres://ani:ani_dev_password@10.10.1.66:30945/ani?sslmode=disable`
+- `ANI_TEST_TENANT_DSN=postgres://ani_app_user:ani_dev_password@10.10.1.66:30945/ani?sslmode=disable`
+
+### Implementation Notes
+
+#### 1. Design Decisions
+
+**D1：TryTx / TryManyTx 不自己 Begin / Commit / Rollback**
+与 v1 的 Confirm / Cancel / Release 签名一致：接收外部 tx，只返回 err。事务生命周期由调用方控制（`WithTenantTx` 或手动 `Begin` + `SetDBTenant`）。失败时只返回 err，不自己回滚，由调用方的外层事务统一回滚。这使预占和实例落库可在同一事务内原子提交。
+
+**D2：TryManyTx 不校验 tenant_id 一致性**
+v1 的 `TryMany` 自开事务时会校验所有 req 的 `tenant_id` 一致（因为是自开事务，需确保所有维度属于同一租户）。v2 的 `TryManyTx` 是同事务内部调用，调用方已通过 `WithTenantTx` 注入 TenantContext 并保证租户一致，不加冗余校验。
+
+**D3：TryTx / TryManyTx 复用 `tryInTx`，零新增 SQL**
+v1 已将单维度预占逻辑（meta 校验 → lazy init → 原子 UPDATE → 插入流水）提取为 `tryInTx(ctx, tx, req)` 内部方法。v2 的 `TryTx` 直接调用 `tryInTx`，`TryManyTx` 循环调用 `tryInTx`。不改动 `tryInTx` 本身，零侵入现有代码。
+
+#### 2. Deviations
+
+**De1：`newQuotaIntegrationEnv` INSERT 语句补 `plan_id` 列**
+真实 PG 的 `tenants` 表有 `plan_id` (uuid, NOT NULL) 列（v1 集成测试编写时该列可能尚未存在或允许 NULL）。本批次集成测试时发现 INSERT 报错 `null value in column "plan_id" violates not-null constraint`，补上 `plan_id` 列并使用默认计划 ID `00000000-0000-0000-0000-000000000001`（tenant_plans 表"入门版"）。此修复同时惠及所有现有集成测试（v1 的 #1-#23 也依赖 `newQuotaIntegrationEnv`）。
+
+#### 3. Tradeoffs
+
+**T1：新增独立方法 vs 改 Try / TryMany 签名**
+- 方案 a（本批次选择）：新增 `TryTx` / `TryManyTx` 独立方法，保留 `Try` / `TryMany` 不变。
+- 方案 b：改 `Try` / `TryMany` 签名接收可选 tx 参数。
+选择 a：不破坏 v1 已合并的接口和调用方，编译期断言 `var _ ports.QuotaService = (*PostgresQuota)(nil)` 自动覆盖新方法。
+
+**T2：TryManyTx 失败不回滚 vs 自己回滚**
+- 方案 a（本批次选择）：返回 err，不自己回滚，由外层事务统一回滚。
+- 方案 b：失败时自己回滚已执行的 tryInTx。
+选择 a：与 Confirm / Cancel / Release 契约一致（接收外部 tx 的方法不自己控制事务生命周期）。若调用方用 `WithTenantTx` 包裹，返回 err 后 `WithTenantTx` 自动回滚整个事务。
+
+#### 4. Open Questions
+
+**Q1：`plan_id` NOT NULL 约束是否是其他分支 migration 新增？**
+真实 PG 的 `tenants` 表现在有 `plan_id` (uuid, NOT NULL) 列，但 main 分支的 migration 文件中未找到 `plan_id` 相关 DDL（搜索 `*.sql` 无匹配）。可能是其他分支或手动执行的 migration。需确认该列是否已纳入正式 migration，否则其他环境部署时可能缺失该列。
+
+**Q2：TryTx / TryManyTx 的调用方（创建实例流程）何时接入？**
+本批次只实现 port + adapter + 测试，未修改创建实例流程（`demo_instances.go` 等）。0812 方案 PR-3 的 `WorkloadInstanceStore.UpsertStatusTx` 和调用方接入是后续 PR。
+
+### 对齐文档
+
+- 方案：`services/tasks/modules/plan/plan-quota-service-v2.md`
+- 0812 方案：`通用资源配额与计量落地方案-0812.md` §4.2、§5.1.1、§5.2.1
+- 代码：issue-003 `QuotaService` adapter（`postgres_quota.go` 的 `tryInTx` / `Try` / `TryMany`）、`ports/quota.go` 的 `QuotaService` interface
+- 集成测试连接模式：issue-011 的 `ANI_TEST_ADMIN_DSN` / `ANI_TEST_TENANT_DSN` 双角色 RLS 验证
+- 本批次为 `feat/quota-service-tcc-v2` 的新增能力，未改动 v1.yaml 契约、handler 或 SDK

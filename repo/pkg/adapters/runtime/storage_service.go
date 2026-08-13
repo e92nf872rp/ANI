@@ -1153,6 +1153,13 @@ func (s *LocalStorageService) CreateStorageObjectUpload(ctx context.Context, req
 	}
 	bucket, ok := s.buckets[strings.TrimSpace(request.BucketID)]
 	s.mu.RUnlock()
+	if !ok && s.store != nil {
+		loaded, err := s.store.GetBucket(ctx, request.TenantID, strings.TrimSpace(request.BucketID))
+		if err == nil && loaded.BucketID != "" {
+			bucket = loaded
+			ok = true
+		}
+	}
 	if !ok || bucket.TenantID != request.TenantID {
 		return ports.StorageObjectUploadRecord{}, fmt.Errorf("%w: bucket not found", ports.ErrNotFound)
 	}

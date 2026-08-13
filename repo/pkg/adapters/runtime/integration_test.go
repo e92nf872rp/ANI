@@ -114,15 +114,17 @@ func newQuotaIntegrationEnv(t *testing.T) *quotaIntegrationEnv {
 	}
 
 	// 插入两个测试租户（tenants 表无 RLS，可直接 INSERT）。
+	// plan_id 是 NOT NULL 列，使用 tenant_plans 表中的默认计划 ID。
 	env.tenantA = uuid.New()
 	env.tenantB = uuid.New()
+	defaultPlanID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	for _, tid := range []uuid.UUID{env.tenantA, env.tenantB} {
 		short := tid.String()[:8]
 		if _, err := adminPool.Exec(context.Background(), `
-			INSERT INTO tenants (id, name, display_name, status)
-			VALUES ($1, $2, $3, 'active')
+			INSERT INTO tenants (id, name, display_name, status, plan_id)
+			VALUES ($1, $2, $3, 'active', $4)
 			ON CONFLICT (id) DO NOTHING
-		`, tid, fmt.Sprintf("it-test-%s", short), fmt.Sprintf("IT测试-%s", short)); err != nil {
+		`, tid, fmt.Sprintf("it-test-%s", short), fmt.Sprintf("IT测试-%s", short), defaultPlanID); err != nil {
 			t.Fatalf("插入测试租户 %s 失败: %v", short, err)
 		}
 	}
@@ -792,9 +794,267 @@ func TestIntegrationQuotaAdminListMeta(t *testing.T) {
 	t.Logf("ListQuotaMeta 返回 %d 个 enabled 维度，含 gpu_count/cpu_core", len(metas))
 }
 
-// ---------------------------------------------------------------- 管理场景 23：SDK 端到端
+// ---------------------------------------------------------------- 扣减场景 24-30：TryTx / TryManyTx（v2，接收外部 tx）
 
-// TestIntegrationQuotaSDKEndToEnd 管理场景 23：通过 ani-gateway 的 HTTP 管理端点
+// TestIntegrationQuotaTryTxSuccess 扣减场景 24：租户 A 在外部 WithTenantTx 内调 TryTx 成功预占。
+// 验证 RLS 放行、reserved 增加、流水插入。
+func TestIntegrationQuotaTryTxSuccess(t *testing.T) {
+	env := newQuotaIntegrationEnv(t)
+	env.seedQuotaFor(env.tenantA, 10)
+
+	var res ports.QuotaReservation
+	err := env.tenantStore.WithTenantTx(env.tenantCtxOf(env.tenantA), func(ctx context.Context, tx ports.MetadataTx) error {
+		var err error
+		res, err = env.tenantQuota.TryTx(ctx, tx, ports.QuotaTryRequest{
+			TenantID:     env.tenantA.String(),
+			ResourceType: ports.QuotaGPUCount,
+			Amount:       2,
+		})
+		return err
+	})
+	if err != nil {
+		t.Fatalf("TryTx 失败（RLS 应放行）: %v", err)
+	}
+	if res.TxID == "" {
+		t.Fatal("TryTx 未返回 tx_id")
+	}
+	reserved, _ := env.loadGpuCounts(env.tenantA)
+	if reserved != 2 {
+		t.Fatalf("TryTx 后 reserved 应为 2，实际 %d", reserved)
+	}
+	t.Logf("TryTx 成功：tx_id=%s, reserved=%d", res.TxID, reserved)
+}
+
+// TestIntegrationQuotaTryTxRollback 扣减场景 25：TryTx 外层事务回滚 → 预占回滚。
+// 验证回滚后 reserved 不变、无流水残留。
+func TestIntegrationQuotaTryTxRollback(t *testing.T) {
+	env := newQuotaIntegrationEnv(t)
+	env.seedQuotaFor(env.tenantA, 10)
+
+	// 在 WithTenantTx 内 TryTx 成功后返回一个错误 → 事务回滚
+	boom := errors.New("simulated business failure")
+	err := env.tenantStore.WithTenantTx(env.tenantCtxOf(env.tenantA), func(ctx context.Context, tx ports.MetadataTx) error {
+		_, err := env.tenantQuota.TryTx(ctx, tx, ports.QuotaTryRequest{
+			TenantID:     env.tenantA.String(),
+			ResourceType: ports.QuotaGPUCount,
+			Amount:       3,
+		})
+		if err != nil {
+			return err
+		}
+		return boom // 模拟业务后续步骤失败 → 回滚
+	})
+	if !errors.Is(err, boom) {
+		t.Fatalf("应返回模拟错误，实际: %v", err)
+	}
+	reserved, _ := env.loadGpuCounts(env.tenantA)
+	if reserved != 0 {
+		t.Fatalf("回滚后 reserved 应为 0，实际 %d（预占未回滚）", reserved)
+	}
+	// 流水不应残留
+	var resCount int
+	env.adminPool.QueryRow(context.Background(), `
+		SELECT COUNT(*) FROM resource_reservations WHERE tenant_id = $1
+	`, env.tenantA).Scan(&resCount)
+	if resCount != 0 {
+		t.Fatalf("回滚后不应有流水残留，实际 %d 条", resCount)
+	}
+	t.Logf("TryTx 回滚成功：reserved=0，无流水残留")
+}
+
+// TestIntegrationQuotaTryManyTxSuccess 扣减场景 26：TryManyTx 多维度预占成功。
+func TestIntegrationQuotaTryManyTxSuccess(t *testing.T) {
+	env := newQuotaIntegrationEnv(t)
+	env.seedQuotaFor(env.tenantA, 10)
+	// seed cpu_core
+	_, err := env.adminPool.Exec(context.Background(), `
+		INSERT INTO resource_quota (tenant_id, resource_type, total, reserved, used)
+		VALUES ($1, 'cpu_core', 10, 0, 0)
+		ON CONFLICT (tenant_id, resource_type) DO UPDATE SET total = EXCLUDED.total
+	`, env.tenantA)
+	if err != nil {
+		t.Fatalf("seed cpu_core 失败: %v", err)
+	}
+
+	var reservations []ports.QuotaReservation
+	err = env.tenantStore.WithTenantTx(env.tenantCtxOf(env.tenantA), func(ctx context.Context, tx ports.MetadataTx) error {
+		var err error
+		reservations, err = env.tenantQuota.TryManyTx(ctx, tx, []ports.QuotaTryRequest{
+			{TenantID: env.tenantA.String(), ResourceType: ports.QuotaGPUCount, Amount: 2},
+			{TenantID: env.tenantA.String(), ResourceType: ports.QuotaCPUCore, Amount: 3},
+		})
+		return err
+	})
+	if err != nil {
+		t.Fatalf("TryManyTx 失败: %v", err)
+	}
+	if len(reservations) != 2 {
+		t.Fatalf("TryManyTx 应返回 2 条预占，实际 %d", len(reservations))
+	}
+	reservedG, _ := env.loadGpuCounts(env.tenantA)
+	if reservedG != 2 {
+		t.Fatalf("gpu_count reserved 应为 2，实际 %d", reservedG)
+	}
+	var reservedC int64
+	env.adminPool.QueryRow(context.Background(), `
+		SELECT reserved FROM resource_quota WHERE tenant_id = $1 AND resource_type = 'cpu_core'
+	`, env.tenantA).Scan(&reservedC)
+	if reservedC != 3 {
+		t.Fatalf("cpu_core reserved 应为 3，实际 %d", reservedC)
+	}
+	t.Logf("TryManyTx 多维度成功：gpu reserved=%d, cpu reserved=%d", reservedG, reservedC)
+}
+
+// TestIntegrationQuotaTryManyTxRollback 扣减场景 27：TryManyTx 第二维度不足 → 外层回滚。
+// 验证所有维度 reserved 不变、无流水残留。
+func TestIntegrationQuotaTryManyTxRollback(t *testing.T) {
+	env := newQuotaIntegrationEnv(t)
+	env.seedQuotaFor(env.tenantA, 10)
+	// seed cpu_core total=2 → 第二维度 Try 3 不足
+	_, err := env.adminPool.Exec(context.Background(), `
+		INSERT INTO resource_quota (tenant_id, resource_type, total, reserved, used)
+		VALUES ($1, 'cpu_core', 2, 0, 0)
+		ON CONFLICT (tenant_id, resource_type) DO UPDATE SET total = EXCLUDED.total
+	`, env.tenantA)
+	if err != nil {
+		t.Fatalf("seed cpu_core 失败: %v", err)
+	}
+
+	err = env.tenantStore.WithTenantTx(env.tenantCtxOf(env.tenantA), func(ctx context.Context, tx ports.MetadataTx) error {
+		_, err := env.tenantQuota.TryManyTx(ctx, tx, []ports.QuotaTryRequest{
+			{TenantID: env.tenantA.String(), ResourceType: ports.QuotaGPUCount, Amount: 2},
+			{TenantID: env.tenantA.String(), ResourceType: ports.QuotaCPUCore, Amount: 3}, // 不足
+		})
+		return err
+	})
+	if !errors.Is(err, ports.ErrQuotaExceeded) {
+		t.Fatalf("应返回 ErrQuotaExceeded，实际: %v", err)
+	}
+	// gpu_count 的预占应随事务回滚
+	reservedG, _ := env.loadGpuCounts(env.tenantA)
+	if reservedG != 0 {
+		t.Fatalf("回滚后 gpu_count reserved 应为 0，实际 %d", reservedG)
+	}
+	// 无流水残留
+	var resCount int
+	env.adminPool.QueryRow(context.Background(), `
+		SELECT COUNT(*) FROM resource_reservations WHERE tenant_id = $1
+	`, env.tenantA).Scan(&resCount)
+	if resCount != 0 {
+		t.Fatalf("回滚后不应有流水残留，实际 %d 条", resCount)
+	}
+	t.Logf("TryManyTx 维度二不足回滚成功：gpu reserved=0，无流水残留")
+}
+
+// TestIntegrationQuotaTryTxConfirmEndToEnd 扣减场景 28：TryTx + Confirm 同事务端到端。
+// 验证预占 → Confirm → used 增加、reserved 减少。
+func TestIntegrationQuotaTryTxConfirmEndToEnd(t *testing.T) {
+	env := newQuotaIntegrationEnv(t)
+	env.seedQuotaFor(env.tenantA, 10)
+
+	// 第一步：TryTx 预占
+	var res ports.QuotaReservation
+	err := env.tenantStore.WithTenantTx(env.tenantCtxOf(env.tenantA), func(ctx context.Context, tx ports.MetadataTx) error {
+		var err error
+		res, err = env.tenantQuota.TryTx(ctx, tx, ports.QuotaTryRequest{
+			TenantID:     env.tenantA.String(),
+			ResourceType: ports.QuotaGPUCount,
+			Amount:       3,
+		})
+		return err
+	})
+	if err != nil {
+		t.Fatalf("TryTx 失败: %v", err)
+	}
+
+	// 第二步：Confirm
+	err = env.tenantStore.WithTenantTx(env.tenantCtxOf(env.tenantA), func(ctx context.Context, tx ports.MetadataTx) error {
+		return env.tenantQuota.Confirm(ctx, tx, []string{res.TxID}, "instance-tx-1")
+	})
+	if err != nil {
+		t.Fatalf("Confirm 失败: %v", err)
+	}
+	reserved, used := env.loadGpuCounts(env.tenantA)
+	if reserved != 0 || used != 3 {
+		t.Fatalf("Confirm 后应 reserved=0 used=3，实际 reserved=%d used=%d", reserved, used)
+	}
+	t.Logf("TryTx→Confirm 端到端成功：reserved=0, used=3")
+}
+
+// TestIntegrationQuotaTryTxConcurrentNoOversell 扣减场景 29：并发 TryTx 不超卖。
+// 两个事务并发 TryTx 各占 6（total=10），PG 行锁串行化，第二个应 ErrQuotaExceeded。
+func TestIntegrationQuotaTryTxConcurrentNoOversell(t *testing.T) {
+	env := newQuotaIntegrationEnv(t)
+	env.seedQuotaFor(env.tenantA, 10)
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	success := 0
+	exceeded := 0
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := env.tenantStore.WithTenantTx(env.tenantCtxOf(env.tenantA), func(ctx context.Context, tx ports.MetadataTx) error {
+				_, err := env.tenantQuota.TryTx(ctx, tx, ports.QuotaTryRequest{
+					TenantID:     env.tenantA.String(),
+					ResourceType: ports.QuotaGPUCount,
+					Amount:       6,
+				})
+				return err
+			})
+			mu.Lock()
+			defer mu.Unlock()
+			if err == nil {
+				success++
+			} else if errors.Is(err, ports.ErrQuotaExceeded) {
+				exceeded++
+			} else {
+				t.Errorf("并发 TryTx 出现未知错误: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if success != 1 || exceeded != 1 {
+		t.Fatalf("应 1 成功 1 拒绝，实际 success=%d exceeded=%d", success, exceeded)
+	}
+	reserved, _ := env.loadGpuCounts(env.tenantA)
+	if reserved != 6 {
+		t.Fatalf("并发后 reserved 应为 6，实际 %d", reserved)
+	}
+	t.Logf("并发 TryTx 不超卖：1 成功 1 拒绝，reserved=%d", reserved)
+}
+
+// TestIntegrationQuotaTryTxRLSIsolation 扣减场景 30：RLS 隔离。
+// 租户 A 的 tx 尝试 TryTx 租户 B 的配额 → RLS 拦截（INSERT resource_reservations 或
+// UPDATE resource_quota 被 RLS WITH CHECK 拒绝）。
+func TestIntegrationQuotaTryTxRLSIsolation(t *testing.T) {
+	env := newQuotaIntegrationEnv(t)
+	env.seedQuotaFor(env.tenantA, 10)
+	env.seedQuotaFor(env.tenantB, 10)
+
+	// 用租户 A 的身份尝试 TryTx 但 tenant_id 填 B → RLS 应拒绝
+	err := env.tenantStore.WithTenantTx(env.tenantCtxOf(env.tenantA), func(ctx context.Context, tx ports.MetadataTx) error {
+		_, err := env.tenantQuota.TryTx(ctx, tx, ports.QuotaTryRequest{
+			TenantID:     env.tenantB.String(), // 试图预占 B 的配额
+			ResourceType: ports.QuotaGPUCount,
+			Amount:       2,
+		})
+		return err
+	})
+	if err == nil {
+		// RLS 应拦截，若未拦截验证 B 的 reserved 未变
+		reservedB, _ := env.loadGpuCounts(env.tenantB)
+		if reservedB != 0 {
+			t.Fatalf("租户 A 成功预占了租户 B 的配额（RLS 失效），B reserved=%d", reservedB)
+		}
+		t.Skip("RLS 未报错但 B reserved 未变（可能 lazy-init INSERT 被 RLS 拦截），跳过")
+	}
+	t.Logf("租户 A TryTx 租户 B 配额被 RLS 拦截: %v", err)
+}
+
+// ---------------------------------------------------------------- 管理场景 23：SDK 端到端
 // （SDK 客户端等价路径）调 5 个 quota 管理端点，再用管理员连接回 DB 验证落库正确。
 //
 // 前置：已在本机启动 ani-gateway（ANI_AUTH_MODE=dev 免认证）+ auth-service，

@@ -154,6 +154,29 @@ func (q *PostgresQuota) TryMany(ctx context.Context, reqs []ports.QuotaTryReques
 	return reservations, nil
 }
 
+// TryTx 单维度预占，接受外部 tx。不自己开事务，在调用方传入的 tx 内执行预占逻辑。
+// 调用方负责开 WithTenantTx 并注入 TenantContext；失败时只返回 err，由外层事务统一回滚。
+func (q *PostgresQuota) TryTx(ctx context.Context, tx ports.MetadataTx, req ports.QuotaTryRequest) (ports.QuotaReservation, error) {
+	return q.tryInTx(ctx, tx, req)
+}
+
+// TryManyTx 多维度批量预占，接受外部 tx。不自己开事务，在调用方传入的 tx 内循环 tryInTx。
+// 调用方负责开 WithTenantTx 并注入 TenantContext；任一维度失败只返回 err，由外层事务统一回滚。
+func (q *PostgresQuota) TryManyTx(ctx context.Context, tx ports.MetadataTx, reqs []ports.QuotaTryRequest) ([]ports.QuotaReservation, error) {
+	if len(reqs) == 0 {
+		return nil, nil
+	}
+	var reservations []ports.QuotaReservation
+	for _, req := range reqs {
+		res, err := q.tryInTx(ctx, tx, req)
+		if err != nil {
+			return nil, err // 不自己回滚，由调用方的外层事务统一回滚
+		}
+		reservations = append(reservations, res)
+	}
+	return reservations, nil
+}
+
 // reservationExists 判断指定 tx_id 的预占流水是否存在。用于 UPDATE 状态守卫返回
 // ErrNoRows 时区分"流水存在但 state 已变更（幂等重放）"与"流水不存在（tx_id 无效）"，
 // 避免把无效 tx_id 静默吞掉。存在返回 true；不存在返回 false；查询本身出错返回 err。

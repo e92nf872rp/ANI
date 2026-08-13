@@ -392,20 +392,20 @@
           <td>200, 400, 401, 403, 409, 413, 422</td>
         </tr>
         <tr>
-          <td><span class="method method-post">POST</span></td>
-          <td><code>/knowledge-bases/{kb_id}/documents/notify-uploaded</code></td>
-          <td><code>notifyDocumentUploaded</code></td>
-          <td>通知文档已直传至对象存储（两步式上传 step 2）</td>
-          <td><code></code></td>
-          <td>202, 400, 401, 403, 404, 409, 422, 503</td>
-        </tr>
-        <tr>
           <td><span class="method method-delete">DELETE</span></td>
           <td><code>/knowledge-bases/{kb_id}/documents/{doc_id}</code></td>
           <td><code>deleteKnowledgeBaseDocument</code></td>
           <td>删除知识库文档</td>
           <td><code></code></td>
           <td>204, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/knowledge-bases/{kb_id}/documents/{doc_id}/notify-uploaded</code></td>
+          <td><code>notifyDocumentUploaded</code></td>
+          <td>通知文档已直传至对象存储（两步式上传 step 2）</td>
+          <td><code></code></td>
+          <td>202, 400, 401, 403, 404, 409, 422, 503</td>
         </tr>
         <tr>
           <td><span class="method method-post">POST</span></td>

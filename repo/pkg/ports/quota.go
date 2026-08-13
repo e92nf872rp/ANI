@@ -69,12 +69,20 @@ type QuotaListResult struct {
 
 // QuotaService owns the Try-Confirm-Cancel/Release (TCC) reservation state
 // machine. Try and TryMany self-open a tenant-scoped transaction because there
-// is no business row to attach to before the reservation exists. Confirm,
-// Cancel and Release accept an external MetadataTx so the caller can commit
-// them atomically with their own status update and outbox writes.
+// is no business row to attach to before the reservation exists. TryTx and
+// TryManyTx accept an external MetadataTx so the caller can reserve quota
+// atomically with its own business row insert (e.g. workload instance) in the
+// same transaction. Confirm, Cancel and Release also accept an external
+// MetadataTx for the same atomic-commit reason.
 type QuotaService interface {
 	Try(ctx context.Context, req QuotaTryRequest) (QuotaReservation, error)
 	TryMany(ctx context.Context, reqs []QuotaTryRequest) ([]QuotaReservation, error)
+	// TryTx 单维度预占，接受外部 tx。不自己开事务，在调用方传入的 tx 内执行预占逻辑。
+	// 调用方负责开 WithTenantTx 并注入 TenantContext；失败时只返回 err，由外层事务统一回滚。
+	TryTx(ctx context.Context, tx MetadataTx, req QuotaTryRequest) (QuotaReservation, error)
+	// TryManyTx 多维度批量预占，接受外部 tx。不自己开事务，在调用方传入的 tx 内循环预占。
+	// 调用方负责开 WithTenantTx 并注入 TenantContext；任一维度失败只返回 err，由外层事务统一回滚。
+	TryManyTx(ctx context.Context, tx MetadataTx, reqs []QuotaTryRequest) ([]QuotaReservation, error)
 	Confirm(ctx context.Context, tx MetadataTx, txIDs []string, resourceRef string) error
 	Cancel(ctx context.Context, tx MetadataTx, txIDs []string) error
 	Release(ctx context.Context, tx MetadataTx, txIDs []string) error

@@ -108,7 +108,14 @@ def validate_allowlist_is_used(
     allowlist: dict[tuple[str, str], str],
     seen: set[tuple[str, str]],
 ) -> list[str]:
-    unused = sorted(set(allowlist) - seen)
+    # Only Go files are scanned, so allowlist entries for Python files
+    # (.py) can never be "seen" by this validator.  Skip them to avoid
+    # false "unused" errors while still keeping the allowlist as the
+    # documented source of truth for Python direct-import coupling.
+    unused = sorted(
+        key for key in (set(allowlist) - seen)
+        if not key[0].endswith(".py")
+    )
     return [f"{path}: allowlist import is unused: {import_path}" for path, import_path in unused]
 
 

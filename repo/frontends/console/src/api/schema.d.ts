@@ -221,7 +221,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/knowledge-bases/{kb_id}/documents/notify-uploaded": {
+    "/knowledge-bases/{kb_id}/documents/{doc_id}/notify-uploaded": {
         parameters: {
             query?: never;
             header?: never;
@@ -2705,7 +2705,7 @@ export interface operations {
                     embedding_model?: string;
                     /**
                      * @description 分块大小（tokens），与 KBConfig 边界一致
-                     * @default 512
+                     * @default 1024
                      */
                     chunk_size?: number;
                     /** @default 5 */
@@ -2853,6 +2853,7 @@ export interface operations {
             header?: never;
             path: {
                 kb_id: string;
+                doc_id: string;
             };
             cookie?: never;
         };
