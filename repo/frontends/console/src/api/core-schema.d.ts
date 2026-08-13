@@ -3422,6 +3422,9 @@ export interface components {
          * @description 创建实例请求。共享字段（name/kind/image/cpu/memory 等）留在顶层；
          *     按 kind 选用对应 `*_config`（推荐）。扁平 VM/容器/GPU 字段保留为 v1 兼容别名。
          *     同名字段以 `*_config` 为准；与扁平别名冲突或传入跨类型 config 时返回 400。
+         *     network_config 优先级：`*_config.network` > 顶层 `network_config`；
+         *     两者同时提供时以 `*_config.network` 为准，顶层 `network_config` 作为 fallback。
+         *     同时提供且字段冲突时返回 400。
          */
         CreateInstanceRequest: {
             /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
@@ -5456,8 +5459,10 @@ export interface components {
             updated_at: string;
             /** @description 队列调度状态（从 Volcano Queue CRD 读取） */
             status?: {
-                /** @description 已分配资源数 */
-                allocated?: number;
+                /** @description 已分配资源键值集合，对齐 Volcano Queue CRD（如 nvidia.com/gpu: 2） */
+                allocated?: {
+                    [key: string]: string;
+                };
                 /** @description 排队中任务数 */
                 in_queue?: number;
             } | null;
@@ -5566,8 +5571,6 @@ export interface components {
             status: "available" | "full" | "device_full" | "unavailable";
             /** @description 可创建实例数 */
             available_count: number;
-            /** @description 配额剩余（allocated-used-reserved） */
-            quota_remaining: number;
             /** @description 是否存在匹配规格的节点 */
             has_matching_nodes: boolean;
             /** @description 是否存在空闲设备 */
@@ -5577,7 +5580,10 @@ export interface components {
             /** @description 每份规格占用的卡数 */
             gpu_count?: number;
         };
+        /** @description 规格可用性列表响应；quota_remaining 是租户级共享值，只在顶层返回一次 */
         GPUSpecAvailabilityListResponse: {
+            /** @description 租户配额剩余（allocated_gpu_count - used - reserved），跨规格共享，仅在顶层返回一次 */
+            quota_remaining: number;
             items: components["schemas"]["GPUSpecAvailability"][];
         };
         /** @description 设置租户预留额度请求 */
@@ -6495,7 +6501,19 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            /**
+             * @description 配额不足或预留额度不足。可能的 code：
+             *     - QUOTA_EXCEEDED: used+reserved+request > total，配额上限不足
+             *     - RESERVED_INSUFFICIENT: allocated-used-reserved < request，预留额度不足
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /**
              * @description GPU 调度前置条件不满足。可能的 code：
              *     - InsufficientGPU: GPU 资源不足，当前无可用算力满足本次创建请求
@@ -10800,6 +10818,8 @@ export interface operations {
         parameters: {
             query?: {
                 gpu_type?: string;
+                /** @description 按 GPU 隔离模式过滤 */
+                gpu_mode?: "wholecard" | "vgpu";
                 status?: "available" | "in_use" | "fault" | "maintenance";
                 node_name?: string;
                 limit?: number;

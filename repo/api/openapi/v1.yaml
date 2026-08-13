@@ -728,6 +728,9 @@ components:
         创建实例请求。共享字段（name/kind/image/cpu/memory 等）留在顶层；
         按 kind 选用对应 `*_config`（推荐）。扁平 VM/容器/GPU 字段保留为 v1 兼容别名。
         同名字段以 `*_config` 为准；与扁平别名冲突或传入跨类型 config 时返回 400。
+        network_config 优先级：`*_config.network` > 顶层 `network_config`；
+        两者同时提供时以 `*_config.network` 为准，顶层 `network_config` 作为 fallback。
+        同时提供且字段冲突时返回 400。
       properties:
         idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
         name:           { type: string, minLength: 1, maxLength: 128 }
@@ -3040,7 +3043,10 @@ components:
           nullable: true
           description: "队列调度状态（从 Volcano Queue CRD 读取）"
           properties:
-            allocated:    { type: integer, minimum: 0, description: "已分配资源数" }
+            allocated:
+              type: object
+              description: "已分配资源键值集合，对齐 Volcano Queue CRD（如 nvidia.com/gpu: 2）"
+              additionalProperties: { type: string }
             in_queue:      { type: integer, minimum: 0, description: "排队中任务数" }
 
     GPUSchedulingQueueListResponse:
@@ -3133,12 +3139,11 @@ components:
     GPUSpecAvailability:
       type: object
       description: "规格可用性视图（四态标注）"
-      required: [spec_id, status, available_count, quota_remaining, has_matching_nodes, has_idle_devices, device_idle_count]
+      required: [spec_id, status, available_count, has_matching_nodes, has_idle_devices, device_idle_count]
       properties:
         spec_id:            { type: string }
         status:             { type: string, enum: [available, full, device_full, unavailable], description: "available=可创建，full=配额不足，device_full=设备不足，unavailable=规格不可用" }
         available_count:    { type: integer, minimum: 0, description: "可创建实例数" }
-        quota_remaining:    { type: integer, description: "配额剩余（allocated-used-reserved）" }
         has_matching_nodes: { type: boolean, description: "是否存在匹配规格的节点" }
         has_idle_devices:   { type: boolean, description: "是否存在空闲设备" }
         device_idle_count:  { type: integer, minimum: 0, description: "空闲设备数" }
@@ -3146,8 +3151,12 @@ components:
 
     GPUSpecAvailabilityListResponse:
       type: object
-      required: [items]
+      description: "规格可用性列表响应；quota_remaining 是租户级共享值，只在顶层返回一次"
+      required: [items, quota_remaining]
       properties:
+        quota_remaining:
+          type: integer
+          description: "租户配额剩余（allocated_gpu_count - used - reserved），跨规格共享，仅在顶层返回一次"
         items:
           type: array
           items: { $ref: '#/components/schemas/GPUSpecAvailability' }
@@ -3942,7 +3951,14 @@ paths:
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
-        "409": { $ref: '#/components/responses/Conflict' }
+        "409":
+          description: |
+            配额不足或预留额度不足。可能的 code：
+            - QUOTA_EXCEEDED: used+reserved+request > total，配额上限不足
+            - RESERVED_INSUFFICIENT: allocated-used-reserved < request，预留额度不足
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
         "422":
           $ref: '#/components/responses/PreconditionFailed'
           description: |
@@ -7346,6 +7362,7 @@ paths:
       x-ani-rbac-scope: "scope:gpu-inventory:read"
       parameters:
         - { name: gpu_type,  in: query, schema: { type: string } }
+        - { name: gpu_mode,  in: query, schema: { type: string, enum: [wholecard, vgpu] }, description: "按 GPU 隔离模式过滤" }
         - { name: status,    in: query, schema: { type: string, enum: [available, in_use, fault, maintenance] } }
         - { name: node_name, in: query, schema: { type: string } }
         - { name: limit,  in: query, schema: { type: integer, default: 50, minimum: 1, maximum: 200 } }
