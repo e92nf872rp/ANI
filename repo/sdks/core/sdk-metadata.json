@@ -887,6 +887,48 @@
       "scope": "scope:observability:read"
     },
     {
+      "operationId": "getPlatformWorkloadCapabilities",
+      "method": "GET",
+      "path": "/platform-workload-capabilities",
+      "scope": "scope:platform-workloads:read"
+    },
+    {
+      "operationId": "createPlatformWorkload",
+      "method": "POST",
+      "path": "/platform-workloads",
+      "scope": "scope:platform-workloads:write"
+    },
+    {
+      "operationId": "deletePlatformWorkload",
+      "method": "DELETE",
+      "path": "/platform-workloads/{workload_id}",
+      "scope": "scope:platform-workloads:write"
+    },
+    {
+      "operationId": "getPlatformWorkload",
+      "method": "GET",
+      "path": "/platform-workloads/{workload_id}",
+      "scope": "scope:platform-workloads:read"
+    },
+    {
+      "operationId": "updatePlatformWorkload",
+      "method": "PATCH",
+      "path": "/platform-workloads/{workload_id}",
+      "scope": "scope:platform-workloads:write"
+    },
+    {
+      "operationId": "applyPlatformWorkloadLifecycle",
+      "method": "POST",
+      "path": "/platform-workloads/{workload_id}/lifecycle",
+      "scope": "scope:platform-workloads:write"
+    },
+    {
+      "operationId": "getPlatformWorkloadLogs",
+      "method": "GET",
+      "path": "/platform-workloads/{workload_id}/logs",
+      "scope": "scope:platform-workloads:read"
+    },
+    {
       "operationId": "readiness",
       "method": "GET",
       "path": "/readyz",
@@ -1308,6 +1350,25 @@
     "ObservabilityRangeQueryResponse",
     "PasswordLoginRequest",
     "PlatformPasswordLoginRequest",
+    "PlatformWorkload",
+    "PlatformWorkloadAcceleratorCapability",
+    "PlatformWorkloadAcceleratorResources",
+    "PlatformWorkloadArtifact",
+    "PlatformWorkloadCapabilities",
+    "PlatformWorkloadCreateRequest",
+    "PlatformWorkloadHealthCheck",
+    "PlatformWorkloadLifecycleRequest",
+    "PlatformWorkloadLogEntry",
+    "PlatformWorkloadLogListResponse",
+    "PlatformWorkloadMetadata",
+    "PlatformWorkloadNetwork",
+    "PlatformWorkloadPort",
+    "PlatformWorkloadResources",
+    "PlatformWorkloadRole",
+    "PlatformWorkloadScheduling",
+    "PlatformWorkloadSecretBinding",
+    "PlatformWorkloadTopology",
+    "PlatformWorkloadUpdateRequest",
     "PutEmailSmtpConfigRequest",
     "PutEmailSubscriptionsRequest",
     "Quota",
@@ -1465,6 +1526,9 @@
     "uploadStorageObject",
     "createObservabilityAlertRule",
     "updateObservabilityAlertRule",
+    "createPlatformWorkload",
+    "updatePlatformWorkload",
+    "applyPlatformWorkloadLifecycle",
     "createRegistryProject",
     "createRegistryProjectPullSecret",
     "setRegistryRepositoryPermission",
@@ -1508,6 +1572,7 @@
     "listNetworkVPCs",
     "listStorageObjects",
     "listObservabilityAlertRules",
+    "getPlatformWorkloadLogs",
     "listRegistryImages",
     "listRegistryProjects",
     "listRegistryRepositories",

@@ -210,6 +210,119 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/platform-workload-capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询平台工作负载能力
+         * @description 仅授权平台服务身份可用。返回 provider-neutral 的 topology、LWS/gang readiness 和 GPUSpec 准入提示；
+         *     响应不是资源预留，最终创建仍由 Core 原子准入。普通租户 token/API key 即使具有同名 tenant scope 也返回 403。
+         */
+        get: operations["getPlatformWorkloadCapabilities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/platform-workloads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 创建平台内部工作负载
+         * @description 仅授权平台服务身份可用。请求表达通用容器、资源、拓扑、网络、artifact 和 secret binding 意图；
+         *     禁止提交 Kubernetes、LWS、Volcano 或推理业务对象。AsyncTask.resource_id 在接收时即确定。
+         */
+        post: operations["createPlatformWorkload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/platform-workloads/{workload_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询平台内部工作负载
+         * @description 仅授权平台服务身份可用。跨租户资源返回 404。internal_endpoint 仅在当前服务身份具有 read scope 时返回，
+         *     且只表示当前 generation 的 ClusterIP endpoint。
+         */
+        get: operations["getPlatformWorkload"];
+        put?: never;
+        post?: never;
+        /**
+         * 删除平台内部工作负载
+         * @description 删除 provider runtime、PlatformWorkload 资源和内部 endpoint；内部 tombstone 可继续用于幂等清理与审计。
+         */
+        delete: operations["deletePlatformWorkload"];
+        options?: never;
+        head?: never;
+        /**
+         * 修改平台内部工作负载副本数
+         * @description P0 只允许修改 single_node 独立副本数。leader_worker 固定 replicas=1；资源、镜像、topology、network、
+         *     artifact、secret 和 profile 均不可通过 PATCH 修改。
+         */
+        patch: operations["updatePlatformWorkload"];
+        trace?: never;
+    };
+    "/platform-workloads/{workload_id}/lifecycle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 执行平台内部工作负载生命周期动作
+         * @description stop 删除 provider 侧 Deployment/LWS、Service 和 PodGroup并释放计算资源，但保留 PlatformWorkload ID 与 applied spec；
+         *     start 在同一 workload ID 下重建 provider runtime；restart 不修改当前 generation 的规格。
+         */
+        post: operations["applyPlatformWorkloadLifecycle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/platform-workloads/{workload_id}/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询平台内部工作负载日志
+         * @description 返回规范化、分页并脱敏的 runtime 日志；不暴露 Pod UID、Secret、Authorization 或临时对象 URL。
+         */
+        get: operations["getPlatformWorkloadLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/instances": {
         parameters: {
             query?: never;
@@ -2948,9 +3061,9 @@ export interface components {
              * @example model.import
              * @enum {string}
              */
-            task_type: "model.import" | "kb.parse" | "kb.index" | "inference.deploy" | "volume.snapshot.create" | "volume.expand" | "volume.mount" | "volume.unmount" | "volume.create_from_snapshot" | "filesystem.expand" | "filesystem.mount_target.create" | "filesystem.mount" | "filesystem.unmount" | "vector_store.index.rebuild" | "vector_store.document.insert" | "sandbox.checkpoint.create" | "sandbox.checkpoint.restore" | "sandbox.code_run.create";
+            task_type: "model.import" | "kb.parse" | "kb.index" | "inference.deploy" | "platform_workload.create" | "platform_workload.scale" | "platform_workload.start" | "platform_workload.stop" | "platform_workload.restart" | "platform_workload.delete" | "volume.snapshot.create" | "volume.expand" | "volume.mount" | "volume.unmount" | "volume.create_from_snapshot" | "filesystem.expand" | "filesystem.mount_target.create" | "filesystem.mount" | "filesystem.unmount" | "vector_store.index.rebuild" | "vector_store.document.insert" | "sandbox.checkpoint.create" | "sandbox.checkpoint.restore" | "sandbox.code_run.create";
             /** @enum {string|null} */
-            resource_type?: "inference_service" | "kb_document" | "model_version" | "volume_snapshot" | "volume" | "filesystem" | "filesystem_mount_target" | "vector_store" | "sandbox_checkpoint" | "sandbox_code_run" | null;
+            resource_type?: "inference_service" | "platform_workload" | "kb_document" | "model_version" | "volume_snapshot" | "volume" | "filesystem" | "filesystem_mount_target" | "vector_store" | "sandbox_checkpoint" | "sandbox_code_run" | null;
             /** Format: uuid */
             resource_id?: string | null;
             /** @enum {string} */
@@ -2966,6 +3079,251 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             completed_at?: string | null;
+        };
+        PlatformWorkloadAcceleratorCapability: {
+            /** @description Core GPUSpec ID；只表达资源形态，不表达租户配额。 */
+            spec_id: string;
+            /** @description 当前是否允许用于新的 PlatformWorkload 准入。 */
+            available: boolean;
+            /** @description 能力查询时单节点最大可准入数量；这是提示，不是资源预留。 */
+            max_single_node_count: number;
+        };
+        PlatformWorkloadCapabilities: {
+            supported_topology_modes: ("single_node" | "leader_worker")[];
+            /** @description LeaderWorkerSet CRD 与 controller 是否满足准入前置条件。 */
+            leader_worker_set_ready: boolean;
+            /** @description gang scheduler、PodGroup CRD/controller 与 inference queue 是否就绪。 */
+            gang_scheduling_ready: boolean;
+            supported_topology_profiles?: {
+                id: string;
+                version: string;
+                /** @enum {string} */
+                mode: "single_node" | "leader_worker";
+            }[];
+            accelerator_specs: components["schemas"]["PlatformWorkloadAcceleratorCapability"][];
+        };
+        PlatformWorkloadAcceleratorResources: {
+            /** @description Core GPUSpec ID。P0 只准入已通过 live gate 的整卡 GPU 规格。 */
+            spec_id: string;
+            /** @description 当前 Pod role 或单节点副本申请的 accelerator 数量。 */
+            count: number;
+        };
+        PlatformWorkloadResources: {
+            /** @description Kubernetes quantity 语义的 CPU request，例如 4 或 4000m。 */
+            cpu: string;
+            /** @description Kubernetes quantity 语义的内存 request，例如 16Gi。 */
+            memory: string;
+            accelerator?: components["schemas"]["PlatformWorkloadAcceleratorResources"];
+        };
+        PlatformWorkloadRole: {
+            /**
+             * @description role Pod 数；leader 固定为 1，workers 必须显式给出。
+             * @default 1
+             */
+            count: number;
+            resources: components["schemas"]["PlatformWorkloadResources"];
+        };
+        /**
+         * @description single_node 不得提交 leader/workers。leader_worker 必须同时提交 leader/workers，leader.count 必须为 1；
+         *     P0 leader_worker 只接受顶层 replicas=1。Core 从 role resources 派生 LWS 与一个 PodGroup，调用方不能提交原生字段。
+         */
+        PlatformWorkloadTopology: {
+            /** @enum {string} */
+            mode: "single_node" | "leader_worker";
+            /** @description Core admission allowlist 中的通用 Pod 拓扑 profile ID。 */
+            profile_id: string;
+            profile_version: string;
+            leader?: components["schemas"]["PlatformWorkloadRole"];
+            workers?: components["schemas"]["PlatformWorkloadRole"];
+        } & (unknown & unknown);
+        PlatformWorkloadScheduling: {
+            /**
+             * @description P0 固定映射到 Core 管理的 inference 调度队列，调用方不提交 provider queue 名。
+             * @enum {string}
+             */
+            queue_class: "inference";
+            /** @description single_node 固定 false；leader_worker 固定 true。 */
+            gang: boolean;
+        };
+        PlatformWorkloadPort: {
+            name: string;
+            port: number;
+        };
+        PlatformWorkloadNetwork: {
+            /**
+             * @description 只允许 ClusterIP；不创建 Ingress、NodePort 或 LoadBalancer。
+             * @enum {string}
+             */
+            exposure: "cluster_internal";
+            ports: components["schemas"]["PlatformWorkloadPort"][];
+        };
+        PlatformWorkloadArtifact: {
+            /** @description Core 可解析的租户内 artifact/object opaque reference。 */
+            object_ref: string;
+            mount_path: string;
+        };
+        PlatformWorkloadSecretBinding: {
+            /** @description Core Secret reference；响应和日志不得回显明文。 */
+            secret_ref: string;
+            mount_path: string;
+        };
+        PlatformWorkloadHealthCheck: {
+            /** @enum {string} */
+            protocol: "http";
+            path: string;
+            port_name: string;
+        };
+        PlatformWorkloadMetadata: {
+            /** @description 调用服务提供的 opaque correlation reference；真正 provider owner 始终是 Core PlatformWorkload。 */
+            owner_ref: string;
+            /** @description 仅允许非保留 label；ani.* 保留键由 Core 写入。 */
+            labels?: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * @example {
+         *       "idempotency_key": "1df72d71-9d49-46c4-a48a-52bb37b082ab",
+         *       "name": "inference-cpu-example",
+         *       "workload_class": "inference",
+         *       "runtime_kind": "container",
+         *       "image_ref": "registry.ani.internal/platform/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         *       "command": [
+         *         "/opt/platform-runtime/serve"
+         *       ],
+         *       "args": [
+         *         "--listen",
+         *         "0.0.0.0:8000",
+         *         "--artifact-path",
+         *         "/models"
+         *       ],
+         *       "replicas": 1,
+         *       "resources": {
+         *         "cpu": "4",
+         *         "memory": "16Gi"
+         *       },
+         *       "topology": {
+         *         "mode": "single_node",
+         *         "profile_id": "container-single-node",
+         *         "profile_version": "v1"
+         *       },
+         *       "scheduling": {
+         *         "queue_class": "inference",
+         *         "gang": false
+         *       },
+         *       "network": {
+         *         "exposure": "cluster_internal",
+         *         "ports": [
+         *           {
+         *             "name": "http",
+         *             "port": 8000
+         *           }
+         *         ]
+         *       },
+         *       "artifacts": [
+         *         {
+         *           "object_ref": "object://tenant-artifact/example",
+         *           "mount_path": "/models"
+         *         }
+         *       ],
+         *       "health_check": {
+         *         "protocol": "http",
+         *         "path": "/health",
+         *         "port_name": "http"
+         *       },
+         *       "metadata": {
+         *         "owner_ref": "05f6f46f-3db8-4551-8497-c46debb4be22",
+         *         "labels": {
+         *           "services.ani.io/inference-service-id": "05f6f46f-3db8-4551-8497-c46debb4be22"
+         *         }
+         *       }
+         *     }
+         */
+        PlatformWorkloadCreateRequest: {
+            /** Format: uuid */
+            idempotency_key: string;
+            name: string;
+            /**
+             * @description 通用调度分类；不携带模型、引擎或 Services 业务状态。
+             * @enum {string}
+             */
+            workload_class: "inference";
+            /** @enum {string} */
+            runtime_kind: "container";
+            /** @description 必须是批准 registry 中的 digest-pinned image；tag 和 latest 必须拒绝。 */
+            image_ref: string;
+            /** @description 必须匹配 workload_class + topology profile 的 Core admission allowlist。 */
+            command: string[];
+            args?: string[];
+            /** @description single_node 表示 Pod 副本；leader_worker 表示 LWS group，P0 只接受 1。 */
+            replicas: number;
+            resources: components["schemas"]["PlatformWorkloadResources"];
+            topology: components["schemas"]["PlatformWorkloadTopology"];
+            scheduling: components["schemas"]["PlatformWorkloadScheduling"];
+            network: components["schemas"]["PlatformWorkloadNetwork"];
+            artifacts?: components["schemas"]["PlatformWorkloadArtifact"][];
+            secret_bindings?: components["schemas"]["PlatformWorkloadSecretBinding"][];
+            health_check: components["schemas"]["PlatformWorkloadHealthCheck"];
+            metadata: components["schemas"]["PlatformWorkloadMetadata"];
+        } & (unknown & unknown);
+        PlatformWorkloadUpdateRequest: {
+            /** Format: uuid */
+            idempotency_key: string;
+            /** @description P0 只允许修改 single_node 独立副本；leader_worker 固定为 1。 */
+            replicas: number;
+        };
+        PlatformWorkloadLifecycleRequest: {
+            /** Format: uuid */
+            idempotency_key: string;
+            /** @enum {string} */
+            action: "start" | "stop" | "restart";
+        };
+        PlatformWorkload: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            tenant_id: string;
+            name: string;
+            /** @enum {string} */
+            state: "pending" | "provisioning" | "running" | "starting" | "stopping" | "stopped" | "failed" | "deleting" | "deleted";
+            generation: number;
+            observed_generation: number;
+            /** @description Deployment 为 Pod 数；LeaderWorkerSet 为 group 数。 */
+            desired_replicas: number;
+            /** @description 与 desired_replicas 同单位；LeaderWorkerSet 直接投影 group 级 readyReplicas。 */
+            ready_replicas: number;
+            /** @enum {string} */
+            runtime_shape: "deployment" | "leader_worker_set";
+            topology_profile_id: string;
+            topology_profile_version: string;
+            /**
+             * Format: uri
+             * @description Only an authorized platform service identity may read this cluster-internal endpoint; never expose it through /instances or tenant-facing Services APIs.
+             */
+            internal_endpoint?: string | null;
+            reason?: string | null;
+            /** @description 脱敏后的诊断信息，不包含 provider 对象或凭据。 */
+            message?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PlatformWorkloadLogEntry: {
+            /** Format: date-time */
+            timestamp: string;
+            /** @enum {string} */
+            level: "debug" | "info" | "warn" | "error";
+            message: string;
+            /** @description 稳定的副本或 role 标识，不返回 Pod UID。 */
+            replica?: string | null;
+            container?: string | null;
+            /** @enum {string|null} */
+            stream?: "stdout" | "stderr" | null;
+        };
+        PlatformWorkloadLogListResponse: {
+            items: components["schemas"]["PlatformWorkloadLogEntry"][];
+            next_cursor?: string | null;
         };
         HealthCheck: {
             /** @enum {string} */
@@ -6067,6 +6425,220 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    getPlatformWorkloadCapabilities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 平台工作负载能力 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformWorkloadCapabilities"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    createPlatformWorkload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformWorkloadCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description 平台工作负载创建任务已接受 */
+            202: {
+                headers: {
+                    /** @description Core AsyncTask 查询 URL */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            /** @description 未批准镜像/profile、GPUSpec 不可用、资源不足或 topology/gang 前置条件不满足。 */
+            422: components["responses"]["PreconditionFailed"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getPlatformWorkload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 平台工作负载规范化状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformWorkload"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deletePlatformWorkload: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                workload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 删除任务已接受 */
+            202: {
+                headers: {
+                    /** @description Core AsyncTask 查询 URL */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updatePlatformWorkload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformWorkloadUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 副本伸缩任务已接受 */
+            202: {
+                headers: {
+                    /** @description Core AsyncTask 查询 URL */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["PreconditionFailed"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    applyPlatformWorkloadLifecycle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformWorkloadLifecycleRequest"];
+            };
+        };
+        responses: {
+            /** @description 生命周期任务已接受 */
+            202: {
+                headers: {
+                    /** @description Core AsyncTask 查询 URL */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["PreconditionFailed"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getPlatformWorkloadLogs: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string;
+                level?: "debug" | "info" | "warn" | "error";
+            };
+            header?: never;
+            path: {
+                workload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 平台工作负载日志 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformWorkloadLogListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listInstances: {

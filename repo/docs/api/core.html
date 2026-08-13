@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>192</dd></div>
-          <div><dt>Schemas</dt><dd>262</dd></div>
+          <div><dt>Operations</dt><dd>199</dd></div>
+          <div><dt>Schemas</dt><dd>281</dd></div>
         </dl>
       </section>
 
@@ -1337,6 +1337,62 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/platform-workload-capabilities</code></td>
+          <td><code>getPlatformWorkloadCapabilities</code></td>
+          <td>查询平台工作负载能力</td>
+          <td><code>scope:platform-workloads:read</code></td>
+          <td>200, 401, 403, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/platform-workloads</code></td>
+          <td><code>createPlatformWorkload</code></td>
+          <td>创建平台内部工作负载</td>
+          <td><code>scope:platform-workloads:write</code></td>
+          <td>202, 400, 401, 403, 409, 422, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/platform-workloads/{workload_id}</code></td>
+          <td><code>deletePlatformWorkload</code></td>
+          <td>删除平台内部工作负载</td>
+          <td><code>scope:platform-workloads:write</code></td>
+          <td>202, 401, 403, 404, 409, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/platform-workloads/{workload_id}</code></td>
+          <td><code>getPlatformWorkload</code></td>
+          <td>查询平台内部工作负载</td>
+          <td><code>scope:platform-workloads:read</code></td>
+          <td>200, 401, 403, 404, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-patch">PATCH</span></td>
+          <td><code>/platform-workloads/{workload_id}</code></td>
+          <td><code>updatePlatformWorkload</code></td>
+          <td>修改平台内部工作负载副本数</td>
+          <td><code>scope:platform-workloads:write</code></td>
+          <td>202, 400, 401, 403, 404, 409, 422, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/platform-workloads/{workload_id}/lifecycle</code></td>
+          <td><code>applyPlatformWorkloadLifecycle</code></td>
+          <td>执行平台内部工作负载生命周期动作</td>
+          <td><code>scope:platform-workloads:write</code></td>
+          <td>202, 400, 401, 403, 404, 409, 422, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/platform-workloads/{workload_id}/logs</code></td>
+          <td><code>getPlatformWorkloadLogs</code></td>
+          <td>查询平台内部工作负载日志</td>
+          <td><code>scope:platform-workloads:read</code></td>
+          <td>200, 400, 401, 403, 404, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/readyz</code></td>
           <td><code>readiness</code></td>
           <td>Readiness probe（服务就绪检查）</td>
@@ -1852,6 +1908,25 @@
         <li><code>ObservabilityRangeQueryResponse</code></li>
         <li><code>PasswordLoginRequest</code></li>
         <li><code>PlatformPasswordLoginRequest</code></li>
+        <li><code>PlatformWorkload</code></li>
+        <li><code>PlatformWorkloadAcceleratorCapability</code></li>
+        <li><code>PlatformWorkloadAcceleratorResources</code></li>
+        <li><code>PlatformWorkloadArtifact</code></li>
+        <li><code>PlatformWorkloadCapabilities</code></li>
+        <li><code>PlatformWorkloadCreateRequest</code></li>
+        <li><code>PlatformWorkloadHealthCheck</code></li>
+        <li><code>PlatformWorkloadLifecycleRequest</code></li>
+        <li><code>PlatformWorkloadLogEntry</code></li>
+        <li><code>PlatformWorkloadLogListResponse</code></li>
+        <li><code>PlatformWorkloadMetadata</code></li>
+        <li><code>PlatformWorkloadNetwork</code></li>
+        <li><code>PlatformWorkloadPort</code></li>
+        <li><code>PlatformWorkloadResources</code></li>
+        <li><code>PlatformWorkloadRole</code></li>
+        <li><code>PlatformWorkloadScheduling</code></li>
+        <li><code>PlatformWorkloadSecretBinding</code></li>
+        <li><code>PlatformWorkloadTopology</code></li>
+        <li><code>PlatformWorkloadUpdateRequest</code></li>
         <li><code>PutEmailSmtpConfigRequest</code></li>
         <li><code>PutEmailSubscriptionsRequest</code></li>
         <li><code>Quota</code></li>
