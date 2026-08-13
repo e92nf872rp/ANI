@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>192</dd></div>
-          <div><dt>Schemas</dt><dd>262</dd></div>
+          <div><dt>Operations</dt><dd>201</dd></div>
+          <div><dt>Schemas</dt><dd>272</dd></div>
         </dl>
       </section>
 
@@ -198,6 +198,22 @@
           <td>批量修改租户配额上限</td>
           <td><code>scope:quota:write</code></td>
           <td>200, 400, 401, 403, 404, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/admin/tenants/{tenant_id}/reservations</code></td>
+          <td><code>getTenantReservations</code></td>
+          <td>查询租户预留额度</td>
+          <td><code>scope:quota:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/admin/tenants/{tenant_id}/reservations</code></td>
+          <td><code>putTenantReservations</code></td>
+          <td>设置租户预留额度</td>
+          <td><code>scope:quota:write</code></td>
+          <td>200, 401, 403, 404, 422</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -544,6 +560,14 @@
           <td>200, 401, 403</td>
         </tr>
         <tr>
+          <td><span class="method method-patch">PATCH</span></td>
+          <td><code>/gpu-inventory/{device_id}</code></td>
+          <td><code>updateGPUDeviceStatus</code></td>
+          <td>翻转 GPU 设备状态</td>
+          <td><code>scope:gpu-inventory:write</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
           <td><span class="method method-get">GET</span></td>
           <td><code>/gpu-scheduling/queues</code></td>
           <td><code>listGPUSchedulingQueues</code></td>
@@ -590,6 +614,30 @@
           <td>查询可选 GPU 规格</td>
           <td><code>scope:gpu-inventory:read</code></td>
           <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/gpu-specs</code></td>
+          <td><code>createGPUSpec</code></td>
+          <td>创建 GPU 规格</td>
+          <td><code>scope:gpu-spec:write</code></td>
+          <td>201, 400, 401, 403, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/gpu-specs/availability</code></td>
+          <td><code>listGPUSpecAvailability</code></td>
+          <td>查询规格可用性</td>
+          <td><code>scope:gpu-spec:read</code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/gpu-specs/{spec_id}</code></td>
+          <td><code>deleteGPUSpec</code></td>
+          <td>删除 GPU 规格</td>
+          <td><code>scope:gpu-spec:write</code></td>
+          <td>204, 401, 403, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1337,6 +1385,22 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/quotas</code></td>
+          <td><code>listQuotas</code></td>
+          <td>BOSS 分页查询租户配额列表</td>
+          <td><code>scope:quota:read</code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/quotas/me</code></td>
+          <td><code>getMyQuota</code></td>
+          <td>查询当前租户配额</td>
+          <td><code>scope:quota:read</code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/readyz</code></td>
           <td><code>readiness</code></td>
           <td>Readiness probe（服务就绪检查）</td>
@@ -1446,6 +1510,14 @@
           <td>获取项目镜像扫描汇总</td>
           <td><code>scope:registry:read</code></td>
           <td>200, 400, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/reservations/me</code></td>
+          <td><code>getMyReservations</code></td>
+          <td>查询当前租户预留额度</td>
+          <td><code>scope:quota:read</code></td>
+          <td>200, 401, 403</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1766,6 +1838,7 @@
         <li><code>FilesystemMountTarget</code></li>
         <li><code>FilesystemMountTargetCreateRequest</code></li>
         <li><code>FilesystemMountTargetListResponse</code></li>
+        <li><code>GPUDeviceStatusUpdateRequest</code></li>
         <li><code>GPUInventoryListResponse</code></li>
         <li><code>GPUInventoryRecord</code></li>
         <li><code>GPUOccupancyStats</code></li>
@@ -1773,8 +1846,14 @@
         <li><code>GPUSchedulingQueueCreateRequest</code></li>
         <li><code>GPUSchedulingQueueListResponse</code></li>
         <li><code>GPUSchedulingQueueUpdateRequest</code></li>
+        <li><code>GPUSpec</code></li>
+        <li><code>GPUSpecAvailability</code></li>
+        <li><code>GPUSpecAvailabilityListResponse</code></li>
+        <li><code>GPUSpecCreateRequest</code></li>
         <li><code>GPUSpecListResponse</code></li>
+        <li><code>GPUSpecNodeAffinity</code></li>
         <li><code>GPUSpecSummary</code></li>
+        <li><code>GPUSpecVolcanoResources</code></li>
         <li><code>HealthCheck</code></li>
         <li><code>InstanceAccessSummary</code></li>
         <li><code>InstanceComputeSummary</code></li>
@@ -1859,6 +1938,7 @@
         <li><code>QuotaCreateRequest</code></li>
         <li><code>QuotaDeleteResponse</code></li>
         <li><code>QuotaItem</code></li>
+        <li><code>QuotaListResult</code></li>
         <li><code>QuotaMeta</code></li>
         <li><code>QuotaMetaListResponse</code></li>
         <li><code>QuotaUpdateItem</code></li>
@@ -1890,6 +1970,8 @@
         <li><code>RegistryRepositoryListResponse</code></li>
         <li><code>RegistryScanResult</code></li>
         <li><code>ReportTokenUsageRequest</code></li>
+        <li><code>ReservationPutRequest</code></li>
+        <li><code>ReservationView</code></li>
         <li><code>RevokeStatusResponse</code></li>
         <li><code>SandboxCheckpoint</code></li>
         <li><code>SandboxCheckpointActionRequest</code></li>
