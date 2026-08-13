@@ -5,6 +5,36 @@
   "serverURL": "https://{host}/api/v1",
   "operations": [
     {
+      "operationId": "listQuotaMeta",
+      "method": "GET",
+      "path": "/admin/quota-meta",
+      "scope": "scope:quota:read"
+    },
+    {
+      "operationId": "deleteTenantQuota",
+      "method": "DELETE",
+      "path": "/admin/tenants/{tenant_id}/quota",
+      "scope": "scope:quota:write"
+    },
+    {
+      "operationId": "getTenantQuota",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/quota",
+      "scope": "scope:quota:read"
+    },
+    {
+      "operationId": "createTenantQuota",
+      "method": "POST",
+      "path": "/admin/tenants/{tenant_id}/quota",
+      "scope": "scope:quota:write"
+    },
+    {
+      "operationId": "updateTenantQuota",
+      "method": "PUT",
+      "path": "/admin/tenants/{tenant_id}/quota",
+      "scope": "scope:quota:write"
+    },
+    {
       "operationId": "listAPIKeys",
       "method": "GET",
       "path": "/auth/api-keys",
@@ -1341,6 +1371,15 @@
     "PlatformWorkloadUpdateRequest",
     "PutEmailSmtpConfigRequest",
     "PutEmailSubscriptionsRequest",
+    "Quota",
+    "QuotaCreateItem",
+    "QuotaCreateRequest",
+    "QuotaDeleteResponse",
+    "QuotaItem",
+    "QuotaMeta",
+    "QuotaMetaListResponse",
+    "QuotaUpdateItem",
+    "QuotaUpdateRequest",
     "RefreshAccessTokenRequest",
     "RefreshAccessTokenResponse",
     "RegistryArtifact",
@@ -1553,9 +1592,14 @@
     "NOT_FOUND",
     "NOT_IMPLEMENTED",
     "PRECONDITION_FAILED",
+    "QUOTA_ALREADY_EXISTS",
+    "QUOTA_NOT_FOUND",
+    "QUOTA_RESOURCE_NOT_REGISTERED",
     "RATE_LIMIT_EXCEEDED",
+    "TENANT_NOT_FOUND",
     "UNAUTHORIZED",
     "UNAVAILABLE",
+    "VALIDATION_FAILED",
     "VECTOR_STORE_NOT_FOUND"
   ]
 }

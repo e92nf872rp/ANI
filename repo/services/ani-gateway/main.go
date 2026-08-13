@@ -22,7 +22,7 @@ func main() {
 	slog.SetDefault(logger)
 
 	h := server.Default(
-		server.WithHostPorts(":8080"),
+		server.WithHostPorts(gatewayListenAddr()),
 		server.WithExitWaitTime(5),
 	)
 
@@ -151,8 +151,27 @@ func main() {
 			"provider", strings.TrimSpace(os.Getenv("INSTANCE_OBSERVABILITY_PROVIDER")),
 		)
 	}
+	kbServiceClient, closeKBGRPC, err := newGatewayKBServiceClient(runtimeCtx, gatewayKBServiceRuntimeConfigFromEnv())
+	if err != nil {
+		logger.Error("failed to configure kb-service gRPC client", "err", err)
+		os.Exit(1)
+	}
+	if closeKBGRPC != nil {
+		defer closeKBGRPC()
+	}
+	if kbServiceClient != nil {
+		logger.Info("kb-service gRPC client configured",
+			"addr", strings.TrimSpace(os.Getenv("KB_SERVICE_GRPC_ADDR")),
+		)
+	}
 	middleware.StartAuditWorker()
 	middleware.Register(h, gatewayStore)
+	quotaAdminService, closeQuotaStore, err := newGatewayQuotaStore(runtimeCtx)
+	if err != nil {
+		logger.Error("failed to configure quota admin store", "err", err)
+		os.Exit(1)
+	}
+	defer closeQuotaStore()
 	var routeInstanceRuntime *router.InstanceRuntime
 	if instanceRuntime.Service != nil {
 		routeInstanceRuntime = &router.InstanceRuntime{
@@ -182,7 +201,10 @@ func main() {
 		KubernetesRESTClient:                  kubernetesRESTClient,
 		ObservabilityService:                  observabilityService,
 		EmailNotificationStore:                runtimeadapter.NewLocalEmailNotificationStore(),
+		KBServiceClient:                       kbServiceClient,
+		KBSSEConfig:                           newGatewaySSEConfig(gatewaySSERuntimeConfigFromEnv()),
 		AsyncTaskStore:                        instanceRuntime.AsyncTasks,
+		QuotaAdminService:                     quotaAdminService,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -237,4 +259,13 @@ func firstGatewayEnv(keys ...string) string {
 		}
 	}
 	return ""
+}
+
+// gatewayListenAddr returns the gateway listen address, defaulting to :8080.
+// GATEWAY_LISTEN_ADDR overrides it for local smoke runs / multi-instance tests.
+func gatewayListenAddr() string {
+	if addr := strings.TrimSpace(os.Getenv("GATEWAY_LISTEN_ADDR")); addr != "" {
+		return addr
+	}
+	return ":8080"
 }

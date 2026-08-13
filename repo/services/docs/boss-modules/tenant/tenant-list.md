@@ -22,7 +22,7 @@ Console [`tenant-management.md`](../../console-modules/tenant/tenant-management.
 - Core tenants CRUD **ADDED-TO-YAML**（`listTenants`/`createTenant`/`getTenant`/`updateTenant`）
 - **不得** 把 `Services GET/POST /api/v1/svc/tenant/members` 写成 BOSS 平台租户 CRUD
 - **不得** 自造 `/api/v1/boss/tenants` 或 `/api/v1/svc/tenants`
-- 平台写操作 POST/PATCH 须 `idempotency_key` + 平台 RBAC
+- 平台写操作 POST/PUT 须 `idempotency_key` + 平台 RBAC
 - 平台 RBAC 鉴权；**不得** 信任 body/query 中未授权的 `tenant_id` 越权
 - 统一错误结构：`{"code":"UPPER_SNAKE","message":"...","request_id":"..."}`
 - `422 PreconditionFailed` 仅 YAML 已声明 operation 可写冻结（§2.10）
@@ -59,7 +59,7 @@ Console [`tenant-management.md`](../../console-modules/tenant/tenant-management.
 └── 行内操作
     ├── 查看详情 → GET by id
     ├── 编辑配额 → tenant-quota-policy
-    ├── 停用 / 恢复 → PATCH status
+    ├── 停用 / 恢复 → PUT status
     └── 重置管理员 → tenant-admin
 ```
 
@@ -91,7 +91,7 @@ Console [`tenant-management.md`](../../console-modules/tenant/tenant-management.
 | 配额摘要列 | quota 内嵌或子资源 **待 YAML** | max/used GPU 等 | tenant-quota-policy |
 | 用量摘要列 | metering platform **待 YAML** | 可选轻量 KPI | tenant-usage-billing |
 | 新建向导 | POST /tenants **待 YAML** | `idempotency_key` 必填 | 详情页 |
-| 停用/恢复 | PATCH /tenants/{id} **待 YAML** | status 变更 | — |
+| 停用/恢复 | PUT /tenants/{id} **待 YAML** | status 变更 | — |
 | 边界说明 | 规划项 | Services members ≠ BOSS CRUD | tenant-management |
 
 ## BOSS 与 Console 分工
@@ -99,7 +99,7 @@ Console [`tenant-management.md`](../../console-modules/tenant/tenant-management.
 | 场景 | BOSS 租户列表 | Console 租户管理 |
 |---|---|---|
 | 创建客户租户 | ✅ 新建向导（待 YAML） | ❌ |
-| 停用/恢复租户 | ✅ PATCH status（待 YAML） | ❌ |
+| 停用/恢复租户 | ✅ PUT status（待 YAML） | ❌ |
 | 跨租户 list | ✅ | ❌ |
 | 重置 tenant-admin | ✅ → tenant-admin | ❌ |
 | 邀请普通成员 | ❌ | ✅ POST members |
@@ -113,7 +113,7 @@ Console [`tenant-management.md`](../../console-modules/tenant/tenant-management.
 | GET | `/api/v1/tenants` | `listTenants` | 平台 list · **ADDED-TO-YAML** |
 | POST | `/api/v1/tenants` | `createTenant` | 创建 · **ADDED-TO-YAML** |
 | GET | `/api/v1/tenants/{tenant_id}` | `getTenant` | 详情 · **ADDED-TO-YAML** |
-| PATCH | `/api/v1/tenants/{tenant_id}` | `updateTenant` | 更新 · **ADDED-TO-YAML** |
+| PUT | `/api/v1/tenants/{tenant_id}` | `updateTenant` | 更新 · **ADDED-TO-YAML** |
 
 | Services 参考（**非 BOSS 租户 CRUD**） | 路径 | operationId |
 |---|---|---|
@@ -128,14 +128,14 @@ Console [`tenant-management.md`](../../console-modules/tenant/tenant-management.
 
 ### 建议 TODO-YAML（非冻结）
 
-<!-- ADDED-TO-YAML: GET/POST /api/v1/tenants, GET/PATCH /api/v1/tenants/{tenant_id} -->
+<!-- ADDED-TO-YAML: GET/POST /api/v1/tenants, GET/PUT /api/v1/tenants/{tenant_id} -->
 
 | 建议能力 | 建议路径 | 归属 |
 |---|---|---|
 | 列出租户 | `GET /api/v1/tenants` | Core |
 | 创建租户 | `POST /api/v1/tenants` | Core |
 | 查询租户 | `GET /api/v1/tenants/{tenant_id}` | Core |
-| 更新状态/资料 | `PATCH /api/v1/tenants/{tenant_id}` | Core |
+| 更新状态/资料 | `PUT /api/v1/tenants/{tenant_id}` | Core |
 
 ## 字段级定义
 
@@ -241,14 +241,14 @@ Console [`tenant-management.md`](../../console-modules/tenant/tenant-management.
 | 新建租户 | ❌ | ✅ | ✅ | POST + 向导 |
 | 查看详情 | ✅ | ✅ | ✅ | GET by id |
 | 编辑配额 | ❌ | ✅ | ✅ | → quota-policy |
-| 停用 | ❌ | ✅ | ✅ | PATCH |
-| 恢复 | ❌ | ✅ | ✅ | PATCH |
+| 停用 | ❌ | ✅ | ✅ | PUT |
+| 恢复 | ❌ | ✅ | ✅ | PUT |
 | 重置管理员 | ❌ | ✅ | ✅ | → tenant-admin |
 | 硬删除 | ❌ | 待产品 | 待产品 | 默认无 UI |
 
 ## 删除前置校验与当前契约边界
 
-默认 **软删除**（`status=deleted`）via PATCH，**无**物理 DELETE UI。
+默认 **软删除**（`status=deleted`）via PUT，**无**物理 DELETE UI。
 
 若 YAML 合入 DELETE：
 
@@ -263,7 +263,7 @@ Console [`tenant-management.md`](../../console-modules/tenant/tenant-management.
 
 ### Core `/api/v1/tenants*`（**ADDED-TO-YAML**）
 
-<!-- TODO-YAML: GET/POST /api/v1/tenants, GET/PATCH /api/v1/tenants/{tenant_id} -->
+<!-- TODO-YAML: GET/POST /api/v1/tenants, GET/PUT /api/v1/tenants/{tenant_id} -->
 
 - 路径前缀须 **Core** `/api/v1/*`
 - **不得** 使用 `/api/v1/boss/tenants` 或 Services 前缀

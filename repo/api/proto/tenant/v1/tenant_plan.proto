@@ -1,0 +1,183 @@
+syntax = "proto3";
+
+package tenant.v1;
+
+import "common/v1/common.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+option go_package = "github.com/kubercloud/ani/pkg/generated/pb/tenant/v1;tenantv1";
+
+// TenantPlanService manages the BOSS quota-policy tenant plans.
+// Tenant plans are platform-level (admin) resources; the gateway (BOSS API)
+// handles auth/scope and calls this service over gRPC.
+service TenantPlanService {
+  // ListTenantPlans returns a cursor-paginated list of plans.
+  rpc ListTenantPlans(ListTenantPlansRequest) returns (ListTenantPlansResponse);
+  // CreateTenantPlan creates a plan with its quota dimensions.
+  rpc CreateTenantPlan(CreateTenantPlanRequest) returns (IdempotentResult);
+  // GetTenantPlan returns a plan by ID.
+  rpc GetTenantPlan(GetTenantPlanRequest) returns (TenantPlan);
+  // DeleteTenantPlan soft-deletes a plan (fails if tenants are bound).
+  rpc DeleteTenantPlan(DeleteTenantPlanRequest) returns (IdempotentResult);
+  // GetTenantPlanQuotaLimits returns the display views of a plan's quota limits.
+  rpc GetTenantPlanQuotaLimits(GetTenantPlanQuotaLimitsRequest) returns (GetTenantPlanQuotaLimitsResponse);
+  // UpdateTenantPlanQuotaLimits updates a plan's quota limits and syncs bound tenants.
+  rpc UpdateTenantPlanQuotaLimits(UpdateTenantPlanQuotaLimitsRequest) returns (IdempotentResult);
+  // ActivateTenantPlan publishes a plan (draft/disabled -> active).
+  rpc ActivateTenantPlan(ActivateTenantPlanRequest) returns (IdempotentResult);
+  // DisableTenantPlan disables a plan (active -> disabled).
+  rpc DisableTenantPlan(DisableTenantPlanRequest) returns (IdempotentResult);
+  // ListTenantPlanBoundTenants returns bound tenant summaries.
+  rpc ListTenantPlanBoundTenants(ListTenantPlanBoundTenantsRequest) returns (ListTenantPlanBoundTenantsResponse);
+  // ListTenantPlanAuditLogs returns paginated audit logs for a plan.
+  rpc ListTenantPlanAuditLogs(ListTenantPlanAuditLogsRequest) returns (ListTenantPlanAuditLogsResponse);
+}
+
+// TenantService manages tenant-plan binding (BindPlanQuota).
+service TenantService {
+  // BindPlanQuota binds a quota plan to a tenant and pushes effective quota to Core.
+  rpc BindPlanQuota(BindPlanQuotaRequest) returns (IdempotentResult);
+}
+
+// ── TenantPlan RPC request / response ────────────────────────────────────────
+
+message ListTenantPlansRequest {
+  string status  = 1;  // filter by status: draft | active | disabled; empty = all
+  string search  = 2;  // fuzzy match name
+  common.v1.CursorPageRequest page = 3;
+}
+
+message ListTenantPlansResponse {
+  repeated TenantPlan items = 1;
+  int64 total = 2;          // 满足筛选条件的总条数（用于前端分页）
+  string next_cursor = 3;   // 下一页游标；空字符串表示已无更多数据
+}
+
+message CreateTenantPlanRequest {
+  string code = 1;          // unique business code
+  string name = 2;          // plan name
+  string description = 3;   // optional
+  repeated PlanQuotaLimitInput quota_limits = 4; // optional dimension limits
+  string idempotency_key = 5;  // 幂等键（必传）
+}
+
+message GetTenantPlanRequest {
+  string plan_id = 1;
+}
+
+message DeleteTenantPlanRequest {
+  string plan_id = 1;
+}
+
+message GetTenantPlanQuotaLimitsRequest {
+  string plan_id = 1;
+}
+
+message GetTenantPlanQuotaLimitsResponse {
+  repeated PlanQuotaLimitView items = 1;
+}
+
+message UpdateTenantPlanQuotaLimitsRequest {
+  string plan_id = 1;
+  repeated PlanQuotaLimitInput items = 2; // total nil = use default_quota
+  string idempotency_key = 3;  // 幂等键（必传）
+}
+
+message ActivateTenantPlanRequest {
+  string plan_id = 1;
+  string idempotency_key = 2;  // 幂等键（必传）
+}
+
+message DisableTenantPlanRequest {
+  string plan_id = 1;
+  string idempotency_key = 2;  // 幂等键（必传）
+}
+
+message ListTenantPlanBoundTenantsRequest {
+  string plan_id = 1;
+}
+
+message ListTenantPlanBoundTenantsResponse {
+  repeated BoundTenant items = 1;
+}
+
+message ListTenantPlanAuditLogsRequest {
+  string plan_id = 1;
+  string action = 2;  // filter by action
+  string result = 3;  // success | failure; empty = all
+  common.v1.CursorPageRequest page = 4;
+}
+
+message ListTenantPlanAuditLogsResponse {
+  repeated AuditLog items = 1;
+  int64 total = 2;          // 满足筛选条件的总条数（用于前端分页）
+  string next_cursor = 3;   // 下一页游标；空字符串表示已无更多数据
+}
+
+// ── BindPlanQuota RPC request / response ─────────────────────────────────────
+
+message BindPlanQuotaRequest {
+  string tenant_id = 1;
+  string plan_id  = 2;
+  string idempotency_key = 3;  // 幂等键（必传）
+}
+
+// IdempotentResult is returned by all idempotent write RPCs.
+// 对齐 HTTP 层 IdempotentResult（{id, message}）。
+message IdempotentResult {
+  string id = 1;          // 资源 id（如 plan_id / tenant_id）
+  string message = 2;     // 操作结果消息（如 "tenant plan created"）
+}
+
+// ── Quota limit input / view ─────────────────────────────────────────────────
+
+// PlanQuotaLimitInput is a single quota dimension write input.
+// total omitted (nil) means "use the dimension default".
+message PlanQuotaLimitInput {
+  string resource_type = 1;
+  google.protobuf.Int64Value total = 2; // nil = use default_quota
+}
+
+// PlanQuotaLimitView is the display view; total is already COALESCE'd.
+message PlanQuotaLimitView {
+  string resource_type = 1;
+  string display_name  = 2;
+  string unit          = 3;
+  int64  total         = 4;
+}
+
+// ── Domain messages ──────────────────────────────────────────────────────────
+
+message TenantPlan {
+  string id = 1;
+  string code = 2;
+  string name = 3;
+  string description = 4;
+  string status = 5;             // draft | active | disabled
+  int64  tenant_count = 6;       // bound tenant count (computed)
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+message BoundTenant {
+  string id = 1;
+  string name = 2;
+  string display_name = 3;
+  string status = 4;             // active | frozen | disabled
+}
+
+message AuditLog {
+  string id = 1;
+  string tenant_id = 2;          // empty for platform-level ops
+  string user_id = 3;
+  string request_id = 4;
+  string action = 5;
+  string resource = 6;
+  string result = 7;             // success | failure
+  google.protobuf.Struct details = 8;  // 任意 JSON 对象，如 {plan_id, code, ...}
+  string ip_address = 9;
+  string user_agent = 10;
+  google.protobuf.Timestamp created_at = 11;
+}

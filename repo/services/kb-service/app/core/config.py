@@ -21,8 +21,10 @@ class Settings(BaseSettings):
     ani_gateway_internal_url: str = "http://ani-gateway.ani-system.svc.cluster.local:8080"
     core_api_base_path: str = "/api/v1"
 
-    # rag-engine gRPC (Query)
-    rag_engine_addr: str = "localhost:50054"
+    # rag-engine REST (Query). kb-service calls rag-engine's Query RPC over
+    # REST (POST /api/v1/kb/{kb_id}/query), so this must point at the
+    # rag-engine HTTP server (spec §2.1). Default: rag-engine REST on 8001.
+    rag_engine_addr: str = "localhost:8001"
 
     # NATS (outbox dispatch) — maps to env NATS_URL
     nats_url: str = "nats://localhost:4222"

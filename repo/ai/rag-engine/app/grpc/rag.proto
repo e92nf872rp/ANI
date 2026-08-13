@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package rag.v1;
+
+// rag-engine internal Query RPC (SPEC §4.1).
+//
+// Message shapes are intentionally identical to kb_service.proto
+// QueryRequest / QueryResponse / SourceChunk (same field numbers and types)
+// so kb-service can call rag-engine's Query RPC with the same payload it
+// receives from its own clients. Per SPEC §11.1 the rag-engine may define
+// an internal proto rather than importing kb_service.proto; this file is
+// that internal proto (kept in sync with kb_service.proto Query messages).
+
+option go_package = "github.com/kubercloud/ani/ai/rag-engine/app/generated/rag/v1;ragv1";
+
+service RagEngine {
+  // Query performs a synchronous RAG query and returns the answer + sources.
+  rpc Query(QueryRequest) returns (QueryResponse);
+}
+
+message QueryRequest {
+  string tenant_id        = 1;
+  string kb_id            = 2;
+  string question         = 3;
+  string session_id       = 4;   // optional; empty creates new session
+  string idempotency_key  = 5;   // prevents duplicate billing on retry
+  int32  top_k            = 6;   // override if nonzero
+  float  score_threshold  = 7;   // override if nonzero; negative disables
+  string inference_service_name = 8; // which vLLM service to use; "default" if empty
+  string retrieval_mode   = 9;   // vector | hybrid | keyword (empty = use KB default)
+}
+
+message QueryResponse {
+  string answer           = 1;
+  repeated SourceChunk sources = 2;
+  string session_id       = 3;
+  int32  input_tokens     = 4;
+  int32  output_tokens    = 5;
+}
+
+message SourceChunk {
+  string doc_id    = 1;
+  string file_name = 2;
+  int32  page      = 3;
+  string content   = 4;   // the cited passage
+  float  score     = 5;   // similarity score [0,1]
+}

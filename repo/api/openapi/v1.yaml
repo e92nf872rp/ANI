@@ -3667,6 +3667,95 @@ components:
         request_id: { type: string, description: "请求 ID（用于排障）" }
         sent_at:    { type: string, format: date-time, nullable: true }
 
+    # ── 配额管理（Core API v1，平台级配额管理）────────────────────────────────
+    QuotaCreateRequest:
+      type: object
+      description: "批量新建租户配额请求（POST /admin/tenants/{tenant_id}/quota）"
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/QuotaCreateItem' }
+
+    QuotaCreateItem:
+      type: object
+      description: "新建配额维度项；total 未提供或为 null 时取 resource_quota_meta.default_quota"
+      required: [resource_type]
+      properties:
+        resource_type: { type: string, description: "配额维度标识（需在 resource_quota_meta 已注册且 enabled=true）" }
+        total:          { type: integer, format: int64, nullable: true, minimum: 0, description: "配额上限；未提供或为 null 时取 resource_quota_meta.default_quota" }
+
+    QuotaUpdateRequest:
+      type: object
+      description: "批量修改租户配额上限请求（PUT /admin/tenants/{tenant_id}/quota）"
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/QuotaUpdateItem' }
+
+    QuotaUpdateItem:
+      type: object
+      description: "修改配额维度项；只改 total，不影响 used/reserved"
+      required: [resource_type, total]
+      properties:
+        resource_type: { type: string, description: "配额维度标识" }
+        total:          { type: integer, format: int64, minimum: 0, description: "新配额上限；允许低于当前 used（缩容，由服务端 GREATEST clamp 到 used+reserved）" }
+
+    Quota:
+      type: object
+      description: "租户配额视图（GET/POST/PUT 共用响应）"
+      required: [tenant_id, items]
+      properties:
+        tenant_id: { type: string, format: uuid, description: "租户 ID" }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/QuotaItem' }
+
+    QuotaItem:
+      type: object
+      description: "单维度配额项"
+      required: [resource_type, total, used, reserved]
+      properties:
+        resource_type: { type: string, description: "配额维度标识" }
+        total:         { type: integer, format: int64, description: "配额上限" }
+        used:          { type: integer, format: int64, description: "已实扣（已 Confirm）" }
+        reserved:      { type: integer, format: int64, description: "已预占（已 Try 未 Confirm/Cancel）" }
+        tightened:     { type: boolean, description: "PUT 缩容自动收紧标记（请求 total<used+reserved 时收紧为 used+reserved，置 true）；GET 响应中为零值 false" }
+        unit:          { type: string, description: "单位（来自 resource_quota_meta，GET 时返回）" }
+        display_name:  { type: string, description: "展示名称（来自 resource_quota_meta，GET 时返回）" }
+        is_discrete:   { type: boolean, description: "是否离散计数（来自 resource_quota_meta，当前统一为整数计数；GET 时返回）" }
+
+    QuotaDeleteResponse:
+      type: object
+      description: "删除租户配额响应（DELETE /admin/tenants/{tenant_id}/quota）"
+      required: [tenant_id, message]
+      properties:
+        tenant_id: { type: string, format: uuid, description: "租户 ID" }
+        message:   { type: string, example: "quota deleted", description: "操作结果描述" }
+
+    QuotaMetaListResponse:
+      type: object
+      description: "可用配额元数据列表（GET /admin/quota-meta）"
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/QuotaMeta' }
+
+    QuotaMeta:
+      type: object
+      description: "配额元数据（resource_quota_meta 只读视图）"
+      required: [resource_type, display_name, unit, default_quota, is_discrete]
+      properties:
+        resource_type:  { type: string, description: "配额维度标识" }
+        display_name:   { type: string, description: "展示名称" }
+        unit:           { type: string, description: "单位" }
+        default_quota:  { type: integer, format: int64, description: "默认上限（新建配额未提供或为 null 时兜底）" }
+        is_discrete:    { type: boolean, description: "是否离散计数（当前统一为整数计数）" }
+
   # 公共响应
   responses:
     Unauthorized:
@@ -3725,6 +3814,32 @@ components:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
     ServiceUnavailable:
       description: 依赖服务暂不可用（code=UNAVAILABLE）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    # ── 配额管理专用错误响应（SPEC §4.5 补充，引用 ErrorResponse schema）──────
+    TenantNotFound:
+      description: 租户不存在（code=TENANT_NOT_FOUND）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    QuotaNotFound:
+      description: 配额行不存在（code=QUOTA_NOT_FOUND）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    QuotaAlreadyExists:
+      description: "部分成功：存在已存在的配额维度被跳过（code=QUOTA_ALREADY_EXISTS），其余维度已正常创建"
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    QuotaResourceNotRegistered:
+      description: 资源类型未注册或已禁用（code=QUOTA_RESOURCE_NOT_REGISTERED）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    QuotaValidationFailed:
+      description: 参数校验失败（code=VALIDATION_FAILED）
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -8075,6 +8190,126 @@ paths:
           $ref: '#/components/responses/PreconditionFailed'
           description: "前置条件不满足（SMTP 未配置 / 无启用收件人 / 无凭据）"
 
+  # ── 配额管理（Core API v1，平台级配额管理，scope=platform）──────────────────
+  /admin/tenants/{tenant_id}/quota:
+    post:
+      operationId: createTenantQuota
+      summary: 批量新建租户配额
+      description: |
+        为指定租户初始化多个资源维度配额行（used/reserved 初始为 0）。
+        - items.resource_type 必须在 resource_quota_meta 已注册且 enabled=true
+        - items.total 未提供或为 null 时取 resource_quota_meta.default_quota
+        - 已存在的维度跳过（ON CONFLICT DO NOTHING），不阻断其余维度创建
+      tags: [QuotaAdmin]
+      x-ani-rbac-scope: "scope:quota:write"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 }, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuotaCreateRequest' }
+      responses:
+        "200":
+          description: 新建结果（含已存在跳过的维度）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Quota' }
+        "400": { $ref: '#/components/responses/QuotaValidationFailed' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/TenantNotFound' }
+        "409": { $ref: '#/components/responses/QuotaAlreadyExists' }
+        "422": { $ref: '#/components/responses/QuotaResourceNotRegistered' }
+    put:
+      operationId: updateTenantQuota
+      summary: 批量修改租户配额上限
+      description: |
+        只改 total，不影响 used/reserved。允许 total < used（缩容，已有资源继续运行，
+        仅阻止后续新建 Try → ErrQuotaExceeded）。缩容时服务端用 GREATEST(total, used+reserved)
+        clamp 到 used+reserved，并在返回的 items 中将 tightened 置 true。
+        维度行不存在返回 QUOTA_NOT_FOUND（需先调 createTenantQuota）。
+      tags: [QuotaAdmin]
+      x-ani-rbac-scope: "scope:quota:write"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 }, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuotaUpdateRequest' }
+      responses:
+        "200":
+          description: 修改结果（含 tightened 标记）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Quota' }
+        "400": { $ref: '#/components/responses/QuotaValidationFailed' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/QuotaNotFound' }
+        "422": { $ref: '#/components/responses/QuotaResourceNotRegistered' }
+    get:
+      operationId: getTenantQuota
+      summary: 查询租户配额
+      description: |
+        查询指定租户所有维度的 total/used/reserved + unit/display_name/is_discrete
+        （JOIN resource_quota_meta）。租户不存在返回 404 TENANT_NOT_FOUND；租户存在但
+        无配额行时返回空 items。
+      tags: [QuotaAdmin]
+      x-ani-rbac-scope: "scope:quota:read"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 租户配额视图
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Quota' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/TenantNotFound' }
+    delete:
+      operationId: deleteTenantQuota
+      summary: 删除租户所有配额
+      description: |
+        删除该租户所有 resource_quota 行 + resource_reservations 流水。
+        用于租户禁用/资源清理场景。由调用方保证此时无在用资源（本方法不强制守卫 used/reserved）。
+      tags: [QuotaAdmin]
+      x-ani-rbac-scope: "scope:quota:write"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 }, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
+      responses:
+        "200":
+          description: 删除结果
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuotaDeleteResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/TenantNotFound' }
+
+  /admin/quota-meta:
+    get:
+      operationId: listQuotaMeta
+      summary: 查询可用配额元数据
+      description: |
+        列出 resource_quota_meta 中 enabled=true 的所有维度，用于创建租户/套餐时
+        展示可选项（前端据此渲染配额维度表单）。只读查询，无分页需求。
+      tags: [QuotaAdmin]
+      x-ani-rbac-scope: "scope:quota:read"
+      responses:
+        "200":
+          description: 可用配额元数据列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuotaMetaListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
 # ── Tag 分组（Swagger UI 显示顺序）──────────────────────────────────────────
 tags:
   - { name: Health,         description: "健康检查（K8s liveness/readiness probe）" }
@@ -8100,3 +8335,4 @@ tags:
   - { name: Audit,          description: "审计日志" }
   - { name: Branding,       description: "平台品牌化配置" }
   - { name: Tasks,          description: "异步任务查询" }
+  - { name: QuotaAdmin,     description: "平台级配额管理（租户配额 CRUD + 配额元数据）" }

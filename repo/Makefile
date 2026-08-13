@@ -1028,13 +1028,8 @@ validate-services:
 	$(MAKE) validate-doc-entrypoints
 	@echo "→ 运行 Services model-service Go tests..."
 	$(GO_CACHE_ENV) go test ./services/model-service/... -v
-	@echo "→ 检查 RAG Python compile/test..."
+	@echo "→ 检查 RAG Python compile（运行级测试见 python-ci job，依赖完整 rag-engine requirements）..."
 	python -m compileall -q ai/rag-engine
-	@if [ -n "$$(find ai/rag-engine -type f \( -name 'test_*.py' -o -name '*_test.py' \) -print -quit)" ]; then \
-		python -m pytest ai/rag-engine -q; \
-	else \
-		echo "ℹ️  no RAG pytest files found under ai/rag-engine; compile check completed"; \
-	fi
 	@echo "→ 安装 Console npm dependencies from frontends/console/package-lock.json..."
 	npm --prefix frontends/console ci
 	@echo "→ 从 Services OpenAPI source 重新生成 Console API schema..."
