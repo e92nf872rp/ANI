@@ -41,8 +41,9 @@ Auth 边界：SPRINT13-AUTH-DEX-PRODUCTION-GATE / Auth/Dex production gate 已�
 完整批次：repo/development-records/README.md
 
 Inference PlatformWorkload API-first 增量：
-- INFERENCE-PLATFORM-WORKLOAD-CONTRACT-A：Core additive v1 契约已本地验证，待人工评审/独立契约 PR；只包含 `service-only + internal exposure` OpenAPI、专项测试和 Core SDK/API docs 生成物，部署层不得通过租户或公网 Ingress 发布。
-- 当前不包含 Gateway handler、port/adapter、PG 状态、Deployment/LWS、推理 runtime 或 live evidence；契约批准前不得进入实现批次。
+- INFERENCE-PLATFORM-WORKLOAD-CONTRACT-A：Core additive v1 契约已通过上游 PR #99 合入；包含 `service-only + internal exposure` OpenAPI、专项测试和 Core SDK/API docs 生成物，部署层不得通过租户或公网 Ingress 发布。
+- INFERENCE-SERVICE-CONTRACT-B：Services additive v1 契约已本地验证、待人工评审/独立契约 PR；包含统一 resources/可选 accelerator、model version、diagnostics/generation、PATCH/lifecycle/operation query、policies 501、内部 endpoint 隔离和 SDK/docs/Console 生成物。
+- 当前不包含 platform-workloads handler/port/adapter、inference-service PG/worker/reconciler、Deployment/LWS、推理 runtime 或 live evidence；Services 契约批准前不得进入阶段 B.1/C 实现批次。
 
 Sprint 12 摘要：
 - CORE-SVC-SUPPORT-OBSERVABILITY-A：实例观测、GPU inventory/occupancy、Sandbox catalog；Tier1 local profile。

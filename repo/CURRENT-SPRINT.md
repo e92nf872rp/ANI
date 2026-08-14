@@ -12,7 +12,7 @@
 
 > **STORAGE-ASYNC-CORRECTNESS-A（2026-08-03）：** live passed。Core v1 Vector 文档写入保持 `202 + VectorStoreDocumentInsertResponse`，补齐 `Location` 和 `vector_store.document.insert`；任务写入 PG，Gateway rollout 后原 task ID 仍返回 200；evidence：`development-records/live-evidence/storage-async-vector-task-live-20260803.json`。
 
-> **INFERENCE-PLATFORM-WORKLOAD-CONTRACT-A（2026-08-13）：** Core `platform-workloads` additive v1 契约已完成本地验证，等待人工评审与独立契约 PR。冻结 7 个 `service-only + internal exposure` operation、统一 AsyncTask、CPU single-node 示例、可选 GPUSpec accelerator、leader-worker role topology 和 ClusterIP-only internal endpoint；部署层不得通过租户或公网 Ingress 发布；当前没有 handler/port/adapter/runtime，也没有推理 live evidence，不得标记 runtime ready。
+> **INFERENCE API-FIRST（2026-08-14）：** 阶段 A Core `platform-workloads` additive v1 契约已通过上游 PR #99 合入；阶段 B `INFERENCE-SERVICE-CONTRACT-B` 已完成本地契约验证，待人工评审与独立 Services 契约 PR。Services 新增统一 resources/可选 accelerator、model version、diagnostics/generation、PATCH/lifecycle/operation query 与 policies 501 语义，且租户响应不包含 Core internal endpoint。当前仍没有 platform-workloads handler/port/adapter、inference-service PG/worker/reconciler、Deployment/LWS runtime 或推理 live evidence，不得标记 control-plane/runtime ready。
 
 > **Sprint 13（当前活跃冲刺，2026-06-19 起）：** Core real provider 与 live gate 收敛。前置 Sprint 12 已闭合 19 个 Core handler + 2 个 422；Sprint 13 不重写 Core handler，不把 Services 业务资源回流 Core API，而是在既有 `pkg/ports` / `pkg/adapters` / Gateway handler 边界接入真实组件，并形成可复跑 live gate 与 evidence JSON。历史冻结原因和历史结论仍保留在旧批次记录中，但不是当前 PR 规则。计划见 [`development-records/sprint13-real-provider-readiness-plan.md`](development-records/sprint13-real-provider-readiness-plan.md)。
 

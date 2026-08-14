@@ -968,6 +968,8 @@ validate-services-contract:
 	@echo "→ 校验 Services OpenAPI 语义门禁..."
 	python scripts/validate_services_contract_test.py
 	python scripts/validate_services_contract.py
+	python scripts/validate_inference_service_contract_test.py
+	python scripts/validate_inference_service_contract.py
 	@echo "✅ Services semantic contract valid"
 
 validate-openapi-spec:

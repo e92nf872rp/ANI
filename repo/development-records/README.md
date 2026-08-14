@@ -17,7 +17,8 @@
 
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
-| INFERENCE-PLATFORM-WORKLOAD-CONTRACT-A | Core `platform-workloads` additive v1 契约本地验证完成、待人工评审/独立 PR：7 个 `service-only + internal exposure` operation、统一 AsyncTask、CPU single-node 示例、可选 GPUSpec accelerator、leader-worker role topology、ClusterIP-only internal endpoint；部署层不得通过租户或公网 Ingress 发布；不含 handler/port/adapter/runtime/live evidence | inference-platform-workload-contract-a.md |
+| INFERENCE-PLATFORM-WORKLOAD-CONTRACT-A | Core `platform-workloads` additive v1 契约已通过上游 PR #99 合入：7 个 `service-only + internal exposure` operation、统一 AsyncTask、CPU single-node 示例、可选 GPUSpec accelerator、leader-worker role topology、ClusterIP-only internal endpoint；部署层不得通过租户或公网 Ingress 发布；仍不含 handler/port/adapter/runtime/live evidence | inference-platform-workload-contract-a.md |
+| INFERENCE-SERVICE-CONTRACT-B | Services `InferenceService` additive v1 契约本地验证完成、待人工评审/独立 PR：统一 resources/可选 accelerator、model version、diagnostics/generation、PATCH/lifecycle/operation query、policies 501、内部 endpoint 隔离、旧 endpoint schema deprecated；不含 handler/PG/worker/reconciler/runtime/live evidence | inference-service-contract-b.md |
 
 ### Core Quota Service（2026-08）
 

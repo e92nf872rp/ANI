@@ -55,6 +55,43 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
+    InferenceBadRequest:
+      description: 推理服务请求参数或字段组合非法（code=INVALID_ARGUMENT）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    InferenceConflict:
+      description: 推理服务名称、幂等键或活动操作冲突
+      x-ani-error-codes: [NAME_CONFLICT, IDEMPOTENCY_CONFLICT, OPERATION_IN_PROGRESS]
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    InferenceUnprocessableEntity:
+      description: 推理服务前置条件不满足；code 为 MODEL_NOT_READY、MODEL_INCOMPATIBLE、ACCELERATOR_SPEC_UNAVAILABLE、INSUFFICIENT_CAPACITY、UNSUPPORTED_TOPOLOGY 或 INVALID_STATE_TRANSITION
+      x-ani-error-codes: [MODEL_NOT_READY, MODEL_INCOMPATIBLE, ACCELERATOR_SPEC_UNAVAILABLE, INSUFFICIENT_CAPACITY, UNSUPPORTED_TOPOLOGY, INVALID_STATE_TRANSITION]
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    FeatureNotAvailable:
+      description: 当前版本尚未提供该能力（code=FEATURE_NOT_AVAILABLE）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    ServiceUnavailable:
+      description: 推理服务依赖暂时不可用（code=DEPENDENCY_UNAVAILABLE）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    RuntimeError:
+      description: 推理 runtime 返回异常（code=RUNTIME_ERROR）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    RuntimeTimeout:
+      description: 推理 runtime 调用超时（code=RUNTIME_TIMEOUT）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
 
   schemas:
     ErrorResponse:
@@ -118,16 +155,82 @@ components:
       type: object
       required: [id, name, model, status, created_at]
       properties:
-        id:                { type: string, format: uuid }
-        name:              { type: string }
-        model:             { type: string }
-        replicas:          { type: integer, default: 1 }
-        gpu_type:          { type: string, nullable: true }
-        gpu_count_per_pod: { type: integer, default: 1 }
-        max_concurrency:   { type: integer, default: 8 }
-        status:            { type: string, enum: [pending, deploying, running, stopping, stopped, failed] }
-        endpoint_url:      { type: string, nullable: true }
-        created_at:        { type: string, format: date-time }
+        id:                    { type: string, format: uuid }
+        name:                  { type: string }
+        model:                 { type: string, description: 创建时冻结的模型名称与版本展示快照 }
+        model_version_id:      { type: string, format: uuid, description: 实际部署的不可变模型版本 }
+        served_model_name:     { type: string, description: 集群内 OpenAI-compatible 请求使用的 model 值，不代表公网路由 }
+        replicas:              { type: integer, minimum: 1, default: 1 }
+        ready_replicas:        { type: integer, minimum: 0, default: 0 }
+        resources:             { $ref: '#/components/schemas/InferenceServiceResources' }
+        placement_mode:        { type: string, enum: [auto, single_node, multi_node], default: auto }
+        gpu_type:              { type: string, nullable: true, deprecated: true, description: v1 兼容投影；新客户端使用 resources.accelerator.spec_id }
+        gpu_count_per_pod:     { type: integer, default: 1, deprecated: true, description: v1 兼容投影；不再是资源规格权威字段 }
+        max_concurrency:       { type: integer, default: 8, deprecated: true, description: v1 兼容投影；P0 不执行 }
+        status:                { type: string, enum: [pending, deploying, running, stopping, stopped, failed] }
+        status_reason:         { type: string, nullable: true, description: 稳定的机器可读状态原因码 }
+        status_message:        { type: string, nullable: true, description: 脱敏的人类可读状态说明 }
+        generation:            { type: integer, minimum: 1 }
+        observed_generation:   { type: integer, minimum: 0 }
+        current_operation_id:  { type: string, format: uuid, nullable: true }
+        invocation_url:        { type: string, format: uri, nullable: true, description: P0 未建设调用网关，固定返回 null }
+        endpoint_url:          { type: string, format: uri, nullable: true, deprecated: true, description: v1 兼容字段；P0 固定返回 null，不得返回 ClusterIP 地址 }
+        created_at:            { type: string, format: date-time }
+        updated_at:            { type: string, format: date-time, nullable: true }
+
+    InferenceServiceAccelerator:
+      type: object
+      required: [spec_id, count_per_replica]
+      properties:
+        spec_id:
+          type: string
+          minLength: 1
+          description: Core GPUSpec ID；P0 仅接受通过 live gate 的整卡 GPU 规格
+        count_per_replica:
+          type: integer
+          minimum: 1
+          description: 每个独立副本或 leader-worker group 申请的 accelerator 总数
+
+    InferenceServiceResources:
+      type: object
+      required: [cpu, memory]
+      properties:
+        cpu: { type: string, minLength: 1, description: 每个单节点 Pod 或跨节点 group 的 CPU 预算 }
+        memory: { type: string, minLength: 1, description: 每个单节点 Pod 或跨节点 group 的内存预算 }
+        accelerator:
+          $ref: '#/components/schemas/InferenceServiceAccelerator'
+
+    CreateInferenceServiceRequest:
+      type: object
+      required: [idempotency_key, name, model]
+      properties:
+        idempotency_key: { type: string, format: uuid }
+        name: { type: string }
+        model: { type: string, description: v1 兼容必填字段；新客户端传稳定模型版本 UUID }
+        model_version_id: { type: string, format: uuid, description: 与 model 指向同一不可变版本 }
+        served_model_name: { type: string, minLength: 1, description: 默认使用服务 name，创建后不可变 }
+        replicas: { type: integer, description: 省略时服务按 1 个副本处理 }
+        resources: { $ref: '#/components/schemas/InferenceServiceResources' }
+        placement_mode: { type: string, enum: [auto, single_node, multi_node], description: 省略时服务按 auto 处理 }
+        gpu_type: { type: string, deprecated: true, description: v1 兼容输入；新客户端不得发送 }
+        gpu_count_per_pod: { type: integer, deprecated: true, description: v1 兼容输入；单独出现时不得推断为 GPU }
+        max_concurrency: { type: integer, deprecated: true, description: v1 兼容输入；P0 不执行 }
+
+    UpdateInferenceServiceRequest:
+      type: object
+      required: [idempotency_key, replicas]
+      additionalProperties: false
+      properties:
+        idempotency_key: { type: string, format: uuid }
+        replicas: { type: integer, minimum: 1 }
+
+    InferenceServiceLifecycleRequest:
+      type: object
+      required: [idempotency_key, action]
+      additionalProperties: false
+      properties:
+        idempotency_key: { type: string, format: uuid }
+        action: { type: string, enum: [start, stop, restart] }
 
     CreateModelRequest:
       type: object
@@ -140,6 +243,8 @@ components:
 
     InferenceEndpoint:
       type: object
+      deprecated: true
+      description: 遗留且未绑定 path 的 schema；不是第二种推理产品资源，新实现必须使用 InferenceService
       required: [id, name, model_version_id, status, created_at]
       properties:
         id:               { type: string, format: uuid }
@@ -153,6 +258,8 @@ components:
 
     CreateInferenceEndpointRequest:
       type: object
+      deprecated: true
+      description: 遗留且未绑定 path 的 schema；新客户端不得引用，后续主版本删除
       required: [idempotency_key, name, model_version_id]
       properties:
         idempotency_key:  { type: string, format: uuid }
@@ -1114,6 +1221,7 @@ paths:
       operationId: listInferenceServices
       summary: 获取推理服务列表
       tags: [InferenceServices]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
       responses:
         "200":
           description: 推理服务列表
@@ -1122,36 +1230,40 @@ paths:
               schema:
                 properties:
                   items: { type: array, items: { $ref: '#/components/schemas/InferenceService' } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
     post:
       operationId: createInferenceService
       summary: 部署推理服务
       tags: [InferenceServices]
+      description: 接受后立即返回 pending 资源；current_operation_id 用于查询持久化 operation，P0 不返回可调用 URL。
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-async-task-types: [inference_service.create]
+      x-ani-async-resource-type: inference_service
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              required: [idempotency_key, name, model]
-              properties:
-                idempotency_key:   { type: string, format: uuid }
-                name:              { type: string }
-                model:             { type: string }
-                replicas:          { type: integer, default: 1 }
-                gpu_type:          { type: string }
-                gpu_count_per_pod: { type: integer, default: 1 }
-                max_concurrency:   { type: integer, default: 8 }
+            schema: { $ref: '#/components/schemas/CreateInferenceServiceRequest' }
       responses:
         "202":
           description: 推理服务部署已提交
           content:
             application/json:
               schema: { $ref: '#/components/schemas/InferenceService' }
+        "400": { $ref: '#/components/responses/InferenceBadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "409": { $ref: '#/components/responses/InferenceConflict' }
+        "422": { $ref: '#/components/responses/InferenceUnprocessableEntity' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
 
   /inference-services/{service_id}:
     get:
       operationId: getInferenceService
       summary: 获取推理服务详情
       tags: [InferenceServices]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
       parameters:
         - { name: service_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -1160,16 +1272,103 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/InferenceService' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateInferenceService
+      summary: 修改推理服务副本数
+      description: P0 只允许修改独立副本数；multi_node 固定 replicas=1，其他资源和 placement 均不可变。
+      tags: [InferenceServices]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-async-task-types: [inference_service.scale]
+      x-ani-async-resource-type: inference_service
+      parameters:
+        - { name: service_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateInferenceServiceRequest' }
+      responses:
+        "202":
+          description: 推理服务伸缩操作已接受
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "400": { $ref: '#/components/responses/InferenceBadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/InferenceConflict' }
+        "422": { $ref: '#/components/responses/InferenceUnprocessableEntity' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
     delete:
       operationId: deleteInferenceService
       summary: 停止并删除推理服务
       tags: [InferenceServices]
+      description: 为保持 v1 兼容不新增必填幂等键；服务按 service_id + desired_state=deleted 去重。
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-async-task-types: [inference_service.delete]
+      x-ani-async-resource-type: inference_service
       parameters:
         - { name: service_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         "202":
           description: 停止任务已提交
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/InferenceConflict' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /inference-services/{service_id}/lifecycle:
+    post:
+      operationId: applyInferenceServiceLifecycle
+      summary: 执行推理服务生命周期动作
+      description: start、stop 和 restart 均由持久化 operation 与 reconciler 异步收敛。
+      tags: [InferenceServices]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-async-task-types: [inference_service.start, inference_service.stop, inference_service.restart]
+      x-ani-async-resource-type: inference_service
+      parameters:
+        - { name: service_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InferenceServiceLifecycleRequest' }
+      responses:
+        "202":
+          description: 生命周期操作已接受
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "400": { $ref: '#/components/responses/InferenceBadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/InferenceConflict' }
+        "422": { $ref: '#/components/responses/InferenceUnprocessableEntity' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /inference-operations/{operation_id}:
+    get:
+      operationId: getInferenceOperation
+      summary: 查询推理服务异步操作
+      description: 只返回当前租户所拥有推理服务的 Services operation，不暴露 Core AsyncTask 标识或内容。
+      tags: [InferenceServices]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-async-task-types: [inference_service.create, inference_service.scale, inference_service.start, inference_service.stop, inference_service.restart, inference_service.delete]
+      x-ani-async-resource-type: inference_service
+      parameters:
+        - { name: operation_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 推理服务异步操作
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AsyncTask' }
@@ -1182,6 +1381,7 @@ paths:
       operationId: getInferenceServiceLogs
       summary: 获取推理服务日志
       tags: [InferenceServices]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
       parameters:
         - { name: service_id, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: limit, in: query, schema: { type: integer, default: 100, minimum: 1, maximum: 1000 } }
@@ -1202,6 +1402,7 @@ paths:
       operationId: testInferenceService
       summary: 推理服务调用测试
       tags: [InferenceServices]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
       parameters:
         - { name: service_id, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -1215,16 +1416,22 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/InferenceTestResponse' }
-        "400": { $ref: '#/components/responses/BadRequest' }
+        "400": { $ref: '#/components/responses/InferenceBadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/InferenceUnprocessableEntity' }
+        "502": { $ref: '#/components/responses/RuntimeError' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
+        "504": { $ref: '#/components/responses/RuntimeTimeout' }
 
   /inference-services/{service_id}/policies:
     put:
       operationId: updateInferenceServicePolicies
       summary: 更新推理服务限流与访问策略
       tags: [InferenceServices]
+      description: P1 兼容预留路径；P0 未建设调用网关，真实 handler 必须返回 501 FEATURE_NOT_AVAILABLE，不得伪造策略已生效。
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
       parameters:
         - { name: service_id, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -1242,6 +1449,7 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "501": { $ref: '#/components/responses/FeatureNotAvailable' }
 
   /knowledge-bases:
     get:

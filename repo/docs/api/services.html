@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1/svc</code></dd></div>
-          <div><dt>Operations</dt><dd>88</dd></div>
-          <div><dt>Schemas</dt><dd>87</dd></div>
+          <div><dt>Operations</dt><dd>91</dd></div>
+          <div><dt>Schemas</dt><dd>92</dd></div>
         </dl>
       </section>
 
@@ -241,11 +241,19 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/inference-operations/{operation_id}</code></td>
+          <td><code>getInferenceOperation</code></td>
+          <td>查询推理服务异步操作</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/inference-services</code></td>
           <td><code>listInferenceServices</code></td>
           <td>获取推理服务列表</td>
           <td><code></code></td>
-          <td>200</td>
+          <td>200, 401, 403</td>
         </tr>
         <tr>
           <td><span class="method method-post">POST</span></td>
@@ -253,7 +261,7 @@
           <td><code>createInferenceService</code></td>
           <td>部署推理服务</td>
           <td><code></code></td>
-          <td>202</td>
+          <td>202, 400, 401, 403, 409, 422, 503</td>
         </tr>
         <tr>
           <td><span class="method method-delete">DELETE</span></td>
@@ -261,7 +269,7 @@
           <td><code>deleteInferenceService</code></td>
           <td>停止并删除推理服务</td>
           <td><code></code></td>
-          <td>202, 401, 403, 404</td>
+          <td>202, 401, 403, 404, 409, 503</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -269,7 +277,23 @@
           <td><code>getInferenceService</code></td>
           <td>获取推理服务详情</td>
           <td><code></code></td>
-          <td>200, 404</td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-patch">PATCH</span></td>
+          <td><code>/inference-services/{service_id}</code></td>
+          <td><code>updateInferenceService</code></td>
+          <td>修改推理服务副本数</td>
+          <td><code></code></td>
+          <td>202, 400, 401, 403, 404, 409, 422, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/inference-services/{service_id}/lifecycle</code></td>
+          <td><code>applyInferenceServiceLifecycle</code></td>
+          <td>执行推理服务生命周期动作</td>
+          <td><code></code></td>
+          <td>202, 400, 401, 403, 404, 409, 422, 503</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -285,7 +309,7 @@
           <td><code>updateInferenceServicePolicies</code></td>
           <td>更新推理服务限流与访问策略</td>
           <td><code></code></td>
-          <td>200, 400, 401, 403, 404</td>
+          <td>200, 400, 401, 403, 404, 501</td>
         </tr>
         <tr>
           <td><span class="method method-post">POST</span></td>
@@ -293,7 +317,7 @@
           <td><code>testInferenceService</code></td>
           <td>推理服务调用测试</td>
           <td><code></code></td>
-          <td>200, 400, 401, 403, 404</td>
+          <td>200, 400, 401, 403, 404, 422, 502, 503, 504</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -880,6 +904,7 @@
         <li><code>BoundTenantsResponse</code></li>
         <li><code>CreateGpuContainerRequest</code></li>
         <li><code>CreateInferenceEndpointRequest</code></li>
+        <li><code>CreateInferenceServiceRequest</code></li>
         <li><code>CreateIntegrationBotRequest</code></li>
         <li><code>CreateIntegrationRequest</code></li>
         <li><code>CreateModelRequest</code></li>
@@ -898,9 +923,12 @@
         <li><code>IdempotentResult</code></li>
         <li><code>InferenceEndpoint</code></li>
         <li><code>InferenceService</code></li>
+        <li><code>InferenceServiceAccelerator</code></li>
+        <li><code>InferenceServiceLifecycleRequest</code></li>
         <li><code>InferenceServiceLogEntry</code></li>
         <li><code>InferenceServiceLogListResponse</code></li>
         <li><code>InferenceServicePolicies</code></li>
+        <li><code>InferenceServiceResources</code></li>
         <li><code>InferenceTestRequest</code></li>
         <li><code>InferenceTestResponse</code></li>
         <li><code>Integration</code></li>
@@ -947,6 +975,7 @@
         <li><code>TenantRole</code></li>
         <li><code>TransferOwnershipRequest</code></li>
         <li><code>UpdateInferenceServicePoliciesRequest</code></li>
+        <li><code>UpdateInferenceServiceRequest</code></li>
         <li><code>UpdateKBConfigRequest</code></li>
         <li><code>UpdateKBPermissionsRequest</code></li>
         <li><code>UpdateQuotaLimitsRequest</code></li>

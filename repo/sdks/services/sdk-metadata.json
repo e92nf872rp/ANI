@@ -65,6 +65,12 @@
       "scope": ""
     },
     {
+      "operationId": "getInferenceOperation",
+      "method": "GET",
+      "path": "/inference-operations/{operation_id}",
+      "scope": ""
+    },
+    {
       "operationId": "listInferenceServices",
       "method": "GET",
       "path": "/inference-services",
@@ -86,6 +92,18 @@
       "operationId": "getInferenceService",
       "method": "GET",
       "path": "/inference-services/{service_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "updateInferenceService",
+      "method": "PATCH",
+      "path": "/inference-services/{service_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "applyInferenceServiceLifecycle",
+      "method": "POST",
+      "path": "/inference-services/{service_id}/lifecycle",
       "scope": ""
     },
     {
@@ -544,6 +562,7 @@
     "BoundTenantsResponse",
     "CreateGpuContainerRequest",
     "CreateInferenceEndpointRequest",
+    "CreateInferenceServiceRequest",
     "CreateIntegrationBotRequest",
     "CreateIntegrationRequest",
     "CreateModelRequest",
@@ -562,9 +581,12 @@
     "IdempotentResult",
     "InferenceEndpoint",
     "InferenceService",
+    "InferenceServiceAccelerator",
+    "InferenceServiceLifecycleRequest",
     "InferenceServiceLogEntry",
     "InferenceServiceLogListResponse",
     "InferenceServicePolicies",
+    "InferenceServiceResources",
     "InferenceTestRequest",
     "InferenceTestResponse",
     "Integration",
@@ -611,6 +633,7 @@
     "TenantRole",
     "TransferOwnershipRequest",
     "UpdateInferenceServicePoliciesRequest",
+    "UpdateInferenceServiceRequest",
     "UpdateKBConfigRequest",
     "UpdateKBPermissionsRequest",
     "UpdateQuotaLimitsRequest",
@@ -625,6 +648,9 @@
   "idempotencyOperations": [
     "createGpuContainer",
     "patchGpuContainer",
+    "createInferenceService",
+    "updateInferenceService",
+    "applyInferenceServiceLifecycle",
     "updateInferenceServicePolicies",
     "testInferenceService",
     "createIntegration",
@@ -669,11 +695,25 @@
     "listTenantAdminAuditLogs"
   ],
   "errorCodes": [
+    "ACCELERATOR_SPEC_UNAVAILABLE",
     "BAD_REQUEST",
     "CONFLICT",
+    "DEPENDENCY_UNAVAILABLE",
+    "FEATURE_NOT_AVAILABLE",
     "FORBIDDEN",
+    "IDEMPOTENCY_CONFLICT",
+    "INSUFFICIENT_CAPACITY",
+    "INVALID_ARGUMENT",
+    "INVALID_STATE_TRANSITION",
+    "MODEL_INCOMPATIBLE",
+    "MODEL_NOT_READY",
+    "NAME_CONFLICT",
     "NOT_FOUND",
+    "OPERATION_IN_PROGRESS",
     "PRECONDITION_FAILED",
-    "UNAUTHORIZED"
+    "RUNTIME_ERROR",
+    "RUNTIME_TIMEOUT",
+    "UNAUTHORIZED",
+    "UNSUPPORTED_TOPOLOGY"
   ]
 }
