@@ -19,3 +19,7 @@ func (NotConfigured) GetNodeClass(context.Context, string) (ports.GPUNodeClass, 
 func (NotConfigured) PlanScheduling(context.Context, ports.GPUSchedulingRequest) (ports.GPUSchedulingDecision, error) {
 	return ports.GPUSchedulingDecision{}, ports.ErrNotConfigured
 }
+
+func (NotConfigured) ListSpecAvailability(context.Context, string) ([]ports.GPUSpecAvailability, error) {
+	return nil, ports.ErrNotConfigured
+}

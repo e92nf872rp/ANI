@@ -164,7 +164,6 @@ make validate-architecture
 git diff --check
 # → exit 0
 ```
-
 ## review-it 结果
 
 **review** 评估 5 个发现（F1-F5），均为低/信息级别，经核实实际代码路径后全部判定为故意设计或无需修复：
@@ -185,4 +184,3 @@ git diff --check
 2. **文档正确性**: `embed_service.py` docstring 仍显示旧的 `index_type=`/`M=` 扁平参数 → 更新为 `index_config` dict
 3. **文档矛盾**: `OpenAICompatibleEmbedding` docstring 与 `_as_base_embedding` 行为矛盾 → 重写 docstring
 4. **类型注解缺失**: `embed_model`/`_build_text_node`/`_nodes_from_chunks` 无类型 → 用 `TYPE_CHECKING` 补充（避免循环导入）
-

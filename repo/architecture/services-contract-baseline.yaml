@@ -20,27 +20,6 @@ exceptions:
   - operation_id: createModelVersion
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: listInferenceServices
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: createInferenceService
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: getInferenceService
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: deleteInferenceService
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: getInferenceServiceLogs
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: testInferenceService
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: updateInferenceServicePolicies
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
   - operation_id: listKnowledgeBases
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。

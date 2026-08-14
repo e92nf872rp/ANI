@@ -1815,4 +1815,3 @@ CREATE POLICY resource_reservations_self
 - demo\_instances.go 调 `QuotaService.TryMany` 创建实例时扣减；本方案不改动该路径
 - 未来 reconciler 调 `Confirm/Cancel/Release` 时也只依赖扣减 `QuotaService`，与管理无关
 - 租户管理（Services 层）通过 Core SDK 调 Core REST 的 5 个管理端点（`/admin/tenants/{tenant_id}/quota` 4 个 + `/admin/quota-meta` 1 个），走 `QuotaAdminService`
-

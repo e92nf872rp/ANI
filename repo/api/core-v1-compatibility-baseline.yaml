@@ -1,7 +1,7 @@
 batch: SPEC-COMPAT-A
 phase: Phase 1 / Sprint 4
 source: api/openapi/v1.yaml
-generated_at: '2026-08-06'
+generated_at: '2026-08-12'
 compatibility_rules:
   allowed:
   - Add optional request fields.
@@ -1219,7 +1219,7 @@ paths:
         '403':
           schema: '{}'
         '409':
-          schema: '{}'
+          schema: ErrorResponse
         '422':
           schema: '{}'
   /instances/{instance_id}:
@@ -2446,6 +2446,11 @@ paths:
       parameters:
       - in: query
         name: name
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: vpc_id
         required: false
         schema:
           type: string
@@ -5351,6 +5356,13 @@ schemas:
         - gateway
         - instance
         - nat
+      priority:
+        signature:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 32766
+        enum: []
       vpc_id:
         signature:
           type: string
@@ -5404,6 +5416,11 @@ schemas:
           type: array
           items:
             $ref: '#/components/schemas/NetworkSecurityGroupRule'
+        enum: []
+      vpc_id:
+        signature:
+          type: string
+          nullable: true
         enum: []
   CreateNetworkSecurityGroupRuleRequest:
     type: object
@@ -5493,6 +5510,11 @@ schemas:
         signature:
           type: string
         enum: []
+      zone:
+        signature:
+          type: string
+          nullable: true
+        enum: []
   CreateNetworkVPCRequest:
     type: object
     required:
@@ -5502,6 +5524,11 @@ schemas:
       cidr:
         signature:
           type: string
+        enum: []
+      description:
+        signature:
+          type: string
+          nullable: true
         enum: []
       idempotency_key:
         signature:
@@ -8986,6 +9013,14 @@ schemas:
         - gateway
         - instance
         - nat
+        - local
+      priority:
+        signature:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 32766
+        enum: []
       vpc_id:
         signature:
           type: string
@@ -9022,6 +9057,11 @@ schemas:
     - tenant_id
     - updated_at
     properties:
+      bound_instance_count:
+        signature:
+          type: integer
+          minimum: 0
+        enum: []
       created_at:
         signature:
           type: string
@@ -9049,6 +9089,11 @@ schemas:
           type: string
           nullable: true
         enum: []
+      rule_count:
+        signature:
+          type: integer
+          minimum: 0
+        enum: []
       rules:
         signature:
           type: array
@@ -9067,6 +9112,11 @@ schemas:
         signature:
           type: string
           format: date-time
+        enum: []
+      vpc_id:
+        signature:
+          type: string
+          nullable: true
         enum: []
   NetworkSecurityGroupBinding:
     type: object
@@ -9285,6 +9335,11 @@ schemas:
     - updated_at
     - vpc_id
     properties:
+      available_ip_count:
+        signature:
+          type: integer
+          minimum: 0
+        enum: []
       cidr:
         signature:
           type: string
@@ -9332,6 +9387,11 @@ schemas:
       vpc_id:
         signature:
           type: string
+        enum: []
+      zone:
+        signature:
+          type: string
+          nullable: true
         enum: []
   NetworkSubnetIPAllocation:
     type: object
@@ -9448,6 +9508,11 @@ schemas:
           type: string
           format: date-time
         enum: []
+      description:
+        signature:
+          type: string
+          nullable: true
+        enum: []
       dev_profile:
         signature:
           $ref: '#/components/schemas/CoreDevProfileInfo'
@@ -9468,6 +9533,11 @@ schemas:
       state:
         signature:
           $ref: '#/components/schemas/NetworkResourceState'
+        enum: []
+      subnet_count:
+        signature:
+          type: integer
+          minimum: 0
         enum: []
       tenant_id:
         signature:

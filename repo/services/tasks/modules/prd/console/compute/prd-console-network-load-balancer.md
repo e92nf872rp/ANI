@@ -1,6 +1,6 @@
 # PRD: Console 网络负载均衡
 
-> Revised: 2026-06-17  
+> Revised: 2026-06-17
 > 详文：`docs/console-modules/compute/network/load-balancer.md`
 
 ## 1. Overview

@@ -136,4 +136,3 @@ cd repo && $env:PYTHONPATH="ai/rag-engine"; python ai/rag-engine/tests/demo_e2e_
 - [x] AC1: `summary_service` 拼接前 N 父块 → LLM 生成 200-500 字摘要 → 向化存 Milvus（`chunk_type=doc_summary`）— E2E 实时验证：真实 vLLM 生成 362 字摘要 → 真实 Milvus 持久化 `chunk_type=doc_summary` 节点
 - [x] AC2: 摘要生成失败不阻断入库（降级为仅父子分块，记录 warning）— 7 个降级测试覆盖 LLM 异常/空/超长/超短/工厂失败
 - [x] AC3: `make test` 通过 — compileall + validate-architecture + pytest 146 passed
-

@@ -38,14 +38,27 @@ type GPUNodeClass struct {
 	OSImage       string
 	Pool          string
 	Labels        map[string]string
+	Annotations   map[string]string
 	Taints        []string
 	Devices       []GPUDeviceClass
 	// Allocatable preserves the raw Kubernetes node allocatable map so
 	// PlanScheduling can check vendor-specific resource names such as
-	// nvidia.com/gpu (whole-card) and nvidia.com/vgpu (HAMi slice).
+	// nvidia.com/gpu (whole-card) and nvidia.com/vgpu (vGPU slice).
 	Allocatable map[string]string
 	Ready       bool
 	Reason      string
+	// GPUMode is derived from the ani.kubercloud.io/gpu-mode node label
+	// (wholecard | vgpu). Read-only; never written to PG.
+	GPUMode string
+	// GPUSpec is derived from the ani.kubercloud.io/gpu-spec node label
+	// (wholecard mode). Read-only; never written to PG.
+	GPUSpec string
+	// GPUSharingSpec is derived from the ani.kubercloud.io/gpu-sharing-spec
+	// node label (vgpu mode). Read-only; never written to PG.
+	GPUSharingSpec string
+	// GPUSharingPolicy is derived from the ani.kubercloud.io/gpu-sharing-policy
+	// node label (vgpu mode). Read-only; never written to PG.
+	GPUSharingPolicy string
 }
 
 type GPUDiscoveryFilter struct {
@@ -112,6 +125,33 @@ type GPUSchedulingDecision struct {
 	SelectedNodeModel string
 }
 
+// GPUSpecAvailabilityStatus enumerates the four availability states for a GPU
+// spec (SPEC §5.1, plan.md §4.4): available = can create instances, full = tenant quota
+// insufficient, device_full = no idle devices on matching nodes, unavailable =
+// spec has no matching nodes in the cluster.
+type GPUSpecAvailabilityStatus string
+
+const (
+	GPUSpecStatusAvailable   GPUSpecAvailabilityStatus = "available"
+	GPUSpecStatusFull        GPUSpecAvailabilityStatus = "full"
+	GPUSpecStatusDeviceFull  GPUSpecAvailabilityStatus = "device_full"
+	GPUSpecStatusUnavailable GPUSpecAvailabilityStatus = "unavailable"
+)
+
+// GPUSpecAvailability is a per-spec availability view computed from tenant
+// quota remaining and node label matching (SPEC §5.1).
+// QuotaRemaining is a tenant-level shared value; the handler lifts it to the
+// GPUSpecAvailabilityListResponse top level (v1.yaml) rather than per-item.
+type GPUSpecAvailability struct {
+	SpecID           string
+	Status           GPUSpecAvailabilityStatus
+	AvailableCount   int
+	HasMatchingNodes bool
+	HasIdleDevices   bool
+	DeviceIdleCount  int
+	GPUCount         int
+}
+
 // GPUInventory discovers heterogeneous GPU capacity and maps workload intent to
 // scheduling constraints. Implementations may use Kubernetes labels, GPU Feature
 // Discovery, vendor device plugins, or customer inventory systems.
@@ -119,4 +159,13 @@ type GPUInventory interface {
 	ListNodeClasses(ctx context.Context, filter GPUDiscoveryFilter) ([]GPUNodeClass, error)
 	GetNodeClass(ctx context.Context, nodeName string) (GPUNodeClass, error)
 	PlanScheduling(ctx context.Context, request GPUSchedulingRequest) (GPUSchedulingDecision, error)
+	// ListSpecAvailability computes per-spec availability for a tenant by
+	// combining node label matching and idle device counts (SPEC §5.1,
+	// plan.md §4.4).
+	//
+	// The returned []GPUSpecAvailability does NOT include QuotaRemaining;
+	// the handler is responsible for querying QuotaService separately and
+	// lifting it to the GPUSpecAvailabilityListResponse top-level field
+	// (v1.yaml), since quota_remaining is a tenant-level shared value.
+	ListSpecAvailability(ctx context.Context, tenantID string) ([]GPUSpecAvailability, error)
 }

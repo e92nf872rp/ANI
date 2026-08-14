@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DOC_ROOT = ROOT.parent
 SERVICE_PATH_PREFIXES = ("/models", "/inference-services", "/knowledge-bases")
 CORE_P0_ROUTER_FILES = (
-    "services/ani-gateway/internal/router/demo_instances.go",
+    "services/ani-gateway/internal/router/instances.go",
     "services/ani-gateway/internal/router/network_resources.go",
     "services/ani-gateway/internal/router/storage_resources.go",
     "services/ani-gateway/internal/router/vector_store_resources.go",

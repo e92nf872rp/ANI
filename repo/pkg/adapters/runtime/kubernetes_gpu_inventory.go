@@ -539,3 +539,11 @@ func gpuNodeSupportsSchedulingRequest(node ports.GPUNodeClass, request ports.GPU
 }
 
 var _ ports.GPUInventory = (*KubernetesGPUInventory)(nil)
+
+// ListSpecAvailability computes per-spec availability for a tenant. The full
+// implementation requires GPUSpecStore, QuotaStore, and reservation allocation
+// wiring (plan.md §5.1); this stub returns ErrUnsupported until those
+// dependencies are injected in the Adapters batch (Issue #3).
+func (i *KubernetesGPUInventory) ListSpecAvailability(_ context.Context, _ string) ([]ports.GPUSpecAvailability, error) {
+	return nil, ports.ErrUnsupported
+}

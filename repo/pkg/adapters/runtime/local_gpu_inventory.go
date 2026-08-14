@@ -169,3 +169,11 @@ func positiveInt(value int, fallback int) int {
 }
 
 var _ ports.GPUInventory = (*LocalGPUInventory)(nil)
+
+// ListSpecAvailability computes per-spec availability for a tenant. The full
+// implementation requires QuotaService, reservation store, and GPUSpecStore
+// wiring (plan.md §5.1); this stub returns ErrUnsupported until those
+// dependencies are injected in the Adapters batch (Issue #3).
+func (i *LocalGPUInventory) ListSpecAvailability(_ context.Context, _ string) ([]ports.GPUSpecAvailability, error) {
+	return nil, ports.ErrUnsupported
+}

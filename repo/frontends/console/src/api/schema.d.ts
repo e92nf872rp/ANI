@@ -84,7 +84,10 @@ export interface paths {
         /** 获取推理服务列表 */
         get: operations["listInferenceServices"];
         put?: never;
-        /** 部署推理服务 */
+        /**
+         * 部署推理服务
+         * @description 接受后立即返回 pending 资源；current_operation_id 用于查询持久化 operation，P0 不返回可调用 URL。
+         */
         post: operations["createInferenceService"];
         delete?: never;
         options?: never;
@@ -103,8 +106,55 @@ export interface paths {
         get: operations["getInferenceService"];
         put?: never;
         post?: never;
-        /** 停止并删除推理服务 */
+        /**
+         * 停止并删除推理服务
+         * @description 为保持 v1 兼容不新增必填幂等键；服务按 service_id + desired_state=deleted 去重。
+         */
         delete: operations["deleteInferenceService"];
+        options?: never;
+        head?: never;
+        /**
+         * 修改推理服务副本数
+         * @description P0 只允许修改独立副本数；multi_node 固定 replicas=1，其他资源和 placement 均不可变。
+         */
+        patch: operations["updateInferenceService"];
+        trace?: never;
+    };
+    "/inference-services/{service_id}/lifecycle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 执行推理服务生命周期动作
+         * @description start、stop 和 restart 均由持久化 operation 与 reconciler 异步收敛。
+         */
+        post: operations["applyInferenceServiceLifecycle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inference-operations/{operation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询推理服务异步操作
+         * @description 只返回当前租户所拥有推理服务的 Services operation，不暴露 Core AsyncTask 标识或内容。
+         */
+        get: operations["getInferenceOperation"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -152,7 +202,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** 更新推理服务限流与访问策略 */
+        /**
+         * 更新推理服务限流与访问策略
+         * @description P1 兼容预留路径；P0 未建设调用网关，真实 handler 必须返回 501 FEATURE_NOT_AVAILABLE，不得伪造策略已生效。
+         */
         put: operations["updateInferenceServicePolicies"];
         post?: never;
         delete?: never;
@@ -1271,19 +1324,128 @@ export interface components {
             /** Format: uuid */
             id: string;
             name: string;
+            /** @description 创建时冻结的模型名称与版本展示快照 */
             model: string;
+            /**
+             * Format: uuid
+             * @description 实际部署的不可变模型版本
+             */
+            model_version_id?: string;
+            /** @description 集群内 OpenAI-compatible 请求使用的 model 值，不代表公网路由 */
+            served_model_name?: string;
             /** @default 1 */
             replicas: number;
+            /** @default 0 */
+            ready_replicas: number;
+            resources?: components["schemas"]["InferenceServiceResources"];
+            /**
+             * @default auto
+             * @enum {string}
+             */
+            placement_mode: "auto" | "single_node" | "multi_node";
+            /**
+             * @deprecated
+             * @description v1 兼容投影；新客户端使用 resources.accelerator.spec_id
+             */
             gpu_type?: string | null;
-            /** @default 1 */
+            /**
+             * @deprecated
+             * @description v1 兼容投影；不再是资源规格权威字段
+             * @default 1
+             */
             gpu_count_per_pod: number;
-            /** @default 8 */
+            /**
+             * @deprecated
+             * @description v1 兼容投影；P0 不执行
+             * @default 8
+             */
             max_concurrency: number;
             /** @enum {string} */
             status: "pending" | "deploying" | "running" | "stopping" | "stopped" | "failed";
+            /** @description 稳定的机器可读状态原因码 */
+            status_reason?: string | null;
+            /** @description 脱敏的人类可读状态说明 */
+            status_message?: string | null;
+            generation?: number;
+            observed_generation?: number;
+            /** Format: uuid */
+            current_operation_id?: string | null;
+            /**
+             * Format: uri
+             * @description P0 未建设调用网关，固定返回 null
+             */
+            invocation_url?: string | null;
+            /**
+             * Format: uri
+             * @deprecated
+             * @description v1 兼容字段；P0 固定返回 null，不得返回 ClusterIP 地址
+             */
             endpoint_url?: string | null;
             /** Format: date-time */
             created_at: string;
+            /** Format: date-time */
+            updated_at?: string | null;
+        };
+        InferenceServiceAccelerator: {
+            /** @description Core GPUSpec ID；P0 仅接受通过 live gate 的整卡 GPU 规格 */
+            spec_id: string;
+            /** @description 每个独立副本或 leader-worker group 申请的 accelerator 总数 */
+            count_per_replica: number;
+        };
+        InferenceServiceResources: {
+            /** @description 每个单节点 Pod 或跨节点 group 的 CPU 预算 */
+            cpu: string;
+            /** @description 每个单节点 Pod 或跨节点 group 的内存预算 */
+            memory: string;
+            accelerator?: components["schemas"]["InferenceServiceAccelerator"];
+        };
+        CreateInferenceServiceRequest: {
+            /** Format: uuid */
+            idempotency_key: string;
+            name: string;
+            /** @description v1 兼容必填字段；新客户端传稳定模型版本 UUID */
+            model: string;
+            /**
+             * Format: uuid
+             * @description 与 model 指向同一不可变版本
+             */
+            model_version_id?: string;
+            /** @description 默认使用服务 name，创建后不可变 */
+            served_model_name?: string;
+            /** @description 省略时服务按 1 个副本处理 */
+            replicas?: number;
+            resources?: components["schemas"]["InferenceServiceResources"];
+            /**
+             * @description 省略时服务按 auto 处理
+             * @enum {string}
+             */
+            placement_mode?: "auto" | "single_node" | "multi_node";
+            /**
+             * @deprecated
+             * @description v1 兼容输入；新客户端不得发送
+             */
+            gpu_type?: string;
+            /**
+             * @deprecated
+             * @description v1 兼容输入；单独出现时不得推断为 GPU
+             */
+            gpu_count_per_pod?: number;
+            /**
+             * @deprecated
+             * @description v1 兼容输入；P0 不执行
+             */
+            max_concurrency?: number;
+        };
+        UpdateInferenceServiceRequest: {
+            /** Format: uuid */
+            idempotency_key: string;
+            replicas: number;
+        };
+        InferenceServiceLifecycleRequest: {
+            /** Format: uuid */
+            idempotency_key: string;
+            /** @enum {string} */
+            action: "start" | "stop" | "restart";
         };
         CreateModelRequest: {
             /**
@@ -1296,6 +1458,10 @@ export interface components {
             source: "upload" | "huggingface" | "modelscope";
             source_url?: string;
         };
+        /**
+         * @deprecated
+         * @description 遗留且未绑定 path 的 schema；不是第二种推理产品资源，新实现必须使用 InferenceService
+         */
         InferenceEndpoint: {
             /** Format: uuid */
             id: string;
@@ -1311,6 +1477,10 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
+        /**
+         * @deprecated
+         * @description 遗留且未绑定 path 的 schema；新客户端不得引用，后续主版本删除
+         */
         CreateInferenceEndpointRequest: {
             /** Format: uuid */
             idempotency_key: string;
@@ -2279,6 +2449,69 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
+        /** @description 推理服务请求参数或字段组合非法（code=INVALID_ARGUMENT） */
+        InferenceBadRequest: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 推理服务名称、幂等键或活动操作冲突 */
+        InferenceConflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 推理服务前置条件不满足；code 为 MODEL_NOT_READY、MODEL_INCOMPATIBLE、ACCELERATOR_SPEC_UNAVAILABLE、INSUFFICIENT_CAPACITY、UNSUPPORTED_TOPOLOGY 或 INVALID_STATE_TRANSITION */
+        InferenceUnprocessableEntity: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 当前版本尚未提供该能力（code=FEATURE_NOT_AVAILABLE） */
+        FeatureNotAvailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 推理服务依赖暂时不可用（code=DEPENDENCY_UNAVAILABLE） */
+        ServiceUnavailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 推理 runtime 返回异常（code=RUNTIME_ERROR） */
+        RuntimeError: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 推理 runtime 调用超时（code=RUNTIME_TIMEOUT） */
+        RuntimeTimeout: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
     };
     parameters: never;
     requestBodies: never;
@@ -2490,6 +2723,8 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     createInferenceService: {
@@ -2501,19 +2736,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    /** Format: uuid */
-                    idempotency_key: string;
-                    name: string;
-                    model: string;
-                    /** @default 1 */
-                    replicas?: number;
-                    gpu_type?: string;
-                    /** @default 1 */
-                    gpu_count_per_pod?: number;
-                    /** @default 8 */
-                    max_concurrency?: number;
-                };
+                "application/json": components["schemas"]["CreateInferenceServiceRequest"];
             };
         };
         responses: {
@@ -2526,6 +2749,12 @@ export interface operations {
                     "application/json": components["schemas"]["InferenceService"];
                 };
             };
+            400: components["responses"]["InferenceBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["InferenceConflict"];
+            422: components["responses"]["InferenceUnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getInferenceService: {
@@ -2548,6 +2777,8 @@ export interface operations {
                     "application/json": components["schemas"]["InferenceService"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -2564,6 +2795,99 @@ export interface operations {
         responses: {
             /** @description 停止任务已提交 */
             202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["InferenceConflict"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateInferenceService: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                service_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateInferenceServiceRequest"];
+            };
+        };
+        responses: {
+            /** @description 推理服务伸缩操作已接受 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            400: components["responses"]["InferenceBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["InferenceConflict"];
+            422: components["responses"]["InferenceUnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    applyInferenceServiceLifecycle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                service_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InferenceServiceLifecycleRequest"];
+            };
+        };
+        responses: {
+            /** @description 生命周期操作已接受 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            400: components["responses"]["InferenceBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["InferenceConflict"];
+            422: components["responses"]["InferenceUnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getInferenceOperation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 推理服务异步操作 */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2629,10 +2953,14 @@ export interface operations {
                     "application/json": components["schemas"]["InferenceTestResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["InferenceBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            422: components["responses"]["InferenceUnprocessableEntity"];
+            502: components["responses"]["RuntimeError"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["RuntimeTimeout"];
         };
     };
     updateInferenceServicePolicies: {
@@ -2663,6 +2991,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            501: components["responses"]["FeatureNotAvailable"];
         };
     };
     listKnowledgeBases: {
