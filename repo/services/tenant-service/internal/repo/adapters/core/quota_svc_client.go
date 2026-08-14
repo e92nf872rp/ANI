@@ -218,7 +218,7 @@ func (c *QuotaSvcClient) doJSON(ctx context.Context, method, url string, payload
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ports.ErrCoreUnavailable, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// 步骤 4：读 body；非 2xx → 业务码映射
 	body, err := io.ReadAll(resp.Body)

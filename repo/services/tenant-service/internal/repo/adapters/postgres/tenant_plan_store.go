@@ -242,7 +242,6 @@ func (s *PostgresTenantPlanStore) Update(ctx context.Context, id uuid.UUID, in p
 	if in.Description != nil {
 		sets = append(sets, fmt.Sprintf("description = $%d", argN))
 		args = append(args, *in.Description)
-		argN++
 	}
 
 	// 步骤 2：条件更新未删除套餐；命中则 RETURNING 组装实体

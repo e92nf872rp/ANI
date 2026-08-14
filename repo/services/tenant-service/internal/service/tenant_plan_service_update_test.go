@@ -113,7 +113,7 @@ func TestTenantPlanService_UpdateTenantPlan(t *testing.T) {
 
 	// 正常更新 description（含清空）
 	audit.logs = nil
-	res, err = svc.UpdateTenantPlan(context.Background(), &tenantv1.UpdateTenantPlanRequest{
+	_, err = svc.UpdateTenantPlan(context.Background(), &tenantv1.UpdateTenantPlanRequest{
 		PlanId:      planID.String(),
 		Description: wrapperspb.String(""),
 	})
