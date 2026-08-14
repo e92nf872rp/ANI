@@ -131,4 +131,3 @@ func TestQuotaSvcClient_PutQuota_QuotaNotFound(t *testing.T) {
 		t.Fatalf("expected ErrQuotaNotFound, got %v", err)
 	}
 }
-

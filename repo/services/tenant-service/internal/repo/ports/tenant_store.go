@@ -47,12 +47,12 @@ func (s TenantStatus) Valid() bool {
 // Status 状态机：active → frozen → disabled。
 // 注意：MFA/SSO 与配额均不在本结构体内（分别由 TenantAuthStore / Core QuotaService 承载）。
 type Tenant struct {
-	ID           uuid.UUID     // 主键
-	Name         string        // 租户标识
-	DisplayName  string        // 展示名
-	ContactEmail string        // 联系邮箱
-	Status       TenantStatus  // active | frozen | disabled
-	PlanID       uuid.UUID     // 外键 → tenant_plans.id
+	ID           uuid.UUID    // 主键
+	Name         string       // 租户标识
+	DisplayName  string       // 展示名
+	ContactEmail string       // 联系邮箱
+	Status       TenantStatus // active | frozen | disabled
+	PlanID       uuid.UUID    // 外键 → tenant_plans.id
 	FrozenAt     *time.Time
 	DisabledAt   *time.Time
 	CreatedAt    time.Time

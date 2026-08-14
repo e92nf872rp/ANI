@@ -14,10 +14,10 @@ import (
 )
 
 type bindFakeTenantStore struct {
-	tenant     ports.Tenant
+	tenant      ports.Tenant
 	updateCalls int
 	updatedPlan uuid.UUID
-	updateErr  error
+	updateErr   error
 }
 
 func (f *bindFakeTenantStore) GetByID(_ context.Context, id uuid.UUID) (ports.Tenant, error) {

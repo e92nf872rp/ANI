@@ -15,8 +15,8 @@ import (
 )
 
 type listFakePlanStore struct {
-	listFn    func(ctx context.Context, filter ports.TenantPlanListFilter) (ports.TenantPlanListResult, error)
-	getByIDFn func(ctx context.Context, id uuid.UUID) (ports.TenantPlan, error)
+	listFn     func(ctx context.Context, filter ports.TenantPlanListFilter) (ports.TenantPlanListResult, error)
+	getByIDFn  func(ctx context.Context, id uuid.UUID) (ports.TenantPlan, error)
 	lastFilter ports.TenantPlanListFilter
 }
 
