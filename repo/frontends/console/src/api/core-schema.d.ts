@@ -2509,6 +2509,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/gpu-inventory/{device_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * 翻转 GPU 设备状态
+         * @description 将设备状态翻转为 maintenance（维护中）或 idle（空闲）。
+         *     BOSS 在 GPU 池管理中用于设备维护操作。
+         */
+        patch: operations["updateGPUDeviceStatus"];
+        trace?: never;
+    };
     "/gpu-specs": {
         parameters: {
             query?: never;
@@ -2523,7 +2544,12 @@ export interface paths {
          */
         get: operations["listGPUSpecs"];
         put?: never;
-        post?: never;
+        /**
+         * 创建 GPU 规格
+         * @description 创建集群级 GPU 规格（K8s CRD）。spec_id 必须符合 K8s 资源名规范且唯一。
+         *     gpu_type 必须存在于节点标签中，否则返回 422 GPUTypeNotInNodes。
+         */
+        post: operations["createGPUSpec"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2543,6 +2569,31 @@ export interface paths {
          *     但不得用于新实例创建；创建准入由 POST /instances 返回 422 GPUSpecUnavailable。
          */
         get: operations["getGPUSpec"];
+        put?: never;
+        post?: never;
+        /**
+         * 删除 GPU 规格
+         * @description 删除集群级 GPU 规格。有运行中实例引用时返回 409 GPUSpecInUse。
+         */
+        delete: operations["deleteGPUSpec"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gpu-specs/availability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询规格可用性
+         * @description 返回所有规格的可用性状态（四态：available/full/device_full/unavailable）。
+         *     Console 在实例创建页面展示规格可用性，BOSS 在 GPU 池管理展示规格分配状态。
+         */
+        get: operations["listGPUSpecAvailability"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2737,6 +2788,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/quotas/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询当前租户配额
+         * @description Console 租户自查配额。返回当前认证租户的所有维度配额视图。
+         */
+        get: operations["getMyQuota"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/quotas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * BOSS 分页查询租户配额列表
+         * @description BOSS 平台级分页查询所有租户配额。按租户维度展示配额分配总览。
+         */
+        get: operations["listQuotas"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/tenants/{tenant_id}/quota": {
         parameters: {
             query?: never;
@@ -2773,6 +2864,52 @@ export interface paths {
          *     用于租户禁用/资源清理场景。由调用方保证此时无在用资源（本方法不强制守卫 used/reserved）。
          */
         delete: operations["deleteTenantQuota"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/tenants/{tenant_id}/reservations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询租户预留额度
+         * @description 查询指定租户的 GPU 预留额度视图（allocated_gpu_count + used/reserved/available）。
+         */
+        get: operations["getTenantReservations"];
+        /**
+         * 设置租户预留额度
+         * @description 设置租户 GPU 预留额度（allocated_gpu_count）。
+         *     allocated_gpu_count 不能超过租户配额上限，否则返回 422 RESERVATION_EXCEEDS_QUOTA。
+         *     下调时用 GREATEST(allocated, used+reserved) clamp，返回 tightened=true。
+         */
+        put: operations["putTenantReservations"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/reservations/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询当前租户预留额度
+         * @description Console 租户自查预留额度。返回当前认证租户的 GPU 预留视图。
+         */
+        get: operations["getMyReservations"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -3643,6 +3780,9 @@ export interface components {
          * @description 创建实例请求。共享字段（name/kind/image/cpu/memory 等）留在顶层；
          *     按 kind 选用对应 `*_config`（推荐）。扁平 VM/容器/GPU 字段保留为 v1 兼容别名。
          *     同名字段以 `*_config` 为准；与扁平别名冲突或传入跨类型 config 时返回 400。
+         *     network_config 优先级：`*_config.network` > 顶层 `network_config`；
+         *     两者同时提供时以 `*_config.network` 为准，顶层 `network_config` 作为 fallback。
+         *     同时提供且字段冲突时返回 400。
          */
         CreateInstanceRequest: {
             /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
@@ -3696,6 +3836,7 @@ export interface components {
             ssh_key_ref?: string | null;
             /** @default false */
             termination_protection: boolean;
+            network_config?: components["schemas"]["InstanceNetworkConfig"];
             /**
              * @deprecated
              * @description 兼容别名；优先使用 gpu_container_config.gpu
@@ -5621,6 +5762,17 @@ export interface components {
             /** Format: uuid */
             instance_id?: string | null;
             dev_profile: components["schemas"]["CoreDevProfileInfo"];
+            /**
+             * @description GPU 隔离模式，从节点标签 ani.kubercloud.io/gpu-mode 读取
+             * @enum {string|null}
+             */
+            gpu_mode?: "wholecard" | "vgpu" | null;
+            /** @description 整卡规格标签值，从 ani.kubercloud.io/gpu-spec 读取 */
+            gpu_spec?: string | null;
+            /** @description vGPU 共享规格标签值，从 ani.kubercloud.io/gpu-sharing-spec 读取 */
+            gpu_sharing_spec?: string | null;
+            /** @description vGPU 共享策略标签值，从 ani.kubercloud.io/gpu-sharing-policy 读取 */
+            gpu_sharing_policy?: string | null;
         };
         GPUInventoryListResponse: {
             items: components["schemas"]["GPUInventoryRecord"][];
@@ -5631,6 +5783,8 @@ export interface components {
         /**
          * @description Core 集群级 GPU 规格只读视图。spec_id 描述 GPU 资源形态，不代表租户配额；
          *     本契约不执行 quota check、acquire 或 release。
+         *     gpu_mode/node_affinity/volcano_resources 为可选扩展字段，对齐 GPUSpec 写视图，
+         *     使 GET /gpu-specs 与 POST /gpu-specs 读写闭环（向后兼容，老客户端可忽略）。
          */
         GPUSpecSummary: {
             /** @description 稳定规格 ID，实例创建通过 spec_id 引用。 */
@@ -5639,6 +5793,11 @@ export interface components {
             name: string;
             /** @description 必须与 GPU inventory 的 gpu_type 一致。 */
             gpu_type: string;
+            /**
+             * @description GPU 隔离模式（可选扩展，对齐 GPUSpec）
+             * @enum {string}
+             */
+            gpu_mode?: "wholecard" | "vgpu";
             memory_total_mb?: number | null;
             /** @description 每张物理卡的切分份数；1 表示整卡规格。 */
             shares: number;
@@ -5646,6 +5805,8 @@ export interface components {
             mb_per_share: number;
             /** @description 是否允许用于新的实例创建。 */
             available: boolean;
+            node_affinity?: components["schemas"]["GPUSpecNodeAffinity"];
+            volcano_resources?: components["schemas"]["GPUSpecVolcanoResources"];
         };
         GPUSpecListResponse: {
             items: components["schemas"]["GPUSpecSummary"][];
@@ -5664,6 +5825,10 @@ export interface components {
                 available?: number;
             }[];
             dev_profile: components["schemas"]["CoreDevProfileInfo"];
+            /** @description vGPU 模式设备数 */
+            vgpu_count?: number;
+            /** @description 整卡模式设备数 */
+            wholecard_count?: number;
         };
         /** @description GPU 调度队列，映射 Volcano Queue CRD */
         GPUSchedulingQueue: {
@@ -5685,6 +5850,15 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+            /** @description 队列调度状态（从 Volcano Queue CRD 读取） */
+            status?: {
+                /** @description 已分配资源键值集合，对齐 Volcano Queue CRD（如 nvidia.com/gpu: 2） */
+                allocated?: {
+                    [key: string]: string;
+                };
+                /** @description 排队中任务数 */
+                in_queue?: number;
+            } | null;
         };
         GPUSchedulingQueueListResponse: {
             items: components["schemas"]["GPUSchedulingQueue"][];
@@ -5710,6 +5884,134 @@ export interface components {
             workload_class?: "inference" | "training" | "batch";
             /** Format: uuid */
             project_id?: string | null;
+        };
+        /** @description 规格节点亲和性标签映射（对齐 K8s 节点标签） */
+        GPUSpecNodeAffinity: {
+            /** @description 整卡时用 ani.kubercloud.io/gpu-spec 值 */
+            gpu_spec?: string | null;
+            /** @description vGPU 时用 ani.kubercloud.io/gpu-sharing-spec 值 */
+            gpu_sharing_spec?: string | null;
+            /** @description vGPU 时用 ani.kubercloud.io/gpu-sharing-policy 值 */
+            gpu_sharing_policy?: string | null;
+            /**
+             * @description 整卡/vGPU 隔离，ani.kubercloud.io/gpu-mode 值
+             * @enum {string|null}
+             */
+            gpu_mode?: "wholecard" | "vgpu" | null;
+        };
+        /** @description Volcano 调度资源声明（嵌套 wholecard/vgpu 两个子 map） */
+        GPUSpecVolcanoResources: {
+            /** @description 整卡模式资源声明 */
+            wholecard?: {
+                [key: string]: string;
+            } | null;
+            /** @description vGPU 模式资源声明 */
+            vgpu?: {
+                [key: string]: string;
+            } | null;
+        };
+        /**
+         * @description GPU 规格完整视图（POST 创建后返回）。含节点亲和性和 Volcano 资源声明，
+         *     用于管理端展示和实例创建准入校验。
+         */
+        GPUSpec: {
+            /** @description 稳定规格 ID，实例创建通过 spec_id 引用。 */
+            id: string;
+            /** @description Console 展示名称。 */
+            name: string;
+            /** @description 必须与 GPU inventory 的 gpu_type 一致。 */
+            gpu_type: string;
+            /**
+             * @description GPU 隔离模式
+             * @enum {string}
+             */
+            gpu_mode: "wholecard" | "vgpu";
+            memory_total_mb?: number | null;
+            /** @description 每张物理卡的切分份数；1 表示整卡规格。 */
+            shares: number;
+            /** @description 每份保证显存，单位 MiB。 */
+            mb_per_share: number;
+            /** @description 是否允许用于新的实例创建。 */
+            available: boolean;
+            node_affinity?: components["schemas"]["GPUSpecNodeAffinity"];
+            volcano_resources?: components["schemas"]["GPUSpecVolcanoResources"];
+        };
+        /** @description 创建 GPU 规格请求（SPEC §4.4） */
+        GPUSpecCreateRequest: {
+            /** @description 规格 ID，K8s 资源名规范 */
+            spec_id: string;
+            /** @description GPU 型号，必须对齐节点标签 */
+            gpu_type: string;
+            /**
+             * @description GPU 隔离模式
+             * @enum {string}
+             */
+            gpu_mode: "wholecard" | "vgpu";
+            /** @description 每张物理卡的切分份数；1=整卡 */
+            shares: number;
+            /** @description 每份保证显存，单位 MiB */
+            mb_per_share: number;
+            /** @description 物理卡显存，用于校验 */
+            memory_total_mb?: number | null;
+        };
+        /** @description 规格可用性视图（四态标注） */
+        GPUSpecAvailability: {
+            spec_id: string;
+            /**
+             * @description available=可创建，full=配额不足，device_full=设备不足，unavailable=规格不可用
+             * @enum {string}
+             */
+            status: "available" | "full" | "device_full" | "unavailable";
+            /** @description 可创建实例数 */
+            available_count: number;
+            /** @description 是否存在匹配规格的节点 */
+            has_matching_nodes: boolean;
+            /** @description 是否存在空闲设备 */
+            has_idle_devices: boolean;
+            /** @description 空闲设备数 */
+            device_idle_count: number;
+            /** @description 每份规格占用的卡数 */
+            gpu_count?: number;
+        };
+        /** @description 规格可用性列表响应；quota_remaining 是租户级共享值，只在顶层返回一次 */
+        GPUSpecAvailabilityListResponse: {
+            /** @description 租户配额剩余（allocated_gpu_count - used - reserved），跨规格共享，仅在顶层返回一次 */
+            quota_remaining: number;
+            items: components["schemas"]["GPUSpecAvailability"][];
+        };
+        /** @description 设置租户预留额度请求 */
+        ReservationPutRequest: {
+            /** @description 预留 GPU 卡数上限 */
+            allocated_gpu_count: number;
+        };
+        /** @description 租户预留额度视图 */
+        ReservationView: {
+            /** Format: uuid */
+            tenant_id: string;
+            /** @description 预留 GPU 卡数上限 */
+            allocated_gpu_count: number;
+            /** @description 已实扣（已 Confirm） */
+            used: number;
+            /** @description 已预占（已 Try 未 Confirm/Cancel） */
+            reserved: number;
+            /** @description 可用 = allocated - used - reserved */
+            available: number;
+            /** @description 下调被 clamp 时 true */
+            tightened?: boolean;
+        };
+        /** @description 设备状态翻转请求 */
+        GPUDeviceStatusUpdateRequest: {
+            /**
+             * @description 目标状态：maintenance=维护中，idle=空闲
+             * @enum {string}
+             */
+            status: "maintenance" | "idle";
+        };
+        /** @description BOSS 分页配额列表 */
+        QuotaListResult: {
+            items: components["schemas"]["Quota"][];
+            total: number;
+            next_cursor?: string | null;
         };
         SandboxTemplate: {
             /** Format: uuid */
@@ -6099,6 +6401,78 @@ export interface components {
         };
         /** @description 参数校验失败（code=VALIDATION_FAILED） */
         QuotaValidationFailed: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 规格不存在（code=GPU_SPEC_NOT_FOUND） */
+        GPUSpecNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 该规格有运行中实例引用，无法删除（code=GPU_SPEC_IN_USE） */
+        GPUSpecInUse: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 规格已存在（code=GPU_SPEC_CONFLICT） */
+        GPUSpecConflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description GPU 型号不存在于集群节点标签中（code=GPU_TYPE_NOT_IN_NODES） */
+        GPUTypeNotInNodes: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 设备不存在（code=DEVICE_NOT_FOUND） */
+        DeviceNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 配额不足（code=QUOTA_EXCEEDED） */
+        QuotaExceeded: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 预留额度不足（code=RESERVED_INSUFFICIENT） */
+        ReservedInsufficient: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 预留额度不能超过配额上限（code=RESERVATION_EXCEEDS_QUOTA） */
+        ReservationExceedsQuota: {
             headers: {
                 [name: string]: unknown;
             };
@@ -6734,7 +7108,19 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            /**
+             * @description 配额不足或预留额度不足。可能的 code：
+             *     - QUOTA_EXCEEDED: used+reserved+request > total，配额上限不足
+             *     - RESERVED_INSUFFICIENT: allocated-used-reserved < request，预留额度不足
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /**
              * @description GPU 调度前置条件不满足。可能的 code：
              *     - InsufficientGPU: GPU 资源不足，当前无可用算力满足本次创建请求
@@ -11041,6 +11427,8 @@ export interface operations {
         parameters: {
             query?: {
                 gpu_type?: string;
+                /** @description 按 GPU 隔离模式过滤 */
+                gpu_mode?: "wholecard" | "vgpu";
                 status?: "available" | "in_use" | "fault" | "maintenance";
                 node_name?: string;
                 limit?: number;
@@ -11087,6 +11475,38 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
+    updateGPUDeviceStatus: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 幂等键，防止重复操作 */
+                "Idempotency-Key": string;
+            };
+            path: {
+                device_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GPUDeviceStatusUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 设备状态已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GPUInventoryRecord"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["DeviceNotFound"];
+        };
+    };
     listGPUSpecs: {
         parameters: {
             query?: {
@@ -11114,6 +11534,38 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
+    createGPUSpec: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 幂等键，防止重复创建 */
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GPUSpecCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description 规格创建成功 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GPUSpec"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["GPUSpecConflict"];
+            422: components["responses"]["GPUTypeNotInNodes"];
+        };
+    };
     getGPUSpec: {
         parameters: {
             query?: never;
@@ -11137,6 +11589,55 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    deleteGPUSpec: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 幂等键，防止重复删除 */
+                "Idempotency-Key": string;
+            };
+            path: {
+                spec_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 删除成功 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["GPUSpecNotFound"];
+            409: components["responses"]["GPUSpecInUse"];
+        };
+    };
+    listGPUSpecAvailability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 规格可用性列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GPUSpecAvailabilityListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     listGPUSchedulingQueues: {
@@ -11536,6 +12037,53 @@ export interface operations {
             422: components["responses"]["PreconditionFailed"];
         };
     };
+    getMyQuota: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前租户配额 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Quota"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listQuotas: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 租户配额分页列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuotaListResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
     getTenantQuota: {
         parameters: {
             query?: never;
@@ -11656,6 +12204,86 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["TenantNotFound"];
+        };
+    };
+    getTenantReservations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 租户预留额度视图 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReservationView"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["TenantNotFound"];
+        };
+    };
+    putTenantReservations: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 幂等键，防止重复操作 */
+                "Idempotency-Key": string;
+            };
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReservationPutRequest"];
+            };
+        };
+        responses: {
+            /** @description 预留额度已设置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReservationView"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["TenantNotFound"];
+            422: components["responses"]["ReservationExceedsQuota"];
+        };
+    };
+    getMyReservations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前租户预留额度视图 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReservationView"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     listQuotaMeta: {

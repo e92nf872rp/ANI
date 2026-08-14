@@ -1219,7 +1219,7 @@ paths:
         '403':
           schema: '{}'
         '409':
-          schema: '{}'
+          schema: ErrorResponse
         '422':
           schema: '{}'
   /instances/{instance_id}:
