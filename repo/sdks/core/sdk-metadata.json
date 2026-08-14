@@ -35,6 +35,18 @@
       "scope": "scope:quota:write"
     },
     {
+      "operationId": "getTenantReservations",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/reservations",
+      "scope": "scope:quota:read"
+    },
+    {
+      "operationId": "putTenantReservations",
+      "method": "PUT",
+      "path": "/admin/tenants/{tenant_id}/reservations",
+      "scope": "scope:quota:write"
+    },
+    {
       "operationId": "listAPIKeys",
       "method": "GET",
       "path": "/auth/api-keys",
@@ -293,6 +305,12 @@
       "scope": "scope:gpu-inventory:read"
     },
     {
+      "operationId": "updateGPUDeviceStatus",
+      "method": "PATCH",
+      "path": "/gpu-inventory/{device_id}",
+      "scope": "scope:gpu-inventory:write"
+    },
+    {
       "operationId": "listGPUSchedulingQueues",
       "method": "GET",
       "path": "/gpu-scheduling/queues",
@@ -327,6 +345,24 @@
       "method": "GET",
       "path": "/gpu-specs",
       "scope": "scope:gpu-inventory:read"
+    },
+    {
+      "operationId": "createGPUSpec",
+      "method": "POST",
+      "path": "/gpu-specs",
+      "scope": "scope:gpu-spec:write"
+    },
+    {
+      "operationId": "listGPUSpecAvailability",
+      "method": "GET",
+      "path": "/gpu-specs/availability",
+      "scope": "scope:gpu-spec:read"
+    },
+    {
+      "operationId": "deleteGPUSpec",
+      "method": "DELETE",
+      "path": "/gpu-specs/{spec_id}",
+      "scope": "scope:gpu-spec:write"
     },
     {
       "operationId": "getGPUSpec",
@@ -929,6 +965,18 @@
       "scope": "scope:platform-workloads:read"
     },
     {
+      "operationId": "listQuotas",
+      "method": "GET",
+      "path": "/quotas",
+      "scope": "scope:quota:read"
+    },
+    {
+      "operationId": "getMyQuota",
+      "method": "GET",
+      "path": "/quotas/me",
+      "scope": "scope:quota:read"
+    },
+    {
       "operationId": "readiness",
       "method": "GET",
       "path": "/readyz",
@@ -1011,6 +1059,12 @@
       "method": "GET",
       "path": "/registry/projects/{project}/scan-report",
       "scope": "scope:registry:read"
+    },
+    {
+      "operationId": "getMyReservations",
+      "method": "GET",
+      "path": "/reservations/me",
+      "scope": "scope:quota:read"
     },
     {
       "operationId": "listSandboxTemplates",
@@ -1264,6 +1318,7 @@
     "FilesystemMountTarget",
     "FilesystemMountTargetCreateRequest",
     "FilesystemMountTargetListResponse",
+    "GPUDeviceStatusUpdateRequest",
     "GPUInventoryListResponse",
     "GPUInventoryRecord",
     "GPUOccupancyStats",
@@ -1271,8 +1326,14 @@
     "GPUSchedulingQueueCreateRequest",
     "GPUSchedulingQueueListResponse",
     "GPUSchedulingQueueUpdateRequest",
+    "GPUSpec",
+    "GPUSpecAvailability",
+    "GPUSpecAvailabilityListResponse",
+    "GPUSpecCreateRequest",
     "GPUSpecListResponse",
+    "GPUSpecNodeAffinity",
     "GPUSpecSummary",
+    "GPUSpecVolcanoResources",
     "HealthCheck",
     "InstanceAccessSummary",
     "InstanceComputeSummary",
@@ -1376,6 +1437,7 @@
     "QuotaCreateRequest",
     "QuotaDeleteResponse",
     "QuotaItem",
+    "QuotaListResult",
     "QuotaMeta",
     "QuotaMetaListResponse",
     "QuotaUpdateItem",
@@ -1407,6 +1469,8 @@
     "RegistryRepositoryListResponse",
     "RegistryScanResult",
     "ReportTokenUsageRequest",
+    "ReservationPutRequest",
+    "ReservationView",
     "RevokeStatusResponse",
     "SandboxCheckpoint",
     "SandboxCheckpointActionRequest",
@@ -1573,6 +1637,7 @@
     "listStorageObjects",
     "listObservabilityAlertRules",
     "getPlatformWorkloadLogs",
+    "listQuotas",
     "listRegistryImages",
     "listRegistryProjects",
     "listRegistryRepositories",
@@ -1586,16 +1651,24 @@
   "errorCodes": [
     "BAD_REQUEST",
     "CONFLICT",
+    "DEVICE_NOT_FOUND",
     "FORBIDDEN",
+    "GPU_SPEC_CONFLICT",
+    "GPU_SPEC_IN_USE",
+    "GPU_SPEC_NOT_FOUND",
+    "GPU_TYPE_NOT_IN_NODES",
     "INTERNAL_ERROR",
     "INVALID_FILTER",
     "NOT_FOUND",
     "NOT_IMPLEMENTED",
     "PRECONDITION_FAILED",
     "QUOTA_ALREADY_EXISTS",
+    "QUOTA_EXCEEDED",
     "QUOTA_NOT_FOUND",
     "QUOTA_RESOURCE_NOT_REGISTERED",
     "RATE_LIMIT_EXCEEDED",
+    "RESERVATION_EXCEEDS_QUOTA",
+    "RESERVED_INSUFFICIENT",
     "TENANT_NOT_FOUND",
     "UNAUTHORIZED",
     "UNAVAILABLE",
