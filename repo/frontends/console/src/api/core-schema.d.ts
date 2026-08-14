@@ -3217,6 +3217,7 @@ export interface components {
             /** Format: date-time */
             completed_at?: string | null;
         };
+        /** @description 单个 Core GPUSpec 对平台内部工作负载的准入能力摘要。 */
         PlatformWorkloadAcceleratorCapability: {
             /** @description Core GPUSpec ID；只表达资源形态，不表达租户配额。 */
             spec_id: string;
@@ -3225,39 +3226,53 @@ export interface components {
             /** @description 能力查询时单节点最大可准入数量；这是提示，不是资源预留。 */
             max_single_node_count: number;
         };
+        /** @description Core 当前可供平台服务使用的工作负载拓扑、调度组件和加速器能力。 */
         PlatformWorkloadCapabilities: {
+            /** @description 当前允许创建的平台工作负载拓扑模式集合。 */
             supported_topology_modes: ("single_node" | "leader_worker")[];
             /** @description LeaderWorkerSet CRD 与 controller 是否满足准入前置条件。 */
             leader_worker_set_ready: boolean;
             /** @description gang scheduler、PodGroup CRD/controller 与 inference queue 是否就绪。 */
             gang_scheduling_ready: boolean;
+            /** @description Core admission allowlist 中已启用的版本化拓扑 profile。 */
             supported_topology_profiles?: {
+                /** @description 调用方创建工作负载时提交的拓扑 profile ID。 */
                 id: string;
+                /** @description 拓扑 profile 的不可变版本标识。 */
                 version: string;
-                /** @enum {string} */
+                /**
+                 * @description 该 profile 支持的拓扑模式。
+                 * @enum {string}
+                 */
                 mode: "single_node" | "leader_worker";
             }[];
+            /** @description 当前可查询的加速器规格及其准入可用性。 */
             accelerator_specs: components["schemas"]["PlatformWorkloadAcceleratorCapability"][];
         };
+        /** @description 单个 Pod role 或单节点副本申请的加速器资源。 */
         PlatformWorkloadAcceleratorResources: {
             /** @description Core GPUSpec ID。P0 只准入已通过 live gate 的整卡 GPU 规格。 */
             spec_id: string;
             /** @description 当前 Pod role 或单节点副本申请的 accelerator 数量。 */
             count: number;
         };
+        /** @description 单个 Pod role 或单节点副本的计算资源请求。 */
         PlatformWorkloadResources: {
             /** @description Kubernetes quantity 语义的 CPU request，例如 4 或 4000m。 */
             cpu: string;
             /** @description Kubernetes quantity 语义的内存 request，例如 16Gi。 */
             memory: string;
+            /** @description 可选加速器资源；CPU 工作负载不提交该字段。 */
             accelerator?: components["schemas"]["PlatformWorkloadAcceleratorResources"];
         };
+        /** @description leader-worker 拓扑中一个角色的 Pod 数量和单 Pod 资源规格。 */
         PlatformWorkloadRole: {
             /**
              * @description role Pod 数；leader 固定为 1，workers 必须显式给出。
              * @default 1
              */
             count: number;
+            /** @description 该 role 中每个 Pod 使用的计算资源规格。 */
             resources: components["schemas"]["PlatformWorkloadResources"];
         };
         /**
@@ -3265,14 +3280,21 @@ export interface components {
          *     P0 leader_worker 只接受顶层 replicas=1。Core 从 role resources 派生 LWS 与一个 PodGroup，调用方不能提交原生字段。
          */
         PlatformWorkloadTopology: {
-            /** @enum {string} */
+            /**
+             * @description single_node 使用 Deployment；leader_worker 使用 LeaderWorkerSet。
+             * @enum {string}
+             */
             mode: "single_node" | "leader_worker";
             /** @description Core admission allowlist 中的通用 Pod 拓扑 profile ID。 */
             profile_id: string;
+            /** @description 与 profile_id 配套的不可变版本；Core 不自动升级调用方提交的版本。 */
             profile_version: string;
+            /** @description leader_worker 模式的 leader role；single_node 模式禁止提交。 */
             leader?: components["schemas"]["PlatformWorkloadRole"];
+            /** @description leader_worker 模式的 worker role；single_node 模式禁止提交。 */
             workers?: components["schemas"]["PlatformWorkloadRole"];
         } & (unknown & unknown);
+        /** @description Provider-neutral 调度意图；Core 负责映射为实际队列和 gang scheduling 对象。 */
         PlatformWorkloadScheduling: {
             /**
              * @description P0 固定映射到 Core 管理的 inference 调度队列，调用方不提交 provider queue 名。
@@ -3282,34 +3304,50 @@ export interface components {
             /** @description single_node 固定 false；leader_worker 固定 true。 */
             gang: boolean;
         };
+        /** @description 平台工作负载通过集群内部 Service 暴露的单个命名端口。 */
         PlatformWorkloadPort: {
+            /** @description 端口的稳定 DNS label 名称，供健康检查通过 port_name 引用。 */
             name: string;
+            /** @description 容器监听并由 ClusterIP Service 暴露的 TCP 端口号。 */
             port: number;
         };
+        /** @description 平台工作负载的集群内部网络暴露意图。 */
         PlatformWorkloadNetwork: {
             /**
              * @description 只允许 ClusterIP；不创建 Ingress、NodePort 或 LoadBalancer。
              * @enum {string}
              */
             exposure: "cluster_internal";
+            /** @description 由同一个 ClusterIP Service 暴露的命名端口列表。 */
             ports: components["schemas"]["PlatformWorkloadPort"][];
         };
+        /** @description 由 Core 解析并挂载到工作负载的租户内只读 artifact。 */
         PlatformWorkloadArtifact: {
             /** @description Core 可解析的租户内 artifact/object opaque reference。 */
             object_ref: string;
+            /** @description artifact 在容器中的绝对挂载路径。 */
             mount_path: string;
         };
+        /** @description 由 Core 解析并以文件形式挂载的租户内 Secret 引用。 */
         PlatformWorkloadSecretBinding: {
             /** @description Core Secret reference；响应和日志不得回显明文。 */
             secret_ref: string;
+            /** @description Secret 在容器中的绝对挂载路径；不得与 artifact 挂载路径冲突。 */
             mount_path: string;
         };
+        /** @description Core 用于判断 provider runtime 是否就绪的集群内部健康检查。 */
         PlatformWorkloadHealthCheck: {
-            /** @enum {string} */
+            /**
+             * @description 健康检查协议；P0 仅支持 HTTP。
+             * @enum {string}
+             */
             protocol: "http";
+            /** @description 发送到 runtime 的 HTTP 健康检查绝对路径。 */
             path: string;
+            /** @description 引用 network.ports 中同名端口。 */
             port_name: string;
         };
+        /** @description 调用服务提供的关联元数据；不用于传递 provider 对象或业务凭据。 */
         PlatformWorkloadMetadata: {
             /** @description 调用服务提供的 opaque correlation reference；真正 provider owner 始终是 Core PlatformWorkload。 */
             owner_ref: string;
@@ -3319,6 +3357,7 @@ export interface components {
             };
         };
         /**
+         * @description 平台服务创建 Core 托管工作负载时提交的完整期望规格。
          * @example {
          *       "idempotency_key": "1df72d71-9d49-46c4-a48a-52bb37b082ab",
          *       "name": "inference-cpu-example",
@@ -3377,89 +3416,156 @@ export interface components {
          *     }
          */
         PlatformWorkloadCreateRequest: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description 一次逻辑创建操作的幂等键；重试必须复用同一个值。
+             */
             idempotency_key: string;
+            /** @description 租户内可读且符合 DNS label 的工作负载名称。 */
             name: string;
             /**
              * @description 通用调度分类；不携带模型、引擎或 Services 业务状态。
              * @enum {string}
              */
             workload_class: "inference";
-            /** @enum {string} */
+            /**
+             * @description Core runtime 类型；P0 仅支持容器工作负载。
+             * @enum {string}
+             */
             runtime_kind: "container";
             /** @description 必须是批准 registry 中的 digest-pinned image；tag 和 latest 必须拒绝。 */
             image_ref: string;
             /** @description 必须匹配 workload_class + topology profile 的 Core admission allowlist。 */
             command: string[];
+            /** @description 追加到 command 后的容器启动参数；必须通过对应 admission allowlist。 */
             args?: string[];
             /** @description single_node 表示 Pod 副本；leader_worker 表示 LWS group，P0 只接受 1。 */
             replicas: number;
+            /** @description single_node 模式下每个副本使用的计算资源；leader_worker 的实际资源由 topology roles 定义。 */
             resources: components["schemas"]["PlatformWorkloadResources"];
+            /** @description 选择单节点 Deployment 或版本化 leader-worker 执行拓扑。 */
             topology: components["schemas"]["PlatformWorkloadTopology"];
+            /** @description 与 topology 一致的 provider-neutral 队列和 gang scheduling 意图。 */
             scheduling: components["schemas"]["PlatformWorkloadScheduling"];
+            /** @description 仅允许创建集群内部 ClusterIP Service 的网络规格。 */
             network: components["schemas"]["PlatformWorkloadNetwork"];
+            /** @description 需要由 Core 解析并挂载的租户内 artifact 列表。 */
             artifacts?: components["schemas"]["PlatformWorkloadArtifact"][];
+            /** @description 需要由 Core 解析并挂载的租户内 Secret 引用列表。 */
             secret_bindings?: components["schemas"]["PlatformWorkloadSecretBinding"][];
+            /** @description Core 观察 runtime readiness 使用的集群内部健康检查。 */
             health_check: components["schemas"]["PlatformWorkloadHealthCheck"];
+            /** @description 调用服务的 owner correlation reference 和非保留 labels。 */
             metadata: components["schemas"]["PlatformWorkloadMetadata"];
         } & (unknown & unknown);
+        /** @description P0 平台工作负载副本数更新请求；资源和 placement 不可在线变更。 */
         PlatformWorkloadUpdateRequest: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description 一次逻辑更新操作的幂等键；重试必须复用同一个值。
+             */
             idempotency_key: string;
             /** @description P0 只允许修改 single_node 独立副本；leader_worker 固定为 1。 */
             replicas: number;
         };
+        /** @description 平台工作负载启动、停止或重启的幂等生命周期请求。 */
         PlatformWorkloadLifecycleRequest: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description 一次逻辑生命周期操作的幂等键；重试必须复用同一个值。
+             */
             idempotency_key: string;
-            /** @enum {string} */
+            /**
+             * @description 期望执行的生命周期动作。
+             * @enum {string}
+             */
             action: "start" | "stop" | "restart";
         };
+        /** @description Core 保存并向授权平台服务返回的平台工作负载状态投影。 */
         PlatformWorkload: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Core 分配的平台工作负载稳定 ID。
+             */
             id: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description 工作负载所属租户；所有读写必须受租户上下文隔离。
+             */
             tenant_id: string;
+            /** @description 创建请求中的租户内工作负载名称。 */
             name: string;
-            /** @enum {string} */
+            /**
+             * @description Core 根据期望状态和 provider observation 收敛出的生命周期状态。
+             * @enum {string}
+             */
             state: "pending" | "provisioning" | "running" | "starting" | "stopping" | "stopped" | "failed" | "deleting" | "deleted";
+            /** @description 每次成功修改期望规格时递增的版本号。 */
             generation: number;
+            /** @description provider observation 已处理的最新 generation；小于 generation 表示仍在收敛。 */
             observed_generation: number;
             /** @description Deployment 为 Pod 数；LeaderWorkerSet 为 group 数。 */
             desired_replicas: number;
             /** @description 与 desired_replicas 同单位；LeaderWorkerSet 直接投影 group 级 readyReplicas。 */
             ready_replicas: number;
-            /** @enum {string} */
+            /**
+             * @description Core 根据已批准 topology profile 选择的 provider runtime 形态。
+             * @enum {string}
+             */
             runtime_shape: "deployment" | "leader_worker_set";
+            /** @description 当前 applied topology profile ID。 */
             topology_profile_id: string;
+            /** @description 当前 applied topology profile 的不可变版本。 */
             topology_profile_version: string;
             /**
              * Format: uri
              * @description Only an authorized platform service identity may read this cluster-internal endpoint; never expose it through /instances or tenant-facing Services APIs.
              */
             internal_endpoint?: string | null;
+            /** @description 当前状态的稳定机器可读原因码；无原因时为 null。 */
             reason?: string | null;
             /** @description 脱敏后的诊断信息，不包含 provider 对象或凭据。 */
             message?: string | null;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description 平台工作负载资源创建时间。
+             */
             created_at: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description 期望规格或观察状态最后更新时间。
+             */
             updated_at: string;
         };
+        /** @description 从工作负载 runtime 聚合并完成脱敏的一条日志记录。 */
         PlatformWorkloadLogEntry: {
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description 日志事件时间。
+             */
             timestamp: string;
-            /** @enum {string} */
+            /**
+             * @description 归一化后的日志级别。
+             * @enum {string}
+             */
             level: "debug" | "info" | "warn" | "error";
+            /** @description 脱敏后的日志正文，不得包含 Secret、凭据或 provider 内部对象。 */
             message: string;
             /** @description 稳定的副本或 role 标识，不返回 Pod UID。 */
             replica?: string | null;
+            /** @description 多容器 runtime 中的稳定容器名称；无法确定时为 null。 */
             container?: string | null;
-            /** @enum {string|null} */
+            /**
+             * @description 日志来源流；无法确定时为 null。
+             * @enum {string|null}
+             */
             stream?: "stdout" | "stderr" | null;
         };
+        /** @description 平台工作负载日志的游标分页响应。 */
         PlatformWorkloadLogListResponse: {
+            /** @description 按时间顺序返回的脱敏日志记录。 */
             items: components["schemas"]["PlatformWorkloadLogEntry"][];
+            /** @description 下一页游标；没有更多日志时为 null。 */
             next_cursor?: string | null;
         };
         HealthCheck: {
