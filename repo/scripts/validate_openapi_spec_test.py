@@ -438,6 +438,7 @@ class OpenAPISpecValidatorTest(unittest.TestCase):
                 self.assertEqual(operation["security"], [{"BearerAuth": []}])
 
         for schema_name in (
+            "PlatformWorkloadAcceleratorCapability",
             "PlatformWorkloadCapabilities",
             "PlatformWorkloadAcceleratorResources",
             "PlatformWorkloadResources",
@@ -457,6 +458,30 @@ class OpenAPISpecValidatorTest(unittest.TestCase):
             "PlatformWorkloadLogListResponse",
         ):
             self.assertIn(schema_name, schemas)
+
+        def assert_property_descriptions(node: dict, path: str) -> None:
+            for property_name, property_schema in node.get("properties", {}).items():
+                property_path = f"{path}.{property_name}"
+                with self.subTest(property=property_path):
+                    self.assertIsInstance(property_schema, dict)
+                    self.assertTrue(
+                        str(property_schema.get("description", "")).strip(),
+                        f"{property_path} must define a non-empty description",
+                    )
+                assert_property_descriptions(property_schema, property_path)
+                items = property_schema.get("items")
+                if isinstance(items, dict):
+                    assert_property_descriptions(items, f"{property_path}.items")
+
+        for schema_name, schema in schemas.items():
+            if not schema_name.startswith("PlatformWorkload"):
+                continue
+            with self.subTest(schema=schema_name):
+                self.assertTrue(
+                    str(schema.get("description", "")).strip(),
+                    f"{schema_name} must define a non-empty description",
+                )
+            assert_property_descriptions(schema, schema_name)
 
         create = schemas["PlatformWorkloadCreateRequest"]
         self.assertEqual(

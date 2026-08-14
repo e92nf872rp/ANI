@@ -374,6 +374,7 @@ components:
     # ── 平台内部工作负载（仅服务身份）────────────────────────────────────────
     PlatformWorkloadAcceleratorCapability:
       type: object
+      description: 单个 Core GPUSpec 对平台内部工作负载的准入能力摘要。
       required: [spec_id, available, max_single_node_count]
       properties:
         spec_id:
@@ -389,12 +390,14 @@ components:
 
     PlatformWorkloadCapabilities:
       type: object
+      description: Core 当前可供平台服务使用的工作负载拓扑、调度组件和加速器能力。
       required: [supported_topology_modes, leader_worker_set_ready, gang_scheduling_ready, accelerator_specs]
       properties:
         supported_topology_modes:
           type: array
           minItems: 1
           uniqueItems: true
+          description: 当前允许创建的平台工作负载拓扑模式集合。
           items: { type: string, enum: [single_node, leader_worker] }
         leader_worker_set_ready:
           type: boolean
@@ -404,19 +407,22 @@ components:
           description: gang scheduler、PodGroup CRD/controller 与 inference queue 是否就绪。
         supported_topology_profiles:
           type: array
+          description: Core admission allowlist 中已启用的版本化拓扑 profile。
           items:
             type: object
             required: [id, version, mode]
             properties:
-              id: { type: string }
-              version: { type: string }
-              mode: { type: string, enum: [single_node, leader_worker] }
+              id: { type: string, description: "调用方创建工作负载时提交的拓扑 profile ID。" }
+              version: { type: string, description: "拓扑 profile 的不可变版本标识。" }
+              mode: { type: string, enum: [single_node, leader_worker], description: "该 profile 支持的拓扑模式。" }
         accelerator_specs:
           type: array
+          description: 当前可查询的加速器规格及其准入可用性。
           items: { $ref: '#/components/schemas/PlatformWorkloadAcceleratorCapability' }
 
     PlatformWorkloadAcceleratorResources:
       type: object
+      description: 单个 Pod role 或单节点副本申请的加速器资源。
       required: [spec_id, count]
       additionalProperties: false
       properties:
@@ -431,6 +437,7 @@ components:
 
     PlatformWorkloadResources:
       type: object
+      description: 单个 Pod role 或单节点副本的计算资源请求。
       required: [cpu, memory]
       additionalProperties: false
       properties:
@@ -444,9 +451,11 @@ components:
           description: Kubernetes quantity 语义的内存 request，例如 16Gi。
         accelerator:
           $ref: '#/components/schemas/PlatformWorkloadAcceleratorResources'
+          description: 可选加速器资源；CPU 工作负载不提交该字段。
 
     PlatformWorkloadRole:
       type: object
+      description: leader-worker 拓扑中一个角色的 Pod 数量和单 Pod 资源规格。
       required: [resources]
       additionalProperties: false
       properties:
@@ -457,6 +466,7 @@ components:
           description: role Pod 数；leader 固定为 1，workers 必须显式给出。
         resources:
           $ref: '#/components/schemas/PlatformWorkloadResources'
+          description: 该 role 中每个 Pod 使用的计算资源规格。
 
     PlatformWorkloadTopology:
       type: object
@@ -466,6 +476,7 @@ components:
         mode:
           type: string
           enum: [single_node, leader_worker]
+          description: single_node 使用 Deployment；leader_worker 使用 LeaderWorkerSet。
         profile_id:
           type: string
           minLength: 1
@@ -473,10 +484,13 @@ components:
         profile_version:
           type: string
           minLength: 1
+          description: 与 profile_id 配套的不可变版本；Core 不自动升级调用方提交的版本。
         leader:
           $ref: '#/components/schemas/PlatformWorkloadRole'
+          description: leader_worker 模式的 leader role；single_node 模式禁止提交。
         workers:
           $ref: '#/components/schemas/PlatformWorkloadRole'
+          description: leader_worker 模式的 worker role；single_node 模式禁止提交。
       allOf:
         - if:
             properties: { mode: { const: single_node } }
@@ -507,6 +521,7 @@ components:
 
     PlatformWorkloadScheduling:
       type: object
+      description: Provider-neutral 调度意图；Core 负责映射为实际队列和 gang scheduling 对象。
       required: [queue_class, gang]
       additionalProperties: false
       properties:
@@ -520,6 +535,7 @@ components:
 
     PlatformWorkloadPort:
       type: object
+      description: 平台工作负载通过集群内部 Service 暴露的单个命名端口。
       required: [name, port]
       additionalProperties: false
       properties:
@@ -527,13 +543,16 @@ components:
           type: string
           minLength: 1
           maxLength: 63
+          description: 端口的稳定 DNS label 名称，供健康检查通过 port_name 引用。
         port:
           type: integer
           minimum: 1
           maximum: 65535
+          description: 容器监听并由 ClusterIP Service 暴露的 TCP 端口号。
 
     PlatformWorkloadNetwork:
       type: object
+      description: 平台工作负载的集群内部网络暴露意图。
       required: [exposure, ports]
       additionalProperties: false
       properties:
@@ -544,10 +563,12 @@ components:
         ports:
           type: array
           minItems: 1
+          description: 由同一个 ClusterIP Service 暴露的命名端口列表。
           items: { $ref: '#/components/schemas/PlatformWorkloadPort' }
 
     PlatformWorkloadArtifact:
       type: object
+      description: 由 Core 解析并挂载到工作负载的租户内只读 artifact。
       required: [object_ref, mount_path]
       additionalProperties: false
       properties:
@@ -558,9 +579,11 @@ components:
         mount_path:
           type: string
           pattern: '^/'
+          description: artifact 在容器中的绝对挂载路径。
 
     PlatformWorkloadSecretBinding:
       type: object
+      description: 由 Core 解析并以文件形式挂载的租户内 Secret 引用。
       required: [secret_ref, mount_path]
       additionalProperties: false
       properties:
@@ -571,18 +594,21 @@ components:
         mount_path:
           type: string
           pattern: '^/'
+          description: Secret 在容器中的绝对挂载路径；不得与 artifact 挂载路径冲突。
 
     PlatformWorkloadHealthCheck:
       type: object
+      description: Core 用于判断 provider runtime 是否就绪的集群内部健康检查。
       required: [protocol, path, port_name]
       additionalProperties: false
       properties:
-        protocol: { type: string, enum: [http] }
-        path: { type: string, pattern: '^/' }
-        port_name: { type: string, minLength: 1 }
+        protocol: { type: string, enum: [http], description: "健康检查协议；P0 仅支持 HTTP。" }
+        path: { type: string, pattern: '^/', description: "发送到 runtime 的 HTTP 健康检查绝对路径。" }
+        port_name: { type: string, minLength: 1, description: "引用 network.ports 中同名端口。" }
 
     PlatformWorkloadMetadata:
       type: object
+      description: 调用服务提供的关联元数据；不用于传递 provider 对象或业务凭据。
       required: [owner_ref]
       additionalProperties: false
       properties:
@@ -597,20 +623,22 @@ components:
 
     PlatformWorkloadCreateRequest:
       type: object
+      description: 平台服务创建 Core 托管工作负载时提交的完整期望规格。
       required: [idempotency_key, name, workload_class, runtime_kind, image_ref, command, replicas, resources, topology, scheduling, network, health_check, metadata]
       additionalProperties: false
       properties:
-        idempotency_key: { type: string, format: uuid }
+        idempotency_key: { type: string, format: uuid, description: "一次逻辑创建操作的幂等键；重试必须复用同一个值。" }
         name:
           type: string
           minLength: 1
           maxLength: 63
           pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+          description: 租户内可读且符合 DNS label 的工作负载名称。
         workload_class:
           type: string
           enum: [inference]
           description: 通用调度分类；不携带模型、引擎或 Services 业务状态。
-        runtime_kind: { type: string, enum: [container] }
+        runtime_kind: { type: string, enum: [container], description: "Core runtime 类型；P0 仅支持容器工作负载。" }
         image_ref:
           type: string
           minLength: 1
@@ -623,6 +651,7 @@ components:
           description: 必须匹配 workload_class + topology profile 的 Core admission allowlist。
         args:
           type: array
+          description: 追加到 command 后的容器启动参数；必须通过对应 admission allowlist。
           items: { type: string }
         replicas:
           type: integer
@@ -630,22 +659,30 @@ components:
           description: single_node 表示 Pod 副本；leader_worker 表示 LWS group，P0 只接受 1。
         resources:
           $ref: '#/components/schemas/PlatformWorkloadResources'
+          description: single_node 模式下每个副本使用的计算资源；leader_worker 的实际资源由 topology roles 定义。
         topology:
           $ref: '#/components/schemas/PlatformWorkloadTopology'
+          description: 选择单节点 Deployment 或版本化 leader-worker 执行拓扑。
         scheduling:
           $ref: '#/components/schemas/PlatformWorkloadScheduling'
+          description: 与 topology 一致的 provider-neutral 队列和 gang scheduling 意图。
         network:
           $ref: '#/components/schemas/PlatformWorkloadNetwork'
+          description: 仅允许创建集群内部 ClusterIP Service 的网络规格。
         artifacts:
           type: array
+          description: 需要由 Core 解析并挂载的租户内 artifact 列表。
           items: { $ref: '#/components/schemas/PlatformWorkloadArtifact' }
         secret_bindings:
           type: array
+          description: 需要由 Core 解析并挂载的租户内 Secret 引用列表。
           items: { $ref: '#/components/schemas/PlatformWorkloadSecretBinding' }
         health_check:
           $ref: '#/components/schemas/PlatformWorkloadHealthCheck'
+          description: Core 观察 runtime readiness 使用的集群内部健康检查。
         metadata:
           $ref: '#/components/schemas/PlatformWorkloadMetadata'
+          description: 调用服务的 owner correlation reference 和非保留 labels。
       allOf:
         - if:
             properties:
@@ -689,10 +726,11 @@ components:
 
     PlatformWorkloadUpdateRequest:
       type: object
+      description: P0 平台工作负载副本数更新请求；资源和 placement 不可在线变更。
       required: [idempotency_key, replicas]
       additionalProperties: false
       properties:
-        idempotency_key: { type: string, format: uuid }
+        idempotency_key: { type: string, format: uuid, description: "一次逻辑更新操作的幂等键；重试必须复用同一个值。" }
         replicas:
           type: integer
           minimum: 1
@@ -700,22 +738,24 @@ components:
 
     PlatformWorkloadLifecycleRequest:
       type: object
+      description: 平台工作负载启动、停止或重启的幂等生命周期请求。
       required: [idempotency_key, action]
       additionalProperties: false
       properties:
-        idempotency_key: { type: string, format: uuid }
-        action: { type: string, enum: [start, stop, restart] }
+        idempotency_key: { type: string, format: uuid, description: "一次逻辑生命周期操作的幂等键；重试必须复用同一个值。" }
+        action: { type: string, enum: [start, stop, restart], description: "期望执行的生命周期动作。" }
 
     PlatformWorkload:
       type: object
+      description: Core 保存并向授权平台服务返回的平台工作负载状态投影。
       required: [id, tenant_id, name, state, generation, observed_generation, desired_replicas, ready_replicas, runtime_shape, topology_profile_id, topology_profile_version, created_at, updated_at]
       properties:
-        id: { type: string, format: uuid }
-        tenant_id: { type: string, format: uuid }
-        name: { type: string }
-        state: { type: string, enum: [pending, provisioning, running, starting, stopping, stopped, failed, deleting, deleted] }
-        generation: { type: integer, minimum: 1 }
-        observed_generation: { type: integer, minimum: 0 }
+        id: { type: string, format: uuid, description: "Core 分配的平台工作负载稳定 ID。" }
+        tenant_id: { type: string, format: uuid, description: "工作负载所属租户；所有读写必须受租户上下文隔离。" }
+        name: { type: string, description: "创建请求中的租户内工作负载名称。" }
+        state: { type: string, enum: [pending, provisioning, running, starting, stopping, stopped, failed, deleting, deleted], description: "Core 根据期望状态和 provider observation 收敛出的生命周期状态。" }
+        generation: { type: integer, minimum: 1, description: "每次成功修改期望规格时递增的版本号。" }
+        observed_generation: { type: integer, minimum: 0, description: "provider observation 已处理的最新 generation；小于 generation 表示仍在收敛。" }
         desired_replicas:
           type: integer
           minimum: 0
@@ -724,38 +764,41 @@ components:
           type: integer
           minimum: 0
           description: 与 desired_replicas 同单位；LeaderWorkerSet 直接投影 group 级 readyReplicas。
-        runtime_shape: { type: string, enum: [deployment, leader_worker_set] }
-        topology_profile_id: { type: string }
-        topology_profile_version: { type: string }
+        runtime_shape: { type: string, enum: [deployment, leader_worker_set], description: "Core 根据已批准 topology profile 选择的 provider runtime 形态。" }
+        topology_profile_id: { type: string, description: "当前 applied topology profile ID。" }
+        topology_profile_version: { type: string, description: "当前 applied topology profile 的不可变版本。" }
         internal_endpoint:
           type: string
           format: uri
           nullable: true
           description: Only an authorized platform service identity may read this cluster-internal endpoint; never expose it through /instances or tenant-facing Services APIs.
-        reason: { type: string, nullable: true }
+        reason: { type: string, nullable: true, description: "当前状态的稳定机器可读原因码；无原因时为 null。" }
         message: { type: string, nullable: true, description: 脱敏后的诊断信息，不包含 provider 对象或凭据。 }
-        created_at: { type: string, format: date-time }
-        updated_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time, description: "平台工作负载资源创建时间。" }
+        updated_at: { type: string, format: date-time, description: "期望规格或观察状态最后更新时间。" }
 
     PlatformWorkloadLogEntry:
       type: object
+      description: 从工作负载 runtime 聚合并完成脱敏的一条日志记录。
       required: [timestamp, level, message]
       properties:
-        timestamp: { type: string, format: date-time }
-        level: { type: string, enum: [debug, info, warn, error] }
-        message: { type: string }
+        timestamp: { type: string, format: date-time, description: "日志事件时间。" }
+        level: { type: string, enum: [debug, info, warn, error], description: "归一化后的日志级别。" }
+        message: { type: string, description: "脱敏后的日志正文，不得包含 Secret、凭据或 provider 内部对象。" }
         replica: { type: string, nullable: true, description: 稳定的副本或 role 标识，不返回 Pod UID。 }
-        container: { type: string, nullable: true }
-        stream: { type: string, enum: [stdout, stderr], nullable: true }
+        container: { type: string, nullable: true, description: "多容器 runtime 中的稳定容器名称；无法确定时为 null。" }
+        stream: { type: string, enum: [stdout, stderr], nullable: true, description: "日志来源流；无法确定时为 null。" }
 
     PlatformWorkloadLogListResponse:
       type: object
+      description: 平台工作负载日志的游标分页响应。
       required: [items]
       properties:
         items:
           type: array
+          description: 按时间顺序返回的脱敏日志记录。
           items: { $ref: '#/components/schemas/PlatformWorkloadLogEntry' }
-        next_cursor: { type: string, nullable: true }
+        next_cursor: { type: string, nullable: true, description: "下一页游标；没有更多日志时为 null。" }
 
     # Demo/Services schemas 已迁移：
     # - DemoInstance/DemoCreateInstanceRequest → api/openapi/dev.yaml
