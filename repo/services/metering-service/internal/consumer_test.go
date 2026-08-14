@@ -11,10 +11,10 @@ import (
 
 // mockMeteringCollectionService 实现 ports.MeteringCollectionService，用于单测 mock。
 type mockMeteringCollectionService struct {
-	startSpecs  []ports.CollectionSpec
-	stopRefs    []string
-	startErr    error
-	stopErr     error
+	startSpecs []ports.CollectionSpec
+	stopRefs   []string
+	startErr   error
+	stopErr    error
 }
 
 func (m *mockMeteringCollectionService) StartCollection(ctx context.Context, spec ports.CollectionSpec) error {
@@ -53,7 +53,7 @@ func makeEventPayload(event ports.InstanceLifecycleEvent) []byte {
 
 func TestHandleEventSuccessAdvancesSeenSeq(t *testing.T) {
 	mockSvc := &mockMeteringCollectionService{}
-	c := NewConsumer(mockSvc, nil)
+	c := NewConsumer(mockSvc, nil, 60)
 
 	event := ports.InstanceLifecycleEvent{
 		InstanceID:   "inst-001",
@@ -105,7 +105,7 @@ func TestHandleEventSuccessAdvancesSeenSeq(t *testing.T) {
 func TestHandleEventFailureDoesNotAdvanceSeenSeq(t *testing.T) {
 	sentinel := errors.New("start collection failed")
 	mockSvc := &mockMeteringCollectionService{startErr: sentinel}
-	c := NewConsumer(mockSvc, nil)
+	c := NewConsumer(mockSvc, nil, 60)
 
 	event := ports.InstanceLifecycleEvent{
 		InstanceID:   "inst-002",
@@ -137,7 +137,7 @@ func TestHandleEventFailureDoesNotAdvanceSeenSeq(t *testing.T) {
 
 func TestHandleEventStaleEventDiscarded(t *testing.T) {
 	mockSvc := &mockMeteringCollectionService{}
-	c := NewConsumer(mockSvc, nil)
+	c := NewConsumer(mockSvc, nil, 60)
 
 	// 预置 seenSeq=500。
 	c.mu.Lock()
@@ -192,7 +192,7 @@ func TestHandleEventStaleEventDiscarded(t *testing.T) {
 
 func TestHandleEventPoisonMessageAckSkip(t *testing.T) {
 	mockSvc := &mockMeteringCollectionService{}
-	c := NewConsumer(mockSvc, nil)
+	c := NewConsumer(mockSvc, nil, 60)
 
 	msg := &mockMessage{
 		headers: map[string][]string{"tenant-id": {"tenant-d"}},
@@ -216,7 +216,7 @@ func TestHandleEventPoisonMessageAckSkip(t *testing.T) {
 
 func TestHandleEventTenantMismatchNakRedelivery(t *testing.T) {
 	mockSvc := &mockMeteringCollectionService{}
-	c := NewConsumer(mockSvc, nil)
+	c := NewConsumer(mockSvc, nil, 60)
 
 	event := ports.InstanceLifecycleEvent{
 		InstanceID: "inst-005",
@@ -252,12 +252,12 @@ func TestHandleEventTenantMismatchNakRedelivery(t *testing.T) {
 
 func TestHandleEventUnknownStatusAckSkip(t *testing.T) {
 	mockSvc := &mockMeteringCollectionService{}
-	c := NewConsumer(mockSvc, nil)
+	c := NewConsumer(mockSvc, nil, 60)
 
 	event := ports.InstanceLifecycleEvent{
 		InstanceID: "inst-006",
 		TenantID:   "tenant-f",
-		NewStatus:   "unknown_status",
+		NewStatus:  "unknown_status",
 		EventSeq:   600,
 	}
 	msg := &mockMessage{
@@ -290,7 +290,7 @@ func TestHandleEventUnknownStatusAckSkip(t *testing.T) {
 
 func TestHandleEventStoppedRoutesToStopCollection(t *testing.T) {
 	mockSvc := &mockMeteringCollectionService{}
-	c := NewConsumer(mockSvc, nil)
+	c := NewConsumer(mockSvc, nil, 60)
 
 	event := ports.InstanceLifecycleEvent{
 		InstanceID: "inst-007",
@@ -325,7 +325,7 @@ func TestHandleEventStoppedRoutesToStopCollection(t *testing.T) {
 
 func TestHandleEventFailedRoutesToStopCollection(t *testing.T) {
 	mockSvc := &mockMeteringCollectionService{}
-	c := NewConsumer(mockSvc, nil)
+	c := NewConsumer(mockSvc, nil, 60)
 
 	event := ports.InstanceLifecycleEvent{
 		InstanceID: "inst-008",
@@ -348,7 +348,7 @@ func TestHandleEventFailedRoutesToStopCollection(t *testing.T) {
 
 func TestHandleEventDeletedRoutesToStopCollection(t *testing.T) {
 	mockSvc := &mockMeteringCollectionService{}
-	c := NewConsumer(mockSvc, nil)
+	c := NewConsumer(mockSvc, nil, 60)
 
 	event := ports.InstanceLifecycleEvent{
 		InstanceID: "inst-009",
@@ -374,7 +374,7 @@ func TestHandleEventDeletedRoutesToStopCollection(t *testing.T) {
 func TestHandleEventStopFailureDoesNotAdvanceSeenSeq(t *testing.T) {
 	sentinel := errors.New("stop collection failed")
 	mockSvc := &mockMeteringCollectionService{stopErr: sentinel}
-	c := NewConsumer(mockSvc, nil)
+	c := NewConsumer(mockSvc, nil, 60)
 
 	event := ports.InstanceLifecycleEvent{
 		InstanceID: "inst-010",
@@ -404,7 +404,7 @@ func TestHandleEventStopFailureDoesNotAdvanceSeenSeq(t *testing.T) {
 
 func TestHandleEventSeenSeqOnlyAdvancesOnSuccess(t *testing.T) {
 	mockSvc := &mockMeteringCollectionService{}
-	c := NewConsumer(mockSvc, nil)
+	c := NewConsumer(mockSvc, nil, 60)
 
 	// 第一次成功处理 seq=100。
 	event1 := ports.InstanceLifecycleEvent{

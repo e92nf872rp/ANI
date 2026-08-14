@@ -15,17 +15,20 @@ type Rebuilder struct {
 	metadataStore ports.MetadataStore
 	metering      ports.MeteringCollectionService
 	logger        *slog.Logger
+	intervalSec   int
 }
 
 // NewRebuilder 创建 rebuilder。
 // metadataStore: 用 WithPlatformTx 绕 RLS 跨租户查询 workload_instances。
 // metering: 采集生命周期控制服务，对每个 running 实例调 StartCollection。
 // logger: 结构化日志记录器，可为 nil（单测无需注入）。
-func NewRebuilder(metadataStore ports.MetadataStore, metering ports.MeteringCollectionService, logger *slog.Logger) *Rebuilder {
+// intervalSec: 采集周期（秒），传入 buildSpec 设置 CollectionSpec.IntervalSec。
+func NewRebuilder(metadataStore ports.MetadataStore, metering ports.MeteringCollectionService, logger *slog.Logger, intervalSec int) *Rebuilder {
 	return &Rebuilder{
 		metadataStore: metadataStore,
 		metering:      metering,
 		logger:        logger,
+		intervalSec:   intervalSec,
 	}
 }
 
@@ -56,7 +59,7 @@ func (r *Rebuilder) Rebuild(ctx context.Context) error {
 			}
 
 			gpuCount := parseGPUCount(gpuStatusJSON)
-			spec := buildSpec(tenantID, instanceID, name, kind, gpuCount)
+			spec := buildSpec(tenantID, instanceID, name, kind, gpuCount, r.intervalSec)
 			if err := r.metering.StartCollection(ctx, spec); err != nil {
 				// 单实例失败不阻塞，记 Error 日志继续重建其余实例。
 				r.safeLog(func(l *slog.Logger) {

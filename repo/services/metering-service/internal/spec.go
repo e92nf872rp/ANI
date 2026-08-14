@@ -10,9 +10,9 @@ import (
 
 // buildSpec 根据 workload_kind 硬编码维度映射，构造 CollectionSpec。
 // 供 consumer 和 rebuilder 共用：
-//   - consumer: buildSpec(event.TenantID, event.InstanceID, event.Name, event.WorkloadKind, gpuCount)
+//   - consumer: buildSpec(event.TenantID, event.InstanceID, event.Name, event.WorkloadKind, gpuCount, intervalSec)
 //     gpuCount 从 event.GPUSpec.Count 提取（nil 则 0）
-//   - rebuilder: buildSpec(tenantID, instanceID, name, kind, gpuCount)
+//   - rebuilder: buildSpec(tenantID, instanceID, name, kind, gpuCount, intervalSec)
 //     gpuCount 从 parseGPUCount(gpuStatusJSON) 提取
 //
 // 维度映射：
@@ -23,16 +23,20 @@ import (
 //
 // ResourceRef 使用 instance_id（用于 ticker 去重和 StopCollection 标识），
 // WorkloadName 使用 name（用于 PromQL pod 正则匹配）。
-// IntervalSec 默认 60，StartedAt 默认 time.Now()。
+// IntervalSec 由调用方从配置注入（默认 60，可通过 METERING_COLLECTION_INTERVAL_SECONDS 环境变量覆盖）。
+// StartedAt 默认 time.Now()。
 // gpuCount > 0 时设置 GPUSpec，否则为 nil。
-func buildSpec(tenantID, instanceID, name, kind string, gpuCount int) ports.CollectionSpec {
+func buildSpec(tenantID, instanceID, name, kind string, gpuCount int, intervalSec int) ports.CollectionSpec {
+	if intervalSec <= 0 {
+		intervalSec = 60
+	}
 	spec := ports.CollectionSpec{
 		ResourceRef:  instanceID,
 		WorkloadName: name,
 		TenantID:     tenantID,
 		WorkloadKind: kind,
 		Dimensions:   dimensionsFor(kind),
-		IntervalSec:  60,
+		IntervalSec:  intervalSec,
 		StartedAt:    time.Now(),
 	}
 	if gpuCount > 0 {

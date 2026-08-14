@@ -7,7 +7,7 @@ import (
 )
 
 func TestBuildSpecGPUContainer(t *testing.T) {
-	spec := buildSpec("tenant-1", "inst-1", "my-gpu-app", "gpu_container", 2)
+	spec := buildSpec("tenant-1", "inst-1", "my-gpu-app", "gpu_container", 2, 60)
 	if spec.ResourceRef != "inst-1" {
 		t.Errorf("ResourceRef = %q, want inst-1", spec.ResourceRef)
 	}
@@ -47,7 +47,7 @@ func TestBuildSpecGPUContainer(t *testing.T) {
 }
 
 func TestBuildSpecVM(t *testing.T) {
-	spec := buildSpec("t-2", "inst-2", "my-vm", "vm", 0)
+	spec := buildSpec("t-2", "inst-2", "my-vm", "vm", 0, 60)
 	if len(spec.Dimensions) != 2 {
 		t.Fatalf("vm Dimensions len = %d, want 2", len(spec.Dimensions))
 	}
@@ -63,7 +63,7 @@ func TestBuildSpecVM(t *testing.T) {
 }
 
 func TestBuildSpecContainer(t *testing.T) {
-	spec := buildSpec("t-3", "inst-3", "my-container", "container", 0)
+	spec := buildSpec("t-3", "inst-3", "my-container", "container", 0, 60)
 	if len(spec.Dimensions) != 2 {
 		t.Fatalf("container Dimensions len = %d, want 2", len(spec.Dimensions))
 	}
@@ -73,7 +73,7 @@ func TestBuildSpecContainer(t *testing.T) {
 }
 
 func TestBuildSpecUnknownKindDefaultsToCPUAndMem(t *testing.T) {
-	spec := buildSpec("t-4", "inst-4", "my-unknown", "unknown_kind", 0)
+	spec := buildSpec("t-4", "inst-4", "my-unknown", "unknown_kind", 0, 60)
 	if len(spec.Dimensions) != 2 {
 		t.Fatalf("unknown kind Dimensions len = %d, want 2", len(spec.Dimensions))
 	}
@@ -86,14 +86,14 @@ func TestBuildSpecUnknownKindDefaultsToCPUAndMem(t *testing.T) {
 }
 
 func TestBuildSpecGPUContainerZeroCount(t *testing.T) {
-	spec := buildSpec("t-5", "inst-5", "my-gpu-zero", "gpu_container", 0)
+	spec := buildSpec("t-5", "inst-5", "my-gpu-zero", "gpu_container", 0, 60)
 	if spec.GPUSpec != nil {
 		t.Errorf("gpu_container with 0 count GPUSpec = %v, want nil", spec.GPUSpec)
 	}
 }
 
 // TestBuildSpecConsumerCall 显式覆盖 consumer 调用契约：
-// buildSpec(event.TenantID, event.InstanceID, event.Name, event.WorkloadKind, gpuCount)，
+// buildSpec(event.TenantID, event.InstanceID, event.Name, event.WorkloadKind, gpuCount, intervalSec)，
 // gpuCount 从 event.GPUSpec.Count 提取（nil 则 0）。
 func TestBuildSpecConsumerCall(t *testing.T) {
 	event := ports.InstanceLifecycleEvent{
@@ -107,7 +107,7 @@ func TestBuildSpecConsumerCall(t *testing.T) {
 	if event.GPUSpec != nil {
 		gpuCount = event.GPUSpec.Count
 	}
-	spec := buildSpec(event.TenantID, event.InstanceID, event.Name, event.WorkloadKind, gpuCount)
+	spec := buildSpec(event.TenantID, event.InstanceID, event.Name, event.WorkloadKind, gpuCount, 60)
 	if spec.ResourceRef != "inst-consumer" {
 		t.Errorf("ResourceRef = %q, want inst-consumer", spec.ResourceRef)
 	}
@@ -135,19 +135,19 @@ func TestBuildSpecConsumerCallNilGPUSpec(t *testing.T) {
 	if event.GPUSpec != nil {
 		gpuCount = event.GPUSpec.Count
 	}
-	spec := buildSpec(event.TenantID, event.InstanceID, event.Name, event.WorkloadKind, gpuCount)
+	spec := buildSpec(event.TenantID, event.InstanceID, event.Name, event.WorkloadKind, gpuCount, 60)
 	if spec.GPUSpec != nil {
 		t.Errorf("nil GPUSpec should produce nil spec.GPUSpec, got %v", spec.GPUSpec)
 	}
 }
 
 // TestBuildSpecRebuilderCall 显式覆盖 rebuilder 调用契约：
-// buildSpec(tenantID, instanceID, name, kind, gpuCount)，
+// buildSpec(tenantID, instanceID, name, kind, gpuCount, intervalSec)，
 // gpuCount 从 parseGPUCount(gpuStatusJSON) 提取。
 func TestBuildSpecRebuilderCall(t *testing.T) {
 	gpuStatusJSON := []byte(`{"count": 8}`)
 	gpuCount := parseGPUCount(gpuStatusJSON)
-	spec := buildSpec("tenant-rebuild", "inst-rebuild", "my-gpu-vm", "gpu_container", gpuCount)
+	spec := buildSpec("tenant-rebuild", "inst-rebuild", "my-gpu-vm", "gpu_container", gpuCount, 60)
 	if spec.ResourceRef != "inst-rebuild" {
 		t.Errorf("ResourceRef = %q, want inst-rebuild", spec.ResourceRef)
 	}
@@ -166,9 +166,25 @@ func TestBuildSpecRebuilderCall(t *testing.T) {
 func TestBuildSpecRebuilderCallMissingGPUCount(t *testing.T) {
 	gpuStatusJSON := []byte(`{}`)
 	gpuCount := parseGPUCount(gpuStatusJSON)
-	spec := buildSpec("t-r2", "inst-r2", "my-vm-2", "vm", gpuCount)
+	spec := buildSpec("t-r2", "inst-r2", "my-vm-2", "vm", gpuCount, 60)
 	if spec.GPUSpec != nil {
 		t.Errorf("missing gpu_status should produce nil GPUSpec, got %v", spec.GPUSpec)
+	}
+}
+
+// TestBuildSpecCustomInterval 验证 intervalSec 参数正确注入到 CollectionSpec。
+func TestBuildSpecCustomInterval(t *testing.T) {
+	spec := buildSpec("t-int", "inst-int", "my-app", "container", 0, 30)
+	if spec.IntervalSec != 30 {
+		t.Errorf("IntervalSec = %d, want 30", spec.IntervalSec)
+	}
+}
+
+// TestBuildSpecZeroIntervalDefaultsTo60 验证 intervalSec<=0 时回退到默认 60。
+func TestBuildSpecZeroIntervalDefaultsTo60(t *testing.T) {
+	spec := buildSpec("t-zero", "inst-zero", "my-app", "container", 0, 0)
+	if spec.IntervalSec != 60 {
+		t.Errorf("IntervalSec = %d, want 60 (default fallback)", spec.IntervalSec)
 	}
 }
 

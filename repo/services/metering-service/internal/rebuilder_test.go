@@ -17,9 +17,9 @@ type mockRows struct {
 	err  error // Err() 返回值
 }
 
-func (m *mockRows) Close()             {}
-func (m *mockRows) Err() error          { return m.err }
-func (m *mockRows) Next() bool          { m.idx++; return m.idx <= len(m.rows) }
+func (m *mockRows) Close()     {}
+func (m *mockRows) Err() error { return m.err }
+func (m *mockRows) Next() bool { m.idx++; return m.idx <= len(m.rows) }
 func (m *mockRows) Scan(dest ...any) error {
 	row := m.rows[m.idx-1]
 	for i := range dest {
@@ -85,7 +85,7 @@ func TestRebuildCallsWithPlatformTx(t *testing.T) {
 		tx: &mockTx{rows: rows},
 	}
 	mockSvc := &mockMeteringCollectionService{}
-	r := NewRebuilder(store, mockSvc, nil)
+	r := NewRebuilder(store, mockSvc, nil, 60)
 
 	if err := r.Rebuild(context.Background()); err != nil {
 		t.Fatalf("Rebuild 返回错误: %v", err)
@@ -107,7 +107,7 @@ func TestRebuildStartsCollectionForRunningInstances(t *testing.T) {
 	}
 	store := &mockMetadataStore{tx: &mockTx{rows: rows}}
 	mockSvc := &mockMeteringCollectionService{}
-	r := NewRebuilder(store, mockSvc, nil)
+	r := NewRebuilder(store, mockSvc, nil, 60)
 
 	if err := r.Rebuild(context.Background()); err != nil {
 		t.Fatalf("Rebuild 返回错误: %v", err)
@@ -151,15 +151,15 @@ func TestRebuildParsesGPUStatus(t *testing.T) {
 	rows := &mockRows{
 		rows: [][]any{
 			{"tenant-a", "inst-gpu-1", "gpu-app-1", "gpu_container", []byte(`{"count": 8}`)},
-			{"tenant-b", "inst-gpu-2", "gpu-app-2", "gpu_container", []byte(`{}`)},          // 缺失 count → 0
-			{"tenant-c", "inst-gpu-3", "gpu-app-3", "gpu_container", []byte(`null`)},        // null → 0
-			{"tenant-d", "inst-gpu-4", "gpu-app-4", "gpu_container", nil},                   // nil → 0
-			{"tenant-e", "inst-gpu-5", "gpu-app-5", "gpu_container", []byte(`invalid`)},     // 畸形 → 0
+			{"tenant-b", "inst-gpu-2", "gpu-app-2", "gpu_container", []byte(`{}`)},      // 缺失 count → 0
+			{"tenant-c", "inst-gpu-3", "gpu-app-3", "gpu_container", []byte(`null`)},    // null → 0
+			{"tenant-d", "inst-gpu-4", "gpu-app-4", "gpu_container", nil},               // nil → 0
+			{"tenant-e", "inst-gpu-5", "gpu-app-5", "gpu_container", []byte(`invalid`)}, // 畸形 → 0
 		},
 	}
 	store := &mockMetadataStore{tx: &mockTx{rows: rows}}
 	mockSvc := &mockMeteringCollectionService{}
-	r := NewRebuilder(store, mockSvc, nil)
+	r := NewRebuilder(store, mockSvc, nil, 60)
 
 	if err := r.Rebuild(context.Background()); err != nil {
 		t.Fatalf("Rebuild 返回错误: %v", err)
@@ -199,7 +199,7 @@ func TestRebuildSingleInstanceFailureDoesNotBlock(t *testing.T) {
 		err:     errors.New("start collection failed"),
 	}
 
-	r := NewRebuilder(store, controllableSvc, nil)
+	r := NewRebuilder(store, controllableSvc, nil, 60)
 
 	if err := r.Rebuild(context.Background()); err != nil {
 		t.Fatalf("单实例失败不应导致 Rebuild 返回错误, 实际: %v", err)
@@ -248,7 +248,7 @@ func (c *conditionalStartService) StopCollection(ctx context.Context, resourceRe
 func TestRebuildWithPlatformTxError(t *testing.T) {
 	store := &mockMetadataStore{err: errors.New("db connection failed")}
 	mockSvc := &mockMeteringCollectionService{}
-	r := NewRebuilder(store, mockSvc, nil)
+	r := NewRebuilder(store, mockSvc, nil, 60)
 
 	err := r.Rebuild(context.Background())
 	if err == nil {
@@ -267,7 +267,7 @@ func TestRebuildQueryError(t *testing.T) {
 		tx: &mockTx{err: errors.New("query failed")},
 	}
 	mockSvc := &mockMeteringCollectionService{}
-	r := NewRebuilder(store, mockSvc, nil)
+	r := NewRebuilder(store, mockSvc, nil, 60)
 
 	err := r.Rebuild(context.Background())
 	if err == nil {
@@ -285,7 +285,7 @@ func TestRebuildNoRunningInstances(t *testing.T) {
 	rows := &mockRows{rows: nil}
 	store := &mockMetadataStore{tx: &mockTx{rows: rows}}
 	mockSvc := &mockMeteringCollectionService{}
-	r := NewRebuilder(store, mockSvc, nil)
+	r := NewRebuilder(store, mockSvc, nil, 60)
 
 	if err := r.Rebuild(context.Background()); err != nil {
 		t.Fatalf("无 running 实例时 Rebuild 应返回 nil, 实际: %v", err)
@@ -305,7 +305,7 @@ func TestRebuildRowsErr(t *testing.T) {
 	}, err: rowsErr}
 	store := &mockMetadataStore{tx: &mockTx{rows: rows}}
 	mockSvc := &mockMeteringCollectionService{}
-	r := NewRebuilder(store, mockSvc, nil)
+	r := NewRebuilder(store, mockSvc, nil, 60)
 
 	err := r.Rebuild(context.Background())
 	if !errors.Is(err, rowsErr) {

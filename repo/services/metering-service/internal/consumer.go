@@ -16,20 +16,23 @@ import (
 // MaxInflight=1 串行消费保证顺序，seenSeq 严格递增判定才有效。
 // seenSeq 是进程内存态，重启归零（接受此边界，不持久化）。
 type Consumer struct {
-	metering ports.MeteringCollectionService
-	logger   *slog.Logger
-	mu       sync.Mutex
-	seenSeq  map[string]uint64
+	metering    ports.MeteringCollectionService
+	logger      *slog.Logger
+	mu          sync.Mutex
+	seenSeq     map[string]uint64
+	intervalSec int
 }
 
 // NewConsumer 创建 metering consumer。
 // metering: 采集生命周期控制服务，handleEvent 根据事件状态调用 Start/StopCollection。
 // logger: 结构化日志记录器，可为 nil（单测无需注入）。
-func NewConsumer(metering ports.MeteringCollectionService, logger *slog.Logger) *Consumer {
+// intervalSec: 采集周期（秒），传入 buildSpec 设置 CollectionSpec.IntervalSec。
+func NewConsumer(metering ports.MeteringCollectionService, logger *slog.Logger, intervalSec int) *Consumer {
 	return &Consumer{
-		metering: metering,
-		logger:   logger,
-		seenSeq:  make(map[string]uint64),
+		metering:    metering,
+		logger:      logger,
+		seenSeq:     make(map[string]uint64),
+		intervalSec: intervalSec,
 	}
 }
 
@@ -91,7 +94,7 @@ func (c *Consumer) handleEvent(ctx context.Context, msg ports.Message) error {
 		if event.GPUSpec != nil {
 			gpuCount = event.GPUSpec.Count
 		}
-		spec := buildSpec(event.TenantID, event.InstanceID, event.Name, event.WorkloadKind, gpuCount)
+		spec := buildSpec(event.TenantID, event.InstanceID, event.Name, event.WorkloadKind, gpuCount, c.intervalSec)
 		processErr = c.metering.StartCollection(ctx, spec)
 	case "stopped", "failed", "deleted":
 		processErr = c.metering.StopCollection(ctx, event.InstanceID)

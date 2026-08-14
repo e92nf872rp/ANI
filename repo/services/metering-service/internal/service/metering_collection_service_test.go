@@ -20,9 +20,9 @@ func testService(collectAll CollectAllFunc, persist persistFunc) *meteringCollec
 		specs:         make(map[string]*ports.CollectionSpec),
 		everCollected: make(map[string]bool),
 		db:            nil,
-		logger:         nil,
-		collectAll:     collectAll,
-		persistFn:      persist,
+		logger:        nil,
+		collectAll:    collectAll,
+		persistFn:     persist,
 	}
 }
 

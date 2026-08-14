@@ -28,9 +28,9 @@ func main() {
 	// 构造 meteringCollectionService，注入 CollectAll 实现（PR-M2 产物）。
 	meteringSvc := service.NewMeteringCollectionService(deps.DB, logger, metering.CollectAll)
 
-	// 构造 consumer 和 rebuilder。
-	consumer := internal.NewConsumer(meteringSvc, logger)
-	rebuilder := internal.NewRebuilder(deps.Ports.Metadata, meteringSvc, logger)
+	// 构造 consumer 和 rebuilder，注入配置的采集周期。
+	consumer := internal.NewConsumer(meteringSvc, logger, cfg.CollectionIntervalSeconds)
+	rebuilder := internal.NewRebuilder(deps.Ports.Metadata, meteringSvc, logger, cfg.CollectionIntervalSeconds)
 
 	// 1. 先重建（查 workload_instances WHERE state='running'）重建 ticker。
 	//    重建失败不阻塞：日志告警后继续订阅（靠事件增量 + DeliverAll 兜底）。
