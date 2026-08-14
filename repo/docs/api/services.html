@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1/svc</code></dd></div>
-          <div><dt>Operations</dt><dd>65</dd></div>
-          <div><dt>Schemas</dt><dd>59</dd></div>
+          <div><dt>Operations</dt><dd>91</dd></div>
+          <div><dt>Schemas</dt><dd>92</dd></div>
         </dl>
       </section>
 
@@ -241,11 +241,19 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/inference-operations/{operation_id}</code></td>
+          <td><code>getInferenceOperation</code></td>
+          <td>查询推理服务异步操作</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/inference-services</code></td>
           <td><code>listInferenceServices</code></td>
           <td>获取推理服务列表</td>
           <td><code></code></td>
-          <td>200</td>
+          <td>200, 401, 403</td>
         </tr>
         <tr>
           <td><span class="method method-post">POST</span></td>
@@ -253,7 +261,7 @@
           <td><code>createInferenceService</code></td>
           <td>部署推理服务</td>
           <td><code></code></td>
-          <td>202</td>
+          <td>202, 400, 401, 403, 409, 422, 503</td>
         </tr>
         <tr>
           <td><span class="method method-delete">DELETE</span></td>
@@ -261,7 +269,7 @@
           <td><code>deleteInferenceService</code></td>
           <td>停止并删除推理服务</td>
           <td><code></code></td>
-          <td>202, 401, 403, 404</td>
+          <td>202, 401, 403, 404, 409, 503</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -269,7 +277,23 @@
           <td><code>getInferenceService</code></td>
           <td>获取推理服务详情</td>
           <td><code></code></td>
-          <td>200, 404</td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-patch">PATCH</span></td>
+          <td><code>/inference-services/{service_id}</code></td>
+          <td><code>updateInferenceService</code></td>
+          <td>修改推理服务副本数</td>
+          <td><code></code></td>
+          <td>202, 400, 401, 403, 404, 409, 422, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/inference-services/{service_id}/lifecycle</code></td>
+          <td><code>applyInferenceServiceLifecycle</code></td>
+          <td>执行推理服务生命周期动作</td>
+          <td><code></code></td>
+          <td>202, 400, 401, 403, 404, 409, 422, 503</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -285,7 +309,7 @@
           <td><code>updateInferenceServicePolicies</code></td>
           <td>更新推理服务限流与访问策略</td>
           <td><code></code></td>
-          <td>200, 400, 401, 403, 404</td>
+          <td>200, 400, 401, 403, 404, 501</td>
         </tr>
         <tr>
           <td><span class="method method-post">POST</span></td>
@@ -293,7 +317,7 @@
           <td><code>testInferenceService</code></td>
           <td>推理服务调用测试</td>
           <td><code></code></td>
-          <td>200, 400, 401, 403, 404</td>
+          <td>200, 400, 401, 403, 404, 422, 502, 503, 504</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -392,20 +416,20 @@
           <td>200, 400, 401, 403, 409, 413, 422</td>
         </tr>
         <tr>
-          <td><span class="method method-post">POST</span></td>
-          <td><code>/knowledge-bases/{kb_id}/documents/notify-uploaded</code></td>
-          <td><code>notifyDocumentUploaded</code></td>
-          <td>通知文档已直传至对象存储（两步式上传 step 2）</td>
-          <td><code></code></td>
-          <td>202, 400, 401, 403, 404, 409, 422, 503</td>
-        </tr>
-        <tr>
           <td><span class="method method-delete">DELETE</span></td>
           <td><code>/knowledge-bases/{kb_id}/documents/{doc_id}</code></td>
           <td><code>deleteKnowledgeBaseDocument</code></td>
           <td>删除知识库文档</td>
           <td><code></code></td>
           <td>204, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/knowledge-bases/{kb_id}/documents/{doc_id}/notify-uploaded</code></td>
+          <td><code>notifyDocumentUploaded</code></td>
+          <td>通知文档已直传至对象存储（两步式上传 step 2）</td>
+          <td><code></code></td>
+          <td>202, 400, 401, 403, 404, 409, 422, 503</td>
         </tr>
         <tr>
           <td><span class="method method-post">POST</span></td>
@@ -585,6 +609,94 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant-admins</code></td>
+          <td><code>listAllTenantAdmins</code></td>
+          <td>跨租户管理员列表（仅返回 owner/admin/邀请中）（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant-plans</code></td>
+          <td><code>listTenantPlans</code></td>
+          <td>查询套餐列表</td>
+          <td><code></code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenant-plans</code></td>
+          <td><code>createTenantPlan</code></td>
+          <td>创建套餐（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/tenant-plans/{planId}</code></td>
+          <td><code>deleteTenantPlan</code></td>
+          <td>删除套餐（软删除）（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant-plans/{planId}</code></td>
+          <td><code>getTenantPlan</code></td>
+          <td>查询套餐详情（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenant-plans/{planId}/activate</code></td>
+          <td><code>activateTenantPlan</code></td>
+          <td>发布套餐（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant-plans/{planId}/audit-logs</code></td>
+          <td><code>listTenantPlanAuditLogs</code></td>
+          <td>查询套餐操作历史（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenant-plans/{planId}/disable</code></td>
+          <td><code>disableTenantPlan</code></td>
+          <td>禁用套餐（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant-plans/{planId}/quota-limits</code></td>
+          <td><code>getTenantPlanQuotaLimits</code></td>
+          <td>查询套餐限额（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/tenant-plans/{planId}/quota-limits</code></td>
+          <td><code>updateTenantPlanQuotaLimits</code></td>
+          <td>修改套餐限额（同步存量租户）（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant-plans/{planId}/tenants</code></td>
+          <td><code>listTenantPlanBoundTenants</code></td>
+          <td>查询套餐绑定的租户列表（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/tenant/members</code></td>
           <td><code>listTenantMembers</code></td>
           <td>租户成员列表</td>
@@ -679,6 +791,102 @@
           <td><code></code></td>
           <td>200, 401, 403, 404</td>
         </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenants/{tenantId}/admins/invite</code></td>
+          <td><code>inviteTenantAdmin</code></td>
+          <td>邀请租户管理员（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/tenants/{tenantId}/admins/{userId}</code></td>
+          <td><code>deleteTenantAdmin</code></td>
+          <td>软删除管理员（不幂等，不携带幂等键）（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenants/{tenantId}/admins/{userId}</code></td>
+          <td><code>getTenantAdminDetail</code></td>
+          <td>查询管理员详情（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenants/{tenantId}/admins/{userId}/audit-logs</code></td>
+          <td><code>listTenantAdminAuditLogs</code></td>
+          <td>查询管理员操作历史（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenants/{tenantId}/admins/{userId}/disable</code></td>
+          <td><code>disableTenantAdmin</code></td>
+          <td>禁用管理员（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenants/{tenantId}/admins/{userId}/enable</code></td>
+          <td><code>enableTenantAdmin</code></td>
+          <td>启用管理员（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenants/{tenantId}/admins/{userId}/invitation/resend</code></td>
+          <td><code>resendTenantAdminInvitation</code></td>
+          <td>重发租户管理员邀请（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenants/{tenantId}/admins/{userId}/reset-password</code></td>
+          <td><code>resetTenantAdminPassword</code></td>
+          <td>重置管理员密码（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenants/{tenantId}/admins/{userId}/role</code></td>
+          <td><code>getTenantAdminRole</code></td>
+          <td>查询指定管理员角色与权限（4 维权限模型）（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/tenants/{tenantId}/admins/{userId}/role</code></td>
+          <td><code>updateTenantAdminRole</code></td>
+          <td>修改管理员角色（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenants/{tenantId}/plan</code></td>
+          <td><code>bindTenantPlan</code></td>
+          <td>绑定套餐（按套餐限额更新配额）（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenants/{tenantId}/transfer-ownership</code></td>
+          <td><code>transferTenantOwnership</code></td>
+          <td>移交租户所有者（对 tenant-admin 行发起，原 owner 降级为 admin）（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 409, 422</td>
+        </tr>
           </tbody>
         </table>
       </section>
@@ -686,14 +894,22 @@
       <section>
         <h2>Schemas</h2>
         <ul class="schema-list">
+        <li><code>AdminDetail</code></li>
+        <li><code>AdminListResponse</code></li>
+        <li><code>AdminWithTenant</code></li>
         <li><code>AsyncTask</code></li>
         <li><code>AvailableGpu</code></li>
+        <li><code>BindPlanRequest</code></li>
+        <li><code>BoundTenant</code></li>
+        <li><code>BoundTenantsResponse</code></li>
         <li><code>CreateGpuContainerRequest</code></li>
         <li><code>CreateInferenceEndpointRequest</code></li>
+        <li><code>CreateInferenceServiceRequest</code></li>
         <li><code>CreateIntegrationBotRequest</code></li>
         <li><code>CreateIntegrationRequest</code></li>
         <li><code>CreateModelRequest</code></li>
         <li><code>CreateSandboxRequest</code></li>
+        <li><code>CreateTenantPlanRequest</code></li>
         <li><code>CreateWebhookRequest</code></li>
         <li><code>CursorPage</code></li>
         <li><code>ErrorResponse</code></li>
@@ -703,16 +919,23 @@
         <li><code>GpuContainer</code></li>
         <li><code>GpuContainerMetrics</code></li>
         <li><code>GpuContainerVersion</code></li>
+        <li><code>IdempotentOnlyRequest</code></li>
+        <li><code>IdempotentResult</code></li>
         <li><code>InferenceEndpoint</code></li>
         <li><code>InferenceService</code></li>
+        <li><code>InferenceServiceAccelerator</code></li>
+        <li><code>InferenceServiceLifecycleRequest</code></li>
         <li><code>InferenceServiceLogEntry</code></li>
         <li><code>InferenceServiceLogListResponse</code></li>
         <li><code>InferenceServicePolicies</code></li>
+        <li><code>InferenceServiceResources</code></li>
         <li><code>InferenceTestRequest</code></li>
         <li><code>InferenceTestResponse</code></li>
         <li><code>Integration</code></li>
         <li><code>IntegrationBot</code></li>
         <li><code>IntegrationListResponse</code></li>
+        <li><code>InvitationResult</code></li>
+        <li><code>InviteAdminRequest</code></li>
         <li><code>InviteMemberRequest</code></li>
         <li><code>KBCitation</code></li>
         <li><code>KBCitationListResponse</code></li>
@@ -729,19 +952,37 @@
         <li><code>NotifyDocumentUploadedRequest</code></li>
         <li><code>PatchGpuContainerRequest</code></li>
         <li><code>PatchSandboxRequest</code></li>
+        <li><code>PlanAuditLog</code></li>
+        <li><code>PlanAuditLogListResponse</code></li>
+        <li><code>PlanQuotaLimitInput</code></li>
+        <li><code>PlanQuotaLimitView</code></li>
+        <li><code>PlanQuotaLimitsResponse</code></li>
         <li><code>RebuildKnowledgeBaseRequest</code></li>
         <li><code>ReparseDocumentRequest</code></li>
+        <li><code>ResendInvitationRequest</code></li>
+        <li><code>ResetPasswordRequest</code></li>
         <li><code>Sandbox</code></li>
         <li><code>SecurityEvent</code></li>
         <li><code>SecurityOverview</code></li>
         <li><code>SsoConfig</code></li>
+        <li><code>TenantAdminAuditLog</code></li>
+        <li><code>TenantAdminAuditLogListResponse</code></li>
         <li><code>TenantMember</code></li>
+        <li><code>TenantPlan</code></li>
+        <li><code>TenantPlanListItem</code></li>
+        <li><code>TenantPlanListResponse</code></li>
+        <li><code>TenantRef</code></li>
         <li><code>TenantRole</code></li>
+        <li><code>TransferOwnershipRequest</code></li>
         <li><code>UpdateInferenceServicePoliciesRequest</code></li>
+        <li><code>UpdateInferenceServiceRequest</code></li>
         <li><code>UpdateKBConfigRequest</code></li>
         <li><code>UpdateKBPermissionsRequest</code></li>
+        <li><code>UpdateQuotaLimitsRequest</code></li>
+        <li><code>UpdateRoleRequest</code></li>
         <li><code>UpdateSsoConfigRequest</code></li>
         <li><code>UpdateTenantRoleRequest</code></li>
+        <li><code>UserPermissions</code></li>
         <li><code>Webhook</code></li>
         <li><code>WebhookDelivery</code></li>
         <li><code>WebhookDeliveryListResponse</code></li>

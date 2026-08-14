@@ -665,9 +665,15 @@ type WorkloadInstanceRecord struct {
 	Sandbox            *SandboxInstanceStatus
 	Identity           *WorkloadIdentityBinding
 	ResourceRefs       []string
-	Status             WorkloadStatus
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	// QuotaTxIDs stores the TCC reservation transaction IDs created by
+	// QuotaService.TryManyTx during instance creation. The reconciler uses
+	// these to Confirm (pending->running), Cancel (pending->failed), or
+	// Release (running->failed) within the same transaction as the status
+	// update (SPEC §5.1). Empty when GPU_QUOTA_ENABLED=false.
+	QuotaTxIDs []string
+	Status     WorkloadStatus
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 type WorkloadIdentityBinding struct {
@@ -859,6 +865,17 @@ type WorkloadInstanceStore interface {
 	UpsertStatus(ctx context.Context, record WorkloadInstanceRecord) error
 	Get(ctx context.Context, tenantID string, instanceID string) (WorkloadInstanceRecord, error)
 	List(ctx context.Context, tenantID string, kind WorkloadKind) ([]WorkloadInstanceRecord, error)
+}
+
+// WorkloadInstanceStoreTx is a small transactional companion to
+// WorkloadInstanceStore. It lets the reconciler and orchestrator update
+// instance status inside an externally-owned MetadataTx -- for example,
+// atomically with quota Cancel/Release in the same transaction. Existing
+// WorkloadInstanceStore implementations and mocks are unaffected; adapters
+// that need transactional status writes implement this additional interface
+// (SPEC §3.1/§3.2).
+type WorkloadInstanceStoreTx interface {
+	UpsertStatusTx(ctx context.Context, tx MetadataTx, record WorkloadInstanceRecord) error
 }
 
 // WorkloadInstanceService is the business-facing API layer for VM, container,

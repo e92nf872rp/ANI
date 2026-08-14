@@ -66,6 +66,18 @@ class CIWorkflowContractTest(unittest.TestCase):
         errors = validator.validate(self.workflow, self.makefile)
         self.assertTrue(any("static Go module list" in error for error in errors))
 
+    def test_go_toolchain_must_meet_security_floor(self) -> None:
+        self.workflow["env"]["GO_VERSION"] = "1.25.12"
+        errors = validator.validate(self.workflow, self.makefile)
+        self.assertTrue(any("Go security floor" in error for error in errors))
+
+    def test_go_builder_images_must_match_ci_toolchain(self) -> None:
+        dockerfiles = {
+            "services/ani-gateway/Dockerfile": "FROM golang:1.25.12-alpine AS build\n",
+        }
+        errors = validator.validate(self.workflow, self.makefile, dockerfiles)
+        self.assertTrue(any("must match CI GO_VERSION" in error for error in errors))
+
     def test_mutable_latest_tool_reference_is_blocked(self) -> None:
         self.workflow["jobs"]["go-ci"]["steps"][0]["uses"] = "example/tool@latest"
         errors = validator.validate(self.workflow, self.makefile)

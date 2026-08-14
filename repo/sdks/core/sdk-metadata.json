@@ -5,6 +5,48 @@
   "serverURL": "https://{host}/api/v1",
   "operations": [
     {
+      "operationId": "listQuotaMeta",
+      "method": "GET",
+      "path": "/admin/quota-meta",
+      "scope": "scope:quota:read"
+    },
+    {
+      "operationId": "deleteTenantQuota",
+      "method": "DELETE",
+      "path": "/admin/tenants/{tenant_id}/quota",
+      "scope": "scope:quota:write"
+    },
+    {
+      "operationId": "getTenantQuota",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/quota",
+      "scope": "scope:quota:read"
+    },
+    {
+      "operationId": "createTenantQuota",
+      "method": "POST",
+      "path": "/admin/tenants/{tenant_id}/quota",
+      "scope": "scope:quota:write"
+    },
+    {
+      "operationId": "updateTenantQuota",
+      "method": "PUT",
+      "path": "/admin/tenants/{tenant_id}/quota",
+      "scope": "scope:quota:write"
+    },
+    {
+      "operationId": "getTenantReservations",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/reservations",
+      "scope": "scope:quota:read"
+    },
+    {
+      "operationId": "putTenantReservations",
+      "method": "PUT",
+      "path": "/admin/tenants/{tenant_id}/reservations",
+      "scope": "scope:quota:write"
+    },
+    {
       "operationId": "listAPIKeys",
       "method": "GET",
       "path": "/auth/api-keys",
@@ -263,6 +305,12 @@
       "scope": "scope:gpu-inventory:read"
     },
     {
+      "operationId": "updateGPUDeviceStatus",
+      "method": "PATCH",
+      "path": "/gpu-inventory/{device_id}",
+      "scope": "scope:gpu-inventory:write"
+    },
+    {
       "operationId": "listGPUSchedulingQueues",
       "method": "GET",
       "path": "/gpu-scheduling/queues",
@@ -297,6 +345,24 @@
       "method": "GET",
       "path": "/gpu-specs",
       "scope": "scope:gpu-inventory:read"
+    },
+    {
+      "operationId": "createGPUSpec",
+      "method": "POST",
+      "path": "/gpu-specs",
+      "scope": "scope:gpu-spec:write"
+    },
+    {
+      "operationId": "listGPUSpecAvailability",
+      "method": "GET",
+      "path": "/gpu-specs/availability",
+      "scope": "scope:gpu-spec:read"
+    },
+    {
+      "operationId": "deleteGPUSpec",
+      "method": "DELETE",
+      "path": "/gpu-specs/{spec_id}",
+      "scope": "scope:gpu-spec:write"
     },
     {
       "operationId": "getGPUSpec",
@@ -857,6 +923,60 @@
       "scope": "scope:observability:read"
     },
     {
+      "operationId": "getPlatformWorkloadCapabilities",
+      "method": "GET",
+      "path": "/platform-workload-capabilities",
+      "scope": "scope:platform-workloads:read"
+    },
+    {
+      "operationId": "createPlatformWorkload",
+      "method": "POST",
+      "path": "/platform-workloads",
+      "scope": "scope:platform-workloads:write"
+    },
+    {
+      "operationId": "deletePlatformWorkload",
+      "method": "DELETE",
+      "path": "/platform-workloads/{workload_id}",
+      "scope": "scope:platform-workloads:write"
+    },
+    {
+      "operationId": "getPlatformWorkload",
+      "method": "GET",
+      "path": "/platform-workloads/{workload_id}",
+      "scope": "scope:platform-workloads:read"
+    },
+    {
+      "operationId": "updatePlatformWorkload",
+      "method": "PATCH",
+      "path": "/platform-workloads/{workload_id}",
+      "scope": "scope:platform-workloads:write"
+    },
+    {
+      "operationId": "applyPlatformWorkloadLifecycle",
+      "method": "POST",
+      "path": "/platform-workloads/{workload_id}/lifecycle",
+      "scope": "scope:platform-workloads:write"
+    },
+    {
+      "operationId": "getPlatformWorkloadLogs",
+      "method": "GET",
+      "path": "/platform-workloads/{workload_id}/logs",
+      "scope": "scope:platform-workloads:read"
+    },
+    {
+      "operationId": "listQuotas",
+      "method": "GET",
+      "path": "/quotas",
+      "scope": "scope:quota:read"
+    },
+    {
+      "operationId": "getMyQuota",
+      "method": "GET",
+      "path": "/quotas/me",
+      "scope": "scope:quota:read"
+    },
+    {
       "operationId": "readiness",
       "method": "GET",
       "path": "/readyz",
@@ -939,6 +1059,12 @@
       "method": "GET",
       "path": "/registry/projects/{project}/scan-report",
       "scope": "scope:registry:read"
+    },
+    {
+      "operationId": "getMyReservations",
+      "method": "GET",
+      "path": "/reservations/me",
+      "scope": "scope:quota:read"
     },
     {
       "operationId": "listSandboxTemplates",
@@ -1192,6 +1318,7 @@
     "FilesystemMountTarget",
     "FilesystemMountTargetCreateRequest",
     "FilesystemMountTargetListResponse",
+    "GPUDeviceStatusUpdateRequest",
     "GPUInventoryListResponse",
     "GPUInventoryRecord",
     "GPUOccupancyStats",
@@ -1199,8 +1326,14 @@
     "GPUSchedulingQueueCreateRequest",
     "GPUSchedulingQueueListResponse",
     "GPUSchedulingQueueUpdateRequest",
+    "GPUSpec",
+    "GPUSpecAvailability",
+    "GPUSpecAvailabilityListResponse",
+    "GPUSpecCreateRequest",
     "GPUSpecListResponse",
+    "GPUSpecNodeAffinity",
     "GPUSpecSummary",
+    "GPUSpecVolcanoResources",
     "HealthCheck",
     "InstanceAccessSummary",
     "InstanceComputeSummary",
@@ -1278,8 +1411,37 @@
     "ObservabilityRangeQueryResponse",
     "PasswordLoginRequest",
     "PlatformPasswordLoginRequest",
+    "PlatformWorkload",
+    "PlatformWorkloadAcceleratorCapability",
+    "PlatformWorkloadAcceleratorResources",
+    "PlatformWorkloadArtifact",
+    "PlatformWorkloadCapabilities",
+    "PlatformWorkloadCreateRequest",
+    "PlatformWorkloadHealthCheck",
+    "PlatformWorkloadLifecycleRequest",
+    "PlatformWorkloadLogEntry",
+    "PlatformWorkloadLogListResponse",
+    "PlatformWorkloadMetadata",
+    "PlatformWorkloadNetwork",
+    "PlatformWorkloadPort",
+    "PlatformWorkloadResources",
+    "PlatformWorkloadRole",
+    "PlatformWorkloadScheduling",
+    "PlatformWorkloadSecretBinding",
+    "PlatformWorkloadTopology",
+    "PlatformWorkloadUpdateRequest",
     "PutEmailSmtpConfigRequest",
     "PutEmailSubscriptionsRequest",
+    "Quota",
+    "QuotaCreateItem",
+    "QuotaCreateRequest",
+    "QuotaDeleteResponse",
+    "QuotaItem",
+    "QuotaListResult",
+    "QuotaMeta",
+    "QuotaMetaListResponse",
+    "QuotaUpdateItem",
+    "QuotaUpdateRequest",
     "RefreshAccessTokenRequest",
     "RefreshAccessTokenResponse",
     "RegistryArtifact",
@@ -1307,6 +1469,8 @@
     "RegistryRepositoryListResponse",
     "RegistryScanResult",
     "ReportTokenUsageRequest",
+    "ReservationPutRequest",
+    "ReservationView",
     "RevokeStatusResponse",
     "SandboxCheckpoint",
     "SandboxCheckpointActionRequest",
@@ -1426,6 +1590,9 @@
     "uploadStorageObject",
     "createObservabilityAlertRule",
     "updateObservabilityAlertRule",
+    "createPlatformWorkload",
+    "updatePlatformWorkload",
+    "applyPlatformWorkloadLifecycle",
     "createRegistryProject",
     "createRegistryProjectPullSecret",
     "setRegistryRepositoryPermission",
@@ -1469,6 +1636,8 @@
     "listNetworkVPCs",
     "listStorageObjects",
     "listObservabilityAlertRules",
+    "getPlatformWorkloadLogs",
+    "listQuotas",
     "listRegistryImages",
     "listRegistryProjects",
     "listRegistryRepositories",
@@ -1482,15 +1651,28 @@
   "errorCodes": [
     "BAD_REQUEST",
     "CONFLICT",
+    "DEVICE_NOT_FOUND",
     "FORBIDDEN",
+    "GPU_SPEC_CONFLICT",
+    "GPU_SPEC_IN_USE",
+    "GPU_SPEC_NOT_FOUND",
+    "GPU_TYPE_NOT_IN_NODES",
     "INTERNAL_ERROR",
     "INVALID_FILTER",
     "NOT_FOUND",
     "NOT_IMPLEMENTED",
     "PRECONDITION_FAILED",
+    "QUOTA_ALREADY_EXISTS",
+    "QUOTA_EXCEEDED",
+    "QUOTA_NOT_FOUND",
+    "QUOTA_RESOURCE_NOT_REGISTERED",
     "RATE_LIMIT_EXCEEDED",
+    "RESERVATION_EXCEEDS_QUOTA",
+    "RESERVED_INSUFFICIENT",
+    "TENANT_NOT_FOUND",
     "UNAUTHORIZED",
     "UNAVAILABLE",
+    "VALIDATION_FAILED",
     "VECTOR_STORE_NOT_FOUND"
   ]
 }

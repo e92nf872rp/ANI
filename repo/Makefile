@@ -944,6 +944,7 @@ validate-spec-split:
 
 validate-core-beta:
 	@echo "→ 校验 Sprint 4 SPEC-CORE-BETA Core API Beta 准备矩阵..."
+	python scripts/validate_core_router_filename_test.py
 	python scripts/validate_core_beta_contract.py
 	$(GO_CACHE_ENV) go test ./pkg/adapters/runtime ./services/ani-gateway/internal/router -run 'TestLocalNetworkService|TestLocalStorageService|TestLocalVectorStoreService|TestNetworkAPI|TestStorageAPI|TestVectorStoreAPI' -v
 	@echo "✅ SPEC-CORE-BETA contract valid"
@@ -967,6 +968,8 @@ validate-services-contract:
 	@echo "→ 校验 Services OpenAPI 语义门禁..."
 	python scripts/validate_services_contract_test.py
 	python scripts/validate_services_contract.py
+	python scripts/validate_inference_service_contract_test.py
+	python scripts/validate_inference_service_contract.py
 	@echo "✅ Services semantic contract valid"
 
 validate-openapi-spec:
@@ -1027,13 +1030,8 @@ validate-services:
 	$(MAKE) validate-doc-entrypoints
 	@echo "→ 运行 Services model-service Go tests..."
 	$(GO_CACHE_ENV) go test ./services/model-service/... -v
-	@echo "→ 检查 RAG Python compile/test..."
+	@echo "→ 检查 RAG Python compile（运行级测试见 python-ci job，依赖完整 rag-engine requirements）..."
 	python -m compileall -q ai/rag-engine
-	@if [ -n "$$(find ai/rag-engine -type f \( -name 'test_*.py' -o -name '*_test.py' \) -print -quit)" ]; then \
-		python -m pytest ai/rag-engine -q; \
-	else \
-		echo "ℹ️  no RAG pytest files found under ai/rag-engine; compile check completed"; \
-	fi
 	@echo "→ 安装 Console npm dependencies from frontends/console/package-lock.json..."
 	npm --prefix frontends/console ci
 	@echo "→ 从 Services OpenAPI source 重新生成 Console API schema..."

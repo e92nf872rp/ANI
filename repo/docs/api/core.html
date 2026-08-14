@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>187</dd></div>
-          <div><dt>Schemas</dt><dd>253</dd></div>
+          <div><dt>Operations</dt><dd>208</dd></div>
+          <div><dt>Schemas</dt><dd>291</dd></div>
         </dl>
       </section>
 
@@ -159,6 +159,62 @@
             </tr>
           </thead>
           <tbody>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/admin/quota-meta</code></td>
+          <td><code>listQuotaMeta</code></td>
+          <td>查询可用配额元数据</td>
+          <td><code>scope:quota:read</code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/admin/tenants/{tenant_id}/quota</code></td>
+          <td><code>deleteTenantQuota</code></td>
+          <td>删除租户所有配额</td>
+          <td><code>scope:quota:write</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/admin/tenants/{tenant_id}/quota</code></td>
+          <td><code>getTenantQuota</code></td>
+          <td>查询租户配额</td>
+          <td><code>scope:quota:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/admin/tenants/{tenant_id}/quota</code></td>
+          <td><code>createTenantQuota</code></td>
+          <td>批量新建租户配额</td>
+          <td><code>scope:quota:write</code></td>
+          <td>200, 400, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/admin/tenants/{tenant_id}/quota</code></td>
+          <td><code>updateTenantQuota</code></td>
+          <td>批量修改租户配额上限</td>
+          <td><code>scope:quota:write</code></td>
+          <td>200, 400, 401, 403, 404, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/admin/tenants/{tenant_id}/reservations</code></td>
+          <td><code>getTenantReservations</code></td>
+          <td>查询租户预留额度</td>
+          <td><code>scope:quota:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/admin/tenants/{tenant_id}/reservations</code></td>
+          <td><code>putTenantReservations</code></td>
+          <td>设置租户预留额度</td>
+          <td><code>scope:quota:write</code></td>
+          <td>200, 401, 403, 404, 422</td>
+        </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
           <td><code>/auth/api-keys</code></td>
@@ -504,6 +560,14 @@
           <td>200, 401, 403</td>
         </tr>
         <tr>
+          <td><span class="method method-patch">PATCH</span></td>
+          <td><code>/gpu-inventory/{device_id}</code></td>
+          <td><code>updateGPUDeviceStatus</code></td>
+          <td>翻转 GPU 设备状态</td>
+          <td><code>scope:gpu-inventory:write</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
           <td><span class="method method-get">GET</span></td>
           <td><code>/gpu-scheduling/queues</code></td>
           <td><code>listGPUSchedulingQueues</code></td>
@@ -550,6 +614,30 @@
           <td>查询可选 GPU 规格</td>
           <td><code>scope:gpu-inventory:read</code></td>
           <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/gpu-specs</code></td>
+          <td><code>createGPUSpec</code></td>
+          <td>创建 GPU 规格</td>
+          <td><code>scope:gpu-spec:write</code></td>
+          <td>201, 400, 401, 403, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/gpu-specs/availability</code></td>
+          <td><code>listGPUSpecAvailability</code></td>
+          <td>查询规格可用性</td>
+          <td><code>scope:gpu-spec:read</code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/gpu-specs/{spec_id}</code></td>
+          <td><code>deleteGPUSpec</code></td>
+          <td>删除 GPU 规格</td>
+          <td><code>scope:gpu-spec:write</code></td>
+          <td>204, 401, 403, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1297,6 +1385,78 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/platform-workload-capabilities</code></td>
+          <td><code>getPlatformWorkloadCapabilities</code></td>
+          <td>查询平台工作负载能力</td>
+          <td><code>scope:platform-workloads:read</code></td>
+          <td>200, 401, 403, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/platform-workloads</code></td>
+          <td><code>createPlatformWorkload</code></td>
+          <td>创建平台内部工作负载</td>
+          <td><code>scope:platform-workloads:write</code></td>
+          <td>202, 400, 401, 403, 409, 422, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/platform-workloads/{workload_id}</code></td>
+          <td><code>deletePlatformWorkload</code></td>
+          <td>删除平台内部工作负载</td>
+          <td><code>scope:platform-workloads:write</code></td>
+          <td>202, 401, 403, 404, 409, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/platform-workloads/{workload_id}</code></td>
+          <td><code>getPlatformWorkload</code></td>
+          <td>查询平台内部工作负载</td>
+          <td><code>scope:platform-workloads:read</code></td>
+          <td>200, 401, 403, 404, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-patch">PATCH</span></td>
+          <td><code>/platform-workloads/{workload_id}</code></td>
+          <td><code>updatePlatformWorkload</code></td>
+          <td>修改平台内部工作负载副本数</td>
+          <td><code>scope:platform-workloads:write</code></td>
+          <td>202, 400, 401, 403, 404, 409, 422, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/platform-workloads/{workload_id}/lifecycle</code></td>
+          <td><code>applyPlatformWorkloadLifecycle</code></td>
+          <td>执行平台内部工作负载生命周期动作</td>
+          <td><code>scope:platform-workloads:write</code></td>
+          <td>202, 400, 401, 403, 404, 409, 422, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/platform-workloads/{workload_id}/logs</code></td>
+          <td><code>getPlatformWorkloadLogs</code></td>
+          <td>查询平台内部工作负载日志</td>
+          <td><code>scope:platform-workloads:read</code></td>
+          <td>200, 400, 401, 403, 404, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/quotas</code></td>
+          <td><code>listQuotas</code></td>
+          <td>BOSS 分页查询租户配额列表</td>
+          <td><code>scope:quota:read</code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/quotas/me</code></td>
+          <td><code>getMyQuota</code></td>
+          <td>查询当前租户配额</td>
+          <td><code>scope:quota:read</code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/readyz</code></td>
           <td><code>readiness</code></td>
           <td>Readiness probe（服务就绪检查）</td>
@@ -1406,6 +1566,14 @@
           <td>获取项目镜像扫描汇总</td>
           <td><code>scope:registry:read</code></td>
           <td>200, 400, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/reservations/me</code></td>
+          <td><code>getMyReservations</code></td>
+          <td>查询当前租户预留额度</td>
+          <td><code>scope:quota:read</code></td>
+          <td>200, 401, 403</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1726,6 +1894,7 @@
         <li><code>FilesystemMountTarget</code></li>
         <li><code>FilesystemMountTargetCreateRequest</code></li>
         <li><code>FilesystemMountTargetListResponse</code></li>
+        <li><code>GPUDeviceStatusUpdateRequest</code></li>
         <li><code>GPUInventoryListResponse</code></li>
         <li><code>GPUInventoryRecord</code></li>
         <li><code>GPUOccupancyStats</code></li>
@@ -1733,8 +1902,14 @@
         <li><code>GPUSchedulingQueueCreateRequest</code></li>
         <li><code>GPUSchedulingQueueListResponse</code></li>
         <li><code>GPUSchedulingQueueUpdateRequest</code></li>
+        <li><code>GPUSpec</code></li>
+        <li><code>GPUSpecAvailability</code></li>
+        <li><code>GPUSpecAvailabilityListResponse</code></li>
+        <li><code>GPUSpecCreateRequest</code></li>
         <li><code>GPUSpecListResponse</code></li>
+        <li><code>GPUSpecNodeAffinity</code></li>
         <li><code>GPUSpecSummary</code></li>
+        <li><code>GPUSpecVolcanoResources</code></li>
         <li><code>HealthCheck</code></li>
         <li><code>InstanceAccessSummary</code></li>
         <li><code>InstanceComputeSummary</code></li>
@@ -1812,8 +1987,37 @@
         <li><code>ObservabilityRangeQueryResponse</code></li>
         <li><code>PasswordLoginRequest</code></li>
         <li><code>PlatformPasswordLoginRequest</code></li>
+        <li><code>PlatformWorkload</code></li>
+        <li><code>PlatformWorkloadAcceleratorCapability</code></li>
+        <li><code>PlatformWorkloadAcceleratorResources</code></li>
+        <li><code>PlatformWorkloadArtifact</code></li>
+        <li><code>PlatformWorkloadCapabilities</code></li>
+        <li><code>PlatformWorkloadCreateRequest</code></li>
+        <li><code>PlatformWorkloadHealthCheck</code></li>
+        <li><code>PlatformWorkloadLifecycleRequest</code></li>
+        <li><code>PlatformWorkloadLogEntry</code></li>
+        <li><code>PlatformWorkloadLogListResponse</code></li>
+        <li><code>PlatformWorkloadMetadata</code></li>
+        <li><code>PlatformWorkloadNetwork</code></li>
+        <li><code>PlatformWorkloadPort</code></li>
+        <li><code>PlatformWorkloadResources</code></li>
+        <li><code>PlatformWorkloadRole</code></li>
+        <li><code>PlatformWorkloadScheduling</code></li>
+        <li><code>PlatformWorkloadSecretBinding</code></li>
+        <li><code>PlatformWorkloadTopology</code></li>
+        <li><code>PlatformWorkloadUpdateRequest</code></li>
         <li><code>PutEmailSmtpConfigRequest</code></li>
         <li><code>PutEmailSubscriptionsRequest</code></li>
+        <li><code>Quota</code></li>
+        <li><code>QuotaCreateItem</code></li>
+        <li><code>QuotaCreateRequest</code></li>
+        <li><code>QuotaDeleteResponse</code></li>
+        <li><code>QuotaItem</code></li>
+        <li><code>QuotaListResult</code></li>
+        <li><code>QuotaMeta</code></li>
+        <li><code>QuotaMetaListResponse</code></li>
+        <li><code>QuotaUpdateItem</code></li>
+        <li><code>QuotaUpdateRequest</code></li>
         <li><code>RefreshAccessTokenRequest</code></li>
         <li><code>RefreshAccessTokenResponse</code></li>
         <li><code>RegistryArtifact</code></li>
@@ -1841,6 +2045,8 @@
         <li><code>RegistryRepositoryListResponse</code></li>
         <li><code>RegistryScanResult</code></li>
         <li><code>ReportTokenUsageRequest</code></li>
+        <li><code>ReservationPutRequest</code></li>
+        <li><code>ReservationView</code></li>
         <li><code>RevokeStatusResponse</code></li>
         <li><code>SandboxCheckpoint</code></li>
         <li><code>SandboxCheckpointActionRequest</code></li>

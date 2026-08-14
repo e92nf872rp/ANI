@@ -27,7 +27,16 @@ type RegisterOptions struct {
 	KubernetesRESTClient                  *runtimeadapter.KubernetesRESTClient
 	ObservabilityService                  ports.ObservabilityService
 	EmailNotificationStore                ports.EmailNotificationStore
-	AsyncTaskStore                        ports.AsyncTaskStore
+	// KBServiceClient routes /api/v1/svc/knowledge-bases/* to kb-service via
+	// gRPC. When nil the KB handlers return 503 UNAVAILABLE so the gateway
+	// still boots in environments without kb-service configured.
+	KBServiceClient KBGRPCClient
+	// KBSSEConfig wires the SSE streaming query endpoint (US-017). When
+	// ragClient or vllmStreamer is nil the SSE handler degrades to an
+	// empty stream so the gateway stays functional without backends.
+	KBSSEConfig       KbSSEConfig
+	AsyncTaskStore    ports.AsyncTaskStore
+	QuotaAdminService ports.QuotaAdminService
 }
 
 // Register wires all route groups onto the Hertz server.
@@ -72,10 +81,16 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerEncryptionResourcesWithService(v1, options.EncryptionService)
 	registerSecretResourcesWithService(v1, options.SecretService)
 	registerEmailNotificationResourcesWithService(v1, options.EmailNotificationStore)
+	registerQuotaResources(v1, options.QuotaAdminService)
 
 	svc := h.Group("/api/v1/svc")
 	registerModels(svc)
 	registerInferenceServices(svc)
+	// Inject the KB gRPC client + SSE wiring into the package-level holders
+	// before registering the KB surface (Spec-split contract requires the
+	// single-argument registerKnowledgeBases(svc) form).
+	kbInjectedClient = options.KBServiceClient
+	kbInjectedSSEConfig = options.KBSSEConfig
 	registerKnowledgeBases(svc)
 	registerGpuContainers(svc)
 	registerSandboxes(svc)

@@ -11,7 +11,7 @@ type BucketClass string
 const (
 	BucketClassModel    BucketClass = "model"
 	BucketClassDataset  BucketClass = "dataset"
-	BucketClassKBDoc    BucketClass = "kb_doc"
+	BucketClassKBDoc    BucketClass = "kb-docs"
 	BucketClassBranding BucketClass = "branding"
 )
 

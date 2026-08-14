@@ -20,27 +20,6 @@ exceptions:
   - operation_id: createModelVersion
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: listInferenceServices
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: createInferenceService
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: getInferenceService
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: deleteInferenceService
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: getInferenceServiceLogs
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: testInferenceService
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: updateInferenceServicePolicies
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
   - operation_id: listKnowledgeBases
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
@@ -224,3 +203,72 @@ exceptions:
   - operation_id: inviteTenantMember
     rule: async_202_requires_async_task
     reason: 当前遗留租户邀请接口的 202 响应仍返回 TenantMember。
+  - operation_id: listTenantPlans
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: createTenantPlan
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: getTenantPlan
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: deleteTenantPlan
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: getTenantPlanQuotaLimits
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: updateTenantPlanQuotaLimits
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: activateTenantPlan
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: disableTenantPlan
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: listTenantPlanBoundTenants
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: listTenantPlanAuditLogs
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: bindTenantPlan
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: listAllTenantAdmins
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: inviteTenantAdmin
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: resendTenantAdminInvitation
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: getTenantAdminDetail
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: deleteTenantAdmin
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: getTenantAdminRole
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: updateTenantAdminRole
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: transferTenantOwnership
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: resetTenantAdminPassword
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: disableTenantAdmin
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: enableTenantAdmin
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: listTenantAdminAuditLogs
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。

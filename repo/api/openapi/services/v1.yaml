@@ -50,6 +50,48 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
+    UnprocessableEntity:
+      description: 前置条件不满足，code 可为 QUOTA_RESOURCE_NOT_REGISTERED（配额维度未注册或已禁用）或 PLAN_NOT_ACTIVE（绑定套餐时套餐状态非 active）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    InferenceBadRequest:
+      description: 推理服务请求参数或字段组合非法（code=INVALID_ARGUMENT）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    InferenceConflict:
+      description: 推理服务名称、幂等键或活动操作冲突
+      x-ani-error-codes: [NAME_CONFLICT, IDEMPOTENCY_CONFLICT, OPERATION_IN_PROGRESS]
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    InferenceUnprocessableEntity:
+      description: 推理服务前置条件不满足；code 为 MODEL_NOT_READY、MODEL_INCOMPATIBLE、ACCELERATOR_SPEC_UNAVAILABLE、INSUFFICIENT_CAPACITY、UNSUPPORTED_TOPOLOGY 或 INVALID_STATE_TRANSITION
+      x-ani-error-codes: [MODEL_NOT_READY, MODEL_INCOMPATIBLE, ACCELERATOR_SPEC_UNAVAILABLE, INSUFFICIENT_CAPACITY, UNSUPPORTED_TOPOLOGY, INVALID_STATE_TRANSITION]
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    FeatureNotAvailable:
+      description: 当前版本尚未提供该能力（code=FEATURE_NOT_AVAILABLE）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    ServiceUnavailable:
+      description: 推理服务依赖暂时不可用（code=DEPENDENCY_UNAVAILABLE）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    RuntimeError:
+      description: 推理 runtime 返回异常（code=RUNTIME_ERROR）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    RuntimeTimeout:
+      description: 推理 runtime 调用超时（code=RUNTIME_TIMEOUT）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
 
   schemas:
     ErrorResponse:
@@ -113,16 +155,82 @@ components:
       type: object
       required: [id, name, model, status, created_at]
       properties:
-        id:                { type: string, format: uuid }
-        name:              { type: string }
-        model:             { type: string }
-        replicas:          { type: integer, default: 1 }
-        gpu_type:          { type: string, nullable: true }
-        gpu_count_per_pod: { type: integer, default: 1 }
-        max_concurrency:   { type: integer, default: 8 }
-        status:            { type: string, enum: [pending, deploying, running, stopping, stopped, failed] }
-        endpoint_url:      { type: string, nullable: true }
-        created_at:        { type: string, format: date-time }
+        id:                    { type: string, format: uuid }
+        name:                  { type: string }
+        model:                 { type: string, description: 创建时冻结的模型名称与版本展示快照 }
+        model_version_id:      { type: string, format: uuid, description: 实际部署的不可变模型版本 }
+        served_model_name:     { type: string, description: 集群内 OpenAI-compatible 请求使用的 model 值，不代表公网路由 }
+        replicas:              { type: integer, minimum: 1, default: 1 }
+        ready_replicas:        { type: integer, minimum: 0, default: 0 }
+        resources:             { $ref: '#/components/schemas/InferenceServiceResources' }
+        placement_mode:        { type: string, enum: [auto, single_node, multi_node], default: auto }
+        gpu_type:              { type: string, nullable: true, deprecated: true, description: v1 兼容投影；新客户端使用 resources.accelerator.spec_id }
+        gpu_count_per_pod:     { type: integer, default: 1, deprecated: true, description: v1 兼容投影；不再是资源规格权威字段 }
+        max_concurrency:       { type: integer, default: 8, deprecated: true, description: v1 兼容投影；P0 不执行 }
+        status:                { type: string, enum: [pending, deploying, running, stopping, stopped, failed] }
+        status_reason:         { type: string, nullable: true, description: 稳定的机器可读状态原因码 }
+        status_message:        { type: string, nullable: true, description: 脱敏的人类可读状态说明 }
+        generation:            { type: integer, minimum: 1 }
+        observed_generation:   { type: integer, minimum: 0 }
+        current_operation_id:  { type: string, format: uuid, nullable: true }
+        invocation_url:        { type: string, format: uri, nullable: true, description: P0 未建设调用网关，固定返回 null }
+        endpoint_url:          { type: string, format: uri, nullable: true, deprecated: true, description: v1 兼容字段；P0 固定返回 null，不得返回 ClusterIP 地址 }
+        created_at:            { type: string, format: date-time }
+        updated_at:            { type: string, format: date-time, nullable: true }
+
+    InferenceServiceAccelerator:
+      type: object
+      required: [spec_id, count_per_replica]
+      properties:
+        spec_id:
+          type: string
+          minLength: 1
+          description: Core GPUSpec ID；P0 仅接受通过 live gate 的整卡 GPU 规格
+        count_per_replica:
+          type: integer
+          minimum: 1
+          description: 每个独立副本或 leader-worker group 申请的 accelerator 总数
+
+    InferenceServiceResources:
+      type: object
+      required: [cpu, memory]
+      properties:
+        cpu: { type: string, minLength: 1, description: 每个单节点 Pod 或跨节点 group 的 CPU 预算 }
+        memory: { type: string, minLength: 1, description: 每个单节点 Pod 或跨节点 group 的内存预算 }
+        accelerator:
+          $ref: '#/components/schemas/InferenceServiceAccelerator'
+
+    CreateInferenceServiceRequest:
+      type: object
+      required: [idempotency_key, name, model]
+      properties:
+        idempotency_key: { type: string, format: uuid }
+        name: { type: string }
+        model: { type: string, description: v1 兼容必填字段；新客户端传稳定模型版本 UUID }
+        model_version_id: { type: string, format: uuid, description: 与 model 指向同一不可变版本 }
+        served_model_name: { type: string, minLength: 1, description: 默认使用服务 name，创建后不可变 }
+        replicas: { type: integer, description: 省略时服务按 1 个副本处理 }
+        resources: { $ref: '#/components/schemas/InferenceServiceResources' }
+        placement_mode: { type: string, enum: [auto, single_node, multi_node], description: 省略时服务按 auto 处理 }
+        gpu_type: { type: string, deprecated: true, description: v1 兼容输入；新客户端不得发送 }
+        gpu_count_per_pod: { type: integer, deprecated: true, description: v1 兼容输入；单独出现时不得推断为 GPU }
+        max_concurrency: { type: integer, deprecated: true, description: v1 兼容输入；P0 不执行 }
+
+    UpdateInferenceServiceRequest:
+      type: object
+      required: [idempotency_key, replicas]
+      additionalProperties: false
+      properties:
+        idempotency_key: { type: string, format: uuid }
+        replicas: { type: integer, minimum: 1 }
+
+    InferenceServiceLifecycleRequest:
+      type: object
+      required: [idempotency_key, action]
+      additionalProperties: false
+      properties:
+        idempotency_key: { type: string, format: uuid }
+        action: { type: string, enum: [start, stop, restart] }
 
     CreateModelRequest:
       type: object
@@ -135,6 +243,8 @@ components:
 
     InferenceEndpoint:
       type: object
+      deprecated: true
+      description: 遗留且未绑定 path 的 schema；不是第二种推理产品资源，新实现必须使用 InferenceService
       required: [id, name, model_version_id, status, created_at]
       properties:
         id:               { type: string, format: uuid }
@@ -148,6 +258,8 @@ components:
 
     CreateInferenceEndpointRequest:
       type: object
+      deprecated: true
+      description: 遗留且未绑定 path 的 schema；新客户端不得引用，后续主版本删除
       required: [idempotency_key, name, model_version_id]
       properties:
         idempotency_key:  { type: string, format: uuid }
@@ -692,6 +804,285 @@ components:
         app_id:          { type: string }
         app_secret:      { type: string }
 
+    # ===== Tenant Plans (配额套餐管理) =====
+
+    TenantPlan:
+      type: object
+      required: [id, code, name, status, tenant_count, created_at, updated_at]
+      properties:
+        id:           { type: string, format: uuid }
+        code:         { type: string, description: "套餐代码" }
+        name:         { type: string, description: "套餐名称" }
+        description:  { type: string, nullable: true }
+        status:       { type: string, enum: [draft, active, disabled] }
+        tenant_count: { type: integer, description: "绑定租户数量" }
+        created_at:   { type: string, format: date-time }
+        updated_at:   { type: string, format: date-time }
+
+    TenantPlanListItem:
+      type: object
+      required: [id, code, name, status, tenant_count, created_at, updated_at]
+      properties:
+        id:           { type: string, format: uuid }
+        code:         { type: string }
+        name:         { type: string }
+        status:       { type: string, enum: [draft, active, disabled] }
+        tenant_count: { type: integer }
+        created_at:   { type: string, format: date-time }
+        updated_at:   { type: string, format: date-time }
+
+    TenantPlanListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:       { type: array, items: { $ref: '#/components/schemas/TenantPlanListItem' } }
+        total:       { type: integer, description: "满足筛选条件的总条数（用于前端分页）" }
+        next_cursor: { type: string, nullable: true, description: "下一页游标；null 表示已无更多数据" }
+
+    CreateTenantPlanRequest:
+      type: object
+      required: [idempotency_key, code, name]
+      properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+        code:         { type: string, minLength: 1, description: "套餐代码；无格式限制，未删除套餐内唯一" }
+        name:         { type: string, minLength: 1, maxLength: 64 }
+        description:  { type: string, maxLength: 512 }
+        quota_limits:
+          type: array
+          description: "各维度配额上限；total 为 null 表示用 default_quota"
+          items: { $ref: '#/components/schemas/PlanQuotaLimitInput' }
+
+    PlanQuotaLimitInput:
+      type: object
+      required: [resource_type]
+      properties:
+        resource_type: { type: string, description: "配额维度标识" }
+        total:         { type: integer, format: int64, nullable: true, minimum: 0, description: "限额值；null = 用 default_quota" }
+
+    PlanQuotaLimitView:
+      type: object
+      required: [resource_type, display_name, unit, total]
+      properties:
+        resource_type: { type: string }
+        display_name:  { type: string, description: "展示名（来自 resource_quota_meta）" }
+        unit:          { type: string, description: "单位（来自 resource_quota_meta）" }
+        total:         { type: integer, format: int64, minimum: 0, description: "展示限额值；未显式设置时已用 resource_quota_meta.default_quota 兜底为具体数值，不返回 null" }
+
+    PlanQuotaLimitsResponse:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/PlanQuotaLimitView' } }
+
+    UpdateQuotaLimitsRequest:
+      type: object
+      required: [idempotency_key, items]
+      properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+        items:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/PlanQuotaLimitInput' }
+
+    BindPlanRequest:
+      type: object
+      required: [idempotency_key, plan_id]
+      properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+        plan_id: { type: string, format: uuid }
+
+    BoundTenant:
+      type: object
+      required: [id, name, display_name, status]
+      properties:
+        id:           { type: string, format: uuid }
+        name:         { type: string }
+        display_name: { type: string }
+        status:       { type: string, enum: [active, frozen, disabled] }
+
+    BoundTenantsResponse:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/BoundTenant' } }
+
+    PlanAuditLog:
+      type: object
+      required: [id, action, resource, result, created_at]
+      properties:
+        id:           { type: string, format: uuid }
+        tenant_id:     { type: string, format: uuid, nullable: true }
+        user_id:      { type: string, format: uuid, nullable: true }
+        request_id:   { type: string, format: uuid, nullable: true }
+        action:       { type: string }
+        resource:     { type: string }
+        result:       { type: string, enum: [success, failure] }
+        details:      { type: object, additionalProperties: true, nullable: true }
+        ip_address:   { type: string, nullable: true }
+        user_agent:   { type: string, nullable: true }
+        created_at:   { type: string, format: date-time }
+
+    PlanAuditLogListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:       { type: array, items: { $ref: '#/components/schemas/PlanAuditLog' } }
+        total:       { type: integer, description: "满足筛选条件的总条数（用于前端分页）" }
+        next_cursor: { type: string, nullable: true, description: "下一页游标；null 表示已无更多数据" }
+
+    IdempotentResult:
+      type: object
+      required: [id, message]
+      properties:
+        id:      { type: string, format: uuid }
+        message: { type: string }
+
+    # ===== Tenant Admins (租户管理员管理) =====
+
+    TenantRef:
+      type: object
+      required: [id, name, display_name, mfa_required]
+      properties:
+        id:           { type: string, format: uuid }
+        name:         { type: string }
+        display_name: { type: string }
+        mfa_required: { type: boolean }
+
+    AdminWithTenant:
+      type: object
+      required: [id, email, username, role, status, is_inviting, source, tenant]
+      description: >
+        跨租户管理员列表项。仅返回 role ∈ (tenant-owner, tenant-admin) 或正在被邀请的用户；
+        is_inviting 仅作标记，不影响 role/status（邀请中用户仍展示原有角色，可为 user）。
+        列表不返回 created_at/updated_at。
+      properties:
+        id:           { type: string, format: uuid }
+        email:        { type: string, format: email }
+        username:     { type: string }
+        display_name: { type: string, nullable: true }
+        role:         { type: string, enum: [tenant-owner, tenant-admin, user, auditor], description: "租户内角色；列表仅含 owner/admin/邀请中" }
+        status:       { type: string, enum: [active, disabled] }
+        is_inviting:  { type: boolean, description: "true = 该租户下存在 status='inviting' 的邀请；仅作标记，不影响 role/status" }
+        source:       { type: string, enum: [local, third_party] }
+        last_login_at: { type: string, format: date-time, nullable: true }
+        tenant:       { $ref: '#/components/schemas/TenantRef' }
+
+    AdminDetail:
+      type: object
+      required: [id, email, username, role, status, is_inviting, source, tenant]
+      description: >
+        管理员详情（不含 password_hash、无顶层 tenant_id 冗余）；
+        相比 AdminWithTenant 额外返回 created_at/updated_at。
+      properties:
+        id:           { type: string, format: uuid }
+        email:        { type: string, format: email }
+        username:     { type: string }
+        display_name: { type: string, nullable: true }
+        role:         { type: string, enum: [tenant-owner, tenant-admin, user, auditor] }
+        status:       { type: string, enum: [active, disabled] }
+        is_inviting:  { type: boolean }
+        source:       { type: string, enum: [local, third_party] }
+        last_login_at: { type: string, format: date-time, nullable: true }
+        created_at:   { type: string, format: date-time, nullable: true, description: "详情响应返回；跨租户列表不返回" }
+        updated_at:   { type: string, format: date-time, nullable: true, description: "详情响应返回；跨租户列表不返回" }
+        tenant:       { $ref: '#/components/schemas/TenantRef' }
+
+    AdminListResponse:
+      type: object
+      required: [items]
+      description: 跨租户管理员列表（游标分页）
+      properties:
+        items:       { type: array, items: { $ref: '#/components/schemas/AdminWithTenant' } }
+        next_cursor: { type: string, nullable: true, description: "下一页游标；null 表示已无更多数据" }
+
+    InvitationResult:
+      type: object
+      required: [id, token, expire_at, message]
+      description: 邀请/重发结果；token 仅本次返回一次，库中仅存 SHA-256 哈希
+      properties:
+        id:        { type: string, format: uuid, description: "邀请记录 ID" }
+        token:     { type: string, description: "原始邀请 token，仅本次返回一次" }
+        expire_at: { type: string, format: date-time, description: "过期时间（now()+72h）" }
+        message:   { type: string }
+
+    UserPermissions:
+      type: object
+      required: [user_id, role, permissions]
+      description: 指定管理员的 4 维权限模型；仅返回租户成员（tenant_id 非空），平台账户不可查
+      properties:
+        user_id:     { type: string, format: uuid }
+        tenant_id:   { type: string, format: uuid, nullable: true, description: "租户成员非空；平台账户为 null（不可经本端点查询）" }
+        role:        { type: string, enum: [tenant-owner, tenant-admin, user, auditor] }
+        permissions:
+          type: object
+          required: [compute, inference, member, transfer]
+          properties:
+            compute:   { type: string, enum: [read, write, none] }
+            inference:  { type: string, enum: [read, write, none] }
+            member:     { type: string, enum: [read, write, none] }
+            transfer:   { type: string, enum: [read, write, none] }
+
+    TenantAdminAuditLog:
+      type: object
+      required: [id, action, resource, result, created_at]
+      properties:
+        id:         { type: string, format: uuid }
+        action:     { type: string, description: "如 tenant_admin.invite / resend_invitation / change_role / transfer_ownership / reset_password / disable / enable / delete" }
+        resource:   { type: string }
+        result:     { type: string, enum: [success, failed] }
+        user_id:    { type: string, format: uuid, nullable: true }
+        details:    { type: object, additionalProperties: true, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    TenantAdminAuditLogListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:       { type: array, items: { $ref: '#/components/schemas/TenantAdminAuditLog' } }
+        next_cursor: { type: string, nullable: true, description: "下一页游标；null 表示已无更多数据" }
+
+    InviteAdminRequest:
+      type: object
+      required: [idempotency_key, email, username]
+      properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+        email:           { type: string, format: email, description: "RFC 5322" }
+        username:        { type: string, minLength: 1, maxLength: 64, description: "不含冒号" }
+
+    ResendInvitationRequest:
+      type: object
+      required: [idempotency_key]
+      properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+
+    UpdateRoleRequest:
+      type: object
+      required: [idempotency_key, role]
+      properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+        role:            { type: string, enum: [user, auditor, tenant-admin], description: "不可设 tenant-owner" }
+
+    TransferOwnershipRequest:
+      type: object
+      required: [idempotency_key, target_user_id]
+      properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+        target_user_id:  { type: string, format: uuid, description: "当前租户内 active 且角色为 tenant-admin 的成员" }
+
+    ResetPasswordRequest:
+      type: object
+      required: [idempotency_key, new_password]
+      properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+        new_password:    { type: string, minLength: 8, maxLength: 64, description: "四类中至少三类，须与旧密码不同（HTTPS，明文不落日志）" }
+
+    IdempotentOnlyRequest:
+      type: object
+      required: [idempotency_key]
+      description: 仅含幂等键的请求体（用于 disable/enable）
+      properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+
 paths:
   /models:
     get:
@@ -830,6 +1221,7 @@ paths:
       operationId: listInferenceServices
       summary: 获取推理服务列表
       tags: [InferenceServices]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
       responses:
         "200":
           description: 推理服务列表
@@ -838,36 +1230,40 @@ paths:
               schema:
                 properties:
                   items: { type: array, items: { $ref: '#/components/schemas/InferenceService' } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
     post:
       operationId: createInferenceService
       summary: 部署推理服务
       tags: [InferenceServices]
+      description: 接受后立即返回 pending 资源；current_operation_id 用于查询持久化 operation，P0 不返回可调用 URL。
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-async-task-types: [inference_service.create]
+      x-ani-async-resource-type: inference_service
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              required: [idempotency_key, name, model]
-              properties:
-                idempotency_key:   { type: string, format: uuid }
-                name:              { type: string }
-                model:             { type: string }
-                replicas:          { type: integer, default: 1 }
-                gpu_type:          { type: string }
-                gpu_count_per_pod: { type: integer, default: 1 }
-                max_concurrency:   { type: integer, default: 8 }
+            schema: { $ref: '#/components/schemas/CreateInferenceServiceRequest' }
       responses:
         "202":
           description: 推理服务部署已提交
           content:
             application/json:
               schema: { $ref: '#/components/schemas/InferenceService' }
+        "400": { $ref: '#/components/responses/InferenceBadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "409": { $ref: '#/components/responses/InferenceConflict' }
+        "422": { $ref: '#/components/responses/InferenceUnprocessableEntity' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
 
   /inference-services/{service_id}:
     get:
       operationId: getInferenceService
       summary: 获取推理服务详情
       tags: [InferenceServices]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
       parameters:
         - { name: service_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -876,16 +1272,103 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/InferenceService' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateInferenceService
+      summary: 修改推理服务副本数
+      description: P0 只允许修改独立副本数；multi_node 固定 replicas=1，其他资源和 placement 均不可变。
+      tags: [InferenceServices]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-async-task-types: [inference_service.scale]
+      x-ani-async-resource-type: inference_service
+      parameters:
+        - { name: service_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateInferenceServiceRequest' }
+      responses:
+        "202":
+          description: 推理服务伸缩操作已接受
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "400": { $ref: '#/components/responses/InferenceBadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/InferenceConflict' }
+        "422": { $ref: '#/components/responses/InferenceUnprocessableEntity' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
     delete:
       operationId: deleteInferenceService
       summary: 停止并删除推理服务
       tags: [InferenceServices]
+      description: 为保持 v1 兼容不新增必填幂等键；服务按 service_id + desired_state=deleted 去重。
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-async-task-types: [inference_service.delete]
+      x-ani-async-resource-type: inference_service
       parameters:
         - { name: service_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         "202":
           description: 停止任务已提交
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/InferenceConflict' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /inference-services/{service_id}/lifecycle:
+    post:
+      operationId: applyInferenceServiceLifecycle
+      summary: 执行推理服务生命周期动作
+      description: start、stop 和 restart 均由持久化 operation 与 reconciler 异步收敛。
+      tags: [InferenceServices]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-async-task-types: [inference_service.start, inference_service.stop, inference_service.restart]
+      x-ani-async-resource-type: inference_service
+      parameters:
+        - { name: service_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InferenceServiceLifecycleRequest' }
+      responses:
+        "202":
+          description: 生命周期操作已接受
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "400": { $ref: '#/components/responses/InferenceBadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/InferenceConflict' }
+        "422": { $ref: '#/components/responses/InferenceUnprocessableEntity' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /inference-operations/{operation_id}:
+    get:
+      operationId: getInferenceOperation
+      summary: 查询推理服务异步操作
+      description: 只返回当前租户所拥有推理服务的 Services operation，不暴露 Core AsyncTask 标识或内容。
+      tags: [InferenceServices]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-async-task-types: [inference_service.create, inference_service.scale, inference_service.start, inference_service.stop, inference_service.restart, inference_service.delete]
+      x-ani-async-resource-type: inference_service
+      parameters:
+        - { name: operation_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 推理服务异步操作
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AsyncTask' }
@@ -898,6 +1381,7 @@ paths:
       operationId: getInferenceServiceLogs
       summary: 获取推理服务日志
       tags: [InferenceServices]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
       parameters:
         - { name: service_id, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: limit, in: query, schema: { type: integer, default: 100, minimum: 1, maximum: 1000 } }
@@ -918,6 +1402,7 @@ paths:
       operationId: testInferenceService
       summary: 推理服务调用测试
       tags: [InferenceServices]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
       parameters:
         - { name: service_id, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -931,16 +1416,22 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/InferenceTestResponse' }
-        "400": { $ref: '#/components/responses/BadRequest' }
+        "400": { $ref: '#/components/responses/InferenceBadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/InferenceUnprocessableEntity' }
+        "502": { $ref: '#/components/responses/RuntimeError' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
+        "504": { $ref: '#/components/responses/RuntimeTimeout' }
 
   /inference-services/{service_id}/policies:
     put:
       operationId: updateInferenceServicePolicies
       summary: 更新推理服务限流与访问策略
       tags: [InferenceServices]
+      description: P1 兼容预留路径；P0 未建设调用网关，真实 handler 必须返回 501 FEATURE_NOT_AVAILABLE，不得伪造策略已生效。
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
       parameters:
         - { name: service_id, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -958,6 +1449,7 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "501": { $ref: '#/components/responses/FeatureNotAvailable' }
 
   /knowledge-bases:
     get:
@@ -987,7 +1479,7 @@ paths:
                 name:            { type: string }
                 description:     { type: string }
                 embedding_model: { type: string, default: "bge-m3" }
-                chunk_size:      { type: integer, default: 512, minimum: 1, maximum: 8192, description: "分块大小（tokens），与 KBConfig 边界一致" }
+                chunk_size:      { type: integer, default: 1024, minimum: 1, maximum: 8192, description: "分块大小（tokens），与 KBConfig 边界一致" }
                 top_k:           { type: integer, default: 5, minimum: 1, maximum: 20 }
                 score_threshold: { type: number, format: float, default: 0.3, description: "相似度阈值，非零覆盖默认值" }
       responses:
@@ -1065,7 +1557,7 @@ paths:
         "413": { description: 文件大小超限（doc.too_large）, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
         "422": { description: 不支持的文档格式（doc.unsupported_type）, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
 
-  /knowledge-bases/{kb_id}/documents/notify-uploaded:
+  /knowledge-bases/{kb_id}/documents/{doc_id}/notify-uploaded:
     post:
       operationId: notifyDocumentUploaded
       summary: 通知文档已直传至对象存储（两步式上传 step 2）
@@ -1076,6 +1568,7 @@ paths:
       tags: [KnowledgeBases]
       parameters:
         - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: doc_id, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
         required: true
         content:
@@ -1926,6 +2419,507 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "409": { $ref: '#/components/responses/Conflict' }
 
+  # ===== Tenant Plans (配额套餐管理) =====
+
+  /tenant-plans:
+    get:
+      operationId: listTenantPlans
+      summary: 查询套餐列表
+      tags: [TenantPlans]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 }, description: "每页数量" }
+        - { name: cursor, in: query, schema: { type: string }, description: "上一页返回的 next_cursor" }
+        - { name: status, in: query, schema: { type: string, enum: [draft, active, disabled] } }
+        - { name: search, in: query, schema: { type: string }, description: "模糊匹配 name" }
+      responses:
+        "200":
+          description: 套餐列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantPlanListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createTenantPlan
+      summary: 创建套餐（需 platform-admin / platform-ops）
+      tags: [TenantPlans]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTenantPlanRequest' }
+      responses:
+        "200":
+          description: 套餐已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /tenant-plans/{planId}:
+    get:
+      operationId: getTenantPlan
+      summary: 查询套餐详情（需 platform-admin / platform-ops / platform-readonly）
+      tags: [TenantPlans]
+      parameters:
+        - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 套餐详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantPlan' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: deleteTenantPlan
+      summary: 删除套餐（软删除）（需 platform-admin / platform-ops）
+      tags: [TenantPlans]
+      parameters:
+        - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 套餐已删除
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /tenant-plans/{planId}/quota-limits:
+    get:
+      operationId: getTenantPlanQuotaLimits
+      summary: 查询套餐限额（需 platform-admin / platform-ops / platform-readonly）
+      tags: [TenantPlans]
+      parameters:
+        - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 套餐限额列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlanQuotaLimitsResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: updateTenantPlanQuotaLimits
+      summary: 修改套餐限额（同步存量租户）（需 platform-admin / platform-ops）
+      tags: [TenantPlans]
+      parameters:
+        - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateQuotaLimitsRequest' }
+      responses:
+        "200":
+          description: 限额已修改
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /tenant-plans/{planId}/activate:
+    post:
+      operationId: activateTenantPlan
+      summary: 发布套餐（需 platform-admin / platform-ops）
+      tags: [TenantPlans]
+      parameters:
+        - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idempotency_key]
+              properties:
+                idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+      responses:
+        "200":
+          description: 套餐已发布
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /tenant-plans/{planId}/disable:
+    post:
+      operationId: disableTenantPlan
+      summary: 禁用套餐（需 platform-admin / platform-ops）
+      tags: [TenantPlans]
+      parameters:
+        - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idempotency_key]
+              properties:
+                idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+      responses:
+        "200":
+          description: 套餐已禁用
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /tenant-plans/{planId}/tenants:
+    get:
+      operationId: listTenantPlanBoundTenants
+      summary: 查询套餐绑定的租户列表（需 platform-admin / platform-ops / platform-readonly）
+      tags: [TenantPlans]
+      parameters:
+        - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 绑定租户列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BoundTenantsResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /tenant-plans/{planId}/audit-logs:
+    get:
+      operationId: listTenantPlanAuditLogs
+      summary: 查询套餐操作历史（需 platform-admin / platform-ops / platform-readonly）
+      tags: [TenantPlans]
+      parameters:
+        - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 }, description: "每页数量" }
+        - { name: cursor, in: query, schema: { type: string }, description: "上一页返回的 next_cursor" }
+        - { name: action, in: query, schema: { type: string }, description: "过滤操作类型" }
+        - { name: result, in: query, schema: { type: string, enum: [success, failure] } }
+      responses:
+        "200":
+          description: 操作历史列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlanAuditLogListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /tenants/{tenantId}/plan:
+    post:
+      operationId: bindTenantPlan
+      summary: 绑定套餐（按套餐限额更新配额）（需 platform-admin / platform-ops）
+      tags: [TenantPlans]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BindPlanRequest' }
+      responses:
+        "200":
+          description: 套餐已绑定，配额已更新
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/UnprocessableEntity' }
+
+  # ===== Tenant Admins (租户管理员管理) =====
+
+  /tenant-admins:
+    get:
+      operationId: listAllTenantAdmins
+      summary: 跨租户管理员列表（仅返回 owner/admin/邀请中）（需 platform-admin / platform-ops / platform-readonly）
+      tags: [TenantAdmins]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 }, description: "每页数量" }
+        - { name: cursor, in: query, schema: { type: string }, description: "上一页返回的 next_cursor" }
+        - { name: tenant_id, in: query, schema: { type: string, format: uuid }, description: "可选；按指定租户过滤" }
+        - { name: role, in: query, schema: { type: string, enum: [tenant-owner, tenant-admin] } }
+        - { name: status, in: query, schema: { type: string, enum: [active, disabled] } }
+        - { name: is_inviting, in: query, schema: { type: boolean }, description: "true = 仅邀请中" }
+        - { name: search, in: query, schema: { type: string }, description: "模糊匹配 email/username" }
+      responses:
+        "200":
+          description: 跨租户管理员列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /tenants/{tenantId}/admins/invite:
+    post:
+      operationId: inviteTenantAdmin
+      summary: 邀请租户管理员（需 platform-admin / platform-ops）
+      tags: [TenantAdmins]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InviteAdminRequest' }
+      responses:
+        "200":
+          description: 邀请已发送
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvitationResult' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_ADMIN_NOT_FOUND / TENANT_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "TENANT_ADMIN_ALREADY_ADMIN / TENANT_INVITATION_PENDING / IDEMPOTENCY_CONFLICT" }
+
+  /tenants/{tenantId}/admins/{userId}/invitation/resend:
+    post:
+      operationId: resendTenantAdminInvitation
+      summary: 重发租户管理员邀请（需 platform-admin / platform-ops）
+      tags: [TenantAdmins]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResendInvitationRequest' }
+      responses:
+        "200":
+          description: 邀请已重发
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvitationResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_ADMIN_INVITATION_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "TENANT_INVITATION_SETTLED / IDEMPOTENCY_CONFLICT" }
+
+  /tenants/{tenantId}/admins/{userId}:
+    get:
+      operationId: getTenantAdminDetail
+      summary: 查询管理员详情（需 platform-admin / platform-ops / platform-readonly）
+      tags: [TenantAdmins]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 管理员详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_ADMIN_NOT_FOUND" }
+    delete:
+      operationId: deleteTenantAdmin
+      summary: 软删除管理员（不幂等，不携带幂等键）（需 platform-admin / platform-ops）
+      tags: [TenantAdmins]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 管理员已删除
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_ADMIN_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "TENANT_OWNER_ROLE_LOCKED" }
+        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "LAST_TENANT_OWNER" }
+
+  /tenants/{tenantId}/admins/{userId}/role:
+    get:
+      operationId: getTenantAdminRole
+      summary: 查询指定管理员角色与权限（4 维权限模型）（需 platform-admin / platform-ops / platform-readonly）
+      tags: [TenantAdmins]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 角色与权限
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserPermissions' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_ADMIN_NOT_FOUND" }
+    put:
+      operationId: updateTenantAdminRole
+      summary: 修改管理员角色（需 platform-admin / platform-ops）
+      tags: [TenantAdmins]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateRoleRequest' }
+      responses:
+        "200":
+          description: 角色已修改
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_ADMIN_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "TENANT_OWNER_ROLE_LOCKED / IDEMPOTENCY_CONFLICT" }
+        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "ROLE_CHANGE_INVALID" }
+
+  /tenants/{tenantId}/transfer-ownership:
+    post:
+      operationId: transferTenantOwnership
+      summary: 移交租户所有者（对 tenant-admin 行发起，原 owner 降级为 admin）（需 platform-admin / platform-ops）
+      tags: [TenantAdmins]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransferOwnershipRequest' }
+      responses:
+        "200":
+          description: 所有权已移交
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_NOT_FOUND / TENANT_ADMIN_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
+        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "TRANSFER_TARGET_INVALID" }
+
+  /tenants/{tenantId}/admins/{userId}/reset-password:
+    post:
+      operationId: resetTenantAdminPassword
+      summary: 重置管理员密码（需 platform-admin / platform-ops）
+      tags: [TenantAdmins]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResetPasswordRequest' }
+      responses:
+        "200":
+          description: 密码已重置
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_ADMIN_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
+        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "PASSWORD_SAME_AS_OLD" }
+
+  /tenants/{tenantId}/admins/{userId}/disable:
+    post:
+      operationId: disableTenantAdmin
+      summary: 禁用管理员（需 platform-admin / platform-ops）
+      tags: [TenantAdmins]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IdempotentOnlyRequest' }
+      responses:
+        "200":
+          description: 管理员已禁用
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_ADMIN_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
+        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "LAST_TENANT_OWNER" }
+
+  /tenants/{tenantId}/admins/{userId}/enable:
+    post:
+      operationId: enableTenantAdmin
+      summary: 启用管理员（需 platform-admin / platform-ops）
+      tags: [TenantAdmins]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IdempotentOnlyRequest' }
+      responses:
+        "200":
+          description: 管理员已启用
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_ADMIN_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
+
+  /tenants/{tenantId}/admins/{userId}/audit-logs:
+    get:
+      operationId: listTenantAdminAuditLogs
+      summary: 查询管理员操作历史（需 platform-admin / platform-ops / platform-readonly）
+      tags: [TenantAdmins]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 }, description: "每页数量" }
+        - { name: cursor, in: query, schema: { type: string }, description: "上一页返回的 next_cursor" }
+        - { name: action, in: query, schema: { type: string }, description: "过滤操作类型" }
+        - { name: result, in: query, schema: { type: string, enum: [success, failed] } }
+      responses:
+        "200":
+          description: 操作历史列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantAdminAuditLogListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_ADMIN_NOT_FOUND" }
+
 tags:
   - { name: Models, description: "模型仓库" }
   - { name: InferenceServices, description: "推理服务" }
@@ -1933,4 +2927,6 @@ tags:
   - { name: GpuContainers, description: "GPU容器（已废弃）" }
   - { name: Sandboxes, description: "Sandbox（已废弃）" }
   - { name: Tenant, description: "租户管理（成员/角色/SSO/Webhook）" }
+  - { name: TenantPlans, description: "配额套餐管理" }
+  - { name: TenantAdmins, description: "租户管理员管理（邀请/角色/移交/禁用启用删除/审计）" }
   - { name: Integrations, description: "第三方集成与企业通知" }
