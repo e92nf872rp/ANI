@@ -22,6 +22,12 @@ PORTABILITY_PATHS = (
     MAKEFILE_PATH.parent / "scripts/validate_sdk_alpha.py",
     MAKEFILE_PATH.parent / "scripts/validate_sdk_mock_smoke.py",
 )
+GO_DOCKERFILE_PATHS = (
+    MAKEFILE_PATH.parent / "services/ani-gateway/Dockerfile",
+    MAKEFILE_PATH.parent / "services/auth-service/Dockerfile",
+    MAKEFILE_PATH.parent / "services/reconcile-worker/Dockerfile",
+)
+MINIMUM_GO_SECURITY_VERSION = (1, 25, 13)
 
 
 def load_workflow(path: Path = WORKFLOW_PATH) -> dict[str, Any]:
@@ -78,6 +84,17 @@ def validate(
     if "@latest" in workflow_text:
         errors.append("CI tools must not be installed from a mutable @latest reference")
 
+    go_version = str((workflow.get("env") or {}).get("GO_VERSION", ""))
+    try:
+        go_version_tuple = tuple(int(part) for part in go_version.split("."))
+    except ValueError:
+        go_version_tuple = ()
+    if len(go_version_tuple) != 3 or go_version_tuple < MINIMUM_GO_SECURITY_VERSION:
+        minimum = ".".join(str(part) for part in MINIMUM_GO_SECURITY_VERSION)
+        errors.append(
+            f"CI GO_VERSION must meet Go security floor {minimum}; found {go_version or 'missing'}"
+        )
+
     go_ci = jobs.get("go-ci")
     go_ci_text = str(go_ci)
     if "scripts/list_go_modules.py" not in go_ci_text:
@@ -110,6 +127,8 @@ def validate(
     for source, text in portability_sources.items():
         if "/private/tmp" in text:
             errors.append(f"{source} must not use the non-portable /private/tmp path")
+        if source.endswith("Dockerfile") and f"FROM golang:{go_version}-" not in text:
+            errors.append(f"{source} Go builder image must match CI GO_VERSION {go_version}")
 
     return errors
 
@@ -117,7 +136,7 @@ def validate(
 def main() -> int:
     portability_texts = {
         str(path.relative_to(MAKEFILE_PATH.parent)): path.read_text(encoding="utf-8")
-        for path in PORTABILITY_PATHS
+        for path in (*PORTABILITY_PATHS, *GO_DOCKERFILE_PATHS)
     }
     errors = validate(
         load_workflow(),
