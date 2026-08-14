@@ -53,7 +53,11 @@ func main() {
 		logger.Error("subscribe failed, exiting", "err", err)
 		os.Exit(1)
 	}
-	defer sub.Drain(context.Background())
+	defer func() {
+		if err := sub.Drain(context.Background()); err != nil {
+			logger.Error("subscription drain failed", "err", err)
+		}
+	}()
 
 	logger.Info("metering-service started",
 		"subject", "ani.events.instance.>",
