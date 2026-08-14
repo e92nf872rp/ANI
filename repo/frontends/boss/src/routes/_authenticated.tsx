@@ -1,56 +1,47 @@
-import { createFileRoute, Link, Outlet, redirect, useNavigate } from '@tanstack/react-router'
+import { createFileRoute, Link, Outlet, useNavigate } from '@tanstack/react-router'
 import { Button, Layout, Menu, MessagePlugin } from 'tdesign-react'
 import {
   CpuIcon,
   DashboardIcon,
+  RootListIcon,
   ServerIcon,
   SettingIcon,
+  UsergroupIcon,
 } from 'tdesign-icons-react'
 import { useEffect } from 'react'
 import { logout, maybeRefresh, setAuthToken } from '@/api/auth'
-import { getSession, isSessionValid, safeReturnTo, saveReturnTo } from '@/auth/session'
+import { getSession, isSessionValid } from '@/auth/session'
 
 const { Header, Aside, Content } = Layout
 
 /**
- * BOSS 受保护布局路由（pathless）。
+ * BOSS 布局路由（pathless）。
  *
- * beforeLoad 门禁：
- *   - 无 token 或已过期 → 保存 returnTo（path + search）→ 跳转 /login?returnTo=...
- *   - 有效 token → setAuthToken 注入 Bearer middleware
+ * 临时关闭登录门禁：未登录也可进入内部页面做联调。
+ * 若本地已有有效 session，仍注入 Bearer 并做临近过期 refresh。
  */
 export const Route = createFileRoute('/_authenticated')({
-  beforeLoad: async ({ location }) => {
+  beforeLoad: async () => {
     const session = getSession()
-    if (!session || !isSessionValid()) {
-      const current = location.pathname + (location.searchStr ?? '')
-      // 仅保存同源相对路径作为 returnTo，防 open redirect
-      if (safeReturnTo(current) === current) {
-        saveReturnTo(current)
-      }
-      throw redirect({
-        to: '/login',
-        search: { returnTo: safeReturnTo(current) === current ? current : '/' },
-      })
+    if (session && isSessionValid()) {
+      await maybeRefresh()
+      setAuthToken(session.access_token)
     }
-    // 路由切换时检查 token 临近过期，自动续期（剩余 < 5 分钟触发）
-    await maybeRefresh()
-    setAuthToken(session.access_token)
   },
   component: AuthenticatedLayout,
 })
 
 function AuthenticatedLayout() {
   const navigate = useNavigate()
+  const loggedIn = !!getSession() && isSessionValid()
 
-  // 定时检查 token 临近过期，触发 refresh（US-006）。
-  // 间隔 1 分钟；refresh 真正逻辑由 api/auth.ts maybeRefresh 负责（剩余 < 5 分钟触发）。
   useEffect(() => {
+    if (!loggedIn) return
     const timer = setInterval(() => {
       void maybeRefresh()
     }, 60_000)
     return () => clearInterval(timer)
-  }, [])
+  }, [loggedIn])
 
   async function handleLogout() {
     await logout()
@@ -71,14 +62,25 @@ function AuthenticatedLayout() {
         }}
       >
         <span style={{ fontWeight: 600, fontSize: 18 }}>ANI 平台运营台</span>
-        <Button
-          variant="outline"
-          theme="default"
-          onClick={handleLogout}
-          style={{ color: '#fff', borderColor: 'rgba(255,255,255,0.4)' }}
-        >
-          退出登录
-        </Button>
+        {loggedIn ? (
+          <Button
+            variant="outline"
+            theme="default"
+            onClick={handleLogout}
+            style={{ color: '#fff', borderColor: 'rgba(255,255,255,0.4)' }}
+          >
+            退出登录
+          </Button>
+        ) : (
+          <Button
+            variant="outline"
+            theme="default"
+            onClick={() => navigate({ to: '/login' })}
+            style={{ color: '#fff', borderColor: 'rgba(255,255,255,0.4)' }}
+          >
+            登录
+          </Button>
+        )}
       </Header>
       <Layout>
         <Aside width="220px" style={{ background: '#fff' }}>
@@ -89,6 +91,11 @@ function AuthenticatedLayout() {
             <Menu.SubMenu value="ops" title="资源池与基础设施" icon={<ServerIcon />}>
               <Menu.MenuItem value="gpu-pool" icon={<CpuIcon />}>
                 <Link to="/ops/gpu-pool">GPU 资源池管理</Link>
+              </Menu.MenuItem>
+            </Menu.SubMenu>
+            <Menu.SubMenu value="tenant" title="租户管理" icon={<UsergroupIcon />}>
+              <Menu.MenuItem value="tenant-quotas" icon={<RootListIcon />}>
+                <Link to="/tenants/quotas">配额策略</Link>
               </Menu.MenuItem>
             </Menu.SubMenu>
             <Menu.MenuItem value="settings" icon={<SettingIcon />}>

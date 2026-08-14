@@ -89,6 +89,13 @@ components:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
     RuntimeTimeout:
       description: 推理 runtime 调用超时（code=RUNTIME_TIMEOUT）
+    BadGateway:
+      description: 下游不可用（code=GRPC_CLIENT_UNAVAILABLE；tenant-service 或 Core 配额 API）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    GatewayTimeout:
+      description: 下游超时（code=GATEWAY_TIMEOUT）
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -808,48 +815,49 @@ components:
 
     TenantPlan:
       type: object
-      required: [id, code, name, status, tenant_count, created_at, updated_at]
+      required: [id, code, name, description, status, tenant_count, created_at, updated_at]
       properties:
         id:           { type: string, format: uuid }
         code:         { type: string, description: "套餐代码" }
         name:         { type: string, description: "套餐名称" }
-        description:  { type: string, nullable: true }
+        description:  { type: string, nullable: true, description: "套餐说明；网关 JSON 始终包含该字段（空则为 null）" }
         status:       { type: string, enum: [draft, active, disabled] }
-        tenant_count: { type: integer, description: "绑定租户数量" }
-        created_at:   { type: string, format: date-time }
-        updated_at:   { type: string, format: date-time }
+        tenant_count: { type: integer, format: int64, description: "绑定租户数量（status≠disabled）" }
+        created_at:   { type: string, description: "展示时间 YYYY-MM-DD HH:mm:ss（Asia/Shanghai）；非 RFC3339" }
+        updated_at:   { type: string, description: "展示时间 YYYY-MM-DD HH:mm:ss（Asia/Shanghai）；非 RFC3339" }
 
     TenantPlanListItem:
       type: object
-      required: [id, code, name, status, tenant_count, created_at, updated_at]
+      required: [id, code, name, description, status, tenant_count, created_at, updated_at]
       properties:
         id:           { type: string, format: uuid }
         code:         { type: string }
         name:         { type: string }
+        description:  { type: string, nullable: true, description: "套餐说明；网关 JSON 始终包含该字段（空则为 null）" }
         status:       { type: string, enum: [draft, active, disabled] }
-        tenant_count: { type: integer }
-        created_at:   { type: string, format: date-time }
-        updated_at:   { type: string, format: date-time }
+        tenant_count: { type: integer, format: int64 }
+        created_at:   { type: string, description: "展示时间 YYYY-MM-DD HH:mm:ss（Asia/Shanghai）；非 RFC3339" }
+        updated_at:   { type: string, description: "展示时间 YYYY-MM-DD HH:mm:ss（Asia/Shanghai）；非 RFC3339" }
 
     TenantPlanListResponse:
       type: object
-      required: [items]
+      required: [items, total, next_cursor]
       properties:
         items:       { type: array, items: { $ref: '#/components/schemas/TenantPlanListItem' } }
-        total:       { type: integer, description: "满足筛选条件的总条数（用于前端分页）" }
-        next_cursor: { type: string, nullable: true, description: "下一页游标；null 表示已无更多数据" }
+        total:       { type: integer, format: int64, description: "满足筛选条件的总条数（用于前端分页）" }
+        next_cursor: { type: string, nullable: true, description: "下一页游标；null 表示已无更多数据（网关将空串映射为 null）" }
 
     CreateTenantPlanRequest:
       type: object
       required: [idempotency_key, code, name]
       properties:
-        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
-        code:         { type: string, minLength: 1, description: "套餐代码；无格式限制，未删除套餐内唯一" }
-        name:         { type: string, minLength: 1, maxLength: 64 }
-        description:  { type: string, maxLength: 512 }
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落；皆空时服务端仍接受，幂等中间件跳过）" }
+        code:         { type: string, minLength: 3, maxLength: 40, pattern: '^[a-z0-9-]{3,40}$', description: "套餐代码；小写字母/数字/连字符，长度 3–40；未删除套餐内唯一" }
+        name:         { type: string, minLength: 1, maxLength: 64, description: "按 Unicode 码点计长度 1–64" }
+        description:  { type: string, maxLength: 512, description: "按 Unicode 码点计长度 ≤512；空串落库为 NULL" }
         quota_limits:
           type: array
-          description: "各维度配额上限；total 为 null 表示用 default_quota"
+          description: "可选；缺省或空数组表示不写限额行。total 为 null 时服务端用 default_quota 物化写入（落库为具体数值，不保留 NULL）"
           items: { $ref: '#/components/schemas/PlanQuotaLimitInput' }
 
     PlanQuotaLimitInput:
@@ -857,7 +865,7 @@ components:
       required: [resource_type]
       properties:
         resource_type: { type: string, description: "配额维度标识" }
-        total:         { type: integer, format: int64, nullable: true, minimum: 0, description: "限额值；null = 用 default_quota" }
+        total:         { type: integer, format: int64, nullable: true, minimum: 0, description: "限额值；null = 服务端用 default_quota 物化落库（不保留 NULL）" }
 
     PlanQuotaLimitView:
       type: object
@@ -866,7 +874,7 @@ components:
         resource_type: { type: string }
         display_name:  { type: string, description: "展示名（来自 resource_quota_meta）" }
         unit:          { type: string, description: "单位（来自 resource_quota_meta）" }
-        total:         { type: integer, format: int64, minimum: 0, description: "展示限额值；未显式设置时已用 resource_quota_meta.default_quota 兜底为具体数值，不返回 null" }
+        total:         { type: integer, format: int64, minimum: 0, description: "展示限额值；写入已物化或查询路径用 default_quota 兜底，不返回 null" }
 
     PlanQuotaLimitsResponse:
       type: object
@@ -874,26 +882,65 @@ components:
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/PlanQuotaLimitView' } }
 
+    QuotaMetaItem:
+      type: object
+      required: [resource_type, display_name, unit, default_quota, is_discrete]
+      description: 可用配额维度元数据（透传 Core GET /admin/quota-meta；仅 enabled 维度）
+      properties:
+        resource_type:  { type: string }
+        display_name:   { type: string }
+        unit:           { type: string }
+        default_quota:  { type: integer, format: int64 }
+        is_discrete:    { type: boolean, description: "true=整数计数；false=允许小数" }
+
+    QuotaMetaListResponse:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/QuotaMetaItem' } }
+
     UpdateQuotaLimitsRequest:
       type: object
       required: [idempotency_key, items]
       properties:
-        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落；皆空时中间件跳过）" }
         items:
           type: array
           minItems: 1
           items: { $ref: '#/components/schemas/PlanQuotaLimitInput' }
 
+    UpdateTenantPlanRequest:
+      type: object
+      description: >
+        更新套餐基本信息。name / description 均为可选：
+        未传或 null 表示不更新；传空串表示清空（name 允许清空为 ""）。
+        长度按 Unicode 码点校验（与服务端 utf8.RuneCountInString 一致）。
+      properties:
+        idempotency_key: { type: string, format: uuid, description: "可选；也可改传请求头 Idempotency-Key；皆空时中间件跳过幂等" }
+        name: { type: string, nullable: true, maxLength: 64, description: "未传/null=不更新；空串=清空；长度 ≤64（Unicode 码点）" }
+        description: { type: string, nullable: true, maxLength: 512, description: "未传/null=不更新；空串=清空；长度 ≤512（Unicode 码点）" }
+
+    TenantPlanStateChangeRequest:
+      type: object
+      description: >
+        套餐发布/禁用请求体。幂等键可选：可放 body.idempotency_key，
+        或请求头 Idempotency-Key；二者皆空时网关仍转发（幂等中间件跳过空键）。
+      properties:
+        idempotency_key: { type: string, format: uuid, description: "可选；也可改传请求头 Idempotency-Key" }
+
     BindPlanRequest:
       type: object
       required: [idempotency_key, plan_id]
       properties:
-        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落；皆空时中间件跳过）" }
         plan_id: { type: string, format: uuid }
 
     BoundTenant:
       type: object
       required: [id, name, display_name, status]
+      description: >
+        租户摘要。绑定列表与可绑定列表均只返回 status≠disabled 的租户；
+        枚举仍含 disabled 以便与租户状态机一致。
       properties:
         id:           { type: string, format: uuid }
         name:         { type: string }
@@ -908,27 +955,22 @@ components:
 
     PlanAuditLog:
       type: object
-      required: [id, action, resource, result, created_at]
+      required: [id, action, result, details, created_at]
+      description: 套餐操作历史摘要；网关 JSON 始终包含 details（无则为 null）
       properties:
-        id:           { type: string, format: uuid }
-        tenant_id:     { type: string, format: uuid, nullable: true }
-        user_id:      { type: string, format: uuid, nullable: true }
-        request_id:   { type: string, format: uuid, nullable: true }
-        action:       { type: string }
-        resource:     { type: string }
-        result:       { type: string, enum: [success, failure] }
-        details:      { type: object, additionalProperties: true, nullable: true }
-        ip_address:   { type: string, nullable: true }
-        user_agent:   { type: string, nullable: true }
-        created_at:   { type: string, format: date-time }
+        id:         { type: string, format: uuid }
+        action:     { type: string }
+        result:     { type: string, enum: [success, failure] }
+        details:    { type: object, additionalProperties: true, nullable: true }
+        created_at: { type: string, description: "展示时间 YYYY-MM-DD HH:mm:ss（Asia/Shanghai）；非 RFC3339" }
 
     PlanAuditLogListResponse:
       type: object
-      required: [items]
+      required: [items, total, next_cursor]
       properties:
         items:       { type: array, items: { $ref: '#/components/schemas/PlanAuditLog' } }
-        total:       { type: integer, description: "满足筛选条件的总条数（用于前端分页）" }
-        next_cursor: { type: string, nullable: true, description: "下一页游标；null 表示已无更多数据" }
+        total:       { type: integer, format: int64, description: "满足筛选条件的总条数（用于前端分页）" }
+        next_cursor: { type: string, nullable: true, description: "下一页游标；null 表示已无更多数据（网关将空串映射为 null）" }
 
     IdempotentResult:
       type: object
@@ -1079,9 +1121,9 @@ components:
     IdempotentOnlyRequest:
       type: object
       required: [idempotency_key]
-      description: 仅含幂等键的请求体（用于 disable/enable）
+      description: 仅含幂等键的请求体（用于租户管理员 disable/enable 等）
       properties:
-        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落）" }
 
 paths:
   /models:
@@ -2421,10 +2463,26 @@ paths:
 
   # ===== Tenant Plans (配额套餐管理) =====
 
+  /quota-meta:
+    get:
+      operationId: listQuotaMeta
+      summary: 查询可用配额维度元数据（透传 Core；需 platform-admin / platform-ops / platform-readonly）
+      tags: [TenantPlans]
+      responses:
+        "200":
+          description: 可用配额维度列表（仅 enabled）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuotaMetaListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "502": { $ref: '#/components/responses/BadGateway' }
+        "504": { $ref: '#/components/responses/GatewayTimeout' }
+
   /tenant-plans:
     get:
       operationId: listTenantPlans
-      summary: 查询套餐列表
+      summary: 查询套餐列表（需 platform-admin / platform-ops / platform-readonly）
       tags: [TenantPlans]
       parameters:
         - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 }, description: "每页数量" }
@@ -2437,8 +2495,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TenantPlanListResponse' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED（如 status 非法 / cursor 非法）" }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
+        "502": { $ref: '#/components/responses/BadGateway' }
+        "504": { $ref: '#/components/responses/GatewayTimeout' }
     post:
       operationId: createTenantPlan
       summary: 创建套餐（需 platform-admin / platform-ops）
@@ -2450,15 +2511,17 @@ paths:
             schema: { $ref: '#/components/schemas/CreateTenantPlanRequest' }
       responses:
         "200":
-          description: 套餐已创建
+          description: 套餐已创建（message 如 "tenant plan created"）
           content:
             application/json:
               schema: { $ref: '#/components/schemas/IdempotentResult' }
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
-        "409": { $ref: '#/components/responses/Conflict' }
+        "409": { $ref: '#/components/responses/Conflict', description: "PLAN_CODE_CONFLICT 或 IDEMPOTENCY_KEY_REUSED" }
         "422": { $ref: '#/components/responses/UnprocessableEntity' }
+        "502": { $ref: '#/components/responses/BadGateway' }
+        "504": { $ref: '#/components/responses/GatewayTimeout' }
 
   /tenant-plans/{planId}:
     get:
@@ -2473,9 +2536,36 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TenantPlan' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED（planId 非 UUID）" }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
-        "404": { $ref: '#/components/responses/NotFound' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_PLAN_NOT_FOUND" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+        "504": { $ref: '#/components/responses/GatewayTimeout' }
+    put:
+      operationId: updateTenantPlan
+      summary: 更新套餐基本信息（name / description）（需 platform-admin / platform-ops）
+      tags: [TenantPlans]
+      parameters:
+        - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateTenantPlanRequest' }
+      responses:
+        "200":
+          description: 套餐基本信息已更新（message 如 "tenant plan updated"）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_PLAN_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_KEY_REUSED" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+        "504": { $ref: '#/components/responses/GatewayTimeout' }
     delete:
       operationId: deleteTenantPlan
       summary: 删除套餐（软删除）（需 platform-admin / platform-ops）
@@ -2484,19 +2574,25 @@ paths:
         - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         "200":
-          description: 套餐已删除
+          description: 套餐已删除（message 如 "tenant plan deleted"）
           content:
             application/json:
               schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED（planId 非 UUID）" }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
-        "404": { $ref: '#/components/responses/NotFound' }
-        "409": { $ref: '#/components/responses/Conflict' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_PLAN_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "TENANT_PLAN_IN_USE（仍有非 disabled 绑定租户）" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+        "504": { $ref: '#/components/responses/GatewayTimeout' }
 
   /tenant-plans/{planId}/quota-limits:
     get:
       operationId: getTenantPlanQuotaLimits
       summary: 查询套餐限额（需 platform-admin / platform-ops / platform-readonly）
+      description: >
+        返回 plan_quota_limits 与 Core 启用维度的交集视图；
+        库中 total 为 NULL 时用 default_quota 兜底展示，并 best-effort 回写（回写失败不影响查询）。
       tags: [TenantPlans]
       parameters:
         - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2506,9 +2602,12 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PlanQuotaLimitsResponse' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED（planId 非 UUID）" }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
-        "404": { $ref: '#/components/responses/NotFound' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_PLAN_NOT_FOUND" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+        "504": { $ref: '#/components/responses/GatewayTimeout' }
     put:
       operationId: updateTenantPlanQuotaLimits
       summary: 修改套餐限额（同步存量租户）（需 platform-admin / platform-ops）
@@ -2522,74 +2621,78 @@ paths:
             schema: { $ref: '#/components/schemas/UpdateQuotaLimitsRequest' }
       responses:
         "200":
-          description: 限额已修改
+          description: 限额已修改（message 如 "quota limits updated"；存量租户同步失败不回滚套餐限额，写审计并异步重试）
           content:
             application/json:
               schema: { $ref: '#/components/schemas/IdempotentResult' }
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
-        "404": { $ref: '#/components/responses/NotFound' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_PLAN_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_KEY_REUSED" }
         "422": { $ref: '#/components/responses/UnprocessableEntity' }
+        "502": { $ref: '#/components/responses/BadGateway' }
+        "504": { $ref: '#/components/responses/GatewayTimeout' }
 
   /tenant-plans/{planId}/activate:
     post:
       operationId: activateTenantPlan
       summary: 发布套餐（需 platform-admin / platform-ops）
+      description: draft/disabled → active；幂等键可选（body 或 Idempotency-Key 头；皆空时中间件跳过）
       tags: [TenantPlans]
       parameters:
         - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
-            schema:
-              type: object
-              required: [idempotency_key]
-              properties:
-                idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+            schema: { $ref: '#/components/schemas/TenantPlanStateChangeRequest' }
       responses:
         "200":
-          description: 套餐已发布
+          description: 套餐已发布（message 如 "tenant plan activated"）
           content:
             application/json:
               schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED（planId 非 UUID）" }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
-        "404": { $ref: '#/components/responses/NotFound' }
-        "409": { $ref: '#/components/responses/Conflict' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_PLAN_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "PLAN_STATE_INVALID 或 IDEMPOTENCY_KEY_REUSED" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+        "504": { $ref: '#/components/responses/GatewayTimeout' }
 
   /tenant-plans/{planId}/disable:
     post:
       operationId: disableTenantPlan
       summary: 禁用套餐（需 platform-admin / platform-ops）
+      description: active → disabled；幂等键可选（body 或 Idempotency-Key 头；皆空时中间件跳过）
       tags: [TenantPlans]
       parameters:
         - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
-            schema:
-              type: object
-              required: [idempotency_key]
-              properties:
-                idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+            schema: { $ref: '#/components/schemas/TenantPlanStateChangeRequest' }
       responses:
         "200":
-          description: 套餐已禁用
+          description: 套餐已禁用（message 如 "tenant plan disabled"）
           content:
             application/json:
               schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED（planId 非 UUID）" }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
-        "404": { $ref: '#/components/responses/NotFound' }
-        "409": { $ref: '#/components/responses/Conflict' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_PLAN_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "PLAN_STATE_INVALID 或 IDEMPOTENCY_KEY_REUSED" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+        "504": { $ref: '#/components/responses/GatewayTimeout' }
 
   /tenant-plans/{planId}/tenants:
     get:
       operationId: listTenantPlanBoundTenants
       summary: 查询套餐绑定的租户列表（需 platform-admin / platform-ops / platform-readonly）
+      description: 返回已绑定该套餐且 status≠disabled 的租户摘要（不分页，按 name 排序）。
       tags: [TenantPlans]
       parameters:
         - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2599,9 +2702,34 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/BoundTenantsResponse' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED（planId 非 UUID）" }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
-        "404": { $ref: '#/components/responses/NotFound' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_PLAN_NOT_FOUND" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+        "504": { $ref: '#/components/responses/GatewayTimeout' }
+
+  /tenant-plans/{planId}/bindable-tenants:
+    get:
+      operationId: listBindableTenants
+      summary: 查询可绑定该套餐的租户列表（需 platform-admin / platform-ops / platform-readonly）
+      description: >
+        返回 status≠disabled 且尚未绑定该套餐（plan_id IS DISTINCT FROM planId，含未绑定其它套餐）的租户摘要，按 name 排序。
+      tags: [TenantPlans]
+      parameters:
+        - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 可绑定租户列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BoundTenantsResponse' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED（planId 非 UUID）" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_PLAN_NOT_FOUND" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+        "504": { $ref: '#/components/responses/GatewayTimeout' }
 
   /tenant-plans/{planId}/audit-logs:
     get:
@@ -2612,17 +2740,18 @@ paths:
         - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 }, description: "每页数量" }
         - { name: cursor, in: query, schema: { type: string }, description: "上一页返回的 next_cursor" }
-        - { name: action, in: query, schema: { type: string }, description: "过滤操作类型" }
-        - { name: result, in: query, schema: { type: string, enum: [success, failure] } }
       responses:
         "200":
-          description: 操作历史列表
+          description: 操作历史列表（无 action/result 服务端过滤）
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PlanAuditLogListResponse' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED（planId 非 UUID）" }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
-        "404": { $ref: '#/components/responses/NotFound' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_PLAN_NOT_FOUND" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+        "504": { $ref: '#/components/responses/GatewayTimeout' }
 
   /tenants/{tenantId}/plan:
     post:
@@ -2638,16 +2767,18 @@ paths:
             schema: { $ref: '#/components/schemas/BindPlanRequest' }
       responses:
         "200":
-          description: 套餐已绑定，配额已更新
+          description: 套餐已绑定，配额已更新（id=tenant_id；message 如 "quota bound to plan"）
           content:
             application/json:
               schema: { $ref: '#/components/schemas/IdempotentResult' }
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
-        "404": { $ref: '#/components/responses/NotFound' }
-        "409": { $ref: '#/components/responses/Conflict' }
-        "422": { $ref: '#/components/responses/UnprocessableEntity' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_NOT_FOUND / TENANT_PLAN_NOT_FOUND / QUOTA_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "TENANT_STATE_INVALID / QUOTA_ALREADY_EXISTS / IDEMPOTENCY_KEY_REUSED" }
+        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "PLAN_NOT_ACTIVE" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+        "504": { $ref: '#/components/responses/GatewayTimeout' }
 
   # ===== Tenant Admins (租户管理员管理) =====
 

@@ -287,6 +287,12 @@
       "scope": ""
     },
     {
+      "operationId": "listQuotaMeta",
+      "method": "GET",
+      "path": "/quota-meta",
+      "scope": ""
+    },
+    {
       "operationId": "listSandboxes",
       "method": "GET",
       "path": "/sandboxes",
@@ -371,6 +377,12 @@
       "scope": ""
     },
     {
+      "operationId": "updateTenantPlan",
+      "method": "PUT",
+      "path": "/tenant-plans/{planId}",
+      "scope": ""
+    },
+    {
       "operationId": "activateTenantPlan",
       "method": "POST",
       "path": "/tenant-plans/{planId}/activate",
@@ -380,6 +392,12 @@
       "operationId": "listTenantPlanAuditLogs",
       "method": "GET",
       "path": "/tenant-plans/{planId}/audit-logs",
+      "scope": ""
+    },
+    {
+      "operationId": "listBindableTenants",
+      "method": "GET",
+      "path": "/tenant-plans/{planId}/bindable-tenants",
       "scope": ""
     },
     {
@@ -615,6 +633,8 @@
     "PlanQuotaLimitInput",
     "PlanQuotaLimitView",
     "PlanQuotaLimitsResponse",
+    "QuotaMetaItem",
+    "QuotaMetaListResponse",
     "RebuildKnowledgeBaseRequest",
     "ReparseDocumentRequest",
     "ResendInvitationRequest",
@@ -629,6 +649,7 @@
     "TenantPlan",
     "TenantPlanListItem",
     "TenantPlanListResponse",
+    "TenantPlanStateChangeRequest",
     "TenantRef",
     "TenantRole",
     "TransferOwnershipRequest",
@@ -639,6 +660,7 @@
     "UpdateQuotaLimitsRequest",
     "UpdateRoleRequest",
     "UpdateSsoConfigRequest",
+    "UpdateTenantPlanRequest",
     "UpdateTenantRoleRequest",
     "UserPermissions",
     "Webhook",
@@ -701,6 +723,8 @@
     "DEPENDENCY_UNAVAILABLE",
     "FEATURE_NOT_AVAILABLE",
     "FORBIDDEN",
+    "GATEWAY_TIMEOUT",
+    "GRPC_CLIENT_UNAVAILABLE",
     "IDEMPOTENCY_CONFLICT",
     "INSUFFICIENT_CAPACITY",
     "INVALID_ARGUMENT",

@@ -99,14 +99,10 @@ function handle401() {
   const current = currentPath()
   if (current.startsWith('/login') || current.startsWith('/auth/callback')) return
 
-  saveReturnTo(current)
+  // 临时：路由未门禁时，401 只清会话，不强制跳登录页，避免打断内部页联调
   bearerToken = null
   clearSession()
   saveReturnTo(current)
-
-  const search = new URLSearchParams({ returnTo: current }).toString()
-  // 保持在 BOSS SPA 内部路由（`/boss/login`），不跨端跳到 Console
-  window.location.assign(`/boss/login?${search}`)
 }
 
 export function maybeRefresh(): Promise<boolean> {

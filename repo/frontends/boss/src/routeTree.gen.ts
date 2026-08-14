@@ -9,19 +9,27 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
+import { Route as AuthenticatedTenantsQuotasRouteImport } from './routes/_authenticated/tenants/quotas'
 import { Route as AuthenticatedOpsGpuPoolRouteImport } from './routes/_authenticated/ops/gpu-pool'
+import { Route as IntegrationNotificationSettingsEmailIndexRouteImport } from './routes/integration/notification-settings/email/index'
+import { Route as AuthenticatedTenantsQuotasIndexRouteImport } from './routes/_authenticated/tenants/quotas/index'
+import { Route as IntegrationNotificationSettingsEmailSubscriptionsRouteImport } from './routes/integration/notification-settings/email/subscriptions'
+import { Route as IntegrationNotificationSettingsEmailSmtpRouteImport } from './routes/integration/notification-settings/email/smtp'
+import { Route as IntegrationNotificationSettingsEmailRecipientsRouteImport } from './routes/integration/notification-settings/email/recipients'
+import { Route as AuthenticatedTenantsQuotasNewRouteImport } from './routes/_authenticated/tenants/quotas.new'
+import { Route as AuthenticatedTenantsQuotasPlanIdRouteImport } from './routes/_authenticated/tenants/quotas.$planId'
 
-const AuthenticatedRoute = AuthenticatedRouteImport.update({
-  id: '/_authenticated',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedRoute = AuthenticatedRouteImport.update({
+  id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
@@ -34,6 +42,12 @@ const AuthCallbackRoute = AuthCallbackRouteImport.update({
   path: '/auth/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedTenantsQuotasRoute =
+  AuthenticatedTenantsQuotasRouteImport.update({
+    id: '/tenants/quotas',
+    path: '/tenants/quotas',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedOpsGpuPoolRoute = AuthenticatedOpsGpuPoolRouteImport.update({
   id: '/ops/gpu-pool',
   path: '/ops/gpu-pool',
@@ -44,6 +58,12 @@ const IntegrationNotificationSettingsEmailIndexRoute =
     id: '/integration/notification-settings/email/',
     path: '/integration/notification-settings/email/',
     getParentRoute: () => rootRouteImport,
+  } as any)
+const AuthenticatedTenantsQuotasIndexRoute =
+  AuthenticatedTenantsQuotasIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedTenantsQuotasRoute,
   } as any)
 const IntegrationNotificationSettingsEmailSubscriptionsRoute =
   IntegrationNotificationSettingsEmailSubscriptionsRouteImport.update({
@@ -63,15 +83,31 @@ const IntegrationNotificationSettingsEmailRecipientsRoute =
     path: '/integration/notification-settings/email/recipients',
     getParentRoute: () => rootRouteImport,
   } as any)
+const AuthenticatedTenantsQuotasNewRoute =
+  AuthenticatedTenantsQuotasNewRouteImport.update({
+    id: '/new',
+    path: '/new',
+    getParentRoute: () => AuthenticatedTenantsQuotasRoute,
+  } as any)
+const AuthenticatedTenantsQuotasPlanIdRoute =
+  AuthenticatedTenantsQuotasPlanIdRouteImport.update({
+    id: '/$planId',
+    path: '/$planId',
+    getParentRoute: () => AuthenticatedTenantsQuotasRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
   '/login': typeof LoginRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/ops/gpu-pool': typeof AuthenticatedOpsGpuPoolRoute
+  '/tenants/quotas': typeof AuthenticatedTenantsQuotasRouteWithChildren
+  '/tenants/quotas/$planId': typeof AuthenticatedTenantsQuotasPlanIdRoute
+  '/tenants/quotas/new': typeof AuthenticatedTenantsQuotasNewRoute
   '/integration/notification-settings/email/recipients': typeof IntegrationNotificationSettingsEmailRecipientsRoute
   '/integration/notification-settings/email/smtp': typeof IntegrationNotificationSettingsEmailSmtpRoute
   '/integration/notification-settings/email/subscriptions': typeof IntegrationNotificationSettingsEmailSubscriptionsRoute
+  '/tenants/quotas/': typeof AuthenticatedTenantsQuotasIndexRoute
   '/integration/notification-settings/email/': typeof IntegrationNotificationSettingsEmailIndexRoute
 }
 export interface FileRoutesByTo {
@@ -79,9 +115,12 @@ export interface FileRoutesByTo {
   '/auth/callback': typeof AuthCallbackRoute
   '/': typeof AuthenticatedIndexRoute
   '/ops/gpu-pool': typeof AuthenticatedOpsGpuPoolRoute
+  '/tenants/quotas/$planId': typeof AuthenticatedTenantsQuotasPlanIdRoute
+  '/tenants/quotas/new': typeof AuthenticatedTenantsQuotasNewRoute
   '/integration/notification-settings/email/recipients': typeof IntegrationNotificationSettingsEmailRecipientsRoute
   '/integration/notification-settings/email/smtp': typeof IntegrationNotificationSettingsEmailSmtpRoute
   '/integration/notification-settings/email/subscriptions': typeof IntegrationNotificationSettingsEmailSubscriptionsRoute
+  '/tenants/quotas': typeof AuthenticatedTenantsQuotasIndexRoute
   '/integration/notification-settings/email': typeof IntegrationNotificationSettingsEmailIndexRoute
 }
 export interface FileRoutesById {
@@ -91,16 +130,43 @@ export interface FileRoutesById {
   '/auth/callback': typeof AuthCallbackRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/ops/gpu-pool': typeof AuthenticatedOpsGpuPoolRoute
+  '/_authenticated/tenants/quotas': typeof AuthenticatedTenantsQuotasRouteWithChildren
+  '/_authenticated/tenants/quotas/$planId': typeof AuthenticatedTenantsQuotasPlanIdRoute
+  '/_authenticated/tenants/quotas/new': typeof AuthenticatedTenantsQuotasNewRoute
   '/integration/notification-settings/email/recipients': typeof IntegrationNotificationSettingsEmailRecipientsRoute
   '/integration/notification-settings/email/smtp': typeof IntegrationNotificationSettingsEmailSmtpRoute
   '/integration/notification-settings/email/subscriptions': typeof IntegrationNotificationSettingsEmailSubscriptionsRoute
+  '/_authenticated/tenants/quotas/': typeof AuthenticatedTenantsQuotasIndexRoute
   '/integration/notification-settings/email/': typeof IntegrationNotificationSettingsEmailIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/auth/callback' | '/ops/gpu-pool' | '/integration/notification-settings/email/recipients' | '/integration/notification-settings/email/smtp' | '/integration/notification-settings/email/subscriptions' | '/integration/notification-settings/email/'
+  fullPaths:
+    | '/'
+    | '/login'
+    | '/auth/callback'
+    | '/ops/gpu-pool'
+    | '/tenants/quotas'
+    | '/tenants/quotas/$planId'
+    | '/tenants/quotas/new'
+    | '/integration/notification-settings/email/recipients'
+    | '/integration/notification-settings/email/smtp'
+    | '/integration/notification-settings/email/subscriptions'
+    | '/tenants/quotas/'
+    | '/integration/notification-settings/email/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/login' | '/auth/callback' | '/' | '/ops/gpu-pool' | '/integration/notification-settings/email/recipients' | '/integration/notification-settings/email/smtp' | '/integration/notification-settings/email/subscriptions' | '/integration/notification-settings/email'
+  to:
+    | '/login'
+    | '/auth/callback'
+    | '/'
+    | '/ops/gpu-pool'
+    | '/tenants/quotas/$planId'
+    | '/tenants/quotas/new'
+    | '/integration/notification-settings/email/recipients'
+    | '/integration/notification-settings/email/smtp'
+    | '/integration/notification-settings/email/subscriptions'
+    | '/tenants/quotas'
+    | '/integration/notification-settings/email'
   id:
     | '__root__'
     | '/_authenticated'
@@ -108,9 +174,13 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/_authenticated/'
     | '/_authenticated/ops/gpu-pool'
+    | '/_authenticated/tenants/quotas'
+    | '/_authenticated/tenants/quotas/$planId'
+    | '/_authenticated/tenants/quotas/new'
     | '/integration/notification-settings/email/recipients'
     | '/integration/notification-settings/email/smtp'
     | '/integration/notification-settings/email/subscriptions'
+    | '/_authenticated/tenants/quotas/'
     | '/integration/notification-settings/email/'
   fileRoutesById: FileRoutesById
 }
@@ -126,18 +196,18 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/_authenticated': {
-      id: '/_authenticated'
-      path: ''
-      fullPath: '/'
-      preLoaderRoute: typeof AuthenticatedRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/login': {
       id: '/login'
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated': {
+      id: '/_authenticated'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AuthenticatedRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/': {
@@ -154,6 +224,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/tenants/quotas': {
+      id: '/_authenticated/tenants/quotas'
+      path: '/tenants/quotas'
+      fullPath: '/tenants/quotas'
+      preLoaderRoute: typeof AuthenticatedTenantsQuotasRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/ops/gpu-pool': {
       id: '/_authenticated/ops/gpu-pool'
       path: '/ops/gpu-pool'
@@ -167,6 +244,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/integration/notification-settings/email/'
       preLoaderRoute: typeof IntegrationNotificationSettingsEmailIndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/tenants/quotas/': {
+      id: '/_authenticated/tenants/quotas/'
+      path: '/'
+      fullPath: '/tenants/quotas/'
+      preLoaderRoute: typeof AuthenticatedTenantsQuotasIndexRouteImport
+      parentRoute: typeof AuthenticatedTenantsQuotasRoute
     }
     '/integration/notification-settings/email/subscriptions': {
       id: '/integration/notification-settings/email/subscriptions'
@@ -189,17 +273,52 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IntegrationNotificationSettingsEmailRecipientsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/tenants/quotas/new': {
+      id: '/_authenticated/tenants/quotas/new'
+      path: '/new'
+      fullPath: '/tenants/quotas/new'
+      preLoaderRoute: typeof AuthenticatedTenantsQuotasNewRouteImport
+      parentRoute: typeof AuthenticatedTenantsQuotasRoute
+    }
+    '/_authenticated/tenants/quotas/$planId': {
+      id: '/_authenticated/tenants/quotas/$planId'
+      path: '/$planId'
+      fullPath: '/tenants/quotas/$planId'
+      preLoaderRoute: typeof AuthenticatedTenantsQuotasPlanIdRouteImport
+      parentRoute: typeof AuthenticatedTenantsQuotasRoute
+    }
   }
 }
+
+interface AuthenticatedTenantsQuotasRouteChildren {
+  AuthenticatedTenantsQuotasPlanIdRoute: typeof AuthenticatedTenantsQuotasPlanIdRoute
+  AuthenticatedTenantsQuotasNewRoute: typeof AuthenticatedTenantsQuotasNewRoute
+  AuthenticatedTenantsQuotasIndexRoute: typeof AuthenticatedTenantsQuotasIndexRoute
+}
+
+const AuthenticatedTenantsQuotasRouteChildren: AuthenticatedTenantsQuotasRouteChildren =
+  {
+    AuthenticatedTenantsQuotasPlanIdRoute:
+      AuthenticatedTenantsQuotasPlanIdRoute,
+    AuthenticatedTenantsQuotasNewRoute: AuthenticatedTenantsQuotasNewRoute,
+    AuthenticatedTenantsQuotasIndexRoute: AuthenticatedTenantsQuotasIndexRoute,
+  }
+
+const AuthenticatedTenantsQuotasRouteWithChildren =
+  AuthenticatedTenantsQuotasRoute._addFileChildren(
+    AuthenticatedTenantsQuotasRouteChildren,
+  )
 
 interface AuthenticatedRouteChildren {
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
   AuthenticatedOpsGpuPoolRoute: typeof AuthenticatedOpsGpuPoolRoute
+  AuthenticatedTenantsQuotasRoute: typeof AuthenticatedTenantsQuotasRouteWithChildren
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
   AuthenticatedOpsGpuPoolRoute: AuthenticatedOpsGpuPoolRoute,
+  AuthenticatedTenantsQuotasRoute: AuthenticatedTenantsQuotasRouteWithChildren,
 }
 
 const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(

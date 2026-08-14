@@ -2,6 +2,8 @@ package ports
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,19 +14,55 @@ import (
 // 具体实现由 postgres adapter（PostgresTenantPlanStore）在后续 issue 填充。
 
 // =============================================================================
+// 状态枚举
+// =============================================================================
+
+// TenantPlanStatus 套餐状态机：draft → active → disabled。
+type TenantPlanStatus string
+
+const (
+	TenantPlanStatusDraft    TenantPlanStatus = "draft"
+	TenantPlanStatusActive   TenantPlanStatus = "active"
+	TenantPlanStatusDisabled TenantPlanStatus = "disabled"
+)
+
+// Valid 报告是否为已知套餐状态（不含空串）。
+func (s TenantPlanStatus) Valid() bool {
+	switch s {
+	case TenantPlanStatusDraft, TenantPlanStatusActive, TenantPlanStatusDisabled:
+		return true
+	default:
+		return false
+	}
+}
+
+// ParseTenantPlanStatusFilter 解析列表过滤用 status：空=全部；非法值报错。
+func ParseTenantPlanStatusFilter(raw string) (TenantPlanStatus, error) {
+	s := TenantPlanStatus(strings.TrimSpace(raw))
+	if s == "" {
+		return "", nil
+	}
+	if !s.Valid() {
+		return "", fmt.Errorf("%w: status must be draft, active, or disabled", ErrValidationFailed)
+	}
+	return s, nil
+}
+
+// =============================================================================
 // 实体与 DTO
 // =============================================================================
 
 // TenantPlan 表示一条配额套餐记录（对应 tenant_plans 表的一行）。
 // status 状态机：draft → active → disabled，软删除通过 is_deleted + deleted_at 标记。
 type TenantPlan struct {
-	ID          uuid.UUID  // 主键；被 tenants.plan_id 外键引用（ON DELETE RESTRICT）
-	Code        string     // 业务代码；
-	Name        string     // 套餐名称
-	Description string     // 描述
-	Status      string     // draft | active | disabled
-	IsDeleted   bool       // 软删除标记
-	DeletedAt   *time.Time // 软删除时间；nil = 未删除
+	ID          uuid.UUID        // 主键；被 tenants.plan_id 外键引用（ON DELETE RESTRICT）
+	Code        string           // 业务代码；
+	Name        string           // 套餐名称
+	Description string           // 描述
+	Status      TenantPlanStatus // draft | active | disabled
+	IsDeleted   bool             // 软删除标记
+	DeletedAt   *time.Time       // 软删除时间；nil = 未删除
+	TenantCount int64            // 绑定租户数（仅读路径填充；Create 为 0）
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -33,16 +71,16 @@ type TenantPlan struct {
 type PlanQuotaLimit struct {
 	PlanID       uuid.UUID // 所属套餐
 	ResourceType string    // 配额维度标识（外键 → resource_quota_meta.resource_type）
-	Total        *int64    // 限额值；
+	Total        *int64    // 限额值；历史行可能为 NULL，读写路径用 Core default_quota 兜底
 }
 
 // PlanQuotaLimitView 表示套餐配额维度的"展示视图"（GET /quota-limits 返回）。
-// 已 JOIN resource_quota_meta 补充分展示名与单位，并把未设置的维度用
+// display_name/unit/default_quota 来自 Core ListQuotaMeta（SDK），不由 store JOIN 本地 meta 表。
 // 展示（GET /quota-limits）与绑定下发均使用本视图。
 type PlanQuotaLimitView struct {
 	ResourceType string // 配额维度标识
-	DisplayName  string // 展示名（来自 resource_quota_meta）
-	Unit         string // 单位（来自 resource_quota_meta）
+	DisplayName  string // 展示名（来自 Core quota-meta）
+	Unit         string // 单位（来自 Core quota-meta）
 	Total        int64  // 兜底后的具体限额值 COALESCE(plan_quota_limits.total, default_quota)
 }
 
@@ -55,15 +93,14 @@ type CreateTenantPlanInput struct {
 }
 
 // PlanQuotaLimitInput 是单个配额维度的写入入参（创建/修改限额时使用）。
-// Total 为 nil 表示"用该维度默认值"（resource_quota_meta.default_quota）。
+// Service 层在落库前已将 nil total 替换为 Core default_quota，故 Total 应为具体值。
 type PlanQuotaLimitInput struct {
 	ResourceType string // 配额维度标识
-	Total        *int64 // 限额值；nil = 用默认值
+	Total        *int64 // 限额值（具体数值）
 }
 
-// UpdateTenantPlanInput 是更新套餐的入参。
-// 注意：PUT /tenant-plans 编辑端点已删除；本类型保留供 service 层内部使用
-// （例如 bind-plan 等需要更新套餐字段的逻辑），不再作为对外 API 的入参。
+// UpdateTenantPlanInput 是更新套餐基本信息的入参（PUT /tenant-plans/{planId}）。
+// Name / Description：nil = 不更新；非 nil（含空串）= 写入该值。
 type UpdateTenantPlanInput struct {
 	Name        *string // nil = 不更新
 	Description *string // nil = 不更新
@@ -71,10 +108,10 @@ type UpdateTenantPlanInput struct {
 
 // TenantPlanListFilter 是套餐列表查询的过滤条件（游标分页）。
 type TenantPlanListFilter struct {
-	Limit  int    // 每页数量，default 20，max 100
-	Cursor string // 上一页返回的 next_cursor；空串 = 第一页
-	Status string // "" = 全部；否则取值 draft | active | disabled
-	Search string // 模糊匹配 name（HEAD 查询）
+	Limit  int              // 每页数量，default 20，max 100
+	Cursor string           // 上一页返回的 next_cursor；空串 = 第一页
+	Status TenantPlanStatus // "" = 全部；否则 draft | active | disabled
+	Search string           // 模糊匹配 name
 }
 
 // TenantPlanListItem 是套餐列表/详情的查询视图（仅在查询接口返回，不进 TenantPlan 实体）。
@@ -84,8 +121,8 @@ type TenantPlanListItem struct {
 	Code        string
 	Name        string
 	Description string
-	Status      string // draft | active | disabled
-	TenantCount int64  // 绑定租户数量（COUNT tenants WHERE plan_id=? AND status != 'disabled'）
+	Status      TenantPlanStatus // draft | active | disabled
+	TenantCount int64            // 绑定租户数量（COUNT tenants WHERE plan_id=? AND status != 'disabled'）
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -103,7 +140,7 @@ type BoundTenant struct {
 	ID          uuid.UUID
 	Name        string
 	DisplayName string
-	Status      string // active | frozen | disabled
+	Status      TenantStatus // active | frozen | disabled
 }
 
 // ApprovedQuotaChange 表示租户已审批通过（status='approved'）的配额变更维度。
@@ -126,15 +163,12 @@ type TenantPlanStore interface {
 	// GetByID 按主键查询未删除的套餐（tenants.plan_id 外键目标查询）。
 	GetByID(ctx context.Context, id uuid.UUID) (TenantPlan, error)
 
-	// GetByCode 按业务代码 code 查询未删除的套餐（不参与 tenants 外键）。
-	GetByCode(ctx context.Context, code string) (TenantPlan, error)
-
 	// List 按过滤条件查询未删除的套餐列表，使用游标分页（limit + cursor + next_cursor）。
-	// 返回 TenantPlanListItem（不含 quota_limits，需另调 GetQuotaLimitViews）。
+	// 返回 TenantPlanListItem（不含 quota_limits，需另调 GetQuotaLimits + Core meta 组装视图）。
 	List(ctx context.Context, filter TenantPlanListFilter) (TenantPlanListResult, error)
 
 	// Update 更新套餐的可变字段（name / description）。
-	// 注意：PUT /tenant-plans 端点已删除，本方法供 service 层内部使用。
+	// PUT /tenant-plans/{planId} 修改 name/description（nil=不更新，空串=清空）；亦用于 service 层内部。
 	Update(ctx context.Context, id uuid.UUID, in UpdateTenantPlanInput) (TenantPlan, error)
 
 	// Activate 将套餐置为 active（draft 或 disabled 均可转为 active）。
@@ -143,24 +177,24 @@ type TenantPlanStore interface {
 	// Disable 将套餐置为 disabled（active → disabled）。
 	Disable(ctx context.Context, id uuid.UUID) (TenantPlan, error)
 
-	// Delete 软删除套餐（is_deleted=TRUE, deleted_at=now()）；需校验无租户关联。
+	// Delete 软删除套餐（is_deleted=TRUE, deleted_at=now()）；
+	// 若仍有非 disabled 租户绑定则返回 ErrTenantPlanInUse（disabled 租户视为已删除，不阻止）。
 	Delete(ctx context.Context, id uuid.UUID) error
 
 	// GetQuotaLimits 读取套餐各维度限额的原始行（保留 NULL 语义）。
 	GetQuotaLimits(ctx context.Context, planID uuid.UUID) ([]PlanQuotaLimit, error)
 
-	// GetQuotaLimitViews 读取套餐各维度限额的展示视图：
-	// JOIN resource_quota_meta 并 COALESCE(total, default_quota) 兜底为具体数值。
-	// GET /tenant-plans/{planId}/quota-limits 展示与绑定下发均使用本方法。
-	GetQuotaLimitViews(ctx context.Context, planID uuid.UUID) ([]PlanQuotaLimitView, error)
-
 	// UpdateQuotaLimits 更新套餐各维度的限额（UPSERT plan_quota_limits）。
-	// 供 TenantPlanService.UpdateQuotaLimits（issue-006，PUT /tenant-plans/{planId}/quota-limits）使用：
-	// 维度已存在则 UPDATE total，不存在则 INSERT；Total 为 nil 表示用默认值。
+	// 供 TenantPlanService.UpdateQuotaLimits（PUT /tenant-plans/{planId}/quota-limits）使用：
+	// 维度已存在则 UPDATE total，不存在则 INSERT；Total 由 service 填为具体值（含 default 兜底）。
 	UpdateQuotaLimits(ctx context.Context, planID uuid.UUID, items []PlanQuotaLimitInput) error
 
 	// ListBoundTenants 查询绑定到指定套餐的租户摘要列表（tenants WHERE plan_id=?）。
 	ListBoundTenants(ctx context.Context, planID uuid.UUID) ([]BoundTenant, error)
+
+	// ListBindableTenants 查询可绑定指定套餐的租户摘要：
+	// status != disabled 且 plan_id IS DISTINCT FROM planID（含未绑定其它套餐）；按 name 排序。
+	ListBindableTenants(ctx context.Context, planID uuid.UUID) ([]BoundTenant, error)
 
 	// GetApprovedQuotaChanges 查询指定租户已审批通过（status='approved'）的配额变更维度，
 	// 用于绑定套餐 / 修改限额同步时保留不覆盖这些维度。

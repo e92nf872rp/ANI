@@ -16,6 +16,29 @@ import (
 // 完整 TenantStore（Create/List/Update/Freeze/Unfreeze/Disable 等）由后续独立租户管理 PR 补充。
 
 // =============================================================================
+// 状态枚举
+// =============================================================================
+
+// TenantStatus 租户状态机：active → frozen → disabled。
+type TenantStatus string
+
+const (
+	TenantStatusActive   TenantStatus = "active"
+	TenantStatusFrozen   TenantStatus = "frozen"
+	TenantStatusDisabled TenantStatus = "disabled"
+)
+
+// Valid 报告是否为已知租户状态（不含空串）。
+func (s TenantStatus) Valid() bool {
+	switch s {
+	case TenantStatusActive, TenantStatusFrozen, TenantStatusDisabled:
+		return true
+	default:
+		return false
+	}
+}
+
+// =============================================================================
 // 实体与 DTO
 // =============================================================================
 
@@ -24,12 +47,12 @@ import (
 // Status 状态机：active → frozen → disabled。
 // 注意：MFA/SSO 与配额均不在本结构体内（分别由 TenantAuthStore / Core QuotaService 承载）。
 type Tenant struct {
-	ID           uuid.UUID // 主键
-	Name         string    // 租户标识
-	DisplayName  string    // 展示名
-	ContactEmail string    // 联系邮箱
-	Status       string    // active | frozen | disabled
-	PlanID       uuid.UUID // 外键 → tenant_plans.id
+	ID           uuid.UUID     // 主键
+	Name         string        // 租户标识
+	DisplayName  string        // 展示名
+	ContactEmail string        // 联系邮箱
+	Status       TenantStatus  // active | frozen | disabled
+	PlanID       uuid.UUID     // 外键 → tenant_plans.id
 	FrozenAt     *time.Time
 	DisabledAt   *time.Time
 	CreatedAt    time.Time

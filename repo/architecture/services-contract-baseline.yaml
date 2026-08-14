@@ -224,9 +224,15 @@ exceptions:
   - operation_id: activateTenantPlan
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: activateTenantPlan
+    rule: write_requires_idempotency
+    reason: 网关 activate 忽略空 body，幂等键可选（body 或 Idempotency-Key 头）；空键时中间件跳过幂等。
   - operation_id: disableTenantPlan
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: disableTenantPlan
+    rule: write_requires_idempotency
+    reason: 网关 disable 忽略空 body，幂等键可选（body 或 Idempotency-Key 头）；空键时中间件跳过幂等。
   - operation_id: listTenantPlanBoundTenants
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
@@ -234,6 +240,18 @@ exceptions:
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
   - operation_id: bindTenantPlan
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: updateTenantPlan
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: updateTenantPlan
+    rule: write_requires_idempotency
+    reason: PUT 更新套餐基本信息按 issue-010 允许 idempotency_key 可选；网关可回落 Idempotency-Key 头。
+  - operation_id: listQuotaMeta
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: listBindableTenants
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
   - operation_id: listAllTenantAdmins

@@ -95,6 +95,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerGpuContainers(svc)
 	registerSandboxes(svc)
 	registerTenant(svc)
+	registerTenantPlans(svc)
 
 	// OpenAI-compatible inference proxy (separate URL prefix, no /api prefix)
 	h.Group("/v1").POST("/chat/completions", inferenceProxy)

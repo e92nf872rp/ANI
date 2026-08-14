@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1/svc</code></dd></div>
-          <div><dt>Operations</dt><dd>91</dd></div>
-          <div><dt>Schemas</dt><dd>92</dd></div>
+          <div><dt>Operations</dt><dd>94</dd></div>
+          <div><dt>Schemas</dt><dd>96</dd></div>
         </dl>
       </section>
 
@@ -537,6 +537,14 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/quota-meta</code></td>
+          <td><code>listQuotaMeta</code></td>
+          <td>查询可用配额维度元数据（透传 Core；需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 502, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/sandboxes</code></td>
           <td><code>listSandboxes</code></td>
           <td>Sandbox列表（已废弃，请使用 /api/v1/instances?kind=sandbox）</td>
@@ -619,9 +627,9 @@
           <td><span class="method method-get">GET</span></td>
           <td><code>/tenant-plans</code></td>
           <td><code>listTenantPlans</code></td>
-          <td>查询套餐列表</td>
+          <td>查询套餐列表（需 platform-admin / platform-ops / platform-readonly）</td>
           <td><code></code></td>
-          <td>200, 401, 403</td>
+          <td>200, 400, 401, 403, 502, 504</td>
         </tr>
         <tr>
           <td><span class="method method-post">POST</span></td>
@@ -629,7 +637,7 @@
           <td><code>createTenantPlan</code></td>
           <td>创建套餐（需 platform-admin / platform-ops）</td>
           <td><code></code></td>
-          <td>200, 400, 401, 403, 409, 422</td>
+          <td>200, 400, 401, 403, 409, 422, 502, 504</td>
         </tr>
         <tr>
           <td><span class="method method-delete">DELETE</span></td>
@@ -637,7 +645,7 @@
           <td><code>deleteTenantPlan</code></td>
           <td>删除套餐（软删除）（需 platform-admin / platform-ops）</td>
           <td><code></code></td>
-          <td>200, 401, 403, 404, 409</td>
+          <td>200, 400, 401, 403, 404, 409, 502, 504</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -645,7 +653,15 @@
           <td><code>getTenantPlan</code></td>
           <td>查询套餐详情（需 platform-admin / platform-ops / platform-readonly）</td>
           <td><code></code></td>
-          <td>200, 401, 403, 404</td>
+          <td>200, 400, 401, 403, 404, 502, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/tenant-plans/{planId}</code></td>
+          <td><code>updateTenantPlan</code></td>
+          <td>更新套餐基本信息（name / description）（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 502, 504</td>
         </tr>
         <tr>
           <td><span class="method method-post">POST</span></td>
@@ -653,7 +669,7 @@
           <td><code>activateTenantPlan</code></td>
           <td>发布套餐（需 platform-admin / platform-ops）</td>
           <td><code></code></td>
-          <td>200, 401, 403, 404, 409</td>
+          <td>200, 400, 401, 403, 404, 409, 502, 504</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -661,7 +677,15 @@
           <td><code>listTenantPlanAuditLogs</code></td>
           <td>查询套餐操作历史（需 platform-admin / platform-ops / platform-readonly）</td>
           <td><code></code></td>
-          <td>200, 401, 403, 404</td>
+          <td>200, 400, 401, 403, 404, 502, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant-plans/{planId}/bindable-tenants</code></td>
+          <td><code>listBindableTenants</code></td>
+          <td>查询可绑定该套餐的租户列表（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 502, 504</td>
         </tr>
         <tr>
           <td><span class="method method-post">POST</span></td>
@@ -669,7 +693,7 @@
           <td><code>disableTenantPlan</code></td>
           <td>禁用套餐（需 platform-admin / platform-ops）</td>
           <td><code></code></td>
-          <td>200, 401, 403, 404, 409</td>
+          <td>200, 400, 401, 403, 404, 409, 502, 504</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -677,7 +701,7 @@
           <td><code>getTenantPlanQuotaLimits</code></td>
           <td>查询套餐限额（需 platform-admin / platform-ops / platform-readonly）</td>
           <td><code></code></td>
-          <td>200, 401, 403, 404</td>
+          <td>200, 400, 401, 403, 404, 502, 504</td>
         </tr>
         <tr>
           <td><span class="method method-put">PUT</span></td>
@@ -685,7 +709,7 @@
           <td><code>updateTenantPlanQuotaLimits</code></td>
           <td>修改套餐限额（同步存量租户）（需 platform-admin / platform-ops）</td>
           <td><code></code></td>
-          <td>200, 400, 401, 403, 404, 422</td>
+          <td>200, 400, 401, 403, 404, 409, 422, 502, 504</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -693,7 +717,7 @@
           <td><code>listTenantPlanBoundTenants</code></td>
           <td>查询套餐绑定的租户列表（需 platform-admin / platform-ops / platform-readonly）</td>
           <td><code></code></td>
-          <td>200, 401, 403, 404</td>
+          <td>200, 400, 401, 403, 404, 502, 504</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -877,7 +901,7 @@
           <td><code>bindTenantPlan</code></td>
           <td>绑定套餐（按套餐限额更新配额）（需 platform-admin / platform-ops）</td>
           <td><code></code></td>
-          <td>200, 400, 401, 403, 404, 409, 422</td>
+          <td>200, 400, 401, 403, 404, 409, 422, 502, 504</td>
         </tr>
         <tr>
           <td><span class="method method-post">POST</span></td>
@@ -957,6 +981,8 @@
         <li><code>PlanQuotaLimitInput</code></li>
         <li><code>PlanQuotaLimitView</code></li>
         <li><code>PlanQuotaLimitsResponse</code></li>
+        <li><code>QuotaMetaItem</code></li>
+        <li><code>QuotaMetaListResponse</code></li>
         <li><code>RebuildKnowledgeBaseRequest</code></li>
         <li><code>ReparseDocumentRequest</code></li>
         <li><code>ResendInvitationRequest</code></li>
@@ -971,6 +997,7 @@
         <li><code>TenantPlan</code></li>
         <li><code>TenantPlanListItem</code></li>
         <li><code>TenantPlanListResponse</code></li>
+        <li><code>TenantPlanStateChangeRequest</code></li>
         <li><code>TenantRef</code></li>
         <li><code>TenantRole</code></li>
         <li><code>TransferOwnershipRequest</code></li>
@@ -981,6 +1008,7 @@
         <li><code>UpdateQuotaLimitsRequest</code></li>
         <li><code>UpdateRoleRequest</code></li>
         <li><code>UpdateSsoConfigRequest</code></li>
+        <li><code>UpdateTenantPlanRequest</code></li>
         <li><code>UpdateTenantRoleRequest</code></li>
         <li><code>UserPermissions</code></li>
         <li><code>Webhook</code></li>
