@@ -60,6 +60,11 @@ allowed:
       - github.com/jackc/pgx/v5
       - github.com/jackc/pgx/v5/pgxpool
     reason: OIDC callback persists users, role mappings, and refresh tokens in a bounded auth metadata module
+  - path: services/metering-service/internal/service/metering_collection_service.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: Metering collection service is a bounded persistence module; direct pgxpool keeps BYPASSRLS writes and ON CONFLICT idempotency explicit for metering_usage_records
   - path: services/task-service/internal/service/task_service.go
     coupling_level: bounded_direct
     imports:
