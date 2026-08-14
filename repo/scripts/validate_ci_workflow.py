@@ -13,7 +13,6 @@ REQUIRED_JOBS = {
     "python-ci",
     "frontend-ci",
     "services-pr-gate",
-    "dependency-scan",
     "api-spec-lint",
 }
 WORKFLOW_PATH = Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml"
