@@ -151,6 +151,19 @@ func main() {
 			"provider", strings.TrimSpace(os.Getenv("INSTANCE_OBSERVABILITY_PROVIDER")),
 		)
 	}
+	inferenceServiceClient, closeInferenceGRPC, err := newGatewayInferenceServiceClient(runtimeCtx, gatewayInferenceServiceRuntimeConfigFromEnv())
+	if err != nil {
+		logger.Error("failed to configure inference-service gRPC client", "err", err)
+		os.Exit(1)
+	}
+	if closeInferenceGRPC != nil {
+		defer closeInferenceGRPC()
+	}
+	if inferenceServiceClient != nil {
+		logger.Info("inference-service gRPC client configured",
+			"addr", strings.TrimSpace(os.Getenv("INFERENCE_SERVICE_GRPC_ADDR")),
+		)
+	}
 	kbServiceClient, closeKBGRPC, err := newGatewayKBServiceClient(runtimeCtx, gatewayKBServiceRuntimeConfigFromEnv())
 	if err != nil {
 		logger.Error("failed to configure kb-service gRPC client", "err", err)
@@ -172,6 +185,18 @@ func main() {
 		os.Exit(1)
 	}
 	defer closeQuotaStore()
+	platformWorkloadRuntimeConfig := gatewayPlatformWorkloadRuntimeConfigFromEnv()
+	platformWorkloadService, closePlatformWorkload, err := newGatewayPlatformWorkloadService(runtimeCtx, platformWorkloadRuntimeConfig)
+	if err != nil {
+		logger.Error("failed to configure platform workload provider runtime", "err", err)
+		os.Exit(1)
+	}
+	defer closePlatformWorkload()
+	platformWorkloadProvider := strings.TrimSpace(platformWorkloadRuntimeConfig.ProviderMode)
+	if platformWorkloadProvider == "" {
+		platformWorkloadProvider = "local"
+	}
+	logger.Info("platform workload provider runtime configured", "provider", platformWorkloadProvider)
 	var routeInstanceRuntime *router.InstanceRuntime
 	if instanceRuntime.Service != nil {
 		routeInstanceRuntime = &router.InstanceRuntime{
@@ -201,10 +226,12 @@ func main() {
 		KubernetesRESTClient:                  kubernetesRESTClient,
 		ObservabilityService:                  observabilityService,
 		EmailNotificationStore:                runtimeadapter.NewLocalEmailNotificationStore(),
+		InferenceServiceClient:                inferenceServiceClient,
 		KBServiceClient:                       kbServiceClient,
 		KBSSEConfig:                           newGatewaySSEConfig(gatewaySSERuntimeConfigFromEnv()),
 		AsyncTaskStore:                        instanceRuntime.AsyncTasks,
 		QuotaAdminService:                     quotaAdminService,
+		PlatformWorkloadService:               platformWorkloadService,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

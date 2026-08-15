@@ -82,6 +82,24 @@ func (s *ModelService) GetModel(ctx context.Context, req *modelv1.GetModelReques
 	return modelToPB(model), nil
 }
 
+func (s *ModelService) GetModelVersion(ctx context.Context, req *modelv1.GetModelVersionRequest) (*modelv1.GetModelVersionResponse, error) {
+	tenantID, versionID, err := parseTenantAndID(req.GetTenantId(), req.GetModelVersionId())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	ctx = withTenant(ctx, tenantID)
+	model, version, err := s.repo.GetVersionByID(ctx, s.db, versionID)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	versionPB := versionToPB(version)
+	versionPB.EncryptHint = ""
+	return &modelv1.GetModelVersionResponse{
+		Model:   modelToPB(model),
+		Version: versionPB,
+	}, nil
+}
+
 func (s *ModelService) ListModels(ctx context.Context, req *modelv1.ListModelsRequest) (*modelv1.ListModelsResponse, error) {
 	tenantID, err := parseTenant(req.GetTenantId())
 	if err != nil {

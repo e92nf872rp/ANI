@@ -40,6 +40,7 @@ func AuthWithClient(authClient AuthClient) app.HandlerFunc {
 				userID = "00000000-0000-0000-0000-000000000001"
 			}
 			setTenantContext(c, tenantID, userID, []string{"tenant-admin"}, "tenant")
+			setPrincipalContext(c, string(c.GetHeader("X-Dev-Principal-Kind")), string(c.GetHeader("X-Dev-Service-Scope")))
 			// Inject TenantContext into Go context.Context so RLS-aware stores
 			// (MetadataInstanceStore via WithTenantTx -> SetDBTenant -> FromContext)
 			// do not panic when a real DB provider is wired.
@@ -97,7 +98,12 @@ func AuthWithClient(authClient AuthClient) app.HandlerFunc {
 				return
 			}
 			setTenantContext(c, tenantCtx.GetTenantId(), tenantCtx.GetUserId(), tenantCtx.GetRoles(), scope)
-			ctx, err = withTenantContextStrict(ctx, tenantCtx.GetTenantId(), tenantCtx.GetUserId(), tenantCtx.GetRoles())
+			if isPlatformWorkloadScope(scope) {
+				setPrincipalContext(c, "service", scope)
+			} else {
+				setPrincipalContext(c, "user", "")
+			}
+			ctx, err = withTenantContextStrict(ctx, tenantCtx.GetTenantId(), serviceActorOrUserID(tenantCtx.GetUserId(), scope), tenantCtx.GetRoles())
 			if err != nil {
 				respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", err.Error())
 				return
@@ -128,6 +134,7 @@ func AuthWithClient(authClient AuthClient) app.HandlerFunc {
 				return
 			}
 			setTenantContext(c, tenantCtx.GetTenantId(), tenantCtx.GetUserId(), tenantCtx.GetRoles(), scope)
+			setPrincipalContext(c, "api_key", "")
 			ctx, err = withTenantContextStrict(ctx, tenantCtx.GetTenantId(), tenantCtx.GetUserId(), tenantCtx.GetRoles())
 			if err != nil {
 				respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", err.Error())
@@ -146,6 +153,27 @@ func setTenantContext(c *app.RequestContext, tenantID, userID string, roles []st
 	c.Set("user_id", userID)
 	c.Set("roles", roles)
 	c.Set("scope", scope)
+}
+
+func setPrincipalContext(c *app.RequestContext, principalKind, serviceScope string) {
+	kind := strings.TrimSpace(principalKind)
+	if kind == "" {
+		kind = "user"
+	}
+	c.Set("principal_kind", kind)
+	c.Set("service_scope", strings.TrimSpace(serviceScope))
+}
+
+func GetPrincipalKind(c *app.RequestContext) string {
+	kind := strings.TrimSpace(c.GetString("principal_kind"))
+	if kind == "" {
+		return "user"
+	}
+	return kind
+}
+
+func GetServiceScope(c *app.RequestContext) string {
+	return strings.TrimSpace(c.GetString("service_scope"))
 }
 
 // GetScope returns the token scope set by Auth middleware. Empty when unset.
@@ -219,6 +247,9 @@ func scopeAllowedForPath(path, scope string) bool {
 	if scope == sandboxtoken.ScopeSandbox {
 		return isSandboxSubresourcePath(path)
 	}
+	if isPlatformWorkloadPath(path) {
+		return isPlatformWorkloadScope(scope)
+	}
 	// 平台/管理路由前缀：/auth/platform/*、/platform/*、/admin/*（含 /admin/tenants/*、/admin/quota-meta）
 	if strings.HasPrefix(path, "/api/v1/auth/platform/") ||
 		strings.HasPrefix(path, "/api/v1/platform/") ||
@@ -226,4 +257,24 @@ func scopeAllowedForPath(path, scope string) bool {
 		return scope == "platform"
 	}
 	return scope == "tenant"
+}
+
+func isPlatformWorkloadPath(path string) bool {
+	return path == "/api/v1/platform-workload-capabilities" ||
+		strings.HasPrefix(path, "/api/v1/platform-workloads")
+}
+
+func isPlatformWorkloadScope(scope string) bool {
+	return strings.Contains(scope, "scope:platform-workloads:read") ||
+		strings.Contains(scope, "scope:platform-workloads:write")
+}
+
+func serviceActorOrUserID(userID, scope string) string {
+	if strings.TrimSpace(userID) != "" {
+		return userID
+	}
+	if isPlatformWorkloadScope(scope) {
+		return "00000000-0000-0000-0000-0000000000aa"
+	}
+	return userID
 }

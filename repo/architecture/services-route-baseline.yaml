@@ -28,19 +28,7 @@ exceptions:
     path: /inference-services/{service_id}/test
     status: accepted_baseline
     owner: ANI Services
-    reason: OpenAPI 已声明推理服务调用测试，当前 Gateway 尚未注册对应过渡路由。
-  - kind: spec_not_in_code
-    method: POST
-    path: /inference-services/{service_id}/lifecycle
-    status: accepted_baseline
-    owner: ANI Services
-    reason: 阶段 B 先冻结推理服务生命周期契约；Gateway handler 必须等待独立契约 PR 批准后实现。
-  - kind: spec_not_in_code
-    method: GET
-    path: /inference-operations/{operation_id}
-    status: accepted_baseline
-    owner: ANI Services
-    reason: 阶段 B 先冻结推理 operation 查询契约；Gateway handler 必须等待独立契约 PR 批准后实现。
+    reason: OpenAPI 保留推理服务调用测试兼容路径；产品控制面不实现 /test，避免增加可打到 runtime 的额外入口。
   - kind: spec_not_in_code
     method: POST
     path: /integrations
@@ -59,12 +47,6 @@ exceptions:
     status: accepted_baseline
     owner: ANI Services
     reason: OpenAPI 已声明第三方集成列表，当前 Gateway 尚未注册对应过渡路由。
-  - kind: spec_not_in_code
-    method: PUT
-    path: /inference-services/{service_id}/policies
-    status: accepted_baseline
-    owner: ANI Services
-    reason: OpenAPI 已声明推理服务策略更新，当前 Gateway 尚未注册对应过渡路由。
   - kind: spec_not_in_code
     method: POST
     path: /knowledge-bases/{kb_id}/documents/{doc_id}/reparse

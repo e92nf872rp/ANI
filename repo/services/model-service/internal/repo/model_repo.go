@@ -16,6 +16,7 @@ import (
 type ModelRepo interface {
 	Create(ctx context.Context, tx pgx.Tx, req CreateModelReq) (*Model, error)
 	GetByID(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) (*Model, error)
+	GetVersionByID(ctx context.Context, pool *pgxpool.Pool, versionID uuid.UUID) (*Model, *ModelVersion, error)
 	List(ctx context.Context, pool *pgxpool.Pool, filter ListFilter) ([]*Model, int64, string, error)
 	SoftDelete(ctx context.Context, tx pgx.Tx, id uuid.UUID) error
 	CreateVersion(ctx context.Context, tx pgx.Tx, req CreateVersionReq) (*ModelVersion, error)
@@ -133,6 +134,41 @@ func (r *PostgresModelRepo) GetByID(ctx context.Context, pool *pgxpool.Pool, id 
 		return nil, fmt.Errorf("modelRepo.GetByID commit: %w", err)
 	}
 	return model, nil
+}
+
+func (r *PostgresModelRepo) GetVersionByID(ctx context.Context, pool *pgxpool.Pool, versionID uuid.UUID) (*Model, *ModelVersion, error) {
+	tx, err := beginTenantTx(ctx, pool)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rollback(ctx, tx)
+
+	tenant := types.FromContext(ctx)
+	model := &Model{}
+	version := &ModelVersion{}
+	err = tx.QueryRow(ctx, `
+		SELECT
+			m.tenant_id, m.id, m.name, m.display_name, COALESCE(m.description, ''),
+			m.source, COALESCE(m.source_repo_id, ''), m.capabilities, m.status,
+			COALESCE(m.error_message, ''), COALESCE(m.total_size_bytes, 0),
+			m.created_at, m.updated_at,
+			v.id, v.model_id, v.version, v.format, v.is_encrypted, COALESCE(v.encrypt_algo, ''),
+			COALESCE(v.encrypt_hint, ''), COALESCE(v.size_bytes, 0), COALESCE(v.checksum_sha256, ''),
+			v.storage_path, v.created_at
+		FROM model_versions v
+		JOIN models m ON m.id = v.model_id
+		WHERE v.id=$1 AND m.tenant_id=$2 AND m.status <> 'deleted'
+	`, versionID, tenant.TenantID).Scan(append(modelScanDest(model), versionScanDest(version)...)...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil, types.Wrapf(types.ErrNotFound, "modelRepo.GetVersionByID id=%s", versionID)
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("modelRepo.GetVersionByID query: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, nil, fmt.Errorf("modelRepo.GetVersionByID commit: %w", err)
+	}
+	return model, version, nil
 }
 
 func (r *PostgresModelRepo) List(ctx context.Context, pool *pgxpool.Pool, filter ListFilter) ([]*Model, int64, string, error) {

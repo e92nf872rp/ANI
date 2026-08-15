@@ -54,6 +54,11 @@ func TestPlatformLogin_TenantIsolation(t *testing.T) {
 		{"platform token on tenant endpoint", "/api/v1/auth/password/login", "platform", false},
 		{"platform token on tenant endpoint (api-keys)", "/api/v1/auth/api-keys", "platform", false},
 		{"empty scope on platform endpoint (defensive)", "/api/v1/auth/platform/password/login", "", false},
+		{"service scope on platform-workloads", "/api/v1/platform-workloads", "scope:platform-workloads:write", true},
+		{"service read scope on capabilities", "/api/v1/platform-workload-capabilities", "scope:platform-workloads:read", true},
+		{"tenant scope on platform-workloads", "/api/v1/platform-workloads", "tenant", false},
+		{"platform scope on platform-workloads", "/api/v1/platform-workloads", "platform", false},
+		{"service scope on tenant endpoint", "/api/v1/instances", "scope:platform-workloads:write", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

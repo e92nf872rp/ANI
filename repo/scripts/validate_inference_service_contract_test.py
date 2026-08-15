@@ -153,17 +153,14 @@ class InferenceServiceContractTest(unittest.TestCase):
             validator.load_handler_baseline(),
         )
         self.assertEqual(errors, ())
-        self.assertEqual(len(warnings), 3)
+        self.assertEqual(warnings, ())
 
     def test_resolved_handler_status_makes_baseline_stale(self) -> None:
         source = validator.HANDLER_PATH.read_text(encoding="utf-8")
-        old_body = validator.function_body(source, "createInferenceService")
-        new_body = old_body.replace("http.StatusOK", "http.StatusAccepted")
-        source = source.replace(old_body, new_body)
         _, errors = validator.validate_handler_statuses(
             self.spec,
             source,
-            validator.load_handler_baseline(),
+            {"createInferenceService": (200, 202)},
         )
         self.assertIn("stale inference handler baseline: createInferenceService", errors)
 

@@ -63,6 +63,37 @@ func (i *JWTIssuer) IssueAccessToken(principal refreshPrincipal, ttl time.Durati
 
 // IssuePlatformAccessToken signs an access token for a platform admin.
 // The token carries scope=platform, no tenant_id, and roles=["platform-admin"].
+func (i *JWTIssuer) IssueServiceAccessToken(tenantID uuid.UUID, scope string, ttl time.Duration) (string, error) {
+	if tenantID == uuid.Nil {
+		return "", fmt.Errorf("service token tenant id is required")
+	}
+	if !isPlatformWorkloadScope(scope) {
+		return "", fmt.Errorf("service token scope is not allowed")
+	}
+	if ttl <= 0 {
+		ttl = defaultServiceTokenTTL
+	}
+	if ttl > maxServiceTokenTTL {
+		ttl = maxServiceTokenTTL
+	}
+	now := i.now()
+	payload := jwtPayload{
+		Subject:       serviceActorUserID.String(),
+		Issuer:        i.issuer,
+		Audience:      serviceAudience,
+		Expires:       now.Add(ttl).Unix(),
+		NotBefore:     now.Unix(),
+		IssuedAt:      now.Unix(),
+		JTI:           uuid.NewString(),
+		TenantID:      tenantID.String(),
+		UserID:        serviceActorUserID.String(),
+		Roles:         []string{"service"},
+		Scope:         scope,
+		PrincipalKind: "service",
+	}
+	return i.sign(payload)
+}
+
 func (i *JWTIssuer) IssuePlatformAccessToken(principal platformPrincipal, ttl time.Duration) (string, error) {
 	if ttl <= 0 {
 		ttl = defaultAccessTokenTTL

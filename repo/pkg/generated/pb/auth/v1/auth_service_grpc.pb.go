@@ -28,6 +28,7 @@ const (
 	AuthService_RefreshToken_FullMethodName          = "/auth.v1.AuthService/RefreshToken"
 	AuthService_RevokeToken_FullMethodName           = "/auth.v1.AuthService/RevokeToken"
 	AuthService_ValidateToken_FullMethodName         = "/auth.v1.AuthService/ValidateToken"
+	AuthService_IssueServiceToken_FullMethodName     = "/auth.v1.AuthService/IssueServiceToken"
 	AuthService_CheckPermission_FullMethodName       = "/auth.v1.AuthService/CheckPermission"
 	AuthService_CreateAPIKey_FullMethodName          = "/auth.v1.AuthService/CreateAPIKey"
 	AuthService_ListAPIKeys_FullMethodName           = "/auth.v1.AuthService/ListAPIKeys"
@@ -47,6 +48,9 @@ type AuthServiceClient interface {
 	// ValidateToken is called internally by the ANI Gateway Auth middleware.
 	// Returns the TenantContext if the token is valid; returns UNAUTHENTICATED otherwise.
 	ValidateToken(ctx context.Context, in *ValidateTokenRequest, opts ...grpc.CallOption) (*v1.TenantContext, error)
+	// IssueServiceToken mints a short-lived service JWT for cluster-internal Core calls.
+	// It is not a tenant HTTP product API and must not be published on Gateway.
+	IssueServiceToken(ctx context.Context, in *IssueServiceTokenRequest, opts ...grpc.CallOption) (*AccessToken, error)
 	// CheckPermission is called by the RBAC middleware.
 	CheckPermission(ctx context.Context, in *CheckPermissionRequest, opts ...grpc.CallOption) (*CheckPermissionResponse, error)
 	CreateAPIKey(ctx context.Context, in *CreateAPIKeyRequest, opts ...grpc.CallOption) (*CreateAPIKeyResponse, error)
@@ -125,6 +129,15 @@ func (c *authServiceClient) ValidateToken(ctx context.Context, in *ValidateToken
 	return out, nil
 }
 
+func (c *authServiceClient) IssueServiceToken(ctx context.Context, in *IssueServiceTokenRequest, opts ...grpc.CallOption) (*AccessToken, error) {
+	out := new(AccessToken)
+	err := c.cc.Invoke(ctx, AuthService_IssueServiceToken_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *authServiceClient) CheckPermission(ctx context.Context, in *CheckPermissionRequest, opts ...grpc.CallOption) (*CheckPermissionResponse, error) {
 	out := new(CheckPermissionResponse)
 	err := c.cc.Invoke(ctx, AuthService_CheckPermission_FullMethodName, in, out, opts...)
@@ -174,6 +187,9 @@ type AuthServiceServer interface {
 	// ValidateToken is called internally by the ANI Gateway Auth middleware.
 	// Returns the TenantContext if the token is valid; returns UNAUTHENTICATED otherwise.
 	ValidateToken(context.Context, *ValidateTokenRequest) (*v1.TenantContext, error)
+	// IssueServiceToken mints a short-lived service JWT for cluster-internal Core calls.
+	// It is not a tenant HTTP product API and must not be published on Gateway.
+	IssueServiceToken(context.Context, *IssueServiceTokenRequest) (*AccessToken, error)
 	// CheckPermission is called by the RBAC middleware.
 	CheckPermission(context.Context, *CheckPermissionRequest) (*CheckPermissionResponse, error)
 	CreateAPIKey(context.Context, *CreateAPIKeyRequest) (*CreateAPIKeyResponse, error)
@@ -206,6 +222,9 @@ func (UnimplementedAuthServiceServer) RevokeToken(context.Context, *RevokeTokenR
 }
 func (UnimplementedAuthServiceServer) ValidateToken(context.Context, *ValidateTokenRequest) (*v1.TenantContext, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ValidateToken not implemented")
+}
+func (UnimplementedAuthServiceServer) IssueServiceToken(context.Context, *IssueServiceTokenRequest) (*AccessToken, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method IssueServiceToken not implemented")
 }
 func (UnimplementedAuthServiceServer) CheckPermission(context.Context, *CheckPermissionRequest) (*CheckPermissionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CheckPermission not implemented")
@@ -358,6 +377,24 @@ func _AuthService_ValidateToken_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AuthService_IssueServiceToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IssueServiceTokenRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).IssueServiceToken(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_IssueServiceToken_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).IssueServiceToken(ctx, req.(*IssueServiceTokenRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AuthService_CheckPermission_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CheckPermissionRequest)
 	if err := dec(in); err != nil {
@@ -464,6 +501,10 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ValidateToken",
 			Handler:    _AuthService_ValidateToken_Handler,
+		},
+		{
+			MethodName: "IssueServiceToken",
+			Handler:    _AuthService_IssueServiceToken_Handler,
 		},
 		{
 			MethodName: "CheckPermission",

@@ -27,6 +27,11 @@ type RegisterOptions struct {
 	KubernetesRESTClient                  *runtimeadapter.KubernetesRESTClient
 	ObservabilityService                  ports.ObservabilityService
 	EmailNotificationStore                ports.EmailNotificationStore
+	// InferenceServiceClient routes /api/v1/svc/inference-services* to
+	// inference-service via internal InferenceControl gRPC. When nil the
+	// product handlers return 503 DEPENDENCY_UNAVAILABLE so the gateway
+	// still boots without inference-service configured.
+	InferenceServiceClient InferenceControlClient
 	// KBServiceClient routes /api/v1/svc/knowledge-bases/* to kb-service via
 	// gRPC. When nil the KB handlers return 503 UNAVAILABLE so the gateway
 	// still boots in environments without kb-service configured.
@@ -34,9 +39,10 @@ type RegisterOptions struct {
 	// KBSSEConfig wires the SSE streaming query endpoint (US-017). When
 	// ragClient or vllmStreamer is nil the SSE handler degrades to an
 	// empty stream so the gateway stays functional without backends.
-	KBSSEConfig       KbSSEConfig
-	AsyncTaskStore    ports.AsyncTaskStore
-	QuotaAdminService ports.QuotaAdminService
+	KBSSEConfig             KbSSEConfig
+	AsyncTaskStore          ports.AsyncTaskStore
+	QuotaAdminService       ports.QuotaAdminService
+	PlatformWorkloadService ports.PlatformWorkloadService
 }
 
 // Register wires all route groups onto the Hertz server.
@@ -82,9 +88,11 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerSecretResourcesWithService(v1, options.SecretService)
 	registerEmailNotificationResourcesWithService(v1, options.EmailNotificationStore)
 	registerQuotaResources(v1, options.QuotaAdminService)
+	registerPlatformWorkloadResources(v1, options.PlatformWorkloadService, options.AsyncTaskStore)
 
 	svc := h.Group("/api/v1/svc")
 	registerModels(svc)
+	inferenceControlClient = options.InferenceServiceClient
 	registerInferenceServices(svc)
 	// Inject the KB gRPC client + SSE wiring into the package-level holders
 	// before registering the KB surface (Spec-split contract requires the
