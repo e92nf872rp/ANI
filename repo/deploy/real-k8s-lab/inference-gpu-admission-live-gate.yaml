@@ -1,0 +1,58 @@
+profile: INFERENCE-SERVICE-GPU-ADMISSION-LIVE-GATE-C16
+status: live
+evidence: development-records/live-evidence/inference-gpu-admission-live-20260815.json
+description: >
+  Same InferenceService entry GPU admission live gate. When Core
+  platform-workload-capabilities advertise no available accelerator,
+  POST /api/v1/svc/inference-services with resources.accelerator must
+  return 422 ACCELERATOR_SPEC_UNAVAILABLE and must not create a GPU
+  Deployment. This is not GPU runtime live and does not roll out
+  in-cluster ani-gateway.
+
+required_tools:
+  - kubectl
+
+required_endpoints:
+  - ani_gateway_inference_services_api
+  - inference_control_grpc
+  - kubernetes_api
+
+required_env:
+  - ANI_GATEWAY_URL
+  - INFERENCE_SERVICE_GRPC_ADDR
+  - KUBECONFIG
+  - DATABASE_URL
+  - NATS_URL
+  - REDIS_URL
+  - INFERENCE_LAB_CATALOG
+
+live_checks:
+  - id: platform-workload-capabilities-no-accelerator
+    command: GET ${ANI_GATEWAY_URL}/api/v1/platform-workload-capabilities
+    pass_condition: no_available_accelerator_specs
+  - id: inference-service-gpu-create-rejected
+    command: POST ${ANI_GATEWAY_URL}/api/v1/svc/inference-services with accelerator
+    pass_condition: 422_ACCELERATOR_SPEC_UNAVAILABLE
+  - id: no-gpu-runtime-created
+    command: kubectl get deploy -n ${tenant_namespace}
+    pass_condition: no_nvidia_com_gpu_request
+  - id: gpu-live-skipped-no-device-plugin
+    command: kubectl get nodes allocatable nvidia.com/gpu
+    pass_condition: skipped_when_no_allocatable_gpu
+  - id: smoke-workload-untouched
+    command: kubectl get deploy/vllm-cpu -n ani-vllm-cpu-smoke
+    pass_condition: independent_smoke_still_ready
+
+evidence_policy:
+  forbidden_content:
+    - bearer tokens
+    - passwords
+    - raw server IPs
+    - full DSN or connection strings
+    - full internal endpoints beyond redacted service DNS
+
+readiness_levels:
+  contract:
+    meaning: Gate definition and local/logic GPU admission are present; no live proof.
+  live:
+    meaning: Approved lab run rejected GPU create on the product entry without creating a GPU runtime or rolling out in-cluster Gateway.

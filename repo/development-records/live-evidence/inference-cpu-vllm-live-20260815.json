@@ -1,0 +1,55 @@
+{
+  "profile": "INFERENCE-SERVICE-CPU-VLLM-LIVE-GATE-C14",
+  "status": "passed",
+  "generated_at": "2026-08-15T08:14:06Z",
+  "gateway": "lab-process-not-in-cluster-ani-gateway",
+  "engine": "vllm-cpu",
+  "image": "digest-pinned-vllm-cpu",
+  "namespace_kind": "ani-tenant-{uuid}",
+  "model_mount": "pvc-snapshot-restore",
+  "probe": "kubernetes_service_proxy",
+  "gpu_live": "skipped_no_device_plugin",
+  "auth_mode": "dev",
+  "checks": [
+    {
+      "id": "product-inference-service-cpu-create",
+      "status": "passed",
+      "http_status": 202
+    },
+    {
+      "id": "kubectl-vllm-cpu-deployment",
+      "status": "passed",
+      "image": "digest-pinned-vllm-cpu"
+    },
+    {
+      "id": "inference-service-running-health-smoke",
+      "status": "passed",
+      "status_value": "running"
+    },
+    {
+      "id": "inference-service-stop",
+      "status": "passed",
+      "status_value": "stopped"
+    },
+    {
+      "id": "inference-service-start",
+      "status": "passed",
+      "same_service_id": true
+    },
+    {
+      "id": "inference-service-delete",
+      "status": "passed",
+      "get_status": 404
+    },
+    {
+      "id": "gpu-live-skipped-no-device-plugin",
+      "status": "passed",
+      "reason": "skipped_no_device_plugin"
+    },
+    {
+      "id": "smoke-workload-untouched",
+      "status": "passed",
+      "namespace": "ani-vllm-cpu-smoke"
+    }
+  ]
+}
