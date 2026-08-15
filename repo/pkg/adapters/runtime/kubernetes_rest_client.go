@@ -210,6 +210,49 @@ func (c *KubernetesRESTClient) Health(ctx context.Context) error {
 	return err
 }
 
+func (c *KubernetesRESTClient) ListNodeInternalCIDRs(ctx context.Context) ([]string, error) {
+	if c == nil {
+		return nil, fmt.Errorf("%w: kubernetes client is not configured", ports.ErrUnavailable)
+	}
+	body, _, err := c.Do(ctx, http.MethodGet, strings.TrimRight(c.host, "/")+"/api/v1/nodes", "", nil)
+	if err != nil {
+		return nil, err
+	}
+	return nodeInternalCIDRsFromList(body)
+}
+
+func nodeInternalCIDRsFromList(body []byte) ([]string, error) {
+	var document struct {
+		Items []struct {
+			Metadata struct {
+				Annotations map[string]string `json:"annotations"`
+			} `json:"metadata"`
+			Status struct {
+				Addresses []struct {
+					Type    string `json:"type"`
+					Address string `json:"address"`
+				} `json:"addresses"`
+			} `json:"status"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(body, &document); err != nil {
+		return nil, fmt.Errorf("%w: invalid Kubernetes node list: %v", ports.ErrInvalid, err)
+	}
+	cidrs := make([]string, 0, len(document.Items)*2)
+	for _, item := range document.Items {
+		for _, address := range item.Status.Addresses {
+			if address.Type != "InternalIP" {
+				continue
+			}
+			cidrs = append(cidrs, address.Address)
+		}
+		if ip := strings.TrimSpace(item.Metadata.Annotations["ovn.kubernetes.io/ip_address"]); ip != "" {
+			cidrs = append(cidrs, strings.Split(ip, "/")[0])
+		}
+	}
+	return platformWorkloadNodeCIDRs(cidrs), nil
+}
+
 func (c *KubernetesRESTClient) ApplyManifests(ctx context.Context, manifests []ports.WorkloadManifest) ([]string, error) {
 	if len(manifests) == 0 {
 		return nil, fmt.Errorf("%w: at least one manifest is required for Kubernetes apply", ports.ErrInvalid)
@@ -568,6 +611,8 @@ func resourceMapping(provider string, apiVersion string, kind string) (kubernete
 		return kubernetesResource{Provider: provider, APIGroup: "networking.k8s.io", APIVersion: "v1", Resource: "networkpolicies", Kind: kind, Namespaced: true}, nil
 	case "kubernetes/Service":
 		return kubernetesResource{Provider: provider, APIGroup: "", APIVersion: "v1", Resource: "services", Kind: kind, Namespaced: true}, nil
+	case "kubernetes/Namespace":
+		return kubernetesResource{Provider: provider, APIGroup: "", APIVersion: "v1", Resource: "namespaces", Kind: kind}, nil
 	case "kubernetes/PersistentVolumeClaim":
 		return kubernetesResource{Provider: provider, APIGroup: "", APIVersion: "v1", Resource: "persistentvolumeclaims", Kind: kind, Namespaced: true}, nil
 	case "kubernetes/VolumeSnapshot":
