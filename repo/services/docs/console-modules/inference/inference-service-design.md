@@ -912,7 +912,7 @@ type InferenceRuntime interface {
 
 1. 在 `repo/api/openapi/services/v1.yaml` 增量加入 model version、resources、状态诊断、scale PATCH、lifecycle、operation query 和 policies 501 语义。
 2. 清理未绑定 path 的 `InferenceEndpoint/CreateInferenceEndpointRequest` 遗留 schema；若兼容门禁不允许直接删除，先标记 deprecated、停止生成新业务引用，并在下一主版本删除。
-3. 要求现有 API ingress 的过渡 stub 委托 inference-service，并对齐已有 202/AsyncTask 契约；入口内部实现不在本方案展开。
+3. 要求现有 API ingress 的过渡 stub 由 ANI Gateway 委托 inference-service 内部 `InferenceControl` gRPC，并对齐已有 202/AsyncTask 契约。
 4. 刷新 Services SDK/API docs 并运行 `make validate-services`。
 5. 独立契约 PR 合入后再实现业务代码。
 
@@ -920,15 +920,16 @@ type InferenceRuntime interface {
 
 - 将 `api/proto/inference/v1/inference_service.proto` 及生成物标记 deprecated，禁止新增调用者；`GetEndpointURL/UpdateStatus` 不进入新链路。
 - `operators/inference-operator` 与 InferenceService CRD 不部署到 P0 环境；若已有测试资源，先盘点 owner，再迁移或清理。
-- 删除 Gateway → inference gRPC 和 operator → status 回写的任何运行接线；API ingress 只委托 inference-service HTTP/OpenAPI handler。
-- 加架构门禁：Services 不得 import inference proto generated client，不得创建 InferenceService CRD。
+- 删除 Gateway → 旧 `inference.v1.InferenceServiceRPC`（`GetEndpointURL` / `UpdateStatus`）和 operator → status 回写的任何运行接线；不得复活该旧 proto。
+- 产品 HTTP 入口只在 ANI Gateway：`/api/v1/svc/inference-services*`。Gateway 通过新的内部 `inference.control.v1.InferenceControl` gRPC 委托 inference-service；inference-service 不再对外暴露产品 HTTP。
+- 加架构门禁：Gateway 不得 import `services/inference-service` 业务包，不得创建 InferenceService CRD；跨层只允许 `pkg/generated/pb/inference/control/v1`。
 - 如果旧资源已在真实环境运行，必须编写一次性、幂等迁移计划；本文不允许新旧控制器同时接管同一服务。
 
 ### 阶段 C：可靠控制面
 
 - 建 inference-service、PG schema、repository、operation lease worker 和 reconciler。
 - 完成 fake Core、fake ModelCatalog 下的全状态机闭环。
-- API ingress 改为真实委托，不再返回空 stub。
+- API ingress 改为 Gateway HTTP → `InferenceControl` gRPC 真实委托，不再返回空 stub。
 
 ### 阶段 D：Core runtime 与 CPU live gate
 

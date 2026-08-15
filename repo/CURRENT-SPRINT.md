@@ -12,7 +12,39 @@
 
 > **STORAGE-ASYNC-CORRECTNESS-A（2026-08-03）：** live passed。Core v1 Vector 文档写入保持 `202 + VectorStoreDocumentInsertResponse`，补齐 `Location` 和 `vector_store.document.insert`；任务写入 PG，Gateway rollout 后原 task ID 仍返回 200；evidence：`development-records/live-evidence/storage-async-vector-task-live-20260803.json`。
 
-> **INFERENCE API-FIRST（2026-08-14）：** 阶段 A Core `platform-workloads` additive v1 契约已通过上游 PR #99 合入；阶段 B `INFERENCE-SERVICE-CONTRACT-B` 已完成本地契约验证，待人工评审与独立 Services 契约 PR。Services 新增统一 resources/可选 accelerator、model version、diagnostics/generation、PATCH/lifecycle/operation query 与 policies 501 语义，且租户响应不包含 Core internal endpoint。当前仍没有 platform-workloads handler/port/adapter、inference-service PG/worker/reconciler、Deployment/LWS runtime 或推理 live evidence，不得标记 control-plane/runtime ready。
+> **INFERENCE CONTROL PLANE C1（2026-08-14）：** 阶段 A Core `platform-workloads` additive v1 契约已通过上游 PR #99 合入，阶段 B Services `InferenceService` 契约已通过上游 PR #101 合入。`INFERENCE-SERVICE-CONTROL-PLANE-C1` 已完成 local/logic verified：独立 module、领域状态机、additive PG migration 静态门禁、带 fencing token 的幂等/lease/generation CAS、遗留行 quarantine、catalog-independent create replay、dependency ports 与 fake create-to-running；真实 pgx integration gate 已落代码但尚未连接 PostgreSQL 执行。当前仍没有 migration live apply、服务 ingress/Gateway delegation、真实 ModelCatalog/Core SDK adapter、platform-workloads handler/port/adapter、Deployment/LWS/vLLM 或推理 live evidence，不得标记 control-plane/runtime ready。
+
+> **INFERENCE LIFECYCLE CONTROL PLANE C2（2026-08-14）：** `INFERENCE-SERVICE-LIFECYCLE-CONTROL-PLANE-C2` 已完成 local/logic verified：PG 原子 lifecycle/query mutation、真实 operation replay 与 completed no-op、scale/start/stop/restart/delete controller、public projection 隔离、provider-side generation/key/intent fence、mutation/Observe 分离，以及 fake create→scale→stop→start→restart→delete 和 stop 抢占旧 create 的反向时序。真实 PostgreSQL仍未连接执行；HTTP/Gateway、真实 ModelCatalog/Core adapter、不可重试/dead-letter/scale rollback、Deployment/LWS/vLLM 与推理 live evidence均未完成，不得标记 control-plane/runtime ready。
+
+> **INFERENCE HTTP ADAPTER C3（2026-08-15，已推翻）：** `INFERENCE-SERVICE-HTTP-ADAPTER-C3` 曾完成独立服务内 HTTP adapter；该入口与平台契约冲突，代码已删除，记录标为 superseded。
+
+> **INFERENCE GATEWAY GRPC C4（2026-08-15）：** `INFERENCE-SERVICE-GATEWAY-GRPC-C4` 已完成 local/logic verified：产品 HTTP 只留在 ANI Gateway；inference-service 暴露内部 `InferenceControl` gRPC，进程入口复用 `pkg/bootstrap.MustConnect`/`RunGRPC`；Gateway 注入 `middleware.GetTenantID` 后委托 create/list/get/scale/lifecycle/delete/operation-query；create/scale/delete 成功码收敛为 202；policies 返回 501 FEATURE_NOT_AVAILABLE。无真实 ModelCatalog/Core SDK adapter、PG live、Deployment/LWS/vLLM 或推理 live evidence，不得标记 control-plane/runtime ready。
+
+> **INFERENCE PLATFORM WORKLOAD LOCAL C5（2026-08-15）：** `INFERENCE-PLATFORM-WORKLOAD-LOCAL-C5` 已完成 local/logic verified：Core `PlatformWorkloadService` CPU single-node local adapter + Gateway 7 个 service-only 路由；`202 AsyncTask.resource_id` 在接受时确定；租户 JWT/API key 403；`WorkloadKindInference` 不再强制 GPU。inference-service 可经 `CORE_API_BASE_URL` 使用 Core SDK runtime adapter，默认仍 fake。无真实 ModelCatalog、service JWT、K8s/LWS/vLLM 或 live evidence，不得标记 runtime ready。
+
+> **INFERENCE MODEL CATALOG C6（2026-08-15）：** `INFERENCE-SERVICE-MODEL-CATALOG-C6` 已完成 local/logic verified：model-service 内部 `GetModelVersion` + inference-service 真实 ModelCatalog adapter；create 按租户解析不可变版本并冻结 digest-pinned engine profile；加密模型只保留 Key reference。未改 OpenAPI，Gateway 不新增 models version 路由。`MODEL_SERVICE_GRPC_ADDR` 未配置时仍 fake。无 K8s/LWS/vLLM、service JWT 或 live evidence，不得标记 runtime ready。
+
+> **INFERENCE SERVICE JWT C7（2026-08-15）：** `INFERENCE-SERVICE-JWT-C7` 已完成 local/logic verified：auth-service 签发 `aud=ani-core` 短期 service JWT；Gateway 非 dev 模式只接受该身份访问 `platform-workloads*`；inference-service 可按租户 mint 并只带 Bearer。未改 OpenAPI。无 K8s/LWS/vLLM 或 live evidence，不得标记 runtime ready。
+
+> **INFERENCE PLATFORM WORKLOAD K8S C8（2026-08-15）：** `INFERENCE-PLATFORM-WORKLOAD-K8S-C8` 已完成 local/logic verified：Core CPU `single_node` Kubernetes adapter 渲染 Deployment + ClusterIP，不写入 `/instances`；`stop` 删 runtime 并保留记录，`start` 按已存 spec 再 apply。Gateway 默认仍 local；`PLATFORM_WORKLOAD_PROVIDER=kubernetes_rest` 才切换，未配置 K8s host 时 fail-closed。未改 OpenAPI。无真实集群 live evidence，不得标记 runtime ready 或 real-provider ready。
+
+> **INFERENCE PLATFORM WORKLOAD K8S C9（2026-08-15）：** `INFERENCE-PLATFORM-WORKLOAD-K8S-C9` 已完成 local/logic verified：Apply 先确保租户 Namespace；PlatformWorkload 记录可经 memory/PG store 在 Gateway 重启后回读；当时定义 live gate `INFERENCE-PLATFORM-WORKLOAD-K8S-LIVE-GATE-C9`。真实集群执行与 evidence 由后续 `INFERENCE-PLATFORM-WORKLOAD-K8S-LIVE-C12` 收口，不得把本批次单独标为 runtime ready。
+
+> **INFERENCE SERVICE TEST C10（2026-08-15，已推翻）：** `INFERENCE-SERVICE-TEST-C10` 曾实现受控 `/test`；产品口径认定该路径只是契约兼容测试入口、用不到且增加 runtime 攻击面，实现已删除，记录标为 superseded。OpenAPI 未改；Gateway 不注册 `/test`。
+
+> **INFERENCE SERVICE LOGS C11（2026-08-15）：** `INFERENCE-SERVICE-LOGS-C11` 已完成 local/logic verified：`GET /inference-services/{id}/logs` 经 Gateway 委托内部 `ListInferenceServiceLogs`；租户只来自认证上下文；服务不存在/跨租户/已删除返回 404，无 `runtime_ref` 返回空列表；响应脱敏且不泄露 runtime/replica。未改 OpenAPI。Core platform-workload logs 仍空，无真实 Pod log / Loki live evidence，不得标记 runtime ready。
+
+> **INFERENCE PLATFORM WORKLOAD K8S LIVE C12（2026-08-15）：** `INFERENCE-PLATFORM-WORKLOAD-K8S-LIVE-C12` 已在人工确认的集群上 live passed：lab Gateway 进程（未 rollout in-cluster `ani-gateway`）对真实 Kubernetes 完成 CPU PlatformWorkload create/scale/stop/start/进程重启回读/delete；租户 403；logs 仍空。evidence：`development-records/live-evidence/platform-workload-k8s-live-20260815.json`。不得把 in-cluster Gateway 或推理产品链路标为 runtime ready。
+
+> **INFERENCE SERVICE RUNTIME C13（2026-08-15）：** `INFERENCE-SERVICE-RUNTIME-C13` 已完成 local/logic verified：CPU/GPU 共用同一 `InferenceService` 入口和 Core `platform-workloads` 单节点 Deployment；`resources.accelerator` 存在时申请 `nvidia.com/gpu`，否则保持 CPU。vLLM 启动参数与 runtime `/health` + 有界 Chat smoke 已接线；不注册产品 `/test`。未改 OpenAPI。无真实 vLLM/模型挂载 live，无 LWS，不得标记 runtime ready。
+
+> **INFERENCE SERVICE CPU VLLM LIVE C14（2026-08-15）：** `INFERENCE-SERVICE-CPU-VLLM-LIVE-C14` 已在人工确认的集群上 live passed：lab Gateway 进程（未 rollout in-cluster `ani-gateway`）经同一 `InferenceService` 入口对真实 vLLM CPU 完成 create → `/health`+有界 Chat 后 `running` → stop/start/delete。模型来自独立 smoke PVC 快照，未触碰 `ani-vllm-cpu-smoke`。GPU 因无 device-plugin 记 `skipped_no_device_plugin`。evidence：`development-records/live-evidence/inference-cpu-vllm-live-20260815.json`。未改 OpenAPI，无 LWS，不得标记 runtime ready。
+
+> **INFERENCE SERVICE CPU VLLM OPS LIVE C15（2026-08-15）：** `INFERENCE-SERVICE-CPU-VLLM-OPS-LIVE-C15` 已在人工确认的集群上 live passed：同一 CPU 入口补齐产品 logs（真实 Pod 行、无 replica）、RWO 下 desired-replicas scale 抢占，以及 lab 进程重启后回读同一 `service_id` 仍为 `running`。未 rollout in-cluster `ani-gateway`。evidence：`development-records/live-evidence/inference-cpu-vllm-ops-live-20260815.json`。未改 OpenAPI，无 LWS，不得标记 runtime ready。
+
+> **INFERENCE SERVICE GPU ADMISSION LIVE C16（2026-08-15）：** `INFERENCE-SERVICE-GPU-ADMISSION-LIVE-C16` 已在人工确认的集群上 live passed：同一入口带 `resources.accelerator` 时，因 Core capabilities 无可用规格返回 `422 ACCELERATOR_SPEC_UNAVAILABLE`，未创建 GPU Deployment。GPU runtime live 记 `skipped_no_device_plugin`。未 rollout in-cluster `ani-gateway`。evidence：`development-records/live-evidence/inference-gpu-admission-live-20260815.json`。未改 OpenAPI，不得标记 GPU ready 或 runtime ready。
+
+> **INFERENCE SERVICE CLUSTERIP NP LIVE C17（2026-08-15）：** `INFERENCE-SERVICE-CLUSTERIP-NP-LIVE-C17` 已在人工确认的集群上 live passed：同一 CPU 入口证明 runtime 只有 ClusterIP，NetworkPolicy 默认拒绝并挡住未授权 namespace，产品 `/test` 保持 404，stop/delete 后内部 endpoint 消失。未 rollout in-cluster `ani-gateway`。evidence：`development-records/live-evidence/inference-clusterip-networkpolicy-live-20260815.json`。未改 OpenAPI，无公网调用网关，不得标记 runtime ready。
 
 > **Sprint 13（当前活跃冲刺，2026-06-19 起）：** Core real provider 与 live gate 收敛。前置 Sprint 12 已闭合 19 个 Core handler + 2 个 422；Sprint 13 不重写 Core handler，不把 Services 业务资源回流 Core API，而是在既有 `pkg/ports` / `pkg/adapters` / Gateway handler 边界接入真实组件，并形成可复跑 live gate 与 evidence JSON。历史冻结原因和历史结论仍保留在旧批次记录中，但不是当前 PR 规则。计划见 [`development-records/sprint13-real-provider-readiness-plan.md`](development-records/sprint13-real-provider-readiness-plan.md)。
 
