@@ -3,8 +3,10 @@ go 1.25.0
 use (
 	./cli/ani
 	./pkg
+	./sdks/core/go
 	./services/ani-gateway
 	./services/auth-service
+	./services/inference-service
 	./services/metering-service
 	./services/model-service
 	./services/reconcile-worker

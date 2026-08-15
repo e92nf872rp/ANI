@@ -12,11 +12,15 @@ import validate_services_boundary as guard
 
 
 class ServicesBoundaryValidationTest(unittest.TestCase):
+    def test_inference_service_is_classified_as_services_owned_source(self) -> None:
+        self.assertIn("inference-service", guard.SERVICES_OWNED_SOURCE_ROOTS)
+        self.assertIn("services/inference-service", guard.GO_SCAN_ROOTS)
+
     def test_repo_baseline_is_warn_only(self) -> None:
         result = guard.validate_workspace(guard.ROOT, run_spec_split=False)
 
         self.assertEqual(result.error_count, 0)
-        self.assertEqual(result.warning_count, 3)
+        self.assertEqual(result.warning_count, 5)
 
     def test_unregistered_core_internal_go_import_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
