@@ -195,6 +195,70 @@ class SourceChunk(_message.Message):
     score: float
     def __init__(self, doc_id: _Optional[str] = ..., file_name: _Optional[str] = ..., page: _Optional[int] = ..., content: _Optional[str] = ..., score: _Optional[float] = ...) -> None: ...
 
+class RetrieveRequest(_message.Message):
+    __slots__ = ("tenant_id", "kb_id", "question", "session_id", "idempotency_key", "top_k", "score_threshold", "inference_service_name", "retrieval_mode")
+    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
+    KB_ID_FIELD_NUMBER: _ClassVar[int]
+    QUESTION_FIELD_NUMBER: _ClassVar[int]
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    IDEMPOTENCY_KEY_FIELD_NUMBER: _ClassVar[int]
+    TOP_K_FIELD_NUMBER: _ClassVar[int]
+    SCORE_THRESHOLD_FIELD_NUMBER: _ClassVar[int]
+    INFERENCE_SERVICE_NAME_FIELD_NUMBER: _ClassVar[int]
+    RETRIEVAL_MODE_FIELD_NUMBER: _ClassVar[int]
+    tenant_id: str
+    kb_id: str
+    question: str
+    session_id: str
+    idempotency_key: str
+    top_k: int
+    score_threshold: float
+    inference_service_name: str
+    retrieval_mode: str
+    def __init__(self, tenant_id: _Optional[str] = ..., kb_id: _Optional[str] = ..., question: _Optional[str] = ..., session_id: _Optional[str] = ..., idempotency_key: _Optional[str] = ..., top_k: _Optional[int] = ..., score_threshold: _Optional[float] = ..., inference_service_name: _Optional[str] = ..., retrieval_mode: _Optional[str] = ...) -> None: ...
+
+class RetrieveEvent(_message.Message):
+    __slots__ = ("token", "sources", "done", "error")
+    TOKEN_FIELD_NUMBER: _ClassVar[int]
+    SOURCES_FIELD_NUMBER: _ClassVar[int]
+    DONE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    token: RetrieveTokenEvent
+    sources: RetrieveSourcesEvent
+    done: RetrieveDoneEvent
+    error: RetrieveErrorEvent
+    def __init__(self, token: _Optional[_Union[RetrieveTokenEvent, _Mapping]] = ..., sources: _Optional[_Union[RetrieveSourcesEvent, _Mapping]] = ..., done: _Optional[_Union[RetrieveDoneEvent, _Mapping]] = ..., error: _Optional[_Union[RetrieveErrorEvent, _Mapping]] = ...) -> None: ...
+
+class RetrieveTokenEvent(_message.Message):
+    __slots__ = ("content",)
+    CONTENT_FIELD_NUMBER: _ClassVar[int]
+    content: str
+    def __init__(self, content: _Optional[str] = ...) -> None: ...
+
+class RetrieveSourcesEvent(_message.Message):
+    __slots__ = ("sources",)
+    SOURCES_FIELD_NUMBER: _ClassVar[int]
+    sources: _containers.RepeatedCompositeFieldContainer[SourceChunk]
+    def __init__(self, sources: _Optional[_Iterable[_Union[SourceChunk, _Mapping]]] = ...) -> None: ...
+
+class RetrieveDoneEvent(_message.Message):
+    __slots__ = ("input_tokens", "output_tokens", "session_id")
+    INPUT_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    OUTPUT_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    input_tokens: int
+    output_tokens: int
+    session_id: str
+    def __init__(self, input_tokens: _Optional[int] = ..., output_tokens: _Optional[int] = ..., session_id: _Optional[str] = ...) -> None: ...
+
+class RetrieveErrorEvent(_message.Message):
+    __slots__ = ("message", "code")
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    CODE_FIELD_NUMBER: _ClassVar[int]
+    message: str
+    code: str
+    def __init__(self, message: _Optional[str] = ..., code: _Optional[str] = ...) -> None: ...
+
 class KnowledgeBase(_message.Message):
     __slots__ = ("tenant_id", "id", "name", "description", "embedding_model", "chunk_size", "top_k", "score_threshold", "retrieval_mode", "status", "doc_count", "created_at", "updated_at")
     TENANT_ID_FIELD_NUMBER: _ClassVar[int]

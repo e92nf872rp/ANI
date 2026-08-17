@@ -1,0 +1,8 @@
+# ruff configuration — exclude protoc-generated stubs from lint
+exclude = [
+  "ai/rag-engine/app/grpc/*_pb2.py",
+  "ai/rag-engine/app/grpc/*_pb2.pyi",
+  "ai/rag-engine/app/grpc/*_pb2_grpc.py",
+  "services/kb-service/app/generated/**/*.py",
+  "services/kb-service/app/generated/**/*.pyi",
+]
