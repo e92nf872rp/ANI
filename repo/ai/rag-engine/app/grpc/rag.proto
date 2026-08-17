@@ -108,6 +108,7 @@ message ParseResponse {
 
 message EmbedRequest {
   repeated string texts = 1;
+  string model = 2;  // embedding model name; empty = use server default (settings.embedding_model)
 }
 
 message EmbedResponse {

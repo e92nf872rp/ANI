@@ -101,10 +101,12 @@ class ParseResponse(_message.Message):
     def __init__(self, chunks: _Optional[_Iterable[_Union[ParsedChunk, _Mapping]]] = ...) -> None: ...
 
 class EmbedRequest(_message.Message):
-    __slots__ = ("texts",)
+    __slots__ = ("texts", "model")
     TEXTS_FIELD_NUMBER: _ClassVar[int]
+    MODEL_FIELD_NUMBER: _ClassVar[int]
     texts: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, texts: _Optional[_Iterable[str]] = ...) -> None: ...
+    model: str
+    def __init__(self, texts: _Optional[_Iterable[str]] = ..., model: _Optional[str] = ...) -> None: ...
 
 class EmbedResponse(_message.Message):
     __slots__ = ("vectors_flat", "dimension", "count")
