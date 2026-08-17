@@ -208,7 +208,7 @@ class CoreClientProtocol(Protocol):
         vector_store_id: str,
         vector: list[float],
         top_k: int,
-        filter_expr: str | None = None,
+        filter: dict[str, str] | None = None,
     ) -> list[dict[str, Any]]:
         """POST /vector-stores/{id}/search — vector search with pre-computed query vector.
 
@@ -216,7 +216,9 @@ class CoreClientProtocol(Protocol):
             vector_store_id: Target vector store id.
             vector:          Pre-computed query embedding (from rag-engine Embed).
             top_k:           Number of hits to return.
-            filter_expr:     Optional Milvus filter expression (e.g. doc_id=="...").
+            filter:          Optional metadata filter (key-value pairs), matching
+                             Core API VectorStoreSearchRequest.filter (object,
+                             additionalProperties: string). Example: {"doc_id": "xxx"}.
 
         Returns:
             List of hit dicts. Each hit has keys: id (str), score (float,
