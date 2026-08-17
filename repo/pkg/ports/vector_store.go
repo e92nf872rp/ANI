@@ -72,6 +72,7 @@ type VectorStoreResourceSearchRequest struct {
 type VectorDocumentInput struct {
 	ID       string
 	Content  string
+	Vector   []float32 // 预计算向量 (可选; 为空则 Core 内部生成伪向量)
 	Metadata map[string]string
 }
 
@@ -144,6 +145,7 @@ type VectorSearchQuery struct {
 type VectorSearchResult struct {
 	ID       string
 	Score    float32
+	Content  string // chunk 文本 (从存储后端返回, 可选)
 	Metadata map[string]string
 }
 
