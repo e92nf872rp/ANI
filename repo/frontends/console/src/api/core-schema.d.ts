@@ -5130,6 +5130,8 @@ export interface components {
             /** Format: float */
             score: number;
             source?: string | null;
+            /** @description chunk 文本 (从存储后端返回 */
+            content?: string;
             metadata: {
                 [key: string]: string;
             };
@@ -5817,6 +5819,8 @@ export interface components {
             idempotency_key: string;
             documents: {
                 content: string;
+                /** @description 预计算向量 (可选; 为空则 Core 内部生成伪向量) */
+                vector?: number[];
                 metadata?: {
                     [key: string]: unknown;
                 };
