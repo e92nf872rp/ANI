@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>208</dd></div>
-          <div><dt>Schemas</dt><dd>291</dd></div>
+          <div><dt>Operations</dt><dd>210</dd></div>
+          <div><dt>Schemas</dt><dd>293</dd></div>
         </dl>
       </section>
 
@@ -166,6 +166,22 @@
           <td>查询可用配额元数据</td>
           <td><code>scope:quota:read</code></td>
           <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/admin/tenants/{tenant_id}</code></td>
+          <td><code>getTenant</code></td>
+          <td>查询租户（最小视图）</td>
+          <td><code>scope:quota:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/admin/tenants/{tenant_id}/plan</code></td>
+          <td><code>updateTenantPlan</code></td>
+          <td>更新租户绑定套餐</td>
+          <td><code>scope:quota:write</code></td>
+          <td>200, 400, 401, 403, 404</td>
         </tr>
         <tr>
           <td><span class="method method-delete">DELETE</span></td>
@@ -2097,6 +2113,8 @@
         <li><code>StorageVolumeMountHistoryEntry</code></li>
         <li><code>StorageVolumeMountRequest</code></li>
         <li><code>StorageVolumeUnmountRequest</code></li>
+        <li><code>Tenant</code></li>
+        <li><code>TenantPlanUpdateRequest</code></li>
         <li><code>TokenPairResponse</code></li>
         <li><code>TokenUsageReport</code></li>
         <li><code>UpdateEmailRecipientRequest</code></li>

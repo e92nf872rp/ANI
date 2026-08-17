@@ -18,8 +18,10 @@ type adminTenantAPI struct {
 }
 
 // registerAdminTenantResources registers Core tenant minimal endpoints:
-//   GET /admin/tenants/:tenant_id
-//   PUT /admin/tenants/:tenant_id/plan
+//
+//	GET /admin/tenants/:tenant_id
+//	PUT /admin/tenants/:tenant_id/plan
+//
 // Does not touch /api/v1/svc/tenant/* (registerTenant).
 func registerAdminTenantResources(v1 *route.RouterGroup, tenants ports.TenantService) {
 	if tenants == nil {
