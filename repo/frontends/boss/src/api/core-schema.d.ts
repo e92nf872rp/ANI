@@ -210,6 +210,119 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/platform-workload-capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询平台工作负载能力
+         * @description 仅授权平台服务身份可用。返回 provider-neutral 的 topology、LWS/gang readiness 和 GPUSpec 准入提示；
+         *     响应不是资源预留，最终创建仍由 Core 原子准入。普通租户 token/API key 即使具有同名 tenant scope 也返回 403。
+         */
+        get: operations["getPlatformWorkloadCapabilities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/platform-workloads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 创建平台内部工作负载
+         * @description 仅授权平台服务身份可用。请求表达通用容器、资源、拓扑、网络、artifact 和 secret binding 意图；
+         *     禁止提交 Kubernetes、LWS、Volcano 或推理业务对象。AsyncTask.resource_id 在接收时即确定。
+         */
+        post: operations["createPlatformWorkload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/platform-workloads/{workload_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询平台内部工作负载
+         * @description 仅授权平台服务身份可用。跨租户资源返回 404。internal_endpoint 仅在当前服务身份具有 read scope 时返回，
+         *     且只表示当前 generation 的 ClusterIP endpoint。
+         */
+        get: operations["getPlatformWorkload"];
+        put?: never;
+        post?: never;
+        /**
+         * 删除平台内部工作负载
+         * @description 删除 provider runtime、PlatformWorkload 资源和内部 endpoint；内部 tombstone 可继续用于幂等清理与审计。
+         */
+        delete: operations["deletePlatformWorkload"];
+        options?: never;
+        head?: never;
+        /**
+         * 修改平台内部工作负载副本数
+         * @description P0 只允许修改 single_node 独立副本数。leader_worker 固定 replicas=1；资源、镜像、topology、network、
+         *     artifact、secret 和 profile 均不可通过 PATCH 修改。
+         */
+        patch: operations["updatePlatformWorkload"];
+        trace?: never;
+    };
+    "/platform-workloads/{workload_id}/lifecycle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 执行平台内部工作负载生命周期动作
+         * @description stop 删除 provider 侧 Deployment/LWS、Service 和 PodGroup并释放计算资源，但保留 PlatformWorkload ID 与 applied spec；
+         *     start 在同一 workload ID 下重建 provider runtime；restart 不修改当前 generation 的规格。
+         */
+        post: operations["applyPlatformWorkloadLifecycle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/platform-workloads/{workload_id}/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询平台内部工作负载日志
+         * @description 返回规范化、分页并脱敏的 runtime 日志；不暴露 Pod UID、Secret、Authorization 或临时对象 URL。
+         */
+        get: operations["getPlatformWorkloadLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/instances": {
         parameters: {
             query?: never;
@@ -2396,6 +2509,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/gpu-inventory/{device_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * 翻转 GPU 设备状态
+         * @description 将设备状态翻转为 maintenance（维护中）或 idle（空闲）。
+         *     BOSS 在 GPU 池管理中用于设备维护操作。
+         */
+        patch: operations["updateGPUDeviceStatus"];
+        trace?: never;
+    };
     "/gpu-specs": {
         parameters: {
             query?: never;
@@ -2411,6 +2545,12 @@ export interface paths {
         get: operations["listGPUSpecs"];
         put?: never;
         post?: never;
+        /**
+         * 创建 GPU 规格
+         * @description 创建集群级 GPU 规格（K8s CRD）。spec_id 必须符合 K8s 资源名规范且唯一。
+         *     gpu_type 必须存在于节点标签中，否则返回 422 GPUTypeNotInNodes。
+         */
+        post: operations["createGPUSpec"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2430,6 +2570,31 @@ export interface paths {
          *     但不得用于新实例创建；创建准入由 POST /instances 返回 422 GPUSpecUnavailable。
          */
         get: operations["getGPUSpec"];
+        put?: never;
+        post?: never;
+        /**
+         * 删除 GPU 规格
+         * @description 删除集群级 GPU 规格。有运行中实例引用时返回 409 GPUSpecInUse。
+         */
+        delete: operations["deleteGPUSpec"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gpu-specs/availability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询规格可用性
+         * @description 返回所有规格的可用性状态（四态：available/full/device_full/unavailable）。
+         *     Console 在实例创建页面展示规格可用性，BOSS 在 GPU 池管理展示规格分配状态。
+         */
+        get: operations["listGPUSpecAvailability"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2624,6 +2789,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/quotas/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询当前租户配额
+         * @description Console 租户自查配额。返回当前认证租户的所有维度配额视图。
+         */
+        get: operations["getMyQuota"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/quotas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * BOSS 分页查询租户配额列表
+         * @description BOSS 平台级分页查询所有租户配额。按租户维度展示配额分配总览。
+         */
+        get: operations["listQuotas"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/tenants/{tenant_id}/quota": {
         parameters: {
             query?: never;
@@ -2660,6 +2865,52 @@ export interface paths {
          *     用于租户禁用/资源清理场景。由调用方保证此时无在用资源（本方法不强制守卫 used/reserved）。
          */
         delete: operations["deleteTenantQuota"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/tenants/{tenant_id}/reservations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询租户预留额度
+         * @description 查询指定租户的 GPU 预留额度视图（allocated_gpu_count + used/reserved/available）。
+         */
+        get: operations["getTenantReservations"];
+        /**
+         * 设置租户预留额度
+         * @description 设置租户 GPU 预留额度（allocated_gpu_count）。
+         *     allocated_gpu_count 不能超过租户配额上限，否则返回 422 RESERVATION_EXCEEDS_QUOTA。
+         *     下调时用 GREATEST(allocated, used+reserved) clamp，返回 tightened=true。
+         */
+        put: operations["putTenantReservations"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/reservations/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询当前租户预留额度
+         * @description Console 租户自查预留额度。返回当前认证租户的 GPU 预留视图。
+         */
+        get: operations["getMyReservations"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2948,9 +3199,9 @@ export interface components {
              * @example model.import
              * @enum {string}
              */
-            task_type: "model.import" | "kb.parse" | "kb.index" | "inference.deploy" | "volume.snapshot.create" | "volume.expand" | "volume.mount" | "volume.unmount" | "volume.create_from_snapshot" | "filesystem.expand" | "filesystem.mount_target.create" | "filesystem.mount" | "filesystem.unmount" | "vector_store.index.rebuild" | "vector_store.document.insert" | "sandbox.checkpoint.create" | "sandbox.checkpoint.restore" | "sandbox.code_run.create";
+            task_type: "model.import" | "kb.parse" | "kb.index" | "inference.deploy" | "platform_workload.create" | "platform_workload.scale" | "platform_workload.start" | "platform_workload.stop" | "platform_workload.restart" | "platform_workload.delete" | "volume.snapshot.create" | "volume.expand" | "volume.mount" | "volume.unmount" | "volume.create_from_snapshot" | "filesystem.expand" | "filesystem.mount_target.create" | "filesystem.mount" | "filesystem.unmount" | "vector_store.index.rebuild" | "vector_store.document.insert" | "sandbox.checkpoint.create" | "sandbox.checkpoint.restore" | "sandbox.code_run.create";
             /** @enum {string|null} */
-            resource_type?: "inference_service" | "kb_document" | "model_version" | "volume_snapshot" | "volume" | "filesystem" | "filesystem_mount_target" | "vector_store" | "sandbox_checkpoint" | "sandbox_code_run" | null;
+            resource_type?: "inference_service" | "platform_workload" | "kb_document" | "model_version" | "volume_snapshot" | "volume" | "filesystem" | "filesystem_mount_target" | "vector_store" | "sandbox_checkpoint" | "sandbox_code_run" | null;
             /** Format: uuid */
             resource_id?: string | null;
             /** @enum {string} */
@@ -2966,6 +3217,357 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             completed_at?: string | null;
+        };
+        /** @description 单个 Core GPUSpec 对平台内部工作负载的准入能力摘要。 */
+        PlatformWorkloadAcceleratorCapability: {
+            /** @description Core GPUSpec ID；只表达资源形态，不表达租户配额。 */
+            spec_id: string;
+            /** @description 当前是否允许用于新的 PlatformWorkload 准入。 */
+            available: boolean;
+            /** @description 能力查询时单节点最大可准入数量；这是提示，不是资源预留。 */
+            max_single_node_count: number;
+        };
+        /** @description Core 当前可供平台服务使用的工作负载拓扑、调度组件和加速器能力。 */
+        PlatformWorkloadCapabilities: {
+            /** @description 当前允许创建的平台工作负载拓扑模式集合。 */
+            supported_topology_modes: ("single_node" | "leader_worker")[];
+            /** @description LeaderWorkerSet CRD 与 controller 是否满足准入前置条件。 */
+            leader_worker_set_ready: boolean;
+            /** @description gang scheduler、PodGroup CRD/controller 与 inference queue 是否就绪。 */
+            gang_scheduling_ready: boolean;
+            /** @description Core admission allowlist 中已启用的版本化拓扑 profile。 */
+            supported_topology_profiles?: {
+                /** @description 调用方创建工作负载时提交的拓扑 profile ID。 */
+                id: string;
+                /** @description 拓扑 profile 的不可变版本标识。 */
+                version: string;
+                /**
+                 * @description 该 profile 支持的拓扑模式。
+                 * @enum {string}
+                 */
+                mode: "single_node" | "leader_worker";
+            }[];
+            /** @description 当前可查询的加速器规格及其准入可用性。 */
+            accelerator_specs: components["schemas"]["PlatformWorkloadAcceleratorCapability"][];
+        };
+        /** @description 单个 Pod role 或单节点副本申请的加速器资源。 */
+        PlatformWorkloadAcceleratorResources: {
+            /** @description Core GPUSpec ID。P0 只准入已通过 live gate 的整卡 GPU 规格。 */
+            spec_id: string;
+            /** @description 当前 Pod role 或单节点副本申请的 accelerator 数量。 */
+            count: number;
+        };
+        /** @description 单个 Pod role 或单节点副本的计算资源请求。 */
+        PlatformWorkloadResources: {
+            /** @description Kubernetes quantity 语义的 CPU request，例如 4 或 4000m。 */
+            cpu: string;
+            /** @description Kubernetes quantity 语义的内存 request，例如 16Gi。 */
+            memory: string;
+            /** @description 可选加速器资源；CPU 工作负载不提交该字段。 */
+            accelerator?: components["schemas"]["PlatformWorkloadAcceleratorResources"];
+        };
+        /** @description leader-worker 拓扑中一个角色的 Pod 数量和单 Pod 资源规格。 */
+        PlatformWorkloadRole: {
+            /**
+             * @description role Pod 数；leader 固定为 1，workers 必须显式给出。
+             * @default 1
+             */
+            count: number;
+            /** @description 该 role 中每个 Pod 使用的计算资源规格。 */
+            resources: components["schemas"]["PlatformWorkloadResources"];
+        };
+        /**
+         * @description single_node 不得提交 leader/workers。leader_worker 必须同时提交 leader/workers，leader.count 必须为 1；
+         *     P0 leader_worker 只接受顶层 replicas=1。Core 从 role resources 派生 LWS 与一个 PodGroup，调用方不能提交原生字段。
+         */
+        PlatformWorkloadTopology: {
+            /**
+             * @description single_node 使用 Deployment；leader_worker 使用 LeaderWorkerSet。
+             * @enum {string}
+             */
+            mode: "single_node" | "leader_worker";
+            /** @description Core admission allowlist 中的通用 Pod 拓扑 profile ID。 */
+            profile_id: string;
+            /** @description 与 profile_id 配套的不可变版本；Core 不自动升级调用方提交的版本。 */
+            profile_version: string;
+            /** @description leader_worker 模式的 leader role；single_node 模式禁止提交。 */
+            leader?: components["schemas"]["PlatformWorkloadRole"];
+            /** @description leader_worker 模式的 worker role；single_node 模式禁止提交。 */
+            workers?: components["schemas"]["PlatformWorkloadRole"];
+        } & (unknown & unknown);
+        /** @description Provider-neutral 调度意图；Core 负责映射为实际队列和 gang scheduling 对象。 */
+        PlatformWorkloadScheduling: {
+            /**
+             * @description P0 固定映射到 Core 管理的 inference 调度队列，调用方不提交 provider queue 名。
+             * @enum {string}
+             */
+            queue_class: "inference";
+            /** @description single_node 固定 false；leader_worker 固定 true。 */
+            gang: boolean;
+        };
+        /** @description 平台工作负载通过集群内部 Service 暴露的单个命名端口。 */
+        PlatformWorkloadPort: {
+            /** @description 端口的稳定 DNS label 名称，供健康检查通过 port_name 引用。 */
+            name: string;
+            /** @description 容器监听并由 ClusterIP Service 暴露的 TCP 端口号。 */
+            port: number;
+        };
+        /** @description 平台工作负载的集群内部网络暴露意图。 */
+        PlatformWorkloadNetwork: {
+            /**
+             * @description 只允许 ClusterIP；不创建 Ingress、NodePort 或 LoadBalancer。
+             * @enum {string}
+             */
+            exposure: "cluster_internal";
+            /** @description 由同一个 ClusterIP Service 暴露的命名端口列表。 */
+            ports: components["schemas"]["PlatformWorkloadPort"][];
+        };
+        /** @description 由 Core 解析并挂载到工作负载的租户内只读 artifact。 */
+        PlatformWorkloadArtifact: {
+            /** @description Core 可解析的租户内 artifact/object opaque reference。 */
+            object_ref: string;
+            /** @description artifact 在容器中的绝对挂载路径。 */
+            mount_path: string;
+        };
+        /** @description 由 Core 解析并以文件形式挂载的租户内 Secret 引用。 */
+        PlatformWorkloadSecretBinding: {
+            /** @description Core Secret reference；响应和日志不得回显明文。 */
+            secret_ref: string;
+            /** @description Secret 在容器中的绝对挂载路径；不得与 artifact 挂载路径冲突。 */
+            mount_path: string;
+        };
+        /** @description Core 用于判断 provider runtime 是否就绪的集群内部健康检查。 */
+        PlatformWorkloadHealthCheck: {
+            /**
+             * @description 健康检查协议；P0 仅支持 HTTP。
+             * @enum {string}
+             */
+            protocol: "http";
+            /** @description 发送到 runtime 的 HTTP 健康检查绝对路径。 */
+            path: string;
+            /** @description 引用 network.ports 中同名端口。 */
+            port_name: string;
+        };
+        /** @description 调用服务提供的关联元数据；不用于传递 provider 对象或业务凭据。 */
+        PlatformWorkloadMetadata: {
+            /** @description 调用服务提供的 opaque correlation reference；真正 provider owner 始终是 Core PlatformWorkload。 */
+            owner_ref: string;
+            /** @description 仅允许非保留 label；ani.* 保留键由 Core 写入。 */
+            labels?: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * @description 平台服务创建 Core 托管工作负载时提交的完整期望规格。
+         * @example {
+         *       "idempotency_key": "1df72d71-9d49-46c4-a48a-52bb37b082ab",
+         *       "name": "inference-cpu-example",
+         *       "workload_class": "inference",
+         *       "runtime_kind": "container",
+         *       "image_ref": "registry.ani.internal/platform/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         *       "command": [
+         *         "/opt/platform-runtime/serve"
+         *       ],
+         *       "args": [
+         *         "--listen",
+         *         "0.0.0.0:8000",
+         *         "--artifact-path",
+         *         "/models"
+         *       ],
+         *       "replicas": 1,
+         *       "resources": {
+         *         "cpu": "4",
+         *         "memory": "16Gi"
+         *       },
+         *       "topology": {
+         *         "mode": "single_node",
+         *         "profile_id": "container-single-node",
+         *         "profile_version": "v1"
+         *       },
+         *       "scheduling": {
+         *         "queue_class": "inference",
+         *         "gang": false
+         *       },
+         *       "network": {
+         *         "exposure": "cluster_internal",
+         *         "ports": [
+         *           {
+         *             "name": "http",
+         *             "port": 8000
+         *           }
+         *         ]
+         *       },
+         *       "artifacts": [
+         *         {
+         *           "object_ref": "object://tenant-artifact/example",
+         *           "mount_path": "/models"
+         *         }
+         *       ],
+         *       "health_check": {
+         *         "protocol": "http",
+         *         "path": "/health",
+         *         "port_name": "http"
+         *       },
+         *       "metadata": {
+         *         "owner_ref": "05f6f46f-3db8-4551-8497-c46debb4be22",
+         *         "labels": {
+         *           "services.ani.io/inference-service-id": "05f6f46f-3db8-4551-8497-c46debb4be22"
+         *         }
+         *       }
+         *     }
+         */
+        PlatformWorkloadCreateRequest: {
+            /**
+             * Format: uuid
+             * @description 一次逻辑创建操作的幂等键；重试必须复用同一个值。
+             */
+            idempotency_key: string;
+            /** @description 租户内可读且符合 DNS label 的工作负载名称。 */
+            name: string;
+            /**
+             * @description 通用调度分类；不携带模型、引擎或 Services 业务状态。
+             * @enum {string}
+             */
+            workload_class: "inference";
+            /**
+             * @description Core runtime 类型；P0 仅支持容器工作负载。
+             * @enum {string}
+             */
+            runtime_kind: "container";
+            /** @description 必须是批准 registry 中的 digest-pinned image；tag 和 latest 必须拒绝。 */
+            image_ref: string;
+            /** @description 必须匹配 workload_class + topology profile 的 Core admission allowlist。 */
+            command: string[];
+            /** @description 追加到 command 后的容器启动参数；必须通过对应 admission allowlist。 */
+            args?: string[];
+            /** @description single_node 表示 Pod 副本；leader_worker 表示 LWS group，P0 只接受 1。 */
+            replicas: number;
+            /** @description single_node 模式下每个副本使用的计算资源；leader_worker 的实际资源由 topology roles 定义。 */
+            resources: components["schemas"]["PlatformWorkloadResources"];
+            /** @description 选择单节点 Deployment 或版本化 leader-worker 执行拓扑。 */
+            topology: components["schemas"]["PlatformWorkloadTopology"];
+            /** @description 与 topology 一致的 provider-neutral 队列和 gang scheduling 意图。 */
+            scheduling: components["schemas"]["PlatformWorkloadScheduling"];
+            /** @description 仅允许创建集群内部 ClusterIP Service 的网络规格。 */
+            network: components["schemas"]["PlatformWorkloadNetwork"];
+            /** @description 需要由 Core 解析并挂载的租户内 artifact 列表。 */
+            artifacts?: components["schemas"]["PlatformWorkloadArtifact"][];
+            /** @description 需要由 Core 解析并挂载的租户内 Secret 引用列表。 */
+            secret_bindings?: components["schemas"]["PlatformWorkloadSecretBinding"][];
+            /** @description Core 观察 runtime readiness 使用的集群内部健康检查。 */
+            health_check: components["schemas"]["PlatformWorkloadHealthCheck"];
+            /** @description 调用服务的 owner correlation reference 和非保留 labels。 */
+            metadata: components["schemas"]["PlatformWorkloadMetadata"];
+        } & (unknown & unknown);
+        /** @description P0 平台工作负载副本数更新请求；资源和 placement 不可在线变更。 */
+        PlatformWorkloadUpdateRequest: {
+            /**
+             * Format: uuid
+             * @description 一次逻辑更新操作的幂等键；重试必须复用同一个值。
+             */
+            idempotency_key: string;
+            /** @description P0 只允许修改 single_node 独立副本；leader_worker 固定为 1。 */
+            replicas: number;
+        };
+        /** @description 平台工作负载启动、停止或重启的幂等生命周期请求。 */
+        PlatformWorkloadLifecycleRequest: {
+            /**
+             * Format: uuid
+             * @description 一次逻辑生命周期操作的幂等键；重试必须复用同一个值。
+             */
+            idempotency_key: string;
+            /**
+             * @description 期望执行的生命周期动作。
+             * @enum {string}
+             */
+            action: "start" | "stop" | "restart";
+        };
+        /** @description Core 保存并向授权平台服务返回的平台工作负载状态投影。 */
+        PlatformWorkload: {
+            /**
+             * Format: uuid
+             * @description Core 分配的平台工作负载稳定 ID。
+             */
+            id: string;
+            /**
+             * Format: uuid
+             * @description 工作负载所属租户；所有读写必须受租户上下文隔离。
+             */
+            tenant_id: string;
+            /** @description 创建请求中的租户内工作负载名称。 */
+            name: string;
+            /**
+             * @description Core 根据期望状态和 provider observation 收敛出的生命周期状态。
+             * @enum {string}
+             */
+            state: "pending" | "provisioning" | "running" | "starting" | "stopping" | "stopped" | "failed" | "deleting" | "deleted";
+            /** @description 每次成功修改期望规格时递增的版本号。 */
+            generation: number;
+            /** @description provider observation 已处理的最新 generation；小于 generation 表示仍在收敛。 */
+            observed_generation: number;
+            /** @description Deployment 为 Pod 数；LeaderWorkerSet 为 group 数。 */
+            desired_replicas: number;
+            /** @description 与 desired_replicas 同单位；LeaderWorkerSet 直接投影 group 级 readyReplicas。 */
+            ready_replicas: number;
+            /**
+             * @description Core 根据已批准 topology profile 选择的 provider runtime 形态。
+             * @enum {string}
+             */
+            runtime_shape: "deployment" | "leader_worker_set";
+            /** @description 当前 applied topology profile ID。 */
+            topology_profile_id: string;
+            /** @description 当前 applied topology profile 的不可变版本。 */
+            topology_profile_version: string;
+            /**
+             * Format: uri
+             * @description Only an authorized platform service identity may read this cluster-internal endpoint; never expose it through /instances or tenant-facing Services APIs.
+             */
+            internal_endpoint?: string | null;
+            /** @description 当前状态的稳定机器可读原因码；无原因时为 null。 */
+            reason?: string | null;
+            /** @description 脱敏后的诊断信息，不包含 provider 对象或凭据。 */
+            message?: string | null;
+            /**
+             * Format: date-time
+             * @description 平台工作负载资源创建时间。
+             */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description 期望规格或观察状态最后更新时间。
+             */
+            updated_at: string;
+        };
+        /** @description 从工作负载 runtime 聚合并完成脱敏的一条日志记录。 */
+        PlatformWorkloadLogEntry: {
+            /**
+             * Format: date-time
+             * @description 日志事件时间。
+             */
+            timestamp: string;
+            /**
+             * @description 归一化后的日志级别。
+             * @enum {string}
+             */
+            level: "debug" | "info" | "warn" | "error";
+            /** @description 脱敏后的日志正文，不得包含 Secret、凭据或 provider 内部对象。 */
+            message: string;
+            /** @description 稳定的副本或 role 标识，不返回 Pod UID。 */
+            replica?: string | null;
+            /** @description 多容器 runtime 中的稳定容器名称；无法确定时为 null。 */
+            container?: string | null;
+            /**
+             * @description 日志来源流；无法确定时为 null。
+             * @enum {string|null}
+             */
+            stream?: "stdout" | "stderr" | null;
+        };
+        /** @description 平台工作负载日志的游标分页响应。 */
+        PlatformWorkloadLogListResponse: {
+            /** @description 按时间顺序返回的脱敏日志记录。 */
+            items: components["schemas"]["PlatformWorkloadLogEntry"][];
+            /** @description 下一页游标；没有更多日志时为 null。 */
+            next_cursor?: string | null;
         };
         HealthCheck: {
             /** @enum {string} */
@@ -3285,6 +3887,9 @@ export interface components {
          * @description 创建实例请求。共享字段（name/kind/image/cpu/memory 等）留在顶层；
          *     按 kind 选用对应 `*_config`（推荐）。扁平 VM/容器/GPU 字段保留为 v1 兼容别名。
          *     同名字段以 `*_config` 为准；与扁平别名冲突或传入跨类型 config 时返回 400。
+         *     network_config 优先级：`*_config.network` > 顶层 `network_config`；
+         *     两者同时提供时以 `*_config.network` 为准，顶层 `network_config` 作为 fallback。
+         *     同时提供且字段冲突时返回 400。
          */
         CreateInstanceRequest: {
             /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
@@ -3338,6 +3943,7 @@ export interface components {
             ssh_key_ref?: string | null;
             /** @default false */
             termination_protection: boolean;
+            network_config?: components["schemas"]["InstanceNetworkConfig"];
             /**
              * @deprecated
              * @description 兼容别名；优先使用 gpu_container_config.gpu
@@ -3912,8 +4518,11 @@ export interface components {
             id: string;
             tenant_id: string;
             name: string;
+            description?: string | null;
             /** @example 10.20.0.0/16 */
             cidr: string;
+            /** @description 该 VPC 下活跃子网数量；只读聚合字段。 */
+            readonly subnet_count?: number;
             state: components["schemas"]["NetworkResourceState"];
             reason?: string | null;
             dev_profile?: components["schemas"]["CoreDevProfileInfo"];
@@ -3930,6 +4539,10 @@ export interface components {
             /** @example 10.20.1.0/24 */
             cidr: string;
             gateway?: string | null;
+            /** @description 可选可用区。 */
+            zone?: string | null;
+            /** @description 子网内当前可分配 IP 数量；只读聚合字段。 */
+            readonly available_ip_count?: number;
             state: components["schemas"]["NetworkResourceState"];
             reason?: string | null;
             dev_profile?: components["schemas"]["CoreDevProfileInfo"];
@@ -3954,8 +4567,14 @@ export interface components {
             id: string;
             tenant_id: string;
             name: string;
+            /** @description 所属 VPC；7.29 Console 创建流程提供，历史资源可为空。 */
+            vpc_id?: string | null;
             description?: string | null;
             rules: components["schemas"]["NetworkSecurityGroupRule"][];
+            /** @description 安全组规则总数；只读聚合字段。 */
+            readonly rule_count?: number;
+            /** @description 关联实例总数；只读聚合字段。 */
+            readonly bound_instance_count?: number;
             state: components["schemas"]["NetworkResourceState"];
             reason?: string | null;
             dev_profile?: components["schemas"]["CoreDevProfileInfo"];
@@ -4153,6 +4772,7 @@ export interface components {
             /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
             idempotency_key: string;
             name: string;
+            description?: string | null;
             /** @default 10.0.0.0/16 */
             cidr: string;
         };
@@ -4164,11 +4784,15 @@ export interface components {
             /** @default 10.0.1.0/24 */
             cidr: string;
             gateway?: string | null;
+            /** @description 可选可用区。 */
+            zone?: string | null;
         };
         CreateNetworkSecurityGroupRequest: {
             /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
             idempotency_key: string;
             name: string;
+            /** @description 所属 VPC；7.29 Console 创建流程始终提供。 */
+            vpc_id?: string | null;
             description?: string | null;
             rules?: components["schemas"]["NetworkSecurityGroupRule"][];
         };
@@ -4507,6 +5131,8 @@ export interface components {
             /** Format: float */
             score: number;
             source?: string | null;
+            /** @description chunk 文本 (从存储后端返回 */
+            content?: string;
             metadata: {
                 [key: string]: string;
             };
@@ -4974,9 +5600,14 @@ export interface components {
             id: string;
             vpc_id: string;
             destination_cidr: string;
-            /** @enum {string} */
-            next_hop_type: "gateway" | "instance" | "nat";
+            /**
+             * @description 响应可包含系统生成的 local 路由；客户端不得通过 create 创建 local。
+             * @enum {string}
+             */
+            next_hop_type: "gateway" | "instance" | "nat" | "local";
             next_hop_id: string;
+            /** @description 路由优先级，数值越小优先级越高。 */
+            priority?: number | null;
             description?: string | null;
             /** Format: date-time */
             created_at: string;
@@ -4987,6 +5618,7 @@ export interface components {
             total: number;
             next_cursor?: string | null;
         };
+        /** @description create 禁止 next_hop_type=local；local 路由仅由系统返回。 */
         CreateNetworkRouteRequest: {
             idempotency_key: string;
             vpc_id: string;
@@ -4994,6 +5626,8 @@ export interface components {
             /** @enum {string} */
             next_hop_type: "gateway" | "instance" | "nat";
             next_hop_id: string;
+            /** @description 路由优先级，数值越小优先级越高。 */
+            priority?: number | null;
             description?: string;
         };
         VolumeSnapshotRecord: {
@@ -5186,6 +5820,8 @@ export interface components {
             idempotency_key: string;
             documents: {
                 content: string;
+                /** @description 预计算向量 (可选; 为空则 Core 内部生成伪向量) */
+                vector?: number[];
                 metadata?: {
                     [key: string]: unknown;
                 };
@@ -5237,6 +5873,17 @@ export interface components {
             /** Format: uuid */
             instance_id?: string | null;
             dev_profile: components["schemas"]["CoreDevProfileInfo"];
+            /**
+             * @description GPU 隔离模式，从节点标签 ani.kubercloud.io/gpu-mode 读取
+             * @enum {string|null}
+             */
+            gpu_mode?: "wholecard" | "vgpu" | null;
+            /** @description 整卡规格标签值，从 ani.kubercloud.io/gpu-spec 读取 */
+            gpu_spec?: string | null;
+            /** @description vGPU 共享规格标签值，从 ani.kubercloud.io/gpu-sharing-spec 读取 */
+            gpu_sharing_spec?: string | null;
+            /** @description vGPU 共享策略标签值，从 ani.kubercloud.io/gpu-sharing-policy 读取 */
+            gpu_sharing_policy?: string | null;
         };
         GPUInventoryListResponse: {
             items: components["schemas"]["GPUInventoryRecord"][];
@@ -5247,6 +5894,8 @@ export interface components {
         /**
          * @description Core 集群级 GPU 规格只读视图。spec_id 描述 GPU 资源形态，不代表租户配额；
          *     本契约不执行 quota check、acquire 或 release。
+         *     gpu_mode/node_affinity/volcano_resources 为可选扩展字段，对齐 GPUSpec 写视图，
+         *     使 GET /gpu-specs 与 POST /gpu-specs 读写闭环（向后兼容，老客户端可忽略）。
          */
         GPUSpecSummary: {
             /** @description 稳定规格 ID，实例创建通过 spec_id 引用。 */
@@ -5255,6 +5904,11 @@ export interface components {
             name: string;
             /** @description 必须与 GPU inventory 的 gpu_type 一致。 */
             gpu_type: string;
+            /**
+             * @description GPU 隔离模式（可选扩展，对齐 GPUSpec）
+             * @enum {string}
+             */
+            gpu_mode?: "wholecard" | "vgpu";
             memory_total_mb?: number | null;
             /** @description 每张物理卡的切分份数；1 表示整卡规格。 */
             shares: number;
@@ -5262,6 +5916,8 @@ export interface components {
             mb_per_share: number;
             /** @description 是否允许用于新的实例创建。 */
             available: boolean;
+            node_affinity?: components["schemas"]["GPUSpecNodeAffinity"];
+            volcano_resources?: components["schemas"]["GPUSpecVolcanoResources"];
         };
         GPUSpecListResponse: {
             items: components["schemas"]["GPUSpecSummary"][];
@@ -5280,6 +5936,10 @@ export interface components {
                 available?: number;
             }[];
             dev_profile: components["schemas"]["CoreDevProfileInfo"];
+            /** @description vGPU 模式设备数 */
+            vgpu_count?: number;
+            /** @description 整卡模式设备数 */
+            wholecard_count?: number;
         };
         /** @description GPU 调度队列，映射 Volcano Queue CRD */
         GPUSchedulingQueue: {
@@ -5301,6 +5961,15 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+            /** @description 队列调度状态（从 Volcano Queue CRD 读取） */
+            status?: {
+                /** @description 已分配资源键值集合，对齐 Volcano Queue CRD（如 nvidia.com/gpu: 2） */
+                allocated?: {
+                    [key: string]: string;
+                };
+                /** @description 排队中任务数 */
+                in_queue?: number;
+            } | null;
         };
         GPUSchedulingQueueListResponse: {
             items: components["schemas"]["GPUSchedulingQueue"][];
@@ -5326,6 +5995,134 @@ export interface components {
             workload_class?: "inference" | "training" | "batch";
             /** Format: uuid */
             project_id?: string | null;
+        };
+        /** @description 规格节点亲和性标签映射（对齐 K8s 节点标签） */
+        GPUSpecNodeAffinity: {
+            /** @description 整卡时用 ani.kubercloud.io/gpu-spec 值 */
+            gpu_spec?: string | null;
+            /** @description vGPU 时用 ani.kubercloud.io/gpu-sharing-spec 值 */
+            gpu_sharing_spec?: string | null;
+            /** @description vGPU 时用 ani.kubercloud.io/gpu-sharing-policy 值 */
+            gpu_sharing_policy?: string | null;
+            /**
+             * @description 整卡/vGPU 隔离，ani.kubercloud.io/gpu-mode 值
+             * @enum {string|null}
+             */
+            gpu_mode?: "wholecard" | "vgpu" | null;
+        };
+        /** @description Volcano 调度资源声明（嵌套 wholecard/vgpu 两个子 map） */
+        GPUSpecVolcanoResources: {
+            /** @description 整卡模式资源声明 */
+            wholecard?: {
+                [key: string]: string;
+            } | null;
+            /** @description vGPU 模式资源声明 */
+            vgpu?: {
+                [key: string]: string;
+            } | null;
+        };
+        /**
+         * @description GPU 规格完整视图（POST 创建后返回）。含节点亲和性和 Volcano 资源声明，
+         *     用于管理端展示和实例创建准入校验。
+         */
+        GPUSpec: {
+            /** @description 稳定规格 ID，实例创建通过 spec_id 引用。 */
+            id: string;
+            /** @description Console 展示名称。 */
+            name: string;
+            /** @description 必须与 GPU inventory 的 gpu_type 一致。 */
+            gpu_type: string;
+            /**
+             * @description GPU 隔离模式
+             * @enum {string}
+             */
+            gpu_mode: "wholecard" | "vgpu";
+            memory_total_mb?: number | null;
+            /** @description 每张物理卡的切分份数；1 表示整卡规格。 */
+            shares: number;
+            /** @description 每份保证显存，单位 MiB。 */
+            mb_per_share: number;
+            /** @description 是否允许用于新的实例创建。 */
+            available: boolean;
+            node_affinity?: components["schemas"]["GPUSpecNodeAffinity"];
+            volcano_resources?: components["schemas"]["GPUSpecVolcanoResources"];
+        };
+        /** @description 创建 GPU 规格请求（SPEC §4.4） */
+        GPUSpecCreateRequest: {
+            /** @description 规格 ID，K8s 资源名规范 */
+            spec_id: string;
+            /** @description GPU 型号，必须对齐节点标签 */
+            gpu_type: string;
+            /**
+             * @description GPU 隔离模式
+             * @enum {string}
+             */
+            gpu_mode: "wholecard" | "vgpu";
+            /** @description 每张物理卡的切分份数；1=整卡 */
+            shares: number;
+            /** @description 每份保证显存，单位 MiB */
+            mb_per_share: number;
+            /** @description 物理卡显存，用于校验 */
+            memory_total_mb?: number | null;
+        };
+        /** @description 规格可用性视图（四态标注） */
+        GPUSpecAvailability: {
+            spec_id: string;
+            /**
+             * @description available=可创建，full=配额不足，device_full=设备不足，unavailable=规格不可用
+             * @enum {string}
+             */
+            status: "available" | "full" | "device_full" | "unavailable";
+            /** @description 可创建实例数 */
+            available_count: number;
+            /** @description 是否存在匹配规格的节点 */
+            has_matching_nodes: boolean;
+            /** @description 是否存在空闲设备 */
+            has_idle_devices: boolean;
+            /** @description 空闲设备数 */
+            device_idle_count: number;
+            /** @description 每份规格占用的卡数 */
+            gpu_count?: number;
+        };
+        /** @description 规格可用性列表响应；quota_remaining 是租户级共享值，只在顶层返回一次 */
+        GPUSpecAvailabilityListResponse: {
+            /** @description 租户配额剩余（allocated_gpu_count - used - reserved），跨规格共享，仅在顶层返回一次 */
+            quota_remaining: number;
+            items: components["schemas"]["GPUSpecAvailability"][];
+        };
+        /** @description 设置租户预留额度请求 */
+        ReservationPutRequest: {
+            /** @description 预留 GPU 卡数上限 */
+            allocated_gpu_count: number;
+        };
+        /** @description 租户预留额度视图 */
+        ReservationView: {
+            /** Format: uuid */
+            tenant_id: string;
+            /** @description 预留 GPU 卡数上限 */
+            allocated_gpu_count: number;
+            /** @description 已实扣（已 Confirm） */
+            used: number;
+            /** @description 已预占（已 Try 未 Confirm/Cancel） */
+            reserved: number;
+            /** @description 可用 = allocated - used - reserved */
+            available: number;
+            /** @description 下调被 clamp 时 true */
+            tightened?: boolean;
+        };
+        /** @description 设备状态翻转请求 */
+        GPUDeviceStatusUpdateRequest: {
+            /**
+             * @description 目标状态：maintenance=维护中，idle=空闲
+             * @enum {string}
+             */
+            status: "maintenance" | "idle";
+        };
+        /** @description BOSS 分页配额列表 */
+        QuotaListResult: {
+            items: components["schemas"]["Quota"][];
+            total: number;
+            next_cursor?: string | null;
         };
         SandboxTemplate: {
             /** Format: uuid */
@@ -5722,6 +6519,78 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
+        /** @description 规格不存在（code=GPU_SPEC_NOT_FOUND） */
+        GPUSpecNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 该规格有运行中实例引用，无法删除（code=GPU_SPEC_IN_USE） */
+        GPUSpecInUse: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 规格已存在（code=GPU_SPEC_CONFLICT） */
+        GPUSpecConflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description GPU 型号不存在于集群节点标签中（code=GPU_TYPE_NOT_IN_NODES） */
+        GPUTypeNotInNodes: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 设备不存在（code=DEVICE_NOT_FOUND） */
+        DeviceNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 配额不足（code=QUOTA_EXCEEDED） */
+        QuotaExceeded: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 预留额度不足（code=RESERVED_INSUFFICIENT） */
+        ReservedInsufficient: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 预留额度不能超过配额上限（code=RESERVATION_EXCEEDS_QUOTA） */
+        ReservationExceedsQuota: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
     };
     parameters: never;
     requestBodies: never;
@@ -6069,6 +6938,220 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    getPlatformWorkloadCapabilities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 平台工作负载能力 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformWorkloadCapabilities"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    createPlatformWorkload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformWorkloadCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description 平台工作负载创建任务已接受 */
+            202: {
+                headers: {
+                    /** @description Core AsyncTask 查询 URL */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            /** @description 未批准镜像/profile、GPUSpec 不可用、资源不足或 topology/gang 前置条件不满足。 */
+            422: components["responses"]["PreconditionFailed"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getPlatformWorkload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 平台工作负载规范化状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformWorkload"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deletePlatformWorkload: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                workload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 删除任务已接受 */
+            202: {
+                headers: {
+                    /** @description Core AsyncTask 查询 URL */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updatePlatformWorkload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformWorkloadUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 副本伸缩任务已接受 */
+            202: {
+                headers: {
+                    /** @description Core AsyncTask 查询 URL */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["PreconditionFailed"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    applyPlatformWorkloadLifecycle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformWorkloadLifecycleRequest"];
+            };
+        };
+        responses: {
+            /** @description 生命周期任务已接受 */
+            202: {
+                headers: {
+                    /** @description Core AsyncTask 查询 URL */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["PreconditionFailed"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getPlatformWorkloadLogs: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string;
+                level?: "debug" | "info" | "warn" | "error";
+            };
+            header?: never;
+            path: {
+                workload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 平台工作负载日志 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformWorkloadLogListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     listInstances: {
         parameters: {
             query?: {
@@ -6136,7 +7219,19 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            /**
+             * @description 配额不足或预留额度不足。可能的 code：
+             *     - QUOTA_EXCEEDED: used+reserved+request > total，配额上限不足
+             *     - RESERVED_INSUFFICIENT: allocated-used-reserved < request，预留额度不足
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /**
              * @description GPU 调度前置条件不满足。可能的 code：
              *     - InsufficientGPU: GPU 资源不足，当前无可用算力满足本次创建请求
@@ -7021,6 +8116,8 @@ export interface operations {
             query?: {
                 /** @description 按安全组名称过滤；可选，服务端可做精确或前缀匹配。 */
                 name?: string;
+                /** @description 按所属 VPC 过滤安全组。 */
+                vpc_id?: string;
                 /** @description 按安全组状态过滤。 */
                 state?: components["schemas"]["NetworkResourceState"];
                 limit?: number;
@@ -7473,8 +8570,8 @@ export interface operations {
         parameters: {
             query?: {
                 vpc_id?: string;
-                /** @description 按下一跳类型过滤路由。 */
-                next_hop_type?: "gateway" | "instance" | "nat";
+                /** @description 按下一跳类型过滤路由；可包含系统 local 路由。 */
+                next_hop_type?: "gateway" | "instance" | "nat" | "local";
                 limit?: number;
                 cursor?: string;
             };
@@ -10441,6 +11538,8 @@ export interface operations {
         parameters: {
             query?: {
                 gpu_type?: string;
+                /** @description 按 GPU 隔离模式过滤 */
+                gpu_mode?: "wholecard" | "vgpu";
                 status?: "available" | "in_use" | "fault" | "maintenance";
                 node_name?: string;
                 limit?: number;
@@ -10487,6 +11586,38 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
+    updateGPUDeviceStatus: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 幂等键，防止重复操作 */
+                "Idempotency-Key": string;
+            };
+            path: {
+                device_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GPUDeviceStatusUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 设备状态已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GPUInventoryRecord"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["DeviceNotFound"];
+        };
+    };
     listGPUSpecs: {
         parameters: {
             query?: {
@@ -10514,6 +11645,38 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
+    createGPUSpec: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 幂等键，防止重复创建 */
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GPUSpecCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description 规格创建成功 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GPUSpec"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["GPUSpecConflict"];
+            422: components["responses"]["GPUTypeNotInNodes"];
+        };
+    };
     getGPUSpec: {
         parameters: {
             query?: never;
@@ -10537,6 +11700,55 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    deleteGPUSpec: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 幂等键，防止重复删除 */
+                "Idempotency-Key": string;
+            };
+            path: {
+                spec_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 删除成功 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["GPUSpecNotFound"];
+            409: components["responses"]["GPUSpecInUse"];
+        };
+    };
+    listGPUSpecAvailability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 规格可用性列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GPUSpecAvailabilityListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     listGPUSchedulingQueues: {
@@ -10936,6 +12148,53 @@ export interface operations {
             422: components["responses"]["PreconditionFailed"];
         };
     };
+    getMyQuota: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前租户配额 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Quota"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listQuotas: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 租户配额分页列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuotaListResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
     getTenantQuota: {
         parameters: {
             query?: never;
@@ -11056,6 +12315,86 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["TenantNotFound"];
+        };
+    };
+    getTenantReservations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 租户预留额度视图 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReservationView"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["TenantNotFound"];
+        };
+    };
+    putTenantReservations: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 幂等键，防止重复操作 */
+                "Idempotency-Key": string;
+            };
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReservationPutRequest"];
+            };
+        };
+        responses: {
+            /** @description 预留额度已设置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReservationView"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["TenantNotFound"];
+            422: components["responses"]["ReservationExceedsQuota"];
+        };
+    };
+    getMyReservations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前租户预留额度视图 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReservationView"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     listQuotaMeta: {

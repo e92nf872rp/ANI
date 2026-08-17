@@ -31,8 +31,11 @@ type MeteringUsageQueryRequest struct {
 	GroupBy      string
 }
 
+// MeteringUsageRecord 表示一条计量用量记录。
+// ResourceRef 为新增字段，标识采集的资源引用（如 instance_id），现有字段保持不变。
 type MeteringUsageRecord struct {
 	TenantID      string
+	ResourceRef   string
 	ResourceType  MeteringResourceType
 	TotalQuantity float64
 	Unit          string
@@ -75,4 +78,34 @@ type TokenUsageReportRecord struct {
 type MeteringService interface {
 	QueryUsage(ctx context.Context, request MeteringUsageQueryRequest) (MeteringUsageResult, error)
 	ReportTokenUsage(ctx context.Context, request TokenUsageReportRequest) (TokenUsageReportRecord, error)
+}
+
+// CollectionDimension 描述采集的一个维度，包含资源类型和 collector 来源标识。
+type CollectionDimension struct {
+	ResourceType MeteringResourceType
+	Source       string
+}
+
+// CollectionSpec 描述单个资源的周期采集规格，由 consumer/rebuilder 构造后传入
+// MeteringCollectionService.StartCollection。
+type CollectionSpec struct {
+	ResourceRef  string
+	WorkloadName string
+	TenantID     string
+	WorkloadKind string
+	Dimensions   []CollectionDimension
+	IntervalSec  int
+	StartedAt    time.Time
+	GPUSpec      *GPUEventSpec
+}
+
+// MeteringCollectionService 定义采集生命周期控制契约，与 MeteringService（查询/上报）分离。
+//
+// StartCollection 启动指定资源的周期采集。幂等语义：进程内 map 按 ResourceRef 去重，
+// 已有 ticker 时返回 nil（no-op）；DB UNIQUE 约束兜底重启/重放场景的重复写入。
+//
+// StopCollection 停止指定资源的周期采集。幂等语义：无 ticker 时返回 nil（no-op）。
+type MeteringCollectionService interface {
+	StartCollection(ctx context.Context, spec CollectionSpec) error
+	StopCollection(ctx context.Context, resourceRef string) error
 }

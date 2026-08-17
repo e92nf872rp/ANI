@@ -36,6 +36,13 @@ service KBService {
   // For streaming answers use the SSE endpoint in the gateway directly.
   rpc Query(QueryRequest) returns (QueryResponse);
 
+  // Retrieve performs a streaming RAG query: yields token events, a sources
+  // event, then a done event (or an error event). Server-streaming RPC.
+  // Orchestration mirrors Query (session + persistence + no-result gates);
+  // implemented in STEP-10 feature issue. This contract issue only declares
+  // the proto surface.
+  rpc Retrieve(RetrieveRequest) returns (stream RetrieveEvent);
+
   // ── Phase A P1 RPC declarations (P0 returns UNIMPLEMENTED) ─────────────────
   // ListKBCitations returns the citation sources used by a KB (P1).
   rpc ListKBCitations(ListKBCitationsRequest) returns (ListKBCitationsResponse);
@@ -152,6 +159,53 @@ message SourceChunk {
   int32  page      = 3;
   string content   = 4;   // the cited passage
   float  score     = 5;   // similarity score [0,1]
+}
+
+// ── Retrieve RPC messages (STEP-10 contract) ────────────────────────────────
+// RetrieveRequest mirrors QueryRequest fields (Plan §10.1).
+message RetrieveRequest {
+  string tenant_id        = 1;
+  string kb_id            = 2;
+  string question         = 3;
+  string session_id       = 4;   // optional; empty creates new session
+  string idempotency_key  = 5;   // prevents duplicate billing on retry
+  int32  top_k            = 6;   // override KB default if nonzero
+  float  score_threshold  = 7;   // override KB default if nonzero
+  string inference_service_name = 8; // which vLLM service to use; "default" if empty
+  string retrieval_mode   = 9;   // override KB retrieval mode; empty = use KB
+}
+
+// RetrieveEvent is a server-streaming oneof: token* → sources → done (or error).
+message RetrieveEvent {
+  oneof event {
+    RetrieveTokenEvent   token   = 1;
+    RetrieveSourcesEvent sources = 2;
+    RetrieveDoneEvent    done    = 3;
+    RetrieveErrorEvent   error   = 4;
+  }
+}
+
+message RetrieveTokenEvent {
+  string content = 1;   // incremental token text
+}
+
+message RetrieveSourcesEvent {
+  repeated SourceChunk sources = 1;
+}
+
+message RetrieveDoneEvent {
+  int32  input_tokens  = 1;
+  int32  output_tokens = 2;
+  string session_id    = 3;
+}
+
+message RetrieveErrorEvent {
+  string message = 1;
+  // Error code matching SSE error event protocol (SPEC §4.3):
+  // BAD_REQUEST | UNAUTHORIZED | KB_NOT_FOUND | INFERENCE_UNAVAILABLE |
+  // RETRIEVE_FAILED | STREAM_INTERRUPTED. Allows Gateway to faithfully
+  // transcode the gRPC error event into the SSE {"code":"...","message":"..."} format.
+  string code = 2;
 }
 
 // ── Domain messages ───────────────────────────────────────────────────────────

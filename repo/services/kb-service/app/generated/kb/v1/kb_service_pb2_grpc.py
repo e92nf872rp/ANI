@@ -87,6 +87,11 @@ class KBServiceStub:
                 request_serializer=kb_dot_v1_dot_kb__service__pb2.QueryRequest.SerializeToString,
                 response_deserializer=kb_dot_v1_dot_kb__service__pb2.QueryResponse.FromString,
                 _registered_method=True)
+        self.Retrieve = channel.unary_stream(
+                '/kb.v1.KBService/Retrieve',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.RetrieveRequest.SerializeToString,
+                response_deserializer=kb_dot_v1_dot_kb__service__pb2.RetrieveEvent.FromString,
+                _registered_method=True)
         self.ListKBCitations = channel.unary_unary(
                 '/kb.v1.KBService/ListKBCitations',
                 request_serializer=kb_dot_v1_dot_kb__service__pb2.ListKBCitationsRequest.SerializeToString,
@@ -177,6 +182,17 @@ class KBServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def Retrieve(self, request, context):
+        """Retrieve performs a streaming RAG query: yields token events, a sources
+        event, then a done event (or an error event). Server-streaming RPC.
+        Orchestration mirrors Query (session + persistence + no-result gates);
+        implemented in STEP-10 feature issue. This contract issue only declares
+        the proto surface.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def ListKBCitations(self, request, context):
         """── Phase A P1 RPC declarations (P0 returns UNIMPLEMENTED) ─────────────────
         ListKBCitations returns the citation sources used by a KB (P1).
@@ -251,6 +267,11 @@ def add_KBServiceServicer_to_server(servicer, server):
                     servicer.Query,
                     request_deserializer=kb_dot_v1_dot_kb__service__pb2.QueryRequest.FromString,
                     response_serializer=kb_dot_v1_dot_kb__service__pb2.QueryResponse.SerializeToString,
+            ),
+            'Retrieve': grpc.unary_stream_rpc_method_handler(
+                    servicer.Retrieve,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.RetrieveRequest.FromString,
+                    response_serializer=kb_dot_v1_dot_kb__service__pb2.RetrieveEvent.SerializeToString,
             ),
             'ListKBCitations': grpc.unary_unary_rpc_method_handler(
                     servicer.ListKBCitations,
@@ -539,6 +560,33 @@ class KBService:
             '/kb.v1.KBService/Query',
             kb_dot_v1_dot_kb__service__pb2.QueryRequest.SerializeToString,
             kb_dot_v1_dot_kb__service__pb2.QueryResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Retrieve(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/kb.v1.KBService/Retrieve',
+            kb_dot_v1_dot_kb__service__pb2.RetrieveRequest.SerializeToString,
+            kb_dot_v1_dot_kb__service__pb2.RetrieveEvent.FromString,
             options,
             channel_credentials,
             insecure,

@@ -1,7 +1,7 @@
 batch: SPEC-COMPAT-A
 phase: Phase 1 / Sprint 4
 source: api/openapi/v1.yaml
-generated_at: '2026-08-12'
+generated_at: '2026-08-14'
 compatibility_rules:
   allowed:
   - Add optional request fields.
@@ -16,6 +16,188 @@ compatibility_rules:
   - Remove response fields.
   - Change existing field schema signatures.
 paths:
+  /admin/quota-meta:
+    get:
+      operation_id: listQuotaMeta
+      rbac_scope: scope:quota:read
+      parameters: []
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: QuotaMetaListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+  /admin/tenants/{tenant_id}/quota:
+    delete:
+      operation_id: deleteTenantQuota
+      rbac_scope: scope:quota:write
+      parameters:
+      - in: path
+        name: tenant_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: QuotaDeleteResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+    get:
+      operation_id: getTenantQuota
+      rbac_scope: scope:quota:read
+      parameters:
+      - in: path
+        name: tenant_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: Quota
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+    post:
+      operation_id: createTenantQuota
+      rbac_scope: scope:quota:write
+      parameters:
+      - in: path
+        name: tenant_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+      request_body_required: true
+      request_schema: QuotaCreateRequest
+      responses:
+        '200':
+          schema: Quota
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+        '422':
+          schema: '{}'
+    put:
+      operation_id: updateTenantQuota
+      rbac_scope: scope:quota:write
+      parameters:
+      - in: path
+        name: tenant_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+      request_body_required: true
+      request_schema: QuotaUpdateRequest
+      responses:
+        '200':
+          schema: Quota
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '422':
+          schema: '{}'
+  /admin/tenants/{tenant_id}/reservations:
+    get:
+      operation_id: getTenantReservations
+      rbac_scope: scope:quota:read
+      parameters:
+      - in: path
+        name: tenant_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: ReservationView
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+    put:
+      operation_id: putTenantReservations
+      rbac_scope: scope:quota:write
+      parameters:
+      - in: path
+        name: tenant_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+      request_body_required: true
+      request_schema: ReservationPutRequest
+      responses:
+        '200':
+          schema: ReservationView
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '422':
+          schema: '{}'
   /auth/api-keys:
     get:
       operation_id: listAPIKeys
@@ -863,6 +1045,11 @@ paths:
         schema:
           type: string
       - in: query
+        name: gpu_mode
+        required: false
+        schema:
+          type: string
+      - in: query
         name: status
         required: false
         schema:
@@ -906,6 +1093,35 @@ paths:
         '401':
           schema: '{}'
         '403':
+          schema: '{}'
+  /gpu-inventory/{device_id}:
+    patch:
+      operation_id: updateGPUDeviceStatus
+      rbac_scope: scope:gpu-inventory:write
+      parameters:
+      - in: path
+        name: device_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+      request_body_required: true
+      request_schema: GPUDeviceStatusUpdateRequest
+      responses:
+        '200':
+          schema: GPUInventoryRecord
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
           schema: '{}'
   /gpu-scheduling/queues:
     get:
@@ -1046,7 +1262,76 @@ paths:
           schema: '{}'
         '403':
           schema: '{}'
+    post:
+      operation_id: createGPUSpec
+      rbac_scope: scope:gpu-spec:write
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+      request_body_required: true
+      request_schema: GPUSpecCreateRequest
+      responses:
+        '201':
+          schema: GPUSpec
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '409':
+          schema: '{}'
+        '422':
+          schema: '{}'
+  /gpu-specs/availability:
+    get:
+      operation_id: listGPUSpecAvailability
+      rbac_scope: scope:gpu-spec:read
+      parameters: []
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: GPUSpecAvailabilityListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
   /gpu-specs/{spec_id}:
+    delete:
+      operation_id: deleteGPUSpec
+      rbac_scope: scope:gpu-spec:write
+      parameters:
+      - in: path
+        name: spec_id
+        required: true
+        schema:
+          type: string
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '204':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
     get:
       operation_id: getGPUSpec
       rbac_scope: scope:gpu-inventory:read
@@ -3514,6 +3799,241 @@ paths:
           schema: '{}'
         '403':
           schema: '{}'
+  /platform-workload-capabilities:
+    get:
+      operation_id: getPlatformWorkloadCapabilities
+      rbac_scope: scope:platform-workloads:read
+      parameters: []
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: PlatformWorkloadCapabilities
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '503':
+          schema: '{}'
+  /platform-workloads:
+    post:
+      operation_id: createPlatformWorkload
+      rbac_scope: scope:platform-workloads:write
+      parameters: []
+      request_body_required: true
+      request_schema: PlatformWorkloadCreateRequest
+      responses:
+        '202':
+          schema: AsyncTask
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '409':
+          schema: '{}'
+        '422':
+          schema: '{}'
+        '503':
+          schema: '{}'
+  /platform-workloads/{workload_id}:
+    delete:
+      operation_id: deletePlatformWorkload
+      rbac_scope: scope:platform-workloads:write
+      parameters:
+      - in: path
+        name: workload_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '202':
+          schema: AsyncTask
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+        '503':
+          schema: '{}'
+    get:
+      operation_id: getPlatformWorkload
+      rbac_scope: scope:platform-workloads:read
+      parameters:
+      - in: path
+        name: workload_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: PlatformWorkload
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '503':
+          schema: '{}'
+    patch:
+      operation_id: updatePlatformWorkload
+      rbac_scope: scope:platform-workloads:write
+      parameters:
+      - in: path
+        name: workload_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: true
+      request_schema: PlatformWorkloadUpdateRequest
+      responses:
+        '202':
+          schema: AsyncTask
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+        '422':
+          schema: '{}'
+        '503':
+          schema: '{}'
+  /platform-workloads/{workload_id}/lifecycle:
+    post:
+      operation_id: applyPlatformWorkloadLifecycle
+      rbac_scope: scope:platform-workloads:write
+      parameters:
+      - in: path
+        name: workload_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: true
+      request_schema: PlatformWorkloadLifecycleRequest
+      responses:
+        '202':
+          schema: AsyncTask
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+        '422':
+          schema: '{}'
+        '503':
+          schema: '{}'
+  /platform-workloads/{workload_id}/logs:
+    get:
+      operation_id: getPlatformWorkloadLogs
+      rbac_scope: scope:platform-workloads:read
+      parameters:
+      - in: path
+        name: workload_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 1000
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: level
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: PlatformWorkloadLogListResponse
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '503':
+          schema: '{}'
+  /quotas:
+    get:
+      operation_id: listQuotas
+      rbac_scope: scope:quota:read
+      parameters:
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: QuotaListResult
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+  /quotas/me:
+    get:
+      operation_id: getMyQuota
+      rbac_scope: scope:quota:read
+      parameters: []
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: Quota
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
   /readyz:
     get:
       operation_id: readiness
@@ -3885,6 +4405,20 @@ paths:
           schema: RegistryProjectScanReport
         '400':
           schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+  /reservations/me:
+    get:
+      operation_id: getMyReservations
+      rbac_scope: scope:quota:read
+      parameters: []
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: ReservationView
         '401':
           schema: '{}'
         '403':
@@ -4703,6 +5237,7 @@ schemas:
           nullable: true
         enum:
         - inference_service
+        - platform_workload
         - kb_document
         - model_version
         - volume_snapshot
@@ -4735,6 +5270,12 @@ schemas:
         - kb.parse
         - kb.index
         - inference.deploy
+        - platform_workload.create
+        - platform_workload.scale
+        - platform_workload.start
+        - platform_workload.stop
+        - platform_workload.restart
+        - platform_workload.delete
         - volume.snapshot.create
         - volume.expand
         - volume.mount
@@ -5237,6 +5778,10 @@ schemas:
           type: string
           minLength: 1
           maxLength: 128
+        enum: []
+      network_config:
+        signature:
+          $ref: '#/components/schemas/InstanceNetworkConfig'
         enum: []
       replicas:
         signature:
@@ -6632,6 +7177,17 @@ schemas:
         signature:
           type: integer
         enum: []
+  GPUDeviceStatusUpdateRequest:
+    type: object
+    required:
+    - status
+    properties:
+      status:
+        signature:
+          type: string
+        enum:
+        - maintenance
+        - idle
   GPUInventoryListResponse:
     type: object
     required:
@@ -6680,6 +7236,28 @@ schemas:
       gpu_index:
         signature:
           type: integer
+        enum: []
+      gpu_mode:
+        signature:
+          type: string
+          nullable: true
+        enum:
+        - wholecard
+        - vgpu
+      gpu_sharing_policy:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      gpu_sharing_spec:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      gpu_spec:
+        signature:
+          type: string
+          nullable: true
         enum: []
       gpu_type:
         signature:
@@ -6753,6 +7331,16 @@ schemas:
         signature:
           type: integer
         enum: []
+      vgpu_count:
+        signature:
+          type: integer
+          minimum: 0
+        enum: []
+      wholecard_count:
+        signature:
+          type: integer
+          minimum: 0
+        enum: []
   GPUSchedulingQueue:
     type: object
     required:
@@ -6792,6 +7380,11 @@ schemas:
       reclaimable:
         signature:
           type: boolean
+        enum: []
+      status:
+        signature:
+          type: object
+          nullable: true
         enum: []
       updated_at:
         signature:
@@ -6893,32 +7486,11 @@ schemas:
         - inference
         - training
         - batch
-  GPUSpecListResponse:
-    type: object
-    required:
-    - items
-    - total
-    properties:
-      items:
-        signature:
-          type: array
-          items:
-            $ref: '#/components/schemas/GPUSpecSummary'
-        enum: []
-      next_cursor:
-        signature:
-          type: string
-          nullable: true
-        enum: []
-      total:
-        signature:
-          type: integer
-          minimum: 0
-        enum: []
-  GPUSpecSummary:
+  GPUSpec:
     type: object
     required:
     - available
+    - gpu_mode
     - gpu_type
     - id
     - mb_per_share
@@ -6929,6 +7501,12 @@ schemas:
         signature:
           type: boolean
         enum: []
+      gpu_mode:
+        signature:
+          type: string
+        enum:
+        - wholecard
+        - vgpu
       gpu_type:
         signature:
           type: string
@@ -6952,10 +7530,241 @@ schemas:
         signature:
           type: string
         enum: []
+      node_affinity:
+        signature:
+          $ref: '#/components/schemas/GPUSpecNodeAffinity'
+        enum: []
       shares:
         signature:
           type: integer
           minimum: 1
+        enum: []
+      volcano_resources:
+        signature:
+          $ref: '#/components/schemas/GPUSpecVolcanoResources'
+        enum: []
+  GPUSpecAvailability:
+    type: object
+    required:
+    - available_count
+    - device_idle_count
+    - has_idle_devices
+    - has_matching_nodes
+    - spec_id
+    - status
+    properties:
+      available_count:
+        signature:
+          type: integer
+          minimum: 0
+        enum: []
+      device_idle_count:
+        signature:
+          type: integer
+          minimum: 0
+        enum: []
+      gpu_count:
+        signature:
+          type: integer
+          minimum: 1
+        enum: []
+      has_idle_devices:
+        signature:
+          type: boolean
+        enum: []
+      has_matching_nodes:
+        signature:
+          type: boolean
+        enum: []
+      spec_id:
+        signature:
+          type: string
+        enum: []
+      status:
+        signature:
+          type: string
+        enum:
+        - available
+        - full
+        - device_full
+        - unavailable
+  GPUSpecAvailabilityListResponse:
+    type: object
+    required:
+    - items
+    - quota_remaining
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/GPUSpecAvailability'
+        enum: []
+      quota_remaining:
+        signature:
+          type: integer
+        enum: []
+  GPUSpecCreateRequest:
+    type: object
+    required:
+    - gpu_mode
+    - gpu_type
+    - mb_per_share
+    - shares
+    - spec_id
+    properties:
+      gpu_mode:
+        signature:
+          type: string
+        enum:
+        - wholecard
+        - vgpu
+      gpu_type:
+        signature:
+          type: string
+        enum: []
+      mb_per_share:
+        signature:
+          type: integer
+          minimum: 1
+        enum: []
+      memory_total_mb:
+        signature:
+          type: integer
+          nullable: true
+          minimum: 1
+        enum: []
+      shares:
+        signature:
+          type: integer
+          minimum: 1
+        enum: []
+      spec_id:
+        signature:
+          type: string
+          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+        enum: []
+  GPUSpecListResponse:
+    type: object
+    required:
+    - items
+    - total
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/GPUSpecSummary'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+          minimum: 0
+        enum: []
+  GPUSpecNodeAffinity:
+    type: object
+    required: []
+    properties:
+      gpu_mode:
+        signature:
+          type: string
+          nullable: true
+        enum:
+        - wholecard
+        - vgpu
+      gpu_sharing_policy:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      gpu_sharing_spec:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      gpu_spec:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+  GPUSpecSummary:
+    type: object
+    required:
+    - available
+    - gpu_type
+    - id
+    - mb_per_share
+    - name
+    - shares
+    properties:
+      available:
+        signature:
+          type: boolean
+        enum: []
+      gpu_mode:
+        signature:
+          type: string
+        enum:
+        - wholecard
+        - vgpu
+      gpu_type:
+        signature:
+          type: string
+        enum: []
+      id:
+        signature:
+          type: string
+        enum: []
+      mb_per_share:
+        signature:
+          type: integer
+          minimum: 1
+        enum: []
+      memory_total_mb:
+        signature:
+          type: integer
+          nullable: true
+          minimum: 1
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+      node_affinity:
+        signature:
+          $ref: '#/components/schemas/GPUSpecNodeAffinity'
+        enum: []
+      shares:
+        signature:
+          type: integer
+          minimum: 1
+        enum: []
+      volcano_resources:
+        signature:
+          $ref: '#/components/schemas/GPUSpecVolcanoResources'
+        enum: []
+  GPUSpecVolcanoResources:
+    type: object
+    required: []
+    properties:
+      vgpu:
+        signature:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: string
+        enum: []
+      wholecard:
+        signature:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: string
         enum: []
   HealthCheck:
     type: object
@@ -9781,6 +10590,554 @@ schemas:
           minLength: 1
           maxLength: 64
         enum: []
+  PlatformWorkload:
+    type: object
+    required:
+    - created_at
+    - desired_replicas
+    - generation
+    - id
+    - name
+    - observed_generation
+    - ready_replicas
+    - runtime_shape
+    - state
+    - tenant_id
+    - topology_profile_id
+    - topology_profile_version
+    - updated_at
+    properties:
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      desired_replicas:
+        signature:
+          type: integer
+          minimum: 0
+        enum: []
+      generation:
+        signature:
+          type: integer
+          minimum: 1
+        enum: []
+      id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      internal_endpoint:
+        signature:
+          type: string
+          format: uri
+          nullable: true
+        enum: []
+      message:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+      observed_generation:
+        signature:
+          type: integer
+          minimum: 0
+        enum: []
+      ready_replicas:
+        signature:
+          type: integer
+          minimum: 0
+        enum: []
+      reason:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      runtime_shape:
+        signature:
+          type: string
+        enum:
+        - deployment
+        - leader_worker_set
+      state:
+        signature:
+          type: string
+        enum:
+        - pending
+        - provisioning
+        - running
+        - starting
+        - stopping
+        - stopped
+        - failed
+        - deleting
+        - deleted
+      tenant_id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      topology_profile_id:
+        signature:
+          type: string
+        enum: []
+      topology_profile_version:
+        signature:
+          type: string
+        enum: []
+      updated_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+  PlatformWorkloadAcceleratorCapability:
+    type: object
+    required:
+    - available
+    - max_single_node_count
+    - spec_id
+    properties:
+      available:
+        signature:
+          type: boolean
+        enum: []
+      max_single_node_count:
+        signature:
+          type: integer
+          minimum: 0
+        enum: []
+      spec_id:
+        signature:
+          type: string
+        enum: []
+  PlatformWorkloadAcceleratorResources:
+    type: object
+    required:
+    - count
+    - spec_id
+    properties:
+      count:
+        signature:
+          type: integer
+          minimum: 1
+        enum: []
+      spec_id:
+        signature:
+          type: string
+          minLength: 1
+        enum: []
+  PlatformWorkloadArtifact:
+    type: object
+    required:
+    - mount_path
+    - object_ref
+    properties:
+      mount_path:
+        signature:
+          type: string
+          pattern: ^/
+        enum: []
+      object_ref:
+        signature:
+          type: string
+          minLength: 1
+        enum: []
+  PlatformWorkloadCapabilities:
+    type: object
+    required:
+    - accelerator_specs
+    - gang_scheduling_ready
+    - leader_worker_set_ready
+    - supported_topology_modes
+    properties:
+      accelerator_specs:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlatformWorkloadAcceleratorCapability'
+        enum: []
+      gang_scheduling_ready:
+        signature:
+          type: boolean
+        enum: []
+      leader_worker_set_ready:
+        signature:
+          type: boolean
+        enum: []
+      supported_topology_modes:
+        signature:
+          type: array
+          items:
+            type: string
+        enum: []
+      supported_topology_profiles:
+        signature:
+          type: array
+          items:
+            type: object
+        enum: []
+  PlatformWorkloadCreateRequest:
+    type: object
+    required:
+    - command
+    - health_check
+    - idempotency_key
+    - image_ref
+    - metadata
+    - name
+    - network
+    - replicas
+    - resources
+    - runtime_kind
+    - scheduling
+    - topology
+    - workload_class
+    properties:
+      args:
+        signature:
+          type: array
+          items:
+            type: string
+        enum: []
+      artifacts:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlatformWorkloadArtifact'
+        enum: []
+      command:
+        signature:
+          type: array
+          items:
+            type: string
+        enum: []
+      health_check:
+        signature:
+          $ref: '#/components/schemas/PlatformWorkloadHealthCheck'
+        enum: []
+      idempotency_key:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      image_ref:
+        signature:
+          type: string
+          minLength: 1
+          pattern: ^.+@sha256:[a-f0-9]{64}$
+        enum: []
+      metadata:
+        signature:
+          $ref: '#/components/schemas/PlatformWorkloadMetadata'
+        enum: []
+      name:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 63
+          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+        enum: []
+      network:
+        signature:
+          $ref: '#/components/schemas/PlatformWorkloadNetwork'
+        enum: []
+      replicas:
+        signature:
+          type: integer
+          minimum: 1
+        enum: []
+      resources:
+        signature:
+          $ref: '#/components/schemas/PlatformWorkloadResources'
+        enum: []
+      runtime_kind:
+        signature:
+          type: string
+        enum:
+        - container
+      scheduling:
+        signature:
+          $ref: '#/components/schemas/PlatformWorkloadScheduling'
+        enum: []
+      secret_bindings:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlatformWorkloadSecretBinding'
+        enum: []
+      topology:
+        signature:
+          $ref: '#/components/schemas/PlatformWorkloadTopology'
+        enum: []
+      workload_class:
+        signature:
+          type: string
+        enum:
+        - inference
+  PlatformWorkloadHealthCheck:
+    type: object
+    required:
+    - path
+    - port_name
+    - protocol
+    properties:
+      path:
+        signature:
+          type: string
+          pattern: ^/
+        enum: []
+      port_name:
+        signature:
+          type: string
+          minLength: 1
+        enum: []
+      protocol:
+        signature:
+          type: string
+        enum:
+        - http
+  PlatformWorkloadLifecycleRequest:
+    type: object
+    required:
+    - action
+    - idempotency_key
+    properties:
+      action:
+        signature:
+          type: string
+        enum:
+        - start
+        - stop
+        - restart
+      idempotency_key:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+  PlatformWorkloadLogEntry:
+    type: object
+    required:
+    - level
+    - message
+    - timestamp
+    properties:
+      container:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      level:
+        signature:
+          type: string
+        enum:
+        - debug
+        - info
+        - warn
+        - error
+      message:
+        signature:
+          type: string
+        enum: []
+      replica:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      stream:
+        signature:
+          type: string
+          nullable: true
+        enum:
+        - stdout
+        - stderr
+      timestamp:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+  PlatformWorkloadLogListResponse:
+    type: object
+    required:
+    - items
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlatformWorkloadLogEntry'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+  PlatformWorkloadMetadata:
+    type: object
+    required:
+    - owner_ref
+    properties:
+      labels:
+        signature:
+          type: object
+          additionalProperties:
+            type: string
+        enum: []
+      owner_ref:
+        signature:
+          type: string
+          minLength: 1
+        enum: []
+  PlatformWorkloadNetwork:
+    type: object
+    required:
+    - exposure
+    - ports
+    properties:
+      exposure:
+        signature:
+          type: string
+        enum:
+        - cluster_internal
+      ports:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlatformWorkloadPort'
+        enum: []
+  PlatformWorkloadPort:
+    type: object
+    required:
+    - name
+    - port
+    properties:
+      name:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 63
+        enum: []
+      port:
+        signature:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        enum: []
+  PlatformWorkloadResources:
+    type: object
+    required:
+    - cpu
+    - memory
+    properties:
+      accelerator:
+        signature:
+          $ref: '#/components/schemas/PlatformWorkloadAcceleratorResources'
+        enum: []
+      cpu:
+        signature:
+          type: string
+          minLength: 1
+        enum: []
+      memory:
+        signature:
+          type: string
+          minLength: 1
+        enum: []
+  PlatformWorkloadRole:
+    type: object
+    required:
+    - resources
+    properties:
+      count:
+        signature:
+          type: integer
+          minimum: 1
+        enum: []
+      resources:
+        signature:
+          $ref: '#/components/schemas/PlatformWorkloadResources'
+        enum: []
+  PlatformWorkloadScheduling:
+    type: object
+    required:
+    - gang
+    - queue_class
+    properties:
+      gang:
+        signature:
+          type: boolean
+        enum: []
+      queue_class:
+        signature:
+          type: string
+        enum:
+        - inference
+  PlatformWorkloadSecretBinding:
+    type: object
+    required:
+    - mount_path
+    - secret_ref
+    properties:
+      mount_path:
+        signature:
+          type: string
+          pattern: ^/
+        enum: []
+      secret_ref:
+        signature:
+          type: string
+          minLength: 1
+        enum: []
+  PlatformWorkloadTopology:
+    type: object
+    required:
+    - mode
+    - profile_id
+    - profile_version
+    properties:
+      leader:
+        signature:
+          $ref: '#/components/schemas/PlatformWorkloadRole'
+        enum: []
+      mode:
+        signature:
+          type: string
+        enum:
+        - single_node
+        - leader_worker
+      profile_id:
+        signature:
+          type: string
+          minLength: 1
+        enum: []
+      profile_version:
+        signature:
+          type: string
+          minLength: 1
+        enum: []
+      workers:
+        signature:
+          $ref: '#/components/schemas/PlatformWorkloadRole'
+        enum: []
+  PlatformWorkloadUpdateRequest:
+    type: object
+    required:
+    - idempotency_key
+    - replicas
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      replicas:
+        signature:
+          type: integer
+          minimum: 1
+        enum: []
   PutEmailSmtpConfigRequest:
     type: object
     required:
@@ -9837,6 +11194,198 @@ schemas:
           type: array
           items:
             type: object
+        enum: []
+  Quota:
+    type: object
+    required:
+    - items
+    - tenant_id
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuotaItem'
+        enum: []
+      tenant_id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+  QuotaCreateItem:
+    type: object
+    required:
+    - resource_type
+    properties:
+      resource_type:
+        signature:
+          type: string
+        enum: []
+      total:
+        signature:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        enum: []
+  QuotaCreateRequest:
+    type: object
+    required:
+    - items
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuotaCreateItem'
+        enum: []
+  QuotaDeleteResponse:
+    type: object
+    required:
+    - message
+    - tenant_id
+    properties:
+      message:
+        signature:
+          type: string
+        enum: []
+      tenant_id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+  QuotaItem:
+    type: object
+    required:
+    - reserved
+    - resource_type
+    - total
+    - used
+    properties:
+      display_name:
+        signature:
+          type: string
+        enum: []
+      is_discrete:
+        signature:
+          type: boolean
+        enum: []
+      reserved:
+        signature:
+          type: integer
+          format: int64
+        enum: []
+      resource_type:
+        signature:
+          type: string
+        enum: []
+      tightened:
+        signature:
+          type: boolean
+        enum: []
+      total:
+        signature:
+          type: integer
+          format: int64
+        enum: []
+      unit:
+        signature:
+          type: string
+        enum: []
+      used:
+        signature:
+          type: integer
+          format: int64
+        enum: []
+  QuotaListResult:
+    type: object
+    required:
+    - items
+    - total
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/Quota'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      total:
+        signature:
+          type: integer
+          minimum: 0
+        enum: []
+  QuotaMeta:
+    type: object
+    required:
+    - default_quota
+    - display_name
+    - is_discrete
+    - resource_type
+    - unit
+    properties:
+      default_quota:
+        signature:
+          type: integer
+          format: int64
+        enum: []
+      display_name:
+        signature:
+          type: string
+        enum: []
+      is_discrete:
+        signature:
+          type: boolean
+        enum: []
+      resource_type:
+        signature:
+          type: string
+        enum: []
+      unit:
+        signature:
+          type: string
+        enum: []
+  QuotaMetaListResponse:
+    type: object
+    required:
+    - items
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuotaMeta'
+        enum: []
+  QuotaUpdateItem:
+    type: object
+    required:
+    - resource_type
+    - total
+    properties:
+      resource_type:
+        signature:
+          type: string
+        enum: []
+      total:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+  QuotaUpdateRequest:
+    type: object
+    required:
+    - items
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuotaUpdateItem'
         enum: []
   RefreshAccessTokenRequest:
     type: object
@@ -10764,6 +12313,50 @@ schemas:
       source:
         signature:
           type: string
+        enum: []
+  ReservationPutRequest:
+    type: object
+    required:
+    - allocated_gpu_count
+    properties:
+      allocated_gpu_count:
+        signature:
+          type: integer
+          minimum: 0
+        enum: []
+  ReservationView:
+    type: object
+    required:
+    - allocated_gpu_count
+    - available
+    - reserved
+    - tenant_id
+    - used
+    properties:
+      allocated_gpu_count:
+        signature:
+          type: integer
+        enum: []
+      available:
+        signature:
+          type: integer
+        enum: []
+      reserved:
+        signature:
+          type: integer
+        enum: []
+      tenant_id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      tightened:
+        signature:
+          type: boolean
+        enum: []
+      used:
+        signature:
+          type: integer
         enum: []
   RevokeStatusResponse:
     type: object
@@ -12944,6 +14537,10 @@ schemas:
         signature:
           type: string
           nullable: true
+        enum: []
+      content:
+        signature:
+          type: string
         enum: []
       id:
         signature:
