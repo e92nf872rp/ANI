@@ -11,6 +11,18 @@
       "scope": "scope:quota:read"
     },
     {
+      "operationId": "getTenant",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}",
+      "scope": "scope:quota:read"
+    },
+    {
+      "operationId": "updateTenantPlan",
+      "method": "PUT",
+      "path": "/admin/tenants/{tenant_id}/plan",
+      "scope": "scope:quota:write"
+    },
+    {
       "operationId": "deleteTenantQuota",
       "method": "DELETE",
       "path": "/admin/tenants/{tenant_id}/quota",
@@ -1521,6 +1533,8 @@
     "StorageVolumeMountHistoryEntry",
     "StorageVolumeMountRequest",
     "StorageVolumeUnmountRequest",
+    "Tenant",
+    "TenantPlanUpdateRequest",
     "TokenPairResponse",
     "TokenUsageReport",
     "UpdateEmailRecipientRequest",
@@ -1670,6 +1684,7 @@
     "RESERVATION_EXCEEDS_QUOTA",
     "RESERVED_INSUFFICIENT",
     "TENANT_NOT_FOUND",
+    "TENANT_PLAN_NOT_FOUND",
     "UNAUTHORIZED",
     "UNAVAILABLE",
     "VALIDATION_FAILED",

@@ -1,19 +1,24 @@
 -- ANI Platform · Migration 20260810_002
 -- Description: 配额套餐管理表 — tenant_plans（套餐主表）+ plan_quota_limits（套餐维度限额）
 --              + tenants.plan_id（租户当前关联套餐）
--- Depends on: 20260501_001_init_schema.sql (tenants), 20260810_001_resource_quota.sql (resource_quota_meta)
+-- Depends on: 20260501_001_init_schema.sql (tenants), 20260810_001_resource_quota.sql
+--             （starter 套餐 seed 的 resource_type 取值对齐 resource_quota_meta 初始维度；
+--              本迁移不对 resource_quota_meta 建外键）
 -- Rationale:
 --   BOSS 配额套餐管理：
 --     - tenant_plans       套餐主表（code/name/description/status: draft|active|disabled）。
 --                          is_deleted/deleted_at 支撑软删除；code 唯一约束仅对未删除套餐生效
 --                          （partial unique index WHERE is_deleted = FALSE），软删除后 code 可复用。
---     - plan_quota_limits  套餐各维度配额上限（total NULL = 用 resource_quota_meta.default_quota）。
---                          外键 → tenant_plans (ON DELETE CASCADE) 与 resource_quota_meta。
+--     - plan_quota_limits  套餐各维度配额上限（total NULL = 用 Core resource_quota_meta.default_quota 兜底）。
+--                          外键仅 → tenant_plans (ON DELETE CASCADE)。
+--                          resource_type 不建外键（Core resource_quota_meta 与 BOSS 表跨层；
+--                          合法性由 tenant-service 经 Core ListQuotaMeta / SDK 在应用层校验）。
 --     - tenants.plan_id    租户当前关联套餐，ON DELETE RESTRICT（有租户关联的套餐不可物理删除，
 --                          删除走 tenant_plans 软删除）。
 --   tenant_plans / plan_quota_limits 为平台治理数据（套餐管理）；应用层 RBAC 限制为
 --   platform-admin，同时 GRANT 表级读写给 ani_app_user（tenant-service 默认 DB 用户）。
---   依赖 20260810_001_resource_quota.sql 先执行：plan_quota_limits 外键引用 resource_quota_meta（本文件序号 002 > 001，顺序天然满足）。
+--   依赖 20260810_001_resource_quota.sql 先执行（本文件序号 002 > 001，顺序天然满足），
+--   以便 starter seed 与 Core 维度命名一致；非因 FK 引用。
 
 BEGIN;
 
@@ -42,8 +47,8 @@ CREATE UNIQUE INDEX idx_tenant_plans_code_active
 -- ===========================================================================
 CREATE TABLE plan_quota_limits (
     plan_id        UUID        NOT NULL REFERENCES tenant_plans(id) ON DELETE CASCADE,
-    resource_type  TEXT        NOT NULL REFERENCES resource_quota_meta(resource_type),
-    total          BIGINT,             -- NULL = 用 resource_quota_meta.default_quota
+    resource_type  TEXT        NOT NULL,  -- 不建 FK → resource_quota_meta；应用层经 Core 校验
+    total          BIGINT,             -- NULL = 用 resource_quota_meta.default_quota（经 Core API 兜底）
     CHECK (total IS NULL OR total >= 0),
     created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (plan_id, resource_type)

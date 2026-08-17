@@ -70,7 +70,7 @@ type TenantPlan struct {
 // PlanQuotaLimit 表示套餐某配额维度的限额原始行（对应 plan_quota_limits 表一行）。
 type PlanQuotaLimit struct {
 	PlanID       uuid.UUID // 所属套餐
-	ResourceType string    // 配额维度标识（外键 → resource_quota_meta.resource_type）
+	ResourceType string    // 配额维度标识（语义对齐 Core resource_quota_meta；无 DB 外键，由 service 经 ListQuotaMeta 校验）
 	Total        *int64    // 限额值；历史行可能为 NULL，读写路径用 Core default_quota 兜底
 }
 

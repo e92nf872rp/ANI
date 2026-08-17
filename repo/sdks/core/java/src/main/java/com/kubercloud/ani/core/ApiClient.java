@@ -27,6 +27,8 @@ public final class ApiClient {
     public static final String SERVER_URL = "https://{host}/api/v1";
     public static final List<String> OPERATIONS = Collections.unmodifiableList(Arrays.asList(
         "listQuotaMeta",
+        "getTenant",
+        "updateTenantPlan",
         "deleteTenantQuota",
         "getTenantQuota",
         "createTenantQuota",
@@ -237,6 +239,8 @@ public final class ApiClient {
     ));
     public static final List<String> PATHS = Collections.unmodifiableList(Arrays.asList(
         "GET /admin/quota-meta",
+        "GET /admin/tenants/{tenant_id}",
+        "PUT /admin/tenants/{tenant_id}/plan",
         "DELETE /admin/tenants/{tenant_id}/quota",
         "GET /admin/tenants/{tenant_id}/quota",
         "POST /admin/tenants/{tenant_id}/quota",
@@ -713,6 +717,8 @@ public final class ApiClient {
         "StorageVolumeMountHistoryEntry",
         "StorageVolumeMountRequest",
         "StorageVolumeUnmountRequest",
+        "Tenant",
+        "TenantPlanUpdateRequest",
         "TokenPairResponse",
         "TokenUsageReport",
         "UpdateEmailRecipientRequest",
@@ -862,6 +868,7 @@ public final class ApiClient {
         "RESERVATION_EXCEEDS_QUOTA",
         "RESERVED_INSUFFICIENT",
         "TENANT_NOT_FOUND",
+        "TENANT_PLAN_NOT_FOUND",
         "UNAUTHORIZED",
         "UNAVAILABLE",
         "VALIDATION_FAILED",

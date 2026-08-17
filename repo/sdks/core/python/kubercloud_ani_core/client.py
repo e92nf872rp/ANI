@@ -9,6 +9,8 @@ VERSION = "1.0.0"
 SERVER_URL = "https://{host}/api/v1"
 OPERATIONS = [
     "listQuotaMeta",
+    "getTenant",
+    "updateTenantPlan",
     "deleteTenantQuota",
     "getTenantQuota",
     "createTenantQuota",
@@ -219,6 +221,8 @@ OPERATIONS = [
 ]
 PATHS = [
     "GET /admin/quota-meta",
+    "GET /admin/tenants/{tenant_id}",
+    "PUT /admin/tenants/{tenant_id}/plan",
     "DELETE /admin/tenants/{tenant_id}/quota",
     "GET /admin/tenants/{tenant_id}/quota",
     "POST /admin/tenants/{tenant_id}/quota",
@@ -695,6 +699,8 @@ SCHEMAS = [
     "StorageVolumeMountHistoryEntry",
     "StorageVolumeMountRequest",
     "StorageVolumeUnmountRequest",
+    "Tenant",
+    "TenantPlanUpdateRequest",
     "TokenPairResponse",
     "TokenUsageReport",
     "UpdateEmailRecipientRequest",
@@ -844,6 +850,7 @@ ERROR_CODES = [
     "RESERVATION_EXCEEDS_QUOTA",
     "RESERVED_INSUFFICIENT",
     "TENANT_NOT_FOUND",
+    "TENANT_PLAN_NOT_FOUND",
     "UNAUTHORIZED",
     "UNAVAILABLE",
     "VALIDATION_FAILED",

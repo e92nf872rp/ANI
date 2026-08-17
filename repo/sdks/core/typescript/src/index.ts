@@ -5,6 +5,8 @@ export const version = "1.0.0" as const;
 export const serverURL = "https://{host}/api/v1" as const;
 export const operations = [
   "listQuotaMeta",
+  "getTenant",
+  "updateTenantPlan",
   "deleteTenantQuota",
   "getTenantQuota",
   "createTenantQuota",
@@ -215,6 +217,8 @@ export const operations = [
 ] as const;
 export const paths = [
   "GET /admin/quota-meta",
+  "GET /admin/tenants/{tenant_id}",
+  "PUT /admin/tenants/{tenant_id}/plan",
   "DELETE /admin/tenants/{tenant_id}/quota",
   "GET /admin/tenants/{tenant_id}/quota",
   "POST /admin/tenants/{tenant_id}/quota",
@@ -691,6 +695,8 @@ export const schemas = [
   "StorageVolumeMountHistoryEntry",
   "StorageVolumeMountRequest",
   "StorageVolumeUnmountRequest",
+  "Tenant",
+  "TenantPlanUpdateRequest",
   "TokenPairResponse",
   "TokenUsageReport",
   "UpdateEmailRecipientRequest",
@@ -840,6 +846,7 @@ export const errorCodes = [
   "RESERVATION_EXCEEDS_QUOTA",
   "RESERVED_INSUFFICIENT",
   "TENANT_NOT_FOUND",
+  "TENANT_PLAN_NOT_FOUND",
   "UNAUTHORIZED",
   "UNAVAILABLE",
   "VALIDATION_FAILED",

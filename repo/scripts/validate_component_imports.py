@@ -33,6 +33,7 @@ COUPLING_LEVELS = {
 ALLOWED_PATH_PARTS = (
     "/pkg/adapters/",
     "/pkg/bootstrap/",
+    "/services/pkg/bootstrap/",
 )
 
 IMPORT_RE = re.compile(r'"([^"]+)"')

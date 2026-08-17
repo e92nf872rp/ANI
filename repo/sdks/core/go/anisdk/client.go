@@ -20,6 +20,8 @@ const ServerURL = "https://{host}/api/v1"
 
 var Operations = []string{
 	"listQuotaMeta",
+	"getTenant",
+	"updateTenantPlan",
 	"deleteTenantQuota",
 	"getTenantQuota",
 	"createTenantQuota",
@@ -230,6 +232,8 @@ var Operations = []string{
 }
 var Paths = []string{
 	"GET /admin/quota-meta",
+	"GET /admin/tenants/{tenant_id}",
+	"PUT /admin/tenants/{tenant_id}/plan",
 	"DELETE /admin/tenants/{tenant_id}/quota",
 	"GET /admin/tenants/{tenant_id}/quota",
 	"POST /admin/tenants/{tenant_id}/quota",
@@ -706,6 +710,8 @@ var Schemas = []string{
 	"StorageVolumeMountHistoryEntry",
 	"StorageVolumeMountRequest",
 	"StorageVolumeUnmountRequest",
+	"Tenant",
+	"TenantPlanUpdateRequest",
 	"TokenPairResponse",
 	"TokenUsageReport",
 	"UpdateEmailRecipientRequest",
@@ -855,6 +861,7 @@ var ErrorCodes = []string{
 	"RESERVATION_EXCEEDS_QUOTA",
 	"RESERVED_INSUFFICIENT",
 	"TENANT_NOT_FOUND",
+	"TENANT_PLAN_NOT_FOUND",
 	"UNAUTHORIZED",
 	"UNAVAILABLE",
 	"VALIDATION_FAILED",

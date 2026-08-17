@@ -14,7 +14,7 @@ import (
 //   PUT    /api/v1/admin/tenants/{tenant_id}/quota
 //   DELETE /api/v1/admin/tenants/{tenant_id}/quota
 // tenant-service 仅作为调用方访问此 Core API，不重复实现配额逻辑。
-// 实现：services/tenant-service/internal/repo/adapters/core。
+// 实现：services/tenant-service/internal/repo/adapters/core（封装 Core Go SDK anisdk.Client）。
 
 // CoreQuotaItem 表示下发给 Core 的单个配额维度项（请求侧）。
 type CoreQuotaItem struct {

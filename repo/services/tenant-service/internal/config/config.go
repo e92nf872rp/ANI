@@ -4,15 +4,13 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/kubercloud/ani/pkg/bootstrap"
+	"github.com/kubercloud/ani/services/pkg/bootstrap"
 )
 
 // Load reads tenant-service configuration from environment variables.
 func Load() bootstrap.Config {
 	return bootstrap.Config{
 		DatabaseURL: env("DATABASE_URL", "postgres://ani_app_user:ani_dev_password@127.0.0.1:5432/ani?sslmode=disable"),
-		NATSURL:     env("NATS_URL", "nats://127.0.0.1:4222"),
-		RedisURL:    env("REDIS_URL", "redis://:ani_dev_password@127.0.0.1:6379/0"),
 		GRPCPort:    envInt("GRPC_PORT", 9105),
 		HealthPort:  envInt("HEALTH_PORT", 9205),
 		ServiceName: "tenant-service",

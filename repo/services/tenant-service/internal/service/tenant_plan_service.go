@@ -38,7 +38,7 @@ func NewTenantPlanService(plans ports.TenantPlanStore, audit ports.TenantPlanAud
 	return &TenantPlanService{plans: plans, audit: audit, core: core}
 }
 
-// Register 向 gRPC Server 注册本服务（由 bootstrap.RunGRPC 回调）。
+// Register 向 gRPC Server 注册本服务（由 services/pkg/bootstrap.RunGRPC 回调）。
 func (s *TenantPlanService) Register(server *grpc.Server) {
 	tenantv1.RegisterTenantPlanServiceServer(server, s)
 }
