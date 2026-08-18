@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1/svc</code></dd></div>
-          <div><dt>Operations</dt><dd>94</dd></div>
-          <div><dt>Schemas</dt><dd>96</dd></div>
+          <div><dt>Operations</dt><dd>95</dd></div>
+          <div><dt>Schemas</dt><dd>97</dd></div>
         </dl>
       </section>
 
@@ -848,6 +848,14 @@
           <td>200, 401, 403, 404</td>
         </tr>
         <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenants/{tenantId}/admins/{userId}/changeable-roles</code></td>
+          <td><code>getChangeableRoles</code></td>
+          <td>查询可变更角色选项（排除 tenant-owner）（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
           <td><span class="method method-post">POST</span></td>
           <td><code>/tenants/{tenantId}/admins/{userId}/disable</code></td>
           <td><code>disableTenantAdmin</code></td>
@@ -926,6 +934,7 @@
         <li><code>BindPlanRequest</code></li>
         <li><code>BoundTenant</code></li>
         <li><code>BoundTenantsResponse</code></li>
+        <li><code>ChangeableRolesResponse</code></li>
         <li><code>CreateGpuContainerRequest</code></li>
         <li><code>CreateInferenceEndpointRequest</code></li>
         <li><code>CreateInferenceServiceRequest</code></li>

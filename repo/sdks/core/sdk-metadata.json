@@ -29,6 +29,12 @@
       "scope": "scope:quota:read"
     },
     {
+      "operationId": "listTenantUsers",
+      "method": "GET",
+      "path": "/admin/tenant-users",
+      "scope": "scope:users:read"
+    },
+    {
       "operationId": "getTenant",
       "method": "GET",
       "path": "/admin/tenants/{tenant_id}",
@@ -75,6 +81,60 @@
       "method": "PUT",
       "path": "/admin/tenants/{tenant_id}/reservations",
       "scope": "scope:quota:write"
+    },
+    {
+      "operationId": "transferCoreTenantOwnership",
+      "method": "POST",
+      "path": "/admin/tenants/{tenant_id}/transfer-ownership",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "lookupTenantUser",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/user-lookup",
+      "scope": "scope:users:read"
+    },
+    {
+      "operationId": "deleteTenantUser",
+      "method": "DELETE",
+      "path": "/admin/tenants/{tenant_id}/users/{user_id}",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "getTenantUser",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/users/{user_id}",
+      "scope": "scope:users:read"
+    },
+    {
+      "operationId": "getTenantUserChangeableRoles",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/users/{user_id}/changeable-roles",
+      "scope": "scope:users:read"
+    },
+    {
+      "operationId": "resetTenantUserPassword",
+      "method": "POST",
+      "path": "/admin/tenants/{tenant_id}/users/{user_id}/reset-password",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "getTenantUserRole",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/users/{user_id}/role",
+      "scope": "scope:users:read"
+    },
+    {
+      "operationId": "updateTenantUserRole",
+      "method": "PUT",
+      "path": "/admin/tenants/{tenant_id}/users/{user_id}/role",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "updateTenantUserStatus",
+      "method": "POST",
+      "path": "/admin/tenants/{tenant_id}/users/{user_id}/status",
+      "scope": "scope:users:write"
     },
     {
       "operationId": "listAPIKeys",
@@ -1292,6 +1352,8 @@
     "BucketObjectPresignedURLRequest",
     "BucketObjectUploadRequest",
     "BucketPrefixCreateRequest",
+    "ChangeableRoleOption",
+    "ChangeableRolesResponse",
     "CloneSandboxCheckpointRequest",
     "CompleteOIDCLoginRequest",
     "CoreDevProfileInfo",
@@ -1557,11 +1619,20 @@
     "TenantPlanUpdateRequest",
     "TenantSummary",
     "TenantSummaryList",
+    "TenantUser",
+    "TenantUserListResponse",
+    "TenantUserPermissions",
     "TokenPairResponse",
     "TokenUsageReport",
     "UpdateEmailRecipientRequest",
     "UpdateNetworkSecurityGroupRuleRequest",
     "UpdateObservabilityAlertRuleRequest",
+    "UserMutationResult",
+    "UserResetPasswordRequest",
+    "UserRoleUpdateRequest",
+    "UserStatusUpdateRequest",
+    "UserTenantRef",
+    "UserTransferOwnershipRequest",
     "VectorStore",
     "VectorStoreDeletePrecheck",
     "VectorStoreDocumentDeleteResponse",
@@ -1646,6 +1717,7 @@
     "unmountStorageVolume"
   ],
   "cursorPaginationOperations": [
+    "listTenantUsers",
     "listStorageBuckets",
     "listBucketObjects",
     "listEncryptionKeys",
@@ -1695,8 +1767,10 @@
     "GPU_TYPE_NOT_IN_NODES",
     "INTERNAL_ERROR",
     "INVALID_FILTER",
+    "LAST_TENANT_OWNER",
     "NOT_FOUND",
     "NOT_IMPLEMENTED",
+    "PASSWORD_SAME_AS_OLD",
     "PRECONDITION_FAILED",
     "QUOTA_ALREADY_EXISTS",
     "QUOTA_EXCEEDED",
@@ -1705,10 +1779,15 @@
     "RATE_LIMIT_EXCEEDED",
     "RESERVATION_EXCEEDS_QUOTA",
     "RESERVED_INSUFFICIENT",
+    "ROLE_CHANGE_INVALID",
     "TENANT_NOT_FOUND",
+    "TENANT_OWNER_ROLE_LOCKED",
     "TENANT_PLAN_NOT_FOUND",
+    "TRANSFER_TARGET_INVALID",
     "UNAUTHORIZED",
     "UNAVAILABLE",
+    "USER_ALREADY_TENANT_ADMIN",
+    "USER_NOT_FOUND",
     "VALIDATION_FAILED",
     "VECTOR_STORE_NOT_FOUND"
   ]
