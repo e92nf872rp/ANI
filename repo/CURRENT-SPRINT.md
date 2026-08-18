@@ -205,6 +205,7 @@ go test -tags=integration ./services/task-service/internal/taskconsumer/...
 | 补充批次1 | v1.yaml 审核意见回添（改动 3/4 契约修正，2026-08-10） | ✅ 已完成 | `development-records/quota-service.md`；改动 4 GET 404 + 改动 3 POST 409；45 个 quota 单测 PASS |
 | 补充批次2 | `feat/quota-service-tcc` 审核意见整改（4 处，2026-08-10） | ✅ 已完成 | `development-records/quota-service.md`；幂等 header 改名 `Idempotency-Key`（`03d5abe`）、`CreateTenantQuota` 部分成功语义（`518b6a5`，推翻批次1 的 409 中断）、`writeQuotaError` 补 `ErrInvalid → 400`（`d00ddb7`）、Confirm/Cancel/Release 补 tx_id 存在性校验 + `ErrReservationNotFound`（`1d17218`）；三处 quota 单测 + Gateway 单测 + `make validate-architecture` + `git diff --check` 全通过 |
 | 补充批次3 | TryTx / TryManyTx 新增外部事务变体（`feat/quota-service-tcc-v2`，2026-08-12） | ✅ 已完成 | `development-records/quota-service.md` 补充批次；`QuotaService` interface 新增 `TryTx` / `TryManyTx`（接收外部 tx，复用 `tryInTx`，零新增 SQL）；9 单元测试 + 7 集成测试（连真实 PG，双角色 RLS 验证）全通过 |
+| 补充批次4 | `UpsertTenantQuota` + Core quota upsert 端点（`feat/quota-service-v3`，2026-08-18） | ✅ 已完成 | `development-records/quota-service.md` 补充批次；新增 `PUT /admin/tenants/{tenant_id}/quota/upsert`、`QuotaAdminService.UpsertTenantQuota`、PG `ON CONFLICT DO UPDATE + GREATEST` 原子 upsert、`ErrQuotaUpdateUncertain → 511`；quota 单测 + integration build tag 编译 + Gateway 映射测试 + OpenAPI YAML + architecture + diff check 通过 |
 
 验收命令：
 

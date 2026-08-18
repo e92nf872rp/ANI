@@ -54,7 +54,7 @@ func (s *MetadataStore) WithPlatformTx(ctx context.Context, fn func(context.Cont
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("metadata platform tx commit: %w", err)
+		return fmt.Errorf("%w: %v", ports.ErrMetadataPlatformTxCommit, err)
 	}
 	return nil
 }

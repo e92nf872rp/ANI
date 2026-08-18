@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -311,6 +313,194 @@ func TestPostgresQuotaAdminUpdateTenantQuotaEmptyItems(t *testing.T) {
 	_, err := q.UpdateTenantQuota(context.Background(), testTenantID, nil)
 	if err != ports.ErrInvalid {
 		t.Fatalf("UpdateTenantQuota() error = %v, want ErrInvalid", err)
+	}
+}
+
+// TestPostgresQuotaAdminUpsertTenantQuotaSuccess 验证 UpsertTenantQuota 批量成功：
+// 已有维度走 ON CONFLICT DO UPDATE，新维度走 INSERT，total=0 取 default_quota。
+func TestPostgresQuotaAdminUpsertTenantQuotaSuccess(t *testing.T) {
+	tx := &quotaFakeTx{}
+	now := time.Unix(100, 0)
+	tx.enqueueRows(
+		tenantExistsRow(true),
+		adminMetaRow(true, int64(100)),
+		adminMetaRow(true, int64(50)),
+	)
+	tx.enqueueQuery(&quotaFakeRows{rows: []quotaFakeRow{
+		adminInfoRow(testTenantID, string(ports.QuotaCPUCore), 200, 0, 0, "核", "CPU 核数", false, now),
+		adminInfoRow(testTenantID, string(ports.QuotaGPUCount), 100, 0, 0, "张", "GPU 数量", true, now),
+	}})
+	q := NewPostgresQuota(&quotaFakeStore{tx: tx})
+
+	infos, err := q.UpsertTenantQuota(context.Background(), testTenantID, []ports.QuotaItemInput{
+		{ResourceType: ports.QuotaGPUCount, Total: 0},
+		{ResourceType: ports.QuotaCPUCore, Total: 200},
+	})
+	if err != nil {
+		t.Fatalf("UpsertTenantQuota() error = %v", err)
+	}
+	if len(infos) != 2 {
+		t.Fatalf("UpsertTenantQuota() len = %d, want 2", len(infos))
+	}
+	for _, info := range infos {
+		if info.Tightened {
+			t.Fatalf("UpsertTenantQuota() success path tightened 应为 false: %+v", info)
+		}
+	}
+	if !hasExec(tx, "INSERT INTO resource_quota") || !hasExec(tx, "ON CONFLICT") || !hasExec(tx, "GREATEST") {
+		t.Fatalf("UpsertTenantQuota() 应使用 INSERT ... ON CONFLICT DO UPDATE + GREATEST，execs=%s", joinExecs(tx))
+	}
+}
+
+func TestPostgresQuotaAdminUpsertTenantQuotaTightened(t *testing.T) {
+	tx := &quotaFakeTx{}
+	now := time.Unix(100, 0)
+	tx.enqueueRows(
+		tenantExistsRow(true),
+		adminMetaRow(true, int64(100)),
+	)
+	tx.enqueueQuery(&quotaFakeRows{rows: []quotaFakeRow{
+		adminInfoRow(testTenantID, string(ports.QuotaGPUCount), 150, 0, 150, "张", "GPU 数量", true, now),
+	}})
+	q := NewPostgresQuota(&quotaFakeStore{tx: tx})
+
+	infos, err := q.UpsertTenantQuota(context.Background(), testTenantID, []ports.QuotaItemInput{
+		{ResourceType: ports.QuotaGPUCount, Total: 100},
+	})
+	if err != nil {
+		t.Fatalf("UpsertTenantQuota() error = %v", err)
+	}
+	if len(infos) != 1 {
+		t.Fatalf("UpsertTenantQuota() len = %d, want 1", len(infos))
+	}
+	if !infos[0].Tightened {
+		t.Fatalf("UpsertTenantQuota() tightened 应为 true（缩容被 clamp）")
+	}
+	if infos[0].Total != 150 {
+		t.Fatalf("UpsertTenantQuota() total = %d, want 150", infos[0].Total)
+	}
+}
+
+func TestPostgresQuotaAdminUpsertTenantQuotaInvalidInput(t *testing.T) {
+	cases := []struct {
+		name  string
+		items []ports.QuotaItemInput
+	}{
+		{name: "empty", items: nil},
+		{name: "duplicate resource type", items: []ports.QuotaItemInput{
+			{ResourceType: ports.QuotaGPUCount, Total: 100},
+			{ResourceType: ports.QuotaGPUCount, Total: 200},
+		}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			tx := &quotaFakeTx{}
+			_, err := NewPostgresQuota(&quotaFakeStore{tx: tx}).UpsertTenantQuota(context.Background(), testTenantID, test.items)
+			if !errors.Is(err, ports.ErrInvalid) {
+				t.Fatalf("UpsertTenantQuota() error = %v, want ErrInvalid", err)
+			}
+			if len(tx.execSQLs) != 0 {
+				t.Fatalf("UpsertTenantQuota() invalid input 不应进入事务执行 SQL，execs=%s", joinExecs(tx))
+			}
+		})
+	}
+}
+
+func TestPostgresQuotaAdminUpsertTenantQuotaNegativeTotal(t *testing.T) {
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(tenantExistsRow(true))
+	store := &quotaFakeStore{tx: tx}
+
+	_, err := NewPostgresQuota(store).UpsertTenantQuota(context.Background(), testTenantID, []ports.QuotaItemInput{
+		{ResourceType: ports.QuotaGPUCount, Total: -1},
+	})
+	if !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("UpsertTenantQuota() error = %v, want ErrInvalid", err)
+	}
+	if !store.platformRolledBack {
+		t.Fatalf("UpsertTenantQuota() 事务内校验失败应回滚")
+	}
+	if len(tx.execSQLs) != 0 {
+		t.Fatalf("UpsertTenantQuota() negative total 不应执行写 SQL，execs=%s", joinExecs(tx))
+	}
+}
+
+func TestPostgresQuotaAdminUpsertTenantQuotaResourceNotRegisteredRollback(t *testing.T) {
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(
+		tenantExistsRow(true),
+		adminMetaRow(true, int64(100)),
+		quotaFakeRow{err: ports.ErrQuotaResourceNotRegistered},
+	)
+	insertCnt := 0
+	tx.execFn = func(sql string, _ []any) int64 {
+		if strings.Contains(sql, "INSERT INTO resource_quota") {
+			insertCnt++
+		}
+		return 1
+	}
+	store := &quotaFakeStore{tx: tx}
+
+	_, err := NewPostgresQuota(store).UpsertTenantQuota(context.Background(), testTenantID, []ports.QuotaItemInput{
+		{ResourceType: ports.QuotaGPUCount, Total: 100},
+		{ResourceType: ports.QuotaCPUCore, Total: 100},
+	})
+	if !errors.Is(err, ports.ErrQuotaResourceNotRegistered) {
+		t.Fatalf("UpsertTenantQuota() error = %v, want ErrQuotaResourceNotRegistered", err)
+	}
+	if !store.platformRolledBack {
+		t.Fatalf("UpsertTenantQuota() 任一维度失败应回滚整批")
+	}
+	if insertCnt != 1 {
+		t.Fatalf("UpsertTenantQuota() 第二维度 meta 失败前只应写入一次，insertCnt=%d", insertCnt)
+	}
+}
+
+func TestPostgresQuotaAdminUpsertTenantQuotaCommitUncertain(t *testing.T) {
+	tx := &quotaFakeTx{}
+	now := time.Unix(100, 0)
+	tx.enqueueRows(
+		tenantExistsRow(true),
+		adminMetaRow(true, int64(100)),
+	)
+	tx.enqueueQuery(&quotaFakeRows{rows: []quotaFakeRow{
+		adminInfoRow(testTenantID, string(ports.QuotaGPUCount), 100, 0, 0, "张", "GPU 数量", true, now),
+	}})
+	store := &quotaFakeStore{
+		tx:          tx,
+		platformErr: fmt.Errorf("%w: connection lost", ports.ErrMetadataPlatformTxCommit),
+	}
+
+	_, err := NewPostgresQuota(store).UpsertTenantQuota(context.Background(), testTenantID, []ports.QuotaItemInput{
+		{ResourceType: ports.QuotaGPUCount, Total: 100},
+	})
+	if !errors.Is(err, ports.ErrQuotaUpdateUncertain) {
+		t.Fatalf("UpsertTenantQuota() error = %v, want ErrQuotaUpdateUncertain", err)
+	}
+	if errors.Is(err, ports.ErrMetadataPlatformTxCommit) {
+		t.Fatalf("UpsertTenantQuota() 不应向调用方暴露 metadata commit 哨兵")
+	}
+}
+
+func TestPostgresQuotaAdminUpsertTenantQuotaInnerFailureNotUncertain(t *testing.T) {
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(
+		tenantExistsRow(true),
+		quotaFakeRow{err: ports.ErrQuotaResourceNotRegistered},
+	)
+	store := &quotaFakeStore{
+		tx:          tx,
+		platformErr: fmt.Errorf("%w: connection lost", ports.ErrMetadataPlatformTxCommit),
+	}
+
+	_, err := NewPostgresQuota(store).UpsertTenantQuota(context.Background(), testTenantID, []ports.QuotaItemInput{
+		{ResourceType: ports.QuotaGPUCount, Total: 100},
+	})
+	if !errors.Is(err, ports.ErrQuotaResourceNotRegistered) {
+		t.Fatalf("UpsertTenantQuota() error = %v, want ErrQuotaResourceNotRegistered", err)
+	}
+	if errors.Is(err, ports.ErrQuotaUpdateUncertain) {
+		t.Fatalf("UpsertTenantQuota() 事务内失败不应误报 ErrQuotaUpdateUncertain")
 	}
 }
 
