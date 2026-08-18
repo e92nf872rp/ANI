@@ -82,6 +82,7 @@ class InferenceServiceContractTest(unittest.TestCase):
             "INSUFFICIENT_CAPACITY",
             "UNSUPPORTED_TOPOLOGY",
             "INVALID_STATE_TRANSITION",
+            "IMAGE_UNAVAILABLE",
             "FEATURE_NOT_AVAILABLE",
             "RUNTIME_ERROR",
             "DEPENDENCY_UNAVAILABLE",
@@ -96,19 +97,30 @@ class InferenceServiceContractTest(unittest.TestCase):
             gen_sdk_alpha.collect_error_codes(self.spec),
         )
 
+    def test_create_accepts_registry_or_manual_image(self) -> None:
+        schema = self.spec["components"]["schemas"]["CreateInferenceServiceRequest"]
+        self.assertEqual(set(schema["required"]), {"idempotency_key", "name", "model"})
+        for field in ("image_id", "image_ref"):
+            self.assertEqual(schema["properties"][field]["type"], "string")
+            self.assertEqual(schema["properties"][field]["minLength"], 1)
+            self.assertNotIn(field, schema["required"])
+        resource = self.spec["components"]["schemas"]["InferenceService"]["properties"]
+        self.assertIn("image_id", resource)
+        self.assertIn("image_ref", resource)
+
     def test_legacy_optional_create_fields_remain_additive(self) -> None:
         properties = self.spec["components"]["schemas"]["CreateInferenceServiceRequest"]["properties"]
         for field in ("name", "model"):
             self.assertNotIn("minLength", properties[field], f"{field} must not tighten the existing v1 input")
         for field in ("replicas", "gpu_count_per_pod", "max_concurrency"):
             self.assertNotIn("minimum", properties[field], f"{field} must not tighten the existing v1 input")
-        for field in ("replicas", "placement_mode", "gpu_count_per_pod", "max_concurrency"):
+        for field in ("replicas", "placement_mode", "gpu_count_per_pod", "max_concurrency", "image_id", "image_ref"):
             self.assertNotIn("default", properties[field], f"{field} must remain optional in generated clients")
 
     def test_generated_types_keep_legacy_create_fields_optional(self) -> None:
         generated = (ROOT / "frontends/console/src/api/schema.d.ts").read_text(encoding="utf-8")
         block = generated.split("CreateInferenceServiceRequest: {", 1)[1].split("\n        };", 1)[0]
-        for field in ("replicas", "placement_mode", "gpu_count_per_pod", "max_concurrency"):
+        for field in ("replicas", "placement_mode", "gpu_count_per_pod", "max_concurrency", "image_id", "image_ref"):
             self.assertIn(f"{field}?:", block)
 
     def test_authenticated_reads_declare_auth_failures(self) -> None:

@@ -26,6 +26,7 @@ STABLE_INFERENCE_ERROR_CODES = {
     "INSUFFICIENT_CAPACITY",
     "UNSUPPORTED_TOPOLOGY",
     "INVALID_STATE_TRANSITION",
+    "IMAGE_UNAVAILABLE",
 }
 REQUIRED_OPERATIONS = {
     ("/inference-services", "get"): "listInferenceServices",
@@ -258,7 +259,13 @@ def validate(spec: dict[str, Any]) -> tuple[str, ...]:
     if required_create != {"idempotency_key", "name", "model"}:
         errors.append("CreateInferenceServiceRequest must preserve required idempotency_key, name, and model")
     create_properties = create_request.get("properties") or {}
-    for field in ("model_version_id", "served_model_name", "resources", "placement_mode"):
+    for field in ("image_id", "image_ref"):
+        field_spec = create_properties.get(field) or {}
+        if field_spec.get("type") != "string" or field_spec.get("minLength") != 1:
+            errors.append(f"CreateInferenceServiceRequest.{field} must be a non-empty optional string")
+        if field in required_create:
+            errors.append(f"CreateInferenceServiceRequest.{field} must remain optional so registry or manual input both work")
+    for field in ("model_version_id", "served_model_name", "resources", "placement_mode", "image_id", "image_ref"):
         if field not in create_properties:
             errors.append(f"CreateInferenceServiceRequest missing {field}")
     for field in ("gpu_type", "gpu_count_per_pod", "max_concurrency"):
@@ -270,7 +277,7 @@ def validate(spec: dict[str, Any]) -> tuple[str, ...]:
     for field in ("replicas", "gpu_count_per_pod", "max_concurrency"):
         if "minimum" in (create_properties.get(field) or {}):
             errors.append(f"CreateInferenceServiceRequest.{field} must not tighten v1 minimum")
-    for field in ("replicas", "placement_mode", "gpu_count_per_pod", "max_concurrency"):
+    for field in ("replicas", "placement_mode", "gpu_count_per_pod", "max_concurrency", "image_id", "image_ref"):
         if "default" in (create_properties.get(field) or {}):
             errors.append(f"CreateInferenceServiceRequest.{field} must remain optional in generated clients")
 
@@ -292,6 +299,8 @@ def validate(spec: dict[str, Any]) -> tuple[str, ...]:
     resource_properties = (schemas.get("InferenceService") or {}).get("properties") or {}
     required_response_fields = {
         "model_version_id",
+        "image_id",
+        "image_ref",
         "served_model_name",
         "ready_replicas",
         "resources",

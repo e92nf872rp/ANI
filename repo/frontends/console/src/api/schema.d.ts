@@ -1331,6 +1331,10 @@ export interface components {
              * @description 实际部署的不可变模型版本
              */
             model_version_id?: string;
+            /** @description 创建时从镜像仓库选定的 Registry 镜像 ID；手填 image_ref 时可为缺省 */
+            image_id?: string;
+            /** @description 创建时解析并冻结的 digest 引用；只读 */
+            image_ref?: string | null;
             /** @description 集群内 OpenAI-compatible 请求使用的 model 值，不代表公网路由 */
             served_model_name?: string;
             /** @default 1 */
@@ -1399,6 +1403,10 @@ export interface components {
             memory: string;
             accelerator?: components["schemas"]["InferenceServiceAccelerator"];
         };
+        /**
+         * @description 镜像来源二选一，也可同时传：image_id 从镜像仓库选择，image_ref 由用户直接输入。
+         *     同时传入时优先 image_id。创建前固定 digest；两者都缺时由实现返回 400 INVALID_ARGUMENT。
+         */
         CreateInferenceServiceRequest: {
             /** Format: uuid */
             idempotency_key: string;
@@ -1410,6 +1418,10 @@ export interface components {
              * @description 与 model 指向同一不可变版本
              */
             model_version_id?: string;
+            /** @description 镜像仓库 Registry 镜像 ID；与 image_ref 至少填一个，同时传入时优先 image_id。创建前固定 digest。 */
+            image_id?: string;
+            /** @description 用户直接输入的镜像引用；与 image_id 至少填一个，同时传入时优先 image_id。创建前固定 digest。 */
+            image_ref?: string;
             /** @description 默认使用服务 name，创建后不可变 */
             served_model_name?: string;
             /** @description 省略时服务按 1 个副本处理 */
@@ -2467,7 +2479,7 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
-        /** @description 推理服务前置条件不满足；code 为 MODEL_NOT_READY、MODEL_INCOMPATIBLE、ACCELERATOR_SPEC_UNAVAILABLE、INSUFFICIENT_CAPACITY、UNSUPPORTED_TOPOLOGY 或 INVALID_STATE_TRANSITION */
+        /** @description 推理服务前置条件不满足；code 为 MODEL_NOT_READY、MODEL_INCOMPATIBLE、ACCELERATOR_SPEC_UNAVAILABLE、INSUFFICIENT_CAPACITY、UNSUPPORTED_TOPOLOGY、INVALID_STATE_TRANSITION 或 IMAGE_UNAVAILABLE */
         InferenceUnprocessableEntity: {
             headers: {
                 [name: string]: unknown;

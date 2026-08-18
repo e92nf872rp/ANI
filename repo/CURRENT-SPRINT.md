@@ -14,6 +14,8 @@
 
 > **INFERENCE API-FIRST（2026-08-14）：** 阶段 A Core `platform-workloads` additive v1 契约已通过上游 PR #99 合入；阶段 B `INFERENCE-SERVICE-CONTRACT-B` 已完成本地契约验证，待人工评审与独立 Services 契约 PR。Services 新增统一 resources/可选 accelerator、model version、diagnostics/generation、PATCH/lifecycle/operation query 与 policies 501 语义，且租户响应不包含 Core internal endpoint。当前仍没有 platform-workloads handler/port/adapter、inference-service PG/worker/reconciler、Deployment/LWS runtime 或推理 live evidence，不得标记 control-plane/runtime ready。
 
+> **INFERENCE SERVICE CREATE IMAGE CONTRACT C27（2026-08-18）：** `INFERENCE-SERVICE-CREATE-IMAGE-CONTRACT-C27` 已补齐 Services 创建契约：`CreateInferenceServiceRequest` 增加可选仓库 `image_id` 与可选手填 `image_ref`，至少填一个，同时传优先 `image_id`；响应增加可选 `image_id` 与只读 digest `image_ref`；`422 IMAGE_UNAVAILABLE` 进入 OpenAPI。不含 handler/proto/实现。无新 live，不得标记 runtime ready。
+
 > **Sprint 13（当前活跃冲刺，2026-06-19 起）：** Core real provider 与 live gate 收敛。前置 Sprint 12 已闭合 19 个 Core handler + 2 个 422；Sprint 13 不重写 Core handler，不把 Services 业务资源回流 Core API，而是在既有 `pkg/ports` / `pkg/adapters` / Gateway handler 边界接入真实组件，并形成可复跑 live gate 与 evidence JSON。历史冻结原因和历史结论仍保留在旧批次记录中，但不是当前 PR 规则。计划见 [`development-records/sprint13-real-provider-readiness-plan.md`](development-records/sprint13-real-provider-readiness-plan.md)。
 
 > **Sprint 14 计划与分支状态：** Sprint 14 Core 韧性与服务语义计划见 [`development-records/sprint14-core-resilience-plan.md`](development-records/sprint14-core-resilience-plan.md)（限流/幂等重放/超时/readyz/重试断路/降级/failover）。配套交付 Services 的前端加速设计：[`development-records/frontend-acceleration-design-for-services.md`](development-records/frontend-acceleration-design-for-services.md)。当前主线入口仍保留 Sprint 13 production-shaped 边界；`feature/sprint14-core-resilience-semantics` 已完成 Sprint14 aggregate live gate，待 PR/评审后再进入主线状态。
