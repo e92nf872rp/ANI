@@ -4013,6 +4013,111 @@ components:
           type: array
           items: { $ref: '#/components/schemas/TenantSummary' }
 
+    UserTenantRef:
+      type: object
+      description: "Core 用户视图内嵌的租户摘要（不含 MFA；MFA 属 Services/tenant_auth）"
+      required: [id, name, display_name]
+      properties:
+        id:           { type: string, format: uuid }
+        name:         { type: string }
+        display_name: { type: string }
+
+    TenantUser:
+      type: object
+      description: >
+        租户成员最小视图（users + user_roles + roles）。不含 password_hash、不含 is_inviting
+        （邀请标记由 Services tenant_admin_invitation 合成）。
+      required: [id, tenant_id, email, username, role, status, source, tenant, created_at, updated_at]
+      properties:
+        id:            { type: string, format: uuid }
+        tenant_id:     { type: string, format: uuid }
+        email:         { type: string, format: email }
+        username:      { type: string }
+        display_name:  { type: string, nullable: true }
+        role:          { type: string, enum: [tenant-owner, tenant-admin, user, auditor] }
+        status:        { type: string, enum: [active, disabled] }
+        source:        { type: string, enum: [local, third_party], description: "由 username 前缀推断：oidc: → third_party；local: → local" }
+        last_login_at: { type: string, format: date-time, nullable: true }
+        created_at:    { type: string, format: date-time }
+        updated_at:    { type: string, format: date-time }
+        tenant:        { $ref: '#/components/schemas/UserTenantRef' }
+
+    TenantUserListResponse:
+      type: object
+      description: "跨租户用户列表（游标分页）"
+      required: [items]
+      properties:
+        items:       { type: array, items: { $ref: '#/components/schemas/TenantUser' } }
+        next_cursor: { type: string, nullable: true, description: "下一页游标；null 表示已无更多" }
+
+    TenantUserPermissions:
+      type: object
+      description: "租户成员 4 维权限；仅 tenant_id 非空的成员可查询"
+      required: [user_id, tenant_id, role, permissions]
+      properties:
+        user_id:   { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        role:      { type: string, enum: [tenant-owner, tenant-admin, user, auditor] }
+        permissions:
+          type: object
+          required: [compute, inference, member, transfer]
+          properties:
+            compute:   { type: string, enum: [read, write, none] }
+            inference: { type: string, enum: [read, write, none] }
+            member:    { type: string, enum: [read, write, none] }
+            transfer:  { type: string, enum: [read, write, none] }
+
+    ChangeableRoleOption:
+      type: object
+      required: [role, label]
+      properties:
+        role:  { type: string, enum: [user, auditor, tenant-admin] }
+        label: { type: string }
+
+    ChangeableRolesResponse:
+      type: object
+      description: "可变更角色选项；当前为 tenant-owner 时 changeable_roles 为空数组"
+      required: [current_role, changeable_roles]
+      properties:
+        current_role:     { type: string, enum: [tenant-owner, tenant-admin, user, auditor] }
+        changeable_roles: { type: array, items: { $ref: '#/components/schemas/ChangeableRoleOption' } }
+
+    UserRoleUpdateRequest:
+      type: object
+      description: "修改租户内角色（不可设 tenant-owner）"
+      required: [role]
+      properties:
+        role: { type: string, enum: [user, auditor, tenant-admin] }
+
+    UserStatusUpdateRequest:
+      type: object
+      description: "设置 users.status"
+      required: [status]
+      properties:
+        status: { type: string, enum: [active, disabled] }
+
+    UserTransferOwnershipRequest:
+      type: object
+      description: "移交租户所有者；target 必须是本租户 active tenant-admin"
+      required: [target_user_id]
+      properties:
+        target_user_id: { type: string, format: uuid }
+
+    UserResetPasswordRequest:
+      type: object
+      description: "重置密码；明文不落日志/审计/响应"
+      required: [new_password]
+      properties:
+        new_password: { type: string, minLength: 8, maxLength: 64, description: "四类中至少三类，须与旧密码不同" }
+
+    UserMutationResult:
+      type: object
+      description: "用户写操作结果（id=user_id 或 tenant_id）"
+      required: [id, message]
+      properties:
+        id:      { type: string, format: uuid }
+        message: { type: string }
+
   # 公共响应
   responses:
     Unauthorized:
@@ -4082,6 +4187,41 @@ components:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
     TenantPlanNotFound:
       description: 配额套餐不存在（code=TENANT_PLAN_NOT_FOUND）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    UserNotFound:
+      description: 租户用户不存在或已软删除（code=USER_NOT_FOUND）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    UserAlreadyTenantAdmin:
+      description: 该用户已是本租户 admin/owner（code=USER_ALREADY_TENANT_ADMIN）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    TenantOwnerRoleLocked:
+      description: 租户所有者角色不可修改/删除（code=TENANT_OWNER_ROLE_LOCKED）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    LastTenantOwner:
+      description: 唯一活跃 tenant-owner 不可禁用/删除（code=LAST_TENANT_OWNER）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    TransferTargetInvalid:
+      description: 移交目标不是本租户 active tenant-admin（code=TRANSFER_TARGET_INVALID）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    RoleChangeInvalid:
+      description: 角色不在 user/auditor/tenant-admin（code=ROLE_CHANGE_INVALID）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    PasswordSameAsOld:
+      description: 新密码与旧密码相同（code=PASSWORD_SAME_AS_OLD）
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -8937,6 +9077,241 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
 
+  # ===== Tenant Users (平台级租户用户/角色，供 Services UserSvcClient 调用) =====
+
+  /admin/tenant-users:
+    get:
+      operationId: listTenantUsers
+      summary: 跨租户列出租户成员（默认 owner/admin）
+      description: |
+        平台侧跨租户查询 users + user_roles + roles。
+        默认仅返回 role ∈ (tenant-owner, tenant-admin)；不含 is_inviting（邀请由 Services 合成）。
+        不含 password_hash。
+      tags: [TenantUsers]
+      x-ani-rbac-scope: "scope:users:read"
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: tenant_id, in: query, schema: { type: string, format: uuid }, description: "可选；按指定租户过滤" }
+        - { name: role, in: query, schema: { type: string, enum: [tenant-owner, tenant-admin] } }
+        - { name: status, in: query, schema: { type: string, enum: [active, disabled] } }
+        - { name: search, in: query, schema: { type: string }, description: "模糊匹配 email/username" }
+      responses:
+        "200":
+          description: 跨租户用户列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantUserListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /admin/tenants/{tenant_id}/user-lookup:
+    get:
+      operationId: lookupTenantUser
+      summary: 按 email+username 匹配租户内已有用户
+      description: |
+        邀请前匹配已有用户；无匹配返回 404 USER_NOT_FOUND。不新建用户。
+      tags: [TenantUsers]
+      x-ani-rbac-scope: "scope:users:read"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: email, in: query, required: true, schema: { type: string, format: email } }
+        - { name: username, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 64 } }
+      responses:
+        "200":
+          description: 匹配到的用户
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantUser' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/UserNotFound' }
+
+  /admin/tenants/{tenant_id}/users/{user_id}:
+    get:
+      operationId: getTenantUser
+      summary: 查询租户成员详情
+      description: 不含 password_hash；平台账户（tenant_id 为空）不可经本端点查询。
+      tags: [TenantUsers]
+      x-ani-rbac-scope: "scope:users:read"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: user_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 用户详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantUser' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/UserNotFound' }
+    delete:
+      operationId: deleteTenantUser
+      summary: 软删除租户成员（不幂等）
+      tags: [TenantUsers]
+      x-ani-rbac-scope: "scope:users:write"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: user_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 已软删除
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserMutationResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/UserNotFound' }
+        "409": { $ref: '#/components/responses/TenantOwnerRoleLocked' }
+        "422": { $ref: '#/components/responses/LastTenantOwner' }
+
+  /admin/tenants/{tenant_id}/users/{user_id}/role:
+    get:
+      operationId: getTenantUserRole
+      summary: 查询租户成员角色与 4 维权限
+      tags: [TenantUsers]
+      x-ani-rbac-scope: "scope:users:read"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: user_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 角色与权限
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantUserPermissions' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/UserNotFound' }
+    put:
+      operationId: updateTenantUserRole
+      summary: 修改租户成员角色
+      tags: [TenantUsers]
+      x-ani-rbac-scope: "scope:users:write"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: user_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserRoleUpdateRequest' }
+      responses:
+        "200":
+          description: 角色已更新
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserMutationResult' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/UserNotFound' }
+        "409": { $ref: '#/components/responses/TenantOwnerRoleLocked' }
+        "422": { $ref: '#/components/responses/RoleChangeInvalid' }
+
+  /admin/tenants/{tenant_id}/users/{user_id}/changeable-roles:
+    get:
+      operationId: getTenantUserChangeableRoles
+      summary: 查询可变更角色选项（排除 tenant-owner）
+      tags: [TenantUsers]
+      x-ani-rbac-scope: "scope:users:read"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: user_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 可变更角色
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChangeableRolesResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/UserNotFound' }
+
+  /admin/tenants/{tenant_id}/transfer-ownership:
+    post:
+      operationId: transferCoreTenantOwnership
+      summary: 原子移交租户所有者
+      description: target 提升为 tenant-owner，原 owner 降级为 tenant-admin。
+      tags: [TenantUsers]
+      x-ani-rbac-scope: "scope:users:write"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserTransferOwnershipRequest' }
+      responses:
+        "200":
+          description: 所有权已移交
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserMutationResult' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/UserNotFound' }
+        "422": { $ref: '#/components/responses/TransferTargetInvalid' }
+
+  /admin/tenants/{tenant_id}/users/{user_id}/status:
+    post:
+      operationId: updateTenantUserStatus
+      summary: 启用或禁用租户成员
+      tags: [TenantUsers]
+      x-ani-rbac-scope: "scope:users:write"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: user_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserStatusUpdateRequest' }
+      responses:
+        "200":
+          description: 状态已更新
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserMutationResult' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/UserNotFound' }
+        "422": { $ref: '#/components/responses/LastTenantOwner' }
+
+  /admin/tenants/{tenant_id}/users/{user_id}/reset-password:
+    post:
+      operationId: resetTenantUserPassword
+      summary: 重置租户成员密码
+      description: 明文密码不落日志、审计或响应。
+      tags: [TenantUsers]
+      x-ani-rbac-scope: "scope:users:write"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: user_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserResetPasswordRequest' }
+      responses:
+        "200":
+          description: 密码已重置
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserMutationResult' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/UserNotFound' }
+        "422": { $ref: '#/components/responses/PasswordSameAsOld' }
 
 # ── Tag 分组（Swagger UI 显示顺序）──────────────────────────────────────────
 tags:
@@ -8965,4 +9340,5 @@ tags:
   - { name: Tasks,          description: "异步任务查询" }
   - { name: QuotaAdmin,     description: "平台级配额管理（租户配额 CRUD + 配额元数据）" }
   - { name: Tenants,        description: "平台级租户最小读写（status / plan_id / 套餐绑定租户计数）" }
+  - { name: TenantUsers,    description: "平台级租户用户与角色（users / user_roles / roles）" }
   - { name: GPUSpec,        description: "GPU 规格目录管理（创建/删除/可用性查询）" }
