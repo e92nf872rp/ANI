@@ -60,6 +60,7 @@ Inference PlatformWorkload API-first 增量：
 - INFERENCE-SERVICE-CPU-VLLM-OPS-LIVE-C15：已在人工确认集群上完成同一 CPU 入口的 ops lab live：真实产品 logs、RWO desired-replicas scale 抢占、lab 进程重启回读。未 rollout in-cluster Gateway。evidence：`repo/development-records/live-evidence/inference-cpu-vllm-ops-live-20260815.json`。未改 OpenAPI，无 LWS，不得外推 runtime ready。
 - INFERENCE-SERVICE-GPU-ADMISSION-LIVE-C16：已在人工确认集群上完成同一入口 GPU 准入 lab live。Core capabilities 无可用 accelerator 时产品 create 返回 `422 ACCELERATOR_SPEC_UNAVAILABLE`，不创建 GPU runtime。GPU live 记 `skipped_no_device_plugin`。未 rollout in-cluster Gateway。evidence：`repo/development-records/live-evidence/inference-gpu-admission-live-20260815.json`。未改 OpenAPI，不得外推 GPU/runtime ready。
 - INFERENCE-SERVICE-CLUSTERIP-NP-LIVE-C17：已在人工确认集群上完成阶段 F 安全边界 lab live（不含 `/test`）。同一入口 runtime 只有 ClusterIP；NetworkPolicy 默认拒绝未授权 namespace，并放行同租户与控制面 `/32`；stop/delete 后内部 endpoint 消失。未 rollout in-cluster Gateway。evidence：`repo/development-records/live-evidence/inference-clusterip-networkpolicy-live-20260815.json`。未改 OpenAPI，无公网调用网关，不得外推 runtime ready。
+- INFERENCE-SERVICE-CREATE-IMAGE-CONTRACT-C27：已补齐 Services 创建契约可选 `image_id`（镜像仓库）与可选 `image_ref`（用户手填），至少填一个，优先 `image_id`；响应增加只读 digest `image_ref`；`IMAGE_UNAVAILABLE` 进入 OpenAPI。不含 handler/proto/实现。
 - 当前不包含 GPU device-plugin live、不可重试/dead-letter/scale rollback、跨节点 LWS，不得把 in-cluster Gateway 或 full platform 标为 control-plane/runtime ready。
 
 Sprint 12 摘要：

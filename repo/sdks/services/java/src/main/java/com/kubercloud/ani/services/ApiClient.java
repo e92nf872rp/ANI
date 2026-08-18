@@ -362,6 +362,7 @@ public final class ApiClient {
         "FEATURE_NOT_AVAILABLE",
         "FORBIDDEN",
         "IDEMPOTENCY_CONFLICT",
+        "IMAGE_UNAVAILABLE",
         "INSUFFICIENT_CAPACITY",
         "INVALID_ARGUMENT",
         "INVALID_STATE_TRANSITION",

@@ -36,6 +36,7 @@
 | INFERENCE-SERVICE-CPU-VLLM-OPS-LIVE-C15 | 同一 CPU 入口 ops live passed：真实产品 logs、RWO desired-replicas scale 抢占、lab 进程重启回读；未 rollout in-cluster Gateway；不得外推 runtime ready | inference-service-cpu-vllm-ops-live-c15.md |
 | INFERENCE-SERVICE-GPU-ADMISSION-LIVE-C16 | 同一入口 GPU 准入 live passed：无 available accelerator 时 422 ACCELERATOR_SPEC_UNAVAILABLE，不创建 GPU runtime；GPU live skip；未 rollout in-cluster Gateway；不得外推 GPU/runtime ready | inference-service-gpu-admission-live-c16.md |
 | INFERENCE-SERVICE-CLUSTERIP-NP-LIVE-C17 | 同一入口阶段 F 安全边界 live passed：ClusterIP-only + 默认拒绝 NetworkPolicy，未授权 namespace 不可达，产品 `/test` 404，stop/delete 后内部 endpoint 消失；未 rollout in-cluster Gateway；不得外推 runtime ready | inference-service-clusterip-networkpolicy-live-c17.md |
+| INFERENCE-SERVICE-CREATE-IMAGE-CONTRACT-C27 | Services 创建推理服务补齐可选 `image_id`（镜像仓库）与可选 `image_ref`（用户手填），至少填一个，优先 `image_id`；响应增加只读 digest `image_ref`；`422 IMAGE_UNAVAILABLE` 进入契约。不含 handler/proto/实现。不得外推 runtime ready | inference-service-create-image-contract-c27.md |
 
 ### Core Quota Service（2026-08）
 
