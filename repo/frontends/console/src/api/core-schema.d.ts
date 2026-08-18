@@ -2869,6 +2869,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/tenants/{tenant_id}/quota/upsert": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 批量 Upsert 租户配额
+         * @description 批量 Upsert 指定租户多个维度的配额上限：已存在的维度更新 total，不存在的维度新建行。
+         *     单次请求内所有维度在同一 DB 事务中原子完成，任一维度失败则整体回滚。
+         *     - items.resource_type 必须在 resource_quota_meta 已注册且 enabled=true
+         *     - items.total 未提供或为 0 时取 resource_quota_meta.default_quota；负数返回 VALIDATION_FAILED
+         *     - 缩容时用 GREATEST(total, used+reserved) clamp 到 used+reserved，
+         *       并在返回的 items 中将 tightened 置 true（新建维度不会触发收紧）
+         */
+        put: operations["upsertTenantQuota"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/tenants/{tenant_id}/reservations": {
         parameters: {
             query?: never;
@@ -6300,6 +6325,20 @@ export interface components {
              */
             total: number;
         };
+        /** @description 批量 Upsert 租户配额请求（PUT /admin/tenants/{tenant_id}/quota/upsert） */
+        QuotaUpsertRequest: {
+            items: components["schemas"]["QuotaUpsertItem"][];
+        };
+        /** @description Upsert 配额维度项；total 未提供、为 null 或为 0 时取 resource_quota_meta.default_quota */
+        QuotaUpsertItem: {
+            /** @description 配额维度标识（需在 resource_quota_meta 已注册且 enabled=true） */
+            resource_type: string;
+            /**
+             * Format: int64
+             * @description 配额上限；未提供、为 null 或为 0 时取 resource_quota_meta.default_quota
+             */
+            total?: number | null;
+        };
         /** @description 租户配额视图（GET/POST/PUT 共用响应） */
         Quota: {
             /**
@@ -6511,6 +6550,19 @@ export interface components {
         };
         /** @description 参数校验失败（code=VALIDATION_FAILED） */
         QuotaValidationFailed: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /**
+         * @description 配额更新失败，无法确认事务提交状态（DB 宕机/连接断开等极端场景）。
+         *     Services 层收到此错误后不得自动重试，应记录告警并触发人工核对流程。
+         *     code=QUOTA_UPDATE_UNCERTAIN
+         */
+        QuotaUpdateUncertain: {
             headers: {
                 [name: string]: unknown;
             };
@@ -12314,6 +12366,41 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["TenantNotFound"];
+        };
+    };
+    upsertTenantQuota: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description 客户端生成；相同 upsert 请求重复执行后的最终状态一致 */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuotaUpsertRequest"];
+            };
+        };
+        responses: {
+            /** @description Upsert 结果（含 tightened 标记） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Quota"];
+                };
+            };
+            400: components["responses"]["QuotaValidationFailed"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["TenantNotFound"];
+            422: components["responses"]["QuotaResourceNotRegistered"];
+            511: components["responses"]["QuotaUpdateUncertain"];
         };
     };
     getTenantReservations: {
