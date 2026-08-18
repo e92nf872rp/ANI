@@ -27,6 +27,13 @@ message CursorPageMeta {
   string next_cursor = 2;   // empty string means last page
 }
 
+// IdempotentResult is returned by all idempotent write RPCs.
+// 对齐 HTTP 层 IdempotentResult（{id, message}）。
+message IdempotentResult {
+  string id = 1;          // 资源 id（如 plan_id / tenant_id）
+  string message = 2;     // 操作结果消息（如 "tenant plan created"）
+}
+
 // AsyncTaskRef is returned by operations that create an asynchronous task.
 message AsyncTaskRef {
   string task_id     = 1;   // UUID

@@ -8,6 +8,7 @@ package tenantv1
 
 import (
 	context "context"
+	v1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -48,21 +49,21 @@ type TenantAdminServiceClient interface {
 	// GetTenantAdminDetail returns one admin (includes is_inviting, created_at, updated_at, tenant).
 	GetTenantAdminDetail(ctx context.Context, in *GetTenantAdminDetailRequest, opts ...grpc.CallOption) (*AdminWithTenant, error)
 	// UpdateTenantAdminRole changes a member role (user / auditor / tenant-admin).
-	UpdateTenantAdminRole(ctx context.Context, in *UpdateTenantAdminRoleRequest, opts ...grpc.CallOption) (*IdempotentResult, error)
+	UpdateTenantAdminRole(ctx context.Context, in *UpdateTenantAdminRoleRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error)
 	// GetTenantAdminRole returns the four-dimension permission model for a tenant member.
 	GetTenantAdminRole(ctx context.Context, in *GetTenantAdminRoleRequest, opts ...grpc.CallOption) (*UserPermissions, error)
 	// GetChangeableRoles returns selectable target roles (excludes tenant-owner).
 	GetChangeableRoles(ctx context.Context, in *GetChangeableRolesRequest, opts ...grpc.CallOption) (*GetChangeableRolesResponse, error)
 	// TransferTenantOwnership promotes a tenant-admin to owner and demotes the current owner.
-	TransferTenantOwnership(ctx context.Context, in *TransferTenantOwnershipRequest, opts ...grpc.CallOption) (*IdempotentResult, error)
+	TransferTenantOwnership(ctx context.Context, in *TransferTenantOwnershipRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error)
 	// ResetTenantAdminPassword resets a local-password admin (plaintext never logged).
-	ResetTenantAdminPassword(ctx context.Context, in *ResetTenantAdminPasswordRequest, opts ...grpc.CallOption) (*IdempotentResult, error)
+	ResetTenantAdminPassword(ctx context.Context, in *ResetTenantAdminPasswordRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error)
 	// DisableTenantAdmin sets users.status=disabled.
-	DisableTenantAdmin(ctx context.Context, in *DisableTenantAdminRequest, opts ...grpc.CallOption) (*IdempotentResult, error)
+	DisableTenantAdmin(ctx context.Context, in *DisableTenantAdminRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error)
 	// EnableTenantAdmin sets users.status=active.
-	EnableTenantAdmin(ctx context.Context, in *EnableTenantAdminRequest, opts ...grpc.CallOption) (*IdempotentResult, error)
+	EnableTenantAdmin(ctx context.Context, in *EnableTenantAdminRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error)
 	// DeleteTenantAdmin soft-deletes an admin (not idempotent).
-	DeleteTenantAdmin(ctx context.Context, in *DeleteTenantAdminRequest, opts ...grpc.CallOption) (*IdempotentResult, error)
+	DeleteTenantAdmin(ctx context.Context, in *DeleteTenantAdminRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error)
 	// ListTenantAdminAuditLogs returns cursor-paginated tenant_admin.* audit rows.
 	ListTenantAdminAuditLogs(ctx context.Context, in *ListTenantAdminAuditLogsRequest, opts ...grpc.CallOption) (*ListTenantAdminAuditLogsResponse, error)
 }
@@ -111,8 +112,8 @@ func (c *tenantAdminServiceClient) GetTenantAdminDetail(ctx context.Context, in 
 	return out, nil
 }
 
-func (c *tenantAdminServiceClient) UpdateTenantAdminRole(ctx context.Context, in *UpdateTenantAdminRoleRequest, opts ...grpc.CallOption) (*IdempotentResult, error) {
-	out := new(IdempotentResult)
+func (c *tenantAdminServiceClient) UpdateTenantAdminRole(ctx context.Context, in *UpdateTenantAdminRoleRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error) {
+	out := new(v1.IdempotentResult)
 	err := c.cc.Invoke(ctx, TenantAdminService_UpdateTenantAdminRole_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -138,8 +139,8 @@ func (c *tenantAdminServiceClient) GetChangeableRoles(ctx context.Context, in *G
 	return out, nil
 }
 
-func (c *tenantAdminServiceClient) TransferTenantOwnership(ctx context.Context, in *TransferTenantOwnershipRequest, opts ...grpc.CallOption) (*IdempotentResult, error) {
-	out := new(IdempotentResult)
+func (c *tenantAdminServiceClient) TransferTenantOwnership(ctx context.Context, in *TransferTenantOwnershipRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error) {
+	out := new(v1.IdempotentResult)
 	err := c.cc.Invoke(ctx, TenantAdminService_TransferTenantOwnership_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -147,8 +148,8 @@ func (c *tenantAdminServiceClient) TransferTenantOwnership(ctx context.Context, 
 	return out, nil
 }
 
-func (c *tenantAdminServiceClient) ResetTenantAdminPassword(ctx context.Context, in *ResetTenantAdminPasswordRequest, opts ...grpc.CallOption) (*IdempotentResult, error) {
-	out := new(IdempotentResult)
+func (c *tenantAdminServiceClient) ResetTenantAdminPassword(ctx context.Context, in *ResetTenantAdminPasswordRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error) {
+	out := new(v1.IdempotentResult)
 	err := c.cc.Invoke(ctx, TenantAdminService_ResetTenantAdminPassword_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -156,8 +157,8 @@ func (c *tenantAdminServiceClient) ResetTenantAdminPassword(ctx context.Context,
 	return out, nil
 }
 
-func (c *tenantAdminServiceClient) DisableTenantAdmin(ctx context.Context, in *DisableTenantAdminRequest, opts ...grpc.CallOption) (*IdempotentResult, error) {
-	out := new(IdempotentResult)
+func (c *tenantAdminServiceClient) DisableTenantAdmin(ctx context.Context, in *DisableTenantAdminRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error) {
+	out := new(v1.IdempotentResult)
 	err := c.cc.Invoke(ctx, TenantAdminService_DisableTenantAdmin_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -165,8 +166,8 @@ func (c *tenantAdminServiceClient) DisableTenantAdmin(ctx context.Context, in *D
 	return out, nil
 }
 
-func (c *tenantAdminServiceClient) EnableTenantAdmin(ctx context.Context, in *EnableTenantAdminRequest, opts ...grpc.CallOption) (*IdempotentResult, error) {
-	out := new(IdempotentResult)
+func (c *tenantAdminServiceClient) EnableTenantAdmin(ctx context.Context, in *EnableTenantAdminRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error) {
+	out := new(v1.IdempotentResult)
 	err := c.cc.Invoke(ctx, TenantAdminService_EnableTenantAdmin_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -174,8 +175,8 @@ func (c *tenantAdminServiceClient) EnableTenantAdmin(ctx context.Context, in *En
 	return out, nil
 }
 
-func (c *tenantAdminServiceClient) DeleteTenantAdmin(ctx context.Context, in *DeleteTenantAdminRequest, opts ...grpc.CallOption) (*IdempotentResult, error) {
-	out := new(IdempotentResult)
+func (c *tenantAdminServiceClient) DeleteTenantAdmin(ctx context.Context, in *DeleteTenantAdminRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error) {
+	out := new(v1.IdempotentResult)
 	err := c.cc.Invoke(ctx, TenantAdminService_DeleteTenantAdmin_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -206,21 +207,21 @@ type TenantAdminServiceServer interface {
 	// GetTenantAdminDetail returns one admin (includes is_inviting, created_at, updated_at, tenant).
 	GetTenantAdminDetail(context.Context, *GetTenantAdminDetailRequest) (*AdminWithTenant, error)
 	// UpdateTenantAdminRole changes a member role (user / auditor / tenant-admin).
-	UpdateTenantAdminRole(context.Context, *UpdateTenantAdminRoleRequest) (*IdempotentResult, error)
+	UpdateTenantAdminRole(context.Context, *UpdateTenantAdminRoleRequest) (*v1.IdempotentResult, error)
 	// GetTenantAdminRole returns the four-dimension permission model for a tenant member.
 	GetTenantAdminRole(context.Context, *GetTenantAdminRoleRequest) (*UserPermissions, error)
 	// GetChangeableRoles returns selectable target roles (excludes tenant-owner).
 	GetChangeableRoles(context.Context, *GetChangeableRolesRequest) (*GetChangeableRolesResponse, error)
 	// TransferTenantOwnership promotes a tenant-admin to owner and demotes the current owner.
-	TransferTenantOwnership(context.Context, *TransferTenantOwnershipRequest) (*IdempotentResult, error)
+	TransferTenantOwnership(context.Context, *TransferTenantOwnershipRequest) (*v1.IdempotentResult, error)
 	// ResetTenantAdminPassword resets a local-password admin (plaintext never logged).
-	ResetTenantAdminPassword(context.Context, *ResetTenantAdminPasswordRequest) (*IdempotentResult, error)
+	ResetTenantAdminPassword(context.Context, *ResetTenantAdminPasswordRequest) (*v1.IdempotentResult, error)
 	// DisableTenantAdmin sets users.status=disabled.
-	DisableTenantAdmin(context.Context, *DisableTenantAdminRequest) (*IdempotentResult, error)
+	DisableTenantAdmin(context.Context, *DisableTenantAdminRequest) (*v1.IdempotentResult, error)
 	// EnableTenantAdmin sets users.status=active.
-	EnableTenantAdmin(context.Context, *EnableTenantAdminRequest) (*IdempotentResult, error)
+	EnableTenantAdmin(context.Context, *EnableTenantAdminRequest) (*v1.IdempotentResult, error)
 	// DeleteTenantAdmin soft-deletes an admin (not idempotent).
-	DeleteTenantAdmin(context.Context, *DeleteTenantAdminRequest) (*IdempotentResult, error)
+	DeleteTenantAdmin(context.Context, *DeleteTenantAdminRequest) (*v1.IdempotentResult, error)
 	// ListTenantAdminAuditLogs returns cursor-paginated tenant_admin.* audit rows.
 	ListTenantAdminAuditLogs(context.Context, *ListTenantAdminAuditLogsRequest) (*ListTenantAdminAuditLogsResponse, error)
 	mustEmbedUnimplementedTenantAdminServiceServer()
@@ -242,7 +243,7 @@ func (UnimplementedTenantAdminServiceServer) ListAllTenantAdmins(context.Context
 func (UnimplementedTenantAdminServiceServer) GetTenantAdminDetail(context.Context, *GetTenantAdminDetailRequest) (*AdminWithTenant, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetTenantAdminDetail not implemented")
 }
-func (UnimplementedTenantAdminServiceServer) UpdateTenantAdminRole(context.Context, *UpdateTenantAdminRoleRequest) (*IdempotentResult, error) {
+func (UnimplementedTenantAdminServiceServer) UpdateTenantAdminRole(context.Context, *UpdateTenantAdminRoleRequest) (*v1.IdempotentResult, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateTenantAdminRole not implemented")
 }
 func (UnimplementedTenantAdminServiceServer) GetTenantAdminRole(context.Context, *GetTenantAdminRoleRequest) (*UserPermissions, error) {
@@ -251,19 +252,19 @@ func (UnimplementedTenantAdminServiceServer) GetTenantAdminRole(context.Context,
 func (UnimplementedTenantAdminServiceServer) GetChangeableRoles(context.Context, *GetChangeableRolesRequest) (*GetChangeableRolesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetChangeableRoles not implemented")
 }
-func (UnimplementedTenantAdminServiceServer) TransferTenantOwnership(context.Context, *TransferTenantOwnershipRequest) (*IdempotentResult, error) {
+func (UnimplementedTenantAdminServiceServer) TransferTenantOwnership(context.Context, *TransferTenantOwnershipRequest) (*v1.IdempotentResult, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method TransferTenantOwnership not implemented")
 }
-func (UnimplementedTenantAdminServiceServer) ResetTenantAdminPassword(context.Context, *ResetTenantAdminPasswordRequest) (*IdempotentResult, error) {
+func (UnimplementedTenantAdminServiceServer) ResetTenantAdminPassword(context.Context, *ResetTenantAdminPasswordRequest) (*v1.IdempotentResult, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ResetTenantAdminPassword not implemented")
 }
-func (UnimplementedTenantAdminServiceServer) DisableTenantAdmin(context.Context, *DisableTenantAdminRequest) (*IdempotentResult, error) {
+func (UnimplementedTenantAdminServiceServer) DisableTenantAdmin(context.Context, *DisableTenantAdminRequest) (*v1.IdempotentResult, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DisableTenantAdmin not implemented")
 }
-func (UnimplementedTenantAdminServiceServer) EnableTenantAdmin(context.Context, *EnableTenantAdminRequest) (*IdempotentResult, error) {
+func (UnimplementedTenantAdminServiceServer) EnableTenantAdmin(context.Context, *EnableTenantAdminRequest) (*v1.IdempotentResult, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method EnableTenantAdmin not implemented")
 }
-func (UnimplementedTenantAdminServiceServer) DeleteTenantAdmin(context.Context, *DeleteTenantAdminRequest) (*IdempotentResult, error) {
+func (UnimplementedTenantAdminServiceServer) DeleteTenantAdmin(context.Context, *DeleteTenantAdminRequest) (*v1.IdempotentResult, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteTenantAdmin not implemented")
 }
 func (UnimplementedTenantAdminServiceServer) ListTenantAdminAuditLogs(context.Context, *ListTenantAdminAuditLogsRequest) (*ListTenantAdminAuditLogsResponse, error) {

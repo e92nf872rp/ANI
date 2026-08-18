@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 
+	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 	tenantv1 "github.com/kubercloud/ani/pkg/generated/pb/tenant/v1"
 	"github.com/kubercloud/ani/services/tenant-service/internal/repo/ports"
 	"google.golang.org/grpc"
@@ -49,7 +50,7 @@ func (s *TenantAdminService) GetTenantAdminDetail(context.Context, *tenantv1.Get
 	return nil, unimplemented()
 }
 
-func (s *TenantAdminService) UpdateTenantAdminRole(context.Context, *tenantv1.UpdateTenantAdminRoleRequest) (*tenantv1.IdempotentResult, error) {
+func (s *TenantAdminService) UpdateTenantAdminRole(context.Context, *tenantv1.UpdateTenantAdminRoleRequest) (*commonv1.IdempotentResult, error) {
 	return nil, unimplemented()
 }
 
@@ -61,23 +62,23 @@ func (s *TenantAdminService) GetChangeableRoles(context.Context, *tenantv1.GetCh
 	return nil, unimplemented()
 }
 
-func (s *TenantAdminService) TransferTenantOwnership(context.Context, *tenantv1.TransferTenantOwnershipRequest) (*tenantv1.IdempotentResult, error) {
+func (s *TenantAdminService) TransferTenantOwnership(context.Context, *tenantv1.TransferTenantOwnershipRequest) (*commonv1.IdempotentResult, error) {
 	return nil, unimplemented()
 }
 
-func (s *TenantAdminService) ResetTenantAdminPassword(context.Context, *tenantv1.ResetTenantAdminPasswordRequest) (*tenantv1.IdempotentResult, error) {
+func (s *TenantAdminService) ResetTenantAdminPassword(context.Context, *tenantv1.ResetTenantAdminPasswordRequest) (*commonv1.IdempotentResult, error) {
 	return nil, unimplemented()
 }
 
-func (s *TenantAdminService) DisableTenantAdmin(context.Context, *tenantv1.DisableTenantAdminRequest) (*tenantv1.IdempotentResult, error) {
+func (s *TenantAdminService) DisableTenantAdmin(context.Context, *tenantv1.DisableTenantAdminRequest) (*commonv1.IdempotentResult, error) {
 	return nil, unimplemented()
 }
 
-func (s *TenantAdminService) EnableTenantAdmin(context.Context, *tenantv1.EnableTenantAdminRequest) (*tenantv1.IdempotentResult, error) {
+func (s *TenantAdminService) EnableTenantAdmin(context.Context, *tenantv1.EnableTenantAdminRequest) (*commonv1.IdempotentResult, error) {
 	return nil, unimplemented()
 }
 
-func (s *TenantAdminService) DeleteTenantAdmin(context.Context, *tenantv1.DeleteTenantAdminRequest) (*tenantv1.IdempotentResult, error) {
+func (s *TenantAdminService) DeleteTenantAdmin(context.Context, *tenantv1.DeleteTenantAdminRequest) (*commonv1.IdempotentResult, error) {
 	return nil, unimplemented()
 }
 

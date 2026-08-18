@@ -6,7 +6,6 @@ import "common/v1/common.proto";
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/wrappers.proto";
-import "tenant/v1/tenant_plan.proto";
 
 option go_package = "github.com/kubercloud/ani/pkg/generated/pb/tenant/v1;tenantv1";
 
@@ -25,21 +24,21 @@ service TenantAdminService {
   // GetTenantAdminDetail returns one admin (includes is_inviting, created_at, updated_at, tenant).
   rpc GetTenantAdminDetail(GetTenantAdminDetailRequest) returns (AdminWithTenant);
   // UpdateTenantAdminRole changes a member role (user / auditor / tenant-admin).
-  rpc UpdateTenantAdminRole(UpdateTenantAdminRoleRequest) returns (IdempotentResult);
+  rpc UpdateTenantAdminRole(UpdateTenantAdminRoleRequest) returns (common.v1.IdempotentResult);
   // GetTenantAdminRole returns the four-dimension permission model for a tenant member.
   rpc GetTenantAdminRole(GetTenantAdminRoleRequest) returns (UserPermissions);
   // GetChangeableRoles returns selectable target roles (excludes tenant-owner).
   rpc GetChangeableRoles(GetChangeableRolesRequest) returns (GetChangeableRolesResponse);
   // TransferTenantOwnership promotes a tenant-admin to owner and demotes the current owner.
-  rpc TransferTenantOwnership(TransferTenantOwnershipRequest) returns (IdempotentResult);
+  rpc TransferTenantOwnership(TransferTenantOwnershipRequest) returns (common.v1.IdempotentResult);
   // ResetTenantAdminPassword resets a local-password admin (plaintext never logged).
-  rpc ResetTenantAdminPassword(ResetTenantAdminPasswordRequest) returns (IdempotentResult);
+  rpc ResetTenantAdminPassword(ResetTenantAdminPasswordRequest) returns (common.v1.IdempotentResult);
   // DisableTenantAdmin sets users.status=disabled.
-  rpc DisableTenantAdmin(DisableTenantAdminRequest) returns (IdempotentResult);
+  rpc DisableTenantAdmin(DisableTenantAdminRequest) returns (common.v1.IdempotentResult);
   // EnableTenantAdmin sets users.status=active.
-  rpc EnableTenantAdmin(EnableTenantAdminRequest) returns (IdempotentResult);
+  rpc EnableTenantAdmin(EnableTenantAdminRequest) returns (common.v1.IdempotentResult);
   // DeleteTenantAdmin soft-deletes an admin (not idempotent).
-  rpc DeleteTenantAdmin(DeleteTenantAdminRequest) returns (IdempotentResult);
+  rpc DeleteTenantAdmin(DeleteTenantAdminRequest) returns (common.v1.IdempotentResult);
   // ListTenantAdminAuditLogs returns cursor-paginated tenant_admin.* audit rows.
   rpc ListTenantAdminAuditLogs(ListTenantAdminAuditLogsRequest) returns (ListTenantAdminAuditLogsResponse);
 }
@@ -134,7 +133,7 @@ message ListTenantAdminAuditLogsRequest {
   string tenant_id = 1;
   string user_id = 2;
   string action = 3;           // optional action filter
-  string result = 4;           // success | failed; empty = all
+  string result = 4;           // success | failure; empty = all
   common.v1.CursorPageRequest page = 5;
 }
 
@@ -190,7 +189,7 @@ message TenantAdminAuditLog {
   string id = 1;
   string action = 2;
   string resource = 3;
-  string result = 4;                           // success | failed
+  string result = 4;                           // success | failure
   google.protobuf.StringValue user_id = 5;
   google.protobuf.Struct details = 6;
   google.protobuf.Timestamp created_at = 7;
