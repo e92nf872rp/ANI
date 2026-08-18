@@ -2936,6 +2936,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/plans/bound-tenant-counts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 按套餐统计绑定中的租户数
+         * @description 统计 tenants 表中 status <> disabled 且 plan_id 命中请求列表的租户数量。
+         *     未知 plan_id 返回 count=0（本接口不校验 tenant_plans 是否存在）。
+         *     供 Services 填充套餐 tenant_count、删除前占用检查；Services 不得直接查询 Core tenants 表。
+         */
+        get: operations["listPlanBoundTenantCounts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/plans/{plan_id}/bound-tenants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询绑定到指定套餐的租户摘要
+         * @description 返回 tenants 中 plan_id 命中且 status <> disabled 的租户，按 name 排序。
+         *     未知 plan_id 返回空列表（本接口不校验 tenant_plans 是否存在）。
+         */
+        get: operations["listPlanBoundTenants"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/plans/{plan_id}/bindable-tenants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询可绑定指定套餐的租户摘要
+         * @description 返回 status <> disabled 且 plan_id IS DISTINCT FROM 请求套餐的租户（含未绑定或绑定其它套餐），按 name 排序。
+         *     未知 plan_id 仍按该过滤返回（本接口不校验 tenant_plans 是否存在）。
+         */
+        get: operations["listPlanBindableTenants"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/tenants/{tenant_id}": {
         parameters: {
             query?: never;
@@ -6445,6 +6509,36 @@ export interface components {
              * @description 目标套餐 ID（须存在于 tenant_plans）
              */
             plan_id: string;
+        };
+        /** @description 单个套餐的绑定租户计数（status <> disabled） */
+        PlanBoundTenantCount: {
+            /**
+             * Format: uuid
+             * @description 配额套餐 ID
+             */
+            plan_id: string;
+            /**
+             * Format: int64
+             * @description 绑定中的非 disabled 租户数
+             */
+            count: number;
+        };
+        /** @description 套餐绑定租户计数列表（GET /admin/plans/bound-tenant-counts） */
+        PlanBoundTenantCountList: {
+            items: components["schemas"]["PlanBoundTenantCount"][];
+        };
+        /** @description 租户摘要（绑定/可绑定列表；不含 created_at / plan_id） */
+        TenantSummary: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            display_name: string;
+            /** @enum {string} */
+            status: "active" | "frozen" | "disabled";
+        };
+        /** @description 租户摘要列表 */
+        TenantSummaryList: {
+            items: components["schemas"]["TenantSummary"][];
         };
     };
     responses: {
@@ -12499,6 +12593,82 @@ export interface operations {
                     "application/json": components["schemas"]["QuotaMetaListResponse"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listPlanBoundTenantCounts: {
+        parameters: {
+            query: {
+                /** @description 套餐 ID；可重复传入，最多 100 个 */
+                plan_id: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 各套餐绑定租户计数（顺序与请求 plan_id 一致；重复 ID 各返回一行） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanBoundTenantCountList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listPlanBoundTenants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 绑定租户摘要列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantSummaryList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listPlanBindableTenants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 可绑定租户摘要列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantSummaryList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
         };

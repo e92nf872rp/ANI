@@ -20,7 +20,7 @@ func main() {
 	coreTenants := core.NewTenantSvcClient()
 
 	// 两个 gRPC service 注册到同一个 server。
-	tenantPlanSvc := service.NewTenantPlanService(plans, audit, coreQuota)
+	tenantPlanSvc := service.NewTenantPlanService(plans, audit, coreQuota, coreTenants)
 	tenantSvc := service.NewTenantService(plans, coreTenants, coreQuota, audit)
 
 	bootstrap.RunGRPC(cfg.GRPCPort, func(s *grpc.Server) {

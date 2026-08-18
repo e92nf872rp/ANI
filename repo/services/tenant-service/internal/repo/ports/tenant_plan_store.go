@@ -62,7 +62,7 @@ type TenantPlan struct {
 	Status      TenantPlanStatus // draft | active | disabled
 	IsDeleted   bool             // 软删除标记
 	DeletedAt   *time.Time       // 软删除时间；nil = 未删除
-	TenantCount int64            // 绑定租户数（仅读路径填充；Create 为 0）
+	TenantCount int64            // 绑定租户数（仅读路径由 service 经 Core SDK 填充；store 不查 tenants）
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -115,14 +115,14 @@ type TenantPlanListFilter struct {
 }
 
 // TenantPlanListItem 是套餐列表/详情的查询视图（仅在查询接口返回，不进 TenantPlan 实体）。
-// 相比 TenantPlan 额外携带 tenant_count（绑定租户数），由 store 通过子查询统计。
+// tenant_count 由 service 经 Core SDK 填充，store 列表查询不再 JOIN tenants。
 type TenantPlanListItem struct {
 	ID          uuid.UUID
 	Code        string
 	Name        string
 	Description string
 	Status      TenantPlanStatus // draft | active | disabled
-	TenantCount int64            // 绑定租户数量（COUNT tenants WHERE plan_id=? AND status != 'disabled'）
+	TenantCount int64            // 绑定租户数量（service 经 Core CountBoundTenants 填充）
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -135,7 +135,7 @@ type TenantPlanListResult struct {
 	NextCursor string               // 下一页游标；空串 = 已无更多数据
 }
 
-// BoundTenant 表示绑定到某套餐的租户摘要（GET /tenant-plans/{planId}/tenants 返回）。
+// BoundTenant 表示绑定/可绑定套餐的租户摘要（由 Core SDK 填充，不再由 store 查 tenants）。
 type BoundTenant struct {
 	ID          uuid.UUID
 	Name        string
@@ -177,8 +177,8 @@ type TenantPlanStore interface {
 	// Disable 将套餐置为 disabled（active → disabled）。
 	Disable(ctx context.Context, id uuid.UUID) (TenantPlan, error)
 
-	// Delete 软删除套餐（is_deleted=TRUE, deleted_at=now()）；
-	// 若仍有非 disabled 租户绑定则返回 ErrTenantPlanInUse（disabled 租户视为已删除，不阻止）。
+	// Delete 软删除套餐（is_deleted=TRUE, deleted_at=now()）。
+	// 占用检查（非 disabled 租户绑定 → ErrTenantPlanInUse）由 service 经 Core SDK 完成，store 不查 tenants。
 	Delete(ctx context.Context, id uuid.UUID) error
 
 	// GetQuotaLimits 读取套餐各维度限额的原始行（保留 NULL 语义）。
@@ -188,13 +188,6 @@ type TenantPlanStore interface {
 	// 供 TenantPlanService.UpdateQuotaLimits（PUT /tenant-plans/{planId}/quota-limits）使用：
 	// 维度已存在则 UPDATE total，不存在则 INSERT；Total 由 service 填为具体值（含 default 兜底）。
 	UpdateQuotaLimits(ctx context.Context, planID uuid.UUID, items []PlanQuotaLimitInput) error
-
-	// ListBoundTenants 查询绑定到指定套餐的租户摘要列表（tenants WHERE plan_id=?）。
-	ListBoundTenants(ctx context.Context, planID uuid.UUID) ([]BoundTenant, error)
-
-	// ListBindableTenants 查询可绑定指定套餐的租户摘要：
-	// status != disabled 且 plan_id IS DISTINCT FROM planID（含未绑定其它套餐）；按 name 排序。
-	ListBindableTenants(ctx context.Context, planID uuid.UUID) ([]BoundTenant, error)
 
 	// GetApprovedQuotaChanges 查询指定租户已审批通过（status='approved'）的配额变更维度，
 	// 用于绑定套餐 / 修改限额同步时保留不覆盖这些维度。

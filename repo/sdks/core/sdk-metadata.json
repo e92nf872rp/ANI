@@ -5,6 +5,24 @@
   "serverURL": "https://{host}/api/v1",
   "operations": [
     {
+      "operationId": "listPlanBoundTenantCounts",
+      "method": "GET",
+      "path": "/admin/plans/bound-tenant-counts",
+      "scope": "scope:quota:read"
+    },
+    {
+      "operationId": "listPlanBindableTenants",
+      "method": "GET",
+      "path": "/admin/plans/{plan_id}/bindable-tenants",
+      "scope": "scope:quota:read"
+    },
+    {
+      "operationId": "listPlanBoundTenants",
+      "method": "GET",
+      "path": "/admin/plans/{plan_id}/bound-tenants",
+      "scope": "scope:quota:read"
+    },
+    {
       "operationId": "listQuotaMeta",
       "method": "GET",
       "path": "/admin/quota-meta",
@@ -1422,6 +1440,8 @@
     "ObservabilityQueryResponse",
     "ObservabilityRangeQueryResponse",
     "PasswordLoginRequest",
+    "PlanBoundTenantCount",
+    "PlanBoundTenantCountList",
     "PlatformPasswordLoginRequest",
     "PlatformWorkload",
     "PlatformWorkloadAcceleratorCapability",
@@ -1535,6 +1555,8 @@
     "StorageVolumeUnmountRequest",
     "Tenant",
     "TenantPlanUpdateRequest",
+    "TenantSummary",
+    "TenantSummaryList",
     "TokenPairResponse",
     "TokenUsageReport",
     "UpdateEmailRecipientRequest",

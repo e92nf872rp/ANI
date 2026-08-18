@@ -101,21 +101,17 @@ func (s *PostgresTenantPlanStore) Create(ctx context.Context, in ports.CreateTen
 	}, nil
 }
 
-// GetByID 按主键查询未删除套餐，并附带 tenant_count。
+// GetByID 按主键查询未删除套餐（不含 tenant_count；由 service 经 Core SDK 填充）。
 func (s *PostgresTenantPlanStore) GetByID(ctx context.Context, id uuid.UUID) (ports.TenantPlan, error) {
 	var plan ports.TenantPlan
 	err := s.db.QueryRow(ctx, `
 		SELECT p.id, p.code, p.name, COALESCE(p.description, ''), p.status, p.is_deleted,
-		       p.created_at, p.updated_at,
-		       COALESCE((
-		         SELECT COUNT(*) FROM tenants t
-		         WHERE t.plan_id = p.id AND t.status <> 'disabled'
-		       ), 0) AS tenant_count
+		       p.created_at, p.updated_at
 		FROM tenant_plans p
 		WHERE p.id = $1 AND p.is_deleted = FALSE
 	`, id).Scan(
 		&plan.ID, &plan.Code, &plan.Name, &plan.Description, &plan.Status,
-		&plan.IsDeleted, &plan.CreatedAt, &plan.UpdatedAt, &plan.TenantCount,
+		&plan.IsDeleted, &plan.CreatedAt, &plan.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -177,10 +173,6 @@ func (s *PostgresTenantPlanStore) List(ctx context.Context, filter ports.TenantP
 	listArgs = append(listArgs, limit+1)
 	rows, err := s.db.Query(ctx, `
 		SELECT p.id, p.code, p.name, p.description, p.status,
-		       COALESCE((
-		         SELECT COUNT(*) FROM tenants t
-		         WHERE t.plan_id = p.id AND t.status <> 'disabled'
-		       ), 0) AS tenant_count,
 		       p.created_at, p.updated_at
 		FROM tenant_plans p
 		WHERE `+listWhere+`
@@ -200,7 +192,7 @@ func (s *PostgresTenantPlanStore) List(ctx context.Context, filter ports.TenantP
 		)
 		if err := rows.Scan(
 			&item.ID, &item.Code, &item.Name, &description, &item.Status,
-			&item.TenantCount, &item.CreatedAt, &item.UpdatedAt,
+			&item.CreatedAt, &item.UpdatedAt,
 		); err != nil {
 			return ports.TenantPlanListResult{}, fmt.Errorf("scan tenant plan list item: %w", err)
 		}
@@ -320,7 +312,7 @@ func (s *PostgresTenantPlanStore) Disable(ctx context.Context, id uuid.UUID) (po
 	return ports.TenantPlan{}, s.stateTransitionReject(ctx, id)
 }
 
-// Delete 软删除套餐（任意状态）；仅非 disabled 租户绑定会阻止删除（TENANT_PLAN_IN_USE）。
+// Delete 软删除套餐（任意状态）。占用检查由 service 经 Core SDK 完成，本方法不查 tenants。
 // 软删除不触发 FK CASCADE，plan_quota_limits 行随套餐行保留。
 func (s *PostgresTenantPlanStore) Delete(ctx context.Context, id uuid.UUID) error {
 	// 步骤 1：未删除套餐须存在，否则 404
@@ -336,18 +328,7 @@ func (s *PostgresTenantPlanStore) Delete(ctx context.Context, id uuid.UUID) erro
 		return ports.ErrTenantPlanNotFound
 	}
 
-	// 步骤 2：仅统计未 disabled 的绑定租户（disabled 等同已删除、不可恢复）→ 有则 409 TENANT_PLAN_IN_USE
-	var bound int64
-	if err := s.db.QueryRow(ctx, `
-		SELECT COUNT(*) FROM tenants WHERE plan_id = $1 AND status <> 'disabled'
-	`, id).Scan(&bound); err != nil {
-		return fmt.Errorf("count bound tenants: %w", err)
-	}
-	if bound > 0 {
-		return ports.ErrTenantPlanInUse
-	}
-
-	// 步骤 3：软删除（is_deleted + deleted_at）；RowsAffected=0 再兜底 404
+	// 步骤 2：软删除（is_deleted + deleted_at）；RowsAffected=0 再兜底 404
 	tag, err := s.db.Exec(ctx, `
 		UPDATE tenant_plans
 		SET is_deleted = TRUE, deleted_at = now(), updated_at = now()
@@ -436,73 +417,6 @@ func (s *PostgresTenantPlanStore) UpdateQuotaLimits(ctx context.Context, planID 
 		return fmt.Errorf("commit update quota limits tx: %w", err)
 	}
 	return nil
-}
-
-func (s *PostgresTenantPlanStore) ListBoundTenants(ctx context.Context, planID uuid.UUID) ([]ports.BoundTenant, error) {
-	// 步骤 1：套餐须存在
-	if err := s.requirePlanExists(ctx, planID); err != nil {
-		return nil, err
-	}
-
-	// 步骤 2：查询非 disabled 绑定租户（与删除/tenant_count 语义一致）
-	rows, err := s.db.Query(ctx, `
-		SELECT id, name, display_name, status
-		FROM tenants
-		WHERE plan_id = $1 AND status <> 'disabled'
-		ORDER BY name
-	`, planID)
-	if err != nil {
-		return nil, fmt.Errorf("list bound tenants: %w", err)
-	}
-	defer rows.Close()
-
-	// 步骤 3：扫描摘要列表
-	out := make([]ports.BoundTenant, 0)
-	for rows.Next() {
-		var t ports.BoundTenant
-		if err := rows.Scan(&t.ID, &t.Name, &t.DisplayName, &t.Status); err != nil {
-			return nil, fmt.Errorf("scan bound tenant: %w", err)
-		}
-		out = append(out, t)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate bound tenants: %w", err)
-	}
-	return out, nil
-}
-
-func (s *PostgresTenantPlanStore) ListBindableTenants(ctx context.Context, planID uuid.UUID) ([]ports.BoundTenant, error) {
-	// 步骤 1：套餐须存在（否则 TENANT_PLAN_NOT_FOUND）
-	if err := s.requirePlanExists(ctx, planID); err != nil {
-		return nil, err
-	}
-
-	// 步骤 2：可绑定 = 非 disabled 且未绑定本套餐（含 plan_id NULL / 其它套餐）
-	rows, err := s.db.Query(ctx, `
-		SELECT id, name, display_name, status
-		FROM tenants
-		WHERE status <> 'disabled'
-		  AND plan_id IS DISTINCT FROM $1
-		ORDER BY name
-	`, planID)
-	if err != nil {
-		return nil, fmt.Errorf("list bindable tenants: %w", err)
-	}
-	defer rows.Close()
-
-	// 步骤 3：扫描摘要列表
-	out := make([]ports.BoundTenant, 0)
-	for rows.Next() {
-		var t ports.BoundTenant
-		if err := rows.Scan(&t.ID, &t.Name, &t.DisplayName, &t.Status); err != nil {
-			return nil, fmt.Errorf("scan bindable tenant: %w", err)
-		}
-		out = append(out, t)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate bindable tenants: %w", err)
-	}
-	return out, nil
 }
 
 func (s *PostgresTenantPlanStore) GetApprovedQuotaChanges(ctx context.Context, tenantID uuid.UUID) ([]ports.ApprovedQuotaChange, error) {

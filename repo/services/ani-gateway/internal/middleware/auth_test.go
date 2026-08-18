@@ -54,6 +54,13 @@ func TestPlatformLogin_TenantIsolation(t *testing.T) {
 		{"platform token on tenant endpoint", "/api/v1/auth/password/login", "platform", false},
 		{"platform token on tenant endpoint (api-keys)", "/api/v1/auth/api-keys", "platform", false},
 		{"empty scope on platform endpoint (defensive)", "/api/v1/auth/platform/password/login", "", false},
+		// Services 层路由：platform 和 tenant 均允许（角色级 RBAC 由 rbac.go 校验）
+		{"platform token on svc endpoint", "/api/v1/svc/tenant-plans", "platform", true},
+		{"platform token on svc tenant-admins", "/api/v1/svc/tenant-admins", "platform", true},
+		{"tenant token on svc endpoint", "/api/v1/svc/tenant-plans", "tenant", true},
+		{"sandbox token on svc endpoint", "/api/v1/svc/tenant-plans", "sandbox", false},
+		{"platform token on admin endpoint", "/api/v1/admin/tenants/123", "platform", true},
+		{"tenant token on admin endpoint", "/api/v1/admin/tenants/123", "tenant", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

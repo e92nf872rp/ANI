@@ -4,6 +4,9 @@ export const title = "KuberCloud ANI Core API";
 export const version = "1.0.0";
 export const serverURL = "https://{host}/api/v1";
 export const operations = [
+  "listPlanBoundTenantCounts",
+  "listPlanBindableTenants",
+  "listPlanBoundTenants",
   "listQuotaMeta",
   "getTenant",
   "updateTenantPlan",
@@ -216,6 +219,9 @@ export const operations = [
   "unmountStorageVolume"
 ];
 export const paths = [
+  "GET /admin/plans/bound-tenant-counts",
+  "GET /admin/plans/{plan_id}/bindable-tenants",
+  "GET /admin/plans/{plan_id}/bound-tenants",
   "GET /admin/quota-meta",
   "GET /admin/tenants/{tenant_id}",
   "PUT /admin/tenants/{tenant_id}/plan",
@@ -584,6 +590,8 @@ export const schemas = [
   "ObservabilityQueryResponse",
   "ObservabilityRangeQueryResponse",
   "PasswordLoginRequest",
+  "PlanBoundTenantCount",
+  "PlanBoundTenantCountList",
   "PlatformPasswordLoginRequest",
   "PlatformWorkload",
   "PlatformWorkloadAcceleratorCapability",
@@ -697,6 +705,8 @@ export const schemas = [
   "StorageVolumeUnmountRequest",
   "Tenant",
   "TenantPlanUpdateRequest",
+  "TenantSummary",
+  "TenantSummaryList",
   "TokenPairResponse",
   "TokenUsageReport",
   "UpdateEmailRecipientRequest",

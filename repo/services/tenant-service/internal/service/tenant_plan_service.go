@@ -28,14 +28,15 @@ type TenantPlanService struct {
 	// 嵌入未实现接口：proto 新增 RPC 时本结构仍可编译（栅栏模式）。
 	tenantv1.UnimplementedTenantPlanServiceServer
 
-	plans ports.TenantPlanStore      // 套餐 + plan_quota_limits 持久化
-	audit ports.TenantPlanAuditStore // 配额套餐域审计（audit_logs）；
-	core  ports.QuotaSvcClient       // Core 配额 API（校验维度 / 后续下发限额）
+	plans   ports.TenantPlanStore      // 套餐 + plan_quota_limits 持久化
+	audit   ports.TenantPlanAuditStore // 配额套餐域审计（audit_logs）；
+	core    ports.QuotaSvcClient       // Core 配额 API（校验维度 / 后续下发限额）
+	tenants ports.TenantSvcClient      // Core 租户 API（tenant_count / 删除占用检查）
 }
 
 // NewTenantPlanService 装配依赖并返回可注册的 gRPC server。
-func NewTenantPlanService(plans ports.TenantPlanStore, audit ports.TenantPlanAuditStore, core ports.QuotaSvcClient) *TenantPlanService {
-	return &TenantPlanService{plans: plans, audit: audit, core: core}
+func NewTenantPlanService(plans ports.TenantPlanStore, audit ports.TenantPlanAuditStore, core ports.QuotaSvcClient, tenants ports.TenantSvcClient) *TenantPlanService {
+	return &TenantPlanService{plans: plans, audit: audit, core: core, tenants: tenants}
 }
 
 // Register 向 gRPC Server 注册本服务（由 services/pkg/bootstrap.RunGRPC 回调）。
@@ -80,9 +81,19 @@ func (s *TenantPlanService) ListTenantPlans(ctx context.Context, req *tenantv1.L
 		return nil, mapStoreError(err)
 	}
 
-	// 步骤 4：组装响应（items 不含 quota_limits）
+	ids := make([]uuid.UUID, 0, len(result.Items))
+	for _, it := range result.Items {
+		ids = append(ids, it.ID)
+	}
+	counts, err := s.boundTenantCounts(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+
+	// 步骤 4：组装响应（items 不含 quota_limits）；tenant_count 来自 Core
 	items := make([]*tenantv1.TenantPlan, 0, len(result.Items))
 	for _, it := range result.Items {
+		it.TenantCount = counts[it.ID]
 		items = append(items, listItemToPB(it))
 	}
 	return &tenantv1.ListTenantPlansResponse{
@@ -180,6 +191,12 @@ func (s *TenantPlanService) GetTenantPlan(ctx context.Context, req *tenantv1.Get
 		return nil, mapStoreError(err)
 	}
 
+	counts, err := s.boundTenantCounts(ctx, []uuid.UUID{id})
+	if err != nil {
+		return nil, err
+	}
+	plan.TenantCount = counts[id]
+
 	// 步骤 3：组装响应
 	return planToPB(plan), nil
 }
@@ -271,14 +288,33 @@ func (s *TenantPlanService) DeleteTenantPlan(ctx context.Context, req *tenantv1.
 		return nil, err
 	}
 
-	// 步骤 2：软删除
+	// 步骤 2：套餐须存在且未删除（404 优先于占用检查，保持原错误语义）
+	if _, err := s.plans.GetByID(ctx, id); err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, action, map[string]any{"plan_id": id.String()}, mapped, nil)
+		return nil, mapped
+	}
+
+	// 步骤 3：Core 统计非 disabled 绑定租户；有则 409 TENANT_PLAN_IN_USE
+	counts, err := s.boundTenantCounts(ctx, []uuid.UUID{id})
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, action, map[string]any{"plan_id": id.String()}, err, nil)
+		return nil, err
+	}
+	if counts[id] > 0 {
+		mapped := mapStoreError(ports.ErrTenantPlanInUse)
+		writeAuditFailure(ctx, s.audit, action, map[string]any{"plan_id": id.String()}, mapped, nil)
+		return nil, mapped
+	}
+
+	// 步骤 4：软删除
 	if err := s.plans.Delete(ctx, id); err != nil {
 		mapped := mapStoreError(err)
 		writeAuditFailure(ctx, s.audit, action, map[string]any{"plan_id": id.String()}, mapped, nil)
 		return nil, mapped
 	}
 
-	// 步骤 3：写成功审计（事后记录；失败不阻断已删除成功）
+	// 步骤 5：写成功审计（事后记录；失败不阻断已删除成功）
 	writeAuditSuccess(ctx, s.audit, action, map[string]any{"plan_id": id.String()}, nil)
 
 	return &tenantv1.IdempotentResult{
@@ -461,23 +497,17 @@ func (s *TenantPlanService) ListTenantPlanBoundTenants(ctx context.Context, req 
 		return nil, err
 	}
 
-	// 步骤 2：列出非 disabled 绑定租户（套餐不存在 → TENANT_PLAN_NOT_FOUND）
-	tenants, err := s.plans.ListBoundTenants(ctx, id)
-	if err != nil {
+	// 步骤 2：套餐须存在；租户列表经 Core SDK（不再直查 tenants 表）
+	if _, err := s.plans.GetByID(ctx, id); err != nil {
 		return nil, mapStoreError(err)
+	}
+	tenants, err := s.coreBoundTenants(ctx, id)
+	if err != nil {
+		return nil, err
 	}
 
 	// 步骤 3：映射为 gRPC BoundTenant（不分页）
-	items := make([]*tenantv1.BoundTenant, 0, len(tenants))
-	for _, t := range tenants {
-		items = append(items, &tenantv1.BoundTenant{
-			Id:          t.ID.String(),
-			Name:        t.Name,
-			DisplayName: t.DisplayName,
-			Status:      string(t.Status),
-		})
-	}
-	return &tenantv1.ListTenantPlanBoundTenantsResponse{Items: items}, nil
+	return &tenantv1.ListTenantPlanBoundTenantsResponse{Items: boundTenantsToPB(tenants)}, nil
 }
 
 // ListBindableTenants 查询可绑定该套餐的租户摘要（US-018 / issue-009c）。
@@ -492,23 +522,17 @@ func (s *TenantPlanService) ListBindableTenants(ctx context.Context, req *tenant
 		return nil, err
 	}
 
-	// 步骤 2：列出可绑定租户（套餐不存在 → TENANT_PLAN_NOT_FOUND）
-	tenants, err := s.plans.ListBindableTenants(ctx, id)
-	if err != nil {
+	// 步骤 2：套餐须存在；可绑定列表经 Core SDK
+	if _, err := s.plans.GetByID(ctx, id); err != nil {
 		return nil, mapStoreError(err)
+	}
+	tenants, err := s.coreBindableTenants(ctx, id)
+	if err != nil {
+		return nil, err
 	}
 
 	// 步骤 3：映射为 gRPC BoundTenant（不分页）
-	items := make([]*tenantv1.BoundTenant, 0, len(tenants))
-	for _, t := range tenants {
-		items = append(items, &tenantv1.BoundTenant{
-			Id:          t.ID.String(),
-			Name:        t.Name,
-			DisplayName: t.DisplayName,
-			Status:      string(t.Status),
-		})
-	}
-	return &tenantv1.ListBindableTenantsResponse{Items: items}, nil
+	return &tenantv1.ListBindableTenantsResponse{Items: boundTenantsToPB(tenants)}, nil
 }
 
 // ListTenantPlanAuditLogs 查询套餐操作历史（US-011 / issue-010）：游标分页。
@@ -667,8 +691,8 @@ func (s *TenantPlanService) syncBoundTenantQuotaLimits(ctx context.Context, plan
 	}
 	totalByType := totalsFromQuotaViews(views)
 
-	// 步骤 3：列出绑定租户（status <> disabled）
-	tenants, err := s.plans.ListBoundTenants(ctx, planID)
+	// 步骤 3：列出绑定租户（status <> disabled，经 Core SDK）
+	tenants, err := s.coreBoundTenants(ctx, planID)
 	if err != nil {
 		return 0, 0, 0, updatedDims
 	}
@@ -961,9 +985,64 @@ func mapStoreError(err error) error {
 		detail := strings.TrimSpace(strings.TrimPrefix(err.Error(), ports.ErrValidationFailed.Error()+":"))
 		detail = strings.TrimSpace(strings.TrimPrefix(detail, ports.ErrValidationFailed.Error()))
 		return businessError(codes.InvalidArgument, ports.ErrValidationFailed, detail)
+	case errors.Is(err, ports.ErrCoreUnavailable):
+		return businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant api unavailable")
 	default:
 		return status.Errorf(codes.Internal, "tenant plan operation failed: %v", err)
 	}
+}
+
+// boundTenantCounts 经 Core SDK 批量查询套餐绑定租户数（status <> disabled）。
+func (s *TenantPlanService) boundTenantCounts(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]int64, error) {
+	if len(ids) == 0 {
+		return map[uuid.UUID]int64{}, nil
+	}
+	if s.tenants == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant api unavailable")
+	}
+	counts, err := s.tenants.CountBoundTenants(ctx, ids)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	if counts == nil {
+		counts = map[uuid.UUID]int64{}
+	}
+	return counts, nil
+}
+
+func (s *TenantPlanService) coreBoundTenants(ctx context.Context, planID uuid.UUID) ([]ports.BoundTenant, error) {
+	if s.tenants == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant api unavailable")
+	}
+	tenants, err := s.tenants.ListBoundTenants(ctx, planID)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	return tenants, nil
+}
+
+func (s *TenantPlanService) coreBindableTenants(ctx context.Context, planID uuid.UUID) ([]ports.BoundTenant, error) {
+	if s.tenants == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant api unavailable")
+	}
+	tenants, err := s.tenants.ListBindableTenants(ctx, planID)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	return tenants, nil
+}
+
+func boundTenantsToPB(tenants []ports.BoundTenant) []*tenantv1.BoundTenant {
+	items := make([]*tenantv1.BoundTenant, 0, len(tenants))
+	for _, t := range tenants {
+		items = append(items, &tenantv1.BoundTenant{
+			Id:          t.ID.String(),
+			Name:        t.Name,
+			DisplayName: t.DisplayName,
+			Status:      string(t.Status),
+		})
+	}
+	return items
 }
 
 // parsePlanID 校验并解析 plan_id（必填 UUID）。

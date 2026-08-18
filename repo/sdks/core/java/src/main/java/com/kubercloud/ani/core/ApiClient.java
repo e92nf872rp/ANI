@@ -26,6 +26,9 @@ public final class ApiClient {
     public static final String VERSION = "1.0.0";
     public static final String SERVER_URL = "https://{host}/api/v1";
     public static final List<String> OPERATIONS = Collections.unmodifiableList(Arrays.asList(
+        "listPlanBoundTenantCounts",
+        "listPlanBindableTenants",
+        "listPlanBoundTenants",
         "listQuotaMeta",
         "getTenant",
         "updateTenantPlan",
@@ -238,6 +241,9 @@ public final class ApiClient {
         "unmountStorageVolume"
     ));
     public static final List<String> PATHS = Collections.unmodifiableList(Arrays.asList(
+        "GET /admin/plans/bound-tenant-counts",
+        "GET /admin/plans/{plan_id}/bindable-tenants",
+        "GET /admin/plans/{plan_id}/bound-tenants",
         "GET /admin/quota-meta",
         "GET /admin/tenants/{tenant_id}",
         "PUT /admin/tenants/{tenant_id}/plan",
@@ -606,6 +612,8 @@ public final class ApiClient {
         "ObservabilityQueryResponse",
         "ObservabilityRangeQueryResponse",
         "PasswordLoginRequest",
+        "PlanBoundTenantCount",
+        "PlanBoundTenantCountList",
         "PlatformPasswordLoginRequest",
         "PlatformWorkload",
         "PlatformWorkloadAcceleratorCapability",
@@ -719,6 +727,8 @@ public final class ApiClient {
         "StorageVolumeUnmountRequest",
         "Tenant",
         "TenantPlanUpdateRequest",
+        "TenantSummary",
+        "TenantSummaryList",
         "TokenPairResponse",
         "TokenUsageReport",
         "UpdateEmailRecipientRequest",

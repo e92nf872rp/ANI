@@ -19,6 +19,9 @@ const Version = "1.0.0"
 const ServerURL = "https://{host}/api/v1"
 
 var Operations = []string{
+	"listPlanBoundTenantCounts",
+	"listPlanBindableTenants",
+	"listPlanBoundTenants",
 	"listQuotaMeta",
 	"getTenant",
 	"updateTenantPlan",
@@ -231,6 +234,9 @@ var Operations = []string{
 	"unmountStorageVolume",
 }
 var Paths = []string{
+	"GET /admin/plans/bound-tenant-counts",
+	"GET /admin/plans/{plan_id}/bindable-tenants",
+	"GET /admin/plans/{plan_id}/bound-tenants",
 	"GET /admin/quota-meta",
 	"GET /admin/tenants/{tenant_id}",
 	"PUT /admin/tenants/{tenant_id}/plan",
@@ -599,6 +605,8 @@ var Schemas = []string{
 	"ObservabilityQueryResponse",
 	"ObservabilityRangeQueryResponse",
 	"PasswordLoginRequest",
+	"PlanBoundTenantCount",
+	"PlanBoundTenantCountList",
 	"PlatformPasswordLoginRequest",
 	"PlatformWorkload",
 	"PlatformWorkloadAcceleratorCapability",
@@ -712,6 +720,8 @@ var Schemas = []string{
 	"StorageVolumeUnmountRequest",
 	"Tenant",
 	"TenantPlanUpdateRequest",
+	"TenantSummary",
+	"TenantSummaryList",
 	"TokenPairResponse",
 	"TokenUsageReport",
 	"UpdateEmailRecipientRequest",

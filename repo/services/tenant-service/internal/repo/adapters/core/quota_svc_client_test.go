@@ -181,3 +181,126 @@ func TestTenantSvcClient_UpdateTenantPlan(t *testing.T) {
 		t.Fatalf("plan_id=%s", got.PlanID)
 	}
 }
+
+func TestTenantSvcClient_CountBoundTenants(t *testing.T) {
+	t.Parallel()
+
+	planA := "11111111-1111-4111-8111-111111111111"
+	planB := "22222222-2222-4222-8222-222222222222"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/admin/plans/bound-tenant-counts" {
+			t.Fatalf("%s %s", r.Method, r.URL.Path)
+		}
+		got := r.URL.Query()["plan_id"]
+		if len(got) != 2 || got[0] != planA || got[1] != planB {
+			t.Fatalf("plan_id query = %v", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"items": []map[string]any{
+				{"plan_id": planA, "count": 12},
+				{"plan_id": planB, "count": 0},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := &TenantSvcClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
+	got, err := client.CountBoundTenants(context.Background(), []uuid.UUID{
+		uuid.MustParse(planA), uuid.MustParse(planB),
+	})
+	if err != nil {
+		t.Fatalf("CountBoundTenants: %v", err)
+	}
+	if got[uuid.MustParse(planA)] != 12 || got[uuid.MustParse(planB)] != 0 {
+		t.Fatalf("got=%v", got)
+	}
+}
+
+func TestTenantSvcClient_CountBoundTenants_MissingItems(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	client := &TenantSvcClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
+	_, err := client.CountBoundTenants(context.Background(), []uuid.UUID{uuid.New()})
+	if err == nil || !strings.Contains(err.Error(), ports.ErrCoreUnavailable.Error()) {
+		t.Fatalf("expected ErrCoreUnavailable, got %v", err)
+	}
+}
+
+func TestTenantSvcClient_ListBoundTenants(t *testing.T) {
+	t.Parallel()
+
+	planID := "11111111-1111-4111-8111-111111111111"
+	tenantID := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/admin/plans/"+planID+"/bound-tenants" {
+			t.Fatalf("%s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"items": []map[string]any{
+				{"id": tenantID, "name": "acme", "display_name": "Acme", "status": "active"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := &TenantSvcClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
+	got, err := client.ListBoundTenants(context.Background(), uuid.MustParse(planID))
+	if err != nil {
+		t.Fatalf("ListBoundTenants: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "acme" || got[0].Status != ports.TenantStatusActive {
+		t.Fatalf("got=%+v", got)
+	}
+}
+
+func TestTenantSvcClient_ListBindableTenants(t *testing.T) {
+	t.Parallel()
+
+	planID := "22222222-2222-4222-8222-222222222222"
+	tenantID := "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/admin/plans/"+planID+"/bindable-tenants" {
+			t.Fatalf("%s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"items": []map[string]any{
+				{"id": tenantID, "name": "beta", "display_name": "Beta", "status": "frozen"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := &TenantSvcClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
+	got, err := client.ListBindableTenants(context.Background(), uuid.MustParse(planID))
+	if err != nil {
+		t.Fatalf("ListBindableTenants: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "beta" || got[0].Status != ports.TenantStatusFrozen {
+		t.Fatalf("got=%+v", got)
+	}
+}
+
+func TestTenantSvcClient_ListBoundTenants_MissingItems(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	client := &TenantSvcClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
+	_, err := client.ListBoundTenants(context.Background(), uuid.New())
+	if err == nil || !strings.Contains(err.Error(), ports.ErrCoreUnavailable.Error()) {
+		t.Fatalf("expected ErrCoreUnavailable, got %v", err)
+	}
+}

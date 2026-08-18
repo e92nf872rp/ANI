@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>210</dd></div>
-          <div><dt>Schemas</dt><dd>293</dd></div>
+          <div><dt>Operations</dt><dd>213</dd></div>
+          <div><dt>Schemas</dt><dd>297</dd></div>
         </dl>
       </section>
 
@@ -159,6 +159,30 @@
             </tr>
           </thead>
           <tbody>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/admin/plans/bound-tenant-counts</code></td>
+          <td><code>listPlanBoundTenantCounts</code></td>
+          <td>按套餐统计绑定中的租户数</td>
+          <td><code>scope:quota:read</code></td>
+          <td>200, 400, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/admin/plans/{plan_id}/bindable-tenants</code></td>
+          <td><code>listPlanBindableTenants</code></td>
+          <td>查询可绑定指定套餐的租户摘要</td>
+          <td><code>scope:quota:read</code></td>
+          <td>200, 400, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/admin/plans/{plan_id}/bound-tenants</code></td>
+          <td><code>listPlanBoundTenants</code></td>
+          <td>查询绑定到指定套餐的租户摘要</td>
+          <td><code>scope:quota:read</code></td>
+          <td>200, 400, 401, 403</td>
+        </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
           <td><code>/admin/quota-meta</code></td>
@@ -2002,6 +2026,8 @@
         <li><code>ObservabilityQueryResponse</code></li>
         <li><code>ObservabilityRangeQueryResponse</code></li>
         <li><code>PasswordLoginRequest</code></li>
+        <li><code>PlanBoundTenantCount</code></li>
+        <li><code>PlanBoundTenantCountList</code></li>
         <li><code>PlatformPasswordLoginRequest</code></li>
         <li><code>PlatformWorkload</code></li>
         <li><code>PlatformWorkloadAcceleratorCapability</code></li>
@@ -2115,6 +2141,8 @@
         <li><code>StorageVolumeUnmountRequest</code></li>
         <li><code>Tenant</code></li>
         <li><code>TenantPlanUpdateRequest</code></li>
+        <li><code>TenantSummary</code></li>
+        <li><code>TenantSummaryList</code></li>
         <li><code>TokenPairResponse</code></li>
         <li><code>TokenUsageReport</code></li>
         <li><code>UpdateEmailRecipientRequest</code></li>

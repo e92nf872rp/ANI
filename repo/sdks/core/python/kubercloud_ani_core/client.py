@@ -8,6 +8,9 @@ TITLE = "KuberCloud ANI Core API"
 VERSION = "1.0.0"
 SERVER_URL = "https://{host}/api/v1"
 OPERATIONS = [
+    "listPlanBoundTenantCounts",
+    "listPlanBindableTenants",
+    "listPlanBoundTenants",
     "listQuotaMeta",
     "getTenant",
     "updateTenantPlan",
@@ -220,6 +223,9 @@ OPERATIONS = [
     "unmountStorageVolume"
 ]
 PATHS = [
+    "GET /admin/plans/bound-tenant-counts",
+    "GET /admin/plans/{plan_id}/bindable-tenants",
+    "GET /admin/plans/{plan_id}/bound-tenants",
     "GET /admin/quota-meta",
     "GET /admin/tenants/{tenant_id}",
     "PUT /admin/tenants/{tenant_id}/plan",
@@ -588,6 +594,8 @@ SCHEMAS = [
     "ObservabilityQueryResponse",
     "ObservabilityRangeQueryResponse",
     "PasswordLoginRequest",
+    "PlanBoundTenantCount",
+    "PlanBoundTenantCountList",
     "PlatformPasswordLoginRequest",
     "PlatformWorkload",
     "PlatformWorkloadAcceleratorCapability",
@@ -701,6 +709,8 @@ SCHEMAS = [
     "StorageVolumeUnmountRequest",
     "Tenant",
     "TenantPlanUpdateRequest",
+    "TenantSummary",
+    "TenantSummaryList",
     "TokenPairResponse",
     "TokenUsageReport",
     "UpdateEmailRecipientRequest",

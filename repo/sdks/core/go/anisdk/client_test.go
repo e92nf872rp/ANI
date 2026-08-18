@@ -41,7 +41,7 @@ func TestSDKAlphaSmoke(t *testing.T) {
 	if len(Operations) == 0 {
 		t.Fatalf("expected generated operations")
 	}
-	if !HasOperation("listQuotaMeta") {
+	if !HasOperation("listPlanBoundTenantCounts") {
 		t.Fatalf("missing expected operation")
 	}
 
