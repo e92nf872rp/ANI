@@ -104,6 +104,10 @@ func (f fakeGPUInventory) PlanScheduling(context.Context, ports.GPUSchedulingReq
 	return ports.GPUSchedulingDecision{}, ports.ErrUnsupported
 }
 
+func (f fakeGPUInventory) ListSpecAvailability(context.Context, string) ([]ports.GPUSpecAvailability, error) {
+	return nil, ports.ErrUnsupported
+}
+
 // stubInstanceStore is an in-memory WorkloadInstanceStore for GPU inventory
 // echo tests. It only implements List; other methods return ErrNotFound /
 // ErrUnsupported.

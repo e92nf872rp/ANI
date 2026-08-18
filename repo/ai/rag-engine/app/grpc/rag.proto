@@ -2,21 +2,49 @@ syntax = "proto3";
 
 package rag.v1;
 
-// rag-engine internal Query RPC (SPEC §4.1).
+// rag-engine internal RPC definitions (SPEC §4.1, RAG-REFACTOR-STEP-2).
 //
-// Message shapes are intentionally identical to kb_service.proto
-// QueryRequest / QueryResponse / SourceChunk (same field numbers and types)
-// so kb-service can call rag-engine's Query RPC with the same payload it
-// receives from its own clients. Per SPEC §11.1 the rag-engine may define
-// an internal proto rather than importing kb_service.proto; this file is
-// that internal proto (kept in sync with kb_service.proto Query messages).
+// The legacy Query RPC (QueryRequest/QueryResponse) is retained until
+// STEP-11 removes it. The old Query path uses REST (not gRPC), so the
+// SourceChunk field renumbering below does not affect it.
+//
+// SourceChunk has been renumbered: chunk_id is now field 1, and the
+// legacy fields (doc_id, file_name, page, content, score) shifted to
+// 2-6. This is NOT wire-compatible with kb_service.proto's SourceChunk
+// (which has doc_id=1, score=5). The new gRPC client in kb-service
+// (STEP-3, issue-030) uses rag.proto's definition directly, so no
+// cross-proto serialization occurs.
+//
+// New stateless RPCs (Parse/Embed/Generate/GenerateStream) are the
+// compliance-compliant execution surface: rag-engine becomes a stateless
+// RPC engine orchestrated by kb-service. These RPCs do NOT depend on
+// LlamaIndex.
 
 option go_package = "github.com/kubercloud/ani/ai/rag-engine/app/generated/rag/v1;ragv1";
 
 service RagEngine {
-  // Query performs a synchronous RAG query and returns the answer + sources.
+  // [DEPRECATED] Query performs a synchronous RAG query and returns the
+  // answer + sources. Retained until STEP-11; new callers should use
+  // retrieve (kb-service) + Generate.
   rpc Query(QueryRequest) returns (QueryResponse);
+
+  // Parse downloads a document from download_url, parses + chunks it, and
+  // returns the chunks (parents + children + images). Stateless.
+  rpc Parse(ParseRequest) returns (ParseResponse);
+
+  // Embed computes embedding vectors for the given texts. Stateless.
+  rpc Embed(EmbedRequest) returns (EmbedResponse);
+
+  // Generate runs a single LLM completion over the question + context +
+  // history and returns the answer + token usage. Stateless.
+  rpc Generate(GenerateRequest) returns (GenerateResponse);
+
+  // GenerateStream is the streaming variant of Generate; yields tokens
+  // then a final done message with token usage. Stateless.
+  rpc GenerateStream(GenerateRequest) returns (stream GenerateToken);
 }
+
+// ── Legacy Query messages (deprecated, unchanged) ────────────────────────────
 
 message QueryRequest {
   string tenant_id        = 1;
@@ -38,10 +66,85 @@ message QueryResponse {
   int32  output_tokens    = 5;
 }
 
+// SourceChunk: chunk_id added (field 1) for RRF rank-fusion key.
+// Backwards compatible: legacy Query RPC callers that don't set chunk_id
+// get the default empty string (old behavior unchanged).
 message SourceChunk {
-  string doc_id    = 1;
-  string file_name = 2;
-  int32  page      = 3;
-  string content   = 4;   // the cited passage
-  float  score     = 5;   // similarity score [0,1]
+  string chunk_id  = 1;   // NEW: chunk unique ID (RRF fusion key)
+  string doc_id    = 2;
+  string file_name = 3;
+  int32  page      = 4;
+  string content   = 5;   // the cited passage
+  float  score     = 6;   // similarity score [0,1]
+}
+
+// ── Parse RPC messages (STEP-2 contract) ────────────────────────────────────
+
+message ParseRequest {
+  string download_url   = 1;   // Core API presigned download URL (avoids gRPC 4MB limit)
+  string file_name      = 2;
+  string file_type      = 3;
+  int32  chunk_size     = 4;
+}
+
+message ParsedChunk {
+  string chunk_id        = 1;
+  string content         = 2;
+  string content_type    = 3;
+  int32  page_number     = 4;
+  string parent_content  = 5;
+  string chunk_type      = 6;   // parent | child | image
+  string metadata_json   = 7;
+  bytes  image_bytes     = 8;
+  string image_format    = 9;
+  string parent_chunk_id = 10;  // child chunk's parent ID (dedup key for _return_parent_and_dedup)
+}
+
+message ParseResponse {
+  repeated ParsedChunk chunks = 1;
+}
+
+// ── Embed RPC messages (STEP-2 contract) ────────────────────────────────────
+
+message EmbedRequest {
+  repeated string texts = 1;
+  string model = 2;  // embedding model name; empty = use server default (settings.embedding_model)
+}
+
+message EmbedResponse {
+  // Flattened 1-D array: vectors_flat[i * dimension + j] = j-th dim of i-th text.
+  // Avoids nested repeated float serialization complexity.
+  repeated float vectors_flat = 1;
+  int32 dimension = 2;
+  int32 count = 3;
+}
+
+// ── Generate RPC messages (STEP-2 contract) ─────────────────────────────────
+
+message GenerateRequest {
+  string question              = 1;   // user question; appended as USER msg at history end (reproduces {query_str})
+  string session_id            = 2;
+  repeated SourceChunk context  = 3;
+  string inference_service_name = 4;
+  int32  max_tokens             = 5;
+  repeated ChatMessage history  = 6;  // includes current-turn user msg (reproduces legacy behavior)
+}
+
+message ChatMessage {
+  string role    = 1;
+  string content = 2;
+}
+
+message GenerateResponse {
+  string answer        = 1;
+  int32  input_tokens  = 2;
+  int32  output_tokens = 3;
+  string session_id    = 4;
+}
+
+message GenerateToken {
+  string content      = 1;
+  bool   done         = 2;
+  int32  input_tokens  = 3;
+  int32  output_tokens = 4;
 }

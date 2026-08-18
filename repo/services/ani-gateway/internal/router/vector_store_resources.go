@@ -50,6 +50,7 @@ type vectorStoreKnowledgeBaseLinkRequest struct {
 type vectorDocumentInputBody struct {
 	ID       string         `json:"id,omitempty"`
 	Content  string         `json:"content"`
+	Vector   []float32      `json:"vector,omitempty"`
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
@@ -92,6 +93,7 @@ type vectorStoreDeleteBlockerJSON struct {
 type vectorSearchHitResponse struct {
 	ID       string            `json:"id"`
 	Score    float32           `json:"score"`
+	Content  string            `json:"content"`
 	Metadata map[string]string `json:"metadata"`
 }
 
@@ -216,6 +218,7 @@ func (api *vectorStoreAPI) searchVectorStore(ctx context.Context, c *app.Request
 		items = append(items, vectorSearchHitResponse{
 			ID:       result.ID,
 			Score:    result.Score,
+			Content:  result.Content,
 			Metadata: result.Metadata,
 		})
 	}
@@ -297,6 +300,7 @@ func (api *vectorStoreAPI) insertVectorStoreDocuments(ctx context.Context, c *ap
 		documents = append(documents, ports.VectorDocumentInput{
 			ID:       document.ID,
 			Content:  document.Content,
+			Vector:   document.Vector,
 			Metadata: stringMetadata(document.Metadata),
 		})
 	}

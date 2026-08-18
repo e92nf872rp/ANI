@@ -2511,6 +2511,7 @@ components:
         chunk:    { type: string, nullable: true }
         score:    { type: number, format: float }
         source:   { type: string, nullable: true }
+        content:  { type: string, description: chunk 文本 (从存储后端返回, 可选) }
         metadata:
           type: object
           additionalProperties: { type: string }
@@ -3368,6 +3369,10 @@ components:
             required: [content]
             properties:
               content:  { type: string }
+              vector:
+                type: array
+                items: { type: number, format: float }
+                description: 预计算向量 (可选; 为空则 Core 内部生成伪向量)
               metadata: { type: object, additionalProperties: true }
               id:       { type: string }
 

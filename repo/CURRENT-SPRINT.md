@@ -245,6 +245,43 @@ make validate-architecture
 git diff --check
 ```
 
+## Metering Service 功能流（2026-08）
+
+> 独立于 Sprint 13/14 real provider 收敛的 Metering Service 计量采集功能开发流，覆盖 metering_usage_records migration、port 接口、collector 实现、consumer/rebuilder、集成测试、部署清单与 Live Gate 缺陷修复。批次记录归档于 `development-records/pr-m1-metering-consumer.md` ~ `pr-m5-metering-consumer.md`。
+
+| Issue | 描述 | 状态 | 证据 |
+|---|---|---|---|
+| #001 | metering_usage_records migration（`ani_metering_writer` BYPASSRLS + RLS policy）+ `MeteringCollectionService` port + `InstanceLifecycleEvent`/`MeteringUsageRecord` schema + go.mod/config.go + service 实现 + 13 单测 | ✅ 已完成 | `pr-m1-metering-consumer.md` |
+| #002 | Collector 接口 + DCGMGPUCollector/KubeletCPUCollector/KubeletMemCollector + Resolve/CollectAll router（24 测试）+ buildSpec 维度映射 + parseGPUCount（16 测试） | ✅ 已完成 | `pr-m2-metering-collectors.md` |
+| #003 | Consumer handleEvent + seenSeq 两阶段锁（11 测试）+ Rebuilder WithPlatformTx 绕过 RLS（8 测试）+ main.go bootstrap | ✅ 已完成 | `pr-m3-metering-consumer.md` |
+| #004 | 9 集成测试场景（事件驱动/保底/幂等/rebuild/seenSeq 乱序/失败重投/租户 mismatch/poison/DB UNIQUE）9/9 PASS | ✅ 已完成 | `pr-m4-metering-consumer.md` |
+| #005 | 部署清单 metering-service-live-deps.yaml + Live Gate 4 缺陷修复 + NATS 事件验证 | ✅ 已完成 | `pr-m5-metering-consumer.md` |
+
+Live Gate 修复详情（2026-08-14，真实 K8s 集群部署后）：
+
+| 缺陷 | 根因 | 修复 |
+|---|---|---|
+| PromQL 返回 "no samples" | collector 用 instance_id 做 pod 正则，Prometheus pod 标签值是 `{name}-{hash}-{hash}` | CollectionSpec 新增 WorkloadName 字段，collector 用 K8s 资源名做 `pod=~"^<name>(-.*)?$"` 正则匹配 |
+| CPU 多副本只取第一个 pod | `rate()` 返回多向量，`queryPrometheusScalar` 只取 Result[0] | CPU 查询加外层 `sum(rate(...))` 聚合所有副本 |
+| 写入错误 schema `_e2e_issue025` | `ani_app_user` 的 search_path 为 `_e2e_issue025, public` | `ALTER ROLE ani_app_user SET search_path TO public` |
+| RLS 阻止写入 | `ani_app_user` 受 RLS 约束，`app.current_tenant_id` 未设置 | persistRecords 用 `SET ROLE ani_metering_writer` 绕过 RLS + migration 补充 `GRANT ani_metering_writer TO ani_app_user` |
+
+验收命令：
+
+```bash
+# 单元测试
+cd repo
+go test -count=1 ./services/metering-service/internal/...
+go test -count=1 ./pkg/adapters/metering/...
+
+# 集成测试（需真实 NATS，build tag 隔离）
+go test -tags=integration ./services/metering-service/internal/...
+
+# 架构校验
+make validate-architecture
+git diff --check
+```
+
 ## Sprint 13 执行矩阵
 
 | 候选切片 | 真实组件方向 | 代码边界 | 当前状态 |

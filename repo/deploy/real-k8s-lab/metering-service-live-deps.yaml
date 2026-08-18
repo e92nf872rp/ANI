@@ -1,0 +1,129 @@
+# ANI Platform · Metering Service Live Dependencies
+# 部署前需先创建 secret ani-metering-runtime，包含以下 key：
+#   - database_url : PostgreSQL 连接串
+#   - nats_url     : NATS 连接串
+#   - redis_url    : Redis 连接串
+#
+# 创建命令：
+#
+#   kubectl create secret generic ani-metering-runtime \
+#     --namespace=ani-system \
+#     --from-literal=database_url="postgres://ani:ani_dev_password@ani-reconcile-ha-postgres.ani-system.svc.cluster.local:5432/ani?sslmode=disable" \
+#     --from-literal=nats_url="nats://ani-reconcile-ha-nats.ani-system.svc.cluster.local:4222" \
+#     --from-literal=redis_url="redis://:ani_dev_password@ani-reconcile-ha-redis.ani-system.svc.cluster.local:6379"
+#
+# 若 secret 已存在需要更新，追加 --dry-run=client -o yaml | kubectl apply -f -
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ani-metering-service
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-metering-service
+    ani.dev/profile: metering-service-live-deps
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ani-metering-service
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-metering-service
+    ani.dev/profile: metering-service-live-deps
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ani-metering-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ani-metering-service
+        ani.dev/profile: metering-service-live-deps
+    spec:
+      serviceAccountName: ani-metering-service
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: metering-service
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          command:
+            - /opt/ani/bin/metering-service
+          ports:
+            - name: health
+              containerPort: 9210
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ani-metering-runtime
+                  key: database_url
+            - name: NATS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ani-metering-runtime
+                  key: nats_url
+            - name: METERING_PROMETHEUS_URL
+              value: http://sprint13-prometheus.ani-s07-observability.svc.cluster.local:9090
+            - name: METERING_COLLECTION_INTERVAL_SECONDS
+              value: "60"
+            - name: HEALTH_PORT
+              value: "9210"
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ani-metering-runtime
+                  key: redis_url
+          readinessProbe:
+            tcpSocket:
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: ani-bin
+              mountPath: /opt/ani/bin
+              readOnly: true
+      volumes:
+        - name: ani-bin
+          hostPath:
+            path: /opt/ani/bin
+            type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ani-metering-service
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/name: ani-metering-service
+    ani.dev/profile: metering-service-live-deps
+spec:
+  selector:
+    app.kubernetes.io/name: ani-metering-service
+  ports:
+    - name: health
+      port: 9210
+      targetPort: health

@@ -444,6 +444,41 @@ func RunGRPC(port int, register func(*grpc.Server), deps *Deps) {
 	deps.Logger.Info("gRPC server stopped")
 }
 
+// RunHealthProbe 仅启动 health probe HTTP 服务器，不启动 gRPC。
+// 用于不需要 gRPC 的服务（如 metering-service）。
+// 阻塞直到收到 SIGINT/SIGTERM，然后优雅关闭 probe 服务器。
+func RunHealthProbe(deps *Deps) {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	var probe *http.Server
+	if deps.HealthPort > 0 {
+		probe = &http.Server{
+			Addr:              fmt.Sprintf(":%d", deps.HealthPort),
+			Handler:           newProbeHandler(deps.ServiceName, dependencyProbeChecks(deps), reconcileControllerMetricsReader(deps)),
+			ReadHeaderTimeout: 5 * time.Second,
+		}
+		go func() {
+			deps.Logger.Info("health probe server listening", "port", deps.HealthPort)
+			if err := probe.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				deps.Logger.Error("health probe serve error", "err", err)
+				os.Exit(1)
+			}
+		}()
+	}
+
+	<-ctx.Done()
+	deps.Logger.Info("health probe shutting down")
+	if probe != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := probe.Shutdown(shutdownCtx); err != nil {
+			deps.Logger.Error("health probe shutdown error", "err", err)
+		}
+	}
+	deps.Logger.Info("health probe stopped")
+}
+
 func RunWorkloadReconcileWorker(deps *Deps) {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

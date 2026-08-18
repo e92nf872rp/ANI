@@ -31,6 +31,7 @@ const (
 	KBService_ListDocuments_FullMethodName          = "/kb.v1.KBService/ListDocuments"
 	KBService_DeleteDocument_FullMethodName         = "/kb.v1.KBService/DeleteDocument"
 	KBService_Query_FullMethodName                  = "/kb.v1.KBService/Query"
+	KBService_Retrieve_FullMethodName               = "/kb.v1.KBService/Retrieve"
 	KBService_ListKBCitations_FullMethodName        = "/kb.v1.KBService/ListKBCitations"
 	KBService_ListKBSessions_FullMethodName         = "/kb.v1.KBService/ListKBSessions"
 	KBService_UpdateKBPermissions_FullMethodName    = "/kb.v1.KBService/UpdateKBPermissions"
@@ -59,6 +60,12 @@ type KBServiceClient interface {
 	// Query performs a synchronous RAG query and returns a JSON answer.
 	// For streaming answers use the SSE endpoint in the gateway directly.
 	Query(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (*QueryResponse, error)
+	// Retrieve performs a streaming RAG query: yields token events, a sources
+	// event, then a done event (or an error event). Server-streaming RPC.
+	// Orchestration mirrors Query (session + persistence + no-result gates);
+	// implemented in STEP-10 feature issue. This contract issue only declares
+	// the proto surface.
+	Retrieve(ctx context.Context, in *RetrieveRequest, opts ...grpc.CallOption) (KBService_RetrieveClient, error)
 	// ── Phase A P1 RPC declarations (P0 returns UNIMPLEMENTED) ─────────────────
 	// ListKBCitations returns the citation sources used by a KB (P1).
 	ListKBCitations(ctx context.Context, in *ListKBCitationsRequest, opts ...grpc.CallOption) (*ListKBCitationsResponse, error)
@@ -166,6 +173,38 @@ func (c *kBServiceClient) Query(ctx context.Context, in *QueryRequest, opts ...g
 	return out, nil
 }
 
+func (c *kBServiceClient) Retrieve(ctx context.Context, in *RetrieveRequest, opts ...grpc.CallOption) (KBService_RetrieveClient, error) {
+	stream, err := c.cc.NewStream(ctx, &KBService_ServiceDesc.Streams[0], KBService_Retrieve_FullMethodName, opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &kBServiceRetrieveClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type KBService_RetrieveClient interface {
+	Recv() (*RetrieveEvent, error)
+	grpc.ClientStream
+}
+
+type kBServiceRetrieveClient struct {
+	grpc.ClientStream
+}
+
+func (x *kBServiceRetrieveClient) Recv() (*RetrieveEvent, error) {
+	m := new(RetrieveEvent)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func (c *kBServiceClient) ListKBCitations(ctx context.Context, in *ListKBCitationsRequest, opts ...grpc.CallOption) (*ListKBCitationsResponse, error) {
 	out := new(ListKBCitationsResponse)
 	err := c.cc.Invoke(ctx, KBService_ListKBCitations_FullMethodName, in, out, opts...)
@@ -216,6 +255,12 @@ type KBServiceServer interface {
 	// Query performs a synchronous RAG query and returns a JSON answer.
 	// For streaming answers use the SSE endpoint in the gateway directly.
 	Query(context.Context, *QueryRequest) (*QueryResponse, error)
+	// Retrieve performs a streaming RAG query: yields token events, a sources
+	// event, then a done event (or an error event). Server-streaming RPC.
+	// Orchestration mirrors Query (session + persistence + no-result gates);
+	// implemented in STEP-10 feature issue. This contract issue only declares
+	// the proto surface.
+	Retrieve(*RetrieveRequest, KBService_RetrieveServer) error
 	// ── Phase A P1 RPC declarations (P0 returns UNIMPLEMENTED) ─────────────────
 	// ListKBCitations returns the citation sources used by a KB (P1).
 	ListKBCitations(context.Context, *ListKBCitationsRequest) (*ListKBCitationsResponse, error)
@@ -259,6 +304,9 @@ func (UnimplementedKBServiceServer) DeleteDocument(context.Context, *DeleteDocum
 }
 func (UnimplementedKBServiceServer) Query(context.Context, *QueryRequest) (*QueryResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Query not implemented")
+}
+func (UnimplementedKBServiceServer) Retrieve(*RetrieveRequest, KBService_RetrieveServer) error {
+	return status.Errorf(codes.Unimplemented, "method Retrieve not implemented")
 }
 func (UnimplementedKBServiceServer) ListKBCitations(context.Context, *ListKBCitationsRequest) (*ListKBCitationsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListKBCitations not implemented")
@@ -462,6 +510,27 @@ func _KBService_Query_Handler(srv interface{}, ctx context.Context, dec func(int
 	return interceptor(ctx, in, info, handler)
 }
 
+func _KBService_Retrieve_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(RetrieveRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(KBServiceServer).Retrieve(m, &kBServiceRetrieveServer{stream})
+}
+
+type KBService_RetrieveServer interface {
+	Send(*RetrieveEvent) error
+	grpc.ServerStream
+}
+
+type kBServiceRetrieveServer struct {
+	grpc.ServerStream
+}
+
+func (x *kBServiceRetrieveServer) Send(m *RetrieveEvent) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 func _KBService_ListKBCitations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListKBCitationsRequest)
 	if err := dec(in); err != nil {
@@ -576,6 +645,12 @@ var KBService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _KBService_UpdateKBPermissions_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Retrieve",
+			Handler:       _KBService_Retrieve_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "kb/v1/kb_service.proto",
 }

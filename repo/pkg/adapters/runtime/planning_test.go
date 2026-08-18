@@ -30,6 +30,10 @@ func (fakeGPUInventory) PlanScheduling(context.Context, ports.GPUSchedulingReque
 	}, nil
 }
 
+func (fakeGPUInventory) ListSpecAvailability(context.Context, string) ([]ports.GPUSpecAvailability, error) {
+	return nil, ports.ErrUnsupported
+}
+
 func TestPlanningRuntimeCreatesVMWithDefaultPlanesAndRootDisk(t *testing.T) {
 	runtime := NewPlanningRuntime(WithClock(func() time.Time {
 		return time.Unix(100, 0)
