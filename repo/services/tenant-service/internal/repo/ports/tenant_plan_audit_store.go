@@ -21,7 +21,7 @@ type AuditLog struct {
 	ID        uuid.UUID
 	TenantID  *uuid.UUID     // 平台级操作（如套餐管理）为 NULL
 	UserID    *uuid.UUID     // 操作者；系统/后台触发可为 NULL
-	RequestID *uuid.UUID     // 关联请求（幂等/追踪）
+	RequestID string         // 网关透传的请求 ID（TEXT；可含 req_ 前缀），空则 store 侧生成
 	Action    string         // 操作类型，如 plan.create / plan.activate / tenant.bind_plan_quota
 	Resource  string         // 资源类型，如 tenant_plan
 	Result    string         // success | failure
@@ -33,11 +33,8 @@ type AuditLog struct {
 
 // AuditLogFilter 是审计日志查询的过滤条件（游标分页）。
 type AuditLogFilter struct {
-	Resource string // 资源类型过滤
-	Action   string // 操作类型过滤
-	Result   string // "" = 全部；否则 success | failure
-	Limit    int    // 每页数量，default 20，max 100
-	Cursor   string // 上一页返回的 next_cursor；空串 = 第一页
+	Limit  int    // 每页数量，default 20，max 100
+	Cursor string // 上一页返回的 next_cursor；空串 = 第一页
 }
 
 // AuditLogListResult 是审计日志查询的返回（游标分页）。
@@ -61,6 +58,6 @@ type TenantPlanAuditStore interface {
 	Create(ctx context.Context, log AuditLog) (uuid.UUID, error)
 
 	// ListPlanAuditLogs 按套餐（details->>'plan_id' = planID）查询配额套餐操作历史，
-	// 支持 action/result 过滤与游标分页。用于 GET /tenant-plans/{planId}/audit-logs。
+	// 游标分页。用于 GET /tenant-plans/{planId}/audit-logs。
 	ListPlanAuditLogs(ctx context.Context, planID uuid.UUID, filter AuditLogFilter) (AuditLogListResult, error)
 }

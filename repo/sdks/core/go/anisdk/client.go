@@ -19,7 +19,12 @@ const Version = "1.0.0"
 const ServerURL = "https://{host}/api/v1"
 
 var Operations = []string{
+	"listPlanBoundTenantCounts",
+	"listPlanBindableTenants",
+	"listPlanBoundTenants",
 	"listQuotaMeta",
+	"getTenant",
+	"updateTenantPlan",
 	"deleteTenantQuota",
 	"getTenantQuota",
 	"createTenantQuota",
@@ -230,7 +235,12 @@ var Operations = []string{
 	"unmountStorageVolume",
 }
 var Paths = []string{
+	"GET /admin/plans/bound-tenant-counts",
+	"GET /admin/plans/{plan_id}/bindable-tenants",
+	"GET /admin/plans/{plan_id}/bound-tenants",
 	"GET /admin/quota-meta",
+	"GET /admin/tenants/{tenant_id}",
+	"PUT /admin/tenants/{tenant_id}/plan",
 	"DELETE /admin/tenants/{tenant_id}/quota",
 	"GET /admin/tenants/{tenant_id}/quota",
 	"POST /admin/tenants/{tenant_id}/quota",
@@ -597,6 +607,8 @@ var Schemas = []string{
 	"ObservabilityQueryResponse",
 	"ObservabilityRangeQueryResponse",
 	"PasswordLoginRequest",
+	"PlanBoundTenantCount",
+	"PlanBoundTenantCountList",
 	"PlatformPasswordLoginRequest",
 	"PlatformWorkload",
 	"PlatformWorkloadAcceleratorCapability",
@@ -710,6 +722,10 @@ var Schemas = []string{
 	"StorageVolumeMountHistoryEntry",
 	"StorageVolumeMountRequest",
 	"StorageVolumeUnmountRequest",
+	"Tenant",
+	"TenantPlanUpdateRequest",
+	"TenantSummary",
+	"TenantSummaryList",
 	"TokenPairResponse",
 	"TokenUsageReport",
 	"UpdateEmailRecipientRequest",
@@ -860,6 +876,7 @@ var ErrorCodes = []string{
 	"RESERVATION_EXCEEDS_QUOTA",
 	"RESERVED_INSUFFICIENT",
 	"TENANT_NOT_FOUND",
+	"TENANT_PLAN_NOT_FOUND",
 	"UNAUTHORIZED",
 	"UNAVAILABLE",
 	"VALIDATION_FAILED",

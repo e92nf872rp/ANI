@@ -22,13 +22,16 @@ const (
 	TenantPlanService_ListTenantPlans_FullMethodName             = "/tenant.v1.TenantPlanService/ListTenantPlans"
 	TenantPlanService_CreateTenantPlan_FullMethodName            = "/tenant.v1.TenantPlanService/CreateTenantPlan"
 	TenantPlanService_GetTenantPlan_FullMethodName               = "/tenant.v1.TenantPlanService/GetTenantPlan"
+	TenantPlanService_UpdateTenantPlan_FullMethodName            = "/tenant.v1.TenantPlanService/UpdateTenantPlan"
 	TenantPlanService_DeleteTenantPlan_FullMethodName            = "/tenant.v1.TenantPlanService/DeleteTenantPlan"
 	TenantPlanService_GetTenantPlanQuotaLimits_FullMethodName    = "/tenant.v1.TenantPlanService/GetTenantPlanQuotaLimits"
 	TenantPlanService_UpdateTenantPlanQuotaLimits_FullMethodName = "/tenant.v1.TenantPlanService/UpdateTenantPlanQuotaLimits"
 	TenantPlanService_ActivateTenantPlan_FullMethodName          = "/tenant.v1.TenantPlanService/ActivateTenantPlan"
 	TenantPlanService_DisableTenantPlan_FullMethodName           = "/tenant.v1.TenantPlanService/DisableTenantPlan"
 	TenantPlanService_ListTenantPlanBoundTenants_FullMethodName  = "/tenant.v1.TenantPlanService/ListTenantPlanBoundTenants"
+	TenantPlanService_ListBindableTenants_FullMethodName         = "/tenant.v1.TenantPlanService/ListBindableTenants"
 	TenantPlanService_ListTenantPlanAuditLogs_FullMethodName     = "/tenant.v1.TenantPlanService/ListTenantPlanAuditLogs"
+	TenantPlanService_ListQuotaMeta_FullMethodName               = "/tenant.v1.TenantPlanService/ListQuotaMeta"
 )
 
 // TenantPlanServiceClient is the client API for TenantPlanService service.
@@ -41,6 +44,8 @@ type TenantPlanServiceClient interface {
 	CreateTenantPlan(ctx context.Context, in *CreateTenantPlanRequest, opts ...grpc.CallOption) (*IdempotentResult, error)
 	// GetTenantPlan returns a plan by ID.
 	GetTenantPlan(ctx context.Context, in *GetTenantPlanRequest, opts ...grpc.CallOption) (*TenantPlan, error)
+	// UpdateTenantPlan updates plan name/description (optional fields; unset = no change).
+	UpdateTenantPlan(ctx context.Context, in *UpdateTenantPlanRequest, opts ...grpc.CallOption) (*IdempotentResult, error)
 	// DeleteTenantPlan soft-deletes a plan (fails if tenants are bound).
 	DeleteTenantPlan(ctx context.Context, in *DeleteTenantPlanRequest, opts ...grpc.CallOption) (*IdempotentResult, error)
 	// GetTenantPlanQuotaLimits returns the display views of a plan's quota limits.
@@ -53,8 +58,12 @@ type TenantPlanServiceClient interface {
 	DisableTenantPlan(ctx context.Context, in *DisableTenantPlanRequest, opts ...grpc.CallOption) (*IdempotentResult, error)
 	// ListTenantPlanBoundTenants returns bound tenant summaries.
 	ListTenantPlanBoundTenants(ctx context.Context, in *ListTenantPlanBoundTenantsRequest, opts ...grpc.CallOption) (*ListTenantPlanBoundTenantsResponse, error)
+	// ListBindableTenants returns tenants that can bind to the plan (status≠disabled and not already bound).
+	ListBindableTenants(ctx context.Context, in *ListBindableTenantsRequest, opts ...grpc.CallOption) (*ListBindableTenantsResponse, error)
 	// ListTenantPlanAuditLogs returns paginated audit logs for a plan.
 	ListTenantPlanAuditLogs(ctx context.Context, in *ListTenantPlanAuditLogsRequest, opts ...grpc.CallOption) (*ListTenantPlanAuditLogsResponse, error)
+	// ListQuotaMeta returns enabled quota dimension metadata from Core (passthrough).
+	ListQuotaMeta(ctx context.Context, in *ListQuotaMetaRequest, opts ...grpc.CallOption) (*ListQuotaMetaResponse, error)
 }
 
 type tenantPlanServiceClient struct {
@@ -86,6 +95,15 @@ func (c *tenantPlanServiceClient) CreateTenantPlan(ctx context.Context, in *Crea
 func (c *tenantPlanServiceClient) GetTenantPlan(ctx context.Context, in *GetTenantPlanRequest, opts ...grpc.CallOption) (*TenantPlan, error) {
 	out := new(TenantPlan)
 	err := c.cc.Invoke(ctx, TenantPlanService_GetTenantPlan_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tenantPlanServiceClient) UpdateTenantPlan(ctx context.Context, in *UpdateTenantPlanRequest, opts ...grpc.CallOption) (*IdempotentResult, error) {
+	out := new(IdempotentResult)
+	err := c.cc.Invoke(ctx, TenantPlanService_UpdateTenantPlan_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -146,9 +164,27 @@ func (c *tenantPlanServiceClient) ListTenantPlanBoundTenants(ctx context.Context
 	return out, nil
 }
 
+func (c *tenantPlanServiceClient) ListBindableTenants(ctx context.Context, in *ListBindableTenantsRequest, opts ...grpc.CallOption) (*ListBindableTenantsResponse, error) {
+	out := new(ListBindableTenantsResponse)
+	err := c.cc.Invoke(ctx, TenantPlanService_ListBindableTenants_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *tenantPlanServiceClient) ListTenantPlanAuditLogs(ctx context.Context, in *ListTenantPlanAuditLogsRequest, opts ...grpc.CallOption) (*ListTenantPlanAuditLogsResponse, error) {
 	out := new(ListTenantPlanAuditLogsResponse)
 	err := c.cc.Invoke(ctx, TenantPlanService_ListTenantPlanAuditLogs_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tenantPlanServiceClient) ListQuotaMeta(ctx context.Context, in *ListQuotaMetaRequest, opts ...grpc.CallOption) (*ListQuotaMetaResponse, error) {
+	out := new(ListQuotaMetaResponse)
+	err := c.cc.Invoke(ctx, TenantPlanService_ListQuotaMeta_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -165,6 +201,8 @@ type TenantPlanServiceServer interface {
 	CreateTenantPlan(context.Context, *CreateTenantPlanRequest) (*IdempotentResult, error)
 	// GetTenantPlan returns a plan by ID.
 	GetTenantPlan(context.Context, *GetTenantPlanRequest) (*TenantPlan, error)
+	// UpdateTenantPlan updates plan name/description (optional fields; unset = no change).
+	UpdateTenantPlan(context.Context, *UpdateTenantPlanRequest) (*IdempotentResult, error)
 	// DeleteTenantPlan soft-deletes a plan (fails if tenants are bound).
 	DeleteTenantPlan(context.Context, *DeleteTenantPlanRequest) (*IdempotentResult, error)
 	// GetTenantPlanQuotaLimits returns the display views of a plan's quota limits.
@@ -177,8 +215,12 @@ type TenantPlanServiceServer interface {
 	DisableTenantPlan(context.Context, *DisableTenantPlanRequest) (*IdempotentResult, error)
 	// ListTenantPlanBoundTenants returns bound tenant summaries.
 	ListTenantPlanBoundTenants(context.Context, *ListTenantPlanBoundTenantsRequest) (*ListTenantPlanBoundTenantsResponse, error)
+	// ListBindableTenants returns tenants that can bind to the plan (status≠disabled and not already bound).
+	ListBindableTenants(context.Context, *ListBindableTenantsRequest) (*ListBindableTenantsResponse, error)
 	// ListTenantPlanAuditLogs returns paginated audit logs for a plan.
 	ListTenantPlanAuditLogs(context.Context, *ListTenantPlanAuditLogsRequest) (*ListTenantPlanAuditLogsResponse, error)
+	// ListQuotaMeta returns enabled quota dimension metadata from Core (passthrough).
+	ListQuotaMeta(context.Context, *ListQuotaMetaRequest) (*ListQuotaMetaResponse, error)
 	mustEmbedUnimplementedTenantPlanServiceServer()
 }
 
@@ -194,6 +236,9 @@ func (UnimplementedTenantPlanServiceServer) CreateTenantPlan(context.Context, *C
 }
 func (UnimplementedTenantPlanServiceServer) GetTenantPlan(context.Context, *GetTenantPlanRequest) (*TenantPlan, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetTenantPlan not implemented")
+}
+func (UnimplementedTenantPlanServiceServer) UpdateTenantPlan(context.Context, *UpdateTenantPlanRequest) (*IdempotentResult, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateTenantPlan not implemented")
 }
 func (UnimplementedTenantPlanServiceServer) DeleteTenantPlan(context.Context, *DeleteTenantPlanRequest) (*IdempotentResult, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteTenantPlan not implemented")
@@ -213,8 +258,14 @@ func (UnimplementedTenantPlanServiceServer) DisableTenantPlan(context.Context, *
 func (UnimplementedTenantPlanServiceServer) ListTenantPlanBoundTenants(context.Context, *ListTenantPlanBoundTenantsRequest) (*ListTenantPlanBoundTenantsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListTenantPlanBoundTenants not implemented")
 }
+func (UnimplementedTenantPlanServiceServer) ListBindableTenants(context.Context, *ListBindableTenantsRequest) (*ListBindableTenantsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListBindableTenants not implemented")
+}
 func (UnimplementedTenantPlanServiceServer) ListTenantPlanAuditLogs(context.Context, *ListTenantPlanAuditLogsRequest) (*ListTenantPlanAuditLogsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListTenantPlanAuditLogs not implemented")
+}
+func (UnimplementedTenantPlanServiceServer) ListQuotaMeta(context.Context, *ListQuotaMetaRequest) (*ListQuotaMetaResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListQuotaMeta not implemented")
 }
 func (UnimplementedTenantPlanServiceServer) mustEmbedUnimplementedTenantPlanServiceServer() {}
 
@@ -279,6 +330,24 @@ func _TenantPlanService_GetTenantPlan_Handler(srv interface{}, ctx context.Conte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(TenantPlanServiceServer).GetTenantPlan(ctx, req.(*GetTenantPlanRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TenantPlanService_UpdateTenantPlan_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateTenantPlanRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantPlanServiceServer).UpdateTenantPlan(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantPlanService_UpdateTenantPlan_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantPlanServiceServer).UpdateTenantPlan(ctx, req.(*UpdateTenantPlanRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -391,6 +460,24 @@ func _TenantPlanService_ListTenantPlanBoundTenants_Handler(srv interface{}, ctx 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TenantPlanService_ListBindableTenants_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListBindableTenantsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantPlanServiceServer).ListBindableTenants(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantPlanService_ListBindableTenants_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantPlanServiceServer).ListBindableTenants(ctx, req.(*ListBindableTenantsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _TenantPlanService_ListTenantPlanAuditLogs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListTenantPlanAuditLogsRequest)
 	if err := dec(in); err != nil {
@@ -405,6 +492,24 @@ func _TenantPlanService_ListTenantPlanAuditLogs_Handler(srv interface{}, ctx con
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(TenantPlanServiceServer).ListTenantPlanAuditLogs(ctx, req.(*ListTenantPlanAuditLogsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TenantPlanService_ListQuotaMeta_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListQuotaMetaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantPlanServiceServer).ListQuotaMeta(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantPlanService_ListQuotaMeta_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantPlanServiceServer).ListQuotaMeta(ctx, req.(*ListQuotaMetaRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -427,6 +532,10 @@ var TenantPlanService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetTenantPlan",
 			Handler:    _TenantPlanService_GetTenantPlan_Handler,
+		},
+		{
+			MethodName: "UpdateTenantPlan",
+			Handler:    _TenantPlanService_UpdateTenantPlan_Handler,
 		},
 		{
 			MethodName: "DeleteTenantPlan",
@@ -453,8 +562,16 @@ var TenantPlanService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _TenantPlanService_ListTenantPlanBoundTenants_Handler,
 		},
 		{
+			MethodName: "ListBindableTenants",
+			Handler:    _TenantPlanService_ListBindableTenants_Handler,
+		},
+		{
 			MethodName: "ListTenantPlanAuditLogs",
 			Handler:    _TenantPlanService_ListTenantPlanAuditLogs_Handler,
+		},
+		{
+			MethodName: "ListQuotaMeta",
+			Handler:    _TenantPlanService_ListQuotaMeta_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

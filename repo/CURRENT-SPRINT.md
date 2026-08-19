@@ -288,6 +288,40 @@ make validate-architecture
 git diff --check
 ```
 
+## BOSS 租户配额套餐功能流（2026-08）
+
+> BOSS 平台租户配额套餐管理功能开发流，覆盖套餐全生命周期（OpenAPI 契约 → gRPC 接口 → DB 迁移 → 网关接入 → CRUD + 状态机 + 限额同步 + 租户绑定 + 审计 + 配额元数据透传 → BOSS 前端）。18 个 issue 全部实现完成。批次记录统一归档于 `development-records/quota-policy-issue-*.md`。
+
+| Issue | 描述 | 状态 | 证据 |
+|---|---|---|---|
+| #1 | OpenAPI 契约：14 端点 + 9 schema + 12 错误码 | ✅ 已完成 | `development-records/quota-policy-issue-01-openapi-contract.md` |
+| #2 | 接口与结构体：TenantPlanStore 13 方法 + QuotaSvcClient 5 方法 | ✅ 已完成 | `development-records/quota-policy-issue-02-interfaces-structs.md` |
+| #3 | 数据库迁移：tenant_plans + plan_quota_limits + tenants.plan_id + audit_logs 分区 | ✅ 已完成 | `development-records/quota-policy-issue-03-database-migration.md` |
+| #4 | 网关接入：14 端点 + tenantCallCtx + mapTenantPlanError + planQuotaLimitJSON DTO | ✅ 已完成 | `development-records/quota-policy-issue-04-gateway-integration.md` |
+| #5 | 创建配额套餐：CreateTenantPlan gRPC + store 事务 + Core meta 验证 + 审计 | ✅ 已完成 | `development-records/quota-policy-issue-05-create-tenant-plan.md` |
+| #6 | 列表 + 详情：List/Get gRPC + store 游标分页 + 业务码映射 | ✅ 已完成 | `development-records/quota-policy-issue-06-list-get-tenant-plan.md` |
+| #7 | 发布/停用/软删除：Activate/Disable/Delete + 状态机 + 审计 | ✅ 已完成 | `development-records/quota-policy-issue-07-activate-disable-delete-tenant-plan.md` |
+| #8 | 修改限额 + 同步租户：UpdateQuotaLimits + syncBoundTenantQuotaLimits + Core Get/Put/Create + 异步重试 | ✅ 已完成 | `development-records/quota-policy-issue-08-update-quota-limits-sync.md` |
+| #9 | 绑定套餐 + 绑定租户列表：BindPlanQuota 7 步校验 + Core 同步 + 回滚 + ListBoundTenants | ✅ 已完成 | `development-records/quota-policy-issue-09-bind-plan-bound-tenants.md` |
+| #10 | 更新套餐基本信息：UpdateTenantPlan PUT + StringValue 可选语义 + 动态 SET | ✅ 已完成 | `development-records/quota-policy-issue-10-update-plan-info.md` |
+| #11 | 查询配额元数据：ListQuotaMeta GET /quota-meta 透传 Core | ✅ 已完成 | `development-records/quota-policy-issue-11-list-quota-meta.md` |
+| #12 | 可绑定租户列表：ListBindableTenants + plan_id IS DISTINCT FROM | ✅ 已完成 | `development-records/quota-policy-issue-12-list-bindable-tenants-api.md` |
+| #13 | 查询操作历史：ListTenantPlanAuditLogs + store 游标分页 + JSON 映射 | ✅ 已完成 | `development-records/quota-policy-issue-13-audit-logs-api.md` |
+| #14–#18 | BOSS 前端：列表+创建 Wizard、详情页(概览+4 Tab)、限额 Tab、绑定租户 Tab、操作历史 Tab | ✅ 已完成（未 commit） | `development-records/quota-policy-issue-14-18-boss-frontend.md` |
+
+验收命令：
+
+```bash
+cd repo/services/tenant-service
+go build ./...
+go test ./internal/service/ -run "TestTenantPlanService_(Create|List|Get|Activate|Disable|Delete|Update|Bind|QuotaMeta|Audit)|TestMapStoreError" -v
+
+cd repo/services/ani-gateway
+go build ./...
+
+cd repo/frontends/boss
+.\node_modules\.bin\tsc.cmd --noEmit
+
 ## Metering Service 功能流（2026-08）
 
 > 独立于 Sprint 13/14 real provider 收敛的 Metering Service 计量采集功能开发流，覆盖 metering_usage_records migration、port 接口、collector 实现、consumer/rebuilder、集成测试、部署清单与 Live Gate 缺陷修复。批次记录归档于 `development-records/pr-m1-metering-consumer.md` ~ `pr-m5-metering-consumer.md`。

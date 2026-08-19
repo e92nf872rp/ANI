@@ -26,7 +26,12 @@ public final class ApiClient {
     public static final String VERSION = "1.0.0";
     public static final String SERVER_URL = "https://{host}/api/v1";
     public static final List<String> OPERATIONS = Collections.unmodifiableList(Arrays.asList(
+        "listPlanBoundTenantCounts",
+        "listPlanBindableTenants",
+        "listPlanBoundTenants",
         "listQuotaMeta",
+        "getTenant",
+        "updateTenantPlan",
         "deleteTenantQuota",
         "getTenantQuota",
         "createTenantQuota",
@@ -237,7 +242,12 @@ public final class ApiClient {
         "unmountStorageVolume"
     ));
     public static final List<String> PATHS = Collections.unmodifiableList(Arrays.asList(
+        "GET /admin/plans/bound-tenant-counts",
+        "GET /admin/plans/{plan_id}/bindable-tenants",
+        "GET /admin/plans/{plan_id}/bound-tenants",
         "GET /admin/quota-meta",
+        "GET /admin/tenants/{tenant_id}",
+        "PUT /admin/tenants/{tenant_id}/plan",
         "DELETE /admin/tenants/{tenant_id}/quota",
         "GET /admin/tenants/{tenant_id}/quota",
         "POST /admin/tenants/{tenant_id}/quota",
@@ -604,6 +614,8 @@ public final class ApiClient {
         "ObservabilityQueryResponse",
         "ObservabilityRangeQueryResponse",
         "PasswordLoginRequest",
+        "PlanBoundTenantCount",
+        "PlanBoundTenantCountList",
         "PlatformPasswordLoginRequest",
         "PlatformWorkload",
         "PlatformWorkloadAcceleratorCapability",
@@ -717,6 +729,10 @@ public final class ApiClient {
         "StorageVolumeMountHistoryEntry",
         "StorageVolumeMountRequest",
         "StorageVolumeUnmountRequest",
+        "Tenant",
+        "TenantPlanUpdateRequest",
+        "TenantSummary",
+        "TenantSummaryList",
         "TokenPairResponse",
         "TokenUsageReport",
         "UpdateEmailRecipientRequest",
@@ -867,6 +883,7 @@ public final class ApiClient {
         "RESERVATION_EXCEEDS_QUOTA",
         "RESERVED_INSUFFICIENT",
         "TENANT_NOT_FOUND",
+        "TENANT_PLAN_NOT_FOUND",
         "UNAUTHORIZED",
         "UNAVAILABLE",
         "VALIDATION_FAILED",

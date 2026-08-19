@@ -207,8 +207,36 @@ export interface paths {
         /** 文档列表 */
         get: operations["listKnowledgeBaseDocuments"];
         put?: never;
-        /** 上传文档 */
-        post: operations["uploadKnowledgeBaseDocument"];
+        /**
+         * 获取文档预签名上传地址（两步式上传 step 1）
+         * @description 预留 doc_id 并创建 kb_documents 记录（parse_status=pending），返回 MinIO
+         *     presigned PUT URL（15 分钟有效）与 storage_path。客户端直接 PUT 文件到
+         *     MinIO 后，调用 notifyDocumentUploaded 触发解析任务。对齐
+         *     kb_service.proto GetDocumentUploadURL。
+         */
+        post: operations["getDocumentUploadURL"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/knowledge-bases/{kb_id}/documents/{doc_id}/notify-uploaded": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 通知文档已直传至对象存储（两步式上传 step 2）
+         * @description 校验对象存在性与 checksum_sha256，同事务写 kb_documents 更新、async_tasks
+         *     与 outbox_events，返回异步任务引用。对齐 kb_service.proto
+         *     NotifyDocumentUploaded。
+         */
+        post: operations["notifyDocumentUploaded"];
         delete?: never;
         options?: never;
         head?: never;
@@ -310,6 +338,96 @@ export interface paths {
         get?: never;
         /** 更新知识库访问权限 */
         put: operations["updateKnowledgeBasePermissions"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/knowledge-bases/{kb_id}/documents/{doc_id}/reparse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 重新解析知识库文档
+         * @description 对失败或需重试的文档触发重新解析，parse_status 回到 pending。
+         *     对齐 SPEC §5 US-002 与 UX §6.3 reparse-confirm（Popconfirm「重新解析将覆盖现有分块」）。
+         *     KB 处于 rebuilding 期间返回 409 kb.rebuilding。
+         */
+        post: operations["reparseKnowledgeBaseDocument"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/knowledge-bases/{kb_id}/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 读取知识库配置
+         * @description 返回 KB 入库配置与问答配置。对齐 UX §4.3 概览配置区与 SPEC §5 US-002。
+         */
+        get: operations["getKnowledgeBaseConfig"];
+        /**
+         * 更新知识库配置
+         * @description 更新 KB 配置。修改 embedding_model 或 chunk_size 将触发全库重建
+         *     （UX §4.3 保存配置 → Popconfirm「修改配置将触发全库重建」）。
+         *     返回更新后的 KnowledgeBase（含新 status）。对齐 SPEC §5 US-002。
+         */
+        put: operations["updateKnowledgeBaseConfig"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/knowledge-bases/{kb_id}/rebuild": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 全库重建
+         * @description 触发全库重建，KB status 转为 rebuilding，重建期间拒绝写操作（409 kb.rebuilding）。
+         *     对齐 SPEC §5 US-002 与 UX §6.2 rebuilding 状态。
+         */
+        post: operations["rebuildKnowledgeBase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/knowledge-bases/{kb_id}/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 可用嵌入/推理模型列表
+         * @description 返回当前租户可用于该 KB 的嵌入模型与推理模型列表。
+         *     对齐 SPEC §5 US-002 与 UX §4.3 概览入库配置区 embedding_model 选择项。
+         */
+        get: operations["listKnowledgeBaseModels"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -776,6 +894,355 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/quota-meta": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询可用配额维度元数据（透传 Core；需 platform-admin / platform-ops / platform-readonly） */
+        get: operations["listQuotaMeta"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenant-plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询套餐列表 */
+        get: operations["listTenantPlans"];
+        put?: never;
+        /** 创建套餐（需 platform-admin / platform-ops） */
+        post: operations["createTenantPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenant-plans/{planId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询套餐详情（需 platform-admin / platform-ops / platform-readonly） */
+        get: operations["getTenantPlan"];
+        /** 更新套餐基本信息（name / description）（需 platform-admin / platform-ops） */
+        put: operations["updateTenantPlan"];
+        post?: never;
+        /** 删除套餐（软删除）（需 platform-admin / platform-ops） */
+        delete: operations["deleteTenantPlan"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenant-plans/{planId}/quota-limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询套餐限额（需 platform-admin / platform-ops / platform-readonly） */
+        get: operations["getTenantPlanQuotaLimits"];
+        /** 修改套餐限额（同步存量租户）（需 platform-admin / platform-ops） */
+        put: operations["updateTenantPlanQuotaLimits"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenant-plans/{planId}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 发布套餐（需 platform-admin / platform-ops） */
+        post: operations["activateTenantPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenant-plans/{planId}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 禁用套餐（需 platform-admin / platform-ops） */
+        post: operations["disableTenantPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenant-plans/{planId}/tenants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询套餐绑定的租户列表（需 platform-admin / platform-ops / platform-readonly） */
+        get: operations["listTenantPlanBoundTenants"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenant-plans/{planId}/bindable-tenants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询可绑定该套餐的租户列表（需 platform-admin / platform-ops / platform-readonly）
+         * @description 返回 status≠disabled 且尚未绑定该套餐（plan_id ≠ planId，含未绑定其它套餐）的租户摘要， 按 name 排序。
+         */
+        get: operations["listBindableTenants"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenant-plans/{planId}/audit-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询套餐操作历史（需 platform-admin / platform-ops / platform-readonly） */
+        get: operations["listTenantPlanAuditLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenantId}/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 绑定套餐（按套餐限额更新配额）（需 platform-admin / platform-ops） */
+        post: operations["bindTenantPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenant-admins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 跨租户管理员列表（仅返回 owner/admin/邀请中）（需 platform-admin / platform-ops / platform-readonly） */
+        get: operations["listAllTenantAdmins"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenantId}/admins/invite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 邀请租户管理员（需 platform-admin / platform-ops） */
+        post: operations["inviteTenantAdmin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenantId}/admins/{userId}/invitation/resend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 重发租户管理员邀请（需 platform-admin / platform-ops） */
+        post: operations["resendTenantAdminInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenantId}/admins/{userId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询管理员详情（需 platform-admin / platform-ops / platform-readonly） */
+        get: operations["getTenantAdminDetail"];
+        put?: never;
+        post?: never;
+        /** 软删除管理员（不幂等，不携带幂等键）（需 platform-admin / platform-ops） */
+        delete: operations["deleteTenantAdmin"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenantId}/admins/{userId}/role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询指定管理员角色与权限（4 维权限模型）（需 platform-admin / platform-ops / platform-readonly） */
+        get: operations["getTenantAdminRole"];
+        /** 修改管理员角色（需 platform-admin / platform-ops） */
+        put: operations["updateTenantAdminRole"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenantId}/transfer-ownership": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 移交租户所有者（对 tenant-admin 行发起，原 owner 降级为 admin）（需 platform-admin / platform-ops） */
+        post: operations["transferTenantOwnership"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenantId}/admins/{userId}/reset-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 重置管理员密码（需 platform-admin / platform-ops） */
+        post: operations["resetTenantAdminPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenantId}/admins/{userId}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 禁用管理员（需 platform-admin / platform-ops） */
+        post: operations["disableTenantAdmin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenantId}/admins/{userId}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 启用管理员（需 platform-admin / platform-ops） */
+        post: operations["enableTenantAdmin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenantId}/admins/{userId}/audit-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询管理员操作历史（需 platform-admin / platform-ops / platform-readonly） */
+        get: operations["listTenantAdminAuditLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -895,32 +1362,76 @@ export interface components {
         KnowledgeBase: {
             /** Format: uuid */
             id: string;
+            /** Format: uuid */
+            tenant_id?: string;
             name: string;
+            description?: string;
+            embedding_model?: string;
+            /** @default 512 */
+            chunk_size: number;
+            /** @default 5 */
+            top_k: number;
+            /**
+             * Format: float
+             * @description 相似度阈值，非零覆盖默认值
+             * @default 0.3
+             */
+            score_threshold: number;
             /** @enum {string} */
             status: "active" | "rebuilding" | "deleted";
             doc_count?: number;
             /** Format: date-time */
             created_at: string;
+            /** Format: date-time */
+            updated_at?: string | null;
         };
         KBDocument: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
-            knowledge_base_id: string;
+            tenant_id?: string;
+            /** Format: uuid */
+            kb_id: string;
             file_name: string;
-            content_type?: string | null;
-            size_bytes?: number;
-            /** @enum {string} */
-            status: "uploaded" | "parsing" | "indexed" | "failed" | "deleted";
+            /** @description pdf | docx | xlsx | pptx | md | txt */
+            file_type?: string | null;
+            /** Format: int64 */
+            file_size_bytes?: number;
+            /**
+             * @description 解析状态，对齐 kb_service.proto KBDocument.parse_status
+             * @enum {string}
+             */
+            parse_status: "pending" | "parsing" | "indexing" | "ready" | "failed";
+            chunk_count?: number;
+            error_message?: string | null;
+            /** @description 客户端自定义元数据（JSONB，≤ 64KB） */
+            custom_metadata?: {
+                [key: string]: unknown;
+            } | null;
             /** Format: date-time */
             created_at: string;
+            /** Format: date-time */
+            parsed_at?: string | null;
         };
         KBQueryRequest: {
             question: string;
+            /**
+             * Format: uuid
+             * @description 可选；为空则新建会话
+             */
+            session_id?: string | null;
+            /** @description 防止重试导致重复计费 */
+            idempotency_key: string;
             /** @default 5 */
             top_k: number;
-            /** Format: uuid */
-            session_id?: string | null;
+            /**
+             * Format: float
+             * @description 相似度阈值，非零覆盖 KB 默认值
+             * @default 0.3
+             */
+            score_threshold: number;
+            /** @description 指定 vLLM 推理服务名；为空则用 default */
+            inference_service_name?: string | null;
         };
         KBQueryResponse: {
             answer: string;
@@ -936,6 +1447,46 @@ export interface components {
             session_id?: string;
             input_tokens?: number;
             output_tokens?: number;
+        };
+        GetDocumentUploadURLRequest: {
+            /** @description 客户端生成，幂等预留 doc_id；重放返回同一 doc */
+            idempotency_key: string;
+            file_name: string;
+            /** @enum {string} */
+            file_type: "pdf" | "docx" | "xlsx" | "pptx" | "md" | "txt";
+            /**
+             * Format: int64
+             * @description 上限 100MB
+             */
+            file_size_bytes: number;
+            /** @description 客户端计算的 SHA-256；上传后服务端校验 */
+            checksum_sha256: string;
+            /** @description 客户端自定义元数据（JSONB，≤ 64KB） */
+            custom_metadata?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        GetDocumentUploadURLResponse: {
+            /**
+             * Format: uuid
+             * @description 预预留的文档 ID
+             */
+            doc_id: string;
+            /**
+             * Format: uri
+             * @description MinIO presigned PUT URL（15 分钟有效）
+             */
+            upload_url: string;
+            /** @description MinIO 存储路径；需原样回传给 notifyDocumentUploaded */
+            storage_path: string;
+        };
+        NotifyDocumentUploadedRequest: {
+            /** @description 与 getDocumentUploadURL 使用同一键，幂等派发解析任务 */
+            idempotency_key: string;
+            /** Format: uuid */
+            doc_id: string;
+            /** @description 由 getDocumentUploadURL 返回的对象存储路径 */
+            storage_path: string;
         };
         GpuContainer: {
             /** Format: uuid */
@@ -1226,6 +1777,81 @@ export interface components {
             public_read?: boolean;
             allowed_user_ids?: string[];
         };
+        /**
+         * @description 知识库配置（入库 + 问答）。对齐 UX §4.3 概览配置：入库配置区
+         *     （embedding_model / chunk_size / ocr_enabled）与问答配置区
+         *     （top_k / score_threshold / retrieval_strategy）。
+         */
+        KBConfig: {
+            /** @description 嵌入模型名，修改触发全库重建（UX §4.3） */
+            embedding_model?: string;
+            /** @description 分块大小（tokens） */
+            chunk_size?: number;
+            /**
+             * @description 是否启用 OCR（入库配置）
+             * @default false
+             */
+            ocr_enabled: boolean;
+            /** @description 问答 TopK */
+            top_k?: number;
+            /**
+             * Format: float
+             * @description 相似度阈值
+             */
+            score_threshold?: number;
+            /**
+             * @description 检索策略：向量 / 混合
+             * @default vector
+             * @enum {string}
+             */
+            retrieval_strategy: "vector" | "hybrid";
+        };
+        /**
+         * @description 更新知识库配置。修改 embedding_model 或 chunk_size 将触发全库重建
+         *     （UX §4.3 保存配置 → Popconfirm「修改配置将触发全库重建」→ POST /rebuild）。
+         */
+        UpdateKBConfigRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
+            /** @description 嵌入模型名；修改触发全库重建 */
+            embedding_model?: string;
+            chunk_size?: number;
+            ocr_enabled?: boolean;
+            top_k?: number;
+            /** Format: float */
+            score_threshold?: number;
+            /** @enum {string} */
+            retrieval_strategy?: "vector" | "hybrid";
+        };
+        /**
+         * @description 知识库可用模型列表（嵌入 + 推理）。对齐 SPEC §5 US-002：
+         *     GET /knowledge-bases/{kb_id}/models 返回当前租户可用的嵌入与推理模型。
+         */
+        ModelList: {
+            /** @description 可用嵌入模型 */
+            embedding_models: components["schemas"]["Model"][];
+            /** @description 可用推理模型 */
+            inference_models: components["schemas"]["Model"][];
+        };
+        /** @description 重新解析知识库文档请求。对齐 SPEC §5 US-002。 */
+        ReparseDocumentRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
+        };
+        /** @description 全库重建请求。对齐 SPEC §5 US-002。 */
+        RebuildKnowledgeBaseRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
+        };
         UpdateTenantRoleRequest: {
             /** Format: uuid */
             idempotency_key: string;
@@ -1305,6 +1931,344 @@ export interface components {
             app_id: string;
             app_secret: string;
         };
+        TenantPlan: {
+            /** Format: uuid */
+            id: string;
+            /** @description 套餐代码 */
+            code: string;
+            /** @description 套餐名称 */
+            name: string;
+            description?: string | null;
+            /** @enum {string} */
+            status: "draft" | "active" | "disabled";
+            /** @description 绑定租户数量 */
+            tenant_count: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        TenantPlanListItem: {
+            /** Format: uuid */
+            id: string;
+            code: string;
+            name: string;
+            /** @enum {string} */
+            status: "draft" | "active" | "disabled";
+            tenant_count: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        TenantPlanListResponse: {
+            items: components["schemas"]["TenantPlanListItem"][];
+            /** @description 满足筛选条件的总条数（用于前端分页） */
+            total?: number;
+            /** @description 下一页游标；null 表示已无更多数据 */
+            next_cursor?: string | null;
+        };
+        CreateTenantPlanRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
+            /** @description 套餐代码；无格式限制，未删除套餐内唯一 */
+            code: string;
+            name: string;
+            description?: string;
+            /** @description 各维度配额上限；total 为 null 表示用 default_quota */
+            quota_limits?: components["schemas"]["PlanQuotaLimitInput"][];
+        };
+        PlanQuotaLimitInput: {
+            /** @description 配额维度标识 */
+            resource_type: string;
+            /**
+             * Format: int64
+             * @description 限额值；null = 用 default_quota
+             */
+            total?: number | null;
+        };
+        PlanQuotaLimitView: {
+            resource_type: string;
+            /** @description 展示名（来自 resource_quota_meta） */
+            display_name: string;
+            /** @description 单位（来自 resource_quota_meta） */
+            unit: string;
+            /**
+             * Format: int64
+             * @description 展示限额值；未显式设置时已用 resource_quota_meta.default_quota 兜底为具体数值，不返回 null
+             */
+            total: number;
+        };
+        PlanQuotaLimitsResponse: {
+            items: components["schemas"]["PlanQuotaLimitView"][];
+        };
+        /** @description 可用配额维度元数据（透传 Core GET /admin/quota-meta；仅 enabled 维度） */
+        QuotaMetaItem: {
+            resource_type: string;
+            display_name: string;
+            unit: string;
+            /** Format: int64 */
+            default_quota: number;
+            /** @description true=整数计数；false=允许小数 */
+            is_discrete: boolean;
+        };
+        QuotaMetaListResponse: {
+            items: components["schemas"]["QuotaMetaItem"][];
+        };
+        UpdateQuotaLimitsRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
+            items: components["schemas"]["PlanQuotaLimitInput"][];
+        };
+        /** @description 更新套餐基本信息。name / description 均为可选： 未传或 null 表示不更新；传空串表示清空。 */
+        UpdateTenantPlanRequest: {
+            /**
+             * Format: uuid
+             * @description 可选；客户端生成UUID，防重复提交
+             */
+            idempotency_key?: string;
+            /** @description 未传/null=不更新；空串=清空 */
+            name?: string | null;
+            /** @description 未传/null=不更新；空串=清空 */
+            description?: string | null;
+        };
+        BindPlanRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
+            /** Format: uuid */
+            plan_id: string;
+        };
+        BoundTenant: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            display_name: string;
+            /** @enum {string} */
+            status: "active" | "frozen" | "disabled";
+        };
+        BoundTenantsResponse: {
+            items: components["schemas"]["BoundTenant"][];
+        };
+        /** @description 套餐操作历史摘要（id / action / result / details / created_at） */
+        PlanAuditLog: {
+            /** Format: uuid */
+            id: string;
+            action: string;
+            /** @enum {string} */
+            result: "success" | "failure";
+            details?: {
+                [key: string]: unknown;
+            } | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        PlanAuditLogListResponse: {
+            items: components["schemas"]["PlanAuditLog"][];
+            /** @description 满足筛选条件的总条数（用于前端分页） */
+            total?: number;
+            /** @description 下一页游标；null 表示已无更多数据 */
+            next_cursor?: string | null;
+        };
+        IdempotentResult: {
+            /** Format: uuid */
+            id: string;
+            message: string;
+        };
+        TenantRef: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            display_name: string;
+            mfa_required: boolean;
+        };
+        /** @description 跨租户管理员列表项。仅返回 role ∈ (tenant-owner, tenant-admin) 或正在被邀请的用户； is_inviting 仅作标记，不影响 role/status（邀请中用户仍展示原有角色，可为 user）。 列表不返回 created_at/updated_at。 */
+        AdminWithTenant: {
+            /** Format: uuid */
+            id: string;
+            /** Format: email */
+            email: string;
+            username: string;
+            display_name?: string | null;
+            /**
+             * @description 租户内角色；列表仅含 owner/admin/邀请中
+             * @enum {string}
+             */
+            role: "tenant-owner" | "tenant-admin" | "user" | "auditor";
+            /** @enum {string} */
+            status: "active" | "disabled";
+            /** @description true = 该租户下存在 status='inviting' 的邀请；仅作标记，不影响 role/status */
+            is_inviting: boolean;
+            /** @enum {string} */
+            source: "local" | "third_party";
+            /** Format: date-time */
+            last_login_at?: string | null;
+            tenant: components["schemas"]["TenantRef"];
+        };
+        /** @description 管理员详情（不含 password_hash、无顶层 tenant_id 冗余）； 相比 AdminWithTenant 额外返回 created_at/updated_at。 */
+        AdminDetail: {
+            /** Format: uuid */
+            id: string;
+            /** Format: email */
+            email: string;
+            username: string;
+            display_name?: string | null;
+            /** @enum {string} */
+            role: "tenant-owner" | "tenant-admin" | "user" | "auditor";
+            /** @enum {string} */
+            status: "active" | "disabled";
+            is_inviting: boolean;
+            /** @enum {string} */
+            source: "local" | "third_party";
+            /** Format: date-time */
+            last_login_at?: string | null;
+            /**
+             * Format: date-time
+             * @description 详情响应返回；跨租户列表不返回
+             */
+            created_at?: string | null;
+            /**
+             * Format: date-time
+             * @description 详情响应返回；跨租户列表不返回
+             */
+            updated_at?: string | null;
+            tenant: components["schemas"]["TenantRef"];
+        };
+        /** @description 跨租户管理员列表（游标分页） */
+        AdminListResponse: {
+            items: components["schemas"]["AdminWithTenant"][];
+            /** @description 下一页游标；null 表示已无更多数据 */
+            next_cursor?: string | null;
+        };
+        /** @description 邀请/重发结果；token 仅本次返回一次，库中仅存 SHA-256 哈希 */
+        InvitationResult: {
+            /**
+             * Format: uuid
+             * @description 邀请记录 ID
+             */
+            id: string;
+            /** @description 原始邀请 token，仅本次返回一次 */
+            token: string;
+            /**
+             * Format: date-time
+             * @description 过期时间（now()+72h）
+             */
+            expire_at: string;
+            message: string;
+        };
+        /** @description 指定管理员的 4 维权限模型；仅返回租户成员（tenant_id 非空），平台账户不可查 */
+        UserPermissions: {
+            /** Format: uuid */
+            user_id: string;
+            /**
+             * Format: uuid
+             * @description 租户成员非空；平台账户为 null（不可经本端点查询）
+             */
+            tenant_id?: string | null;
+            /** @enum {string} */
+            role: "tenant-owner" | "tenant-admin" | "user" | "auditor";
+            permissions: {
+                /** @enum {string} */
+                compute: "read" | "write" | "none";
+                /** @enum {string} */
+                inference: "read" | "write" | "none";
+                /** @enum {string} */
+                member: "read" | "write" | "none";
+                /** @enum {string} */
+                transfer: "read" | "write" | "none";
+            };
+        };
+        TenantAdminAuditLog: {
+            /** Format: uuid */
+            id: string;
+            /** @description 如 tenant_admin.invite / resend_invitation / change_role / transfer_ownership / reset_password / disable / enable / delete */
+            action: string;
+            resource: string;
+            /** @enum {string} */
+            result: "success" | "failed";
+            /** Format: uuid */
+            user_id?: string | null;
+            details?: {
+                [key: string]: unknown;
+            } | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        TenantAdminAuditLogListResponse: {
+            items: components["schemas"]["TenantAdminAuditLog"][];
+            /** @description 下一页游标；null 表示已无更多数据 */
+            next_cursor?: string | null;
+        };
+        InviteAdminRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
+            /**
+             * Format: email
+             * @description RFC 5322
+             */
+            email: string;
+            /** @description 不含冒号 */
+            username: string;
+        };
+        ResendInvitationRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
+        };
+        UpdateRoleRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
+            /**
+             * @description 不可设 tenant-owner
+             * @enum {string}
+             */
+            role: "user" | "auditor" | "tenant-admin";
+        };
+        TransferOwnershipRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
+            /**
+             * Format: uuid
+             * @description 当前租户内 active 且角色为 tenant-admin 的成员
+             */
+            target_user_id: string;
+        };
+        ResetPasswordRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
+            /** @description 四类中至少三类，须与旧密码不同（HTTPS，明文不落日志） */
+            new_password: string;
+        };
+        /** @description 仅含幂等键的请求体（用于 disable/enable） */
+        IdempotentOnlyRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
+        };
     };
     responses: {
         /** @description 请求参数错误 */
@@ -1354,6 +2318,15 @@ export interface components {
         };
         /** @description 前置条件不满足（code=PRECONDITION_FAILED） */
         PreconditionFailed: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 前置条件不满足，code 可为 QUOTA_RESOURCE_NOT_REGISTERED（配额维度未注册或已禁用）或 PLAN_NOT_ACTIVE（绑定套餐时套餐状态非 active） */
+        UnprocessableEntity: {
             headers: {
                 [name: string]: unknown;
             };
@@ -1785,10 +2758,19 @@ export interface operations {
                     description?: string;
                     /** @default bge-m3 */
                     embedding_model?: string;
-                    /** @default 512 */
+                    /**
+                     * @description 分块大小（tokens），与 KBConfig 边界一致
+                     * @default 1024
+                     */
                     chunk_size?: number;
                     /** @default 5 */
                     top_k?: number;
+                    /**
+                     * Format: float
+                     * @description 相似度阈值，非零覆盖默认值
+                     * @default 0.3
+                     */
+                    score_threshold?: number;
                 };
             };
         };
@@ -1872,7 +2854,7 @@ export interface operations {
             };
         };
     };
-    uploadKnowledgeBaseDocument: {
+    getDocumentUploadURL: {
         parameters: {
             query?: never;
             header?: never;
@@ -1883,20 +2865,89 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "multipart/form-data": {
-                    /** Format: binary */
-                    file: string;
-                };
+                "application/json": components["schemas"]["GetDocumentUploadURLRequest"];
             };
         };
         responses: {
-            /** @description 文档已上传，解析任务进行中 */
+            /** @description 预签名上传地址与预留 doc_id */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GetDocumentUploadURLResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            /** @description 文件大小超限（doc.too_large） */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 不支持的文档格式（doc.unsupported_type） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    notifyDocumentUploaded: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+                doc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotifyDocumentUploadedRequest"];
+            };
+        };
+        responses: {
+            /** @description 解析任务已派发 */
             202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["KBDocument"];
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            /** @description 校验和不匹配（doc.checksum_mismatch） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 对象存储/解析服务暂不可用（inference.unavailable） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -1934,19 +2985,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    question: string;
-                    /** Format: uuid */
-                    session_id?: string | null;
-                    idempotency_key: string;
-                    /** @default 5 */
-                    top_k?: number;
-                    /**
-                     * Format: float
-                     * @default 0.3
-                     */
-                    score_threshold?: number;
-                };
+                "application/json": components["schemas"]["KBQueryRequest"];
             };
         };
         responses: {
@@ -1962,6 +3001,15 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            /** @description 推理服务暂不可用（inference.unavailable） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     streamQueryKnowledgeBase: {
@@ -2072,6 +3120,159 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    reparseKnowledgeBaseDocument: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+                doc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReparseDocumentRequest"];
+            };
+        };
+        responses: {
+            /** @description 重新解析任务已提交 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            /** @description 解析服务暂不可用（inference.unavailable） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getKnowledgeBaseConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 知识库配置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KBConfig"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateKnowledgeBaseConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateKBConfigRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新后的知识库 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeBase"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    rebuildKnowledgeBase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RebuildKnowledgeBaseRequest"];
+            };
+        };
+        responses: {
+            /** @description 重建任务已提交 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listKnowledgeBaseModels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 可用模型列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelList"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -2944,6 +4145,814 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+        };
+    };
+    listQuotaMeta: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 启用维度元数据列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuotaMetaListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Core 或下游不可用 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    listTenantPlans: {
+        parameters: {
+            query?: {
+                /** @description 每页数量 */
+                limit?: number;
+                /** @description 上一页返回的 next_cursor */
+                cursor?: string;
+                status?: "draft" | "active" | "disabled";
+                /** @description 模糊匹配 name */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 套餐列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantPlanListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createTenantPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTenantPlanRequest"];
+            };
+        };
+        responses: {
+            /** @description 套餐已创建 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    getTenantPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                planId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 套餐详情 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantPlan"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateTenantPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                planId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateTenantPlanRequest"];
+            };
+        };
+        responses: {
+            /** @description 套餐已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteTenantPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                planId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 套餐已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getTenantPlanQuotaLimits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                planId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 套餐限额列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanQuotaLimitsResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateTenantPlanQuotaLimits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                planId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateQuotaLimitsRequest"];
+            };
+        };
+        responses: {
+            /** @description 限额已修改 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    activateTenantPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                planId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description 客户端生成UUID，防重复提交
+                     */
+                    idempotency_key: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 套餐已发布 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    disableTenantPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                planId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description 客户端生成UUID，防重复提交
+                     */
+                    idempotency_key: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 套餐已禁用 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listTenantPlanBoundTenants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                planId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 绑定租户列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundTenantsResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listBindableTenants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                planId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 可绑定租户列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundTenantsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listTenantPlanAuditLogs: {
+        parameters: {
+            query?: {
+                /** @description 每页数量 */
+                limit?: number;
+                /** @description 上一页返回的 next_cursor */
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                planId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 操作历史列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanAuditLogListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    bindTenantPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BindPlanRequest"];
+            };
+        };
+        responses: {
+            /** @description 套餐已绑定，配额已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    listAllTenantAdmins: {
+        parameters: {
+            query?: {
+                /** @description 每页数量 */
+                limit?: number;
+                /** @description 上一页返回的 next_cursor */
+                cursor?: string;
+                /** @description 可选；按指定租户过滤 */
+                tenant_id?: string;
+                role?: "tenant-owner" | "tenant-admin";
+                status?: "active" | "disabled";
+                /** @description true = 仅邀请中 */
+                is_inviting?: boolean;
+                /** @description 模糊匹配 email/username */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 跨租户管理员列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    inviteTenantAdmin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InviteAdminRequest"];
+            };
+        };
+        responses: {
+            /** @description 邀请已发送 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description TENANT_ADMIN_NOT_FOUND / TENANT_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+            /** @description TENANT_ADMIN_ALREADY_ADMIN / TENANT_INVITATION_PENDING / IDEMPOTENCY_CONFLICT */
+            409: components["responses"]["Conflict"];
+        };
+    };
+    resendTenantAdminInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResendInvitationRequest"];
+            };
+        };
+        responses: {
+            /** @description 邀请已重发 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description TENANT_ADMIN_INVITATION_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+            /** @description TENANT_INVITATION_SETTLED / IDEMPOTENCY_CONFLICT */
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getTenantAdminDetail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 管理员详情 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description TENANT_ADMIN_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteTenantAdmin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 管理员已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description TENANT_ADMIN_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+            /** @description TENANT_OWNER_ROLE_LOCKED */
+            409: components["responses"]["Conflict"];
+            /** @description LAST_TENANT_OWNER */
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    getTenantAdminRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 角色与权限 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserPermissions"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description TENANT_ADMIN_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateTenantAdminRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateRoleRequest"];
+            };
+        };
+        responses: {
+            /** @description 角色已修改 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description TENANT_ADMIN_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+            /** @description TENANT_OWNER_ROLE_LOCKED / IDEMPOTENCY_CONFLICT */
+            409: components["responses"]["Conflict"];
+            /** @description ROLE_CHANGE_INVALID */
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    transferTenantOwnership: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransferOwnershipRequest"];
+            };
+        };
+        responses: {
+            /** @description 所有权已移交 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description TENANT_NOT_FOUND / TENANT_ADMIN_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+            /** @description IDEMPOTENCY_CONFLICT */
+            409: components["responses"]["Conflict"];
+            /** @description TRANSFER_TARGET_INVALID */
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    resetTenantAdminPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResetPasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description 密码已重置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            /** @description VALIDATION_FAILED */
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description TENANT_ADMIN_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+            /** @description IDEMPOTENCY_CONFLICT */
+            409: components["responses"]["Conflict"];
+            /** @description PASSWORD_SAME_AS_OLD */
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    disableTenantAdmin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdempotentOnlyRequest"];
+            };
+        };
+        responses: {
+            /** @description 管理员已禁用 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description TENANT_ADMIN_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+            /** @description IDEMPOTENCY_CONFLICT */
+            409: components["responses"]["Conflict"];
+            /** @description LAST_TENANT_OWNER */
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    enableTenantAdmin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdempotentOnlyRequest"];
+            };
+        };
+        responses: {
+            /** @description 管理员已启用 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description TENANT_ADMIN_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+            /** @description IDEMPOTENCY_CONFLICT */
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listTenantAdminAuditLogs: {
+        parameters: {
+            query?: {
+                /** @description 每页数量 */
+                limit?: number;
+                /** @description 上一页返回的 next_cursor */
+                cursor?: string;
+                /** @description 过滤操作类型 */
+                action?: string;
+                result?: "success" | "failed";
+            };
+            header?: never;
+            path: {
+                tenantId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 操作历史列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantAdminAuditLogListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description TENANT_ADMIN_NOT_FOUND */
+            404: components["responses"]["NotFound"];
         };
     };
 }

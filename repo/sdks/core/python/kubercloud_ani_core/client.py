@@ -8,7 +8,12 @@ TITLE = "KuberCloud ANI Core API"
 VERSION = "1.0.0"
 SERVER_URL = "https://{host}/api/v1"
 OPERATIONS = [
+    "listPlanBoundTenantCounts",
+    "listPlanBindableTenants",
+    "listPlanBoundTenants",
     "listQuotaMeta",
+    "getTenant",
+    "updateTenantPlan",
     "deleteTenantQuota",
     "getTenantQuota",
     "createTenantQuota",
@@ -219,7 +224,12 @@ OPERATIONS = [
     "unmountStorageVolume"
 ]
 PATHS = [
+    "GET /admin/plans/bound-tenant-counts",
+    "GET /admin/plans/{plan_id}/bindable-tenants",
+    "GET /admin/plans/{plan_id}/bound-tenants",
     "GET /admin/quota-meta",
+    "GET /admin/tenants/{tenant_id}",
+    "PUT /admin/tenants/{tenant_id}/plan",
     "DELETE /admin/tenants/{tenant_id}/quota",
     "GET /admin/tenants/{tenant_id}/quota",
     "POST /admin/tenants/{tenant_id}/quota",
@@ -586,6 +596,8 @@ SCHEMAS = [
     "ObservabilityQueryResponse",
     "ObservabilityRangeQueryResponse",
     "PasswordLoginRequest",
+    "PlanBoundTenantCount",
+    "PlanBoundTenantCountList",
     "PlatformPasswordLoginRequest",
     "PlatformWorkload",
     "PlatformWorkloadAcceleratorCapability",
@@ -699,6 +711,10 @@ SCHEMAS = [
     "StorageVolumeMountHistoryEntry",
     "StorageVolumeMountRequest",
     "StorageVolumeUnmountRequest",
+    "Tenant",
+    "TenantPlanUpdateRequest",
+    "TenantSummary",
+    "TenantSummaryList",
     "TokenPairResponse",
     "TokenUsageReport",
     "UpdateEmailRecipientRequest",
@@ -849,6 +865,7 @@ ERROR_CODES = [
     "RESERVATION_EXCEEDS_QUOTA",
     "RESERVED_INSUFFICIENT",
     "TENANT_NOT_FOUND",
+    "TENANT_PLAN_NOT_FOUND",
     "UNAUTHORIZED",
     "UNAVAILABLE",
     "VALIDATION_FAILED",

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/kubercloud/ani/pkg/ports"
@@ -35,6 +36,8 @@ func (r quotaFakeRow) Scan(dest ...any) error {
 			*ptr = r.values[i].(time.Time)
 		case *[]byte:
 			*ptr = r.values[i].([]byte)
+		case *uuid.UUID:
+			*ptr = r.values[i].(uuid.UUID)
 		default:
 			return ports.ErrUnsupported
 		}

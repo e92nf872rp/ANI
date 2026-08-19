@@ -5,10 +5,40 @@
   "serverURL": "https://{host}/api/v1",
   "operations": [
     {
+      "operationId": "listPlanBoundTenantCounts",
+      "method": "GET",
+      "path": "/admin/plans/bound-tenant-counts",
+      "scope": "scope:quota:read"
+    },
+    {
+      "operationId": "listPlanBindableTenants",
+      "method": "GET",
+      "path": "/admin/plans/{plan_id}/bindable-tenants",
+      "scope": "scope:quota:read"
+    },
+    {
+      "operationId": "listPlanBoundTenants",
+      "method": "GET",
+      "path": "/admin/plans/{plan_id}/bound-tenants",
+      "scope": "scope:quota:read"
+    },
+    {
       "operationId": "listQuotaMeta",
       "method": "GET",
       "path": "/admin/quota-meta",
       "scope": "scope:quota:read"
+    },
+    {
+      "operationId": "getTenant",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}",
+      "scope": "scope:quota:read"
+    },
+    {
+      "operationId": "updateTenantPlan",
+      "method": "PUT",
+      "path": "/admin/tenants/{tenant_id}/plan",
+      "scope": "scope:quota:write"
     },
     {
       "operationId": "deleteTenantQuota",
@@ -1416,6 +1446,8 @@
     "ObservabilityQueryResponse",
     "ObservabilityRangeQueryResponse",
     "PasswordLoginRequest",
+    "PlanBoundTenantCount",
+    "PlanBoundTenantCountList",
     "PlatformPasswordLoginRequest",
     "PlatformWorkload",
     "PlatformWorkloadAcceleratorCapability",
@@ -1529,6 +1561,10 @@
     "StorageVolumeMountHistoryEntry",
     "StorageVolumeMountRequest",
     "StorageVolumeUnmountRequest",
+    "Tenant",
+    "TenantPlanUpdateRequest",
+    "TenantSummary",
+    "TenantSummaryList",
     "TokenPairResponse",
     "TokenUsageReport",
     "UpdateEmailRecipientRequest",
@@ -1679,6 +1715,7 @@
     "RESERVATION_EXCEEDS_QUOTA",
     "RESERVED_INSUFFICIENT",
     "TENANT_NOT_FOUND",
+    "TENANT_PLAN_NOT_FOUND",
     "UNAUTHORIZED",
     "UNAVAILABLE",
     "VALIDATION_FAILED",

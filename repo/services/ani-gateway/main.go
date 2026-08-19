@@ -210,6 +210,12 @@ func main() {
 		platformWorkloadProvider = "local"
 	}
 	logger.Info("platform workload provider runtime configured", "provider", platformWorkloadProvider)
+	tenantService, closeTenantStore, err := newGatewayTenantStore(runtimeCtx)
+	if err != nil {
+		logger.Error("failed to configure tenant admin store", "err", err)
+		os.Exit(1)
+	}
+	defer closeTenantStore()
 	var routeInstanceRuntime *router.InstanceRuntime
 	if instanceRuntime.Service != nil {
 		routeInstanceRuntime = &router.InstanceRuntime{
@@ -246,6 +252,7 @@ func main() {
 		AsyncTaskStore:                        instanceRuntime.AsyncTasks,
 		QuotaAdminService:                     quotaAdminService,
 		PlatformWorkloadService:               platformWorkloadService,
+		TenantService:                         tenantService,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

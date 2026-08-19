@@ -4,7 +4,12 @@ export const title = "KuberCloud ANI Core API";
 export const version = "1.0.0";
 export const serverURL = "https://{host}/api/v1";
 export const operations = [
+  "listPlanBoundTenantCounts",
+  "listPlanBindableTenants",
+  "listPlanBoundTenants",
   "listQuotaMeta",
+  "getTenant",
+  "updateTenantPlan",
   "deleteTenantQuota",
   "getTenantQuota",
   "createTenantQuota",
@@ -215,7 +220,12 @@ export const operations = [
   "unmountStorageVolume"
 ];
 export const paths = [
+  "GET /admin/plans/bound-tenant-counts",
+  "GET /admin/plans/{plan_id}/bindable-tenants",
+  "GET /admin/plans/{plan_id}/bound-tenants",
   "GET /admin/quota-meta",
+  "GET /admin/tenants/{tenant_id}",
+  "PUT /admin/tenants/{tenant_id}/plan",
   "DELETE /admin/tenants/{tenant_id}/quota",
   "GET /admin/tenants/{tenant_id}/quota",
   "POST /admin/tenants/{tenant_id}/quota",
@@ -582,6 +592,8 @@ export const schemas = [
   "ObservabilityQueryResponse",
   "ObservabilityRangeQueryResponse",
   "PasswordLoginRequest",
+  "PlanBoundTenantCount",
+  "PlanBoundTenantCountList",
   "PlatformPasswordLoginRequest",
   "PlatformWorkload",
   "PlatformWorkloadAcceleratorCapability",
@@ -695,6 +707,10 @@ export const schemas = [
   "StorageVolumeMountHistoryEntry",
   "StorageVolumeMountRequest",
   "StorageVolumeUnmountRequest",
+  "Tenant",
+  "TenantPlanUpdateRequest",
+  "TenantSummary",
+  "TenantSummaryList",
   "TokenPairResponse",
   "TokenUsageReport",
   "UpdateEmailRecipientRequest",
@@ -845,6 +861,7 @@ export const errorCodes = [
   "RESERVATION_EXCEEDS_QUOTA",
   "RESERVED_INSUFFICIENT",
   "TENANT_NOT_FOUND",
+  "TENANT_PLAN_NOT_FOUND",
   "UNAUTHORIZED",
   "UNAVAILABLE",
   "VALIDATION_FAILED",

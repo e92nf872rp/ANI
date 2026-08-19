@@ -947,6 +947,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/quota-meta": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询可用配额维度元数据（透传 Core；需 platform-admin / platform-ops / platform-readonly） */
+        get: operations["listQuotaMeta"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenant-plans": {
         parameters: {
             query?: never;
@@ -954,7 +971,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 查询套餐列表 */
+        /** 查询套餐列表（需 platform-admin / platform-ops / platform-readonly） */
         get: operations["listTenantPlans"];
         put?: never;
         /** 创建套餐（需 platform-admin / platform-ops） */
@@ -974,7 +991,8 @@ export interface paths {
         };
         /** 查询套餐详情（需 platform-admin / platform-ops / platform-readonly） */
         get: operations["getTenantPlan"];
-        put?: never;
+        /** 更新套餐基本信息（name / description）（需 platform-admin / platform-ops） */
+        put: operations["updateTenantPlan"];
         post?: never;
         /** 删除套餐（软删除）（需 platform-admin / platform-ops） */
         delete: operations["deleteTenantPlan"];
@@ -990,7 +1008,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 查询套餐限额（需 platform-admin / platform-ops / platform-readonly） */
+        /**
+         * 查询套餐限额（需 platform-admin / platform-ops / platform-readonly）
+         * @description 返回 plan_quota_limits 与 Core 启用维度的交集视图； 库中 total 为 NULL 时用 default_quota 兜底展示，并 best-effort 回写（回写失败不影响查询）。
+         */
         get: operations["getTenantPlanQuotaLimits"];
         /** 修改套餐限额（同步存量租户）（需 platform-admin / platform-ops） */
         put: operations["updateTenantPlanQuotaLimits"];
@@ -1010,7 +1031,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 发布套餐（需 platform-admin / platform-ops） */
+        /**
+         * 发布套餐（需 platform-admin / platform-ops）
+         * @description draft/disabled → active；幂等键必传（body 或 Idempotency-Key 头）
+         */
         post: operations["activateTenantPlan"];
         delete?: never;
         options?: never;
@@ -1027,7 +1051,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 禁用套餐（需 platform-admin / platform-ops） */
+        /**
+         * 禁用套餐（需 platform-admin / platform-ops）
+         * @description active → disabled；幂等键必传（body 或 Idempotency-Key 头）
+         */
         post: operations["disableTenantPlan"];
         delete?: never;
         options?: never;
@@ -1042,8 +1069,31 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 查询套餐绑定的租户列表（需 platform-admin / platform-ops / platform-readonly） */
+        /**
+         * 查询套餐绑定的租户列表（需 platform-admin / platform-ops / platform-readonly）
+         * @description 返回已绑定该套餐且 status≠disabled 的租户摘要（不分页，按 name 排序）。
+         */
         get: operations["listTenantPlanBoundTenants"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenant-plans/{planId}/bindable-tenants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询可绑定该套餐的租户列表（需 platform-admin / platform-ops / platform-readonly）
+         * @description 返回 status≠disabled 且尚未绑定该套餐（plan_id IS DISTINCT FROM planId，含未绑定其它套餐）的租户摘要，按 name 排序。
+         */
+        get: operations["listBindableTenants"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2112,14 +2162,18 @@ export interface components {
             code: string;
             /** @description 套餐名称 */
             name: string;
-            description?: string | null;
+            /** @description 套餐说明；网关 JSON 始终包含该字段（空则为 null） */
+            description: string | null;
             /** @enum {string} */
             status: "draft" | "active" | "disabled";
-            /** @description 绑定租户数量 */
+            /**
+             * Format: int64
+             * @description 绑定租户数量（status≠disabled）
+             */
             tenant_count: number;
-            /** Format: date-time */
+            /** @description 展示时间 YYYY-MM-DD HH:mm:ss（Asia/Shanghai）；非 RFC3339 */
             created_at: string;
-            /** Format: date-time */
+            /** @description 展示时间 YYYY-MM-DD HH:mm:ss（Asia/Shanghai）；非 RFC3339 */
             updated_at: string;
         };
         TenantPlanListItem: {
@@ -2127,32 +2181,40 @@ export interface components {
             id: string;
             code: string;
             name: string;
+            /** @description 套餐说明；网关 JSON 始终包含该字段（空则为 null） */
+            description: string | null;
             /** @enum {string} */
             status: "draft" | "active" | "disabled";
+            /** Format: int64 */
             tenant_count: number;
-            /** Format: date-time */
+            /** @description 展示时间 YYYY-MM-DD HH:mm:ss（Asia/Shanghai）；非 RFC3339 */
             created_at: string;
-            /** Format: date-time */
+            /** @description 展示时间 YYYY-MM-DD HH:mm:ss（Asia/Shanghai）；非 RFC3339 */
             updated_at: string;
         };
         TenantPlanListResponse: {
             items: components["schemas"]["TenantPlanListItem"][];
-            /** @description 满足筛选条件的总条数（用于前端分页） */
-            total?: number;
-            /** @description 下一页游标；null 表示已无更多数据 */
-            next_cursor?: string | null;
+            /**
+             * Format: int64
+             * @description 满足筛选条件的总条数（用于前端分页）
+             */
+            total: number;
+            /** @description 下一页游标；null 表示已无更多数据（网关将空串映射为 null） */
+            next_cursor: string | null;
         };
         CreateTenantPlanRequest: {
             /**
              * Format: uuid
-             * @description 客户端生成UUID，防重复提交
+             * @description 客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落；皆空时服务端仍接受，幂等中间件跳过）
              */
             idempotency_key: string;
-            /** @description 套餐代码；无格式限制，未删除套餐内唯一 */
+            /** @description 套餐代码；小写字母/数字/连字符，长度 3–40；未删除套餐内唯一 */
             code: string;
+            /** @description 按 Unicode 码点计长度 1–64 */
             name: string;
+            /** @description 按 Unicode 码点计长度 ≤512；空串落库为 NULL */
             description?: string;
-            /** @description 各维度配额上限；total 为 null 表示用 default_quota */
+            /** @description 可选；缺省或空数组表示不写限额行。total 为 null 时服务端用 default_quota 物化写入（落库为具体数值，不保留 NULL） */
             quota_limits?: components["schemas"]["PlanQuotaLimitInput"][];
         };
         PlanQuotaLimitInput: {
@@ -2160,7 +2222,7 @@ export interface components {
             resource_type: string;
             /**
              * Format: int64
-             * @description 限额值；null = 用 default_quota
+             * @description 限额值；null = 服务端用 default_quota 物化落库（不保留 NULL）
              */
             total?: number | null;
         };
@@ -2172,30 +2234,64 @@ export interface components {
             unit: string;
             /**
              * Format: int64
-             * @description 展示限额值；未显式设置时已用 resource_quota_meta.default_quota 兜底为具体数值，不返回 null
+             * @description 展示限额值；写入已物化或查询路径用 default_quota 兜底，不返回 null
              */
             total: number;
         };
         PlanQuotaLimitsResponse: {
             items: components["schemas"]["PlanQuotaLimitView"][];
         };
+        /** @description 可用配额维度元数据（透传 Core GET /admin/quota-meta；仅 enabled 维度） */
+        QuotaMetaItem: {
+            resource_type: string;
+            display_name: string;
+            unit: string;
+            /** Format: int64 */
+            default_quota: number;
+            /** @description true=整数计数；false=允许小数 */
+            is_discrete: boolean;
+        };
+        QuotaMetaListResponse: {
+            items: components["schemas"]["QuotaMetaItem"][];
+        };
         UpdateQuotaLimitsRequest: {
             /**
              * Format: uuid
-             * @description 客户端生成UUID，防重复提交
+             * @description 客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落；皆空时中间件跳过）
              */
             idempotency_key: string;
             items: components["schemas"]["PlanQuotaLimitInput"][];
         };
+        /** @description 更新套餐基本信息。name / description 均为可选： 未传或 null 表示不更新；name 不允许传空串（服务端校验返回 VALIDATION_FAILED）， description 传空串表示清空。 长度按 Unicode 码点校验（与服务端 utf8.RuneCountInString 一致）。 */
+        UpdateTenantPlanRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落；皆空时中间件跳过）
+             */
+            idempotency_key: string;
+            /** @description 未传/null=不更新；不允许空串；长度 1-64（Unicode 码点） */
+            name?: string | null;
+            /** @description 未传/null=不更新；空串=清空；长度 ≤512（Unicode 码点） */
+            description?: string | null;
+        };
+        /** @description 套餐发布/禁用请求体。幂等键可放 body.idempotency_key， 或请求头 Idempotency-Key（body 缺省时网关回落）。 */
+        TenantPlanStateChangeRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落）
+             */
+            idempotency_key: string;
+        };
         BindPlanRequest: {
             /**
              * Format: uuid
-             * @description 客户端生成UUID，防重复提交
+             * @description 客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落；皆空时中间件跳过）
              */
             idempotency_key: string;
             /** Format: uuid */
             plan_id: string;
         };
+        /** @description 租户摘要。绑定列表与可绑定列表均只返回 status≠disabled 的租户； 枚举仍含 disabled 以便与租户状态机一致。 */
         BoundTenant: {
             /** Format: uuid */
             id: string;
@@ -2207,33 +2303,28 @@ export interface components {
         BoundTenantsResponse: {
             items: components["schemas"]["BoundTenant"][];
         };
+        /** @description 套餐操作历史摘要；网关 JSON 始终包含 details（无则为 null） */
         PlanAuditLog: {
             /** Format: uuid */
             id: string;
-            /** Format: uuid */
-            tenant_id?: string | null;
-            /** Format: uuid */
-            user_id?: string | null;
-            /** Format: uuid */
-            request_id?: string | null;
             action: string;
-            resource: string;
             /** @enum {string} */
             result: "success" | "failure";
-            details?: {
+            details: {
                 [key: string]: unknown;
             } | null;
-            ip_address?: string | null;
-            user_agent?: string | null;
-            /** Format: date-time */
+            /** @description 展示时间 YYYY-MM-DD HH:mm:ss（Asia/Shanghai）；非 RFC3339 */
             created_at: string;
         };
         PlanAuditLogListResponse: {
             items: components["schemas"]["PlanAuditLog"][];
-            /** @description 满足筛选条件的总条数（用于前端分页） */
-            total?: number;
-            /** @description 下一页游标；null 表示已无更多数据 */
-            next_cursor?: string | null;
+            /**
+             * Format: int64
+             * @description 满足筛选条件的总条数（用于前端分页）
+             */
+            total: number;
+            /** @description 下一页游标；null 表示已无更多数据（网关将空串映射为 null） */
+            next_cursor: string | null;
         };
         IdempotentResult: {
             /** Format: uuid */
@@ -2418,11 +2509,11 @@ export interface components {
             /** @description 四类中至少三类，须与旧密码不同（HTTPS，明文不落日志） */
             new_password: string;
         };
-        /** @description 仅含幂等键的请求体（用于 disable/enable） */
+        /** @description 仅含幂等键的请求体（用于租户管理员 disable/enable 等） */
         IdempotentOnlyRequest: {
             /**
              * Format: uuid
-             * @description 客户端生成UUID，防重复提交
+             * @description 客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落）
              */
             idempotency_key: string;
         };
@@ -2547,6 +2638,22 @@ export interface components {
         };
         /** @description 推理 runtime 调用超时（code=RUNTIME_TIMEOUT） */
         RuntimeTimeout: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content?: never;
+        };
+        /** @description 下游不可用（code=GRPC_CLIENT_UNAVAILABLE；tenant-service 或 Core 配额 API） */
+        BadGateway: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 下游超时（code=GATEWAY_TIMEOUT） */
+        GatewayTimeout: {
             headers: {
                 [name: string]: unknown;
             };
@@ -4463,6 +4570,30 @@ export interface operations {
             409: components["responses"]["Conflict"];
         };
     };
+    listQuotaMeta: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 可用配额维度列表（仅 enabled） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuotaMetaListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
     listTenantPlans: {
         parameters: {
             query?: {
@@ -4489,8 +4620,12 @@ export interface operations {
                     "application/json": components["schemas"]["TenantPlanListResponse"];
                 };
             };
+            /** @description VALIDATION_FAILED（如 status 非法 / cursor 非法） */
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     createTenantPlan: {
@@ -4506,7 +4641,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 套餐已创建 */
+            /** @description 套餐已创建（message 如 "tenant plan created"） */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4518,8 +4653,11 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description PLAN_CODE_CONFLICT 或 IDEMPOTENCY_KEY_REUSED */
             409: components["responses"]["Conflict"];
             422: components["responses"]["UnprocessableEntity"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     getTenantPlan: {
@@ -4542,9 +4680,49 @@ export interface operations {
                     "application/json": components["schemas"]["TenantPlan"];
                 };
             };
+            /** @description VALIDATION_FAILED（planId 非 UUID） */
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description TENANT_PLAN_NOT_FOUND */
             404: components["responses"]["NotFound"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    updateTenantPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                planId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateTenantPlanRequest"];
+            };
+        };
+        responses: {
+            /** @description 套餐基本信息已更新（message 如 "tenant plan updated"） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description TENANT_PLAN_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+            /** @description IDEMPOTENCY_KEY_REUSED */
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     deleteTenantPlan: {
@@ -4558,7 +4736,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description 套餐已删除 */
+            /** @description 套餐已删除（message 如 "tenant plan deleted"） */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4567,10 +4745,16 @@ export interface operations {
                     "application/json": components["schemas"]["IdempotentResult"];
                 };
             };
+            /** @description VALIDATION_FAILED（planId 非 UUID） */
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description TENANT_PLAN_NOT_FOUND */
             404: components["responses"]["NotFound"];
+            /** @description TENANT_PLAN_IN_USE（仍有非 disabled 绑定租户） */
             409: components["responses"]["Conflict"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     getTenantPlanQuotaLimits: {
@@ -4593,9 +4777,14 @@ export interface operations {
                     "application/json": components["schemas"]["PlanQuotaLimitsResponse"];
                 };
             };
+            /** @description VALIDATION_FAILED（planId 非 UUID） */
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description TENANT_PLAN_NOT_FOUND */
             404: components["responses"]["NotFound"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     updateTenantPlanQuotaLimits: {
@@ -4613,7 +4802,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 限额已修改 */
+            /** @description 限额已修改（message 如 "quota limits updated"；存量租户同步失败不回滚套餐限额，写审计并异步重试） */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4625,8 +4814,13 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description TENANT_PLAN_NOT_FOUND */
             404: components["responses"]["NotFound"];
+            /** @description IDEMPOTENCY_KEY_REUSED */
+            409: components["responses"]["Conflict"];
             422: components["responses"]["UnprocessableEntity"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     activateTenantPlan: {
@@ -4640,17 +4834,11 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    /**
-                     * Format: uuid
-                     * @description 客户端生成UUID，防重复提交
-                     */
-                    idempotency_key: string;
-                };
+                "application/json": components["schemas"]["TenantPlanStateChangeRequest"];
             };
         };
         responses: {
-            /** @description 套餐已发布 */
+            /** @description 套餐已发布（message 如 "tenant plan activated"） */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4659,10 +4847,16 @@ export interface operations {
                     "application/json": components["schemas"]["IdempotentResult"];
                 };
             };
+            /** @description VALIDATION_FAILED（planId 非 UUID） */
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description TENANT_PLAN_NOT_FOUND */
             404: components["responses"]["NotFound"];
+            /** @description PLAN_STATE_INVALID 或 IDEMPOTENCY_KEY_REUSED */
             409: components["responses"]["Conflict"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     disableTenantPlan: {
@@ -4676,17 +4870,11 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    /**
-                     * Format: uuid
-                     * @description 客户端生成UUID，防重复提交
-                     */
-                    idempotency_key: string;
-                };
+                "application/json": components["schemas"]["TenantPlanStateChangeRequest"];
             };
         };
         responses: {
-            /** @description 套餐已禁用 */
+            /** @description 套餐已禁用（message 如 "tenant plan disabled"） */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4695,10 +4883,16 @@ export interface operations {
                     "application/json": components["schemas"]["IdempotentResult"];
                 };
             };
+            /** @description VALIDATION_FAILED（planId 非 UUID） */
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description TENANT_PLAN_NOT_FOUND */
             404: components["responses"]["NotFound"];
+            /** @description PLAN_STATE_INVALID 或 IDEMPOTENCY_KEY_REUSED */
             409: components["responses"]["Conflict"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     listTenantPlanBoundTenants: {
@@ -4721,9 +4915,44 @@ export interface operations {
                     "application/json": components["schemas"]["BoundTenantsResponse"];
                 };
             };
+            /** @description VALIDATION_FAILED（planId 非 UUID） */
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description TENANT_PLAN_NOT_FOUND */
             404: components["responses"]["NotFound"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    listBindableTenants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                planId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 可绑定租户列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundTenantsResponse"];
+                };
+            };
+            /** @description VALIDATION_FAILED（planId 非 UUID） */
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description TENANT_PLAN_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     listTenantPlanAuditLogs: {
@@ -4733,9 +4962,6 @@ export interface operations {
                 limit?: number;
                 /** @description 上一页返回的 next_cursor */
                 cursor?: string;
-                /** @description 过滤操作类型 */
-                action?: string;
-                result?: "success" | "failure";
             };
             header?: never;
             path: {
@@ -4745,7 +4971,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description 操作历史列表 */
+            /** @description 操作历史列表（无 action/result 服务端过滤） */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4754,9 +4980,14 @@ export interface operations {
                     "application/json": components["schemas"]["PlanAuditLogListResponse"];
                 };
             };
+            /** @description VALIDATION_FAILED（planId 非 UUID） */
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description TENANT_PLAN_NOT_FOUND */
             404: components["responses"]["NotFound"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     bindTenantPlan: {
@@ -4774,7 +5005,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 套餐已绑定，配额已更新 */
+            /** @description 套餐已绑定，配额已更新（id=tenant_id；message 如 "quota bound to plan"） */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4786,9 +5017,14 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description TENANT_NOT_FOUND / TENANT_PLAN_NOT_FOUND / QUOTA_NOT_FOUND */
             404: components["responses"]["NotFound"];
+            /** @description TENANT_STATE_INVALID / QUOTA_ALREADY_EXISTS / IDEMPOTENCY_KEY_REUSED */
             409: components["responses"]["Conflict"];
+            /** @description PLAN_NOT_ACTIVE */
             422: components["responses"]["UnprocessableEntity"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     listAllTenantAdmins: {

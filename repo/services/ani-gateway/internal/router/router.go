@@ -47,6 +47,7 @@ type RegisterOptions struct {
 	AsyncTaskStore          ports.AsyncTaskStore
 	QuotaAdminService       ports.QuotaAdminService
 	PlatformWorkloadService ports.PlatformWorkloadService
+	TenantService           ports.TenantService
 }
 
 // Register wires all route groups onto the Hertz server.
@@ -93,6 +94,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerEmailNotificationResourcesWithService(v1, options.EmailNotificationStore)
 	registerQuotaResources(v1, options.QuotaAdminService)
 	registerPlatformWorkloadResources(v1, options.PlatformWorkloadService, options.AsyncTaskStore)
+	registerAdminTenantResources(v1, options.TenantService)
 
 	svc := h.Group("/api/v1/svc")
 	modelServiceClient = options.ModelServiceClient
@@ -109,6 +111,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerGpuContainers(svc)
 	registerSandboxes(svc)
 	registerTenant(svc)
+	registerTenantPlans(svc)
 
 	// OpenAI-compatible inference proxy (separate URL prefix, no /api prefix)
 	h.Group("/v1").POST("/chat/completions", inferenceProxy)
