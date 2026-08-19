@@ -105,7 +105,6 @@ function handle401() {
   saveReturnTo(current)
 
   const search = new URLSearchParams({ returnTo: current }).toString()
-  // 保持在 BOSS SPA 内部路由（`/boss/login`），不跨端跳到 Console
   window.location.assign(`/boss/login?${search}`)
 }
 

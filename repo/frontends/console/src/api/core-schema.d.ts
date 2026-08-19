@@ -2869,6 +2869,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/tenants/{tenant_id}/quota/upsert": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 批量 Upsert 租户配额
+         * @description 批量 Upsert 指定租户多个维度的配额上限：已存在的维度更新 total，不存在的维度新建行。
+         *     单次请求内所有维度在同一 DB 事务中原子完成，任一维度失败则整体回滚。
+         *     - items.resource_type 必须在 resource_quota_meta 已注册且 enabled=true
+         *     - items.total 未提供或为 0 时取 resource_quota_meta.default_quota；负数返回 VALIDATION_FAILED
+         *     - 缩容时用 GREATEST(total, used+reserved) clamp 到 used+reserved，
+         *       并在返回的 items 中将 tightened 置 true（新建维度不会触发收紧）
+         */
+        put: operations["upsertTenantQuota"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/tenants/{tenant_id}/reservations": {
         parameters: {
             query?: never;
@@ -2929,6 +2954,112 @@ export interface paths {
          */
         get: operations["listQuotaMeta"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/plans/bound-tenant-counts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 按套餐统计绑定中的租户数
+         * @description 统计 tenants 表中 status <> disabled 且 plan_id 命中请求列表的租户数量。
+         *     未知 plan_id 返回 count=0（本接口不校验 tenant_plans 是否存在）。
+         *     供 Services 填充套餐 tenant_count、删除前占用检查；Services 不得直接查询 Core tenants 表。
+         */
+        get: operations["listPlanBoundTenantCounts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/plans/{plan_id}/bound-tenants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询绑定到指定套餐的租户摘要
+         * @description 返回 tenants 中 plan_id 命中且 status <> disabled 的租户，按 name 排序。
+         *     未知 plan_id 返回空列表（本接口不校验 tenant_plans 是否存在）。
+         */
+        get: operations["listPlanBoundTenants"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/plans/{plan_id}/bindable-tenants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询可绑定指定套餐的租户摘要
+         * @description 返回 status <> disabled 且 plan_id IS DISTINCT FROM 请求套餐的租户（含未绑定或绑定其它套餐），按 name 排序。
+         *     未知 plan_id 仍按该过滤返回（本接口不校验 tenant_plans 是否存在）。
+         */
+        get: operations["listPlanBindableTenants"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/tenants/{tenant_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询租户（最小视图）
+         * @description 平台侧查询租户最小字段（含 status / plan_id），供 Services 绑定配额套餐等场景调用。
+         *     不替代完整租户管理 API。
+         */
+        get: operations["getTenant"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/tenants/{tenant_id}/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 更新租户绑定套餐
+         * @description 仅更新 tenants.plan_id，不修改配额行。
+         *     plan_id 外键不存在时返回 404 TENANT_PLAN_NOT_FOUND；租户不存在返回 404 TENANT_NOT_FOUND。
+         */
+        put: operations["updateTenantPlan"];
         post?: never;
         delete?: never;
         options?: never;
@@ -6300,6 +6431,20 @@ export interface components {
              */
             total: number;
         };
+        /** @description 批量 Upsert 租户配额请求（PUT /admin/tenants/{tenant_id}/quota/upsert） */
+        QuotaUpsertRequest: {
+            items: components["schemas"]["QuotaUpsertItem"][];
+        };
+        /** @description Upsert 配额维度项；total 未提供、为 null 或为 0 时取 resource_quota_meta.default_quota */
+        QuotaUpsertItem: {
+            /** @description 配额维度标识（需在 resource_quota_meta 已注册且 enabled=true） */
+            resource_type: string;
+            /**
+             * Format: int64
+             * @description 配额上限；未提供、为 null 或为 0 时取 resource_quota_meta.default_quota
+             */
+            total?: number | null;
+        };
         /** @description 租户配额视图（GET/POST/PUT 共用响应） */
         Quota: {
             /**
@@ -6369,6 +6514,70 @@ export interface components {
             default_quota: number;
             /** @description 是否离散计数（当前统一为整数计数） */
             is_discrete: boolean;
+        };
+        /** @description 租户最小视图（绑定配额套餐所需：status / plan_id） */
+        Tenant: {
+            /**
+             * Format: uuid
+             * @description 租户 ID
+             */
+            id: string;
+            /** @description 租户标识 */
+            name: string;
+            /** @description 展示名 */
+            display_name: string;
+            /**
+             * @description 租户状态
+             * @enum {string}
+             */
+            status: "active" | "frozen" | "disabled";
+            /**
+             * Format: uuid
+             * @description 当前绑定的配额套餐 ID
+             */
+            plan_id: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description 更新租户绑定套餐请求（PUT /admin/tenants/{tenant_id}/plan）；仅改 plan_id，不触碰配额 */
+        TenantPlanUpdateRequest: {
+            /**
+             * Format: uuid
+             * @description 目标套餐 ID（须存在于 tenant_plans）
+             */
+            plan_id: string;
+        };
+        /** @description 单个套餐的绑定租户计数（status <> disabled） */
+        PlanBoundTenantCount: {
+            /**
+             * Format: uuid
+             * @description 配额套餐 ID
+             */
+            plan_id: string;
+            /**
+             * Format: int64
+             * @description 绑定中的非 disabled 租户数
+             */
+            count: number;
+        };
+        /** @description 套餐绑定租户计数列表（GET /admin/plans/bound-tenant-counts） */
+        PlanBoundTenantCountList: {
+            items: components["schemas"]["PlanBoundTenantCount"][];
+        };
+        /** @description 租户摘要（绑定/可绑定列表；不含 created_at / plan_id） */
+        TenantSummary: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            display_name: string;
+            /** @enum {string} */
+            status: "active" | "frozen" | "disabled";
+        };
+        /** @description 租户摘要列表 */
+        TenantSummaryList: {
+            items: components["schemas"]["TenantSummary"][];
         };
     };
     responses: {
@@ -6482,6 +6691,15 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
+        /** @description 配额套餐不存在（code=TENANT_PLAN_NOT_FOUND） */
+        TenantPlanNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
         /** @description 配额行不存在（code=QUOTA_NOT_FOUND） */
         QuotaNotFound: {
             headers: {
@@ -6511,6 +6729,19 @@ export interface components {
         };
         /** @description 参数校验失败（code=VALIDATION_FAILED） */
         QuotaValidationFailed: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /**
+         * @description 配额更新失败，无法确认事务提交状态（DB 宕机/连接断开等极端场景）。
+         *     Services 层收到此错误后不得自动重试，应记录告警并触发人工核对流程。
+         *     code=QUOTA_UPDATE_UNCERTAIN
+         */
+        QuotaUpdateUncertain: {
             headers: {
                 [name: string]: unknown;
             };
@@ -12316,6 +12547,41 @@ export interface operations {
             404: components["responses"]["TenantNotFound"];
         };
     };
+    upsertTenantQuota: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description 客户端生成；相同 upsert 请求重复执行后的最终状态一致 */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuotaUpsertRequest"];
+            };
+        };
+        responses: {
+            /** @description Upsert 结果（含 tightened 标记） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Quota"];
+                };
+            };
+            400: components["responses"]["QuotaValidationFailed"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["TenantNotFound"];
+            422: components["responses"]["QuotaResourceNotRegistered"];
+            511: components["responses"]["QuotaUpdateUncertain"];
+        };
+    };
     getTenantReservations: {
         parameters: {
             query?: never;
@@ -12416,6 +12682,148 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    listPlanBoundTenantCounts: {
+        parameters: {
+            query: {
+                /** @description 套餐 ID；可重复传入，最多 100 个 */
+                plan_id: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 各套餐绑定租户计数（顺序与请求 plan_id 一致；重复 ID 各返回一行） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanBoundTenantCountList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listPlanBoundTenants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 绑定租户摘要列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantSummaryList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listPlanBindableTenants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 可绑定租户摘要列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantSummaryList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getTenant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 租户视图 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Tenant"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["TenantNotFound"];
+        };
+    };
+    updateTenantPlan: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 客户端生成；同一 tenant_id 下 24 小时内去重 */
+                "Idempotency-Key": string;
+            };
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantPlanUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新后的租户视图 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Tenant"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description 租户或套餐不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
 }

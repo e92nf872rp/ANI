@@ -172,6 +172,12 @@ func main() {
 		os.Exit(1)
 	}
 	defer closeQuotaStore()
+	tenantService, closeTenantStore, err := newGatewayTenantStore(runtimeCtx)
+	if err != nil {
+		logger.Error("failed to configure tenant admin store", "err", err)
+		os.Exit(1)
+	}
+	defer closeTenantStore()
 	var routeInstanceRuntime *router.InstanceRuntime
 	if instanceRuntime.Service != nil {
 		routeInstanceRuntime = &router.InstanceRuntime{
@@ -205,6 +211,7 @@ func main() {
 		KBSSEConfig:                           newGatewaySSEConfig(gatewaySSERuntimeConfigFromEnv()),
 		AsyncTaskStore:                        instanceRuntime.AsyncTasks,
 		QuotaAdminService:                     quotaAdminService,
+		TenantService:                         tenantService,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

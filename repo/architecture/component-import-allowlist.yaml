@@ -90,13 +90,10 @@ allowed:
   - path: services/tenant-service/internal/repo/adapters/postgres/tenant_plan_store.go
     coupling_level: bounded_direct
     imports:
+      - github.com/jackc/pgx/v5
+      - github.com/jackc/pgx/v5/pgconn
       - github.com/jackc/pgx/v5/pgxpool
-    reason: tenant plan repository is a bounded persistence module; direct pgx keeps PostgreSQL/RLS transactions explicit
-  - path: services/tenant-service/internal/repo/adapters/postgres/tenant_store.go
-    coupling_level: bounded_direct
-    imports:
-      - github.com/jackc/pgx/v5/pgxpool
-    reason: tenant repository is a bounded persistence module; direct pgx keeps PostgreSQL/RLS transactions explicit
+    reason: tenant plan repository is a bounded persistence module; direct pgx keeps PostgreSQL/RLS transactions explicit and maps unique/FK/not-found to domain errors
   - path: services/tenant-service/internal/repo/adapters/postgres/tenant_plan_audit_store.go
     coupling_level: bounded_direct
     imports:

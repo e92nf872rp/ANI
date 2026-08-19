@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/route"
@@ -15,7 +16,7 @@ type quotaAPI struct {
 	admin ports.QuotaAdminService
 }
 
-// registerQuotaResources 注册 QuotaAdminService 的 5 个管理端点：
+// registerQuotaResources 注册 QuotaAdminService 的管理端点：
 // 4 个 /admin/tenants/{tenant_id}/quota + 1 个 /admin/quota-meta。
 // 这些路径属于平台/管理路由，由 scopeAllowedForPath 守卫要求 platform scope。
 func registerQuotaResources(v1 *route.RouterGroup, admin ports.QuotaAdminService) {
@@ -25,6 +26,7 @@ func registerQuotaResources(v1 *route.RouterGroup, admin ports.QuotaAdminService
 	v1.GET("/admin/tenants/:tenant_id/quota", api.getTenantQuota)
 	v1.DELETE("/admin/tenants/:tenant_id/quota", api.deleteTenantQuota)
 	v1.GET("/admin/quota-meta", api.listQuotaMeta)
+	v1.PUT("/admin/tenants/:tenant_id/quota/upsert", api.upsertTenantQuota)
 }
 
 // ---- 请求/响应结构（对齐 core-quota-api 契约） ----
@@ -45,6 +47,15 @@ type quotaUpdateItem struct {
 
 type quotaUpdateRequest struct {
 	Items []quotaUpdateItem `json:"items"`
+}
+
+type quotaUpsertItem struct {
+	ResourceType ports.ResourceType `json:"resource_type"`
+	Total        *int64             `json:"total,omitempty"`
+}
+
+type quotaUpsertRequest struct {
+	Items []quotaUpsertItem `json:"items"`
 }
 
 type quotaItem struct {
@@ -126,6 +137,32 @@ func (api *quotaAPI) updateTenantQuota(ctx context.Context, c *app.RequestContex
 	c.JSON(http.StatusOK, quotaResponse{TenantID: tenantID, Items: toQuotaItems(info)})
 }
 
+func (api *quotaAPI) upsertTenantQuota(ctx context.Context, c *app.RequestContext) {
+	tenantID := c.Param("tenant_id")
+	var req quotaUpsertRequest
+	if err := c.BindJSON(&req); err != nil {
+		writeDemoError(c, http.StatusBadRequest, "VALIDATION_FAILED", "invalid quota upsert request")
+		return
+	}
+	items := make([]ports.QuotaItemInput, 0, len(req.Items))
+	for _, it := range req.Items {
+		var total int64
+		if it.Total != nil {
+			total = *it.Total
+		}
+		items = append(items, ports.QuotaItemInput{
+			ResourceType: it.ResourceType,
+			Total:        total,
+		})
+	}
+	info, err := api.admin.UpsertTenantQuota(ctx, tenantID, items)
+	if err != nil {
+		writeQuotaUpsertError(c, tenantID, err)
+		return
+	}
+	c.JSON(http.StatusOK, quotaResponse{TenantID: tenantID, Items: toQuotaItems(info)})
+}
+
 func (api *quotaAPI) getTenantQuota(ctx context.Context, c *app.RequestContext) {
 	tenantID := c.Param("tenant_id")
 	info, err := api.admin.GetTenantQuota(ctx, tenantID)
@@ -199,6 +236,29 @@ func writeQuotaError(c *app.RequestContext, err error) {
 	default:
 		writeDemoError(c, http.StatusInternalServerError, "INTERNAL", err.Error())
 	}
+}
+
+func writeQuotaUpsertError(c *app.RequestContext, tenantID string, err error) {
+	switch {
+	case errors.Is(err, ports.ErrInvalid):
+		writeDemoError(c, http.StatusBadRequest, "VALIDATION_FAILED", "配额更新失败，已回滚。"+quotaErrorDetail(err, ports.ErrInvalid))
+	case errors.Is(err, ports.ErrTenantNotFound):
+		writeDemoError(c, http.StatusNotFound, "TENANT_NOT_FOUND", "租户不存在: tenant_id="+tenantID)
+	case errors.Is(err, ports.ErrQuotaResourceNotRegistered):
+		writeDemoError(c, http.StatusUnprocessableEntity, "QUOTA_RESOURCE_NOT_REGISTERED", "配额更新失败，已回滚。"+quotaErrorDetail(err, ports.ErrQuotaResourceNotRegistered))
+	case errors.Is(err, ports.ErrQuotaUpdateUncertain):
+		writeDemoError(c, http.StatusNetworkAuthenticationRequired, "QUOTA_UPDATE_UNCERTAIN", "配额更新失败，无法确认事务状态，可能已部分提交，请联系管理员人工核对租户配额")
+	default:
+		writeDemoError(c, http.StatusInternalServerError, "INTERNAL", "internal server error")
+	}
+}
+
+func quotaErrorDetail(err error, sentinel error) string {
+	detail := strings.TrimPrefix(err.Error(), sentinel.Error()+": ")
+	if detail == err.Error() {
+		return err.Error()
+	}
+	return detail
 }
 
 // writeDemoError 输出标准 ANI 三段式错误响应。

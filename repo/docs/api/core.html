@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>208</dd></div>
-          <div><dt>Schemas</dt><dd>291</dd></div>
+          <div><dt>Operations</dt><dd>214</dd></div>
+          <div><dt>Schemas</dt><dd>299</dd></div>
         </dl>
       </section>
 
@@ -161,11 +161,51 @@
           <tbody>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/admin/plans/bound-tenant-counts</code></td>
+          <td><code>listPlanBoundTenantCounts</code></td>
+          <td>按套餐统计绑定中的租户数</td>
+          <td><code>scope:quota:read</code></td>
+          <td>200, 400, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/admin/plans/{plan_id}/bindable-tenants</code></td>
+          <td><code>listPlanBindableTenants</code></td>
+          <td>查询可绑定指定套餐的租户摘要</td>
+          <td><code>scope:quota:read</code></td>
+          <td>200, 400, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/admin/plans/{plan_id}/bound-tenants</code></td>
+          <td><code>listPlanBoundTenants</code></td>
+          <td>查询绑定到指定套餐的租户摘要</td>
+          <td><code>scope:quota:read</code></td>
+          <td>200, 400, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/admin/quota-meta</code></td>
           <td><code>listQuotaMeta</code></td>
           <td>查询可用配额元数据</td>
           <td><code>scope:quota:read</code></td>
           <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/admin/tenants/{tenant_id}</code></td>
+          <td><code>getTenant</code></td>
+          <td>查询租户（最小视图）</td>
+          <td><code>scope:quota:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/admin/tenants/{tenant_id}/plan</code></td>
+          <td><code>updateTenantPlan</code></td>
+          <td>更新租户绑定套餐</td>
+          <td><code>scope:quota:write</code></td>
+          <td>200, 400, 401, 403, 404</td>
         </tr>
         <tr>
           <td><span class="method method-delete">DELETE</span></td>
@@ -198,6 +238,14 @@
           <td>批量修改租户配额上限</td>
           <td><code>scope:quota:write</code></td>
           <td>200, 400, 401, 403, 404, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/admin/tenants/{tenant_id}/quota/upsert</code></td>
+          <td><code>upsertTenantQuota</code></td>
+          <td>批量 Upsert 租户配额</td>
+          <td><code>scope:quota:write</code></td>
+          <td>200, 400, 401, 403, 404, 422, 511</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1986,6 +2034,8 @@
         <li><code>ObservabilityQueryResponse</code></li>
         <li><code>ObservabilityRangeQueryResponse</code></li>
         <li><code>PasswordLoginRequest</code></li>
+        <li><code>PlanBoundTenantCount</code></li>
+        <li><code>PlanBoundTenantCountList</code></li>
         <li><code>PlatformPasswordLoginRequest</code></li>
         <li><code>PlatformWorkload</code></li>
         <li><code>PlatformWorkloadAcceleratorCapability</code></li>
@@ -2018,6 +2068,8 @@
         <li><code>QuotaMetaListResponse</code></li>
         <li><code>QuotaUpdateItem</code></li>
         <li><code>QuotaUpdateRequest</code></li>
+        <li><code>QuotaUpsertItem</code></li>
+        <li><code>QuotaUpsertRequest</code></li>
         <li><code>RefreshAccessTokenRequest</code></li>
         <li><code>RefreshAccessTokenResponse</code></li>
         <li><code>RegistryArtifact</code></li>
@@ -2097,6 +2149,10 @@
         <li><code>StorageVolumeMountHistoryEntry</code></li>
         <li><code>StorageVolumeMountRequest</code></li>
         <li><code>StorageVolumeUnmountRequest</code></li>
+        <li><code>Tenant</code></li>
+        <li><code>TenantPlanUpdateRequest</code></li>
+        <li><code>TenantSummary</code></li>
+        <li><code>TenantSummaryList</code></li>
         <li><code>TokenPairResponse</code></li>
         <li><code>TokenUsageReport</code></li>
         <li><code>UpdateEmailRecipientRequest</code></li>

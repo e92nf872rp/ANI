@@ -3905,6 +3905,24 @@ components:
         resource_type: { type: string, description: "配额维度标识" }
         total:          { type: integer, format: int64, minimum: 0, description: "新配额上限；允许低于当前 used（缩容，由服务端 GREATEST clamp 到 used+reserved）" }
 
+    QuotaUpsertRequest:
+      type: object
+      description: "批量 Upsert 租户配额请求（PUT /admin/tenants/{tenant_id}/quota/upsert）"
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/QuotaUpsertItem' }
+
+    QuotaUpsertItem:
+      type: object
+      description: "Upsert 配额维度项；total 未提供、为 null 或为 0 时取 resource_quota_meta.default_quota"
+      required: [resource_type]
+      properties:
+        resource_type: { type: string, description: "配额维度标识（需在 resource_quota_meta 已注册且 enabled=true）" }
+        total:          { type: integer, format: int64, nullable: true, minimum: 0, description: "配额上限；未提供、为 null 或为 0 时取 resource_quota_meta.default_quota" }
+
     Quota:
       type: object
       description: "租户配额视图（GET/POST/PUT 共用响应）"
@@ -3956,6 +3974,62 @@ components:
         unit:           { type: string, description: "单位" }
         default_quota:  { type: integer, format: int64, description: "默认上限（新建配额未提供或为 null 时兜底）" }
         is_discrete:    { type: boolean, description: "是否离散计数（当前统一为整数计数）" }
+
+    Tenant:
+      type: object
+      description: "租户最小视图（绑定配额套餐所需：status / plan_id）"
+      required: [id, name, display_name, status, plan_id, created_at, updated_at]
+      properties:
+        id:           { type: string, format: uuid, description: "租户 ID" }
+        name:         { type: string, description: "租户标识" }
+        display_name: { type: string, description: "展示名" }
+        status:       { type: string, enum: [active, frozen, disabled], description: "租户状态" }
+        plan_id:      { type: string, format: uuid, description: "当前绑定的配额套餐 ID" }
+        created_at:   { type: string, format: date-time }
+        updated_at:   { type: string, format: date-time }
+
+    TenantPlanUpdateRequest:
+      type: object
+      description: "更新租户绑定套餐请求（PUT /admin/tenants/{tenant_id}/plan）；仅改 plan_id，不触碰配额"
+      required: [plan_id]
+      properties:
+        plan_id: { type: string, format: uuid, description: "目标套餐 ID（须存在于 tenant_plans）" }
+
+    PlanBoundTenantCount:
+      type: object
+      description: "单个套餐的绑定租户计数（status <> disabled）"
+      required: [plan_id, count]
+      properties:
+        plan_id: { type: string, format: uuid, description: "配额套餐 ID" }
+        count:   { type: integer, format: int64, minimum: 0, description: "绑定中的非 disabled 租户数" }
+
+    PlanBoundTenantCountList:
+      type: object
+      description: "套餐绑定租户计数列表（GET /admin/plans/bound-tenant-counts）"
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/PlanBoundTenantCount' }
+
+    TenantSummary:
+      type: object
+      description: "租户摘要（绑定/可绑定列表；不含 created_at / plan_id）"
+      required: [id, name, display_name, status]
+      properties:
+        id:           { type: string, format: uuid }
+        name:         { type: string }
+        display_name: { type: string }
+        status:       { type: string, enum: [active, frozen, disabled] }
+
+    TenantSummaryList:
+      type: object
+      description: "租户摘要列表"
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/TenantSummary' }
 
   # 公共响应
   responses:
@@ -4024,6 +4098,11 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
+    TenantPlanNotFound:
+      description: 配额套餐不存在（code=TENANT_PLAN_NOT_FOUND）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
     QuotaNotFound:
       description: 配额行不存在（code=QUOTA_NOT_FOUND）
       content:
@@ -4041,6 +4120,14 @@ components:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
     QuotaValidationFailed:
       description: 参数校验失败（code=VALIDATION_FAILED）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    QuotaUpdateUncertain:
+      description: |
+        配额更新失败，无法确认事务提交状态（DB 宕机/连接断开等极端场景）。
+        Services 层收到此错误后不得自动重试，应记录告警并触发人工核对流程。
+        code=QUOTA_UPDATE_UNCERTAIN
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -8668,6 +8755,40 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/TenantNotFound' }
 
+  /admin/tenants/{tenant_id}/quota/upsert:
+    put:
+      operationId: upsertTenantQuota
+      summary: 批量 Upsert 租户配额
+      description: |
+        批量 Upsert 指定租户多个维度的配额上限：已存在的维度更新 total，不存在的维度新建行。
+        单次请求内所有维度在同一 DB 事务中原子完成，任一维度失败则整体回滚。
+        - items.resource_type 必须在 resource_quota_meta 已注册且 enabled=true
+        - items.total 未提供或为 0 时取 resource_quota_meta.default_quota；负数返回 VALIDATION_FAILED
+        - 缩容时用 GREATEST(total, used+reserved) clamp 到 used+reserved，
+          并在返回的 items 中将 tightened 置 true（新建维度不会触发收紧）
+      tags: [QuotaAdmin]
+      x-ani-rbac-scope: "scope:quota:write"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: false, schema: { type: string, minLength: 1, maxLength: 128 }, description: "客户端生成；相同 upsert 请求重复执行后的最终状态一致" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuotaUpsertRequest' }
+      responses:
+        "200":
+          description: Upsert 结果（含 tightened 标记）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Quota' }
+        "400": { $ref: '#/components/responses/QuotaValidationFailed' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/TenantNotFound' }
+        "422": { $ref: '#/components/responses/QuotaResourceNotRegistered' }
+        "511": { $ref: '#/components/responses/QuotaUpdateUncertain' }
+
   /admin/tenants/{tenant_id}/reservations:
     put:
       operationId: putTenantReservations
@@ -8750,6 +8871,133 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
 
+  /admin/plans/bound-tenant-counts:
+    get:
+      operationId: listPlanBoundTenantCounts
+      summary: 按套餐统计绑定中的租户数
+      description: |
+        统计 tenants 表中 status <> disabled 且 plan_id 命中请求列表的租户数量。
+        未知 plan_id 返回 count=0（本接口不校验 tenant_plans 是否存在）。
+        供 Services 填充套餐 tenant_count、删除前占用检查；Services 不得直接查询 Core tenants 表。
+      tags: [Tenants]
+      x-ani-rbac-scope: "scope:quota:read"
+      parameters:
+        - name: plan_id
+          in: query
+          required: true
+          explode: true
+          description: "套餐 ID；可重复传入，最多 100 个"
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 100
+            items: { type: string, format: uuid }
+      responses:
+        "200":
+          description: 各套餐绑定租户计数（顺序与请求 plan_id 一致；重复 ID 各返回一行）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlanBoundTenantCountList' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /admin/plans/{plan_id}/bound-tenants:
+    get:
+      operationId: listPlanBoundTenants
+      summary: 查询绑定到指定套餐的租户摘要
+      description: |
+        返回 tenants 中 plan_id 命中且 status <> disabled 的租户，按 name 排序。
+        未知 plan_id 返回空列表（本接口不校验 tenant_plans 是否存在）。
+      tags: [Tenants]
+      x-ani-rbac-scope: "scope:quota:read"
+      parameters:
+        - { name: plan_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 绑定租户摘要列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantSummaryList' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /admin/plans/{plan_id}/bindable-tenants:
+    get:
+      operationId: listPlanBindableTenants
+      summary: 查询可绑定指定套餐的租户摘要
+      description: |
+        返回 status <> disabled 且 plan_id IS DISTINCT FROM 请求套餐的租户（含未绑定或绑定其它套餐），按 name 排序。
+        未知 plan_id 仍按该过滤返回（本接口不校验 tenant_plans 是否存在）。
+      tags: [Tenants]
+      x-ani-rbac-scope: "scope:quota:read"
+      parameters:
+        - { name: plan_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 可绑定租户摘要列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantSummaryList' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /admin/tenants/{tenant_id}:
+    get:
+      operationId: getTenant
+      summary: 查询租户（最小视图）
+      description: |
+        平台侧查询租户最小字段（含 status / plan_id），供 Services 绑定配额套餐等场景调用。
+        不替代完整租户管理 API。
+      tags: [Tenants]
+      x-ani-rbac-scope: "scope:quota:read"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 租户视图
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tenant' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/TenantNotFound' }
+
+  /admin/tenants/{tenant_id}/plan:
+    put:
+      operationId: updateTenantPlan
+      summary: 更新租户绑定套餐
+      description: |
+        仅更新 tenants.plan_id，不修改配额行。
+        plan_id 外键不存在时返回 404 TENANT_PLAN_NOT_FOUND；租户不存在返回 404 TENANT_NOT_FOUND。
+      tags: [Tenants]
+      x-ani-rbac-scope: "scope:quota:write"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 }, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TenantPlanUpdateRequest' }
+      responses:
+        "200":
+          description: 更新后的租户视图
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tenant' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404":
+          description: 租户或套餐不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+
 # ── Tag 分组（Swagger UI 显示顺序）──────────────────────────────────────────
 tags:
   - { name: Health,         description: "健康检查（K8s liveness/readiness probe）" }
@@ -8776,4 +9024,5 @@ tags:
   - { name: Branding,       description: "平台品牌化配置" }
   - { name: Tasks,          description: "异步任务查询" }
   - { name: QuotaAdmin,     description: "平台级配额管理（租户配额 CRUD + 配额元数据）" }
+  - { name: Tenants,        description: "平台级租户最小读写（status / plan_id / 套餐绑定租户计数）" }
   - { name: GPUSpec,        description: "GPU 规格目录管理（创建/删除/可用性查询）" }

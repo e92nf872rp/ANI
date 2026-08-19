@@ -236,6 +236,15 @@ exceptions:
   - operation_id: bindTenantPlan
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: updateTenantPlan
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: listQuotaMeta
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: listBindableTenants
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
   - operation_id: listAllTenantAdmins
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。

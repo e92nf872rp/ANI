@@ -27,7 +27,7 @@ func (s *MetadataStore) Ping(ctx context.Context) error {
 func (s *MetadataStore) WithTenantTx(ctx context.Context, fn func(context.Context, ports.MetadataTx) error) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("metadata tenant tx begin: %w", err)
+		return fmt.Errorf("%w: %v", ports.ErrMetadataTenantTxBegin, err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -38,7 +38,7 @@ func (s *MetadataStore) WithTenantTx(ctx context.Context, fn func(context.Contex
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("metadata tenant tx commit: %w", err)
+		return fmt.Errorf("%w: %v", ports.ErrMetadataTenantTxCommit, err)
 	}
 	return nil
 }
@@ -46,7 +46,7 @@ func (s *MetadataStore) WithTenantTx(ctx context.Context, fn func(context.Contex
 func (s *MetadataStore) WithPlatformTx(ctx context.Context, fn func(context.Context, ports.MetadataTx) error) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("metadata platform tx begin: %w", err)
+		return fmt.Errorf("%w: %v", ports.ErrMetadataPlatformTxBegin, err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -54,7 +54,7 @@ func (s *MetadataStore) WithPlatformTx(ctx context.Context, fn func(context.Cont
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("metadata platform tx commit: %w", err)
+		return fmt.Errorf("%w: %v", ports.ErrMetadataPlatformTxCommit, err)
 	}
 	return nil
 }

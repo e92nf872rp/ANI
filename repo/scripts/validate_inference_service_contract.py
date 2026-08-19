@@ -26,6 +26,7 @@ STABLE_INFERENCE_ERROR_CODES = {
     "INSUFFICIENT_CAPACITY",
     "UNSUPPORTED_TOPOLOGY",
     "INVALID_STATE_TRANSITION",
+    "IMAGE_UNAVAILABLE",
 }
 REQUIRED_OPERATIONS = {
     ("/inference-services", "get"): "listInferenceServices",
@@ -258,9 +259,19 @@ def validate(spec: dict[str, Any]) -> tuple[str, ...]:
     if required_create != {"idempotency_key", "name", "model"}:
         errors.append("CreateInferenceServiceRequest must preserve required idempotency_key, name, and model")
     create_properties = create_request.get("properties") or {}
-    for field in ("model_version_id", "served_model_name", "resources", "placement_mode"):
+    for field in ("image_id", "image_ref"):
+        field_spec = create_properties.get(field) or {}
+        if field_spec.get("type") != "string" or field_spec.get("minLength") != 1:
+            errors.append(f"CreateInferenceServiceRequest.{field} must be a non-empty optional string")
+        if field in required_create:
+            errors.append(f"CreateInferenceServiceRequest.{field} must remain optional so registry or manual input both work")
+    for field in ("model_version_id", "served_model_name", "resources", "placement_mode", "image_id", "image_ref", "engine"):
         if field not in create_properties:
             errors.append(f"CreateInferenceServiceRequest missing {field}")
+    if (create_properties.get("engine") or {}).get("$ref") != "#/components/schemas/InferenceServiceEngine":
+        errors.append("CreateInferenceServiceRequest.engine must reference InferenceServiceEngine")
+    if "default" in (create_properties.get("engine") or {}):
+        errors.append("CreateInferenceServiceRequest.engine must remain optional in generated clients")
     for field in ("gpu_type", "gpu_count_per_pod", "max_concurrency"):
         if not (create_properties.get(field) or {}).get("deprecated"):
             errors.append(f"CreateInferenceServiceRequest.{field} must be deprecated")
@@ -270,7 +281,7 @@ def validate(spec: dict[str, Any]) -> tuple[str, ...]:
     for field in ("replicas", "gpu_count_per_pod", "max_concurrency"):
         if "minimum" in (create_properties.get(field) or {}):
             errors.append(f"CreateInferenceServiceRequest.{field} must not tighten v1 minimum")
-    for field in ("replicas", "placement_mode", "gpu_count_per_pod", "max_concurrency"):
+    for field in ("replicas", "placement_mode", "gpu_count_per_pod", "max_concurrency", "image_id", "image_ref", "engine"):
         if "default" in (create_properties.get(field) or {}):
             errors.append(f"CreateInferenceServiceRequest.{field} must remain optional in generated clients")
 
@@ -292,6 +303,8 @@ def validate(spec: dict[str, Any]) -> tuple[str, ...]:
     resource_properties = (schemas.get("InferenceService") or {}).get("properties") or {}
     required_response_fields = {
         "model_version_id",
+        "image_id",
+        "image_ref",
         "served_model_name",
         "ready_replicas",
         "resources",
@@ -304,6 +317,7 @@ def validate(spec: dict[str, Any]) -> tuple[str, ...]:
         "invocation_url",
         "endpoint_url",
         "updated_at",
+        "engine",
     }
     for field in sorted(required_response_fields - set(resource_properties)):
         errors.append(f"InferenceService missing {field}")
@@ -313,6 +327,55 @@ def validate(spec: dict[str, Any]) -> tuple[str, ...]:
     for endpoint in ("invocation_url", "endpoint_url"):
         if not (resource_properties.get(endpoint) or {}).get("nullable"):
             errors.append(f"InferenceService.{endpoint} must be nullable")
+    if (resource_properties.get("engine") or {}).get("$ref") != "#/components/schemas/InferenceServiceEngine":
+        errors.append("InferenceService.engine must reference InferenceServiceEngine")
+
+    engine = schemas.get("InferenceServiceEngine") or {}
+    if engine.get("additionalProperties") is not False:
+        errors.append("InferenceServiceEngine must set additionalProperties false")
+    if engine.get("x-ani-reserved-engine-arg-names"):
+        errors.append("InferenceServiceEngine must not reserve CLI arg names; command is the complete argv")
+    for leftover in ("extra_args", "args"):
+        if leftover in (engine.get("properties") or {}):
+            errors.append(f"InferenceServiceEngine must not keep {leftover}; command is the complete argv")
+    if schemas.get("InferenceServiceEngineArg"):
+        errors.append("InferenceServiceEngineArg must be removed; command is a string argv")
+    engine_env = (engine.get("properties") or {}).get("env") or {}
+    if engine_env.get("maxItems") != 32:
+        errors.append("InferenceServiceEngine.env must cap at 32 items")
+    if engine_env.get("items", {}).get("$ref") != "#/components/schemas/InferenceServiceEngineEnvVar":
+        errors.append("InferenceServiceEngine.env items must be InferenceServiceEngineEnvVar")
+    reserved_env = engine.get("x-ani-reserved-engine-env-names") or []
+    expected_reserved_env = [
+        "CUDA_VISIBLE_DEVICES",
+        "NVIDIA_VISIBLE_DEVICES",
+        "NVIDIA_DRIVER_CAPABILITIES",
+        "PYTHONPATH",
+        "PATH",
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES",
+    ]
+    if reserved_env != expected_reserved_env:
+        errors.append("InferenceServiceEngine must freeze the reserved engine env names")
+    engine_env_var = schemas.get("InferenceServiceEngineEnvVar") or {}
+    if set(engine_env_var.get("required") or []) != {"name", "value"}:
+        errors.append("InferenceServiceEngineEnvVar must require name and value")
+    if engine_env_var.get("additionalProperties") is not False:
+        errors.append("InferenceServiceEngineEnvVar must set additionalProperties false")
+    env_name = (engine_env_var.get("properties") or {}).get("name") or {}
+    if env_name.get("pattern") != "^[A-Za-z_][A-Za-z0-9_]*$":
+        errors.append("InferenceServiceEngineEnvVar.name must be a POSIX environment variable name")
+    engine_command = (engine.get("properties") or {}).get("command") or {}
+    if engine_command.get("minItems") != 1:
+        errors.append("InferenceServiceEngine.command must require at least one argv item when present")
+    if engine_command.get("maxItems") != 64:
+        errors.append("InferenceServiceEngine.command must cap at 64 argv items")
+    command_item = engine_command.get("items") or {}
+    if command_item.get("type") != "string" or command_item.get("minLength") != 1:
+        errors.append("InferenceServiceEngine.command items must be non-empty strings")
+    if command_item.get("$ref"):
+        errors.append("InferenceServiceEngine.command must be a string argv, not structured flags")
 
     policies = (paths.get("/inference-services/{service_id}/policies") or {}).get("put") or {}
     if "501" not in (policies.get("responses") or {}):

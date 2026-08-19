@@ -3,6 +3,7 @@ go 1.25.0
 use (
 	./cli/ani
 	./pkg
+	./sdks/core/go
 	./services/ani-gateway
 	./services/auth-service
 	./services/metering-service

@@ -668,6 +668,88 @@ func TestIntegrationQuotaAdminUpdate(t *testing.T) {
 	t.Logf("UpdateTenantQuota 扩容成功：total=%d tightened=false", infos[0].Total)
 }
 
+// TestIntegrationQuotaAdminUpsertMixedAndDefault 管理场景 18b：UpsertTenantQuota
+// 同时覆盖已有维度更新、新维度插入和 total=0 取 default_quota。
+func TestIntegrationQuotaAdminUpsertMixedAndDefault(t *testing.T) {
+	env := newQuotaIntegrationEnv(t)
+	env.seedQuotaFor(env.tenantA, 10)
+
+	infos, err := env.adminQuota.UpsertTenantQuota(context.Background(), env.tenantA.String(), []ports.QuotaItemInput{
+		{ResourceType: ports.QuotaGPUCount, Total: 6},
+		{ResourceType: ports.QuotaCPUCore, Total: 0},
+	})
+	if err != nil {
+		t.Fatalf("UpsertTenantQuota 失败: %v", err)
+	}
+	if len(infos) != 2 {
+		t.Fatalf("应返回 2 条 QuotaInfo，实际 %d", len(infos))
+	}
+	if total := env.loadGpuTotal(env.tenantA, "gpu_count"); total != 6 {
+		t.Fatalf("Upsert 后 gpu_count total 应为 6，实际 %d", total)
+	}
+	if total := env.loadGpuTotal(env.tenantA, "cpu_core"); total != 8 {
+		t.Fatalf("Upsert 后 cpu_core total 应取 default_quota=8，实际 %d", total)
+	}
+	for _, info := range infos {
+		if info.Tightened {
+			t.Fatalf("混合 upsert 不应 tightened=true：%+v", info)
+		}
+	}
+	t.Logf("UpsertTenantQuota 混合成功：gpu_count 更新为 6，cpu_core 新建并取 default_quota=8")
+}
+
+// TestIntegrationQuotaAdminUpsertShrinkClamp 管理场景 19b：UpsertTenantQuota
+// 缩容时用 GREATEST clamp 到 used+reserved，并返回 tightened=true。
+func TestIntegrationQuotaAdminUpsertShrinkClamp(t *testing.T) {
+	env := newQuotaIntegrationEnv(t)
+	env.seedQuotaFor(env.tenantA, 10)
+
+	_, err := env.tenantQuota.Try(context.Background(), ports.QuotaTryRequest{
+		TenantID:     env.tenantA.String(),
+		ResourceType: ports.QuotaGPUCount,
+		Amount:       7,
+	})
+	if err != nil {
+		t.Fatalf("先行 Try 失败: %v", err)
+	}
+
+	infos, err := env.adminQuota.UpsertTenantQuota(context.Background(), env.tenantA.String(), []ports.QuotaItemInput{
+		{ResourceType: ports.QuotaGPUCount, Total: 1},
+	})
+	if err != nil {
+		t.Fatalf("UpsertTenantQuota 缩容失败: %v", err)
+	}
+	if len(infos) != 1 {
+		t.Fatalf("应返回 1 条 QuotaInfo，实际 %d", len(infos))
+	}
+	if infos[0].Total != 7 {
+		t.Fatalf("缩容 clamp 后 total 应为 7，实际 %d", infos[0].Total)
+	}
+	if !infos[0].Tightened {
+		t.Fatalf("缩容 clamp 应 tightened=true")
+	}
+	t.Logf("UpsertTenantQuota 缩容 clamp 成功：total=%d tightened=true", infos[0].Total)
+}
+
+// TestIntegrationQuotaAdminUpsertAtomicRollback 管理场景 20b：UpsertTenantQuota
+// 任一维度失败时整体回滚，前序成功写入不会残留。
+func TestIntegrationQuotaAdminUpsertAtomicRollback(t *testing.T) {
+	env := newQuotaIntegrationEnv(t)
+	env.seedQuotaFor(env.tenantA, 10)
+
+	_, err := env.adminQuota.UpsertTenantQuota(context.Background(), env.tenantA.String(), []ports.QuotaItemInput{
+		{ResourceType: ports.QuotaGPUCount, Total: 15},
+		{ResourceType: ports.ResourceType("no_such_resource"), Total: 1},
+	})
+	if !errors.Is(err, ports.ErrQuotaResourceNotRegistered) {
+		t.Fatalf("UpsertTenantQuota 应返回 ErrQuotaResourceNotRegistered，实际 %v", err)
+	}
+	if total := env.loadGpuTotal(env.tenantA, "gpu_count"); total != 10 {
+		t.Fatalf("事务回滚后 gpu_count total 应保持 10，实际 %d", total)
+	}
+	t.Logf("UpsertTenantQuota 原子回滚成功：失败后 gpu_count total 保持 10")
+}
+
 // TestIntegrationQuotaAdminShrink 管理场景 19：UpdateTenantQuota 缩容（GREATEST clamp，tightened=true，Try→ErrQuotaExceeded）。
 func TestIntegrationQuotaAdminShrink(t *testing.T) {
 	env := newQuotaIntegrationEnv(t)
