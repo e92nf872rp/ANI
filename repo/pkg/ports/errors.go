@@ -24,8 +24,8 @@ var (
 	ErrReservationNotFound        = errors.New("resource reservation not found")
 
 	// Metadata transaction sentinel errors.
-	ErrMetadataTenantTxBegin   = errors.New("metadata tenant tx begin")
-	ErrMetadataTenantTxCommit  = errors.New("metadata tenant tx commit")
-	ErrMetadataPlatformTxBegin = errors.New("metadata platform tx begin")
+	ErrMetadataTenantTxBegin    = errors.New("metadata tenant tx begin")
+	ErrMetadataTenantTxCommit   = errors.New("metadata tenant tx commit")
+	ErrMetadataPlatformTxBegin  = errors.New("metadata platform tx begin")
 	ErrMetadataPlatformTxCommit = errors.New("metadata platform tx commit")
 )
