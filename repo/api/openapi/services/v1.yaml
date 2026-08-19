@@ -166,6 +166,7 @@ components:
         ready_replicas:        { type: integer, minimum: 0, default: 0 }
         resources:             { $ref: '#/components/schemas/InferenceServiceResources' }
         placement_mode:        { type: string, enum: [auto, single_node, multi_node], default: auto }
+        engine:                { $ref: '#/components/schemas/InferenceServiceEngine', description: 创建时冻结的引擎附加参数；省略表示无 extra_args。不进入 PATCH }
         gpu_type:              { type: string, nullable: true, deprecated: true, description: v1 兼容投影；新客户端使用 resources.accelerator.spec_id }
         gpu_count_per_pod:     { type: integer, default: 1, deprecated: true, description: v1 兼容投影；不再是资源规格权威字段 }
         max_concurrency:       { type: integer, default: 8, deprecated: true, description: v1 兼容投影；P0 不执行 }
@@ -202,6 +203,50 @@ components:
         accelerator:
           $ref: '#/components/schemas/InferenceServiceAccelerator'
 
+    InferenceServiceEngineArg:
+      type: object
+      required: [name]
+      additionalProperties: false
+      description: |
+        追加到平台生成的引擎 CLI 之后的单个参数。name 不含前导 `--`，实现负责加上 `--`。
+        省略 value 表示布尔开关。不是 shell 片段，不能更换入口二进制。
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: '^[a-z0-9][a-z0-9-]*$'
+          description: 引擎 CLI flag 名，不含前导 `--`
+        value:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: 可选 flag 值；省略表示只传 `--name`
+
+    InferenceServiceEngine:
+      type: object
+      additionalProperties: false
+      description: |
+        创建时冻结的引擎附加参数。平台仍独占入口、`--model`、`--host`、`--port`、
+        `--served-model-name`、tensor parallel、LWS Ray backend 和 `--device`。
+        命中保留名时实现返回 400 INVALID_ARGUMENT。不进入 PATCH。
+      x-ani-reserved-engine-arg-names:
+        - model
+        - host
+        - port
+        - served-model-name
+        - tensor-parallel-size
+        - tp-size
+        - distributed-executor-backend
+        - device
+      properties:
+        extra_args:
+          type: array
+          maxItems: 32
+          description: 追加在平台 command 之后的额外引擎参数；省略或空数组表示无附加参数
+          items:
+            $ref: '#/components/schemas/InferenceServiceEngineArg'
+
     CreateInferenceServiceRequest:
       type: object
       required: [idempotency_key, name, model]
@@ -219,6 +264,7 @@ components:
         replicas: { type: integer, description: 省略时服务按 1 个副本处理 }
         resources: { $ref: '#/components/schemas/InferenceServiceResources' }
         placement_mode: { type: string, enum: [auto, single_node, multi_node], description: 省略时服务按 auto 处理 }
+        engine: { $ref: '#/components/schemas/InferenceServiceEngine', description: 可选；创建时冻结 extra_args。省略表示沿用平台默认启动参数 }
         gpu_type: { type: string, deprecated: true, description: v1 兼容输入；新客户端不得发送 }
         gpu_count_per_pod: { type: integer, deprecated: true, description: v1 兼容输入；单独出现时不得推断为 GPU }
         max_concurrency: { type: integer, deprecated: true, description: v1 兼容输入；P0 不执行 }

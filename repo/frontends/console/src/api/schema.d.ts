@@ -1347,6 +1347,8 @@ export interface components {
              * @enum {string}
              */
             placement_mode: "auto" | "single_node" | "multi_node";
+            /** @description 创建时冻结的引擎附加参数；省略表示无 extra_args。不进入 PATCH */
+            engine?: components["schemas"]["InferenceServiceEngine"];
             /**
              * @deprecated
              * @description v1 兼容投影；新客户端使用 resources.accelerator.spec_id
@@ -1404,6 +1406,25 @@ export interface components {
             accelerator?: components["schemas"]["InferenceServiceAccelerator"];
         };
         /**
+         * @description 追加到平台生成的引擎 CLI 之后的单个参数。name 不含前导 `--`，实现负责加上 `--`。
+         *     省略 value 表示布尔开关。不是 shell 片段，不能更换入口二进制。
+         */
+        InferenceServiceEngineArg: {
+            /** @description 引擎 CLI flag 名，不含前导 `--` */
+            name: string;
+            /** @description 可选 flag 值；省略表示只传 `--name` */
+            value?: string;
+        };
+        /**
+         * @description 创建时冻结的引擎附加参数。平台仍独占入口、`--model`、`--host`、`--port`、
+         *     `--served-model-name`、tensor parallel、LWS Ray backend 和 `--device`。
+         *     命中保留名时实现返回 400 INVALID_ARGUMENT。不进入 PATCH。
+         */
+        InferenceServiceEngine: {
+            /** @description 追加在平台 command 之后的额外引擎参数；省略或空数组表示无附加参数 */
+            extra_args?: components["schemas"]["InferenceServiceEngineArg"][];
+        };
+        /**
          * @description 镜像来源二选一，也可同时传：image_id 从镜像仓库选择，image_ref 由用户直接输入。
          *     同时传入时优先 image_id。创建前固定 digest；两者都缺时由实现返回 400 INVALID_ARGUMENT。
          */
@@ -1432,6 +1453,8 @@ export interface components {
              * @enum {string}
              */
             placement_mode?: "auto" | "single_node" | "multi_node";
+            /** @description 可选；创建时冻结 extra_args。省略表示沿用平台默认启动参数 */
+            engine?: components["schemas"]["InferenceServiceEngine"];
             /**
              * @deprecated
              * @description v1 兼容输入；新客户端不得发送

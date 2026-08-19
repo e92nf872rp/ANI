@@ -114,14 +114,51 @@ class InferenceServiceContractTest(unittest.TestCase):
             self.assertNotIn("minLength", properties[field], f"{field} must not tighten the existing v1 input")
         for field in ("replicas", "gpu_count_per_pod", "max_concurrency"):
             self.assertNotIn("minimum", properties[field], f"{field} must not tighten the existing v1 input")
-        for field in ("replicas", "placement_mode", "gpu_count_per_pod", "max_concurrency", "image_id", "image_ref"):
+        for field in ("replicas", "placement_mode", "gpu_count_per_pod", "max_concurrency", "image_id", "image_ref", "engine"):
             self.assertNotIn("default", properties[field], f"{field} must remain optional in generated clients")
 
     def test_generated_types_keep_legacy_create_fields_optional(self) -> None:
         generated = (ROOT / "frontends/console/src/api/schema.d.ts").read_text(encoding="utf-8")
         block = generated.split("CreateInferenceServiceRequest: {", 1)[1].split("\n        };", 1)[0]
-        for field in ("replicas", "placement_mode", "gpu_count_per_pod", "max_concurrency", "image_id", "image_ref"):
+        for field in ("replicas", "placement_mode", "gpu_count_per_pod", "max_concurrency", "image_id", "image_ref", "engine"):
             self.assertIn(f"{field}?:", block)
+
+    def test_create_freezes_optional_engine_extra_args(self) -> None:
+        schemas = self.spec["components"]["schemas"]
+        self.assertEqual(
+            schemas["CreateInferenceServiceRequest"]["properties"]["engine"]["$ref"],
+            "#/components/schemas/InferenceServiceEngine",
+        )
+        self.assertEqual(
+            schemas["InferenceService"]["properties"]["engine"]["$ref"],
+            "#/components/schemas/InferenceServiceEngine",
+        )
+        engine = schemas["InferenceServiceEngine"]
+        self.assertFalse(engine["additionalProperties"])
+        self.assertEqual(
+            engine["x-ani-reserved-engine-arg-names"],
+            [
+                "model",
+                "host",
+                "port",
+                "served-model-name",
+                "tensor-parallel-size",
+                "tp-size",
+                "distributed-executor-backend",
+                "device",
+            ],
+        )
+        extra_args = engine["properties"]["extra_args"]
+        self.assertEqual(extra_args["maxItems"], 32)
+        arg = schemas["InferenceServiceEngineArg"]
+        self.assertEqual(arg["required"], ["name"])
+        self.assertFalse(arg["additionalProperties"])
+        self.assertEqual(arg["properties"]["name"]["pattern"], "^[a-z0-9][a-z0-9-]*$")
+        self.assertIn("value", arg["properties"])
+        self.assertEqual(
+            set(schemas["UpdateInferenceServiceRequest"]["properties"]),
+            {"idempotency_key", "replicas"},
+        )
 
     def test_authenticated_reads_declare_auth_failures(self) -> None:
         paths = self.spec["paths"]

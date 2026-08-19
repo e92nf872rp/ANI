@@ -220,6 +220,8 @@ export const schemas = [
   "InferenceEndpoint",
   "InferenceService",
   "InferenceServiceAccelerator",
+  "InferenceServiceEngine",
+  "InferenceServiceEngineArg",
   "InferenceServiceLifecycleRequest",
   "InferenceServiceLogEntry",
   "InferenceServiceLogListResponse",
