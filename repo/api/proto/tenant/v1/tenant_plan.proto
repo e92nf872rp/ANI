@@ -129,7 +129,9 @@ message ListBindableTenantsResponse {
 
 message ListTenantPlanAuditLogsRequest {
   string plan_id = 1;
-  common.v1.CursorPageRequest page = 2;
+  reserved 2;  // action (deleted; keep field number for wire compat)
+  reserved 3;  // result (deleted; keep field number for wire compat)
+  common.v1.CursorPageRequest page = 4;
 }
 
 message ListTenantPlanAuditLogsResponse {
@@ -206,11 +208,19 @@ message BoundTenant {
   string status = 4;             // active | frozen | disabled
 }
 
-// AuditLog 是套餐操作历史列表项（id / action / result / details / created_at）。
+// AuditLog 是套餐操作历史列表项。
+// 保留 merge base 字段编号以保证 wire 兼容；已删除字段以 reserved 标记，
+// 新版本仅返回 id / action / result / details / created_at 五个字段。
 message AuditLog {
+  reserved 2;  // tenant_id
+  reserved 3;  // user_id
+  reserved 4;  // request_id
+  reserved 6;  // resource
+  reserved 9;  // ip_address
+  reserved 10; // user_agent
   string id = 1;
-  string action = 2;
-  string result = 3;             // success | failure
-  google.protobuf.Struct details = 4;
-  google.protobuf.Timestamp created_at = 5;
+  string action = 5;
+  string result = 7;             // success | failure
+  google.protobuf.Struct details = 8;
+  google.protobuf.Timestamp created_at = 11;
 }
