@@ -123,8 +123,10 @@ func (r *quotaFakeRows) Scan(dest ...any) error {
 // tenantRolledBack，模拟真实 PG 事务回滚，用于验证 TryMany 原子性：
 // 任一维度失败 → 整个事务回滚（无悬挂预占）。
 type quotaFakeStore struct {
-	tx               *quotaFakeTx
-	tenantRolledBack bool
+	tx                 *quotaFakeTx
+	tenantRolledBack   bool
+	platformRolledBack bool
+	platformErr        error
 }
 
 func (s *quotaFakeStore) Ping(context.Context) error {
@@ -140,7 +142,12 @@ func (s *quotaFakeStore) WithTenantTx(ctx context.Context, fn func(context.Conte
 }
 
 func (s *quotaFakeStore) WithPlatformTx(ctx context.Context, fn func(context.Context, ports.MetadataTx) error) error {
-	return fn(ctx, s.tx)
+	err := fn(ctx, s.tx)
+	if err != nil {
+		s.platformRolledBack = true
+		return err
+	}
+	return s.platformErr
 }
 
 const testTenantID = "5dbb1d01-0000-4000-8000-000000000001"

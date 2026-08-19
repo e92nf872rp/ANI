@@ -35,6 +35,12 @@
       "scope": "scope:quota:write"
     },
     {
+      "operationId": "upsertTenantQuota",
+      "method": "PUT",
+      "path": "/admin/tenants/{tenant_id}/quota/upsert",
+      "scope": "scope:quota:write"
+    },
+    {
       "operationId": "getTenantReservations",
       "method": "GET",
       "path": "/admin/tenants/{tenant_id}/reservations",
@@ -1442,6 +1448,8 @@
     "QuotaMetaListResponse",
     "QuotaUpdateItem",
     "QuotaUpdateRequest",
+    "QuotaUpsertItem",
+    "QuotaUpsertRequest",
     "RefreshAccessTokenRequest",
     "RefreshAccessTokenResponse",
     "RegistryArtifact",
@@ -1666,6 +1674,7 @@
     "QUOTA_EXCEEDED",
     "QUOTA_NOT_FOUND",
     "QUOTA_RESOURCE_NOT_REGISTERED",
+    "QUOTA_UPDATE_UNCERTAIN",
     "RATE_LIMIT_EXCEEDED",
     "RESERVATION_EXCEEDS_QUOTA",
     "RESERVED_INSUFFICIENT",

@@ -3905,6 +3905,24 @@ components:
         resource_type: { type: string, description: "配额维度标识" }
         total:          { type: integer, format: int64, minimum: 0, description: "新配额上限；允许低于当前 used（缩容，由服务端 GREATEST clamp 到 used+reserved）" }
 
+    QuotaUpsertRequest:
+      type: object
+      description: "批量 Upsert 租户配额请求（PUT /admin/tenants/{tenant_id}/quota/upsert）"
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/QuotaUpsertItem' }
+
+    QuotaUpsertItem:
+      type: object
+      description: "Upsert 配额维度项；total 未提供、为 null 或为 0 时取 resource_quota_meta.default_quota"
+      required: [resource_type]
+      properties:
+        resource_type: { type: string, description: "配额维度标识（需在 resource_quota_meta 已注册且 enabled=true）" }
+        total:          { type: integer, format: int64, nullable: true, minimum: 0, description: "配额上限；未提供、为 null 或为 0 时取 resource_quota_meta.default_quota" }
+
     Quota:
       type: object
       description: "租户配额视图（GET/POST/PUT 共用响应）"
@@ -4041,6 +4059,14 @@ components:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
     QuotaValidationFailed:
       description: 参数校验失败（code=VALIDATION_FAILED）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    QuotaUpdateUncertain:
+      description: |
+        配额更新失败，无法确认事务提交状态（DB 宕机/连接断开等极端场景）。
+        Services 层收到此错误后不得自动重试，应记录告警并触发人工核对流程。
+        code=QUOTA_UPDATE_UNCERTAIN
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -8667,6 +8693,40 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/TenantNotFound' }
+
+  /admin/tenants/{tenant_id}/quota/upsert:
+    put:
+      operationId: upsertTenantQuota
+      summary: 批量 Upsert 租户配额
+      description: |
+        批量 Upsert 指定租户多个维度的配额上限：已存在的维度更新 total，不存在的维度新建行。
+        单次请求内所有维度在同一 DB 事务中原子完成，任一维度失败则整体回滚。
+        - items.resource_type 必须在 resource_quota_meta 已注册且 enabled=true
+        - items.total 未提供或为 0 时取 resource_quota_meta.default_quota；负数返回 VALIDATION_FAILED
+        - 缩容时用 GREATEST(total, used+reserved) clamp 到 used+reserved，
+          并在返回的 items 中将 tightened 置 true（新建维度不会触发收紧）
+      tags: [QuotaAdmin]
+      x-ani-rbac-scope: "scope:quota:write"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: false, schema: { type: string, minLength: 1, maxLength: 128 }, description: "客户端生成；相同 upsert 请求重复执行后的最终状态一致" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuotaUpsertRequest' }
+      responses:
+        "200":
+          description: Upsert 结果（含 tightened 标记）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Quota' }
+        "400": { $ref: '#/components/responses/QuotaValidationFailed' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/TenantNotFound' }
+        "422": { $ref: '#/components/responses/QuotaResourceNotRegistered' }
+        "511": { $ref: '#/components/responses/QuotaUpdateUncertain' }
 
   /admin/tenants/{tenant_id}/reservations:
     put:

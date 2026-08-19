@@ -1633,3 +1633,81 @@ v1 已将单维度预占逻辑（meta 校验 → lazy init → 原子 UPDATE →
 - 代码：issue-003 `QuotaService` adapter（`postgres_quota.go` 的 `tryInTx` / `Try` / `TryMany`）、`ports/quota.go` 的 `QuotaService` interface
 - 集成测试连接模式：issue-011 的 `ANI_TEST_ADMIN_DSN` / `ANI_TEST_TENANT_DSN` 双角色 RLS 验证
 - 本批次为 `feat/quota-service-tcc-v2` 的新增能力，未改动 v1.yaml 契约、handler 或 SDK
+
+---
+
+## 补充批次 UpsertTenantQuota / quota upsert 端点（2026-08-18）
+
+> 批次类型：Feature batch（Core quota 管理层原子 upsert 能力）
+> 完成日期：2026-08-18
+> 分支：`feat/quota-service-v3`
+> 背景：tenant-service 为租户同步套餐/限额时，不知道哪些配额维度已存在，v1 需要 `GetQuota → 分流 → PutQuota → CreateQuota` 多次调用。若 Put 成功但 Create 失败，Services 层只能 best-effort 补偿，仍可能留下不一致。本批次在 Core 侧提供单事务 `UpsertTenantQuota`，消除 Services 层拆分调用和补偿回滚需求。
+
+### 完成摘要
+
+新增 Core API `PUT /api/v1/admin/tenants/{tenant_id}/quota/upsert`，请求复用配额维度输入语义，响应复用 `Quota`。新增 `QuotaAdminService.UpsertTenantQuota`，在 `PostgresQuota` 中用 `INSERT ... ON CONFLICT DO UPDATE` 实现批量 upsert：已存在维度更新 total，不存在维度新建；`total==0` 取 `resource_quota_meta.default_quota`；缩容时 `GREATEST(EXCLUDED.total, resource_quota.reserved + resource_quota.used)` clamp 到当前占用量，并通过回读设置 `tightened=true`。
+
+事务模型保持 Core 管理方法边界：adapter 自开 `WithPlatformTx` 走 RLS bypass，任一维度校验/写入失败整体回滚。`MetadataStore.WithPlatformTx` 在 commit 失败时包装 `ErrMetadataPlatformTxCommit`；`PostgresQuota.UpsertTenantQuota` 将该内部事务哨兵转换为对外 `ErrQuotaUpdateUncertain`，Gateway 映射为 HTTP 511 `QUOTA_UPDATE_UNCERTAIN`，提示调用方不得自动重试。
+
+### 关键文件
+
+| 文件 | 类型 | 说明 |
+|---|---|---|
+| `api/openapi/v1.yaml` | 修改 | 新增 `upsertTenantQuota` 路径、`QuotaUpsertRequest` / `QuotaUpsertItem` schema、`QuotaUpdateUncertain` 响应 |
+| `pkg/ports/errors.go` | 修改 | 新增 `ErrQuotaUpdateUncertain` 与 `ErrMetadataPlatformTxCommit` 哨兵错误 |
+| `pkg/ports/quota_admin.go` | 修改 | `QuotaAdminService` 新增 `UpsertTenantQuota` 方法 |
+| `pkg/adapters/postgres/metadata_store.go` | 修改 | `WithPlatformTx` commit 失败包装 metadata commit 哨兵 |
+| `pkg/adapters/runtime/postgres_quota.go` | 修改 | 实现 `UpsertTenantQuota`，复用 tenant/meta/readback helper |
+| `services/ani-gateway/internal/router/quota_resources.go` | 修改 | 新增 upsert handler、路由注册和专用错误映射 |
+| `pkg/adapters/runtime/postgres_quota_admin_test.go` | 修改 | 新增 upsert 单测：默认值、clamp、重复维度、负数、回滚、commit 不确定 |
+| `pkg/adapters/runtime/integration_test.go` | 修改 | 新增 upsert 集成测试：混合新建/更新、缩容 clamp、原子回滚 |
+| `services/ani-gateway/internal/router/quota_resources_test.go` | 修改 | 新增 upsert 错误映射测试 |
+| `sdks/core/*` / `sdks/services/*` | 重新生成 | `make gen-core-sdk` 调用既有 SDK Alpha 生成脚本刷新多语言 SDK 产物 |
+
+### 验证命令与结果
+
+| 命令 | 结果 |
+|---|---|
+| `make gen-core-sdk` | PASS（生成脚本刷新 Core/Services SDK；Windows 下 `date -u` 有既有噪声但未阻断） |
+| `python scripts/validate_yaml.py api/openapi/v1.yaml` | PASS |
+| `go test ./pkg/adapters/runtime -run 'TestPostgresQuota\|TestIntegrationQuotaAdminUpsert' -count=1` | PASS（quota 相关单测；不带 integration tag） |
+| `go test ./pkg/adapters/runtime -run '^$' -tags integration -count=1` | PASS（integration build tag 编译通过，未执行真实 PG 写入） |
+| `go test ./services/ani-gateway/internal/router -run 'TestWriteQuota' -count=1` | PASS |
+| `make validate-architecture` | PASS |
+| `git diff --check` | PASS（仅 SDK 生成物 CRLF/LF 提示，无空白错误） |
+| `make validate-sdk-beta` | 环境性失败：beta helper 两个 Python 校验已 PASS，随后内部调用 `make validate-sdk-alpha` 时因 Windows `C:/Program Files (x86)/.../make` 路径未加引号触发 bash 语法错误；非 quota 代码失败 |
+
+### Implementation Notes
+
+#### 1. Design Decisions
+
+**D1：新增 UpsertTenantQuota，不改 Create/Update 语义**
+Create 的已存在维度仍是 `ON CONFLICT DO NOTHING` 部分成功语义；Update 的不存在维度仍返回 `ErrQuotaNotFound`。Upsert 独立表达“存在则更新，不存在则新建”的原子批量语义，避免破坏 v1 已有端点。
+
+**D2：commit 失败显式区分为未知状态**
+事务内失败能确定已回滚；commit 阶段失败无法确定数据库是否提交成功。`WithPlatformTx` 提供 `ErrMetadataPlatformTxCommit` 供 adapter 用 `errors.Is` 判定，adapter 再转换为 `ErrQuotaUpdateUncertain`，避免调用方误自动重试。
+
+**D3：upsert 的 resource_type 错误由 adapter 带上下文**
+`getMetaDefault` 是共用 helper，本身只返回哨兵错误。Upsert 在捕获 `ErrQuotaResourceNotRegistered` 时包装具体 `resource_type`，让 Gateway 能返回“配额更新失败，已回滚。”加具体维度信息。
+
+#### 2. Deviations
+
+**De1：未真实执行 PG integration 写入**
+本轮在当前环境只做了 `-tags integration -run '^$'` 编译验证；真实 PG 写入测试场景已补入 `integration_test.go`，需要有 `ANI_TEST_ADMIN_DSN` / `ANI_TEST_TENANT_DSN` 的环境复跑。默认 `go test ./pkg/adapters/runtime` 在当前 Windows 环境仍会因既有 Sandbox 文件安全测试缺少符号链接权限和 `os.O_DIRECTORY` 失败，与本批次无关。
+
+#### 3. Tradeoffs
+
+**T1：不新增请求级 replay 存储**
+Upsert 是 set-total 语义，相同请求重复执行后最终 DB 状态一致。本批次只按 OpenAPI 保留可选 `Idempotency-Key` header，不引入新的幂等表或 worker，避免扩大 Core quota 的状态面。
+
+#### 4. Open Questions
+
+**Q1：tenant-service 何时接入新端点？**
+本批次只交付 Core 侧 API、port、adapter、handler 和 SDK 生成物。tenant-service 的 `QuotaSvcClient.UpsertQuota` 以及替换 `Get + 分流 + Put + Create + 补偿` 的调用链仍属后续 PR。
+
+### 对齐文档
+
+- 方案：`kjs-study/配额操作任务/plan-quota-service-v3.md`
+- 接口定义前置：`kjs-study/配额操作任务/配额core层upsert端点设计.md`
+- Core API 真实来源：`api/openapi/v1.yaml`
+- 代码边界：`pkg/ports/quota_admin.go`、`pkg/adapters/runtime/postgres_quota.go`、`services/ani-gateway/internal/router/quota_resources.go`

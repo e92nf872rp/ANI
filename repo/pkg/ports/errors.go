@@ -20,5 +20,12 @@ var (
 	ErrQuotaIdempotencyConflict   = errors.New("quota idempotency key conflict")
 	ErrQuotaNotFound              = errors.New("quota not found")
 	ErrQuotaAlreadyExists         = errors.New("quota already exists")
+	ErrQuotaUpdateUncertain       = errors.New("quota update uncertain: transaction commit status unknown")
 	ErrReservationNotFound        = errors.New("resource reservation not found")
+
+	// Metadata transaction sentinel errors.
+	ErrMetadataTenantTxBegin    = errors.New("metadata tenant tx begin")
+	ErrMetadataTenantTxCommit   = errors.New("metadata tenant tx commit")
+	ErrMetadataPlatformTxBegin  = errors.New("metadata platform tx begin")
+	ErrMetadataPlatformTxCommit = errors.New("metadata platform tx commit")
 )

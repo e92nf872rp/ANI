@@ -734,6 +734,79 @@ func (q *PostgresQuota) UpdateTenantQuota(ctx context.Context, tenantID string, 
 	return infos, nil
 }
 
+// UpsertTenantQuota 批量 upsert 租户配额（平台管理员）。自开 WithPlatformTx。
+// 已存在维度更新 total，不存在维度新建；任一维度失败则整体回滚。
+// 提交阶段失败时返回 ErrQuotaUpdateUncertain，调用方不得自动重试。
+func (q *PostgresQuota) UpsertTenantQuota(ctx context.Context, tenantID string, items []ports.QuotaItemInput) ([]ports.QuotaInfo, error) {
+	if len(items) == 0 {
+		return nil, ports.ErrInvalid
+	}
+	seen := make(map[ports.ResourceType]struct{}, len(items))
+	for _, item := range items {
+		if _, ok := seen[item.ResourceType]; ok {
+			return nil, ports.ErrInvalid
+		}
+		seen[item.ResourceType] = struct{}{}
+	}
+
+	reqTotals := make(map[ports.ResourceType]int64, len(items))
+	infos := make([]ports.QuotaInfo, 0, len(items))
+	var err error
+	err = q.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		if err := q.requireTenantExists(ctx, tx, tenantID); err != nil {
+			return err
+		}
+
+		for i, item := range items {
+			if item.Total < 0 {
+				return fmt.Errorf("%w: total 不能为负数，items[%d].total=%d", ports.ErrInvalid, i, item.Total)
+			}
+			_, defaultQuota, err := q.getMetaDefault(ctx, tx, item.ResourceType)
+			if err != nil {
+				if errors.Is(err, ports.ErrQuotaResourceNotRegistered) {
+					return fmt.Errorf("%w: resource_type %q 未在 resource_quota_meta 中注册或已禁用", ports.ErrQuotaResourceNotRegistered, item.ResourceType)
+				}
+				return err
+			}
+			total := item.Total
+			if total == 0 {
+				total = defaultQuota
+			}
+			reqTotals[item.ResourceType] = total
+
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO resource_quota (tenant_id, resource_type, total, reserved, used)
+				VALUES ($1, $2, $3, 0, 0)
+				ON CONFLICT (tenant_id, resource_type)
+				DO UPDATE SET total = GREATEST(EXCLUDED.total, resource_quota.reserved + resource_quota.used),
+				              updated_at = NOW()
+			`, tenantID, item.ResourceType, total); err != nil {
+				return err
+			}
+		}
+
+		types := make([]ports.ResourceType, len(items))
+		for i, item := range items {
+			types[i] = item.ResourceType
+		}
+		infos, err = q.quotaInfoByTypes(ctx, tx, tenantID, types)
+		return err
+	})
+	if err != nil {
+		if errors.Is(err, ports.ErrMetadataPlatformTxCommit) {
+			return nil, ports.ErrQuotaUpdateUncertain
+		}
+		return nil, err
+	}
+
+	for i := range infos {
+		if req, ok := reqTotals[infos[i].ResourceType]; ok && infos[i].Total > req {
+			infos[i].Tightened = true
+		}
+	}
+	return infos, nil
+}
+
 // GetTenantQuota 查询租户所有维度配额（平台管理员）。自开 WithPlatformTx。
 // JOIN resource_quota_meta 返回 unit/display_name/is_discrete，ORDER BY resource_type。
 // 租户不存在返回 ports.ErrTenantNotFound（handler 映射 404 TENANT_NOT_FOUND）；

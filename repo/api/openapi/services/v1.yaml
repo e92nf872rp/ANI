@@ -166,6 +166,7 @@ components:
         ready_replicas:        { type: integer, minimum: 0, default: 0 }
         resources:             { $ref: '#/components/schemas/InferenceServiceResources' }
         placement_mode:        { type: string, enum: [auto, single_node, multi_node], default: auto }
+        engine:                { $ref: '#/components/schemas/InferenceServiceEngine', description: 创建时冻结的前端环境变量与完整启动命令；省略表示无租户 env/command。不进入 PATCH }
         gpu_type:              { type: string, nullable: true, deprecated: true, description: v1 兼容投影；新客户端使用 resources.accelerator.spec_id }
         gpu_count_per_pod:     { type: integer, default: 1, deprecated: true, description: v1 兼容投影；不再是资源规格权威字段 }
         max_concurrency:       { type: integer, default: 8, deprecated: true, description: v1 兼容投影；P0 不执行 }
@@ -202,6 +203,63 @@ components:
         accelerator:
           $ref: '#/components/schemas/InferenceServiceAccelerator'
 
+    InferenceServiceEngineEnvVar:
+      type: object
+      required: [name, value]
+      additionalProperties: false
+      description: |
+        前端传入的单个环境变量。创建时冻结。不是 shell 赋值。
+        命中平台保留名时实现返回 400 INVALID_ARGUMENT。
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: '^[A-Za-z_][A-Za-z0-9_]*$'
+          description: 环境变量名
+        value:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: 环境变量值
+
+    InferenceServiceEngine:
+      type: object
+      additionalProperties: false
+      description: |
+        前端在创建请求中传入的环境变量与完整启动命令，创建时冻结，只读回显。
+        `command` 是完整 argv，原样作为容器启动命令，不与平台默认 command 拼接、不追加。
+        平台仍独占 GPU/Ray 运行时环境变量；命中保留 env 名时实现返回 400 INVALID_ARGUMENT。
+        不是 shell 字符串。不进入 PATCH。
+      x-ani-reserved-engine-env-names:
+        - CUDA_VISIBLE_DEVICES
+        - NVIDIA_VISIBLE_DEVICES
+        - NVIDIA_DRIVER_CAPABILITIES
+        - PYTHONPATH
+        - PATH
+        - LD_PRELOAD
+        - LD_LIBRARY_PATH
+        - RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES
+      properties:
+        env:
+          type: array
+          maxItems: 32
+          description: 前端传入的环境变量；省略或空数组表示不追加租户环境变量
+          items:
+            $ref: '#/components/schemas/InferenceServiceEngineEnvVar'
+        command:
+          type: array
+          minItems: 1
+          maxItems: 64
+          description: |
+            前端传入的完整启动命令（argv），例如
+            ["python3","-m","vllm.entrypoints.openai.api_server","--model","/models/qwen","--host","0.0.0.0","--port","8000"]。
+            原样作为容器启动命令，不拼接、不追加平台默认 command。省略表示沿用平台默认启动命令。
+          items:
+            type: string
+            minLength: 1
+            maxLength: 4096
+
     CreateInferenceServiceRequest:
       type: object
       required: [idempotency_key, name, model]
@@ -219,6 +277,7 @@ components:
         replicas: { type: integer, description: 省略时服务按 1 个副本处理 }
         resources: { $ref: '#/components/schemas/InferenceServiceResources' }
         placement_mode: { type: string, enum: [auto, single_node, multi_node], description: 省略时服务按 auto 处理 }
+        engine: { $ref: '#/components/schemas/InferenceServiceEngine', description: 可选；前端传入 env 与完整启动命令 command，创建时冻结。省略表示沿用平台默认启动命令和环境 }
         gpu_type: { type: string, deprecated: true, description: v1 兼容输入；新客户端不得发送 }
         gpu_count_per_pod: { type: integer, deprecated: true, description: v1 兼容输入；单独出现时不得推断为 GPU }
         max_concurrency: { type: integer, deprecated: true, description: v1 兼容输入；P0 不执行 }

@@ -1347,6 +1347,8 @@ export interface components {
              * @enum {string}
              */
             placement_mode: "auto" | "single_node" | "multi_node";
+            /** @description 创建时冻结的前端环境变量与完整启动命令；省略表示无租户 env/command。不进入 PATCH */
+            engine?: components["schemas"]["InferenceServiceEngine"];
             /**
              * @deprecated
              * @description v1 兼容投影；新客户端使用 resources.accelerator.spec_id
@@ -1404,6 +1406,32 @@ export interface components {
             accelerator?: components["schemas"]["InferenceServiceAccelerator"];
         };
         /**
+         * @description 前端传入的单个环境变量。创建时冻结。不是 shell 赋值。
+         *     命中平台保留名时实现返回 400 INVALID_ARGUMENT。
+         */
+        InferenceServiceEngineEnvVar: {
+            /** @description 环境变量名 */
+            name: string;
+            /** @description 环境变量值 */
+            value: string;
+        };
+        /**
+         * @description 前端在创建请求中传入的环境变量与完整启动命令，创建时冻结，只读回显。
+         *     `command` 是完整 argv，原样作为容器启动命令，不与平台默认 command 拼接、不追加。
+         *     平台仍独占 GPU/Ray 运行时环境变量；命中保留 env 名时实现返回 400 INVALID_ARGUMENT。
+         *     不是 shell 字符串。不进入 PATCH。
+         */
+        InferenceServiceEngine: {
+            /** @description 前端传入的环境变量；省略或空数组表示不追加租户环境变量 */
+            env?: components["schemas"]["InferenceServiceEngineEnvVar"][];
+            /**
+             * @description 前端传入的完整启动命令（argv），例如
+             *     ["python3","-m","vllm.entrypoints.openai.api_server","--model","/models/qwen","--host","0.0.0.0","--port","8000"]。
+             *     原样作为容器启动命令，不拼接、不追加平台默认 command。省略表示沿用平台默认启动命令。
+             */
+            command?: string[];
+        };
+        /**
          * @description 镜像来源二选一，也可同时传：image_id 从镜像仓库选择，image_ref 由用户直接输入。
          *     同时传入时优先 image_id。创建前固定 digest；两者都缺时由实现返回 400 INVALID_ARGUMENT。
          */
@@ -1432,6 +1460,8 @@ export interface components {
              * @enum {string}
              */
             placement_mode?: "auto" | "single_node" | "multi_node";
+            /** @description 可选；前端传入 env 与完整启动命令 command，创建时冻结。省略表示沿用平台默认启动命令和环境 */
+            engine?: components["schemas"]["InferenceServiceEngine"];
             /**
              * @deprecated
              * @description v1 兼容输入；新客户端不得发送
