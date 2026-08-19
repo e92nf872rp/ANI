@@ -107,7 +107,7 @@ func (api *tenantPlansAPI) listTenantPlans(ctx context.Context, c *app.RequestCo
 	c.JSON(http.StatusOK, map[string]any{
 		"items":       items,
 		"total":       res.GetTotal(),
-		"next_cursor": res.GetNextCursor(), // 列表端点：空串 "" 表示已无更多（与审计列表的 null 不同）
+		"next_cursor": nullIfEmpty(res.GetNextCursor()),
 	})
 }
 

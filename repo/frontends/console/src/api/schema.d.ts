@@ -2220,14 +2220,14 @@ export interface components {
             idempotency_key: string;
             items: components["schemas"]["PlanQuotaLimitInput"][];
         };
-        /** @description 更新套餐基本信息。name / description 均为可选： 未传或 null 表示不更新；传空串表示清空（name 允许清空为 ""）。 长度按 Unicode 码点校验（与服务端 utf8.RuneCountInString 一致）。 */
+        /** @description 更新套餐基本信息。name / description 均为可选： 未传或 null 表示不更新；name 不允许传空串（服务端校验返回 VALIDATION_FAILED）， description 传空串表示清空。 长度按 Unicode 码点校验（与服务端 utf8.RuneCountInString 一致）。 */
         UpdateTenantPlanRequest: {
             /**
              * Format: uuid
              * @description 可选；也可改传请求头 Idempotency-Key；皆空时中间件跳过幂等
              */
             idempotency_key?: string;
-            /** @description 未传/null=不更新；空串=清空；长度 ≤64（Unicode 码点） */
+            /** @description 未传/null=不更新；不允许空串；长度 1-64（Unicode 码点） */
             name?: string | null;
             /** @description 未传/null=不更新；空串=清空；长度 ≤512（Unicode 码点） */
             description?: string | null;
