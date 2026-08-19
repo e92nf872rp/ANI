@@ -353,7 +353,7 @@ func probeHealth(ctx context.Context, client *http.Client, endpoint string) erro
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("runtime health returned %d", resp.StatusCode)
@@ -388,7 +388,7 @@ func probeSmoke(ctx context.Context, client *http.Client, endpoint, servedModelN
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("runtime smoke returned %d", resp.StatusCode)
