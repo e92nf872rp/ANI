@@ -99,10 +99,13 @@ function handle401() {
   const current = currentPath()
   if (current.startsWith('/login') || current.startsWith('/auth/callback')) return
 
-  // 临时：路由未门禁时，401 只清会话，不强制跳登录页，避免打断内部页联调
+  saveReturnTo(current)
   bearerToken = null
   clearSession()
   saveReturnTo(current)
+
+  const search = new URLSearchParams({ returnTo: current }).toString()
+  window.location.assign(`/boss/login?${search}`)
 }
 
 export function maybeRefresh(): Promise<boolean> {

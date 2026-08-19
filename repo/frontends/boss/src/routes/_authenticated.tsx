@@ -1,4 +1,4 @@
-import { createFileRoute, Link, Outlet, useNavigate } from '@tanstack/react-router'
+import { createFileRoute, Link, Outlet, redirect, useNavigate } from '@tanstack/react-router'
 import { Button, Layout, Menu, MessagePlugin } from 'tdesign-react'
 import {
   CpuIcon,
@@ -10,38 +10,42 @@ import {
 } from 'tdesign-icons-react'
 import { useEffect } from 'react'
 import { logout, maybeRefresh, setAuthToken } from '@/api/auth'
-import { getSession, isSessionValid } from '@/auth/session'
+import { getSession, isSessionValid, safeReturnTo, saveReturnTo } from '@/auth/session'
 
 const { Header, Aside, Content } = Layout
 
 /**
  * BOSS 布局路由（pathless）。
- *
- * 临时关闭登录门禁：未登录也可进入内部页面做联调。
- * 若本地已有有效 session，仍注入 Bearer 并做临近过期 refresh。
+ * 未登录或 session 已过期 → 保存 returnTo 并重定向到 /login。
  */
 export const Route = createFileRoute('/_authenticated')({
-  beforeLoad: async () => {
+  beforeLoad: async ({ location }) => {
     const session = getSession()
-    if (session && isSessionValid()) {
-      await maybeRefresh()
-      setAuthToken(session.access_token)
+    if (!session || !isSessionValid()) {
+      const current = location.pathname + (location.searchStr ?? '')
+      if (safeReturnTo(current) === current) {
+        saveReturnTo(current)
+      }
+      throw redirect({
+        to: '/login',
+        search: { returnTo: safeReturnTo(current) === current ? current : '/' },
+      })
     }
+    await maybeRefresh()
+    setAuthToken(session.access_token)
   },
   component: AuthenticatedLayout,
 })
 
 function AuthenticatedLayout() {
   const navigate = useNavigate()
-  const loggedIn = !!getSession() && isSessionValid()
 
   useEffect(() => {
-    if (!loggedIn) return
     const timer = setInterval(() => {
       void maybeRefresh()
     }, 60_000)
     return () => clearInterval(timer)
-  }, [loggedIn])
+  }, [])
 
   async function handleLogout() {
     await logout()
@@ -62,25 +66,14 @@ function AuthenticatedLayout() {
         }}
       >
         <span style={{ fontWeight: 600, fontSize: 18 }}>ANI 平台运营台</span>
-        {loggedIn ? (
-          <Button
-            variant="outline"
-            theme="default"
-            onClick={handleLogout}
-            style={{ color: '#fff', borderColor: 'rgba(255,255,255,0.4)' }}
-          >
-            退出登录
-          </Button>
-        ) : (
-          <Button
-            variant="outline"
-            theme="default"
-            onClick={() => navigate({ to: '/login' })}
-            style={{ color: '#fff', borderColor: 'rgba(255,255,255,0.4)' }}
-          >
-            登录
-          </Button>
-        )}
+        <Button
+          variant="outline"
+          theme="default"
+          onClick={handleLogout}
+          style={{ color: '#fff', borderColor: 'rgba(255,255,255,0.4)' }}
+        >
+          退出登录
+        </Button>
       </Header>
       <Layout>
         <Aside width="220px" style={{ background: '#fff' }}>
