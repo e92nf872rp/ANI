@@ -15,12 +15,12 @@ import (
 )
 
 const (
-	defaultLeaseDuration    = 30 * time.Second
-	defaultRetryDelay       = 5 * time.Second
-	defaultMaxAttempts      = 180
-	defaultDeployTimeout    = 15 * time.Minute
-	requestPathEnsureGrace  = 45 * time.Second
-	codeRuntimeNotBound     = "RUNTIME_NOT_BOUND"
+	defaultLeaseDuration   = 30 * time.Second
+	defaultRetryDelay      = 5 * time.Second
+	defaultMaxAttempts     = 180
+	defaultDeployTimeout   = 15 * time.Minute
+	requestPathEnsureGrace = 45 * time.Second
+	codeRuntimeNotBound    = "RUNTIME_NOT_BOUND"
 )
 
 type Worker struct {

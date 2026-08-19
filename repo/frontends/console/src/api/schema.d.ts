@@ -1443,7 +1443,7 @@ export interface components {
             updated_at?: string | null;
         };
         InferenceServiceAccelerator: {
-            /** @description Core GPUSpec ID；P0 仅接受通过 live gate 的整卡 GPU 规格 */
+            /** @description Core GPUSpec ID；P0 接受通过 live gate 的整卡（`-full`）与 vGPU（`-Nx`）规格 */
             spec_id: string;
             /** @description 每个独立副本或 leader-worker group 申请的 accelerator 总数 */
             count_per_replica: number;
