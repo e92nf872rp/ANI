@@ -333,34 +333,49 @@ def validate(spec: dict[str, Any]) -> tuple[str, ...]:
     engine = schemas.get("InferenceServiceEngine") or {}
     if engine.get("additionalProperties") is not False:
         errors.append("InferenceServiceEngine must set additionalProperties false")
-    reserved = engine.get("x-ani-reserved-engine-arg-names") or []
-    expected_reserved = [
-        "model",
-        "host",
-        "port",
-        "served-model-name",
-        "tensor-parallel-size",
-        "tp-size",
-        "distributed-executor-backend",
-        "device",
+    if engine.get("x-ani-reserved-engine-arg-names"):
+        errors.append("InferenceServiceEngine must not reserve CLI arg names; command is the complete argv")
+    for leftover in ("extra_args", "args"):
+        if leftover in (engine.get("properties") or {}):
+            errors.append(f"InferenceServiceEngine must not keep {leftover}; command is the complete argv")
+    if schemas.get("InferenceServiceEngineArg"):
+        errors.append("InferenceServiceEngineArg must be removed; command is a string argv")
+    engine_env = (engine.get("properties") or {}).get("env") or {}
+    if engine_env.get("maxItems") != 32:
+        errors.append("InferenceServiceEngine.env must cap at 32 items")
+    if engine_env.get("items", {}).get("$ref") != "#/components/schemas/InferenceServiceEngineEnvVar":
+        errors.append("InferenceServiceEngine.env items must be InferenceServiceEngineEnvVar")
+    reserved_env = engine.get("x-ani-reserved-engine-env-names") or []
+    expected_reserved_env = [
+        "CUDA_VISIBLE_DEVICES",
+        "NVIDIA_VISIBLE_DEVICES",
+        "NVIDIA_DRIVER_CAPABILITIES",
+        "PYTHONPATH",
+        "PATH",
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES",
     ]
-    if reserved != expected_reserved:
-        errors.append("InferenceServiceEngine must freeze the reserved engine arg names")
-    extra_args = (engine.get("properties") or {}).get("extra_args") or {}
-    if extra_args.get("maxItems") != 32:
-        errors.append("InferenceServiceEngine.extra_args must cap at 32 items")
-    if extra_args.get("items", {}).get("$ref") != "#/components/schemas/InferenceServiceEngineArg":
-        errors.append("InferenceServiceEngine.extra_args items must be InferenceServiceEngineArg")
-    engine_arg = schemas.get("InferenceServiceEngineArg") or {}
-    if set(engine_arg.get("required") or []) != {"name"}:
-        errors.append("InferenceServiceEngineArg must require name only")
-    if engine_arg.get("additionalProperties") is not False:
-        errors.append("InferenceServiceEngineArg must set additionalProperties false")
-    arg_name = (engine_arg.get("properties") or {}).get("name") or {}
-    if arg_name.get("pattern") != "^[a-z0-9][a-z0-9-]*$":
-        errors.append("InferenceServiceEngineArg.name must be a lowercase CLI flag without leading dashes")
-    if "value" not in (engine_arg.get("properties") or {}):
-        errors.append("InferenceServiceEngineArg must allow optional value")
+    if reserved_env != expected_reserved_env:
+        errors.append("InferenceServiceEngine must freeze the reserved engine env names")
+    engine_env_var = schemas.get("InferenceServiceEngineEnvVar") or {}
+    if set(engine_env_var.get("required") or []) != {"name", "value"}:
+        errors.append("InferenceServiceEngineEnvVar must require name and value")
+    if engine_env_var.get("additionalProperties") is not False:
+        errors.append("InferenceServiceEngineEnvVar must set additionalProperties false")
+    env_name = (engine_env_var.get("properties") or {}).get("name") or {}
+    if env_name.get("pattern") != "^[A-Za-z_][A-Za-z0-9_]*$":
+        errors.append("InferenceServiceEngineEnvVar.name must be a POSIX environment variable name")
+    engine_command = (engine.get("properties") or {}).get("command") or {}
+    if engine_command.get("minItems") != 1:
+        errors.append("InferenceServiceEngine.command must require at least one argv item when present")
+    if engine_command.get("maxItems") != 64:
+        errors.append("InferenceServiceEngine.command must cap at 64 argv items")
+    command_item = engine_command.get("items") or {}
+    if command_item.get("type") != "string" or command_item.get("minLength") != 1:
+        errors.append("InferenceServiceEngine.command items must be non-empty strings")
+    if command_item.get("$ref"):
+        errors.append("InferenceServiceEngine.command must be a string argv, not structured flags")
 
     policies = (paths.get("/inference-services/{service_id}/policies") or {}).get("put") or {}
     if "501" not in (policies.get("responses") or {}):

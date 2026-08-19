@@ -221,7 +221,7 @@ export const schemas = [
   "InferenceService",
   "InferenceServiceAccelerator",
   "InferenceServiceEngine",
-  "InferenceServiceEngineArg",
+  "InferenceServiceEngineEnvVar",
   "InferenceServiceLifecycleRequest",
   "InferenceServiceLogEntry",
   "InferenceServiceLogListResponse",

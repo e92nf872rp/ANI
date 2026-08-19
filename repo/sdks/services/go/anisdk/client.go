@@ -236,7 +236,7 @@ var Schemas = []string{
 	"InferenceService",
 	"InferenceServiceAccelerator",
 	"InferenceServiceEngine",
-	"InferenceServiceEngineArg",
+	"InferenceServiceEngineEnvVar",
 	"InferenceServiceLifecycleRequest",
 	"InferenceServiceLogEntry",
 	"InferenceServiceLogListResponse",

@@ -123,7 +123,7 @@ class InferenceServiceContractTest(unittest.TestCase):
         for field in ("replicas", "placement_mode", "gpu_count_per_pod", "max_concurrency", "image_id", "image_ref", "engine"):
             self.assertIn(f"{field}?:", block)
 
-    def test_create_freezes_optional_engine_extra_args(self) -> None:
+    def test_create_freezes_optional_engine_env_and_command(self) -> None:
         schemas = self.spec["components"]["schemas"]
         self.assertEqual(
             schemas["CreateInferenceServiceRequest"]["properties"]["engine"]["$ref"],
@@ -135,26 +135,34 @@ class InferenceServiceContractTest(unittest.TestCase):
         )
         engine = schemas["InferenceServiceEngine"]
         self.assertFalse(engine["additionalProperties"])
+        self.assertNotIn("extra_args", engine["properties"])
+        self.assertNotIn("args", engine["properties"])
+        self.assertNotIn("InferenceServiceEngineArg", schemas)
+        self.assertNotIn("x-ani-reserved-engine-arg-names", engine)
         self.assertEqual(
-            engine["x-ani-reserved-engine-arg-names"],
+            engine["x-ani-reserved-engine-env-names"],
             [
-                "model",
-                "host",
-                "port",
-                "served-model-name",
-                "tensor-parallel-size",
-                "tp-size",
-                "distributed-executor-backend",
-                "device",
+                "CUDA_VISIBLE_DEVICES",
+                "NVIDIA_VISIBLE_DEVICES",
+                "NVIDIA_DRIVER_CAPABILITIES",
+                "PYTHONPATH",
+                "PATH",
+                "LD_PRELOAD",
+                "LD_LIBRARY_PATH",
+                "RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES",
             ],
         )
-        extra_args = engine["properties"]["extra_args"]
-        self.assertEqual(extra_args["maxItems"], 32)
-        arg = schemas["InferenceServiceEngineArg"]
-        self.assertEqual(arg["required"], ["name"])
-        self.assertFalse(arg["additionalProperties"])
-        self.assertEqual(arg["properties"]["name"]["pattern"], "^[a-z0-9][a-z0-9-]*$")
-        self.assertIn("value", arg["properties"])
+        env = engine["properties"]["env"]
+        self.assertEqual(env["maxItems"], 32)
+        env_var = schemas["InferenceServiceEngineEnvVar"]
+        self.assertEqual(env_var["required"], ["name", "value"])
+        self.assertFalse(env_var["additionalProperties"])
+        self.assertEqual(env_var["properties"]["name"]["pattern"], "^[A-Za-z_][A-Za-z0-9_]*$")
+        command = engine["properties"]["command"]
+        self.assertEqual(command["minItems"], 1)
+        self.assertEqual(command["maxItems"], 64)
+        self.assertEqual(command["items"]["type"], "string")
+        self.assertEqual(command["items"]["minLength"], 1)
         self.assertEqual(
             set(schemas["UpdateInferenceServiceRequest"]["properties"]),
             {"idempotency_key", "replicas"},

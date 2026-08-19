@@ -225,7 +225,7 @@ SCHEMAS = [
     "InferenceService",
     "InferenceServiceAccelerator",
     "InferenceServiceEngine",
-    "InferenceServiceEngineArg",
+    "InferenceServiceEngineEnvVar",
     "InferenceServiceLifecycleRequest",
     "InferenceServiceLogEntry",
     "InferenceServiceLogListResponse",

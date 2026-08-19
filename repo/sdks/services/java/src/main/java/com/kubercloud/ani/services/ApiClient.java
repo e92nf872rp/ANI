@@ -243,7 +243,7 @@ public final class ApiClient {
         "InferenceService",
         "InferenceServiceAccelerator",
         "InferenceServiceEngine",
-        "InferenceServiceEngineArg",
+        "InferenceServiceEngineEnvVar",
         "InferenceServiceLifecycleRequest",
         "InferenceServiceLogEntry",
         "InferenceServiceLogListResponse",

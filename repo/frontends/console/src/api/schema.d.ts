@@ -1347,7 +1347,7 @@ export interface components {
              * @enum {string}
              */
             placement_mode: "auto" | "single_node" | "multi_node";
-            /** @description 创建时冻结的引擎附加参数；省略表示无 extra_args。不进入 PATCH */
+            /** @description 创建时冻结的前端环境变量与完整启动命令；省略表示无租户 env/command。不进入 PATCH */
             engine?: components["schemas"]["InferenceServiceEngine"];
             /**
              * @deprecated
@@ -1406,23 +1406,30 @@ export interface components {
             accelerator?: components["schemas"]["InferenceServiceAccelerator"];
         };
         /**
-         * @description 追加到平台生成的引擎 CLI 之后的单个参数。name 不含前导 `--`，实现负责加上 `--`。
-         *     省略 value 表示布尔开关。不是 shell 片段，不能更换入口二进制。
+         * @description 前端传入的单个环境变量。创建时冻结。不是 shell 赋值。
+         *     命中平台保留名时实现返回 400 INVALID_ARGUMENT。
          */
-        InferenceServiceEngineArg: {
-            /** @description 引擎 CLI flag 名，不含前导 `--` */
+        InferenceServiceEngineEnvVar: {
+            /** @description 环境变量名 */
             name: string;
-            /** @description 可选 flag 值；省略表示只传 `--name` */
-            value?: string;
+            /** @description 环境变量值 */
+            value: string;
         };
         /**
-         * @description 创建时冻结的引擎附加参数。平台仍独占入口、`--model`、`--host`、`--port`、
-         *     `--served-model-name`、tensor parallel、LWS Ray backend 和 `--device`。
-         *     命中保留名时实现返回 400 INVALID_ARGUMENT。不进入 PATCH。
+         * @description 前端在创建请求中传入的环境变量与完整启动命令，创建时冻结，只读回显。
+         *     `command` 是完整 argv，原样作为容器启动命令，不与平台默认 command 拼接、不追加。
+         *     平台仍独占 GPU/Ray 运行时环境变量；命中保留 env 名时实现返回 400 INVALID_ARGUMENT。
+         *     不是 shell 字符串。不进入 PATCH。
          */
         InferenceServiceEngine: {
-            /** @description 追加在平台 command 之后的额外引擎参数；省略或空数组表示无附加参数 */
-            extra_args?: components["schemas"]["InferenceServiceEngineArg"][];
+            /** @description 前端传入的环境变量；省略或空数组表示不追加租户环境变量 */
+            env?: components["schemas"]["InferenceServiceEngineEnvVar"][];
+            /**
+             * @description 前端传入的完整启动命令（argv），例如
+             *     ["python3","-m","vllm.entrypoints.openai.api_server","--model","/models/qwen","--host","0.0.0.0","--port","8000"]。
+             *     原样作为容器启动命令，不拼接、不追加平台默认 command。省略表示沿用平台默认启动命令。
+             */
+            command?: string[];
         };
         /**
          * @description 镜像来源二选一，也可同时传：image_id 从镜像仓库选择，image_ref 由用户直接输入。
@@ -1453,7 +1460,7 @@ export interface components {
              * @enum {string}
              */
             placement_mode?: "auto" | "single_node" | "multi_node";
-            /** @description 可选；创建时冻结 extra_args。省略表示沿用平台默认启动参数 */
+            /** @description 可选；前端传入 env 与完整启动命令 command，创建时冻结。省略表示沿用平台默认启动命令和环境 */
             engine?: components["schemas"]["InferenceServiceEngine"];
             /**
              * @deprecated
