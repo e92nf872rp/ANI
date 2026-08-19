@@ -4,14 +4,27 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	anisdk "github.com/kubercloud/ani-sdks/core-go/anisdk"
 	"github.com/kubercloud/ani/services/tenant-service/internal/repo/ports"
 )
 
 const defaultCoreAPIBaseURL = "http://127.0.0.1:8080/api/v1"
+
+// defaultCoreAPITimeout 是 tenant-service 调 Core API 的 HTTP 超时。
+// anisdk.Client（自动生成）内部使用 http.DefaultClient.Do 发请求且不接收 context，
+// 无法通过 SDK 选项注入自定义 http.Client 或 per-request deadline。
+// 这里在 init() 中设置 http.DefaultClient.Timeout，使所有 SDK 调用都有超时保护，
+// 避免 Core 挂起时 tenant-service handler goroutine 无限阻塞。
+const defaultCoreAPITimeout = 10 * time.Second
+
+func init() {
+	http.DefaultClient.Timeout = defaultCoreAPITimeout
+}
 
 func newCoreSDKClient() anisdk.Client {
 	base := strings.TrimSpace(os.Getenv("CORE_API_BASE_URL"))
