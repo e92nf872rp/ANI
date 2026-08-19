@@ -521,6 +521,12 @@
       "scope": ""
     },
     {
+      "operationId": "getChangeableRoles",
+      "method": "GET",
+      "path": "/tenants/{tenantId}/admins/{userId}/changeable-roles",
+      "scope": ""
+    },
+    {
       "operationId": "disableTenantAdmin",
       "method": "POST",
       "path": "/tenants/{tenantId}/admins/{userId}/disable",
@@ -578,6 +584,7 @@
     "BindPlanRequest",
     "BoundTenant",
     "BoundTenantsResponse",
+    "ChangeableRolesResponse",
     "CreateGpuContainerRequest",
     "CreateInferenceEndpointRequest",
     "CreateInferenceServiceRequest",

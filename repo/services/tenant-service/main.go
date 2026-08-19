@@ -22,9 +22,11 @@ func main() {
 	// 两个 gRPC service 注册到同一个 server。
 	tenantPlanSvc := service.NewTenantPlanService(plans, audit, coreQuota, coreTenants)
 	tenantSvc := service.NewTenantService(plans, coreTenants, coreQuota, audit)
+	tenantAdminSvc := service.NewTenantAdminService()
 
 	bootstrap.RunGRPC(cfg.GRPCPort, func(s *grpc.Server) {
 		tenantPlanSvc.Register(s)
 		tenantSvc.Register(s)
+		tenantAdminSvc.Register(s)
 	}, deps)
 }

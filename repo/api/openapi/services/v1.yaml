@@ -1133,6 +1133,21 @@ components:
             member:     { type: string, enum: [read, write, none] }
             transfer:   { type: string, enum: [read, write, none] }
 
+    ChangeableRolesResponse:
+      type: object
+      required: [current_role, changeable_roles]
+      description: 可变更角色选项（当前为 tenant-owner 时 changeable_roles 为空）
+      properties:
+        current_role:     { type: string, enum: [tenant-owner, tenant-admin, user, auditor] }
+        changeable_roles:
+          type: array
+          items:
+            type: object
+            required: [role, label]
+            properties:
+              role:  { type: string, enum: [user, auditor, tenant-admin] }
+              label: { type: string, description: "展示名（普通成员 / 审计员 / 租户管理员）" }
+
     TenantAdminAuditLog:
       type: object
       required: [id, action, resource, result, created_at]
@@ -1140,7 +1155,7 @@ components:
         id:         { type: string, format: uuid }
         action:     { type: string, description: "如 tenant_admin.invite / resend_invitation / change_role / transfer_ownership / reset_password / disable / enable / delete" }
         resource:   { type: string }
-        result:     { type: string, enum: [success, failed] }
+        result:     { type: string, enum: [success, failure] }
         user_id:    { type: string, format: uuid, nullable: true }
         details:    { type: object, additionalProperties: true, nullable: true }
         created_at: { type: string, format: date-time }
@@ -2999,6 +3014,24 @@ paths:
         "409": { $ref: '#/components/responses/Conflict', description: "TENANT_OWNER_ROLE_LOCKED / IDEMPOTENCY_CONFLICT" }
         "422": { $ref: '#/components/responses/UnprocessableEntity', description: "ROLE_CHANGE_INVALID" }
 
+  /tenants/{tenantId}/admins/{userId}/changeable-roles:
+    get:
+      operationId: getChangeableRoles
+      summary: 查询可变更角色选项（排除 tenant-owner）（需 platform-admin / platform-ops / platform-readonly）
+      tags: [TenantAdmins]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 可变更角色列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChangeableRolesResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_ADMIN_NOT_FOUND" }
+
   /tenants/{tenantId}/transfer-ownership:
     post:
       operationId: transferTenantOwnership
@@ -3109,7 +3142,7 @@ paths:
         - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 }, description: "每页数量" }
         - { name: cursor, in: query, schema: { type: string }, description: "上一页返回的 next_cursor" }
         - { name: action, in: query, schema: { type: string }, description: "过滤操作类型" }
-        - { name: result, in: query, schema: { type: string, enum: [success, failed] } }
+        - { name: result, in: query, schema: { type: string, enum: [success, failure] } }
       responses:
         "200":
           description: 操作历史列表
