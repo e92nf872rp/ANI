@@ -44,6 +44,7 @@ Inference PlatformWorkload API-first 增量：
 - INFERENCE-PLATFORM-WORKLOAD-CONTRACT-A：Core additive v1 契约已通过上游 PR #99 合入；包含 `service-only + internal exposure` OpenAPI、专项测试和 Core SDK/API docs 生成物，部署层不得通过租户或公网 Ingress 发布。
 - INFERENCE-SERVICE-CONTRACT-B：Services additive v1 契约已本地验证、待人工评审/独立契约 PR；包含统一 resources/可选 accelerator、model version、diagnostics/generation、PATCH/lifecycle/operation query、policies 501、内部 endpoint 隔离和 SDK/docs/Console 生成物。
 - INFERENCE-SERVICE-CREATE-IMAGE-CONTRACT-C27：已补齐 Services 创建契约可选 `image_id`（镜像仓库）与可选 `image_ref`（用户手填），至少填一个，优先 `image_id`；响应增加只读 digest `image_ref`；`IMAGE_UNAVAILABLE` 进入 OpenAPI。不含 handler/proto/实现。
+- INFERENCE-SERVICE-ENGINE-EXTRA-ARGS-CONTRACT-C35：已补齐 Services 创建契约可选 `engine.env` 与完整 `engine.command` argv；由前端传入环境变量和完整启动命令，创建时冻结、响应只读回显；不与平台默认 command 拼接或追加；env 保留名由后续实现返回 400 INVALID_ARGUMENT；不进入 PATCH。不含 handler/proto/`engine.Launch`/Console 表单。无新 live，不得外推 GPU ready / runtime ready。
 - 当前不包含 platform-workloads handler/port/adapter、inference-service PG/worker/reconciler、Deployment/LWS、推理 runtime 或 live evidence；Services 契约批准前不得进入阶段 B.1/C 实现批次。
 
 

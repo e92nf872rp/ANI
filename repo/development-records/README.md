@@ -20,6 +20,7 @@
 | INFERENCE-PLATFORM-WORKLOAD-CONTRACT-A | Core `platform-workloads` additive v1 契约已通过上游 PR #99 合入：7 个 `service-only + internal exposure` operation、统一 AsyncTask、CPU single-node 示例、可选 GPUSpec accelerator、leader-worker role topology、ClusterIP-only internal endpoint；部署层不得通过租户或公网 Ingress 发布；仍不含 handler/port/adapter/runtime/live evidence | inference-platform-workload-contract-a.md |
 | INFERENCE-SERVICE-CONTRACT-B | Services `InferenceService` additive v1 契约本地验证完成、待人工评审/独立 PR：统一 resources/可选 accelerator、model version、diagnostics/generation、PATCH/lifecycle/operation query、policies 501、内部 endpoint 隔离、旧 endpoint schema deprecated；不含 handler/PG/worker/reconciler/runtime/live evidence | inference-service-contract-b.md |
 | INFERENCE-SERVICE-CREATE-IMAGE-CONTRACT-C27 | Services 创建推理服务补齐可选 `image_id`（镜像仓库）与可选 `image_ref`（用户手填），至少填一个，优先 `image_id`；响应增加只读 digest `image_ref`；`422 IMAGE_UNAVAILABLE` 进入契约。不含 handler/proto/实现。不得外推 runtime ready | inference-service-create-image-contract-c27.md |
+| INFERENCE-SERVICE-ENGINE-EXTRA-ARGS-CONTRACT-C35 | Services 创建推理服务补齐可选 `engine.env` 与完整 `engine.command` argv，由前端传入环境变量和完整启动命令，创建时冻结、响应只读；不拼接/不追加；env 保留名 400；不进入 PATCH。不含 handler/proto/Launch/Console 表单。不得外推 runtime ready | inference-service-engine-extra-args-contract-c35.md |
 
 
 ### Core Quota Service（2026-08）
