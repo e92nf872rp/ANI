@@ -14,6 +14,7 @@ var (
 	ErrOperationInProgress = errors.New("inference service operation in progress")
 )
 
+// TransitionDisposition 描述 BeginTransition 是新建、重放还是已经是目标态。
 type TransitionDisposition string
 
 const (
@@ -29,6 +30,8 @@ type TransitionResult struct {
 	Disposition TransitionDisposition
 }
 
+// BeginTransition 在内存里推进状态机：generation+1、挂上 active operation。
+// 不访问 Core。delete 可抢占未完成的 create/scale/start/restart。
 func BeginTransition(service Service, action Action, target Spec, operationID uuid.UUID) (TransitionResult, error) {
 	if service.LegacyQuarantined {
 		return TransitionResult{}, ErrLegacyQuarantined
@@ -99,12 +102,14 @@ func BeginTransition(service Service, action Action, target Spec, operationID uu
 	}, nil
 }
 
+// replayActiveOperation 把进行中的同类型操作当成幂等重放，不再开新 generation。
 func replayActiveOperation(service Service, _ Action) (TransitionResult, error) {
 	return TransitionResult{
 		Service: service, OperationID: service.ActiveOperationID, Disposition: TransitionReuseOperation,
 	}, nil
 }
 
+// actionAllowed 限制各 status 上允许的动作。create 只从 pending 出发。
 func actionAllowed(status Status, action Action) bool {
 	switch action {
 	case ActionCreate:
@@ -125,6 +130,7 @@ func actionAllowed(status Status, action Action) bool {
 	}
 }
 
+// canPreempt：delete 抢占一切非 delete；stop 可打断 create/scale/start/restart；scale 可打断未完成的 scale。
 func canPreempt(next, active Action) bool {
 	if next == ActionDelete {
 		return active != ActionDelete
@@ -143,6 +149,7 @@ func canPreempt(next, active Action) bool {
 	}
 }
 
+// transitionTarget 给出动作对应的过渡 status 和最终 desired_state。
 func transitionTarget(action Action) (Status, DesiredState) {
 	switch action {
 	case ActionCreate:

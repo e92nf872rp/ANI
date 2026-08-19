@@ -12,6 +12,7 @@ import (
 	"github.com/kubercloud/ani/services/inference-service/internal/runtime"
 )
 
+// LogQuery 是产品日志查询。ClusterIP / runtime_ref 会在 redactLogMessage 里抹掉。
 type LogQuery struct {
 	Limit  int
 	Cursor string
@@ -39,6 +40,7 @@ type runtimeLogs interface {
 	Logs(context.Context, runtime.LogQuery) (runtime.LogPage, error)
 }
 
+// LogReader 经 Core GET /platform-workloads/{id}/logs 读容器日志。
 type LogReader struct {
 	store   serviceLookup
 	runtime runtimeLogs
@@ -48,6 +50,7 @@ func NewLogReader(store serviceLookup, runtime runtimeLogs) *LogReader {
 	return &LogReader{store: store, runtime: runtime}
 }
 
+// List 返回脱敏后的引擎日志。尚未绑定 runtime 时给空列表。
 func (r *LogReader) List(ctx context.Context, tenantID, serviceID uuid.UUID, query LogQuery) (LogPage, error) {
 	if tenantID == uuid.Nil || serviceID == uuid.Nil {
 		return LogPage{}, ErrInvalidInput
@@ -106,6 +109,7 @@ func normalizeLogQuery(query LogQuery) (int, string, error) {
 	}
 }
 
+// redactLogMessage 去掉 token、ClusterIP、runtime_ref，避免内部地址泄漏到 Console。
 func redactLogMessage(message string, resource domain.Service) string {
 	lower := strings.ToLower(message)
 	if strings.Contains(lower, "authorization") ||

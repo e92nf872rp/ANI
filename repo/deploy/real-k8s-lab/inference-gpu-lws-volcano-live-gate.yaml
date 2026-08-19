@@ -1,0 +1,65 @@
+profile: INFERENCE-SERVICE-GPU-LWS-VOLCANO-LIVE-GATE-C20
+status: contract
+description: >
+  Same InferenceService entry GPU device-plugin, cross-node LeaderWorkerSet,
+  and Volcano schedulerName live gate. Contract and local/logic are present
+  now. GPU/LWS runtime live must be re-run on a cluster with device-plugin,
+  LWS CRD/controller, and Volcano scheduler/PodGroup. This gate must not mark
+  GPU ready or runtime ready, and must not roll out in-cluster ani-gateway.
+
+required_tools:
+  - kubectl
+
+required_endpoints:
+  - ani_gateway_inference_services_api
+  - inference_control_grpc
+  - kubernetes_api
+
+required_env:
+  - ANI_GATEWAY_URL
+  - INFERENCE_SERVICE_GRPC_ADDR
+  - KUBECONFIG
+  - DATABASE_URL
+  - NATS_URL
+  - REDIS_URL
+  - INFERENCE_LAB_CATALOG
+
+live_checks:
+  - id: platform-workload-capabilities-probe
+    command: GET ${ANI_GATEWAY_URL}/api/v1/platform-workload-capabilities
+    pass_condition: reports_lws_volcano_and_accelerator_availability
+  - id: cpu-deployment-keeps-default-scheduler
+    command: render or observe CPU PlatformWorkload
+    pass_condition: no_schedulerName_volcano
+  - id: gpu-single-node-uses-volcano
+    command: render GPU Deployment
+    pass_condition: schedulerName_volcano
+  - id: gpu-create-fail-closed-without-plugin
+    command: POST /api/v1/svc/inference-services with accelerator
+    pass_condition: 422_when_no_available_spec_or_gpu_runtime_on_ready_cluster
+  - id: multi-node-lws-fail-closed-without-crd
+    command: POST /api/v1/svc/inference-services placement_mode=multi_node
+    pass_condition: 422_UNSUPPORTED_TOPOLOGY_when_lws_or_volcano_not_ready
+  - id: lws-renders-podgroup-and-leader-service
+    command: render leader_worker PlatformWorkload
+    pass_condition: LeaderWorkerSet_PodGroup_leader_only_ClusterIP
+  - id: gpu-lws-runtime-skipped-until-ready-cluster
+    command: kubectl get nodes/crds
+    pass_condition: skipped_until_device_plugin_lws_and_volcano_are_ready
+  - id: smoke-workload-untouched
+    command: kubectl get deploy/vllm-cpu -n ani-vllm-cpu-smoke
+    pass_condition: independent_smoke_still_ready
+
+evidence_policy:
+  forbidden_content:
+    - bearer tokens
+    - passwords
+    - raw server IPs
+    - full DSN or connection strings
+    - full internal endpoints beyond redacted service DNS
+
+readiness_levels:
+  contract:
+    meaning: Renderer, admission, capabilities probe, and PG integration are present; GPU/LWS runtime live is not claimed.
+  live:
+    meaning: Approved GPU cluster run created a single-node GPU Deployment with volcano schedulerName and a replicas=1 LeaderWorkerSet with one PodGroup; CPU path still has no volcano schedulerName.

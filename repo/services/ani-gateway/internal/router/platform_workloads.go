@@ -27,6 +27,7 @@ type platformWorkloadCreateRequest struct {
 	ImageRef       string                             `json:"image_ref"`
 	Command        []string                           `json:"command"`
 	Args           []string                           `json:"args"`
+	Env            []platformWorkloadEnvVarRequest    `json:"env"`
 	Replicas       int                                `json:"replicas"`
 	Resources      platformWorkloadResourcesRequest   `json:"resources"`
 	Topology       platformWorkloadTopologyRequest    `json:"topology"`
@@ -47,16 +48,17 @@ type platformWorkloadResourcesRequest struct {
 	} `json:"accelerator"`
 }
 
+type platformWorkloadRoleRequest struct {
+	Count     int                               `json:"count"`
+	Resources *platformWorkloadResourcesRequest `json:"resources"`
+}
+
 type platformWorkloadTopologyRequest struct {
-	Mode           string `json:"mode"`
-	ProfileID      string `json:"profile_id"`
-	ProfileVersion string `json:"profile_version"`
-	Leader         *struct {
-		Count int `json:"count"`
-	} `json:"leader"`
-	Workers *struct {
-		Count int `json:"count"`
-	} `json:"workers"`
+	Mode           string                       `json:"mode"`
+	ProfileID      string                       `json:"profile_id"`
+	ProfileVersion string                       `json:"profile_version"`
+	Leader         *platformWorkloadRoleRequest `json:"leader"`
+	Workers        *platformWorkloadRoleRequest `json:"workers"`
 }
 
 type platformWorkloadSchedulingRequest struct {
@@ -75,6 +77,11 @@ type platformWorkloadNetworkRequest struct {
 type platformWorkloadArtifactRequest struct {
 	ObjectRef string `json:"object_ref"`
 	MountPath string `json:"mount_path"`
+}
+
+type platformWorkloadEnvVarRequest struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 type platformWorkloadSecretRequest struct {
@@ -313,11 +320,14 @@ func platformWorkloadSpecFromRequest(req platformWorkloadCreateRequest) ports.Pl
 		ImageRef:       req.ImageRef,
 		Command:        req.Command,
 		Args:           req.Args,
+		Env:            platformWorkloadEnvFromRequest(req.Env),
 		Replicas:       req.Replicas,
 		Resources:      ports.PlatformWorkloadResources{CPU: req.Resources.CPU, Memory: req.Resources.Memory},
 		Topology: ports.PlatformWorkloadTopology{
 			Mode: req.Topology.Mode, ProfileID: req.Topology.ProfileID, ProfileVersion: req.Topology.ProfileVersion,
 			HasLeader: req.Topology.Leader != nil, HasWorkers: req.Topology.Workers != nil,
+			Leader:  platformWorkloadRoleFromRequest(req.Topology.Leader),
+			Workers: platformWorkloadRoleFromRequest(req.Topology.Workers),
 		},
 		Scheduling:  ports.PlatformWorkloadScheduling{QueueClass: req.Scheduling.QueueClass, Gang: req.Scheduling.Gang},
 		Network:     ports.PlatformWorkloadNetwork{Exposure: req.Network.Exposure},
@@ -338,6 +348,36 @@ func platformWorkloadSpecFromRequest(req platformWorkloadCreateRequest) ports.Pl
 		spec.SecretBindings = append(spec.SecretBindings, ports.PlatformWorkloadSecretBinding{SecretRef: binding.SecretRef, MountPath: binding.MountPath})
 	}
 	return spec
+}
+
+func platformWorkloadEnvFromRequest(items []platformWorkloadEnvVarRequest) []ports.PlatformWorkloadEnvVar {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]ports.PlatformWorkloadEnvVar, 0, len(items))
+	for _, item := range items {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			continue
+		}
+		out = append(out, ports.PlatformWorkloadEnvVar{Name: name, Value: item.Value})
+	}
+	return out
+}
+
+func platformWorkloadRoleFromRequest(role *platformWorkloadRoleRequest) ports.PlatformWorkloadRole {
+	if role == nil {
+		return ports.PlatformWorkloadRole{}
+	}
+	out := ports.PlatformWorkloadRole{Count: role.Count}
+	if role.Resources != nil {
+		out.Resources = ports.PlatformWorkloadResources{CPU: role.Resources.CPU, Memory: role.Resources.Memory}
+		if role.Resources.Accelerator != nil {
+			out.Resources.AcceleratorSpecID = role.Resources.Accelerator.SpecID
+			out.Resources.AcceleratorCount = role.Resources.Accelerator.Count
+		}
+	}
+	return out
 }
 
 func platformWorkloadJSON(record ports.PlatformWorkloadRecord) map[string]any {

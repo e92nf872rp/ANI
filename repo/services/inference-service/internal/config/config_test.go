@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadReadsServiceLocalSettings(t *testing.T) {
@@ -28,6 +29,23 @@ func TestLoadReadsServiceLocalSettings(t *testing.T) {
 	}
 }
 
+func TestLoadReadsWorkerLimits(t *testing.T) {
+	t.Setenv("INFERENCE_MAX_ATTEMPTS", "90")
+	t.Setenv("INFERENCE_DEPLOY_TIMEOUT_SECONDS", "20")
+	t.Setenv("INFERENCE_RETRY_DELAY_SECONDS", "1")
+
+	cfg := Load()
+	if cfg.MaxAttempts != 90 {
+		t.Fatalf("MaxAttempts = %d", cfg.MaxAttempts)
+	}
+	if cfg.DeployTimeout != 20*time.Second {
+		t.Fatalf("DeployTimeout = %s", cfg.DeployTimeout)
+	}
+	if cfg.RetryDelay != time.Second {
+		t.Fatalf("RetryDelay = %s", cfg.RetryDelay)
+	}
+}
+
 func TestLoadFallsBackSharedDatabaseAndDefaults(t *testing.T) {
 	t.Setenv("INFERENCE_DATABASE_URL", "")
 	t.Setenv("DATABASE_URL", "postgres://shared/db")
@@ -49,5 +67,17 @@ func TestLoadFallsBackSharedDatabaseAndDefaults(t *testing.T) {
 	}
 	if !strings.HasPrefix(cfg.WorkerOwner, "inference-service") {
 		t.Fatalf("WorkerOwner = %q", cfg.WorkerOwner)
+	}
+}
+
+func TestLoadIgnoresRemovedEngineImageEnv(t *testing.T) {
+	t.Setenv("INFERENCE_CPU_IMAGE_REF", "registry.example/vllm:latest")
+	t.Setenv("INFERENCE_GPU_IMAGE_REF", "registry.example/vllm-gpu:latest")
+	t.Setenv("INFERENCE_SGLANG_CPU_IMAGE_REF", "registry.example/sglang:latest")
+	t.Setenv("INFERENCE_SGLANG_GPU_IMAGE_REF", "registry.example/sglang-gpu:latest")
+
+	cfg := Load()
+	if cfg.ServiceName != "inference-service" {
+		t.Fatalf("ServiceName = %q", cfg.ServiceName)
 	}
 }

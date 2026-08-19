@@ -1,8 +1,9 @@
 # INFERENCE-PLATFORM-WORKLOAD-K8S-LIVE-C12
 
-> 日期：2026-08-15  
-> 状态：live passed（仅限隔离 CPU PlatformWorkload lab）  
-> 方案依据：`INFERENCE-PLATFORM-WORKLOAD-K8S-LIVE-GATE-C9`  
+> 日期：2026-08-15
+> 状态：live passed（仅限隔离 CPU PlatformWorkload lab）
+> C25 已删除 lab Gateway harness（`cmd/platform-workload-live`）及本批次 runner；evidence 仍由 `make validate-platform-workload-k8s-live-gate` 校验。
+> 方案依据：`INFERENCE-PLATFORM-WORKLOAD-K8S-LIVE-GATE-C9`
 > 前置：`INFERENCE-PLATFORM-WORKLOAD-K8S-C8`、`INFERENCE-PLATFORM-WORKLOAD-K8S-C9`、人工确认集群可访问
 
 ## 完成范围
@@ -40,4 +41,4 @@ git diff --check
 
 ## 下一批次边界
 
-要把产品入口接到真实集群，需要另开批次：部署含 C8/C9 的 Gateway，或继续用 lab 进程跑 `inference-services` 全链路。未明确要求前不滚动生产 Gateway。
+要把产品入口接到真实集群，需要另开批次：部署含 C8/C9 的 Gateway。lab 进程路径已在 C25 删除。未明确要求前不滚动生产 Gateway。

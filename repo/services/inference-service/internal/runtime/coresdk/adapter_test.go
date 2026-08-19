@@ -9,19 +9,21 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	anisdk "github.com/kubercloud/ani-sdks/core-go/anisdk"
 	"github.com/kubercloud/ani/services/inference-service/internal/domain"
 	"github.com/kubercloud/ani/services/inference-service/internal/runtime"
 )
 
 func TestCreateBodyUsesSamePathForCPUAndGPU(t *testing.T) {
 	serviceID := uuid.MustParse("05f6f46f-3db8-4551-8497-c46debb4be22")
+	single := runtime.TopologyPlan{Mode: "single_node", ProfileID: "container-single-node", ProfileVersion: "v1"}
 	cpu := createBody(runtime.EnsureRequest{
 		ServiceID: serviceID, ServedModelName: "tiny-cpu", IdempotencyKey: uuid.MustParse("1df72d71-9d49-46c4-a48a-52bb37b082ab"),
 		Spec: domain.Spec{Replicas: 1, CPU: "4", Memory: "16Gi", ExecutionProfile: domain.ExecutionProfile{
 			ImageRef:    "registry.ani.internal/platform/vllm-openai-cpu@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 			ArtifactRef: "object://models/tiny",
 		}},
-	})
+	}, single)
 	gpu := createBody(runtime.EnsureRequest{
 		ServiceID: serviceID, ServedModelName: "tiny-gpu", IdempotencyKey: uuid.MustParse("2df72d71-9d49-46c4-a48a-52bb37b082ab"),
 		Spec: domain.Spec{Replicas: 1, CPU: "8", Memory: "32Gi", Accelerator: &domain.Accelerator{SpecID: "gpu-a100", CountPerReplica: 1},
@@ -29,7 +31,7 @@ func TestCreateBodyUsesSamePathForCPUAndGPU(t *testing.T) {
 				ImageRef:    "registry.ani.internal/platform/vllm-openai-gpu@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
 				ArtifactRef: "object://models/tiny",
 			}},
-	})
+	}, single)
 	if cpu["workload_class"] != gpu["workload_class"] || cpu["topology"].(map[string]any)["mode"] != "single_node" {
 		t.Fatalf("cpu/gpu create path diverged: cpu=%#v gpu=%#v", cpu, gpu)
 	}
@@ -45,9 +47,44 @@ func TestCreateBodyUsesSamePathForCPUAndGPU(t *testing.T) {
 	if !containsArg(cpuArgs, "--dtype") || containsArg(gpuArgs, "--dtype") {
 		t.Fatalf("dtype args cpu=%v gpu=%v", cpuArgs, gpuArgs)
 	}
+	if !containsArg(gpuArgs, "--enforce-eager") {
+		t.Fatalf("GPU args missing --enforce-eager: %v", gpuArgs)
+	}
 	cpuCommand, _ := cpu["command"].([]string)
 	if len(cpuCommand) != 1 || cpuCommand[0] != "env" {
 		t.Fatalf("CPU command = %#v", cpu["command"])
+	}
+}
+
+func TestCreateBodyUsesFrozenTenantCommandAndEnv(t *testing.T) {
+	body := createBody(runtime.EnsureRequest{
+		ServiceID:       uuid.MustParse("05f6f46f-3db8-4551-8497-c46debb4be22"),
+		ServedModelName: "tiny-gpu",
+		IdempotencyKey:  uuid.MustParse("1df72d71-9d49-46c4-a48a-52bb37b082ab"),
+		Spec: domain.Spec{
+			Replicas: 1, CPU: "8", Memory: "32Gi",
+			Accelerator: &domain.Accelerator{SpecID: "gpu-nvidia-geforce-rtx-4090-full", CountPerReplica: 1},
+			Engine: &domain.Engine{
+				Env:     []domain.EngineEnvVar{{Name: "VLLM_LOGGING_LEVEL", Value: "DEBUG"}},
+				Command: []string{"python3", "-m", "vllm.entrypoints.openai.api_server", "--model", "/models/qwen"},
+			},
+			ExecutionProfile: domain.ExecutionProfile{
+				ImageRef:    "registry.ani.internal/platform/vllm-openai-gpu@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+				ArtifactRef: "pvc://vllm-model#/models/qwen",
+			},
+		},
+	}, runtime.TopologyPlan{Mode: "single_node", ProfileID: "container-single-node", ProfileVersion: "v1"})
+	command, _ := body["command"].([]string)
+	if strings.Join(command, " ") != "python3 -m vllm.entrypoints.openai.api_server --model /models/qwen" {
+		t.Fatalf("command = %#v", body["command"])
+	}
+	args, _ := body["args"].([]string)
+	if len(args) != 0 {
+		t.Fatalf("args = %#v, want empty", args)
+	}
+	env, _ := body["env"].([]map[string]string)
+	if len(env) != 1 || env[0]["name"] != "VLLM_LOGGING_LEVEL" || env[0]["value"] != "DEBUG" {
+		t.Fatalf("env = %#v", body["env"])
 	}
 }
 
@@ -60,7 +97,7 @@ func TestCreateBodyStripsArtifactPathFragment(t *testing.T) {
 			ImageRef:    "registry.ani.internal/platform/vllm-openai-cpu@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 			ArtifactRef: "pvc://vllm-model#/models/qwen",
 		}},
-	})
+	}, runtime.TopologyPlan{Mode: "single_node", ProfileID: "container-single-node", ProfileVersion: "v1"})
 	artifacts, _ := body["artifacts"].([]map[string]any)
 	if len(artifacts) != 1 || artifacts[0]["object_ref"] != "pvc://vllm-model" || artifacts[0]["mount_path"] != "/models" {
 		t.Fatalf("artifacts = %#v", body["artifacts"])
@@ -118,6 +155,41 @@ func containsArg(args []string, key string) bool {
 	return false
 }
 
+func TestCreateBodyLeaderWorkerUsesInternalRoles(t *testing.T) {
+	body := createBody(runtime.EnsureRequest{
+		ServiceID:       uuid.MustParse("05f6f46f-3db8-4551-8497-c46debb4be22"),
+		ServedModelName: "tiny-gpu",
+		IdempotencyKey:  uuid.MustParse("2df72d71-9d49-46c4-a48a-52bb37b082ab"),
+		Spec: domain.Spec{Replicas: 1, CPU: "8", Memory: "32Gi", PlacementMode: "multi_node",
+			Accelerator: &domain.Accelerator{SpecID: "gpu-a100-full", CountPerReplica: 2},
+			ExecutionProfile: domain.ExecutionProfile{
+				ImageRef: "registry.ani.internal/platform/vllm-openai-gpu@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+			}},
+	}, runtime.TopologyPlan{
+		Mode: "leader_worker", ProfileID: "container-leader-worker", ProfileVersion: "v1",
+		Gang: true, LeaderCount: 1, WorkerCount: 1, LeaderGPUs: 1, WorkerGPUs: 1,
+	})
+	topology, _ := body["topology"].(map[string]any)
+	if topology["mode"] != "leader_worker" || body["scheduling"].(map[string]any)["gang"] != true {
+		t.Fatalf("lws body = %#v", body)
+	}
+	if _, ok := topology["leader"]; !ok || topology["workers"] == nil {
+		t.Fatalf("missing roles: %#v", topology)
+	}
+	command, _ := body["command"].([]string)
+	args, _ := body["args"].([]string)
+	joined := strings.Join(args, " ")
+	if len(command) != 2 || command[0] != "sh" || !strings.Contains(joined, "ray start --head") {
+		t.Fatalf("leader launch = %#v %#v", command, args)
+	}
+	if !strings.Contains(joined, "--num-gpus=1") || !strings.Contains(joined, "RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES=1") || !strings.Contains(joined, "sitecustomize.py") {
+		t.Fatalf("leader launch missing Ray GPU env: %q", joined)
+	}
+	if !strings.Contains(joined, "VLLM_USE_RAY_COMPILED_DAG=0") {
+		t.Fatalf("leader launch missing compiled DAG disable: %q", joined)
+	}
+}
+
 func TestAdmitRejectsUnadvertisedAccelerator(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/platform-workload-capabilities" {
@@ -161,5 +233,72 @@ func TestLogPageFromPayloadProjectsPublicFields(t *testing.T) {
 	}
 	if page.Items[0] != want {
 		t.Fatalf("item = %+v", page.Items[0])
+	}
+}
+
+func TestMapCoreErrorClassifiesPermanentCodes(t *testing.T) {
+	cases := []struct {
+		code string
+		want error
+	}{
+		{"PRECONDITION_FAILED", runtime.ErrRuntimeUnsupported},
+		{"UNSUPPORTED_TOPOLOGY", runtime.ErrUnsupportedTopology},
+		{"INSUFFICIENT_CAPACITY", runtime.ErrInsufficientCapacity},
+		{"ACCELERATOR_SPEC_UNAVAILABLE", runtime.ErrRuntimeUnsupported},
+		{"IMAGE_UNAVAILABLE", runtime.ErrImageUnavailable},
+		{"IMAGE_NOT_FOUND", runtime.ErrImageUnavailable},
+		{"ENGINE_PROFILE_UNAPPROVED", runtime.ErrEngineProfileUnapproved},
+		{"RESERVED_FIELD_CONFLICT", runtime.ErrReservedFieldConflict},
+		{"NOT_FOUND", runtime.ErrRuntimeNotFound},
+	}
+	for _, tc := range cases {
+		if err := mapCoreError(anisdk.APIError{Code: tc.code}); !errors.Is(err, tc.want) {
+			t.Fatalf("mapCoreError(%s) = %v, want %v", tc.code, err, tc.want)
+		}
+	}
+}
+
+func TestEnsureRetriesIdempotencyInProgress(t *testing.T) {
+	workloadID := "80000000-0000-0000-0000-000000000008"
+	posts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"id":"` + workloadID + `","state":"provisioning","ready_replicas":0,"internal_endpoint":""}`))
+			return
+		}
+		if r.URL.Path != "/api/v1/platform-workloads" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		if r.Header.Get("Idempotency-Key") == "" {
+			t.Fatal("missing Idempotency-Key header")
+		}
+		posts++
+		if posts == 1 {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"code":"IDEMPOTENCY_IN_PROGRESS","message":"idempotent request is already in progress"}`))
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"resource_id":"` + workloadID + `","state":"provisioning"}`))
+	}))
+	t.Cleanup(server.Close)
+	observed, err := New(server.URL, "dev-token").Ensure(t.Context(), runtime.EnsureRequest{
+		TenantID:        uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+		ServiceID:       uuid.MustParse("05f6f46f-3db8-4551-8497-c46debb4be22"),
+		IdempotencyKey:  uuid.MustParse("1df72d71-9d49-46c4-a48a-52bb37b082ab"),
+		ServedModelName: "tiny-cpu",
+		Spec: domain.Spec{Replicas: 1, CPU: "4", Memory: "16Gi", ExecutionProfile: domain.ExecutionProfile{
+			ImageRef: "registry.ani.internal/platform/vllm-openai-cpu@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Ensure() error = %v", err)
+	}
+	if posts != 2 {
+		t.Fatalf("POST count = %d, want 2", posts)
+	}
+	if observed.RuntimeRef.String() != workloadID {
+		t.Fatalf("runtime ref = %s", observed.RuntimeRef)
 	}
 }

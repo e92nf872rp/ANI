@@ -31,6 +31,8 @@ const (
 // InferenceServiceRPCClient is the client API for InferenceServiceRPC service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// Deprecated: Do not use.
 type InferenceServiceRPCClient interface {
 	// CreateInferenceService starts an asynchronous deployment.
 	// Returns the initial status record and an AsyncTaskRef for polling.
@@ -53,6 +55,7 @@ type inferenceServiceRPCClient struct {
 	cc grpc.ClientConnInterface
 }
 
+// Deprecated: Do not use.
 func NewInferenceServiceRPCClient(cc grpc.ClientConnInterface) InferenceServiceRPCClient {
 	return &inferenceServiceRPCClient{cc}
 }
@@ -114,6 +117,8 @@ func (c *inferenceServiceRPCClient) UpdateStatus(ctx context.Context, in *Update
 // InferenceServiceRPCServer is the server API for InferenceServiceRPC service.
 // All implementations must embed UnimplementedInferenceServiceRPCServer
 // for forward compatibility
+//
+// Deprecated: Do not use.
 type InferenceServiceRPCServer interface {
 	// CreateInferenceService starts an asynchronous deployment.
 	// Returns the initial status record and an AsyncTaskRef for polling.
@@ -164,6 +169,7 @@ type UnsafeInferenceServiceRPCServer interface {
 	mustEmbedUnimplementedInferenceServiceRPCServer()
 }
 
+// Deprecated: Do not use.
 func RegisterInferenceServiceRPCServer(s grpc.ServiceRegistrar, srv InferenceServiceRPCServer) {
 	s.RegisterService(&InferenceServiceRPC_ServiceDesc, srv)
 }

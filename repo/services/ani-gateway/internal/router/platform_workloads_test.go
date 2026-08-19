@@ -97,6 +97,29 @@ func TestPlatformWorkloadHTTPGPUCreateUsesSameEntry(t *testing.T) {
 	}
 }
 
+func TestPlatformWorkloadHTTPLWSRejectedOnLocalProfile(t *testing.T) {
+	h := setupPlatformWorkloadTestServer(t)
+	body := `{
+		"idempotency_key":"6df72d71-9d49-46c4-a48a-52bb37b082ab",
+		"name":"inference-lws-example",
+		"workload_class":"inference",
+		"runtime_kind":"container",
+		"image_ref":"registry.ani.internal/platform/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"command":["python3","-m","vllm.entrypoints.openai.api_server"],
+		"replicas":1,
+		"resources":{"cpu":"8","memory":"32Gi","accelerator":{"spec_id":"gpu-a100-full","count":2}},
+		"topology":{"mode":"leader_worker","profile_id":"container-leader-worker","profile_version":"v1","leader":{"count":1,"resources":{"cpu":"8","memory":"32Gi","accelerator":{"spec_id":"gpu-a100-full","count":1}}},"workers":{"count":1,"resources":{"cpu":"8","memory":"32Gi","accelerator":{"spec_id":"gpu-a100-full","count":1}}}},
+		"scheduling":{"queue_class":"inference","gang":true},
+		"network":{"exposure":"cluster_internal","ports":[{"name":"http","port":8000}]},
+		"health_check":{"protocol":"http","path":"/health","port_name":"http"},
+		"metadata":{"owner_ref":"05f6f46f-3db8-4551-8497-c46debb4be22"}
+	}`
+	created := performPlatformWorkload(h, http.MethodPost, "/api/v1/platform-workloads", body, "11111111-1111-1111-1111-111111111111", true)
+	if created.StatusCode() != http.StatusUnprocessableEntity {
+		t.Fatalf("lws create status = %d body=%s", created.StatusCode(), created.Body())
+	}
+}
+
 func setupPlatformWorkloadTestServer(t *testing.T) *server.Hertz {
 	t.Helper()
 	h := server.Default()

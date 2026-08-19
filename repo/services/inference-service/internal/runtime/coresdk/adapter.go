@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -20,11 +22,12 @@ import (
 	"github.com/kubercloud/ani/services/inference-service/internal/runtime"
 )
 
+// Runtime 用 Core SDK 调 /platform-workloads。Services 禁止 import Core 内部包。
 type Runtime struct {
 	client      anisdk.Client
 	httpClient  *http.Client
 	staticToken string
-	minter      *Minter
+	minter      *Minter // 按租户 mint JWT；没有则用 staticToken
 	tenants     map[uuid.UUID]uuid.UUID
 }
 
@@ -41,6 +44,7 @@ func (r *Runtime) WithMinter(minter *Minter) *Runtime {
 	return r
 }
 
+// Ensure 无 RuntimeRef 则 POST /platform-workloads；已有则 PATCH replicas。
 func (r *Runtime) Ensure(ctx context.Context, request runtime.EnsureRequest) (runtime.Observation, error) {
 	if request.RuntimeRef != uuid.Nil {
 		_, err := r.request(ctx, request.TenantID, "PATCH", "/platform-workloads/"+request.RuntimeRef.String(), anisdk.RequestOptions{
@@ -51,7 +55,11 @@ func (r *Runtime) Ensure(ctx context.Context, request runtime.EnsureRequest) (ru
 		}
 		return r.Observe(ctx, runtime.RuntimeIdentity{TenantID: request.TenantID, ServiceID: request.ServiceID, RuntimeRef: request.RuntimeRef})
 	}
-	body := createBody(request)
+	plan, err := r.plan(ctx, request.TenantID, request.Spec)
+	if err != nil {
+		return runtime.Observation{}, err
+	}
+	body := createBody(request, plan)
 	payload, err := r.request(ctx, request.TenantID, "POST", "/platform-workloads", anisdk.RequestOptions{Body: body})
 	if err != nil {
 		return runtime.Observation{}, err
@@ -68,6 +76,7 @@ func (r *Runtime) Ensure(ctx context.Context, request runtime.EnsureRequest) (ru
 	return observed, nil
 }
 
+// Observe 只读 GET platform-workload，不创建。
 func (r *Runtime) Observe(ctx context.Context, identity runtime.RuntimeIdentity) (runtime.Observation, error) {
 	if identity.RuntimeRef == uuid.Nil {
 		return runtime.Observation{}, runtime.ErrRuntimeNotFound
@@ -80,6 +89,7 @@ func (r *Runtime) Observe(ctx context.Context, identity runtime.RuntimeIdentity)
 	return observationFromWorkload(payload)
 }
 
+// ApplyLifecycle 调 Core /lifecycle：start/stop/restart。
 func (r *Runtime) ApplyLifecycle(ctx context.Context, request runtime.LifecycleRequest) (runtime.Observation, error) {
 	if request.RuntimeRef == uuid.Nil {
 		return runtime.Observation{}, runtime.ErrRuntimeNotFound
@@ -100,6 +110,7 @@ func (r *Runtime) ApplyLifecycle(ctx context.Context, request runtime.LifecycleR
 	return r.Observe(ctx, runtime.RuntimeIdentity{TenantID: request.TenantID, ServiceID: request.ServiceID, RuntimeRef: request.RuntimeRef})
 }
 
+// Delete 调 Core DELETE /platform-workloads/{id}。
 func (r *Runtime) Delete(ctx context.Context, request runtime.DeleteRequest) error {
 	if request.RuntimeRef == uuid.Nil {
 		return runtime.ErrRuntimeNotFound
@@ -110,6 +121,7 @@ func (r *Runtime) Delete(ctx context.Context, request runtime.DeleteRequest) err
 	return err
 }
 
+// Health GET 引擎 /health。
 func (r *Runtime) Health(ctx context.Context, runtimeRef uuid.UUID) error {
 	endpoint, err := r.runtimeEndpoint(ctx, runtimeRef)
 	if err != nil {
@@ -118,6 +130,7 @@ func (r *Runtime) Health(ctx context.Context, runtimeRef uuid.UUID) error {
 	return probeHealth(ctx, r.http(), endpoint)
 }
 
+// Smoke 对 ClusterIP 发有界 Chat Completions 探活。
 func (r *Runtime) Smoke(ctx context.Context, runtimeRef uuid.UUID, servedModelName string) error {
 	endpoint, err := r.runtimeEndpoint(ctx, runtimeRef)
 	if err != nil {
@@ -144,32 +157,27 @@ func (r *Runtime) http() *http.Client {
 	if client := kubeHTTPClient(); client != nil {
 		return client
 	}
-	return &http.Client{Timeout: 15 * time.Second}
+	return &http.Client{Timeout: 120 * time.Second}
 }
 
+// Admit 写库前问 Core 容量/拓扑。CPU 单节点直接通过。
 func (r *Runtime) Admit(ctx context.Context, tenantID uuid.UUID, spec domain.Spec) error {
-	if spec.Accelerator == nil {
+	if spec.Accelerator == nil && spec.PlacementMode != "multi_node" {
 		return nil
+	}
+	_, err := r.plan(ctx, tenantID, spec)
+	return err
+}
+
+func (r *Runtime) plan(ctx context.Context, tenantID uuid.UUID, spec domain.Spec) (runtime.TopologyPlan, error) {
+	if spec.Accelerator == nil && spec.PlacementMode != "multi_node" {
+		return runtime.PlanTopology(spec, runtime.CapabilityView{})
 	}
 	payload, err := r.request(ctx, tenantID, "GET", "/platform-workload-capabilities", anisdk.RequestOptions{})
 	if err != nil {
-		return err
+		return runtime.TopologyPlan{}, err
 	}
-	rawSpecs, _ := payload["accelerator_specs"].([]any)
-	for _, raw := range rawSpecs {
-		item, _ := raw.(map[string]any)
-		if item == nil {
-			continue
-		}
-		if fmt.Sprint(item["spec_id"]) != spec.Accelerator.SpecID {
-			continue
-		}
-		available, _ := item["available"].(bool)
-		if available && intFromAny(item["max_single_node_count"]) >= spec.Accelerator.CountPerReplica {
-			return nil
-		}
-	}
-	return runtime.ErrRuntimeUnsupported
+	return runtime.PlanTopology(spec, capabilityViewFromPayload(payload))
 }
 
 func (r *Runtime) Logs(ctx context.Context, query runtime.LogQuery) (runtime.LogPage, error) {
@@ -193,6 +201,7 @@ func (r *Runtime) Logs(ctx context.Context, query runtime.LogQuery) (runtime.Log
 	return logPageFromPayload(payload), nil
 }
 
+// request 给 Core OpenAPI 带上租户 JWT。minter 优先于 staticToken。
 func (r *Runtime) request(ctx context.Context, tenantID uuid.UUID, method, path string, options anisdk.RequestOptions) (map[string]any, error) {
 	if options.Headers == nil {
 		options.Headers = map[string]string{}
@@ -217,19 +226,50 @@ func (r *Runtime) request(ctx context.Context, tenantID uuid.UUID, method, path 
 			options.Headers["Authorization"] = "Bearer " + token
 		}
 	}
-	decoded, err := r.client.Request(method, "/api/v1"+path, options)
+	if key, _ := options.Body["idempotency_key"].(string); strings.TrimSpace(key) != "" && strings.TrimSpace(options.Headers["Idempotency-Key"]) == "" {
+		options.Headers["Idempotency-Key"] = strings.TrimSpace(key)
+	}
+	var decoded any
+	var err error
+	for attempt := 0; attempt < idempotencyInProgressAttempts; attempt++ {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		decoded, err = r.client.Request(method, "/api/v1"+path, options)
+		if err == nil || !isIdempotencyInProgress(err) {
+			break
+		}
+		timer := time.NewTimer(idempotencyInProgressDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
 	if err != nil {
+		slog.Error("core sdk request failed", "method", method, "path", path, "err", err)
 		return nil, mapCoreError(err)
 	}
 	payload, _ := decoded.(map[string]any)
 	if payload == nil {
 		return map[string]any{}, nil
 	}
-	_ = ctx
 	return payload, nil
 }
 
-func createBody(request runtime.EnsureRequest) map[string]any {
+const (
+	idempotencyInProgressAttempts = 40
+	idempotencyInProgressDelay    = 250 * time.Millisecond
+)
+
+func isIdempotencyInProgress(err error) bool {
+	var apiErr anisdk.APIError
+	return errors.As(err, &apiErr) && apiErr.Code == "IDEMPOTENCY_IN_PROGRESS"
+}
+
+// createBody 组装 Core POST /platform-workloads。Core 只收 image_ref + command/args，不知道 vLLM。
+func createBody(request runtime.EnsureRequest, plan runtime.TopologyPlan) map[string]any {
 	image := request.Spec.ExecutionProfile.ImageRef
 	if image == "" {
 		image = "registry.ani.internal/platform/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -241,13 +281,30 @@ func createBody(request runtime.EnsureRequest) map[string]any {
 	if memory == "" {
 		memory = "16Gi"
 	}
+	// Engine choice is already frozen on ExecutionProfile.Runtime. Core only
+	// stores the resulting image_ref / command / args / pvc artifact.
 	command, args := engine.Launch(request.Spec, request.ServedModelName)
+	if plan.Mode == "leader_worker" {
+		command, args = engine.LaunchLeader(request.Spec, request.ServedModelName)
+	}
 	resources := map[string]any{"cpu": cpu, "memory": memory}
 	if request.Spec.Accelerator != nil {
 		resources["accelerator"] = map[string]any{
 			"spec_id": request.Spec.Accelerator.SpecID,
 			"count":   request.Spec.Accelerator.CountPerReplica,
 		}
+	}
+	topology := map[string]any{"mode": plan.Mode, "profile_id": plan.ProfileID, "profile_version": plan.ProfileVersion}
+	if plan.Mode == "leader_worker" {
+		role := func(count, gpus int) map[string]any {
+			item := map[string]any{"cpu": cpu, "memory": memory}
+			if request.Spec.Accelerator != nil {
+				item["accelerator"] = map[string]any{"spec_id": request.Spec.Accelerator.SpecID, "count": gpus}
+			}
+			return map[string]any{"count": count, "resources": item}
+		}
+		topology["leader"] = role(plan.LeaderCount, plan.LeaderGPUs)
+		topology["workers"] = role(plan.WorkerCount, plan.WorkerGPUs)
 	}
 	body := map[string]any{
 		"idempotency_key": request.IdempotencyKey.String(),
@@ -259,8 +316,8 @@ func createBody(request runtime.EnsureRequest) map[string]any {
 		"args":            args,
 		"replicas":        request.Spec.Replicas,
 		"resources":       resources,
-		"topology":        map[string]any{"mode": "single_node", "profile_id": "container-single-node", "profile_version": "v1"},
-		"scheduling":      map[string]any{"queue_class": "inference", "gang": false},
+		"topology":        topology,
+		"scheduling":      map[string]any{"queue_class": "inference", "gang": plan.Gang},
 		"network":         map[string]any{"exposure": "cluster_internal", "ports": []map[string]any{{"name": "http", "port": 8000}}},
 		"health_check":    map[string]any{"protocol": "http", "path": "/health", "port_name": "http"},
 		"metadata": map[string]any{
@@ -268,6 +325,15 @@ func createBody(request runtime.EnsureRequest) map[string]any {
 			"labels":    map[string]string{"services.ani.io/inference-service-id": request.ServiceID.String()},
 		},
 	}
+	if request.Spec.Engine != nil && len(request.Spec.Engine.Env) > 0 {
+		env := make([]map[string]string, 0, len(request.Spec.Engine.Env))
+		for _, item := range request.Spec.Engine.Env {
+			env = append(env, map[string]string{"name": item.Name, "value": item.Value})
+		}
+		body["env"] = env
+	}
+	// Local models are pvc://<claim>. Core mounts that claim at /models; the
+	// engine --model path is the #fragment from ArtifactRef, not a subPath.
 	if objectRef, _ := engine.Artifact(request.Spec.ExecutionProfile.ArtifactRef); objectRef != "" {
 		body["artifacts"] = []map[string]any{{"object_ref": objectRef, "mount_path": "/models"}}
 	}
@@ -377,8 +443,21 @@ func mapCoreError(err error) error {
 			return runtime.ErrRuntimeNotFound
 		case "CONFLICT":
 			return runtime.ErrRuntimeIntentConflict
-		case "PRECONDITION_FAILED":
+		case "UNSUPPORTED_TOPOLOGY":
+			return runtime.ErrUnsupportedTopology
+		case "INSUFFICIENT_CAPACITY":
+			return runtime.ErrInsufficientCapacity
+		case "PRECONDITION_FAILED", "ACCELERATOR_SPEC_UNAVAILABLE":
+			if strings.Contains(strings.ToLower(apiErr.Message), "leader_worker") || strings.Contains(strings.ToLower(apiErr.Message), "topology") {
+				return runtime.ErrUnsupportedTopology
+			}
 			return runtime.ErrRuntimeUnsupported
+		case "IMAGE_UNAVAILABLE", "IMAGE_NOT_FOUND", "IMAGE_UNAUTHORIZED":
+			return runtime.ErrImageUnavailable
+		case "ENGINE_PROFILE_UNAPPROVED":
+			return runtime.ErrEngineProfileUnapproved
+		case "RESERVED_FIELD_CONFLICT":
+			return runtime.ErrReservedFieldConflict
 		}
 	}
 	return err
@@ -423,6 +502,38 @@ func logPageFromPayload(payload map[string]any) runtime.LogPage {
 func stringFromAny(value any) string {
 	text, _ := value.(string)
 	return text
+}
+
+func capabilityViewFromPayload(payload map[string]any) runtime.CapabilityView {
+	view := runtime.CapabilityView{
+		LeaderWorkerSetReady: boolFromAny(payload["leader_worker_set_ready"]),
+		GangSchedulingReady:  boolFromAny(payload["gang_scheduling_ready"]),
+	}
+	for _, raw := range anySlice(payload["supported_topology_modes"]) {
+		view.SupportedTopologyModes = append(view.SupportedTopologyModes, fmt.Sprint(raw))
+	}
+	for _, raw := range anySlice(payload["accelerator_specs"]) {
+		item, _ := raw.(map[string]any)
+		if item == nil {
+			continue
+		}
+		view.AcceleratorSpecs = append(view.AcceleratorSpecs, runtime.AcceleratorView{
+			SpecID:             fmt.Sprint(item["spec_id"]),
+			Available:          boolFromAny(item["available"]),
+			MaxSingleNodeCount: intFromAny(item["max_single_node_count"]),
+		})
+	}
+	return view
+}
+
+func anySlice(value any) []any {
+	items, _ := value.([]any)
+	return items
+}
+
+func boolFromAny(value any) bool {
+	flag, _ := value.(bool)
+	return flag
 }
 
 func intFromAny(value any) int {

@@ -1,8 +1,9 @@
 # INFERENCE-SERVICE-CPU-VLLM-OPS-LIVE-C15
 
-> 日期：2026-08-15  
-> 状态：live passed（lab Gateway 进程，未 rollout in-cluster `ani-gateway`）  
-> 方案依据：`services/docs/console-modules/inference/inference-service-design.md` 阶段 D  
+> 日期：2026-08-15
+> 状态：live passed（lab Gateway 进程，未 rollout in-cluster `ani-gateway`）
+> C25 已删除 lab Gateway harness；本记录 evidence 仍由 `make validate-inference-cpu-vllm-ops-live-gate` 校验。
+> 方案依据：`services/docs/console-modules/inference/inference-service-design.md` 阶段 D
 > 前置：`INFERENCE-SERVICE-CPU-VLLM-LIVE-C14`、`INFERENCE-SERVICE-LOGS-C11`
 
 ## 完成范围

@@ -1,8 +1,9 @@
 # INFERENCE-SERVICE-GPU-ADMISSION-LIVE-C16
 
-> 日期：2026-08-15  
-> 状态：live passed（lab Gateway 进程，未 rollout in-cluster `ani-gateway`）  
-> 方案依据：`services/docs/console-modules/inference/inference-service-design.md` 阶段 E 准入  
+> 日期：2026-08-15
+> 状态：live passed（lab Gateway 进程，未 rollout in-cluster `ani-gateway`）
+> C25 已删除 lab Gateway harness 及本批次 runner；evidence 仍由 `make validate-inference-gpu-admission-live-gate` 校验。
+> 方案依据：`services/docs/console-modules/inference/inference-service-design.md` 阶段 E 准入
 > 前置：`INFERENCE-SERVICE-CPU-VLLM-LIVE-C14`、`INFERENCE-SERVICE-CPU-VLLM-OPS-LIVE-C15`
 
 ## 完成范围

@@ -15,20 +15,18 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-var digestPinnedImage = regexp.MustCompile(`^.+@sha256:[a-f0-9]{64}$`)
-
-const (
-	defaultCPUImage = "registry.ani.internal/platform/vllm-openai-cpu@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	defaultGPUImage = "registry.ani.internal/platform/vllm-openai-gpu@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-)
+var pvcClaimPattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
 
 type modelVersionAPI interface {
 	GetModelVersion(context.Context, *modelv1.GetModelVersionRequest, ...grpc.CallOption) (*modelv1.GetModelVersionResponse, error)
 }
 
+// Profiles 是引擎底盘（vLLM / SGLang）。运行镜像不在这里配置。
 type Profiles struct {
-	CPU catalog.EngineProfile
-	GPU catalog.EngineProfile
+	CPU       catalog.EngineProfile
+	GPU       catalog.EngineProfile
+	SGLangCPU catalog.EngineProfile
+	SGLangGPU catalog.EngineProfile
 }
 
 type Catalog struct {
@@ -38,20 +36,11 @@ type Catalog struct {
 
 func DefaultProfiles() Profiles {
 	return Profiles{
-		CPU: catalog.EngineProfile{ID: "vllm-chat-cpu", Version: "v1", Runtime: "vllm", ImageRef: defaultCPUImage},
-		GPU: catalog.EngineProfile{ID: "vllm-chat-gpu", Version: "v1", Runtime: "vllm", ImageRef: defaultGPUImage},
+		CPU:       catalog.EngineProfile{ID: "vllm-chat-cpu", Version: "v1", Runtime: "vllm"},
+		GPU:       catalog.EngineProfile{ID: "vllm-chat-gpu", Version: "v1", Runtime: "vllm"},
+		SGLangCPU: catalog.EngineProfile{ID: "sglang-chat-cpu", Version: "v1", Runtime: "sglang"},
+		SGLangGPU: catalog.EngineProfile{ID: "sglang-chat-gpu", Version: "v1", Runtime: "sglang"},
 	}
-}
-
-func ProfilesFromImages(cpuImage, gpuImage string) Profiles {
-	profiles := DefaultProfiles()
-	if image := strings.TrimSpace(cpuImage); image != "" {
-		profiles.CPU.ImageRef = image
-	}
-	if image := strings.TrimSpace(gpuImage); image != "" {
-		profiles.GPU.ImageRef = image
-	}
-	return profiles
 }
 
 func New(client modelVersionAPI, profiles Profiles) (*Catalog, error) {
@@ -64,21 +53,20 @@ func New(client modelVersionAPI, profiles Profiles) (*Catalog, error) {
 	return &Catalog{client: client, profiles: profiles}, nil
 }
 
-func Dial(addr string, profiles Profiles) (*Catalog, error) {
+func Dial(addr string) (*Catalog, error) {
 	addr = strings.TrimSpace(addr)
 	if addr == "" {
 		return nil, fmt.Errorf("model-service gRPC address is empty")
-	}
-	if err := profiles.validate(); err != nil {
-		return nil, err
 	}
 	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, fmt.Errorf("dial model-service %s: %w", addr, err)
 	}
-	return New(modelv1.NewModelServiceClient(conn), profiles)
+	return New(modelv1.NewModelServiceClient(conn), DefaultProfiles())
 }
 
+// Resolve 按租户取不可变模型版本，冻结可部署的 vLLM/SGLang profile。
+// 当前只认 pvc://claim#/path；HF/MinIO 还没有兼容 profile。
 func (c *Catalog) Resolve(ctx context.Context, tenantID, versionID uuid.UUID) (catalog.ModelVersion, error) {
 	if tenantID == uuid.Nil || versionID == uuid.Nil {
 		return catalog.ModelVersion{}, catalog.ErrModelNotFound
@@ -120,14 +108,21 @@ func (c *Catalog) Resolve(ctx context.Context, tenantID, versionID uuid.UUID) (c
 		ArtifactRef:    strings.TrimSpace(version.GetStoragePath()),
 		ArtifactDigest: normalizeDigest(version.GetChecksumSha256()),
 	}
+	if !localPVCArtifact(out.ArtifactRef) {
+		return catalog.ModelVersion{}, catalog.ErrNoCompatibleProfile
+	}
 	if version.GetIsEncrypted() {
 		out.SecretRef = "model-encrypt/" + parsedVersionID.String()
 	}
+	cpuProfile, gpuProfile := c.profiles.CPU, c.profiles.GPU
+	if prefersSGLang(model.GetCapabilities()) {
+		cpuProfile, gpuProfile = c.profiles.SGLangCPU, c.profiles.SGLangGPU
+	}
 	if cpuCompatible(out.Format) {
-		out.CPUProfile = cloneProfile(c.profiles.CPU)
+		out.CPUProfile = cloneProfile(cpuProfile)
 	}
 	if gpuCompatible(out.Format) {
-		out.GPUProfile = cloneProfile(c.profiles.GPU)
+		out.GPUProfile = cloneProfile(gpuProfile)
 	}
 	if out.CPUProfile == nil && out.GPUProfile == nil {
 		return catalog.ModelVersion{}, catalog.ErrNoCompatibleProfile
@@ -136,10 +131,20 @@ func (c *Catalog) Resolve(ctx context.Context, tenantID, versionID uuid.UUID) (c
 }
 
 func (p Profiles) validate() error {
-	if err := validateProfile("cpu", p.CPU); err != nil {
-		return err
+	for _, item := range []struct {
+		kind    string
+		profile catalog.EngineProfile
+	}{
+		{"cpu", p.CPU},
+		{"gpu", p.GPU},
+		{"sglang-cpu", p.SGLangCPU},
+		{"sglang-gpu", p.SGLangGPU},
+	} {
+		if err := validateProfile(item.kind, item.profile); err != nil {
+			return err
+		}
 	}
-	return validateProfile("gpu", p.GPU)
+	return nil
 }
 
 func validateProfile(kind string, profile catalog.EngineProfile) error {
@@ -150,8 +155,6 @@ func validateProfile(kind string, profile catalog.EngineProfile) error {
 		return fmt.Errorf("%s engine profile version is required", kind)
 	case strings.TrimSpace(profile.Runtime) == "":
 		return fmt.Errorf("%s engine profile runtime is required", kind)
-	case !digestPinnedImage.MatchString(strings.TrimSpace(profile.ImageRef)):
-		return fmt.Errorf("%s engine profile image must be digest-pinned", kind)
 	default:
 		return nil
 	}
@@ -173,11 +176,36 @@ func supportsChat(capabilities []string) bool {
 		return true
 	}
 	for _, capability := range capabilities {
-		if strings.EqualFold(strings.TrimSpace(capability), "text-generation") {
+		name := strings.ToLower(strings.TrimSpace(capability))
+		if name == "text-generation" || name == "sglang" {
 			return true
 		}
 	}
 	return false
+}
+
+// prefersSGLang 是过渡旁路：OpenAPI 还没有 engine_runtime，capability 带 sglang 才选 SGLang。
+func prefersSGLang(capabilities []string) bool {
+	for _, capability := range capabilities {
+		if strings.EqualFold(strings.TrimSpace(capability), "sglang") {
+			return true
+		}
+	}
+	return false
+}
+
+// localPVCArtifact 只接受 pvc://<dns-label>#/path，拒绝 object:// 和 HostPath。
+func localPVCArtifact(ref string) bool {
+	ref = strings.TrimSpace(ref)
+	if ref == "" || strings.Contains(ref, "..") {
+		return false
+	}
+	rest, ok := strings.CutPrefix(ref, "pvc://")
+	if !ok {
+		return false
+	}
+	claim, _, _ := strings.Cut(rest, "#")
+	return pvcClaimPattern.MatchString(strings.TrimSpace(claim))
 }
 
 func cpuCompatible(format string) bool {

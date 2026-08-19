@@ -1,0 +1,94 @@
+profile: INFERENCE-SERVICE-GPU-SINGLE-NODE-LIVE-GATE-C32
+status: live
+description: >
+  Single-node whole-card GPU InferenceService product path through the existing
+  production ani-gateway. Tenant Bearer POST create with digest-pinned CUDA
+  vLLM image_ref, accelerator spec_id gpu-nvidia-geforce-rtx-4090-full,
+  count_per_replica=1, placement_mode=single_node, and pvc://vllm-model
+  model version. Runtime is a Deployment with schedulerName=volcano and
+  nvidia.com/gpu=1, ClusterIP only. Product logs, stop, and start are included;
+  delete is skipped so the user service remains. ANI_AUTH_MODE stays
+  auth_service. This must not deploy a second Gateway, must not mark GPU/LWS
+  or full platform runtime ready, and must not claim a public invocation
+  gateway.
+
+required_tools:
+  - kubectl
+  - docker
+
+required_endpoints:
+  - ani_gateway_inference_services_api
+  - ani_gateway_models_api
+  - ani_gateway_platform_workloads_api
+  - inference_control_grpc
+  - model_service_grpc
+  - kubernetes_api
+
+required_env:
+  - KUBECONFIG
+
+live_checks:
+  - id: tenant-local-pvc-ready
+    command: kubectl -n ani-tenant-{uuid} get pvc vllm-model
+    pass_condition: tenant_local_pvc_bound_and_seeded
+  - id: in-cluster-inference-service-running
+    command: kubectl -n ani-system rollout status deploy/inference-service
+    pass_condition: inference_service_pod_ready
+  - id: production-gateway-auth-mode-preserved
+    command: kubectl -n ani-system get deploy ani-gateway
+    pass_condition: ani_auth_mode_remains_auth_service
+  - id: platform-workloads-table-ready
+    command: psql \dt platform_workloads
+    pass_condition: platform_workloads_relation_exists_on_gateway_search_path
+  - id: create-model
+    command: POST /api/v1/svc/models
+    pass_condition: http_201
+  - id: create-model-version-pvc
+    command: POST /api/v1/svc/models/{id}/versions storage_path=pvc://vllm-model#/models/qwen
+    pass_condition: http_201_storage_path_frozen
+  - id: product-inference-service-gpu-create
+    command: POST /api/v1/svc/inference-services with accelerator and digest image_ref
+    pass_condition: http_202
+  - id: kubectl-vllm-gpu-deployment
+    command: kubectl -n ani-tenant-{uuid} get deploy
+    pass_condition: single_node_deployment_volcano_scheduler_nvidia_gpu_1_clusterip
+  - id: inference-service-running-health-smoke
+    command: GET /api/v1/svc/inference-services/{id}
+    pass_condition: status_running_via_clusterip_health_and_chat
+  - id: inference-service-logs
+    command: GET /api/v1/svc/inference-services/{id}/logs
+    pass_condition: http_200_pod_lines_without_replica
+  - id: inference-service-stop
+    command: POST /api/v1/svc/inference-services/{id}/lifecycle action=stop
+    pass_condition: http_202_status_stopped_runtime_released
+  - id: inference-service-start
+    command: POST /api/v1/svc/inference-services/{id}/lifecycle action=start
+    pass_condition: http_202_status_running
+  - id: invocation-url-null
+    command: GET /api/v1/svc/inference-services/{id}
+    pass_condition: invocation_url_and_endpoint_url_are_null
+  - id: existing-tenant-namespace-preserved
+    command: kubectl get ns ani-tenant-{uuid}
+    pass_condition: existing_tenant_namespace_and_model_pvc_still_present
+  - id: service-retained
+    command: GET /api/v1/svc/inference-services/{id}
+    pass_condition: user_requested_gpu_service_not_deleted
+  - id: lws-cross-node-skipped
+    command: POST leader_worker / multi_node
+    pass_condition: skipped_cross_node_lws_not_in_this_batch
+
+evidence: development-records/live-evidence/inference-gpu-single-node-live-20260818.json
+
+evidence_policy:
+  forbidden_content:
+    - bearer tokens
+    - passwords
+    - raw server IPs
+    - full DSN or connection strings
+    - full internal endpoints beyond redacted service DNS
+
+readiness_levels:
+  contract:
+    meaning: Single-node GPU live runner, volcano scheduler, and fail-closed LWS skip are present.
+  live:
+    meaning: Approved cluster run created a single-node whole-card GPU InferenceService through production ani-gateway; LWS/cross-node and full platform runtime remain skipped.

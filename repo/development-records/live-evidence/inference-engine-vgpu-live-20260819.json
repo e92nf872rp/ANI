@@ -1,0 +1,96 @@
+{
+  "profile": "INFERENCE-SERVICE-ENGINE-VGPU-LIVE-GATE-C36",
+  "status": "passed",
+  "generated_at": "2026-08-19T04:20:00Z",
+  "entry": "ani-system/ani-gateway",
+  "gateway": "ani-system/ani-gateway",
+  "auth_mode": "auth_service",
+  "auth": "tenant_bearer",
+  "gateway_image": "ani/ani-gateway:engine-vgpu-c36-20260819",
+  "inference_service_image": "ani/inference-service:engine-vgpu-c36-20260819",
+  "advertised_specs": [
+    "gpu-nvidia-geforce-rtx-4090-8x",
+    "gpu-nvidia-geforce-rtx-4090-full"
+  ],
+  "vgpu_spec": "gpu-nvidia-geforce-rtx-4090-8x",
+  "accelerator": "volcano.sh/vgpu-number=1,volcano.sh/vgpu-memory=1228",
+  "nvidia_gpu_on_vgpu": false,
+  "tenant_command": true,
+  "tenant_args_empty": true,
+  "tenant_env": true,
+  "reserved_env_http_status": 400,
+  "product_status": "deploying",
+  "pod_ready": false,
+  "pod_ready_not_required": true,
+  "pvc_conflict_with_retained_whole_card": true,
+  "invocation_url": null,
+  "endpoint_url": null,
+  "test_service_deleted": true,
+  "service_retained": true,
+  "lws_live": "skipped",
+  "gpu_ready": false,
+  "runtime_ready": false,
+  "checks": [
+    {
+      "id": "reserved-engine-env-400",
+      "status": "passed",
+      "http_status": 400,
+      "code": "INVALID_ARGUMENT"
+    },
+    {
+      "id": "capabilities-advertise-vgpu-spec",
+      "status": "passed",
+      "spec_id": "gpu-nvidia-geforce-rtx-4090-8x"
+    },
+    {
+      "id": "product-create-vgpu-202",
+      "status": "passed",
+      "http_status": 202
+    },
+    {
+      "id": "runtime-command-is-tenant-argv",
+      "status": "passed"
+    },
+    {
+      "id": "runtime-args-empty",
+      "status": "passed"
+    },
+    {
+      "id": "runtime-tenant-env-injected",
+      "status": "passed",
+      "env": "VLLM_LOGGING_LEVEL"
+    },
+    {
+      "id": "runtime-volcano-vgpu-resources",
+      "status": "passed",
+      "vgpu_number": "1",
+      "vgpu_memory": "1228"
+    },
+    {
+      "id": "runtime-no-nvidia-gpu",
+      "status": "passed"
+    },
+    {
+      "id": "invocation-url-null",
+      "status": "passed"
+    },
+    {
+      "id": "test-service-deleted",
+      "status": "passed"
+    },
+    {
+      "id": "service-retained",
+      "status": "passed"
+    },
+    {
+      "id": "production-gateway-auth-mode-preserved",
+      "status": "passed",
+      "auth_mode": "auth_service"
+    },
+    {
+      "id": "lws-cross-node-skipped",
+      "status": "passed",
+      "reason": "skipped_cross_node_lws"
+    }
+  ]
+}

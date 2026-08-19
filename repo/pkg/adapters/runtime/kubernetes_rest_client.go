@@ -605,6 +605,12 @@ func resourceMapping(provider string, apiVersion string, kind string) (kubernete
 	switch provider + "/" + kind {
 	case "kubernetes/Deployment":
 		return kubernetesResource{Provider: provider, APIGroup: "apps", APIVersion: "v1", Resource: "deployments", Kind: kind, Namespaced: true}, nil
+	case "kubernetes/StatefulSet":
+		return kubernetesResource{Provider: provider, APIGroup: "apps", APIVersion: "v1", Resource: "statefulsets", Kind: kind, Namespaced: true}, nil
+	case "kubernetes/LeaderWorkerSet":
+		return kubernetesResource{Provider: provider, APIGroup: "leaderworkerset.x-k8s.io", APIVersion: "v1", Resource: "leaderworkersets", Kind: kind, Namespaced: true}, nil
+	case "kubernetes/PodGroup":
+		return kubernetesResource{Provider: provider, APIGroup: "scheduling.volcano.sh", APIVersion: "v1beta1", Resource: "podgroups", Kind: kind, Namespaced: true}, nil
 	case "kubernetes/Job":
 		return kubernetesResource{Provider: provider, APIGroup: "batch", APIVersion: "v1", Resource: "jobs", Kind: kind, Namespaced: true}, nil
 	case "kubernetes/NetworkPolicy":

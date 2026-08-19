@@ -32,6 +32,10 @@ type RegisterOptions struct {
 	// product handlers return 503 DEPENDENCY_UNAVAILABLE so the gateway
 	// still boots without inference-service configured.
 	InferenceServiceClient InferenceControlClient
+	// ModelServiceClient routes /api/v1/svc/models* to model-service.
+	// When nil the product handlers return 503 DEPENDENCY_UNAVAILABLE.
+	// GetModelVersion stays internal and is not registered on Gateway.
+	ModelServiceClient ModelServiceClient
 	// KBServiceClient routes /api/v1/svc/knowledge-bases/* to kb-service via
 	// gRPC. When nil the KB handlers return 503 UNAVAILABLE so the gateway
 	// still boots in environments without kb-service configured.
@@ -91,8 +95,10 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerPlatformWorkloadResources(v1, options.PlatformWorkloadService, options.AsyncTaskStore)
 
 	svc := h.Group("/api/v1/svc")
+	modelServiceClient = options.ModelServiceClient
 	registerModels(svc)
 	inferenceControlClient = options.InferenceServiceClient
+	inferenceImageRegistry = options.ImageRegistry
 	registerInferenceServices(svc)
 	// Inject the KB gRPC client + SSE wiring into the package-level holders
 	// before registering the KB surface (Spec-split contract requires the

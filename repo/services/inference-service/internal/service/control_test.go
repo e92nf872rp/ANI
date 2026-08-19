@@ -3,12 +3,15 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/kubercloud/ani/services/inference-service/internal/domain"
 	"github.com/kubercloud/ani/services/inference-service/internal/repository"
+	"github.com/kubercloud/ani/services/inference-service/internal/runtime"
+	runtimefake "github.com/kubercloud/ani/services/inference-service/internal/runtime/fake"
 )
 
 type controlStoreStub struct {
@@ -16,6 +19,8 @@ type controlStoreStub struct {
 	operation domain.Operation
 	list      []domain.Service
 	mutate    func(repository.MutationRequest) (repository.MutationResult, error)
+	aborts    int
+	binds     int
 }
 
 func (s *controlStoreStub) GetService(context.Context, uuid.UUID, uuid.UUID) (domain.Service, error) {
@@ -32,6 +37,16 @@ func (s *controlStoreStub) ListServices(context.Context, uuid.UUID) ([]domain.Se
 
 func (s *controlStoreStub) MutateService(_ context.Context, request repository.MutationRequest) (repository.MutationResult, error) {
 	return s.mutate(request)
+}
+
+func (s *controlStoreStub) BindRuntimeRef(context.Context, repository.RuntimeBinding) error {
+	s.binds++
+	return nil
+}
+
+func (s *controlStoreStub) AbortPendingMutation(context.Context, repository.MutationAbort) error {
+	s.aborts++
+	return nil
 }
 
 func runningControlService() domain.Service {
@@ -181,6 +196,50 @@ func TestQueriesNeverProjectRuntimeEndpoint(t *testing.T) {
 	}
 	if operationView.IdempotencyKey != operation.IdempotencyKey.String() {
 		t.Fatalf("operation idempotency key = %q", operationView.IdempotencyKey)
+	}
+}
+
+func TestProjectOperationIncludesStableErrorCode(t *testing.T) {
+	operation := domain.Operation{
+		ID: uuid.New(), ServiceID: uuid.New(), State: domain.OperationFailed,
+		ErrorCode: "SCALE_ROLLED_BACK", ErrorMessage: "inference scale rolled back to the previously applied spec",
+		IdempotencyKey: uuid.New(),
+	}
+	view := ProjectOperation(operation)
+	if view.ErrorMessage == nil || *view.ErrorMessage != "SCALE_ROLLED_BACK: inference scale rolled back to the previously applied spec" {
+		t.Fatalf("operation error_message = %v", view.ErrorMessage)
+	}
+	if view.Status != domain.OperationFailed {
+		t.Fatalf("operation status = %s", view.Status)
+	}
+}
+
+func TestScaleDispatchesCoreAndReturnsCapacityError(t *testing.T) {
+	resource := runningControlService()
+	store := &controlStoreStub{service: resource}
+	store.mutate = func(request repository.MutationRequest) (repository.MutationResult, error) {
+		operation := domain.Operation{
+			ID: request.OperationID, TenantID: resource.TenantID, ServiceID: resource.ID,
+			Type: domain.ActionScale, State: domain.OperationPending,
+			TargetGeneration: resource.Generation + 1, TargetSpec: request.TargetSpec,
+		}
+		updated := resource
+		updated.Generation = operation.TargetGeneration
+		updated.Status = domain.StatusDeploying
+		updated.DesiredSpec = request.TargetSpec
+		return repository.MutationResult{
+			Service: updated, Operation: operation, Disposition: domain.TransitionCreated,
+		}, nil
+	}
+	rt := runtimefake.New()
+	rt.EnsureError = runtime.ErrInsufficientCapacity
+	_, err := NewController(store, time.Now).WithRuntime(rt).
+		Scale(context.Background(), resource.TenantID, resource.ID, uuid.New(), 2)
+	if !errors.Is(err, ErrInsufficientCapacity) {
+		t.Fatalf("Scale() error = %v, want ErrInsufficientCapacity", err)
+	}
+	if store.aborts != 1 {
+		t.Fatalf("failed scale must revert pending mutation, aborts=%d", store.aborts)
 	}
 }
 

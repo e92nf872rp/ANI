@@ -49,17 +49,14 @@ func NewLocalPlatformWorkloadService() *LocalPlatformWorkloadService {
 }
 
 func (s *LocalPlatformWorkloadService) Capabilities(context.Context) (ports.PlatformWorkloadCapabilities, error) {
-	return ports.PlatformWorkloadCapabilities{
-		SupportedTopologyModes: []string{"single_node"},
-		SupportedProfiles: []ports.PlatformWorkloadTopologyProfile{
-			{ID: "container-single-node", Version: "v1", Mode: "single_node"},
-		},
-		AcceleratorSpecs: []ports.PlatformWorkloadAcceleratorCapability{},
-	}, nil
+	return defaultPlatformWorkloadCapabilities(), nil
 }
 
 func (s *LocalPlatformWorkloadService) Create(_ context.Context, tenantID string, spec ports.PlatformWorkloadCreateSpec) (ports.PlatformWorkloadRecord, error) {
 	if err := validatePlatformWorkloadCreate(spec); err != nil {
+		return ports.PlatformWorkloadRecord{}, err
+	}
+	if err := admitPlatformWorkloadTopology(defaultPlatformWorkloadCapabilities(), spec); err != nil {
 		return ports.PlatformWorkloadRecord{}, err
 	}
 	fingerprint, err := platformWorkloadFingerprint("create", spec)
@@ -266,14 +263,14 @@ func validatePlatformWorkloadCreate(spec ports.PlatformWorkloadCreateSpec) error
 			return fmt.Errorf("%w: accelerator requires spec_id and a positive count", ports.ErrInvalid)
 		}
 	}
-	if spec.Topology.Mode != "single_node" || spec.Topology.HasLeader || spec.Topology.HasWorkers {
-		return fmt.Errorf("%w: single-node profile only admits single_node topology", ports.ErrFailedPrecondition)
-	}
 	if strings.TrimSpace(spec.Topology.ProfileID) == "" || strings.TrimSpace(spec.Topology.ProfileVersion) == "" {
 		return fmt.Errorf("%w: topology profile is required", ports.ErrInvalid)
 	}
-	if spec.Scheduling.QueueClass != "inference" || spec.Scheduling.Gang {
-		return fmt.Errorf("%w: single_node scheduling must use inference queue without gang", ports.ErrInvalid)
+	if spec.Scheduling.QueueClass != "inference" {
+		return fmt.Errorf("%w: scheduling must use the inference queue", ports.ErrInvalid)
+	}
+	if err := validatePlatformWorkloadTopology(spec); err != nil {
+		return err
 	}
 	if spec.Network.Exposure != "cluster_internal" || len(spec.Network.Ports) == 0 {
 		return fmt.Errorf("%w: network must be cluster_internal with at least one port", ports.ErrInvalid)
@@ -287,16 +284,96 @@ func validatePlatformWorkloadCreate(spec ports.PlatformWorkloadCreateSpec) error
 	return nil
 }
 
-func admitPlatformWorkloadAccelerator(caps ports.PlatformWorkloadCapabilities, spec ports.PlatformWorkloadResources) error {
+func validatePlatformWorkloadTopology(spec ports.PlatformWorkloadCreateSpec) error {
+	switch spec.Topology.Mode {
+	case "single_node":
+		if spec.Topology.HasLeader || spec.Topology.HasWorkers || spec.Topology.Leader.Count > 0 || spec.Topology.Workers.Count > 0 {
+			return fmt.Errorf("%w: single_node topology must not submit leader or workers", ports.ErrInvalid)
+		}
+		if spec.Scheduling.Gang {
+			return fmt.Errorf("%w: single_node scheduling must use inference queue without gang", ports.ErrInvalid)
+		}
+		return nil
+	case "leader_worker":
+		if !spec.Topology.HasLeader || !spec.Topology.HasWorkers || spec.Topology.Leader.Count != 1 || spec.Topology.Workers.Count < 1 {
+			return fmt.Errorf("%w: leader_worker topology requires leader.count=1 and workers.count>=1", ports.ErrInvalid)
+		}
+		if spec.Replicas != 1 {
+			return fmt.Errorf("%w: leader_worker only admits replicas=1", ports.ErrFailedPrecondition)
+		}
+		if !spec.Scheduling.Gang {
+			return fmt.Errorf("%w: leader_worker scheduling must enable gang", ports.ErrInvalid)
+		}
+		if strings.TrimSpace(spec.Resources.AcceleratorSpecID) == "" || spec.Resources.AcceleratorCount < 2 {
+			return fmt.Errorf("%w: leader_worker requires an accelerator count of at least 2", ports.ErrInvalid)
+		}
+		leaderGPUs := spec.Topology.Leader.Resources.AcceleratorCount
+		if leaderGPUs < 1 {
+			leaderGPUs = 1
+		}
+		workerGPUs := spec.Topology.Workers.Resources.AcceleratorCount
+		if workerGPUs < 1 {
+			workerGPUs = 1
+		}
+		if leaderGPUs*spec.Topology.Leader.Count+workerGPUs*spec.Topology.Workers.Count != spec.Resources.AcceleratorCount {
+			return fmt.Errorf("%w: leader and worker accelerator counts must equal resources.accelerator.count", ports.ErrInvalid)
+		}
+		return nil
+	default:
+		return fmt.Errorf("%w: topology mode must be single_node or leader_worker", ports.ErrInvalid)
+	}
+}
+
+func admitPlatformWorkloadTopology(caps ports.PlatformWorkloadCapabilities, spec ports.PlatformWorkloadCreateSpec) error {
+	if spec.Topology.Mode != "leader_worker" {
+		return nil
+	}
+	if !caps.LeaderWorkerSetReady || !caps.GangSchedulingReady || !platformWorkloadSupportsMode(caps, "leader_worker") {
+		return fmt.Errorf("%w: leader_worker topology is not available", ports.ErrFailedPrecondition)
+	}
+	return nil
+}
+
+func admitPlatformWorkloadAccelerator(caps ports.PlatformWorkloadCapabilities, spec ports.PlatformWorkloadResources, topologyMode string) error {
 	if strings.TrimSpace(spec.AcceleratorSpecID) == "" && spec.AcceleratorCount == 0 {
 		return nil
 	}
 	for _, item := range caps.AcceleratorSpecs {
-		if item.SpecID == spec.AcceleratorSpecID && item.Available && item.MaxSingleNodeCount >= spec.AcceleratorCount {
-			return nil
+		if item.SpecID != spec.AcceleratorSpecID || !item.Available {
+			continue
 		}
+		if topologyMode != "leader_worker" && item.MaxSingleNodeCount < spec.AcceleratorCount {
+			return fmt.Errorf("%w: accelerator spec is not available", ports.ErrFailedPrecondition)
+		}
+		return nil
 	}
 	return fmt.Errorf("%w: accelerator spec is not available", ports.ErrFailedPrecondition)
+}
+
+func defaultPlatformWorkloadCapabilities() ports.PlatformWorkloadCapabilities {
+	return ports.PlatformWorkloadCapabilities{
+		SupportedTopologyModes: []string{"single_node"},
+		SupportedProfiles: []ports.PlatformWorkloadTopologyProfile{
+			{ID: "container-single-node", Version: "v1", Mode: "single_node"},
+		},
+		AcceleratorSpecs: []ports.PlatformWorkloadAcceleratorCapability{},
+	}
+}
+
+func platformWorkloadSupportsMode(caps ports.PlatformWorkloadCapabilities, mode string) bool {
+	for _, item := range caps.SupportedTopologyModes {
+		if item == mode {
+			return true
+		}
+	}
+	return false
+}
+
+func platformWorkloadRuntimeShapeFor(spec ports.PlatformWorkloadCreateSpec) string {
+	if spec.Topology.Mode == "leader_worker" {
+		return "leader_worker_set"
+	}
+	return "deployment"
 }
 
 func platformWorkloadFingerprint(kind string, value any) (string, error) {

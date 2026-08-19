@@ -1,0 +1,58 @@
+{
+  "profile": "INFERENCE-SERVICE-GPU-LWS-VOLCANO-LIVE-GATE-C20",
+  "status": "passed",
+  "generated_at": "2026-08-17T02:26:23Z",
+  "gateway": "lab-process-not-in-cluster-ani-gateway",
+  "gpu_ready": false,
+  "runtime_ready": false,
+  "gpu_live": "skipped_no_device_plugin",
+  "auth_mode": "dev",
+  "checks": [
+    {
+      "id": "platform-workload-capabilities-probe",
+      "status": "passed",
+      "leader_worker_set_ready": false,
+      "gang_scheduling_ready": true,
+      "available_accelerator_specs": 0
+    },
+    {
+      "id": "cpu-deployment-keeps-default-scheduler",
+      "status": "passed",
+      "proof": "unit"
+    },
+    {
+      "id": "gpu-single-node-uses-volcano",
+      "status": "passed",
+      "proof": "unit"
+    },
+    {
+      "id": "lws-renders-podgroup-and-leader-service",
+      "status": "passed",
+      "proof": "unit"
+    },
+    {
+      "id": "gpu-create-fail-closed-without-plugin",
+      "status": "passed",
+      "http_status": 422
+    },
+    {
+      "id": "multi-node-lws-fail-closed-without-crd",
+      "status": "passed",
+      "http_status": 422,
+      "code": "ACCELERATOR_SPEC_UNAVAILABLE"
+    },
+    {
+      "id": "gpu-lws-runtime-skipped-until-ready-cluster",
+      "status": "passed",
+      "reason": "skipped_no_device_plugin",
+      "gpu_allocatable": 0,
+      "lws_crd": false,
+      "volcano_crd": true
+    },
+    {
+      "id": "smoke-workload-untouched",
+      "status": "passed",
+      "namespace": "ani-vllm-cpu-smoke"
+    }
+  ]
+}

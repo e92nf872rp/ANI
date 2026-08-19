@@ -14,13 +14,15 @@ type gatewayInferenceServiceRuntimeConfig struct {
 	CallTimeout time.Duration
 }
 
+// gatewayInferenceServiceRuntimeConfigFromEnv 读现网 Gateway 连 inference-service 的地址。
+// 默认超时 30s，覆盖同步 Ensure Core 的请求路径。
 func gatewayInferenceServiceRuntimeConfigFromEnv() gatewayInferenceServiceRuntimeConfig {
 	cfg := gatewayInferenceServiceRuntimeConfig{
 		Addr:        strings.TrimSpace(os.Getenv("INFERENCE_SERVICE_GRPC_ADDR")),
 		CallTimeout: gatewayDurationFromEnv("INFERENCE_SERVICE_GRPC_CALL_TIMEOUT"),
 	}
 	if cfg.CallTimeout <= 0 {
-		cfg.CallTimeout = 5 * time.Second
+		cfg.CallTimeout = 30 * time.Second
 	}
 	return cfg
 }

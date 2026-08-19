@@ -33,6 +33,7 @@ type inferenceGRPCClient struct {
 	timeout time.Duration
 }
 
+// DialInferenceControl 连 inference-service 内部 gRPC。超时默认 30s。
 func DialInferenceControl(ctx context.Context, addr string, timeout time.Duration) (*grpc.ClientConn, InferenceControlClient, error) {
 	_ = ctx
 	addr = strings.TrimSpace(addr)
@@ -44,7 +45,7 @@ func DialInferenceControl(ctx context.Context, addr string, timeout time.Duratio
 		return nil, nil, fmt.Errorf("dial inference-service %s: %w", addr, err)
 	}
 	if timeout <= 0 {
-		timeout = 5 * time.Second
+		timeout = 30 * time.Second
 	}
 	return conn, &inferenceGRPCClient{client: inferencecontrolv1.NewInferenceControlClient(conn), timeout: timeout}, nil
 }
@@ -129,6 +130,10 @@ func writeInferenceInvalid(c *app.RequestContext, message string) {
 	writeInstanceError(c, http.StatusBadRequest, "INVALID_ARGUMENT", message)
 }
 
+func writeInferenceUnprocessable(c *app.RequestContext, code, message string) {
+	writeInstanceError(c, http.StatusUnprocessableEntity, code, message)
+}
+
 func writeInferenceGRPCError(c *app.RequestContext, err error) {
 	if err == nil {
 		return
@@ -157,7 +162,7 @@ func mapInferenceGRPCError(err error) (int, string, string) {
 		switch code {
 		case "OPERATION_IN_PROGRESS":
 			return http.StatusConflict, code, "inference service operation is already in progress"
-		case "MODEL_NOT_READY", "MODEL_INCOMPATIBLE", "INVALID_STATE_TRANSITION", "UNSUPPORTED_TOPOLOGY", "ACCELERATOR_SPEC_UNAVAILABLE", "INSUFFICIENT_CAPACITY":
+		case "MODEL_NOT_READY", "MODEL_INCOMPATIBLE", "INVALID_STATE_TRANSITION", "UNSUPPORTED_TOPOLOGY", "ACCELERATOR_SPEC_UNAVAILABLE", "INSUFFICIENT_CAPACITY", "IMAGE_UNAVAILABLE", "ENGINE_PROFILE_UNAPPROVED", "RESERVED_FIELD_CONFLICT":
 			return http.StatusUnprocessableEntity, code, inferenceUnprocessableMessage(code)
 		default:
 			return http.StatusUnprocessableEntity, firstNonEmpty(code, "INVALID_STATE_TRANSITION"), "inference service precondition failed"
@@ -181,6 +186,10 @@ func inferenceUnprocessableMessage(code string) string {
 		return "requested inference topology is not supported"
 	case "ACCELERATOR_SPEC_UNAVAILABLE":
 		return "requested accelerator spec is not available"
+	case "INSUFFICIENT_CAPACITY":
+		return "inference capacity is insufficient"
+	case "IMAGE_UNAVAILABLE":
+		return "inference runtime image is unavailable"
 	case "INVALID_STATE_TRANSITION":
 		return "inference service cannot accept this state transition"
 	default:

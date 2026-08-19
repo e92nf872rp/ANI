@@ -4,7 +4,7 @@
 // - protoc             (unknown)
 // source: inference/control/v1/inference_control.proto
 
-package controlv1
+package inferencecontrolv1
 
 import (
 	context "context"

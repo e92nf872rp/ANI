@@ -15,7 +15,7 @@ export
         image image-gateway image-auth-service \
         clean
 
-.PHONY: test-inference-control-plane-postgres
+.PHONY: test-inference-control-plane-postgres validate-inference-gpu-lws-volcano-live-gate validate-inference-legacy-control-plane validate-inference-incluster-e2e-live-gate validate-inference-console-shaped-e2e-live-gate validate-inference-local-model-source-live-gate validate-inference-create-image-live-gate validate-inference-create-image-harbor-live-gate validate-inference-gpu-single-node-live-gate validate-gpu-plugin-node-partition-live-gate validate-inference-gpu-vllm-eager-live-gate validate-inference-engine-vgpu-live-gate
 
 # ── 帮助 ──────────────────────────────────────────────────────────────────────
 help:
@@ -156,6 +156,18 @@ help:
 	@echo "    make validate-inference-cpu-vllm-ops-live-gate 校验 CPU vLLM InferenceService ops live gate"
 	@echo "    make validate-inference-gpu-admission-live-gate 校验 GPU admission InferenceService live gate"
 	@echo "    make validate-inference-clusterip-networkpolicy-live-gate 校验 ClusterIP/NetworkPolicy InferenceService live gate"
+	@echo "    make validate-inference-failure-rollback-live-gate 校验 InferenceService 失败清理与 scale rollback live gate"
+	@echo "    make validate-inference-gpu-lws-volcano-live-gate 校验 GPU/LWS/Volcano InferenceService live gate 契约"
+	@echo "    make validate-inference-legacy-control-plane 校验旧 inference.v1/operator 控制面已退役"
+	@echo "    make validate-inference-incluster-e2e-live-gate 校验集群内 CPU InferenceService 产品链路 live gate"
+	@echo "    make validate-inference-console-shaped-e2e-live-gate 校验 Console 模拟请求 CPU InferenceService live gate"
+	@echo "    make validate-inference-local-model-source-live-gate 校验租户本地 PVC 模型来源 InferenceService live gate"
+	@echo "    make validate-inference-create-image-live-gate 校验创建推理服务 image_id/image_ref live gate"
+	@echo "    make validate-inference-create-image-harbor-live-gate 校验 Harbor image_id 创建推理服务 live gate"
+	@echo "    make validate-inference-gpu-single-node-live-gate 校验单节点整卡 GPU InferenceService live gate"
+	@echo "    make validate-gpu-plugin-node-partition-live-gate 校验 NVIDIA/Volcano GPU 插件节点分区 live gate"
+	@echo "    make validate-inference-gpu-vllm-eager-live-gate 校验 GPU vLLM enforce-eager 启动 live gate"
+	@echo "    make validate-inference-engine-vgpu-live-gate 校验 engine.env/command 与 volcano vGPU live gate"
 	@echo ""
 	@echo "  代码检查:"
 	@echo "    make lint           运行所有 linter"
@@ -984,7 +996,14 @@ validate-inference-control-plane:
 	@echo "→ 校验 inference-service PostgreSQL 控制面迁移..."
 	python scripts/validate_inference_control_plane_migration_test.py
 	python scripts/validate_inference_control_plane_migration.py
+	$(MAKE) validate-inference-legacy-control-plane
 	@echo "✅ inference-service control-plane migration valid"
+
+validate-inference-legacy-control-plane:
+	@echo "→ 校验旧 inference.v1 / operator 控制面已退役..."
+	python scripts/validate_inference_legacy_control_plane_test.py
+	python scripts/validate_inference_legacy_control_plane.py
+	@echo "✅ INFERENCE-SERVICE-LEGACY-CONTROL-PLANE-B1 retired"
 
 validate-platform-workload-k8s-live-gate:
 	@echo "→ 校验 CPU PlatformWorkload Kubernetes live gate..."
@@ -1015,6 +1034,72 @@ validate-inference-clusterip-networkpolicy-live-gate:
 	python scripts/validate_inference_clusterip_networkpolicy_live_gate_test.py
 	python scripts/validate_inference_clusterip_networkpolicy_live_gate.py
 	@echo "✅ INFERENCE-SERVICE-CLUSTERIP-NP-LIVE-GATE-C17 valid"
+
+validate-inference-failure-rollback-live-gate:
+	@echo "→ 校验 InferenceService 失败清理与 scale rollback live gate..."
+	python scripts/validate_inference_failure_rollback_live_gate_test.py
+	python scripts/validate_inference_failure_rollback_live_gate.py
+	@echo "✅ INFERENCE-SERVICE-FAILURE-ROLLBACK-LIVE-GATE-C19 valid"
+
+validate-inference-gpu-lws-volcano-live-gate:
+	@echo "→ 校验 GPU/LWS/Volcano InferenceService live gate 契约..."
+	python scripts/validate_inference_gpu_lws_volcano_live_gate_test.py
+	python scripts/validate_inference_gpu_lws_volcano_live_gate.py
+	@echo "✅ INFERENCE-SERVICE-GPU-LWS-VOLCANO-LIVE-GATE-C20 contract valid"
+
+validate-inference-incluster-e2e-live-gate:
+	@echo "→ 校验集群内 CPU InferenceService 产品链路 live gate..."
+	python scripts/validate_inference_incluster_e2e_live_gate_test.py
+	python scripts/validate_inference_incluster_e2e_live_gate.py
+	@echo "✅ INFERENCE-SERVICE-INCLUSTER-E2E-LIVE-GATE-C21 live valid"
+
+validate-inference-console-shaped-e2e-live-gate:
+	@echo "→ 校验 Console 模拟请求 CPU InferenceService 产品链路 live gate..."
+	python scripts/validate_inference_console_shaped_e2e_live_gate_test.py
+	python scripts/validate_inference_console_shaped_e2e_live_gate.py
+	@echo "✅ INFERENCE-SERVICE-CONSOLE-SHAPED-E2E-LIVE-GATE-C22 live valid"
+
+validate-inference-local-model-source-live-gate:
+	@echo "→ 校验租户本地 PVC 模型来源 InferenceService 产品链路 live gate..."
+	python scripts/validate_inference_local_model_source_live_gate_test.py
+	python scripts/validate_inference_local_model_source_live_gate.py
+	@echo "✅ INFERENCE-SERVICE-LOCAL-MODEL-SOURCE-LIVE-GATE-C23 contract/live valid"
+
+validate-inference-create-image-live-gate:
+	@echo "→ 校验创建推理服务 image_id/image_ref live gate..."
+	python scripts/validate_inference_create_image_live_gate_test.py
+	python scripts/validate_inference_create_image_live_gate.py
+	@echo "✅ INFERENCE-SERVICE-CREATE-IMAGE-LIVE-GATE-C30 contract/live valid"
+
+validate-inference-create-image-harbor-live-gate:
+	@echo "→ 校验 Harbor image_id 创建推理服务 live gate..."
+	python scripts/validate_inference_create_image_harbor_live_gate_test.py
+	python scripts/validate_inference_create_image_harbor_live_gate.py
+	@echo "✅ INFERENCE-SERVICE-CREATE-IMAGE-HARBOR-LIVE-GATE-C31 contract/live valid"
+
+validate-inference-gpu-single-node-live-gate:
+	@echo "→ 校验单节点整卡 GPU InferenceService live gate..."
+	python scripts/validate_inference_gpu_single_node_live_gate_test.py
+	python scripts/validate_inference_gpu_single_node_live_gate.py
+	@echo "✅ INFERENCE-SERVICE-GPU-SINGLE-NODE-LIVE-GATE-C32 contract/live valid"
+
+validate-gpu-plugin-node-partition-live-gate:
+	@echo "→ 校验 NVIDIA/Volcano GPU 插件节点分区 live gate..."
+	python scripts/validate_gpu_plugin_node_partition_live_gate_test.py
+	python scripts/validate_gpu_plugin_node_partition_live_gate.py
+	@echo "✅ GPU-PLUGIN-NODE-PARTITION-LIVE-GATE-C33 contract/live valid"
+
+validate-inference-gpu-vllm-eager-live-gate:
+	@echo "→ 校验 GPU vLLM enforce-eager 启动 live gate..."
+	python scripts/validate_inference_gpu_vllm_eager_live_gate_test.py
+	python scripts/validate_inference_gpu_vllm_eager_live_gate.py
+	@echo "✅ INFERENCE-SERVICE-GPU-VLLM-EAGER-LIVE-GATE-C34 contract/live valid"
+
+validate-inference-engine-vgpu-live-gate:
+	@echo "→ 校验 engine.env/command 与 volcano vGPU live gate..."
+	python scripts/validate_inference_engine_vgpu_live_gate_test.py
+	python scripts/validate_inference_engine_vgpu_live_gate.py
+	@echo "✅ INFERENCE-SERVICE-ENGINE-VGPU-LIVE-GATE-C36 contract/live valid"
 
 test-inference-control-plane-postgres:
 	@test -n "$$INFERENCE_TEST_DATABASE_URL" || (echo "ERROR: INFERENCE_TEST_DATABASE_URL is required"; exit 2)
@@ -1094,6 +1179,7 @@ validate-services:
 validate-architecture:
 	@echo "→ 校验开源组件 ports/adapters 边界..."
 	python scripts/validate_component_imports.py --root .
+	python scripts/validate_inference_legacy_control_plane.py
 	@echo "✅ architecture guardrails valid"
 
 # ── 代码检查 ──────────────────────────────────────────────────────────────────

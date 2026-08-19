@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
-"""Run the CPU vLLM InferenceService live gate against an approved lab cluster.
+"""Shared helpers for InferenceService product live runners.
 
-This starts a local lab Gateway harness and a local inference-service process.
-It does not roll out the in-cluster ani-gateway Deployment and must not touch
-ani-vllm-cpu-smoke.
+C12-C20 used a local lab Gateway harness. That binary and those runners were
+removed in C25. Product live uses in-cluster ani-gateway (C21+). Direct
+execution of this file is rejected on purpose.
 """
 
 from __future__ import annotations
 
-import argparse
 import base64
-import datetime as dt
 import json
 import os
 import re
@@ -18,7 +16,6 @@ import signal
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -76,12 +73,15 @@ def request(
     tenant_id: str,
     body: dict[str, Any] | None = None,
     idempotency_key: str = "",
+    token: str = "",
 ) -> tuple[int, dict[str, Any]]:
     data = None
     headers = {
         "Accept": "application/json",
         "X-Dev-Tenant-ID": tenant_id,
     }
+    if token:
+        headers["Authorization"] = "Bearer " + token
     if body is not None:
         data = json.dumps(body).encode("utf-8")
         headers["Content-Type"] = "application/json"
@@ -241,11 +241,17 @@ def wait_service(
     wanted: str,
     timeout: int = 900,
     kubeconfig: str = "",
+    token: str = "",
 ) -> dict[str, Any]:
     deadline = time.time() + timeout
     last: dict[str, Any] = {}
     while time.time() < deadline:
-        status, body = request("GET", f"{base}/api/v1/svc/inference-services/{service_id}", tenant)
+        status, body = request(
+            "GET",
+            f"{base}/api/v1/svc/inference-services/{service_id}",
+            tenant,
+            token=token,
+        )
         if status == 200:
             last = body
             if body.get("status") == wanted:
@@ -288,7 +294,13 @@ def secret_data(kubeconfig: str, key: str) -> str:
 
 
 def discover_image(kubeconfig: str) -> str:
-    deploy = kubectl_json(kubeconfig, ["-n", SMOKE_NS, "get", "deploy", SMOKE_DEPLOY])
+    completed = run(
+        ["kubectl", "--kubeconfig", kubeconfig, "-n", SMOKE_NS, "get", "deploy", SMOKE_DEPLOY, "-o", "json"],
+        timeout=60,
+    )
+    if completed.returncode != 0:
+        return IMAGE_FALLBACK
+    deploy = json.loads(completed.stdout or "{}")
     containers = (((deploy.get("spec") or {}).get("template") or {}).get("spec") or {}).get("containers") or []
     if not containers:
         return IMAGE_FALLBACK
@@ -309,7 +321,13 @@ def gpu_allocatable(kubeconfig: str) -> int:
 
 
 def smoke_ready(kubeconfig: str) -> bool:
-    deploy = kubectl_json(kubeconfig, ["-n", SMOKE_NS, "get", "deploy", SMOKE_DEPLOY])
+    completed = run(
+        ["kubectl", "--kubeconfig", kubeconfig, "-n", SMOKE_NS, "get", "deploy", SMOKE_DEPLOY, "-o", "json"],
+        timeout=60,
+    )
+    if completed.returncode != 0:
+        return False
+    deploy = json.loads(completed.stdout or "{}")
     status = deploy.get("status") or {}
     return int(status.get("readyReplicas") or 0) >= 1
 
@@ -453,6 +471,11 @@ def assert_cpu_deployment(kubeconfig: str, namespace: str, name: str, image: str
     if "ani.kubercloud.io/instance" in labels:
         fail("deployment carried an instance identity label")
     pod_spec = (((deploy.get("spec") or {}).get("template") or {}).get("spec") or {})
+    annotations = (((deploy.get("spec") or {}).get("template") or {}).get("metadata") or {}).get("annotations") or {}
+    if annotations.get("ovn.kubernetes.io/logical_switch") != "ovn-default":
+        fail("deployment is not pinned to the cluster default overlay")
+    if annotations.get("ovn.kubernetes.io/vpc") != "ovn-cluster":
+        fail("deployment is not pinned to the cluster default VPC")
     containers = pod_spec.get("containers") or []
     if not containers:
         fail("deployment has no container")
@@ -481,365 +504,14 @@ def wait_deploy_replicas(kubeconfig: str, namespace: str, name: str, wanted: int
     fail(f"deployment replicas stayed {last}, want {wanted}")
 
 
+
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--kubeconfig", default=os.environ.get("KUBECONFIG", str(Path.home() / ".kube/config")))
-    parser.add_argument("--listen", default="127.0.0.1:18081")
-    args = parser.parse_args()
-    kubeconfig = args.kubeconfig
-    listen = args.listen
-    if not Path(kubeconfig).exists():
-        fail("kubeconfig is missing")
-    if not GATE.exists() or not PW_MIGRATION.exists() or not INF_MIGRATION.exists():
-        fail("gate or migration files are missing")
-
-    tenant_id = str(uuid.uuid4())
-    tenant_name = "inf-c14-lab-" + tenant_id[:8]
-    model_id = str(uuid.uuid4())
-    namespace = f"ani-tenant-{tenant_id}"
-    sa_name = "ani-inf-c14"
-    checks: list[dict[str, Any]] = []
-    ops_checks: list[dict[str, Any]] = []
-    harness: subprocess.Popen[str] | None = None
-    inference: subprocess.Popen[str] | None = None
-    forwards: list[subprocess.Popen[str]] = []
-    tmpdir = Path(tempfile.mkdtemp(prefix="ani-inf-c14-"))
-    created_ns = False
-    src_snapshot = ""
-    dest_vsc = ""
-    try:
-        if not smoke_ready(kubeconfig):
-            fail("independent vLLM CPU smoke workload is not ready")
-        image = discover_image(kubeconfig)
-        gpu_count = gpu_allocatable(kubeconfig)
-        server, ca_data = current_cluster(kubeconfig)
-        (tmpdir / "ca.crt").write_bytes(base64.b64decode(ca_data))
-
-        rbac = [
-            {
-                "apiVersion": "v1",
-                "kind": "ServiceAccount",
-                "metadata": {"name": sa_name, "namespace": "ani-system"},
-            },
-            {
-                "apiVersion": "rbac.authorization.k8s.io/v1",
-                "kind": "ClusterRole",
-                "metadata": {"name": sa_name},
-                "rules": [
-                    {"apiGroups": [""], "resources": ["namespaces"], "verbs": ["get", "list", "create", "update", "patch"]},
-                    {"apiGroups": [""], "resources": ["services"], "verbs": ["get", "list", "create", "update", "patch", "delete"]},
-                    {"apiGroups": [""], "resources": ["services/proxy"], "verbs": ["get", "create"]},
-                    {"apiGroups": [""], "resources": ["pods"], "verbs": ["get", "list"]},
-                    {"apiGroups": [""], "resources": ["pods/log"], "verbs": ["get"]},
-                    {"apiGroups": [""], "resources": ["nodes"], "verbs": ["get", "list"]},
-                    {"apiGroups": ["apps"], "resources": ["deployments"], "verbs": ["get", "list", "create", "update", "patch", "delete"]},
-                    {"apiGroups": ["networking.k8s.io"], "resources": ["networkpolicies"], "verbs": ["get", "list", "create", "update", "patch", "delete"]},
-                ],
-            },
-            {
-                "apiVersion": "rbac.authorization.k8s.io/v1",
-                "kind": "ClusterRoleBinding",
-                "metadata": {"name": sa_name},
-                "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": sa_name},
-                "subjects": [{"kind": "ServiceAccount", "name": sa_name, "namespace": "ani-system"}],
-            },
-        ]
-        (tmpdir / "rbac.yaml").write_text(yaml.safe_dump_all(rbac), encoding="utf-8")
-        kubectl(kubeconfig, ["apply", "-f", str(tmpdir / "rbac.yaml")])
-        token = kubectl(kubeconfig, ["-n", "ani-system", "create", "token", sa_name, "--duration=2h"]).strip()
-        if not token:
-            fail("failed to mint lab service account token")
-
-        database_url = rewrite_url(secret_data(kubeconfig, "database_url"), "127.0.0.1", 15432)
-        nats_url = rewrite_url(secret_data(kubeconfig, "nats_url"), "127.0.0.1", 14222)
-        redis_url = rewrite_url(secret_data(kubeconfig, "redis_url"), "127.0.0.1", 16379)
-        for spec in (
-            (["-n", "ani-system", "port-forward", "pod/ani-postgres-0", "15432:5432"], 15432),
-            (["-n", "ani-system", "port-forward", "svc/nats", "14222:4222"], 14222),
-            (["-n", "ani-system", "port-forward", "svc/ani-redis", "16379:6379"], 16379),
-        ):
-            args_pf, port = spec
-            proc = subprocess.Popen(
-                ["kubectl", "--kubeconfig", kubeconfig, *args_pf],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            forwards.append(proc)
-            wait_tcp("127.0.0.1", port)
-
-        apply_platform_workload_migration(kubeconfig)
-        apply_sql(
-            kubeconfig,
-            """
-CREATE TABLE IF NOT EXISTS inference_services (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    model_version_id UUID NOT NULL,
-    replicas INT NOT NULL DEFAULT 1,
-    gpu_type TEXT,
-    gpu_count_per_pod INT NOT NULL DEFAULT 1,
-    max_concurrency INT NOT NULL DEFAULT 8,
-    placement_region TEXT,
-    placement_az TEXT,
-    status TEXT NOT NULL DEFAULT 'pending'
-        CHECK (status IN ('pending','downloading','decrypting','deploying','running','stopping','stopped','failed')),
-    endpoint_url TEXT,
-    k8s_namespace TEXT,
-    k8s_deployment_name TEXT,
-    error_message TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (tenant_id, name)
-);
-""",
-            "ensure inference_services base table",
-        )
-        apply_sql(kubeconfig, INF_MIGRATION.read_text(encoding="utf-8"), "apply inference control-plane migration")
-        quarantine_leftover_c14(kubeconfig)
-        postgres_exec(
-            kubeconfig,
-            "INSERT INTO tenants (id, name, display_name, status, max_gpu_count, max_cpu_cores, max_memory_gb, settings) "
-            f"VALUES ('{tenant_id}', '{tenant_name}', 'inference-cpu-vllm-c14', 'active', 0, 8, 16, '{{}}') "
-            "ON CONFLICT (id) DO NOTHING;",
-        )
-
-        ns_doc = {
-            "apiVersion": "v1",
-            "kind": "Namespace",
-            "metadata": {
-                "name": namespace,
-                "labels": {
-                    "app.kubernetes.io/part-of": "ani-platform",
-                    "ani.kubercloud.io/tenant-id": tenant_id,
-                },
-            },
-        }
-        (tmpdir / "namespace.yaml").write_text(yaml.safe_dump(ns_doc), encoding="utf-8")
-        kubectl(kubeconfig, ["apply", "-f", str(tmpdir / "namespace.yaml")])
-        created_ns = True
-        src_snapshot, dest_vsc = clone_model_pvc(kubeconfig, namespace, tmpdir)
-
-        env = os.environ.copy()
-        env.update({
-            "ANI_AUTH_MODE": "dev",
-            "GATEWAY_LISTEN_ADDR": listen,
-            "KUBERNETES_API_HOST": server,
-            "KUBERNETES_BEARER_TOKEN": token,
-            "KUBERNETES_SERVICE_ACCOUNT_CA_FILE": str(tmpdir / "ca.crt"),
-            "DATABASE_URL": database_url,
-            "NATS_URL": nats_url,
-            "REDIS_URL": redis_url,
-            "INFERENCE_DATABASE_URL": database_url,
-            "CORE_API_BASE_URL": f"http://{listen}",
-            "INFERENCE_SERVICE_GRPC_ADDR": "127.0.0.1:19104",
-            "GRPC_PORT": "19104",
-            "HEALTH_PORT": "19204",
-            "INFERENCE_LAB_CATALOG": "1",
-            "INFERENCE_LAB_IMAGE_REF": image,
-            "INFERENCE_CPU_IMAGE_REF": image,
-            "INFERENCE_LAB_ARTIFACT_REF": "pvc://vllm-model#/models/qwen",
-            "INFERENCE_RUNTIME_PROBE_VIA": "kubernetes_proxy",
-            "PLATFORM_WORKLOAD_PROVIDER": "kubernetes_rest",
-        })
-
-        harness_bin = tmpdir / "harness"
-        inference_bin = tmpdir / "inference-service"
-        built = run(["go", "build", "-o", str(harness_bin), "./cmd/platform-workload-live"], cwd=str(ROOT / "services/ani-gateway"))
-        if built.returncode != 0:
-            fail(f"build lab harness failed: {redact_text(built.stderr or built.stdout)}")
-        built = run(["go", "build", "-o", str(inference_bin), "."], cwd=str(ROOT / "services/inference-service"), env={**env, "GOWORK": "off"})
-        if built.returncode != 0:
-            fail(f"build inference-service failed: {redact_text(built.stderr or built.stdout)}")
-
-        inference = start_proc([str(inference_bin)], ROOT / "services/inference-service", env, tmpdir / "inference.log")
-        wait_tcp("127.0.0.1", 19104, timeout=60)
-        if inference.poll() is not None:
-            fail(f"inference-service exited: {redact_text(proc_log(inference)[-2000:] or 'no output')}")
-        harness = start_proc([str(harness_bin)], ROOT / "services/ani-gateway", env, tmpdir / "harness.log")
-        wait_http(f"http://{listen}/readyz", harness, timeout=90)
-
-        base = f"http://{listen}"
-        create_body = {
-            "idempotency_key": str(uuid.uuid4()),
-            "name": "inf-c14-cpu",
-            "model": model_id,
-            "model_version_id": model_id,
-            "served_model_name": "qwen2.5-0.5b",
-            "replicas": 1,
-            "resources": {"cpu": "4", "memory": "8Gi"},
-        }
-        create_status, created = request("POST", f"{base}/api/v1/svc/inference-services", tenant_id, create_body)
-        expect(create_status, 202, "product-inference-service-cpu-create")
-        service_id = str(created.get("id") or "")
-        if not service_id:
-            fail("create did not return an inference service id")
-        checks.append({"id": "product-inference-service-cpu-create", "status": "passed", "http_status": 202})
-
-        deploy_name = runtime_resource_name(service_id)
-        deadline = time.time() + 180
-        while time.time() < deadline:
-            found = run(["kubectl", "--kubeconfig", kubeconfig, "-n", namespace, "get", "deploy", deploy_name])
-            if found.returncode == 0:
-                break
-            time.sleep(3)
-        else:
-            fail("platform-workload deployment was not created")
-        assert_cpu_deployment(kubeconfig, namespace, deploy_name, image)
-        checks.append({"id": "kubectl-vllm-cpu-deployment", "status": "passed", "image": "digest-pinned-vllm-cpu"})
-
-        observed = wait_service(base, tenant_id, service_id, "running", timeout=900, kubeconfig=kubeconfig)
-        if observed.get("invocation_url") is not None or observed.get("endpoint_url") is not None:
-            fail("product response leaked an invocation URL")
-        if "accelerator" in (observed.get("resources") or {}):
-            fail("CPU create projected an accelerator")
-        checks.append({"id": "inference-service-running-health-smoke", "status": "passed", "status_value": "running"})
-
-        logs_status, logs = request("GET", f"{base}/api/v1/svc/inference-services/{service_id}/logs?limit=20", tenant_id)
-        expect(logs_status, 200, "inference-service-product-logs")
-        items = logs.get("items") or []
-        if not items:
-            fail("product logs were empty after the runtime became running")
-        for item in items:
-            if not isinstance(item, dict):
-                fail("product log item is not an object")
-            if item.get("replica"):
-                fail("product logs leaked a replica identity")
-        ops_checks.append({"id": "inference-service-product-logs", "status": "passed", "item_count": len(items)})
-
-        scale_status, _ = request(
-            "PATCH",
-            f"{base}/api/v1/svc/inference-services/{service_id}",
-            tenant_id,
-            {"idempotency_key": str(uuid.uuid4()), "replicas": 2},
-        )
-        expect(scale_status, 202, "inference-service-scale-desired-replicas")
-        wait_deploy_replicas(kubeconfig, namespace, deploy_name, 2)
-        ops_checks.append({"id": "inference-service-scale-desired-replicas", "status": "passed", "desired_replicas": 2})
-
-        scale_back_status, _ = request(
-            "PATCH",
-            f"{base}/api/v1/svc/inference-services/{service_id}",
-            tenant_id,
-            {"idempotency_key": str(uuid.uuid4()), "replicas": 1},
-        )
-        expect(scale_back_status, 202, "inference-service-scale-back-running")
-        wait_service(base, tenant_id, service_id, "running", timeout=900, kubeconfig=kubeconfig)
-        wait_deploy_replicas(kubeconfig, namespace, deploy_name, 1)
-        ops_checks.append({"id": "inference-service-scale-back-running", "status": "passed", "desired_replicas": 1})
-
-        stop_proc(harness)
-        stop_proc(inference)
-        inference = start_proc([str(inference_bin)], ROOT / "services/inference-service", env, tmpdir / "inference-restart.log")
-        wait_tcp("127.0.0.1", 19104, timeout=60)
-        if inference.poll() is not None:
-            fail(f"inference-service restart exited: {redact_text(proc_log(inference)[-2000:] or 'no output')}")
-        harness = start_proc([str(harness_bin)], ROOT / "services/ani-gateway", env, tmpdir / "harness-restart.log")
-        wait_http(f"http://{listen}/readyz", harness, timeout=90)
-        restart_status, restarted = request("GET", f"{base}/api/v1/svc/inference-services/{service_id}", tenant_id)
-        expect(restart_status, 200, "inference-service-lab-restart-get")
-        if restarted.get("id") != service_id or restarted.get("status") != "running":
-            fail("inference service was not restored after lab process restart")
-        ops_checks.append({"id": "inference-service-lab-restart-get", "status": "passed", "restart_mode": "lab_process"})
-
-        stop_status, _ = request(
-            "POST",
-            f"{base}/api/v1/svc/inference-services/{service_id}/lifecycle",
-            tenant_id,
-            {"idempotency_key": str(uuid.uuid4()), "action": "stop"},
-        )
-        expect(stop_status, 202, "inference-service-stop")
-        wait_service(base, tenant_id, service_id, "stopped", timeout=180, kubeconfig=kubeconfig)
-        checks.append({"id": "inference-service-stop", "status": "passed", "status_value": "stopped"})
-
-        start_status, _ = request(
-            "POST",
-            f"{base}/api/v1/svc/inference-services/{service_id}/lifecycle",
-            tenant_id,
-            {"idempotency_key": str(uuid.uuid4()), "action": "start"},
-        )
-        expect(start_status, 202, "inference-service-start")
-        started = wait_service(base, tenant_id, service_id, "running", timeout=900, kubeconfig=kubeconfig)
-        if started.get("id") != service_id:
-            fail("start did not reuse the same inference service id")
-        checks.append({"id": "inference-service-start", "status": "passed", "same_service_id": True})
-
-        delete_status, _ = request("DELETE", f"{base}/api/v1/svc/inference-services/{service_id}", tenant_id)
-        expect(delete_status, 202, "inference-service-delete")
-        deadline = time.time() + 180
-        while time.time() < deadline:
-            gone_status, _ = request("GET", f"{base}/api/v1/svc/inference-services/{service_id}", tenant_id)
-            leftover = run(["kubectl", "--kubeconfig", kubeconfig, "-n", namespace, "get", "deploy,svc,netpol", deploy_name])
-            if gone_status == 404 and leftover.returncode != 0:
-                break
-            time.sleep(3)
-        else:
-            fail("delete did not remove the inference service and runtime")
-        checks.append({"id": "inference-service-delete", "status": "passed", "get_status": 404})
-
-        if gpu_count != 0:
-            fail("cluster unexpectedly advertised nvidia.com/gpu; this batch must skip GPU live")
-        checks.append({"id": "gpu-live-skipped-no-device-plugin", "status": "passed", "reason": "skipped_no_device_plugin"})
-        if not smoke_ready(kubeconfig):
-            fail("independent vLLM CPU smoke workload was disturbed")
-        checks.append({"id": "smoke-workload-untouched", "status": "passed", "namespace": SMOKE_NS})
-
-        evidence = {
-            "profile": PROFILE,
-            "status": "passed",
-            "generated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "gateway": "lab-process-not-in-cluster-ani-gateway",
-            "engine": "vllm-cpu",
-            "image": "digest-pinned-vllm-cpu",
-            "namespace_kind": "ani-tenant-{uuid}",
-            "model_mount": "pvc-snapshot-restore",
-            "probe": "kubernetes_service_proxy",
-            "gpu_live": "skipped_no_device_plugin",
-            "auth_mode": "dev",
-            "checks": checks,
-        }
-        assert_clean_evidence(evidence)
-        EVIDENCE.parent.mkdir(parents=True, exist_ok=True)
-        EVIDENCE.write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
-        ops_checks.append({"id": "smoke-workload-untouched", "status": "passed", "namespace": SMOKE_NS})
-        ops_evidence = {
-            "profile": OPS_PROFILE,
-            "status": "passed",
-            "generated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "gateway": "lab-process-not-in-cluster-ani-gateway",
-            "engine": "vllm-cpu",
-            "image": "digest-pinned-vllm-cpu",
-            "namespace_kind": "ani-tenant-{uuid}",
-            "restart_mode": "lab_process",
-            "scale": "desired_replicas_only_rwo_preempt",
-            "auth_mode": "dev",
-            "checks": ops_checks,
-        }
-        assert_clean_evidence(ops_evidence)
-        OPS_EVIDENCE.write_text(json.dumps(ops_evidence, indent=2) + "\n", encoding="utf-8")
-        print("inference cpu vllm live gate passed")
-        print(f"evidence {EVIDENCE.relative_to(ROOT)}")
-        print(f"ops evidence {OPS_EVIDENCE.relative_to(ROOT)}")
-    finally:
-        stop_proc(harness)
-        stop_proc(inference)
-        for forward in forwards:
-            if forward.poll() is None:
-                forward.send_signal(signal.SIGTERM)
-                try:
-                    forward.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    forward.kill()
-        if src_snapshot:
-            run(["kubectl", "--kubeconfig", kubeconfig, "-n", SMOKE_NS, "delete", "volumesnapshot", src_snapshot, "--wait=false", "--ignore-not-found"])
-        if dest_vsc:
-            run(["kubectl", "--kubeconfig", kubeconfig, "delete", "volumesnapshotcontent", dest_vsc, "--wait=false", "--ignore-not-found"])
-        if created_ns:
-            run(["kubectl", "--kubeconfig", kubeconfig, "delete", "ns", namespace, "--wait=false"])
-        postgres_exec(kubeconfig, f"DELETE FROM tenants WHERE id='{tenant_id}';")
-        run(["kubectl", "--kubeconfig", kubeconfig, "delete", "clusterrolebinding", sa_name, "--ignore-not-found"])
-        run(["kubectl", "--kubeconfig", kubeconfig, "delete", "clusterrole", sa_name, "--ignore-not-found"])
-        run(["kubectl", "--kubeconfig", kubeconfig, "-n", "ani-system", "delete", "serviceaccount", sa_name, "--ignore-not-found"])
+    raise SystemExit(
+        "lab Gateway harness was removed in C25; product live uses in-cluster ani-gateway. "
+        "Use scripts/run_inference_incluster_e2e.py, "
+        "scripts/run_inference_console_shaped_e2e.py, or "
+        "scripts/run_inference_local_model_source_e2e.py"
+    )
 
 
 if __name__ == "__main__":

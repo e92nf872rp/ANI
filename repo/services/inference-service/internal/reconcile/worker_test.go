@@ -31,6 +31,12 @@ func (*workerStore) FindCreateReplay(context.Context, uuid.UUID, string, uuid.UU
 func (*workerStore) CreateWithOperation(context.Context, domain.Service, domain.Operation) (repository.CreateResult, error) {
 	panic("unexpected CreateWithOperation")
 }
+func (*workerStore) BindRuntimeRef(context.Context, repository.RuntimeBinding) error {
+	panic("unexpected BindRuntimeRef")
+}
+func (*workerStore) AbortCreate(context.Context, repository.RuntimeBinding) error {
+	panic("unexpected AbortCreate")
+}
 func (s *workerStore) GetService(context.Context, uuid.UUID, uuid.UUID) (domain.Service, error) {
 	return s.service, nil
 }
@@ -54,12 +60,97 @@ func (s *workerStore) ApplyObservation(_ context.Context, observation repository
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.observations = append(s.observations, observation)
-	return s.applyErr
+	if s.applyErr != nil {
+		return s.applyErr
+	}
+	s.service.Status = observation.Status
+	if observation.RuntimeRef != uuid.Nil {
+		s.service.RuntimeRef = observation.RuntimeRef
+	}
+	s.service.RuntimeEndpoint = observation.RuntimeEndpoint
+	s.service.ReadyReplicas = observation.ReadyReplicas
+	if observation.Complete {
+		s.service.ObservedGeneration = observation.TargetGeneration
+		s.service.AppliedSpec = observation.AppliedSpec
+		s.service.ActiveOperationID = uuid.Nil
+		s.service.ActiveOperation = ""
+	}
+	return nil
 }
 func (s *workerStore) FailOperation(_ context.Context, failure repository.Failure) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.failures = append(s.failures, failure)
+	s.operation.Attempt++
+	s.operation.ErrorCode = failure.ErrorCode
+	s.operation.ErrorMessage = failure.ErrorMessage
+	switch {
+	case failure.DeadLetter:
+		s.operation.State = domain.OperationDeadLetter
+		s.service.Status = domain.StatusFailed
+		s.service.StatusReason = failure.ErrorCode
+		s.service.RuntimeEndpoint = ""
+		s.service.ActiveOperationID = uuid.Nil
+		s.service.ActiveOperation = ""
+	case failure.RetryAt == nil:
+		s.operation.State = domain.OperationFailed
+		s.service.Status = domain.StatusFailed
+		s.service.StatusReason = failure.ErrorCode
+		s.service.RuntimeEndpoint = ""
+		s.service.ActiveOperationID = uuid.Nil
+		s.service.ActiveOperation = ""
+	default:
+		s.operation.State = domain.OperationPending
+		s.claimed = false
+	}
+	return nil
+}
+
+func (s *workerStore) BeginScaleRollback(_ context.Context, request repository.ScaleRollback) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.service.DesiredState == domain.DesiredStateDeleted {
+		return 0, domain.ErrDeleted
+	}
+	if s.operation.RollbackGeneration != 0 {
+		return s.operation.RollbackGeneration, nil
+	}
+	if s.service.Generation != request.TargetGeneration || s.service.ActiveOperationID != request.OperationID {
+		return 0, repository.ErrStaleGeneration
+	}
+	s.service.DesiredSpec = s.service.AppliedSpec
+	s.service.Generation++
+	s.service.Status = domain.StatusDeploying
+	s.service.StatusReason = "SCALE_ROLLING_BACK"
+	s.operation.RollbackGeneration = s.service.Generation
+	s.operation.ErrorCode = "SCALE_ROLLING_BACK"
+	return s.operation.RollbackGeneration, nil
+}
+
+func (s *workerStore) FinishScaleRollback(_ context.Context, finish repository.ScaleRollbackFinish) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if finish.Success {
+		s.service.Status = domain.StatusRunning
+		s.service.AppliedSpec = finish.AppliedSpec
+		s.service.DesiredSpec = finish.AppliedSpec
+		s.service.ObservedGeneration = s.service.Generation
+		s.service.RuntimeRef = finish.RuntimeRef
+		s.service.RuntimeEndpoint = finish.RuntimeEndpoint
+		s.service.ReadyReplicas = finish.ReadyReplicas
+		s.service.StatusReason = codeScaleRolledBack
+		s.operation.State = domain.OperationFailed
+		s.operation.ErrorCode = codeScaleRolledBack
+	} else {
+		s.service.Status = domain.StatusFailed
+		s.service.StatusReason = codeRollbackFailed
+		s.service.RuntimeEndpoint = ""
+		s.service.ReadyReplicas = 0
+		s.operation.State = domain.OperationFailed
+		s.operation.ErrorCode = codeRollbackFailed
+	}
+	s.service.ActiveOperationID = uuid.Nil
+	s.service.ActiveOperation = ""
 	return nil
 }
 
@@ -190,6 +281,8 @@ func TestRunOnceRetryKeepsGenerationAndRuntimeIdempotencyKey(t *testing.T) {
 	store, runtime := workerFixture()
 	store.repeatClaims = true
 	runtime.ensureErr = errors.New("core temporarily unavailable")
+	runtime.observation.Ready = false
+	runtime.observation.ReadyReplicas = 0
 	now := time.Unix(200, 0).UTC()
 	worker := NewWorker(store, runtime, "worker-a", func() time.Time { return now })
 
@@ -199,8 +292,11 @@ func TestRunOnceRetryKeepsGenerationAndRuntimeIdempotencyKey(t *testing.T) {
 			t.Fatalf("retry RunOnce() = (%v, %v)", handled, err)
 		}
 	}
-	if len(runtime.requests) != 2 || runtime.requests[0].IdempotencyKey != runtime.requests[1].IdempotencyKey {
-		t.Fatalf("runtime retry changed idempotency key: %+v", runtime.requests)
+	if len(runtime.requests) != 1 || runtime.requests[0].IdempotencyKey == uuid.Nil {
+		t.Fatalf("create retry must reuse the first Ensure key and then only observe: %+v", runtime.requests)
+	}
+	if runtime.observeCalls == 0 {
+		t.Fatal("create retry after runtime_ref must Observe instead of Ensure")
 	}
 	if len(store.failures) != 2 {
 		t.Fatalf("failures = %d, want 2 retry schedules", len(store.failures))
@@ -255,8 +351,47 @@ func TestWorkerUnsupportedAcceleratorIsTerminal(t *testing.T) {
 	if err != nil || !handled {
 		t.Fatalf("RunOnce() = (%v, %v)", handled, err)
 	}
-	if len(store.failures) != 1 || store.failures[0].ErrorCode != "ACCELERATOR_SPEC_UNAVAILABLE" || store.failures[0].RetryAt != nil {
+	if len(store.failures) != 1 || store.failures[0].ErrorCode != codeAcceleratorUnavailable || store.failures[0].RetryAt != nil || store.failures[0].DeadLetter {
 		t.Fatalf("failures = %+v", store.failures)
+	}
+	if len(runtime.deletes) != 1 {
+		t.Fatalf("permanent create must delete provider runtime: %+v", runtime.deletes)
+	}
+}
+
+func TestWorkerWaitsForRequestPathEnsureOnFreshCreate(t *testing.T) {
+	store, runtime := workerFixture()
+	created := time.Unix(100, 0).UTC()
+	store.operation.CreatedAt = created
+	worker := NewWorker(store, runtime, "worker-a", func() time.Time { return created.Add(time.Second) })
+
+	handled, err := worker.RunOnce(context.Background())
+	if err != nil || !handled {
+		t.Fatalf("RunOnce() = (%v, %v)", handled, err)
+	}
+	if len(runtime.requests) != 0 {
+		t.Fatalf("fresh create must not Ensure: %+v", runtime.requests)
+	}
+	if runtime.observeCalls != 0 || runtime.healthCalls != 0 {
+		t.Fatal("fresh create must not Observe or Health")
+	}
+	if len(store.failures) != 1 || store.failures[0].ErrorCode != codeRuntimeNotBound || store.failures[0].RetryAt == nil {
+		t.Fatalf("failures = %+v, want RUNTIME_NOT_BOUND retry", store.failures)
+	}
+}
+
+func TestWorkerRecoversUnboundCreateAfterRequestPathGrace(t *testing.T) {
+	store, runtime := workerFixture()
+	created := time.Unix(100, 0).UTC()
+	store.operation.CreatedAt = created
+	worker := NewWorker(store, runtime, "worker-a", func() time.Time { return created.Add(requestPathEnsureGrace + time.Second) })
+
+	handled, err := worker.RunOnce(context.Background())
+	if err != nil || !handled {
+		t.Fatalf("RunOnce() = (%v, %v)", handled, err)
+	}
+	if len(runtime.requests) != 1 {
+		t.Fatalf("expired grace must Ensure once: %+v", runtime.requests)
 	}
 }
 
@@ -454,5 +589,235 @@ func TestPreemptedCreateCannotRestoreRuntimeAfterStop(t *testing.T) {
 	}
 	if len(store.observations) != 1 || store.observations[0].Status != domain.StatusDeploying {
 		t.Fatalf("preempted create advanced after fenced observation: %+v", store.observations)
+	}
+}
+
+func TestWorkerImageUnavailableIsTerminalAndDeletesRuntime(t *testing.T) {
+	store, runtime := workerFixture()
+	runtime.ensureErr = runtimeport.ErrImageUnavailable
+	worker := NewWorker(store, runtime, "worker-image", time.Now)
+	if handled, err := worker.RunOnce(context.Background()); err != nil || !handled {
+		t.Fatalf("RunOnce() = (%v, %v)", handled, err)
+	}
+	if len(store.failures) != 1 || store.failures[0].ErrorCode != codeImageUnavailable || store.failures[0].RetryAt != nil {
+		t.Fatalf("failures = %+v", store.failures)
+	}
+	if len(runtime.deletes) != 1 || store.service.Status != domain.StatusFailed {
+		t.Fatalf("image failure must release runtime: deletes=%+v status=%s", runtime.deletes, store.service.Status)
+	}
+}
+
+func TestWorkerCreateExhaustedRetriesGoDeadLetterAndDelete(t *testing.T) {
+	store, runtime := workerFixture()
+	store.repeatClaims = true
+	runtime.ensureErr = errors.New("core temporarily unavailable")
+	worker := NewWorker(store, runtime, "worker-dead-letter", func() time.Time { return time.Unix(400, 0).UTC() })
+	worker.maxAttempts = 2
+
+	for i := 0; i < 2; i++ {
+		if handled, err := worker.RunOnce(context.Background()); err != nil || !handled {
+			t.Fatalf("RunOnce(%d) = (%v, %v)", i, handled, err)
+		}
+	}
+	if len(store.failures) != 2 {
+		t.Fatalf("failures = %+v", store.failures)
+	}
+	if store.failures[0].RetryAt == nil || store.failures[0].DeadLetter {
+		t.Fatalf("first failure must retry: %+v", store.failures[0])
+	}
+	last := store.failures[1]
+	if !last.DeadLetter || last.RetryAt != nil || last.ErrorCode != codeRuntimeMutationFailed {
+		t.Fatalf("second failure must dead-letter: %+v", last)
+	}
+	if store.operation.State != domain.OperationDeadLetter || store.service.Status != domain.StatusFailed {
+		t.Fatalf("dead-letter state = %s/%s", store.operation.State, store.service.Status)
+	}
+	if len(runtime.deletes) != 1 {
+		t.Fatalf("dead-letter create must delete provider runtime: %+v", runtime.deletes)
+	}
+}
+
+func TestWorkerCreateDeployTimeoutFailsAndDeletesRuntime(t *testing.T) {
+	store, runtime := workerFixture()
+	store.operation.CreatedAt = time.Unix(0, 0).UTC()
+	runtime.observation.Ready = false
+	runtime.observation.ReadyReplicas = 0
+	worker := NewWorker(store, runtime, "worker-timeout", func() time.Time { return time.Unix(20*60, 0).UTC() })
+	worker.deployTimeout = 15 * time.Minute
+	if handled, err := worker.RunOnce(context.Background()); err != nil || !handled {
+		t.Fatalf("RunOnce() = (%v, %v)", handled, err)
+	}
+	if len(store.failures) != 1 || store.failures[0].ErrorCode != codeDeployTimeout || store.failures[0].RetryAt != nil || store.failures[0].DeadLetter {
+		t.Fatalf("timeout failure = %+v", store.failures)
+	}
+	if len(runtime.deletes) != 1 || store.service.Status != domain.StatusFailed {
+		t.Fatalf("deploy timeout must release runtime: deletes=%+v status=%s", runtime.deletes, store.service.Status)
+	}
+	if runtime.deletes[0].IdempotencyKey == runtimeIdempotencyKey(store.operation.ServiceID, store.operation.TargetGeneration) {
+		t.Fatal("cleanup must not reuse the create Ensure idempotency key")
+	}
+	if runtime.deletes[0].IdempotencyKey != cleanupIdempotencyKey(store.operation.ServiceID, store.operation.TargetGeneration) {
+		t.Fatalf("cleanup key = %s", runtime.deletes[0].IdempotencyKey)
+	}
+}
+
+func TestWorkerScaleFailureRollsBackToBeforeSpec(t *testing.T) {
+	store, runtime := workerFixture()
+	store.operation.Type = domain.ActionScale
+	store.operation.TargetGeneration = 2
+	store.operation.CreatedAt = time.Unix(0, 0).UTC()
+	store.operation.BeforeSpec = domain.Spec{Replicas: 1}
+	store.operation.TargetSpec = domain.Spec{Replicas: 2}
+	store.service.Status = domain.StatusDeploying
+	store.service.Generation = 2
+	store.service.AppliedSpec = domain.Spec{Replicas: 1}
+	store.service.DesiredSpec = domain.Spec{Replicas: 2}
+	store.service.RuntimeRef = runtime.observation.RuntimeRef
+	store.service.ActiveOperationID = store.operation.ID
+	runtime.observation.ReadyReplicas = 1
+	runtime.observation.Ready = true
+
+	worker := NewWorker(store, runtime, "worker-scale-rollback", func() time.Time { return time.Unix(16*60, 0).UTC() })
+	worker.deployTimeout = 15 * time.Minute
+	if handled, err := worker.RunOnce(context.Background()); err != nil || !handled {
+		t.Fatalf("RunOnce() = (%v, %v)", handled, err)
+	}
+	if store.operation.RollbackGeneration != 3 {
+		t.Fatalf("rollback generation = %d, want 3", store.operation.RollbackGeneration)
+	}
+	if len(runtime.requests) < 2 {
+		t.Fatalf("scale+rollback Ensure calls = %+v", runtime.requests)
+	}
+	rollback := runtime.requests[len(runtime.requests)-1]
+	if rollback.Spec.Replicas != 1 || rollback.Generation != 3 || rollback.IdempotencyKey != rollbackIdempotencyKey(store.operation.ID, 3) {
+		t.Fatalf("rollback Ensure = %+v", rollback)
+	}
+	if store.service.Status != domain.StatusRunning || store.service.AppliedSpec.Replicas != 1 || store.service.DesiredSpec.Replicas != 1 {
+		t.Fatalf("rolled-back service = %+v", store.service)
+	}
+	if store.operation.State != domain.OperationFailed || store.operation.ErrorCode != codeScaleRolledBack {
+		t.Fatalf("rolled-back operation = %+v", store.operation)
+	}
+	if store.service.StatusReason != codeScaleRolledBack {
+		t.Fatalf("service reason = %s", store.service.StatusReason)
+	}
+}
+
+func TestWorkerNotReadyDoesNotDeadLetterBeforeTimeout(t *testing.T) {
+	store, runtime := workerFixture()
+	store.operation.Attempt = 19
+	store.operation.CreatedAt = time.Unix(100, 0).UTC()
+	runtime.observation.Ready = false
+	runtime.observation.ReadyReplicas = 0
+	worker := NewWorker(store, runtime, "worker-not-ready", func() time.Time { return time.Unix(130, 0).UTC() })
+	worker.maxAttempts = 20
+	worker.deployTimeout = 15 * time.Minute
+	if handled, err := worker.RunOnce(context.Background()); err != nil || !handled {
+		t.Fatalf("RunOnce() = (%v, %v)", handled, err)
+	}
+	if len(store.failures) != 1 || store.failures[0].RetryAt == nil || store.failures[0].DeadLetter {
+		t.Fatalf("not-ready must keep retrying until deploy timeout: %+v", store.failures)
+	}
+	if len(runtime.deletes) != 0 {
+		t.Fatalf("not-ready must not delete runtime before timeout: %+v", runtime.deletes)
+	}
+}
+
+func TestWorkerStartPermanentFailureDeletesRuntime(t *testing.T) {
+	store, runtime := workerFixture()
+	store.operation.Type = domain.ActionStart
+	store.operation.TargetGeneration = 2
+	store.service.Status = domain.StatusDeploying
+	store.service.Generation = 2
+	store.service.RuntimeRef = uuid.Nil
+	store.service.ActiveOperationID = store.operation.ID
+	runtime.ensureErr = runtimeport.ErrImageUnavailable
+	worker := NewWorker(store, runtime, "worker-start-fail", time.Now)
+	if handled, err := worker.RunOnce(context.Background()); err != nil || !handled {
+		t.Fatalf("RunOnce() = (%v, %v)", handled, err)
+	}
+	if len(store.failures) != 1 || store.failures[0].ErrorCode != codeImageUnavailable || store.failures[0].RetryAt != nil {
+		t.Fatalf("start failure = %+v", store.failures)
+	}
+	if len(runtime.deletes) != 1 {
+		t.Fatalf("start permanent failure must delete runtime: %+v", runtime.deletes)
+	}
+}
+
+func TestWorkerScaleRollbackFailureMarksRollbackFailed(t *testing.T) {
+	store, runtime := workerFixture()
+	store.operation.Type = domain.ActionScale
+	store.operation.TargetGeneration = 2
+	store.operation.Attempt = 19
+	store.operation.BeforeSpec = domain.Spec{Replicas: 1}
+	store.operation.TargetSpec = domain.Spec{Replicas: 2}
+	store.service.Status = domain.StatusDeploying
+	store.service.Generation = 2
+	store.service.AppliedSpec = domain.Spec{Replicas: 1}
+	store.service.DesiredSpec = domain.Spec{Replicas: 2}
+	store.service.RuntimeRef = runtime.observation.RuntimeRef
+	store.service.ActiveOperationID = store.operation.ID
+	runtime.ensureErr = runtimeport.ErrImageUnavailable
+
+	worker := NewWorker(store, runtime, "worker-rollback-failed", time.Now)
+	if handled, err := worker.RunOnce(context.Background()); err != nil || !handled {
+		t.Fatalf("RunOnce() = (%v, %v)", handled, err)
+	}
+	if store.service.Status != domain.StatusFailed || store.service.StatusReason != codeRollbackFailed {
+		t.Fatalf("service = status=%s reason=%s", store.service.Status, store.service.StatusReason)
+	}
+	if store.operation.State != domain.OperationFailed || store.operation.ErrorCode != codeRollbackFailed {
+		t.Fatalf("operation = %+v", store.operation)
+	}
+	if store.operation.RollbackGeneration == 0 {
+		t.Fatal("rollback generation must be recorded before ROLLBACK_FAILED")
+	}
+}
+
+func TestWorkerScaleRollbackSkippedWhenDesiredDeleted(t *testing.T) {
+	store, runtime := workerFixture()
+	store.operation.Type = domain.ActionScale
+	store.operation.TargetGeneration = 2
+	store.operation.Attempt = 19
+	store.service.Status = domain.StatusDeploying
+	store.service.Generation = 2
+	store.service.DesiredState = domain.DesiredStateDeleted
+	store.service.AppliedSpec = domain.Spec{Replicas: 1}
+	store.service.DesiredSpec = domain.Spec{Replicas: 2}
+	store.service.ActiveOperationID = store.operation.ID
+
+	worker := NewWorker(store, runtime, "worker-delete-wins", time.Now)
+	if handled, err := worker.RunOnce(context.Background()); err != nil || !handled {
+		t.Fatalf("RunOnce() = (%v, %v)", handled, err)
+	}
+	if store.operation.RollbackGeneration != 0 {
+		t.Fatalf("delete-wins started rollback: %+v", store.operation)
+	}
+	if len(runtime.requests) != 0 {
+		t.Fatalf("delete-wins must not Ensure previous spec: %+v", runtime.requests)
+	}
+}
+
+func TestClassifyRuntimeErrorAndGenerationMatch(t *testing.T) {
+	cases := []struct {
+		err  error
+		code string
+	}{
+		{runtimeport.ErrRuntimeUnsupported, codeAcceleratorUnavailable},
+		{runtimeport.ErrImageUnavailable, codeImageUnavailable},
+		{runtimeport.ErrEngineProfileUnapproved, codeEngineProfileUnapproved},
+		{runtimeport.ErrReservedFieldConflict, codeReservedFieldConflict},
+		{errors.New("core 502"), codeRuntimeMutationFailed},
+	}
+	for _, tc := range cases {
+		got := classifyRuntimeError(tc.err)
+		if got.code != tc.code || got.retryable != retryableCode(tc.code) {
+			t.Fatalf("classify(%v) = %+v", tc.err, got)
+		}
+	}
+	service := domain.Service{ActiveOperationID: uuid.MustParse("70000000-0000-0000-0000-000000000007"), Generation: 3}
+	operation := domain.Operation{ID: service.ActiveOperationID, TargetGeneration: 2, RollbackGeneration: 3}
+	if !generationMatches(service, operation) {
+		t.Fatal("rollback generation must match the compensated service generation")
 	}
 }

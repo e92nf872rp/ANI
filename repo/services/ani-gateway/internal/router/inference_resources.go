@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -11,15 +12,21 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/route"
 	inferencecontrolv1 "github.com/kubercloud/ani/pkg/generated/pb/inference/control/v1"
+	"github.com/kubercloud/ani/pkg/ports"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 var (
-	inferenceControlClient      InferenceControlClient
-	errInvalidInferenceLogQuery = errors.New("invalid inference log query")
+	inferenceControlClient       InferenceControlClient
+	inferenceImageRegistry       ports.ImageRegistry
+	errInvalidInferenceLogQuery  = errors.New("invalid inference log query")
+	errInferenceImageMissing     = errors.New("image_id or image_ref is required")
+	errInferenceImageUnavailable = errors.New("inference runtime image is unavailable")
+	inferenceDigestPinnedImage   = regexp.MustCompile(`^.+@sha256:[a-f0-9]{64}$`)
 )
 
+// registerInferenceServices 把产品 HTTP 挂到 /api/v1/svc。租户身份来自 auth middleware。
 func registerInferenceServices(svc *route.RouterGroup) {
 	svc.GET("/inference-services", listInferenceServices)
 	svc.POST("/inference-services", createInferenceService)
@@ -43,6 +50,19 @@ type createInferenceServiceJSON struct {
 	PlacementMode   string                         `json:"placement_mode"`
 	GPUType         string                         `json:"gpu_type"`
 	GPUCountPerPod  int32                          `json:"gpu_count_per_pod"`
+	ImageID         string                         `json:"image_id"`
+	ImageRef        string                         `json:"image_ref"`
+	Engine          *inferenceServiceEngineJSON    `json:"engine"`
+}
+
+type inferenceServiceEngineJSON struct {
+	Env     []inferenceServiceEngineEnvJSON `json:"env"`
+	Command []string                        `json:"command"`
+}
+
+type inferenceServiceEngineEnvJSON struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 type inferenceServiceResourcesJSON struct {
@@ -105,6 +125,21 @@ func createInferenceService(ctx context.Context, c *app.RequestContext) {
 		writeInferenceInvalid(c, "idempotency_key, name, and model are required")
 		return
 	}
+	engine, err := protoEngineFromJSON(req.Engine)
+	if err != nil {
+		writeInferenceInvalid(c, err.Error())
+		return
+	}
+	imageID, imageRef, err := resolveInferenceCreateImage(ctx, tenantID, req.ImageID, req.ImageRef)
+	if err != nil {
+		if errors.Is(err, errInferenceImageMissing) {
+			writeInferenceInvalid(c, "image_id or image_ref is required")
+			return
+		}
+		writeInferenceUnprocessable(c, "IMAGE_UNAVAILABLE", "inference runtime image is unavailable")
+		return
+	}
+	// Product create takes a real model_version_id (or the same UUID in model).
 	created, err := inferenceControlClient.CreateInferenceService(ctx, tenantID, &inferencecontrolv1.CreateInferenceServiceRequest{
 		IdempotencyKey:  strings.TrimSpace(req.IdempotencyKey),
 		Name:            strings.TrimSpace(req.Name),
@@ -116,6 +151,9 @@ func createInferenceService(ctx context.Context, c *app.RequestContext) {
 		PlacementMode:   strings.TrimSpace(req.PlacementMode),
 		GpuType:         strings.TrimSpace(req.GPUType),
 		GpuCountPerPod:  req.GPUCountPerPod,
+		ImageId:         imageID,
+		ImageRef:        imageRef,
+		Engine:          engine,
 	})
 	if err != nil {
 		writeInferenceGRPCError(c, err)
@@ -303,12 +341,14 @@ func inferenceServiceJSON(msg *inferencecontrolv1.InferenceService) map[string]a
 	if msg == nil {
 		return map[string]any{}
 	}
-	return map[string]any{
+	body := map[string]any{
 		"id":                   msg.GetId(),
 		"name":                 msg.GetName(),
 		"model":                msg.GetModel(),
 		"model_version_id":     emptyToNil(msg.GetModelVersionId()),
 		"served_model_name":    msg.GetServedModelName(),
+		"image_id":             emptyToNil(msg.GetImageId()),
+		"image_ref":            emptyToNil(msg.GetImageRef()),
 		"replicas":             msg.GetReplicas(),
 		"ready_replicas":       msg.GetReadyReplicas(),
 		"resources":            inferenceResourcesJSON(msg.GetResources()),
@@ -327,6 +367,10 @@ func inferenceServiceJSON(msg *inferencecontrolv1.InferenceService) map[string]a
 		"created_at":           timestampJSON(msg.GetCreatedAt()),
 		"updated_at":           timestampJSON(msg.GetUpdatedAt()),
 	}
+	if engine := inferenceEngineJSON(msg.GetEngine()); engine != nil {
+		body["engine"] = engine
+	}
+	return body
 }
 
 func inferenceResourcesJSON(msg *inferencecontrolv1.InferenceServiceResources) map[string]any {
@@ -389,6 +433,109 @@ func emptyToNil(value string) any {
 		return nil
 	}
 	return value
+}
+
+func resolveInferenceCreateImage(ctx context.Context, tenantID, imageID, imageRef string) (string, string, error) {
+	imageID = strings.TrimSpace(imageID)
+	imageRef = strings.TrimSpace(imageRef)
+	if imageID == "" && imageRef == "" {
+		return "", "", errInferenceImageMissing
+	}
+	if imageID != "" {
+		digest, err := lookupInferenceRegistryImage(ctx, tenantID, imageID)
+		if err == nil {
+			return imageID, digest, nil
+		}
+		if inferenceDigestPinnedImage.MatchString(imageID) {
+			return imageID, imageID, nil
+		}
+		return "", "", errInferenceImageUnavailable
+	}
+	if inferenceDigestPinnedImage.MatchString(imageRef) {
+		return "", imageRef, nil
+	}
+	digest, err := lookupInferenceRegistryImage(ctx, tenantID, imageRef)
+	if err != nil {
+		return "", "", errInferenceImageUnavailable
+	}
+	return "", digest, nil
+}
+
+func lookupInferenceRegistryImage(ctx context.Context, tenantID, imageRef string) (string, error) {
+	if inferenceImageRegistry == nil {
+		return "", errInferenceImageUnavailable
+	}
+	_, project, repository, tag, digest := parseInferenceImageReference(imageRef)
+	if repository == "" {
+		return "", errInferenceImageUnavailable
+	}
+	if project != "" && project != tenantID {
+		return "", errInferenceImageUnavailable
+	}
+	result, err := inferenceImageRegistry.ListImages(ctx, ports.RegistryImageListRequest{
+		TenantID: tenantID, Project: tenantID, Repository: repository, Tag: tag,
+	})
+	if err != nil {
+		return "", errInferenceImageUnavailable
+	}
+	for _, item := range result.Items {
+		if digest != "" && item.Digest != digest {
+			continue
+		}
+		pinned, ok := pinInferenceRegistryImage(item)
+		if !ok {
+			continue
+		}
+		return pinned, nil
+	}
+	return "", errInferenceImageUnavailable
+}
+
+func pinInferenceRegistryImage(image ports.RegistryImage) (string, bool) {
+	if inferenceDigestPinnedImage.MatchString(strings.TrimSpace(image.Image)) {
+		return strings.TrimSpace(image.Image), true
+	}
+	digest := strings.TrimSpace(image.Digest)
+	if digest != "" && !strings.HasPrefix(digest, "sha256:") {
+		digest = "sha256:" + digest
+	}
+	name := strings.TrimSpace(image.Image)
+	if at := strings.Index(name, "@"); at >= 0 {
+		name = name[:at]
+	}
+	slash := strings.LastIndex(name, "/")
+	if colon := strings.LastIndex(name, ":"); colon > slash && colon >= 0 {
+		name = name[:colon]
+	}
+	pinned := name + "@" + digest
+	if !inferenceDigestPinnedImage.MatchString(pinned) {
+		return "", false
+	}
+	return pinned, true
+}
+
+func parseInferenceImageReference(value string) (registryHost, project, repository, tag, digest string) {
+	value = strings.TrimSpace(value)
+	if at := strings.Index(value, "@"); at >= 0 {
+		digest = value[at+1:]
+		value = value[:at]
+	}
+	parts := strings.Split(value, "/")
+	if len(parts) > 0 && (strings.Contains(parts[0], ".") || strings.Contains(parts[0], ":") || parts[0] == "localhost") {
+		registryHost = parts[0]
+		parts = parts[1:]
+	}
+	if len(parts) > 1 {
+		project = parts[0]
+		repository = strings.Join(parts[1:], "/")
+	} else if len(parts) == 1 {
+		repository = parts[0]
+	}
+	if colon := strings.LastIndex(repository, ":"); colon >= 0 {
+		tag = repository[colon+1:]
+		repository = repository[:colon]
+	}
+	return registryHost, project, repository, tag, digest
 }
 
 func timestampJSON(value *timestamppb.Timestamp) any {

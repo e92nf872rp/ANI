@@ -42,7 +42,7 @@ func TestResolveReadySafetensorsAssignsCPUAndGPUProfiles(t *testing.T) {
 	if got.DisplayName != "Qwen 7B / v1" || got.ArtifactDigest != "sha256:abc" {
 		t.Fatalf("snapshot = %+v", got)
 	}
-	if got.CPUProfile.ImageRef != defaultCPUImage || got.GPUProfile.ID != "vllm-chat-gpu" {
+	if got.CPUProfile.ID != "vllm-chat-cpu" || got.CPUProfile.Runtime != "vllm" || got.GPUProfile.ID != "vllm-chat-gpu" {
 		t.Fatalf("profiles = cpu=%+v gpu=%+v", got.CPUProfile, got.GPUProfile)
 	}
 	if got.SecretRef != "" {
@@ -140,12 +140,44 @@ func TestResolveUnavailableIsNotMappedToNotFound(t *testing.T) {
 	}
 }
 
-func TestNewRejectsTagImage(t *testing.T) {
+func TestResolveObjectStoreArtifactIsIncompatible(t *testing.T) {
+	tenantID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	versionID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	modelID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	resp := readyResponse(tenantID, modelID, versionID, "safetensors", "ready", []string{"text-generation"}, false, "")
+	resp.Version.StoragePath = "object://models/qwen/v1"
+	cat := mustCatalog(t, &stubClient{resp: resp})
+
+	_, err := cat.Resolve(context.Background(), tenantID, versionID)
+	if !errors.Is(err, catalog.ErrNoCompatibleProfile) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestResolveSGLangCapabilitySelectsSGLangRuntime(t *testing.T) {
+	tenantID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	versionID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	modelID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	cat := mustCatalog(t, &stubClient{resp: readyResponse(tenantID, modelID, versionID, "safetensors", "ready", []string{"text-generation", "sglang"}, false, "")})
+
+	got, err := cat.Resolve(context.Background(), tenantID, versionID)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got.CPUProfile == nil || got.CPUProfile.Runtime != "sglang" || got.GPUProfile.Runtime != "sglang" {
+		t.Fatalf("profiles = cpu=%+v gpu=%+v", got.CPUProfile, got.GPUProfile)
+	}
+	if got.CPUProfile.ID != "sglang-chat-cpu" {
+		t.Fatalf("cpu profile id = %q", got.CPUProfile.ID)
+	}
+}
+
+func TestNewRejectsEmptyRuntime(t *testing.T) {
 	profiles := DefaultProfiles()
-	profiles.CPU.ImageRef = "registry.ani.internal/platform/vllm-openai-cpu:latest"
+	profiles.CPU.Runtime = ""
 	_, err := New(&stubClient{}, profiles)
 	if err == nil {
-		t.Fatal("expected digest-pinned image error")
+		t.Fatal("expected engine profile runtime error")
 	}
 }
 
@@ -178,7 +210,7 @@ func readyResponse(tenantID, modelID, versionID uuid.UUID, format, status string
 			EncryptHint:    hint,
 			SizeBytes:      12,
 			ChecksumSha256: "abc",
-			StoragePath:    "object://models/qwen/v1",
+			StoragePath:    "pvc://vllm-model#/models/qwen",
 		},
 	}
 }

@@ -21,6 +21,7 @@ type fakePlatformWorkloadRuntime struct {
 	applyErr error
 	ready    bool
 	missing  bool
+	caps     *ports.PlatformWorkloadCapabilities
 }
 
 func newReadyFakePlatformWorkloadRuntime() *fakePlatformWorkloadRuntime {
@@ -63,6 +64,13 @@ func (f *fakePlatformWorkloadRuntime) Logs(context.Context, string, string, port
 		Container: "inference-cpu-example",
 		Stream:    "stdout",
 	}}}, nil
+}
+
+func (f *fakePlatformWorkloadRuntime) DiscoverCapabilities(context.Context) (ports.PlatformWorkloadCapabilities, error) {
+	if f.caps != nil {
+		return *f.caps, nil
+	}
+	return defaultPlatformWorkloadCapabilities(), nil
 }
 
 func (f *fakePlatformWorkloadRuntime) observation(tenantID string, spec ports.PlatformWorkloadCreateSpec) platformWorkloadObservation {
@@ -204,12 +212,42 @@ func TestKubernetesPlatformWorkloadAcceptsAcceleratorAndRejectsLeaderWorker(t *t
 		t.Fatalf("incomplete accelerator Create() error = %v", err)
 	}
 
-	lws := sampleCPUPlatformWorkloadSpec("6df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-lws")
-	lws.Topology.Mode = "leader_worker"
-	lws.Topology.HasLeader = true
-	lws.Scheduling.Gang = true
+	lws := sampleLeaderWorkerPlatformWorkloadSpec("6df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-lws")
 	if _, err := svc.Create(ctx, tenant, lws); !errors.Is(err, ports.ErrFailedPrecondition) {
 		t.Fatalf("leader_worker Create() error = %v", err)
+	}
+}
+
+func TestKubernetesPlatformWorkloadAcceptsAdvertisedGPUAndLeaderWorker(t *testing.T) {
+	provider := newReadyFakePlatformWorkloadRuntime()
+	provider.caps = &ports.PlatformWorkloadCapabilities{
+		SupportedTopologyModes: []string{"single_node", "leader_worker"},
+		LeaderWorkerSetReady:   true,
+		GangSchedulingReady:    true,
+		SupportedProfiles: []ports.PlatformWorkloadTopologyProfile{
+			{ID: "container-single-node", Version: "v1", Mode: "single_node"},
+			{ID: "container-leader-worker", Version: "v1", Mode: "leader_worker"},
+		},
+		AcceleratorSpecs: []ports.PlatformWorkloadAcceleratorCapability{{
+			SpecID: "gpu-a100-full", Available: true, MaxSingleNodeCount: 1,
+		}},
+	}
+	svc := NewKubernetesPlatformWorkloadService(provider)
+	ctx := context.Background()
+	tenant := "11111111-1111-1111-1111-111111111111"
+
+	gpu := sampleCPUPlatformWorkloadSpec("5df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-gpu")
+	gpu.Resources.AcceleratorSpecID = "gpu-a100-full"
+	gpu.Resources.AcceleratorCount = 1
+	created, err := svc.Create(ctx, tenant, gpu)
+	if err != nil || created.RuntimeShape != "deployment" {
+		t.Fatalf("advertised GPU Create() = %+v, %v", created, err)
+	}
+
+	lws := sampleLeaderWorkerPlatformWorkloadSpec("6df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-lws")
+	createdLWS, err := svc.Create(ctx, tenant, lws)
+	if err != nil || createdLWS.RuntimeShape != "leader_worker_set" {
+		t.Fatalf("advertised LWS Create() = %+v, %v", createdLWS, err)
 	}
 }
 
@@ -302,6 +340,27 @@ func TestRenderPlatformWorkloadManifestsUsesClusterIPAndInferenceLabels(t *testi
 	if _, ok := resources["nvidia.com/gpu"]; ok {
 		t.Fatalf("CPU manifest requested GPU: %#v", resources)
 	}
+	podSpec, _ := deployment["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)
+	if _, ok := podSpec["schedulerName"]; ok {
+		t.Fatalf("CPU manifest set schedulerName: %#v", podSpec)
+	}
+	if strings.Contains(manifests[0].Content, "volcano") {
+		t.Fatalf("CPU manifest referenced volcano:\n%s", manifests[0].Content)
+	}
+	strategy, _ := deployment["spec"].(map[string]any)["strategy"].(map[string]any)
+	if strategy["type"] != "Recreate" {
+		t.Fatalf("CPU strategy = %#v", strategy)
+	}
+	if !strings.Contains(manifests[0].Content, `"sizeLimit": "1Gi"`) {
+		t.Fatalf("CPU shm should stay 1Gi:\n%s", manifests[0].Content)
+	}
+	annotations, _ := deployment["spec"].(map[string]any)["template"].(map[string]any)["metadata"].(map[string]any)["annotations"].(map[string]any)
+	if annotations["ovn.kubernetes.io/logical_switch"] != kubeOVNDefaultLogicalSwitch {
+		t.Fatalf("CPU overlay switch = %#v", annotations)
+	}
+	if annotations["ovn.kubernetes.io/vpc"] != kubeOVNDefaultVPC {
+		t.Fatalf("CPU overlay vpc = %#v", annotations)
+	}
 }
 
 func TestRenderPlatformWorkloadNetworkPolicyDeniesExternalAndForeignNamespace(t *testing.T) {
@@ -363,6 +422,45 @@ func TestRenderPlatformWorkloadNetworkPolicyAllowsNodeInternalIPBlocks(t *testin
 	}
 }
 
+func TestRenderPlatformWorkloadManifestsRequestsVolcanoVGPUForVGPUSpec(t *testing.T) {
+	spec := sampleCPUPlatformWorkloadSpec("5df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-vgpu-example")
+	spec.Resources.AcceleratorSpecID = "gpu-nvidia-geforce-rtx-4090-4x"
+	spec.Resources.AcceleratorCount = 1
+	spec.Resources.AcceleratorMemoryMB = 6144
+	manifests := renderPlatformWorkloadManifests("11111111-1111-1111-1111-111111111111", "workload-vgpu-1", spec, nil)
+	var deployment map[string]any
+	if err := json.Unmarshal([]byte(manifests[0].Content), &deployment); err != nil {
+		t.Fatalf("deployment json: %v", err)
+	}
+	container, _ := deployment["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)["containers"].([]any)[0].(map[string]any)
+	resources, _ := container["resources"].(map[string]any)["requests"].(map[string]any)
+	if resources["volcano.sh/vgpu-number"] != "1" || resources["volcano.sh/vgpu-memory"] != "6144" {
+		t.Fatalf("vgpu request = %#v", resources)
+	}
+	if _, ok := resources["nvidia.com/gpu"]; ok {
+		t.Fatalf("vGPU spec must not request nvidia.com/gpu: %#v", resources)
+	}
+}
+
+func TestRenderPlatformWorkloadManifestsInjectsTenantEnv(t *testing.T) {
+	spec := sampleCPUPlatformWorkloadSpec("1df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-cpu-example")
+	spec.Env = []ports.PlatformWorkloadEnvVar{{Name: "VLLM_LOGGING_LEVEL", Value: "DEBUG"}}
+	manifests := renderPlatformWorkloadManifests("11111111-1111-1111-1111-111111111111", "workload-id-1", spec, nil)
+	var deployment map[string]any
+	if err := json.Unmarshal([]byte(manifests[0].Content), &deployment); err != nil {
+		t.Fatalf("deployment json: %v", err)
+	}
+	container, _ := deployment["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)["containers"].([]any)[0].(map[string]any)
+	env, _ := container["env"].([]any)
+	if len(env) != 1 {
+		t.Fatalf("env = %#v", env)
+	}
+	item, _ := env[0].(map[string]any)
+	if item["name"] != "VLLM_LOGGING_LEVEL" || item["value"] != "DEBUG" {
+		t.Fatalf("env item = %#v", item)
+	}
+}
+
 func TestRenderPlatformWorkloadManifestsRequestsGPUForAccelerator(t *testing.T) {
 	spec := sampleCPUPlatformWorkloadSpec("5df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-gpu-example")
 	spec.Resources.AcceleratorSpecID = "gpu-a100"
@@ -377,12 +475,133 @@ func TestRenderPlatformWorkloadManifestsRequestsGPUForAccelerator(t *testing.T) 
 	if resources["nvidia.com/gpu"] != "2" {
 		t.Fatalf("gpu request = %#v", resources)
 	}
+	podSpec, _ := deployment["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)
+	if podSpec["schedulerName"] != "volcano" {
+		t.Fatalf("GPU schedulerName = %#v", podSpec["schedulerName"])
+	}
+	if strings.Contains(manifests[0].Content, "ani-inference") || strings.Contains(manifests[0].Content, "queue-name") {
+		t.Fatalf("GPU manifest bound a named Volcano queue:\n%s", manifests[0].Content)
+	}
+	if strings.Contains(manifests[0].Content, "PodGroup") || strings.Contains(manifests[0].Content, "LeaderWorkerSet") {
+		t.Fatalf("single-node GPU rendered LWS/PodGroup:\n%s", manifests[0].Content)
+	}
+	strategy, _ := deployment["spec"].(map[string]any)["strategy"].(map[string]any)
+	if strategy["type"] != "Recreate" {
+		t.Fatalf("GPU strategy = %#v", strategy)
+	}
+	if !strings.Contains(manifests[0].Content, `"sizeLimit": "12Gi"`) {
+		t.Fatalf("multi-GPU shm should be 12Gi:\n%s", manifests[0].Content)
+	}
 	labels, _ := deployment["metadata"].(map[string]any)["labels"].(map[string]any)
 	if labels["ani.kubercloud.io/accelerator-spec-id"] != "gpu-a100" {
 		t.Fatalf("labels = %#v", labels)
 	}
 	if _, ok := labels["ani.kubercloud.io/instance"]; ok {
 		t.Fatalf("rendered instance identity label: %#v", labels)
+	}
+}
+
+func TestRenderLeaderWorkerPlatformWorkloadUsesLWSPodGroupAndLeaderService(t *testing.T) {
+	spec := sampleLeaderWorkerPlatformWorkloadSpec("6df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-lws")
+	manifests := renderPlatformWorkloadManifests("11111111-1111-1111-1111-111111111111", "workload-lws-1", spec, nil)
+	if len(manifests) != 4 || manifests[0].Kind != "LeaderWorkerSet" || manifests[1].Kind != "PodGroup" || manifests[2].Kind != "Service" || manifests[3].Kind != "NetworkPolicy" {
+		t.Fatalf("manifests = %+v", manifests)
+	}
+	joined := manifests[0].Content + manifests[1].Content + manifests[2].Content
+	if !strings.Contains(joined, `"schedulerName": "volcano"`) {
+		t.Fatalf("LWS/PodGroup missing volcano scheduler:\n%s", joined)
+	}
+	if strings.Contains(joined, "ani-inference") {
+		t.Fatalf("LWS/PodGroup bound a named Volcano queue:\n%s", joined)
+	}
+	if !strings.Contains(joined, `"ani.kubercloud.io/inference-role": "leader"`) {
+		t.Fatalf("missing leader role label:\n%s", joined)
+	}
+	if !strings.Contains(manifests[2].Content, `"ani.kubercloud.io/inference-role": "leader"`) {
+		t.Fatalf("service does not select leader:\n%s", manifests[2].Content)
+	}
+	if !strings.Contains(manifests[2].Content, `"name": "inference-lws-http"`) {
+		t.Fatalf("LWS ClusterIP must not reuse the LWS headless name:\n%s", manifests[2].Content)
+	}
+	if strings.Contains(manifests[3].Content, `"port": 53`) == false {
+		t.Fatalf("LWS NetworkPolicy missing DNS:\n%s", manifests[3].Content)
+	}
+	if strings.Contains(manifests[2].Content, `"ani.kubercloud.io/inference-role": "worker"`) {
+		t.Fatalf("service selected worker:\n%s", manifests[2].Content)
+	}
+	if !strings.Contains(manifests[0].Content, "--num-gpus=1") || !strings.Contains(manifests[0].Content, "RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES") || !strings.Contains(manifests[0].Content, "sitecustomize.py") || !strings.Contains(manifests[0].Content, "PYTHONPATH=/tmp") {
+		t.Fatalf("worker launch missing Ray GPU env:\n%s", manifests[0].Content)
+	}
+	if !strings.Contains(manifests[0].Content, `"name": "CUDA_VISIBLE_DEVICES"`) || !strings.Contains(manifests[0].Content, `"value": "0"`) || !strings.Contains(manifests[0].Content, `"name": "PYTHONPATH"`) {
+		t.Fatalf("LWS container missing CUDA_VISIBLE_DEVICES=0 or PYTHONPATH:\n%s", manifests[0].Content)
+	}
+	if !strings.Contains(manifests[0].Content, `"name": "VLLM_USE_RAY_COMPILED_DAG"`) || !strings.Contains(manifests[0].Content, "VLLM_USE_RAY_COMPILED_DAG=0") {
+		t.Fatalf("LWS missing compiled DAG disable:\n%s", manifests[0].Content)
+	}
+	if !strings.Contains(manifests[0].Content, `"sizeLimit": "12Gi"`) {
+		t.Fatalf("LWS shm should be 12Gi:\n%s", manifests[0].Content)
+	}
+	if strings.Contains(manifests[0].Content, `"name": "NVIDIA_VISIBLE_DEVICES"`) {
+		t.Fatalf("Pod spec must not set NVIDIA_VISIBLE_DEVICES:\n%s", manifests[0].Content)
+	}
+	if !strings.Contains(manifests[1].Content, `"minMember": 2`) || !strings.Contains(manifests[1].Content, `"nvidia.com/gpu": "2"`) {
+		t.Fatalf("podgroup = %s", manifests[1].Content)
+	}
+	if strings.Count(manifests[0].Content, `"nvidia.com/gpu": "1"`) < 2 {
+		t.Fatalf("leader and worker must each request nvidia.com/gpu=1:\n%s", manifests[0].Content)
+	}
+	if !strings.Contains(manifests[0].Content, `"ovn.kubernetes.io/logical_switch": "ovn-default"`) || !strings.Contains(manifests[0].Content, `"ovn.kubernetes.io/vpc": "ovn-cluster"`) {
+		t.Fatalf("LWS templates missing cluster default overlay:\n%s", manifests[0].Content)
+	}
+	if !strings.Contains(manifests[3].Content, `"matchLabels":`) || strings.Count(manifests[3].Content, `"from"`) < 2 {
+		t.Fatalf("LWS NetworkPolicy missing same-workload peer ingress:\n%s", manifests[3].Content)
+	}
+}
+
+func TestAcceleratorSpecsFromGPUNodesRequireVolcano(t *testing.T) {
+	nodes := []ports.GPUNodeClass{{
+		NodeName: "gpu-a", Model: "A100", Ready: true,
+		Allocatable: map[string]string{"nvidia.com/gpu": "2"},
+		Devices:     []ports.GPUDeviceClass{{Model: "A100", ResourceName: "nvidia.com/gpu"}},
+	}}
+	withoutVolcano := acceleratorSpecsFromGPUNodes(nodes, false)
+	if len(withoutVolcano) != 1 || withoutVolcano[0].SpecID != "gpu-a100-full" || withoutVolcano[0].Available || withoutVolcano[0].MaxSingleNodeCount != 2 {
+		t.Fatalf("without volcano = %#v", withoutVolcano)
+	}
+	withVolcano := acceleratorSpecsFromGPUNodes(nodes, true)
+	if len(withVolcano) != 1 || !withVolcano[0].Available {
+		t.Fatalf("with volcano = %#v", withVolcano)
+	}
+}
+
+func TestAcceleratorSpecsFromGPUNodesAdvertiseVolcanoVGPU(t *testing.T) {
+	nodes := []ports.GPUNodeClass{
+		{
+			NodeName: "gpu-full", Model: "NVIDIA-GeForce-RTX-4090", Ready: true,
+			Allocatable: map[string]string{"nvidia.com/gpu": "1"},
+			Devices:     []ports.GPUDeviceClass{{Model: "NVIDIA-GeForce-RTX-4090", ResourceName: "nvidia.com/gpu", VirtualizationMode: ports.GPUVirtualizationNone}},
+		},
+		{
+			NodeName: "gpu-vgpu", Model: "NVIDIA-GeForce-RTX-4090", Ready: true,
+			Allocatable: map[string]string{"volcano.sh/vgpu-number": "4", "volcano.sh/vgpu-memory": "24576"},
+			Devices: []ports.GPUDeviceClass{{
+				Model: "NVIDIA-GeForce-RTX-4090", ResourceName: "volcano.sh/vgpu-number",
+				VirtualizationMode: ports.GPUVirtualizationVGPU, MemoryMiB: 6144,
+			}},
+		},
+	}
+	specs := acceleratorSpecsFromGPUNodes(nodes, true)
+	byID := map[string]ports.PlatformWorkloadAcceleratorCapability{}
+	for _, spec := range specs {
+		byID[spec.SpecID] = spec
+	}
+	full := byID["gpu-nvidia-geforce-rtx-4090-full"]
+	if !full.Available || full.MaxSingleNodeCount != 1 {
+		t.Fatalf("full spec = %#v", full)
+	}
+	vgpu := byID["gpu-nvidia-geforce-rtx-4090-4x"]
+	if !vgpu.Available || vgpu.MaxSingleNodeCount != 4 || vgpu.MemoryPerShareMB != 6144 {
+		t.Fatalf("vgpu spec = %#v", vgpu)
 	}
 }
 
@@ -417,6 +636,22 @@ func TestRenderPlatformWorkloadManifestsMountsPVCArtifact(t *testing.T) {
 	probe, _ := container["readinessProbe"].(map[string]any)
 	if probe["failureThreshold"] != float64(90) && probe["failureThreshold"] != 90 {
 		t.Fatalf("readinessProbe = %#v", probe)
+	}
+}
+
+func TestPvcClaimNameAcceptsTenantLocalPVC(t *testing.T) {
+	claim, ok := pvcClaimName("pvc://vllm-model#/models/qwen")
+	if !ok || claim != "vllm-model" {
+		t.Fatalf("claim = %q ok=%v", claim, ok)
+	}
+	if _, ok := pvcClaimName("object://models/qwen/v1"); ok {
+		t.Fatal("object:// must not mount")
+	}
+	if _, ok := pvcClaimName("hostPath:/data/models"); ok {
+		t.Fatal("hostPath must not mount")
+	}
+	if _, ok := pvcClaimName("pvc://VLLM"); ok {
+		t.Fatal("uppercase claim must not mount")
 	}
 }
 
@@ -475,6 +710,34 @@ func TestKubernetesPlatformWorkloadRuntimeApplyObserveDelete(t *testing.T) {
 	}
 	if strings.Count(strings.Join(methods, ","), http.MethodDelete) < 3 {
 		t.Fatalf("methods = %v, want service, networkpolicy, and deployment deletes", methods)
+	}
+}
+
+func TestKubernetesPlatformWorkloadRuntimeDeleteLeaderWorkerRemovesGeneratedStatefulSets(t *testing.T) {
+	var paths []string
+	client := newTestKubernetesRESTClient(t, roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		if r.Method == http.MethodDelete {
+			return jsonResponse(http.StatusOK, `{"kind":"Status","status":"Success"}`), nil
+		}
+		return jsonResponse(http.StatusNotFound, `{"kind":"Status","status":"Failure"}`), nil
+	}))
+	spec := sampleLeaderWorkerPlatformWorkloadSpec("6df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-lws")
+	if err := NewKubernetesPlatformWorkloadRuntime(client).Delete(context.Background(), "11111111-1111-1111-1111-111111111111", "workload-lws-1", spec); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	joined := strings.Join(paths, "\n")
+	ns := "/namespaces/ani-tenant-11111111-1111-1111-1111-111111111111/"
+	for _, want := range []string{
+		"DELETE /apis/leaderworkerset.x-k8s.io/v1" + ns + "leaderworkersets/inference-lws",
+		"DELETE /apis/apps/v1" + ns + "statefulsets/inference-lws",
+		"DELETE /apis/apps/v1" + ns + "statefulsets/inference-lws-0",
+		"DELETE /apis/scheduling.volcano.sh/v1beta1" + ns + "podgroups/inference-lws",
+		"DELETE /api/v1" + ns + "services/inference-lws-http",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("Delete() paths = %v, want %s", paths, want)
+		}
 	}
 }
 

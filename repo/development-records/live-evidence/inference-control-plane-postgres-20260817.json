@@ -1,0 +1,27 @@
+{
+  "profile": "INFERENCE-SERVICE-CONTROL-PLANE-POSTGRES-C20",
+  "status": "passed",
+  "generated_at": "2026-08-17T01:30:36Z",
+  "database": "lab-postgres-isolated-schema",
+  "create_role": "passed",
+  "rls": "passed",
+  "lease": "passed",
+  "checks": [
+    {
+      "id": "create-isolated-schema-and-roles",
+      "status": "passed"
+    },
+    {
+      "id": "apply-control-plane-migration",
+      "status": "passed"
+    },
+    {
+      "id": "tenant-rls-and-platform-bypass",
+      "status": "passed"
+    },
+    {
+      "id": "idempotent-create-and-lease",
+      "status": "passed"
+    }
+  ]
+}

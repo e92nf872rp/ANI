@@ -21,7 +21,8 @@ SELECT pg_advisory_xact_lock(hashtextextended($1, 0))
 `
 
 const findReplaySQL = `
-SELECT id, service_id, type, state, target_generation, before_spec, target_spec,
+SELECT id, service_id, type, state, target_generation, COALESCE(rollback_generation, 0),
+       before_spec, target_spec,
        operation_scope, idempotency_key, request_hash, attempt, next_attempt_at,
        COALESCE(lease_owner, ''), lease_until,
        COALESCE(lease_token, '00000000-0000-0000-0000-000000000000'::uuid),
@@ -137,7 +138,8 @@ INSERT INTO inference_operations (
 `
 
 const getOperationSQL = `
-SELECT id, service_id, type, state, target_generation, before_spec, target_spec,
+SELECT id, service_id, type, state, target_generation, COALESCE(rollback_generation, 0),
+       before_spec, target_spec,
        operation_scope, idempotency_key, request_hash, attempt, next_attempt_at,
        COALESCE(lease_owner, ''), lease_until,
        COALESCE(lease_token, '00000000-0000-0000-0000-000000000000'::uuid),
@@ -164,12 +166,12 @@ SET state = 'running', lease_owner = $1, lease_until = $3, lease_token = $4, upd
 FROM candidate
 WHERE operation.id = candidate.id
 RETURNING operation.id, operation.tenant_id, operation.service_id, operation.type,
-          operation.state, operation.target_generation, operation.before_spec,
-          operation.target_spec, operation.operation_scope, operation.idempotency_key,
-          operation.request_hash, operation.attempt, operation.next_attempt_at,
-          operation.lease_owner, operation.lease_until, operation.lease_token,
-          COALESCE(operation.runtime_task_id, ''), COALESCE(operation.error_code, ''),
-          COALESCE(operation.error_message, ''),
+          operation.state, operation.target_generation, COALESCE(operation.rollback_generation, 0),
+          operation.before_spec, operation.target_spec, operation.operation_scope,
+          operation.idempotency_key, operation.request_hash, operation.attempt,
+          operation.next_attempt_at, operation.lease_owner, operation.lease_until,
+          operation.lease_token, COALESCE(operation.runtime_task_id, ''),
+          COALESCE(operation.error_code, ''), COALESCE(operation.error_message, ''),
           COALESCE(operation.result_snapshot, 'null'::jsonb), operation.created_at,
           operation.updated_at, operation.completed_at
 `
@@ -211,10 +213,89 @@ WHERE tenant_id = $1 AND service_id = $2 AND target_generation = $3 AND id = $4
 
 const failServiceSQL = `
 UPDATE inference_services
-SET status = 'failed', status_reason = $5, status_message = $6, updated_at = $7
+SET status = 'failed', status_reason = $5, status_message = $6,
+    runtime_endpoint = NULL, ready_replicas = 0, updated_at = $7
 WHERE tenant_id = $1 AND id = $2 AND generation = $3 AND current_operation_id = $4
 `
 
+const beginScaleRollbackServiceSQL = `
+UPDATE inference_services
+SET desired_spec = applied_spec, generation = generation + 1, status = 'deploying',
+    status_reason = 'SCALE_ROLLING_BACK', status_message = $5, updated_at = $6
+WHERE tenant_id = $1 AND id = $2 AND generation = $3 AND current_operation_id = $4
+  AND desired_state <> 'deleted'
+RETURNING generation
+`
+
+const beginScaleRollbackOperationSQL = `
+UPDATE inference_operations
+SET rollback_generation = $4, error_code = 'SCALE_ROLLING_BACK', error_message = $5,
+    updated_at = $6
+WHERE tenant_id = $1 AND service_id = $2 AND id = $3
+  AND lease_token = $7 AND lease_until > $6 AND state = 'running'
+`
+
+const finishScaleRollbackServiceSQL = `
+UPDATE inference_services
+SET status = $5, applied_spec = CASE WHEN $6 THEN $7 ELSE applied_spec END,
+    observed_generation = CASE WHEN $6 THEN generation ELSE observed_generation END,
+    runtime_ref = CASE WHEN $6 THEN NULLIF($8, '00000000-0000-0000-0000-000000000000'::uuid) ELSE runtime_ref END,
+    runtime_endpoint = CASE WHEN $6 THEN NULLIF($9, '') ELSE NULL END,
+    ready_replicas = CASE WHEN $6 THEN $10 ELSE 0 END,
+    status_reason = $11, status_message = $12, updated_at = $13
+WHERE tenant_id = $1 AND id = $2 AND generation = $3 AND current_operation_id = $4
+`
+
+const finishScaleRollbackOperationSQL = `
+UPDATE inference_operations
+SET state = 'failed', error_code = $5, error_message = $6,
+    lease_owner = NULL, lease_until = NULL, lease_token = NULL,
+    completed_at = $7, updated_at = $7
+WHERE tenant_id = $1 AND service_id = $2 AND id = $3
+  AND rollback_generation = $4 AND lease_token = $8 AND lease_until > $7 AND state = 'running'
+`
+
+const bindRuntimeRefSQL = `
+UPDATE inference_services
+SET runtime_ref = $5, status = 'deploying', updated_at = $6
+WHERE tenant_id = $1 AND id = $2 AND generation = $3 AND current_operation_id = $4
+  AND deleted_at IS NULL
+`
+
+const clearCreateCurrentOperationSQL = `
+UPDATE inference_services
+SET current_operation_id = NULL, updated_at = $4
+WHERE tenant_id = $1 AND id = $2 AND current_operation_id = $3
+  AND runtime_ref IS NULL AND status IN ('pending', 'deploying') AND deleted_at IS NULL
+`
+
+const abortCreateOperationSQL = `
+DELETE FROM inference_operations
+WHERE tenant_id = $1 AND service_id = $2 AND id = $3 AND type = 'create' AND state = 'pending'
+`
+
+const abortCreateServiceSQL = `
+DELETE FROM inference_services
+WHERE tenant_id = $1 AND id = $2 AND current_operation_id IS NULL
+  AND runtime_ref IS NULL AND status IN ('pending', 'deploying') AND deleted_at IS NULL
+`
+
+const abortPendingMutationServiceSQL = `
+UPDATE inference_services
+SET desired_spec = $5, desired_state = $6, generation = $7, status = $8,
+    current_operation_id = NULL, updated_at = $9
+WHERE tenant_id = $1 AND id = $2 AND generation = $3 AND current_operation_id = $4
+  AND deleted_at IS NULL
+`
+
+const abortPendingMutationOperationSQL = `
+UPDATE inference_operations
+SET state = 'cancelled', lease_owner = NULL, lease_until = NULL, lease_token = NULL,
+    completed_at = $4, updated_at = $4
+WHERE tenant_id = $1 AND service_id = $2 AND id = $3 AND state = 'pending'
+`
+
+// Postgres 实现 Store / ControlStore。tenantPool 走租户 schema。
 type Postgres struct {
 	tenantPool   *pgxpool.Pool
 	platformPool *pgxpool.Pool
@@ -388,6 +469,100 @@ func (p *Postgres) CreateWithOperation(ctx context.Context, service domain.Servi
 		return result, fmt.Errorf("commit inference create: %w", err)
 	}
 	return CreateResult{Service: service, Operation: operation}, nil
+}
+
+func (p *Postgres) BindRuntimeRef(ctx context.Context, binding RuntimeBinding) error {
+	if binding.RuntimeRef == uuid.Nil {
+		return errors.New("runtime reference is required")
+	}
+	tx, err := p.tenantPool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin bind inference runtime: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := setTenant(ctx, tx, binding.TenantID); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, bindRuntimeRefSQL, binding.TenantID, binding.ServiceID,
+		binding.Generation, binding.OperationID, binding.RuntimeRef, time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("bind inference runtime: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrStaleGeneration
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit bind inference runtime: %w", err)
+	}
+	return nil
+}
+
+func (p *Postgres) AbortCreate(ctx context.Context, binding RuntimeBinding) error {
+	tx, err := p.tenantPool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin abort inference create: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := setTenant(ctx, tx, binding.TenantID); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	if _, err := tx.Exec(ctx, clearCreateCurrentOperationSQL,
+		binding.TenantID, binding.ServiceID, binding.OperationID, now); err != nil {
+		return fmt.Errorf("clear aborted inference create: %w", err)
+	}
+	if _, err := tx.Exec(ctx, abortCreateOperationSQL,
+		binding.TenantID, binding.ServiceID, binding.OperationID); err != nil {
+		return fmt.Errorf("delete aborted inference create operation: %w", err)
+	}
+	tag, err := tx.Exec(ctx, abortCreateServiceSQL, binding.TenantID, binding.ServiceID)
+	if err != nil {
+		return fmt.Errorf("delete aborted inference create service: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrStaleGeneration
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit abort inference create: %w", err)
+	}
+	return nil
+}
+
+func (p *Postgres) AbortPendingMutation(ctx context.Context, abort MutationAbort) error {
+	desired, err := json.Marshal(abort.RestoredSpec)
+	if err != nil {
+		return fmt.Errorf("marshal restored inference spec: %w", err)
+	}
+	tx, err := p.tenantPool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin abort inference mutation: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := setTenant(ctx, tx, abort.TenantID); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	tag, err := tx.Exec(ctx, abortPendingMutationServiceSQL, abort.TenantID, abort.ServiceID,
+		abort.TargetGeneration, abort.OperationID, desired, abort.RestoredDesired,
+		abort.RestoredGeneration, abort.RestoredStatus, now)
+	if err != nil {
+		return fmt.Errorf("restore aborted inference mutation: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrStaleGeneration
+	}
+	tag, err = tx.Exec(ctx, abortPendingMutationOperationSQL,
+		abort.TenantID, abort.ServiceID, abort.OperationID, now)
+	if err != nil {
+		return fmt.Errorf("cancel aborted inference mutation: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrStaleGeneration
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit abort inference mutation: %w", err)
+	}
+	return nil
 }
 
 func (p *Postgres) GetService(ctx context.Context, tenantID, serviceID uuid.UUID) (domain.Service, error) {
@@ -665,7 +840,10 @@ func (p *Postgres) ApplyObservation(ctx context.Context, observation Observation
 
 func (p *Postgres) FailOperation(ctx context.Context, failure Failure) error {
 	state := domain.OperationFailed
-	if failure.RetryAt != nil {
+	switch {
+	case failure.DeadLetter:
+		state = domain.OperationDeadLetter
+	case failure.RetryAt != nil:
 		state = domain.OperationPending
 	}
 	now := time.Now().UTC()
@@ -692,6 +870,111 @@ func (p *Postgres) FailOperation(ctx context.Context, failure Failure) error {
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit failed inference operation: %w", err)
+	}
+	return nil
+}
+
+func (p *Postgres) BeginScaleRollback(ctx context.Context, request ScaleRollback) (int64, error) {
+	now := time.Now().UTC()
+	tx, err := p.platformPool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin inference scale rollback: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var desiredState domain.DesiredState
+	var currentGeneration int64
+	var currentOperation uuid.UUID
+	var rollbackGeneration int64
+	if err := setTenant(ctx, tx, request.TenantID); err != nil {
+		return 0, err
+	}
+	err = tx.QueryRow(ctx, `
+SELECT service.desired_state, service.generation, COALESCE(service.current_operation_id, '00000000-0000-0000-0000-000000000000'::uuid),
+       COALESCE(operation.rollback_generation, 0)
+FROM inference_services AS service
+JOIN inference_operations AS operation
+  ON operation.id = $3 AND operation.tenant_id = $1 AND operation.service_id = $2
+WHERE service.tenant_id = $1 AND service.id = $2
+`, request.TenantID, request.ServiceID, request.OperationID).Scan(
+		&desiredState, &currentGeneration, &currentOperation, &rollbackGeneration)
+	if err != nil {
+		return 0, fmt.Errorf("load inference scale rollback: %w", err)
+	}
+	if desiredState == domain.DesiredStateDeleted {
+		return 0, domain.ErrDeleted
+	}
+	if rollbackGeneration != 0 {
+		if err := tx.Commit(ctx); err != nil {
+			return 0, fmt.Errorf("commit existing inference scale rollback: %w", err)
+		}
+		return rollbackGeneration, nil
+	}
+	if currentOperation != request.OperationID {
+		return 0, fmt.Errorf("%w: scale rollback operation is not current", ErrStaleGeneration)
+	}
+	if err := tx.QueryRow(ctx, beginScaleRollbackServiceSQL, request.TenantID, request.ServiceID,
+		currentGeneration, request.OperationID, "scale is rolling back to the previously applied spec", now).Scan(&rollbackGeneration); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, fmt.Errorf("%w: scale rollback service generation %d", ErrStaleGeneration, currentGeneration)
+		}
+		return 0, fmt.Errorf("begin inference scale rollback service: %w", err)
+	}
+	tag, err := tx.Exec(ctx, beginScaleRollbackOperationSQL, request.TenantID, request.ServiceID,
+		request.OperationID, rollbackGeneration,
+		"scale is rolling back to the previously applied spec", now, request.LeaseToken)
+	if err != nil {
+		return 0, fmt.Errorf("begin inference scale rollback operation: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return 0, ErrStaleGeneration
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit inference scale rollback: %w", err)
+	}
+	return rollbackGeneration, nil
+}
+
+func (p *Postgres) FinishScaleRollback(ctx context.Context, finish ScaleRollbackFinish) error {
+	now := time.Now().UTC()
+	status := domain.StatusFailed
+	reason := "ROLLBACK_FAILED"
+	message := "ROLLBACK_FAILED: inference scale rollback failed"
+	if finish.Success {
+		status = domain.StatusRunning
+		reason = "SCALE_ROLLED_BACK"
+		message = "SCALE_ROLLED_BACK: inference scale rolled back to the previously applied spec"
+	}
+	applied, err := json.Marshal(finish.AppliedSpec)
+	if err != nil {
+		return fmt.Errorf("marshal scale rollback spec: %w", err)
+	}
+	tx, err := p.platformPool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin finish inference scale rollback: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := setTenant(ctx, tx, finish.TenantID); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, finishScaleRollbackServiceSQL, finish.TenantID, finish.ServiceID,
+		finish.RollbackGeneration, finish.OperationID, status, finish.Success, applied,
+		finish.RuntimeRef, finish.RuntimeEndpoint, finish.ReadyReplicas, reason, message, now)
+	if err != nil {
+		return fmt.Errorf("finish inference scale rollback service: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrStaleGeneration
+	}
+	tag, err = tx.Exec(ctx, finishScaleRollbackOperationSQL, finish.TenantID, finish.ServiceID,
+		finish.OperationID, finish.RollbackGeneration, reason, message, now, finish.LeaseToken)
+	if err != nil {
+		return fmt.Errorf("finish inference scale rollback operation: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrStaleGeneration
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit finish inference scale rollback: %w", err)
 	}
 	return nil
 }
@@ -778,9 +1061,9 @@ func scanOperation(row pgx.Row, tenantID uuid.UUID) (operation domain.Operation,
 	operation.TenantID = tenantID
 	var before, target []byte
 	err = row.Scan(&operation.ID, &operation.ServiceID, &operation.Type, &operation.State,
-		&operation.TargetGeneration, &before, &target, &operation.OperationScope,
-		&operation.IdempotencyKey, &operation.RequestHash, &operation.Attempt,
-		&operation.NextAttemptAt, &operation.LeaseOwner, &operation.LeaseUntil,
+		&operation.TargetGeneration, &operation.RollbackGeneration, &before, &target,
+		&operation.OperationScope, &operation.IdempotencyKey, &operation.RequestHash,
+		&operation.Attempt, &operation.NextAttemptAt, &operation.LeaseOwner, &operation.LeaseUntil,
 		&operation.LeaseToken, &operation.RuntimeTaskID, &operation.ErrorCode, &operation.ErrorMessage,
 		&operation.ResultSnapshot,
 		&operation.CreatedAt, &operation.UpdatedAt, &operation.CompletedAt)
@@ -799,7 +1082,7 @@ func scanOperation(row pgx.Row, tenantID uuid.UUID) (operation domain.Operation,
 func scanClaimedOperation(row pgx.Row) (operation domain.Operation, err error) {
 	var before, target []byte
 	err = row.Scan(&operation.ID, &operation.TenantID, &operation.ServiceID, &operation.Type,
-		&operation.State, &operation.TargetGeneration, &before, &target,
+		&operation.State, &operation.TargetGeneration, &operation.RollbackGeneration, &before, &target,
 		&operation.OperationScope, &operation.IdempotencyKey, &operation.RequestHash,
 		&operation.Attempt, &operation.NextAttemptAt, &operation.LeaseOwner,
 		&operation.LeaseUntil, &operation.LeaseToken, &operation.RuntimeTaskID, &operation.ErrorCode,

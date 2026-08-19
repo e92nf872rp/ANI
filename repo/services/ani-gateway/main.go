@@ -177,6 +177,19 @@ func main() {
 			"addr", strings.TrimSpace(os.Getenv("KB_SERVICE_GRPC_ADDR")),
 		)
 	}
+	modelServiceClient, closeModelGRPC, err := newGatewayModelServiceClient(runtimeCtx, gatewayModelServiceRuntimeConfigFromEnv())
+	if err != nil {
+		logger.Error("failed to configure model-service gRPC client", "err", err)
+		os.Exit(1)
+	}
+	if closeModelGRPC != nil {
+		defer closeModelGRPC()
+	}
+	if modelServiceClient != nil {
+		logger.Info("model-service gRPC client configured",
+			"addr", strings.TrimSpace(os.Getenv("MODEL_SERVICE_GRPC_ADDR")),
+		)
+	}
 	middleware.StartAuditWorker()
 	middleware.Register(h, gatewayStore)
 	quotaAdminService, closeQuotaStore, err := newGatewayQuotaStore(runtimeCtx)
@@ -227,6 +240,7 @@ func main() {
 		ObservabilityService:                  observabilityService,
 		EmailNotificationStore:                runtimeadapter.NewLocalEmailNotificationStore(),
 		InferenceServiceClient:                inferenceServiceClient,
+		ModelServiceClient:                    modelServiceClient,
 		KBServiceClient:                       kbServiceClient,
 		KBSSEConfig:                           newGatewaySSEConfig(gatewaySSERuntimeConfigFromEnv()),
 		AsyncTaskStore:                        instanceRuntime.AsyncTasks,

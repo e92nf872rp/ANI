@@ -11,6 +11,7 @@ import (
 	"github.com/kubercloud/ani/services/inference-service/internal/domain"
 	"github.com/kubercloud/ani/services/inference-service/internal/repository"
 	"github.com/kubercloud/ani/services/inference-service/internal/runtime"
+	runtimefake "github.com/kubercloud/ani/services/inference-service/internal/runtime/fake"
 )
 
 type catalogStub struct {
@@ -28,6 +29,8 @@ type storeStub struct {
 	create func(domain.Service, domain.Operation) (repository.CreateResult, error)
 	find   func(string) (repository.CreateResult, bool, error)
 	calls  int
+	binds  int
+	aborts int
 }
 
 func (s *storeStub) FindCreateReplay(_ context.Context, _ uuid.UUID, _ string, _ uuid.UUID, hash string) (repository.CreateResult, bool, error) {
@@ -42,6 +45,17 @@ func (s *storeStub) CreateWithOperation(_ context.Context, resource domain.Servi
 	return s.create(resource, operation)
 }
 
+func (s *storeStub) AbortCreate(context.Context, repository.RuntimeBinding) error {
+	s.aborts++
+	return nil
+}
+func (s *storeStub) BindRuntimeRef(_ context.Context, binding repository.RuntimeBinding) error {
+	s.binds++
+	if binding.RuntimeRef == uuid.Nil {
+		return errors.New("runtime reference is required")
+	}
+	return nil
+}
 func (*storeStub) GetService(context.Context, uuid.UUID, uuid.UUID) (domain.Service, error) {
 	panic("unexpected GetService")
 }
@@ -56,6 +70,12 @@ func (*storeStub) ApplyObservation(context.Context, repository.Observation) erro
 }
 func (*storeStub) FailOperation(context.Context, repository.Failure) error {
 	panic("unexpected FailOperation")
+}
+func (*storeStub) BeginScaleRollback(context.Context, repository.ScaleRollback) (int64, error) {
+	panic("unexpected BeginScaleRollback")
+}
+func (*storeStub) FinishScaleRollback(context.Context, repository.ScaleRollbackFinish) error {
+	panic("unexpected FinishScaleRollback")
 }
 
 func readyVersion() catalog.ModelVersion {
@@ -79,6 +99,7 @@ func validInput() CreateInput {
 		IdempotencyKey: uuid.MustParse("30000000-0000-0000-0000-000000000003"),
 		Name:           "qwen-chat",
 		ModelVersionID: readyVersion().ID,
+		ImageRef:       "registry.local/user/vllm@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		Spec: domain.Spec{
 			Replicas: 1, CPU: "4", Memory: "16Gi", PlacementMode: "auto",
 		},
@@ -95,6 +116,12 @@ func TestCreateResolvesReadyModelAndPersistsPendingOperation(t *testing.T) {
 		}
 		if resource.ModelSnapshot == nil || resource.DesiredSpec.ExecutionProfile.ID != "vllm-chat-cpu" {
 			t.Fatalf("catalog snapshot/profile were not frozen: %+v", resource)
+		}
+		if resource.DesiredSpec.ExecutionProfile.ImageRef != validInput().ImageRef {
+			t.Fatalf("create used catalog image %q, want request image %q", resource.DesiredSpec.ExecutionProfile.ImageRef, validInput().ImageRef)
+		}
+		if resource.DesiredSpec.ExecutionProfile.ImageRef == readyVersion().CPUProfile.ImageRef {
+			t.Fatal("create must not freeze the catalog default image")
 		}
 		if operation.Type != domain.ActionCreate || operation.TaskType() != "inference_service.create" {
 			t.Fatalf("unexpected operation: %+v", operation)
@@ -230,6 +257,23 @@ func TestCreateRejectsUnavailableAcceleratorBeforePersist(t *testing.T) {
 	}
 }
 
+func TestCreateRejectsUnsupportedTopologyBeforePersist(t *testing.T) {
+	store := &storeStub{create: func(domain.Service, domain.Operation) (repository.CreateResult, error) {
+		t.Fatal("unsupported topology must not persist a service")
+		return repository.CreateResult{}, nil
+	}}
+	creator := NewCreator(store, &catalogStub{resolved: readyVersion()}, time.Now).WithAdmission(admissionStub{
+		err: runtime.ErrUnsupportedTopology,
+	})
+	input := validInput()
+	input.Spec.PlacementMode = "multi_node"
+	input.Spec.Accelerator = &domain.Accelerator{SpecID: "gpu-spec-a100", CountPerReplica: 2}
+	_, _, err := creator.Create(context.Background(), uuid.New(), input)
+	if !errors.Is(err, ErrUnsupportedTopology) {
+		t.Fatalf("Create() error = %v", err)
+	}
+}
+
 type admissionStub struct{ err error }
 
 func (a admissionStub) Admit(context.Context, uuid.UUID, domain.Spec) error { return a.err }
@@ -306,6 +350,7 @@ func TestCreateRejectsInvalidResourceAndPlacementCombinations(t *testing.T) {
 		{name: "empty memory", mutate: func(input *CreateInput) { input.Spec.Memory = "" }},
 		{name: "unknown placement", mutate: func(input *CreateInput) { input.Spec.PlacementMode = "somewhere" }},
 		{name: "distributed cpu", mutate: func(input *CreateInput) { input.Spec.PlacementMode = "multi_node" }},
+		{name: "missing image", mutate: func(input *CreateInput) { input.ImageID = ""; input.ImageRef = "" }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -325,5 +370,87 @@ func TestCreateRejectsInvalidResourceAndPlacementCombinations(t *testing.T) {
 				t.Fatalf("store calls = %d, want 0", store.calls)
 			}
 		})
+	}
+}
+
+func TestCreateDispatchesCoreBeforeReturning(t *testing.T) {
+	store := &storeStub{}
+	store.create = func(resource domain.Service, operation domain.Operation) (repository.CreateResult, error) {
+		return repository.CreateResult{Service: resource, Operation: operation}, nil
+	}
+	rt := runtimefake.New()
+	resource, operation, err := NewCreator(store, &catalogStub{resolved: readyVersion()}, time.Now).
+		WithRuntime(rt).
+		Create(context.Background(), uuid.New(), validInput())
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if resource.RuntimeRef == uuid.Nil || resource.Status != domain.StatusDeploying {
+		t.Fatalf("create must bind runtime before return: %+v", resource)
+	}
+	if operation.State != domain.OperationPending {
+		t.Fatalf("operation must stay pending for worker align: %+v", operation)
+	}
+	if len(rt.EnsureCalls) != 1 || store.binds != 1 || store.aborts != 0 {
+		t.Fatalf("ensure/bind/abort = %d/%d/%d", len(rt.EnsureCalls), store.binds, store.aborts)
+	}
+	if rt.EnsureCalls[0].IdempotencyKey == uuid.Nil {
+		t.Fatal("create dispatch must reuse a stable runtime idempotency key")
+	}
+}
+
+func TestCreateReturnsCoreCapacityErrorToCaller(t *testing.T) {
+	store := &storeStub{create: func(resource domain.Service, operation domain.Operation) (repository.CreateResult, error) {
+		return repository.CreateResult{Service: resource, Operation: operation}, nil
+	}}
+	rt := runtimefake.New()
+	rt.EnsureError = runtime.ErrInsufficientCapacity
+	_, _, err := NewCreator(store, &catalogStub{resolved: readyVersion()}, time.Now).
+		WithRuntime(rt).
+		Create(context.Background(), uuid.New(), validInput())
+	if !errors.Is(err, ErrInsufficientCapacity) {
+		t.Fatalf("Create() error = %v, want ErrInsufficientCapacity", err)
+	}
+	if store.aborts != 1 || store.binds != 0 {
+		t.Fatalf("failed create must abort pending row: binds=%d aborts=%d", store.binds, store.aborts)
+	}
+}
+
+func TestCreateRejectsUnpinnedImageBeforeCatalog(t *testing.T) {
+	store := &storeStub{create: func(domain.Service, domain.Operation) (repository.CreateResult, error) {
+		t.Fatal("unpinned image must not persist a service")
+		return repository.CreateResult{}, nil
+	}}
+	catalogPort := &catalogStub{resolved: readyVersion()}
+	input := validInput()
+	input.ImageRef = "registry.local/user/vllm:latest"
+	_, _, err := NewCreator(store, catalogPort, time.Now).Create(context.Background(), uuid.New(), input)
+	if !errors.Is(err, ErrImageUnavailable) {
+		t.Fatalf("Create() error = %v, want ErrImageUnavailable", err)
+	}
+	if store.calls != 0 || catalogPort.calls != 0 {
+		t.Fatalf("store/catalog calls = %d/%d", store.calls, catalogPort.calls)
+	}
+}
+
+func TestCreateRequestHashChangesWithImage(t *testing.T) {
+	var hashes []string
+	store := &storeStub{create: func(resource domain.Service, operation domain.Operation) (repository.CreateResult, error) {
+		hashes = append(hashes, operation.RequestHash)
+		return repository.CreateResult{Service: resource, Operation: operation}, nil
+	}}
+	creator := NewCreator(store, &catalogStub{resolved: readyVersion()}, time.Now)
+	first := validInput()
+	if _, _, err := creator.Create(context.Background(), uuid.New(), first); err != nil {
+		t.Fatalf("first Create() error = %v", err)
+	}
+	second := validInput()
+	second.IdempotencyKey = uuid.New()
+	second.ImageRef = "registry.local/user/sglang@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	if _, _, err := creator.Create(context.Background(), uuid.New(), second); err != nil {
+		t.Fatalf("second Create() error = %v", err)
+	}
+	if len(hashes) != 2 || hashes[0] == hashes[1] {
+		t.Fatalf("image must participate in request identity: %v", hashes)
 	}
 }

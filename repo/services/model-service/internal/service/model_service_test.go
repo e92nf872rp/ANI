@@ -118,6 +118,41 @@ func TestGetModelVersionRejectsInvalidIDs(t *testing.T) {
 	}
 }
 
+func TestValidateModelVersionReqAcceptsTenantPVC(t *testing.T) {
+	req := &modelv1.CreateModelVersionRequest{
+		Version: "v1", Format: "safetensors", StoragePath: "pvc://vllm-model#/models/qwen", SizeBytes: 1,
+	}
+	if err := validateModelVersionReq(req); err != nil {
+		t.Fatalf("valid pvc://: %v", err)
+	}
+	req.StoragePath = "pvc://vllm-model"
+	if err := validateModelVersionReq(req); err != nil {
+		t.Fatalf("claim-only pvc://: %v", err)
+	}
+}
+
+func TestValidateModelVersionReqRejectsNonLocalSources(t *testing.T) {
+	req := &modelv1.CreateModelVersionRequest{
+		Version: "v1", Format: "safetensors", SizeBytes: 1,
+	}
+	for _, path := range []string{
+		"",
+		"object://models/qwen/v1",
+		"file:///models/qwen",
+		"dir:///data/qwen",
+		"pvc://",
+		"pvc://VLLM",
+		"pvc://vllm_model",
+		"pvc://vllm-model#../etc",
+		"hostPath:/data/models",
+	} {
+		req.StoragePath = path
+		if err := validateModelVersionReq(req); err == nil {
+			t.Fatalf("accepted %q", path)
+		}
+	}
+}
+
 func TestGetModelVersionMapsUnexpectedRepoError(t *testing.T) {
 	stub := &stubRepo{err: errors.New("db down")}
 	svc := NewModelService(nil, stub)

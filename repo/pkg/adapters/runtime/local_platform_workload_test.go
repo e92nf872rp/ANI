@@ -53,16 +53,16 @@ func TestLocalPlatformWorkloadCPUCreateGetStopStartDelete(t *testing.T) {
 
 func TestAdmitPlatformWorkloadAcceleratorRequiresAdvertisedSpec(t *testing.T) {
 	spec := ports.PlatformWorkloadResources{AcceleratorSpecID: "gpu-a100", AcceleratorCount: 1}
-	if err := admitPlatformWorkloadAccelerator(ports.PlatformWorkloadCapabilities{}, spec); !errors.Is(err, ports.ErrFailedPrecondition) {
+	if err := admitPlatformWorkloadAccelerator(ports.PlatformWorkloadCapabilities{}, spec, "single_node"); !errors.Is(err, ports.ErrFailedPrecondition) {
 		t.Fatalf("empty capabilities error = %v", err)
 	}
 	caps := ports.PlatformWorkloadCapabilities{AcceleratorSpecs: []ports.PlatformWorkloadAcceleratorCapability{{
 		SpecID: "gpu-a100", Available: true, MaxSingleNodeCount: 1,
 	}}}
-	if err := admitPlatformWorkloadAccelerator(caps, spec); err != nil {
+	if err := admitPlatformWorkloadAccelerator(caps, spec, "single_node"); err != nil {
 		t.Fatalf("advertised accelerator error = %v", err)
 	}
-	if err := admitPlatformWorkloadAccelerator(caps, ports.PlatformWorkloadResources{}); err != nil {
+	if err := admitPlatformWorkloadAccelerator(caps, ports.PlatformWorkloadResources{}, "single_node"); err != nil {
 		t.Fatalf("cpu admission error = %v", err)
 	}
 }
@@ -80,10 +80,7 @@ func TestLocalPlatformWorkloadAcceptsAcceleratorAndRejectsLeaderWorker(t *testin
 		t.Fatalf("accelerator Create() = %+v, %v", created, err)
 	}
 
-	lws := sampleCPUPlatformWorkloadSpec("6df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-lws")
-	lws.Topology.Mode = "leader_worker"
-	lws.Topology.HasLeader = true
-	lws.Scheduling.Gang = true
+	lws := sampleLeaderWorkerPlatformWorkloadSpec("6df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-lws")
 	if _, err := svc.Create(ctx, tenant, lws); !errors.Is(err, ports.ErrFailedPrecondition) {
 		t.Fatalf("leader_worker Create() error = %v", err)
 	}
@@ -117,4 +114,18 @@ func sampleCPUPlatformWorkloadSpec(key, name string) ports.PlatformWorkloadCreat
 		HealthCheck: ports.PlatformWorkloadHealthCheck{Protocol: "http", Path: "/health", PortName: "http"},
 		Metadata:    ports.PlatformWorkloadMetadata{OwnerRef: "05f6f46f-3db8-4551-8497-c46debb4be22"},
 	}
+}
+
+func sampleLeaderWorkerPlatformWorkloadSpec(key, name string) ports.PlatformWorkloadCreateSpec {
+	spec := sampleCPUPlatformWorkloadSpec(key, name)
+	spec.Resources.AcceleratorSpecID = "gpu-a100-full"
+	spec.Resources.AcceleratorCount = 2
+	spec.Topology = ports.PlatformWorkloadTopology{
+		Mode: "leader_worker", ProfileID: "container-leader-worker", ProfileVersion: "v1",
+		HasLeader: true, HasWorkers: true,
+		Leader:  ports.PlatformWorkloadRole{Count: 1, Resources: ports.PlatformWorkloadResources{CPU: "8", Memory: "32Gi", AcceleratorSpecID: "gpu-a100-full", AcceleratorCount: 1}},
+		Workers: ports.PlatformWorkloadRole{Count: 1, Resources: ports.PlatformWorkloadResources{CPU: "8", Memory: "32Gi", AcceleratorSpecID: "gpu-a100-full", AcceleratorCount: 1}},
+	}
+	spec.Scheduling.Gang = true
+	return spec
 }

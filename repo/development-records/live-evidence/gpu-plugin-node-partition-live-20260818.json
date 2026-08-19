@@ -1,0 +1,53 @@
+{
+  "profile": "GPU-PLUGIN-NODE-PARTITION-LIVE-GATE-C33",
+  "status": "passed",
+  "generated_at": "2026-08-18T10:11:33Z",
+  "gpu_ready": false,
+  "runtime_ready": false,
+  "partition": {
+    "wholecard_nodes": ["kubercloud", "dev-phys-02"],
+    "vgpu_nodes": ["dev-phys-03"]
+  },
+  "checks": [
+    {
+      "id": "wholecard-nodes-labeled",
+      "status": "passed",
+      "nodes": ["kubercloud", "dev-phys-02"]
+    },
+    {
+      "id": "vgpu-nodes-labeled",
+      "status": "passed",
+      "nodes": ["dev-phys-03"]
+    },
+    {
+      "id": "nvidia-device-plugin-only-on-wholecard",
+      "status": "passed",
+      "nodes": ["kubercloud", "dev-phys-02"]
+    },
+    {
+      "id": "volcano-device-plugin-only-on-vgpu",
+      "status": "passed",
+      "nodes": ["dev-phys-03"]
+    },
+    {
+      "id": "wholecard-nvidia-gpu-allocatable",
+      "status": "passed",
+      "nvidia.com/gpu": "2"
+    },
+    {
+      "id": "vgpu-nodes-without-nvidia-gpu",
+      "status": "passed",
+      "nvidia.com/gpu": "0"
+    },
+    {
+      "id": "vgpu-volcano-resources",
+      "status": "passed",
+      "volcano.sh/vgpu-number": "8"
+    },
+    {
+      "id": "vgpu-nvidia-device-plugin-disabled",
+      "status": "passed",
+      "nvidia.com/gpu.deploy.device-plugin": "false"
+    }
+  ]
+}

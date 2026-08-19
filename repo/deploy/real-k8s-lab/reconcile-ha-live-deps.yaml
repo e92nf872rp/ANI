@@ -49,12 +49,16 @@ data:
         ON control_plane_leases (lease_until);
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: ani-reconcile-ha-postgres
   namespace: ani-system
 spec:
+  serviceName: ani-reconcile-ha-postgres
   replicas: 1
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
   selector:
     matchLabels:
       app: ani-reconcile-ha-postgres
@@ -63,6 +67,9 @@ spec:
       labels:
         app: ani-reconcile-ha-postgres
     spec:
+      securityContext:
+        fsGroup: 70
+        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: postgres
           image: postgres:17-alpine
@@ -76,6 +83,8 @@ spec:
               value: ani
             - name: POSTGRES_PASSWORD
               value: ani_dev_password
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
           readinessProbe:
             exec:
               command: ["pg_isready", "-U", "ani"]
@@ -91,8 +100,15 @@ spec:
         - name: init-sql
           configMap:
             name: ani-reconcile-ha-postgres-init
-        - name: data
-          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: ani-rbd-ssd
+        resources:
+          requests:
+            storage: 20Gi
 ---
 apiVersion: v1
 kind: Service

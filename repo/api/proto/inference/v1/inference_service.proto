@@ -8,8 +8,13 @@ import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/kubercloud/ani/pkg/generated/pb/inference/v1;inferencev1";
 
-// InferenceService manages the lifecycle of vLLM inference deployments.
+// Deprecated: this Gateway/Operator control plane is retired.
+// Do not add callers. P0 product path is ANI Gateway HTTP
+// /api/v1/svc/inference-services* → inference.control.v1.InferenceControl.
+// GetEndpointURL and UpdateStatus must not be revived.
 service InferenceServiceRPC {
+  option deprecated = true;
+
   // CreateInferenceService starts an asynchronous deployment.
   // Returns the initial status record and an AsyncTaskRef for polling.
   rpc CreateInferenceService(CreateInferenceServiceRequest) returns (CreateInferenceServiceResponse);

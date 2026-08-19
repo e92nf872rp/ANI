@@ -37,6 +37,7 @@ type Minter struct {
 	cache  map[uuid.UUID]cachedToken
 }
 
+// NewMinter 按租户向 auth-service 换 Core service JWT，带 30s 刷新窗口。
 func NewMinter(client serviceTokenAPI, secret string) (*Minter, error) {
 	if client == nil {
 		return nil, fmt.Errorf("auth-service client is required")
@@ -59,6 +60,7 @@ func DialMinter(addr, secret string) (*Minter, error) {
 	return NewMinter(authv1.NewAuthServiceClient(conn), secret)
 }
 
+// Token 返回该租户访问 platform-workloads 的 service JWT。
 func (m *Minter) Token(ctx context.Context, tenantID uuid.UUID) (string, error) {
 	if tenantID == uuid.Nil {
 		return "", fmt.Errorf("service token tenant id is required")

@@ -3,6 +3,7 @@ package grpcapi
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
@@ -21,10 +22,12 @@ var (
 	errUnauthenticated = errors.New("inference tenant identity is required")
 )
 
+// CreateUseCase 是 POST 创建用例，由 Creator 实现。
 type CreateUseCase interface {
 	Create(context.Context, uuid.UUID, service.CreateInput) (domain.Service, domain.Operation, error)
 }
 
+// ControlUseCase 覆盖 list/get/scale/lifecycle/delete 和 operation 查询。
 type ControlUseCase interface {
 	Get(context.Context, uuid.UUID, uuid.UUID) (service.ServiceView, error)
 	List(context.Context, uuid.UUID) ([]service.ServiceView, error)
@@ -38,6 +41,7 @@ type LogsUseCase interface {
 	List(context.Context, uuid.UUID, uuid.UUID, service.LogQuery) (service.LogPage, error)
 }
 
+// Server 实现 InferenceControl gRPC。Gateway HTTP 只调这里，不直连 Core。
 type Server struct {
 	inferencecontrolv1.UnimplementedInferenceControlServer
 	creator    CreateUseCase
@@ -54,6 +58,7 @@ func (s *Server) WithLogs(logs LogsUseCase) *Server {
 	return s
 }
 
+// Register 挂到 bootstrap gRPC server。
 func (s *Server) Register(grpcServer *grpc.Server) {
 	inferencecontrolv1.RegisterInferenceControlServer(grpcServer, s)
 }
@@ -203,6 +208,7 @@ func (s *Server) GetInferenceOperation(ctx context.Context, req *inferencecontro
 	return protoOperation(view), nil
 }
 
+// mapError 把领域错误翻成 gRPC code，Gateway 再映射 HTTP。
 func mapError(err error) error {
 	switch {
 	case errors.Is(err, errUnauthenticated):
@@ -225,9 +231,20 @@ func mapError(err error) error {
 		return status.Error(codes.FailedPrecondition, "UNSUPPORTED_TOPOLOGY")
 	case errors.Is(err, service.ErrAcceleratorSpecUnavailable):
 		return status.Error(codes.FailedPrecondition, "ACCELERATOR_SPEC_UNAVAILABLE")
+	case errors.Is(err, service.ErrInsufficientCapacity):
+		return status.Error(codes.FailedPrecondition, "INSUFFICIENT_CAPACITY")
+	case errors.Is(err, service.ErrImageUnavailable):
+		return status.Error(codes.FailedPrecondition, "IMAGE_UNAVAILABLE")
+	case errors.Is(err, service.ErrEngineProfileUnapproved):
+		return status.Error(codes.FailedPrecondition, "ENGINE_PROFILE_UNAPPROVED")
+	case errors.Is(err, service.ErrReservedFieldConflict):
+		return status.Error(codes.FailedPrecondition, "RESERVED_FIELD_CONFLICT")
+	case errors.Is(err, service.ErrRuntimeIntentConflict):
+		return status.Error(codes.AlreadyExists, "IDEMPOTENCY_CONFLICT")
 	case errors.Is(err, domain.ErrInvalidTransition), errors.Is(err, domain.ErrDeleted), errors.Is(err, domain.ErrLegacyQuarantined):
 		return status.Error(codes.FailedPrecondition, "INVALID_STATE_TRANSITION")
 	default:
+		slog.Error("unmapped inference error", "err", err)
 		return status.Error(codes.Unavailable, "DEPENDENCY_UNAVAILABLE")
 	}
 }

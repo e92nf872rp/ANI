@@ -13,11 +13,22 @@ import (
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/cloudwego/hertz/pkg/protocol"
 	inferencecontrolv1 "github.com/kubercloud/ani/pkg/generated/pb/inference/control/v1"
+	"github.com/kubercloud/ani/pkg/ports"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+const pinnedInferenceImageRef = "registry.local/user/vllm@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+func inferenceCreateBody(imageFields string) string {
+	body := `{"idempotency_key":"44444444-4444-4444-4444-444444444444","name":"qwen-chat","model":"33333333-3333-3333-3333-333333333333","resources":{"cpu":"2","memory":"4Gi"}`
+	if imageFields != "" {
+		return body + "," + imageFields + "}"
+	}
+	return body + "}"
+}
 
 type fakeInferenceClient struct {
 	lastTenantID string
@@ -25,6 +36,7 @@ type fakeInferenceClient struct {
 	lastKey      string
 	lastAction   string
 	lastReplicas int32
+	lastCreate   *inferencecontrolv1.CreateInferenceServiceRequest
 
 	listResp   *inferencecontrolv1.ListInferenceServicesResponse
 	createResp *inferencecontrolv1.InferenceService
@@ -47,6 +59,7 @@ func (f *fakeInferenceClient) ListInferenceServices(_ context.Context, tenantID 
 func (f *fakeInferenceClient) CreateInferenceService(_ context.Context, tenantID string, req *inferencecontrolv1.CreateInferenceServiceRequest) (*inferencecontrolv1.InferenceService, error) {
 	f.lastTenantID = tenantID
 	f.lastKey = req.GetIdempotencyKey()
+	f.lastCreate = req
 	return f.createResp, f.err
 }
 func (f *fakeInferenceClient) GetInferenceService(_ context.Context, tenantID, serviceID string) (*inferencecontrolv1.InferenceService, error) {
@@ -81,8 +94,12 @@ func (f *fakeInferenceClient) ListInferenceServiceLogs(_ context.Context, tenant
 func setupInferenceTestServer(t *testing.T, client InferenceControlClient) *server.Hertz {
 	t.Helper()
 	prev := inferenceControlClient
+	prevRegistry := inferenceImageRegistry
 	inferenceControlClient = client
-	t.Cleanup(func() { inferenceControlClient = prev })
+	t.Cleanup(func() {
+		inferenceControlClient = prev
+		inferenceImageRegistry = prevRegistry
+	})
 	h := server.Default()
 	h.Use(middleware.RequestID())
 	h.Use(func(ctx context.Context, c *app.RequestContext) {
@@ -113,6 +130,7 @@ func sampleService() *inferencecontrolv1.InferenceService {
 		ModelVersionId: "33333333-3333-3333-3333-333333333333", ServedModelName: "qwen-chat",
 		Replicas: 1, Resources: &inferencecontrolv1.InferenceServiceResources{Cpu: "2", Memory: "4Gi"},
 		PlacementMode: "auto", Status: "pending", CurrentOperationId: "55555555-5555-5555-5555-555555555555",
+		ImageRef:  pinnedInferenceImageRef,
 		CreatedAt: timestamppb.New(time.Date(2026, 8, 15, 1, 2, 3, 0, time.UTC)),
 	}
 }
@@ -136,7 +154,7 @@ func TestInferenceRoutesRegistered(t *testing.T) {
 	})
 	routes := []struct{ method, path, body string }{
 		{http.MethodGet, "/api/v1/svc/inference-services", ""},
-		{http.MethodPost, "/api/v1/svc/inference-services", `{"idempotency_key":"44444444-4444-4444-4444-444444444444","name":"qwen-chat","model":"33333333-3333-3333-3333-333333333333","resources":{"cpu":"2","memory":"4Gi"}}`},
+		{http.MethodPost, "/api/v1/svc/inference-services", inferenceCreateBody(`"image_ref":"` + pinnedInferenceImageRef + `"`)},
 		{http.MethodGet, "/api/v1/svc/inference-services/22222222-2222-2222-2222-222222222222", ""},
 		{http.MethodPatch, "/api/v1/svc/inference-services/22222222-2222-2222-2222-222222222222", `{"idempotency_key":"44444444-4444-4444-4444-444444444444","replicas":2}`},
 		{http.MethodDelete, "/api/v1/svc/inference-services/22222222-2222-2222-2222-222222222222", ""},
@@ -156,7 +174,7 @@ func TestInferenceRoutesRegistered(t *testing.T) {
 func TestInferenceCreateReturnsAcceptedPublicProjection(t *testing.T) {
 	client := &fakeInferenceClient{createResp: sampleService()}
 	h := setupInferenceTestServer(t, client)
-	body := `{"idempotency_key":"44444444-4444-4444-4444-444444444444","name":"qwen-chat","model":"33333333-3333-3333-3333-333333333333","resources":{"cpu":"2","memory":"4Gi"}}`
+	body := inferenceCreateBody(`"image_ref":"` + pinnedInferenceImageRef + `"`)
 	resp := performInference(h, http.MethodPost, "/api/v1/svc/inference-services", body, "11111111-1111-1111-1111-111111111111")
 	if resp.StatusCode() != http.StatusAccepted {
 		t.Fatalf("status = %d body=%s", resp.StatusCode(), resp.Body())
@@ -179,6 +197,52 @@ func TestInferenceCreateReturnsAcceptedPublicProjection(t *testing.T) {
 	}
 	if _, ok := got["runtime_endpoint"]; ok {
 		t.Fatal("runtime_endpoint leaked")
+	}
+	if got["image_ref"] != pinnedInferenceImageRef {
+		t.Fatalf("image_ref = %v", got["image_ref"])
+	}
+	if client.lastCreate == nil || client.lastCreate.GetImageRef() != pinnedInferenceImageRef || client.lastCreate.GetImageId() != "" {
+		t.Fatalf("create request = %+v", client.lastCreate)
+	}
+}
+
+func TestInferenceCreateForwardsEngineCommandAndEnv(t *testing.T) {
+	client := &fakeInferenceClient{createResp: sampleService()}
+	h := setupInferenceTestServer(t, client)
+	body := inferenceCreateBody(`"image_ref":"` + pinnedInferenceImageRef + `","engine":{"env":[{"name":"VLLM_LOGGING_LEVEL","value":"DEBUG"}],"command":["python3","-m","vllm.entrypoints.openai.api_server","--model","/models/qwen"]}`)
+	resp := performInference(h, http.MethodPost, "/api/v1/svc/inference-services", body, "11111111-1111-1111-1111-111111111111")
+	if resp.StatusCode() != http.StatusAccepted {
+		t.Fatalf("status = %d body=%s", resp.StatusCode(), resp.Body())
+	}
+	if client.lastCreate == nil || client.lastCreate.GetEngine() == nil {
+		t.Fatal("engine was not forwarded")
+	}
+	engine := client.lastCreate.GetEngine()
+	if len(engine.GetEnv()) != 1 || engine.GetEnv()[0].GetName() != "VLLM_LOGGING_LEVEL" || engine.GetEnv()[0].GetValue() != "DEBUG" {
+		t.Fatalf("env = %#v", engine.GetEnv())
+	}
+	if strings.Join(engine.GetCommand(), " ") != "python3 -m vllm.entrypoints.openai.api_server --model /models/qwen" {
+		t.Fatalf("command = %#v", engine.GetCommand())
+	}
+}
+
+func TestInferenceCreateRejectsReservedEngineEnv(t *testing.T) {
+	client := &fakeInferenceClient{createResp: sampleService()}
+	h := setupInferenceTestServer(t, client)
+	body := inferenceCreateBody(`"image_ref":"` + pinnedInferenceImageRef + `","engine":{"env":[{"name":"CUDA_VISIBLE_DEVICES","value":"0"}]}`)
+	resp := performInference(h, http.MethodPost, "/api/v1/svc/inference-services", body, "11111111-1111-1111-1111-111111111111")
+	if resp.StatusCode() != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s", resp.StatusCode(), resp.Body())
+	}
+	if client.lastCreate != nil {
+		t.Fatal("reserved env must not reach gRPC")
+	}
+	var got map[string]any
+	if err := json.Unmarshal(resp.Body(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["code"] != "INVALID_ARGUMENT" {
+		t.Fatalf("code = %v", got["code"])
 	}
 }
 
@@ -338,5 +402,87 @@ func TestInferenceLogsRejectInvalidQuery(t *testing.T) {
 	}
 	if client.lastTenantID != "" {
 		t.Fatal("invalid query must not reach gRPC")
+	}
+}
+
+func TestInferenceCreateRequiresImage(t *testing.T) {
+	client := &fakeInferenceClient{createResp: sampleService()}
+	h := setupInferenceTestServer(t, client)
+	resp := performInference(h, http.MethodPost, "/api/v1/svc/inference-services", inferenceCreateBody(""), "11111111-1111-1111-1111-111111111111")
+	if resp.StatusCode() != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s", resp.StatusCode(), resp.Body())
+	}
+	if client.lastCreate != nil {
+		t.Fatal("missing image must not reach gRPC")
+	}
+}
+
+func TestInferenceCreateRejectsUnpinnedImageRef(t *testing.T) {
+	client := &fakeInferenceClient{createResp: sampleService()}
+	h := setupInferenceTestServer(t, client)
+	resp := performInference(h, http.MethodPost, "/api/v1/svc/inference-services", inferenceCreateBody(`"image_ref":"registry.local/user/vllm:latest"`), "11111111-1111-1111-1111-111111111111")
+	if resp.StatusCode() != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d body=%s", resp.StatusCode(), resp.Body())
+	}
+	if client.lastCreate != nil {
+		t.Fatal("unpinned image_ref must not reach gRPC without registry")
+	}
+}
+
+type stubInferenceRegistry struct {
+	ports.ImageRegistry
+	items []ports.RegistryImage
+}
+
+func (s *stubInferenceRegistry) ListImages(_ context.Context, request ports.RegistryImageListRequest) (ports.RegistryImageListResult, error) {
+	items := make([]ports.RegistryImage, 0, len(s.items))
+	for _, item := range s.items {
+		if request.Repository != "" && request.Repository != item.Repository {
+			continue
+		}
+		if request.Tag != "" && request.Tag != item.Tag {
+			continue
+		}
+		items = append(items, item)
+	}
+	return ports.RegistryImageListResult{Items: items}, nil
+}
+
+func TestInferenceCreateResolvesImageIDBeforeImageRef(t *testing.T) {
+	tenant := "11111111-1111-1111-1111-111111111111"
+	digest := "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	prev := inferenceImageRegistry
+	inferenceImageRegistry = &stubInferenceRegistry{items: []ports.RegistryImage{{
+		Project: tenant, Repository: "runtime", Tag: "latest",
+		Image: "registry.local/" + tenant + "/runtime:latest", Registry: "registry.local", Digest: digest,
+	}}}
+	t.Cleanup(func() { inferenceImageRegistry = prev })
+
+	client := &fakeInferenceClient{createResp: sampleService()}
+	h := setupInferenceTestServer(t, client)
+	body := inferenceCreateBody(`"image_id":"` + tenant + `/runtime:latest","image_ref":"` + pinnedInferenceImageRef + `"`)
+	resp := performInference(h, http.MethodPost, "/api/v1/svc/inference-services", body, tenant)
+	if resp.StatusCode() != http.StatusAccepted {
+		t.Fatalf("status = %d body=%s", resp.StatusCode(), resp.Body())
+	}
+	want := "registry.local/" + tenant + "/runtime@" + digest
+	if client.lastCreate.GetImageId() != tenant+"/runtime:latest" || client.lastCreate.GetImageRef() != want {
+		t.Fatalf("create request = %+v", client.lastCreate)
+	}
+}
+
+func TestInferenceCreateUnknownImageIDReturnsUnavailable(t *testing.T) {
+	prev := inferenceImageRegistry
+	inferenceImageRegistry = &stubInferenceRegistry{}
+	t.Cleanup(func() { inferenceImageRegistry = prev })
+
+	client := &fakeInferenceClient{createResp: sampleService()}
+	h := setupInferenceTestServer(t, client)
+	resp := performInference(h, http.MethodPost, "/api/v1/svc/inference-services", inferenceCreateBody(`"image_id":"missing/runtime:latest"`), "11111111-1111-1111-1111-111111111111")
+	if resp.StatusCode() != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d body=%s", resp.StatusCode(), resp.Body())
+	}
+	if client.lastCreate != nil {
+		t.Fatal("unknown image_id must not reach gRPC")
 	}
 }

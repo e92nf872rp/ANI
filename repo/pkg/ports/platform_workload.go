@@ -20,10 +20,21 @@ const (
 )
 
 type PlatformWorkloadResources struct {
-	CPU               string
-	Memory            string
-	AcceleratorSpecID string
-	AcceleratorCount  int
+	CPU                 string
+	Memory              string
+	AcceleratorSpecID   string
+	AcceleratorCount    int
+	AcceleratorMemoryMB int
+}
+
+type PlatformWorkloadEnvVar struct {
+	Name  string
+	Value string
+}
+
+type PlatformWorkloadRole struct {
+	Count     int
+	Resources PlatformWorkloadResources
 }
 
 type PlatformWorkloadTopology struct {
@@ -32,6 +43,8 @@ type PlatformWorkloadTopology struct {
 	ProfileVersion string
 	HasLeader      bool
 	HasWorkers     bool
+	Leader         PlatformWorkloadRole
+	Workers        PlatformWorkloadRole
 }
 
 type PlatformWorkloadScheduling struct {
@@ -78,6 +91,7 @@ type PlatformWorkloadCreateSpec struct {
 	ImageRef       string
 	Command        []string
 	Args           []string
+	Env            []PlatformWorkloadEnvVar
 	Replicas       int
 	Resources      PlatformWorkloadResources
 	Topology       PlatformWorkloadTopology
@@ -126,6 +140,7 @@ type PlatformWorkloadAcceleratorCapability struct {
 	SpecID             string
 	Available          bool
 	MaxSingleNodeCount int
+	MemoryPerShareMB   int
 }
 
 type PlatformWorkloadLogEntry struct {

@@ -3,6 +3,7 @@ package grpcapi
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +23,7 @@ var (
 	testModel   = uuid.MustParse("33333333-3333-3333-3333-333333333333")
 	testKey     = uuid.MustParse("44444444-4444-4444-4444-444444444444")
 	testOp      = uuid.MustParse("55555555-5555-5555-5555-555555555555")
+	pinnedImage = "registry.local/user/vllm@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 )
 
 type fakeCreator struct {
@@ -84,8 +86,11 @@ func pendingResource() (domain.Service, domain.Operation) {
 	resource := domain.Service{
 		ID: testService, TenantID: testTenant, Name: "qwen-chat", ModelVersionID: testModel,
 		ServedModelName: "qwen-chat", Status: domain.StatusPending, CurrentOperationID: testOp,
-		DesiredSpec: domain.Spec{Replicas: 1, CPU: "2", Memory: "4Gi", PlacementMode: "auto"},
-		CreatedAt:   now, UpdatedAt: now,
+		DesiredSpec: domain.Spec{
+			Replicas: 1, CPU: "2", Memory: "4Gi", PlacementMode: "auto",
+			ExecutionProfile: domain.ExecutionProfile{ImageRef: pinnedImage},
+		},
+		CreatedAt: now, UpdatedAt: now,
 	}
 	return resource, operation
 }
@@ -106,7 +111,7 @@ func TestCreateRejectsGPUCountWithoutGPUType(t *testing.T) {
 	server := NewServer(creator, &fakeController{})
 	_, err := server.CreateInferenceService(context.Background(), &inferencecontrolv1.CreateInferenceServiceRequest{
 		TenantId: testTenant.String(), IdempotencyKey: testKey.String(), Name: "qwen-chat",
-		Model: testModel.String(), GpuCountPerPod: 2,
+		Model: testModel.String(), GpuCountPerPod: 2, ImageRef: pinnedImage,
 		Resources: &inferencecontrolv1.InferenceServiceResources{Cpu: "2", Memory: "4Gi"},
 	})
 	if err != nil {
@@ -132,6 +137,8 @@ func TestCreateMapsCatalogAndConflictErrors(t *testing.T) {
 		{name: "invalid", err: service.ErrInvalidInput, code: codes.InvalidArgument, msg: "INVALID_ARGUMENT"},
 		{name: "topology", err: service.ErrUnsupportedTopology, code: codes.FailedPrecondition, msg: "UNSUPPORTED_TOPOLOGY"},
 		{name: "accelerator", err: service.ErrAcceleratorSpecUnavailable, code: codes.FailedPrecondition, msg: "ACCELERATOR_SPEC_UNAVAILABLE"},
+		{name: "capacity", err: service.ErrInsufficientCapacity, code: codes.FailedPrecondition, msg: "INSUFFICIENT_CAPACITY"},
+		{name: "image", err: service.ErrImageUnavailable, code: codes.FailedPrecondition, msg: "IMAGE_UNAVAILABLE"},
 		{name: "unknown", err: errors.New("sql: connection refused"), code: codes.Unavailable, msg: "DEPENDENCY_UNAVAILABLE"},
 	}
 	for _, tt := range tests {
@@ -139,7 +146,7 @@ func TestCreateMapsCatalogAndConflictErrors(t *testing.T) {
 			server := NewServer(&fakeCreator{err: tt.err}, &fakeController{})
 			_, err := server.CreateInferenceService(context.Background(), &inferencecontrolv1.CreateInferenceServiceRequest{
 				TenantId: testTenant.String(), IdempotencyKey: testKey.String(), Name: "qwen-chat",
-				Model:     testModel.String(),
+				Model: testModel.String(), ImageRef: pinnedImage,
 				Resources: &inferencecontrolv1.InferenceServiceResources{Cpu: "2", Memory: "4Gi"},
 			})
 			assertStatus(t, err, tt.code, tt.msg)
@@ -149,23 +156,105 @@ func TestCreateMapsCatalogAndConflictErrors(t *testing.T) {
 
 func TestCreateReturnsPublicProjection(t *testing.T) {
 	resource, operation := pendingResource()
-	server := NewServer(&fakeCreator{result: resource, op: operation}, &fakeController{})
+	creator := &fakeCreator{result: resource, op: operation}
+	server := NewServer(creator, &fakeController{})
 	got, err := server.CreateInferenceService(context.Background(), &inferencecontrolv1.CreateInferenceServiceRequest{
 		TenantId: testTenant.String(), IdempotencyKey: testKey.String(), Name: "qwen-chat",
-		Model:     testModel.String(),
+		Model: testModel.String(), ImageId: "tenant/runtime:latest", ImageRef: pinnedImage,
 		Resources: &inferencecontrolv1.InferenceServiceResources{Cpu: "2", Memory: "4Gi"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if creator.input.ImageID != "tenant/runtime:latest" || creator.input.ImageRef != pinnedImage {
+		t.Fatalf("create input image = id=%q ref=%q", creator.input.ImageID, creator.input.ImageRef)
+	}
 	if got.GetId() != testService.String() || got.GetStatus() != "pending" {
 		t.Fatalf("service = %+v", got)
+	}
+	if got.GetImageRef() != pinnedImage {
+		t.Fatalf("image_ref = %q", got.GetImageRef())
 	}
 	if got.GetCurrentOperationId() != testOp.String() {
 		t.Fatalf("current_operation_id = %q", got.GetCurrentOperationId())
 	}
 	if got.GetGpuType() != "" {
 		t.Fatalf("gpu_type should stay empty for CPU create, got %q", got.GetGpuType())
+	}
+}
+
+func TestCreateForwardsFrozenEngine(t *testing.T) {
+	resource, operation := pendingResource()
+	resource.DesiredSpec.Engine = &domain.Engine{
+		Env:     []domain.EngineEnvVar{{Name: "VLLM_LOGGING_LEVEL", Value: "DEBUG"}},
+		Command: []string{"python3", "-m", "vllm.entrypoints.openai.api_server"},
+	}
+	creator := &fakeCreator{result: resource, op: operation}
+	server := NewServer(creator, &fakeController{})
+	got, err := server.CreateInferenceService(context.Background(), &inferencecontrolv1.CreateInferenceServiceRequest{
+		TenantId: testTenant.String(), IdempotencyKey: testKey.String(), Name: "qwen-chat",
+		Model: testModel.String(), ImageRef: pinnedImage,
+		Resources: &inferencecontrolv1.InferenceServiceResources{Cpu: "2", Memory: "4Gi"},
+		Engine: &inferencecontrolv1.InferenceServiceEngine{
+			Env:     []*inferencecontrolv1.InferenceServiceEngineEnvVar{{Name: "VLLM_LOGGING_LEVEL", Value: "DEBUG"}},
+			Command: []string{"python3", "-m", "vllm.entrypoints.openai.api_server"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if creator.input.Spec.Engine == nil || strings.Join(creator.input.Spec.Engine.Command, " ") != "python3 -m vllm.entrypoints.openai.api_server" {
+		t.Fatalf("create input engine = %+v", creator.input.Spec.Engine)
+	}
+	if got.GetEngine() == nil || strings.Join(got.GetEngine().GetCommand(), " ") != "python3 -m vllm.entrypoints.openai.api_server" {
+		t.Fatalf("response engine = %+v", got.GetEngine())
+	}
+}
+
+func TestCreateRejectsReservedEngineEnv(t *testing.T) {
+	creator := &fakeCreator{}
+	server := NewServer(creator, &fakeController{})
+	_, err := server.CreateInferenceService(context.Background(), &inferencecontrolv1.CreateInferenceServiceRequest{
+		TenantId: testTenant.String(), IdempotencyKey: testKey.String(), Name: "qwen-chat",
+		Model: testModel.String(), ImageRef: pinnedImage,
+		Resources: &inferencecontrolv1.InferenceServiceResources{Cpu: "2", Memory: "4Gi"},
+		Engine: &inferencecontrolv1.InferenceServiceEngine{
+			Env: []*inferencecontrolv1.InferenceServiceEngineEnvVar{{Name: "CUDA_VISIBLE_DEVICES", Value: "0"}},
+		},
+	})
+	assertStatus(t, err, codes.InvalidArgument, "INVALID_ARGUMENT")
+	if creator.calls != 0 {
+		t.Fatalf("creator calls = %d, want 0", creator.calls)
+	}
+}
+
+func TestCreateRejectsMissingAndUnpinnedImage(t *testing.T) {
+	creator := &fakeCreator{}
+	server := NewServer(creator, &fakeController{})
+	tests := []struct {
+		name     string
+		imageID  string
+		imageRef string
+		code     codes.Code
+		msg      string
+	}{
+		{name: "missing", code: codes.InvalidArgument, msg: "INVALID_ARGUMENT"},
+		{name: "tag only", imageRef: "registry.local/user/vllm:latest", code: codes.FailedPrecondition, msg: "IMAGE_UNAVAILABLE"},
+		{name: "image_id without digest", imageID: "tenant/runtime:latest", code: codes.FailedPrecondition, msg: "IMAGE_UNAVAILABLE"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			creator.calls = 0
+			_, err := server.CreateInferenceService(context.Background(), &inferencecontrolv1.CreateInferenceServiceRequest{
+				TenantId: testTenant.String(), IdempotencyKey: testKey.String(), Name: "qwen-chat",
+				Model: testModel.String(), ImageId: tt.imageID, ImageRef: tt.imageRef,
+				Resources: &inferencecontrolv1.InferenceServiceResources{Cpu: "2", Memory: "4Gi"},
+			})
+			assertStatus(t, err, tt.code, tt.msg)
+			if creator.calls != 0 {
+				t.Fatalf("creator calls = %d, want 0", creator.calls)
+			}
+		})
 	}
 }
 

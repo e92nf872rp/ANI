@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kubercloud/ani/services/inference-service/internal/catalog"
-	catalogfake "github.com/kubercloud/ani/services/inference-service/internal/catalog/fake"
 	"github.com/kubercloud/ani/services/inference-service/internal/domain"
 	"github.com/kubercloud/ani/services/inference-service/internal/reconcile"
 	"github.com/kubercloud/ani/services/inference-service/internal/repository"
@@ -17,6 +16,26 @@ import (
 	runtimefake "github.com/kubercloud/ani/services/inference-service/internal/runtime/fake"
 	"github.com/kubercloud/ani/services/inference-service/internal/service"
 )
+
+type memoryCatalog struct {
+	versions map[string]catalog.ModelVersion
+}
+
+func newMemoryCatalog() *memoryCatalog {
+	return &memoryCatalog{versions: map[string]catalog.ModelVersion{}}
+}
+
+func (c *memoryCatalog) put(tenantID uuid.UUID, version catalog.ModelVersion) {
+	c.versions[tenantID.String()+"/"+version.ID.String()] = version
+}
+
+func (c *memoryCatalog) Resolve(_ context.Context, tenantID, versionID uuid.UUID) (catalog.ModelVersion, error) {
+	version, ok := c.versions[tenantID.String()+"/"+versionID.String()]
+	if !ok {
+		return catalog.ModelVersion{}, catalog.ErrModelNotFound
+	}
+	return version, nil
+}
 
 type memoryStore struct {
 	mu         sync.Mutex
@@ -36,6 +55,49 @@ func (m *memoryStore) CreateWithOperation(_ context.Context, resource domain.Ser
 	m.resource, m.operation = resource, operation
 	m.operations = map[uuid.UUID]domain.Operation{operation.ID: operation}
 	return repository.CreateResult{Service: resource, Operation: operation}, nil
+}
+func (m *memoryStore) BindRuntimeRef(_ context.Context, binding repository.RuntimeBinding) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.resource.TenantID != binding.TenantID || m.resource.ID != binding.ServiceID ||
+		m.resource.Generation != binding.Generation || m.resource.CurrentOperationID != binding.OperationID {
+		return repository.ErrStaleGeneration
+	}
+	m.resource.RuntimeRef = binding.RuntimeRef
+	m.resource.Status = domain.StatusDeploying
+	return nil
+}
+func (m *memoryStore) AbortCreate(_ context.Context, binding repository.RuntimeBinding) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.resource.ID != binding.ServiceID || m.resource.RuntimeRef != uuid.Nil {
+		return repository.ErrStaleGeneration
+	}
+	m.resource = domain.Service{}
+	m.operation = domain.Operation{}
+	delete(m.operations, binding.OperationID)
+	return nil
+}
+func (m *memoryStore) AbortPendingMutation(_ context.Context, abort repository.MutationAbort) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.resource.ID != abort.ServiceID || m.resource.Generation != abort.TargetGeneration ||
+		m.resource.CurrentOperationID != abort.OperationID {
+		return repository.ErrStaleGeneration
+	}
+	m.resource.DesiredSpec = abort.RestoredSpec
+	m.resource.Status = abort.RestoredStatus
+	m.resource.DesiredState = abort.RestoredDesired
+	m.resource.Generation = abort.RestoredGeneration
+	m.resource.CurrentOperationID = uuid.Nil
+	m.resource.ActiveOperationID = uuid.Nil
+	m.resource.ActiveOperation = ""
+	if operation, ok := m.operations[abort.OperationID]; ok {
+		operation.State = domain.OperationCancelled
+		m.operations[abort.OperationID] = operation
+		m.operation = operation
+	}
+	return nil
 }
 func (m *memoryStore) GetService(_ context.Context, tenantID, serviceID uuid.UUID) (domain.Service, error) {
 	m.mu.Lock()
@@ -154,16 +216,69 @@ func (m *memoryStore) ApplyObservation(_ context.Context, observation repository
 func (m *memoryStore) FailOperation(_ context.Context, failure repository.Failure) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.operation.Attempt++
 	m.operation.ErrorCode = failure.ErrorCode
 	m.operation.ErrorMessage = failure.ErrorMessage
-	if failure.RetryAt == nil {
-		m.operation.State = domain.OperationFailed
+	switch {
+	case failure.DeadLetter:
+		m.operation.State = domain.OperationDeadLetter
+		m.resource.Status = domain.StatusFailed
 		m.resource.ActiveOperationID = uuid.Nil
 		m.resource.ActiveOperation = ""
-	} else {
+	case failure.RetryAt == nil:
+		m.operation.State = domain.OperationFailed
+		m.resource.Status = domain.StatusFailed
+		m.resource.ActiveOperationID = uuid.Nil
+		m.resource.ActiveOperation = ""
+	default:
 		m.operation.State = domain.OperationPending
 		m.claimed = false
 	}
+	m.operations[m.operation.ID] = m.operation
+	return nil
+}
+
+func (m *memoryStore) BeginScaleRollback(_ context.Context, request repository.ScaleRollback) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.resource.DesiredState == domain.DesiredStateDeleted {
+		return 0, domain.ErrDeleted
+	}
+	if m.operation.RollbackGeneration != 0 {
+		return m.operation.RollbackGeneration, nil
+	}
+	if m.resource.Generation != request.TargetGeneration || m.resource.ActiveOperationID != request.OperationID {
+		return 0, repository.ErrStaleGeneration
+	}
+	m.resource.DesiredSpec = m.resource.AppliedSpec
+	m.resource.Generation++
+	m.resource.Status = domain.StatusDeploying
+	m.operation.RollbackGeneration = m.resource.Generation
+	m.operations[m.operation.ID] = m.operation
+	return m.operation.RollbackGeneration, nil
+}
+
+func (m *memoryStore) FinishScaleRollback(_ context.Context, finish repository.ScaleRollbackFinish) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if finish.Success {
+		m.resource.Status = domain.StatusRunning
+		m.resource.AppliedSpec = finish.AppliedSpec
+		m.resource.DesiredSpec = finish.AppliedSpec
+		m.resource.ObservedGeneration = m.resource.Generation
+		m.resource.RuntimeEndpoint = finish.RuntimeEndpoint
+		m.resource.ReadyReplicas = finish.ReadyReplicas
+		m.operation.State = domain.OperationFailed
+		m.operation.ErrorCode = "SCALE_ROLLED_BACK"
+	} else {
+		m.resource.Status = domain.StatusFailed
+		m.resource.StatusReason = "ROLLBACK_FAILED"
+		m.resource.RuntimeEndpoint = ""
+		m.operation.State = domain.OperationFailed
+		m.operation.ErrorCode = "ROLLBACK_FAILED"
+	}
+	m.resource.ActiveOperationID = uuid.Nil
+	m.resource.ActiveOperation = ""
 	m.operations[m.operation.ID] = m.operation
 	return nil
 }
@@ -173,27 +288,29 @@ func TestCreateToRunningWithFakeDependencies(t *testing.T) {
 	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
 	tenantID := uuid.New()
 	versionID := uuid.New()
-	catalogPort := catalogfake.New()
+	catalogPort := newMemoryCatalog()
 	cpuProfile := catalog.EngineProfile{ID: "vllm-chat-cpu", Version: "1", Runtime: "vllm", ImageRef: "registry/vllm@sha256:image"}
-	catalogPort.Put(tenantID, catalog.ModelVersion{
+	catalogPort.put(tenantID, catalog.ModelVersion{
 		ID: versionID, ModelID: uuid.New(), DisplayName: "Qwen 7B / immutable-v1", Ready: true,
 		Format: "safetensors", ArtifactRef: "object://models/qwen/v1", ArtifactDigest: "sha256:model",
 		CPUProfile: &cpuProfile,
 	})
 	store := &memoryStore{}
-	creator := service.NewCreator(store, catalogPort, func() time.Time { return now })
+	runtimePort := runtimefake.New()
+	creator := service.NewCreator(store, catalogPort, func() time.Time { return now }).WithRuntime(runtimePort)
 	created, operation, err := creator.Create(ctx, tenantID, service.CreateInput{
 		IdempotencyKey: uuid.New(), Name: "qwen-chat", ModelVersionID: versionID,
-		Spec: domain.Spec{Replicas: 1, CPU: "4", Memory: "16Gi", PlacementMode: "auto"},
+		ImageRef: "registry.local/user/vllm@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Spec:     domain.Spec{Replicas: 1, CPU: "4", Memory: "16Gi", PlacementMode: "auto"},
 	})
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
-	if created.Status != domain.StatusPending || operation.State != domain.OperationPending {
-		t.Fatalf("unexpected initial state: service=%+v operation=%+v", created, operation)
+	if created.Status != domain.StatusDeploying || created.RuntimeRef == uuid.Nil || operation.State != domain.OperationPending {
+		t.Fatalf("create must dispatch runtime and stay pending for align: service=%+v operation=%+v", created, operation)
 	}
 
-	worker := reconcile.NewWorker(store, runtimefake.New(), "worker-flow", func() time.Time { return now })
+	worker := reconcile.NewWorker(store, runtimePort, "worker-flow", func() time.Time { return now })
 	handled, err := worker.RunOnce(ctx)
 	if err != nil || !handled {
 		t.Fatalf("RunOnce() = (%v, %v), want (true, nil)", handled, err)
@@ -219,25 +336,26 @@ func TestFullLifecycleConvergesWithFakeDependencies(t *testing.T) {
 	now := time.Date(2026, 8, 14, 13, 0, 0, 0, time.UTC)
 	tenantID := uuid.New()
 	versionID := uuid.New()
-	catalogPort := catalogfake.New()
+	catalogPort := newMemoryCatalog()
 	cpuProfile := catalog.EngineProfile{ID: "vllm-chat-cpu", Version: "1", Runtime: "vllm", ImageRef: "registry/vllm@sha256:image"}
-	catalogPort.Put(tenantID, catalog.ModelVersion{
+	catalogPort.put(tenantID, catalog.ModelVersion{
 		ID: versionID, ModelID: uuid.New(), DisplayName: "Qwen 7B / immutable-v1", Ready: true,
 		Format: "safetensors", ArtifactRef: "object://models/qwen/v1", ArtifactDigest: "sha256:model",
 		CPUProfile: &cpuProfile,
 	})
 	store := &memoryStore{}
-	creator := service.NewCreator(store, catalogPort, func() time.Time { return now })
+	runtimePort := runtimefake.New()
+	creator := service.NewCreator(store, catalogPort, func() time.Time { return now }).WithRuntime(runtimePort)
 	created, _, err := creator.Create(ctx, tenantID, service.CreateInput{
 		IdempotencyKey: uuid.New(), Name: "qwen-lifecycle", ModelVersionID: versionID,
-		Spec: domain.Spec{Replicas: 1, CPU: "4", Memory: "16Gi", PlacementMode: "single_node"},
+		ImageRef: "registry.local/user/vllm@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Spec:     domain.Spec{Replicas: 1, CPU: "4", Memory: "16Gi", PlacementMode: "single_node"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime := runtimefake.New()
-	worker := reconcile.NewWorker(store, runtime, "worker-flow", func() time.Time { return now })
-	controller := service.NewController(store, func() time.Time { now = now.Add(time.Second); return now })
+	worker := reconcile.NewWorker(store, runtimePort, "worker-flow", func() time.Time { return now })
+	controller := service.NewController(store, func() time.Time { now = now.Add(time.Second); return now }).WithRuntime(runtimePort)
 	run := func(action string) {
 		t.Helper()
 		handled, runErr := worker.RunOnce(ctx)
@@ -287,17 +405,20 @@ func TestCreatePreemptedByStopCannotRestoreRunning(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 14, 14, 0, 0, 0, time.UTC)
 	tenantID, versionID := uuid.New(), uuid.New()
-	catalogPort := catalogfake.New()
+	catalogPort := newMemoryCatalog()
 	cpuProfile := catalog.EngineProfile{ID: "cpu", Version: "1", Runtime: "vllm", ImageRef: "registry/vllm@sha256:image"}
-	catalogPort.Put(tenantID, catalog.ModelVersion{
+	catalogPort.put(tenantID, catalog.ModelVersion{
 		ID: versionID, ModelID: uuid.New(), DisplayName: "Qwen", Ready: true,
 		ArtifactRef: "object://qwen", ArtifactDigest: "sha256:model", CPUProfile: &cpuProfile,
 	})
 	store := &memoryStore{}
-	created, createOperation, err := service.NewCreator(store, catalogPort, func() time.Time { return now }).Create(
+	runtimePort := runtimefake.New()
+	created, createOperation, err := service.NewCreator(store, catalogPort, func() time.Time { return now }).
+		WithRuntime(runtimePort).Create(
 		ctx, tenantID, service.CreateInput{
 			IdempotencyKey: uuid.New(), Name: "qwen-preempt", ModelVersionID: versionID,
-			Spec: domain.Spec{Replicas: 1, CPU: "2", Memory: "8Gi", PlacementMode: "single_node"},
+			ImageRef: "registry.local/user/vllm@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			Spec:     domain.Spec{Replicas: 1, CPU: "2", Memory: "8Gi", PlacementMode: "single_node"},
 		},
 	)
 	if err != nil {
@@ -307,12 +428,11 @@ func TestCreatePreemptedByStopCannotRestoreRunning(t *testing.T) {
 	if err != nil || !claimed {
 		t.Fatalf("claim create = (%+v,%v,%v)", claimedCreate, claimed, err)
 	}
-	controller := service.NewController(store, func() time.Time { return now.Add(time.Second) })
+	controller := service.NewController(store, func() time.Time { return now.Add(time.Second) }).WithRuntime(runtimePort)
 	if _, err := controller.Lifecycle(ctx, tenantID, created.ID, uuid.New(), domain.ActionStop); err != nil {
 		t.Fatal(err)
 	}
-	runtime := runtimefake.New()
-	worker := reconcile.NewWorker(store, runtime, "stop-worker", func() time.Time { return now.Add(2 * time.Second) })
+	worker := reconcile.NewWorker(store, runtimePort, "stop-worker", func() time.Time { return now.Add(2 * time.Second) })
 	if handled, err := worker.RunOnce(ctx); err != nil || !handled {
 		t.Fatalf("stop worker = (%v,%v)", handled, err)
 	}
@@ -320,7 +440,7 @@ func TestCreatePreemptedByStopCannotRestoreRunning(t *testing.T) {
 	if stopped.RuntimeEndpoint != "" {
 		t.Fatalf("preempted create endpoint survived stop: %+v", stopped)
 	}
-	if _, err := runtime.Ensure(ctx, runtimeport.EnsureRequest{
+	if _, err := runtimePort.Ensure(ctx, runtimeport.EnsureRequest{
 		TenantID: tenantID, ServiceID: created.ID, Generation: createOperation.TargetGeneration,
 		IdempotencyKey: uuid.New(), Name: created.Name, ServedModelName: created.ServedModelName,
 		Spec: createOperation.TargetSpec,

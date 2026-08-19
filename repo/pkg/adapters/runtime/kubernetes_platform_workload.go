@@ -39,14 +39,11 @@ func NewKubernetesPlatformWorkloadServiceWithStore(runtime platformWorkloadRunti
 	}
 }
 
-func (s *KubernetesPlatformWorkloadService) Capabilities(context.Context) (ports.PlatformWorkloadCapabilities, error) {
-	return ports.PlatformWorkloadCapabilities{
-		SupportedTopologyModes: []string{"single_node"},
-		SupportedProfiles: []ports.PlatformWorkloadTopologyProfile{
-			{ID: "container-single-node", Version: "v1", Mode: "single_node"},
-		},
-		AcceleratorSpecs: []ports.PlatformWorkloadAcceleratorCapability{},
-	}, nil
+func (s *KubernetesPlatformWorkloadService) Capabilities(ctx context.Context) (ports.PlatformWorkloadCapabilities, error) {
+	if source, ok := s.runtime.(platformWorkloadCapabilitySource); ok {
+		return source.DiscoverCapabilities(ctx)
+	}
+	return defaultPlatformWorkloadCapabilities(), nil
 }
 
 func (s *KubernetesPlatformWorkloadService) Create(ctx context.Context, tenantID string, spec ports.PlatformWorkloadCreateSpec) (ports.PlatformWorkloadRecord, error) {
@@ -57,13 +54,17 @@ func (s *KubernetesPlatformWorkloadService) Create(ctx context.Context, tenantID
 	if err != nil {
 		return ports.PlatformWorkloadRecord{}, err
 	}
-	if err := admitPlatformWorkloadAccelerator(caps, spec.Resources); err != nil {
+	if err := admitPlatformWorkloadAccelerator(caps, spec.Resources, spec.Topology.Mode); err != nil {
+		return ports.PlatformWorkloadRecord{}, err
+	}
+	if err := admitPlatformWorkloadTopology(caps, spec); err != nil {
 		return ports.PlatformWorkloadRecord{}, err
 	}
 	fingerprint, err := platformWorkloadFingerprint("create", spec)
 	if err != nil {
 		return ports.PlatformWorkloadRecord{}, err
 	}
+	applied := enrichPlatformWorkloadAccelerator(caps, spec)
 	s.mu.Lock()
 	if existing, ok := s.state.intent(tenantID, spec.IdempotencyKey); ok {
 		item, found := s.state.getRaw(tenantID, existing.workloadID)
@@ -90,13 +91,13 @@ func (s *KubernetesPlatformWorkloadService) Create(ctx context.Context, tenantID
 			State:                  ports.PlatformWorkloadProvisioning,
 			Generation:             1,
 			DesiredReplicas:        spec.Replicas,
-			RuntimeShape:           platformWorkloadRuntimeShape,
+			RuntimeShape:           platformWorkloadRuntimeShapeFor(spec),
 			TopologyProfileID:      spec.Topology.ProfileID,
 			TopologyProfileVersion: spec.Topology.ProfileVersion,
 			CreatedAt:              now,
 			UpdatedAt:              now,
 		},
-		spec: spec,
+		spec: applied,
 	}
 	if err := s.state.put(item); err != nil {
 		s.mu.Unlock()
@@ -105,14 +106,14 @@ func (s *KubernetesPlatformWorkloadService) Create(ctx context.Context, tenantID
 	s.state.putIntent(tenantID, spec.IdempotencyKey, platformWorkloadIntent{fingerprint: fingerprint, workloadID: id})
 	s.mu.Unlock()
 
-	obs, err := s.runtime.Apply(ctx, tenantID, id, spec)
+	obs, err := s.runtime.Apply(ctx, tenantID, id, applied)
 	if err != nil {
 		s.mu.Lock()
 		s.state.remove(tenantID, id, spec.Name, spec.IdempotencyKey)
 		s.mu.Unlock()
 		return ports.PlatformWorkloadRecord{}, err
 	}
-	if observed, observeErr := s.runtime.Observe(ctx, tenantID, id, spec); observeErr == nil {
+	if observed, observeErr := s.runtime.Observe(ctx, tenantID, id, applied); observeErr == nil {
 		obs = observed
 	}
 	return s.storeObservation(tenantID, id, obs, ""), nil
@@ -352,6 +353,26 @@ func (s *KubernetesPlatformWorkloadService) storeObservation(tenantID, workloadI
 	}
 	_ = s.state.put(item)
 	return item.record
+}
+
+func enrichPlatformWorkloadAccelerator(caps ports.PlatformWorkloadCapabilities, spec ports.PlatformWorkloadCreateSpec) ports.PlatformWorkloadCreateSpec {
+	spec.Resources = enrichAcceleratorMemory(caps, spec.Resources)
+	spec.Topology.Leader.Resources = enrichAcceleratorMemory(caps, spec.Topology.Leader.Resources)
+	spec.Topology.Workers.Resources = enrichAcceleratorMemory(caps, spec.Topology.Workers.Resources)
+	return spec
+}
+
+func enrichAcceleratorMemory(caps ports.PlatformWorkloadCapabilities, resources ports.PlatformWorkloadResources) ports.PlatformWorkloadResources {
+	if resources.AcceleratorCount < 1 || resources.AcceleratorMemoryMB > 0 {
+		return resources
+	}
+	for _, spec := range caps.AcceleratorSpecs {
+		if spec.SpecID == resources.AcceleratorSpecID && spec.MemoryPerShareMB > 0 {
+			resources.AcceleratorMemoryMB = spec.MemoryPerShareMB * resources.AcceleratorCount
+			return resources
+		}
+	}
+	return resources
 }
 
 var _ ports.PlatformWorkloadService = (*KubernetesPlatformWorkloadService)(nil)

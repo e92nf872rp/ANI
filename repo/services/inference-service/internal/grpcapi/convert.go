@@ -2,6 +2,7 @@ package grpcapi
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/google/uuid"
@@ -11,6 +12,9 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+var digestPinnedImage = regexp.MustCompile(`^.+@sha256:[a-f0-9]{64}$`)
+
+// parseTenantID 要求 Gateway 注入真实租户 UUID，JSON 里的 tenant 字段不可信。
 func parseTenantID(raw string) (uuid.UUID, error) {
 	id, err := uuid.Parse(strings.TrimSpace(raw))
 	if err != nil || id == uuid.Nil {
@@ -27,6 +31,7 @@ func parseResourceID(raw, field string) (uuid.UUID, error) {
 	return id, nil
 }
 
+// createInputFromProto 把 gRPC 创建请求收成 Creator.Create 的输入。
 func createInputFromProto(req *inferencecontrolv1.CreateInferenceServiceRequest) (service.CreateInput, error) {
 	if req == nil {
 		return service.CreateInput{}, errInvalidArgument
@@ -62,15 +67,62 @@ func createInputFromProto(req *inferencecontrolv1.CreateInferenceServiceRequest)
 	if strings.TrimSpace(req.GetName()) == "" || strings.TrimSpace(spec.CPU) == "" || strings.TrimSpace(spec.Memory) == "" {
 		return service.CreateInput{}, errInvalidArgument
 	}
+	imageID, imageRef, err := parseCreateImage(req.GetImageId(), req.GetImageRef())
+	if err != nil {
+		return service.CreateInput{}, err
+	}
+	engine, err := engineFromProto(req.GetEngine())
+	if err != nil {
+		return service.CreateInput{}, err
+	}
+	spec.Engine = engine
 	return service.CreateInput{
 		IdempotencyKey:  idempotencyKey,
 		Name:            strings.TrimSpace(req.GetName()),
 		ModelVersionID:  modelVersionID,
 		ServedModelName: strings.TrimSpace(req.GetServedModelName()),
+		ImageID:         imageID,
+		ImageRef:        imageRef,
 		Spec:            spec,
 	}, nil
 }
 
+func engineFromProto(msg *inferencecontrolv1.InferenceServiceEngine) (*domain.Engine, error) {
+	if msg == nil {
+		return nil, nil
+	}
+	engine := &domain.Engine{}
+	if len(msg.GetCommand()) > 0 {
+		engine.Command = append([]string(nil), msg.GetCommand()...)
+	}
+	for _, item := range msg.GetEnv() {
+		if item == nil {
+			continue
+		}
+		engine.Env = append(engine.Env, domain.EngineEnvVar{Name: strings.TrimSpace(item.GetName()), Value: item.GetValue()})
+	}
+	if len(engine.Env) == 0 && len(engine.Command) == 0 {
+		return nil, nil
+	}
+	if err := domain.ValidateEngine(engine); err != nil {
+		return nil, fmt.Errorf("%w: %v", errInvalidArgument, err)
+	}
+	return engine, nil
+}
+
+func parseCreateImage(imageID, imageRef string) (string, string, error) {
+	imageID = strings.TrimSpace(imageID)
+	imageRef = strings.TrimSpace(imageRef)
+	if imageID == "" && imageRef == "" {
+		return "", "", errInvalidArgument
+	}
+	if !digestPinnedImage.MatchString(imageRef) {
+		return "", "", service.ErrImageUnavailable
+	}
+	return imageID, imageRef, nil
+}
+
+// parseModelVersionID 产品把手是不可变 version UUID；model 与 model_version_id 必须一致。
 func parseModelVersionID(model, explicit string) (uuid.UUID, error) {
 	modelID, modelErr := uuid.Parse(strings.TrimSpace(model))
 	if strings.TrimSpace(explicit) == "" {
@@ -89,10 +141,12 @@ func parseModelVersionID(model, explicit string) (uuid.UUID, error) {
 	return explicitID, nil
 }
 
+// protoService 把产品投影编成 proto。invocation_url / endpoint_url 不在这里填。
 func protoService(view service.ServiceView) *inferencecontrolv1.InferenceService {
 	msg := &inferencecontrolv1.InferenceService{
 		Id: view.ID.String(), Name: view.Name, Model: view.Model,
 		ModelVersionId: view.ModelVersionID.String(), ServedModelName: view.ServedModelName,
+		ImageId: view.ImageID, ImageRef: view.ImageRef,
 		Replicas: int32(view.Replicas), ReadyReplicas: int32(view.ReadyReplicas),
 		Resources: &inferencecontrolv1.InferenceServiceResources{
 			Cpu: view.Resources.CPU, Memory: view.Resources.Memory,
@@ -110,6 +164,9 @@ func protoService(view service.ServiceView) *inferencecontrolv1.InferenceService
 	if view.LegacyGPUType != nil {
 		msg.GpuType = *view.LegacyGPUType
 	}
+	if engine := protoEngine(view.Engine); engine != nil {
+		msg.Engine = engine
+	}
 	if view.StatusReason != nil {
 		msg.StatusReason = *view.StatusReason
 	}
@@ -121,6 +178,20 @@ func protoService(view service.ServiceView) *inferencecontrolv1.InferenceService
 	}
 	if view.UpdatedAt != nil {
 		msg.UpdatedAt = timestamppb.New(*view.UpdatedAt)
+	}
+	return msg
+}
+
+func protoEngine(engine *domain.Engine) *inferencecontrolv1.InferenceServiceEngine {
+	if engine == nil {
+		return nil
+	}
+	if len(engine.Env) == 0 && len(engine.Command) == 0 {
+		return nil
+	}
+	msg := &inferencecontrolv1.InferenceServiceEngine{Command: append([]string(nil), engine.Command...)}
+	for _, item := range engine.Env {
+		msg.Env = append(msg.Env, &inferencecontrolv1.InferenceServiceEngineEnvVar{Name: item.Name, Value: item.Value})
 	}
 	return msg
 }

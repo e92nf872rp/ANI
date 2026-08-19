@@ -1,0 +1,80 @@
+profile: INFERENCE-SERVICE-ENGINE-VGPU-LIVE-GATE-C36
+status: live
+description: >
+  Product create freezes tenant engine.env / engine.command and applies them
+  as container env plus a full command argv with empty args. volcano vGPU
+  specs are advertised and render volcano.sh/vgpu-* instead of nvidia.com/gpu.
+  Reserved engine.env names return 400 INVALID_ARGUMENT before runtime create.
+  Product HTTP stays on production ani-gateway with ANI_AUTH_MODE=auth_service.
+  The retained whole-card user service is not deleted. This must not mark GPU
+  ready, runtime ready, Pod Ready, or cross-node LWS live. vGPU Pod Ready is
+  not required while the RWO model PVC is held by the retained whole-card
+  service.
+
+required_tools:
+  - kubectl
+
+required_endpoints:
+  - ani_gateway_inference_services_api
+  - inference_control_grpc
+  - kubernetes_api
+
+required_env:
+  - KUBECONFIG
+
+live_checks:
+  - id: reserved-engine-env-400
+    command: POST /api/v1/svc/inference-services with engine.env CUDA_VISIBLE_DEVICES
+    pass_condition: http_400_invalid_argument_no_runtime
+  - id: capabilities-advertise-vgpu-spec
+    command: GET /api/v1/platform-workload-capabilities
+    pass_condition: accelerator_specs_include_4090_Nx
+  - id: product-create-vgpu-202
+    command: POST /api/v1/svc/inference-services accelerator.spec_id=-Nx
+    pass_condition: http_202
+  - id: runtime-command-is-tenant-argv
+    command: kubectl get deploy runtime command
+    pass_condition: command_equals_frozen_engine_command
+  - id: runtime-args-empty
+    command: kubectl get deploy runtime args
+    pass_condition: args_empty
+  - id: runtime-tenant-env-injected
+    command: kubectl get deploy runtime env
+    pass_condition: vllm_logging_level_debug
+  - id: runtime-volcano-vgpu-resources
+    command: kubectl get deploy runtime requests
+    pass_condition: volcano_sh_vgpu_number_and_memory
+  - id: runtime-no-nvidia-gpu
+    command: kubectl get deploy runtime requests
+    pass_condition: nvidia.com/gpu_absent
+  - id: invocation-url-null
+    command: GET /api/v1/svc/inference-services/{id}
+    pass_condition: invocation_url_and_endpoint_url_are_null
+  - id: test-service-deleted
+    command: DELETE /api/v1/svc/inference-services/{id}
+    pass_condition: test_runtime_removed
+  - id: service-retained
+    command: kubectl get deploy retained whole-card InferenceService
+    pass_condition: user_requested_gpu_service_not_deleted
+  - id: production-gateway-auth-mode-preserved
+    command: kubectl -n ani-system get deploy ani-gateway
+    pass_condition: ani_auth_mode_remains_auth_service
+  - id: lws-cross-node-skipped
+    command: POST leader_worker / multi_node
+    pass_condition: skipped_cross_node_lws_not_in_this_batch
+
+evidence: development-records/live-evidence/inference-engine-vgpu-live-20260819.json
+
+evidence_policy:
+  forbidden_content:
+    - bearer tokens
+    - passwords
+    - raw server IPs
+    - full DSN or connection strings
+    - full internal endpoints beyond redacted service DNS
+
+readiness_levels:
+  contract:
+    meaning: engine.env/command and volcano vGPU rendering are implemented; live cluster proof is not claimed.
+  live:
+    meaning: Approved cluster run proved reserved env 400, advertised -Nx, tenant command/env, and volcano.sh/vgpu-* requests. Pod Ready /health and full platform runtime remain skipped because the RWO model PVC is held by the retained whole-card service.
