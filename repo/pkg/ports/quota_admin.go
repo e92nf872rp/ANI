@@ -54,4 +54,5 @@ type QuotaAdminService interface {
 	GetTenantQuota(ctx context.Context, tenantID string) ([]QuotaInfo, error)
 	DeleteTenantQuota(ctx context.Context, tenantID string) error
 	ListQuotaMeta(ctx context.Context) ([]QuotaMeta, error)
+	UpsertTenantQuota(ctx context.Context, tenantID string, items []QuotaItemInput) ([]QuotaInfo, error)
 }

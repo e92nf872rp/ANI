@@ -366,6 +366,8 @@ idempotency_key: uuid          # 必填
 name: string                   # 必填，租户内活动资源唯一
 model: string                  # v1 现有必填兼容字段，传稳定版本 UUID
 model_version_id: uuid         # 新增可选强类型字段，与 model 指向同一版本
+image_id: string               # 可选，镜像仓库 Registry 镜像 ID；与 image_ref 至少填一个，同时传优先 image_id
+image_ref: string              # 可选，用户直接输入的镜像引用；与 image_id 至少填一个
 served_model_name: string      # 可选，默认使用 name；创建后不可变，供 vLLM 请求 model 字段使用
 replicas: integer              # 默认 1，P0 >= 1
 resources:                     # 统一资源规格
@@ -380,6 +382,8 @@ placement_mode: string         # auto|single_node|multi_node，默认 auto
 兼容规则：
 
 - 为避免改变现有 required/generated SDK，v1 继续要求 `model`；新客户端同时传 `model=<version UUID>` 与 `model_version_id`。
+- `image_id` 与 `image_ref` 都是可选创建字段，两者至少填一个：`image_id` 从镜像仓库选择，`image_ref` 由用户直接输入；同时传入时优先 `image_id`。创建前固定 digest。进程环境中的平台默认引擎镜像不是创建路径权威来源。
+- 两者都缺时返回 `400 INVALID_ARGUMENT`；选定或输入的镜像无法解析为 digest 时返回 `422 IMAGE_UNAVAILABLE`。
 - 旧客户端只传 `model` 时，服务必须立即解析并落库 `model_version_id`；旧 `name:version` 仅作为兼容输入。
 - 两者同时存在时必须指向同一版本，否则返回 `409 IDEMPOTENCY_CONFLICT` 或 `400 INVALID_ARGUMENT`，取决于是否发生在幂等重放。
 - 响应继续保留 `model` 作为展示快照，调度与幂等指纹只使用 `model_version_id`。
@@ -408,6 +412,8 @@ P0 规范化与 shape 决策必须覆盖以下表格：
 | 旧请求缺少 `gpu_type`，仅出现 SDK 默认 `gpu_count_per_pod=1` | 无 accelerator | CPU Deployment，禁止误判 GPU |
 | 旧请求含 `gpu_type`，未传新 `resources/placement_mode` | accelerator + single_node | 保持旧客户端单节点语义，不自动升级为 LWS |
 | 新旧字段同时存在但不一致 | 冲突 | `400 INVALID_ARGUMENT` |
+| `image_id` 与 `image_ref` 都缺失 | 非法输入 | `400 INVALID_ARGUMENT` |
+| 选定或输入的镜像无法解析为 digest | 镜像不可用 | `422 IMAGE_UNAVAILABLE` |
 
 虽然 schema 使用通用名 `accelerator`，P0 allowlist 只接受已通过 live gate 的整卡 GPU `spec_id`；不接受 vGPU/MIG，也不表示 TPU、NPU 或其他 accelerator 已受支持。所有规范化结果与 GPUSpec 不可变快照都进入 request hash、desired spec 和审计快照，避免规格目录变化或重试后得到不同 execution plan。
 
@@ -423,6 +429,8 @@ P0 规范化与 shape 决策必须覆盖以下表格：
 | `name` | 租户内活动资源唯一名称 |
 | `model` | 模型名称/版本展示快照 |
 | `model_version_id` | 实际部署的不可变版本 |
+| `image_id` | 创建时从镜像仓库选定的 Registry 镜像 ID；手填 `image_ref` 时可为缺省 |
+| `image_ref` | 创建时解析并冻结的 digest 引用；只读 |
 | `served_model_name` | OpenAI 请求中的稳定 `model` 值，租户内唯一 |
 | `replicas` | 期望独立服务副本数 |
 | `ready_replicas` | 当前健康副本数 |
@@ -454,7 +462,7 @@ PATCH 只允许修改：
 
 伸缩失败不能只留下含糊的 `failed`：operation 保留 `before_spec/target_spec`。服务在事务中把 `desired_spec` 恢复为 `applied_spec`、再递增一次 generation，并把该代次记入 `rollback_generation`；worker 使用由 operation ID + rollback generation 派生的幂等键要求 Core 恢复 `before_spec.replicas`。回滚成功后服务恢复为旧规格的 `running`，该 scale operation 仍以 `failed` 结束并记录 `SCALE_ROLLED_BACK`；回滚也失败时服务进入 `failed`，原因固定为 `ROLLBACK_FAILED`，由 reconciler 继续按当前 `desired_spec` 收敛或等待人工处置。只有目标规格全部 ready 且 smoke 通过，才允许覆盖 `applied_spec`。
 
-模型版本、resources、placement 和 engine profile 都不是 P0 PATCH 字段。需要切换时新建服务，避免在没有网关流量切换与完整 applied-spec rollback 前制造高风险原地变更。
+模型版本、推理镜像、resources、placement 和 engine profile 都不是 P0 PATCH 字段。需要切换时新建服务，避免在没有网关流量切换与完整 applied-spec rollback 前制造高风险原地变更。
 
 ### 6.5 生命周期
 

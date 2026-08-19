@@ -374,6 +374,7 @@ public final class ApiClient {
         "GATEWAY_TIMEOUT",
         "GRPC_CLIENT_UNAVAILABLE",
         "IDEMPOTENCY_CONFLICT",
+        "IMAGE_UNAVAILABLE",
         "INSUFFICIENT_CAPACITY",
         "INVALID_ARGUMENT",
         "INVALID_STATE_TRANSITION",
