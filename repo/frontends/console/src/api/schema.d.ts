@@ -1033,7 +1033,7 @@ export interface paths {
         put?: never;
         /**
          * 发布套餐（需 platform-admin / platform-ops）
-         * @description draft/disabled → active；幂等键可选（body 或 Idempotency-Key 头；皆空时中间件跳过）
+         * @description draft/disabled → active；幂等键必传（body 或 Idempotency-Key 头）
          */
         post: operations["activateTenantPlan"];
         delete?: never;
@@ -1053,7 +1053,7 @@ export interface paths {
         put?: never;
         /**
          * 禁用套餐（需 platform-admin / platform-ops）
-         * @description active → disabled；幂等键可选（body 或 Idempotency-Key 头；皆空时中间件跳过）
+         * @description active → disabled；幂等键必传（body 或 Idempotency-Key 头）
          */
         post: operations["disableTenantPlan"];
         delete?: never;
@@ -1398,6 +1398,10 @@ export interface components {
              * @description 实际部署的不可变模型版本
              */
             model_version_id?: string;
+            /** @description 创建时从镜像仓库选定的 Registry 镜像 ID；手填 image_ref 时可为缺省 */
+            image_id?: string;
+            /** @description 创建时解析并冻结的 digest 引用；只读 */
+            image_ref?: string | null;
             /** @description 集群内 OpenAI-compatible 请求使用的 model 值，不代表公网路由 */
             served_model_name?: string;
             /** @default 1 */
@@ -1410,6 +1414,8 @@ export interface components {
              * @enum {string}
              */
             placement_mode: "auto" | "single_node" | "multi_node";
+            /** @description 创建时冻结的前端环境变量与完整启动命令；省略表示无租户 env/command。不进入 PATCH */
+            engine?: components["schemas"]["InferenceServiceEngine"];
             /**
              * @deprecated
              * @description v1 兼容投影；新客户端使用 resources.accelerator.spec_id
@@ -1466,6 +1472,36 @@ export interface components {
             memory: string;
             accelerator?: components["schemas"]["InferenceServiceAccelerator"];
         };
+        /**
+         * @description 前端传入的单个环境变量。创建时冻结。不是 shell 赋值。
+         *     命中平台保留名时实现返回 400 INVALID_ARGUMENT。
+         */
+        InferenceServiceEngineEnvVar: {
+            /** @description 环境变量名 */
+            name: string;
+            /** @description 环境变量值 */
+            value: string;
+        };
+        /**
+         * @description 前端在创建请求中传入的环境变量与完整启动命令，创建时冻结，只读回显。
+         *     `command` 是完整 argv，原样作为容器启动命令，不与平台默认 command 拼接、不追加。
+         *     平台仍独占 GPU/Ray 运行时环境变量；命中保留 env 名时实现返回 400 INVALID_ARGUMENT。
+         *     不是 shell 字符串。不进入 PATCH。
+         */
+        InferenceServiceEngine: {
+            /** @description 前端传入的环境变量；省略或空数组表示不追加租户环境变量 */
+            env?: components["schemas"]["InferenceServiceEngineEnvVar"][];
+            /**
+             * @description 前端传入的完整启动命令（argv），例如
+             *     ["python3","-m","vllm.entrypoints.openai.api_server","--model","/models/qwen","--host","0.0.0.0","--port","8000"]。
+             *     原样作为容器启动命令，不拼接、不追加平台默认 command。省略表示沿用平台默认启动命令。
+             */
+            command?: string[];
+        };
+        /**
+         * @description 镜像来源二选一，也可同时传：image_id 从镜像仓库选择，image_ref 由用户直接输入。
+         *     同时传入时优先 image_id。创建前固定 digest；两者都缺时由实现返回 400 INVALID_ARGUMENT。
+         */
         CreateInferenceServiceRequest: {
             /** Format: uuid */
             idempotency_key: string;
@@ -1477,6 +1513,10 @@ export interface components {
              * @description 与 model 指向同一不可变版本
              */
             model_version_id?: string;
+            /** @description 镜像仓库 Registry 镜像 ID；与 image_ref 至少填一个，同时传入时优先 image_id。创建前固定 digest。 */
+            image_id?: string;
+            /** @description 用户直接输入的镜像引用；与 image_id 至少填一个，同时传入时优先 image_id。创建前固定 digest。 */
+            image_ref?: string;
             /** @description 默认使用服务 name，创建后不可变 */
             served_model_name?: string;
             /** @description 省略时服务按 1 个副本处理 */
@@ -1487,6 +1527,8 @@ export interface components {
              * @enum {string}
              */
             placement_mode?: "auto" | "single_node" | "multi_node";
+            /** @description 可选；前端传入 env 与完整启动命令 command，创建时冻结。省略表示沿用平台默认启动命令和环境 */
+            engine?: components["schemas"]["InferenceServiceEngine"];
             /**
              * @deprecated
              * @description v1 兼容输入；新客户端不得发送
@@ -2237,25 +2279,25 @@ export interface components {
             idempotency_key: string;
             items: components["schemas"]["PlanQuotaLimitInput"][];
         };
-        /** @description 更新套餐基本信息。name / description 均为可选： 未传或 null 表示不更新；传空串表示清空（name 允许清空为 ""）。 长度按 Unicode 码点校验（与服务端 utf8.RuneCountInString 一致）。 */
+        /** @description 更新套餐基本信息。name / description 均为可选： 未传或 null 表示不更新；name 不允许传空串（服务端校验返回 VALIDATION_FAILED）， description 传空串表示清空。 长度按 Unicode 码点校验（与服务端 utf8.RuneCountInString 一致）。 */
         UpdateTenantPlanRequest: {
             /**
              * Format: uuid
-             * @description 可选；也可改传请求头 Idempotency-Key；皆空时中间件跳过幂等
+             * @description 客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落；皆空时中间件跳过）
              */
-            idempotency_key?: string;
-            /** @description 未传/null=不更新；空串=清空；长度 ≤64（Unicode 码点） */
+            idempotency_key: string;
+            /** @description 未传/null=不更新；不允许空串；长度 1-64（Unicode 码点） */
             name?: string | null;
             /** @description 未传/null=不更新；空串=清空；长度 ≤512（Unicode 码点） */
             description?: string | null;
         };
-        /** @description 套餐发布/禁用请求体。幂等键可选：可放 body.idempotency_key， 或请求头 Idempotency-Key；二者皆空时网关仍转发（幂等中间件跳过空键）。 */
+        /** @description 套餐发布/禁用请求体。幂等键可放 body.idempotency_key， 或请求头 Idempotency-Key（body 缺省时网关回落）。 */
         TenantPlanStateChangeRequest: {
             /**
              * Format: uuid
-             * @description 可选；也可改传请求头 Idempotency-Key
+             * @description 客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落）
              */
-            idempotency_key?: string;
+            idempotency_key: string;
         };
         BindPlanRequest: {
             /**
@@ -2586,7 +2628,7 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
-        /** @description 推理服务前置条件不满足；code 为 MODEL_NOT_READY、MODEL_INCOMPATIBLE、ACCELERATOR_SPEC_UNAVAILABLE、INSUFFICIENT_CAPACITY、UNSUPPORTED_TOPOLOGY 或 INVALID_STATE_TRANSITION */
+        /** @description 推理服务前置条件不满足；code 为 MODEL_NOT_READY、MODEL_INCOMPATIBLE、ACCELERATOR_SPEC_UNAVAILABLE、INSUFFICIENT_CAPACITY、UNSUPPORTED_TOPOLOGY、INVALID_STATE_TRANSITION 或 IMAGE_UNAVAILABLE */
         InferenceUnprocessableEntity: {
             headers: {
                 [name: string]: unknown;
@@ -4818,7 +4860,7 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: {
+        requestBody: {
             content: {
                 "application/json": components["schemas"]["TenantPlanStateChangeRequest"];
             };
@@ -4854,7 +4896,7 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: {
+        requestBody: {
             content: {
                 "application/json": components["schemas"]["TenantPlanStateChangeRequest"];
             };

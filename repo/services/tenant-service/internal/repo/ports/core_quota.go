@@ -12,6 +12,7 @@ import (
 //   GET    /api/v1/admin/tenants/{tenant_id}/quota
 //   POST   /api/v1/admin/tenants/{tenant_id}/quota
 //   PUT    /api/v1/admin/tenants/{tenant_id}/quota
+//   PUT    /api/v1/admin/tenants/{tenant_id}/quota/upsert
 //   DELETE /api/v1/admin/tenants/{tenant_id}/quota
 // tenant-service 仅作为调用方访问此 Core API，不重复实现配额逻辑。
 // 实现：services/tenant-service/internal/repo/adapters/core（封装 Core Go SDK anisdk.Client）。
@@ -61,6 +62,10 @@ type QuotaSvcClient interface {
 	// CreateQuota 批量新建租户配额行（Core POST /admin/tenants/{id}/quota）。
 	// 供绑定套餐时初始化配额；冲突语义由 Core 映射为 ErrQuotaAlreadyExists。
 	CreateQuota(ctx context.Context, tenantID uuid.UUID, items []CoreQuotaItem) ([]CoreQuotaResult, error)
+
+	// UpsertQuota 批量 Upsert 租户配额（Core PUT /admin/tenants/{id}/quota/upsert）。
+	// 已存在则更新，不存在则新建；单次请求原子完成。套餐绑定/改限额同步应走此方法，无需先 GetQuota 分流。
+	UpsertQuota(ctx context.Context, tenantID uuid.UUID, items []CoreQuotaItem) ([]CoreQuotaResult, error)
 
 	// DeleteQuota 删除租户全部配额（Core DELETE /admin/tenants/{id}/quota）。
 	DeleteQuota(ctx context.Context, tenantID uuid.UUID) error

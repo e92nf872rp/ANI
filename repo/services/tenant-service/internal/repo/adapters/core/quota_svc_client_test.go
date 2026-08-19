@@ -123,6 +123,39 @@ func TestQuotaSvcClient_PutQuota_QuotaNotFound(t *testing.T) {
 	}
 }
 
+func TestQuotaSvcClient_UpsertQuota_Tightened(t *testing.T) {
+	t.Parallel()
+
+	id := uuid.New()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/api/v1/admin/tenants/"+id.String()+"/quota/upsert" {
+			t.Fatalf("%s %s", r.Method, r.URL.Path)
+		}
+		if r.Header.Get("Idempotency-Key") == "" {
+			t.Fatal("missing Idempotency-Key")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"tenant_id": id.String(),
+			"items": []map[string]any{
+				{"resource_type": "gpu_count", "total": 2, "used": 1, "reserved": 1, "tightened": true},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := &QuotaSvcClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
+	out, err := client.UpsertQuota(context.Background(), id, []ports.CoreQuotaItem{
+		{ResourceType: "gpu_count", Total: 1},
+	})
+	if err != nil {
+		t.Fatalf("UpsertQuota: %v", err)
+	}
+	if len(out) != 1 || !out[0].Tightened || out[0].Total != 2 {
+		t.Fatalf("result=%+v", out)
+	}
+}
+
 func TestTenantSvcClient_GetTenant(t *testing.T) {
 	t.Parallel()
 

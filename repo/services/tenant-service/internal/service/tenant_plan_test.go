@@ -123,18 +123,22 @@ func (f *fakeAuditStore) ListPlanAuditLogs(_ context.Context, planID uuid.UUID, 
 }
 
 type fakeQuotaClient struct {
-	meta         []ports.QuotaMeta
-	metaErr      error
-	calls        int
-	putCalls     int
-	putTenant    uuid.UUID
-	putItems     []ports.CoreQuotaItem
-	putFn        func(ctx context.Context, tenantID uuid.UUID, items []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error)
-	putTightened bool
-	createCalls  int
-	createItems  []ports.CoreQuotaItem
-	createFn     func(ctx context.Context, tenantID uuid.UUID, items []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error)
-	// existing 模拟租户已有配额维度（GetQuota 返回）
+	meta            []ports.QuotaMeta
+	metaErr         error
+	calls           int
+	putCalls        int
+	putTenant       uuid.UUID
+	putItems        []ports.CoreQuotaItem
+	putFn           func(ctx context.Context, tenantID uuid.UUID, items []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error)
+	putTightened    bool
+	createCalls     int
+	createItems     []ports.CoreQuotaItem
+	createFn        func(ctx context.Context, tenantID uuid.UUID, items []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error)
+	upsertCalls     int
+	upsertItems     []ports.CoreQuotaItem
+	upsertFn        func(ctx context.Context, tenantID uuid.UUID, items []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error)
+	upsertTightened bool
+	// existing 保留字段供旧测试数据兼容；同步路径已不再调用 GetQuota 分流
 	existing map[uuid.UUID][]ports.CoreQuotaResult
 	getFn    func(ctx context.Context, tenantID uuid.UUID) ([]ports.CoreQuotaResult, error)
 }
@@ -194,6 +198,23 @@ func (f *fakeQuotaClient) CreateQuota(ctx context.Context, tenantID uuid.UUID, i
 		out = append(out, ports.CoreQuotaResult{
 			ResourceType: it.ResourceType,
 			Total:        it.Total,
+		})
+	}
+	return out, nil
+}
+
+func (f *fakeQuotaClient) UpsertQuota(ctx context.Context, tenantID uuid.UUID, items []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error) {
+	f.upsertCalls++
+	f.upsertItems = append([]ports.CoreQuotaItem(nil), items...)
+	if f.upsertFn != nil {
+		return f.upsertFn(ctx, tenantID, items)
+	}
+	out := make([]ports.CoreQuotaResult, 0, len(items))
+	for _, it := range items {
+		out = append(out, ports.CoreQuotaResult{
+			ResourceType: it.ResourceType,
+			Total:        it.Total,
+			Tightened:    f.upsertTightened,
 		})
 	}
 	return out, nil
@@ -1422,11 +1443,6 @@ func TestTenantPlanService_UpdateQuotaLimits(t *testing.T) {
 			{ResourceType: "gpu_count", Enabled: true, DefaultQuota: 4, DisplayName: "GPU", Unit: "card"},
 			{ResourceType: "cpu_core", Enabled: true, DefaultQuota: 32, DisplayName: "CPU", Unit: "core"},
 		},
-		// tenantA：仅有 cpu_core（gpu 已 approved 跳过）→ Put cpu_core
-		// tenantB：无配额行 → Create gpu+cpu
-		existing: map[uuid.UUID][]ports.CoreQuotaResult{
-			tenantA: {{ResourceType: "cpu_core", Total: 16}},
-		},
 	}
 	audit := &fakeAuditStore{}
 	svc := NewTenantPlanService(plans, audit, core, &fakeTenantClient{
@@ -1458,18 +1474,12 @@ func TestTenantPlanService_UpdateQuotaLimits(t *testing.T) {
 		t.Fatalf("cpu_core total should be default 32, got %+v", plans.updated[1])
 	}
 
-	// tenantA：Put cpu_core；tenantB：Create gpu+cpu
-	if core.putCalls != 1 {
-		t.Fatalf("putCalls=%d want 1", core.putCalls)
+	// tenantA：跳过 approved gpu → Upsert 仅 cpu_core；tenantB：Upsert gpu+cpu
+	if core.upsertCalls != 2 {
+		t.Fatalf("upsertCalls=%d want 2", core.upsertCalls)
 	}
-	if len(core.putItems) != 1 || core.putItems[0].ResourceType != "cpu_core" || core.putItems[0].Total != 32 {
-		t.Fatalf("putItems=%+v", core.putItems)
-	}
-	if core.createCalls != 1 {
-		t.Fatalf("createCalls=%d want 1", core.createCalls)
-	}
-	if len(core.createItems) != 2 {
-		t.Fatalf("createItems=%+v", core.createItems)
+	if core.putCalls != 0 || core.createCalls != 0 {
+		t.Fatalf("putCalls=%d createCalls=%d want 0 (no Put/Create split)", core.putCalls, core.createCalls)
 	}
 	if len(audit.logs) != 1 || audit.logs[0].Result != "success" || audit.logs[0].Action != "tenant_plan.update_quota_limits" {
 		t.Fatalf("audit=%+v", audit.logs)
@@ -1500,11 +1510,8 @@ func Test_UpdateQuotaLimits_Tightened(t *testing.T) {
 	}
 	audit := &fakeAuditStore{}
 	core := &fakeQuotaClient{
-		meta:         []ports.QuotaMeta{{ResourceType: "gpu_count", Enabled: true, DefaultQuota: 4, DisplayName: "GPU", Unit: "card"}},
-		putTightened: true,
-		existing: map[uuid.UUID][]ports.CoreQuotaResult{
-			tenantID: {{ResourceType: "gpu_count", Total: 4}},
-		},
+		meta:            []ports.QuotaMeta{{ResourceType: "gpu_count", Enabled: true, DefaultQuota: 4, DisplayName: "GPU", Unit: "card"}},
+		upsertTightened: true,
 	}
 	svc := NewTenantPlanService(plans, audit, core, &fakeTenantClient{
 		bound: []ports.BoundTenant{{ID: tenantID, Name: "t", Status: ports.TenantStatusActive}},
@@ -1519,11 +1526,11 @@ func Test_UpdateQuotaLimits_Tightened(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tightened must not error: %v", err)
 	}
-	if core.putCalls != 1 {
-		t.Fatalf("putCalls=%d", core.putCalls)
+	if core.upsertCalls != 1 {
+		t.Fatalf("upsertCalls=%d want 1", core.upsertCalls)
 	}
-	if core.createCalls != 0 {
-		t.Fatalf("createCalls=%d want 0", core.createCalls)
+	if core.putCalls != 0 || core.createCalls != 0 {
+		t.Fatalf("putCalls=%d createCalls=%d want 0", core.putCalls, core.createCalls)
 	}
 	if len(audit.logs) != 1 || audit.logs[0].Result != "success" {
 		t.Fatalf("audit=%+v", audit.logs)
@@ -1550,11 +1557,8 @@ func Test_UpdateQuotaLimits_CoreFailAudits(t *testing.T) {
 	}
 	core := &fakeQuotaClient{
 		meta: []ports.QuotaMeta{{ResourceType: "gpu_count", Enabled: true, DefaultQuota: 4, DisplayName: "GPU", Unit: "card"}},
-		existing: map[uuid.UUID][]ports.CoreQuotaResult{
-			tenantID: {{ResourceType: "gpu_count", Total: 2}},
-		},
-		putFn: func(context.Context, uuid.UUID, []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error) {
-			return nil, ports.ErrQuotaNotFound
+		upsertFn: func(context.Context, uuid.UUID, []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error) {
+			return nil, ports.ErrCoreUnavailable
 		},
 	}
 	audit := &fakeAuditStore{}
@@ -1585,7 +1589,7 @@ func Test_UpdateQuotaLimits_CoreFailAudits(t *testing.T) {
 	}
 }
 
-func Test_UpdateQuotaLimits_CreateWhenMissing(t *testing.T) {
+func Test_UpdateQuotaLimits_UpsertWhenMissing(t *testing.T) {
 	enablePutQuotaRetry = false
 	t.Cleanup(func() { enablePutQuotaRetry = true })
 
@@ -1599,7 +1603,6 @@ func Test_UpdateQuotaLimits_CreateWhenMissing(t *testing.T) {
 	}
 	core := &fakeQuotaClient{
 		meta: []ports.QuotaMeta{{ResourceType: "gpu_count", Enabled: true, DefaultQuota: 4, DisplayName: "GPU", Unit: "card"}},
-		// GetQuota 空列表 → CreateQuota
 	}
 	svc := NewTenantPlanService(plans, &fakeAuditStore{}, core, &fakeTenantClient{
 		bound: []ports.BoundTenant{{ID: tenantID, Name: "t", Status: ports.TenantStatusActive}},
@@ -1614,11 +1617,11 @@ func Test_UpdateQuotaLimits_CreateWhenMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	if core.createCalls != 1 || core.putCalls != 0 {
-		t.Fatalf("createCalls=%d putCalls=%d", core.createCalls, core.putCalls)
+	if core.upsertCalls != 1 || core.putCalls != 0 || core.createCalls != 0 {
+		t.Fatalf("upsertCalls=%d putCalls=%d createCalls=%d", core.upsertCalls, core.putCalls, core.createCalls)
 	}
-	if len(core.createItems) != 1 || core.createItems[0].ResourceType != "gpu_count" || core.createItems[0].Total != 4 {
-		t.Fatalf("createItems=%+v", core.createItems)
+	if len(core.upsertItems) != 1 || core.upsertItems[0].ResourceType != "gpu_count" || core.upsertItems[0].Total != 4 {
+		t.Fatalf("upsertItems=%+v", core.upsertItems)
 	}
 }
 
@@ -1857,8 +1860,8 @@ func TestTenantService_BindPlanQuota(t *testing.T) {
 	if res.GetMessage() != "quota bound to plan" || res.GetId() != tenantID.String() {
 		t.Fatalf("res=%+v", res)
 	}
-	if quota.createCalls != 1 || quota.putCalls != 0 {
-		t.Fatalf("createCalls=%d putCalls=%d", quota.createCalls, quota.putCalls)
+	if quota.upsertCalls != 1 || quota.putCalls != 0 || quota.createCalls != 0 {
+		t.Fatalf("upsertCalls=%d putCalls=%d createCalls=%d", quota.upsertCalls, quota.putCalls, quota.createCalls)
 	}
 	if tenants.updateCalls != 1 || tenants.updatedPlan != planID {
 		t.Fatalf("UpdateTenantPlan calls=%d plan=%s", tenants.updateCalls, tenants.updatedPlan)
@@ -1960,8 +1963,8 @@ func Test_BindPlanQuota_AuditWriteErrorStillSucceeds(t *testing.T) {
 	if tenants.tenant.PlanID != planID {
 		t.Fatalf("plan_id=%s want %s", tenants.tenant.PlanID, planID)
 	}
-	if quota.createCalls != 1 {
-		t.Fatalf("createCalls=%d want 1", quota.createCalls)
+	if quota.upsertCalls != 1 {
+		t.Fatalf("upsertCalls=%d want 1", quota.upsertCalls)
 	}
 }
 
@@ -1984,7 +1987,7 @@ func Test_BindPlanQuota_CoreFailRollsBackPlanID(t *testing.T) {
 		meta: []ports.QuotaMeta{
 			{ResourceType: "gpu_count", Enabled: true, DefaultQuota: 4, DisplayName: "GPU", Unit: "card"},
 		},
-		createFn: func(context.Context, uuid.UUID, []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error) {
+		upsertFn: func(context.Context, uuid.UUID, []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error) {
 			return nil, ports.ErrCoreUnavailable
 		},
 	}
@@ -2036,9 +2039,6 @@ func Test_BindPlanQuota_ApprovedSkip(t *testing.T) {
 			{ResourceType: "gpu_count", Enabled: true, DefaultQuota: 4, DisplayName: "GPU", Unit: "card"},
 			{ResourceType: "cpu_core", Enabled: true, DefaultQuota: 16, DisplayName: "CPU", Unit: "core"},
 		},
-		existing: map[uuid.UUID][]ports.CoreQuotaResult{
-			tenantID: {{ResourceType: "cpu_core", Total: 16}},
-		},
 	}
 	audit := &fakeAuditStore{}
 	svc := NewTenantService(plans, tenants, quota, audit)
@@ -2050,11 +2050,11 @@ func Test_BindPlanQuota_ApprovedSkip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BindPlanQuota: %v", err)
 	}
-	if quota.putCalls != 1 || len(quota.putItems) != 1 || quota.putItems[0].ResourceType != "cpu_core" {
-		t.Fatalf("putCalls=%d putItems=%+v", quota.putCalls, quota.putItems)
+	if quota.upsertCalls != 1 || len(quota.upsertItems) != 1 || quota.upsertItems[0].ResourceType != "cpu_core" {
+		t.Fatalf("upsertCalls=%d upsertItems=%+v", quota.upsertCalls, quota.upsertItems)
 	}
-	if quota.createCalls != 0 {
-		t.Fatalf("createCalls=%d want 0", quota.createCalls)
+	if quota.putCalls != 0 || quota.createCalls != 0 {
+		t.Fatalf("putCalls=%d createCalls=%d want 0", quota.putCalls, quota.createCalls)
 	}
 	if tenants.updateCalls != 0 {
 		t.Fatalf("same plan_id should skip UpdateTenantPlan, calls=%d", tenants.updateCalls)

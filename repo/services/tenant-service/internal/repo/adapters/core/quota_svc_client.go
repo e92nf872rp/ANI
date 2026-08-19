@@ -102,6 +102,24 @@ func (c *QuotaSvcClient) CreateQuota(ctx context.Context, tenantID uuid.UUID, it
 	return decodeQuotaItems(raw)
 }
 
+// UpsertQuota 调用 Core PUT /admin/tenants/{id}/quota/upsert（Idempotency-Key header）。
+func (c *QuotaSvcClient) UpsertQuota(ctx context.Context, tenantID uuid.UUID, items []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error) {
+	_ = ctx
+	headers, err := idempotencyHeaders()
+	if err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/admin/tenants/%s/quota/upsert", tenantID.String())
+	raw, err := c.sdk.Request("PUT", path, anisdk.RequestOptions{
+		Body:    map[string]any{"items": encodeQuotaItems(items)},
+		Headers: headers,
+	})
+	if err != nil {
+		return nil, mapSDKError(err)
+	}
+	return decodeQuotaItems(raw)
+}
+
 // DeleteQuota 调用 Core DELETE /admin/tenants/{id}/quota。
 func (c *QuotaSvcClient) DeleteQuota(ctx context.Context, tenantID uuid.UUID) error {
 	_ = ctx

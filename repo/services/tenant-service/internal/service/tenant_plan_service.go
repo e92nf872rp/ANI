@@ -55,7 +55,7 @@ func (s *TenantPlanService) ListTenantPlans(ctx context.Context, req *tenantv1.L
 	}
 
 	// 步骤 1：status 枚举校验（空=全部）
-	status, err := ports.ParseTenantPlanStatusFilter(req.GetStatus())
+	statusFilter, err := ports.ParseTenantPlanStatusFilter(req.GetStatus())
 	if err != nil {
 		return nil, mapStoreError(err)
 	}
@@ -74,7 +74,7 @@ func (s *TenantPlanService) ListTenantPlans(ctx context.Context, req *tenantv1.L
 	result, err := s.plans.List(ctx, ports.TenantPlanListFilter{
 		Limit:  limit,
 		Cursor: cursor,
-		Status: status,
+		Status: statusFilter,
 		Search: strings.TrimSpace(req.GetSearch()),
 	})
 	if err != nil {
@@ -728,7 +728,7 @@ type tenantQuotaSyncResult struct {
 
 // syncPlanQuotaToTenant 将套餐限额同步到单个租户配额（绑定 / 改限额同步共用）。
 // dims 为待同步维度；totalByType 提供各维度有效 total。
-// 跳过 approved 维度后：已有行 → PutQuota，缺失 → CreateQuota。
+// 入口先校验维度已启用，再跳过 approved，最后 UpsertQuota。
 func syncPlanQuotaToTenant(
 	ctx context.Context,
 	plans ports.TenantPlanStore,
@@ -739,7 +739,12 @@ func syncPlanQuotaToTenant(
 ) (tenantQuotaSyncResult, error) {
 	var out tenantQuotaSyncResult
 
-	// 步骤 1：读已审批维度
+	// 步骤 1：service 侧先校验待同步维度均已启用（不依赖 Core Upsert 兜底）
+	if err := validateEnabledQuotaResourceTypes(ctx, core, dims); err != nil {
+		return out, err
+	}
+
+	// 步骤 2：读已审批维度
 	approved, err := plans.GetApprovedQuotaChanges(ctx, tenantID)
 	if err != nil {
 		return out, err
@@ -749,7 +754,7 @@ func syncPlanQuotaToTenant(
 		approvedSet[a.ResourceType] = struct{}{}
 	}
 
-	// 步骤 2：过滤 dims → Core items（跳过 approved / 无 total）
+	// 步骤 3：过滤 dims → Core items（跳过 approved / 无 total）
 	out.Updated = make([]string, 0, len(dims))
 	out.SkippedApproved = make([]string, 0)
 	out.Tightened = make([]string, 0)
@@ -767,12 +772,12 @@ func syncPlanQuotaToTenant(
 		out.Updated = append(out.Updated, rt)
 	}
 
-	// 步骤 3：无待下发项则结束
+	// 步骤 4：无待下发项则结束
 	if len(out.Items) == 0 {
 		return out, nil
 	}
 
-	// 步骤 4：按存在性分流 Put/Create，并收集 tightened 维度
+	// 步骤 5：Upsert 下发，并收集 tightened 维度
 	results, err := applyTenantQuotaItems(ctx, core, tenantID, out.Items)
 	if err != nil {
 		return out, err
@@ -805,52 +810,44 @@ func dimsFromQuotaViews(views []ports.PlanQuotaLimitView) []string {
 	return out
 }
 
-// applyTenantQuotaItems 按租户当前配额行存在性分流：已有 → PutQuota，缺失 → CreateQuota。
+// validateEnabledQuotaResourceTypes 在 service 层校验 resource_type 均已在 Core quota-meta 中启用。
+// syncPlanQuotaToTenant 入口第一步调用；未注册或 Enabled=false → ErrQuotaResourceNotRegistered。
+// 不修改 buildQuotaLimitViews（展示路径仍可静默跳过未启用维度）。
+func validateEnabledQuotaResourceTypes(ctx context.Context, core ports.QuotaSvcClient, resourceTypes []string) error {
+	if len(resourceTypes) == 0 {
+		return nil
+	}
+	if core == nil {
+		return businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core quota api unavailable")
+	}
+	meta, err := core.ListQuotaMeta(ctx)
+	if err != nil {
+		if errors.Is(err, ports.ErrCoreUnavailable) {
+			return businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core quota-meta unavailable")
+		}
+		return businessError(codes.Unavailable, ports.ErrCoreUnavailable, err.Error())
+	}
+	enabled := make(map[string]struct{}, len(meta))
+	for _, m := range meta {
+		if m.Enabled {
+			enabled[m.ResourceType] = struct{}{}
+		}
+	}
+	for _, rt := range resourceTypes {
+		if _, ok := enabled[rt]; !ok {
+			return businessError(codes.FailedPrecondition, ports.ErrQuotaResourceNotRegistered, "resource_type not registered or disabled: "+rt)
+		}
+	}
+	return nil
+}
+
+// applyTenantQuotaItems 一律走 Core UpsertQuota，不再 GetQuota 后按存在性分流 Put/Create。
 // 返回 Core 各维度结果（含 tightened）；BindPlanQuota / 改限额同步共用。
 func applyTenantQuotaItems(ctx context.Context, core ports.QuotaSvcClient, tenantID uuid.UUID, items []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error) {
-	// 步骤 1：空列表直接成功
 	if len(items) == 0 {
 		return nil, nil
 	}
-
-	// 步骤 2：查询租户已有配额维度
-	existing, err := core.GetQuota(ctx, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	existSet := make(map[string]struct{}, len(existing))
-	for _, e := range existing {
-		existSet[e.ResourceType] = struct{}{}
-	}
-
-	// 步骤 3：拆成更新集 / 新建集
-	putItems := make([]ports.CoreQuotaItem, 0, len(items))
-	createItems := make([]ports.CoreQuotaItem, 0, len(items))
-	for _, it := range items {
-		if _, ok := existSet[it.ResourceType]; ok {
-			putItems = append(putItems, it)
-		} else {
-			createItems = append(createItems, it)
-		}
-	}
-
-	// 步骤 4：已有维度 Put；缺失维度 Create；合并结果供审计统计 tightened
-	out := make([]ports.CoreQuotaResult, 0, len(items))
-	if len(putItems) > 0 {
-		res, err := core.PutQuota(ctx, tenantID, putItems)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, res...)
-	}
-	if len(createItems) > 0 {
-		res, err := core.CreateQuota(ctx, tenantID, createItems)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, res...)
-	}
-	return out, nil
+	return core.UpsertQuota(ctx, tenantID, items)
 }
 
 // buildQuotaLimitViews 组装展示/下发视图：store.GetQuotaLimits + Core ListQuotaMeta。

@@ -19,7 +19,7 @@ type TenantService struct {
 
 	plans   ports.TenantPlanStore      // 套餐 store（限额原始行；展示/下发经 Core ListQuotaMeta 组装）
 	tenants ports.TenantSvcClient      // Core 租户 API（GetTenant / UpdateTenantPlan）
-	quota   ports.QuotaSvcClient       // Core 配额 API（Get/Put/Create）
+	quota   ports.QuotaSvcClient       // Core 配额 API（Get/Put/Create/Upsert）
 	audit   ports.TenantPlanAuditStore // 审计日志（配额套餐域）
 }
 
@@ -91,14 +91,30 @@ func (s *TenantService) BindPlanQuota(ctx context.Context, req *tenantv1.BindPla
 		return nil, err
 	}
 
-	// 步骤 4：组装套餐有效限额视图（store + Core meta；NULL total 回写 default）
+	// 步骤 4：service 侧先校验套餐内维度均已启用（组装视图之前；不依赖 Core Upsert）
+	rawLimits, err := s.plans.GetQuotaLimits(ctx, planID)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, action, map[string]any{"tenant_id": tenantID.String(), "plan_id": planID.String()}, mapped, &tenantID)
+		return nil, mapped
+	}
+	planDims := make([]string, 0, len(rawLimits))
+	for _, lim := range rawLimits {
+		planDims = append(planDims, lim.ResourceType)
+	}
+	if err := validateEnabledQuotaResourceTypes(ctx, s.quota, planDims); err != nil {
+		writeAuditFailure(ctx, s.audit, action, map[string]any{"tenant_id": tenantID.String(), "plan_id": planID.String()}, err, &tenantID)
+		return nil, err
+	}
+
+	// 步骤 5：组装套餐有效限额视图（store + Core meta；NULL total 回写 default）
 	views, err := buildQuotaLimitViews(ctx, s.plans, s.quota, planID)
 	if err != nil {
 		writeAuditFailure(ctx, s.audit, action, map[string]any{"tenant_id": tenantID.String(), "plan_id": planID.String()}, err, &tenantID)
 		return nil, err
 	}
 
-	// 步骤 5：plan_id 变更时经 Core 租户 API 更新；记下旧值以便配额失败回滚
+	// 步骤 6：plan_id 变更时经 Core 租户 API 更新；记下旧值以便配额失败回滚
 	prevPlanID := tenant.PlanID
 	planChanged := prevPlanID != planID
 	if planChanged {
@@ -109,11 +125,11 @@ func (s *TenantService) BindPlanQuota(ctx context.Context, req *tenantv1.BindPla
 		}
 	}
 
-	// 步骤 6：同步套餐配额到该租户（跳过 approved；Put/Create 分流）
+	// 步骤 7：同步套餐配额到该租户（跳过 approved；入口再校验启用后 Upsert）
 	syncRes, err := syncPlanQuotaToTenant(ctx, s.plans, s.quota, tenantID, totalsFromQuotaViews(views), dimsFromQuotaViews(views))
 	if err != nil {
 		mapped := mapStoreError(err)
-		// 步骤 6b：配额失败 → 回滚 plan_id（best-effort）
+		// 步骤 7b：配额失败 → 回滚 plan_id（best-effort）
 		rolledBack := false
 		if planChanged {
 			if _, rbErr := s.tenants.UpdateTenantPlan(ctx, tenantID, prevPlanID); rbErr != nil {
@@ -141,7 +157,7 @@ func (s *TenantService) BindPlanQuota(ctx context.Context, req *tenantv1.BindPla
 		return nil, mapped
 	}
 
-	// 步骤 7：写成功审计（best-effort：失败只 Warn，不把已生效绑定变成错误）
+	// 步骤 8：写成功审计（best-effort：失败只 Warn，不把已生效绑定变成错误）
 	writeAuditSuccess(ctx, s.audit, action, map[string]any{
 		"plan_id":             planID.String(),
 		"tenant_id":           tenantID.String(),
