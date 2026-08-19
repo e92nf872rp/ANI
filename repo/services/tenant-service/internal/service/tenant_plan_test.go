@@ -123,20 +123,20 @@ func (f *fakeAuditStore) ListPlanAuditLogs(_ context.Context, planID uuid.UUID, 
 }
 
 type fakeQuotaClient struct {
-	meta           []ports.QuotaMeta
-	metaErr        error
-	calls          int
-	putCalls       int
-	putTenant      uuid.UUID
-	putItems       []ports.CoreQuotaItem
-	putFn          func(ctx context.Context, tenantID uuid.UUID, items []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error)
-	putTightened   bool
-	createCalls    int
-	createItems    []ports.CoreQuotaItem
-	createFn       func(ctx context.Context, tenantID uuid.UUID, items []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error)
-	upsertCalls    int
-	upsertItems    []ports.CoreQuotaItem
-	upsertFn       func(ctx context.Context, tenantID uuid.UUID, items []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error)
+	meta            []ports.QuotaMeta
+	metaErr         error
+	calls           int
+	putCalls        int
+	putTenant       uuid.UUID
+	putItems        []ports.CoreQuotaItem
+	putFn           func(ctx context.Context, tenantID uuid.UUID, items []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error)
+	putTightened    bool
+	createCalls     int
+	createItems     []ports.CoreQuotaItem
+	createFn        func(ctx context.Context, tenantID uuid.UUID, items []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error)
+	upsertCalls     int
+	upsertItems     []ports.CoreQuotaItem
+	upsertFn        func(ctx context.Context, tenantID uuid.UUID, items []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error)
 	upsertTightened bool
 	// existing 保留字段供旧测试数据兼容；同步路径已不再调用 GetQuota 分流
 	existing map[uuid.UUID][]ports.CoreQuotaResult
