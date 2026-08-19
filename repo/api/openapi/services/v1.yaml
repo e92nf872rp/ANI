@@ -918,23 +918,25 @@ components:
 
     UpdateTenantPlanRequest:
       type: object
+      required: [idempotency_key]
       description: >
         更新套餐基本信息。name / description 均为可选：
         未传或 null 表示不更新；name 不允许传空串（服务端校验返回 VALIDATION_FAILED），
         description 传空串表示清空。
         长度按 Unicode 码点校验（与服务端 utf8.RuneCountInString 一致）。
       properties:
-        idempotency_key: { type: string, format: uuid, description: "可选；也可改传请求头 Idempotency-Key；皆空时中间件跳过幂等" }
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落；皆空时中间件跳过）" }
         name: { type: string, nullable: true, maxLength: 64, minLength: 1, description: "未传/null=不更新；不允许空串；长度 1-64（Unicode 码点）" }
         description: { type: string, nullable: true, maxLength: 512, description: "未传/null=不更新；空串=清空；长度 ≤512（Unicode 码点）" }
 
     TenantPlanStateChangeRequest:
       type: object
+      required: [idempotency_key]
       description: >
-        套餐发布/禁用请求体。幂等键可选：可放 body.idempotency_key，
-        或请求头 Idempotency-Key；二者皆空时网关仍转发（幂等中间件跳过空键）。
+        套餐发布/禁用请求体。幂等键可放 body.idempotency_key，
+        或请求头 Idempotency-Key（body 缺省时网关回落）。
       properties:
-        idempotency_key: { type: string, format: uuid, description: "可选；也可改传请求头 Idempotency-Key" }
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落）" }
 
     BindPlanRequest:
       type: object
@@ -2646,12 +2648,12 @@ paths:
     post:
       operationId: activateTenantPlan
       summary: 发布套餐（需 platform-admin / platform-ops）
-      description: draft/disabled → active；幂等键可选（body 或 Idempotency-Key 头；皆空时中间件跳过）
+      description: draft/disabled → active；幂等键必传（body 或 Idempotency-Key 头）
       tags: [TenantPlans]
       parameters:
         - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema: { $ref: '#/components/schemas/TenantPlanStateChangeRequest' }
@@ -2673,12 +2675,12 @@ paths:
     post:
       operationId: disableTenantPlan
       summary: 禁用套餐（需 platform-admin / platform-ops）
-      description: active → disabled；幂等键可选（body 或 Idempotency-Key 头；皆空时中间件跳过）
+      description: active → disabled；幂等键必传（body 或 Idempotency-Key 头）
       tags: [TenantPlans]
       parameters:
         - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema: { $ref: '#/components/schemas/TenantPlanStateChangeRequest' }

@@ -1033,7 +1033,7 @@ export interface paths {
         put?: never;
         /**
          * 发布套餐（需 platform-admin / platform-ops）
-         * @description draft/disabled → active；幂等键可选（body 或 Idempotency-Key 头；皆空时中间件跳过）
+         * @description draft/disabled → active；幂等键必传（body 或 Idempotency-Key 头）
          */
         post: operations["activateTenantPlan"];
         delete?: never;
@@ -1053,7 +1053,7 @@ export interface paths {
         put?: never;
         /**
          * 禁用套餐（需 platform-admin / platform-ops）
-         * @description active → disabled；幂等键可选（body 或 Idempotency-Key 头；皆空时中间件跳过）
+         * @description active → disabled；幂等键必传（body 或 Idempotency-Key 头）
          */
         post: operations["disableTenantPlan"];
         delete?: never;
@@ -2236,21 +2236,21 @@ export interface components {
         UpdateTenantPlanRequest: {
             /**
              * Format: uuid
-             * @description 可选；也可改传请求头 Idempotency-Key；皆空时中间件跳过幂等
+             * @description 客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落；皆空时中间件跳过）
              */
-            idempotency_key?: string;
+            idempotency_key: string;
             /** @description 未传/null=不更新；不允许空串；长度 1-64（Unicode 码点） */
             name?: string | null;
             /** @description 未传/null=不更新；空串=清空；长度 ≤512（Unicode 码点） */
             description?: string | null;
         };
-        /** @description 套餐发布/禁用请求体。幂等键可选：可放 body.idempotency_key， 或请求头 Idempotency-Key；二者皆空时网关仍转发（幂等中间件跳过空键）。 */
+        /** @description 套餐发布/禁用请求体。幂等键可放 body.idempotency_key， 或请求头 Idempotency-Key（body 缺省时网关回落）。 */
         TenantPlanStateChangeRequest: {
             /**
              * Format: uuid
-             * @description 可选；也可改传请求头 Idempotency-Key
+             * @description 客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落）
              */
-            idempotency_key?: string;
+            idempotency_key: string;
         };
         BindPlanRequest: {
             /**
@@ -4802,7 +4802,7 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: {
+        requestBody: {
             content: {
                 "application/json": components["schemas"]["TenantPlanStateChangeRequest"];
             };
@@ -4838,7 +4838,7 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: {
+        requestBody: {
             content: {
                 "application/json": components["schemas"]["TenantPlanStateChangeRequest"];
             };

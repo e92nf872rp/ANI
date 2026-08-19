@@ -79,7 +79,7 @@ message UpdateTenantPlanRequest {
   string plan_id = 1;
   google.protobuf.StringValue name = 2;
   google.protobuf.StringValue description = 3;
-  string idempotency_key = 4; // 可选幂等键
+  string idempotency_key = 4; // 幂等键（必传）
 }
 
 message DeleteTenantPlanRequest {
