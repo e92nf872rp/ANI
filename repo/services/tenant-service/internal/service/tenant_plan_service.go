@@ -55,7 +55,7 @@ func (s *TenantPlanService) ListTenantPlans(ctx context.Context, req *tenantv1.L
 	}
 
 	// 步骤 1：status 枚举校验（空=全部）
-	status, err := ports.ParseTenantPlanStatusFilter(req.GetStatus())
+	statusFilter, err := ports.ParseTenantPlanStatusFilter(req.GetStatus())
 	if err != nil {
 		return nil, mapStoreError(err)
 	}
@@ -74,7 +74,7 @@ func (s *TenantPlanService) ListTenantPlans(ctx context.Context, req *tenantv1.L
 	result, err := s.plans.List(ctx, ports.TenantPlanListFilter{
 		Limit:  limit,
 		Cursor: cursor,
-		Status: status,
+		Status: statusFilter,
 		Search: strings.TrimSpace(req.GetSearch()),
 	})
 	if err != nil {
