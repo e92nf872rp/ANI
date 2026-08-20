@@ -1,0 +1,35 @@
+{
+  "profile": "INFERENCE-SERVICE-GPU-ADMISSION-LIVE-GATE-C16",
+  "status": "passed",
+  "generated_at": "2026-08-15T08:24:57Z",
+  "gateway": "lab-process-not-in-cluster-ani-gateway",
+  "admission": "accelerator_spec_unavailable",
+  "gpu_live": "skipped_no_device_plugin",
+  "auth_mode": "dev",
+  "checks": [
+    {
+      "id": "platform-workload-capabilities-no-accelerator",
+      "status": "passed",
+      "available_specs": 0
+    },
+    {
+      "id": "inference-service-gpu-create-rejected",
+      "status": "passed",
+      "http_status": 422
+    },
+    {
+      "id": "no-gpu-runtime-created",
+      "status": "passed"
+    },
+    {
+      "id": "gpu-live-skipped-no-device-plugin",
+      "status": "passed",
+      "reason": "skipped_no_device_plugin"
+    },
+    {
+      "id": "smoke-workload-untouched",
+      "status": "passed",
+      "namespace": "ani-vllm-cpu-smoke"
+    }
+  ]
+}

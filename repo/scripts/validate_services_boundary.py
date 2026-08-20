@@ -26,7 +26,7 @@ CORE_PROTECTED_SERVICE_ROOTS = (
     "metering-service",
     "reconcile-worker",
 )
-SERVICES_OWNED_SOURCE_ROOTS = ("model-service", "kb-service", "tenant-service", "pkg")
+SERVICES_OWNED_SOURCE_ROOTS = ("model-service", "kb-service", "tenant-service", "inference-service", "pkg")
 DOCS_ONLY_SERVICE_ROOTS = ("docs", "tasks", "prototypes")
 KNOWN_SERVICE_ROOTS = frozenset(
     (*CORE_PROTECTED_SERVICE_ROOTS, *SERVICES_OWNED_SOURCE_ROOTS, *DOCS_ONLY_SERVICE_ROOTS)
@@ -70,6 +70,7 @@ FORBIDDEN_GATEWAY_SERVICE_IMPORT_PREFIXES = (
     "github.com/kubercloud/ani/services/task-service/",
     "github.com/kubercloud/ani/services/metering-service/",
     "github.com/kubercloud/ani/services/reconcile-worker/",
+    "github.com/kubercloud/ani/services/inference-service/",
 )
 
 

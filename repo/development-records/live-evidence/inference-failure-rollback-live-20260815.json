@@ -1,0 +1,50 @@
+{
+  "profile": "INFERENCE-SERVICE-FAILURE-ROLLBACK-LIVE-GATE-C19",
+  "status": "passed",
+  "generated_at": "2026-08-15T10:00:26Z",
+  "gateway": "lab-process-not-in-cluster-ani-gateway",
+  "timeout": "DEPLOY_TIMEOUT",
+  "scale": "SCALE_ROLLED_BACK",
+  "auth_mode": "dev",
+  "checks": [
+    {
+      "id": "inference-service-create-deploy-timeout",
+      "status": "passed",
+      "status_reason": "DEPLOY_TIMEOUT"
+    },
+    {
+      "id": "inference-service-timeout-runtime-released",
+      "status": "passed"
+    },
+    {
+      "id": "inference-service-timeout-operation-code",
+      "status": "passed",
+      "operation_status": "failed"
+    },
+    {
+      "id": "inference-service-cpu-running",
+      "status": "passed",
+      "status_value": "running"
+    },
+    {
+      "id": "inference-service-scale-rolled-back",
+      "status": "passed",
+      "replicas": 1
+    },
+    {
+      "id": "inference-service-scale-operation-failed",
+      "status": "passed",
+      "operation_status": "failed"
+    },
+    {
+      "id": "inference-service-delete",
+      "status": "passed",
+      "get_status": 404
+    },
+    {
+      "id": "smoke-workload-untouched",
+      "status": "passed",
+      "namespace": "ani-vllm-cpu-smoke"
+    }
+  ]
+}

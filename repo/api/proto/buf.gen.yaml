@@ -4,6 +4,9 @@ managed:
   override:
     - file_option: go_package_prefix
       value: github.com/kubercloud/ani/pkg/generated/pb
+    - file_option: go_package
+      path: inference/control/v1/inference_control.proto
+      value: github.com/kubercloud/ani/pkg/generated/pb/inference/control/v1;inferencecontrolv1
 plugins:
   - local: protoc-gen-go
     out: ../../pkg/generated/pb

@@ -23,6 +23,7 @@ type Config struct {
 	OIDCPublicKeyPEM     string
 	OIDCPublicKeyFile    string
 	OIDCGroupRoleMapJSON string
+	MintCredentials      string
 }
 
 func Load() Config {
@@ -49,6 +50,7 @@ func Load() Config {
 		OIDCPublicKeyPEM:     env("AUTH_OIDC_PUBLIC_KEY_PEM", ""),
 		OIDCPublicKeyFile:    env("AUTH_OIDC_PUBLIC_KEY_FILE", ""),
 		OIDCGroupRoleMapJSON: env("AUTH_OIDC_GROUP_ROLE_MAP_JSON", ""),
+		MintCredentials:      env("AUTH_SERVICE_MINT_CREDENTIALS", ""),
 	}
 }
 

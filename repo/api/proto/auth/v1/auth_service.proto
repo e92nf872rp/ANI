@@ -21,6 +21,10 @@ service AuthService {
   // Returns the TenantContext if the token is valid; returns UNAUTHENTICATED otherwise.
   rpc ValidateToken(ValidateTokenRequest) returns (common.v1.TenantContext);
 
+  // IssueServiceToken mints a short-lived service JWT for cluster-internal Core calls.
+  // It is not a tenant HTTP product API and must not be published on Gateway.
+  rpc IssueServiceToken(IssueServiceTokenRequest) returns (AccessToken);
+
   // CheckPermission is called by the RBAC middleware.
   rpc CheckPermission(CheckPermissionRequest) returns (CheckPermissionResponse);
 
@@ -80,6 +84,14 @@ message RevokeTokenRequest {
 
 message ValidateTokenRequest {
   string token = 1;   // raw JWT or API key value
+}
+
+message IssueServiceTokenRequest {
+  string caller_service = 1; // allowlisted internal caller, e.g. inference-service
+  string caller_secret  = 2; // compared to AUTH_SERVICE_MINT_CREDENTIALS; never logged
+  string tenant_id      = 3;
+  string scope          = 4; // scope:platform-workloads:read | scope:platform-workloads:write
+  int32  ttl_seconds    = 5; // optional; default 300, max 3600
 }
 
 message CheckPermissionRequest {

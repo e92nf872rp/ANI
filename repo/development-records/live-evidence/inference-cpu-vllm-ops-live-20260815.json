@@ -1,0 +1,39 @@
+{
+  "profile": "INFERENCE-SERVICE-CPU-VLLM-OPS-LIVE-GATE-C15",
+  "status": "passed",
+  "generated_at": "2026-08-15T08:14:06Z",
+  "gateway": "lab-process-not-in-cluster-ani-gateway",
+  "engine": "vllm-cpu",
+  "image": "digest-pinned-vllm-cpu",
+  "namespace_kind": "ani-tenant-{uuid}",
+  "restart_mode": "lab_process",
+  "scale": "desired_replicas_only_rwo_preempt",
+  "auth_mode": "dev",
+  "checks": [
+    {
+      "id": "inference-service-product-logs",
+      "status": "passed",
+      "item_count": 20
+    },
+    {
+      "id": "inference-service-scale-desired-replicas",
+      "status": "passed",
+      "desired_replicas": 2
+    },
+    {
+      "id": "inference-service-scale-back-running",
+      "status": "passed",
+      "desired_replicas": 1
+    },
+    {
+      "id": "inference-service-lab-restart-get",
+      "status": "passed",
+      "restart_mode": "lab_process"
+    },
+    {
+      "id": "smoke-workload-untouched",
+      "status": "passed",
+      "namespace": "ani-vllm-cpu-smoke"
+    }
+  ]
+}

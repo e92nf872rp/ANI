@@ -1,0 +1,61 @@
+{
+  "profile": "INFERENCE-PLATFORM-WORKLOAD-K8S-LIVE-GATE-C9",
+  "status": "passed",
+  "generated_at": "2026-08-15T03:45:17Z",
+  "gateway": "lab-process-not-in-cluster-ani-gateway",
+  "image": "docker.changqingyun.cn/mirror/busybox@sha256:fd8d9aa63ba2f0982b5304e1ee8d3b90a210bc1ffb5314d980eb6962f1a9715d",
+  "namespace_kind": "ani-tenant-{uuid}",
+  "restart_mode": "lab_process",
+  "auth_mode": "dev",
+  "checks": [
+    {
+      "id": "tenant-jwt-forbidden",
+      "status": "passed",
+      "http_status": 403
+    },
+    {
+      "id": "core-platform-workload-cpu-create",
+      "status": "passed",
+      "http_status": 202
+    },
+    {
+      "id": "kubectl-deployment-service-labels",
+      "status": "passed"
+    },
+    {
+      "id": "core-platform-workload-observe-running",
+      "status": "passed",
+      "state": "running"
+    },
+    {
+      "id": "core-platform-workload-scale",
+      "status": "passed",
+      "desired_replicas": 2
+    },
+    {
+      "id": "core-platform-workload-stop",
+      "status": "passed",
+      "state": "stopped"
+    },
+    {
+      "id": "core-platform-workload-start",
+      "status": "passed",
+      "same_workload_id": true
+    },
+    {
+      "id": "gateway-restart-get",
+      "status": "passed",
+      "restart_mode": "lab_process"
+    },
+    {
+      "id": "logs-empty-until-live-log-store",
+      "status": "passed",
+      "http_status": 200
+    },
+    {
+      "id": "core-platform-workload-delete",
+      "status": "passed",
+      "get_status": 404
+    }
+  ]
+}

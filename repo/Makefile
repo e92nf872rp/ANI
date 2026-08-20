@@ -9,11 +9,13 @@ export
         tools-proto gen-api gen-console-api gen-proto gen-core-sdk gen-api-docs \
         build build-gateway build-auth-service build-model-service build-task-service build-reconcile-worker build-cli \
         test test-go test-python test-cover \
-	validate-infra validate-gpu-preflight validate-gpu-contracts validate-runtime-contracts validate-instance-contracts validate-instance-planner validate-instance-renderer validate-instance-admission validate-instance-audit validate-instance-provider-dry-run validate-instance-provider-apply validate-instance-status-reconcile validate-instance-orchestrator validate-instance-store validate-instance-provider-adapter validate-instance-service validate-instance-lifecycle-ops validate-m1-e2e validate-kubernetes-provider-execution validate-kubernetes-rest-client validate-kubernetes-bootstrap-wiring validate-kubernetes-lifecycle-execution validate-kubernetes-ops-execution validate-m1-real-provider-profile validate-real-k8s-profile validate-vcluster-live-gate validate-vcluster-upgrade-live-gate validate-k8s-node-pool-live-gate validate-kubeovn-network-live-gate validate-kubevirt-vm-live-gate validate-reconcile-ha-live-gate validate-kms-sm4-live-gate validate-secrets-live-gate validate-storage-live-gate validate-storage-control-plane-state validate-storage-control-plane-state-live-gate validate-gpu-inventory-live-gate validate-object-store-live-gate validate-vector-store-live-gate validate-instance-observability-live-gate validate-registry-harbor-live-gate validate-instance-management-live-gate validate-sandbox-live-gate validate-instance-sandbox-stateless-live-gate validate-instance-sandbox-checkpoint-live-gate validate-instance-reconcile-provider-loss-live-gate validate-instance-orchestration-live-gate validate-sprint13-b-track-production-shape validate-gateway-ratelimit validate-gateway-idempotency validate-adapter-resilience-timeout validate-resilience-faultinjection-live-gate validate-resilience-degradation validate-ha-failover-live-gate validate-readyz-dataplane-live-gate validate-sprint14-resilience-live-gate validate-core-installer validate-core-offline validate-core-cli validate-sprint7-core-regression validate-core-release-hardening validate-core-installer-live validate-core-offline-pack validate-core-doc-consistency validate-sprint8-core-release validate-core-release-evidence validate-sprint9-core-rc validate-sprint9-core-doc-consistency validate-sprint9-rc validate-core-artifact-manifest validate-core-version-policy validate-sprint10-final-readiness validate-sprint10-core-doc-consistency validate-sprint10-release-prep validate-sprint11-storage-disk-plan validate-sprint11-core-real-deployment validate-sprint11-rook-ceph-formal-deployment validate-sprint11-rook-ceph-live-deployment-result validate-sprint11-rook-ceph-vm-storage-smoke validate-sprint11-rook-ceph-reboot-resilience validate-sprint11-safe-completion validate-sprint11-core-doc-consistency validate-sprint11-real-deployment validate-demo-instances validate-core-alpha validate-network-alpha validate-storage-alpha validate-vector-alpha validate-workload-identity validate-core-dev-profile validate-sdk-alpha validate-sdk-beta validate-sdk-mock-smoke validate-sprint3-closure validate-sprint4-closure validate-spec-split validate-core-beta validate-core-api-compatibility validate-mock-a validate-doc-api validate-openapi-spec validate-doc-entrypoints validate-auth-contract validate-auth-dex-smoke validate-auth-dex-production-gate validate-services validate-services-contract validate-services-route-contract validate-ci-workflow validate-architecture validate-async-task-store \
+	validate-infra validate-gpu-preflight validate-gpu-contracts validate-runtime-contracts validate-instance-contracts validate-instance-planner validate-instance-renderer validate-instance-admission validate-instance-audit validate-instance-provider-dry-run validate-instance-provider-apply validate-instance-status-reconcile validate-instance-orchestrator validate-instance-store validate-instance-provider-adapter validate-instance-service validate-instance-lifecycle-ops validate-m1-e2e validate-kubernetes-provider-execution validate-kubernetes-rest-client validate-kubernetes-bootstrap-wiring validate-kubernetes-lifecycle-execution validate-kubernetes-ops-execution validate-m1-real-provider-profile validate-real-k8s-profile validate-vcluster-live-gate validate-vcluster-upgrade-live-gate validate-k8s-node-pool-live-gate validate-kubeovn-network-live-gate validate-kubevirt-vm-live-gate validate-reconcile-ha-live-gate validate-kms-sm4-live-gate validate-secrets-live-gate validate-storage-live-gate validate-storage-control-plane-state validate-storage-control-plane-state-live-gate validate-gpu-inventory-live-gate validate-object-store-live-gate validate-vector-store-live-gate validate-instance-observability-live-gate validate-registry-harbor-live-gate validate-instance-management-live-gate validate-sandbox-live-gate validate-instance-sandbox-stateless-live-gate validate-instance-sandbox-checkpoint-live-gate validate-instance-reconcile-provider-loss-live-gate validate-instance-orchestration-live-gate validate-sprint13-b-track-production-shape validate-gateway-ratelimit validate-gateway-idempotency validate-adapter-resilience-timeout validate-resilience-faultinjection-live-gate validate-resilience-degradation validate-ha-failover-live-gate validate-readyz-dataplane-live-gate validate-sprint14-resilience-live-gate validate-core-installer validate-core-offline validate-core-cli validate-sprint7-core-regression validate-core-release-hardening validate-core-installer-live validate-core-offline-pack validate-core-doc-consistency validate-sprint8-core-release validate-core-release-evidence validate-sprint9-core-rc validate-sprint9-core-doc-consistency validate-sprint9-rc validate-core-artifact-manifest validate-core-version-policy validate-sprint10-final-readiness validate-sprint10-core-doc-consistency validate-sprint10-release-prep validate-sprint11-storage-disk-plan validate-sprint11-core-real-deployment validate-sprint11-rook-ceph-formal-deployment validate-sprint11-rook-ceph-live-deployment-result validate-sprint11-rook-ceph-vm-storage-smoke validate-sprint11-rook-ceph-reboot-resilience validate-sprint11-safe-completion validate-sprint11-core-doc-consistency validate-sprint11-real-deployment validate-demo-instances validate-core-alpha validate-network-alpha validate-storage-alpha validate-vector-alpha validate-workload-identity validate-core-dev-profile validate-sdk-alpha validate-sdk-beta validate-sdk-mock-smoke validate-sprint3-closure validate-sprint4-closure validate-spec-split validate-core-beta validate-core-api-compatibility validate-mock-a validate-doc-api validate-openapi-spec validate-doc-entrypoints validate-auth-contract validate-auth-dex-smoke validate-auth-dex-production-gate validate-services validate-services-contract validate-services-route-contract validate-inference-control-plane validate-platform-workload-k8s-live-gate validate-ci-workflow validate-architecture validate-async-task-store \
         lint lint-go lint-python lint-ts \
         dev-gateway dev-console dev-core-mock \
         image image-gateway image-auth-service \
         clean
+
+.PHONY: test-inference-control-plane-postgres validate-inference-gpu-lws-volcano-live-gate validate-inference-legacy-control-plane validate-inference-incluster-e2e-live-gate validate-inference-console-shaped-e2e-live-gate validate-inference-local-model-source-live-gate validate-inference-create-image-live-gate validate-inference-create-image-harbor-live-gate validate-inference-gpu-single-node-live-gate validate-gpu-plugin-node-partition-live-gate validate-inference-gpu-vllm-eager-live-gate validate-inference-engine-vgpu-live-gate
 
 # ── 帮助 ──────────────────────────────────────────────────────────────────────
 help:
@@ -45,6 +47,7 @@ help:
 	@echo ""
 	@echo "  测试:"
 	@echo "    make test           运行所有测试（Go + Python）"
+	@echo "    make test-inference-control-plane-postgres  在隔离 schema 中验证推理控制面 PostgreSQL 事务/RLS/lease（需 INFERENCE_TEST_DATABASE_URL）"
 	@echo "    make test-cover     生成测试覆盖率报告"
 	@echo "    make validate-infra 校验 M1 基础设施 K8s YAML"
 	@echo "    make validate-gpu-preflight 校验 M1-INFRA-F GPU 预检契约"
@@ -148,6 +151,23 @@ help:
 	@echo "    make validate-openapi-spec 校验 Core/Services OpenAPI 结构"
 	@echo "    make validate-services 校验 Services boundary/spec/route/SDK/model/RAG/Console 真实门禁"
 	@echo "    make validate-architecture 校验 ports/adapters 组件边界"
+	@echo "    make validate-platform-workload-k8s-live-gate 校验 CPU PlatformWorkload Kubernetes live gate"
+	@echo "    make validate-inference-cpu-vllm-live-gate 校验 CPU vLLM InferenceService live gate"
+	@echo "    make validate-inference-cpu-vllm-ops-live-gate 校验 CPU vLLM InferenceService ops live gate"
+	@echo "    make validate-inference-gpu-admission-live-gate 校验 GPU admission InferenceService live gate"
+	@echo "    make validate-inference-clusterip-networkpolicy-live-gate 校验 ClusterIP/NetworkPolicy InferenceService live gate"
+	@echo "    make validate-inference-failure-rollback-live-gate 校验 InferenceService 失败清理与 scale rollback live gate"
+	@echo "    make validate-inference-gpu-lws-volcano-live-gate 校验 GPU/LWS/Volcano InferenceService live gate 契约"
+	@echo "    make validate-inference-legacy-control-plane 校验旧 inference.v1/operator 控制面已退役"
+	@echo "    make validate-inference-incluster-e2e-live-gate 校验集群内 CPU InferenceService 产品链路 live gate"
+	@echo "    make validate-inference-console-shaped-e2e-live-gate 校验 Console 模拟请求 CPU InferenceService live gate"
+	@echo "    make validate-inference-local-model-source-live-gate 校验租户本地 PVC 模型来源 InferenceService live gate"
+	@echo "    make validate-inference-create-image-live-gate 校验创建推理服务 image_id/image_ref live gate"
+	@echo "    make validate-inference-create-image-harbor-live-gate 校验 Harbor image_id 创建推理服务 live gate"
+	@echo "    make validate-inference-gpu-single-node-live-gate 校验单节点整卡 GPU InferenceService live gate"
+	@echo "    make validate-gpu-plugin-node-partition-live-gate 校验 NVIDIA/Volcano GPU 插件节点分区 live gate"
+	@echo "    make validate-inference-gpu-vllm-eager-live-gate 校验 GPU vLLM enforce-eager 启动 live gate"
+	@echo "    make validate-inference-engine-vgpu-live-gate 校验 engine.env/command 与 volcano vGPU live gate"
 	@echo ""
 	@echo "  代码检查:"
 	@echo "    make lint           运行所有 linter"
@@ -161,7 +181,7 @@ help:
 COMPOSE = docker compose -f deploy/docker/docker-compose.yml
 GO_CACHE_ENV = GOCACHE=$(CURDIR)/.cache/go-build GOMODCACHE=$(CURDIR)/.cache/gomod
 BUF_CACHE_ENV = BUF_CACHE_DIR=$(CURDIR)/.cache/buf
-GO_PACKAGES = ./pkg/... ./services/ani-gateway/... ./services/auth-service/... ./services/model-service/... ./services/task-service/... ./services/reconcile-worker/...
+GO_PACKAGES = ./pkg/... ./services/ani-gateway/... ./services/auth-service/... ./services/model-service/... ./services/inference-service/... ./services/task-service/... ./services/reconcile-worker/...
 TOOLS_BIN = $(CURDIR)/.bin
 
 deps:
@@ -972,6 +992,119 @@ validate-services-contract:
 	python scripts/validate_inference_service_contract.py
 	@echo "✅ Services semantic contract valid"
 
+validate-inference-control-plane:
+	@echo "→ 校验 inference-service PostgreSQL 控制面迁移..."
+	python scripts/validate_inference_control_plane_migration_test.py
+	python scripts/validate_inference_control_plane_migration.py
+	$(MAKE) validate-inference-legacy-control-plane
+	@echo "✅ inference-service control-plane migration valid"
+
+validate-inference-legacy-control-plane:
+	@echo "→ 校验旧 inference.v1 / operator 控制面已退役..."
+	python scripts/validate_inference_legacy_control_plane_test.py
+	python scripts/validate_inference_legacy_control_plane.py
+	@echo "✅ INFERENCE-SERVICE-LEGACY-CONTROL-PLANE-B1 retired"
+
+validate-platform-workload-k8s-live-gate:
+	@echo "→ 校验 CPU PlatformWorkload Kubernetes live gate..."
+	python scripts/validate_platform_workload_k8s_live_gate_test.py
+	python scripts/validate_platform_workload_k8s_live_gate.py
+	@echo "✅ INFERENCE-PLATFORM-WORKLOAD-K8S-LIVE-GATE-C9 valid"
+
+validate-inference-cpu-vllm-live-gate:
+	@echo "→ 校验 CPU vLLM InferenceService live gate..."
+	python scripts/validate_inference_cpu_vllm_live_gate_test.py
+	python scripts/validate_inference_cpu_vllm_live_gate.py
+	@echo "✅ INFERENCE-SERVICE-CPU-VLLM-LIVE-GATE-C14 valid"
+
+validate-inference-cpu-vllm-ops-live-gate:
+	@echo "→ 校验 CPU vLLM InferenceService ops live gate..."
+	python scripts/validate_inference_cpu_vllm_ops_live_gate_test.py
+	python scripts/validate_inference_cpu_vllm_ops_live_gate.py
+	@echo "✅ INFERENCE-SERVICE-CPU-VLLM-OPS-LIVE-GATE-C15 valid"
+
+validate-inference-gpu-admission-live-gate:
+	@echo "→ 校验 GPU admission InferenceService live gate..."
+	python scripts/validate_inference_gpu_admission_live_gate_test.py
+	python scripts/validate_inference_gpu_admission_live_gate.py
+	@echo "✅ INFERENCE-SERVICE-GPU-ADMISSION-LIVE-GATE-C16 valid"
+
+validate-inference-clusterip-networkpolicy-live-gate:
+	@echo "→ 校验 ClusterIP/NetworkPolicy InferenceService live gate..."
+	python scripts/validate_inference_clusterip_networkpolicy_live_gate_test.py
+	python scripts/validate_inference_clusterip_networkpolicy_live_gate.py
+	@echo "✅ INFERENCE-SERVICE-CLUSTERIP-NP-LIVE-GATE-C17 valid"
+
+validate-inference-failure-rollback-live-gate:
+	@echo "→ 校验 InferenceService 失败清理与 scale rollback live gate..."
+	python scripts/validate_inference_failure_rollback_live_gate_test.py
+	python scripts/validate_inference_failure_rollback_live_gate.py
+	@echo "✅ INFERENCE-SERVICE-FAILURE-ROLLBACK-LIVE-GATE-C19 valid"
+
+validate-inference-gpu-lws-volcano-live-gate:
+	@echo "→ 校验 GPU/LWS/Volcano InferenceService live gate 契约..."
+	python scripts/validate_inference_gpu_lws_volcano_live_gate_test.py
+	python scripts/validate_inference_gpu_lws_volcano_live_gate.py
+	@echo "✅ INFERENCE-SERVICE-GPU-LWS-VOLCANO-LIVE-GATE-C20 contract valid"
+
+validate-inference-incluster-e2e-live-gate:
+	@echo "→ 校验集群内 CPU InferenceService 产品链路 live gate..."
+	python scripts/validate_inference_incluster_e2e_live_gate_test.py
+	python scripts/validate_inference_incluster_e2e_live_gate.py
+	@echo "✅ INFERENCE-SERVICE-INCLUSTER-E2E-LIVE-GATE-C21 live valid"
+
+validate-inference-console-shaped-e2e-live-gate:
+	@echo "→ 校验 Console 模拟请求 CPU InferenceService 产品链路 live gate..."
+	python scripts/validate_inference_console_shaped_e2e_live_gate_test.py
+	python scripts/validate_inference_console_shaped_e2e_live_gate.py
+	@echo "✅ INFERENCE-SERVICE-CONSOLE-SHAPED-E2E-LIVE-GATE-C22 live valid"
+
+validate-inference-local-model-source-live-gate:
+	@echo "→ 校验租户本地 PVC 模型来源 InferenceService 产品链路 live gate..."
+	python scripts/validate_inference_local_model_source_live_gate_test.py
+	python scripts/validate_inference_local_model_source_live_gate.py
+	@echo "✅ INFERENCE-SERVICE-LOCAL-MODEL-SOURCE-LIVE-GATE-C23 contract/live valid"
+
+validate-inference-create-image-live-gate:
+	@echo "→ 校验创建推理服务 image_id/image_ref live gate..."
+	python scripts/validate_inference_create_image_live_gate_test.py
+	python scripts/validate_inference_create_image_live_gate.py
+	@echo "✅ INFERENCE-SERVICE-CREATE-IMAGE-LIVE-GATE-C30 contract/live valid"
+
+validate-inference-create-image-harbor-live-gate:
+	@echo "→ 校验 Harbor image_id 创建推理服务 live gate..."
+	python scripts/validate_inference_create_image_harbor_live_gate_test.py
+	python scripts/validate_inference_create_image_harbor_live_gate.py
+	@echo "✅ INFERENCE-SERVICE-CREATE-IMAGE-HARBOR-LIVE-GATE-C31 contract/live valid"
+
+validate-inference-gpu-single-node-live-gate:
+	@echo "→ 校验单节点整卡 GPU InferenceService live gate..."
+	python scripts/validate_inference_gpu_single_node_live_gate_test.py
+	python scripts/validate_inference_gpu_single_node_live_gate.py
+	@echo "✅ INFERENCE-SERVICE-GPU-SINGLE-NODE-LIVE-GATE-C32 contract/live valid"
+
+validate-gpu-plugin-node-partition-live-gate:
+	@echo "→ 校验 NVIDIA/Volcano GPU 插件节点分区 live gate..."
+	python scripts/validate_gpu_plugin_node_partition_live_gate_test.py
+	python scripts/validate_gpu_plugin_node_partition_live_gate.py
+	@echo "✅ GPU-PLUGIN-NODE-PARTITION-LIVE-GATE-C33 contract/live valid"
+
+validate-inference-gpu-vllm-eager-live-gate:
+	@echo "→ 校验 GPU vLLM enforce-eager 启动 live gate..."
+	python scripts/validate_inference_gpu_vllm_eager_live_gate_test.py
+	python scripts/validate_inference_gpu_vllm_eager_live_gate.py
+	@echo "✅ INFERENCE-SERVICE-GPU-VLLM-EAGER-LIVE-GATE-C34 contract/live valid"
+
+validate-inference-engine-vgpu-live-gate:
+	@echo "→ 校验 engine.env/command 与 volcano vGPU live gate..."
+	python scripts/validate_inference_engine_vgpu_live_gate_test.py
+	python scripts/validate_inference_engine_vgpu_live_gate.py
+	@echo "✅ INFERENCE-SERVICE-ENGINE-VGPU-LIVE-GATE-C36 contract/live valid"
+
+test-inference-control-plane-postgres:
+	@test -n "$$INFERENCE_TEST_DATABASE_URL" || (echo "ERROR: INFERENCE_TEST_DATABASE_URL is required"; exit 2)
+	@cd services/inference-service && GOWORK=off go test -tags=integration ./internal/repository -run TestPostgresControlPlaneIntegration -count=1 -v
+
 validate-openapi-spec:
 	@echo "→ 校验 Core/Services OpenAPI 结构..."
 	python scripts/validate_openapi_spec_test.py
@@ -1018,6 +1151,7 @@ validate-services:
 	@echo "→ 校验 Services boundary baseline..."
 	python scripts/validate_services_boundary.py --root .
 	python scripts/validate_yaml.py api/openapi/services/v1.yaml
+	$(MAKE) validate-inference-control-plane
 	$(MAKE) validate-services-contract
 	$(MAKE) validate-services-route-contract
 	$(MAKE) validate-spec-split
@@ -1030,6 +1164,8 @@ validate-services:
 	$(MAKE) validate-doc-entrypoints
 	@echo "→ 运行 Services model-service Go tests..."
 	$(GO_CACHE_ENV) go test ./services/model-service/... -v
+	@echo "→ 运行 Services inference-service Go tests..."
+	$(GO_CACHE_ENV) go test ./services/inference-service/... -v
 	@echo "→ 检查 RAG Python compile（运行级测试见 python-ci job，依赖完整 rag-engine requirements）..."
 	python -m compileall -q ai/rag-engine
 	@echo "→ 安装 Console npm dependencies from frontends/console/package-lock.json..."
@@ -1043,6 +1179,7 @@ validate-services:
 validate-architecture:
 	@echo "→ 校验开源组件 ports/adapters 边界..."
 	python scripts/validate_component_imports.py --root .
+	python scripts/validate_inference_legacy_control_plane.py
 	@echo "✅ architecture guardrails valid"
 
 # ── 代码检查 ──────────────────────────────────────────────────────────────────

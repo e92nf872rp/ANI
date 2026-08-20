@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,6 +30,7 @@ type AuthService struct {
 	oidc          *oidcLoginManager
 	passwordLogin *passwordLoginManager
 	platformLogin *platformLoginManager
+	mintSecrets   map[string]string
 }
 
 func NewAuthService(db *pgxpool.Pool, cache ports.CacheStore, jwtCfg JWTConfig) *AuthService {
@@ -50,6 +53,11 @@ func NewAuthService(db *pgxpool.Pool, cache ports.CacheStore, jwtCfg JWTConfig) 
 		passwordLogin: newPasswordLoginManager(postgres.NewPasswordLoginStore(db), issuer),
 		platformLogin: newPlatformLoginManager(postgres.NewPlatformLoginStore(db), issuer),
 	}
+}
+
+func (s *AuthService) WithMintCredentials(raw string) *AuthService {
+	s.mintSecrets = parseMintCredentials(raw)
+	return s
 }
 
 func (s *AuthService) Register(server *grpc.Server) {
@@ -158,6 +166,38 @@ func (s *AuthService) ValidateToken(ctx context.Context, req *authv1.ValidateTok
 	}, nil
 }
 
+func (s *AuthService) IssueServiceToken(_ context.Context, req *authv1.IssueServiceTokenRequest) (*authv1.AccessToken, error) {
+	if s == nil || s.issuer == nil {
+		return nil, status.Error(codes.FailedPrecondition, "service token issuer is not configured")
+	}
+	if len(s.mintSecrets) == 0 {
+		return nil, status.Error(codes.FailedPrecondition, "service token minting is not configured")
+	}
+	if !s.mintAllowed(req.GetCallerService(), req.GetCallerSecret()) {
+		return nil, status.Error(codes.PermissionDenied, "forbidden")
+	}
+	tenantID, err := uuid.Parse(strings.TrimSpace(req.GetTenantId()))
+	if err != nil || tenantID == uuid.Nil {
+		return nil, status.Error(codes.InvalidArgument, "invalid tenant_id")
+	}
+	scope := strings.TrimSpace(req.GetScope())
+	if !isPlatformWorkloadScope(scope) {
+		return nil, status.Error(codes.InvalidArgument, "invalid service scope")
+	}
+	ttl := time.Duration(req.GetTtlSeconds()) * time.Second
+	token, err := s.issuer.IssueServiceAccessToken(tenantID, scope, ttl)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "failed to issue service token")
+	}
+	if ttl <= 0 {
+		ttl = defaultServiceTokenTTL
+	}
+	if ttl > maxServiceTokenTTL {
+		ttl = maxServiceTokenTTL
+	}
+	return &authv1.AccessToken{AccessToken: token, ExpiresIn: int32(ttl.Seconds())}, nil
+}
+
 func (s *AuthService) CheckPermission(_ context.Context, req *authv1.CheckPermissionRequest) (*authv1.CheckPermissionResponse, error) {
 	if req.GetTenantId() == "" {
 		return deny("tenant_id required"), nil
@@ -256,7 +296,39 @@ func uuidString(id uuid.UUID) string {
 	return id.String()
 }
 
-const defaultAccessTokenTTL = time.Hour
+const (
+	defaultAccessTokenTTL = time.Hour
+	allowedMintCaller     = "inference-service"
+)
+
+func (s *AuthService) mintAllowed(name, secret string) bool {
+	if strings.TrimSpace(name) != allowedMintCaller {
+		return false
+	}
+	want := s.mintSecrets[allowedMintCaller]
+	if want == "" || secret == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(want), []byte(secret)) == 1
+}
+
+func parseMintCredentials(raw string) map[string]string {
+	out := map[string]string{}
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		name, secret, ok := strings.Cut(item, ":")
+		name = strings.TrimSpace(name)
+		secret = strings.TrimSpace(secret)
+		if !ok || name == "" || secret == "" {
+			continue
+		}
+		out[name] = secret
+	}
+	return out
+}
 
 func isReadAction(action string) bool {
 	switch action {

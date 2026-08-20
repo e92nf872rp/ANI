@@ -1,0 +1,70 @@
+profile: INFERENCE-SERVICE-CLUSTERIP-NP-LIVE-GATE-C17
+status: live
+evidence: development-records/live-evidence/inference-clusterip-networkpolicy-live-20260815.json
+description: >
+  Same InferenceService entry ClusterIP/NetworkPolicy live gate. Runtime
+  must stay ClusterIP-only with a default-deny Ingress NetworkPolicy that
+  allows only the tenant namespace plus kube-system/ani-system. Product
+  /test stays unregistered. Stop/delete must remove the internal endpoint.
+  This does not roll out in-cluster ani-gateway and is not runtime ready.
+
+required_tools:
+  - kubectl
+
+required_endpoints:
+  - ani_gateway_inference_services_api
+  - inference_control_grpc
+  - kubernetes_api
+
+required_env:
+  - ANI_GATEWAY_URL
+  - INFERENCE_SERVICE_GRPC_ADDR
+  - KUBECONFIG
+  - DATABASE_URL
+  - NATS_URL
+  - REDIS_URL
+  - INFERENCE_LAB_CATALOG
+  - INFERENCE_RUNTIME_PROBE_VIA
+
+live_checks:
+  - id: product-inference-service-cpu-create
+    command: POST ${ANI_GATEWAY_URL}/api/v1/svc/inference-services
+    pass_condition: 202_inference_service
+  - id: inference-service-clusterip-only
+    command: kubectl get svc -n ${tenant_namespace}
+    pass_condition: type_clusterip_no_ingress_no_nodeport
+  - id: inference-service-networkpolicy-applied
+    command: kubectl get netpol -n ${tenant_namespace}
+    pass_condition: ingress_same_ns_and_control_plane_no_public_ipblock
+  - id: inference-service-running-health-smoke
+    command: GET ${ANI_GATEWAY_URL}/api/v1/svc/inference-services/{id}
+    pass_condition: running_after_health_and_bounded_chat_via_kube_proxy
+  - id: inference-service-foreign-namespace-denied
+    command: probe ClusterIP /health from ani-inf-c17-probe
+    pass_condition: foreign_namespace_cannot_reach_health
+  - id: inference-service-no-product-test
+    command: POST ${ANI_GATEWAY_URL}/api/v1/svc/inference-services/{id}/test
+    pass_condition: 404_not_registered
+  - id: inference-service-stop-endpoint-gone
+    command: POST lifecycle stop then kubectl get deploy,svc,netpol
+    pass_condition: stopped_and_runtime_removed
+  - id: inference-service-delete
+    command: DELETE ${ANI_GATEWAY_URL}/api/v1/svc/inference-services/{id}
+    pass_condition: 404_and_runtime_removed
+  - id: smoke-workload-untouched
+    command: kubectl get deploy/vllm-cpu -n ani-vllm-cpu-smoke
+    pass_condition: independent_smoke_still_ready
+
+evidence_policy:
+  forbidden_content:
+    - bearer tokens
+    - passwords
+    - raw server IPs
+    - full DSN or connection strings
+    - full internal endpoints beyond redacted service DNS
+
+readiness_levels:
+  contract:
+    meaning: Gate definition and local/logic ClusterIP NetworkPolicy render are present; no live proof.
+  live:
+    meaning: Approved lab run proved ClusterIP + NetworkPolicy isolation on the product entry without /test or in-cluster Gateway rollout.

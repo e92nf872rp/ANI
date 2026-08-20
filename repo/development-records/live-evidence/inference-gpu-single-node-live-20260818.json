@@ -1,0 +1,105 @@
+{
+  "profile": "INFERENCE-SERVICE-GPU-SINGLE-NODE-LIVE-GATE-C32",
+  "status": "passed",
+  "generated_at": "2026-08-18T09:08:42Z",
+  "entry": "ani-system/ani-gateway",
+  "gateway": "ani-system/ani-gateway",
+  "auth_mode": "auth_service",
+  "auth": "tenant_bearer",
+  "model_source": "tenant_local_pvc",
+  "image_source": "request_image_ref",
+  "engine": "vllm-gpu",
+  "image": "digest-pinned-vllm-cuda",
+  "namespace_kind": "existing-ani-tenant-{uuid}",
+  "probe": "clusterip",
+  "scheduler": "volcano",
+  "accelerator": "nvidia.com/gpu=1",
+  "spec_id": "gpu-nvidia-geforce-rtx-4090-full",
+  "gpu_live": "single_node_full_card",
+  "lws_live": "skipped",
+  "gpu_ready": false,
+  "runtime_ready": false,
+  "checks": [
+    {
+      "id": "tenant-local-pvc-ready",
+      "status": "passed",
+      "storage_path": "pvc://vllm-model#/models/qwen"
+    },
+    {
+      "id": "in-cluster-inference-service-running",
+      "status": "passed"
+    },
+    {
+      "id": "production-gateway-auth-mode-preserved",
+      "status": "passed",
+      "auth_mode": "auth_service"
+    },
+    {
+      "id": "platform-workloads-table-ready",
+      "status": "passed"
+    },
+    {
+      "id": "create-model",
+      "status": "passed",
+      "http_status": 201
+    },
+    {
+      "id": "create-model-version-pvc",
+      "status": "passed",
+      "http_status": 201
+    },
+    {
+      "id": "product-inference-service-gpu-create",
+      "status": "passed",
+      "http_status": 202
+    },
+    {
+      "id": "kubectl-vllm-gpu-deployment",
+      "status": "passed",
+      "scheduler": "volcano",
+      "gpu": "1",
+      "service_type": "ClusterIP"
+    },
+    {
+      "id": "inference-service-running-health-smoke",
+      "status": "passed",
+      "status_value": "running"
+    },
+    {
+      "id": "inference-service-logs",
+      "status": "passed",
+      "http_status": 200,
+      "item_count": 20,
+      "replica_leaked": false
+    },
+    {
+      "id": "inference-service-stop",
+      "status": "passed",
+      "http_status": 202,
+      "status_value": "stopped"
+    },
+    {
+      "id": "inference-service-start",
+      "status": "passed",
+      "http_status": 202,
+      "status_value": "running"
+    },
+    {
+      "id": "invocation-url-null",
+      "status": "passed"
+    },
+    {
+      "id": "existing-tenant-namespace-preserved",
+      "status": "passed"
+    },
+    {
+      "id": "service-retained",
+      "status": "passed"
+    },
+    {
+      "id": "lws-cross-node-skipped",
+      "status": "passed",
+      "reason": "skipped_cross_node_lws"
+    }
+  ]
+}

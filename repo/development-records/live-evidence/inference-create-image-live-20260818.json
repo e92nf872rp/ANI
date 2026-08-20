@@ -1,0 +1,108 @@
+{
+  "profile": "INFERENCE-SERVICE-CREATE-IMAGE-LIVE-GATE-C30",
+  "status": "passed",
+  "generated_at": "2026-08-18T02:24:03Z",
+  "entry": "ani-system/ani-console",
+  "gateway": "ani-system/ani-gateway",
+  "auth_mode": "auth_service",
+  "auth": "tenant_bearer_via_console",
+  "model_source": "tenant_local_pvc",
+  "image_source": "request_image_ref",
+  "engine": "vllm-cpu",
+  "image": "digest-pinned-vllm-cpu",
+  "namespace_kind": "existing-ani-tenant-{uuid}",
+  "probe": "clusterip",
+  "gpu_live": "skipped_no_device_plugin",
+  "checks": [
+    {
+      "id": "tenant-local-pvc-ready",
+      "status": "passed",
+      "storage_path": "pvc://vllm-model#/models/qwen"
+    },
+    {
+      "id": "in-cluster-inference-service-running",
+      "status": "passed"
+    },
+    {
+      "id": "default-engine-image-env-removed",
+      "status": "passed"
+    },
+    {
+      "id": "production-ani-gateway-rolled",
+      "status": "passed",
+      "image": "create-image-c30-20260818"
+    },
+    {
+      "id": "production-gateway-auth-mode-preserved",
+      "status": "passed",
+      "auth_mode": "auth_service"
+    },
+    {
+      "id": "console-nginx-inference-list",
+      "status": "passed",
+      "entry": "ani-system/ani-console"
+    },
+    {
+      "id": "create-missing-image-rejected",
+      "status": "passed",
+      "http_status": 400,
+      "code": "INVALID_ARGUMENT"
+    },
+    {
+      "id": "create-unpinned-image-rejected",
+      "status": "passed",
+      "http_status": 422,
+      "code": "IMAGE_UNAVAILABLE"
+    },
+    {
+      "id": "create-model",
+      "status": "passed",
+      "http_status": 201
+    },
+    {
+      "id": "create-model-version-pvc",
+      "status": "passed",
+      "http_status": 201
+    },
+    {
+      "id": "product-inference-service-cpu-create",
+      "status": "passed",
+      "http_status": 202,
+      "image_source": "request_image_ref"
+    },
+    {
+      "id": "kubectl-vllm-cpu-deployment",
+      "status": "passed",
+      "image": "digest-pinned-vllm-cpu"
+    },
+    {
+      "id": "inference-service-running-health-smoke",
+      "status": "passed",
+      "status_value": "running"
+    },
+    {
+      "id": "inference-service-stop",
+      "status": "passed",
+      "status_value": "stopped"
+    },
+    {
+      "id": "inference-service-start",
+      "status": "passed",
+      "same_service_id": true
+    },
+    {
+      "id": "inference-service-delete",
+      "status": "passed",
+      "get_status": 404
+    },
+    {
+      "id": "existing-tenant-namespace-preserved",
+      "status": "passed"
+    },
+    {
+      "id": "gpu-live-skipped-no-device-plugin",
+      "status": "passed",
+      "reason": "skipped_no_device_plugin"
+    }
+  ]
+}

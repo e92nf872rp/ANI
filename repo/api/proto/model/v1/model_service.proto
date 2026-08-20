@@ -17,6 +17,10 @@ service ModelService {
   // GetModel retrieves a model by ID. Returns NOT_FOUND if tenant mismatch.
   rpc GetModel(GetModelRequest) returns (Model);
 
+  // GetModelVersion is an internal service-to-service lookup by model_version_id.
+  // It is not a tenant HTTP product API and must not be published on Gateway.
+  rpc GetModelVersion(GetModelVersionRequest) returns (GetModelVersionResponse);
+
   // ListModels returns a cursor-paginated list of models for the tenant.
   rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
 
@@ -52,6 +56,16 @@ message CreateModelRequest {
 message GetModelRequest {
   string tenant_id = 1;
   string model_id  = 2;
+}
+
+message GetModelVersionRequest {
+  string tenant_id         = 1;
+  string model_version_id  = 2;
+}
+
+message GetModelVersionResponse {
+  Model model = 1;
+  ModelVersion version = 2;
 }
 
 message ListModelsRequest {

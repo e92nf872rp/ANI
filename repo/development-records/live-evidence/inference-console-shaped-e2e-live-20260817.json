@@ -1,0 +1,75 @@
+{
+  "profile": "INFERENCE-SERVICE-CONSOLE-SHAPED-E2E-LIVE-GATE-C22",
+  "status": "passed",
+  "generated_at": "2026-08-17T06:13:41Z",
+  "entry": "ani-system/ani-console",
+  "gateway": "ani-system/ani-gateway",
+  "auth_mode": "auth_service",
+  "auth": "tenant_bearer_via_console",
+  "engine": "vllm-cpu",
+  "image": "digest-pinned-vllm-cpu",
+  "namespace_kind": "existing-ani-tenant-{uuid}",
+  "probe": "clusterip",
+  "gpu_live": "skipped_no_device_plugin",
+  "checks": [
+    {
+      "id": "in-cluster-inference-service-running",
+      "status": "passed"
+    },
+    {
+      "id": "production-gateway-auth-mode-preserved",
+      "status": "passed",
+      "auth_mode": "auth_service"
+    },
+    {
+      "id": "console-nginx-inference-list",
+      "status": "passed",
+      "entry": "ani-system/ani-console"
+    },
+    {
+      "id": "product-inference-service-cpu-create",
+      "status": "passed",
+      "http_status": 202
+    },
+    {
+      "id": "kubectl-vllm-cpu-deployment",
+      "status": "passed",
+      "image": "digest-pinned-vllm-cpu"
+    },
+    {
+      "id": "inference-service-running-health-smoke",
+      "status": "passed",
+      "status_value": "running",
+      "probe": "clusterip"
+    },
+    {
+      "id": "inference-service-stop",
+      "status": "passed",
+      "status_value": "stopped"
+    },
+    {
+      "id": "inference-service-start",
+      "status": "passed",
+      "same_service_id": true
+    },
+    {
+      "id": "inference-service-delete",
+      "status": "passed",
+      "get_status": 404
+    },
+    {
+      "id": "existing-tenant-namespace-preserved",
+      "status": "passed"
+    },
+    {
+      "id": "gpu-live-skipped-no-device-plugin",
+      "status": "passed",
+      "reason": "skipped_no_device_plugin"
+    },
+    {
+      "id": "smoke-workload-untouched",
+      "status": "passed",
+      "namespace": "ani-vllm-cpu-smoke"
+    }
+  ]
+}

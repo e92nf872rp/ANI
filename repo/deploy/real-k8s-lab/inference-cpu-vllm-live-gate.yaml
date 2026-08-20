@@ -1,0 +1,70 @@
+profile: INFERENCE-SERVICE-CPU-VLLM-LIVE-GATE-C14
+status: live
+evidence: development-records/live-evidence/inference-cpu-vllm-live-20260815.json
+description: >
+  Product-path CPU vLLM live gate. A lab Gateway process plus a local
+  inference-service process create one InferenceService through
+  /api/v1/svc/inference-services. The same CPU/GPU entry is used without
+  resources.accelerator. The runtime must become running only after ClusterIP
+  /health and a bounded /v1/chat/completions succeed against a digest-pinned
+  vLLM CPU image and a real model PVC. GPU live is skipped when the cluster
+  has no nvidia.com/gpu allocatable. This does not roll out in-cluster
+  ani-gateway and must not touch ani-vllm-cpu-smoke.
+
+required_tools:
+  - kubectl
+
+required_endpoints:
+  - ani_gateway_inference_services_api
+  - inference_control_grpc
+  - kubernetes_api
+
+required_env:
+  - ANI_GATEWAY_URL
+  - INFERENCE_SERVICE_GRPC_ADDR
+  - KUBECONFIG
+  - DATABASE_URL
+  - NATS_URL
+  - REDIS_URL
+  - INFERENCE_LAB_CATALOG
+  - INFERENCE_RUNTIME_PROBE_VIA
+
+live_checks:
+  - id: product-inference-service-cpu-create
+    command: POST ${ANI_GATEWAY_URL}/api/v1/svc/inference-services without accelerator
+    pass_condition: 202_inference_service_id
+  - id: kubectl-vllm-cpu-deployment
+    command: kubectl get deploy -n ${tenant_namespace}
+    pass_condition: digest_pinned_vllm_cpu_no_instance_label_no_nvidia_gpu
+  - id: inference-service-running-health-smoke
+    command: GET ${ANI_GATEWAY_URL}/api/v1/svc/inference-services/{id}
+    pass_condition: status_running_after_health_and_chat
+  - id: inference-service-stop
+    command: POST lifecycle stop
+    pass_condition: status_stopped
+  - id: inference-service-start
+    command: POST lifecycle start
+    pass_condition: status_running_same_id
+  - id: inference-service-delete
+    command: DELETE /api/v1/svc/inference-services/{id}
+    pass_condition: get_404_and_no_deploy_svc
+  - id: gpu-live-skipped-no-device-plugin
+    command: kubectl get nodes allocatable nvidia.com/gpu
+    pass_condition: skipped_when_no_allocatable_gpu
+  - id: smoke-workload-untouched
+    command: kubectl get deploy/vllm-cpu -n ani-vllm-cpu-smoke
+    pass_condition: independent_smoke_still_ready
+
+evidence_policy:
+  forbidden_content:
+    - bearer tokens
+    - passwords
+    - raw server IPs
+    - full DSN or connection strings
+    - full internal endpoints beyond redacted service DNS
+
+readiness_levels:
+  contract:
+    meaning: Gate definition and local/logic CPU/GPU entry are present; no live vLLM proof.
+  live:
+    meaning: Approved lab run created, probed, stopped, started, and deleted one CPU vLLM InferenceService without rolling out in-cluster Gateway.

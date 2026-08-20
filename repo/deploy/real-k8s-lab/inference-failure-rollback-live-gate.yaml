@@ -1,0 +1,68 @@
+profile: INFERENCE-SERVICE-FAILURE-ROLLBACK-LIVE-GATE-C19
+status: live
+evidence: development-records/live-evidence/inference-failure-rollback-live-20260815.json
+description: >
+  Same InferenceService entry live gate for C18 failure cleanup and scale
+  rollback. A create that cannot become ready must reach failed/DEPLOY_TIMEOUT
+  and delete the provider runtime. A running CPU service scaled to 2 on RWO
+  must roll back to the previously applied 1-replica spec, with the scale
+  operation failed/SCALE_ROLLED_BACK. This does not roll out in-cluster
+  ani-gateway, does not implement /test, and is not GPU or LWS live.
+
+required_tools:
+  - kubectl
+
+required_endpoints:
+  - ani_gateway_inference_services_api
+  - inference_control_grpc
+  - kubernetes_api
+
+required_env:
+  - ANI_GATEWAY_URL
+  - INFERENCE_SERVICE_GRPC_ADDR
+  - KUBECONFIG
+  - DATABASE_URL
+  - NATS_URL
+  - REDIS_URL
+  - INFERENCE_LAB_CATALOG
+  - INFERENCE_DEPLOY_TIMEOUT_SECONDS
+
+live_checks:
+  - id: inference-service-create-deploy-timeout
+    command: POST /api/v1/svc/inference-services with a missing image
+    pass_condition: service_failed_DEPLOY_TIMEOUT
+  - id: inference-service-timeout-runtime-released
+    command: kubectl get deploy -n ${tenant_namespace}
+    pass_condition: timeout_create_runtime_deleted
+  - id: inference-service-timeout-operation-code
+    command: GET /api/v1/svc/inference-operations/{id}
+    pass_condition: error_message_contains_DEPLOY_TIMEOUT
+  - id: inference-service-cpu-running
+    command: POST /api/v1/svc/inference-services with digest-pinned CPU vLLM
+    pass_condition: running_after_health_and_smoke
+  - id: inference-service-scale-rolled-back
+    command: PATCH replicas=2 then wait for compensation
+    pass_condition: service_running_replicas_1_SCALE_ROLLED_BACK
+  - id: inference-service-scale-operation-failed
+    command: GET /api/v1/svc/inference-operations/{scale_id}
+    pass_condition: task_failed_SCALE_ROLLED_BACK
+  - id: inference-service-delete
+    command: DELETE /api/v1/svc/inference-services/{id}
+    pass_condition: 404_and_runtime_gone
+  - id: smoke-workload-untouched
+    command: kubectl get deploy/vllm-cpu -n ani-vllm-cpu-smoke
+    pass_condition: independent_smoke_still_ready
+
+evidence_policy:
+  forbidden_content:
+    - bearer tokens
+    - passwords
+    - raw server IPs
+    - full DSN or connection strings
+    - full internal endpoints beyond redacted service DNS
+
+readiness_levels:
+  contract:
+    meaning: Gate definition and local/logic failure classification are present; no live proof.
+  live:
+    meaning: Approved lab run proved deploy-timeout cleanup and scale rollback on the product entry without rolling out in-cluster Gateway.

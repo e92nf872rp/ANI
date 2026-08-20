@@ -1,0 +1,68 @@
+profile: INFERENCE-PLATFORM-WORKLOAD-K8S-LIVE-GATE-C9
+status: live
+evidence: development-records/live-evidence/platform-workload-k8s-live-20260815.json
+description: >
+  CPU single-node PlatformWorkload Kubernetes live gate. A lab Gateway process
+  with current C8/C9 code wrote a digest-pinned busybox Deployment to the
+  approved cluster, then scaled, stopped, started, restored after process
+  restart, and deleted it. This does not roll out in-cluster ani-gateway and
+  must not write /instances or expose a public invocation URL.
+
+required_tools:
+  - kubectl
+
+required_endpoints:
+  - ani_gateway_platform_workloads_api
+  - kubernetes_api
+
+required_env:
+  - ANI_GATEWAY_URL
+  - ANI_SERVICE_BEARER_TOKEN
+  - KUBECONFIG
+  - DATABASE_URL
+  - PLATFORM_WORKLOAD_PROVIDER
+
+live_checks:
+  - id: core-platform-workload-cpu-create
+    command: POST ${ANI_GATEWAY_URL}/api/v1/platform-workloads with service JWT
+    pass_condition: 202_async_task_resource_id
+  - id: kubectl-deployment-service-labels
+    command: kubectl get deploy,svc -n ${tenant_namespace} --show-labels
+    pass_condition: ani.platform_workload=inference and no ani.kubercloud.io/instance
+  - id: core-platform-workload-observe-running
+    command: GET ${ANI_GATEWAY_URL}/api/v1/platform-workloads/{workload_id}
+    pass_condition: state_running_internal_clusterip
+  - id: core-platform-workload-scale
+    command: PATCH replicas=2
+    pass_condition: desired_replicas=2
+  - id: core-platform-workload-stop
+    command: POST lifecycle stop
+    pass_condition: state_stopped_endpoint_empty_and_runtime_deleted
+  - id: core-platform-workload-start
+    command: POST lifecycle start
+    pass_condition: runtime_reapplied_same_workload_id
+  - id: gateway-restart-get
+    command: rollout Gateway then GET same workload_id
+    pass_condition: record_restored_from_postgres
+  - id: core-platform-workload-delete
+    command: DELETE with Idempotency-Key
+    pass_condition: get_404_and_no_deploy_svc
+  - id: tenant-jwt-forbidden
+    command: tenant JWT POST /platform-workloads
+    pass_condition: 403
+  - id: logs-empty-until-live-log-store
+    command: GET /platform-workloads/{id}/logs
+    pass_condition: 200_empty_items
+
+evidence_policy:
+  forbidden_content:
+    - bearer tokens
+    - passwords
+    - raw server IPs
+    - full internal endpoints beyond redacted service DNS
+
+readiness_levels:
+  contract:
+    meaning: Gate definition and local/logic provider/store are present; no live cluster proof.
+  live:
+    meaning: Approved lab run created, observed, scaled, stopped, started, restored after Gateway restart, and deleted a CPU Deployment without writing /instances.

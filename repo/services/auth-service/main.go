@@ -26,6 +26,6 @@ func main() {
 		OIDCPublicKeyPEM:     cfg.OIDCPublicKeyPEM,
 		OIDCPublicKeyFile:    cfg.OIDCPublicKeyFile,
 		OIDCGroupRoleMapJSON: cfg.OIDCGroupRoleMapJSON,
-	})
+	}).WithMintCredentials(cfg.MintCredentials)
 	bootstrap.RunGRPC(cfg.GRPCPort, authSvc.Register, deps)
 }

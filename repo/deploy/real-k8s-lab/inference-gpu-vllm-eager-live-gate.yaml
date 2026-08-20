@@ -1,0 +1,61 @@
+profile: INFERENCE-SERVICE-GPU-VLLM-EAGER-LIVE-GATE-C34
+status: live
+description: >
+  GPU vLLM launch adds --enforce-eager so the existing single-node whole-card
+  InferenceService can pass kubelet /health instead of stalling on V1
+  torch.compile. Product HTTP stays on production ani-gateway with
+  ANI_AUTH_MODE=auth_service. The user service is retained. This must not
+  mark GPU ready, runtime ready, or cross-node LWS live.
+
+required_tools:
+  - kubectl
+
+required_endpoints:
+  - ani_gateway_inference_services_api
+  - inference_control_grpc
+  - kubernetes_api
+
+required_env:
+  - KUBECONFIG
+
+live_checks:
+  - id: gpu-vllm-launch-enforce-eager
+    command: go test ./internal/engine
+    pass_condition: gpu_and_leader_launch_include_enforce_eager
+  - id: live-pod-ready
+    command: kubectl get deploy/pod for retained GPU InferenceService
+    pass_condition: ready_replicas_1_on_wholecard_worker
+  - id: runtime-health-200
+    command: GET runtime ClusterIP /health
+    pass_condition: http_200
+  - id: product-get-running
+    command: GET /api/v1/svc/inference-services/{id}
+    pass_condition: status_running
+  - id: invocation-url-null
+    command: GET /api/v1/svc/inference-services/{id}
+    pass_condition: invocation_url_and_endpoint_url_are_null
+  - id: service-retained
+    command: GET /api/v1/svc/inference-services/{id}
+    pass_condition: user_requested_gpu_service_not_deleted
+  - id: production-gateway-auth-mode-preserved
+    command: kubectl -n ani-system get deploy ani-gateway
+    pass_condition: ani_auth_mode_remains_auth_service
+  - id: lws-cross-node-skipped
+    command: POST leader_worker / multi_node
+    pass_condition: skipped_cross_node_lws_not_in_this_batch
+
+evidence: development-records/live-evidence/inference-gpu-vllm-eager-live-20260818.json
+
+evidence_policy:
+  forbidden_content:
+    - bearer tokens
+    - passwords
+    - raw server IPs
+    - full DSN or connection strings
+    - full internal endpoints beyond redacted service DNS
+
+readiness_levels:
+  contract:
+    meaning: GPU vLLM launch includes --enforce-eager; live Ready is not claimed.
+  live:
+    meaning: Approved cluster run made the retained single-node GPU InferenceService Pod Ready with /health 200 after --enforce-eager; cross-node LWS and full platform runtime remain skipped.

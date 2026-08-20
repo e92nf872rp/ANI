@@ -2,19 +2,7 @@ version: 1
 status: accepted_baseline
 owner: ANI Services
 purpose: >-
-  阶段 B 只冻结 Services 契约，不提前实现 handler。本文件精确登记现有推理过渡
-  stub 与已批准目标契约之间的成功响应码差异；阶段 B.1/C 实现对应 handler 时必须
-  同步删除已收敛条目，stale baseline 会阻断 Services 门禁。
-exceptions:
-  - operation_id: createInferenceService
-    actual_status: 200
-    expected_status: 202
-    reason: 当前过渡 stub 返回 200；契约批准后的真实 handler 必须返回 202 + InferenceService。
-  - operation_id: updateInferenceService
-    actual_status: 200
-    expected_status: 202
-    reason: 当前过渡 stub 返回 200；契约批准后的 scale handler 必须返回 202 + AsyncTask。
-  - operation_id: deleteInferenceService
-    actual_status: 204
-    expected_status: 202
-    reason: 当前过渡 stub 返回 204；契约批准后的 delete handler 必须返回 202 + AsyncTask。
+  登记 Gateway 推理 handler 成功响应码与已批准 OpenAPI 契约之间的已知差异。
+  create/scale/delete 已收敛到 202，本文件不得再保留对应 stub 例外；新增差异或
+  stale 条目会阻断 Services 门禁。
+exceptions: []

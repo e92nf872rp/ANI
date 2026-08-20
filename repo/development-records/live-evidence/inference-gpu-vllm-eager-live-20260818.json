@@ -1,0 +1,59 @@
+{
+  "profile": "INFERENCE-SERVICE-GPU-VLLM-EAGER-LIVE-GATE-C34",
+  "status": "passed",
+  "generated_at": "2026-08-18T10:45:00Z",
+  "entry": "ani-system/ani-gateway",
+  "gateway": "ani-system/ani-gateway",
+  "auth_mode": "auth_service",
+  "auth": "tenant_bearer",
+  "engine": "vllm-gpu",
+  "launch": "enforce-eager",
+  "scheduler": "volcano",
+  "accelerator": "nvidia.com/gpu=1",
+  "pod_ready": true,
+  "health": 200,
+  "product_status": "running",
+  "lws_live": "skipped",
+  "gpu_ready": false,
+  "runtime_ready": false,
+  "service_retained": true,
+  "inference_service_image": "ani/inference-service:gpu-eager-20260818",
+  "checks": [
+    {
+      "id": "gpu-vllm-launch-enforce-eager",
+      "status": "passed"
+    },
+    {
+      "id": "live-pod-ready",
+      "status": "passed"
+    },
+    {
+      "id": "runtime-health-200",
+      "status": "passed",
+      "http_status": 200
+    },
+    {
+      "id": "product-get-running",
+      "status": "passed",
+      "status_value": "running"
+    },
+    {
+      "id": "invocation-url-null",
+      "status": "passed"
+    },
+    {
+      "id": "service-retained",
+      "status": "passed"
+    },
+    {
+      "id": "production-gateway-auth-mode-preserved",
+      "status": "passed",
+      "auth_mode": "auth_service"
+    },
+    {
+      "id": "lws-cross-node-skipped",
+      "status": "passed",
+      "reason": "skipped_cross_node_lws"
+    }
+  ]
+}

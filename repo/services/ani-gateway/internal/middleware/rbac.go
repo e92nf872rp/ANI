@@ -38,6 +38,14 @@ func RBACWithClient(authClient AuthClient) app.HandlerFunc {
 			c.Next(ctx)
 			return
 		}
+		if GetPrincipalKind(c) == "service" {
+			if !isPlatformWorkloadPath(string(c.Path())) {
+				respondError(c, http.StatusForbidden, "FORBIDDEN", "service token not allowed for this path")
+				return
+			}
+			c.Next(ctx)
+			return
+		}
 		if tenantID == "" && scope != "platform" {
 			// Auth middleware should have already rejected unauthenticated requests.
 			respondError(c, http.StatusForbidden, "FORBIDDEN", "tenant context missing")

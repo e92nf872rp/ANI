@@ -1,0 +1,71 @@
+profile: INFERENCE-SERVICE-CONSOLE-SHAPED-E2E-LIVE-GATE-C22
+status: live
+description: >
+  Console-shaped CPU InferenceService path. Requests enter the existing
+  ani-console nginx /api/ proxy, reach production ani-gateway, and use a
+  tenant Bearer. No X-Dev-Tenant-ID, no second Gateway, and the existing
+  tenant namespace is not deleted. Platform-workload pods pin to the
+  cluster default overlay instead of inheriting a tenant private VPC.
+
+required_tools:
+  - kubectl
+
+required_endpoints:
+  - ani_console_nginx_api_proxy
+  - ani_gateway_inference_services_api
+  - inference_control_grpc
+
+required_env:
+  - KUBECONFIG
+  - CONSOLE_TOKEN_FILE
+
+live_checks:
+  - id: in-cluster-inference-service-running
+    command: kubectl -n ani-system rollout status deploy/inference-service
+    pass_condition: inference_service_pod_ready
+  - id: production-gateway-auth-mode-preserved
+    command: kubectl -n ani-system get deploy ani-gateway
+    pass_condition: ani_auth_mode_remains_auth_service
+  - id: console-nginx-inference-list
+    command: GET ${ANI_CONSOLE_URL}/api/v1/svc/inference-services
+    pass_condition: http_200_via_ani_console_nginx_with_tenant_bearer
+  - id: product-inference-service-cpu-create
+    command: POST ${ANI_CONSOLE_URL}/api/v1/svc/inference-services without accelerator
+    pass_condition: http_202
+  - id: kubectl-vllm-cpu-deployment
+    command: kubectl -n ani-tenant-{uuid} get deploy
+    pass_condition: cpu_vllm_deployment_without_gpu_or_instance_label
+  - id: inference-service-running-health-smoke
+    command: GET /api/v1/svc/inference-services/{id}
+    pass_condition: status_running_via_clusterip_health_and_chat
+  - id: inference-service-stop
+    command: POST /api/v1/svc/inference-services/{id}/lifecycle action=stop
+    pass_condition: status_stopped
+  - id: inference-service-start
+    command: POST /api/v1/svc/inference-services/{id}/lifecycle action=start
+    pass_condition: same_service_id_running
+  - id: inference-service-delete
+    command: DELETE /api/v1/svc/inference-services/{id}
+    pass_condition: get_404_and_runtime_gone
+  - id: existing-tenant-namespace-preserved
+    command: kubectl get ns ani-tenant-{uuid}
+    pass_condition: existing_tenant_namespace_still_present
+  - id: gpu-live-skipped-no-device-plugin
+    command: kubectl get nodes allocatable nvidia.com/gpu
+    pass_condition: skipped_no_device_plugin
+
+evidence: development-records/live-evidence/inference-console-shaped-e2e-live-20260817.json
+
+evidence_policy:
+  forbidden_content:
+    - bearer tokens
+    - passwords
+    - raw server IPs
+    - full DSN or connection strings
+    - full internal endpoints beyond redacted service DNS
+
+readiness_levels:
+  contract:
+    meaning: Console-shaped runner, nginx /api/ proxy path, and fail-closed GPU skip are present.
+  live:
+    meaning: Approved cluster run created a CPU InferenceService through ani-console nginx using a tenant session token; GPU/LWS remain skipped.

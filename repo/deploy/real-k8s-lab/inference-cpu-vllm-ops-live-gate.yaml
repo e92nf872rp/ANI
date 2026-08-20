@@ -1,0 +1,58 @@
+profile: INFERENCE-SERVICE-CPU-VLLM-OPS-LIVE-GATE-C15
+status: live
+evidence: development-records/live-evidence/inference-cpu-vllm-ops-live-20260815.json
+description: >
+  Product-path CPU vLLM ops live gate on the same InferenceService entry.
+  After the service is running, prove product logs from real Pods, PATCH
+  scale desired replicas (RWO cannot become ready at 2, so a later scale
+  preempts the in-flight scale), lab process restart reread, and leave
+  ani-vllm-cpu-smoke untouched. Does not roll out in-cluster ani-gateway.
+
+required_tools:
+  - kubectl
+
+required_endpoints:
+  - ani_gateway_inference_services_api
+  - inference_control_grpc
+  - kubernetes_api
+
+required_env:
+  - ANI_GATEWAY_URL
+  - INFERENCE_SERVICE_GRPC_ADDR
+  - KUBECONFIG
+  - DATABASE_URL
+  - NATS_URL
+  - REDIS_URL
+  - INFERENCE_LAB_CATALOG
+  - INFERENCE_RUNTIME_PROBE_VIA
+
+live_checks:
+  - id: inference-service-product-logs
+    command: GET ${ANI_GATEWAY_URL}/api/v1/svc/inference-services/{id}/logs
+    pass_condition: 200_non_empty_items_no_replica
+  - id: inference-service-scale-desired-replicas
+    command: PATCH ${ANI_GATEWAY_URL}/api/v1/svc/inference-services/{id} replicas=2
+    pass_condition: 202_and_deploy_spec_replicas_2
+  - id: inference-service-scale-back-running
+    command: PATCH replicas=1 after preempting the in-flight scale
+    pass_condition: 202_and_status_running_replicas_1
+  - id: inference-service-lab-restart-get
+    command: restart lab Gateway and inference-service processes
+    pass_condition: same_id_still_running
+  - id: smoke-workload-untouched
+    command: kubectl get deploy/vllm-cpu -n ani-vllm-cpu-smoke
+    pass_condition: independent_smoke_still_ready
+
+evidence_policy:
+  forbidden_content:
+    - bearer tokens
+    - passwords
+    - raw server IPs
+    - full DSN or connection strings
+    - full internal endpoints beyond redacted service DNS
+
+readiness_levels:
+  contract:
+    meaning: Gate definition and local/logic ops path are present; no live ops proof.
+  live:
+    meaning: Approved lab run proved product logs, scale preempt, and process restart reread without rolling out in-cluster Gateway.
