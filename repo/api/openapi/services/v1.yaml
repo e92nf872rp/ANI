@@ -1056,6 +1056,99 @@ components:
         id:      { type: string, format: uuid }
         message: { type: string }
 
+    # ===== Platform Admins (平台运营账号管理) =====
+
+    PlatformAdminListItem:
+      type: object
+      required: [id, username, display_name, role, status, source]
+      properties:
+        id:           { type: string, format: uuid }
+        username:     { type: string }
+        display_name: { type: string }
+        role:         { type: string, enum: [platform-admin, platform-ops, platform-readonly] }
+        status:       { type: string, enum: [active, disabled] }
+        source:       { type: string, enum: [local, third_party] }
+        last_login_at: { type: string, format: date-time, nullable: true }
+
+    PlatformAdminDetail:
+      type: object
+      required: [id, email, username, display_name, role, status, source, created_at]
+      properties:
+        id:            { type: string, format: uuid }
+        email:         { type: string, format: email }
+        username:      { type: string }
+        display_name:  { type: string }
+        role:          { type: string, enum: [platform-admin, platform-ops, platform-readonly] }
+        status:        { type: string, enum: [active, disabled] }
+        source:        { type: string, enum: [local, third_party] }
+        last_login_at: { type: string, format: date-time, nullable: true }
+        created_at:    { type: string, format: date-time }
+
+    PlatformAdminListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:       { type: array, items: { $ref: '#/components/schemas/PlatformAdminListItem' } }
+        next_cursor: { type: string, nullable: true, description: "下一页游标；null 表示已无更多数据" }
+
+    PlatformAdminCreateRequest:
+      type: object
+      required: [idempotency_key, email, username, display_name, role, password]
+      properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+        email:           { type: string, format: email, description: "RFC 5322" }
+        username:        { type: string, minLength: 1, maxLength: 64, description: "不含冒号" }
+        display_name:    { type: string, minLength: 1, maxLength: 128 }
+        role:            { type: string, enum: [platform-admin, platform-ops, platform-readonly] }
+        password:        { type: string, minLength: 8, maxLength: 64, description: "四类中至少三类" }
+
+    PlatformAdminRoleUpdateRequest:
+      type: object
+      required: [idempotency_key, role]
+      properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+        role:            { type: string, enum: [platform-admin, platform-ops, platform-readonly] }
+
+    PlatformRole:
+      type: object
+      required: [name, label, description, permissions]
+      properties:
+        name:        { type: string, enum: [platform-admin, platform-ops, platform-readonly] }
+        label:       { type: string }
+        description: { type: string }
+        permissions:
+          type: object
+          required: [tenant_ops, resource_pool, platform_user, audit_export]
+          properties:
+            tenant_ops:    { type: string, enum: [read, write, none] }
+            resource_pool: { type: string, enum: [read, write, none] }
+            platform_user: { type: string, enum: [read, write, none] }
+            audit_export:  { type: string, enum: [read, write, none] }
+
+    PlatformRoleListResponse:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/PlatformRole' } }
+
+    PlatformAdminAuditLog:
+      type: object
+      required: [id, action, resource, result, created_at]
+      properties:
+        id:         { type: string, format: uuid }
+        action:     { type: string, description: "如 platform_admin.create / change_role / reset_password / disable / enable / delete" }
+        resource:   { type: string }
+        result:     { type: string, enum: [success, failed] }
+        details:    { type: object, additionalProperties: true, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    PlatformAdminAuditLogListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:       { type: array, items: { $ref: '#/components/schemas/PlatformAdminAuditLog' } }
+        next_cursor: { type: string, nullable: true, description: "下一页游标；null 表示已无更多数据" }
+
     # ===== Tenant Admins (租户管理员管理) =====
 
     TenantRef:
@@ -2871,6 +2964,230 @@ paths:
         "502": { $ref: '#/components/responses/BadGateway' }
         "504": { $ref: '#/components/responses/GatewayTimeout' }
 
+  # ===== Platform Admins (平台运营账号管理) =====
+
+  /platform-admins:
+    post:
+      operationId: createPlatformAdmin
+      summary: 创建平台运营账号（需 platform-admin）
+      tags: [PlatformAdmins]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlatformAdminCreateRequest' }
+      responses:
+        "200":
+          description: 平台运营账号已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden', description: "FORBIDDEN" }
+        "404": { $ref: '#/components/responses/NotFound', description: "ROLE_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "EMAIL_ALREADY_EXISTS / USERNAME_ALREADY_EXISTS / IDEMPOTENCY_CONFLICT" }
+    get:
+      operationId: listPlatformAdmins
+      summary: 平台运营账号列表（需 platform-admin / platform-ops / platform-readonly）
+      tags: [PlatformAdmins]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 }, description: "每页数量" }
+        - { name: cursor, in: query, schema: { type: string }, description: "上一页返回的 next_cursor" }
+        - { name: role, in: query, schema: { type: string, enum: [platform-admin, platform-ops, platform-readonly] } }
+        - { name: status, in: query, schema: { type: string, enum: [active, disabled] } }
+        - { name: source, in: query, schema: { type: string, enum: [local, oidc] }, description: "按 username 前缀过滤；oidc 结果在响应中映射为 third_party" }
+        - { name: search, in: query, schema: { type: string }, description: "模糊匹配 email/username" }
+      responses:
+        "200":
+          description: 平台运营账号列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformAdminListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /platform-admins/roles:
+    get:
+      operationId: listPlatformAdminRoles
+      summary: 查询可分配的平台角色与权限矩阵（需 platform-admin / platform-ops / platform-readonly）
+      tags: [PlatformAdmins]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      responses:
+        "200":
+          description: 平台角色列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformRoleListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /platform-admins/{userId}:
+    get:
+      operationId: getPlatformAdmin
+      summary: 查询平台运营账号详情（需 platform-admin / platform-ops / platform-readonly）
+      tags: [PlatformAdmins]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 平台运营账号详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformAdminDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "PLATFORM_USER_NOT_FOUND" }
+    delete:
+      operationId: deletePlatformAdmin
+      summary: 软删除平台运营账号（需 platform-admin）
+      tags: [PlatformAdmins]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IdempotentOnlyRequest' }
+      responses:
+        "200":
+          description: 平台运营账号已删除
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden', description: "FORBIDDEN" }
+        "404": { $ref: '#/components/responses/NotFound', description: "PLATFORM_USER_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
+        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "LAST_PLATFORM_ADMIN" }
+
+  /platform-admins/{userId}/role:
+    put:
+      operationId: updatePlatformAdminRole
+      summary: 修改平台运营账号角色（需 platform-admin）
+      tags: [PlatformAdmins]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlatformAdminRoleUpdateRequest' }
+      responses:
+        "200":
+          description: 平台运营账号角色已修改
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden', description: "FORBIDDEN" }
+        "404": { $ref: '#/components/responses/NotFound', description: "PLATFORM_USER_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
+        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "ROLE_CHANGE_INVALID" }
+
+  /platform-admins/{userId}/reset-password:
+    post:
+      operationId: resetPlatformAdminPassword
+      summary: 重置平台运营账号密码（需 platform-admin）
+      tags: [PlatformAdmins]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResetPasswordRequest' }
+      responses:
+        "200":
+          description: 平台运营账号密码已重置
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden', description: "FORBIDDEN" }
+        "404": { $ref: '#/components/responses/NotFound', description: "PLATFORM_USER_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
+        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "PASSWORD_SAME_AS_OLD" }
+
+  /platform-admins/{userId}/disable:
+    post:
+      operationId: disablePlatformAdmin
+      summary: 禁用平台运营账号（需 platform-admin）
+      tags: [PlatformAdmins]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IdempotentOnlyRequest' }
+      responses:
+        "200":
+          description: 平台运营账号已禁用
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden', description: "FORBIDDEN" }
+        "404": { $ref: '#/components/responses/NotFound', description: "PLATFORM_USER_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
+        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "LAST_PLATFORM_ADMIN" }
+
+  /platform-admins/{userId}/enable:
+    post:
+      operationId: enablePlatformAdmin
+      summary: 启用平台运营账号（需 platform-admin）
+      tags: [PlatformAdmins]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IdempotentOnlyRequest' }
+      responses:
+        "200":
+          description: 平台运营账号已启用
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden', description: "FORBIDDEN" }
+        "404": { $ref: '#/components/responses/NotFound', description: "PLATFORM_USER_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
+
+  /platform-admins/{userId}/audit-logs:
+    get:
+      operationId: listPlatformAdminAuditLogs
+      summary: 查询平台运营账号操作历史（需 platform-admin / platform-ops / platform-readonly）
+      tags: [PlatformAdmins]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 }, description: "每页数量" }
+        - { name: cursor, in: query, schema: { type: string }, description: "上一页返回的 next_cursor" }
+        - { name: action, in: query, schema: { type: string }, description: "过滤操作类型" }
+        - { name: result, in: query, schema: { type: string, enum: [success, failed] } }
+      responses:
+        "200":
+          description: 平台运营账号操作历史
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformAdminAuditLogListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "PLATFORM_USER_NOT_FOUND" }
+
   # ===== Tenant Admins (租户管理员管理) =====
 
   /tenant-admins:
@@ -3168,5 +3485,6 @@ tags:
   - { name: Sandboxes, description: "Sandbox（已废弃）" }
   - { name: Tenant, description: "租户管理（成员/角色/SSO/Webhook）" }
   - { name: TenantPlans, description: "配额套餐管理" }
+  - { name: PlatformAdmins, description: "平台运营账号管理（创建/详情/角色/密码/禁用启用删除/审计）" }
   - { name: TenantAdmins, description: "租户管理员管理（邀请/角色/移交/禁用启用删除/审计）" }
   - { name: Integrations, description: "第三方集成与企业通知" }

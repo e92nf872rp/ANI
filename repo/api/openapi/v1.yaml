@@ -4088,6 +4088,64 @@ components:
         updated_at:    { type: string, format: date-time }
         tenant:        { $ref: '#/components/schemas/UserTenantRef' }
 
+    PlatformUser:
+      type: object
+      description: "平台运营账号详情；tenant_id 固定为空，不含 password_hash"
+      required: [id, email, username, display_name, role, status, source, created_at]
+      properties:
+        id:            { type: string, format: uuid }
+        email:         { type: string, format: email }
+        username:      { type: string }
+        display_name:  { type: string }
+        role:          { type: string, enum: [platform-admin, platform-ops, platform-readonly] }
+        status:        { type: string, enum: [active, disabled] }
+        source:        { type: string, enum: [local, third_party], description: "由 username 前缀推断：oidc: -> third_party；local: -> local" }
+        last_login_at: { type: string, format: date-time, nullable: true }
+        created_at:    { type: string, format: date-time }
+
+    PlatformUserCreateRequest:
+      type: object
+      description: "创建平台运营账号；明文密码仅本次请求透传，明文不落日志/审计/响应"
+      required: [idempotency_key, email, username, display_name, role, password]
+      properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+        email:           { type: string, format: email, description: "RFC 5322，全局唯一" }
+        username:        { type: string, minLength: 1, maxLength: 64, description: "不含冒号；Core 侧会拼接 local: 前缀" }
+        display_name:    { type: string, minLength: 1, maxLength: 128 }
+        role:            { type: string, enum: [platform-admin, platform-ops, platform-readonly] }
+        password:        { type: string, minLength: 8, maxLength: 64, description: "至少包含大写/小写/数字/特殊字符中的三类" }
+
+    PlatformUserListResponse:
+      type: object
+      description: "平台运营账号列表（游标分页）"
+      required: [items]
+      properties:
+        items:       { type: array, items: { $ref: '#/components/schemas/PlatformUser' } }
+        next_cursor: { type: string, nullable: true, description: "下一页游标；null 表示已无更多" }
+
+    PlatformUserRoleUpdateRequest:
+      type: object
+      description: "修改平台运营账号角色"
+      required: [idempotency_key, role]
+      properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+        role:            { type: string, enum: [platform-admin, platform-ops, platform-readonly] }
+
+    PlatformUserResetPasswordRequest:
+      type: object
+      description: "重置平台运营账号密码；明文不落日志/审计/响应"
+      required: [idempotency_key, new_password]
+      properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+        new_password:    { type: string, minLength: 8, maxLength: 64, description: "至少包含大写/小写/数字/特殊字符中的三类，且必须与旧密码不同" }
+
+    PlatformUserIdempotentRequest:
+      type: object
+      description: "仅含幂等键的请求体"
+      required: [idempotency_key]
+      properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+
     TenantUserListResponse:
       type: object
       description: "跨租户用户列表（游标分页）"
@@ -4131,29 +4189,33 @@ components:
     UserRoleUpdateRequest:
       type: object
       description: "修改租户内角色（不可设 tenant-owner）"
-      required: [role]
+      required: [idempotency_key, role]
       properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
         role: { type: string, enum: [user, auditor, tenant-admin] }
 
     UserStatusUpdateRequest:
       type: object
       description: "设置 users.status"
-      required: [status]
+      required: [idempotency_key, status]
       properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
         status: { type: string, enum: [active, disabled] }
 
     UserTransferOwnershipRequest:
       type: object
       description: "移交租户所有者；target 必须是本租户 active tenant-admin"
-      required: [target_user_id]
+      required: [idempotency_key, target_user_id]
       properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
         target_user_id: { type: string, format: uuid }
 
     UserResetPasswordRequest:
       type: object
       description: "重置密码；明文不落日志/审计/响应"
-      required: [new_password]
+      required: [idempotency_key, new_password]
       properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
         new_password: { type: string, minLength: 8, maxLength: 64, description: "四类中至少三类，须与旧密码不同" }
 
     UserMutationResult:
@@ -4241,6 +4303,11 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
+    PlatformUserNotFound:
+      description: 平台运营账号不存在或已软删除（code=PLATFORM_USER_NOT_FOUND）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
     UserAlreadyTenantAdmin:
       description: 该用户已是本租户 admin/owner（code=USER_ALREADY_TENANT_ADMIN）
       content:
@@ -4268,6 +4335,11 @@ components:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
     PasswordSameAsOld:
       description: 新密码与旧密码相同（code=PASSWORD_SAME_AS_OLD）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    LastPlatformAdmin:
+      description: 唯一活跃 platform-admin 不可禁用/删除（code=LAST_PLATFORM_ADMIN）
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -9048,7 +9120,7 @@ paths:
         未知 plan_id 返回 count=0（本接口不校验 tenant_plans 是否存在）。
         供 Services 填充套餐 tenant_count、删除前占用检查；Services 不得直接查询 Core tenants 表。
       tags: [Tenants]
-      x-ani-rbac-scope: "scope:quota:read"
+      x-ani-rbac-scope: "scope:tenant:read"
       parameters:
         - name: plan_id
           in: query
@@ -9078,7 +9150,7 @@ paths:
         返回 tenants 中 plan_id 命中且 status <> disabled 的租户，按 name 排序。
         未知 plan_id 返回空列表（本接口不校验 tenant_plans 是否存在）。
       tags: [Tenants]
-      x-ani-rbac-scope: "scope:quota:read"
+      x-ani-rbac-scope: "scope:tenant:read"
       parameters:
         - { name: plan_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -9099,7 +9171,7 @@ paths:
         返回 status <> disabled 且 plan_id IS DISTINCT FROM 请求套餐的租户（含未绑定或绑定其它套餐），按 name 排序。
         未知 plan_id 仍按该过滤返回（本接口不校验 tenant_plans 是否存在）。
       tags: [Tenants]
-      x-ani-rbac-scope: "scope:quota:read"
+      x-ani-rbac-scope: "scope:tenant:read"
       parameters:
         - { name: plan_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -9120,7 +9192,7 @@ paths:
         平台侧查询租户最小字段（含 status / plan_id），供 Services 绑定配额套餐等场景调用。
         不替代完整租户管理 API。
       tags: [Tenants]
-      x-ani-rbac-scope: "scope:quota:read"
+      x-ani-rbac-scope: "scope:tenant:read"
       parameters:
         - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -9141,7 +9213,7 @@ paths:
         仅更新 tenants.plan_id，不修改配额行。
         plan_id 外键不存在时返回 404 TENANT_PLAN_NOT_FOUND；租户不存在返回 404 TENANT_NOT_FOUND。
       tags: [Tenants]
-      x-ani-rbac-scope: "scope:quota:write"
+      x-ani-rbac-scope: "scope:tenant:write"
       parameters:
         - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 }, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
@@ -9164,6 +9236,196 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  # ===== Platform Users (平台运营账号，供 Services PlatformAdminService 调用) =====
+
+  /admin/platform-users:
+    post:
+      operationId: createPlatformUser
+      summary: 创建平台运营账号
+      description: 仅创建 tenant_id 为空的平台账号；明文密码仅本次请求透传，不落日志/审计/响应。
+      tags: [PlatformUsers]
+      x-ani-rbac-scope: "scope:users:write"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlatformUserCreateRequest' }
+      responses:
+        "200":
+          description: 平台运营账号已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserMutationResult' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "ROLE_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "EMAIL_ALREADY_EXISTS / USERNAME_ALREADY_EXISTS / IDEMPOTENCY_CONFLICT" }
+    get:
+      operationId: listPlatformUsers
+      summary: 平台运营账号列表
+      description: 跨平台侧查询 tenant_id 为空的平台账号；不含 password_hash。
+      tags: [PlatformUsers]
+      x-ani-rbac-scope: "scope:users:read"
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: role, in: query, schema: { type: string, enum: [platform-admin, platform-ops, platform-readonly] } }
+        - { name: status, in: query, schema: { type: string, enum: [active, disabled] } }
+        - { name: source, in: query, schema: { type: string, enum: [local, oidc] }, description: "按 username 前缀过滤；oidc 结果在响应中映射为 third_party" }
+        - { name: search, in: query, schema: { type: string }, description: "模糊匹配 email/username" }
+      responses:
+        "200":
+          description: 平台运营账号列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformUserListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /admin/platform-users/{userId}:
+    get:
+      operationId: getPlatformUser
+      summary: 查询平台运营账号详情
+      description: 不含 password_hash；仅返回 tenant_id 为空且未软删除的平台账号。
+      tags: [PlatformUsers]
+      x-ani-rbac-scope: "scope:users:read"
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 平台运营账号详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformUser' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/PlatformUserNotFound' }
+    delete:
+      operationId: deletePlatformUser
+      summary: 软删除平台运营账号
+      tags: [PlatformUsers]
+      x-ani-rbac-scope: "scope:users:write"
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlatformUserIdempotentRequest' }
+      responses:
+        "200":
+          description: 平台运营账号已删除
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserMutationResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/PlatformUserNotFound' }
+        "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
+        "422": { $ref: '#/components/responses/LastPlatformAdmin' }
+
+  /admin/platform-users/{userId}/role:
+    put:
+      operationId: updatePlatformUserRole
+      summary: 修改平台运营账号角色
+      tags: [PlatformUsers]
+      x-ani-rbac-scope: "scope:users:write"
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlatformUserRoleUpdateRequest' }
+      responses:
+        "200":
+          description: 平台运营账号角色已更新
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserMutationResult' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "PLATFORM_USER_NOT_FOUND / ROLE_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
+
+  /admin/platform-users/{userId}/reset-password:
+    post:
+      operationId: resetPlatformUserPassword
+      summary: 重置平台运营账号密码
+      description: 明文密码仅本次请求透传，不落日志/审计/响应。
+      tags: [PlatformUsers]
+      x-ani-rbac-scope: "scope:users:write"
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlatformUserResetPasswordRequest' }
+      responses:
+        "200":
+          description: 平台运营账号密码已重置
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserMutationResult' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/PlatformUserNotFound' }
+        "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
+        "422": { $ref: '#/components/responses/PasswordSameAsOld' }
+
+  /admin/platform-users/{userId}/disable:
+    post:
+      operationId: disablePlatformUser
+      summary: 禁用平台运营账号
+      tags: [PlatformUsers]
+      x-ani-rbac-scope: "scope:users:write"
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlatformUserIdempotentRequest' }
+      responses:
+        "200":
+          description: 平台运营账号已禁用
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserMutationResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/PlatformUserNotFound' }
+        "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
+        "422": { $ref: '#/components/responses/LastPlatformAdmin' }
+
+  /admin/platform-users/{userId}/enable:
+    post:
+      operationId: enablePlatformUser
+      summary: 启用平台运营账号
+      tags: [PlatformUsers]
+      x-ani-rbac-scope: "scope:users:write"
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlatformUserIdempotentRequest' }
+      responses:
+        "200":
+          description: 平台运营账号已启用
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserMutationResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/PlatformUserNotFound' }
+        "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
 
   # ===== Tenant Users (平台级租户用户/角色，供 Services UserSvcClient 调用) =====
 
@@ -9281,7 +9543,6 @@ paths:
       parameters:
         - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: user_id, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
       requestBody:
         required: true
         content:
@@ -9328,7 +9589,6 @@ paths:
       x-ani-rbac-scope: "scope:users:write"
       parameters:
         - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
       requestBody:
         required: true
         content:
@@ -9355,7 +9615,6 @@ paths:
       parameters:
         - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: user_id, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
       requestBody:
         required: true
         content:
@@ -9383,7 +9642,6 @@ paths:
       parameters:
         - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: user_id, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
       requestBody:
         required: true
         content:
@@ -9428,5 +9686,6 @@ tags:
   - { name: Tasks,          description: "异步任务查询" }
   - { name: QuotaAdmin,     description: "平台级配额管理（租户配额 CRUD + 配额元数据）" }
   - { name: Tenants,        description: "平台级租户最小读写（status / plan_id / 套餐绑定租户计数）" }
+  - { name: PlatformUsers,  description: "平台运营账号（tenant_id 为空的 users / user_roles / roles）" }
   - { name: TenantUsers,    description: "平台级租户用户与角色（users / user_roles / roles）" }
   - { name: GPUSpec,        description: "GPU 规格目录管理（创建/删除/可用性查询）" }
