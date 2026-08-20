@@ -903,10 +903,12 @@ public final class ApiClient {
         "GPU_TYPE_NOT_IN_NODES",
         "INTERNAL_ERROR",
         "INVALID_FILTER",
+        "LAST_PLATFORM_ADMIN",
         "LAST_TENANT_OWNER",
         "NOT_FOUND",
         "NOT_IMPLEMENTED",
         "PASSWORD_SAME_AS_OLD",
+        "PLATFORM_USER_NOT_FOUND",
         "PRECONDITION_FAILED",
         "QUOTA_ALREADY_EXISTS",
         "QUOTA_EXCEEDED",
@@ -942,7 +944,8 @@ public final class ApiClient {
             this.code = code;
             this.message = message;
             this.requestId = requestId;
-            this.details = details == null ? Collections.emptyMap() : Collections.unmodifiableMap(new HashMap<>(details));
+            this.details = details == null ? Collections.emptyMap()
+                    : Collections.unmodifiableMap(new HashMap<>(details));
         }
 
         public String code() {
@@ -982,8 +985,10 @@ public final class ApiClient {
 
         public RequestOptions(String bodyJson, Map<String, String> params, Map<String, String> headers) {
             this.bodyJson = bodyJson;
-            this.params = params == null ? Collections.emptyMap() : Collections.unmodifiableMap(new HashMap<>(params));
-            this.headers = headers == null ? Collections.emptyMap() : Collections.unmodifiableMap(new HashMap<>(headers));
+            this.params = params == null ? Collections.emptyMap()
+                    : Collections.unmodifiableMap(new HashMap<>(params));
+            this.headers = headers == null ? Collections.emptyMap()
+                    : Collections.unmodifiableMap(new HashMap<>(headers));
         }
 
         public String bodyJson() {
@@ -1016,7 +1021,8 @@ public final class ApiClient {
         return OPERATIONS.contains(operationId);
     }
 
-    public String request(String method, String path, RequestOptions options) throws IOException, InterruptedException, APIException {
+    public String request(String method, String path, RequestOptions options)
+            throws IOException, InterruptedException, APIException {
         RequestOptions opts = options == null ? new RequestOptions(null, null, null) : options;
         HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(requestUrl(path, opts.params())))
                 .header("Accept", "application/json");
@@ -1049,7 +1055,8 @@ public final class ApiClient {
         StringJoiner query = new StringJoiner("&");
         for (Map.Entry<String, String> entry : params.entrySet()) {
             if (entry.getValue() != null && !entry.getValue().isEmpty()) {
-                query.add(URLEncoder.encode(entry.getKey(), StandardCharsets.UTF_8) + "=" + URLEncoder.encode(entry.getValue(), StandardCharsets.UTF_8));
+                query.add(URLEncoder.encode(entry.getKey(), StandardCharsets.UTF_8) + "="
+                        + URLEncoder.encode(entry.getValue(), StandardCharsets.UTF_8));
             }
         }
         String encoded = query.toString();
