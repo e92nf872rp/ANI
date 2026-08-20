@@ -178,3 +178,11 @@ git diff --check
 - 不得为了"未来可能需要"提前引入抽象、插件化、多实现、通用框架或复杂配置
 - 不得以"简化"为理由绕过已经强制的架构边界、安全边界、多租户边界、API 契约、真实 provider 门禁、审计、幂等、测试和文档闭环
 - 优先复用现有能力边界；只有当复用会破坏语义、稳定性、安全性或长期兼容性时，才允许新增实体
+
+<!-- OPENWIKI:START -->
+
+## OpenWiki
+
+See [AGENTS.md](AGENTS.md) for OpenWiki agent instructions.
+
+<!-- OPENWIKI:END -->

@@ -1,0 +1,7 @@
+# Files
+
+- [Architecture Governance Baselines](architecture-baselines.md) - Architecture governance baselines in repo/architecture/ (5 YAML files): component-import-allowlist.yaml, services-boundary-baseline.yaml, services-contract-baseline.yaml, services-route-baseline.yaml, inference-service-handler-baseline.yaml. Coupling levels, accepted_baseline exception regime, enforcement via validate-architecture and validate-services.
+- [Build System](build-system.md) - Makefile (repo/Makefile) build system: Go workspace (go.work, 15 modules), service builds, code generation (OpenAPI→SDK, Proto→gRPC, API docs), lint, test, validation gates, image builds, offline packaging.
+- [End-to-End Integration Tests](e2e-tests.md) - E2E test suite at repo/tests/e2e/: run_e2e_sse_test.py (15.7KB) orchestrating real rag-engine, Gateway, and vLLM for SSE streaming validation. fake_rag_engine.py (1.4KB) for isolated SSE testing.
+- [GitHub Actions CI/CD](github-workflows.md) - GitHub Actions workflows (.github/workflows/): PR validation, sprint gate validation, release workflows. Build matrix for services, operators, AI services. Integration with Makefile validation targets.
+- [Validation Gates](validation-gates.md) - Validation gate catalog: architecture gate, services boundary gate, live gate catalog (Sprint 13 S01-S07, Sprint 14 resilience), guard series (299 guards with append-only index), SDK drift detection. Gate-to-command mapping.

@@ -1,0 +1,22 @@
+# Files
+
+- [Core Adapters Catalog](adapters.md) - Default provider implementations in pkg/adapters/: K8s runtime adapters, local dev adapters, third-party component adapters, and resilience wrappers
+- [Async Task System](async-tasks.md) - Async task lifecycle, PostgreSQL-backed task store, outbox pattern, NATS JetStream messaging — the foundation for all async operations in ANI
+- [Auth, Security & Secrets](auth-security.md) - Auth middleware (JWT/API Key/sandbox token/dev bypass), RBAC, audit, secrets service (create/bind/unbind), KMS/SM4 encryption provider, workload identity, and sandbox token subsystem
+- [Core Bootstrap (pkg/bootstrap)](bootstrap.md) - Core-layer dependency initialization: MustConnect wiring PostgreSQL, NATS, Redis; readiness/liveness probes; resilience Policy catalog; services-layer vs core-layer bootstrap split.
+- [ANI Gateway](gateway.md) - services/ani-gateway/: unified HTTP entry point for Core and Services APIs using Hertz framework, middleware chain, route registration, provider wiring
+- [GPU Inventory & Scheduling](gpu.md) - GPU inventory discovery (NVIDIA device-plugin, DCGM), GPU specification catalog, GPU scheduling queues via Volcano/HAMi, GPU smoke live gates
+- [Idempotency](idempotency.md) - Idempotency design: crypto/rand key generation (not UUIDv7), Gateway middleware with 24h TTL, DB-level ON CONFLICT DO NOTHING enforcement, request fingerprinting, sandbox token expiry-aware caching.
+- [Instance Lifecycle](instances.md) - Workload instance lifecycle from port definitions through state machine, orchestrator pipeline, reconciliation loop. All 9 workload states with valid transitions, 23 lifecycle actions, LocalStatusReconciler mapping, LocalWorkloadReconcileController loop, ProviderMissing detection.
+- [Gateway Middleware Chain](middleware.md) - ANI Gateway middleware: Auth (JWT/API Key/sandbox token/dev bypass), RBAC, Audit, RateLimit, Idempotency, RequestID — middleware composition and client abstraction
+- [Core Network Subsystem](network.md) - Network resource model (VPC/subnet/security group), ports.NetworkService, Kube-OVN provider adapter, network status reconciliation
+- [Observability & Metering](observability-metering.md) - Prometheus query proxy, Loki log store, DCGM GPU metrics, instance events, metering collection service with lifecycle event consumer and rebuilder — Sprint 14 resilience degradation integration
+- [ANI Core Overview](overview.md) - ANI Core: infrastructure control plane owning compute instances, network, storage, GPU, auth/RBAC, observability, metering, async tasks, quota, and reconcile controllers
+- [Core Ports Catalog](ports-catalog.md) - Complete inventory of pkg/ports capability interfaces: workload, network, storage, GPU, observability, metering, async tasks, quota, tenant, sandbox
+- [Quota & Tenancy Management](quota-tenancy.md) - Resource quota management (try/confirm/cancel/release reservation protocol), tenant plans, RLS-based multi-tenant isolation, Core Quota API (admin endpoints)
+- [Reconcile Controller & HA Leader Election](reconcile-controller.md) - Status reconciliation pipeline: provider status reader, status reconciler, reconcile controller with backoff. HA leader election via Postgres-backed lease.
+- [Core Resilience Subsystem](resilience.md) - pkg/adapters/resilience/: circuit breaker, retry, timeout, degradation — cross-cutting resilience wrappers used by all provider adapters
+- [Gateway Router](router.md) - Gateway route registration: Core routes (/api/v1/*), Services routes (/api/v1/svc/*), RegisterWithOptions wiring, nil-provider guards, stub handler groups (models, inference, sandboxes, tenant) returning 501/empty JSON, OpenAI inference proxy returning 501.
+- [Core Shared Repositories](shared-repos.md) - pkg/repo (async task + outbox repos), pkg/nats (canonical NATS subjects and payloads), pkg/types (tenant context, pagination, error types) — shared abstractions used across Core microservices
+- [Core Storage Subsystem](storage.md) - Storage resource model (block volume, filesystem), ports.StorageService, object store (MinIO), vector store (Milvus), Rook-Ceph provider, state machine
+- [Tenant Context Propagation](tenant-context-propagation.md) - Multi-tenant context propagation: HTTP path (Hertz context + Go context with TenantContext), gRPC path (request message fields, no gRPC metadata interceptor), PostgreSQL RLS via SET LOCAL app.current_tenant_id, Gateway auth middleware as context origin.

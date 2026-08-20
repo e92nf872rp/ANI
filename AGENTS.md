@@ -22,3 +22,16 @@
 - API 工程约定（幂等性/兼容性/控制平面分离等）→ [CLAUDE.md #API-工程约定](./CLAUDE.md)
 - 版本管理约定 → [CLAUDE.md #版本管理强制约定](./CLAUDE.md)
 - Karpathy 五条开发原则 → [CLAUDE.md #Karpathy-五条开发原则](./CLAUDE.md)
+
+<!-- OPENWIKI:START -->
+
+## OpenWiki
+
+This repository has a generated `openwiki/` evidence index. It is optional just-in-time context, not required startup reading.
+
+- Treat source code and tests as authoritative. A brief's unknowns and review items are verification gaps, not automatic requirements.
+- Prefer the narrowest quiet validation that proves the changed behavior. Preserve complete failure output.
+
+The scheduled OpenWiki GitHub Actions workflow refreshes the repository wiki. Do not hand-edit generated OpenWiki pages unless explicitly asked; prefer updating source code/docs and letting OpenWiki regenerate.
+
+<!-- OPENWIKI:END -->

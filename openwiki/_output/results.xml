@@ -1,0 +1,32 @@
+<results>
+  <result id="Q-ARCH-004" status="PASS">
+    <missing>None</missing>
+  </result>
+  <result id="Q-CORE-001" status="PASS">
+    <missing>None</missing>
+  </result>
+  <result id="Q-CORE-002" status="PASS">
+    <missing>None</missing>
+  </result>
+  <result id="Q-CORE-003" status="PASS">
+    <missing>None</missing>
+  </result>
+  <result id="Q-CORE-004" status="PASS">
+    <missing>None</missing>
+  </result>
+  <result id="Q-FRONTEND-001" status="PASS">
+    <missing>None</missing>
+  </result>
+  <result id="Q-FRONTEND-002" status="PASS">
+    <missing>None</missing>
+  </result>
+  <result id="Q-DEPLOY-001" status="PARTIAL">
+    <missing>/openwiki/deployment/k8s-namespace-layout.md and /openwiki/deployment/helm-charts.md lack documentation of Ingress configuration via publicIngress Helm value for external Gateway access.</missing>
+  </result>
+  <result id="Q-DEPLOY-002" status="PASS">
+    <missing>None</missing>
+  </result>
+  <result id="Q-DEPLOY-003" status="PASS">
+    <missing>None</missing>
+  </result>
+</results>
