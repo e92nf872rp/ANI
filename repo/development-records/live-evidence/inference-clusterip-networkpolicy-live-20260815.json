@@ -1,0 +1,57 @@
+{
+  "profile": "INFERENCE-SERVICE-CLUSTERIP-NP-LIVE-GATE-C17",
+  "status": "passed",
+  "generated_at": "2026-08-15T08:59:49Z",
+  "gateway": "lab-process-not-in-cluster-ani-gateway",
+  "exposure": "clusterip_networkpolicy",
+  "product_test": "not_registered",
+  "probe": "kubernetes_service_proxy",
+  "auth_mode": "dev",
+  "checks": [
+    {
+      "id": "product-inference-service-cpu-create",
+      "status": "passed",
+      "http_status": 202
+    },
+    {
+      "id": "inference-service-clusterip-only",
+      "status": "passed",
+      "service_type": "ClusterIP"
+    },
+    {
+      "id": "inference-service-networkpolicy-applied",
+      "status": "passed",
+      "ingress": "same-ns-and-control-plane"
+    },
+    {
+      "id": "inference-service-running-health-smoke",
+      "status": "passed",
+      "status_value": "running"
+    },
+    {
+      "id": "inference-service-foreign-namespace-denied",
+      "status": "passed",
+      "peer": "foreign-namespace"
+    },
+    {
+      "id": "inference-service-no-product-test",
+      "status": "passed",
+      "http_status": 404
+    },
+    {
+      "id": "inference-service-stop-endpoint-gone",
+      "status": "passed",
+      "status_value": "stopped"
+    },
+    {
+      "id": "inference-service-delete",
+      "status": "passed",
+      "get_status": 404
+    },
+    {
+      "id": "smoke-workload-untouched",
+      "status": "passed",
+      "namespace": "ani-vllm-cpu-smoke"
+    }
+  ]
+}

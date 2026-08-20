@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -80,6 +81,24 @@ func (s *ModelService) GetModel(ctx context.Context, req *modelv1.GetModelReques
 		return nil, toStatus(err)
 	}
 	return modelToPB(model), nil
+}
+
+func (s *ModelService) GetModelVersion(ctx context.Context, req *modelv1.GetModelVersionRequest) (*modelv1.GetModelVersionResponse, error) {
+	tenantID, versionID, err := parseTenantAndID(req.GetTenantId(), req.GetModelVersionId())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	ctx = withTenant(ctx, tenantID)
+	model, version, err := s.repo.GetVersionByID(ctx, s.db, versionID)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	versionPB := versionToPB(version)
+	versionPB.EncryptHint = ""
+	return &modelv1.GetModelVersionResponse{
+		Model:   modelToPB(model),
+		Version: versionPB,
+	}, nil
 }
 
 func (s *ModelService) ListModels(ctx context.Context, req *modelv1.ListModelsRequest) (*modelv1.ListModelsResponse, error) {
@@ -183,7 +202,40 @@ func (s *ModelService) GetModelDownloadURL(ctx context.Context, req *modelv1.Get
 	return nil, status.Error(codes.Unimplemented, "model download presigned URL requires MinIO client wiring")
 }
 
-var modelNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{0,62}$`)
+var (
+	modelNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{0,62}$`)
+	pvcClaimPattern  = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
+)
+
+// validateStoragePath accepts tenant-local model directories only:
+// pvc://<dns-1123-claim>[#/absolute-path]. HuggingFace / ModelScope / MinIO
+// object:// paths are the next source slice, not this one. HostPath is never a
+// product source.
+func validateStoragePath(raw string) error {
+	path := strings.TrimSpace(raw)
+	if path == "" {
+		return types.Wrapf(types.ErrBadRequest, "storage_path required")
+	}
+	if strings.Contains(path, "..") {
+		return types.Wrapf(types.ErrBadRequest, "storage_path must not contain ..")
+	}
+	rest, ok := strings.CutPrefix(path, "pvc://")
+	if !ok {
+		return types.Wrapf(types.ErrBadRequest, "storage_path must be pvc://<claim>[#/path] for a tenant-local model directory")
+	}
+	claim, subpath, found := strings.Cut(rest, "#")
+	claim = strings.TrimSpace(claim)
+	if !pvcClaimPattern.MatchString(claim) {
+		return types.Wrapf(types.ErrBadRequest, "invalid pvc claim name")
+	}
+	if found {
+		subpath = strings.TrimSpace(subpath)
+		if subpath == "" || !strings.HasPrefix(subpath, "/") {
+			return types.Wrapf(types.ErrBadRequest, "pvc subpath must be an absolute path")
+		}
+	}
+	return nil
+}
 
 func validateModelName(name string) error {
 	if !modelNamePattern.MatchString(name) {
@@ -201,8 +253,8 @@ func validateModelVersionReq(req *modelv1.CreateModelVersionRequest) error {
 	default:
 		return types.Wrapf(types.ErrBadRequest, "invalid model format")
 	}
-	if req.GetStoragePath() == "" {
-		return types.Wrapf(types.ErrBadRequest, "storage_path required")
+	if err := validateStoragePath(req.GetStoragePath()); err != nil {
+		return err
 	}
 	if req.GetSizeBytes() < 0 {
 		return types.Wrapf(types.ErrBadRequest, "size_bytes must be non-negative")

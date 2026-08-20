@@ -1,0 +1,74 @@
+profile: INFERENCE-SERVICE-INCLUSTER-E2E-LIVE-GATE-C21
+status: live
+description: >
+  In-cluster CPU InferenceService product path. inference-service runs in
+  ani-system. The existing production ani-gateway Deployment is rolled to the
+  current Gateway binary and given INFERENCE_SERVICE_GRPC_ADDR plus
+  PLATFORM_WORKLOAD_PROVIDER=kubernetes_rest. ANI_AUTH_MODE stays auth_service.
+  This must not deploy a second Gateway, must not touch ani-vllm-cpu-smoke,
+  and must not mark GPU/LWS or full platform runtime ready.
+
+required_tools:
+  - kubectl
+  - docker
+
+required_endpoints:
+  - ani_gateway_inference_services_api
+  - inference_control_grpc
+  - kubernetes_api
+
+required_env:
+  - KUBECONFIG
+  - DATABASE_URL
+  - INFERENCE_LAB_CATALOG
+
+live_checks:
+  - id: in-cluster-inference-service-running
+    command: kubectl -n ani-system rollout status deploy/inference-service
+    pass_condition: inference_service_pod_ready
+  - id: production-ani-gateway-rolled
+    command: kubectl -n ani-system rollout status deploy/ani-gateway
+    pass_condition: production_gateway_image_is_c21_tag_with_inference_grpc_env
+  - id: production-gateway-auth-mode-preserved
+    command: kubectl -n ani-system get deploy ani-gateway
+    pass_condition: ani_auth_mode_remains_auth_service
+  - id: product-inference-service-cpu-create
+    command: POST ${ANI_GATEWAY_URL}/api/v1/svc/inference-services without accelerator
+    pass_condition: http_202
+  - id: kubectl-vllm-cpu-deployment
+    command: kubectl -n ani-tenant-{uuid} get deploy
+    pass_condition: cpu_vllm_deployment_without_gpu_or_instance_label
+  - id: inference-service-running-health-smoke
+    command: GET /api/v1/svc/inference-services/{id}
+    pass_condition: status_running_via_clusterip_health_and_chat
+  - id: inference-service-stop
+    command: POST /api/v1/svc/inference-services/{id}/lifecycle action=stop
+    pass_condition: status_stopped
+  - id: inference-service-start
+    command: POST /api/v1/svc/inference-services/{id}/lifecycle action=start
+    pass_condition: same_service_id_running
+  - id: inference-service-delete
+    command: DELETE /api/v1/svc/inference-services/{id}
+    pass_condition: get_404_and_runtime_gone
+  - id: gpu-live-skipped-no-device-plugin
+    command: kubectl get nodes allocatable nvidia.com/gpu
+    pass_condition: skipped_no_device_plugin
+  - id: smoke-workload-untouched
+    command: kubectl get deploy/vllm-cpu -n ani-vllm-cpu-smoke
+    pass_condition: independent_smoke_still_ready
+
+evidence: development-records/live-evidence/inference-incluster-e2e-live-20260817.json
+
+evidence_policy:
+  forbidden_content:
+    - bearer tokens
+    - passwords
+    - raw server IPs
+    - full DSN or connection strings
+    - full internal endpoints beyond redacted service DNS
+
+readiness_levels:
+  contract:
+    meaning: In-cluster CPU product path manifests, runner, and fail-closed GPU skip are present.
+  live:
+    meaning: Approved cluster run created a CPU InferenceService through production ani-gateway to in-cluster inference-service; GPU/LWS remain skipped.

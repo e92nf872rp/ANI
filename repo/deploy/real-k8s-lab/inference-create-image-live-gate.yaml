@@ -1,0 +1,96 @@
+profile: INFERENCE-SERVICE-CREATE-IMAGE-LIVE-GATE-C30
+status: live
+description: >
+  Create InferenceService with request image_id/image_ref on the existing
+  production ani-gateway. Missing image returns 400 INVALID_ARGUMENT; unpinned
+  image_ref returns 422 IMAGE_UNAVAILABLE; digest-pinned image_ref is frozen
+  into the CPU vLLM runtime. inference-service must not keep engine default
+  image env. ANI_AUTH_MODE stays auth_service. This must not deploy a second
+  Gateway, must not delete the existing tenant namespace, and must not mark
+  GPU/LWS or full platform runtime ready.
+
+required_tools:
+  - kubectl
+  - docker
+
+required_endpoints:
+  - ani_console_nginx_api_proxy
+  - ani_gateway_models_api
+  - ani_gateway_inference_services_api
+  - inference_control_grpc
+  - model_service_grpc
+
+required_env:
+  - KUBECONFIG
+
+live_checks:
+  - id: tenant-local-pvc-ready
+    command: kubectl -n ani-tenant-{uuid} get pvc vllm-model
+    pass_condition: tenant_local_pvc_bound_and_seeded
+  - id: in-cluster-inference-service-running
+    command: kubectl -n ani-system rollout status deploy/inference-service
+    pass_condition: inference_service_pod_ready
+  - id: default-engine-image-env-removed
+    command: kubectl -n ani-system get deploy inference-service
+    pass_condition: no_inference_cpu_gpu_sglang_image_env
+  - id: production-ani-gateway-rolled
+    command: kubectl -n ani-system rollout status deploy/ani-gateway
+    pass_condition: production_gateway_image_is_c30_tag
+  - id: production-gateway-auth-mode-preserved
+    command: kubectl -n ani-system get deploy ani-gateway
+    pass_condition: ani_auth_mode_remains_auth_service
+  - id: console-nginx-inference-list
+    command: GET ${ANI_CONSOLE_URL}/api/v1/svc/inference-services
+    pass_condition: http_200_via_ani_console_nginx_with_tenant_bearer
+  - id: create-missing-image-rejected
+    command: POST ${ANI_CONSOLE_URL}/api/v1/svc/inference-services without image_id or image_ref
+    pass_condition: http_400_invalid_argument
+  - id: create-unpinned-image-rejected
+    command: POST ${ANI_CONSOLE_URL}/api/v1/svc/inference-services with tag-only image_ref
+    pass_condition: http_422_image_unavailable
+  - id: create-model
+    command: POST ${ANI_CONSOLE_URL}/api/v1/svc/models
+    pass_condition: http_201
+  - id: create-model-version-pvc
+    command: POST ${ANI_CONSOLE_URL}/api/v1/svc/models/{id}/versions storage_path=pvc://vllm-model#/models/qwen
+    pass_condition: http_201_storage_path_frozen
+  - id: product-inference-service-cpu-create
+    command: POST ${ANI_CONSOLE_URL}/api/v1/svc/inference-services with digest-pinned image_ref
+    pass_condition: http_202_image_ref_frozen
+  - id: kubectl-vllm-cpu-deployment
+    command: kubectl -n ani-tenant-{uuid} get deploy
+    pass_condition: cpu_vllm_deployment_uses_request_image_ref
+  - id: inference-service-running-health-smoke
+    command: GET /api/v1/svc/inference-services/{id}
+    pass_condition: status_running_via_clusterip_health_and_chat
+  - id: inference-service-stop
+    command: POST /api/v1/svc/inference-services/{id}/lifecycle action=stop
+    pass_condition: status_stopped
+  - id: inference-service-start
+    command: POST /api/v1/svc/inference-services/{id}/lifecycle action=start
+    pass_condition: same_service_id_running_with_frozen_image_ref
+  - id: inference-service-delete
+    command: DELETE /api/v1/svc/inference-services/{id}
+    pass_condition: get_404_and_runtime_gone
+  - id: existing-tenant-namespace-preserved
+    command: kubectl get ns ani-tenant-{uuid}
+    pass_condition: existing_tenant_namespace_and_model_pvc_still_present
+  - id: gpu-live-skipped-no-device-plugin
+    command: kubectl get nodes allocatable nvidia.com/gpu
+    pass_condition: skipped_no_device_plugin
+
+evidence: development-records/live-evidence/inference-create-image-live-20260818.json
+
+evidence_policy:
+  forbidden_content:
+    - bearer tokens
+    - passwords
+    - raw server IPs
+    - full DSN or connection strings
+    - full internal endpoints beyond redacted service DNS
+
+readiness_levels:
+  contract:
+    meaning: Create-image live runner, in-cluster rollout, and fail-closed GPU skip are present.
+  live:
+    meaning: Approved cluster run created a CPU InferenceService from request image_ref through production ani-gateway; default engine image env is gone; GPU/LWS remain skipped.

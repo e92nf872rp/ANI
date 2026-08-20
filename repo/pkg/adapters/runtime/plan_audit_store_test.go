@@ -34,13 +34,18 @@ type fakeMetadataTx struct {
 	queryRowSQL  string
 	queryRowArgs []any
 	row          fakeMetadataRow
+	zeroRows     bool
 }
 
 func (tx *fakeMetadataTx) Exec(_ context.Context, sql string, args ...any) (ports.CommandTag, error) {
 	tx.sql = sql
 	tx.args = args
 	tx.execs = append(tx.execs, sql)
-	return ports.CommandTag{RowsAffected: 1}, nil
+	affected := int64(1)
+	if tx.zeroRows {
+		affected = 0
+	}
+	return ports.CommandTag{RowsAffected: affected}, nil
 }
 
 func (tx *fakeMetadataTx) Query(_ context.Context, sql string, _ ...any) (ports.Rows, error) {

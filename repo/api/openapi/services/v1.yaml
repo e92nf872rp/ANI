@@ -195,7 +195,7 @@ components:
         spec_id:
           type: string
           minLength: 1
-          description: Core GPUSpec ID；P0 仅接受通过 live gate 的整卡 GPU 规格
+          description: Core GPUSpec ID；P0 接受通过 live gate 的整卡（`-full`）与 vGPU（`-Nx`）规格
         count_per_replica:
           type: integer
           minimum: 1

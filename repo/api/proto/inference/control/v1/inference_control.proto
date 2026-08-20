@@ -1,0 +1,158 @@
+syntax = "proto3";
+
+package inference.control.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/kubercloud/ani/pkg/generated/pb/inference/control/v1;inferencecontrolv1";
+
+// InferenceControl is the Gateway → inference-service internal API.
+// It projects the approved Services OpenAPI InferenceService surface.
+// It is not a tenant-facing product contract and must not revive
+// inference.v1.InferenceServiceRPC (GetEndpointURL / UpdateStatus / operator).
+service InferenceControl {
+  rpc ListInferenceServices(ListInferenceServicesRequest) returns (ListInferenceServicesResponse);
+  rpc CreateInferenceService(CreateInferenceServiceRequest) returns (InferenceService);
+  rpc GetInferenceService(GetInferenceServiceRequest) returns (InferenceService);
+  rpc ScaleInferenceService(ScaleInferenceServiceRequest) returns (InferenceOperation);
+  rpc DeleteInferenceService(DeleteInferenceServiceRequest) returns (InferenceOperation);
+  rpc ApplyInferenceServiceLifecycle(ApplyInferenceServiceLifecycleRequest) returns (InferenceOperation);
+  rpc GetInferenceOperation(GetInferenceOperationRequest) returns (InferenceOperation);
+  rpc ListInferenceServiceLogs(ListInferenceServiceLogsRequest) returns (ListInferenceServiceLogsResponse);
+}
+
+message ListInferenceServicesRequest {
+  string tenant_id = 1;
+}
+
+message ListInferenceServicesResponse {
+  repeated InferenceService items = 1;
+}
+
+message CreateInferenceServiceRequest {
+  string tenant_id = 1;
+  string idempotency_key = 2;
+  string name = 3;
+  string model = 4;
+  string model_version_id = 5;
+  string served_model_name = 6;
+  int32 replicas = 7;
+  InferenceServiceResources resources = 8;
+  string placement_mode = 9;
+  string gpu_type = 10;
+  int32 gpu_count_per_pod = 11;
+  string image_id = 12;
+  string image_ref = 13;
+  InferenceServiceEngine engine = 14;
+}
+
+message GetInferenceServiceRequest {
+  string tenant_id = 1;
+  string service_id = 2;
+}
+
+message ScaleInferenceServiceRequest {
+  string tenant_id = 1;
+  string service_id = 2;
+  string idempotency_key = 3;
+  int32 replicas = 4;
+}
+
+message DeleteInferenceServiceRequest {
+  string tenant_id = 1;
+  string service_id = 2;
+}
+
+message ApplyInferenceServiceLifecycleRequest {
+  string tenant_id = 1;
+  string service_id = 2;
+  string idempotency_key = 3;
+  string action = 4;
+}
+
+message GetInferenceOperationRequest {
+  string tenant_id = 1;
+  string operation_id = 2;
+}
+
+message ListInferenceServiceLogsRequest {
+  string tenant_id = 1;
+  string service_id = 2;
+  int32 limit = 3;
+  string cursor = 4;
+  string level = 5;
+}
+
+message ListInferenceServiceLogsResponse {
+  repeated InferenceServiceLogEntry items = 1;
+  string next_cursor = 2;
+}
+
+message InferenceServiceLogEntry {
+  google.protobuf.Timestamp timestamp = 1;
+  string level = 2;
+  string message = 3;
+  string container = 4;
+  string stream = 5;
+}
+
+message InferenceService {
+  string id = 1;
+  string name = 2;
+  string model = 3;
+  string model_version_id = 4;
+  string served_model_name = 5;
+  int32 replicas = 6;
+  int32 ready_replicas = 7;
+  InferenceServiceResources resources = 8;
+  string placement_mode = 9;
+  string gpu_type = 10;
+  int32 gpu_count_per_pod = 11;
+  int32 max_concurrency = 12;
+  string status = 13;
+  string status_reason = 14;
+  string status_message = 15;
+  int64 generation = 16;
+  int64 observed_generation = 17;
+  string current_operation_id = 18;
+  google.protobuf.Timestamp created_at = 19;
+  google.protobuf.Timestamp updated_at = 20;
+  string image_id = 21;
+  string image_ref = 22;
+  InferenceServiceEngine engine = 23;
+}
+
+message InferenceServiceEngine {
+  repeated InferenceServiceEngineEnvVar env = 1;
+  repeated string command = 2;
+}
+
+message InferenceServiceEngineEnvVar {
+  string name = 1;
+  string value = 2;
+}
+
+message InferenceServiceResources {
+  string cpu = 1;
+  string memory = 2;
+  InferenceServiceAccelerator accelerator = 3;
+}
+
+message InferenceServiceAccelerator {
+  string spec_id = 1;
+  int32 count_per_replica = 2;
+}
+
+message InferenceOperation {
+  string id = 1;
+  string task_type = 2;
+  string resource_type = 3;
+  string resource_id = 4;
+  string idempotency_key = 5;
+  string status = 6;
+  int32 attempt_count = 7;
+  int32 progress_pct = 8;
+  string error_message = 9;
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp completed_at = 11;
+}

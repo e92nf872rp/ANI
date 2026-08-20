@@ -1,0 +1,60 @@
+profile: GPU-PLUGIN-NODE-PARTITION-LIVE-GATE-C33
+status: live
+description: >
+  Keep NVIDIA GPU Operator device-plugin and volcano-device-plugin from
+  advertising the same node. Nodes labeled ani.kubercloud.io/gpu-mode=wholecard
+  run NVIDIA device-plugin and advertise nvidia.com/gpu. Nodes labeled
+  gpu-mode=vgpu run volcano-device-plugin, set
+  nvidia.com/gpu.deploy.device-plugin=false, and advertise volcano.sh/vgpu-*.
+  This must not mark GPU or full platform runtime ready.
+
+required_tools:
+  - kubectl
+
+required_endpoints:
+  - kubernetes_api
+
+required_env:
+  - KUBECONFIG
+
+live_checks:
+  - id: wholecard-nodes-labeled
+    command: kubectl get nodes -l ani.kubercloud.io/gpu-mode=wholecard
+    pass_condition: wholecard_nodes_exist
+  - id: vgpu-nodes-labeled
+    command: kubectl get nodes -l ani.kubercloud.io/gpu-mode=vgpu
+    pass_condition: vgpu_nodes_exist
+  - id: nvidia-device-plugin-only-on-wholecard
+    command: kubectl -n gpu-operator get po -l app=nvidia-device-plugin-daemonset
+    pass_condition: nvidia_device_plugin_pods_only_on_wholecard_nodes
+  - id: volcano-device-plugin-only-on-vgpu
+    command: kubectl -n kube-system get po -l app.kubernetes.io/name=volcano-vgpu-device-plugin
+    pass_condition: volcano_device_plugin_pods_only_on_vgpu_nodes
+  - id: wholecard-nvidia-gpu-allocatable
+    command: kubectl get nodes -l ani.kubercloud.io/gpu-mode=wholecard
+    pass_condition: wholecard_nodes_advertise_nvidia_com_gpu
+  - id: vgpu-nodes-without-nvidia-gpu
+    command: kubectl get nodes -l ani.kubercloud.io/gpu-mode=vgpu
+    pass_condition: vgpu_nodes_nvidia_com_gpu_capacity_zero
+  - id: vgpu-volcano-resources
+    command: kubectl get nodes -l ani.kubercloud.io/gpu-mode=vgpu
+    pass_condition: vgpu_nodes_advertise_volcano_sh_vgpu_number
+  - id: vgpu-nvidia-device-plugin-disabled
+    command: kubectl get nodes -l ani.kubercloud.io/gpu-mode=vgpu
+    pass_condition: nvidia.com/gpu.deploy.device-plugin=false
+
+evidence: development-records/live-evidence/gpu-plugin-node-partition-live-20260818.json
+
+evidence_policy:
+  forbidden_content:
+    - bearer tokens
+    - passwords
+    - raw server IPs
+    - full DSN or connection strings
+    - GPU UUID lists
+
+readiness_levels:
+  contract:
+    meaning: Node gpu-mode labels and exclusive plugin selectors are documented.
+  live:
+    meaning: Approved cluster run partitioned wholecard NVIDIA device-plugin from volcano vGPU device-plugin; GPU/runtime ready remain false.

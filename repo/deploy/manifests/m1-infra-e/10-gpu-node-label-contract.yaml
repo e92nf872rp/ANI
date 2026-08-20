@@ -12,9 +12,16 @@ data:
     ani.kubercloud.io/gpu-vendor=nvidia|huawei|hygon
     ani.kubercloud.io/gpu-model=<model>
   optional-labels: |
+    ani.kubercloud.io/gpu-mode=wholecard|vgpu
+    ani.kubercloud.io/gpu-spec=<wholecard-spec>
+    ani.kubercloud.io/gpu-sharing-spec=<vgpu-spec>
+    ani.kubercloud.io/gpu-sharing-policy=<vgpu-policy>
     ani.kubercloud.io/gpu-mig-capable=true|false
     ani.kubercloud.io/gpu-hami-enabled=true|false
     ani.kubercloud.io/gpu-pool=<pool-name>
   notes: |
     These labels are a scheduling contract. They do not install drivers.
     GPU Operator, HAMi, Volcano, and DCGM remain deploy-profile controlled components.
+    wholecard nodes advertise nvidia.com/gpu via NVIDIA GPU Operator device-plugin.
+    vgpu nodes advertise volcano.sh/vgpu-* via volcano-device-plugin and must set
+    nvidia.com/gpu.deploy.device-plugin=false so the two plugins never share a node.

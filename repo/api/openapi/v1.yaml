@@ -653,6 +653,27 @@ components:
           type: array
           description: 追加到 command 后的容器启动参数；必须通过对应 admission allowlist。
           items: { type: string }
+        env:
+          type: array
+          maxItems: 32
+          description: 可选容器环境变量；省略表示不追加调用方 env。不是 shell 赋值。平台仍可注入 runtime 保留变量。
+          items:
+            type: object
+            required: [name, value]
+            additionalProperties: false
+            description: 单个容器环境变量。
+            properties:
+              name:
+                type: string
+                minLength: 1
+                maxLength: 64
+                pattern: '^[A-Za-z_][A-Za-z0-9_]*$'
+                description: POSIX 环境变量名。
+              value:
+                type: string
+                minLength: 1
+                maxLength: 4096
+                description: 环境变量值。
         replicas:
           type: integer
           minimum: 1

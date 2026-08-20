@@ -12,21 +12,23 @@ import (
 )
 
 const (
-	kubernetesNVIDIAGPUResource       = "nvidia.com/gpu"
-	kubernetesNVIDIAVGPUResource      = "nvidia.com/vgpu"
-	kubernetesNVIDIAGPUProductLabel   = "nvidia.com/gpu.product"
-	kubernetesANIGPUModelLabel        = "ani.kubercloud.io/gpu-model"
-	kubernetesHostnameLabel           = "kubernetes.io/hostname"
-	kubernetesANIGPUPoolLabel         = "ani.kubercloud.io/gpu-pool"
-	kubernetesVolcanoSchedulerName    = "volcano"
-	kubernetesHAMISchedulerName       = "hami-scheduler"
-	kubernetesDefaultInferenceQueue   = "ani-inference"
-	kubernetesDefaultTrainingQueue    = "ani-training"
-	kubernetesGPUNodeSelectorLabel    = "ani.kubercloud.io/gpu-node"
-	kubernetesHAMIRegisterAnnotation  = "hami.io/node-nvidia-register"
-	kubernetesHAMIHandshakeAnnotation = "hami.io/node-handshake"
-	kubernetesHAMILocalModel          = "hami-core"
-	kubernetesHAMILocalRuntimeClass   = "hami-vgpu"
+	kubernetesNVIDIAGPUResource         = "nvidia.com/gpu"
+	kubernetesNVIDIAVGPUResource        = "nvidia.com/vgpu"
+	kubernetesVolcanoVGPUNumberResource = "volcano.sh/vgpu-number"
+	kubernetesVolcanoVGPUMemoryResource = "volcano.sh/vgpu-memory"
+	kubernetesNVIDIAGPUProductLabel     = "nvidia.com/gpu.product"
+	kubernetesANIGPUModelLabel          = "ani.kubercloud.io/gpu-model"
+	kubernetesHostnameLabel             = "kubernetes.io/hostname"
+	kubernetesANIGPUPoolLabel           = "ani.kubercloud.io/gpu-pool"
+	kubernetesVolcanoSchedulerName      = "volcano"
+	kubernetesHAMISchedulerName         = "hami-scheduler"
+	kubernetesDefaultInferenceQueue     = "ani-inference"
+	kubernetesDefaultTrainingQueue      = "ani-training"
+	kubernetesGPUNodeSelectorLabel      = "ani.kubercloud.io/gpu-node"
+	kubernetesHAMIRegisterAnnotation    = "hami.io/node-nvidia-register"
+	kubernetesHAMIHandshakeAnnotation   = "hami.io/node-handshake"
+	kubernetesHAMILocalModel            = "hami-core"
+	kubernetesHAMILocalRuntimeClass     = "hami-vgpu"
 )
 
 // KubernetesGPUInventory discovers GPU capacity from Kubernetes nodes and
@@ -433,6 +435,24 @@ func gpuNodeClassesFromKubernetesNodeList(body []byte) ([]ports.GPUNodeClass, er
 					Capabilities:       []string{"cuda", "compute", "vgpu"},
 				})
 			}
+			volcanoNumber := gpuResourceCount(item.Status.Capacity, item.Status.Allocatable, kubernetesVolcanoVGPUNumberResource)
+			volcanoMemory := gpuResourceCount(item.Status.Capacity, item.Status.Allocatable, kubernetesVolcanoVGPUMemoryResource)
+			memoryPerSlice := int64(0)
+			if volcanoNumber > 0 && volcanoMemory > 0 {
+				memoryPerSlice = int64(volcanoMemory / volcanoNumber)
+			}
+			for range volcanoNumber {
+				devices = append(devices, ports.GPUDeviceClass{
+					Vendor:             ports.GPUVendorNVIDIA,
+					Model:              model,
+					MemoryMiB:          memoryPerSlice,
+					ResourceName:       kubernetesVolcanoVGPUNumberResource,
+					VirtualizationMode: ports.GPUVirtualizationVGPU,
+					DriverVersion:      firstNonEmpty(item.Metadata.Labels["nvidia.com/cuda.driver.major"], "volcano-vgpu"),
+					RuntimeVersion:     item.Status.NodeInfo.KubeletVersion,
+					Capabilities:       []string{"cuda", "compute", "vgpu"},
+				})
+			}
 		}
 		nodes = append(nodes, ports.GPUNodeClass{
 			NodeName:      nodeName,
@@ -484,7 +504,8 @@ func parseHAMIAnnotation(annotations map[string]string) []hamiPhysicalDevice {
 // (whole-card or vGPU).
 func hasGPUResource(capacity, allocatable map[string]string) bool {
 	return gpuResourceCount(capacity, allocatable, kubernetesNVIDIAGPUResource) > 0 ||
-		gpuResourceCount(capacity, allocatable, kubernetesNVIDIAVGPUResource) > 0
+		gpuResourceCount(capacity, allocatable, kubernetesNVIDIAVGPUResource) > 0 ||
+		gpuResourceCount(capacity, allocatable, kubernetesVolcanoVGPUNumberResource) > 0
 }
 
 // gpuResourceCount reads an extended resource from capacity falling back to

@@ -1,8 +1,9 @@
 # INFERENCE-SERVICE-CREATE-IMAGE-CONTRACT-C27
 
-> 日期：2026-08-18  
-> 状态：Services 契约本地验证完成，待人工评审与独立契约 PR  
-> 前置：`INFERENCE-SERVICE-CONTRACT-B`  
+> 日期：2026-08-18
+> 状态：Services 契约本地验证完成，待人工评审与独立契约 PR
+> 前置：`INFERENCE-SERVICE-CONTRACT-B`、`INFERENCE-REMOVE-LAB-CATALOG-C26`
+
 > 范围：Services OpenAPI、专项语义门禁、Services SDK/API 文档/Console 类型生成物、设计文档；不含 Gateway handler、proto、inference-service 实现、live 或产品原型
 
 ## 目标

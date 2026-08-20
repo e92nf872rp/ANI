@@ -151,6 +151,19 @@ func main() {
 			"provider", strings.TrimSpace(os.Getenv("INSTANCE_OBSERVABILITY_PROVIDER")),
 		)
 	}
+	inferenceServiceClient, closeInferenceGRPC, err := newGatewayInferenceServiceClient(runtimeCtx, gatewayInferenceServiceRuntimeConfigFromEnv())
+	if err != nil {
+		logger.Error("failed to configure inference-service gRPC client", "err", err)
+		os.Exit(1)
+	}
+	if closeInferenceGRPC != nil {
+		defer closeInferenceGRPC()
+	}
+	if inferenceServiceClient != nil {
+		logger.Info("inference-service gRPC client configured",
+			"addr", strings.TrimSpace(os.Getenv("INFERENCE_SERVICE_GRPC_ADDR")),
+		)
+	}
 	kbServiceClient, closeKBGRPC, err := newGatewayKBServiceClient(runtimeCtx, gatewayKBServiceRuntimeConfigFromEnv())
 	if err != nil {
 		logger.Error("failed to configure kb-service gRPC client", "err", err)
@@ -164,6 +177,19 @@ func main() {
 			"addr", strings.TrimSpace(os.Getenv("KB_SERVICE_GRPC_ADDR")),
 		)
 	}
+	modelServiceClient, closeModelGRPC, err := newGatewayModelServiceClient(runtimeCtx, gatewayModelServiceRuntimeConfigFromEnv())
+	if err != nil {
+		logger.Error("failed to configure model-service gRPC client", "err", err)
+		os.Exit(1)
+	}
+	if closeModelGRPC != nil {
+		defer closeModelGRPC()
+	}
+	if modelServiceClient != nil {
+		logger.Info("model-service gRPC client configured",
+			"addr", strings.TrimSpace(os.Getenv("MODEL_SERVICE_GRPC_ADDR")),
+		)
+	}
 	middleware.StartAuditWorker()
 	middleware.Register(h, gatewayStore)
 	quotaAdminService, closeQuotaStore, err := newGatewayQuotaStore(runtimeCtx)
@@ -172,6 +198,18 @@ func main() {
 		os.Exit(1)
 	}
 	defer closeQuotaStore()
+	platformWorkloadRuntimeConfig := gatewayPlatformWorkloadRuntimeConfigFromEnv()
+	platformWorkloadService, closePlatformWorkload, err := newGatewayPlatformWorkloadService(runtimeCtx, platformWorkloadRuntimeConfig)
+	if err != nil {
+		logger.Error("failed to configure platform workload provider runtime", "err", err)
+		os.Exit(1)
+	}
+	defer closePlatformWorkload()
+	platformWorkloadProvider := strings.TrimSpace(platformWorkloadRuntimeConfig.ProviderMode)
+	if platformWorkloadProvider == "" {
+		platformWorkloadProvider = "local"
+	}
+	logger.Info("platform workload provider runtime configured", "provider", platformWorkloadProvider)
 	tenantService, closeTenantStore, err := newGatewayTenantStore(runtimeCtx)
 	if err != nil {
 		logger.Error("failed to configure tenant admin store", "err", err)
@@ -207,10 +245,13 @@ func main() {
 		KubernetesRESTClient:                  kubernetesRESTClient,
 		ObservabilityService:                  observabilityService,
 		EmailNotificationStore:                runtimeadapter.NewLocalEmailNotificationStore(),
+		InferenceServiceClient:                inferenceServiceClient,
+		ModelServiceClient:                    modelServiceClient,
 		KBServiceClient:                       kbServiceClient,
 		KBSSEConfig:                           newGatewaySSEConfig(gatewaySSERuntimeConfigFromEnv()),
 		AsyncTaskStore:                        instanceRuntime.AsyncTasks,
 		QuotaAdminService:                     quotaAdminService,
+		PlatformWorkloadService:               platformWorkloadService,
 		TenantService:                         tenantService,
 	})
 

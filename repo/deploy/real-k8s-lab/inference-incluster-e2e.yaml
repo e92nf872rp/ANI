@@ -1,0 +1,259 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ani-gateway-inference-platform-workload
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    app.kubernetes.io/name: ani-gateway
+    ani.dev/profile: inference-incluster-e2e
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list"]
+  - apiGroups: ["scheduling.volcano.sh"]
+    resources: ["podgroups"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+  - apiGroups: ["leaderworkerset.x-k8s.io"]
+    resources: ["leaderworkersets"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ani-gateway-inference-platform-workload
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    app.kubernetes.io/name: ani-gateway
+    ani.dev/profile: inference-incluster-e2e
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ani-gateway-inference-platform-workload
+subjects:
+  - kind: ServiceAccount
+    name: ani-gateway
+    namespace: ani-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference-service
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    app.kubernetes.io/name: inference-service
+    ani.dev/profile: inference-incluster-e2e
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: inference-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: ani-platform
+        app.kubernetes.io/name: inference-service
+        ani.dev/profile: inference-incluster-e2e
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: inference-service
+          image: docker.changqingyun.cn/ani/inference-service:create-image-c30-20260818
+          imagePullPolicy: Always
+          ports:
+            - name: grpc
+              containerPort: 9104
+            - name: health
+              containerPort: 9204
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ani-services-runtime
+                  key: database_url
+            - name: INFERENCE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ani-services-runtime
+                  key: database_url
+            - name: NATS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ani-services-runtime
+                  key: nats_url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ani-services-runtime
+                  key: redis_url
+            - name: GRPC_PORT
+              value: "9104"
+            - name: HEALTH_PORT
+              value: "9204"
+            - name: CORE_API_BASE_URL
+              value: http://ani-gateway.ani-system.svc.cluster.local:8080
+            - name: CORE_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: inference-c21-core-token
+                  key: token
+            - name: MODEL_SERVICE_GRPC_ADDR
+              value: model-service.ani-system.svc.cluster.local:9103
+            - name: AUTH_SERVICE_GRPC_ADDR
+              value: ani-auth-service.ani-system.svc.cluster.local:9101
+            - name: AUTH_SERVICE_MINT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: inference-mint
+                  key: credentials
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: model-service
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    app.kubernetes.io/name: model-service
+    ani.dev/profile: inference-incluster-e2e
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: model-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: ani-platform
+        app.kubernetes.io/name: model-service
+        ani.dev/profile: inference-incluster-e2e
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: model-service
+          image: docker.changqingyun.cn/ani/model-service:local-model-pvc-20260817
+          imagePullPolicy: Always
+          ports:
+            - name: grpc
+              containerPort: 9103
+            - name: health
+              containerPort: 9203
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ani-services-runtime
+                  key: database_url
+            - name: NATS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ani-services-runtime
+                  key: nats_url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ani-services-runtime
+                  key: redis_url
+            - name: GRPC_PORT
+              value: "9103"
+            - name: HEALTH_PORT
+              value: "9203"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: model-service
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    app.kubernetes.io/name: model-service
+    ani.dev/profile: inference-incluster-e2e
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: model-service
+  ports:
+    - name: grpc
+      port: 9103
+      targetPort: grpc
+    - name: health
+      port: 9203
+      targetPort: health
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inference-service
+  namespace: ani-system
+  labels:
+    app.kubernetes.io/part-of: ani-platform
+    app.kubernetes.io/name: inference-service
+    ani.dev/profile: inference-incluster-e2e
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: inference-service
+  ports:
+    - name: grpc
+      port: 9104
+      targetPort: grpc
+    - name: health
+      port: 9204
+      targetPort: health

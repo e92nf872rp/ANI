@@ -1,0 +1,81 @@
+profile: INFERENCE-SERVICE-LOCAL-MODEL-SOURCE-LIVE-GATE-C23
+status: live
+description: >
+  Console-shaped CPU InferenceService path using a real model_version_id whose
+  storage_path is a tenant-local PVC directory (pvc://<claim>#/path). Requests
+  enter the existing ani-console nginx /api/ proxy, reach production
+  ani-gateway, and use a tenant Bearer. No X-Dev-Tenant-ID, no second Gateway,
+  and the existing tenant namespace and vllm-model PVC are not deleted.
+
+required_tools:
+  - kubectl
+
+required_endpoints:
+  - ani_console_nginx_api_proxy
+  - ani_gateway_models_api
+  - ani_gateway_inference_services_api
+  - inference_control_grpc
+  - model_service_grpc
+
+required_env:
+  - KUBECONFIG
+
+live_checks:
+  - id: tenant-local-pvc-ready
+    command: kubectl -n ani-tenant-{uuid} get pvc vllm-model
+    pass_condition: tenant_local_pvc_bound_and_seeded
+  - id: in-cluster-inference-service-running
+    command: kubectl -n ani-system rollout status deploy/inference-service
+    pass_condition: inference_service_pod_ready
+  - id: production-gateway-auth-mode-preserved
+    command: kubectl -n ani-system get deploy ani-gateway
+    pass_condition: ani_auth_mode_remains_auth_service
+  - id: console-nginx-inference-list
+    command: GET ${ANI_CONSOLE_URL}/api/v1/svc/inference-services
+    pass_condition: http_200_via_ani_console_nginx_with_tenant_bearer
+  - id: create-model
+    command: POST ${ANI_CONSOLE_URL}/api/v1/svc/models
+    pass_condition: http_201
+  - id: create-model-version-pvc
+    command: POST ${ANI_CONSOLE_URL}/api/v1/svc/models/{id}/versions storage_path=pvc://vllm-model#/models/qwen
+    pass_condition: http_201_storage_path_frozen
+  - id: product-inference-service-cpu-create
+    command: POST ${ANI_CONSOLE_URL}/api/v1/svc/inference-services with real model_version_id
+    pass_condition: http_202
+  - id: kubectl-vllm-cpu-deployment
+    command: kubectl -n ani-tenant-{uuid} get deploy
+    pass_condition: cpu_vllm_deployment_without_gpu_or_instance_label
+  - id: inference-service-running-health-smoke
+    command: GET /api/v1/svc/inference-services/{id}
+    pass_condition: status_running_via_clusterip_health_and_chat
+  - id: inference-service-stop
+    command: POST /api/v1/svc/inference-services/{id}/lifecycle action=stop
+    pass_condition: status_stopped
+  - id: inference-service-start
+    command: POST /api/v1/svc/inference-services/{id}/lifecycle action=start
+    pass_condition: same_service_id_running
+  - id: inference-service-delete
+    command: DELETE /api/v1/svc/inference-services/{id}
+    pass_condition: get_404_and_runtime_gone
+  - id: existing-tenant-namespace-preserved
+    command: kubectl get ns ani-tenant-{uuid}
+    pass_condition: existing_tenant_namespace_and_model_pvc_still_present
+  - id: gpu-live-skipped-no-device-plugin
+    command: kubectl get nodes allocatable nvidia.com/gpu
+    pass_condition: skipped_no_device_plugin
+
+evidence: development-records/live-evidence/inference-local-model-source-live-20260817.json
+
+evidence_policy:
+  forbidden_content:
+    - bearer tokens
+    - passwords
+    - raw server IPs
+    - full DSN or connection strings
+    - full internal endpoints beyond redacted service DNS
+
+readiness_levels:
+  contract:
+    meaning: Local PVC model source runner, Console nginx /api/ path, and fail-closed GPU skip are present.
+  live:
+    meaning: Approved cluster run created a model version from a tenant-local PVC and a CPU InferenceService through ani-console nginx; GPU/LWS remain skipped.

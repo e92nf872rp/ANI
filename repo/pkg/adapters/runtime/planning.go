@@ -192,7 +192,7 @@ func (r *PlanningRuntime) plan(ctx context.Context, spec ports.WorkloadSpec) (po
 		}
 	}
 
-	if requiresGPU(spec.Kind) {
+	if requiresGPU(spec.Kind, spec.Resources) {
 		if spec.Resources.GPU.RequiredCount <= 0 {
 			return ports.WorkloadSpec{}, fmt.Errorf("%w: gpu requiredCount must be positive", ports.ErrInvalid)
 		}
@@ -237,8 +237,11 @@ func supportedKind(kind ports.WorkloadKind) bool {
 	}
 }
 
-func requiresGPU(kind ports.WorkloadKind) bool {
-	return kind == ports.WorkloadKindGPUContainer || kind == ports.WorkloadKindInference
+func requiresGPU(kind ports.WorkloadKind, resources ports.WorkloadResourceRequest) bool {
+	if resources.GPU.RequiredCount > 0 {
+		return true
+	}
+	return kind == ports.WorkloadKindGPUContainer
 }
 
 func normalizeNetworkAttachments(kind ports.WorkloadKind, attachments []ports.WorkloadNetworkAttachment) []ports.WorkloadNetworkAttachment {

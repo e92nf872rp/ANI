@@ -197,6 +197,52 @@ func (s stubQueueStore) Delete(context.Context, string, string) error {
 	return ports.ErrQueueStoreUnavailable
 }
 
+func TestKubernetesGPUInventoryListsVolcanoVGPUNodes(t *testing.T) {
+	body := `{
+  "kind": "NodeList",
+  "items": [{
+    "metadata": {
+      "name": "ani-vgpu-1",
+      "labels": {
+        "kubernetes.io/hostname": "ani-vgpu-1",
+        "nvidia.com/gpu.product": "NVIDIA-GeForce-RTX-4090"
+      }
+    },
+    "status": {
+      "capacity": {"volcano.sh/vgpu-number": "4", "volcano.sh/vgpu-memory": "24576"},
+      "allocatable": {"volcano.sh/vgpu-number": "4", "volcano.sh/vgpu-memory": "24576"},
+      "nodeInfo": {"kubeletVersion": "v1.36.1"},
+      "conditions": [{"type": "Ready", "status": "True", "reason": "KubeletReady"}]
+    }
+  }, {
+    "metadata": {"name": "cpu-only", "labels": {"kubernetes.io/hostname": "cpu-only"}},
+    "status": {
+      "capacity": {"cpu": "32"},
+      "allocatable": {"cpu": "32"},
+      "conditions": [{"type": "Ready", "status": "True"}]
+    }
+  }]
+}`
+	inventory := newTestGPUInventory(t, body)
+	nodes, err := inventory.ListNodeClasses(context.Background(), ports.GPUDiscoveryFilter{})
+	if err != nil {
+		t.Fatalf("ListNodeClasses() error = %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].NodeName != "ani-vgpu-1" {
+		t.Fatalf("nodes = %+v, want volcano vGPU node", nodes)
+	}
+	if nodes[0].Allocatable["volcano.sh/vgpu-number"] != "4" {
+		t.Fatalf("allocatable = %+v", nodes[0].Allocatable)
+	}
+	if len(nodes[0].Devices) != 4 {
+		t.Fatalf("devices = %+v, want one device per vGPU slice", nodes[0].Devices)
+	}
+	device := nodes[0].Devices[0]
+	if device.ResourceName != "volcano.sh/vgpu-number" || device.VirtualizationMode != ports.GPUVirtualizationVGPU || device.MemoryMiB != 6144 {
+		t.Fatalf("device = %+v", device)
+	}
+}
+
 func TestPlanSchedulingWholeCardSelectsNVIDIAGPUResource(t *testing.T) {
 	inventory := newTestGPUInventory(t, gpuNodeListJSON(t, "2", "0"))
 	decision, err := inventory.PlanScheduling(context.Background(), ports.GPUSchedulingRequest{

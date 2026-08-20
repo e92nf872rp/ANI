@@ -43,11 +43,13 @@ type JWTValidator struct {
 }
 
 type Claims struct {
-	TenantID uuid.UUID
-	UserID   uuid.UUID
-	Roles    []string
-	JTI      string
-	Scope    string
+	TenantID      uuid.UUID
+	UserID        uuid.UUID
+	Roles         []string
+	JTI           string
+	Scope         string
+	Audience      string
+	PrincipalKind string
 }
 
 type jwtHeader struct {
@@ -57,16 +59,18 @@ type jwtHeader struct {
 }
 
 type jwtPayload struct {
-	Subject   string   `json:"sub"`
-	Issuer    string   `json:"iss"`
-	Expires   int64    `json:"exp"`
-	NotBefore int64    `json:"nbf"`
-	IssuedAt  int64    `json:"iat"`
-	JTI       string   `json:"jti"`
-	TenantID  string   `json:"tid"`
-	UserID    string   `json:"uid"`
-	Roles     []string `json:"roles"`
-	Scope     string   `json:"scope,omitempty"`
+	Subject       string   `json:"sub"`
+	Issuer        string   `json:"iss"`
+	Audience      string   `json:"aud,omitempty"`
+	Expires       int64    `json:"exp"`
+	NotBefore     int64    `json:"nbf"`
+	IssuedAt      int64    `json:"iat"`
+	JTI           string   `json:"jti"`
+	TenantID      string   `json:"tid"`
+	UserID        string   `json:"uid"`
+	Roles         []string `json:"roles"`
+	Scope         string   `json:"scope,omitempty"`
+	PrincipalKind string   `json:"principal_kind,omitempty"`
 }
 
 func NewJWTValidator(cfg JWTConfig, blocklist tokenBlocklist) (*JWTValidator, error) {
@@ -125,6 +129,9 @@ func (v *JWTValidator) Validate(ctx context.Context, token string) (*Claims, err
 		return nil, err
 	}
 
+	if err := validateServiceClaims(payload); err != nil {
+		return nil, err
+	}
 	tenantID, err := uuid.Parse(payload.TenantID)
 	if err != nil || tenantID == uuid.Nil {
 		// Platform tokens carry no tenant_id (scope=platform). Tenant tokens must have a valid tenant_id.
@@ -135,15 +142,50 @@ func (v *JWTValidator) Validate(ctx context.Context, token string) (*Claims, err
 	}
 	userID, err := uuid.Parse(payload.UserID)
 	if err != nil || userID == uuid.Nil {
-		return nil, errInvalidJWT
+		if !isServicePrincipal(payload.PrincipalKind) {
+			return nil, errInvalidJWT
+		}
+		userID = serviceActorUserID
 	}
 	return &Claims{
-		TenantID: tenantID,
-		UserID:   userID,
-		Roles:    payload.Roles,
-		JTI:      payload.JTI,
-		Scope:    payload.Scope,
+		TenantID:      tenantID,
+		UserID:        userID,
+		Roles:         payload.Roles,
+		JTI:           payload.JTI,
+		Scope:         payload.Scope,
+		Audience:      payload.Audience,
+		PrincipalKind: payload.PrincipalKind,
 	}, nil
+}
+
+func validateServiceClaims(payload jwtPayload) error {
+	if !isServicePrincipal(payload.PrincipalKind) {
+		return nil
+	}
+	if payload.Audience != serviceAudience {
+		return errInvalidJWT
+	}
+	if !isPlatformWorkloadScope(payload.Scope) {
+		return errInvalidJWT
+	}
+	tenantID, err := uuid.Parse(payload.TenantID)
+	if err != nil || tenantID == uuid.Nil {
+		return errInvalidJWT
+	}
+	return nil
+}
+
+func isServicePrincipal(kind string) bool {
+	return strings.TrimSpace(kind) == "service"
+}
+
+func isPlatformWorkloadScope(scope string) bool {
+	switch strings.TrimSpace(scope) {
+	case "scope:platform-workloads:read", "scope:platform-workloads:write":
+		return true
+	default:
+		return false
+	}
 }
 
 func (v *JWTValidator) validatePayload(ctx context.Context, payload jwtPayload) error {
@@ -194,6 +236,14 @@ func decodeSegment(segment string, out any) error {
 	}
 	return json.Unmarshal(data, out)
 }
+
+const (
+	serviceAudience        = "ani-core"
+	defaultServiceTokenTTL = 5 * time.Minute
+	maxServiceTokenTTL     = time.Hour
+)
+
+var serviceActorUserID = uuid.MustParse("00000000-0000-0000-0000-0000000000aa")
 
 var (
 	errJWTNotConfigured = errors.New("jwt validator is not configured")

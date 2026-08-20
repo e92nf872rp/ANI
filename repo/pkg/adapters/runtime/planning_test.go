@@ -146,6 +146,23 @@ func TestPlanningRuntimePlansGPUContainerWithInventory(t *testing.T) {
 	}
 }
 
+func TestPlanningRuntimeAllowsInferenceWithoutGPU(t *testing.T) {
+	runtime := NewPlanningRuntime()
+
+	ref, err := runtime.Create(context.Background(), ports.WorkloadSpec{
+		TenantID: "tenant-a",
+		Name:     "inference-cpu",
+		Kind:     ports.WorkloadKindInference,
+		Image:    "harbor/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if ref.InstanceID == "" {
+		t.Fatal("expected inference workload id")
+	}
+}
+
 func TestPlanningRuntimeRejectsGPUContainerWithoutInventory(t *testing.T) {
 	runtime := NewPlanningRuntime()
 

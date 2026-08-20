@@ -3841,6 +3841,13 @@ export interface components {
             command: string[];
             /** @description 追加到 command 后的容器启动参数；必须通过对应 admission allowlist。 */
             args?: string[];
+            /** @description 可选容器环境变量；省略表示不追加调用方 env。不是 shell 赋值。平台仍可注入 runtime 保留变量。 */
+            env?: {
+                /** @description POSIX 环境变量名。 */
+                name: string;
+                /** @description 环境变量值。 */
+                value: string;
+            }[];
             /** @description single_node 表示 Pod 副本；leader_worker 表示 LWS group，P0 只接受 1。 */
             replicas: number;
             /** @description single_node 模式下每个副本使用的计算资源；leader_worker 的实际资源由 topology roles 定义。 */

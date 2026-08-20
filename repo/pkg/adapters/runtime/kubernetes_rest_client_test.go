@@ -382,6 +382,79 @@ func TestKubernetesRESTClientApplyManifestsSupportsVolumeSnapshot(t *testing.T) 
 	}
 }
 
+func TestKubernetesRESTClientApplyManifestsDeletesPartialApply(t *testing.T) {
+	var methods []string
+	var paths []string
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		methods = append(methods, r.Method)
+		paths = append(paths, r.URL.Path)
+		switch {
+		case strings.Contains(r.URL.Path, "/secrets/sec-keep"):
+			return jsonResponse(http.StatusOK, `{"kind":"Secret"}`), nil
+		case strings.Contains(r.URL.Path, "/services/svc-fail"):
+			return jsonResponse(http.StatusConflict, `{"kind":"Status","reason":"AlreadyExists"}`), nil
+		case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/namespaces/ani-tenant-tenant-a"):
+			return jsonResponse(http.StatusOK, `{"kind":"Namespace"}`), nil
+		default:
+			return jsonResponse(http.StatusInternalServerError, `{"kind":"Status","reason":"Unexpected"}`), nil
+		}
+	})
+
+	client := newTestKubernetesRESTClient(t, transport)
+	_, err := client.ApplyManifests(context.Background(), []ports.WorkloadManifest{
+		{
+			Provider: "kubernetes",
+			Kind:     "Namespace",
+			Name:     "ani-tenant-tenant-a",
+			Content: `{
+  "apiVersion": "v1",
+  "kind": "Namespace",
+  "metadata": {"name": "ani-tenant-tenant-a"}
+}`,
+		},
+		{
+			Provider: "kubernetes",
+			Kind:     "Secret",
+			Name:     "sec-keep",
+			Content: `{
+  "apiVersion": "v1",
+  "kind": "Secret",
+  "metadata": {"name": "sec-keep", "namespace": "ani-tenant-tenant-a"}
+}`,
+		},
+		{
+			Provider: "kubernetes",
+			Kind:     "Service",
+			Name:     "svc-fail",
+			Content: `{
+  "apiVersion": "v1",
+  "kind": "Service",
+  "metadata": {"name": "svc-fail", "namespace": "ani-tenant-tenant-a"},
+  "spec": {"type": "ClusterIP", "ports": [{"port": 80}]}
+}`,
+		},
+	})
+	if err == nil {
+		t.Fatal("ApplyManifests() error = nil, want partial apply failure")
+	}
+	deletedSecret := false
+	deletedNamespace := false
+	for i, method := range methods {
+		if method == http.MethodDelete && strings.Contains(paths[i], "/secrets/sec-keep") {
+			deletedSecret = true
+		}
+		if method == http.MethodDelete && strings.HasSuffix(paths[i], "/namespaces/ani-tenant-tenant-a") && !strings.Contains(paths[i], "/secrets/") && !strings.Contains(paths[i], "/services/") {
+			deletedNamespace = true
+		}
+	}
+	if !deletedSecret {
+		t.Fatalf("methods=%v paths=%v, want DELETE of applied Secret", methods, paths)
+	}
+	if deletedNamespace {
+		t.Fatalf("compensated Namespace delete: paths=%v", paths)
+	}
+}
+
 func TestKubernetesRESTClientSupportsClusterAPIMachineDeployment(t *testing.T) {
 	var gotPath string
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {

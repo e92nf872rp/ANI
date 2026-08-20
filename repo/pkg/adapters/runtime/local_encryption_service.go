@@ -570,7 +570,7 @@ func contentChunkNonce(base []byte, chunkIndex int) []byte {
 }
 
 func contentAAD(tenantID string, keyID string, objectURI string, sealedObjectURI string, chunkIndex int) []byte {
-	return []byte(fmt.Sprintf("%s\n%s\n%s\n%s\n%d", tenantID, keyID, objectURI, sealedObjectURI, chunkIndex))
+	return fmt.Appendf(nil, "%s\n%s\n%s\n%s\n%d", tenantID, keyID, objectURI, sealedObjectURI, chunkIndex)
 }
 
 func writeSealedContentFrame(w io.Writer, hash io.Writer, frame []byte) error {

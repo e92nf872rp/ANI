@@ -395,7 +395,7 @@ func containerResources(spec ports.WorkloadSpec) map[string]any {
 		requests["memory"] = spec.Resources.Memory
 		limits["memory"] = spec.Resources.Memory
 	}
-	if requiresGPU(spec.Kind) {
+	if requiresGPU(spec.Kind, spec.Resources) {
 		resourceName := firstNonEmpty(spec.Annotations["ani.kubercloud.io/gpu-resource-name"], "nvidia.com/gpu")
 		quantity := firstNonEmpty(spec.Annotations["ani.kubercloud.io/gpu-resource-quantity"], strconv.Itoa(spec.Resources.GPU.RequiredCount))
 		limits[resourceName] = quantity

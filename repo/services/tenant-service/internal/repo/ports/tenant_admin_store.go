@@ -57,7 +57,6 @@ type TenantRef struct {
 	ID          uuid.UUID
 	Name        string
 	DisplayName string
-	MFARequired bool
 }
 
 // AdminWithTenant 是跨租户列表项 / 详情视图。
