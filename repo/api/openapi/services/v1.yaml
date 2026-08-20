@@ -1052,12 +1052,11 @@ components:
 
     TenantRef:
       type: object
-      required: [id, name, display_name, mfa_required]
+      required: [id, name, display_name]
       properties:
         id:           { type: string, format: uuid }
         name:         { type: string }
         display_name: { type: string }
-        mfa_required: { type: boolean }
 
     AdminWithTenant:
       type: object

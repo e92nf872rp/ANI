@@ -1048,7 +1048,6 @@ type TenantAdminTenantRef struct {
 	Id          string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name        string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	DisplayName string `protobuf:"bytes,3,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
-	MfaRequired bool   `protobuf:"varint,4,opt,name=mfa_required,json=mfaRequired,proto3" json:"mfa_required,omitempty"`
 }
 
 func (x *TenantAdminTenantRef) Reset() {
@@ -1102,13 +1101,6 @@ func (x *TenantAdminTenantRef) GetDisplayName() string {
 		return x.DisplayName
 	}
 	return ""
-}
-
-func (x *TenantAdminTenantRef) GetMfaRequired() bool {
-	if x != nil {
-		return x.MfaRequired
-	}
-	return false
 }
 
 type AdminWithTenant struct {

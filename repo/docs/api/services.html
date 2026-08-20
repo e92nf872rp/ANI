@@ -1,1040 +1,931 @@
 <!doctype html>
 <html lang="en">
-
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ANI Services API</title>
-  <style>
-    :root {
-      color-scheme: light;
-      --ink: #17202a;
-      --muted: #667085;
-      --line: #d9dee8;
-      --bg: #f7f9fc;
-      --panel: #ffffff;
-      --blue: #1b5faa;
-      --green: #167c58;
-      --orange: #9a5b00;
-      --red: #b42318;
-    }
-
-    * {
-      box-sizing: border-box;
-    }
-
-    body {
-      margin: 0;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      color: var(--ink);
-      background: var(--bg);
-    }
-
-    main {
-      width: min(1180px, calc(100vw - 32px));
-      margin: 0 auto;
-      padding: 32px 0 56px;
-    }
-
-    .hero {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 24px;
-    }
-
-    .eyebrow {
-      margin: 0 0 8px;
-      color: var(--blue);
-      font-size: 13px;
-      font-weight: 700;
-      text-transform: uppercase;
-    }
-
-    h1 {
-      margin: 0 0 12px;
-      font-size: 32px;
-      line-height: 1.15;
-    }
-
-    h2 {
-      margin: 28px 0 12px;
-      font-size: 20px;
-    }
-
-    p {
-      color: var(--muted);
-      line-height: 1.6;
-    }
-
-    code {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 13px;
-    }
-
-    .facts {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-      gap: 12px;
-      margin: 22px 0 0;
-    }
-
-    .facts div {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 12px;
-      background: #fbfcff;
-    }
-
-    dt {
-      color: var(--muted);
-      font-size: 12px;
-    }
-
-    dd {
-      margin: 4px 0 0;
-      font-weight: 700;
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      overflow: hidden;
-    }
-
-    th,
-    td {
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--line);
-      text-align: left;
-      vertical-align: top;
-      font-size: 14px;
-    }
-
-    th {
-      color: var(--muted);
-      background: #eef3f8;
-      font-size: 12px;
-      text-transform: uppercase;
-    }
-
-    tr:last-child td {
-      border-bottom: 0;
-    }
-
-    .method {
-      display: inline-block;
-      min-width: 58px;
-      border-radius: 6px;
-      padding: 4px 8px;
-      color: #fff;
-      text-align: center;
-      font-size: 12px;
-      font-weight: 800;
-    }
-
-    .method-get {
-      background: var(--blue);
-    }
-
-    .method-post {
-      background: var(--green);
-    }
-
-    .method-put,
-    .method-patch {
-      background: var(--orange);
-    }
-
-    .method-delete {
-      background: var(--red);
-    }
-
-    .schema-list {
-      columns: 2;
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 18px 28px;
-    }
-
-    .schema-list li {
-      margin: 6px 0;
-    }
-
-    .cards {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 16px;
-      margin-top: 20px;
-    }
-
-    .doc-card {
-      display: block;
-      min-height: 150px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 18px;
-      background: var(--panel);
-      color: inherit;
-      text-decoration: none;
-    }
-
-    .doc-card span {
-      color: var(--blue);
-      font-size: 13px;
-      font-weight: 800;
-    }
-
-    .doc-card strong {
-      display: block;
-      margin: 10px 0;
-      font-size: 21px;
-    }
-
-    .doc-card small {
-      color: var(--muted);
-      line-height: 1.5;
-    }
-
-    @media (max-width: 760px) {
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ANI Services API</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #17202a;
+        --muted: #667085;
+        --line: #d9dee8;
+        --bg: #f7f9fc;
+        --panel: #ffffff;
+        --blue: #1b5faa;
+        --green: #167c58;
+        --orange: #9a5b00;
+        --red: #b42318;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: var(--ink);
+        background: var(--bg);
+      }
       main {
-        width: min(100vw - 20px, 1180px);
-        padding-top: 18px;
+        width: min(1180px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 32px 0 56px;
       }
-
       .hero {
-        padding: 18px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 24px;
       }
-
-      h1 {
-        font-size: 26px;
+      .eyebrow {
+        margin: 0 0 8px;
+        color: var(--blue);
+        font-size: 13px;
+        font-weight: 700;
+        text-transform: uppercase;
       }
-
+      h1 { margin: 0 0 12px; font-size: 32px; line-height: 1.15; }
+      h2 { margin: 28px 0 12px; font-size: 20px; }
+      p { color: var(--muted); line-height: 1.6; }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 13px;
+      }
+      .facts {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+        gap: 12px;
+        margin: 22px 0 0;
+      }
+      .facts div {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+        background: #fbfcff;
+      }
+      dt { color: var(--muted); font-size: 12px; }
+      dd { margin: 4px 0 0; font-weight: 700; }
       table {
-        display: block;
-        overflow-x: auto;
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
       }
-
+      th, td {
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+        font-size: 14px;
+      }
+      th { color: var(--muted); background: #eef3f8; font-size: 12px; text-transform: uppercase; }
+      tr:last-child td { border-bottom: 0; }
+      .method {
+        display: inline-block;
+        min-width: 58px;
+        border-radius: 6px;
+        padding: 4px 8px;
+        color: #fff;
+        text-align: center;
+        font-size: 12px;
+        font-weight: 800;
+      }
+      .method-get { background: var(--blue); }
+      .method-post { background: var(--green); }
+      .method-put, .method-patch { background: var(--orange); }
+      .method-delete { background: var(--red); }
       .schema-list {
-        columns: 1;
+        columns: 2;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px 28px;
       }
-    }
-  </style>
-</head>
+      .schema-list li { margin: 6px 0; }
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 16px;
+        margin-top: 20px;
+      }
+      .doc-card {
+        display: block;
+        min-height: 150px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px;
+        background: var(--panel);
+        color: inherit;
+        text-decoration: none;
+      }
+      .doc-card span { color: var(--blue); font-size: 13px; font-weight: 800; }
+      .doc-card strong { display: block; margin: 10px 0; font-size: 21px; }
+      .doc-card small { color: var(--muted); line-height: 1.5; }
+      @media (max-width: 760px) {
+        main { width: min(100vw - 20px, 1180px); padding-top: 18px; }
+        .hero { padding: 18px; }
+        h1 { font-size: 26px; }
+        table { display: block; overflow-x: auto; }
+        .schema-list { columns: 1; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
 
-<body>
-  <main>
+      <section class="hero">
+        <p class="eyebrow">Generated from api/openapi/services/v1.yaml</p>
+        <h1>KuberCloud ANI Services API</h1>
+        <p>ANI Services 层 REST API 契约。由 ANI Services 团队维护。 models、inference-services、knowledge-bases 等业务资源只在本文件维护； ANI Core API 不承载这些业务路径。</p>
+        <dl class="facts">
+          <div><dt>Version</dt><dd>1.0.0</dd></div>
+          <div><dt>Server</dt><dd><code>https://{host}/api/v1/svc</code></dd></div>
+          <div><dt>Operations</dt><dd>95</dd></div>
+          <div><dt>Schemas</dt><dd>99</dd></div>
+        </dl>
+      </section>
 
-    <section class="hero">
-      <p class="eyebrow">Generated from api/openapi/services/v1.yaml</p>
-      <h1>KuberCloud ANI Services API</h1>
-      <p>ANI Services 层 REST API 契约。由 ANI Services 团队维护。 models、inference-services、knowledge-bases 等业务资源只在本文件维护； ANI
-        Core API 不承载这些业务路径。</p>
-      <dl class="facts">
-        <div>
-          <dt>Version</dt>
-          <dd>1.0.0</dd>
-        </div>
-        <div>
-          <dt>Server</dt>
-          <dd><code>https://{host}/api/v1/svc</code></dd>
-        </div>
-        <div>
-          <dt>Operations</dt>
-          <dd>95</dd>
-        </div>
-        <div>
-          <dt>Schemas</dt>
-          <dd>99</dd>
-        </div>
-      </dl>
-    </section>
+      <section>
+        <h2>Operations</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Method</th>
+              <th>Path</th>
+              <th>Operation</th>
+              <th>Summary</th>
+              <th>RBAC Scope</th>
+              <th>Responses</th>
+            </tr>
+          </thead>
+          <tbody>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/gpu-containers</code></td>
+          <td><code>listGpuContainers</code></td>
+          <td>GPU容器列表（已废弃，请使用 /api/v1/instances?kind=gpu_container）</td>
+          <td><code></code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/gpu-containers</code></td>
+          <td><code>createGpuContainer</code></td>
+          <td>创建GPU容器（已废弃，请使用 POST /api/v1/instances）</td>
+          <td><code></code></td>
+          <td>202, 400, 401, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/gpu-containers/available-gpus</code></td>
+          <td><code>listAvailableGpus</code></td>
+          <td>查询可用GPU资源（已废弃，请使用 GET /api/v1/gpu-inventory）</td>
+          <td><code></code></td>
+          <td>200, 401</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/gpu-containers/{container_id}</code></td>
+          <td><code>deleteGpuContainer</code></td>
+          <td>删除GPU容器（已废弃）</td>
+          <td><code></code></td>
+          <td>202, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/gpu-containers/{container_id}</code></td>
+          <td><code>getGpuContainer</code></td>
+          <td>获取GPU容器详情（已废弃）</td>
+          <td><code></code></td>
+          <td>200, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-patch">PATCH</span></td>
+          <td><code>/gpu-containers/{container_id}</code></td>
+          <td><code>patchGpuContainer</code></td>
+          <td>更新GPU容器配置（已废弃）</td>
+          <td><code></code></td>
+          <td>200, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/gpu-containers/{container_id}/metrics</code></td>
+          <td><code>getGpuContainerMetrics</code></td>
+          <td>获取GPU容器监控指标（已废弃）</td>
+          <td><code></code></td>
+          <td>200, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/gpu-containers/{container_id}/rebuild</code></td>
+          <td><code>rebuildGpuContainer</code></td>
+          <td>重建GPU容器（已废弃）</td>
+          <td><code></code></td>
+          <td>202, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/gpu-containers/{container_id}/rollback</code></td>
+          <td><code>rollbackGpuContainer</code></td>
+          <td>回滚GPU容器到指定版本（已废弃）</td>
+          <td><code></code></td>
+          <td>202, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/gpu-containers/{container_id}/versions</code></td>
+          <td><code>listGpuContainerVersions</code></td>
+          <td>GPU容器版本历史（已废弃）</td>
+          <td><code></code></td>
+          <td>200, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/inference-operations/{operation_id}</code></td>
+          <td><code>getInferenceOperation</code></td>
+          <td>查询推理服务异步操作</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/inference-services</code></td>
+          <td><code>listInferenceServices</code></td>
+          <td>获取推理服务列表</td>
+          <td><code></code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/inference-services</code></td>
+          <td><code>createInferenceService</code></td>
+          <td>部署推理服务</td>
+          <td><code></code></td>
+          <td>202, 400, 401, 403, 409, 422, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/inference-services/{service_id}</code></td>
+          <td><code>deleteInferenceService</code></td>
+          <td>停止并删除推理服务</td>
+          <td><code></code></td>
+          <td>202, 401, 403, 404, 409, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/inference-services/{service_id}</code></td>
+          <td><code>getInferenceService</code></td>
+          <td>获取推理服务详情</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-patch">PATCH</span></td>
+          <td><code>/inference-services/{service_id}</code></td>
+          <td><code>updateInferenceService</code></td>
+          <td>修改推理服务副本数</td>
+          <td><code></code></td>
+          <td>202, 400, 401, 403, 404, 409, 422, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/inference-services/{service_id}/lifecycle</code></td>
+          <td><code>applyInferenceServiceLifecycle</code></td>
+          <td>执行推理服务生命周期动作</td>
+          <td><code></code></td>
+          <td>202, 400, 401, 403, 404, 409, 422, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/inference-services/{service_id}/logs</code></td>
+          <td><code>getInferenceServiceLogs</code></td>
+          <td>获取推理服务日志</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/inference-services/{service_id}/policies</code></td>
+          <td><code>updateInferenceServicePolicies</code></td>
+          <td>更新推理服务限流与访问策略</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 501</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/inference-services/{service_id}/test</code></td>
+          <td><code>testInferenceService</code></td>
+          <td>推理服务调用测试</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 422, 502, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/integrations</code></td>
+          <td><code>listIntegrations</code></td>
+          <td>第三方集成列表</td>
+          <td><code></code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/integrations</code></td>
+          <td><code>createIntegration</code></td>
+          <td>创建第三方集成</td>
+          <td><code></code></td>
+          <td>201, 400, 401, 403, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/integrations/bots</code></td>
+          <td><code>createIntegrationBot</code></td>
+          <td>创建企微/钉钉 Bot 集成</td>
+          <td><code></code></td>
+          <td>201, 400, 401, 403, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/knowledge-bases</code></td>
+          <td><code>listKnowledgeBases</code></td>
+          <td>知识库列表</td>
+          <td><code></code></td>
+          <td>200</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/knowledge-bases</code></td>
+          <td><code>createKnowledgeBase</code></td>
+          <td>创建知识库</td>
+          <td><code></code></td>
+          <td>201</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/knowledge-bases/{kb_id}</code></td>
+          <td><code>deleteKnowledgeBase</code></td>
+          <td>删除知识库</td>
+          <td><code></code></td>
+          <td>204, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/knowledge-bases/{kb_id}</code></td>
+          <td><code>getKnowledgeBase</code></td>
+          <td>获取知识库详情</td>
+          <td><code></code></td>
+          <td>200, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/knowledge-bases/{kb_id}/citations</code></td>
+          <td><code>listKnowledgeBaseCitations</code></td>
+          <td>知识库引用来源列表</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/knowledge-bases/{kb_id}/config</code></td>
+          <td><code>getKnowledgeBaseConfig</code></td>
+          <td>读取知识库配置</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/knowledge-bases/{kb_id}/config</code></td>
+          <td><code>updateKnowledgeBaseConfig</code></td>
+          <td>更新知识库配置</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/knowledge-bases/{kb_id}/documents</code></td>
+          <td><code>listKnowledgeBaseDocuments</code></td>
+          <td>文档列表</td>
+          <td><code></code></td>
+          <td>200</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/knowledge-bases/{kb_id}/documents</code></td>
+          <td><code>getDocumentUploadURL</code></td>
+          <td>获取文档预签名上传地址（两步式上传 step 1）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 409, 413, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/knowledge-bases/{kb_id}/documents/{doc_id}</code></td>
+          <td><code>deleteKnowledgeBaseDocument</code></td>
+          <td>删除知识库文档</td>
+          <td><code></code></td>
+          <td>204, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/knowledge-bases/{kb_id}/documents/{doc_id}/notify-uploaded</code></td>
+          <td><code>notifyDocumentUploaded</code></td>
+          <td>通知文档已直传至对象存储（两步式上传 step 2）</td>
+          <td><code></code></td>
+          <td>202, 400, 401, 403, 404, 409, 422, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/knowledge-bases/{kb_id}/documents/{doc_id}/reparse</code></td>
+          <td><code>reparseKnowledgeBaseDocument</code></td>
+          <td>重新解析知识库文档</td>
+          <td><code></code></td>
+          <td>202, 400, 401, 403, 404, 409, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/knowledge-bases/{kb_id}/models</code></td>
+          <td><code>listKnowledgeBaseModels</code></td>
+          <td>可用嵌入/推理模型列表</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/knowledge-bases/{kb_id}/permissions</code></td>
+          <td><code>updateKnowledgeBasePermissions</code></td>
+          <td>更新知识库访问权限</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/knowledge-bases/{kb_id}/query</code></td>
+          <td><code>queryKnowledgeBase</code></td>
+          <td>知识库问答</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 404, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/knowledge-bases/{kb_id}/query/stream</code></td>
+          <td><code>streamQueryKnowledgeBase</code></td>
+          <td>知识库问答 SSE 流式</td>
+          <td><code></code></td>
+          <td>200, 400, 401</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/knowledge-bases/{kb_id}/rebuild</code></td>
+          <td><code>rebuildKnowledgeBase</code></td>
+          <td>全库重建</td>
+          <td><code></code></td>
+          <td>202, 400, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/knowledge-bases/{kb_id}/sessions</code></td>
+          <td><code>listKnowledgeBaseSessions</code></td>
+          <td>知识库对话历史列表</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/models</code></td>
+          <td><code>listModels</code></td>
+          <td>获取模型列表</td>
+          <td><code></code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/models</code></td>
+          <td><code>createModel</code></td>
+          <td>创建模型元数据记录</td>
+          <td><code></code></td>
+          <td>201, 400, 401, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/models/import</code></td>
+          <td><code>importModel</code></td>
+          <td>从 HuggingFace 或 ModelScope 异步导入模型</td>
+          <td><code></code></td>
+          <td>202, 400, 401</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/models/{model_id}</code></td>
+          <td><code>deleteModel</code></td>
+          <td>删除模型</td>
+          <td><code></code></td>
+          <td>204, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/models/{model_id}</code></td>
+          <td><code>getModel</code></td>
+          <td>获取模型详情</td>
+          <td><code></code></td>
+          <td>200, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/models/{model_id}/versions</code></td>
+          <td><code>createModelVersion</code></td>
+          <td>上传模型版本</td>
+          <td><code></code></td>
+          <td>201</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/quota-meta</code></td>
+          <td><code>listQuotaMeta</code></td>
+          <td>查询可用配额维度元数据（透传 Core；需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 502, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/sandboxes</code></td>
+          <td><code>listSandboxes</code></td>
+          <td>Sandbox列表（已废弃，请使用 /api/v1/instances?kind=sandbox）</td>
+          <td><code></code></td>
+          <td>200, 401</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/sandboxes</code></td>
+          <td><code>createSandbox</code></td>
+          <td>创建Sandbox（已废弃，请使用 POST /api/v1/instances）</td>
+          <td><code></code></td>
+          <td>202, 400, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/sandboxes/{sandbox_id}</code></td>
+          <td><code>deleteSandbox</code></td>
+          <td>删除Sandbox（已废弃）</td>
+          <td><code></code></td>
+          <td>202, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/sandboxes/{sandbox_id}</code></td>
+          <td><code>getSandbox</code></td>
+          <td>获取Sandbox详情（已废弃）</td>
+          <td><code></code></td>
+          <td>200, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-patch">PATCH</span></td>
+          <td><code>/sandboxes/{sandbox_id}</code></td>
+          <td><code>patchSandbox</code></td>
+          <td>更新Sandbox配置（已废弃）</td>
+          <td><code></code></td>
+          <td>200, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/sandboxes/{sandbox_id}/extend</code></td>
+          <td><code>extendSandbox</code></td>
+          <td>延期Sandbox有效期（已废弃）</td>
+          <td><code></code></td>
+          <td>200, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/sandboxes/{sandbox_id}/pause</code></td>
+          <td><code>pauseSandbox</code></td>
+          <td>暂停Sandbox（已废弃）</td>
+          <td><code></code></td>
+          <td>202, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/sandboxes/{sandbox_id}/security-events</code></td>
+          <td><code>listSandboxSecurityEvents</code></td>
+          <td>Sandbox安全事件列表（已废弃，请使用 GET /api/v1/instances/{id}/security-events）</td>
+          <td><code></code></td>
+          <td>200, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/sandboxes/{sandbox_id}/security-overview</code></td>
+          <td><code>getSandboxSecurityOverview</code></td>
+          <td>Sandbox安全概览（已废弃）</td>
+          <td><code></code></td>
+          <td>200, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant-admins</code></td>
+          <td><code>listAllTenantAdmins</code></td>
+          <td>跨租户管理员列表（仅返回 owner/admin/邀请中）（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant-plans</code></td>
+          <td><code>listTenantPlans</code></td>
+          <td>查询套餐列表（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 502, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenant-plans</code></td>
+          <td><code>createTenantPlan</code></td>
+          <td>创建套餐（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 409, 422, 502, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/tenant-plans/{planId}</code></td>
+          <td><code>deleteTenantPlan</code></td>
+          <td>删除套餐（软删除）（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 502, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant-plans/{planId}</code></td>
+          <td><code>getTenantPlan</code></td>
+          <td>查询套餐详情（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 502, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/tenant-plans/{planId}</code></td>
+          <td><code>updateTenantPlan</code></td>
+          <td>更新套餐基本信息（name / description）（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 502, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenant-plans/{planId}/activate</code></td>
+          <td><code>activateTenantPlan</code></td>
+          <td>发布套餐（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 502, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant-plans/{planId}/audit-logs</code></td>
+          <td><code>listTenantPlanAuditLogs</code></td>
+          <td>查询套餐操作历史（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 502, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant-plans/{planId}/bindable-tenants</code></td>
+          <td><code>listBindableTenants</code></td>
+          <td>查询可绑定该套餐的租户列表（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 502, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenant-plans/{planId}/disable</code></td>
+          <td><code>disableTenantPlan</code></td>
+          <td>禁用套餐（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 502, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant-plans/{planId}/quota-limits</code></td>
+          <td><code>getTenantPlanQuotaLimits</code></td>
+          <td>查询套餐限额（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 502, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/tenant-plans/{planId}/quota-limits</code></td>
+          <td><code>updateTenantPlanQuotaLimits</code></td>
+          <td>修改套餐限额（同步存量租户）（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 422, 502, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant-plans/{planId}/tenants</code></td>
+          <td><code>listTenantPlanBoundTenants</code></td>
+          <td>查询套餐绑定的租户列表（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 502, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant/members</code></td>
+          <td><code>listTenantMembers</code></td>
+          <td>租户成员列表</td>
+          <td><code></code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenant/members</code></td>
+          <td><code>inviteTenantMember</code></td>
+          <td>邀请成员加入租户</td>
+          <td><code></code></td>
+          <td>202, 400, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/tenant/members/{member_id}</code></td>
+          <td><code>removeTenantMember</code></td>
+          <td>移除租户成员</td>
+          <td><code></code></td>
+          <td>204, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant/members/{member_id}</code></td>
+          <td><code>getTenantMember</code></td>
+          <td>获取租户成员详情</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant/roles</code></td>
+          <td><code>listTenantRoles</code></td>
+          <td>角色列表</td>
+          <td><code></code></td>
+          <td>200, 401</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/tenant/roles/{role_id}</code></td>
+          <td><code>updateTenantRole</code></td>
+          <td>更新角色权限配置</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant/sso</code></td>
+          <td><code>getSsoConfig</code></td>
+          <td>获取SSO配置</td>
+          <td><code></code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/tenant/sso</code></td>
+          <td><code>updateSsoConfig</code></td>
+          <td>更新SSO配置</td>
+          <td><code></code></td>
+          <td>200, 400, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant/webhooks</code></td>
+          <td><code>listWebhooks</code></td>
+          <td>Webhook列表</td>
+          <td><code></code></td>
+          <td>200, 401</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenant/webhooks</code></td>
+          <td><code>createWebhook</code></td>
+          <td>创建Webhook</td>
+          <td><code></code></td>
+          <td>201, 400, 401, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/tenant/webhooks/{webhook_id}</code></td>
+          <td><code>deleteWebhook</code></td>
+          <td>删除Webhook</td>
+          <td><code></code></td>
+          <td>204, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant/webhooks/{webhook_id}/deliveries</code></td>
+          <td><code>listWebhookDeliveries</code></td>
+          <td>Webhook 投递日志</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenants/{tenantId}/admins/invite</code></td>
+          <td><code>inviteTenantAdmin</code></td>
+          <td>邀请租户管理员（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/tenants/{tenantId}/admins/{userId}</code></td>
+          <td><code>deleteTenantAdmin</code></td>
+          <td>软删除管理员（不幂等，不携带幂等键）（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenants/{tenantId}/admins/{userId}</code></td>
+          <td><code>getTenantAdminDetail</code></td>
+          <td>查询管理员详情（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenants/{tenantId}/admins/{userId}/audit-logs</code></td>
+          <td><code>listTenantAdminAuditLogs</code></td>
+          <td>查询管理员操作历史（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenants/{tenantId}/admins/{userId}/changeable-roles</code></td>
+          <td><code>getChangeableRoles</code></td>
+          <td>查询可变更角色选项（排除 tenant-owner）（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenants/{tenantId}/admins/{userId}/disable</code></td>
+          <td><code>disableTenantAdmin</code></td>
+          <td>禁用管理员（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenants/{tenantId}/admins/{userId}/enable</code></td>
+          <td><code>enableTenantAdmin</code></td>
+          <td>启用管理员（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenants/{tenantId}/admins/{userId}/invitation/resend</code></td>
+          <td><code>resendTenantAdminInvitation</code></td>
+          <td>重发租户管理员邀请（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenants/{tenantId}/admins/{userId}/reset-password</code></td>
+          <td><code>resetTenantAdminPassword</code></td>
+          <td>重置管理员密码（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenants/{tenantId}/admins/{userId}/role</code></td>
+          <td><code>getTenantAdminRole</code></td>
+          <td>查询指定管理员角色与权限（4 维权限模型）（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/tenants/{tenantId}/admins/{userId}/role</code></td>
+          <td><code>updateTenantAdminRole</code></td>
+          <td>修改管理员角色（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenants/{tenantId}/plan</code></td>
+          <td><code>bindTenantPlan</code></td>
+          <td>绑定套餐（按套餐限额更新配额）（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 422, 502, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/tenants/{tenantId}/transfer-ownership</code></td>
+          <td><code>transferTenantOwnership</code></td>
+          <td>移交租户所有者（对 tenant-admin 行发起，原 owner 降级为 admin）（需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 409, 422</td>
+        </tr>
+          </tbody>
+        </table>
+      </section>
 
-    <section>
-      <h2>Operations</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Method</th>
-            <th>Path</th>
-            <th>Operation</th>
-            <th>Summary</th>
-            <th>RBAC Scope</th>
-            <th>Responses</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/gpu-containers</code></td>
-            <td><code>listGpuContainers</code></td>
-            <td>GPU容器列表（已废弃，请使用 /api/v1/instances?kind=gpu_container）</td>
-            <td><code></code></td>
-            <td>200, 401, 403</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/gpu-containers</code></td>
-            <td><code>createGpuContainer</code></td>
-            <td>创建GPU容器（已废弃，请使用 POST /api/v1/instances）</td>
-            <td><code></code></td>
-            <td>202, 400, 401, 409</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/gpu-containers/available-gpus</code></td>
-            <td><code>listAvailableGpus</code></td>
-            <td>查询可用GPU资源（已废弃，请使用 GET /api/v1/gpu-inventory）</td>
-            <td><code></code></td>
-            <td>200, 401</td>
-          </tr>
-          <tr>
-            <td><span class="method method-delete">DELETE</span></td>
-            <td><code>/gpu-containers/{container_id}</code></td>
-            <td><code>deleteGpuContainer</code></td>
-            <td>删除GPU容器（已废弃）</td>
-            <td><code></code></td>
-            <td>202, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/gpu-containers/{container_id}</code></td>
-            <td><code>getGpuContainer</code></td>
-            <td>获取GPU容器详情（已废弃）</td>
-            <td><code></code></td>
-            <td>200, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-patch">PATCH</span></td>
-            <td><code>/gpu-containers/{container_id}</code></td>
-            <td><code>patchGpuContainer</code></td>
-            <td>更新GPU容器配置（已废弃）</td>
-            <td><code></code></td>
-            <td>200, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/gpu-containers/{container_id}/metrics</code></td>
-            <td><code>getGpuContainerMetrics</code></td>
-            <td>获取GPU容器监控指标（已废弃）</td>
-            <td><code></code></td>
-            <td>200, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/gpu-containers/{container_id}/rebuild</code></td>
-            <td><code>rebuildGpuContainer</code></td>
-            <td>重建GPU容器（已废弃）</td>
-            <td><code></code></td>
-            <td>202, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/gpu-containers/{container_id}/rollback</code></td>
-            <td><code>rollbackGpuContainer</code></td>
-            <td>回滚GPU容器到指定版本（已废弃）</td>
-            <td><code></code></td>
-            <td>202, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/gpu-containers/{container_id}/versions</code></td>
-            <td><code>listGpuContainerVersions</code></td>
-            <td>GPU容器版本历史（已废弃）</td>
-            <td><code></code></td>
-            <td>200, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/inference-operations/{operation_id}</code></td>
-            <td><code>getInferenceOperation</code></td>
-            <td>查询推理服务异步操作</td>
-            <td><code></code></td>
-            <td>200, 401, 403, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/inference-services</code></td>
-            <td><code>listInferenceServices</code></td>
-            <td>获取推理服务列表</td>
-            <td><code></code></td>
-            <td>200, 401, 403</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/inference-services</code></td>
-            <td><code>createInferenceService</code></td>
-            <td>部署推理服务</td>
-            <td><code></code></td>
-            <td>202, 400, 401, 403, 409, 422, 503</td>
-          </tr>
-          <tr>
-            <td><span class="method method-delete">DELETE</span></td>
-            <td><code>/inference-services/{service_id}</code></td>
-            <td><code>deleteInferenceService</code></td>
-            <td>停止并删除推理服务</td>
-            <td><code></code></td>
-            <td>202, 401, 403, 404, 409, 503</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/inference-services/{service_id}</code></td>
-            <td><code>getInferenceService</code></td>
-            <td>获取推理服务详情</td>
-            <td><code></code></td>
-            <td>200, 401, 403, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-patch">PATCH</span></td>
-            <td><code>/inference-services/{service_id}</code></td>
-            <td><code>updateInferenceService</code></td>
-            <td>修改推理服务副本数</td>
-            <td><code></code></td>
-            <td>202, 400, 401, 403, 404, 409, 422, 503</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/inference-services/{service_id}/lifecycle</code></td>
-            <td><code>applyInferenceServiceLifecycle</code></td>
-            <td>执行推理服务生命周期动作</td>
-            <td><code></code></td>
-            <td>202, 400, 401, 403, 404, 409, 422, 503</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/inference-services/{service_id}/logs</code></td>
-            <td><code>getInferenceServiceLogs</code></td>
-            <td>获取推理服务日志</td>
-            <td><code></code></td>
-            <td>200, 401, 403, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-put">PUT</span></td>
-            <td><code>/inference-services/{service_id}/policies</code></td>
-            <td><code>updateInferenceServicePolicies</code></td>
-            <td>更新推理服务限流与访问策略</td>
-            <td><code></code></td>
-            <td>200, 400, 401, 403, 404, 501</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/inference-services/{service_id}/test</code></td>
-            <td><code>testInferenceService</code></td>
-            <td>推理服务调用测试</td>
-            <td><code></code></td>
-            <td>200, 400, 401, 403, 404, 422, 502, 503, 504</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/integrations</code></td>
-            <td><code>listIntegrations</code></td>
-            <td>第三方集成列表</td>
-            <td><code></code></td>
-            <td>200, 401, 403</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/integrations</code></td>
-            <td><code>createIntegration</code></td>
-            <td>创建第三方集成</td>
-            <td><code></code></td>
-            <td>201, 400, 401, 403, 409</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/integrations/bots</code></td>
-            <td><code>createIntegrationBot</code></td>
-            <td>创建企微/钉钉 Bot 集成</td>
-            <td><code></code></td>
-            <td>201, 400, 401, 403, 409</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/knowledge-bases</code></td>
-            <td><code>listKnowledgeBases</code></td>
-            <td>知识库列表</td>
-            <td><code></code></td>
-            <td>200</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/knowledge-bases</code></td>
-            <td><code>createKnowledgeBase</code></td>
-            <td>创建知识库</td>
-            <td><code></code></td>
-            <td>201</td>
-          </tr>
-          <tr>
-            <td><span class="method method-delete">DELETE</span></td>
-            <td><code>/knowledge-bases/{kb_id}</code></td>
-            <td><code>deleteKnowledgeBase</code></td>
-            <td>删除知识库</td>
-            <td><code></code></td>
-            <td>204, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/knowledge-bases/{kb_id}</code></td>
-            <td><code>getKnowledgeBase</code></td>
-            <td>获取知识库详情</td>
-            <td><code></code></td>
-            <td>200, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/knowledge-bases/{kb_id}/citations</code></td>
-            <td><code>listKnowledgeBaseCitations</code></td>
-            <td>知识库引用来源列表</td>
-            <td><code></code></td>
-            <td>200, 401, 403, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/knowledge-bases/{kb_id}/config</code></td>
-            <td><code>getKnowledgeBaseConfig</code></td>
-            <td>读取知识库配置</td>
-            <td><code></code></td>
-            <td>200, 401, 403, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-put">PUT</span></td>
-            <td><code>/knowledge-bases/{kb_id}/config</code></td>
-            <td><code>updateKnowledgeBaseConfig</code></td>
-            <td>更新知识库配置</td>
-            <td><code></code></td>
-            <td>200, 400, 401, 403, 404, 409</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/knowledge-bases/{kb_id}/documents</code></td>
-            <td><code>listKnowledgeBaseDocuments</code></td>
-            <td>文档列表</td>
-            <td><code></code></td>
-            <td>200</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/knowledge-bases/{kb_id}/documents</code></td>
-            <td><code>getDocumentUploadURL</code></td>
-            <td>获取文档预签名上传地址（两步式上传 step 1）</td>
-            <td><code></code></td>
-            <td>200, 400, 401, 403, 409, 413, 422</td>
-          </tr>
-          <tr>
-            <td><span class="method method-delete">DELETE</span></td>
-            <td><code>/knowledge-bases/{kb_id}/documents/{doc_id}</code></td>
-            <td><code>deleteKnowledgeBaseDocument</code></td>
-            <td>删除知识库文档</td>
-            <td><code></code></td>
-            <td>204, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/knowledge-bases/{kb_id}/documents/{doc_id}/notify-uploaded</code></td>
-            <td><code>notifyDocumentUploaded</code></td>
-            <td>通知文档已直传至对象存储（两步式上传 step 2）</td>
-            <td><code></code></td>
-            <td>202, 400, 401, 403, 404, 409, 422, 503</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/knowledge-bases/{kb_id}/documents/{doc_id}/reparse</code></td>
-            <td><code>reparseKnowledgeBaseDocument</code></td>
-            <td>重新解析知识库文档</td>
-            <td><code></code></td>
-            <td>202, 400, 401, 403, 404, 409, 503</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/knowledge-bases/{kb_id}/models</code></td>
-            <td><code>listKnowledgeBaseModels</code></td>
-            <td>可用嵌入/推理模型列表</td>
-            <td><code></code></td>
-            <td>200, 401, 403, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-put">PUT</span></td>
-            <td><code>/knowledge-bases/{kb_id}/permissions</code></td>
-            <td><code>updateKnowledgeBasePermissions</code></td>
-            <td>更新知识库访问权限</td>
-            <td><code></code></td>
-            <td>200, 400, 401, 403, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/knowledge-bases/{kb_id}/query</code></td>
-            <td><code>queryKnowledgeBase</code></td>
-            <td>知识库问答</td>
-            <td><code></code></td>
-            <td>200, 400, 401, 404, 503</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/knowledge-bases/{kb_id}/query/stream</code></td>
-            <td><code>streamQueryKnowledgeBase</code></td>
-            <td>知识库问答 SSE 流式</td>
-            <td><code></code></td>
-            <td>200, 400, 401</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/knowledge-bases/{kb_id}/rebuild</code></td>
-            <td><code>rebuildKnowledgeBase</code></td>
-            <td>全库重建</td>
-            <td><code></code></td>
-            <td>202, 400, 401, 403, 404, 409</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/knowledge-bases/{kb_id}/sessions</code></td>
-            <td><code>listKnowledgeBaseSessions</code></td>
-            <td>知识库对话历史列表</td>
-            <td><code></code></td>
-            <td>200, 401, 403, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/models</code></td>
-            <td><code>listModels</code></td>
-            <td>获取模型列表</td>
-            <td><code></code></td>
-            <td>200, 401, 403</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/models</code></td>
-            <td><code>createModel</code></td>
-            <td>创建模型元数据记录</td>
-            <td><code></code></td>
-            <td>201, 400, 401, 409</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/models/import</code></td>
-            <td><code>importModel</code></td>
-            <td>从 HuggingFace 或 ModelScope 异步导入模型</td>
-            <td><code></code></td>
-            <td>202, 400, 401</td>
-          </tr>
-          <tr>
-            <td><span class="method method-delete">DELETE</span></td>
-            <td><code>/models/{model_id}</code></td>
-            <td><code>deleteModel</code></td>
-            <td>删除模型</td>
-            <td><code></code></td>
-            <td>204, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/models/{model_id}</code></td>
-            <td><code>getModel</code></td>
-            <td>获取模型详情</td>
-            <td><code></code></td>
-            <td>200, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/models/{model_id}/versions</code></td>
-            <td><code>createModelVersion</code></td>
-            <td>上传模型版本</td>
-            <td><code></code></td>
-            <td>201</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/quota-meta</code></td>
-            <td><code>listQuotaMeta</code></td>
-            <td>查询可用配额维度元数据（透传 Core；需 platform-admin / platform-ops / platform-readonly）</td>
-            <td><code></code></td>
-            <td>200, 401, 403, 502, 504</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/sandboxes</code></td>
-            <td><code>listSandboxes</code></td>
-            <td>Sandbox列表（已废弃，请使用 /api/v1/instances?kind=sandbox）</td>
-            <td><code></code></td>
-            <td>200, 401</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/sandboxes</code></td>
-            <td><code>createSandbox</code></td>
-            <td>创建Sandbox（已废弃，请使用 POST /api/v1/instances）</td>
-            <td><code></code></td>
-            <td>202, 400, 409</td>
-          </tr>
-          <tr>
-            <td><span class="method method-delete">DELETE</span></td>
-            <td><code>/sandboxes/{sandbox_id}</code></td>
-            <td><code>deleteSandbox</code></td>
-            <td>删除Sandbox（已废弃）</td>
-            <td><code></code></td>
-            <td>202, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/sandboxes/{sandbox_id}</code></td>
-            <td><code>getSandbox</code></td>
-            <td>获取Sandbox详情（已废弃）</td>
-            <td><code></code></td>
-            <td>200, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-patch">PATCH</span></td>
-            <td><code>/sandboxes/{sandbox_id}</code></td>
-            <td><code>patchSandbox</code></td>
-            <td>更新Sandbox配置（已废弃）</td>
-            <td><code></code></td>
-            <td>200, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/sandboxes/{sandbox_id}/extend</code></td>
-            <td><code>extendSandbox</code></td>
-            <td>延期Sandbox有效期（已废弃）</td>
-            <td><code></code></td>
-            <td>200, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/sandboxes/{sandbox_id}/pause</code></td>
-            <td><code>pauseSandbox</code></td>
-            <td>暂停Sandbox（已废弃）</td>
-            <td><code></code></td>
-            <td>202, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/sandboxes/{sandbox_id}/security-events</code></td>
-            <td><code>listSandboxSecurityEvents</code></td>
-            <td>Sandbox安全事件列表（已废弃，请使用 GET /api/v1/instances/{id}/security-events）</td>
-            <td><code></code></td>
-            <td>200, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/sandboxes/{sandbox_id}/security-overview</code></td>
-            <td><code>getSandboxSecurityOverview</code></td>
-            <td>Sandbox安全概览（已废弃）</td>
-            <td><code></code></td>
-            <td>200, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/tenant-admins</code></td>
-            <td><code>listAllTenantAdmins</code></td>
-            <td>跨租户管理员列表（仅返回 owner/admin/邀请中）（需 platform-admin / platform-ops / platform-readonly）</td>
-            <td><code></code></td>
-            <td>200, 401, 403</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/tenant-plans</code></td>
-            <td><code>listTenantPlans</code></td>
-            <td>查询套餐列表（需 platform-admin / platform-ops / platform-readonly）</td>
-            <td><code></code></td>
-            <td>200, 400, 401, 403, 502, 504</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/tenant-plans</code></td>
-            <td><code>createTenantPlan</code></td>
-            <td>创建套餐（需 platform-admin / platform-ops）</td>
-            <td><code></code></td>
-            <td>200, 400, 401, 403, 409, 422, 502, 504</td>
-          </tr>
-          <tr>
-            <td><span class="method method-delete">DELETE</span></td>
-            <td><code>/tenant-plans/{planId}</code></td>
-            <td><code>deleteTenantPlan</code></td>
-            <td>删除套餐（软删除）（需 platform-admin / platform-ops）</td>
-            <td><code></code></td>
-            <td>200, 400, 401, 403, 404, 409, 502, 504</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/tenant-plans/{planId}</code></td>
-            <td><code>getTenantPlan</code></td>
-            <td>查询套餐详情（需 platform-admin / platform-ops / platform-readonly）</td>
-            <td><code></code></td>
-            <td>200, 400, 401, 403, 404, 502, 504</td>
-          </tr>
-          <tr>
-            <td><span class="method method-put">PUT</span></td>
-            <td><code>/tenant-plans/{planId}</code></td>
-            <td><code>updateTenantPlan</code></td>
-            <td>更新套餐基本信息（name / description）（需 platform-admin / platform-ops）</td>
-            <td><code></code></td>
-            <td>200, 400, 401, 403, 404, 409, 502, 504</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/tenant-plans/{planId}/activate</code></td>
-            <td><code>activateTenantPlan</code></td>
-            <td>发布套餐（需 platform-admin / platform-ops）</td>
-            <td><code></code></td>
-            <td>200, 400, 401, 403, 404, 409, 502, 504</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/tenant-plans/{planId}/audit-logs</code></td>
-            <td><code>listTenantPlanAuditLogs</code></td>
-            <td>查询套餐操作历史（需 platform-admin / platform-ops / platform-readonly）</td>
-            <td><code></code></td>
-            <td>200, 400, 401, 403, 404, 502, 504</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/tenant-plans/{planId}/bindable-tenants</code></td>
-            <td><code>listBindableTenants</code></td>
-            <td>查询可绑定该套餐的租户列表（需 platform-admin / platform-ops / platform-readonly）</td>
-            <td><code></code></td>
-            <td>200, 400, 401, 403, 404, 502, 504</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/tenant-plans/{planId}/disable</code></td>
-            <td><code>disableTenantPlan</code></td>
-            <td>禁用套餐（需 platform-admin / platform-ops）</td>
-            <td><code></code></td>
-            <td>200, 400, 401, 403, 404, 409, 502, 504</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/tenant-plans/{planId}/quota-limits</code></td>
-            <td><code>getTenantPlanQuotaLimits</code></td>
-            <td>查询套餐限额（需 platform-admin / platform-ops / platform-readonly）</td>
-            <td><code></code></td>
-            <td>200, 400, 401, 403, 404, 502, 504</td>
-          </tr>
-          <tr>
-            <td><span class="method method-put">PUT</span></td>
-            <td><code>/tenant-plans/{planId}/quota-limits</code></td>
-            <td><code>updateTenantPlanQuotaLimits</code></td>
-            <td>修改套餐限额（同步存量租户）（需 platform-admin / platform-ops）</td>
-            <td><code></code></td>
-            <td>200, 400, 401, 403, 404, 409, 422, 502, 504</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/tenant-plans/{planId}/tenants</code></td>
-            <td><code>listTenantPlanBoundTenants</code></td>
-            <td>查询套餐绑定的租户列表（需 platform-admin / platform-ops / platform-readonly）</td>
-            <td><code></code></td>
-            <td>200, 400, 401, 403, 404, 502, 504</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/tenant/members</code></td>
-            <td><code>listTenantMembers</code></td>
-            <td>租户成员列表</td>
-            <td><code></code></td>
-            <td>200, 401, 403</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/tenant/members</code></td>
-            <td><code>inviteTenantMember</code></td>
-            <td>邀请成员加入租户</td>
-            <td><code></code></td>
-            <td>202, 400, 409</td>
-          </tr>
-          <tr>
-            <td><span class="method method-delete">DELETE</span></td>
-            <td><code>/tenant/members/{member_id}</code></td>
-            <td><code>removeTenantMember</code></td>
-            <td>移除租户成员</td>
-            <td><code></code></td>
-            <td>204, 401, 403, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/tenant/members/{member_id}</code></td>
-            <td><code>getTenantMember</code></td>
-            <td>获取租户成员详情</td>
-            <td><code></code></td>
-            <td>200, 401, 403, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/tenant/roles</code></td>
-            <td><code>listTenantRoles</code></td>
-            <td>角色列表</td>
-            <td><code></code></td>
-            <td>200, 401</td>
-          </tr>
-          <tr>
-            <td><span class="method method-put">PUT</span></td>
-            <td><code>/tenant/roles/{role_id}</code></td>
-            <td><code>updateTenantRole</code></td>
-            <td>更新角色权限配置</td>
-            <td><code></code></td>
-            <td>200, 400, 401, 403, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/tenant/sso</code></td>
-            <td><code>getSsoConfig</code></td>
-            <td>获取SSO配置</td>
-            <td><code></code></td>
-            <td>200, 401, 403</td>
-          </tr>
-          <tr>
-            <td><span class="method method-put">PUT</span></td>
-            <td><code>/tenant/sso</code></td>
-            <td><code>updateSsoConfig</code></td>
-            <td>更新SSO配置</td>
-            <td><code></code></td>
-            <td>200, 400, 403</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/tenant/webhooks</code></td>
-            <td><code>listWebhooks</code></td>
-            <td>Webhook列表</td>
-            <td><code></code></td>
-            <td>200, 401</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/tenant/webhooks</code></td>
-            <td><code>createWebhook</code></td>
-            <td>创建Webhook</td>
-            <td><code></code></td>
-            <td>201, 400, 401, 409, 422</td>
-          </tr>
-          <tr>
-            <td><span class="method method-delete">DELETE</span></td>
-            <td><code>/tenant/webhooks/{webhook_id}</code></td>
-            <td><code>deleteWebhook</code></td>
-            <td>删除Webhook</td>
-            <td><code></code></td>
-            <td>204, 401, 403, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/tenant/webhooks/{webhook_id}/deliveries</code></td>
-            <td><code>listWebhookDeliveries</code></td>
-            <td>Webhook 投递日志</td>
-            <td><code></code></td>
-            <td>200, 401, 403, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/tenants/{tenantId}/admins/invite</code></td>
-            <td><code>inviteTenantAdmin</code></td>
-            <td>邀请租户管理员（需 platform-admin / platform-ops）</td>
-            <td><code></code></td>
-            <td>200, 400, 401, 403, 404, 409</td>
-          </tr>
-          <tr>
-            <td><span class="method method-delete">DELETE</span></td>
-            <td><code>/tenants/{tenantId}/admins/{userId}</code></td>
-            <td><code>deleteTenantAdmin</code></td>
-            <td>软删除管理员（不幂等，不携带幂等键）（需 platform-admin / platform-ops）</td>
-            <td><code></code></td>
-            <td>200, 401, 403, 404, 409, 422</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/tenants/{tenantId}/admins/{userId}</code></td>
-            <td><code>getTenantAdminDetail</code></td>
-            <td>查询管理员详情（需 platform-admin / platform-ops / platform-readonly）</td>
-            <td><code></code></td>
-            <td>200, 401, 403, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/tenants/{tenantId}/admins/{userId}/audit-logs</code></td>
-            <td><code>listTenantAdminAuditLogs</code></td>
-            <td>查询管理员操作历史（需 platform-admin / platform-ops / platform-readonly）</td>
-            <td><code></code></td>
-            <td>200, 401, 403, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/tenants/{tenantId}/admins/{userId}/changeable-roles</code></td>
-            <td><code>getChangeableRoles</code></td>
-            <td>查询可变更角色选项（排除 tenant-owner）（需 platform-admin / platform-ops / platform-readonly）</td>
-            <td><code></code></td>
-            <td>200, 401, 403, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/tenants/{tenantId}/admins/{userId}/disable</code></td>
-            <td><code>disableTenantAdmin</code></td>
-            <td>禁用管理员（需 platform-admin / platform-ops）</td>
-            <td><code></code></td>
-            <td>200, 401, 403, 404, 409, 422</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/tenants/{tenantId}/admins/{userId}/enable</code></td>
-            <td><code>enableTenantAdmin</code></td>
-            <td>启用管理员（需 platform-admin / platform-ops）</td>
-            <td><code></code></td>
-            <td>200, 401, 403, 404, 409</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/tenants/{tenantId}/admins/{userId}/invitation/resend</code></td>
-            <td><code>resendTenantAdminInvitation</code></td>
-            <td>重发租户管理员邀请（需 platform-admin / platform-ops）</td>
-            <td><code></code></td>
-            <td>200, 401, 403, 404, 409</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/tenants/{tenantId}/admins/{userId}/reset-password</code></td>
-            <td><code>resetTenantAdminPassword</code></td>
-            <td>重置管理员密码（需 platform-admin / platform-ops）</td>
-            <td><code></code></td>
-            <td>200, 400, 401, 403, 404, 409, 422</td>
-          </tr>
-          <tr>
-            <td><span class="method method-get">GET</span></td>
-            <td><code>/tenants/{tenantId}/admins/{userId}/role</code></td>
-            <td><code>getTenantAdminRole</code></td>
-            <td>查询指定管理员角色与权限（4 维权限模型）（需 platform-admin / platform-ops / platform-readonly）</td>
-            <td><code></code></td>
-            <td>200, 401, 403, 404</td>
-          </tr>
-          <tr>
-            <td><span class="method method-put">PUT</span></td>
-            <td><code>/tenants/{tenantId}/admins/{userId}/role</code></td>
-            <td><code>updateTenantAdminRole</code></td>
-            <td>修改管理员角色（需 platform-admin / platform-ops）</td>
-            <td><code></code></td>
-            <td>200, 400, 401, 403, 404, 409, 422</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/tenants/{tenantId}/plan</code></td>
-            <td><code>bindTenantPlan</code></td>
-            <td>绑定套餐（按套餐限额更新配额）（需 platform-admin / platform-ops）</td>
-            <td><code></code></td>
-            <td>200, 400, 401, 403, 404, 409, 422, 502, 504</td>
-          </tr>
-          <tr>
-            <td><span class="method method-post">POST</span></td>
-            <td><code>/tenants/{tenantId}/transfer-ownership</code></td>
-            <td><code>transferTenantOwnership</code></td>
-            <td>移交租户所有者（对 tenant-admin 行发起，原 owner 降级为 admin）（需 platform-admin / platform-ops）</td>
-            <td><code></code></td>
-            <td>200, 401, 403, 404, 409, 422</td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
-
-    <section>
-      <h2>Schemas</h2>
-      <ul class="schema-list">
+      <section>
+        <h2>Schemas</h2>
+        <ul class="schema-list">
         <li><code>AdminDetail</code></li>
         <li><code>AdminListResponse</code></li>
         <li><code>AdminWithTenant</code></li>
@@ -1134,10 +1025,9 @@
         <li><code>Webhook</code></li>
         <li><code>WebhookDelivery</code></li>
         <li><code>WebhookDeliveryListResponse</code></li>
-      </ul>
-    </section>
+        </ul>
+      </section>
 
-  </main>
-</body>
-
+    </main>
+  </body>
 </html>
