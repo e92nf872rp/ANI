@@ -291,6 +291,15 @@ def validate(spec: dict[str, Any]) -> tuple[str, ...]:
     accelerator = schemas.get("InferenceServiceAccelerator") or {}
     if set(accelerator.get("required") or []) != {"spec_id", "count_per_replica"}:
         errors.append("InferenceServiceAccelerator must require spec_id and count_per_replica")
+    memory = (accelerator.get("properties") or {}).get("memory") or {}
+    if memory.get("type") != "integer":
+        errors.append("InferenceServiceAccelerator.memory must be integer")
+    if memory.get("minimum") != 1:
+        errors.append("InferenceServiceAccelerator.memory must have minimum 1")
+    if "memory" in set(accelerator.get("required") or []):
+        errors.append("InferenceServiceAccelerator.memory must remain optional")
+    if "gpu_mode" in (accelerator.get("properties") or {}):
+        errors.append("InferenceServiceAccelerator must not declare gpu_mode; wholecard vs vGPU is implied by memory")
 
     update_request = schemas.get("UpdateInferenceServiceRequest") or {}
     if set((update_request.get("properties") or {}).keys()) != {"idempotency_key", "replicas"}:

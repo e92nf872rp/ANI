@@ -502,6 +502,28 @@ class OpenAPISpecValidatorTest(unittest.TestCase):
                 "metadata",
             },
         )
+        accelerator = schemas["PlatformWorkloadAcceleratorResources"]
+        self.assertEqual(set(accelerator["required"]), {"spec_id", "count"})
+        self.assertEqual(accelerator["properties"]["count"]["minimum"], 1)
+        self.assertNotIn("memory", accelerator["required"])
+        self.assertEqual(accelerator["properties"]["memory"]["type"], "integer")
+        self.assertEqual(accelerator["properties"]["memory"]["minimum"], 1)
+        self.assertNotIn("gpu_mode", accelerator["properties"])
+        capability = schemas["PlatformWorkloadAcceleratorCapability"]
+        self.assertEqual(
+            set(capability["required"]),
+            {"spec_id", "available", "max_single_node_count"},
+        )
+        for field in (
+            "whole_card_available",
+            "vgpu_available",
+            "memory_min_mb",
+            "memory_max_mb",
+            "memory_step_mb",
+            "gpu_mode",
+        ):
+            self.assertNotIn(field, capability["properties"])
+
         cpu_example = create["example"]
         self.assertNotIn("accelerator", cpu_example["resources"])
         self.assertEqual(cpu_example["topology"]["mode"], "single_node")

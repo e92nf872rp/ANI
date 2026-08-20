@@ -3503,13 +3503,13 @@ export interface components {
             /** Format: date-time */
             completed_at?: string | null;
         };
-        /** @description 单个 Core GPUSpec 对平台内部工作负载的准入能力摘要。 */
+        /** @description 单个 GPU 型号对平台内部工作负载的准入能力摘要。spec_id 只表示型号。 */
         PlatformWorkloadAcceleratorCapability: {
-            /** @description Core GPUSpec ID；只表达资源形态，不表达租户配额。 */
+            /** @description GPU 型号，例如 gpu-nvidia-geforce-rtx-4090。只表示型号，不表示整卡或 vGPU。不表达租户配额。 */
             spec_id: string;
             /** @description 当前是否允许用于新的 PlatformWorkload 准入。 */
             available: boolean;
-            /** @description 能力查询时单节点最大可准入数量；这是提示，不是资源预留。 */
+            /** @description 能力查询时单节点最大可申请卡数；这是提示，不是资源预留。 */
             max_single_node_count: number;
         };
         /** @description Core 当前可供平台服务使用的工作负载拓扑、调度组件和加速器能力。 */
@@ -3535,12 +3535,18 @@ export interface components {
             /** @description 当前可查询的加速器规格及其准入可用性。 */
             accelerator_specs: components["schemas"]["PlatformWorkloadAcceleratorCapability"][];
         };
-        /** @description 单个 Pod role 或单节点副本申请的加速器资源。 */
+        /**
+         * @description 单个 Pod role 或单节点副本申请的加速器资源。
+         *     spec_id 是 GPU 型号，count 是申请卡数，memory 是申请显存（MiB）。
+         *     不填 memory 为整卡，填写 memory 为 vGPU。
+         */
         PlatformWorkloadAcceleratorResources: {
-            /** @description Core GPUSpec ID。P0 只准入已通过 live gate 的整卡 GPU 规格。 */
+            /** @description GPU 型号，例如 gpu-nvidia-geforce-rtx-4090。只表示型号。历史 -full/-Nx ID 实现剥掉后缀后仍按型号处理。 */
             spec_id: string;
-            /** @description 当前 Pod role 或单节点副本申请的 accelerator 数量。 */
+            /** @description 申请卡数。整卡和 vGPU 都必填，最小为 1。 */
             count: number;
+            /** @description 申请显存，单位 MiB。这是 GPU 显存，不是 resources.memory 的内存预算。省略为整卡；填写为 vGPU。 */
+            memory?: number;
         };
         /** @description 单个 Pod role 或单节点副本的计算资源请求。 */
         PlatformWorkloadResources: {

@@ -190,16 +190,24 @@ components:
 
     InferenceServiceAccelerator:
       type: object
+      description: |
+        推理服务每个副本申请的加速器资源。
+        spec_id 是 GPU 型号，count_per_replica 是申请卡数，memory 是申请显存（MiB）。
+        不填 memory 为整卡，填写 memory 为 vGPU。
       required: [spec_id, count_per_replica]
       properties:
         spec_id:
           type: string
           minLength: 1
-          description: Core GPUSpec ID；P0 接受通过 live gate 的整卡（`-full`）与 vGPU（`-Nx`）规格
+          description: GPU 型号，例如 gpu-nvidia-geforce-rtx-4090。只表示型号。历史 -full/-Nx ID 实现剥掉后缀后仍按型号处理。
         count_per_replica:
           type: integer
           minimum: 1
-          description: 每个独立副本或 leader-worker group 申请的 accelerator 总数
+          description: 每个独立副本或 leader-worker group 的申请卡数。整卡和 vGPU 都必填，最小为 1。
+        memory:
+          type: integer
+          minimum: 1
+          description: 申请显存，单位 MiB。这是 GPU 显存，不是 resources.memory 的内存预算。省略为整卡；填写为 vGPU。
 
     InferenceServiceResources:
       type: object
