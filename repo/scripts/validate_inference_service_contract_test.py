@@ -168,6 +168,35 @@ class InferenceServiceContractTest(unittest.TestCase):
             {"idempotency_key", "replicas"},
         )
 
+    def test_accelerator_count_is_required_and_memory_is_optional(self) -> None:
+        accelerator = self.spec["components"]["schemas"]["InferenceServiceAccelerator"]
+        self.assertEqual(set(accelerator["required"]), {"spec_id", "count_per_replica"})
+        self.assertEqual(accelerator["properties"]["count_per_replica"]["minimum"], 1)
+        self.assertNotIn("gpu_mode", accelerator["properties"])
+        memory = accelerator["properties"]["memory"]
+        self.assertEqual(memory["type"], "integer")
+        self.assertEqual(memory["minimum"], 1)
+        spec = copy.deepcopy(self.spec)
+        spec["components"]["schemas"]["InferenceServiceAccelerator"]["required"] = [
+            "spec_id",
+            "count_per_replica",
+            "memory",
+        ]
+        errors = validator.validate(spec)
+        self.assertIn("InferenceServiceAccelerator.memory must remain optional", errors)
+
+    def test_accelerator_rejects_gpu_mode(self) -> None:
+        spec = copy.deepcopy(self.spec)
+        spec["components"]["schemas"]["InferenceServiceAccelerator"]["properties"]["gpu_mode"] = {
+            "type": "string",
+            "enum": ["wholecard", "vgpu"],
+        }
+        errors = validator.validate(spec)
+        self.assertIn(
+            "InferenceServiceAccelerator must not declare gpu_mode; wholecard vs vGPU is implied by memory",
+            errors,
+        )
+
     def test_authenticated_reads_declare_auth_failures(self) -> None:
         paths = self.spec["paths"]
         for path, method in (
