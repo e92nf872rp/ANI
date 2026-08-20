@@ -2595,7 +2595,7 @@ export interface components {
             name: string;
             display_name: string;
         };
-        /** @description 跨租户管理员列表项。仅返回 role ∈ (tenant-owner, tenant-admin) 或正在被邀请的用户； is_inviting 仅作标记，不影响 role/status（邀请中用户仍展示原有角色，可为 user）。 列表不返回 created_at/updated_at。mfa_required 为用户级 MFA 强制开关（users.mfa_required）。 */
+        /** @description 跨租户管理员列表项。仅返回 role ∈ (tenant-owner, tenant-admin) 或正在被邀请的用户； is_inviting 仅作标记，不影响 role/status（邀请中用户仍展示原有角色，可为 user）。 列表不返回 created_at/updated_at。 */
         AdminWithTenant: {
             /** Format: uuid */
             id: string;
@@ -2616,8 +2616,6 @@ export interface components {
             source: "local" | "third_party";
             /** Format: date-time */
             last_login_at?: string | null;
-            /** @description 用户级 MFA 强制开关（users.mfa_required）；非租户级 tenant_auth.mfa_required */
-            mfa_required: boolean;
             tenant: components["schemas"]["TenantRef"];
         };
         /** @description 管理员详情（不含 password_hash、无顶层 tenant_id 冗余）； 相比 AdminWithTenant 额外返回 created_at/updated_at。 */

@@ -1153,11 +1153,11 @@ components:
 
     AdminWithTenant:
       type: object
-      required: [id, email, username, role, status, is_inviting, source, mfa_required, tenant]
+      required: [id, email, username, role, status, is_inviting, source, tenant]
       description: >
         跨租户管理员列表项。仅返回 role ∈ (tenant-owner, tenant-admin) 或正在被邀请的用户；
         is_inviting 仅作标记，不影响 role/status（邀请中用户仍展示原有角色，可为 user）。
-        列表不返回 created_at/updated_at。mfa_required 为用户级 MFA 强制开关（users.mfa_required）。
+        列表不返回 created_at/updated_at。
       properties:
         id:           { type: string, format: uuid }
         email:        { type: string, format: email }
@@ -1168,7 +1168,6 @@ components:
         is_inviting:  { type: boolean, description: "true = 该租户下存在 status='inviting' 的邀请；仅作标记，不影响 role/status" }
         source:       { type: string, enum: [local, third_party] }
         last_login_at: { type: string, format: date-time, nullable: true }
-        mfa_required: { type: boolean, description: "用户级 MFA 强制开关（users.mfa_required）；非租户级 tenant_auth.mfa_required" }
         tenant:       { $ref: '#/components/schemas/TenantRef' }
 
     AdminDetail:
