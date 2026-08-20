@@ -1,8 +1,8 @@
 # INFERENCE-SERVICE-GPU-LWS-RUNTIME-FIX-C37
 
-> 日期：2026-08-19  
-> 状态：local/logic verified  
-> 前置：`INFERENCE-SERVICE-ENGINE-VGPU-C36`  
+> 日期：2026-08-19
+> 状态：local/logic verified
+> 前置：`INFERENCE-SERVICE-ENGINE-VGPU-C36`
 > 范围：默认 GPU/LWS 启动与 Core PlatformWorkload 渲染；不含 OpenAPI、不含 Console、不含现网 rollout、不含新产品 live
 
 ## 目标

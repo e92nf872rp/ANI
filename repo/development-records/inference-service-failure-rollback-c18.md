@@ -1,8 +1,8 @@
 # INFERENCE-SERVICE-FAILURE-ROLLBACK-C18
 
-> 日期：2026-08-15  
-> 状态：local/logic verified  
-> 方案依据：`services/docs/console-modules/inference/inference-service-design.md` 6.4 / 9.3 / 9.4 / 17.1  
+> 日期：2026-08-15
+> 状态：local/logic verified
+> 方案依据：`services/docs/console-modules/inference/inference-service-design.md` 6.4 / 9.3 / 9.4 / 17.1
 > 前置：`INFERENCE-SERVICE-CLUSTERIP-NP-LIVE-C17`
 
 ## 完成范围

@@ -1,8 +1,8 @@
 # INFERENCE-SERVICE-RUNTIME-C13
 
-> 日期：2026-08-15  
-> 状态：local/logic verified  
-> 方案依据：`services/docs/console-modules/inference/inference-service-design.md` 阶段 D（单节点 CPU/GPU 同一入口）  
+> 日期：2026-08-15
+> 状态：local/logic verified
+> 方案依据：`services/docs/console-modules/inference/inference-service-design.md` 阶段 D（单节点 CPU/GPU 同一入口）
 > 前置：`INFERENCE-PLATFORM-WORKLOAD-K8S-LIVE-C12`
 
 ## 完成范围

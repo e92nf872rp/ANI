@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -65,58 +66,85 @@ func (s *KubernetesPlatformWorkloadService) Create(ctx context.Context, tenantID
 		return ports.PlatformWorkloadRecord{}, err
 	}
 	applied := enrichPlatformWorkloadAccelerator(caps, spec)
-	s.mu.Lock()
-	if existing, ok := s.state.intent(tenantID, spec.IdempotencyKey); ok {
-		item, found := s.state.getRaw(tenantID, existing.workloadID)
-		s.mu.Unlock()
-		if !found || existing.fingerprint != fingerprint {
-			return ports.PlatformWorkloadRecord{}, fmt.Errorf("%w: idempotency key reused for a different platform workload", ports.ErrConflict)
-		}
-		return item.record, nil
-	}
-	if _, taken := s.state.nameID(tenantID, spec.Name); taken {
-		s.mu.Unlock()
-		return ports.PlatformWorkloadRecord{}, fmt.Errorf("%w: platform workload name already exists", ports.ErrConflict)
-	}
-	now := s.now()
-	id := uuid.NewString()
-	if parsed, err := uuid.Parse(strings.TrimSpace(spec.Name)); err == nil {
-		id = parsed.String()
-	}
-	item := kubernetesPlatformWorkload{
-		record: ports.PlatformWorkloadRecord{
-			ID:                     id,
-			TenantID:               tenantID,
-			Name:                   spec.Name,
-			State:                  ports.PlatformWorkloadProvisioning,
-			Generation:             1,
-			DesiredReplicas:        spec.Replicas,
-			RuntimeShape:           platformWorkloadRuntimeShapeFor(spec),
-			TopologyProfileID:      spec.Topology.ProfileID,
-			TopologyProfileVersion: spec.Topology.ProfileVersion,
-			CreatedAt:              now,
-			UpdatedAt:              now,
-		},
-		spec: applied,
-	}
-	if err := s.state.put(item); err != nil {
-		s.mu.Unlock()
-		return ports.PlatformWorkloadRecord{}, err
-	}
-	s.state.putIntent(tenantID, spec.IdempotencyKey, platformWorkloadIntent{fingerprint: fingerprint, workloadID: id})
-	s.mu.Unlock()
-
-	obs, err := s.runtime.Apply(ctx, tenantID, id, applied)
-	if err != nil {
+	for {
 		s.mu.Lock()
-		s.state.remove(tenantID, id, spec.Name, spec.IdempotencyKey)
+		existing, found, err := s.state.intent(tenantID, spec.IdempotencyKey)
+		if err != nil {
+			s.mu.Unlock()
+			return ports.PlatformWorkloadRecord{}, err
+		}
+		if found {
+			item, ok, getErr := s.state.getRaw(tenantID, existing.workloadID)
+			s.mu.Unlock()
+			if getErr != nil {
+				return ports.PlatformWorkloadRecord{}, getErr
+			}
+			if !ok || existing.fingerprint != fingerprint {
+				return ports.PlatformWorkloadRecord{}, platformWorkloadIntentConflict()
+			}
+			if existing.succeeded() {
+				return item.record, nil
+			}
+			return s.finishCreate(ctx, tenantID, item.record.ID, spec.IdempotencyKey, fingerprint, item.spec, false)
+		}
+		if _, taken := s.state.nameID(tenantID, spec.Name); taken {
+			s.mu.Unlock()
+			return ports.PlatformWorkloadRecord{}, fmt.Errorf("%w: platform workload name already exists", ports.ErrConflict)
+		}
+		now := s.now()
+		id := uuid.NewString()
+		if parsed, err := uuid.Parse(strings.TrimSpace(spec.Name)); err == nil {
+			id = parsed.String()
+		}
+		item := kubernetesPlatformWorkload{
+			record: ports.PlatformWorkloadRecord{
+				ID:                     id,
+				TenantID:               tenantID,
+				Name:                   spec.Name,
+				State:                  ports.PlatformWorkloadProvisioning,
+				Generation:             1,
+				DesiredReplicas:        spec.Replicas,
+				RuntimeShape:           platformWorkloadRuntimeShapeFor(spec),
+				TopologyProfileID:      spec.Topology.ProfileID,
+				TopologyProfileVersion: spec.Topology.ProfileVersion,
+				CreatedAt:              now,
+				UpdatedAt:              now,
+			},
+			spec: applied,
+		}
+		if err := s.state.putWithIntent(item, spec.IdempotencyKey, pendingIntent(fingerprint, id)); err != nil {
+			s.mu.Unlock()
+			if errors.Is(err, errPlatformWorkloadIntentReplay) {
+				continue
+			}
+			return ports.PlatformWorkloadRecord{}, err
+		}
 		s.mu.Unlock()
+		return s.finishCreate(ctx, tenantID, id, spec.IdempotencyKey, fingerprint, applied, true)
+	}
+}
+
+func (s *KubernetesPlatformWorkloadService) finishCreate(ctx context.Context, tenantID, workloadID, idempotencyKey, fingerprint string, spec ports.PlatformWorkloadCreateSpec, rollbackOnFailure bool) (ports.PlatformWorkloadRecord, error) {
+	obs, err := s.runtime.Apply(ctx, tenantID, workloadID, spec)
+	if err != nil {
+		if rollbackOnFailure {
+			if delErr := s.runtime.Delete(ctx, tenantID, workloadID, spec); delErr != nil {
+				return ports.PlatformWorkloadRecord{}, err
+			}
+			s.mu.Lock()
+			s.state.remove(tenantID, workloadID, spec.Name, idempotencyKey)
+			s.mu.Unlock()
+		}
 		return ports.PlatformWorkloadRecord{}, err
 	}
-	if observed, observeErr := s.runtime.Observe(ctx, tenantID, id, applied); observeErr == nil {
+	if observed, observeErr := s.runtime.Observe(ctx, tenantID, workloadID, spec); observeErr == nil {
 		obs = observed
 	}
-	return s.storeObservation(tenantID, id, obs, ""), nil
+	record := s.storeObservation(tenantID, workloadID, obs, "")
+	if err := s.markIntentSucceeded(tenantID, idempotencyKey, fingerprint, workloadID); err != nil {
+		return ports.PlatformWorkloadRecord{}, err
+	}
+	return record, nil
 }
 
 func (s *KubernetesPlatformWorkloadService) Get(ctx context.Context, tenantID, workloadID string) (ports.PlatformWorkloadRecord, error) {
@@ -152,37 +180,61 @@ func (s *KubernetesPlatformWorkloadService) UpdateReplicas(ctx context.Context, 
 		return ports.PlatformWorkloadRecord{}, err
 	}
 	s.mu.Lock()
-	if existing, ok := s.state.intent(tenantID, idempotencyKey); ok {
-		item, found := s.state.getRaw(tenantID, existing.workloadID)
-		s.mu.Unlock()
-		if !found || existing.fingerprint != fingerprint || existing.workloadID != workloadID {
-			return ports.PlatformWorkloadRecord{}, fmt.Errorf("%w: idempotency key reused for a different platform workload", ports.ErrConflict)
-		}
-		return item.record, nil
-	}
-	item, err := s.state.get(tenantID, workloadID)
+	existing, found, err := s.state.intent(tenantID, idempotencyKey)
 	if err != nil {
 		s.mu.Unlock()
 		return ports.PlatformWorkloadRecord{}, err
 	}
-	if item.spec.Topology.Mode != "single_node" {
+	var spec ports.PlatformWorkloadCreateSpec
+	var stopped bool
+	var record ports.PlatformWorkloadRecord
+	if found {
+		item, ok, getErr := s.state.getRaw(tenantID, existing.workloadID)
 		s.mu.Unlock()
-		return ports.PlatformWorkloadRecord{}, fmt.Errorf("%w: only single_node replicas can be updated", ports.ErrFailedPrecondition)
-	}
-	item.spec.Replicas = replicas
-	item.record.DesiredReplicas = replicas
-	item.record.Generation++
-	item.record.UpdatedAt = s.now()
-	if err := s.state.put(item); err != nil {
+		if getErr != nil {
+			return ports.PlatformWorkloadRecord{}, getErr
+		}
+		if !ok || existing.fingerprint != fingerprint || existing.workloadID != workloadID {
+			return ports.PlatformWorkloadRecord{}, platformWorkloadIntentConflict()
+		}
+		if existing.succeeded() {
+			return item.record, nil
+		}
+		spec = item.spec
+		stopped = item.record.State == ports.PlatformWorkloadStopped
+		record = item.record
+	} else {
+		item, err := s.state.get(tenantID, workloadID)
+		if err != nil {
+			s.mu.Unlock()
+			return ports.PlatformWorkloadRecord{}, err
+		}
+		if item.spec.Topology.Mode != "single_node" {
+			s.mu.Unlock()
+			return ports.PlatformWorkloadRecord{}, fmt.Errorf("%w: only single_node replicas can be updated", ports.ErrFailedPrecondition)
+		}
+		item.spec.Replicas = replicas
+		item.record.DesiredReplicas = replicas
+		item.record.Generation++
+		item.record.UpdatedAt = s.now()
+		if err := s.state.put(item); err != nil {
+			s.mu.Unlock()
+			return ports.PlatformWorkloadRecord{}, err
+		}
+		if err := s.state.putIntent(tenantID, idempotencyKey, pendingIntent(fingerprint, workloadID)); err != nil {
+			s.mu.Unlock()
+			return ports.PlatformWorkloadRecord{}, err
+		}
+		stopped = item.record.State == ports.PlatformWorkloadStopped
+		spec = item.spec
+		record = item.record
 		s.mu.Unlock()
-		return ports.PlatformWorkloadRecord{}, err
 	}
-	s.state.putIntent(tenantID, idempotencyKey, platformWorkloadIntent{fingerprint: fingerprint, workloadID: workloadID})
-	stopped := item.record.State == ports.PlatformWorkloadStopped
-	spec := item.spec
-	s.mu.Unlock()
 	if stopped {
-		return item.record, nil
+		if err := s.markIntentSucceeded(tenantID, idempotencyKey, fingerprint, workloadID); err != nil {
+			return ports.PlatformWorkloadRecord{}, err
+		}
+		return record, nil
 	}
 	if _, err := s.runtime.Apply(ctx, tenantID, workloadID, spec); err != nil {
 		return ports.PlatformWorkloadRecord{}, err
@@ -191,7 +243,11 @@ func (s *KubernetesPlatformWorkloadService) UpdateReplicas(ctx context.Context, 
 	if err != nil {
 		return ports.PlatformWorkloadRecord{}, err
 	}
-	return s.storeObservation(tenantID, workloadID, obs, ""), nil
+	updated := s.storeObservation(tenantID, workloadID, obs, "")
+	if err := s.markIntentSucceeded(tenantID, idempotencyKey, fingerprint, workloadID); err != nil {
+		return ports.PlatformWorkloadRecord{}, err
+	}
+	return updated, nil
 }
 
 func (s *KubernetesPlatformWorkloadService) ApplyLifecycle(ctx context.Context, tenantID, workloadID, idempotencyKey, action string) (ports.PlatformWorkloadRecord, error) {
@@ -208,22 +264,38 @@ func (s *KubernetesPlatformWorkloadService) ApplyLifecycle(ctx context.Context, 
 		return ports.PlatformWorkloadRecord{}, err
 	}
 	s.mu.Lock()
-	if existing, ok := s.state.intent(tenantID, idempotencyKey); ok {
-		item, found := s.state.getRaw(tenantID, existing.workloadID)
-		s.mu.Unlock()
-		if !found || existing.fingerprint != fingerprint || existing.workloadID != workloadID {
-			return ports.PlatformWorkloadRecord{}, fmt.Errorf("%w: idempotency key reused for a different platform workload", ports.ErrConflict)
-		}
-		return item.record, nil
-	}
-	item, err := s.state.get(tenantID, workloadID)
+	existing, found, err := s.state.intent(tenantID, idempotencyKey)
 	if err != nil {
 		s.mu.Unlock()
 		return ports.PlatformWorkloadRecord{}, err
 	}
-	s.state.putIntent(tenantID, idempotencyKey, platformWorkloadIntent{fingerprint: fingerprint, workloadID: workloadID})
-	spec := item.spec
-	s.mu.Unlock()
+	var spec ports.PlatformWorkloadCreateSpec
+	if found {
+		item, ok, getErr := s.state.getRaw(tenantID, existing.workloadID)
+		s.mu.Unlock()
+		if getErr != nil {
+			return ports.PlatformWorkloadRecord{}, getErr
+		}
+		if !ok || existing.fingerprint != fingerprint || existing.workloadID != workloadID {
+			return ports.PlatformWorkloadRecord{}, platformWorkloadIntentConflict()
+		}
+		if existing.succeeded() {
+			return item.record, nil
+		}
+		spec = item.spec
+	} else {
+		item, err := s.state.get(tenantID, workloadID)
+		if err != nil {
+			s.mu.Unlock()
+			return ports.PlatformWorkloadRecord{}, err
+		}
+		if err := s.state.putIntent(tenantID, idempotencyKey, pendingIntent(fingerprint, workloadID)); err != nil {
+			s.mu.Unlock()
+			return ports.PlatformWorkloadRecord{}, err
+		}
+		spec = item.spec
+		s.mu.Unlock()
+	}
 
 	switch action {
 	case "stop":
@@ -231,9 +303,9 @@ func (s *KubernetesPlatformWorkloadService) ApplyLifecycle(ctx context.Context, 
 			return ports.PlatformWorkloadRecord{}, err
 		}
 		s.mu.Lock()
-		defer s.mu.Unlock()
 		item, err := s.state.get(tenantID, workloadID)
 		if err != nil {
+			s.mu.Unlock()
 			return ports.PlatformWorkloadRecord{}, err
 		}
 		item.record.State = ports.PlatformWorkloadStopped
@@ -242,6 +314,11 @@ func (s *KubernetesPlatformWorkloadService) ApplyLifecycle(ctx context.Context, 
 		item.record.Reason = "stopped"
 		item.record.UpdatedAt = s.now()
 		if err := s.state.put(item); err != nil {
+			s.mu.Unlock()
+			return ports.PlatformWorkloadRecord{}, err
+		}
+		s.mu.Unlock()
+		if err := s.markIntentSucceeded(tenantID, idempotencyKey, fingerprint, workloadID); err != nil {
 			return ports.PlatformWorkloadRecord{}, err
 		}
 		return item.record, nil
@@ -257,7 +334,11 @@ func (s *KubernetesPlatformWorkloadService) ApplyLifecycle(ctx context.Context, 
 	if err != nil {
 		obs = platformWorkloadObservation{Endpoint: platformWorkloadEndpoint(tenantID, spec)}
 	}
-	return s.storeObservation(tenantID, workloadID, obs, action), nil
+	record := s.storeObservation(tenantID, workloadID, obs, action)
+	if err := s.markIntentSucceeded(tenantID, idempotencyKey, fingerprint, workloadID); err != nil {
+		return ports.PlatformWorkloadRecord{}, err
+	}
+	return record, nil
 }
 
 func (s *KubernetesPlatformWorkloadService) Delete(ctx context.Context, tenantID, workloadID, idempotencyKey string) (ports.PlatformWorkloadRecord, error) {
@@ -269,31 +350,55 @@ func (s *KubernetesPlatformWorkloadService) Delete(ctx context.Context, tenantID
 		return ports.PlatformWorkloadRecord{}, err
 	}
 	s.mu.Lock()
-	if existing, ok := s.state.intent(tenantID, idempotencyKey); ok {
-		item, found := s.state.getRaw(tenantID, existing.workloadID)
+	existing, found, err := s.state.intent(tenantID, idempotencyKey)
+	if err != nil {
 		s.mu.Unlock()
-		if !found || existing.fingerprint != fingerprint || existing.workloadID != workloadID {
-			return ports.PlatformWorkloadRecord{}, fmt.Errorf("%w: idempotency key reused for a different platform workload", ports.ErrConflict)
+		return ports.PlatformWorkloadRecord{}, err
+	}
+	var spec ports.PlatformWorkloadCreateSpec
+	if found {
+		item, ok, getErr := s.state.getRaw(tenantID, existing.workloadID)
+		s.mu.Unlock()
+		if getErr != nil {
+			return ports.PlatformWorkloadRecord{}, getErr
 		}
-		return item.record, nil
-	}
-	item, ok := s.state.getRaw(tenantID, workloadID)
-	if !ok {
+		if !ok || existing.fingerprint != fingerprint || existing.workloadID != workloadID {
+			return ports.PlatformWorkloadRecord{}, platformWorkloadIntentConflict()
+		}
+		if existing.succeeded() {
+			return item.record, nil
+		}
+		spec = item.spec
+	} else {
+		item, ok, getErr := s.state.getRaw(tenantID, workloadID)
+		if getErr != nil {
+			s.mu.Unlock()
+			return ports.PlatformWorkloadRecord{}, getErr
+		}
+		if !ok {
+			s.mu.Unlock()
+			return ports.PlatformWorkloadRecord{}, ports.ErrNotFound
+		}
+		spec = item.spec
+		if err := s.state.putIntent(tenantID, idempotencyKey, pendingIntent(fingerprint, workloadID)); err != nil {
+			s.mu.Unlock()
+			return ports.PlatformWorkloadRecord{}, err
+		}
 		s.mu.Unlock()
-		return ports.PlatformWorkloadRecord{}, ports.ErrNotFound
 	}
-	spec := item.spec
-	s.state.putIntent(tenantID, idempotencyKey, platformWorkloadIntent{fingerprint: fingerprint, workloadID: workloadID})
-	s.mu.Unlock()
 
 	if err := s.runtime.Delete(ctx, tenantID, workloadID, spec); err != nil {
 		return ports.PlatformWorkloadRecord{}, err
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	item, ok = s.state.getRaw(tenantID, workloadID)
+	item, ok, getErr := s.state.getRaw(tenantID, workloadID)
+	if getErr != nil {
+		s.mu.Unlock()
+		return ports.PlatformWorkloadRecord{}, getErr
+	}
 	if !ok {
+		s.mu.Unlock()
 		return ports.PlatformWorkloadRecord{}, ports.ErrNotFound
 	}
 	item.deleted = true
@@ -302,9 +407,14 @@ func (s *KubernetesPlatformWorkloadService) Delete(ctx context.Context, tenantID
 	item.record.InternalEndpoint = ""
 	item.record.UpdatedAt = s.now()
 	if err := s.state.put(item); err != nil {
+		s.mu.Unlock()
 		return ports.PlatformWorkloadRecord{}, err
 	}
 	s.state.deleteName(tenantID, item.record.Name)
+	s.mu.Unlock()
+	if err := s.markIntentSucceeded(tenantID, idempotencyKey, fingerprint, workloadID); err != nil {
+		return ports.PlatformWorkloadRecord{}, err
+	}
 	return item.record, nil
 }
 
@@ -321,11 +431,17 @@ func (s *KubernetesPlatformWorkloadService) Logs(ctx context.Context, tenantID, 
 	return s.runtime.Logs(ctx, tenantID, workloadID, item.spec, limit, cursor, level)
 }
 
+func (s *KubernetesPlatformWorkloadService) markIntentSucceeded(tenantID, idempotencyKey, fingerprint, workloadID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state.putIntent(tenantID, idempotencyKey, succeededIntent(fingerprint, workloadID))
+}
+
 func (s *KubernetesPlatformWorkloadService) storeObservation(tenantID, workloadID string, obs platformWorkloadObservation, action string) ports.PlatformWorkloadRecord {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	item, ok := s.state.getRaw(tenantID, workloadID)
-	if !ok {
+	item, ok, err := s.state.getRaw(tenantID, workloadID)
+	if err != nil || !ok {
 		return ports.PlatformWorkloadRecord{}
 	}
 	item.record.DesiredReplicas = item.spec.Replicas

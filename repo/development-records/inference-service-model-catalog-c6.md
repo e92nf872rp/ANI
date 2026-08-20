@@ -1,8 +1,8 @@
 # INFERENCE-SERVICE-MODEL-CATALOG-C6
 
-> 日期：2026-08-15  
-> 状态：local/logic verified  
-> 方案依据：`services/docs/console-modules/inference/inference-service-design.md` 4.3 / 9.1 / 10.1  
+> 日期：2026-08-15
+> 状态：local/logic verified
+> 方案依据：`services/docs/console-modules/inference/inference-service-design.md` 4.3 / 9.1 / 10.1
 > 前置：Core PR #99、Services PR #101、`INFERENCE-SERVICE-GATEWAY-GRPC-C4`、`INFERENCE-PLATFORM-WORKLOAD-LOCAL-C5`
 
 ## 完成范围

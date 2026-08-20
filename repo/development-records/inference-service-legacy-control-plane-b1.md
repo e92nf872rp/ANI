@@ -1,8 +1,8 @@
 # INFERENCE-SERVICE-LEGACY-CONTROL-PLANE-B1
 
-> 日期：2026-08-17  
-> 状态：local/logic verified  
-> 方案依据：`services/docs/console-modules/inference/inference-service-design.md` 阶段 B.1  
+> 日期：2026-08-17
+> 状态：local/logic verified
+> 方案依据：`services/docs/console-modules/inference/inference-service-design.md` 阶段 B.1
 > 前置：`INFERENCE-SERVICE-GATEWAY-GRPC-C4`
 
 ## 完成范围

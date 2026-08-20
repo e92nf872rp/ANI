@@ -258,18 +258,43 @@ func (c *KubernetesRESTClient) ApplyManifests(ctx context.Context, manifests []p
 		return nil, fmt.Errorf("%w: at least one manifest is required for Kubernetes apply", ports.ErrInvalid)
 	}
 	refs := make([]string, 0, len(manifests))
+	applied := make([]kubernetesResource, 0, len(manifests))
 	for _, manifest := range manifests {
 		resource, err := parseKubernetesResource(manifest)
 		if err != nil {
-			return nil, err
+			return nil, c.compensateAppliedManifests(ctx, applied, err)
 		}
 		query := "fieldManager=" + url.QueryEscape(c.fieldManager) + "&force=true"
 		if _, err := c.do(ctx, http.MethodPatch, c.resourceURL(resource, query), kubernetesApplyPatchContentType, []byte(manifest.Content)); err != nil {
-			return nil, err
+			return nil, c.compensateAppliedManifests(ctx, applied, err)
 		}
+		applied = append(applied, resource)
 		refs = append(refs, resource.ref())
 	}
 	return refs, nil
+}
+
+func (c *KubernetesRESTClient) compensateAppliedManifests(ctx context.Context, applied []kubernetesResource, applyErr error) error {
+	if len(applied) == 0 {
+		return applyErr
+	}
+	var compensateErr error
+	for i := len(applied) - 1; i >= 0; i-- {
+		resource := applied[i]
+		if resource.Kind == "Namespace" {
+			continue
+		}
+		_, err := c.do(ctx, http.MethodDelete, c.resourceURL(resource, ""), "", nil)
+		if err != nil && !isKubernetesNotFound(err) {
+			if compensateErr == nil {
+				compensateErr = err
+			}
+		}
+	}
+	if compensateErr != nil {
+		return fmt.Errorf("%w: compensate delete failed: %v", applyErr, compensateErr)
+	}
+	return applyErr
 }
 
 func (c *KubernetesRESTClient) ObserveNetworkResource(ctx context.Context, request ports.NetworkProviderStatusRequest) (ports.NetworkProviderStatusResult, error) {

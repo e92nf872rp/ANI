@@ -1,8 +1,8 @@
 # INFERENCE-SERVICE-TEST-C10
 
-> 日期：2026-08-15  
-> 状态：superseded  
-> 方案依据：产品口径纠正——`/test` 只是契约兼容测试路径，不是推理服务产品能力  
+> 日期：2026-08-15
+> 状态：superseded
+> 方案依据：产品口径纠正——`/test` 只是契约兼容测试路径，不是推理服务产品能力
 > 前置：`INFERENCE-SERVICE-GATEWAY-GRPC-C4`
 
 C10 曾实现 `POST /inference-services/{service_id}/test` 的 Gateway + 内部 gRPC + Tester。该入口会把控制面请求送到 runtime，增加 SSRF、超时和幂等面，且产品侧用不到。实现已删除。

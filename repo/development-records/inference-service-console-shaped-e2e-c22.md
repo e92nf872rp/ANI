@@ -1,8 +1,8 @@
 # INFERENCE-SERVICE-CONSOLE-SHAPED-E2E-C22
 
-> 日期：2026-08-17  
-> 状态：live passed（HTTP 进现有 `ani-console` nginx `/api/`，生产 `ani-gateway`，`ANI_AUTH_MODE=auth_service`）  
-> 方案依据：`services/docs/console-modules/inference/inference-service.md`  
+> 日期：2026-08-17
+> 状态：live passed（HTTP 进现有 `ani-console` nginx `/api/`，生产 `ani-gateway`，`ANI_AUTH_MODE=auth_service`）
+> 方案依据：`services/docs/console-modules/inference/inference-service.md`
 > 前置：`INFERENCE-SERVICE-INCLUSTER-E2E-C21`
 
 ## 完成范围

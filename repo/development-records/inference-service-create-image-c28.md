@@ -1,8 +1,8 @@
 # INFERENCE-SERVICE-CREATE-IMAGE-C28
 
-> 日期：2026-08-18  
-> 状态：local/logic verified  
-> 前置：`INFERENCE-SERVICE-CREATE-IMAGE-CONTRACT-C27`  
+> 日期：2026-08-18
+> 状态：local/logic verified
+> 前置：`INFERENCE-SERVICE-CREATE-IMAGE-CONTRACT-C27`
 > 范围：Gateway 产品 HTTP 解析、`InferenceControl` proto、inference-service Creator/投影；不含 OpenAPI 再改、不含删除进程默认镜像环境变量、不含 live
 
 ## 目标

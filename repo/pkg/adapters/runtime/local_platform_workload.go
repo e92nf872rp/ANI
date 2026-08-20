@@ -20,9 +20,27 @@ var (
 	platformWorkloadImageRE = regexp.MustCompile(`^.+@sha256:[a-f0-9]{64}$`)
 )
 
+const (
+	platformWorkloadIntentPending   = "pending"
+	platformWorkloadIntentSucceeded = "succeeded"
+)
+
 type platformWorkloadIntent struct {
 	fingerprint string
 	workloadID  string
+	status      string
+}
+
+func pendingIntent(fingerprint, workloadID string) platformWorkloadIntent {
+	return platformWorkloadIntent{fingerprint: fingerprint, workloadID: workloadID, status: platformWorkloadIntentPending}
+}
+
+func succeededIntent(fingerprint, workloadID string) platformWorkloadIntent {
+	return platformWorkloadIntent{fingerprint: fingerprint, workloadID: workloadID, status: platformWorkloadIntentSucceeded}
+}
+
+func (i platformWorkloadIntent) succeeded() bool {
+	return i.status == platformWorkloadIntentSucceeded
 }
 
 type localPlatformWorkload struct {

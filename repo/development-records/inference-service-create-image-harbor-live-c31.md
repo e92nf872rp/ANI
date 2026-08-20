@@ -1,7 +1,7 @@
 # INFERENCE-SERVICE-CREATE-IMAGE-HARBOR-LIVE-C31
 
-> 日期：2026-08-18  
-> 状态：live passed（生产 `ani-system/ani-gateway` + `inference-service`，`ANI_AUTH_MODE=auth_service`）  
+> 日期：2026-08-18
+> 状态：live passed（生产 `ani-system/ani-gateway` + `inference-service`，`ANI_AUTH_MODE=auth_service`）
 > 前置：`INFERENCE-SERVICE-CREATE-IMAGE-LIVE-C30`、`INFERENCE-SERVICE-CREATE-IMAGE-C28`、`INFERENCE-SERVICE-LOCAL-MODEL-SOURCE-C23`
 
 ## 完成范围
@@ -29,7 +29,7 @@ PATH=/tmp/ani-pybin:$PATH make validate-doc-entrypoints
 git diff --check
 ```
 
-evidence：`development-records/live-evidence/inference-create-image-harbor-live-20260818.json`  
+evidence：`development-records/live-evidence/inference-create-image-harbor-live-20260818.json`
 gate：`deploy/real-k8s-lab/inference-create-image-harbor-live-gate.yaml`（`status: live`）
 
 ## 明确未完成

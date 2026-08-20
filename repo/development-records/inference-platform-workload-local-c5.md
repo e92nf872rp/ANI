@@ -1,8 +1,8 @@
 # INFERENCE-PLATFORM-WORKLOAD-LOCAL-C5
 
-> 日期：2026-08-15  
-> 状态：local/logic verified  
-> 方案依据：`services/docs/console-modules/inference/inference-service-design.md` 阶段 A.4 / D 前置  
+> 日期：2026-08-15
+> 状态：local/logic verified
+> 方案依据：`services/docs/console-modules/inference/inference-service-design.md` 阶段 A.4 / D 前置
 > 前置：Core PR #99、Services PR #101、`INFERENCE-SERVICE-GATEWAY-GRPC-C4`
 
 ## 完成范围

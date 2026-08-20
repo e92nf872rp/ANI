@@ -43,7 +43,7 @@ PATH=/tmp/ani-pybin:$PATH make validate-doc-entrypoints
 git diff --check
 ```
 
-evidence：`development-records/live-evidence/gpu-plugin-node-partition-live-20260818.json`  
+evidence：`development-records/live-evidence/gpu-plugin-node-partition-live-20260818.json`
 gate：`deploy/real-k8s-lab/gpu-plugin-node-partition-live-gate.yaml`（`status: live`）
 
 ## 明确未完成

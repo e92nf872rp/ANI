@@ -15,13 +15,14 @@ import (
 )
 
 type fakePlatformWorkloadRuntime struct {
-	mu       sync.Mutex
-	applies  []ports.PlatformWorkloadCreateSpec
-	deletes  int
-	applyErr error
-	ready    bool
-	missing  bool
-	caps     *ports.PlatformWorkloadCapabilities
+	mu        sync.Mutex
+	applies   []ports.PlatformWorkloadCreateSpec
+	deletes   int
+	applyErr  error
+	deleteErr error
+	ready     bool
+	missing   bool
+	caps      *ports.PlatformWorkloadCapabilities
 }
 
 func newReadyFakePlatformWorkloadRuntime() *fakePlatformWorkloadRuntime {
@@ -52,6 +53,9 @@ func (f *fakePlatformWorkloadRuntime) Delete(context.Context, string, string, po
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.deletes++
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
 	f.missing = true
 	return nil
 }
@@ -186,11 +190,149 @@ func TestKubernetesPlatformWorkloadApplyFailureDoesNotReserveName(t *testing.T) 
 	if _, err := svc.Create(ctx, tenant, spec); !errors.Is(err, ports.ErrUnavailable) {
 		t.Fatalf("Create() error = %v, want unavailable", err)
 	}
+	if provider.deletes != 1 {
+		t.Fatalf("failed Create() deletes = %d, want compensation delete", provider.deletes)
+	}
 	provider.applyErr = nil
 	provider.ready = true
 	created, err := svc.Create(ctx, tenant, spec)
 	if err != nil || created.Name != spec.Name {
 		t.Fatalf("retry Create() = %+v, %v", created, err)
+	}
+}
+
+func TestKubernetesPlatformWorkloadPendingScaleRetriesProvider(t *testing.T) {
+	provider := newReadyFakePlatformWorkloadRuntime()
+	svc := NewKubernetesPlatformWorkloadService(provider)
+	ctx := context.Background()
+	tenant := "11111111-1111-1111-1111-111111111111"
+	spec := sampleCPUPlatformWorkloadSpec("1df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-cpu-scale-retry")
+	created, err := svc.Create(ctx, tenant, spec)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	provider.applyErr = ports.ErrUnavailable
+	scaleKey := "8df72d71-9d49-46c4-a48a-52bb37b082ab"
+	if _, err := svc.UpdateReplicas(ctx, tenant, created.ID, scaleKey, 2); !errors.Is(err, ports.ErrUnavailable) {
+		t.Fatalf("scale error = %v, want unavailable", err)
+	}
+	if len(provider.applies) != 2 {
+		t.Fatalf("applies after failed scale = %d, want 2", len(provider.applies))
+	}
+	provider.applyErr = nil
+	scaled, err := svc.UpdateReplicas(ctx, tenant, created.ID, scaleKey, 2)
+	if err != nil || scaled.DesiredReplicas != 2 || scaled.Generation != 2 {
+		t.Fatalf("retry scale = %+v err=%v", scaled, err)
+	}
+	if len(provider.applies) != 3 {
+		t.Fatalf("applies after retry scale = %d, want 3", len(provider.applies))
+	}
+	replay, err := svc.UpdateReplicas(ctx, tenant, created.ID, scaleKey, 2)
+	if err != nil || replay.ID != scaled.ID || len(provider.applies) != 3 {
+		t.Fatalf("succeeded scale replay = %+v applies=%d err=%v", replay, len(provider.applies), err)
+	}
+}
+
+func TestKubernetesPlatformWorkloadPendingLifecycleAndDeleteRetryProvider(t *testing.T) {
+	provider := newReadyFakePlatformWorkloadRuntime()
+	svc := NewKubernetesPlatformWorkloadService(provider)
+	ctx := context.Background()
+	tenant := "11111111-1111-1111-1111-111111111111"
+	spec := sampleCPUPlatformWorkloadSpec("1df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-cpu-lifecycle-retry")
+	created, err := svc.Create(ctx, tenant, spec)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	provider.deleteErr = ports.ErrUnavailable
+	stopKey := "2df72d71-9d49-46c4-a48a-52bb37b082ab"
+	if _, err := svc.ApplyLifecycle(ctx, tenant, created.ID, stopKey, "stop"); !errors.Is(err, ports.ErrUnavailable) {
+		t.Fatalf("stop error = %v, want unavailable", err)
+	}
+	if provider.deletes != 1 {
+		t.Fatalf("deletes after failed stop = %d, want 1", provider.deletes)
+	}
+	provider.deleteErr = nil
+	stopped, err := svc.ApplyLifecycle(ctx, tenant, created.ID, stopKey, "stop")
+	if err != nil || stopped.State != ports.PlatformWorkloadStopped || provider.deletes != 2 {
+		t.Fatalf("retry stop = %+v deletes=%d err=%v", stopped, provider.deletes, err)
+	}
+	replayStop, err := svc.ApplyLifecycle(ctx, tenant, created.ID, stopKey, "stop")
+	if err != nil || replayStop.State != ports.PlatformWorkloadStopped || provider.deletes != 2 {
+		t.Fatalf("succeeded stop replay = %+v deletes=%d err=%v", replayStop, provider.deletes, err)
+	}
+
+	started, err := svc.ApplyLifecycle(ctx, tenant, created.ID, "3df72d71-9d49-46c4-a48a-52bb37b082ab", "start")
+	if err != nil || started.State != ports.PlatformWorkloadRunning {
+		t.Fatalf("start = %+v err=%v", started, err)
+	}
+	provider.deleteErr = ports.ErrUnavailable
+	deleteKey := "4df72d71-9d49-46c4-a48a-52bb37b082ab"
+	if _, err := svc.Delete(ctx, tenant, created.ID, deleteKey); !errors.Is(err, ports.ErrUnavailable) {
+		t.Fatalf("delete error = %v, want unavailable", err)
+	}
+	provider.deleteErr = nil
+	if _, err := svc.Delete(ctx, tenant, created.ID, deleteKey); err != nil {
+		t.Fatalf("retry Delete() error = %v", err)
+	}
+	if provider.deletes != 4 {
+		t.Fatalf("deletes = %d, want 4 (failed stop, retry stop, failed delete, retry delete)", provider.deletes)
+	}
+}
+
+func TestKubernetesPlatformWorkloadCreateKeepsTombstoneWhenCompensateFails(t *testing.T) {
+	provider := &fakePlatformWorkloadRuntime{applyErr: ports.ErrUnavailable, deleteErr: ports.ErrUnavailable}
+	svc := NewKubernetesPlatformWorkloadService(provider)
+	ctx := context.Background()
+	tenant := "11111111-1111-1111-1111-111111111111"
+	spec := sampleCPUPlatformWorkloadSpec("1df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-cpu-tombstone")
+	if _, err := svc.Create(ctx, tenant, spec); !errors.Is(err, ports.ErrUnavailable) {
+		t.Fatalf("Create() error = %v, want unavailable", err)
+	}
+	other := spec
+	other.IdempotencyKey = "9df72d71-9d49-46c4-a48a-52bb37b082ab"
+	if _, err := svc.Create(ctx, tenant, other); !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("other-key Create() error = %v, want name conflict tombstone", err)
+	}
+	provider.applyErr = nil
+	provider.deleteErr = nil
+	provider.ready = true
+	created, err := svc.Create(ctx, tenant, spec)
+	if err != nil || created.Name != spec.Name {
+		t.Fatalf("retry Create() = %+v, %v", created, err)
+	}
+	if len(provider.applies) != 2 {
+		t.Fatalf("applies = %d, want pending create retry", len(provider.applies))
+	}
+}
+
+func TestKubernetesPlatformWorkloadPendingCreateRetryDoesNotDeleteLiveRuntime(t *testing.T) {
+	provider := newReadyFakePlatformWorkloadRuntime()
+	store := newMemoryPlatformWorkloadStore()
+	svc := NewKubernetesPlatformWorkloadServiceWithStore(provider, store)
+	ctx := context.Background()
+	tenant := "11111111-1111-1111-1111-111111111111"
+	spec := sampleCPUPlatformWorkloadSpec("1df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-cpu-pending-live")
+	created, err := svc.Create(ctx, tenant, spec)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	fingerprint, err := platformWorkloadFingerprint("create", spec)
+	if err != nil {
+		t.Fatalf("fingerprint: %v", err)
+	}
+	if err := store.putIntent(tenant, spec.IdempotencyKey, pendingIntent(fingerprint, created.ID)); err != nil {
+		t.Fatalf("putIntent() error = %v", err)
+	}
+	provider.applyErr = ports.ErrUnavailable
+	if _, err := svc.Create(ctx, tenant, spec); !errors.Is(err, ports.ErrUnavailable) {
+		t.Fatalf("pending retry error = %v, want unavailable", err)
+	}
+	if provider.deletes != 0 {
+		t.Fatalf("pending create retry deleted live runtime: deletes=%d", provider.deletes)
+	}
+	got, err := svc.Get(ctx, tenant, created.ID)
+	if err != nil || got.ID != created.ID {
+		t.Fatalf("Get after pending retry = %+v, %v", got, err)
 	}
 }
 

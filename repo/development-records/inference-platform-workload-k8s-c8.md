@@ -1,8 +1,8 @@
 # INFERENCE-PLATFORM-WORKLOAD-K8S-C8
 
-> 日期：2026-08-15  
-> 状态：local/logic verified  
-> 方案依据：`services/docs/console-modules/inference/inference-service-design.md` 阶段 D 前置  
+> 日期：2026-08-15
+> 状态：local/logic verified
+> 方案依据：`services/docs/console-modules/inference/inference-service-design.md` 阶段 D 前置
 > 前置：Core PR #99、`INFERENCE-PLATFORM-WORKLOAD-LOCAL-C5`、`INFERENCE-SERVICE-JWT-C7`
 
 ## 完成范围

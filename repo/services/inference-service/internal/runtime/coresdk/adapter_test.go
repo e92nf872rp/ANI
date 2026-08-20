@@ -1,10 +1,12 @@
 package coresdk
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -300,5 +302,65 @@ func TestEnsureRetriesIdempotencyInProgress(t *testing.T) {
 	}
 	if observed.RuntimeRef.String() != workloadID {
 		t.Fatalf("runtime ref = %s", observed.RuntimeRef)
+	}
+}
+
+func TestHealthAndSmokePassCallerTenantID(t *testing.T) {
+	engine := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	t.Cleanup(engine.Close)
+
+	tenantA := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	tenantB := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	refA := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	refB := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+	var mu sync.Mutex
+	seen := map[string]string{}
+	core := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimPrefix(r.URL.Path, "/api/v1/platform-workloads/")
+		mu.Lock()
+		seen[id] = r.Header.Get("X-Dev-Tenant-ID")
+		mu.Unlock()
+		payload, _ := json.Marshal(map[string]any{
+			"id":                id,
+			"state":             "running",
+			"ready_replicas":    1,
+			"internal_endpoint": engine.URL,
+		})
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(payload)
+	}))
+	t.Cleanup(core.Close)
+
+	rt := New(core.URL, "dev-token")
+	errCh := make(chan error, 4)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		errCh <- rt.Health(t.Context(), tenantA, refA)
+	}()
+	go func() {
+		defer wg.Done()
+		errCh <- rt.Health(t.Context(), tenantB, refB)
+	}()
+	wg.Wait()
+	if err := rt.Smoke(t.Context(), tenantA, refA, "tiny"); err != nil {
+		t.Fatalf("Smoke() error = %v", err)
+	}
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("Health() error = %v", err)
+		}
+	}
+	if seen[refA.String()] != tenantA.String() || seen[refB.String()] != tenantB.String() {
+		t.Fatalf("tenant headers = %#v", seen)
 	}
 }

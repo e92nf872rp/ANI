@@ -198,13 +198,13 @@ func (r *runtimeStub) Delete(_ context.Context, request runtimeport.DeleteReques
 	r.deletes = append(r.deletes, request)
 	return nil
 }
-func (r *runtimeStub) Health(context.Context, uuid.UUID) error {
+func (r *runtimeStub) Health(context.Context, uuid.UUID, uuid.UUID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.healthCalls++
 	return r.healthErr
 }
-func (r *runtimeStub) Smoke(context.Context, uuid.UUID, string) error {
+func (r *runtimeStub) Smoke(context.Context, uuid.UUID, uuid.UUID, string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.smokeCalls++

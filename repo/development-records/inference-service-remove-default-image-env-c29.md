@@ -1,8 +1,8 @@
 # INFERENCE-SERVICE-REMOVE-DEFAULT-IMAGE-ENV-C29
 
-> 日期：2026-08-18  
-> 状态：local/logic verified  
-> 前置：`INFERENCE-SERVICE-CREATE-IMAGE-C28`  
+> 日期：2026-08-18
+> 状态：local/logic verified
+> 前置：`INFERENCE-SERVICE-CREATE-IMAGE-C28`
 > 范围：删除进程默认引擎镜像环境变量与 catalog 占位 digest；不含 OpenAPI、不含 live
 
 ## 目标

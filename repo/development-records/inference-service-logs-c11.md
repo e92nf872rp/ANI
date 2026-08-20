@@ -1,9 +1,9 @@
 # INFERENCE-SERVICE-LOGS-C11
 
-> 日期：2026-08-15  
-> 状态：local/logic verified  
-> 方案依据：`services/docs/console-modules/inference/inference-service-design.md` §13.2  
-> 前置：`INFERENCE-SERVICE-GATEWAY-GRPC-C4`、`INFERENCE-PLATFORM-WORKLOAD-LOCAL-C5`  
+> 日期：2026-08-15
+> 状态：local/logic verified
+> 方案依据：`services/docs/console-modules/inference/inference-service-design.md` §13.2
+> 前置：`INFERENCE-SERVICE-GATEWAY-GRPC-C4`、`INFERENCE-PLATFORM-WORKLOAD-LOCAL-C5`
 > 不包含：`POST /inference-services/{service_id}/test`（C10 已推翻，不再实现）
 
 ## 完成范围

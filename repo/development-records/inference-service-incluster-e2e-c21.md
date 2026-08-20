@@ -1,8 +1,8 @@
 # INFERENCE-SERVICE-INCLUSTER-E2E-C21
 
-> 日期：2026-08-17  
-> 状态：live passed（生产 `ani-system/ani-gateway`，`ANI_AUTH_MODE=auth_service`）  
-> 方案依据：`services/docs/console-modules/inference/inference-service-design.md` 阶段 D / 1.1  
+> 日期：2026-08-17
+> 状态：live passed（生产 `ani-system/ani-gateway`，`ANI_AUTH_MODE=auth_service`）
+> 方案依据：`services/docs/console-modules/inference/inference-service-design.md` 阶段 D / 1.1
 > 前置：`INFERENCE-SERVICE-CPU-VLLM-LIVE-C14`、`INFERENCE-SERVICE-LEGACY-CONTROL-PLANE-B1`
 
 ## 完成范围
@@ -38,7 +38,7 @@ PATH=/tmp/ani-pybin:$PATH make validate-doc-entrypoints
 git diff --check
 ```
 
-evidence：`development-records/live-evidence/inference-incluster-e2e-live-20260817.json`  
+evidence：`development-records/live-evidence/inference-incluster-e2e-live-20260817.json`
 gate：`deploy/real-k8s-lab/inference-incluster-e2e-live-gate.yaml`（`status: live`）
 
 ## 明确未完成

@@ -1,8 +1,8 @@
 # INFERENCE-SERVICE-ENGINE-VGPU-C36
 
-> 日期：2026-08-19  
-> 状态：live passed（生产 `ani-system/ani-gateway` + `inference-service`，`ANI_AUTH_MODE=auth_service`；vGPU Pod Ready 未要求）  
-> 前置：`INFERENCE-SERVICE-ENGINE-EXTRA-ARGS-CONTRACT-C35`、`GPU-PLUGIN-NODE-PARTITION-C33`  
+> 日期：2026-08-19
+> 状态：live passed（生产 `ani-system/ani-gateway` + `inference-service`，`ANI_AUTH_MODE=auth_service`；vGPU Pod Ready 未要求）
+> 前置：`INFERENCE-SERVICE-ENGINE-EXTRA-ARGS-CONTRACT-C35`、`GPU-PLUGIN-NODE-PARTITION-C33`
 > 范围：Gateway handler、`InferenceControl` proto、inference-service Launch/createBody、Core `platform-workloads` 可选 `env`、volcano vGPU inventory/capabilities/资源请求；不含 Console 表单、不含跨节点 LWS live
 
 ## 目标

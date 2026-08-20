@@ -28,14 +28,12 @@ type Runtime struct {
 	httpClient  *http.Client
 	staticToken string
 	minter      *Minter // 按租户 mint JWT；没有则用 staticToken
-	tenants     map[uuid.UUID]uuid.UUID
 }
 
 func New(baseURL, token string) *Runtime {
 	return &Runtime{
 		client:      anisdk.NewClient(strings.TrimRight(baseURL, "/"), ""),
 		staticToken: strings.TrimSpace(token),
-		tenants:     map[uuid.UUID]uuid.UUID{},
 	}
 }
 
@@ -68,7 +66,6 @@ func (r *Runtime) Ensure(ctx context.Context, request runtime.EnsureRequest) (ru
 	if err != nil {
 		return runtime.Observation{}, err
 	}
-	r.tenants[workloadID] = request.TenantID
 	observed, err := r.Observe(ctx, runtime.RuntimeIdentity{TenantID: request.TenantID, ServiceID: request.ServiceID, RuntimeRef: workloadID})
 	if err != nil {
 		return runtime.Observation{RuntimeRef: workloadID}, err
@@ -85,7 +82,6 @@ func (r *Runtime) Observe(ctx context.Context, identity runtime.RuntimeIdentity)
 	if err != nil {
 		return runtime.Observation{}, err
 	}
-	r.tenants[identity.RuntimeRef] = identity.TenantID
 	return observationFromWorkload(payload)
 }
 
@@ -122,8 +118,8 @@ func (r *Runtime) Delete(ctx context.Context, request runtime.DeleteRequest) err
 }
 
 // Health GET 引擎 /health。
-func (r *Runtime) Health(ctx context.Context, runtimeRef uuid.UUID) error {
-	endpoint, err := r.runtimeEndpoint(ctx, runtimeRef)
+func (r *Runtime) Health(ctx context.Context, tenantID, runtimeRef uuid.UUID) error {
+	endpoint, err := r.runtimeEndpoint(ctx, tenantID, runtimeRef)
 	if err != nil {
 		return err
 	}
@@ -131,16 +127,16 @@ func (r *Runtime) Health(ctx context.Context, runtimeRef uuid.UUID) error {
 }
 
 // Smoke 对 ClusterIP 发有界 Chat Completions 探活。
-func (r *Runtime) Smoke(ctx context.Context, runtimeRef uuid.UUID, servedModelName string) error {
-	endpoint, err := r.runtimeEndpoint(ctx, runtimeRef)
+func (r *Runtime) Smoke(ctx context.Context, tenantID, runtimeRef uuid.UUID, servedModelName string) error {
+	endpoint, err := r.runtimeEndpoint(ctx, tenantID, runtimeRef)
 	if err != nil {
 		return err
 	}
 	return probeSmoke(ctx, r.http(), endpoint, servedModelName)
 }
 
-func (r *Runtime) runtimeEndpoint(ctx context.Context, runtimeRef uuid.UUID) (string, error) {
-	observed, err := r.Observe(ctx, runtime.RuntimeIdentity{TenantID: r.tenants[runtimeRef], RuntimeRef: runtimeRef})
+func (r *Runtime) runtimeEndpoint(ctx context.Context, tenantID, runtimeRef uuid.UUID) (string, error) {
+	observed, err := r.Observe(ctx, runtime.RuntimeIdentity{TenantID: tenantID, RuntimeRef: runtimeRef})
 	if err != nil {
 		return "", err
 	}

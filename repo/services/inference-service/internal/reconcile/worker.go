@@ -193,10 +193,10 @@ func (w *Worker) RunOnce(ctx context.Context) (bool, error) {
 	if observed.RuntimeEndpoint == "" {
 		return true, w.conclude(ctx, service, operation, outcome{code: "RUNTIME_ENDPOINT_MISSING", retryable: true}, errors.New("ready runtime endpoint is missing"))
 	}
-	if err := w.runtime.Health(ctx, observed.RuntimeRef); err != nil {
+	if err := w.runtime.Health(ctx, service.TenantID, observed.RuntimeRef); err != nil {
 		return true, w.conclude(ctx, service, operation, outcome{code: "RUNTIME_HEALTH_FAILED", retryable: true}, err)
 	}
-	if err := w.runtime.Smoke(ctx, observed.RuntimeRef, service.ServedModelName); err != nil {
+	if err := w.runtime.Smoke(ctx, service.TenantID, observed.RuntimeRef, service.ServedModelName); err != nil {
 		return true, w.conclude(ctx, service, operation, outcome{code: "RUNTIME_SMOKE_FAILED", retryable: true}, err)
 	}
 	partial.Status = domain.StatusRunning
@@ -376,13 +376,13 @@ func (w *Worker) reconcileScaleRollback(ctx context.Context, service domain.Serv
 		}
 		return w.retry(ctx, operation, codeRuntimeNotReady, errors.New("rollback runtime has not reached the previous replicas"))
 	}
-	if err := w.runtime.Health(ctx, observed.RuntimeRef); err != nil {
+	if err := w.runtime.Health(ctx, service.TenantID, observed.RuntimeRef); err != nil {
 		if w.timedOut(operation) {
 			return w.finishRollback(ctx, service, operation, observed, false)
 		}
 		return w.retry(ctx, operation, "RUNTIME_HEALTH_FAILED", err)
 	}
-	if err := w.runtime.Smoke(ctx, observed.RuntimeRef, service.ServedModelName); err != nil {
+	if err := w.runtime.Smoke(ctx, service.TenantID, observed.RuntimeRef, service.ServedModelName); err != nil {
 		if w.timedOut(operation) {
 			return w.finishRollback(ctx, service, operation, observed, false)
 		}

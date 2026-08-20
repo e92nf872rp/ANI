@@ -42,7 +42,7 @@ PATH=/tmp/ani-pybin:$PATH make validate-doc-entrypoints
 git diff --check
 ```
 
-evidence：`development-records/live-evidence/inference-gpu-vllm-eager-live-20260818.json`  
+evidence：`development-records/live-evidence/inference-gpu-vllm-eager-live-20260818.json`
 gate：`deploy/real-k8s-lab/inference-gpu-vllm-eager-live-gate.yaml`（`status: live`）
 
 ## 明确未完成

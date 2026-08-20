@@ -1,9 +1,9 @@
 # INFERENCE-SERVICE-HTTP-ADAPTER-C3
 
-> 日期：2026-08-15  
-> 状态：superseded  
-> 被取代：`INFERENCE-SERVICE-GATEWAY-GRPC-C4`  
-> 方案依据：`services/docs/console-modules/inference/inference-service-design.md`  
+> 日期：2026-08-15
+> 状态：superseded
+> 被取代：`INFERENCE-SERVICE-GATEWAY-GRPC-C4`
+> 方案依据：`services/docs/console-modules/inference/inference-service-design.md`
 > 前置：Core PR #99、Services PR #101、`INFERENCE-SERVICE-CONTROL-PLANE-C1`、`INFERENCE-SERVICE-LIFECYCLE-CONTROL-PLANE-C2`
 
 独立服务内的 `/api/v1/svc` 产品 HTTP mux 与后续 HMAC TenantResolver 方案已推翻。平台契约要求产品 HTTP 只在 ANI Gateway，服务间走新的 `InferenceControl` gRPC。C1/C2 控制面保留；本批次 HTTP adapter 代码已删除。

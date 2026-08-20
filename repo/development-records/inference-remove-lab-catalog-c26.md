@@ -1,7 +1,7 @@
 # INFERENCE-REMOVE-LAB-CATALOG-C26
 
-> 日期：2026-08-17  
-> 状态：local/logic verified  
+> 日期：2026-08-17
+> 状态：local/logic verified
 > 前置：`INFERENCE-SERVICE-LOCAL-MODEL-SOURCE-C23`、`INFERENCE-REMOVE-LAB-GATEWAY-HARNESS-C25`
 
 ## 完成范围

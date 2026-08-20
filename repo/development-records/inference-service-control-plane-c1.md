@@ -1,8 +1,8 @@
 # INFERENCE-SERVICE-CONTROL-PLANE-C1
 
-> 日期：2026-08-14  
-> 状态：local/logic verified  
-> 方案依据：`services/docs/console-modules/inference/inference-service-design.md` 阶段 C  
+> 日期：2026-08-14
+> 状态：local/logic verified
+> 方案依据：`services/docs/console-modules/inference/inference-service-design.md` 阶段 C
 > 前置契约：Core PR #99、Services PR #101 已合入上游 `main`
 
 ## 完成范围

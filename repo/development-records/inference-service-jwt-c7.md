@@ -1,8 +1,8 @@
 # INFERENCE-SERVICE-JWT-C7
 
-> 日期：2026-08-15  
-> 状态：local/logic verified  
-> 方案依据：Core v1 `BearerAuth` / `x-ani-principal-kind=service`，`inference-service-design.md` 跨层 service-only  
+> 日期：2026-08-15
+> 状态：local/logic verified
+> 方案依据：Core v1 `BearerAuth` / `x-ani-principal-kind=service`，`inference-service-design.md` 跨层 service-only
 > 前置：Core PR #99、`INFERENCE-PLATFORM-WORKLOAD-LOCAL-C5`、`INFERENCE-SERVICE-MODEL-CATALOG-C6`
 
 ## 完成范围

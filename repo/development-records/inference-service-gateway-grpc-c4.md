@@ -1,9 +1,9 @@
 # INFERENCE-SERVICE-GATEWAY-GRPC-C4
 
-> 日期：2026-08-15  
-> 状态：local/logic verified  
-> 方案依据：`services/docs/console-modules/inference/inference-service-design.md`  
-> 前置：Core PR #99、Services PR #101、`INFERENCE-SERVICE-CONTROL-PLANE-C1`、`INFERENCE-SERVICE-LIFECYCLE-CONTROL-PLANE-C2`  
+> 日期：2026-08-15
+> 状态：local/logic verified
+> 方案依据：`services/docs/console-modules/inference/inference-service-design.md`
+> 前置：Core PR #99、Services PR #101、`INFERENCE-SERVICE-CONTROL-PLANE-C1`、`INFERENCE-SERVICE-LIFECYCLE-CONTROL-PLANE-C2`
 > 推翻：`INFERENCE-SERVICE-HTTP-ADAPTER-C3` 独立服务产品 HTTP，以及错误的服务内 HMAC TenantResolver / HTTP composition root
 
 ## 完成范围
