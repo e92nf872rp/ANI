@@ -4078,8 +4078,9 @@ components:
     PlatformUserCreateRequest:
       type: object
       description: "创建平台运营账号；明文密码仅本次请求透传，明文不落日志/审计/响应"
-      required: [email, username, display_name, role, password]
+      required: [idempotency_key, email, username, display_name, role, password]
       properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
         email:           { type: string, format: email, description: "RFC 5322，全局唯一" }
         username:        { type: string, minLength: 1, maxLength: 64, description: "不含冒号；Core 侧会拼接 local: 前缀" }
         display_name:    { type: string, minLength: 1, maxLength: 128 }
@@ -4097,21 +4098,25 @@ components:
     PlatformUserRoleUpdateRequest:
       type: object
       description: "修改平台运营账号角色"
-      required: [role]
+      required: [idempotency_key, role]
       properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
         role:            { type: string, enum: [platform-admin, platform-ops, platform-readonly] }
 
     PlatformUserResetPasswordRequest:
       type: object
       description: "重置平台运营账号密码；明文不落日志/审计/响应"
-      required: [new_password]
+      required: [idempotency_key, new_password]
       properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
         new_password:    { type: string, minLength: 8, maxLength: 64, description: "至少包含大写/小写/数字/特殊字符中的三类，且必须与旧密码不同" }
 
     PlatformUserIdempotentRequest:
       type: object
-      description: "空请求体（幂等键通过 Idempotency-Key header 传递）"
-      properties: {}
+      description: "仅含幂等键的请求体"
+      required: [idempotency_key]
+      properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
 
     TenantUserListResponse:
       type: object
@@ -4156,29 +4161,33 @@ components:
     UserRoleUpdateRequest:
       type: object
       description: "修改租户内角色（不可设 tenant-owner）"
-      required: [role]
+      required: [idempotency_key, role]
       properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
         role: { type: string, enum: [user, auditor, tenant-admin] }
 
     UserStatusUpdateRequest:
       type: object
       description: "设置 users.status"
-      required: [status]
+      required: [idempotency_key, status]
       properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
         status: { type: string, enum: [active, disabled] }
 
     UserTransferOwnershipRequest:
       type: object
       description: "移交租户所有者；target 必须是本租户 active tenant-admin"
-      required: [target_user_id]
+      required: [idempotency_key, target_user_id]
       properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
         target_user_id: { type: string, format: uuid }
 
     UserResetPasswordRequest:
       type: object
       description: "重置密码；明文不落日志/审计/响应"
-      required: [new_password]
+      required: [idempotency_key, new_password]
       properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
         new_password: { type: string, minLength: 8, maxLength: 64, description: "四类中至少三类，须与旧密码不同" }
 
     UserMutationResult:
@@ -9209,8 +9218,6 @@ paths:
       description: 仅创建 tenant_id 为空的平台账号；明文密码仅本次请求透传，不落日志/审计/响应。
       tags: [PlatformUsers]
       x-ani-rbac-scope: "scope:users:write"
-      parameters:
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 }, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
       requestBody:
         required: true
         content:
@@ -9274,7 +9281,6 @@ paths:
       x-ani-rbac-scope: "scope:users:write"
       parameters:
         - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 }, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
       requestBody:
         required: true
         content:
@@ -9300,7 +9306,6 @@ paths:
       x-ani-rbac-scope: "scope:users:write"
       parameters:
         - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 }, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
       requestBody:
         required: true
         content:
@@ -9327,7 +9332,6 @@ paths:
       x-ani-rbac-scope: "scope:users:write"
       parameters:
         - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 }, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
       requestBody:
         required: true
         content:
@@ -9354,7 +9358,6 @@ paths:
       x-ani-rbac-scope: "scope:users:write"
       parameters:
         - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 }, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
       requestBody:
         required: true
         content:
@@ -9380,7 +9383,6 @@ paths:
       x-ani-rbac-scope: "scope:users:write"
       parameters:
         - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 }, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
       requestBody:
         required: true
         content:
@@ -9513,7 +9515,6 @@ paths:
       parameters:
         - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: user_id, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 }, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
       requestBody:
         required: true
         content:
@@ -9560,7 +9561,6 @@ paths:
       x-ani-rbac-scope: "scope:users:write"
       parameters:
         - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 }, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
       requestBody:
         required: true
         content:
@@ -9587,7 +9587,6 @@ paths:
       parameters:
         - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: user_id, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 }, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
       requestBody:
         required: true
         content:
@@ -9615,7 +9614,6 @@ paths:
       parameters:
         - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: user_id, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 }, description: "客户端生成；同一 tenant_id 下 24 小时内去重" }
       requestBody:
         required: true
         content:

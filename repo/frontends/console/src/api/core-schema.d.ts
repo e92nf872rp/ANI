@@ -6998,21 +6998,41 @@ export interface components {
         };
         /** @description 修改租户内角色（不可设 tenant-owner） */
         UserRoleUpdateRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
             /** @enum {string} */
             role: "user" | "auditor" | "tenant-admin";
         };
         /** @description 设置 users.status */
         UserStatusUpdateRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
             /** @enum {string} */
             status: "active" | "disabled";
         };
         /** @description 移交租户所有者；target 必须是本租户 active tenant-admin */
         UserTransferOwnershipRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
             /** Format: uuid */
             target_user_id: string;
         };
         /** @description 重置密码；明文不落日志/审计/响应 */
         UserResetPasswordRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
             /** @description 四类中至少三类，须与旧密码不同 */
             new_password: string;
         };
