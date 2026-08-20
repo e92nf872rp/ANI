@@ -8,19 +8,67 @@
       "operationId": "listPlanBoundTenantCounts",
       "method": "GET",
       "path": "/admin/plans/bound-tenant-counts",
-      "scope": "scope:quota:read"
+      "scope": "scope:tenant:read"
     },
     {
       "operationId": "listPlanBindableTenants",
       "method": "GET",
       "path": "/admin/plans/{plan_id}/bindable-tenants",
-      "scope": "scope:quota:read"
+      "scope": "scope:tenant:read"
     },
     {
       "operationId": "listPlanBoundTenants",
       "method": "GET",
       "path": "/admin/plans/{plan_id}/bound-tenants",
-      "scope": "scope:quota:read"
+      "scope": "scope:tenant:read"
+    },
+    {
+      "operationId": "listPlatformUsers",
+      "method": "GET",
+      "path": "/admin/platform-users",
+      "scope": "scope:users:read"
+    },
+    {
+      "operationId": "createPlatformUser",
+      "method": "POST",
+      "path": "/admin/platform-users",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "deletePlatformUser",
+      "method": "DELETE",
+      "path": "/admin/platform-users/{userId}",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "getPlatformUser",
+      "method": "GET",
+      "path": "/admin/platform-users/{userId}",
+      "scope": "scope:users:read"
+    },
+    {
+      "operationId": "disablePlatformUser",
+      "method": "POST",
+      "path": "/admin/platform-users/{userId}/disable",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "enablePlatformUser",
+      "method": "POST",
+      "path": "/admin/platform-users/{userId}/enable",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "resetPlatformUserPassword",
+      "method": "POST",
+      "path": "/admin/platform-users/{userId}/reset-password",
+      "scope": "scope:users:write"
+    },
+    {
+      "operationId": "updatePlatformUserRole",
+      "method": "PUT",
+      "path": "/admin/platform-users/{userId}/role",
+      "scope": "scope:users:write"
     },
     {
       "operationId": "listQuotaMeta",
@@ -38,13 +86,13 @@
       "operationId": "getTenant",
       "method": "GET",
       "path": "/admin/tenants/{tenant_id}",
-      "scope": "scope:quota:read"
+      "scope": "scope:tenant:read"
     },
     {
       "operationId": "updateTenantPlan",
       "method": "PUT",
       "path": "/admin/tenants/{tenant_id}/plan",
-      "scope": "scope:quota:write"
+      "scope": "scope:tenant:write"
     },
     {
       "operationId": "deleteTenantQuota",
@@ -1511,6 +1559,12 @@
     "PlanBoundTenantCount",
     "PlanBoundTenantCountList",
     "PlatformPasswordLoginRequest",
+    "PlatformUser",
+    "PlatformUserCreateRequest",
+    "PlatformUserIdempotentRequest",
+    "PlatformUserListResponse",
+    "PlatformUserResetPasswordRequest",
+    "PlatformUserRoleUpdateRequest",
     "PlatformWorkload",
     "PlatformWorkloadAcceleratorCapability",
     "PlatformWorkloadAcceleratorResources",
@@ -1662,6 +1716,11 @@
     "WriteSandboxFileRequest"
   ],
   "idempotencyOperations": [
+    "createPlatformUser",
+    "disablePlatformUser",
+    "enablePlatformUser",
+    "resetPlatformUserPassword",
+    "updatePlatformUserRole",
     "createStorageBucket",
     "setStorageBucketACL",
     "createStorageBucketLifecycleRule",
@@ -1725,6 +1784,7 @@
     "unmountStorageVolume"
   ],
   "cursorPaginationOperations": [
+    "listPlatformUsers",
     "listTenantUsers",
     "listStorageBuckets",
     "listBucketObjects",
@@ -1775,10 +1835,12 @@
     "GPU_TYPE_NOT_IN_NODES",
     "INTERNAL_ERROR",
     "INVALID_FILTER",
+    "LAST_PLATFORM_ADMIN",
     "LAST_TENANT_OWNER",
     "NOT_FOUND",
     "NOT_IMPLEMENTED",
     "PASSWORD_SAME_AS_OLD",
+    "PLATFORM_USER_NOT_FOUND",
     "PRECONDITION_FAILED",
     "QUOTA_ALREADY_EXISTS",
     "QUOTA_EXCEEDED",
