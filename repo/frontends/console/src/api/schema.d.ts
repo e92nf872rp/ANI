@@ -1223,6 +1223,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/{tenantId}/admins/{userId}/changeable-roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询可变更角色选项（排除 tenant-owner）（需 platform-admin / platform-ops / platform-readonly） */
+        get: operations["getChangeableRoles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenantId}/transfer-ownership": {
         parameters: {
             query?: never;
@@ -2336,7 +2353,6 @@ export interface components {
             id: string;
             name: string;
             display_name: string;
-            mfa_required: boolean;
         };
         /** @description 跨租户管理员列表项。仅返回 role ∈ (tenant-owner, tenant-admin) 或正在被邀请的用户； is_inviting 仅作标记，不影响 role/status（邀请中用户仍展示原有角色，可为 user）。 列表不返回 created_at/updated_at。 */
         AdminWithTenant: {
@@ -2434,6 +2450,17 @@ export interface components {
                 transfer: "read" | "write" | "none";
             };
         };
+        /** @description 可变更角色选项（当前为 tenant-owner 时 changeable_roles 为空） */
+        ChangeableRolesResponse: {
+            /** @enum {string} */
+            current_role: "tenant-owner" | "tenant-admin" | "user" | "auditor";
+            changeable_roles: {
+                /** @enum {string} */
+                role: "user" | "auditor" | "tenant-admin";
+                /** @description 展示名（普通成员 / 审计员 / 租户管理员） */
+                label: string;
+            }[];
+        };
         TenantAdminAuditLog: {
             /** Format: uuid */
             id: string;
@@ -2441,7 +2468,7 @@ export interface components {
             action: string;
             resource: string;
             /** @enum {string} */
-            result: "success" | "failed";
+            result: "success" | "failure";
             /** Format: uuid */
             user_id?: string | null;
             details?: {
@@ -5249,6 +5276,33 @@ export interface operations {
             422: components["responses"]["UnprocessableEntity"];
         };
     };
+    getChangeableRoles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 可变更角色列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeableRolesResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description TENANT_ADMIN_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+        };
+    };
     transferTenantOwnership: {
         parameters: {
             query?: never;
@@ -5397,7 +5451,7 @@ export interface operations {
                 cursor?: string;
                 /** @description 过滤操作类型 */
                 action?: string;
-                result?: "success" | "failed";
+                result?: "success" | "failure";
             };
             header?: never;
             path: {

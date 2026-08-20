@@ -3067,6 +3067,161 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/tenant-users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 跨租户列出租户成员（默认 owner/admin）
+         * @description 平台侧跨租户查询 users + user_roles + roles。
+         *     默认仅返回 role ∈ (tenant-owner, tenant-admin)；不含 is_inviting（邀请由 Services 合成）。
+         *     不含 password_hash。
+         */
+        get: operations["listTenantUsers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/tenants/{tenant_id}/user-lookup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 按 email+username 匹配租户内已有用户
+         * @description 邀请前匹配已有用户；无匹配返回 404 USER_NOT_FOUND。不新建用户。
+         */
+        get: operations["lookupTenantUser"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/tenants/{tenant_id}/users/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询租户成员详情
+         * @description 不含 password_hash；平台账户（tenant_id 为空）不可经本端点查询。
+         */
+        get: operations["getTenantUser"];
+        put?: never;
+        post?: never;
+        /** 软删除租户成员（不幂等） */
+        delete: operations["deleteTenantUser"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/tenants/{tenant_id}/users/{user_id}/role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询租户成员角色与 4 维权限 */
+        get: operations["getTenantUserRole"];
+        /** 修改租户成员角色 */
+        put: operations["updateTenantUserRole"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/tenants/{tenant_id}/users/{user_id}/changeable-roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询可变更角色选项（排除 tenant-owner） */
+        get: operations["getTenantUserChangeableRoles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/tenants/{tenant_id}/transfer-ownership": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 原子移交租户所有者
+         * @description target 提升为 tenant-owner，原 owner 降级为 tenant-admin。
+         */
+        post: operations["transferCoreTenantOwnership"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/tenants/{tenant_id}/users/{user_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 启用或禁用租户成员 */
+        post: operations["updateTenantUserStatus"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/tenants/{tenant_id}/users/{user_id}/reset-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 重置租户成员密码
+         * @description 明文密码不落日志、审计或响应。
+         */
+        post: operations["resetTenantUserPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -6586,6 +6741,102 @@ export interface components {
         TenantSummaryList: {
             items: components["schemas"]["TenantSummary"][];
         };
+        /** @description Core 用户视图内嵌的租户摘要（不含 MFA；MFA 属 Services/tenant_auth） */
+        UserTenantRef: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            display_name: string;
+        };
+        /** @description 租户成员最小视图（users + user_roles + roles）。不含 password_hash、不含 is_inviting （邀请标记由 Services tenant_admin_invitation 合成）。 */
+        TenantUser: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            tenant_id: string;
+            /** Format: email */
+            email: string;
+            username: string;
+            display_name?: string | null;
+            /** @enum {string} */
+            role: "tenant-owner" | "tenant-admin" | "user" | "auditor";
+            /** @enum {string} */
+            status: "active" | "disabled";
+            /**
+             * @description 由 username 前缀推断：oidc: → third_party；local: → local
+             * @enum {string}
+             */
+            source: "local" | "third_party";
+            /** Format: date-time */
+            last_login_at?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            tenant: components["schemas"]["UserTenantRef"];
+        };
+        /** @description 跨租户用户列表（游标分页） */
+        TenantUserListResponse: {
+            items: components["schemas"]["TenantUser"][];
+            /** @description 下一页游标；null 表示已无更多 */
+            next_cursor?: string | null;
+        };
+        /** @description 租户成员 4 维权限；仅 tenant_id 非空的成员可查询 */
+        TenantUserPermissions: {
+            /** Format: uuid */
+            user_id: string;
+            /** Format: uuid */
+            tenant_id: string;
+            /** @enum {string} */
+            role: "tenant-owner" | "tenant-admin" | "user" | "auditor";
+            permissions: {
+                /** @enum {string} */
+                compute: "read" | "write" | "none";
+                /** @enum {string} */
+                inference: "read" | "write" | "none";
+                /** @enum {string} */
+                member: "read" | "write" | "none";
+                /** @enum {string} */
+                transfer: "read" | "write" | "none";
+            };
+        };
+        ChangeableRoleOption: {
+            /** @enum {string} */
+            role: "user" | "auditor" | "tenant-admin";
+            label: string;
+        };
+        /** @description 可变更角色选项；当前为 tenant-owner 时 changeable_roles 为空数组 */
+        ChangeableRolesResponse: {
+            /** @enum {string} */
+            current_role: "tenant-owner" | "tenant-admin" | "user" | "auditor";
+            changeable_roles: components["schemas"]["ChangeableRoleOption"][];
+        };
+        /** @description 修改租户内角色（不可设 tenant-owner） */
+        UserRoleUpdateRequest: {
+            /** @enum {string} */
+            role: "user" | "auditor" | "tenant-admin";
+        };
+        /** @description 设置 users.status */
+        UserStatusUpdateRequest: {
+            /** @enum {string} */
+            status: "active" | "disabled";
+        };
+        /** @description 移交租户所有者；target 必须是本租户 active tenant-admin */
+        UserTransferOwnershipRequest: {
+            /** Format: uuid */
+            target_user_id: string;
+        };
+        /** @description 重置密码；明文不落日志/审计/响应 */
+        UserResetPasswordRequest: {
+            /** @description 四类中至少三类，须与旧密码不同 */
+            new_password: string;
+        };
+        /** @description 用户写操作结果（id=user_id 或 tenant_id） */
+        UserMutationResult: {
+            /** Format: uuid */
+            id: string;
+            message: string;
+        };
     };
     responses: {
         /** @description 未认证或 Token 无效（code=UNAUTHORIZED） */
@@ -6700,6 +6951,69 @@ export interface components {
         };
         /** @description 配额套餐不存在（code=TENANT_PLAN_NOT_FOUND） */
         TenantPlanNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 租户用户不存在或已软删除（code=USER_NOT_FOUND） */
+        UserNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 该用户已是本租户 admin/owner（code=USER_ALREADY_TENANT_ADMIN） */
+        UserAlreadyTenantAdmin: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 租户所有者角色不可修改/删除（code=TENANT_OWNER_ROLE_LOCKED） */
+        TenantOwnerRoleLocked: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 唯一活跃 tenant-owner 不可禁用/删除（code=LAST_TENANT_OWNER） */
+        LastTenantOwner: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 移交目标不是本租户 active tenant-admin（code=TRANSFER_TARGET_INVALID） */
+        TransferTargetInvalid: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 角色不在 user/auditor/tenant-admin（code=ROLE_CHANGE_INVALID） */
+        RoleChangeInvalid: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 新密码与旧密码相同（code=PASSWORD_SAME_AS_OLD） */
+        PasswordSameAsOld: {
             headers: {
                 [name: string]: unknown;
             };
@@ -12831,6 +13145,308 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+        };
+    };
+    listTenantUsers: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string;
+                /** @description 可选；按指定租户过滤 */
+                tenant_id?: string;
+                role?: "tenant-owner" | "tenant-admin";
+                status?: "active" | "disabled";
+                /** @description 模糊匹配 email/username */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 跨租户用户列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantUserListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    lookupTenantUser: {
+        parameters: {
+            query: {
+                email: string;
+                username: string;
+            };
+            header?: never;
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 匹配到的用户 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantUser"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["UserNotFound"];
+        };
+    };
+    getTenantUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 用户详情 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantUser"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["UserNotFound"];
+        };
+    };
+    deleteTenantUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已软删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserMutationResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["UserNotFound"];
+            409: components["responses"]["TenantOwnerRoleLocked"];
+            422: components["responses"]["LastTenantOwner"];
+        };
+    };
+    getTenantUserRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 角色与权限 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantUserPermissions"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["UserNotFound"];
+        };
+    };
+    updateTenantUserRole: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                tenant_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserRoleUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 角色已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserMutationResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["UserNotFound"];
+            409: components["responses"]["TenantOwnerRoleLocked"];
+            422: components["responses"]["RoleChangeInvalid"];
+        };
+    };
+    getTenantUserChangeableRoles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 可变更角色 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeableRolesResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["UserNotFound"];
+        };
+    };
+    transferCoreTenantOwnership: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserTransferOwnershipRequest"];
+            };
+        };
+        responses: {
+            /** @description 所有权已移交 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserMutationResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["UserNotFound"];
+            422: components["responses"]["TransferTargetInvalid"];
+        };
+    };
+    updateTenantUserStatus: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                tenant_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserStatusUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 状态已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserMutationResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["UserNotFound"];
+            422: components["responses"]["LastTenantOwner"];
+        };
+    };
+    resetTenantUserPassword: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                tenant_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserResetPasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description 密码已重置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserMutationResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["UserNotFound"];
+            422: components["responses"]["PasswordSameAsOld"];
         };
     };
 }

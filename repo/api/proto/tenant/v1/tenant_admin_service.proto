@@ -1,0 +1,195 @@
+syntax = "proto3";
+
+package tenant.v1;
+
+import "common/v1/common.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+option go_package = "github.com/kubercloud/ani/pkg/generated/pb/tenant/v1;tenantv1";
+
+// TenantAdminService manages BOSS tenant-admin lifecycle (invite / resend /
+// list / detail / role / transfer / reset / disable / enable / delete / audit).
+// The gateway (BOSS API) handles auth/scope/idempotency and calls this service
+// over gRPC. All RPCs return UNIMPLEMENTED until later issues fill them in.
+service TenantAdminService {
+  // InviteTenantAdmin invites an existing tenant user as an admin.
+  rpc InviteTenantAdmin(InviteTenantAdminRequest) returns (InvitationResult);
+  // ResendTenantAdminInvitation regenerates token/expiry for inviting|expired invitations.
+  rpc ResendTenantAdminInvitation(ResendTenantAdminInvitationRequest) returns (InvitationResult);
+  // ListAllTenantAdmins returns a cursor-paginated cross-tenant admin list
+  // (owner / admin / currently inviting only).
+  rpc ListAllTenantAdmins(ListAllTenantAdminsRequest) returns (ListAllTenantAdminsResponse);
+  // GetTenantAdminDetail returns one admin (includes is_inviting, created_at, updated_at, tenant).
+  rpc GetTenantAdminDetail(GetTenantAdminDetailRequest) returns (AdminWithTenant);
+  // UpdateTenantAdminRole changes a member role (user / auditor / tenant-admin).
+  rpc UpdateTenantAdminRole(UpdateTenantAdminRoleRequest) returns (common.v1.IdempotentResult);
+  // GetTenantAdminRole returns the four-dimension permission model for a tenant member.
+  rpc GetTenantAdminRole(GetTenantAdminRoleRequest) returns (UserPermissions);
+  // GetChangeableRoles returns selectable target roles (excludes tenant-owner).
+  rpc GetChangeableRoles(GetChangeableRolesRequest) returns (GetChangeableRolesResponse);
+  // TransferTenantOwnership promotes a tenant-admin to owner and demotes the current owner.
+  rpc TransferTenantOwnership(TransferTenantOwnershipRequest) returns (common.v1.IdempotentResult);
+  // ResetTenantAdminPassword resets a local-password admin (plaintext never logged).
+  rpc ResetTenantAdminPassword(ResetTenantAdminPasswordRequest) returns (common.v1.IdempotentResult);
+  // DisableTenantAdmin sets users.status=disabled.
+  rpc DisableTenantAdmin(DisableTenantAdminRequest) returns (common.v1.IdempotentResult);
+  // EnableTenantAdmin sets users.status=active.
+  rpc EnableTenantAdmin(EnableTenantAdminRequest) returns (common.v1.IdempotentResult);
+  // DeleteTenantAdmin soft-deletes an admin (not idempotent).
+  rpc DeleteTenantAdmin(DeleteTenantAdminRequest) returns (common.v1.IdempotentResult);
+  // ListTenantAdminAuditLogs returns cursor-paginated tenant_admin.* audit rows.
+  rpc ListTenantAdminAuditLogs(ListTenantAdminAuditLogsRequest) returns (ListTenantAdminAuditLogsResponse);
+}
+
+// ── RPC request / response ───────────────────────────────────────────────────
+
+message InviteTenantAdminRequest {
+  string tenant_id = 1;
+  string email = 2;            // RFC 5322
+  string username = 3;         // 1-64 chars, no ':'
+  string idempotency_key = 4;  // required UUID
+}
+
+message ResendTenantAdminInvitationRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+  string idempotency_key = 3;  // required UUID
+}
+
+message ListAllTenantAdminsRequest {
+  string tenant_id = 1;                           // optional UUID; empty = all tenants
+  string role = 2;                                // tenant-owner | tenant-admin; empty = all
+  string status = 3;                              // active | disabled; empty = all
+  google.protobuf.BoolValue is_inviting = 4;      // unset = all
+  string search = 5;                              // fuzzy match email/username
+  common.v1.CursorPageRequest page = 6;
+}
+
+message ListAllTenantAdminsResponse {
+  repeated AdminWithTenant items = 1;
+  string next_cursor = 2;  // empty = no more
+}
+
+message GetTenantAdminDetailRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+}
+
+message UpdateTenantAdminRoleRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+  string role = 3;             // user | auditor | tenant-admin (not tenant-owner)
+  string idempotency_key = 4;  // required UUID
+}
+
+message GetTenantAdminRoleRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+}
+
+message GetChangeableRolesRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+}
+
+message GetChangeableRolesResponse {
+  string current_role = 1;
+  repeated ChangeableRoleOption changeable_roles = 2;
+}
+
+message TransferTenantOwnershipRequest {
+  string tenant_id = 1;
+  string target_user_id = 2;   // must be active tenant-admin in this tenant
+  string idempotency_key = 3;  // required UUID
+}
+
+message ResetTenantAdminPasswordRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+  string new_password = 3;     // 8-64 chars; never persist/log plaintext
+  string idempotency_key = 4;  // required UUID
+}
+
+message DisableTenantAdminRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+  string idempotency_key = 3;  // required UUID
+}
+
+message EnableTenantAdminRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+  string idempotency_key = 3;  // required UUID
+}
+
+message DeleteTenantAdminRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+}
+
+message ListTenantAdminAuditLogsRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+  string action = 3;           // optional action filter
+  string result = 4;           // success | failure; empty = all
+  common.v1.CursorPageRequest page = 5;
+}
+
+message ListTenantAdminAuditLogsResponse {
+  repeated TenantAdminAuditLog items = 1;
+  string next_cursor = 2;  // empty = no more
+}
+
+// ── Domain messages (align OpenAPI AdminWithTenant / InvitationResult) ───────
+
+message TenantAdminTenantRef {
+  string id = 1;
+  string name = 2;
+  string display_name = 3;
+}
+
+message AdminWithTenant {
+  string id = 1;
+  string email = 2;
+  string username = 3;
+  google.protobuf.StringValue display_name = 4;
+  string role = 5;             // tenant-owner | tenant-admin | user | auditor
+  string status = 6;           // active | disabled
+  bool is_inviting = 7;        // marker only; does not change role/status
+  string source = 8;           // local | third_party
+  google.protobuf.Timestamp last_login_at = 9;
+  google.protobuf.Timestamp created_at = 10;  // detail only
+  google.protobuf.Timestamp updated_at = 11;  // detail only
+  TenantAdminTenantRef tenant = 12;
+}
+
+message InvitationResult {
+  string id = 1;                               // invitation row id
+  string token = 2;                            // raw token, returned once
+  google.protobuf.Timestamp expire_at = 3;     // now()+72h
+  string message = 4;
+}
+
+message UserPermissions {
+  string user_id = 1;
+  google.protobuf.StringValue tenant_id = 2;   // required for tenant members; unset for platform accounts
+  string role = 3;
+  map<string, string> permissions = 4;         // compute/inference/member/transfer → read/write/none
+}
+
+message ChangeableRoleOption {
+  string role = 1;   // user | auditor | tenant-admin
+  string label = 2;  // 普通成员 / 审计员 / 租户管理员
+}
+
+message TenantAdminAuditLog {
+  string id = 1;
+  string action = 2;
+  string resource = 3;
+  string result = 4;                           // success | failure
+  google.protobuf.StringValue user_id = 5;
+  google.protobuf.Struct details = 6;
+  google.protobuf.Timestamp created_at = 7;
+}

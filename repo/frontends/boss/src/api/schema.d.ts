@@ -2088,7 +2088,6 @@ export interface components {
             id: string;
             name: string;
             display_name: string;
-            mfa_required: boolean;
         };
         /** @description 跨租户管理员列表项。仅返回 role ∈ (tenant-owner, tenant-admin) 或正在被邀请的用户； is_inviting 仅作标记，不影响 role/status（邀请中用户仍展示原有角色，可为 user）。 列表不返回 created_at/updated_at。 */
         AdminWithTenant: {
