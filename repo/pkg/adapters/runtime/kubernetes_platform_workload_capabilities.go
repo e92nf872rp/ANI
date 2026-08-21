@@ -41,14 +41,16 @@ func (r *KubernetesPlatformWorkloadRuntime) clusterResourceExists(ctx context.Co
 	return err == nil && status == http.StatusOK
 }
 
+// acceleratorSpecsFromGPUNodes 按 GPU 型号聚合广告。SpecID 只是型号，同一型号的整卡节点和 vGPU 节点合并成一条。
+// 对外仍只填 MaxSingleNodeCount 作为提示；准入必须用 MaxWholeCardCount / MaxVGPUCount。
 func acceleratorSpecsFromGPUNodes(nodes []ports.GPUNodeClass, volcanoReady bool) []ports.PlatformWorkloadAcceleratorCapability {
 	type agg struct {
-		maxCount    int
-		ready       bool
-		memoryShare int
+		wholeMax int
+		vgpuMax  int
+		ready    bool
 	}
 	byID := map[string]*agg{}
-	add := func(id string, count, memoryShare int, ready bool) {
+	add := func(id string, wholeCount, vgpuCount int, ready bool) {
 		if strings.TrimSpace(id) == "" {
 			return
 		}
@@ -57,13 +59,13 @@ func acceleratorSpecsFromGPUNodes(nodes []ports.GPUNodeClass, volcanoReady bool)
 			item = &agg{}
 			byID[id] = item
 		}
-		if count > item.maxCount {
-			item.maxCount = count
+		if wholeCount > item.wholeMax {
+			item.wholeMax = wholeCount
 		}
-		if memoryShare > item.memoryShare {
-			item.memoryShare = memoryShare
+		if vgpuCount > item.vgpuMax {
+			item.vgpuMax = vgpuCount
 		}
-		item.ready = item.ready || (ready && count > 0)
+		item.ready = item.ready || (ready && (wholeCount > 0 || vgpuCount > 0))
 	}
 	for _, node := range nodes {
 		gpuType := strings.TrimSpace(firstNonEmpty(node.Model, "nvidia"))
@@ -78,37 +80,27 @@ func acceleratorSpecsFromGPUNodes(nodes []ports.GPUNodeClass, volcanoReady bool)
 		if gpuType == "" {
 			gpuType = "nvidia"
 		}
+		modelID := gpuModelSpecID(gpuType)
 		wholeCount := gpuAllocatableCount(node, kubernetesNVIDIAGPUResource)
-		if wholeCount > 0 {
-			add(gpuSpecID(gpuType, 1), wholeCount, 0, node.Ready)
-		}
 		volcanoCount := gpuAllocatableCount(node, kubernetesVolcanoVGPUNumberResource)
-		if volcanoCount < 1 {
+		if wholeCount < 1 && volcanoCount < 1 {
 			continue
 		}
-		memoryShare := 0
-		if total := gpuAllocatableCount(node, kubernetesVolcanoVGPUMemoryResource); volcanoCount > 0 && total > 0 {
-			memoryShare = total / volcanoCount
-		}
-		add(gpuSpecID(gpuType, volcanoVGPUShareCount(volcanoCount)), volcanoCount, memoryShare, node.Ready)
+		add(modelID, wholeCount, volcanoCount, node.Ready)
 	}
 	out := make([]ports.PlatformWorkloadAcceleratorCapability, 0, len(byID))
 	for id, item := range byID {
+		maxCount := item.wholeMax
+		if item.vgpuMax > maxCount {
+			maxCount = item.vgpuMax
+		}
 		out = append(out, ports.PlatformWorkloadAcceleratorCapability{
 			SpecID:             id,
-			Available:          volcanoReady && item.ready && item.maxCount > 0,
-			MaxSingleNodeCount: item.maxCount,
-			MemoryPerShareMB:   item.memoryShare,
+			Available:          volcanoReady && item.ready && maxCount > 0,
+			MaxSingleNodeCount: maxCount,
+			MaxWholeCardCount:  item.wholeMax,
+			MaxVGPUCount:       item.vgpuMax,
 		})
 	}
 	return out
-}
-
-func volcanoVGPUShareCount(number int) int {
-	switch number {
-	case 2, 4, 8:
-		return number
-	default:
-		return 4
-	}
 }

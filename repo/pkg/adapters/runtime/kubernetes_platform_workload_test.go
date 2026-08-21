@@ -371,7 +371,7 @@ func TestKubernetesPlatformWorkloadAcceptsAdvertisedGPUAndLeaderWorker(t *testin
 			{ID: "container-leader-worker", Version: "v1", Mode: "leader_worker"},
 		},
 		AcceleratorSpecs: []ports.PlatformWorkloadAcceleratorCapability{{
-			SpecID: "gpu-a100-full", Available: true, MaxSingleNodeCount: 1,
+			SpecID: "gpu-a100", Available: true, MaxSingleNodeCount: 1, MaxWholeCardCount: 1,
 		}},
 	}
 	svc := NewKubernetesPlatformWorkloadService(provider)
@@ -564,11 +564,11 @@ func TestRenderPlatformWorkloadNetworkPolicyAllowsNodeInternalIPBlocks(t *testin
 	}
 }
 
-func TestRenderPlatformWorkloadManifestsRequestsVolcanoVGPUForVGPUSpec(t *testing.T) {
+func TestRenderPlatformWorkloadManifestsRequestsVolcanoVGPUWhenMemorySet(t *testing.T) {
 	spec := sampleCPUPlatformWorkloadSpec("5df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-vgpu-example")
-	spec.Resources.AcceleratorSpecID = "gpu-nvidia-geforce-rtx-4090-4x"
-	spec.Resources.AcceleratorCount = 1
-	spec.Resources.AcceleratorMemoryMB = 6144
+	spec.Resources.AcceleratorSpecID = "gpu-nvidia-geforce-rtx-4090"
+	spec.Resources.AcceleratorCount = 2
+	spec.Resources.AcceleratorMemoryMB = 10240
 	manifests := renderPlatformWorkloadManifests("11111111-1111-1111-1111-111111111111", "workload-vgpu-1", spec, nil)
 	var deployment map[string]any
 	if err := json.Unmarshal([]byte(manifests[0].Content), &deployment); err != nil {
@@ -576,11 +576,45 @@ func TestRenderPlatformWorkloadManifestsRequestsVolcanoVGPUForVGPUSpec(t *testin
 	}
 	container, _ := deployment["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)["containers"].([]any)[0].(map[string]any)
 	resources, _ := container["resources"].(map[string]any)["requests"].(map[string]any)
-	if resources["volcano.sh/vgpu-number"] != "1" || resources["volcano.sh/vgpu-memory"] != "6144" {
+	if resources["volcano.sh/vgpu-number"] != "2" || resources["volcano.sh/vgpu-memory"] != "1024" {
 		t.Fatalf("vgpu request = %#v", resources)
 	}
 	if _, ok := resources["nvidia.com/gpu"]; ok {
 		t.Fatalf("vGPU spec must not request nvidia.com/gpu: %#v", resources)
+	}
+}
+
+func TestRenderPlatformWorkloadManifestsRequestsWholeCardWhenMemoryOmitted(t *testing.T) {
+	spec := sampleCPUPlatformWorkloadSpec("5df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-gpu-example")
+	spec.Resources.AcceleratorSpecID = "gpu-nvidia-geforce-rtx-4090-8x"
+	spec.Resources.AcceleratorCount = 1
+	manifests := renderPlatformWorkloadManifests("11111111-1111-1111-1111-111111111111", "workload-gpu-legacy-1", spec, nil)
+	var deployment map[string]any
+	if err := json.Unmarshal([]byte(manifests[0].Content), &deployment); err != nil {
+		t.Fatalf("deployment json: %v", err)
+	}
+	container, _ := deployment["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)["containers"].([]any)[0].(map[string]any)
+	resources, _ := container["resources"].(map[string]any)["requests"].(map[string]any)
+	if resources["nvidia.com/gpu"] != "1" {
+		t.Fatalf("whole-card request = %#v", resources)
+	}
+	if _, ok := resources["volcano.sh/vgpu-number"]; ok {
+		t.Fatalf("omitted memory must not request vGPU: %#v", resources)
+	}
+}
+
+func TestCanonicalAcceleratorSpecIDStripsLegacySuffixes(t *testing.T) {
+	cases := map[string]string{
+		"gpu-nvidia-geforce-rtx-4090":      "gpu-nvidia-geforce-rtx-4090",
+		"gpu-nvidia-geforce-rtx-4090-full": "gpu-nvidia-geforce-rtx-4090",
+		"gpu-nvidia-geforce-rtx-4090-8x":   "gpu-nvidia-geforce-rtx-4090",
+		"gpu-a100":                         "gpu-a100",
+		"GPU-A100-FULL":                    "gpu-a100",
+	}
+	for in, want := range cases {
+		if got := canonicalAcceleratorSpecID(in); got != want {
+			t.Fatalf("canonicalAcceleratorSpecID(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 
@@ -700,6 +734,21 @@ func TestRenderLeaderWorkerPlatformWorkloadUsesLWSPodGroupAndLeaderService(t *te
 	}
 }
 
+func TestRenderLeaderWorkerDoesNotCopyAggregateGPUCountIntoRoles(t *testing.T) {
+	spec := sampleLeaderWorkerPlatformWorkloadSpec("7df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-lws-4gpu")
+	spec.Resources.AcceleratorCount = 4
+	spec.Topology.Workers.Count = 3
+	spec.Topology.Leader.Resources.AcceleratorCount = 0
+	spec.Topology.Workers.Resources.AcceleratorCount = 0
+	manifests := renderPlatformWorkloadManifests("11111111-1111-1111-1111-111111111111", "workload-lws-4", spec, nil)
+	if strings.Contains(manifests[0].Content, `"nvidia.com/gpu": "4"`) {
+		t.Fatalf("role pods must not request the aggregate GPU count:\n%s", manifests[0].Content)
+	}
+	if strings.Count(manifests[0].Content, `"nvidia.com/gpu": "1"`) < 2 {
+		t.Fatalf("leader and worker templates must each request 1 GPU:\n%s", manifests[0].Content)
+	}
+}
+
 func TestAcceleratorSpecsFromGPUNodesRequireVolcano(t *testing.T) {
 	nodes := []ports.GPUNodeClass{{
 		NodeName: "gpu-a", Model: "A100", Ready: true,
@@ -707,7 +756,7 @@ func TestAcceleratorSpecsFromGPUNodesRequireVolcano(t *testing.T) {
 		Devices:     []ports.GPUDeviceClass{{Model: "A100", ResourceName: "nvidia.com/gpu"}},
 	}}
 	withoutVolcano := acceleratorSpecsFromGPUNodes(nodes, false)
-	if len(withoutVolcano) != 1 || withoutVolcano[0].SpecID != "gpu-a100-full" || withoutVolcano[0].Available || withoutVolcano[0].MaxSingleNodeCount != 2 {
+	if len(withoutVolcano) != 1 || withoutVolcano[0].SpecID != "gpu-a100" || withoutVolcano[0].Available || withoutVolcano[0].MaxSingleNodeCount != 2 {
 		t.Fatalf("without volcano = %#v", withoutVolcano)
 	}
 	withVolcano := acceleratorSpecsFromGPUNodes(nodes, true)
@@ -717,33 +766,21 @@ func TestAcceleratorSpecsFromGPUNodesRequireVolcano(t *testing.T) {
 }
 
 func TestAcceleratorSpecsFromGPUNodesAdvertiseVolcanoVGPU(t *testing.T) {
-	nodes := []ports.GPUNodeClass{
-		{
-			NodeName: "gpu-full", Model: "NVIDIA-GeForce-RTX-4090", Ready: true,
-			Allocatable: map[string]string{"nvidia.com/gpu": "1"},
-			Devices:     []ports.GPUDeviceClass{{Model: "NVIDIA-GeForce-RTX-4090", ResourceName: "nvidia.com/gpu", VirtualizationMode: ports.GPUVirtualizationNone}},
-		},
-		{
-			NodeName: "gpu-vgpu", Model: "NVIDIA-GeForce-RTX-4090", Ready: true,
-			Allocatable: map[string]string{"volcano.sh/vgpu-number": "4", "volcano.sh/vgpu-memory": "24576"},
-			Devices: []ports.GPUDeviceClass{{
-				Model: "NVIDIA-GeForce-RTX-4090", ResourceName: "volcano.sh/vgpu-number",
-				VirtualizationMode: ports.GPUVirtualizationVGPU, MemoryMiB: 6144,
-			}},
-		},
-	}
+	nodes := mixed4090AcceleratorNodes()
 	specs := acceleratorSpecsFromGPUNodes(nodes, true)
 	byID := map[string]ports.PlatformWorkloadAcceleratorCapability{}
 	for _, spec := range specs {
 		byID[spec.SpecID] = spec
 	}
-	full := byID["gpu-nvidia-geforce-rtx-4090-full"]
-	if !full.Available || full.MaxSingleNodeCount != 1 {
-		t.Fatalf("full spec = %#v", full)
+	model := byID["gpu-nvidia-geforce-rtx-4090"]
+	if !model.Available || model.MaxSingleNodeCount != 4 || model.MaxWholeCardCount != 1 || model.MaxVGPUCount != 4 {
+		t.Fatalf("model spec = %#v", model)
 	}
-	vgpu := byID["gpu-nvidia-geforce-rtx-4090-4x"]
-	if !vgpu.Available || vgpu.MaxSingleNodeCount != 4 || vgpu.MemoryPerShareMB != 6144 {
-		t.Fatalf("vgpu spec = %#v", vgpu)
+	if _, ok := byID["gpu-nvidia-geforce-rtx-4090-full"]; ok {
+		t.Fatalf("must not advertise -full: %#v", byID)
+	}
+	if _, ok := byID["gpu-nvidia-geforce-rtx-4090-4x"]; ok {
+		t.Fatalf("must not advertise -Nx: %#v", byID)
 	}
 }
 

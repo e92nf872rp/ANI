@@ -1,0 +1,101 @@
+{
+  "profile": "INFERENCE-SERVICE-GPU-MEMORY-LIVE-GATE-C39",
+  "status": "passed",
+  "generated_at": "2026-08-21T02:32:23Z",
+  "entry": "ani-system/ani-gateway",
+  "gateway": "ani-system/ani-gateway",
+  "auth_mode": "auth_service",
+  "auth": "tenant_bearer",
+  "gateway_image": "ani/ani-gateway:gpu-memory-c39-20260821",
+  "inference_service_image": "ani/inference-service:gpu-memory-c39-20260821",
+  "advertised_spec": "gpu-nvidia-geforce-rtx-4090",
+  "advertised_specs": [
+    "gpu-nvidia-geforce-rtx-4090"
+  ],
+  "memory_mib": 12280,
+  "memory_zero_http_status": 400,
+  "whole_card_accelerator": "nvidia.com/gpu=1",
+  "whole_card_nvidia_gpu": "1",
+  "vgpu_on_whole_card": false,
+  "accelerator": "volcano.sh/vgpu-number=1,volcano.sh/vgpu-memory=1228",
+  "vgpu_number": "1",
+  "vgpu_memory": "1228",
+  "nvidia_gpu_on_vgpu": false,
+  "product_status": "running",
+  "invocation_url": null,
+  "endpoint_url": null,
+  "leftover_cleaned": true,
+  "test_service_deleted": true,
+  "cpu_service_restored": true,
+  "lws_live": "skipped",
+  "gpu_ready": false,
+  "runtime_ready": false,
+  "checks": [
+    {
+      "id": "production-gateway-auth-mode-preserved",
+      "status": "passed",
+      "auth_mode": "auth_service"
+    },
+    {
+      "id": "leftover-test-services-cleaned",
+      "status": "passed"
+    },
+    {
+      "id": "capabilities-advertise-model-spec",
+      "status": "passed",
+      "spec_id": "gpu-nvidia-geforce-rtx-4090"
+    },
+    {
+      "id": "memory-zero-400",
+      "status": "passed",
+      "http_status": 400,
+      "code": "INVALID_ARGUMENT"
+    },
+    {
+      "id": "product-create-whole-card-202",
+      "status": "passed",
+      "http_status": 202
+    },
+    {
+      "id": "runtime-nvidia-gpu",
+      "status": "passed",
+      "nvidia_gpu": "1"
+    },
+    {
+      "id": "runtime-no-vgpu-on-whole-card",
+      "status": "passed"
+    },
+    {
+      "id": "invocation-url-null",
+      "status": "passed"
+    },
+    {
+      "id": "whole-card-deleted",
+      "status": "passed"
+    },
+    {
+      "id": "product-create-vgpu-202",
+      "status": "passed",
+      "http_status": 202
+    },
+    {
+      "id": "runtime-volcano-vgpu-resources",
+      "status": "passed",
+      "vgpu_number": "1",
+      "vgpu_memory": "1228"
+    },
+    {
+      "id": "runtime-no-nvidia-gpu",
+      "status": "passed"
+    },
+    {
+      "id": "test-service-deleted",
+      "status": "passed"
+    },
+    {
+      "id": "lws-cross-node-skipped",
+      "status": "passed",
+      "reason": "skipped_cross_node_lws"
+    }
+  ]
+}

@@ -486,3 +486,34 @@ func TestInferenceCreateUnknownImageIDReturnsUnavailable(t *testing.T) {
 		t.Fatal("unknown image_id must not reach gRPC")
 	}
 }
+
+func TestProtoResourcesMapsAcceleratorMemory(t *testing.T) {
+	memory := int32(10240)
+	msg := protoResources(&inferenceServiceResourcesJSON{
+		CPU: "8", Memory: "32Gi",
+		Accelerator: &inferenceServiceAcceleratorJSON{
+			SpecID: "gpu-nvidia-geforce-rtx-4090", CountPerReplica: 1, Memory: &memory,
+		},
+	})
+	if msg.GetAccelerator().GetSpecId() != "gpu-nvidia-geforce-rtx-4090" || msg.GetAccelerator().GetCountPerReplica() != 1 || msg.GetAccelerator().GetMemory() != 10240 {
+		t.Fatalf("accelerator = %+v", msg.GetAccelerator())
+	}
+	body := inferenceResourcesJSON(msg)
+	acc, _ := body["accelerator"].(map[string]any)
+	if acc["memory"] != int32(10240) {
+		t.Fatalf("json accelerator = %#v", acc)
+	}
+}
+
+func TestCreateInferenceServiceRejectsZeroAcceleratorMemory(t *testing.T) {
+	client := &fakeInferenceClient{createResp: &inferencecontrolv1.InferenceService{Id: "svc-1"}}
+	h := setupInferenceTestServer(t, client)
+	body := `{"idempotency_key":"44444444-4444-4444-4444-444444444444","name":"qwen-chat","model":"33333333-3333-3333-3333-333333333333","resources":{"cpu":"2","memory":"4Gi","accelerator":{"spec_id":"gpu-nvidia-geforce-rtx-4090","count_per_replica":1,"memory":0}},"image_ref":"` + pinnedInferenceImageRef + `"}`
+	resp := performInference(h, http.MethodPost, "/api/v1/svc/inference-services", body, "11111111-1111-1111-1111-111111111111")
+	if resp.StatusCode() != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s", resp.StatusCode(), resp.Body())
+	}
+	if client.lastCreate != nil {
+		t.Fatal("zero accelerator memory must not reach gRPC")
+	}
+}

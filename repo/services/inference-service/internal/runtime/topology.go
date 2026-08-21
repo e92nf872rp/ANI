@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/kubercloud/ani/services/inference-service/internal/domain"
@@ -16,6 +17,7 @@ type CapabilityView struct {
 }
 
 type AcceleratorView struct {
+	// SpecID 是 GPU 型号。与创建请求的 spec_id 比对时剥掉历史 -full / -Nx。
 	SpecID             string
 	Available          bool
 	MaxSingleNodeCount int
@@ -107,13 +109,22 @@ func commandProvidesRay(command []string) bool {
 }
 
 func findAccelerator(caps CapabilityView, specID string) (AcceleratorView, bool) {
-	specID = strings.TrimSpace(specID)
+	want := canonicalAcceleratorSpecID(specID)
 	for _, item := range caps.AcceleratorSpecs {
-		if item.SpecID == specID {
+		if canonicalAcceleratorSpecID(item.SpecID) == want {
 			return item, true
 		}
 	}
 	return AcceleratorView{}, false
+}
+
+var legacyAcceleratorSuffix = regexp.MustCompile(`-\d+x$`)
+
+// canonicalAcceleratorSpecID 把历史 -full / -Nx 剥掉，得到型号 ID。
+func canonicalAcceleratorSpecID(specID string) string {
+	id := strings.ToLower(strings.TrimSpace(specID))
+	id = legacyAcceleratorSuffix.ReplaceAllString(id, "")
+	return strings.TrimSuffix(id, "-full")
 }
 
 func supportsMode(caps CapabilityView, mode string) bool {

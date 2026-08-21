@@ -285,17 +285,14 @@ func createBody(request runtime.EnsureRequest, plan runtime.TopologyPlan) map[st
 	}
 	resources := map[string]any{"cpu": cpu, "memory": memory}
 	if request.Spec.Accelerator != nil {
-		resources["accelerator"] = map[string]any{
-			"spec_id": request.Spec.Accelerator.SpecID,
-			"count":   request.Spec.Accelerator.CountPerReplica,
-		}
+		resources["accelerator"] = acceleratorBody(request.Spec.Accelerator, request.Spec.Accelerator.CountPerReplica)
 	}
 	topology := map[string]any{"mode": plan.Mode, "profile_id": plan.ProfileID, "profile_version": plan.ProfileVersion}
 	if plan.Mode == "leader_worker" {
 		role := func(count, gpus int) map[string]any {
 			item := map[string]any{"cpu": cpu, "memory": memory}
 			if request.Spec.Accelerator != nil {
-				item["accelerator"] = map[string]any{"spec_id": request.Spec.Accelerator.SpecID, "count": gpus}
+				item["accelerator"] = acceleratorBody(request.Spec.Accelerator, gpus)
 			}
 			return map[string]any{"count": count, "resources": item}
 		}
@@ -334,6 +331,19 @@ func createBody(request runtime.EnsureRequest, plan runtime.TopologyPlan) map[st
 		body["artifacts"] = []map[string]any{{"object_ref": objectRef, "mount_path": "/models"}}
 	}
 	return body
+}
+
+// acceleratorBody 把推理加速器映射到 Core platform-workloads。
+// spec_id 是型号；count 是卡数；memory>0 才带上，表示 vGPU 显存（MiB）。
+func acceleratorBody(acc *domain.Accelerator, count int) map[string]any {
+	if acc == nil {
+		return nil
+	}
+	out := map[string]any{"spec_id": acc.SpecID, "count": count}
+	if acc.MemoryMB > 0 {
+		out["memory"] = acc.MemoryMB
+	}
+	return out
 }
 
 func probeHealth(ctx context.Context, client *http.Client, endpoint string) error {

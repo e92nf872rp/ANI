@@ -1,0 +1,83 @@
+profile: INFERENCE-SERVICE-GPU-MEMORY-LIVE-GATE-C39
+status: live
+description: >
+  Product create uses accelerator.spec_id as a GPU model ID and optional
+  memory in MiB. Omitting memory requests nvidia.com/gpu. Present memory
+  requests volcano.sh/vgpu-number plus volcano.sh/vgpu-memory=ceil(MiB/10).
+  Explicit memory 0 returns 400. Capabilities advertise the model ID, not
+  -full or -Nx. Both whole-card and vGPU product creates are required.
+  Leftover inference test services are deleted first. Product HTTP stays on
+  production ani-gateway with ANI_AUTH_MODE=auth_service. User instance GPU
+  workloads are not touched. Cross-node LWS is skipped. This must not mark
+  GPU ready or runtime ready.
+
+required_tools:
+  - kubectl
+
+required_endpoints:
+  - ani_gateway_inference_services_api
+  - inference_control_grpc
+  - kubernetes_api
+
+required_env:
+  - KUBECONFIG
+
+live_checks:
+  - id: leftover-test-services-cleaned
+    command: DELETE leftover inf-c36/c37/c39/inf-gpu-qwen test InferenceServices
+    pass_condition: leftover_test_services_404
+  - id: memory-zero-400
+    command: POST /api/v1/svc/inference-services with accelerator.memory=0
+    pass_condition: http_400_invalid_argument_no_runtime
+  - id: capabilities-advertise-model-spec
+    command: GET /api/v1/platform-workload-capabilities
+    pass_condition: accelerator_specs_include_4090_model_id_without_suffix
+  - id: product-create-whole-card-202
+    command: POST /api/v1/svc/inference-services spec_id=model without memory
+    pass_condition: http_202
+  - id: runtime-nvidia-gpu
+    command: kubectl get deploy whole-card runtime requests
+    pass_condition: nvidia.com/gpu_equals_1
+  - id: runtime-no-vgpu-on-whole-card
+    command: kubectl get deploy whole-card runtime requests
+    pass_condition: volcano_sh_vgpu_absent
+  - id: whole-card-deleted
+    command: DELETE whole-card test InferenceService
+    pass_condition: test_runtime_removed
+  - id: product-create-vgpu-202
+    command: POST /api/v1/svc/inference-services spec_id=model memory=12280
+    pass_condition: http_202
+  - id: runtime-volcano-vgpu-resources
+    command: kubectl get deploy vgpu runtime requests
+    pass_condition: volcano_sh_vgpu_number_1_and_memory_1228
+  - id: runtime-no-nvidia-gpu
+    command: kubectl get deploy vgpu runtime requests
+    pass_condition: nvidia.com/gpu_absent
+  - id: invocation-url-null
+    command: GET /api/v1/svc/inference-services/{id}
+    pass_condition: invocation_url_and_endpoint_url_are_null
+  - id: test-service-deleted
+    command: DELETE vGPU test InferenceService
+    pass_condition: test_runtime_removed
+  - id: production-gateway-auth-mode-preserved
+    command: kubectl -n ani-system get deploy ani-gateway
+    pass_condition: ani_auth_mode_remains_auth_service
+  - id: lws-cross-node-skipped
+    command: POST leader_worker / multi_node
+    pass_condition: skipped_cross_node_lws_not_in_this_batch
+
+evidence: development-records/live-evidence/inference-gpu-memory-live-20260821.json
+
+evidence_policy:
+  forbidden_content:
+    - bearer tokens
+    - passwords
+    - raw server IPs
+    - full DSN or connection strings
+    - full internal endpoints beyond redacted service DNS
+
+readiness_levels:
+  contract:
+    meaning: C39 memory/model-ID rendering is implemented; live cluster proof is not claimed.
+  live:
+    meaning: Approved cluster run proved leftover tests were cleaned, memory 0 is 400, capabilities advertise the model ID, omitted memory requests nvidia.com/gpu, and memory requests volcano.sh/vgpu-*. GPU ready and full platform runtime remain skipped.

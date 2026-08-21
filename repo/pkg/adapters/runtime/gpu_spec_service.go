@@ -106,13 +106,21 @@ func (s *LocalGPUSpecService) GetGPUSpec(ctx context.Context, specID string) (po
 	return ports.GPUSpec{}, ports.ErrNotFound
 }
 
-func gpuSpecID(gpuType string, shares int) string {
+// gpuModelSpecID 生成 platform-workloads 广告用的型号 ID，例如 gpu-nvidia-geforce-rtx-4090。
+// 不含 -full / -Nx；整卡或 vGPU 由创建请求的 memory 决定。
+func gpuModelSpecID(gpuType string) string {
 	value := strings.ToLower(strings.TrimSpace(gpuType))
 	value = strings.NewReplacer(" ", "-", "/", "-", "_", "-").Replace(value)
+	return "gpu-" + value
+}
+
+// gpuSpecID 只给 /gpu-specs 目录用，仍带 -full / -Nx。platform-workloads 不要再用这个 ID 广告。
+func gpuSpecID(gpuType string, shares int) string {
+	id := gpuModelSpecID(gpuType)
 	if shares == 1 {
-		return "gpu-" + value + "-full"
+		return id + "-full"
 	}
-	return fmt.Sprintf("gpu-%s-%dx", value, shares)
+	return fmt.Sprintf("%s-%dx", id, shares)
 }
 
 var _ ports.GPUSpecService = (*LocalGPUSpecService)(nil)

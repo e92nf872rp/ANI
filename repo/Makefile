@@ -15,7 +15,7 @@ export
         image image-gateway image-auth-service \
         clean
 
-.PHONY: test-inference-control-plane-postgres validate-inference-gpu-lws-volcano-live-gate validate-inference-legacy-control-plane validate-inference-incluster-e2e-live-gate validate-inference-console-shaped-e2e-live-gate validate-inference-local-model-source-live-gate validate-inference-create-image-live-gate validate-inference-create-image-harbor-live-gate validate-inference-gpu-single-node-live-gate validate-gpu-plugin-node-partition-live-gate validate-inference-gpu-vllm-eager-live-gate validate-inference-engine-vgpu-live-gate
+.PHONY: test-inference-control-plane-postgres validate-inference-gpu-lws-volcano-live-gate validate-inference-legacy-control-plane validate-inference-incluster-e2e-live-gate validate-inference-console-shaped-e2e-live-gate validate-inference-local-model-source-live-gate validate-inference-create-image-live-gate validate-inference-create-image-harbor-live-gate validate-inference-gpu-single-node-live-gate validate-gpu-plugin-node-partition-live-gate validate-inference-gpu-vllm-eager-live-gate validate-inference-engine-vgpu-live-gate validate-inference-gpu-memory-live-gate
 
 # ── 帮助 ──────────────────────────────────────────────────────────────────────
 help:
@@ -168,6 +168,7 @@ help:
 	@echo "    make validate-gpu-plugin-node-partition-live-gate 校验 NVIDIA/Volcano GPU 插件节点分区 live gate"
 	@echo "    make validate-inference-gpu-vllm-eager-live-gate 校验 GPU vLLM enforce-eager 启动 live gate"
 	@echo "    make validate-inference-engine-vgpu-live-gate 校验 engine.env/command 与 volcano vGPU live gate"
+	@echo "    make validate-inference-gpu-memory-live-gate 校验 GPU 型号 spec_id 与 memory 显存申请 live gate"
 	@echo ""
 	@echo "  代码检查:"
 	@echo "    make lint           运行所有 linter"
@@ -1100,6 +1101,12 @@ validate-inference-engine-vgpu-live-gate:
 	python scripts/validate_inference_engine_vgpu_live_gate_test.py
 	python scripts/validate_inference_engine_vgpu_live_gate.py
 	@echo "✅ INFERENCE-SERVICE-ENGINE-VGPU-LIVE-GATE-C36 contract/live valid"
+
+validate-inference-gpu-memory-live-gate:
+	@echo "→ 校验 GPU 型号 spec_id 与 memory 显存申请 live gate..."
+	python scripts/validate_inference_gpu_memory_live_gate_test.py
+	python scripts/validate_inference_gpu_memory_live_gate.py
+	@echo "✅ INFERENCE-SERVICE-GPU-MEMORY-LIVE-GATE-C39 contract/live valid"
 
 test-inference-control-plane-postgres:
 	@test -n "$$INFERENCE_TEST_DATABASE_URL" || (echo "ERROR: INFERENCE_TEST_DATABASE_URL is required"; exit 2)

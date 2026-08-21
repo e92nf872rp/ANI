@@ -58,6 +58,7 @@
 | INFERENCE-SERVICE-ENGINE-VGPU-C36 | 按 C35 实现冻结 `engine.env`/`engine.command` 原样下发；Core platform-workloads 增加可选 `env`；volcano vGPU 广告 `-Nx` 并申请 `volcano.sh/vgpu-*`。live passed：保留 env 400、`gpu-nvidia-geforce-rtx-4090-8x`、租户 command/env、无 `nvidia.com/gpu`；测试服务已删、整卡服务保留；vGPU Pod Ready 未要求。不得外推 GPU/runtime ready | inference-service-engine-vgpu-c36.md |
 | INFERENCE-SERVICE-GPU-LWS-RUNTIME-FIX-C37 | 默认 LWS 关 Ray compiled DAG；GPU TP>1 关 custom all-reduce；多卡/LWS shm 12Gi；Deployment Recreate；SGLang 与无 Ray 的租户 command 拒绝 `leader_worker`；ClusterIP smoke timeout 120s。local/logic verified，无新 live，不得外推 GPU/runtime ready | inference-service-gpu-lws-runtime-fix-c37.md |
 | INFERENCE-SERVICE-GPU-MEMORY-CONTRACT-C38 | Core/Services 加速器契约：`spec_id` 只表示型号；`count` / `count_per_replica` 必填；可选 `memory` 为申请显存，不填整卡、填写 vGPU。不另加 `gpu_mode`。历史 `-full`/`-Nx` 剥后缀后按型号处理。不含 handler/runtime。不得外推 GPU/runtime ready | inference-service-gpu-memory-contract-c38.md |
+| INFERENCE-SERVICE-GPU-MEMORY-C39 | 按 C38 实现 handler/proto/runtime：capabilities 广告型号 ID；有 `memory` 申请 volcano vGPU 显存，无 `memory` 申请整卡。live passed：清理残留测试后，`memory: 0` 400、型号 `gpu-nvidia-geforce-rtx-4090`、省略 memory 为 `nvidia.com/gpu=1`、填写 memory 为 `volcano.sh/vgpu-number=1`/`vgpu-memory=1228`。首次 live 两条路径 running 后删除；二次 live 保留服务并 ClusterIP 压测 60 秒。不含 Console。不得外推 GPU/runtime ready | inference-service-gpu-memory-c39.md |
 
 
 ### Core Quota Service（2026-08）

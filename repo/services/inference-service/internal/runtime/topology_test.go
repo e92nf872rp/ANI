@@ -82,3 +82,19 @@ func TestPlanTopologyCPUAndGPUPlacement(t *testing.T) {
 		t.Fatalf("tenant ray command plan = %+v, %v", rayOK, err)
 	}
 }
+
+func TestPlanTopologyAcceptsLegacyAcceleratorSuffix(t *testing.T) {
+	caps := CapabilityView{
+		SupportedTopologyModes: []string{"single_node"},
+		AcceleratorSpecs: []AcceleratorView{{
+			SpecID: "gpu-nvidia-geforce-rtx-4090", Available: true, MaxSingleNodeCount: 2,
+		}},
+	}
+	got, err := PlanTopology(domain.Spec{
+		Replicas: 1, PlacementMode: "auto",
+		Accelerator: &domain.Accelerator{SpecID: "gpu-nvidia-geforce-rtx-4090-full", CountPerReplica: 1},
+	}, caps)
+	if err != nil || got.Mode != "single_node" {
+		t.Fatalf("legacy suffix plan = %+v, %v", got, err)
+	}
+}
