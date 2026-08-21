@@ -52,6 +52,7 @@ func createInputFromProto(req *inferencecontrolv1.CreateInferenceServiceRequest)
 			spec.Accelerator = &domain.Accelerator{
 				SpecID:          strings.TrimSpace(acc.GetSpecId()),
 				CountPerReplica: int(acc.GetCountPerReplica()),
+				MemoryMB:        int(acc.GetMemory()),
 			}
 		}
 	}
@@ -159,6 +160,7 @@ func protoService(view service.ServiceView) *inferencecontrolv1.InferenceService
 	if view.Resources.Accelerator != nil {
 		msg.Resources.Accelerator = &inferencecontrolv1.InferenceServiceAccelerator{
 			SpecId: view.Resources.Accelerator.SpecID, CountPerReplica: int32(view.Resources.Accelerator.CountPerReplica),
+			Memory: int32(view.Resources.Accelerator.MemoryMB),
 		}
 	}
 	if view.LegacyGPUType != nil {

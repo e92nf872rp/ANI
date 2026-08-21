@@ -351,6 +351,9 @@ func TestCreateRejectsInvalidResourceAndPlacementCombinations(t *testing.T) {
 		{name: "unknown placement", mutate: func(input *CreateInput) { input.Spec.PlacementMode = "somewhere" }},
 		{name: "distributed cpu", mutate: func(input *CreateInput) { input.Spec.PlacementMode = "multi_node" }},
 		{name: "missing image", mutate: func(input *CreateInput) { input.ImageID = ""; input.ImageRef = "" }},
+		{name: "negative accelerator memory", mutate: func(input *CreateInput) {
+			input.Spec.Accelerator = &domain.Accelerator{SpecID: "gpu-a100", CountPerReplica: 1, MemoryMB: -1}
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

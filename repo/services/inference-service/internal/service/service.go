@@ -260,6 +260,8 @@ func validateCreateInput(tenantID uuid.UUID, input CreateInput) error {
 		return fmt.Errorf("%w: accelerator spec id is required", ErrInvalidInput)
 	case input.Spec.Accelerator != nil && input.Spec.Accelerator.CountPerReplica < 1:
 		return fmt.Errorf("%w: accelerator count must be positive", ErrInvalidInput)
+	case input.Spec.Accelerator != nil && input.Spec.Accelerator.MemoryMB < 0:
+		return fmt.Errorf("%w: accelerator memory must be positive", ErrInvalidInput)
 	case input.Spec.Accelerator != nil && input.Spec.PlacementMode == "multi_node" && input.Spec.Replicas != 1:
 		return fmt.Errorf("%w: multi-node inference requires exactly one replica", ErrUnsupportedTopology)
 	}

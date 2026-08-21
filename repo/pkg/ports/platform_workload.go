@@ -20,10 +20,17 @@ const (
 )
 
 type PlatformWorkloadResources struct {
-	CPU                 string
-	Memory              string
-	AcceleratorSpecID   string
-	AcceleratorCount    int
+	CPU    string
+	Memory string // Pod 内存预算，例如 16Gi；不是 GPU 显存
+	// AcceleratorSpecID 是 GPU 型号，例如 gpu-nvidia-geforce-rtx-4090。
+	// 只表示型号，不表示整卡或 vGPU。历史 -full / -Nx 剥后缀后仍按型号处理。
+	AcceleratorSpecID string
+	// AcceleratorCount 是申请卡数。整卡和 vGPU 都必填，最小 1。
+	AcceleratorCount int
+	// AcceleratorMemoryMB 是申请 GPU 显存，单位 MiB。
+	// 内部 0 表示请求未填，按整卡（nvidia.com/gpu）；>0 表示 vGPU（volcano.sh/vgpu-*）。
+	// JSON 若出现 memory，必须 >= 1，不得把 0 或负数静默当整卡。
+	// 这不是 Memory 字段的内存预算。
 	AcceleratorMemoryMB int
 }
 
@@ -137,10 +144,14 @@ type PlatformWorkloadTopologyProfile struct {
 }
 
 type PlatformWorkloadAcceleratorCapability struct {
+	// SpecID 是 GPU 型号，例如 gpu-nvidia-geforce-rtx-4090。
+	// capabilities 只广告型号，不广告 -full / -Nx；整卡或 vGPU 由创建请求有没有 memory 决定。
 	SpecID             string
 	Available          bool
-	MaxSingleNodeCount int
-	MemoryPerShareMB   int
+	MaxSingleNodeCount int // 对外提示：整卡与 vGPU 单节点上限的较大值，不是准入依据
+	MaxWholeCardCount  int // 内部：单节点 nvidia.com/gpu 上限；不对外广告
+	MaxVGPUCount       int // 内部：单节点 volcano.sh/vgpu-number 上限；不对外广告
+	MemoryPerShareMB   int // 内部残留，不对外广告；创建显存以请求 memory 为准
 }
 
 type PlatformWorkloadLogEntry struct {

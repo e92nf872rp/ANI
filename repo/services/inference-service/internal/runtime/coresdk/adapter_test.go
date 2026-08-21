@@ -44,6 +44,9 @@ func TestCreateBodyUsesSamePathForCPUAndGPU(t *testing.T) {
 	if accelerator["spec_id"] != "gpu-a100" || accelerator["count"] != 1 {
 		t.Fatalf("GPU accelerator = %#v", accelerator)
 	}
+	if _, ok := accelerator["memory"]; ok {
+		t.Fatalf("whole-card accelerator leaked memory: %#v", accelerator)
+	}
 	cpuArgs, _ := cpu["args"].([]string)
 	gpuArgs, _ := gpu["args"].([]string)
 	if !containsArg(cpuArgs, "--dtype") || containsArg(gpuArgs, "--dtype") {
@@ -302,6 +305,25 @@ func TestEnsureRetriesIdempotencyInProgress(t *testing.T) {
 	}
 	if observed.RuntimeRef.String() != workloadID {
 		t.Fatalf("runtime ref = %s", observed.RuntimeRef)
+	}
+}
+
+func TestCreateBodyMapsAcceleratorMemory(t *testing.T) {
+	body := createBody(runtime.EnsureRequest{
+		ServiceID:       uuid.MustParse("05f6f46f-3db8-4551-8497-c46debb4be22"),
+		ServedModelName: "tiny-gpu",
+		IdempotencyKey:  uuid.MustParse("2df72d71-9d49-46c4-a48a-52bb37b082ab"),
+		Spec: domain.Spec{
+			Replicas: 1, CPU: "8", Memory: "32Gi",
+			Accelerator: &domain.Accelerator{SpecID: "gpu-nvidia-geforce-rtx-4090", CountPerReplica: 1, MemoryMB: 10240},
+			ExecutionProfile: domain.ExecutionProfile{
+				ImageRef: "registry.ani.internal/platform/vllm-openai-gpu@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+			},
+		},
+	}, runtime.TopologyPlan{Mode: "single_node", ProfileID: "container-single-node", ProfileVersion: "v1"})
+	accelerator, _ := body["resources"].(map[string]any)["accelerator"].(map[string]any)
+	if accelerator["spec_id"] != "gpu-nvidia-geforce-rtx-4090" || accelerator["count"] != 1 || accelerator["memory"] != 10240 {
+		t.Fatalf("accelerator = %#v", accelerator)
 	}
 }
 

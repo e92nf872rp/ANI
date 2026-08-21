@@ -73,6 +73,46 @@ func TestPlatformWorkloadHTTPCPUCreateGetAndServiceGate(t *testing.T) {
 	}
 }
 
+func TestPlatformWorkloadSpecFromRequestMapsAcceleratorMemory(t *testing.T) {
+	memory := 10240
+	spec, err := platformWorkloadSpecFromRequest(platformWorkloadCreateRequest{
+		Resources: platformWorkloadResourcesRequest{
+			CPU: "8", Memory: "32Gi",
+			Accelerator: &platformWorkloadAcceleratorRequest{SpecID: "gpu-nvidia-geforce-rtx-4090", Count: 1, Memory: &memory},
+		},
+	})
+	if err != nil {
+		t.Fatalf("spec from request: %v", err)
+	}
+	if spec.Resources.AcceleratorSpecID != "gpu-nvidia-geforce-rtx-4090" || spec.Resources.AcceleratorCount != 1 || spec.Resources.AcceleratorMemoryMB != 10240 {
+		t.Fatalf("resources = %+v", spec.Resources)
+	}
+}
+
+func TestPlatformWorkloadHTTPRejectsZeroAcceleratorMemory(t *testing.T) {
+	h := setupPlatformWorkloadTestServer(t)
+	tenant := "11111111-1111-1111-1111-111111111111"
+	body := `{
+		"idempotency_key":"5df72d71-9d49-46c4-a48a-52bb37b082ab",
+		"name":"inference-gpu-zero-memory",
+		"workload_class":"inference",
+		"runtime_kind":"container",
+		"image_ref":"registry.ani.internal/platform/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"command":["python3","-m","vllm.entrypoints.openai.api_server"],
+		"replicas":1,
+		"resources":{"cpu":"8","memory":"32Gi","accelerator":{"spec_id":"gpu-a100","count":1,"memory":0}},
+		"topology":{"mode":"single_node","profile_id":"container-single-node","profile_version":"v1"},
+		"scheduling":{"queue_class":"inference","gang":false},
+		"network":{"exposure":"cluster_internal","ports":[{"name":"http","port":8000}]},
+		"health_check":{"protocol":"http","path":"/health","port_name":"http"},
+		"metadata":{"owner_ref":"05f6f46f-3db8-4551-8497-c46debb4be22"}
+	}`
+	created := performPlatformWorkload(h, http.MethodPost, "/api/v1/platform-workloads", body, tenant, true)
+	if created.StatusCode() != http.StatusBadRequest {
+		t.Fatalf("zero memory status = %d body=%s", created.StatusCode(), created.Body())
+	}
+}
+
 func TestPlatformWorkloadHTTPGPUCreateUsesSameEntry(t *testing.T) {
 	h := setupPlatformWorkloadTestServer(t)
 	tenant := "11111111-1111-1111-1111-111111111111"
