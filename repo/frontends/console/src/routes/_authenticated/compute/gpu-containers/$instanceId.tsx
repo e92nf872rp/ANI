@@ -1,14 +1,18 @@
-import { createFileRoute, Link } from '@tanstack/react-router'
+import { useState } from 'react'
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import {
   Alert,
   Button,
   Descriptions,
+  Dialog,
   Empty,
+  MessagePlugin,
   Skeleton,
+  Space,
   Tag,
 } from 'tdesign-react'
 import { ChevronLeftIcon } from 'tdesign-icons-react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ConsolePage } from '@/components/shell/ConsolePage'
 import { ConsolePageHeader } from '@/components/shell/ConsolePageHeader'
 import { ConsoleContentCard } from '@/components/shell/ConsoleContentCard'
@@ -54,6 +58,9 @@ function isNotFound(error: unknown): boolean {
 
 function GpuContainerDetailPage() {
   const { instanceId } = Route.useParams()
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const [deleteDialogVisible, setDeleteDialogVisible] = useState(false)
 
   const { data: instance, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['gpu-container-instance', instanceId],
@@ -61,6 +68,36 @@ function GpuContainerDetailPage() {
       coreApi
         .GET('/instances/{instance_id}', { params: { path: { instance_id: instanceId } } })
         .then(({ data }) => data),
+  })
+
+  const lifecycleMutation = useMutation({
+    mutationFn: async (action: 'start' | 'stop' | 'delete') => {
+      const { data, error, response } = await coreApi.POST('/instances/{instance_id}/lifecycle', {
+        params: { path: { instance_id: instanceId } },
+        body: {
+          action,
+          idempotency_key: `${action}-${instanceId}-${Date.now()}`,
+        },
+      })
+      if (error) {
+        const err = error as { code?: string; message?: string }
+        throw { code: err.code, message: err.message, status: response.status }
+      }
+      return data
+    },
+    onSuccess: (_data, action) => {
+      MessagePlugin.success(action === 'delete' ? '删除请求已提交' : `${action === 'stop' ? '停止' : '启动'}请求已提交`)
+      if (action === 'delete') {
+        queryClient.invalidateQueries({ queryKey: ['gpu-container-instances'] })
+        navigate({ to: '/compute/gpu-containers' })
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['gpu-container-instance', instanceId] })
+        queryClient.invalidateQueries({ queryKey: ['gpu-container-instances'] })
+      }
+    },
+    onError: (err: { message?: string }) => {
+      MessagePlugin.error(err.message || '操作失败')
+    },
   })
 
   if (isNotFound(error)) {
@@ -100,6 +137,11 @@ function GpuContainerDetailPage() {
 
   const isProvisioning = instance.state === 'provisioning' || instance.state === 'pending' || instance.state === 'starting'
   const isFailed = instance.state === 'failed'
+  const isRunning = instance.state === 'running'
+  const isStopped = instance.state === 'stopped'
+  const canStart = isStopped || isFailed
+  const canStop = isRunning
+  const canDelete = !isProvisioning && instance.state !== 'deleting' && instance.state !== 'deleted'
 
   function allocationModeLabel(resourceName?: string | null): string {
     if (!resourceName) return '—'
@@ -117,9 +159,41 @@ function GpuContainerDetailPage() {
         title={instance.name}
         subtitle={`实例 ID: ${instance.id}`}
         extra={
-          <Tag theme={STATE_THEME[instance.state] ?? 'default'} variant="light">
-            {STATE_LABEL[instance.state] ?? instance.state}
-          </Tag>
+          <Space>
+            <Tag theme={STATE_THEME[instance.state] ?? 'default'} variant="light">
+              {STATE_LABEL[instance.state] ?? instance.state}
+            </Tag>
+            {canStop && (
+              <Button
+                theme="warning"
+                variant="outline"
+                loading={lifecycleMutation.isPending}
+                onClick={() => lifecycleMutation.mutate('stop')}
+              >
+                停止
+              </Button>
+            )}
+            {canStart && (
+              <Button
+                theme="primary"
+                variant="outline"
+                loading={lifecycleMutation.isPending}
+                onClick={() => lifecycleMutation.mutate('start')}
+              >
+                启动
+              </Button>
+            )}
+            {canDelete && (
+              <Button
+                theme="danger"
+                variant="outline"
+                loading={lifecycleMutation.isPending}
+                onClick={() => setDeleteDialogVisible(true)}
+              >
+                删除
+              </Button>
+            )}
+          </Space>
         }
       />
 
@@ -156,6 +230,29 @@ function GpuContainerDetailPage() {
           { label: '失败原因', content: instance.state_reason ?? '—' },
         ]} />
       </ConsoleContentCard>
+
+      <Dialog
+        header="确认删除"
+        visible={deleteDialogVisible}
+        onClose={() => setDeleteDialogVisible(false)}
+        footer={
+          <Space>
+            <Button variant="outline" onClick={() => setDeleteDialogVisible(false)}>取消</Button>
+            <Button
+              theme="danger"
+              loading={lifecycleMutation.isPending}
+              onClick={() => {
+                lifecycleMutation.mutate('delete')
+                setDeleteDialogVisible(false)
+              }}
+            >
+              确认删除
+            </Button>
+          </Space>
+        }
+      >
+        确定要删除实例「{instance.name}」吗？此操作不可撤销。
+      </Dialog>
     </ConsolePage>
   )
 }

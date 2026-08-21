@@ -154,8 +154,8 @@ func newFakeGPUInventoryWithNode(nodeName string, deviceCount int) fakeGPUInvent
 
 func TestGPUInventoryListEchoesInstanceIDForRunningGPUContainerOnSameNode(t *testing.T) {
 	// Scenario: 1 GPU node with 2 cards; 1 running gpu_container instance on
-	// that node. Per Plan A (node-level ownership), all cards on the same
-	// node echo the same instance_id and status is set to in_use.
+	// that node. With PodCount=1, only the first device (index 0) is in_use;
+	// the second device (index 1) stays available.
 	store := stubInstanceStore{records: []ports.WorkloadInstanceRecord{{
 		TenantID:   "tenant-a",
 		InstanceID: "inst-a-001",
@@ -169,7 +169,7 @@ func TestGPUInventoryListEchoesInstanceIDForRunningGPUContainerOnSameNode(t *tes
 
 	// Build occupancy map directly (bypass Hertz context).
 	occupancy := gpuNodeOccupancyMap{entries: map[string]gpuNodeOccupancyEntry{
-		"gpu-node-a": {TenantID: "tenant-a", InstanceID: "inst-a-001", NodeName: "gpu-node-a"},
+		"gpu-node-a": {TenantID: "tenant-a", InstanceID: "inst-a-001", NodeName: "gpu-node-a", PodCount: 1},
 	}}
 	records, err := api.inventory.ListNodeClasses(context.Background(), ports.GPUDiscoveryFilter{})
 	if err != nil {
@@ -179,16 +179,19 @@ func TestGPUInventoryListEchoesInstanceIDForRunningGPUContainerOnSameNode(t *tes
 	if len(listResponse.Items) != 2 {
 		t.Fatalf("items = %d, want 2 devices", len(listResponse.Items))
 	}
-	for i, item := range listResponse.Items {
-		if item.Status != "in_use" {
-			t.Fatalf("item[%d].status = %q, want in_use", i, item.Status)
-		}
-		if item.InstanceID == nil || *item.InstanceID != "inst-a-001" {
-			t.Fatalf("item[%d].instance_id = %v, want inst-a-001", i, item.InstanceID)
-		}
-		if item.TenantID == nil || *item.TenantID != "tenant-a" {
-			t.Fatalf("item[%d].tenant_id = %v, want tenant-a", i, item.TenantID)
-		}
+	// First device: in_use
+	if listResponse.Items[0].Status != "in_use" {
+		t.Fatalf("item[0].status = %q, want in_use", listResponse.Items[0].Status)
+	}
+	if listResponse.Items[0].InstanceID == nil || *listResponse.Items[0].InstanceID != "inst-a-001" {
+		t.Fatalf("item[0].instance_id = %v, want inst-a-001", listResponse.Items[0].InstanceID)
+	}
+	// Second device: available (only 1 pod running, PodCount=1)
+	if listResponse.Items[1].Status != "available" {
+		t.Fatalf("item[1].status = %q, want available (PodCount=1, only first device in_use)", listResponse.Items[1].Status)
+	}
+	if listResponse.Items[1].InstanceID != nil {
+		t.Fatalf("item[1].instance_id = %v, want nil (not in_use)", listResponse.Items[1].InstanceID)
 	}
 }
 
@@ -276,7 +279,7 @@ func TestGPUInventoryListMarksFaultNodeAsFaultRegardlessOfOccupancy(t *testing.T
 	api := newGPUInventoryAPIWithStore(inventory, store, nil)
 
 	occupancy := gpuNodeOccupancyMap{entries: map[string]gpuNodeOccupancyEntry{
-		"fault-node": {TenantID: "tenant-a", InstanceID: "inst-a-003", NodeName: "fault-node"},
+		"fault-node": {TenantID: "tenant-a", InstanceID: "inst-a-003", NodeName: "fault-node", PodCount: 1},
 	}}
 	records, err := api.inventory.ListNodeClasses(context.Background(), ports.GPUDiscoveryFilter{})
 	if err != nil {
@@ -310,7 +313,7 @@ func TestGPUInventoryOccupancyCountsInUseWhenInstanceEchoed(t *testing.T) {
 	api := newGPUInventoryAPIWithStore(newFakeGPUInventoryWithNode("gpu-node-a", 2), store, nil)
 
 	occupancy := gpuNodeOccupancyMap{entries: map[string]gpuNodeOccupancyEntry{
-		"gpu-node-a": {TenantID: "tenant-a", InstanceID: "inst-a-004", NodeName: "gpu-node-a"},
+		"gpu-node-a": {TenantID: "tenant-a", InstanceID: "inst-a-004", NodeName: "gpu-node-a", PodCount: 2},
 	}}
 	records, err := api.inventory.ListNodeClasses(context.Background(), ports.GPUDiscoveryFilter{})
 	if err != nil {
@@ -374,10 +377,12 @@ func TestGPUNodeOccupancyBuildsMapFromRunningInstances(t *testing.T) {
 	api := newGPUInventoryAPIWithPodFetcher(newFakeGPUInventoryWithNode("dev-phys-02", 1), pods)
 
 	occupancy := api.gpuNodeOccupancy(context.Background(), minimalRequestContext())
-	// dev-phys-02 has 2 running pods; the lexicographically smallest instance
-	// name wins (test-2 < test-dj).
+	// dev-phys-02 has 2 running pods; PodCount should be 2 and the
+	// lexicographically smallest instance name wins (test-2 < test-dj).
 	if entry, ok := occupancy.lookup("dev-phys-02"); !ok || entry.InstanceID != "test-2" {
 		t.Fatalf("lookup(dev-phys-02) = %+v ok=%v, want test-2", entry, ok)
+	} else if entry.PodCount != 2 {
+		t.Fatalf("lookup(dev-phys-02).PodCount = %d, want 2 (2 running pods)", entry.PodCount)
 	}
 	// dev-phys-03 only has a Pending pod and an empty-instance pod; both
 	// skipped, so no entry.
@@ -413,5 +418,8 @@ func TestGPUNodeOccupancyPicksStableInstanceWhenMultipleOnSameNode(t *testing.T)
 	}
 	if entry.InstanceID != "test-aaa" {
 		t.Fatalf("instance_id = %q, want test-aaa (lexicographically smallest)", entry.InstanceID)
+	}
+	if entry.PodCount != 2 {
+		t.Fatalf("PodCount = %d, want 2 (2 running pods on same node)", entry.PodCount)
 	}
 }

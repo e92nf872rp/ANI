@@ -163,10 +163,11 @@ func (s *VolcanoQueueStore) EnsurePlatformQueueDefaults(ctx context.Context) err
 
 // volcanoQueueCRD is the minimal Volcano Queue CRD JSON shape this adapter reads/writes.
 type volcanoQueueCRD struct {
-	APIVersion string              `json:"apiVersion"`
-	Kind       string              `json:"kind"`
-	Metadata   volcanoQueueCRDMeta `json:"metadata"`
-	Spec       volcanoQueueCRDSpec `json:"spec,omitempty"`
+	APIVersion string                `json:"apiVersion"`
+	Kind       string                `json:"kind"`
+	Metadata   volcanoQueueCRDMeta   `json:"metadata"`
+	Spec       volcanoQueueCRDSpec   `json:"spec,omitempty"`
+	Status     volcanoQueueCRDStatus `json:"status,omitempty"`
 }
 
 type volcanoQueueCRDMeta struct {
@@ -181,6 +182,15 @@ type volcanoQueueCRDMeta struct {
 type volcanoQueueCRDSpec struct {
 	Weight      int  `json:"weight,omitempty"`
 	Reclaimable bool `json:"reclaimable,omitempty"`
+}
+
+// volcanoQueueCRDStatus mirrors the Volcano Queue CRD status object.
+// The allocated map records resources held by running pods in this queue
+// (SPEC §4.4, FR-24). State is the raw Volcano queue switch state
+// ("Open" / "Closed" / ""). Omitted when the CRD has no status.
+type volcanoQueueCRDStatus struct {
+	Allocated map[string]string `json:"allocated,omitempty"`
+	State     string            `json:"state,omitempty"`
 }
 
 // volcanoQueueListCRD is the list response from K8s API.
@@ -507,8 +517,12 @@ func (s *VolcanoQueueStore) crdToQueue(crd volcanoQueueCRD) ports.GPUSchedulingQ
 		WorkloadClass:     workloadClass,
 		ProjectID:         labels[volcanoLabelProjectID],
 		IsPlatformDefault: isPlatformDefaultCRD(crd),
-		CreatedAt:         createdAt,
-		UpdatedAt:         updatedAt,
+		Status: ports.GPUSchedulingQueueStatus{
+			Allocated: crd.Status.Allocated,
+			State:     normaliseVolcanoQueueState(crd.Status.State),
+		},
+		CreatedAt: createdAt,
+		UpdatedAt: updatedAt,
 	}
 }
 
@@ -585,6 +599,21 @@ func labelSelectorTenant(tenantID string) string {
 
 func labelSelectorQueueID(id string) string {
 	return fmt.Sprintf("%s=%s", volcanoLabelQueueID, id)
+}
+
+// normaliseVolcanoQueueState maps the raw Volcano Queue CRD status.state
+// ("Open" / "Closed" / "") to the lowercase enum exposed by the Core API
+// (v1.yaml GPUSchedulingQueue.status.state: open / closed / unknown).
+// Empty or unrecognised values become "unknown".
+func normaliseVolcanoQueueState(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "open":
+		return "open"
+	case "closed":
+		return "closed"
+	default:
+		return "unknown"
+	}
 }
 
 // validateQueueName enforces K8s resource name convention:

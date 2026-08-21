@@ -30,6 +30,15 @@ type LocalInstanceService struct {
 	storage      instanceStorageBinder
 	sandbox      ports.SandboxRuntime
 	ops          ports.WorkloadInstanceOps
+	// quotaService performs TCC Cancel+Release on Delete (SPEC §5.1).
+	// nil means GPU quota is disabled.
+	quotaService ports.QuotaService
+	// metadataStore opens tenant-scoped transactions for atomic quota +
+	// status writes on Delete.
+	metadataStore ports.MetadataStore
+	// storeTx writes instance status inside the same tenant transaction as
+	// the quota Cancel+Release on Delete.
+	storeTx ports.WorkloadInstanceStoreTx
 }
 
 type InstanceServiceOption func(*LocalInstanceService)
@@ -67,6 +76,30 @@ func WithSandboxRuntime(sandbox ports.SandboxRuntime) InstanceServiceOption {
 func WithInstanceStorageService(storage instanceStorageBinder) InstanceServiceOption {
 	return func(service *LocalInstanceService) {
 		service.storage = storage
+	}
+}
+
+// WithInstanceQuotaService injects the TCC quota service used for Cancel +
+// Release on Delete (SPEC §5.1). When nil, quota calls are skipped.
+func WithInstanceQuotaService(service ports.QuotaService) InstanceServiceOption {
+	return func(s *LocalInstanceService) {
+		s.quotaService = service
+	}
+}
+
+// WithInstanceMetadataStore injects the tenant transaction store used so
+// Delete can atomically release quota and write the deleted status.
+func WithInstanceMetadataStore(store ports.MetadataStore) InstanceServiceOption {
+	return func(s *LocalInstanceService) {
+		s.metadataStore = store
+	}
+}
+
+// WithInstanceStoreTx injects the transactional status writer used inside the
+// same tenant transaction as Cancel+Release on Delete.
+func WithInstanceStoreTx(storeTx ports.WorkloadInstanceStoreTx) InstanceServiceOption {
+	return func(s *LocalInstanceService) {
+		s.storeTx = storeTx
 	}
 }
 
@@ -961,7 +994,7 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 		record.Status.UpdatedAt = request.RequestedAt.UTC()
 		record.UpdatedAt = request.RequestedAt.UTC()
 	}
-	if err := s.store.UpsertStatus(ctx, record); err != nil {
+	if err := s.persistLifecycleWithQuota(ctx, record, request.Action); err != nil {
 		return ports.WorkloadInstanceRecord{}, err
 	}
 	record.OperationID = opID
@@ -1016,6 +1049,29 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 		}
 	}
 	return record, nil
+}
+
+// persistLifecycleWithQuota writes the lifecycle status update and, when the
+// action is Delete with quota enabled, atomically releases both reserved and
+// used quota (Cancel + Release double-call, state-independent) in the same
+// tenant transaction (SPEC §5.1). For all other actions it falls back to the
+// plain store.UpsertStatus path.
+func (s *LocalInstanceService) persistLifecycleWithQuota(ctx context.Context, record ports.WorkloadInstanceRecord, action ports.WorkloadLifecycleAction) error {
+	if action != ports.WorkloadLifecycleDelete || s.quotaService == nil || s.metadataStore == nil || s.storeTx == nil {
+		return s.store.UpsertStatus(ctx, record)
+	}
+	if len(record.QuotaTxIDs) == 0 {
+		return s.store.UpsertStatus(ctx, record)
+	}
+	return s.metadataStore.WithTenantTx(ctx, func(txCtx context.Context, tx ports.MetadataTx) error {
+		if err := s.quotaService.Cancel(txCtx, tx, record.QuotaTxIDs); err != nil {
+			return err
+		}
+		if err := s.quotaService.Release(txCtx, tx, record.QuotaTxIDs); err != nil {
+			return err
+		}
+		return s.storeTx.UpsertStatusTx(txCtx, tx, record)
+	})
 }
 
 // SandboxExecutionContextFromRecord validates and projects the durable instance

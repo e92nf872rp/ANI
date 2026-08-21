@@ -126,7 +126,11 @@ type createInstanceRequest struct {
 	SandboxConfig         sandboxConfigRequest       `json:"sandbox_config"`
 	SecretBindings        []secretBindingRequest     `json:"secret_bindings"`
 	Description           string                     `json:"description"`
-	IdempotencyKey        string                     `json:"idempotency_key"`
+	// NetworkConfig is the top-level network fallback (v1.yaml
+	// InstanceNetworkConfig). Kind-specific *_config.network takes
+	// precedence; this is applied first as the base default.
+	NetworkConfig  *instanceNetworkRequest `json:"network_config"`
+	IdempotencyKey string                  `json:"idempotency_key"`
 }
 
 type vmConfigRequest struct {
@@ -240,6 +244,7 @@ type createGPURequest struct {
 	Count          int    `json:"count"`
 	AllocationMode string `json:"allocation_mode"`
 	WorkloadClass  string `json:"workload_class"`
+	QueueName      string `json:"queue_name"`
 }
 
 type instanceLifecycleRequest struct {
@@ -663,10 +668,10 @@ type instanceTimelineStepResponse struct {
 }
 
 func newInstanceAPI() *instanceAPI {
-	return newInstanceAPIWithObservability(nil, false, nil, nil, nil)
+	return newInstanceAPIWithObservability(nil, false, nil, nil, nil, nil)
 }
 
-func newInstanceAPIWithObservability(observability ports.InstanceObservability, useInstanceName bool, gpuInventory ports.GPUInventory, k8sClient *runtimeadapter.KubernetesRESTClient, secrets ports.SecretService) *instanceAPI {
+func newInstanceAPIWithObservability(observability ports.InstanceObservability, useInstanceName bool, gpuInventory ports.GPUInventory, k8sClient *runtimeadapter.KubernetesRESTClient, secrets ports.SecretService, specStore ports.GPUSpecStore) *instanceAPI {
 	store := newMemoryInstanceStore()
 	operations := runtimeadapter.NewLocalOperationStore()
 	identity := runtimeadapter.NewLocalWorkloadIdentityService()
@@ -705,7 +710,7 @@ func newInstanceAPIWithObservability(observability ports.InstanceObservability, 
 		reader = runtimeadapter.NewLocalProviderStatusReader()
 	}
 
-	orchestrator := runtimeadapter.NewLocalInstanceOrchestrator(
+	var orchestrator ports.WorkloadInstanceOrchestrator = runtimeadapter.NewLocalInstanceOrchestrator(
 		planner,
 		runtimeadapter.NewKubernetesDryRunRenderer(planner),
 		runtimeadapter.NewLocalAdmissionGuard(),
@@ -717,6 +722,18 @@ func newInstanceAPIWithObservability(observability ports.InstanceObservability, 
 		runtimeadapter.WithInstanceStore(store),
 		runtimeadapter.WithInstanceOrchestratorWorkloadIdentityService(identity),
 	)
+	// When a CRD-backed GPUSpecStore is available, wrap the orchestrator with
+	// the QuotaAwareInstanceOrchestrator so Volcano resource translation runs
+	// (vGPU/wholecard spec_id → volcano.sh/vgpu-memory etc.). Quota gates are
+	// nil-safe and skipped when quotaService/metadataStore are absent.
+	if specStore != nil {
+		translator := runtimeadapter.NewVolcanoResourceTranslator(specStore)
+		orchestrator = runtimeadapter.NewQuotaAwareInstanceOrchestrator(
+			orchestrator,
+			runtimeadapter.WithQuotaAwareQuotaEnabled(true),
+			runtimeadapter.WithQuotaAwareTranslator(translator),
+		)
+	}
 
 	sandboxRuntime := runtimeadapter.NewLocalSandboxRuntime()
 	serviceOpts := []runtimeadapter.InstanceServiceOption{
@@ -726,7 +743,7 @@ func newInstanceAPIWithObservability(observability ports.InstanceObservability, 
 		runtimeadapter.WithInstanceResourceResolver(runtimeadapter.NewLocalInstanceResourceResolverWithDependencies(
 			runtimeadapter.NewLocalNetworkService(),
 			runtimeadapter.NewLocalStorageService(),
-			runtimeadapter.NewLocalGPUSpecService(inventory),
+			runtimeadapter.NewCompositeGPUSpecService(specStore, runtimeadapter.NewLocalGPUSpecService(inventory)),
 			registryadapter.NewLocalImageRegistry(),
 			secrets,
 		)),
@@ -757,11 +774,11 @@ func newInstanceAPIWithObservability(observability ports.InstanceObservability, 
 }
 
 func registerInstancesWithObservability(v1 *route.RouterGroup, observability ports.InstanceObservability, useInstanceName bool, gpuInventory ports.GPUInventory, k8sClient *runtimeadapter.KubernetesRESTClient) ports.WorkloadInstanceService {
-	return registerInstancesWithRuntime(v1, observability, useInstanceName, gpuInventory, k8sClient, nil, nil)
+	return registerInstancesWithRuntime(v1, observability, useInstanceName, gpuInventory, k8sClient, nil, nil, nil)
 }
 
-func registerInstancesWithRuntime(v1 *route.RouterGroup, observability ports.InstanceObservability, useInstanceName bool, gpuInventory ports.GPUInventory, k8sClient *runtimeadapter.KubernetesRESTClient, secrets ports.SecretService, runtime *InstanceRuntime) ports.WorkloadInstanceService {
-	api := newInstanceAPIWithObservability(observability, useInstanceName, gpuInventory, k8sClient, secrets)
+func registerInstancesWithRuntime(v1 *route.RouterGroup, observability ports.InstanceObservability, useInstanceName bool, gpuInventory ports.GPUInventory, k8sClient *runtimeadapter.KubernetesRESTClient, secrets ports.SecretService, runtime *InstanceRuntime, specStore ports.GPUSpecStore) ports.WorkloadInstanceService {
+	api := newInstanceAPIWithObservability(observability, useInstanceName, gpuInventory, k8sClient, secrets, specStore)
 	if runtime != nil {
 		if runtime.Service == nil || runtime.Store == nil || runtime.Operations == nil {
 			panic("instance runtime requires service, store, and operations")
@@ -1139,6 +1156,26 @@ func (api *instanceAPI) discoverOrphanDeployments(ctx context.Context, tenantID 
 		log.Printf("[LIST] orphan discovery found untracked deployment %s/%s phase=%s node=%s gpu=%d", namespace, depName, obs.Phase, obs.NodeName, obs.GPUCount)
 	}
 	return records
+}
+
+// tryImportOrphanForLifecycle discovers orphan deployments for the tenant,
+// finds the one matching instanceID, and persists it into the store so a
+// subsequent lifecycle action can succeed. Returns true when the instance
+// was imported and the caller should retry the lifecycle action.
+func (api *instanceAPI) tryImportOrphanForLifecycle(ctx context.Context, tenantID, instanceID string) bool {
+	orphans := api.discoverOrphanDeployments(ctx, tenantID)
+	for _, orphan := range orphans {
+		if orphan.InstanceID != instanceID && orphan.Name != instanceID {
+			continue
+		}
+		if err := api.store.UpsertStatus(ctx, orphan); err != nil {
+			log.Printf("[LIFECYCLE] failed to import orphan instance %s for tenant %s: %v", instanceID, tenantID, err)
+			return false
+		}
+		log.Printf("[LIFECYCLE] imported orphan instance %s for tenant %s to retry lifecycle", instanceID, tenantID)
+		return true
+	}
+	return false
 }
 
 // observeOrphan inspects a single Kubernetes Deployment and its Pods to
@@ -1564,6 +1601,43 @@ func (api *instanceAPI) lifecycle(ctx context.Context, c *app.RequestContext) {
 		record, err = api.service.Rollback(ctx, lifecycle)
 	default:
 		record, err = api.service.ApplyLifecycle(ctx, lifecycle)
+	}
+	// If the instance is not in the local store but exists as an orphan
+	// deployment in the live Kubernetes cluster (e.g. after a gateway
+	// restart), import it into the store and retry the lifecycle action.
+	if err != nil && errors.Is(err, ports.ErrNotFound) && api.k8sClient != nil {
+		if imported := api.tryImportOrphanForLifecycle(ctx, lifecycle.TenantID, lifecycle.InstanceID); imported {
+			switch strings.ToLower(strings.TrimSpace(req.Action)) {
+			case "start":
+				record, err = api.service.Start(ctx, lifecycle)
+			case "stop":
+				record, err = api.service.Stop(ctx, lifecycle)
+			case "restart":
+				record, err = api.service.Restart(ctx, lifecycle)
+			case "resize":
+				record, err = api.service.Resize(ctx, ports.WorkloadInstanceResizeRequest{
+					TenantID:        lifecycle.TenantID,
+					InstanceID:      lifecycle.InstanceID,
+					IdempotencyKey:  lifecycle.IdempotencyKey,
+					Resources:       lifecycle.Resources,
+					UserID:          lifecycle.UserID,
+					PermissionProof: lifecycle.PermissionProof,
+					RequestedAt:     lifecycle.RequestedAt,
+				})
+			case "delete":
+				record, err = api.service.Delete(ctx, lifecycle)
+			case "snapshot":
+				record, err = api.service.Snapshot(ctx, lifecycle)
+			case "attach_volume":
+				record, err = api.service.AttachVolume(ctx, lifecycle)
+			case "detach_volume":
+				record, err = api.service.DetachVolume(ctx, lifecycle)
+			case "rollback":
+				record, err = api.service.Rollback(ctx, lifecycle)
+			default:
+				record, err = api.service.ApplyLifecycle(ctx, lifecycle)
+			}
+		}
 	}
 	if err != nil {
 		writeInstanceError(c, instanceLifecycleErrorStatus(err), instanceLifecycleErrorCode(err), err.Error())
@@ -2652,6 +2726,12 @@ func instanceSpecFromRequest(req createInstanceRequest, tenantID string) (ports.
 	if len(spec.Labels) == 0 {
 		spec.Labels = map[string]string{}
 	}
+	// Top-level network_config acts as the fallback default; kind-specific
+	// *_config.network overrides it (v1.yaml: network_config priority is
+	// *_config.network > top-level network_config).
+	if req.NetworkConfig != nil {
+		spec.Network = networkPolicyFromRequest(req.NetworkConfig, spec.Network)
+	}
 	if req.ContainerConfig != nil {
 		spec.Network = networkPolicyFromRequest(req.ContainerConfig.Network, spec.Network)
 	}
@@ -2706,9 +2786,16 @@ func instanceSpecFromRequest(req createInstanceRequest, tenantID string) (ports.
 			PreferredVendors: []ports.GPUVendor{ports.GPUVendor(firstNonEmpty(resolved.GPUVendor, "nvidia"))},
 			PreferredModels:  []string{firstNonEmpty(resolved.GPUModel, "A100")},
 			RequiredCount:    maxInt(resolved.GPUCount, 1),
+			QueueName:        resolved.QueueName,
+			WorkloadClass:    ports.WorkloadClass(firstNonEmpty(resolved.WorkloadClass, string(ports.WorkloadClassInference))),
 		}
 		if resolved.GPUSpecID != "" {
 			spec.GPUSpec = &ports.InstanceGPUSpecReference{SpecID: resolved.GPUSpecID, GPUType: resolved.GPUModel, Shares: resolved.GPUShares, MBPerShare: resolved.GPUMBPerShare}
+			// spec_id carries full GPU type info; clear legacy selectors
+			// to avoid conflict validation in instance_service.go.
+			spec.Resources.GPU.PreferredVendors = nil
+			spec.Resources.GPU.PreferredModels = nil
+			spec.Resources.GPU.RequiredCount = 1
 		}
 	case ports.WorkloadKindSandbox:
 		sandboxConfig, err := sandboxConfigFromRequest(resolved.SandboxConfig)
@@ -2881,6 +2968,8 @@ type resolvedCreateFields struct {
 	GPUSpecID     string
 	GPUShares     int
 	GPUMBPerShare int
+	QueueName     string
+	WorkloadClass string
 	SandboxConfig sandboxConfigRequest
 }
 
@@ -2897,6 +2986,8 @@ func resolveCreateInstanceFields(req createInstanceRequest, kind ports.WorkloadK
 		GPUModel:      firstNonEmpty(req.GPU.Model, req.GPUModel),
 		GPUCount:      firstNonZeroInt(req.GPU.Count, req.GPUCount),
 		GPUSpecID:     strings.TrimSpace(req.GPU.SpecID),
+		QueueName:     strings.TrimSpace(req.GPU.QueueName),
+		WorkloadClass: strings.TrimSpace(req.GPU.WorkloadClass),
 		SandboxConfig: req.SandboxConfig,
 	}
 	switch kind {
@@ -2941,11 +3032,19 @@ func resolveCreateInstanceFields(req createInstanceRequest, kind ports.WorkloadK
 			if err := conflictInt("gpu.count", req.GPUContainerConfig.GPU.Count, flatGPU.Count); err != nil {
 				return resolvedCreateFields{}, err
 			}
+			if err := conflictString("gpu.queue_name", req.GPUContainerConfig.GPU.QueueName, req.GPU.QueueName); err != nil {
+				return resolvedCreateFields{}, err
+			}
+			if err := conflictString("gpu.workload_class", req.GPUContainerConfig.GPU.WorkloadClass, req.GPU.WorkloadClass); err != nil {
+				return resolvedCreateFields{}, err
+			}
 			resolved.Replicas = firstNonZeroInt(req.GPUContainerConfig.Replicas, req.Replicas)
 			resolved.GPUVendor = firstNonEmpty(req.GPUContainerConfig.GPU.Vendor, flatGPU.Vendor)
 			resolved.GPUModel = firstNonEmpty(req.GPUContainerConfig.GPU.Model, flatGPU.Model)
 			resolved.GPUCount = firstNonZeroInt(req.GPUContainerConfig.GPU.Count, flatGPU.Count)
 			resolved.GPUSpecID = firstNonEmpty(req.GPUContainerConfig.GPU.SpecID, resolved.GPUSpecID)
+			resolved.QueueName = firstNonEmpty(req.GPUContainerConfig.GPU.QueueName, resolved.QueueName)
+			resolved.WorkloadClass = firstNonEmpty(req.GPUContainerConfig.GPU.WorkloadClass, resolved.WorkloadClass)
 		}
 	case ports.WorkloadKindSandbox:
 		// sandbox_config is already the nested path; no flat aliases.
@@ -3515,6 +3614,10 @@ func writeInstanceCreateError(c *app.RequestContext, err error) {
 		writeInstanceError(c, http.StatusConflict, "CONFLICT", err.Error())
 	case errors.Is(err, ports.ErrFailedPrecondition):
 		writeInstanceError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", err.Error())
+	case errors.Is(err, ports.ErrQuotaExceeded):
+		writeInstanceError(c, http.StatusConflict, "QUOTA_EXCEEDED", err.Error())
+	case errors.Is(err, ports.ErrReservedInsufficient):
+		writeInstanceError(c, http.StatusConflict, "RESERVED_INSUFFICIENT", err.Error())
 	case errors.Is(err, ports.ErrInvalid):
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	default:

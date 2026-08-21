@@ -11,7 +11,7 @@ import (
 )
 
 func TestGatewayGPUInventoryFromConfigDefaultsToRouterLocalInventory(t *testing.T) {
-	inventory, err := newGatewayGPUInventory(gatewayGPUInventoryRuntimeConfig{})
+	inventory, err := newGatewayGPUInventory(gatewayGPUInventoryRuntimeConfig{}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newGatewayGPUInventory() error = %v", err)
 	}
@@ -25,7 +25,7 @@ func TestGatewayGPUInventoryFromConfigUsesKubernetesProvider(t *testing.T) {
 		ProviderMode:         "kubernetes_rest",
 		KubernetesAPIHost:    "https://kubernetes.example.test",
 		KubernetesHTTPClient: &http.Client{Transport: gatewayGPUInventoryRoundTripper{}},
-	})
+	}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newGatewayGPUInventory() error = %v", err)
 	}
@@ -44,7 +44,7 @@ func TestGatewayGPUInventoryFromConfigUsesKubernetesProvider(t *testing.T) {
 func TestGatewayGPUInventoryRejectsUnsupportedProvider(t *testing.T) {
 	if _, err := newGatewayGPUInventory(gatewayGPUInventoryRuntimeConfig{
 		ProviderMode: "dcgm_direct",
-	}); err == nil {
+	}, nil, nil, nil); err == nil {
 		t.Fatalf("newGatewayGPUInventory() error = nil, want unsupported provider error")
 	}
 }

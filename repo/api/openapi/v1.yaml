@@ -3549,6 +3549,10 @@ components:
               type: object
               description: "已分配资源键值集合，对齐 Volcano Queue CRD（如 nvidia.com/gpu: 2）"
               additionalProperties: { type: string }
+            state:
+              type: string
+              enum: [open, closed, unknown]
+              description: "队列开关状态，归一自 Volcano Queue CRD status.state（Open→open / Closed→closed / 空/其他→unknown）"
             in_queue:      { type: integer, minimum: 0, description: "排队中任务数" }
 
     GPUSchedulingQueueListResponse:
@@ -3957,6 +3961,7 @@ components:
       required: [tenant_id, items]
       properties:
         tenant_id: { type: string, format: uuid, description: "租户 ID" }
+        tenant_name: { type: string, description: "租户名称（仅 GET /quotas 列表返回，其余端点可能省略）" }
         items:
           type: array
           items: { $ref: '#/components/schemas/QuotaItem' }
@@ -8540,6 +8545,7 @@ paths:
       x-ani-rbac-scope: "scope:gpu-scheduling:write"
       parameters:
         - { name: queue_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 }, description: "幂等键，防止重复更新" }
       requestBody:
         required: true
         content:

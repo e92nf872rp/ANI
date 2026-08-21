@@ -20,15 +20,21 @@ type gpuSchedulingAPI struct {
 
 // gpuSchedulingQueueResponse is the JSON shape for GPUSchedulingQueue (matches v1.yaml).
 type gpuSchedulingQueueResponse struct {
-	ID                string    `json:"id"`
-	Name              string    `json:"name"`
-	Weight            int       `json:"weight"`
-	Reclaimable       bool      `json:"reclaimable"`
-	WorkloadClass     string    `json:"workload_class"`
-	ProjectID         *string   `json:"project_id,omitempty"`
-	IsPlatformDefault bool      `json:"is_platform_default"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	ID                string                        `json:"id"`
+	Name              string                        `json:"name"`
+	Weight            int                           `json:"weight"`
+	Reclaimable       bool                          `json:"reclaimable"`
+	WorkloadClass     string                        `json:"workload_class"`
+	ProjectID         *string                       `json:"project_id,omitempty"`
+	IsPlatformDefault bool                          `json:"is_platform_default"`
+	Status            *gpuSchedulingQueueStatusJSON `json:"status,omitempty"`
+	CreatedAt         time.Time                     `json:"created_at"`
+	UpdatedAt         time.Time                     `json:"updated_at"`
+}
+
+type gpuSchedulingQueueStatusJSON struct {
+	Allocated map[string]string `json:"allocated,omitempty"`
+	State     string            `json:"state"`
 }
 
 type gpuSchedulingQueueListResponse struct {
@@ -230,7 +236,7 @@ func queueToResponse(q ports.GPUSchedulingQueue) gpuSchedulingQueueResponse {
 		pid := q.ProjectID
 		projectID = &pid
 	}
-	return gpuSchedulingQueueResponse{
+	resp := gpuSchedulingQueueResponse{
 		ID:                q.ID,
 		Name:              q.Name,
 		Weight:            q.Weight,
@@ -241,6 +247,13 @@ func queueToResponse(q ports.GPUSchedulingQueue) gpuSchedulingQueueResponse {
 		CreatedAt:         q.CreatedAt,
 		UpdatedAt:         q.UpdatedAt,
 	}
+	if len(q.Status.Allocated) > 0 || q.Status.State != "" {
+		resp.Status = &gpuSchedulingQueueStatusJSON{
+			Allocated: q.Status.Allocated,
+			State:     q.Status.State,
+		}
+	}
+	return resp
 }
 
 func writeGPUSchedulingError(c *app.RequestContext, err error) {

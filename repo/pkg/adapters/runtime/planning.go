@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -213,6 +214,26 @@ func (r *PlanningRuntime) plan(ctx context.Context, spec ports.WorkloadSpec) (po
 		planned.Annotations["ani.kubercloud.io/gpu-queue"] = decision.QueueName
 		if decision.SelectedNodeModel != "" {
 			planned.Annotations["ani.kubercloud.io/gpu-selected-model"] = decision.SelectedNodeModel
+		}
+		// Apply the Volcano queue annotation so the renderer can place it
+		// on the PodTemplate metadata (not the top-level object metadata).
+		if decision.QueueName != "" && planned.Annotations["scheduling.volcano.sh/queue-name"] == "" {
+			planned.Annotations["scheduling.volcano.sh/queue-name"] = decision.QueueName
+		}
+		// When using a Volcano spec_id (GPUSpec != nil), the translator already
+		// injected the correct nodeSelector (gpu-mode, gpu-sharing-spec, etc.).
+		// Do not override it with a hostname-pinned selector — let Volcano
+		// choose the node.
+		if spec.GPUSpec == nil && len(decision.NodeSelector) > 0 {
+			merged := map[string]string{}
+			if raw, ok := planned.Annotations[volcanoNodeSelectorAnnotation]; ok && strings.TrimSpace(raw) != "" {
+				_ = json.Unmarshal([]byte(raw), &merged)
+			}
+			for k, v := range decision.NodeSelector {
+				merged[k] = v
+			}
+			data, _ := json.Marshal(merged)
+			planned.Annotations[volcanoNodeSelectorAnnotation] = string(data)
 		}
 		if planned.Resources.GPU.Pool == "" {
 			planned.Resources.GPU.Pool = decision.QueueName

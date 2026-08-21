@@ -531,3 +531,138 @@ func TestVolcanoQueueStoreCanonicalLabelWinsOverLegacy(t *testing.T) {
 }
 
 func intPtr(v int) *int { return &v }
+
+// TestNormaliseVolcanoQueueState verifies the CRD status.state → API enum
+// mapping required by issue-007 AC L23:
+//
+//	Open→open / Closed→closed / 空/其他→unknown, 大小写归一.
+func TestNormaliseVolcanoQueueState(t *testing.T) {
+	cases := []struct {
+		raw   string
+		want  string
+		label string
+	}{
+		{"Open", "open", "canonical Open"},
+		{"OPEN", "open", "uppercase OPEN"},
+		{"open", "open", "lowercase open"},
+		{"  Open  ", "open", "whitespace-padded Open"},
+		{"Closed", "closed", "canonical Closed"},
+		{"CLOSED", "closed", "uppercase CLOSED"},
+		{"closed", "closed", "lowercase closed"},
+		{"  Closed  ", "closed", "whitespace-padded Closed"},
+		{"", "unknown", "empty string"},
+		{"   ", "unknown", "whitespace only"},
+		{"unknown", "unknown", "literal unknown"},
+		{"Pending", "unknown", "unrecognised Volcano state"},
+		{"foo", "unknown", "arbitrary string"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.label, func(t *testing.T) {
+			got := normaliseVolcanoQueueState(tc.raw)
+			if got != tc.want {
+				t.Fatalf("normaliseVolcanoQueueState(%q) = %q, want %q", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestVolcanoQueueStoreCRDStatusMapped verifies that crdToQueue maps the
+// Volcano Queue CRD status.allocated and status.state into the
+// GPUSchedulingQueue.Status fields required by issue-007 AC L23.
+func TestVolcanoQueueStoreCRDStatusMapped(t *testing.T) {
+	api := newFakeK8sAPI()
+	store := newTestStore(api)
+
+	// Seed a queue CRD with a populated status sub-resource (as Volcano
+	// controller would write it).
+	crd := volcanoQueueCRD{
+		APIVersion: volcanoQueueAPIGroup + "/" + volcanoQueueAPIVersion,
+		Kind:       volcanoQueueKind,
+		Metadata: volcanoQueueCRDMeta{
+			Name:      "gpu-queue-a",
+			Namespace: "volcano-system",
+			UID:       "uid-gpu-queue-a",
+			Labels: map[string]string{
+				volcanoLabelTenantID:      "tenant-a",
+				volcanoLabelWorkloadClass: string(ports.WorkloadClassInference),
+				volcanoLabelQueueID:       "queue-id-a",
+			},
+			Annotations: map[string]string{
+				"ani.kubercloud.io/created-at": api.now().Format(time.RFC3339),
+				"ani.kubercloud.io/updated-at": api.now().Format(time.RFC3339),
+			},
+		},
+		Spec: volcanoQueueCRDSpec{Weight: 10, Reclaimable: false},
+		Status: volcanoQueueCRDStatus{
+			Allocated: map[string]string{
+				"nvidia.com/gpu": "2",
+				"cpu":            "8",
+			},
+			State: "Open",
+		},
+	}
+	api.queues["gpu-queue-a"] = crd
+
+	queues, err := store.List(context.Background(), "tenant-a")
+	if err != nil {
+		t.Fatalf("List error = %v", err)
+	}
+	if len(queues) != 1 {
+		t.Fatalf("queues = %+v, want 1 queue", queues)
+	}
+	q := queues[0]
+
+	// Allocated map must be carried through verbatim.
+	if len(q.Status.Allocated) != 2 {
+		t.Fatalf("Allocated = %+v, want 2 entries", q.Status.Allocated)
+	}
+	if q.Status.Allocated["nvidia.com/gpu"] != "2" {
+		t.Errorf("Allocated[nvidia.com/gpu] = %q, want %q", q.Status.Allocated["nvidia.com/gpu"], "2")
+	}
+	if q.Status.Allocated["cpu"] != "8" {
+		t.Errorf("Allocated[cpu] = %q, want %q", q.Status.Allocated["cpu"], "8")
+	}
+
+	// State must be normalised from "Open" → "open".
+	if q.Status.State != "open" {
+		t.Errorf("State = %q, want %q", q.Status.State, "open")
+	}
+}
+
+// TestVolcanoQueueStoreCRDStatusEmptyStateMapsUnknown ensures a CRD with
+// no status.state (empty/omitted) is exposed as "unknown" per AC L23.
+func TestVolcanoQueueStoreCRDStatusEmptyStateMapsUnknown(t *testing.T) {
+	api := newFakeK8sAPI()
+	store := newTestStore(api)
+
+	crd := volcanoQueueCRD{
+		APIVersion: volcanoQueueAPIGroup + "/" + volcanoQueueAPIVersion,
+		Kind:       volcanoQueueKind,
+		Metadata: volcanoQueueCRDMeta{
+			Name: "no-status-queue",
+			Labels: map[string]string{
+				volcanoLabelTenantID:      "tenant-a",
+				volcanoLabelWorkloadClass: string(ports.WorkloadClassTraining),
+				volcanoLabelQueueID:       "queue-id-b",
+			},
+			Annotations: map[string]string{
+				"ani.kubercloud.io/created-at": api.now().Format(time.RFC3339),
+				"ani.kubercloud.io/updated-at": api.now().Format(time.RFC3339),
+			},
+		},
+		Spec: volcanoQueueCRDSpec{Weight: 5},
+		// Status omitted entirely — no state, no allocated.
+	}
+	api.queues["no-status-queue"] = crd
+
+	got, err := store.Get(context.Background(), "tenant-a", "queue-id-b")
+	if err != nil {
+		t.Fatalf("Get error = %v", err)
+	}
+	if got.Status.State != "unknown" {
+		t.Errorf("State = %q, want %q (empty state → unknown)", got.Status.State, "unknown")
+	}
+	if len(got.Status.Allocated) != 0 {
+		t.Errorf("Allocated = %+v, want empty map", got.Status.Allocated)
+	}
+}

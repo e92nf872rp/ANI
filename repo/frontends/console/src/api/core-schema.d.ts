@@ -6265,6 +6265,11 @@ export interface components {
                 allocated?: {
                     [key: string]: string;
                 };
+                /**
+                 * @description 队列开关状态，归一自 Volcano Queue CRD status.state（Open→open / Closed→closed / 空/其他→unknown）
+                 * @enum {string}
+                 */
+                state?: "open" | "closed" | "unknown";
                 /** @description 排队中任务数 */
                 in_queue?: number;
             } | null;
@@ -6620,6 +6625,8 @@ export interface components {
              * @description 租户 ID
              */
             tenant_id: string;
+            /** @description 租户名称（仅 GET /quotas 列表返回，其余端点可能省略） */
+            tenant_name?: string;
             items: components["schemas"]["QuotaItem"][];
         };
         /** @description 单维度配额项 */
@@ -12414,7 +12421,10 @@ export interface operations {
     updateGPUSchedulingQueue: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 幂等键，防止重复更新 */
+                "Idempotency-Key": string;
+            };
             path: {
                 queue_id: string;
             };
