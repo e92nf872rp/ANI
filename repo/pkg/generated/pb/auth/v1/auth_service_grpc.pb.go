@@ -28,8 +28,10 @@ const (
 	AuthService_RefreshToken_FullMethodName          = "/auth.v1.AuthService/RefreshToken"
 	AuthService_RevokeToken_FullMethodName           = "/auth.v1.AuthService/RevokeToken"
 	AuthService_ValidateToken_FullMethodName         = "/auth.v1.AuthService/ValidateToken"
+	AuthService_ValidatePrincipal_FullMethodName     = "/auth.v1.AuthService/ValidatePrincipal"
 	AuthService_IssueServiceToken_FullMethodName     = "/auth.v1.AuthService/IssueServiceToken"
 	AuthService_CheckPermission_FullMethodName       = "/auth.v1.AuthService/CheckPermission"
+	AuthService_CheckPermissionV2_FullMethodName     = "/auth.v1.AuthService/CheckPermissionV2"
 	AuthService_CreateAPIKey_FullMethodName          = "/auth.v1.AuthService/CreateAPIKey"
 	AuthService_ListAPIKeys_FullMethodName           = "/auth.v1.AuthService/ListAPIKeys"
 	AuthService_RevokeAPIKey_FullMethodName          = "/auth.v1.AuthService/RevokeAPIKey"
@@ -48,11 +50,18 @@ type AuthServiceClient interface {
 	// ValidateToken is called internally by the ANI Gateway Auth middleware.
 	// Returns the TenantContext if the token is valid; returns UNAUTHENTICATED otherwise.
 	ValidateToken(ctx context.Context, in *ValidateTokenRequest, opts ...grpc.CallOption) (*v1.TenantContext, error)
+	// ValidatePrincipal is the V2 credential validation RPC.
+	// Returns a canonical PrincipalContext without legacy scope/roles.
+	ValidatePrincipal(ctx context.Context, in *ValidatePrincipalRequest, opts ...grpc.CallOption) (*PrincipalContext, error)
 	// IssueServiceToken mints a short-lived service JWT for cluster-internal Core calls.
 	// It is not a tenant HTTP product API and must not be published on Gateway.
 	IssueServiceToken(ctx context.Context, in *IssueServiceTokenRequest, opts ...grpc.CallOption) (*AccessToken, error)
 	// CheckPermission is called by the RBAC middleware.
 	CheckPermission(ctx context.Context, in *CheckPermissionRequest, opts ...grpc.CallOption) (*CheckPermissionResponse, error)
+	// CheckPermissionV2 is the V2 authorization RPC.
+	// Re-validates the raw credential and compares the Gateway principal before
+	// reading authoritative permissions.
+	CheckPermissionV2(ctx context.Context, in *AuthorizationRequest, opts ...grpc.CallOption) (*AuthorizationDecision, error)
 	CreateAPIKey(ctx context.Context, in *CreateAPIKeyRequest, opts ...grpc.CallOption) (*CreateAPIKeyResponse, error)
 	ListAPIKeys(ctx context.Context, in *ListAPIKeysRequest, opts ...grpc.CallOption) (*ListAPIKeysResponse, error)
 	RevokeAPIKey(ctx context.Context, in *RevokeAPIKeyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
@@ -129,6 +138,15 @@ func (c *authServiceClient) ValidateToken(ctx context.Context, in *ValidateToken
 	return out, nil
 }
 
+func (c *authServiceClient) ValidatePrincipal(ctx context.Context, in *ValidatePrincipalRequest, opts ...grpc.CallOption) (*PrincipalContext, error) {
+	out := new(PrincipalContext)
+	err := c.cc.Invoke(ctx, AuthService_ValidatePrincipal_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *authServiceClient) IssueServiceToken(ctx context.Context, in *IssueServiceTokenRequest, opts ...grpc.CallOption) (*AccessToken, error) {
 	out := new(AccessToken)
 	err := c.cc.Invoke(ctx, AuthService_IssueServiceToken_FullMethodName, in, out, opts...)
@@ -141,6 +159,15 @@ func (c *authServiceClient) IssueServiceToken(ctx context.Context, in *IssueServ
 func (c *authServiceClient) CheckPermission(ctx context.Context, in *CheckPermissionRequest, opts ...grpc.CallOption) (*CheckPermissionResponse, error) {
 	out := new(CheckPermissionResponse)
 	err := c.cc.Invoke(ctx, AuthService_CheckPermission_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) CheckPermissionV2(ctx context.Context, in *AuthorizationRequest, opts ...grpc.CallOption) (*AuthorizationDecision, error) {
+	out := new(AuthorizationDecision)
+	err := c.cc.Invoke(ctx, AuthService_CheckPermissionV2_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -187,11 +214,18 @@ type AuthServiceServer interface {
 	// ValidateToken is called internally by the ANI Gateway Auth middleware.
 	// Returns the TenantContext if the token is valid; returns UNAUTHENTICATED otherwise.
 	ValidateToken(context.Context, *ValidateTokenRequest) (*v1.TenantContext, error)
+	// ValidatePrincipal is the V2 credential validation RPC.
+	// Returns a canonical PrincipalContext without legacy scope/roles.
+	ValidatePrincipal(context.Context, *ValidatePrincipalRequest) (*PrincipalContext, error)
 	// IssueServiceToken mints a short-lived service JWT for cluster-internal Core calls.
 	// It is not a tenant HTTP product API and must not be published on Gateway.
 	IssueServiceToken(context.Context, *IssueServiceTokenRequest) (*AccessToken, error)
 	// CheckPermission is called by the RBAC middleware.
 	CheckPermission(context.Context, *CheckPermissionRequest) (*CheckPermissionResponse, error)
+	// CheckPermissionV2 is the V2 authorization RPC.
+	// Re-validates the raw credential and compares the Gateway principal before
+	// reading authoritative permissions.
+	CheckPermissionV2(context.Context, *AuthorizationRequest) (*AuthorizationDecision, error)
 	CreateAPIKey(context.Context, *CreateAPIKeyRequest) (*CreateAPIKeyResponse, error)
 	ListAPIKeys(context.Context, *ListAPIKeysRequest) (*ListAPIKeysResponse, error)
 	RevokeAPIKey(context.Context, *RevokeAPIKeyRequest) (*emptypb.Empty, error)
@@ -223,11 +257,17 @@ func (UnimplementedAuthServiceServer) RevokeToken(context.Context, *RevokeTokenR
 func (UnimplementedAuthServiceServer) ValidateToken(context.Context, *ValidateTokenRequest) (*v1.TenantContext, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ValidateToken not implemented")
 }
+func (UnimplementedAuthServiceServer) ValidatePrincipal(context.Context, *ValidatePrincipalRequest) (*PrincipalContext, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ValidatePrincipal not implemented")
+}
 func (UnimplementedAuthServiceServer) IssueServiceToken(context.Context, *IssueServiceTokenRequest) (*AccessToken, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method IssueServiceToken not implemented")
 }
 func (UnimplementedAuthServiceServer) CheckPermission(context.Context, *CheckPermissionRequest) (*CheckPermissionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CheckPermission not implemented")
+}
+func (UnimplementedAuthServiceServer) CheckPermissionV2(context.Context, *AuthorizationRequest) (*AuthorizationDecision, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CheckPermissionV2 not implemented")
 }
 func (UnimplementedAuthServiceServer) CreateAPIKey(context.Context, *CreateAPIKeyRequest) (*CreateAPIKeyResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateAPIKey not implemented")
@@ -377,6 +417,24 @@ func _AuthService_ValidateToken_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AuthService_ValidatePrincipal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ValidatePrincipalRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).ValidatePrincipal(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_ValidatePrincipal_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).ValidatePrincipal(ctx, req.(*ValidatePrincipalRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AuthService_IssueServiceToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(IssueServiceTokenRequest)
 	if err := dec(in); err != nil {
@@ -409,6 +467,24 @@ func _AuthService_CheckPermission_Handler(srv interface{}, ctx context.Context, 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AuthServiceServer).CheckPermission(ctx, req.(*CheckPermissionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_CheckPermissionV2_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AuthorizationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).CheckPermissionV2(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_CheckPermissionV2_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).CheckPermissionV2(ctx, req.(*AuthorizationRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -503,12 +579,20 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _AuthService_ValidateToken_Handler,
 		},
 		{
+			MethodName: "ValidatePrincipal",
+			Handler:    _AuthService_ValidatePrincipal_Handler,
+		},
+		{
 			MethodName: "IssueServiceToken",
 			Handler:    _AuthService_IssueServiceToken_Handler,
 		},
 		{
 			MethodName: "CheckPermission",
 			Handler:    _AuthService_CheckPermission_Handler,
+		},
+		{
+			MethodName: "CheckPermissionV2",
+			Handler:    _AuthService_CheckPermissionV2_Handler,
 		},
 		{
 			MethodName: "CreateAPIKey",

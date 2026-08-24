@@ -36,11 +36,15 @@ func TestIssueAndValidateServiceToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	if claims.TenantID != tenantID || claims.PrincipalKind != "service" || claims.Audience != serviceAudience {
+	if claims.Principal.TenantID != tenantID.String() || claims.Principal.Kind != "service" || claims.Principal.Domain != "tenant" {
 		t.Fatalf("claims = %+v", claims)
 	}
-	if claims.Scope != "scope:platform-workloads:write" {
-		t.Fatalf("scope = %q", claims.Scope)
+	raw := decodeJWTClaims(t, issued.GetAccessToken())
+	if aud, ok := raw["aud"].(string); !ok || aud != serviceAudience {
+		t.Fatalf("aud = %#v, want %q", raw["aud"], serviceAudience)
+	}
+	if claims.Legacy.Scope != "scope:platform-workloads:write" {
+		t.Fatalf("scope = %q", claims.Legacy.Scope)
 	}
 
 	ctx, err := svc.ValidateToken(context.Background(), &authv1.ValidateTokenRequest{Token: issued.GetAccessToken()})
@@ -146,7 +150,7 @@ func TestExistingTenantTokenStillValidWithoutAudience(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	if claims.TenantID != tenantID || claims.PrincipalKind != "" {
+	if claims.Principal.TenantID != tenantID.String() || claims.Principal.Kind != "user" {
 		t.Fatalf("claims = %+v", claims)
 	}
 }

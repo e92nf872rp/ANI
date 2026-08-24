@@ -61,14 +61,14 @@ func TestRefreshTokenIssuesAccessToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate issued access token: %v", err)
 	}
-	if claims.TenantID != tenantID || claims.UserID != userID {
-		t.Fatalf("claims tenant/user = %s/%s", claims.TenantID, claims.UserID)
+	if claims.Principal.TenantID != tenantID.String() || claims.Principal.SubjectID != userID.String() {
+		t.Fatalf("claims tenant/user = %s/%s", claims.Principal.TenantID, claims.Principal.SubjectID)
 	}
-	if len(claims.Roles) != 1 || claims.Roles[0] != "tenant-admin" {
-		t.Fatalf("roles = %v", claims.Roles)
+	if len(claims.Legacy.Roles) != 1 || claims.Legacy.Roles[0] != "tenant-admin" {
+		t.Fatalf("roles = %v", claims.Legacy.Roles)
 	}
-	if claims.Scope != "tenant" {
-		t.Fatalf("scope = %q, want tenant", claims.Scope)
+	if claims.Legacy.Scope != "tenant" {
+		t.Fatalf("scope = %q, want tenant", claims.Legacy.Scope)
 	}
 }
 
@@ -124,17 +124,17 @@ func TestRefreshToken_PlatformScopeIssuesPlatformToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate issued access token: %v", err)
 	}
-	if claims.Scope != "platform" {
-		t.Fatalf("scope = %q, want platform", claims.Scope)
+	if claims.Legacy.Scope != "platform" {
+		t.Fatalf("scope = %q, want platform", claims.Legacy.Scope)
 	}
-	if claims.TenantID != uuid.Nil {
-		t.Fatalf("tenant_id = %v, want Nil for platform token", claims.TenantID)
+	if claims.Principal.Domain != "platform" || claims.Principal.TenantID != "" {
+		t.Fatalf("domain/tenant = %q/%q, want platform/empty", claims.Principal.Domain, claims.Principal.TenantID)
 	}
-	if claims.UserID != userID {
-		t.Fatalf("user_id = %v, want %v", claims.UserID, userID)
+	if claims.Principal.SubjectID != userID.String() {
+		t.Fatalf("user_id = %v, want %v", claims.Principal.SubjectID, userID)
 	}
-	if len(claims.Roles) != 1 || claims.Roles[0] != "platform-admin" {
-		t.Fatalf("roles = %v, want [platform-admin]", claims.Roles)
+	if len(claims.Legacy.Roles) != 1 || claims.Legacy.Roles[0] != "platform-admin" {
+		t.Fatalf("roles = %v, want [platform-admin]", claims.Legacy.Roles)
 	}
 }
 

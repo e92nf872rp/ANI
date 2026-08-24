@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	authv1 "github.com/kubercloud/ani/pkg/generated/pb/auth/v1"
 	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 )
 
@@ -137,6 +138,36 @@ func (p Principal) Validate() error {
 func (p Principal) WithoutLegacyRoles() Principal {
 	p.LegacyRoles = nil
 	return p
+}
+
+// PrincipalFromProto 把 auth-service 返回的 PrincipalContext 转为内部规范 Principal，
+// 转换后立即执行结构校验，失败 fail closed。
+func PrincipalFromProto(value *authv1.PrincipalContext) (Principal, error) {
+	if value == nil {
+		return Principal{}, errors.New("principal context required")
+	}
+	principal := Principal{
+		Kind:             PrincipalKind(value.GetPrincipalKind()),
+		CredentialScheme: CredentialScheme(value.GetCredentialScheme()),
+		CredentialDomain: CredentialDomain(value.GetCredentialDomain()),
+		TenantID:         value.GetTenantId(),
+		SubjectID:        value.GetSubjectId(),
+		CredentialID:     value.GetCredentialId(),
+	}
+	return principal, principal.Validate()
+}
+
+// Proto 把规范 Principal 序列化为 auth-service V2 RPC 使用的 PrincipalContext。
+// V2 Proto 不携带 legacy roles / sandbox claims。
+func (p Principal) Proto() *authv1.PrincipalContext {
+	return &authv1.PrincipalContext{
+		PrincipalKind:    string(p.Kind),
+		CredentialScheme: string(p.CredentialScheme),
+		CredentialDomain: string(p.CredentialDomain),
+		TenantId:         p.TenantID,
+		SubjectId:        p.SubjectID,
+		CredentialId:     p.CredentialID,
+	}
 }
 
 // AllowsPrincipalKind 判断 policy 是否允许该 principal kind。

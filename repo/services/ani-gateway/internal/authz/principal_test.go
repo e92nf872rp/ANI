@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	authv1 "github.com/kubercloud/ani/pkg/generated/pb/auth/v1"
 	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 )
 
@@ -275,4 +276,53 @@ const userUUIDForTest = "22222222-2222-2222-2222-222222222222"
 
 func newPlatformTenantContext(userID string) *commonv1.TenantContext {
 	return &commonv1.TenantContext{TenantId: zeroUUID, UserId: userID, Scope: "platform"}
+}
+
+// TestPrincipalProtoRoundTrip 验证 Principal -> Proto -> PrincipalFromProto 的无损往返，
+// 以及 nil / 非法 proto 的 fail-closed 行为。
+func TestPrincipalProtoRoundTrip(t *testing.T) {
+	tenant := "11111111-1111-1111-1111-111111111111"
+	user := userUUIDForTest
+	credential := "33333333-3333-3333-3333-333333333333"
+
+	cases := []Principal{
+		{Kind: PrincipalUser, CredentialScheme: CredentialBearer, CredentialDomain: DomainTenant, TenantID: tenant, SubjectID: user},
+		{Kind: PrincipalUser, CredentialScheme: CredentialBearer, CredentialDomain: DomainPlatform, SubjectID: user},
+		{Kind: PrincipalService, CredentialScheme: CredentialBearer, CredentialDomain: DomainPlatform, SubjectID: "svc-1"},
+		{Kind: PrincipalAPIKey, CredentialScheme: CredentialAPIKey, CredentialDomain: DomainTenant, TenantID: tenant, CredentialID: credential},
+	}
+	for _, principal := range cases {
+		pb := principal.Proto()
+		got, err := PrincipalFromProto(pb)
+		if err != nil {
+			t.Fatalf("round trip %v: %v", principal, err)
+		}
+		if got.Kind != principal.Kind || got.CredentialScheme != principal.CredentialScheme ||
+			got.CredentialDomain != principal.CredentialDomain || got.TenantID != principal.TenantID ||
+			got.SubjectID != principal.SubjectID || got.CredentialID != principal.CredentialID {
+			t.Fatalf("round trip mismatch: got %+v want %+v", got, principal)
+		}
+	}
+}
+
+func TestPrincipalFromProtoFailClosed(t *testing.T) {
+	if _, err := PrincipalFromProto(nil); err == nil {
+		t.Fatal("nil proto: want error")
+	}
+	// 未知 kind：结构校验失败。
+	if _, err := PrincipalFromProto(&authv1.PrincipalContext{
+		PrincipalKind: "ghost", CredentialScheme: "bearer",
+		CredentialDomain: "tenant", TenantId: "11111111-1111-1111-1111-111111111111",
+		SubjectId: userUUIDForTest,
+	}); err == nil {
+		t.Fatal("unknown kind proto: want error")
+	}
+	// platform 域携带 tenant：结构校验失败。
+	if _, err := PrincipalFromProto(&authv1.PrincipalContext{
+		PrincipalKind: "user", CredentialScheme: "bearer",
+		CredentialDomain: "platform", TenantId: "11111111-1111-1111-1111-111111111111",
+		SubjectId: userUUIDForTest,
+	}); err == nil {
+		t.Fatal("platform with tenant proto: want error")
+	}
 }

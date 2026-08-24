@@ -126,14 +126,14 @@ func TestPlatformPasswordLogin_Success(t *testing.T) {
 	if validateErr != nil {
 		t.Fatalf("validate token: %v", validateErr)
 	}
-	if claims.Scope != "platform" {
-		t.Fatalf("scope = %q, want platform", claims.Scope)
+	if claims.Legacy.Scope != "platform" {
+		t.Fatalf("scope = %q, want platform", claims.Legacy.Scope)
 	}
-	if claims.TenantID != uuid.Nil {
-		t.Fatalf("tenant_id = %v, want Nil", claims.TenantID)
+	if claims.Principal.Domain != "platform" || claims.Principal.TenantID != "" {
+		t.Fatalf("domain/tenant = %q/%q, want platform/empty", claims.Principal.Domain, claims.Principal.TenantID)
 	}
-	if len(claims.Roles) != 1 || claims.Roles[0] != "platform-admin" {
-		t.Fatalf("roles = %v, want [platform-admin]", claims.Roles)
+	if len(claims.Legacy.Roles) != 1 || claims.Legacy.Roles[0] != "platform-admin" {
+		t.Fatalf("roles = %v, want [platform-admin]", claims.Legacy.Roles)
 	}
 }
 

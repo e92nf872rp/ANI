@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,14 +26,16 @@ func TestJWTValidatorValidateRS256Token(t *testing.T) {
 	userID := uuid.New()
 	issuedAt := time.Unix(1_700_000_000, 0)
 	token := signTestJWT(t, key, map[string]any{
-		"iss":   "ani-test",
-		"sub":   userID.String(),
-		"tid":   tenantID.String(),
-		"uid":   userID.String(),
-		"roles": []string{"tenant-admin"},
-		"exp":   issuedAt.Add(time.Hour).Unix(),
-		"iat":   issuedAt.Unix(),
-		"jti":   "jwt-1",
+		"iss":               "ani-test",
+		"sub":               userID.String(),
+		"tid":               tenantID.String(),
+		"uid":               userID.String(),
+		"principal_kind":    "user",
+		"credential_domain": "tenant",
+		"roles":             []string{"tenant-admin"},
+		"exp":               issuedAt.Add(time.Hour).Unix(),
+		"iat":               issuedAt.Unix(),
+		"jti":               "jwt-1",
 	})
 
 	validator, err := NewJWTValidator(JWTConfig{
@@ -48,14 +51,18 @@ func TestJWTValidatorValidateRS256Token(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	if claims.TenantID != tenantID {
-		t.Fatalf("tenant id = %s, want %s", claims.TenantID, tenantID)
+	if claims.Principal.TenantID != tenantID.String() {
+		t.Fatalf("tenant id = %s, want %s", claims.Principal.TenantID, tenantID)
 	}
-	if claims.UserID != userID {
-		t.Fatalf("user id = %s, want %s", claims.UserID, userID)
+	if claims.Principal.SubjectID != userID.String() {
+		t.Fatalf("user id = %s, want %s", claims.Principal.SubjectID, userID)
 	}
-	if len(claims.Roles) != 1 || claims.Roles[0] != "tenant-admin" {
-		t.Fatalf("roles = %v", claims.Roles)
+	if len(claims.Legacy.Roles) != 1 || claims.Legacy.Roles[0] != "tenant-admin" {
+		t.Fatalf("roles = %v", claims.Legacy.Roles)
+	}
+	// V2 规范字段：user 凭证固定为 user/tenant 边界。
+	if claims.Principal.Kind != "user" || claims.Principal.Domain != "tenant" {
+		t.Fatalf("principal kind/domain = %q/%q", claims.Principal.Kind, claims.Principal.Domain)
 	}
 }
 
@@ -101,6 +108,24 @@ func encodeJSON(t *testing.T, v any) string {
 		t.Fatalf("marshal json: %v", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(data)
+}
+
+// decodeJWTClaims 解码 token 的 payload 段为 map，用于校验签名原始字段（如 aud）。
+func decodeJWTClaims(t *testing.T, token string) map[string]any {
+	t.Helper()
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		t.Fatalf("malformed token")
+	}
+	data, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	var claims map[string]any
+	if err := json.Unmarshal(data, &claims); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	return claims
 }
 
 func publicKeyPEM(t *testing.T, key *rsa.PublicKey) string {
