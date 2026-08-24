@@ -25,12 +25,10 @@ type TenantSummary struct {
 	Status      string // active | frozen | disabled
 }
 
-// TenantService reads/updates tenants rows under platform RLS bypass.
-// Methods mirror the former Services TenantStore surface that migrated to Core.
+// TenantService reads tenant rows under platform RLS bypass.
 type TenantService interface {
 	GetTenant(ctx context.Context, tenantID string) (Tenant, error)
-	UpdateTenantPlan(ctx context.Context, tenantID string, planID string) (Tenant, error)
-	CountBoundTenants(ctx context.Context, planIDs []string) (map[string]int64, error)
-	ListBoundTenants(ctx context.Context, planID string) ([]TenantSummary, error)
-	ListBindableTenants(ctx context.Context, planID string) ([]TenantSummary, error)
+	// ListActiveTenants returns all non-disabled tenants (status <> 'disabled'),
+	// ordered by name. Used by the invite-admin tenant selector.
+	ListActiveTenants(ctx context.Context) ([]TenantSummary, error)
 }

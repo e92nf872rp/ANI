@@ -210,12 +210,24 @@ func main() {
 		platformWorkloadProvider = "local"
 	}
 	logger.Info("platform workload provider runtime configured", "provider", platformWorkloadProvider)
-	tenantService, closeTenantStore, err := newGatewayTenantStore(runtimeCtx)
+	tenantService, closeTenantStore, err := newGatewayTenantService(runtimeCtx)
 	if err != nil {
 		logger.Error("failed to configure tenant admin store", "err", err)
 		os.Exit(1)
 	}
 	defer closeTenantStore()
+	tenantPlanService, closeTenantPlanStore, err := newGatewayTenantPlanService(runtimeCtx)
+	if err != nil {
+		logger.Error("failed to configure tenant plan service", "err", err)
+		os.Exit(1)
+	}
+	defer closeTenantPlanStore()
+	tenantAdminService, closeTenantAdmin, err := newGatewayTenantAdminService(runtimeCtx)
+	if err != nil {
+		logger.Error("failed to configure tenant admin service", "err", err)
+		os.Exit(1)
+	}
+	defer closeTenantAdmin()
 	var routeInstanceRuntime *router.InstanceRuntime
 	if instanceRuntime.Service != nil {
 		routeInstanceRuntime = &router.InstanceRuntime{
@@ -253,6 +265,8 @@ func main() {
 		QuotaAdminService:                     quotaAdminService,
 		PlatformWorkloadService:               platformWorkloadService,
 		TenantService:                         tenantService,
+		TenantPlanService:                     tenantPlanService,
+		TenantAdminService:                    tenantAdminService,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

@@ -1177,6 +1177,21 @@ components:
         items:       { type: array, items: { $ref: '#/components/schemas/TenantAdminAuditLog' } }
         next_cursor: { type: string, nullable: true, description: "下一页游标；null 表示已无更多数据" }
 
+    ActiveTenantListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, name, display_name, status]
+            properties:
+              id:           { type: string, format: uuid }
+              name:         { type: string }
+              display_name: { type: string, nullable: true }
+              status:       { type: string, enum: [active, frozen], description: "非停用租户（不含 disabled）" }
+
     InviteAdminRequest:
       type: object
       required: [idempotency_key, email, username]
@@ -3129,6 +3144,20 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound', description: "TENANT_ADMIN_NOT_FOUND" }
+
+  /tenant-admins/tenants:
+    get:
+      operationId: listActiveTenantsForAdmin
+      summary: 查询非停用租户列表（邀请管理员租户选择器数据源，需 platform-admin / platform-ops / platform-readonly）
+      tags: [TenantAdmins]
+      responses:
+        "200":
+          description: 非停用租户列表（status <> disabled，不分页）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActiveTenantListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
 
 tags:
   - { name: Models, description: "模型仓库" }

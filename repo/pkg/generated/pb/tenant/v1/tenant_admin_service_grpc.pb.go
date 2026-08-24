@@ -43,13 +43,13 @@ type TenantAdminServiceClient interface {
 	// ResendTenantAdminInvitation regenerates token/expiry for inviting|expired invitations.
 	ResendTenantAdminInvitation(ctx context.Context, in *ResendTenantAdminInvitationRequest, opts ...grpc.CallOption) (*InvitationResult, error)
 	// ListAllTenantAdmins returns a cursor-paginated cross-tenant admin list
-	// (admin / currently inviting only).
+	// (admin / currently inviting / expired invitations).
 	ListAllTenantAdmins(ctx context.Context, in *ListAllTenantAdminsRequest, opts ...grpc.CallOption) (*ListAllTenantAdminsResponse, error)
-	// GetTenantAdminDetail returns one admin (includes is_inviting, created_at, updated_at, tenant).
+	// GetTenantAdminDetail returns one admin (includes is_inviting, is_expired, created_at, updated_at, tenant).
 	GetTenantAdminDetail(ctx context.Context, in *GetTenantAdminDetailRequest, opts ...grpc.CallOption) (*AdminWithTenant, error)
 	// UpdateTenantAdminRole changes a member role (user / auditor / tenant-admin).
 	UpdateTenantAdminRole(ctx context.Context, in *UpdateTenantAdminRoleRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error)
-	// GetTenantAdminRole returns the four-dimension permission model for a tenant member.
+	// GetTenantAdminRole returns the role and permissions for a tenant member.
 	GetTenantAdminRole(ctx context.Context, in *GetTenantAdminRoleRequest, opts ...grpc.CallOption) (*UserPermissions, error)
 	// GetChangeableRoles returns selectable target roles.
 	GetChangeableRoles(ctx context.Context, in *GetChangeableRolesRequest, opts ...grpc.CallOption) (*GetChangeableRolesResponse, error)
@@ -190,13 +190,13 @@ type TenantAdminServiceServer interface {
 	// ResendTenantAdminInvitation regenerates token/expiry for inviting|expired invitations.
 	ResendTenantAdminInvitation(context.Context, *ResendTenantAdminInvitationRequest) (*InvitationResult, error)
 	// ListAllTenantAdmins returns a cursor-paginated cross-tenant admin list
-	// (admin / currently inviting only).
+	// (admin / currently inviting / expired invitations).
 	ListAllTenantAdmins(context.Context, *ListAllTenantAdminsRequest) (*ListAllTenantAdminsResponse, error)
-	// GetTenantAdminDetail returns one admin (includes is_inviting, created_at, updated_at, tenant).
+	// GetTenantAdminDetail returns one admin (includes is_inviting, is_expired, created_at, updated_at, tenant).
 	GetTenantAdminDetail(context.Context, *GetTenantAdminDetailRequest) (*AdminWithTenant, error)
 	// UpdateTenantAdminRole changes a member role (user / auditor / tenant-admin).
 	UpdateTenantAdminRole(context.Context, *UpdateTenantAdminRoleRequest) (*v1.IdempotentResult, error)
-	// GetTenantAdminRole returns the four-dimension permission model for a tenant member.
+	// GetTenantAdminRole returns the role and permissions for a tenant member.
 	GetTenantAdminRole(context.Context, *GetTenantAdminRoleRequest) (*UserPermissions, error)
 	// GetChangeableRoles returns selectable target roles.
 	GetChangeableRoles(context.Context, *GetChangeableRolesRequest) (*GetChangeableRolesResponse, error)

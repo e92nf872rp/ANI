@@ -10,7 +10,7 @@ import (
 // 租户管理员邀请与审计的端口（ports）定义。
 // 本文件只声明接口与领域结构体，不含实现。
 // Postgres 适配器仅操作 tenant_admin_invitation / audit_logs；
-// users / user_roles / roles 一律经 UserSvcClient（见 core_user.go）。
+// users / user_roles / roles 一律经 TenantAdminSvcClient（见 core_tenant_admin.go）。
 
 // =============================================================================
 // 枚举常量
@@ -169,7 +169,7 @@ type TenantAdminAuditLogListResult struct {
 // TenantAdminStore 定义租户管理员模块对本地表的数据访问。
 // 实现：internal/repo/adapters/postgres/tenant_admin_store.go。
 //
-// 禁止直接 SQL 操作 users / user_roles / roles；这些走 UserSvcClient。
+// 禁止直接 SQL 操作 users / user_roles / roles；这些走 TenantAdminSvcClient。
 type TenantAdminStore interface {
 	// HasPendingInvitation 报告该租户下该用户是否存在 status='inviting' 的邀请。
 	HasPendingInvitation(ctx context.Context, tenantID, userID uuid.UUID) (bool, error)

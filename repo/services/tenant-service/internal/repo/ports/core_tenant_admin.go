@@ -6,8 +6,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// Core 用户/角色最小 API 客户端端口。
-// 封装 Core OpenAPI `/api/v1/admin/...` 租户用户能力（见 pkg/ports.UserAdminService）：
+// Core 租户管理员用户/角色最小 API 客户端端口。
+// 封装 Core OpenAPI `/api/v1/admin/...` 租户管理员能力（见 pkg/ports.TenantAdminService）：
 //
 //	GET    /admin/tenants/{tenant_id}/user-lookup
 //	GET    /admin/tenant-users
@@ -22,8 +22,8 @@ import (
 // tenant-service 不直接 SQL 操作 users / user_roles / roles。
 // 实现：后续 issue 在 internal/repo/adapters/core 封装 Core Go SDK。
 
-// UserSvcClient 定义通向 Core 用户 API 的调用客户端接口。
-type UserSvcClient interface {
+// TenantAdminSvcClient 定义通向 Core 租户管理员 API 的调用客户端接口。
+type TenantAdminSvcClient interface {
 	// MatchUser 按租户 + email + username 匹配已有用户（Core lookupTenantUser）。
 	// 无匹配 → ErrTenantAdminNotFound（邀请不新建用户）。
 	MatchUser(ctx context.Context, tenantID uuid.UUID, email, username string) (uuid.UUID, error)
@@ -63,3 +63,7 @@ type UserSvcClient interface {
 	// 禁用/已删 → ErrTenantAdminNotFound；与旧密码相同 → ErrPasswordSameAsOld。
 	ResetPassword(ctx context.Context, tenantID, userID uuid.UUID, newPassword string) error
 }
+
+// UserSvcClient is kept as an alias for backward compatibility.
+// Prefer TenantAdminSvcClient in new code.
+type UserSvcClient = TenantAdminSvcClient

@@ -47,7 +47,7 @@ type UserListResult struct {
 }
 
 // UserPermissions is the tenant permission model.
-// Platform accounts (tenant_id empty) are not queryable through UserAdminService.
+// Platform accounts (tenant_id empty) are not queryable through TenantAdminService.
 type UserPermissions struct {
 	UserID      string
 	TenantID    string
@@ -74,10 +74,10 @@ type ChangeableRoles struct {
 	Options     []ChangeableRoleOption
 }
 
-// UserAdminService manages tenant users and role bindings (users / user_roles / roles)
+// TenantAdminService manages tenant users and role bindings (users / user_roles / roles)
 // under platform RLS bypass. Invitation lifecycle stays in Services.
 //
-// REST surface (Core OpenAPI, called by tenant-service UserSvcClient):
+// REST surface (Core OpenAPI, called by tenant-service TenantAdminSvcClient):
 //
 //	GET    /admin/tenants/{tenant_id}/user-lookup
 //	GET    /admin/tenant-users
@@ -88,7 +88,7 @@ type ChangeableRoles struct {
 //	POST   /admin/tenants/{tenant_id}/users/{user_id}/status
 //	POST   /admin/tenants/{tenant_id}/users/{user_id}/reset-password
 //	DELETE /admin/tenants/{tenant_id}/users/{user_id}
-type UserAdminService interface {
+type TenantAdminService interface {
 	// LookupUser matches an existing tenant user by email AND username.
 	// No match → ErrUserNotFound. Does not create users.
 	LookupUser(ctx context.Context, tenantID, email, username string) (User, error)
@@ -126,3 +126,7 @@ type UserAdminService interface {
 	// Disabled/deleted → ErrUserNotFound; same as old → ErrPasswordSameAsOld.
 	ResetPassword(ctx context.Context, tenantID, userID, newPassword string) error
 }
+
+// UserAdminService is kept as an alias for backward compatibility.
+// Prefer TenantAdminService in new code.
+type UserAdminService = TenantAdminService

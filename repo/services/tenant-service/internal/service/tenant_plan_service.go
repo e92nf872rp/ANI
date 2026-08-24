@@ -28,15 +28,15 @@ type TenantPlanService struct {
 	// 嵌入未实现接口：proto 新增 RPC 时本结构仍可编译（栅栏模式）。
 	tenantv1.UnimplementedTenantPlanServiceServer
 
-	plans   ports.TenantPlanStore      // 套餐 + plan_quota_limits 持久化
-	audit   ports.TenantPlanAuditStore // 配额套餐域审计（audit_logs）；
-	core    ports.QuotaSvcClient       // Core 配额 API（校验维度 / 后续下发限额）
-	tenants ports.TenantSvcClient      // Core 租户 API（tenant_count / 删除占用检查）
+	plans       ports.TenantPlanStore      // 套餐 + plan_quota_limits 持久化
+	audit       ports.TenantPlanAuditStore // 配额套餐域审计（audit_logs）；
+	core        ports.QuotaSvcClient       // Core 配额 API（校验维度 / 后续下发限额）
+	tenantPlans ports.TenantPlanSvcClient  // Core 配额套餐绑定 API（tenant_count / 绑定列表）
 }
 
 // NewTenantPlanService 装配依赖并返回可注册的 gRPC server。
-func NewTenantPlanService(plans ports.TenantPlanStore, audit ports.TenantPlanAuditStore, core ports.QuotaSvcClient, tenants ports.TenantSvcClient) *TenantPlanService {
-	return &TenantPlanService{plans: plans, audit: audit, core: core, tenants: tenants}
+func NewTenantPlanService(plans ports.TenantPlanStore, audit ports.TenantPlanAuditStore, core ports.QuotaSvcClient, tenantPlans ports.TenantPlanSvcClient) *TenantPlanService {
+	return &TenantPlanService{plans: plans, audit: audit, core: core, tenantPlans: tenantPlans}
 }
 
 // Register 向 gRPC Server 注册本服务（由 services/pkg/bootstrap.RunGRPC 回调）。
@@ -994,10 +994,10 @@ func (s *TenantPlanService) boundTenantCounts(ctx context.Context, ids []uuid.UU
 	if len(ids) == 0 {
 		return map[uuid.UUID]int64{}, nil
 	}
-	if s.tenants == nil {
-		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant api unavailable")
+	if s.tenantPlans == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant plan api unavailable")
 	}
-	counts, err := s.tenants.CountBoundTenants(ctx, ids)
+	counts, err := s.tenantPlans.CountBoundTenants(ctx, ids)
 	if err != nil {
 		return nil, mapStoreError(err)
 	}
@@ -1008,10 +1008,10 @@ func (s *TenantPlanService) boundTenantCounts(ctx context.Context, ids []uuid.UU
 }
 
 func (s *TenantPlanService) coreBoundTenants(ctx context.Context, planID uuid.UUID) ([]ports.BoundTenant, error) {
-	if s.tenants == nil {
-		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant api unavailable")
+	if s.tenantPlans == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant plan api unavailable")
 	}
-	tenants, err := s.tenants.ListBoundTenants(ctx, planID)
+	tenants, err := s.tenantPlans.ListBoundTenants(ctx, planID)
 	if err != nil {
 		return nil, mapStoreError(err)
 	}
@@ -1019,10 +1019,10 @@ func (s *TenantPlanService) coreBoundTenants(ctx context.Context, planID uuid.UU
 }
 
 func (s *TenantPlanService) coreBindableTenants(ctx context.Context, planID uuid.UUID) ([]ports.BoundTenant, error) {
-	if s.tenants == nil {
-		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant api unavailable")
+	if s.tenantPlans == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant plan api unavailable")
 	}
-	tenants, err := s.tenants.ListBindableTenants(ctx, planID)
+	tenants, err := s.tenantPlans.ListBindableTenants(ctx, planID)
 	if err != nil {
 		return nil, mapStoreError(err)
 	}

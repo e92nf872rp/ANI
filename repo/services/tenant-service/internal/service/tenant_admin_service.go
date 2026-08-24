@@ -20,7 +20,7 @@ type TenantAdminService struct {
 
 var _ tenantv1.TenantAdminServiceServer = (*TenantAdminService)(nil)
 
-// NewTenantAdminService 返回可注册的 gRPC server（方法体占位，后续 issue 注入 store/UserSvcClient）。
+// NewTenantAdminService 返回可注册的 gRPC server（方法体占位，后续 issue 注入 store/TenantAdminSvcClient）。
 func NewTenantAdminService() *TenantAdminService {
 	return &TenantAdminService{}
 }

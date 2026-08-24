@@ -18,10 +18,11 @@ func main() {
 	audit := postgres.NewPostgresTenantPlanAuditStore(deps.DB)
 	coreQuota := core.NewQuotaSvcClient()
 	coreTenants := core.NewTenantSvcClient()
+	coreTenantPlans := core.NewTenantPlanSvcClient()
 
 	// 两个 gRPC service 注册到同一个 server。
-	tenantPlanSvc := service.NewTenantPlanService(plans, audit, coreQuota, coreTenants)
-	tenantSvc := service.NewTenantService(plans, coreTenants, coreQuota, audit)
+	tenantPlanSvc := service.NewTenantPlanService(plans, audit, coreQuota, coreTenantPlans)
+	tenantSvc := service.NewTenantService(plans, coreTenants, coreTenantPlans, coreQuota, audit)
 	tenantAdminSvc := service.NewTenantAdminService()
 
 	bootstrap.RunGRPC(cfg.GRPCPort, func(s *grpc.Server) {

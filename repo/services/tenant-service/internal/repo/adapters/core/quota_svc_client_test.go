@@ -184,7 +184,7 @@ func TestTenantSvcClient_GetTenant(t *testing.T) {
 	}
 }
 
-func TestTenantSvcClient_UpdateTenantPlan(t *testing.T) {
+func TestTenantPlanSvcClient_UpdateTenantPlan(t *testing.T) {
 	t.Parallel()
 
 	tenantID := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
@@ -205,7 +205,7 @@ func TestTenantSvcClient_UpdateTenantPlan(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := &TenantSvcClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
+	client := &TenantPlanSvcClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
 	got, err := client.UpdateTenantPlan(context.Background(), uuid.MustParse(tenantID), uuid.MustParse(planID))
 	if err != nil {
 		t.Fatalf("UpdateTenantPlan: %v", err)
@@ -215,7 +215,7 @@ func TestTenantSvcClient_UpdateTenantPlan(t *testing.T) {
 	}
 }
 
-func TestTenantSvcClient_CountBoundTenants(t *testing.T) {
+func TestTenantPlanSvcClient_CountBoundTenants(t *testing.T) {
 	t.Parallel()
 
 	planA := "11111111-1111-4111-8111-111111111111"
@@ -238,7 +238,7 @@ func TestTenantSvcClient_CountBoundTenants(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := &TenantSvcClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
+	client := &TenantPlanSvcClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
 	got, err := client.CountBoundTenants(context.Background(), []uuid.UUID{
 		uuid.MustParse(planA), uuid.MustParse(planB),
 	})
@@ -250,7 +250,7 @@ func TestTenantSvcClient_CountBoundTenants(t *testing.T) {
 	}
 }
 
-func TestTenantSvcClient_CountBoundTenants_MissingItems(t *testing.T) {
+func TestTenantPlanSvcClient_CountBoundTenants_MissingItems(t *testing.T) {
 	t.Parallel()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -259,14 +259,14 @@ func TestTenantSvcClient_CountBoundTenants_MissingItems(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := &TenantSvcClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
+	client := &TenantPlanSvcClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
 	_, err := client.CountBoundTenants(context.Background(), []uuid.UUID{uuid.New()})
 	if err == nil || !strings.Contains(err.Error(), ports.ErrCoreUnavailable.Error()) {
 		t.Fatalf("expected ErrCoreUnavailable, got %v", err)
 	}
 }
 
-func TestTenantSvcClient_ListBoundTenants(t *testing.T) {
+func TestTenantPlanSvcClient_ListBoundTenants(t *testing.T) {
 	t.Parallel()
 
 	planID := "11111111-1111-4111-8111-111111111111"
@@ -284,7 +284,7 @@ func TestTenantSvcClient_ListBoundTenants(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := &TenantSvcClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
+	client := &TenantPlanSvcClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
 	got, err := client.ListBoundTenants(context.Background(), uuid.MustParse(planID))
 	if err != nil {
 		t.Fatalf("ListBoundTenants: %v", err)
@@ -294,7 +294,7 @@ func TestTenantSvcClient_ListBoundTenants(t *testing.T) {
 	}
 }
 
-func TestTenantSvcClient_ListBindableTenants(t *testing.T) {
+func TestTenantPlanSvcClient_ListBindableTenants(t *testing.T) {
 	t.Parallel()
 
 	planID := "22222222-2222-4222-8222-222222222222"
@@ -312,7 +312,7 @@ func TestTenantSvcClient_ListBindableTenants(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := &TenantSvcClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
+	client := &TenantPlanSvcClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
 	got, err := client.ListBindableTenants(context.Background(), uuid.MustParse(planID))
 	if err != nil {
 		t.Fatalf("ListBindableTenants: %v", err)
@@ -322,7 +322,7 @@ func TestTenantSvcClient_ListBindableTenants(t *testing.T) {
 	}
 }
 
-func TestTenantSvcClient_ListBoundTenants_MissingItems(t *testing.T) {
+func TestTenantPlanSvcClient_ListBoundTenants_MissingItems(t *testing.T) {
 	t.Parallel()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -331,7 +331,7 @@ func TestTenantSvcClient_ListBoundTenants_MissingItems(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := &TenantSvcClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
+	client := &TenantPlanSvcClient{sdk: anisdk.NewClient(strings.TrimRight(srv.URL, "/")+"/api/v1", "")}
 	_, err := client.ListBoundTenants(context.Background(), uuid.New())
 	if err == nil || !strings.Contains(err.Error(), ports.ErrCoreUnavailable.Error()) {
 		t.Fatalf("expected ErrCoreUnavailable, got %v", err)
