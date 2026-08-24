@@ -353,6 +353,12 @@
       "scope": ""
     },
     {
+      "operationId": "listActiveTenantsForAdmin",
+      "method": "GET",
+      "path": "/tenant-admins/tenants",
+      "scope": ""
+    },
+    {
       "operationId": "listTenantPlans",
       "method": "GET",
       "path": "/tenant-plans",
@@ -570,6 +576,7 @@
     }
   ],
   "schemas": [
+    "ActiveTenantListResponse",
     "AdminDetail",
     "AdminListResponse",
     "AdminWithTenant",

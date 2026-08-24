@@ -62,6 +62,7 @@ export const operations = [
   "listSandboxSecurityEvents",
   "getSandboxSecurityOverview",
   "listAllTenantAdmins",
+  "listActiveTenantsForAdmin",
   "listTenantPlans",
   "createTenantPlan",
   "deleteTenantPlan",
@@ -158,6 +159,7 @@ export const paths = [
   "GET /sandboxes/{sandbox_id}/security-events",
   "GET /sandboxes/{sandbox_id}/security-overview",
   "GET /tenant-admins",
+  "GET /tenant-admins/tenants",
   "GET /tenant-plans",
   "POST /tenant-plans",
   "DELETE /tenant-plans/{planId}",
@@ -196,6 +198,7 @@ export const paths = [
   "POST /tenants/{tenantId}/plan"
 ] as const;
 export const schemas = [
+  "ActiveTenantListResponse",
   "AdminDetail",
   "AdminListResponse",
   "AdminWithTenant",

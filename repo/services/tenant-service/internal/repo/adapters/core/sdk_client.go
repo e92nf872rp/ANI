@@ -65,6 +65,14 @@ func mapSDKError(err error) error {
 			return fmt.Errorf("%w: %s", ports.ErrQuotaResourceNotRegistered, detail)
 		case ports.ErrValidationFailed.Error():
 			return fmt.Errorf("%w: %s", ports.ErrValidationFailed, detail)
+		case "USER_NOT_FOUND":
+			return fmt.Errorf("%w: %s", ports.ErrTenantAdminNotFound, detail)
+		case ports.ErrTenantAdminNotFound.Error():
+			return fmt.Errorf("%w: %s", ports.ErrTenantAdminNotFound, detail)
+		case ports.ErrRoleChangeInvalid.Error():
+			return fmt.Errorf("%w: %s", ports.ErrRoleChangeInvalid, detail)
+		case ports.ErrPasswordSameAsOld.Error():
+			return fmt.Errorf("%w: %s", ports.ErrPasswordSameAsOld, detail)
 		default:
 			return fmt.Errorf("%w: %s", ports.ErrCoreUnavailable, detail)
 		}

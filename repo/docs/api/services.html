@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1/svc</code></dd></div>
-          <div><dt>Operations</dt><dd>94</dd></div>
-          <div><dt>Schemas</dt><dd>98</dd></div>
+          <div><dt>Operations</dt><dd>95</dd></div>
+          <div><dt>Schemas</dt><dd>99</dd></div>
         </dl>
       </section>
 
@@ -625,6 +625,14 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/tenant-admins/tenants</code></td>
+          <td><code>listActiveTenantsForAdmin</code></td>
+          <td>查询非停用租户列表（邀请管理员租户选择器数据源，需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/tenant-plans</code></td>
           <td><code>listTenantPlans</code></td>
           <td>查询套餐列表（需 platform-admin / platform-ops / platform-readonly）</td>
@@ -918,6 +926,7 @@
       <section>
         <h2>Schemas</h2>
         <ul class="schema-list">
+        <li><code>ActiveTenantListResponse</code></li>
         <li><code>AdminDetail</code></li>
         <li><code>AdminListResponse</code></li>
         <li><code>AdminWithTenant</code></li>

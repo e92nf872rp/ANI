@@ -77,6 +77,7 @@ var Operations = []string{
 	"listSandboxSecurityEvents",
 	"getSandboxSecurityOverview",
 	"listAllTenantAdmins",
+	"listActiveTenantsForAdmin",
 	"listTenantPlans",
 	"createTenantPlan",
 	"deleteTenantPlan",
@@ -173,6 +174,7 @@ var Paths = []string{
 	"GET /sandboxes/{sandbox_id}/security-events",
 	"GET /sandboxes/{sandbox_id}/security-overview",
 	"GET /tenant-admins",
+	"GET /tenant-admins/tenants",
 	"GET /tenant-plans",
 	"POST /tenant-plans",
 	"DELETE /tenant-plans/{planId}",
@@ -211,6 +213,7 @@ var Paths = []string{
 	"POST /tenants/{tenantId}/plan",
 }
 var Schemas = []string{
+	"ActiveTenantListResponse",
 	"AdminDetail",
 	"AdminListResponse",
 	"AdminWithTenant",

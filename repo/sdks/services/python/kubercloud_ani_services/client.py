@@ -66,6 +66,7 @@ OPERATIONS = [
     "listSandboxSecurityEvents",
     "getSandboxSecurityOverview",
     "listAllTenantAdmins",
+    "listActiveTenantsForAdmin",
     "listTenantPlans",
     "createTenantPlan",
     "deleteTenantPlan",
@@ -162,6 +163,7 @@ PATHS = [
     "GET /sandboxes/{sandbox_id}/security-events",
     "GET /sandboxes/{sandbox_id}/security-overview",
     "GET /tenant-admins",
+    "GET /tenant-admins/tenants",
     "GET /tenant-plans",
     "POST /tenant-plans",
     "DELETE /tenant-plans/{planId}",
@@ -200,6 +202,7 @@ PATHS = [
     "POST /tenants/{tenantId}/plan"
 ]
 SCHEMAS = [
+    "ActiveTenantListResponse",
     "AdminDetail",
     "AdminListResponse",
     "AdminWithTenant",

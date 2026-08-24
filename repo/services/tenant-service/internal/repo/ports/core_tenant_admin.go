@@ -20,7 +20,7 @@ import (
 //	DELETE /admin/tenants/{tenant_id}/users/{user_id}
 //
 // tenant-service 不直接 SQL 操作 users / user_roles / roles。
-// 实现：后续 issue 在 internal/repo/adapters/core 封装 Core Go SDK。
+// 实现：internal/repo/adapters/core/tenant_admin_svc_client.go。
 
 // TenantAdminSvcClient 定义通向 Core 租户管理员 API 的调用客户端接口。
 type TenantAdminSvcClient interface {

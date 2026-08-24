@@ -13,16 +13,17 @@ import (
 
 // TenantAdminService 是租户管理员域的 gRPC 服务骨架。
 // 网关（ani-gateway）经 TenantAdminServiceClient 转发 /api/v1/svc/tenant-admins*
-// 与 /tenants/{tenantId}/admins*；本 Issue 全部 RPC 返回 UNIMPLEMENTED（HTTP 501）。
+// 与 /tenants/{tenantId}/admins*；RPC 业务仍返回 UNIMPLEMENTED（HTTP 501）。
 type TenantAdminService struct {
 	tenantv1.UnimplementedTenantAdminServiceServer
+	core ports.TenantAdminSvcClient
 }
 
 var _ tenantv1.TenantAdminServiceServer = (*TenantAdminService)(nil)
 
-// NewTenantAdminService 返回可注册的 gRPC server（方法体占位，后续 issue 注入 store/TenantAdminSvcClient）。
-func NewTenantAdminService() *TenantAdminService {
-	return &TenantAdminService{}
+// NewTenantAdminService 装配 Core 租户管理员客户端并返回可注册的 gRPC server。
+func NewTenantAdminService(core ports.TenantAdminSvcClient) *TenantAdminService {
+	return &TenantAdminService{core: core}
 }
 
 // Register 向 gRPC Server 注册本服务（由 services/pkg/bootstrap.RunGRPC 回调）。

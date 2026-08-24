@@ -10,7 +10,7 @@ import (
 )
 
 func TestTenantAdminService_Unimplemented(t *testing.T) {
-	s := NewTenantAdminService()
+	s := NewTenantAdminService(nil)
 	ctx := context.Background()
 
 	checks := []struct {
