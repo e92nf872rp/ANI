@@ -66,9 +66,9 @@ func TestRegisterFailsClosedOnInvalidAuthzConfig(t *testing.T) {
 		operations string
 		authMode   string
 	}{
-		"invalid mode":       {mode: "bogus"},
-		"dev with pilot":     {mode: "pilot", operations: "listQuotaMeta", authMode: "dev"},
-		"dev with full":      {mode: "full", authMode: "dev"},
+		"invalid mode":        {mode: "bogus"},
+		"dev with pilot":      {mode: "pilot", operations: "listQuotaMeta", authMode: "dev"},
+		"dev with full":       {mode: "full", authMode: "dev"},
 		"full with allowlist": {mode: "full", operations: "listQuotaMeta"},
 		"off with allowlist":  {mode: "off", operations: "listQuotaMeta"},
 	}
@@ -98,17 +98,17 @@ func TestRegisterSucceedsWithDefaultOff(t *testing.T) {
 // healthz/readyz 属于 Core policy 域；/health、/ready 豁免；svc/demo 排除。
 func TestIsCorePolicyPath(t *testing.T) {
 	cases := map[string]bool{
-		"/healthz":             true,
-		"/readyz":              true,
-		"/health":              false,
-		"/ready":               false,
-		"/api/v1/instances":    true,
-		"/api/v1/admin/tenants": true,
-		"/api/v1/svc/models":   false,
+		"/healthz":               true,
+		"/readyz":                true,
+		"/health":                false,
+		"/ready":                 false,
+		"/api/v1/instances":      true,
+		"/api/v1/admin/tenants":  true,
+		"/api/v1/svc/models":     false,
 		"/api/v1/demo/instances": false,
-		"/v1/chat/completions": false,
-		"/api/v1":              false,
-		"/api/v2/instances":    false,
+		"/v1/chat/completions":   false,
+		"/api/v1":                false,
+		"/api/v2/instances":      false,
 	}
 	for path, want := range cases {
 		if got := IsCorePolicyPath(path); got != want {

@@ -39,9 +39,9 @@ func TestValidateRejectsInvalidPilotConfig(t *testing.T) {
 	// pilot operation 尚未 generated：伪造 legacy registry 验证 fail closed。
 	legacyRegistry, err := NewRegistry(map[string]Policy{
 		"GET /api/v1/admin/quota-meta": {
-			Source:      PolicySourceLegacy,
-			OperationID: "listQuotaMeta",
-			Method:      "GET",
+			Source:       PolicySourceLegacy,
+			OperationID:  "listQuotaMeta",
+			Method:       "GET",
 			PathTemplate: "/api/v1/admin/quota-meta",
 		},
 	})

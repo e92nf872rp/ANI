@@ -85,7 +85,7 @@ func TestNewRegistryRejectsInvalidInput(t *testing.T) {
 		t.Error("missing operation id should fail")
 	}
 	if _, err := NewRegistry(map[string]Policy{
-		"GET /x": {OperationID: "op", Method: "GET", PathTemplate: "/x"},
+		"GET /x":  {OperationID: "op", Method: "GET", PathTemplate: "/x"},
 		"POST /x": {OperationID: "op", Method: "POST", PathTemplate: "/x"},
 	}); err == nil {
 		t.Error("duplicate operation id should fail")

@@ -41,11 +41,13 @@ func (s tokenStub) ValidateToken(context.Context, string) (*commonv1.TenantConte
 func (s tokenStub) CheckPermission(context.Context, *authv1.CheckPermissionRequest) (*authv1.CheckPermissionResponse, error) {
 	return &authv1.CheckPermissionResponse{Allowed: true}, nil
 }
+
 // ValidatePrincipal 是 V2 stub：B1 mode=off 下不允许被调用，调用即测试失败。
 func (s tokenStub) ValidatePrincipal(context.Context, string, authz.CredentialScheme) (*authv1.PrincipalContext, error) {
 	s.v2c().ValidatePrincipal++
 	return nil, errors.New("V2 ValidatePrincipal must not be called in mode=off")
 }
+
 // CheckPermissionV2 是 V2 stub：B1 mode=off 下不允许被调用，调用即测试失败。
 func (s tokenStub) CheckPermissionV2(context.Context, *authv1.AuthorizationRequest) (*authv1.AuthorizationDecision, error) {
 	s.v2c().CheckPermissionV2++

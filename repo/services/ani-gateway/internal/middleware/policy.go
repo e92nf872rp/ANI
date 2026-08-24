@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	resolvedPolicyContextKey = "ani.authz.resolved_policy"
-	principalContextKey      = "ani.authz.principal"
+	resolvedPolicyContextKey  = "ani.authz.resolved_policy"
+	principalContextKey       = "ani.authz.principal"
 	legacyPrincipalContextKey = "ani.authz.legacy_principal"
 )
 

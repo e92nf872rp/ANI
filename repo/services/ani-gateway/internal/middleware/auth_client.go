@@ -11,8 +11,8 @@ import (
 	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/authz"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 )
 
