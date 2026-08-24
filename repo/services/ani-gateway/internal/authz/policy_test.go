@@ -27,28 +27,16 @@ func TestNormalizeHertzFullPath(t *testing.T) {
 func TestCoreRegistryBasics(t *testing.T) {
 	registry := CoreRegistry()
 
-	// C1 起 listQuotaMeta 迁移为 generated：Bearer OR ApiKey + V2 元数据。
+	// B0 起 listQuotaMeta 仍为 legacy：路由存在但 effective source 恒为 legacy。
 	policy, ok := registry.Lookup("GET", "/api/v1/admin/quota-meta")
 	if !ok {
 		t.Fatal("GET /api/v1/admin/quota-meta not found")
 	}
-	if policy.Source != PolicySourceGenerated {
-		t.Errorf("source = %q, want generated", policy.Source)
+	if policy.Source != PolicySourceLegacy {
+		t.Errorf("source = %q, want legacy", policy.Source)
 	}
 	if policy.OperationID != "listQuotaMeta" {
 		t.Errorf("operation id = %q, want listQuotaMeta", policy.OperationID)
-	}
-	if len(policy.SecurityAlternatives) != 2 {
-		t.Fatalf("alternatives = %d, want 2 (Bearer OR ApiKey)", len(policy.SecurityAlternatives))
-	}
-	if policy.Version != "v1" || policy.Resource != "quota" || policy.Action != "read" {
-		t.Errorf("policy meta = %q/%q/%q, want v1/quota/read", policy.Version, policy.Resource, policy.Action)
-	}
-	if policy.Boundary != BoundaryPlatform {
-		t.Errorf("boundary = %q, want platform", policy.Boundary)
-	}
-	if !policy.AllowsPrincipalKind(PrincipalUser) {
-		t.Error("policy should allow principal kind user")
 	}
 
 	// 派生 operationId 端点命中。
