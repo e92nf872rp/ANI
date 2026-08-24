@@ -89,12 +89,6 @@
       "scope": "scope:quota:write"
     },
     {
-      "operationId": "transferCoreTenantOwnership",
-      "method": "POST",
-      "path": "/admin/tenants/{tenant_id}/transfer-ownership",
-      "scope": "scope:users:write"
-    },
-    {
       "operationId": "lookupTenantUser",
       "method": "GET",
       "path": "/admin/tenants/{tenant_id}/user-lookup",
@@ -1640,7 +1634,6 @@
     "UserRoleUpdateRequest",
     "UserStatusUpdateRequest",
     "UserTenantRef",
-    "UserTransferOwnershipRequest",
     "VectorStore",
     "VectorStoreDeletePrecheck",
     "VectorStoreDocumentDeleteResponse",
@@ -1775,7 +1768,6 @@
     "GPU_TYPE_NOT_IN_NODES",
     "INTERNAL_ERROR",
     "INVALID_FILTER",
-    "LAST_TENANT_OWNER",
     "NOT_FOUND",
     "NOT_IMPLEMENTED",
     "PASSWORD_SAME_AS_OLD",
@@ -1790,9 +1782,7 @@
     "RESERVED_INSUFFICIENT",
     "ROLE_CHANGE_INVALID",
     "TENANT_NOT_FOUND",
-    "TENANT_OWNER_ROLE_LOCKED",
     "TENANT_PLAN_NOT_FOUND",
-    "TRANSFER_TARGET_INVALID",
     "UNAUTHORIZED",
     "UNAVAILABLE",
     "USER_ALREADY_TENANT_ADMIN",
@@ -1801,4 +1791,3 @@
     "VECTOR_STORE_NOT_FOUND"
   ]
 }
-

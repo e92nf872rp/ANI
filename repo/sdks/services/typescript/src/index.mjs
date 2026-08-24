@@ -97,8 +97,7 @@ export const operations = [
   "resetTenantAdminPassword",
   "getTenantAdminRole",
   "updateTenantAdminRole",
-  "bindTenantPlan",
-  "transferTenantOwnership"
+  "bindTenantPlan"
 ];
 export const paths = [
   "GET /gpu-containers",
@@ -194,8 +193,7 @@ export const paths = [
   "POST /tenants/{tenantId}/admins/{userId}/reset-password",
   "GET /tenants/{tenantId}/admins/{userId}/role",
   "PUT /tenants/{tenantId}/admins/{userId}/role",
-  "POST /tenants/{tenantId}/plan",
-  "POST /tenants/{tenantId}/transfer-ownership"
+  "POST /tenants/{tenantId}/plan"
 ];
 export const schemas = [
   "AdminDetail",
@@ -283,7 +281,6 @@ export const schemas = [
   "TenantPlanStateChangeRequest",
   "TenantRef",
   "TenantRole",
-  "TransferOwnershipRequest",
   "UpdateInferenceServicePoliciesRequest",
   "UpdateInferenceServiceRequest",
   "UpdateKBConfigRequest",
@@ -333,8 +330,7 @@ export const idempotencyOperations = [
   "resendTenantAdminInvitation",
   "resetTenantAdminPassword",
   "updateTenantAdminRole",
-  "bindTenantPlan",
-  "transferTenantOwnership"
+  "bindTenantPlan"
 ];
 export const cursorPaginationOperations = [
   "listGpuContainers",

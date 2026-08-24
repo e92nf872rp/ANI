@@ -113,7 +113,6 @@ var Operations = []string{
 	"getTenantAdminRole",
 	"updateTenantAdminRole",
 	"bindTenantPlan",
-	"transferTenantOwnership",
 }
 var Paths = []string{
 	"GET /gpu-containers",
@@ -210,7 +209,6 @@ var Paths = []string{
 	"GET /tenants/{tenantId}/admins/{userId}/role",
 	"PUT /tenants/{tenantId}/admins/{userId}/role",
 	"POST /tenants/{tenantId}/plan",
-	"POST /tenants/{tenantId}/transfer-ownership",
 }
 var Schemas = []string{
 	"AdminDetail",
@@ -298,7 +296,6 @@ var Schemas = []string{
 	"TenantPlanStateChangeRequest",
 	"TenantRef",
 	"TenantRole",
-	"TransferOwnershipRequest",
 	"UpdateInferenceServicePoliciesRequest",
 	"UpdateInferenceServiceRequest",
 	"UpdateKBConfigRequest",
@@ -349,7 +346,6 @@ var IdempotencyOperations = []string{
 	"resetTenantAdminPassword",
 	"updateTenantAdminRole",
 	"bindTenantPlan",
-	"transferTenantOwnership",
 }
 var CursorPaginationOperations = []string{
 	"listGpuContainers",

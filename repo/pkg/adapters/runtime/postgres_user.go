@@ -71,13 +71,6 @@ func (u *PostgresUserAdmin) GetChangeableRoles(ctx context.Context, tenantID, us
 	return ports.ChangeableRoles{}, ports.ErrUnsupported
 }
 
-func (u *PostgresUserAdmin) TransferOwnership(ctx context.Context, tenantID, targetUserID string) error {
-	_ = ctx
-	_ = tenantID
-	_ = targetUserID
-	return ports.ErrUnsupported
-}
-
 func (u *PostgresUserAdmin) SetStatus(ctx context.Context, tenantID, userID, status string) error {
 	_ = ctx
 	_ = tenantID

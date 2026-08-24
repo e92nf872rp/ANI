@@ -567,12 +567,6 @@
       "method": "POST",
       "path": "/tenants/{tenantId}/plan",
       "scope": ""
-    },
-    {
-      "operationId": "transferTenantOwnership",
-      "method": "POST",
-      "path": "/tenants/{tenantId}/transfer-ownership",
-      "scope": ""
     }
   ],
   "schemas": [
@@ -661,7 +655,6 @@
     "TenantPlanStateChangeRequest",
     "TenantRef",
     "TenantRole",
-    "TransferOwnershipRequest",
     "UpdateInferenceServicePoliciesRequest",
     "UpdateInferenceServiceRequest",
     "UpdateKBConfigRequest",
@@ -711,8 +704,7 @@
     "resendTenantAdminInvitation",
     "resetTenantAdminPassword",
     "updateTenantAdminRole",
-    "bindTenantPlan",
-    "transferTenantOwnership"
+    "bindTenantPlan"
   ],
   "cursorPaginationOperations": [
     "listGpuContainers",

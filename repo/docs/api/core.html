@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>224</dd></div>
-          <div><dt>Schemas</dt><dd>310</dd></div>
+          <div><dt>Operations</dt><dd>223</dd></div>
+          <div><dt>Schemas</dt><dd>309</dd></div>
         </dl>
       </section>
 
@@ -272,14 +272,6 @@
           <td>200, 401, 403, 404, 422</td>
         </tr>
         <tr>
-          <td><span class="method method-post">POST</span></td>
-          <td><code>/admin/tenants/{tenant_id}/transfer-ownership</code></td>
-          <td><code>transferCoreTenantOwnership</code></td>
-          <td>原子移交租户所有者</td>
-          <td><code>scope:users:write</code></td>
-          <td>200, 400, 401, 403, 404, 422</td>
-        </tr>
-        <tr>
           <td><span class="method method-get">GET</span></td>
           <td><code>/admin/tenants/{tenant_id}/user-lookup</code></td>
           <td><code>lookupTenantUser</code></td>
@@ -293,7 +285,7 @@
           <td><code>deleteTenantUser</code></td>
           <td>软删除租户成员（不幂等）</td>
           <td><code>scope:users:write</code></td>
-          <td>200, 401, 403, 404, 409, 422</td>
+          <td>200, 401, 403, 404</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -307,7 +299,7 @@
           <td><span class="method method-get">GET</span></td>
           <td><code>/admin/tenants/{tenant_id}/users/{user_id}/changeable-roles</code></td>
           <td><code>getTenantUserChangeableRoles</code></td>
-          <td>查询可变更角色选项（排除 tenant-owner）</td>
+          <td>查询可变更角色选项</td>
           <td><code>scope:users:read</code></td>
           <td>200, 401, 403, 404</td>
         </tr>
@@ -323,7 +315,7 @@
           <td><span class="method method-get">GET</span></td>
           <td><code>/admin/tenants/{tenant_id}/users/{user_id}/role</code></td>
           <td><code>getTenantUserRole</code></td>
-          <td>查询租户成员角色与 4 维权限</td>
+          <td>查询租户成员角色与权限</td>
           <td><code>scope:users:read</code></td>
           <td>200, 401, 403, 404</td>
         </tr>
@@ -333,7 +325,7 @@
           <td><code>updateTenantUserRole</code></td>
           <td>修改租户成员角色</td>
           <td><code>scope:users:write</code></td>
-          <td>200, 400, 401, 403, 404, 409, 422</td>
+          <td>200, 400, 401, 403, 404, 422</td>
         </tr>
         <tr>
           <td><span class="method method-post">POST</span></td>
@@ -341,7 +333,7 @@
           <td><code>updateTenantUserStatus</code></td>
           <td>启用或禁用租户成员</td>
           <td><code>scope:users:write</code></td>
-          <td>200, 400, 401, 403, 404, 422</td>
+          <td>200, 400, 401, 403, 404</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -2248,7 +2240,6 @@
         <li><code>UserRoleUpdateRequest</code></li>
         <li><code>UserStatusUpdateRequest</code></li>
         <li><code>UserTenantRef</code></li>
-        <li><code>UserTransferOwnershipRequest</code></li>
         <li><code>VectorStore</code></li>
         <li><code>VectorStoreDeletePrecheck</code></li>
         <li><code>VectorStoreDocumentDeleteResponse</code></li>

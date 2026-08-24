@@ -119,8 +119,7 @@ public final class ApiClient {
         "resetTenantAdminPassword",
         "getTenantAdminRole",
         "updateTenantAdminRole",
-        "bindTenantPlan",
-        "transferTenantOwnership"
+        "bindTenantPlan"
     ));
     public static final List<String> PATHS = Collections.unmodifiableList(Arrays.asList(
         "GET /gpu-containers",
@@ -216,8 +215,7 @@ public final class ApiClient {
         "POST /tenants/{tenantId}/admins/{userId}/reset-password",
         "GET /tenants/{tenantId}/admins/{userId}/role",
         "PUT /tenants/{tenantId}/admins/{userId}/role",
-        "POST /tenants/{tenantId}/plan",
-        "POST /tenants/{tenantId}/transfer-ownership"
+        "POST /tenants/{tenantId}/plan"
     ));
     public static final List<String> SCHEMAS = Collections.unmodifiableList(Arrays.asList(
         "AdminDetail",
@@ -305,7 +303,6 @@ public final class ApiClient {
         "TenantPlanStateChangeRequest",
         "TenantRef",
         "TenantRole",
-        "TransferOwnershipRequest",
         "UpdateInferenceServicePoliciesRequest",
         "UpdateInferenceServiceRequest",
         "UpdateKBConfigRequest",
@@ -355,8 +352,7 @@ public final class ApiClient {
         "resendTenantAdminInvitation",
         "resetTenantAdminPassword",
         "updateTenantAdminRole",
-        "bindTenantPlan",
-        "transferTenantOwnership"
+        "bindTenantPlan"
     ));
     public static final List<String> CURSOR_PAGINATION_OPERATIONS = Collections.unmodifiableList(Arrays.asList(
         "listGpuContainers",

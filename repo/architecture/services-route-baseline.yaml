@@ -127,12 +127,6 @@ exceptions:
     reason: OpenAPI 已声明修改管理员角色，当前 Gateway 尚未注册对应过渡路由。
   - kind: spec_not_in_code
     method: POST
-    path: /tenants/{tenantId}/transfer-ownership
-    status: accepted_baseline
-    owner: ANI Services
-    reason: OpenAPI 已声明移交租户所有者，当前 Gateway 尚未注册对应过渡路由。
-  - kind: spec_not_in_code
-    method: POST
     path: /tenants/{tenantId}/admins/{userId}/reset-password
     status: accepted_baseline
     owner: ANI Services

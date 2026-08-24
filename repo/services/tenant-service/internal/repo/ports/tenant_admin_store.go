@@ -22,7 +22,6 @@ const (
 	InvitationStatusRejected = "rejected"
 	InvitationStatusExpired  = "expired"
 
-	TenantAdminRoleOwner   = "tenant-owner"
 	TenantAdminRoleAdmin   = "tenant-admin"
 	TenantAdminRoleUser    = "user"
 	TenantAdminRoleAuditor = "auditor"
@@ -67,9 +66,10 @@ type AdminWithTenant struct {
 	Email       string
 	Username    string
 	DisplayName *string
-	Role        string // tenant-owner | tenant-admin | user（列表仅含 owner/admin/邀请中）
+	Role        string // tenant-admin | user | auditor（列表仅含 admin/邀请中/已过期）
 	Status      string // active | disabled
 	IsInviting  bool   // true = 该租户下存在 status='inviting' 的邀请；仅作标记
+	IsExpired   bool   // true = 该租户下存在 status='expired' 的邀请；仅作标记
 	Source      string // third_party | local
 	LastLoginAt *time.Time
 	CreatedAt   *time.Time // 详情返回
@@ -82,9 +82,9 @@ type TenantAdminListFilter struct {
 	Limit      int
 	Cursor     string
 	TenantID   *uuid.UUID
-	Role       string // tenant-owner | tenant-admin
 	Status     string
 	IsInviting *bool
+	IsExpired  *bool
 	Search     string
 }
 
@@ -109,13 +109,20 @@ type InvitationResult struct {
 	Message  string
 }
 
-// UserPermissions 是指定管理员的 4 维权限模型。
+// UserPermissions 是指定管理员的权限模型。
 // 仅返回租户成员（TenantID 非空）；平台账户不可经本模块查询。
 type UserPermissions struct {
 	UserID      uuid.UUID
 	TenantID    *uuid.UUID
 	Role        string
-	Permissions map[string]string // compute/inference/member/transfer → read/write/none
+	Permissions []PermissionEntry // resource/action/scope JSONB 数组
+}
+
+// PermissionEntry 是 permissions 数组中的一项（对齐 migration 003 格式）。
+type PermissionEntry struct {
+	Resource string `json:"resource"`
+	Action   string `json:"action"`
+	Scope    string `json:"scope"`
 }
 
 // ChangeableRoleOption 是可变更角色下拉的一项。
@@ -125,7 +132,6 @@ type ChangeableRoleOption struct {
 }
 
 // ChangeableRoles 是 GET .../changeable-roles 的返回。
-// 当前角色为 tenant-owner 时 ChangeableRoles 为空（owner 不可变更）。
 type ChangeableRoles struct {
 	CurrentRole     string
 	ChangeableRoles []ChangeableRoleOption

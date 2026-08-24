@@ -62,10 +62,6 @@ func (s *TenantAdminService) GetChangeableRoles(context.Context, *tenantv1.GetCh
 	return nil, unimplemented()
 }
 
-func (s *TenantAdminService) TransferTenantOwnership(context.Context, *tenantv1.TransferTenantOwnershipRequest) (*commonv1.IdempotentResult, error) {
-	return nil, unimplemented()
-}
-
 func (s *TenantAdminService) ResetTenantAdminPassword(context.Context, *tenantv1.ResetTenantAdminPasswordRequest) (*commonv1.IdempotentResult, error) {
 	return nil, unimplemented()
 }

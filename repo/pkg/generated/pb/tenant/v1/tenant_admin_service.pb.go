@@ -7,14 +7,15 @@
 package tenantv1
 
 import (
+	reflect "reflect"
+	sync "sync"
+
 	v1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	structpb "google.golang.org/protobuf/types/known/structpb"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
-	reflect "reflect"
-	sync "sync"
 )
 
 const (
@@ -164,11 +165,11 @@ type ListAllTenantAdminsRequest struct {
 	unknownFields protoimpl.UnknownFields
 
 	TenantId   string                `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`       // optional UUID; empty = all tenants
-	Role       string                `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`                               // tenant-owner | tenant-admin; empty = all
 	Status     string                `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`                           // active | disabled; empty = all
 	IsInviting *wrapperspb.BoolValue `protobuf:"bytes,4,opt,name=is_inviting,json=isInviting,proto3" json:"is_inviting,omitempty"` // unset = all
-	Search     string                `protobuf:"bytes,5,opt,name=search,proto3" json:"search,omitempty"`                           // fuzzy match email/username
-	Page       *v1.CursorPageRequest `protobuf:"bytes,6,opt,name=page,proto3" json:"page,omitempty"`
+	IsExpired  *wrapperspb.BoolValue `protobuf:"bytes,5,opt,name=is_expired,json=isExpired,proto3" json:"is_expired,omitempty"`    // unset = all; filter by invitation.status='expired'
+	Search     string                `protobuf:"bytes,6,opt,name=search,proto3" json:"search,omitempty"`                           // fuzzy match email/username
+	Page       *v1.CursorPageRequest `protobuf:"bytes,7,opt,name=page,proto3" json:"page,omitempty"`
 }
 
 func (x *ListAllTenantAdminsRequest) Reset() {
@@ -210,13 +211,6 @@ func (x *ListAllTenantAdminsRequest) GetTenantId() string {
 	return ""
 }
 
-func (x *ListAllTenantAdminsRequest) GetRole() string {
-	if x != nil {
-		return x.Role
-	}
-	return ""
-}
-
 func (x *ListAllTenantAdminsRequest) GetStatus() string {
 	if x != nil {
 		return x.Status
@@ -227,6 +221,13 @@ func (x *ListAllTenantAdminsRequest) GetStatus() string {
 func (x *ListAllTenantAdminsRequest) GetIsInviting() *wrapperspb.BoolValue {
 	if x != nil {
 		return x.IsInviting
+	}
+	return nil
+}
+
+func (x *ListAllTenantAdminsRequest) GetIsExpired() *wrapperspb.BoolValue {
+	if x != nil {
+		return x.IsExpired
 	}
 	return nil
 }
@@ -362,7 +363,7 @@ type UpdateTenantAdminRoleRequest struct {
 
 	TenantId       string `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
 	UserId         string `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Role           string `protobuf:"bytes,3,opt,name=role,proto3" json:"role,omitempty"`                                           // user | auditor | tenant-admin (not tenant-owner)
+	Role           string `protobuf:"bytes,3,opt,name=role,proto3" json:"role,omitempty"`                                           // user | auditor | tenant-admin
 	IdempotencyKey string `protobuf:"bytes,4,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"` // required UUID
 }
 
@@ -589,69 +590,6 @@ func (x *GetChangeableRolesResponse) GetChangeableRoles() []*ChangeableRoleOptio
 		return x.ChangeableRoles
 	}
 	return nil
-}
-
-type TransferTenantOwnershipRequest struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	TenantId       string `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
-	TargetUserId   string `protobuf:"bytes,2,opt,name=target_user_id,json=targetUserId,proto3" json:"target_user_id,omitempty"`     // must be active tenant-admin in this tenant
-	IdempotencyKey string `protobuf:"bytes,3,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"` // required UUID
-}
-
-func (x *TransferTenantOwnershipRequest) Reset() {
-	*x = TransferTenantOwnershipRequest{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_tenant_v1_tenant_admin_service_proto_msgTypes[9]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *TransferTenantOwnershipRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TransferTenantOwnershipRequest) ProtoMessage() {}
-
-func (x *TransferTenantOwnershipRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tenant_v1_tenant_admin_service_proto_msgTypes[9]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TransferTenantOwnershipRequest.ProtoReflect.Descriptor instead.
-func (*TransferTenantOwnershipRequest) Descriptor() ([]byte, []int) {
-	return file_tenant_v1_tenant_admin_service_proto_rawDescGZIP(), []int{9}
-}
-
-func (x *TransferTenantOwnershipRequest) GetTenantId() string {
-	if x != nil {
-		return x.TenantId
-	}
-	return ""
-}
-
-func (x *TransferTenantOwnershipRequest) GetTargetUserId() string {
-	if x != nil {
-		return x.TargetUserId
-	}
-	return ""
-}
-
-func (x *TransferTenantOwnershipRequest) GetIdempotencyKey() string {
-	if x != nil {
-		return x.IdempotencyKey
-	}
-	return ""
 }
 
 type ResetTenantAdminPasswordRequest struct {
@@ -1112,14 +1050,15 @@ type AdminWithTenant struct {
 	Email       string                  `protobuf:"bytes,2,opt,name=email,proto3" json:"email,omitempty"`
 	Username    string                  `protobuf:"bytes,3,opt,name=username,proto3" json:"username,omitempty"`
 	DisplayName *wrapperspb.StringValue `protobuf:"bytes,4,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
-	Role        string                  `protobuf:"bytes,5,opt,name=role,proto3" json:"role,omitempty"`                                // tenant-owner | tenant-admin | user | auditor
+	Role        string                  `protobuf:"bytes,5,opt,name=role,proto3" json:"role,omitempty"`                                // tenant-admin | user | auditor
 	Status      string                  `protobuf:"bytes,6,opt,name=status,proto3" json:"status,omitempty"`                            // active | disabled
 	IsInviting  bool                    `protobuf:"varint,7,opt,name=is_inviting,json=isInviting,proto3" json:"is_inviting,omitempty"` // marker only; does not change role/status
-	Source      string                  `protobuf:"bytes,8,opt,name=source,proto3" json:"source,omitempty"`                            // local | third_party
-	LastLoginAt *timestamppb.Timestamp  `protobuf:"bytes,9,opt,name=last_login_at,json=lastLoginAt,proto3" json:"last_login_at,omitempty"`
-	CreatedAt   *timestamppb.Timestamp  `protobuf:"bytes,10,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"` // detail only
-	UpdatedAt   *timestamppb.Timestamp  `protobuf:"bytes,11,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"` // detail only
-	Tenant      *TenantAdminTenantRef   `protobuf:"bytes,12,opt,name=tenant,proto3" json:"tenant,omitempty"`
+	IsExpired   bool                    `protobuf:"varint,8,opt,name=is_expired,json=isExpired,proto3" json:"is_expired,omitempty"`    // marker only; does not change role/status
+	Source      string                  `protobuf:"bytes,9,opt,name=source,proto3" json:"source,omitempty"`                            // local | third_party
+	LastLoginAt *timestamppb.Timestamp  `protobuf:"bytes,10,opt,name=last_login_at,json=lastLoginAt,proto3" json:"last_login_at,omitempty"`
+	CreatedAt   *timestamppb.Timestamp  `protobuf:"bytes,11,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"` // detail only
+	UpdatedAt   *timestamppb.Timestamp  `protobuf:"bytes,12,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"` // detail only
+	Tenant      *TenantAdminTenantRef   `protobuf:"bytes,13,opt,name=tenant,proto3" json:"tenant,omitempty"`
 }
 
 func (x *AdminWithTenant) Reset() {
@@ -1199,6 +1138,13 @@ func (x *AdminWithTenant) GetStatus() string {
 func (x *AdminWithTenant) GetIsInviting() bool {
 	if x != nil {
 		return x.IsInviting
+	}
+	return false
+}
+
+func (x *AdminWithTenant) GetIsExpired() bool {
+	if x != nil {
+		return x.IsExpired
 	}
 	return false
 }
@@ -1868,7 +1814,7 @@ func file_tenant_v1_tenant_admin_service_proto_rawDescGZIP() []byte {
 	return file_tenant_v1_tenant_admin_service_proto_rawDescData
 }
 
-var file_tenant_v1_tenant_admin_service_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
+var file_tenant_v1_tenant_admin_service_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
 var file_tenant_v1_tenant_admin_service_proto_goTypes = []interface{}{
 	(*InviteTenantAdminRequest)(nil),           // 0: tenant.v1.InviteTenantAdminRequest
 	(*ResendTenantAdminInvitationRequest)(nil), // 1: tenant.v1.ResendTenantAdminInvitationRequest
@@ -1879,76 +1825,74 @@ var file_tenant_v1_tenant_admin_service_proto_goTypes = []interface{}{
 	(*GetTenantAdminRoleRequest)(nil),          // 6: tenant.v1.GetTenantAdminRoleRequest
 	(*GetChangeableRolesRequest)(nil),          // 7: tenant.v1.GetChangeableRolesRequest
 	(*GetChangeableRolesResponse)(nil),         // 8: tenant.v1.GetChangeableRolesResponse
-	(*TransferTenantOwnershipRequest)(nil),     // 9: tenant.v1.TransferTenantOwnershipRequest
-	(*ResetTenantAdminPasswordRequest)(nil),    // 10: tenant.v1.ResetTenantAdminPasswordRequest
-	(*DisableTenantAdminRequest)(nil),          // 11: tenant.v1.DisableTenantAdminRequest
-	(*EnableTenantAdminRequest)(nil),           // 12: tenant.v1.EnableTenantAdminRequest
-	(*DeleteTenantAdminRequest)(nil),           // 13: tenant.v1.DeleteTenantAdminRequest
-	(*ListTenantAdminAuditLogsRequest)(nil),    // 14: tenant.v1.ListTenantAdminAuditLogsRequest
-	(*ListTenantAdminAuditLogsResponse)(nil),   // 15: tenant.v1.ListTenantAdminAuditLogsResponse
-	(*TenantAdminTenantRef)(nil),               // 16: tenant.v1.TenantAdminTenantRef
-	(*AdminWithTenant)(nil),                    // 17: tenant.v1.AdminWithTenant
-	(*InvitationResult)(nil),                   // 18: tenant.v1.InvitationResult
-	(*UserPermissions)(nil),                    // 19: tenant.v1.UserPermissions
-	(*ChangeableRoleOption)(nil),               // 20: tenant.v1.ChangeableRoleOption
-	(*TenantAdminAuditLog)(nil),                // 21: tenant.v1.TenantAdminAuditLog
-	nil,                                        // 22: tenant.v1.UserPermissions.PermissionsEntry
-	(*wrapperspb.BoolValue)(nil),               // 23: google.protobuf.BoolValue
-	(*v1.CursorPageRequest)(nil),               // 24: common.v1.CursorPageRequest
-	(*wrapperspb.StringValue)(nil),             // 25: google.protobuf.StringValue
-	(*timestamppb.Timestamp)(nil),              // 26: google.protobuf.Timestamp
-	(*structpb.Struct)(nil),                    // 27: google.protobuf.Struct
-	(*v1.IdempotentResult)(nil),                // 28: common.v1.IdempotentResult
+	(*ResetTenantAdminPasswordRequest)(nil),    // 9: tenant.v1.ResetTenantAdminPasswordRequest
+	(*DisableTenantAdminRequest)(nil),          // 10: tenant.v1.DisableTenantAdminRequest
+	(*EnableTenantAdminRequest)(nil),           // 11: tenant.v1.EnableTenantAdminRequest
+	(*DeleteTenantAdminRequest)(nil),           // 12: tenant.v1.DeleteTenantAdminRequest
+	(*ListTenantAdminAuditLogsRequest)(nil),    // 13: tenant.v1.ListTenantAdminAuditLogsRequest
+	(*ListTenantAdminAuditLogsResponse)(nil),   // 14: tenant.v1.ListTenantAdminAuditLogsResponse
+	(*TenantAdminTenantRef)(nil),               // 15: tenant.v1.TenantAdminTenantRef
+	(*AdminWithTenant)(nil),                    // 16: tenant.v1.AdminWithTenant
+	(*InvitationResult)(nil),                   // 17: tenant.v1.InvitationResult
+	(*UserPermissions)(nil),                    // 18: tenant.v1.UserPermissions
+	(*ChangeableRoleOption)(nil),               // 19: tenant.v1.ChangeableRoleOption
+	(*TenantAdminAuditLog)(nil),                // 20: tenant.v1.TenantAdminAuditLog
+	nil,                                        // 21: tenant.v1.UserPermissions.PermissionsEntry
+	(*wrapperspb.BoolValue)(nil),               // 22: google.protobuf.BoolValue
+	(*v1.CursorPageRequest)(nil),               // 23: common.v1.CursorPageRequest
+	(*wrapperspb.StringValue)(nil),             // 24: google.protobuf.StringValue
+	(*timestamppb.Timestamp)(nil),              // 25: google.protobuf.Timestamp
+	(*structpb.Struct)(nil),                    // 26: google.protobuf.Struct
+	(*v1.IdempotentResult)(nil),                // 27: common.v1.IdempotentResult
 }
 var file_tenant_v1_tenant_admin_service_proto_depIdxs = []int32{
-	23, // 0: tenant.v1.ListAllTenantAdminsRequest.is_inviting:type_name -> google.protobuf.BoolValue
-	24, // 1: tenant.v1.ListAllTenantAdminsRequest.page:type_name -> common.v1.CursorPageRequest
-	17, // 2: tenant.v1.ListAllTenantAdminsResponse.items:type_name -> tenant.v1.AdminWithTenant
-	20, // 3: tenant.v1.GetChangeableRolesResponse.changeable_roles:type_name -> tenant.v1.ChangeableRoleOption
-	24, // 4: tenant.v1.ListTenantAdminAuditLogsRequest.page:type_name -> common.v1.CursorPageRequest
-	21, // 5: tenant.v1.ListTenantAdminAuditLogsResponse.items:type_name -> tenant.v1.TenantAdminAuditLog
-	25, // 6: tenant.v1.AdminWithTenant.display_name:type_name -> google.protobuf.StringValue
-	26, // 7: tenant.v1.AdminWithTenant.last_login_at:type_name -> google.protobuf.Timestamp
-	26, // 8: tenant.v1.AdminWithTenant.created_at:type_name -> google.protobuf.Timestamp
-	26, // 9: tenant.v1.AdminWithTenant.updated_at:type_name -> google.protobuf.Timestamp
-	16, // 10: tenant.v1.AdminWithTenant.tenant:type_name -> tenant.v1.TenantAdminTenantRef
-	26, // 11: tenant.v1.InvitationResult.expire_at:type_name -> google.protobuf.Timestamp
-	25, // 12: tenant.v1.UserPermissions.tenant_id:type_name -> google.protobuf.StringValue
-	22, // 13: tenant.v1.UserPermissions.permissions:type_name -> tenant.v1.UserPermissions.PermissionsEntry
-	25, // 14: tenant.v1.TenantAdminAuditLog.user_id:type_name -> google.protobuf.StringValue
-	27, // 15: tenant.v1.TenantAdminAuditLog.details:type_name -> google.protobuf.Struct
-	26, // 16: tenant.v1.TenantAdminAuditLog.created_at:type_name -> google.protobuf.Timestamp
-	0,  // 17: tenant.v1.TenantAdminService.InviteTenantAdmin:input_type -> tenant.v1.InviteTenantAdminRequest
-	1,  // 18: tenant.v1.TenantAdminService.ResendTenantAdminInvitation:input_type -> tenant.v1.ResendTenantAdminInvitationRequest
-	2,  // 19: tenant.v1.TenantAdminService.ListAllTenantAdmins:input_type -> tenant.v1.ListAllTenantAdminsRequest
-	4,  // 20: tenant.v1.TenantAdminService.GetTenantAdminDetail:input_type -> tenant.v1.GetTenantAdminDetailRequest
-	5,  // 21: tenant.v1.TenantAdminService.UpdateTenantAdminRole:input_type -> tenant.v1.UpdateTenantAdminRoleRequest
-	6,  // 22: tenant.v1.TenantAdminService.GetTenantAdminRole:input_type -> tenant.v1.GetTenantAdminRoleRequest
-	7,  // 23: tenant.v1.TenantAdminService.GetChangeableRoles:input_type -> tenant.v1.GetChangeableRolesRequest
-	9,  // 24: tenant.v1.TenantAdminService.TransferTenantOwnership:input_type -> tenant.v1.TransferTenantOwnershipRequest
-	10, // 25: tenant.v1.TenantAdminService.ResetTenantAdminPassword:input_type -> tenant.v1.ResetTenantAdminPasswordRequest
-	11, // 26: tenant.v1.TenantAdminService.DisableTenantAdmin:input_type -> tenant.v1.DisableTenantAdminRequest
-	12, // 27: tenant.v1.TenantAdminService.EnableTenantAdmin:input_type -> tenant.v1.EnableTenantAdminRequest
-	13, // 28: tenant.v1.TenantAdminService.DeleteTenantAdmin:input_type -> tenant.v1.DeleteTenantAdminRequest
-	14, // 29: tenant.v1.TenantAdminService.ListTenantAdminAuditLogs:input_type -> tenant.v1.ListTenantAdminAuditLogsRequest
-	18, // 30: tenant.v1.TenantAdminService.InviteTenantAdmin:output_type -> tenant.v1.InvitationResult
-	18, // 31: tenant.v1.TenantAdminService.ResendTenantAdminInvitation:output_type -> tenant.v1.InvitationResult
+	22, // 0: tenant.v1.ListAllTenantAdminsRequest.is_inviting:type_name -> google.protobuf.BoolValue
+	22, // 1: tenant.v1.ListAllTenantAdminsRequest.is_expired:type_name -> google.protobuf.BoolValue
+	23, // 2: tenant.v1.ListAllTenantAdminsRequest.page:type_name -> common.v1.CursorPageRequest
+	16, // 3: tenant.v1.ListAllTenantAdminsResponse.items:type_name -> tenant.v1.AdminWithTenant
+	19, // 4: tenant.v1.GetChangeableRolesResponse.changeable_roles:type_name -> tenant.v1.ChangeableRoleOption
+	23, // 5: tenant.v1.ListTenantAdminAuditLogsRequest.page:type_name -> common.v1.CursorPageRequest
+	20, // 6: tenant.v1.ListTenantAdminAuditLogsResponse.items:type_name -> tenant.v1.TenantAdminAuditLog
+	24, // 7: tenant.v1.AdminWithTenant.display_name:type_name -> google.protobuf.StringValue
+	25, // 8: tenant.v1.AdminWithTenant.last_login_at:type_name -> google.protobuf.Timestamp
+	25, // 9: tenant.v1.AdminWithTenant.created_at:type_name -> google.protobuf.Timestamp
+	25, // 10: tenant.v1.AdminWithTenant.updated_at:type_name -> google.protobuf.Timestamp
+	15, // 11: tenant.v1.AdminWithTenant.tenant:type_name -> tenant.v1.TenantAdminTenantRef
+	25, // 12: tenant.v1.InvitationResult.expire_at:type_name -> google.protobuf.Timestamp
+	24, // 13: tenant.v1.UserPermissions.tenant_id:type_name -> google.protobuf.StringValue
+	21, // 14: tenant.v1.UserPermissions.permissions:type_name -> tenant.v1.UserPermissions.PermissionsEntry
+	24, // 15: tenant.v1.TenantAdminAuditLog.user_id:type_name -> google.protobuf.StringValue
+	26, // 16: tenant.v1.TenantAdminAuditLog.details:type_name -> google.protobuf.Struct
+	25, // 17: tenant.v1.TenantAdminAuditLog.created_at:type_name -> google.protobuf.Timestamp
+	0,  // 18: tenant.v1.TenantAdminService.InviteTenantAdmin:input_type -> tenant.v1.InviteTenantAdminRequest
+	1,  // 19: tenant.v1.TenantAdminService.ResendTenantAdminInvitation:input_type -> tenant.v1.ResendTenantAdminInvitationRequest
+	2,  // 20: tenant.v1.TenantAdminService.ListAllTenantAdmins:input_type -> tenant.v1.ListAllTenantAdminsRequest
+	4,  // 21: tenant.v1.TenantAdminService.GetTenantAdminDetail:input_type -> tenant.v1.GetTenantAdminDetailRequest
+	5,  // 22: tenant.v1.TenantAdminService.UpdateTenantAdminRole:input_type -> tenant.v1.UpdateTenantAdminRoleRequest
+	6,  // 23: tenant.v1.TenantAdminService.GetTenantAdminRole:input_type -> tenant.v1.GetTenantAdminRoleRequest
+	7,  // 24: tenant.v1.TenantAdminService.GetChangeableRoles:input_type -> tenant.v1.GetChangeableRolesRequest
+	9,  // 25: tenant.v1.TenantAdminService.ResetTenantAdminPassword:input_type -> tenant.v1.ResetTenantAdminPasswordRequest
+	10, // 26: tenant.v1.TenantAdminService.DisableTenantAdmin:input_type -> tenant.v1.DisableTenantAdminRequest
+	11, // 27: tenant.v1.TenantAdminService.EnableTenantAdmin:input_type -> tenant.v1.EnableTenantAdminRequest
+	12, // 28: tenant.v1.TenantAdminService.DeleteTenantAdmin:input_type -> tenant.v1.DeleteTenantAdminRequest
+	13, // 29: tenant.v1.TenantAdminService.ListTenantAdminAuditLogs:input_type -> tenant.v1.ListTenantAdminAuditLogsRequest
+	17, // 30: tenant.v1.TenantAdminService.InviteTenantAdmin:output_type -> tenant.v1.InvitationResult
+	17, // 31: tenant.v1.TenantAdminService.ResendTenantAdminInvitation:output_type -> tenant.v1.InvitationResult
 	3,  // 32: tenant.v1.TenantAdminService.ListAllTenantAdmins:output_type -> tenant.v1.ListAllTenantAdminsResponse
-	17, // 33: tenant.v1.TenantAdminService.GetTenantAdminDetail:output_type -> tenant.v1.AdminWithTenant
-	28, // 34: tenant.v1.TenantAdminService.UpdateTenantAdminRole:output_type -> common.v1.IdempotentResult
-	19, // 35: tenant.v1.TenantAdminService.GetTenantAdminRole:output_type -> tenant.v1.UserPermissions
+	16, // 33: tenant.v1.TenantAdminService.GetTenantAdminDetail:output_type -> tenant.v1.AdminWithTenant
+	27, // 34: tenant.v1.TenantAdminService.UpdateTenantAdminRole:output_type -> common.v1.IdempotentResult
+	18, // 35: tenant.v1.TenantAdminService.GetTenantAdminRole:output_type -> tenant.v1.UserPermissions
 	8,  // 36: tenant.v1.TenantAdminService.GetChangeableRoles:output_type -> tenant.v1.GetChangeableRolesResponse
-	28, // 37: tenant.v1.TenantAdminService.TransferTenantOwnership:output_type -> common.v1.IdempotentResult
-	28, // 38: tenant.v1.TenantAdminService.ResetTenantAdminPassword:output_type -> common.v1.IdempotentResult
-	28, // 39: tenant.v1.TenantAdminService.DisableTenantAdmin:output_type -> common.v1.IdempotentResult
-	28, // 40: tenant.v1.TenantAdminService.EnableTenantAdmin:output_type -> common.v1.IdempotentResult
-	28, // 41: tenant.v1.TenantAdminService.DeleteTenantAdmin:output_type -> common.v1.IdempotentResult
-	15, // 42: tenant.v1.TenantAdminService.ListTenantAdminAuditLogs:output_type -> tenant.v1.ListTenantAdminAuditLogsResponse
-	30, // [30:43] is the sub-list for method output_type
-	17, // [17:30] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	27, // 37: tenant.v1.TenantAdminService.ResetTenantAdminPassword:output_type -> common.v1.IdempotentResult
+	27, // 38: tenant.v1.TenantAdminService.DisableTenantAdmin:output_type -> common.v1.IdempotentResult
+	27, // 39: tenant.v1.TenantAdminService.EnableTenantAdmin:output_type -> common.v1.IdempotentResult
+	27, // 40: tenant.v1.TenantAdminService.DeleteTenantAdmin:output_type -> common.v1.IdempotentResult
+	14, // 41: tenant.v1.TenantAdminService.ListTenantAdminAuditLogs:output_type -> tenant.v1.ListTenantAdminAuditLogsResponse
+	30, // [30:42] is the sub-list for method output_type
+	18, // [18:30] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_tenant_v1_tenant_admin_service_proto_init() }
@@ -2066,18 +2010,6 @@ func file_tenant_v1_tenant_admin_service_proto_init() {
 			}
 		}
 		file_tenant_v1_tenant_admin_service_proto_msgTypes[9].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*TransferTenantOwnershipRequest); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_tenant_v1_tenant_admin_service_proto_msgTypes[10].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*ResetTenantAdminPasswordRequest); i {
 			case 0:
 				return &v.state
@@ -2089,7 +2021,7 @@ func file_tenant_v1_tenant_admin_service_proto_init() {
 				return nil
 			}
 		}
-		file_tenant_v1_tenant_admin_service_proto_msgTypes[11].Exporter = func(v interface{}, i int) interface{} {
+		file_tenant_v1_tenant_admin_service_proto_msgTypes[10].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*DisableTenantAdminRequest); i {
 			case 0:
 				return &v.state
@@ -2101,7 +2033,7 @@ func file_tenant_v1_tenant_admin_service_proto_init() {
 				return nil
 			}
 		}
-		file_tenant_v1_tenant_admin_service_proto_msgTypes[12].Exporter = func(v interface{}, i int) interface{} {
+		file_tenant_v1_tenant_admin_service_proto_msgTypes[11].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*EnableTenantAdminRequest); i {
 			case 0:
 				return &v.state
@@ -2113,7 +2045,7 @@ func file_tenant_v1_tenant_admin_service_proto_init() {
 				return nil
 			}
 		}
-		file_tenant_v1_tenant_admin_service_proto_msgTypes[13].Exporter = func(v interface{}, i int) interface{} {
+		file_tenant_v1_tenant_admin_service_proto_msgTypes[12].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*DeleteTenantAdminRequest); i {
 			case 0:
 				return &v.state
@@ -2125,7 +2057,7 @@ func file_tenant_v1_tenant_admin_service_proto_init() {
 				return nil
 			}
 		}
-		file_tenant_v1_tenant_admin_service_proto_msgTypes[14].Exporter = func(v interface{}, i int) interface{} {
+		file_tenant_v1_tenant_admin_service_proto_msgTypes[13].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*ListTenantAdminAuditLogsRequest); i {
 			case 0:
 				return &v.state
@@ -2137,7 +2069,7 @@ func file_tenant_v1_tenant_admin_service_proto_init() {
 				return nil
 			}
 		}
-		file_tenant_v1_tenant_admin_service_proto_msgTypes[15].Exporter = func(v interface{}, i int) interface{} {
+		file_tenant_v1_tenant_admin_service_proto_msgTypes[14].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*ListTenantAdminAuditLogsResponse); i {
 			case 0:
 				return &v.state
@@ -2149,7 +2081,7 @@ func file_tenant_v1_tenant_admin_service_proto_init() {
 				return nil
 			}
 		}
-		file_tenant_v1_tenant_admin_service_proto_msgTypes[16].Exporter = func(v interface{}, i int) interface{} {
+		file_tenant_v1_tenant_admin_service_proto_msgTypes[15].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*TenantAdminTenantRef); i {
 			case 0:
 				return &v.state
@@ -2161,7 +2093,7 @@ func file_tenant_v1_tenant_admin_service_proto_init() {
 				return nil
 			}
 		}
-		file_tenant_v1_tenant_admin_service_proto_msgTypes[17].Exporter = func(v interface{}, i int) interface{} {
+		file_tenant_v1_tenant_admin_service_proto_msgTypes[16].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*AdminWithTenant); i {
 			case 0:
 				return &v.state
@@ -2173,7 +2105,7 @@ func file_tenant_v1_tenant_admin_service_proto_init() {
 				return nil
 			}
 		}
-		file_tenant_v1_tenant_admin_service_proto_msgTypes[18].Exporter = func(v interface{}, i int) interface{} {
+		file_tenant_v1_tenant_admin_service_proto_msgTypes[17].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*InvitationResult); i {
 			case 0:
 				return &v.state
@@ -2185,7 +2117,7 @@ func file_tenant_v1_tenant_admin_service_proto_init() {
 				return nil
 			}
 		}
-		file_tenant_v1_tenant_admin_service_proto_msgTypes[19].Exporter = func(v interface{}, i int) interface{} {
+		file_tenant_v1_tenant_admin_service_proto_msgTypes[18].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*UserPermissions); i {
 			case 0:
 				return &v.state
@@ -2197,7 +2129,7 @@ func file_tenant_v1_tenant_admin_service_proto_init() {
 				return nil
 			}
 		}
-		file_tenant_v1_tenant_admin_service_proto_msgTypes[20].Exporter = func(v interface{}, i int) interface{} {
+		file_tenant_v1_tenant_admin_service_proto_msgTypes[19].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*ChangeableRoleOption); i {
 			case 0:
 				return &v.state
@@ -2209,7 +2141,7 @@ func file_tenant_v1_tenant_admin_service_proto_init() {
 				return nil
 			}
 		}
-		file_tenant_v1_tenant_admin_service_proto_msgTypes[21].Exporter = func(v interface{}, i int) interface{} {
+		file_tenant_v1_tenant_admin_service_proto_msgTypes[20].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*TenantAdminAuditLog); i {
 			case 0:
 				return &v.state
@@ -2228,7 +2160,7 @@ func file_tenant_v1_tenant_admin_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_tenant_v1_tenant_admin_service_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   23,
+			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

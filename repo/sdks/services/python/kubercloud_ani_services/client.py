@@ -101,8 +101,7 @@ OPERATIONS = [
     "resetTenantAdminPassword",
     "getTenantAdminRole",
     "updateTenantAdminRole",
-    "bindTenantPlan",
-    "transferTenantOwnership"
+    "bindTenantPlan"
 ]
 PATHS = [
     "GET /gpu-containers",
@@ -198,8 +197,7 @@ PATHS = [
     "POST /tenants/{tenantId}/admins/{userId}/reset-password",
     "GET /tenants/{tenantId}/admins/{userId}/role",
     "PUT /tenants/{tenantId}/admins/{userId}/role",
-    "POST /tenants/{tenantId}/plan",
-    "POST /tenants/{tenantId}/transfer-ownership"
+    "POST /tenants/{tenantId}/plan"
 ]
 SCHEMAS = [
     "AdminDetail",
@@ -287,7 +285,6 @@ SCHEMAS = [
     "TenantPlanStateChangeRequest",
     "TenantRef",
     "TenantRole",
-    "TransferOwnershipRequest",
     "UpdateInferenceServicePoliciesRequest",
     "UpdateInferenceServiceRequest",
     "UpdateKBConfigRequest",
@@ -337,8 +334,7 @@ IDEMPOTENCY_OPERATIONS = [
     "resendTenantAdminInvitation",
     "resetTenantAdminPassword",
     "updateTenantAdminRole",
-    "bindTenantPlan",
-    "transferTenantOwnership"
+    "bindTenantPlan"
 ]
 CURSOR_PAGINATION_OPERATIONS = [
     "listGpuContainers",

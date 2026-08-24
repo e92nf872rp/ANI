@@ -14,7 +14,7 @@ type User struct {
 	Email       string
 	Username    string
 	DisplayName *string
-	Role        string // tenant-owner | tenant-admin | user | auditor
+	Role        string // tenant-admin | user | auditor
 	Status      string // active | disabled
 	Source      string // local | third_party (inferred from username prefix)
 	LastLoginAt *time.Time
@@ -35,7 +35,7 @@ type UserListFilter struct {
 	Limit    int
 	Cursor   string
 	TenantID string // empty = all tenants
-	Role     string // tenant-owner | tenant-admin; empty = both plus no extra roles
+	Role     string // tenant-admin; empty = all plus no extra roles
 	Status   string // active | disabled; empty = all
 	Search   string // fuzzy match email/username
 }
@@ -46,13 +46,20 @@ type UserListResult struct {
 	NextCursor string // empty = no more
 }
 
-// UserPermissions is the four-dimension tenant permission model.
+// UserPermissions is the tenant permission model.
 // Platform accounts (tenant_id empty) are not queryable through UserAdminService.
 type UserPermissions struct {
 	UserID      string
 	TenantID    string
 	Role        string
-	Permissions map[string]string // compute/inference/member/transfer → read/write/none
+	Permissions []PermissionEntry // resource/action/scope JSONB array
+}
+
+// PermissionEntry is one entry in the permissions array (aligned with migration 003).
+type PermissionEntry struct {
+	Resource string `json:"resource"`
+	Action   string `json:"action"`
+	Scope    string `json:"scope"`
 }
 
 // ChangeableRoleOption is one selectable target role.
@@ -62,7 +69,6 @@ type ChangeableRoleOption struct {
 }
 
 // ChangeableRoles is GET .../changeable-roles.
-// CurrentRole tenant-owner yields an empty Options list.
 type ChangeableRoles struct {
 	CurrentRole string
 	Options     []ChangeableRoleOption
@@ -79,7 +85,6 @@ type ChangeableRoles struct {
 //	PUT    /admin/tenants/{tenant_id}/users/{user_id}/role
 //	GET    /admin/tenants/{tenant_id}/users/{user_id}/role
 //	GET    /admin/tenants/{tenant_id}/users/{user_id}/changeable-roles
-//	POST   /admin/tenants/{tenant_id}/transfer-ownership
 //	POST   /admin/tenants/{tenant_id}/users/{user_id}/status
 //	POST   /admin/tenants/{tenant_id}/users/{user_id}/reset-password
 //	DELETE /admin/tenants/{tenant_id}/users/{user_id}
@@ -88,7 +93,7 @@ type UserAdminService interface {
 	// No match → ErrUserNotFound. Does not create users.
 	LookupUser(ctx context.Context, tenantID, email, username string) (User, error)
 
-	// IsTenantAdmin reports whether the user holds tenant-admin or tenant-owner
+	// IsTenantAdmin reports whether the user holds tenant-admin role
 	// in this tenant. Missing user → ErrUserNotFound.
 	IsTenantAdmin(ctx context.Context, tenantID, userID string) (bool, error)
 
@@ -96,32 +101,25 @@ type UserAdminService interface {
 	// missing → ErrUserNotFound. Platform accounts are not returned.
 	GetUser(ctx context.Context, tenantID, userID string) (User, error)
 
-	// ListUsers returns tenant-owner / tenant-admin members (cursor page).
+	// ListUsers returns tenant-admin members (cursor page).
 	// Role filter is optional; implementations must not return ordinary user
 	// members unless a later caller merges invitation rows in Services.
 	ListUsers(ctx context.Context, filter UserListFilter) (UserListResult, error)
 
 	// ChangeRole replaces the tenant role (user / auditor / tenant-admin).
-	// tenant-owner target → ErrTenantOwnerRoleLocked; illegal role → ErrRoleChangeInvalid.
+	// Illegal role → ErrRoleChangeInvalid.
 	ChangeRole(ctx context.Context, tenantID, userID, role string) error
 
 	// GetRolePermissions returns role + permissions JSONB for a tenant member.
 	GetRolePermissions(ctx context.Context, tenantID, userID string) (UserPermissions, error)
 
-	// GetChangeableRoles returns selectable roles excluding tenant-owner.
+	// GetChangeableRoles returns selectable roles.
 	GetChangeableRoles(ctx context.Context, tenantID, userID string) (ChangeableRoles, error)
 
-	// TransferOwnership atomically promotes target to tenant-owner and demotes
-	// the current owner to tenant-admin.
-	// Invalid target → ErrTransferTargetInvalid.
-	TransferOwnership(ctx context.Context, tenantID, targetUserID string) error
-
 	// SetStatus sets users.status to active or disabled.
-	// Disabling the last active tenant-owner → ErrLastTenantOwner.
 	SetStatus(ctx context.Context, tenantID, userID, status string) error
 
 	// SoftDelete marks the user deleted (and status=disabled).
-	// tenant-owner → ErrTenantOwnerRoleLocked; last active owner → ErrLastTenantOwner.
 	SoftDelete(ctx context.Context, tenantID, userID string) error
 
 	// ResetPassword updates password_hash. Plaintext must not be logged or returned.

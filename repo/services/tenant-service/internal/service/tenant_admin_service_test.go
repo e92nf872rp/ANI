@@ -45,10 +45,6 @@ func TestTenantAdminService_Unimplemented(t *testing.T) {
 			_, err := s.GetChangeableRoles(ctx, &tenantv1.GetChangeableRolesRequest{})
 			return err
 		}},
-		{"TransferTenantOwnership", func() error {
-			_, err := s.TransferTenantOwnership(ctx, &tenantv1.TransferTenantOwnershipRequest{})
-			return err
-		}},
 		{"ResetTenantAdminPassword", func() error {
 			_, err := s.ResetTenantAdminPassword(ctx, &tenantv1.ResetTenantAdminPasswordRequest{})
 			return err
@@ -71,8 +67,8 @@ func TestTenantAdminService_Unimplemented(t *testing.T) {
 		}},
 	}
 
-	if len(checks) != 13 {
-		t.Fatalf("want 13 RPCs, got %d", len(checks))
+	if len(checks) != 12 {
+		t.Fatalf("want 12 RPCs, got %d", len(checks))
 	}
 	for _, tc := range checks {
 		t.Run(tc.name, func(t *testing.T) {
