@@ -83,6 +83,7 @@ Inference PlatformWorkload API-first 增量：
 - INFERENCE-SERVICE-GPU-LWS-RUNTIME-FIX-C37：已完成 local/logic verified。默认 LWS 关 Ray compiled DAG；GPU TP>1 关 custom all-reduce；多卡/LWS shm 12Gi；Deployment Recreate；SGLang 与无 Ray 的租户 command 拒绝 `leader_worker`；ClusterIP smoke timeout 120s。未改 OpenAPI，无新 live，不得外推 GPU ready / runtime ready。
 - INFERENCE-SERVICE-GPU-MEMORY-CONTRACT-C38：已补齐 Core/Services 加速器契约：`spec_id` 只表示 GPU 型号；`count` / `count_per_replica` 为申请卡数且两种模式都必填；可选 `memory` 为申请显存（MiB），不填即整卡、填写即 vGPU。不另加 `gpu_mode`。历史 `-full` / `-Nx` 剥后缀后仍按型号处理。不含 handler/runtime/inventory/Console。无新 live，不得外推 GPU ready / runtime ready。
 - 当前已含单节点整卡 GPU InferenceService live（C32）、GPU 插件节点分区（C33）、GPU vLLM eager 启动 live（C34）、引擎 env/command 契约（C35）、engine/vGPU live（C36）、GPU/LWS 默认启动修复（C37）与 GPU 显存申请契约（C38），仍不含跨节点 LWS runtime live，不得把 C32–C38 或 C21–C31 产品路径标为 GPU ready / runtime ready，也不得把 full platform 标为 control-plane/runtime ready。
+- GATEWAY-AUTHZ-POLICY-COMPAT-CONTRACT-PILOT（2026-08）：Gateway OpenAPI 鉴权四批次已在 `feat/gateway-authz-policy` 分支完成 local verified。PR1 AUTHZ-POLICY-A 从 Core OpenAPI 生成授权策略注册表（generator + drift 门禁）；PR2 AUTHZ-COMPAT-B0 统一 Principal 与 identity key（默认 off，gateway 走旧链路）；PR3 AUTHZ-CONTRACT-B1 引入 additive V2 proto + auth-service JWT/API Key principal + permission evaluator（gateway 仍 mode=off 不调 V2）；PR4 AUTHZ-PILOT-C 对 listQuotaMeta 启用 pilot（v1.yaml security 注解 + mode Validate + V2 链路 + E2E）。未改 Core OpenAPI 破坏性契约，无 live evidence，不得标记 production ready。批次记录 `development-records/authz-policy-compat-contract-pilot.md`。
 
 
 Sprint 12 摘要：

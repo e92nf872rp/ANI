@@ -122,6 +122,19 @@
 
 闭环规则：每个 provider slice 必须具备 real adapter/provider runtime、live gate、非敏感 evidence JSON、development record 和全局 production-shape guard。S05-S07 B 轨可以继续 作为历史兼容 token 保留；截至 2026-06-21，S05/S06/S07 均已 passed。
 
+## Gateway OpenAPI 鉴权四批次（2026-08）
+
+> 独立于 Sprint 13/14 real provider 收敛的 Gateway 鉴权策略开发流。按 `repo/services/tasks/modules/plan/plan-authz-policy-compat-contract-pilot-v4.md` 四批次分阶段引入 OpenAPI 鉴权策略注册表、统一 Principal 与 identity key、V2 授权契约和 pilot 启用。分支 `feat/gateway-authz-policy`，默认 `mode=off` 不切流。
+
+| 批次 | 状态 | 证据 |
+|---|---|---|
+| AUTHZ-POLICY-A (PR1) | ✅ local verified | `7440445`；generator + 生成注册表 + drift 门禁 + policy.go；A 不改 quota-meta，所有非 public operation 为 legacy |
+| AUTHZ-COMPAT-B0 (PR2) | ✅ local verified | `e2eb502`；规范 Principal + LegacyPrincipalView + Mode/Config + ResolveAuthzPolicy + 横切 identity key；gateway 仍走旧 ValidateToken/CheckPermission |
+| AUTHZ-CONTRACT-B1 (PR3) | ✅ local verified | `65f00f3`；additive V2 proto + auth-service JWT/API Key principal + permission evaluator + Gateway V2 client；gateway 仍 mode=off 不调 V2 |
+| AUTHZ-PILOT-C (PR4) | ✅ local verified | `ad83e41`；v1.yaml security 注解 + mode Validate + V2 授权链路 + pilot E2E + deployment env；仅 listQuotaMeta 启用 V2 |
+
+**gofmt 修复：** `cfe5b30`。**批次记录：** `development-records/authz-policy-compat-contract-pilot.md`。**验证命令：** `go build ./services/ani-gateway/... ./services/auth-service/...` + `go test -count=1 ./services/ani-gateway/... ./services/auth-service/...` + `gofmt -l`。
+
 ## 账密登录模块（2026-07）
 
 > 独立于 Sprint 13/14 的账密登录功能开发流。覆盖 Core Auth API（租户账密 + 平台账密）、Console 前端（OIDC + 账密 Tab）、BOSS 前端（平台账密登录）。
