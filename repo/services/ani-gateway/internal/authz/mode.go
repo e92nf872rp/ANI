@@ -60,6 +60,54 @@ func (c Config) ValidateBase() error {
 	return nil
 }
 
+// functionalMVPPilotOperations 冻结 Functional MVP 的 pilot 唯一集合。
+// 只允许 listQuotaMeta；空集、额外项、拼写错误都必须启动失败。
+var functionalMVPPilotOperations = map[string]struct{}{
+	"listQuotaMeta": {},
+}
+
+func sameOperationSet(left, right map[string]struct{}) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for operationID := range left {
+		if _, ok := right[operationID]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// Validate 在 ValidateBase 之上执行带 registry 的完整配置校验：
+// pilot 集合必须严格等于 Functional MVP 唯一集合，且每个 pilot operation
+// 必须存在 generated policy。监听前调用，失败即启动失败。
+func (c Config) Validate(registry Registry) error {
+	if err := c.ValidateBase(); err != nil {
+		return err
+	}
+	switch c.Mode {
+	case ModeOff, ModeFull:
+		// ValidateBase 已保证 allowlist 为空。
+		return nil
+	case ModePilot:
+		if c.AuthMode != "auth_service" {
+			return errors.New("pilot requires ANI_AUTH_MODE=auth_service")
+		}
+		if !sameOperationSet(c.PilotOperations, functionalMVPPilotOperations) {
+			return errors.New("Functional MVP pilot operations must equal {listQuotaMeta}")
+		}
+	default:
+		return errors.New("unsupported authz policy mode")
+	}
+	for operationID := range functionalMVPPilotOperations {
+		policy, ok := registry.LookupOperation(operationID)
+		if !ok || policy.Source != PolicySourceGenerated {
+			return fmt.Errorf("pilot operation %q has no generated policy", operationID)
+		}
+	}
+	return nil
+}
+
 // EffectiveSource 按 mode 返回 policy 的有效 source。
 func (c Config) EffectiveSource(policy Policy) PolicySource {
 	if policy.Source == PolicySourcePublic {

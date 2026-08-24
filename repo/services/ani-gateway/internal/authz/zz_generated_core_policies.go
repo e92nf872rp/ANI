@@ -24,11 +24,16 @@ var generatedCorePolicies = map[string]Policy{
 		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
 	},
 	"GET /api/v1/admin/quota-meta": {
-		Source:               PolicySourceLegacy,
+		Source:               PolicySourceGenerated,
 		OperationID:          "listQuotaMeta",
 		Method:               "GET",
 		PathTemplate:         "/api/v1/admin/quota-meta",
 		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
+		Version:              "v1",
+		Resource:             "quota",
+		Action:               "read",
+		Boundary:             BoundaryPlatform,
+		PrincipalKinds:       []PrincipalKind{PrincipalUser},
 	},
 	"GET /api/v1/admin/tenant-users": {
 		Source:               PolicySourceLegacy,
@@ -226,6 +231,20 @@ var generatedCorePolicies = map[string]Policy{
 		OperationID:  "getBranding",
 		Method:       "GET",
 		PathTemplate: "/api/v1/branding",
+	},
+	"PUT /api/v1/branding": {
+		Source:               PolicySourceLegacy,
+		OperationID:          "updateBranding",
+		Method:               "PUT",
+		PathTemplate:         "/api/v1/branding",
+		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
+	},
+	"POST /api/v1/branding/logo": {
+		Source:               PolicySourceLegacy,
+		OperationID:          "uploadBrandingLogo",
+		Method:               "POST",
+		PathTemplate:         "/api/v1/branding/logo",
+		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
 	},
 	"GET /api/v1/buckets": {
 		Source:               PolicySourceLegacy,
@@ -1385,6 +1404,13 @@ var generatedCorePolicies = map[string]Policy{
 		OperationID:          "bindSecret",
 		Method:               "POST",
 		PathTemplate:         "/api/v1/secrets/{secret_id}/bindings",
+		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
+	},
+	"DELETE /api/v1/tasks/{task_id}": {
+		Source:               PolicySourceLegacy,
+		OperationID:          "cancelTask",
+		Method:               "DELETE",
+		PathTemplate:         "/api/v1/tasks/{task_id}",
 		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
 	},
 	"GET /api/v1/tasks/{task_id}": {

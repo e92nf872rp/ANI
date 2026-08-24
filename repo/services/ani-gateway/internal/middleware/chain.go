@@ -10,7 +10,7 @@ import (
 )
 
 // Register wires all middleware onto the Hertz server in the correct order.
-// 启动前校验 authz 配置（ValidateBase）；非法组合返回 error，调用方必须在监听前 fail closed。
+// 启动前校验 authz 配置；非法组合返回 error，调用方必须在监听前 fail closed。
 func Register(h *server.Hertz, store GatewayStore) error {
 	if store == nil {
 		return errors.New("gateway middleware store is required")
@@ -20,22 +20,26 @@ func Register(h *server.Hertz, store GatewayStore) error {
 	if err != nil {
 		return err
 	}
-	registerLegacyCompatibleChain(h, store, NewAuthClientFromEnv(), registry, cfg)
+	// C2：监听前执行带 registry 的完整校验，非法 pilot 组合直接启动失败。
+	if err := cfg.Validate(registry); err != nil {
+		return err
+	}
+	registerChain(h, store, NewAuthClientFromEnv(), registry, cfg)
 	return nil
 }
 
-// registerLegacyCompatibleChain 注册 B0 链路：
-// policy resolver → legacy 认证（generated 也按 legacy 调 ValidateToken）→
-// legacy 授权（只调旧 CheckPermission）→ 横切（限流/幂等/审计，统一 identity key）。
-func registerLegacyCompatibleChain(
+// registerChain 注册 C 阶段链路：
+// policy resolver → generated/legacy 分流认证 → generated/legacy 分流授权 →
+// 横切（限流/幂等/审计，统一 identity key）。
+func registerChain(
 	h *server.Hertz, store GatewayStore, client AuthClient,
 	registry authz.Registry, cfg authz.Config,
 ) {
 	h.Use(
 		RequestID(),
 		ResolveAuthzPolicy(registry, cfg),
-		AuthWithResolvedPolicy(client),
-		RBACWithResolvedPolicy(client),
+		AuthenticatePrincipal(client),
+		AuthorizePrincipal(client),
 		RateLimit(store),
 		Idempotency(store),
 		Audit(),
