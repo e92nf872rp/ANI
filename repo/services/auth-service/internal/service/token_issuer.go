@@ -115,8 +115,10 @@ func (i *JWTIssuer) IssueServiceTokenPayload(payload jwtPayload, ttl time.Durati
 	if payload.Subject == "" {
 		payload.Subject = serviceActorUserID.String()
 	}
+	// uid 是 legacy ValidateToken.UserId 的 UUID 兼容投影，与 sub（V2 服务身份）分离；
+	// 兜底必须是 magic UUID，不能复制 sub，否则服务名会泄漏到旧 wire 契约。
 	if payload.UserID == "" {
-		payload.UserID = payload.Subject
+		payload.UserID = serviceActorUserID.String()
 	}
 	return i.sign(payload)
 }
@@ -173,7 +175,8 @@ func resolveIssueServiceTokenClaims(req *authv1.IssueServiceTokenRequest) (jwtPa
 		PrincipalKind:    "service",
 		Audience:         serviceJWTAudience, // ani-core
 		TenantID:         req.GetTenantId(),
-		Subject:          req.GetCallerService(),
+		Subject:          req.GetCallerService(),        // V2 权威服务身份
+		UserID:           serviceActorUserID.String(),   // legacy ValidateToken.UserId 兼容投影
 		CredentialDomain: domain,
 		Permissions:      permissions,
 		// deprecated legacy projection：旧 ValidateToken / 旧 Gateway 仍需消费。

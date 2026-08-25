@@ -169,9 +169,16 @@ func (s *AuthService) ValidateToken(ctx context.Context, req *authv1.ValidateTok
 	if claims.Principal.Domain == "platform" || tenantID == "" {
 		tenantID = uuid.Nil.String()
 	}
+	// 旧 wire 契约要求 TenantContext.UserId 是合法 UUID（Gateway 侧 uuid.Parse fail closed）。
+	// V2 service principal 的 SubjectID 是服务名（如 inference-service，非 UUID），
+	// legacy 投影必须回填 service actor UUID；user principal 的 SubjectID 本就是 UUID，直接透传。
+	legacyUserID := claims.Principal.SubjectID
+	if claims.Principal.Kind == "service" {
+		legacyUserID = serviceActorUserID.String()
+	}
 	return &commonv1.TenantContext{
 		TenantId: tenantID,
-		UserId:   claims.Principal.SubjectID,
+		UserId:   legacyUserID,
 		Roles:    claims.Legacy.Roles,
 		Scope:    scope,
 	}, nil
