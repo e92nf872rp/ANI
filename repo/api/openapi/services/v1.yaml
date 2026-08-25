@@ -2963,7 +2963,6 @@ paths:
       operationId: createPlatformAdmin
       summary: 创建平台运营账号（需 platform-admin）
       tags: [PlatformAdmins]
-      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
       requestBody:
         required: true
         content:
@@ -2984,7 +2983,6 @@ paths:
       operationId: listPlatformAdmins
       summary: 平台运营账号列表（需 platform-admin / platform-ops / platform-readonly）
       tags: [PlatformAdmins]
-      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
       parameters:
         - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 }, description: "每页数量" }
         - { name: cursor, in: query, schema: { type: string }, description: "上一页返回的 next_cursor" }
@@ -3006,7 +3004,6 @@ paths:
       operationId: listPlatformAdminRoles
       summary: 查询可分配的平台角色与权限矩阵（需 platform-admin / platform-ops / platform-readonly）
       tags: [PlatformAdmins]
-      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
       responses:
         "200":
           description: 平台角色列表
@@ -3021,7 +3018,6 @@ paths:
       operationId: getPlatformAdmin
       summary: 查询平台运营账号详情（需 platform-admin / platform-ops / platform-readonly）
       tags: [PlatformAdmins]
-      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
       parameters:
         - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -3037,7 +3033,6 @@ paths:
       operationId: deletePlatformAdmin
       summary: 软删除平台运营账号（需 platform-admin）
       tags: [PlatformAdmins]
-      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
       parameters:
         - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -3062,7 +3057,6 @@ paths:
       operationId: updatePlatformAdminRole
       summary: 修改平台运营账号角色（需 platform-admin）
       tags: [PlatformAdmins]
-      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
       parameters:
         - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -3088,7 +3082,6 @@ paths:
       operationId: resetPlatformAdminPassword
       summary: 重置平台运营账号密码（需 platform-admin）
       tags: [PlatformAdmins]
-      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
       parameters:
         - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -3114,7 +3107,6 @@ paths:
       operationId: disablePlatformAdmin
       summary: 禁用平台运营账号（需 platform-admin）
       tags: [PlatformAdmins]
-      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
       parameters:
         - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -3139,7 +3131,6 @@ paths:
       operationId: enablePlatformAdmin
       summary: 启用平台运营账号（需 platform-admin）
       tags: [PlatformAdmins]
-      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
       parameters:
         - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -3163,7 +3154,6 @@ paths:
       operationId: listPlatformAdminAuditLogs
       summary: 查询平台运营账号操作历史（需 platform-admin / platform-ops / platform-readonly）
       tags: [PlatformAdmins]
-      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
       parameters:
         - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 }, description: "每页数量" }
