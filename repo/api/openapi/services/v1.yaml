@@ -1177,7 +1177,7 @@ components:
         items:       { type: array, items: { $ref: '#/components/schemas/TenantAdminAuditLog' } }
         next_cursor: { type: string, nullable: true, description: "下一页游标；null 表示已无更多数据" }
 
-    ActiveTenantListResponse:
+    AvailableTenantListResponse:
       type: object
       required: [items]
       properties:
@@ -3147,15 +3147,15 @@ paths:
 
   /tenant-admins/tenants:
     get:
-      operationId: listActiveTenantsForAdmin
-      summary: 查询非停用租户列表（邀请管理员租户选择器数据源，需 platform-admin / platform-ops / platform-readonly）
+      operationId: listAvailableTenantsForAdmin
+      summary: 查询可用租户列表（邀请管理员租户选择器数据源，需 platform-admin / platform-ops / platform-readonly）
       tags: [TenantAdmins]
       responses:
         "200":
           description: 非停用租户列表（status <> disabled，不分页）
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ActiveTenantListResponse' }
+              schema: { $ref: '#/components/schemas/AvailableTenantListResponse' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
 

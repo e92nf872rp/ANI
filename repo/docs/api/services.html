@@ -626,8 +626,8 @@
         <tr>
           <td><span class="method method-get">GET</span></td>
           <td><code>/tenant-admins/tenants</code></td>
-          <td><code>listActiveTenantsForAdmin</code></td>
-          <td>查询非停用租户列表（邀请管理员租户选择器数据源，需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code>listAvailableTenantsForAdmin</code></td>
+          <td>查询可用租户列表（邀请管理员租户选择器数据源，需 platform-admin / platform-ops / platform-readonly）</td>
           <td><code></code></td>
           <td>200, 401, 403</td>
         </tr>
@@ -926,12 +926,12 @@
       <section>
         <h2>Schemas</h2>
         <ul class="schema-list">
-        <li><code>ActiveTenantListResponse</code></li>
         <li><code>AdminDetail</code></li>
         <li><code>AdminListResponse</code></li>
         <li><code>AdminWithTenant</code></li>
         <li><code>AsyncTask</code></li>
         <li><code>AvailableGpu</code></li>
+        <li><code>AvailableTenantListResponse</code></li>
         <li><code>BindPlanRequest</code></li>
         <li><code>BoundTenant</code></li>
         <li><code>BoundTenantsResponse</code></li>

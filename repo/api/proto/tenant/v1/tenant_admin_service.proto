@@ -39,6 +39,8 @@ service TenantAdminService {
   rpc DeleteTenantAdmin(DeleteTenantAdminRequest) returns (common.v1.IdempotentResult);
   // ListTenantAdminAuditLogs returns cursor-paginated tenant_admin.* audit rows.
   rpc ListTenantAdminAuditLogs(ListTenantAdminAuditLogsRequest) returns (ListTenantAdminAuditLogsResponse);
+  // ListAvailableTenants returns all non-disabled tenants for the invite-admin tenant selector.
+  rpc ListAvailableTenants(ListAvailableTenantsRequest) returns (ListAvailableTenantsResponse);
 }
 
 // ── RPC request / response ───────────────────────────────────────────────────
@@ -185,4 +187,17 @@ message TenantAdminAuditLog {
   google.protobuf.StringValue user_id = 5;
   google.protobuf.Struct details = 6;
   google.protobuf.Timestamp created_at = 7;
+}
+
+message ListAvailableTenantsRequest {}  // no params; returns all non-disabled tenants
+
+message ListAvailableTenantsResponse {
+  repeated AvailableTenant items = 1;
+}
+
+message AvailableTenant {
+  string id = 1;
+  string name = 2;
+  string display_name = 3;
+  string status = 4;  // active | frozen (excludes disabled)
 }

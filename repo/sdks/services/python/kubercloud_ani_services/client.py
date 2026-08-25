@@ -66,7 +66,7 @@ OPERATIONS = [
     "listSandboxSecurityEvents",
     "getSandboxSecurityOverview",
     "listAllTenantAdmins",
-    "listActiveTenantsForAdmin",
+    "listAvailableTenantsForAdmin",
     "listTenantPlans",
     "createTenantPlan",
     "deleteTenantPlan",
@@ -202,12 +202,12 @@ PATHS = [
     "POST /tenants/{tenantId}/plan"
 ]
 SCHEMAS = [
-    "ActiveTenantListResponse",
     "AdminDetail",
     "AdminListResponse",
     "AdminWithTenant",
     "AsyncTask",
     "AvailableGpu",
+    "AvailableTenantListResponse",
     "BindPlanRequest",
     "BoundTenant",
     "BoundTenantsResponse",

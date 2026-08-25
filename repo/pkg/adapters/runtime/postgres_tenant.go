@@ -71,49 +71,6 @@ func (t *PostgresTenant) GetTenant(ctx context.Context, tenantID string) (ports.
 	return out, nil
 }
 
-// ListActiveTenants returns all non-disabled tenants, ordered by created_at DESC.
-// Used by the invite-admin tenant selector.
-func (t *PostgresTenant) ListActiveTenants(ctx context.Context) ([]ports.TenantSummary, error) {
-	out := make([]ports.TenantSummary, 0)
-	err := t.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
-		rows, queryErr := tx.Query(ctx, `
-			SELECT id, name, display_name, status
-			FROM tenants
-			WHERE status <> 'disabled'
-			ORDER BY created_at DESC
-		`)
-		if queryErr != nil {
-			return fmt.Errorf("list active tenants: %w", queryErr)
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var (
-				id          uuid.UUID
-				name        string
-				displayName string
-				status      string
-			)
-			if scanErr := rows.Scan(&id, &name, &displayName, &status); scanErr != nil {
-				return fmt.Errorf("scan tenant summary: %w", scanErr)
-			}
-			out = append(out, ports.TenantSummary{
-				ID:          id.String(),
-				Name:        name,
-				DisplayName: displayName,
-				Status:      status,
-			})
-		}
-		if rows.Err() != nil {
-			return fmt.Errorf("iterate tenant summaries: %w", rows.Err())
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func parseTenantUUID(raw string) (uuid.UUID, error) {
 	return parseAdminUUID(raw, "tenant_id")
 }

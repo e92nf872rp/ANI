@@ -84,7 +84,7 @@ public final class ApiClient {
         "listSandboxSecurityEvents",
         "getSandboxSecurityOverview",
         "listAllTenantAdmins",
-        "listActiveTenantsForAdmin",
+        "listAvailableTenantsForAdmin",
         "listTenantPlans",
         "createTenantPlan",
         "deleteTenantPlan",
@@ -220,12 +220,12 @@ public final class ApiClient {
         "POST /tenants/{tenantId}/plan"
     ));
     public static final List<String> SCHEMAS = Collections.unmodifiableList(Arrays.asList(
-        "ActiveTenantListResponse",
         "AdminDetail",
         "AdminListResponse",
         "AdminWithTenant",
         "AsyncTask",
         "AvailableGpu",
+        "AvailableTenantListResponse",
         "BindPlanRequest",
         "BoundTenant",
         "BoundTenantsResponse",

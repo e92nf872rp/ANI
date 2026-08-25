@@ -353,7 +353,7 @@
       "scope": ""
     },
     {
-      "operationId": "listActiveTenantsForAdmin",
+      "operationId": "listAvailableTenantsForAdmin",
       "method": "GET",
       "path": "/tenant-admins/tenants",
       "scope": ""
@@ -576,12 +576,12 @@
     }
   ],
   "schemas": [
-    "ActiveTenantListResponse",
     "AdminDetail",
     "AdminListResponse",
     "AdminWithTenant",
     "AsyncTask",
     "AvailableGpu",
+    "AvailableTenantListResponse",
     "BindPlanRequest",
     "BoundTenant",
     "BoundTenantsResponse",

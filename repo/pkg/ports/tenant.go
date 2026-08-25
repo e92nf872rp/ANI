@@ -28,7 +28,4 @@ type TenantSummary struct {
 // TenantService reads tenant rows under platform RLS bypass.
 type TenantService interface {
 	GetTenant(ctx context.Context, tenantID string) (Tenant, error)
-	// ListActiveTenants returns all non-disabled tenants (status <> 'disabled'),
-	// ordered by name. Used by the invite-admin tenant selector.
-	ListActiveTenants(ctx context.Context) ([]TenantSummary, error)
 }

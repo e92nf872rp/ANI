@@ -12,20 +12,24 @@ import (
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 	tenantv1 "github.com/kubercloud/ani/pkg/generated/pb/tenant/v1"
-	"github.com/kubercloud/ani/pkg/ports"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 type fakeTenantAdminGRPC struct {
-	lastListReq *tenantv1.ListAllTenantAdminsRequest
-	listResp    *tenantv1.ListAllTenantAdminsResponse
-	listErr     error
-	detailResp  *tenantv1.AdminWithTenant
-	detailErr   error
-	inviteErr   error
+	lastListReq   *tenantv1.ListAllTenantAdminsRequest
+	listResp      *tenantv1.ListAllTenantAdminsResponse
+	listErr       error
+	detailResp    *tenantv1.AdminWithTenant
+	detailErr     error
+	inviteErr     error
+	changeRoleErr error
+	roleResp      *tenantv1.UserPermissions
+	roleErr       error
 }
 
 func (f *fakeTenantAdminGRPC) InviteTenantAdmin(_ context.Context, req *tenantv1.InviteTenantAdminRequest, _ ...grpc.CallOption) (*tenantv1.InvitationResult, error) {
@@ -50,11 +54,17 @@ func (f *fakeTenantAdminGRPC) GetTenantAdminDetail(context.Context, *tenantv1.Ge
 	}
 	return f.detailResp, nil
 }
-func (f *fakeTenantAdminGRPC) UpdateTenantAdminRole(context.Context, *tenantv1.UpdateTenantAdminRoleRequest, ...grpc.CallOption) (*commonv1.IdempotentResult, error) {
-	return nil, status.Error(codes.Unimplemented, "not used")
+func (f *fakeTenantAdminGRPC) UpdateTenantAdminRole(_ context.Context, _ *tenantv1.UpdateTenantAdminRoleRequest, _ ...grpc.CallOption) (*commonv1.IdempotentResult, error) {
+	if f.changeRoleErr != nil {
+		return nil, f.changeRoleErr
+	}
+	return &commonv1.IdempotentResult{Id: "u1", Message: "role updated"}, nil
 }
-func (f *fakeTenantAdminGRPC) GetTenantAdminRole(context.Context, *tenantv1.GetTenantAdminRoleRequest, ...grpc.CallOption) (*tenantv1.UserPermissions, error) {
-	return nil, status.Error(codes.Unimplemented, "not used")
+func (f *fakeTenantAdminGRPC) GetTenantAdminRole(_ context.Context, _ *tenantv1.GetTenantAdminRoleRequest, _ ...grpc.CallOption) (*tenantv1.UserPermissions, error) {
+	if f.roleErr != nil {
+		return nil, f.roleErr
+	}
+	return f.roleResp, nil
 }
 func (f *fakeTenantAdminGRPC) GetChangeableRoles(context.Context, *tenantv1.GetChangeableRolesRequest, ...grpc.CallOption) (*tenantv1.GetChangeableRolesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "not used")
@@ -74,54 +84,20 @@ func (f *fakeTenantAdminGRPC) DeleteTenantAdmin(context.Context, *tenantv1.Delet
 func (f *fakeTenantAdminGRPC) ListTenantAdminAuditLogs(context.Context, *tenantv1.ListTenantAdminAuditLogsRequest, ...grpc.CallOption) (*tenantv1.ListTenantAdminAuditLogsResponse, error) {
 	return &tenantv1.ListTenantAdminAuditLogsResponse{}, nil
 }
-
-type fakeTenantAdminService struct {
-	changeRoleErr error
-	perms         ports.UserPermissions
-	permsErr      error
+func (f *fakeTenantAdminGRPC) ListAvailableTenants(context.Context, *tenantv1.ListAvailableTenantsRequest, ...grpc.CallOption) (*tenantv1.ListAvailableTenantsResponse, error) {
+	return &tenantv1.ListAvailableTenantsResponse{}, nil
 }
 
-func (f *fakeTenantAdminService) LookupUser(context.Context, string, string, string) (ports.User, error) {
-	return ports.User{}, ports.ErrUnsupported
-}
-func (f *fakeTenantAdminService) IsTenantAdmin(context.Context, string, string) (bool, error) {
-	return false, ports.ErrUnsupported
-}
-func (f *fakeTenantAdminService) GetUser(context.Context, string, string) (ports.User, error) {
-	return ports.User{}, ports.ErrUnsupported
-}
-func (f *fakeTenantAdminService) ListUsers(context.Context, ports.UserListFilter) (ports.UserListResult, error) {
-	return ports.UserListResult{}, ports.ErrUnsupported
-}
-func (f *fakeTenantAdminService) ChangeRole(context.Context, string, string, string) error {
-	return f.changeRoleErr
-}
-func (f *fakeTenantAdminService) GetRolePermissions(context.Context, string, string) (ports.UserPermissions, error) {
-	return f.perms, f.permsErr
-}
-func (f *fakeTenantAdminService) GetChangeableRoles(context.Context, string, string) (ports.ChangeableRoles, error) {
-	return ports.ChangeableRoles{}, ports.ErrUnsupported
-}
-func (f *fakeTenantAdminService) SetStatus(context.Context, string, string, string) error {
-	return ports.ErrUnsupported
-}
-func (f *fakeTenantAdminService) SoftDelete(context.Context, string, string) error {
-	return ports.ErrUnsupported
-}
-func (f *fakeTenantAdminService) ResetPassword(context.Context, string, string, string) error {
-	return ports.ErrUnsupported
-}
-
-func newTenantAdminTestServer(grpcClient tenantv1.TenantAdminServiceClient, tenantAdmin ports.TenantAdminService) *server.Hertz {
+func newTenantAdminTestServer(grpcClient tenantv1.TenantAdminServiceClient) *server.Hertz {
 	h := server.Default()
 	svc := h.Group("/api/v1/svc")
-	registerTenantAdminsWithClient(svc, tenantAdmin, nil, grpcClient)
+	registerTenantAdminsWithClient(svc, grpcClient)
 	return h
 }
 
 func TestTenantAdminRoutes_NilGRPCClient(t *testing.T) {
 	t.Setenv("ANI_AUTH_MODE", "dev")
-	h := newTenantAdminTestServer(nil, &fakeTenantAdminService{})
+	h := newTenantAdminTestServer(nil)
 	resp := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/svc/tenant-admins", nil)
 	if resp.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502", resp.Code)
@@ -143,7 +119,7 @@ func TestTenantAdminRoutes_ListForwardsToGRPC(t *testing.T) {
 			NextCursor: "next-1",
 		},
 	}
-	h := newTenantAdminTestServer(client, &fakeTenantAdminService{})
+	h := newTenantAdminTestServer(client)
 	resp := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/svc/tenant-admins?limit=10&tenant_id=t1&search=acme", nil)
 	if resp.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", resp.Code, resp.Body.String())
@@ -166,7 +142,7 @@ func TestTenantAdminRoutes_GRPCBusinessCodeMapping(t *testing.T) {
 	client := &fakeTenantAdminGRPC{
 		inviteErr: status.Error(codes.AlreadyExists, "TENANT_ADMIN_ALREADY_ADMIN: user is already admin"),
 	}
-	h := newTenantAdminTestServer(client, &fakeTenantAdminService{})
+	h := newTenantAdminTestServer(client)
 	body := `{"idempotency_key":"550e8400-e29b-41d4-a716-446655440000","email":"a@acme.io","username":"acme_admin"}`
 	resp := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/svc/tenants/t1/admins/invite",
 		&ut.Body{Body: bytes.NewBufferString(body), Len: len(body)})
@@ -182,10 +158,12 @@ func TestTenantAdminRoutes_GRPCBusinessCodeMapping(t *testing.T) {
 	}
 }
 
-func TestTenantAdminRoutes_CoreErrorMapping(t *testing.T) {
+func TestTenantAdminRoutes_UpdateRoleGRPCErrorMapping(t *testing.T) {
 	t.Setenv("ANI_AUTH_MODE", "dev")
-	tenantAdmin := &fakeTenantAdminService{changeRoleErr: ports.ErrUserNotFound}
-	h := newTenantAdminTestServer(&fakeTenantAdminGRPC{}, tenantAdmin)
+	client := &fakeTenantAdminGRPC{
+		changeRoleErr: status.Error(codes.NotFound, "TENANT_ADMIN_NOT_FOUND: user not found"),
+	}
+	h := newTenantAdminTestServer(client)
 	body := `{"role":"user","idempotency_key":"550e8400-e29b-41d4-a716-446655440000"}`
 	resp := ut.PerformRequest(h.Engine, http.MethodPut, "/api/v1/svc/tenants/t1/admins/u1/role",
 		&ut.Body{Body: bytes.NewBufferString(body), Len: len(body)})
@@ -196,17 +174,22 @@ func TestTenantAdminRoutes_CoreErrorMapping(t *testing.T) {
 
 func TestTenantAdminRoutes_GetRolePermissions(t *testing.T) {
 	t.Setenv("ANI_AUTH_MODE", "dev")
-	tenantAdmin := &fakeTenantAdminService{
-		perms: ports.UserPermissions{
-			UserID:   "u1",
-			TenantID: "t1",
+	permStruct, _ := structpb.NewStruct(map[string]any{
+		"resource": "compute",
+		"action":   "write",
+		"scope":    "tenant",
+	})
+	client := &fakeTenantAdminGRPC{
+		roleResp: &tenantv1.UserPermissions{
+			UserId:   "u1",
+			TenantId: wrapperspb.String("t1"),
 			Role:     "tenant-admin",
-			Permissions: []ports.PermissionEntry{
-				{Resource: "compute", Action: "write", Scope: "tenant"},
+			Permissions: &structpb.ListValue{
+				Values: []*structpb.Value{structpb.NewStructValue(permStruct)},
 			},
 		},
 	}
-	h := newTenantAdminTestServer(&fakeTenantAdminGRPC{}, tenantAdmin)
+	h := newTenantAdminTestServer(client)
 	resp := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/svc/tenants/t1/admins/u1/role", nil)
 	if resp.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", resp.Code, resp.Body.String())
@@ -224,7 +207,7 @@ func TestTenantAdminRoutes_DetailIncludesTimestamps(t *testing.T) {
 			Tenant: &tenantv1.TenantAdminTenantRef{Id: "t1", Name: "acme", DisplayName: "ACME"},
 		},
 	}
-	h := newTenantAdminTestServer(client, &fakeTenantAdminService{})
+	h := newTenantAdminTestServer(client)
 	resp := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/svc/tenants/t1/admins/u1", nil)
 	if resp.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", resp.Code, resp.Body.String())

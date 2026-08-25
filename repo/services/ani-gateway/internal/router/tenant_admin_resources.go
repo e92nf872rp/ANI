@@ -2,7 +2,6 @@ package router
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"os"
 	"strconv"
@@ -13,7 +12,6 @@ import (
 	"github.com/cloudwego/hertz/pkg/route"
 	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 	tenantv1 "github.com/kubercloud/ani/pkg/generated/pb/tenant/v1"
-	"github.com/kubercloud/ani/pkg/ports"
 	gatewayerrors "github.com/kubercloud/ani/services/ani-gateway/internal/pkg/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -25,23 +23,24 @@ import (
 
 // 本文件实现租户管理员网关接入：/api/v1/svc/tenant-admins* 与
 // /api/v1/svc/tenants/{tenantId}/admins/*。
-// 邀请/重发/跨租户列表/详情/审计经 gRPC 转发 tenant-service；
-// 用户/角色写读（改角色/查权限/重置/禁用启用/删除）经 TenantAdminService 直连 Core DB。
+// 所有端点经 gRPC 转发 tenant-service 的 TenantAdminService RPC；
+// tenant-service 内部通过 Core SDK 操作 users/user_roles/roles 表。
+
+// tenantAdminAPI 持有 tenant-service 的 TenantAdminService gRPC 客户端。
+// conn 建立失败时字段为 nil，由各 handler 做 nil 守卫兜底返回 502。
 type tenantAdminAPI struct {
-	admins      tenantv1.TenantAdminServiceClient
-	tenantAdmin ports.TenantAdminService
-	tenantSvc   ports.TenantService
+	admins tenantv1.TenantAdminServiceClient
 }
 
-func registerTenantAdmins(svc *route.RouterGroup, tenantAdmin ports.TenantAdminService, tenantSvc ports.TenantService) {
-	registerTenantAdminsWithClient(svc, tenantAdmin, tenantSvc, dialTenantAdminGRPCClient())
+func registerTenantAdmins(svc *route.RouterGroup) {
+	registerTenantAdminsWithClient(svc, dialTenantAdminGRPCClient())
 }
 
-func registerTenantAdminsWithClient(svc *route.RouterGroup, tenantAdmin ports.TenantAdminService, tenantSvc ports.TenantService, client tenantv1.TenantAdminServiceClient) {
-	api := &tenantAdminAPI{admins: client, tenantAdmin: tenantAdmin, tenantSvc: tenantSvc}
+func registerTenantAdminsWithClient(svc *route.RouterGroup, client tenantv1.TenantAdminServiceClient) {
+	api := &tenantAdminAPI{admins: client}
 
-	// 读端点
-	svc.GET("/tenant-admins/tenants", api.listActiveTenants)
+	// 读端点 — gRPC
+	svc.GET("/tenant-admins/tenants", api.listAvailableTenants)
 	svc.GET("/tenant-admins", api.listAllTenantAdmins)
 	svc.GET("/tenants/:tenantId/admins/:userId", api.getTenantAdminDetail)
 	svc.GET("/tenants/:tenantId/admins/:userId/audit-logs", api.listTenantAdminAuditLogs)
@@ -50,7 +49,7 @@ func registerTenantAdminsWithClient(svc *route.RouterGroup, tenantAdmin ports.Te
 	svc.POST("/tenants/:tenantId/admins/invite", api.inviteTenantAdmin)
 	svc.POST("/tenants/:tenantId/admins/:userId/invitation/resend", api.resendTenantAdminInvitation)
 
-	// 写端点 — TenantAdminService（用户/角色）
+	// 用户/角色 CRUD — gRPC（service 内部通过 Core SDK 操作 users 表）
 	svc.PUT("/tenants/:tenantId/admins/:userId/role", api.updateTenantAdminRole)
 	svc.GET("/tenants/:tenantId/admins/:userId/role", api.getTenantAdminRole)
 	svc.GET("/tenants/:tenantId/admins/:userId/changeable-roles", api.getChangeableRoles)
@@ -72,39 +71,49 @@ func dialTenantAdminGRPCClient() tenantv1.TenantAdminServiceClient {
 	return tenantv1.NewTenantAdminServiceClient(conn)
 }
 
-// ── gRPC 转发 handlers ───────────────────────────────────────────────────────
+// ── gRPC 转发 handlers（邀请生命周期 + 只读查询）─────────────────────────────
 
-// listActiveTenants returns all non-disabled tenants for the invite-admin
-// tenant selector (Core DB direct, no gRPC).
-func (api *tenantAdminAPI) listActiveTenants(ctx context.Context, c *app.RequestContext) {
-	if api.tenantSvc == nil {
-		writeTenantAdminError(ctx, c, http.StatusServiceUnavailable, "TENANT_ADMIN_UNAVAILABLE", "tenant service unavailable")
-		return
-	}
-	tenants, err := api.tenantSvc.ListActiveTenants(ctx)
-	if err != nil {
-		writeTenantAdminError(ctx, c, http.StatusInternalServerError, gatewayerrors.CodeInternalError, err.Error())
-		return
-	}
-	items := make([]map[string]any, 0, len(tenants))
-	for _, t := range tenants {
-		items = append(items, map[string]any{
-			"id":           t.ID,
-			"name":         t.Name,
-			"display_name": t.DisplayName,
-			"status":       t.Status,
-		})
-	}
-	c.JSON(http.StatusOK, map[string]any{"items": items})
-}
-
-func (api *tenantAdminAPI) listAllTenantAdmins(ctx context.Context, c *app.RequestContext) {
+// listAvailableTenants returns all non-disabled tenants for the invite-admin
+// tenant selector (gRPC → tenant-service).
+func (api *tenantAdminAPI) listAvailableTenants(ctx context.Context, c *app.RequestContext) {
+	// 1. 校验 gRPC 客户端依赖是否就绪
 	if api.admins == nil {
 		writeTenantAdminError(ctx, c, http.StatusBadGateway, "GRPC_CLIENT_UNAVAILABLE", "tenant admin grpc client unavailable")
 		return
 	}
+	// 2. 构造 gRPC 调用上下文（携带认证 metadata）
 	callCtx, cancel := tenantCallCtx(ctx, c)
 	defer cancel()
+	// 3. 调用 tenant-service ListAvailableTenants RPC
+	res, err := api.admins.ListAvailableTenants(callCtx, &tenantv1.ListAvailableTenantsRequest{})
+	if err != nil {
+		mapTenantAdminGRPCError(ctx, c, err)
+		return
+	}
+	// 4. 组装响应 JSON
+	items := make([]map[string]any, 0, len(res.GetItems()))
+	for _, t := range res.GetItems() {
+		items = append(items, map[string]any{
+			"id":           t.GetId(),
+			"name":         t.GetName(),
+			"display_name": t.GetDisplayName(),
+			"status":       t.GetStatus(),
+		})
+	}
+	// 5. 返回列表
+	c.JSON(http.StatusOK, map[string]any{"items": items})
+}
+
+func (api *tenantAdminAPI) listAllTenantAdmins(ctx context.Context, c *app.RequestContext) {
+	// 1. 校验 gRPC 客户端依赖是否就绪
+	if api.admins == nil {
+		writeTenantAdminError(ctx, c, http.StatusBadGateway, "GRPC_CLIENT_UNAVAILABLE", "tenant admin grpc client unavailable")
+		return
+	}
+	// 2. 构造 gRPC 调用上下文（携带认证 metadata）
+	callCtx, cancel := tenantCallCtx(ctx, c)
+	defer cancel()
+	// 3. 组装请求参数
 	req := &tenantv1.ListAllTenantAdminsRequest{
 		TenantId: c.Query("tenant_id"),
 		Status:   c.Query("status"),
@@ -121,11 +130,13 @@ func (api *tenantAdminAPI) listAllTenantAdmins(ctx context.Context, c *app.Reque
 			req.IsExpired = wrapperspb.Bool(b)
 		}
 	}
+	// 4. 调用 tenant-service ListAllTenantAdmins RPC
 	res, err := api.admins.ListAllTenantAdmins(callCtx, req)
 	if err != nil {
 		mapTenantAdminGRPCError(ctx, c, err)
 		return
 	}
+	// 5. 组装并返回列表
 	items := make([]map[string]any, 0, len(res.GetItems()))
 	for _, item := range res.GetItems() {
 		items = append(items, adminWithTenantJSON(item, false))
@@ -137,12 +148,15 @@ func (api *tenantAdminAPI) listAllTenantAdmins(ctx context.Context, c *app.Reque
 }
 
 func (api *tenantAdminAPI) getTenantAdminDetail(ctx context.Context, c *app.RequestContext) {
+	// 1. 校验 gRPC 客户端依赖是否就绪
 	if api.admins == nil {
 		writeTenantAdminError(ctx, c, http.StatusBadGateway, "GRPC_CLIENT_UNAVAILABLE", "tenant admin grpc client unavailable")
 		return
 	}
+	// 2. 构造 gRPC 调用上下文
 	callCtx, cancel := tenantCallCtx(ctx, c)
 	defer cancel()
+	// 3. 调用 tenant-service GetTenantAdminDetail RPC
 	res, err := api.admins.GetTenantAdminDetail(callCtx, &tenantv1.GetTenantAdminDetailRequest{
 		TenantId: c.Param("tenantId"),
 		UserId:   c.Param("userId"),
@@ -151,16 +165,20 @@ func (api *tenantAdminAPI) getTenantAdminDetail(ctx context.Context, c *app.Requ
 		mapTenantAdminGRPCError(ctx, c, err)
 		return
 	}
+	// 4. 返回详情
 	c.JSON(http.StatusOK, adminWithTenantJSON(res, true))
 }
 
 func (api *tenantAdminAPI) listTenantAdminAuditLogs(ctx context.Context, c *app.RequestContext) {
+	// 1. 校验 gRPC 客户端依赖是否就绪
 	if api.admins == nil {
 		writeTenantAdminError(ctx, c, http.StatusBadGateway, "GRPC_CLIENT_UNAVAILABLE", "tenant admin grpc client unavailable")
 		return
 	}
+	// 2. 构造 gRPC 调用上下文
 	callCtx, cancel := tenantCallCtx(ctx, c)
 	defer cancel()
+	// 3. 调用 tenant-service ListTenantAdminAuditLogs RPC
 	res, err := api.admins.ListTenantAdminAuditLogs(callCtx, &tenantv1.ListTenantAdminAuditLogsRequest{
 		TenantId: c.Param("tenantId"),
 		UserId:   c.Param("userId"),
@@ -172,6 +190,7 @@ func (api *tenantAdminAPI) listTenantAdminAuditLogs(ctx context.Context, c *app.
 		mapTenantAdminGRPCError(ctx, c, err)
 		return
 	}
+	// 4. 组装并返回审计日志列表
 	items := make([]map[string]any, 0, len(res.GetItems()))
 	for _, item := range res.GetItems() {
 		items = append(items, tenantAdminAuditLogJSON(item))
@@ -183,10 +202,12 @@ func (api *tenantAdminAPI) listTenantAdminAuditLogs(ctx context.Context, c *app.
 }
 
 func (api *tenantAdminAPI) inviteTenantAdmin(ctx context.Context, c *app.RequestContext) {
+	// 1. 校验 gRPC 客户端依赖是否就绪
 	if api.admins == nil {
 		writeTenantAdminError(ctx, c, http.StatusBadGateway, "GRPC_CLIENT_UNAVAILABLE", "tenant admin grpc client unavailable")
 		return
 	}
+	// 2. 解析请求体
 	var body struct {
 		Email          string `json:"email"`
 		Username       string `json:"username"`
@@ -196,11 +217,14 @@ func (api *tenantAdminAPI) inviteTenantAdmin(ctx context.Context, c *app.Request
 		writeTenantAdminError(ctx, c, http.StatusBadRequest, "VALIDATION_FAILED", "invalid request body")
 		return
 	}
+	// 3. 补充幂等键（优先取 header）
 	if body.IdempotencyKey == "" {
 		body.IdempotencyKey = idempotencyHeader(c)
 	}
+	// 4. 构造 gRPC 调用上下文
 	callCtx, cancel := tenantCallCtx(ctx, c)
 	defer cancel()
+	// 5. 调用 tenant-service InviteTenantAdmin RPC
 	res, err := api.admins.InviteTenantAdmin(callCtx, &tenantv1.InviteTenantAdminRequest{
 		TenantId:       c.Param("tenantId"),
 		Email:          body.Email,
@@ -211,14 +235,17 @@ func (api *tenantAdminAPI) inviteTenantAdmin(ctx context.Context, c *app.Request
 		mapTenantAdminGRPCError(ctx, c, err)
 		return
 	}
+	// 6. 返回邀请结果
 	c.JSON(http.StatusOK, invitationResultJSON(res))
 }
 
 func (api *tenantAdminAPI) resendTenantAdminInvitation(ctx context.Context, c *app.RequestContext) {
+	// 1. 校验 gRPC 客户端依赖是否就绪
 	if api.admins == nil {
 		writeTenantAdminError(ctx, c, http.StatusBadGateway, "GRPC_CLIENT_UNAVAILABLE", "tenant admin grpc client unavailable")
 		return
 	}
+	// 2. 解析请求体
 	var body struct {
 		IdempotencyKey string `json:"idempotency_key"`
 	}
@@ -226,11 +253,14 @@ func (api *tenantAdminAPI) resendTenantAdminInvitation(ctx context.Context, c *a
 		writeTenantAdminError(ctx, c, http.StatusBadRequest, "VALIDATION_FAILED", "invalid request body")
 		return
 	}
+	// 3. 补充幂等键
 	if body.IdempotencyKey == "" {
 		body.IdempotencyKey = idempotencyHeader(c)
 	}
+	// 4. 构造 gRPC 调用上下文
 	callCtx, cancel := tenantCallCtx(ctx, c)
 	defer cancel()
+	// 5. 调用 tenant-service ResendTenantAdminInvitation RPC
 	res, err := api.admins.ResendTenantAdminInvitation(callCtx, &tenantv1.ResendTenantAdminInvitationRequest{
 		TenantId:       c.Param("tenantId"),
 		UserId:         c.Param("userId"),
@@ -240,16 +270,19 @@ func (api *tenantAdminAPI) resendTenantAdminInvitation(ctx context.Context, c *a
 		mapTenantAdminGRPCError(ctx, c, err)
 		return
 	}
+	// 6. 返回重发结果
 	c.JSON(http.StatusOK, invitationResultJSON(res))
 }
 
-// ── TenantAdminService handlers ───────────────────────────────────────────────
+// ── gRPC 转发 handlers（用户/角色 CRUD）──────────────────────────────────────
 
 func (api *tenantAdminAPI) updateTenantAdminRole(ctx context.Context, c *app.RequestContext) {
-	if api.tenantAdmin == nil {
-		writeTenantAdminError(ctx, c, http.StatusServiceUnavailable, "TENANT_ADMIN_UNAVAILABLE", "tenant admin service unavailable")
+	// 1. 校验 gRPC 客户端依赖是否就绪
+	if api.admins == nil {
+		writeTenantAdminError(ctx, c, http.StatusBadGateway, "GRPC_CLIENT_UNAVAILABLE", "tenant admin grpc client unavailable")
 		return
 	}
+	// 2. 解析请求体
 	var body struct {
 		Role           string `json:"role"`
 		IdempotencyKey string `json:"idempotency_key"`
@@ -258,57 +291,90 @@ func (api *tenantAdminAPI) updateTenantAdminRole(ctx context.Context, c *app.Req
 		writeTenantAdminError(ctx, c, http.StatusBadRequest, "VALIDATION_FAILED", "invalid request body")
 		return
 	}
-	if err := api.tenantAdmin.ChangeRole(ctx, c.Param("tenantId"), c.Param("userId"), body.Role); err != nil {
-		mapTenantAdminCoreError(ctx, c, err)
+	// 3. 补充幂等键（优先取 header）
+	if body.IdempotencyKey == "" {
+		body.IdempotencyKey = idempotencyHeader(c)
+	}
+	// 4. 构造 gRPC 调用上下文
+	callCtx, cancel := tenantCallCtx(ctx, c)
+	defer cancel()
+	// 5. 调用 tenant-service UpdateTenantAdminRole RPC
+	res, err := api.admins.UpdateTenantAdminRole(callCtx, &tenantv1.UpdateTenantAdminRoleRequest{
+		TenantId:       c.Param("tenantId"),
+		UserId:         c.Param("userId"),
+		Role:           body.Role,
+		IdempotencyKey: body.IdempotencyKey,
+	})
+	if err != nil {
+		mapTenantAdminGRPCError(ctx, c, err)
 		return
 	}
-	c.JSON(http.StatusOK, map[string]any{
-		"id":      c.Param("userId"),
-		"message": "role updated",
-	})
+	// 6. 返回幂等结果
+	c.JSON(http.StatusOK, idempotentResultJSON(res))
 }
 
 func (api *tenantAdminAPI) getTenantAdminRole(ctx context.Context, c *app.RequestContext) {
-	if api.tenantAdmin == nil {
-		writeTenantAdminError(ctx, c, http.StatusServiceUnavailable, "TENANT_ADMIN_UNAVAILABLE", "tenant admin service unavailable")
+	// 1. 校验 gRPC 客户端依赖是否就绪
+	if api.admins == nil {
+		writeTenantAdminError(ctx, c, http.StatusBadGateway, "GRPC_CLIENT_UNAVAILABLE", "tenant admin grpc client unavailable")
 		return
 	}
-	perms, err := api.tenantAdmin.GetRolePermissions(ctx, c.Param("tenantId"), c.Param("userId"))
+	// 2. 构造 gRPC 调用上下文
+	callCtx, cancel := tenantCallCtx(ctx, c)
+	defer cancel()
+	// 3. 调用 tenant-service GetTenantAdminRole RPC
+	res, err := api.admins.GetTenantAdminRole(callCtx, &tenantv1.GetTenantAdminRoleRequest{
+		TenantId: c.Param("tenantId"),
+		UserId:   c.Param("userId"),
+	})
 	if err != nil {
-		mapTenantAdminCoreError(ctx, c, err)
+		mapTenantAdminGRPCError(ctx, c, err)
 		return
 	}
-	c.JSON(http.StatusOK, userPermissionsJSON(perms))
+	// 4. 组装并返回权限 JSON
+	c.JSON(http.StatusOK, userPermissionsJSON(res))
 }
 
 func (api *tenantAdminAPI) getChangeableRoles(ctx context.Context, c *app.RequestContext) {
-	if api.tenantAdmin == nil {
-		writeTenantAdminError(ctx, c, http.StatusServiceUnavailable, "TENANT_ADMIN_UNAVAILABLE", "tenant admin service unavailable")
+	// 1. 校验 gRPC 客户端依赖是否就绪
+	if api.admins == nil {
+		writeTenantAdminError(ctx, c, http.StatusBadGateway, "GRPC_CLIENT_UNAVAILABLE", "tenant admin grpc client unavailable")
 		return
 	}
-	roles, err := api.tenantAdmin.GetChangeableRoles(ctx, c.Param("tenantId"), c.Param("userId"))
+	// 2. 构造 gRPC 调用上下文
+	callCtx, cancel := tenantCallCtx(ctx, c)
+	defer cancel()
+	// 3. 调用 tenant-service GetChangeableRoles RPC
+	res, err := api.admins.GetChangeableRoles(callCtx, &tenantv1.GetChangeableRolesRequest{
+		TenantId: c.Param("tenantId"),
+		UserId:   c.Param("userId"),
+	})
 	if err != nil {
-		mapTenantAdminCoreError(ctx, c, err)
+		mapTenantAdminGRPCError(ctx, c, err)
 		return
 	}
-	options := make([]map[string]any, 0, len(roles.Options))
-	for _, opt := range roles.Options {
+	// 4. 组装可变角色列表
+	options := make([]map[string]any, 0, len(res.GetChangeableRoles()))
+	for _, opt := range res.GetChangeableRoles() {
 		options = append(options, map[string]any{
-			"role":  opt.Role,
-			"label": opt.Label,
+			"role":  opt.GetRole(),
+			"label": opt.GetLabel(),
 		})
 	}
+	// 5. 返回结果
 	c.JSON(http.StatusOK, map[string]any{
-		"current_role":      roles.CurrentRole,
+		"current_role":     res.GetCurrentRole(),
 		"changeable_roles": options,
 	})
 }
 
 func (api *tenantAdminAPI) resetTenantAdminPassword(ctx context.Context, c *app.RequestContext) {
-	if api.tenantAdmin == nil {
-		writeTenantAdminError(ctx, c, http.StatusServiceUnavailable, "TENANT_ADMIN_UNAVAILABLE", "tenant admin service unavailable")
+	// 1. 校验 gRPC 客户端依赖是否就绪
+	if api.admins == nil {
+		writeTenantAdminError(ctx, c, http.StatusBadGateway, "GRPC_CLIENT_UNAVAILABLE", "tenant admin grpc client unavailable")
 		return
 	}
+	// 2. 解析请求体
 	var body struct {
 		NewPassword    string `json:"new_password"`
 		IdempotencyKey string `json:"idempotency_key"`
@@ -317,52 +383,110 @@ func (api *tenantAdminAPI) resetTenantAdminPassword(ctx context.Context, c *app.
 		writeTenantAdminError(ctx, c, http.StatusBadRequest, "VALIDATION_FAILED", "invalid request body")
 		return
 	}
-	if err := api.tenantAdmin.ResetPassword(ctx, c.Param("tenantId"), c.Param("userId"), body.NewPassword); err != nil {
-		mapTenantAdminCoreError(ctx, c, err)
+	// 3. 补充幂等键
+	if body.IdempotencyKey == "" {
+		body.IdempotencyKey = idempotencyHeader(c)
+	}
+	// 4. 构造 gRPC 调用上下文
+	callCtx, cancel := tenantCallCtx(ctx, c)
+	defer cancel()
+	// 5. 调用 tenant-service ResetTenantAdminPassword RPC
+	res, err := api.admins.ResetTenantAdminPassword(callCtx, &tenantv1.ResetTenantAdminPasswordRequest{
+		TenantId:       c.Param("tenantId"),
+		UserId:         c.Param("userId"),
+		NewPassword:    body.NewPassword,
+		IdempotencyKey: body.IdempotencyKey,
+	})
+	if err != nil {
+		mapTenantAdminGRPCError(ctx, c, err)
 		return
 	}
-	c.JSON(http.StatusOK, map[string]any{
-		"id":      c.Param("userId"),
-		"message": "password reset",
-	})
+	// 6. 返回幂等结果
+	c.JSON(http.StatusOK, idempotentResultJSON(res))
 }
 
 func (api *tenantAdminAPI) disableTenantAdmin(ctx context.Context, c *app.RequestContext) {
-	api.setTenantAdminStatus(ctx, c, "disabled", "disabled")
+	// 1. 校验 gRPC 客户端依赖是否就绪
+	if api.admins == nil {
+		writeTenantAdminError(ctx, c, http.StatusBadGateway, "GRPC_CLIENT_UNAVAILABLE", "tenant admin grpc client unavailable")
+		return
+	}
+	// 2. 解析幂等键（可选 body）
+	var body struct {
+		IdempotencyKey string `json:"idempotency_key"`
+	}
+	_ = c.BindJSON(&body)
+	if body.IdempotencyKey == "" {
+		body.IdempotencyKey = idempotencyHeader(c)
+	}
+	// 3. 构造 gRPC 调用上下文
+	callCtx, cancel := tenantCallCtx(ctx, c)
+	defer cancel()
+	// 4. 调用 tenant-service DisableTenantAdmin RPC
+	res, err := api.admins.DisableTenantAdmin(callCtx, &tenantv1.DisableTenantAdminRequest{
+		TenantId:       c.Param("tenantId"),
+		UserId:         c.Param("userId"),
+		IdempotencyKey: body.IdempotencyKey,
+	})
+	if err != nil {
+		mapTenantAdminGRPCError(ctx, c, err)
+		return
+	}
+	// 5. 返回幂等结果
+	c.JSON(http.StatusOK, idempotentResultJSON(res))
 }
 
 func (api *tenantAdminAPI) enableTenantAdmin(ctx context.Context, c *app.RequestContext) {
-	api.setTenantAdminStatus(ctx, c, "active", "enabled")
-}
-
-func (api *tenantAdminAPI) setTenantAdminStatus(ctx context.Context, c *app.RequestContext, status, message string) {
-	if api.tenantAdmin == nil {
-		writeTenantAdminError(ctx, c, http.StatusServiceUnavailable, "TENANT_ADMIN_UNAVAILABLE", "tenant admin service unavailable")
+	// 1. 校验 gRPC 客户端依赖是否就绪
+	if api.admins == nil {
+		writeTenantAdminError(ctx, c, http.StatusBadGateway, "GRPC_CLIENT_UNAVAILABLE", "tenant admin grpc client unavailable")
 		return
 	}
-	if err := api.tenantAdmin.SetStatus(ctx, c.Param("tenantId"), c.Param("userId"), status); err != nil {
-		mapTenantAdminCoreError(ctx, c, err)
-		return
+	// 2. 解析幂等键
+	var body struct {
+		IdempotencyKey string `json:"idempotency_key"`
 	}
-	c.JSON(http.StatusOK, map[string]any{
-		"id":      c.Param("userId"),
-		"message": message,
+	_ = c.BindJSON(&body)
+	if body.IdempotencyKey == "" {
+		body.IdempotencyKey = idempotencyHeader(c)
+	}
+	// 3. 构造 gRPC 调用上下文
+	callCtx, cancel := tenantCallCtx(ctx, c)
+	defer cancel()
+	// 4. 调用 tenant-service EnableTenantAdmin RPC
+	res, err := api.admins.EnableTenantAdmin(callCtx, &tenantv1.EnableTenantAdminRequest{
+		TenantId:       c.Param("tenantId"),
+		UserId:         c.Param("userId"),
+		IdempotencyKey: body.IdempotencyKey,
 	})
+	if err != nil {
+		mapTenantAdminGRPCError(ctx, c, err)
+		return
+	}
+	// 5. 返回幂等结果
+	c.JSON(http.StatusOK, idempotentResultJSON(res))
 }
 
 func (api *tenantAdminAPI) deleteTenantAdmin(ctx context.Context, c *app.RequestContext) {
-	if api.tenantAdmin == nil {
-		writeTenantAdminError(ctx, c, http.StatusServiceUnavailable, "TENANT_ADMIN_UNAVAILABLE", "tenant admin service unavailable")
+	// 1. 校验 gRPC 客户端依赖是否就绪
+	if api.admins == nil {
+		writeTenantAdminError(ctx, c, http.StatusBadGateway, "GRPC_CLIENT_UNAVAILABLE", "tenant admin grpc client unavailable")
 		return
 	}
-	if err := api.tenantAdmin.SoftDelete(ctx, c.Param("tenantId"), c.Param("userId")); err != nil {
-		mapTenantAdminCoreError(ctx, c, err)
-		return
-	}
-	c.JSON(http.StatusOK, map[string]any{
-		"id":      c.Param("userId"),
-		"message": "deleted",
+	// 2. 构造 gRPC 调用上下文（DELETE 不幂等，不携带 idempotency_key）
+	callCtx, cancel := tenantCallCtx(ctx, c)
+	defer cancel()
+	// 3. 调用 tenant-service DeleteTenantAdmin RPC
+	res, err := api.admins.DeleteTenantAdmin(callCtx, &tenantv1.DeleteTenantAdminRequest{
+		TenantId: c.Param("tenantId"),
+		UserId:   c.Param("userId"),
 	})
+	if err != nil {
+		mapTenantAdminGRPCError(ctx, c, err)
+		return
+	}
+	// 4. 返回结果
+	c.JSON(http.StatusOK, idempotentResultJSON(res))
 }
 
 // ── JSON mappers ─────────────────────────────────────────────────────────────
@@ -372,14 +496,14 @@ func adminWithTenantJSON(item *tenantv1.AdminWithTenant, includeTimestamps bool)
 		return map[string]any{}
 	}
 	out := map[string]any{
-		"id":           item.GetId(),
-		"email":        item.GetEmail(),
-		"username":     item.GetUsername(),
-		"role":         item.GetRole(),
-		"status":       item.GetStatus(),
-		"is_inviting":  item.GetIsInviting(),
-		"is_expired":   item.GetIsExpired(),
-		"source":       item.GetSource(),
+		"id":            item.GetId(),
+		"email":         item.GetEmail(),
+		"username":      item.GetUsername(),
+		"role":          item.GetRole(),
+		"status":        item.GetStatus(),
+		"is_inviting":   item.GetIsInviting(),
+		"is_expired":    item.GetIsExpired(),
+		"source":        item.GetSource(),
 		"last_login_at": pbRFC3339(item.GetLastLoginAt()),
 		"tenant": map[string]any{
 			"id":           item.GetTenant().GetId(),
@@ -435,26 +559,45 @@ func tenantAdminAuditLogJSON(item *tenantv1.TenantAdminAuditLog) map[string]any 
 	return out
 }
 
-func userPermissionsJSON(perms ports.UserPermissions) map[string]any {
-	items := make([]map[string]any, 0, len(perms.Permissions))
-	for _, p := range perms.Permissions {
-		items = append(items, map[string]any{
-			"resource": p.Resource,
-			"action":   p.Action,
-			"scope":    p.Scope,
-		})
+func userPermissionsJSON(perms *tenantv1.UserPermissions) map[string]any {
+	if perms == nil {
+		return map[string]any{}
+	}
+	// permissions 为 ListValue（resource/action/scope JSONB 数组），直接透传为 []any
+	var permItems []any
+	if lv := perms.GetPermissions(); lv != nil && len(lv.GetValues()) > 0 {
+		permItems = make([]any, 0, len(lv.GetValues()))
+		for _, v := range lv.GetValues() {
+			if s := v.GetStructValue(); s != nil {
+				permItems = append(permItems, s.AsMap())
+			} else {
+				permItems = append(permItems, nil)
+			}
+		}
+	} else {
+		permItems = []any{}
 	}
 	out := map[string]any{
-		"user_id":     perms.UserID,
-		"role":        perms.Role,
-		"permissions": items,
+		"user_id":     perms.GetUserId(),
+		"role":        perms.GetRole(),
+		"permissions": permItems,
 	}
-	if perms.TenantID != "" {
-		out["tenant_id"] = perms.TenantID
+	if tID := perms.GetTenantId(); tID != nil {
+		out["tenant_id"] = tID.GetValue()
 	} else {
 		out["tenant_id"] = nil
 	}
 	return out
+}
+
+func idempotentResultJSON(res *commonv1.IdempotentResult) map[string]any {
+	if res == nil {
+		return map[string]any{}
+	}
+	return map[string]any{
+		"id":      res.GetId(),
+		"message": res.GetMessage(),
+	}
 }
 
 func pbRFC3339(ts *timestamppb.Timestamp) any {
@@ -522,23 +665,6 @@ func mapTenantAdminGRPCError(ctx context.Context, c *app.RequestContext, err err
 		writeTenantAdminError(ctx, c, http.StatusBadGateway, "GRPC_CLIENT_UNAVAILABLE", msg)
 	default:
 		writeTenantAdminError(ctx, c, http.StatusInternalServerError, gatewayerrors.CodeInternalError, msg)
-	}
-}
-
-func mapTenantAdminCoreError(ctx context.Context, c *app.RequestContext, err error) {
-	switch {
-	case errors.Is(err, ports.ErrUserNotFound):
-		writeTenantAdminError(ctx, c, http.StatusNotFound, "TENANT_ADMIN_NOT_FOUND", err.Error())
-	case errors.Is(err, ports.ErrRoleChangeInvalid):
-		writeTenantAdminError(ctx, c, http.StatusUnprocessableEntity, "ROLE_CHANGE_INVALID", err.Error())
-	case errors.Is(err, ports.ErrPasswordSameAsOld):
-		writeTenantAdminError(ctx, c, http.StatusUnprocessableEntity, "PASSWORD_SAME_AS_OLD", err.Error())
-	case errors.Is(err, ports.ErrInvalid):
-		writeTenantAdminError(ctx, c, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
-	case errors.Is(err, ports.ErrNotConfigured), errors.Is(err, ports.ErrUnsupported), errors.Is(err, ports.ErrUnavailable):
-		writeTenantAdminError(ctx, c, http.StatusServiceUnavailable, "TENANT_ADMIN_UNAVAILABLE", err.Error())
-	default:
-		writeTenantAdminError(ctx, c, http.StatusInternalServerError, gatewayerrors.CodeInternalError, err.Error())
 	}
 }
 
