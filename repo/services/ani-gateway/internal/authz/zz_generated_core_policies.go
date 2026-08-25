@@ -232,20 +232,6 @@ var generatedCorePolicies = map[string]Policy{
 		Method:       "GET",
 		PathTemplate: "/api/v1/branding",
 	},
-	"PUT /api/v1/branding": {
-		Source:               PolicySourceLegacy,
-		OperationID:          "updateBranding",
-		Method:               "PUT",
-		PathTemplate:         "/api/v1/branding",
-		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
-	},
-	"POST /api/v1/branding/logo": {
-		Source:               PolicySourceLegacy,
-		OperationID:          "uploadBrandingLogo",
-		Method:               "POST",
-		PathTemplate:         "/api/v1/branding/logo",
-		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
-	},
 	"GET /api/v1/buckets": {
 		Source:               PolicySourceLegacy,
 		OperationID:          "listStorageBuckets",
@@ -1404,13 +1390,6 @@ var generatedCorePolicies = map[string]Policy{
 		OperationID:          "bindSecret",
 		Method:               "POST",
 		PathTemplate:         "/api/v1/secrets/{secret_id}/bindings",
-		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
-	},
-	"DELETE /api/v1/tasks/{task_id}": {
-		Source:               PolicySourceLegacy,
-		OperationID:          "cancelTask",
-		Method:               "DELETE",
-		PathTemplate:         "/api/v1/tasks/{task_id}",
 		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
 	},
 	"GET /api/v1/tasks/{task_id}": {

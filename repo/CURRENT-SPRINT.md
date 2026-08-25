@@ -135,6 +135,8 @@
 
 **gofmt 修复：** `cfe5b30`。**批次记录：** `development-records/authz-policy-compat-contract-pilot.md`。**验证命令：** `go build ./services/ani-gateway/... ./services/auth-service/...` + `go test -count=1 ./services/ani-gateway/... ./services/auth-service/...` + `gofmt -l`。
 
+**预存问题修复（2026-08-25）：** 本地实测 pilot 模式后修复 4 个文件的预存不一致——删 v1.yaml 已弃用的 branding PUT/POST logo + tasks DELETE 路由的 router 注册和 registry 条目（branding_resources.go / task_resources.go / zz_generated_core_policies.go）；gpu_scheduling_resources.go `:id`→`:queue_id` 与 v1.yaml 一致（修复运行时 `LookupByRequest` lookup miss + route coverage 门禁）。修复后 drift 门禁通过、route coverage 0 error（274 registered, 224 registry）。详见 `development-records/authz-policy-compat-contract-pilot.md`。
+
 ## 账密登录模块（2026-07）
 
 > 独立于 Sprint 13/14 的账密登录功能开发流。覆盖 Core Auth API（租户账密 + 平台账密）、Console 前端（OIDC + 账密 Tab）、BOSS 前端（平台账密登录）。

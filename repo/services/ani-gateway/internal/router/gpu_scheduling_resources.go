@@ -58,9 +58,9 @@ func registerGPUSchedulingResourcesWithStore(v1 *route.RouterGroup, store ports.
 	api := newGPUSchedulingAPIWithStore(store)
 	v1.GET("/gpu-scheduling/queues", api.listGPUSchedulingQueues)
 	v1.POST("/gpu-scheduling/queues", api.createGPUSchedulingQueue)
-	v1.GET("/gpu-scheduling/queues/:id", api.getGPUSchedulingQueue)
-	v1.PATCH("/gpu-scheduling/queues/:id", api.updateGPUSchedulingQueue)
-	v1.DELETE("/gpu-scheduling/queues/:id", api.deleteGPUSchedulingQueue)
+	v1.GET("/gpu-scheduling/queues/:queue_id", api.getGPUSchedulingQueue)
+	v1.PATCH("/gpu-scheduling/queues/:queue_id", api.updateGPUSchedulingQueue)
+	v1.DELETE("/gpu-scheduling/queues/:queue_id", api.deleteGPUSchedulingQueue)
 }
 
 func (api *gpuSchedulingAPI) listGPUSchedulingQueues(ctx context.Context, c *app.RequestContext) {
@@ -142,7 +142,7 @@ func (api *gpuSchedulingAPI) getGPUSchedulingQueue(ctx context.Context, c *app.R
 		writeInstanceError(c, http.StatusForbidden, "FORBIDDEN", "tenant context missing")
 		return
 	}
-	id := c.Param("id")
+	id := c.Param("queue_id")
 	if id == "" {
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "id is required")
 		return
@@ -170,7 +170,7 @@ func (api *gpuSchedulingAPI) updateGPUSchedulingQueue(ctx context.Context, c *ap
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "Idempotency-Key header is required")
 		return
 	}
-	id := c.Param("id")
+	id := c.Param("queue_id")
 	if id == "" {
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "id is required")
 		return
@@ -212,7 +212,7 @@ func (api *gpuSchedulingAPI) deleteGPUSchedulingQueue(ctx context.Context, c *ap
 		writeInstanceError(c, http.StatusForbidden, "FORBIDDEN", "tenant context missing")
 		return
 	}
-	id := c.Param("id")
+	id := c.Param("queue_id")
 	if id == "" {
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "id is required")
 		return

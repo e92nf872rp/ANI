@@ -130,17 +130,56 @@
 
 ## Open Questions
 
-### 1. v1.yaml 预存改动（branding/cancelTask）如何处理
+### 1. v1.yaml 预存改动（branding/cancelTask）如何处理 — 已处理
 
-源分支 v1.yaml 含 `updateBranding`/`uploadBrandingLogo`/`cancelTask`（+81 行）预存改动，本次未迁移。这些改动是否需要在 `feat/gateway-authz-policy` 分支单独处理，由用户决定。
+源分支 v1.yaml 含 `updateBranding`/`uploadBrandingLogo`/`cancelTask`（+81 行）预存改动，本次未迁移。本地实测后已一并修复：v1.yaml 已删这 3 个路由，同步删 router 注册（branding_resources.go + task_resources.go）并重新生成 registry（zz_generated_core_policies.go）。详见上方"本地实测后的预存问题修复"。
 
 ### 2. tenant pb.go 重新生成
 
 `tenant_plan.pb.go`/`tenant_admin_service.pb.go` 的重新生成产物（+399/+348）不在 authz 范围。如果 tenant-plan 审计功能需要在这些分支上落地，应在单独 PR 中处理。
 
-### 3. router/gpu_scheduling_resources.go 的 :id→:queue_id 改动
+### 3. router/gpu_scheduling_resources.go 的 :id→:queue_id 改动 — 已处理
 
-源分支含 `gpu_scheduling_resources.go` 的路由参数改名（`:id`→`:queue_id`，3 路由 + 3 c.Param），属于预存改动，本次未迁移。
+源分支含 `gpu_scheduling_resources.go` 的路由参数改名（`:id`→`:queue_id`，3 路由 + 3 c.Param），属于预存改动，本次未迁移。本地实测后已修复：参数名不一致会导致运行时 `LookupByRequest` lookup miss（`{id}`≠`{queue_id}`）和 route coverage 门禁报错，已改成 `:queue_id` 与 v1.yaml 一致。详见上方"本地实测后的预存问题修复"。
+
+---
+
+## 本地实测后的预存问题修复（2026-08-25）
+
+本地启动 pilot 模式实测 quota-meta 接口时，发现并修复了 4 个文件的预存不一致问题。
+
+### 修复内容（4 文件）
+
+| 文件 | 改动 | 原因 |
+|---|---|---|
+| `services/ani-gateway/internal/authz/zz_generated_core_policies.go` | 重新生成，删 3 个 legacy 条目（`PUT /branding`、`POST /branding/logo`、`DELETE /tasks/{task_id}`） | v1.yaml 已删这 3 个路由，但 registry 未重新生成（drift） |
+| `services/ani-gateway/internal/router/branding_resources.go` | 删 `PUT /branding` 和 `POST /branding/logo` 注册 + `updateBranding`/`uploadBrandingLogo` handler（保留 GET） | v1.yaml 已删这 2 个路由，router 未同步删 |
+| `services/ani-gateway/internal/router/task_resources.go` | 删 `DELETE /tasks/:task_id` 注册 + `cancel` handler（保留 GET） | v1.yaml 已删 `cancelTask`，router 未同步删 |
+| `services/ani-gateway/internal/router/gpu_scheduling_resources.go` | `:id`→`:queue_id`（3 路由注册 + 3 `c.Param`） | v1.yaml 用 `{queue_id}`，router 用 `:id`，参数名不一致导致 route coverage 门禁报错，且运行时 `LookupByRequest` 会因 key 不匹配（`{id}`≠`{queue_id}`）lookup miss，破坏 generated 鉴权链路 |
+
+### 修复的必要性
+
+1. **drift 修复**：feat 分支 HEAD 的 registry 和 v1.yaml 不同步——v1.yaml 删了 branding PUT/POST logo 和 tasks DELETE 路由，但 registry 还留着旧条目。重新生成后 drift 门禁通过（`no drift`）。
+
+2. **router 与 v1.yaml 一致**：router 代码还注册着 v1.yaml 已删的路由，三者（v1.yaml/registry/router）不一致。删 router 注册后三者一致，route coverage 不再报 "registered Core route missing from authz registry"。
+
+3. **gpu-scheduling 参数名修复（运行时正确性，最关键）**：`LookupByRequest`（[policy.go:128-131](../services/ani-gateway/internal/authz/policy.go#L128-L131)）从 hertz `c.FullPath()` 拿 router 注册的模板（`:id`），`NormalizeHertzFullPath` 转成 `{id}`，去 registry 查。但 registry 的 key 按 v1.yaml 生成，用 `{queue_id}`。`{id}`≠`{queue_id}` 导致 lookup miss，generated 鉴权链路断（gpu-scheduling 的 DELETE/PATCH 是敏感操作，lookup miss 会 fail open 或 fail closed）。改成 `:queue_id` 后，运行时 lookup 能命中 registry，门禁字符串比较也通过。
+
+### 验证结果
+
+| 门禁 | 修复前（feat HEAD） | 修复后 |
+|---|---|---|
+| `generate_gateway_authz_test.py` | 18/18 PASS | 18/18 PASS |
+| `validate_gateway_authz_drift.py` | drift 挂 | no drift ✓ |
+| `validate_core_gateway_authz_routes.py` | 3 error（gpu-scheduling） | 0 error ✓（274 registered, 224 registry） |
+| `go test ./services/ani-gateway/internal/router` | ok | ok ✓ |
+| `go build` | ✓ | ✓ |
+
+### 备注
+
+- 这些预存问题在源分支 `feat/authz-policy-compat-contract-pilot` @ `43a8558` 就存在，四批次迁移时按"不是你改的不挪"原则未处理（见 Deviation 2 和原 Open Question 1/3）。
+- 本地实测 pilot 模式（`ANI_AUTH_MODE=auth_service` + `GATEWAY_AUTHZ_POLICY_MODE=pilot` + `GATEWAY_AUTHZ_PILOT_OPERATIONS=listQuotaMeta`）验证 quota-meta V2 链路通后，发现这些预存问题需要一并修复才能让 feat 分支门禁全绿。
+- main 分支没有 `validate_core_gateway_authz_routes.py` 脚本和 `validate-gateway-authz` Makefile target（PR1 才引入，未 merge），所以 main 分支不跑 route coverage 门禁，这些预存问题在 main 上不报错但实际存在。
 
 ---
 
@@ -169,4 +208,5 @@ go test -count=1 ./services/ani-gateway/... ./services/auth-service/...
 - [x] PR4：listQuotaMeta pilot，v1.yaml security 注解 + Validate + V2 链路 + E2E
 - [x] gofmt 全部通过
 - [x] 全程未 git push
-- [x] tenant pb.go / v1.yaml 预存改动 / gpu路由改动 不迁移
+- [x] tenant pb.go 不迁移（仍由单独 PR 处理）
+- [x] v1.yaml 预存改动（branding/cancelTask）+ gpu-scheduling 路由改动 — 本地实测后已修复（详见上方"本地实测后的预存问题修复"）

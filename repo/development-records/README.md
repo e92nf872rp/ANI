@@ -22,6 +22,8 @@
 | AUTHZ-CONTRACT-B1 | PR3：V2 授权契约——additive proto（ValidatePrincipal/CheckPermissionV2）+ auth-service JWT/API Key principal + permission evaluator + Gateway V2 client；gateway 仍 mode=off 不调 V2 | authz-policy-compat-contract-pilot.md |
 | AUTHZ-PILOT-C | PR4：listQuotaMeta pilot——v1.yaml security/x-ani-authz 注解 + mode Validate 冻结校验 + generated_authz V2 授权链路 + pilot E2E 测试 + deployment env；仅该 operation 使用 V2 | authz-policy-compat-contract-pilot.md |
 
+**预存问题修复（2026-08-25）：** 本地实测 pilot 模式后修复 4 个文件的预存不一致——删 v1.yaml 已弃用的 branding PUT/POST logo + tasks DELETE 路由的 router 注册和 registry 条目（branding_resources.go / task_resources.go / zz_generated_core_policies.go）；gpu_scheduling_resources.go 的 `:id`→`:queue_id` 与 v1.yaml 一致（修复运行时 `LookupByRequest` lookup miss + route coverage 门禁）。详见 `authz-policy-compat-contract-pilot.md`。
+
 ### Inference Platform Workload Contract（2026-08）
 
 | 批次 | 内容摘要 | 文件 |
