@@ -94,7 +94,7 @@ func (c Config) Validate(registry Registry) error {
 			return errors.New("pilot requires ANI_AUTH_MODE=auth_service")
 		}
 		if !sameOperationSet(c.PilotOperations, functionalMVPPilotOperations) {
-			return errors.New("Functional MVP pilot operations must equal {listQuotaMeta}")
+			return errors.New("functional MVP pilot operations must equal {listQuotaMeta}")
 		}
 	default:
 		return errors.New("unsupported authz policy mode")
