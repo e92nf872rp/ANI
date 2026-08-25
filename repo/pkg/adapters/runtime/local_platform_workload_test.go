@@ -57,13 +57,75 @@ func TestAdmitPlatformWorkloadAcceleratorRequiresAdvertisedSpec(t *testing.T) {
 		t.Fatalf("empty capabilities error = %v", err)
 	}
 	caps := ports.PlatformWorkloadCapabilities{AcceleratorSpecs: []ports.PlatformWorkloadAcceleratorCapability{{
-		SpecID: "gpu-a100", Available: true, MaxSingleNodeCount: 1,
+		SpecID: "gpu-a100", Available: true, MaxSingleNodeCount: 1, MaxWholeCardCount: 1,
 	}}}
 	if err := admitPlatformWorkloadAccelerator(caps, spec, "single_node"); err != nil {
 		t.Fatalf("advertised accelerator error = %v", err)
 	}
+	legacy := ports.PlatformWorkloadResources{AcceleratorSpecID: "gpu-a100-8x", AcceleratorCount: 1}
+	if err := admitPlatformWorkloadAccelerator(caps, legacy, "single_node"); err != nil {
+		t.Fatalf("legacy suffix accelerator error = %v", err)
+	}
 	if err := admitPlatformWorkloadAccelerator(caps, ports.PlatformWorkloadResources{}, "single_node"); err != nil {
 		t.Fatalf("cpu admission error = %v", err)
+	}
+}
+
+func mixed4090AcceleratorNodes() []ports.GPUNodeClass {
+	return []ports.GPUNodeClass{
+		{
+			NodeName: "gpu-full", Model: "NVIDIA-GeForce-RTX-4090", Ready: true,
+			Allocatable: map[string]string{"nvidia.com/gpu": "1"},
+			Devices:     []ports.GPUDeviceClass{{Model: "NVIDIA-GeForce-RTX-4090", ResourceName: "nvidia.com/gpu", VirtualizationMode: ports.GPUVirtualizationNone}},
+		},
+		{
+			NodeName: "gpu-vgpu", Model: "NVIDIA-GeForce-RTX-4090", Ready: true,
+			Allocatable: map[string]string{"volcano.sh/vgpu-number": "4", "volcano.sh/vgpu-memory": "24576"},
+			Devices: []ports.GPUDeviceClass{{
+				Model: "NVIDIA-GeForce-RTX-4090", ResourceName: "volcano.sh/vgpu-number",
+				VirtualizationMode: ports.GPUVirtualizationVGPU, MemoryMiB: 6144,
+			}},
+		},
+	}
+}
+
+func TestAdmitPlatformWorkloadAcceleratorDoesNotMixWholeAndVGPUCapacity(t *testing.T) {
+	caps := ports.PlatformWorkloadCapabilities{AcceleratorSpecs: acceleratorSpecsFromGPUNodes(mixed4090AcceleratorNodes(), true)}
+	model := "gpu-nvidia-geforce-rtx-4090"
+	if err := admitPlatformWorkloadAccelerator(caps, ports.PlatformWorkloadResources{AcceleratorSpecID: model, AcceleratorCount: 4}, "single_node"); !errors.Is(err, ports.ErrFailedPrecondition) {
+		t.Fatalf("whole-card count=4 over 1 physical card error = %v", err)
+	}
+	if err := admitPlatformWorkloadAccelerator(caps, ports.PlatformWorkloadResources{AcceleratorSpecID: model, AcceleratorCount: 1}, "single_node"); err != nil {
+		t.Fatalf("whole-card count=1 error = %v", err)
+	}
+	if err := admitPlatformWorkloadAccelerator(caps, ports.PlatformWorkloadResources{AcceleratorSpecID: model, AcceleratorCount: 4, AcceleratorMemoryMB: 10240}, "single_node"); err != nil {
+		t.Fatalf("vGPU count=4 error = %v", err)
+	}
+	if err := admitPlatformWorkloadAccelerator(caps, ports.PlatformWorkloadResources{AcceleratorSpecID: model, AcceleratorCount: 8, AcceleratorMemoryMB: 10240}, "single_node"); !errors.Is(err, ports.ErrFailedPrecondition) {
+		t.Fatalf("vGPU count=8 over 4 slots error = %v", err)
+	}
+}
+
+func TestAdmitPlatformWorkloadAcceleratorRejectsVGPUOnWholeCardOnlyNodes(t *testing.T) {
+	nodes := []ports.GPUNodeClass{{
+		NodeName: "gpu-a", Model: "A100", Ready: true,
+		Allocatable: map[string]string{"nvidia.com/gpu": "2"},
+		Devices:     []ports.GPUDeviceClass{{Model: "A100", ResourceName: "nvidia.com/gpu", VirtualizationMode: ports.GPUVirtualizationNone}},
+	}}
+	caps := ports.PlatformWorkloadCapabilities{AcceleratorSpecs: acceleratorSpecsFromGPUNodes(nodes, true)}
+	if err := admitPlatformWorkloadAccelerator(caps, ports.PlatformWorkloadResources{AcceleratorSpecID: "gpu-a100", AcceleratorCount: 1, AcceleratorMemoryMB: 10240}, "single_node"); !errors.Is(err, ports.ErrFailedPrecondition) {
+		t.Fatalf("vGPU on whole-card-only nodes error = %v", err)
+	}
+}
+
+func TestLocalPlatformWorkloadRejectsNegativeAcceleratorMemory(t *testing.T) {
+	svc := NewLocalPlatformWorkloadService()
+	spec := sampleCPUPlatformWorkloadSpec("8df72d71-9d49-46c4-a48a-52bb37b082ab", "inference-gpu-neg")
+	spec.Resources.AcceleratorSpecID = "gpu-a100"
+	spec.Resources.AcceleratorCount = 1
+	spec.Resources.AcceleratorMemoryMB = -1
+	if _, err := svc.Create(context.Background(), "11111111-1111-1111-1111-111111111111", spec); !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("negative memory Create() error = %v", err)
 	}
 }
 

@@ -365,10 +365,12 @@ func renderLeaderWorkerPlatformWorkloadManifests(tenantID, workloadID string, sp
 	if leaderResources.AcceleratorCount < 1 {
 		leaderResources.AcceleratorCount = 1
 		leaderResources.AcceleratorSpecID = spec.Resources.AcceleratorSpecID
+		leaderResources.AcceleratorMemoryMB = spec.Resources.AcceleratorMemoryMB
 	}
 	if workerResources.AcceleratorCount < 1 {
 		workerResources.AcceleratorCount = 1
 		workerResources.AcceleratorSpecID = spec.Resources.AcceleratorSpecID
+		workerResources.AcceleratorMemoryMB = spec.Resources.AcceleratorMemoryMB
 	}
 	size := 1 + spec.Topology.Workers.Count
 	leaderContainer := platformWorkloadContainer(spec, resourceName, leaderResources, spec.Command, spec.Args, containerPorts, volumeMounts, true)
@@ -555,24 +557,41 @@ func platformWorkloadContainerResources(resources ports.PlatformWorkloadResource
 	return map[string]any{"requests": requests, "limits": requests}
 }
 
+// volcanoGPUMemoryFactor 是现网 volcano-device-plugin 的 gpuMemoryFactor。
+// 产品 memory 是 MiB；写入 volcano.sh/vgpu-memory 时除以该因子。
+const volcanoGPUMemoryFactor = 10
+
+// platformWorkloadAcceleratorResourceMap 按 memory 选择资源：
+// 有 AcceleratorMemoryMB → vGPU；没有 → 整卡。不看 spec_id 后缀。
 func platformWorkloadAcceleratorResourceMap(resources ports.PlatformWorkloadResources) map[string]any {
 	if resources.AcceleratorCount < 1 {
 		return nil
 	}
-	if platformWorkloadSpecIsVGPU(resources.AcceleratorSpecID) {
-		out := map[string]any{
+	if resources.AcceleratorMemoryMB > 0 {
+		return map[string]any{
 			kubernetesVolcanoVGPUNumberResource: strconv.Itoa(resources.AcceleratorCount),
+			kubernetesVolcanoVGPUMemoryResource: strconv.Itoa(volcanoVGPUMemoryUnits(resources.AcceleratorMemoryMB)),
 		}
-		if resources.AcceleratorMemoryMB > 0 {
-			out[kubernetesVolcanoVGPUMemoryResource] = strconv.Itoa(resources.AcceleratorMemoryMB)
-		}
-		return out
 	}
 	return map[string]any{kubernetesNVIDIAGPUResource: strconv.Itoa(resources.AcceleratorCount)}
 }
 
-func platformWorkloadSpecIsVGPU(specID string) bool {
-	return vgpuSpecIDPattern.MatchString(strings.ToLower(strings.TrimSpace(specID)))
+func volcanoVGPUMemoryUnits(memoryMB int) int {
+	if memoryMB < 1 {
+		return 0
+	}
+	units := (memoryMB + volcanoGPUMemoryFactor - 1) / volcanoGPUMemoryFactor
+	if units < 1 {
+		return 1
+	}
+	return units
+}
+
+// canonicalAcceleratorSpecID 把历史 -full / -Nx 剥掉，得到型号 ID。
+func canonicalAcceleratorSpecID(specID string) string {
+	id := strings.ToLower(strings.TrimSpace(specID))
+	id = vgpuSpecIDPattern.ReplaceAllString(id, "")
+	return strings.TrimSuffix(id, "-full")
 }
 
 func platformWorkloadNetworkPorts(spec ports.PlatformWorkloadCreateSpec) ([]any, []any) {
@@ -709,6 +728,9 @@ func roleResourcesOrFallback(role, fallback ports.PlatformWorkloadResources) por
 	}
 	if strings.TrimSpace(out.AcceleratorSpecID) == "" {
 		out.AcceleratorSpecID = fallback.AcceleratorSpecID
+	}
+	if out.AcceleratorMemoryMB < 1 {
+		out.AcceleratorMemoryMB = fallback.AcceleratorMemoryMB
 	}
 	return out
 }

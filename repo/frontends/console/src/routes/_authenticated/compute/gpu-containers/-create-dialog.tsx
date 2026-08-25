@@ -1,14 +1,14 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import {
+  Alert,
   Button,
   Dialog,
   Form,
   Input,
-  InputNumber,
   MessagePlugin,
-  Radio,
   Select,
+  Tag,
 } from 'tdesign-react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { coreApi } from '@/api/coreClient'
@@ -16,41 +16,102 @@ import type { components } from '@/api/core-schema'
 
 type CreateInstanceRequest = components['schemas']['CreateInstanceRequest']
 type GPUSchedulingQueue = components['schemas']['GPUSchedulingQueue']
+type GPUSpecAvailability = components['schemas']['GPUSpecAvailability']
 
 export interface CreateGpuContainerDialogProps {
   visible: boolean
   onClose: () => void
-  /** Optional model options from inventory for the "model preference" field. */
-  modelOptions?: { label: string; value: string }[]
 }
 
-const WORKLOAD_CLASS_OPTIONS = [
-  { label: '推理', value: 'inference' },
-  { label: '训练', value: 'training' },
-  { label: '批任务', value: 'batch' },
-]
+// 四态 → Tag theme + 文案（UX §7.3）
+function specStatusTag(status: GPUSpecAvailability['status'], availableCount: number) {
+  switch (status) {
+    case 'available':
+      return <Tag theme="success" variant="light">剩余 {availableCount}</Tag>
+    case 'full':
+      return <Tag theme="default" variant="light">配额已满</Tag>
+    case 'device_full':
+      return <Tag theme="warning" variant="light">设备已满，暂无空闲</Tag>
+    case 'unavailable':
+      return <Tag theme="default" variant="light">暂无匹配节点</Tag>
+  }
+}
 
-const ALLOCATION_MODE_OPTIONS = [
-  { label: '整卡', value: 'dedicated' },
-  { label: 'vGPU 切片', value: 'vgpu' },
-]
-
-export function CreateGpuContainerDialog({
-  visible,
-  onClose,
-  modelOptions = [],
-}: CreateGpuContainerDialogProps) {
+export function CreateGpuContainerDialog({ visible, onClose }: CreateGpuContainerDialogProps) {
   const navigate = useNavigate()
   const [form] = Form.useForm()
+  const [selectedSpecId, setSelectedSpecId] = useState<string>('')
 
+  // 规格可用性（GET /gpu-specs/availability）
+  const availabilityQuery = useQuery({
+    queryKey: ['gpu-specs-availability'],
+    queryFn: () => coreApi.GET('/gpu-specs/availability').then(({ data }) => data),
+    enabled: visible,
+  })
+
+  // 调度队列（GET /gpu-scheduling/queues）
   const queuesQuery = useQuery({
     queryKey: ['gpu-scheduling-queues'],
     queryFn: () => coreApi.GET('/gpu-scheduling/queues').then(({ data }) => data),
     enabled: visible,
   })
 
-  const queueOptions = (queuesQuery.data?.items ?? [])
-    .map((q: GPUSchedulingQueue) => ({ label: q.name, value: q.name }))
+  const queueOptions = useMemo(
+    () =>
+      (queuesQuery.data?.items ?? []).map((q: GPUSchedulingQueue) => ({
+        label: q.name,
+        value: q.name,
+      })),
+    [queuesQuery.data],
+  )
+
+  const availabilityItems: GPUSpecAvailability[] = useMemo(
+    () => availabilityQuery.data?.items ?? [],
+    [availabilityQuery.data],
+  )
+  const quotaRemaining: number = availabilityQuery.data?.quota_remaining ?? 0
+
+  // 本地重算：选规格后扣减 quota_remaining，刷新各规格 available_count（UX §4.4）
+  const recomputedItems = useMemo(() => {
+    if (!selectedSpecId) return availabilityItems
+    const selected = availabilityItems.find((s) => s.spec_id === selectedSpecId)
+    if (!selected) return availabilityItems
+    const consumedGpuCount = selected.gpu_count ?? 1
+    const newQuotaRemaining = Math.max(0, quotaRemaining - consumedGpuCount)
+    return availabilityItems.map((s) => {
+      if (s.spec_id === selectedSpecId) return s
+      const recalculatedAvailable = Math.min(newQuotaRemaining, s.device_idle_count)
+      return {
+        ...s,
+        available_count: recalculatedAvailable,
+      }
+    })
+  }, [availabilityItems, selectedSpecId, quotaRemaining])
+
+  // 规格下拉选项：四态标注 + 置灰不可选项
+  const specOptions = useMemo(
+    () =>
+      recomputedItems.map((s) => {
+        const disabled = s.status !== 'available' || s.available_count <= 0
+        return {
+          label: (
+            <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>{s.spec_id}</span>
+              {specStatusTag(s.status, s.available_count)}
+            </span>
+          ),
+          value: s.spec_id,
+          disabled,
+        }
+      }),
+    [recomputedItems],
+  )
+
+  // 选中规格的详情（用于 Alert 展示）
+  const selectedSpec = useMemo(
+    () => recomputedItems.find((s) => s.spec_id === selectedSpecId),
+    [recomputedItems, selectedSpecId],
+  )
 
   const createMutation = useMutation({
     mutationFn: async (payload: CreateInstanceRequest) => {
@@ -65,13 +126,10 @@ export function CreateGpuContainerDialog({
     },
   })
 
-  function resetForm() {
-    form.reset()
-  }
-
   useEffect(() => {
     if (!visible) {
-      resetForm()
+      form.reset()
+      setSelectedSpecId('')
     }
   }, [visible, form])
 
@@ -81,11 +139,8 @@ export function CreateGpuContainerDialog({
 
     const values = form.getFieldsValue(true) as {
       name: string
-      gpu_count: number
-      allocation_mode: 'dedicated' | 'vgpu'
-      workload_class: 'inference' | 'training' | 'batch'
+      spec_id: string
       queue_name: string
-      model: string
     }
 
     const idempotencyKey = crypto.randomUUID()
@@ -98,12 +153,15 @@ export function CreateGpuContainerDialog({
       termination_protection: false,
       ssh_username: null,
       replicas: 1,
-      gpu: {
-        count: values.gpu_count,
-        allocation_mode: values.allocation_mode,
-        workload_class: values.workload_class,
-        queue_name: values.queue_name || null,
-        model: values.model || undefined,
+      gpu_container_config: {
+        replicas: 1,
+        gpu: {
+          spec_id: values.spec_id,
+          count: 1,
+          queue_name: values.queue_name,
+          allocation_mode: 'dedicated',
+          workload_class: 'inference',
+        },
       },
     }
 
@@ -114,11 +172,17 @@ export function CreateGpuContainerDialog({
       navigate({ to: '/compute/gpu-containers/$instanceId', params: { instanceId: result.instance.id } })
     } catch (err) {
       const e = err as { code?: string; message?: string; status?: number }
-      if (e.status === 422) {
-        if (e.code === 'QueueNotFound') {
-          form.setFieldsValue({ _queueError: '所选调度队列不存在或已删除' })
+      if (e.status === 409) {
+        if (e.code === 'QUOTA_EXCEEDED') {
+          MessagePlugin.error('配额不足，无法创建')
+        } else if (e.code === 'RESERVED_INSUFFICIENT') {
+          MessagePlugin.error('预留额度不足，无法创建')
+        } else {
+          MessagePlugin.error(`创建失败：${e.message ?? e.code ?? '未知错误'}`)
         }
-        MessagePlugin.error(`调度失败：${e.message ?? e.code ?? '未知错误'}`)
+      } else if (e.status === 422 && e.code === 'QueueNotFound') {
+        form.setFieldsValue({ _queueError: '所选调度队列不存在或已删除' })
+        MessagePlugin.error('调度失败：所选队列不存在')
       } else {
         MessagePlugin.error(`创建失败：${e.message ?? '请稍后重试'}`)
       }
@@ -141,43 +205,48 @@ export function CreateGpuContainerDialog({
             loading={createMutation.isPending}
             onClick={handleSubmit}
           >
-            提交
+            创建
           </Button>
         </>
       }
     >
       <Form form={form} labelWidth={100} labelAlign="right">
         <Form.FormItem label="名称" name="name" rules={[{ required: true, message: '请输入名称' }]}>
-          <Input placeholder="容器名称" />
+          <Input placeholder="实例名称" />
         </Form.FormItem>
 
-        <Form.FormItem label="GPU 数量" name="gpu_count" initialData={1} rules={[{ required: true }]}>
-          <InputNumber min={1} step={1} />
-        </Form.FormItem>
-
-        <Form.FormItem label="分配模式" name="allocation_mode" initialData="dedicated">
-          <Radio.Group options={ALLOCATION_MODE_OPTIONS} />
-        </Form.FormItem>
-
-        <Form.FormItem label="工作负载类型" name="workload_class" initialData="inference">
-          <Radio.Group options={WORKLOAD_CLASS_OPTIONS} />
-        </Form.FormItem>
-
-        <Form.FormItem label="调度队列" name="queue_name">
+        <Form.FormItem
+          label="GPU 规格"
+          name="spec_id"
+          rules={[{ required: true, message: '请选择 GPU 规格' }]}
+        >
           <Select
-            options={queueOptions}
-            placeholder="留空按工作负载类型选默认队列"
-            clearable
-            loading={queuesQuery.isLoading}
+            options={specOptions}
+            placeholder="选择 GPU 规格"
+            filterable
+            loading={availabilityQuery.isLoading}
+            onChange={(v) => setSelectedSpecId(v as string)}
           />
         </Form.FormItem>
 
-        <Form.FormItem label="型号偏好" name="model">
+        {selectedSpec && (
+          <Alert
+            theme="info"
+            message={`已选规格：${selectedSpec.spec_id}，占用 ${selectedSpec.gpu_count ?? 1} 卡，剩余配额 ${Math.max(0, quotaRemaining - (selectedSpec.gpu_count ?? 1))} 卡`}
+            style={{ marginBottom: 12 }}
+          />
+        )}
+
+        <Form.FormItem
+          label="调度队列"
+          name="queue_name"
+          rules={[{ required: true, message: '请选择调度队列' }]}
+        >
           <Select
-            options={modelOptions}
-            placeholder="可选，留空不指定"
+            options={queueOptions}
+            placeholder="选择调度队列"
             clearable
-            filterable
+            loading={queuesQuery.isLoading}
           />
         </Form.FormItem>
       </Form>

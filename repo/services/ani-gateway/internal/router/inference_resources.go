@@ -67,13 +67,17 @@ type inferenceServiceEngineEnvJSON struct {
 
 type inferenceServiceResourcesJSON struct {
 	CPU         string                           `json:"cpu"`
-	Memory      string                           `json:"memory"`
+	Memory      string                           `json:"memory"` // Pod 内存预算；GPU 显存在 accelerator.memory
 	Accelerator *inferenceServiceAcceleratorJSON `json:"accelerator"`
 }
 
 type inferenceServiceAcceleratorJSON struct {
+	// SpecID 是 GPU 型号，例如 gpu-nvidia-geforce-rtx-4090。只表示型号，不表示整卡或 vGPU。
 	SpecID          string `json:"spec_id"`
 	CountPerReplica int32  `json:"count_per_replica"`
+	// Memory 是申请 GPU 显存，单位 MiB。省略=整卡；填写=vGPU。不是 resources.memory。
+	// JSON 若出现该字段，必须 >= 1。
+	Memory *int32 `json:"memory,omitempty"`
 }
 
 type updateInferenceServiceJSON struct {
@@ -123,6 +127,10 @@ func createInferenceService(ctx context.Context, c *app.RequestContext) {
 	}
 	if strings.TrimSpace(req.IdempotencyKey) == "" || strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Model) == "" {
 		writeInferenceInvalid(c, "idempotency_key, name, and model are required")
+		return
+	}
+	if err := validateInferenceAcceleratorMemory(req.Resources); err != nil {
+		writeInferenceInvalid(c, err.Error())
 		return
 	}
 	engine, err := protoEngineFromJSON(req.Engine)
@@ -333,8 +341,21 @@ func protoResources(resources *inferenceServiceResourcesJSON) *inferencecontrolv
 			SpecId:          strings.TrimSpace(resources.Accelerator.SpecID),
 			CountPerReplica: resources.Accelerator.CountPerReplica,
 		}
+		if resources.Accelerator.Memory != nil {
+			msg.Accelerator.Memory = *resources.Accelerator.Memory
+		}
 	}
 	return msg
+}
+
+func validateInferenceAcceleratorMemory(resources *inferenceServiceResourcesJSON) error {
+	if resources == nil || resources.Accelerator == nil || resources.Accelerator.Memory == nil {
+		return nil
+	}
+	if *resources.Accelerator.Memory < 1 {
+		return errors.New("accelerator memory must be at least 1 MiB")
+	}
+	return nil
 }
 
 func inferenceServiceJSON(msg *inferencecontrolv1.InferenceService) map[string]any {
@@ -379,9 +400,13 @@ func inferenceResourcesJSON(msg *inferencecontrolv1.InferenceServiceResources) m
 	}
 	body := map[string]any{"cpu": msg.GetCpu(), "memory": msg.GetMemory()}
 	if acc := msg.GetAccelerator(); acc != nil && strings.TrimSpace(acc.GetSpecId()) != "" {
-		body["accelerator"] = map[string]any{
+		item := map[string]any{
 			"spec_id": acc.GetSpecId(), "count_per_replica": acc.GetCountPerReplica(),
 		}
+		if acc.GetMemory() > 0 {
+			item["memory"] = acc.GetMemory()
+		}
+		body["accelerator"] = item
 	}
 	return body
 }

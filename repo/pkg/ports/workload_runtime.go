@@ -506,6 +506,12 @@ type WorkloadInstanceCreateRequest struct {
 	UserID          string
 	PermissionProof string
 	RequestedAt     time.Time
+	// QuotaTxIDs carries the TCC reservation transaction IDs created by
+	// QuotaAwareInstanceOrchestrator before delegating to the inner
+	// orchestrator. The inner orchestrator persists them on every
+	// UpsertStatus call so the reconciler can Confirm/Cancel/Release
+	// even if the status transitions synchronously during Create.
+	QuotaTxIDs []string
 }
 
 type WorkloadInstanceCreateResult struct {

@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -21,6 +22,24 @@ type LocalInstanceOrchestrator struct {
 	store      ports.WorkloadInstanceStore
 	identity   ports.WorkloadIdentityService
 	now        func() time.Time
+	// quotaService performs TCC Cancel/Release on Apply failure and Delete.
+	// nil means GPU quota is disabled and all quota calls are no-ops
+	// (SPEC §5.1 GPU_QUOTA_ENABLED=false case).
+	quotaService ports.QuotaService
+	// metadataStore opens tenant-scoped transactions for the quota + status
+	// atomic write on Apply failure. nil falls back to the non-transactional
+	// store.UpsertStatus.
+	metadataStore ports.MetadataStore
+	// storeTx writes instance status inside an externally-owned MetadataTx
+	// (same transaction as Cancel/Release on Apply failure). nil falls back
+	// to the non-transactional store.UpsertStatus.
+	storeTx ports.WorkloadInstanceStoreTx
+	// translator converts spec_id to Volcano Pod resource requests, node
+	// selector, schedulerName and queue annotation. This is a Core capability
+	// that must work regardless of GPU_QUOTA_ENABLED (plan.md §4.7: "节点标签
+	// 读取/规格管理是 Core 能力,不受 GPU_QUOTA_ENABLED 开关影响"). nil skips
+	// translation (no GPUSpec CRD available).
+	translator *VolcanoResourceTranslator
 }
 
 type InstanceOrchestratorOption func(*LocalInstanceOrchestrator)
@@ -42,6 +61,40 @@ func WithInstanceStore(store ports.WorkloadInstanceStore) InstanceOrchestratorOp
 func WithInstanceOrchestratorWorkloadIdentityService(identity ports.WorkloadIdentityService) InstanceOrchestratorOption {
 	return func(orchestrator *LocalInstanceOrchestrator) {
 		orchestrator.identity = identity
+	}
+}
+
+// WithInstanceOrchestratorQuotaService injects the TCC quota service used for
+// Cancel on Apply failure and Release on Delete. When nil, quota calls are
+// skipped (SPEC §5.1 GPU_QUOTA_ENABLED=false case).
+func WithInstanceOrchestratorQuotaService(service ports.QuotaService) InstanceOrchestratorOption {
+	return func(orchestrator *LocalInstanceOrchestrator) {
+		orchestrator.quotaService = service
+	}
+}
+
+// WithInstanceOrchestratorMetadataStore injects the tenant transaction store
+// used so Cancel/Release and the status write commit atomically on Apply
+// failure and Delete.
+func WithInstanceOrchestratorMetadataStore(store ports.MetadataStore) InstanceOrchestratorOption {
+	return func(orchestrator *LocalInstanceOrchestrator) {
+		orchestrator.metadataStore = store
+	}
+}
+
+// WithInstanceOrchestratorStoreTx injects the transactional status writer used
+// inside the same tenant transaction as Cancel/Release on Apply failure.
+func WithInstanceOrchestratorStoreTx(storeTx ports.WorkloadInstanceStoreTx) InstanceOrchestratorOption {
+	return func(orchestrator *LocalInstanceOrchestrator) {
+		orchestrator.storeTx = storeTx
+	}
+}
+
+// WithInstanceOrchestratorTranslator injects the Volcano resource translator.
+// This is a Core capability independent of GPU_QUOTA_ENABLED (plan.md §4.7).
+func WithInstanceOrchestratorTranslator(translator *VolcanoResourceTranslator) InstanceOrchestratorOption {
+	return func(orchestrator *LocalInstanceOrchestrator) {
+		orchestrator.translator = translator
 	}
 }
 
@@ -108,6 +161,19 @@ func (o *LocalInstanceOrchestrator) Create(ctx context.Context, request ports.Wo
 		identity = &binding
 		request.Spec.Identity = identity
 	}
+	// Volcano resource translation — Core capability, runs regardless of
+	// GPU_QUOTA_ENABLED (plan.md §4.7: "节点标签读取/规格管理是 Core 能力,
+	// 不受 GPU_QUOTA_ENABLED 开关影响").
+	if o.translator != nil && request.Spec.GPUSpec != nil && request.Spec.GPUSpec.SpecID != "" {
+		count := gpuRequestCount(request.Spec)
+		queueName := annotationValue(request.Spec, gpuQueueAnnotation)
+		translation, err := o.translator.Translate(ctx, request.Spec.GPUSpec.SpecID, queueName, count)
+		if err != nil {
+			return ports.WorkloadInstanceCreateResult{}, fmt.Errorf("volcano translation for spec %q: %w", request.Spec.GPUSpec.SpecID, err)
+		}
+		injectVolcanoTranslation(&request.Spec, translation)
+	}
+
 	manifests, err := o.renderer.Render(ctx, request.Spec)
 	if err != nil {
 		return ports.WorkloadInstanceCreateResult{}, err
@@ -151,6 +217,9 @@ func (o *LocalInstanceOrchestrator) Create(ctx context.Context, request ports.Wo
 		RequestedAt:     firstNonZeroTime(request.RequestedAt, o.now().UTC()),
 	})
 	if err != nil {
+		// SPEC §5.1 FR-28: Apply 失败保留 DB 行 UpsertStatusTx(state=failed),
+		// 复用 cancelQuotaAndFinalize 同事务 Cancel 配额，方便审计。
+		o.markApplyFailed(ctx, request, ref, auditID, provider, err)
 		return ports.WorkloadInstanceCreateResult{}, err
 	}
 
@@ -165,7 +234,7 @@ func (o *LocalInstanceOrchestrator) Create(ctx context.Context, request ports.Wo
 		Identity:    identity,
 	}
 	if o.store != nil {
-		if err := o.store.UpsertStatus(ctx, instanceRecordFromResult(request.Spec, ref, auditID, provider, nil, current, firstNonZeroTime(request.RequestedAt, o.now().UTC()))); err != nil {
+		if err := o.store.UpsertStatus(ctx, instanceRecordFromResult(request.Spec, ref, auditID, provider, nil, current, firstNonZeroTime(request.RequestedAt, o.now().UTC()), request.QuotaTxIDs)); err != nil {
 			return ports.WorkloadInstanceCreateResult{}, err
 		}
 	}
@@ -198,7 +267,8 @@ func (o *LocalInstanceOrchestrator) Create(ctx context.Context, request ports.Wo
 	result.FinalStatus = reconcile.Status
 	result.Orchestrated = true
 	if o.store != nil {
-		if err := o.store.UpsertStatus(ctx, instanceRecordFromResult(request.Spec, ref, auditID, provider, apply.ResourceRefs, reconcile.Status, firstNonZeroTime(request.RequestedAt, o.now().UTC()))); err != nil {
+		record := instanceRecordFromResult(request.Spec, ref, auditID, provider, apply.ResourceRefs, reconcile.Status, firstNonZeroTime(request.RequestedAt, o.now().UTC()), request.QuotaTxIDs)
+		if err := o.persistWithQuotaTransition(ctx, record, current.State, reconcile.Status.State); err != nil {
 			return ports.WorkloadInstanceCreateResult{}, err
 		}
 	}
@@ -233,9 +303,171 @@ func (o *LocalInstanceOrchestrator) validate() error {
 	return nil
 }
 
+// hasTransactionalQuotaSupport reports whether the orchestrator can perform
+// transactional quota + status writes on Apply failure.
+func (o *LocalInstanceOrchestrator) hasTransactionalQuotaSupport() bool {
+	return o.metadataStore != nil && o.storeTx != nil
+}
+
+// persistWithQuotaTransition writes the instance status and, when the
+// reconcile produced a quota-relevant transition with QuotaTxIDs present,
+// performs the TCC action in the same tenant transaction (SPEC §5.1):
+//   - pending/provisioning → running: Confirm (reserved → used)
+//   - pending/provisioning → failed:  Cancel  (release reserved)
+//
+// This covers the case where the inner Create's synchronous Observe+Reconcile
+// immediately observes Running or Failed (e.g. the local provider returns
+// "Running" for Create, or CrashLoopBackOff/ImagePullBackOff is observed
+// immediately), which would otherwise bypass the Reconciler's
+// applyStateTransition and leave the quota stuck in "reserved" (SPEC §5.1).
+func (o *LocalInstanceOrchestrator) persistWithQuotaTransition(ctx context.Context, record ports.WorkloadInstanceRecord, previous, next ports.WorkloadState) error {
+	slog.Info("persistWithQuotaTransition",
+		"instance_id", record.InstanceID,
+		"previous", previous,
+		"next", next,
+		"quota_tx_ids", record.QuotaTxIDs,
+		"has_tx_quota", o.hasTransactionalQuotaSupport(),
+	)
+	if !o.hasTransactionalQuotaSupport() {
+		slog.Warn("persistWithQuotaTransition: no tx quota support, plain UpsertStatus",
+			"instance_id", record.InstanceID,
+		)
+		return o.store.UpsertStatus(ctx, record)
+	}
+	needsConfirm := (previous == ports.WorkloadStatePending || previous == ports.WorkloadStateProvisioning) &&
+		next == ports.WorkloadStateRunning &&
+		len(record.QuotaTxIDs) > 0
+	needsCancel := (previous == ports.WorkloadStatePending || previous == ports.WorkloadStateProvisioning) &&
+		next == ports.WorkloadStateFailed &&
+		len(record.QuotaTxIDs) > 0
+	if !needsConfirm && !needsCancel {
+		slog.Info("persistWithQuotaTransition: no TCC action, plain UpsertStatus",
+			"instance_id", record.InstanceID,
+			"previous", previous,
+			"next", next,
+			"quota_tx_ids_len", len(record.QuotaTxIDs),
+		)
+		return o.store.UpsertStatus(ctx, record)
+	}
+	action := "Confirm"
+	if needsCancel {
+		action = "Cancel"
+	}
+	slog.Info("persistWithQuotaTransition: executing TCC action in tx",
+		"instance_id", record.InstanceID,
+		"action", action,
+		"quota_tx_ids", record.QuotaTxIDs,
+	)
+	return o.metadataStore.WithTenantTx(ctx, func(txCtx context.Context, tx ports.MetadataTx) error {
+		if o.quotaService != nil {
+			if needsConfirm {
+				if err := o.quotaService.Confirm(txCtx, tx, record.QuotaTxIDs, record.InstanceID); err != nil {
+					slog.Error("persistWithQuotaTransition: Confirm failed",
+						"instance_id", record.InstanceID,
+						"err", err,
+					)
+					return err
+				}
+				slog.Info("persistWithQuotaTransition: Confirm succeeded",
+					"instance_id", record.InstanceID,
+				)
+			} else {
+				if err := o.quotaService.Cancel(txCtx, tx, record.QuotaTxIDs); err != nil {
+					slog.Error("persistWithQuotaTransition: Cancel failed",
+						"instance_id", record.InstanceID,
+						"err", err,
+					)
+					return err
+				}
+				slog.Info("persistWithQuotaTransition: Cancel succeeded",
+					"instance_id", record.InstanceID,
+				)
+			}
+		}
+		return o.storeTx.UpsertStatusTx(txCtx, tx, record)
+	})
+}
+
+// markApplyFailed persists the instance with state=failed after an Apply
+// error (SPEC §5.1 FR-28). When transactional quota support is configured
+// it writes the failed status and cancels any reserved quota in the same
+// tenant transaction. When quota is disabled it falls back to the
+// non-transactional store.UpsertStatus. The original Apply error is
+// returned to the caller; this method only records the failure for audit.
+func (o *LocalInstanceOrchestrator) markApplyFailed(
+	ctx context.Context,
+	request ports.WorkloadInstanceCreateRequest,
+	ref ports.WorkloadRef,
+	auditID string,
+	provider string,
+	applyErr error,
+) {
+	if o.store == nil {
+		return
+	}
+	now := o.now().UTC()
+	failedStatus := ports.WorkloadStatus{
+		Ref:       ref,
+		State:     ports.WorkloadStateFailed,
+		Reason:    fmt.Sprintf("apply failed: %v", applyErr),
+		UpdatedAt: now,
+	}
+	record := instanceRecordFromResult(request.Spec, ref, auditID, provider, nil, failedStatus, now, request.QuotaTxIDs)
+	if !o.hasTransactionalQuotaSupport() {
+		_ = o.store.UpsertStatus(ctx, record)
+		return
+	}
+	_ = o.metadataStore.WithTenantTx(ctx, func(txCtx context.Context, tx ports.MetadataTx) error {
+		if o.quotaService != nil && len(record.QuotaTxIDs) > 0 {
+			if cancelErr := o.quotaService.Cancel(txCtx, tx, record.QuotaTxIDs); cancelErr != nil {
+				slog.Error("markApplyFailed: quota Cancel failed, reserved quota may leak",
+					"instance_id", record.InstanceID,
+					"quota_tx_ids", record.QuotaTxIDs,
+					"apply_err", applyErr,
+					"cancel_err", cancelErr,
+				)
+			}
+		}
+		return o.storeTx.UpsertStatusTx(txCtx, tx, record)
+	})
+}
+
+// Delete releases quota and removes the instance (SPEC §5.1 FR-18). It calls
+// Quota.Release on the instance's QuotaTxIDs. When transactional support is
+// configured the Release and the status write commit atomically in the same
+// tenant transaction. When quota is disabled it only writes the status.
+// The caller is responsible for loading the current record before calling
+// Delete so the QuotaTxIDs are available.
+func (o *LocalInstanceOrchestrator) Delete(ctx context.Context, record ports.WorkloadInstanceRecord) error {
+	if o.store == nil {
+		return ports.ErrNotConfigured
+	}
+	now := o.now().UTC()
+	record.Status.State = ports.WorkloadStateDeleted
+	record.Status.UpdatedAt = now
+	record.UpdatedAt = now
+	if !o.hasTransactionalQuotaSupport() {
+		return o.store.UpsertStatus(ctx, record)
+	}
+	return o.metadataStore.WithTenantTx(ctx, func(txCtx context.Context, tx ports.MetadataTx) error {
+		if o.quotaService != nil && len(record.QuotaTxIDs) > 0 {
+			// Cancel releases reserved (if any, idempotent); Release releases
+			// used (if any, idempotent). Both are safe to call regardless of
+			// the original reservation state (SPEC §5.1 delete flow).
+			if err := o.quotaService.Cancel(txCtx, tx, record.QuotaTxIDs); err != nil {
+				return err
+			}
+			if err := o.quotaService.Release(txCtx, tx, record.QuotaTxIDs); err != nil {
+				return err
+			}
+		}
+		return o.storeTx.UpsertStatusTx(txCtx, tx, record)
+	})
+}
+
 var _ ports.WorkloadInstanceOrchestrator = (*LocalInstanceOrchestrator)(nil)
 
-func instanceRecordFromResult(spec ports.WorkloadSpec, ref ports.WorkloadRef, auditID string, provider string, resourceRefs []string, status ports.WorkloadStatus, createdAt time.Time) ports.WorkloadInstanceRecord {
+func instanceRecordFromResult(spec ports.WorkloadSpec, ref ports.WorkloadRef, auditID string, provider string, resourceRefs []string, status ports.WorkloadStatus, createdAt time.Time, quotaTxIDs []string) ports.WorkloadInstanceRecord {
 	status.Ref = ref
 	return ports.WorkloadInstanceRecord{
 		TenantID:           spec.TenantID,
@@ -257,6 +489,7 @@ func instanceRecordFromResult(spec ports.WorkloadSpec, ref ports.WorkloadRef, au
 		GPU:                gpuStatusInfo(spec, status),
 		Identity:           workloadIdentitySummary(spec.Identity),
 		ResourceRefs:       append([]string(nil), resourceRefs...),
+		QuotaTxIDs:         append([]string(nil), quotaTxIDs...),
 		Status:             status,
 		CreatedAt:          createdAt,
 		UpdatedAt:          firstNonZeroTime(status.UpdatedAt, createdAt),

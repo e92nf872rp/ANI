@@ -1136,6 +1136,144 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/platform-admins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 平台运营账号列表（需 platform-admin / platform-ops / platform-readonly） */
+        get: operations["listPlatformAdmins"];
+        put?: never;
+        /** 创建平台运营账号（需 platform-admin） */
+        post: operations["createPlatformAdmin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/platform-admins/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询可分配的平台角色与权限矩阵（需 platform-admin / platform-ops / platform-readonly） */
+        get: operations["listPlatformAdminRoles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/platform-admins/{userId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询平台运营账号详情（需 platform-admin / platform-ops / platform-readonly） */
+        get: operations["getPlatformAdmin"];
+        put?: never;
+        post?: never;
+        /** 软删除平台运营账号（需 platform-admin） */
+        delete: operations["deletePlatformAdmin"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/platform-admins/{userId}/role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 修改平台运营账号角色（需 platform-admin） */
+        put: operations["updatePlatformAdminRole"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/platform-admins/{userId}/reset-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 重置平台运营账号密码（需 platform-admin） */
+        post: operations["resetPlatformAdminPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/platform-admins/{userId}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 禁用平台运营账号（需 platform-admin） */
+        post: operations["disablePlatformAdmin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/platform-admins/{userId}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 启用平台运营账号（需 platform-admin） */
+        post: operations["enablePlatformAdmin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/platform-admins/{userId}/audit-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询平台运营账号操作历史（需 platform-admin / platform-ops / platform-readonly） */
+        get: operations["listPlatformAdminAuditLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenant-admins": {
         parameters: {
             query?: never;
@@ -2354,6 +2492,109 @@ export interface components {
             /** Format: uuid */
             id: string;
             message: string;
+        };
+        PlatformAdminListItem: {
+            /** Format: uuid */
+            id: string;
+            username: string;
+            display_name: string;
+            /** @enum {string} */
+            role: "platform-admin" | "platform-ops" | "platform-readonly";
+            /** @enum {string} */
+            status: "active" | "disabled";
+            /** @enum {string} */
+            source: "local" | "third_party";
+            /** Format: date-time */
+            last_login_at?: string | null;
+        };
+        PlatformAdminDetail: {
+            /** Format: uuid */
+            id: string;
+            /** Format: email */
+            email: string;
+            username: string;
+            display_name: string;
+            /** @enum {string} */
+            role: "platform-admin" | "platform-ops" | "platform-readonly";
+            /** @enum {string} */
+            status: "active" | "disabled";
+            /** @enum {string} */
+            source: "local" | "third_party";
+            /** Format: date-time */
+            last_login_at?: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        PlatformAdminListResponse: {
+            items: components["schemas"]["PlatformAdminListItem"][];
+            /** @description 下一页游标；null 表示已无更多数据 */
+            next_cursor?: string | null;
+        };
+        PlatformAdminCreateRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
+            /**
+             * Format: email
+             * @description RFC 5322
+             */
+            email: string;
+            /** @description 不含冒号 */
+            username: string;
+            display_name: string;
+            /** @enum {string} */
+            role: "platform-admin" | "platform-ops" | "platform-readonly";
+            /** @description 四类中至少三类 */
+            password: string;
+        };
+        PlatformAdminRoleUpdateRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
+            /** @enum {string} */
+            role: "platform-admin" | "platform-ops" | "platform-readonly";
+        };
+        PlatformRole: {
+            /** @enum {string} */
+            name: "platform-admin" | "platform-ops" | "platform-readonly";
+            label: string;
+            description: string;
+            permissions: {
+                /** @enum {string} */
+                tenant_ops: "read" | "write" | "none";
+                /** @enum {string} */
+                resource_pool: "read" | "write" | "none";
+                /** @enum {string} */
+                platform_user: "read" | "write" | "none";
+                /** @enum {string} */
+                audit_export: "read" | "write" | "none";
+            };
+        };
+        PlatformRoleListResponse: {
+            items: components["schemas"]["PlatformRole"][];
+        };
+        PlatformAdminAuditLog: {
+            /** Format: uuid */
+            id: string;
+            /** @description 如 platform_admin.create / change_role / reset_password / disable / enable / delete */
+            action: string;
+            resource: string;
+            /** @enum {string} */
+            result: "success" | "failed";
+            details?: {
+                [key: string]: unknown;
+            } | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        PlatformAdminAuditLogListResponse: {
+            items: components["schemas"]["PlatformAdminAuditLog"][];
+            /** @description 下一页游标；null 表示已无更多数据 */
+            next_cursor?: string | null;
         };
         TenantRef: {
             /** Format: uuid */
@@ -5059,6 +5300,331 @@ export interface operations {
             422: components["responses"]["UnprocessableEntity"];
             502: components["responses"]["BadGateway"];
             504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    listPlatformAdmins: {
+        parameters: {
+            query?: {
+                /** @description 每页数量 */
+                limit?: number;
+                /** @description 上一页返回的 next_cursor */
+                cursor?: string;
+                role?: "platform-admin" | "platform-ops" | "platform-readonly";
+                status?: "active" | "disabled";
+                /** @description 按 username 前缀过滤；oidc 结果在响应中映射为 third_party */
+                source?: "local" | "oidc";
+                /** @description 模糊匹配 email/username */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 平台运营账号列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformAdminListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createPlatformAdmin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformAdminCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description 平台运营账号已创建 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            /** @description VALIDATION_FAILED */
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description FORBIDDEN */
+            403: components["responses"]["Forbidden"];
+            /** @description ROLE_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+            /** @description EMAIL_ALREADY_EXISTS / USERNAME_ALREADY_EXISTS / IDEMPOTENCY_CONFLICT */
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listPlatformAdminRoles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 平台角色列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformRoleListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getPlatformAdmin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 平台运营账号详情 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformAdminDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description PLATFORM_USER_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deletePlatformAdmin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdempotentOnlyRequest"];
+            };
+        };
+        responses: {
+            /** @description 平台运营账号已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description FORBIDDEN */
+            403: components["responses"]["Forbidden"];
+            /** @description PLATFORM_USER_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+            /** @description IDEMPOTENCY_CONFLICT */
+            409: components["responses"]["Conflict"];
+            /** @description LAST_PLATFORM_ADMIN */
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    updatePlatformAdminRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformAdminRoleUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 平台运营账号角色已修改 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            /** @description VALIDATION_FAILED */
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description FORBIDDEN */
+            403: components["responses"]["Forbidden"];
+            /** @description PLATFORM_USER_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+            /** @description IDEMPOTENCY_CONFLICT */
+            409: components["responses"]["Conflict"];
+            /** @description ROLE_CHANGE_INVALID */
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    resetPlatformAdminPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResetPasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description 平台运营账号密码已重置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            /** @description VALIDATION_FAILED */
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description FORBIDDEN */
+            403: components["responses"]["Forbidden"];
+            /** @description PLATFORM_USER_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+            /** @description IDEMPOTENCY_CONFLICT */
+            409: components["responses"]["Conflict"];
+            /** @description PASSWORD_SAME_AS_OLD */
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    disablePlatformAdmin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdempotentOnlyRequest"];
+            };
+        };
+        responses: {
+            /** @description 平台运营账号已禁用 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description FORBIDDEN */
+            403: components["responses"]["Forbidden"];
+            /** @description PLATFORM_USER_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+            /** @description IDEMPOTENCY_CONFLICT */
+            409: components["responses"]["Conflict"];
+            /** @description LAST_PLATFORM_ADMIN */
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    enablePlatformAdmin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdempotentOnlyRequest"];
+            };
+        };
+        responses: {
+            /** @description 平台运营账号已启用 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdempotentResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description FORBIDDEN */
+            403: components["responses"]["Forbidden"];
+            /** @description PLATFORM_USER_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+            /** @description IDEMPOTENCY_CONFLICT */
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listPlatformAdminAuditLogs: {
+        parameters: {
+            query?: {
+                /** @description 每页数量 */
+                limit?: number;
+                /** @description 上一页返回的 next_cursor */
+                cursor?: string;
+                /** @description 过滤操作类型 */
+                action?: string;
+                result?: "success" | "failed";
+            };
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 平台运营账号操作历史 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformAdminAuditLogListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description PLATFORM_USER_NOT_FOUND */
+            404: components["responses"]["NotFound"];
         };
     };
     listAllTenantAdmins: {

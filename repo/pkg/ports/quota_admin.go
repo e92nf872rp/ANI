@@ -55,4 +55,32 @@ type QuotaAdminService interface {
 	DeleteTenantQuota(ctx context.Context, tenantID string) error
 	ListQuotaMeta(ctx context.Context) ([]QuotaMeta, error)
 	UpsertTenantQuota(ctx context.Context, tenantID string, items []QuotaItemInput) ([]QuotaInfo, error)
+	// PutReservation sets the tenant's allocated_gpu_count (BOSS reservation).
+	// allocated_gpu_count > total returns RESERVATION_EXCEEDS_QUOTA (422).
+	// Shrink is clamped to GREATEST(allocated, used+reserved); tightened=true.
+	PutReservation(ctx context.Context, idempotencyKey string, req ReservationPutRequest) (ReservationView, error)
+	// GetReservation returns the tenant's current reservation view.
+	GetReservation(ctx context.Context, tenantID string) (ReservationView, error)
+	// GetReservationTx returns the tenant's reservation view inside an
+	// externally-owned transaction. The adapter locks the
+	// resource_reservation_allocations row FOR UPDATE so the caller can
+	// serialise concurrent reservation checks (plan.md §6.3.1 闸 2).
+	GetReservationTx(ctx context.Context, tx MetadataTx, tenantID string) (ReservationView, error)
+}
+
+// ReservationPutRequest carries the BOSS reservation write.
+type ReservationPutRequest struct {
+	TenantID          string
+	AllocatedGPUCount int64
+}
+
+// ReservationView is the tenant reservation snapshot returned by
+// PutReservation and GetReservation (SPEC §4.4 ReservationView schema).
+type ReservationView struct {
+	TenantID          string
+	AllocatedGPUCount int64
+	Used              int64
+	Reserved          int64
+	Available         int64 // allocated - used - reserved
+	Tightened         bool
 }

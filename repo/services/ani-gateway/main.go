@@ -43,11 +43,6 @@ func main() {
 		logger.Error("failed to configure secret provider runtime", "err", err)
 		os.Exit(1)
 	}
-	gpuInventory, err := newGatewayGPUInventory(gatewayGPUInventoryRuntimeConfigFromEnv())
-	if err != nil {
-		logger.Error("failed to configure gpu inventory provider runtime", "err", err)
-		os.Exit(1)
-	}
 	kubernetesRESTClient, err := newGatewayKubernetesClient(gatewayGPUInventoryRuntimeConfigFromEnv())
 	if err != nil {
 		logger.Error("failed to configure kubernetes rest client for orphan discovery", "err", err)
@@ -92,6 +87,14 @@ func main() {
 			"shared_network_storage_registry", true,
 		)
 	}
+	if instanceRuntime.ReconcileController != nil {
+		go func() {
+			logger.Info("workload reconcile controller starting")
+			if err := instanceRuntime.ReconcileController.Start(runtimeCtx); err != nil {
+				logger.Error("workload reconcile controller stopped with error", "err", err)
+			}
+		}()
+	}
 	gpuSchedulingQueueStore, err := newGatewayGPUSchedulingQueueStore(gatewayGPUSchedulingQueueRuntimeConfigFromEnv())
 	if err != nil {
 		logger.Error("failed to configure gpu scheduling queue store runtime", "err", err)
@@ -100,6 +103,11 @@ func main() {
 	gpuInstanceStore, err := newGatewayGPUInstanceStore(runtimeCtx, gatewayGPUInstanceStoreConfigFromEnv())
 	if err != nil {
 		logger.Error("failed to configure gpu instance store runtime", "err", err)
+		os.Exit(1)
+	}
+	gpuSpecStore, err := newGatewayGPUSpecStore(gatewayGPUInventoryRuntimeConfigFromEnv())
+	if err != nil {
+		logger.Error("failed to configure gpu spec store runtime", "err", err)
 		os.Exit(1)
 	}
 	vectorStoreRuntimeConfig := gatewayVectorStoreRuntimeConfigFromEnv()
@@ -195,7 +203,7 @@ func main() {
 		logger.Error("failed to configure gateway authz", "err", err)
 		os.Exit(1)
 	}
-	quotaAdminService, closeQuotaStore, err := newGatewayQuotaStore(runtimeCtx)
+	quotaAdminService, quotaStoreService, quotaMetadataStore, closeQuotaStore, err := newGatewayQuotaStore(runtimeCtx)
 	if err != nil {
 		logger.Error("failed to configure quota admin store", "err", err)
 		os.Exit(1)
@@ -219,6 +227,11 @@ func main() {
 		os.Exit(1)
 	}
 	defer closeTenantStore()
+	gpuInventory, err := newGatewayGPUInventory(gatewayGPUInventoryRuntimeConfigFromEnv(), gpuSchedulingQueueStore, gpuSpecStore, quotaStoreService)
+	if err != nil {
+		logger.Error("failed to configure gpu inventory provider runtime", "err", err)
+		os.Exit(1)
+	}
 	var routeInstanceRuntime *router.InstanceRuntime
 	if instanceRuntime.Service != nil {
 		routeInstanceRuntime = &router.InstanceRuntime{
@@ -256,6 +269,9 @@ func main() {
 		QuotaAdminService:                     quotaAdminService,
 		PlatformWorkloadService:               platformWorkloadService,
 		TenantService:                         tenantService,
+		GPUSpecStore:                          gpuSpecStore,
+		MetadataStore:                         quotaMetadataStore,
+		QuotaStoreService:                     quotaStoreService,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

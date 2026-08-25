@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>224</dd></div>
-          <div><dt>Schemas</dt><dd>310</dd></div>
+          <div><dt>Operations</dt><dd>232</dd></div>
+          <div><dt>Schemas</dt><dd>316</dd></div>
         </dl>
       </section>
 
@@ -164,7 +164,7 @@
           <td><code>/admin/plans/bound-tenant-counts</code></td>
           <td><code>listPlanBoundTenantCounts</code></td>
           <td>按套餐统计绑定中的租户数</td>
-          <td><code>scope:quota:read</code></td>
+          <td><code>scope:tenant:read</code></td>
           <td>200, 400, 401, 403</td>
         </tr>
         <tr>
@@ -172,7 +172,7 @@
           <td><code>/admin/plans/{plan_id}/bindable-tenants</code></td>
           <td><code>listPlanBindableTenants</code></td>
           <td>查询可绑定指定套餐的租户摘要</td>
-          <td><code>scope:quota:read</code></td>
+          <td><code>scope:tenant:read</code></td>
           <td>200, 400, 401, 403</td>
         </tr>
         <tr>
@@ -180,8 +180,72 @@
           <td><code>/admin/plans/{plan_id}/bound-tenants</code></td>
           <td><code>listPlanBoundTenants</code></td>
           <td>查询绑定到指定套餐的租户摘要</td>
-          <td><code>scope:quota:read</code></td>
+          <td><code>scope:tenant:read</code></td>
           <td>200, 400, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/admin/platform-users</code></td>
+          <td><code>listPlatformUsers</code></td>
+          <td>平台运营账号列表</td>
+          <td><code>scope:users:read</code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/admin/platform-users</code></td>
+          <td><code>createPlatformUser</code></td>
+          <td>创建平台运营账号</td>
+          <td><code>scope:users:write</code></td>
+          <td>200, 400, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/admin/platform-users/{userId}</code></td>
+          <td><code>deletePlatformUser</code></td>
+          <td>软删除平台运营账号</td>
+          <td><code>scope:users:write</code></td>
+          <td>200, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/admin/platform-users/{userId}</code></td>
+          <td><code>getPlatformUser</code></td>
+          <td>查询平台运营账号详情</td>
+          <td><code>scope:users:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/admin/platform-users/{userId}/disable</code></td>
+          <td><code>disablePlatformUser</code></td>
+          <td>禁用平台运营账号</td>
+          <td><code>scope:users:write</code></td>
+          <td>200, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/admin/platform-users/{userId}/enable</code></td>
+          <td><code>enablePlatformUser</code></td>
+          <td>启用平台运营账号</td>
+          <td><code>scope:users:write</code></td>
+          <td>200, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/admin/platform-users/{userId}/reset-password</code></td>
+          <td><code>resetPlatformUserPassword</code></td>
+          <td>重置平台运营账号密码</td>
+          <td><code>scope:users:write</code></td>
+          <td>200, 400, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/admin/platform-users/{userId}/role</code></td>
+          <td><code>updatePlatformUserRole</code></td>
+          <td>修改平台运营账号角色</td>
+          <td><code>scope:users:write</code></td>
+          <td>200, 400, 401, 403, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -204,7 +268,7 @@
           <td><code>/admin/tenants/{tenant_id}</code></td>
           <td><code>getTenant</code></td>
           <td>查询租户（最小视图）</td>
-          <td><code>scope:quota:read</code></td>
+          <td><code>scope:tenant:read</code></td>
           <td>200, 401, 403, 404</td>
         </tr>
         <tr>
@@ -212,7 +276,7 @@
           <td><code>/admin/tenants/{tenant_id}/plan</code></td>
           <td><code>updateTenantPlan</code></td>
           <td>更新租户绑定套餐</td>
-          <td><code>scope:quota:write</code></td>
+          <td><code>scope:tenant:write</code></td>
           <td>200, 400, 401, 403, 404</td>
         </tr>
         <tr>
@@ -2119,6 +2183,12 @@
         <li><code>PlanBoundTenantCount</code></li>
         <li><code>PlanBoundTenantCountList</code></li>
         <li><code>PlatformPasswordLoginRequest</code></li>
+        <li><code>PlatformUser</code></li>
+        <li><code>PlatformUserCreateRequest</code></li>
+        <li><code>PlatformUserIdempotentRequest</code></li>
+        <li><code>PlatformUserListResponse</code></li>
+        <li><code>PlatformUserResetPasswordRequest</code></li>
+        <li><code>PlatformUserRoleUpdateRequest</code></li>
         <li><code>PlatformWorkload</code></li>
         <li><code>PlatformWorkloadAcceleratorCapability</code></li>
         <li><code>PlatformWorkloadAcceleratorResources</code></li>

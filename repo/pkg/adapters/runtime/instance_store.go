@@ -40,22 +40,37 @@ func (s *MetadataInstanceStore) UpsertStatus(ctx context.Context, record ports.W
 	if s.store == nil {
 		return ports.ErrNotConfigured
 	}
-	if strings.TrimSpace(record.TenantID) == "" {
-		return fmt.Errorf("%w: tenantID is required", ports.ErrInvalid)
+	if err := validateInstanceRecord(record); err != nil {
+		return err
 	}
-	if strings.TrimSpace(record.InstanceID) == "" {
-		return fmt.Errorf("%w: instanceID is required", ports.ErrInvalid)
-	}
-	if strings.TrimSpace(record.Name) == "" {
-		return fmt.Errorf("%w: name is required", ports.ErrInvalid)
-	}
-	if record.Kind == "" {
-		return fmt.Errorf("%w: workload kind is required", ports.ErrInvalid)
-	}
-	if record.Status.State == "" {
-		return fmt.Errorf("%w: workload state is required", ports.ErrInvalid)
-	}
+	return s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		return s.upsertStatusInTx(ctx, tx, record)
+	})
+}
 
+// UpsertStatusTx implements ports.WorkloadInstanceStoreTx (SPEC §3.2). It
+// writes the instance status inside an externally-owned MetadataTx so the
+// caller can commit it atomically with a quota Confirm/Cancel/Release in the
+// same transaction. The caller is responsible for opening the tenant-
+// scoped transaction (WithTenantTx) and injecting the TenantContext.
+func (s *MetadataInstanceStore) UpsertStatusTx(ctx context.Context, tx ports.MetadataTx, record ports.WorkloadInstanceRecord) error {
+	if s.store == nil {
+		return ports.ErrNotConfigured
+	}
+	if err := validateInstanceRecord(record); err != nil {
+		return err
+	}
+	if tx == nil {
+		return fmt.Errorf("%w: metadata tx is required for UpsertStatusTx", ports.ErrInvalid)
+	}
+	return s.upsertStatusInTx(ctx, tx, record)
+}
+
+// upsertStatusInTx runs the upsert SQL within the provided MetadataTx. It is
+// shared by UpsertStatus (which opens its own tenant tx) and UpsertStatusTx
+// (which runs in the caller's tx). The quota_tx_ids JSONB column is written
+// alongside the status so TCC tx_ids persist with the instance row.
+func (s *MetadataInstanceStore) upsertStatusInTx(ctx context.Context, tx ports.MetadataTx, record ports.WorkloadInstanceRecord) error {
 	resourceRefs, err := json.Marshal(record.ResourceRefs)
 	if err != nil {
 		return fmt.Errorf("marshal resource refs: %w", err)
@@ -116,64 +131,94 @@ func (s *MetadataInstanceStore) UpsertStatus(ctx context.Context, record ports.W
 	if err != nil {
 		return fmt.Errorf("marshal sandbox status: %w", err)
 	}
+	quotaTxIDs, err := json.Marshal(firstNonNilStringSlice(record.QuotaTxIDs))
+	if err != nil {
+		return fmt.Errorf("marshal quota tx ids: %w", err)
+	}
 	now := s.now().UTC()
 	createdAt := firstNonZeroTime(record.CreatedAt, now)
 	updatedAt := firstNonZeroTime(record.UpdatedAt, record.Status.UpdatedAt, now)
 
-	return s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
-		_, err := tx.Exec(ctx, `
-			INSERT INTO workload_instances (
-				tenant_id, instance_id, name, workload_kind, provider, audit_id,
-				provider_id, resource_refs, state, endpoint, node_name, reason,
-				networks, storage, lifecycle_policy, ssh_connection, snapshots, container_status, gpu_status,
-				description, labels, image_summary, compute_summary, network_summary, access_summary,
-				storage_attachments, sandbox_status, created_at, updated_at
-			)
-			VALUES (
-				$1::uuid, $2, $3, $4, NULLIF($5, ''), NULLIF($6, '')::uuid,
-				NULLIF($7, ''), $8::jsonb, $9, NULLIF($10, ''), NULLIF($11, ''),
-				NULLIF($12, ''), $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb, $17::jsonb, $18::jsonb, $19::jsonb,
-				NULLIF($20, ''), $21::jsonb, $22::jsonb, $23::jsonb, $24::jsonb, $25::jsonb,
-				$26::jsonb, $27::jsonb, $28, $29
-			)
-			ON CONFLICT (tenant_id, instance_id) DO UPDATE SET
-				name = EXCLUDED.name,
-				workload_kind = EXCLUDED.workload_kind,
-				provider = EXCLUDED.provider,
-				audit_id = EXCLUDED.audit_id,
-				provider_id = EXCLUDED.provider_id,
-				resource_refs = EXCLUDED.resource_refs,
-				state = EXCLUDED.state,
-				endpoint = EXCLUDED.endpoint,
-				node_name = EXCLUDED.node_name,
-				reason = EXCLUDED.reason,
-				networks = EXCLUDED.networks,
-				storage = EXCLUDED.storage,
-				lifecycle_policy = EXCLUDED.lifecycle_policy,
-				ssh_connection = EXCLUDED.ssh_connection,
-				snapshots = EXCLUDED.snapshots,
-				container_status = EXCLUDED.container_status,
-				gpu_status = EXCLUDED.gpu_status,
-				description = EXCLUDED.description,
-				labels = EXCLUDED.labels,
-				image_summary = EXCLUDED.image_summary,
-				compute_summary = EXCLUDED.compute_summary,
-				network_summary = EXCLUDED.network_summary,
-				access_summary = EXCLUDED.access_summary,
-				storage_attachments = EXCLUDED.storage_attachments,
-				sandbox_status = EXCLUDED.sandbox_status,
-				updated_at = EXCLUDED.updated_at
-		`, record.TenantID, record.InstanceID, record.Name, string(record.Kind), record.Provider,
-			record.AuditID, record.Status.Ref.ProviderID, string(resourceRefs), string(record.Status.State),
-			record.Status.Endpoint, record.Status.NodeName, record.Status.Reason, string(networks), string(storage),
-			string(lifecyclePolicy), string(sshConnection), string(snapshots), string(containerStatus), string(gpuStatus),
-			record.Description, string(labels), string(imageSummary), string(computeSummary), string(networkSummary),
-			string(accessSummary), string(storageAttachments), string(sandboxStatus), createdAt, updatedAt)
-		if err != nil {
-			return fmt.Errorf("upsert workload instance: %w", err)
-		}
-		return nil
-	})
+	_, err = tx.Exec(ctx, `
+		INSERT INTO workload_instances (
+			tenant_id, instance_id, name, workload_kind, provider, audit_id,
+			provider_id, resource_refs, state, endpoint, node_name, reason,
+			networks, storage, lifecycle_policy, ssh_connection, snapshots, container_status, gpu_status,
+			description, labels, image_summary, compute_summary, network_summary, access_summary,
+			storage_attachments, sandbox_status, quota_tx_ids, created_at, updated_at
+		)
+		VALUES (
+			$1::uuid, $2, $3, $4, NULLIF($5, ''), NULLIF($6, '')::uuid,
+			NULLIF($7, ''), $8::jsonb, $9, NULLIF($10, ''), NULLIF($11, ''),
+			NULLIF($12, ''), $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb, $17::jsonb, $18::jsonb, $19::jsonb,
+			NULLIF($20, ''), $21::jsonb, $22::jsonb, $23::jsonb, $24::jsonb, $25::jsonb,
+			$26::jsonb, $27::jsonb, $28::jsonb, $29, $30
+		)
+		ON CONFLICT (tenant_id, instance_id) DO UPDATE SET
+			name = EXCLUDED.name,
+			workload_kind = EXCLUDED.workload_kind,
+			provider = EXCLUDED.provider,
+			audit_id = EXCLUDED.audit_id,
+			provider_id = EXCLUDED.provider_id,
+			resource_refs = EXCLUDED.resource_refs,
+			state = EXCLUDED.state,
+			endpoint = EXCLUDED.endpoint,
+			node_name = EXCLUDED.node_name,
+			reason = EXCLUDED.reason,
+			networks = EXCLUDED.networks,
+			storage = EXCLUDED.storage,
+			lifecycle_policy = EXCLUDED.lifecycle_policy,
+			ssh_connection = EXCLUDED.ssh_connection,
+			snapshots = EXCLUDED.snapshots,
+			container_status = EXCLUDED.container_status,
+			gpu_status = EXCLUDED.gpu_status,
+			description = EXCLUDED.description,
+			labels = EXCLUDED.labels,
+			image_summary = EXCLUDED.image_summary,
+			compute_summary = EXCLUDED.compute_summary,
+			network_summary = EXCLUDED.network_summary,
+			access_summary = EXCLUDED.access_summary,
+			storage_attachments = EXCLUDED.storage_attachments,
+			sandbox_status = EXCLUDED.sandbox_status,
+			quota_tx_ids = EXCLUDED.quota_tx_ids,
+			updated_at = EXCLUDED.updated_at
+	`, record.TenantID, record.InstanceID, record.Name, string(record.Kind), record.Provider,
+		record.AuditID, record.Status.Ref.ProviderID, string(resourceRefs), string(record.Status.State),
+		record.Status.Endpoint, record.Status.NodeName, record.Status.Reason, string(networks), string(storage),
+		string(lifecyclePolicy), string(sshConnection), string(snapshots), string(containerStatus), string(gpuStatus),
+		record.Description, string(labels), string(imageSummary), string(computeSummary), string(networkSummary),
+		string(accessSummary), string(storageAttachments), string(sandboxStatus), string(quotaTxIDs), createdAt, updatedAt)
+	if err != nil {
+		return fmt.Errorf("upsert workload instance: %w", err)
+	}
+	return nil
+}
+
+// validateInstanceRecord checks the required fields for an upsert.
+func validateInstanceRecord(record ports.WorkloadInstanceRecord) error {
+	if strings.TrimSpace(record.TenantID) == "" {
+		return fmt.Errorf("%w: tenantID is required", ports.ErrInvalid)
+	}
+	if strings.TrimSpace(record.InstanceID) == "" {
+		return fmt.Errorf("%w: instanceID is required", ports.ErrInvalid)
+	}
+	if strings.TrimSpace(record.Name) == "" {
+		return fmt.Errorf("%w: name is required", ports.ErrInvalid)
+	}
+	if record.Kind == "" {
+		return fmt.Errorf("%w: workload kind is required", ports.ErrInvalid)
+	}
+	if record.Status.State == "" {
+		return fmt.Errorf("%w: workload state is required", ports.ErrInvalid)
+	}
+	return nil
+}
+
+func firstNonNilStringSlice(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
 }
 
 func (s *MetadataInstanceStore) Get(ctx context.Context, tenantID string, instanceID string) (ports.WorkloadInstanceRecord, error) {
@@ -192,7 +237,7 @@ func (s *MetadataInstanceStore) Get(ctx context.Context, tenantID string, instan
 				state, COALESCE(endpoint, ''), COALESCE(node_name, ''), COALESCE(reason, ''),
 				networks, storage, lifecycle_policy, ssh_connection, snapshots, container_status, gpu_status,
 				COALESCE(description, ''), labels, image_summary, compute_summary, network_summary,
-				access_summary, storage_attachments, sandbox_status, created_at, updated_at
+				access_summary, storage_attachments, sandbox_status, quota_tx_ids, created_at, updated_at
 			FROM workload_instances
 			WHERE tenant_id = $1::uuid AND instance_id = $2
 		`, tenantID, instanceID)
@@ -220,7 +265,7 @@ func (s *MetadataInstanceStore) List(ctx context.Context, tenantID string, kind 
 				state, COALESCE(endpoint, ''), COALESCE(node_name, ''), COALESCE(reason, ''),
 				networks, storage, lifecycle_policy, ssh_connection, snapshots, container_status, gpu_status,
 				COALESCE(description, ''), labels, image_summary, compute_summary, network_summary,
-				access_summary, storage_attachments, sandbox_status, created_at, updated_at
+				access_summary, storage_attachments, sandbox_status, quota_tx_ids, created_at, updated_at
 			FROM workload_instances
 			WHERE tenant_id = $1::uuid AND ($2 = '' OR workload_kind = $2)
 			ORDER BY updated_at DESC
@@ -312,6 +357,7 @@ func scanWorkloadInstance(row scanner, record *ports.WorkloadInstanceRecord) err
 	var accessSummaryJSON []byte
 	var storageAttachmentsJSON []byte
 	var sandboxStatusJSON []byte
+	var quotaTxIDsJSON []byte
 	if err := row.Scan(
 		&record.TenantID,
 		&record.InstanceID,
@@ -340,6 +386,7 @@ func scanWorkloadInstance(row scanner, record *ports.WorkloadInstanceRecord) err
 		&accessSummaryJSON,
 		&storageAttachmentsJSON,
 		&sandboxStatusJSON,
+		&quotaTxIDsJSON,
 		&record.CreatedAt,
 		&record.UpdatedAt,
 	); err != nil {
@@ -419,10 +466,16 @@ func scanWorkloadInstance(row scanner, record *ports.WorkloadInstanceRecord) err
 		}
 		record.Sandbox = &sandbox
 	}
+	if len(quotaTxIDsJSON) > 0 && string(quotaTxIDsJSON) != "null" {
+		if err := json.Unmarshal(quotaTxIDsJSON, &record.QuotaTxIDs); err != nil {
+			return fmt.Errorf("unmarshal quota tx ids: %w", err)
+		}
+	}
 	return nil
 }
 
 var _ ports.WorkloadInstanceStore = (*MetadataInstanceStore)(nil)
+var _ ports.WorkloadInstanceStoreTx = (*MetadataInstanceStore)(nil)
 var _ ports.ReconcileTargetLister = (*MetadataInstanceStore)(nil)
 
 func firstNonNilSSH(ssh *ports.VMSSHConnectionInfo) any {

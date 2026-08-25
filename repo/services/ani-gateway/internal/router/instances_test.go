@@ -88,6 +88,7 @@ func TestRegisterInstancesUsesInjectedRuntime(t *testing.T) {
 			Store:      injected.store,
 			Operations: injected.operations,
 		},
+		nil,
 	)
 
 	if got != injected.service {
@@ -644,7 +645,7 @@ func TestInstanceInstanceObservabilityResponsesUseLocalProfile(t *testing.T) {
 }
 
 func TestInstanceInstanceObservabilityCanUseInstanceNameForProviderTarget(t *testing.T) {
-	api := newInstanceAPIWithObservability(nil, true, nil, nil, nil)
+	api := newInstanceAPIWithObservability(nil, true, nil, nil, nil, nil)
 	spec, err := instanceSpecFromRequest(createInstanceRequest{Kind: "container", Name: "s07-observability-live"}, "tenant-a")
 	if err != nil {
 		t.Fatalf("instanceSpecFromRequest error = %v", err)
@@ -670,7 +671,7 @@ func TestInstanceInstanceObservabilityCanUseInstanceNameForProviderTarget(t *tes
 		t.Fatalf("observability target = %q, want instance name", got)
 	}
 
-	localAPI := newInstanceAPIWithObservability(nil, false, nil, nil, nil)
+	localAPI := newInstanceAPIWithObservability(nil, false, nil, nil, nil, nil)
 	if got := localAPI.observabilityTargetID(record); got != created.Ref.InstanceID {
 		t.Fatalf("local observability target = %q, want instance id %q", got, created.Ref.InstanceID)
 	}
@@ -1431,7 +1432,7 @@ func TestInstanceSpecFromRequestPrefersNestedConfigs(t *testing.T) {
 		Name: "gpu-config-path",
 		GPUContainerConfig: &gpuContainerConfigRequest{
 			Replicas: 2,
-			GPU:      createGPURequest{Vendor: "nvidia", Model: "H100", Count: 4},
+			GPU:      createGPURequest{Vendor: "nvidia", Model: "H100", Count: 4, QueueName: "ani-training", WorkloadClass: "training"},
 		},
 	}, "tenant-a")
 	if err != nil {
@@ -1442,6 +1443,12 @@ func TestInstanceSpecFromRequestPrefersNestedConfigs(t *testing.T) {
 	}
 	if gpuSpec.Resources.GPU.RequiredCount != 4 || len(gpuSpec.Resources.GPU.PreferredModels) != 1 || gpuSpec.Resources.GPU.PreferredModels[0] != "H100" {
 		t.Fatalf("gpu resources = %+v, want H100 count=4", gpuSpec.Resources.GPU)
+	}
+	if gpuSpec.Resources.GPU.QueueName != "ani-training" {
+		t.Fatalf("gpu queue_name = %q, want ani-training", gpuSpec.Resources.GPU.QueueName)
+	}
+	if gpuSpec.Resources.GPU.WorkloadClass != ports.WorkloadClassTraining {
+		t.Fatalf("gpu workload_class = %q, want training", gpuSpec.Resources.GPU.WorkloadClass)
 	}
 
 	sandboxSpec, err := instanceSpecFromRequest(createInstanceRequest{

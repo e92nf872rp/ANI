@@ -69,6 +69,85 @@ func TestKubernetesDryRunRendererRendersGPUDeployment(t *testing.T) {
 	}
 }
 
+// TestKubernetesDryRunRendererVolcanoAnnotationsOnPodTemplate verifies that
+// Volcano scheduling annotations (scheduling.volcano.sh/queue-name,
+// nodeSelector, resource requests) land on the PodTemplate metadata and NOT
+// on the top-level Deployment metadata, as required by Volcano (see
+// volcano-queue最小演示.md §8.4: annotation must be in
+// spec.template.metadata.annotations, not Deployment metadata.annotations).
+func TestKubernetesDryRunRendererVolcanoAnnotationsOnPodTemplate(t *testing.T) {
+	renderer := NewKubernetesDryRunRenderer(NewPlanningRuntime(WithGPUInventory(fakeGPUInventory{})))
+
+	nodeSelectorJSON := `{"ani.kubercloud.io/gpu-node":"true","kubernetes.io/hostname":"gpu-node-01"}`
+	resourceRequestJSON := `{"volcano.sh/vgpu-memory":"4096","volcano.sh/vgpu-number":"1"}`
+
+	manifests, err := renderer.Render(context.Background(), ports.WorkloadSpec{
+		TenantID: "tenant-a",
+		Name:     "gpu-volcano-01",
+		Kind:     ports.WorkloadKindGPUContainer,
+		Image:    "harbor/runtime:cuda",
+		Resources: ports.WorkloadResourceRequest{
+			GPU: ports.GPUSchedulingRequest{RequiredCount: 1},
+		},
+		Annotations: map[string]string{
+			"scheduling.volcano.sh/queue-name":            "ani-test-demo",
+			"ani.kubercloud.io/volcano-node-selector":     nodeSelectorJSON,
+			"ani.kubercloud.io/volcano-resource-requests": resourceRequestJSON,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	if len(manifests) < 1 || manifests[0].Kind != "Deployment" {
+		t.Fatalf("expected Deployment manifest, got %#v", manifests)
+	}
+
+	var deployment map[string]any
+	if err := json.Unmarshal([]byte(manifests[0].Content), &deployment); err != nil {
+		t.Fatalf("unmarshal deployment = %v", err)
+	}
+
+	topMeta := deployment["metadata"].(map[string]any)
+	topAnnotations := topMeta["annotations"].(map[string]any)
+	if _, ok := topAnnotations["scheduling.volcano.sh/queue-name"]; ok {
+		t.Fatalf("scheduling.volcano.sh/queue-name must NOT appear on top-level Deployment metadata:\n%s", manifests[0].Content)
+	}
+	if _, ok := topAnnotations["ani.kubercloud.io/volcano-node-selector"]; ok {
+		t.Fatalf("volcano-node-selector must NOT appear on top-level Deployment metadata:\n%s", manifests[0].Content)
+	}
+
+	spec := deployment["spec"].(map[string]any)
+	podTemplate := spec["template"].(map[string]any)
+	podMeta := podTemplate["metadata"].(map[string]any)
+	podAnnotations := podMeta["annotations"].(map[string]any)
+
+	if podAnnotations["scheduling.volcano.sh/queue-name"] != "ani-test-demo" {
+		t.Fatalf("PodTemplate annotations missing scheduling.volcano.sh/queue-name=ani-test-demo:\n%s", manifests[0].Content)
+	}
+
+	podSpec := podTemplate["spec"].(map[string]any)
+	nodeSelector, ok := podSpec["nodeSelector"].(map[string]any)
+	if !ok {
+		t.Fatalf("PodTemplate spec missing nodeSelector:\n%s", manifests[0].Content)
+	}
+	if nodeSelector["ani.kubercloud.io/gpu-node"] != "true" {
+		t.Fatalf("nodeSelector missing ani.kubercloud.io/gpu-node=true:\n%s", manifests[0].Content)
+	}
+	if nodeSelector["kubernetes.io/hostname"] != "gpu-node-01" {
+		t.Fatalf("nodeSelector missing kubernetes.io/hostname=gpu-node-01:\n%s", manifests[0].Content)
+	}
+
+	container := podSpec["containers"].([]any)[0].(map[string]any)
+	resources := container["resources"].(map[string]any)
+	limits := resources["limits"].(map[string]any)
+	if limits["volcano.sh/vgpu-memory"] != "4096" {
+		t.Fatalf("container limits missing volcano.sh/vgpu-memory=4096:\n%s", manifests[0].Content)
+	}
+	if limits["volcano.sh/vgpu-number"] != "1" {
+		t.Fatalf("container limits missing volcano.sh/vgpu-number=1:\n%s", manifests[0].Content)
+	}
+}
+
 func TestKubernetesDryRunRendererInjectsWorkloadIdentityEnvFromSecret(t *testing.T) {
 	renderer := NewKubernetesDryRunRenderer(NewPlanningRuntime())
 

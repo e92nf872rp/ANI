@@ -84,7 +84,10 @@ export interface paths {
         /** 获取推理服务列表 */
         get: operations["listInferenceServices"];
         put?: never;
-        /** 部署推理服务 */
+        /**
+         * 部署推理服务
+         * @description 接受后立即返回 pending 资源；current_operation_id 用于查询持久化 operation，P0 不返回可调用 URL。
+         */
         post: operations["createInferenceService"];
         delete?: never;
         options?: never;
@@ -103,8 +106,55 @@ export interface paths {
         get: operations["getInferenceService"];
         put?: never;
         post?: never;
-        /** 停止并删除推理服务 */
+        /**
+         * 停止并删除推理服务
+         * @description 为保持 v1 兼容不新增必填幂等键；服务按 service_id + desired_state=deleted 去重。
+         */
         delete: operations["deleteInferenceService"];
+        options?: never;
+        head?: never;
+        /**
+         * 修改推理服务副本数
+         * @description P0 只允许修改独立副本数；multi_node 固定 replicas=1，其他资源和 placement 均不可变。
+         */
+        patch: operations["updateInferenceService"];
+        trace?: never;
+    };
+    "/inference-services/{service_id}/lifecycle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 执行推理服务生命周期动作
+         * @description start、stop 和 restart 均由持久化 operation 与 reconciler 异步收敛。
+         */
+        post: operations["applyInferenceServiceLifecycle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inference-operations/{operation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询推理服务异步操作
+         * @description 只返回当前租户所拥有推理服务的 Services operation，不暴露 Core AsyncTask 标识或内容。
+         */
+        get: operations["getInferenceOperation"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -152,7 +202,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** 更新推理服务限流与访问策略 */
+        /**
+         * 更新推理服务限流与访问策略
+         * @description P1 兼容预留路径；P0 未建设调用网关，真实 handler 必须返回 501 FEATURE_NOT_AVAILABLE，不得伪造策略已生效。
+         */
         put: operations["updateInferenceServicePolicies"];
         post?: never;
         delete?: never;
@@ -918,7 +971,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 查询套餐列表 */
+        /** 查询套餐列表（需 platform-admin / platform-ops / platform-readonly） */
         get: operations["listTenantPlans"];
         put?: never;
         /** 创建套餐（需 platform-admin / platform-ops） */
@@ -955,7 +1008,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 查询套餐限额（需 platform-admin / platform-ops / platform-readonly） */
+        /**
+         * 查询套餐限额（需 platform-admin / platform-ops / platform-readonly）
+         * @description 返回 plan_quota_limits 与 Core 启用维度的交集视图； 库中 total 为 NULL 时用 default_quota 兜底展示，并 best-effort 回写（回写失败不影响查询）。
+         */
         get: operations["getTenantPlanQuotaLimits"];
         /** 修改套餐限额（同步存量租户）（需 platform-admin / platform-ops） */
         put: operations["updateTenantPlanQuotaLimits"];
@@ -975,7 +1031,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 发布套餐（需 platform-admin / platform-ops） */
+        /**
+         * 发布套餐（需 platform-admin / platform-ops）
+         * @description draft/disabled → active；幂等键必传（body 或 Idempotency-Key 头）
+         */
         post: operations["activateTenantPlan"];
         delete?: never;
         options?: never;
@@ -992,7 +1051,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 禁用套餐（需 platform-admin / platform-ops） */
+        /**
+         * 禁用套餐（需 platform-admin / platform-ops）
+         * @description active → disabled；幂等键必传（body 或 Idempotency-Key 头）
+         */
         post: operations["disableTenantPlan"];
         delete?: never;
         options?: never;
@@ -1007,7 +1069,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 查询套餐绑定的租户列表（需 platform-admin / platform-ops / platform-readonly） */
+        /**
+         * 查询套餐绑定的租户列表（需 platform-admin / platform-ops / platform-readonly）
+         * @description 返回已绑定该套餐且 status≠disabled 的租户摘要（不分页，按 name 排序）。
+         */
         get: operations["listTenantPlanBoundTenants"];
         put?: never;
         post?: never;
@@ -1026,7 +1091,7 @@ export interface paths {
         };
         /**
          * 查询可绑定该套餐的租户列表（需 platform-admin / platform-ops / platform-readonly）
-         * @description 返回 status≠disabled 且尚未绑定该套餐（plan_id ≠ planId，含未绑定其它套餐）的租户摘要， 按 name 排序。
+         * @description 返回 status≠disabled 且尚未绑定该套餐（plan_id IS DISTINCT FROM planId，含未绑定其它套餐）的租户摘要，按 name 排序。
          */
         get: operations["listBindableTenants"];
         put?: never;
@@ -1151,6 +1216,23 @@ export interface paths {
         get: operations["getTenantAdminRole"];
         /** 修改管理员角色（需 platform-admin / platform-ops） */
         put: operations["updateTenantAdminRole"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenantId}/admins/{userId}/changeable-roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询可变更角色选项（排除 tenant-owner）（需 platform-admin / platform-ops / platform-readonly） */
+        get: operations["getChangeableRoles"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -1309,19 +1391,177 @@ export interface components {
             /** Format: uuid */
             id: string;
             name: string;
+            /** @description 创建时冻结的模型名称与版本展示快照 */
             model: string;
+            /**
+             * Format: uuid
+             * @description 实际部署的不可变模型版本
+             */
+            model_version_id?: string;
+            /** @description 创建时从镜像仓库选定的 Registry 镜像 ID；手填 image_ref 时可为缺省 */
+            image_id?: string;
+            /** @description 创建时解析并冻结的 digest 引用；只读 */
+            image_ref?: string | null;
+            /** @description 集群内 OpenAI-compatible 请求使用的 model 值，不代表公网路由 */
+            served_model_name?: string;
             /** @default 1 */
             replicas: number;
+            /** @default 0 */
+            ready_replicas: number;
+            resources?: components["schemas"]["InferenceServiceResources"];
+            /**
+             * @default auto
+             * @enum {string}
+             */
+            placement_mode: "auto" | "single_node" | "multi_node";
+            /** @description 创建时冻结的前端环境变量与完整启动命令；省略表示无租户 env/command。不进入 PATCH */
+            engine?: components["schemas"]["InferenceServiceEngine"];
+            /**
+             * @deprecated
+             * @description v1 兼容投影；新客户端使用 resources.accelerator.spec_id
+             */
             gpu_type?: string | null;
-            /** @default 1 */
+            /**
+             * @deprecated
+             * @description v1 兼容投影；不再是资源规格权威字段
+             * @default 1
+             */
             gpu_count_per_pod: number;
-            /** @default 8 */
+            /**
+             * @deprecated
+             * @description v1 兼容投影；P0 不执行
+             * @default 8
+             */
             max_concurrency: number;
             /** @enum {string} */
             status: "pending" | "deploying" | "running" | "stopping" | "stopped" | "failed";
+            /** @description 稳定的机器可读状态原因码 */
+            status_reason?: string | null;
+            /** @description 脱敏的人类可读状态说明 */
+            status_message?: string | null;
+            generation?: number;
+            observed_generation?: number;
+            /** Format: uuid */
+            current_operation_id?: string | null;
+            /**
+             * Format: uri
+             * @description P0 未建设调用网关，固定返回 null
+             */
+            invocation_url?: string | null;
+            /**
+             * Format: uri
+             * @deprecated
+             * @description v1 兼容字段；P0 固定返回 null，不得返回 ClusterIP 地址
+             */
             endpoint_url?: string | null;
             /** Format: date-time */
             created_at: string;
+            /** Format: date-time */
+            updated_at?: string | null;
+        };
+        /**
+         * @description 推理服务每个副本申请的加速器资源。
+         *     spec_id 是 GPU 型号，count_per_replica 是申请卡数，memory 是申请显存（MiB）。
+         *     不填 memory 为整卡，填写 memory 为 vGPU。
+         */
+        InferenceServiceAccelerator: {
+            /** @description GPU 型号，例如 gpu-nvidia-geforce-rtx-4090。只表示型号。历史 -full/-Nx ID 实现剥掉后缀后仍按型号处理。 */
+            spec_id: string;
+            /** @description 每个独立副本或 leader-worker group 的申请卡数。整卡和 vGPU 都必填，最小为 1。 */
+            count_per_replica: number;
+            /** @description 申请显存，单位 MiB。这是 GPU 显存，不是 resources.memory 的内存预算。省略为整卡；填写为 vGPU。 */
+            memory?: number;
+        };
+        InferenceServiceResources: {
+            /** @description 每个单节点 Pod 或跨节点 group 的 CPU 预算 */
+            cpu: string;
+            /** @description 每个单节点 Pod 或跨节点 group 的内存预算 */
+            memory: string;
+            accelerator?: components["schemas"]["InferenceServiceAccelerator"];
+        };
+        /**
+         * @description 前端传入的单个环境变量。创建时冻结。不是 shell 赋值。
+         *     命中平台保留名时实现返回 400 INVALID_ARGUMENT。
+         */
+        InferenceServiceEngineEnvVar: {
+            /** @description 环境变量名 */
+            name: string;
+            /** @description 环境变量值 */
+            value: string;
+        };
+        /**
+         * @description 前端在创建请求中传入的环境变量与完整启动命令，创建时冻结，只读回显。
+         *     `command` 是完整 argv，原样作为容器启动命令，不与平台默认 command 拼接、不追加。
+         *     平台仍独占 GPU/Ray 运行时环境变量；命中保留 env 名时实现返回 400 INVALID_ARGUMENT。
+         *     不是 shell 字符串。不进入 PATCH。
+         */
+        InferenceServiceEngine: {
+            /** @description 前端传入的环境变量；省略或空数组表示不追加租户环境变量 */
+            env?: components["schemas"]["InferenceServiceEngineEnvVar"][];
+            /**
+             * @description 前端传入的完整启动命令（argv），例如
+             *     ["python3","-m","vllm.entrypoints.openai.api_server","--model","/models/qwen","--host","0.0.0.0","--port","8000"]。
+             *     原样作为容器启动命令，不拼接、不追加平台默认 command。省略表示沿用平台默认启动命令。
+             */
+            command?: string[];
+        };
+        /**
+         * @description 镜像来源二选一，也可同时传：image_id 从镜像仓库选择，image_ref 由用户直接输入。
+         *     同时传入时优先 image_id。创建前固定 digest；两者都缺时由实现返回 400 INVALID_ARGUMENT。
+         */
+        CreateInferenceServiceRequest: {
+            /** Format: uuid */
+            idempotency_key: string;
+            name: string;
+            /** @description v1 兼容必填字段；新客户端传稳定模型版本 UUID */
+            model: string;
+            /**
+             * Format: uuid
+             * @description 与 model 指向同一不可变版本
+             */
+            model_version_id?: string;
+            /** @description 镜像仓库 Registry 镜像 ID；与 image_ref 至少填一个，同时传入时优先 image_id。创建前固定 digest。 */
+            image_id?: string;
+            /** @description 用户直接输入的镜像引用；与 image_id 至少填一个，同时传入时优先 image_id。创建前固定 digest。 */
+            image_ref?: string;
+            /** @description 默认使用服务 name，创建后不可变 */
+            served_model_name?: string;
+            /** @description 省略时服务按 1 个副本处理 */
+            replicas?: number;
+            resources?: components["schemas"]["InferenceServiceResources"];
+            /**
+             * @description 省略时服务按 auto 处理
+             * @enum {string}
+             */
+            placement_mode?: "auto" | "single_node" | "multi_node";
+            /** @description 可选；前端传入 env 与完整启动命令 command，创建时冻结。省略表示沿用平台默认启动命令和环境 */
+            engine?: components["schemas"]["InferenceServiceEngine"];
+            /**
+             * @deprecated
+             * @description v1 兼容输入；新客户端不得发送
+             */
+            gpu_type?: string;
+            /**
+             * @deprecated
+             * @description v1 兼容输入；单独出现时不得推断为 GPU
+             */
+            gpu_count_per_pod?: number;
+            /**
+             * @deprecated
+             * @description v1 兼容输入；P0 不执行
+             */
+            max_concurrency?: number;
+        };
+        UpdateInferenceServiceRequest: {
+            /** Format: uuid */
+            idempotency_key: string;
+            replicas: number;
+        };
+        InferenceServiceLifecycleRequest: {
+            /** Format: uuid */
+            idempotency_key: string;
+            /** @enum {string} */
+            action: "start" | "stop" | "restart";
         };
         CreateModelRequest: {
             /**
@@ -1334,6 +1574,10 @@ export interface components {
             source: "upload" | "huggingface" | "modelscope";
             source_url?: string;
         };
+        /**
+         * @deprecated
+         * @description 遗留且未绑定 path 的 schema；不是第二种推理产品资源，新实现必须使用 InferenceService
+         */
         InferenceEndpoint: {
             /** Format: uuid */
             id: string;
@@ -1349,6 +1593,10 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
+        /**
+         * @deprecated
+         * @description 遗留且未绑定 path 的 schema；新客户端不得引用，后续主版本删除
+         */
         CreateInferenceEndpointRequest: {
             /** Format: uuid */
             idempotency_key: string;
@@ -1938,14 +2186,18 @@ export interface components {
             code: string;
             /** @description 套餐名称 */
             name: string;
-            description?: string | null;
+            /** @description 套餐说明；网关 JSON 始终包含该字段（空则为 null） */
+            description: string | null;
             /** @enum {string} */
             status: "draft" | "active" | "disabled";
-            /** @description 绑定租户数量 */
+            /**
+             * Format: int64
+             * @description 绑定租户数量（status≠disabled）
+             */
             tenant_count: number;
-            /** Format: date-time */
+            /** @description 展示时间 YYYY-MM-DD HH:mm:ss（Asia/Shanghai）；非 RFC3339 */
             created_at: string;
-            /** Format: date-time */
+            /** @description 展示时间 YYYY-MM-DD HH:mm:ss（Asia/Shanghai）；非 RFC3339 */
             updated_at: string;
         };
         TenantPlanListItem: {
@@ -1953,32 +2205,40 @@ export interface components {
             id: string;
             code: string;
             name: string;
+            /** @description 套餐说明；网关 JSON 始终包含该字段（空则为 null） */
+            description: string | null;
             /** @enum {string} */
             status: "draft" | "active" | "disabled";
+            /** Format: int64 */
             tenant_count: number;
-            /** Format: date-time */
+            /** @description 展示时间 YYYY-MM-DD HH:mm:ss（Asia/Shanghai）；非 RFC3339 */
             created_at: string;
-            /** Format: date-time */
+            /** @description 展示时间 YYYY-MM-DD HH:mm:ss（Asia/Shanghai）；非 RFC3339 */
             updated_at: string;
         };
         TenantPlanListResponse: {
             items: components["schemas"]["TenantPlanListItem"][];
-            /** @description 满足筛选条件的总条数（用于前端分页） */
-            total?: number;
-            /** @description 下一页游标；null 表示已无更多数据 */
-            next_cursor?: string | null;
+            /**
+             * Format: int64
+             * @description 满足筛选条件的总条数（用于前端分页）
+             */
+            total: number;
+            /** @description 下一页游标；null 表示已无更多数据（网关将空串映射为 null） */
+            next_cursor: string | null;
         };
         CreateTenantPlanRequest: {
             /**
              * Format: uuid
-             * @description 客户端生成UUID，防重复提交
+             * @description 客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落；皆空时服务端仍接受，幂等中间件跳过）
              */
             idempotency_key: string;
-            /** @description 套餐代码；无格式限制，未删除套餐内唯一 */
+            /** @description 套餐代码；小写字母/数字/连字符，长度 3–40；未删除套餐内唯一 */
             code: string;
+            /** @description 按 Unicode 码点计长度 1–64 */
             name: string;
+            /** @description 按 Unicode 码点计长度 ≤512；空串落库为 NULL */
             description?: string;
-            /** @description 各维度配额上限；total 为 null 表示用 default_quota */
+            /** @description 可选；缺省或空数组表示不写限额行。total 为 null 时服务端用 default_quota 物化写入（落库为具体数值，不保留 NULL） */
             quota_limits?: components["schemas"]["PlanQuotaLimitInput"][];
         };
         PlanQuotaLimitInput: {
@@ -1986,7 +2246,7 @@ export interface components {
             resource_type: string;
             /**
              * Format: int64
-             * @description 限额值；null = 用 default_quota
+             * @description 限额值；null = 服务端用 default_quota 物化落库（不保留 NULL）
              */
             total?: number | null;
         };
@@ -1998,7 +2258,7 @@ export interface components {
             unit: string;
             /**
              * Format: int64
-             * @description 展示限额值；未显式设置时已用 resource_quota_meta.default_quota 兜底为具体数值，不返回 null
+             * @description 展示限额值；写入已物化或查询路径用 default_quota 兜底，不返回 null
              */
             total: number;
         };
@@ -2021,32 +2281,41 @@ export interface components {
         UpdateQuotaLimitsRequest: {
             /**
              * Format: uuid
-             * @description 客户端生成UUID，防重复提交
+             * @description 客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落；皆空时中间件跳过）
              */
             idempotency_key: string;
             items: components["schemas"]["PlanQuotaLimitInput"][];
         };
-        /** @description 更新套餐基本信息。name / description 均为可选： 未传或 null 表示不更新；传空串表示清空。 */
+        /** @description 更新套餐基本信息。name / description 均为可选： 未传或 null 表示不更新；name 不允许传空串（服务端校验返回 VALIDATION_FAILED）， description 传空串表示清空。 长度按 Unicode 码点校验（与服务端 utf8.RuneCountInString 一致）。 */
         UpdateTenantPlanRequest: {
             /**
              * Format: uuid
-             * @description 可选；客户端生成UUID，防重复提交
+             * @description 客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落；皆空时中间件跳过）
              */
-            idempotency_key?: string;
-            /** @description 未传/null=不更新；空串=清空 */
+            idempotency_key: string;
+            /** @description 未传/null=不更新；不允许空串；长度 1-64（Unicode 码点） */
             name?: string | null;
-            /** @description 未传/null=不更新；空串=清空 */
+            /** @description 未传/null=不更新；空串=清空；长度 ≤512（Unicode 码点） */
             description?: string | null;
+        };
+        /** @description 套餐发布/禁用请求体。幂等键可放 body.idempotency_key， 或请求头 Idempotency-Key（body 缺省时网关回落）。 */
+        TenantPlanStateChangeRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落）
+             */
+            idempotency_key: string;
         };
         BindPlanRequest: {
             /**
              * Format: uuid
-             * @description 客户端生成UUID，防重复提交
+             * @description 客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落；皆空时中间件跳过）
              */
             idempotency_key: string;
             /** Format: uuid */
             plan_id: string;
         };
+        /** @description 租户摘要。绑定列表与可绑定列表均只返回 status≠disabled 的租户； 枚举仍含 disabled 以便与租户状态机一致。 */
         BoundTenant: {
             /** Format: uuid */
             id: string;
@@ -2058,25 +2327,28 @@ export interface components {
         BoundTenantsResponse: {
             items: components["schemas"]["BoundTenant"][];
         };
-        /** @description 套餐操作历史摘要（id / action / result / details / created_at） */
+        /** @description 套餐操作历史摘要；网关 JSON 始终包含 details（无则为 null） */
         PlanAuditLog: {
             /** Format: uuid */
             id: string;
             action: string;
             /** @enum {string} */
             result: "success" | "failure";
-            details?: {
+            details: {
                 [key: string]: unknown;
             } | null;
-            /** Format: date-time */
+            /** @description 展示时间 YYYY-MM-DD HH:mm:ss（Asia/Shanghai）；非 RFC3339 */
             created_at: string;
         };
         PlanAuditLogListResponse: {
             items: components["schemas"]["PlanAuditLog"][];
-            /** @description 满足筛选条件的总条数（用于前端分页） */
-            total?: number;
-            /** @description 下一页游标；null 表示已无更多数据 */
-            next_cursor?: string | null;
+            /**
+             * Format: int64
+             * @description 满足筛选条件的总条数（用于前端分页）
+             */
+            total: number;
+            /** @description 下一页游标；null 表示已无更多数据（网关将空串映射为 null） */
+            next_cursor: string | null;
         };
         IdempotentResult: {
             /** Format: uuid */
@@ -2185,6 +2457,17 @@ export interface components {
                 transfer: "read" | "write" | "none";
             };
         };
+        /** @description 可变更角色选项（当前为 tenant-owner 时 changeable_roles 为空） */
+        ChangeableRolesResponse: {
+            /** @enum {string} */
+            current_role: "tenant-owner" | "tenant-admin" | "user" | "auditor";
+            changeable_roles: {
+                /** @enum {string} */
+                role: "user" | "auditor" | "tenant-admin";
+                /** @description 展示名（普通成员 / 审计员 / 租户管理员） */
+                label: string;
+            }[];
+        };
         TenantAdminAuditLog: {
             /** Format: uuid */
             id: string;
@@ -2192,7 +2475,7 @@ export interface components {
             action: string;
             resource: string;
             /** @enum {string} */
-            result: "success" | "failed";
+            result: "success" | "failure";
             /** Format: uuid */
             user_id?: string | null;
             details?: {
@@ -2260,11 +2543,11 @@ export interface components {
             /** @description 四类中至少三类，须与旧密码不同（HTTPS，明文不落日志） */
             new_password: string;
         };
-        /** @description 仅含幂等键的请求体（用于 disable/enable） */
+        /** @description 仅含幂等键的请求体（用于租户管理员 disable/enable 等） */
         IdempotentOnlyRequest: {
             /**
              * Format: uuid
-             * @description 客户端生成UUID，防重复提交
+             * @description 客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落）
              */
             idempotency_key: string;
         };
@@ -2326,6 +2609,85 @@ export interface components {
         };
         /** @description 前置条件不满足，code 可为 QUOTA_RESOURCE_NOT_REGISTERED（配额维度未注册或已禁用）或 PLAN_NOT_ACTIVE（绑定套餐时套餐状态非 active） */
         UnprocessableEntity: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 推理服务请求参数或字段组合非法（code=INVALID_ARGUMENT） */
+        InferenceBadRequest: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 推理服务名称、幂等键或活动操作冲突 */
+        InferenceConflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 推理服务前置条件不满足；code 为 MODEL_NOT_READY、MODEL_INCOMPATIBLE、ACCELERATOR_SPEC_UNAVAILABLE、INSUFFICIENT_CAPACITY、UNSUPPORTED_TOPOLOGY、INVALID_STATE_TRANSITION 或 IMAGE_UNAVAILABLE */
+        InferenceUnprocessableEntity: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 当前版本尚未提供该能力（code=FEATURE_NOT_AVAILABLE） */
+        FeatureNotAvailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 推理服务依赖暂时不可用（code=DEPENDENCY_UNAVAILABLE） */
+        ServiceUnavailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 推理 runtime 返回异常（code=RUNTIME_ERROR） */
+        RuntimeError: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 推理 runtime 调用超时（code=RUNTIME_TIMEOUT） */
+        RuntimeTimeout: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content?: never;
+        };
+        /** @description 下游不可用（code=GRPC_CLIENT_UNAVAILABLE；tenant-service 或 Core 配额 API） */
+        BadGateway: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 下游超时（code=GATEWAY_TIMEOUT） */
+        GatewayTimeout: {
             headers: {
                 [name: string]: unknown;
             };
@@ -2544,6 +2906,8 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     createInferenceService: {
@@ -2555,19 +2919,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    /** Format: uuid */
-                    idempotency_key: string;
-                    name: string;
-                    model: string;
-                    /** @default 1 */
-                    replicas?: number;
-                    gpu_type?: string;
-                    /** @default 1 */
-                    gpu_count_per_pod?: number;
-                    /** @default 8 */
-                    max_concurrency?: number;
-                };
+                "application/json": components["schemas"]["CreateInferenceServiceRequest"];
             };
         };
         responses: {
@@ -2580,6 +2932,12 @@ export interface operations {
                     "application/json": components["schemas"]["InferenceService"];
                 };
             };
+            400: components["responses"]["InferenceBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["InferenceConflict"];
+            422: components["responses"]["InferenceUnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getInferenceService: {
@@ -2602,6 +2960,8 @@ export interface operations {
                     "application/json": components["schemas"]["InferenceService"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -2618,6 +2978,99 @@ export interface operations {
         responses: {
             /** @description 停止任务已提交 */
             202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["InferenceConflict"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateInferenceService: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                service_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateInferenceServiceRequest"];
+            };
+        };
+        responses: {
+            /** @description 推理服务伸缩操作已接受 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            400: components["responses"]["InferenceBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["InferenceConflict"];
+            422: components["responses"]["InferenceUnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    applyInferenceServiceLifecycle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                service_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InferenceServiceLifecycleRequest"];
+            };
+        };
+        responses: {
+            /** @description 生命周期操作已接受 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            400: components["responses"]["InferenceBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["InferenceConflict"];
+            422: components["responses"]["InferenceUnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getInferenceOperation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 推理服务异步操作 */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2683,10 +3136,14 @@ export interface operations {
                     "application/json": components["schemas"]["InferenceTestResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["InferenceBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            422: components["responses"]["InferenceUnprocessableEntity"];
+            502: components["responses"]["RuntimeError"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["RuntimeTimeout"];
         };
     };
     updateInferenceServicePolicies: {
@@ -2717,6 +3174,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            501: components["responses"]["FeatureNotAvailable"];
         };
     };
     listKnowledgeBases: {
@@ -4155,7 +4613,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description 启用维度元数据列表 */
+            /** @description 可用配额维度列表（仅 enabled） */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4166,15 +4624,8 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Core 或下游不可用 */
-            502: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     listTenantPlans: {
@@ -4203,8 +4654,12 @@ export interface operations {
                     "application/json": components["schemas"]["TenantPlanListResponse"];
                 };
             };
+            /** @description VALIDATION_FAILED（如 status 非法 / cursor 非法） */
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     createTenantPlan: {
@@ -4220,7 +4675,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 套餐已创建 */
+            /** @description 套餐已创建（message 如 "tenant plan created"） */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4232,8 +4687,11 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description PLAN_CODE_CONFLICT 或 IDEMPOTENCY_KEY_REUSED */
             409: components["responses"]["Conflict"];
             422: components["responses"]["UnprocessableEntity"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     getTenantPlan: {
@@ -4256,9 +4714,14 @@ export interface operations {
                     "application/json": components["schemas"]["TenantPlan"];
                 };
             };
+            /** @description VALIDATION_FAILED（planId 非 UUID） */
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description TENANT_PLAN_NOT_FOUND */
             404: components["responses"]["NotFound"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     updateTenantPlan: {
@@ -4276,7 +4739,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 套餐已更新 */
+            /** @description 套餐基本信息已更新（message 如 "tenant plan updated"） */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4288,7 +4751,12 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description TENANT_PLAN_NOT_FOUND */
             404: components["responses"]["NotFound"];
+            /** @description IDEMPOTENCY_KEY_REUSED */
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     deleteTenantPlan: {
@@ -4302,7 +4770,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description 套餐已删除 */
+            /** @description 套餐已删除（message 如 "tenant plan deleted"） */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4311,10 +4779,16 @@ export interface operations {
                     "application/json": components["schemas"]["IdempotentResult"];
                 };
             };
+            /** @description VALIDATION_FAILED（planId 非 UUID） */
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description TENANT_PLAN_NOT_FOUND */
             404: components["responses"]["NotFound"];
+            /** @description TENANT_PLAN_IN_USE（仍有非 disabled 绑定租户） */
             409: components["responses"]["Conflict"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     getTenantPlanQuotaLimits: {
@@ -4337,9 +4811,14 @@ export interface operations {
                     "application/json": components["schemas"]["PlanQuotaLimitsResponse"];
                 };
             };
+            /** @description VALIDATION_FAILED（planId 非 UUID） */
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description TENANT_PLAN_NOT_FOUND */
             404: components["responses"]["NotFound"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     updateTenantPlanQuotaLimits: {
@@ -4357,7 +4836,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 限额已修改 */
+            /** @description 限额已修改（message 如 "quota limits updated"；存量租户同步失败不回滚套餐限额，写审计并异步重试） */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4369,8 +4848,13 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description TENANT_PLAN_NOT_FOUND */
             404: components["responses"]["NotFound"];
+            /** @description IDEMPOTENCY_KEY_REUSED */
+            409: components["responses"]["Conflict"];
             422: components["responses"]["UnprocessableEntity"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     activateTenantPlan: {
@@ -4384,17 +4868,11 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    /**
-                     * Format: uuid
-                     * @description 客户端生成UUID，防重复提交
-                     */
-                    idempotency_key: string;
-                };
+                "application/json": components["schemas"]["TenantPlanStateChangeRequest"];
             };
         };
         responses: {
-            /** @description 套餐已发布 */
+            /** @description 套餐已发布（message 如 "tenant plan activated"） */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4403,10 +4881,16 @@ export interface operations {
                     "application/json": components["schemas"]["IdempotentResult"];
                 };
             };
+            /** @description VALIDATION_FAILED（planId 非 UUID） */
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description TENANT_PLAN_NOT_FOUND */
             404: components["responses"]["NotFound"];
+            /** @description PLAN_STATE_INVALID 或 IDEMPOTENCY_KEY_REUSED */
             409: components["responses"]["Conflict"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     disableTenantPlan: {
@@ -4420,17 +4904,11 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    /**
-                     * Format: uuid
-                     * @description 客户端生成UUID，防重复提交
-                     */
-                    idempotency_key: string;
-                };
+                "application/json": components["schemas"]["TenantPlanStateChangeRequest"];
             };
         };
         responses: {
-            /** @description 套餐已禁用 */
+            /** @description 套餐已禁用（message 如 "tenant plan disabled"） */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4439,10 +4917,16 @@ export interface operations {
                     "application/json": components["schemas"]["IdempotentResult"];
                 };
             };
+            /** @description VALIDATION_FAILED（planId 非 UUID） */
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description TENANT_PLAN_NOT_FOUND */
             404: components["responses"]["NotFound"];
+            /** @description PLAN_STATE_INVALID 或 IDEMPOTENCY_KEY_REUSED */
             409: components["responses"]["Conflict"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     listTenantPlanBoundTenants: {
@@ -4465,9 +4949,14 @@ export interface operations {
                     "application/json": components["schemas"]["BoundTenantsResponse"];
                 };
             };
+            /** @description VALIDATION_FAILED（planId 非 UUID） */
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description TENANT_PLAN_NOT_FOUND */
             404: components["responses"]["NotFound"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     listBindableTenants: {
@@ -4490,10 +4979,14 @@ export interface operations {
                     "application/json": components["schemas"]["BoundTenantsResponse"];
                 };
             };
+            /** @description VALIDATION_FAILED（planId 非 UUID） */
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description TENANT_PLAN_NOT_FOUND */
             404: components["responses"]["NotFound"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     listTenantPlanAuditLogs: {
@@ -4512,7 +5005,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description 操作历史列表 */
+            /** @description 操作历史列表（无 action/result 服务端过滤） */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4521,9 +5014,14 @@ export interface operations {
                     "application/json": components["schemas"]["PlanAuditLogListResponse"];
                 };
             };
+            /** @description VALIDATION_FAILED（planId 非 UUID） */
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description TENANT_PLAN_NOT_FOUND */
             404: components["responses"]["NotFound"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     bindTenantPlan: {
@@ -4541,7 +5039,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 套餐已绑定，配额已更新 */
+            /** @description 套餐已绑定，配额已更新（id=tenant_id；message 如 "quota bound to plan"） */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4553,9 +5051,14 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description TENANT_NOT_FOUND / TENANT_PLAN_NOT_FOUND / QUOTA_NOT_FOUND */
             404: components["responses"]["NotFound"];
+            /** @description TENANT_STATE_INVALID / QUOTA_ALREADY_EXISTS / IDEMPOTENCY_KEY_REUSED */
             409: components["responses"]["Conflict"];
+            /** @description PLAN_NOT_ACTIVE */
             422: components["responses"]["UnprocessableEntity"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     listAllTenantAdmins: {
@@ -4780,6 +5283,33 @@ export interface operations {
             422: components["responses"]["UnprocessableEntity"];
         };
     };
+    getChangeableRoles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 可变更角色列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeableRolesResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description TENANT_ADMIN_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+        };
+    };
     transferTenantOwnership: {
         parameters: {
             query?: never;
@@ -4928,7 +5458,7 @@ export interface operations {
                 cursor?: string;
                 /** @description 过滤操作类型 */
                 action?: string;
-                result?: "success" | "failed";
+                result?: "success" | "failure";
             };
             header?: never;
             path: {
