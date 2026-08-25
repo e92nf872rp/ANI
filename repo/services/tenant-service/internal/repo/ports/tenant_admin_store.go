@@ -185,9 +185,6 @@ type TenantAdminStore interface {
 	// UpdateInvitation 更新邀请（重发：新 token_hash / expire_at / status='inviting'，清空 accepted_at/rejected_at）。
 	UpdateInvitation(ctx context.Context, inv TenantAdminInvitation) (TenantAdminInvitation, error)
 
-	// CreateAuditLog 写入一条 tenant_admin.* 审计（复用 audit_logs）。
-	CreateAuditLog(ctx context.Context, log AuditLog) (uuid.UUID, error)
-
 	// ListAuditLogs 按 tenant_id + 目标 user_id 查询操作历史，游标分页。
 	ListAuditLogs(ctx context.Context, tenantID, userID uuid.UUID, filter TenantAdminAuditLogFilter) (TenantAdminAuditLogListResult, error)
 }

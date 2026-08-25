@@ -47,12 +47,12 @@ func (s *TenantService) BindPlanQuota(ctx context.Context, req *tenantv1.BindPla
 	}
 	tenantID, err := parseTenantID(rawTenantID)
 	if err != nil {
-		writeAuditFailure(ctx, s.audit, action, map[string]any{"tenant_id": rawTenantID, "plan_id": rawPlanID}, err, nil)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"tenant_id": rawTenantID, "plan_id": rawPlanID}, err, nil)
 		return nil, err
 	}
 	planID, err := parsePlanID(rawPlanID)
 	if err != nil {
-		writeAuditFailure(ctx, s.audit, action, map[string]any{"tenant_id": tenantID.String(), "plan_id": rawPlanID}, err, &tenantID)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"tenant_id": tenantID.String(), "plan_id": rawPlanID}, err, &tenantID)
 		return nil, err
 	}
 
@@ -60,12 +60,12 @@ func (s *TenantService) BindPlanQuota(ctx context.Context, req *tenantv1.BindPla
 	plan, err := s.plans.GetByID(ctx, planID)
 	if err != nil {
 		mapped := mapStoreError(err)
-		writeAuditFailure(ctx, s.audit, action, map[string]any{"tenant_id": tenantID.String(), "plan_id": planID.String()}, mapped, &tenantID)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"tenant_id": tenantID.String(), "plan_id": planID.String()}, mapped, &tenantID)
 		return nil, mapped
 	}
 	if plan.Status != ports.TenantPlanStatusActive {
 		err := businessError(codes.FailedPrecondition, ports.ErrPlanNotActive, "tenant plan status is "+string(plan.Status))
-		writeAuditFailure(ctx, s.audit, action, map[string]any{
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{
 			"tenant_id": tenantID.String(),
 			"plan_id":   planID.String(),
 			"status":    string(plan.Status),
@@ -77,12 +77,12 @@ func (s *TenantService) BindPlanQuota(ctx context.Context, req *tenantv1.BindPla
 	tenant, err := s.tenants.GetTenant(ctx, tenantID)
 	if err != nil {
 		mapped := mapStoreError(err)
-		writeAuditFailure(ctx, s.audit, action, map[string]any{"tenant_id": tenantID.String(), "plan_id": planID.String()}, mapped, &tenantID)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"tenant_id": tenantID.String(), "plan_id": planID.String()}, mapped, &tenantID)
 		return nil, mapped
 	}
 	if tenant.Status == ports.TenantStatusDisabled {
 		err := businessError(codes.FailedPrecondition, ports.ErrTenantStateInvalid, "tenant is disabled")
-		writeAuditFailure(ctx, s.audit, action, map[string]any{
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{
 			"tenant_id":           tenantID.String(),
 			"tenant_name":         tenant.Name,
 			"tenant_display_name": tenant.DisplayName,
@@ -96,7 +96,7 @@ func (s *TenantService) BindPlanQuota(ctx context.Context, req *tenantv1.BindPla
 	rawLimits, err := s.plans.GetQuotaLimits(ctx, planID)
 	if err != nil {
 		mapped := mapStoreError(err)
-		writeAuditFailure(ctx, s.audit, action, map[string]any{"tenant_id": tenantID.String(), "plan_id": planID.String()}, mapped, &tenantID)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"tenant_id": tenantID.String(), "plan_id": planID.String()}, mapped, &tenantID)
 		return nil, mapped
 	}
 	planDims := make([]string, 0, len(rawLimits))
@@ -104,14 +104,14 @@ func (s *TenantService) BindPlanQuota(ctx context.Context, req *tenantv1.BindPla
 		planDims = append(planDims, lim.ResourceType)
 	}
 	if err := validateEnabledQuotaResourceTypes(ctx, s.quota, planDims); err != nil {
-		writeAuditFailure(ctx, s.audit, action, map[string]any{"tenant_id": tenantID.String(), "plan_id": planID.String()}, err, &tenantID)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"tenant_id": tenantID.String(), "plan_id": planID.String()}, err, &tenantID)
 		return nil, err
 	}
 
 	// 步骤 5：组装套餐有效限额视图（store + Core meta；NULL total 回写 default）
 	views, err := buildQuotaLimitViews(ctx, s.plans, s.quota, planID)
 	if err != nil {
-		writeAuditFailure(ctx, s.audit, action, map[string]any{"tenant_id": tenantID.String(), "plan_id": planID.String()}, err, &tenantID)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"tenant_id": tenantID.String(), "plan_id": planID.String()}, err, &tenantID)
 		return nil, err
 	}
 
@@ -121,7 +121,7 @@ func (s *TenantService) BindPlanQuota(ctx context.Context, req *tenantv1.BindPla
 	if planChanged {
 		if _, err := s.tenantPlans.UpdateTenantPlan(ctx, tenantID, planID); err != nil {
 			mapped := mapStoreError(err)
-			writeAuditFailure(ctx, s.audit, action, map[string]any{"tenant_id": tenantID.String(), "plan_id": planID.String()}, mapped, &tenantID)
+			writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"tenant_id": tenantID.String(), "plan_id": planID.String()}, mapped, &tenantID)
 			return nil, mapped
 		}
 	}
@@ -134,7 +134,7 @@ func (s *TenantService) BindPlanQuota(ctx context.Context, req *tenantv1.BindPla
 		rolledBack := false
 		if planChanged {
 			if _, rbErr := s.tenantPlans.UpdateTenantPlan(ctx, tenantID, prevPlanID); rbErr != nil {
-				writeAuditFailure(ctx, s.audit, action, map[string]any{
+				writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{
 					"tenant_id":           tenantID.String(),
 					"tenant_name":         tenant.Name,
 					"tenant_display_name": tenant.DisplayName,
@@ -147,7 +147,7 @@ func (s *TenantService) BindPlanQuota(ctx context.Context, req *tenantv1.BindPla
 			}
 			rolledBack = true
 		}
-		writeAuditFailure(ctx, s.audit, action, map[string]any{
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{
 			"tenant_id":           tenantID.String(),
 			"tenant_name":         tenant.Name,
 			"tenant_display_name": tenant.DisplayName,
@@ -159,7 +159,7 @@ func (s *TenantService) BindPlanQuota(ctx context.Context, req *tenantv1.BindPla
 	}
 
 	// 步骤 8：写成功审计（best-effort：失败只 Warn，不把已生效绑定变成错误）
-	writeAuditSuccess(ctx, s.audit, action, map[string]any{
+	writeAuditSuccess(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{
 		"plan_id":             planID.String(),
 		"tenant_id":           tenantID.String(),
 		"tenant_name":         tenant.Name,

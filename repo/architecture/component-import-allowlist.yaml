@@ -106,6 +106,12 @@ allowed:
     imports:
       - github.com/jackc/pgx/v5/pgxpool
     reason: tenant plan audit repository is a bounded persistence module; direct pgx keeps audit-log writes and RLS rows explicit
+  - path: services/tenant-service/internal/repo/adapters/postgres/tenant_admin_store.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: tenant admin invitation repository is a bounded persistence module; direct pgx keeps invitation/audit SQL and unique/FK mapping explicit
   # ── kb-service: asyncpg direct PG (bounded_direct, RLS explicit) ──────────
   - path: services/kb-service/main.py
     coupling_level: bounded_direct

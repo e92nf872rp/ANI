@@ -1726,21 +1726,21 @@ func TestTenantPlanService_ListTenantPlanAuditLogs(t *testing.T) {
 	}
 	audit := &fakeAuditStore{}
 	// 模拟创建成功后的审计 + 另一套餐噪声
-	writeAuditSuccess(context.Background(), audit, "tenant_plan.create", map[string]any{
+	writeAuditSuccess(context.Background(), audit, auditResourceTenantPlan, "tenant_plan.create", map[string]any{
 		"plan_id": planID.String(),
 		"code":    "pro",
 	}, nil)
 	audit.logs[0].ID = createLogID
 	audit.logs[0].CreatedAt = time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC)
 
-	writeAuditSuccess(context.Background(), audit, "tenant_plan.activate", map[string]any{
+	writeAuditSuccess(context.Background(), audit, auditResourceTenantPlan, "tenant_plan.activate", map[string]any{
 		"plan_id": planID.String(),
 		"status":  "active",
 	}, nil)
 	audit.logs[1].ID = activateLogID
 	audit.logs[1].CreatedAt = time.Date(2026, 8, 13, 11, 0, 0, 0, time.UTC)
 
-	writeAuditSuccess(context.Background(), audit, "tenant_plan.create", map[string]any{
+	writeAuditSuccess(context.Background(), audit, auditResourceTenantPlan, "tenant_plan.create", map[string]any{
 		"plan_id": otherPlan.String(),
 		"code":    "other",
 	}, nil)

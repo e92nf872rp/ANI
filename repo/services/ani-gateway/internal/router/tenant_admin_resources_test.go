@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,19 +28,40 @@ type fakeTenantAdminGRPC struct {
 	detailResp         *tenantv1.AdminWithTenant
 	detailErr          error
 	inviteErr          error
+	inviteResp         *tenantv1.InvitationResult
+	lastInviteReq      *tenantv1.InviteTenantAdminRequest
+	inviteCalls        int
 	changeRoleErr      error
 	roleResp           *tenantv1.UserPermissions
 	roleErr            error
 	availableResp      *tenantv1.ListAvailableTenantsResponse
 	availableErr       error
 	listAvailableCalls int
+	invitedUserID      string
+	lastInviteToken    string
 }
 
 func (f *fakeTenantAdminGRPC) InviteTenantAdmin(_ context.Context, req *tenantv1.InviteTenantAdminRequest, _ ...grpc.CallOption) (*tenantv1.InvitationResult, error) {
+	f.inviteCalls++
+	f.lastInviteReq = req
 	if f.inviteErr != nil {
 		return nil, f.inviteErr
 	}
-	return &tenantv1.InvitationResult{Id: "inv-1", Token: "tok", Message: "sent"}, nil
+	if f.inviteResp != nil {
+		f.lastInviteToken = f.inviteResp.GetToken()
+		return f.inviteResp, nil
+	}
+	token := "tok-once-only"
+	f.lastInviteToken = token
+	if f.invitedUserID == "" {
+		f.invitedUserID = "u-invited"
+	}
+	return &tenantv1.InvitationResult{
+		Id:       "inv-1",
+		Token:    token,
+		ExpireAt: timestamppb.New(time.Now().UTC().Add(72 * time.Hour)),
+		Message:  "invitation sent",
+	}, nil
 }
 func (f *fakeTenantAdminGRPC) ResendTenantAdminInvitation(context.Context, *tenantv1.ResendTenantAdminInvitationRequest, ...grpc.CallOption) (*tenantv1.InvitationResult, error) {
 	return nil, status.Error(codes.Unimplemented, "not used")
@@ -49,7 +71,22 @@ func (f *fakeTenantAdminGRPC) ListAllTenantAdmins(_ context.Context, req *tenant
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
-	return f.listResp, nil
+	if f.listResp != nil {
+		return f.listResp, nil
+	}
+	// After invite: surface the invited user with is_inviting=true; token never appears in list.
+	if f.inviteCalls > 0 && f.invitedUserID != "" {
+		return &tenantv1.ListAllTenantAdminsResponse{
+			Items: []*tenantv1.AdminWithTenant{
+				{
+					Id: f.invitedUserID, Email: "a@acme.io", Username: "acme_admin",
+					Role: "user", Status: "active", IsInviting: true, Source: "local",
+					Tenant: &tenantv1.TenantAdminTenantRef{Id: "t1", Name: "acme", DisplayName: "ACME"},
+				},
+			},
+		}, nil
+	}
+	return &tenantv1.ListAllTenantAdminsResponse{}, nil
 }
 func (f *fakeTenantAdminGRPC) GetTenantAdminDetail(context.Context, *tenantv1.GetTenantAdminDetailRequest, ...grpc.CallOption) (*tenantv1.AdminWithTenant, error) {
 	if f.detailErr != nil {
@@ -103,6 +140,58 @@ func newTenantAdminTestServer(grpcClient tenantv1.TenantAdminServiceClient) *ser
 	svc := h.Group("/api/v1/svc")
 	registerTenantAdminsWithClient(svc, grpcClient)
 	return h
+}
+
+func TestHandler_InviteFlow(t *testing.T) {
+	t.Setenv("ANI_AUTH_MODE", "dev")
+	client := &fakeTenantAdminGRPC{invitedUserID: "u-invited"}
+	h := newTenantAdminTestServer(client)
+
+	body := `{"idempotency_key":"550e8400-e29b-41d4-a716-446655440000","email":"a@acme.io","username":"acme_admin"}`
+	inviteResp := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/svc/tenants/t1/admins/invite",
+		&ut.Body{Body: bytes.NewBufferString(body), Len: len(body)})
+	if inviteResp.Code != http.StatusOK {
+		t.Fatalf("invite status=%d body=%s", inviteResp.Code, inviteResp.Body.String())
+	}
+	var inviteBody map[string]any
+	if err := json.Unmarshal(inviteResp.Body.Bytes(), &inviteBody); err != nil {
+		t.Fatalf("invite json: %v", err)
+	}
+	token, _ := inviteBody["token"].(string)
+	if token == "" {
+		t.Fatalf("token missing: %#v", inviteBody)
+	}
+	if inviteBody["expire_at"] == nil || inviteBody["id"] == nil {
+		t.Fatalf("incomplete invite: %#v", inviteBody)
+	}
+	if client.inviteCalls != 1 || client.lastInviteToken != token {
+		t.Fatalf("inviteCalls=%d lastToken=%q", client.inviteCalls, client.lastInviteToken)
+	}
+
+	listResp := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/svc/tenant-admins?tenant_id=t1", nil)
+	if listResp.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", listResp.Code, listResp.Body.String())
+	}
+	var listBody map[string]any
+	if err := json.Unmarshal(listResp.Body.Bytes(), &listBody); err != nil {
+		t.Fatalf("list json: %v", err)
+	}
+	items, _ := listBody["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("items=%#v", listBody["items"])
+	}
+	first, _ := items[0].(map[string]any)
+	if first["is_inviting"] != true {
+		t.Fatalf("is_inviting=%v want true", first["is_inviting"])
+	}
+	if _, hasToken := first["token"]; hasToken {
+		t.Fatalf("token must not appear in list: %#v", first)
+	}
+	// token is one-shot: list must not echo the invite token value in any field
+	rawList := listResp.Body.String()
+	if strings.Contains(rawList, token) {
+		t.Fatalf("invite token leaked into list response")
+	}
 }
 
 func TestHandler_ListAvailableTenants(t *testing.T) {

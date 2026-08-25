@@ -11,11 +11,17 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const auditResourceTenantPlan = "tenant_plan"
+const (
+	auditResourceTenantPlan  = "tenant_plan"
+	auditResourceTenantAdmin = "tenant_admin"
+)
 
 // writeAuditSuccess 写入 result=success 的审计（best-effort：写失败只告警，不阻断已成功业务）。
-// tenantID 可选：平台级套餐操作为 nil，绑定租户时传入租户 ID。
-func writeAuditSuccess(ctx context.Context, audit ports.TenantPlanAuditStore, action string, details map[string]any, tenantID *uuid.UUID) {
+// resource 由调用方传入（如 tenant_plan / tenant_admin）；tenantID 可选（平台级操作为 nil）。
+func writeAuditSuccess(ctx context.Context, audit ports.TenantPlanAuditStore, resource, action string, details map[string]any, tenantID *uuid.UUID) {
+	if audit == nil {
+		return
+	}
 	// 步骤 1：details 缺省空对象
 	if details == nil {
 		details = map[string]any{}
@@ -26,12 +32,12 @@ func writeAuditSuccess(ctx context.Context, audit ports.TenantPlanAuditStore, ac
 		UserID:    userIDFromCtx(ctx),
 		RequestID: requestIDFromCtx(ctx),
 		Action:    action,
-		Resource:  auditResourceTenantPlan,
+		Resource:  resource,
 		Result:    "success",
 		Details:   details,
 	})
 	if err != nil {
-		attrs := []any{"action", action, "error", err}
+		attrs := []any{"action", action, "resource", resource, "error", err}
 		if tenantID != nil {
 			attrs = append(attrs, "tenant_id", tenantID.String())
 		}
@@ -43,8 +49,11 @@ func writeAuditSuccess(ctx context.Context, audit ports.TenantPlanAuditStore, ac
 }
 
 // writeAuditFailure 写入 result=failure 的审计（best-effort：写失败只 Warn，不掩盖业务错误）。
-// tenantID 可选，语义同 writeAuditSuccess。
-func writeAuditFailure(ctx context.Context, audit ports.TenantPlanAuditStore, action string, details map[string]any, cause error, tenantID *uuid.UUID) {
+// resource / tenantID 语义同 writeAuditSuccess。
+func writeAuditFailure(ctx context.Context, audit ports.TenantPlanAuditStore, resource, action string, details map[string]any, cause error, tenantID *uuid.UUID) {
+	if audit == nil {
+		return
+	}
 	// 步骤 1：复制 details 并附加 reason
 	out := map[string]any{}
 	for k, v := range details {
@@ -57,12 +66,12 @@ func writeAuditFailure(ctx context.Context, audit ports.TenantPlanAuditStore, ac
 		UserID:    userIDFromCtx(ctx),
 		RequestID: requestIDFromCtx(ctx),
 		Action:    action,
-		Resource:  auditResourceTenantPlan,
+		Resource:  resource,
 		Result:    "failure",
 		Details:   out,
 	})
 	if err != nil {
-		attrs := []any{"action", action, "error", err}
+		attrs := []any{"action", action, "resource", resource, "error", err}
 		if tenantID != nil {
 			attrs = append(attrs, "tenant_id", tenantID.String())
 		}
