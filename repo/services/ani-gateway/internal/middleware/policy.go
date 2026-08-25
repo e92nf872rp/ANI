@@ -84,7 +84,8 @@ func ResolveAuthzPolicy(registry authz.Registry, cfg authz.Config) app.HandlerFu
 	return func(ctx context.Context, c *app.RequestContext) {
 		fullPath := string(c.FullPath())
 		if fullPath == "" {
-			// 未匹配路由交给 Hertz NoRoute 返回 404，不对 raw path 做授权匹配。
+			// 未匹配路由：标记为 public 放行，交由 Hertz NoRoute 返回 404。
+			SetResolvedPolicy(c, ResolvedPolicy{Source: authz.PolicySourcePublic})
 			c.Next(ctx)
 			return
 		}

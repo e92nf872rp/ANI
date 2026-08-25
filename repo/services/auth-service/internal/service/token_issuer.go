@@ -175,8 +175,8 @@ func resolveIssueServiceTokenClaims(req *authv1.IssueServiceTokenRequest) (jwtPa
 		PrincipalKind:    "service",
 		Audience:         serviceJWTAudience, // ani-core
 		TenantID:         req.GetTenantId(),
-		Subject:          req.GetCallerService(),        // V2 权威服务身份
-		UserID:           serviceActorUserID.String(),   // legacy ValidateToken.UserId 兼容投影
+		Subject:          req.GetCallerService(),      // V2 权威服务身份
+		UserID:           serviceActorUserID.String(), // legacy ValidateToken.UserId 兼容投影
 		CredentialDomain: domain,
 		Permissions:      permissions,
 		// deprecated legacy projection：旧 ValidateToken / 旧 Gateway 仍需消费。

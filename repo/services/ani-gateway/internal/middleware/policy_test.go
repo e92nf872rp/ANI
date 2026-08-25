@@ -142,3 +142,28 @@ func TestAuthWithClientRejectsMissingPolicy(t *testing.T) {
 		t.Fatalf("body = %s, want AUTHZ_POLICY_MISSING", resp.Body())
 	}
 }
+
+// TestUnmatchedRouteReturns404Not503 验证未匹配路由经过完整 C 阶段链后
+// 由 Hertz NoRoute 返回 404，而非因 resolved policy 缺失返回 503。
+func TestUnmatchedRouteReturns404Not503(t *testing.T) {
+	registry, err := authz.NewRegistry(nil)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	cfg := authz.Config{Mode: authz.ModeOff}
+	h := server.New()
+	h.Use(
+		RequestID(),
+		ResolveAuthzPolicy(registry, cfg),
+		AuthenticatePrincipal(tokenStub{}),
+		AuthorizePrincipal(tokenStub{}),
+	)
+	// 不注册 /api/v1/nonexistent 路由，触发 Hertz NoRoute 404。
+	resp := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/nonexistent", nil).Result()
+	if resp.StatusCode() == http.StatusServiceUnavailable {
+		t.Fatalf("status = 503, want 404 (unmatched route must not hit authz 503)")
+	}
+	if resp.StatusCode() != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode())
+	}
+}
