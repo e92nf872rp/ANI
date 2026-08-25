@@ -24,7 +24,7 @@ ANI 推理控制面已经贯通 Console、ANI Gateway、inference-service、Core
 8. AK 有效不等于可跨租户访问。目标推理服务的 owner tenant 必须由受信任的路由配置传给 adapter，并与 `ValidateToken` 返回的 `tenant_id` 相等。
 9. 不把现有 AK 明文同步到 Kubernetes Secret；手工的 Secret 型 APIKeyAuth 只在 ext_authz 真实门禁通过后移除。
 10. C40 先产品化一个静态推理服务；C41 再实现与 InferenceService 生命周期联动的动态发布。
-11. C40 的受管推理 Route 下所有已注册推理路径统一要求系统 AK；`/healthz`、`/readyz` 等基础设施探针使用独立 Route 并且不对公网提供业务能力，未注册路径直接返回 `404`。
+11. C40 的受管推理 Route 下所有已注册推理路径统一要求系统 AK；Envoy 和 adapter 使用工作负载自身的 Kubernetes readiness/liveness probe，公网 Gateway 不开放 `/healthz`、`/readyz`，未注册路径直接返回 `404`。
 12. 客户端第一版只能通过 `Authorization: Bearer ani_*` 传递 AK；不接受 `x-api-key`、Cookie 或查询参数。
 
 ## 范围
@@ -35,7 +35,7 @@ ANI 推理控制面已经贯通 Console、ANI Gateway、inference-service、Core
 - 使用一个已运行并 Ready 的 ANI InferenceService/vLLM Service 完成普通响应和 SSE 流式响应。
 - 认证使用系统中已创建的真实 `ani_*` AK。
 - 路由配置显式绑定该推理服务的 `inference_service_id`、owner `tenant_id` 和对外模型标识。
-- 受管推理 Route 下的所有已注册推理路径复用同一 ext_authz 鉴权闭环；探针 Route 不绑定该 SecurityPolicy。
+- 受管推理 Route 下的所有已注册推理路径复用同一 ext_authz 鉴权闭环；工作负载探针不经过公网 Route 或 SecurityPolicy。
 - 复用 auth-service 现有单 AK RPM；不新增租户总 RPM、服务级并发或 token 硬配额。
 - C40 不改变 InferenceService API 的 `invocation_url`，也不实现自动发布/撤销。
 
@@ -96,7 +96,7 @@ Content-Type: application/json
 8. 第一版不向 vLLM 注入租户或用户身份头。Envoy 在转发前删除 `Authorization`、`x-api-key`、`x-ani-tenant-id` 和 `x-ani-user-id`，保证 AK 原文和客户伪造身份不进入 vLLM。
 9. 请求转发到对应 AIServiceBackend 和 vLLM ClusterIP Service。
 10. vLLM 返回普通 JSON，或保持连接返回 SSE；Envoy 将响应透传给客户端。一次流式请求只在开始时授权一次，不逐 chunk 调用 Auth。
-11. `/healthz`、`/readyz` 等探针只能通过独立、受限的基础设施 Route 访问，不进入推理后端。
+11. Envoy 和 adapter 的 Kubernetes readiness/liveness probe 直接检查各自工作负载，不经过公网 Gateway、SecurityPolicy 或推理后端；公网 `/healthz`、`/readyz` 返回 `404`。
 
 ## 租户与模型标识
 
@@ -215,7 +215,7 @@ InferenceService desired=running
 11. 现有 Console/ANI Gateway 推理控制面查询和生命周期门禁不回归。
 12. 旧 Secret 型 APIKeyAuth 仅在新链路全部通过后移除，并再次证明有效 AK 调用成功。
 13. 受管推理 Route 下每个已注册推理路径都要求 AK；未注册路径返回 `404`且不到达 vLLM。
-14. 基础设施探针无需 AK 即可工作，但无法借此 Route 访问任何推理能力。
+14. Envoy 和 adapter 的 Kubernetes readiness/liveness probe 正常工作且不占用 AK RPM；公网 `/healthz`、`/readyz` 均返回 `404`且不到达 vLLM。
 15. `x-api-key`、Cookie 和查询参数中的 AK 均不能授权；只有 `Authorization: Bearer ani_*` 可用。
 
 ## C41 验收门禁
