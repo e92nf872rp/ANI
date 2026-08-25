@@ -188,6 +188,10 @@ func credentialValidationStatus(err error) error {
 	case errors.Is(err, errInvalidJWT), errors.Is(err, pgx.ErrNoRows):
 		// expired/revoked/API Key hash miss 均不暴露具体原因。
 		return status.Error(codes.Unauthenticated, "invalid credential")
+	case errors.Is(err, errInvalidAPIKeyFormat):
+		// 客户端提交的 API Key 格式非法属于无效凭证（401），
+		// 不是后端故障，不能落入 default 被误映射为 503。
+		return status.Error(codes.Unauthenticated, "invalid credential")
 	default:
 		// blocklist/cache/DB 等依赖错误不能伪装成无效凭证。
 		return status.Error(codes.Unavailable, "credential backend unavailable")

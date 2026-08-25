@@ -11,6 +11,8 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/uuid"
 	authv1 "github.com/kubercloud/ani/pkg/generated/pb/auth/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // TestPermissionsFromScopesFailClosed 校验签名凭证 permissions 的 fail-closed 解析：
@@ -377,6 +379,24 @@ func TestValidatePrincipalBearer(t *testing.T) {
 		CredentialScheme: "mtls",
 	}); err == nil {
 		t.Fatal("expected unsupported scheme to be rejected")
+	}
+}
+
+// TestValidatePrincipalAPIKeyFormatRejectedAsUnauthenticated 验证格式非法的 API Key
+// 在 V2 路径返回 Unauthenticated（HTTP 401），而不是被错误分类为后端不可用（503）。
+func TestValidatePrincipalAPIKeyFormatRejectedAsUnauthenticated(t *testing.T) {
+	service := &AuthService{apiKeys: newAPIKeyStore(nil, nil)}
+	for _, key := range []string{"ani", "ani_dev", "ani_dev_not-a-uuid_secret"} {
+		_, err := service.ValidatePrincipal(context.Background(), &authv1.ValidatePrincipalRequest{
+			Credential:       key,
+			CredentialScheme: "api_key",
+		})
+		if err == nil {
+			t.Fatalf("ValidatePrincipal(%q) error = nil, want rejection", key)
+		}
+		if got := status.Code(err); got != codes.Unauthenticated {
+			t.Fatalf("ValidatePrincipal(%q) code = %v, want Unauthenticated", key, got)
+		}
 	}
 }
 

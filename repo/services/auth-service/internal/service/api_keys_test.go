@@ -29,6 +29,20 @@ func TestGenerateAPIKeyEmbedsTenantID(t *testing.T) {
 	}
 }
 
+// TestParseAPIKeyTenantRejectsMalformedKeys 验证格式非法的 key 返回
+// errInvalidAPIKeyFormat sentinel，供错误分类器映射为 401。
+func TestParseAPIKeyTenantRejectsMalformedKeys(t *testing.T) {
+	for _, key := range []string{
+		"", "ani", "ani_dev", "ani_dev_secret",
+		"prod_11111111-1111-1111-1111-111111111111_secret",
+		"ani_dev_not-a-uuid_secret",
+	} {
+		if _, err := parseAPIKeyTenant(key); !errors.Is(err, errInvalidAPIKeyFormat) {
+			t.Fatalf("parseAPIKeyTenant(%q) error = %v, want errInvalidAPIKeyFormat", key, err)
+		}
+	}
+}
+
 func TestHasScope(t *testing.T) {
 	if !hasScope([]string{"scope:models:create"}, "models", "create") {
 		t.Fatal("expected exact scope to allow")

@@ -28,6 +28,10 @@ const maxAPIKeyRateLimitRPM int32 = 10000
 
 var errAPIKeyRateLimitExceeded = errors.New("api key rate limit exceeded")
 
+// errInvalidAPIKeyFormat 表示客户端提交的 API Key 格式非法（缺前缀/分段/tenant 非 UUID），
+// 属于无效凭证（401），不能被错误分类为后端故障（503）。
+var errInvalidAPIKeyFormat = errors.New("invalid api key format")
+
 type apiKeyStore struct {
 	db    *pgxpool.Pool
 	cache ports.CacheStore
@@ -401,11 +405,11 @@ func generateAPIKey(tenantID uuid.UUID) (string, error) {
 func parseAPIKeyTenant(rawKey string) (uuid.UUID, error) {
 	parts := strings.SplitN(rawKey, "_", 4)
 	if len(parts) != 4 || parts[0] != "ani" || parts[1] == "" || parts[2] == "" || parts[3] == "" {
-		return uuid.Nil, fmt.Errorf("invalid api key format")
+		return uuid.Nil, errInvalidAPIKeyFormat
 	}
 	tenantID, err := uuid.Parse(parts[2])
 	if err != nil || tenantID == uuid.Nil {
-		return uuid.Nil, fmt.Errorf("invalid api key tenant")
+		return uuid.Nil, fmt.Errorf("%w: bad tenant", errInvalidAPIKeyFormat)
 	}
 	return tenantID, nil
 }
