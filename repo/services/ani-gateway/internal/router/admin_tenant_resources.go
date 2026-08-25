@@ -16,14 +16,16 @@ type adminTenantAPI struct {
 	tenant ports.TenantService
 }
 
-// registerAdminTenantResources registers the Core tenant read endpoint:
+// registerAdminTenantResources registers Core tenant read endpoints:
 //
+//	GET /admin/tenant-admins/available-tenants
 //	GET /admin/tenants/:tenant_id
 func registerAdminTenantResources(v1 *route.RouterGroup, tenant ports.TenantService) {
 	if tenant == nil {
 		return
 	}
-	api := adminTenantAPI{tenant: tenant}
+	api := &adminTenantAPI{tenant: tenant}
+	v1.GET("/admin/tenant-admins/available-tenants", api.listAvailableTenants)
 	v1.GET("/admin/tenants/:tenant_id", api.getTenant)
 }
 
@@ -35,6 +37,28 @@ type adminTenantResponse struct {
 	PlanID      string    `json:"plan_id"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+func (api *adminTenantAPI) listAvailableTenants(ctx context.Context, c *app.RequestContext) {
+	if api.tenant == nil {
+		writeDemoError(c, http.StatusServiceUnavailable, "TENANT_UNAVAILABLE", "tenant service unavailable")
+		return
+	}
+	items, err := api.tenant.ListAvailableTenants(ctx)
+	if err != nil {
+		writeAdminTenantError(c, err)
+		return
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, t := range items {
+		out = append(out, map[string]any{
+			"id":           t.ID,
+			"name":         t.Name,
+			"display_name": t.DisplayName,
+			"status":       t.Status,
+		})
+	}
+	c.JSON(http.StatusOK, map[string]any{"items": out})
 }
 
 func (api *adminTenantAPI) getTenant(ctx context.Context, c *app.RequestContext) {

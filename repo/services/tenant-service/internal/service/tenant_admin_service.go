@@ -11,19 +11,21 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// TenantAdminService 是租户管理员域的 gRPC 服务骨架。
-// 网关（ani-gateway）经 TenantAdminServiceClient 转发 /api/v1/svc/tenant-admins*
-// 与 /tenants/{tenantId}/admins*；RPC 业务仍返回 UNIMPLEMENTED（HTTP 501）。
+// TenantAdminService 是租户管理员域的 gRPC 服务。
+// 网关经 TenantAdminServiceClient 转发 /api/v1/svc/tenant-admins* 与 /tenants/{tenantId}/admins*。
+// ListAvailableTenants 已实现；其余 RPC 仍返回 UNIMPLEMENTED。
 type TenantAdminService struct {
 	tenantv1.UnimplementedTenantAdminServiceServer
-	core ports.TenantAdminSvcClient
+	core    ports.TenantAdminSvcClient
+	tenants ports.TenantSvcClient
 }
 
 var _ tenantv1.TenantAdminServiceServer = (*TenantAdminService)(nil)
 
-// NewTenantAdminService 装配 Core 租户管理员客户端并返回可注册的 gRPC server。
-func NewTenantAdminService(core ports.TenantAdminSvcClient) *TenantAdminService {
-	return &TenantAdminService{core: core}
+// NewTenantAdminService 装配 Core 客户端并返回可注册的 gRPC server。
+// ListAvailableTenants 走 tenants（Core TenantService）；用户/角色后续走 core。
+func NewTenantAdminService(core ports.TenantAdminSvcClient, tenants ports.TenantSvcClient) *TenantAdminService {
+	return &TenantAdminService{core: core, tenants: tenants}
 }
 
 // Register 向 gRPC Server 注册本服务（由 services/pkg/bootstrap.RunGRPC 回调）。
@@ -33,6 +35,31 @@ func (s *TenantAdminService) Register(server *grpc.Server) {
 
 func unimplemented() error {
 	return status.Error(codes.Unimplemented, ports.ErrNotImplemented.Error())
+}
+
+// ListAvailableTenants 返回非 disabled 租户列表（SPEC §5.1.11 / US-011）。
+// 只读、无审计；经 Core GET /admin/tenant-admins/available-tenants（TenantService）。
+func (s *TenantAdminService) ListAvailableTenants(ctx context.Context, _ *tenantv1.ListAvailableTenantsRequest) (*tenantv1.ListAvailableTenantsResponse, error) {
+	// 步骤 1：校验 Core 租户客户端已注入
+	if s.tenants == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant api unavailable")
+	}
+	// 步骤 2：调用 Core TenantSvcClient 拉取非 disabled 租户
+	items, err := s.tenants.ListAvailableTenants(ctx)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	// 步骤 3：映射为 gRPC AvailableTenant 列表并返回
+	out := make([]*tenantv1.AvailableTenant, 0, len(items))
+	for _, t := range items {
+		out = append(out, &tenantv1.AvailableTenant{
+			Id:          t.ID.String(),
+			Name:        t.Name,
+			DisplayName: t.DisplayName,
+			Status:      string(t.Status),
+		})
+	}
+	return &tenantv1.ListAvailableTenantsResponse{Items: out}, nil
 }
 
 func (s *TenantAdminService) InviteTenantAdmin(context.Context, *tenantv1.InviteTenantAdminRequest) (*tenantv1.InvitationResult, error) {

@@ -152,6 +152,7 @@ type fakeTenantClient struct {
 	countErr    error
 	bound       []ports.BoundTenant
 	bindable    []ports.BoundTenant
+	available   []ports.BoundTenant
 }
 
 var (
@@ -234,6 +235,10 @@ func (f *fakeTenantClient) GetTenant(_ context.Context, id uuid.UUID) (ports.Ten
 		return ports.Tenant{}, ports.ErrTenantNotFound
 	}
 	return f.tenant, nil
+}
+
+func (f *fakeTenantClient) ListAvailableTenants(_ context.Context) ([]ports.BoundTenant, error) {
+	return f.available, nil
 }
 
 func (f *fakeTenantClient) UpdateTenantPlan(_ context.Context, id uuid.UUID, planID uuid.UUID) (ports.Tenant, error) {

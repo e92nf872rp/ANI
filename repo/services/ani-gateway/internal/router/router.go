@@ -97,6 +97,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerQuotaResources(v1, options.QuotaAdminService)
 	registerPlatformWorkloadResources(v1, options.PlatformWorkloadService, options.AsyncTaskStore)
 	registerAdminTenantResources(v1, options.TenantService)
+	registerAdminTenantAdminResources(v1, options.TenantAdminService)
 	registerAdminTenantPlanResources(v1, options.TenantPlanService)
 
 	svc := h.Group("/api/v1/svc")

@@ -51,3 +51,41 @@ func TestPostgresTenantGetTenantNotFound(t *testing.T) {
 		t.Fatalf("want ErrTenantNotFound, got %v", err)
 	}
 }
+
+func TestPostgresTenantListAvailableTenants(t *testing.T) {
+	id1 := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	id2 := uuid.MustParse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+	tx := &quotaFakeTx{}
+	tx.enqueueQuery(&quotaFakeRows{rows: []quotaFakeRow{
+		{values: []any{id1, "acme", "Acme", "active"}},
+		{values: []any{id2, "beta", "Beta", "frozen"}},
+	}})
+	svc := NewPostgresTenant(&quotaFakeStore{tx: tx})
+
+	got, err := svc.ListAvailableTenants(context.Background())
+	if err != nil {
+		t.Fatalf("ListAvailableTenants: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len=%d", len(got))
+	}
+	if got[0].ID != id1.String() || got[0].Status != "active" || got[0].DisplayName != "Acme" {
+		t.Fatalf("got[0]=%+v", got[0])
+	}
+	if got[1].ID != id2.String() || got[1].Status != "frozen" {
+		t.Fatalf("got[1]=%+v", got[1])
+	}
+}
+
+func TestPostgresTenantListAvailableTenantsEmpty(t *testing.T) {
+	tx := &quotaFakeTx{}
+	tx.enqueueQuery(&quotaFakeRows{})
+	svc := NewPostgresTenant(&quotaFakeStore{tx: tx})
+	got, err := svc.ListAvailableTenants(context.Background())
+	if err != nil {
+		t.Fatalf("empty: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("len=%d", len(got))
+	}
+}

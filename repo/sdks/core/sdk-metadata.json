@@ -29,6 +29,12 @@
       "scope": "scope:quota:read"
     },
     {
+      "operationId": "listAvailableTenants",
+      "method": "GET",
+      "path": "/admin/tenant-admins/available-tenants",
+      "scope": "scope:users:read"
+    },
+    {
       "operationId": "listTenantUsers",
       "method": "GET",
       "path": "/admin/tenant-users",

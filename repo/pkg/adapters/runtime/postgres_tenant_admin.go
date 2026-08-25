@@ -6,8 +6,7 @@ import (
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
-// PostgresTenantAdmin is the PostgreSQL adapter skeleton for ports.TenantAdminService.
-// Methods are declared only; SQL against users / user_roles / roles is filled later.
+// PostgresTenantAdmin is the PostgreSQL adapter for ports.TenantAdminService.
 // Invitation state is not handled here (Services tenant_admin_invitation).
 type PostgresTenantAdmin struct {
 	store ports.MetadataStore
@@ -16,7 +15,7 @@ type PostgresTenantAdmin struct {
 var _ ports.TenantAdminService = (*PostgresTenantAdmin)(nil)
 
 // NewPostgresTenantAdmin constructs a TenantAdminService backed by MetadataStore
-// (platform tx / RLS bypass). The store is retained for the later SQL issue.
+// (platform tx / RLS bypass).
 func NewPostgresTenantAdmin(store ports.MetadataStore) *PostgresTenantAdmin {
 	return &PostgresTenantAdmin{store: store}
 }

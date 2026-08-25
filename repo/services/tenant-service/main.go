@@ -23,7 +23,7 @@ func main() {
 
 	tenantPlanSvc := service.NewTenantPlanService(plans, audit, coreQuota, coreTenantPlans)
 	tenantSvc := service.NewTenantService(plans, coreTenants, coreTenantPlans, coreQuota, audit)
-	tenantAdminSvc := service.NewTenantAdminService(coreTenantAdmins)
+	tenantAdminSvc := service.NewTenantAdminService(coreTenantAdmins, coreTenants)
 
 	bootstrap.RunGRPC(cfg.GRPCPort, func(s *grpc.Server) {
 		tenantPlanSvc.Register(s)

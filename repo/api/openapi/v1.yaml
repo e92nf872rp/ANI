@@ -9147,6 +9147,24 @@ paths:
 
   # ===== Tenant Users (平台级租户用户/角色，供 Services UserSvcClient 调用) =====
 
+  /admin/tenant-admins/available-tenants:
+    get:
+      operationId: listAvailableTenants
+      summary: 查询可用租户列表（邀请管理员选择器）
+      description: |
+        返回 status <> 'disabled' 的租户摘要，按 created_at DESC 排序，不分页。
+        供 Services 租户管理员邀请时选择目标租户。
+      tags: [TenantUsers]
+      x-ani-rbac-scope: "scope:users:read"
+      responses:
+        "200":
+          description: 可用租户摘要列表（status ∈ active / frozen）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantSummaryList' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
   /admin/tenant-users:
     get:
       operationId: listTenantUsers

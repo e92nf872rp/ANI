@@ -75,6 +75,52 @@ func parseTenantUUID(raw string) (uuid.UUID, error) {
 	return parseAdminUUID(raw, "tenant_id")
 }
 
+// ListAvailableTenants 返回 status <> 'disabled' 的租户列表，按 created_at DESC 排序。
+func (t *PostgresTenant) ListAvailableTenants(ctx context.Context) ([]ports.TenantSummary, error) {
+	// 步骤 1：准备结果切片，在平台事务内查询
+	out := make([]ports.TenantSummary, 0)
+	err := t.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		// 步骤 2：查询非 disabled 租户，按 created_at DESC
+		rows, queryErr := tx.Query(ctx, `
+			SELECT id, name, display_name, status
+			FROM tenants
+			WHERE status <> 'disabled'
+			ORDER BY created_at DESC
+		`)
+		if queryErr != nil {
+			return fmt.Errorf("list available tenants: %w", queryErr)
+		}
+		defer rows.Close()
+		// 步骤 3：逐行扫描并写入 TenantSummary
+		for rows.Next() {
+			var (
+				id          uuid.UUID
+				name        string
+				displayName string
+				status      string
+			)
+			if scanErr := rows.Scan(&id, &name, &displayName, &status); scanErr != nil {
+				return fmt.Errorf("scan available tenant: %w", scanErr)
+			}
+			out = append(out, ports.TenantSummary{
+				ID:          id.String(),
+				Name:        name,
+				DisplayName: displayName,
+				Status:      status,
+			})
+		}
+		if rows.Err() != nil {
+			return fmt.Errorf("iterate available tenants: %w", rows.Err())
+		}
+		return nil
+	})
+	// 步骤 4：事务失败则上抛；成功返回列表
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func parseAdminUUID(raw, field string) (uuid.UUID, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

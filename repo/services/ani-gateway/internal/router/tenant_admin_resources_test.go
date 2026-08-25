@@ -21,15 +21,18 @@ import (
 )
 
 type fakeTenantAdminGRPC struct {
-	lastListReq   *tenantv1.ListAllTenantAdminsRequest
-	listResp      *tenantv1.ListAllTenantAdminsResponse
-	listErr       error
-	detailResp    *tenantv1.AdminWithTenant
-	detailErr     error
-	inviteErr     error
-	changeRoleErr error
-	roleResp      *tenantv1.UserPermissions
-	roleErr       error
+	lastListReq        *tenantv1.ListAllTenantAdminsRequest
+	listResp           *tenantv1.ListAllTenantAdminsResponse
+	listErr            error
+	detailResp         *tenantv1.AdminWithTenant
+	detailErr          error
+	inviteErr          error
+	changeRoleErr      error
+	roleResp           *tenantv1.UserPermissions
+	roleErr            error
+	availableResp      *tenantv1.ListAvailableTenantsResponse
+	availableErr       error
+	listAvailableCalls int
 }
 
 func (f *fakeTenantAdminGRPC) InviteTenantAdmin(_ context.Context, req *tenantv1.InviteTenantAdminRequest, _ ...grpc.CallOption) (*tenantv1.InvitationResult, error) {
@@ -85,6 +88,13 @@ func (f *fakeTenantAdminGRPC) ListTenantAdminAuditLogs(context.Context, *tenantv
 	return &tenantv1.ListTenantAdminAuditLogsResponse{}, nil
 }
 func (f *fakeTenantAdminGRPC) ListAvailableTenants(context.Context, *tenantv1.ListAvailableTenantsRequest, ...grpc.CallOption) (*tenantv1.ListAvailableTenantsResponse, error) {
+	f.listAvailableCalls++
+	if f.availableErr != nil {
+		return nil, f.availableErr
+	}
+	if f.availableResp != nil {
+		return f.availableResp, nil
+	}
 	return &tenantv1.ListAvailableTenantsResponse{}, nil
 }
 
@@ -93,6 +103,47 @@ func newTenantAdminTestServer(grpcClient tenantv1.TenantAdminServiceClient) *ser
 	svc := h.Group("/api/v1/svc")
 	registerTenantAdminsWithClient(svc, grpcClient)
 	return h
+}
+
+func TestHandler_ListAvailableTenants(t *testing.T) {
+	t.Setenv("ANI_AUTH_MODE", "dev")
+	client := &fakeTenantAdminGRPC{
+		availableResp: &tenantv1.ListAvailableTenantsResponse{
+			Items: []*tenantv1.AvailableTenant{
+				{Id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", Name: "acme", DisplayName: "Acme", Status: "active"},
+				{Id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", Name: "beta", DisplayName: "Beta", Status: "frozen"},
+			},
+		},
+	}
+	h := newTenantAdminTestServer(client)
+	resp := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/svc/tenant-admins/tenants", nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if client.listAvailableCalls != 1 {
+		t.Fatalf("grpc calls=%d", client.listAvailableCalls)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	items, _ := body["items"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("items=%#v", body["items"])
+	}
+	first, _ := items[0].(map[string]any)
+	for _, key := range []string{"id", "name", "display_name", "status"} {
+		if first[key] == nil || first[key] == "" {
+			t.Fatalf("missing %s in %#v", key, first)
+		}
+	}
+	if first["status"] == "disabled" {
+		t.Fatalf("disabled leaked: %#v", first)
+	}
+	// ordering preserved from gRPC (created_at DESC at Core)
+	if first["name"] != "acme" {
+		t.Fatalf("order/name=%v", first["name"])
+	}
 }
 
 func TestTenantAdminRoutes_NilGRPCClient(t *testing.T) {

@@ -34,6 +34,43 @@ func (c *TenantSvcClient) GetTenant(ctx context.Context, tenantID uuid.UUID) (po
 	return decodeTenant(raw)
 }
 
+// ListAvailableTenants 调用 Core GET /admin/tenant-admins/available-tenants。
+func (c *TenantSvcClient) ListAvailableTenants(ctx context.Context) ([]ports.BoundTenant, error) {
+	_ = ctx
+	// 步骤 1：调用 Core GET /admin/tenant-admins/available-tenants
+	raw, err := c.sdk.Request("GET", "/admin/tenant-admins/available-tenants", anisdk.RequestOptions{})
+	if err != nil {
+		return nil, mapSDKError(err)
+	}
+	// 步骤 2：解析响应对象并校验 items 字段
+	obj, err := asObject(raw)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := obj["items"]; !ok {
+		return nil, fmt.Errorf("%w: missing items", ports.ErrCoreUnavailable)
+	}
+	items, err := asObjectSlice(obj["items"])
+	if err != nil {
+		return nil, err
+	}
+	// 步骤 3：逐项解码为 BoundTenant（id 必须为 UUID）
+	out := make([]ports.BoundTenant, 0, len(items))
+	for _, it := range items {
+		id, parseErr := uuid.Parse(strings.TrimSpace(stringField(it, "id")))
+		if parseErr != nil {
+			return nil, fmt.Errorf("%w: tenant id: %v", ports.ErrCoreUnavailable, parseErr)
+		}
+		out = append(out, ports.BoundTenant{
+			ID:          id,
+			Name:        stringField(it, "name"),
+			DisplayName: stringField(it, "display_name"),
+			Status:      ports.TenantStatus(stringField(it, "status")),
+		})
+	}
+	return out, nil
+}
+
 func decodeTenant(raw any) (ports.Tenant, error) {
 	obj, err := asObject(raw)
 	if err != nil {
