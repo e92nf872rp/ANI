@@ -186,11 +186,12 @@ func normalizeJWTPrincipal(payload jwtPayload) (*validatedJWT, error) {
 
 	tenantID := strings.TrimSpace(payload.TenantID)
 	// domain 为空时跳过 tenantID 校验（旧 JWT 没有 credential_domain，由调用方决定是否拒绝）。
-	if domain == "platform" {
+	switch domain {
+	case "platform":
 		if tenantID != "" {
 			return nil, errInvalidJWT
 		}
-	} else if domain == "tenant" {
+	case "tenant":
 		if id, err := uuid.Parse(tenantID); err != nil || id == uuid.Nil {
 			return nil, errInvalidJWT
 		}
@@ -283,19 +284,6 @@ func jwtPrincipalContext(value *validatedJWT) (*authv1.PrincipalContext, error) 
 		return nil, errInvalidJWT
 	}
 	return value.Principal.Proto(), nil
-}
-
-func isServicePrincipal(kind string) bool {
-	return strings.TrimSpace(kind) == "service"
-}
-
-func isPlatformWorkloadScope(scope string) bool {
-	switch strings.TrimSpace(scope) {
-	case "scope:platform-workloads:read", "scope:platform-workloads:write":
-		return true
-	default:
-		return false
-	}
 }
 
 func (v *JWTValidator) validatePayload(ctx context.Context, payload jwtPayload) error {

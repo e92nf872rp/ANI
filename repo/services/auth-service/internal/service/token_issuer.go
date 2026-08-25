@@ -124,12 +124,14 @@ func (i *JWTIssuer) IssueServiceTokenPayload(payload jwtPayload, ttl time.Durati
 // resolveIssueServiceTokenClaims 将 IssueServiceTokenRequest 映射为 V2 JWT claims。
 // 同时写入 V2 规范字段（credential_domain + permissions）与 deprecated legacy projection。
 func resolveIssueServiceTokenClaims(req *authv1.IssueServiceTokenRequest) (jwtPayload, error) {
-	hasLegacyScope := strings.TrimSpace(req.GetScope()) != ""
+	//nolint:staticcheck // scope 字段虽在 proto 标 deprecated，但 V2 兼容路径必须读取旧字段
+	legacyScope := strings.TrimSpace(req.GetScope())
+	hasLegacyScope := legacyScope != ""
 	hasPermissions := len(req.GetPermissions()) != 0
 
 	// 同时提交 scope 和 permissions 时，二者不一致必须拒绝，不能静默选一个。
 	if hasLegacyScope && hasPermissions {
-		expected := []string{req.GetScope()}
+		expected := []string{legacyScope}
 		if !equalStringSlice(expected, req.GetPermissions()) {
 			return jwtPayload{}, status.Error(codes.InvalidArgument,
 				"scope and permissions are both set but inconsistent")
@@ -141,7 +143,7 @@ func resolveIssueServiceTokenClaims(req *authv1.IssueServiceTokenRequest) (jwtPa
 	case hasPermissions:
 		permissions = req.GetPermissions()
 	case hasLegacyScope:
-		permissions = []string{req.GetScope()}
+		permissions = []string{legacyScope}
 	default:
 		return jwtPayload{}, status.Error(codes.InvalidArgument,
 			"either scope or permissions must be set")
