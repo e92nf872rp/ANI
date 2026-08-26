@@ -9,6 +9,7 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/route"
+	"github.com/google/uuid"
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
 )
@@ -58,25 +59,44 @@ type tokenUsageReportResponse struct {
 	CreatedAt    string                 `json:"created_at"`
 }
 
-func newMeteringAPI() *meteringAPI {
+// newMeteringAPI 支持注入 metering service；未注入时默认 local adapter（dev/CI fallback）。
+func newMeteringAPI(services ...ports.MeteringService) *meteringAPI {
+	if len(services) > 0 && services[0] != nil {
+		return &meteringAPI{service: services[0]}
+	}
 	return &meteringAPI{service: runtimeadapter.NewLocalMeteringService()}
 }
 
-func registerMetering(v1 *route.RouterGroup) {
-	api := newMeteringAPI()
+func registerMetering(v1 *route.RouterGroup, service ports.MeteringService) {
+	api := newMeteringAPI(service)
 	v1.GET("/metering/usage", api.queryUsage)
+	v1.GET("/metering/usage/platform", api.queryPlatformUsage)
 	v1.POST("/metering/token-usage", api.reportTokenUsage)
 }
 
-func (api *meteringAPI) queryUsage(ctx context.Context, c *app.RequestContext) {
+// requireTimeRange 校验 start_time 和 end_time 必填且格式正确（RFC3339）。
+// 返回解析后的时间；任一缺失或格式错误返回 400。两个 metering handler 共用。
+func requireTimeRange(c *app.RequestContext) (time.Time, time.Time, bool) {
 	startTime, err := optionalRFC3339(c.Query("start_time"))
 	if err != nil {
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "start_time must be RFC3339")
-		return
+		return time.Time{}, time.Time{}, false
 	}
 	endTime, err := optionalRFC3339(c.Query("end_time"))
 	if err != nil {
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "end_time must be RFC3339")
+		return time.Time{}, time.Time{}, false
+	}
+	if startTime.IsZero() || endTime.IsZero() {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "start_time and end_time are required")
+		return time.Time{}, time.Time{}, false
+	}
+	return startTime, endTime, true
+}
+
+func (api *meteringAPI) queryUsage(ctx context.Context, c *app.RequestContext) {
+	startTime, endTime, ok := requireTimeRange(c)
+	if !ok {
 		return
 	}
 	result, err := api.service.QueryUsage(ctx, ports.MeteringUsageQueryRequest{
@@ -85,6 +105,38 @@ func (api *meteringAPI) queryUsage(ctx context.Context, c *app.RequestContext) {
 		EndTime:      endTime,
 		ResourceType: ports.MeteringResourceType(strings.TrimSpace(c.Query("resource_type"))),
 		GroupBy:      strings.TrimSpace(c.Query("group_by")),
+	})
+	if err != nil {
+		writeMeteringError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, meteringUsageFromResult(result))
+}
+
+func (api *meteringAPI) queryPlatformUsage(ctx context.Context, c *app.RequestContext) {
+	// 复用 requireTimeRange：与 queryUsage handler 共用时间必填校验。
+	startTime, endTime, ok := requireTimeRange(c)
+	if !ok {
+		return
+	}
+
+	// tenant_id query 参数 UUID 格式校验：契约 schema 已加 format: uuid，
+	// handler 层 uuid.Parse 是真正落地校验。
+	platformTenantID := strings.TrimSpace(c.Query("tenant_id"))
+	if platformTenantID != "" {
+		if _, err := uuid.Parse(platformTenantID); err != nil {
+			writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "tenant_id must be a valid UUID")
+			return
+		}
+	}
+
+	result, err := api.service.QueryPlatformUsage(ctx, ports.MeteringUsageQueryRequest{
+		TenantID:         instanceTenantID(c),
+		PlatformTenantID: platformTenantID,
+		StartTime:        startTime,
+		EndTime:          endTime,
+		ResourceType:     ports.MeteringResourceType(strings.TrimSpace(c.Query("resource_type"))),
+		GroupBy:          strings.TrimSpace(c.Query("group_by")),
 	})
 	if err != nil {
 		writeMeteringError(c, err)
@@ -173,6 +225,8 @@ func writeMeteringError(c *app.RequestContext, err error) {
 	switch {
 	case errors.Is(err, ports.ErrInvalid):
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+	case errors.Is(err, ports.ErrNotConfigured), errors.Is(err, ports.ErrUnavailable):
+		writeInstanceError(c, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "metering service unavailable")
 	default:
 		writeInstanceError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
 	}

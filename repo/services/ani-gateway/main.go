@@ -216,6 +216,14 @@ func main() {
 		os.Exit(1)
 	}
 	defer closeQuotaStore()
+	meteringService, closeMeteringRuntime, err := newGatewayMeteringService(runtimeCtx)
+	if err != nil {
+		logger.Error("failed to configure metering service", "err", err)
+		os.Exit(1)
+	}
+	if closeMeteringRuntime != nil {
+		defer closeMeteringRuntime()
+	}
 	platformWorkloadRuntimeConfig := gatewayPlatformWorkloadRuntimeConfigFromEnv()
 	platformWorkloadService, closePlatformWorkload, err := newGatewayPlatformWorkloadService(runtimeCtx, platformWorkloadRuntimeConfig)
 	if err != nil {
@@ -279,6 +287,7 @@ func main() {
 		GPUSpecStore:                          gpuSpecStore,
 		MetadataStore:                         quotaMetadataStore,
 		QuotaStoreService:                     quotaStoreService,
+		MeteringService:                       meteringService,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
