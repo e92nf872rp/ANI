@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/kubercloud/ani/services/ani-gateway/internal/authz"
 )
 
 // RateLimit enforces per-principal windowed request limiting through the shared gateway store.
@@ -17,6 +18,12 @@ func RateLimit(store GatewayStore) app.HandlerFunc {
 	limit := gatewayRateLimitFromEnv()
 	return func(ctx context.Context, c *app.RequestContext) {
 		if isPublicPath(string(c.Path())) {
+			c.Next(ctx)
+			return
+		}
+		// 与 AuthenticatePrincipal / AuthorizePrincipal 一致：
+		// resolved policy 为 public 时放行，交由后续 NoRoute 返回 404。
+		if resolved, err := GetResolvedPolicy(c); err == nil && resolved.Source == authz.PolicySourcePublic {
 			c.Next(ctx)
 			return
 		}
