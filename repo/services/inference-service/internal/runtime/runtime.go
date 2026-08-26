@@ -93,7 +93,7 @@ type InferenceRuntime interface {
 	Observe(context.Context, RuntimeIdentity) (Observation, error)         // 只读对齐，不创建
 	ApplyLifecycle(context.Context, LifecycleRequest) (Observation, error) // start/stop/restart
 	Delete(context.Context, DeleteRequest) error
-	Health(context.Context, uuid.UUID, uuid.UUID) error        // GET runtime /health
-	Smoke(context.Context, uuid.UUID, uuid.UUID, string) error // 有界 Chat/Embeddings 探活
+	Health(context.Context, uuid.UUID, uuid.UUID) error                              // GET runtime /health
+	Smoke(context.Context, uuid.UUID, uuid.UUID, string, domain.InferenceTask) error // 有界 Chat/Embeddings 探活
 	Logs(context.Context, LogQuery) (LogPage, error)
 }

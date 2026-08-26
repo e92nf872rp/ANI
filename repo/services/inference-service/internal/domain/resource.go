@@ -37,6 +37,20 @@ const (
 	ActionDelete  Action = "delete"
 )
 
+type InferenceTask string
+
+const (
+	InferenceTaskGenerate InferenceTask = "generate"
+	InferenceTaskEmbed    InferenceTask = "embed"
+)
+
+func NormalizeInferenceTask(task InferenceTask) InferenceTask {
+	if task == InferenceTaskEmbed {
+		return InferenceTaskEmbed
+	}
+	return InferenceTaskGenerate
+}
+
 type OperationState string
 
 const (
@@ -63,14 +77,15 @@ type Accelerator struct {
 
 // ExecutionProfile 在创建时冻结，后续 catalog/镜像变更不改写已有服务。
 type ExecutionProfile struct {
-	ID             string `json:"id"`
-	Version        string `json:"version"`
-	Runtime        string `json:"runtime"` // vllm | sglang
-	ImageID        string `json:"image_id,omitempty"`
-	ImageRef       string `json:"image_ref"`
-	ArtifactRef    string `json:"artifact_ref"` // pvc://...#/models/...
-	ArtifactDigest string `json:"artifact_digest"`
-	SecretRef      string `json:"secret_ref,omitempty"`
+	ID             string        `json:"id"`
+	Version        string        `json:"version"`
+	Runtime        string        `json:"runtime"` // vllm | sglang
+	Task           InferenceTask `json:"task,omitempty"`
+	ImageID        string        `json:"image_id,omitempty"`
+	ImageRef       string        `json:"image_ref"`
+	ArtifactRef    string        `json:"artifact_ref"` // pvc://...#/models/...
+	ArtifactDigest string        `json:"artifact_digest"`
+	SecretRef      string        `json:"secret_ref,omitempty"`
 }
 
 // EngineEnvVar 是创建时冻结的租户环境变量，不是 shell 赋值。

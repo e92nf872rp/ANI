@@ -126,13 +126,13 @@ func (r *Runtime) Health(ctx context.Context, tenantID, runtimeRef uuid.UUID) er
 	return probeHealth(ctx, r.http(), endpoint)
 }
 
-// Smoke 对 ClusterIP 发有界 Chat Completions 探活。
-func (r *Runtime) Smoke(ctx context.Context, tenantID, runtimeRef uuid.UUID, servedModelName string) error {
+// Smoke 对 ClusterIP 发有界 Chat Completions 或 Embeddings 探活。
+func (r *Runtime) Smoke(ctx context.Context, tenantID, runtimeRef uuid.UUID, servedModelName string, task domain.InferenceTask) error {
 	endpoint, err := r.runtimeEndpoint(ctx, tenantID, runtimeRef)
 	if err != nil {
 		return err
 	}
-	return probeSmoke(ctx, r.http(), endpoint, servedModelName)
+	return probeSmoke(ctx, r.http(), endpoint, servedModelName, task)
 }
 
 func (r *Runtime) runtimeEndpoint(ctx context.Context, tenantID, runtimeRef uuid.UUID) (string, error) {
@@ -367,21 +367,28 @@ func probeHealth(ctx context.Context, client *http.Client, endpoint string) erro
 	return nil
 }
 
-func probeSmoke(ctx context.Context, client *http.Client, endpoint, servedModelName string) error {
-	target, err := probeURL(endpoint, "/v1/chat/completions")
-	if err != nil {
-		return err
-	}
+func probeSmoke(ctx context.Context, client *http.Client, endpoint, servedModelName string, task domain.InferenceTask) error {
+	task = domain.NormalizeInferenceTask(task)
+	path := "/v1/chat/completions"
 	model := strings.TrimSpace(servedModelName)
 	if model == "" {
 		model = "default"
 	}
-	payload, err := json.Marshal(map[string]any{
+	payloadBody := map[string]any{
 		"model":       model,
 		"messages":    []map[string]string{{"role": "user", "content": "ping"}},
 		"max_tokens":  8,
 		"temperature": 0,
-	})
+	}
+	if task == domain.InferenceTaskEmbed {
+		path = "/v1/embeddings"
+		payloadBody = map[string]any{"model": model, "input": []string{"ping"}}
+	}
+	target, err := probeURL(endpoint, path)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(payloadBody)
 	if err != nil {
 		return err
 	}
@@ -395,13 +402,24 @@ func probeSmoke(ctx context.Context, client *http.Client, endpoint, servedModelN
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	const maxSmokeResponseBytes = 1 << 20
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxSmokeResponseBytes+1))
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("runtime smoke returned %d", resp.StatusCode)
+	}
+	if len(body) > maxSmokeResponseBytes {
+		return fmt.Errorf("runtime smoke response exceeds %d bytes", maxSmokeResponseBytes)
 	}
 	var decoded map[string]any
 	if err := json.Unmarshal(body, &decoded); err != nil {
 		return fmt.Errorf("runtime smoke returned a non-json body")
+	}
+	if task == domain.InferenceTaskEmbed {
+		data, ok := decoded["data"].([]any)
+		if !ok || len(data) == 0 {
+			return fmt.Errorf("runtime embedding smoke missing data")
+		}
+		return nil
 	}
 	if _, ok := decoded["choices"]; !ok {
 		return fmt.Errorf("runtime smoke missing choices")

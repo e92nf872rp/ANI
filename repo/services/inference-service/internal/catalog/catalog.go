@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/google/uuid"
+	"github.com/kubercloud/ani/services/inference-service/internal/domain"
 )
 
 var (
@@ -19,6 +20,7 @@ type EngineProfile struct {
 	ID       string
 	Version  string
 	Runtime  string // vllm 或 sglang，由模型能力推断，不是页面下拉
+	Task     domain.InferenceTask
 	ImageRef string // 仅测试替身可填；产品创建路径会覆盖为请求冻结 digest
 }
 

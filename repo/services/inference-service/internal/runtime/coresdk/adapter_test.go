@@ -125,11 +125,95 @@ func TestProbeHealthAndSmokeUseRuntimeEndpoint(t *testing.T) {
 	if err := probeHealth(t.Context(), server.Client(), server.URL); err != nil {
 		t.Fatalf("probeHealth() error = %v", err)
 	}
-	if err := probeSmoke(t.Context(), server.Client(), server.URL, "tiny"); err != nil {
+	if err := probeSmoke(t.Context(), server.Client(), server.URL, "tiny", domain.InferenceTaskGenerate); err != nil {
 		t.Fatalf("probeSmoke() error = %v", err)
 	}
 	if len(paths) != 2 || paths[0] != "GET /health" || paths[1] != "POST /v1/chat/completions" {
 		t.Fatalf("paths = %v", paths)
+	}
+}
+
+func TestProbeSmokeUsesTaskEndpoint(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		response string
+		task     domain.InferenceTask
+	}{
+		{name: "generate", path: "/v1/chat/completions", response: `{"choices":[{}]}`, task: domain.InferenceTaskGenerate},
+		{name: "legacy-empty", path: "/v1/chat/completions", response: `{"choices":[{}]}`},
+		{name: "legacy-unknown", path: "/v1/chat/completions", response: `{"choices":[{}]}`, task: domain.InferenceTask("unknown")},
+		{name: "embed", path: "/v1/embeddings", response: `{"data":[{"embedding":[0.1]}]}`, task: domain.InferenceTaskEmbed},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotPath string
+			var gotBody map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+					t.Fatalf("decode request: %v", err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.response))
+			}))
+			t.Cleanup(server.Close)
+
+			if err := probeSmoke(t.Context(), server.Client(), server.URL, " tiny ", tc.task); err != nil {
+				t.Fatalf("probeSmoke() error = %v", err)
+			}
+			if gotPath != tc.path {
+				t.Fatalf("path = %q, want %q", gotPath, tc.path)
+			}
+			if gotBody["model"] != "tiny" {
+				t.Fatalf("model = %#v, want tiny", gotBody["model"])
+			}
+			if tc.task == domain.InferenceTaskEmbed {
+				input, ok := gotBody["input"].([]any)
+				if !ok || len(input) != 1 || input[0] != "ping" {
+					t.Fatalf("embedding input = %#v", gotBody["input"])
+				}
+			}
+		})
+	}
+}
+
+func TestProbeSmokeAcceptsLargeEmbeddingResponse(t *testing.T) {
+	response := `{"data":[{"embedding":[` + strings.Repeat("0.1,", 5000) + `0.1]}]}`
+	if len(response) <= 4096 {
+		t.Fatalf("test response length = %d, want > 4096", len(response))
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(response))
+	}))
+	t.Cleanup(server.Close)
+
+	if err := probeSmoke(t.Context(), server.Client(), server.URL, "tiny", domain.InferenceTaskEmbed); err != nil {
+		t.Fatalf("probeSmoke() error = %v", err)
+	}
+}
+
+func TestProbeSmokeRejectsInvalidEmbeddingResponse(t *testing.T) {
+	tests := []struct {
+		name, response string
+	}{
+		{name: "missing-data", response: `{}`},
+		{name: "empty-data", response: `{"data":[]}`},
+		{name: "non-json", response: `not-json`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.response))
+			}))
+			t.Cleanup(server.Close)
+
+			if err := probeSmoke(t.Context(), server.Client(), server.URL, "tiny", domain.InferenceTaskEmbed); err == nil {
+				t.Fatal("probeSmoke() error = nil, want invalid embedding response")
+			}
+		})
 	}
 }
 
@@ -373,7 +457,7 @@ func TestHealthAndSmokePassCallerTenantID(t *testing.T) {
 		errCh <- rt.Health(t.Context(), tenantB, refB)
 	}()
 	wg.Wait()
-	if err := rt.Smoke(t.Context(), tenantA, refA, "tiny"); err != nil {
+	if err := rt.Smoke(t.Context(), tenantA, refA, "tiny", domain.InferenceTaskGenerate); err != nil {
 		t.Fatalf("Smoke() error = %v", err)
 	}
 	close(errCh)
