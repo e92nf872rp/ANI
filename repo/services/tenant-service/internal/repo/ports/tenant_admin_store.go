@@ -68,8 +68,8 @@ type AdminWithTenant struct {
 	DisplayName *string
 	Role        string // tenant-admin | user | auditor（列表仅含 admin/邀请中/已过期）
 	Status      string // active | disabled
-	IsInviting  bool   // true = 该租户下存在 status='inviting' 的邀请；仅作标记
-	IsExpired   bool   // true = 该租户下存在 status='expired' 的邀请；仅作标记
+	IsInviting  bool   // true = 最新邀请 status='inviting'；仅作标记
+	IsExpired   bool   // true = 最新邀请 status='expired'；仅作标记
 	Source      string // third_party | local
 	LastLoginAt *time.Time
 	CreatedAt   *time.Time // 详情返回
@@ -194,9 +194,13 @@ type TenantAdminStore interface {
 	// UpdateInvitation 更新邀请（重发：新 token_hash / expire_at / status='inviting'，清空 accepted_at/rejected_at）。
 	UpdateInvitation(ctx context.Context, inv TenantAdminInvitation) (TenantAdminInvitation, error)
 
-	// ListInvitationFlags 返回存在 inviting 和/或 expired 邀请的 (tenant_id,user_id) 标记。
+	// ListInvitationFlags 返回 inviting/expired 标记；读取前先将「最新邀请仍为 inviting 且 expire_at < now」落库为 expired。
 	// tenantID 非空时按租户过滤；statusFilter 为 inviting|expired 时仅返回带该标记的行；空串返回两者。
 	ListInvitationFlags(ctx context.Context, tenantID *uuid.UUID, statusFilter string) ([]InvitationFlag, error)
+
+	// GetInvitationFlags 按最新邀请设置标记（inviting/expired 互斥；其余/无记录两者 false）。
+	// 读取后若最新为 inviting 且 expire_at < now，先写回 expired 再返回。
+	GetInvitationFlags(ctx context.Context, tenantID, userID uuid.UUID) (InvitationFlag, error)
 
 	// ListAuditLogs 按 tenant_id + 目标 user_id 查询操作历史，游标分页。
 	ListAuditLogs(ctx context.Context, tenantID, userID uuid.UUID, filter TenantAdminAuditLogFilter) (TenantAdminAuditLogListResult, error)

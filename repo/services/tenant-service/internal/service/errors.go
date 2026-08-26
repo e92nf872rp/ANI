@@ -45,6 +45,8 @@ func mapStoreError(err error) error {
 		return businessError(codes.InvalidArgument, ports.ErrValidationFailed, detail)
 	case errors.Is(err, ports.ErrCoreUnavailable):
 		return businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant api unavailable")
+	case errors.Is(err, ports.ErrStoreUnavailable):
+		return businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant admin store unavailable")
 	case errors.Is(err, ports.ErrTenantAdminNotFound):
 		return businessError(codes.NotFound, ports.ErrTenantAdminNotFound, "tenant admin not found")
 	case errors.Is(err, ports.ErrTenantAdminAlreadyAdmin):

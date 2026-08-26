@@ -498,15 +498,16 @@ func adminWithTenantJSON(item *tenantv1.AdminWithTenant, includeTimestamps bool)
 		return map[string]any{}
 	}
 	out := map[string]any{
-		"id":            item.GetId(),
-		"email":         item.GetEmail(),
-		"username":      item.GetUsername(),
-		"role":          item.GetRole(),
-		"status":        item.GetStatus(),
-		"is_inviting":   item.GetIsInviting(),
-		"is_expired":    item.GetIsExpired(),
-		"source":        item.GetSource(),
-		"last_login_at": pbRFC3339(item.GetLastLoginAt()),
+		"id":          item.GetId(),
+		"email":       item.GetEmail(),
+		"username":    item.GetUsername(),
+		"role":        item.GetRole(),
+		"status":      item.GetStatus(),
+		"is_inviting": item.GetIsInviting(),
+		"is_expired":  item.GetIsExpired(),
+		"source":      item.GetSource(),
+		// 日期展示对齐配额套餐：Asia/Shanghai「年-月-日 时:分:秒」；无值保持 null
+		"last_login_at": tenantAdminTimestampOrNil(item.GetLastLoginAt()),
 		"tenant": map[string]any{
 			"id":           item.GetTenant().GetId(),
 			"name":         item.GetTenant().GetName(),
@@ -519,10 +520,19 @@ func adminWithTenantJSON(item *tenantv1.AdminWithTenant, includeTimestamps bool)
 		out["display_name"] = nil
 	}
 	if includeTimestamps {
-		out["created_at"] = pbRFC3339(item.GetCreatedAt())
-		out["updated_at"] = pbRFC3339(item.GetUpdatedAt())
+		out["created_at"] = tenantAdminTimestampOrNil(item.GetCreatedAt())
+		out["updated_at"] = tenantAdminTimestampOrNil(item.GetUpdatedAt())
 	}
 	return out
+}
+
+// tenantAdminTimestampOrNil 复用配额套餐 pbTimestampFormat；空值返回 null（非空串）。
+func tenantAdminTimestampOrNil(ts *timestamppb.Timestamp) any {
+	formatted := pbTimestampFormat(ts)
+	if formatted == "" {
+		return nil
+	}
+	return formatted
 }
 
 func invitationResultJSON(res *tenantv1.InvitationResult) map[string]any {
@@ -627,6 +637,7 @@ var tenantAdminBusinessCodeByHTTP = map[string]int{
 	"TENANT_NOT_FOUND":                  http.StatusNotFound,
 	"FORBIDDEN":                         http.StatusForbidden,
 	"GRPC_CLIENT_UNAVAILABLE":           http.StatusBadGateway,
+	"STORE_UNAVAILABLE":                 http.StatusBadGateway,
 }
 
 var sortedTenantAdminBusinessCodes = func() []string {

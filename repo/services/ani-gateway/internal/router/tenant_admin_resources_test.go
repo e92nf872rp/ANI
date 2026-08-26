@@ -426,14 +426,16 @@ func TestTenantAdminRoutes_GetRolePermissions(t *testing.T) {
 	}
 }
 
-func TestTenantAdminRoutes_DetailIncludesTimestamps(t *testing.T) {
+func TestHandler_Detail(t *testing.T) {
 	t.Setenv("ANI_AUTH_MODE", "dev")
 	now := timestamppb.New(time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC))
 	client := &fakeTenantAdminGRPC{
 		detailResp: &tenantv1.AdminWithTenant{
 			Id: "u1", Email: "a@acme.io", Username: "acme_admin",
+			DisplayName: wrapperspb.String("Acme Admin"),
 			Role: "tenant-admin", Status: "active", Source: "local",
-			CreatedAt: now, UpdatedAt: now,
+			IsInviting: true, IsExpired: false,
+			LastLoginAt: now, CreatedAt: now, UpdatedAt: now,
 			Tenant: &tenantv1.TenantAdminTenantRef{Id: "t1", Name: "acme", DisplayName: "ACME"},
 		},
 	}
@@ -446,7 +448,34 @@ func TestTenantAdminRoutes_DetailIncludesTimestamps(t *testing.T) {
 	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
 		t.Fatalf("json: %v", err)
 	}
+	for _, key := range []string{"id", "username", "email", "display_name", "role", "status", "source", "last_login_at", "created_at", "updated_at", "is_inviting", "is_expired", "tenant"} {
+		if _, ok := body[key]; !ok {
+			t.Fatalf("missing field %q: %#v", key, body)
+		}
+	}
+	if body["id"] != "u1" || body["username"] != "acme_admin" || body["email"] != "a@acme.io" {
+		t.Fatalf("identity=%#v", body)
+	}
+	if body["is_inviting"] != true || body["is_expired"] != false {
+		t.Fatalf("flags inviting=%v expired=%v", body["is_inviting"], body["is_expired"])
+	}
 	if body["created_at"] == nil || body["updated_at"] == nil {
 		t.Fatalf("detail timestamps missing: %#v", body)
+	}
+	// 与配额套餐一致：Asia/Shanghai「2006-01-02 15:04:05」（UTC 10:00 → 18:00）
+	wantTS := "2026-08-10 18:00:00"
+	if body["created_at"] != wantTS || body["updated_at"] != wantTS || body["last_login_at"] != wantTS {
+		t.Fatalf("timestamp format want %q, got created=%v updated=%v last_login=%v",
+			wantTS, body["created_at"], body["updated_at"], body["last_login_at"])
+	}
+	if _, hasHash := body["password_hash"]; hasHash {
+		t.Fatalf("password_hash must not appear: %#v", body)
+	}
+	if _, hasTenantID := body["tenant_id"]; hasTenantID {
+		t.Fatalf("top-level tenant_id must not appear: %#v", body)
+	}
+	tenant, _ := body["tenant"].(map[string]any)
+	if tenant["id"] != "t1" || tenant["name"] != "acme" || tenant["display_name"] != "ACME" {
+		t.Fatalf("tenant=%#v", tenant)
 	}
 }

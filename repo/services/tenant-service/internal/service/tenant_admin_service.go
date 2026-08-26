@@ -92,7 +92,7 @@ func (s *TenantAdminService) InviteTenantAdmin(ctx context.Context, req *tenantv
 		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant admin api unavailable")
 	}
 	if s.store == nil {
-		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "tenant admin store unavailable")
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant admin store unavailable")
 	}
 
 	// 步骤 2：校验入参
@@ -205,7 +205,7 @@ func (s *TenantAdminService) ResendTenantAdminInvitation(ctx context.Context, re
 
 	// 步骤 1：校验依赖
 	if s.store == nil {
-		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "tenant admin store unavailable")
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant admin store unavailable")
 	}
 
 	// 步骤 2：校验入参
@@ -303,7 +303,7 @@ func (s *TenantAdminService) ListAllTenantAdmins(ctx context.Context, req *tenan
 		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant admin api unavailable")
 	}
 	if s.store == nil {
-		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "tenant admin store unavailable")
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant admin store unavailable")
 	}
 	if req == nil {
 		req = &tenantv1.ListAllTenantAdminsRequest{}
@@ -610,8 +610,46 @@ func adminWithTenantToProto(user ports.AdminWithTenant, includeTimestamps bool) 
 	return out
 }
 
-func (s *TenantAdminService) GetTenantAdminDetail(context.Context, *tenantv1.GetTenantAdminDetailRequest) (*tenantv1.AdminWithTenant, error) {
-	return nil, unimplemented()
+// GetTenantAdminDetail 管理员详情（SPEC §5.1.9 / US-004）。
+// Core 用户全字段 + 本地邀请标记；只读、无审计。
+func (s *TenantAdminService) GetTenantAdminDetail(ctx context.Context, req *tenantv1.GetTenantAdminDetailRequest) (*tenantv1.AdminWithTenant, error) {
+	// 步骤 1：校验依赖
+	if s.core == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant admin api unavailable")
+	}
+	if s.store == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant admin store unavailable")
+	}
+	if req == nil {
+		return nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "request required")
+	}
+
+	// 步骤 2：解析路径参数
+	tenantID, err := parseTenantAdminUUID(req.GetTenantId(), "tenant_id")
+	if err != nil {
+		return nil, err
+	}
+	userID, err := parseTenantAdminUUID(req.GetUserId(), "user_id")
+	if err != nil {
+		return nil, err
+	}
+
+	// 步骤 3：Core 拉取用户详情（含 created_at/updated_at/tenant；username 已去前缀，source 已推断）
+	user, err := s.core.GetAdminDetail(ctx, tenantID, userID)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+
+	// 步骤 4：按最新邀请 status 合成 is_inviting / is_expired（互斥）
+	flags, err := s.store.GetInvitationFlags(ctx, tenantID, userID)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	user.IsInviting = flags.IsInviting
+	user.IsExpired = flags.IsExpired
+
+	// 步骤 5：详情含 timestamps
+	return adminWithTenantToProto(user, true), nil
 }
 
 func (s *TenantAdminService) UpdateTenantAdminRole(context.Context, *tenantv1.UpdateTenantAdminRoleRequest) (*commonv1.IdempotentResult, error) {

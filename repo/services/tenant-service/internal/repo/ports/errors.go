@@ -27,6 +27,9 @@ var (
 	// ErrCoreUnavailable 表示 Core 配额 API 不可用（HTTP 502 GRPC_CLIENT_UNAVAILABLE）。
 	ErrCoreUnavailable = errors.New("GRPC_CLIENT_UNAVAILABLE")
 
+	// ErrStoreUnavailable 表示本地 store（tenant-service DB）不可用（HTTP 502 STORE_UNAVAILABLE）。
+	ErrStoreUnavailable = errors.New("STORE_UNAVAILABLE")
+
 	// ErrTenantNotFound 表示 Core 侧租户不存在（HTTP 404）。
 	ErrTenantNotFound = errors.New("TENANT_NOT_FOUND")
 

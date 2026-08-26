@@ -165,8 +165,13 @@ func (f *fakeTenantAdminStore) ListInvitationFlags(_ context.Context, tenantID *
 	if f.flagsErr != nil {
 		return nil, f.flagsErr
 	}
-	out := make([]ports.InvitationFlag, 0, len(f.flags))
-	for _, flag := range f.flags {
+	f.expireStaleInvitations()
+	source := f.flags
+	if len(source) == 0 && f.latest != nil {
+		source = []ports.InvitationFlag{invitationFlagFromLatest(*f.latest)}
+	}
+	out := make([]ports.InvitationFlag, 0, len(source))
+	for _, flag := range source {
 		if tenantID != nil && flag.TenantID != *tenantID {
 			continue
 		}
@@ -180,9 +185,72 @@ func (f *fakeTenantAdminStore) ListInvitationFlags(_ context.Context, tenantID *
 				continue
 			}
 		}
+		if !flag.IsInviting && !flag.IsExpired {
+			continue
+		}
 		out = append(out, flag)
 	}
 	return out, nil
+}
+func (f *fakeTenantAdminStore) GetInvitationFlags(_ context.Context, tenantID, userID uuid.UUID) (ports.InvitationFlag, error) {
+	if f.flagsErr != nil {
+		return ports.InvitationFlag{}, f.flagsErr
+	}
+	f.expireStaleInvitations()
+	if f.latest != nil && f.latest.TenantID == tenantID && f.latest.UserID == userID {
+		return invitationFlagFromLatest(*f.latest), nil
+	}
+	for _, flag := range f.flags {
+		if flag.TenantID == tenantID && flag.UserID == userID {
+			return flag, nil
+		}
+	}
+	out := ports.InvitationFlag{TenantID: tenantID, UserID: userID}
+	if f.pending {
+		out.IsInviting = true
+	}
+	return out, nil
+}
+func (f *fakeTenantAdminStore) expireStaleInvitations() {
+	now := time.Now().UTC()
+	if f.latest != nil &&
+		f.latest.Status == ports.InvitationStatusInviting &&
+		!f.latest.ExpireAt.IsZero() &&
+		f.latest.ExpireAt.Before(now) {
+		f.latest.Status = ports.InvitationStatusExpired
+	}
+	for i := range f.invitations {
+		inv := &f.invitations[i]
+		if inv.Status == ports.InvitationStatusInviting &&
+			!inv.ExpireAt.IsZero() &&
+			inv.ExpireAt.Before(now) {
+			inv.Status = ports.InvitationStatusExpired
+		}
+	}
+	// 同步显式 flags：与 latest 对齐（懒过期后）
+	if f.latest != nil {
+		refreshed := invitationFlagFromLatest(*f.latest)
+		replaced := false
+		for i := range f.flags {
+			if f.flags[i].TenantID == f.latest.TenantID && f.flags[i].UserID == f.latest.UserID {
+				f.flags[i] = refreshed
+				replaced = true
+			}
+		}
+		if !replaced && (refreshed.IsInviting || refreshed.IsExpired) {
+			f.flags = append(f.flags, refreshed)
+		}
+	}
+}
+func invitationFlagFromLatest(inv ports.TenantAdminInvitation) ports.InvitationFlag {
+	out := ports.InvitationFlag{TenantID: inv.TenantID, UserID: inv.UserID}
+	switch inv.Status {
+	case ports.InvitationStatusInviting:
+		out.IsInviting = true
+	case ports.InvitationStatusExpired:
+		out.IsExpired = true
+	}
+	return out
 }
 func (f *fakeTenantAdminStore) ListAuditLogs(context.Context, uuid.UUID, uuid.UUID, ports.TenantAdminAuditLogFilter) (ports.TenantAdminAuditLogListResult, error) {
 	return ports.TenantAdminAuditLogListResult{}, ports.ErrNotImplemented
@@ -724,6 +792,191 @@ func TestTenantAdminService_ListAll(t *testing.T) {
 		})
 		assertBusinessCode(t, err, codes.InvalidArgument, "VALIDATION_FAILED")
 	})
+
+	t.Run("lazy_expire_stale_inviting", func(t *testing.T) {
+		t.Parallel()
+		core := &fakeTenantAdminCoreClient{
+			listItems: []ports.AdminWithTenant{admin},
+			users: map[string]ports.AdminWithTenant{
+				tenantUserKey(tenantID, invitingID): invitingUser,
+			},
+		}
+		store := &fakeTenantAdminStore{
+			latest: &ports.TenantAdminInvitation{
+				ID: uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+				TenantID: tenantID, UserID: invitingID,
+				Status: ports.InvitationStatusInviting,
+				ExpireAt: time.Now().UTC().Add(-time.Hour),
+			},
+			flags: []ports.InvitationFlag{
+				{TenantID: tenantID, UserID: invitingID, IsInviting: true},
+			},
+		}
+		svc := NewTenantAdminService(core, nil, store, nil)
+		res, err := svc.ListAllTenantAdmins(context.Background(), &tenantv1.ListAllTenantAdminsRequest{
+			Page: &commonv1.CursorPageRequest{Limit: 20},
+		})
+		if err != nil {
+			t.Fatalf("ListAll: %v", err)
+		}
+		if store.latest.Status != ports.InvitationStatusExpired {
+			t.Fatalf("latest status=%q want expired", store.latest.Status)
+		}
+		byID := map[string]*tenantv1.AdminWithTenant{}
+		for _, it := range res.Items {
+			byID[it.GetId()] = it
+		}
+		got := byID[invitingID.String()]
+		if got == nil || got.GetIsInviting() || !got.GetIsExpired() {
+			t.Fatalf("want expired flag after lazy expire, got %+v", got)
+		}
+	})
+}
+
+func TestTenantAdminService_GetDetail(t *testing.T) {
+	t.Parallel()
+	tenantID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
+	userID := uuid.MustParse("22222222-2222-4222-8222-222222222222")
+	now := time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)
+	display := "Acme Admin"
+	lastLogin := now.Add(-time.Hour)
+	coreUser := ports.AdminWithTenant{
+		ID: userID, Email: "a@acme.io", Username: "acme_admin", DisplayName: &display,
+		Role: ports.TenantAdminRoleAdmin, Status: "active", Source: "local",
+		LastLoginAt: &lastLogin, CreatedAt: &now, UpdatedAt: &now,
+		Tenant: ports.TenantRef{ID: tenantID, Name: "acme", DisplayName: "Acme"},
+	}
+
+	t.Run("full_fields_with_inviting", func(t *testing.T) {
+		t.Parallel()
+		core := &fakeTenantAdminCoreClient{
+			users: map[string]ports.AdminWithTenant{
+				tenantUserKey(tenantID, userID): coreUser,
+			},
+		}
+		store := &fakeTenantAdminStore{
+			flags: []ports.InvitationFlag{{
+				TenantID: tenantID, UserID: userID, IsInviting: true, IsExpired: false,
+			}},
+		}
+		svc := NewTenantAdminService(core, nil, store, nil)
+		res, err := svc.GetTenantAdminDetail(context.Background(), &tenantv1.GetTenantAdminDetailRequest{
+			TenantId: tenantID.String(),
+			UserId:   userID.String(),
+		})
+		if err != nil {
+			t.Fatalf("GetTenantAdminDetail: %v", err)
+		}
+		if res.GetId() != userID.String() || res.GetEmail() != "a@acme.io" || res.GetUsername() != "acme_admin" {
+			t.Fatalf("identity=%+v", res)
+		}
+		if res.GetDisplayName() == nil || res.GetDisplayName().GetValue() != display {
+			t.Fatalf("display_name=%v", res.GetDisplayName())
+		}
+		if res.GetRole() != "tenant-admin" || res.GetStatus() != "active" || res.GetSource() != "local" {
+			t.Fatalf("role/status/source=%s/%s/%s", res.GetRole(), res.GetStatus(), res.GetSource())
+		}
+		if !res.GetIsInviting() || res.GetIsExpired() {
+			t.Fatalf("flags inviting=%v expired=%v", res.GetIsInviting(), res.GetIsExpired())
+		}
+		if res.GetCreatedAt() == nil || res.GetUpdatedAt() == nil || res.GetLastLoginAt() == nil {
+			t.Fatalf("timestamps missing created=%v updated=%v last=%v", res.GetCreatedAt(), res.GetUpdatedAt(), res.GetLastLoginAt())
+		}
+		if res.GetTenant() == nil || res.GetTenant().GetId() != tenantID.String() || res.GetTenant().GetName() != "acme" {
+			t.Fatalf("tenant=%+v", res.GetTenant())
+		}
+	})
+
+	t.Run("latest_expired_flag", func(t *testing.T) {
+		t.Parallel()
+		core := &fakeTenantAdminCoreClient{
+			users: map[string]ports.AdminWithTenant{
+				tenantUserKey(tenantID, userID): coreUser,
+			},
+		}
+		store := &fakeTenantAdminStore{
+			latest: &ports.TenantAdminInvitation{
+				TenantID: tenantID, UserID: userID, Status: ports.InvitationStatusExpired,
+			},
+		}
+		svc := NewTenantAdminService(core, nil, store, nil)
+		res, err := svc.GetTenantAdminDetail(context.Background(), &tenantv1.GetTenantAdminDetailRequest{
+			TenantId: tenantID.String(),
+			UserId:   userID.String(),
+		})
+		if err != nil {
+			t.Fatalf("GetTenantAdminDetail: %v", err)
+		}
+		if res.GetIsInviting() || !res.GetIsExpired() {
+			t.Fatalf("want expired only, got inviting=%v expired=%v", res.GetIsInviting(), res.GetIsExpired())
+		}
+	})
+
+	t.Run("latest_settled_both_false", func(t *testing.T) {
+		t.Parallel()
+		core := &fakeTenantAdminCoreClient{
+			users: map[string]ports.AdminWithTenant{
+				tenantUserKey(tenantID, userID): coreUser,
+			},
+		}
+		store := &fakeTenantAdminStore{
+			latest: &ports.TenantAdminInvitation{
+				TenantID: tenantID, UserID: userID, Status: ports.InvitationStatusAccepted,
+			},
+		}
+		svc := NewTenantAdminService(core, nil, store, nil)
+		res, err := svc.GetTenantAdminDetail(context.Background(), &tenantv1.GetTenantAdminDetailRequest{
+			TenantId: tenantID.String(),
+			UserId:   userID.String(),
+		})
+		if err != nil {
+			t.Fatalf("GetTenantAdminDetail: %v", err)
+		}
+		if res.GetIsInviting() || res.GetIsExpired() {
+			t.Fatalf("want both false, got inviting=%v expired=%v", res.GetIsInviting(), res.GetIsExpired())
+		}
+	})
+
+	t.Run("lazy_expire_stale_inviting", func(t *testing.T) {
+		t.Parallel()
+		core := &fakeTenantAdminCoreClient{
+			users: map[string]ports.AdminWithTenant{
+				tenantUserKey(tenantID, userID): coreUser,
+			},
+		}
+		store := &fakeTenantAdminStore{
+			latest: &ports.TenantAdminInvitation{
+				ID:       uuid.MustParse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+				TenantID: tenantID, UserID: userID,
+				Status:   ports.InvitationStatusInviting,
+				ExpireAt: time.Now().UTC().Add(-time.Minute),
+			},
+		}
+		svc := NewTenantAdminService(core, nil, store, nil)
+		res, err := svc.GetTenantAdminDetail(context.Background(), &tenantv1.GetTenantAdminDetailRequest{
+			TenantId: tenantID.String(),
+			UserId:   userID.String(),
+		})
+		if err != nil {
+			t.Fatalf("GetTenantAdminDetail: %v", err)
+		}
+		if store.latest.Status != ports.InvitationStatusExpired {
+			t.Fatalf("latest status=%q want expired", store.latest.Status)
+		}
+		if res.GetIsInviting() || !res.GetIsExpired() {
+			t.Fatalf("want expired only after lazy expire, got inviting=%v expired=%v", res.GetIsInviting(), res.GetIsExpired())
+		}
+	})
+
+	t.Run("not_found", func(t *testing.T) {
+		t.Parallel()
+		svc := NewTenantAdminService(&fakeTenantAdminCoreClient{}, nil, &fakeTenantAdminStore{}, nil)
+		_, err := svc.GetTenantAdminDetail(context.Background(), &tenantv1.GetTenantAdminDetailRequest{
+			TenantId: tenantID.String(),
+			UserId:   userID.String(),
+		})
+		assertBusinessCode(t, err, codes.NotFound, "TENANT_ADMIN_NOT_FOUND")
+	})
 }
 
 func TestTenantAdminService_Unimplemented(t *testing.T) {
@@ -734,10 +987,6 @@ func TestTenantAdminService_Unimplemented(t *testing.T) {
 		name string
 		call func() error
 	}{
-		{"GetTenantAdminDetail", func() error {
-			_, err := s.GetTenantAdminDetail(ctx, &tenantv1.GetTenantAdminDetailRequest{})
-			return err
-		}},
 		{"UpdateTenantAdminRole", func() error {
 			_, err := s.UpdateTenantAdminRole(ctx, &tenantv1.UpdateTenantAdminRoleRequest{})
 			return err
@@ -772,8 +1021,8 @@ func TestTenantAdminService_Unimplemented(t *testing.T) {
 		}},
 	}
 
-	if len(checks) != 9 {
-		t.Fatalf("want 9 remaining unimplemented RPCs, got %d", len(checks))
+	if len(checks) != 8 {
+		t.Fatalf("want 8 remaining unimplemented RPCs, got %d", len(checks))
 	}
 	for _, tc := range checks {
 		t.Run(tc.name, func(t *testing.T) {

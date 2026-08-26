@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -202,7 +203,12 @@ func (s *PostgresTenantAdminStore) ListInvitationFlags(ctx context.Context, tena
 		return nil, fmt.Errorf("%w: statusFilter must be inviting|expired|empty", ports.ErrValidationFailed)
 	}
 
-	// 步骤 2：取每个 (tenant_id,user_id) 最新一条邀请记录，按其 status 设置标记
+	// 步骤 2：懒过期——每个 (tenant,user) 最新邀请若 inviting 且已过 expire_at，写回 expired
+	if err := s.expireStaleLatestInvitations(ctx, tenantID); err != nil {
+		return nil, err
+	}
+
+	// 步骤 3：取每个 (tenant_id,user_id) 最新一条 inviting/expired 邀请，按其 status 设置标记
 	rows, err := s.db.Query(ctx, `
 		SELECT tenant_id, user_id,
 		       status = $2 AS is_inviting,
@@ -238,6 +244,64 @@ func (s *PostgresTenantAdminStore) ListInvitationFlags(ctx context.Context, tena
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate invitation flags: %w", err)
+	}
+	return out, nil
+}
+
+// expireStaleLatestInvitations 将「最新邀请仍为 inviting 且 expire_at < now」批量写回 expired。
+func (s *PostgresTenantAdminStore) expireStaleLatestInvitations(ctx context.Context, tenantID *uuid.UUID) error {
+	_, err := s.db.Exec(ctx, `
+		UPDATE tenant_admin_invitation AS i
+		SET status = $2
+		FROM (
+			SELECT id
+			FROM (
+				SELECT id, status, expire_at,
+				       ROW_NUMBER() OVER (PARTITION BY tenant_id, user_id ORDER BY created_at DESC, id DESC) AS rn
+				FROM tenant_admin_invitation
+				WHERE ($1::uuid IS NULL OR tenant_id = $1)
+			) ranked
+			WHERE rn = 1
+			  AND status = $3
+			  AND expire_at < NOW()
+		) stale
+		WHERE i.id = stale.id
+	`, tenantID, ports.InvitationStatusExpired, ports.InvitationStatusInviting)
+	if err != nil {
+		return fmt.Errorf("expire stale latest invitations: %w", err)
+	}
+	return nil
+}
+
+func (s *PostgresTenantAdminStore) GetInvitationFlags(ctx context.Context, tenantID, userID uuid.UUID) (ports.InvitationFlag, error) {
+	// 步骤 1：取最新邀请；无记录 → 两标记 false
+	out := ports.InvitationFlag{TenantID: tenantID, UserID: userID}
+	inv, err := s.GetLatestInvitation(ctx, tenantID, userID)
+	if errors.Is(err, ports.ErrTenantAdminInvitationNotFound) {
+		return out, nil
+	}
+	if err != nil {
+		return ports.InvitationFlag{}, fmt.Errorf("get invitation flags: %w", err)
+	}
+
+	// 步骤 2：最新为 inviting 且 expire_at < now → 落库 expired
+	if inv.Status == ports.InvitationStatusInviting && inv.ExpireAt.Before(time.Now().UTC()) {
+		if _, updErr := s.db.Exec(ctx, `
+			UPDATE tenant_admin_invitation
+			SET status = $2
+			WHERE id = $1 AND status = $3
+		`, inv.ID, ports.InvitationStatusExpired, ports.InvitationStatusInviting); updErr != nil {
+			return ports.InvitationFlag{}, fmt.Errorf("expire stale invitation: %w", updErr)
+		}
+		inv.Status = ports.InvitationStatusExpired
+	}
+
+	// 步骤 3：仅按最新 status 互斥置位
+	switch inv.Status {
+	case ports.InvitationStatusInviting:
+		out.IsInviting = true
+	case ports.InvitationStatusExpired:
+		out.IsExpired = true
 	}
 	return out, nil
 }
