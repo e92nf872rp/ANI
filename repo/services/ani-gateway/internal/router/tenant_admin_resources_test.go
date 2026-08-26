@@ -31,6 +31,12 @@ type fakeTenantAdminGRPC struct {
 	inviteResp         *tenantv1.InvitationResult
 	lastInviteReq      *tenantv1.InviteTenantAdminRequest
 	inviteCalls        int
+	resendErr          error
+	resendResp         *tenantv1.InvitationResult
+	lastResendReq      *tenantv1.ResendTenantAdminInvitationRequest
+	resendCalls        int
+	lastResendToken    string
+	invitationSettled  bool
 	changeRoleErr      error
 	roleResp           *tenantv1.UserPermissions
 	roleErr            error
@@ -63,8 +69,27 @@ func (f *fakeTenantAdminGRPC) InviteTenantAdmin(_ context.Context, req *tenantv1
 		Message:  "invitation sent",
 	}, nil
 }
-func (f *fakeTenantAdminGRPC) ResendTenantAdminInvitation(context.Context, *tenantv1.ResendTenantAdminInvitationRequest, ...grpc.CallOption) (*tenantv1.InvitationResult, error) {
-	return nil, status.Error(codes.Unimplemented, "not used")
+func (f *fakeTenantAdminGRPC) ResendTenantAdminInvitation(_ context.Context, req *tenantv1.ResendTenantAdminInvitationRequest, _ ...grpc.CallOption) (*tenantv1.InvitationResult, error) {
+	f.resendCalls++
+	f.lastResendReq = req
+	if f.resendErr != nil {
+		return nil, f.resendErr
+	}
+	if f.invitationSettled {
+		return nil, status.Error(codes.FailedPrecondition, "TENANT_INVITATION_SETTLED: invitation already settled")
+	}
+	if f.resendResp != nil {
+		f.lastResendToken = f.resendResp.GetToken()
+		return f.resendResp, nil
+	}
+	token := "tok-resend-once"
+	f.lastResendToken = token
+	return &tenantv1.InvitationResult{
+		Id:       "inv-1",
+		Token:    token,
+		ExpireAt: timestamppb.New(time.Now().UTC().Add(72 * time.Hour)),
+		Message:  "invitation resent",
+	}, nil
 }
 func (f *fakeTenantAdminGRPC) ListAllTenantAdmins(_ context.Context, req *tenantv1.ListAllTenantAdminsRequest, _ ...grpc.CallOption) (*tenantv1.ListAllTenantAdminsResponse, error) {
 	f.lastListReq = req
@@ -191,6 +216,52 @@ func TestHandler_InviteFlow(t *testing.T) {
 	rawList := listResp.Body.String()
 	if strings.Contains(rawList, token) {
 		t.Fatalf("invite token leaked into list response")
+	}
+}
+
+func TestHandler_ResendFlow(t *testing.T) {
+	t.Setenv("ANI_AUTH_MODE", "dev")
+	client := &fakeTenantAdminGRPC{}
+	h := newTenantAdminTestServer(client)
+
+	body := `{"idempotency_key":"550e8400-e29b-41d4-a716-446655440020"}`
+	resendResp := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/svc/tenants/t1/admins/u1/invitation/resend",
+		&ut.Body{Body: bytes.NewBufferString(body), Len: len(body)})
+	if resendResp.Code != http.StatusOK {
+		t.Fatalf("resend status=%d body=%s", resendResp.Code, resendResp.Body.String())
+	}
+	var resendBody map[string]any
+	if err := json.Unmarshal(resendResp.Body.Bytes(), &resendBody); err != nil {
+		t.Fatalf("resend json: %v", err)
+	}
+	token, _ := resendBody["token"].(string)
+	if token == "" || resendBody["expire_at"] == nil || resendBody["id"] == nil {
+		t.Fatalf("incomplete resend: %#v", resendBody)
+	}
+	if resendBody["message"] != "invitation resent" {
+		t.Fatalf("message=%v", resendBody["message"])
+	}
+	if client.resendCalls != 1 || client.lastResendToken != token {
+		t.Fatalf("resendCalls=%d lastToken=%q", client.resendCalls, client.lastResendToken)
+	}
+	if client.lastResendReq == nil || client.lastResendReq.GetTenantId() != "t1" || client.lastResendReq.GetUserId() != "u1" {
+		t.Fatalf("path not forwarded: %+v", client.lastResendReq)
+	}
+
+	// settling: accepted/rejected → 409 TENANT_INVITATION_SETTLED
+	client.invitationSettled = true
+	settledBody := `{"idempotency_key":"550e8400-e29b-41d4-a716-446655440021"}`
+	settledResp := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/svc/tenants/t1/admins/u1/invitation/resend",
+		&ut.Body{Body: bytes.NewBufferString(settledBody), Len: len(settledBody)})
+	if settledResp.Code != http.StatusConflict {
+		t.Fatalf("settled status=%d want 409 body=%s", settledResp.Code, settledResp.Body.String())
+	}
+	var errBody map[string]any
+	if err := json.Unmarshal(settledResp.Body.Bytes(), &errBody); err != nil {
+		t.Fatalf("settled json: %v", err)
+	}
+	if errBody["code"] != "TENANT_INVITATION_SETTLED" {
+		t.Fatalf("code=%v", errBody["code"])
 	}
 }
 

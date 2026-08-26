@@ -110,6 +110,7 @@ allowed:
     coupling_level: bounded_direct
     imports:
       - github.com/jackc/pgx/v5
+      - github.com/jackc/pgx/v5/pgconn
       - github.com/jackc/pgx/v5/pgxpool
     reason: tenant admin invitation repository is a bounded persistence module; direct pgx keeps invitation/audit SQL and unique/FK mapping explicit
   # ── kb-service: asyncpg direct PG (bounded_direct, RLS explicit) ──────────

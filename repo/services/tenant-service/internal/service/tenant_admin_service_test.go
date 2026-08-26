@@ -66,8 +66,12 @@ type fakeTenantAdminStore struct {
 	pending     bool
 	pendingErr  error
 	insertErr   error
+	latest      *ports.TenantAdminInvitation
+	latestErr   error
+	updateErr   error
 	invitations []ports.TenantAdminInvitation
 	insertCalls int
+	updateCalls int
 }
 
 func (f *fakeTenantAdminStore) HasPendingInvitation(context.Context, uuid.UUID, uuid.UUID) (bool, error) {
@@ -91,10 +95,34 @@ func (f *fakeTenantAdminStore) InsertInvitation(_ context.Context, inv ports.Ten
 	return inv, nil
 }
 func (f *fakeTenantAdminStore) GetLatestInvitation(context.Context, uuid.UUID, uuid.UUID) (ports.TenantAdminInvitation, error) {
-	return ports.TenantAdminInvitation{}, ports.ErrNotImplemented
+	if f.latestErr != nil {
+		return ports.TenantAdminInvitation{}, f.latestErr
+	}
+	if f.latest == nil {
+		return ports.TenantAdminInvitation{}, ports.ErrTenantAdminInvitationNotFound
+	}
+	return *f.latest, nil
 }
-func (f *fakeTenantAdminStore) UpdateInvitation(context.Context, ports.TenantAdminInvitation) (ports.TenantAdminInvitation, error) {
-	return ports.TenantAdminInvitation{}, ports.ErrNotImplemented
+func (f *fakeTenantAdminStore) UpdateInvitation(_ context.Context, inv ports.TenantAdminInvitation) (ports.TenantAdminInvitation, error) {
+	f.updateCalls++
+	if f.updateErr != nil {
+		return ports.TenantAdminInvitation{}, f.updateErr
+	}
+	if f.latest == nil {
+		return ports.TenantAdminInvitation{}, ports.ErrTenantAdminInvitationNotFound
+	}
+	out := *f.latest
+	out.ID = inv.ID
+	if inv.ID == uuid.Nil {
+		out.ID = f.latest.ID
+	}
+	out.TokenHash = inv.TokenHash
+	out.ExpireAt = inv.ExpireAt
+	out.Status = inv.Status
+	out.AcceptedAt = nil
+	out.RejectedAt = nil
+	f.latest = &out
+	return out, nil
 }
 func (f *fakeTenantAdminStore) ListAuditLogs(context.Context, uuid.UUID, uuid.UUID, ports.TenantAdminAuditLogFilter) (ports.TenantAdminAuditLogListResult, error) {
 	return ports.TenantAdminAuditLogListResult{}, ports.ErrNotImplemented
@@ -265,6 +293,12 @@ func assertFailureAudit(t *testing.T, audit *fakeAuditStore, action string) {
 	if log.Action != action || log.Result != "failure" || log.Resource != auditResourceTenantAdmin {
 		t.Fatalf("audit=%+v", log)
 	}
+	if code, _ := log.Details["code"].(string); code == "" {
+		t.Fatalf("failure audit missing code: %+v", log.Details)
+	}
+	if msg, _ := log.Details["message"].(string); msg == "" {
+		t.Fatalf("failure audit missing message: %+v", log.Details)
+	}
 }
 
 func assertBusinessCode(t *testing.T, err error, wantCode codes.Code, wantPrefix string) {
@@ -281,6 +315,122 @@ func assertBusinessCode(t *testing.T, err error, wantCode codes.Code, wantPrefix
 	}
 }
 
+func TestTenantAdminService_Resend(t *testing.T) {
+	t.Parallel()
+	tenantID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
+	userID := uuid.MustParse("22222222-2222-4222-8222-222222222222")
+	invID := uuid.MustParse("33333333-3333-4333-8333-333333333333")
+
+	newLatest := func(status string) *ports.TenantAdminInvitation {
+		oldHash := "old-token-hash"
+		return &ports.TenantAdminInvitation{
+			ID:        invID,
+			TenantID:  tenantID,
+			UserID:    userID,
+			TokenHash: oldHash,
+			Status:    status,
+			ExpireAt:  time.Now().UTC().Add(-time.Hour),
+			CreatedAt: time.Now().UTC().Add(-48 * time.Hour),
+		}
+	}
+
+	for _, statusName := range []string{ports.InvitationStatusInviting, ports.InvitationStatusExpired} {
+		statusName := statusName
+		t.Run("success_"+statusName, func(t *testing.T) {
+			t.Parallel()
+			store := &fakeTenantAdminStore{latest: newLatest(statusName)}
+			oldHash := store.latest.TokenHash
+			audit := &fakeAuditStore{}
+			svc := NewTenantAdminService(nil, nil, store, audit)
+
+			before := time.Now().UTC()
+			res, err := svc.ResendTenantAdminInvitation(context.Background(), &tenantv1.ResendTenantAdminInvitationRequest{
+				TenantId:       tenantID.String(),
+				UserId:         userID.String(),
+				IdempotencyKey: "550e8400-e29b-41d4-a716-446655440010",
+			})
+			if err != nil {
+				t.Fatalf("Resend: %v", err)
+			}
+			if res.GetId() != invID.String() || res.GetToken() == "" || res.GetExpireAt() == nil {
+				t.Fatalf("incomplete: %+v", res)
+			}
+			if res.GetMessage() != "invitation resent" {
+				t.Fatalf("message=%q", res.GetMessage())
+			}
+			if len(res.GetToken()) != 64 {
+				t.Fatalf("token len=%d", len(res.GetToken()))
+			}
+			expireAt := res.GetExpireAt().AsTime()
+			if expireAt.Before(before.Add(71*time.Hour)) || expireAt.After(before.Add(73*time.Hour)) {
+				t.Fatalf("expire_at=%v not ~72h", expireAt)
+			}
+			if store.updateCalls != 1 || store.latest == nil {
+				t.Fatalf("updateCalls=%d latest=%v", store.updateCalls, store.latest)
+			}
+			if store.latest.Status != ports.InvitationStatusInviting {
+				t.Fatalf("status=%s want inviting", store.latest.Status)
+			}
+			if store.latest.TokenHash == oldHash || store.latest.TokenHash == "" {
+				t.Fatalf("token_hash not refreshed: %q", store.latest.TokenHash)
+			}
+			sum := sha256.Sum256([]byte(res.GetToken()))
+			wantHash := hex.EncodeToString(sum[:])
+			if store.latest.TokenHash != wantHash {
+				t.Fatalf("hash mismatch store=%s want=%s", store.latest.TokenHash, wantHash)
+			}
+			if len(audit.logs) != 1 || audit.logs[0].Action != "tenant_admin.resend_invitation" || audit.logs[0].Result != "success" {
+				t.Fatalf("audit=%+v", audit.logs)
+			}
+			if audit.logs[0].Details["token_hash"] != wantHash {
+				t.Fatalf("audit token_hash=%v", audit.logs[0].Details["token_hash"])
+			}
+		})
+	}
+
+	t.Run("not_found", func(t *testing.T) {
+		t.Parallel()
+		audit := &fakeAuditStore{}
+		svc := NewTenantAdminService(nil, nil, &fakeTenantAdminStore{latestErr: ports.ErrTenantAdminInvitationNotFound}, audit)
+		_, err := svc.ResendTenantAdminInvitation(context.Background(), &tenantv1.ResendTenantAdminInvitationRequest{
+			TenantId:       tenantID.String(),
+			UserId:         userID.String(),
+			IdempotencyKey: "550e8400-e29b-41d4-a716-446655440011",
+		})
+		assertBusinessCode(t, err, codes.NotFound, "TENANT_ADMIN_INVITATION_NOT_FOUND")
+		assertFailureAudit(t, audit, "tenant_admin.resend_invitation")
+		if audit.logs[0].Details["code"] != "TENANT_ADMIN_INVITATION_NOT_FOUND" {
+			t.Fatalf("audit code=%v", audit.logs[0].Details["code"])
+		}
+	})
+
+	t.Run("settled_accepted", func(t *testing.T) {
+		t.Parallel()
+		audit := &fakeAuditStore{}
+		svc := NewTenantAdminService(nil, nil, &fakeTenantAdminStore{latest: newLatest(ports.InvitationStatusAccepted)}, audit)
+		_, err := svc.ResendTenantAdminInvitation(context.Background(), &tenantv1.ResendTenantAdminInvitationRequest{
+			TenantId:       tenantID.String(),
+			UserId:         userID.String(),
+			IdempotencyKey: "550e8400-e29b-41d4-a716-446655440012",
+		})
+		assertBusinessCode(t, err, codes.FailedPrecondition, "TENANT_INVITATION_SETTLED")
+		assertFailureAudit(t, audit, "tenant_admin.resend_invitation")
+	})
+
+	t.Run("settled_rejected", func(t *testing.T) {
+		t.Parallel()
+		audit := &fakeAuditStore{}
+		svc := NewTenantAdminService(nil, nil, &fakeTenantAdminStore{latest: newLatest(ports.InvitationStatusRejected)}, audit)
+		_, err := svc.ResendTenantAdminInvitation(context.Background(), &tenantv1.ResendTenantAdminInvitationRequest{
+			TenantId:       tenantID.String(),
+			UserId:         userID.String(),
+			IdempotencyKey: "550e8400-e29b-41d4-a716-446655440013",
+		})
+		assertBusinessCode(t, err, codes.FailedPrecondition, "TENANT_INVITATION_SETTLED")
+		assertFailureAudit(t, audit, "tenant_admin.resend_invitation")
+	})
+}
+
 func TestTenantAdminService_Unimplemented(t *testing.T) {
 	s := NewTenantAdminService(nil, nil, nil, nil)
 	ctx := context.Background()
@@ -289,10 +439,6 @@ func TestTenantAdminService_Unimplemented(t *testing.T) {
 		name string
 		call func() error
 	}{
-		{"ResendTenantAdminInvitation", func() error {
-			_, err := s.ResendTenantAdminInvitation(ctx, &tenantv1.ResendTenantAdminInvitationRequest{})
-			return err
-		}},
 		{"ListAllTenantAdmins", func() error {
 			_, err := s.ListAllTenantAdmins(ctx, &tenantv1.ListAllTenantAdminsRequest{})
 			return err
@@ -335,8 +481,8 @@ func TestTenantAdminService_Unimplemented(t *testing.T) {
 		}},
 	}
 
-	if len(checks) != 11 {
-		t.Fatalf("want 11 remaining unimplemented RPCs, got %d", len(checks))
+	if len(checks) != 10 {
+		t.Fatalf("want 10 remaining unimplemented RPCs, got %d", len(checks))
 	}
 	for _, tc := range checks {
 		t.Run(tc.name, func(t *testing.T) {

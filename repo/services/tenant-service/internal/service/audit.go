@@ -54,12 +54,15 @@ func writeAuditFailure(ctx context.Context, audit ports.TenantPlanAuditStore, re
 	if audit == nil {
 		return
 	}
-	// 步骤 1：复制 details 并附加 reason
+	// 步骤 1：复制 details，并写入业务码 + 异常信息
 	out := map[string]any{}
 	for k, v := range details {
 		out[k] = v
 	}
-	out["reason"] = auditReason(cause)
+	code, message := auditErrorParts(cause)
+	out["code"] = code
+	out["message"] = message
+	out["reason"] = auditReason(cause) // 兼容既有「CODE: detail」摘要
 	// 步骤 2：best-effort 写入；失败只告警，不影响调用方已返回的业务错误
 	_, err := audit.Create(ctx, ports.AuditLog{
 		TenantID:  tenantID,
@@ -91,6 +94,22 @@ func auditReason(err error) string {
 		return st.Message()
 	}
 	return err.Error()
+}
+
+// auditErrorParts 拆出业务码与异常信息（message 为 CODE 后的 detail；无前缀时 code 为空）。
+func auditErrorParts(err error) (code, message string) {
+	raw := auditReason(err)
+	if raw == "" {
+		return "", ""
+	}
+	if idx := strings.Index(raw, ":"); idx > 0 {
+		code = strings.TrimSpace(raw[:idx])
+		message = strings.TrimSpace(raw[idx+1:])
+		if code != "" {
+			return code, message
+		}
+	}
+	return "", raw
 }
 
 // coreItemsForAudit 把 Core 配额项压成可 JSON 序列化的审计 details 片段。

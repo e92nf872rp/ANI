@@ -136,6 +136,13 @@ func (s *PostgresTenantAdminStore) UpdateInvitation(ctx context.Context, inv por
 	}
 	if err != nil {
 		if isUniqueViolation(err) {
+			// 区分两种唯一冲突：
+			// - uk_tenant_admin_invitation_pending (tenant_id,user_id WHERE status='inviting') → 已有 pending 邀请
+			// - uk_tenant_admin_invitation_token_hash → token_hash 碰撞（极罕见）
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.ConstraintName == "uk_tenant_admin_invitation_pending" {
+				return ports.TenantAdminInvitation{}, ports.ErrTenantInvitationPending
+			}
 			return ports.TenantAdminInvitation{}, fmt.Errorf("%w: token_hash conflict", ports.ErrValidationFailed)
 		}
 		return ports.TenantAdminInvitation{}, fmt.Errorf("update tenant_admin_invitation: %w", err)

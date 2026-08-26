@@ -195,8 +195,101 @@ func (s *TenantAdminService) InviteTenantAdmin(ctx context.Context, req *tenantv
 	}, nil
 }
 
-func (s *TenantAdminService) ResendTenantAdminInvitation(context.Context, *tenantv1.ResendTenantAdminInvitationRequest) (*tenantv1.InvitationResult, error) {
-	return nil, unimplemented()
+// ResendTenantAdminInvitation 重发邀请（SPEC §5.1.2 / US-002）。
+// 仅最新一条 inviting/expired 可重发；终态 accepted/rejected → 409；无记录 → 404。
+func (s *TenantAdminService) ResendTenantAdminInvitation(ctx context.Context, req *tenantv1.ResendTenantAdminInvitationRequest) (*tenantv1.InvitationResult, error) {
+	const action = "tenant_admin.resend_invitation"
+
+	// 步骤 1：校验依赖
+	if s.store == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "tenant admin store unavailable")
+	}
+
+	// 步骤 2：校验入参
+	if req == nil {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "request required")
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, nil, err, nil)
+		return nil, err
+	}
+	tenantID, err := parseTenantAdminUUID(req.GetTenantId(), "tenant_id")
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, nil, err, nil)
+		return nil, err
+	}
+	userID, err := parseTenantAdminUUID(req.GetUserId(), "user_id")
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, nil, err, &tenantID)
+		return nil, err
+	}
+
+	details := map[string]any{"target_id": userID.String()}
+
+	// 步骤 3：取最新邀请
+	inv, err := s.store.GetLatestInvitation(ctx, tenantID, userID)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, details, mapped, &tenantID)
+		return nil, mapped
+	}
+
+	// 步骤 4：终态不可重发；仅 inviting / expired 允许
+	switch inv.Status {
+	case ports.InvitationStatusAccepted:
+		err := businessError(codes.FailedPrecondition, ports.ErrTenantInvitationSettled, "invitation already accepted")
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, details, err, &tenantID)
+		return nil, err
+	case ports.InvitationStatusRejected:
+		err := businessError(codes.FailedPrecondition, ports.ErrTenantInvitationSettled, "invitation already rejected")
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, details, err, &tenantID)
+		return nil, err
+	case ports.InvitationStatusInviting, ports.InvitationStatusExpired:
+		// ok
+	default:
+		err := businessError(codes.FailedPrecondition, ports.ErrTenantInvitationSettled, "invitation status not resendable: "+inv.Status)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, details, err, &tenantID)
+		return nil, err
+	}
+
+	// 步骤 5：重新生成 token，刷新过期时间，状态回归 inviting
+	token, tokenHash, err := generateInviteToken()
+	if err != nil {
+		mapped := status.Errorf(codes.Internal, "generate invite token: %v", err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, details, mapped, &tenantID)
+		return nil, mapped
+	}
+	expireAt := time.Now().UTC().Add(inviteExpireDuration)
+	updated, err := s.store.UpdateInvitation(ctx, ports.TenantAdminInvitation{
+		ID:        inv.ID,
+		TokenHash: tokenHash,
+		ExpireAt:  expireAt,
+		Status:    ports.InvitationStatusInviting,
+	})
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, details, mapped, &tenantID)
+		return nil, mapped
+	}
+
+	// 步骤 6：成功审计（含 target_id + token_hash）
+	writeAuditSuccess(ctx, s.audit, auditResourceTenantAdmin, action, map[string]any{
+		"target_id":  userID.String(),
+		"token_hash": tokenHash,
+	}, &tenantID)
+
+	// 步骤 7：通知占位
+	slog.Info("tenant_admin resend invitation notification placeholder",
+		"tenant_id", tenantID.String(),
+		"invitation_id", updated.ID.String(),
+		"target_id", userID.String(),
+	)
+
+	// 步骤 8：明文 token 仅本次返回
+	return &tenantv1.InvitationResult{
+		Id:       updated.ID.String(),
+		Token:    token,
+		ExpireAt: timestamppb.New(updated.ExpireAt.UTC()),
+		Message:  "invitation resent",
+	}, nil
 }
 
 func (s *TenantAdminService) ListAllTenantAdmins(context.Context, *tenantv1.ListAllTenantAdminsRequest) (*tenantv1.ListAllTenantAdminsResponse, error) {
