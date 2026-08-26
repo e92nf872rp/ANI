@@ -35,6 +35,10 @@ type TenantAdminSvcClient interface {
 	// 不存在或已软删除 → ErrTenantAdminNotFound。
 	GetUser(ctx context.Context, tenantID, userID uuid.UUID) (AdminWithTenant, error)
 
+	// BatchGetUsers 批量查询租户内用户（Core GET /admin/tenants/{id}/users/batch）。
+	// 不存在的用户跳过；返回 map key 为 user_id。
+	BatchGetUsers(ctx context.Context, tenantID uuid.UUID, userIDs []uuid.UUID) (map[uuid.UUID]AdminWithTenant, error)
+
 	// GetAdminDetail 查询管理员详情（含 created_at/updated_at + tenant 对象）。
 	// is_inviting / is_expired 由 service 结合 TenantAdminStore 邀请状态填充。
 	GetAdminDetail(ctx context.Context, tenantID, userID uuid.UUID) (AdminWithTenant, error)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
@@ -26,6 +27,7 @@ type adminTenantAdminAPI struct {
 //	GET    /admin/tenant-users
 //	GET    /admin/tenants/:tenant_id/user-lookup
 //	GET    /admin/tenants/:tenant_id/users/:user_id
+//	GET    /admin/tenants/:tenant_id/users/batch
 //	DELETE /admin/tenants/:tenant_id/users/:user_id
 //	GET    /admin/tenants/:tenant_id/users/:user_id/role
 //	PUT    /admin/tenants/:tenant_id/users/:user_id/role
@@ -40,6 +42,7 @@ func registerAdminTenantAdminResources(v1 *route.RouterGroup, admin ports.Tenant
 	v1.GET("/admin/tenant-users", api.listTenantUsers)
 	v1.GET("/admin/tenants/:tenant_id/user-lookup", api.lookupTenantUser)
 	v1.GET("/admin/tenants/:tenant_id/users/:user_id", api.getTenantUser)
+	v1.GET("/admin/tenants/:tenant_id/users/batch", api.batchGetUsers)
 	v1.DELETE("/admin/tenants/:tenant_id/users/:user_id", api.deleteTenantUser)
 	v1.GET("/admin/tenants/:tenant_id/users/:user_id/role", api.getTenantUserRole)
 	v1.PUT("/admin/tenants/:tenant_id/users/:user_id/role", api.updateTenantUserRole)
@@ -104,6 +107,29 @@ func (api *adminTenantAdminAPI) getTenantUser(ctx context.Context, c *app.Reques
 	}
 	// 3. 返回用户详情
 	c.JSON(http.StatusOK, adminTenantUserJSON(user))
+}
+
+func (api *adminTenantAdminAPI) batchGetUsers(ctx context.Context, c *app.RequestContext) {
+	tenantID := c.Param("tenant_id")
+	rawIDs := strings.TrimSpace(c.Query("user_ids"))
+	if rawIDs == "" {
+		writeDemoError(c, http.StatusBadRequest, "VALIDATION_FAILED", "user_ids required")
+		return
+	}
+	userIDs := strings.Split(rawIDs, ",")
+	for i := range userIDs {
+		userIDs[i] = strings.TrimSpace(userIDs[i])
+	}
+	users, err := api.admin.BatchGetUsers(ctx, tenantID, userIDs)
+	if err != nil {
+		writeAdminTenantAdminError(c, err)
+		return
+	}
+	items := make([]map[string]any, 0, len(users))
+	for _, u := range users {
+		items = append(items, adminTenantUserJSON(u))
+	}
+	c.JSON(http.StatusOK, map[string]any{"items": items})
 }
 
 func (api *adminTenantAdminAPI) deleteTenantUser(ctx context.Context, c *app.RequestContext) {

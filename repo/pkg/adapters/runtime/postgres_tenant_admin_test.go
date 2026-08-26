@@ -103,6 +103,9 @@ func TestPostgresTenantAdminGetUserAndIsTenantAdmin(t *testing.T) {
 	if got.Role != "tenant-admin" || got.Source != "third_party" || got.DisplayName == nil || *got.DisplayName != "Admin" {
 		t.Fatalf("user=%+v", got)
 	}
+	if got.Username != "acme_admin" {
+		t.Fatalf("username=%q want stripped acme_admin", got.Username)
+	}
 
 	ok, err := svc.IsTenantAdmin(context.Background(), tenantID.String(), userID.String())
 	if err != nil {
@@ -133,6 +136,23 @@ func TestPostgresTenantAdminIsTenantAdminNotAdmin(t *testing.T) {
 	}
 }
 
+func TestStripTenantUserUsernamePrefix(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"oidc:acme_admin", "acme_admin"},
+		{"local:u1", "u1"},
+		{"plain", "plain"},
+		{"oidc:", ""},
+		{"local:", ""},
+	}
+	for _, tc := range cases {
+		if got := stripTenantUserUsernamePrefix(tc.in); got != tc.want {
+			t.Fatalf("strip(%q)=%q want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestPostgresTenantAdminIsTenantAdminPlatformRole(t *testing.T) {
 	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 	userID := uuid.MustParse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
@@ -150,5 +170,28 @@ func TestPostgresTenantAdminIsTenantAdminPlatformRole(t *testing.T) {
 	}
 	if ok {
 		t.Fatalf("want false for platform-* role")
+	}
+}
+
+func TestPostgresTenantAdminListUsers(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	userID := uuid.MustParse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+	createdAt := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
+	tx := &quotaFakeTx{}
+	tx.enqueueQuery(&quotaFakeRows{rows: []quotaFakeRow{{values: []any{
+		userID, tenantID, "admin@acme.io", "acme_admin", nil, "active", "tenant-admin",
+		nil, createdAt, createdAt,
+		tenantID, "acme", "Acme",
+	}}}})
+	svc := NewPostgresTenantAdmin(&quotaFakeStore{tx: tx})
+	got, err := svc.ListUsers(context.Background(), ports.UserListFilter{Limit: 20})
+	if err != nil {
+		t.Fatalf("ListUsers: %v", err)
+	}
+	if len(got.Items) != 1 || got.Items[0].Role != "tenant-admin" || got.Items[0].Email != "admin@acme.io" {
+		t.Fatalf("items=%+v", got.Items)
+	}
+	if got.NextCursor != "" {
+		t.Fatalf("next_cursor=%q want empty", got.NextCursor)
 	}
 }

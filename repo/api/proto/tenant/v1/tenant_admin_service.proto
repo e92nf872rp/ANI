@@ -65,6 +65,8 @@ message ListAllTenantAdminsRequest {
   google.protobuf.BoolValue is_expired = 5;       // unset = all; filter by invitation.status='expired'
   string search = 6;                              // fuzzy match email/username
   common.v1.CursorPageRequest page = 7;
+  string role = 8;                                // tenant-admin | user | auditor; empty = all
+  string source = 9;                              // local | third_party; empty = all
 }
 
 message ListAllTenantAdminsResponse {

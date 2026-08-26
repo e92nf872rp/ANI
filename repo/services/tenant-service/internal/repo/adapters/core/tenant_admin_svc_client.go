@@ -63,6 +63,42 @@ func (c *TenantAdminSvcClient) GetUser(ctx context.Context, tenantID, userID uui
 	return decodeTenantUser(raw)
 }
 
+// BatchGetUsers 调用 Core GET /admin/tenants/{id}/users/batch。
+func (c *TenantAdminSvcClient) BatchGetUsers(ctx context.Context, tenantID uuid.UUID, userIDs []uuid.UUID) (map[uuid.UUID]ports.AdminWithTenant, error) {
+	_ = ctx
+	if len(userIDs) == 0 {
+		return map[uuid.UUID]ports.AdminWithTenant{}, nil
+	}
+	ids := make([]string, 0, len(userIDs))
+	for _, id := range userIDs {
+		ids = append(ids, id.String())
+	}
+	q := url.Values{}
+	q.Set("user_ids", strings.Join(ids, ","))
+	path := fmt.Sprintf("/admin/tenants/%s/users/batch?%s", tenantID.String(), q.Encode())
+	raw, err := c.sdk.Request("GET", path, anisdk.RequestOptions{})
+	if err != nil {
+		return nil, mapSDKError(err)
+	}
+	obj, err := asObject(raw)
+	if err != nil {
+		return nil, err
+	}
+	itemsRaw, err := asObjectSlice(obj["items"])
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID]ports.AdminWithTenant, len(itemsRaw))
+	for _, it := range itemsRaw {
+		user, decodeErr := decodeTenantUserObject(it)
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+		out[user.ID] = user
+	}
+	return out, nil
+}
+
 // GetAdminDetail 与 GetUser 同 Core 端点；is_inviting / is_expired 由 service 合成。
 func (c *TenantAdminSvcClient) GetAdminDetail(ctx context.Context, tenantID, userID uuid.UUID) (ports.AdminWithTenant, error) {
 	return c.GetUser(ctx, tenantID, userID)
@@ -87,6 +123,7 @@ func (c *TenantAdminSvcClient) ListTenantAdmins(ctx context.Context, filter port
 	if strings.TrimSpace(filter.Search) != "" {
 		q.Set("search", strings.TrimSpace(filter.Search))
 	}
+	q.Set("role", ports.TenantAdminRoleAdmin)
 	path := "/admin/tenant-users"
 	if encoded := q.Encode(); encoded != "" {
 		path += "?" + encoded

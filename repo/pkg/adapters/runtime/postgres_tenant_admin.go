@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/kubercloud/ani/pkg/ports"
+	"github.com/kubercloud/ani/pkg/types"
 )
 
 const (
@@ -84,14 +85,13 @@ func (u *PostgresTenantAdmin) LookupUser(ctx context.Context, tenantID, email, u
 }
 
 // IsTenantAdmin 报告该用户是否持有 tenant-admin 角色；用户不存在 → ErrUserNotFound。
-// 平台角色（name 以 platform- 开头）一律视为非租户管理员。
 func (u *PostgresTenantAdmin) IsTenantAdmin(ctx context.Context, tenantID, userID string) (bool, error) {
 	// 步骤 1：复用 GetUser 校验存在性并读取角色
 	user, err := u.GetUser(ctx, tenantID, userID)
 	if err != nil {
 		return false, err
 	}
-	// 步骤 2：判断是否为 tenant-admin
+	// 步骤 2：判断是否为 tenant-admin（platform-* 等非该角色一律 false）
 	return user.Role == tenantAdminRoleName, nil
 }
 
@@ -142,9 +142,126 @@ func (u *PostgresTenantAdmin) GetUser(ctx context.Context, tenantID, userID stri
 }
 
 func (u *PostgresTenantAdmin) ListUsers(ctx context.Context, filter ports.UserListFilter) (ports.UserListResult, error) {
-	_ = ctx
-	_ = filter
-	return ports.UserListResult{}, ports.ErrUnsupported
+	// 步骤 1：规范化分页与过滤
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	role := strings.TrimSpace(filter.Role)
+	if role == "" {
+		role = tenantAdminRoleName
+	}
+	if role != tenantAdminRoleName {
+		return ports.UserListResult{}, fmt.Errorf("%w: role must be tenant-admin", ports.ErrInvalid)
+	}
+	status := strings.TrimSpace(filter.Status)
+	if status != "" && status != "active" && status != "disabled" {
+		return ports.UserListResult{}, fmt.Errorf("%w: status must be active or disabled", ports.ErrInvalid)
+	}
+	search := strings.TrimSpace(filter.Search)
+	var tenantFilter *uuid.UUID
+	if raw := strings.TrimSpace(filter.TenantID); raw != "" {
+		tid, err := parseAdminUUID(raw, "tenant_id")
+		if err != nil {
+			return ports.UserListResult{}, err
+		}
+		tenantFilter = &tid
+	}
+
+	var cursorCreatedAt *time.Time
+	var cursorID *uuid.UUID
+	if raw := strings.TrimSpace(filter.Cursor); raw != "" {
+		createdAt, id, err := types.DecodeCursor(raw)
+		if err != nil {
+			return ports.UserListResult{}, fmt.Errorf("%w: invalid cursor", ports.ErrInvalid)
+		}
+		cursorCreatedAt = &createdAt
+		cursorID = &id
+	}
+
+	// 步骤 2：平台事务内跨租户列出持有 tenant-admin 角色的未软删除用户
+	var items []ports.User
+	err := u.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		args := []any{tenantAdminRoleName, status, search}
+		where := `
+			WHERE COALESCE(u.is_deleted, FALSE) = FALSE
+			  AND EXISTS (
+				SELECT 1
+				FROM user_roles ur0
+				JOIN roles r0 ON r0.id = ur0.role_id
+				WHERE ur0.user_id = u.id
+				  AND r0.name = $1
+			  )
+			  AND ($2 = '' OR u.status = $2)
+			  AND ($3 = '' OR u.email ILIKE '%' || $3 || '%' OR u.username ILIKE '%' || $3 || '%' OR u.display_name ILIKE '%' || $3 || '%')
+		`
+		if tenantFilter != nil {
+			args = append(args, *tenantFilter)
+			where += fmt.Sprintf(" AND u.tenant_id = $%d", len(args))
+		}
+		if cursorCreatedAt != nil && cursorID != nil {
+			args = append(args, *cursorCreatedAt, *cursorID)
+			where += fmt.Sprintf(" AND (u.created_at, u.id) < ($%d, $%d)", len(args)-1, len(args))
+		}
+		args = append(args, limit+1)
+		limitArg := len(args)
+
+		rows, queryErr := tx.Query(ctx, `
+			SELECT u.id, u.tenant_id, u.email, u.username, u.display_name, u.status,
+			       COALESCE(r.name, '') AS role,
+			       u.last_login_at, u.created_at, u.updated_at,
+			       t.id, t.name, t.display_name
+			FROM users u
+			JOIN tenants t ON t.id = u.tenant_id
+			LEFT JOIN LATERAL (
+				SELECT r2.name
+				FROM user_roles ur
+				JOIN roles r2 ON r2.id = ur.role_id
+				WHERE ur.user_id = u.id
+				ORDER BY CASE WHEN r2.name = $1 THEN 0 ELSE 1 END, r2.name
+				LIMIT 1
+			) r ON TRUE
+			`+where+`
+			ORDER BY u.created_at DESC, u.id DESC
+			LIMIT $`+fmt.Sprintf("%d", limitArg), args...)
+		if queryErr != nil {
+			return fmt.Errorf("list tenant admin users: %w", queryErr)
+		}
+		defer rows.Close()
+
+		out := make([]ports.User, 0, limit+1)
+		for rows.Next() {
+			user, scanErr := scanTenantAdminUserRow(rows)
+			if scanErr != nil {
+				return scanErr
+			}
+			out = append(out, user)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("iterate tenant admin users: %w", err)
+		}
+		items = out
+		return nil
+	})
+	if err != nil {
+		return ports.UserListResult{}, err
+	}
+
+	// 步骤 3：多取 1 条判断是否还有下一页
+	nextCursor := ""
+	if len(items) > limit {
+		last := items[limit-1]
+		uid, parseErr := uuid.Parse(last.ID)
+		if parseErr != nil {
+			return ports.UserListResult{}, fmt.Errorf("encode cursor: %w", parseErr)
+		}
+		nextCursor = types.EncodeCursor(last.CreatedAt, uid)
+		items = items[:limit]
+	}
+	return ports.UserListResult{Items: items, NextCursor: nextCursor}, nil
 }
 
 func (u *PostgresTenantAdmin) ChangeRole(ctx context.Context, tenantID, userID, role string) error {
@@ -192,8 +309,91 @@ func (u *PostgresTenantAdmin) ResetPassword(ctx context.Context, tenantID, userI
 	return ports.ErrUnsupported
 }
 
+// BatchGetUsers 批量查询租户内未软删除用户（按 user_id 列表）。不存在的用户跳过。
+func (u *PostgresTenantAdmin) BatchGetUsers(ctx context.Context, tenantID string, userIDs []string) ([]ports.User, error) {
+	tid, err := parseAdminUUID(tenantID, "tenant_id")
+	if err != nil {
+		return nil, err
+	}
+	if len(userIDs) == 0 {
+		return nil, nil
+	}
+	uids := make([]uuid.UUID, 0, len(userIDs))
+	for _, raw := range userIDs {
+		id, parseErr := parseAdminUUID(raw, "user_id")
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		uids = append(uids, id)
+	}
+	var out []ports.User
+	err = u.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		rows, queryErr := tx.Query(ctx, `
+			SELECT u.id, u.tenant_id, u.email, u.username, u.display_name, u.status,
+			       COALESCE(r.name, '') AS role,
+			       u.last_login_at, u.created_at, u.updated_at,
+			       t.id, t.name, t.display_name
+			FROM users u
+			JOIN tenants t ON t.id = u.tenant_id
+			LEFT JOIN LATERAL (
+				SELECT r2.name
+				FROM user_roles ur
+				JOIN roles r2 ON r2.id = ur.role_id
+				WHERE ur.user_id = u.id
+				ORDER BY r2.name
+				LIMIT 1
+			) r ON TRUE
+			WHERE u.tenant_id = $1
+			  AND u.id = ANY($2::uuid[])
+			  AND COALESCE(u.is_deleted, FALSE) = FALSE
+		`, tid, uids)
+		if queryErr != nil {
+			return fmt.Errorf("batch get users: %w", queryErr)
+		}
+		defer rows.Close()
+		out = make([]ports.User, 0)
+		for rows.Next() {
+			user, scanErr := scanTenantAdminUserRow(rows)
+			if scanErr != nil {
+				return scanErr
+			}
+			out = append(out, user)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // scanTenantAdminUser 执行 QueryRow 并映射为 ports.User；无行 → ErrUserNotFound。
 func scanTenantAdminUser(ctx context.Context, tx ports.MetadataTx, query string, args ...any) (ports.User, error) {
+	row := tx.QueryRow(ctx, query, args...)
+	user, err := scanTenantAdminUserDest(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ports.User{}, ports.ErrUserNotFound
+	}
+	if err != nil {
+		return ports.User{}, fmt.Errorf("scan tenant admin user: %w", err)
+	}
+	return user, nil
+}
+
+// scanTenantAdminUserRow 从多行结果集扫描一行。
+func scanTenantAdminUserRow(rows ports.Rows) (ports.User, error) {
+	user, err := scanTenantAdminUserDest(rows)
+	if err != nil {
+		return ports.User{}, fmt.Errorf("scan tenant admin user: %w", err)
+	}
+	return user, nil
+}
+
+type tenantAdminUserScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanTenantAdminUserDest(s tenantAdminUserScanner) (ports.User, error) {
 	var (
 		id            uuid.UUID
 		tenantUUID    uuid.UUID
@@ -209,26 +409,24 @@ func scanTenantAdminUser(ctx context.Context, tx ports.MetadataTx, query string,
 		tenantName    string
 		tenantDisplay string
 	)
-	err := tx.QueryRow(ctx, query, args...).Scan(
+	err := s.Scan(
 		&id, &tenantUUID, &email, &username, &displayName, &status, &role,
 		&lastLoginAt, &createdAt, &updatedAt,
 		&tenantID, &tenantName, &tenantDisplay,
 	)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ports.User{}, ports.ErrUserNotFound
-	}
 	if err != nil {
-		return ports.User{}, fmt.Errorf("scan tenant admin user: %w", err)
+		return ports.User{}, err
 	}
+	source := inferTenantUserSource(username)
 	return ports.User{
 		ID:          id.String(),
 		TenantID:    tenantUUID.String(),
 		Email:       email,
-		Username:    username,
+		Username:    stripTenantUserUsernamePrefix(username),
 		DisplayName: displayName,
 		Role:        role,
 		Status:      status,
-		Source:      inferTenantUserSource(username),
+		Source:      source,
 		LastLoginAt: lastLoginAt,
 		CreatedAt:   createdAt,
 		UpdatedAt:   updatedAt,
@@ -240,12 +438,24 @@ func scanTenantAdminUser(ctx context.Context, tx ports.MetadataTx, query string,
 	}, nil
 }
 
-// inferTenantUserSource 按 username 前缀推断来源（SPEC：oidc: → third_party，其余 local）。
+// inferTenantUserSource 按 username 前缀推断来源（SPEC：oidc: → third_party；其余 local）。
 func inferTenantUserSource(username string) string {
 	if strings.HasPrefix(username, "oidc:") {
 		return userSourceOIDC
 	}
 	return userSourceLocal
+}
+
+// stripTenantUserUsernamePrefix 对外返回时去掉存储前缀 oidc: / local:。
+func stripTenantUserUsernamePrefix(username string) string {
+	switch {
+	case strings.HasPrefix(username, "oidc:"):
+		return strings.TrimPrefix(username, "oidc:")
+	case strings.HasPrefix(username, "local:"):
+		return strings.TrimPrefix(username, "local:")
+	default:
+		return username
+	}
 }
 
 // PostgresUserAdmin is kept as a compatibility alias during the rename.

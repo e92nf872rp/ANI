@@ -348,6 +348,25 @@ func TestTenantAdminRoutes_ListForwardsToGRPC(t *testing.T) {
 	}
 }
 
+func TestTenantAdminRoutes_ListFilterMutualExclusion(t *testing.T) {
+	t.Setenv("ANI_AUTH_MODE", "dev")
+	client := &fakeTenantAdminGRPC{
+		listErr: status.Error(codes.InvalidArgument, "VALIDATION_FAILED: status, is_inviting, and is_expired are mutually exclusive"),
+	}
+	h := newTenantAdminTestServer(client)
+	resp := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/svc/tenant-admins?status=active&is_inviting=true", nil)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d want 400 body=%s", resp.Code, resp.Body.String())
+	}
+	var errBody map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &errBody); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if errBody["code"] != "VALIDATION_FAILED" {
+		t.Fatalf("code=%v", errBody["code"])
+	}
+}
+
 func TestTenantAdminRoutes_GRPCBusinessCodeMapping(t *testing.T) {
 	t.Setenv("ANI_AUTH_MODE", "dev")
 	client := &fakeTenantAdminGRPC{

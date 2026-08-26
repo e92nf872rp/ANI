@@ -4078,11 +4078,11 @@ components:
         id:            { type: string, format: uuid }
         tenant_id:     { type: string, format: uuid }
         email:         { type: string, format: email }
-        username:      { type: string }
+        username:      { type: string, description: "对外返回时去掉存储前缀 oidc: / local:" }
         display_name:  { type: string, nullable: true }
         role:          { type: string, enum: [tenant-admin, user, auditor] }
         status:        { type: string, enum: [active, disabled] }
-        source:        { type: string, enum: [local, third_party], description: "由 username 前缀推断：oidc: → third_party；local: → local" }
+        source:        { type: string, enum: [local, third_party], description: "由存储 username 前缀推断：oidc: → third_party；其余（含 local:）→ local" }
         last_login_at: { type: string, format: date-time, nullable: true }
         created_at:    { type: string, format: date-time }
         updated_at:    { type: string, format: date-time }
@@ -9213,6 +9213,32 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/UserNotFound' }
+
+  /admin/tenants/{tenant_id}/users/batch:
+    get:
+      operationId: batchGetTenantUsers
+      summary: 批量查询租户内用户
+      description: |
+        按 user_id 列表批量查询租户内未软删除用户；不存在的用户跳过。
+        不含 password_hash。用于 Services 层避免 N+1 查询。
+      tags: [TenantUsers]
+      x-ani-rbac-scope: "scope:users:read"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: user_ids, in: query, required: true, schema: { type: string }, description: "逗号分隔的 user_id 列表" }
+      responses:
+        "200":
+          description: 批量用户列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/TenantUser' } }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
 
   /admin/tenants/{tenant_id}/users/{user_id}:
     get:

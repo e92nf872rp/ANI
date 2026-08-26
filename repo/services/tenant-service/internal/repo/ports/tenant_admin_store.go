@@ -88,6 +88,14 @@ type TenantAdminListFilter struct {
 	Search     string
 }
 
+// InvitationFlag 是 (tenant_id, user_id) 上的邀请中/已过期标记。
+type InvitationFlag struct {
+	TenantID   uuid.UUID
+	UserID     uuid.UUID
+	IsInviting bool
+	IsExpired  bool
+}
+
 // ListResult 是跨租户管理员列表返回（游标分页；具体类型、不用泛型）。
 type ListResult struct {
 	Items      []AdminWithTenant
@@ -174,7 +182,8 @@ type TenantAdminStore interface {
 	// HasPendingInvitation 报告该租户下该用户是否存在 status='inviting' 的邀请。
 	HasPendingInvitation(ctx context.Context, tenantID, userID uuid.UUID) (bool, error)
 
-	// InsertInvitation 插入邀请行（status='inviting'，token_hash，expire_at）。
+	// InsertInvitation 写入邀请（status='inviting'，token_hash，expire_at）。
+	// 实现须在事务内：先查该租户+用户最新一条；若为 expired 则原地更新 token/过期时间并回归 inviting，否则 INSERT。
 	// 不改 users.status、不预绑角色。token_hash 冲突 → 实现侧映射领域错误。
 	InsertInvitation(ctx context.Context, inv TenantAdminInvitation) (TenantAdminInvitation, error)
 
@@ -184,6 +193,10 @@ type TenantAdminStore interface {
 
 	// UpdateInvitation 更新邀请（重发：新 token_hash / expire_at / status='inviting'，清空 accepted_at/rejected_at）。
 	UpdateInvitation(ctx context.Context, inv TenantAdminInvitation) (TenantAdminInvitation, error)
+
+	// ListInvitationFlags 返回存在 inviting 和/或 expired 邀请的 (tenant_id,user_id) 标记。
+	// tenantID 非空时按租户过滤；statusFilter 为 inviting|expired 时仅返回带该标记的行；空串返回两者。
+	ListInvitationFlags(ctx context.Context, tenantID *uuid.UUID, statusFilter string) ([]InvitationFlag, error)
 
 	// ListAuditLogs 按 tenant_id + 目标 user_id 查询操作历史，游标分页。
 	ListAuditLogs(ctx context.Context, tenantID, userID uuid.UUID, filter TenantAdminAuditLogFilter) (TenantAdminAuditLogListResult, error)

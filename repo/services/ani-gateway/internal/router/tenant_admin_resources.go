@@ -118,16 +118,18 @@ func (api *tenantAdminAPI) listAllTenantAdmins(ctx context.Context, c *app.Reque
 		TenantId: c.Query("tenant_id"),
 		Status:   c.Query("status"),
 		Search:   c.Query("search"),
+		Role:     c.Query("role"),
+		Source:   c.Query("source"),
 		Page:     &commonv1.CursorPageRequest{Limit: cursorLimit(c), Cursor: c.Query("cursor")},
 	}
 	if v := strings.TrimSpace(c.Query("is_inviting")); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			req.IsInviting = wrapperspb.Bool(b)
+		if b, err := strconv.ParseBool(v); err == nil && b {
+			req.IsInviting = wrapperspb.Bool(true)
 		}
 	}
 	if v := strings.TrimSpace(c.Query("is_expired")); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			req.IsExpired = wrapperspb.Bool(b)
+		if b, err := strconv.ParseBool(v); err == nil && b {
+			req.IsExpired = wrapperspb.Bool(true)
 		}
 	}
 	// 4. 调用 tenant-service ListAllTenantAdmins RPC

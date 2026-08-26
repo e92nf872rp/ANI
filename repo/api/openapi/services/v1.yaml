@@ -2896,7 +2896,9 @@ paths:
         - { name: status, in: query, schema: { type: string, enum: [active, disabled] } }
         - { name: is_inviting, in: query, schema: { type: boolean }, description: "true = 仅邀请中" }
         - { name: is_expired, in: query, schema: { type: boolean }, description: "true = 仅邀请已过期" }
-        - { name: search, in: query, schema: { type: string }, description: "模糊匹配 email/username" }
+        - { name: search, in: query, schema: { type: string }, description: "模糊匹配 email/username/display_name" }
+        - { name: role, in: query, schema: { type: string, enum: [tenant-admin, user, auditor] }, description: "按角色过滤" }
+        - { name: source, in: query, schema: { type: string, enum: [local, third_party] }, description: "按来源过滤" }
       responses:
         "200":
           description: 跨租户管理员列表

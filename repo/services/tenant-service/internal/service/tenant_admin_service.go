@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"net/mail"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -14,11 +15,13 @@ import (
 	"github.com/google/uuid"
 	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 	tenantv1 "github.com/kubercloud/ani/pkg/generated/pb/tenant/v1"
+	"github.com/kubercloud/ani/pkg/types"
 	"github.com/kubercloud/ani/services/tenant-service/internal/repo/ports"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 const (
@@ -292,8 +295,319 @@ func (s *TenantAdminService) ResendTenantAdminInvitation(ctx context.Context, re
 	}, nil
 }
 
-func (s *TenantAdminService) ListAllTenantAdmins(context.Context, *tenantv1.ListAllTenantAdminsRequest) (*tenantv1.ListAllTenantAdminsResponse, error) {
-	return nil, unimplemented()
+// ListAllTenantAdmins 跨租户管理员列表（SPEC §5.1.3 / US-003）。
+// 只读、无审计；合并 Core tenant-admin 与本地 inviting/expired 邀请标记。
+func (s *TenantAdminService) ListAllTenantAdmins(ctx context.Context, req *tenantv1.ListAllTenantAdminsRequest) (*tenantv1.ListAllTenantAdminsResponse, error) {
+	// 步骤 1：校验依赖
+	if s.core == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant admin api unavailable")
+	}
+	if s.store == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "tenant admin store unavailable")
+	}
+	if req == nil {
+		req = &tenantv1.ListAllTenantAdminsRequest{}
+	}
+
+	// 步骤 2：三选一校验 status / is_inviting / is_expired
+	statusFilter := strings.TrimSpace(req.GetStatus())
+	hasStatus := statusFilter != ""
+	hasInviting := req.GetIsInviting() != nil
+	hasExpired := req.GetIsExpired() != nil
+	exclusive := 0
+	if hasStatus {
+		exclusive++
+	}
+	if hasInviting {
+		exclusive++
+	}
+	if hasExpired {
+		exclusive++
+	}
+	if exclusive > 1 {
+		return nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "status, is_inviting, and is_expired are mutually exclusive")
+	}
+	if hasStatus && statusFilter != ports.TenantAdminUserStatusActive && statusFilter != ports.TenantAdminUserStatusDisabled {
+		return nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "status must be active or disabled")
+	}
+	if hasInviting && !req.GetIsInviting().GetValue() {
+		return nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "is_inviting filter only supports true")
+	}
+	if hasExpired && !req.GetIsExpired().GetValue() {
+		return nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "is_expired filter only supports true")
+	}
+
+	// 步骤 3：解析 tenant_id / search / 分页
+	var tenantID *uuid.UUID
+	if raw := strings.TrimSpace(req.GetTenantId()); raw != "" {
+		id, err := parseTenantAdminUUID(raw, "tenant_id")
+		if err != nil {
+			return nil, err
+		}
+		tenantID = &id
+	}
+	search := strings.TrimSpace(req.GetSearch())
+	roleFilter := strings.TrimSpace(req.GetRole())
+	if roleFilter != "" && roleFilter != ports.TenantAdminRoleAdmin && roleFilter != ports.TenantAdminRoleUser && roleFilter != ports.TenantAdminRoleAuditor {
+		return nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "role must be tenant-admin, user, or auditor")
+	}
+	sourceFilter := strings.TrimSpace(req.GetSource())
+	if sourceFilter != "" && sourceFilter != ports.TenantAdminSourceLocal && sourceFilter != ports.TenantAdminSourceThirdParty {
+		return nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "source must be local or third_party")
+	}
+	limit := 20
+	cursor := ""
+	if page := req.GetPage(); page != nil {
+		if page.GetLimit() > 0 {
+			limit = int(page.GetLimit())
+		}
+		cursor = strings.TrimSpace(page.GetCursor())
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	// 步骤 4：拉取邀请标记（按过滤模式收窄）
+	flagStatus := ""
+	switch {
+	case hasInviting:
+		flagStatus = ports.InvitationStatusInviting
+	case hasExpired:
+		flagStatus = ports.InvitationStatusExpired
+	}
+	flags, err := s.store.ListInvitationFlags(ctx, tenantID, flagStatus)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	flagByKey := make(map[string]ports.InvitationFlag, len(flags))
+	for _, f := range flags {
+		flagByKey[tenantUserKey(f.TenantID, f.UserID)] = f
+	}
+
+	// 步骤 5：组装候选用户
+	merged := make(map[string]ports.AdminWithTenant)
+	switch {
+	case hasInviting, hasExpired:
+		// 仅邀请中 / 仅已过期：按标记批量 GetUser
+		users, batchErr := s.batchGetUsersByFlags(ctx, flags)
+		if batchErr != nil {
+			return nil, batchErr
+		}
+		for _, f := range flags {
+			if user, ok := users[f.UserID]; ok {
+				merged[tenantUserKey(f.TenantID, f.UserID)] = user
+			}
+		}
+	default:
+		// 默认 / status：Core tenant-admin + 邀请中/已过期非 admin 用户
+		admins, listErr := s.listAllCoreTenantAdmins(ctx, tenantID, statusFilter, search)
+		if listErr != nil {
+			return nil, listErr
+		}
+		for _, admin := range admins {
+			merged[tenantUserKey(admin.Tenant.ID, admin.ID)] = admin
+		}
+		pendingFlags := make([]ports.InvitationFlag, 0)
+		for _, f := range flags {
+			key := tenantUserKey(f.TenantID, f.UserID)
+			if _, ok := merged[key]; ok {
+				continue
+			}
+			pendingFlags = append(pendingFlags, f)
+		}
+		if len(pendingFlags) > 0 {
+			users, batchErr := s.batchGetUsersByFlags(ctx, pendingFlags)
+			if batchErr != nil {
+				return nil, batchErr
+			}
+			for _, f := range pendingFlags {
+				if user, ok := users[f.UserID]; ok {
+					if statusFilter != "" && user.Status != statusFilter {
+						continue
+					}
+					merged[tenantUserKey(f.TenantID, f.UserID)] = user
+				}
+			}
+		}
+	}
+
+	// 步骤 6：填充邀请标记 + search / role / source 过滤（邀请-only 路径未走 Core search）
+	items := make([]ports.AdminWithTenant, 0, len(merged))
+	for key, user := range merged {
+		if search != "" && !tenantAdminSearchMatch(user, search) {
+			continue
+		}
+		if roleFilter != "" && user.Role != roleFilter {
+			continue
+		}
+		if sourceFilter != "" && user.Source != sourceFilter {
+			continue
+		}
+		if f, ok := flagByKey[key]; ok {
+			user.IsInviting = f.IsInviting
+			user.IsExpired = f.IsExpired
+		} else {
+			user.IsInviting = false
+			user.IsExpired = false
+		}
+		// 列表不回传 created_at/updated_at 字段语义由网关控制；此处保留排序用时间
+		items = append(items, user)
+	}
+
+	// 步骤 7：按 created_at DESC, id DESC 排序并游标分页
+	sort.Slice(items, func(i, j int) bool {
+		ci, cj := adminCreatedAt(items[i]), adminCreatedAt(items[j])
+		if !ci.Equal(cj) {
+			return ci.After(cj)
+		}
+		return items[i].ID.String() > items[j].ID.String()
+	})
+	pageItems, nextCursor, pageErr := pageTenantAdmins(items, limit, cursor)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+
+	// 步骤 8：映射 proto（列表不含 timestamps）
+	out := make([]*tenantv1.AdminWithTenant, 0, len(pageItems))
+	for _, it := range pageItems {
+		out = append(out, adminWithTenantToProto(it, false))
+	}
+	return &tenantv1.ListAllTenantAdminsResponse{Items: out, NextCursor: nextCursor}, nil
+}
+
+func (s *TenantAdminService) listAllCoreTenantAdmins(ctx context.Context, tenantID *uuid.UUID, status, search string) ([]ports.AdminWithTenant, error) {
+	const pageSize = 100
+	var all []ports.AdminWithTenant
+	cursor := ""
+	for {
+		res, err := s.core.ListTenantAdmins(ctx, ports.TenantAdminListFilter{
+			Limit:    pageSize,
+			Cursor:   cursor,
+			TenantID: tenantID,
+			Status:   status,
+			Search:   search,
+		})
+		if err != nil {
+			return nil, mapStoreError(err)
+		}
+		all = append(all, res.Items...)
+		if res.NextCursor == "" || len(res.Items) == 0 {
+			break
+		}
+		cursor = res.NextCursor
+	}
+	return all, nil
+}
+
+// batchGetUsersByFlags 按 flag 的 (tenant_id, user_id) 批量查询 Core 用户。
+// 同一 tenant_id 的 flag 合并为一次 BatchGetUsers 调用。
+func (s *TenantAdminService) batchGetUsersByFlags(ctx context.Context, flags []ports.InvitationFlag) (map[uuid.UUID]ports.AdminWithTenant, error) {
+	byTenant := make(map[uuid.UUID][]uuid.UUID)
+	for _, f := range flags {
+		byTenant[f.TenantID] = append(byTenant[f.TenantID], f.UserID)
+	}
+	out := make(map[uuid.UUID]ports.AdminWithTenant)
+	for tenantID, uids := range byTenant {
+		users, err := s.core.BatchGetUsers(ctx, tenantID, uids)
+		if err != nil {
+			return nil, mapStoreError(err)
+		}
+		for uid, user := range users {
+			out[uid] = user
+		}
+	}
+	return out, nil
+}
+
+func tenantUserKey(tenantID, userID uuid.UUID) string {
+	return tenantID.String() + "|" + userID.String()
+}
+
+func tenantAdminSearchMatch(user ports.AdminWithTenant, search string) bool {
+	q := strings.ToLower(strings.TrimSpace(search))
+	if q == "" {
+		return true
+	}
+	if strings.Contains(strings.ToLower(user.Username), q) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(user.Email), q) {
+		return true
+	}
+	if user.DisplayName != nil && strings.Contains(strings.ToLower(*user.DisplayName), q) {
+		return true
+	}
+	return false
+}
+
+func adminCreatedAt(user ports.AdminWithTenant) time.Time {
+	if user.CreatedAt != nil {
+		return user.CreatedAt.UTC()
+	}
+	return time.Time{}
+}
+
+func pageTenantAdmins(items []ports.AdminWithTenant, limit int, cursor string) ([]ports.AdminWithTenant, string, error) {
+	start := 0
+	if strings.TrimSpace(cursor) != "" {
+		createdAt, id, err := types.DecodeCursor(cursor)
+		if err != nil {
+			return nil, "", businessError(codes.InvalidArgument, ports.ErrValidationFailed, "invalid cursor")
+		}
+		start = len(items)
+		for i, it := range items {
+			ci := adminCreatedAt(it)
+			if ci.Before(createdAt) || (ci.Equal(createdAt) && it.ID.String() < id.String()) {
+				start = i
+				break
+			}
+		}
+	}
+	if start >= len(items) {
+		return []ports.AdminWithTenant{}, "", nil
+	}
+	end := start + limit
+	nextCursor := ""
+	if end < len(items) {
+		last := items[end-1]
+		nextCursor = types.EncodeCursor(adminCreatedAt(last), last.ID)
+	} else {
+		end = len(items)
+	}
+	return items[start:end], nextCursor, nil
+}
+
+func adminWithTenantToProto(user ports.AdminWithTenant, includeTimestamps bool) *tenantv1.AdminWithTenant {
+	out := &tenantv1.AdminWithTenant{
+		Id:         user.ID.String(),
+		Email:      user.Email,
+		Username:   user.Username,
+		Role:       user.Role,
+		Status:     user.Status,
+		IsInviting: user.IsInviting,
+		IsExpired:  user.IsExpired,
+		Source:     user.Source,
+		Tenant: &tenantv1.TenantAdminTenantRef{
+			Id:          user.Tenant.ID.String(),
+			Name:        user.Tenant.Name,
+			DisplayName: user.Tenant.DisplayName,
+		},
+	}
+	if user.DisplayName != nil {
+		out.DisplayName = wrapperspb.String(*user.DisplayName)
+	}
+	if user.LastLoginAt != nil {
+		out.LastLoginAt = timestamppb.New(user.LastLoginAt.UTC())
+	}
+	if includeTimestamps {
+		if user.CreatedAt != nil {
+			out.CreatedAt = timestamppb.New(user.CreatedAt.UTC())
+		}
+		if user.UpdatedAt != nil {
+			out.UpdatedAt = timestamppb.New(user.UpdatedAt.UTC())
+		}
+	}
+	return out
 }
 
 func (s *TenantAdminService) GetTenantAdminDetail(context.Context, *tenantv1.GetTenantAdminDetailRequest) (*tenantv1.AdminWithTenant, error) {

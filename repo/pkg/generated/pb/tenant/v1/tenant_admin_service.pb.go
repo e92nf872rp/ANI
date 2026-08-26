@@ -169,6 +169,8 @@ type ListAllTenantAdminsRequest struct {
 	IsExpired  *wrapperspb.BoolValue `protobuf:"bytes,5,opt,name=is_expired,json=isExpired,proto3" json:"is_expired,omitempty"`    // unset = all; filter by invitation.status='expired'
 	Search     string                `protobuf:"bytes,6,opt,name=search,proto3" json:"search,omitempty"`                           // fuzzy match email/username
 	Page       *v1.CursorPageRequest `protobuf:"bytes,7,opt,name=page,proto3" json:"page,omitempty"`
+	Role       string                `protobuf:"bytes,8,opt,name=role,proto3" json:"role,omitempty"`                               // tenant-admin | user | auditor; empty = all
+	Source     string                `protobuf:"bytes,9,opt,name=source,proto3" json:"source,omitempty"`                           // local | third_party; empty = all
 }
 
 func (x *ListAllTenantAdminsRequest) Reset() {
@@ -243,6 +245,20 @@ func (x *ListAllTenantAdminsRequest) GetPage() *v1.CursorPageRequest {
 		return x.Page
 	}
 	return nil
+}
+
+func (x *ListAllTenantAdminsRequest) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+func (x *ListAllTenantAdminsRequest) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
 }
 
 type ListAllTenantAdminsResponse struct {

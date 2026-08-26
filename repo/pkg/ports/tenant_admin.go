@@ -125,6 +125,9 @@ type TenantAdminService interface {
 	// ResetPassword updates password_hash. Plaintext must not be logged or returned.
 	// Disabled/deleted → ErrUserNotFound; same as old → ErrPasswordSameAsOld.
 	ResetPassword(ctx context.Context, tenantID, userID, newPassword string) error
+
+	// BatchGetUsers 批量查询租户内用户（按 user_id 列表）。不存在的用户跳过。
+	BatchGetUsers(ctx context.Context, tenantID string, userIDs []string) ([]User, error)
 }
 
 // UserAdminService is kept as an alias for backward compatibility.
