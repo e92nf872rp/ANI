@@ -443,28 +443,30 @@ kubectl apply --server-side --dry-run=server \
 
 Expected: all eight resources report server dry-run acceptance; `kubectl get` confirms the dry run created nothing new.
 
-- [ ] **Step 3: Build and inspect the exact image**
+- [ ] **Step 3: Inspect the existing exact image when production code is unchanged**
+
+```bash
+docker inspect docker.changqingyun.cn/ani/envoy-authz-adapter:c40-20260824 \
+  --format '{{.Config.User}}'
+```
+
+Expected: the existing image is present locally and runtime user is `65532:65532` or `65532`. If the image is not local, inspect the deployed Pod image ID and registry manifest read-only; do not push.
+
+- [ ] **Step 4: Build a new immutable tag only if Task 2 changed adapter production code**
 
 ```bash
 cd /root/kubercon/ANI/repo
 make image-envoy-authz-adapter \
   REGISTRY=docker.changqingyun.cn/ani \
-  VERSION=c40-20260824
-docker inspect docker.changqingyun.cn/ani/envoy-authz-adapter:c40-20260824 \
+  VERSION=c40-20260825
+docker inspect docker.changqingyun.cn/ani/envoy-authz-adapter:c40-20260825 \
   --format '{{.Config.User}}'
-```
-
-Expected: image build passes and runtime user is `65532:65532` or `65532`.
-
-- [ ] **Step 4: Push only when the local digest is the intended artifact**
-
-```bash
-docker push docker.changqingyun.cn/ani/envoy-authz-adapter:c40-20260824
-docker image inspect docker.changqingyun.cn/ani/envoy-authz-adapter:c40-20260824 \
+docker push docker.changqingyun.cn/ani/envoy-authz-adapter:c40-20260825
+docker image inspect docker.changqingyun.cn/ani/envoy-authz-adapter:c40-20260825 \
   --format '{{index .RepoDigests 0}}'
 ```
 
-Expected: push succeeds and prints a registry digest. Never write registry credentials or Docker config to evidence.
+This step is skipped completely when adapter production code is unchanged. If it runs, update only the adapter Deployment image in `inference-envoy-ai-gateway-c40.yaml` to `c40-20260825`, rerun the manifest validator and server dry-run, then require the new Pod image ID after rollout. Never overwrite or repush `c40-20260824`; never write registry credentials or Docker config to evidence.
 
 - [ ] **Step 5: Review checkpoint**
 

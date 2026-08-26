@@ -16,6 +16,7 @@ validate the pure-logic parts that matter for the AC:
   answer with empty sources (SPEC §5.4 — do not hallucinate).
 * Token extraction probes the LLM response usage object defensively.
 """
+# ruff: noqa: E402
 from __future__ import annotations
 
 import sys

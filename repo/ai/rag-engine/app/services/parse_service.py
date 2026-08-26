@@ -86,10 +86,10 @@ def _is_list_line(line: str) -> bool:
 
 def _is_list_block(text: str) -> bool:
     """Heuristic: text segment is predominantly a list."""
-    lines = [l for l in text.strip().splitlines() if l.strip()]
+    lines = [line for line in text.strip().splitlines() if line.strip()]
     if not lines:
         return False
-    list_lines = sum(1 for l in lines if _is_list_line(l))
+    list_lines = sum(1 for line in lines if _is_list_line(line))
     return list_lines >= len(lines) * 0.5
 
 

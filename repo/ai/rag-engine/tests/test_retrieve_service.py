@@ -18,6 +18,7 @@ The tests validate the pure-logic parts that matter for the AC:
 * ``RetrieveService`` accepts an injected embed_model (shared singleton,
   SPEC §1.3).
 """
+# ruff: noqa: E402
 from __future__ import annotations
 
 import re

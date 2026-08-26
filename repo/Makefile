@@ -15,7 +15,7 @@ export
         image image-gateway image-auth-service \
         clean
 
-.PHONY: test-inference-control-plane-postgres validate-inference-gpu-lws-volcano-live-gate validate-inference-legacy-control-plane validate-inference-incluster-e2e-live-gate validate-inference-console-shaped-e2e-live-gate validate-inference-local-model-source-live-gate validate-inference-create-image-live-gate validate-inference-create-image-harbor-live-gate validate-inference-gpu-single-node-live-gate validate-gpu-plugin-node-partition-live-gate validate-inference-gpu-vllm-eager-live-gate validate-inference-engine-vgpu-live-gate validate-inference-gpu-memory-live-gate
+.PHONY: test-inference-control-plane-postgres validate-inference-gpu-lws-volcano-live-gate validate-inference-legacy-control-plane validate-inference-incluster-e2e-live-gate validate-inference-console-shaped-e2e-live-gate validate-inference-local-model-source-live-gate validate-inference-create-image-live-gate validate-inference-create-image-harbor-live-gate validate-inference-gpu-single-node-live-gate validate-gpu-plugin-node-partition-live-gate validate-inference-gpu-vllm-eager-live-gate validate-inference-engine-vgpu-live-gate validate-inference-gpu-memory-live-gate validate-inference-envoy-ai-gateway-manifest validate-inference-envoy-ai-gateway-live-gate run-inference-envoy-ai-gateway-live image-envoy-authz-adapter
 
 # ── 帮助 ──────────────────────────────────────────────────────────────────────
 help:
@@ -184,7 +184,7 @@ help:
 COMPOSE = docker compose -f deploy/docker/docker-compose.yml
 GO_CACHE_ENV = GOCACHE=$(CURDIR)/.cache/go-build GOMODCACHE=$(CURDIR)/.cache/gomod
 BUF_CACHE_ENV = BUF_CACHE_DIR=$(CURDIR)/.cache/buf
-GO_PACKAGES = ./pkg/... ./services/ani-gateway/... ./services/auth-service/... ./services/model-service/... ./services/inference-service/... ./services/task-service/... ./services/reconcile-worker/...
+GO_PACKAGES = ./pkg/... ./services/ani-gateway/... ./services/auth-service/... ./services/envoy-authz-adapter/... ./services/model-service/... ./services/inference-service/... ./services/task-service/... ./services/reconcile-worker/...
 TOOLS_BIN = $(CURDIR)/.bin
 
 deps:
@@ -1015,6 +1015,17 @@ validate-inference-control-plane:
 	$(MAKE) validate-inference-legacy-control-plane
 	@echo "✅ inference-service control-plane migration valid"
 
+validate-inference-envoy-ai-gateway-manifest:
+	python scripts/validate_inference_envoy_ai_gateway_manifest_test.py
+	python scripts/validate_inference_envoy_ai_gateway_manifest.py
+
+validate-inference-envoy-ai-gateway-live-gate:
+	python scripts/validate_inference_envoy_ai_gateway_live_gate_test.py
+	python scripts/validate_inference_envoy_ai_gateway_live_gate.py
+
+run-inference-envoy-ai-gateway-live:
+	python scripts/run_inference_envoy_ai_gateway_live.py
+
 validate-inference-legacy-control-plane:
 	@echo "→ 校验旧 inference.v1 / operator 控制面已退役..."
 	python scripts/validate_inference_legacy_control_plane_test.py
@@ -1236,7 +1247,7 @@ dev-core-mock:
 # ── 镜像构建 ──────────────────────────────────────────────────────────────────
 REGISTRY ?= harbor.ani.internal/ani
 
-image: image-gateway image-auth-service
+image: image-gateway image-auth-service image-envoy-authz-adapter
 
 image-gateway:
 	docker build -t $(REGISTRY)/ani-gateway:$(VERSION) \
@@ -1246,6 +1257,11 @@ image-gateway:
 image-auth-service:
 	docker build -t $(REGISTRY)/ani-auth-service:$(VERSION) \
 		-f services/auth-service/Dockerfile \
+		.
+
+image-envoy-authz-adapter:
+	docker build -t $(REGISTRY)/envoy-authz-adapter:$(VERSION) \
+		-f services/envoy-authz-adapter/Dockerfile \
 		.
 
 # ── 清理 ──────────────────────────────────────────────────────────────────────

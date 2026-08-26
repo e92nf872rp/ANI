@@ -1,0 +1,251 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: envoy-authz-adapter
+  namespace: ani-aigw
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: envoy-authz-adapter
+  namespace: ani-aigw
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: envoy-authz-adapter
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: envoy-authz-adapter
+    spec:
+      serviceAccountName: envoy-authz-adapter
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: envoy-authz-adapter
+          image: docker.changqingyun.cn/ani/envoy-authz-adapter:c40-20260824
+          imagePullPolicy: Always
+          ports:
+            - name: grpc
+              containerPort: 9002
+              protocol: TCP
+          env:
+            - name: AUTH_SERVICE_GRPC_ADDR
+              value: ani-auth-service.ani-system.svc.cluster.local:9101
+            - name: AUTH_TIMEOUT
+              value: 2s
+            - name: GRPC_PORT
+              value: "9002"
+          readinessProbe:
+            grpc:
+              port: 9002
+            initialDelaySeconds: 2
+          livenessProbe:
+            grpc:
+              port: 9002
+            initialDelaySeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: envoy-authz-adapter
+  namespace: ani-aigw
+spec:
+  selector:
+    app.kubernetes.io/name: envoy-authz-adapter
+  ports:
+    - name: grpc
+      port: 9002
+      protocol: TCP
+      targetPort: grpc
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: envoy-authz-adapter
+  namespace: ani-aigw
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: envoy-authz-adapter
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: envoy
+              gateway.envoyproxy.io/owning-gateway-name: ani-aigw
+              gateway.envoyproxy.io/owning-gateway-namespace: ani-aigw
+      ports:
+        - protocol: TCP
+          port: 9002
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: TCP
+          port: 53
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ani-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ani-auth-service
+      ports:
+        - protocol: TCP
+          port: 9101
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: Backend
+metadata:
+  name: ani-c40-chat-vllm
+  namespace: ani-aigw
+spec:
+  type: Endpoints
+  endpoints:
+    - fqdn:
+        hostname: pw-182df9a4-4a6a-4eed-9d50-51a458a15f6a.ani-tenant-00000000-0000-0000-0000-000000000001.svc.cluster.local
+        port: 8000
+---
+apiVersion: aigateway.envoyproxy.io/v1beta1
+kind: AIServiceBackend
+metadata:
+  name: ani-c40-chat-vllm
+  namespace: ani-aigw
+spec:
+  backendRef:
+    group: gateway.envoyproxy.io
+    kind: Backend
+    name: ani-c40-chat-vllm
+  schema:
+    name: OpenAI
+    version: v1
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: Backend
+metadata:
+  name: ani-c40-embed-vllm
+  namespace: ani-aigw
+spec:
+  type: Endpoints
+  endpoints:
+    - fqdn:
+        hostname: pw-6ae6f951-415d-454f-8459-cd38d32dc58f.ani-tenant-00000000-0000-0000-0000-000000000001.svc.cluster.local
+        port: 8000
+---
+apiVersion: aigateway.envoyproxy.io/v1beta1
+kind: AIServiceBackend
+metadata:
+  name: ani-c40-embed-vllm
+  namespace: ani-aigw
+spec:
+  backendRef:
+    group: gateway.envoyproxy.io
+    kind: Backend
+    name: ani-c40-embed-vllm
+  schema:
+    name: OpenAI
+    version: v1
+---
+apiVersion: aigateway.envoyproxy.io/v1beta1
+kind: AIGatewayRoute
+metadata:
+  name: ani-c40
+  namespace: ani-aigw
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: ani-aigw
+  rules:
+    - matches:
+        - headers:
+            - name: x-ai-eg-model
+              type: Exact
+              value: ani-c40-chat
+      backendRefs:
+        - name: ani-c40-chat-vllm
+          priority: 0
+          weight: 1
+          headerMutation:
+            remove:
+              - Authorization
+              - x-api-key
+              - x-ani-tenant-id
+              - x-ani-user-id
+    - matches:
+        - headers:
+            - name: x-ai-eg-model
+              type: Exact
+              value: ani-c40-embed
+      backendRefs:
+        - name: ani-c40-embed-vllm
+          priority: 0
+          weight: 1
+          headerMutation:
+            remove:
+              - Authorization
+              - x-api-key
+              - x-ani-tenant-id
+              - x-ani-user-id
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: ani-c40-ext-auth
+  namespace: ani-aigw
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: ani-c40
+  extAuth:
+    failOpen: false
+    statusOnError: 503
+    headersToExtAuth:
+      - authorization
+    contextExtensions:
+      - name: ani.target_tenant_id
+        type: Value
+        value: 00000000-0000-0000-0000-000000000001
+      - name: ani.inference_service_id
+        type: Value
+        value: 182df9a4-4a6a-4eed-9d50-51a458a15f6a
+    grpc:
+      backendRefs:
+        - name: envoy-authz-adapter
+          port: 9002

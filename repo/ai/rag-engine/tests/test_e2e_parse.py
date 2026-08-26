@@ -8,6 +8,7 @@ parsing. Creates test documents, parses them, and verifies:
 
 Run from repo root: python -m pytest ai/rag-engine/tests/test_e2e_parse.py -v -s
 """
+# ruff: noqa: E402
 from __future__ import annotations
 
 import os

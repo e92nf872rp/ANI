@@ -17,6 +17,7 @@ validate the pure-logic parts that matter for the AC:
   the AI inference service (not a local HuggingFace model) — SPEC §1.3
   v1.2: rag-engine calls the inference-service /v1/embeddings endpoint.
 """
+# ruff: noqa: E402
 from __future__ import annotations
 
 import sys

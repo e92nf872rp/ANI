@@ -5,6 +5,7 @@ default splitter falls back to :class:`_PureSentenceSplitter` when
 ``SentenceSplitter`` cannot be imported, so every test exercises the real
 chunking algorithm.
 """
+# ruff: noqa: E402
 from __future__ import annotations
 
 import sys

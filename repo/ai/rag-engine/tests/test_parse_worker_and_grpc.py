@@ -10,8 +10,10 @@ dependencies are injected as fakes/mocks. They validate:
   question, top_k bounds), error mapping (INVALID_ARGUMENT /
   DEADLINE_EXCEEDED / UNAVAILABLE / INTERNAL).
 """
+# ruff: noqa: E402
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sys
@@ -47,6 +49,7 @@ for _mod in (
     "openai",
     "pymilvus",
     "pymilvus.connections",
+    "asyncpg",
     "nats",
     "nats.aio",
     "nats.aio.client",
@@ -82,6 +85,16 @@ from app.services.retrieve_service import RetrievedSource
 from app.workers.parse_worker import ParseWorker
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _run_to_thread_inline(monkeypatch):
+    """Keep these logic tests independent of the local thread executor."""
+
+    async def _inline(func, /, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", _inline)
 
 
 class FakeStatusUpdater:
