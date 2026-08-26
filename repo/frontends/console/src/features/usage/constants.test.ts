@@ -4,7 +4,7 @@
  * 覆盖 ACCEPTANCE CRITERIA：
  * - RESOURCE_TYPE_TABS: 5 启用 + 2 disabled
  * - 不含 token_total Tab（FR-17）
- * - GROUP_BY_OPTIONS: resource_type / az / day / hour
+ * - GROUP_BY_OPTIONS: resource_type / day / hour
  */
 import { describe, it, expect } from 'vitest'
 import { RESOURCE_TYPE_TABS, GROUP_BY_OPTIONS } from './constants'
@@ -54,13 +54,13 @@ describe('RESOURCE_TYPE_TABS', () => {
 })
 
 describe('GROUP_BY_OPTIONS', () => {
-  it('应有 4 个选项', () => {
-    expect(GROUP_BY_OPTIONS).toHaveLength(4)
+  it('应有 3 个选项', () => {
+    expect(GROUP_BY_OPTIONS).toHaveLength(3)
   })
 
-  it('应包含 resource_type / az / day / hour', () => {
+  it('应包含 resource_type / day / hour', () => {
     const values = GROUP_BY_OPTIONS.map((o) => o.value)
-    expect(values).toEqual(['resource_type', 'az', 'day', 'hour'])
+    expect(values).toEqual(['resource_type', 'day', 'hour'])
   })
 
   it('每个选项应有 label', () => {

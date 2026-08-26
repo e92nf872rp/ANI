@@ -14,6 +14,7 @@ import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
 import { Route as AuthenticatedTenantsQuotasRouteImport } from './routes/_authenticated/tenants/quotas'
+import { Route as AuthenticatedTenantUsageBillingRouteImport } from './routes/_authenticated/tenant/usage-billing'
 import { Route as AuthenticatedOpsGpuPoolRouteImport } from './routes/_authenticated/ops/gpu-pool'
 import { Route as IntegrationNotificationSettingsEmailIndexRouteImport } from './routes/integration/notification-settings/email/index'
 import { Route as AuthenticatedTenantsQuotasIndexRouteImport } from './routes/_authenticated/tenants/quotas/index'
@@ -46,6 +47,12 @@ const AuthenticatedTenantsQuotasRoute =
   AuthenticatedTenantsQuotasRouteImport.update({
     id: '/tenants/quotas',
     path: '/tenants/quotas',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedTenantUsageBillingRoute =
+  AuthenticatedTenantUsageBillingRouteImport.update({
+    id: '/tenant/usage-billing',
+    path: '/tenant/usage-billing',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
 const AuthenticatedOpsGpuPoolRoute = AuthenticatedOpsGpuPoolRouteImport.update({
@@ -229,6 +236,13 @@ declare module '@tanstack/react-router' {
       path: '/tenants/quotas'
       fullPath: '/tenants/quotas'
       preLoaderRoute: typeof AuthenticatedTenantsQuotasRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/tenant/usage-billing': {
+      id: '/_authenticated/tenant/usage-billing'
+      path: '/tenant/usage-billing'
+      fullPath: '/tenant/usage-billing'
+      preLoaderRoute: typeof AuthenticatedTenantUsageBillingRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/ops/gpu-pool': {

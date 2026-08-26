@@ -45,7 +45,7 @@ export const RESOURCE_TYPE_TABS: ResourceTypeTab[] = [
 ]
 
 /** group_by 分组维度选项值 */
-export type GroupByOption = 'resource_type' | 'az' | 'day' | 'hour'
+export type GroupByOption = 'resource_type' | 'day' | 'hour'
 
 /** group_by 分组维度配置项 */
 export interface GroupByOptionConfig {
@@ -57,13 +57,11 @@ export interface GroupByOptionConfig {
 
 /**
  * group_by 分组维度选项（SPEC §3.2、UX §5.1）。
- *
- * 租户 API group_by 枚举：resource_type / az / day / hour。
+ * 租户 API group_by 枚举：resource_type / day / hour（az 无底层列支持，契约已移除）。
  * 注意：平台 API 另有 tenant_id，租户侧不包含。
  */
 export const GROUP_BY_OPTIONS: GroupByOptionConfig[] = [
   { label: '按资源类型', value: 'resource_type' },
-  { label: '按可用区', value: 'az' },
   { label: '按天', value: 'day' },
   { label: '按小时', value: 'hour' },
 ]
