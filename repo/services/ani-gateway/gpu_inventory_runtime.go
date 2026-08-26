@@ -40,7 +40,7 @@ func gatewayGPUInventoryRuntimeConfigFromEnv() gatewayGPUInventoryRuntimeConfig 
 	}
 }
 
-func newGatewayGPUInventory(cfg gatewayGPUInventoryRuntimeConfig) (ports.GPUInventory, error) {
+func newGatewayGPUInventory(cfg gatewayGPUInventoryRuntimeConfig, queueStore ports.GPUSchedulingQueueStore, specStore ports.GPUSpecStore, quotaStore ports.QuotaStoreService) (ports.GPUInventory, error) {
 	switch mode := strings.TrimSpace(cfg.ProviderMode); mode {
 	case "", "local", "not_configured":
 		return nil, nil
@@ -59,7 +59,7 @@ func newGatewayGPUInventory(cfg gatewayGPUInventoryRuntimeConfig) (ports.GPUInve
 		if err != nil {
 			return nil, err
 		}
-		return runtimeadapter.NewKubernetesGPUInventory(client), nil
+		return runtimeadapter.NewKubernetesGPUInventoryWithSpecStore(client, queueStore, specStore, quotaStore), nil
 	default:
 		return nil, fmt.Errorf("%w: unsupported GPU_INVENTORY_PROVIDER %q", ports.ErrUnsupported, mode)
 	}
@@ -184,4 +184,33 @@ func newGatewayGPUInstanceStore(ctx context.Context, cfg gatewayGPUInstanceStore
 		closeStore()
 	}()
 	return runtimeadapter.NewMetadataInstanceStore(metadata), nil
+}
+
+// newGatewayGPUSpecStore builds the CRD-backed GPUSpecStore used by the GPU
+// spec directory CRUD endpoints (POST/DELETE /gpu-specs) and the extended
+// GET /gpu-specs response (with gpu_mode/node_affinity/volcano_resources).
+// Returns (nil, nil) when the provider mode is not kubernetes_rest so
+// local/dev profiles keep using the in-memory GPUSpecService fallback.
+func newGatewayGPUSpecStore(cfg gatewayGPUInventoryRuntimeConfig) (ports.GPUSpecStore, error) {
+	if strings.TrimSpace(cfg.ProviderMode) != "kubernetes_rest" {
+		return nil, nil
+	}
+	client, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
+		Host:            cfg.KubernetesAPIHost,
+		ServiceHost:     cfg.KubernetesServiceHost,
+		ServicePort:     cfg.KubernetesServicePort,
+		BearerToken:     cfg.KubernetesBearerToken,
+		BearerTokenFile: cfg.KubernetesServiceAccountTokenFile,
+		CAFile:          cfg.KubernetesServiceAccountCAFile,
+		FieldManager:    cfg.KubernetesProviderManager,
+		HTTPClient:      cfg.KubernetesHTTPClient,
+		RequestTimeout:  cfg.KubernetesRequestTimeout,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("kubernetes REST client for gpu spec store: %w", err)
+	}
+	return runtimeadapter.NewCRDGPUSpecStore(runtimeadapter.CRDGPUSpecStoreConfig{
+		Doer:    client,
+		BaseURL: client.Host(),
+	}), nil
 }

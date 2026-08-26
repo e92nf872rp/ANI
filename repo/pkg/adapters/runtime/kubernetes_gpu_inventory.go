@@ -21,24 +21,43 @@ const (
 	kubernetesHostnameLabel             = "kubernetes.io/hostname"
 	kubernetesANIGPUPoolLabel           = "ani.kubercloud.io/gpu-pool"
 	kubernetesVolcanoSchedulerName      = "volcano"
-	kubernetesHAMISchedulerName         = "hami-scheduler"
 	kubernetesDefaultInferenceQueue     = "ani-inference"
 	kubernetesDefaultTrainingQueue      = "ani-training"
 	kubernetesGPUNodeSelectorLabel      = "ani.kubercloud.io/gpu-node"
-	kubernetesHAMIRegisterAnnotation    = "hami.io/node-nvidia-register"
-	kubernetesHAMIHandshakeAnnotation   = "hami.io/node-handshake"
-	kubernetesHAMILocalModel            = "hami-core"
-	kubernetesHAMILocalRuntimeClass     = "hami-vgpu"
+
+	// Node label keys for GPU mode / spec derivation (plan.md §4.2).
+	kubernetesANIGPUModeLabel          = "ani.kubercloud.io/gpu-mode"
+	kubernetesANIGPUSpecLabel          = "ani.kubercloud.io/gpu-spec"
+	kubernetesANIGPUSharingSpecLabel   = "ani.kubercloud.io/gpu-sharing-spec"
+	kubernetesANIGPUSharingPolicyLabel = "ani.kubercloud.io/gpu-sharing-policy"
+
+	// Node label key for physical GPU memory in MiB (NVIDIA device plugin).
+	kubernetesNVIDIAGPUMemoryLabel = "nvidia.com/gpu.memory"
+
+	// Volcano vGPU device registration annotation key. The Volcano vGPU
+	// device plugin (based on HAMi-core) writes this annotation on each
+	// GPU node. The format is a colon-separated list of physical GPU
+	// records, each record being comma-separated fields:
+	// GPU-ID,count,mb,type,health,mode (plan.md §4.6).
+	// Example: "GPU-xxx,10,4914,NVIDIA-RTX4090,true,hami-core:GPU-yyy,10,4914,..."
+	kubernetesVolcanoVGPURegisterAnnotation = "volcano.sh/node-vgpu-register"
 )
 
 // KubernetesGPUInventory discovers GPU capacity from Kubernetes nodes and
 // maps workload intent to scheduling constraints. When a queue store is
 // injected it resolves and validates Volcano queues; without one it still
 // serves inventory lookups but PlanScheduling falls back to workload-class
-// defaults without tenant validation.
+// defaults without tenant validation. When a spec store and quota store are
+// injected it can compute per-spec availability via ListSpecAvailability.
+// When a quota admin service is injected, ListSpecAvailability uses the
+// tenant's allocated_gpu_count (reservation) instead of the quota total,
+// per plan.md §4.4.1.
 type KubernetesGPUInventory struct {
 	client     *KubernetesRESTClient
 	queueStore ports.GPUSchedulingQueueStore
+	specStore  ports.GPUSpecStore
+	quotaStore ports.QuotaStoreService
+	quotaAdmin ports.QuotaAdminService
 }
 
 // NewKubernetesGPUInventory builds an inventory adapter without queue
@@ -51,6 +70,21 @@ func NewKubernetesGPUInventory(client *KubernetesRESTClient) *KubernetesGPUInven
 // and validates Volcano queues through the provided store.
 func NewKubernetesGPUInventoryWithQueueStore(client *KubernetesRESTClient, store ports.GPUSchedulingQueueStore) *KubernetesGPUInventory {
 	return &KubernetesGPUInventory{client: client, queueStore: store}
+}
+
+// NewKubernetesGPUInventoryWithSpecStore returns an inventory wired with a
+// GPUSpecStore and QuotaStoreService so ListSpecAvailability can compute
+// per-spec availability (SPEC §5.1).
+func NewKubernetesGPUInventoryWithSpecStore(client *KubernetesRESTClient, queueStore ports.GPUSchedulingQueueStore, specStore ports.GPUSpecStore, quotaStore ports.QuotaStoreService) *KubernetesGPUInventory {
+	return &KubernetesGPUInventory{client: client, queueStore: queueStore, specStore: specStore, quotaStore: quotaStore}
+}
+
+// WithQuotaAdmin injects a QuotaAdminService so ListSpecAvailability can
+// read the tenant's allocated_gpu_count (reservation) per plan.md §4.4.1.
+// When not set, ListSpecAvailability falls back to quota total.
+func (i *KubernetesGPUInventory) WithQuotaAdmin(admin ports.QuotaAdminService) *KubernetesGPUInventory {
+	i.quotaAdmin = admin
+	return i
 }
 
 func (i *KubernetesGPUInventory) ListNodeClasses(ctx context.Context, filter ports.GPUDiscoveryFilter) ([]ports.GPUNodeClass, error) {
@@ -133,18 +167,10 @@ func (i *KubernetesGPUInventory) PlanScheduling(ctx context.Context, request por
 		if !gpuNodeSupportsSchedulingRequest(node, request) {
 			continue
 		}
-		// Resource name depends on whether HAMi manages this node.
-		// HAMi reports vGPU splits as nvidia.com/gpu; non-HAMi clusters
-		// use nvidia.com/vgpu for vGPU scheduling.
 		resourceName := resourceNameForNode(node, mode)
 		available := gpuAllocatableCount(node, resourceName)
 		if available < requiredCount {
 			continue
-		}
-		// HAMi-managed nodes require hami-scheduler; non-HAMi nodes use volcano.
-		schedulerName := kubernetesVolcanoSchedulerName
-		if isHAMINode(node) {
-			schedulerName = kubernetesHAMISchedulerName
 		}
 		return ports.GPUSchedulingDecision{
 			NodeSelector: map[string]string{
@@ -154,7 +180,7 @@ func (i *KubernetesGPUInventory) PlanScheduling(ctx context.Context, request por
 			ResourceName:      resourceName,
 			ResourceQuantity:  strconv.Itoa(requiredCount),
 			RuntimeClassName:  runtimeClassNameForNode(node, mode),
-			SchedulerName:     schedulerName,
+			SchedulerName:     kubernetesVolcanoSchedulerName,
 			QueueName:         queueName,
 			Reasons:           []string{fmt.Sprintf("Kubernetes node %s provides %d %s", node.NodeName, available, resourceName)},
 			SelectedNodeModel: node.Model,
@@ -164,7 +190,7 @@ func (i *KubernetesGPUInventory) PlanScheduling(ctx context.Context, request por
 	// Fallback resource name for the "no node found" message.
 	fallbackResource := kubernetesNVIDIAGPUResource
 	if mode == ports.GPUVirtualizationVGPU {
-		fallbackResource = kubernetesNVIDIAGPUResource
+		fallbackResource = kubernetesNVIDIAVGPUResource
 	}
 	return ports.GPUSchedulingDecision{
 		SchedulerName: kubernetesVolcanoSchedulerName,
@@ -175,23 +201,12 @@ func (i *KubernetesGPUInventory) PlanScheduling(ctx context.Context, request por
 }
 
 // resourceNameForNode returns the K8s extended resource name to request for
-// scheduling on this node. HAMi-managed nodes report vGPU splits as
-// nvidia.com/gpu (the device's ResourceName field reflects this); non-HAMi
-// nodes use nvidia.com/vgpu for vGPU scheduling.
+// scheduling on this node. Whole-card requests use nvidia.com/gpu; vGPU
+// requests use nvidia.com/vgpu (the Volcano vGPU device plugin resource).
 func resourceNameForNode(node ports.GPUNodeClass, mode ports.GPUVirtualizationMode) string {
 	if mode != ports.GPUVirtualizationVGPU {
 		return kubernetesNVIDIAGPUResource
 	}
-	// Check if any device on this node is a HAMi vGPU (ResourceName ==
-	// nvidia.com/gpu with VirtualizationMode == vgpu). If so, HAMi
-	// manages this node and nvidia.com/gpu is the correct resource.
-	for _, device := range node.Devices {
-		if device.VirtualizationMode == ports.GPUVirtualizationVGPU &&
-			device.ResourceName == kubernetesNVIDIAGPUResource {
-			return kubernetesNVIDIAGPUResource
-		}
-	}
-	// Non-HAMi node with vGPU request: use nvidia.com/vgpu.
 	return kubernetesNVIDIAVGPUResource
 }
 
@@ -262,46 +277,28 @@ func defaultQueueName(class ports.WorkloadClass) string {
 }
 
 // selectResourceName returns the K8s extended resource name and the effective
-// virtualization mode for the request. HAMi uses nvidia.com/gpu for both
-// whole-card and vGPU scheduling; the difference is conveyed via
-// nvidia.com/gpumem / nvidia.com/gpucores limits and the runtime class.
-// Non-HAMi clusters distinguish via nvidia.com/vgpu.
+// virtualization mode for the request. Non-HAMi clusters distinguish via
+// nvidia.com/vgpu for vGPU and nvidia.com/gpu for whole-card.
 func selectResourceName(request ports.GPUSchedulingRequest) (string, ports.GPUVirtualizationMode) {
 	for _, mode := range request.VirtualizationModes {
 		if mode == ports.GPUVirtualizationVGPU {
-			// HAMi reports vGPU splits as nvidia.com/gpu, not nvidia.com/vgpu.
-			return kubernetesNVIDIAGPUResource, ports.GPUVirtualizationVGPU
+			return kubernetesNVIDIAVGPUResource, ports.GPUVirtualizationVGPU
 		}
 	}
 	return kubernetesNVIDIAGPUResource, ports.GPUVirtualizationNone
 }
 
-// runtimeClassNameForNode returns the runtime class for a node given its
-// management type (HAMi vs Volcano/native) and the requested virtualization
-// mode. HAMi-managed nodes use the hami-vgpu runtime class for vGPU splits;
-// whole-card scheduling on HAMi nodes leaves the runtime class empty so the
-// HAMi device plugin takes over container creation. Non-HAMi (Volcano/native)
-// nodes leave the runtime class empty for both whole-card and vGPU, letting
-// the native NVIDIA device plugin or a cluster-defined RuntimeClass handle it.
+// runtimeClassNameForNode returns the runtime class for a node given the
+// requested virtualization mode. With HAMi removed, all nodes use the
+// Volcano/native device plugin and the runtime class is always empty.
 func runtimeClassNameForNode(node ports.GPUNodeClass, mode ports.GPUVirtualizationMode) string {
-	if isHAMINode(node) {
-		if mode == ports.GPUVirtualizationVGPU {
-			return kubernetesHAMILocalRuntimeClass
-		}
-		return ""
-	}
-	// Non-HAMi node: let the cluster's native device plugin handle GPU
-	// allocation. Returning an empty runtime class avoids requiring a
-	// "nvidia" RuntimeClass that may not exist in the cluster.
 	return ""
 }
 
 // runtimeClassNameForMode returns the runtime class for a virtualization mode
-// when the node management type is unknown. Prefer runtimeClassNameForNode.
+// when the node management type is unknown. With HAMi removed, the runtime
+// class is always empty. Kept for backward compatibility with local_gpu_inventory.go.
 func runtimeClassNameForMode(mode ports.GPUVirtualizationMode) string {
-	if mode == ports.GPUVirtualizationVGPU {
-		return kubernetesHAMILocalRuntimeClass
-	}
 	return ""
 }
 
@@ -318,19 +315,6 @@ func gpuAllocatableCount(node ports.GPUNodeClass, resourceName string) int {
 		return 0
 	}
 	return count
-}
-
-// isHAMINode returns true when any device on the node is managed by HAMi
-// (detected via the hami.io/node-nvidia-register annotation or devices with
-// VirtualizationMode == vgpu using nvidia.com/gpu).
-func isHAMINode(node ports.GPUNodeClass) bool {
-	for _, device := range node.Devices {
-		if device.VirtualizationMode == ports.GPUVirtualizationVGPU &&
-			device.ResourceName == kubernetesNVIDIAGPUResource {
-			return true
-		}
-	}
-	return false
 }
 
 type kubernetesNodeListDocument struct {
@@ -379,6 +363,9 @@ func gpuNodeClassesFromKubernetesNodeList(body []byte) ([]ports.GPUNodeClass, er
 			continue
 		}
 		nodeName := firstNonEmpty(item.Metadata.Labels[kubernetesHostnameLabel], item.Metadata.Name)
+		// Model derivation: new labels first, fall back to legacy
+		// nvidia.com/gpu.product / ani.kubercloud.io/gpu-model during
+		// the transition period.
 		model := firstNonEmpty(
 			item.Metadata.Labels[kubernetesNVIDIAGPUProductLabel],
 			item.Metadata.Labels[kubernetesANIGPUModelLabel],
@@ -386,30 +373,43 @@ func gpuNodeClassesFromKubernetesNodeList(body []byte) ([]ports.GPUNodeClass, er
 		)
 		ready, reason := kubernetesNodeReady(item.Status.Conditions)
 
-		// HAMi-aware device parsing: when hami.io/node-nvidia-register
-		// annotation is present, HAMi has replaced the native NVIDIA device
-		// plugin and reports nvidia.com/gpu as vGPU split count (physical
-		// cards × deviceSplitCount). We parse the annotation to recover
-		// physical card identity, model, VRAM and health, and mark each
-		// device with vGPU virtualization mode.
-		hamiDevices := parseHAMIAnnotation(item.Metadata.Annotations)
+		// Derive GPUMode / GPUSpec / GPUSharingSpec / GPUSharingPolicy
+		// from node labels (plan.md §4.2). These are read-only fields
+		// derived from labels, never written to PG.
+		gpuMode := item.Metadata.Labels[kubernetesANIGPUModeLabel]
+		gpuSpec := item.Metadata.Labels[kubernetesANIGPUSpecLabel]
+		gpuSharingSpec := item.Metadata.Labels[kubernetesANIGPUSharingSpecLabel]
+		gpuSharingPolicy := item.Metadata.Labels[kubernetesANIGPUSharingPolicyLabel]
+
+		// Physical GPU memory in MiB from the NVIDIA device plugin node
+		// label (nvidia.com/gpu.memory). Applied to every device on this
+		// node so the handler can populate memory_total_mb.
+		gpuMemoryMiB, _ := strconv.ParseInt(item.Metadata.Labels[kubernetesNVIDIAGPUMemoryLabel], 10, 64)
+
+		// Device parsing: parse the volcano.sh/node-vgpu-register
+		// annotation to discover vGPU devices managed by the Volcano
+		// vGPU device plugin. When the annotation is absent, fall back
+		// to nvidia.com/gpu (whole-card) and nvidia.com/vgpu resource
+		// counts.
+		vgpuDevices := parseVolcanoVGPUAnnotation(item.Metadata.Annotations)
 		var devices []ports.GPUDeviceClass
-		if len(hamiDevices) > 0 {
-			devices = make([]ports.GPUDeviceClass, 0, len(hamiDevices))
-			for _, hd := range hamiDevices {
+		if vgpuDevices > 0 {
+			devices = make([]ports.GPUDeviceClass, 0, vgpuDevices)
+			for range vgpuDevices {
 				devices = append(devices, ports.GPUDeviceClass{
 					Vendor:             ports.GPUVendorNVIDIA,
-					Model:              firstNonEmpty(hd.Type, model),
-					MemoryMiB:          hd.DevMem,
-					ResourceName:       kubernetesNVIDIAGPUResource,
+					Model:              model,
+					MemoryMiB:          gpuMemoryMiB,
+					ResourceName:       kubernetesVolcanoVGPUNumberResource,
 					VirtualizationMode: ports.GPUVirtualizationVGPU,
-					DriverVersion:      firstNonEmpty(item.Metadata.Labels["nvidia.com/cuda.driver.major"], "hami"),
+					DriverVersion:      firstNonEmpty(item.Metadata.Labels["nvidia.com/cuda.driver.major"], "volcano-vgpu"),
 					RuntimeVersion:     item.Status.NodeInfo.KubeletVersion,
 					Capabilities:       []string{"cuda", "compute", "vgpu"},
 				})
 			}
 		} else {
-			// Non-HAMi node: nvidia.com/gpu = physical whole cards.
+			// No Volcano vGPU annotation: parse nvidia.com/gpu (whole
+			// cards) and nvidia.com/vgpu (vGPU slices) from resources.
 			wholeCount := gpuResourceCount(item.Status.Capacity, item.Status.Allocatable, kubernetesNVIDIAGPUResource)
 			vgpuCount := gpuResourceCount(item.Status.Capacity, item.Status.Allocatable, kubernetesNVIDIAVGPUResource)
 			devices = make([]ports.GPUDeviceClass, 0, wholeCount+vgpuCount)
@@ -417,6 +417,7 @@ func gpuNodeClassesFromKubernetesNodeList(body []byte) ([]ports.GPUNodeClass, er
 				devices = append(devices, ports.GPUDeviceClass{
 					Vendor:             ports.GPUVendorNVIDIA,
 					Model:              model,
+					MemoryMiB:          gpuMemoryMiB,
 					ResourceName:       kubernetesNVIDIAGPUResource,
 					VirtualizationMode: ports.GPUVirtualizationNone,
 					DriverVersion:      firstNonEmpty(item.Metadata.Labels["nvidia.com/cuda.driver.major"], "device-plugin"),
@@ -428,9 +429,10 @@ func gpuNodeClassesFromKubernetesNodeList(body []byte) ([]ports.GPUNodeClass, er
 				devices = append(devices, ports.GPUDeviceClass{
 					Vendor:             ports.GPUVendorNVIDIA,
 					Model:              model,
+					MemoryMiB:          gpuMemoryMiB,
 					ResourceName:       kubernetesNVIDIAVGPUResource,
 					VirtualizationMode: ports.GPUVirtualizationVGPU,
-					DriverVersion:      firstNonEmpty(item.Metadata.Labels["nvidia.com/cuda.driver.major"], "hami"),
+					DriverVersion:      firstNonEmpty(item.Metadata.Labels["nvidia.com/cuda.driver.major"], "volcano-vgpu"),
 					RuntimeVersion:     item.Status.NodeInfo.KubeletVersion,
 					Capabilities:       []string{"cuda", "compute", "vgpu"},
 				})
@@ -455,53 +457,108 @@ func gpuNodeClassesFromKubernetesNodeList(body []byte) ([]ports.GPUNodeClass, er
 			}
 		}
 		nodes = append(nodes, ports.GPUNodeClass{
-			NodeName:      nodeName,
-			Vendor:        ports.GPUVendorNVIDIA,
-			Model:         model,
-			KernelVersion: item.Status.NodeInfo.KernelVersion,
-			OSImage:       item.Status.NodeInfo.OSImage,
-			Pool:          firstNonEmpty(item.Metadata.Labels[kubernetesANIGPUPoolLabel], "default"),
-			Labels:        cloneGPUStringMap(item.Metadata.Labels),
-			Devices:       devices,
-			Allocatable:   cloneGPUStringMap(item.Status.Allocatable),
-			Ready:         ready,
-			Reason:        reason,
+			NodeName:         nodeName,
+			Vendor:           ports.GPUVendorNVIDIA,
+			Model:            model,
+			KernelVersion:    item.Status.NodeInfo.KernelVersion,
+			OSImage:          item.Status.NodeInfo.OSImage,
+			Pool:             firstNonEmpty(item.Metadata.Labels[kubernetesANIGPUPoolLabel], "default"),
+			Labels:           cloneGPUStringMap(item.Metadata.Labels),
+			Annotations:      cloneGPUStringMap(item.Metadata.Annotations),
+			Devices:          devices,
+			Allocatable:      cloneGPUStringMap(item.Status.Allocatable),
+			Ready:            ready,
+			Reason:           reason,
+			GPUMode:          gpuMode,
+			GPUSpec:          gpuSpec,
+			GPUSharingSpec:   gpuSharingSpec,
+			GPUSharingPolicy: gpuSharingPolicy,
 		})
 	}
 	return nodes, nil
 }
 
-// hamiPhysicalDevice represents a single physical GPU as reported by the
-// HAMi device plugin via the hami.io/node-nvidia-register node annotation.
-type hamiPhysicalDevice struct {
+// volcanoVGPUDevice represents a single vGPU device entry in the
+// volcano.sh/node-vgpu-register annotation.
+type volcanoVGPUDevice struct {
 	ID      string `json:"id"`
 	Index   int    `json:"index"`
 	Count   int    `json:"count"`
 	DevMem  int64  `json:"devmem"`
 	DevCore int    `json:"devcore"`
 	Type    string `json:"type"`
-	Mode    string `json:"mode"`
 	Health  bool   `json:"health"`
 }
 
-// parseHAMIAnnotation parses the hami.io/node-nvidia-register annotation
-// to recover physical GPU identity. Returns nil when the annotation is
-// absent or invalid, signalling the caller to fall back to the legacy
-// nvidia.com/gpu whole-card or nvidia.com/vgpu parsing path.
-func parseHAMIAnnotation(annotations map[string]string) []hamiPhysicalDevice {
-	raw, ok := annotations[kubernetesHAMIRegisterAnnotation]
+// parseVolcanoVGPUAnnotation parses the volcano.sh/node-vgpu-register
+// annotation to count total vGPU slices. The annotation has two supported
+// formats:
+//
+//  1. Comma-separated string (plan.md §4.6, current Volcano/HAMi-core format):
+//     colon separates physical GPUs, comma separates fields within each GPU:
+//     "GPU-ID,count,mb,type,health,mode:GPU-ID,count,mb,type,health,mode"
+//     The second field (count) is the number of vGPU slices each physical
+//     GPU is split into. Returns the sum of all count fields (total slices).
+//
+//  2. JSON array (legacy format):
+//     [{"id":"GPU-xxx","count":10,...},{"id":"GPU-yyy",...}]
+//     Returns the sum of all count fields.
+//
+// Returns 0 when the annotation is absent or invalid, signalling the caller
+// to fall back to nvidia.com/gpu / nvidia.com/vgpu resource parsing.
+func parseVolcanoVGPUAnnotation(annotations map[string]string) int {
+	raw, ok := annotations[kubernetesVolcanoVGPURegisterAnnotation]
 	if !ok || strings.TrimSpace(raw) == "" {
-		return nil
+		return 0
 	}
-	var devices []hamiPhysicalDevice
-	if err := json.Unmarshal([]byte(raw), &devices); err != nil {
-		return nil
+	raw = strings.TrimSpace(raw)
+	// Try JSON array format first (legacy compatibility).
+	if strings.HasPrefix(raw, "[") {
+		var devices []volcanoVGPUDevice
+		if err := json.Unmarshal([]byte(raw), &devices); err != nil {
+			return 0
+		}
+		total := 0
+		for _, d := range devices {
+			if d.Count > 0 {
+				total += d.Count
+			} else {
+				total++
+			}
+		}
+		return total
 	}
-	return devices
+	// Comma-separated string format (plan.md §4.6):
+	// GPU-ID,count,mb,type,health,mode:GPU-ID,count,mb,type,health,mode
+	// The count field (2nd comma-separated field) is the number of vGPU
+	// slices per physical GPU. Sum across all physical GPUs.
+	// Guard: non-JSON strings that don't look like GPU records return 0.
+	if !strings.HasPrefix(raw, "GPU-") {
+		return 0
+	}
+	segments := strings.Split(raw, ":")
+	total := 0
+	for _, seg := range segments {
+		seg = strings.TrimSpace(seg)
+		if seg == "" {
+			continue
+		}
+		fields := strings.Split(seg, ",")
+		if len(fields) >= 2 {
+			if n, err := strconv.Atoi(strings.TrimSpace(fields[1])); err == nil && n > 0 {
+				total += n
+			} else {
+				total++
+			}
+		} else {
+			total++
+		}
+	}
+	return total
 }
 
 // hasGPUResource reports whether the node advertises any NVIDIA GPU resource
-// (whole-card or vGPU).
+// (whole card, vGPU, or Volcano vGPU slices).
 func hasGPUResource(capacity, allocatable map[string]string) bool {
 	return gpuResourceCount(capacity, allocatable, kubernetesNVIDIAGPUResource) > 0 ||
 		gpuResourceCount(capacity, allocatable, kubernetesNVIDIAVGPUResource) > 0 ||
@@ -537,9 +594,8 @@ func kubernetesNodeReady(conditions []kubernetesNodeCondition) (bool, string) {
 
 func gpuNodeSupportsSchedulingRequest(node ports.GPUNodeClass, request ports.GPUSchedulingRequest) bool {
 	// When PreferredModels is set, prefer matching nodes but do not reject
-	// others — HAMi nodes report device models from annotations which may
-	// not match the user-specified model name exactly. Falling through to
-	// any available GPU node is safer than failing to schedule.
+	// others — falling through to any available GPU node is safer than
+	// failing to schedule.
 	if len(request.PreferredModels) > 0 {
 		for _, model := range request.PreferredModels {
 			if strings.EqualFold(node.Model, strings.TrimSpace(model)) {
@@ -561,10 +617,235 @@ func gpuNodeSupportsSchedulingRequest(node ports.GPUNodeClass, request ports.GPU
 
 var _ ports.GPUInventory = (*KubernetesGPUInventory)(nil)
 
-// ListSpecAvailability computes per-spec availability for a tenant. The full
-// implementation requires GPUSpecStore, QuotaStore, and reservation allocation
-// wiring (plan.md §5.1); this stub returns ErrUnsupported until those
-// dependencies are injected in the Adapters batch (Issue #3).
-func (i *KubernetesGPUInventory) ListSpecAvailability(_ context.Context, _ string) ([]ports.GPUSpecAvailability, error) {
-	return nil, ports.ErrUnsupported
+// ListSpecAvailability computes per-spec availability for a tenant following
+// SPEC §5.1: it retrieves tenant quota remaining, lists all GPU specs from
+// the spec store, iterates cluster nodes to find matching nodes per spec,
+// parses the volcano.sh/node-vgpu-register annotation for device idle count,
+// and determines a four-state status (available / full / device_full /
+// unavailable).
+func (i *KubernetesGPUInventory) ListSpecAvailability(ctx context.Context, tenantID string) ([]ports.GPUSpecAvailability, error) {
+	if i.specStore == nil || i.quotaStore == nil {
+		return nil, ports.ErrUnsupported
+	}
+
+	// Step 1: get tenant quota (total / used / reserved).
+	quota, err := i.quotaStore.GetMy(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 2: quota_remaining = allocated_gpu_count - used - reserved
+	// (plan.md §4.4.1). When quotaAdmin is available, use the tenant's
+	// allocated_gpu_count (BOSS reservation). Fall back to total when
+	// quotaAdmin is not configured or the reservation row doesn't exist.
+	total := quota.Total[ports.QuotaGPUCount]
+	used := quota.Used[ports.QuotaGPUCount]
+	reserved := quota.Reserved[ports.QuotaGPUCount]
+	allocatedLimit := total
+	if i.quotaAdmin != nil {
+		reservation, err := i.quotaAdmin.GetReservation(ctx, tenantID)
+		if err == nil && reservation.AllocatedGPUCount > 0 {
+			allocatedLimit = reservation.AllocatedGPUCount
+		}
+	}
+	quotaRemaining := allocatedLimit - used - reserved
+
+	// Step 3: list all specs.
+	specs, err := i.specStore.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 4: list all node classes.
+	nodes, err := i.ListNodeClasses(ctx, ports.GPUDiscoveryFilter{})
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 4b: query running pods across all namespaces to compute
+	// per-node GPU resource usage (plan.md §五 #14: 空闲 = 总切分数 - 已占用).
+	podUsageByNode, err := i.fetchPodGPUUsage(ctx)
+	if err != nil {
+		// Non-fatal: fall back to treating deviceIdleCount as total
+		// (pre-existing behavior) if pod query fails.
+		podUsageByNode = nil
+	}
+
+	// Step 5: for each spec, determine availability.
+	result := make([]ports.GPUSpecAvailability, 0, len(specs))
+	for _, spec := range specs {
+		availability := computeSpecAvailability(spec, nodes, quotaRemaining, podUsageByNode)
+		result = append(result, availability)
+	}
+	return result, nil
+}
+
+// computeSpecAvailability determines the four-state availability for a single
+// spec by matching nodes and computing device idle count from the Volcano
+// vGPU annotation (SPEC §5.1). Per plan.md §五 #14, deviceIdleCount is
+// total device count minus running pod GPU resource requests on matching nodes.
+func computeSpecAvailability(spec ports.GPUSpecCRD, nodes []ports.GPUNodeClass, quotaRemaining int64, podUsageByNode map[string]int) ports.GPUSpecAvailability {
+	// Step 5a: check if any node matches this spec.
+	// Wholecard: node.GPUMode == "wholecard" AND node.GPUSpec == spec.GPUType
+	// vGPU: node.GPUMode == "vgpu" AND node.GPUSharingSpec == spec.GPUType
+	hasMatchingNodes := false
+	deviceTotalCount := 0
+	for _, node := range nodes {
+		if !specMatchesNode(spec, node) {
+			continue
+		}
+		hasMatchingNodes = true
+		// Step 5b-i: compute device total count based on spec mode.
+		// Wholecard: read nvidia.com/gpu allocatable count from node
+		// resources. vGPU: parse volcano.sh/node-vgpu-register
+		// annotation for vGPU slice count (plan.md §五 #14).
+		if spec.GPUMode == "wholecard" {
+			deviceTotalCount += gpuAllocatableCount(node, kubernetesNVIDIAGPUResource)
+		} else {
+			deviceTotalCount += parseVolcanoVGPUAnnotation(node.Annotations)
+		}
+	}
+
+	// Step 5b-ii: deviceIdleCount = total - podUsage (plan.md §五 #14).
+	// podUsageByNode maps nodeName → total GPU units consumed by running
+	// pods on that node. For wholecard, 1 pod = 1 nvidia.com/gpu unit.
+	// For vGPU, 1 pod = N volcano.sh/vgpu-number units.
+	// Since podUsage is node-level (not per-spec), we subtract the
+	// matching node's usage from the deviceTotalCount for this spec.
+	// When podUsageByNode is nil (query failed), idle = total (fallback).
+	deviceIdleCount := deviceTotalCount
+	if podUsageByNode != nil {
+		podUsage := 0
+		for _, node := range nodes {
+			if !specMatchesNode(spec, node) {
+				continue
+			}
+			podUsage += podUsageByNode[node.NodeName]
+		}
+		deviceIdleCount = deviceTotalCount - podUsage
+		if deviceIdleCount < 0 {
+			deviceIdleCount = 0
+		}
+	}
+
+	availability := ports.GPUSpecAvailability{
+		SpecID:           spec.ID,
+		HasMatchingNodes: hasMatchingNodes,
+		DeviceIdleCount:  deviceIdleCount,
+		HasIdleDevices:   deviceIdleCount > 0,
+		// GPUCount is the number of GPU cards consumed per instance
+		// request. Per plan.md §四.4.2 and 实现方案 §二.2, 1 vGPU
+		// slice = 1 card = 1 gpu_count. A single instance creation
+		// requests count=1, so GPUCount is always 1 regardless of
+		// whether the spec is wholecard (shares=1) or vGPU (shares>1).
+		GPUCount: 1,
+	}
+
+	// Step 5b: four-state determination.
+	if !hasMatchingNodes {
+		// Step 5b (no matching nodes): status=unavailable.
+		availability.Status = ports.GPUSpecStatusUnavailable
+		availability.AvailableCount = 0
+		return availability
+	}
+
+	if quotaRemaining <= 0 {
+		// Quota exhausted: status=full.
+		availability.Status = ports.GPUSpecStatusFull
+		availability.AvailableCount = 0
+		return availability
+	}
+
+	if deviceIdleCount <= 0 {
+		// No idle devices on matching nodes: status=device_full.
+		availability.Status = ports.GPUSpecStatusDeviceFull
+		availability.AvailableCount = 0
+		return availability
+	}
+
+	// Available: available_count = min(quota_remaining, device_idle_count).
+	availability.Status = ports.GPUSpecStatusAvailable
+	availability.AvailableCount = minInt64(quotaRemaining, int64(deviceIdleCount))
+	return availability
+}
+
+// specMatchesNode checks whether a GPU spec matches a node based on the
+// spec's GPUMode and node labels. Wholecard specs match nodes where
+// GPUMode == "wholecard" and GPUSpec == spec.GPUType; vGPU specs match nodes
+// where GPUMode == "vgpu" and GPUSharingSpec == spec.GPUType.
+func specMatchesNode(spec ports.GPUSpecCRD, node ports.GPUNodeClass) bool {
+	if spec.GPUMode == "wholecard" {
+		return node.GPUMode == "wholecard" && node.GPUSpec == spec.GPUType
+	}
+	return node.GPUMode == "vgpu" && node.GPUSharingSpec == spec.GPUType
+}
+
+// fetchPodGPUUsage queries all Running pods across the cluster and returns
+// a map of nodeName → total GPU resource units consumed by running pods
+// on that node. For wholecard pods, the resource is nvidia.com/gpu; for
+// vGPU pods, the resource is volcano.sh/vgpu-number. Each pod's resource
+// request is summed per node (plan.md §五 #14: 空闲 = 总切分数 - 已占用).
+//
+// Only Running pods with a non-empty nodeName and non-zero GPU resource
+// requests are counted. Pending/Failed/Succeeded pods are excluded.
+func (i *KubernetesGPUInventory) fetchPodGPUUsage(ctx context.Context) (map[string]int, error) {
+	if i.client == nil {
+		return nil, nil
+	}
+	// Query all pods in all namespaces with Running phase.
+	// Using fieldSelector=spec.nodeName!= for broad query, then filter
+	// by phase in code since K8s field selectors for phase vary by version.
+	endpoint := i.client.Host() + "/api/v1/pods?fieldSelector=status.phase%3DRunning"
+	body, status, err := i.client.Do(ctx, http.MethodGet, endpoint, "", nil)
+	if err != nil || status != 200 || len(body) == 0 {
+		return nil, fmt.Errorf("fetch pods: status=%d err=%v", status, err)
+	}
+	var podList struct {
+		Items []struct {
+			Spec struct {
+				NodeName   string `json:"nodeName"`
+				Containers []struct {
+					Resources struct {
+						Requests map[string]string `json:"requests"`
+					} `json:"resources"`
+				} `json:"containers"`
+			} `json:"spec"`
+			Status struct {
+				Phase string `json:"phase"`
+			} `json:"status"`
+		} `json:"items"`
+	}
+	if json.Unmarshal(body, &podList) != nil {
+		return nil, fmt.Errorf("unmarshal pod list")
+	}
+	usageByNode := make(map[string]int)
+	for _, pod := range podList.Items {
+		if !strings.EqualFold(pod.Status.Phase, "Running") {
+			continue
+		}
+		nodeName := strings.TrimSpace(pod.Spec.NodeName)
+		if nodeName == "" {
+			continue
+		}
+		// Sum GPU resource requests across all containers.
+		for _, c := range pod.Spec.Containers {
+			for resName, resVal := range c.Resources.Requests {
+				if resName == kubernetesNVIDIAGPUResource || resName == kubernetesVolcanoVGPUNumberResource {
+					n, parseErr := strconv.Atoi(strings.TrimSpace(resVal))
+					if parseErr == nil && n > 0 {
+						usageByNode[nodeName] += n
+					}
+				}
+			}
+		}
+	}
+	return usageByNode, nil
+}
+
+// minInt64 returns the smaller of two int64 values.
+func minInt64(a, b int64) int {
+	if a < b {
+		return int(a)
+	}
+	return int(b)
 }

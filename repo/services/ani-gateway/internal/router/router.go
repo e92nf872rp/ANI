@@ -48,6 +48,17 @@ type RegisterOptions struct {
 	QuotaAdminService       ports.QuotaAdminService
 	PlatformWorkloadService ports.PlatformWorkloadService
 	TenantService           ports.TenantService
+	// GPUSpecStore backs the GPU spec directory CRUD endpoints (POST/DELETE
+	// in gpu_spec_resources.go). When nil those handlers return 503.
+	GPUSpecStore ports.GPUSpecStore
+	// MetadataStore enables platform-scoped (RLS-bypass) queries for the
+	// cross-tenant GPUSpecInUse check in gpu_spec_resources.go. When nil
+	// the check falls back to a tenant-scoped instanceStore.List.
+	MetadataStore ports.MetadataStore
+	// QuotaStoreService backs the tenant self-query endpoint GET /quotas/me
+	// (GetMy self-opens a tenant-scoped transaction so RLS applies). When nil
+	// the handler returns 503.
+	QuotaStoreService ports.QuotaStoreService
 }
 
 // Register wires all route groups onto the Hertz server.
@@ -74,12 +85,12 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	if options.InstanceRuntime != nil && options.InstanceRuntime.TaskStore == nil {
 		options.InstanceRuntime.TaskStore = options.AsyncTaskStore
 	}
-	instanceLookup := registerInstancesWithRuntime(v1, options.InstanceObservability, options.InstanceObservabilityUsesInstanceName, options.GPUInventory, options.KubernetesRESTClient, options.SecretService, options.InstanceRuntime)
+	instanceLookup := registerInstancesWithRuntime(v1, options.InstanceObservability, options.InstanceObservabilityUsesInstanceName, options.GPUInventory, options.KubernetesRESTClient, options.SecretService, options.InstanceRuntime, options.GPUSpecStore)
 	if promSvc, ok := options.ObservabilityService.(*runtimeadapter.PrometheusObservabilityService); ok {
 		promSvc.SetInstanceLookup(instanceLookup)
 	}
 	registerObservability(v1, options.ObservabilityService)
-	registerGPUInventoryResourcesWithStore(v1, options.GPUInventory, options.GPUInstanceStore, options.KubernetesRESTClient)
+	registerGPUInventoryResourcesWithStore(v1, options.GPUInventory, options.GPUInstanceStore, options.KubernetesRESTClient, options.GPUSpecStore, options.QuotaStoreService, options.QuotaAdminService)
 	registerGPUSchedulingResourcesWithStore(v1, options.GPUSchedulingQueueStore)
 	registerNetworkResourcesWithService(v1, options.NetworkService)
 	registerStorageResourcesWithServiceAndTasks(v1, options.StorageService, options.AsyncTaskStore)
@@ -92,9 +103,13 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerEncryptionResourcesWithService(v1, options.EncryptionService)
 	registerSecretResourcesWithService(v1, options.SecretService)
 	registerEmailNotificationResourcesWithService(v1, options.EmailNotificationStore)
-	registerQuotaResources(v1, options.QuotaAdminService)
+	registerQuotaResources(v1, options.QuotaAdminService, options.QuotaStoreService)
 	registerPlatformWorkloadResources(v1, options.PlatformWorkloadService, options.AsyncTaskStore)
 	registerAdminTenantResources(v1, options.TenantService)
+	// GPU spec directory CRUD (POST/DELETE) + reservation management +
+	// tenant self-query endpoints (SPEC §4.3).
+	registerGPUSpecResources(v1, options.GPUSpecStore, options.GPUInventory, options.GPUInstanceStore, options.MetadataStore)
+	registerReservationResources(v1, options.QuotaAdminService, options.QuotaStoreService)
 
 	svc := h.Group("/api/v1/svc")
 	modelServiceClient = options.ModelServiceClient

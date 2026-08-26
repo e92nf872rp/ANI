@@ -3067,6 +3067,122 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/platform-users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 平台运营账号列表
+         * @description 跨平台侧查询 tenant_id 为空的平台账号；不含 password_hash。
+         */
+        get: operations["listPlatformUsers"];
+        put?: never;
+        /**
+         * 创建平台运营账号
+         * @description 仅创建 tenant_id 为空的平台账号；明文密码仅本次请求透传，不落日志/审计/响应。
+         */
+        post: operations["createPlatformUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/platform-users/{userId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询平台运营账号详情
+         * @description 不含 password_hash；仅返回 tenant_id 为空且未软删除的平台账号。
+         */
+        get: operations["getPlatformUser"];
+        put?: never;
+        post?: never;
+        /** 软删除平台运营账号 */
+        delete: operations["deletePlatformUser"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/platform-users/{userId}/role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 修改平台运营账号角色 */
+        put: operations["updatePlatformUserRole"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/platform-users/{userId}/reset-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 重置平台运营账号密码
+         * @description 明文密码仅本次请求透传，不落日志/审计/响应。
+         */
+        post: operations["resetPlatformUserPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/platform-users/{userId}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 禁用平台运营账号 */
+        post: operations["disablePlatformUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/platform-users/{userId}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 启用平台运营账号 */
+        post: operations["enablePlatformUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/tenant-users": {
         parameters: {
             query?: never;
@@ -6265,6 +6381,11 @@ export interface components {
                 allocated?: {
                     [key: string]: string;
                 };
+                /**
+                 * @description 队列开关状态，归一自 Volcano Queue CRD status.state（Open→open / Closed→closed / 空/其他→unknown）
+                 * @enum {string}
+                 */
+                state?: "open" | "closed" | "unknown";
                 /** @description 排队中任务数 */
                 in_queue?: number;
             } | null;
@@ -6620,6 +6741,8 @@ export interface components {
              * @description 租户 ID
              */
             tenant_id: string;
+            /** @description 租户名称（仅 GET /quotas 列表返回，其余端点可能省略） */
+            tenant_name?: string;
             items: components["schemas"]["QuotaItem"][];
         };
         /** @description 单维度配额项 */
@@ -6781,6 +6904,82 @@ export interface components {
             updated_at: string;
             tenant: components["schemas"]["UserTenantRef"];
         };
+        /** @description 平台运营账号详情；tenant_id 固定为空，不含 password_hash */
+        PlatformUser: {
+            /** Format: uuid */
+            id: string;
+            /** Format: email */
+            email: string;
+            username: string;
+            display_name: string;
+            /** @enum {string} */
+            role: "platform-admin" | "platform-ops" | "platform-readonly";
+            /** @enum {string} */
+            status: "active" | "disabled";
+            /**
+             * @description 由 username 前缀推断：oidc: -> third_party；local: -> local
+             * @enum {string}
+             */
+            source: "local" | "third_party";
+            /** Format: date-time */
+            last_login_at?: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description 创建平台运营账号；明文密码仅本次请求透传，明文不落日志/审计/响应 */
+        PlatformUserCreateRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
+            /**
+             * Format: email
+             * @description RFC 5322，全局唯一
+             */
+            email: string;
+            /** @description 不含冒号；Core 侧会拼接 local: 前缀 */
+            username: string;
+            display_name: string;
+            /** @enum {string} */
+            role: "platform-admin" | "platform-ops" | "platform-readonly";
+            /** @description 至少包含大写/小写/数字/特殊字符中的三类 */
+            password: string;
+        };
+        /** @description 平台运营账号列表（游标分页） */
+        PlatformUserListResponse: {
+            items: components["schemas"]["PlatformUser"][];
+            /** @description 下一页游标；null 表示已无更多 */
+            next_cursor?: string | null;
+        };
+        /** @description 修改平台运营账号角色 */
+        PlatformUserRoleUpdateRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
+            /** @enum {string} */
+            role: "platform-admin" | "platform-ops" | "platform-readonly";
+        };
+        /** @description 重置平台运营账号密码；明文不落日志/审计/响应 */
+        PlatformUserResetPasswordRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
+            /** @description 至少包含大写/小写/数字/特殊字符中的三类，且必须与旧密码不同 */
+            new_password: string;
+        };
+        /** @description 仅含幂等键的请求体 */
+        PlatformUserIdempotentRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
+        };
         /** @description 跨租户用户列表（游标分页） */
         TenantUserListResponse: {
             items: components["schemas"]["TenantUser"][];
@@ -6819,21 +7018,41 @@ export interface components {
         };
         /** @description 修改租户内角色（不可设 tenant-owner） */
         UserRoleUpdateRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
             /** @enum {string} */
             role: "user" | "auditor" | "tenant-admin";
         };
         /** @description 设置 users.status */
         UserStatusUpdateRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
             /** @enum {string} */
             status: "active" | "disabled";
         };
         /** @description 移交租户所有者；target 必须是本租户 active tenant-admin */
         UserTransferOwnershipRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
             /** Format: uuid */
             target_user_id: string;
         };
         /** @description 重置密码；明文不落日志/审计/响应 */
         UserResetPasswordRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
             /** @description 四类中至少三类，须与旧密码不同 */
             new_password: string;
         };
@@ -6973,6 +7192,15 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
+        /** @description 平台运营账号不存在或已软删除（code=PLATFORM_USER_NOT_FOUND） */
+        PlatformUserNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
         /** @description 该用户已是本租户 admin/owner（code=USER_ALREADY_TENANT_ADMIN） */
         UserAlreadyTenantAdmin: {
             headers: {
@@ -7020,6 +7248,15 @@ export interface components {
         };
         /** @description 新密码与旧密码相同（code=PASSWORD_SAME_AS_OLD） */
         PasswordSameAsOld: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 唯一活跃 platform-admin 不可禁用/删除（code=LAST_PLATFORM_ADMIN） */
+        LastPlatformAdmin: {
             headers: {
                 [name: string]: unknown;
             };
@@ -12414,7 +12651,10 @@ export interface operations {
     updateGPUSchedulingQueue: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 幂等键，防止重复更新 */
+                "Idempotency-Key": string;
+            };
             path: {
                 queue_id: string;
             };
@@ -13153,6 +13393,257 @@ export interface operations {
             };
         };
     };
+    listPlatformUsers: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string;
+                role?: "platform-admin" | "platform-ops" | "platform-readonly";
+                status?: "active" | "disabled";
+                /** @description 按 username 前缀过滤；oidc 结果在响应中映射为 third_party */
+                source?: "local" | "oidc";
+                /** @description 模糊匹配 email/username */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 平台运营账号列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformUserListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createPlatformUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformUserCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description 平台运营账号已创建 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserMutationResult"];
+                };
+            };
+            /** @description VALIDATION_FAILED */
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description ROLE_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+            /** @description EMAIL_ALREADY_EXISTS / USERNAME_ALREADY_EXISTS / IDEMPOTENCY_CONFLICT */
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getPlatformUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 平台运营账号详情 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformUser"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["PlatformUserNotFound"];
+        };
+    };
+    deletePlatformUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformUserIdempotentRequest"];
+            };
+        };
+        responses: {
+            /** @description 平台运营账号已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserMutationResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["PlatformUserNotFound"];
+            /** @description IDEMPOTENCY_CONFLICT */
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["LastPlatformAdmin"];
+        };
+    };
+    updatePlatformUserRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformUserRoleUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 平台运营账号角色已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserMutationResult"];
+                };
+            };
+            /** @description VALIDATION_FAILED */
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description PLATFORM_USER_NOT_FOUND / ROLE_NOT_FOUND */
+            404: components["responses"]["NotFound"];
+            /** @description IDEMPOTENCY_CONFLICT */
+            409: components["responses"]["Conflict"];
+        };
+    };
+    resetPlatformUserPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformUserResetPasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description 平台运营账号密码已重置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserMutationResult"];
+                };
+            };
+            /** @description VALIDATION_FAILED */
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["PlatformUserNotFound"];
+            /** @description IDEMPOTENCY_CONFLICT */
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["PasswordSameAsOld"];
+        };
+    };
+    disablePlatformUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformUserIdempotentRequest"];
+            };
+        };
+        responses: {
+            /** @description 平台运营账号已禁用 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserMutationResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["PlatformUserNotFound"];
+            /** @description IDEMPOTENCY_CONFLICT */
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["LastPlatformAdmin"];
+        };
+    };
+    enablePlatformUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformUserIdempotentRequest"];
+            };
+        };
+        responses: {
+            /** @description 平台运营账号已启用 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserMutationResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["PlatformUserNotFound"];
+            /** @description IDEMPOTENCY_CONFLICT */
+            409: components["responses"]["Conflict"];
+        };
+    };
     listTenantUsers: {
         parameters: {
             query?: {
@@ -13296,9 +13787,7 @@ export interface operations {
     updateTenantUserRole: {
         parameters: {
             query?: never;
-            header: {
-                "Idempotency-Key": string;
-            };
+            header?: never;
             path: {
                 tenant_id: string;
                 user_id: string;
@@ -13357,9 +13846,7 @@ export interface operations {
     transferCoreTenantOwnership: {
         parameters: {
             query?: never;
-            header: {
-                "Idempotency-Key": string;
-            };
+            header?: never;
             path: {
                 tenant_id: string;
             };
@@ -13390,9 +13877,7 @@ export interface operations {
     updateTenantUserStatus: {
         parameters: {
             query?: never;
-            header: {
-                "Idempotency-Key": string;
-            };
+            header?: never;
             path: {
                 tenant_id: string;
                 user_id: string;
@@ -13424,9 +13909,7 @@ export interface operations {
     resetTenantUserPassword: {
         parameters: {
             query?: never;
-            header: {
-                "Idempotency-Key": string;
-            };
+            header?: never;
             path: {
                 tenant_id: string;
                 user_id: string;

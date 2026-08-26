@@ -37,10 +37,11 @@ type QuotaReservation struct {
 
 // QuotaView is a per-tenant snapshot of every tracked resource dimension.
 type QuotaView struct {
-	TenantID string
-	Total    map[ResourceType]int64
-	Used     map[ResourceType]int64
-	Reserved map[ResourceType]int64
+	TenantID   string
+	TenantName string // from tenants.name (only populated by List; empty otherwise)
+	Total      map[ResourceType]int64
+	Used       map[ResourceType]int64
+	Reserved   map[ResourceType]int64
 }
 
 // QuotaPutRequest carries a platform-level quota configuration write. Total is

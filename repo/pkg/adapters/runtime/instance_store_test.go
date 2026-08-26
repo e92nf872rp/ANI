@@ -183,6 +183,78 @@ func TestMetadataInstanceStoreNeverSelectsDeletingOrDeletedReconcileTargets(t *t
 	}
 }
 
+func TestUpsertStatusTx(t *testing.T) {
+	tx := &fakeMetadataTx{}
+	store := NewMetadataInstanceStore(fakeMetadataStore{tx: tx}, WithInstanceStoreClock(func() time.Time {
+		return time.Unix(700, 0)
+	}))
+	record := ports.WorkloadInstanceRecord{
+		TenantID:   "5dbb1d01-0000-4000-8000-000000000001",
+		InstanceID: "inst_tx_1",
+		Name:       "quota-app",
+		Kind:       ports.WorkloadKindGPUContainer,
+		Provider:   "kubernetes",
+		AuditID:    "audit-tx-1",
+		QuotaTxIDs: []string{"tx_001", "tx_002"},
+		Status: ports.WorkloadStatus{
+			State: ports.WorkloadStatePending,
+			Ref: ports.WorkloadRef{
+				TenantID:   "5dbb1d01-0000-4000-8000-000000000001",
+				InstanceID: "inst_tx_1",
+				Kind:       ports.WorkloadKindGPUContainer,
+			},
+		},
+		CreatedAt: time.Unix(700, 0),
+		UpdatedAt: time.Unix(700, 0),
+	}
+	err := store.UpsertStatusTx(context.Background(), tx, record)
+	if err != nil {
+		t.Fatalf("UpsertStatusTx() error = %v", err)
+	}
+	if len(tx.execs) == 0 {
+		t.Fatalf("no SQL executed on tx")
+	}
+	// quota_tx_ids must be written in the same transaction.
+	if !strings.Contains(tx.sql, "quota_tx_ids") {
+		t.Fatalf("SQL = %q, want quota_tx_ids column", tx.sql)
+	}
+	// Find the quota_tx_ids argument (JSONB array passed as string).
+	foundQuotaTxIDs := false
+	for _, arg := range tx.args {
+		if s, ok := arg.(string); ok && strings.Contains(s, "tx_001") {
+			foundQuotaTxIDs = true
+			break
+		}
+	}
+	if !foundQuotaTxIDs {
+		t.Fatalf("args = %v, want quota_tx_ids JSON containing tx_001", tx.args)
+	}
+}
+
+func TestUpsertStatusTxRejectsNilTx(t *testing.T) {
+	store := NewMetadataInstanceStore(fakeMetadataStore{tx: &fakeMetadataTx{}})
+	err := store.UpsertStatusTx(context.Background(), nil, ports.WorkloadInstanceRecord{
+		TenantID:   "t",
+		InstanceID: "i",
+		Name:       "n",
+		Kind:       ports.WorkloadKindContainer,
+		Status:     ports.WorkloadStatus{State: ports.WorkloadStatePending},
+	})
+	if err == nil {
+		t.Fatalf("UpsertStatusTx(nil tx) error = nil, want error")
+	}
+}
+
+func TestUpsertStatusTxRejectsInvalidRecord(t *testing.T) {
+	store := NewMetadataInstanceStore(fakeMetadataStore{tx: &fakeMetadataTx{}})
+	err := store.UpsertStatusTx(context.Background(), &fakeMetadataTx{}, ports.WorkloadInstanceRecord{
+		TenantID: "",
+	})
+	if err == nil {
+		t.Fatalf("UpsertStatusTx(invalid record) error = nil, want error")
+	}
+}
+
 type emptyMetadataRows struct{}
 
 func (emptyMetadataRows) Next() bool        { return false }

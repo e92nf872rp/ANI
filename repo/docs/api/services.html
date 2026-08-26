@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1/svc</code></dd></div>
-          <div><dt>Operations</dt><dd>95</dd></div>
-          <div><dt>Schemas</dt><dd>99</dd></div>
+          <div><dt>Operations</dt><dd>105</dd></div>
+          <div><dt>Schemas</dt><dd>108</dd></div>
         </dl>
       </section>
 
@@ -534,6 +534,86 @@
           <td>上传模型版本</td>
           <td><code></code></td>
           <td>201</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/platform-admins</code></td>
+          <td><code>listPlatformAdmins</code></td>
+          <td>平台运营账号列表（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/platform-admins</code></td>
+          <td><code>createPlatformAdmin</code></td>
+          <td>创建平台运营账号（需 platform-admin）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/platform-admins/roles</code></td>
+          <td><code>listPlatformAdminRoles</code></td>
+          <td>查询可分配的平台角色与权限矩阵（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/platform-admins/{userId}</code></td>
+          <td><code>deletePlatformAdmin</code></td>
+          <td>软删除平台运营账号（需 platform-admin）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/platform-admins/{userId}</code></td>
+          <td><code>getPlatformAdmin</code></td>
+          <td>查询平台运营账号详情（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/platform-admins/{userId}/audit-logs</code></td>
+          <td><code>listPlatformAdminAuditLogs</code></td>
+          <td>查询平台运营账号操作历史（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/platform-admins/{userId}/disable</code></td>
+          <td><code>disablePlatformAdmin</code></td>
+          <td>禁用平台运营账号（需 platform-admin）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/platform-admins/{userId}/enable</code></td>
+          <td><code>enablePlatformAdmin</code></td>
+          <td>启用平台运营账号（需 platform-admin）</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/platform-admins/{userId}/reset-password</code></td>
+          <td><code>resetPlatformAdminPassword</code></td>
+          <td>重置平台运营账号密码（需 platform-admin）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/platform-admins/{userId}/role</code></td>
+          <td><code>updatePlatformAdminRole</code></td>
+          <td>修改平台运营账号角色（需 platform-admin）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 422</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -992,6 +1072,15 @@
         <li><code>PlanQuotaLimitInput</code></li>
         <li><code>PlanQuotaLimitView</code></li>
         <li><code>PlanQuotaLimitsResponse</code></li>
+        <li><code>PlatformAdminAuditLog</code></li>
+        <li><code>PlatformAdminAuditLogListResponse</code></li>
+        <li><code>PlatformAdminCreateRequest</code></li>
+        <li><code>PlatformAdminDetail</code></li>
+        <li><code>PlatformAdminListItem</code></li>
+        <li><code>PlatformAdminListResponse</code></li>
+        <li><code>PlatformAdminRoleUpdateRequest</code></li>
+        <li><code>PlatformRole</code></li>
+        <li><code>PlatformRoleListResponse</code></li>
         <li><code>QuotaMetaItem</code></li>
         <li><code>QuotaMetaListResponse</code></li>
         <li><code>RebuildKnowledgeBaseRequest</code></li>

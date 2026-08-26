@@ -16,6 +16,7 @@ type InstanceRuntime struct {
 	SandboxRuntime       ports.SandboxRuntime
 	AsyncTasks           ports.AsyncTaskStore
 	KubernetesRESTClient *runtimeadapter.KubernetesRESTClient
+	ReconcileController  ports.WorkloadReconcileController
 }
 
 func ConnectInstanceService(ctx context.Context, cfg Config) (InstanceRuntime, func(), error) {
@@ -46,6 +47,7 @@ func ConnectInstanceService(ctx context.Context, cfg Config) (InstanceRuntime, f
 		SandboxRuntime:       capabilities.SandboxRuntime,
 		AsyncTasks:           capabilities.AsyncTasks,
 		KubernetesRESTClient: kubernetesRESTClient,
+		ReconcileController:  capabilities.WorkloadController,
 	}, pool.Close, nil
 }
 
@@ -80,5 +82,7 @@ func instanceRuntimeConfig(cfg Config) Config {
 		WorkloadReconcileStaleThreshold:   cfg.WorkloadReconcileStaleThreshold,
 		WorkloadReconcileMaxBatch:         cfg.WorkloadReconcileMaxBatch,
 		WorkloadReconcileFailureBackoff:   cfg.WorkloadReconcileFailureBackoff,
+		GPUQuotaEnabled:                   cfg.GPUQuotaEnabled,
+		ProvisioningTimeoutMin:            cfg.ProvisioningTimeoutMin,
 	}
 }
