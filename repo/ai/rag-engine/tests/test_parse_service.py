@@ -5,7 +5,6 @@ They validate the core parsing algorithms: table→HTML conversion, large
 table splitting (row groups with header preservation), image placeholder
 rewriting, page splitting, and markdown table/text segmentation.
 """
-# ruff: noqa: E402
 from __future__ import annotations
 
 import importlib

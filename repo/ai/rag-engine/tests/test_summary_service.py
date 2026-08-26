@@ -14,7 +14,6 @@ validate the pure-logic parts that matter for the AC:
   §6.3, PRD US-012 AC7).
 * ``parent_count`` is configurable and defaults to 3.
 """
-# ruff: noqa: E402
 from __future__ import annotations
 
 import sys

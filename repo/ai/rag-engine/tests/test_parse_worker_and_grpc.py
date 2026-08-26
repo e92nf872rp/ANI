@@ -10,7 +10,6 @@ dependencies are injected as fakes/mocks. They validate:
   question, top_k bounds), error mapping (INVALID_ARGUMENT /
   DEADLINE_EXCEEDED / UNAVAILABLE / INTERNAL).
 """
-# ruff: noqa: E402
 from __future__ import annotations
 
 import asyncio
