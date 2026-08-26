@@ -199,7 +199,10 @@ func main() {
 		)
 	}
 	middleware.StartAuditWorker()
-	middleware.Register(h, gatewayStore)
+	if err := middleware.Register(h, gatewayStore); err != nil {
+		logger.Error("failed to configure gateway authz", "err", err)
+		os.Exit(1)
+	}
 	quotaAdminService, quotaStoreService, quotaMetadataStore, closeQuotaStore, err := newGatewayQuotaStore(runtimeCtx)
 	if err != nil {
 		logger.Error("failed to configure quota admin store", "err", err)

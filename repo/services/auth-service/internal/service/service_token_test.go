@@ -36,13 +36,37 @@ func TestIssueAndValidateServiceToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	if claims.TenantID != tenantID || claims.PrincipalKind != "service" || claims.Audience != serviceAudience {
+	if claims.Principal.TenantID != tenantID.String() || claims.Principal.Kind != "service" || claims.Principal.Domain != "tenant" {
 		t.Fatalf("claims = %+v", claims)
 	}
-	if claims.Scope != "scope:platform-workloads:write" {
-		t.Fatalf("scope = %q", claims.Scope)
+	raw := decodeJWTClaims(t, issued.GetAccessToken())
+	if aud, ok := raw["aud"].(string); !ok || aud != serviceAudience {
+		t.Fatalf("aud = %#v, want %q", raw["aud"], serviceAudience)
+	}
+	// wire 契约：sub 是 V2 服务身份，uid 是 legacy UUID 投影，二者必须分离。
+	if raw["sub"] != "inference-service" {
+		t.Fatalf("sub = %#v, want inference-service", raw["sub"])
+	}
+	if raw["uid"] != serviceActorUserID.String() {
+		t.Fatalf("uid = %#v, want %s", raw["uid"], serviceActorUserID.String())
+	}
+	if claims.Legacy.Scope != "scope:platform-workloads:write" {
+		t.Fatalf("scope = %q", claims.Legacy.Scope)
 	}
 
+	// V2 接口返回服务名作为 SubjectId，供 CheckPermissionV2 授权/审计使用。
+	principal, err := svc.ValidatePrincipal(context.Background(), &authv1.ValidatePrincipalRequest{
+		Credential:       issued.GetAccessToken(),
+		CredentialScheme: "bearer",
+	})
+	if err != nil {
+		t.Fatalf("ValidatePrincipal: %v", err)
+	}
+	if principal.GetSubjectId() != "inference-service" {
+		t.Fatalf("V2 subject = %q, want inference-service", principal.GetSubjectId())
+	}
+
+	// 旧接口 UserId 必须是合法 UUID（magic），Gateway 侧 uuid.Parse 才能通过。
 	ctx, err := svc.ValidateToken(context.Background(), &authv1.ValidateTokenRequest{Token: issued.GetAccessToken()})
 	if err != nil {
 		t.Fatalf("ValidateToken: %v", err)
@@ -50,6 +74,69 @@ func TestIssueAndValidateServiceToken(t *testing.T) {
 	if ctx.GetTenantId() != tenantID.String() || ctx.GetScope() != "scope:platform-workloads:write" {
 		t.Fatalf("tenant context = %+v", ctx)
 	}
+	if ctx.GetUserId() != serviceActorUserID.String() {
+		t.Fatalf("legacy user_id = %q, want %s", ctx.GetUserId(), serviceActorUserID.String())
+	}
+}
+
+// TestValidateTokenProjectsServiceActorUUIDForNonUUIDSubject 覆盖已流出的错误 token：
+// sub=服务名、uid 为空时，V2 仍返回服务名，legacy 投影必须回填 magic UUID。
+func TestValidateTokenProjectsServiceActorUUIDForNonUUIDSubject(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	tenantID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	issuedAt := time.Unix(1_700_000_000, 0)
+	token := signTestJWT(t, key, map[string]any{
+		"iss":               "ani-test",
+		"principal_kind":    "service",
+		"sub":               "inference-service",
+		"tid":               tenantID.String(),
+		"aud":               serviceAudience,
+		"credential_domain": "tenant",
+		"permissions":       []string{"scope:platform-workloads:write"},
+		"scope":             "scope:platform-workloads:write",
+		"roles":             []string{"service"},
+		"exp":               issuedAt.Add(time.Hour).Unix(),
+		"iat":               issuedAt.Unix(),
+	})
+	svc := &AuthService{jwt: mustValidator(t, key, issuedAt)}
+
+	principal, err := svc.ValidatePrincipal(context.Background(), &authv1.ValidatePrincipalRequest{
+		Credential:       token,
+		CredentialScheme: "bearer",
+	})
+	if err != nil {
+		t.Fatalf("ValidatePrincipal: %v", err)
+	}
+	if principal.GetSubjectId() != "inference-service" {
+		t.Fatalf("V2 subject = %q, want inference-service", principal.GetSubjectId())
+	}
+
+	legacy, err := svc.ValidateToken(context.Background(), &authv1.ValidateTokenRequest{Token: token})
+	if err != nil {
+		t.Fatalf("ValidateToken: %v", err)
+	}
+	if legacy.GetUserId() != serviceActorUserID.String() {
+		t.Fatalf("legacy user_id = %q, want %s", legacy.GetUserId(), serviceActorUserID.String())
+	}
+	if _, err := uuid.Parse(legacy.GetUserId()); err != nil {
+		t.Fatalf("legacy user_id is not a valid UUID: %v", err)
+	}
+}
+
+func mustValidator(t *testing.T, key *rsa.PrivateKey, issuedAt time.Time) *JWTValidator {
+	t.Helper()
+	validator, err := NewJWTValidator(JWTConfig{
+		PublicKeyPEM: publicKeyPEM(t, &key.PublicKey),
+		Issuer:       "ani-test",
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewJWTValidator: %v", err)
+	}
+	validator.now = func() time.Time { return issuedAt.Add(time.Minute) }
+	return validator
 }
 
 func TestIssueServiceTokenRejectsBadCallerAndScope(t *testing.T) {
@@ -146,7 +233,7 @@ func TestExistingTenantTokenStillValidWithoutAudience(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	if claims.TenantID != tenantID || claims.PrincipalKind != "" {
+	if claims.Principal.TenantID != tenantID.String() || claims.Principal.Kind != "user" {
 		t.Fatalf("claims = %+v", claims)
 	}
 }

@@ -9107,7 +9107,16 @@ paths:
         列出 resource_quota_meta 中 enabled=true 的所有维度，用于创建租户/套餐时
         展示可选项（前端据此渲染配额维度表单）。只读查询，无分页需求。
       tags: [QuotaAdmin]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
       x-ani-rbac-scope: "scope:quota:read"
+      x-ani-authz:
+        version: v1
+        resource: quota
+        action: read
+        boundary: platform
+        principal_kinds: [user]
       responses:
         "200":
           description: 可用配额元数据列表

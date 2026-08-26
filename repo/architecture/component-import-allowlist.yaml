@@ -40,8 +40,15 @@ allowed:
   - path: services/auth-service/internal/service/auth_service.go
     coupling_level: bounded_direct
     imports:
+      - github.com/jackc/pgx/v5
       - github.com/jackc/pgx/v5/pgxpool
     reason: auth service currently wires a bounded API key persistence module that owns PostgreSQL/RLS access
+  - path: services/auth-service/internal/service/permissions.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/jackc/pgx/v5
+      - github.com/jackc/pgx/v5/pgxpool
+    reason: V2 permission store is a bounded auth metadata module; direct pgx keeps authoritative permission reads and tenant RLS semantics explicit
   - path: services/auth-service/internal/service/token_blocklist.go
     coupling_level: bounded_direct
     imports:

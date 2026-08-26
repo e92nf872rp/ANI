@@ -7,6 +7,7 @@ import (
 
 	authv1 "github.com/kubercloud/ani/pkg/generated/pb/auth/v1"
 	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
+	"github.com/kubercloud/ani/services/ani-gateway/internal/authz"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -299,6 +300,15 @@ func (f fakeGatewayAuthClient) PlatformPasswordLogin(context.Context, *authv1.Pl
 		return nil, f.platformLoginErr
 	}
 	return f.platformLogin, nil
+}
+
+// V2 契约 stub：router 登录类 handler 不触发 V2 RPC，返回零值保持接口闭合。
+func (f fakeGatewayAuthClient) ValidatePrincipal(context.Context, string, authz.CredentialScheme) (*authv1.PrincipalContext, error) {
+	return nil, nil
+}
+
+func (f fakeGatewayAuthClient) CheckPermissionV2(context.Context, *authv1.AuthorizationRequest) (*authv1.AuthorizationDecision, error) {
+	return nil, nil
 }
 
 func TestPasswordLoginHandlerSuccess(t *testing.T) {

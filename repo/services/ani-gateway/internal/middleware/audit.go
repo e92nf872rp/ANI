@@ -15,9 +15,14 @@ func Audit() app.HandlerFunc {
 		c.Next(ctx)
 
 		// Capture after response
+		identity, err := RequestIdentityKey(c)
+		if err != nil {
+			identity = ""
+		}
 		entry := auditEntry{
 			RequestID:  GetRequestID(c),
 			TenantID:   GetTenantID(c),
+			Identity:   identity,
 			Method:     string(c.Method()),
 			Path:       string(c.Path()),
 			StatusCode: c.Response.StatusCode(),
@@ -34,6 +39,7 @@ func Audit() app.HandlerFunc {
 type auditEntry struct {
 	RequestID  string
 	TenantID   string
+	Identity   string
 	Method     string
 	Path       string
 	StatusCode int

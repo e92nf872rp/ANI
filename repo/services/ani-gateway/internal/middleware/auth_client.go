@@ -2,13 +2,18 @@ package middleware
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"time"
 
+	"github.com/cloudwego/hertz/pkg/app"
 	authv1 "github.com/kubercloud/ani/pkg/generated/pb/auth/v1"
 	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
+	"github.com/kubercloud/ani/services/ani-gateway/internal/authz"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 type AuthClient interface {
@@ -23,7 +28,13 @@ type AuthClient interface {
 	CreateAPIKey(ctx context.Context, req *authv1.CreateAPIKeyRequest) (*authv1.CreateAPIKeyResponse, error)
 	ListAPIKeys(ctx context.Context, req *authv1.ListAPIKeysRequest) (*authv1.ListAPIKeysResponse, error)
 	RevokeAPIKey(ctx context.Context, req *authv1.RevokeAPIKeyRequest) error
+
+	// V2 鉴权契约：B1 只闭合接口，mode=off 下不被调用。
+	ValidatePrincipal(ctx context.Context, credential string, scheme authz.CredentialScheme) (*authv1.PrincipalContext, error)
+	CheckPermissionV2(ctx context.Context, req *authv1.AuthorizationRequest) (*authv1.AuthorizationDecision, error)
 }
+
+var _ AuthClient = (*grpcAuthClient)(nil)
 
 type grpcAuthClient struct {
 	client  authv1.AuthServiceClient
@@ -112,4 +123,40 @@ func (c *grpcAuthClient) RevokeAPIKey(ctx context.Context, req *authv1.RevokeAPI
 	defer cancel()
 	_, err := c.client.RevokeAPIKey(callCtx, req)
 	return err
+}
+
+func (c *grpcAuthClient) ValidatePrincipal(ctx context.Context, credential string, scheme authz.CredentialScheme) (*authv1.PrincipalContext, error) {
+	callCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	return c.client.ValidatePrincipal(callCtx, &authv1.ValidatePrincipalRequest{
+		Credential: credential, CredentialScheme: string(scheme),
+	})
+}
+
+func (c *grpcAuthClient) CheckPermissionV2(ctx context.Context, req *authv1.AuthorizationRequest) (*authv1.AuthorizationDecision, error) {
+	callCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	return c.client.CheckPermissionV2(callCtx, req)
+}
+
+// writeAuthRPCError 是 ValidatePrincipal/CheckPermissionV2 的固定错误映射表。
+// 只记录 gRPC code / operation ID / decision reason code / request ID，
+// 不得把 auth-service 原始错误文本直接返回 HTTP。
+func writeAuthRPCError(c *app.RequestContext, err error) {
+	switch status.Code(err) {
+	case codes.Unauthenticated:
+		respondError(c, http.StatusUnauthorized, "UNAUTHORIZED", "invalid or expired credential")
+	case codes.PermissionDenied:
+		respondError(c, http.StatusForbidden, "FORBIDDEN", "permission denied")
+	case codes.ResourceExhausted:
+		respondError(c, http.StatusTooManyRequests, "RATE_LIMIT_EXCEEDED", "credential rate limit exceeded")
+	case codes.DeadlineExceeded:
+		respondError(c, http.StatusGatewayTimeout, "AUTHZ_DEADLINE_EXCEEDED", "authorization deadline exceeded")
+	case codes.InvalidArgument:
+		respondError(c, http.StatusInternalServerError, "AUTHZ_CONTRACT_ERROR", "authorization contract error")
+	case codes.Unavailable, codes.FailedPrecondition:
+		respondError(c, http.StatusServiceUnavailable, "AUTHZ_UNAVAILABLE", "authorization service unavailable")
+	default:
+		respondError(c, http.StatusServiceUnavailable, "AUTHZ_UNAVAILABLE", "authorization service unavailable")
+	}
 }
