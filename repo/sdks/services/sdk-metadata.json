@@ -71,6 +71,42 @@
       "scope": ""
     },
     {
+      "operationId": "listInferenceAccessPolicies",
+      "method": "GET",
+      "path": "/inference-policies",
+      "scope": ""
+    },
+    {
+      "operationId": "createInferenceAccessPolicy",
+      "method": "POST",
+      "path": "/inference-policies",
+      "scope": ""
+    },
+    {
+      "operationId": "deleteInferenceAccessPolicy",
+      "method": "DELETE",
+      "path": "/inference-policies/{policy_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "getInferenceAccessPolicy",
+      "method": "GET",
+      "path": "/inference-policies/{policy_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "patchInferenceAccessPolicy",
+      "method": "PATCH",
+      "path": "/inference-policies/{policy_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "listInferencePolicyEvents",
+      "method": "GET",
+      "path": "/inference-policy-events",
+      "scope": ""
+    },
+    {
       "operationId": "listInferenceServices",
       "method": "GET",
       "path": "/inference-services",
@@ -110,6 +146,12 @@
       "operationId": "getInferenceServiceLogs",
       "method": "GET",
       "path": "/inference-services/{service_id}/logs",
+      "scope": ""
+    },
+    {
+      "operationId": "listInferenceServicePolicies",
+      "method": "GET",
+      "path": "/inference-services/{service_id}/policies",
       "scope": ""
     },
     {
@@ -251,6 +293,12 @@
       "scope": ""
     },
     {
+      "operationId": "getModelImportTask",
+      "method": "GET",
+      "path": "/model-import-tasks/{task_id}",
+      "scope": ""
+    },
+    {
       "operationId": "listModels",
       "method": "GET",
       "path": "/models",
@@ -278,6 +326,18 @@
       "operationId": "getModel",
       "method": "GET",
       "path": "/models/{model_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "getModelUploadURL",
+      "method": "POST",
+      "path": "/models/{model_id}/upload-url",
+      "scope": ""
+    },
+    {
+      "operationId": "listModelVersions",
+      "method": "GET",
+      "path": "/models/{model_id}/versions",
       "scope": ""
     },
     {
@@ -646,11 +706,13 @@
     "BoundTenantsResponse",
     "ChangeableRolesResponse",
     "CreateGpuContainerRequest",
+    "CreateInferenceAccessPolicyRequest",
     "CreateInferenceEndpointRequest",
     "CreateInferenceServiceRequest",
     "CreateIntegrationBotRequest",
     "CreateIntegrationRequest",
     "CreateModelRequest",
+    "CreateModelUploadURLRequest",
     "CreateSandboxRequest",
     "CreateTenantPlanRequest",
     "CreateWebhookRequest",
@@ -664,6 +726,15 @@
     "GpuContainerVersion",
     "IdempotentOnlyRequest",
     "IdempotentResult",
+    "InferenceAccessPolicy",
+    "InferenceAccessPolicyAccess",
+    "InferenceAccessPolicyBinding",
+    "InferenceAccessPolicyConcurrency",
+    "InferenceAccessPolicyEvent",
+    "InferenceAccessPolicyEventListResponse",
+    "InferenceAccessPolicyListResponse",
+    "InferenceAccessPolicyRateLimits",
+    "InferenceAccessPolicyScope",
     "InferenceEndpoint",
     "InferenceService",
     "InferenceServiceAccelerator",
@@ -693,9 +764,11 @@
     "KnowledgeBase",
     "Model",
     "ModelList",
+    "ModelUploadURLResponse",
     "ModelVersion",
     "NotifyDocumentUploadedRequest",
     "PatchGpuContainerRequest",
+    "PatchInferenceAccessPolicyRequest",
     "PatchSandboxRequest",
     "PlanAuditLog",
     "PlanAuditLogListResponse",
@@ -748,6 +821,8 @@
   "idempotencyOperations": [
     "createGpuContainer",
     "patchGpuContainer",
+    "createInferenceAccessPolicy",
+    "patchInferenceAccessPolicy",
     "createInferenceService",
     "updateInferenceService",
     "applyInferenceServiceLifecycle",
@@ -762,6 +837,7 @@
     "updateKnowledgeBasePermissions",
     "queryKnowledgeBase",
     "rebuildKnowledgeBase",
+    "getModelUploadURL",
     "createPlatformAdmin",
     "disablePlatformAdmin",
     "enablePlatformAdmin",
@@ -790,11 +866,13 @@
   ],
   "cursorPaginationOperations": [
     "listGpuContainers",
+    "listInferencePolicyEvents",
     "getInferenceServiceLogs",
     "listIntegrations",
     "listKnowledgeBaseCitations",
     "listKnowledgeBaseSessions",
     "listModels",
+    "listModelVersions",
     "listPlatformAdmins",
     "listPlatformAdminAuditLogs",
     "listSandboxes",
