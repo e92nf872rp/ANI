@@ -164,10 +164,10 @@ func buildUsageQuery(request ports.MeteringUsageQueryRequest, isPlatform bool) (
 	}
 
 	// 平台视角：可选筛选单租户
+	// （此处是最后一个参数占位符，argIdx 自增后不再使用，故省略）
 	if isPlatform && request.PlatformTenantID != "" {
 		whereParts = append(whereParts, fmt.Sprintf("tenant_id = $%d::uuid", argIdx))
 		args = append(args, request.PlatformTenantID)
-		argIdx++
 	}
 
 	whereClause := ""
