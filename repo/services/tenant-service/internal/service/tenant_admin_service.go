@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
@@ -80,6 +81,51 @@ func (s *TenantAdminService) ListAvailableTenants(ctx context.Context, _ *tenant
 		})
 	}
 	return &tenantv1.ListAvailableTenantsResponse{Items: out}, nil
+}
+
+// ListTenantRoles 返回租户可分配角色列表（SPEC §5.1.12 / US-012 / FR-8）。
+// 只读、无审计；经 Core GET /admin/tenants/{id}/roles。
+func (s *TenantAdminService) ListTenantRoles(ctx context.Context, req *tenantv1.ListTenantRolesRequest) (*tenantv1.ListTenantRolesResponse, error) {
+	// 步骤 1：校验依赖与路径参数
+	if s.core == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant admin api unavailable")
+	}
+	if req == nil {
+		return nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "request required")
+	}
+	tenantID, err := parseTenantAdminUUID(req.GetTenantId(), "tenant_id")
+	if err != nil {
+		return nil, err
+	}
+
+	// 步骤 2：Core 查询可分配角色（已排除 platform-*）
+	roles, err := s.core.ListAssignableRoles(ctx, tenantID)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+
+	// 步骤 3：映射 gRPC 响应（id / tenant_id / name / permissions）
+	out := make([]*tenantv1.TenantAssignableRole, 0, len(roles))
+	for _, r := range roles {
+		item := &tenantv1.TenantAssignableRole{
+			Id:   r.ID.String(),
+			Name: r.Name,
+		}
+		if r.TenantID != nil {
+			item.TenantId = wrapperspb.String(r.TenantID.String())
+		}
+		perms := r.Permissions
+		if perms == nil {
+			perms = []any{}
+		}
+		lv, lvErr := structpb.NewList(perms)
+		if lvErr != nil {
+			return nil, businessError(codes.Internal, ports.ErrCoreUnavailable, "encode role permissions")
+		}
+		item.Permissions = lv
+		out = append(out, item)
+	}
+	return &tenantv1.ListTenantRolesResponse{Items: out}, nil
 }
 
 // InviteTenantAdmin 邀请现有租户用户为管理员（SPEC §5.1.1 / US-001）。

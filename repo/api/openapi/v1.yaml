@@ -4130,6 +4130,25 @@ components:
         current_role:     { type: string, enum: [tenant-admin, user, auditor] }
         changeable_roles: { type: array, items: { $ref: '#/components/schemas/ChangeableRoleOption' } }
 
+    AssignableTenantRole:
+      type: object
+      description: "租户可分配角色（排除 platform-*）"
+      required: [id, name, permissions]
+      properties:
+        id:          { type: string, format: uuid }
+        tenant_id:   { type: string, format: uuid, nullable: true, description: "NULL=平台内置角色" }
+        name:        { type: string }
+        permissions:
+          type: array
+          description: "roles.permissions JSONB（resource/actions/scope）"
+          items: { type: object, additionalProperties: true }
+
+    AssignableTenantRoleList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/AssignableTenantRole' } }
+
     UserRoleUpdateRequest:
       type: object
       description: "修改租户内角色"
@@ -9339,6 +9358,26 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/UserNotFound' }
+
+  /admin/tenants/{tenant_id}/roles:
+    get:
+      operationId: listAssignableTenantRoles
+      summary: 查询租户可分配角色列表
+      description: |
+        返回 roles 表中 name NOT LIKE 'platform-%' 且 tenant_id IS NULL OR tenant_id = $tenant_id 的角色，
+        不分页。供 Services 修改管理员角色选择器使用。
+      tags: [TenantUsers]
+      x-ani-rbac-scope: "scope:users:read"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 可分配角色列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AssignableTenantRoleList' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
 
   /admin/tenants/{tenant_id}/users/{user_id}/status:
     post:

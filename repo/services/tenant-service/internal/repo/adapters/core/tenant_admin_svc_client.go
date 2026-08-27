@@ -238,6 +238,72 @@ func (c *TenantAdminSvcClient) GetChangeableRoles(ctx context.Context, tenantID,
 	}, nil
 }
 
+// ListAssignableRoles 调用 Core GET /admin/tenants/{id}/roles。
+func (c *TenantAdminSvcClient) ListAssignableRoles(ctx context.Context, tenantID uuid.UUID) ([]ports.AssignableRole, error) {
+	_ = ctx
+	path := fmt.Sprintf("/admin/tenants/%s/roles", tenantID.String())
+	raw, err := c.sdk.Request("GET", path, anisdk.RequestOptions{})
+	if err != nil {
+		return nil, mapSDKError(err)
+	}
+	obj, err := asObject(raw)
+	if err != nil {
+		return nil, err
+	}
+	itemsRaw, err := asObjectSlice(obj["items"])
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ports.AssignableRole, 0, len(itemsRaw))
+	for _, it := range itemsRaw {
+		id, parseErr := uuid.Parse(strings.TrimSpace(stringField(it, "id")))
+		if parseErr != nil {
+			return nil, fmt.Errorf("%w: role id: %v", ports.ErrCoreUnavailable, parseErr)
+		}
+		name := strings.TrimSpace(stringField(it, "name"))
+		if name == "" {
+			return nil, fmt.Errorf("%w: role name required", ports.ErrCoreUnavailable)
+		}
+		var tid *uuid.UUID
+		if rawTID := strings.TrimSpace(stringField(it, "tenant_id")); rawTID != "" {
+			parsed, tidErr := uuid.Parse(rawTID)
+			if tidErr != nil {
+				return nil, fmt.Errorf("%w: role tenant_id: %v", ports.ErrCoreUnavailable, tidErr)
+			}
+			tid = &parsed
+		}
+		perms, permErr := decodePermissionsAny(it["permissions"])
+		if permErr != nil {
+			return nil, permErr
+		}
+		out = append(out, ports.AssignableRole{
+			ID:          id,
+			TenantID:    tid,
+			Name:        name,
+			Permissions: perms,
+		})
+	}
+	return out, nil
+}
+
+func decodePermissionsAny(raw any) ([]any, error) {
+	if raw == nil {
+		return []any{}, nil
+	}
+	switch v := raw.(type) {
+	case []any:
+		return v, nil
+	case []map[string]any:
+		out := make([]any, 0, len(v))
+		for _, it := range v {
+			out = append(out, it)
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("%w: permissions must be array", ports.ErrCoreUnavailable)
+	}
+}
+
 // SetStatus 调用 Core POST /admin/tenants/{id}/users/{user_id}/status。
 func (c *TenantAdminSvcClient) SetStatus(ctx context.Context, tenantID, userID uuid.UUID, status string) error {
 	_ = ctx

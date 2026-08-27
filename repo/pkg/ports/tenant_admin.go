@@ -3,6 +3,8 @@ package ports
 import (
 	"context"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // User is the Core tenant-user view used by platform admin flows.
@@ -74,6 +76,14 @@ type ChangeableRoles struct {
 	Options     []ChangeableRoleOption
 }
 
+// RoleRef is an assignable role row for tenant role pickers.
+type RoleRef struct {
+	ID          uuid.UUID
+	TenantID    *uuid.UUID // nil = 平台内置（roles.tenant_id IS NULL）
+	Name        string
+	Permissions []any // roles.permissions JSONB 原样
+}
+
 // TenantAdminService manages tenant users and role bindings (users / user_roles / roles)
 // under platform RLS bypass. Invitation lifecycle stays in Services.
 //
@@ -85,6 +95,7 @@ type ChangeableRoles struct {
 //	PUT    /admin/tenants/{tenant_id}/users/{user_id}/role
 //	GET    /admin/tenants/{tenant_id}/users/{user_id}/role
 //	GET    /admin/tenants/{tenant_id}/users/{user_id}/changeable-roles
+//	GET    /admin/tenants/{tenant_id}/roles
 //	POST   /admin/tenants/{tenant_id}/users/{user_id}/status
 //	POST   /admin/tenants/{tenant_id}/users/{user_id}/reset-password
 //	DELETE /admin/tenants/{tenant_id}/users/{user_id}
@@ -115,6 +126,10 @@ type TenantAdminService interface {
 
 	// GetChangeableRoles returns selectable roles.
 	GetChangeableRoles(ctx context.Context, tenantID, userID string) (ChangeableRoles, error)
+
+	// ListAssignableRoles returns roles assignable to the tenant
+	// (name NOT LIKE 'platform-%' AND (tenant_id IS NULL OR tenant_id = tenantID)).
+	ListAssignableRoles(ctx context.Context, tenantID string) ([]RoleRef, error)
 
 	// SetStatus sets users.status to active or disabled.
 	SetStatus(ctx context.Context, tenantID, userID, status string) error

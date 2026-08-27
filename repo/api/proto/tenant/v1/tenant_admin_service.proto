@@ -41,6 +41,8 @@ service TenantAdminService {
   rpc ListTenantAdminAuditLogs(ListTenantAdminAuditLogsRequest) returns (ListTenantAdminAuditLogsResponse);
   // ListAvailableTenants returns all non-disabled tenants for the invite-admin tenant selector.
   rpc ListAvailableTenants(ListAvailableTenantsRequest) returns (ListAvailableTenantsResponse);
+  // ListTenantRoles returns assignable roles for a tenant (excludes platform-* roles).
+  rpc ListTenantRoles(ListTenantRolesRequest) returns (ListTenantRolesResponse);
 }
 
 // ── RPC request / response ───────────────────────────────────────────────────
@@ -202,4 +204,19 @@ message AvailableTenant {
   string name = 2;
   string display_name = 3;
   string status = 4;  // active | frozen (excludes disabled)
+}
+
+message ListTenantRolesRequest {
+  string tenant_id = 1;
+}
+
+message ListTenantRolesResponse {
+  repeated TenantAssignableRole items = 1;
+}
+
+message TenantAssignableRole {
+  string id = 1;
+  google.protobuf.StringValue tenant_id = 2; // unset when roles.tenant_id IS NULL
+  string name = 3;  // tenant-admin | user | auditor | tenant-scoped custom (never platform-*)
+  google.protobuf.ListValue permissions = 4; // roles.permissions JSONB array
 }

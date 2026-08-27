@@ -41,6 +41,7 @@ func registerTenantAdminsWithClient(svc *route.RouterGroup, client tenantv1.Tena
 
 	// 读端点 — gRPC
 	svc.GET("/tenant-admins/tenants", api.listAvailableTenants)
+	svc.GET("/tenants/:tenantId/roles", api.listTenantRoles)
 	svc.GET("/tenant-admins", api.listAllTenantAdmins)
 	svc.GET("/tenants/:tenantId/admins/:userId", api.getTenantAdminDetail)
 	svc.GET("/tenants/:tenantId/admins/:userId/audit-logs", api.listTenantAdminAuditLogs)
@@ -101,6 +102,45 @@ func (api *tenantAdminAPI) listAvailableTenants(ctx context.Context, c *app.Requ
 		})
 	}
 	// 5. 返回列表
+	c.JSON(http.StatusOK, map[string]any{"items": items})
+}
+
+func (api *tenantAdminAPI) listTenantRoles(ctx context.Context, c *app.RequestContext) {
+	// 1. 校验 gRPC 客户端依赖是否就绪
+	if api.admins == nil {
+		writeTenantAdminError(ctx, c, http.StatusBadGateway, "GRPC_CLIENT_UNAVAILABLE", "tenant admin grpc client unavailable")
+		return
+	}
+	// 2. 构造 gRPC 调用上下文
+	callCtx, cancel := tenantCallCtx(ctx, c)
+	defer cancel()
+	// 3. 调用 tenant-service ListTenantRoles RPC
+	res, err := api.admins.ListTenantRoles(callCtx, &tenantv1.ListTenantRolesRequest{
+		TenantId: c.Param("tenantId"),
+	})
+	if err != nil {
+		mapTenantAdminGRPCError(ctx, c, err)
+		return
+	}
+	// 4. 组装 { items: [{id,tenant_id,name,permissions}] }
+	items := make([]map[string]any, 0, len(res.GetItems()))
+	for _, r := range res.GetItems() {
+		item := map[string]any{
+			"id":   r.GetId(),
+			"name": r.GetName(),
+		}
+		if r.GetTenantId() != nil {
+			item["tenant_id"] = r.GetTenantId().GetValue()
+		} else {
+			item["tenant_id"] = nil
+		}
+		if lv := r.GetPermissions(); lv != nil {
+			item["permissions"] = lv.AsSlice()
+		} else {
+			item["permissions"] = []any{}
+		}
+		items = append(items, item)
+	}
 	c.JSON(http.StatusOK, map[string]any{"items": items})
 }
 

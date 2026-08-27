@@ -145,6 +145,14 @@ type ChangeableRoles struct {
 	ChangeableRoles []ChangeableRoleOption
 }
 
+// AssignableRole 是 GET /tenants/{tenantId}/roles 的一项。
+type AssignableRole struct {
+	ID          uuid.UUID
+	TenantID    *uuid.UUID // nil = 平台内置
+	Name        string
+	Permissions []any // roles.permissions JSONB 原样
+}
+
 // AuditLogListItem 是租户管理员操作历史列表项。
 type AuditLogListItem struct {
 	ID        uuid.UUID

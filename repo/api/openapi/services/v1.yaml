@@ -1192,6 +1192,24 @@ components:
               display_name: { type: string, nullable: true }
               status:       { type: string, enum: [active, frozen], description: "非停用租户（不含 disabled）" }
 
+    AssignableTenantRoleListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, name, permissions]
+            properties:
+              id:        { type: string, format: uuid }
+              tenant_id: { type: string, format: uuid, nullable: true, description: "NULL=平台内置角色" }
+              name:      { type: string, description: "非 platform-* 角色名（如 tenant-admin / user / auditor）" }
+              permissions:
+                type: array
+                description: "roles.permissions JSONB（resource/actions/scope）"
+                items: { type: object, additionalProperties: true }
+
     InviteAdminRequest:
       type: object
       required: [idempotency_key, email, username]
@@ -2994,7 +3012,7 @@ paths:
   /tenants/{tenantId}/admins/{userId}/role:
     get:
       operationId: getTenantAdminRole
-      summary: 查询指定管理员角色与权限（4 维权限模型）（需 platform-admin / platform-ops / platform-readonly）
+      summary: 查询指定管理员角色与权限（需 platform-admin / platform-ops / platform-readonly）
       tags: [TenantAdmins]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -3158,6 +3176,25 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AvailableTenantListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /tenants/{tenantId}/roles:
+    get:
+      operationId: listTenantAssignableRoles
+      summary: 查询租户可分配角色列表（修改管理员角色选择器数据源，需 platform-admin / platform-ops / platform-readonly）
+      description: |
+        返回 name NOT LIKE 'platform-%' 且 tenant_id IS NULL OR tenant_id = $tenantId 的角色，不分页。
+        网关经 gRPC 转发 tenant-service；tenant-service 经 Core SDK 查询 roles 表。
+      tags: [TenantAdmins]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 可分配角色列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AssignableTenantRoleListResponse' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
 

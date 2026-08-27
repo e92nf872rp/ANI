@@ -15,6 +15,7 @@ import (
 //	PUT    /admin/tenants/{tenant_id}/users/{user_id}/role
 //	GET    /admin/tenants/{tenant_id}/users/{user_id}/role
 //	GET    /admin/tenants/{tenant_id}/users/{user_id}/changeable-roles
+//	GET    /admin/tenants/{tenant_id}/roles
 //	POST   /admin/tenants/{tenant_id}/users/{user_id}/status
 //	POST   /admin/tenants/{tenant_id}/users/{user_id}/reset-password
 //	DELETE /admin/tenants/{tenant_id}/users/{user_id}
@@ -56,6 +57,9 @@ type TenantAdminSvcClient interface {
 
 	// GetChangeableRoles 查询可变更角色选项。
 	GetChangeableRoles(ctx context.Context, tenantID, userID uuid.UUID) (ChangeableRoles, error)
+
+	// ListAssignableRoles 查询租户可分配角色（Core GET /admin/tenants/{id}/roles）。
+	ListAssignableRoles(ctx context.Context, tenantID uuid.UUID) ([]AssignableRole, error)
 
 	// SetStatus 更新 users.status（active | disabled）。
 	SetStatus(ctx context.Context, tenantID, userID uuid.UUID, status string) error

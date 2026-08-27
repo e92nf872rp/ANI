@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -284,6 +285,71 @@ func (u *PostgresTenantAdmin) GetChangeableRoles(ctx context.Context, tenantID, 
 	_ = tenantID
 	_ = userID
 	return ports.ChangeableRoles{}, ports.ErrUnsupported
+}
+
+// ListAssignableRoles 返回租户可分配角色（排除 platform-*；系统角色 + 该租户自定义角色）。
+// 若租户不存在或已停用（status='disabled'），仅返回系统角色（tenant_id IS NULL）。
+func (u *PostgresTenantAdmin) ListAssignableRoles(ctx context.Context, tenantID string) ([]ports.RoleRef, error) {
+	tid, err := parseAdminUUID(tenantID, "tenant_id")
+	if err != nil {
+		return nil, err
+	}
+	var out []ports.RoleRef
+	err = u.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		rows, queryErr := tx.Query(ctx, `
+			SELECT r.id, r.tenant_id, r.name, r.permissions
+			FROM roles r
+			WHERE r.name NOT LIKE 'platform-%'
+			  AND (
+			    r.tenant_id IS NULL
+			    OR (r.tenant_id = $1 AND EXISTS (
+			      SELECT 1 FROM tenants t WHERE t.id = $1 AND t.status <> 'disabled'
+			    ))
+			  )
+			ORDER BY r.name ASC, r.id ASC
+		`, tid)
+		if queryErr != nil {
+			return fmt.Errorf("list assignable roles: %w", queryErr)
+		}
+		defer rows.Close()
+		out = make([]ports.RoleRef, 0)
+		for rows.Next() {
+			var (
+				ref      ports.RoleRef
+				tenantID *uuid.UUID
+				permRaw  []byte
+			)
+			if scanErr := rows.Scan(&ref.ID, &tenantID, &ref.Name, &permRaw); scanErr != nil {
+				return fmt.Errorf("scan assignable role: %w", scanErr)
+			}
+			ref.TenantID = tenantID
+			perms, decodeErr := decodeRolePermissionsJSON(permRaw)
+			if decodeErr != nil {
+				return decodeErr
+			}
+			ref.Permissions = perms
+			out = append(out, ref)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func decodeRolePermissionsJSON(raw []byte) ([]any, error) {
+	if len(raw) == 0 {
+		return []any{}, nil
+	}
+	var perms []any
+	if err := json.Unmarshal(raw, &perms); err != nil {
+		return nil, fmt.Errorf("decode role permissions: %w", err)
+	}
+	if perms == nil {
+		return []any{}, nil
+	}
+	return perms, nil
 }
 
 func (u *PostgresTenantAdmin) SetStatus(ctx context.Context, tenantID, userID, status string) error {

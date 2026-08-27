@@ -43,6 +43,10 @@ type fakeTenantAdminGRPC struct {
 	availableResp      *tenantv1.ListAvailableTenantsResponse
 	availableErr       error
 	listAvailableCalls int
+	rolesResp          *tenantv1.ListTenantRolesResponse
+	rolesErr           error
+	listRolesCalls     int
+	lastRolesReq       *tenantv1.ListTenantRolesRequest
 	invitedUserID      string
 	lastInviteToken    string
 }
@@ -158,6 +162,17 @@ func (f *fakeTenantAdminGRPC) ListAvailableTenants(context.Context, *tenantv1.Li
 		return f.availableResp, nil
 	}
 	return &tenantv1.ListAvailableTenantsResponse{}, nil
+}
+func (f *fakeTenantAdminGRPC) ListTenantRoles(_ context.Context, req *tenantv1.ListTenantRolesRequest, _ ...grpc.CallOption) (*tenantv1.ListTenantRolesResponse, error) {
+	f.listRolesCalls++
+	f.lastRolesReq = req
+	if f.rolesErr != nil {
+		return nil, f.rolesErr
+	}
+	if f.rolesResp != nil {
+		return f.rolesResp, nil
+	}
+	return &tenantv1.ListTenantRolesResponse{}, nil
 }
 
 func newTenantAdminTestServer(grpcClient tenantv1.TenantAdminServiceClient) *server.Hertz {
@@ -303,6 +318,67 @@ func TestHandler_ListAvailableTenants(t *testing.T) {
 	// ordering preserved from gRPC (created_at DESC at Core)
 	if first["name"] != "acme" {
 		t.Fatalf("order/name=%v", first["name"])
+	}
+}
+
+func TestHandler_ListTenantRoles(t *testing.T) {
+	t.Setenv("ANI_AUTH_MODE", "dev")
+	adminPerms, err := structpb.NewList([]any{
+		map[string]any{"resource": "*", "actions": []any{"*"}, "scope": "tenant"},
+	})
+	if err != nil {
+		t.Fatalf("structpb: %v", err)
+	}
+	emptyPerms, err := structpb.NewList([]any{})
+	if err != nil {
+		t.Fatalf("structpb empty: %v", err)
+	}
+	client := &fakeTenantAdminGRPC{
+		rolesResp: &tenantv1.ListTenantRolesResponse{
+			Items: []*tenantv1.TenantAssignableRole{
+				{Id: "00000000-0000-0000-0000-000000000002", Name: "tenant-admin", Permissions: adminPerms},
+				{Id: "00000000-0000-0000-0000-000000000003", Name: "user", Permissions: emptyPerms},
+				{Id: "00000000-0000-0000-0000-000000000004", Name: "auditor", Permissions: emptyPerms},
+			},
+		},
+	}
+	h := newTenantAdminTestServer(client)
+	resp := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/svc/tenants/t1/roles", nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if client.listRolesCalls != 1 || client.lastRolesReq == nil || client.lastRolesReq.GetTenantId() != "t1" {
+		t.Fatalf("grpc forward mismatch calls=%d req=%+v", client.listRolesCalls, client.lastRolesReq)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	items, _ := body["items"].([]any)
+	if len(items) != 3 {
+		t.Fatalf("items=%#v", body["items"])
+	}
+	names := map[string]bool{}
+	for _, raw := range items {
+		it, _ := raw.(map[string]any)
+		id, _ := it["id"].(string)
+		name, _ := it["name"].(string)
+		if id == "" || name == "" {
+			t.Fatalf("incomplete %#v", it)
+		}
+		if _, ok := it["tenant_id"]; !ok {
+			t.Fatalf("tenant_id missing %#v", it)
+		}
+		if _, ok := it["permissions"]; !ok {
+			t.Fatalf("permissions missing %#v", it)
+		}
+		if strings.HasPrefix(name, "platform-") {
+			t.Fatalf("platform role leaked: %#v", it)
+		}
+		names[name] = true
+	}
+	if !names["tenant-admin"] || !names["user"] || !names["auditor"] {
+		t.Fatalf("missing expected roles: %#v", names)
 	}
 }
 

@@ -25,6 +25,8 @@ type fakeTenantAdminCoreClient struct {
 	users      map[string]ports.AdminWithTenant // key tenant|user
 	listItems  []ports.AdminWithTenant
 	listErr    error
+	roles      []ports.AssignableRole
+	rolesErr   error
 }
 
 func (f *fakeTenantAdminCoreClient) MatchUser(context.Context, uuid.UUID, string, string) (uuid.UUID, error) {
@@ -73,6 +75,12 @@ func (f *fakeTenantAdminCoreClient) GetRolePermissions(context.Context, uuid.UUI
 }
 func (f *fakeTenantAdminCoreClient) GetChangeableRoles(context.Context, uuid.UUID, uuid.UUID) (ports.ChangeableRoles, error) {
 	return ports.ChangeableRoles{}, ports.ErrNotImplemented
+}
+func (f *fakeTenantAdminCoreClient) ListAssignableRoles(context.Context, uuid.UUID) ([]ports.AssignableRole, error) {
+	if f.rolesErr != nil {
+		return nil, f.rolesErr
+	}
+	return append([]ports.AssignableRole(nil), f.roles...), nil
 }
 func (f *fakeTenantAdminCoreClient) SetStatus(context.Context, uuid.UUID, uuid.UUID, string) error {
 	return ports.ErrNotImplemented
@@ -299,6 +307,66 @@ func TestTenantAdminService_ListAvailableTenants_NilClient(t *testing.T) {
 	if !ok || st.Code() != codes.Unavailable {
 		t.Fatalf("want Unavailable, got %v", err)
 	}
+}
+
+func TestTenantAdminService_ListTenantRoles(t *testing.T) {
+	t.Parallel()
+	tenantID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
+	adminRoleID := uuid.MustParse("00000000-0000-0000-0000-000000000002")
+	userRoleID := uuid.MustParse("00000000-0000-0000-0000-000000000003")
+	auditorID := uuid.MustParse("00000000-0000-0000-0000-000000000004")
+	core := &fakeTenantAdminCoreClient{
+		roles: []ports.AssignableRole{
+			{
+				ID: adminRoleID, Name: "tenant-admin",
+				Permissions: []any{map[string]any{"resource": "*", "actions": []any{"*"}, "scope": "tenant"}},
+			},
+			{
+				ID: userRoleID, Name: "user",
+				Permissions: []any{map[string]any{"resource": "instances", "actions": []any{"read"}, "scope": "own"}},
+			},
+			{
+				ID: auditorID, Name: "auditor",
+				Permissions: []any{},
+			},
+		},
+	}
+	svc := NewTenantAdminService(core, nil, nil, nil)
+
+	res, err := svc.ListTenantRoles(context.Background(), &tenantv1.ListTenantRolesRequest{
+		TenantId: tenantID.String(),
+	})
+	if err != nil {
+		t.Fatalf("ListTenantRoles: %v", err)
+	}
+	if len(res.GetItems()) != 3 {
+		t.Fatalf("items=%d want 3", len(res.GetItems()))
+	}
+	byName := map[string]string{}
+	for _, it := range res.Items {
+		byName[it.GetName()] = it.GetId()
+		if strings.HasPrefix(it.GetName(), "platform-") {
+			t.Fatalf("platform role leaked: %+v", it)
+		}
+		if it.GetId() == "" || it.GetName() == "" {
+			t.Fatalf("incomplete: %+v", it)
+		}
+		if it.GetTenantId() != nil {
+			t.Fatalf("system role tenant_id want nil, got %v", it.GetTenantId())
+		}
+		if it.GetPermissions() == nil {
+			t.Fatalf("permissions missing for %s", it.GetName())
+		}
+	}
+	if byName["tenant-admin"] != adminRoleID.String() || byName["user"] == "" || byName["auditor"] == "" {
+		t.Fatalf("unexpected roles: %#v", byName)
+	}
+
+	t.Run("invalid_tenant_id", func(t *testing.T) {
+		t.Parallel()
+		_, err := svc.ListTenantRoles(context.Background(), &tenantv1.ListTenantRolesRequest{TenantId: "bad"})
+		assertBusinessCode(t, err, codes.InvalidArgument, "VALIDATION_FAILED")
+	})
 }
 
 func TestTenantAdminService_Invite(t *testing.T) {

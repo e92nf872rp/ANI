@@ -33,6 +33,7 @@ const (
 	TenantAdminService_DeleteTenantAdmin_FullMethodName           = "/tenant.v1.TenantAdminService/DeleteTenantAdmin"
 	TenantAdminService_ListTenantAdminAuditLogs_FullMethodName    = "/tenant.v1.TenantAdminService/ListTenantAdminAuditLogs"
 	TenantAdminService_ListAvailableTenants_FullMethodName        = "/tenant.v1.TenantAdminService/ListAvailableTenants"
+	TenantAdminService_ListTenantRoles_FullMethodName             = "/tenant.v1.TenantAdminService/ListTenantRoles"
 )
 
 // TenantAdminServiceClient is the client API for TenantAdminService service.
@@ -66,6 +67,8 @@ type TenantAdminServiceClient interface {
 	ListTenantAdminAuditLogs(ctx context.Context, in *ListTenantAdminAuditLogsRequest, opts ...grpc.CallOption) (*ListTenantAdminAuditLogsResponse, error)
 	// ListAvailableTenants returns all non-disabled tenants for the invite-admin tenant selector.
 	ListAvailableTenants(ctx context.Context, in *ListAvailableTenantsRequest, opts ...grpc.CallOption) (*ListAvailableTenantsResponse, error)
+	// ListTenantRoles returns assignable roles for a tenant (excludes platform-* roles).
+	ListTenantRoles(ctx context.Context, in *ListTenantRolesRequest, opts ...grpc.CallOption) (*ListTenantRolesResponse, error)
 }
 
 type tenantAdminServiceClient struct {
@@ -193,6 +196,15 @@ func (c *tenantAdminServiceClient) ListAvailableTenants(ctx context.Context, in 
 	return out, nil
 }
 
+func (c *tenantAdminServiceClient) ListTenantRoles(ctx context.Context, in *ListTenantRolesRequest, opts ...grpc.CallOption) (*ListTenantRolesResponse, error) {
+	out := new(ListTenantRolesResponse)
+	err := c.cc.Invoke(ctx, TenantAdminService_ListTenantRoles_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TenantAdminServiceServer is the server API for TenantAdminService service.
 // All implementations must embed UnimplementedTenantAdminServiceServer
 // for forward compatibility
@@ -224,6 +236,8 @@ type TenantAdminServiceServer interface {
 	ListTenantAdminAuditLogs(context.Context, *ListTenantAdminAuditLogsRequest) (*ListTenantAdminAuditLogsResponse, error)
 	// ListAvailableTenants returns all non-disabled tenants for the invite-admin tenant selector.
 	ListAvailableTenants(context.Context, *ListAvailableTenantsRequest) (*ListAvailableTenantsResponse, error)
+	// ListTenantRoles returns assignable roles for a tenant (excludes platform-* roles).
+	ListTenantRoles(context.Context, *ListTenantRolesRequest) (*ListTenantRolesResponse, error)
 	mustEmbedUnimplementedTenantAdminServiceServer()
 }
 
@@ -269,6 +283,9 @@ func (UnimplementedTenantAdminServiceServer) ListTenantAdminAuditLogs(context.Co
 }
 func (UnimplementedTenantAdminServiceServer) ListAvailableTenants(context.Context, *ListAvailableTenantsRequest) (*ListAvailableTenantsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListAvailableTenants not implemented")
+}
+func (UnimplementedTenantAdminServiceServer) ListTenantRoles(context.Context, *ListTenantRolesRequest) (*ListTenantRolesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListTenantRoles not implemented")
 }
 func (UnimplementedTenantAdminServiceServer) mustEmbedUnimplementedTenantAdminServiceServer() {}
 
@@ -517,6 +534,24 @@ func _TenantAdminService_ListAvailableTenants_Handler(srv interface{}, ctx conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TenantAdminService_ListTenantRoles_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTenantRolesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantAdminServiceServer).ListTenantRoles(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantAdminService_ListTenantRoles_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantAdminServiceServer).ListTenantRoles(ctx, req.(*ListTenantRolesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TenantAdminService_ServiceDesc is the grpc.ServiceDesc for TenantAdminService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -575,6 +610,10 @@ var TenantAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListAvailableTenants",
 			Handler:    _TenantAdminService_ListAvailableTenants_Handler,
+		},
+		{
+			MethodName: "ListTenantRoles",
+			Handler:    _TenantAdminService_ListTenantRoles_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

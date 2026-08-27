@@ -32,6 +32,7 @@ type adminTenantAdminAPI struct {
 //	GET    /admin/tenants/:tenant_id/users/:user_id/role
 //	PUT    /admin/tenants/:tenant_id/users/:user_id/role
 //	GET    /admin/tenants/:tenant_id/users/:user_id/changeable-roles
+//	GET    /admin/tenants/:tenant_id/roles
 //	POST   /admin/tenants/:tenant_id/users/:user_id/status
 //	POST   /admin/tenants/:tenant_id/users/:user_id/reset-password
 func registerAdminTenantAdminResources(v1 *route.RouterGroup, admin ports.TenantAdminService) {
@@ -47,6 +48,7 @@ func registerAdminTenantAdminResources(v1 *route.RouterGroup, admin ports.Tenant
 	v1.GET("/admin/tenants/:tenant_id/users/:user_id/role", api.getTenantUserRole)
 	v1.PUT("/admin/tenants/:tenant_id/users/:user_id/role", api.updateTenantUserRole)
 	v1.GET("/admin/tenants/:tenant_id/users/:user_id/changeable-roles", api.getChangeableRoles)
+	v1.GET("/admin/tenants/:tenant_id/roles", api.listAssignableRoles)
 	v1.POST("/admin/tenants/:tenant_id/users/:user_id/status", api.updateTenantUserStatus)
 	v1.POST("/admin/tenants/:tenant_id/users/:user_id/reset-password", api.resetTenantUserPassword)
 }
@@ -209,6 +211,36 @@ func (api *adminTenantAdminAPI) getChangeableRoles(ctx context.Context, c *app.R
 		"current_role":     roles.CurrentRole,
 		"changeable_roles": options,
 	})
+}
+
+func (api *adminTenantAdminAPI) listAssignableRoles(ctx context.Context, c *app.RequestContext) {
+	// 1. 解析路径参数
+	tenantID := c.Param("tenant_id")
+	// 2. 调用 Core SDK
+	roles, err := api.admin.ListAssignableRoles(ctx, tenantID)
+	if err != nil {
+		writeAdminTenantAdminError(c, err)
+		return
+	}
+	// 3. 组装 { items: [{id,tenant_id,name,permissions}] }
+	items := make([]map[string]any, 0, len(roles))
+	for _, r := range roles {
+		item := map[string]any{
+			"id":          r.ID.String(),
+			"name":        r.Name,
+			"permissions": r.Permissions,
+		}
+		if r.TenantID != nil {
+			item["tenant_id"] = r.TenantID.String()
+		} else {
+			item["tenant_id"] = nil
+		}
+		if item["permissions"] == nil {
+			item["permissions"] = []any{}
+		}
+		items = append(items, item)
+	}
+	c.JSON(http.StatusOK, map[string]any{"items": items})
 }
 
 func (api *adminTenantAdminAPI) updateTenantUserStatus(ctx context.Context, c *app.RequestContext) {
