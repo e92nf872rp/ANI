@@ -76,3 +76,9 @@ python3 scripts/validate_storage_control_plane_state_live_gate.py --live --produ
 验证：`go test ./pkg/adapters/runtime/ -count=1`（除需管理员权限的 Windows 符号链接沙箱测试外全绿）、`go test ./services/ani-gateway/internal/router/ -run 'Storage|Bucket'`、`go vet` 干净。
 
 已知残留（未改，另行处理）：SetStorageBucketACL/Class 与单条生命周期规则增删仅写内存，未回写 Store；重启后这些变更会丢失（桶本身与 ListStorageBucketLifecycleRules 已可恢复）。
+
+### 追加：2026-08-27 可观测性补强（现场反馈发布后仍 404 且无日志）
+
+- `resolveBucket` 未命中时输出 `slog.Warn("storage bucket resolve miss")`，含 tenant_id/bucket_id/reason（memory_miss / store_lookup_miss / memory_record_unusable）/control_plane_store_configured/store_err。
+- 9 个桶级操作的 404 消息携带 bucket_id（`capability resource not found: bucket <id> not found`），errors.Is 语义不变。
+- Gateway 启动日志新增 `storage provider runtime configured`，暴露 control_plane_store 是否接入（仅当 `STORAGE_PROVIDER=kubernetes_rest` 或 `OBJECT_STORE_PROVIDER=minio` 且配置 `DATABASE_URL` 时才接 PG）。排查要点：若 control_plane_store=false，桶为纯内存态，重启/多副本必丢，需补环境变量或重建桶；若桶在纯内存时期创建，从未写入 PG，需重建。

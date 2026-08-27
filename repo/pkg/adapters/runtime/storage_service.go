@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"sort"
 	"strconv"
@@ -1154,7 +1155,7 @@ func (s *LocalStorageService) CreateStorageObjectUpload(ctx context.Context, req
 	s.mu.RUnlock()
 	bucket, ok := s.resolveBucket(ctx, request.TenantID, request.BucketID)
 	if !ok {
-		return ports.StorageObjectUploadRecord{}, fmt.Errorf("%w: bucket not found", ports.ErrNotFound)
+		return ports.StorageObjectUploadRecord{}, fmt.Errorf("%w: bucket %s not found", ports.ErrNotFound, strings.TrimSpace(request.BucketID))
 	}
 
 	now := s.now().UTC()
@@ -1229,20 +1230,46 @@ func (s *LocalStorageService) resolveBucket(ctx context.Context, tenantID string
 	bucket, ok := s.buckets[bucketID]
 	s.mu.RUnlock()
 	if ok && (bucket.TenantID != tenantID || bucket.State == ports.StorageResourceDeleted) {
+		s.logBucketResolveMiss(tenantID, bucketID, "memory_record_unusable", bucket.State, nil)
 		return ports.StorageBucketRecord{}, false
 	}
 	if !ok && s.store != nil {
-		if loaded, err := s.store.GetBucket(ctx, tenantID, bucketID); err == nil && loaded.BucketID != "" {
+		loaded, err := s.store.GetBucket(ctx, tenantID, bucketID)
+		if err == nil && loaded.BucketID != "" {
 			return loaded, true
 		}
+		s.logBucketResolveMiss(tenantID, bucketID, "store_lookup_miss", ports.StorageResourceState(""), err)
+		return ports.StorageBucketRecord{}, false
+	}
+	if !ok {
+		s.logBucketResolveMiss(tenantID, bucketID, "memory_miss", ports.StorageResourceState(""), nil)
 	}
 	return bucket, ok
+}
+
+// logBucketResolveMiss explains why a bucket-level request resolved to
+// NOT_FOUND so operators can distinguish missing control-plane store config,
+// cross-tenant access and genuinely absent buckets.
+func (s *LocalStorageService) logBucketResolveMiss(tenantID string, bucketID string, reason string, state ports.StorageResourceState, storeErr error) {
+	attrs := []any{
+		"tenant_id", tenantID,
+		"bucket_id", bucketID,
+		"reason", reason,
+		"control_plane_store_configured", s.store != nil,
+	}
+	if state != "" {
+		attrs = append(attrs, "memory_state", string(state))
+	}
+	if storeErr != nil && !errors.Is(storeErr, ports.ErrNotFound) {
+		attrs = append(attrs, "store_err", storeErr.Error())
+	}
+	slog.Warn("storage bucket resolve miss", attrs...)
 }
 
 func (s *LocalStorageService) ListBucketObjects(ctx context.Context, request ports.StorageBucketObjectListRequest) (ports.StorageBucketObjectListResult, error) {
 	bucket, ok := s.resolveBucket(ctx, request.TenantID, request.BucketID)
 	if !ok {
-		return ports.StorageBucketObjectListResult{}, ports.ErrNotFound
+		return ports.StorageBucketObjectListResult{}, fmt.Errorf("%w: bucket %s not found", ports.ErrNotFound, strings.TrimSpace(request.BucketID))
 	}
 	prefix := strings.TrimSpace(request.Prefix)
 	if prefix == "/" {
@@ -1372,7 +1399,7 @@ func (s *LocalStorageService) DeleteBucketObject(ctx context.Context, request po
 	}
 	bucket, ok := s.resolveBucket(ctx, request.TenantID, request.BucketID)
 	if !ok {
-		return ports.StorageBucketObjectDeleteResult{}, ports.ErrNotFound
+		return ports.StorageBucketObjectDeleteResult{}, fmt.Errorf("%w: bucket %s not found", ports.ErrNotFound, strings.TrimSpace(request.BucketID))
 	}
 	s.mu.Lock()
 	// delete prefix marker
@@ -1426,7 +1453,7 @@ func (s *LocalStorageService) CreateBucketPrefix(ctx context.Context, request po
 	}
 	bucket, ok := s.resolveBucket(ctx, request.TenantID, request.BucketID)
 	if !ok {
-		return ports.StorageBucketObjectEntry{}, ports.ErrNotFound
+		return ports.StorageBucketObjectEntry{}, fmt.Errorf("%w: bucket %s not found", ports.ErrNotFound, strings.TrimSpace(request.BucketID))
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1474,7 +1501,7 @@ func (s *LocalStorageService) GenerateBucketObjectPresignedURL(ctx context.Conte
 	}
 	bucket, ok := s.resolveBucket(ctx, request.TenantID, request.BucketID)
 	if !ok {
-		return ports.StorageObjectDownloadRecord{}, ports.ErrNotFound
+		return ports.StorageObjectDownloadRecord{}, fmt.Errorf("%w: bucket %s not found", ports.ErrNotFound, strings.TrimSpace(request.BucketID))
 	}
 	s.mu.RLock()
 	var object ports.StorageObjectRecord
@@ -1539,7 +1566,7 @@ func (s *LocalStorageService) SetStorageBucketACL(ctx context.Context, request p
 	}
 	bucket, ok := s.resolveBucket(ctx, request.TenantID, request.BucketID)
 	if !ok {
-		return ports.StorageBucketRecord{}, ports.ErrNotFound
+		return ports.StorageBucketRecord{}, fmt.Errorf("%w: bucket %s not found", ports.ErrNotFound, strings.TrimSpace(request.BucketID))
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1575,7 +1602,7 @@ func (s *LocalStorageService) SetStorageBucketClass(ctx context.Context, request
 	}
 	bucket, ok := s.resolveBucket(ctx, request.TenantID, request.BucketID)
 	if !ok {
-		return ports.StorageBucketRecord{}, ports.ErrNotFound
+		return ports.StorageBucketRecord{}, fmt.Errorf("%w: bucket %s not found", ports.ErrNotFound, strings.TrimSpace(request.BucketID))
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1589,7 +1616,7 @@ func (s *LocalStorageService) SetStorageBucketClass(ctx context.Context, request
 func (s *LocalStorageService) ListStorageBucketLifecycleRules(ctx context.Context, request ports.StorageResourceGetRequest) (ports.StorageBucketLifecycleRuleListResult, error) {
 	bucket, ok := s.resolveBucket(ctx, request.TenantID, request.ResourceID)
 	if !ok {
-		return ports.StorageBucketLifecycleRuleListResult{}, ports.ErrNotFound
+		return ports.StorageBucketLifecycleRuleListResult{}, fmt.Errorf("%w: bucket %s not found", ports.ErrNotFound, strings.TrimSpace(request.ResourceID))
 	}
 	rules := append([]ports.StorageBucketLifecycleRule{}, bucket.LifecycleRules...)
 	return ports.StorageBucketLifecycleRuleListResult{Items: rules, Total: len(rules)}, nil
@@ -1645,7 +1672,7 @@ func (s *LocalStorageService) SetStorageBucketLifecycleRules(ctx context.Context
 	}
 	bucket, ok := s.resolveBucket(ctx, request.TenantID, request.BucketID)
 	if !ok {
-		return ports.StorageBucketLifecycleRuleListResult{}, ports.ErrNotFound
+		return ports.StorageBucketLifecycleRuleListResult{}, fmt.Errorf("%w: bucket %s not found", ports.ErrNotFound, strings.TrimSpace(request.BucketID))
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1686,7 +1713,7 @@ func (s *LocalStorageService) CreateStorageBucketLifecycleRule(ctx context.Conte
 	}
 	bucket, ok := s.resolveBucket(ctx, request.TenantID, request.BucketID)
 	if !ok {
-		return ports.StorageBucketLifecycleRule{}, ports.ErrNotFound
+		return ports.StorageBucketLifecycleRule{}, fmt.Errorf("%w: bucket %s not found", ports.ErrNotFound, strings.TrimSpace(request.BucketID))
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1709,7 +1736,7 @@ func (s *LocalStorageService) CreateStorageBucketLifecycleRule(ctx context.Conte
 func (s *LocalStorageService) DeleteStorageBucketLifecycleRule(ctx context.Context, request ports.StorageBucketLifecycleRuleDeleteRequest) (ports.StorageBucketLifecycleRuleListResult, error) {
 	bucket, ok := s.resolveBucket(ctx, request.TenantID, request.BucketID)
 	if !ok {
-		return ports.StorageBucketLifecycleRuleListResult{}, ports.ErrNotFound
+		return ports.StorageBucketLifecycleRuleListResult{}, fmt.Errorf("%w: bucket %s not found", ports.ErrNotFound, strings.TrimSpace(request.BucketID))
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

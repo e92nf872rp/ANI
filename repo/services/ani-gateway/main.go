@@ -53,11 +53,18 @@ func main() {
 		logger.Error("failed to configure network provider runtime", "err", err)
 		os.Exit(1)
 	}
-	storageService, closeStorageRuntime, err := newGatewayStorageService(runtimeCtx, gatewayStorageRuntimeConfigFromEnv())
+	storageRuntimeCfg := gatewayStorageRuntimeConfigFromEnv()
+	storageService, closeStorageRuntime, err := newGatewayStorageService(runtimeCtx, storageRuntimeCfg)
 	if err != nil {
 		logger.Error("failed to configure storage provider runtime", "err", err)
 		os.Exit(1)
 	}
+	logger.Info("storage provider runtime configured",
+		"provider", strings.TrimSpace(storageRuntimeCfg.ProviderMode),
+		"object_store", strings.TrimSpace(storageRuntimeCfg.ObjectStoreProvider),
+		"control_plane_store", storageNeedsControlPlaneStore(storageRuntimeCfg),
+		"router_default_in_memory_service", storageService == nil,
+	)
 	if closeStorageRuntime != nil {
 		defer closeStorageRuntime()
 	}
