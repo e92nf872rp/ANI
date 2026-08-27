@@ -1499,6 +1499,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/objects/{object_id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 确认预签名上传完成
+         * @description 客户端将文件 PUT 到预签名上传 URL 后调用本端点确认上传完成；配置对象存储时校验对象已存在并回写实际大小，未上传返回 412。
+         */
+        post: operations["completeStorageObject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/vector-stores": {
         parameters: {
             query?: never;
@@ -6213,6 +6233,9 @@ export interface components {
             key: string;
             content_type?: string;
         };
+        StorageObjectCompleteRequest: {
+            idempotency_key: string;
+        };
         StorageObjectUploadResponse: {
             /** Format: uri */
             upload_url: string;
@@ -10662,6 +10685,37 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    completeStorageObject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                object_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StorageObjectCompleteRequest"];
+            };
+        };
+        responses: {
+            /** @description 对象元数据已确认 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageObject"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["PreconditionFailed"];
         };
     };
     listVectorStores: {
