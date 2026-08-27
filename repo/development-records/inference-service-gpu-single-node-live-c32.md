@@ -9,7 +9,7 @@
 - 经现网 `ani-gateway` 租户 Bearer 创建单节点整卡 GPU `InferenceService`：digest-pinned CUDA vLLM `image_ref`、`accelerator.spec_id=gpu-nvidia-geforce-rtx-4090-full`、`count_per_replica=1`、`placement_mode=single_node`、模型 `pvc://vllm-model#/models/qwen`。
 - create 返回 202，产品 GET 达到 `running`；runtime 为 Deployment + ClusterIP，`schedulerName=volcano`，`nvidia.com/gpu=1`。产品 logs 返回真实 Pod 行且无 replica 字段。`invocation_url` / `endpoint_url` 保持 null。
 - 现网 `ANI_AUTH_MODE` 保持 `auth_service`。不部署第二条 Gateway，不装 Console。同一 `service_id` 完成 stop→`stopped`（runtime 释放）和 start→`running`。用户服务保留，未做 delete。
-- 补齐 Gateway search_path 上缺失的 `platform_workloads` 表（官方 `20260815_001_platform_workloads.sql`），否则 Core POST 500、产品 create 503。
+- 补齐 Gateway search_path 上缺失的 `platform_workloads` 表（官方 `20260815000100_platform_workloads.sql`），否则 Core POST 500、产品 create 503。
 - 未改 OpenAPI。跨节点 LWS 仍 skip。不得标记 GPU ready / runtime ready。
 
 ## Design Decisions

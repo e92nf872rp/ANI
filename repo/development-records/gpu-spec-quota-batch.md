@@ -46,7 +46,7 @@ Issue #013 AC 要求：节点打标签 → BOSS 分配配额/预留 → Console 
 | GPU_QUOTA_ENABLED 开关 | #007 `bootstrap/server.go` + `deps.go` 条件装配 | `gpu-spec-quota-a.md` Issue #007 D9：false 时配额完全旁路 |
 | HAMi 代码废弃 | #005 删除 `isHAMINode`/`parseHAMIAnnotation`/`kubernetesHAMISchedulerName`/`hami-scheduler` 分支 | `gpu-spec-quota-a.md` Issue #005 §7 HAMi 删除清单（grep 零匹配验证） |
 | Gateway handler 端点 | #008 `gpu_spec_resources.go` + `reservation_resources.go` + `gpu_inventory_resources.go` + `router.go` + `quota_runtime.go` + `gpu_inventory_runtime.go` | `gpu-spec-quota-a.md` Issue #008：Gateway `go build` + 现有 router 测试覆盖 |
-| Migrations | #007 `20260812_001_quota_tx_ids.sql` + `20260812_002_resource_reservation_allocations.sql` | `gpu-spec-quota-a.md` Issue #007：幂等 `IF NOT EXISTS`，RLS + CHECK >= 0 |
+| Migrations | #007 `20260812000100_quota_tx_ids.sql` + `20260812000200_resource_reservation_allocations.sql` | `gpu-spec-quota-a.md` Issue #007：幂等 `IF NOT EXISTS`，RLS + CHECK >= 0 |
 
 ## Implementation notes / design choices
 

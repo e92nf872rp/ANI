@@ -21,7 +21,7 @@
 
 | 文件 | 新增/修改 | 说明 |
 |---|---|---|
-| `deploy/migrations/20260731_001_metering_usage.sql` | 新增 | 建表 + 角色 + 索引 + GRANT + RLS policy |
+| `deploy/migrations/20260731000100_metering_usage.sql` | 新增 | 建表 + 角色 + 索引 + GRANT + RLS policy |
 
 ### Design Decisions
 

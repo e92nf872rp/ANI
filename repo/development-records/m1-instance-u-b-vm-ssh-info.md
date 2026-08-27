@@ -19,7 +19,7 @@
 | `pkg/adapters/runtime/instance_store_test.go` | 修改 | 覆盖 SSH key ref 进入持久化参数 |
 | `services/ani-gateway/internal/router/demo_instances.go` | 修改 | create request 支持 `ssh_username`/`ssh_key_ref`，response 返回 `ssh` |
 | `api/openapi/v1.yaml` | 修改 | `CreateInstanceRequest` 与 `InstanceRecord.ssh` schema 补齐 SSH 字段 |
-| `deploy/migrations/20260519_004_instance_u_vm_protection.sql` | 修改 | 同一 M1-INSTANCE-U migration 增加 `ssh_connection` JSONB |
+| `deploy/migrations/20260519000400_instance_u_vm_protection.sql` | 修改 | 同一 M1-INSTANCE-U migration 增加 `ssh_connection` JSONB |
 | `scripts/validate_core_alpha_contract.py` | 修改 | 守卫 SSH request/response schema 和 migration token |
 
 ## 完工标准达成

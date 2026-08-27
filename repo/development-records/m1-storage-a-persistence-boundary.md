@@ -15,7 +15,7 @@
 | `pkg/ports/storage_resources.go` | 修改 | 新增 `StorageResourceStore` port |
 | `pkg/adapters/runtime/storage_store.go` | 新增 | 新增 metadata-backed storage store |
 | `pkg/adapters/runtime/storage_service.go` | 修改 | 创建/删除存储资源时写入 store |
-| `deploy/migrations/20260520_006_storage_resources.sql` | 新增 | 新增 storage resource 表、索引、RLS 和 grants |
+| `deploy/migrations/20260520000600_storage_resources.sql` | 新增 | 新增 storage resource 表、索引、RLS 和 grants |
 | `pkg/bootstrap/deps.go` | 修改 | 新增 `StorageStore` capability，并注入 `LocalStorageService` |
 | `scripts/validate_storage_alpha_contract.py` | 修改 | 合同守卫覆盖持久化边界和 RLS 迁移 |
 | `Makefile` | 修改 | `make validate-storage-alpha` 纳入持久化单元测试 |

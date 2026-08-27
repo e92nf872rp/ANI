@@ -107,7 +107,7 @@ medium
 - CLAUDE.md: §3 强制架构边界、§4 API 与 SDK 强制规则、§7 提交与版本
 
 ## Notes
-- **Open Question**：平台 refresh_token 存储（复用 refresh_tokens 表 vs 独立 platform_refresh_tokens 表）— 已决策复用 `refresh_tokens` 表（tenant_id=NULL，user_id 引用 users.id）；迁移 20260707_014 已 DROP NOT NULL 与原 user_id FK，由应用层 `platformLoginManager` / `passwordLoginManager` 保证 user_id ↔ tenant_id 一致性
+- **Open Question**：平台 refresh_token 存储（复用 refresh_tokens 表 vs 独立 platform_refresh_tokens 表）— 已决策复用 `refresh_tokens` 表（tenant_id=NULL，user_id 引用 users.id）；平台用户迁移 `20260707001400` 与 refresh token 迁移 `20260707001401` 已 DROP NOT NULL 与原 user_id FK，由应用层 `platformLoginManager` / `passwordLoginManager` 保证 user_id ↔ tenant_id 一致性
 - 平台 token claims 必须含 `scope=platform`，Gateway middleware 按 scope 路由白名单强制分流是安全关键
 - 平台管理员与租户用户复用 `users` 表，username 统一使用 `local:<username>` 前缀，由 `user_roles` 角色绑定区分（平台管理员关联 `roles.name='platform-admin'`）；`idx_users_platform_username` / `idx_users_platform_email`（partial UNIQUE INDEX `WHERE tenant_id IS NULL`）保证平台管理员全局唯一
 - 平台管理员角色通过 `user_roles` + `roles`（`roles.tenant_id IS NULL` 表示平台内置角色）映射，与租户 RBAC 基础设施一致

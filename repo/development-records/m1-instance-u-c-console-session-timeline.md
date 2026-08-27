@@ -18,7 +18,7 @@
 | `pkg/adapters/runtime/kubernetes_instance_ops.go` | 修改 | Kubernetes ops session 同步返回 `url` alias |
 | `pkg/adapters/runtime/instance_service_test.go` | 修改 | 覆盖 VM VNC session 产生 operation timeline |
 | `api/openapi/v1.yaml` | 修改 | `InstanceConsoleSession` schema 增加 `operation_id` 和 `url`，operation enum 增加 `console_session` |
-| `deploy/migrations/20260519_004_instance_u_vm_protection.sql` | 修改 | operation CHECK enum 增加 `console_session` |
+| `deploy/migrations/20260519000400_instance_u_vm_protection.sql` | 修改 | operation CHECK enum 增加 `console_session` |
 | `scripts/validate_core_alpha_contract.py` | 修改 | 守卫 console session response 与 migration token |
 
 ## 完工标准达成

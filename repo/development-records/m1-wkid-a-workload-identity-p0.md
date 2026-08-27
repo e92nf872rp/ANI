@@ -17,7 +17,7 @@
 | `pkg/adapters/runtime/instance_orchestrator.go` | 修改 | provider render 前绑定 scoped key，并把身份上下文交给 renderer |
 | `pkg/adapters/runtime/dryrun_renderer.go` | 修改 | 通过 Secret 引用注入 `ANI_WORKLOAD_TOKEN`，避免明文进入 manifest |
 | `pkg/adapters/runtime/instance_service.go` | 修改 | create/delete operation timeline 记录身份绑定与撤销 |
-| `deploy/migrations/20260520_007_workload_identity_api_keys.sql` | 新增 | 对齐 `api_keys.instance_id` 与 ANI instance id |
+| `deploy/migrations/20260520000700_workload_identity_api_keys.sql` | 新增 | 对齐 `api_keys.instance_id` 与 ANI instance id |
 | `scripts/validate_workload_identity_contract.py` | 新增 | Workload Identity 合同守卫 |
 | `api/openapi/v1.yaml` | 修改 | `InstanceRecord` 增加 `workload_identity` 摘要，不暴露 key 明文 |
 

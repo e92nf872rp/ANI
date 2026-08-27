@@ -14,7 +14,7 @@
 - Code paths allowed: `repo/deploy/migrations/`
 
 ## Acceptance Criteria
-- [ ] 新增 `repo/deploy/migrations/20260731_001_metering_usage.sql`
+- [ ] 新增 `repo/deploy/migrations/20260731000100_metering_usage.sql`
 - [ ] `CREATE ROLE ani_metering_writer BYPASSRLS NOLOGIN`（类比 `ani_outbox_publisher` 范式）
 - [ ] `CREATE TABLE metering_usage_records`：`id BIGSERIAL PK`、`tenant_id UUID FK tenants(id) ON DELETE CASCADE`、`resource_ref TEXT`、`resource_type TEXT`、`period TEXT`、`quantity DOUBLE PRECISION`、`unit TEXT`、`recorded_at TIMESTAMPTZ DEFAULT NOW()`
 - [ ] `UNIQUE (tenant_id, resource_ref, resource_type, period)` 约束作为写入幂等 DB 层兜底
@@ -23,7 +23,7 @@
 - [ ] `ENABLE ROW LEVEL SECURITY`（不 FORCE RLS，写侧 BYPASSRLS 绕过）
 - [ ] `CREATE POLICY tenant_isolation ON metering_usage_records USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)`（不加 `AS RESTRICTIVE`）
 - [ ] migration 用 `BEGIN/COMMIT` 事务包裹
-- [ ] 文件头声明 `Depends on: 20260501_001_init_schema.sql`
+- [ ] 文件头声明 `Depends on: 20260501000100_init_schema.sql`
 
 ## Dependencies
 None

@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MIGRATION_PATH = ROOT / "deploy/migrations/20260814_001_inference_control_plane.sql"
+MIGRATION_PATH = ROOT / "deploy/migrations/20260814000100_inference_control_plane.sql"
 
 
 def normalize(sql: str) -> str:

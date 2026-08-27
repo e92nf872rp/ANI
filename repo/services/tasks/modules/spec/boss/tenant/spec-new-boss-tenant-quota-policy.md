@@ -190,7 +190,7 @@ repo/frontends/boss/src/
 #### 3.1.1 tenant_plans 表
 
 ```sql
--- deploy/migrations/20260810_002_tenant_plan_management.sql
+-- deploy/migrations/20260810000200_tenant_plan_management.sql
 CREATE TABLE tenant_plans (
   id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   code            TEXT        NOT NULL,
@@ -212,7 +212,7 @@ CREATE UNIQUE INDEX idx_tenant_plans_code_active
 #### 3.1.2 plan_quota_limits 表
 
 ```sql
--- 同迁移文件 20260810_002_tenant_plan_management.sql
+-- 同迁移文件 20260810000200_tenant_plan_management.sql
 CREATE TABLE plan_quota_limits (
     plan_id        UUID   NOT NULL REFERENCES tenant_plans(id) ON DELETE CASCADE,
     resource_type  TEXT   NOT NULL REFERENCES resource_quota_meta(resource_type),
@@ -227,7 +227,7 @@ CREATE TABLE plan_quota_limits (
 #### 3.1.3 resource_quota_meta — 配额元数据注册表
 
 ```sql
--- deploy/migrations/20260810_001_resource_quota.sql
+-- deploy/migrations/20260810000100_resource_quota.sql
 CREATE TABLE resource_quota_meta (
     resource_type     TEXT PRIMARY KEY,
     display_name      TEXT NOT NULL,
@@ -259,7 +259,7 @@ ON CONFLICT (resource_type) DO NOTHING;
 #### 3.1.4 resource_quota — 配额配置 + 运行时账本
 
 ```sql
--- 同迁移文件 20260810_001_resource_quota.sql
+-- 同迁移文件 20260810000100_resource_quota.sql
 CREATE TABLE resource_quota (
     tenant_id      UUID   NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     resource_type  TEXT   NOT NULL REFERENCES resource_quota_meta(resource_type),
@@ -288,7 +288,7 @@ CREATE POLICY resource_quota_self
 #### 3.1.5 resource_reservations — TCC 配额流水
 
 ```sql
--- 同迁移文件 20260810_001_resource_quota.sql
+-- 同迁移文件 20260810000100_resource_quota.sql
 CREATE TABLE resource_reservations (
     tx_id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id     UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -488,7 +488,7 @@ audit_logs (N)  [details->>'plan_id' 关联，非外键]
 
 分为两个迁移文件，按依赖顺序执行：
 
-**文件 1：`20260810_001_resource_quota.sql` — 配额基础表（先执行）**
+**文件 1：`20260810000100_resource_quota.sql` — 配额基础表（先执行）**
 
 | Step | Description | Rollback |
 |------|-------------|----------|
@@ -496,7 +496,7 @@ audit_logs (N)  [details->>'plan_id' 关联，非外键]
 | 2 | CREATE TABLE resource_quota + RLS policies | DROP TABLE resource_quota |
 | 3 | CREATE TABLE resource_reservations + indexes + RLS | DROP TABLE resource_reservations |
 
-**文件 2：`20260810_002_tenant_plan_management.sql` — 配额套餐表（后执行，依赖文件 1）**
+**文件 2：`20260810000200_tenant_plan_management.sql` — 配额套餐表（后执行，依赖文件 1）**
 
 | Step | Description | Rollback |
 |------|-------------|----------|
@@ -505,7 +505,7 @@ audit_logs (N)  [details->>'plan_id' 关联，非外键]
 | 6 | CREATE TABLE plan_quota_limits (FK → tenant_plans + resource_quota_meta) | DROP TABLE plan_quota_limits |
 | 7 | ALTER TABLE tenants ADD COLUMN plan_id（分 4 步：加列可空→插入 starter→回填存量→收紧 NOT NULL） | ALTER TABLE tenants DROP COLUMN plan_id |
 
-> **迁移顺序**：文件 1 必须先于文件 2 执行，因 plan_quota_limits 外键引用 resource_quota_meta。两文件文件名为 `20260810_001` / `20260810_002`，按文件名排序天然满足该依赖。文件 1 中的 resource_quota / resource_reservations 也依赖 tenants 表和 resource_quota_meta 已存在。各文件内事务执行。
+> **迁移顺序**：文件 1 必须先于文件 2 执行，因 plan_quota_limits 外键引用 resource_quota_meta。两文件文件名为 `20260810000100` / `20260810000200`，按文件名排序天然满足该依赖。文件 1 中的 resource_quota / resource_reservations 也依赖 tenants 表和 resource_quota_meta 已存在。各文件内事务执行。
 
 ---
 

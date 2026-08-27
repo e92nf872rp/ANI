@@ -24,7 +24,7 @@
 
 已通过：Sandbox Runtime、AsyncTaskStore、Bootstrap、Middleware、Router 测试，`validate-async-task-store`、静态重启门禁和 `git diff --check`。
 
-集群已应用 `20260802_001_async_tasks.sql`，并成功 rollout：
+集群已应用 `20260802000100_async_tasks.sql`，并成功 rollout：
 
 ```text
 docker.changqingyun.cn/ani/ani-gateway:instance-sandbox-stateless-20260802-v1

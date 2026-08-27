@@ -18,7 +18,6 @@
 --   3. CREATE PERMISSIVE self: tenant_id matches current_setting → own rows.
 --   This matches the dual-policy pattern used by resource_quota et al.
 
-BEGIN;
 
 -- 1. Drop the old RESTRICTIVE-only policy
 DROP POLICY IF EXISTS tenant_isolation ON workload_instances;
@@ -33,7 +32,6 @@ CREATE POLICY workload_instances_self
   ON workload_instances FOR ALL
   USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
 
-COMMIT;
 
 -- ===========================================================================
 -- Rollback

@@ -9,7 +9,7 @@
 
 - Kubernetes Apply 先确保租户 Namespace（`ani-tenant-{id}`），再 apply Deployment/Service。不在 delete 时删除 Namespace。
 - PlatformWorkload 控制面记录可持久化：memory store 可在进程间共享以证明重启回读；`DATABASE_URL` 存在时 Gateway 使用 PostgreSQL metadata store（RLS）。
-- Additive migration `20260815_001_platform_workloads.sql`：`platform_workloads` + `platform_workload_intents`，active-name 部分唯一索引，FORCE RLS。
+- Additive migration `20260815000100_platform_workloads.sql`：`platform_workloads` + `platform_workload_intents`，active-name 部分唯一索引，FORCE RLS。
 - Live gate 契约 `INFERENCE-PLATFORM-WORKLOAD-K8S-LIVE-GATE-C9`：本批次只落地契约与 local/logic。真实集群执行与 evidence 由 `INFERENCE-PLATFORM-WORKLOAD-K8S-LIVE-C12` 收口。
 - 未改 OpenAPI；logs 仍空；无 LWS/GPU/vLLM。
 

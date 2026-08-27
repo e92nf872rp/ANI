@@ -25,8 +25,8 @@
 | #007 | `pkg/adapters/runtime/demo_instances.go` | QuotaAwareInstanceOrchestrator (TryManyTx 预占 + Volcano 翻译 + Apply 失败 Cancel) |
 | #007 | `pkg/adapters/runtime/outbox_writer.go` | outboxWriter 接口 + metadataOutboxWriter + mockOutboxWriter + encodeOutboxPayload |
 | #007 | `pkg/adapters/runtime/volcano_queue_store.go` | volcanoQueueCRDStatus + crdToQueue 映射 allocated 到 GPUSchedulingQueue.Status |
-| #007 | `deploy/migrations/20260812_001_quota_tx_ids.sql` | workload_instances 新增 quota_tx_ids JSONB NOT NULL DEFAULT '[]' |
-| #007 | `deploy/migrations/20260812_002_resource_reservation_allocations.sql` | resource_reservation_allocations 表 + RLS + CHECK >= 0 |
+| #007 | `deploy/migrations/20260812000100_quota_tx_ids.sql` | workload_instances 新增 quota_tx_ids JSONB NOT NULL DEFAULT '[]' |
+| #007 | `deploy/migrations/20260812000200_resource_reservation_allocations.sql` | resource_reservation_allocations 表 + RLS + CHECK >= 0 |
 | #007 | `pkg/bootstrap/server.go` | GPUQuotaEnabled + ProvisioningTimeoutMin + 环境变量覆盖 |
 | #007 | `pkg/bootstrap/deps.go` | 注入 quotaService + gpuSpecStore + volcanoTranslator + reconcileController/orchestrator 条件装配 |
 | #008 | `services/ani-gateway/internal/router/gpu_spec_resources.go` | POST /gpu-specs + DELETE /gpu-specs/:spec_id handler |

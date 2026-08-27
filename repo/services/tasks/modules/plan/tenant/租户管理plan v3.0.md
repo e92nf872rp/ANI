@@ -33,7 +33,7 @@
 | 平台角色 | 保留 platform-admin，新增 platform-ops / platform-readonly 作为种子 | 与用户要求一致；platform-admin 仍为超级管理员 |
 | 租户角色 | 新增 tenant-owner（所有者）；保留 tenant-admin / user / auditor；permissions 改为 4 维度 JSONB（compute / inference / member / transfer） | 所有者可操作全部 4 维度；管理员前 3 个；普通用户前 2 个；审计只读前 2 个 |
 | 幂等性 | 复用现有 Gateway `Idempotency` 中间件 + Redis 存储（`idempotency:` key，TTL 24h） | 现有实现见 `repo/services/ani-gateway/internal/middleware/idempotency.go`；POST/PUT 自动 dedup，不写数据库 |
-| 审计日志 | 复用现有 `audit_logs` 分区表（`20260501_001_init_schema.sql` SECTION 10） | 已有 `tenant_id`/`user_id`/`request_id`/`action`/`resource`/`result`/`details`/`ip_address`/`user_agent`/`created_at`，按月分区；不新建表 |
+| 审计日志 | 复用现有 `audit_logs` 分区表（`20260501000100_init_schema.sql` SECTION 10） | 已有 `tenant_id`/`user_id`/`request_id`/`action`/`resource`/`result`/`details`/`ip_address`/`user_agent`/`created_at`，按月分区；不新建表 |
 | 最后管理员保护 | 平台 admin 删除/禁用前检查活跃数；为 0 则 422 LAST_PLATFORM_ADMIN | 防止平台失能 |
 | 租户最后所有者保护 | 删除/禁用/降级最后活跃 tenant-owner 前检查；计数 ≤ 1（排除目标）则 422 LAST_TENANT_OWNER，防止"租户无 owner"；移交给其他租户成员允许 | 每个租户恒有且仅有一名 tenant-owner |
 | 前端基础路径 | `/boss/` | 与现有 BOSS 一致；TDesign React + TanStack Router |
@@ -312,7 +312,7 @@ repo/
 **重要：** tenants 表**不再保留 `plan_code` 列**——`plan_id` 是唯一引用套餐的字段；套餐的 `code` 仅在 `tenant_plans` 表自身使用，不进入 tenants。需要展示套餐代码时由 service 层 JOIN `tenant_plans` 读取。tenants 表也不再保留任何 `max_*` 配额字段——所有配额由 Core `resource_quota` 表承载。
 
 ```sql
--- 注意：现有 tenants 表（20260501_001_init_schema.sql SECTION 1）：
+-- 注意：现有 tenants 表（20260501000100_init_schema.sql SECTION 1）：
 --   - 有 name TEXT NOT NULL UNIQUE，display_name TEXT NOT NULL
 --   - 现有 status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','suspended','deleted'))
 --   - 旧数据需迁移：suspended → frozen、deleted → disabled
@@ -448,7 +448,7 @@ CREATE POLICY tenant_lifecycle_self_read
 
 #### 4.1.4 tenant_admins
 
-**不新建表，不新增列**。完全复用现有 `users` + `roles` + `user_roles` 三张表（见 `20260501_001_init_schema.sql` SECTION 2）：
+**不新建表，不新增列**。完全复用现有 `users` + `roles` + `user_roles` 三张表（见 `20260501000100_init_schema.sql` SECTION 2）：
 
 - 租户管理员 = `users.tenant_id IS NOT NULL` 且 `users.status='active'` 且通过 `user_roles` 关联到 `roles.tenant_id IS NULL AND roles.name='tenant-admin'` 的内置角色（seed 已存在）
 - 租户普通成员 = `users.tenant_id IS NOT NULL` 且通过 `user_roles` 关联到 `roles.name='user'`
@@ -632,7 +632,7 @@ CREATE INDEX idx_tenant_admin_invitation_user_status ON tenant_admin_invitation(
 
 #### 4.1.5 platform_admins
 
-**不新建表，不新增列**。完全复用 `users` 表 + `tenant_id IS NULL`（见 `20260707_014_platform_users.sql`）。
+**不新建表，不新增列**。完全复用 `users` 表 + `tenant_id IS NULL`（见 `20260707001400_platform_users.sql`）。
 
 - 平台账号 = `users.tenant_id IS NULL`（全局唯一 username / email，见 `idx_users_platform_username` / `idx_users_platform_email`）
 - 平台角色 = 通过 `user_roles` 关联到 `roles.tenant_id IS NULL AND roles.name IN ('platform-admin', 'platform-ops', 'platform-readonly')`
@@ -765,10 +765,10 @@ CREATE UNIQUE INDEX idx_tenant_plans_code_active ON tenant_plans(code) WHERE is_
 
 #### 4.2.2 plan_quota_limits — 套餐限额模板表（新增，归属 tenant-service 迁移）
 
-套餐模板中各维度的配额上限。每行一个维度。表归属 tenant-service 迁移文件 `20260810_002_tenant_plan_management.sql`，通过 `plan_id` 外键关联 `tenant_plans`，通过 `resource_type` 外键关联 Core 层 `resource_quota_meta`。
+套餐模板中各维度的配额上限。每行一个维度。表归属 tenant-service 迁移文件 `20260810000200_tenant_plan_management.sql`，通过 `plan_id` 外键关联 `tenant_plans`，通过 `resource_type` 外键关联 Core 层 `resource_quota_meta`。
 
 ```sql
--- deploy/migrations/20260810_002_tenant_plan_management.sql
+-- deploy/migrations/20260810000200_tenant_plan_management.sql
 CREATE TABLE plan_quota_limits (
     plan_id        UUID   NOT NULL REFERENCES tenant_plans(id) ON DELETE CASCADE,
     resource_type  TEXT   NOT NULL REFERENCES resource_quota_meta(resource_type),
@@ -794,7 +794,7 @@ CREATE TABLE plan_quota_limits (
 
 #### 4.2.3 starter 入门套餐（迁移内置 seed）
 
-迁移文件 `20260810_002_tenant_plan_management.sql` 内置一条固定 UUID 的入门套餐，作为存量租户的默认套餐：
+迁移文件 `20260810000200_tenant_plan_management.sql` 内置一条固定 UUID 的入门套餐，作为存量租户的默认套餐：
 
 - **固定 UUID**：`00000000-0000-0000-0000-000000000001`（幂等插入，冲突则跳过）
 - **字段**：code=`starter`，name=`入门版`，status=`active`，is_deleted=FALSE
@@ -808,7 +808,7 @@ CREATE TABLE plan_quota_limits (
 平台管理员维护的可限额资源注册表。配额与计量共用。**平台管理员专用表，不加 RLS**（跨租户平台治理数据）；`enabled=false` 的维度，Try 时拒绝。
 
 ```sql
--- deploy/migrations/20260810_001_resource_quota.sql（与 §4.3.2 / §4.3.3 合并为单文件）
+-- deploy/migrations/20260810000100_resource_quota.sql（与 §4.3.2 / §4.3.3 合并为单文件）
 CREATE TABLE resource_quota_meta (
     resource_type     TEXT PRIMARY KEY,   -- 'gpu_count' | 'cpu_core' | 'memory_gb' | 'storage_gb' | 'token_count' | 'kb_query_count' | 'member_count' | 'inference_service_count'
     display_name      TEXT NOT NULL,       -- 'GPU 份数' | 'CPU 核数'
@@ -844,7 +844,7 @@ ON CONFLICT (resource_type) DO NOTHING;
 租户上限（`total`，平台管理员配置）+ 运行时占用（`reserved/used`，Try/Confirm/Cancel 维护），合一行。外键引用 meta：配置必须引用已注册资源（DB 约束保证语义）。**RLS**：租户只能看自己的配额行。
 
 ```sql
--- deploy/migrations/20260810_001_resource_quota.sql（与 §4.3.1 / §4.3.3 合并为单文件）
+-- deploy/migrations/20260810000100_resource_quota.sql（与 §4.3.1 / §4.3.3 合并为单文件）
 CREATE TABLE resource_quota (
     tenant_id      UUID   NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     resource_type  TEXT   NOT NULL REFERENCES resource_quota_meta(resource_type),
@@ -880,7 +880,7 @@ CREATE POLICY resource_quota_self
 幂等守卫 + 跨事务关联 + TTL 回收依据。承担四职责：① Confirm/Cancel 幂等状态守卫 ② tx_id↔tenant/amount 关联 ③ TTL 孤儿回收 ④ 审计追溯。**RLS**：租户只能看自己的预占流水。
 
 ```sql
--- deploy/migrations/20260810_001_resource_quota.sql（与 §4.3.1 / §4.3.2 合并为单文件）
+-- deploy/migrations/20260810000100_resource_quota.sql（与 §4.3.1 / §4.3.2 合并为单文件）
 CREATE TABLE resource_reservations (
     tx_id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id     UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -973,9 +973,9 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ani_app_user;
 
 ### 4.5 audit_logs 表（复用现有分区表）
 
-**不新建表。** 完全复用 `20260501_001_init_schema.sql` SECTION 10 的 `audit_logs`（按月 RANGE 分区）。
+**不新建表。** 完全复用 `20260501000100_init_schema.sql` SECTION 10 的 `audit_logs`（按月 RANGE 分区）。
 
-**现有 schema（见 `20260501_001_init_schema.sql:500-522`）：**
+**现有 schema（见 `20260501000100_init_schema.sql:500-522`）：**
 
 ```sql
 -- 已存在，本设计不修改
@@ -1069,7 +1069,7 @@ CREATE POLICY tenants_self_read
   ON tenants
   USING (id::text = current_setting('app.current_tenant_id', true));
 
--- audit_logs: 复用现有 RLS（见 20260501_001_init_schema.sql SECTION 11）
+-- audit_logs: 复用现有 RLS（见 20260501000100_init_schema.sql SECTION 11）
 -- 现有策略：tenant_isolation 为 RESTRICTIVE，要求 tenant_id = current_setting('app.current_tenant_id')
 -- 平台操作（tenant_id IS NULL）需新增 PERMISSIVE bypass 策略，否则平台无法跨租户读审计
 -- 注意：现有 audit_logs 没有 target_tenant_id 列，只有 tenant_id（操作者租户）；

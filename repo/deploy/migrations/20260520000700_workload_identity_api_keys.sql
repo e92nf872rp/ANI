@@ -1,9 +1,8 @@
 -- ===========================================================================
--- 20260520_007_workload_identity_api_keys.sql
+-- 20260520000700_workload_identity_api_keys.sql
 -- Description: Align api_keys with Workload Identity P0.
 -- ===========================================================================
 
-BEGIN;
 
 ALTER TABLE api_keys
     ADD COLUMN IF NOT EXISTS instance_id TEXT;
@@ -18,4 +17,3 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_instance
 COMMENT ON COLUMN api_keys.instance_id IS
     'ANI workload instance id bound to this lifecycle-scoped key. Revoked when the instance is deleted.';
 
-COMMIT;

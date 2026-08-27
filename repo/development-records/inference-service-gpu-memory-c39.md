@@ -20,7 +20,7 @@
 - JSON 显式 `memory: 0` 或负数在 Gateway 返回 400；内部 0 仍表示未填整卡。OpenAPI 描述改动不在本批，只保留代码注释。
 - 现网滚动 `ani-gateway` / `inference-service` 到 `gpu-memory-c39-20260821`。live 先清理残留推理测试服务（含旧整卡 `inf-gpu-qwen` 与 `inf-c36/c37/c39` 残留），再证明：capabilities 广告 `gpu-nvidia-geforce-rtx-4090`；`memory: 0` 返回 `400 INVALID_ARGUMENT`；省略 `memory` 申请 `nvidia.com/gpu=1` 且无 volcano vGPU；填写 `memory=12280` 申请 `volcano.sh/vgpu-number=1` 与 `volcano.sh/vgpu-memory=1228`，无 `nvidia.com/gpu`；首次 live 两条产品路径 GET `running` 后均删除。CPU InferenceService 只临时 scale 到 0。为让整卡落到可调度节点，测试期间临时 scale 占用整卡的 instance 工作负载。用户 vGPU instance 未删。`ANI_AUTH_MODE` 保持 `auth_service`。
 - 2026-08-21 按用户要求二次 live：`--keep --load-seconds 60`。整卡服务 `inf-c39-whole-f3cbfa4a` 与 vGPU 服务 `inf-c39-vgpu-f3cbfa4a` 均 GET `running` 后保留。模型 PVC 是 RWO，vGPU 改挂克隆卷 `vllm-model-c39-vgpu`（来自现网 snapshot class），整卡继续挂 `vllm-model`。产品无 `invocation_url`，压测走同租户 ClusterIP `/v1/chat/completions`，每条服务 60 秒、并发 4：整卡 2456/2456 成功、约 40.9 QPS、p50 92ms / p99 101ms；vGPU 2373/2373 成功、约 39.6 QPS、p50 95ms / p99 107ms。压测客户端已删。占用整卡 GPU 的 instance 仍保持 0 副本，避免挤掉整卡 InferenceService。不得标记 GPU ready / runtime ready。keep/load evidence：`development-records/live-evidence/inference-gpu-memory-keep-load-20260821.json`。
-- live 前对现网 PostgreSQL 补了已有 additive migration `20260820_001_platform_workload_intent_status.sql`（`platform_workload_intents.status`），否则当前 Gateway 二进制无法写 Core platform-workload 变更。
+- live 前对现网 PostgreSQL 补了已有 additive migration `20260820000100_platform_workload_intent_status.sql`（`platform_workload_intents.status`），否则当前 Gateway 二进制无法写 Core platform-workload 变更。
 - 不改 `/gpu-specs` 的 `-full` / `-Nx` 目录 ID。不新增 capabilities 广告字段。无 Console 表单。不得标记 GPU ready / runtime ready。
 
 ## Design Decisions

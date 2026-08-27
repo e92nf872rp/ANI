@@ -5,7 +5,7 @@
 -include .env
 export
 
-.PHONY: help deps deps-down deps-status deps-clean \
+.PHONY: help deps deps-down deps-status deps-clean db-validate db-list db-status db-migrate-dry-run db-migrate \
         tools-proto gen-api gen-console-api gen-proto gen-core-sdk gen-api-docs gen-gateway-authz \
         build build-gateway build-auth-service build-model-service build-task-service build-reconcile-worker build-cli \
         test test-go test-python test-cover \
@@ -182,6 +182,9 @@ help:
 
 # ── 依赖服务 ──────────────────────────────────────────────────────────────────
 COMPOSE = docker compose -f deploy/docker/docker-compose.yml
+ATLAS ?= atlas
+ATLAS_MIGRATION_DIR ?= file://deploy/migrations
+DB_ENV ?= local
 GO_CACHE_ENV = GOCACHE=$(CURDIR)/.cache/go-build GOMODCACHE=$(CURDIR)/.cache/gomod
 BUF_CACHE_ENV = BUF_CACHE_DIR=$(CURDIR)/.cache/buf
 GO_PACKAGES = ./pkg/... ./services/ani-gateway/... ./services/auth-service/... ./services/model-service/... ./services/inference-service/... ./services/task-service/... ./services/reconcile-worker/...
@@ -207,6 +210,27 @@ deps-status:
 deps-clean:
 	@echo "⚠️  这将删除所有本地开发数据，是否确认？[y/N]" && read ans && [ $${ans:-N} = y ]
 	$(COMPOSE) down -v
+
+# ── 数据库迁移 ────────────────────────────────────────────────────────────────
+db-validate:
+	@echo "→ 校验 Atlas migration checksum 和 SQL 文件..."
+	$(ATLAS) migrate validate --dir "$(ATLAS_MIGRATION_DIR)"
+	@echo "✅ Atlas migration directory valid"
+
+db-list:
+	$(ATLAS) migrate ls --dir "$(ATLAS_MIGRATION_DIR)"
+
+db-status:
+	@echo "→ 查询数据库迁移状态（DB_ENV=$(DB_ENV)）..."
+	$(ATLAS) migrate status --env "$(DB_ENV)"
+
+db-migrate-dry-run:
+	@echo "→ 预览数据库迁移（DB_ENV=$(DB_ENV)），不会写入数据库..."
+	$(ATLAS) migrate apply --env "$(DB_ENV)" --dry-run
+
+db-migrate:
+	@echo "→ 执行数据库迁移（DB_ENV=$(DB_ENV)）..."
+	$(ATLAS) migrate apply --env "$(DB_ENV)"
 
 # ── 代码生成 ──────────────────────────────────────────────────────────────────
 tools-proto:
@@ -451,7 +475,7 @@ validate-instance-admission:
 
 validate-instance-audit:
 	@echo "→ 校验 M1-INSTANCE-E audit trail contract..."
-	python scripts/validate_instance_audit.py deploy/manifests/m1-instance-e deploy/migrations/20260501_001_init_schema.sql
+	python scripts/validate_instance_audit.py deploy/manifests/m1-instance-e deploy/migrations/20260501000100_init_schema.sql
 	@echo "✅ instance audit contract valid"
 
 validate-instance-provider-dry-run:
@@ -476,7 +500,7 @@ validate-instance-orchestrator:
 
 validate-instance-store:
 	@echo "→ 校验 M1-INSTANCE-J instance persistence/query contract..."
-	python scripts/validate_instance_store.py deploy/manifests/m1-instance-j deploy/migrations/20260501_001_init_schema.sql
+	python scripts/validate_instance_store.py deploy/manifests/m1-instance-j deploy/migrations/20260501000100_init_schema.sql
 	@echo "✅ instance persistence/query contract valid"
 
 validate-instance-provider-adapter:

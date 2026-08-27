@@ -1,7 +1,6 @@
 -- ANI Platform - approved instance-management summaries and lifecycle operations.
--- Depends on: 20260519_004_instance_u_vm_protection.sql
+-- Depends on: 20260519000400_instance_u_vm_protection.sql
 
-BEGIN;
 
 ALTER TABLE workload_instances
     ADD COLUMN IF NOT EXISTS description TEXT;
@@ -83,4 +82,3 @@ ALTER TABLE workload_instance_operations
         'console_session'
     ));
 
-COMMIT;

@@ -24,13 +24,13 @@
 | 切片 | 状态 | 说明 |
 |---|---|---|
 | B1 契约冻结 | done | `test_storage_p0_keeps_existing_v1_without_contract_changes` |
-| B2 PG migration | done | `20260803_001_storage_control_plane_state.sql` 已在真实 PG apply；`make validate-storage-control-plane-state` |
+| B2 PG migration | done | `20260803000100_storage_control_plane_state.sql` 已在真实 PG apply；`make validate-storage-control-plane-state` |
 | B3 Store/Service 权威 | done | `StorageResourceStore` / `VectorStoreResourceStore`；共享 Store 测试通过 |
 | B4 Gateway + live gate | live passed | fail-closed + 真实 Gateway rollout restart / 幂等 / 墓碑已通过；evidence `live-evidence/storage-control-plane-state-live-20260803.json` |
 
 ## 契约与脚本
 
-- migration：`deploy/migrations/20260803_001_storage_control_plane_state.sql`
+- migration：`deploy/migrations/20260803000100_storage_control_plane_state.sql`
 - schema gate：`make validate-storage-control-plane-state`
 - live gate：`deploy/real-k8s-lab/storage-control-plane-state-live-gate.yaml`
 - live validator：`scripts/validate_storage_control_plane_state_live_gate.py`
@@ -104,8 +104,8 @@ python3 scripts/validate_storage_control_plane_state_live_gate.py --live --produ
 
 现场反馈两个问题：① `POST /objects/{object_id}/complete` 报 `upsert storage object: ERROR: null value in column "bucket_id" of relation "storage_objects" violates not-null constraint (SQLSTATE 23502)`；② 请求日志已有，但还需要处理链路日志。
 
-问题①根因：权威迁移 `20260803_001` 中 `storage_objects.bucket_id` 是**可空增量列**（可选 FK 目标），控制面 upsert 从不写该列；但现场库被迁移之外的手动 ALTER 加了 NOT NULL 约束（与先前 `storage_filesystems.storage_class` 同型漂移）。修复：
-- 新增幂等迁移 `deploy/migrations/20260827_001_storage_objects_bucket_id_nullable.sql`：`ALTER TABLE storage_objects ALTER COLUMN bucket_id DROP NOT NULL`，干净库上为 no-op；**现场需应用该迁移后重试**。
+问题①根因：权威迁移 `20260803000100` 中 `storage_objects.bucket_id` 是**可空增量列**（可选 FK 目标），控制面 upsert 从不写该列；但现场库被迁移之外的手动 ALTER 加了 NOT NULL 约束（与先前 `storage_filesystems.storage_class` 同型漂移）。修复：
+- 新增幂等迁移 `deploy/migrations/20260827000100_storage_objects_bucket_id_nullable.sql`：`ALTER TABLE storage_objects ALTER COLUMN bucket_id DROP NOT NULL`，干净库上为 no-op；**现场需应用该迁移后重试**。
 - 顺带修复相邻缺陷：`CreateStorageObjectUpload` 创建时即 `upsertObject` 持久化，预签名上传在 Gateway 重启后仍可 complete（此前重启会丢对象元数据导致 404）。
 - 回归测试：`TestLocalStorageServiceCompleteObjectPersistsToSharedStore`（接共享 Store：建桶→上传→确认→重启实例回读；重启后对旧上传仍可 complete）。
 

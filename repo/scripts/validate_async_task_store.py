@@ -22,7 +22,7 @@ def main() -> int:
     errors += found
     found, task_router = require("services/ani-gateway/internal/router/task_resources.go", ["registerTasksWithStore", "api.store.Get", "api.store.Update"])
     errors += found
-    found, _ = require("deploy/migrations/20260802_001_async_tasks.sql", ["result JSONB", "idx_async_tasks_tenant_idempotency", "idx_async_tasks_tenant_id"])
+    found, _ = require("deploy/migrations/20260802000100_async_tasks.sql", ["result JSONB", "idx_async_tasks_tenant_idempotency", "idx_async_tasks_tenant_id"])
     errors += found
     if "completedTasks" in task_router:
         errors.append("task_resources.go: package-level completedTasks authority remains")

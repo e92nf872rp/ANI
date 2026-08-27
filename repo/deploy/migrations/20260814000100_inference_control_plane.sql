@@ -1,7 +1,6 @@
 -- ANI Services inference control-plane state.
--- Additive over the legacy inference_services table from 20260501_001_init_schema.sql.
+-- Additive over the legacy inference_services table from 20260501000100_init_schema.sql.
 
-BEGIN;
 
 ALTER TABLE inference_services
     ADD COLUMN IF NOT EXISTS served_model_name TEXT,
@@ -135,4 +134,3 @@ CREATE POLICY inference_operations_tenant_isolation ON inference_operations
     USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
     WITH CHECK (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
 
-COMMIT;

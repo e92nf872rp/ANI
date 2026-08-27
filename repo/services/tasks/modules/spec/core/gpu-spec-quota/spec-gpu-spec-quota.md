@@ -135,8 +135,8 @@ repo/
 │   ├── manifests/gpu-spec-a/
 │   │   └── 00-gpuspec-crd.yaml                      [NEW: GPUSpec CRD 定义]
 │   └── migrations/
-│       ├── 20260812_001_quota_tx_ids.sql            [NEW: workload_instances + quota_tx_ids]
-│       └── 20260812_002_resource_reservation_allocations.sql [NEW: 预留账本表]
+│       ├── 20260812000100_quota_tx_ids.sql            [NEW: workload_instances + quota_tx_ids]
+│       └── 20260812000200_resource_reservation_allocations.sql [NEW: 预留账本表]
 ├── pkg/
 │   ├── ports/
 │   │   ├── gpu_spec.go                              [NEW: GPUSpecStore 接口]
@@ -188,7 +188,7 @@ repo/
 #### 新增表：resource_reservation_allocations
 
 ```sql
--- 20260812_002_resource_reservation_allocations.sql
+-- 20260812000200_resource_reservation_allocations.sql
 BEGIN;
 CREATE TABLE IF NOT EXISTS resource_reservation_allocations (
     tenant_id           UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -202,7 +202,7 @@ COMMIT;
 #### 扩展表：workload_instances + quota_tx_ids
 
 ```sql
--- 20260812_001_quota_tx_ids.sql
+-- 20260812000100_quota_tx_ids.sql
 BEGIN;
 ALTER TABLE workload_instances
     ADD COLUMN IF NOT EXISTS quota_tx_ids JSONB NOT NULL DEFAULT '[]';
@@ -334,8 +334,8 @@ type OutboxEvent struct {
 
 | 顺序 | 迁移文件 | 操作 | 回滚 |
 |------|---------|------|------|
-| 1 | `20260812_001_quota_tx_ids.sql` | ALTER TABLE workload_instances ADD COLUMN | DROP COLUMN quota_tx_ids |
-| 2 | `20260812_002_resource_reservation_allocations.sql` | CREATE TABLE | DROP TABLE |
+| 1 | `20260812000100_quota_tx_ids.sql` | ALTER TABLE workload_instances ADD COLUMN | DROP COLUMN quota_tx_ids |
+| 2 | `20260812000200_resource_reservation_allocations.sql` | CREATE TABLE | DROP TABLE |
 
 迁移使用 `IF NOT EXISTS` / `IF EXISTS` 保证幂等。迁移前需确保 `tenants` 表存在（已有）。
 

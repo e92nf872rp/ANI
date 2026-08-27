@@ -91,7 +91,7 @@ None。
 | `services/metering-service/internal/rebuilder.go` | 修改 | rebuilder 查询增加 name 列，传入 buildSpec |
 | `pkg/adapters/metering/collectors.go` | 修改 | CPU/Mem collector 用 spec.WorkloadName 做 pod 正则匹配；CPU 查询加外层 sum() 聚合多副本 |
 | `services/metering-service/internal/service/metering_collection_service.go` | 修改 | persistRecords 用 SET ROLE ani_metering_writer 绕过 RLS；清理调试日志 |
-| `deploy/migrations/20260731_001_metering_usage.sql` | 修改 | 补充 GRANT ani_metering_writer TO ani_app_user |
+| `deploy/migrations/20260731000100_metering_usage.sql` | 修改 | 补充 GRANT ani_metering_writer TO ani_app_user |
 | `deploy/real-k8s-lab/metering-service-live-deps.yaml` | 修改 | 补充 secret 创建命令注释 |
 
 ### Design Decisions

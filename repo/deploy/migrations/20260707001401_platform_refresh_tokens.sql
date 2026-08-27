@@ -1,16 +1,15 @@
--- ANI Platform · Migration 20260707_014
+-- ANI Platform · Migration 20260707001401
 -- Description: Allow NULL tenant_id on refresh_tokens for platform admin refresh tokens
 --              and restore refresh_tokens.user_id FK to users(id)
--- Depends on: 20260501_001_init_schema.sql, 20260707_014_platform_users.sql
+-- Depends on: 20260501000100_init_schema.sql, 20260707001400_platform_users.sql
 -- Rationale:
 --   init_schema.refresh_tokens.tenant_id is NOT NULL with FK to tenants(id).
 --   init_schema.refresh_tokens.user_id has FK to users(id).
 --   Platform admins now live in `users` with tenant_id IS NULL (see migration
---   20260707_014_platform_users.sql). Platform refresh tokens are stored with
+--   20260707001400_platform_users.sql). Platform refresh tokens are stored with
 --   tenant_id=NULL, user_id referencing the platform admin's row in `users`.
 
 
-BEGIN;
 
 -- 1. Make tenant_id nullable to allow platform refresh tokens (tenant_id=NULL).
 ALTER TABLE refresh_tokens ALTER COLUMN tenant_id DROP NOT NULL;
@@ -30,7 +29,6 @@ CREATE POLICY tenant_isolation ON refresh_tokens
            OR tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
 
 
-COMMIT;
 
 -- ===========================================================================
 -- Rollback

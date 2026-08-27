@@ -1,13 +1,12 @@
 -- ANI Platform · Migration
 -- Description: STORAGE-CONTROL-PLANE-STATE-A storage/vector control-plane schema
--- Depends on: 20260520_006_storage_resources.sql, 20260520_005_network_resources.sql
+-- Depends on: 20260520000600_storage_resources.sql, 20260520000500_network_resources.sql
 -- Notes:
 --   - PostgreSQL is control-plane authority; MinIO/Milvus remain content authority.
 --   - Do not persist object body, signed download URLs, vector payloads, or search results.
 --   - Brownfield-safe: existing storage_buckets / vector_stores are altered in place
 --     (bucket_id TEXT, store_id -> vector_store_id, idempotency_key backfill).
 
-BEGIN;
 
 -- ── Extend existing volume / filesystem / object tables ──────────────────────
 
@@ -582,4 +581,3 @@ CREATE POLICY tenant_isolation ON vector_store_knowledge_base_links
     USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
     WITH CHECK (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
 
-COMMIT;

@@ -1,8 +1,7 @@
 -- ANI Platform · Migration 005
 -- Description: M1-NETWORK-A Core network resource persistence
--- Depends on: 20260519_004_instance_u_vm_protection.sql
+-- Depends on: 20260519000400_instance_u_vm_protection.sql
 
-BEGIN;
 
 CREATE TABLE IF NOT EXISTS network_vpcs (
     tenant_id       UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -109,4 +108,3 @@ CREATE POLICY tenant_isolation ON network_load_balancers
     AS RESTRICTIVE
     USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
 
-COMMIT;

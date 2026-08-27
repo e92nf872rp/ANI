@@ -14,7 +14,7 @@ Added persistent instance state and query boundary:
 - `pkg/ports/workload_runtime.go` adds `WorkloadInstanceStore`.
 - `pkg/adapters/runtime/instance_store.go`
 - `pkg/adapters/runtime/instance_store_test.go`
-- `deploy/migrations/20260501_001_init_schema.sql` adds `workload_instances`
+- `deploy/migrations/20260501000100_init_schema.sql` adds `workload_instances`
   with tenant RLS.
 - `deploy/manifests/m1-instance-j/`
 - `scripts/validate_instance_store.py`
