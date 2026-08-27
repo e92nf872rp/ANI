@@ -64,7 +64,7 @@ func mapStoreError(err error) error {
 	case errors.Is(err, ports.ErrNotImplemented):
 		return status.Error(codes.Unimplemented, ports.ErrNotImplemented.Error())
 	default:
-		return status.Errorf(codes.Internal, "tenant plan operation failed: %v", err)
+		return status.Errorf(codes.Internal, "tenant operation failed: %v", err)
 	}
 }
 

@@ -4098,22 +4098,17 @@ components:
 
     TenantUserPermissions:
       type: object
-      description: "租户成员权限；仅 tenant_id 非空的成员可查询"
+      description: "租户成员权限；仅 tenant_id 非空的成员可查询；permissions 为 roles.permissions JSONB 原样"
       required: [user_id, tenant_id, role, permissions]
       properties:
         user_id:   { type: string, format: uuid }
         tenant_id: { type: string, format: uuid }
-        role:      { type: string, enum: [tenant-admin, user, auditor] }
+        role_id:   { type: string, format: uuid, description: "当前 roles.id；无绑定时可省略" }
+        role:      { type: string, description: "角色名（非 platform-*）" }
         permissions:
           type: array
-          description: "资源权限列表"
-          items:
-            type: object
-            required: [resource, action, scope]
-            properties:
-              resource: { type: string, description: "资源标识，如 compute, inference, member" }
-              action:   { type: string, enum: [read, write, none] }
-              scope:    { type: string, description: "作用域标识" }
+          description: "roles.permissions JSONB 原样（resource/actions/scope）"
+          items: { type: object, additionalProperties: true }
 
     ChangeableRoleOption:
       type: object
@@ -4151,10 +4146,11 @@ components:
 
     UserRoleUpdateRequest:
       type: object
-      description: "修改租户内角色"
-      required: [role]
+      description: "修改租户内角色（按 role_id）；old_role_id 用于定位既有 user_roles 行"
+      required: [role_id]
       properties:
-        role: { type: string, enum: [user, auditor, tenant-admin] }
+        old_role_id: { type: string, format: uuid, description: "当前绑定的 roles.id；缺省或无匹配行时改为 INSERT" }
+        role_id: { type: string, format: uuid, description: "目标角色 UUID；须非 platform-*，且 tenant_id 为空或等于路径租户" }
 
     UserStatusUpdateRequest:
       type: object

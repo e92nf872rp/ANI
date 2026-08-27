@@ -26,14 +26,9 @@ func NewTenantPlanSvcClient() ports.TenantPlanSvcClient {
 // UpdateTenantPlan 调用 Core PUT /admin/tenants/{id}/plan。
 func (c *TenantPlanSvcClient) UpdateTenantPlan(ctx context.Context, tenantID uuid.UUID, planID uuid.UUID) (ports.Tenant, error) {
 	_ = ctx
-	headers, err := idempotencyHeaders()
-	if err != nil {
-		return ports.Tenant{}, err
-	}
 	path := fmt.Sprintf("/admin/tenants/%s/plan", tenantID.String())
 	raw, err := c.sdk.Request("PUT", path, anisdk.RequestOptions{
-		Body:    map[string]any{"plan_id": planID.String()},
-		Headers: headers,
+		Body: map[string]any{"plan_id": planID.String()},
 	})
 	if err != nil {
 		return ports.Tenant{}, mapSDKError(err)

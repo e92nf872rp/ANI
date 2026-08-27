@@ -53,15 +53,9 @@ type UserListResult struct {
 type UserPermissions struct {
 	UserID      string
 	TenantID    string
+	RoleID      string // roles.id；无角色绑定时为空
 	Role        string
-	Permissions []PermissionEntry // resource/action/scope JSONB array
-}
-
-// PermissionEntry is one entry in the permissions array (aligned with migration 003).
-type PermissionEntry struct {
-	Resource string `json:"resource"`
-	Action   string `json:"action"`
-	Scope    string `json:"scope"`
+	Permissions []any // roles.permissions JSONB 原样
 }
 
 // ChangeableRoleOption is one selectable target role.
@@ -117,11 +111,13 @@ type TenantAdminService interface {
 	// members unless a later caller merges invitation rows in Services.
 	ListUsers(ctx context.Context, filter UserListFilter) (UserListResult, error)
 
-	// ChangeRole replaces the tenant role (user / auditor / tenant-admin).
+	// ChangeRole replaces the tenant role by role_id.
+	// role_id must exist, not be platform-*, and have tenant_id NULL or equal to tenantID.
 	// Illegal role → ErrRoleChangeInvalid.
-	ChangeRole(ctx context.Context, tenantID, userID, role string) error
+	ChangeRole(ctx context.Context, tenantID, userID, roleID string) error
 
 	// GetRolePermissions returns role + permissions JSONB for a tenant member.
+	// Rejects platform-* roles and platform accounts (users.tenant_id empty).
 	GetRolePermissions(ctx context.Context, tenantID, userID string) (UserPermissions, error)
 
 	// GetChangeableRoles returns selectable roles.

@@ -78,9 +78,6 @@ func TestQuotaSvcClient_PutQuota_Tightened(t *testing.T) {
 		if r.URL.Path != "/api/v1/admin/tenants/"+tenantID+"/quota" {
 			t.Fatalf("path=%s", r.URL.Path)
 		}
-		if r.Header.Get("Idempotency-Key") == "" {
-			t.Fatal("missing Idempotency-Key")
-		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"tenant_id": tenantID,
@@ -130,9 +127,6 @@ func TestQuotaSvcClient_UpsertQuota_Tightened(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPut || r.URL.Path != "/api/v1/admin/tenants/"+id.String()+"/quota/upsert" {
 			t.Fatalf("%s %s", r.Method, r.URL.Path)
-		}
-		if r.Header.Get("Idempotency-Key") == "" {
-			t.Fatal("missing Idempotency-Key")
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -192,9 +186,6 @@ func TestTenantPlanSvcClient_UpdateTenantPlan(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPut || r.URL.Path != "/api/v1/admin/tenants/"+tenantID+"/plan" {
 			t.Fatalf("%s %s", r.Method, r.URL.Path)
-		}
-		if r.Header.Get("Idempotency-Key") == "" {
-			t.Fatal("missing Idempotency-Key")
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{

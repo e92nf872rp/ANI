@@ -47,12 +47,12 @@ type TenantAdminSvcClient interface {
 	// ListTenantAdmins 跨租户列出 admin（邀请中/已过期用户由 service 与邀请表合并）。
 	ListTenantAdmins(ctx context.Context, filter TenantAdminListFilter) (ListResult, error)
 
-	// ChangeRole 修改租户内角色（Core updateTenantUserRole）。
-	// role 非法 → ErrRoleChangeInvalid。
-	ChangeRole(ctx context.Context, tenantID, userID uuid.UUID, role string) error
+	// ChangeRole 修改租户内角色（Core updateTenantUserRole，按 role_id upsert）。
+	// role_id 非法 → ErrRoleChangeInvalid。
+	ChangeRole(ctx context.Context, tenantID, userID, roleID uuid.UUID) error
 
-	// GetRolePermissions 查询角色及 permissions（resource/action/scope JSONB 数组）。
-	// 仅租户成员（tenant_id 非空）；平台账户不可查。
+	// GetRolePermissions 查询角色及 permissions（roles.permissions JSONB 原样）。
+	// 仅租户成员（tenant_id 非空）；平台账户或 platform-* 角色不可查。
 	GetRolePermissions(ctx context.Context, tenantID, userID uuid.UUID) (UserPermissions, error)
 
 	// GetChangeableRoles 查询可变更角色选项。

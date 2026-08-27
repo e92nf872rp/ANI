@@ -18,15 +18,20 @@ import (
 )
 
 type fakeTenantAdminCoreClient struct {
-	matchID    uuid.UUID
-	matchErr   error
-	isAdmin    bool
-	isAdminErr error
-	users      map[string]ports.AdminWithTenant // key tenant|user
-	listItems  []ports.AdminWithTenant
-	listErr    error
-	roles      []ports.AssignableRole
-	rolesErr   error
+	matchID          uuid.UUID
+	matchErr         error
+	isAdmin          bool
+	isAdminErr       error
+	users            map[string]ports.AdminWithTenant // key tenant|user
+	listItems        []ports.AdminWithTenant
+	listErr          error
+	roles            []ports.AssignableRole
+	rolesErr         error
+	changeRoleErr    error
+	changeRoleID     uuid.UUID // if set, only this role_id succeeds
+	lastChangeRoleID uuid.UUID
+	perms            *ports.UserPermissions
+	permsErr         error
 }
 
 func (f *fakeTenantAdminCoreClient) MatchUser(context.Context, uuid.UUID, string, string) (uuid.UUID, error) {
@@ -67,11 +72,38 @@ func (f *fakeTenantAdminCoreClient) ListTenantAdmins(context.Context, ports.Tena
 	}
 	return ports.ListResult{Items: append([]ports.AdminWithTenant(nil), f.listItems...)}, nil
 }
-func (f *fakeTenantAdminCoreClient) ChangeRole(context.Context, uuid.UUID, uuid.UUID, string) error {
-	return ports.ErrNotImplemented
+func (f *fakeTenantAdminCoreClient) ChangeRole(_ context.Context, _, _, roleID uuid.UUID) error {
+	if f.changeRoleErr != nil {
+		return f.changeRoleErr
+	}
+	if f.changeRoleID != uuid.Nil && roleID != f.changeRoleID {
+		return ports.ErrRoleChangeInvalid
+	}
+	f.lastChangeRoleID = roleID
+	// 模拟改绑后角色名变化，便于审计断言 new_role
+	if f.perms != nil && f.perms.Role == "user" {
+		cp := *f.perms
+		cp.Role = "tenant-admin"
+		cp.RoleID = roleID
+		f.perms = &cp
+	}
+	return nil
 }
-func (f *fakeTenantAdminCoreClient) GetRolePermissions(context.Context, uuid.UUID, uuid.UUID) (ports.UserPermissions, error) {
-	return ports.UserPermissions{}, ports.ErrNotImplemented
+func (f *fakeTenantAdminCoreClient) GetRolePermissions(_ context.Context, tenantID, userID uuid.UUID) (ports.UserPermissions, error) {
+	if f.permsErr != nil {
+		return ports.UserPermissions{}, f.permsErr
+	}
+	if f.perms != nil {
+		return *f.perms, nil
+	}
+	if u, ok := f.users[tenantUserKey(tenantID, userID)]; ok {
+		tid := tenantID
+		return ports.UserPermissions{
+			UserID: userID, TenantID: &tid, Role: u.Role,
+			Permissions: []any{},
+		}, nil
+	}
+	return ports.UserPermissions{}, ports.ErrTenantAdminNotFound
 }
 func (f *fakeTenantAdminCoreClient) GetChangeableRoles(context.Context, uuid.UUID, uuid.UUID) (ports.ChangeableRoles, error) {
 	return ports.ChangeableRoles{}, ports.ErrNotImplemented
@@ -1047,6 +1079,133 @@ func TestTenantAdminService_GetDetail(t *testing.T) {
 	})
 }
 
+func TestTenantAdminService_ChangeRole(t *testing.T) {
+	t.Parallel()
+	tenantID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
+	userID := uuid.MustParse("22222222-2222-4222-8222-222222222222")
+	roleID := uuid.MustParse("00000000-0000-0000-0000-000000000002")
+	idem := "550e8400-e29b-41d4-a716-446655440099"
+
+	t.Run("success", func(t *testing.T) {
+		t.Parallel()
+		tid := tenantID
+		oldRoleID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+		core := &fakeTenantAdminCoreClient{
+			perms: &ports.UserPermissions{
+				UserID: userID, TenantID: &tid, RoleID: oldRoleID, Role: "user", Permissions: []any{},
+			},
+		}
+		audit := &fakeAuditStore{}
+		svc := NewTenantAdminService(core, nil, nil, audit)
+		res, err := svc.UpdateTenantAdminRole(context.Background(), &tenantv1.UpdateTenantAdminRoleRequest{
+			TenantId: tenantID.String(), UserId: userID.String(), RoleId: roleID.String(), IdempotencyKey: idem,
+		})
+		if err != nil {
+			t.Fatalf("UpdateTenantAdminRole: %v", err)
+		}
+		if res.GetId() != userID.String() || res.GetMessage() != "role updated" {
+			t.Fatalf("result=%+v", res)
+		}
+		if core.lastChangeRoleID != roleID {
+			t.Fatalf("role_id forwarded=%s want %s", core.lastChangeRoleID, roleID)
+		}
+		if len(audit.logs) != 1 || audit.logs[0].Action != "tenant_admin.change_role" {
+			t.Fatalf("audit=%+v", audit.logs)
+		}
+		if audit.logs[0].Details["old_role"] != "user" {
+			t.Fatalf("old_role=%v", audit.logs[0].Details["old_role"])
+		}
+		if audit.logs[0].Details["new_role"] != "tenant-admin" {
+			t.Fatalf("new_role=%v", audit.logs[0].Details["new_role"])
+		}
+	})
+
+	t.Run("invalid_role_id", func(t *testing.T) {
+		t.Parallel()
+		tid := tenantID
+		oldRID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+		core := &fakeTenantAdminCoreClient{
+			perms:        &ports.UserPermissions{UserID: userID, TenantID: &tid, RoleID: oldRID, Role: "user", Permissions: []any{}},
+			changeRoleErr: ports.ErrRoleChangeInvalid,
+		}
+		audit := &fakeAuditStore{}
+		svc := NewTenantAdminService(core, nil, nil, audit)
+		_, err := svc.UpdateTenantAdminRole(context.Background(), &tenantv1.UpdateTenantAdminRoleRequest{
+			TenantId: tenantID.String(), UserId: userID.String(), RoleId: roleID.String(), IdempotencyKey: idem,
+		})
+		assertBusinessCode(t, err, codes.FailedPrecondition, "ROLE_CHANGE_INVALID")
+		assertFailureAudit(t, audit, "tenant_admin.change_role")
+	})
+
+	t.Run("platform_role_rejected", func(t *testing.T) {
+		t.Parallel()
+		// Core 对 platform-* / tenant 不匹配统一返回 ErrRoleChangeInvalid
+		tid := tenantID
+		oldRID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+		platformRoleID := uuid.MustParse("00000000-0000-0000-0000-000000000099")
+		core := &fakeTenantAdminCoreClient{
+			perms:        &ports.UserPermissions{UserID: userID, TenantID: &tid, RoleID: oldRID, Role: "user", Permissions: []any{}},
+			changeRoleErr: ports.ErrRoleChangeInvalid,
+		}
+		audit := &fakeAuditStore{}
+		svc := NewTenantAdminService(core, nil, nil, audit)
+		_, err := svc.UpdateTenantAdminRole(context.Background(), &tenantv1.UpdateTenantAdminRoleRequest{
+			TenantId: tenantID.String(), UserId: userID.String(), RoleId: platformRoleID.String(), IdempotencyKey: idem,
+		})
+		assertBusinessCode(t, err, codes.FailedPrecondition, "ROLE_CHANGE_INVALID")
+		assertFailureAudit(t, audit, "tenant_admin.change_role")
+	})
+}
+
+func TestTenantAdminService_GetRolePermissions(t *testing.T) {
+	t.Parallel()
+	tenantID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
+	userID := uuid.MustParse("22222222-2222-4222-8222-222222222222")
+
+	t.Run("tenant_member", func(t *testing.T) {
+		t.Parallel()
+		tid := tenantID
+		roleID := uuid.MustParse("33333333-3333-4333-8333-333333333333")
+		core := &fakeTenantAdminCoreClient{
+			perms: &ports.UserPermissions{
+				UserID: userID, TenantID: &tid, RoleID: roleID, Role: "tenant-admin",
+				Permissions: []any{map[string]any{"resource": "*", "actions": []any{"*"}, "scope": "tenant"}},
+			},
+		}
+		svc := NewTenantAdminService(core, nil, nil, nil)
+		res, err := svc.GetTenantAdminRole(context.Background(), &tenantv1.GetTenantAdminRoleRequest{
+			TenantId: tenantID.String(), UserId: userID.String(),
+		})
+		if err != nil {
+			t.Fatalf("GetTenantAdminRole: %v", err)
+		}
+		if res.GetUserId() != userID.String() || res.GetRole() != "tenant-admin" {
+			t.Fatalf("got %+v", res)
+		}
+		if res.GetRoleId() != roleID.String() {
+			t.Fatalf("role_id=%v want %s", res.GetRoleId(), roleID.String())
+		}
+		if res.GetTenantId() == nil || res.GetTenantId().GetValue() != tenantID.String() {
+			t.Fatalf("tenant_id=%v", res.GetTenantId())
+		}
+		if res.GetPermissions() == nil || len(res.GetPermissions().GetValues()) != 1 {
+			t.Fatalf("permissions=%v", res.GetPermissions())
+		}
+	})
+
+	t.Run("platform_account_rejected", func(t *testing.T) {
+		t.Parallel()
+		core := &fakeTenantAdminCoreClient{
+			permsErr: ports.ErrTenantAdminNotFound,
+		}
+		svc := NewTenantAdminService(core, nil, nil, nil)
+		_, err := svc.GetTenantAdminRole(context.Background(), &tenantv1.GetTenantAdminRoleRequest{
+			TenantId: tenantID.String(), UserId: userID.String(),
+		})
+		assertBusinessCode(t, err, codes.NotFound, "TENANT_ADMIN_NOT_FOUND")
+	})
+}
+
 func TestTenantAdminService_Unimplemented(t *testing.T) {
 	s := NewTenantAdminService(nil, nil, nil, nil)
 	ctx := context.Background()
@@ -1055,14 +1214,6 @@ func TestTenantAdminService_Unimplemented(t *testing.T) {
 		name string
 		call func() error
 	}{
-		{"UpdateTenantAdminRole", func() error {
-			_, err := s.UpdateTenantAdminRole(ctx, &tenantv1.UpdateTenantAdminRoleRequest{})
-			return err
-		}},
-		{"GetTenantAdminRole", func() error {
-			_, err := s.GetTenantAdminRole(ctx, &tenantv1.GetTenantAdminRoleRequest{})
-			return err
-		}},
 		{"GetChangeableRoles", func() error {
 			_, err := s.GetChangeableRoles(ctx, &tenantv1.GetChangeableRolesRequest{})
 			return err
@@ -1089,8 +1240,8 @@ func TestTenantAdminService_Unimplemented(t *testing.T) {
 		}},
 	}
 
-	if len(checks) != 8 {
-		t.Fatalf("want 8 remaining unimplemented RPCs, got %d", len(checks))
+	if len(checks) != 6 {
+		t.Fatalf("want 6 remaining unimplemented RPCs, got %d", len(checks))
 	}
 	for _, tc := range checks {
 		t.Run(tc.name, func(t *testing.T) {

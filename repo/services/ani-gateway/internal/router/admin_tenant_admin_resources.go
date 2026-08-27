@@ -167,7 +167,7 @@ func (api *adminTenantAdminAPI) getTenantUserRole(ctx context.Context, c *app.Re
 func (api *adminTenantAdminAPI) updateTenantUserRole(ctx context.Context, c *app.RequestContext) {
 	// 1. 解析请求体
 	var body struct {
-		Role string `json:"role"`
+		RoleID string `json:"role_id"`
 	}
 	if err := c.BindJSON(&body); err != nil {
 		writeAdminTenantAdminError(c, ports.ErrInvalid)
@@ -177,7 +177,7 @@ func (api *adminTenantAdminAPI) updateTenantUserRole(ctx context.Context, c *app
 	tenantID := c.Param("tenant_id")
 	userID := c.Param("user_id")
 	// 3. 调用 Core SDK
-	if err := api.admin.ChangeRole(ctx, tenantID, userID, body.Role); err != nil {
+	if err := api.admin.ChangeRole(ctx, tenantID, userID, body.RoleID); err != nil {
 		writeAdminTenantAdminError(c, err)
 		return
 	}
@@ -323,20 +323,20 @@ func adminTenantUserJSON(u ports.User) map[string]any {
 }
 
 func adminUserPermissionsJSON(perms ports.UserPermissions) map[string]any {
-	permItems := make([]any, 0, len(perms.Permissions))
-	for _, p := range perms.Permissions {
-		permItems = append(permItems, map[string]any{
-			"resource": p.Resource,
-			"action":   p.Action,
-			"scope":    p.Scope,
-		})
+	permsOut := perms.Permissions
+	if permsOut == nil {
+		permsOut = []any{}
 	}
-	return map[string]any{
+	out := map[string]any{
 		"user_id":     perms.UserID,
 		"tenant_id":   perms.TenantID,
 		"role":        perms.Role,
-		"permissions": permItems,
+		"permissions": permsOut,
 	}
+	if strings.TrimSpace(perms.RoleID) != "" {
+		out["role_id"] = perms.RoleID
+	}
+	return out
 }
 
 // ── Error mapping ─────────────────────────────────────────────────────────────

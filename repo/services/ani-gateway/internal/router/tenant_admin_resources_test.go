@@ -470,7 +470,7 @@ func TestTenantAdminRoutes_UpdateRoleGRPCErrorMapping(t *testing.T) {
 		changeRoleErr: status.Error(codes.NotFound, "TENANT_ADMIN_NOT_FOUND: user not found"),
 	}
 	h := newTenantAdminTestServer(client)
-	body := `{"role":"user","idempotency_key":"550e8400-e29b-41d4-a716-446655440000"}`
+	body := `{"role_id":"00000000-0000-0000-0000-000000000003","idempotency_key":"550e8400-e29b-41d4-a716-446655440000"}`
 	resp := ut.PerformRequest(h.Engine, http.MethodPut, "/api/v1/svc/tenants/t1/admins/u1/role",
 		&ut.Body{Body: bytes.NewBufferString(body), Len: len(body)})
 	if resp.Code != http.StatusNotFound {

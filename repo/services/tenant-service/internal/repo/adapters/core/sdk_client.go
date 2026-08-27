@@ -34,14 +34,6 @@ func newCoreSDKClient() anisdk.Client {
 	return anisdk.NewClient(strings.TrimRight(base, "/"), strings.TrimSpace(os.Getenv("CORE_API_TOKEN")))
 }
 
-func idempotencyHeaders() (map[string]string, error) {
-	key, err := anisdk.NewIdempotencyKey("ani")
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ports.ErrCoreUnavailable, err)
-	}
-	return map[string]string{"Idempotency-Key": key}, nil
-}
-
 func mapSDKError(err error) error {
 	if err == nil {
 		return nil

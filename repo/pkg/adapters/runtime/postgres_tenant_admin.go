@@ -265,19 +265,135 @@ func (u *PostgresTenantAdmin) ListUsers(ctx context.Context, filter ports.UserLi
 	return ports.UserListResult{Items: items, NextCursor: nextCursor}, nil
 }
 
-func (u *PostgresTenantAdmin) ChangeRole(ctx context.Context, tenantID, userID, role string) error {
-	_ = ctx
-	_ = tenantID
-	_ = userID
-	_ = role
-	return ports.ErrUnsupported
+func (u *PostgresTenantAdmin) ChangeRole(ctx context.Context, tenantID, userID, roleID string) error {
+	tid, err := parseAdminUUID(tenantID, "tenant_id")
+	if err != nil {
+		return err
+	}
+	uid, err := parseAdminUUID(userID, "user_id")
+	if err != nil {
+		return err
+	}
+	rid, err := parseAdminUUID(roleID, "role_id")
+	if err != nil {
+		return fmt.Errorf("%w: role_id invalid", ports.ErrRoleChangeInvalid)
+	}
+
+	return u.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		// 步骤 1：确认用户属于该租户且未软删除
+		var exists bool
+		if qErr := tx.QueryRow(ctx, `
+			SELECT EXISTS(
+				SELECT 1 FROM users
+				WHERE id = $1 AND tenant_id = $2 AND COALESCE(is_deleted, FALSE) = FALSE
+			)
+		`, uid, tid).Scan(&exists); qErr != nil {
+			return fmt.Errorf("check user for change role: %w", qErr)
+		}
+		if !exists {
+			return ports.ErrUserNotFound
+		}
+
+		// 步骤 2：校验目标角色可分配（非 platform-*、非 tenant-admin；tenant_id NULL 或等于路径租户）
+		var roleName string
+		qErr := tx.QueryRow(ctx, `
+			SELECT name
+			FROM roles
+			WHERE id = $1
+			  AND name NOT LIKE 'platform-%'
+			  AND name <> 'tenant-admin'
+			  AND (tenant_id IS NULL OR tenant_id = $2)
+		`, rid, tid).Scan(&roleName)
+		if errors.Is(qErr, pgx.ErrNoRows) {
+			return ports.ErrRoleChangeInvalid
+		}
+		if qErr != nil {
+			return fmt.Errorf("lookup role for change: %w", qErr)
+		}
+
+		// 步骤 3：upsert（user_id 唯一索引保证单角色）
+		if _, execErr := tx.Exec(ctx, `
+			INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)
+			ON CONFLICT (user_id) DO UPDATE SET role_id = EXCLUDED.role_id
+		`, uid, rid); execErr != nil {
+			return fmt.Errorf("upsert user role: %w", execErr)
+		}
+		_ = roleName
+		return nil
+	})
 }
 
 func (u *PostgresTenantAdmin) GetRolePermissions(ctx context.Context, tenantID, userID string) (ports.UserPermissions, error) {
-	_ = ctx
-	_ = tenantID
-	_ = userID
-	return ports.UserPermissions{}, ports.ErrUnsupported
+	tid, err := parseAdminUUID(tenantID, "tenant_id")
+	if err != nil {
+		return ports.UserPermissions{}, err
+	}
+	uid, err := parseAdminUUID(userID, "user_id")
+	if err != nil {
+		return ports.UserPermissions{}, err
+	}
+
+	var out ports.UserPermissions
+	err = u.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		var (
+			userTenantID uuid.UUID
+			roleID       *uuid.UUID
+			roleTenant   *uuid.UUID
+			roleName     string
+			permRaw      []byte
+		)
+		// 单角色模型：业务保证一用户一角色绑定，LIMIT 1 取唯一行
+		qErr := tx.QueryRow(ctx, `
+		SELECT u.tenant_id, r.id, r.tenant_id, COALESCE(r.name, ''), COALESCE(r.permissions, '[]'::jsonb)
+		FROM users u
+		LEFT JOIN LATERAL (
+			SELECT r2.id, r2.tenant_id, r2.name, r2.permissions
+			FROM user_roles ur
+			JOIN roles r2 ON r2.id = ur.role_id
+			WHERE ur.user_id = u.id
+			ORDER BY r2.name
+			LIMIT 1
+		) r ON TRUE
+		WHERE u.id = $1
+		  AND u.tenant_id = $2
+		  AND COALESCE(u.is_deleted, FALSE) = FALSE
+	`, uid, tid).Scan(&userTenantID, &roleID, &roleTenant, &roleName, &permRaw)
+		if errors.Is(qErr, pgx.ErrNoRows) {
+			return ports.ErrUserNotFound
+		}
+		if qErr != nil {
+			return fmt.Errorf("get role permissions: %w", qErr)
+		}
+		// 平台账户不可经本端点查询（users.tenant_id 理论上已由 WHERE 约束）
+		if userTenantID == uuid.Nil {
+			return ports.ErrUserNotFound
+		}
+		// 当前角色为 platform-*，或角色 tenant_id 既非空也不等于路径租户 → 不可查
+		if strings.HasPrefix(roleName, "platform-") {
+			return ports.ErrUserNotFound
+		}
+		if roleTenant != nil && *roleTenant != tid {
+			return ports.ErrUserNotFound
+		}
+		perms, decodeErr := decodeRolePermissionsJSON(permRaw)
+		if decodeErr != nil {
+			return decodeErr
+		}
+		out = ports.UserPermissions{
+			UserID:      uid.String(),
+			TenantID:    userTenantID.String(),
+			Role:        roleName,
+			Permissions: perms,
+		}
+		if roleID != nil {
+			out.RoleID = roleID.String()
+		}
+		return nil
+	})
+	if err != nil {
+		return ports.UserPermissions{}, err
+	}
+	return out, nil
 }
 
 func (u *PostgresTenantAdmin) GetChangeableRoles(ctx context.Context, tenantID, userID string) (ports.ChangeableRoles, error) {
@@ -300,6 +416,7 @@ func (u *PostgresTenantAdmin) ListAssignableRoles(ctx context.Context, tenantID 
 			SELECT r.id, r.tenant_id, r.name, r.permissions
 			FROM roles r
 			WHERE r.name NOT LIKE 'platform-%'
+			  AND r.name <> 'tenant-admin'
 			  AND (
 			    r.tenant_id IS NULL
 			    OR (r.tenant_id = $1 AND EXISTS (

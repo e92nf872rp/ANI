@@ -54,6 +54,7 @@ func (s *TenantAdminService) Register(server *grpc.Server) {
 	tenantv1.RegisterTenantAdminServiceServer(server, s)
 }
 
+// unimplemented 返回 gRPC Unimplemented 标准错误，供存根方法使用。
 func unimplemented() error {
 	return status.Error(codes.Unimplemented, ports.ErrNotImplemented.Error())
 }
@@ -521,6 +522,7 @@ func (s *TenantAdminService) ListAllTenantAdmins(ctx context.Context, req *tenan
 	return &tenantv1.ListAllTenantAdminsResponse{Items: out, NextCursor: nextCursor}, nil
 }
 
+// listAllCoreTenantAdmins 分页拉取 Core 租户管理员全量列表（游标翻页至 nextCursor 为空）。
 func (s *TenantAdminService) listAllCoreTenantAdmins(ctx context.Context, tenantID *uuid.UUID, status, search string) ([]ports.AdminWithTenant, error) {
 	const pageSize = 100
 	var all []ports.AdminWithTenant
@@ -565,10 +567,12 @@ func (s *TenantAdminService) batchGetUsersByFlags(ctx context.Context, flags []p
 	return out, nil
 }
 
+// tenantUserKey 生成 tenant_id|user_id 复合键，用于去重合并。
 func tenantUserKey(tenantID, userID uuid.UUID) string {
 	return tenantID.String() + "|" + userID.String()
 }
 
+// tenantAdminSearchMatch 按 search 关键词模糊匹配 username / email / display_name（大小写不敏感）。
 func tenantAdminSearchMatch(user ports.AdminWithTenant, search string) bool {
 	q := strings.ToLower(strings.TrimSpace(search))
 	if q == "" {
@@ -586,6 +590,7 @@ func tenantAdminSearchMatch(user ports.AdminWithTenant, search string) bool {
 	return false
 }
 
+// adminCreatedAt 安全提取用户的 created_at，为零值时返回 time.Time{}。
 func adminCreatedAt(user ports.AdminWithTenant) time.Time {
 	if user.CreatedAt != nil {
 		return user.CreatedAt.UTC()
@@ -593,6 +598,7 @@ func adminCreatedAt(user ports.AdminWithTenant) time.Time {
 	return time.Time{}
 }
 
+// pageTenantAdmins 对已排序的内存列表执行游标分页，返回当前页 items + nextCursor。
 func pageTenantAdmins(items []ports.AdminWithTenant, limit int, cursor string) ([]ports.AdminWithTenant, string, error) {
 	start := 0
 	if strings.TrimSpace(cursor) != "" {
@@ -623,6 +629,8 @@ func pageTenantAdmins(items []ports.AdminWithTenant, limit int, cursor string) (
 	return items[start:end], nextCursor, nil
 }
 
+// adminWithTenantToProto 将 ports.AdminWithTenant 映射为 gRPC AdminWithTenant；
+// includeTimestamps 控制是否填充 created_at / updated_at（详情页需要，列表页不需要）。
 func adminWithTenantToProto(user ports.AdminWithTenant, includeTimestamps bool) *tenantv1.AdminWithTenant {
 	out := &tenantv1.AdminWithTenant{
 		Id:         user.ID.String(),
@@ -698,12 +706,127 @@ func (s *TenantAdminService) GetTenantAdminDetail(ctx context.Context, req *tena
 	return adminWithTenantToProto(user, true), nil
 }
 
-func (s *TenantAdminService) UpdateTenantAdminRole(context.Context, *tenantv1.UpdateTenantAdminRoleRequest) (*commonv1.IdempotentResult, error) {
-	return nil, unimplemented()
+// UpdateTenantAdminRole 修改管理员角色（SPEC §5.1.5 / US-005）。
+// 入参 role_id（uuid）；校验 role.tenant_id 与参数一致或为 null、name 不以 platform- 为前缀；
+// Core upsert 改绑 user_roles；写审计 tenant_admin.change_role。
+func (s *TenantAdminService) UpdateTenantAdminRole(ctx context.Context, req *tenantv1.UpdateTenantAdminRoleRequest) (*commonv1.IdempotentResult, error) {
+	const action = "tenant_admin.change_role"
+
+	// 步骤 1：校验依赖
+	if s.core == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant admin api unavailable")
+	}
+	if req == nil {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "request required")
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, nil, err, nil)
+		return nil, err
+	}
+
+	// 解析请求体
+	tenantID, err := parseTenantAdminUUID(req.GetTenantId(), "tenant_id")
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, nil, err, nil)
+		return nil, err
+	}
+	userID, err := parseTenantAdminUUID(req.GetUserId(), "user_id")
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+		return nil, err
+	}
+	roleID, err := parseTenantAdminUUID(req.GetRoleId(), "role_id")
+	if err != nil {
+		mapped := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "role_id must be a valid uuid")
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, map[string]any{
+			"tenant_id": tenantID.String(), "target_id": userID.String(),
+		}, mapped, &tenantID)
+		return nil, mapped
+	}
+
+	details := map[string]any{
+		"tenant_id":   tenantID.String(),
+		"target_id":   userID.String(),
+		"new_role_id": roleID.String(),
+	}
+
+	// 步骤 2：读取旧角色（审计 old_role）
+	oldRole := ""
+	perms, getErr := s.core.GetRolePermissions(ctx, tenantID, userID)
+	if getErr != nil {
+		mapped := mapStoreError(getErr)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, details, mapped, &tenantID)
+		return nil, mapped
+	}
+	oldRole = perms.Role
+	details["old_role"] = oldRole
+	if perms.RoleID != uuid.Nil {
+		details["old_role_id"] = perms.RoleID.String()
+	}
+
+	// 步骤 3：Core upsert 改绑
+	if err := s.core.ChangeRole(ctx, tenantID, userID, roleID); err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, details, mapped, &tenantID)
+		return nil, mapped
+	}
+
+	// 步骤 4：读新角色名写入审计 new_role
+	newRole := ""
+	if perms, getErr := s.core.GetRolePermissions(ctx, tenantID, userID); getErr == nil {
+		newRole = perms.Role
+	}
+	details["new_role"] = newRole
+	writeAuditSuccess(ctx, s.audit, auditResourceTenantAdmin, action, details, &tenantID)
+
+	return &commonv1.IdempotentResult{Id: userID.String(), Message: "role updated"}, nil
 }
 
-func (s *TenantAdminService) GetTenantAdminRole(context.Context, *tenantv1.GetTenantAdminRoleRequest) (*tenantv1.UserPermissions, error) {
-	return nil, unimplemented()
+// GetTenantAdminRole 查询管理员角色与权限（SPEC §5.1.8 / US-009）。
+// 只读、无审计；Core JOIN user_roles + roles 返回 role 及 permissions JSONB；
+// 仅租户成员（tenant_id 非空）可查，平台角色（platform-* 前缀）不可查。
+func (s *TenantAdminService) GetTenantAdminRole(ctx context.Context, req *tenantv1.GetTenantAdminRoleRequest) (*tenantv1.UserPermissions, error) {
+	// 步骤 1：校验依赖
+	if s.core == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant admin api unavailable")
+	}
+	if req == nil {
+		return nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "request required")
+	}
+	tenantID, err := parseTenantAdminUUID(req.GetTenantId(), "tenant_id")
+	if err != nil {
+		return nil, err
+	}
+	userID, err := parseTenantAdminUUID(req.GetUserId(), "user_id")
+	if err != nil {
+		return nil, err
+	}
+
+	// 步骤 2：Core 查询权限（已拒绝平台账户 / platform-*）
+	perms, err := s.core.GetRolePermissions(ctx, tenantID, userID)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+
+	// 步骤 3：映射 gRPC（TenantID 可为 nil — 平台账户场景）
+	out := &tenantv1.UserPermissions{
+		UserId: perms.UserID.String(),
+		Role:   perms.Role,
+	}
+	if perms.RoleID != uuid.Nil {
+		out.RoleId = perms.RoleID.String()
+	}
+	if perms.TenantID != nil {
+		out.TenantId = wrapperspb.String(perms.TenantID.String())
+	}
+	permItems := perms.Permissions
+	if permItems == nil {
+		permItems = []any{}
+	}
+	lv, lvErr := structpb.NewList(permItems)
+	if lvErr != nil {
+		return nil, status.Errorf(codes.Internal, "encode permissions: %v", lvErr)
+	}
+	out.Permissions = lv
+	return out, nil
 }
 
 func (s *TenantAdminService) GetChangeableRoles(context.Context, *tenantv1.GetChangeableRolesRequest) (*tenantv1.GetChangeableRolesResponse, error) {
@@ -730,6 +853,7 @@ func (s *TenantAdminService) ListTenantAdminAuditLogs(context.Context, *tenantv1
 	return nil, unimplemented()
 }
 
+// validateInviteIdentity 校验邀请入参：email 合法且 username 非空、长度 1-64、不含冒号。
 func validateInviteIdentity(email, username string) error {
 	if email == "" {
 		return businessError(codes.InvalidArgument, ports.ErrValidationFailed, "email required")
@@ -750,6 +874,7 @@ func validateInviteIdentity(email, username string) error {
 	return nil
 }
 
+// parseTenantAdminUUID 解析并校验 UUID 路径/请求参数，空值或格式非法返回 InvalidArgument。
 func parseTenantAdminUUID(raw, field string) (uuid.UUID, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -762,6 +887,7 @@ func parseTenantAdminUUID(raw, field string) (uuid.UUID, error) {
 	return id, nil
 }
 
+// generateInviteToken 生成 32 字节随机邀请 token，返回明文 token 与其 SHA-256 哈希（仅存哈希）。
 func generateInviteToken() (token string, tokenHash string, err error) {
 	buf := make([]byte, inviteTokenBytes)
 	if _, err = rand.Read(buf); err != nil {

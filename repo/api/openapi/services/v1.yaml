@@ -1226,10 +1226,10 @@ components:
 
     UpdateRoleRequest:
       type: object
-      required: [idempotency_key, role]
+      required: [idempotency_key, role_id]
       properties:
         idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
-        role:            { type: string, enum: [user, auditor, tenant-admin] }
+        role_id:         { type: string, format: uuid, description: "目标角色 UUID；须为可分配角色（非 platform-*，tenant_id 为空或等于路径 tenantId）" }
 
     ResetPasswordRequest:
       type: object

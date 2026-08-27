@@ -326,7 +326,7 @@ func (api *tenantAdminAPI) updateTenantAdminRole(ctx context.Context, c *app.Req
 	}
 	// 2. 解析请求体
 	var body struct {
-		Role           string `json:"role"`
+		RoleID         string `json:"role_id"`
 		IdempotencyKey string `json:"idempotency_key"`
 	}
 	if err := c.BindJSON(&body); err != nil {
@@ -344,7 +344,7 @@ func (api *tenantAdminAPI) updateTenantAdminRole(ctx context.Context, c *app.Req
 	res, err := api.admins.UpdateTenantAdminRole(callCtx, &tenantv1.UpdateTenantAdminRoleRequest{
 		TenantId:       c.Param("tenantId"),
 		UserId:         c.Param("userId"),
-		Role:           body.Role,
+		RoleId:         body.RoleID,
 		IdempotencyKey: body.IdempotencyKey,
 	})
 	if err != nil {
@@ -633,6 +633,9 @@ func userPermissionsJSON(perms *tenantv1.UserPermissions) map[string]any {
 		"user_id":     perms.GetUserId(),
 		"role":        perms.GetRole(),
 		"permissions": permItems,
+	}
+	if roleID := perms.GetRoleId(); roleID != "" {
+		out["role_id"] = roleID
 	}
 	if tID := perms.GetTenantId(); tID != nil {
 		out["tenant_id"] = tID.GetValue()

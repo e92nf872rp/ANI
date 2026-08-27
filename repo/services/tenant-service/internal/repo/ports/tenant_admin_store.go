@@ -122,15 +122,9 @@ type InvitationResult struct {
 type UserPermissions struct {
 	UserID      uuid.UUID
 	TenantID    *uuid.UUID
+	RoleID      uuid.UUID // 无绑定时为零值
 	Role        string
-	Permissions []PermissionEntry // resource/action/scope JSONB 数组
-}
-
-// PermissionEntry 是 permissions 数组中的一项（对齐 migration 003 格式）。
-type PermissionEntry struct {
-	Resource string `json:"resource"`
-	Action   string `json:"action"`
-	Scope    string `json:"scope"`
+	Permissions []any // roles.permissions JSONB 原样
 }
 
 // ChangeableRoleOption 是可变更角色下拉的一项。

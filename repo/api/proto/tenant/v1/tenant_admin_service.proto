@@ -84,7 +84,7 @@ message GetTenantAdminDetailRequest {
 message UpdateTenantAdminRoleRequest {
   string tenant_id = 1;
   string user_id = 2;
-  string role = 3;             // user | auditor | tenant-admin
+  string role_id = 3;          // target roles.id (uuid)
   string idempotency_key = 4;  // required UUID
 }
 
@@ -176,6 +176,7 @@ message UserPermissions {
   google.protobuf.StringValue tenant_id = 2;   // required for tenant members; unset for platform accounts
   string role = 3;
   google.protobuf.ListValue permissions = 4;  // resource/action/scope JSONB array
+  string role_id = 5;                         // roles.id (uuid); empty when no role binding
 }
 
 message ChangeableRoleOption {

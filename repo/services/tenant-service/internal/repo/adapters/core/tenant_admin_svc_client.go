@@ -154,17 +154,13 @@ func (c *TenantAdminSvcClient) ListTenantAdmins(ctx context.Context, filter port
 	}, nil
 }
 
-// ChangeRole 调用 Core PUT /admin/tenants/{id}/users/{user_id}/role。
-func (c *TenantAdminSvcClient) ChangeRole(ctx context.Context, tenantID, userID uuid.UUID, role string) error {
+// ChangeRole 调用 Core PUT /admin/tenants/{id}/users/{user_id}/role（body.role_id）。
+func (c *TenantAdminSvcClient) ChangeRole(ctx context.Context, tenantID, userID, roleID uuid.UUID) error {
 	_ = ctx
-	headers, err := idempotencyHeaders()
-	if err != nil {
-		return err
-	}
 	path := fmt.Sprintf("/admin/tenants/%s/users/%s/role", tenantID.String(), userID.String())
-	_, err = c.sdk.Request("PUT", path, anisdk.RequestOptions{
-		Body:    map[string]any{"role": role},
-		Headers: headers,
+	body := map[string]any{"role_id": roleID.String()}
+	_, err := c.sdk.Request("PUT", path, anisdk.RequestOptions{
+		Body: body,
 	})
 	if err != nil {
 		return mapSDKError(err)
@@ -197,16 +193,24 @@ func (c *TenantAdminSvcClient) GetRolePermissions(ctx context.Context, tenantID,
 		}
 		tid = &parsed
 	}
-	perms, err := decodePermissionEntries(obj["permissions"])
+	perms, err := decodePermissionsAny(obj["permissions"])
 	if err != nil {
 		return ports.UserPermissions{}, err
 	}
-	return ports.UserPermissions{
+	out := ports.UserPermissions{
 		UserID:      uid,
 		TenantID:    tid,
 		Role:        stringField(obj, "role"),
 		Permissions: perms,
-	}, nil
+	}
+	if roleIDRaw := strings.TrimSpace(stringField(obj, "role_id")); roleIDRaw != "" {
+		parsed, parseErr := uuid.Parse(roleIDRaw)
+		if parseErr != nil {
+			return ports.UserPermissions{}, fmt.Errorf("%w: role_id: %v", ports.ErrCoreUnavailable, parseErr)
+		}
+		out.RoleID = parsed
+	}
+	return out, nil
 }
 
 // GetChangeableRoles 调用 Core GET /admin/tenants/{id}/users/{user_id}/changeable-roles。
@@ -307,14 +311,9 @@ func decodePermissionsAny(raw any) ([]any, error) {
 // SetStatus 调用 Core POST /admin/tenants/{id}/users/{user_id}/status。
 func (c *TenantAdminSvcClient) SetStatus(ctx context.Context, tenantID, userID uuid.UUID, status string) error {
 	_ = ctx
-	headers, err := idempotencyHeaders()
-	if err != nil {
-		return err
-	}
 	path := fmt.Sprintf("/admin/tenants/%s/users/%s/status", tenantID.String(), userID.String())
-	_, err = c.sdk.Request("POST", path, anisdk.RequestOptions{
-		Body:    map[string]any{"status": status},
-		Headers: headers,
+	_, err := c.sdk.Request("POST", path, anisdk.RequestOptions{
+		Body: map[string]any{"status": status},
 	})
 	if err != nil {
 		return mapSDKError(err)
@@ -325,12 +324,8 @@ func (c *TenantAdminSvcClient) SetStatus(ctx context.Context, tenantID, userID u
 // SoftDelete 调用 Core DELETE /admin/tenants/{id}/users/{user_id}。
 func (c *TenantAdminSvcClient) SoftDelete(ctx context.Context, tenantID, userID uuid.UUID) error {
 	_ = ctx
-	headers, err := idempotencyHeaders()
-	if err != nil {
-		return err
-	}
 	path := fmt.Sprintf("/admin/tenants/%s/users/%s", tenantID.String(), userID.String())
-	_, err = c.sdk.Request("DELETE", path, anisdk.RequestOptions{Headers: headers})
+	_, err := c.sdk.Request("DELETE", path, anisdk.RequestOptions{})
 	if err != nil {
 		return mapSDKError(err)
 	}
@@ -340,14 +335,9 @@ func (c *TenantAdminSvcClient) SoftDelete(ctx context.Context, tenantID, userID 
 // ResetPassword 调用 Core POST /admin/tenants/{id}/users/{user_id}/reset-password。
 func (c *TenantAdminSvcClient) ResetPassword(ctx context.Context, tenantID, userID uuid.UUID, newPassword string) error {
 	_ = ctx
-	headers, err := idempotencyHeaders()
-	if err != nil {
-		return err
-	}
 	path := fmt.Sprintf("/admin/tenants/%s/users/%s/reset-password", tenantID.String(), userID.String())
-	_, err = c.sdk.Request("POST", path, anisdk.RequestOptions{
-		Body:    map[string]any{"new_password": newPassword},
-		Headers: headers,
+	_, err := c.sdk.Request("POST", path, anisdk.RequestOptions{
+		Body: map[string]any{"new_password": newPassword},
 	})
 	if err != nil {
 		return mapSDKError(err)
@@ -413,20 +403,8 @@ func decodeTenantUserObject(obj map[string]any) (ports.AdminWithTenant, error) {
 	}, nil
 }
 
-func decodePermissionEntries(raw any) ([]ports.PermissionEntry, error) {
-	items, err := asObjectSlice(raw)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]ports.PermissionEntry, 0, len(items))
-	for _, it := range items {
-		out = append(out, ports.PermissionEntry{
-			Resource: stringField(it, "resource"),
-			Action:   stringField(it, "action"),
-			Scope:    stringField(it, "scope"),
-		})
-	}
-	return out, nil
+func decodePermissionEntries(raw any) ([]any, error) {
+	return decodePermissionsAny(raw)
 }
 
 func parseOptionalTimeField(m map[string]any, key string) *time.Time {
