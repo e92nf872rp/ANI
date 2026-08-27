@@ -401,5 +401,3 @@ func TestPgMeteringServiceNotConfiguredAndInvalidTenant(t *testing.T) {
 		t.Fatalf("empty tenant QueryUsage err = %v, want ErrInvalid", err)
 	}
 }
-
-

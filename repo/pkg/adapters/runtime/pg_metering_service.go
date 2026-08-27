@@ -106,8 +106,10 @@ func (s *PgMeteringService) ReportTokenUsage(ctx context.Context, request ports.
 
 // buildUsageQuery 构建聚合查询 SQL 和参数。
 // SQL 始终输出固定列，确保 scan 列数与 SQL 列数一致：
-//   租户视角: resource_type, total_quantity, unit, period（4 列）
-//   平台视角: tenant_id, resource_type, total_quantity, unit, period（5 列）
+//
+//	租户视角: resource_type, total_quantity, unit, period（4 列）
+//	平台视角: tenant_id, resource_type, total_quantity, unit, period（5 列）
+//
 // period 列在无时间聚合（group_by 为空/resource_type/tenant_id）时输出 NULL::text 占位。
 //
 // isPlatform=true 时，SQL 包含 tenant_id 输出列（平台视角），WHERE 不依赖 RLS。
