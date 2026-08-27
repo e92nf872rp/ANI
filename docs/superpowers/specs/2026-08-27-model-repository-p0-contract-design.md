@@ -90,7 +90,7 @@ POST /models/{model_id}/upload-url
 保留：
 
 ```text
-POST /models/import
+模型导入创建端点（路径为 `/models/import`）
 ```
 
 新增：
@@ -107,7 +107,7 @@ GET /model-import-tasks/{task_id}
 
 ## 幂等与错误语义
 
-- `POST /models`、`POST /models/{model_id}/versions`、`POST /models/{model_id}/upload-url` 和 `POST /models/import` 必须接受并重放同一个 `idempotency_key`。
+- 模型创建、版本登记、上传地址申请和模型导入创建端点必须接受并重放同一个 `idempotency_key`。
 - 同一租户、同一幂等键、同一请求意图返回首次结果；同键不同意图返回 409。
 - 不存在或不属于当前租户的模型、版本、任务统一返回 404。
 - 上传文件名非法、大小越界、来源或 capability 非法返回 400。
