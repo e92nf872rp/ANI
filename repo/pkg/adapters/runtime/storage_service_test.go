@@ -584,20 +584,20 @@ func TestLocalStorageServiceCompleteStorageObject(t *testing.T) {
 }
 
 type fakeObjectStore struct {
-	ensureBucket ports.BucketClass
-	uploadRef    ports.ObjectRef
-	downloadRef  ports.ObjectRef
-	deleteRef    ports.ObjectRef
-	statRef      ports.ObjectRef
-	uploadURL    string
-	downloadURL  string
-	expiresAt    time.Time
-	statOK       bool
-	statErr      error
-	statMetadata ports.ObjectMetadata
-	usage        ports.BucketUsage
-	usageErr     error
-	usageClass   ports.BucketClass
+	ensureBucket  ports.BucketClass
+	uploadRef     ports.ObjectRef
+	downloadRef   ports.ObjectRef
+	deleteRef     ports.ObjectRef
+	statRef       ports.ObjectRef
+	uploadURL     string
+	downloadURL   string
+	expiresAt     time.Time
+	statOK        bool
+	statErr       error
+	statMetadata  ports.ObjectMetadata
+	usage         ports.BucketUsage
+	usageErr      error
+	usageClass    ports.BucketClass
 	usageTenantID string
 }
 
