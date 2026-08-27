@@ -984,10 +984,21 @@ func (s *LocalStorageService) DeleteObject(ctx context.Context, request ports.St
 	record, ok := s.objects[request.ResourceID]
 	if !ok || record.TenantID != request.TenantID || record.State == ports.StorageResourceDeleted {
 		s.mu.RUnlock()
-		return ports.StorageObjectRecord{}, ports.ErrNotFound
+		record = ports.StorageObjectRecord{}
+		ok = false
 	}
 	objectStore := s.objectStore
 	s.mu.RUnlock()
+	if !ok && s.store != nil {
+		if loaded, err := s.store.GetObject(ctx, request.TenantID, request.ResourceID); err == nil && loaded.ObjectID != "" &&
+			loaded.TenantID == request.TenantID && loaded.State != ports.StorageResourceDeleted {
+			record = loaded
+			ok = true
+		}
+	}
+	if !ok {
+		return ports.StorageObjectRecord{}, ports.ErrNotFound
+	}
 
 	if objectStore != nil {
 		if err := objectStore.DeleteObject(ctx, storageObjectRef(record)); err != nil && err != ports.ErrNotFound {
@@ -997,11 +1008,12 @@ func (s *LocalStorageService) DeleteObject(ctx context.Context, request ports.St
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	current, ok := s.objects[request.ResourceID]
-	if !ok || current.TenantID != request.TenantID || current.State == ports.StorageResourceDeleted {
-		return ports.StorageObjectRecord{}, ports.ErrNotFound
+	if current, exists := s.objects[request.ResourceID]; exists {
+		if current.TenantID != request.TenantID || current.State == ports.StorageResourceDeleted {
+			return ports.StorageObjectRecord{}, ports.ErrNotFound
+		}
+		record = current
 	}
-	record = current
 	record.State = ports.StorageResourceDeleted
 	record.Reason = "deleted by local storage profile"
 	record.UpdatedAt = s.now().UTC()
@@ -1226,6 +1238,12 @@ func (s *LocalStorageService) GetStorageObjectDownload(ctx context.Context, requ
 	s.mu.RLock()
 	object, ok := s.objects[strings.TrimSpace(request.ObjectID)]
 	s.mu.RUnlock()
+	if (!ok || object.TenantID != request.TenantID || object.State == ports.StorageResourceDeleted) && s.store != nil {
+		if loaded, err := s.store.GetObject(ctx, request.TenantID, strings.TrimSpace(request.ObjectID)); err == nil && loaded.ObjectID != "" {
+			object = loaded
+			ok = true
+		}
+	}
 	if !ok || object.TenantID != request.TenantID || object.State == ports.StorageResourceDeleted {
 		return ports.StorageObjectDownloadRecord{}, ports.ErrNotFound
 	}
@@ -1329,6 +1347,35 @@ func (s *LocalStorageService) GetStorageBucket(ctx context.Context, request port
 	return enriched, nil
 }
 
+// hydrateObjectsFromStore backfills the in-memory object cache from the
+// control-plane store authority so bucket-level object operations survive
+// gateway restarts. Records already cached win to preserve in-flight
+// mutations; lookup failures only log and keep the cache as-is.
+func (s *LocalStorageService) hydrateObjectsFromStore(ctx context.Context, tenantID string) {
+	if s.store == nil {
+		return
+	}
+	loaded, err := s.store.ListObjects(ctx, tenantID)
+	if err != nil {
+		slog.Warn("storage object hydrate from store failed",
+			"tenant_id", tenantID,
+			"err", err,
+		)
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, record := range loaded {
+		if record.TenantID != tenantID || record.ObjectID == "" || record.State == ports.StorageResourceDeleted {
+			continue
+		}
+		if _, exists := s.objects[record.ObjectID]; exists {
+			continue
+		}
+		s.objects[record.ObjectID] = record
+	}
+}
+
 // resolveBucket returns the bucket record for bucketID, preferring the
 // in-memory cache and falling back to the shared store authority so
 // bucket-level operations survive gateway restarts.
@@ -1379,6 +1426,9 @@ func (s *LocalStorageService) ListBucketObjects(ctx context.Context, request por
 	if !ok {
 		return ports.StorageBucketObjectListResult{}, fmt.Errorf("%w: bucket %s not found", ports.ErrNotFound, strings.TrimSpace(request.BucketID))
 	}
+	// Bucket object listings must survive gateway restarts: backfill the
+	// in-memory object cache from the control-plane store authority first.
+	s.hydrateObjectsFromStore(ctx, request.TenantID)
 	prefix := strings.TrimSpace(request.Prefix)
 	if prefix == "/" {
 		prefix = ""
@@ -1509,6 +1559,9 @@ func (s *LocalStorageService) DeleteBucketObject(ctx context.Context, request po
 	if !ok {
 		return ports.StorageBucketObjectDeleteResult{}, fmt.Errorf("%w: bucket %s not found", ports.ErrNotFound, strings.TrimSpace(request.BucketID))
 	}
+	// Backfill the object cache from the store authority so deletes survive
+	// gateway restarts the same way listings do.
+	s.hydrateObjectsFromStore(ctx, request.TenantID)
 	s.mu.Lock()
 	// delete prefix marker
 	if prefixes, exists := s.bucketPrefixes[storageBucketPrefixMapKey(bucket.TenantID, bucket.BucketID)]; exists {

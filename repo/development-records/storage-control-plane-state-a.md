@@ -126,3 +126,14 @@ python3 scripts/validate_storage_control_plane_state_live_gate.py --live --produ
 - 命名约定确认：`LocalStorageService` 与本包其他实现（`LocalInstanceService`/`LocalNetworkService`/`LocalVectorStoreService`/`LocalPlatformWorkloadService` 等）同名系，表示网关本地控制面实现（对照 `KubernetesPlatformWorkloadService` 等 provider 侧实现），符合既有约定，不改名；driven 适配器对应命名为 `MinIOObjectStore`/`KubernetesStorageProviderAdapter`。
 - 验证：`go build`/`go vet` 干净；objectstore/bootstrap/runtime/gateway 全包测试全绿。
 - 注意：统计范围为桶内 `{tenant-id}/` 前缀下的对象；绕过 ANI 直接上传到桶根目录的对象不会被计入（需按租户前缀布局）。
+
+### 追加：2026-08-27 对象列表重启后为空修复（现场反馈）
+
+现场反馈：每次重启 Gateway 后 `GET /api/v1/buckets/{bucket_id}/objects` 返回 `items:[]`，但 PG `storage_objects` 有记录（bucket="test2"、object_key=".env"、state=available）、MinIO 也有对象。根因：`ListBucketObjects`/`DeleteBucketObject` 只遍历内存 `s.objects` map，不回退 Store 权威——与先前 9 个桶级操作同型缺陷，当时修复未覆盖对象级遍历；旧的回归测试只断言「不报错」未断言列出内容，故漏网。
+
+修复（内存缓存 + Store 注水模式）：
+- 新增 `hydrateObjectsFromStore`：`ListBucketObjects`/`DeleteBucketObject` 进入逻辑前先把该租户对象从 Store 回填内存缓存（跳过已缓存记录以保留在途变更；失败仅记 Warn 不阻断）。
+- `DeleteObject`/`GetStorageObjectDownload` 补 Store 回退（内存未命中时经 `store.GetObject` 解析，含租户/墓碑校验）。
+- 强化回归测试 `TestLocalStorageServiceBucketObjectOperationsAfterRestart`：重启前先上传+完成对象，重启后断言列表包含该对象（Kind/Key）且可删除——不再只断言不报错。
+
+验证：`go build`/`go vet` 干净；runtime/gateway 全包测试全绿。
