@@ -66,3 +66,13 @@ python3 scripts/validate_storage_control_plane_state_live_gate.py --live --produ
 - B4 live：`production_shape.status=passed`；Gateway `storage-control-plane-state-20260803-v4`；最小 storage/vector 图经 rollout 后按原 ID/list 可回读；volume 幂等 replay/conflict；volume/filesystem/vector soft-delete API 隐藏 + PG 墓碑
 - live 修复：List volumes/buckets/vector 避免 pgx nested query `conn busy`；`DeleteFilesystem` 改为 Store-first（对齐 volume）；bucket 无 GET/DELETE by id，live runner 用 list 回读
 - 不含 Console / full platform production ready
+
+## 补强：2026-08-27 桶级操作重启后 NOT_FOUND 修复
+
+现场反馈 `GET /api/v1/buckets/{bucket_id}/objects` 在 Gateway 重启后返回 `NOT_FOUND: capability resource not found`：桶已持久化到 PG，但 9 个桶级操作（ListBucketObjects / DeleteBucketObject / CreateBucketPrefix / GenerateBucketObjectPresignedURL / SetStorageBucketACL / SetStorageBucketClass / ListStorageBucketLifecycleRules / CreateStorageBucketLifecycleRule / DeleteStorageBucketLifecycleRule）只查内存 `s.buckets` 缓存，不回退 Store 权威，违背本批次「PG 为权威、重启可恢复」目标。
+
+修复：新增 `LocalStorageService.resolveBucket`（内存缓存→`store.GetBucket` 回退，统一租户/墓碑校验），9 个操作全部改走该解析器；幂等 replay 改为先无锁读 `bucketUpdateIdem` 再经解析器回读，避免持写锁时再取读锁。回归测试：`TestLocalStorageServiceBucketObjectOperationsAfterRestart`（重启后的新服务实例对同一 Store 做 list objects / create prefix / list lifecycle / set ACL）。
+
+验证：`go test ./pkg/adapters/runtime/ -count=1`（除需管理员权限的 Windows 符号链接沙箱测试外全绿）、`go test ./services/ani-gateway/internal/router/ -run 'Storage|Bucket'`、`go vet` 干净。
+
+已知残留（未改，另行处理）：SetStorageBucketACL/Class 与单条生命周期规则增删仅写内存，未回写 Store；重启后这些变更会丢失（桶本身与 ListStorageBucketLifecycleRules 已可恢复）。

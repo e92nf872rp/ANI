@@ -1151,16 +1151,9 @@ func (s *LocalStorageService) CreateStorageObjectUpload(ctx context.Context, req
 			return s.signedUploadForObject(ctx, object, request.ExpiresSeconds)
 		}
 	}
-	bucket, ok := s.buckets[strings.TrimSpace(request.BucketID)]
 	s.mu.RUnlock()
-	if !ok && s.store != nil {
-		loaded, err := s.store.GetBucket(ctx, request.TenantID, strings.TrimSpace(request.BucketID))
-		if err == nil && loaded.BucketID != "" {
-			bucket = loaded
-			ok = true
-		}
-	}
-	if !ok || bucket.TenantID != request.TenantID {
+	bucket, ok := s.resolveBucket(ctx, request.TenantID, request.BucketID)
+	if !ok {
 		return ports.StorageObjectUploadRecord{}, fmt.Errorf("%w: bucket not found", ports.ErrNotFound)
 	}
 
@@ -1227,17 +1220,36 @@ func (s *LocalStorageService) GetStorageBucket(ctx context.Context, request port
 	return s.enrichStorageBucketLocked(bucket), nil
 }
 
-func (s *LocalStorageService) ListBucketObjects(_ context.Context, request ports.StorageBucketObjectListRequest) (ports.StorageBucketObjectListResult, error) {
+// resolveBucket returns the bucket record for bucketID, preferring the
+// in-memory cache and falling back to the shared store authority so
+// bucket-level operations survive gateway restarts.
+func (s *LocalStorageService) resolveBucket(ctx context.Context, tenantID string, bucketID string) (ports.StorageBucketRecord, bool) {
+	bucketID = strings.TrimSpace(bucketID)
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	bucket, ok := s.buckets[strings.TrimSpace(request.BucketID)]
-	if !ok || bucket.TenantID != request.TenantID {
+	bucket, ok := s.buckets[bucketID]
+	s.mu.RUnlock()
+	if ok && (bucket.TenantID != tenantID || bucket.State == ports.StorageResourceDeleted) {
+		return ports.StorageBucketRecord{}, false
+	}
+	if !ok && s.store != nil {
+		if loaded, err := s.store.GetBucket(ctx, tenantID, bucketID); err == nil && loaded.BucketID != "" {
+			return loaded, true
+		}
+	}
+	return bucket, ok
+}
+
+func (s *LocalStorageService) ListBucketObjects(ctx context.Context, request ports.StorageBucketObjectListRequest) (ports.StorageBucketObjectListResult, error) {
+	bucket, ok := s.resolveBucket(ctx, request.TenantID, request.BucketID)
+	if !ok {
 		return ports.StorageBucketObjectListResult{}, ports.ErrNotFound
 	}
 	prefix := strings.TrimSpace(request.Prefix)
 	if prefix == "/" {
 		prefix = ""
 	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	items := make([]ports.StorageBucketObjectEntry, 0)
 	// prefixes first
 	if prefixes, exists := s.bucketPrefixes[storageBucketPrefixMapKey(bucket.TenantID, bucket.BucketID)]; exists {
@@ -1358,12 +1370,11 @@ func (s *LocalStorageService) DeleteBucketObject(ctx context.Context, request po
 	if key == "" {
 		return ports.StorageBucketObjectDeleteResult{}, fmt.Errorf("%w: key is required", ports.ErrInvalid)
 	}
-	s.mu.Lock()
-	bucket, ok := s.buckets[strings.TrimSpace(request.BucketID)]
-	if !ok || bucket.TenantID != request.TenantID {
-		s.mu.Unlock()
+	bucket, ok := s.resolveBucket(ctx, request.TenantID, request.BucketID)
+	if !ok {
 		return ports.StorageBucketObjectDeleteResult{}, ports.ErrNotFound
 	}
+	s.mu.Lock()
 	// delete prefix marker
 	if prefixes, exists := s.bucketPrefixes[storageBucketPrefixMapKey(bucket.TenantID, bucket.BucketID)]; exists {
 		if _, has := prefixes[key]; has {
@@ -1401,7 +1412,7 @@ func (s *LocalStorageService) DeleteBucketObject(ctx context.Context, request po
 	return ports.StorageBucketObjectDeleteResult{BucketID: bucket.BucketID, Key: key, Deleted: true}, nil
 }
 
-func (s *LocalStorageService) CreateBucketPrefix(_ context.Context, request ports.StorageBucketPrefixCreateRequest) (ports.StorageBucketObjectEntry, error) {
+func (s *LocalStorageService) CreateBucketPrefix(ctx context.Context, request ports.StorageBucketPrefixCreateRequest) (ports.StorageBucketObjectEntry, error) {
 	prefix := strings.TrimSpace(request.Prefix)
 	if prefix == "" {
 		return ports.StorageBucketObjectEntry{}, fmt.Errorf("%w: prefix is required", ports.ErrInvalid)
@@ -1413,12 +1424,12 @@ func (s *LocalStorageService) CreateBucketPrefix(_ context.Context, request port
 	if err != nil {
 		return ports.StorageBucketObjectEntry{}, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	bucket, ok := s.buckets[strings.TrimSpace(request.BucketID)]
-	if !ok || bucket.TenantID != request.TenantID {
+	bucket, ok := s.resolveBucket(ctx, request.TenantID, request.BucketID)
+	if !ok {
 		return ports.StorageBucketObjectEntry{}, ports.ErrNotFound
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	mapKey := storageBucketPrefixMapKey(bucket.TenantID, bucket.BucketID)
 	if existingKey, ok := s.prefixIdem[idemKey]; ok {
 		if prefixes, exists := s.bucketPrefixes[mapKey]; exists {
@@ -1461,12 +1472,11 @@ func (s *LocalStorageService) GenerateBucketObjectPresignedURL(ctx context.Conte
 	if hours > 168 {
 		hours = 168
 	}
-	s.mu.RLock()
-	bucket, ok := s.buckets[strings.TrimSpace(request.BucketID)]
-	if !ok || bucket.TenantID != request.TenantID {
-		s.mu.RUnlock()
+	bucket, ok := s.resolveBucket(ctx, request.TenantID, request.BucketID)
+	if !ok {
 		return ports.StorageObjectDownloadRecord{}, ports.ErrNotFound
 	}
+	s.mu.RLock()
 	var object ports.StorageObjectRecord
 	found := false
 	for _, item := range s.objects {
@@ -1510,7 +1520,7 @@ func (s *LocalStorageService) GenerateBucketObjectPresignedURL(ctx context.Conte
 	}, nil
 }
 
-func (s *LocalStorageService) SetStorageBucketACL(_ context.Context, request ports.StorageBucketACLUpdateRequest) (ports.StorageBucketRecord, error) {
+func (s *LocalStorageService) SetStorageBucketACL(ctx context.Context, request ports.StorageBucketACLUpdateRequest) (ports.StorageBucketRecord, error) {
 	acl := strings.TrimSpace(request.ACL)
 	if acl != "private" && acl != "tenant_read" {
 		return ports.StorageBucketRecord{}, fmt.Errorf("%w: unsupported acl %q", ports.ErrUnsupported, request.ACL)
@@ -1519,17 +1529,20 @@ func (s *LocalStorageService) SetStorageBucketACL(_ context.Context, request por
 	if err != nil {
 		return ports.StorageBucketRecord{}, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if id, ok := s.bucketUpdateIdem[idemKey]; ok {
-		if bucket, exists := s.buckets[id]; exists {
-			return s.enrichStorageBucketLocked(bucket), nil
+	s.mu.RLock()
+	replayID, hasReplay := s.bucketUpdateIdem[idemKey]
+	s.mu.RUnlock()
+	if hasReplay {
+		if bucket, ok := s.resolveBucket(ctx, request.TenantID, replayID); ok {
+			return s.enrichStorageBucketRecord(bucket), nil
 		}
 	}
-	bucket, ok := s.buckets[strings.TrimSpace(request.BucketID)]
-	if !ok || bucket.TenantID != request.TenantID {
+	bucket, ok := s.resolveBucket(ctx, request.TenantID, request.BucketID)
+	if !ok {
 		return ports.StorageBucketRecord{}, ports.ErrNotFound
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	bucket.ACL = acl
 	bucket.ACLLabel = storageBucketACLLabel(acl)
 	if acl == "tenant_read" {
@@ -1543,7 +1556,7 @@ func (s *LocalStorageService) SetStorageBucketACL(_ context.Context, request por
 	return s.enrichStorageBucketLocked(bucket), nil
 }
 
-func (s *LocalStorageService) SetStorageBucketClass(_ context.Context, request ports.StorageBucketClassUpdateRequest) (ports.StorageBucketRecord, error) {
+func (s *LocalStorageService) SetStorageBucketClass(ctx context.Context, request ports.StorageBucketClassUpdateRequest) (ports.StorageBucketRecord, error) {
 	class := strings.TrimSpace(request.StorageClass)
 	if class != "standard" && class != "infrequent_access" {
 		return ports.StorageBucketRecord{}, fmt.Errorf("%w: unsupported storage_class %q", ports.ErrUnsupported, request.StorageClass)
@@ -1552,17 +1565,20 @@ func (s *LocalStorageService) SetStorageBucketClass(_ context.Context, request p
 	if err != nil {
 		return ports.StorageBucketRecord{}, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if id, ok := s.bucketUpdateIdem[idemKey]; ok {
-		if bucket, exists := s.buckets[id]; exists {
-			return s.enrichStorageBucketLocked(bucket), nil
+	s.mu.RLock()
+	replayID, hasReplay := s.bucketUpdateIdem[idemKey]
+	s.mu.RUnlock()
+	if hasReplay {
+		if bucket, ok := s.resolveBucket(ctx, request.TenantID, replayID); ok {
+			return s.enrichStorageBucketRecord(bucket), nil
 		}
 	}
-	bucket, ok := s.buckets[strings.TrimSpace(request.BucketID)]
-	if !ok || bucket.TenantID != request.TenantID {
+	bucket, ok := s.resolveBucket(ctx, request.TenantID, request.BucketID)
+	if !ok {
 		return ports.StorageBucketRecord{}, ports.ErrNotFound
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	bucket.StorageClass = class
 	bucket.UpdatedAt = s.now().UTC()
 	s.buckets[bucket.BucketID] = bucket
@@ -1570,11 +1586,9 @@ func (s *LocalStorageService) SetStorageBucketClass(_ context.Context, request p
 	return s.enrichStorageBucketLocked(bucket), nil
 }
 
-func (s *LocalStorageService) ListStorageBucketLifecycleRules(_ context.Context, request ports.StorageResourceGetRequest) (ports.StorageBucketLifecycleRuleListResult, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	bucket, ok := s.buckets[strings.TrimSpace(request.ResourceID)]
-	if !ok || bucket.TenantID != request.TenantID {
+func (s *LocalStorageService) ListStorageBucketLifecycleRules(ctx context.Context, request ports.StorageResourceGetRequest) (ports.StorageBucketLifecycleRuleListResult, error) {
+	bucket, ok := s.resolveBucket(ctx, request.TenantID, request.ResourceID)
+	if !ok {
 		return ports.StorageBucketLifecycleRuleListResult{}, ports.ErrNotFound
 	}
 	rules := append([]ports.StorageBucketLifecycleRule{}, bucket.LifecycleRules...)
@@ -1617,18 +1631,24 @@ func (s *LocalStorageService) SetStorageBucketLifecycleRules(ctx context.Context
 		s.mu.Unlock()
 		return ports.StorageBucketLifecycleRuleListResult{Items: append([]ports.StorageBucketLifecycleRule{}, rules...), Total: len(rules)}, nil
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if id, ok := s.bucketUpdateIdem[idemKey]; ok {
-		if bucket, exists := s.buckets[id]; exists {
-			existing := append([]ports.StorageBucketLifecycleRule{}, bucket.LifecycleRules...)
-			return ports.StorageBucketLifecycleRuleListResult{Items: existing, Total: len(existing)}, nil
+	s.mu.RLock()
+	replayID, hasReplay := s.bucketUpdateIdem[idemKey]
+	var replayRules []ports.StorageBucketLifecycleRule
+	if hasReplay {
+		if bucket, exists := s.buckets[replayID]; exists {
+			replayRules = append([]ports.StorageBucketLifecycleRule{}, bucket.LifecycleRules...)
 		}
 	}
-	bucket, ok := s.buckets[strings.TrimSpace(request.BucketID)]
-	if !ok || bucket.TenantID != request.TenantID {
+	s.mu.RUnlock()
+	if hasReplay && replayRules != nil {
+		return ports.StorageBucketLifecycleRuleListResult{Items: replayRules, Total: len(replayRules)}, nil
+	}
+	bucket, ok := s.resolveBucket(ctx, request.TenantID, request.BucketID)
+	if !ok {
 		return ports.StorageBucketLifecycleRuleListResult{}, ports.ErrNotFound
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	bucket.LifecycleRules = rules
 	bucket.LifecycleNote = storageBucketLifecycleNote(len(rules))
 	bucket.UpdatedAt = s.now().UTC()
@@ -1637,7 +1657,7 @@ func (s *LocalStorageService) SetStorageBucketLifecycleRules(ctx context.Context
 	return ports.StorageBucketLifecycleRuleListResult{Items: append([]ports.StorageBucketLifecycleRule{}, rules...), Total: len(rules)}, nil
 }
 
-func (s *LocalStorageService) CreateStorageBucketLifecycleRule(_ context.Context, request ports.StorageBucketLifecycleRuleCreateRequest) (ports.StorageBucketLifecycleRule, error) {
+func (s *LocalStorageService) CreateStorageBucketLifecycleRule(ctx context.Context, request ports.StorageBucketLifecycleRuleCreateRequest) (ports.StorageBucketLifecycleRule, error) {
 	if err := validateStorageBucketLifecycleRuleFields(request.Name, request.ExpireDays, request.ToInfrequentDays); err != nil {
 		return ports.StorageBucketLifecycleRule{}, err
 	}
@@ -1645,21 +1665,31 @@ func (s *LocalStorageService) CreateStorageBucketLifecycleRule(_ context.Context
 	if err != nil {
 		return ports.StorageBucketLifecycleRule{}, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if id, ok := s.bucketUpdateIdem[idemKey]; ok {
-		if bucket, exists := s.buckets[id]; exists {
+	replayedName := strings.TrimSpace(request.Name)
+	s.mu.RLock()
+	replayID, hasReplay := s.bucketUpdateIdem[idemKey]
+	var replayedRule *ports.StorageBucketLifecycleRule
+	if hasReplay {
+		if bucket, exists := s.buckets[replayID]; exists {
 			for _, rule := range bucket.LifecycleRules {
-				if rule.Name == strings.TrimSpace(request.Name) {
-					return rule, nil
+				if rule.Name == replayedName {
+					item := rule
+					replayedRule = &item
+					break
 				}
 			}
 		}
 	}
-	bucket, ok := s.buckets[strings.TrimSpace(request.BucketID)]
-	if !ok || bucket.TenantID != request.TenantID {
+	s.mu.RUnlock()
+	if replayedRule != nil {
+		return *replayedRule, nil
+	}
+	bucket, ok := s.resolveBucket(ctx, request.TenantID, request.BucketID)
+	if !ok {
 		return ports.StorageBucketLifecycleRule{}, ports.ErrNotFound
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	rule := ports.StorageBucketLifecycleRule{
 		ID:               uuid.NewString(),
 		Name:             strings.TrimSpace(request.Name),
@@ -1676,13 +1706,13 @@ func (s *LocalStorageService) CreateStorageBucketLifecycleRule(_ context.Context
 	return rule, nil
 }
 
-func (s *LocalStorageService) DeleteStorageBucketLifecycleRule(_ context.Context, request ports.StorageBucketLifecycleRuleDeleteRequest) (ports.StorageBucketLifecycleRuleListResult, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	bucket, ok := s.buckets[strings.TrimSpace(request.BucketID)]
-	if !ok || bucket.TenantID != request.TenantID {
+func (s *LocalStorageService) DeleteStorageBucketLifecycleRule(ctx context.Context, request ports.StorageBucketLifecycleRuleDeleteRequest) (ports.StorageBucketLifecycleRuleListResult, error) {
+	bucket, ok := s.resolveBucket(ctx, request.TenantID, request.BucketID)
+	if !ok {
 		return ports.StorageBucketLifecycleRuleListResult{}, ports.ErrNotFound
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	ruleID := strings.TrimSpace(request.RuleID)
 	kept := make([]ports.StorageBucketLifecycleRule, 0, len(bucket.LifecycleRules))
 	found := false

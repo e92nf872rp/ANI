@@ -129,6 +129,52 @@ func TestLocalStorageServicePersistsCreateAndDelete(t *testing.T) {
 	}
 }
 
+func TestLocalStorageServiceBucketObjectOperationsAfterRestart(t *testing.T) {
+	store := newSharedMemoryStorageStore()
+	service := NewLocalStorageService(WithStorageResourceStore(store))
+
+	bucket, err := service.CreateStorageBucket(context.Background(), ports.StorageBucketCreateRequest{
+		TenantID:       storageStoreTenantID,
+		IdempotencyKey: "persisted-bucket",
+		Name:           "persisted-bucket",
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageBucket() error = %v", err)
+	}
+
+	// Simulate Gateway restart: fresh service, same PG/memory store authority.
+	restarted := NewLocalStorageService(WithStorageResourceStore(store))
+	if _, err := restarted.ListBucketObjects(context.Background(), ports.StorageBucketObjectListRequest{
+		TenantID: storageStoreTenantID,
+		BucketID: bucket.BucketID,
+		Prefix:   "/",
+	}); err != nil {
+		t.Fatalf("ListBucketObjects after restart error = %v", err)
+	}
+	if _, err := restarted.CreateBucketPrefix(context.Background(), ports.StorageBucketPrefixCreateRequest{
+		TenantID:       storageStoreTenantID,
+		IdempotencyKey: "persisted-bucket-prefix",
+		BucketID:       bucket.BucketID,
+		Prefix:         "models/",
+	}); err != nil {
+		t.Fatalf("CreateBucketPrefix after restart error = %v", err)
+	}
+	if _, err := restarted.ListStorageBucketLifecycleRules(context.Background(), ports.StorageResourceGetRequest{
+		TenantID:   storageStoreTenantID,
+		ResourceID: bucket.BucketID,
+	}); err != nil {
+		t.Fatalf("ListStorageBucketLifecycleRules after restart error = %v", err)
+	}
+	if _, err := restarted.SetStorageBucketACL(context.Background(), ports.StorageBucketACLUpdateRequest{
+		TenantID:       storageStoreTenantID,
+		IdempotencyKey: "persisted-bucket-acl",
+		BucketID:       bucket.BucketID,
+		ACL:            "private",
+	}); err != nil {
+		t.Fatalf("SetStorageBucketACL after restart error = %v", err)
+	}
+}
+
 func TestMetadataStorageStoreUpdatesResourceState(t *testing.T) {
 	tx := &fakeMetadataTx{}
 	store := NewMetadataStorageStore(fakeMetadataStore{tx: tx}, WithStorageStoreClock(func() time.Time {
