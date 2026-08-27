@@ -113,3 +113,16 @@ python3 scripts/validate_storage_control_plane_state_live_gate.py --live --produ
 - 生命周期 Info：`storage bucket created`（含 object_store/control_plane_store 配置态）、`storage object upload created`（object_id/bucket_id/key/expires_at）、`storage object completed`（size_bytes）、`storage object deleted`。
 - 异常 Warn：`storage bucket object store ensure failed`、`storage object complete precondition failed`（412 前置失败原因）、`storage object/bucket control-plane persist failed`（集中在 `upsertObject`/`upsertBucket`，PG 写入失败必留痕）。
 - 结合已有 `http request` 访问日志与 `storage bucket resolve miss`，任一现场问题可用「访问日志定位请求 → 链路日志定位环节」两步排查。
+
+### 追加：2026-08-27 桶统计对齐真实对象存储（现场反馈）
+
+现场核对 `GET /api/v1/buckets` 与 MinIO 真实返回：桶 `test2` API 报 `object_count=0/size_bytes=0`，MinIO 实际 `ani-s13-test2` 有 3 个对象、52719 字节。根因：桶统计只数控制面对象记录（经 ANI API 创建且接 PG 时恒为 0/0），从不查真实对象存储。
+
+修复（对象存储为用量权威）：
+- `ports.ObjectStore` 新增 `BucketUsage(ctx, class, tenantID) (BucketUsage, error)`；MinIO 适配器用 S3 ListObjectsV2（`prefix={tenant-id}/`，按租户隔离，分页聚合）实现；`NotConfigured` 与测试 fake 同步补齐。
+- `LocalStorageService.enrichBucketUsage`：`GetStorageBucket`/`ListStorageBuckets` 在配置对象存储时以真实用量覆盖 `object_count`/`size_bytes`；查询失败降级保留控制面统计并记 debug 日志；网络调用移出锁外。
+- 字段核对结论：桶名 `test2` vs `ani-s13-test2` 为 `OBJECT_STORE_BUCKET_PREFIX` 前缀设计，一致；`created_at` 为控制面记录时间，早于 MinIO 桶惰性创建时间，属语义差异；`access_mode/acl` 为控制面语义，不从 S3 实时读取。
+- 测试：`TestMinIOObjectStoreBucketUsageAggregatesTenantScopedListing`（两页分页聚合 3 对象/52719 字节 + 租户前缀 + SigV4 断言）、`TestLocalStorageServiceBucketStatsReflectObjectStoreUsage`（list/get 反映真实用量 + 查询失败降级）。
+- 命名约定确认：`LocalStorageService` 与本包其他实现（`LocalInstanceService`/`LocalNetworkService`/`LocalVectorStoreService`/`LocalPlatformWorkloadService` 等）同名系，表示网关本地控制面实现（对照 `KubernetesPlatformWorkloadService` 等 provider 侧实现），符合既有约定，不改名；driven 适配器对应命名为 `MinIOObjectStore`/`KubernetesStorageProviderAdapter`。
+- 验证：`go build`/`go vet` 干净；objectstore/bootstrap/runtime/gateway 全包测试全绿。
+- 注意：统计范围为桶内 `{tenant-id}/` 前缀下的对象；绕过 ANI 直接上传到桶根目录的对象不会被计入（需按租户前缀布局）。

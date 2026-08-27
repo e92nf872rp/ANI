@@ -460,6 +460,62 @@ func TestLocalStorageServiceBucketsAndSignedObjectURLsUseObjectStorePort(t *test
 	}
 }
 
+func TestLocalStorageServiceBucketStatsReflectObjectStoreUsage(t *testing.T) {
+	objectStore := &fakeObjectStore{
+		uploadURL: "https://objects.local/upload/report.csv",
+		expiresAt: time.Date(2026, 8, 27, 10, 0, 0, 0, time.UTC),
+	}
+	service := NewLocalStorageService(WithStorageObjectStore(objectStore))
+
+	bucket, err := service.CreateStorageBucket(context.Background(), ports.StorageBucketCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "bucket-usage",
+		Name:           "datasets-usage",
+		Region:         "local",
+		AccessMode:     "private",
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageBucket() error = %v", err)
+	}
+
+	// Object store reports live usage; bucket stats must reflect the S3
+	// authority instead of control-plane records alone.
+	objectStore.statOK = true
+	objectStore.usage = ports.BucketUsage{ObjectCount: 3, SizeBytes: 52719}
+
+	listed, err := service.ListStorageBuckets(context.Background(), ports.StorageResourceListRequest{TenantID: "tenant-a"})
+	if err != nil {
+		t.Fatalf("ListStorageBuckets() error = %v", err)
+	}
+	if len(listed) != 1 || listed[0].ObjectCount != 3 || listed[0].SizeBytes != 52719 {
+		t.Fatalf("listed buckets = %#v, want object_count=3 size_bytes=52719 from object store", listed)
+	}
+	if objectStore.usageClass != ports.BucketClass("datasets-usage") || objectStore.usageTenantID != "tenant-a" {
+		t.Fatalf("usage lookup args = class=%q tenant=%q, want datasets-usage/tenant-a", objectStore.usageClass, objectStore.usageTenantID)
+	}
+
+	got, err := service.GetStorageBucket(context.Background(), ports.StorageResourceGetRequest{
+		TenantID:   "tenant-a",
+		ResourceID: bucket.BucketID,
+	})
+	if err != nil {
+		t.Fatalf("GetStorageBucket() error = %v", err)
+	}
+	if got.ObjectCount != 3 || got.SizeBytes != 52719 {
+		t.Fatalf("GetStorageBucket() stats = count=%d size=%d, want object store usage", got.ObjectCount, got.SizeBytes)
+	}
+
+	// Usage lookup failures fall back to control-plane stats without error.
+	objectStore.usageErr = ports.ErrUnsupported
+	fallback, err := service.ListStorageBuckets(context.Background(), ports.StorageResourceListRequest{TenantID: "tenant-a"})
+	if err != nil {
+		t.Fatalf("ListStorageBuckets() fallback error = %v", err)
+	}
+	if len(fallback) != 1 || fallback[0].ObjectCount != 0 || fallback[0].SizeBytes != 0 {
+		t.Fatalf("fallback buckets = %#v, want control-plane stats kept on usage lookup failure", fallback)
+	}
+}
+
 func TestLocalStorageServiceCompleteStorageObject(t *testing.T) {
 	objectStore := &fakeObjectStore{
 		uploadURL: "https://objects.local/upload/report.csv",
@@ -539,11 +595,24 @@ type fakeObjectStore struct {
 	statOK       bool
 	statErr      error
 	statMetadata ports.ObjectMetadata
+	usage        ports.BucketUsage
+	usageErr     error
+	usageClass   ports.BucketClass
+	usageTenantID string
 }
 
 func (s *fakeObjectStore) EnsureBucket(_ context.Context, class ports.BucketClass) error {
 	s.ensureBucket = class
 	return nil
+}
+
+func (s *fakeObjectStore) BucketUsage(_ context.Context, class ports.BucketClass, tenantID string) (ports.BucketUsage, error) {
+	if !s.statOK {
+		return ports.BucketUsage{}, ports.ErrUnsupported
+	}
+	s.usageClass = class
+	s.usageTenantID = tenantID
+	return s.usage, s.usageErr
 }
 
 func (s *fakeObjectStore) Health(context.Context) error {

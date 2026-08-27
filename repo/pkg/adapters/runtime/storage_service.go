@@ -1132,17 +1132,23 @@ func (s *LocalStorageService) ListStorageBuckets(ctx context.Context, request po
 		for _, bucket := range items {
 			out = append(out, s.enrichStorageBucketRecord(bucket))
 		}
+		for i := range out {
+			s.enrichBucketUsage(ctx, &out[i])
+		}
 		sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 		return out, nil
 	}
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	items := make([]ports.StorageBucketRecord, 0, len(s.buckets))
 	for _, bucket := range s.buckets {
 		if bucket.TenantID != request.TenantID || bucket.State == ports.StorageResourceDeleted {
 			continue
 		}
 		items = append(items, s.enrichStorageBucketLocked(bucket))
+	}
+	s.mu.RUnlock()
+	for i := range items {
+		s.enrichBucketUsage(ctx, &items[i])
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
 	return items, nil
@@ -1307,15 +1313,20 @@ func (s *LocalStorageService) GetStorageBucket(ctx context.Context, request port
 		if err != nil {
 			return ports.StorageBucketRecord{}, err
 		}
-		return s.enrichStorageBucketRecord(bucket), nil
+		enriched := s.enrichStorageBucketRecord(bucket)
+		s.enrichBucketUsage(ctx, &enriched)
+		return enriched, nil
 	}
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	bucket, ok := s.buckets[strings.TrimSpace(request.ResourceID)]
 	if !ok || bucket.TenantID != request.TenantID || bucket.State == ports.StorageResourceDeleted {
+		s.mu.RUnlock()
 		return ports.StorageBucketRecord{}, ports.ErrNotFound
 	}
-	return s.enrichStorageBucketLocked(bucket), nil
+	enriched := s.enrichStorageBucketLocked(bucket)
+	s.mu.RUnlock()
+	s.enrichBucketUsage(ctx, &enriched)
+	return enriched, nil
 }
 
 // resolveBucket returns the bucket record for bucketID, preferring the
@@ -1861,6 +1872,27 @@ func (s *LocalStorageService) enrichStorageBucketRecord(bucket ports.StorageBuck
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.enrichStorageBucketLocked(bucket)
+}
+
+// enrichBucketUsage reflects live usage from the object store authority into
+// bucket statistics so object_count/size_bytes match the S3-compatible
+// backend instead of control-plane records alone. Lookup failures keep the
+// control-plane stats and only log at debug level.
+func (s *LocalStorageService) enrichBucketUsage(ctx context.Context, bucket *ports.StorageBucketRecord) {
+	if s.objectStore == nil {
+		return
+	}
+	usage, err := s.objectStore.BucketUsage(ctx, ports.BucketClass(bucket.Name), bucket.TenantID)
+	if err != nil {
+		slog.Debug("storage bucket usage lookup failed",
+			"tenant_id", bucket.TenantID,
+			"bucket", bucket.Name,
+			"err", err,
+		)
+		return
+	}
+	bucket.ObjectCount = int(usage.ObjectCount)
+	bucket.SizeBytes = usage.SizeBytes
 }
 
 func (s *LocalStorageService) enrichStorageBucketLocked(bucket ports.StorageBucketRecord) ports.StorageBucketRecord {
