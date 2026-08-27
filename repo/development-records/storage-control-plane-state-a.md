@@ -99,3 +99,17 @@ python3 scripts/validate_storage_control_plane_state_live_gate.py --live --produ
 测试：服务级 `TestLocalStorageServiceCompleteStorageObject`（未上传→412、上传后→available + 大小回填、未知对象→404）；HTTP 级 `TestStorageHTTPCompleteObjectConfirmsPresignedUpload`（建桶→预签名上传→缺幂等键 400→确认 200→未知对象 404）；中间件 `TestAccessLogEmitsStructuredRequestLines`（200/404/500/健康探针分级断言）。
 
 验证：`go build`/`go vet` 干净；`go test ./services/ani-gateway/... -count=1` 全绿；`go test ./pkg/adapters/runtime/ -count=1`（跳过 Windows 符号链接沙箱测试）全绿；authz drift/路由覆盖/生成测试、SDK alpha、兼容基线校验全部通过。
+
+### 追加：2026-08-27 对象确认 23502 漂移修复 + 处理链路日志（现场反馈）
+
+现场反馈两个问题：① `POST /objects/{object_id}/complete` 报 `upsert storage object: ERROR: null value in column "bucket_id" of relation "storage_objects" violates not-null constraint (SQLSTATE 23502)`；② 请求日志已有，但还需要处理链路日志。
+
+问题①根因：权威迁移 `20260803_001` 中 `storage_objects.bucket_id` 是**可空增量列**（可选 FK 目标），控制面 upsert 从不写该列；但现场库被迁移之外的手动 ALTER 加了 NOT NULL 约束（与先前 `storage_filesystems.storage_class` 同型漂移）。修复：
+- 新增幂等迁移 `deploy/migrations/20260827_001_storage_objects_bucket_id_nullable.sql`：`ALTER TABLE storage_objects ALTER COLUMN bucket_id DROP NOT NULL`，干净库上为 no-op；**现场需应用该迁移后重试**。
+- 顺带修复相邻缺陷：`CreateStorageObjectUpload` 创建时即 `upsertObject` 持久化，预签名上传在 Gateway 重启后仍可 complete（此前重启会丢对象元数据导致 404）。
+- 回归测试：`TestLocalStorageServiceCompleteObjectPersistsToSharedStore`（接共享 Store：建桶→上传→确认→重启实例回读；重启后对旧上传仍可 complete）。
+
+问题②处理链路日志（均为 slog 结构化，含 tenant_id/资源 id）：
+- 生命周期 Info：`storage bucket created`（含 object_store/control_plane_store 配置态）、`storage object upload created`（object_id/bucket_id/key/expires_at）、`storage object completed`（size_bytes）、`storage object deleted`。
+- 异常 Warn：`storage bucket object store ensure failed`、`storage object complete precondition failed`（412 前置失败原因）、`storage object/bucket control-plane persist failed`（集中在 `upsertObject`/`upsertBucket`，PG 写入失败必留痕）。
+- 结合已有 `http request` 访问日志与 `storage bucket resolve miss`，任一现场问题可用「访问日志定位请求 → 链路日志定位环节」两步排查。

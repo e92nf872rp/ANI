@@ -1009,6 +1009,12 @@ func (s *LocalStorageService) DeleteObject(ctx context.Context, request ports.St
 	if err := s.upsertObject(ctx, record); err != nil {
 		return ports.StorageObjectRecord{}, err
 	}
+	slog.Info("storage object deleted",
+		"tenant_id", record.TenantID,
+		"object_id", record.ObjectID,
+		"bucket", record.Bucket,
+		"key", record.Key,
+	)
 	return record, nil
 }
 
@@ -1082,6 +1088,12 @@ func (s *LocalStorageService) CreateStorageBucket(ctx context.Context, request p
 	}
 	if s.objectStore != nil {
 		if err := s.objectStore.EnsureBucket(ctx, ports.BucketClass(record.Name)); err != nil {
+			slog.Warn("storage bucket object store ensure failed",
+				"tenant_id", record.TenantID,
+				"bucket_id", record.BucketID,
+				"name", record.Name,
+				"err", err,
+			)
 			record.State = ports.StorageResourceFailed
 			record.Reason = err.Error()
 			record.UpdatedAt = s.now().UTC()
@@ -1095,6 +1107,14 @@ func (s *LocalStorageService) CreateStorageBucket(ctx context.Context, request p
 			return ports.StorageBucketRecord{}, err
 		}
 	}
+	slog.Info("storage bucket created",
+		"tenant_id", record.TenantID,
+		"bucket_id", record.BucketID,
+		"name", record.Name,
+		"access_mode", record.AccessMode,
+		"object_store_configured", s.objectStore != nil,
+		"control_plane_store_configured", s.store != nil,
+	)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.buckets[record.BucketID] = record
@@ -1176,10 +1196,23 @@ func (s *LocalStorageService) CreateStorageObjectUpload(ctx context.Context, req
 	if err != nil {
 		return ports.StorageObjectUploadRecord{}, err
 	}
+	// Persist at creation so a presigned upload survives gateway restarts
+	// between upload and complete; the store is the control-plane authority.
+	if err := s.upsertObject(ctx, object); err != nil {
+		return ports.StorageObjectUploadRecord{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.objects[object.ObjectID] = object
 	s.uploadIdem[idemKey] = object.ObjectID
+	slog.Info("storage object upload created",
+		"tenant_id", object.TenantID,
+		"object_id", object.ObjectID,
+		"bucket_id", strings.TrimSpace(request.BucketID),
+		"bucket", object.Bucket,
+		"key", object.Key,
+		"expires_at", result.ExpiresAt.Format(time.RFC3339),
+	)
 	return result, nil
 }
 
@@ -1232,6 +1265,13 @@ func (s *LocalStorageService) CompleteStorageObject(ctx context.Context, request
 	if s.objectStore != nil {
 		metadata, err := s.objectStore.StatObject(ctx, storageObjectRef(object))
 		if err != nil {
+			slog.Warn("storage object complete precondition failed",
+				"tenant_id", request.TenantID,
+				"object_id", objectID,
+				"bucket", object.Bucket,
+				"key", object.Key,
+				"err", err,
+			)
 			return ports.StorageObjectRecord{}, fmt.Errorf("%w: object content not uploaded yet: %v", ports.ErrFailedPrecondition, err)
 		}
 		if metadata.SizeBytes > 0 {
@@ -1250,6 +1290,14 @@ func (s *LocalStorageService) CompleteStorageObject(ctx context.Context, request
 	if err := s.upsertObject(ctx, object); err != nil {
 		return ports.StorageObjectRecord{}, err
 	}
+	slog.Info("storage object completed",
+		"tenant_id", object.TenantID,
+		"object_id", objectID,
+		"bucket", object.Bucket,
+		"key", object.Key,
+		"size_bytes", object.SizeBytes,
+		"control_plane_store_configured", s.store != nil,
+	)
 	return object, nil
 }
 
@@ -2045,14 +2093,34 @@ func (s *LocalStorageService) upsertObject(ctx context.Context, record ports.Sto
 	if s.store == nil {
 		return nil
 	}
-	return s.store.UpsertObject(ctx, record)
+	if err := s.store.UpsertObject(ctx, record); err != nil {
+		slog.Warn("storage object control-plane persist failed",
+			"tenant_id", record.TenantID,
+			"object_id", record.ObjectID,
+			"bucket", record.Bucket,
+			"state", string(record.State),
+			"err", err,
+		)
+		return err
+	}
+	return nil
 }
 
 func (s *LocalStorageService) upsertBucket(ctx context.Context, record ports.StorageBucketRecord) error {
 	if s.store == nil {
 		return nil
 	}
-	return s.store.UpsertBucket(ctx, record)
+	if err := s.store.UpsertBucket(ctx, record); err != nil {
+		slog.Warn("storage bucket control-plane persist failed",
+			"tenant_id", record.TenantID,
+			"bucket_id", record.BucketID,
+			"name", record.Name,
+			"state", string(record.State),
+			"err", err,
+		)
+		return err
+	}
+	return nil
 }
 
 func (s *LocalStorageService) upsertVolumeSnapshot(ctx context.Context, record ports.VolumeSnapshotRecord) error {
