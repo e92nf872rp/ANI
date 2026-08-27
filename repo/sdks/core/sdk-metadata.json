@@ -1019,6 +1019,12 @@
       "scope": "scope:objects:read"
     },
     {
+      "operationId": "completeStorageObject",
+      "method": "POST",
+      "path": "/objects/{object_id}/complete",
+      "scope": "scope:objects:create"
+    },
+    {
       "operationId": "downloadStorageObject",
       "method": "GET",
       "path": "/objects/{object_id}/download",
@@ -1664,6 +1670,7 @@
     "StorageFilesystemMountRequest",
     "StorageFilesystemUnmountRequest",
     "StorageObject",
+    "StorageObjectCompleteRequest",
     "StorageObjectDownloadInfo",
     "StorageObjectListResponse",
     "StorageObjectUploadRequest",
@@ -1766,6 +1773,7 @@
     "createNetworkVPC",
     "createStorageObject",
     "uploadStorageObject",
+    "completeStorageObject",
     "createObservabilityAlertRule",
     "updateObservabilityAlertRule",
     "createPlatformWorkload",

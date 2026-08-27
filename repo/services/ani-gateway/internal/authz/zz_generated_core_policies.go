@@ -1183,6 +1183,13 @@ var generatedCorePolicies = map[string]Policy{
 		PathTemplate:         "/api/v1/objects/{object_id}",
 		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
 	},
+	"POST /api/v1/objects/{object_id}/complete": {
+		Source:               PolicySourceLegacy,
+		OperationID:          "completeStorageObject",
+		Method:               "POST",
+		PathTemplate:         "/api/v1/objects/{object_id}/complete",
+		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
+	},
 	"GET /api/v1/objects/{object_id}/download": {
 		Source:               PolicySourceLegacy,
 		OperationID:          "downloadStorageObject",

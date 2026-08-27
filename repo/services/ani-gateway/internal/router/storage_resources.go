@@ -152,6 +152,10 @@ type storageBucketACLUpdateRequest struct {
 	ACL            string `json:"acl"`
 }
 
+type storageObjectCompleteRequest struct {
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
 type storageBucketClassUpdateRequest struct {
 	IdempotencyKey string `json:"idempotency_key"`
 	StorageClass   string `json:"storage_class"`
@@ -462,6 +466,7 @@ func registerStorageResourcesWithServiceAndTasks(v1 *route.RouterGroup, service 
 	v1.GET("/objects/:object_id", api.getObject)
 	v1.DELETE("/objects/:object_id", api.deleteObject)
 	v1.GET("/objects/:object_id/download", api.downloadStorageObject)
+	v1.POST("/objects/:object_id/complete", api.completeStorageObject)
 }
 
 func (api *storageAPI) createVolume(ctx context.Context, c *app.RequestContext) {
@@ -1141,6 +1146,24 @@ func (api *storageAPI) downloadStorageObject(ctx context.Context, c *app.Request
 	c.JSON(http.StatusOK, storageObjectDownloadFromRecord(record))
 }
 
+func (api *storageAPI) completeStorageObject(ctx context.Context, c *app.RequestContext) {
+	var req storageObjectCompleteRequest
+	if err := c.BindJSON(&req); err != nil {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid storage object complete request")
+		return
+	}
+	record, err := api.service.CompleteStorageObject(ctx, ports.StorageObjectCompleteRequest{
+		TenantID:       instanceTenantID(c),
+		ObjectID:       c.Param("object_id"),
+		IdempotencyKey: req.IdempotencyKey,
+	})
+	if err != nil {
+		writeStorageError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, storageObjectFromRecord(record))
+}
+
 func (api *storageAPI) createVolumeSnapshot(ctx context.Context, c *app.RequestContext) {
 	var req storageCreateSnapshotRequest
 	if err := c.BindJSON(&req); err != nil {
@@ -1474,6 +1497,8 @@ func writeStorageError(c *app.RequestContext, err error) {
 		writeInstanceError(c, http.StatusNotFound, "NOT_FOUND", err.Error())
 	case errors.Is(err, ports.ErrConflict):
 		writeInstanceError(c, http.StatusConflict, "CONFLICT", err.Error())
+	case errors.Is(err, ports.ErrFailedPrecondition):
+		writeInstanceError(c, http.StatusPreconditionFailed, "PRECONDITION_FAILED", err.Error())
 	case errors.Is(err, ports.ErrUnsupported):
 		writeInstanceError(c, http.StatusBadRequest, "UNSUPPORTED", err.Error())
 	case errors.Is(err, ports.ErrInvalid):

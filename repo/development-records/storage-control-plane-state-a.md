@@ -82,3 +82,20 @@ python3 scripts/validate_storage_control_plane_state_live_gate.py --live --produ
 - `resolveBucket` 未命中时输出 `slog.Warn("storage bucket resolve miss")`，含 tenant_id/bucket_id/reason（memory_miss / store_lookup_miss / memory_record_unusable）/control_plane_store_configured/store_err。
 - 9 个桶级操作的 404 消息携带 bucket_id（`capability resource not found: bucket <id> not found`），errors.Is 语义不变。
 - Gateway 启动日志新增 `storage provider runtime configured`，暴露 control_plane_store 是否接入（仅当 `STORAGE_PROVIDER=kubernetes_rest` 或 `OBJECT_STORE_PROVIDER=minio` 且配置 `DATABASE_URL` 时才接 PG）。排查要点：若 control_plane_store=false，桶为纯内存态，重启/多副本必丢，需补环境变量或重建桶；若桶在纯内存时期创建，从未写入 PG，需重建。
+
+### 追加：2026-08-27 对象上传确认端点 + 请求访问日志（现场反馈）
+
+现场反馈两个问题：① 前端预签名上传完成后调用 `POST /api/v1/objects/{object_id}/complete` 返回 `404 page not found`（Hertz 默认 NoRoute，该端点从未在契约中定义）；② 运行时无请求日志，无法排查。
+
+契约优先新增（v1 允许增量端点）：
+- `api/openapi/v1.yaml`：新增 `POST /objects/{object_id}/complete`（operationId `completeStorageObject`，x-ani-rbac-scope `scope:objects:create`，请求体仅 `idempotency_key`，响应 200/400/401/403/404/412）与 `StorageObjectCompleteRequest` schema。
+- `ports.StorageService` 新增 `CompleteStorageObject`；`LocalStorageService` 实现：内存→Store 回退解析对象（租户/墓碑校验），配置对象存储时 `StatObject` 校验内容已上传并回写实际大小/内容类型，未上传返回 `ErrFailedPrecondition`（412），完成后置 `available` 并 `upsertObject` 回写。
+- Gateway：`POST /api/v1/objects/:object_id/complete` 路由 + `completeStorageObject` handler + `writeStorageError` 新增 `ErrFailedPrecondition → 412 PRECONDITION_FAILED` 映射；authz 注册表重新生成（drift/路由覆盖校验全绿）。
+- 生成链同步：SDK alpha（go/java/python/typescript + metadata）、前端 `core-schema.d.ts`、`core-v1-compatibility-baseline.yaml` 全部重新生成并校验通过；`validate_sdk_alpha.py` 顺带修复 `command_available` 在工具缺失时抛 FileNotFoundError 未兜底的缺陷（现按不可用处理）。
+
+运行时可观测性：
+- 新增 `internal/middleware/access_log.go`：每请求一条结构化日志（method/path/status/latency_ms/request_id/tenant_id/user_id），≥500 记 ERROR、≥400 记 WARN、健康探针（/health /ready /healthz /readyz）降为 DEBUG；注册于 RequestID 之后，链路变为 RequestID → AccessLog → TLS → Auth → RBAC → RateLimit → Idempotency → Audit → Route。
+
+测试：服务级 `TestLocalStorageServiceCompleteStorageObject`（未上传→412、上传后→available + 大小回填、未知对象→404）；HTTP 级 `TestStorageHTTPCompleteObjectConfirmsPresignedUpload`（建桶→预签名上传→缺幂等键 400→确认 200→未知对象 404）；中间件 `TestAccessLogEmitsStructuredRequestLines`（200/404/500/健康探针分级断言）。
+
+验证：`go build`/`go vet` 干净；`go test ./services/ani-gateway/... -count=1` 全绿；`go test ./pkg/adapters/runtime/ -count=1`（跳过 Windows 符号链接沙箱测试）全绿；authz drift/路由覆盖/生成测试、SDK alpha、兼容基线校验全部通过。

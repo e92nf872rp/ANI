@@ -1204,6 +1204,55 @@ func (s *LocalStorageService) GetStorageObjectDownload(ctx context.Context, requ
 	}, nil
 }
 
+func (s *LocalStorageService) CompleteStorageObject(ctx context.Context, request ports.StorageObjectCompleteRequest) (ports.StorageObjectRecord, error) {
+	if strings.TrimSpace(request.TenantID) == "" || strings.TrimSpace(request.ObjectID) == "" {
+		return ports.StorageObjectRecord{}, fmt.Errorf("%w: tenant_id and object_id are required", ports.ErrInvalid)
+	}
+	if _, err := requireIdempotencyKey(request.TenantID, request.IdempotencyKey); err != nil {
+		return ports.StorageObjectRecord{}, err
+	}
+	objectID := strings.TrimSpace(request.ObjectID)
+	s.mu.RLock()
+	object, ok := s.objects[objectID]
+	s.mu.RUnlock()
+	if !ok && s.store != nil {
+		if loaded, err := s.store.GetObject(ctx, request.TenantID, objectID); err == nil && loaded.ObjectID != "" {
+			object = loaded
+			ok = true
+		}
+	}
+	if !ok || object.TenantID != request.TenantID || object.State == ports.StorageResourceDeleted {
+		slog.Warn("storage object complete miss",
+			"tenant_id", request.TenantID,
+			"object_id", objectID,
+			"control_plane_store_configured", s.store != nil,
+		)
+		return ports.StorageObjectRecord{}, fmt.Errorf("%w: object %s not found", ports.ErrNotFound, objectID)
+	}
+	if s.objectStore != nil {
+		metadata, err := s.objectStore.StatObject(ctx, storageObjectRef(object))
+		if err != nil {
+			return ports.StorageObjectRecord{}, fmt.Errorf("%w: object content not uploaded yet: %v", ports.ErrFailedPrecondition, err)
+		}
+		if metadata.SizeBytes > 0 {
+			object.SizeBytes = metadata.SizeBytes
+		}
+		if strings.TrimSpace(metadata.ContentType) != "" {
+			object.ContentType = metadata.ContentType
+		}
+	}
+	object.State = ports.StorageResourceAvailable
+	object.Reason = "upload completed"
+	object.UpdatedAt = s.now().UTC()
+	s.mu.Lock()
+	s.objects[objectID] = object
+	s.mu.Unlock()
+	if err := s.upsertObject(ctx, object); err != nil {
+		return ports.StorageObjectRecord{}, err
+	}
+	return object, nil
+}
+
 func (s *LocalStorageService) GetStorageBucket(ctx context.Context, request ports.StorageResourceGetRequest) (ports.StorageBucketRecord, error) {
 	if s.store != nil {
 		bucket, err := s.store.GetBucket(ctx, request.TenantID, strings.TrimSpace(request.ResourceID))
