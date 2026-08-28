@@ -29,6 +29,7 @@ var (
 	ErrUserAlreadyTenantAdmin = errors.New("user already tenant admin")
 	ErrRoleChangeInvalid      = errors.New("role change invalid")
 	ErrPasswordSameAsOld      = errors.New("password same as old")
+	ErrUserStateInvalid       = errors.New("user state invalid")
 	// Metadata transaction sentinel errors.
 	ErrMetadataTenantTxBegin    = errors.New("metadata tenant tx begin")
 	ErrMetadataTenantTxCommit   = errors.New("metadata tenant tx commit")

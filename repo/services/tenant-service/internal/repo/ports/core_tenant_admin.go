@@ -64,7 +64,7 @@ type TenantAdminSvcClient interface {
 	// SetStatus 更新 users.status（active | disabled）。
 	SetStatus(ctx context.Context, tenantID, userID uuid.UUID, status string) error
 
-	// SoftDelete 软删除（is_deleted=TRUE, deleted_at=now(), status=disabled）。
+	// SoftDelete 软删除（is_deleted=TRUE, deleted_at=now()；不改 users.status）。
 	SoftDelete(ctx context.Context, tenantID, userID uuid.UUID) error
 
 	// ResetPassword 更新 password_hash（明文不落日志/审计/响应）。

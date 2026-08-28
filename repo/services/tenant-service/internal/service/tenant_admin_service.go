@@ -808,6 +808,7 @@ func (s *TenantAdminService) GetTenantAdminRole(ctx context.Context, req *tenant
 	// 步骤 3：映射 gRPC（TenantID 可为 nil — 平台账户场景）
 	out := &tenantv1.UserPermissions{
 		UserId: perms.UserID.String(),
+		RoleId: perms.RoleID.String(),
 		Role:   perms.Role,
 	}
 	if perms.TenantID != nil {
@@ -880,16 +881,134 @@ func (s *TenantAdminService) ResetTenantAdminPassword(ctx context.Context, req *
 	return &commonv1.IdempotentResult{Id: userID.String(), Message: "password reset"}, nil
 }
 
-func (s *TenantAdminService) DisableTenantAdmin(context.Context, *tenantv1.DisableTenantAdminRequest) (*commonv1.IdempotentResult, error) {
-	return nil, unimplemented()
+// DisableTenantAdmin 禁用管理员（SPEC §5.1.6 / US-008）。
+func (s *TenantAdminService) DisableTenantAdmin(ctx context.Context, req *tenantv1.DisableTenantAdminRequest) (*commonv1.IdempotentResult, error) {
+	const action = "tenant_admin.disable"
+
+	// 步骤 1：校验依赖
+	if s.core == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant admin api unavailable")
+	}
+	if req == nil {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "request required")
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, nil, err, nil)
+		return nil, err
+	}
+
+	// 步骤 2：解析路径参数
+	tenantID, err := parseTenantAdminUUID(req.GetTenantId(), "tenant_id")
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, nil, err, nil)
+		return nil, err
+	}
+	userID, err := parseTenantAdminUUID(req.GetUserId(), "user_id")
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+		return nil, err
+	}
+
+	details := map[string]any{
+		"tenant_id": tenantID.String(),
+		"target_id": userID.String(),
+	}
+
+	// 步骤 3：Core 更新状态（Core 层校验不可重复 disable）
+	if err := s.core.SetStatus(ctx, tenantID, userID, ports.TenantAdminUserStatusDisabled); err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, details, mapped, &tenantID)
+		return nil, mapped
+	}
+
+	// 步骤 4：写审计 success
+	writeAuditSuccess(ctx, s.audit, auditResourceTenantAdmin, action, details, &tenantID)
+	return &commonv1.IdempotentResult{Id: userID.String(), Message: "admin disabled"}, nil
 }
 
-func (s *TenantAdminService) EnableTenantAdmin(context.Context, *tenantv1.EnableTenantAdminRequest) (*commonv1.IdempotentResult, error) {
-	return nil, unimplemented()
+// EnableTenantAdmin 启用管理员（SPEC §5.1.6 / US-008）。
+func (s *TenantAdminService) EnableTenantAdmin(ctx context.Context, req *tenantv1.EnableTenantAdminRequest) (*commonv1.IdempotentResult, error) {
+	const action = "tenant_admin.enable"
+
+	// 步骤 1：校验依赖
+	if s.core == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant admin api unavailable")
+	}
+	if req == nil {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "request required")
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, nil, err, nil)
+		return nil, err
+	}
+
+	// 步骤 2：解析路径参数
+	tenantID, err := parseTenantAdminUUID(req.GetTenantId(), "tenant_id")
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, nil, err, nil)
+		return nil, err
+	}
+	userID, err := parseTenantAdminUUID(req.GetUserId(), "user_id")
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+		return nil, err
+	}
+
+	details := map[string]any{
+		"tenant_id": tenantID.String(),
+		"target_id": userID.String(),
+	}
+
+	// 步骤 3：Core 更新状态（Core 层校验不可重复 enable）
+	if err := s.core.SetStatus(ctx, tenantID, userID, ports.TenantAdminUserStatusActive); err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, details, mapped, &tenantID)
+		return nil, mapped
+	}
+
+	// 步骤 4：写审计 success
+	writeAuditSuccess(ctx, s.audit, auditResourceTenantAdmin, action, details, &tenantID)
+	return &commonv1.IdempotentResult{Id: userID.String(), Message: "admin enabled"}, nil
 }
 
-func (s *TenantAdminService) DeleteTenantAdmin(context.Context, *tenantv1.DeleteTenantAdminRequest) (*commonv1.IdempotentResult, error) {
-	return nil, unimplemented()
+// DeleteTenantAdmin 软删除管理员（SPEC §5.1.6 / US-008）。
+// 不幂等；Core 写 is_deleted/deleted_at（不改 status）；写审计 tenant_admin.delete。
+func (s *TenantAdminService) DeleteTenantAdmin(ctx context.Context, req *tenantv1.DeleteTenantAdminRequest) (*commonv1.IdempotentResult, error) {
+	const action = "tenant_admin.delete"
+
+	// 步骤 1：校验依赖
+	if s.core == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant admin api unavailable")
+	}
+	if req == nil {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "request required")
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, nil, err, nil)
+		return nil, err
+	}
+
+	// 步骤 2：解析路径参数
+	tenantID, err := parseTenantAdminUUID(req.GetTenantId(), "tenant_id")
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, nil, err, nil)
+		return nil, err
+	}
+	userID, err := parseTenantAdminUUID(req.GetUserId(), "user_id")
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+		return nil, err
+	}
+
+	details := map[string]any{
+		"tenant_id": tenantID.String(),
+		"target_id": userID.String(),
+	}
+
+	// 步骤 3：Core 软删除
+	if err := s.core.SoftDelete(ctx, tenantID, userID); err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, details, mapped, &tenantID)
+		return nil, mapped
+	}
+
+	// 步骤 4：写审计 success
+	writeAuditSuccess(ctx, s.audit, auditResourceTenantAdmin, action, details, &tenantID)
+	return &commonv1.IdempotentResult{Id: userID.String(), Message: "admin deleted"}, nil
 }
 
 func (s *TenantAdminService) ListTenantAdminAuditLogs(context.Context, *tenantv1.ListTenantAdminAuditLogsRequest) (*tenantv1.ListTenantAdminAuditLogsResponse, error) {

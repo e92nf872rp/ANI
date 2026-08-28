@@ -252,15 +252,20 @@ func (api *adminTenantAdminAPI) updateTenantUserStatus(ctx context.Context, c *a
 		writeAdminTenantAdminError(c, ports.ErrInvalid)
 		return
 	}
-	// 2. 解析路径参数
+	// 2. 校验 status 值
+	if body.Status != "active" && body.Status != "disabled" {
+		writeAdminTenantAdminError(c, ports.ErrInvalid)
+		return
+	}
+	// 3. 解析路径参数
 	tenantID := c.Param("tenant_id")
 	userID := c.Param("user_id")
-	// 3. 调用 Core SDK
+	// 4. 调用 Core SDK
 	if err := api.admin.SetStatus(ctx, tenantID, userID, body.Status); err != nil {
 		writeAdminTenantAdminError(c, err)
 		return
 	}
-	// 4. 返回结果
+	// 5. 返回结果
 	c.JSON(http.StatusOK, map[string]any{
 		"id":      userID,
 		"message": "status updated",
@@ -351,6 +356,8 @@ func writeAdminTenantAdminError(c *app.RequestContext, err error) {
 		writeDemoError(c, http.StatusUnprocessableEntity, "ROLE_CHANGE_INVALID", err.Error())
 	case errors.Is(err, ports.ErrPasswordSameAsOld):
 		writeDemoError(c, http.StatusUnprocessableEntity, "PASSWORD_SAME_AS_OLD", err.Error())
+	case errors.Is(err, ports.ErrUserStateInvalid):
+		writeDemoError(c, http.StatusConflict, "USER_STATE_INVALID", err.Error())
 	default:
 		writeDemoError(c, http.StatusInternalServerError, "INTERNAL", err.Error())
 	}

@@ -68,4 +68,7 @@ var (
 
 	// ErrPasswordSameAsOld 表示新密码与旧密码相同（HTTP 422）。
 	ErrPasswordSameAsOld = errors.New("PASSWORD_SAME_AS_OLD")
+
+	// ErrUserStateInvalid 表示用户状态不允许该操作（如重复 disable/enable，HTTP 409）。
+	ErrUserStateInvalid = errors.New("USER_STATE_INVALID")
 )

@@ -130,7 +130,7 @@ type TenantAdminService interface {
 	// SetStatus sets users.status to active or disabled.
 	SetStatus(ctx context.Context, tenantID, userID, status string) error
 
-	// SoftDelete marks the user deleted (and status=disabled).
+	// SoftDelete marks the user deleted (is_deleted + deleted_at; does not change status).
 	SoftDelete(ctx context.Context, tenantID, userID string) error
 
 	// ResetPassword updates password_hash. Plaintext must not be logged or returned.

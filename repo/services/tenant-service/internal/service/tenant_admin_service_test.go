@@ -33,6 +33,10 @@ type fakeTenantAdminCoreClient struct {
 	perms            *ports.UserPermissions
 	permsErr         error
 	resetPasswordErr error
+	setStatusErr     error
+	lastStatus       string
+	softDeleteErr    error
+	softDeleted      bool
 }
 
 func (f *fakeTenantAdminCoreClient) MatchUser(context.Context, uuid.UUID, string, string) (uuid.UUID, error) {
@@ -115,11 +119,25 @@ func (f *fakeTenantAdminCoreClient) ListAssignableRoles(context.Context, uuid.UU
 	}
 	return append([]ports.AssignableRole(nil), f.roles...), nil
 }
-func (f *fakeTenantAdminCoreClient) SetStatus(context.Context, uuid.UUID, uuid.UUID, string) error {
-	return ports.ErrNotImplemented
+func (f *fakeTenantAdminCoreClient) SetStatus(_ context.Context, tenantID, userID uuid.UUID, status string) error {
+	if f.setStatusErr != nil {
+		return f.setStatusErr
+	}
+	// 模拟 Core DB 层重复校验：状态未变化 → ErrUserStateInvalid
+	if u, ok := f.users[tenantUserKey(tenantID, userID)]; ok {
+		if u.Status == status {
+			return ports.ErrUserStateInvalid
+		}
+	}
+	f.lastStatus = status
+	return nil
 }
-func (f *fakeTenantAdminCoreClient) SoftDelete(context.Context, uuid.UUID, uuid.UUID) error {
-	return ports.ErrNotImplemented
+func (f *fakeTenantAdminCoreClient) SoftDelete(_ context.Context, _, _ uuid.UUID) error {
+	if f.softDeleteErr != nil {
+		return f.softDeleteErr
+	}
+	f.softDeleted = true
+	return nil
 }
 func (f *fakeTenantAdminCoreClient) ResetPassword(_ context.Context, _, _ uuid.UUID, _ string) error {
 	if f.resetPasswordErr != nil {
@@ -746,8 +764,8 @@ func TestTenantAdminService_ListAll(t *testing.T) {
 		core := &fakeTenantAdminCoreClient{
 			listItems: []ports.AdminWithTenant{admin},
 			users: map[string]ports.AdminWithTenant{
-				tenantUserKey(tenantID, invitingID): invitingUser,
-				tenantUserKey(tenantID, expiredID):  expiredUser,
+				tenantUserKey(tenantID, invitingID):  invitingUser,
+				tenantUserKey(tenantID, expiredID):   expiredUser,
 				tenantUserKey(tenantID, plainUserID): plainUser,
 			},
 		}
@@ -907,9 +925,9 @@ func TestTenantAdminService_ListAll(t *testing.T) {
 		}
 		store := &fakeTenantAdminStore{
 			latest: &ports.TenantAdminInvitation{
-				ID: uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+				ID:       uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
 				TenantID: tenantID, UserID: invitingID,
-				Status: ports.InvitationStatusInviting,
+				Status:   ports.InvitationStatusInviting,
 				ExpireAt: time.Now().UTC().Add(-time.Hour),
 			},
 			flags: []ports.InvitationFlag{
@@ -1129,7 +1147,7 @@ func TestTenantAdminService_ChangeRole(t *testing.T) {
 		tid := tenantID
 		oldRID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 		core := &fakeTenantAdminCoreClient{
-			perms:        &ports.UserPermissions{UserID: userID, TenantID: &tid, RoleID: oldRID, Role: "user", Permissions: []any{}},
+			perms:         &ports.UserPermissions{UserID: userID, TenantID: &tid, RoleID: oldRID, Role: "user", Permissions: []any{}},
 			changeRoleErr: ports.ErrRoleChangeInvalid,
 		}
 		audit := &fakeAuditStore{}
@@ -1148,7 +1166,7 @@ func TestTenantAdminService_ChangeRole(t *testing.T) {
 		oldRID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 		platformRoleID := uuid.MustParse("00000000-0000-0000-0000-000000000099")
 		core := &fakeTenantAdminCoreClient{
-			perms:        &ports.UserPermissions{UserID: userID, TenantID: &tid, RoleID: oldRID, Role: "user", Permissions: []any{}},
+			perms:         &ports.UserPermissions{UserID: userID, TenantID: &tid, RoleID: oldRID, Role: "user", Permissions: []any{}},
 			changeRoleErr: ports.ErrRoleChangeInvalid,
 		}
 		audit := &fakeAuditStore{}
@@ -1291,6 +1309,124 @@ func TestTenantAdminService_ResetPassword(t *testing.T) {
 	})
 }
 
+func TestTenantAdminService_DisableEnableDelete(t *testing.T) {
+	t.Parallel()
+	tenantID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
+	userID := uuid.MustParse("22222222-2222-4222-8222-222222222222")
+
+	t.Run("disable", func(t *testing.T) {
+		t.Parallel()
+		core := &fakeTenantAdminCoreClient{
+			users: map[string]ports.AdminWithTenant{
+				tenantUserKey(tenantID, userID): {ID: userID, Tenant: ports.TenantRef{ID: tenantID}, Status: "active"},
+			},
+		}
+		audit := &fakeAuditStore{}
+		svc := NewTenantAdminService(core, nil, nil, audit)
+		res, err := svc.DisableTenantAdmin(context.Background(), &tenantv1.DisableTenantAdminRequest{
+			TenantId: tenantID.String(), UserId: userID.String(),
+		})
+		if err != nil {
+			t.Fatalf("DisableTenantAdmin: %v", err)
+		}
+		if res.GetId() != userID.String() || res.GetMessage() != "admin disabled" {
+			t.Fatalf("result=%+v", res)
+		}
+		if core.lastStatus != "disabled" {
+			t.Fatalf("status=%q want disabled", core.lastStatus)
+		}
+		if len(audit.logs) != 1 || audit.logs[0].Action != "tenant_admin.disable" {
+			t.Fatalf("audit=%+v", audit.logs)
+		}
+	})
+
+	t.Run("enable", func(t *testing.T) {
+		t.Parallel()
+		core := &fakeTenantAdminCoreClient{
+			users: map[string]ports.AdminWithTenant{
+				tenantUserKey(tenantID, userID): {ID: userID, Tenant: ports.TenantRef{ID: tenantID}, Status: "disabled"},
+			},
+		}
+		audit := &fakeAuditStore{}
+		svc := NewTenantAdminService(core, nil, nil, audit)
+		res, err := svc.EnableTenantAdmin(context.Background(), &tenantv1.EnableTenantAdminRequest{
+			TenantId: tenantID.String(), UserId: userID.String(),
+		})
+		if err != nil {
+			t.Fatalf("EnableTenantAdmin: %v", err)
+		}
+		if res.GetMessage() != "admin enabled" {
+			t.Fatalf("result=%+v", res)
+		}
+		if core.lastStatus != "active" {
+			t.Fatalf("status=%q want active", core.lastStatus)
+		}
+		if len(audit.logs) != 1 || audit.logs[0].Action != "tenant_admin.enable" {
+			t.Fatalf("audit=%+v", audit.logs)
+		}
+	})
+
+	t.Run("already_disabled", func(t *testing.T) {
+		t.Parallel()
+		core := &fakeTenantAdminCoreClient{
+			users: map[string]ports.AdminWithTenant{
+				tenantUserKey(tenantID, userID): {ID: userID, Tenant: ports.TenantRef{ID: tenantID}, Status: "disabled"},
+			},
+		}
+		svc := NewTenantAdminService(core, nil, nil, nil)
+		_, err := svc.DisableTenantAdmin(context.Background(), &tenantv1.DisableTenantAdminRequest{
+			TenantId: tenantID.String(), UserId: userID.String(),
+		})
+		assertBusinessCode(t, err, codes.FailedPrecondition, "USER_STATE_INVALID")
+	})
+
+	t.Run("already_active", func(t *testing.T) {
+		t.Parallel()
+		core := &fakeTenantAdminCoreClient{
+			users: map[string]ports.AdminWithTenant{
+				tenantUserKey(tenantID, userID): {ID: userID, Tenant: ports.TenantRef{ID: tenantID}, Status: "active"},
+			},
+		}
+		svc := NewTenantAdminService(core, nil, nil, nil)
+		_, err := svc.EnableTenantAdmin(context.Background(), &tenantv1.EnableTenantAdminRequest{
+			TenantId: tenantID.String(), UserId: userID.String(),
+		})
+		assertBusinessCode(t, err, codes.FailedPrecondition, "USER_STATE_INVALID")
+	})
+
+	t.Run("delete_soft", func(t *testing.T) {
+		t.Parallel()
+		core := &fakeTenantAdminCoreClient{}
+		audit := &fakeAuditStore{}
+		svc := NewTenantAdminService(core, nil, nil, audit)
+		res, err := svc.DeleteTenantAdmin(context.Background(), &tenantv1.DeleteTenantAdminRequest{
+			TenantId: tenantID.String(), UserId: userID.String(),
+		})
+		if err != nil {
+			t.Fatalf("DeleteTenantAdmin: %v", err)
+		}
+		if res.GetMessage() != "admin deleted" {
+			t.Fatalf("result=%+v", res)
+		}
+		if !core.softDeleted {
+			t.Fatal("SoftDelete not called")
+		}
+		if len(audit.logs) != 1 || audit.logs[0].Action != "tenant_admin.delete" {
+			t.Fatalf("audit=%+v", audit.logs)
+		}
+	})
+
+	t.Run("not_found", func(t *testing.T) {
+		t.Parallel()
+		core := &fakeTenantAdminCoreClient{setStatusErr: ports.ErrTenantAdminNotFound}
+		svc := NewTenantAdminService(core, nil, nil, nil)
+		_, err := svc.DisableTenantAdmin(context.Background(), &tenantv1.DisableTenantAdminRequest{
+			TenantId: tenantID.String(), UserId: userID.String(),
+		})
+		assertBusinessCode(t, err, codes.NotFound, "TENANT_ADMIN_NOT_FOUND")
+	})
+}
+
 func TestTenantAdminService_Unimplemented(t *testing.T) {
 	s := NewTenantAdminService(nil, nil, nil, nil)
 	ctx := context.Background()
@@ -1303,26 +1439,14 @@ func TestTenantAdminService_Unimplemented(t *testing.T) {
 			_, err := s.GetChangeableRoles(ctx, &tenantv1.GetChangeableRolesRequest{})
 			return err
 		}},
-		{"DisableTenantAdmin", func() error {
-			_, err := s.DisableTenantAdmin(ctx, &tenantv1.DisableTenantAdminRequest{})
-			return err
-		}},
-		{"EnableTenantAdmin", func() error {
-			_, err := s.EnableTenantAdmin(ctx, &tenantv1.EnableTenantAdminRequest{})
-			return err
-		}},
-		{"DeleteTenantAdmin", func() error {
-			_, err := s.DeleteTenantAdmin(ctx, &tenantv1.DeleteTenantAdminRequest{})
-			return err
-		}},
 		{"ListTenantAdminAuditLogs", func() error {
 			_, err := s.ListTenantAdminAuditLogs(ctx, &tenantv1.ListTenantAdminAuditLogsRequest{})
 			return err
 		}},
 	}
 
-	if len(checks) != 5 {
-		t.Fatalf("want 5 remaining unimplemented RPCs, got %d", len(checks))
+	if len(checks) != 2 {
+		t.Fatalf("want 2 remaining unimplemented RPCs, got %d", len(checks))
 	}
 	for _, tc := range checks {
 		t.Run(tc.name, func(t *testing.T) {

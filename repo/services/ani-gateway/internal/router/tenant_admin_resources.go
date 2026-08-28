@@ -677,6 +677,7 @@ var tenantAdminBusinessCodeByHTTP = map[string]int{
 	"TENANT_INVITATION_SETTLED":         http.StatusConflict,
 	"ROLE_CHANGE_INVALID":               http.StatusUnprocessableEntity,
 	"PASSWORD_SAME_AS_OLD":              http.StatusUnprocessableEntity,
+	"USER_STATE_INVALID":                http.StatusConflict,
 	"TENANT_NOT_FOUND":                  http.StatusNotFound,
 	"FORBIDDEN":                         http.StatusForbidden,
 	"GRPC_CLIENT_UNAVAILABLE":           http.StatusBadGateway,

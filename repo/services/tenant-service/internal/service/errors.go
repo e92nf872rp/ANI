@@ -39,6 +39,8 @@ func mapStoreError(err error) error {
 		return businessError(codes.FailedPrecondition, ports.ErrPlanNotActive, "tenant plan is not active")
 	case errors.Is(err, ports.ErrTenantStateInvalid):
 		return businessError(codes.FailedPrecondition, ports.ErrTenantStateInvalid, "tenant state does not allow this operation")
+	case errors.Is(err, ports.ErrUserStateInvalid):
+		return businessError(codes.FailedPrecondition, ports.ErrUserStateInvalid, "user state does not allow this operation")
 	case errors.Is(err, ports.ErrValidationFailed):
 		detail := strings.TrimSpace(strings.TrimPrefix(err.Error(), ports.ErrValidationFailed.Error()+":"))
 		detail = strings.TrimSpace(strings.TrimPrefix(detail, ports.ErrValidationFailed.Error()))

@@ -472,18 +472,89 @@ func decodeRolePermissionsJSON(raw []byte) ([]any, error) {
 }
 
 func (u *PostgresTenantAdmin) SetStatus(ctx context.Context, tenantID, userID, status string) error {
-	_ = ctx
-	_ = tenantID
-	_ = userID
-	_ = status
-	return ports.ErrUnsupported
+	tid, err := parseAdminUUID(tenantID, "tenant_id")
+	if err != nil {
+		return err
+	}
+	uid, err := parseAdminUUID(userID, "user_id")
+	if err != nil {
+		return err
+	}
+	switch status {
+	case "active", "disabled":
+	default:
+		return ports.ErrInvalid
+	}
+
+	return u.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		// 步骤 1：查询当前状态
+		var currentStatus string
+		qErr := tx.QueryRow(ctx, `
+			SELECT status
+			FROM users
+			WHERE id = $1
+			  AND tenant_id = $2
+			  AND COALESCE(is_deleted, FALSE) = FALSE
+		`, uid, tid).Scan(&currentStatus)
+		if errors.Is(qErr, pgx.ErrNoRows) {
+			return ports.ErrUserNotFound
+		}
+		if qErr != nil {
+			return fmt.Errorf("load user for set status: %w", qErr)
+		}
+
+		// 步骤 2：状态未变化 → ErrUserStateInvalid
+		if currentStatus == status {
+			return ports.ErrUserStateInvalid
+		}
+
+		// 步骤 3：UPDATE users.status
+		tag, execErr := tx.Exec(ctx, `
+			UPDATE users
+			SET status = $1, updated_at = NOW()
+			WHERE id = $2
+			  AND tenant_id = $3
+			  AND COALESCE(is_deleted, FALSE) = FALSE
+		`, status, uid, tid)
+		if execErr != nil {
+			return fmt.Errorf("update user status: %w", execErr)
+		}
+		if tag.RowsAffected == 0 {
+			return ports.ErrUserNotFound
+		}
+		return nil
+	})
 }
 
+// SoftDelete 软删除租户成员（is_deleted=TRUE, deleted_at=now()；不改 users.status）。
 func (u *PostgresTenantAdmin) SoftDelete(ctx context.Context, tenantID, userID string) error {
-	_ = ctx
-	_ = tenantID
-	_ = userID
-	return ports.ErrUnsupported
+	tid, err := parseAdminUUID(tenantID, "tenant_id")
+	if err != nil {
+		return err
+	}
+	uid, err := parseAdminUUID(userID, "user_id")
+	if err != nil {
+		return err
+	}
+
+	return u.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		tag, execErr := tx.Exec(ctx, `
+			UPDATE users
+			SET is_deleted = TRUE,
+			    deleted_at = NOW(),
+			    updated_at = NOW()
+			WHERE id = $1
+			  AND tenant_id = $2
+			  AND COALESCE(is_deleted, FALSE) = FALSE
+		`, uid, tid)
+		if execErr != nil {
+			return fmt.Errorf("soft delete user: %w", execErr)
+		}
+		if tag.RowsAffected == 0 {
+			return ports.ErrUserNotFound
+		}
+		return nil
+	})
 }
 
 // ResetPassword 重置租户成员 password_hash（bcrypt cost=12）。
