@@ -12,7 +12,7 @@ env "local" {
 }
 
 env "test" {
-  url = getenv("TEST_DATABASE_URL")
+  url = "postgresql://ani:NMAN1XtQ@10.10.1.66:30945/ani?sslmode=disable"
 
   migration {
     dir = "file://deploy/migrations"
