@@ -36,11 +36,6 @@ spec:
           env:
             - name: ANI_AUTH_MODE
               value: auth_service
-            # C2：Functional MVP pilot 冻结为 {listQuotaMeta}，启动前 Validate 校验。
-            - name: GATEWAY_AUTHZ_POLICY_MODE
-              value: "pilot"
-            - name: GATEWAY_AUTHZ_PILOT_OPERATIONS
-              value: "listQuotaMeta"
             - name: AUTH_SERVICE_ADDR
               value: ani-auth-service.ani-system.svc.cluster.local:9101
             - name: KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE

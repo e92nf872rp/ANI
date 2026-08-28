@@ -55,42 +55,33 @@ func TestRateLimitAppliesToPlatformPrincipal(t *testing.T) {
 	}
 }
 
-// TestRegisterFailsClosedOnInvalidAuthzConfig 验证非法 authz 配置在注册阶段失败。
-func TestRegisterFailsClosedOnInvalidAuthzConfig(t *testing.T) {
+// TestRegisterFailsClosedOnRemovedAuthzEnv 验证废弃 authz env 残留在注册阶段失败。
+func TestRegisterFailsClosedOnRemovedAuthzEnv(t *testing.T) {
 	if err := Register(server.New(), nil); err == nil {
 		t.Fatal("nil store: want error")
 	}
 
-	cases := map[string]struct {
-		mode       string
-		operations string
-		authMode   string
-	}{
-		"invalid mode":        {mode: "bogus"},
-		"dev with pilot":      {mode: "pilot", operations: "listQuotaMeta", authMode: "dev"},
-		"dev with full":       {mode: "full", authMode: "dev"},
-		"full with allowlist": {mode: "full", operations: "listQuotaMeta"},
-		"off with allowlist":  {mode: "off", operations: "listQuotaMeta"},
+	t.Setenv("ANI_AUTH_MODE", "")
+	t.Setenv("GATEWAY_AUTHZ_POLICY_MODE", "pilot")
+	t.Setenv("GATEWAY_AUTHZ_PILOT_OPERATIONS", "")
+	if err := Register(server.New(), newMemoryGatewayStoreForTest()); err == nil {
+		t.Fatal("removed GATEWAY_AUTHZ_POLICY_MODE: want configuration error before serving")
 	}
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			t.Setenv("GATEWAY_AUTHZ_POLICY_MODE", tc.mode)
-			t.Setenv("GATEWAY_AUTHZ_PILOT_OPERATIONS", tc.operations)
-			t.Setenv("ANI_AUTH_MODE", tc.authMode)
-			if err := Register(server.New(), newMemoryGatewayStoreForTest()); err == nil {
-				t.Fatal("want configuration error before serving")
-			}
-		})
+
+	t.Setenv("GATEWAY_AUTHZ_POLICY_MODE", "")
+	t.Setenv("GATEWAY_AUTHZ_PILOT_OPERATIONS", "listQuotaMeta")
+	if err := Register(server.New(), newMemoryGatewayStoreForTest()); err == nil {
+		t.Fatal("removed GATEWAY_AUTHZ_PILOT_OPERATIONS: want configuration error before serving")
 	}
 }
 
-// TestRegisterSucceedsWithDefaultOff 验证默认配置（mode off）注册成功。
-func TestRegisterSucceedsWithDefaultOff(t *testing.T) {
+// TestRegisterSucceedsWithAuthServiceMode 验证 auth_service 模式下无 policy env 注册成功。
+func TestRegisterSucceedsWithAuthServiceMode(t *testing.T) {
 	t.Setenv("GATEWAY_AUTHZ_POLICY_MODE", "")
 	t.Setenv("GATEWAY_AUTHZ_PILOT_OPERATIONS", "")
-	t.Setenv("ANI_AUTH_MODE", "")
+	t.Setenv("ANI_AUTH_MODE", "auth_service")
 	if err := Register(server.New(), newMemoryGatewayStoreForTest()); err != nil {
-		t.Fatalf("default off config: %v", err)
+		t.Fatalf("auth_service config: %v", err)
 	}
 }
 
@@ -124,7 +115,7 @@ func TestAuthWithClientRejectsMissingPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
-	cfg := authz.Config{Mode: authz.ModeOff}
+	cfg := authz.Config{}
 	h := server.New()
 	h.Use(
 		RequestID(),
@@ -150,7 +141,7 @@ func TestUnmatchedRouteReturns404Not503(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
-	cfg := authz.Config{Mode: authz.ModeOff}
+	cfg := authz.Config{}
 	h := server.New()
 	h.Use(
 		RequestID(),

@@ -29,7 +29,7 @@ func Auth() app.HandlerFunc {
 // AuthWithResolvedPolicy 执行且只 c.Next 一次，避免 Hertz 链路提前推进。
 func AuthWithClient(authClient AuthClient) app.HandlerFunc {
 	registry := authz.CoreRegistry()
-	cfg := authz.Config{Mode: authz.ModeOff}
+	cfg := authz.Config{}
 	return func(ctx context.Context, c *app.RequestContext) {
 		resolved, err := ResolvePolicyForRequest(registry, cfg, c)
 		if err != nil {

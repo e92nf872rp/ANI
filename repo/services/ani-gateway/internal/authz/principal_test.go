@@ -8,77 +8,29 @@ import (
 	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 )
 
-func TestModeOffAlwaysUsesLegacy(t *testing.T) {
-	cfg := Config{Mode: ModeOff}
-	policy := Policy{Source: PolicySourceGenerated, OperationID: "listQuotaMeta"}
-	if got := cfg.EffectiveSource(policy); got != PolicySourceLegacy {
-		t.Fatalf("got %q, want legacy", got)
-	}
-}
-
 func TestEffectiveSourcePublicAlwaysPublic(t *testing.T) {
 	policy := Policy{Source: PolicySourcePublic, OperationID: "login"}
-	for _, mode := range []Mode{ModeOff, ModePilot, ModeFull} {
-		cfg := Config{Mode: mode}
+	for name, cfg := range map[string]Config{
+		"auth_service": {},
+		"dev":          {AuthMode: "dev"},
+	} {
 		if got := cfg.EffectiveSource(policy); got != PolicySourcePublic {
-			t.Fatalf("mode %s: got %q, want public", mode, got)
+			t.Fatalf("auth mode %s: got %q, want public", name, got)
 		}
 	}
 }
 
-func TestPilotOnlyUsesGeneratedForAllowlistedOperations(t *testing.T) {
-	cfg := Config{
-		Mode:            ModePilot,
-		PilotOperations: map[string]struct{}{"listQuotaMeta": {}},
-	}
-	allowed := Policy{Source: PolicySourceGenerated, OperationID: "listQuotaMeta"}
-	if got := cfg.EffectiveSource(allowed); got != PolicySourceGenerated {
-		t.Fatalf("allowed: got %q, want generated", got)
-	}
-	notAllowed := Policy{Source: PolicySourceGenerated, OperationID: "createInstance"}
-	if got := cfg.EffectiveSource(notAllowed); got != PolicySourceLegacy {
-		t.Fatalf("not allowed: got %q, want legacy", got)
-	}
-	legacy := Policy{Source: PolicySourceLegacy, OperationID: "listQuotaMeta"}
-	if got := cfg.EffectiveSource(legacy); got != PolicySourceLegacy {
-		t.Fatalf("legacy: got %q, want legacy", got)
-	}
-}
-
-func TestFullUsesGeneratedDirectly(t *testing.T) {
-	cfg := Config{Mode: ModeFull}
+func TestGeneratedUsesGeneratedDirectly(t *testing.T) {
+	cfg := Config{}
 	policy := Policy{Source: PolicySourceGenerated, OperationID: "listQuotaMeta"}
 	if got := cfg.EffectiveSource(policy); got != PolicySourceGenerated {
 		t.Fatalf("got %q, want generated", got)
 	}
 }
 
-func TestValidateBaseRejectsDevWithNonOffMode(t *testing.T) {
-	for _, mode := range []Mode{ModePilot, ModeFull} {
-		cfg := Config{Mode: mode, AuthMode: "dev"}
-		if err := cfg.ValidateBase(); err == nil {
-			t.Fatalf("mode %s + dev: want error", mode)
-		}
-	}
-	if err := (Config{Mode: ModeOff, AuthMode: "dev"}).ValidateBase(); err != nil {
-		t.Fatalf("mode off + dev: unexpected error: %v", err)
-	}
-}
-
-func TestValidateBaseRejectsAllowlistWithoutPilot(t *testing.T) {
-	allow := map[string]struct{}{"listQuotaMeta": {}}
-	if err := (Config{Mode: ModeOff, PilotOperations: allow}).ValidateBase(); err == nil {
-		t.Fatal("off + allowlist: want error")
-	}
-	if err := (Config{Mode: ModeFull, PilotOperations: allow}).ValidateBase(); err == nil {
-		t.Fatal("full + allowlist: want error")
-	}
-	if err := (Config{Mode: ModePilot, PilotOperations: allow}).ValidateBase(); err != nil {
-		t.Fatalf("pilot + allowlist: unexpected error: %v", err)
-	}
-}
-
-func TestConfigFromEnvDefaultsToOff(t *testing.T) {
+// TestConfigFromEnvParsesAuthMode ANI_AUTH_MODE 解析断言：
+// 空值归一为空串，大小写与首尾空白归一为小写。
+func TestConfigFromEnvParsesAuthMode(t *testing.T) {
 	t.Setenv("GATEWAY_AUTHZ_POLICY_MODE", "")
 	t.Setenv("GATEWAY_AUTHZ_PILOT_OPERATIONS", "")
 	t.Setenv("ANI_AUTH_MODE", "")
@@ -86,33 +38,17 @@ func TestConfigFromEnvDefaultsToOff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConfigFromEnv: %v", err)
 	}
-	if cfg.Mode != ModeOff {
-		t.Fatalf("mode = %q, want off", cfg.Mode)
+	if cfg.AuthMode != "" {
+		t.Fatalf("AuthMode = %q, want empty", cfg.AuthMode)
 	}
-}
 
-func TestConfigFromEnvRejectsInvalidMode(t *testing.T) {
-	t.Setenv("GATEWAY_AUTHZ_POLICY_MODE", "bogus")
-	if _, err := ConfigFromEnv(); err == nil {
-		t.Fatal("invalid mode: want error")
+	t.Setenv("ANI_AUTH_MODE", " DEV ")
+	cfg, err = ConfigFromEnv()
+	if err != nil {
+		t.Fatalf("ConfigFromEnv: %v", err)
 	}
-}
-
-func TestConfigFromEnvRejectsDevWithPilot(t *testing.T) {
-	t.Setenv("GATEWAY_AUTHZ_POLICY_MODE", "pilot")
-	t.Setenv("GATEWAY_AUTHZ_PILOT_OPERATIONS", "listQuotaMeta")
-	t.Setenv("ANI_AUTH_MODE", "dev")
-	if _, err := ConfigFromEnv(); err == nil {
-		t.Fatal("dev + pilot: want error")
-	}
-}
-
-func TestConfigFromEnvRejectsAllowlistWithFull(t *testing.T) {
-	t.Setenv("GATEWAY_AUTHZ_POLICY_MODE", "full")
-	t.Setenv("GATEWAY_AUTHZ_PILOT_OPERATIONS", "listQuotaMeta")
-	t.Setenv("ANI_AUTH_MODE", "")
-	if _, err := ConfigFromEnv(); err == nil {
-		t.Fatal("full + allowlist: want error")
+	if cfg.AuthMode != "dev" {
+		t.Fatalf("AuthMode = %q, want dev", cfg.AuthMode)
 	}
 }
 

@@ -20,10 +20,6 @@ func Register(h *server.Hertz, store GatewayStore) error {
 	if err != nil {
 		return err
 	}
-	// C2：监听前执行带 registry 的完整校验，非法 pilot 组合直接启动失败。
-	if err := cfg.Validate(registry); err != nil {
-		return err
-	}
 	registerChain(h, store, NewAuthClientFromEnv(), registry, cfg)
 	return nil
 }

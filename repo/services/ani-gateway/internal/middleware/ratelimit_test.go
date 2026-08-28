@@ -73,7 +73,7 @@ func TestUnmatchedRouteRateLimitDoesNotReturn401(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
-	cfg := authz.Config{Mode: authz.ModeOff}
+	cfg := authz.Config{}
 	store := newMemoryGatewayStoreForTest()
 	h := server.New()
 	h.Use(

@@ -18,7 +18,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// C4：quota-meta pilot E2E 矩阵。
+// C4：quota-meta 契约即开关 E2E 矩阵。
 // 所有用例显式 ANI_AUTH_MODE=auth_service，按认证/授权注错阶段精确断言
 // ValidatePrincipal/CheckPermissionV2/legacy RPC 调用次数，冻结 V2 短路位置
 // 并证明 generated 请求没有调用 legacy RPC。
@@ -232,23 +232,17 @@ func (fakePilotAuthClient) RevokeAPIKey(context.Context, *authv1.RevokeAPIKeyReq
 	return nil
 }
 
-// newPilotGateway 构造 pilot 模式的 gateway：显式 auth_service + 冻结 allowlist，
-// 测试结束自动恢复环境。quota-meta 路由返回固定 200 载荷。
-func newPilotGateway(t *testing.T, behavior fakeAuthBehavior) (*server.Hertz, *fakePilotAuthClient) {
+// newContractSwitchGateway 构造契约即开关的 gateway：显式 auth_service，
+// 无任何 policy env。generated（quota-meta）按契约直通 V2，测试结束自动恢复环境。
+func newContractSwitchGateway(t *testing.T, behavior fakeAuthBehavior) (*server.Hertz, *fakePilotAuthClient) {
 	t.Helper()
 	t.Setenv("ANI_AUTH_MODE", "auth_service")
-	t.Setenv("GATEWAY_AUTHZ_POLICY_MODE", "pilot")
-	t.Setenv("GATEWAY_AUTHZ_PILOT_OPERATIONS", "listQuotaMeta")
 
 	fake := &fakePilotAuthClient{behavior: behavior}
 	h := server.New()
 	h.Use(
 		RequestID(),
-		ResolveAuthzPolicy(authz.CoreRegistry(), authz.Config{
-			Mode:            authz.ModePilot,
-			AuthMode:        "auth_service",
-			PilotOperations: map[string]struct{}{"listQuotaMeta": {}},
-		}),
+		ResolveAuthzPolicy(authz.CoreRegistry(), authz.Config{AuthMode: "auth_service"}),
 		AuthenticatePrincipal(fake),
 		AuthorizePrincipal(fake),
 	)
@@ -258,12 +252,10 @@ func newPilotGateway(t *testing.T, behavior fakeAuthBehavior) (*server.Hertz, *f
 	return h, fake
 }
 
-// newGatewayWithMode 按指定 policy mode 构造 gateway（回滚验证用）。
-func newGatewayWithMode(t *testing.T, mode authz.Mode) (*server.Hertz, *fakePilotAuthClient) {
+// newDevGateway 构造 dev 回落 gateway：无 auth-service，generated 自动回落 legacy。
+func newDevGateway(t *testing.T) (*server.Hertz, *fakePilotAuthClient) {
 	t.Helper()
-	t.Setenv("ANI_AUTH_MODE", "auth_service")
-	t.Setenv("GATEWAY_AUTHZ_POLICY_MODE", string(mode))
-	t.Setenv("GATEWAY_AUTHZ_PILOT_OPERATIONS", "")
+	t.Setenv("ANI_AUTH_MODE", "dev")
 
 	fake := &fakePilotAuthClient{
 		behavior: fakeAuthBehavior{Allowed: true},
@@ -277,7 +269,7 @@ func newGatewayWithMode(t *testing.T, mode authz.Mode) (*server.Hertz, *fakePilo
 	h := server.New()
 	h.Use(
 		RequestID(),
-		ResolveAuthzPolicy(authz.CoreRegistry(), authz.Config{Mode: mode, AuthMode: "auth_service"}),
+		ResolveAuthzPolicy(authz.CoreRegistry(), authz.Config{AuthMode: "dev"}),
 		AuthenticatePrincipal(fake),
 		AuthorizePrincipal(fake),
 	)
@@ -305,7 +297,7 @@ func countCalls(fake *fakePilotAuthClient) authRPCCallCounts {
 	}
 }
 
-func TestQuotaMetaPilotAuthorizationMatrix(t *testing.T) {
+func TestQuotaMetaAuthorizationMatrix(t *testing.T) {
 	cases := []struct {
 		name       string
 		credential testCredential
@@ -410,7 +402,7 @@ func TestQuotaMetaPilotAuthorizationMatrix(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			gateway, fake := newPilotGateway(t, tc.behavior)
+			gateway, fake := newContractSwitchGateway(t, tc.behavior)
 			response := doGET(t, gateway, "/api/v1/admin/quota-meta", tc.credential.headers())
 			if response.StatusCode() != tc.wantStatus {
 				t.Fatalf("got %d, want %d", response.StatusCode(), tc.wantStatus)
@@ -422,25 +414,17 @@ func TestQuotaMetaPilotAuthorizationMatrix(t *testing.T) {
 	}
 }
 
-// TestQuotaMetaModeOffUsesLegacy 回滚验证：mode=off 时 quota-meta 整体回到旧 middleware。
-func TestQuotaMetaModeOffUsesLegacy(t *testing.T) {
-	gateway, fake := newGatewayWithMode(t, authz.ModeOff)
-	_ = doGET(t, gateway, "/api/v1/admin/quota-meta", platformAdmin().headers())
-	wantCalls := authRPCCallCounts{ValidateToken: 1, CheckPermission: 1}
+// TestQuotaMetaDevFallsBackToLegacy dev 回落验证：ANI_AUTH_MODE=dev 时
+// generated（quota-meta）自动回落 legacy，等价原 dev+off 的逐请求行为，
+// 本地开发无需任何 policy 配置；dev 旁路不调用任何 auth RPC。
+func TestQuotaMetaDevFallsBackToLegacy(t *testing.T) {
+	gateway, fake := newDevGateway(t)
+	response := doGET(t, gateway, "/api/v1/admin/quota-meta", platformAdmin().headers())
+	if response.StatusCode() != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.StatusCode())
+	}
+	wantCalls := authRPCCallCounts{}
 	if gotCalls := countCalls(fake); gotCalls != wantCalls {
 		t.Fatalf("RPC calls = %+v, want %+v", gotCalls, wantCalls)
-	}
-}
-
-// TestPilotStartupRejectsDevAuthMode 负向启动测试：
-// ANI_AUTH_MODE=dev + policy mode=pilot 无法通过启动校验。
-func TestPilotStartupRejectsDevAuthMode(t *testing.T) {
-	t.Setenv("ANI_AUTH_MODE", "dev")
-	t.Setenv("GATEWAY_AUTHZ_POLICY_MODE", "pilot")
-	t.Setenv("GATEWAY_AUTHZ_PILOT_OPERATIONS", "listQuotaMeta")
-	h := server.New()
-	// 用内存 store 越过 store nil 前置校验，确保失败点落在 dev+pilot 组合校验。
-	if err := Register(h, newMemoryGatewayStoreForTest()); err == nil {
-		t.Fatal("dev + pilot Register: want error, got nil")
 	}
 }

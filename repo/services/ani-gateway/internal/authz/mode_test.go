@@ -4,61 +4,52 @@ import (
 	"testing"
 )
 
-// TestValidateRejectsInvalidPilotConfig 冻结 C2 启动校验负例：
-// 空 allowlist、额外 operation、拼写错误、dev+pilot、
-// pilot operation 尚未 generated 均启动失败。
-func TestValidateRejectsInvalidPilotConfig(t *testing.T) {
-	registry := CoreRegistry()
-
-	emptyAllow := Config{Mode: ModePilot, AuthMode: "auth_service", PilotOperations: map[string]struct{}{}}
-	if err := emptyAllow.Validate(registry); err == nil {
-		t.Fatal("pilot with empty allowlist: want error")
-	}
-
-	extra := Config{
-		Mode: ModePilot, AuthMode: "auth_service",
-		PilotOperations: map[string]struct{}{"listQuotaMeta": {}, "createInstance": {}},
-	}
-	if err := extra.Validate(registry); err == nil {
-		t.Fatal("pilot with extra operation: want error")
-	}
-
-	typo := Config{
-		Mode: ModePilot, AuthMode: "auth_service",
-		PilotOperations: map[string]struct{}{"listQuotaMetas": {}},
-	}
-	if err := typo.Validate(registry); err == nil {
-		t.Fatal("pilot with misspelled operation: want error")
-	}
-
-	devPilot := Config{Mode: ModePilot, AuthMode: "dev", PilotOperations: map[string]struct{}{"listQuotaMeta": {}}}
-	if err := devPilot.Validate(registry); err == nil {
-		t.Fatal("dev + pilot: want error")
-	}
-
-	// pilot operation 尚未 generated：伪造 legacy registry 验证 fail closed。
-	legacyRegistry, err := NewRegistry(map[string]Policy{
-		"GET /api/v1/admin/quota-meta": {
-			Source:       PolicySourceLegacy,
-			OperationID:  "listQuotaMeta",
-			Method:       "GET",
-			PathTemplate: "/api/v1/admin/quota-meta",
-		},
-	})
-	if err != nil {
-		t.Fatalf("NewRegistry: %v", err)
-	}
-	pilot := Config{Mode: ModePilot, AuthMode: "auth_service", PilotOperations: map[string]struct{}{"listQuotaMeta": {}}}
-	if err := pilot.Validate(legacyRegistry); err == nil {
-		t.Fatal("pilot operation not generated: want error")
+// TestConfigFromEnvRejectsRemovedPolicyModeEnv 废弃 env 残留检测：
+// GATEWAY_AUTHZ_POLICY_MODE 任一非空值（含旧合法值 off/pilot/full）均启动失败。
+func TestConfigFromEnvRejectsRemovedPolicyModeEnv(t *testing.T) {
+	for _, value := range []string{"off", "pilot", "full", "bogus"} {
+		t.Setenv("GATEWAY_AUTHZ_POLICY_MODE", value)
+		t.Setenv("GATEWAY_AUTHZ_PILOT_OPERATIONS", "")
+		t.Setenv("ANI_AUTH_MODE", "")
+		if _, err := ConfigFromEnv(); err == nil {
+			t.Fatalf("GATEWAY_AUTHZ_POLICY_MODE=%q: want error", value)
+		}
 	}
 }
 
-// TestValidateAcceptsFrozenPilotConfig 验证唯一合法 pilot 组合可以通过带 registry 的校验。
-func TestValidateAcceptsFrozenPilotConfig(t *testing.T) {
-	registry := CoreRegistry()
-	cfg := Config{Mode: ModePilot, AuthMode: "auth_service", PilotOperations: map[string]struct{}{"listQuotaMeta": {}}}
-	if err := cfg.Validate(registry); err != nil {
-		t.Fatalf("frozen pilot config rejected: %v", err)
+// TestConfigFromEnvRejectsRemovedPilotOperationsEnv 废弃 env 残留检测：
+// GATEWAY_AUTHZ_PILOT_OPERATIONS 非空即启动失败。
+func TestConfigFromEnvRejectsRemovedPilotOperationsEnv(t *testing.T) {
+	t.Setenv("GATEWAY_AUTHZ_POLICY_MODE", "")
+	t.Setenv("GATEWAY_AUTHZ_PILOT_OPERATIONS", "listQuotaMeta")
+	t.Setenv("ANI_AUTH_MODE", "")
+	if _, err := ConfigFromEnv(); err == nil {
+		t.Fatal("GATEWAY_AUTHZ_PILOT_OPERATIONS set: want error")
+	}
+}
+
+// TestEffectiveSourceContractSwitchMatrix 契约即开关矩阵：
+// public 恒放行（auth_service 与 dev 均是）；dev 一律 legacy；
+// auth_service 按 source 直通（generated→generated、legacy→legacy）。
+func TestEffectiveSourceContractSwitchMatrix(t *testing.T) {
+	policies := map[string]Policy{
+		"public":    {Source: PolicySourcePublic, OperationID: "login"},
+		"generated": {Source: PolicySourceGenerated, OperationID: "listQuotaMeta"},
+		"legacy":    {Source: PolicySourceLegacy, OperationID: "listInstances"},
+	}
+	configs := map[string]Config{
+		"auth_service": {},
+		"dev":          {AuthMode: "dev"},
+	}
+	want := map[string]map[string]PolicySource{
+		"auth_service": {"public": PolicySourcePublic, "generated": PolicySourceGenerated, "legacy": PolicySourceLegacy},
+		"dev":          {"public": PolicySourcePublic, "generated": PolicySourceLegacy, "legacy": PolicySourceLegacy},
+	}
+	for cfgName, cfg := range configs {
+		for policyName, policy := range policies {
+			if got := cfg.EffectiveSource(policy); got != want[cfgName][policyName] {
+				t.Fatalf("%s × %s: got %q, want %q", cfgName, policyName, got, want[cfgName][policyName])
+			}
+		}
 	}
 }
