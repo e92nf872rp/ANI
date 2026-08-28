@@ -158,6 +158,8 @@ type fakeTenantAdminStore struct {
 	invitations []ports.TenantAdminInvitation
 	insertCalls int
 	updateCalls int
+	auditItems  []ports.AuditLogListItem
+	auditErr    error
 }
 
 func (f *fakeTenantAdminStore) HasPendingInvitation(context.Context, uuid.UUID, uuid.UUID) (bool, error) {
@@ -314,8 +316,40 @@ func invitationFlagFromLatest(inv ports.TenantAdminInvitation) ports.InvitationF
 	}
 	return out
 }
-func (f *fakeTenantAdminStore) ListAuditLogs(context.Context, uuid.UUID, uuid.UUID, ports.TenantAdminAuditLogFilter) (ports.TenantAdminAuditLogListResult, error) {
-	return ports.TenantAdminAuditLogListResult{}, ports.ErrNotImplemented
+func (f *fakeTenantAdminStore) ListAuditLogs(_ context.Context, tenantID, userID uuid.UUID, filter ports.TenantAdminAuditLogFilter) (ports.TenantAdminAuditLogListResult, error) {
+	if f.auditErr != nil {
+		return ports.TenantAdminAuditLogListResult{}, f.auditErr
+	}
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	matched := make([]ports.AuditLogListItem, 0, len(f.auditItems))
+	for _, it := range f.auditItems {
+		target, _ := it.Details["target_id"].(string)
+		if target != userID.String() {
+			continue
+		}
+		if tid, ok := it.Details["tenant_id"].(string); ok && tid != "" && tid != tenantID.String() {
+			continue
+		}
+		if action := strings.TrimSpace(filter.Action); action != "" && it.Action != action {
+			continue
+		}
+		if result := strings.TrimSpace(filter.Result); result != "" && it.Result != result {
+			continue
+		}
+		matched = append(matched, it)
+	}
+	next := ""
+	if len(matched) > limit {
+		next = "next"
+		matched = matched[:limit]
+	}
+	return ports.TenantAdminAuditLogListResult{Items: matched, NextCursor: next}, nil
 }
 
 func TestTenantAdminService_ListAvailableTenants(t *testing.T) {
@@ -1427,6 +1461,101 @@ func TestTenantAdminService_DisableEnableDelete(t *testing.T) {
 	})
 }
 
+func TestTenantAdminService_ListAuditLogs(t *testing.T) {
+	t.Parallel()
+	tenantID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
+	userID := uuid.MustParse("22222222-2222-4222-8222-222222222222")
+	actorID := uuid.MustParse("33333333-3333-4333-8333-333333333333")
+	logID := uuid.MustParse("44444444-4444-4444-8444-444444444444")
+	now := time.Date(2026, 8, 28, 10, 0, 0, 0, time.UTC)
+
+	t.Run("list_and_filter", func(t *testing.T) {
+		t.Parallel()
+		store := &fakeTenantAdminStore{
+			auditItems: []ports.AuditLogListItem{
+				{
+					ID: logID, Action: "tenant_admin.invite", Resource: "tenant_admin",
+					Result: "success", UserID: &actorID, CreatedAt: now,
+					Details: map[string]any{"target_id": userID.String(), "tenant_id": tenantID.String()},
+				},
+				{
+					ID: uuid.MustParse("55555555-5555-4555-8555-555555555555"),
+					Action: "tenant_admin.disable", Resource: "tenant_admin",
+					Result: "failure", UserID: &actorID, CreatedAt: now.Add(-time.Minute),
+					Details: map[string]any{"target_id": userID.String(), "tenant_id": tenantID.String()},
+				},
+			},
+		}
+		svc := NewTenantAdminService(nil, nil, store, nil)
+		res, err := svc.ListTenantAdminAuditLogs(context.Background(), &tenantv1.ListTenantAdminAuditLogsRequest{
+			TenantId: tenantID.String(), UserId: userID.String(),
+			Page: &commonv1.CursorPageRequest{Limit: 20},
+		})
+		if err != nil {
+			t.Fatalf("ListTenantAdminAuditLogs: %v", err)
+		}
+		if len(res.GetItems()) != 2 {
+			t.Fatalf("items=%d", len(res.GetItems()))
+		}
+		first := res.GetItems()[0]
+		if first.GetAction() != "tenant_admin.invite" || first.GetResource() != "tenant_admin" || first.GetResult() != "success" {
+			t.Fatalf("first=%+v", first)
+		}
+		if first.GetUserId() == nil || first.GetUserId().GetValue() != actorID.String() {
+			t.Fatalf("user_id=%v", first.GetUserId())
+		}
+		if first.GetDetails() == nil || first.GetDetails().AsMap()["target_id"] != userID.String() {
+			t.Fatalf("details=%v", first.GetDetails())
+		}
+
+		filtered, err := svc.ListTenantAdminAuditLogs(context.Background(), &tenantv1.ListTenantAdminAuditLogsRequest{
+			TenantId: tenantID.String(), UserId: userID.String(),
+			Action: "tenant_admin.disable", Result: "failure",
+		})
+		if err != nil {
+			t.Fatalf("filtered: %v", err)
+		}
+		if len(filtered.GetItems()) != 1 || filtered.GetItems()[0].GetResult() != "failure" {
+			t.Fatalf("filtered=%+v", filtered.GetItems())
+		}
+	})
+
+	t.Run("invite_then_audit_exists", func(t *testing.T) {
+		t.Parallel()
+		audit := &fakeAuditStore{}
+		core := &fakeTenantAdminCoreClient{matchID: userID}
+		store := &fakeTenantAdminStore{}
+		svc := NewTenantAdminService(core, nil, store, audit)
+		_, err := svc.InviteTenantAdmin(context.Background(), &tenantv1.InviteTenantAdminRequest{
+			TenantId: tenantID.String(), Email: "a@acme.io", Username: "acme_admin",
+			IdempotencyKey: "550e8400-e29b-41d4-a716-446655440014",
+		})
+		if err != nil {
+			t.Fatalf("InviteTenantAdmin: %v", err)
+		}
+		if len(audit.logs) != 1 || audit.logs[0].Action != "tenant_admin.invite" {
+			t.Fatalf("audit=%+v", audit.logs)
+		}
+		target, _ := audit.logs[0].Details["target_id"].(string)
+		if target != userID.String() {
+			t.Fatalf("target_id=%q", target)
+		}
+		store.auditItems = []ports.AuditLogListItem{{
+			ID: uuid.New(), Action: audit.logs[0].Action, Resource: audit.logs[0].Resource,
+			Result: audit.logs[0].Result, Details: audit.logs[0].Details, CreatedAt: now,
+		}}
+		listed, err := svc.ListTenantAdminAuditLogs(context.Background(), &tenantv1.ListTenantAdminAuditLogsRequest{
+			TenantId: tenantID.String(), UserId: userID.String(),
+		})
+		if err != nil {
+			t.Fatalf("ListTenantAdminAuditLogs: %v", err)
+		}
+		if len(listed.GetItems()) != 1 || listed.GetItems()[0].GetAction() != "tenant_admin.invite" {
+			t.Fatalf("listed=%+v", listed.GetItems())
+		}
+	})
+}
+
 func TestTenantAdminService_Unimplemented(t *testing.T) {
 	s := NewTenantAdminService(nil, nil, nil, nil)
 	ctx := context.Background()
@@ -1439,14 +1568,10 @@ func TestTenantAdminService_Unimplemented(t *testing.T) {
 			_, err := s.GetChangeableRoles(ctx, &tenantv1.GetChangeableRolesRequest{})
 			return err
 		}},
-		{"ListTenantAdminAuditLogs", func() error {
-			_, err := s.ListTenantAdminAuditLogs(ctx, &tenantv1.ListTenantAdminAuditLogsRequest{})
-			return err
-		}},
 	}
 
-	if len(checks) != 2 {
-		t.Fatalf("want 2 remaining unimplemented RPCs, got %d", len(checks))
+	if len(checks) != 1 {
+		t.Fatalf("want 1 remaining unimplemented RPCs, got %d", len(checks))
 	}
 	for _, tc := range checks {
 		t.Run(tc.name, func(t *testing.T) {

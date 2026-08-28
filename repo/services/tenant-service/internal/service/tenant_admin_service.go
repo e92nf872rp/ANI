@@ -1011,8 +1011,88 @@ func (s *TenantAdminService) DeleteTenantAdmin(ctx context.Context, req *tenantv
 	return &commonv1.IdempotentResult{Id: userID.String(), Message: "admin deleted"}, nil
 }
 
-func (s *TenantAdminService) ListTenantAdminAuditLogs(context.Context, *tenantv1.ListTenantAdminAuditLogsRequest) (*tenantv1.ListTenantAdminAuditLogsResponse, error) {
-	return nil, unimplemented()
+// ListTenantAdminAuditLogs 查询指定管理员操作历史（SPEC §5.1.10 / US-010）。
+// 只读、无审计；按 tenant_id + details.target_id 游标分页；不调 Core。
+func (s *TenantAdminService) ListTenantAdminAuditLogs(ctx context.Context, req *tenantv1.ListTenantAdminAuditLogsRequest) (*tenantv1.ListTenantAdminAuditLogsResponse, error) {
+	// 步骤 1：校验依赖
+	if s.store == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant admin store unavailable")
+	}
+	if req == nil {
+		req = &tenantv1.ListTenantAdminAuditLogsRequest{}
+	}
+
+	// 步骤 2：解析路径参数
+	tenantID, err := parseTenantAdminUUID(req.GetTenantId(), "tenant_id")
+	if err != nil {
+		return nil, err
+	}
+	userID, err := parseTenantAdminUUID(req.GetUserId(), "user_id")
+	if err != nil {
+		return nil, err
+	}
+
+	// 步骤 3：游标分页入参
+	limit := 20
+	cursor := ""
+	if page := req.GetPage(); page != nil {
+		if page.GetLimit() > 0 {
+			limit = int(page.GetLimit())
+		}
+		if limit > 100 {
+			limit = 100
+		}
+		cursor = page.GetCursor()
+	}
+
+	// 步骤 4：查 audit_logs（目标管理员 = details.target_id）
+	listed, err := s.store.ListAuditLogs(ctx, tenantID, userID, ports.TenantAdminAuditLogFilter{
+		Limit:  limit,
+		Cursor: cursor,
+		Action: strings.TrimSpace(req.GetAction()),
+		Result: strings.TrimSpace(req.GetResult()),
+	})
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+
+	// 步骤 5：映射 gRPC TenantAdminAuditLog
+	items := make([]*tenantv1.TenantAdminAuditLog, 0, len(listed.Items))
+	for _, it := range listed.Items {
+		pb, mapErr := tenantAdminAuditLogToPB(it)
+		if mapErr != nil {
+			return nil, status.Errorf(codes.Internal, "INTERNAL_ERROR: encode audit log: %v", mapErr)
+		}
+		items = append(items, pb)
+	}
+	return &tenantv1.ListTenantAdminAuditLogsResponse{
+		Items:      items,
+		NextCursor: listed.NextCursor,
+	}, nil
+}
+
+// tenantAdminAuditLogToPB 把管理员审计领域对象映射为 gRPC TenantAdminAuditLog。
+func tenantAdminAuditLogToPB(log ports.AuditLogListItem) (*tenantv1.TenantAdminAuditLog, error) {
+	details := log.Details
+	if details == nil {
+		details = map[string]any{}
+	}
+	st, err := structpb.NewStruct(details)
+	if err != nil {
+		return nil, err
+	}
+	out := &tenantv1.TenantAdminAuditLog{
+		Id:        log.ID.String(),
+		Action:    log.Action,
+		Resource:  log.Resource,
+		Result:    log.Result,
+		Details:   st,
+		CreatedAt: timestamppb.New(log.CreatedAt),
+	}
+	if log.UserID != nil {
+		out.UserId = wrapperspb.String(log.UserID.String())
+	}
+	return out, nil
 }
 
 // validateInviteIdentity 校验邀请入参：email 合法且 username 非空、长度 1-64、不含冒号。

@@ -152,7 +152,7 @@ type AuditLogListItem struct {
 	ID        uuid.UUID
 	Action    string
 	Resource  string
-	Result    string // success | failed
+	Result    string // success | failure
 	UserID    *uuid.UUID
 	Details   map[string]any
 	CreatedAt time.Time
@@ -163,7 +163,7 @@ type TenantAdminAuditLogFilter struct {
 	Limit  int
 	Cursor string
 	Action string
-	Result string // success | failed；空 = 全部
+	Result string // success | failure
 }
 
 // TenantAdminAuditLogListResult 是操作历史查询返回。

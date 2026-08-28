@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/kubercloud/ani/pkg/types"
 	"github.com/kubercloud/ani/services/tenant-service/internal/repo/ports"
 )
 
@@ -306,10 +308,99 @@ func (s *PostgresTenantAdminStore) GetInvitationFlags(ctx context.Context, tenan
 	return out, nil
 }
 
+// ListAuditLogs 按租户 + 目标管理员查询操作历史（details.target_id），游标分页。
+// 不调 Core；resource 固定 tenant_admin。
 func (s *PostgresTenantAdminStore) ListAuditLogs(ctx context.Context, tenantID, userID uuid.UUID, filter ports.TenantAdminAuditLogFilter) (ports.TenantAdminAuditLogListResult, error) {
-	_ = ctx
-	_ = tenantID
-	_ = userID
-	_ = filter
-	return ports.TenantAdminAuditLogListResult{}, ports.ErrNotImplemented
+	// 步骤 1：limit 边界（default 20，max 100）
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	// 步骤 2：固定租户 + 目标管理员（写入侧 target_id 落在 details）
+	where := []string{
+		"tenant_id = $1",
+		"resource = 'tenant_admin'",
+		"details->>'target_id' = $2",
+	}
+	args := []any{tenantID, userID.String()}
+
+	// 步骤 3：可选 action / result 过滤（原样匹配，不做归一化）
+	if action := strings.TrimSpace(filter.Action); action != "" {
+		args = append(args, action)
+		where = append(where, fmt.Sprintf("action = $%d", len(args)))
+	}
+	if result := strings.TrimSpace(filter.Result); result != "" {
+		args = append(args, result)
+		where = append(where, fmt.Sprintf("result = $%d", len(args)))
+	}
+	whereSQL := strings.Join(where, " AND ")
+
+	// 步骤 4：游标（created_at DESC, id DESC）；非法 cursor → VALIDATION_FAILED
+	listArgs := append([]any{}, args...)
+	listWhere := whereSQL
+	if cursor := strings.TrimSpace(filter.Cursor); cursor != "" {
+		createdAt, id, err := types.DecodeCursor(cursor)
+		if err != nil {
+			return ports.TenantAdminAuditLogListResult{}, fmt.Errorf("%w: invalid cursor", ports.ErrValidationFailed)
+		}
+		listArgs = append(listArgs, createdAt, id)
+		listWhere += fmt.Sprintf(" AND (created_at, id) < ($%d, $%d)", len(listArgs)-1, len(listArgs))
+	}
+
+	// 步骤 5：多取 1 条判断是否还有下一页
+	listArgs = append(listArgs, limit+1)
+	rows, err := s.db.Query(ctx, `
+		SELECT id, action, resource, result, user_id, details, created_at
+		FROM audit_logs
+		WHERE `+listWhere+`
+		ORDER BY created_at DESC, id DESC
+		LIMIT $`+fmt.Sprintf("%d", len(listArgs)), listArgs...)
+	if err != nil {
+		return ports.TenantAdminAuditLogListResult{}, fmt.Errorf("list tenant admin audit logs: %w", err)
+	}
+	defer rows.Close()
+
+	// 步骤 6a：扫描本页
+	items := make([]ports.AuditLogListItem, 0, limit)
+	for rows.Next() {
+		var (
+			item       ports.AuditLogListItem
+			detailsRaw []byte
+		)
+		if err := rows.Scan(
+			&item.ID, &item.Action, &item.Resource, &item.Result, &item.UserID, &detailsRaw, &item.CreatedAt,
+		); err != nil {
+			return ports.TenantAdminAuditLogListResult{}, fmt.Errorf("scan tenant admin audit log: %w", err)
+		}
+		if len(detailsRaw) > 0 {
+			details := map[string]any{}
+			if err := json.Unmarshal(detailsRaw, &details); err != nil {
+				return ports.TenantAdminAuditLogListResult{}, fmt.Errorf("decode audit details: %w", err)
+			}
+			item.Details = details
+		} else {
+			item.Details = map[string]any{}
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return ports.TenantAdminAuditLogListResult{}, fmt.Errorf("iterate tenant admin audit logs: %w", err)
+	}
+
+	// 步骤 6b：有多余一行则截断并编码 next_cursor
+	nextCursor := ""
+	if len(items) > limit {
+		last := items[limit-1]
+		nextCursor = types.EncodeCursor(last.CreatedAt, last.ID)
+		items = items[:limit]
+	}
+
+	return ports.TenantAdminAuditLogListResult{
+		Items:      items,
+		NextCursor: nextCursor,
+	}, nil
 }

@@ -150,7 +150,27 @@ func (f *fakeTenantAdminGRPC) EnableTenantAdmin(context.Context, *tenantv1.Enabl
 func (f *fakeTenantAdminGRPC) DeleteTenantAdmin(context.Context, *tenantv1.DeleteTenantAdminRequest, ...grpc.CallOption) (*commonv1.IdempotentResult, error) {
 	return nil, status.Error(codes.Unimplemented, "not used")
 }
-func (f *fakeTenantAdminGRPC) ListTenantAdminAuditLogs(context.Context, *tenantv1.ListTenantAdminAuditLogsRequest, ...grpc.CallOption) (*tenantv1.ListTenantAdminAuditLogsResponse, error) {
+func (f *fakeTenantAdminGRPC) ListTenantAdminAuditLogs(_ context.Context, req *tenantv1.ListTenantAdminAuditLogsRequest, _ ...grpc.CallOption) (*tenantv1.ListTenantAdminAuditLogsResponse, error) {
+	// After invite: surface tenant_admin.invite audit for the invited user (target_id).
+	if f.inviteCalls > 0 && f.invitedUserID != "" && req.GetUserId() == f.invitedUserID {
+		details, _ := structpb.NewStruct(map[string]any{
+			"target_id": f.invitedUserID,
+			"email":     "a@acme.io",
+			"username":  "acme_admin",
+		})
+		return &tenantv1.ListTenantAdminAuditLogsResponse{
+			Items: []*tenantv1.TenantAdminAuditLog{
+				{
+					Id:        "aud-invite-1",
+					Action:    "tenant_admin.invite",
+					Resource:  "tenant_admin",
+					Result:    "success",
+					Details:   details,
+					CreatedAt: timestamppb.Now(),
+				},
+			},
+		}, nil
+	}
 	return &tenantv1.ListTenantAdminAuditLogsResponse{}, nil
 }
 func (f *fakeTenantAdminGRPC) ListAvailableTenants(context.Context, *tenantv1.ListAvailableTenantsRequest, ...grpc.CallOption) (*tenantv1.ListAvailableTenantsResponse, error) {
@@ -231,6 +251,28 @@ func TestHandler_InviteFlow(t *testing.T) {
 	rawList := listResp.Body.String()
 	if strings.Contains(rawList, token) {
 		t.Fatalf("invite token leaked into list response")
+	}
+
+	// SPEC §9.2/§9.4: invite 后可查到操作历史
+	auditResp := ut.PerformRequest(h.Engine, http.MethodGet,
+		"/api/v1/svc/tenants/t1/admins/u-invited/audit-logs", nil)
+	if auditResp.Code != http.StatusOK {
+		t.Fatalf("audit-logs status=%d body=%s", auditResp.Code, auditResp.Body.String())
+	}
+	var auditBody map[string]any
+	if err := json.Unmarshal(auditResp.Body.Bytes(), &auditBody); err != nil {
+		t.Fatalf("audit-logs json: %v", err)
+	}
+	auditItems, _ := auditBody["items"].([]any)
+	if len(auditItems) != 1 {
+		t.Fatalf("audit items=%#v", auditBody["items"])
+	}
+	auditFirst, _ := auditItems[0].(map[string]any)
+	if auditFirst["action"] != "tenant_admin.invite" || auditFirst["resource"] != "tenant_admin" {
+		t.Fatalf("unexpected audit item: %#v", auditFirst)
+	}
+	if _, hasToken := auditFirst["token"]; hasToken {
+		t.Fatalf("token must not appear in audit-logs: %#v", auditFirst)
 	}
 }
 
