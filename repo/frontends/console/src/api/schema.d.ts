@@ -64,10 +64,45 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** 获取模型版本列表 */
+        get: operations["listModelVersions"];
         put?: never;
         /** 上传模型版本 */
         post: operations["createModelVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/models/{model_id}/upload-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 申请模型文件预签名上传地址 */
+        post: operations["getModelUploadURL"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/model-import-tasks/{task_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询模型异步导入任务 */
+        get: operations["getModelImportTask"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -194,6 +229,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/inference-policies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询推理访问策略 */
+        get: operations["listInferenceAccessPolicies"];
+        put?: never;
+        /** 创建推理访问策略 */
+        post: operations["createInferenceAccessPolicy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inference-policies/{policy_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 获取推理访问策略 */
+        get: operations["getInferenceAccessPolicy"];
+        put?: never;
+        post?: never;
+        /** 删除推理访问策略 */
+        delete: operations["deleteInferenceAccessPolicy"];
+        options?: never;
+        head?: never;
+        /** 更新推理访问策略 */
+        patch: operations["patchInferenceAccessPolicy"];
+        trace?: never;
+    };
+    "/inference-policy-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询推理访问策略命中记录 */
+        get: operations["listInferencePolicyEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/inference-services/{service_id}/policies": {
         parameters: {
             query?: never;
@@ -201,11 +290,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
-        /**
-         * 更新推理服务限流与访问策略
-         * @description P1 兼容预留路径；P0 未建设调用网关，真实 handler 必须返回 501 FEATURE_NOT_AVAILABLE，不得伪造策略已生效。
-         */
+        /** 查询推理服务绑定的访问策略 */
+        get: operations["listInferenceServicePolicies"];
+        /** 更新推理服务绑定的访问策略 */
         put: operations["updateInferenceServicePolicies"];
         post?: never;
         delete?: never;
@@ -1503,6 +1590,7 @@ export interface components {
             id: string;
             name: string;
             display_name?: string;
+            description?: string | null;
             /** @enum {string} */
             source: "upload" | "huggingface" | "modelscope" | "builtin";
             capabilities?: string[];
@@ -1511,6 +1599,9 @@ export interface components {
             total_size_bytes?: number;
             /** Format: date-time */
             created_at: string;
+            /** Format: date-time */
+            updated_at?: string | null;
+            versions?: components["schemas"]["ModelVersion"][];
         };
         ModelVersion: {
             /** Format: uuid */
@@ -1522,8 +1613,24 @@ export interface components {
             format: "safetensors" | "gguf" | "pytorch";
             is_encrypted?: boolean;
             size_bytes?: number;
+            checksum_sha256?: string | null;
+            storage_path?: string;
             /** Format: date-time */
             created_at: string;
+        };
+        CreateModelUploadURLRequest: {
+            /** Format: uuid */
+            idempotency_key: string;
+            version: string;
+            file_name: string;
+            size_bytes: number;
+        };
+        ModelUploadURLResponse: {
+            /** Format: uri */
+            upload_url: string;
+            storage_path: string;
+            /** Format: date-time */
+            expires_at: string;
         };
         InferenceService: {
             /** Format: uuid */
@@ -2107,21 +2214,120 @@ export interface components {
             /** @enum {string} */
             status: "success" | "timeout" | "error";
         };
+        InferenceAccessPolicyScope: {
+            /** @enum {string} */
+            type: "tenant_default" | "inference_service" | "api_key" | "inference_service_api_key";
+            inference_service_ids?: string[];
+            api_key_ids?: string[];
+        };
+        InferenceAccessPolicyAccess: {
+            allow_all_tenant_keys: boolean;
+            allow_api_key_ids?: string[];
+            deny_api_key_ids?: string[];
+        };
+        InferenceAccessPolicyRateLimits: {
+            qps?: number | null;
+            rpm?: number | null;
+        };
+        InferenceAccessPolicyConcurrency: {
+            max_in_flight?: number | null;
+            /** @default 60 */
+            lease_ttl_seconds: number;
+        };
+        InferenceAccessPolicy: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            tenant_id: string;
+            name: string;
+            /** @enum {string} */
+            status: "enabled" | "disabled";
+            description?: string | null;
+            priority: number;
+            scope: components["schemas"]["InferenceAccessPolicyScope"];
+            access: components["schemas"]["InferenceAccessPolicyAccess"];
+            rate_limits: components["schemas"]["InferenceAccessPolicyRateLimits"];
+            concurrency: components["schemas"]["InferenceAccessPolicyConcurrency"];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at?: string | null;
+        };
+        CreateInferenceAccessPolicyRequest: {
+            /** Format: uuid */
+            idempotency_key: string;
+            name: string;
+            description?: string | null;
+            /**
+             * @default enabled
+             * @enum {string}
+             */
+            status: "enabled" | "disabled";
+            /** @default 1000 */
+            priority: number;
+            scope: components["schemas"]["InferenceAccessPolicyScope"];
+            access: components["schemas"]["InferenceAccessPolicyAccess"];
+            rate_limits?: components["schemas"]["InferenceAccessPolicyRateLimits"];
+            concurrency?: components["schemas"]["InferenceAccessPolicyConcurrency"];
+        };
+        PatchInferenceAccessPolicyRequest: {
+            /** Format: uuid */
+            idempotency_key: string;
+            name?: string;
+            description?: string | null;
+            /** @enum {string} */
+            status?: "enabled" | "disabled";
+            priority?: number;
+            scope?: components["schemas"]["InferenceAccessPolicyScope"];
+            access?: components["schemas"]["InferenceAccessPolicyAccess"];
+            rate_limits?: components["schemas"]["InferenceAccessPolicyRateLimits"];
+            concurrency?: components["schemas"]["InferenceAccessPolicyConcurrency"];
+        };
+        InferenceAccessPolicyListResponse: {
+            items: components["schemas"]["InferenceAccessPolicy"][];
+            next_cursor?: string | null;
+        };
+        InferenceAccessPolicyBinding: {
+            /** Format: uuid */
+            policy_id: string;
+            inference_service_ids: string[];
+        };
+        InferenceAccessPolicyEvent: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            tenant_id: string;
+            /** Format: uuid */
+            policy_id?: string | null;
+            /** Format: uuid */
+            inference_service_id: string;
+            /** Format: uuid */
+            api_key_id?: string | null;
+            key_prefix?: string | null;
+            request_id?: string | null;
+            openai_path?: string;
+            external_model?: string | null;
+            /** @enum {string} */
+            decision: "allow" | "deny" | "rate_limited" | "concurrency_limited" | "policy_unavailable";
+            reason_code: string;
+            http_status: number;
+            retry_after_seconds?: number | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        InferenceAccessPolicyEventListResponse: {
+            items: components["schemas"]["InferenceAccessPolicyEvent"][];
+            next_cursor?: string | null;
+        };
         InferenceServicePolicies: {
-            rate_limit_rpm?: number | null;
-            max_concurrency?: number | null;
-            allowed_tenant_ids?: string[] | null;
-            /** @enum {string|null} */
-            auth_mode?: "api_key" | "jwt" | "none" | null;
+            /** Format: uuid */
+            service_id: string;
+            policies: components["schemas"]["InferenceAccessPolicy"][];
         };
         UpdateInferenceServicePoliciesRequest: {
             /** Format: uuid */
             idempotency_key: string;
-            rate_limit_rpm?: number | null;
-            max_concurrency?: number | null;
-            allowed_tenant_ids?: string[];
-            /** @enum {string} */
-            auth_mode?: "api_key" | "jwt" | "none";
+            policy_ids: string[];
         };
         KBCitation: {
             /** Format: uuid */
@@ -2947,6 +3153,10 @@ export interface operations {
     listModels: {
         parameters: {
             query?: {
+                /** @description 按模型名称或显示名称搜索 */
+                keyword?: string;
+                source?: "upload" | "huggingface" | "modelscope" | "builtin";
+                capability?: "text-generation" | "embedding" | "speech-to-text";
                 status?: "pending" | "downloading" | "ready" | "error" | "deleted";
                 limit?: number;
                 /** @description 上一页返回的 next_cursor */
@@ -3066,6 +3276,8 @@ export interface operations {
                     "application/json": components["schemas"]["Model"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -3087,6 +3299,47 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 模型仍被未删除的推理服务引用（code=MODEL_IN_USE） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    listModelVersions: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 模型版本列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CursorPage"] & {
+                        items?: components["schemas"]["ModelVersion"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -3125,6 +3378,67 @@ export interface operations {
                     "application/json": components["schemas"]["ModelVersion"];
                 };
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getModelUploadURL: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateModelUploadURLRequest"];
+            };
+        };
+        responses: {
+            /** @description 已创建有时限的模型文件预签名上传地址 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelUploadURLResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getModelImportTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 模型异步导入任务 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listInferenceServices: {
@@ -3387,6 +3701,189 @@ export interface operations {
             504: components["responses"]["RuntimeTimeout"];
         };
     };
+    listInferenceAccessPolicies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 推理访问策略列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceAccessPolicyListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createInferenceAccessPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateInferenceAccessPolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description 已创建推理访问策略 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceAccessPolicy"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["InferenceUnprocessableEntity"];
+        };
+    };
+    getInferenceAccessPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                policy_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 推理访问策略 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceAccessPolicy"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteInferenceAccessPolicy: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                policy_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除推理访问策略 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    patchInferenceAccessPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                policy_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchInferenceAccessPolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description 已更新推理访问策略 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceAccessPolicy"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["InferenceUnprocessableEntity"];
+        };
+    };
+    listInferencePolicyEvents: {
+        parameters: {
+            query?: {
+                inference_service_id?: string;
+                policy_id?: string;
+                api_key_id?: string;
+                decision?: "allow" | "deny" | "rate_limited" | "concurrency_limited" | "policy_unavailable";
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 推理访问策略命中记录 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceAccessPolicyEventListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    listInferenceServicePolicies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                service_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 推理服务策略绑定 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceServicePolicies"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     updateInferenceServicePolicies: {
         parameters: {
             query?: never;
@@ -3402,7 +3899,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 更新后的策略 */
+            /** @description 更新后的推理服务策略绑定 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -3413,9 +3910,9 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            501: components["responses"]["FeatureNotAvailable"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["InferenceUnprocessableEntity"];
         };
     };
     listKnowledgeBases: {
