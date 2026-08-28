@@ -134,7 +134,8 @@ type TenantAdminService interface {
 	SoftDelete(ctx context.Context, tenantID, userID string) error
 
 	// ResetPassword updates password_hash. Plaintext must not be logged or returned.
-	// Disabled/deleted → ErrUserNotFound; same as old → ErrPasswordSameAsOld.
+	// Soft-deleted → ErrUserNotFound; same as old → ErrPasswordSameAsOld.
+	// Disabled users may reset (status='disabled' is allowed).
 	ResetPassword(ctx context.Context, tenantID, userID, newPassword string) error
 
 	// BatchGetUsers 批量查询租户内用户（按 user_id 列表）。不存在的用户跳过。

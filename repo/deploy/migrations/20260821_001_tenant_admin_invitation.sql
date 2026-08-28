@@ -62,15 +62,6 @@ CREATE POLICY tenant_admin_invitation_tenant_self
 -- GRANT 表级读写给 ani_app_user
 GRANT SELECT, INSERT, UPDATE, DELETE ON tenant_admin_invitation TO ani_app_user;
 
--- ===========================================================================
--- 3. Core：users 表列扩展（展示名 + 软删除）
--- ===========================================================================
--- display_name：租户管理员展示名（昵称），NULL 表示使用 username
-ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT;
-
--- is_deleted / deleted_at：软删除标记，与 users.status(active/disabled) 独立
-ALTER TABLE users ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 
 COMMIT;
 

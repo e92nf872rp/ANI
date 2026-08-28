@@ -32,6 +32,7 @@ type fakeTenantAdminCoreClient struct {
 	lastChangeRoleID uuid.UUID
 	perms            *ports.UserPermissions
 	permsErr         error
+	resetPasswordErr error
 }
 
 func (f *fakeTenantAdminCoreClient) MatchUser(context.Context, uuid.UUID, string, string) (uuid.UUID, error) {
@@ -120,8 +121,11 @@ func (f *fakeTenantAdminCoreClient) SetStatus(context.Context, uuid.UUID, uuid.U
 func (f *fakeTenantAdminCoreClient) SoftDelete(context.Context, uuid.UUID, uuid.UUID) error {
 	return ports.ErrNotImplemented
 }
-func (f *fakeTenantAdminCoreClient) ResetPassword(context.Context, uuid.UUID, uuid.UUID, string) error {
-	return ports.ErrNotImplemented
+func (f *fakeTenantAdminCoreClient) ResetPassword(_ context.Context, _, _ uuid.UUID, _ string) error {
+	if f.resetPasswordErr != nil {
+		return f.resetPasswordErr
+	}
+	return nil
 }
 
 type fakeTenantAdminStore struct {
@@ -1206,6 +1210,87 @@ func TestTenantAdminService_GetRolePermissions(t *testing.T) {
 	})
 }
 
+func TestTenantAdminService_ResetPassword(t *testing.T) {
+	t.Parallel()
+	tenantID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
+	userID := uuid.MustParse("22222222-2222-4222-8222-222222222222")
+	validPassword := "NewP@ssw0rd"
+
+	t.Run("success", func(t *testing.T) {
+		t.Parallel()
+		core := &fakeTenantAdminCoreClient{}
+		audit := &fakeAuditStore{}
+		svc := NewTenantAdminService(core, nil, nil, audit)
+		res, err := svc.ResetTenantAdminPassword(context.Background(), &tenantv1.ResetTenantAdminPasswordRequest{
+			TenantId: tenantID.String(), UserId: userID.String(), NewPassword: validPassword,
+		})
+		if err != nil {
+			t.Fatalf("ResetTenantAdminPassword: %v", err)
+		}
+		if res.GetId() != userID.String() || res.GetMessage() != "password reset" {
+			t.Fatalf("result=%+v", res)
+		}
+		if len(audit.logs) != 1 || audit.logs[0].Action != "tenant_admin.reset_password" {
+			t.Fatalf("audit=%+v", audit.logs)
+		}
+		if _, ok := audit.logs[0].Details["new_password"]; ok {
+			t.Fatalf("password must not appear in audit: %+v", audit.logs[0].Details)
+		}
+	})
+
+	t.Run("same_as_old", func(t *testing.T) {
+		t.Parallel()
+		core := &fakeTenantAdminCoreClient{resetPasswordErr: ports.ErrPasswordSameAsOld}
+		audit := &fakeAuditStore{}
+		svc := NewTenantAdminService(core, nil, nil, audit)
+		_, err := svc.ResetTenantAdminPassword(context.Background(), &tenantv1.ResetTenantAdminPasswordRequest{
+			TenantId: tenantID.String(), UserId: userID.String(), NewPassword: validPassword,
+		})
+		assertBusinessCode(t, err, codes.FailedPrecondition, "PASSWORD_SAME_AS_OLD")
+		assertFailureAudit(t, audit, "tenant_admin.reset_password")
+	})
+
+	t.Run("complexity_invalid", func(t *testing.T) {
+		t.Parallel()
+		svc := NewTenantAdminService(&fakeTenantAdminCoreClient{}, nil, nil, nil)
+		_, err := svc.ResetTenantAdminPassword(context.Background(), &tenantv1.ResetTenantAdminPasswordRequest{
+			TenantId: tenantID.String(), UserId: userID.String(), NewPassword: "short1",
+		})
+		assertBusinessCode(t, err, codes.InvalidArgument, "VALIDATION_FAILED")
+	})
+
+	t.Run("soft_deleted_not_found", func(t *testing.T) {
+		t.Parallel()
+		core := &fakeTenantAdminCoreClient{resetPasswordErr: ports.ErrTenantAdminNotFound}
+		svc := NewTenantAdminService(core, nil, nil, nil)
+		_, err := svc.ResetTenantAdminPassword(context.Background(), &tenantv1.ResetTenantAdminPasswordRequest{
+			TenantId: tenantID.String(), UserId: userID.String(), NewPassword: validPassword,
+		})
+		assertBusinessCode(t, err, codes.NotFound, "TENANT_ADMIN_NOT_FOUND")
+	})
+
+	t.Run("disabled_user_allowed", func(t *testing.T) {
+		t.Parallel()
+		core := &fakeTenantAdminCoreClient{
+			users: map[string]ports.AdminWithTenant{
+				tenantUserKey(tenantID, userID): {
+					ID: userID, Tenant: ports.TenantRef{ID: tenantID}, Status: "disabled",
+				},
+			},
+		}
+		svc := NewTenantAdminService(core, nil, nil, nil)
+		res, err := svc.ResetTenantAdminPassword(context.Background(), &tenantv1.ResetTenantAdminPasswordRequest{
+			TenantId: tenantID.String(), UserId: userID.String(), NewPassword: validPassword,
+		})
+		if err != nil {
+			t.Fatalf("ResetTenantAdminPassword disabled user: %v", err)
+		}
+		if res.GetMessage() != "password reset" {
+			t.Fatalf("result=%+v", res)
+		}
+	})
+}
+
 func TestTenantAdminService_Unimplemented(t *testing.T) {
 	s := NewTenantAdminService(nil, nil, nil, nil)
 	ctx := context.Background()
@@ -1216,10 +1301,6 @@ func TestTenantAdminService_Unimplemented(t *testing.T) {
 	}{
 		{"GetChangeableRoles", func() error {
 			_, err := s.GetChangeableRoles(ctx, &tenantv1.GetChangeableRolesRequest{})
-			return err
-		}},
-		{"ResetTenantAdminPassword", func() error {
-			_, err := s.ResetTenantAdminPassword(ctx, &tenantv1.ResetTenantAdminPasswordRequest{})
 			return err
 		}},
 		{"DisableTenantAdmin", func() error {
@@ -1240,8 +1321,8 @@ func TestTenantAdminService_Unimplemented(t *testing.T) {
 		}},
 	}
 
-	if len(checks) != 6 {
-		t.Fatalf("want 6 remaining unimplemented RPCs, got %d", len(checks))
+	if len(checks) != 5 {
+		t.Fatalf("want 5 remaining unimplemented RPCs, got %d", len(checks))
 	}
 	for _, tc := range checks {
 		t.Run(tc.name, func(t *testing.T) {

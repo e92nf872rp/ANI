@@ -68,7 +68,7 @@ type TenantAdminSvcClient interface {
 	SoftDelete(ctx context.Context, tenantID, userID uuid.UUID) error
 
 	// ResetPassword 更新 password_hash（明文不落日志/审计/响应）。
-	// 禁用/已删 → ErrTenantAdminNotFound；与旧密码相同 → ErrPasswordSameAsOld。
+	// 已软删除 → ErrTenantAdminNotFound；与旧密码相同 → ErrPasswordSameAsOld。
 	ResetPassword(ctx context.Context, tenantID, userID uuid.UUID, newPassword string) error
 }
 

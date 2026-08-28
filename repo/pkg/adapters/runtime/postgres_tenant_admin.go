@@ -10,6 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/kubercloud/ani/pkg/ports"
 	"github.com/kubercloud/ani/pkg/types"
 )
@@ -484,12 +486,64 @@ func (u *PostgresTenantAdmin) SoftDelete(ctx context.Context, tenantID, userID s
 	return ports.ErrUnsupported
 }
 
+// ResetPassword 重置租户成员 password_hash（bcrypt cost=12）。
+// 软删除 → ErrUserNotFound；与旧 hash 相同 → ErrPasswordSameAsOld；status=disabled 允许重置。
 func (u *PostgresTenantAdmin) ResetPassword(ctx context.Context, tenantID, userID, newPassword string) error {
-	_ = ctx
-	_ = tenantID
-	_ = userID
-	_ = newPassword
-	return ports.ErrUnsupported
+	tid, err := parseAdminUUID(tenantID, "tenant_id")
+	if err != nil {
+		return err
+	}
+	uid, err := parseAdminUUID(userID, "user_id")
+	if err != nil {
+		return err
+	}
+
+	return u.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		// 步骤 1：加载未软删除用户的旧 password_hash（禁用 status 不过滤）
+		var oldHash string
+		qErr := tx.QueryRow(ctx, `
+			SELECT COALESCE(password_hash, '')
+			FROM users
+			WHERE id = $1
+			  AND tenant_id = $2
+			  AND COALESCE(is_deleted, FALSE) = FALSE
+		`, uid, tid).Scan(&oldHash)
+		if errors.Is(qErr, pgx.ErrNoRows) {
+			return ports.ErrUserNotFound
+		}
+		if qErr != nil {
+			return fmt.Errorf("load user for reset password: %w", qErr)
+		}
+
+		// 步骤 2：与旧 hash 相同 → PASSWORD_SAME_AS_OLD
+		if oldHash != "" {
+			if cmpErr := bcrypt.CompareHashAndPassword([]byte(oldHash), []byte(newPassword)); cmpErr == nil {
+				return ports.ErrPasswordSameAsOld
+			}
+		}
+
+		// 步骤 3：bcrypt(cost=12) 生成新 hash
+		hash, hashErr := bcrypt.GenerateFromPassword([]byte(newPassword), 12)
+		if hashErr != nil {
+			return fmt.Errorf("hash password: %w", hashErr)
+		}
+
+		// 步骤 4：UPDATE users.password_hash
+		tag, execErr := tx.Exec(ctx, `
+			UPDATE users
+			SET password_hash = $1, updated_at = NOW()
+			WHERE id = $2
+			  AND tenant_id = $3
+			  AND COALESCE(is_deleted, FALSE) = FALSE
+		`, string(hash), uid, tid)
+		if execErr != nil {
+			return fmt.Errorf("update password_hash: %w", execErr)
+		}
+		if tag.RowsAffected == 0 {
+			return ports.ErrUserNotFound
+		}
+		return nil
+	})
 }
 
 // BatchGetUsers 批量查询租户内未软删除用户（按 user_id 列表）。不存在的用户跳过。

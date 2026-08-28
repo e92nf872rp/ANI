@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -629,7 +630,6 @@ func pageTenantAdmins(items []ports.AdminWithTenant, limit int, cursor string) (
 	return items[start:end], nextCursor, nil
 }
 
-// adminWithTenantToProto 将 ports.AdminWithTenant 映射为 gRPC AdminWithTenant；
 // includeTimestamps 控制是否填充 created_at / updated_at（详情页需要，列表页不需要）。
 func adminWithTenantToProto(user ports.AdminWithTenant, includeTimestamps bool) *tenantv1.AdminWithTenant {
 	out := &tenantv1.AdminWithTenant{
@@ -707,8 +707,7 @@ func (s *TenantAdminService) GetTenantAdminDetail(ctx context.Context, req *tena
 }
 
 // UpdateTenantAdminRole 修改管理员角色（SPEC §5.1.5 / US-005）。
-// 入参 role_id（uuid）；校验 role.tenant_id 与参数一致或为 null、name 不以 platform- 为前缀；
-// Core upsert 改绑 user_roles；写审计 tenant_admin.change_role。
+// Core 按 role_id upsert 改绑 user_roles；写审计 tenant_admin.change_role。
 func (s *TenantAdminService) UpdateTenantAdminRole(ctx context.Context, req *tenantv1.UpdateTenantAdminRoleRequest) (*commonv1.IdempotentResult, error) {
 	const action = "tenant_admin.change_role"
 
@@ -747,8 +746,8 @@ func (s *TenantAdminService) UpdateTenantAdminRole(ctx context.Context, req *ten
 		"target_id":   userID.String(),
 		"new_role_id": roleID.String(),
 	}
-
 	// 步骤 2：读取旧角色（审计 old_role）
+	var oldRoleID uuid.UUID
 	oldRole := ""
 	perms, getErr := s.core.GetRolePermissions(ctx, tenantID, userID)
 	if getErr != nil {
@@ -756,13 +755,13 @@ func (s *TenantAdminService) UpdateTenantAdminRole(ctx context.Context, req *ten
 		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, details, mapped, &tenantID)
 		return nil, mapped
 	}
+	oldRoleID = perms.RoleID
 	oldRole = perms.Role
 	details["old_role"] = oldRole
-	if perms.RoleID != uuid.Nil {
-		details["old_role_id"] = perms.RoleID.String()
+	if oldRoleID != uuid.Nil {
+		details["old_role_id"] = oldRoleID.String()
 	}
-
-	// 步骤 3：Core upsert 改绑
+	// 步骤 3：Core 按 role_id 改绑
 	if err := s.core.ChangeRole(ctx, tenantID, userID, roleID); err != nil {
 		mapped := mapStoreError(err)
 		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, details, mapped, &tenantID)
@@ -811,9 +810,6 @@ func (s *TenantAdminService) GetTenantAdminRole(ctx context.Context, req *tenant
 		UserId: perms.UserID.String(),
 		Role:   perms.Role,
 	}
-	if perms.RoleID != uuid.Nil {
-		out.RoleId = perms.RoleID.String()
-	}
 	if perms.TenantID != nil {
 		out.TenantId = wrapperspb.String(perms.TenantID.String())
 	}
@@ -823,7 +819,7 @@ func (s *TenantAdminService) GetTenantAdminRole(ctx context.Context, req *tenant
 	}
 	lv, lvErr := structpb.NewList(permItems)
 	if lvErr != nil {
-		return nil, status.Errorf(codes.Internal, "encode permissions: %v", lvErr)
+		return nil, businessError(codes.Internal, ports.ErrCoreUnavailable, "encode permissions")
 	}
 	out.Permissions = lv
 	return out, nil
@@ -833,8 +829,55 @@ func (s *TenantAdminService) GetChangeableRoles(context.Context, *tenantv1.GetCh
 	return nil, unimplemented()
 }
 
-func (s *TenantAdminService) ResetTenantAdminPassword(context.Context, *tenantv1.ResetTenantAdminPasswordRequest) (*commonv1.IdempotentResult, error) {
-	return nil, unimplemented()
+// ResetTenantAdminPassword 重置管理员密码（SPEC §5.1.7 / US-007）。
+// 校验 new_password 复杂度；Core bcrypt(cost=12) 更新 password_hash；明文不落审计/日志/响应。
+func (s *TenantAdminService) ResetTenantAdminPassword(ctx context.Context, req *tenantv1.ResetTenantAdminPasswordRequest) (*commonv1.IdempotentResult, error) {
+	const action = "tenant_admin.reset_password"
+
+	// 步骤 1：校验依赖
+	if s.core == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant admin api unavailable")
+	}
+	if req == nil {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "request required")
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, nil, err, nil)
+		return nil, err
+	}
+
+	// 步骤 2：解析路径参数
+	tenantID, err := parseTenantAdminUUID(req.GetTenantId(), "tenant_id")
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, nil, err, nil)
+		return nil, err
+	}
+	userID, err := parseTenantAdminUUID(req.GetUserId(), "user_id")
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+		return nil, err
+	}
+
+	// 步骤 3：校验密码复杂度（明文不落审计）
+	if err := validateTenantAdminPassword(req.GetNewPassword()); err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, map[string]any{
+			"tenant_id": tenantID.String(), "target_id": userID.String(),
+		}, err, &tenantID)
+		return nil, err
+	}
+
+	details := map[string]any{
+		"tenant_id": tenantID.String(),
+		"target_id": userID.String(),
+	}
+
+	if err := s.core.ResetPassword(ctx, tenantID, userID, req.GetNewPassword()); err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantAdmin, action, details, mapped, &tenantID)
+		return nil, mapped
+	}
+
+	// 步骤 5：写审计 success（details 不含 new_password）
+	writeAuditSuccess(ctx, s.audit, auditResourceTenantAdmin, action, details, &tenantID)
+	return &commonv1.IdempotentResult{Id: userID.String(), Message: "password reset"}, nil
 }
 
 func (s *TenantAdminService) DisableTenantAdmin(context.Context, *tenantv1.DisableTenantAdminRequest) (*commonv1.IdempotentResult, error) {
@@ -870,6 +913,47 @@ func validateInviteIdentity(email, username string) error {
 	}
 	if strings.Contains(username, ":") {
 		return businessError(codes.InvalidArgument, ports.ErrValidationFailed, "username must not contain ':'")
+	}
+	return nil
+}
+
+// validateTenantAdminPassword 校验 8-64 字符且四类（大写/小写/数字/特殊）至少三类。
+func validateTenantAdminPassword(password string) error {
+	// 步骤 1：长度 8-64
+	n := utf8.RuneCountInString(password)
+	if n < 8 || n > 64 {
+		return businessError(codes.InvalidArgument, ports.ErrValidationFailed, "new_password must be 8-64 characters")
+	}
+	// 步骤 2：统计字符类别（大写/小写/数字/特殊）
+	var upper, lower, digit, special bool
+	for _, r := range password {
+		switch {
+		case unicode.IsUpper(r):
+			upper = true
+		case unicode.IsLower(r):
+			lower = true
+		case unicode.IsDigit(r):
+			digit = true
+		case unicode.IsPunct(r) || unicode.IsSymbol(r):
+			special = true
+		}
+	}
+	// 步骤 3：至少三类
+	classes := 0
+	if upper {
+		classes++
+	}
+	if lower {
+		classes++
+	}
+	if digit {
+		classes++
+	}
+	if special {
+		classes++
+	}
+	if classes < 3 {
+		return businessError(codes.InvalidArgument, ports.ErrValidationFailed, "new_password complexity insufficient")
 	}
 	return nil
 }
