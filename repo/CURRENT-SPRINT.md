@@ -136,10 +136,13 @@
 | AUTHZ-COMPAT-B0 (PR2) | ✅ local verified | `e2eb502`；规范 Principal + LegacyPrincipalView + Mode/Config + ResolveAuthzPolicy + 横切 identity key；gateway 仍走旧 ValidateToken/CheckPermission |
 | AUTHZ-CONTRACT-B1 (PR3) | ✅ local verified | `65f00f3`；additive V2 proto + auth-service JWT/API Key principal + permission evaluator + Gateway V2 client；gateway 仍 mode=off 不调 V2 |
 | AUTHZ-PILOT-C (PR4) | ✅ local verified | `ad83e41`；v1.yaml security 注解 + mode Validate + V2 授权链路 + pilot E2E + deployment env；仅 listQuotaMeta 启用 V2 |
+| AUTHZ-MODE-SIMPLIFY-D (PR5) | ✅ local verified | `4753a42`；契约即开关收敛——删除 mode 开关（policy/dev/pilot/off）与 pilot allowlist，policy 路由恒为 x-ani-authz（generated）→V2、其余 legacy、public 放行，dev 自动回落 legacy；废弃 env 残留启动 fail closed；部署清单删除两个废弃 env 条目 |
 
 **gofmt 修复：** `cfe5b30`。**批次记录：** `development-records/authz-policy-compat-contract-pilot.md`。**验证命令：** `go build ./services/ani-gateway/... ./services/auth-service/...` + `go test -count=1 ./services/ani-gateway/... ./services/auth-service/...` + `gofmt -l`。
 
 **预存问题修复（2026-08-25）：** 本地实测 pilot 模式后修复 4 个文件的预存不一致——删 v1.yaml 已弃用的 branding PUT/POST logo + tasks DELETE 路由的 router 注册和 registry 条目（branding_resources.go / task_resources.go / zz_generated_core_policies.go）；gpu_scheduling_resources.go `:id`→`:queue_id` 与 v1.yaml 一致（修复运行时 `LookupByRequest` lookup miss + route coverage 门禁）。修复后 drift 门禁通过、route coverage 0 error（274 registered, 224 registry）。详见 `development-records/authz-policy-compat-contract-pilot.md`。
+
+**PR5 批次记录：** `development-records/authz-mode-simplify-d.md`。**验证命令：** `go test ./services/ani-gateway/...` + `make gen-gateway-authz`（生成物零漂移）+ `make validate-gateway-authz`（18 tests、283 registered routes 0 errors）+ `make validate-architecture` + `git diff --check`；`make test` 仅 `pkg/adapters/runtime` 的 Windows 预存失败（sandbox symlink 特权 / Python `os.O_DIRECTORY`；origin/main @ `9c7bf2b` worktree 复跑同包同样 FAIL，不在本次改动集）。**本地实测：** `ANI_AUTH_MODE=auth_service`（无任何 policy env）启动正常；public 放行（branding 200）、generated 接口 `/api/v1/admin/quota-meta` 无凭证被 V2 拒绝 401、legacy 无效 token 401；`ANI_AUTH_MODE=dev` 启动正常且 quota-meta 回落 legacy 返回真实数据 200；废弃 env 残留启动 fail closed 实测复现。登录全链路（有 token 200）受数据库角色权限迁移（#124 `ani_app_user`）未应用阻塞，暂缓验证。
 
 ## 账密登录模块（2026-07）
 
