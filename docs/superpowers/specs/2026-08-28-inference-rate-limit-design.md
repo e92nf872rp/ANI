@@ -6,11 +6,11 @@
 
 ## 1. 目标与范围
 
-第一版把现有推理服务访问策略契约从 `501 FEATURE_NOT_AVAILABLE` 提升为可用的后端闭环：租户管理员能够为指定推理服务配置限流与 AK 访问范围，推理请求进入 ANI Gateway 后按策略执行，超限请求稳定返回 429。
+第一版把现有推理服务访问策略契约从 `501 FEATURE_NOT_AVAILABLE` 提升为可用的后端闭环：租户管理员能够创建/更新访问策略并绑定到指定推理服务，推理请求进入 ANI Gateway 后按策略执行，超限请求稳定返回 429。
 
 本轮包含：
 
-- 实现已有 `PUT /api/v1/svc/inference-services/{service_id}/policies`；
+- 实现已有 `/api/v1/svc/inference-policies` 策略 CRUD 和 `/api/v1/svc/inference-services/{service_id}/policies` 绑定读写；
 - 按租户隔离保存和读取策略；
 - 支持 `rate_limits.qps` 与 `rate_limits.rpm`，同时配置时两者均必须通过；
 - 支持 `allow_api_key_ids` 与 `deny_api_key_ids`；
@@ -24,7 +24,7 @@
 
 - Services 契约位于 `repo/api/openapi/services/v1.yaml`，策略资源已存在，不能回流 Core API。
 - Gateway 现有 `RateLimit(store)` 已提供共享窗口计数和 429/503 错误语义，但当前按通用路由和主体限流，不能读取推理服务策略。
-- Gateway 必须通过 ANI Services API/SDK 或稳定的服务端口调用推理服务能力，不直接访问数据库表。
+- Gateway 通过 inference-service 已有内部 gRPC 控制面扩展读取公开策略快照，不直接访问数据库表；控制面 HTTP 仍由 Gateway 暴露。
 - 所有新行为必须保持 `tenant_id` first 的查询与 RLS 边界，不能通过请求路径中的 ID 绕过租户校验。
 - 现有 auth middleware 负责解析 Bearer/API Key、注入主体和 `api_key_id`；限流只消费其结果，不重复校验凭证。
 
@@ -32,20 +32,20 @@
 
 ### 3.1 控制面
 
-在 inference-service 中增加策略存储与服务逻辑：
+在 inference-service 中增加策略存储、策略服务和绑定服务逻辑：
 
 1. 校验 `service_id` 属于当前租户且未删除；不存在或跨租户统一映射为 404。
 2. 校验策略字段：`qps/rpm` 至少一个存在时必须为正数；允许列表和拒绝列表不能包含重复 ID；同一 AK 同时命中 deny 和 allow 时 deny 优先。
-3. 以 `idempotency_key` 对 PUT 做请求指纹约束：相同 key + 相同请求重放原结果；相同 key + 不同请求返回幂等冲突。
-4. 使用事务完成策略替换，更新版本/时间戳，并写入可供 Gateway 读取的公开策略视图；不返回 secret 或原始 AK。
+3. 以 `idempotency_key` 对策略写入和绑定写入做请求指纹约束：相同 key + 相同请求重放原结果；相同 key + 不同请求返回幂等冲突。
+4. 使用事务完成策略创建/更新/删除和服务绑定，更新版本/时间戳，并通过内部 gRPC 提供可供 Gateway 读取的公开策略视图；不返回 secret 或原始 AK。
 
-策略按 `(tenant_id, inference_service_id)` 唯一。第一版采用“单个服务一份当前策略”的替换语义，避免并行规则合并造成优先级歧义。
+策略按 `(tenant_id, policy_id)` 唯一；服务绑定按 `(tenant_id, inference_service_id, policy_id)` 唯一。第一版按 `priority` 升序选择首个匹配的 enabled 策略；同一优先级冲突时以稳定 UUID 顺序决胜。
 
 ### 3.2 数据面
 
 ANI Gateway 在已有认证和路由解析之后增加推理策略 enforcement：
 
-1. 从已认证请求上下文取得 `tenant_id`、主体标识、`api_key_id`（若有）和外部模型名；通过推理服务策略读取端口获得当前启用策略。
+1. 从已认证请求上下文取得 `tenant_id`、主体标识、`api_key_id`（若有）和外部模型名；通过内部策略读取端口获得当前已绑定策略。
 2. 仅对 chat/completions 和 embeddings 数据面请求执行；管理 API、健康检查和公共路径不进入该策略。
 3. AK 访问范围检查先于计数：命中 deny 或不在非空 allow 列表时返回 403，不消耗限流计数。
 4. `qps` 使用 1 秒 Redis 原子窗口；`rpm` 使用 1 分钟 Redis 原子窗口。计数键必须包含租户、AK/主体、推理服务、请求类型和窗口，避免不同租户或模型互相污染。
@@ -63,7 +63,7 @@ inference_rl:v1:{tenant_id}:{principal_key}:{inference_service_id}:chat:rpm:{epo
 
 ## 4. 请求与错误语义
 
-策略更新继续使用现有契约的 `PUT /inference-services/{service_id}/policies`，成功返回 `200 + InferenceService`，并要求 `idempotency_key`。
+控制面继续使用现有契约：策略 `POST /inference-policies`、`PATCH/DELETE /inference-policies/{policy_id}`，以及绑定 `GET/PUT /inference-services/{service_id}/policies`。策略写入和绑定写入均要求契约规定的 `idempotency_key`；绑定 PUT 成功返回 `InferenceServicePolicies`。
 
 数据面结果：
 
@@ -81,7 +81,7 @@ inference_rl:v1:{tenant_id}:{principal_key}:{inference_service_id}:chat:rpm:{epo
 
 ### 控制面
 
-- 租户内 PUT 创建/替换策略成功；跨租户 service 返回 404；禁用策略不执行；字段边界校验稳定。
+- 租户内策略创建/更新/删除和服务绑定成功；跨租户 policy/service 返回 404；禁用策略不执行；字段边界校验稳定。
 - 相同幂等键重放返回相同结果；同键不同请求返回幂等冲突。
 - allow/deny 冲突时 deny 优先，重复 ID 和非法 UUID 被拒绝。
 
