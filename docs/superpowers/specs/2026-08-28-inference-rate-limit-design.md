@@ -6,92 +6,69 @@
 
 ## 1. 目标与范围
 
-第一版把现有推理服务访问策略契约从 `501 FEATURE_NOT_AVAILABLE` 提升为可用的后端闭环：租户管理员能够创建/更新访问策略并绑定到指定推理服务，推理请求进入 ANI Gateway 后按策略执行，超限请求稳定返回 429。
+第一版围绕 C40 真实数据面完成限流闭环：客户端请求进入 Envoy AI Gateway，由现有 ext_authz 链路调用 auth-service 的 AK RPM 限流，并在 Envoy 路由层增加共享的全局保护限流。ANI Gateway 的 `/v1` 不参与推理流量。
 
 本轮包含：
 
-- 实现已有 `/api/v1/svc/inference-policies` 策略 CRUD 和 `/api/v1/svc/inference-services/{service_id}/policies` 绑定读写；
-- 按租户隔离保存和读取策略；
-- 支持 `rate_limits.qps` 与 `rate_limits.rpm`，同时配置时两者均必须通过；
-- 支持 `allow_api_key_ids` 与 `deny_api_key_ids`；
-- 在 `/v1/chat/completions` 与 `/v1/embeddings` 请求路径执行策略；
-- 复用现有 AK 鉴权、租户注入、审计和 Redis 共享计数能力；
-- 保证 POST/PUT 幂等和重试语义。
+- 保持 C40 现有 `/v1/chat/completions`、`/v1/embeddings` Envoy AI Gateway 路由；
+- 复用 auth-service 对 `ani_*` AK 的每分钟请求限制；
+- 为受管 AIGatewayRoute 增加 Envoy `BackendTrafficPolicy` 全局路由保护限流；
+- 校验限流策略只作用于 Envoy 数据面，不注册 ANI Gateway `/v1` handler；
+- 验证 401/404/429/503 语义、SSE 透传和 vLLM 不可绕过。
 
-本轮不包含：计费、用量结算、AK 签发规则调整、独立限流资源、`max_concurrency` 执行、队列排队或复杂并发租约。
+本轮不包含：推理访问策略 CRUD、动态按租户/模型配置、计费、用量结算、AK 签发规则调整、`max_concurrency` 执行、队列排队或复杂并发租约。动态业务策略需要后续独立 Rate Limit Service 或 Envoy 动态配置方案。
 
 ## 2. 现状与约束
 
-- Services 契约位于 `repo/api/openapi/services/v1.yaml`，策略资源已存在，不能回流 Core API。
-- Gateway 现有 `RateLimit(store)` 已提供共享窗口计数和 429/503 错误语义，但当前按通用路由和主体限流，不能读取推理服务策略。
-- Gateway 通过 inference-service 已有内部 gRPC 控制面扩展读取公开策略快照，不直接访问数据库表；控制面 HTTP 仍由 Gateway 暴露。
+- Services 契约位于 `repo/api/openapi/services/v1.yaml`，访问策略契约已存在但本轮不启用其动态执行。
+- Envoy AI Gateway 是唯一推理数据面；ANI Gateway 的 `inferenceProxy` 仍是旧控制面仓库中的占位，不得接入此限流链路。
+- auth-service `ValidateToken` 已对 API Key 执行哈希校验、撤销/过期检查、AK RPM 限流和 `last_used_at` 更新；adapter 只做协议转换和租户比对。
+- Envoy Gateway 的 Global RateLimit 通过 `BackendTrafficPolicy` 和 Redis 共享，策略按路由生效；Local RateLimit 不作为跨副本业务限流。
 - 所有新行为必须保持 `tenant_id` first 的查询与 RLS 边界，不能通过请求路径中的 ID 绕过租户校验。
-- 现有 auth middleware 负责解析 Bearer/API Key、注入主体和 `api_key_id`；限流只消费其结果，不重复校验凭证。
+- envoy-authz-adapter 负责提取 Bearer/API Key 并调用 auth-service；限流不复制 AK 校验或登录流程。
 
 ## 3. 方案与组件
 
-### 3.1 控制面
+### 3.1 Envoy 数据面限流
 
-在 inference-service 中增加策略存储、策略服务和绑定服务逻辑：
+第一版不在 ANI Gateway 或 inference-service 增加策略 enforcement，而是在 C40 的受管 AIGatewayRoute 上挂载 `gateway.envoyproxy.io/v1alpha1` `BackendTrafficPolicy`：
 
-1. 校验 `service_id` 属于当前租户且未删除；不存在或跨租户统一映射为 404。
-2. 校验策略字段：`qps/rpm` 至少一个存在时必须为正数；允许列表和拒绝列表不能包含重复 ID；同一 AK 同时命中 deny 和 allow 时 deny 优先。
-3. 以 `idempotency_key` 对策略写入和绑定写入做请求指纹约束：相同 key + 相同请求重放原结果；相同 key + 不同请求返回幂等冲突。
-4. 使用事务完成策略创建/更新/删除和服务绑定，更新版本/时间戳，并通过内部 gRPC 提供可供 Gateway 读取的公开策略视图；不返回 secret 或原始 AK。
-
-策略按 `(tenant_id, policy_id)` 唯一；服务绑定按 `(tenant_id, inference_service_id, policy_id)` 唯一。第一版按 `priority` 升序选择首个匹配的 enabled 策略；同一优先级冲突时以稳定 UUID 顺序决胜。
-
-### 3.2 数据面
-
-ANI Gateway 在已有认证和路由解析之后增加推理策略 enforcement：
-
-1. 从已认证请求上下文取得 `tenant_id`、主体标识、`api_key_id`（若有）和外部模型名；通过内部策略读取端口获得当前已绑定策略。
-2. 仅对 chat/completions 和 embeddings 数据面请求执行；管理 API、健康检查和公共路径不进入该策略。
-3. AK 访问范围检查先于计数：命中 deny 或不在非空 allow 列表时返回 403，不消耗限流计数。
-4. `qps` 使用 1 秒 Redis 原子窗口；`rpm` 使用 1 分钟 Redis 原子窗口。计数键必须包含租户、AK/主体、推理服务、请求类型和窗口，避免不同租户或模型互相污染。
-5. 任一配置的窗口超过阈值即返回 429，并设置不超过对应窗口的 `Retry-After`；未配置的维度不参与判断。
-6. Redis 或策略读取失败时默认 fail-closed，返回 `503 RATE_LIMIT_UNAVAILABLE`，不得静默放行。
-
-建议键格式：
-
-```text
-inference_rl:v1:{tenant_id}:{principal_key}:{inference_service_id}:chat:qps:{epoch_second}
-inference_rl:v1:{tenant_id}:{principal_key}:{inference_service_id}:chat:rpm:{epoch_minute}
-```
-
-其中 `principal_key` 优先使用 `api_key_id`，无 AK 的受信主体使用稳定主体 ID；不得使用原始 AK 值。
+1. `global.rules` 提供按路由的共享保护上限，覆盖 chat 和 embeddings 两条已注册路径；
+2. Envoy Gateway 使用 Redis 作为 Global RateLimit 后端，多个 Envoy 副本共享窗口；
+3. C40 的业务身份限流仍由 auth-service AK RPM 执行，Envoy 路由保护限流只负责整体防护；
+4. 任何 429 都在 Envoy/adapter 层产生，vLLM 不实现限流；
+5. 动态的每租户/每模型额度不在本轮伪装成静态 CRD，后续应单独建设 Rate Limit Service 或动态发布器。
 
 ## 4. 请求与错误语义
 
-控制面继续使用现有契约：策略 `POST /inference-policies`、`PATCH/DELETE /inference-policies/{policy_id}`，以及绑定 `GET/PUT /inference-services/{service_id}/policies`。策略写入和绑定写入均要求契约规定的 `idempotency_key`；绑定 PUT 成功返回 `InferenceServicePolicies`。
+本轮不改变 Services OpenAPI 契约，不实现 `/inference-policies` 控制面；限流配置通过受管 Envoy `BackendTrafficPolicy` 清单和现有 auth-service AK 配置生效。
 
 数据面结果：
 
 | 场景 | HTTP | code |
 |---|---:|---|
-| 策略允许且计数未超限 | 继续转发 | — |
-| AK 被 deny 或不满足 allow | 403 | `FORBIDDEN` |
-| QPS/RPM 超限 | 429 | `RATE_LIMIT_EXCEEDED` |
-| 策略或 Redis 不可用 | 503 | `RATE_LIMIT_UNAVAILABLE` |
+| ext_authz 允许且 Envoy 计数未超限 | 继续转发 | — |
+| AK 被 auth-service 拒绝 | 401/404 | 现有 C40 ext_authz 语义 |
+| AK RPM 或 Envoy Global RateLimit 超限 | 429 | `RATE_LIMIT_EXCEEDED` |
+| adapter/auth-service/Envoy RateLimit backend 不可用 | 503 | `RATE_LIMIT_UNAVAILABLE` |
 | 无效/过期/撤销 AK | 401 | 现有 auth 错误语义 |
 
-审计记录至少保留：租户、推理服务、请求类型、AK ID/前缀（不保存原始 key）、allow/deny/rate_limited/policy_unavailable 决策、命中维度和 `retry_after_seconds`。原始凭证永不写日志、数据库或响应。
+审计记录至少保留：租户、推理服务、请求类型、AK ID/前缀（不保存原始 key）、authorized/rate_limited/dependency_failed 决策、命中维度和 `retry_after_seconds`。原始凭证永不写日志、数据库或响应。
 
 ## 5. 测试与验收
 
-### 控制面
+### 配置与 adapter
 
-- 租户内策略创建/更新/删除和服务绑定成功；跨租户 policy/service 返回 404；禁用策略不执行；字段边界校验稳定。
-- 相同幂等键重放返回相同结果；同键不同请求返回幂等冲突。
-- allow/deny 冲突时 deny 优先，重复 ID 和非法 UUID 被拒绝。
+- C40 路由的 `BackendTrafficPolicy` 和 EnvoyGateway Redis 配置可通过服务端 dry-run。
+- adapter 对 auth-service `ResourceExhausted` 映射为 429、依赖不可达映射为 503，并保持租户不匹配 404。
+- `Authorization: Bearer ani_*` 才能进入限流链路；`x-api-key`、Cookie、查询参数不能授权。
 
-### 数据面
+### Envoy 数据面
 
-- chat 和 embeddings 分别验证 qps、rpm；未配置维度不限制。
-- 同一 AK 超限返回 429，换 AK 或换租户不共享计数；窗口过期后恢复。
-- deny/allow 失败返回 403 且不增加 Redis 计数。
-- 策略读取失败、Redis 失败均返回 503；无策略的兼容行为按明确默认策略测试。
-- 带有效 AK 的请求响应体和流式/非流式响应不被限流中间件改写。
+- chat 和 embeddings 均命中受管 AIGatewayRoute 的 Global RateLimit；超限返回 429，不到达 vLLM。
+- 同一 AK 的 RPM 超限经 ext_authz 返回 429；跨 AK/跨租户不泄漏目标服务。
+- Envoy RateLimit backend 或 adapter/auth-service 不可用时返回 503，fail closed。
+- 非流式响应和 SSE 流式响应均能透传；一次 SSE 请求只授权一次。
 
 ### 必跑门禁
 
@@ -109,8 +86,8 @@ git diff --check
 
 当以下条件全部满足时，本轮完成：
 
-1. `/policies` 不再返回 501，策略能按租户持久化并幂等更新；
-2. Gateway 对 chat/embeddings 按服务策略执行 qps/rpm 和 AK allow/deny；
+1. C40 受管 Envoy 路由配置 Global RateLimit 并能通过真实 Gateway 生效；
+2. auth-service 对 AK 的 RPM 限流和 Envoy 路由保护限流均能对 chat/embeddings 返回 429；
 3. 429、403、503、401 错误语义与审计字段稳定；
-4. 多租户、跨 AK、窗口恢复和故障 fail-closed 测试通过；
-5. Services、架构、OpenAPI、SDK 生成物和 CI 门禁全部通过。
+4. 多租户、跨 AK、SSE、窗口恢复和故障 fail-closed 测试通过；
+5. C40 manifest validator、Envoy/adapter live gate 和现有 Services/架构门禁全部通过。
