@@ -31,11 +31,10 @@
 | 状态机 | active / frozen / disabled | 管理员可手动冻结（无法登录、实例继续运行）；管理员可手动禁用（禁止登录、资源删除）；管理员可解冻（frozen → active），禁用不可逆 |
 | 配额与计量归属 | Core（`通用资源配额与计量落地方案.md`） | BOSS 仅负责：配额元数据 UI/代理、租户配额配置 UI、创建租户时配额初始化；TCC（Try/Confirm/Cancel）与计量采集属 Core 责任 |
 | 平台角色 | 保留 platform-admin，新增 platform-ops / platform-readonly 作为种子 | 与用户要求一致；platform-admin 仍为超级管理员 |
-| 租户角色 | 新增 tenant-owner（所有者）；保留 tenant-admin / user / auditor；permissions 改为 4 维度 JSONB（compute / inference / member / transfer） | 所有者可操作全部 4 维度；管理员前 3 个；普通用户前 2 个；审计只读前 2 个 |
+| 租户角色 | 保留 tenant-admin / user / auditor；permissions 沿用已有的 resource/action/scope JSONB 数组格式（见 migration 003） | 租户用户相关权限不变，不引入新维度模型 |
 | 幂等性 | 复用现有 Gateway `Idempotency` 中间件 + Redis 存储（`idempotency:` key，TTL 24h） | 现有实现见 `repo/services/ani-gateway/internal/middleware/idempotency.go`；POST/PUT 自动 dedup，不写数据库 |
 | 审计日志 | 复用现有 `audit_logs` 分区表（`20260501_001_init_schema.sql` SECTION 10） | 已有 `tenant_id`/`user_id`/`request_id`/`action`/`resource`/`result`/`details`/`ip_address`/`user_agent`/`created_at`，按月分区；不新建表 |
 | 最后管理员保护 | 平台 admin 删除/禁用前检查活跃数；为 0 则 422 LAST_PLATFORM_ADMIN | 防止平台失能 |
-| 租户最后所有者保护 | 删除/禁用/降级最后活跃 tenant-owner 前检查；计数 ≤ 1（排除目标）则 422 LAST_TENANT_OWNER，防止"租户无 owner"；移交给其他租户成员允许 | 每个租户恒有且仅有一名 tenant-owner |
 | 前端基础路径 | `/boss/` | 与现有 BOSS 一致；TDesign React + TanStack Router |
 
 ### 1.3 边界
@@ -221,7 +220,7 @@
      INSERT tenants (name, display_name, contact_email, plan_id, status='active')
      INSERT tenant_auth (tenant_id) VALUES (tenant.id) -- 1:1 关系，全部默认值
      INSERT users (email=admin_email, username=admin_name, status='active', password_hash=bcrypt(admin_password, 12))
-     INSERT user_roles (绑定 tenant-owner 内置角色)
+     INSERT user_roles (绑定 tenant-admin 内置角色)
      调用 Core API 逐维度初始化该租户各 resource_type 的 resource_quota.total（按 plan_quota_limits 读取套餐限额，total=NULL 时用 resource_quota_meta.default_quota 兜底）
      INSERT audit_logs (action='tenant.create', ...) -- 复用现有分区表
      INSERT tenant_lifecycle (action='active', ...) -- 生命周期记录
@@ -516,43 +515,16 @@ ON CONFLICT DO NOTHING;
 
 ```sql
 -- 现有 seed 已含 platform-admin / tenant-admin / user / auditor（见 001 SECTION 12）
--- 新增 tenant-owner 租户所有者角色；同时更新现有 tenant-admin / user / auditor 的 permissions 为 4 维度模型
--- permissions 4 个维度：
---   compute:   算力实例（创建/管理/删除 GPU 实例、推理服务）
---   inference:  推理/模型（模型管理、推理调用、知识库管理）
---   member:    成员邀请（邀请/管理租户成员、重置密码、禁用/启用）
---   transfer:   所有者移交（转移所有者身份给其他成员）
--- 权限值：read=只读、write=读写、none=无权限
-
--- 新增租户所有者角色（每个租户仅一人）
-INSERT INTO roles (id, tenant_id, name, permissions) VALUES
-  (gen_random_uuid(), NULL, 'tenant-owner',
-   '{"compute":"write","inference":"write","member":"write","transfer":"write"}')
-ON CONFLICT (name, tenant_id) WHERE tenant_id IS NULL DO NOTHING;
-
--- 更新现有租户角色的 permissions 为 4 维度模型
-UPDATE roles SET permissions =
-  CASE name
-    WHEN 'tenant-admin' THEN '{"compute":"write","inference":"write","member":"write","transfer":"none"}'
-    WHEN 'user'          THEN '{"compute":"read","inference":"write","member":"none","transfer":"none"}'
-    WHEN 'auditor'       THEN '{"compute":"read","inference":"read","member":"none","transfer":"none"}'
-  END
-WHERE tenant_id IS NULL AND name IN ('tenant-admin', 'user', 'auditor');
+-- 租户用户相关权限沿用已有的 resource/action/scope JSONB 数组格式（见 migration 003），不做变动
 ```
 
 **租户角色权限矩阵：**
 
-| 角色 | 算力实例 (compute) | 推理/模型 (inference) | 成员邀请 (member) | 所有者移交 (transfer) |
-|------|-------|-------|-------|-------|
-| tenant-owner | write | write | write | write |
-| tenant-admin | write | write | write | none |
-| user | read | write | none | none |
-| auditor | read | read | none | none |
+> 租户用户相关权限沿用已有的 resource/action/scope JSONB 数组格式（见 [migration 003](../../deploy/migrations/20260502_003_permissions_schema.sql)），本设计不重新定义权限维度。
 
 **设计要点：**
 
-- **tenant-owner**：每个租户仅一人，由 `CreateTenant` 时自动绑定首位管理员为所有者；可通过 `transfer` 权限移交给其他成员。
-- **权限校验**：service 层在执行操作前检查当前用户 `roles.permissions` 对应维度的权限值（`write` > `read` > `none`）。
+- **权限校验**：沿用现有 RBAC 引擎（`resource/action/scope` 匹配），不引入新的维度模型。
 
 **租户管理员操作：**
 
@@ -560,17 +532,19 @@ WHERE tenant_id IS NULL AND name IN ('tenant-admin', 'user', 'auditor');
 |------|------|--------|
 | 邀请 | `POST /api/v1/svc/tenants/{tenantId}/admins/invite`（新建 `tenant_admin_invitation` 记录 `status='inviting'`，不改 `users.status`/角色，返回 `{id, token, expire_at, message}`；§5.4.1） | idempotency_key 支持 |
 | 重发邀请 | `POST /api/v1/svc/tenants/{tenantId}/admins/{userId}/invitation/resend`（重新生成 token、刷新 expire_at=now()+72h、清空 accepted_at/rejected_at、状态回归 inviting；仅 inviting/expired 可重发；§5.4.2） | idempotency_key 支持 |
-| 列表 | `GET /api/v1/svc/tenants/{tenantId}/admins`（JOIN user_roles + roles 过滤 tenant-admin；§5.2.7） | 幂等 |
-| 查看详细 | `GET /api/v1/svc/tenants/{tenantId}/admins/{userId}` | 幂等 |
-| 修改权限 | `PUT /api/v1/svc/tenants/{tenantId}/admins/{userId}/role`（改 user_roles 绑定：admin ↔ user / auditor / tenant-admin；tenantId 和 userId 在路径参数；tenant-owner 不可被修改角色） | idempotency_key 支持 |
+| 列表 | `GET /api/v1/svc/tenants/{tenantId}/admins`（JOIN user_roles + roles 过滤 tenant-admin；§5.2.7） | — |
+| 查看详细 | `GET /api/v1/svc/tenants/{tenantId}/admins/{userId}` | — |
+| 修改权限 | `PUT /api/v1/svc/tenants/{tenantId}/admins/{userId}/role`（改 user_roles 绑定：admin ↔ user / auditor / tenant-admin；tenantId 和 userId 在路径参数） | idempotency_key 支持 |
+| 查询管理员权限 | `GET /api/v1/svc/tenants/{tenantId}/admins/{userId}/role`（与 PUT role 同路径不同方法） | — |
+| 查询可变更角色 | `GET /api/v1/svc/tenants/{tenantId}/admins/{userId}/changeable-roles`（返回当前用户可变更的目标角色列表） | — |
+| 查询可变角色列表 | `GET /api/v1/svc/tenants/{tenantId}/roles`（查询所有前缀不为 `platform-` 的角色，且 `tenant_id` 为空或与传入 `tenantId` 相同；返回 `[{ id, name }]`，不分页） | — |
 | 重置密码 | `POST /api/v1/svc/tenants/{tenantId}/admins/{userId}/reset-password`（tenantId 和 userId 在路径参数） | idempotency_key 支持 |
-| 禁用 | `POST /api/v1/svc/tenants/{tenantId}/admins/{userId}/disable`（改 `users.status='disabled'`；tenantId 和 userId 在路径参数；最后活跃 tenant-owner 不可禁用 → 422 `LAST_TENANT_OWNER`） | idempotency_key 支持 |
+| 禁用 | `POST /api/v1/svc/tenants/{tenantId}/admins/{userId}/disable`（改 `users.status='disabled'`；tenantId 和 userId 在路径参数） | idempotency_key 支持 |
 | 启用 | `POST /api/v1/svc/tenants/{tenantId}/admins/{userId}/enable`（改 `users.status='active'`；tenantId 和 userId 在路径参数） | idempotency_key 支持 |
-| 删除 | `DELETE /api/v1/svc/tenants/{tenantId}/admins/{userId}`（软删除，`users.is_deleted=TRUE` + `deleted_at` + `status='disabled'`；tenant-owner 不可删，最后活跃 tenant-owner → 422 `LAST_TENANT_OWNER`） | **不幂等（DELETE 不做幂等，无需 idempotency_key）** |
-| 跨租户查询 | `GET /api/v1/svc/tenant-admins`（分页，含租户对象；**仅返回租户所有者、租户管理员与正在被邀请的用户**，不返回普通成员 user；邀请中用户 `is_inviting=true`，仅作标记，不改变该用户的 role/status） | 幂等 |
-| 查询管理员权限 | `GET /api/v1/svc/tenants/{tenantId}/admins/{userId}/role`（与 PUT role 同路径不同方法） | 幂等 |
-| 移交所有者 | `POST /api/v1/svc/tenants/{tenantId}/transfer-ownership`（target_user_id 在 body；owner 唯一且不能没有，但可移交——目标接任后仍唯一） | idempotency_key 支持 |
-| 操作历史 | `GET /api/v1/svc/tenants/{tenantId}/admins/{userId}/audit-logs` | 幂等 |
+| 删除 | `DELETE /api/v1/svc/tenants/{tenantId}/admins/{userId}`（软删除，`users.is_deleted=TRUE` + `deleted_at` + `status='disabled'`） | — |
+| 跨租户查询 | `GET /api/v1/svc/tenant-admins`（分页，含租户对象；**仅返回租户管理员与正在被邀请的用户**，不返回普通成员 user；邀请中用户 `is_inviting=true`，仅作标记，不改变该用户的 role/status） | — |
+| 查询可用租户列表 | `GET /api/v1/svc/tenant-admins/tenants`（gRPC 转发 tenant-service，返回 `status <> 'disabled'` 的租户列表，按 `created_at DESC` 排序，不分页；用于邀请管理员时选择目标租户） | — |
+| 操作历史 | `GET /api/v1/svc/tenants/{tenantId}/admins/{userId}/audit-logs` | — |
 
 **密码处理：** bcrypt cost=12；密码由调用方提供，不存明文；创建和重置密码时同样。
 
@@ -670,7 +644,7 @@ ON CONFLICT (name, tenant_id) WHERE tenant_id IS NULL DO NOTHING;
 
 - **platform-admin** 拥有 `["*"]` 超级权限，不受 4 维度模型约束。
 - **platform-ops / platform-readonly** 的 permissions 仅为声明性元数据，实际权限由 Gateway AuthZ 中间件按角色名硬编码校验。
-- 平台权限维度与租户权限维度（compute / inference / member / transfer）独立，平台角色不使用租户维度。
+- 平台权限维度与租户权限维度（沿用已有 resource/action/scope 格式）独立，平台角色不使用租户维度。
 
 **平台账号操作：**
 
@@ -1011,7 +985,7 @@ CREATE TABLE audit_logs (
 | - | `result` | `'success'`（失败回滚不记录） |
 | - | `ip_address` / `user_agent` | 由 Gateway 中间件透传 |
 
-**action 命名规范：** `<domain>.<verb>`（动词可为复合词，采用小写 + 下划线），如 `tenant.create`、`tenant.freeze`、`tenant.unfreeze`、`tenant.disable`、`tenant_admin.reset_password`、`tenant_admin.resend_invitation`、`tenant_admin.transfer_ownership`、`platform_admin.create`。
+**action 命名规范：** `<domain>.<verb>`（动词可为复合词，采用小写 + 下划线），如 `tenant.create`、`tenant.freeze`、`tenant.unfreeze`、`tenant.disable`、`tenant_admin.reset_password`、`tenant_admin.resend_invitation`、`platform_admin.create`。
 
 **写入时机：** 所有写操作成功后，在事务内同步写入；失败则回滚（不记录失败尝试）。
 
@@ -1049,7 +1023,6 @@ CREATE TABLE audit_logs (
 | `POST /tenants/{tenantId}/admins/{userId}/reset-password` | platform + path | 重置密码（§5.4.8） |
 | `POST /tenants/{tenantId}/admins/{userId}/disable` | platform + path | 禁用管理员（§5.4.9） |
 | `POST /tenants/{tenantId}/admins/{userId}/enable` | platform + path | 启用管理员（§5.4.10） |
-| `POST /tenants/{tenantId}/transfer-ownership` | platform + path | 移交所有者（§5.4.7） |
 | `DELETE /tenants/{tenantId}/admins/{userId}` | — | **不幂等**：删除为软删除，重复调用按幂等键回放无意义；客户端不加 Idempotency-Key |
 | 其它 POST/PUT | 同上 | 通用规则 |
 
@@ -1094,8 +1067,8 @@ CREATE POLICY audit_platform_bypass
 | 路径组 | 作用 | 主要端点 |
 |--------|------|---------|
 | **tenants** | 租户生命周期管理：创建/查看/编辑/冻结/解冻/禁用（禁用后关联资源强制删除，不可逆）；身份认证（SSO/IdP 配置与测试、MFA 强制开关）；配额查询与变更申请（配额实际数据由 Core API 承载，本服务代理查询并记录变更申请至 `tenant_quota_change` 表 §4.1.6）；租户管理员列表；生命周期查询；操作历史查询 | `POST /tenants` 创建、`GET /tenants` 列表、`GET /tenants/{tenantId}` 详情、`PUT /tenants/{tenantId}` 修改基本信息、`POST /tenants/{tenantId}/freeze`、`POST /tenants/{tenantId}/unfreeze`、`POST /tenants/{tenantId}/disable`、`GET /tenants/{tenantId}/auth/sso` 查看 SSO、`PUT /tenants/{tenantId}/auth/sso` 修改 SSO、`POST /tenants/{tenantId}/auth/sso/test` 测试连接、`PUT /tenants/{tenantId}/auth/mfa` 切换强制 MFA、`GET /tenants/{tenantId}/quota` 查询配额、`POST /tenants/{tenantId}/quota-requests` 配额变更申请、`GET /tenants/{tenantId}/quota-requests` 查询申请列表、`POST /tenants/{tenantId}/quota-requests/{reqId}/approve` 审批申请、`GET /tenant-plans/{planId}/bindable-tenants` 查询可绑定该套餐的租户、`GET /tenants/{tenantId}/admins` 分页查询租户管理员（§5.2.7）、`GET /tenants/{tenantId}/lifecycle` 分页查看生命周期、`GET /tenants/{tenantId}/audit-logs` 分页查看操作历史 |
-| **tenant-admins** | 租户管理员管理（跨租户）：跨租户分页查询 | `GET /tenant-admins` 跨租户分页查询所有管理员（返回租户对象） |
-| **tenants/{tenantId}/admins** | 租户管理员管理（租户内）：详情、查询/修改角色权限、移交所有者、重置密码、禁用/启用、软删除；管理员操作历史查询 | `GET /tenants/{tenantId}/admins/{userId}` 详情、`GET /tenants/{tenantId}/admins/{userId}/role` 查询角色权限、`PUT /tenants/{tenantId}/admins/{userId}/role` 改权限、`POST /tenants/{tenantId}/transfer-ownership` 移交所有者、`POST /tenants/{tenantId}/admins/{userId}/reset-password`、`POST /tenants/{tenantId}/admins/{userId}/disable`、`POST /tenants/{tenantId}/admins/{userId}/enable`、`DELETE /tenants/{tenantId}/admins/{userId}`、`GET /tenants/{tenantId}/admins/{userId}/audit-logs` 管理员操作历史 |
+| **tenant-admins** | 租户管理员管理（跨租户）：跨租户分页查询、可用租户列表 | `GET /tenant-admins` 跨租户分页查询所有管理员（返回租户对象）、`GET /tenant-admins/tenants` 查询可用租户列表（用于邀请管理员选择目标租户） |
+| **tenants/{tenantId}/admins** | 租户管理员管理（租户内）：详情、查询/修改角色权限、重置密码、禁用/启用、软删除；管理员操作历史查询 | `GET /tenants/{tenantId}/admins/{userId}` 详情、`GET /tenants/{tenantId}/admins/{userId}/role` 查询角色权限、`PUT /tenants/{tenantId}/admins/{userId}/role` 改权限、`POST /tenants/{tenantId}/admins/{userId}/reset-password`、`POST /tenants/{tenantId}/admins/{userId}/disable`、`POST /tenants/{tenantId}/admins/{userId}/enable`、`DELETE /tenants/{tenantId}/admins/{userId}`、`GET /tenants/{tenantId}/admins/{userId}/audit-logs` 管理员操作历史 |
 | **tenant-plans** | 套餐模板管理：draft→active→disabled 状态机；套餐限额查询与修改（任意状态可改，修改后同步存量租户）；删除套餐（有租户关联时不可删除）；套餐绑定租户查询；可绑定租户列表；套餐操作历史；配额元数据透传 | `POST /tenant-plans`、`GET /tenant-plans`、`GET /tenant-plans/{planId}`、`PUT /tenant-plans/{planId}`（更新 name/description）、`GET /tenant-plans/{planId}/quota-limits`、`PUT /tenant-plans/{planId}/quota-limits`、`POST /tenant-plans/{planId}/activate`、`POST /tenant-plans/{planId}/disable`、`DELETE /tenant-plans/{planId}`、`GET /tenant-plans/{planId}/tenants`、`GET /tenant-plans/{planId}/bindable-tenants`、`GET /tenant-plans/{planId}/audit-logs`、`GET /quota-meta`、`POST /tenants/{tenantId}/plan` |
 | **tenants/{tenantId}/plan** | 绑定套餐更新租户配额（操作对象是租户，挂在租户下） | `POST /tenants/{tenantId}/plan` 绑定套餐更新配额（plan_id 在 body） |
 | **platform-admins** | 平台运营账号管理：三类平台账号 CRUD、重置密码、启用/禁用、改角色、软删除、最后管理员保护；查询指定运营账号权限 | `POST /platform-admins` 创建（含 password）、`GET /platform-admins` 列表、`GET /platform-admins/{userId}` 详情、`GET /platform-admins/{userId}/permissions` 查询指定运营账号权限、`PUT /platform-admins/{userId}/role` 改角色、`POST /platform-admins/{userId}/reset-password`、`POST /platform-admins/{userId}/disable`、`POST /platform-admins/{userId}/enable`、`DELETE /platform-admins/{userId}` |
@@ -1377,11 +1350,11 @@ tags:
 |------|------|------|------|------|
 | limit | integer | 否 | 20（max 100） | 每页数量 |
 | cursor | string | 否 | 无 | 上一页返回的 next_cursor |
-| role | string | 否 | 全部 | 过滤：`tenant-owner` / `tenant-admin` / `user` |
+| role | string | 否 | 全部 | 过滤：`tenant-admin` / `user` |
 | status | string | 否 | 全部 | 过滤：`active` / `disabled`（直接对应 `users.status`） |
 | search | string | 否 | 无 | email / username 模糊匹配 |
 
-**Response 200:** `CursorPage`（items + next_cursor），items 每条含 id / email / username / display_name / role / status / source / last_login_at（最近登录时间）及 tenant 对象（id / name / display_name / mfa_required），字段与详情（§5.4.4）一致。按 created_at DESC 排序，`next_cursor: null` 表示无更多数据
+**Response 200:** `CursorPage`（items + next_cursor），items 每条含 id / email / username / display_name / role / status / source / last_login_at（最近登录时间）及 tenant 对象（id / name / display_name），字段与详情（§5.4.4）一致。按 created_at DESC 排序，`next_cursor: null` 表示无更多数据
 
 > MFA/SSO 字段存放在 `tenant_auth` 表（§4.1.2），共 3 个业务字段：`mfa_required`（BOOLEAN）+ `sso_enabled`（BOOLEAN）+ `sso_provider`（TEXT，'oidc'/'custom'/NULL）。SSO 详细配置（issuer_url / client_id / client_secret_ref / scopes / auto_provision / email_domains）不在 tenant_auth 表中存放，由外部系统（K8s Secret/ConfigMap）承载，通过 `sso_provider` 标识提供商类型。身份认证共 3 个写接口 + 1 个查询接口，统一以 `/tenants/{tenantId}/auth` 为前缀，租户 ID 通过路径参数 `{tenantId}` 传递。
 
@@ -2471,7 +2444,7 @@ tags:
 
 **错误：**
 - 该租户内不存在匹配 `email + username` 的用户 → 404 `TENANT_ADMIN_NOT_FOUND`（不新建用户）
-- 该用户已是本租户 `tenant-admin` / `tenant-owner` → 409 `TENANT_ADMIN_ALREADY_ADMIN`
+- 该用户已是本租户 `tenant-admin` → 409 `TENANT_ADMIN_ALREADY_ADMIN`
 - 该用户在本租户下已存在 `status='inviting'` 的邀请 → 409 `TENANT_INVITATION_PENDING`（应改用重发邀请）
 
 #### 5.4.2 `POST /tenants/{tenantId}/admins/{userId}/invitation/resend` — 重发租户管理员邀请
@@ -2532,7 +2505,7 @@ tags:
 | limit | integer | 否 | 20（max 100） | 每页数量 |
 | cursor | string | 否 | 无 | 上一页返回的 next_cursor |
 | tenant_id | uuid | 否 | 全部 | 可选的租户过滤：传入时仅返回该租户内的管理员绑定（role/status 等结果为该租户内的绑定） |
-| role | string | 否 | 全部 | 过滤：`tenant-owner` / `tenant-admin`（不含普通成员 `user`） |
+| role | string | 否 | 全部 | 过滤：`tenant-admin`（不含普通成员 `user`） |
 | status | string | 否 | 全部 | 过滤：`active` / `disabled`（直接对应 `users.status`） |
 | is_inviting | boolean | 否 | 全部 | 过滤：传入 `true` 时仅返回「正在被邀请」（该租户下 `tenant_admin_invitation.status='inviting'`）的用户；传入 `false` 返回非邀请中的用户 |
 | search | string | 否 | 无 | email / username 模糊匹配 |
@@ -2546,7 +2519,7 @@ tags:
 | items[].email | string | 邮箱 |
 | items[].username | string | 用户名 |
 | items[].display_name | string \| null | 显示名 |
-| items[].role | string | 角色：tenant-owner / tenant-admin（本端点**仅返回租户所有者、租户管理员与邀请中用户**，不返回普通成员 user）；邀请中用户仍展示其在该租户内原有的角色（若该用户已绑定了角色） |
+| items[].role | string | 角色：tenant-admin（本端点**仅返回租户管理员与邀请中用户**，不返回普通成员 user）；邀请中用户仍展示其在该租户内原有的角色（若该用户已绑定了角色） |
 | items[].status | string | 状态：active / disabled（直接对应 `users.status`） |
 | items[].is_inviting | boolean | 是否正在被邀请（仅作标记，不影响 role/status）：`true`（该租户下存在 `tenant_admin_invitation.status='inviting'`）/ `false`（非邀请中） |
 | items[].source | string | 来源：`third_party`（oidc: 开头）/ `local`（local: 开头） |
@@ -2555,7 +2528,6 @@ tags:
 | items[].tenant.id | string | 租户 ID |
 | items[].tenant.name | string | 租户名称 |
 | items[].tenant.display_name | string | 租户显示名 |
-| items[].tenant.mfa_required | boolean | 租户是否强制 MFA |
 | next_cursor | string \| null | 下一页游标；null 表示无更多数据 |
 
 ```json
@@ -2574,8 +2546,7 @@ tags:
       "tenant": {
         "id": "uuid",
         "name": "acme",
-        "display_name": "Acme Inc.",
-        "mfa_required": true
+        "display_name": "Acme Inc."
       }
     },
     {
@@ -2591,8 +2562,7 @@ tags:
       "tenant": {
         "id": "uuid",
         "name": "acme",
-        "display_name": "Acme Inc.",
-        "mfa_required": true
+        "display_name": "Acme Inc."
       }
     }
   ],
@@ -2601,13 +2571,47 @@ tags:
 ```
 
 **说明：** 本端点跨所有租户查询管理员列表。JOIN `users` + `user_roles` + `roles` + `tenants` 表（含 `roles` 以返回角色名），并关联 `tenant_admin_invitation` 表。**返回范围仅包含：**
-1. 租户所有者（`role='tenant-owner'`）
-2. 租户管理员（`role='tenant-admin'`）
-3. 正在被邀请的用户（该租户下存在 `tenant_admin_invitation.status='inviting'` 的邀请，`is_inviting=true`）
+1. 租户管理员（`role='tenant-admin'`）
+2. 正在被邀请的用户（该租户下存在 `tenant_admin_invitation.status='inviting'` 的邀请，`is_inviting=true`）
 
 普通成员（`role='user'`）默认不返回，**仅当该用户正在被邀请（`is_inviting=true`）时才出现在列表**。`is_inviting` 仅作标记（让 BOSS 端知道哪些用户正在被邀请，可按该状态过滤），**不影响用户的 role/status**——邀请中用户仍展示其在该租户内原有的角色（本例中为 `user`）。返回管理员所属租户对象。支持 tenant_id / role / status / is_inviting / search 过滤。按 created_at DESC 排序，游标分页（limit + cursor）返回 CursorPage（items + next_cursor）。
 
-#### 5.4.4 `GET /tenants/{tenantId}/admins/{userId}` — 详情
+#### 5.4.4 `GET /tenant-admins/tenants` — 查询可用租户列表
+
+**AuthZ:** platform-admin, platform-ops, platform-readonly
+
+**说明:** 返回 `status <> 'disabled'` 的租户列表，按 `created_at DESC` 排序，不分页。用于邀请管理员时选择目标租户。网关通过 gRPC 转发至 tenant-service，与其他 TenantAdminService RPC 保持一致。
+
+**Response 200:**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| items | array | 可用租户列表 |
+| items[].id | string | 租户 ID |
+| items[].name | string | 租户名称 |
+| items[].display_name | string | 租户显示名 |
+| items[].status | string | 租户状态：active / frozen（不含 disabled） |
+
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "name": "acme",
+      "display_name": "Acme Inc.",
+      "status": "active"
+    },
+    {
+      "id": "uuid",
+      "name": "globex",
+      "display_name": "Globex Corp.",
+      "status": "frozen"
+    }
+  ]
+}
+```
+
+#### 5.4.5 `GET /tenants/{tenantId}/admins/{userId}` — 详情
 
 **AuthZ:** platform-admin, platform-ops, platform-readonly
 
@@ -2626,7 +2630,7 @@ tags:
 | username | string | 用户名 |
 | email | string | 邮箱 |
 | display_name | string \| null | 显示名 |
-| role | string | 角色：tenant-owner / tenant-admin / user |
+| role | string | 角色：tenant-admin / user |
 | status | string | 状态：active / disabled |
 | source | string | 来源：`third_party`（oidc: 开头）/ `local`（local: 开头） |
 | last_login_at | timestamp \| null | 最近登录时间 |
@@ -2637,7 +2641,6 @@ tags:
 | tenant.id | string | 租户 ID |
 | tenant.name | string | 租户名称 |
 | tenant.display_name | string | 租户显示名 |
-| tenant.mfa_required | boolean | 租户是否强制 MFA |
 
 > 本端点返回该用户的**所有用户信息**（`users` 表全字段，不含冗余的 `tenant_id` 顶层字段，租户信息由下方 `tenant` 对象承载）；出于安全**不返回** `password_hash` 等敏感字段。
 
@@ -2657,15 +2660,14 @@ tags:
   "tenant": {
     "id": "uuid",
     "name": "acme",
-    "display_name": "Acme Inc.",
-    "mfa_required": true
+    "display_name": "Acme Inc."
   }
 }
 ```
 
 **说明：** 返回该用户所有用户信息（不含 `password_hash` 等敏感字段），并包含所属租户对象。`source` 由 `username` 前缀推断；`role` 由 `user_roles` + `roles` 解析；`is_inviting` 表示该用户是否正在被邀请（仅作标记，便于详情页识别并提供重发邀请等操作）。
 
-#### 5.4.5 `GET /tenants/{tenantId}/admins/{userId}/role` — 查询指定管理员角色与权限
+#### 5.4.6 `GET /tenants/{tenantId}/admins/{userId}/role` — 查询指定管理员角色与权限
 
 **AuthZ:** platform-admin, platform-ops
 
@@ -2676,7 +2678,7 @@ tags:
 | tenantId | uuid | 是 | 租户 ID |
 | userId | uuid | 是 | 用户 ID |
 
-**说明:** 查询指定用户在指定租户内的角色及 permissions（4 维度权限模型），前端用于按钮/菜单的显示控制。与 `PUT .../role` 同路径不同方法（GET 查询 / PUT 修改）。
+**说明:** 查询指定用户在指定租户内的角色及 permissions（沿用已有 resource/action/scope JSONB 格式），前端用于按钮/菜单的显示控制。与 `PUT .../role` 同路径不同方法（GET 查询 / PUT 修改）。
 
 **Response 200:**
 
@@ -2684,34 +2686,28 @@ tags:
 |------|------|------|
 | user_id | string | 用户 ID |
 | tenant_id | string \| null | 租户 ID（本端点仅租户账号非空；平台账号为 null） |
-| role | string | 当前角色：tenant-owner / tenant-admin / user / auditor（仅租户角色） |
-| permissions | object | 4 维度权限对象 |
-| permissions.compute | string | 算力实例权限：read / write / none |
-| permissions.inference | string | 推理/模型权限：read / write / none |
-| permissions.member | string | 成员邀请权限：read / write / none |
-| permissions.transfer | string | 所有者移交权限：read / write / none |
+| role | string | 当前角色：tenant-admin / user / auditor（仅租户角色） |
+| permissions | array | 权限数组（沿用已有 resource/action/scope JSONB 格式，见 migration 003） |
 
 ```json
 {
   "user_id": "uuid",
   "tenant_id": "uuid",
   "role": "tenant-admin",
-  "permissions": {
-    "compute": "write",
-    "inference": "write",
-    "member": "write",
-    "transfer": "none"
-  }
+  "permissions": [
+    {"resource":"instances","actions":["*"],"scope":"tenant"},
+    {"resource":"tenants","actions":["read","list","delete","disable","enable","reset-password","change-role","invite","resend-invitation"],"scope":"tenant"}
+  ]
 }
 ```
 
-**说明:** JOIN `user_roles` + `roles` 查询指定用户角色及 `roles.permissions` JSONB 字段直接返回。本端点**只能查询到租户成员的权限**：role ∈ tenant-owner / tenant-admin / user / auditor（租户内 `tenant_id` 非空），直接使用 `roles.permissions` 的 4 维度（compute / inference / member / transfer）。
+**说明:** JOIN `user_roles` + `roles` 查询指定用户角色及 `roles.permissions` JSONB 字段直接返回。本端点**只能查询到租户成员的权限**：role ∈ tenant-admin / user / auditor（租户内 `tenant_id` 非空），直接返回 `roles.permissions` 数组（沿用已有 resource/action/scope 格式）。
 
-**平台账户（`tenant_id=null`）权限不可通过本端点查询：** 平台账号不参与租户 4 维权限模型（其权限为平台 4 维 tenant_ops / resource_pool / platform_user / audit_export），其权限由平台侧查询，不在本端点返回。若传入平台账号 `userId`（tenant_id=null），本端点不返回其平台权限。
+**平台账户（`tenant_id=null`）权限不可通过本端点查询：** 平台账号不参与租户权限模型（其权限为平台维度），其权限由平台侧查询，不在本端点返回。若传入平台账号 `userId`（tenant_id=null），本端点不返回其平台权限。
 
 不调用 Core API。
 
-#### 5.4.6 `PUT /tenants/{tenantId}/admins/{userId}/role` — 修改权限
+#### 5.4.7 `PUT /tenants/{tenantId}/admins/{userId}/role` — 修改权限
 
 **AuthZ:** platform-admin, platform-ops
 
@@ -2726,7 +2722,7 @@ tags:
 
 | 字段 | 类型 | 必填 | 约束 | 说明 |
 |------|------|------|------|------|
-| role | string | 是 | `user` \| `auditor` \| `tenant-admin` | 可修改为 user / auditor / tenant-admin（不可设为 tenant-owner） |
+| role | string | 是 | `user` \| `auditor` \| `tenant-admin` | 可修改为 user / auditor / tenant-admin |
 | idempotency_key | string (uuid) | 是 | UUID | 幂等键，客户端生成，body 必填（PUT 已纳入 Gateway idempotencyApplies） |
 
 ```json
@@ -2734,8 +2730,7 @@ tags:
 ```
 
 **约束:**
-- 可将用户修改为 `user` / `auditor` / `tenant-admin` 角色，不可设为 `tenant-owner`（所有者通过移交端点转移）
-- `tenant-owner` 的角色不可被修改（一律 409 `TENANT_OWNER_ROLE_LOCKED`，与是否唯一 owner 无关，不触发 `LAST_TENANT_OWNER`）
+- 可将用户修改为 `user` / `auditor` / `tenant-admin` 角色
 - 写审计日志 `action='tenant_admin.change_role'`，`details` 含 `old_role` / `new_role`
 
 **Response 200:** `{ id, message }`
@@ -2749,50 +2744,6 @@ tags:
 | HTTP | code | 说明 |
 |------|------|------|
 | 422 | ROLE_CHANGE_INVALID | role 不在允许范围内（仅 user / auditor / tenant-admin） |
-| 409 | TENANT_OWNER_ROLE_LOCKED | 目标用户为 tenant-owner，角色不可修改 |
-
-#### 5.4.7 `POST /tenants/{tenantId}/transfer-ownership` — 移交所有者
-
-**AuthZ:** platform-admin, platform-ops
-
-**说明:** 由平台运营将某租户的所有者身份移交给该租户内一名 tenant-admin 用户。移交后原所有者降级为 tenant-admin，目标用户升级为 tenant-owner。每个租户仅一人持有 tenant-owner 角色。
-
-**Path 参数：**
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| tenantId | uuid | 是 | 租户 ID |
-
-**Request:**
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| target_user_id | uuid | 是 | 被移交为所有者的用户 ID（须为该租户的 tenant-admin） |
-| idempotency_key | string (uuid) | 是 | 幂等键，客户端生成，body 必填 |
-
-```json
-{ "target_user_id": "uuid", "idempotency_key": "550e8400-e29b-41d4-a716-446655440000" }
-```
-
-**Response 200:** `{ id, message }`
-
-```json
-{ "id": "uuid", "message": "ownership transferred" }
-```
-
-**约束:**
-- 由 `platform-admin` / `platform-ops` 发起（AuthZ 中间件按角色校验）；tenant-owner 不可直接发起
-- `target_user_id` 必须为该租户内 `status='active'` 且角色为 `tenant-admin` 的用户；否则 422 `TRANSFER_TARGET_INVALID`
-- 移交为原子操作：原所有者 `user_roles` 中 tenant-owner 行 → 改绑 tenant-admin；目标用户 `user_roles` 中 tenant-admin 行 → 改绑 tenant-owner
-- 写审计日志 `action='tenant_admin.transfer_ownership'`，`details` 含 `old_owner_id` / `new_owner_id`
-- **所有者唯一且不能没有：** 每个租户恒有且仅有一名 tenant-owner。移交是允许的（移交后由目标用户接任 owner，租户仍保持唯一 owner），**不受** `LAST_TENANT_OWNER` 保护限制；该保护仅作用于会导致"租户无 owner"的操作（删除/禁用/降级）
-
-**错误:**
-
-| HTTP | code | 说明 |
-|------|------|------|
-| 403 | FORBIDDEN | 当前用户无平台运营权限（非 platform-admin / platform-ops） |
-| 422 | TRANSFER_TARGET_INVALID | 目标用户不存在、非 active、或非 tenant-admin 角色 |
 
 #### 5.4.8 `POST /tenants/{tenantId}/admins/{userId}/reset-password` — 重置密码
 
@@ -2853,8 +2804,6 @@ tags:
 |------|------|------|------|
 | idempotency_key | string (uuid) | 是 | 幂等键，客户端生成，body 必填 |
 
-**最后租户所有者保护:** 若该用户为该租户内**唯一**的活跃 `tenant-owner`（active 数 ≤ 1，排除目标），则返回 422 `LAST_TENANT_OWNER`，防止租户失去所有者。管理员（tenant-admin）不受此保护。
-
 **审计:** 写审计日志 `action='tenant_admin.disable'`，`details` 含 `target_id`。
 
 **Response 200:** `{ id, message }`
@@ -2901,11 +2850,9 @@ tags:
 | tenantId | uuid | 是 | 租户 ID |
 | userId | uuid | 是 | 用户 ID |
 
-**说明:** 软删除用户，设置 `users.is_deleted=TRUE`、`users.deleted_at=now()`、`users.status='disabled'`；保留审计可追溯。tenant-owner 不可被删除（409 `TENANT_OWNER_ROLE_LOCKED`）。
+**说明:** 软删除用户，设置 `users.is_deleted=TRUE`、`users.deleted_at=now()`、`users.status='disabled'`；保留审计可追溯。
 
 **幂等性:** 本端点为 `DELETE`，**不做幂等**（不要求客户端提供 `idempotency_key`）。软删除重复调用结果一致，无需按幂等键回放。
-
-**最后租户所有者保护:** 若该用户为该租户内**唯一**的活跃 `tenant-owner`（active 数 ≤ 1，排除目标），则返回 422 `LAST_TENANT_OWNER`，防止租户失去所有者。管理员（tenant-admin）不受此保护。
 
 **审计:** 写审计日志 `action='tenant_admin.delete'`，`details` 含 `target_id`（软删除，保留可追溯）。
 
@@ -2954,6 +2901,37 @@ tags:
 | next_cursor | string \| null | 下一页游标；null 表示无更多数据 |
 
 **说明：** 查询 `audit_logs` 表中 `tenant_id = $tenantId AND user_id = $userId` 的记录，按 `created_at DESC` 排序，游标分页（limit + cursor）返回 CursorPage（items + next_cursor）。不调用 Core API。
+
+
+#### 5.4.14 `GET /tenants/{tenantId}/roles` — 查询租户可变角色列表
+
+**AuthZ:** platform-admin, platform-ops, platform-readonly
+
+**Path 参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| tenantId | uuid | 是 | 租户 ID |
+
+**Response 200:**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| items | array | 可变角色列表 |
+| items[].id | string | 角色 ID |
+| items[].name | string | 角色名称 |
+
+```json
+{
+  "items": [
+    { "id": "uuid", "name": "tenant-admin" },
+    { "id": "uuid", "name": "user" },
+    { "id": "uuid", "name": "auditor" }
+  ]
+}
+```
+
+**说明：** 查询 `roles` 表 `WHERE name NOT LIKE 'platform-%' AND (tenant_id IS NULL OR tenant_id = $tenantId)`，不分页。用于修改管理员角色时选择目标角色。网关通过 gRPC 转发至 tenant-service `ListTenantRoles` RPC；tenant-service 内部调用 Core SDK 查询 `roles` 表获取可变角色列表后返回。不写审计（只读查询）。
 
 ### 5.5 PlatformAdmins 路径
 
@@ -3233,14 +3211,13 @@ tags:
 | TENANT_FROZEN | 403 | 租户已冻结，禁止登录 |
 | TENANT_DISABLED | 403 | 租户已禁用，禁止登录 |
 | TENANT_ADMIN_NOT_FOUND | 404 | 租户管理员不存在（含邀请时无匹配用户、重置密码遇到禁用态用户） |
-| TENANT_ADMIN_ALREADY_ADMIN | 409 | 邀请时该用户已是本租户 tenant-admin / tenant-owner |
+| TENANT_ADMIN_ALREADY_ADMIN | 409 | 邀请时该用户已是本租户 tenant-admin |
 | TENANT_INVITATION_PENDING | 409 | 该用户在本租户下已有 status='inviting' 的待接受邀请（应改用重发） |
 | TENANT_ADMIN_INVITATION_NOT_FOUND | 404 | 重发邀请时该租户内无匹配的邀请记录 |
 | TENANT_INVITATION_SETTLED | 409 | 最新邀请已 accepted / rejected（终态，不可重发） |
 | TENANT_SSO_CONFIG_INVALID | 422 | SSO 配置校验失败（issuer_url 不合法 / client_id 缺失 / client_secret_ref 未指向有效 K8s Secret / 开启 sso_enabled 但 provider / issuer_url / client_id / client_secret_ref 为空） |
 | PLATFORM_ADMIN_NOT_FOUND | 404 | 平台账号不存在 |
 | LAST_PLATFORM_ADMIN | 422 | 最后管理员保护触发 |
-| LAST_TENANT_OWNER | 422 | 最后租户所有者保护触发（删除/禁用/降级唯一活跃 tenant-owner，防止"租户无 owner"；移交除外） |
 | MFA_REQUIRED | 403 | 该租户已启用 mfa_required，但用户未完成 MFA 二次校验 |
 | IDEMPOTENCY_CONFLICT | 409 | 同 key 不同 body |
 | IDEMPOTENCY_KEY_INVALID | 400 | idempotency_key body 字段格式错 |
@@ -3248,8 +3225,6 @@ tags:
 | FORBIDDEN | 403 | 角色不匹配 |
 | QUOTA_CHANGE_REQUEST_DUPLICATE | 409 | 该租户该配额维度已有待审核的申请 |
 | QUOTA_CHANGE_REQUEST_INVALID | 422 | resource_type 不存在 / new_value 为负数 |
-| TENANT_OWNER_ROLE_LOCKED | 409 | 目标用户为 tenant-owner，角色不可修改/删除 |
-| TRANSFER_TARGET_INVALID | 422 | 移交所有者目标用户不存在、非 active、或非 tenant-admin 角色 |
 | ROLE_CHANGE_INVALID | 422 | role 不在允许范围内（仅 user / auditor / tenant-admin） |
 | PASSWORD_SAME_AS_OLD | 422 | 重置密码时新密码与旧密码相同 |
 
@@ -3590,7 +3565,7 @@ type TenantAdmin struct {
     Username   string
     DisplayName string // users.display_name（可空）
     Status     string // 直接读 users.status（active / disabled）
-    Role       string // 由 service 层 JOIN user_roles + roles 得到（tenant-owner / tenant-admin / user / auditor）
+    Role       string // 由 service 层 JOIN user_roles + roles 得到（tenant-admin / user / auditor）
     Source     string // 由 username 前缀推断：oidc: → third_party，local: → local
     LastLoginAt *time.Time
     CreatedAt  time.Time
@@ -3638,10 +3613,10 @@ type TenantAdmin struct {
       VALUES (...)
       RETURNING id AS new_user_id
       -- password_hash = bcrypt(admin_password, 12)
-    -- 绑定 tenant-owner 内置角色（首位管理员为租户所有者，roles.tenant_id IS NULL AND name='tenant-owner'）
+    -- 绑定 tenant-admin 内置角色（首位管理员为租户管理员，roles.tenant_id IS NULL AND name='tenant-admin'）
     INSERT INTO user_roles (user_id, role_id)
       SELECT new_user_id, r.id FROM roles r
-      WHERE r.tenant_id IS NULL AND r.name = 'tenant-owner'
+      WHERE r.tenant_id IS NULL AND r.name = 'tenant-admin'
     -- 复用现有 audit_logs 分区表，写入 details JSONB
     INSERT INTO audit_logs (tenant_id, user_id, request_id, action, resource, result, details)
       VALUES (NULL, actor_user_id, request_id, 'tenant.create', 'tenant', 'success',
@@ -4021,10 +3996,10 @@ AuthZ: platform-admin, platform-ops
 执行：
 
   - JOIN user_roles + roles 查询指定用户在指定租户下的角色及 roles.permissions JSONB
-  - **仅返回租户成员权限**：tenant-owner / tenant-admin / user / auditor（tenant_id 非空）→ 直接返回 roles.permissions 的 4 维
+  - **仅返回租户成员权限**：tenant-admin / user / auditor（tenant_id 非空）→ 直接返回 roles.permissions 数组（沿用已有 resource/action/scope 格式）
   - **平台账户（tenant_id=null）权限不可查询**：本端点不返回平台权限（平台权限由平台侧查询）
   - 不写审计日志，不调用 Core API
-    返回：{ user_id, tenant_id, role, permissions{compute, inference, member, transfer} }
+    返回：{ user_id, tenant_id, role, permissions[] }
 
 
 ```
@@ -4037,11 +4012,11 @@ AuthZ: platform-admin / platform-ops / platform-readonly
 
   - JOIN users + user_roles + roles + tenants + tenant_admin_invitation 跨租户查询
   - WHERE users.is_deleted = FALSE
-  - **仅返回 role ∈ (tenant-owner, tenant-admin) 或正在被邀请（`tenant_admin_invitation.status='inviting'`，is_inviting=true）的用户，不返回普通成员 user**
-  - 可选过滤：tenant_id（传入时仅返回该租户内的管理员绑定）、role（通过 roles.name，tenant-owner/tenant-admin）、status（users.status）、is_inviting、search（email/username ILIKE）
+  - **仅返回 role ∈ (tenant-admin) 或正在被邀请（`tenant_admin_invitation.status='inviting'`，is_inviting=true）的用户，不返回普通成员 user**
+  - 可选过滤：tenant_id（传入时仅返回该租户内的管理员绑定）、role（通过 roles.name，tenant-admin）、status（users.status）、is_inviting、search（email/username ILIKE）
   - source 字段推断：username 以 'oidc:' 开头 → 'third_party'，以 'local:' 开头 → 'local'
   - 游标分页（limit + cursor），按 created_at DESC 排序
-  - 每条返回 tenant 对象（tenants.id / name / display_name / mfa_required，JOIN tenant_auth 获取 mfa_required）
+  - 每条返回 tenant 对象（tenants.id / name / display_name）
   - 不写审计日志，不调用 Core API
     返回：CursorPage { items[]{id, email, username, display_name, role, status, is_inviting, source, last_login_at, tenant{...}}, next_cursor }
 
@@ -4057,7 +4032,7 @@ AuthZ: platform-admin, platform-ops
   - 校验幂等：Gateway Redis 中间件按 Idempotency-Key 去重（body 必填）
   - 按 email + username 在本租户（tenant_id = tenantId）内匹配现有用户
     - 无匹配 → 404 TENANT_ADMIN_NOT_FOUND（不新建用户）
-  - 该用户已是本租户 tenant-admin / tenant-owner → 409 TENANT_ADMIN_ALREADY_ADMIN
+  - 该用户已是本租户 tenant-admin → 409 TENANT_ADMIN_ALREADY_ADMIN
   - 该用户在本租户下已存在 status='inviting' 的邀请 → 409 TENANT_INVITATION_PENDING（应改用重发）
   - token = crypto_random(32)（原始 token，仅本次返回一次）
   - INSERT INTO tenant_admin_invitation (tenant_id, user_id, token_hash, status, expire_at)
@@ -4093,20 +4068,18 @@ AuthZ: platform-admin, platform-ops
     返回：{ id, token, expire_at, message }
 ```
 
-#### 6.3.17d TenantAdminService.ChangeRole / Disable / Enable / Delete / ListTenantAdmins / ListAllTenantAdmins / GetAdminDetail / TransferOwnership
+#### 6.3.17d TenantAdminService.ChangeRole / Disable / Enable / Delete / ListTenantAdmins / ListAllTenantAdmins / GetAdminDetail / ListAvailableTenants / GetRolePermissions / GetChangeableRoles / ListTenantRoles / ListAuditLogs
 
 ```
 ChangeRole（§5.4.6 PUT .../role）：
   AuthZ: platform-admin, platform-ops
   - 校验 role 参数在允许范围（user/auditor/tenant-admin），否则 → 422 ROLE_CHANGE_INVALID
-  - 目标用户为 tenant-owner → 409 TENANT_OWNER_ROLE_LOCKED（owner 角色锁定，不可修改，与是否唯一 owner 无关，不触发 LAST_TENANT_OWNER）
   - DELETE FROM user_roles WHERE user_id=target AND role_id IN (本租户 user/auditor/tenant-admin 角色)
   - INSERT INTO user_roles SELECT target, 目标角色 id
   - 写审计 action='tenant_admin.change_role'，details 含 old_role / new_role
 
 Disable（§5.4.9 POST .../disable）：
   AuthZ: platform-admin, platform-ops
-  - 目标为唯一活跃 tenant-owner → 422 LAST_TENANT_OWNER
   - UPDATE users SET status='disabled' WHERE id=target AND tenant_id=tenantId
   - 写审计 action='tenant_admin.disable'
 
@@ -4117,7 +4090,6 @@ Enable（§5.4.10 POST .../enable）：
 
 Delete（§5.4.11 DELETE .../admins/{userId}）：
   AuthZ: platform-admin, platform-ops
-  - tenant-owner 不可删；目标为唯一活跃 tenant-owner → 422 LAST_TENANT_OWNER
   - 软删除：UPDATE users SET is_deleted=TRUE, deleted_at=now(), status='disabled'
       WHERE id=target AND tenant_id=tenantId AND is_deleted=FALSE
   - 写审计 action='tenant_admin.delete'
@@ -4129,20 +4101,45 @@ ListTenantAdmins（§5.2.7 GET .../admins，租户内）：
 
 ListAllTenantAdmins（§5.4.3 GET /tenant-admins，跨租户）：
   AuthZ: platform-admin, platform-ops, platform-readonly
-  - JOIN users + user_roles + roles + tenants 返回租户管理员；**仅返回 role ∈ (tenant-owner, tenant-admin) 或 is_inviting=true 的用户**（不返回普通成员 user）
+  - JOIN users + user_roles + roles + tenants 返回租户管理员；**仅返回 role ∈ (tenant-admin) 或 is_inviting=true 的用户**（不返回普通成员 user）
   - 关联 tenant_admin_invitation：某用户在该租户下存在 status='inviting' 的邀请时，该用户亦返回，且 is_inviting=true（仅作标记，不改变其 role/status，仍展示原有角色）
   - 可选 tenant_id / role / status / is_inviting / search 过滤；游标分页；返回租户对象
   - 不写审计（只读）
 
-GetAdminDetail（§5.4.4 GET .../admins/{userId}）：
+GetAdminDetail（§5.4.5 GET .../admins/{userId}）：
   AuthZ: platform-admin, platform-ops, platform-readonly
   - 查单个管理员详情（含 tenant 对象）；不写审计（只读）
 
-TransferOwnership（§5.4.7 POST .../transfer-ownership）：
-  AuthZ: platform-admin, platform-ops
-  - 目标用户须为**当前租户**（tenant_id 相同）`status='active'` 且角色为 `tenant-admin` 的成员 → 否则 422 TRANSFER_TARGET_INVALID
-  - 当前 owner 角色降为 tenant-admin / 目标角色升为 tenant-owner（唯一）
-  - 写审计 action='tenant_admin.transfer_ownership'，details 含 old_owner_id / new_owner_id
+ListAvailableTenants（§5.4.4 GET /tenant-admins/tenants）：
+  AuthZ: platform-admin, platform-ops, platform-readonly
+  - 查询 tenants WHERE status <> 'disabled' ORDER BY created_at DESC（不分页）
+  - 返回 items [{ id, name, display_name, status }]
+  - 不写审计（只读查询）
+
+GetRolePermissions（§5.4.6 GET .../role）：
+  AuthZ: platform-admin, platform-ops, platform-readonly
+  - JOIN user_roles + roles 查询指定用户在指定租户下的角色及 permissions JSONB
+  - 仅返回租户成员（tenant_id 非空）权限；平台账户不可查询
+  - 返回 { user_id, tenant_id, role, permissions[] }
+  - 不写审计（只读）
+
+GetChangeableRoles（§5.4.13 GET .../changeable-roles）：
+  AuthZ: platform-admin, platform-ops, platform-readonly
+  - 返回当前用户可变更的目标角色列表
+  - 返回 { current_role, changeable_roles[{ role, label }] }
+  - 不写审计（只读查询）
+
+ListTenantRoles（§5.4.14 GET /tenants/{tenantId}/roles）：
+  AuthZ: platform-admin, platform-ops, platform-readonly
+  - 查询 roles WHERE name NOT LIKE 'platform-%' AND (tenant_id IS NULL OR tenant_id = $tenantId)
+  - 返回 items [{ id, name }]（不分页）
+  - 不写审计（只读查询）
+
+ListAuditLogs（§5.4.12 GET .../audit-logs）：
+  AuthZ: platform-admin, platform-ops, platform-readonly
+  - 查询 audit_logs WHERE tenant_id=$tenantId AND user_id=$userId
+  - 支持 action / result 过滤；游标分页（limit + cursor）
+  - 不写审计（只读查询）
 ```
 
 #### 6.3.18 PlatformAdminService.Delete / Disable / ChangeRole / ResetPassword
@@ -4285,7 +4282,6 @@ func BuildApp(deps Deps) *App {
     mux.Handle("/tenants/{tenantId}/admins/{userId}/disable", handlers.NewTenantAdminHandler(adminSvc))       // POST 禁用
     mux.Handle("/tenants/{tenantId}/admins/{userId}/enable", handlers.NewTenantAdminHandler(adminSvc))        // POST 启用
     mux.Handle("/tenants/{tenantId}/admins/{userId}/audit-logs", handlers.NewTenantAdminHandler(adminSvc))    // GET 管理员操作历史
-    mux.Handle("/tenants/{tenantId}/transfer-ownership", handlers.NewTenantAdminHandler(adminSvc))  // POST 移交所有者
 
     // tenant-admins 路径组（跨租户管理员）
     mux.Handle("/tenant-admins", handlers.NewTenantAdminHandler(adminSvc))                           // GET 跨租户查询所有管理员
@@ -4425,8 +4421,8 @@ func BuildApp(deps Deps) *App {
 
 - 顶部：租户选择器（可选，选中后按该租户过滤）
 - 顶部操作：邀请管理员（platform-admin / platform-ops 可见）→ 表单 email + username → 调用 `POST /tenants/{tenantId}/admins/invite`（body 含 idempotency_key），成功提示"邀请已发送"；TENANT_INVITATION_PENDING → 提示"该用户已有待接受的邀请，可重发"
-- 筛选：关键字（email/username）+ 状态（active/disabled）+ 角色（tenant-owner/tenant-admin）+ 邀请状态（is_inviting：全部/正在被邀请/非邀请中）
-- 表格列：email / username / display_name / role / status / source / 邀请状态（is_inviting：正在被邀请 Tag / 非邀请中） / MFA（租户 mfa_required） / last_login / actions
+- 筛选：关键字（email/username）+ 状态（active/disabled）+ 角色（tenant-admin）+ 邀请状态（is_inviting：全部/正在被邀请/非邀请中）
+- 表格列：email / username / display_name / role / status / source / 邀请状态（is_inviting：正在被邀请 Tag / 非邀请中） / last_login / actions
 - 操作：查看详情、重置密码、修改权限（tenant-admin ↔ user / auditor）、禁用、启用、删除（软删除）、重发邀请（针对邀请中/过期）
 - 重置密码表单：输入新密码（8-64 字符，复杂度校验）→ 提交 → 成功提示"密码已重置"
 - "操作历史"标签页：调用 `GET /tenants/{tenantId}/admins/{userId}/audit-logs` 分页展示该管理员的操作历史
@@ -4610,7 +4606,7 @@ export interface AdminWithTenant {
   email: string;
   username: string;
   display_name: string | null;
-  role: string;          // 该租户内角色：tenant-owner / tenant-admin（列表仅含 owner/admin/邀请中；邀请中用户仍展示原有角色，可为 user）
+  role: string;          // 该租户内角色：tenant-admin（列表仅含 admin/邀请中；邀请中用户仍展示原有角色，可为 user）
   status: string;
   is_inviting: boolean;   // true = 正在被邀请（该租户下存在 status='inviting' 的邀请）；仅作标记，不影响 role/status
   source: 'third_party' | 'local';
@@ -4654,27 +4650,17 @@ export async function resendTenantAdminInvitation(
   });
 }
 
-export async function transferOwnership(
-  tenantId: string,
-  targetUserId: string,
-  idempotencyKey: string,
-): Promise<{ id: string; message: string }> {
-  return fetchCore(`/api/v1/svc/tenants/${tenantId}/transfer-ownership`, {
-    method: 'POST',
-    body: { target_user_id: targetUserId, idempotency_key: idempotencyKey },
-  });
+export interface PermissionEntry {
+  resource: string;
+  actions: string[];
+  scope?: 'tenant' | 'own' | 'platform';
 }
 
 export interface UserPermissions {
   user_id: string;
   tenant_id: string | null;
   role: string;
-  permissions: {
-    compute: 'read' | 'write' | 'none';
-    inference: 'read' | 'write' | 'none';
-    member: 'read' | 'write' | 'none';
-    transfer: 'read' | 'write' | 'none';
-  };
+  permissions: PermissionEntry[];
 }
 
 export async function getRolePermissions(tenantId: string, userId: string): Promise<UserPermissions> {
@@ -5132,9 +5118,7 @@ repo/frontends/boss/src/routes/_authenticated/
 | 409 | TENANT_STATE_INVALID | 提示当前状态不允许该操作 |
 | 409 | IDEMPOTENCY_CONFLICT | 提示"请勿重复提交" |
 | 409 | PLAN_CODE_CONFLICT | 套餐 code 字段错误提示 |
-| 409 | TENANT_OWNER_ROLE_LOCKED | 提示"租户所有者角色不可修改/删除" |
 | 422 | PLAN_NOT_ACTIVE | 提示"套餐未发布，无法被租户引用" |
-| 422 | TRANSFER_TARGET_INVALID | 提示"移交目标用户不存在、非 active、或非 tenant-admin 角色" |
 | 422 | ROLE_CHANGE_INVALID | 提示"角色不在允许范围内" |
 | 422 | PASSWORD_SAME_AS_OLD | 提示"新密码与旧密码相同" |
 | 422 | LAST_PLATFORM_ADMIN | 红色 toast 提示 |
@@ -5300,7 +5284,7 @@ cd repo/frontends/boss && pnpm build
 | 3.7 | service 层完整实现（§6.3 全部业务规则，含 CreateTenant 调用 Core API 逐维度初始化配额 + 同步 INSERT tenant_auth / 读取 plan_quota_limits 有效限额 / UpdatePlan 仅改 plan_id 不动配额 / TenantPlanService.Create 含 quota_limits 创建 / TenantPlanService.Delete 软删除含状态与租户关联校验 / UpdateSSO / TestSSOConnection / UpdateMFARequired） | `repo/services/tenant-service/internal/service/*.go` |
 | 3.8 | handler 层完整实现（含错误转换；GET /tenants/{tenantId}/auth/sso；PUT /tenants/{tenantId}/auth/sso；POST /tenants/{tenantId}/auth/sso/test；PUT /tenants/{tenantId}/auth/mfa（tenantId 通过路径参数传递）；GET /tenants/{tenantId}/quota；POST /tenants/{tenantId}/quota-requests（tenantId 通过路径参数传递，old_value 从 Core resource_quota.total 读取）；GET /tenants/{tenantId}/quota-requests（查询申请列表）；POST /tenants/{tenantId}/quota-requests/{reqId}/approve（审批申请）；GET /tenant-plans/{planId}/bindable-tenants（查询可绑定该套餐的租户，排除已绑定该套餐的租户，不分页）；GET /tenant-plans/{planId}/quota-limits（查询套餐限额，JOIN resource_quota_meta 返回 display_name/unit/total）；POST /tenants/{tenantId}/plan（绑定套餐，按 plan_quota_limits 更新各维度 total，同步 tenants.plan_id）；GET /tenants/{tenantId}/lifecycle（分页查询 tenant_lifecycle 表，按 created_at DESC 排序，支持 action 过滤，不调 Core API）；GET /tenants/{tenantId}/audit-logs（分页查询 audit_logs 分区表，按 created_at DESC 排序，支持 action 和 result 过滤，不调 Core API）；GET /tenants/{tenantId}/admins/{userId}/audit-logs（按租户管理员分页查询 audit_logs 表，按 created_at DESC 排序，支持 action 和 result 过滤，不调 Core API）；GET /tenant-plans/{planId}/audit-logs（按套餐分页查询 audit_logs 表，按 created_at DESC 排序，支持 action 和 result 过滤，不调 Core API）；GET /tenant-admins（跨租户分页查询所有管理员，JOIN users + user_roles + tenants，返回租户对象）；GET /tenants/{tenantId}/admins/{userId}/role（查询指定管理员角色与权限，与 PUT role 同路径不同方法）；**不实现 /tenants/quotas 端点**） | `repo/services/tenant-service/handlers/*.go` |
 | 3.9 | wiring 完整接线（注入 quotaSvcClient / quotaMetaSvcClient 至 TenantService 构造器） | `repo/services/tenant-service/internal/wiring/wiring.go` |
-| 3.10 | BOSS API 客户端（含 updateTenantMFARequired / getTenantSSO / updateTenantSSO / getAllTenantAdmins / getRolePermissions / transferOwnership / getPlatformPermissions / listPlans 等；新增 quota_meta.ts 代理 Core API `/api/v1/admin/quota-meta/*`、tenant_quota.ts 代理 Core API `/api/v1/admin/tenants/{id}/quota/*`、quota_change_request.ts 调用 Services API `/api/v1/svc/tenants/{tenantId}/quota*` 提供 getTenantQuota / createQuotaChangeRequest） | `repo/frontends/boss/src/api/{tenant,tenant_admin,platform_admin,tenant_plan,quota_meta,tenant_quota,quota_change_request}.ts` |
+| 3.10 | BOSS API 客户端（含 updateTenantMFARequired / getTenantSSO / updateTenantSSO / getAllTenantAdmins / getRolePermissions / getPlatformPermissions / listPlans 等；新增 quota_meta.ts 代理 Core API `/api/v1/admin/quota-meta/*`、tenant_quota.ts 代理 Core API `/api/v1/admin/tenants/{id}/quota/*`、quota_change_request.ts 调用 Services API `/api/v1/svc/tenants/{tenantId}/quota*` 提供 getTenantQuota / createQuotaChangeRequest） | `repo/frontends/boss/src/api/{tenant,tenant_admin,platform_admin,tenant_plan,quota_meta,tenant_quota,quota_change_request}.ts` |
 | 3.11 | BOSS 5 页面（含配额元数据页、租户配额页含配额查询列表 + 申请变更弹窗（调用 Services API `/api/v1/svc/tenants/{tenantId}/quota*`）、租户安全页含 MFA 开关 + SSO 配置） | `repo/frontends/boss/src/routes/_authenticated/{tenants/*,settings/platform-admins.tsx}` |
 | 3.12 | 单元测试（§9.1） | 同名 _test.go |
 | 3.13 | 集成测试（§9.2，含 SSO discovery 校验、MFA enforcement、CreateTenant 调用 Core API 逐维度配额初始化、配额变更申请提交与 409 重复 pending 校验、GET /tenants/{tenantId}/quota 与 Core resource_quota + resource_quota_meta JOIN 一致性） | `repo/services/tenant-service/integration_test.go` |
@@ -5396,14 +5380,13 @@ cd repo/frontends/boss && pnpm build
 - [ ] 冻结/解冻/禁用：均响应 `{ id, message }`；DB 状态机正确；冻结后用户无法登录、实例运行；禁用禁止登录、资源删除（不可恢复）（Core 侧 resource_quota 行保留但资源实例停止运行）；审计日志写入
 - [ ] SSO 配置（B1）：PUT /tenants/{tenantId}/auth/sso 响应 `{ id, message }`（tenantId 在路径参数；支持部分更新：仅传 sso_enabled 切换开关，仅传 provider 更新 sso_provider）；GET /tenants/{tenantId}/auth/sso 返回 { sso_enabled, provider, updated_at }（不含 SSO 详细配置，由外部系统承载）；sso_enabled=TRUE 时若 sso_provider 为 NULL 返回 422 TENANT_SSO_CONFIG_INVALID；POST /tenants/{tenantId}/auth/sso/test（tenantId 在路径参数）根据 sso_provider 从外部系统加载详细配置，返回 { success, discovery_result, error, tested_at }
 - [ ] MFA 强制开关（B2）：PUT /tenants/{tenantId}/auth/mfa 响应 `{ id, message }`（tenantId 在路径参数）；mfa_required=TRUE 时模拟登录 → 403 MFA_REQUIRED
-- [ ] 跨租户查询所有管理员：GET /tenant-admins 分页返回 items[]{id, email, username, display_name, role, status, is_inviting, source, last_login_at, tenant{id, name, display_name, mfa_required}}；**仅返回 role ∈ (tenant-owner, tenant-admin) 或正在被邀请（is_inviting=true）的用户，不含普通成员 user**；支持 tenant_id / role / status / is_inviting / search 过滤；返回租户对象；设置了该租户下 `status='inviting'` 邀请的用户也要返回且 `is_inviting=true`（仅作标记，不改变 role/status，仍展示原有角色）
-- [ ] 查询管理员角色与权限：GET /tenants/{tenantId}/admins/{userId}/role（与 PUT role 同路径不同方法）返回 { user_id, tenant_id, role, permissions{compute,inference,member,transfer} }
+- [ ] 跨租户查询所有管理员：GET /tenant-admins 分页返回 items[]{id, email, username, display_name, role, status, is_inviting, source, last_login_at, tenant{id, name, display_name}}；**仅返回 role ∈ (tenant-admin) 或正在被邀请（is_inviting=true）的用户，不含普通成员 user**；支持 tenant_id / role / status / is_inviting / search 过滤；返回租户对象；设置了该租户下 `status='inviting'` 邀请的用户也要返回且 `is_inviting=true`（仅作标记，不改变 role/status，仍展示原有角色）
+- [ ] 查询管理员角色与权限：GET /tenants/{tenantId}/admins/{userId}/role（与 PUT role 同路径不同方法）返回 { user_id, tenant_id, role, permissions[] }
 - [ ] 查询运营账号权限：GET /platform-admins/{userId}/permissions 返回 { user_id, role, permissions{tenant_ops,resource_pool,platform_user,audit_export} }
-- [ ] 移交所有者：POST /tenants/{tenantId}/transfer-ownership 响应 { id, message }；目标非 tenant-admin 422 TRANSFER_TARGET_INVALID；非 owner 发起 403
 - [ ] 租户管理员列表：GET /tenants/{tenantId}/admins 分页返回用户列表，支持 role/status/search 过滤
 - [ ] 平台账号列表：GET /platform-admins 分页返回 items[]{id,username,display_name,role,status,source,last_login_at}
 - [ ] 平台账号详情：GET /platform-admins/{userId} 返回完整对象（含 email/created_at）
-- [ ] 修改权限：PUT /tenants/{tenantId}/admins/{userId}/role 响应 { id, message }；可设为 user / auditor / tenant-admin（不可设 tenant-owner）；tenant-owner 不可被修改 → 409 TENANT_OWNER_ROLE_LOCKED；非法 role → 422 ROLE_CHANGE_INVALID；禁用/启用/删除均响应 { id, message }
+- [ ] 修改权限：PUT /tenants/{tenantId}/admins/{userId}/role 响应 { id, message }；可设为 user / auditor / tenant-admin；非法 role → 422 ROLE_CHANGE_INVALID；禁用/启用/删除均响应 { id, message }
 - [ ] 重置密码：响应 `{ id, message }`；新密码由调用方提供，必须与旧密码不同（422 PASSWORD_SAME_AS_OLD）
 - [ ] 平台账号：创建/改角色/重置密码/禁用/启用/删除均响应 `{ id, message }`
 - [ ] 最后管理员保护：删除/禁用活跃数 ≤ 1 时 422
