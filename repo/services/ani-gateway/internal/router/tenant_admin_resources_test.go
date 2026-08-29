@@ -135,9 +135,6 @@ func (f *fakeTenantAdminGRPC) GetTenantAdminRole(_ context.Context, _ *tenantv1.
 	}
 	return f.roleResp, nil
 }
-func (f *fakeTenantAdminGRPC) GetChangeableRoles(context.Context, *tenantv1.GetChangeableRolesRequest, ...grpc.CallOption) (*tenantv1.GetChangeableRolesResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "not used")
-}
 func (f *fakeTenantAdminGRPC) ResetTenantAdminPassword(context.Context, *tenantv1.ResetTenantAdminPasswordRequest, ...grpc.CallOption) (*commonv1.IdempotentResult, error) {
 	return nil, status.Error(codes.Unimplemented, "not used")
 }

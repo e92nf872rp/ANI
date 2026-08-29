@@ -95,14 +95,14 @@ OPERATIONS = [
     "deleteTenantAdmin",
     "getTenantAdminDetail",
     "listTenantAdminAuditLogs",
-    "getChangeableRoles",
     "disableTenantAdmin",
     "enableTenantAdmin",
     "resendTenantAdminInvitation",
     "resetTenantAdminPassword",
     "getTenantAdminRole",
     "updateTenantAdminRole",
-    "bindTenantPlan"
+    "bindTenantPlan",
+    "listTenantAssignableRoles"
 ]
 PATHS = [
     "GET /gpu-containers",
@@ -192,26 +192,26 @@ PATHS = [
     "DELETE /tenants/{tenantId}/admins/{userId}",
     "GET /tenants/{tenantId}/admins/{userId}",
     "GET /tenants/{tenantId}/admins/{userId}/audit-logs",
-    "GET /tenants/{tenantId}/admins/{userId}/changeable-roles",
     "POST /tenants/{tenantId}/admins/{userId}/disable",
     "POST /tenants/{tenantId}/admins/{userId}/enable",
     "POST /tenants/{tenantId}/admins/{userId}/invitation/resend",
     "POST /tenants/{tenantId}/admins/{userId}/reset-password",
     "GET /tenants/{tenantId}/admins/{userId}/role",
     "PUT /tenants/{tenantId}/admins/{userId}/role",
-    "POST /tenants/{tenantId}/plan"
+    "POST /tenants/{tenantId}/plan",
+    "GET /tenants/{tenantId}/roles"
 ]
 SCHEMAS = [
     "AdminDetail",
     "AdminListResponse",
     "AdminWithTenant",
+    "AssignableTenantRoleListResponse",
     "AsyncTask",
     "AvailableGpu",
     "AvailableTenantListResponse",
     "BindPlanRequest",
     "BoundTenant",
     "BoundTenantsResponse",
-    "ChangeableRolesResponse",
     "CreateGpuContainerRequest",
     "CreateInferenceEndpointRequest",
     "CreateInferenceServiceRequest",

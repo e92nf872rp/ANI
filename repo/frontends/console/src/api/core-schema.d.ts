@@ -3067,6 +3067,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/tenant-admins/available-tenants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询可用租户列表（邀请管理员选择器）
+         * @description 返回 status <> 'disabled' 的租户摘要，按 created_at DESC 排序，不分页。
+         *     供 Services 租户管理员邀请时选择目标租户。
+         */
+        get: operations["listAvailableTenants"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/tenant-users": {
         parameters: {
             query?: never;
@@ -3101,6 +3122,27 @@ export interface paths {
          * @description 邀请前匹配已有用户；无匹配返回 404 USER_NOT_FOUND。不新建用户。
          */
         get: operations["lookupTenantUser"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/tenants/{tenant_id}/users/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 批量查询租户内用户
+         * @description 按 user_id 列表批量查询租户内未软删除用户；不存在的用户跳过。
+         *     不含 password_hash。用于 Services 层避免 N+1 查询。
+         */
+        get: operations["batchGetTenantUsers"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3148,15 +3190,19 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/admin/tenants/{tenant_id}/users/{user_id}/changeable-roles": {
+    "/admin/tenants/{tenant_id}/roles": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** 查询可变更角色选项 */
-        get: operations["getTenantUserChangeableRoles"];
+        /**
+         * 查询租户可分配角色列表
+         * @description 返回 roles 表中 name NOT LIKE 'platform-%' 且 tenant_id IS NULL OR tenant_id = $tenant_id 的角色，
+         *     不分页。供 Services 修改管理员角色选择器使用。
+         */
+        get: operations["listAssignableTenantRoles"];
         put?: never;
         post?: never;
         delete?: never;
@@ -6742,6 +6788,7 @@ export interface components {
             tenant_id: string;
             /** Format: email */
             email: string;
+            /** @description 对外返回时去掉存储前缀 oidc: / local: */
             username: string;
             display_name?: string | null;
             /** @enum {string} */
@@ -6749,7 +6796,7 @@ export interface components {
             /** @enum {string} */
             status: "active" | "disabled";
             /**
-             * @description 由 username 前缀推断：oidc: → third_party；local: → local
+             * @description 由存储 username 前缀推断：oidc: → third_party；其余（含 local:）→ local
              * @enum {string}
              */
             source: "local" | "third_party";
@@ -6767,39 +6814,54 @@ export interface components {
             /** @description 下一页游标；null 表示已无更多 */
             next_cursor?: string | null;
         };
-        /** @description 租户成员权限；仅 tenant_id 非空的成员可查询 */
+        /** @description 租户成员权限；仅 tenant_id 非空的成员可查询；permissions 为 roles.permissions JSONB 原样 */
         TenantUserPermissions: {
             /** Format: uuid */
             user_id: string;
             /** Format: uuid */
             tenant_id: string;
-            /** @enum {string} */
-            role: "tenant-admin" | "user" | "auditor";
-            /** @description 资源权限列表 */
+            /**
+             * Format: uuid
+             * @description 当前 roles.id；无绑定时可省略
+             */
+            role_id?: string;
+            /** @description 角色名（非 platform-*） */
+            role: string;
+            /** @description roles.permissions JSONB 原样（resource/actions/scope） */
             permissions: {
-                /** @description 资源标识，如 compute, inference, member */
-                resource: string;
-                /** @enum {string} */
-                action: "read" | "write" | "none";
-                /** @description 作用域标识 */
-                scope: string;
+                [key: string]: unknown;
             }[];
         };
-        ChangeableRoleOption: {
-            /** @enum {string} */
-            role: "user" | "auditor" | "tenant-admin";
-            label: string;
+        /** @description 租户可分配角色（排除 platform-*） */
+        AssignableTenantRole: {
+            /** Format: uuid */
+            id: string;
+            /**
+             * Format: uuid
+             * @description NULL=平台内置角色
+             */
+            tenant_id?: string | null;
+            name: string;
+            /** @description roles.permissions JSONB（resource/actions/scope） */
+            permissions: {
+                [key: string]: unknown;
+            }[];
         };
-        /** @description 可变更角色选项 */
-        ChangeableRolesResponse: {
-            /** @enum {string} */
-            current_role: "tenant-admin" | "user" | "auditor";
-            changeable_roles: components["schemas"]["ChangeableRoleOption"][];
+        AssignableTenantRoleList: {
+            items: components["schemas"]["AssignableTenantRole"][];
         };
-        /** @description 修改租户内角色 */
+        /** @description 修改租户内角色（按 role_id）；old_role_id 用于定位既有 user_roles 行 */
         UserRoleUpdateRequest: {
-            /** @enum {string} */
-            role: "user" | "auditor" | "tenant-admin";
+            /**
+             * Format: uuid
+             * @description 当前绑定的 roles.id；缺省或无匹配行时改为 INSERT
+             */
+            old_role_id?: string;
+            /**
+             * Format: uuid
+             * @description 目标角色 UUID；须非 platform-*，且 tenant_id 为空或等于路径租户
+             */
+            role_id: string;
         };
         /** @description 设置 users.status */
         UserStatusUpdateRequest: {
@@ -13100,6 +13162,28 @@ export interface operations {
             };
         };
     };
+    listAvailableTenants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 可用租户摘要列表（status ∈ active / frozen） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantSummaryList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
     listTenantUsers: {
         parameters: {
             query?: {
@@ -13158,6 +13242,36 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["UserNotFound"];
+        };
+    };
+    batchGetTenantUsers: {
+        parameters: {
+            query: {
+                /** @description 逗号分隔的 user_id 列表 */
+                user_ids: string;
+            };
+            header?: never;
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 批量用户列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["TenantUser"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     getTenantUser: {
@@ -13272,30 +13386,28 @@ export interface operations {
             422: components["responses"]["RoleChangeInvalid"];
         };
     };
-    getTenantUserChangeableRoles: {
+    listAssignableTenantRoles: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 tenant_id: string;
-                user_id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description 可变更角色 */
+            /** @description 可分配角色列表 */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ChangeableRolesResponse"];
+                    "application/json": components["schemas"]["AssignableTenantRoleList"];
                 };
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["UserNotFound"];
         };
     };
     updateTenantUserStatus: {

@@ -53,7 +53,6 @@ func registerTenantAdminsWithClient(svc *route.RouterGroup, client tenantv1.Tena
 	// 用户/角色 CRUD — gRPC（service 内部通过 Core SDK 操作 users 表）
 	svc.PUT("/tenants/:tenantId/admins/:userId/role", api.updateTenantAdminRole)
 	svc.GET("/tenants/:tenantId/admins/:userId/role", api.getTenantAdminRole)
-	svc.GET("/tenants/:tenantId/admins/:userId/changeable-roles", api.getChangeableRoles)
 	svc.POST("/tenants/:tenantId/admins/:userId/reset-password", api.resetTenantAdminPassword)
 	svc.POST("/tenants/:tenantId/admins/:userId/disable", api.disableTenantAdmin)
 	svc.POST("/tenants/:tenantId/admins/:userId/enable", api.enableTenantAdmin)
@@ -375,39 +374,6 @@ func (api *tenantAdminAPI) getTenantAdminRole(ctx context.Context, c *app.Reques
 	}
 	// 4. 组装并返回权限 JSON
 	c.JSON(http.StatusOK, userPermissionsJSON(res))
-}
-
-func (api *tenantAdminAPI) getChangeableRoles(ctx context.Context, c *app.RequestContext) {
-	// 1. 校验 gRPC 客户端依赖是否就绪
-	if api.admins == nil {
-		writeTenantAdminError(ctx, c, http.StatusBadGateway, "GRPC_CLIENT_UNAVAILABLE", "tenant admin grpc client unavailable")
-		return
-	}
-	// 2. 构造 gRPC 调用上下文
-	callCtx, cancel := tenantCallCtx(ctx, c)
-	defer cancel()
-	// 3. 调用 tenant-service GetChangeableRoles RPC
-	res, err := api.admins.GetChangeableRoles(callCtx, &tenantv1.GetChangeableRolesRequest{
-		TenantId: c.Param("tenantId"),
-		UserId:   c.Param("userId"),
-	})
-	if err != nil {
-		mapTenantAdminGRPCError(ctx, c, err)
-		return
-	}
-	// 4. 组装可变角色列表
-	options := make([]map[string]any, 0, len(res.GetChangeableRoles()))
-	for _, opt := range res.GetChangeableRoles() {
-		options = append(options, map[string]any{
-			"role":  opt.GetRole(),
-			"label": opt.GetLabel(),
-		})
-	}
-	// 5. 返回结果
-	c.JSON(http.StatusOK, map[string]any{
-		"current_role":     res.GetCurrentRole(),
-		"changeable_roles": options,
-	})
 }
 
 func (api *tenantAdminAPI) resetTenantAdminPassword(ctx context.Context, c *app.RequestContext) {

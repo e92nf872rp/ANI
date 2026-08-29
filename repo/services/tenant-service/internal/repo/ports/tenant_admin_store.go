@@ -127,18 +127,6 @@ type UserPermissions struct {
 	Permissions []any // roles.permissions JSONB 原样
 }
 
-// ChangeableRoleOption 是可变更角色下拉的一项。
-type ChangeableRoleOption struct {
-	Role  string // user | auditor | tenant-admin
-	Label string
-}
-
-// ChangeableRoles 是 GET .../changeable-roles 的返回。
-type ChangeableRoles struct {
-	CurrentRole     string
-	ChangeableRoles []ChangeableRoleOption
-}
-
 // AssignableRole 是 GET /tenants/{tenantId}/roles 的一项。
 type AssignableRole struct {
 	ID          uuid.UUID

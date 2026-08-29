@@ -95,9 +95,21 @@
       "scope": "scope:quota:write"
     },
     {
+      "operationId": "listAssignableTenantRoles",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/roles",
+      "scope": "scope:users:read"
+    },
+    {
       "operationId": "lookupTenantUser",
       "method": "GET",
       "path": "/admin/tenants/{tenant_id}/user-lookup",
+      "scope": "scope:users:read"
+    },
+    {
+      "operationId": "batchGetTenantUsers",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/users/batch",
       "scope": "scope:users:read"
     },
     {
@@ -110,12 +122,6 @@
       "operationId": "getTenantUser",
       "method": "GET",
       "path": "/admin/tenants/{tenant_id}/users/{user_id}",
-      "scope": "scope:users:read"
-    },
-    {
-      "operationId": "getTenantUserChangeableRoles",
-      "method": "GET",
-      "path": "/admin/tenants/{tenant_id}/users/{user_id}/changeable-roles",
       "scope": "scope:users:read"
     },
     {
@@ -1351,6 +1357,8 @@
   ],
   "schemas": [
     "APIKeyInfo",
+    "AssignableTenantRole",
+    "AssignableTenantRoleList",
     "AsyncTask",
     "BeginOIDCLoginRequest",
     "BeginOIDCLoginResponse",
@@ -1358,8 +1366,6 @@
     "BucketObjectPresignedURLRequest",
     "BucketObjectUploadRequest",
     "BucketPrefixCreateRequest",
-    "ChangeableRoleOption",
-    "ChangeableRolesResponse",
     "CloneSandboxCheckpointRequest",
     "CompleteOIDCLoginRequest",
     "CoreDevProfileInfo",

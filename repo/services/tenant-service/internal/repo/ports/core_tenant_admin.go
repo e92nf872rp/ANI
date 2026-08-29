@@ -14,7 +14,6 @@ import (
 //	GET    /admin/tenants/{tenant_id}/users/{user_id}
 //	PUT    /admin/tenants/{tenant_id}/users/{user_id}/role
 //	GET    /admin/tenants/{tenant_id}/users/{user_id}/role
-//	GET    /admin/tenants/{tenant_id}/users/{user_id}/changeable-roles
 //	GET    /admin/tenants/{tenant_id}/roles
 //	POST   /admin/tenants/{tenant_id}/users/{user_id}/status
 //	POST   /admin/tenants/{tenant_id}/users/{user_id}/reset-password
@@ -54,9 +53,6 @@ type TenantAdminSvcClient interface {
 	// GetRolePermissions 查询角色及 permissions（roles.permissions JSONB 原样）。
 	// 仅租户成员（tenant_id 非空）；平台账户或 platform-* 角色不可查。
 	GetRolePermissions(ctx context.Context, tenantID, userID uuid.UUID) (UserPermissions, error)
-
-	// GetChangeableRoles 查询可变更角色选项。
-	GetChangeableRoles(ctx context.Context, tenantID, userID uuid.UUID) (ChangeableRoles, error)
 
 	// ListAssignableRoles 查询租户可分配角色（Core GET /admin/tenants/{id}/roles）。
 	ListAssignableRoles(ctx context.Context, tenantID uuid.UUID) ([]AssignableRole, error)

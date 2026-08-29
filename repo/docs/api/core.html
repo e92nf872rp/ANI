@@ -140,7 +140,7 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>223</dd></div>
+          <div><dt>Operations</dt><dd>225</dd></div>
           <div><dt>Schemas</dt><dd>309</dd></div>
         </dl>
       </section>
@@ -189,6 +189,14 @@
           <td><code>listQuotaMeta</code></td>
           <td>查询可用配额元数据</td>
           <td><code>scope:quota:read</code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/admin/tenant-admins/available-tenants</code></td>
+          <td><code>listAvailableTenants</code></td>
+          <td>查询可用租户列表（邀请管理员选择器）</td>
+          <td><code>scope:users:read</code></td>
           <td>200, 401, 403</td>
         </tr>
         <tr>
@@ -273,11 +281,27 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/admin/tenants/{tenant_id}/roles</code></td>
+          <td><code>listAssignableTenantRoles</code></td>
+          <td>查询租户可分配角色列表</td>
+          <td><code>scope:users:read</code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/admin/tenants/{tenant_id}/user-lookup</code></td>
           <td><code>lookupTenantUser</code></td>
           <td>按 email+username 匹配租户内已有用户</td>
           <td><code>scope:users:read</code></td>
           <td>200, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/admin/tenants/{tenant_id}/users/batch</code></td>
+          <td><code>batchGetTenantUsers</code></td>
+          <td>批量查询租户内用户</td>
+          <td><code>scope:users:read</code></td>
+          <td>200, 400, 401, 403</td>
         </tr>
         <tr>
           <td><span class="method method-delete">DELETE</span></td>
@@ -292,14 +316,6 @@
           <td><code>/admin/tenants/{tenant_id}/users/{user_id}</code></td>
           <td><code>getTenantUser</code></td>
           <td>查询租户成员详情</td>
-          <td><code>scope:users:read</code></td>
-          <td>200, 401, 403, 404</td>
-        </tr>
-        <tr>
-          <td><span class="method method-get">GET</span></td>
-          <td><code>/admin/tenants/{tenant_id}/users/{user_id}/changeable-roles</code></td>
-          <td><code>getTenantUserChangeableRoles</code></td>
-          <td>查询可变更角色选项</td>
           <td><code>scope:users:read</code></td>
           <td>200, 401, 403, 404</td>
         </tr>
@@ -1951,6 +1967,8 @@
         <h2>Schemas</h2>
         <ul class="schema-list">
         <li><code>APIKeyInfo</code></li>
+        <li><code>AssignableTenantRole</code></li>
+        <li><code>AssignableTenantRoleList</code></li>
         <li><code>AsyncTask</code></li>
         <li><code>BeginOIDCLoginRequest</code></li>
         <li><code>BeginOIDCLoginResponse</code></li>
@@ -1958,8 +1976,6 @@
         <li><code>BucketObjectPresignedURLRequest</code></li>
         <li><code>BucketObjectUploadRequest</code></li>
         <li><code>BucketPrefixCreateRequest</code></li>
-        <li><code>ChangeableRoleOption</code></li>
-        <li><code>ChangeableRolesResponse</code></li>
         <li><code>CloneSandboxCheckpointRequest</code></li>
         <li><code>CompleteOIDCLoginRequest</code></li>
         <li><code>CoreDevProfileInfo</code></li>

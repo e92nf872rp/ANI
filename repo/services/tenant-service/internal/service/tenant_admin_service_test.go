@@ -110,9 +110,6 @@ func (f *fakeTenantAdminCoreClient) GetRolePermissions(_ context.Context, tenant
 	}
 	return ports.UserPermissions{}, ports.ErrTenantAdminNotFound
 }
-func (f *fakeTenantAdminCoreClient) GetChangeableRoles(context.Context, uuid.UUID, uuid.UUID) (ports.ChangeableRoles, error) {
-	return ports.ChangeableRoles{}, ports.ErrNotImplemented
-}
 func (f *fakeTenantAdminCoreClient) ListAssignableRoles(context.Context, uuid.UUID) ([]ports.AssignableRole, error) {
 	if f.rolesErr != nil {
 		return nil, f.rolesErr
@@ -1554,38 +1551,4 @@ func TestTenantAdminService_ListAuditLogs(t *testing.T) {
 			t.Fatalf("listed=%+v", listed.GetItems())
 		}
 	})
-}
-
-func TestTenantAdminService_Unimplemented(t *testing.T) {
-	s := NewTenantAdminService(nil, nil, nil, nil)
-	ctx := context.Background()
-
-	checks := []struct {
-		name string
-		call func() error
-	}{
-		{"GetChangeableRoles", func() error {
-			_, err := s.GetChangeableRoles(ctx, &tenantv1.GetChangeableRolesRequest{})
-			return err
-		}},
-	}
-
-	if len(checks) != 1 {
-		t.Fatalf("want 1 remaining unimplemented RPCs, got %d", len(checks))
-	}
-	for _, tc := range checks {
-		t.Run(tc.name, func(t *testing.T) {
-			err := tc.call()
-			st, ok := status.FromError(err)
-			if !ok {
-				t.Fatalf("got %v, want gRPC status", err)
-			}
-			if st.Code() != codes.Unimplemented {
-				t.Fatalf("got code %v, want Unimplemented", st.Code())
-			}
-			if st.Message() != "NOT_IMPLEMENTED" {
-				t.Fatalf("got message %q, want NOT_IMPLEMENTED", st.Message())
-			}
-		})
-	}
 }

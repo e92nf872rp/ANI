@@ -1143,21 +1143,6 @@ components:
               action:   { type: string, enum: [read, write, none] }
               scope:    { type: string, description: "权限作用域，如 tenant / platform" }
 
-    ChangeableRolesResponse:
-      type: object
-      required: [current_role, changeable_roles]
-      description: 可变更角色选项
-      properties:
-        current_role:     { type: string, enum: [tenant-admin, user, auditor] }
-        changeable_roles:
-          type: array
-          items:
-            type: object
-            required: [role, label]
-            properties:
-              role:  { type: string, enum: [user, auditor, tenant-admin] }
-              label: { type: string, description: "展示名（普通成员 / 审计员 / 租户管理员）" }
-
     TenantAdminAuditLog:
       type: object
       required: [id, action, resource, result, created_at]
@@ -3050,24 +3035,6 @@ paths:
         "404": { $ref: '#/components/responses/NotFound', description: "TENANT_ADMIN_NOT_FOUND" }
         "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
         "422": { $ref: '#/components/responses/UnprocessableEntity', description: "ROLE_CHANGE_INVALID" }
-
-  /tenants/{tenantId}/admins/{userId}/changeable-roles:
-    get:
-      operationId: getChangeableRoles
-      summary: 查询可变更角色选项（需 platform-admin / platform-ops / platform-readonly）
-      tags: [TenantAdmins]
-      parameters:
-        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
-      responses:
-        "200":
-          description: 可变更角色列表
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ChangeableRolesResponse' }
-        "401": { $ref: '#/components/responses/Unauthorized' }
-        "403": { $ref: '#/components/responses/Forbidden' }
-        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_ADMIN_NOT_FOUND" }
 
   /tenants/{tenantId}/admins/{userId}/reset-password:
     post:

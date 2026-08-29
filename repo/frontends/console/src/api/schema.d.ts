@@ -1212,27 +1212,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 查询指定管理员角色与权限（4 维权限模型）（需 platform-admin / platform-ops / platform-readonly） */
+        /** 查询指定管理员角色与权限（需 platform-admin / platform-ops / platform-readonly） */
         get: operations["getTenantAdminRole"];
         /** 修改管理员角色（需 platform-admin / platform-ops） */
         put: operations["updateTenantAdminRole"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tenants/{tenantId}/admins/{userId}/changeable-roles": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 查询可变更角色选项（需 platform-admin / platform-ops / platform-readonly） */
-        get: operations["getChangeableRoles"];
-        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -1317,6 +1300,27 @@ export interface paths {
         };
         /** 查询可用租户列表（邀请管理员租户选择器数据源，需 platform-admin / platform-ops / platform-readonly） */
         get: operations["listAvailableTenantsForAdmin"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenantId}/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询租户可分配角色列表（修改管理员角色选择器数据源，需 platform-admin / platform-ops / platform-readonly）
+         * @description 返回 name NOT LIKE 'platform-%' 且 tenant_id IS NULL OR tenant_id = $tenantId 的角色，不分页。
+         *     网关经 gRPC 转发 tenant-service；tenant-service 经 Core SDK 查询 roles 表。
+         */
+        get: operations["listTenantAssignableRoles"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2458,17 +2462,6 @@ export interface components {
                 scope: string;
             }[];
         };
-        /** @description 可变更角色选项 */
-        ChangeableRolesResponse: {
-            /** @enum {string} */
-            current_role: "tenant-admin" | "user" | "auditor";
-            changeable_roles: {
-                /** @enum {string} */
-                role: "user" | "auditor" | "tenant-admin";
-                /** @description 展示名（普通成员 / 审计员 / 租户管理员） */
-                label: string;
-            }[];
-        };
         TenantAdminAuditLog: {
             /** Format: uuid */
             id: string;
@@ -2503,6 +2496,23 @@ export interface components {
                 status: "active" | "frozen";
             }[];
         };
+        AssignableTenantRoleListResponse: {
+            items: {
+                /** Format: uuid */
+                id: string;
+                /**
+                 * Format: uuid
+                 * @description NULL=平台内置角色
+                 */
+                tenant_id?: string | null;
+                /** @description 非 platform-* 角色名（如 tenant-admin / user / auditor） */
+                name: string;
+                /** @description roles.permissions JSONB（resource/actions/scope） */
+                permissions: {
+                    [key: string]: unknown;
+                }[];
+            }[];
+        };
         InviteAdminRequest: {
             /**
              * Format: uuid
@@ -2530,8 +2540,11 @@ export interface components {
              * @description 客户端生成UUID，防重复提交
              */
             idempotency_key: string;
-            /** @enum {string} */
-            role: "user" | "auditor" | "tenant-admin";
+            /**
+             * Format: uuid
+             * @description 目标角色 UUID；须为可分配角色（非 platform-*，tenant_id 为空或等于路径 tenantId）
+             */
+            role_id: string;
         };
         ResetPasswordRequest: {
             /**
@@ -5074,8 +5087,12 @@ export interface operations {
                 is_inviting?: boolean;
                 /** @description true = 仅邀请已过期 */
                 is_expired?: boolean;
-                /** @description 模糊匹配 email/username */
+                /** @description 模糊匹配 email/username/display_name */
                 search?: string;
+                /** @description 按角色过滤 */
+                role?: "tenant-admin" | "user" | "auditor";
+                /** @description 按来源过滤 */
+                source?: "local" | "third_party";
             };
             header?: never;
             path?: never;
@@ -5281,33 +5298,6 @@ export interface operations {
             422: components["responses"]["UnprocessableEntity"];
         };
     };
-    getChangeableRoles: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tenantId: string;
-                userId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 可变更角色列表 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ChangeableRolesResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            /** @description TENANT_ADMIN_NOT_FOUND */
-            404: components["responses"]["NotFound"];
-        };
-    };
     resetTenantAdminPassword: {
         parameters: {
             query?: never;
@@ -5462,6 +5452,30 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AvailableTenantListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listTenantAssignableRoles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 可分配角色列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignableTenantRoleListResponse"];
                 };
             };
             401: components["responses"]["Unauthorized"];

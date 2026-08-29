@@ -527,12 +527,6 @@
       "scope": ""
     },
     {
-      "operationId": "getChangeableRoles",
-      "method": "GET",
-      "path": "/tenants/{tenantId}/admins/{userId}/changeable-roles",
-      "scope": ""
-    },
-    {
       "operationId": "disableTenantAdmin",
       "method": "POST",
       "path": "/tenants/{tenantId}/admins/{userId}/disable",
@@ -573,19 +567,25 @@
       "method": "POST",
       "path": "/tenants/{tenantId}/plan",
       "scope": ""
+    },
+    {
+      "operationId": "listTenantAssignableRoles",
+      "method": "GET",
+      "path": "/tenants/{tenantId}/roles",
+      "scope": ""
     }
   ],
   "schemas": [
     "AdminDetail",
     "AdminListResponse",
     "AdminWithTenant",
+    "AssignableTenantRoleListResponse",
     "AsyncTask",
     "AvailableGpu",
     "AvailableTenantListResponse",
     "BindPlanRequest",
     "BoundTenant",
     "BoundTenantsResponse",
-    "ChangeableRolesResponse",
     "CreateGpuContainerRequest",
     "CreateInferenceEndpointRequest",
     "CreateInferenceServiceRequest",

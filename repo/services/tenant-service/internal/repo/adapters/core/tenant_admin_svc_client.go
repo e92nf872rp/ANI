@@ -213,35 +213,6 @@ func (c *TenantAdminSvcClient) GetRolePermissions(ctx context.Context, tenantID,
 	return out, nil
 }
 
-// GetChangeableRoles 调用 Core GET /admin/tenants/{id}/users/{user_id}/changeable-roles。
-func (c *TenantAdminSvcClient) GetChangeableRoles(ctx context.Context, tenantID, userID uuid.UUID) (ports.ChangeableRoles, error) {
-	_ = ctx
-	path := fmt.Sprintf("/admin/tenants/%s/users/%s/changeable-roles", tenantID.String(), userID.String())
-	raw, err := c.sdk.Request("GET", path, anisdk.RequestOptions{})
-	if err != nil {
-		return ports.ChangeableRoles{}, mapSDKError(err)
-	}
-	obj, err := asObject(raw)
-	if err != nil {
-		return ports.ChangeableRoles{}, err
-	}
-	optsRaw, err := asObjectSlice(obj["changeable_roles"])
-	if err != nil {
-		return ports.ChangeableRoles{}, err
-	}
-	opts := make([]ports.ChangeableRoleOption, 0, len(optsRaw))
-	for _, it := range optsRaw {
-		opts = append(opts, ports.ChangeableRoleOption{
-			Role:  stringField(it, "role"),
-			Label: stringField(it, "label"),
-		})
-	}
-	return ports.ChangeableRoles{
-		CurrentRole:     stringField(obj, "current_role"),
-		ChangeableRoles: opts,
-	}, nil
-}
-
 // ListAssignableRoles 调用 Core GET /admin/tenants/{id}/roles。
 func (c *TenantAdminSvcClient) ListAssignableRoles(ctx context.Context, tenantID uuid.UUID) ([]ports.AssignableRole, error) {
 	_ = ctx

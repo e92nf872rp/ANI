@@ -398,13 +398,6 @@ func (u *PostgresTenantAdmin) GetRolePermissions(ctx context.Context, tenantID, 
 	return out, nil
 }
 
-func (u *PostgresTenantAdmin) GetChangeableRoles(ctx context.Context, tenantID, userID string) (ports.ChangeableRoles, error) {
-	_ = ctx
-	_ = tenantID
-	_ = userID
-	return ports.ChangeableRoles{}, ports.ErrUnsupported
-}
-
 // ListAssignableRoles 返回租户可分配角色（排除 platform-*；系统角色 + 该租户自定义角色）。
 // 若租户不存在或已停用（status='disabled'），仅返回系统角色（tenant_id IS NULL）。
 func (u *PostgresTenantAdmin) ListAssignableRoles(ctx context.Context, tenantID string) ([]ports.RoleRef, error) {

@@ -31,7 +31,6 @@ type adminTenantAdminAPI struct {
 //	DELETE /admin/tenants/:tenant_id/users/:user_id
 //	GET    /admin/tenants/:tenant_id/users/:user_id/role
 //	PUT    /admin/tenants/:tenant_id/users/:user_id/role
-//	GET    /admin/tenants/:tenant_id/users/:user_id/changeable-roles
 //	GET    /admin/tenants/:tenant_id/roles
 //	POST   /admin/tenants/:tenant_id/users/:user_id/status
 //	POST   /admin/tenants/:tenant_id/users/:user_id/reset-password
@@ -47,7 +46,6 @@ func registerAdminTenantAdminResources(v1 *route.RouterGroup, admin ports.Tenant
 	v1.DELETE("/admin/tenants/:tenant_id/users/:user_id", api.deleteTenantUser)
 	v1.GET("/admin/tenants/:tenant_id/users/:user_id/role", api.getTenantUserRole)
 	v1.PUT("/admin/tenants/:tenant_id/users/:user_id/role", api.updateTenantUserRole)
-	v1.GET("/admin/tenants/:tenant_id/users/:user_id/changeable-roles", api.getChangeableRoles)
 	v1.GET("/admin/tenants/:tenant_id/roles", api.listAssignableRoles)
 	v1.POST("/admin/tenants/:tenant_id/users/:user_id/status", api.updateTenantUserStatus)
 	v1.POST("/admin/tenants/:tenant_id/users/:user_id/reset-password", api.resetTenantUserPassword)
@@ -185,31 +183,6 @@ func (api *adminTenantAdminAPI) updateTenantUserRole(ctx context.Context, c *app
 	c.JSON(http.StatusOK, map[string]any{
 		"id":      userID,
 		"message": "role updated",
-	})
-}
-
-func (api *adminTenantAdminAPI) getChangeableRoles(ctx context.Context, c *app.RequestContext) {
-	// 1. 解析路径参数
-	tenantID := c.Param("tenant_id")
-	userID := c.Param("user_id")
-	// 2. 调用 Core SDK
-	roles, err := api.admin.GetChangeableRoles(ctx, tenantID, userID)
-	if err != nil {
-		writeAdminTenantAdminError(c, err)
-		return
-	}
-	// 3. 组装可变角色列表
-	options := make([]map[string]any, 0, len(roles.Options))
-	for _, opt := range roles.Options {
-		options = append(options, map[string]any{
-			"role":  opt.Role,
-			"label": opt.Label,
-		})
-	}
-	// 4. 返回结果
-	c.JSON(http.StatusOK, map[string]any{
-		"current_role":     roles.CurrentRole,
-		"changeable_roles": options,
 	})
 }
 

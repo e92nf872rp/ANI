@@ -113,14 +113,14 @@ public final class ApiClient {
         "deleteTenantAdmin",
         "getTenantAdminDetail",
         "listTenantAdminAuditLogs",
-        "getChangeableRoles",
         "disableTenantAdmin",
         "enableTenantAdmin",
         "resendTenantAdminInvitation",
         "resetTenantAdminPassword",
         "getTenantAdminRole",
         "updateTenantAdminRole",
-        "bindTenantPlan"
+        "bindTenantPlan",
+        "listTenantAssignableRoles"
     ));
     public static final List<String> PATHS = Collections.unmodifiableList(Arrays.asList(
         "GET /gpu-containers",
@@ -210,26 +210,26 @@ public final class ApiClient {
         "DELETE /tenants/{tenantId}/admins/{userId}",
         "GET /tenants/{tenantId}/admins/{userId}",
         "GET /tenants/{tenantId}/admins/{userId}/audit-logs",
-        "GET /tenants/{tenantId}/admins/{userId}/changeable-roles",
         "POST /tenants/{tenantId}/admins/{userId}/disable",
         "POST /tenants/{tenantId}/admins/{userId}/enable",
         "POST /tenants/{tenantId}/admins/{userId}/invitation/resend",
         "POST /tenants/{tenantId}/admins/{userId}/reset-password",
         "GET /tenants/{tenantId}/admins/{userId}/role",
         "PUT /tenants/{tenantId}/admins/{userId}/role",
-        "POST /tenants/{tenantId}/plan"
+        "POST /tenants/{tenantId}/plan",
+        "GET /tenants/{tenantId}/roles"
     ));
     public static final List<String> SCHEMAS = Collections.unmodifiableList(Arrays.asList(
         "AdminDetail",
         "AdminListResponse",
         "AdminWithTenant",
+        "AssignableTenantRoleListResponse",
         "AsyncTask",
         "AvailableGpu",
         "AvailableTenantListResponse",
         "BindPlanRequest",
         "BoundTenant",
         "BoundTenantsResponse",
-        "ChangeableRolesResponse",
         "CreateGpuContainerRequest",
         "CreateInferenceEndpointRequest",
         "CreateInferenceServiceRequest",

@@ -856,14 +856,6 @@
           <td>200, 401, 403, 404</td>
         </tr>
         <tr>
-          <td><span class="method method-get">GET</span></td>
-          <td><code>/tenants/{tenantId}/admins/{userId}/changeable-roles</code></td>
-          <td><code>getChangeableRoles</code></td>
-          <td>查询可变更角色选项（需 platform-admin / platform-ops / platform-readonly）</td>
-          <td><code></code></td>
-          <td>200, 401, 403, 404</td>
-        </tr>
-        <tr>
           <td><span class="method method-post">POST</span></td>
           <td><code>/tenants/{tenantId}/admins/{userId}/disable</code></td>
           <td><code>disableTenantAdmin</code></td>
@@ -899,7 +891,7 @@
           <td><span class="method method-get">GET</span></td>
           <td><code>/tenants/{tenantId}/admins/{userId}/role</code></td>
           <td><code>getTenantAdminRole</code></td>
-          <td>查询指定管理员角色与权限（4 维权限模型）（需 platform-admin / platform-ops / platform-readonly）</td>
+          <td>查询指定管理员角色与权限（需 platform-admin / platform-ops / platform-readonly）</td>
           <td><code></code></td>
           <td>200, 401, 403, 404</td>
         </tr>
@@ -919,6 +911,14 @@
           <td><code></code></td>
           <td>200, 400, 401, 403, 404, 409, 422, 502, 504</td>
         </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/tenants/{tenantId}/roles</code></td>
+          <td><code>listTenantAssignableRoles</code></td>
+          <td>查询租户可分配角色列表（修改管理员角色选择器数据源，需 platform-admin / platform-ops / platform-readonly）</td>
+          <td><code></code></td>
+          <td>200, 401, 403</td>
+        </tr>
           </tbody>
         </table>
       </section>
@@ -929,13 +929,13 @@
         <li><code>AdminDetail</code></li>
         <li><code>AdminListResponse</code></li>
         <li><code>AdminWithTenant</code></li>
+        <li><code>AssignableTenantRoleListResponse</code></li>
         <li><code>AsyncTask</code></li>
         <li><code>AvailableGpu</code></li>
         <li><code>AvailableTenantListResponse</code></li>
         <li><code>BindPlanRequest</code></li>
         <li><code>BoundTenant</code></li>
         <li><code>BoundTenantsResponse</code></li>
-        <li><code>ChangeableRolesResponse</code></li>
         <li><code>CreateGpuContainerRequest</code></li>
         <li><code>CreateInferenceEndpointRequest</code></li>
         <li><code>CreateInferenceServiceRequest</code></li>

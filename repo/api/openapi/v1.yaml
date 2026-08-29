@@ -4110,21 +4110,6 @@ components:
           description: "roles.permissions JSONB 原样（resource/actions/scope）"
           items: { type: object, additionalProperties: true }
 
-    ChangeableRoleOption:
-      type: object
-      required: [role, label]
-      properties:
-        role:  { type: string, enum: [user, auditor, tenant-admin] }
-        label: { type: string }
-
-    ChangeableRolesResponse:
-      type: object
-      description: "可变更角色选项"
-      required: [current_role, changeable_roles]
-      properties:
-        current_role:     { type: string, enum: [tenant-admin, user, auditor] }
-        changeable_roles: { type: array, items: { $ref: '#/components/schemas/ChangeableRoleOption' } }
-
     AssignableTenantRole:
       type: object
       description: "租户可分配角色（排除 platform-*）"
@@ -9335,25 +9320,6 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/UserNotFound' }
         "422": { $ref: '#/components/responses/RoleChangeInvalid' }
-
-  /admin/tenants/{tenant_id}/users/{user_id}/changeable-roles:
-    get:
-      operationId: getTenantUserChangeableRoles
-      summary: 查询可变更角色选项
-      tags: [TenantUsers]
-      x-ani-rbac-scope: "scope:users:read"
-      parameters:
-        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: user_id, in: path, required: true, schema: { type: string, format: uuid } }
-      responses:
-        "200":
-          description: 可变更角色
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ChangeableRolesResponse' }
-        "401": { $ref: '#/components/responses/Unauthorized' }
-        "403": { $ref: '#/components/responses/Forbidden' }
-        "404": { $ref: '#/components/responses/UserNotFound' }
 
   /admin/tenants/{tenant_id}/roles:
     get:

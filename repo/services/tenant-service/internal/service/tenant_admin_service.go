@@ -55,11 +55,6 @@ func (s *TenantAdminService) Register(server *grpc.Server) {
 	tenantv1.RegisterTenantAdminServiceServer(server, s)
 }
 
-// unimplemented 返回 gRPC Unimplemented 标准错误，供存根方法使用。
-func unimplemented() error {
-	return status.Error(codes.Unimplemented, ports.ErrNotImplemented.Error())
-}
-
 // ListAvailableTenants 返回非 disabled 租户列表（SPEC §5.1.11 / US-011）。
 // 只读、无审计；经 Core GET /admin/tenant-admins/available-tenants（TenantService）。
 func (s *TenantAdminService) ListAvailableTenants(ctx context.Context, _ *tenantv1.ListAvailableTenantsRequest) (*tenantv1.ListAvailableTenantsResponse, error) {
@@ -824,10 +819,6 @@ func (s *TenantAdminService) GetTenantAdminRole(ctx context.Context, req *tenant
 	}
 	out.Permissions = lv
 	return out, nil
-}
-
-func (s *TenantAdminService) GetChangeableRoles(context.Context, *tenantv1.GetChangeableRolesRequest) (*tenantv1.GetChangeableRolesResponse, error) {
-	return nil, unimplemented()
 }
 
 // ResetTenantAdminPassword 重置管理员密码（SPEC §5.1.7 / US-007）。

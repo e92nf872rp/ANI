@@ -27,8 +27,6 @@ service TenantAdminService {
   rpc UpdateTenantAdminRole(UpdateTenantAdminRoleRequest) returns (common.v1.IdempotentResult);
   // GetTenantAdminRole returns the role and permissions for a tenant member.
   rpc GetTenantAdminRole(GetTenantAdminRoleRequest) returns (UserPermissions);
-  // GetChangeableRoles returns selectable target roles.
-  rpc GetChangeableRoles(GetChangeableRolesRequest) returns (GetChangeableRolesResponse);
   // ResetTenantAdminPassword resets a local-password admin (plaintext never logged).
   rpc ResetTenantAdminPassword(ResetTenantAdminPasswordRequest) returns (common.v1.IdempotentResult);
   // DisableTenantAdmin sets users.status=disabled.
@@ -91,16 +89,6 @@ message UpdateTenantAdminRoleRequest {
 message GetTenantAdminRoleRequest {
   string tenant_id = 1;
   string user_id = 2;
-}
-
-message GetChangeableRolesRequest {
-  string tenant_id = 1;
-  string user_id = 2;
-}
-
-message GetChangeableRolesResponse {
-  string current_role = 1;
-  repeated ChangeableRoleOption changeable_roles = 2;
 }
 
 message ResetTenantAdminPasswordRequest {
@@ -177,11 +165,6 @@ message UserPermissions {
   string role = 3;
   google.protobuf.ListValue permissions = 4;  // resource/action/scope JSONB array
   string role_id = 5;                         // roles.id (uuid); empty when no role binding
-}
-
-message ChangeableRoleOption {
-  string role = 1;   // user | auditor | tenant-admin
-  string label = 2;  // 普通成员 / 审计员 / 租户管理员
 }
 
 message TenantAdminAuditLog {

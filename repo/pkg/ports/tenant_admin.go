@@ -58,18 +58,6 @@ type UserPermissions struct {
 	Permissions []any // roles.permissions JSONB 原样
 }
 
-// ChangeableRoleOption is one selectable target role.
-type ChangeableRoleOption struct {
-	Role  string // user | auditor | tenant-admin
-	Label string
-}
-
-// ChangeableRoles is GET .../changeable-roles.
-type ChangeableRoles struct {
-	CurrentRole string
-	Options     []ChangeableRoleOption
-}
-
 // RoleRef is an assignable role row for tenant role pickers.
 type RoleRef struct {
 	ID          uuid.UUID
@@ -88,7 +76,6 @@ type RoleRef struct {
 //	GET    /admin/tenants/{tenant_id}/users/{user_id}
 //	PUT    /admin/tenants/{tenant_id}/users/{user_id}/role
 //	GET    /admin/tenants/{tenant_id}/users/{user_id}/role
-//	GET    /admin/tenants/{tenant_id}/users/{user_id}/changeable-roles
 //	GET    /admin/tenants/{tenant_id}/roles
 //	POST   /admin/tenants/{tenant_id}/users/{user_id}/status
 //	POST   /admin/tenants/{tenant_id}/users/{user_id}/reset-password
@@ -119,9 +106,6 @@ type TenantAdminService interface {
 	// GetRolePermissions returns role + permissions JSONB for a tenant member.
 	// Rejects platform-* roles and platform accounts (users.tenant_id empty).
 	GetRolePermissions(ctx context.Context, tenantID, userID string) (UserPermissions, error)
-
-	// GetChangeableRoles returns selectable roles.
-	GetChangeableRoles(ctx context.Context, tenantID, userID string) (ChangeableRoles, error)
 
 	// ListAssignableRoles returns roles assignable to the tenant
 	// (name NOT LIKE 'platform-%' AND (tenant_id IS NULL OR tenant_id = tenantID)).

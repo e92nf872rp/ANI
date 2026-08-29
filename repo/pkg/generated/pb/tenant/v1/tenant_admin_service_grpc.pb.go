@@ -26,7 +26,6 @@ const (
 	TenantAdminService_GetTenantAdminDetail_FullMethodName        = "/tenant.v1.TenantAdminService/GetTenantAdminDetail"
 	TenantAdminService_UpdateTenantAdminRole_FullMethodName       = "/tenant.v1.TenantAdminService/UpdateTenantAdminRole"
 	TenantAdminService_GetTenantAdminRole_FullMethodName          = "/tenant.v1.TenantAdminService/GetTenantAdminRole"
-	TenantAdminService_GetChangeableRoles_FullMethodName          = "/tenant.v1.TenantAdminService/GetChangeableRoles"
 	TenantAdminService_ResetTenantAdminPassword_FullMethodName    = "/tenant.v1.TenantAdminService/ResetTenantAdminPassword"
 	TenantAdminService_DisableTenantAdmin_FullMethodName          = "/tenant.v1.TenantAdminService/DisableTenantAdmin"
 	TenantAdminService_EnableTenantAdmin_FullMethodName           = "/tenant.v1.TenantAdminService/EnableTenantAdmin"
@@ -53,8 +52,6 @@ type TenantAdminServiceClient interface {
 	UpdateTenantAdminRole(ctx context.Context, in *UpdateTenantAdminRoleRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error)
 	// GetTenantAdminRole returns the role and permissions for a tenant member.
 	GetTenantAdminRole(ctx context.Context, in *GetTenantAdminRoleRequest, opts ...grpc.CallOption) (*UserPermissions, error)
-	// GetChangeableRoles returns selectable target roles.
-	GetChangeableRoles(ctx context.Context, in *GetChangeableRolesRequest, opts ...grpc.CallOption) (*GetChangeableRolesResponse, error)
 	// ResetTenantAdminPassword resets a local-password admin (plaintext never logged).
 	ResetTenantAdminPassword(ctx context.Context, in *ResetTenantAdminPasswordRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error)
 	// DisableTenantAdmin sets users.status=disabled.
@@ -127,15 +124,6 @@ func (c *tenantAdminServiceClient) UpdateTenantAdminRole(ctx context.Context, in
 func (c *tenantAdminServiceClient) GetTenantAdminRole(ctx context.Context, in *GetTenantAdminRoleRequest, opts ...grpc.CallOption) (*UserPermissions, error) {
 	out := new(UserPermissions)
 	err := c.cc.Invoke(ctx, TenantAdminService_GetTenantAdminRole_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *tenantAdminServiceClient) GetChangeableRoles(ctx context.Context, in *GetChangeableRolesRequest, opts ...grpc.CallOption) (*GetChangeableRolesResponse, error) {
-	out := new(GetChangeableRolesResponse)
-	err := c.cc.Invoke(ctx, TenantAdminService_GetChangeableRoles_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -222,8 +210,6 @@ type TenantAdminServiceServer interface {
 	UpdateTenantAdminRole(context.Context, *UpdateTenantAdminRoleRequest) (*v1.IdempotentResult, error)
 	// GetTenantAdminRole returns the role and permissions for a tenant member.
 	GetTenantAdminRole(context.Context, *GetTenantAdminRoleRequest) (*UserPermissions, error)
-	// GetChangeableRoles returns selectable target roles.
-	GetChangeableRoles(context.Context, *GetChangeableRolesRequest) (*GetChangeableRolesResponse, error)
 	// ResetTenantAdminPassword resets a local-password admin (plaintext never logged).
 	ResetTenantAdminPassword(context.Context, *ResetTenantAdminPasswordRequest) (*v1.IdempotentResult, error)
 	// DisableTenantAdmin sets users.status=disabled.
@@ -262,9 +248,6 @@ func (UnimplementedTenantAdminServiceServer) UpdateTenantAdminRole(context.Conte
 }
 func (UnimplementedTenantAdminServiceServer) GetTenantAdminRole(context.Context, *GetTenantAdminRoleRequest) (*UserPermissions, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetTenantAdminRole not implemented")
-}
-func (UnimplementedTenantAdminServiceServer) GetChangeableRoles(context.Context, *GetChangeableRolesRequest) (*GetChangeableRolesResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetChangeableRoles not implemented")
 }
 func (UnimplementedTenantAdminServiceServer) ResetTenantAdminPassword(context.Context, *ResetTenantAdminPasswordRequest) (*v1.IdempotentResult, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ResetTenantAdminPassword not implemented")
@@ -404,24 +387,6 @@ func _TenantAdminService_GetTenantAdminRole_Handler(srv interface{}, ctx context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(TenantAdminServiceServer).GetTenantAdminRole(ctx, req.(*GetTenantAdminRoleRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _TenantAdminService_GetChangeableRoles_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetChangeableRolesRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(TenantAdminServiceServer).GetChangeableRoles(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: TenantAdminService_GetChangeableRoles_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TenantAdminServiceServer).GetChangeableRoles(ctx, req.(*GetChangeableRolesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -582,10 +547,6 @@ var TenantAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetTenantAdminRole",
 			Handler:    _TenantAdminService_GetTenantAdminRole_Handler,
-		},
-		{
-			MethodName: "GetChangeableRoles",
-			Handler:    _TenantAdminService_GetChangeableRoles_Handler,
 		},
 		{
 			MethodName: "ResetTenantAdminPassword",
