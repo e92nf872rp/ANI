@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -40,12 +41,18 @@ type platformWorkloadCreateRequest struct {
 }
 
 type platformWorkloadResourcesRequest struct {
-	CPU         string `json:"cpu"`
-	Memory      string `json:"memory"`
-	Accelerator *struct {
-		SpecID string `json:"spec_id"`
-		Count  int    `json:"count"`
-	} `json:"accelerator"`
+	CPU         string                              `json:"cpu"`
+	Memory      string                              `json:"memory"`
+	Accelerator *platformWorkloadAcceleratorRequest `json:"accelerator"`
+}
+
+type platformWorkloadAcceleratorRequest struct {
+	// SpecID 是 GPU 型号，例如 gpu-nvidia-geforce-rtx-4090。只表示型号，不表示整卡或 vGPU。
+	SpecID string `json:"spec_id"`
+	Count  int    `json:"count"`
+	// Memory 是申请 GPU 显存，单位 MiB。省略=整卡；填写=vGPU。不是 resources.memory。
+	// JSON 若出现该字段，必须 >= 1。
+	Memory *int `json:"memory,omitempty"`
 }
 
 type platformWorkloadRoleRequest struct {
@@ -172,7 +179,12 @@ func (api *platformWorkloadAPI) create(ctx context.Context, c *app.RequestContex
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid platform workload request")
 		return
 	}
-	record, err := api.service.Create(ctx, tenantID, platformWorkloadSpecFromRequest(req))
+	spec, err := platformWorkloadSpecFromRequest(req)
+	if err != nil {
+		writePlatformWorkloadError(c, err)
+		return
+	}
+	record, err := api.service.Create(ctx, tenantID, spec)
 	if err != nil {
 		writePlatformWorkloadError(c, err)
 		return
@@ -311,7 +323,15 @@ func (api *platformWorkloadAPI) writeAccepted(ctx context.Context, c *app.Reques
 	c.JSON(http.StatusAccepted, payload)
 }
 
-func platformWorkloadSpecFromRequest(req platformWorkloadCreateRequest) ports.PlatformWorkloadCreateSpec {
+func platformWorkloadSpecFromRequest(req platformWorkloadCreateRequest) (ports.PlatformWorkloadCreateSpec, error) {
+	leader, err := platformWorkloadRoleFromRequest(req.Topology.Leader)
+	if err != nil {
+		return ports.PlatformWorkloadCreateSpec{}, err
+	}
+	workers, err := platformWorkloadRoleFromRequest(req.Topology.Workers)
+	if err != nil {
+		return ports.PlatformWorkloadCreateSpec{}, err
+	}
 	spec := ports.PlatformWorkloadCreateSpec{
 		IdempotencyKey: req.IdempotencyKey,
 		Name:           req.Name,
@@ -326,8 +346,8 @@ func platformWorkloadSpecFromRequest(req platformWorkloadCreateRequest) ports.Pl
 		Topology: ports.PlatformWorkloadTopology{
 			Mode: req.Topology.Mode, ProfileID: req.Topology.ProfileID, ProfileVersion: req.Topology.ProfileVersion,
 			HasLeader: req.Topology.Leader != nil, HasWorkers: req.Topology.Workers != nil,
-			Leader:  platformWorkloadRoleFromRequest(req.Topology.Leader),
-			Workers: platformWorkloadRoleFromRequest(req.Topology.Workers),
+			Leader:  leader,
+			Workers: workers,
 		},
 		Scheduling:  ports.PlatformWorkloadScheduling{QueueClass: req.Scheduling.QueueClass, Gang: req.Scheduling.Gang},
 		Network:     ports.PlatformWorkloadNetwork{Exposure: req.Network.Exposure},
@@ -335,8 +355,13 @@ func platformWorkloadSpecFromRequest(req platformWorkloadCreateRequest) ports.Pl
 		Metadata:    ports.PlatformWorkloadMetadata{OwnerRef: req.Metadata.OwnerRef, Labels: req.Metadata.Labels},
 	}
 	if req.Resources.Accelerator != nil {
+		memoryMB, err := acceleratorMemoryFromJSON(req.Resources.Accelerator.Memory)
+		if err != nil {
+			return ports.PlatformWorkloadCreateSpec{}, err
+		}
 		spec.Resources.AcceleratorSpecID = req.Resources.Accelerator.SpecID
 		spec.Resources.AcceleratorCount = req.Resources.Accelerator.Count
+		spec.Resources.AcceleratorMemoryMB = memoryMB
 	}
 	for _, port := range req.Network.Ports {
 		spec.Network.Ports = append(spec.Network.Ports, ports.PlatformWorkloadPort{Name: port.Name, Port: port.Port})
@@ -347,7 +372,17 @@ func platformWorkloadSpecFromRequest(req platformWorkloadCreateRequest) ports.Pl
 	for _, binding := range req.SecretBindings {
 		spec.SecretBindings = append(spec.SecretBindings, ports.PlatformWorkloadSecretBinding{SecretRef: binding.SecretRef, MountPath: binding.MountPath})
 	}
-	return spec
+	return spec, nil
+}
+
+func acceleratorMemoryFromJSON(mem *int) (int, error) {
+	if mem == nil {
+		return 0, nil
+	}
+	if *mem < 1 {
+		return 0, fmt.Errorf("%w: accelerator memory must be at least 1 MiB", ports.ErrInvalid)
+	}
+	return *mem, nil
 }
 
 func platformWorkloadEnvFromRequest(items []platformWorkloadEnvVarRequest) []ports.PlatformWorkloadEnvVar {
@@ -365,19 +400,24 @@ func platformWorkloadEnvFromRequest(items []platformWorkloadEnvVarRequest) []por
 	return out
 }
 
-func platformWorkloadRoleFromRequest(role *platformWorkloadRoleRequest) ports.PlatformWorkloadRole {
+func platformWorkloadRoleFromRequest(role *platformWorkloadRoleRequest) (ports.PlatformWorkloadRole, error) {
 	if role == nil {
-		return ports.PlatformWorkloadRole{}
+		return ports.PlatformWorkloadRole{}, nil
 	}
 	out := ports.PlatformWorkloadRole{Count: role.Count}
 	if role.Resources != nil {
 		out.Resources = ports.PlatformWorkloadResources{CPU: role.Resources.CPU, Memory: role.Resources.Memory}
 		if role.Resources.Accelerator != nil {
+			memoryMB, err := acceleratorMemoryFromJSON(role.Resources.Accelerator.Memory)
+			if err != nil {
+				return ports.PlatformWorkloadRole{}, err
+			}
 			out.Resources.AcceleratorSpecID = role.Resources.Accelerator.SpecID
 			out.Resources.AcceleratorCount = role.Resources.Accelerator.Count
+			out.Resources.AcceleratorMemoryMB = memoryMB
 		}
 	}
-	return out
+	return out, nil
 }
 
 func platformWorkloadJSON(record ports.PlatformWorkloadRecord) map[string]any {

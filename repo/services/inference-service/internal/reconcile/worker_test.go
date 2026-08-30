@@ -169,6 +169,7 @@ type runtimeStub struct {
 	observeCalls int
 	healthCalls  int
 	smokeCalls   int
+	smokeTasks   []domain.InferenceTask
 }
 
 func (r *runtimeStub) Ensure(_ context.Context, request runtimeport.EnsureRequest) (runtimeport.Observation, error) {
@@ -204,10 +205,11 @@ func (r *runtimeStub) Health(context.Context, uuid.UUID, uuid.UUID) error {
 	r.healthCalls++
 	return r.healthErr
 }
-func (r *runtimeStub) Smoke(context.Context, uuid.UUID, uuid.UUID, string) error {
+func (r *runtimeStub) Smoke(_ context.Context, _, _ uuid.UUID, _ string, task domain.InferenceTask) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.smokeCalls++
+	r.smokeTasks = append(r.smokeTasks, task)
 	return r.smokeErr
 }
 func (r *runtimeStub) Logs(context.Context, runtimeport.LogQuery) (runtimeport.LogPage, error) {
@@ -260,6 +262,20 @@ func TestRunOncePersistsRuntimeBeforeHealthAndOnlyThenMarksRunning(t *testing.T)
 	}
 	if len(runtime.requests) != 1 || runtime.requests[0].IdempotencyKey == uuid.Nil {
 		t.Fatalf("runtime request lacks deterministic key: %+v", runtime.requests)
+	}
+}
+
+func TestWorkerEmbeddingTaskPropagatesToSmoke(t *testing.T) {
+	store, runtime := workerFixture()
+	store.operation.TargetSpec.ExecutionProfile.Task = domain.InferenceTaskEmbed
+	worker := NewWorker(store, runtime, "worker-embedding", func() time.Time { return time.Unix(100, 0).UTC() })
+
+	handled, err := worker.RunOnce(context.Background())
+	if err != nil || !handled {
+		t.Fatalf("RunOnce() = (%v, %v), want (true, nil)", handled, err)
+	}
+	if len(runtime.smokeTasks) != 1 || runtime.smokeTasks[0] != domain.InferenceTaskEmbed {
+		t.Fatalf("smoke tasks = %v, want [embed]", runtime.smokeTasks)
 	}
 }
 
@@ -700,6 +716,32 @@ func TestWorkerScaleFailureRollsBackToBeforeSpec(t *testing.T) {
 	}
 	if store.service.StatusReason != codeScaleRolledBack {
 		t.Fatalf("service reason = %s", store.service.StatusReason)
+	}
+}
+
+func TestWorkerRollbackEmbeddingTaskPropagatesToSmoke(t *testing.T) {
+	store, runtime := workerFixture()
+	store.operation.Type = domain.ActionScale
+	store.operation.TargetGeneration = 2
+	store.operation.CreatedAt = time.Unix(0, 0).UTC()
+	store.operation.BeforeSpec = domain.Spec{Replicas: 1, ExecutionProfile: domain.ExecutionProfile{Task: domain.InferenceTaskEmbed}}
+	store.operation.TargetSpec = domain.Spec{Replicas: 2, ExecutionProfile: domain.ExecutionProfile{Task: domain.InferenceTaskGenerate}}
+	store.service.Status = domain.StatusDeploying
+	store.service.Generation = 2
+	store.service.AppliedSpec = store.operation.BeforeSpec
+	store.service.DesiredSpec = store.operation.TargetSpec
+	store.service.RuntimeRef = runtime.observation.RuntimeRef
+	store.service.ActiveOperationID = store.operation.ID
+	runtime.observation.ReadyReplicas = 1
+	runtime.observation.Ready = true
+
+	worker := NewWorker(store, runtime, "worker-embedding-rollback", func() time.Time { return time.Unix(16*60, 0).UTC() })
+	worker.deployTimeout = 15 * time.Minute
+	if handled, err := worker.RunOnce(context.Background()); err != nil || !handled {
+		t.Fatalf("RunOnce() = (%v, %v)", handled, err)
+	}
+	if len(runtime.smokeTasks) != 1 || runtime.smokeTasks[0] != domain.InferenceTaskEmbed {
+		t.Fatalf("rollback smoke tasks = %v, want [embed]", runtime.smokeTasks)
 	}
 }
 

@@ -24,7 +24,6 @@ func registerTasksWithStore(v1 *route.RouterGroup, store ports.AsyncTaskStore) {
 	}
 	api := &taskAPI{store: store}
 	v1.GET("/tasks/:task_id", api.get)
-	v1.DELETE("/tasks/:task_id", api.cancel)
 }
 
 func (api *taskAPI) get(ctx context.Context, c *app.RequestContext) {
@@ -38,31 +37,6 @@ func (api *taskAPI) get(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	c.JSON(http.StatusOK, taskResponseFromRecord(task))
-}
-
-func (api *taskAPI) cancel(ctx context.Context, c *app.RequestContext) {
-	task, err := api.store.Get(ctx, instanceTenantID(c), c.Param("task_id"))
-	if errors.Is(err, ports.ErrNotFound) {
-		writeInstanceError(c, http.StatusNotFound, "NOT_FOUND", "task not found")
-		return
-	}
-	if err != nil {
-		writeInstanceError(c, http.StatusInternalServerError, "TASK_LOOKUP_FAILED", err.Error())
-		return
-	}
-	if task.Status == "completed" || task.Status == "failed" || task.Status == "cancelled" || task.Status == "dead_letter" {
-		c.Status(http.StatusNoContent)
-		return
-	}
-	_, err = api.store.Update(ctx, ports.AsyncTaskUpdate{
-		TenantID: task.TenantID, ID: task.ID, Status: "cancelled",
-		AttemptCount: task.AttemptCount, ProgressPct: task.ProgressPct, Result: task.Result,
-	})
-	if err != nil {
-		writeInstanceError(c, http.StatusInternalServerError, "TASK_CANCEL_FAILED", err.Error())
-		return
-	}
-	c.Status(http.StatusNoContent)
 }
 
 func taskResponseFromRecord(record ports.AsyncTaskRecord) storageSnapshotTaskResponse {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/cloudwego/hertz/pkg/app"
@@ -11,16 +12,19 @@ import (
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
-// quotaAPI 持有 QuotaAdminService 接口，构造时注入 adapter（照搬 demo_instances.go 模式）。
+// quotaAPI 持有 QuotaAdminService 和 QuotaStoreService 接口，构造时注入 adapter。
 type quotaAPI struct {
 	admin ports.QuotaAdminService
+	store ports.QuotaStoreService
 }
 
-// registerQuotaResources 注册 QuotaAdminService 的管理端点：
-// 4 个 /admin/tenants/{tenant_id}/quota + 1 个 /admin/quota-meta。
+// registerQuotaResources 注册 QuotaAdminService 的管理端点 +
+// QuotaStoreService 的 BOSS 分页列表端点：
+// 4 个 /admin/tenants/{tenant_id}/quota + 1 个 /admin/quota-meta + GET /quotas + upsert。
 // 这些路径属于平台/管理路由，由 scopeAllowedForPath 守卫要求 platform scope。
-func registerQuotaResources(v1 *route.RouterGroup, admin ports.QuotaAdminService) {
-	api := quotaAPI{admin: admin}
+func registerQuotaResources(v1 *route.RouterGroup, admin ports.QuotaAdminService, store ports.QuotaStoreService) {
+	api := quotaAPI{admin: admin, store: store}
+	v1.GET("/quotas", api.listQuotas)
 	v1.POST("/admin/tenants/:tenant_id/quota", api.createTenantQuota)
 	v1.PUT("/admin/tenants/:tenant_id/quota", api.updateTenantQuota)
 	v1.GET("/admin/tenants/:tenant_id/quota", api.getTenantQuota)
@@ -70,8 +74,15 @@ type quotaItem struct {
 }
 
 type quotaResponse struct {
-	TenantID string      `json:"tenant_id"`
-	Items    []quotaItem `json:"items"`
+	TenantID   string      `json:"tenant_id"`
+	TenantName string      `json:"tenant_name,omitempty"`
+	Items      []quotaItem `json:"items"`
+}
+
+type quotaListResultResponse struct {
+	Items      []quotaResponse `json:"items"`
+	Total      int             `json:"total"`
+	NextCursor string          `json:"next_cursor,omitempty"`
 }
 
 type quotaDeleteResponse struct {
@@ -199,6 +210,39 @@ func (api *quotaAPI) listQuotaMeta(ctx context.Context, c *app.RequestContext) {
 		})
 	}
 	c.JSON(http.StatusOK, quotaMetaListResponse{Items: items})
+}
+
+// listQuotas 是 BOSS 分页查询所有租户配额的 handler。
+// 调用 QuotaStoreService.List，将 QuotaListResult 转为 QuotaListResult 响应。
+func (api *quotaAPI) listQuotas(ctx context.Context, c *app.RequestContext) {
+	if api.store == nil {
+		writeDemoError(c, http.StatusServiceUnavailable, "NOT_CONFIGURED", "quota store service is not configured")
+		return
+	}
+	limit := 50
+	if v := c.Query("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	cursor := c.Query("cursor")
+	result, err := api.store.List(ctx, ports.QuotaListRequest{
+		Limit:  limit,
+		Cursor: cursor,
+	})
+	if err != nil {
+		writeQuotaError(c, err)
+		return
+	}
+	items := make([]quotaResponse, 0, len(result.Items))
+	for _, v := range result.Items {
+		items = append(items, quotaResponseFromView(v))
+	}
+	c.JSON(http.StatusOK, quotaListResultResponse{
+		Items:      items,
+		Total:      result.Total,
+		NextCursor: result.NextCursor,
+	})
 }
 
 // ---- helpers ----

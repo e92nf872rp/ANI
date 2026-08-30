@@ -283,7 +283,7 @@ CREATE INDEX idx_inference_services_status ON inference_services(tenant_id, stat
 
 -- 推理调用审计日志（高写入量，可考虑分区）
 CREATE TABLE inference_audit_logs (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id              UUID NOT NULL DEFAULT gen_random_uuid(),
     tenant_id       UUID NOT NULL,
     service_id      UUID NOT NULL,
     user_id         UUID,
@@ -294,7 +294,8 @@ CREATE TABLE inference_audit_logs (
     output_tokens   INT NOT NULL DEFAULT 0,
     duration_ms     INT,
     status_code     INT,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (id, created_at)
 ) PARTITION BY RANGE (created_at);                  -- 按月分区
 
 -- 创建当月和下月分区（由定时任务自动维护）
@@ -553,7 +554,7 @@ CREATE TABLE platform_settings (
 
 -- 审计日志（操作层面，与推理层面分开存储）
 CREATE TABLE audit_logs (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id          UUID NOT NULL DEFAULT gen_random_uuid(),
     tenant_id   UUID,
     user_id     UUID,
     request_id  TEXT NOT NULL,
@@ -563,7 +564,8 @@ CREATE TABLE audit_logs (
     details     JSONB NOT NULL DEFAULT '{}',
     ip_address  INET,
     user_agent  TEXT,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (id, created_at)
 ) PARTITION BY RANGE (created_at);
 
 CREATE TABLE audit_logs_2026_05

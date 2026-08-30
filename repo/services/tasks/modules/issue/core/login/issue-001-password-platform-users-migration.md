@@ -9,12 +9,12 @@
 
 调整数据库 schema，为账号密码登录功能提供数据存储基础：
 
-1. `20260707_014_platform_users.sql`：修改 `users` 表以支持平台管理员存储（`tenant_id IS NULL`），调整 UNIQUE 约束，并补 `refresh_tokens` 缺失的 `user_id` 索引
-2. `20260707_014_platform_refresh_tokens.sql`：放宽 `refresh_tokens.tenant_id` 为 NULLABLE，并重建 `refresh_tokens.user_id` FK 到 `users(id)`
+1. `20260707001400_platform_users.sql`：修改 `users` 表以支持平台管理员存储（`tenant_id IS NULL`），调整 UNIQUE 约束，并补 `refresh_tokens` 缺失的 `user_id` 索引
+2. `20260707001401_platform_refresh_tokens.sql`：放宽 `refresh_tokens.tenant_id` 为 NULLABLE，并重建 `refresh_tokens.user_id` FK 到 `users(id)`
 
 **2026-07-15 决策**：取消原计划的独立 `platform_users` 表，改为平台管理员复用 `users` 表，由 `tenant_id IS NULL` 谓词区分。平台管理员角色通过 `user_roles` + `roles`（`roles.tenant_id IS NULL` 表示平台内置角色）映射，与现有 RBAC 基础设施一致。
 
-`users.password_hash` 列已在 `20260501_001_init_schema.sql` line 55 中存在（允许 NULL，兼容 OIDC 用户），本 Issue 不变更。`roles.tenant_id IS NULL` 表示平台内置角色的约定也已在 init_schema line 68 既有。
+`users.password_hash` 列已在 `20260501000100_init_schema.sql` line 55 中存在（允许 NULL，兼容 OIDC 用户），本 Issue 不变更。`roles.tenant_id IS NULL` 表示平台内置角色的约定也已在 init_schema line 68 既有。
 
 **不包含**：`password_history` 表（密码修改/重置功能不在本 Issues 范围）。
 
@@ -28,7 +28,7 @@
 
 ### 迁移文件 1：users 表扩展 + refresh_tokens 索引
 
-- [ ] 修改文件 `repo/deploy/migrations/20260707_014_platform_users.sql`
+- [ ] 修改文件 `repo/deploy/migrations/20260707001400_platform_users.sql`
 - [ ] `ALTER TABLE users DROP CONSTRAINT IF EXISTS users_tenant_id_fkey`（删除 tenant_id FK，允许平台管理员无租户）
 - [ ] `ALTER TABLE users ALTER COLUMN tenant_id DROP NOT NULL`（放宽为 NULLABLE）
 - [ ] 删除既有 `UNIQUE (tenant_id, username)` 与 `UNIQUE (tenant_id, email)` 约束
@@ -40,7 +40,7 @@
 
 ### 迁移文件 2：refresh_tokens 放宽 + FK 重建
 
-- [ ] 修改文件 `repo/deploy/migrations/20260707_014_platform_refresh_tokens.sql`
+- [ ] 修改文件 `repo/deploy/migrations/20260707001401_platform_refresh_tokens.sql`
 - [ ] `ALTER TABLE refresh_tokens ALTER COLUMN tenant_id DROP NOT NULL`（平台 refresh token tenant_id=NULL）
 - [ ] 重建 `refresh_tokens.user_id` FK 到 `users(id) ON DELETE CASCADE`（平台管理员现在也在 users 表，FK 可成立）
 
@@ -75,7 +75,7 @@ high
 ## References
 - SPEC: §2.4 File Structure、§3.1 Schema Changes、§3.3 Relationships、§3.4 Migration Plan、§11.3 Assumptions
 - ANI-08-安全架构设计.md：bcrypt cost≥12、密码哈希存储规范
-- init_schema: `repo/deploy/migrations/20260501_001_init_schema.sql` line 50-63 (users)、line 66-72 (roles)、line 74-79 (user_roles)、line 108-120 (refresh_tokens)
+- init_schema: `repo/deploy/migrations/20260501000100_init_schema.sql` line 50-63 (users)、line 66-72 (roles)、line 74-79 (user_roles)、line 108-120 (refresh_tokens)
 
 ## Notes
 - **平台用户存储决策**（2026-07-15 修订）：取消独立 `platform_users` 表，改为平台管理员复用 `users` 表，由 `tenant_id IS NULL` 谓词区分。平台管理员角色通过 `user_roles` + `roles`（`roles.tenant_id IS NULL`）映射，与现有 RBAC 基础设施一致。比原方案更简洁，减少冗余表和密码字段重复。

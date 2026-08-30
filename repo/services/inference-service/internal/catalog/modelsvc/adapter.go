@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	modelv1 "github.com/kubercloud/ani/pkg/generated/pb/model/v1"
 	"github.com/kubercloud/ani/services/inference-service/internal/catalog"
+	"github.com/kubercloud/ani/services/inference-service/internal/domain"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -27,6 +28,8 @@ type Profiles struct {
 	GPU       catalog.EngineProfile
 	SGLangCPU catalog.EngineProfile
 	SGLangGPU catalog.EngineProfile
+	EmbedCPU  catalog.EngineProfile
+	EmbedGPU  catalog.EngineProfile
 }
 
 type Catalog struct {
@@ -36,10 +39,12 @@ type Catalog struct {
 
 func DefaultProfiles() Profiles {
 	return Profiles{
-		CPU:       catalog.EngineProfile{ID: "vllm-chat-cpu", Version: "v1", Runtime: "vllm"},
-		GPU:       catalog.EngineProfile{ID: "vllm-chat-gpu", Version: "v1", Runtime: "vllm"},
-		SGLangCPU: catalog.EngineProfile{ID: "sglang-chat-cpu", Version: "v1", Runtime: "sglang"},
-		SGLangGPU: catalog.EngineProfile{ID: "sglang-chat-gpu", Version: "v1", Runtime: "sglang"},
+		CPU:       catalog.EngineProfile{ID: "vllm-chat-cpu", Version: "v1", Runtime: "vllm", Task: domain.InferenceTaskGenerate},
+		GPU:       catalog.EngineProfile{ID: "vllm-chat-gpu", Version: "v1", Runtime: "vllm", Task: domain.InferenceTaskGenerate},
+		SGLangCPU: catalog.EngineProfile{ID: "sglang-chat-cpu", Version: "v1", Runtime: "sglang", Task: domain.InferenceTaskGenerate},
+		SGLangGPU: catalog.EngineProfile{ID: "sglang-chat-gpu", Version: "v1", Runtime: "sglang", Task: domain.InferenceTaskGenerate},
+		EmbedCPU:  catalog.EngineProfile{ID: "vllm-embed-cpu", Version: "v1", Runtime: "vllm", Task: domain.InferenceTaskEmbed},
+		EmbedGPU:  catalog.EngineProfile{ID: "vllm-embed-gpu", Version: "v1", Runtime: "vllm", Task: domain.InferenceTaskEmbed},
 	}
 }
 
@@ -94,7 +99,8 @@ func (c *Catalog) Resolve(ctx context.Context, tenantID, versionID uuid.UUID) (c
 	if err != nil || modelID == uuid.Nil {
 		return catalog.ModelVersion{}, catalog.ErrModelNotFound
 	}
-	if !supportsChat(model.GetCapabilities()) {
+	task, supported := inferenceTask(model.GetCapabilities())
+	if !supported {
 		return catalog.ModelVersion{}, catalog.ErrNoCompatibleProfile
 	}
 
@@ -115,7 +121,9 @@ func (c *Catalog) Resolve(ctx context.Context, tenantID, versionID uuid.UUID) (c
 		out.SecretRef = "model-encrypt/" + parsedVersionID.String()
 	}
 	cpuProfile, gpuProfile := c.profiles.CPU, c.profiles.GPU
-	if prefersSGLang(model.GetCapabilities()) {
+	if task == domain.InferenceTaskEmbed {
+		cpuProfile, gpuProfile = c.profiles.EmbedCPU, c.profiles.EmbedGPU
+	} else if prefersSGLang(model.GetCapabilities()) {
 		cpuProfile, gpuProfile = c.profiles.SGLangCPU, c.profiles.SGLangGPU
 	}
 	if cpuCompatible(out.Format) {
@@ -132,22 +140,26 @@ func (c *Catalog) Resolve(ctx context.Context, tenantID, versionID uuid.UUID) (c
 
 func (p Profiles) validate() error {
 	for _, item := range []struct {
-		kind    string
-		profile catalog.EngineProfile
+		kind            string
+		profile         catalog.EngineProfile
+		expectedTask    domain.InferenceTask
+		expectedRuntime string
 	}{
-		{"cpu", p.CPU},
-		{"gpu", p.GPU},
-		{"sglang-cpu", p.SGLangCPU},
-		{"sglang-gpu", p.SGLangGPU},
+		{"cpu", p.CPU, domain.InferenceTaskGenerate, ""},
+		{"gpu", p.GPU, domain.InferenceTaskGenerate, ""},
+		{"sglang-cpu", p.SGLangCPU, domain.InferenceTaskGenerate, ""},
+		{"sglang-gpu", p.SGLangGPU, domain.InferenceTaskGenerate, ""},
+		{"embed-cpu", p.EmbedCPU, domain.InferenceTaskEmbed, "vllm"},
+		{"embed-gpu", p.EmbedGPU, domain.InferenceTaskEmbed, "vllm"},
 	} {
-		if err := validateProfile(item.kind, item.profile); err != nil {
+		if err := validateProfile(item.kind, item.profile, item.expectedTask, item.expectedRuntime); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func validateProfile(kind string, profile catalog.EngineProfile) error {
+func validateProfile(kind string, profile catalog.EngineProfile, expectedTask domain.InferenceTask, expectedRuntime string) error {
 	switch {
 	case strings.TrimSpace(profile.ID) == "":
 		return fmt.Errorf("%s engine profile id is required", kind)
@@ -155,6 +167,10 @@ func validateProfile(kind string, profile catalog.EngineProfile) error {
 		return fmt.Errorf("%s engine profile version is required", kind)
 	case strings.TrimSpace(profile.Runtime) == "":
 		return fmt.Errorf("%s engine profile runtime is required", kind)
+	case profile.Task != expectedTask:
+		return fmt.Errorf("%s engine profile task must be %q", kind, expectedTask)
+	case expectedRuntime != "" && strings.ToLower(strings.TrimSpace(profile.Runtime)) != expectedRuntime:
+		return fmt.Errorf("%s engine profile runtime must be %q", kind, expectedRuntime)
 	default:
 		return nil
 	}
@@ -171,17 +187,23 @@ func mapLookupError(err error) error {
 	}
 }
 
-func supportsChat(capabilities []string) bool {
+func inferenceTask(capabilities []string) (domain.InferenceTask, bool) {
 	if len(capabilities) == 0 {
-		return true
+		return domain.InferenceTaskGenerate, true
 	}
+	hasEmbedding := false
 	for _, capability := range capabilities {
-		name := strings.ToLower(strings.TrimSpace(capability))
-		if name == "text-generation" || name == "sglang" {
-			return true
+		switch strings.ToLower(strings.TrimSpace(capability)) {
+		case "text-generation", "sglang":
+			return domain.InferenceTaskGenerate, true
+		case "embedding":
+			hasEmbedding = true
 		}
 	}
-	return false
+	if hasEmbedding {
+		return domain.InferenceTaskEmbed, true
+	}
+	return "", false
 }
 
 // prefersSGLang 是过渡旁路：OpenAPI 还没有 engine_runtime，capability 带 sglang 才选 SGLang。

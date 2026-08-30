@@ -20,6 +20,10 @@ func (NotConfigured) EnsureBucket(context.Context, ports.BucketClass) error {
 	return ports.ErrNotConfigured
 }
 
+func (NotConfigured) BucketUsage(context.Context, ports.BucketClass, string) (ports.BucketUsage, error) {
+	return ports.BucketUsage{}, ports.ErrNotConfigured
+}
+
 func (NotConfigured) PutObject(context.Context, ports.PutObjectInput) (ports.ObjectMetadata, error) {
 	return ports.ObjectMetadata{}, ports.ErrNotConfigured
 }

@@ -28,15 +28,20 @@ const maxAPIKeyRateLimitRPM int32 = 10000
 
 var errAPIKeyRateLimitExceeded = errors.New("api key rate limit exceeded")
 
+// errInvalidAPIKeyFormat 表示客户端提交的 API Key 格式非法（缺前缀/分段/tenant 非 UUID），
+// 属于无效凭证（401），不能被错误分类为后端故障（503）。
+var errInvalidAPIKeyFormat = errors.New("invalid api key format")
+
 type apiKeyStore struct {
 	db    *pgxpool.Pool
 	cache ports.CacheStore
 }
 
 type apiKeyPrincipal struct {
-	TenantID uuid.UUID
-	UserID   uuid.UUID
-	Scopes   []string
+	CredentialID uuid.UUID
+	TenantID     uuid.UUID
+	UserID       uuid.UUID
+	Permissions  []string // 对应数据库 api_keys.scopes 列，V2 权限集合
 }
 
 func newAPIKeyStore(db *pgxpool.Pool, cache ports.CacheStore) *apiKeyStore {
@@ -220,52 +225,123 @@ func (s *apiKeyStore) revoke(ctx context.Context, req *authv1.RevokeAPIKeyReques
 	return tx.Commit(ctx)
 }
 
-func (s *apiKeyStore) validate(ctx context.Context, rawKey string) (*apiKeyPrincipal, error) {
+// apiKeyValidationOptions 控制一次 API Key 校验的副作用：
+// ValidatePrincipal 用全开选项；CheckPermissionV2 重验全关，避免一次请求计两次 rate limit。
+type apiKeyValidationOptions struct {
+	EnforceRateLimit bool
+	TouchLastUsed    bool
+}
+
+// loadActiveByRawCredential 在 RLS 事务内读取活跃 API Key，不含任何副作用。
+func (s *apiKeyStore) loadActiveByRawCredential(ctx context.Context, rawKey string) (*apiKeyPrincipal, int32, error) {
 	tenantID, err := parseAPIKeyTenant(rawKey)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
+	// API Key 只能按 key 中解析出的 tenant 建立 RLS 上下文。
 	ctx = types.WithTenant(ctx, &types.TenantContext{TenantID: tenantID})
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rollbackTx(ctx, tx)
 	if err := types.SetDBTenant(ctx, tx); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	var principal apiKeyPrincipal
 	var userID pgtype.UUID
 	var rateLimitRPM int32
 	err = tx.QueryRow(ctx, `
-		SELECT tenant_id, user_id, scopes, rate_limit_rpm
+		SELECT id, tenant_id, user_id, scopes, rate_limit_rpm
 		FROM api_keys
-		WHERE tenant_id=$1
-		  AND key_hash=$2
+		WHERE tenant_id=$1 AND key_hash=$2
 		  AND revoked_at IS NULL
 		  AND (expires_at IS NULL OR expires_at > NOW())
-	`, tenantID, hashAPIKey(rawKey)).Scan(&principal.TenantID, &userID, &principal.Scopes, &rateLimitRPM)
+	`, tenantID, hashAPIKey(rawKey)).Scan(
+		&principal.CredentialID, &principal.TenantID, &userID,
+		&principal.Permissions, &rateLimitRPM,
+	)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if userID.Valid {
 		principal.UserID = uuid.UUID(userID.Bytes)
 	}
-	keyHash := hashAPIKey(rawKey)
-	if err := s.enforceRateLimit(ctx, keyHash, rateLimitRPM); err != nil {
-		return nil, err
-	}
-	if _, err := tx.Exec(ctx, `
-		UPDATE api_keys SET last_used_at=NOW()
-		WHERE tenant_id=$1 AND key_hash=$2
-	`, tenantID, keyHash); err != nil {
-		return nil, err
-	}
 	if err := tx.Commit(ctx); err != nil {
+		return nil, 0, err
+	}
+	return &principal, rateLimitRPM, nil
+}
+
+// validateWithOptions 读取/重验 credential 并按选项执行单次请求副作用。
+func (s *apiKeyStore) validateWithOptions(ctx context.Context, rawKey string, options apiKeyValidationOptions) (*apiKeyPrincipal, error) {
+	principal, rateLimitRPM, err := s.loadActiveByRawCredential(ctx, rawKey)
+	if err != nil {
 		return nil, err
 	}
-	return &principal, nil
+	if options.EnforceRateLimit {
+		if err := s.enforceRateLimit(ctx, hashAPIKey(rawKey), rateLimitRPM); err != nil {
+			return nil, err
+		}
+	}
+	if options.TouchLastUsed {
+		if err := s.touchLastUsed(ctx, principal.TenantID, principal.CredentialID); err != nil {
+			return nil, err
+		}
+	}
+	return principal, nil
+}
+
+// touchLastUsed 在 RLS 事务内按 credential ID 更新 last_used_at；
+// 跨 tenant 的 credential ID 因 RLS 命中 0 行，必须返回 ErrNoRows 而非静默跳过。
+func (s *apiKeyStore) touchLastUsed(ctx context.Context, tenantID, credentialID uuid.UUID) error {
+	if tenantID == uuid.Nil || credentialID == uuid.Nil {
+		return errors.New("invalid api key identity")
+	}
+	ctx = types.WithTenant(ctx, &types.TenantContext{TenantID: tenantID})
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackTx(ctx, tx)
+	if err := types.SetDBTenant(ctx, tx); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, `
+		UPDATE api_keys
+		SET last_used_at = NOW()
+		WHERE tenant_id = $1 AND id = $2
+		  AND revoked_at IS NULL
+		  AND (expires_at IS NULL OR expires_at > NOW())
+	`, tenantID, credentialID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return pgx.ErrNoRows
+	}
+	return tx.Commit(ctx)
+}
+
+// apiKeyPrincipalContext 将 apiKeyPrincipal 转为 V2 PrincipalContext；
+// credential ID / tenant ID 任一缺失都 fail closed。
+func apiKeyPrincipalContext(value *apiKeyPrincipal) (*authv1.PrincipalContext, error) {
+	if value == nil || value.CredentialID == uuid.Nil || value.TenantID == uuid.Nil {
+		return nil, errors.New("invalid api key principal")
+	}
+	subjectID := ""
+	if value.UserID != uuid.Nil {
+		subjectID = value.UserID.String()
+	}
+	return &authv1.PrincipalContext{
+		PrincipalKind:    "api_key",
+		CredentialScheme: "api_key",
+		CredentialDomain: "tenant",
+		TenantId:         value.TenantID.String(),
+		SubjectId:        subjectID,
+		CredentialId:     value.CredentialID.String(),
+	}, nil
 }
 
 func normalizeAPIKeyName(raw string) (string, error) {
@@ -329,11 +405,11 @@ func generateAPIKey(tenantID uuid.UUID) (string, error) {
 func parseAPIKeyTenant(rawKey string) (uuid.UUID, error) {
 	parts := strings.SplitN(rawKey, "_", 4)
 	if len(parts) != 4 || parts[0] != "ani" || parts[1] == "" || parts[2] == "" || parts[3] == "" {
-		return uuid.Nil, fmt.Errorf("invalid api key format")
+		return uuid.Nil, errInvalidAPIKeyFormat
 	}
 	tenantID, err := uuid.Parse(parts[2])
 	if err != nil || tenantID == uuid.Nil {
-		return uuid.Nil, fmt.Errorf("invalid api key tenant")
+		return uuid.Nil, fmt.Errorf("%w: bad tenant", errInvalidAPIKeyFormat)
 	}
 	return tenantID, nil
 }

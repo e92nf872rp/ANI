@@ -6,3 +6,8 @@ exclude = [
   "services/kb-service/app/generated/**/*.py",
   "services/kb-service/app/generated/**/*.pyi",
 ]
+
+[lint.per-file-ignores]
+# rag-engine tests install optional dependency stubs before importing app.*
+# modules so pure-logic tests can run without Docling/LlamaIndex/Milvus/etc.
+"ai/rag-engine/tests/test_*.py" = ["E402"]

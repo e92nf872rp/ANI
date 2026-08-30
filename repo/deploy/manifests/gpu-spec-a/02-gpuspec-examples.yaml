@@ -1,0 +1,52 @@
+# Example GPUSpec CR instances — apply after CRD is established.
+---
+apiVersion: ani.kubercloud.io/v1
+kind: GPUSpec
+metadata:
+  name: nvidia-a100-sxm4-80gb
+  labels:
+    ani.kubercloud.io/idempotency-key: "00000000-0000-0000-0000-000000000000"
+spec:
+  name: "NVIDIA A100 SXM4 80GB"
+  available: true
+  gpu_type: "NVIDIA-A100-SXM4-80GB"
+  gpu_mode: "wholecard"
+  memory_total_mb: 80640
+  shares: 1
+  mb_per_share: 80640
+  compute_per_share: null
+  node_affinity:
+    gpu_spec: "NVIDIA-A100-SXM4-80GB"
+    gpu_sharing_spec: ""
+    gpu_sharing_policy: ""
+    gpu_mode: "wholecard"
+  volcano_resources:
+    wholecard:
+      nvidia.com/gpu: "{count}"
+    vgpu: {}
+---
+apiVersion: ani.kubercloud.io/v1
+kind: GPUSpec
+metadata:
+  name: nvidia-a100-sxm4-80gb-vgpu-half
+  labels:
+    ani.kubercloud.io/idempotency-key: "00000000-0000-0000-0000-000000000001"
+spec:
+  name: "NVIDIA A100 SXM4 80GB vGPU Half"
+  available: true
+  gpu_type: "NVIDIA-A100-SXM4-80GB-HALF"
+  gpu_mode: "vgpu"
+  memory_total_mb: 80640
+  shares: 2
+  mb_per_share: 40320
+  compute_per_share: null
+  node_affinity:
+    gpu_spec: ""
+    gpu_sharing_spec: "NVIDIA-A100-SXM4-80GB-HALF"
+    gpu_sharing_policy: "half"
+    gpu_mode: "vgpu"
+  volcano_resources:
+    wholecard: {}
+    vgpu:
+      volcano.sh/vgpu-memory: "{mb_per_share}"
+      volcano.sh/vgpu-number: "{count}"

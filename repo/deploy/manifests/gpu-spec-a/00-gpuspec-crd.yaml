@@ -1,0 +1,97 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: gpuspecs.ani.kubercloud.io
+  labels:
+    app.kubernetes.io/name: gpuspec-crd
+    app.kubernetes.io/part-of: ani-platform
+    ani.kubercloud.io/stage: gpu-spec-a
+spec:
+  group: ani.kubercloud.io
+  scope: Cluster
+  names:
+    plural: gpuspecs
+    singular: gpuspec
+    kind: GPUSpec
+    shortNames:
+      - gpu
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required:
+                - gpu_type
+                - gpu_mode
+                - shares
+                - mb_per_share
+                - node_affinity
+                - volcano_resources
+              properties:
+                name:
+                  type: string
+                  description: Console display name; derived from spec_id (metadata.name) if empty.
+                available:
+                  type: boolean
+                  default: true
+                  description: Whether the spec is enabled for new instance creation.
+                gpu_type:
+                  type: string
+                  description: GPU type identifier aligned to node labels (ani.kubercloud.io/gpu-spec or gpu-sharing-spec).
+                gpu_mode:
+                  type: string
+                  enum: [wholecard, vgpu]
+                  description: Isolation mode aligned to ani.kubercloud.io/gpu-mode node label.
+                memory_total_mb:
+                  type: integer
+                  minimum: 1
+                  nullable: true
+                  description: Physical card memory in MiB, used for validation.
+                shares:
+                  type: integer
+                  minimum: 1
+                  description: "1=whole card, >1=vGPU; derived from gpu-sharing-policy (quarter=4, half=2)."
+                mb_per_share:
+                  type: integer
+                  minimum: 1
+                  description: "Wholecard=card memory, vGPU=derived from gpu-sharing-spec."
+                compute_per_share:
+                  type: integer
+                  nullable: true
+                  description: Compute reservation placeholder (not used in this batch).
+                node_affinity:
+                  type: object
+                  required: [gpu_mode]
+                  properties:
+                    gpu_spec:
+                      type: string
+                      description: "Wholecard mode: value of ani.kubercloud.io/gpu-spec label."
+                    gpu_sharing_spec:
+                      type: string
+                      description: "vGPU mode: value of ani.kubercloud.io/gpu-sharing-spec label."
+                    gpu_sharing_policy:
+                      type: string
+                      description: "vGPU mode: value of ani.kubercloud.io/gpu-sharing-policy label."
+                    gpu_mode:
+                      type: string
+                      enum: [wholecard, vgpu]
+                      description: Value of ani.kubercloud.io/gpu-mode label for physical isolation.
+                volcano_resources:
+                  type: object
+                  properties:
+                    wholecard:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: "Wholecard resource requests (e.g. nvidia.com/gpu, huawei.com/Ascend910) with {count} placeholder."
+                    vgpu:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: "vGPU resource requests (e.g. volcano.sh/vgpu-memory, volcano.sh/vgpu-number) with {mb_per_share} / {count} placeholders."

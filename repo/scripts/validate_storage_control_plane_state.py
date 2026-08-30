@@ -9,7 +9,7 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_MIGRATION = ROOT / "deploy/migrations/20260803_001_storage_control_plane_state.sql"
+DEFAULT_MIGRATION = ROOT / "deploy/migrations/20260803000100_storage_control_plane_state.sql"
 
 REQUIRED_TABLES = (
     "storage_volumes",

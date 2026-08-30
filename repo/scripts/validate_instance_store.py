@@ -45,7 +45,7 @@ def load_manifests(root: pathlib.Path) -> str:
 
 def main() -> int:
     root = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else pathlib.Path("deploy/manifests/m1-instance-j")
-    migration = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 else pathlib.Path("deploy/migrations/20260501_001_init_schema.sql")
+    migration = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 else pathlib.Path("deploy/migrations/20260501000100_init_schema.sql")
     text = load_manifests(root)
     migration_text = migration.read_text(encoding="utf-8")
 

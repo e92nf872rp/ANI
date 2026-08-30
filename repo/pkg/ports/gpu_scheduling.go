@@ -25,8 +25,21 @@ type GPUSchedulingQueue struct {
 	WorkloadClass     WorkloadClass
 	ProjectID         string // optional; empty means tenant-level queue
 	IsPlatformDefault bool
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	// Status carries the Volcano Queue CRD status.allocated map (SPEC §4.4,
+	// FR-24). Empty when the CRD has no status or the allocated field is absent.
+	Status    GPUSchedulingQueueStatus
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// GPUSchedulingQueueStatus mirrors the Volcano Queue CRD status object
+// (SPEC §4.4). The allocated map records resources held by running pods in
+// this queue, keyed by resource name (e.g. "nvidia.com/gpu"). State is the
+// normalised queue switch state derived from Volcano status.state:
+// "open" / "closed" / "unknown" (empty when the CRD has no status).
+type GPUSchedulingQueueStatus struct {
+	Allocated map[string]string
+	State     string
 }
 
 // GPUSchedulingQueueCreateRequest carries user-supplied queue fields.

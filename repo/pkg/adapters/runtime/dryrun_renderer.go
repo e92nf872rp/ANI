@@ -62,7 +62,7 @@ func renderVM(spec ports.WorkloadSpec) ports.WorkloadManifest {
 			"template": map[string]any{
 				"metadata": map[string]any{
 					"labels":      labels(spec),
-					"annotations": annotationsWithInstancePlan(spec),
+					"annotations": podTemplateAnnotations(spec),
 				},
 				"spec": map[string]any{
 					"domain": map[string]any{
@@ -146,6 +146,17 @@ func podTemplate(spec ports.WorkloadSpec) map[string]any {
 	storage := renderStorageAttachments(spec)
 	envFrom := secretEnvFromIDs(spec)
 	envFrom = append(envFrom, secretEnvFrom(spec.SecretBindings)...)
+	resources := containerResources(spec)
+	// Merge Volcano resource-request annotations (e.g. volcano.sh/vgpu-memory,
+	// volcano.sh/vgpu-number, nvidia.com/gpu) into the container resources.
+	if existing, ok := resources["limits"].(map[string]string); ok {
+		merged := resourceRequestsFromAnnotations(spec, existing)
+		resources["limits"] = merged
+	}
+	if existing, ok := resources["requests"].(map[string]string); ok {
+		merged := resourceRequestsFromAnnotations(spec, existing)
+		resources["requests"] = merged
+	}
 	podSpec := map[string]any{
 		"restartPolicy": "Always",
 		"containers": []any{
@@ -156,7 +167,7 @@ func podTemplate(spec ports.WorkloadSpec) map[string]any {
 				"args":         omitEmptySlice(spec.Args),
 				"env":          containerEnv(spec),
 				"envFrom":      envFrom,
-				"resources":    containerResources(spec),
+				"resources":    resources,
 				"ports":        containerPorts(spec),
 				"volumeMounts": append(volumeMounts(storage), secretVolumeMounts(spec.SecretBindings)...),
 			},
@@ -189,11 +200,15 @@ func podTemplate(spec ports.WorkloadSpec) map[string]any {
 	if spec.ServiceAccountName != "" {
 		podSpec["serviceAccountName"] = spec.ServiceAccountName
 	}
+	// Apply Volcano nodeSelector from annotations (ani.kubercloud.io/node-selector/*).
+	if nodeSelector := nodeSelectorFromAnnotations(spec); nodeSelector != nil {
+		podSpec["nodeSelector"] = nodeSelector
+	}
 
 	return map[string]any{
 		"metadata": map[string]any{
 			"labels":      selectorLabels(spec),
-			"annotations": annotationsWithInstancePlan(spec),
+			"annotations": podTemplateAnnotations(spec),
 		},
 		"spec": podSpec,
 	}
@@ -239,6 +254,31 @@ func sandboxCheckpointSnapshotName(ref string) string {
 	return ""
 }
 
+// volcanoPodTemplateAnnotationPrefixes are annotation key prefixes that must
+// land on the PodTemplate metadata (spec.template.metadata.annotations), not
+// the top-level object metadata. metadata() filters these out so they do not
+// leak onto the Deployment/Job/Service top-level annotations.
+var volcanoPodTemplateAnnotationPrefixes = []string{
+	"scheduling.volcano.sh/",
+	"ani.kubercloud.io/scheduler-name",
+	volcanoNodeSelectorAnnotation,
+	volcanoResourceRequestAnnotation,
+}
+
+// isPodTemplateOnlyAnnotation reports whether the annotation key should only
+// appear on the PodTemplate metadata and be filtered out of the top-level
+// object metadata.
+func isPodTemplateOnlyAnnotation(key string) bool {
+	for _, prefix := range volcanoPodTemplateAnnotationPrefixes {
+		// "scheduling.volcano.sh/" is a prefix with trailing slash, so
+		// HasPrefix matches keys under that domain (e.g. .../queue-name).
+		if strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func metadata(spec ports.WorkloadSpec, component string) map[string]any {
 	return map[string]any{
 		"name":      spec.Name,
@@ -246,7 +286,7 @@ func metadata(spec ports.WorkloadSpec, component string) map[string]any {
 		"labels": mergeStringMap(labels(spec), map[string]string{
 			"app.kubernetes.io/component": component,
 		}),
-		"annotations": annotationsWithInstancePlan(spec),
+		"annotations": objectAnnotations(spec),
 	}
 }
 
@@ -296,6 +336,68 @@ func annotationsWithInstancePlan(spec ports.WorkloadSpec) map[string]string {
 		}
 	}
 	return annotations
+}
+
+// objectAnnotations returns the platform annotations for top-level object
+// metadata (Deployment/Job/Service). It calls annotationsWithInstancePlan and
+// then strips Volcano PodTemplate-only keys so they do not leak onto the
+// top-level metadata where Volcano would ignore them.
+func objectAnnotations(spec ports.WorkloadSpec) map[string]string {
+	annotations := annotationsWithInstancePlan(spec)
+	for key := range annotations {
+		if isPodTemplateOnlyAnnotation(key) {
+			delete(annotations, key)
+		}
+	}
+	return annotations
+}
+
+// podTemplateAnnotations returns the annotations that should appear on the
+// PodTemplate metadata (spec.template.metadata.annotations). This includes
+// all platform annotations plus Volcano PodTemplate-only keys.
+func podTemplateAnnotations(spec ports.WorkloadSpec) map[string]string {
+	return annotationsWithInstancePlan(spec)
+}
+
+// nodeSelectorFromAnnotations extracts the JSON-encoded nodeSelector injected
+// by the Volcano translator/planner (ani.kubercloud.io/volcano-node-selector)
+// into a K8s Pod spec nodeSelector map.
+func nodeSelectorFromAnnotations(spec ports.WorkloadSpec) map[string]string {
+	raw, ok := spec.Annotations[volcanoNodeSelectorAnnotation]
+	if !ok || strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	result := map[string]string{}
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		return nil
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// resourceRequestsFromAnnotations extracts the JSON-encoded Volcano resource
+// requests (ani.kubercloud.io/volcano-resource-requests) and merges them into
+// the container resources map. Values from annotations override existing
+// entries for the same key.
+func resourceRequestsFromAnnotations(spec ports.WorkloadSpec, existing map[string]string) map[string]string {
+	result := map[string]string{}
+	for k, v := range existing {
+		result[k] = v
+	}
+	raw, ok := spec.Annotations[volcanoResourceRequestAnnotation]
+	if !ok || strings.TrimSpace(raw) == "" {
+		return result
+	}
+	decoded := map[string]string{}
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		return result
+	}
+	for k, v := range decoded {
+		result[k] = v
+	}
+	return result
 }
 
 func joinSecurityGroupIDs(ids []string) string {
@@ -374,7 +476,7 @@ func renderWorkloadIdentitySecret(spec ports.WorkloadSpec) ports.WorkloadManifes
 			"labels": mergeStringMap(labels(spec), map[string]string{
 				"app.kubernetes.io/component": "workload-identity",
 			}),
-			"annotations": annotationsWithInstancePlan(spec),
+			"annotations": objectAnnotations(spec),
 		},
 		"type": "Opaque",
 		"data": map[string]string{
@@ -396,9 +498,13 @@ func containerResources(spec ports.WorkloadSpec) map[string]any {
 		limits["memory"] = spec.Resources.Memory
 	}
 	if requiresGPU(spec.Kind, spec.Resources) {
-		resourceName := firstNonEmpty(spec.Annotations["ani.kubercloud.io/gpu-resource-name"], "nvidia.com/gpu")
-		quantity := firstNonEmpty(spec.Annotations["ani.kubercloud.io/gpu-resource-quantity"], strconv.Itoa(spec.Resources.GPU.RequiredCount))
-		limits[resourceName] = quantity
+		// When Volcano resource requests are present (vGPU/wholecard spec),
+		// they fully define the GPU resources — skip the legacy default.
+		if _, hasVolcanoRequests := spec.Annotations[volcanoResourceRequestAnnotation]; !hasVolcanoRequests {
+			resourceName := firstNonEmpty(spec.Annotations["ani.kubercloud.io/gpu-resource-name"], "nvidia.com/gpu")
+			quantity := firstNonEmpty(spec.Annotations["ani.kubercloud.io/gpu-resource-quantity"], strconv.Itoa(spec.Resources.GPU.RequiredCount))
+			limits[resourceName] = quantity
+		}
 	}
 	return map[string]any{
 		"requests": requests,

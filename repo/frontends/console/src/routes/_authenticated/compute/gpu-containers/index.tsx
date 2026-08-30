@@ -3,9 +3,13 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import {
   Alert,
   Button,
+  Col,
   Empty,
   Input,
+  Row,
   Select,
+  Skeleton,
+  Statistic,
   Table,
   Tag,
 } from 'tdesign-react'
@@ -68,13 +72,26 @@ function GpuContainerListPage() {
         .then(({ data }) => data),
   })
 
-  const modelOptions = useMemo(() => {
-    const set = new Set<string>()
-    for (const item of data?.items ?? []) {
-      if (item.gpu?.model) set.add(item.gpu.model)
-    }
-    return Array.from(set).map((v) => ({ label: v, value: v }))
-  }, [data])
+  // 本租户配额（GET /quotas/me，UX §4.6 配额卡片）
+  const quotaQuery = useQuery({
+    queryKey: ['my-quota'],
+    queryFn: () => coreApi.GET('/quotas/me').then(({ data }) => data),
+  })
+
+  // 本租户预留额度（GET /reservations/me，UX §4.6 预留卡片）
+  const reservationQuery = useQuery({
+    queryKey: ['my-reservations'],
+    queryFn: () => coreApi.GET('/reservations/me').then(({ data }) => data),
+  })
+
+  // 从 Quota.items 取 gpu_count 维度（可用余量 = total - used - reserved）
+  const gpuCountQuota = useMemo(
+    () => quotaQuery.data?.items?.find((it) => it.resource_type === 'gpu_count'),
+    [quotaQuery.data],
+  )
+  const quotaAvailable = gpuCountQuota
+    ? Math.max(0, gpuCountQuota.total - gpuCountQuota.used - gpuCountQuota.reserved)
+    : 0
 
   const filteredItems = useMemo(() => {
     let items = data?.items ?? []
@@ -146,6 +163,59 @@ function GpuContainerListPage() {
         }
       />
 
+      {/* 配额 + 预留卡片（UX §4.6） */}
+      <Row gutter={16} style={{ marginBottom: 16 }}>
+        <Col span={6}>
+          <ConsoleContentCard title="配额（GPU 卡数）">
+            {quotaQuery.isLoading ? (
+              <Skeleton />
+            ) : quotaQuery.isError ? (
+              <Alert theme="warning" message="配额加载失败" />
+            ) : gpuCountQuota ? (
+              <Row gutter={8}>
+                <Col span={6}>
+                  <Statistic title="总量" value={gpuCountQuota.total} />
+                </Col>
+                <Col span={6}>
+                  <Statistic title="已用" value={gpuCountQuota.used} />
+                </Col>
+                <Col span={6}>
+                  <Statistic title="预留" value={gpuCountQuota.reserved} />
+                </Col>
+                <Col span={6}>
+                  <Statistic title="可用余量" value={quotaAvailable} />
+                </Col>
+              </Row>
+            ) : (
+              <Empty description="暂无配额数据" />
+            )}
+          </ConsoleContentCard>
+        </Col>
+        <Col span={6}>
+          <ConsoleContentCard title="预留额度">
+            {reservationQuery.isLoading ? (
+              <Skeleton />
+            ) : reservationQuery.isError ? (
+              <Alert theme="warning" message="预留额度加载失败" />
+            ) : reservationQuery.data ? (
+              <Row gutter={8}>
+                <Col span={8}>
+                  <Statistic title="已分配" value={reservationQuery.data.allocated_gpu_count} />
+                </Col>
+                <Col span={8}>
+                  <Statistic title="已使用" value={reservationQuery.data.used} />
+                </Col>
+                <Col span={8}>
+                  <Statistic title="可用" value={reservationQuery.data.available} />
+                </Col>
+              </Row>
+            ) : (
+              <Empty description="暂无预留数据" />
+            )}
+          </ConsoleContentCard>
+        </Col>
+      </Row>
+
       {isError && (
         <Alert
           theme="error"
@@ -187,7 +257,6 @@ function GpuContainerListPage() {
       <CreateGpuContainerDialog
         visible={dialogVisible}
         onClose={() => setDialogVisible(false)}
-        modelOptions={modelOptions}
       />
     </ConsolePage>
   )

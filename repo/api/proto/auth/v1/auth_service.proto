@@ -21,12 +21,21 @@ service AuthService {
   // Returns the TenantContext if the token is valid; returns UNAUTHENTICATED otherwise.
   rpc ValidateToken(ValidateTokenRequest) returns (common.v1.TenantContext);
 
+  // ValidatePrincipal is the V2 credential validation RPC.
+  // Returns a canonical PrincipalContext without legacy scope/roles.
+  rpc ValidatePrincipal(ValidatePrincipalRequest) returns (PrincipalContext);
+
   // IssueServiceToken mints a short-lived service JWT for cluster-internal Core calls.
   // It is not a tenant HTTP product API and must not be published on Gateway.
   rpc IssueServiceToken(IssueServiceTokenRequest) returns (AccessToken);
 
   // CheckPermission is called by the RBAC middleware.
   rpc CheckPermission(CheckPermissionRequest) returns (CheckPermissionResponse);
+
+  // CheckPermissionV2 is the V2 authorization RPC.
+  // Re-validates the raw credential and compares the Gateway principal before
+  // reading authoritative permissions.
+  rpc CheckPermissionV2(AuthorizationRequest) returns (AuthorizationDecision);
 
   rpc CreateAPIKey(CreateAPIKeyRequest) returns (CreateAPIKeyResponse);
   rpc ListAPIKeys(ListAPIKeysRequest) returns (ListAPIKeysResponse);
@@ -90,8 +99,41 @@ message IssueServiceTokenRequest {
   string caller_service = 1; // allowlisted internal caller, e.g. inference-service
   string caller_secret  = 2; // compared to AUTH_SERVICE_MINT_CREDENTIALS; never logged
   string tenant_id      = 3;
-  string scope          = 4; // scope:platform-workloads:read | scope:platform-workloads:write
+  string scope          = 4 [deprecated = true]; // legacy projection; prefer permissions
   int32  ttl_seconds    = 5; // optional; default 300, max 3600
+
+  // V2 additive fields.
+  repeated string permissions = 6;     // permission set, format scope:<resource>:<action>
+  string credential_domain    = 7;     // tenant|platform
+}
+
+message ValidatePrincipalRequest {
+  string credential        = 1; // raw JWT or API key value; never logged
+  string credential_scheme = 2; // bearer|api_key
+}
+
+message PrincipalContext {
+  string principal_kind    = 1; // user|service|api_key
+  string credential_scheme = 2; // bearer|api_key
+  string credential_domain = 3; // tenant|platform
+  string tenant_id         = 4; // must be empty for platform domain
+  string subject_id        = 5;
+  string credential_id     = 6; // API key credential id; empty for JWT
+}
+
+message AuthorizationRequest {
+  PrincipalContext principal       = 1;
+  string resource                 = 2;
+  string action                    = 3;
+  string required_boundary         = 4; // own|tenant|platform
+  string operation_id              = 5;
+  string credential                = 6; // must be re-validated; never logged
+  string credential_scheme         = 7; // bearer|api_key
+}
+
+message AuthorizationDecision {
+  bool allowed    = 1;
+  string reason_code = 2; // ALLOWED|PERMISSION_DENIED|PRINCIPAL_MISMATCH|CREDENTIAL_DOMAIN_MISMATCH
 }
 
 message CheckPermissionRequest {

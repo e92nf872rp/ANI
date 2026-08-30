@@ -36,15 +36,19 @@ func Idempotency(store GatewayStore) app.HandlerFunc {
 			return
 		}
 
-		tenantID := GetTenantID(c)
 		key := idempotencyKeyFromRequest(c)
 		if key == "" {
 			c.Next(ctx)
 			return
 		}
 
-		scope := GetScope(c)
-		cacheKey := idempotencyCacheKey(scope, tenantID, string(c.Method()), string(c.Path()), key)
+		// identityKey 取代旧 scope+tenantID：认证请求按身份隔离，公开端点无 identity
+		// 时回退到 path 粒度的匿名键，保持既有登录端点 dedupe 行为。
+		identityKey, err := RequestIdentityKey(c)
+		if err != nil {
+			identityKey = "anonymous"
+		}
+		cacheKey := idempotencyCacheKey(identityKey, string(c.Method()), string(c.Path()), key)
 		fingerprint := idempotencyRequestFingerprint(c)
 		existing, err := readIdempotencyRecord(ctx, store, cacheKey)
 		if err == nil {
@@ -176,9 +180,9 @@ func idempotencyKeyFromRequest(c *app.RequestContext) string {
 	return strings.TrimSpace(payload.IdempotencyKey)
 }
 
-func idempotencyCacheKey(scope, tenantID, method, path, idempotencyKey string) string {
+func idempotencyCacheKey(identityKey, method, path, idempotencyKey string) string {
 	digest := sha256.Sum256([]byte(idempotencyKey))
-	return "idempotency:" + scope + ":" + tenantID + ":" + method + ":" + path + ":" + hex.EncodeToString(digest[:])
+	return "idempotency:" + identityKey + ":" + method + ":" + path + ":" + hex.EncodeToString(digest[:])
 }
 
 func readIdempotencyRecord(ctx context.Context, store GatewayStore, key string) (idempotencyRecord, error) {

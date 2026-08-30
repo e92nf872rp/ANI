@@ -90,6 +90,10 @@
 
 > **INFERENCE SERVICE GPU MEMORY CONTRACT C38（2026-08-20）：** `INFERENCE-SERVICE-GPU-MEMORY-CONTRACT-C38` 已补齐 Core `platform-workloads` 与 Services `InferenceService` 加速器契约：`spec_id` 只表示 GPU 型号；`count` / `count_per_replica` 为申请卡数且两种模式都必填；可选 `memory` 为申请显存（MiB），不填即整卡、填写即 vGPU。不另加 `gpu_mode`。历史 `-full` / `-Nx` 剥后缀后仍按型号处理。不含 handler/runtime/inventory/Console。无新 live，不得标记 GPU/runtime ready。
 
+> **INFERENCE SERVICE GPU MEMORY C39（2026-08-21）：** `INFERENCE-SERVICE-GPU-MEMORY-C39` 已在人工确认的 GPU 集群上 live passed：滚动现网 `ani-gateway` 与 `inference-service` 到 `gpu-memory-c39-20260821` 后，先清理残留推理测试服务；capabilities 广告型号 `gpu-nvidia-geforce-rtx-4090`；JSON `memory: 0` 返回 `400 INVALID_ARGUMENT`；省略 `memory` 申请 `nvidia.com/gpu=1`；填写 `memory=12280` 申请 `volcano.sh/vgpu-number=1` 与 `volcano.sh/vgpu-memory=1228`。首次 live 两条路径 GET `running` 后删除。二次 live 按用户要求保留 `inf-c39-whole-f3cbfa4a` / `inf-c39-vgpu-f3cbfa4a`，并对两条 ClusterIP 各做 60 秒 chat 压测（整卡 2456/2456、vGPU 2373/2373，均 0 失败）。`ANI_AUTH_MODE` 保持 `auth_service`。不含 Console 表单，跨节点 LWS 仍 skip，不得标记 GPU ready / runtime ready。evidence：`development-records/live-evidence/inference-gpu-memory-live-20260821.json`；keep/load：`development-records/live-evidence/inference-gpu-memory-keep-load-20260821.json`。
+
+> **MODEL TENANT ISOLATION + VECTOR INFERENCE A（2026-08-25）：** `MODEL-TENANT-ISOLATION-VECTOR-INFERENCE-A` 已完成限定 live passed：ModelRepository Get/List/count/Delete/CreateVersion/ListVersions 均使用显式 tenant SQL fence并保留 RLS；真实 foreign Model Get=404，owner List 不含 foreign ID。inference-service 从既有 Model capabilities 派生并冻结 `generate`/`embed`；当前 vLLM embedding argv 使用 `--runner pooling --convert embed`，有界 1 MiB smoke 可解析真实约 19 KiB 响应。CPU 测试服务到 `running`，internal ClusterIP `/v1/embeddings`=200 且 data/embedding 非空；测试资源已清理，控制面镜像已恢复。未改 OpenAPI；公开 Envoy `/v1/embeddings`、GPU 与 embedding 质量不在结论范围。evidence：`development-records/live-evidence/model-tenant-vector-inference-live-20260825.json`；记录：`development-records/model-tenant-isolation-vector-inference.md`。
+
 > **Sprint 13（当前活跃冲刺，2026-06-19 起）：** Core real provider 与 live gate 收敛。前置 Sprint 12 已闭合 19 个 Core handler + 2 个 422；Sprint 13 不重写 Core handler，不把 Services 业务资源回流 Core API，而是在既有 `pkg/ports` / `pkg/adapters` / Gateway handler 边界接入真实组件，并形成可复跑 live gate 与 evidence JSON。历史冻结原因和历史结论仍保留在旧批次记录中，但不是当前 PR 规则。计划见 [`development-records/sprint13-real-provider-readiness-plan.md`](development-records/sprint13-real-provider-readiness-plan.md)。
 
 > **Sprint 14 计划与分支状态：** Sprint 14 Core 韧性与服务语义计划见 [`development-records/sprint14-core-resilience-plan.md`](development-records/sprint14-core-resilience-plan.md)（限流/幂等重放/超时/readyz/重试断路/降级/failover）。配套交付 Services 的前端加速设计：[`development-records/frontend-acceleration-design-for-services.md`](development-records/frontend-acceleration-design-for-services.md)。当前主线入口仍保留 Sprint 13 production-shaped 边界；`feature/sprint14-core-resilience-semantics` 已完成 Sprint14 aggregate live gate，待 PR/评审后再进入主线状态。
@@ -121,6 +125,21 @@
 | S07 instance observability Prometheus | production-shaped gate passed | `SPRINT13-INSTANCE-OBSERVABILITY-PROMETHEUS-A-TRACK`；`validate-instance-observability-live-gate`；Prometheus + kubelet；LIVE PENDING 仅作历史兼容 |
 
 闭环规则：每个 provider slice 必须具备 real adapter/provider runtime、live gate、非敏感 evidence JSON、development record 和全局 production-shape guard。S05-S07 B 轨可以继续 作为历史兼容 token 保留；截至 2026-06-21，S05/S06/S07 均已 passed。
+
+## Gateway OpenAPI 鉴权四批次（2026-08）
+
+> 独立于 Sprint 13/14 real provider 收敛的 Gateway 鉴权策略开发流。按 `repo/services/tasks/modules/plan/plan-authz-policy-compat-contract-pilot-v4.md` 四批次分阶段引入 OpenAPI 鉴权策略注册表、统一 Principal 与 identity key、V2 授权契约和 pilot 启用。分支 `feat/gateway-authz-policy`，默认 `mode=off` 不切流。
+
+| 批次 | 状态 | 证据 |
+|---|---|---|
+| AUTHZ-POLICY-A (PR1) | ✅ local verified | `7440445`；generator + 生成注册表 + drift 门禁 + policy.go；A 不改 quota-meta，所有非 public operation 为 legacy |
+| AUTHZ-COMPAT-B0 (PR2) | ✅ local verified | `e2eb502`；规范 Principal + LegacyPrincipalView + Mode/Config + ResolveAuthzPolicy + 横切 identity key；gateway 仍走旧 ValidateToken/CheckPermission |
+| AUTHZ-CONTRACT-B1 (PR3) | ✅ local verified | `65f00f3`；additive V2 proto + auth-service JWT/API Key principal + permission evaluator + Gateway V2 client；gateway 仍 mode=off 不调 V2 |
+| AUTHZ-PILOT-C (PR4) | ✅ local verified | `ad83e41`；v1.yaml security 注解 + mode Validate + V2 授权链路 + pilot E2E + deployment env；仅 listQuotaMeta 启用 V2 |
+
+**gofmt 修复：** `cfe5b30`。**批次记录：** `development-records/authz-policy-compat-contract-pilot.md`。**验证命令：** `go build ./services/ani-gateway/... ./services/auth-service/...` + `go test -count=1 ./services/ani-gateway/... ./services/auth-service/...` + `gofmt -l`。
+
+**预存问题修复（2026-08-25）：** 本地实测 pilot 模式后修复 4 个文件的预存不一致——删 v1.yaml 已弃用的 branding PUT/POST logo + tasks DELETE 路由的 router 注册和 registry 条目（branding_resources.go / task_resources.go / zz_generated_core_policies.go）；gpu_scheduling_resources.go `:id`→`:queue_id` 与 v1.yaml 一致（修复运行时 `LookupByRequest` lookup miss + route coverage 门禁）。修复后 drift 门禁通过、route coverage 0 error（274 registered, 224 registry）。详见 `development-records/authz-policy-compat-contract-pilot.md`。
 
 ## 账密登录模块（2026-07）
 
@@ -281,7 +300,33 @@ go test -tags=integration ./services/task-service/internal/taskconsumer/...
 | 补充批次3 | TryTx / TryManyTx 新增外部事务变体（`feat/quota-service-tcc-v2`，2026-08-12） | ✅ 已完成 | `development-records/quota-service.md` 补充批次；`QuotaService` interface 新增 `TryTx` / `TryManyTx`（接收外部 tx，复用 `tryInTx`，零新增 SQL）；9 单元测试 + 7 集成测试（连真实 PG，双角色 RLS 验证）全通过 |
 | 补充批次4 | `UpsertTenantQuota` + Core quota upsert 端点（`feat/quota-service-v3`，2026-08-18） | ✅ 已完成 | `development-records/quota-service.md` 补充批次；新增 `PUT /admin/tenants/{tenant_id}/quota/upsert`、`QuotaAdminService.UpsertTenantQuota`、PG `ON CONFLICT DO UPDATE + GREATEST` 原子 upsert、`ErrQuotaUpdateUncertain → 511`；quota 单测 + integration build tag 编译 + Gateway 映射测试 + OpenAPI YAML + architecture + diff check 通过 |
 
+## GPU 规格与配额管理功能流（2026-08）
+
+> 独立于 Sprint 13/14 real provider 收敛的 GPU 规格与配额管理功能开发流，覆盖 GPUSpec CRD 持久化、Volcano 资源翻译、GPU Inventory 四态可用性、reconciler TCC 同事务、orchestrator 配额预占、gateway handler 端点。批次记录归档于 `development-records/gpu-spec-quota-a.md`。
+
+| Issue | 描述 | 状态 | 证据 |
+|---|---|---|---|
+| #003 | GPUSpec CRD Store（CRD 持久化 + 幂等 label + 15 单测） | ✅ 已完成 | `development-records/gpu-spec-quota-a.md` |
+| #004 | VolcanoResourceTranslator（spec_id→nodeSelector+schedulerName+资源请求+queue annotation + 8 单测） | ✅ 已完成 | `development-records/gpu-spec-quota-a.md` |
+| #005 | GPU Inventory 四态可用性 + HAMi 全量删除（parseVolcanoVGPUAnnotation + 8 单测） | ✅ 已完成 | `development-records/gpu-spec-quota-a.md` |
+| #006 | reconciler TCC Confirm/Cancel/Release 同事务 + provisioning 超时 + 删除双调 + 对账循环（12 单测） | ✅ 已完成 | `development-records/gpu-spec-quota-a.md` |
+| #007 | QuotaAwareInstanceOrchestrator 包装模式 + WorkloadInstanceStoreTx + outboxWriter 接口 + quota_tx_ids JSONB + resource_reservation_allocations 表（RLS）+ bootstrap 条件装配（4 单测） | ✅ 已完成 | `development-records/gpu-spec-quota-a.md`；review-it 3 accepted findings fixed（RLS/TenantID/SchedulerName） |
+| #008 | Gateway handler（POST/DELETE /gpu-specs + PUT/GET /admin/tenants/:tid/reservations + GET /quotas/me + GET /reservations/me）+ PutReservation/GetReservation 接口 + specInUse 跨租户检查（WithPlatformTx） | ✅ 已完成 | `development-records/gpu-spec-quota-a.md`；review-it 1 accepted finding fixed（specInUse 跨租户） |
+| #009 | BOSS GPU 资源池 4 Tab 改版（KPI 6 卡 + 节点/设备/队列/规格 Tab + 配额分配 Drawer 内联） | ✅ 已完成 | `development-records/gpu-spec-quota-a.md`；review-it 2 accepted findings fixed；BOSS tsc + vite build PASS |
+| #010 | BOSS 规格管理 Drawer（`-gpu-spec-drawer.tsx`）+ 配额/预留分配 Drawer（`-gpu-pool-quota-drawer.tsx`）+ Tab 4 新建/删除操作 | ✅ 已完成 | `development-records/gpu-spec-quota-a.md`；review-it 2 accepted findings fixed；BOSS tsc + vite build PASS |
+| #011 | Console 创建 Dialog 改版（spec_id Select 四态标注 + queue_name Select 必选 + 本地 quota 重算） | ✅ 已完成 | `development-records/gpu-spec-quota-a.md`；review-it 1 accepted finding fixed；Console tsc + vite build PASS |
+| #012 | Console 列表页配额/预留卡片（GET /quotas/me + GET /reservations/me）+ 队列页"已分配"列扩展 | ✅ 已完成 | `development-records/gpu-spec-quota-a.md`；review-it 1 accepted finding fixed；Console tsc + vite build PASS |
+| #013 | 集成验收（闭环验证 + 文档更新）：#003-#012 闭环证据映射 + 批次记录 + Sprint/README 索引 | ✅ 已完成 | `development-records/gpu-spec-quota-batch.md`；make test + validate-architecture + validate-services + validate-doc-entrypoints + git diff --check PASS（仅 Java smoke 受本地 JDK 8 限制） |
+
 验收命令：
+
+```bash
+go build ./pkg/adapters/runtime/... ./services/ani-gateway/...
+go test ./pkg/adapters/runtime/ -run "TestGPUSpec|TestVolcanoTranslator|TestListSpecAvailability|TestReconcile|TestQuotaEnabledSwitch|TestUpsertStatusTx|TestQuota" -count=1
+go test ./services/ani-gateway/... -count=1
+python scripts/validate_component_imports.py --root .
+git diff --check
+```
 
 ```bash
 go test ./pkg/adapters/runtime -run Quota
@@ -323,6 +368,15 @@ go build ./...
 
 cd repo/frontends/boss
 .\node_modules\.bin\tsc.cmd --noEmit
+
+# 集成验收（Issue #013）
+cd repo/frontends/boss && npx tsc --noEmit && npx vite build
+cd repo/frontends/console && npx tsc --noEmit && npx vite build
+make test
+make validate-architecture
+make validate-doc-entrypoints
+git diff --check
+```
 
 ## Metering Service 功能流（2026-08）
 

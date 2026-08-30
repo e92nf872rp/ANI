@@ -61,7 +61,7 @@ PostgreSQL
 ### 3.1 Schema Changes
 
 ```sql
--- 20260707_014_platform_users.sql
+-- 20260707001400_platform_users.sql
 -- users.tenant_id 改为 NULLABLE
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_tenant_id_fkey;
 ALTER TABLE users ALTER COLUMN tenant_id DROP NOT NULL;
@@ -70,7 +70,7 @@ ALTER TABLE users ALTER COLUMN tenant_id DROP NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_tenant_username   ON users(tenant_id, username);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_platform_username ON users(username) WHERE tenant_id IS NULL;
 
--- 20260707_014_platform_refresh_tokens.sql
+-- 20260707001401_platform_refresh_tokens.sql
 ALTER TABLE refresh_tokens ALTER COLUMN tenant_id DROP NOT NULL;
 ALTER TABLE refresh_tokens DROP CONSTRAINT IF EXISTS refresh_tokens_user_id_fkey;
 ALTER TABLE refresh_tokens ADD CONSTRAINT refresh_tokens_user_id_fkey
@@ -207,7 +207,7 @@ PlatformPasswordLoginRequest:
 
 | 批次 | 内容 | 依赖 |
 |------|------|------|
-| M13.2-A1 | 迁移 `20260707_014_platform_users.sql` | — |
+| M13.2-A1 | 迁移 `20260707001400_platform_users.sql` | — |
 | M13.2-A2 | v1.yaml 新增 `/auth/password/login` | A1 |
 | M13.2-A3 | passwordLoginManager + bcrypt + idempotency_key | A1, A2 |
 | M13.2-A4 | auth_service.go Login RPC 实现 | A3 |

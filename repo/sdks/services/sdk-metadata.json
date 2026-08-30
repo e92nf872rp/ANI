@@ -287,6 +287,66 @@
       "scope": ""
     },
     {
+      "operationId": "listPlatformAdmins",
+      "method": "GET",
+      "path": "/platform-admins",
+      "scope": ""
+    },
+    {
+      "operationId": "createPlatformAdmin",
+      "method": "POST",
+      "path": "/platform-admins",
+      "scope": ""
+    },
+    {
+      "operationId": "listPlatformAdminRoles",
+      "method": "GET",
+      "path": "/platform-admins/roles",
+      "scope": ""
+    },
+    {
+      "operationId": "deletePlatformAdmin",
+      "method": "DELETE",
+      "path": "/platform-admins/{userId}",
+      "scope": ""
+    },
+    {
+      "operationId": "getPlatformAdmin",
+      "method": "GET",
+      "path": "/platform-admins/{userId}",
+      "scope": ""
+    },
+    {
+      "operationId": "listPlatformAdminAuditLogs",
+      "method": "GET",
+      "path": "/platform-admins/{userId}/audit-logs",
+      "scope": ""
+    },
+    {
+      "operationId": "disablePlatformAdmin",
+      "method": "POST",
+      "path": "/platform-admins/{userId}/disable",
+      "scope": ""
+    },
+    {
+      "operationId": "enablePlatformAdmin",
+      "method": "POST",
+      "path": "/platform-admins/{userId}/enable",
+      "scope": ""
+    },
+    {
+      "operationId": "resetPlatformAdminPassword",
+      "method": "POST",
+      "path": "/platform-admins/{userId}/reset-password",
+      "scope": ""
+    },
+    {
+      "operationId": "updatePlatformAdminRole",
+      "method": "PUT",
+      "path": "/platform-admins/{userId}/role",
+      "scope": ""
+    },
+    {
       "operationId": "listQuotaMeta",
       "method": "GET",
       "path": "/quota-meta",
@@ -643,6 +703,15 @@
     "PlanQuotaLimitInput",
     "PlanQuotaLimitView",
     "PlanQuotaLimitsResponse",
+    "PlatformAdminAuditLog",
+    "PlatformAdminAuditLogListResponse",
+    "PlatformAdminCreateRequest",
+    "PlatformAdminDetail",
+    "PlatformAdminListItem",
+    "PlatformAdminListResponse",
+    "PlatformAdminRoleUpdateRequest",
+    "PlatformRole",
+    "PlatformRoleListResponse",
     "QuotaMetaItem",
     "QuotaMetaListResponse",
     "RebuildKnowledgeBaseRequest",
@@ -693,6 +762,11 @@
     "updateKnowledgeBasePermissions",
     "queryKnowledgeBase",
     "rebuildKnowledgeBase",
+    "createPlatformAdmin",
+    "disablePlatformAdmin",
+    "enablePlatformAdmin",
+    "resetPlatformAdminPassword",
+    "updatePlatformAdminRole",
     "createSandbox",
     "patchSandbox",
     "extendSandbox",
@@ -720,6 +794,8 @@
     "listKnowledgeBaseCitations",
     "listKnowledgeBaseSessions",
     "listModels",
+    "listPlatformAdmins",
+    "listPlatformAdminAuditLogs",
     "listSandboxes",
     "listAllTenantAdmins",
     "listTenantPlans",

@@ -281,6 +281,9 @@ func validatePlatformWorkloadCreate(spec ports.PlatformWorkloadCreateSpec) error
 			return fmt.Errorf("%w: accelerator requires spec_id and a positive count", ports.ErrInvalid)
 		}
 	}
+	if spec.Resources.AcceleratorMemoryMB < 0 || spec.Topology.Leader.Resources.AcceleratorMemoryMB < 0 || spec.Topology.Workers.Resources.AcceleratorMemoryMB < 0 {
+		return fmt.Errorf("%w: accelerator memory must be at least 1 MiB", ports.ErrInvalid)
+	}
 	if strings.TrimSpace(spec.Topology.ProfileID) == "" || strings.TrimSpace(spec.Topology.ProfileVersion) == "" {
 		return fmt.Errorf("%w: topology profile is required", ports.ErrInvalid)
 	}
@@ -356,11 +359,19 @@ func admitPlatformWorkloadAccelerator(caps ports.PlatformWorkloadCapabilities, s
 	if strings.TrimSpace(spec.AcceleratorSpecID) == "" && spec.AcceleratorCount == 0 {
 		return nil
 	}
+	want := canonicalAcceleratorSpecID(spec.AcceleratorSpecID)
 	for _, item := range caps.AcceleratorSpecs {
-		if item.SpecID != spec.AcceleratorSpecID || !item.Available {
+		if canonicalAcceleratorSpecID(item.SpecID) != want || !item.Available {
 			continue
 		}
-		if topologyMode != "leader_worker" && item.MaxSingleNodeCount < spec.AcceleratorCount {
+		capacity := item.MaxWholeCardCount
+		if spec.AcceleratorMemoryMB > 0 {
+			capacity = item.MaxVGPUCount
+		}
+		if capacity < 1 {
+			continue
+		}
+		if topologyMode != "leader_worker" && capacity < spec.AcceleratorCount {
 			return fmt.Errorf("%w: accelerator spec is not available", ports.ErrFailedPrecondition)
 		}
 		return nil

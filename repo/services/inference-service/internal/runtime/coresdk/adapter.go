@@ -126,13 +126,13 @@ func (r *Runtime) Health(ctx context.Context, tenantID, runtimeRef uuid.UUID) er
 	return probeHealth(ctx, r.http(), endpoint)
 }
 
-// Smoke 对 ClusterIP 发有界 Chat Completions 探活。
-func (r *Runtime) Smoke(ctx context.Context, tenantID, runtimeRef uuid.UUID, servedModelName string) error {
+// Smoke 对 ClusterIP 发有界 Chat Completions 或 Embeddings 探活。
+func (r *Runtime) Smoke(ctx context.Context, tenantID, runtimeRef uuid.UUID, servedModelName string, task domain.InferenceTask) error {
 	endpoint, err := r.runtimeEndpoint(ctx, tenantID, runtimeRef)
 	if err != nil {
 		return err
 	}
-	return probeSmoke(ctx, r.http(), endpoint, servedModelName)
+	return probeSmoke(ctx, r.http(), endpoint, servedModelName, task)
 }
 
 func (r *Runtime) runtimeEndpoint(ctx context.Context, tenantID, runtimeRef uuid.UUID) (string, error) {
@@ -285,17 +285,14 @@ func createBody(request runtime.EnsureRequest, plan runtime.TopologyPlan) map[st
 	}
 	resources := map[string]any{"cpu": cpu, "memory": memory}
 	if request.Spec.Accelerator != nil {
-		resources["accelerator"] = map[string]any{
-			"spec_id": request.Spec.Accelerator.SpecID,
-			"count":   request.Spec.Accelerator.CountPerReplica,
-		}
+		resources["accelerator"] = acceleratorBody(request.Spec.Accelerator, request.Spec.Accelerator.CountPerReplica)
 	}
 	topology := map[string]any{"mode": plan.Mode, "profile_id": plan.ProfileID, "profile_version": plan.ProfileVersion}
 	if plan.Mode == "leader_worker" {
 		role := func(count, gpus int) map[string]any {
 			item := map[string]any{"cpu": cpu, "memory": memory}
 			if request.Spec.Accelerator != nil {
-				item["accelerator"] = map[string]any{"spec_id": request.Spec.Accelerator.SpecID, "count": gpus}
+				item["accelerator"] = acceleratorBody(request.Spec.Accelerator, gpus)
 			}
 			return map[string]any{"count": count, "resources": item}
 		}
@@ -336,6 +333,19 @@ func createBody(request runtime.EnsureRequest, plan runtime.TopologyPlan) map[st
 	return body
 }
 
+// acceleratorBody 把推理加速器映射到 Core platform-workloads。
+// spec_id 是型号；count 是卡数；memory>0 才带上，表示 vGPU 显存（MiB）。
+func acceleratorBody(acc *domain.Accelerator, count int) map[string]any {
+	if acc == nil {
+		return nil
+	}
+	out := map[string]any{"spec_id": acc.SpecID, "count": count}
+	if acc.MemoryMB > 0 {
+		out["memory"] = acc.MemoryMB
+	}
+	return out
+}
+
 func probeHealth(ctx context.Context, client *http.Client, endpoint string) error {
 	target, err := probeURL(endpoint, "/health")
 	if err != nil {
@@ -357,21 +367,28 @@ func probeHealth(ctx context.Context, client *http.Client, endpoint string) erro
 	return nil
 }
 
-func probeSmoke(ctx context.Context, client *http.Client, endpoint, servedModelName string) error {
-	target, err := probeURL(endpoint, "/v1/chat/completions")
-	if err != nil {
-		return err
-	}
+func probeSmoke(ctx context.Context, client *http.Client, endpoint, servedModelName string, task domain.InferenceTask) error {
+	task = domain.NormalizeInferenceTask(task)
+	path := "/v1/chat/completions"
 	model := strings.TrimSpace(servedModelName)
 	if model == "" {
 		model = "default"
 	}
-	payload, err := json.Marshal(map[string]any{
+	payloadBody := map[string]any{
 		"model":       model,
 		"messages":    []map[string]string{{"role": "user", "content": "ping"}},
 		"max_tokens":  8,
 		"temperature": 0,
-	})
+	}
+	if task == domain.InferenceTaskEmbed {
+		path = "/v1/embeddings"
+		payloadBody = map[string]any{"model": model, "input": []string{"ping"}}
+	}
+	target, err := probeURL(endpoint, path)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(payloadBody)
 	if err != nil {
 		return err
 	}
@@ -385,13 +402,24 @@ func probeSmoke(ctx context.Context, client *http.Client, endpoint, servedModelN
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	const maxSmokeResponseBytes = 1 << 20
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxSmokeResponseBytes+1))
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("runtime smoke returned %d", resp.StatusCode)
+	}
+	if len(body) > maxSmokeResponseBytes {
+		return fmt.Errorf("runtime smoke response exceeds %d bytes", maxSmokeResponseBytes)
 	}
 	var decoded map[string]any
 	if err := json.Unmarshal(body, &decoded); err != nil {
 		return fmt.Errorf("runtime smoke returned a non-json body")
+	}
+	if task == domain.InferenceTaskEmbed {
+		data, ok := decoded["data"].([]any)
+		if !ok || len(data) == 0 {
+			return fmt.Errorf("runtime embedding smoke missing data")
+		}
+		return nil
 	}
 	if _, ok := decoded["choices"]; !ok {
 		return fmt.Errorf("runtime smoke missing choices")

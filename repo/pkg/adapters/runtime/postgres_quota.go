@@ -459,12 +459,13 @@ func (q *PostgresQuota) List(ctx context.Context, req ports.QuotaListRequest) (p
 			tenantIDs = tenantIDs[:limit]
 		}
 
-		// 第二步：查这些租户的全部配额维度
+		// 第二步：查这些租户的全部配额维度（LEFT JOIN tenants 补充租户名称）
 		rows, err := tx.Query(ctx, `
-			SELECT tenant_id::text, resource_type, total, reserved, used
-			FROM resource_quota
-			WHERE tenant_id::text = ANY($1)
-			ORDER BY tenant_id::text, resource_type
+			SELECT rq.tenant_id::text, t.name, rq.resource_type, rq.total, rq.reserved, rq.used
+			FROM resource_quota rq
+			LEFT JOIN tenants t ON t.id = rq.tenant_id
+			WHERE rq.tenant_id::text = ANY($1)
+			ORDER BY rq.tenant_id::text, rq.resource_type
 		`, tenantIDs)
 		if err != nil {
 			return err
@@ -474,18 +475,19 @@ func (q *PostgresQuota) List(ctx context.Context, req ports.QuotaListRequest) (p
 		viewsByTenant := make(map[string]*ports.QuotaView)
 		var order []string
 		for rows.Next() {
-			var tenantID, rt string
+			var tenantID, tenantName, rt string
 			var total, reserved, used int64
-			if err := rows.Scan(&tenantID, &rt, &total, &reserved, &used); err != nil {
+			if err := rows.Scan(&tenantID, &tenantName, &rt, &total, &reserved, &used); err != nil {
 				return err
 			}
 			v, ok := viewsByTenant[tenantID]
 			if !ok {
 				v = &ports.QuotaView{
-					TenantID: tenantID,
-					Total:    make(map[ports.ResourceType]int64),
-					Used:     make(map[ports.ResourceType]int64),
-					Reserved: make(map[ports.ResourceType]int64),
+					TenantID:   tenantID,
+					TenantName: tenantName,
+					Total:      make(map[ports.ResourceType]int64),
+					Used:       make(map[ports.ResourceType]int64),
+					Reserved:   make(map[ports.ResourceType]int64),
 				}
 				viewsByTenant[tenantID] = v
 				order = append(order, tenantID)
@@ -927,4 +929,169 @@ func (q *PostgresQuota) quotaInfoByTypes(ctx context.Context, tx ports.MetadataT
 		infos = append(infos, info)
 	}
 	return infos, rows.Err()
+}
+
+// PutReservation sets the tenant's allocated_gpu_count (BOSS reservation).
+// Self-opens WithPlatformTx (bypass RLS). Validates allocated_gpu_count <=
+// total (422 RESERVATION_EXCEEDS_QUOTA), then clamps with
+// GREATEST(allocated, used+reserved) and UPSERTs resource_reservation_allocations.
+func (q *PostgresQuota) PutReservation(ctx context.Context, idempotencyKey string, req ports.ReservationPutRequest) (ports.ReservationView, error) {
+	if req.TenantID == "" {
+		return ports.ReservationView{}, fmt.Errorf("%w: tenant_id is required", ports.ErrInvalid)
+	}
+	if req.AllocatedGPUCount < 0 {
+		return ports.ReservationView{}, fmt.Errorf("%w: allocated_gpu_count must be >= 0", ports.ErrInvalid)
+	}
+	view := ports.ReservationView{TenantID: req.TenantID}
+	err := q.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		if err := q.requireTenantExists(ctx, tx, req.TenantID); err != nil {
+			return err
+		}
+		// Lock the gpu_count quota row FOR UPDATE.
+		total, err := q.GetTotalForUpdateTx(ctx, tx, req.TenantID, ports.QuotaGPUCount)
+		if err != nil {
+			return err
+		}
+		// Gate: allocated_gpu_count > total → 422.
+		if req.AllocatedGPUCount > total {
+			return ports.ErrReservationExceedsQuota
+		}
+		// Read current used + reserved from the quota row.
+		var used, reserved int64
+		if err := tx.QueryRow(ctx, `
+			SELECT used, reserved FROM resource_quota
+			WHERE tenant_id = $1::uuid AND resource_type = 'gpu_count'
+		`, req.TenantID).Scan(&used, &reserved); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ports.ErrQuotaNotFound
+			}
+			return err
+		}
+		// Clamp: allocated = GREATEST(requested, used+reserved).
+		actualAlloc := req.AllocatedGPUCount
+		if used+reserved > actualAlloc {
+			actualAlloc = used + reserved
+		}
+		// UPSERT resource_reservation_allocations.
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO resource_reservation_allocations (tenant_id, allocated_gpu_count, updated_at)
+			VALUES ($1::uuid, $2, NOW())
+			ON CONFLICT (tenant_id) DO UPDATE SET
+				allocated_gpu_count = EXCLUDED.allocated_gpu_count,
+				updated_at = NOW()
+		`, req.TenantID, actualAlloc); err != nil {
+			return err
+		}
+		view.AllocatedGPUCount = actualAlloc
+		view.Used = used
+		view.Reserved = reserved
+		view.Available = actualAlloc - used - reserved
+		view.Tightened = actualAlloc != req.AllocatedGPUCount
+		return nil
+	})
+	if err != nil {
+		return ports.ReservationView{}, err
+	}
+	return view, nil
+}
+
+// GetReservationTx returns the tenant's reservation view inside an
+// externally-owned transaction. The resource_reservation_allocations row is
+// locked FOR UPDATE so the caller can serialise concurrent reservation checks
+// (plan.md §6.3.1 闸 2). When no allocation row exists, falls back to the
+// quota total as the allocated limit (consistent with the availability
+// query path in gpu_inventory_resources.go).
+func (q *PostgresQuota) GetReservationTx(ctx context.Context, tx ports.MetadataTx, tenantID string) (ports.ReservationView, error) {
+	if tenantID == "" {
+		return ports.ReservationView{}, fmt.Errorf("%w: tenant_id is required", ports.ErrInvalid)
+	}
+	view := ports.ReservationView{TenantID: tenantID}
+	// Lock the allocation row FOR UPDATE (may not exist → fall back to total).
+	var allocated int64
+	rowErr := tx.QueryRow(ctx, `
+		SELECT allocated_gpu_count FROM resource_reservation_allocations
+		WHERE tenant_id = $1::uuid
+		FOR UPDATE
+	`, tenantID).Scan(&allocated)
+	if rowErr != nil && !errors.Is(rowErr, pgx.ErrNoRows) {
+		return ports.ReservationView{}, rowErr
+	}
+	// Read used + reserved from the quota row.
+	var used, reserved int64
+	if err := tx.QueryRow(ctx, `
+		SELECT used, reserved FROM resource_quota
+		WHERE tenant_id = $1::uuid AND resource_type = 'gpu_count'
+	`, tenantID).Scan(&used, &reserved); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ports.ReservationView{}, ports.ErrQuotaNotFound
+		}
+		return ports.ReservationView{}, err
+	}
+	// When no reservation row exists, fall back to quota total as the
+	// allocated limit so the create path stays consistent with the
+	// availability query path (both use total when no reservation is set).
+	if errors.Is(rowErr, pgx.ErrNoRows) {
+		var total int64
+		if err := tx.QueryRow(ctx, `
+			SELECT total FROM resource_quota
+			WHERE tenant_id = $1::uuid AND resource_type = 'gpu_count'
+		`, tenantID).Scan(&total); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ports.ReservationView{}, ports.ErrQuotaNotFound
+			}
+			return ports.ReservationView{}, err
+		}
+		allocated = total
+	}
+	view.AllocatedGPUCount = allocated
+	view.Used = used
+	view.Reserved = reserved
+	view.Available = allocated - used - reserved
+	return view, nil
+}
+
+// GetReservation returns the tenant's current reservation view.
+// Self-opens WithPlatformTx (bypass RLS) for BOSS admin queries.
+func (q *PostgresQuota) GetReservation(ctx context.Context, tenantID string) (ports.ReservationView, error) {
+	if tenantID == "" {
+		return ports.ReservationView{}, fmt.Errorf("%w: tenant_id is required", ports.ErrInvalid)
+	}
+	view := ports.ReservationView{TenantID: tenantID}
+	err := q.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		if err := q.requireTenantExists(ctx, tx, tenantID); err != nil {
+			return err
+		}
+		// Read allocation row (may not exist → allocated=0).
+		var allocated int64
+		err := tx.QueryRow(ctx, `
+			SELECT allocated_gpu_count FROM resource_reservation_allocations
+			WHERE tenant_id = $1::uuid
+		`, tenantID).Scan(&allocated)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			allocated = 0
+		}
+		// Read used + reserved from quota row.
+		var used, reserved int64
+		if err := tx.QueryRow(ctx, `
+			SELECT used, reserved FROM resource_quota
+			WHERE tenant_id = $1::uuid AND resource_type = 'gpu_count'
+		`, tenantID).Scan(&used, &reserved); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ports.ErrQuotaNotFound
+			}
+			return err
+		}
+		view.AllocatedGPUCount = allocated
+		view.Used = used
+		view.Reserved = reserved
+		view.Available = allocated - used - reserved
+		return nil
+	})
+	if err != nil {
+		return ports.ReservationView{}, err
+	}
+	return view, nil
 }

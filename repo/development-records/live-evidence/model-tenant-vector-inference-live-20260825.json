@@ -1,0 +1,47 @@
+{
+  "batch": "MODEL-TENANT-ISOLATION-VECTOR-INFERENCE-A",
+  "date": "2026-08-25",
+  "status": "passed",
+  "scope": {
+    "model_tenant_isolation": "live_passed",
+    "embedding_control_plane": "live_passed",
+    "embedding_data_plane": "internal_cluster_ip_live_passed",
+    "public_envoy_embeddings_route": "not_in_scope",
+    "gpu": "not_tested"
+  },
+  "tenant_isolation": {
+    "foreign_model_get_http_status": 404,
+    "foreign_model_get_code": "NOT_FOUND",
+    "owner_model_list_http_status": 200,
+    "foreign_model_present_in_owner_list": false
+  },
+  "embedding": {
+    "inference_service_status": "running",
+    "ready_replicas": 1,
+    "launch_has_runner_pooling": true,
+    "launch_has_convert_embed": true,
+    "launch_has_legacy_task_flag": false,
+    "cluster_ip_http_status": 200,
+    "response_bytes": 19451,
+    "data_nonempty": true,
+    "embedding_nonempty": true,
+    "full_vector_archived": false
+  },
+  "images": {
+    "model_service_live_digest": "sha256:7f4f53e153df23eb1fd1cdd658a69591797de644445c753acba0041edd3621bc",
+    "inference_service_live_digest": "sha256:d5ea34b4bfb67b02378c2ffe5d105d1c691719107b420eb511a1875de2bcafbf"
+  },
+  "cleanup": {
+    "test_inference_service_deleted": true,
+    "test_models_deleted": 2,
+    "test_workload_absent": true,
+    "control_plane_images_restored": true,
+    "temporary_token_unset": true,
+    "port_forward_closed": true
+  },
+  "limitations": [
+    "Existing Qwen2 weights were used to validate pooling/embed plumbing; embedding quality was not evaluated.",
+    "The public Envoy /v1/embeddings route was not changed or tested.",
+    "No GPU embedding runtime was tested."
+  ]
+}

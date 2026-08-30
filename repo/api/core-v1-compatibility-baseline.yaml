@@ -1,7 +1,7 @@
 batch: SPEC-COMPAT-A
 phase: Phase 1 / Sprint 4
 source: api/openapi/v1.yaml
-generated_at: '2026-08-14'
+generated_at: '2026-08-27'
 compatibility_rules:
   allowed:
   - Add optional request fields.
@@ -16,6 +16,290 @@ compatibility_rules:
   - Remove response fields.
   - Change existing field schema signatures.
 paths:
+  /admin/plans/bound-tenant-counts:
+    get:
+      operation_id: listPlanBoundTenantCounts
+      rbac_scope: scope:tenant:read
+      parameters:
+      - in: query
+        name: plan_id
+        required: true
+        schema:
+          type: array
+          items:
+            type: string
+            format: uuid
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: PlanBoundTenantCountList
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+  /admin/plans/{plan_id}/bindable-tenants:
+    get:
+      operation_id: listPlanBindableTenants
+      rbac_scope: scope:tenant:read
+      parameters:
+      - in: path
+        name: plan_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: TenantSummaryList
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+  /admin/plans/{plan_id}/bound-tenants:
+    get:
+      operation_id: listPlanBoundTenants
+      rbac_scope: scope:tenant:read
+      parameters:
+      - in: path
+        name: plan_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: TenantSummaryList
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+  /admin/platform-users:
+    get:
+      operation_id: listPlatformUsers
+      rbac_scope: scope:users:read
+      parameters:
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: role
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: status
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: source
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: search
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: PlatformUserListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+    post:
+      operation_id: createPlatformUser
+      rbac_scope: scope:users:write
+      parameters: []
+      request_body_required: true
+      request_schema: PlatformUserCreateRequest
+      responses:
+        '200':
+          schema: UserMutationResult
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+  /admin/platform-users/{userId}:
+    delete:
+      operation_id: deletePlatformUser
+      rbac_scope: scope:users:write
+      parameters:
+      - in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: true
+      request_schema: PlatformUserIdempotentRequest
+      responses:
+        '200':
+          schema: UserMutationResult
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+        '422':
+          schema: '{}'
+    get:
+      operation_id: getPlatformUser
+      rbac_scope: scope:users:read
+      parameters:
+      - in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: PlatformUser
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+  /admin/platform-users/{userId}/disable:
+    post:
+      operation_id: disablePlatformUser
+      rbac_scope: scope:users:write
+      parameters:
+      - in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: true
+      request_schema: PlatformUserIdempotentRequest
+      responses:
+        '200':
+          schema: UserMutationResult
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+        '422':
+          schema: '{}'
+  /admin/platform-users/{userId}/enable:
+    post:
+      operation_id: enablePlatformUser
+      rbac_scope: scope:users:write
+      parameters:
+      - in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: true
+      request_schema: PlatformUserIdempotentRequest
+      responses:
+        '200':
+          schema: UserMutationResult
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+  /admin/platform-users/{userId}/reset-password:
+    post:
+      operation_id: resetPlatformUserPassword
+      rbac_scope: scope:users:write
+      parameters:
+      - in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: true
+      request_schema: PlatformUserResetPasswordRequest
+      responses:
+        '200':
+          schema: UserMutationResult
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+        '422':
+          schema: '{}'
+  /admin/platform-users/{userId}/role:
+    put:
+      operation_id: updatePlatformUserRole
+      rbac_scope: scope:users:write
+      parameters:
+      - in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: true
+      request_schema: PlatformUserRoleUpdateRequest
+      responses:
+        '200':
+          schema: UserMutationResult
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
   /admin/quota-meta:
     get:
       operation_id: listQuotaMeta
@@ -30,6 +314,106 @@ paths:
           schema: '{}'
         '403':
           schema: '{}'
+  /admin/tenant-users:
+    get:
+      operation_id: listTenantUsers
+      rbac_scope: scope:users:read
+      parameters:
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: tenant_id
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - in: query
+        name: role
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: status
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: search
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: TenantUserListResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+  /admin/tenants/{tenant_id}:
+    get:
+      operation_id: getTenant
+      rbac_scope: scope:tenant:read
+      parameters:
+      - in: path
+        name: tenant_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: Tenant
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+  /admin/tenants/{tenant_id}/plan:
+    put:
+      operation_id: updateTenantPlan
+      rbac_scope: scope:tenant:write
+      parameters:
+      - in: path
+        name: tenant_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+      request_body_required: true
+      request_schema: TenantPlanUpdateRequest
+      responses:
+        '200':
+          schema: Tenant
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: ErrorResponse
   /admin/tenants/{tenant_id}/quota:
     delete:
       operation_id: deleteTenantQuota
@@ -146,6 +530,41 @@ paths:
           schema: '{}'
         '422':
           schema: '{}'
+  /admin/tenants/{tenant_id}/quota/upsert:
+    put:
+      operation_id: upsertTenantQuota
+      rbac_scope: scope:quota:write
+      parameters:
+      - in: path
+        name: tenant_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - in: header
+        name: Idempotency-Key
+        required: false
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+      request_body_required: true
+      request_schema: QuotaUpsertRequest
+      responses:
+        '200':
+          schema: Quota
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '422':
+          schema: '{}'
+        '511':
+          schema: '{}'
   /admin/tenants/{tenant_id}/reservations:
     get:
       operation_id: getTenantReservations
@@ -190,6 +609,281 @@ paths:
       responses:
         '200':
           schema: ReservationView
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '422':
+          schema: '{}'
+  /admin/tenants/{tenant_id}/transfer-ownership:
+    post:
+      operation_id: transferCoreTenantOwnership
+      rbac_scope: scope:users:write
+      parameters:
+      - in: path
+        name: tenant_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: true
+      request_schema: UserTransferOwnershipRequest
+      responses:
+        '200':
+          schema: UserMutationResult
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '422':
+          schema: '{}'
+  /admin/tenants/{tenant_id}/user-lookup:
+    get:
+      operation_id: lookupTenantUser
+      rbac_scope: scope:users:read
+      parameters:
+      - in: path
+        name: tenant_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - in: query
+        name: email
+        required: true
+        schema:
+          type: string
+          format: email
+      - in: query
+        name: username
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 64
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: TenantUser
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+  /admin/tenants/{tenant_id}/users/{user_id}:
+    delete:
+      operation_id: deleteTenantUser
+      rbac_scope: scope:users:write
+      parameters:
+      - in: path
+        name: tenant_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - in: path
+        name: user_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: UserMutationResult
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+        '422':
+          schema: '{}'
+    get:
+      operation_id: getTenantUser
+      rbac_scope: scope:users:read
+      parameters:
+      - in: path
+        name: tenant_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - in: path
+        name: user_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: TenantUser
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+  /admin/tenants/{tenant_id}/users/{user_id}/changeable-roles:
+    get:
+      operation_id: getTenantUserChangeableRoles
+      rbac_scope: scope:users:read
+      parameters:
+      - in: path
+        name: tenant_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - in: path
+        name: user_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: ChangeableRolesResponse
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+  /admin/tenants/{tenant_id}/users/{user_id}/reset-password:
+    post:
+      operation_id: resetTenantUserPassword
+      rbac_scope: scope:users:write
+      parameters:
+      - in: path
+        name: tenant_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - in: path
+        name: user_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: true
+      request_schema: UserResetPasswordRequest
+      responses:
+        '200':
+          schema: UserMutationResult
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '422':
+          schema: '{}'
+  /admin/tenants/{tenant_id}/users/{user_id}/role:
+    get:
+      operation_id: getTenantUserRole
+      rbac_scope: scope:users:read
+      parameters:
+      - in: path
+        name: tenant_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - in: path
+        name: user_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: TenantUserPermissions
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+    put:
+      operation_id: updateTenantUserRole
+      rbac_scope: scope:users:write
+      parameters:
+      - in: path
+        name: tenant_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - in: path
+        name: user_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: true
+      request_schema: UserRoleUpdateRequest
+      responses:
+        '200':
+          schema: UserMutationResult
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '409':
+          schema: '{}'
+        '422':
+          schema: '{}'
+  /admin/tenants/{tenant_id}/users/{user_id}/status:
+    post:
+      operation_id: updateTenantUserStatus
+      rbac_scope: scope:users:write
+      parameters:
+      - in: path
+        name: tenant_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - in: path
+        name: user_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      request_body_required: true
+      request_schema: UserStatusUpdateRequest
+      responses:
+        '200':
+          schema: UserMutationResult
+        '400':
+          schema: '{}'
         '401':
           schema: '{}'
         '403':
@@ -1213,6 +1907,13 @@ paths:
         schema:
           type: string
           format: uuid
+      - in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
       request_body_required: true
       request_schema: GPUSchedulingQueueUpdateRequest
       responses:
@@ -3590,6 +4291,31 @@ paths:
           schema: '{}'
         '404':
           schema: '{}'
+  /objects/{object_id}/complete:
+    post:
+      operation_id: completeStorageObject
+      rbac_scope: scope:objects:create
+      parameters:
+      - in: path
+        name: object_id
+        required: true
+        schema:
+          type: string
+      request_body_required: true
+      request_schema: StorageObjectCompleteRequest
+      responses:
+        '200':
+          schema: StorageObject
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
+        '404':
+          schema: '{}'
+        '412':
+          schema: '{}'
   /objects/{object_id}/download:
     get:
       operation_id: downloadStorageObject
@@ -5415,6 +6141,43 @@ schemas:
           minLength: 1
           maxLength: 1024
         enum: []
+  ChangeableRoleOption:
+    type: object
+    required:
+    - label
+    - role
+    properties:
+      label:
+        signature:
+          type: string
+        enum: []
+      role:
+        signature:
+          type: string
+        enum:
+        - user
+        - auditor
+        - tenant-admin
+  ChangeableRolesResponse:
+    type: object
+    required:
+    - changeable_roles
+    - current_role
+    properties:
+      changeable_roles:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChangeableRoleOption'
+        enum: []
+      current_role:
+        signature:
+          type: string
+        enum:
+        - tenant-owner
+        - tenant-admin
+        - user
+        - auditor
   CloneSandboxCheckpointRequest:
     type: object
     required:
@@ -10566,6 +11329,34 @@ schemas:
           minLength: 1
           maxLength: 64
         enum: []
+  PlanBoundTenantCount:
+    type: object
+    required:
+    - count
+    - plan_id
+    properties:
+      count:
+        signature:
+          type: integer
+          format: int64
+          minimum: 0
+        enum: []
+      plan_id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+  PlanBoundTenantCountList:
+    type: object
+    required:
+    - items
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlanBoundTenantCount'
+        enum: []
   PlatformPasswordLoginRequest:
     type: object
     required:
@@ -10590,6 +11381,172 @@ schemas:
           minLength: 1
           maxLength: 64
         enum: []
+  PlatformUser:
+    type: object
+    required:
+    - created_at
+    - display_name
+    - email
+    - id
+    - role
+    - source
+    - status
+    - username
+    properties:
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      display_name:
+        signature:
+          type: string
+        enum: []
+      email:
+        signature:
+          type: string
+          format: email
+        enum: []
+      id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      last_login_at:
+        signature:
+          type: string
+          format: date-time
+          nullable: true
+        enum: []
+      role:
+        signature:
+          type: string
+        enum:
+        - platform-admin
+        - platform-ops
+        - platform-readonly
+      source:
+        signature:
+          type: string
+        enum:
+        - local
+        - third_party
+      status:
+        signature:
+          type: string
+        enum:
+        - active
+        - disabled
+      username:
+        signature:
+          type: string
+        enum: []
+  PlatformUserCreateRequest:
+    type: object
+    required:
+    - display_name
+    - email
+    - idempotency_key
+    - password
+    - role
+    - username
+    properties:
+      display_name:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+        enum: []
+      email:
+        signature:
+          type: string
+          format: email
+        enum: []
+      idempotency_key:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      password:
+        signature:
+          type: string
+          minLength: 8
+          maxLength: 64
+        enum: []
+      role:
+        signature:
+          type: string
+        enum:
+        - platform-admin
+        - platform-ops
+        - platform-readonly
+      username:
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 64
+        enum: []
+  PlatformUserIdempotentRequest:
+    type: object
+    required:
+    - idempotency_key
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+  PlatformUserListResponse:
+    type: object
+    required:
+    - items
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlatformUser'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+  PlatformUserResetPasswordRequest:
+    type: object
+    required:
+    - idempotency_key
+    - new_password
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      new_password:
+        signature:
+          type: string
+          minLength: 8
+          maxLength: 64
+        enum: []
+  PlatformUserRoleUpdateRequest:
+    type: object
+    required:
+    - idempotency_key
+    - role
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      role:
+        signature:
+          type: string
+        enum:
+        - platform-admin
+        - platform-ops
+        - platform-readonly
   PlatformWorkload:
     type: object
     required:
@@ -10725,6 +11682,11 @@ schemas:
           type: integer
           minimum: 1
         enum: []
+      memory:
+        signature:
+          type: integer
+          minimum: 1
+        enum: []
       spec_id:
         signature:
           type: string
@@ -10814,6 +11776,13 @@ schemas:
           type: array
           items:
             type: string
+        enum: []
+      env:
+        signature:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
         enum: []
       health_check:
         signature:
@@ -11212,6 +12181,10 @@ schemas:
           type: string
           format: uuid
         enum: []
+      tenant_name:
+        signature:
+          type: string
+        enum: []
   QuotaCreateItem:
     type: object
     required:
@@ -11386,6 +12359,33 @@ schemas:
           type: array
           items:
             $ref: '#/components/schemas/QuotaUpdateItem'
+        enum: []
+  QuotaUpsertItem:
+    type: object
+    required:
+    - resource_type
+    properties:
+      resource_type:
+        signature:
+          type: string
+        enum: []
+      total:
+        signature:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+        enum: []
+  QuotaUpsertRequest:
+    type: object
+    required:
+    - items
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuotaUpsertItem'
         enum: []
   RefreshAccessTokenRequest:
     type: object
@@ -13716,6 +14716,15 @@ schemas:
           type: string
           format: date-time
         enum: []
+  StorageObjectCompleteRequest:
+    type: object
+    required:
+    - idempotency_key
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+        enum: []
   StorageObjectDownloadInfo:
     type: object
     required:
@@ -14106,6 +15115,225 @@ schemas:
           minLength: 1
           maxLength: 128
         enum: []
+  Tenant:
+    type: object
+    required:
+    - created_at
+    - display_name
+    - id
+    - name
+    - plan_id
+    - status
+    - updated_at
+    properties:
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      display_name:
+        signature:
+          type: string
+        enum: []
+      id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+      plan_id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      status:
+        signature:
+          type: string
+        enum:
+        - active
+        - frozen
+        - disabled
+      updated_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+  TenantPlanUpdateRequest:
+    type: object
+    required:
+    - plan_id
+    properties:
+      plan_id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+  TenantSummary:
+    type: object
+    required:
+    - display_name
+    - id
+    - name
+    - status
+    properties:
+      display_name:
+        signature:
+          type: string
+        enum: []
+      id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+      status:
+        signature:
+          type: string
+        enum:
+        - active
+        - frozen
+        - disabled
+  TenantSummaryList:
+    type: object
+    required:
+    - items
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/TenantSummary'
+        enum: []
+  TenantUser:
+    type: object
+    required:
+    - created_at
+    - email
+    - id
+    - role
+    - source
+    - status
+    - tenant
+    - tenant_id
+    - updated_at
+    - username
+    properties:
+      created_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      display_name:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+      email:
+        signature:
+          type: string
+          format: email
+        enum: []
+      id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      last_login_at:
+        signature:
+          type: string
+          format: date-time
+          nullable: true
+        enum: []
+      role:
+        signature:
+          type: string
+        enum:
+        - tenant-owner
+        - tenant-admin
+        - user
+        - auditor
+      source:
+        signature:
+          type: string
+        enum:
+        - local
+        - third_party
+      status:
+        signature:
+          type: string
+        enum:
+        - active
+        - disabled
+      tenant:
+        signature:
+          $ref: '#/components/schemas/UserTenantRef'
+        enum: []
+      tenant_id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      updated_at:
+        signature:
+          type: string
+          format: date-time
+        enum: []
+      username:
+        signature:
+          type: string
+        enum: []
+  TenantUserListResponse:
+    type: object
+    required:
+    - items
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/TenantUser'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
+        enum: []
+  TenantUserPermissions:
+    type: object
+    required:
+    - permissions
+    - role
+    - tenant_id
+    - user_id
+    properties:
+      permissions:
+        signature:
+          type: object
+        enum: []
+      role:
+        signature:
+          type: string
+        enum:
+        - tenant-owner
+        - tenant-admin
+        - user
+        - auditor
+      tenant_id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      user_id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
   TokenPairResponse:
     type: object
     required:
@@ -14309,6 +15537,109 @@ schemas:
         - info
         - warning
         - critical
+  UserMutationResult:
+    type: object
+    required:
+    - id
+    - message
+    properties:
+      id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      message:
+        signature:
+          type: string
+        enum: []
+  UserResetPasswordRequest:
+    type: object
+    required:
+    - idempotency_key
+    - new_password
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      new_password:
+        signature:
+          type: string
+          minLength: 8
+          maxLength: 64
+        enum: []
+  UserRoleUpdateRequest:
+    type: object
+    required:
+    - idempotency_key
+    - role
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      role:
+        signature:
+          type: string
+        enum:
+        - user
+        - auditor
+        - tenant-admin
+  UserStatusUpdateRequest:
+    type: object
+    required:
+    - idempotency_key
+    - status
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      status:
+        signature:
+          type: string
+        enum:
+        - active
+        - disabled
+  UserTenantRef:
+    type: object
+    required:
+    - display_name
+    - id
+    - name
+    properties:
+      display_name:
+        signature:
+          type: string
+        enum: []
+      id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      name:
+        signature:
+          type: string
+        enum: []
+  UserTransferOwnershipRequest:
+    type: object
+    required:
+    - idempotency_key
+    - target_user_id
+    properties:
+      idempotency_key:
+        signature:
+          type: string
+          format: uuid
+        enum: []
+      target_user_id:
+        signature:
+          type: string
+          format: uuid
+        enum: []
   VectorStore:
     type: object
     required:

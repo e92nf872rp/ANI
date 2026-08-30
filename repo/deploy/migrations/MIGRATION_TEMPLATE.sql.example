@@ -1,0 +1,128 @@
+-- ANI Platform · Migration Template
+-- 文件名：复制本文件后，改为 YYYYMMDDHHMMSS_description.sql
+--
+-- 使用方式：
+--   1. 复制本文件并改成唯一的 14 位版本号文件名。
+--   2. 删除不适用的章节，填写真实表名、字段名和业务说明。
+--   3. 不要修改已经在共享环境执行过的历史 migration；修复请新建更高版本文件。
+--   4. 本文件使用 .sql.example 后缀，不会被 Atlas 当作可执行 migration。
+--
+-- 事务：
+--   Atlas 默认按 migration 文件包裹事务，因此这里不要写 BEGIN/COMMIT/ROLLBACK。
+--   只有 CREATE INDEX CONCURRENTLY 等不可事务化语句，才单独评估并使用：
+--     -- atlas:txmode none
+--
+-- 凭据：
+--   不要在 migration 中写数据库账号密码。密码由 Secret 和独立 bootstrap 流程设置。
+
+-- ===========================================================================
+-- 0) 迁移说明
+-- ===========================================================================
+-- Description: 用一句话说明变更目的
+-- Depends on: 上一个相关 migration 文件
+--
+-- 影响评估：
+--   - 是否会锁表或扫描大量历史数据？
+--   - 是否会影响已有租户或用户数据？
+--   - 是否需要先备份、分批回填或增加修复 migration？
+
+-- ===========================================================================
+-- 1) 新增字段
+-- ===========================================================================
+
+-- 可重复执行的普通字段：
+-- ALTER TABLE example_table
+--     ADD COLUMN IF NOT EXISTS display_name TEXT;
+
+-- 新增带默认值且不可为空的字段：
+--   对大表不要直接一次性新增 NOT NULL；通常分三步执行：
+--   1. 先加可空字段；
+--   2. 分批回填历史数据；
+--   3. 确认没有 NULL 后再设置 NOT NULL。
+-- ALTER TABLE example_table
+--     ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN;
+-- UPDATE example_table
+-- SET is_deleted = FALSE
+-- WHERE is_deleted IS NULL;
+-- ALTER TABLE example_table
+--     ALTER COLUMN is_deleted SET DEFAULT FALSE;
+-- ALTER TABLE example_table
+--     ALTER COLUMN is_deleted SET NOT NULL;
+
+-- ===========================================================================
+-- 2) 新增表
+-- ===========================================================================
+
+-- 新增租户表时，tenant_id、索引、权限和 RLS 必须一起提交：
+-- CREATE TABLE IF NOT EXISTS example_resources (
+--     tenant_id  UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+--     id         UUID NOT NULL DEFAULT gen_random_uuid(),
+--     name       TEXT NOT NULL,
+--     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+--     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+--     PRIMARY KEY (tenant_id, id)
+-- );
+--
+-- 只授予实际需要的最小权限；统一授给 ani_app 组角色，
+-- 不要直接授给 ani_app_user：
+-- GRANT SELECT, INSERT, UPDATE ON example_resources TO ani_app;
+--
+-- 租户表必须启用并强制 RLS，且读写策略都要覆盖：
+-- ALTER TABLE example_resources ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE example_resources FORCE ROW LEVEL SECURITY;
+-- CREATE POLICY example_resources_tenant_isolation
+--     ON example_resources
+--     AS RESTRICTIVE
+--     USING (
+--         tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+--     )
+--     WITH CHECK (
+--         tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+--     );
+
+-- 如果使用 BIGSERIAL/IDENTITY，另外授权对应序列：
+-- GRANT USAGE, SELECT
+-- ON SEQUENCE example_resources_id_seq
+-- TO ani_app;
+-- 如果是跨租户后台 worker，使用独立 BYPASSRLS 角色，
+-- 不要把 BYPASSRLS 授给 ani_app_user。
+
+-- ===========================================================================
+-- 3) 新增索引、约束或函数
+-- ===========================================================================
+
+-- 普通索引：
+-- CREATE INDEX IF NOT EXISTS idx_example_resources_tenant_created
+--     ON example_resources (tenant_id, created_at DESC);
+
+-- 需要 CONCURRENTLY 时不能放在 Atlas 默认事务中：
+-- -- atlas:txmode none
+-- CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_example_resources_name
+--     ON example_resources (tenant_id, name);
+
+-- CHECK 约束中不要使用子查询；复杂校验应放入 IMMUTABLE 函数后再由 CHECK 调用。
+
+-- ===========================================================================
+-- 4) 数据回填或数据修复
+-- ===========================================================================
+
+-- 必须说明用途，并确认重试安全：
+-- UPDATE example_resources
+-- SET updated_at = NOW()
+-- WHERE updated_at IS NULL;
+
+-- 大表回填要考虑分批、锁等待、超时和中断后的续跑方式。
+
+-- ===========================================================================
+-- 5) 执行后检查
+-- ===========================================================================
+-- atlas migrate validate --dir file://deploy/migrations
+-- atlas migrate status --env test
+--
+-- 对新租户表至少验证：
+--   1. ani_app_user 有预期的表权限；
+--   2. app.current_tenant_id 未设置时不能读写租户数据；
+--   3. 租户 A 看不到租户 B；
+--   4. INSERT/UPDATE 的 tenant_id 不能写成别的租户；
+--   5. 若有序列，业务账号可以正常 INSERT。
+

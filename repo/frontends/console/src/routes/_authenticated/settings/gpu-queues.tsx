@@ -122,8 +122,12 @@ export function GpuQueueSettingsPage() {
         project_id: string
       }
     }) => {
+      const idempotencyKey = crypto.randomUUID()
       const { data, error, response } = await coreApi.PATCH('/gpu-scheduling/queues/{queue_id}', {
-        params: { path: { queue_id: params.queueId } },
+        params: {
+          path: { queue_id: params.queueId },
+          header: { 'Idempotency-Key': idempotencyKey },
+        },
         body: {
           workload_class: params.values.workload_class,
           weight: params.values.weight,
@@ -242,6 +246,33 @@ export function GpuQueueSettingsPage() {
       colKey: 'reclaimable',
       cell: ({ row }) => (row.reclaimable ? '是' : '否'),
     },
+    {
+      title: '已分配',
+      colKey: 'allocated',
+      cell: ({ row }) => {
+        const allocated = row.status?.allocated
+        if (!allocated || Object.keys(allocated).length === 0) return '—'
+        return (
+          <span>
+            {Object.entries(allocated).map(([k, v]) => (
+              <Tag key={k} variant="light" style={{ marginRight: 4, marginBottom: 4 }}>
+                {k}: {v}
+              </Tag>
+            ))}
+          </span>
+        )
+      },
+    },
+    {
+      title: '状态',
+      colKey: 'state',
+      cell: ({ row }) => {
+        const state = row.status?.state ?? 'unknown'
+        if (state === 'open') return <Tag theme="success" variant="light">open</Tag>
+        if (state === 'closed') return <Tag theme="default" variant="light">closed</Tag>
+        return <Tag theme="default" variant="light">unknown</Tag>
+      },
+    },
   ]
 
   const customColumns: PrimaryTableCol<GPUSchedulingQueue>[] = [
@@ -258,6 +289,33 @@ export function GpuQueueSettingsPage() {
       title: '可被回收',
       colKey: 'reclaimable',
       cell: ({ row }) => (row.reclaimable ? '是' : '否'),
+    },
+    {
+      title: '已分配',
+      colKey: 'allocated',
+      cell: ({ row }) => {
+        const allocated = row.status?.allocated
+        if (!allocated || Object.keys(allocated).length === 0) return '—'
+        return (
+          <span>
+            {Object.entries(allocated).map(([k, v]) => (
+              <Tag key={k} variant="light" style={{ marginRight: 4, marginBottom: 4 }}>
+                {k}: {v}
+              </Tag>
+            ))}
+          </span>
+        )
+      },
+    },
+    {
+      title: '状态',
+      colKey: 'state',
+      cell: ({ row }) => {
+        const state = row.status?.state ?? 'unknown'
+        if (state === 'open') return <Tag theme="success" variant="light">open</Tag>
+        if (state === 'closed') return <Tag theme="default" variant="light">closed</Tag>
+        return <Tag theme="default" variant="light">unknown</Tag>
+      },
     },
     {
       title: '关联项目',

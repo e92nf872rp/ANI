@@ -241,7 +241,7 @@ func (r *Runtime) Health(context.Context, uuid.UUID, uuid.UUID) error {
 	return r.HealthError
 }
 
-func (r *Runtime) Smoke(context.Context, uuid.UUID, uuid.UUID, string) error {
+func (r *Runtime) Smoke(context.Context, uuid.UUID, uuid.UUID, string, domain.InferenceTask) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.SmokeError

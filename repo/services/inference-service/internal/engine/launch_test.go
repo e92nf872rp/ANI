@@ -38,6 +38,85 @@ func TestLaunchUsesSameEntryForCPUAndGPU(t *testing.T) {
 	}
 }
 
+func TestLaunchVLLMEmbeddingUsesPoolingEmbedCLI(t *testing.T) {
+	tests := []struct {
+		name        string
+		accelerator *domain.Accelerator
+	}{
+		{name: "cpu"},
+		{name: "gpu", accelerator: &domain.Accelerator{SpecID: "gpu-a100", CountPerReplica: 1}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, args := Launch(domain.Spec{
+				CPU: "4", Memory: "16Gi", Accelerator: tt.accelerator,
+				ExecutionProfile: domain.ExecutionProfile{
+					Runtime:     "vllm",
+					Task:        domain.InferenceTaskEmbed,
+					ArtifactRef: "pvc://vllm-model#/models/bge-m3",
+				},
+			}, "bge-m3")
+			if !containsPair(args, "--runner", "pooling") || !containsPair(args, "--convert", "embed") {
+				t.Fatalf("embedding args = %#v", args)
+			}
+			if containsArg(args, "--task") {
+				t.Fatalf("embedding args use removed vLLM --task flag: %#v", args)
+			}
+		})
+	}
+}
+
+func TestLaunchVLLMGenerateDoesNotAddTaskOverride(t *testing.T) {
+	tests := []struct {
+		name string
+		task domain.InferenceTask
+	}{
+		{name: "generate", task: domain.InferenceTaskGenerate},
+		{name: "legacy-empty"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, args := Launch(domain.Spec{ExecutionProfile: domain.ExecutionProfile{
+				Runtime:     "vllm",
+				Task:        tt.task,
+				ArtifactRef: "pvc://vllm-model#/models/qwen",
+			}}, "qwen")
+			if containsArg(args, "--task") {
+				t.Fatalf("generate args changed: %#v", args)
+			}
+		})
+	}
+}
+
+func TestLaunchVLLMEmbeddingPreservesFrozenTenantCommand(t *testing.T) {
+	want := []string{"custom-engine", "--model", "/models/bge-m3"}
+	command, args := Launch(domain.Spec{
+		Engine: &domain.Engine{Command: want},
+		ExecutionProfile: domain.ExecutionProfile{
+			Runtime: "vllm",
+			Task:    domain.InferenceTaskEmbed,
+		},
+	}, "bge-m3")
+	if strings.Join(command, "\x00") != strings.Join(want, "\x00") || len(args) != 0 {
+		t.Fatalf("tenant command = %#v args=%#v", command, args)
+	}
+}
+
+func TestLaunchLeaderVLLMEmbeddingUsesPoolingEmbedCLI(t *testing.T) {
+	_, args := LaunchLeader(domain.Spec{
+		PlacementMode: "multi_node",
+		Accelerator:   &domain.Accelerator{SpecID: "gpu-a100", CountPerReplica: 2},
+		ExecutionProfile: domain.ExecutionProfile{
+			Runtime:     "vllm",
+			Task:        domain.InferenceTaskEmbed,
+			ArtifactRef: "pvc://vllm-model#/models/bge-m3",
+		},
+	}, "bge-m3")
+	if len(args) != 1 || !strings.Contains(args[0], "--runner pooling") || !strings.Contains(args[0], "--convert embed") || strings.Contains(args[0], "--task") {
+		t.Fatalf("leader embedding args = %#v", args)
+	}
+}
+
 func TestLaunchLeaderStartsRayHead(t *testing.T) {
 	command, args := LaunchLeader(domain.Spec{
 		CPU: "8", Memory: "32Gi", PlacementMode: "multi_node",

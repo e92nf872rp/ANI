@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/kubercloud/ani/services/ani-gateway/internal/authz"
 )
 
-// RateLimit enforces per-tenant windowed request limiting through the shared gateway store.
+// RateLimit enforces per-principal windowed request limiting through the shared gateway store.
+// identity key 取代旧 tenant 粒度：user/platform/sandbox 各自隔离，platform 空 tenant 不再绕过限流。
 func RateLimit(store GatewayStore) app.HandlerFunc {
 	limit := gatewayRateLimitFromEnv()
 	return func(ctx context.Context, c *app.RequestContext) {
@@ -19,12 +21,18 @@ func RateLimit(store GatewayStore) app.HandlerFunc {
 			c.Next(ctx)
 			return
 		}
-		tenantID := GetTenantID(c)
-		if tenantID == "" {
+		// 与 AuthenticatePrincipal / AuthorizePrincipal 一致：
+		// resolved policy 为 public 时放行，交由后续 NoRoute 返回 404。
+		if resolved, err := GetResolvedPolicy(c); err == nil && resolved.Source == authz.PolicySourcePublic {
 			c.Next(ctx)
 			return
 		}
-		allowed, err := checkLimit(ctx, store, tenantID, string(c.Method()), string(c.Path()), limit)
+		identityKey, err := RequestIdentityKey(c)
+		if err != nil {
+			respondError(c, http.StatusUnauthorized, "INVALID_PRINCIPAL", "invalid principal")
+			return
+		}
+		allowed, err := checkLimit(ctx, store, identityKey, string(c.Method()), string(c.Path()), limit)
 		if err != nil {
 			respondError(c, http.StatusServiceUnavailable, "RATE_LIMIT_UNAVAILABLE",
 				"rate limit store unavailable")
@@ -32,7 +40,7 @@ func RateLimit(store GatewayStore) app.HandlerFunc {
 		}
 		if !allowed {
 			respondError(c, http.StatusTooManyRequests, "RATE_LIMIT_EXCEEDED",
-				"request rate limit exceeded for this tenant")
+				"request rate limit exceeded for this principal")
 			return
 		}
 		c.Next(ctx)

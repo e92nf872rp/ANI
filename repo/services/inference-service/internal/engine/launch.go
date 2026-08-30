@@ -70,6 +70,9 @@ func launchVLLM(spec domain.Spec, servedModelName string) (command []string, arg
 		"--host", "0.0.0.0",
 		"--port", defaultListenPort,
 	}
+	if domain.NormalizeInferenceTask(spec.ExecutionProfile.Task) == domain.InferenceTaskEmbed {
+		server = append(server, "--runner", "pooling", "--convert", "embed")
+	}
 	if spec.Accelerator == nil {
 		command = []string{"env"}
 		args = append([]string{

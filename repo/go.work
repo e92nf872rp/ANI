@@ -6,6 +6,7 @@ use (
 	./sdks/core/go
 	./services/ani-gateway
 	./services/auth-service
+	./services/envoy-authz-adapter
 	./services/inference-service
 	./services/metering-service
 	./services/model-service

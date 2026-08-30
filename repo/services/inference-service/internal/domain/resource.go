@@ -37,6 +37,20 @@ const (
 	ActionDelete  Action = "delete"
 )
 
+type InferenceTask string
+
+const (
+	InferenceTaskGenerate InferenceTask = "generate"
+	InferenceTaskEmbed    InferenceTask = "embed"
+)
+
+func NormalizeInferenceTask(task InferenceTask) InferenceTask {
+	if task == InferenceTaskEmbed {
+		return InferenceTaskEmbed
+	}
+	return InferenceTaskGenerate
+}
+
 type OperationState string
 
 const (
@@ -48,22 +62,30 @@ const (
 	OperationDeadLetter OperationState = "dead_letter"
 )
 
-// Accelerator 引用 Core GPUSpec。nil 表示 CPU 推理。
+// Accelerator 引用 Core 加速器。nil 表示 CPU 推理。
 type Accelerator struct {
-	SpecID          string `json:"spec_id"`
-	CountPerReplica int    `json:"count_per_replica"`
+	// SpecID 是 GPU 型号，例如 gpu-nvidia-geforce-rtx-4090。
+	// 只表示型号，不表示整卡或 vGPU。历史 -full / -Nx 剥后缀后仍按型号处理。
+	SpecID string `json:"spec_id"`
+	// CountPerReplica 是每个副本申请的卡数。整卡和 vGPU 都必填，最小 1。
+	CountPerReplica int `json:"count_per_replica"`
+	// MemoryMB 是申请 GPU 显存，单位 MiB。对应产品字段 accelerator.memory。
+	// 内部 0 表示未填，按整卡；>0 表示 vGPU。JSON 若出现 memory 必须 >= 1。
+	// 这不是 Spec.Memory 的内存预算。
+	MemoryMB int `json:"memory,omitempty"`
 }
 
 // ExecutionProfile 在创建时冻结，后续 catalog/镜像变更不改写已有服务。
 type ExecutionProfile struct {
-	ID             string `json:"id"`
-	Version        string `json:"version"`
-	Runtime        string `json:"runtime"` // vllm | sglang
-	ImageID        string `json:"image_id,omitempty"`
-	ImageRef       string `json:"image_ref"`
-	ArtifactRef    string `json:"artifact_ref"` // pvc://...#/models/...
-	ArtifactDigest string `json:"artifact_digest"`
-	SecretRef      string `json:"secret_ref,omitempty"`
+	ID             string        `json:"id"`
+	Version        string        `json:"version"`
+	Runtime        string        `json:"runtime"` // vllm | sglang
+	Task           InferenceTask `json:"task,omitempty"`
+	ImageID        string        `json:"image_id,omitempty"`
+	ImageRef       string        `json:"image_ref"`
+	ArtifactRef    string        `json:"artifact_ref"` // pvc://...#/models/...
+	ArtifactDigest string        `json:"artifact_digest"`
+	SecretRef      string        `json:"secret_ref,omitempty"`
 }
 
 // EngineEnvVar 是创建时冻结的租户环境变量，不是 shell 赋值。
@@ -82,7 +104,7 @@ type Engine struct {
 type Spec struct {
 	Replicas             int              `json:"replicas"`
 	CPU                  string           `json:"cpu,omitempty"`
-	Memory               string           `json:"memory,omitempty"`
+	Memory               string           `json:"memory,omitempty"` // Pod 内存预算，例如 16Gi；GPU 显存在 Accelerator.MemoryMB
 	Accelerator          *Accelerator     `json:"accelerator,omitempty"`
 	PlacementMode        string           `json:"placement_mode,omitempty"` // auto | single_node | multi_node
 	Engine               *Engine          `json:"engine,omitempty"`

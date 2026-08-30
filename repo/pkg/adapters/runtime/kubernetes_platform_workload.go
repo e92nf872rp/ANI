@@ -65,7 +65,6 @@ func (s *KubernetesPlatformWorkloadService) Create(ctx context.Context, tenantID
 	if err != nil {
 		return ports.PlatformWorkloadRecord{}, err
 	}
-	applied := enrichPlatformWorkloadAccelerator(caps, spec)
 	for {
 		s.mu.Lock()
 		existing, found, err := s.state.intent(tenantID, spec.IdempotencyKey)
@@ -110,7 +109,7 @@ func (s *KubernetesPlatformWorkloadService) Create(ctx context.Context, tenantID
 				CreatedAt:              now,
 				UpdatedAt:              now,
 			},
-			spec: applied,
+			spec: spec,
 		}
 		if err := s.state.putWithIntent(item, spec.IdempotencyKey, pendingIntent(fingerprint, id)); err != nil {
 			s.mu.Unlock()
@@ -120,7 +119,7 @@ func (s *KubernetesPlatformWorkloadService) Create(ctx context.Context, tenantID
 			return ports.PlatformWorkloadRecord{}, err
 		}
 		s.mu.Unlock()
-		return s.finishCreate(ctx, tenantID, id, spec.IdempotencyKey, fingerprint, applied, true)
+		return s.finishCreate(ctx, tenantID, id, spec.IdempotencyKey, fingerprint, spec, true)
 	}
 }
 
@@ -469,26 +468,6 @@ func (s *KubernetesPlatformWorkloadService) storeObservation(tenantID, workloadI
 	}
 	_ = s.state.put(item)
 	return item.record
-}
-
-func enrichPlatformWorkloadAccelerator(caps ports.PlatformWorkloadCapabilities, spec ports.PlatformWorkloadCreateSpec) ports.PlatformWorkloadCreateSpec {
-	spec.Resources = enrichAcceleratorMemory(caps, spec.Resources)
-	spec.Topology.Leader.Resources = enrichAcceleratorMemory(caps, spec.Topology.Leader.Resources)
-	spec.Topology.Workers.Resources = enrichAcceleratorMemory(caps, spec.Topology.Workers.Resources)
-	return spec
-}
-
-func enrichAcceleratorMemory(caps ports.PlatformWorkloadCapabilities, resources ports.PlatformWorkloadResources) ports.PlatformWorkloadResources {
-	if resources.AcceleratorCount < 1 || resources.AcceleratorMemoryMB > 0 {
-		return resources
-	}
-	for _, spec := range caps.AcceleratorSpecs {
-		if spec.SpecID == resources.AcceleratorSpecID && spec.MemoryPerShareMB > 0 {
-			resources.AcceleratorMemoryMB = spec.MemoryPerShareMB * resources.AcceleratorCount
-			return resources
-		}
-	}
-	return resources
 }
 
 var _ ports.PlatformWorkloadService = (*KubernetesPlatformWorkloadService)(nil)

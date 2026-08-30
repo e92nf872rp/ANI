@@ -1,0 +1,110 @@
+profile: INFERENCE-SERVICE-ENVOY-AI-GATEWAY-LIVE-C40
+status: contract
+description: >
+  C40 defines repository-managed static Envoy AI Gateway routes for one chat
+  vLLM backend and one embedding vLLM backend retained behind ClusterIP
+  Services. A human-approved live execution is required before this contract
+  can claim invocation readiness. C41 dynamic publication and full runtime
+  readiness remain out of scope.
+
+required_tools:
+  - kubectl
+
+required_env:
+  - KUBECONFIG
+  - ANI_C40_CONTROL_PLANE_URL
+  - ANI_C40_GATEWAY_URL
+  - ANI_C40_OWNER_ACCESS_TOKEN
+  - ANI_C40_FOREIGN_ACCESS_TOKEN
+
+required_endpoints:
+  - ani_control_plane_api
+  - envoy_ai_gateway_chat
+  - envoy_ai_gateway_embeddings
+  - kubernetes_api
+
+live_checks:
+  - id: envoy-resources-accepted
+    command: wait for Gateway, HTTPRoute, Backend, AIServiceBackend, AIGatewayRoute, and SecurityPolicy Accepted
+    pass_condition: all_c40_resources_accepted
+  - id: adapter-ready
+    command: wait for deployment/envoy-authz-adapter Ready
+    pass_condition: adapter_ready
+  - id: valid-ak-nonstream-chat
+    command: POST /v1/chat/completions with an owner system AK
+    pass_condition: http_200_nonempty_choices
+  - id: valid-ak-embedding
+    command: POST /v1/embeddings with an owner system AK
+    pass_condition: http_200_nonempty_embedding_vector
+  - id: valid-ak-sse-done
+    command: POST /v1/chat/completions stream=true with an owner system AK
+    pass_condition: sse_data_and_done_received
+  - id: missing-ak-401
+    command: POST /v1/chat/completions without an AK
+    pass_condition: http_401
+  - id: malformed-ak-401
+    command: POST /v1/chat/completions with a malformed AK
+    pass_condition: http_401
+  - id: credential-location-boundary
+    command: try x-api-key, Cookie, and a non-secret query sentinel without Authorization
+    pass_condition: alternate_locations_do_not_authorize
+  - id: public-path-boundary
+    command: request /healthz, /readyz, and /v1/not-registered through the public Gateway
+    pass_condition: all_http_404_and_markers_absent_from_vllm
+  - id: workload-probes-ready
+    command: inspect adapter and owning Envoy Deployments
+    pass_condition: every_required_container_has_readiness_and_liveness
+  - id: expired-ak-401
+    command: POST /v1/chat/completions with a bounded-expiry AK after expiry
+    pass_condition: http_401
+  - id: revoked-ak-immediate-401
+    command: revoke a temporary owner AK then invoke again
+    pass_condition: http_401_without_secret_change
+  - id: rpm-limit-429
+    command: invoke twice with a one-RPM AK in one minute
+    pass_condition: first_200_second_429
+  - id: foreign-tenant-404
+    command: invoke C40 model with a foreign-tenant AK
+    pass_condition: http_404
+  - id: authz-fail-closed-503
+    command: temporarily scale only envoy-authz-adapter to zero
+    pass_condition: http_503_and_marker_absent_from_vllm
+  - id: auth-service-unreachable-503
+    command: temporarily set only adapter AUTH_SERVICE_GRPC_ADDR to a closed local address
+    pass_condition: http_503_and_adapter_restored
+  - id: authorization-not-forwarded
+    command: inspect generated HTTPRoute mutation and scan selected vLLM logs in memory
+    pass_condition: credentials_removed_and_temporary_aks_absent
+  - id: clusterip-only-backend
+    command: inspect C40 Backend and vLLM Service exposure
+    pass_condition: retained_backend_is_clusterip_only
+  - id: control-plane-regression-pass
+    command: make validate-inference-control-plane and validate-inference-gpu-memory-live-gate
+    pass_condition: local_regressions_pass
+  - id: secret-redaction-pass
+    command: scan temporary-key prefixes, logs, evidence, and Secret data only in memory
+    pass_condition: no_key_material_serialized
+
+evidence: development-records/live-evidence/inference-envoy-ai-gateway-live-20260825.json
+
+evidence_policy:
+  forbidden_content:
+    - Authorization header names or values, except the authorization_not_forwarded boolean
+    - Bearer values
+    - ani_dev_ or ani_prod_ API key material
+    - passwords, connection strings, or Kubernetes Secret data
+  allowed_assertions:
+    - authorization_not_forwarded
+    - clusterip_only_backend
+    - passed check identifiers and aggregate counts
+
+readiness_claims:
+  envoy_invocation_ready: true
+  dynamic_publication_ready: false
+  runtime_ready: false
+
+readiness_levels:
+  contract:
+    meaning: C40 live procedure and redaction policy are implemented; no cluster execution or live evidence is claimed.
+  live:
+    meaning: An approved execution proved the static Envoy invocation path. C41 dynamic publication and full runtime readiness remain false.

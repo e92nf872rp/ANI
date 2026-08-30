@@ -170,10 +170,58 @@ func positiveInt(value int, fallback int) int {
 
 var _ ports.GPUInventory = (*LocalGPUInventory)(nil)
 
-// ListSpecAvailability computes per-spec availability for a tenant. The full
-// implementation requires QuotaService, reservation store, and GPUSpecStore
-// wiring (plan.md §5.1); this stub returns ErrUnsupported until those
-// dependencies are injected in the Adapters batch (Issue #3).
-func (i *LocalGPUInventory) ListSpecAvailability(_ context.Context, _ string) ([]ports.GPUSpecAvailability, error) {
-	return nil, ports.ErrUnsupported
+// ListSpecAvailability computes per-spec availability for the local dev
+// profile by deriving specs from GPUSpecService and matching them against
+// local nodes. Since the local profile has no QuotaStoreService, quota
+// remaining is effectively unbounded (math.MaxInt32); the handler will
+// override quota_remaining from its own QuotaStoreService query.
+func (i *LocalGPUInventory) ListSpecAvailability(ctx context.Context, _ string) ([]ports.GPUSpecAvailability, error) {
+	specService := NewLocalGPUSpecService(i)
+	all := false
+	specs, err := specService.ListGPUSpecs(ctx, ports.GPUSpecListRequest{Available: &all})
+	if err != nil {
+		return nil, err
+	}
+	nodes, err := i.ListNodeClasses(ctx, ports.GPUDiscoveryFilter{})
+	if err != nil {
+		return nil, err
+	}
+	// Local profile has no quota store; use a large number so availability
+	// is gated only by device idle count.
+	const localQuotaRemaining int64 = 1 << 30
+	result := make([]ports.GPUSpecAvailability, 0, len(specs))
+	for _, spec := range specs {
+		hasMatchingNodes := false
+		deviceIdleCount := 0
+		for _, node := range nodes {
+			if !node.Ready {
+				continue
+			}
+			for _, device := range node.Devices {
+				gpuType := firstNonEmpty(device.Model, node.Model)
+				if !strings.EqualFold(gpuType, spec.GPUType) {
+					continue
+				}
+				hasMatchingNodes = true
+				deviceIdleCount++
+			}
+		}
+		availability := ports.GPUSpecAvailability{
+			SpecID:           spec.ID,
+			HasMatchingNodes: hasMatchingNodes,
+			DeviceIdleCount:  deviceIdleCount,
+			HasIdleDevices:   deviceIdleCount > 0,
+			GPUCount:         spec.Shares,
+		}
+		if !hasMatchingNodes {
+			availability.Status = ports.GPUSpecStatusUnavailable
+		} else if deviceIdleCount <= 0 {
+			availability.Status = ports.GPUSpecStatusDeviceFull
+		} else {
+			availability.Status = ports.GPUSpecStatusAvailable
+			availability.AvailableCount = int(minInt64(localQuotaRemaining, int64(deviceIdleCount)))
+		}
+		result = append(result, availability)
+	}
+	return result, nil
 }

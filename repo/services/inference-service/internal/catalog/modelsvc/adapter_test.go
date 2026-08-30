@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	modelv1 "github.com/kubercloud/ani/pkg/generated/pb/model/v1"
 	"github.com/kubercloud/ani/services/inference-service/internal/catalog"
+	"github.com/kubercloud/ani/services/inference-service/internal/domain"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -100,15 +101,62 @@ func TestResolveUnknownFormatIsIncompatible(t *testing.T) {
 	}
 }
 
-func TestResolveEmbeddingOnlyIsIncompatible(t *testing.T) {
+func TestResolveEmbeddingOnlySelectsVLLMEmbedProfiles(t *testing.T) {
 	tenantID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	versionID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
 	modelID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
-	cat := mustCatalog(t, &stubClient{resp: readyResponse(tenantID, modelID, versionID, "safetensors", "ready", []string{"embedding"}, false, "")})
+	cat := mustCatalog(t, &stubClient{resp: readyResponse(
+		tenantID, modelID, versionID, "safetensors", "ready", []string{"embedding"}, false, "",
+	)})
 
-	_, err := cat.Resolve(context.Background(), tenantID, versionID)
-	if !errors.Is(err, catalog.ErrNoCompatibleProfile) {
-		t.Fatalf("err = %v", err)
+	got, err := cat.Resolve(context.Background(), tenantID, versionID)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got.CPUProfile == nil || got.GPUProfile == nil ||
+		got.CPUProfile.Task != domain.InferenceTaskEmbed ||
+		got.GPUProfile.Runtime != "vllm" {
+		t.Fatalf("embedding profiles = cpu=%+v gpu=%+v", got.CPUProfile, got.GPUProfile)
+	}
+}
+
+func TestResolveCapabilitySetsSelectDeterministicTask(t *testing.T) {
+	tenantID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	versionID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	modelID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	tests := []struct {
+		name         string
+		capabilities []string
+		wantTask     domain.InferenceTask
+		wantErr      error
+	}{
+		{name: "empty defaults to generation", wantTask: domain.InferenceTaskGenerate},
+		{name: "generation", capabilities: []string{"text-generation"}, wantTask: domain.InferenceTaskGenerate},
+		{name: "mixed generation and embedding", capabilities: []string{"embedding", "text-generation"}, wantTask: domain.InferenceTaskGenerate},
+		{name: "speech to text is unsupported", capabilities: []string{"speech-to-text"}, wantErr: catalog.ErrNoCompatibleProfile},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cat := mustCatalog(t, &stubClient{resp: readyResponse(
+				tenantID, modelID, versionID, "safetensors", "ready", tt.capabilities, false, "",
+			)})
+
+			got, err := cat.Resolve(context.Background(), tenantID, versionID)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("Resolve() error = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
+			}
+			if got.CPUProfile == nil || got.GPUProfile == nil ||
+				got.CPUProfile.Task != tt.wantTask || got.GPUProfile.Task != tt.wantTask {
+				t.Fatalf("profiles = cpu=%+v gpu=%+v, want task %q", got.CPUProfile, got.GPUProfile, tt.wantTask)
+			}
+		})
 	}
 }
 
@@ -178,6 +226,62 @@ func TestNewRejectsEmptyRuntime(t *testing.T) {
 	_, err := New(&stubClient{}, profiles)
 	if err == nil {
 		t.Fatal("expected engine profile runtime error")
+	}
+}
+
+func TestNewRejectsProfileSlotInvariantViolations(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Profiles)
+	}{
+		{name: "cpu embed task", mutate: func(profiles *Profiles) {
+			profiles.CPU.Task = domain.InferenceTaskEmbed
+		}},
+		{name: "gpu embed task", mutate: func(profiles *Profiles) {
+			profiles.GPU.Task = domain.InferenceTaskEmbed
+		}},
+		{name: "sglang cpu embed task", mutate: func(profiles *Profiles) {
+			profiles.SGLangCPU.Task = domain.InferenceTaskEmbed
+		}},
+		{name: "sglang gpu embed task", mutate: func(profiles *Profiles) {
+			profiles.SGLangGPU.Task = domain.InferenceTaskEmbed
+		}},
+		{name: "embed cpu generate task", mutate: func(profiles *Profiles) {
+			profiles.EmbedCPU.Task = domain.InferenceTaskGenerate
+		}},
+		{name: "embed gpu empty task", mutate: func(profiles *Profiles) {
+			profiles.EmbedGPU.Task = ""
+		}},
+		{name: "embed gpu unknown task", mutate: func(profiles *Profiles) {
+			profiles.EmbedGPU.Task = domain.InferenceTask("unknown")
+		}},
+		{name: "embed cpu sglang runtime", mutate: func(profiles *Profiles) {
+			profiles.EmbedCPU.Runtime = "sglang"
+		}},
+		{name: "embed gpu sglang runtime", mutate: func(profiles *Profiles) {
+			profiles.EmbedGPU.Runtime = "sglang"
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			profiles := DefaultProfiles()
+			tt.mutate(&profiles)
+
+			if _, err := New(&stubClient{}, profiles); err == nil {
+				t.Fatal("New() accepted a profile that violates its slot invariant")
+			}
+		})
+	}
+}
+
+func TestNewAcceptsNormalizedEmbedVLLMRuntime(t *testing.T) {
+	profiles := DefaultProfiles()
+	profiles.EmbedCPU.Runtime = " VLLM "
+	profiles.EmbedGPU.Runtime = "\tvLlM\n"
+
+	if _, err := New(&stubClient{}, profiles); err != nil {
+		t.Fatalf("New() rejected normalized vLLM runtimes: %v", err)
 	}
 }
 

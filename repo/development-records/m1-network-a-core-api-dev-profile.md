@@ -19,7 +19,7 @@
 | `pkg/adapters/runtime/network_service.go` | 新增 | 本地 dev profile 实现 VPC/Subnet/SecurityGroup/LoadBalancer create/list/get/delete，并可接入持久化 store |
 | `pkg/adapters/runtime/network_store.go` | 新增 | metadata-backed 网络资源持久化 adapter |
 | `pkg/bootstrap/deps.go` | 修改 | 将网络资源 service/store 暴露到 bootstrap capabilities |
-| `deploy/migrations/20260520_005_network_resources.sql` | 新增 | 新增网络资源表、索引和 RLS 租户隔离策略 |
+| `deploy/migrations/20260520000500_network_resources.sql` | 新增 | 新增网络资源表、索引和 RLS 租户隔离策略 |
 | `services/ani-gateway/internal/router/network_resources.go` | 新增 | 注册网络资源 Gateway 主路径 |
 | `scripts/validate_network_alpha_contract.py` | 新增 | 校验网络 path/schema/RBAC scope、Gateway route、Services API 边界和持久化迁移 |
 | `Makefile` | 修改 | 新增 `make validate-network-alpha` |

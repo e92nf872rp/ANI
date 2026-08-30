@@ -37,12 +37,12 @@ CREATE INDEX IF NOT EXISTS idx_kb_chunks_type     ON kb_chunks(chunk_type);
 -- Requires pg_trgm extension (see 001_pg_trgm_extension.sql).
 CREATE INDEX IF NOT EXISTS idx_kb_chunks_content_trgm ON kb_chunks USING GIN (content gin_trgm_ops);
 
--- Grant app role access (convention: all business tables follow 20260501_001_init_schema.sql).
+-- Grant app role access (convention: all business tables follow 20260501000100_init_schema.sql).
 GRANT SELECT, INSERT, UPDATE, DELETE ON kb_chunks TO ani_app;
 
 -- Row Level Security: tenant isolation (SPEC §8.1, FR-15).
 -- Matches the pattern used by kb_documents / kb_messages / async_tasks / outbox_events
--- in 20260501_001_init_schema.sql and later migrations (e.g. 20260520_005).
+-- in 20260501000100_init_schema.sql and later migrations (e.g. 20260520000500).
 -- The app role (ani_app_user) is non-superuser, non-bypassrls, so RLS is enforced.
 ALTER TABLE kb_chunks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE kb_chunks FORCE ROW LEVEL SECURITY;

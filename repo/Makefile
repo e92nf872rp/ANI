@@ -5,17 +5,17 @@
 -include .env
 export
 
-.PHONY: help deps deps-down deps-status deps-clean \
-        tools-proto gen-api gen-console-api gen-proto gen-core-sdk gen-api-docs \
+.PHONY: help deps deps-down deps-status deps-clean db-validate db-list db-status db-migrate-dry-run db-migrate \
+        tools-proto gen-api gen-console-api gen-proto gen-core-sdk gen-api-docs gen-gateway-authz \
         build build-gateway build-auth-service build-model-service build-task-service build-reconcile-worker build-cli \
         test test-go test-python test-cover \
-	validate-infra validate-gpu-preflight validate-gpu-contracts validate-runtime-contracts validate-instance-contracts validate-instance-planner validate-instance-renderer validate-instance-admission validate-instance-audit validate-instance-provider-dry-run validate-instance-provider-apply validate-instance-status-reconcile validate-instance-orchestrator validate-instance-store validate-instance-provider-adapter validate-instance-service validate-instance-lifecycle-ops validate-m1-e2e validate-kubernetes-provider-execution validate-kubernetes-rest-client validate-kubernetes-bootstrap-wiring validate-kubernetes-lifecycle-execution validate-kubernetes-ops-execution validate-m1-real-provider-profile validate-real-k8s-profile validate-vcluster-live-gate validate-vcluster-upgrade-live-gate validate-k8s-node-pool-live-gate validate-kubeovn-network-live-gate validate-kubevirt-vm-live-gate validate-reconcile-ha-live-gate validate-kms-sm4-live-gate validate-secrets-live-gate validate-storage-live-gate validate-storage-control-plane-state validate-storage-control-plane-state-live-gate validate-gpu-inventory-live-gate validate-object-store-live-gate validate-vector-store-live-gate validate-instance-observability-live-gate validate-registry-harbor-live-gate validate-instance-management-live-gate validate-sandbox-live-gate validate-instance-sandbox-stateless-live-gate validate-instance-sandbox-checkpoint-live-gate validate-instance-reconcile-provider-loss-live-gate validate-instance-orchestration-live-gate validate-sprint13-b-track-production-shape validate-gateway-ratelimit validate-gateway-idempotency validate-adapter-resilience-timeout validate-resilience-faultinjection-live-gate validate-resilience-degradation validate-ha-failover-live-gate validate-readyz-dataplane-live-gate validate-sprint14-resilience-live-gate validate-core-installer validate-core-offline validate-core-cli validate-sprint7-core-regression validate-core-release-hardening validate-core-installer-live validate-core-offline-pack validate-core-doc-consistency validate-sprint8-core-release validate-core-release-evidence validate-sprint9-core-rc validate-sprint9-core-doc-consistency validate-sprint9-rc validate-core-artifact-manifest validate-core-version-policy validate-sprint10-final-readiness validate-sprint10-core-doc-consistency validate-sprint10-release-prep validate-sprint11-storage-disk-plan validate-sprint11-core-real-deployment validate-sprint11-rook-ceph-formal-deployment validate-sprint11-rook-ceph-live-deployment-result validate-sprint11-rook-ceph-vm-storage-smoke validate-sprint11-rook-ceph-reboot-resilience validate-sprint11-safe-completion validate-sprint11-core-doc-consistency validate-sprint11-real-deployment validate-demo-instances validate-core-alpha validate-network-alpha validate-storage-alpha validate-vector-alpha validate-workload-identity validate-core-dev-profile validate-sdk-alpha validate-sdk-beta validate-sdk-mock-smoke validate-sprint3-closure validate-sprint4-closure validate-spec-split validate-core-beta validate-core-api-compatibility validate-mock-a validate-doc-api validate-openapi-spec validate-doc-entrypoints validate-auth-contract validate-auth-dex-smoke validate-auth-dex-production-gate validate-services validate-services-contract validate-services-route-contract validate-inference-control-plane validate-platform-workload-k8s-live-gate validate-ci-workflow validate-architecture validate-async-task-store \
+	validate-infra validate-gpu-preflight validate-gpu-contracts validate-runtime-contracts validate-instance-contracts validate-instance-planner validate-instance-renderer validate-instance-admission validate-instance-audit validate-instance-provider-dry-run validate-instance-provider-apply validate-instance-status-reconcile validate-instance-orchestrator validate-instance-store validate-instance-provider-adapter validate-instance-service validate-instance-lifecycle-ops validate-m1-e2e validate-kubernetes-provider-execution validate-kubernetes-rest-client validate-kubernetes-bootstrap-wiring validate-kubernetes-lifecycle-execution validate-kubernetes-ops-execution validate-m1-real-provider-profile validate-real-k8s-profile validate-vcluster-live-gate validate-vcluster-upgrade-live-gate validate-k8s-node-pool-live-gate validate-kubeovn-network-live-gate validate-kubevirt-vm-live-gate validate-reconcile-ha-live-gate validate-kms-sm4-live-gate validate-secrets-live-gate validate-storage-live-gate validate-storage-control-plane-state validate-storage-control-plane-state-live-gate validate-gpu-inventory-live-gate validate-object-store-live-gate validate-vector-store-live-gate validate-instance-observability-live-gate validate-registry-harbor-live-gate validate-instance-management-live-gate validate-sandbox-live-gate validate-instance-sandbox-stateless-live-gate validate-instance-sandbox-checkpoint-live-gate validate-instance-reconcile-provider-loss-live-gate validate-instance-orchestration-live-gate validate-sprint13-b-track-production-shape validate-gateway-ratelimit validate-gateway-idempotency validate-adapter-resilience-timeout validate-resilience-faultinjection-live-gate validate-resilience-degradation validate-ha-failover-live-gate validate-readyz-dataplane-live-gate validate-sprint14-resilience-live-gate validate-core-installer validate-core-offline validate-core-cli validate-sprint7-core-regression validate-core-release-hardening validate-core-installer-live validate-core-offline-pack validate-core-doc-consistency validate-sprint8-core-release validate-core-release-evidence validate-sprint9-core-rc validate-sprint9-core-doc-consistency validate-sprint9-rc validate-core-artifact-manifest validate-core-version-policy validate-sprint10-final-readiness validate-sprint10-core-doc-consistency validate-sprint10-release-prep validate-sprint11-storage-disk-plan validate-sprint11-core-real-deployment validate-sprint11-rook-ceph-formal-deployment validate-sprint11-rook-ceph-live-deployment-result validate-sprint11-rook-ceph-vm-storage-smoke validate-sprint11-rook-ceph-reboot-resilience validate-sprint11-safe-completion validate-sprint11-core-doc-consistency validate-sprint11-real-deployment validate-demo-instances validate-core-alpha validate-network-alpha validate-storage-alpha validate-vector-alpha validate-workload-identity validate-core-dev-profile validate-sdk-alpha validate-sdk-beta validate-sdk-mock-smoke validate-sprint3-closure validate-sprint4-closure validate-spec-split validate-core-beta validate-core-api-compatibility validate-mock-a validate-doc-api validate-openapi-spec validate-doc-entrypoints validate-auth-contract validate-gateway-authz validate-auth-dex-smoke validate-auth-dex-production-gate validate-services validate-services-contract validate-services-route-contract validate-inference-control-plane validate-platform-workload-k8s-live-gate validate-ci-workflow validate-architecture validate-async-task-store \
         lint lint-go lint-python lint-ts \
         dev-gateway dev-console dev-core-mock \
         image image-gateway image-auth-service \
         clean
 
-.PHONY: test-inference-control-plane-postgres validate-inference-gpu-lws-volcano-live-gate validate-inference-legacy-control-plane validate-inference-incluster-e2e-live-gate validate-inference-console-shaped-e2e-live-gate validate-inference-local-model-source-live-gate validate-inference-create-image-live-gate validate-inference-create-image-harbor-live-gate validate-inference-gpu-single-node-live-gate validate-gpu-plugin-node-partition-live-gate validate-inference-gpu-vllm-eager-live-gate validate-inference-engine-vgpu-live-gate
+.PHONY: test-inference-control-plane-postgres validate-inference-gpu-lws-volcano-live-gate validate-inference-legacy-control-plane validate-inference-incluster-e2e-live-gate validate-inference-console-shaped-e2e-live-gate validate-inference-local-model-source-live-gate validate-inference-create-image-live-gate validate-inference-create-image-harbor-live-gate validate-inference-gpu-single-node-live-gate validate-gpu-plugin-node-partition-live-gate validate-inference-gpu-vllm-eager-live-gate validate-inference-engine-vgpu-live-gate validate-inference-gpu-memory-live-gate validate-inference-envoy-ai-gateway-manifest validate-inference-envoy-ai-gateway-live-gate run-inference-envoy-ai-gateway-live image-envoy-authz-adapter
 
 # ── 帮助 ──────────────────────────────────────────────────────────────────────
 help:
@@ -147,6 +147,8 @@ help:
 	@echo "    make validate-services-contract 校验 Services OpenAPI 语义门禁与精确存量基线"
 	@echo "    make validate-doc-entrypoints 校验 CLAUDE.md/文档入口职责边界"
 	@echo "    make validate-auth-contract 校验 M2.2 Auth Gateway/API 契约一致性"
+	@echo "    make gen-gateway-authz 从 Core OpenAPI 生成 Gateway authz policy 注册表"
+	@echo "    make validate-gateway-authz 校验 Gateway authz 注册表生成链与 route coverage"
 	@echo "    make validate-auth-dex-smoke 校验 M2.2 Docker Dex OIDC auth-code flow（需 Docker）"
 	@echo "    make validate-openapi-spec 校验 Core/Services OpenAPI 结构"
 	@echo "    make validate-services 校验 Services boundary/spec/route/SDK/model/RAG/Console 真实门禁"
@@ -168,6 +170,7 @@ help:
 	@echo "    make validate-gpu-plugin-node-partition-live-gate 校验 NVIDIA/Volcano GPU 插件节点分区 live gate"
 	@echo "    make validate-inference-gpu-vllm-eager-live-gate 校验 GPU vLLM enforce-eager 启动 live gate"
 	@echo "    make validate-inference-engine-vgpu-live-gate 校验 engine.env/command 与 volcano vGPU live gate"
+	@echo "    make validate-inference-gpu-memory-live-gate 校验 GPU 型号 spec_id 与 memory 显存申请 live gate"
 	@echo ""
 	@echo "  代码检查:"
 	@echo "    make lint           运行所有 linter"
@@ -179,9 +182,12 @@ help:
 
 # ── 依赖服务 ──────────────────────────────────────────────────────────────────
 COMPOSE = docker compose -f deploy/docker/docker-compose.yml
+ATLAS ?= atlas
+ATLAS_MIGRATION_DIR ?= file://deploy/migrations
+DB_ENV ?= local
 GO_CACHE_ENV = GOCACHE=$(CURDIR)/.cache/go-build GOMODCACHE=$(CURDIR)/.cache/gomod
 BUF_CACHE_ENV = BUF_CACHE_DIR=$(CURDIR)/.cache/buf
-GO_PACKAGES = ./pkg/... ./services/ani-gateway/... ./services/auth-service/... ./services/model-service/... ./services/inference-service/... ./services/task-service/... ./services/reconcile-worker/...
+GO_PACKAGES = ./pkg/... ./services/ani-gateway/... ./services/auth-service/... ./services/envoy-authz-adapter/... ./services/model-service/... ./services/inference-service/... ./services/task-service/... ./services/reconcile-worker/...
 TOOLS_BIN = $(CURDIR)/.bin
 
 deps:
@@ -204,6 +210,27 @@ deps-status:
 deps-clean:
 	@echo "⚠️  这将删除所有本地开发数据，是否确认？[y/N]" && read ans && [ $${ans:-N} = y ]
 	$(COMPOSE) down -v
+
+# ── 数据库迁移 ────────────────────────────────────────────────────────────────
+db-validate:
+	@echo "→ 校验 Atlas migration checksum 和 SQL 文件..."
+	$(ATLAS) migrate validate --dir "$(ATLAS_MIGRATION_DIR)"
+	@echo "✅ Atlas migration directory valid"
+
+db-list:
+	$(ATLAS) migrate ls --dir "$(ATLAS_MIGRATION_DIR)"
+
+db-status:
+	@echo "→ 查询数据库迁移状态（DB_ENV=$(DB_ENV)）..."
+	$(ATLAS) migrate status --env "$(DB_ENV)"
+
+db-migrate-dry-run:
+	@echo "→ 预览数据库迁移（DB_ENV=$(DB_ENV)），不会写入数据库..."
+	$(ATLAS) migrate apply --env "$(DB_ENV)" --dry-run
+
+db-migrate:
+	@echo "→ 执行数据库迁移（DB_ENV=$(DB_ENV)）..."
+	$(ATLAS) migrate apply --env "$(DB_ENV)"
 
 # ── 代码生成 ──────────────────────────────────────────────────────────────────
 tools-proto:
@@ -250,6 +277,19 @@ gen-core-api-compat-baseline:
 	@echo "→ 生成 Core API v1 兼容性基线..."
 	python scripts/generate_core_api_compatibility_baseline.py
 	@echo "✅ Core API compatibility baseline generated"
+
+gen-gateway-authz:
+	@echo "→ 从 Core OpenAPI 生成 Gateway authz policy 注册表..."
+	python scripts/generate_gateway_authz.py
+	gofmt -w services/ani-gateway/internal/authz/zz_generated_core_policies.go
+	@echo "✅ Gateway authz policy registry generated"
+
+validate-gateway-authz:
+	@echo "→ 校验 Gateway authz 注册表生成链..."
+	python scripts/generate_gateway_authz_test.py
+	python scripts/validate_gateway_authz_drift.py
+	python scripts/validate_core_gateway_authz_routes.py
+	@echo "✅ Gateway authz registry valid"
 
 # ── 构建 ──────────────────────────────────────────────────────────────────────
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -300,7 +340,7 @@ build-cli:
 	@echo "✅ bin/ani"
 
 # ── 测试 ──────────────────────────────────────────────────────────────────────
-test: validate-architecture validate-auth-contract test-go test-python
+test: validate-architecture validate-auth-contract validate-gateway-authz test-go test-python
 
 test-go:
 	@echo "→ 运行 Go 单元测试..."
@@ -435,7 +475,7 @@ validate-instance-admission:
 
 validate-instance-audit:
 	@echo "→ 校验 M1-INSTANCE-E audit trail contract..."
-	python scripts/validate_instance_audit.py deploy/manifests/m1-instance-e deploy/migrations/20260501_001_init_schema.sql
+	python scripts/validate_instance_audit.py deploy/manifests/m1-instance-e deploy/migrations/20260501000100_init_schema.sql
 	@echo "✅ instance audit contract valid"
 
 validate-instance-provider-dry-run:
@@ -460,7 +500,7 @@ validate-instance-orchestrator:
 
 validate-instance-store:
 	@echo "→ 校验 M1-INSTANCE-J instance persistence/query contract..."
-	python scripts/validate_instance_store.py deploy/manifests/m1-instance-j deploy/migrations/20260501_001_init_schema.sql
+	python scripts/validate_instance_store.py deploy/manifests/m1-instance-j deploy/migrations/20260501000100_init_schema.sql
 	@echo "✅ instance persistence/query contract valid"
 
 validate-instance-provider-adapter:
@@ -999,6 +1039,17 @@ validate-inference-control-plane:
 	$(MAKE) validate-inference-legacy-control-plane
 	@echo "✅ inference-service control-plane migration valid"
 
+validate-inference-envoy-ai-gateway-manifest:
+	python scripts/validate_inference_envoy_ai_gateway_manifest_test.py
+	python scripts/validate_inference_envoy_ai_gateway_manifest.py
+
+validate-inference-envoy-ai-gateway-live-gate:
+	python scripts/validate_inference_envoy_ai_gateway_live_gate_test.py
+	python scripts/validate_inference_envoy_ai_gateway_live_gate.py
+
+run-inference-envoy-ai-gateway-live:
+	python scripts/run_inference_envoy_ai_gateway_live.py
+
 validate-inference-legacy-control-plane:
 	@echo "→ 校验旧 inference.v1 / operator 控制面已退役..."
 	python scripts/validate_inference_legacy_control_plane_test.py
@@ -1100,6 +1151,12 @@ validate-inference-engine-vgpu-live-gate:
 	python scripts/validate_inference_engine_vgpu_live_gate_test.py
 	python scripts/validate_inference_engine_vgpu_live_gate.py
 	@echo "✅ INFERENCE-SERVICE-ENGINE-VGPU-LIVE-GATE-C36 contract/live valid"
+
+validate-inference-gpu-memory-live-gate:
+	@echo "→ 校验 GPU 型号 spec_id 与 memory 显存申请 live gate..."
+	python scripts/validate_inference_gpu_memory_live_gate_test.py
+	python scripts/validate_inference_gpu_memory_live_gate.py
+	@echo "✅ INFERENCE-SERVICE-GPU-MEMORY-LIVE-GATE-C39 contract/live valid"
 
 test-inference-control-plane-postgres:
 	@test -n "$$INFERENCE_TEST_DATABASE_URL" || (echo "ERROR: INFERENCE_TEST_DATABASE_URL is required"; exit 2)
@@ -1214,7 +1271,7 @@ dev-core-mock:
 # ── 镜像构建 ──────────────────────────────────────────────────────────────────
 REGISTRY ?= harbor.ani.internal/ani
 
-image: image-gateway image-auth-service
+image: image-gateway image-auth-service image-envoy-authz-adapter
 
 image-gateway:
 	docker build -t $(REGISTRY)/ani-gateway:$(VERSION) \
@@ -1224,6 +1281,11 @@ image-gateway:
 image-auth-service:
 	docker build -t $(REGISTRY)/ani-auth-service:$(VERSION) \
 		-f services/auth-service/Dockerfile \
+		.
+
+image-envoy-authz-adapter:
+	docker build -t $(REGISTRY)/envoy-authz-adapter:$(VERSION) \
+		-f services/envoy-authz-adapter/Dockerfile \
 		.
 
 # ── 清理 ──────────────────────────────────────────────────────────────────────

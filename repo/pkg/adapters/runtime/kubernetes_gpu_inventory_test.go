@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"testing"
@@ -243,6 +244,79 @@ func TestKubernetesGPUInventoryListsVolcanoVGPUNodes(t *testing.T) {
 	}
 }
 
+// stubSpecStore is a minimal in-memory GPUSpecStore for ListSpecAvailability tests.
+type stubSpecStore struct {
+	specs []ports.GPUSpecCRD
+	err   error
+}
+
+func (s stubSpecStore) List(context.Context) ([]ports.GPUSpecCRD, error) {
+	return s.specs, s.err
+}
+func (s stubSpecStore) Get(context.Context, string) (ports.GPUSpecCRD, error) {
+	return ports.GPUSpecCRD{}, ports.ErrGPUSpecNotFound
+}
+func (s stubSpecStore) Create(context.Context, string, ports.GPUSpecCRD) (ports.GPUSpecCRD, error) {
+	return ports.GPUSpecCRD{}, ports.ErrUnsupported
+}
+func (s stubSpecStore) Delete(context.Context, string, string) error {
+	return ports.ErrUnsupported
+}
+
+// stubQuotaStore is a minimal in-memory QuotaStoreService for ListSpecAvailability tests.
+type stubQuotaStore struct {
+	view ports.QuotaView
+	err  error
+}
+
+func (s stubQuotaStore) Put(context.Context, string, ports.QuotaPutRequest) (ports.QuotaView, error) {
+	return ports.QuotaView{}, ports.ErrUnsupported
+}
+func (s stubQuotaStore) List(context.Context, ports.QuotaListRequest) (ports.QuotaListResult, error) {
+	return ports.QuotaListResult{}, ports.ErrUnsupported
+}
+func (s stubQuotaStore) GetMy(context.Context, string) (ports.QuotaView, error) {
+	return s.view, s.err
+}
+
+// stubQuotaAdmin is a minimal in-memory QuotaAdminService for
+// ListSpecAvailability tests that need allocated_gpu_count.
+type stubQuotaAdmin struct {
+	reservation ports.ReservationView
+	err         error
+}
+
+func (s stubQuotaAdmin) CreateTenantQuota(context.Context, string, []ports.QuotaItemInput) ([]ports.QuotaInfo, error) {
+	return nil, ports.ErrUnsupported
+}
+func (s stubQuotaAdmin) UpdateTenantQuota(context.Context, string, []ports.QuotaItemUpdate) ([]ports.QuotaInfo, error) {
+	return nil, ports.ErrUnsupported
+}
+func (s stubQuotaAdmin) GetTenantQuota(context.Context, string) ([]ports.QuotaInfo, error) {
+	return nil, ports.ErrUnsupported
+}
+func (s stubQuotaAdmin) DeleteTenantQuota(context.Context, string) error {
+	return ports.ErrUnsupported
+}
+func (s stubQuotaAdmin) ListQuotaMeta(context.Context) ([]ports.QuotaMeta, error) {
+	return nil, ports.ErrUnsupported
+}
+func (s stubQuotaAdmin) UpsertTenantQuota(context.Context, string, []ports.QuotaItemInput) ([]ports.QuotaInfo, error) {
+	return nil, ports.ErrUnsupported
+}
+func (s stubQuotaAdmin) PutReservation(context.Context, string, ports.ReservationPutRequest) (ports.ReservationView, error) {
+	return ports.ReservationView{}, ports.ErrUnsupported
+}
+func (s stubQuotaAdmin) GetReservation(context.Context, string) (ports.ReservationView, error) {
+	return s.reservation, s.err
+}
+func (s stubQuotaAdmin) GetReservationTx(context.Context, ports.MetadataTx, string) (ports.ReservationView, error) {
+	return s.reservation, s.err
+}
+func (s stubQuotaStore) GetTotalForUpdateTx(context.Context, ports.MetadataTx, string, ports.ResourceType) (int64, error) {
+	return 0, ports.ErrUnsupported
+}
+
 func TestPlanSchedulingWholeCardSelectsNVIDIAGPUResource(t *testing.T) {
 	inventory := newTestGPUInventory(t, gpuNodeListJSON(t, "2", "0"))
 	decision, err := inventory.PlanScheduling(context.Background(), ports.GPUSchedulingRequest{
@@ -260,7 +334,7 @@ func TestPlanSchedulingWholeCardSelectsNVIDIAGPUResource(t *testing.T) {
 		t.Fatalf("quantity = %q, want 2", decision.ResourceQuantity)
 	}
 	if decision.RuntimeClassName != "" {
-		t.Fatalf("runtimeClassName = %q, want empty for non-HAMi whole-card", decision.RuntimeClassName)
+		t.Fatalf("runtimeClassName = %q, want empty for whole-card", decision.RuntimeClassName)
 	}
 	if decision.SchedulerName != "volcano" {
 		t.Fatalf("schedulerName = %q, want volcano", decision.SchedulerName)
@@ -284,32 +358,37 @@ func TestPlanSchedulingVGPUSelectsNVIDIAGVGPUResource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanScheduling error = %v", err)
 	}
-	// Non-HAMi node: vGPU scheduling uses nvidia.com/vgpu resource.
+	// vGPU scheduling uses nvidia.com/vgpu resource.
 	if decision.ResourceName != "nvidia.com/vgpu" {
 		t.Fatalf("resourceName = %q, want nvidia.com/vgpu", decision.ResourceName)
 	}
 	if decision.ResourceQuantity != "2" {
 		t.Fatalf("quantity = %q, want 2", decision.ResourceQuantity)
 	}
-	// Non-HAMi node: vGPU scheduling uses nvidia.com/vgpu resource, but
-	// leaves runtime class empty (no hami-vgpu on non-HAMi nodes).
+	// Runtime class is always empty with HAMi removed.
 	if decision.RuntimeClassName != "" {
-		t.Fatalf("runtimeClassName = %q, want empty for non-HAMi vGPU", decision.RuntimeClassName)
+		t.Fatalf("runtimeClassName = %q, want empty for vGPU", decision.RuntimeClassName)
 	}
 }
-func TestPlanSchedulingVGPUOnHAMiNodeUsesNVIDIAGPUResource(t *testing.T) {
+
+// TestHAMiRemoved verifies that HAMi-related code has been removed:
+// the scheduler name is always "volcano" (never "hami-scheduler") and
+// the runtime class is always empty regardless of virtualization mode.
+func TestHAMiRemoved(t *testing.T) {
+	// vGPU scheduling on a node with volcano vGPU annotation should use
+	// volcano scheduler and empty runtime class (no hami-scheduler).
 	body := `{
   "items": [{
     "metadata": {
-      "name": "hami-node-1",
-      "labels": {"kubernetes.io/hostname": "hami-node-1", "nvidia.com/gpu.product": "RTX4090"},
+      "name": "vgpu-node-1",
+      "labels": {"kubernetes.io/hostname": "vgpu-node-1", "nvidia.com/gpu.product": "RTX4090"},
       "annotations": {
-        "hami.io/node-nvidia-register": "[{\"id\":\"GPU-aaa\",\"count\":10,\"devmem\":49140,\"devcore\":100,\"type\":\"NVIDIA GeForce RTX 4090\",\"mode\":\"hami-core\",\"health\":true},{\"id\":\"GPU-bbb\",\"index\":1,\"count\":10,\"devmem\":49140,\"devcore\":100,\"type\":\"NVIDIA GeForce RTX 4090\",\"mode\":\"hami-core\",\"health\":true}]"
+        "volcano.sh/node-vgpu-register": "[{\"id\":\"GPU-aaa\",\"count\":10,\"devmem\":49140,\"devcore\":100,\"type\":\"NVIDIA GeForce RTX 4090\",\"health\":true},{\"id\":\"GPU-bbb\",\"index\":1,\"count\":10,\"devmem\":49140,\"devcore\":100,\"type\":\"NVIDIA GeForce RTX 4090\",\"health\":true}]"
       }
     },
     "status": {
-      "capacity": {"nvidia.com/gpu": "20"},
-      "allocatable": {"nvidia.com/gpu": "20"},
+      "capacity": {"nvidia.com/vgpu": "20"},
+      "allocatable": {"nvidia.com/vgpu": "20"},
       "nodeInfo": {"kubeletVersion": "v1.36.1"},
       "conditions": [{"type": "Ready", "status": "True", "reason": "KubeletReady"}]
     }
@@ -325,33 +404,167 @@ func TestPlanSchedulingVGPUOnHAMiNodeUsesNVIDIAGPUResource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanScheduling error = %v", err)
 	}
-	if decision.ResourceName != "nvidia.com/gpu" {
-		t.Fatalf("resourceName = %q, want nvidia.com/gpu (HAMi vGPU)", decision.ResourceName)
+	if decision.SchedulerName != "volcano" {
+		t.Fatalf("schedulerName = %q, want volcano (hami-scheduler removed)", decision.SchedulerName)
 	}
-	if decision.ResourceQuantity != "2" {
-		t.Fatalf("quantity = %q, want 2", decision.ResourceQuantity)
+	if decision.RuntimeClassName != "" {
+		t.Fatalf("runtimeClassName = %q, want empty (hami-vgpu removed)", decision.RuntimeClassName)
 	}
-	if decision.RuntimeClassName != "hami-vgpu" {
-		t.Fatalf("runtimeClassName = %q, want hami-vgpu", decision.RuntimeClassName)
+	if decision.ResourceName != "nvidia.com/vgpu" {
+		t.Fatalf("resourceName = %q, want nvidia.com/vgpu", decision.ResourceName)
 	}
 }
 
-// TestListNodeClassesWithHAMiAnnotationCountsPhysicalCards verifies that
-// HAMi-managed nodes report physical card count (from annotation) rather
-// than the inflated vGPU split count in nvidia.com/gpu allocatable.
-func TestListNodeClassesWithHAMiAnnotationCountsPhysicalCards(t *testing.T) {
+// TestParseVolcanoVGPUAnnotation verifies parsing of the
+// volcano.sh/node-vgpu-register annotation for vGPU device count.
+func TestParseVolcanoVGPUAnnotation(t *testing.T) {
+	tests := []struct {
+		name        string
+		annotations map[string]string
+		wantDevices int
+	}{
+		{
+			name:        "nil annotations",
+			annotations: nil,
+			wantDevices: 0,
+		},
+		{
+			name:        "empty annotations",
+			annotations: map[string]string{},
+			wantDevices: 0,
+		},
+		{
+			name: "annotation absent",
+			annotations: map[string]string{
+				"other-annotation": "value",
+			},
+			wantDevices: 0,
+		},
+		{
+			name: "annotation empty string",
+			annotations: map[string]string{
+				"volcano.sh/node-vgpu-register": "",
+			},
+			wantDevices: 0,
+		},
+		{
+			name: "annotation whitespace only",
+			annotations: map[string]string{
+				"volcano.sh/node-vgpu-register": "   ",
+			},
+			wantDevices: 0,
+		},
+		{
+			name: "annotation invalid JSON",
+			annotations: map[string]string{
+				"volcano.sh/node-vgpu-register": "not-json",
+			},
+			wantDevices: 0,
+		},
+		{
+			name: "single device with count=10",
+			annotations: map[string]string{
+				"volcano.sh/node-vgpu-register": `[{"id":"GPU-aaa","count":10,"devmem":49140,"devcore":100,"type":"NVIDIA GeForce RTX 4090","health":true}]`,
+			},
+			wantDevices: 10,
+		},
+		{
+			name: "two devices with count=10 each",
+			annotations: map[string]string{
+				"volcano.sh/node-vgpu-register": `[{"id":"GPU-aaa","count":10,"devmem":49140,"devcore":100,"type":"NVIDIA GeForce RTX 4090","health":true},{"id":"GPU-bbb","index":1,"count":10,"devmem":49140,"devcore":100,"type":"NVIDIA GeForce RTX 4090","health":true}]`,
+			},
+			wantDevices: 20,
+		},
+		{
+			name: "two devices with count=0 fallback to 1 each",
+			annotations: map[string]string{
+				"volcano.sh/node-vgpu-register": `[{"id":"GPU-aaa","count":0},{"id":"GPU-bbb","count":0}]`,
+			},
+			wantDevices: 2,
+		},
+		{
+			// Real cluster format (plan.md §4.6): colon-separated physical
+			// GPUs, each with comma-separated fields. count=4 per GPU.
+			name: "comma-separated two GPUs count=4 each (real cluster)",
+			annotations: map[string]string{
+				"volcano.sh/node-vgpu-register": "GPU-4e7a0d18-9e71-50ac-2de3-05245d7d89b5,4,4914,NVIDIA-NVIDIA GeForce RTX 4090,true,hami-core:GPU-81a7a1b7-3671-2da0-cd94-9ae5e92700da,4,4914,NVIDIA-NVIDIA GeForce RTX 4090,true,hami-core:",
+			},
+			wantDevices: 8,
+		},
+		{
+			name: "comma-separated single GPU count=10 (real cluster)",
+			annotations: map[string]string{
+				"volcano.sh/node-vgpu-register": "GPU-aaa,10,4914,NVIDIA-RTX4090,true,hami-core:",
+			},
+			wantDevices: 10,
+		},
+		{
+			name: "comma-separated two GPUs with different counts",
+			annotations: map[string]string{
+				"volcano.sh/node-vgpu-register": "GPU-aaa,4,4914,NVIDIA-RTX4090,true,hami-core:GPU-bbb,8,4914,NVIDIA-RTX4090,true,hami-core:",
+			},
+			wantDevices: 12,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseVolcanoVGPUAnnotation(tt.annotations)
+			if got != tt.wantDevices {
+				t.Fatalf("parseVolcanoVGPUAnnotation() = %d, want %d", got, tt.wantDevices)
+			}
+		})
+	}
+}
+
+// TestInventoryNodeLabelDerivation verifies that GPUNodeClass fields
+// GPUMode, GPUSpec, GPUSharingSpec, GPUSharingPolicy are derived from
+// the corresponding node labels.
+func TestInventoryNodeLabelDerivation(t *testing.T) {
 	body := `{
   "items": [{
     "metadata": {
-      "name": "hami-node-1",
-      "labels": {"kubernetes.io/hostname": "hami-node-1"},
-      "annotations": {
-        "hami.io/node-nvidia-register": "[{\"id\":\"GPU-aaa\",\"count\":10,\"devmem\":49140,\"devcore\":100,\"type\":\"NVIDIA GeForce RTX 4090\",\"mode\":\"hami-core\",\"health\":true},{\"id\":\"GPU-bbb\",\"index\":1,\"count\":10,\"devmem\":49140,\"devcore\":100,\"type\":\"NVIDIA GeForce RTX 4090\",\"mode\":\"hami-core\",\"health\":true}]"
+      "name": "wholecard-node",
+      "labels": {
+        "kubernetes.io/hostname": "wholecard-node",
+        "nvidia.com/gpu.product": "A100",
+        "ani.kubercloud.io/gpu-mode": "wholecard",
+        "ani.kubercloud.io/gpu-spec": "NVIDIA-A100-SXM4-80GB"
       }
     },
     "status": {
-      "capacity": {"nvidia.com/gpu": "20"},
-      "allocatable": {"nvidia.com/gpu": "20"},
+      "capacity": {"nvidia.com/gpu": "4"},
+      "allocatable": {"nvidia.com/gpu": "4"},
+      "nodeInfo": {"kubeletVersion": "v1.36.1"},
+      "conditions": [{"type": "Ready", "status": "True", "reason": "KubeletReady"}]
+    }
+  }, {
+    "metadata": {
+      "name": "vgpu-node",
+      "labels": {
+        "kubernetes.io/hostname": "vgpu-node",
+        "nvidia.com/gpu.product": "L40S",
+        "ani.kubercloud.io/gpu-mode": "vgpu",
+        "ani.kubercloud.io/gpu-sharing-spec": "NVIDIA-L40S-HALF",
+        "ani.kubercloud.io/gpu-sharing-policy": "half"
+      }
+    },
+    "status": {
+      "capacity": {"nvidia.com/gpu": "2"},
+      "allocatable": {"nvidia.com/gpu": "2"},
+      "nodeInfo": {"kubeletVersion": "v1.36.1"},
+      "conditions": [{"type": "Ready", "status": "True", "reason": "KubeletReady"}]
+    }
+  }, {
+    "metadata": {
+      "name": "legacy-node",
+      "labels": {
+        "kubernetes.io/hostname": "legacy-node",
+        "nvidia.com/gpu.product": "V100"
+      }
+    },
+    "status": {
+      "capacity": {"nvidia.com/gpu": "1"},
+      "allocatable": {"nvidia.com/gpu": "1"},
       "nodeInfo": {"kubeletVersion": "v1.36.1"},
       "conditions": [{"type": "Ready", "status": "True", "reason": "KubeletReady"}]
     }
@@ -362,26 +575,422 @@ func TestListNodeClassesWithHAMiAnnotationCountsPhysicalCards(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListNodeClasses error = %v", err)
 	}
-	if len(nodes) != 1 {
-		t.Fatalf("len(nodes) = %d, want 1", len(nodes))
+	if len(nodes) != 3 {
+		t.Fatalf("len(nodes) = %d, want 3", len(nodes))
 	}
-	node := nodes[0]
-	if len(node.Devices) != 2 {
-		t.Fatalf("len(devices) = %d, want 2 physical cards", len(node.Devices))
+
+	// Wholecard node: GPUMode=wholecard, GPUSpec set, sharing fields empty.
+	wholecard := nodes[0]
+	if wholecard.GPUMode != "wholecard" {
+		t.Fatalf("wholecard node GPUMode = %q, want wholecard", wholecard.GPUMode)
 	}
-	for i, device := range node.Devices {
-		if device.VirtualizationMode != ports.GPUVirtualizationVGPU {
-			t.Fatalf("device[%d].VirtualizationMode = %q, want vgpu", i, device.VirtualizationMode)
+	if wholecard.GPUSpec != "NVIDIA-A100-SXM4-80GB" {
+		t.Fatalf("wholecard node GPUSpec = %q, want NVIDIA-A100-SXM4-80GB", wholecard.GPUSpec)
+	}
+	if wholecard.GPUSharingSpec != "" {
+		t.Fatalf("wholecard node GPUSharingSpec = %q, want empty", wholecard.GPUSharingSpec)
+	}
+	if wholecard.GPUSharingPolicy != "" {
+		t.Fatalf("wholecard node GPUSharingPolicy = %q, want empty", wholecard.GPUSharingPolicy)
+	}
+
+	// vGPU node: GPUMode=vgpu, GPUSharingSpec and GPUSharingPolicy set, GPUSpec empty.
+	vgpu := nodes[1]
+	if vgpu.GPUMode != "vgpu" {
+		t.Fatalf("vgpu node GPUMode = %q, want vgpu", vgpu.GPUMode)
+	}
+	if vgpu.GPUSpec != "" {
+		t.Fatalf("vgpu node GPUSpec = %q, want empty", vgpu.GPUSpec)
+	}
+	if vgpu.GPUSharingSpec != "NVIDIA-L40S-HALF" {
+		t.Fatalf("vgpu node GPUSharingSpec = %q, want NVIDIA-L40S-HALF", vgpu.GPUSharingSpec)
+	}
+	if vgpu.GPUSharingPolicy != "half" {
+		t.Fatalf("vgpu node GPUSharingPolicy = %q, want half", vgpu.GPUSharingPolicy)
+	}
+
+	// Legacy node: no new labels, all derived fields should be empty.
+	legacy := nodes[2]
+	if legacy.GPUMode != "" {
+		t.Fatalf("legacy node GPUMode = %q, want empty", legacy.GPUMode)
+	}
+	if legacy.GPUSpec != "" {
+		t.Fatalf("legacy node GPUSpec = %q, want empty", legacy.GPUSpec)
+	}
+	if legacy.GPUSharingSpec != "" {
+		t.Fatalf("legacy node GPUSharingSpec = %q, want empty", legacy.GPUSharingSpec)
+	}
+	if legacy.GPUSharingPolicy != "" {
+		t.Fatalf("legacy node GPUSharingPolicy = %q, want empty", legacy.GPUSharingPolicy)
+	}
+}
+
+// newTestGPUInventoryWithSpecStore builds an inventory with spec and quota
+// stores for ListSpecAvailability tests. The body is the NodeList JSON.
+func newTestGPUInventoryWithSpecStore(t *testing.T, body string, specStore ports.GPUSpecStore, quotaStore ports.QuotaStoreService) *KubernetesGPUInventory {
+	t.Helper()
+	client, err := NewKubernetesRESTClient(KubernetesRESTClientConfig{
+		Host: "https://kubernetes.example",
+		HTTPClient: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return jsonResponse(http.StatusOK, body), nil
+		})},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return NewKubernetesGPUInventoryWithSpecStore(client, nil, specStore, quotaStore)
+}
+
+// gpuNodeListJSONWithLabels returns a NodeList body with one ready GPU node
+// advertising the given allocatable resources and node labels. Annotation
+// values are JSON-encoded to handle embedded JSON arrays safely.
+func gpuNodeListJSONWithLabels(t *testing.T, allocatableGPU, allocatableVGPU string, labels map[string]string, annotations map[string]string) string {
+	t.Helper()
+	return gpuNodeListJSONFull(t, allocatableGPU, allocatableGPU, allocatableVGPU, allocatableVGPU, labels, annotations)
+}
+
+// gpuNodeListJSONFull returns a NodeList body with independent capacity and
+// allocatable values. Used to simulate nodes where capacity > 0 but
+// allocatable = 0 (all devices in use) for device_full tests.
+func gpuNodeListJSONFull(t *testing.T, capacityGPU, allocatableGPU, capacityVGPU, allocatableVGPU string, labels map[string]string, annotations map[string]string) string {
+	t.Helper()
+	labelJSON := `"kubernetes.io/hostname": "ani-gpu-1"`
+	for k, v := range labels {
+		encoded, _ := json.Marshal(v)
+		labelJSON += `, ` + `"` + k + `": ` + string(encoded)
+	}
+	annJSON := ""
+	for k, v := range annotations {
+		if annJSON != "" {
+			annJSON += ", "
 		}
-		if device.ResourceName != "nvidia.com/gpu" {
-			t.Fatalf("device[%d].ResourceName = %q, want nvidia.com/gpu", i, device.ResourceName)
-		}
-		if device.Model != "NVIDIA GeForce RTX 4090" {
-			t.Fatalf("device[%d].Model = %q, want NVIDIA GeForce RTX 4090", i, device.Model)
-		}
-		if device.MemoryMiB != 49140 {
-			t.Fatalf("device[%d].MemoryMiB = %d, want 49140", i, device.MemoryMiB)
-		}
+		encoded, _ := json.Marshal(v)
+		annJSON += `"` + k + `": ` + string(encoded)
+	}
+	annotationsSection := ""
+	if annJSON != "" {
+		annotationsSection = `,"annotations": {` + annJSON + `}`
+	}
+	return `{
+  "items": [{
+    "metadata": {
+      "name": "ani-gpu-1",
+      "labels": {` + labelJSON + `}` + annotationsSection + `
+    },
+    "status": {
+      "capacity": {"nvidia.com/gpu": "` + capacityGPU + `", "nvidia.com/vgpu": "` + capacityVGPU + `"},
+      "allocatable": {"nvidia.com/gpu": "` + allocatableGPU + `", "nvidia.com/vgpu": "` + allocatableVGPU + `"},
+      "nodeInfo": {"kubeletVersion": "v1.36.1"},
+      "conditions": [{"type": "Ready", "status": "True", "reason": "KubeletReady"}]
+    }
+  }]
+}`
+}
+
+func TestListSpecAvailabilityAvailable(t *testing.T) {
+	// Quota: total=10, used=2, reserved=1 → remaining=7
+	// Spec: wholecard, GPUType matches node GPUSpec
+	// Wholecard device count = nvidia.com/gpu allocatable = 4
+	// AvailableCount = min(7, 4) = 4
+	body := gpuNodeListJSONWithLabels(t, "4", "0",
+		map[string]string{
+			"ani.kubercloud.io/gpu-mode": "wholecard",
+			"ani.kubercloud.io/gpu-spec": "NVIDIA-A100-SXM4-80GB",
+		},
+		nil, // wholecard reads nvidia.com/gpu allocatable, not the volcano annotation
+	)
+	specStore := stubSpecStore{specs: []ports.GPUSpecCRD{
+		{ID: "a100-wholecard", GPUType: "NVIDIA-A100-SXM4-80GB", GPUMode: "wholecard", Shares: 1},
+	}}
+	quotaStore := stubQuotaStore{view: ports.QuotaView{
+		Total:    map[ports.ResourceType]int64{ports.QuotaGPUCount: 10},
+		Used:     map[ports.ResourceType]int64{ports.QuotaGPUCount: 2},
+		Reserved: map[ports.ResourceType]int64{ports.QuotaGPUCount: 1},
+	}}
+	inventory := newTestGPUInventoryWithSpecStore(t, body, specStore, quotaStore)
+	result, err := inventory.ListSpecAvailability(context.Background(), "tenant-a")
+	if err != nil {
+		t.Fatalf("ListSpecAvailability error = %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("len(result) = %d, want 1", len(result))
+	}
+	avail := result[0]
+	if avail.SpecID != "a100-wholecard" {
+		t.Fatalf("SpecID = %q, want a100-wholecard", avail.SpecID)
+	}
+	if avail.Status != ports.GPUSpecStatusAvailable {
+		t.Fatalf("Status = %q, want available", avail.Status)
+	}
+	if !avail.HasMatchingNodes {
+		t.Fatalf("HasMatchingNodes = false, want true")
+	}
+	if avail.AvailableCount != 4 {
+		t.Fatalf("AvailableCount = %d, want 4", avail.AvailableCount)
+	}
+	if avail.DeviceIdleCount != 4 {
+		t.Fatalf("DeviceIdleCount = %d, want 4", avail.DeviceIdleCount)
+	}
+	if !avail.HasIdleDevices {
+		t.Fatalf("HasIdleDevices = false, want true")
+	}
+}
+
+func TestListSpecAvailabilityFull(t *testing.T) {
+	// Quota: total=5, used=5, reserved=0 → remaining=0 → status=full
+	// (wholecard node with nvidia.com/gpu allocatable=4, but quota
+	// exhausted takes precedence over device count)
+	body := gpuNodeListJSONWithLabels(t, "4", "0",
+		map[string]string{
+			"ani.kubercloud.io/gpu-mode": "wholecard",
+			"ani.kubercloud.io/gpu-spec": "NVIDIA-A100-SXM4-80GB",
+		},
+		nil,
+	)
+	specStore := stubSpecStore{specs: []ports.GPUSpecCRD{
+		{ID: "a100-wholecard", GPUType: "NVIDIA-A100-SXM4-80GB", GPUMode: "wholecard", Shares: 1},
+	}}
+	quotaStore := stubQuotaStore{view: ports.QuotaView{
+		Total:    map[ports.ResourceType]int64{ports.QuotaGPUCount: 5},
+		Used:     map[ports.ResourceType]int64{ports.QuotaGPUCount: 5},
+		Reserved: map[ports.ResourceType]int64{},
+	}}
+	inventory := newTestGPUInventoryWithSpecStore(t, body, specStore, quotaStore)
+	result, err := inventory.ListSpecAvailability(context.Background(), "tenant-a")
+	if err != nil {
+		t.Fatalf("ListSpecAvailability error = %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("len(result) = %d, want 1", len(result))
+	}
+	avail := result[0]
+	if avail.Status != ports.GPUSpecStatusFull {
+		t.Fatalf("Status = %q, want full", avail.Status)
+	}
+	if avail.AvailableCount != 0 {
+		t.Fatalf("AvailableCount = %d, want 0", avail.AvailableCount)
+	}
+	if !avail.HasMatchingNodes {
+		t.Fatalf("HasMatchingNodes = false, want true (nodes match but quota is full)")
+	}
+}
+
+func TestListSpecAvailabilityDeviceFull(t *testing.T) {
+	// Quota: remaining=5, but nvidia.com/gpu allocatable=0 (capacity=4 but
+	// all allocated) → device_idle_count=0 → device_full.
+	// The node still advertises capacity > 0 so hasGPUResource keeps it;
+	// gpuAllocatableCount reads the allocatable map (which is 0).
+	body := gpuNodeListJSONFull(t, "4", "0", "0", "0",
+		map[string]string{
+			"ani.kubercloud.io/gpu-mode": "wholecard",
+			"ani.kubercloud.io/gpu-spec": "NVIDIA-A100-SXM4-80GB",
+		},
+		nil,
+	)
+	specStore := stubSpecStore{specs: []ports.GPUSpecCRD{
+		{ID: "a100-wholecard", GPUType: "NVIDIA-A100-SXM4-80GB", GPUMode: "wholecard", Shares: 1},
+	}}
+	quotaStore := stubQuotaStore{view: ports.QuotaView{
+		Total:    map[ports.ResourceType]int64{ports.QuotaGPUCount: 10},
+		Used:     map[ports.ResourceType]int64{ports.QuotaGPUCount: 5},
+		Reserved: map[ports.ResourceType]int64{},
+	}}
+	inventory := newTestGPUInventoryWithSpecStore(t, body, specStore, quotaStore)
+	result, err := inventory.ListSpecAvailability(context.Background(), "tenant-a")
+	if err != nil {
+		t.Fatalf("ListSpecAvailability error = %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("len(result) = %d, want 1", len(result))
+	}
+	avail := result[0]
+	if avail.Status != ports.GPUSpecStatusDeviceFull {
+		t.Fatalf("Status = %q, want device_full", avail.Status)
+	}
+	if avail.AvailableCount != 0 {
+		t.Fatalf("AvailableCount = %d, want 0", avail.AvailableCount)
+	}
+	if !avail.HasMatchingNodes {
+		t.Fatalf("HasMatchingNodes = false, want true (nodes match but no idle devices)")
+	}
+	if avail.HasIdleDevices {
+		t.Fatalf("HasIdleDevices = true, want false")
+	}
+}
+
+func TestListSpecAvailabilityUnavailable(t *testing.T) {
+	// Node has wholecard labels, but spec is vGPU → no matching nodes → unavailable
+	body := gpuNodeListJSONWithLabels(t, "4", "0",
+		map[string]string{
+			"ani.kubercloud.io/gpu-mode": "wholecard",
+			"ani.kubercloud.io/gpu-spec": "NVIDIA-A100-SXM4-80GB",
+		},
+		map[string]string{
+			"volcano.sh/node-vgpu-register": `[{"id":"GPU-1"}]`,
+		},
+	)
+	specStore := stubSpecStore{specs: []ports.GPUSpecCRD{
+		{ID: "l40s-vgpu-half", GPUType: "NVIDIA-L40S-HALF", GPUMode: "vgpu", Shares: 2},
+	}}
+	quotaStore := stubQuotaStore{view: ports.QuotaView{
+		Total:    map[ports.ResourceType]int64{ports.QuotaGPUCount: 10},
+		Used:     map[ports.ResourceType]int64{ports.QuotaGPUCount: 0},
+		Reserved: map[ports.ResourceType]int64{},
+	}}
+	inventory := newTestGPUInventoryWithSpecStore(t, body, specStore, quotaStore)
+	result, err := inventory.ListSpecAvailability(context.Background(), "tenant-a")
+	if err != nil {
+		t.Fatalf("ListSpecAvailability error = %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("len(result) = %d, want 1", len(result))
+	}
+	avail := result[0]
+	if avail.Status != ports.GPUSpecStatusUnavailable {
+		t.Fatalf("Status = %q, want unavailable", avail.Status)
+	}
+	if avail.AvailableCount != 0 {
+		t.Fatalf("AvailableCount = %d, want 0", avail.AvailableCount)
+	}
+	if avail.HasMatchingNodes {
+		t.Fatalf("HasMatchingNodes = true, want false (no matching nodes)")
+	}
+}
+
+func TestListSpecAvailabilityVGPUAvailable(t *testing.T) {
+	// vGPU spec matches node with gpu-mode=vgpu and gpu-sharing-spec matching GPUType
+	// Volcano annotation: 2 physical GPUs, each split into 4 vGPU slices → total=8 slices
+	// Quota remaining=10 → AvailableCount = min(10, 8) = 8
+	// GPUCount = 1 (1 vGPU slice = 1 card per instance request)
+	body := gpuNodeListJSONWithLabels(t, "0", "4",
+		map[string]string{
+			"ani.kubercloud.io/gpu-mode":           "vgpu",
+			"ani.kubercloud.io/gpu-sharing-spec":   "NVIDIA-L40S-HALF",
+			"ani.kubercloud.io/gpu-sharing-policy": "half",
+		},
+		map[string]string{
+			"volcano.sh/node-vgpu-register": "GPU-aaa,4,4914,NVIDIA-L40S,true,hami-core:GPU-bbb,4,4914,NVIDIA-L40S,true,hami-core:",
+		},
+	)
+	specStore := stubSpecStore{specs: []ports.GPUSpecCRD{
+		{ID: "l40s-vgpu-half", GPUType: "NVIDIA-L40S-HALF", GPUMode: "vgpu", Shares: 2},
+	}}
+	quotaStore := stubQuotaStore{view: ports.QuotaView{
+		Total:    map[ports.ResourceType]int64{ports.QuotaGPUCount: 10},
+		Used:     map[ports.ResourceType]int64{ports.QuotaGPUCount: 0},
+		Reserved: map[ports.ResourceType]int64{},
+	}}
+	inventory := newTestGPUInventoryWithSpecStore(t, body, specStore, quotaStore)
+	result, err := inventory.ListSpecAvailability(context.Background(), "tenant-a")
+	if err != nil {
+		t.Fatalf("ListSpecAvailability error = %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("len(result) = %d, want 1", len(result))
+	}
+	avail := result[0]
+	if avail.Status != ports.GPUSpecStatusAvailable {
+		t.Fatalf("Status = %q, want available", avail.Status)
+	}
+	if avail.AvailableCount != 8 {
+		t.Fatalf("AvailableCount = %d, want 8", avail.AvailableCount)
+	}
+	if !avail.HasMatchingNodes {
+		t.Fatalf("HasMatchingNodes = false, want true")
+	}
+	if avail.DeviceIdleCount != 8 {
+		t.Fatalf("DeviceIdleCount = %d, want 8", avail.DeviceIdleCount)
+	}
+	if avail.GPUCount != 1 {
+		t.Fatalf("GPUCount = %d, want 1 (1 vGPU slice = 1 card per instance)", avail.GPUCount)
+	}
+}
+
+func TestListSpecAvailabilityUnsupportedWithoutStores(t *testing.T) {
+	// Without specStore/quotaStore injected, ListSpecAvailability should
+	// return ErrUnsupported.
+	inventory := newTestGPUInventory(t, gpuNodeListJSON(t, "1", "0"))
+	_, err := inventory.ListSpecAvailability(context.Background(), "tenant-a")
+	if err == nil {
+		t.Fatalf("error nil, want ErrUnsupported")
+	}
+	if !errors.Is(err, ports.ErrUnsupported) {
+		t.Fatalf("error = %v, want ErrUnsupported", err)
+	}
+}
+
+func TestListSpecAvailabilityUsesAllocatedGPUCount(t *testing.T) {
+	// plan.md §4.4.1: quota_remaining = allocated_gpu_count - used - reserved
+	// total=10, allocated=4, used=1, reserved=1 → remaining=2 (not 8)
+	// device_idle=4 → AvailableCount = min(2, 4) = 2
+	body := gpuNodeListJSONWithLabels(t, "4", "0",
+		map[string]string{
+			"ani.kubercloud.io/gpu-mode": "wholecard",
+			"ani.kubercloud.io/gpu-spec": "NVIDIA-A100-SXM4-80GB",
+		},
+		nil,
+	)
+	specStore := stubSpecStore{specs: []ports.GPUSpecCRD{
+		{ID: "a100-wholecard", GPUType: "NVIDIA-A100-SXM4-80GB", GPUMode: "wholecard", Shares: 1},
+	}}
+	quotaStore := stubQuotaStore{view: ports.QuotaView{
+		Total:    map[ports.ResourceType]int64{ports.QuotaGPUCount: 10},
+		Used:     map[ports.ResourceType]int64{ports.QuotaGPUCount: 1},
+		Reserved: map[ports.ResourceType]int64{ports.QuotaGPUCount: 1},
+	}}
+	quotaAdmin := stubQuotaAdmin{reservation: ports.ReservationView{
+		TenantID:          "tenant-a",
+		AllocatedGPUCount: 4,
+		Used:              1,
+		Reserved:          1,
+		Available:         2,
+	}}
+	inventory := newTestGPUInventoryWithSpecStore(t, body, specStore, quotaStore)
+	inventory.WithQuotaAdmin(quotaAdmin)
+	result, err := inventory.ListSpecAvailability(context.Background(), "tenant-a")
+	if err != nil {
+		t.Fatalf("ListSpecAvailability error = %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("len(result) = %d, want 1", len(result))
+	}
+	avail := result[0]
+	if avail.AvailableCount != 2 {
+		t.Fatalf("AvailableCount = %d, want 2 (allocated=4 - used=1 - reserved=1 = 2, not total=10 - 1 - 1 = 8)", avail.AvailableCount)
+	}
+}
+
+func TestListSpecAvailabilityFallsBackToTotalWithoutQuotaAdmin(t *testing.T) {
+	// When quotaAdmin is not injected, fall back to total.
+	// total=10, used=2, reserved=1 → remaining=7
+	// device_idle=4 → AvailableCount = min(7, 4) = 4
+	body := gpuNodeListJSONWithLabels(t, "4", "0",
+		map[string]string{
+			"ani.kubercloud.io/gpu-mode": "wholecard",
+			"ani.kubercloud.io/gpu-spec": "NVIDIA-A100-SXM4-80GB",
+		},
+		nil,
+	)
+	specStore := stubSpecStore{specs: []ports.GPUSpecCRD{
+		{ID: "a100-wholecard", GPUType: "NVIDIA-A100-SXM4-80GB", GPUMode: "wholecard", Shares: 1},
+	}}
+	quotaStore := stubQuotaStore{view: ports.QuotaView{
+		Total:    map[ports.ResourceType]int64{ports.QuotaGPUCount: 10},
+		Used:     map[ports.ResourceType]int64{ports.QuotaGPUCount: 2},
+		Reserved: map[ports.ResourceType]int64{ports.QuotaGPUCount: 1},
+	}}
+	inventory := newTestGPUInventoryWithSpecStore(t, body, specStore, quotaStore)
+	// No WithQuotaAdmin — should fall back to total.
+	result, err := inventory.ListSpecAvailability(context.Background(), "tenant-a")
+	if err != nil {
+		t.Fatalf("ListSpecAvailability error = %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("len(result) = %d, want 1", len(result))
+	}
+	avail := result[0]
+	if avail.AvailableCount != 4 {
+		t.Fatalf("AvailableCount = %d, want 4 (fallback: total=10 - used=2 - reserved=1 = 7, min(7,4)=4)", avail.AvailableCount)
 	}
 }
 

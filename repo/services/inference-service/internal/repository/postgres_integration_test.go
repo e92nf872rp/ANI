@@ -120,7 +120,7 @@ INSERT INTO inference_services(id, tenant_id, name, model_version_id, replicas, 
 VALUES($1, $2, 'legacy-gpu', $3, 2, 'A100', 'stopped')`, legacyID, tenantID, versionID); err != nil {
 		t.Fatalf("seed legacy row: %v", err)
 	}
-	migrationPath := filepath.Join("..", "..", "..", "..", "deploy", "migrations", "20260814_001_inference_control_plane.sql")
+	migrationPath := filepath.Join("..", "..", "..", "..", "deploy", "migrations", "20260814000100_inference_control_plane.sql")
 	migration, err := os.ReadFile(migrationPath)
 	if err != nil {
 		t.Fatal(err)

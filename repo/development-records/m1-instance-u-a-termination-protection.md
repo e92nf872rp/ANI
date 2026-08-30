@@ -16,7 +16,7 @@
 | `pkg/adapters/runtime/instance_service.go` | 修改 | lifecycle precheck 拦截 VM 危险操作，记录 failed operation、precheck 和 destructive impact |
 | `pkg/adapters/runtime/instance_service_test.go` | 修改 | 覆盖 protected VM stop 被拒绝、不调用 provider、不更新实例状态 |
 | `pkg/adapters/runtime/instance_store.go` | 修改 | 持久化/读取 `lifecycle_policy` |
-| `deploy/migrations/20260519_004_instance_u_vm_protection.sql` | 新增 | 增加 `workload_instances.lifecycle_policy`，扩展 operation CHECK enum |
+| `deploy/migrations/20260519000400_instance_u_vm_protection.sql` | 新增 | 增加 `workload_instances.lifecycle_policy`，扩展 operation CHECK enum |
 | `services/ani-gateway/internal/router/demo_instances.go` | 修改 | create request/response 支持 `termination_protection` |
 | `scripts/validate_core_alpha_contract.py` | 修改 | 守卫 lifecycle enum、port constants 和 migration 004 |
 

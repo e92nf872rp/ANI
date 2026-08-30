@@ -142,6 +142,41 @@ func TestCreateResolvesReadyModelAndPersistsPendingOperation(t *testing.T) {
 	}
 }
 
+func TestCreateFreezesEmbeddingTask(t *testing.T) {
+	tenantID := uuid.MustParse("40000000-0000-0000-0000-000000000004")
+	version := readyVersion()
+	version.CPUProfile.ID = "vllm-embed-cpu"
+	version.CPUProfile.Task = domain.InferenceTaskEmbed
+	store := &storeStub{create: func(resource domain.Service, operation domain.Operation) (repository.CreateResult, error) {
+		if resource.DesiredSpec.ExecutionProfile.Task != domain.InferenceTaskEmbed {
+			t.Fatalf("execution task = %q, want %q", resource.DesiredSpec.ExecutionProfile.Task, domain.InferenceTaskEmbed)
+		}
+		return repository.CreateResult{Service: resource, Operation: operation}, nil
+	}}
+
+	resource, _, err := NewCreator(store, &catalogStub{resolved: version}, time.Now).
+		Create(context.Background(), tenantID, validInput())
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if resource.DesiredSpec.ExecutionProfile.Task != domain.InferenceTaskEmbed {
+		t.Fatalf("persisted execution task = %q, want %q", resource.DesiredSpec.ExecutionProfile.Task, domain.InferenceTaskEmbed)
+	}
+}
+
+func TestLegacyEmptyInferenceTaskDefaultsToGenerate(t *testing.T) {
+	if got := domain.NormalizeInferenceTask(""); got != domain.InferenceTaskGenerate {
+		t.Fatalf("NormalizeInferenceTask(\"\") = %q, want %q", got, domain.InferenceTaskGenerate)
+	}
+}
+
+func TestLegacyUnknownInferenceTaskDefaultsToGenerate(t *testing.T) {
+	task := domain.InferenceTask("unknown")
+	if got := domain.NormalizeInferenceTask(task); got != domain.InferenceTaskGenerate {
+		t.Fatalf("NormalizeInferenceTask(%q) = %q, want %q", task, got, domain.InferenceTaskGenerate)
+	}
+}
+
 func TestCreateRejectsModelNotReadyBeforeDatabaseMutation(t *testing.T) {
 	catalogPort := &catalogStub{resolved: catalog.ModelVersion{ID: readyVersion().ID, Ready: false}}
 	store := &storeStub{create: func(domain.Service, domain.Operation) (repository.CreateResult, error) {
@@ -351,6 +386,9 @@ func TestCreateRejectsInvalidResourceAndPlacementCombinations(t *testing.T) {
 		{name: "unknown placement", mutate: func(input *CreateInput) { input.Spec.PlacementMode = "somewhere" }},
 		{name: "distributed cpu", mutate: func(input *CreateInput) { input.Spec.PlacementMode = "multi_node" }},
 		{name: "missing image", mutate: func(input *CreateInput) { input.ImageID = ""; input.ImageRef = "" }},
+		{name: "negative accelerator memory", mutate: func(input *CreateInput) {
+			input.Spec.Accelerator = &domain.Accelerator{SpecID: "gpu-a100", CountPerReplica: 1, MemoryMB: -1}
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

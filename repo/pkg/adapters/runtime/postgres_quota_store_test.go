@@ -193,11 +193,11 @@ func TestPostgresQuotaStoreListNoFilter(t *testing.T) {
 		{values: []any{testTenantID}},
 		{values: []any{testTenantID2}},
 	}})
-	// step2：两租户的全部维度
+	// step2：两租户的全部维度（含 tenant_name）
 	tx.enqueueQuery(&quotaFakeRows{rows: []quotaFakeRow{
-		{values: []any{testTenantID, string(ports.QuotaGPUCount), int64(8), int64(2), int64(1)}},
-		{values: []any{testTenantID, string(ports.QuotaCPUCore), int64(16), int64(0), int64(4)}},
-		{values: []any{testTenantID2, string(ports.QuotaGPUCount), int64(4), int64(0), int64(0)}},
+		{values: []any{testTenantID, "tenant-a", string(ports.QuotaGPUCount), int64(8), int64(2), int64(1)}},
+		{values: []any{testTenantID, "tenant-a", string(ports.QuotaCPUCore), int64(16), int64(0), int64(4)}},
+		{values: []any{testTenantID2, "tenant-b", string(ports.QuotaGPUCount), int64(4), int64(0), int64(0)}},
 	}})
 	q := NewPostgresQuota(&quotaFakeStore{tx: tx})
 
@@ -263,7 +263,7 @@ func TestPostgresQuotaStoreListPaginationCursor(t *testing.T) {
 		{values: []any{testTenantID2}},
 	}})
 	tx1.enqueueQuery(&quotaFakeRows{rows: []quotaFakeRow{
-		{values: []any{testTenantID, string(ports.QuotaGPUCount), int64(8), int64(0), int64(0)}},
+		{values: []any{testTenantID, "tenant-a", string(ports.QuotaGPUCount), int64(8), int64(0), int64(0)}},
 	}})
 	r1, err := NewPostgresQuota(&quotaFakeStore{tx: tx1}).List(context.Background(), ports.QuotaListRequest{Limit: 1})
 	if err != nil {
@@ -282,7 +282,7 @@ func TestPostgresQuotaStoreListPaginationCursor(t *testing.T) {
 		{values: []any{testTenantID2}},
 	}})
 	tx2.enqueueQuery(&quotaFakeRows{rows: []quotaFakeRow{
-		{values: []any{testTenantID2, string(ports.QuotaGPUCount), int64(4), int64(0), int64(0)}},
+		{values: []any{testTenantID2, "tenant-b", string(ports.QuotaGPUCount), int64(4), int64(0), int64(0)}},
 	}})
 	r2, err := NewPostgresQuota(&quotaFakeStore{tx: tx2}).List(context.Background(), ports.QuotaListRequest{Limit: 1, Cursor: testTenantID})
 	if err != nil {
@@ -330,7 +330,7 @@ func TestPostgresQuotaStoreListHasMore(t *testing.T) {
 		{values: []any{testTenantID2}},
 	}})
 	tx.enqueueQuery(&quotaFakeRows{rows: []quotaFakeRow{
-		{values: []any{testTenantID, string(ports.QuotaGPUCount), int64(8), int64(0), int64(0)}},
+		{values: []any{testTenantID, "tenant-a", string(ports.QuotaGPUCount), int64(8), int64(0), int64(0)}},
 	}})
 	q := NewPostgresQuota(&quotaFakeStore{tx: tx})
 

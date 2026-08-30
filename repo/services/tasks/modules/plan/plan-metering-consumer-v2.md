@@ -281,7 +281,7 @@ MaxInflight=1 的吞吐降低对低频生命周期事件(数百实例规模)完�
 通用计量落地表。一张表覆盖所有维度。
 
 ```sql
--- repo/deploy/migrations/20260731_001_metering_usage.sql
+-- repo/deploy/migrations/20260731000100_metering_usage.sql
 -- 执行顺序:ROLE → TABLE → GRANT
 -- 0) 采集写侧专用角色(类比 init_schema.sql:26 创建 ani_outbox_publisher BYPASSRLS)
 CREATE ROLE ani_metering_writer BYPASSRLS NOLOGIN;

@@ -103,6 +103,15 @@ type Config struct {
 	WorkloadReconcileLeaderLeaseName       string
 	WorkloadReconcileLeaderLeaseTTL        int
 	WorkloadReconcileLeaderRenewInterval   int
+
+	// GPUQuotaEnabled toggles the GPU quota three-gate check (SPEC §5.1).
+	// When false, TryManyTx/Confirm/Cancel/Release are all skipped and
+	// quota is fully bypassed. Default false.
+	GPUQuotaEnabled bool
+	// ProvisioningTimeoutMin is the maximum minutes an instance may stay
+	// in the provisioning state before the reconciler marks it failed and
+	// Cancels the reserved quota (SPEC §5.1). Default 10.
+	ProvisioningTimeoutMin int
 }
 
 // MustConnect initializes all dependencies. Exits the process if any connection fails.
@@ -352,6 +361,12 @@ func (c Config) withEnvironmentOverrides() Config {
 	}
 	if value := os.Getenv("WORKLOAD_RECONCILE_LEADER_RENEW_INTERVAL_SECONDS"); value != "" {
 		c.WorkloadReconcileLeaderRenewInterval = parseInt(value, c.WorkloadReconcileLeaderRenewInterval)
+	}
+	if value := os.Getenv("GPU_QUOTA_ENABLED"); value != "" {
+		c.GPUQuotaEnabled = parseBool(value)
+	}
+	if value := os.Getenv("PROVISIONING_TIMEOUT_MIN"); value != "" {
+		c.ProvisioningTimeoutMin = parseInt(value, c.ProvisioningTimeoutMin)
 	}
 	return c
 }

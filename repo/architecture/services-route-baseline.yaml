@@ -149,3 +149,69 @@ exceptions:
     status: accepted_baseline
     owner: ANI Services
     reason: OpenAPI 已声明查询管理员操作历史，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: GET
+    path: /tenants/{tenantId}/admins/{userId}/changeable-roles
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明查询可变更角色选项，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: POST
+    path: /platform-admins
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明创建平台运营账号，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: GET
+    path: /platform-admins
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明平台运营账号列表，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: GET
+    path: /platform-admins/roles
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明平台运营账号角色列表，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: GET
+    path: /platform-admins/{userId}
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明平台运营账号详情，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: DELETE
+    path: /platform-admins/{userId}
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明软删除平台运营账号，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: PUT
+    path: /platform-admins/{userId}/role
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明修改平台运营账号角色，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: POST
+    path: /platform-admins/{userId}/reset-password
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明重置平台运营账号密码，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: POST
+    path: /platform-admins/{userId}/disable
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明禁用平台运营账号，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: POST
+    path: /platform-admins/{userId}/enable
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明启用平台运营账号，当前 Gateway 尚未注册对应过渡路由。
+  - kind: spec_not_in_code
+    method: GET
+    path: /platform-admins/{userId}/audit-logs
+    status: accepted_baseline
+    owner: ANI Services
+    reason: OpenAPI 已声明查询平台运营账号操作历史，当前 Gateway 尚未注册对应过渡路由。

@@ -197,9 +197,9 @@ def validate_gateway(root: Path, errors: list[str]) -> None:
 
 
 def validate_persistence(root: Path, errors: list[str]) -> None:
-    migration = root / "deploy/migrations/20260520_005_network_resources.sql"
+    migration = root / "deploy/migrations/20260520000500_network_resources.sql"
     if not migration.exists():
-        errors.append("missing network persistence migration 20260520_005_network_resources.sql")
+        errors.append("missing network persistence migration 20260520000500_network_resources.sql")
         return
     sql = migration.read_text(encoding="utf-8")
     for table in (

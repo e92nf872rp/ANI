@@ -35,4 +35,8 @@ var (
 	ErrMetadataTenantTxCommit   = errors.New("metadata tenant tx commit")
 	ErrMetadataPlatformTxBegin  = errors.New("metadata platform tx begin")
 	ErrMetadataPlatformTxCommit = errors.New("metadata platform tx commit")
+
+	// Reservation sentinel errors (BOSS reservation management).
+	ErrReservationExceedsQuota = errors.New("allocated_gpu_count exceeds total quota")
+	ErrReservedInsufficient    = errors.New("reserved quota insufficient: allocated - used - reserved < request")
 )

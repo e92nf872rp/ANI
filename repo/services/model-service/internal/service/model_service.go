@@ -76,9 +76,12 @@ func (s *ModelService) GetModel(ctx context.Context, req *modelv1.GetModelReques
 		return nil, toStatus(err)
 	}
 	ctx = withTenant(ctx, tenantID)
-	model, err := s.repo.GetByID(ctx, s.db, id)
+	model, err := s.repo.GetByID(ctx, s.db, tenantID, id)
 	if err != nil {
 		return nil, toStatus(err)
+	}
+	if !modelOwnedBy(model, tenantID) {
+		return nil, toStatus(types.Wrapf(types.ErrNotFound, "model not found"))
 	}
 	return modelToPB(model), nil
 }
@@ -89,9 +92,12 @@ func (s *ModelService) GetModelVersion(ctx context.Context, req *modelv1.GetMode
 		return nil, toStatus(err)
 	}
 	ctx = withTenant(ctx, tenantID)
-	model, version, err := s.repo.GetVersionByID(ctx, s.db, versionID)
+	model, version, err := s.repo.GetVersionByID(ctx, s.db, tenantID, versionID)
 	if err != nil {
 		return nil, toStatus(err)
+	}
+	if !modelOwnedBy(model, tenantID) {
+		return nil, toStatus(types.Wrapf(types.ErrNotFound, "model not found"))
 	}
 	versionPB := versionToPB(version)
 	versionPB.EncryptHint = ""
@@ -115,12 +121,18 @@ func (s *ModelService) ListModels(ctx context.Context, req *modelv1.ListModelsRe
 		cursor = req.GetPage().GetCursor()
 	}
 	models, total, nextCursor, err := s.repo.List(ctx, s.db, repo.ListFilter{
-		Status: req.GetStatus(),
-		Limit:  limit,
-		Cursor: cursor,
+		TenantID: tenantID,
+		Status:   req.GetStatus(),
+		Limit:    limit,
+		Cursor:   cursor,
 	})
 	if err != nil {
 		return nil, toStatus(err)
+	}
+	for _, model := range models {
+		if !modelOwnedBy(model, tenantID) {
+			return nil, status.Error(codes.Internal, "internal error")
+		}
 	}
 	out := &modelv1.ListModelsResponse{
 		Models: make([]*modelv1.Model, 0, len(models)),
@@ -146,7 +158,7 @@ func (s *ModelService) DeleteModel(ctx context.Context, req *modelv1.DeleteModel
 		return nil, status.Errorf(codes.Internal, "begin transaction")
 	}
 	defer rollback(ctx, tx)
-	if err := s.repo.SoftDelete(ctx, tx, id); err != nil {
+	if err := s.repo.SoftDelete(ctx, tx, tenantID, id); err != nil {
 		return nil, toStatus(err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -171,6 +183,7 @@ func (s *ModelService) CreateModelVersion(ctx context.Context, req *modelv1.Crea
 	defer rollback(ctx, tx)
 
 	version, err := s.repo.CreateVersion(ctx, tx, repo.CreateVersionReq{
+		TenantID:       tenantID,
 		ModelID:        modelID,
 		Version:        req.GetVersion(),
 		Format:         req.GetFormat(),
@@ -291,6 +304,10 @@ func parseTenantAndID(tenantID, id string) (uuid.UUID, uuid.UUID, error) {
 
 func withTenant(ctx context.Context, tenantID uuid.UUID) context.Context {
 	return types.WithTenant(ctx, &types.TenantContext{TenantID: tenantID})
+}
+
+func modelOwnedBy(model *repo.Model, tenantID uuid.UUID) bool {
+	return model != nil && tenantID != uuid.Nil && model.TenantID == tenantID
 }
 
 func modelToPB(model *repo.Model) *modelv1.Model {

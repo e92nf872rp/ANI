@@ -2,7 +2,7 @@
 
 > **批次类型：** Feature batch（BOSS 租户配额套餐功能流 Issue #4）
 > **完成日期：** 2026-08-11
-> **Scope：** `repo/services/ani-gateway/internal/router/tenant_plans.go`、`repo/services/ani-gateway/internal/router/router.go`、`repo/deploy/migrations/20260810_003_alter_table_structures.sql`
+> **Scope：** `repo/services/ani-gateway/internal/router/tenant_plans.go`、`repo/services/ani-gateway/internal/router/router.go`、`repo/deploy/migrations/20260810000300_alter_table_structures.sql`
 > **依赖：** #1 OpenAPI 契约、#2 gRPC 接口与 ports
 > **Product line：** boss
 
