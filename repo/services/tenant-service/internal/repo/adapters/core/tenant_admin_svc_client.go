@@ -374,10 +374,6 @@ func decodeTenantUserObject(obj map[string]any) (ports.AdminWithTenant, error) {
 	}, nil
 }
 
-func decodePermissionEntries(raw any) ([]any, error) {
-	return decodePermissionsAny(raw)
-}
-
 func parseOptionalTimeField(m map[string]any, key string) *time.Time {
 	t := parseTimeField(m, key)
 	if t.IsZero() {
