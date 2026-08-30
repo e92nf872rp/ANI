@@ -97,6 +97,28 @@
 | QUOTA-POLICY-ISSUE-12 | 可绑定租户列表（issue-12）：`ListBindableTenants` GET /tenant-plans/{planId}/bindable-tenants（status≠disabled 且 plan_id IS DISTINCT FROM planId，按 name 排序，无 search）；单测覆盖正常/404/空列表 | quota-policy-issue-12-list-bindable-tenants-api.md |
 | QUOTA-POLICY-ISSUE-13 | 查询操作历史（issue-13）：`ListTenantPlanAuditLogs` GET /tenant-plans/{planId}/audit-logs + store 游标分页（`resource='tenant_plan' AND details->>'plan_id'`）+ 网关 `auditLogJSON` 手动映射 + details→structpb.NewStruct + next_cursor null 处理；review-it 1 finding（action/result 过滤未实现，设计决策） | quota-policy-issue-13-audit-logs-api.md |
 | QUOTA-POLICY-ISSUE-14-18 | BOSS 配额套餐前端（issue-014~018）：`/tenants/plans` 列表+创建 Wizard、详情页（概览+4 Tab）、限额 Tab 行内编辑+同步提示、绑定租户 Tab+Select、操作历史 Tab 游标分页+本地过滤；`tenant-plans.ts` 17 API 函数 + `canWritePlatform` + `planStatus.tsx` + `quotaResourceOrder.ts`；对齐当前 audit API（无服务端筛选/无 user_id）；`tsc --noEmit` PASS | quota-policy-issue-14-18-boss-frontend.md |
+
+### BOSS 租户管理员功能流（2026-08）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| TENANT-ADMIN-ISSUE-001 | OpenAPI 契约：Services v1.yaml 13 端点 + 错误码表（FORBIDDEN/USER_STATE_INVALID，IDEMPOTENCY_* 为网关中间件） | tenant-admin-issue-001-openapi-contract.md |
+| TENANT-ADMIN-ISSUE-002 | 接口与结构体：TenantAdminStore（仅 invitation/audit）+ TenantAdminSvcClient（12 方法）+ TenantSvcClient（2 方法） | tenant-admin-issue-002-interfaces-data-model.md |
+| TENANT-ADMIN-ISSUE-003 | 数据库迁移：三个独立文件（20260821_001 建表 + 20260825_001 部分唯一索引 uk_tenant_admin_invitation_pending + 20260827000200 users ALTER） | tenant-admin-issue-03-database-migration.md |
+| TENANT-ADMIN-ISSUE-004 | 网关接入 | tenant-admin-issue-04-gateway-integration.md |
+| TENANT-ADMIN-ISSUE-005 | 可用租户列表 | tenant-admin-issue-005-available-tenants-api.md |
+| TENANT-ADMIN-ISSUE-006 | 邀请管理员 | tenant-admin-issue-006-invite-api.md |
+| TENANT-ADMIN-ISSUE-007 | 重发邀请 | tenant-admin-issue-007-resend-api.md |
+| TENANT-ADMIN-ISSUE-008 | 跨租户管理员列表：Core SDK ListTenantAdmins + 本地 Store ListInvitationFlags 内存合并；Go subtest 测试 | tenant-admin-issue-008-list-all-tenant-admins.md |
+| TENANT-ADMIN-ISSUE-009 | 管理员详情 | tenant-admin-issue-009-detail-api.md |
+| TENANT-ADMIN-ISSUE-010 | 可分配角色列表：返回 {id, name, tenant_id, permissions} | tenant-admin-issue-010-roles-api.md |
+| TENANT-ADMIN-ISSUE-011 | 修改角色：入参 role_id（UUID），约束非 platform-*、非 tenant-admin | tenant-admin-issue-011-role-change-and-query.md |
+| TENANT-ADMIN-ISSUE-012 | 重置密码：已软删除→404，禁用态允许 | tenant-admin-issue-012-reset-password.md |
+| TENANT-ADMIN-ISSUE-013 | 禁用/启用/删除：不改 status；重复 disable/enable 409 USER_STATE_INVALID | tenant-admin-issue-013-disable-enable-delete.md |
+| TENANT-ADMIN-ISSUE-014 | 操作历史：WHERE details->>'target_id'=userId，result 过滤 success/failure | tenant-admin-issue-014-audit-logs-api.md |
+| TENANT-ADMIN-DOC-ALIGNMENT | 文档对齐批次：以代码和 issue 为标准，5+ 轮深度审计修正 SPEC/UX/PRD/Plan 四份文档；14 项设计决策、4 张偏差表（spec/ux/prd/plan）、3 项 tradeoff、4 项 open question | tenant-admin-doc-alignment-batch.md |
+| TENANT-ADMIN-FEATURE-BATCH | 功能批次汇总：14 个 issue 全量实现完成（OpenAPI 契约 → 接口/数据模型 → DB 迁移 → 网关接入 → 13 端点端到端 → 多轮 review-it → 文档对齐）；13 项设计决策（Core/Services 边界拆分、全量拉取+内存合并、部分唯一索引竞态防护、审计统一/查询条件/枚举值、ResetPassword 禁用态策略、ChangeRole UUID 入参、Delete 不改 status、幂等键网关处理、接口重命名、迁移三文件拆分、Go subtest 命名）；5 张偏差表（vs SPEC/PRD/UX/Plan/Issue）；4 项 tradeoff；4 项 open question | tenant-admin-feature-batch.md |
+
 ### Metering Service（2026-08）
 
 | 批次 | 内容摘要 | 文件 |

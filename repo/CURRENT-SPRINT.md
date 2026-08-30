@@ -378,6 +378,44 @@ make validate-doc-entrypoints
 git diff --check
 ```
 
+## BOSS 租户管理员功能流（2026-08）
+
+> BOSS 平台租户管理员管理功能开发流，覆盖管理员全生命周期（OpenAPI 契约 → 接口/数据模型 → DB 迁移 → 网关接入 → 13 端点端到端实现 → 多轮 review-it → 文档对齐）。14 个 issue 全部实现完成。批次记录归档于 `development-records/tenant-admin-issue-*.md` 和 `tenant-admin-feature-batch.md`。
+
+| Issue | 描述 | 状态 | 证据 |
+|---|---|---|---|
+| #1 | OpenAPI 契约：13 端点 + 14 schema + 错误码表（FORBIDDEN/USER_STATE_INVALID，IDEMPOTENCY_* 为网关中间件） | ✅ 已完成 | `tenant-admin-issue-001-openapi-contract.md` |
+| #2 | 接口与数据模型：TenantAdminStore（仅 invitation/audit）+ TenantAdminSvcClient（12 方法）+ TenantSvcClient（2 方法）+ proto 13 RPC | ✅ 已完成 | `tenant-admin-issue-002-interfaces-data-model.md` |
+| #3 | 数据库迁移：三个独立文件（20260821_001 建表 + token_hash 唯一索引 + RLS、20260825_001 部分唯一索引 uk_tenant_admin_invitation_pending、20260827000200 users ALTER display_name + is_deleted + deleted_at） | ✅ 已完成 | `tenant-admin-issue-03-database-migration.md` |
+| #4 | 网关接入：REST→gRPC 转发 + Core DB 直连双路径，12 端点 + tenant_admin_resources.go + tenant_admin_runtime.go | ✅ 已完成 | `tenant-admin-issue-04-gateway-integration.md` |
+| #5 | 可用租户列表：ListAvailableTenants 端到端（gRPC → Core SDK HTTP → ani-gateway Core handler → PG bypass RLS） | ✅ 已完成 | `tenant-admin-issue-005-available-tenants-api.md` |
+| #6 | 邀请管理员：InviteTenantAdmin 10 步流程 + 部分唯一索引竞态防护 + ConstraintName 区分冲突 + 审计 best-effort | ✅ 已完成 | `tenant-admin-issue-006-invite-api.md` |
+| #7 | 重发邀请：ResendTenantAdminInvitation 8 步流程 + UpdateInvitation 冲突处理 + 终态错误 detail 区分 | ✅ 已完成 | `tenant-admin-issue-007-resend-api.md` |
+| #8 | 跨租户管理员列表：Core SDK ListTenantAdmins 全量拉取 + 本地 Store ListInvitationFlags 内存合并 + BatchGetUsers 三层贯通 + 27 sub-tests | ✅ 已完成 | `tenant-admin-issue-008-list-all-tenant-admins.md` |
+| #9 | 管理员详情：GetTenantAdminDetail + lazy expire 写回 DB + ErrStoreUnavailable/ErrCoreUnavailable 分离 | ✅ 已完成 | `tenant-admin-issue-009-detail-api.md` |
+| #10 | 可分配角色列表：ListTenantRoles + 排除 platform-* + 租户软删除后仅返回系统角色 + EXISTS 子查询 | ✅ 已完成 | `tenant-admin-issue-010-roles-api.md` |
+| #11 | 角色查询与修改：UpdateTenantAdminRole role_id UUID 全链路 + upsert 简化 + user_id 唯一索引 + GetTenantAdminRole + 5 轮 review-it | ✅ 已完成 | `tenant-admin-issue-011-role-change-and-query.md` |
+| #12 | 重置密码：ResetTenantAdminPassword + bcrypt cost=12 + 禁用态允许 + 明文不落审计/日志/响应 | ✅ 已完成 | `tenant-admin-issue-012-reset-password.md` |
+| #13 | 禁用/启用/删除：SetStatus + SoftDelete 不改 status + 重复 disable/enable 409 USER_STATE_INVALID + Core DB 事务内 SELECT+UPDATE | ✅ 已完成 | `tenant-admin-issue-013-disable-enable-delete.md` |
+| #14 | 操作历史：ListTenantAdminAuditLogs + WHERE details->>'target_id'=userId + result 过滤 success/failure + limit 三层截断 | ✅ 已完成 | `tenant-admin-issue-014-audit-logs-api.md` |
+| 文档对齐 | 以代码和 issue 为标准，5+ 轮深度审计修正 SPEC/UX/PRD/Plan 四份文档 + 7 处 issue 修正 | ✅ 已完成 | `tenant-admin-doc-alignment-batch.md` |
+| 批次汇总 | 功能批次汇总：13 项设计决策、5 张偏差表、4 项 tradeoff、4 项 open question | ✅ 已完成 | `tenant-admin-feature-batch.md` |
+
+验收命令：
+
+```bash
+cd repo/services/tenant-service
+go build ./...
+go test ./internal/... -run "TestTenantAdminService" -v
+
+cd repo/services/ani-gateway
+go build ./...
+go test ./internal/router/ -run "TestTenantAdmin|TestHandler_ListAvailableTenants|TestHandler_ListTenantRoles" -v
+
+make validate-architecture
+git diff --check
+```
+
 ## Metering Service 功能流（2026-08）
 
 > 独立于 Sprint 13/14 real provider 收敛的 Metering Service 计量采集功能开发流，覆盖 metering_usage_records migration、port 接口、collector 实现、consumer/rebuilder、集成测试、部署清单与 Live Gate 缺陷修复。批次记录归档于 `development-records/pr-m1-metering-consumer.md` ~ `pr-m5-metering-consumer.md`。
