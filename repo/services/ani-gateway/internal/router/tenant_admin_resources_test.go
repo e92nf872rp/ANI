@@ -548,7 +548,7 @@ func TestHandler_Detail(t *testing.T) {
 		detailResp: &tenantv1.AdminWithTenant{
 			Id: "u1", Email: "a@acme.io", Username: "acme_admin",
 			DisplayName: wrapperspb.String("Acme Admin"),
-			Role: "tenant-admin", Status: "active", Source: "local",
+			Role:        "tenant-admin", Status: "active", Source: "local",
 			IsInviting: true, IsExpired: false,
 			LastLoginAt: now, CreatedAt: now, UpdatedAt: now,
 			Tenant: &tenantv1.TenantAdminTenantRef{Id: "t1", Name: "acme", DisplayName: "ACME"},

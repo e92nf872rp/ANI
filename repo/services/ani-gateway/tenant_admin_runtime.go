@@ -12,7 +12,7 @@ import (
 )
 
 // newGatewayTenantAdminService 连接控制面元数据库并构造租户管理员 Core 端口
-//（ports.TenantAdminService：用户/角色管理，走 platform bypass RLS）。
+// （ports.TenantAdminService：用户/角色管理，走 platform bypass RLS）。
 //
 // 与 quota_runtime / tenant_runtime 一致，从标准 DATABASE_URL 读取控制面数据库地址；
 // 未配置时返回 ErrNotConfigured，由调用方决定启动策略。

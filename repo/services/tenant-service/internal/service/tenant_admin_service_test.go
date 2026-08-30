@@ -1476,7 +1476,7 @@ func TestTenantAdminService_ListAuditLogs(t *testing.T) {
 					Details: map[string]any{"target_id": userID.String(), "tenant_id": tenantID.String()},
 				},
 				{
-					ID: uuid.MustParse("55555555-5555-4555-8555-555555555555"),
+					ID:     uuid.MustParse("55555555-5555-4555-8555-555555555555"),
 					Action: "tenant_admin.disable", Resource: "tenant_admin",
 					Result: "failure", UserID: &actorID, CreatedAt: now.Add(-time.Minute),
 					Details: map[string]any{"target_id": userID.String(), "tenant_id": tenantID.String()},
