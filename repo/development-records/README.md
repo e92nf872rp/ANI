@@ -21,7 +21,7 @@
 | AUTHZ-COMPAT-B0 | PR2：统一 Principal 与 identity key（默认 off）——规范 Principal + LegacyPrincipalView + Mode/Config + ResolveAuthzPolicy 中间件 + 横切 identity key 改造；gateway 仍走旧 ValidateToken/CheckPermission | authz-policy-compat-contract-pilot.md |
 | AUTHZ-CONTRACT-B1 | PR3：V2 授权契约——additive proto（ValidatePrincipal/CheckPermissionV2）+ auth-service JWT/API Key principal + permission evaluator + Gateway V2 client；gateway 仍 mode=off 不调 V2 | authz-policy-compat-contract-pilot.md |
 | AUTHZ-PILOT-C | PR4：listQuotaMeta pilot——v1.yaml security/x-ani-authz 注解 + mode Validate 冻结校验 + generated_authz V2 授权链路 + pilot E2E 测试 + deployment env；仅该 operation 使用 V2 | authz-policy-compat-contract-pilot.md |
-| AUTHZ-MODE-SIMPLIFY-D | PR5：契约即开关收敛——删除 mode 开关（policy/dev/pilot/off）与 pilot allowlist，policy 路由恒为 x-ani-authz（generated）→V2、其余 legacy、public 放行，dev 自动回落 legacy；废弃 env `GATEWAY_AUTHZ_POLICY_MODE`/`GATEWAY_AUTHZ_PILOT_OPERATIONS` 残留启动 fail closed；部署清单删除两个废弃 env 条目；commit `4753a42` | authz-mode-simplify-d.md |
+| AUTHZ-MODE-SIMPLIFY-D | PR5：契约即开关收敛——删除 mode 开关（policy/dev/pilot/off）与 pilot allowlist，policy 路由恒为 x-ani-authz（generated）→V2、其余 legacy、public 放行，dev 自动回落 legacy；`ANI_AUTH_MODE` 唯一保留 env，不设废弃 env 残留检测（新集群从头部署拍板）；deploy 清单删除两个废弃 env 条目；第六版修订改名 `config.go`/`config_test.go`、删兼容入口 6 函数、测试归一；commit `4753a42` | authz-mode-simplify-d.md |
 
 **预存问题修复（2026-08-25）：** 本地实测 pilot 模式后修复 4 个文件的预存不一致——删 v1.yaml 已弃用的 branding PUT/POST logo + tasks DELETE 路由的 router 注册和 registry 条目（branding_resources.go / task_resources.go / zz_generated_core_policies.go）；gpu_scheduling_resources.go 的 `:id`→`:queue_id` 与 v1.yaml 一致（修复运行时 `LookupByRequest` lookup miss + route coverage 门禁）。详见 `authz-policy-compat-contract-pilot.md`。
 

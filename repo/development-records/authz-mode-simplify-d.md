@@ -1,9 +1,9 @@
 # AUTHZ-MODE-SIMPLIFY-D — Gateway 鉴权契约即开关收敛
 
-> 计划来源：`kjs-study/平台鉴权任务/plan-authz-mode-simplify-contract-switch.md`（第三版；该文档位于本地 kjs-study 目录，不入库）
+> 计划来源：`kjs-study/平台鉴权任务/plan-authz-mode-simplify-contract-switch.md`（第六版定稿；该文档位于本地 kjs-study 目录，不入库）
 > 实施分支：`feat/authz-mode-simplify-contract-switch`（基于 origin/main @ `9c7bf2b`）
-> 代码 commit：`4753a42`
-> 完成日期：2026-08-28
+> 代码 commit：`4753a42`；第六版修订见文末章节（未提交时以工作区为准）
+> 完成日期：2026-08-28；修订日期：2026-08-31
 
 ## 实现了什么
 
@@ -42,3 +42,45 @@
 ## 本地实测
 
 `ANI_AUTH_MODE=auth_service`（不带任何 policy env）启动 auth-service + ani-gateway：public 放行、generated 接口（quota-meta / metering usage）走 V2 返回 200、无 token/越权 401/403、legacy 接口不回归；`ANI_AUTH_MODE=dev` 回落验证通过。详见 `repo/CURRENT-SPRINT.md` 对应条目。
+
+---
+
+## 修订（2026-08-31，方案评审至第六版定稿）
+
+> 以下记录取代本文前文与第六版冲突的表述：废弃 env 残留检测已删除，`mode.go`/`mode_test.go` 已改名，兼容入口已删除。前文保留作为第三版实施的历史脉络。
+
+### 拍板变化（第五/六版）
+
+1. **删除废弃 env 残留检测与 fail-closed 语义**：新集群从头部署，`GATEWAY_AUTHZ_POLICY_MODE` / `GATEWAY_AUTHZ_PILOT_OPERATIONS` 不设残留检测、无启动校验；deploy 清单删除两个废弃 env 条目维持不变。
+2. **`mode.go` → `config.go`、`mode_test.go` → `config_test.go`**（git mv）：文件名与内容对齐——承载的是 `Config`/`ConfigFromEnv`/`EffectiveSource`，不再有 `Mode`。
+3. **删除兼容入口 6 函数**：`auth.go` 删 `Auth` / `AuthWithClient` / `AuthWithResolvedPolicy`，`rbac.go` 删 `RBAC` / `RBACWithClient` / `RBACWithResolvedPolicy`；仅保留 legacy 分支内部函数 `authenticateLegacy` / `authorizeLegacy` / `legacyViewFromContext`。业务方一律走 `registerChain` 主链。
+4. **测试覆盖归一**：`EffectiveSource` 矩阵与 `ANI_AUTH_MODE` 解析断言唯一归属 `config_test.go`；`principal_test.go` 删 3 条重复用例。
+5. **`mode=off` 表述清理**：`auth_client.go`、`contract_switch_test.go` 等注释改为 legacy 链路表述。
+
+### 修订改动明细
+
+| 文件 | 修改 | 说明 |
+|---|---|---|
+| `internal/authz/mode.go` → `config.go` | git mv + 重写 | 删废弃 env 残留检测；`ConfigFromEnv` 只解析 `ANI_AUTH_MODE`（trim+lower，无 error）；`EffectiveSource` 保留（public 恒放行、dev 回落 legacy、其余按契约直通） |
+| `internal/authz/mode_test.go` → `config_test.go` | git mv + 重写 | `TestEffectiveSourceContractSwitchMatrix`（public/generated/legacy × auth_service/dev 全矩阵）+ `TestConfigFromEnvParsesAuthMode`（空串、`" DEV "`→`"dev"`）；删残留检测负例 |
+| `internal/authz/principal_test.go` | 修改 | 删 `TestEffectiveSourcePublicAlwaysPublic` / `TestGeneratedUsesGeneratedDirectly` / `TestConfigFromEnvParsesAuthMode` 3 条，归一至 config_test.go |
+| `internal/middleware/chain.go` | 修改 | `Register` 简化：`registerChain(h, store, NewAuthClientFromEnv(), registry, authz.ConfigFromEnv())`，无启动校验 |
+| `internal/middleware/auth.go` | 修改 | 删 `Auth` / `AuthWithClient` / `AuthWithResolvedPolicy`；保留 `authenticateLegacy`（历史来源注释不变）、`legacyViewFromContext` |
+| `internal/middleware/rbac.go` | 修改 | 删 `RBAC` / `RBACWithClient` / `RBACWithResolvedPolicy`；保留 `authorizeLegacy`；删悬空 authz import |
+| `internal/middleware/policy.go` | 修改 | 函数零改动；仅注释更新（"供测试或主链之外的组合场景复用"） |
+| `internal/middleware/policy_test.go` | 修改 | 删 `TestRegisterFailsClosedOnRemovedAuthzEnv`；`TestRegisterSucceedsWithAuthServiceMode` 仅 `t.Setenv("ANI_AUTH_MODE", "auth_service")`；`TestAuthenticatePrincipalRejectsMissingPolicy` 更名并直连 `AuthenticatePrincipal`；ratelimit 用例迁主链装配 |
+| `internal/middleware/sandbox_auth_test.go` | 修改 | 迁主链装配：`ResolveAuthzPolicy(authz.CoreRegistry(), authz.Config{})` + `AuthenticatePrincipal` + `AuthorizePrincipal` |
+| `internal/middleware/service_token_test.go` | 修改 | 两处迁主链装配；`mode=off` 表述改"legacy 链路（含拒绝分支）不得触发 V2 RPC" |
+| `internal/middleware/auth_client.go` | 修改 | 注释"mode=off 下不被调用"→"legacy 链路不经过此处" |
+| `internal/middleware/contract_switch_test.go` | 修改 | 注释"mode=off 回滚验证用"→"legacy 链路验证用" |
+
+12 files changed, +51/−222（净删 171 行，含 2 个 rename）。生成物 `zz_generated_core_policies.go` 零漂移，`repo/api/openapi/v1.yaml` 无契约变更。
+
+### 修订后验证
+
+- `go test ./services/ani-gateway/...` PASS
+- `make gen-gateway-authz` 生成物零漂移
+- `make validate-gateway-authz` PASS（18 tests、no drift、283 registered routes 0 errors）
+- `make validate-architecture` PASS
+- `git diff --check` PASS
+- 代码与方案第六版 §4.1–§4.5 逐项复核一致，无出入
