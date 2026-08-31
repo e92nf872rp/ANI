@@ -11,6 +11,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/kubercloud/ani/pkg/security/sandboxtoken"
+	"github.com/kubercloud/ani/services/ani-gateway/internal/authz"
 )
 
 func TestScopeAllowedForPathSandbox(t *testing.T) {
@@ -76,8 +77,11 @@ func TestAuthAcceptsSandboxBearerToken(t *testing.T) {
 	}
 
 	h := server.New()
-	h.Use(AuthWithClient(nil))
-	h.Use(RBACWithClient(nil))
+	h.Use(
+		ResolveAuthzPolicy(authz.CoreRegistry(), authz.Config{}),
+		AuthenticatePrincipal(nil),
+		AuthorizePrincipal(nil),
+	)
 	h.GET("/api/v1/instances/:instance_id/sandbox/files", func(ctx context.Context, c *app.RequestContext) {
 		if GetTenantID(c) != "11111111-1111-1111-1111-111111111111" {
 			t.Fatalf("tenant_id = %q", GetTenantID(c))

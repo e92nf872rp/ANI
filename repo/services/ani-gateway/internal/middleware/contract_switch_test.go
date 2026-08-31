@@ -100,7 +100,7 @@ func platformAdmin() testCredential {
 // fakePilotAuthClient 按 credential 返回固定 Principal，并按 ErrorStage 注错。
 type fakePilotAuthClient struct {
 	behavior fakeAuthBehavior
-	// legacyTenant 非 nil 时 legacy ValidateToken 成功（mode=off 回滚验证用）。
+	// legacyTenant 非 nil 时 legacy ValidateToken 成功（legacy 链路验证用）。
 	legacyTenant           *commonv1.TenantContext
 	ValidatePrincipalCalls int
 	CheckPermissionV2Calls int

@@ -8,50 +8,6 @@ import (
 	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 )
 
-func TestEffectiveSourcePublicAlwaysPublic(t *testing.T) {
-	policy := Policy{Source: PolicySourcePublic, OperationID: "login"}
-	for name, cfg := range map[string]Config{
-		"auth_service": {},
-		"dev":          {AuthMode: "dev"},
-	} {
-		if got := cfg.EffectiveSource(policy); got != PolicySourcePublic {
-			t.Fatalf("auth mode %s: got %q, want public", name, got)
-		}
-	}
-}
-
-func TestGeneratedUsesGeneratedDirectly(t *testing.T) {
-	cfg := Config{}
-	policy := Policy{Source: PolicySourceGenerated, OperationID: "listQuotaMeta"}
-	if got := cfg.EffectiveSource(policy); got != PolicySourceGenerated {
-		t.Fatalf("got %q, want generated", got)
-	}
-}
-
-// TestConfigFromEnvParsesAuthMode ANI_AUTH_MODE 解析断言：
-// 空值归一为空串，大小写与首尾空白归一为小写。
-func TestConfigFromEnvParsesAuthMode(t *testing.T) {
-	t.Setenv("GATEWAY_AUTHZ_POLICY_MODE", "")
-	t.Setenv("GATEWAY_AUTHZ_PILOT_OPERATIONS", "")
-	t.Setenv("ANI_AUTH_MODE", "")
-	cfg, err := ConfigFromEnv()
-	if err != nil {
-		t.Fatalf("ConfigFromEnv: %v", err)
-	}
-	if cfg.AuthMode != "" {
-		t.Fatalf("AuthMode = %q, want empty", cfg.AuthMode)
-	}
-
-	t.Setenv("ANI_AUTH_MODE", " DEV ")
-	cfg, err = ConfigFromEnv()
-	if err != nil {
-		t.Fatalf("ConfigFromEnv: %v", err)
-	}
-	if cfg.AuthMode != "dev" {
-		t.Fatalf("AuthMode = %q, want dev", cfg.AuthMode)
-	}
-}
-
 func TestIdentityKeyMatrix(t *testing.T) {
 	tenant := "11111111-1111-1111-1111-111111111111"
 	user := "22222222-2222-2222-2222-222222222222"

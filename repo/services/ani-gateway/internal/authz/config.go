@@ -1,7 +1,6 @@
 package authz
 
 import (
-	"errors"
 	"os"
 	"strings"
 )
@@ -14,17 +13,10 @@ type Config struct {
 }
 
 // ConfigFromEnv 从环境变量解析配置。
-// 废弃 env 残留检测：监听前 fail closed，暴露旧部署配置。
-func ConfigFromEnv() (Config, error) {
-	if v := os.Getenv("GATEWAY_AUTHZ_POLICY_MODE"); v != "" {
-		return Config{}, errors.New("GATEWAY_AUTHZ_POLICY_MODE has been removed; policy routing now follows x-ani-authz presence")
-	}
-	if os.Getenv("GATEWAY_AUTHZ_PILOT_OPERATIONS") != "" {
-		return Config{}, errors.New("GATEWAY_AUTHZ_PILOT_OPERATIONS has been removed; policy routing now follows x-ani-authz presence")
-	}
+func ConfigFromEnv() Config {
 	return Config{
 		AuthMode: strings.ToLower(strings.TrimSpace(os.Getenv("ANI_AUTH_MODE"))),
-	}, nil
+	}
 }
 
 // EffectiveSource 返回 policy 的有效 source：
