@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1/svc</code></dd></div>
-          <div><dt>Operations</dt><dd>105</dd></div>
-          <div><dt>Schemas</dt><dd>108</dd></div>
+          <div><dt>Operations</dt><dd>115</dd></div>
+          <div><dt>Schemas</dt><dd>121</dd></div>
         </dl>
       </section>
 
@@ -249,6 +249,54 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/inference-policies</code></td>
+          <td><code>listInferenceAccessPolicies</code></td>
+          <td>查询推理访问策略</td>
+          <td><code></code></td>
+          <td>200, 401</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/inference-policies</code></td>
+          <td><code>createInferenceAccessPolicy</code></td>
+          <td>创建推理访问策略</td>
+          <td><code></code></td>
+          <td>201, 400, 401, 403, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/inference-policies/{policy_id}</code></td>
+          <td><code>deleteInferenceAccessPolicy</code></td>
+          <td>删除推理访问策略</td>
+          <td><code></code></td>
+          <td>204, 400, 401, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/inference-policies/{policy_id}</code></td>
+          <td><code>getInferenceAccessPolicy</code></td>
+          <td>获取推理访问策略</td>
+          <td><code></code></td>
+          <td>200, 401, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-patch">PATCH</span></td>
+          <td><code>/inference-policies/{policy_id}</code></td>
+          <td><code>patchInferenceAccessPolicy</code></td>
+          <td>更新推理访问策略</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 404, 409, 422</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/inference-policy-events</code></td>
+          <td><code>listInferencePolicyEvents</code></td>
+          <td>查询推理访问策略命中记录</td>
+          <td><code></code></td>
+          <td>200, 401</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/inference-services</code></td>
           <td><code>listInferenceServices</code></td>
           <td>获取推理服务列表</td>
@@ -304,12 +352,20 @@
           <td>200, 401, 403, 404</td>
         </tr>
         <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/inference-services/{service_id}/policies</code></td>
+          <td><code>listInferenceServicePolicies</code></td>
+          <td>查询推理服务绑定的访问策略</td>
+          <td><code></code></td>
+          <td>200, 401, 404</td>
+        </tr>
+        <tr>
           <td><span class="method method-put">PUT</span></td>
           <td><code>/inference-services/{service_id}/policies</code></td>
           <td><code>updateInferenceServicePolicies</code></td>
-          <td>更新推理服务限流与访问策略</td>
+          <td>更新推理服务绑定的访问策略</td>
           <td><code></code></td>
-          <td>200, 400, 401, 403, 404, 501</td>
+          <td>200, 400, 401, 404, 409, 422</td>
         </tr>
         <tr>
           <td><span class="method method-post">POST</span></td>
@@ -489,6 +545,14 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/model-import-tasks/{task_id}</code></td>
+          <td><code>getModelImportTask</code></td>
+          <td>查询模型异步导入任务</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/models</code></td>
           <td><code>listModels</code></td>
           <td>获取模型列表</td>
@@ -517,7 +581,7 @@
           <td><code>deleteModel</code></td>
           <td>删除模型</td>
           <td><code></code></td>
-          <td>204, 404</td>
+          <td>204, 401, 403, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -525,7 +589,23 @@
           <td><code>getModel</code></td>
           <td>获取模型详情</td>
           <td><code></code></td>
-          <td>200, 404</td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/models/{model_id}/upload-url</code></td>
+          <td><code>getModelUploadURL</code></td>
+          <td>申请模型文件预签名上传地址</td>
+          <td><code></code></td>
+          <td>201, 400, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/models/{model_id}/versions</code></td>
+          <td><code>listModelVersions</code></td>
+          <td>获取模型版本列表</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
         </tr>
         <tr>
           <td><span class="method method-post">POST</span></td>
@@ -533,7 +613,7 @@
           <td><code>createModelVersion</code></td>
           <td>上传模型版本</td>
           <td><code></code></td>
-          <td>201</td>
+          <td>201, 400, 401, 403, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1016,11 +1096,13 @@
         <li><code>BoundTenantsResponse</code></li>
         <li><code>ChangeableRolesResponse</code></li>
         <li><code>CreateGpuContainerRequest</code></li>
+        <li><code>CreateInferenceAccessPolicyRequest</code></li>
         <li><code>CreateInferenceEndpointRequest</code></li>
         <li><code>CreateInferenceServiceRequest</code></li>
         <li><code>CreateIntegrationBotRequest</code></li>
         <li><code>CreateIntegrationRequest</code></li>
         <li><code>CreateModelRequest</code></li>
+        <li><code>CreateModelUploadURLRequest</code></li>
         <li><code>CreateSandboxRequest</code></li>
         <li><code>CreateTenantPlanRequest</code></li>
         <li><code>CreateWebhookRequest</code></li>
@@ -1034,6 +1116,15 @@
         <li><code>GpuContainerVersion</code></li>
         <li><code>IdempotentOnlyRequest</code></li>
         <li><code>IdempotentResult</code></li>
+        <li><code>InferenceAccessPolicy</code></li>
+        <li><code>InferenceAccessPolicyAccess</code></li>
+        <li><code>InferenceAccessPolicyBinding</code></li>
+        <li><code>InferenceAccessPolicyConcurrency</code></li>
+        <li><code>InferenceAccessPolicyEvent</code></li>
+        <li><code>InferenceAccessPolicyEventListResponse</code></li>
+        <li><code>InferenceAccessPolicyListResponse</code></li>
+        <li><code>InferenceAccessPolicyRateLimits</code></li>
+        <li><code>InferenceAccessPolicyScope</code></li>
         <li><code>InferenceEndpoint</code></li>
         <li><code>InferenceService</code></li>
         <li><code>InferenceServiceAccelerator</code></li>
@@ -1063,9 +1154,11 @@
         <li><code>KnowledgeBase</code></li>
         <li><code>Model</code></li>
         <li><code>ModelList</code></li>
+        <li><code>ModelUploadURLResponse</code></li>
         <li><code>ModelVersion</code></li>
         <li><code>NotifyDocumentUploadedRequest</code></li>
         <li><code>PatchGpuContainerRequest</code></li>
+        <li><code>PatchInferenceAccessPolicyRequest</code></li>
         <li><code>PatchSandboxRequest</code></li>
         <li><code>PlanAuditLog</code></li>
         <li><code>PlanAuditLogListResponse</code></li>

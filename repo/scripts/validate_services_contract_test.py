@@ -64,6 +64,43 @@ class ServicesContractTest(unittest.TestCase):
         result = self.validate_fixture(spec)
         self.assertTrue(any("newUnsecured/operation_security" in error for error in result.errors))
 
+    def test_new_operation_with_legacy_security_format_is_blocked(self) -> None:
+        spec = copy.deepcopy(self.spec)
+        self.add_operation(
+            spec,
+            "/new-legacy-auth",
+            "get",
+            {
+                "operationId": "newLegacyAuth",
+                "security": [{"BearerAuth": []}],
+                "responses": {"200": {"description": "ok"}},
+            },
+        )
+        result = self.validate_fixture(spec)
+        self.assertTrue(any("newLegacyAuth/operation_authz_v1_format" in error for error in result.errors))
+
+    def test_new_operation_with_v1_authz_format_is_allowed(self) -> None:
+        spec = copy.deepcopy(self.spec)
+        self.add_operation(
+            spec,
+            "/new-standard-auth",
+            "get",
+            {
+                "operationId": "newStandardAuth",
+                "security": [{"BearerAuth": []}, {"ApiKeyAuth": []}],
+                "x-ani-authz": {
+                    "version": "v1",
+                    "resource": "fixture",
+                    "action": "read",
+                    "boundary": "tenant",
+                    "principal_kinds": ["user"],
+                },
+                "responses": {"200": {"description": "ok"}},
+            },
+        )
+        result = self.validate_fixture(spec)
+        self.assertFalse(any("newStandardAuth/" in error for error in result.errors))
+
     def test_new_202_with_wrong_schema_is_blocked(self) -> None:
         spec = copy.deepcopy(self.spec)
         self.add_operation(
