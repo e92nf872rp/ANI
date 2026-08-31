@@ -1,13 +1,13 @@
 # AUTHZ-MODE-SIMPLIFY-D — Gateway 鉴权契约即开关收敛
 
-> 计划来源：`kjs-study/平台鉴权任务/plan-authz-mode-simplify-contract-switch.md`（第六版定稿；该文档位于本地 kjs-study 目录，不入库）
+> 计划来源：`services/tasks/modules/plan/plan-authz-mode-simplify-contract-switch.md`（第六版定稿，随本批次入库）
 > 实施分支：`feat/authz-mode-simplify-contract-switch`（基于 origin/main @ `9c7bf2b`）
-> 代码 commit：`4753a42`；第六版修订见文末章节（未提交时以工作区为准）
+> 代码 commit：`4753a42`（初版）、`1d5c20a`（第六版修订）；文档同步 `caafef4`
 > 完成日期：2026-08-28；修订日期：2026-08-31
 
 ## 实现了什么
 
-落实"契约即开关"：删除 Gateway 鉴权 mode 开关（policy/dev/pilot/off），policy 路由恒为——带 `x-ani-authz`（generated）的 operation 走 V2 新链路，其余走 legacy，public 恒放行；`ANI_AUTH_MODE=dev` 时 generated 自动回落 legacy（dev 环境无 auth-service）。废弃 env `GATEWAY_AUTHZ_POLICY_MODE` / `GATEWAY_AUTHZ_PILOT_OPERATIONS` 残留时启动 fail closed（监听前报错）。存量 generated 接口（`listQuotaMeta` / `getPlatformMeteringUsage`）无需任何 pilot env 即常驻 V2，切流审批语义由 CODEOWNERS 共同审查 + drift 门禁承接，回滚退化为镜像回退/代码 revert。
+落实"契约即开关"：删除 Gateway 鉴权 mode 开关（policy/dev/pilot/off），policy 路由恒为——带 `x-ani-authz`（generated）的 operation 走 V2 新链路，其余走 legacy，public 恒放行；`ANI_AUTH_MODE=dev` 时 generated 自动回落 legacy（dev 环境无 auth-service）。两个废弃 env `GATEWAY_AUTHZ_POLICY_MODE` / `GATEWAY_AUTHZ_PILOT_OPERATIONS` 直接删除、不设残留检测（新集群从头部署拍板，第六版修订）。存量 generated 接口（`listQuotaMeta` / `getPlatformMeteringUsage`）无需任何 pilot env 即常驻 V2，切流审批语义由 CODEOWNERS 共同审查 + drift 门禁承接，回滚退化为镜像回退/代码 revert。
 
 ## 关键文件改动
 
