@@ -2,7 +2,7 @@
 
 > 日期：2026-09-01
 > 范围：ANI Gateway `instanceAPI` / K8s REST provider 列表与详情回填路径
-> 状态：local verified（`go test ./services/ani-gateway/...` 全通，`make validate-architecture` 通过）；待 live 验证
+> 状态：**live passed（10.10.1.66，镜像 `ani-gateway:dev-20260901`）**——运行中 GPU 容器实例列表/详情已回填节点/私网IP/访问端点/终端；`go test ./services/ani-gateway/...` 全通，`make validate-architecture` 通过
 
 ## 问题背景
 
@@ -32,7 +32,22 @@
 
 - 本批只回读 Deployment/Pod 派生字段，不新增 Service/NodePort/LoadBalancer 探测；`Network.Endpoints` 在真实 Service/外部访问端点存在时不会被覆盖（仅在建端点为空的补给时写入 private 端点）。
 - 配置与密钥摘要（`InstanceRecord` 是否对外暴露 env/secret 绑定）不在本批范围，需另行确认产品口径。
-- 尚未在 K8s 测试环境做 live 验证，不外推 runtime ready / real-provider ready。
+
+## 真实验证（10.10.1.66，镜像 dev-20260901）
+
+成功滚动更新 `deployment/ani-gateway` 至 `docker.changqingyun.cn/ani/ani-gateway:dev-20260901`；新 Pod 1/1 Running 于 `dev-phys-02`；`curl http://10.10.1.66:30080/healthz` 连续 3 次 200。
+
+租户 `tenant-a` 登录后核对实例接口，运行中 GPU 容器实例（`test-gpu-inst-create`，`state=running`）**列表与详情一致回填**：
+
+```text
+compute.node_name            = dev-phys-02        # 运行节点 ✓
+network.private_ip           = 10.60.0.3          # 私网 IP ✓
+endpoint                     = 10.60.0.3          # 访问端点 ✓
+network.endpoints            = [{name:private, address:10.60.0.3, protocol:tcp}]  # 访问端点 ✓
+access.exec_available        = true               # 终端可用 ✓
+```
+
+非运行/已删除/未调度实例（deleted/pending/provisioning、无已调度 Pod）正确地保持空字段，回填按「已调度 Pod + 运行态」门控，不误产数据。
 
 ## 验证命令
 

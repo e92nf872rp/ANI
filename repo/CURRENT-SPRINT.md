@@ -475,7 +475,7 @@ git diff --check
 
 ### 热修复：实例运行时信息回填（INSTANCE-RUNTIME-HYDRATE-A，2026-09-01）
 
-> 前端反馈 GPU 容器实例列表/详情缺节点、私网 IP、访问端点、终端。Gateway `instances.go` 修复：节点字段错位（`refreshOneStoreStatus` 补回填 `Compute.NodeName`）、从 Pod 回读 PodIP 填 `Network.PrivateIP`/`Endpoint`/`Endpoints`、运行态 container/gpu_container 置 `Access.ExecAvailable=true`；`get` 详情处理器接入 `refreshOneStoreStatus`。`go test ./services/ani-gateway/...` + `make validate-architecture` 通过。本地单测通过，待 live 验证，不外推 runtime ready。批次详情见 `repo/development-records/instance-runtime-hydrate-a.md`。
+> 前端反馈 GPU 容器实例列表/详情缺节点、私网 IP、访问端点、终端。Gateway `instances.go` 修复：节点字段错位（`refreshOneStoreStatus` 补回填 `Compute.NodeName`）、从 Pod 回读 PodIP 填 `Network.PrivateIP`/`Endpoint`/`Endpoints`、运行态 container/gpu_container 置 `Access.ExecAvailable=true`；`get` 详情处理器接入 `refreshOneStoreStatus`。已在 10.10.1.66 live passed（镜像 `ani-gateway:dev-20260901`）：运行中 GPU 容器实例 `test-gpu-inst-create` 列表/详情一致回填 dev-phys-02 / 10.60.0.3 / exec_available=true；`go test ./services/ani-gateway/...` + `make validate-architecture` 通过。批次详情见 `repo/development-records/instance-runtime-hydrate-a.md`。
 
 ## Instance Observability Completion 增量补全（2026-07，PR4 分支）
 
