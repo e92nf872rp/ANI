@@ -665,6 +665,18 @@ var generatedCorePolicies = map[string]Policy{
 		PathTemplate:         "/api/v1/instances/{instance_id}/logs",
 		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
 	},
+	"GET /api/v1/instances/{instance_id}/logs/stream": {
+		Source:               PolicySourceGenerated,
+		OperationID:          "streamInstanceLogs",
+		Method:               "GET",
+		PathTemplate:         "/api/v1/instances/{instance_id}/logs/stream",
+		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
+		Version:              "v1",
+		Resource:             "instances",
+		Action:               "read",
+		Boundary:             BoundaryTenant,
+		PrincipalKinds:       []PrincipalKind{PrincipalUser, PrincipalAPIKey},
+	},
 	"GET /api/v1/instances/{instance_id}/metrics": {
 		Source:               PolicySourceLegacy,
 		OperationID:          "getInstanceMetrics",

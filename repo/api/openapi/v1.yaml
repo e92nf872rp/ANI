@@ -5121,6 +5121,48 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
 
+  /instances/{instance_id}/logs/stream:
+    get:
+      operationId: streamInstanceLogs
+      summary: 实例日志 SSE 流式输出
+      description: |
+        SSE 流式输出实例日志：首屏回放最近 limit 条历史日志（时间正序），
+        然后持续增量推送新日志。每条日志通过 event: log 帧推送，
+        错误通过 event: error 帧推送，结束通过 event: done 帧推送。
+        连接时长上限 10 分钟，到达后发 done{reason:"timeout"} 并关闭。
+        预流错误（401/404/400）返回普通 JSON，不进入 SSE 流。
+      tags: [Instances]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      x-ani-rbac-scope: "scope:instances:read"
+      x-ani-authz:
+        version: v1
+        resource: instances
+        action: read
+        boundary: tenant
+        principal_kinds: [user, api_key]
+      parameters:
+        - { name: instance_id, in: path, required: true, schema: { type: string } }
+        - { name: level,             in: query, schema: { type: string, enum: [debug, info, warn, error] } }
+        - { name: limit,             in: query, schema: { type: integer, default: 1000, minimum: 1, maximum: 1000 } }
+        - { name: interval_seconds,  in: query, schema: { type: integer, default: 2, minimum: 1, maximum: 30 } }
+      responses:
+        "200":
+          description: SSE 日志流
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503":
+          description: 日志流未配置（非 loki profile）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
   /instances/{instance_id}/events:
     get:
       operationId: listInstanceEvents

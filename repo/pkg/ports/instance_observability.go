@@ -124,6 +124,17 @@ type InstanceConsoleSessionRecord struct {
 	DevProfile DevProfileInfo
 }
 
+// InstanceLogStreamRequest 是流式日志查询请求。
+type InstanceLogStreamRequest struct {
+	TenantID   string
+	InstanceID string
+	Level      string
+	// Limit 是首屏回放条数上限，0 表示 adapter 默认值（1000）。
+	Limit int
+	// IntervalSeconds 是增量轮询间隔；0 表示 adapter 默认值（2s）。
+	IntervalSeconds int
+}
+
 // InstanceObservability exposes local/real runtime observations without
 // leaking Kubernetes, kubelet, Prometheus, or terminal provider SDK objects.
 type InstanceObservability interface {
@@ -133,4 +144,8 @@ type InstanceObservability interface {
 	ListSecurityEvents(ctx context.Context, request InstanceObservationListRequest) (InstanceSecurityEventListResult, error)
 	CreateExecSession(ctx context.Context, request InstanceExecSessionCreateRequest) (InstanceExecSessionRecord, error)
 	CreateConsoleSession(ctx context.Context, request InstanceConsoleSessionCreateRequest) (InstanceConsoleSessionRecord, error)
+	// StreamLogs 先回放最近 Limit 条历史日志（时间正序），再持续增量推送新日志，
+	// 每条通过 sink 回调写出；sink 返回 error 表示下游断开，实现必须立即退出。
+	// ctx 取消（客户端断开）也应立即退出并返回 nil。
+	StreamLogs(ctx context.Context, request InstanceLogStreamRequest, sink func(InstanceLogEntry) error) error
 }
