@@ -428,6 +428,7 @@ func TestQuotaMetaDevFallsBackToLegacy(t *testing.T) {
 		t.Fatalf("RPC calls = %+v, want %+v", gotCalls, wantCalls)
 	}
 }
+
 // ── 计量平台查询 V2 契约用例（getPlatformMeteringUsage 契约即开关） ──
 //
 // getPlatformMeteringUsage 已通过 v1.yaml x-ani-authz 切为 generated，
