@@ -479,3 +479,82 @@ func TestLocalVectorStoreServiceSharedStoreIsReadAuthority(t *testing.T) {
 		t.Fatalf("deleted GetVectorStore() error = %v, want ErrNotFound", err)
 	}
 }
+
+func TestLocalStorageServiceCompleteObjectPersistsToSharedStore(t *testing.T) {
+	store := newSharedMemoryStorageStore()
+	clock := func() time.Time { return time.Unix(300, 0).UTC() }
+	service := NewLocalStorageService(WithStorageResourceStore(store), WithStorageServiceClock(clock))
+
+	bucket, err := service.CreateStorageBucket(context.Background(), ports.StorageBucketCreateRequest{
+		TenantID:       storageStoreTenantID,
+		IdempotencyKey: "complete-store-bucket",
+		Name:           "complete-store",
+		Region:         "local",
+		AccessMode:     "private",
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageBucket() error = %v", err)
+	}
+
+	upload, err := service.CreateStorageObjectUpload(context.Background(), ports.StorageObjectUploadRequest{
+		TenantID:       storageStoreTenantID,
+		IdempotencyKey: "complete-store-upload",
+		BucketID:       bucket.BucketID,
+		Key:            "raw/report.csv",
+		ContentType:    "text/csv",
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageObjectUpload() error = %v", err)
+	}
+
+	record, err := service.CompleteStorageObject(context.Background(), ports.StorageObjectCompleteRequest{
+		TenantID:       storageStoreTenantID,
+		ObjectID:       upload.ObjectID,
+		IdempotencyKey: "complete-store-confirm",
+	})
+	if err != nil {
+		t.Fatalf("CompleteStorageObject() error = %v", err)
+	}
+	if record.State != ports.StorageResourceAvailable {
+		t.Fatalf("completed record state = %q, want available", record.State)
+	}
+
+	// A restarted service instance sharing the same store must read back the
+	// completed object (complete persists to the control-plane authority).
+	restarted := NewLocalStorageService(WithStorageResourceStore(store), WithStorageServiceClock(clock))
+	loaded, err := restarted.GetObject(context.Background(), ports.StorageResourceGetRequest{
+		TenantID:   storageStoreTenantID,
+		ResourceID: upload.ObjectID,
+	})
+	if err != nil {
+		t.Fatalf("restarted GetObject() error = %v", err)
+	}
+	if loaded.State != ports.StorageResourceAvailable || loaded.Key != "raw/report.csv" || loaded.Bucket != "complete-store" {
+		t.Fatalf("restarted GetObject() = %#v, want completed object persisted to store", loaded)
+	}
+
+	// A presigned upload must also survive a restart before completion:
+	// the upload record is persisted at creation, so the restarted instance
+	// can resolve it from the store and complete it.
+	lateUpload, err := service.CreateStorageObjectUpload(context.Background(), ports.StorageObjectUploadRequest{
+		TenantID:       storageStoreTenantID,
+		IdempotencyKey: "complete-store-late-upload",
+		BucketID:       bucket.BucketID,
+		Key:            "raw/late.csv",
+		ContentType:    "text/csv",
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageObjectUpload() late error = %v", err)
+	}
+	lateRecord, err := restarted.CompleteStorageObject(context.Background(), ports.StorageObjectCompleteRequest{
+		TenantID:       storageStoreTenantID,
+		ObjectID:       lateUpload.ObjectID,
+		IdempotencyKey: "complete-store-late-confirm",
+	})
+	if err != nil {
+		t.Fatalf("restarted CompleteStorageObject() error = %v", err)
+	}
+	if lateRecord.State != ports.StorageResourceAvailable || lateRecord.Key != "raw/late.csv" {
+		t.Fatalf("restarted CompleteStorageObject() = %#v, want completed late upload", lateRecord)
+	}
+}

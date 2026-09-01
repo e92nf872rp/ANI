@@ -1,5 +1,5 @@
 // Package middleware registers the ANI Gateway middleware chain.
-// Execution order: RequestID → TLS → Auth → RBAC → RateLimit → Idempotency → Audit → Route
+// Execution order: RequestID → AccessLog → TLS → Auth → RBAC → RateLimit → Idempotency → Audit → Route
 package middleware
 
 import (
@@ -37,6 +37,7 @@ func registerChain(
 ) {
 	h.Use(
 		RequestID(),
+		AccessLog(),
 		ResolveAuthzPolicy(registry, cfg),
 		AuthenticatePrincipal(client),
 		AuthorizePrincipal(client),

@@ -339,7 +339,7 @@ def validate_runtime_contract(root: Path, errors: list[str]) -> None:
         if token not in workload_runtime_go:
             errors.append(f"pkg/ports/workload_runtime.go missing Core Alpha token: {token}")
 
-    migration_text = (root / "deploy/migrations/20260519_004_instance_u_vm_protection.sql").read_text(
+    migration_text = (root / "deploy/migrations/20260519000400_instance_u_vm_protection.sql").read_text(
         encoding="utf-8"
     )
     for token in ("lifecycle_policy", "ssh_connection", "snapshots", "container_status", "gpu_status", "termination_protection", "'rebuild'", "'snapshot'", "'rollback'", "'console_session'"):

@@ -29,7 +29,7 @@
 | `pkg/bootstrap/deps_test.go` | 修改 | 覆盖 leader election wiring 与缺失 identity 拒绝 |
 | `pkg/bootstrap/server.go` | 修改 | 新增 leader election 环境变量解析 |
 | `pkg/bootstrap/server_test.go` | 修改 | 覆盖 leader election 环境变量覆盖 |
-| `deploy/migrations/20260524_001_control_plane_leases.sql` | 新增 | 建立 control plane lease 表与过期索引 |
+| `deploy/migrations/20260524000100_control_plane_leases.sql` | 新增 | 建立 control plane lease 表与过期索引 |
 
 ## 完工标准达成
 

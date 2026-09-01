@@ -8,7 +8,7 @@
 #
 #   kubectl create secret generic ani-metering-runtime \
 #     --namespace=ani-system \
-#     --from-literal=database_url="postgres://ani:ani_dev_password@ani-reconcile-ha-postgres.ani-system.svc.cluster.local:5432/ani?sslmode=disable" \
+#     --from-literal=database_url="postgres://ani_metering_user:<metering-password>@ani-reconcile-ha-postgres.ani-system.svc.cluster.local:5432/ani?sslmode=disable" \
 #     --from-literal=nats_url="nats://ani-reconcile-ha-nats.ani-system.svc.cluster.local:4222" \
 #     --from-literal=redis_url="redis://:ani_dev_password@ani-reconcile-ha-redis.ani-system.svc.cluster.local:6379"
 #

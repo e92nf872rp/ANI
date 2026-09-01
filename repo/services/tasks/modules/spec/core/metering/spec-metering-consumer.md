@@ -154,7 +154,7 @@ StopCollection(ref)
 repo/
 ├── deploy/
 │   ├── migrations/
-│   │   └── 20260731_001_metering_usage.sql          [NEW]
+│   │   └── 20260731000100_metering_usage.sql          [NEW]
 │   └── real-k8s-lab/
 │       └── metering-service-live-deps.yaml           [NEW]
 ├── pkg/
@@ -191,8 +191,8 @@ repo/
 新增 `metering_usage_records` 表和 `ani_metering_writer` 角色。
 
 ```sql
--- repo/deploy/migrations/20260731_001_metering_usage.sql
--- Depends on: 20260501_001_init_schema.sql (tenants 表)
+-- repo/deploy/migrations/20260731000100_metering_usage.sql
+-- Depends on: 20260501000100_init_schema.sql (tenants 表)
 -- 执行顺序: ROLE → TABLE → GRANT → RLS
 
 BEGIN;

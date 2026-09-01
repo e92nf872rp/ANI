@@ -15,7 +15,7 @@
 | `pkg/ports/workload_runtime.go` | 修改 | 新增 WorkloadOperationStore、操作/步骤模型，并在实例结果/记录中暴露 operation_id |
 | `pkg/adapters/runtime/operation_store.go` | 新增 | 新增 LocalOperationStore 与 MetadataOperationStore，实现操作记录、幂等键查询、步骤追加和列表查询 |
 | `pkg/adapters/runtime/instance_service.go` | 修改 | Create/Start/Stop/Restart/Resize/Delete 接入 operation store、timeline 和幂等回放 |
-| `deploy/migrations/20260502_002_operations_idempotency.sql` | 修改 | 对齐当前 instance_id/requested_by 字段类型，并修正 tenant RLS setting |
+| `deploy/migrations/20260502000200_operations_idempotency.sql` | 修改 | 对齐当前 instance_id/requested_by 字段类型，并修正 tenant RLS setting |
 | `services/ani-gateway/internal/router/demo_instances.go` | 修改 | demo/real path 增加 operation 查询路由、operation_id 响应和 idempotency_key 入参 |
 | `api/openapi/dev.yaml` | 修改 | 对齐 demo API 的创建响应、生命周期幂等键和 operation 查询契约 |
 | `pkg/adapters/runtime/instance_service_test.go` | 修改 | 覆盖 create/lifecycle operation 记录、步骤和幂等回放 |

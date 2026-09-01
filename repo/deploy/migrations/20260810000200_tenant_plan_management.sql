@@ -1,7 +1,7 @@
--- ANI Platform · Migration 20260810_002
+-- ANI Platform · Migration 20260810000200
 -- Description: 配额套餐管理表 — tenant_plans（套餐主表）+ plan_quota_limits（套餐维度限额）
 --              + tenants.plan_id（租户当前关联套餐）
--- Depends on: 20260501_001_init_schema.sql (tenants), 20260810_001_resource_quota.sql
+-- Depends on: 20260501000100_init_schema.sql (tenants), 20260810000100_resource_quota.sql
 --             （starter 套餐 seed 的 resource_type 取值对齐 resource_quota_meta 初始维度；
 --              本迁移不对 resource_quota_meta 建外键）
 -- Rationale:
@@ -17,10 +17,9 @@
 --                          删除走 tenant_plans 软删除）。
 --   tenant_plans / plan_quota_limits 为平台治理数据（套餐管理）；应用层 RBAC 限制为
 --   platform-admin，同时 GRANT 表级读写给 ani_app_user（tenant-service 默认 DB 用户）。
---   依赖 20260810_001_resource_quota.sql 先执行（本文件序号 002 > 001，顺序天然满足），
+--   依赖 20260810000100_resource_quota.sql 先执行（本文件序号 002 > 001，顺序天然满足），
 --   以便 starter seed 与 Core 维度命名一致；非因 FK 引用。
 
-BEGIN;
 
 -- ===========================================================================
 -- 1. tenant_plans — 套餐主表
@@ -109,7 +108,6 @@ ALTER TABLE tenants ALTER COLUMN plan_id SET NOT NULL;
 GRANT SELECT, INSERT, UPDATE, DELETE ON tenant_plans TO ani_app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON plan_quota_limits TO ani_app_user;
 
-COMMIT;
 
 -- ===========================================================================
 -- Rollback

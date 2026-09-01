@@ -129,6 +129,84 @@ func TestLocalStorageServicePersistsCreateAndDelete(t *testing.T) {
 	}
 }
 
+func TestLocalStorageServiceBucketObjectOperationsAfterRestart(t *testing.T) {
+	store := newSharedMemoryStorageStore()
+	service := NewLocalStorageService(WithStorageResourceStore(store))
+
+	bucket, err := service.CreateStorageBucket(context.Background(), ports.StorageBucketCreateRequest{
+		TenantID:       storageStoreTenantID,
+		IdempotencyKey: "persisted-bucket",
+		Name:           "persisted-bucket",
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageBucket() error = %v", err)
+	}
+
+	// Upload and complete an object before the simulated restart so the
+	// store authority holds a finished object record.
+	upload, err := service.CreateStorageObjectUpload(context.Background(), ports.StorageObjectUploadRequest{
+		TenantID:       storageStoreTenantID,
+		IdempotencyKey: "persisted-upload",
+		BucketID:       bucket.BucketID,
+		Key:            "persisted.csv",
+		ContentType:    "text/csv",
+	})
+	if err != nil {
+		t.Fatalf("CreateStorageObjectUpload() error = %v", err)
+	}
+	if _, err := service.CompleteStorageObject(context.Background(), ports.StorageObjectCompleteRequest{
+		TenantID:       storageStoreTenantID,
+		ObjectID:       upload.ObjectID,
+		IdempotencyKey: "persisted-complete",
+	}); err != nil {
+		t.Fatalf("CompleteStorageObject() error = %v", err)
+	}
+
+	// Simulate Gateway restart: fresh service, same PG/memory store authority.
+	restarted := NewLocalStorageService(WithStorageResourceStore(store))
+	listed, err := restarted.ListBucketObjects(context.Background(), ports.StorageBucketObjectListRequest{
+		TenantID: storageStoreTenantID,
+		BucketID: bucket.BucketID,
+		Prefix:   "/",
+	})
+	if err != nil {
+		t.Fatalf("ListBucketObjects after restart error = %v", err)
+	}
+	if listed.Total != 1 || len(listed.Items) != 1 || listed.Items[0].Kind != "object" || listed.Items[0].Key != "persisted.csv" {
+		t.Fatalf("ListBucketObjects after restart = %#v, want the persisted object listed", listed)
+	}
+	deleted, err := restarted.DeleteBucketObject(context.Background(), ports.StorageBucketObjectDeleteRequest{
+		TenantID: storageStoreTenantID,
+		BucketID: bucket.BucketID,
+		Key:      "persisted.csv",
+	})
+	if err != nil || !deleted.Deleted {
+		t.Fatalf("DeleteBucketObject after restart = %#v err=%v, want persisted object deletable", deleted, err)
+	}
+	if _, err := restarted.CreateBucketPrefix(context.Background(), ports.StorageBucketPrefixCreateRequest{
+		TenantID:       storageStoreTenantID,
+		IdempotencyKey: "persisted-bucket-prefix",
+		BucketID:       bucket.BucketID,
+		Prefix:         "models/",
+	}); err != nil {
+		t.Fatalf("CreateBucketPrefix after restart error = %v", err)
+	}
+	if _, err := restarted.ListStorageBucketLifecycleRules(context.Background(), ports.StorageResourceGetRequest{
+		TenantID:   storageStoreTenantID,
+		ResourceID: bucket.BucketID,
+	}); err != nil {
+		t.Fatalf("ListStorageBucketLifecycleRules after restart error = %v", err)
+	}
+	if _, err := restarted.SetStorageBucketACL(context.Background(), ports.StorageBucketACLUpdateRequest{
+		TenantID:       storageStoreTenantID,
+		IdempotencyKey: "persisted-bucket-acl",
+		BucketID:       bucket.BucketID,
+		ACL:            "private",
+	}); err != nil {
+		t.Fatalf("SetStorageBucketACL after restart error = %v", err)
+	}
+}
+
 func TestMetadataStorageStoreUpdatesResourceState(t *testing.T) {
 	tx := &fakeMetadataTx{}
 	store := NewMetadataStorageStore(fakeMetadataStore{tx: tx}, WithStorageStoreClock(func() time.Time {

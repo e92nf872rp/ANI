@@ -313,6 +313,75 @@ func fixedMinIOTestClock() time.Time {
 	return time.Date(2026, 6, 19, 1, 2, 3, 0, time.UTC)
 }
 
+func TestMinIOObjectStoreBucketUsageAggregatesTenantScopedListing(t *testing.T) {
+	pageOne := `<?xml version="1.0" encoding="UTF-8"?>
+<ListBucketResult>
+  <IsTruncated>true</IsTruncated>
+  <NextContinuationToken>token-2</NextContinuationToken>
+  <Contents><Key>tenant-a/raw/a.csv</Key><Size>100</Size></Contents>
+  <Contents><Key>tenant-a/raw/b.csv</Key><Size>200</Size></Contents>
+</ListBucketResult>`
+	pageTwo := `<?xml version="1.0" encoding="UTF-8"?>
+<ListBucketResult>
+  <IsTruncated>false</IsTruncated>
+  <Contents><Key>tenant-a/raw/c.csv</Key><Size>52419</Size></Contents>
+</ListBucketResult>`
+
+	var queries []string
+	page := 0
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodGet || r.URL.Path != "/ani-s13-test2" {
+			t.Fatalf("request = %s %s, want GET /ani-s13-test2", r.Method, r.URL.Path)
+		}
+		if !strings.HasPrefix(r.Header.Get("Authorization"), "AWS4-HMAC-SHA256") {
+			t.Fatalf("request missing SigV4 authorization header: %q", r.Header.Get("Authorization"))
+		}
+		query := r.URL.Query()
+		queries = append(queries, query.Get("list-type")+"|"+query.Get("prefix")+"|"+query.Get("continuation-token"))
+		if query.Get("list-type") != "2" || query.Get("prefix") != "tenant-a/" {
+			t.Fatalf("list query = %v, want list-type=2 prefix=tenant-a/", r.URL.RawQuery)
+		}
+		page++
+		if page == 1 {
+			if query.Get("continuation-token") != "" {
+				t.Fatalf("first page continuation-token = %q, want empty", query.Get("continuation-token"))
+			}
+			return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(pageOne))}, nil
+		}
+		if query.Get("continuation-token") != "token-2" {
+			t.Fatalf("second page continuation-token = %q, want token-2", query.Get("continuation-token"))
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(pageTwo))}, nil
+	})}
+
+	store, err := NewMinIOObjectStore(MinIOObjectStoreConfig{
+		Endpoint:        "http://minio.test",
+		AccessKeyID:     "minio",
+		SecretAccessKey: "secret",
+		BucketPrefix:    "ani-s13-",
+		HTTPClient:      client,
+		Now:             fixedMinIOTestClock,
+	})
+	if err != nil {
+		t.Fatalf("NewMinIOObjectStore() error = %v", err)
+	}
+
+	usage, err := store.BucketUsage(context.Background(), ports.BucketClass("test2"), "tenant-a")
+	if err != nil {
+		t.Fatalf("BucketUsage() error = %v", err)
+	}
+	if usage.ObjectCount != 3 || usage.SizeBytes != 52719 {
+		t.Fatalf("usage = %#v, want 3 objects totaling 52719 bytes", usage)
+	}
+	if len(queries) != 2 {
+		t.Fatalf("list requests = %v, want two paginated requests", queries)
+	}
+
+	if _, err := store.BucketUsage(context.Background(), ports.BucketClass("test2"), ""); err == nil {
+		t.Fatal("BucketUsage() with empty tenant error = nil, want invalid")
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {

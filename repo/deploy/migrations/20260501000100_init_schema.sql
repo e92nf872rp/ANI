@@ -1,9 +1,12 @@
 -- ANI Platform · Initial Schema Migration
--- Version: 001
+-- Version: 20260501000100
 -- Description: Complete initial schema for all ANI services
--- Run with: psql $DATABASE_URL -f 20260501_001_init_schema.sql
+-- Run with: psql $DATABASE_URL -f 20260501000100_init_schema.sql
 -- Atlas: atlas migrate apply
-BEGIN;
+
+-- `atlas schema clean` may remove the public schema. Keep the migration
+-- runnable against a freshly cleaned PostgreSQL database.
+CREATE SCHEMA IF NOT EXISTS public;
 
 -- ===========================================================================
 -- DATABASE ROLES & PERMISSIONS
@@ -11,19 +14,37 @@ BEGIN;
 
 -- 应用连接账号（所有微服务使用此账号）
 -- 关键约束：非 owner、非 superuser、非 bypassrls，受 RLS 约束
-CREATE ROLE ani_app NOLOGIN;
-CREATE USER ani_app_user WITH PASSWORD '...' IN ROLE ani_app;
+-- 角色和凭据是 PostgreSQL 实例级资源；创建角色但不在迁移中写入密码。
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ani_app') THEN
+        CREATE ROLE ani_app NOLOGIN;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ani_app_user') THEN
+        CREATE ROLE ani_app_user LOGIN;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ani_migrator') THEN
+        CREATE ROLE ani_migrator NOLOGIN;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ani_outbox_publisher') THEN
+        CREATE ROLE ani_outbox_publisher BYPASSRLS NOLOGIN;
+    END IF;
+END
+$$;
 
-GRANT CONNECT ON DATABASE ani TO ani_app_user;
+GRANT ani_app TO ani_app_user;
+
+DO $$
+BEGIN
+    EXECUTE format('GRANT CONNECT ON DATABASE %I TO ani_app_user', current_database());
+    EXECUTE format('GRANT ALL PRIVILEGES ON DATABASE %I TO ani_migrator', current_database());
+END
+$$;
+
 GRANT USAGE ON SCHEMA public TO ani_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ani_app;
 
--- 迁移账号（仅 CI/CD 时使用，不是应用账号）
-CREATE ROLE ani_migrator;
-GRANT ALL PRIVILEGES ON DATABASE ani TO ani_migrator;
-
--- Outbox publisher 专用角色（bypassrls，仅跨租户扫描 outbox_events）
-CREATE ROLE ani_outbox_publisher BYPASSRLS NOLOGIN;
+-- 角色创建和数据库授权已在上方幂等处理。
 
 -- ===========================================================================
 -- SECTION 1: TENANTS
@@ -254,7 +275,7 @@ CREATE INDEX idx_workload_instances_audit ON workload_instances(tenant_id, audit
 -- 推理调用审计日志（高写入量，按月分区）
 -- NOTE: 可转为 TimescaleDB hypertable，见文件末尾注释
 CREATE TABLE inference_audit_logs (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id              UUID NOT NULL DEFAULT gen_random_uuid(),
     tenant_id       UUID NOT NULL,
     service_id      UUID NOT NULL,
     user_id         UUID,
@@ -265,7 +286,8 @@ CREATE TABLE inference_audit_logs (
     output_tokens   INT NOT NULL DEFAULT 0,
     duration_ms     INT,
     status_code     INT,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (id, created_at)
 ) PARTITION BY RANGE (created_at);                  -- 按月分区，由定时任务自动维护
 
 -- 创建当月和下月分区
@@ -498,7 +520,7 @@ CREATE TABLE platform_settings (
 
 -- 审计日志（操作层面，与推理层面分开存储），按月分区
 CREATE TABLE audit_logs (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id          UUID NOT NULL DEFAULT gen_random_uuid(),
     tenant_id   UUID,
     user_id     UUID,
     request_id  TEXT NOT NULL,
@@ -508,7 +530,8 @@ CREATE TABLE audit_logs (
     details     JSONB NOT NULL DEFAULT '{}',
     ip_address  INET,
     user_agent  TEXT,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (id, created_at)
 ) PARTITION BY RANGE (created_at);
 
 CREATE TABLE audit_logs_2026_05
@@ -654,4 +677,3 @@ INSERT INTO platform_branding (platform_name, primary_color, secondary_color)
 VALUES ('KuberCloud ANI', '#1677FF', '#13C2C2')
 ON CONFLICT DO NOTHING;
 
-COMMIT;

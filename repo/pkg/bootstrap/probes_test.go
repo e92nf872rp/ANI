@@ -218,6 +218,10 @@ func (fakeObjectStoreHealth) EnsureBucket(context.Context, ports.BucketClass) er
 	return nil
 }
 
+func (fakeObjectStoreHealth) BucketUsage(context.Context, ports.BucketClass, string) (ports.BucketUsage, error) {
+	return ports.BucketUsage{}, nil
+}
+
 func (fakeObjectStoreHealth) PutObject(context.Context, ports.PutObjectInput) (ports.ObjectMetadata, error) {
 	return ports.ObjectMetadata{}, nil
 }

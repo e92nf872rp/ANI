@@ -3366,6 +3366,12 @@ components:
         key:          { type: string }
         content_type: { type: string }
 
+    StorageObjectCompleteRequest:
+      type: object
+      required: [idempotency_key]
+      properties:
+        idempotency_key: { type: string }
+
     StorageObjectUploadResponse:
       type: object
       required: [upload_url, object_id]
@@ -6996,6 +7002,32 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+
+  /objects/{object_id}/complete:
+    post:
+      operationId: completeStorageObject
+      summary: 确认预签名上传完成
+      description: 客户端将文件 PUT 到预签名上传 URL 后调用本端点确认上传完成；配置对象存储时校验对象已存在并回写实际大小，未上传返回 412。
+      tags: [ObjectStore]
+      x-ani-rbac-scope: "scope:objects:create"
+      parameters:
+        - { name: object_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StorageObjectCompleteRequest' }
+      responses:
+        "200":
+          description: 对象元数据已确认
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StorageObject' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "412": { $ref: '#/components/responses/PreconditionFailed' }
 
   # ── 向量存储（Core API Alpha）──────────────────────────────────────────────
   /vector-stores:

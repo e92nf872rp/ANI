@@ -1,8 +1,7 @@
 -- ANI Platform · Migration 004
 -- Description: M1-INSTANCE-U VM lifecycle protection and SSH metadata
--- Depends on: 20260502_003_permissions_schema.sql
+-- Depends on: 20260502000300_permissions_schema.sql
 
-BEGIN;
 
 ALTER TABLE workload_instances
     ADD COLUMN IF NOT EXISTS lifecycle_policy JSONB NOT NULL DEFAULT '{}';
@@ -54,4 +53,3 @@ ALTER TABLE workload_instance_operations
         'console_session'
     ));
 
-COMMIT;

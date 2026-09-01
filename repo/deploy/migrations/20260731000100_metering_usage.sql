@@ -1,15 +1,24 @@
 -- ANI Platform · Metering Usage Records Migration
--- Version: 001
+-- Version: 20260731000100
 -- Description: 新建 metering_usage_records 表和 ani_metering_writer 角色，作为计量采集的 DB 层基础设施
--- Depends on: 20260501_001_init_schema.sql (tenants 表)
+-- Depends on: 20260501000100_init_schema.sql (tenants 表)
 -- 执行顺序: ROLE → TABLE → GRANT → RLS
--- Run with: psql $DATABASE_URL -f 20260731_001_metering_usage.sql
-BEGIN;
+-- Run with: psql $DATABASE_URL -f 20260731000100_metering_usage.sql
 
 -- ===========================================================================
 -- 0) 采集写侧专用角色（类比 init_schema.sql:26 ani_outbox_publisher BYPASSRLS）
 -- ===========================================================================
-CREATE ROLE ani_metering_writer BYPASSRLS NOLOGIN;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_roles WHERE rolname = 'ani_metering_writer'
+    ) THEN
+        CREATE ROLE ani_metering_writer BYPASSRLS NOLOGIN;
+    ELSE
+        ALTER ROLE ani_metering_writer BYPASSRLS NOLOGIN;
+    END IF;
+END
+$$;
 
 -- 让 ani_app_user 成为 ani_metering_writer 成员，
 -- 使 metering-service 可通过 SET ROLE ani_metering_writer 切换为 BYPASSRLS 身份跨租户写入
@@ -48,5 +57,3 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON metering_usage_records TO ani_metering_w
 ALTER TABLE metering_usage_records ENABLE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON metering_usage_records
     USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
-
-COMMIT;

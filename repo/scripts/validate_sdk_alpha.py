@@ -137,7 +137,10 @@ def run(cmd: list[str], cwd: Path, env: dict[str, str] | None = None) -> None:
 
 
 def command_available(cmd: list[str], cwd: Path) -> bool:
-    result = subprocess.run(cmd, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    try:
+        result = subprocess.run(cmd, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    except (FileNotFoundError, OSError):
+        return False
     return result.returncode == 0
 
 

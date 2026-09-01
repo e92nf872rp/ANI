@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>232</dd></div>
-          <div><dt>Schemas</dt><dd>316</dd></div>
+          <div><dt>Operations</dt><dd>233</dd></div>
+          <div><dt>Schemas</dt><dd>317</dd></div>
         </dl>
       </section>
 
@@ -1512,6 +1512,14 @@
           <td>200, 401, 403, 404</td>
         </tr>
         <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/objects/{object_id}/complete</code></td>
+          <td><code>completeStorageObject</code></td>
+          <td>确认预签名上传完成</td>
+          <td><code>scope:objects:create</code></td>
+          <td>200, 400, 401, 403, 404, 412</td>
+        </tr>
+        <tr>
           <td><span class="method method-get">GET</span></td>
           <td><code>/objects/{object_id}/download</code></td>
           <td><code>downloadStorageObject</code></td>
@@ -2288,6 +2296,7 @@
         <li><code>StorageFilesystemMountRequest</code></li>
         <li><code>StorageFilesystemUnmountRequest</code></li>
         <li><code>StorageObject</code></li>
+        <li><code>StorageObjectCompleteRequest</code></li>
         <li><code>StorageObjectDownloadInfo</code></li>
         <li><code>StorageObjectListResponse</code></li>
         <li><code>StorageObjectUploadRequest</code></li>

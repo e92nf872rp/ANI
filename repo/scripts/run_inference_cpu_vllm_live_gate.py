@@ -28,8 +28,8 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 GATE = ROOT / "deploy/real-k8s-lab/inference-cpu-vllm-live-gate.yaml"
-PW_MIGRATION = ROOT / "deploy/migrations/20260815_001_platform_workloads.sql"
-INF_MIGRATION = ROOT / "deploy/migrations/20260814_001_inference_control_plane.sql"
+PW_MIGRATION = ROOT / "deploy/migrations/20260815000100_platform_workloads.sql"
+INF_MIGRATION = ROOT / "deploy/migrations/20260814000100_inference_control_plane.sql"
 EVIDENCE = ROOT / "development-records/live-evidence/inference-cpu-vllm-live-20260815.json"
 OPS_EVIDENCE = ROOT / "development-records/live-evidence/inference-cpu-vllm-ops-live-20260815.json"
 PROFILE = "INFERENCE-SERVICE-CPU-VLLM-LIVE-GATE-C14"

@@ -16,7 +16,7 @@
 | `pkg/adapters/runtime/instance_orchestrator.go` | 修改 | GPU Container create 时生成 GPU 状态摘要 |
 | `pkg/adapters/runtime/instance_store.go` | 修改 | `workload_instances.gpu_status` JSONB 持久化读写 |
 | `services/ani-gateway/internal/router/demo_instances.go` | 修改 | 响应返回 `gpu` 状态摘要 |
-| `deploy/migrations/20260519_004_instance_u_vm_protection.sql` | 修改 | 增加 `gpu_status` JSONB 列 |
+| `deploy/migrations/20260519000400_instance_u_vm_protection.sql` | 修改 | 增加 `gpu_status` JSONB 列 |
 | `scripts/validate_core_alpha_contract.py` | 修改 | 合同守卫覆盖 GPU 状态字段和持久化 token |
 | `pkg/adapters/runtime/instance_orchestrator_test.go` | 修改 | 覆盖 GPU 状态生成 |
 | `services/ani-gateway/internal/router/demo_instances_test.go` | 修改 | 覆盖 demo service 返回 GPU 状态 |

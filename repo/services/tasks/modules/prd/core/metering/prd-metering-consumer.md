@@ -48,7 +48,7 @@ ANI 平台需要一个事件驱动的计量采集系统，在实例生命周期�
 **Description:** 作为开发者，我需要新建 `metering_usage_records` 表和 `ani_metering_writer` 角色，为计量数据提供持久化存储。
 
 **Acceptance Criteria:**
-- [ ] 新增 `repo/deploy/migrations/20260731_001_metering_usage.sql`
+- [ ] 新增 `repo/deploy/migrations/20260731000100_metering_usage.sql`
 - [ ] 创建 `ani_metering_writer` 角色（BYPASSRLS NOLOGIN），类比 `init_schema.sql` 中 `ani_outbox_publisher` 的创建范式
 - [ ] 创建 `metering_usage_records` 表：`id` BIGSERIAL PK、`tenant_id` UUID FK→tenants(id) ON DELETE CASCADE、`resource_ref` TEXT、`resource_type` TEXT、`period` TEXT、`quantity` DOUBLE PRECISION、`unit` TEXT、`recorded_at` TIMESTAMPTZ DEFAULT NOW()
 - [ ] UNIQUE 约束 `(tenant_id, resource_ref, resource_type, period)` 作为 StartCollection 幂等的 DB 层
@@ -315,7 +315,7 @@ ANI 平台需要一个事件驱动的计量采集系统，在实例生命周期�
 | Item | Value |
 |------|-------|
 | Product line | core |
-| Code scope | `repo/pkg/ports/metering.go`（扩展）、`repo/pkg/ports/instance_events.go`（新增）、`repo/pkg/adapters/metering/`（新增）、`repo/services/metering-service/`（新建 main.go + internal）、`repo/deploy/migrations/20260731_001_metering_usage.sql`（新增）、`repo/deploy/real-k8s-lab/metering-service-live-deps.yaml`（新增） |
+| Code scope | `repo/pkg/ports/metering.go`（扩展）、`repo/pkg/ports/instance_events.go`（新增）、`repo/pkg/adapters/metering/`（新增）、`repo/services/metering-service/`（新建 main.go + internal）、`repo/deploy/migrations/20260731000100_metering_usage.sql`（新增）、`repo/deploy/real-k8s-lab/metering-service-live-deps.yaml`（新增） |
 | OpenAPI authority | consume only / N/A（本 PRD 不涉及 OpenAPI 契约变更，纯 Core 内部服务 + DB migration + 部署清单） |
 | Frozen exclusions | Core OpenAPI v1.yaml、Services API services/v1.yaml、reconciler/outbox 生产侧、metering 读取侧（QueryUsage 展示）、多副本支持 |
 | idempotency_key | N/A（本 PRD 为 Core 内部服务 + 基础设施改造，不新增有副作用的 POST/PUT/PATCH API 端点） |

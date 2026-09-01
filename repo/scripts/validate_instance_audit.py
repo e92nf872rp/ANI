@@ -39,7 +39,7 @@ def load_contract_text(root: pathlib.Path) -> str:
 
 def main() -> int:
     root = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else pathlib.Path("deploy/manifests/m1-instance-e")
-    schema = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 else pathlib.Path("deploy/migrations/20260501_001_init_schema.sql")
+    schema = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 else pathlib.Path("deploy/migrations/20260501000100_init_schema.sql")
     contract_text = load_contract_text(root)
     schema_text = schema.read_text(encoding="utf-8")
 

@@ -76,7 +76,7 @@ def validate_code_contract() -> None:
 
 def validate_migration() -> None:
     migration = require_text(
-        ROOT / "deploy/migrations/20260520_007_workload_identity_api_keys.sql",
+        ROOT / "deploy/migrations/20260520000700_workload_identity_api_keys.sql",
         "ALTER COLUMN instance_id TYPE TEXT",
         "idx_api_keys_instance",
     )

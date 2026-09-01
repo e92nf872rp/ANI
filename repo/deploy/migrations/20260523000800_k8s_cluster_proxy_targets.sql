@@ -1,8 +1,7 @@
 -- ANI Platform · Migration 008
 -- Description: M1-K8S-PROXY-C K8s cluster proxy target persistence
--- Depends on: 20260520_007_workload_identity_api_keys.sql
+-- Depends on: 20260520000700_workload_identity_api_keys.sql
 
-BEGIN;
 
 CREATE TABLE IF NOT EXISTS k8s_cluster_proxy_targets (
     tenant_id       UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -33,4 +32,3 @@ COMMENT ON TABLE k8s_cluster_proxy_targets IS
 COMMENT ON COLUMN k8s_cluster_proxy_targets.bearer_token IS
     'Current metadata-backed bridge token for proxy forwarding; production deployments should move this secret material behind KMS or a Kubernetes Secret provider.';
 
-COMMIT;

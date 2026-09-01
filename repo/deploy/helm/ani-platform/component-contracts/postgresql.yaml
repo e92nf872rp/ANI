@@ -19,7 +19,7 @@ contracts:
       - not-used-by-app-services
   migration:
     path: deploy/migrations
-    firstMigration: 20260501_001_init_schema.sql
+    firstMigration: 20260501000100_init_schema.sql
 secrets:
   - name: ani-bootstrap-placeholders
     keys:

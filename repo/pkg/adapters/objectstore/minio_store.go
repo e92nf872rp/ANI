@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
@@ -158,6 +159,69 @@ func (s *MinIOObjectStore) EnsureBucket(ctx context.Context, class ports.BucketC
 		return nil
 	}
 	return minIOHTTPError(putResp.StatusCode, "create bucket")
+}
+
+// BucketUsage aggregates live object count and size from the S3-compatible
+// backend via ListObjectsV2, scoped to the tenant prefix so shared buckets
+// only report the requesting tenant's objects.
+func (s *MinIOObjectStore) BucketUsage(ctx context.Context, class ports.BucketClass, tenantID string) (ports.BucketUsage, error) {
+	if strings.TrimSpace(tenantID) == "" {
+		return ports.BucketUsage{}, fmt.Errorf("%w: tenant_id is required for bucket usage", ports.ErrInvalid)
+	}
+	bucket, err := s.bucketName(class)
+	if err != nil {
+		return ports.BucketUsage{}, err
+	}
+	var usage ports.BucketUsage
+	continuationToken := ""
+	for {
+		target := s.bucketURL(bucket)
+		query := url.Values{}
+		query.Set("list-type", "2")
+		query.Set("max-keys", "1000")
+		query.Set("prefix", strings.Trim(tenantID, "/")+"/")
+		if continuationToken != "" {
+			query.Set("continuation-token", continuationToken)
+		}
+		target.RawQuery = query.Encode()
+		req, err := s.newSignedRequest(ctx, http.MethodGet, target, nil, "")
+		if err != nil {
+			return ports.BucketUsage{}, err
+		}
+		resp, err := s.doRequest(req)
+		if err != nil {
+			return ports.BucketUsage{}, err
+		}
+		body, readErr := io.ReadAll(resp.Body)
+		closeBody(resp.Body)
+		if readErr != nil {
+			return ports.BucketUsage{}, readErr
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return ports.BucketUsage{}, minIOHTTPError(resp.StatusCode, "list bucket usage")
+		}
+		var result minIOListBucketResult
+		if err := xml.Unmarshal(body, &result); err != nil {
+			return ports.BucketUsage{}, fmt.Errorf("decode list objects response: %w", err)
+		}
+		for _, object := range result.Contents {
+			usage.ObjectCount++
+			usage.SizeBytes += object.Size
+		}
+		if !result.IsTruncated || strings.TrimSpace(result.NextContinuationToken) == "" {
+			return usage, nil
+		}
+		continuationToken = result.NextContinuationToken
+	}
+}
+
+type minIOListBucketResult struct {
+	XMLName               xml.Name `xml:"ListBucketResult"`
+	IsTruncated           bool     `xml:"IsTruncated"`
+	NextContinuationToken string   `xml:"NextContinuationToken"`
+	Contents              []struct {
+		Size int64 `xml:"Size"`
+	} `xml:"Contents"`
 }
 
 func (s *MinIOObjectStore) PutObject(ctx context.Context, input ports.PutObjectInput) (ports.ObjectMetadata, error) {

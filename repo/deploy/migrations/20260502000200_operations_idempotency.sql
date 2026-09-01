@@ -1,9 +1,8 @@
 -- ANI Platform · Migration 002
 -- Description: Instance operations tracking + idempotency + workload identity
--- Depends on: 20260501_001_init_schema.sql
+-- Depends on: 20260501000100_init_schema.sql
 -- Run: atlas migrate apply  OR  psql $DATABASE_URL -f <this_file>
 
-BEGIN;
 
 -- ===========================================================================
 -- 1. IDEMPOTENCY ON workload_instances
@@ -131,4 +130,3 @@ COMMENT ON COLUMN api_keys.scope IS
     'Permission scope. Format: [{"resource":"instances","actions":["read"]}]. '
     'Workload Identity keys must have explicit non-empty scope.';
 
-COMMIT;

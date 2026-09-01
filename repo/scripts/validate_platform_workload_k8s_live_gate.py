@@ -10,7 +10,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_GATE = ROOT / "deploy/real-k8s-lab/platform-workload-k8s-live-gate.yaml"
-MIGRATION = ROOT / "deploy/migrations/20260815_001_platform_workloads.sql"
+MIGRATION = ROOT / "deploy/migrations/20260815000100_platform_workloads.sql"
 DEFAULT_EVIDENCE = ROOT / "development-records/live-evidence/platform-workload-k8s-live-20260815.json"
 PROFILE = "INFERENCE-PLATFORM-WORKLOAD-K8S-LIVE-GATE-C9"
 REQUIRED_CHECKS = {

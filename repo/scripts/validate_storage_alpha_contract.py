@@ -324,9 +324,9 @@ def validate_gateway(root: Path, errors: list[str]) -> None:
 
 
 def validate_persistence(root: Path, errors: list[str]) -> None:
-    migration = root / "deploy/migrations/20260520_006_storage_resources.sql"
+    migration = root / "deploy/migrations/20260520000600_storage_resources.sql"
     if not migration.exists():
-        errors.append("missing storage persistence migration 20260520_006_storage_resources.sql")
+        errors.append("missing storage persistence migration 20260520000600_storage_resources.sql")
         return
     sql = migration.read_text(encoding="utf-8")
     for table in (

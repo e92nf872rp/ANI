@@ -1,8 +1,8 @@
--- ANI Platform · Migration 20260811_003
+-- ANI Platform · Migration 20260811000300
 -- Description: 配额变更申请表 — tenant_quota_change
 --              支撑 US-012（提交配额变更申请）/ US-013（查询申请列表）/ US-014（审批申请）
 --              以及 GetApprovedQuotaChanges（绑定套餐/修改限额同步时跳过 approved 维度）
--- Depends on: 20260501_001_init_schema.sql (tenants, users), 20260810_001_resource_quota.sql (resource_quota_meta)
+-- Depends on: 20260501000100_init_schema.sql (tenants, users), 20260810000100_resource_quota.sql (resource_quota_meta)
 -- Rationale:
 --   BOSS 租户配额变更审批流（plan v3.0 §4.1.6）：
 --     - tenant_quota_change  记录某租户某配额维度的变更申请，一个申请对应一个维度。
@@ -16,7 +16,6 @@
 --   平台治理数据，应用层 RBAC 限制为 platform-admin/ops；
 --   tenant-service 以 ani_app_user 连接 DB，故仍需表级 GRANT。
 
-BEGIN;
 
 -- ===========================================================================
 -- 1. tenant_quota_change — 配额变更申请表
@@ -57,7 +56,6 @@ CREATE POLICY tenant_quota_change_self_read
 -- GRANT 表级读写给 ani_app_user
 GRANT SELECT, INSERT, UPDATE, DELETE ON tenant_quota_change TO ani_app_user;
 
-COMMIT;
 
 -- ===========================================================================
 -- Rollback

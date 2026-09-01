@@ -118,7 +118,7 @@ ANI 平台知识库模块，支持多租户隔离、多知识库管理、文档�
 ### 3.1 PostgreSQL（P0 新增 1 张表）
 
 ```sql
--- knowledge_bases/kb_documents/kb_sessions/kb_messages 已在 20260501_001_init_schema.sql 迁移
+-- knowledge_bases/kb_documents/kb_sessions/kb_messages 已在 20260501000100_init_schema.sql 迁移
 -- P0 仅新增 kb_chunks 表；kb_permissions/kb_audit_log 降级为 P1
 
 CREATE TABLE kb_chunks (

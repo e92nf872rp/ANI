@@ -1,6 +1,6 @@
--- ANI Platform · Migration 20260707_014
+-- ANI Platform · Migration 20260707001400
 -- Description: Unify platform admins into users table (tenant_id IS NULL) + refresh_tokens.user_id index
--- Depends on: 20260501_001_init_schema.sql
+-- Depends on: 20260501000100_init_schema.sql
 -- Rationale:
 --   init_schema.users.tenant_id is NOT NULL with FK to tenants(id), preventing platform
 --   admins (which have no tenant) from living in `users`. We previously maintained a
@@ -20,10 +20,9 @@
 --     3. Adds the missing idx_refresh_tokens_user_id index (used by RevokeAllForUser).
 --
 --   refresh_tokens.tenant_id/user_id FKs are NOT touched here. A later migration
---   (20260707_014_platform_refresh_tokens.sql) loosens refresh_tokens.tenant_id to
+--   (20260707001401_platform_refresh_tokens.sql) loosens refresh_tokens.tenant_id to
 --   NULLABLE and restores the refresh_tokens.user_id FK to users(id).
 
-BEGIN;
 
 -- ===========================================================================
 -- 1. USERS: allow tenant_id NULL for platform admins
@@ -63,7 +62,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_users_platform_email
 
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id);
 
-COMMIT;
 
 -- ===========================================================================
 -- Rollback

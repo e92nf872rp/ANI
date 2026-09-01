@@ -17,7 +17,7 @@
 | `pkg/adapters/runtime/instance_store.go` | 修改 | `workload_instances.container_status` JSONB 持久化读写 |
 | `services/ani-gateway/internal/router/demo_instances.go` | 修改 | create 支持 `replicas`，响应返回 `container` 状态摘要 |
 | `api/openapi/v1.yaml` | 修改 | `InstanceRecord.container` 和 `CreateInstanceRequest.replicas` 进入 Core Alpha 契约 |
-| `deploy/migrations/20260519_004_instance_u_vm_protection.sql` | 修改 | 增加 `container_status` JSONB 列 |
+| `deploy/migrations/20260519000400_instance_u_vm_protection.sql` | 修改 | 增加 `container_status` JSONB 列 |
 | `scripts/validate_core_alpha_contract.py` | 修改 | 合同守卫覆盖 container rollout 字段和持久化 token |
 | `pkg/adapters/runtime/instance_orchestrator_test.go` | 修改 | 覆盖 Container rollout 状态生成 |
 | `services/ani-gateway/internal/router/demo_instances_test.go` | 修改 | 覆盖 demo service 返回 container rollout 状态 |

@@ -1,12 +1,12 @@
--- ANI Platform · Migration 20260810_003
+-- ANI Platform · Migration 20260810000300
 -- Description:
 --   1) 移除 tenants 表废弃的配额上限列（max_gpu_count / max_cpu_cores / max_memory_gb）
 --   2) 修复 audit_logs 分区主键并补建 2026-08 分区
 --   3) 补齐 audit_logs 平台审计 RLS（PERMISSIVE bypass + tenant self）
 --   4) 补齐 tenant_plans / plan_quota_limits 对 ani_app_user 的表级 GRANT
--- Depends on: 20260501_001_init_schema.sql, 20260810_001_resource_quota.sql, 20260810_002_tenant_plan_management.sql
+-- Depends on: 20260501000100_init_schema.sql, 20260810000100_resource_quota.sql, 20260810000200_tenant_plan_management.sql
 -- Rationale:
---   配额治理已迁移到 resource_quota 表（见 20260810_001_resource_quota.sql）：
+--   配额治理已迁移到 resource_quota 表（见 20260810000100_resource_quota.sql）：
 --     - 旧列: tenants.max_gpu_count INT NOT NULL DEFAULT 0 / max_cpu_cores / max_memory_gb
 --     - 新表: resource_quota(tenant_id, resource_type, total, reserved, used) 承载按维度账本
 --   三个旧列已无代码引用（配额读写改走 resource_quota），此处清理避免双重来源。
@@ -15,7 +15,6 @@
 --   platform_bypass + tenant_self PERMISSIVE 策略（对齐租户管理 plan v3.0）。
 --   tenant-service 默认 DATABASE_URL 使用 ani_app_user，需对套餐表 GRANT。
 
-BEGIN;
 
 -- 1) 移除 tenants 表废弃的配额上限列
 ALTER TABLE tenants DROP COLUMN IF EXISTS max_gpu_count;
@@ -52,7 +51,6 @@ CREATE POLICY audit_tenant_self ON audit_logs
 GRANT SELECT, INSERT, UPDATE, DELETE ON tenant_plans TO ani_app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON plan_quota_limits TO ani_app_user;
 
-COMMIT;
 
 -- ===========================================================================
 -- Rollback

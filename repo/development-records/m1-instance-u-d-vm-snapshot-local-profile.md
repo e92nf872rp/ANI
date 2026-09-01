@@ -17,7 +17,7 @@
 | `pkg/adapters/runtime/instance_store.go` | 修改 | `workload_instances.snapshots` JSONB 持久化读写 |
 | `services/ani-gateway/internal/router/demo_instances.go` | 修改 | lifecycle 支持 `snapshot` action，响应返回 `snapshots[]` |
 | `api/openapi/v1.yaml` | 修改 | `InstanceRecord.snapshots` 和 `InstanceLifecycleRequest.snapshot_name` 进入 Core Alpha 契约 |
-| `deploy/migrations/20260519_004_instance_u_vm_protection.sql` | 修改 | 增加 `snapshots` JSONB 列 |
+| `deploy/migrations/20260519000400_instance_u_vm_protection.sql` | 修改 | 增加 `snapshots` JSONB 列 |
 | `scripts/validate_core_alpha_contract.py` | 修改 | 合同守卫覆盖 snapshot schema 和迁移 token |
 | `pkg/adapters/runtime/instance_service_test.go` | 修改 | 覆盖 VM snapshot 不调用 provider、保持 running、写入 timeline |
 | `services/ani-gateway/internal/router/demo_instances_test.go` | 修改 | 覆盖 demo service VM snapshot 响应 |

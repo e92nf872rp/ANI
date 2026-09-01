@@ -101,7 +101,7 @@ go test ./internal/middleware/... -count=1 -timeout 60s
 
 | Issue | 标题 | 状态 | 验收项 |
 |---|---|---|---|
-| #001 | 平台用户迁移 (users 表扩展) | ✅ 已完成 | 迁移 `20260707_014_platform_users.sql` 已合入 |
+| #001 | 平台用户迁移 (users 表扩展) | ✅ 已完成 | 迁移 `20260707001400_platform_users.sql` 已合入 |
 | #002 | 租户账密登录 API | ✅ 已完成 | v1.yaml + passwordLoginManager + ani-gateway 路由 + 测试 |
 | #003 | 平台账密登录 API | ✅ 已完成 | v1.yaml + platformLoginManager + RBAC scope + Token 隔离 |
 

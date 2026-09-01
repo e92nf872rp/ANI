@@ -1,7 +1,7 @@
--- ANI Platform · Migration 20260810_001
+-- ANI Platform · Migration 20260810000100
 -- Description: 配额基础表 — resource_quota_meta（配额维度元数据注册表）
 --              + resource_quota（租户配额配置 + 运行时账本）+ resource_reservations（TCC 配额流水）
--- Depends on: 20260501_001_init_schema.sql (tenants)
+-- Depends on: 20260501000100_init_schema.sql (tenants)
 -- Rationale:
 --   Core 配额治理所需的持久化基础：
 --     - resource_quota_meta  维度注册表（display_name/unit/default_quota/enabled）。平台治理数据，
@@ -17,7 +17,6 @@
 --   应用用户授权按「租户管理 plan v3.0 §4.3.4 应用用户权限分配」：
 --   配额相关表直接 GRANT 给 ani_app_user。
 
-BEGIN;
 
 -- ===========================================================================
 -- 1. resource_quota_meta — 配额维度元数据注册表（不加 RLS：平台治理数据）
@@ -117,7 +116,6 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON resource_reservations TO ani_app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON resource_quota_meta TO ani_app_user;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ani_app_user;
 
-COMMIT;
 
 -- ===========================================================================
 -- Rollback

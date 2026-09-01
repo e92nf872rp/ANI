@@ -1,8 +1,7 @@
 -- ANI Platform · Migration 006
 -- Description: M1-STORAGE-A Core storage resource persistence
--- Depends on: 20260520_005_network_resources.sql
+-- Depends on: 20260520000500_network_resources.sql
 
-BEGIN;
 
 CREATE TABLE IF NOT EXISTS storage_volumes (
     tenant_id       UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -82,4 +81,3 @@ CREATE POLICY tenant_isolation ON storage_objects
     AS RESTRICTIVE
     USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
 
-COMMIT;

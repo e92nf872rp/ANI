@@ -14,7 +14,7 @@ Added plan/render/admission audit persistence:
 - `pkg/ports/workload_runtime.go` adds `WorkloadPlanAuditStore`.
 - `pkg/adapters/runtime/plan_audit_store.go`
 - `pkg/adapters/runtime/plan_audit_store_test.go`
-- `deploy/migrations/20260501_001_init_schema.sql` adds `instance_plan_audits` with tenant RLS.
+- `deploy/migrations/20260501000100_init_schema.sql` adds `instance_plan_audits` with tenant RLS.
 - `deploy/manifests/m1-instance-e/`
 - `scripts/validate_instance_audit.py`
 

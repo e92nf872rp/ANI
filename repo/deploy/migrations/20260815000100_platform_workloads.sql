@@ -1,7 +1,6 @@
 -- Core platform-workloads persistence for CPU Kubernetes provider restart recovery.
 -- Independent of /instances. Tenant RLS matches other Core control-plane tables.
 
-BEGIN;
 
 CREATE TABLE IF NOT EXISTS platform_workloads (
     id          UUID        PRIMARY KEY,
@@ -53,4 +52,3 @@ COMMENT ON TABLE platform_workloads IS
 COMMENT ON TABLE platform_workload_intents IS
     'Idempotency fingerprints for platform-workloads mutations.';
 
-COMMIT;

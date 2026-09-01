@@ -40,7 +40,7 @@ Version impact:
 - `pkg/repo/task_repo.go`
 - `services/task-service/internal/service/task_service.go`
 - `services/task-service/internal/service/task_service_test.go`
-- `deploy/migrations/20260501_001_init_schema.sql`
+- `deploy/migrations/20260501000100_init_schema.sql`
 - `Makefile`
 - `../ANI-11-代码实现规范.md`
 - `development-records/README.md`

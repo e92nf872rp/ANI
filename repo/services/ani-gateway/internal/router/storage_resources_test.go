@@ -239,6 +239,36 @@ func TestStorageHTTPAsyncTasksKeepOperationTypeAndLocation(t *testing.T) {
 	}
 }
 
+func TestStorageHTTPCompleteObjectConfirmsPresignedUpload(t *testing.T) {
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Next(ctx)
+	})
+	registerStorageResourcesWithService(h.Group("/api/v1"), runtimeadapter.NewLocalStorageService())
+
+	bucket := performJSONRequest(t, h, http.MethodPost, "/api/v1/buckets", `{"idempotency_key":"http-complete-bucket","name":"uploads-a","region":"local","access_mode":"private"}`, http.StatusCreated)
+	bucketID := jsonStringField(t, bucket, "id")
+
+	upload := performJSONRequest(t, h, http.MethodPost, "/api/v1/buckets/"+bucketID+"/objects/upload", `{"idempotency_key":"http-complete-upload","key":"raw/report.csv","content_type":"text/csv"}`, http.StatusOK)
+	objectID := jsonStringField(t, upload, "object_id")
+	if objectID == "" {
+		t.Fatalf("upload response missing object_id: %s", upload)
+	}
+
+	performJSONRequest(t, h, http.MethodPost, "/api/v1/objects/"+objectID+"/complete", `{}`, http.StatusBadRequest)
+
+	completed := performJSONRequest(t, h, http.MethodPost, "/api/v1/objects/"+objectID+"/complete", `{"idempotency_key":"http-complete-confirm"}`, http.StatusOK)
+	if got := jsonStringField(t, completed, "id"); got != objectID {
+		t.Fatalf("completed object id = %q, want %s", got, objectID)
+	}
+	if got := jsonStringField(t, completed, "state"); got != "available" {
+		t.Fatalf("completed object state = %q, want available", got)
+	}
+
+	performJSONRequest(t, h, http.MethodPost, "/api/v1/objects/00000000-0000-0000-0000-000000000000/complete", `{"idempotency_key":"http-complete-missing"}`, http.StatusNotFound)
+}
+
 func TestStorageAPIBucketAndSignedURLResponsesMatchCoreSchema(t *testing.T) {
 	api := newStorageAPI()
 	bucket, err := api.service.CreateStorageBucket(context.Background(), ports.StorageBucketCreateRequest{

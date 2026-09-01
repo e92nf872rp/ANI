@@ -7,7 +7,7 @@
 //
 // 修复前：workload_instances 仅有 RESTRICTIVE tenant_isolation 策略，无 PERMISSIVE
 // 策略，PostgreSQL RLS 拒绝所有行，导致 specInUse COUNT(*) 假阴性。
-// 修复后（20260825_001_workload_instances_rls_fix.sql）：PERMISSIVE 双策略。
+// 修复后（20260825000100_workload_instances_rls_fix.sql）：PERMISSIVE 双策略。
 //
 // 运行命令（PG 已部署在 10.10.1.66:30945）：
 //
@@ -71,7 +71,7 @@ func TestRLSWorkloadInstancesPlatformBypass(t *testing.T) {
 	}
 	policyRows.Close()
 	if !hasPermissive {
-		t.Fatal("无 PERMISSIVE 策略 — 迁移 20260825_001 可能未执行，PostgreSQL RLS 会拒绝所有行")
+		t.Fatal("无 PERMISSIVE 策略 — 迁移 20260825000100 可能未执行，PostgreSQL RLS 会拒绝所有行")
 	}
 
 	// --- 创建临时非 superuser 角色（模拟 ani_app_user，受 RLS 约束） ---
