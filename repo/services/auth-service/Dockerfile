@@ -5,6 +5,8 @@ COPY go.work go.work.sum ./
 COPY pkg ./pkg
 COPY services/auth-service ./services/auth-service
 
+ENV GOWORK=off
+
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     cd services/auth-service && \

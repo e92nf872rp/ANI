@@ -71,6 +71,7 @@
 | INFERENCE-SERVICE-GPU-MEMORY-CONTRACT-C38 | Core/Services 加速器契约：`spec_id` 只表示型号；`count` / `count_per_replica` 必填；可选 `memory` 为申请显存，不填整卡、填写 vGPU。不另加 `gpu_mode`。历史 `-full`/`-Nx` 剥后缀后按型号处理。不含 handler/runtime。不得外推 GPU/runtime ready | inference-service-gpu-memory-contract-c38.md |
 | INFERENCE-SERVICE-GPU-MEMORY-C39 | 按 C38 实现 handler/proto/runtime：capabilities 广告型号 ID；有 `memory` 申请 volcano vGPU 显存，无 `memory` 申请整卡。live passed：清理残留测试后，`memory: 0` 400、型号 `gpu-nvidia-geforce-rtx-4090`、省略 memory 为 `nvidia.com/gpu=1`、填写 memory 为 `volcano.sh/vgpu-number=1`/`vgpu-memory=1228`。首次 live 两条路径 running 后删除；二次 live 保留服务并 ClusterIP 压测 60 秒。不含 Console。不得外推 GPU/runtime ready | inference-service-gpu-memory-c39.md |
 | MODEL-TENANT-ISOLATION-VECTOR-INFERENCE-A | live passed（限定 CPU / internal ClusterIP）：ModelRepository 全操作增加显式 tenant SQL fence，真实 foreign Model Get=404 且 owner List 不含 foreign ID；从既有 Model capabilities 派生并冻结 `generate`/`embed`，当前 vLLM embedding argv 使用 `--runner pooling --convert embed`，有界 1 MiB smoke 可解析真实约 19 KiB 向量响应。测试服务已到 running 并直连 `/v1/embeddings` 200 / data 非空，随后清理测试资源、恢复控制面基线；公开 Envoy `/v1/embeddings`、GPU 与 embedding 质量不在结论范围。evidence `live-evidence/model-tenant-vector-inference-live-20260825.json` | model-tenant-isolation-vector-inference.md |
+| INFERENCE-SERVICE-C41 | Envoy AI Gateway 多租户动态发布 local/logic verified：Services v1 无新 endpoint/field，只有 `served_model_name`/`invocation_url` 描述澄清；AK-only authentication、认证后 tenant/model/path 解析、trusted header overwrite + `recomputeRoute`、generation-fenced Publisher、withdraw-before-runtime lifecycle、least-privilege RBAC/NetworkPolicy 与脱敏 live-gate contract 已落地。Task 8 server dry-run 为 10/11 accepted，已安装 BackendTrafficPolicy CRD 的 `int32`/`maximum` schema 自相矛盾；live status `not-run`，不得标 runtime/production ready。外部 normal/race/module/repository tests 均通过；Console schema 三处 description 生成更新纳入隔离 shipping index 后 `make validate-services` EXIT:0，真实 index 保持为空；PG live integration 因 DSN 未设而 skip。 | inference-envoy-ai-gateway-c41.md |
 
 
 ### Core Quota Service（2026-08）
@@ -632,6 +633,7 @@
 | M2.1-TASK-C | worker mutation RPCs | m2-1-task-c-worker-mutations.md |
 | M2.2-AUTH-A~K | auth-service 完整实现（JWT/OIDC/JWKS/RBAC/API Key）| m2-2-auth-*.md |
 | M2.2-AUTH-FINAL | Auth 生产收尾：OIDC/Dex 护栏、Gateway Auth REST、API Key 管理、合同守卫与 Docker Dex smoke | m2-2-auth-final-production-closeout.md |
+| INFERENCE-ENVOY-AI-GATEWAY-RATELIMIT | Envoy AI Gateway 推理入口共享全局限流与 Redis 后端契约 | inference-envoy-ai-gateway-ratelimit.md |
 
 ---
 

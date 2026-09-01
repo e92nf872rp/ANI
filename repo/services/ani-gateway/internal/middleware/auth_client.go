@@ -4,12 +4,14 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	authv1 "github.com/kubercloud/ani/pkg/generated/pb/auth/v1"
 	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/authz"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -149,6 +151,9 @@ func writeAuthRPCError(c *app.RequestContext, err error) {
 	case codes.PermissionDenied:
 		respondError(c, http.StatusForbidden, "FORBIDDEN", "permission denied")
 	case codes.ResourceExhausted:
+		if retryAfter := retryAfterSecondsFromGRPCError(err); retryAfter > 0 {
+			c.Header("Retry-After", strconv.Itoa(retryAfter))
+		}
 		respondError(c, http.StatusTooManyRequests, "RATE_LIMIT_EXCEEDED", "credential rate limit exceeded")
 	case codes.DeadlineExceeded:
 		respondError(c, http.StatusGatewayTimeout, "AUTHZ_DEADLINE_EXCEEDED", "authorization deadline exceeded")
@@ -159,4 +164,23 @@ func writeAuthRPCError(c *app.RequestContext, err error) {
 	default:
 		respondError(c, http.StatusServiceUnavailable, "AUTHZ_UNAVAILABLE", "authorization service unavailable")
 	}
+}
+
+func retryAfterSecondsFromGRPCError(err error) int {
+	st, ok := status.FromError(err)
+	if !ok {
+		return 0
+	}
+	for _, detail := range st.Details() {
+		info, ok := detail.(*errdetails.ErrorInfo)
+		if !ok || info.GetReason() != "RATE_LIMITED" {
+			continue
+		}
+		seconds, parseErr := strconv.Atoi(info.GetMetadata()["retry_after_seconds"])
+		if parseErr != nil || seconds <= 0 {
+			return 0
+		}
+		return seconds
+	}
+	return 0
 }

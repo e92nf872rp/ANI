@@ -100,6 +100,7 @@ class InferenceEnvoyAIGatewayLiveGateTests(unittest.TestCase):
             runner.lifecycle_plan(),
             [
                 "apply-and-wait",
+                "gateway-global-rate-limit-configured",
                 "owner-nonstream",
                 "owner-embedding",
                 "owner-sse",

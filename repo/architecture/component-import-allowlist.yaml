@@ -101,6 +101,11 @@ allowed:
       - github.com/jackc/pgx/v5/pgconn
       - github.com/jackc/pgx/v5/pgxpool
     reason: inference-service PostgreSQL repository is a bounded persistence adapter; direct pgx keeps tenant RLS transactions, advisory idempotency locking, generation CAS, and SKIP LOCKED operation leases explicit
+  - path: services/inference-service/internal/adapter/redis/rate_limiter.go
+    coupling_level: bounded_direct
+    imports:
+      - github.com/redis/go-redis/v9
+    reason: inference-service Redis rate-limiter adapter implements the service-owned RateLimiter port; provider types remain inside the bounded adapter and do not leak into access-policy business code
   - path: services/tenant-service/internal/repo/adapters/postgres/tenant_plan_store.go
     coupling_level: bounded_direct
     imports:

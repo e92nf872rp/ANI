@@ -57,6 +57,9 @@ func TestRateLimitRejectsOverQuotaAndRecoversAfterWindow(t *testing.T) {
 	if got := string(resp.Body()); !strings.Contains(got, "RATE_LIMIT_EXCEEDED") {
 		t.Fatalf("over-quota body = %s, want RATE_LIMIT_EXCEEDED", got)
 	}
+	if got := resp.Header.Get("Retry-After"); got == "" {
+		t.Fatal("over-quota response is missing Retry-After")
+	}
 
 	time.Sleep(70 * time.Millisecond)
 	resp = ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/instances", nil).Result()

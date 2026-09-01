@@ -19,14 +19,20 @@ import (
 type acceptingValidator struct{}
 
 func (acceptingValidator) ValidateToken(context.Context, string) (*commonv1.TenantContext, error) {
-	return &commonv1.TenantContext{TenantId: "tenant-1"}, nil
+	return &commonv1.TenantContext{TenantId: "tenant-1", ApiKeyId: "key-1"}, nil
+}
+
+type acceptingChecker struct{}
+
+func (acceptingChecker) CheckInferenceAccess(context.Context, string, string, string, string, string, string, string, bool) (extauth.AccessDecision, error) {
+	return extauth.AccessDecision{HTTPStatus: 200, InferenceServiceID: "service-1"}, nil
 }
 
 var _ extauth.TokenValidator = acceptingValidator{}
 
 func TestNewGRPCServerServesHealthAndAuthorization(t *testing.T) {
 	listener := bufconn.Listen(1024 * 1024)
-	server := newGRPCServer(acceptingValidator{})
+	server := newGRPCServer(acceptingValidator{}, acceptingChecker{})
 	defer server.Stop()
 	go func() {
 		if err := server.Serve(listener); err != nil {
@@ -55,12 +61,9 @@ func TestNewGRPCServerServesHealthAndAuthorization(t *testing.T) {
 	}
 
 	authResponse, err := authv3.NewAuthorizationClient(conn).Check(ctx, &authv3.CheckRequest{Attributes: &authv3.AttributeContext{
-		ContextExtensions: map[string]string{
-			"ani.target_tenant_id":     "tenant-1",
-			"ani.inference_service_id": "service-1",
-		},
 		Request: &authv3.AttributeContext_Request{Http: &authv3.AttributeContext_HttpRequest{
-			Headers: map[string]string{"authorization": "Bearer ani_tenant_secret"},
+			Path:    "/v1/chat/completions",
+			Headers: map[string]string{"authorization": "Bearer ani_tenant_secret", "x-ai-eg-model": "ani-qwen3"},
 		}},
 	}})
 	if err != nil {
@@ -76,8 +79,18 @@ func TestNewGRPCServerServesHealthAndAuthorization(t *testing.T) {
 
 func TestRunReturnsErrorForInvalidConfiguration(t *testing.T) {
 	t.Setenv("AUTH_SERVICE_GRPC_ADDR", "")
+	t.Setenv("INFERENCE_SERVICE_GRPC_ADDR", "inference:9112")
 
 	if err := run(); err == nil {
 		t.Fatal("run() accepted an invalid configuration")
+	}
+}
+
+func TestRunReturnsErrorWhenInferenceServiceIsNotConfigured(t *testing.T) {
+	t.Setenv("AUTH_SERVICE_GRPC_ADDR", "auth:9101")
+	t.Setenv("INFERENCE_SERVICE_GRPC_ADDR", "")
+
+	if err := run(); err == nil {
+		t.Fatal("run() accepted a missing inference service address")
 	}
 }

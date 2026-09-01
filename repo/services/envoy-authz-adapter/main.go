@@ -13,9 +13,11 @@ import (
 
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	authv1 "github.com/kubercloud/ani/pkg/generated/pb/auth/v1"
+	inferencev1 "github.com/kubercloud/ani/pkg/generated/pb/inference/control/v1"
 	"github.com/kubercloud/ani/services/envoy-authz-adapter/internal/authclient"
 	"github.com/kubercloud/ani/services/envoy-authz-adapter/internal/config"
 	"github.com/kubercloud/ani/services/envoy-authz-adapter/internal/extauth"
+	"github.com/kubercloud/ani/services/envoy-authz-adapter/internal/policyclient"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health"
@@ -49,6 +51,12 @@ func run() error {
 			log.Printf("close auth service connection: %v", err)
 		}
 	}()
+	inferenceConnection, err := grpc.NewClient(cfg.InferenceServiceGRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return fmt.Errorf("set up inference service connection: %w", err)
+	}
+	defer inferenceConnection.Close()
+	checker := policyclient.New(inferencev1.NewInferenceControlClient(inferenceConnection), cfg.InferenceTimeout)
 
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.GRPCPort))
 	if err != nil {
@@ -60,7 +68,7 @@ func run() error {
 		}
 	}()
 
-	server := newGRPCServer(authclient.New(authv1.NewAuthServiceClient(authConnection), cfg.AuthTimeout))
+	server := newGRPCServer(authclient.New(authv1.NewAuthServiceClient(authConnection), cfg.AuthTimeout), checker)
 	shutdownContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 	go func() {
@@ -75,9 +83,9 @@ func run() error {
 	return nil
 }
 
-func newGRPCServer(validator extauth.TokenValidator) *grpc.Server {
+func newGRPCServer(validator extauth.TokenValidator, checker extauth.AccessChecker) *grpc.Server {
 	server := grpc.NewServer()
-	authv3.RegisterAuthorizationServer(server, extauth.New(validator))
+	authv3.RegisterAuthorizationServer(server, extauth.New(validator).WithAccessChecker(checker))
 	healthServer := health.NewServer()
 	healthServer.SetServingStatus("", healthv1.HealthCheckResponse_SERVING)
 	healthv1.RegisterHealthServer(server, healthServer)

@@ -4,6 +4,8 @@
 > 范围：ANI Services 推理服务控制面与 ANI Gateway 数据面  
 > 阶段：第一版最小闭环
 
+> **动态发布说明（2026-08-31）：** 本文的 C40 Gateway 保护限流和 auth-service AK RPM 结论继续有效；C41 动态路由、认证后租户解析和产品访问策略接入以 [`2026-08-31-envoy-ai-gateway-tenant-aware-dynamic-publication-design.md`](./2026-08-31-envoy-ai-gateway-tenant-aware-dynamic-publication-design.md) 为准。
+
 ## 1. 目标与范围
 
 第一版围绕 C40 真实数据面完成限流闭环：客户端请求进入 Envoy AI Gateway，由现有 ext_authz 链路调用 auth-service 的 AK RPM 限流，并在 Envoy 路由层增加共享的全局保护限流。ANI Gateway 的 `/v1` 不参与推理流量。
@@ -49,7 +51,7 @@
 |---|---:|---|
 | ext_authz 允许且 Envoy 计数未超限 | 继续转发 | — |
 | AK 被 auth-service 拒绝 | 401/404 | 现有 C40 ext_authz 语义 |
-| AK RPM 或 Envoy Global RateLimit 超限 | 429 | `RATE_LIMIT_EXCEEDED` |
+| AK RPM 或 Envoy Global RateLimit 超限 | 429 | `RATE_LIMIT_EXCEEDED`，可重试时带 `Retry-After` |
 | adapter/auth-service/Envoy RateLimit backend 不可用 | 503 | `RATE_LIMIT_UNAVAILABLE` |
 | 无效/过期/撤销 AK | 401 | 现有 auth 错误语义 |
 
