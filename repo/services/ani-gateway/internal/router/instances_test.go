@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"runtime"
@@ -18,6 +19,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/ut"
+	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
@@ -1760,5 +1762,115 @@ func TestInstanceCreatePreconditionCodeMapsImageGateReasons(t *testing.T) {
 		if ok != tc.ok || code != tc.code {
 			t.Fatalf("instanceCreatePreconditionCode(%v) = (%q, %v), want (%q, %v)", tc.err, code, ok, tc.code, tc.ok)
 		}
+	}
+}
+
+// TestRefreshOneStoreStatusHydratesRuntimeFields 验证 refreshOneStoreStatus 从真实
+// Pod 回读运行时字段：compute.node_name、network.private_ip、endpoint、
+// network.endpoints 以及运行态 container/gpu_container 的 access.exec_available。
+// 修复前这些字段只在创建时快照，list/detail 返回空，前端看不到节点/私网IP/终端。
+func TestRefreshOneStoreStatusHydratesRuntimeFields(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/apis/apps/v1/namespaces/"):
+			_, _ = w.Write([]byte(`{"metadata":{"name":"inst-1"},"status":{"replicas":1,"readyReplicas":1,"availableReplicas":1,"updatedReplicas":1}}`))
+		case strings.HasPrefix(r.URL.Path, "/api/v1/namespaces/"):
+			_, _ = w.Write([]byte(`{"items":[{"metadata":{"name":"inst-1-pod"},"spec":{"nodeName":"dev-phys-02"},"status":{"nodeName":"dev-phys-02","podIP":"10.10.1.77","conditions":[]}}]}`))
+		default:
+			http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	k8s, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
+		Host:       srv.URL,
+		HTTPClient: srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("NewKubernetesRESTClient error = %v", err)
+	}
+	store := newMemoryInstanceStore()
+	api := &instanceAPI{k8sClient: k8s, store: store}
+
+	record := ports.WorkloadInstanceRecord{
+		InstanceID: "inst_1",
+		TenantID:   "tenant-a",
+		Name:       "inst-1",
+		Kind:       ports.WorkloadKindGPUContainer,
+		Provider:   "kubernetes",
+		Status: ports.WorkloadStatus{
+			State: ports.WorkloadStateProvisioning,
+		},
+	}
+
+	api.refreshOneStoreStatus(context.Background(), &record)
+
+	if record.Status.State != ports.WorkloadStateRunning {
+		t.Fatalf("state = %s, want running", record.Status.State)
+	}
+	if record.Compute.NodeName != "dev-phys-02" {
+		t.Fatalf("compute.node_name = %q, want dev-phys-02", record.Compute.NodeName)
+	}
+	if record.Network.PrivateIP != "10.10.1.77" {
+		t.Fatalf("network.private_ip = %q, want 10.10.1.77", record.Network.PrivateIP)
+	}
+	if record.Status.Endpoint != "10.10.1.77" {
+		t.Fatalf("endpoint = %q, want 10.10.1.77", record.Status.Endpoint)
+	}
+	if len(record.Network.Endpoints) != 1 || record.Network.Endpoints[0].Address != "10.10.1.77" {
+		t.Fatalf("network.endpoints = %+v, want a private endpoint for 10.10.1.77", record.Network.Endpoints)
+	}
+	if !record.Access.ExecAvailable {
+		t.Fatalf("access.exec_available = false, want true for a running gpu_container")
+	}
+}
+
+// TestRefreshOneStoreStatusDoesNotSetExecForVM verifies exec_available is only
+// hydrated for container/gpu_container kinds, not VM.
+func TestRefreshOneStoreStatusDoesNotSetExecForVM(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/apis/apps/v1/namespaces/"):
+			_, _ = w.Write([]byte(`{"metadata":{"name":"vm-1"},"status":{"replicas":1,"readyReplicas":1,"availableReplicas":1,"updatedReplicas":1}}`))
+		case strings.HasPrefix(r.URL.Path, "/api/v1/namespaces/"):
+			_, _ = w.Write([]byte(`{"items":[{"metadata":{"name":"vm-1-pod"},"spec":{"nodeName":"dev-phys-02"},"status":{"nodeName":"dev-phys-02","podIP":"10.10.1.78","conditions":[]}}]}`))
+		default:
+			http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	k8s, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
+		Host:       srv.URL,
+		HTTPClient: srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("NewKubernetesRESTClient error = %v", err)
+	}
+	api := &instanceAPI{k8sClient: k8s, store: newMemoryInstanceStore()}
+
+	record := ports.WorkloadInstanceRecord{
+		InstanceID: "vm_1",
+		TenantID:   "tenant-a",
+		Name:       "vm-1",
+		Kind:       ports.WorkloadKindVM,
+		Provider:   "kubernetes",
+		Status: ports.WorkloadStatus{
+			State: ports.WorkloadStateProvisioning,
+		},
+	}
+
+	api.refreshOneStoreStatus(context.Background(), &record)
+
+	if record.Status.State != ports.WorkloadStateRunning {
+		t.Fatalf("state = %s, want running", record.Status.State)
+	}
+	if record.Compute.NodeName != "dev-phys-02" {
+		t.Fatalf("compute.node_name = %q, want dev-phys-02", record.Compute.NodeName)
+	}
+	if record.Access.ExecAvailable {
+		t.Fatalf("access.exec_available = true, want false for VM")
 	}
 }
