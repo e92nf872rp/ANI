@@ -238,8 +238,8 @@ func (w *retrieveStreamWrapper) Recv() (*kbv1.RetrieveEvent, error) {
 	return ev, err
 }
 
-func (w *retrieveStreamWrapper) Header() (metadata.MD, error)  { return w.stream.Header() }
-func (w *retrieveStreamWrapper) Trailer() metadata.MD           { return w.stream.Trailer() }
+func (w *retrieveStreamWrapper) Header() (metadata.MD, error) { return w.stream.Header() }
+func (w *retrieveStreamWrapper) Trailer() metadata.MD         { return w.stream.Trailer() }
 func (w *retrieveStreamWrapper) CloseSend() error {
 	err := w.stream.CloseSend()
 	w.cancel()

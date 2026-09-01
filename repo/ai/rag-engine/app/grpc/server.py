@@ -112,12 +112,14 @@ class RagEngineServicer(rag_grpc.RagEngineServicer):
             temp_path = f.name
             download_error: Exception | None = None
             try:
-                async with httpx.AsyncClient(timeout=DOWNLOAD_TIMEOUT_SECONDS) as client:
-                    async with client.stream("GET", request.download_url) as resp:
-                        resp.raise_for_status()
-                        async for chunk in resp.aiter_bytes():
-                            f.write(chunk)
-            except Exception as exc:
+                async with (
+                    httpx.AsyncClient(timeout=DOWNLOAD_TIMEOUT_SECONDS) as client,
+                    client.stream("GET", request.download_url) as resp,
+                ):
+                    resp.raise_for_status()
+                    async for chunk in resp.aiter_bytes():
+                        f.write(chunk)
+            except Exception as exc:  # noqa: BLE001
                 download_error = exc
 
         if download_error is not None:
@@ -495,8 +497,9 @@ def _extract_image_bytes(
     elif ft == "md":
         # Scan markdown for ``image://{object_id}`` references and download
         # images from Core API.
-        import httpx
         import re as _re
+
+        import httpx
 
         _md_img_re = _re.compile(r"!\[([^\]]*)\]\(image://([a-f0-9\-]+)\)")
         try:

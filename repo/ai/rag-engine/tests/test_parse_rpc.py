@@ -6,10 +6,8 @@ httpx/Milvus/PG/vLLM â€?all deps are stubbed in conftest.py.
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
-
 from app.grpc import rag_pb2 as rag_pb
 from app.grpc.server import RagEngineServicer, _build_parse_chunks, _extract_image_bytes
 from app.services.chunk_service import ChildChunk, ParentChunk
@@ -185,7 +183,7 @@ async def test_parse_rpc_download_failure(tmp_path: Path, monkeypatch):
 
     class _FakeResponse:
         def raise_for_status(self):
-            raise Exception("404 not found")
+            raise RuntimeError("404 not found")
 
         async def aiter_bytes(self):
             yield b""

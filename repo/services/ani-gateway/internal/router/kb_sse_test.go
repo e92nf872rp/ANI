@@ -80,10 +80,10 @@ func TestSSE_QuestionTooLongReturns400(t *testing.T) {
 // fakeKBRetrieveClient implements KBGRPCClient for the new SSE path tests.
 // Only Retrieve is functional; all other methods panic to catch misuse.
 type fakeKBRetrieveClient struct {
-	stream   kbv1.KBService_RetrieveClient
-	err      error
-	called   bool
-	lastReq  *kbv1.RetrieveRequest
+	stream  kbv1.KBService_RetrieveClient
+	err     error
+	called  bool
+	lastReq *kbv1.RetrieveRequest
 }
 
 func (f *fakeKBRetrieveClient) Retrieve(_ context.Context, tenantID string, kbID string, req *kbv1.RetrieveRequest) (kbv1.KBService_RetrieveClient, error) {
@@ -99,19 +99,45 @@ func (f *fakeKBRetrieveClient) Retrieve(_ context.Context, tenantID string, kbID
 }
 
 // Unused methods — return zero values to satisfy the interface.
-func (f *fakeKBRetrieveClient) CreateKB(context.Context, string, string, *kbv1.CreateKBRequest) (*kbv1.KnowledgeBase, error) { return nil, nil }
-func (f *fakeKBRetrieveClient) GetKB(context.Context, string, string) (*kbv1.KnowledgeBase, error) { return nil, nil }
-func (f *fakeKBRetrieveClient) ListKBs(context.Context, string, int32, string) (*kbv1.ListKBsResponse, error) { return nil, nil }
-func (f *fakeKBRetrieveClient) DeleteKB(context.Context, string, string) (*emptypb.Empty, error) { return nil, nil }
-func (f *fakeKBRetrieveClient) GetDocumentUploadURL(context.Context, string, string, string, *kbv1.GetDocumentUploadURLRequest) (*kbv1.GetDocumentUploadURLResponse, error) { return nil, nil }
-func (f *fakeKBRetrieveClient) NotifyDocumentUploaded(context.Context, string, string, string, string) (*commonv1.AsyncTaskRef, error) { return nil, nil }
-func (f *fakeKBRetrieveClient) GetDocument(context.Context, string, string, string) (*kbv1.KBDocument, error) { return nil, nil }
-func (f *fakeKBRetrieveClient) ListDocuments(context.Context, string, string, string, int32, string) (*kbv1.ListDocumentsResponse, error) { return nil, nil }
-func (f *fakeKBRetrieveClient) DeleteDocument(context.Context, string, string, string) (*emptypb.Empty, error) { return nil, nil }
-func (f *fakeKBRetrieveClient) Query(context.Context, string, string, string, *kbv1.QueryRequest) (*kbv1.QueryResponse, error) { return nil, nil }
-func (f *fakeKBRetrieveClient) ListKBCitations(context.Context, string, string, int32, string) (*kbv1.ListKBCitationsResponse, error) { return nil, nil }
-func (f *fakeKBRetrieveClient) ListKBSessions(context.Context, string, string, int32, string) (*kbv1.ListKBSessionsResponse, error) { return nil, nil }
-func (f *fakeKBRetrieveClient) UpdateKBPermissions(context.Context, string, string, string, *kbv1.UpdateKBPermissionsRequest) (*kbv1.KnowledgeBase, error) { return nil, nil }
+func (f *fakeKBRetrieveClient) CreateKB(context.Context, string, string, *kbv1.CreateKBRequest) (*kbv1.KnowledgeBase, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) GetKB(context.Context, string, string) (*kbv1.KnowledgeBase, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) ListKBs(context.Context, string, int32, string) (*kbv1.ListKBsResponse, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) DeleteKB(context.Context, string, string) (*emptypb.Empty, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) GetDocumentUploadURL(context.Context, string, string, string, *kbv1.GetDocumentUploadURLRequest) (*kbv1.GetDocumentUploadURLResponse, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) NotifyDocumentUploaded(context.Context, string, string, string, string) (*commonv1.AsyncTaskRef, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) GetDocument(context.Context, string, string, string) (*kbv1.KBDocument, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) ListDocuments(context.Context, string, string, string, int32, string) (*kbv1.ListDocumentsResponse, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) DeleteDocument(context.Context, string, string, string) (*emptypb.Empty, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) Query(context.Context, string, string, string, *kbv1.QueryRequest) (*kbv1.QueryResponse, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) ListKBCitations(context.Context, string, string, int32, string) (*kbv1.ListKBCitationsResponse, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) ListKBSessions(context.Context, string, string, int32, string) (*kbv1.ListKBSessionsResponse, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) UpdateKBPermissions(context.Context, string, string, string, *kbv1.UpdateKBPermissionsRequest) (*kbv1.KnowledgeBase, error) {
+	return nil, nil
+}
 
 // fakeRetrieveStream implements kbv1.KBService_RetrieveClient for tests.
 // It replays a canned list of RetrieveEvent messages, then returns io.EOF.
@@ -130,11 +156,11 @@ func (s *fakeRetrieveStream) Recv() (*kbv1.RetrieveEvent, error) {
 }
 
 // grpc.ClientStream methods — no-ops for test purposes.
-func (s *fakeRetrieveStream) Header() (metadata.MD, error)      { return nil, nil }
-func (s *fakeRetrieveStream) Trailer() metadata.MD              { return nil }
-func (s *fakeRetrieveStream) CloseSend() error                   { return nil }
-func (s *fakeRetrieveStream) Context() context.Context           { return context.Background() }
-func (s *fakeRetrieveStream) SendMsg(interface{}) error          { return nil }
+func (s *fakeRetrieveStream) Header() (metadata.MD, error) { return nil, nil }
+func (s *fakeRetrieveStream) Trailer() metadata.MD         { return nil }
+func (s *fakeRetrieveStream) CloseSend() error             { return nil }
+func (s *fakeRetrieveStream) Context() context.Context     { return context.Background() }
+func (s *fakeRetrieveStream) SendMsg(interface{}) error    { return nil }
 func (s *fakeRetrieveStream) RecvMsg(interface{}) error {
 	if s.idx >= len(s.events) {
 		return io.EOF

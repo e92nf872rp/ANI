@@ -21,7 +21,6 @@ from unittest.mock import MagicMock
 
 import grpc
 import pytest
-
 from app.grpc import rag_pb2 as rag_pb
 from app.grpc.server import RagEngineServicer
 from app.services.generate_rpc_service import (
@@ -483,7 +482,7 @@ def test_generate_multi_round_empty_content_no_call(monkeypatch):
 
     _patch_openai(monkeypatch, _FakeCompletions)
 
-    result = svc.generate("q", "s", [{"content": ""}, {"content": ""}], [])
+    svc.generate("q", "s", [{"content": ""}, {"content": ""}], [])
     # _repack_context returns [] for empty content â†?single call with ""
     assert call_count[0] == 1
 

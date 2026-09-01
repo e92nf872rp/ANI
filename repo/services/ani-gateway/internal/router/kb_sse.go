@@ -155,8 +155,8 @@ func streamQuerySSENewPath(cfg KbSSEConfig) app.HandlerFunc {
 		if cfg.KBClient == nil {
 			_ = writeSSEEvent(c, sseEvent{event: "sources", data: []map[string]any{}})
 			_ = writeSSEEvent(c, sseEvent{event: "done", data: map[string]any{
-				"session_id":   sessionID,
-				"input_tokens": 0,
+				"session_id":    sessionID,
+				"input_tokens":  0,
 				"output_tokens": 0,
 			}})
 			return

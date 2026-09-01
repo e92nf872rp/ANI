@@ -140,15 +140,15 @@ def _map_openai_exception(exc: Exception) -> Exception:
     if isinstance(exc, excs["APITimeoutError"]):
         raise TimeoutError(str(exc)) from exc
     if isinstance(exc, excs["APIConnectionError"]):
-        raise RuntimeError(f"vLLM unavailable: {exc}") from exc
+        raise RuntimeError(f"vLLM unavailable: {exc}") from exc  # noqa: TRY004
     if isinstance(exc, excs["APIError"]):
-        raise RuntimeError(f"vLLM error: {exc}") from exc
+        raise RuntimeError(f"vLLM error: {exc}") from exc  # noqa: TRY004
     # Built-in Python exceptions (openai SDK subclasses these but tests
     # may raise the base types directly).
     if isinstance(exc, TimeoutError):
         raise exc
     if isinstance(exc, ConnectionError):
-        raise RuntimeError(f"vLLM unavailable: {exc}") from exc
+        raise RuntimeError(f"vLLM unavailable: {exc}") from exc  # noqa: TRY004
     raise RuntimeError(f"vLLM error: {exc}") from exc
 
 
@@ -331,7 +331,7 @@ class GenerateRPCService:
             )
         except TimeoutError:
             raise
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             _map_openai_exception(exc)
 
         answer = ""
@@ -459,7 +459,7 @@ class GenerateRPCService:
             )
         except TimeoutError:
             raise
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             _map_openai_exception(exc)
 
         for chunk in stream:
