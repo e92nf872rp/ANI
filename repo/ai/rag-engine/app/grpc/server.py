@@ -30,6 +30,7 @@ import logging
 import os
 import threading
 import uuid
+from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
 
@@ -295,7 +296,7 @@ class RagEngineServicer(rag_grpc.RagEngineServicer):
         self,
         request: rag_pb.GenerateRequest,
         context: grpc.aio.ServicerContext,
-    ) -> rag_pb.GenerateToken:
+    ) -> AsyncGenerator[rag_pb.GenerateToken, None]:
         """Streaming LLM generation (Plan §2.4).
 
         Yields token events then a final done event with usage. Uses
