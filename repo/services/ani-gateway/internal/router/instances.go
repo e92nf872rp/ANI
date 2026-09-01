@@ -1000,6 +1000,10 @@ func (api *instanceAPI) refreshOneStoreStatus(ctx context.Context, record *ports
 				} `json:"spec"`
 				Status struct {
 					NodeName   string `json:"nodeName"`
+					PodIP      string `json:"podIP"`
+					PodIPs     []struct {
+						IP string `json:"ip"`
+					} `json:"podIPs"`
 					Conditions []struct {
 						Type    string `json:"type"`
 						Status  string `json:"status"`
@@ -1015,6 +1019,7 @@ func (api *instanceAPI) refreshOneStoreStatus(ctx context.Context, record *ports
 			// scheduled pod for node name and only surface the scheduling
 			// failure reason when no pod has been scheduled.
 			scheduledPod := false
+			podIP := ""
 			for _, pod := range podList.Items {
 				if pod.Spec.NodeName != "" || pod.Status.NodeName != "" {
 					scheduledPod = true
@@ -1023,6 +1028,37 @@ func (api *instanceAPI) refreshOneStoreStatus(ctx context.Context, record *ports
 					} else if pod.Status.NodeName != "" {
 						record.Status.NodeName = pod.Status.NodeName
 					}
+					if podIP == "" {
+						podIP = pod.Status.PodIP
+						if podIP == "" && len(pod.Status.PodIPs) > 0 {
+							podIP = pod.Status.PodIPs[0].IP
+						}
+					}
+				}
+			}
+			if record.Status.NodeName != "" {
+				record.Compute.NodeName = record.Status.NodeName
+			}
+			// Hydrate the private access endpoint and terminal availability from
+			// the scheduled Pod so the instance response surfaces the private IP,
+			// access endpoint and exec terminal without a separate Service lookup.
+			if podIP != "" {
+				record.Network.PrivateIP = podIP
+				if record.Status.Endpoint == "" {
+					record.Status.Endpoint = podIP
+				}
+				if len(record.Network.Endpoints) == 0 {
+					record.Network.Endpoints = []ports.InstanceEndpointSummary{{
+						Name:     "private",
+						Address:  podIP,
+						Protocol: "tcp",
+					}}
+				}
+			}
+			if record.Status.State == ports.WorkloadStateRunning {
+				if record.Kind == ports.WorkloadKindContainer || record.Kind == ports.WorkloadKindGPUContainer {
+					record.Access.ExecAvailable = true
+					record.Access.Reason = ""
 				}
 			}
 			if scheduledPod {
@@ -1428,6 +1464,9 @@ func (api *instanceAPI) get(ctx context.Context, c *app.RequestContext) {
 		}
 		writeInstanceError(c, http.StatusNotFound, "INSTANCE_NOT_FOUND", err.Error())
 		return
+	}
+	if api.k8sClient != nil && api.store != nil {
+		api.refreshOneStoreStatus(ctx, &record)
 	}
 	c.JSON(http.StatusOK, api.instanceResponseFromRecord(record))
 }

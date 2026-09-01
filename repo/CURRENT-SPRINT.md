@@ -464,6 +464,10 @@ git diff --check
 - **后端 WebSocket exec 服务端未实现**：SPEC §11.2 已知边界，归后续 Core 批次
 - **Issue #011 lazy re-observe**：非终态实例在 Get/List 时触发 K8s 状态同步，避免引入后台 controller
 
+### 热修复：实例运行时信息回填（INSTANCE-RUNTIME-HYDRATE-A，2026-09-01）
+
+> 前端反馈 GPU 容器实例列表/详情缺节点、私网 IP、访问端点、终端。Gateway `instances.go` 修复：节点字段错位（`refreshOneStoreStatus` 补回填 `Compute.NodeName`）、从 Pod 回读 PodIP 填 `Network.PrivateIP`/`Endpoint`/`Endpoints`、运行态 container/gpu_container 置 `Access.ExecAvailable=true`；`get` 详情处理器接入 `refreshOneStoreStatus`。`go test ./services/ani-gateway/...` + `make validate-architecture` 通过。本地单测通过，待 live 验证，不外推 runtime ready。批次详情见 `repo/development-records/instance-runtime-hydrate-a.md`。
+
 ## Instance Observability Completion 增量补全（2026-07，PR4 分支）
 
 > 本节记录 `feat/instance-observability-pr4` 分支对 Sprint 15 实例可观测性的增量补全工作，对应 SPEC `spec-console-instance-observability-completion.md` 的 16 个设计决策（D-1~D-16）、12 个 User Story（US-001~US-012）和 8 个批次（B-1~B-8）。覆盖 LogStore port 抽象、Loki 日志持久化、Prometheus GPU/VM 指标采集、PromQL label 重写扩展和 VM 前端模板。各批次实现与验证细节见 `repo/development-records/instance-observability-completion-*.md`。

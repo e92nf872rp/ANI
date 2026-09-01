@@ -124,6 +124,7 @@
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
 | INSTANCE-NETWORK-STORE-READ-RLS-A | live passed（10.10.1.66）：GPU 容器实例创建引用 VPC NOT_FOUND 三层根因修复——`NetworkResourceStore` 补 5 个读方法（端口+PG SELECT 实现，WithTenantTx）、`LocalNetworkService` Get/List 穿透读、Gateway 有 `DATABASE_URL` 时注入 store；迁移 `20260828_001` 把实例链路 8 张表 RESTRICTIVE-only policy 替换为 PERMISSIVE 双策略（对齐 `20260825_001`）；`WORKLOAD_PROVIDER=kubernetes_rest` + `WORKLOAD_PROVIDER_APPLY_ENABLED=true` 接线。验证：VPC/Subnet 创建落库、实例 201 → provisioning → Volcano 排队（容量问题非代码）；不外推 GPU runtime ready / production ready | instance-network-store-read-rls-a.md |
+| INSTANCE-RUNTIME-HYDRATE-A | local verified：GPU 容器实例列表/详情缺节点/私网IP/访问端点/终端——修复 `refreshOneStoreStatus` 节点字段错位（回填 `Compute.NodeName`）、回读 PodIP 填 `Network.PrivateIP`/`Endpoint`/`Endpoints`、运行态 container/gpu_container 置 `Access.ExecAvailable=true`；`get` 详情处理器接入刷新；新增 2 个 httptest 单测；`go test ./services/ani-gateway/...` + `make validate-architecture` 通过；待 live | instance-runtime-hydrate-a.md |
 
 ### Instance Sandbox 无状态化（2026-08）
 
