@@ -12,10 +12,8 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-
 from app.core import embeddings
 from app.core.embeddings import OpenAICompatibleEmbedding
-
 
 # ── get_embed_model returns OpenAICompatibleEmbedding (no wrapper) ─────────
 

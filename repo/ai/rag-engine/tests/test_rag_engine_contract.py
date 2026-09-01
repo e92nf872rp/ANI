@@ -22,12 +22,9 @@ import sys
 from unittest.mock import MagicMock
 
 import pytest
-
 from app.grpc import rag_pb2 as rag_pb
 from app.grpc.server import RagEngineServicer
 from app.services.generate_rpc_service import (
-    DEFAULT_CONTEXT_TEMPLATE,
-    DEFAULT_REFINE_TEMPLATE,
     GenerateRPCService,
 )
 

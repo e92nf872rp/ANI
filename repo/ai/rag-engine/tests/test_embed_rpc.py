@@ -8,7 +8,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-
 from app.grpc import rag_pb2 as rag_pb
 from app.grpc.server import RagEngineServicer
 from app.services.embed_rpc_service import EmbedRPCService

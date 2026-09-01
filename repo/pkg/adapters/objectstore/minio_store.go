@@ -335,10 +335,6 @@ func (s *MinIOObjectStore) SignedDownloadURL(ctx context.Context, ref ports.Obje
 	return s.presignWithEndpoint(ctx, http.MethodGet, ref, ttl, s.endpoint)
 }
 
-func (s *MinIOObjectStore) presign(ctx context.Context, method string, ref ports.ObjectRef, ttl time.Duration) (ports.SignedURL, error) {
-	return s.presignWithEndpoint(ctx, method, ref, ttl, s.publicEndpoint)
-}
-
 func (s *MinIOObjectStore) presignWithEndpoint(ctx context.Context, method string, ref ports.ObjectRef, ttl time.Duration, endpoint *url.URL) (ports.SignedURL, error) {
 	if err := ctx.Err(); err != nil {
 		return ports.SignedURL{}, err
