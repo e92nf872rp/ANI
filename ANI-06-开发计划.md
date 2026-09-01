@@ -36,6 +36,7 @@
 当前重心：Sprint 13 从 Sprint 12 已闭合的 handler/ports/adapters/router 边界接入真实 provider 与 live gate。
 生产化边界：S01-S07 均达到 production-shaped acceptance passed；full platform production ready 仍需正式镜像发布/升级、长期 SLA/soak、备份/恢复和故障注入等 release gate。Sprint14 resilience live gate 当前以 ani-sprint14-resilience 隔离 fixture 验证 backend kill、degradation 与 controller primary failover，不把现有 Sprint13 单副本后端误标为自身 HA。
 Auth 边界：SPRINT13-AUTH-DEX-PRODUCTION-GATE / Auth/Dex production gate 已通过；production-shaped Gateway 使用 ANI_AUTH_MODE=auth_service。
+实例链路热修复：INSTANCE-NETWORK-STORE-READ-RLS-A 已在 K8s 测试环境 live passed（2026-08-27~09-01）——NetworkResourceStore 补读方法 + LocalNetworkService 穿透读 + Gateway 注入 store；迁移 20260828_001 修复实例链路 8 张表 RESTRICTIVE-only RLS；WORKLOAD_PROVIDER_APPLY_ENABLED=true 接线。验证止于实例 201 → provisioning → Volcano 排队（GPU 容量问题非代码），不外推 GPU runtime ready / production ready。
 当前执行入口：repo/CURRENT-SPRINT.md
 详细计划：repo/development-records/sprint13-real-provider-readiness-plan.md
 完整批次：repo/development-records/README.md
