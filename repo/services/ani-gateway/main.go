@@ -48,10 +48,13 @@ func main() {
 		logger.Error("failed to configure kubernetes rest client for orphan discovery", "err", err)
 		os.Exit(1)
 	}
-	networkService, err := newGatewayNetworkService(gatewayNetworkRuntimeConfigFromEnv())
+	networkService, closeNetworkRuntime, err := newGatewayNetworkService(runtimeCtx, gatewayNetworkRuntimeConfigFromEnv())
 	if err != nil {
 		logger.Error("failed to configure network provider runtime", "err", err)
 		os.Exit(1)
+	}
+	if closeNetworkRuntime != nil {
+		defer closeNetworkRuntime()
 	}
 	storageRuntimeCfg := gatewayStorageRuntimeConfigFromEnv()
 	storageService, closeStorageRuntime, err := newGatewayStorageService(runtimeCtx, storageRuntimeCfg)

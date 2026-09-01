@@ -3,10 +3,12 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
@@ -225,6 +227,152 @@ func (s *MetadataNetworkStore) UpdateResourceState(ctx context.Context, request 
 		}
 		return nil
 	})
+}
+
+func (s *MetadataNetworkStore) GetVPC(ctx context.Context, tenantID string, vpcID string) (ports.NetworkVPCRecord, error) {
+	if s.store == nil {
+		return ports.NetworkVPCRecord{}, ports.ErrNotConfigured
+	}
+	if strings.TrimSpace(tenantID) == "" || strings.TrimSpace(vpcID) == "" {
+		return ports.NetworkVPCRecord{}, fmt.Errorf("%w: tenant_id and vpc_id are required", ports.ErrInvalid)
+	}
+	var record ports.NetworkVPCRecord
+	err := s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		row := tx.QueryRow(ctx, `
+			SELECT tenant_id::text, vpc_id, name, cidr, state, COALESCE(reason, ''), created_at, updated_at
+			FROM network_vpcs
+			WHERE tenant_id = $1::uuid AND vpc_id = $2
+		`, tenantID, vpcID)
+		if err := row.Scan(&record.TenantID, &record.VPCID, &record.Name, &record.CIDR, &record.State, &record.Reason, &record.CreatedAt, &record.UpdatedAt); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) || isNoRows(err) {
+				return ports.ErrNotFound
+			}
+			return err
+		}
+		return nil
+	})
+	return record, err
+}
+
+func (s *MetadataNetworkStore) ListVPCs(ctx context.Context, tenantID string) ([]ports.NetworkVPCRecord, error) {
+	if s.store == nil {
+		return nil, ports.ErrNotConfigured
+	}
+	if strings.TrimSpace(tenantID) == "" {
+		return nil, fmt.Errorf("%w: tenant_id is required", ports.ErrInvalid)
+	}
+	var records []ports.NetworkVPCRecord
+	err := s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT tenant_id::text, vpc_id, name, cidr, state, COALESCE(reason, ''), created_at, updated_at
+			FROM network_vpcs
+			WHERE tenant_id = $1::uuid AND state <> 'deleted'
+			ORDER BY updated_at DESC
+		`, tenantID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var record ports.NetworkVPCRecord
+			if err := rows.Scan(&record.TenantID, &record.VPCID, &record.Name, &record.CIDR, &record.State, &record.Reason, &record.CreatedAt, &record.UpdatedAt); err != nil {
+				return err
+			}
+			records = append(records, record)
+		}
+		return rows.Err()
+	})
+	return records, err
+}
+
+func (s *MetadataNetworkStore) GetSubnet(ctx context.Context, tenantID string, subnetID string) (ports.NetworkSubnetRecord, error) {
+	if s.store == nil {
+		return ports.NetworkSubnetRecord{}, ports.ErrNotConfigured
+	}
+	if strings.TrimSpace(tenantID) == "" || strings.TrimSpace(subnetID) == "" {
+		return ports.NetworkSubnetRecord{}, fmt.Errorf("%w: tenant_id and subnet_id are required", ports.ErrInvalid)
+	}
+	var record ports.NetworkSubnetRecord
+	err := s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		row := tx.QueryRow(ctx, `
+			SELECT tenant_id::text, subnet_id, vpc_id, name, cidr, COALESCE(gateway, ''), state, COALESCE(reason, ''), created_at, updated_at
+			FROM network_subnets
+			WHERE tenant_id = $1::uuid AND subnet_id = $2
+		`, tenantID, subnetID)
+		if err := row.Scan(&record.TenantID, &record.SubnetID, &record.VPCID, &record.Name, &record.CIDR, &record.Gateway, &record.State, &record.Reason, &record.CreatedAt, &record.UpdatedAt); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) || isNoRows(err) {
+				return ports.ErrNotFound
+			}
+			return err
+		}
+		return nil
+	})
+	return record, err
+}
+
+func (s *MetadataNetworkStore) ListSubnets(ctx context.Context, tenantID string) ([]ports.NetworkSubnetRecord, error) {
+	if s.store == nil {
+		return nil, ports.ErrNotConfigured
+	}
+	if strings.TrimSpace(tenantID) == "" {
+		return nil, fmt.Errorf("%w: tenant_id is required", ports.ErrInvalid)
+	}
+	var records []ports.NetworkSubnetRecord
+	err := s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT tenant_id::text, subnet_id, vpc_id, name, cidr, COALESCE(gateway, ''), state, COALESCE(reason, ''), created_at, updated_at
+			FROM network_subnets
+			WHERE tenant_id = $1::uuid AND state <> 'deleted'
+			ORDER BY updated_at DESC
+		`, tenantID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var record ports.NetworkSubnetRecord
+			if err := rows.Scan(&record.TenantID, &record.SubnetID, &record.VPCID, &record.Name, &record.CIDR, &record.Gateway, &record.State, &record.Reason, &record.CreatedAt, &record.UpdatedAt); err != nil {
+				return err
+			}
+			records = append(records, record)
+		}
+		return rows.Err()
+	})
+	return records, err
+}
+
+func (s *MetadataNetworkStore) GetSecurityGroup(ctx context.Context, tenantID string, securityGroupID string) (ports.NetworkSecurityGroupRecord, error) {
+	if s.store == nil {
+		return ports.NetworkSecurityGroupRecord{}, ports.ErrNotConfigured
+	}
+	if strings.TrimSpace(tenantID) == "" || strings.TrimSpace(securityGroupID) == "" {
+		return ports.NetworkSecurityGroupRecord{}, fmt.Errorf("%w: tenant_id and security_group_id are required", ports.ErrInvalid)
+	}
+	var record ports.NetworkSecurityGroupRecord
+	var rulesJSON []byte
+	err := s.store.WithTenantTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		row := tx.QueryRow(ctx, `
+			SELECT tenant_id::text, security_group_id, name, COALESCE(description, ''), rules, state, COALESCE(reason, ''), created_at, updated_at
+			FROM network_security_groups
+			WHERE tenant_id = $1::uuid AND security_group_id = $2
+		`, tenantID, securityGroupID)
+		if err := row.Scan(&record.TenantID, &record.SecurityGroupID, &record.Name, &record.Description, &rulesJSON, &record.State, &record.Reason, &record.CreatedAt, &record.UpdatedAt); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) || isNoRows(err) {
+				return ports.ErrNotFound
+			}
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return ports.NetworkSecurityGroupRecord{}, err
+	}
+	if len(rulesJSON) > 0 && string(rulesJSON) != "[]" {
+		if err := json.Unmarshal(rulesJSON, &record.Rules); err != nil {
+			return ports.NetworkSecurityGroupRecord{}, fmt.Errorf("unmarshal security group rules: %w", err)
+		}
+	}
+	return record, nil
 }
 
 func requireNetworkRecord(tenantID string, resourceID string, name string, state ports.NetworkResourceState) error {
