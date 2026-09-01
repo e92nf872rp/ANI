@@ -128,6 +128,12 @@
 |---|---|---|
 | STORAGE-ASYNC-CORRECTNESS-A | live passed：保持 Core v1 Vector 文档写入 `202` 自定义响应，补齐 `Location` 和 `vector_store.document.insert`；任务落 PG，Gateway rollout 后原 task ID 仍可查询；Milvus 临时夹具已清理；evidence `live-evidence/storage-async-vector-task-live-20260803.json` | storage-async-correctness-a.md |
 
+### Instance Network Store Read-Through + RLS（2026-08）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-NETWORK-STORE-READ-RLS-A | live passed（10.10.1.66）：GPU 容器实例创建引用 VPC NOT_FOUND 三层根因修复——`NetworkResourceStore` 补 5 个读方法（端口+PG SELECT 实现，WithTenantTx）、`LocalNetworkService` Get/List 穿透读、Gateway 有 `DATABASE_URL` 时注入 store；迁移 `20260828_001` 把实例链路 8 张表 RESTRICTIVE-only policy 替换为 PERMISSIVE 双策略（对齐 `20260825_001`）；`WORKLOAD_PROVIDER=kubernetes_rest` + `WORKLOAD_PROVIDER_APPLY_ENABLED=true` 接线。验证：VPC/Subnet 创建落库、实例 201 → provisioning → Volcano 排队（容量问题非代码）；不外推 GPU runtime ready / production ready | instance-network-store-read-rls-a.md |
+
 ### Instance Sandbox 无状态化（2026-08）
 
 | 批次 | 内容摘要 | 文件 |
