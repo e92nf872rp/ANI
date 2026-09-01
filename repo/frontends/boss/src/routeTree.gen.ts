@@ -9,28 +9,35 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
-import { Route as AuthenticatedTenantsQuotasRouteImport } from './routes/_authenticated/tenants/quotas'
-import { Route as AuthenticatedTenantUsageBillingRouteImport } from './routes/_authenticated/tenant/usage-billing'
+import { Route as AuthenticatedMeteringCpuHoursRouteImport } from './routes/_authenticated/metering/cpu-hours'
+import { Route as AuthenticatedMeteringGpuHoursRouteImport } from './routes/_authenticated/metering/gpu-hours'
+import { Route as AuthenticatedMeteringInputTokensRouteImport } from './routes/_authenticated/metering/input-tokens'
+import { Route as AuthenticatedMeteringKbQueriesRouteImport } from './routes/_authenticated/metering/kb-queries'
+import { Route as AuthenticatedMeteringMemoryGbhoursRouteImport } from './routes/_authenticated/metering/memory-gbhours'
+import { Route as AuthenticatedMeteringOutputTokensRouteImport } from './routes/_authenticated/metering/output-tokens'
+import { Route as AuthenticatedMeteringStorageGbdaysRouteImport } from './routes/_authenticated/metering/storage-gbdays'
 import { Route as AuthenticatedOpsGpuPoolRouteImport } from './routes/_authenticated/ops/gpu-pool'
-import { Route as IntegrationNotificationSettingsEmailIndexRouteImport } from './routes/integration/notification-settings/email/index'
+import { Route as AuthenticatedTenantUsageBillingRouteImport } from './routes/_authenticated/tenant/usage-billing'
+import { Route as AuthenticatedTenantsQuotasRouteImport } from './routes/_authenticated/tenants/quotas'
 import { Route as AuthenticatedTenantsQuotasIndexRouteImport } from './routes/_authenticated/tenants/quotas/index'
-import { Route as IntegrationNotificationSettingsEmailSubscriptionsRouteImport } from './routes/integration/notification-settings/email/subscriptions'
-import { Route as IntegrationNotificationSettingsEmailSmtpRouteImport } from './routes/integration/notification-settings/email/smtp'
-import { Route as IntegrationNotificationSettingsEmailRecipientsRouteImport } from './routes/integration/notification-settings/email/recipients'
-import { Route as AuthenticatedTenantsQuotasNewRouteImport } from './routes/_authenticated/tenants/quotas.new'
 import { Route as AuthenticatedTenantsQuotasPlanIdRouteImport } from './routes/_authenticated/tenants/quotas.$planId'
+import { Route as AuthenticatedTenantsQuotasNewRouteImport } from './routes/_authenticated/tenants/quotas.new'
+import { Route as IntegrationNotificationSettingsEmailIndexRouteImport } from './routes/integration/notification-settings/email/index'
+import { Route as IntegrationNotificationSettingsEmailRecipientsRouteImport } from './routes/integration/notification-settings/email/recipients'
+import { Route as IntegrationNotificationSettingsEmailSmtpRouteImport } from './routes/integration/notification-settings/email/smtp'
+import { Route as IntegrationNotificationSettingsEmailSubscriptionsRouteImport } from './routes/integration/notification-settings/email/subscriptions'
 
+const AuthenticatedRoute = AuthenticatedRouteImport.update({
+  id: '/_authenticated',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuthenticatedRoute = AuthenticatedRouteImport.update({
-  id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
@@ -43,16 +50,46 @@ const AuthCallbackRoute = AuthCallbackRouteImport.update({
   path: '/auth/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthenticatedTenantsQuotasRoute =
-  AuthenticatedTenantsQuotasRouteImport.update({
-    id: '/tenants/quotas',
-    path: '/tenants/quotas',
+const AuthenticatedMeteringCpuHoursRoute =
+  AuthenticatedMeteringCpuHoursRouteImport.update({
+    id: '/metering/cpu-hours',
+    path: '/metering/cpu-hours',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
-const AuthenticatedTenantUsageBillingRoute =
-  AuthenticatedTenantUsageBillingRouteImport.update({
-    id: '/tenant/usage-billing',
-    path: '/tenant/usage-billing',
+const AuthenticatedMeteringGpuHoursRoute =
+  AuthenticatedMeteringGpuHoursRouteImport.update({
+    id: '/metering/gpu-hours',
+    path: '/metering/gpu-hours',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedMeteringInputTokensRoute =
+  AuthenticatedMeteringInputTokensRouteImport.update({
+    id: '/metering/input-tokens',
+    path: '/metering/input-tokens',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedMeteringKbQueriesRoute =
+  AuthenticatedMeteringKbQueriesRouteImport.update({
+    id: '/metering/kb-queries',
+    path: '/metering/kb-queries',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedMeteringMemoryGbhoursRoute =
+  AuthenticatedMeteringMemoryGbhoursRouteImport.update({
+    id: '/metering/memory-gbhours',
+    path: '/metering/memory-gbhours',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedMeteringOutputTokensRoute =
+  AuthenticatedMeteringOutputTokensRouteImport.update({
+    id: '/metering/output-tokens',
+    path: '/metering/output-tokens',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedMeteringStorageGbdaysRoute =
+  AuthenticatedMeteringStorageGbdaysRouteImport.update({
+    id: '/metering/storage-gbdays',
+    path: '/metering/storage-gbdays',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
 const AuthenticatedOpsGpuPoolRoute = AuthenticatedOpsGpuPoolRouteImport.update({
@@ -60,40 +97,22 @@ const AuthenticatedOpsGpuPoolRoute = AuthenticatedOpsGpuPoolRouteImport.update({
   path: '/ops/gpu-pool',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
-const IntegrationNotificationSettingsEmailIndexRoute =
-  IntegrationNotificationSettingsEmailIndexRouteImport.update({
-    id: '/integration/notification-settings/email/',
-    path: '/integration/notification-settings/email/',
-    getParentRoute: () => rootRouteImport,
+const AuthenticatedTenantUsageBillingRoute =
+  AuthenticatedTenantUsageBillingRouteImport.update({
+    id: '/tenant/usage-billing',
+    path: '/tenant/usage-billing',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedTenantsQuotasRoute =
+  AuthenticatedTenantsQuotasRouteImport.update({
+    id: '/tenants/quotas',
+    path: '/tenants/quotas',
+    getParentRoute: () => AuthenticatedRoute,
   } as any)
 const AuthenticatedTenantsQuotasIndexRoute =
   AuthenticatedTenantsQuotasIndexRouteImport.update({
     id: '/',
     path: '/',
-    getParentRoute: () => AuthenticatedTenantsQuotasRoute,
-  } as any)
-const IntegrationNotificationSettingsEmailSubscriptionsRoute =
-  IntegrationNotificationSettingsEmailSubscriptionsRouteImport.update({
-    id: '/integration/notification-settings/email/subscriptions',
-    path: '/integration/notification-settings/email/subscriptions',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const IntegrationNotificationSettingsEmailSmtpRoute =
-  IntegrationNotificationSettingsEmailSmtpRouteImport.update({
-    id: '/integration/notification-settings/email/smtp',
-    path: '/integration/notification-settings/email/smtp',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const IntegrationNotificationSettingsEmailRecipientsRoute =
-  IntegrationNotificationSettingsEmailRecipientsRouteImport.update({
-    id: '/integration/notification-settings/email/recipients',
-    path: '/integration/notification-settings/email/recipients',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const AuthenticatedTenantsQuotasNewRoute =
-  AuthenticatedTenantsQuotasNewRouteImport.update({
-    id: '/new',
-    path: '/new',
     getParentRoute: () => AuthenticatedTenantsQuotasRoute,
   } as any)
 const AuthenticatedTenantsQuotasPlanIdRoute =
@@ -102,12 +121,50 @@ const AuthenticatedTenantsQuotasPlanIdRoute =
     path: '/$planId',
     getParentRoute: () => AuthenticatedTenantsQuotasRoute,
   } as any)
+const AuthenticatedTenantsQuotasNewRoute =
+  AuthenticatedTenantsQuotasNewRouteImport.update({
+    id: '/new',
+    path: '/new',
+    getParentRoute: () => AuthenticatedTenantsQuotasRoute,
+  } as any)
+const IntegrationNotificationSettingsEmailIndexRoute =
+  IntegrationNotificationSettingsEmailIndexRouteImport.update({
+    id: '/integration/notification-settings/email/',
+    path: '/integration/notification-settings/email/',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const IntegrationNotificationSettingsEmailRecipientsRoute =
+  IntegrationNotificationSettingsEmailRecipientsRouteImport.update({
+    id: '/integration/notification-settings/email/recipients',
+    path: '/integration/notification-settings/email/recipients',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const IntegrationNotificationSettingsEmailSmtpRoute =
+  IntegrationNotificationSettingsEmailSmtpRouteImport.update({
+    id: '/integration/notification-settings/email/smtp',
+    path: '/integration/notification-settings/email/smtp',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const IntegrationNotificationSettingsEmailSubscriptionsRoute =
+  IntegrationNotificationSettingsEmailSubscriptionsRouteImport.update({
+    id: '/integration/notification-settings/email/subscriptions',
+    path: '/integration/notification-settings/email/subscriptions',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
   '/login': typeof LoginRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/metering/cpu-hours': typeof AuthenticatedMeteringCpuHoursRoute
+  '/metering/gpu-hours': typeof AuthenticatedMeteringGpuHoursRoute
+  '/metering/input-tokens': typeof AuthenticatedMeteringInputTokensRoute
+  '/metering/kb-queries': typeof AuthenticatedMeteringKbQueriesRoute
+  '/metering/memory-gbhours': typeof AuthenticatedMeteringMemoryGbhoursRoute
+  '/metering/output-tokens': typeof AuthenticatedMeteringOutputTokensRoute
+  '/metering/storage-gbdays': typeof AuthenticatedMeteringStorageGbdaysRoute
   '/ops/gpu-pool': typeof AuthenticatedOpsGpuPoolRoute
+  '/tenant/usage-billing': typeof AuthenticatedTenantUsageBillingRoute
   '/tenants/quotas': typeof AuthenticatedTenantsQuotasRouteWithChildren
   '/tenants/quotas/$planId': typeof AuthenticatedTenantsQuotasPlanIdRoute
   '/tenants/quotas/new': typeof AuthenticatedTenantsQuotasNewRoute
@@ -121,7 +178,15 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/': typeof AuthenticatedIndexRoute
+  '/metering/cpu-hours': typeof AuthenticatedMeteringCpuHoursRoute
+  '/metering/gpu-hours': typeof AuthenticatedMeteringGpuHoursRoute
+  '/metering/input-tokens': typeof AuthenticatedMeteringInputTokensRoute
+  '/metering/kb-queries': typeof AuthenticatedMeteringKbQueriesRoute
+  '/metering/memory-gbhours': typeof AuthenticatedMeteringMemoryGbhoursRoute
+  '/metering/output-tokens': typeof AuthenticatedMeteringOutputTokensRoute
+  '/metering/storage-gbdays': typeof AuthenticatedMeteringStorageGbdaysRoute
   '/ops/gpu-pool': typeof AuthenticatedOpsGpuPoolRoute
+  '/tenant/usage-billing': typeof AuthenticatedTenantUsageBillingRoute
   '/tenants/quotas/$planId': typeof AuthenticatedTenantsQuotasPlanIdRoute
   '/tenants/quotas/new': typeof AuthenticatedTenantsQuotasNewRoute
   '/integration/notification-settings/email/recipients': typeof IntegrationNotificationSettingsEmailRecipientsRoute
@@ -136,7 +201,15 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/_authenticated/metering/cpu-hours': typeof AuthenticatedMeteringCpuHoursRoute
+  '/_authenticated/metering/gpu-hours': typeof AuthenticatedMeteringGpuHoursRoute
+  '/_authenticated/metering/input-tokens': typeof AuthenticatedMeteringInputTokensRoute
+  '/_authenticated/metering/kb-queries': typeof AuthenticatedMeteringKbQueriesRoute
+  '/_authenticated/metering/memory-gbhours': typeof AuthenticatedMeteringMemoryGbhoursRoute
+  '/_authenticated/metering/output-tokens': typeof AuthenticatedMeteringOutputTokensRoute
+  '/_authenticated/metering/storage-gbdays': typeof AuthenticatedMeteringStorageGbdaysRoute
   '/_authenticated/ops/gpu-pool': typeof AuthenticatedOpsGpuPoolRoute
+  '/_authenticated/tenant/usage-billing': typeof AuthenticatedTenantUsageBillingRoute
   '/_authenticated/tenants/quotas': typeof AuthenticatedTenantsQuotasRouteWithChildren
   '/_authenticated/tenants/quotas/$planId': typeof AuthenticatedTenantsQuotasPlanIdRoute
   '/_authenticated/tenants/quotas/new': typeof AuthenticatedTenantsQuotasNewRoute
@@ -152,7 +225,15 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/auth/callback'
+    | '/metering/cpu-hours'
+    | '/metering/gpu-hours'
+    | '/metering/input-tokens'
+    | '/metering/kb-queries'
+    | '/metering/memory-gbhours'
+    | '/metering/output-tokens'
+    | '/metering/storage-gbdays'
     | '/ops/gpu-pool'
+    | '/tenant/usage-billing'
     | '/tenants/quotas'
     | '/tenants/quotas/$planId'
     | '/tenants/quotas/new'
@@ -166,7 +247,15 @@ export interface FileRouteTypes {
     | '/login'
     | '/auth/callback'
     | '/'
+    | '/metering/cpu-hours'
+    | '/metering/gpu-hours'
+    | '/metering/input-tokens'
+    | '/metering/kb-queries'
+    | '/metering/memory-gbhours'
+    | '/metering/output-tokens'
+    | '/metering/storage-gbdays'
     | '/ops/gpu-pool'
+    | '/tenant/usage-billing'
     | '/tenants/quotas/$planId'
     | '/tenants/quotas/new'
     | '/integration/notification-settings/email/recipients'
@@ -180,7 +269,15 @@ export interface FileRouteTypes {
     | '/login'
     | '/auth/callback'
     | '/_authenticated/'
+    | '/_authenticated/metering/cpu-hours'
+    | '/_authenticated/metering/gpu-hours'
+    | '/_authenticated/metering/input-tokens'
+    | '/_authenticated/metering/kb-queries'
+    | '/_authenticated/metering/memory-gbhours'
+    | '/_authenticated/metering/output-tokens'
+    | '/_authenticated/metering/storage-gbdays'
     | '/_authenticated/ops/gpu-pool'
+    | '/_authenticated/tenant/usage-billing'
     | '/_authenticated/tenants/quotas'
     | '/_authenticated/tenants/quotas/$planId'
     | '/_authenticated/tenants/quotas/new'
@@ -203,18 +300,18 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/login': {
-      id: '/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof LoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/_authenticated': {
       id: '/_authenticated'
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof AuthenticatedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/': {
@@ -231,18 +328,53 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_authenticated/tenants/quotas': {
-      id: '/_authenticated/tenants/quotas'
-      path: '/tenants/quotas'
-      fullPath: '/tenants/quotas'
-      preLoaderRoute: typeof AuthenticatedTenantsQuotasRouteImport
+    '/_authenticated/metering/cpu-hours': {
+      id: '/_authenticated/metering/cpu-hours'
+      path: '/metering/cpu-hours'
+      fullPath: '/metering/cpu-hours'
+      preLoaderRoute: typeof AuthenticatedMeteringCpuHoursRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
-    '/_authenticated/tenant/usage-billing': {
-      id: '/_authenticated/tenant/usage-billing'
-      path: '/tenant/usage-billing'
-      fullPath: '/tenant/usage-billing'
-      preLoaderRoute: typeof AuthenticatedTenantUsageBillingRouteImport
+    '/_authenticated/metering/gpu-hours': {
+      id: '/_authenticated/metering/gpu-hours'
+      path: '/metering/gpu-hours'
+      fullPath: '/metering/gpu-hours'
+      preLoaderRoute: typeof AuthenticatedMeteringGpuHoursRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/metering/input-tokens': {
+      id: '/_authenticated/metering/input-tokens'
+      path: '/metering/input-tokens'
+      fullPath: '/metering/input-tokens'
+      preLoaderRoute: typeof AuthenticatedMeteringInputTokensRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/metering/kb-queries': {
+      id: '/_authenticated/metering/kb-queries'
+      path: '/metering/kb-queries'
+      fullPath: '/metering/kb-queries'
+      preLoaderRoute: typeof AuthenticatedMeteringKbQueriesRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/metering/memory-gbhours': {
+      id: '/_authenticated/metering/memory-gbhours'
+      path: '/metering/memory-gbhours'
+      fullPath: '/metering/memory-gbhours'
+      preLoaderRoute: typeof AuthenticatedMeteringMemoryGbhoursRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/metering/output-tokens': {
+      id: '/_authenticated/metering/output-tokens'
+      path: '/metering/output-tokens'
+      fullPath: '/metering/output-tokens'
+      preLoaderRoute: typeof AuthenticatedMeteringOutputTokensRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/metering/storage-gbdays': {
+      id: '/_authenticated/metering/storage-gbdays'
+      path: '/metering/storage-gbdays'
+      fullPath: '/metering/storage-gbdays'
+      preLoaderRoute: typeof AuthenticatedMeteringStorageGbdaysRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/ops/gpu-pool': {
@@ -252,12 +384,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedOpsGpuPoolRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
-    '/integration/notification-settings/email/': {
-      id: '/integration/notification-settings/email/'
-      path: '/integration/notification-settings/email'
-      fullPath: '/integration/notification-settings/email/'
-      preLoaderRoute: typeof IntegrationNotificationSettingsEmailIndexRouteImport
-      parentRoute: typeof rootRouteImport
+    '/_authenticated/tenant/usage-billing': {
+      id: '/_authenticated/tenant/usage-billing'
+      path: '/tenant/usage-billing'
+      fullPath: '/tenant/usage-billing'
+      preLoaderRoute: typeof AuthenticatedTenantUsageBillingRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/tenants/quotas': {
+      id: '/_authenticated/tenants/quotas'
+      path: '/tenants/quotas'
+      fullPath: '/tenants/quotas'
+      preLoaderRoute: typeof AuthenticatedTenantsQuotasRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/tenants/quotas/': {
       id: '/_authenticated/tenants/quotas/'
@@ -266,18 +405,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedTenantsQuotasIndexRouteImport
       parentRoute: typeof AuthenticatedTenantsQuotasRoute
     }
-    '/integration/notification-settings/email/subscriptions': {
-      id: '/integration/notification-settings/email/subscriptions'
-      path: '/integration/notification-settings/email/subscriptions'
-      fullPath: '/integration/notification-settings/email/subscriptions'
-      preLoaderRoute: typeof IntegrationNotificationSettingsEmailSubscriptionsRouteImport
-      parentRoute: typeof rootRouteImport
+    '/_authenticated/tenants/quotas/$planId': {
+      id: '/_authenticated/tenants/quotas/$planId'
+      path: '/$planId'
+      fullPath: '/tenants/quotas/$planId'
+      preLoaderRoute: typeof AuthenticatedTenantsQuotasPlanIdRouteImport
+      parentRoute: typeof AuthenticatedTenantsQuotasRoute
     }
-    '/integration/notification-settings/email/smtp': {
-      id: '/integration/notification-settings/email/smtp'
-      path: '/integration/notification-settings/email/smtp'
-      fullPath: '/integration/notification-settings/email/smtp'
-      preLoaderRoute: typeof IntegrationNotificationSettingsEmailSmtpRouteImport
+    '/_authenticated/tenants/quotas/new': {
+      id: '/_authenticated/tenants/quotas/new'
+      path: '/new'
+      fullPath: '/tenants/quotas/new'
+      preLoaderRoute: typeof AuthenticatedTenantsQuotasNewRouteImport
+      parentRoute: typeof AuthenticatedTenantsQuotasRoute
+    }
+    '/integration/notification-settings/email/': {
+      id: '/integration/notification-settings/email/'
+      path: '/integration/notification-settings/email'
+      fullPath: '/integration/notification-settings/email/'
+      preLoaderRoute: typeof IntegrationNotificationSettingsEmailIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/integration/notification-settings/email/recipients': {
@@ -287,19 +433,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IntegrationNotificationSettingsEmailRecipientsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_authenticated/tenants/quotas/new': {
-      id: '/_authenticated/tenants/quotas/new'
-      path: '/new'
-      fullPath: '/tenants/quotas/new'
-      preLoaderRoute: typeof AuthenticatedTenantsQuotasNewRouteImport
-      parentRoute: typeof AuthenticatedTenantsQuotasRoute
+    '/integration/notification-settings/email/smtp': {
+      id: '/integration/notification-settings/email/smtp'
+      path: '/integration/notification-settings/email/smtp'
+      fullPath: '/integration/notification-settings/email/smtp'
+      preLoaderRoute: typeof IntegrationNotificationSettingsEmailSmtpRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/_authenticated/tenants/quotas/$planId': {
-      id: '/_authenticated/tenants/quotas/$planId'
-      path: '/$planId'
-      fullPath: '/tenants/quotas/$planId'
-      preLoaderRoute: typeof AuthenticatedTenantsQuotasPlanIdRouteImport
-      parentRoute: typeof AuthenticatedTenantsQuotasRoute
+    '/integration/notification-settings/email/subscriptions': {
+      id: '/integration/notification-settings/email/subscriptions'
+      path: '/integration/notification-settings/email/subscriptions'
+      fullPath: '/integration/notification-settings/email/subscriptions'
+      preLoaderRoute: typeof IntegrationNotificationSettingsEmailSubscriptionsRouteImport
+      parentRoute: typeof rootRouteImport
     }
   }
 }
@@ -325,13 +471,32 @@ const AuthenticatedTenantsQuotasRouteWithChildren =
 
 interface AuthenticatedRouteChildren {
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
+  AuthenticatedMeteringCpuHoursRoute: typeof AuthenticatedMeteringCpuHoursRoute
+  AuthenticatedMeteringGpuHoursRoute: typeof AuthenticatedMeteringGpuHoursRoute
+  AuthenticatedMeteringInputTokensRoute: typeof AuthenticatedMeteringInputTokensRoute
+  AuthenticatedMeteringKbQueriesRoute: typeof AuthenticatedMeteringKbQueriesRoute
+  AuthenticatedMeteringMemoryGbhoursRoute: typeof AuthenticatedMeteringMemoryGbhoursRoute
+  AuthenticatedMeteringOutputTokensRoute: typeof AuthenticatedMeteringOutputTokensRoute
+  AuthenticatedMeteringStorageGbdaysRoute: typeof AuthenticatedMeteringStorageGbdaysRoute
   AuthenticatedOpsGpuPoolRoute: typeof AuthenticatedOpsGpuPoolRoute
+  AuthenticatedTenantUsageBillingRoute: typeof AuthenticatedTenantUsageBillingRoute
   AuthenticatedTenantsQuotasRoute: typeof AuthenticatedTenantsQuotasRouteWithChildren
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
+  AuthenticatedMeteringCpuHoursRoute: AuthenticatedMeteringCpuHoursRoute,
+  AuthenticatedMeteringGpuHoursRoute: AuthenticatedMeteringGpuHoursRoute,
+  AuthenticatedMeteringInputTokensRoute: AuthenticatedMeteringInputTokensRoute,
+  AuthenticatedMeteringKbQueriesRoute: AuthenticatedMeteringKbQueriesRoute,
+  AuthenticatedMeteringMemoryGbhoursRoute:
+    AuthenticatedMeteringMemoryGbhoursRoute,
+  AuthenticatedMeteringOutputTokensRoute:
+    AuthenticatedMeteringOutputTokensRoute,
+  AuthenticatedMeteringStorageGbdaysRoute:
+    AuthenticatedMeteringStorageGbdaysRoute,
   AuthenticatedOpsGpuPoolRoute: AuthenticatedOpsGpuPoolRoute,
+  AuthenticatedTenantUsageBillingRoute: AuthenticatedTenantUsageBillingRoute,
   AuthenticatedTenantsQuotasRoute: AuthenticatedTenantsQuotasRouteWithChildren,
 }
 
