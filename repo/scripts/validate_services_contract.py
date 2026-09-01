@@ -25,9 +25,14 @@ HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
 RULES = {
     "write_requires_idempotency",
     "operation_security",
+    "operation_authz_v1_format",
     "async_202_requires_async_task",
 }
 ASYNC_TASK_REF = "#/components/schemas/AsyncTask"
+STANDARD_AUTH_SECURITY = [{"BearerAuth": []}, {"ApiKeyAuth": []}]
+AUTHZ_FIELDS = {"version", "resource", "action", "boundary", "principal_kinds"}
+VALID_AUTHZ_BOUNDARIES = {"own", "tenant", "platform"}
+VALID_AUTHZ_PRINCIPAL_KINDS = {"user", "service", "api_key", "sandbox"}
 
 
 @dataclass(frozen=True)
@@ -126,6 +131,37 @@ def operation_has_security(spec: dict[str, Any], operation: dict[str, Any]) -> b
     return isinstance(security, list) and bool(security)
 
 
+def authz_v1_format_error(spec: dict[str, Any], operation: dict[str, Any]) -> str | None:
+    security = operation.get("security", spec.get("security"))
+    if not isinstance(security, list) or not security:
+        return None
+    if security != STANDARD_AUTH_SECURITY:
+        return "authenticated operation must use security alternatives BearerAuth or ApiKeyAuth"
+    authz = operation.get("x-ani-authz")
+    if not isinstance(authz, dict):
+        return "authenticated operation must declare x-ani-authz"
+    if set(authz) != AUTHZ_FIELDS:
+        return "x-ani-authz must declare exactly version, resource, action, boundary, principal_kinds"
+    if authz.get("version") != "v1":
+        return "x-ani-authz.version must be v1"
+    if authz.get("boundary") not in VALID_AUTHZ_BOUNDARIES:
+        return "x-ani-authz.boundary must be own, tenant, or platform"
+    for field in ("resource", "action"):
+        value = authz.get(field)
+        if not isinstance(value, str) or not value.strip():
+            return f"x-ani-authz.{field} must be a non-empty string"
+    principal_kinds = authz.get("principal_kinds")
+    if (
+        not isinstance(principal_kinds, list)
+        or not principal_kinds
+        or any(not isinstance(kind, str) for kind in principal_kinds)
+        or len(principal_kinds) != len(set(principal_kinds))
+        or set(principal_kinds) - VALID_AUTHZ_PRINCIPAL_KINDS
+    ):
+        return "x-ani-authz.principal_kinds must be a non-empty unique list of supported principal kinds"
+    return None
+
+
 def async_response_has_task(operation: dict[str, Any]) -> bool:
     response = operation.get("responses", {}).get("202")
     if not isinstance(response, dict):
@@ -151,6 +187,9 @@ def collect_findings(spec: dict[str, Any]) -> list[Finding]:
             findings.append(Finding(op_id, "write_requires_idempotency", f"{method.upper()} {path} request body must require idempotency_key"))
         if not operation_has_security(spec, operation):
             findings.append(Finding(op_id, "operation_security", f"{method.upper()} {path} must declare a non-empty security requirement"))
+        authz_error = authz_v1_format_error(spec, operation)
+        if authz_error:
+            findings.append(Finding(op_id, "operation_authz_v1_format", f"{method.upper()} {path} {authz_error}"))
         if "202" in operation.get("responses", {}) and not async_response_has_task(operation):
             findings.append(Finding(op_id, "async_202_requires_async_task", f"{method.upper()} {path} 202 response must use {ASYNC_TASK_REF}"))
     return sorted(findings, key=lambda item: item.key)

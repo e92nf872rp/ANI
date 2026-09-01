@@ -2,24 +2,6 @@ version: 1
 status: accepted_baseline
 owner: ANI Services 团队
 exceptions:
-  - operation_id: listModels
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: createModel
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: importModel
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: getModel
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: deleteModel
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: createModelVersion
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
   - operation_id: listKnowledgeBases
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
@@ -176,6 +158,33 @@ exceptions:
   - operation_id: createIntegrationBot
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: listInferenceServices
+    rule: operation_authz_v1_format
+    reason: C42 前既有推理服务控制面接口仅声明 security，尚未补齐 v1 x-ani-authz 元数据；新增接口不得沿用该格式。
+  - operation_id: createInferenceService
+    rule: operation_authz_v1_format
+    reason: C42 前既有推理服务控制面接口仅声明 security，尚未补齐 v1 x-ani-authz 元数据；新增接口不得沿用该格式。
+  - operation_id: getInferenceService
+    rule: operation_authz_v1_format
+    reason: C42 前既有推理服务控制面接口仅声明 security，尚未补齐 v1 x-ani-authz 元数据；新增接口不得沿用该格式。
+  - operation_id: updateInferenceService
+    rule: operation_authz_v1_format
+    reason: C42 前既有推理服务控制面接口仅声明 security，尚未补齐 v1 x-ani-authz 元数据；新增接口不得沿用该格式。
+  - operation_id: deleteInferenceService
+    rule: operation_authz_v1_format
+    reason: C42 前既有推理服务控制面接口仅声明 security，尚未补齐 v1 x-ani-authz 元数据；新增接口不得沿用该格式。
+  - operation_id: applyInferenceServiceLifecycle
+    rule: operation_authz_v1_format
+    reason: C42 前既有推理服务控制面接口仅声明 security，尚未补齐 v1 x-ani-authz 元数据；新增接口不得沿用该格式。
+  - operation_id: getInferenceOperation
+    rule: operation_authz_v1_format
+    reason: C42 前既有推理服务控制面接口仅声明 security，尚未补齐 v1 x-ani-authz 元数据；新增接口不得沿用该格式。
+  - operation_id: getInferenceServiceLogs
+    rule: operation_authz_v1_format
+    reason: C42 前既有推理服务控制面接口仅声明 security，尚未补齐 v1 x-ani-authz 元数据；新增接口不得沿用该格式。
+  - operation_id: testInferenceService
+    rule: operation_authz_v1_format
+    reason: C42 前既有推理服务控制面接口仅声明 security，尚未补齐 v1 x-ani-authz 元数据；新增接口不得沿用该格式。
   - operation_id: createInferenceService
     rule: async_202_requires_async_task
     reason: 当前异步部署响应仍返回 InferenceService；切换为任务响应需要 Services 团队同步实现。

@@ -140,11 +140,16 @@ components:
         id:           { type: string, format: uuid }
         name:         { type: string }
         display_name: { type: string }
+        description:  { type: string, nullable: true }
         source:       { type: string, enum: [upload, huggingface, modelscope, builtin] }
         capabilities: { type: array, items: { type: string } }
         status:       { type: string, enum: [pending, downloading, ready, error, deleted] }
         total_size_bytes: { type: integer }
         created_at:   { type: string, format: date-time }
+        updated_at:   { type: string, format: date-time, nullable: true }
+        versions:
+          type: array
+          items: { $ref: '#/components/schemas/ModelVersion' }
 
     ModelVersion:
       type: object
@@ -156,7 +161,26 @@ components:
         format:       { type: string, enum: [safetensors, gguf, pytorch] }
         is_encrypted: { type: boolean }
         size_bytes:   { type: integer }
+        checksum_sha256: { type: string, nullable: true }
+        storage_path: { type: string }
         created_at:   { type: string, format: date-time }
+
+    CreateModelUploadURLRequest:
+      type: object
+      required: [idempotency_key, version, file_name, size_bytes]
+      properties:
+        idempotency_key: { type: string, format: uuid }
+        version: { type: string, minLength: 1, maxLength: 128 }
+        file_name: { type: string, minLength: 1, maxLength: 255 }
+        size_bytes: { type: integer, minimum: 1 }
+
+    ModelUploadURLResponse:
+      type: object
+      required: [upload_url, storage_path, expires_at]
+      properties:
+        upload_url: { type: string, format: uri }
+        storage_path: { type: string }
+        expires_at: { type: string, format: date-time }
 
     InferenceService:
       type: object
@@ -683,23 +707,132 @@ components:
         model_id:   { type: string, nullable: true }
         status:     { type: string, enum: [success, timeout, error] }
 
-    InferenceServicePolicies:
+    InferenceAccessPolicyScope:
+      type: object
+      required: [type]
+      properties:
+        type: { type: string, enum: [tenant_default, inference_service, api_key, inference_service_api_key] }
+        inference_service_ids: { type: array, items: { type: string, format: uuid } }
+        api_key_ids: { type: array, items: { type: string, format: uuid } }
+
+    InferenceAccessPolicyAccess:
+      type: object
+      required: [allow_all_tenant_keys]
+      properties:
+        allow_all_tenant_keys: { type: boolean }
+        allow_api_key_ids: { type: array, items: { type: string, format: uuid } }
+        deny_api_key_ids: { type: array, items: { type: string, format: uuid } }
+
+    InferenceAccessPolicyRateLimits:
       type: object
       properties:
-        rate_limit_rpm:     { type: integer, nullable: true }
-        max_concurrency:    { type: integer, nullable: true }
-        allowed_tenant_ids: { type: array, items: { type: string }, nullable: true }
-        auth_mode:          { type: string, enum: [api_key, jwt, none], nullable: true }
+        qps: { type: integer, minimum: 1, nullable: true }
+        rpm: { type: integer, minimum: 1, nullable: true }
 
-    UpdateInferenceServicePoliciesRequest:
+    InferenceAccessPolicyConcurrency:
+      type: object
+      properties:
+        max_in_flight: { type: integer, minimum: 1, nullable: true }
+        lease_ttl_seconds: { type: integer, minimum: 1, maximum: 3600, default: 60 }
+
+    InferenceAccessPolicy:
+      type: object
+      required: [id, tenant_id, name, status, priority, scope, access, rate_limits, concurrency, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 128 }
+        status: { type: string, enum: [enabled, disabled] }
+        description: { type: string, maxLength: 512, nullable: true }
+        priority: { type: integer, minimum: 1, maximum: 10000 }
+        scope: { $ref: '#/components/schemas/InferenceAccessPolicyScope' }
+        access: { $ref: '#/components/schemas/InferenceAccessPolicyAccess' }
+        rate_limits: { $ref: '#/components/schemas/InferenceAccessPolicyRateLimits' }
+        concurrency: { $ref: '#/components/schemas/InferenceAccessPolicyConcurrency' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time, nullable: true }
+
+    CreateInferenceAccessPolicyRequest:
+      type: object
+      required: [idempotency_key, name, scope, access]
+      properties:
+        idempotency_key: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 128 }
+        description: { type: string, maxLength: 512, nullable: true }
+        status: { type: string, enum: [enabled, disabled], default: enabled }
+        priority: { type: integer, minimum: 1, maximum: 10000, default: 1000 }
+        scope: { $ref: '#/components/schemas/InferenceAccessPolicyScope' }
+        access: { $ref: '#/components/schemas/InferenceAccessPolicyAccess' }
+        rate_limits: { $ref: '#/components/schemas/InferenceAccessPolicyRateLimits' }
+        concurrency: { $ref: '#/components/schemas/InferenceAccessPolicyConcurrency' }
+
+    PatchInferenceAccessPolicyRequest:
       type: object
       required: [idempotency_key]
       properties:
-        idempotency_key:    { type: string, format: uuid }
-        rate_limit_rpm:     { type: integer, minimum: 1, nullable: true }
-        max_concurrency:    { type: integer, minimum: 1, nullable: true }
-        allowed_tenant_ids: { type: array, items: { type: string } }
-        auth_mode:          { type: string, enum: [api_key, jwt, none] }
+        idempotency_key: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 128 }
+        description: { type: string, maxLength: 512, nullable: true }
+        status: { type: string, enum: [enabled, disabled] }
+        priority: { type: integer, minimum: 1, maximum: 10000 }
+        scope: { $ref: '#/components/schemas/InferenceAccessPolicyScope' }
+        access: { $ref: '#/components/schemas/InferenceAccessPolicyAccess' }
+        rate_limits: { $ref: '#/components/schemas/InferenceAccessPolicyRateLimits' }
+        concurrency: { $ref: '#/components/schemas/InferenceAccessPolicyConcurrency' }
+
+    InferenceAccessPolicyListResponse:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/InferenceAccessPolicy' } }
+        next_cursor: { type: string, nullable: true }
+
+    InferenceAccessPolicyBinding:
+      type: object
+      required: [policy_id, inference_service_ids]
+      properties:
+        policy_id: { type: string, format: uuid }
+        inference_service_ids: { type: array, items: { type: string, format: uuid } }
+
+    InferenceAccessPolicyEvent:
+      type: object
+      required: [id, tenant_id, inference_service_id, decision, reason_code, http_status, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        policy_id: { type: string, format: uuid, nullable: true }
+        inference_service_id: { type: string, format: uuid }
+        api_key_id: { type: string, format: uuid, nullable: true }
+        key_prefix: { type: string, nullable: true }
+        request_id: { type: string, nullable: true }
+        openai_path: { type: string }
+        external_model: { type: string, nullable: true }
+        decision: { type: string, enum: [allow, deny, rate_limited, concurrency_limited, policy_unavailable] }
+        reason_code: { type: string }
+        http_status: { type: integer }
+        retry_after_seconds: { type: integer, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    InferenceAccessPolicyEventListResponse:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/InferenceAccessPolicyEvent' } }
+        next_cursor: { type: string, nullable: true }
+
+    InferenceServicePolicies:
+      type: object
+      required: [service_id, policies]
+      properties:
+        service_id: { type: string, format: uuid }
+        policies: { type: array, items: { $ref: '#/components/schemas/InferenceAccessPolicy' } }
+
+    UpdateInferenceServicePoliciesRequest:
+      type: object
+      required: [idempotency_key, policy_ids]
+      properties:
+        idempotency_key: { type: string, format: uuid }
+        policy_ids: { type: array, items: { type: string, format: uuid } }
 
     KBCitation:
       type: object
@@ -1329,7 +1462,17 @@ paths:
       operationId: listModels
       summary: 获取模型列表
       tags: [Models]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: model
+        action: read
+        boundary: tenant
+        principal_kinds: [user]
       parameters:
+        - { name: keyword, in: query, schema: { type: string, maxLength: 128 }, description: "按模型名称或显示名称搜索" }
+        - { name: source, in: query, schema: { type: string, enum: [upload, huggingface, modelscope, builtin] } }
+        - { name: capability, in: query, schema: { type: string, enum: [text-generation, embedding, speech-to-text] } }
         - { name: status, in: query, schema: { type: string, enum: [pending, downloading, ready, error, deleted] } }
         - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string }, description: "上一页返回的 next_cursor" }
@@ -1349,6 +1492,13 @@ paths:
       operationId: createModel
       summary: 创建模型元数据记录
       tags: [Models]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: model
+        action: create
+        boundary: tenant
+        principal_kinds: [user]
       requestBody:
         required: true
         content:
@@ -1380,6 +1530,13 @@ paths:
       operationId: importModel
       summary: 从 HuggingFace 或 ModelScope 异步导入模型
       tags: [Models]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: model
+        action: create
+        boundary: tenant
+        principal_kinds: [user]
       requestBody:
         required: true
         content:
@@ -1409,6 +1566,13 @@ paths:
       operationId: getModel
       summary: 获取模型详情
       tags: [Models]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: model
+        action: read
+        boundary: tenant
+        principal_kinds: [user]
       parameters:
         - { name: model_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -1417,22 +1581,74 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Model' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
     delete:
       operationId: deleteModel
       summary: 删除模型
       tags: [Models]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: model
+        action: delete
+        boundary: tenant
+        principal_kinds: [user]
       parameters:
         - { name: model_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         "204": { description: 已删除 }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "409":
+          description: 模型仍被未删除的推理服务引用（code=MODEL_IN_USE）
+          x-ani-error-codes: [MODEL_IN_USE]
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
 
   /models/{model_id}/versions:
+    get:
+      operationId: listModelVersions
+      summary: 获取模型版本列表
+      tags: [Models]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: model
+        action: read
+        boundary: tenant
+        principal_kinds: [user]
+      parameters:
+        - { name: model_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: 模型版本列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CursorPage'
+                  - properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/ModelVersion' } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
     post:
       operationId: createModelVersion
       summary: 上传模型版本
       tags: [Models]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: model
+        action: create
+        boundary: tenant
+        principal_kinds: [user]
       parameters:
         - { name: model_id, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -1455,6 +1671,66 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ModelVersion' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /models/{model_id}/upload-url:
+    post:
+      operationId: getModelUploadURL
+      summary: 申请模型文件预签名上传地址
+      tags: [Models]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: model
+        action: create
+        boundary: tenant
+        principal_kinds: [user]
+      parameters:
+        - { name: model_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateModelUploadURLRequest' }
+      responses:
+        "201":
+          description: 已创建有时限的模型文件预签名上传地址
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelUploadURLResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /model-import-tasks/{task_id}:
+    get:
+      operationId: getModelImportTask
+      summary: 查询模型异步导入任务
+      tags: [Models]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: model
+        action: read
+        boundary: tenant
+        principal_kinds: [user]
+      parameters:
+        - { name: task_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 模型异步导入任务
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncTask' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
 
   /inference-services:
     get:
@@ -1665,13 +1941,185 @@ paths:
         "503": { $ref: '#/components/responses/ServiceUnavailable' }
         "504": { $ref: '#/components/responses/RuntimeTimeout' }
 
+  /inference-policies:
+    get:
+      operationId: listInferenceAccessPolicies
+      summary: 查询推理访问策略
+      tags: [InferenceServices]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: inference_policy
+        action: read
+        boundary: tenant
+        principal_kinds: [user]
+      responses:
+        "200":
+          description: 推理访问策略列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InferenceAccessPolicyListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+    post:
+      operationId: createInferenceAccessPolicy
+      summary: 创建推理访问策略
+      tags: [InferenceServices]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: inference_policy
+        action: create
+        boundary: tenant
+        principal_kinds: [user]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateInferenceAccessPolicyRequest' }
+      responses:
+        "201":
+          description: 已创建推理访问策略
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InferenceAccessPolicy' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/InferenceUnprocessableEntity' }
+
+  /inference-policies/{policy_id}:
+    get:
+      operationId: getInferenceAccessPolicy
+      summary: 获取推理访问策略
+      tags: [InferenceServices]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: inference_policy
+        action: read
+        boundary: tenant
+        principal_kinds: [user]
+      parameters:
+        - { name: policy_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 推理访问策略
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InferenceAccessPolicy' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: patchInferenceAccessPolicy
+      summary: 更新推理访问策略
+      tags: [InferenceServices]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: inference_policy
+        action: update
+        boundary: tenant
+        principal_kinds: [user]
+      parameters:
+        - { name: policy_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PatchInferenceAccessPolicyRequest' }
+      responses:
+        "200":
+          description: 已更新推理访问策略
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InferenceAccessPolicy' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/InferenceUnprocessableEntity' }
+    delete:
+      operationId: deleteInferenceAccessPolicy
+      summary: 删除推理访问策略
+      tags: [InferenceServices]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: inference_policy
+        action: delete
+        boundary: tenant
+        principal_kinds: [user]
+      parameters:
+        - { name: policy_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: 已删除推理访问策略 }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /inference-policy-events:
+    get:
+      operationId: listInferencePolicyEvents
+      summary: 查询推理访问策略命中记录
+      tags: [InferenceServices]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: inference_policy
+        action: read
+        boundary: tenant
+        principal_kinds: [user]
+      parameters:
+        - { name: inference_service_id, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: policy_id, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: api_key_id, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: decision, in: query, required: false, schema: { type: string, enum: [allow, deny, rate_limited, concurrency_limited, policy_unavailable] } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: 推理访问策略命中记录
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InferenceAccessPolicyEventListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+
   /inference-services/{service_id}/policies:
+    get:
+      operationId: listInferenceServicePolicies
+      summary: 查询推理服务绑定的访问策略
+      tags: [InferenceServices]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: inference_policy
+        action: read
+        boundary: tenant
+        principal_kinds: [user]
+      parameters:
+        - { name: service_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 推理服务策略绑定
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InferenceServicePolicies' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "404": { $ref: '#/components/responses/NotFound' }
     put:
       operationId: updateInferenceServicePolicies
-      summary: 更新推理服务限流与访问策略
+      summary: 更新推理服务绑定的访问策略
       tags: [InferenceServices]
-      description: P1 兼容预留路径；P0 未建设调用网关，真实 handler 必须返回 501 FEATURE_NOT_AVAILABLE，不得伪造策略已生效。
       security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: inference_policy
+        action: update
+        boundary: tenant
+        principal_kinds: [user]
       parameters:
         - { name: service_id, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -1681,15 +2129,15 @@ paths:
             schema: { $ref: '#/components/schemas/UpdateInferenceServicePoliciesRequest' }
       responses:
         "200":
-          description: 更新后的策略
+          description: 更新后的推理服务策略绑定
           content:
             application/json:
               schema: { $ref: '#/components/schemas/InferenceServicePolicies' }
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
-        "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
-        "501": { $ref: '#/components/responses/FeatureNotAvailable' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/InferenceUnprocessableEntity' }
 
   /knowledge-bases:
     get:

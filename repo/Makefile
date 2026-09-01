@@ -1030,7 +1030,17 @@ validate-services-contract:
 	python scripts/validate_services_contract.py
 	python scripts/validate_inference_service_contract_test.py
 	python scripts/validate_inference_service_contract.py
+	$(MAKE) validate-inference-access-policy-contract
+	$(MAKE) validate-model-repository-contract
 	@echo "✅ Services semantic contract valid"
+
+validate-model-repository-contract:
+	python scripts/validate_model_repository_contract_test.py
+	python scripts/validate_model_repository_contract.py
+
+validate-inference-access-policy-contract:
+	python scripts/validate_inference_access_policy_contract_test.py
+	python scripts/validate_inference_access_policy_contract.py
 
 validate-inference-control-plane:
 	@echo "→ 校验 inference-service PostgreSQL 控制面迁移..."
