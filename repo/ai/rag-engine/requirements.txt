@@ -4,37 +4,23 @@ pydantic-settings==2.14.2
 httpx==0.28.1
 opentelemetry-sdk==1.26.0
 opentelemetry-instrumentation-fastapi==0.47b0
-# LlamaIndex stack (SPEC §1.3 / US-011): replace legacy langchain/pymilvus direct usage.
+# LlamaIndex minimal: only SentenceSplitter (chunk_service) and DoclingReader
+# (parse_service Word/Excel/PPT). All other LlamaIndex packages removed in
+# Issue #039 (RAG refactor Step 11 — delete old path).
 llama-index-core==0.14.23
 llama-index-readers-docling==0.4.2
 # Embedding model is served by the AI inference service (vLLM/sglang OpenAI
-# compatible /v1/embeddings). US-013 v1.2: rag-engine calls the remote
-# inference-service embedding endpoint instead of loading a local
-# HuggingFace model. We use a thin custom adapter backed by the ``openai``
-# SDK rather than llama-index-embeddings-openai, because the latter
-# validates the model name against a fixed OpenAI enum and rejects custom
-# model names served by the inference service (e.g. Qwen3-Embedding-0.6B).
+# compatible /v1/embeddings). We use a thin custom adapter backed by the
+# ``openai`` SDK rather than llama-index-embeddings-openai.
 openai>=1.50.0
-llama-index-llms-openai-like==0.7.2
-llama-index-vector-stores-milvus==1.1.0
-# pymilvus is the Milvus Python SDK used by llama-index-vector-stores-milvus.
-pymilvus>=2.5.0
-# Redis-backed chat store for ContextChatEngine multi-turn memory (US-014 /
-# SPEC §5.1 qa_service: ChatMemoryBuffer(chat_store=RedisChatStore)).
-llama-index-storage-chat-store-redis>=0.6.0
-# asyncpg for kb_chunks writes (US-012) and pg_trgm keyword retrieval (US-014).
-asyncpg>=0.29.0
-# nest_asyncio for nested event loops (LlamaIndex QueryFusionRetriever runs
-# aretrieve inside an event loop; pg_trgm search bridges asyncpg sync via
-# asyncio.run, which needs nest_asyncio when called from a running loop).
-nest_asyncio>=1.6.0
-# MinIO SDK for image upload during document parsing (plan.md §4.4).
-minio==7.2.15
 # PyMuPDF for lightweight PDF text + image extraction (no model download).
 pymupdf>=1.24.0
-# gRPC server (Query RPC, SPEC §4.1 / US-015) + the kb_service.proto-equivalent
-# internal rag.proto generated stubs.
+# Office document parsing (Word/Excel/PPT image extraction in parse_service +
+# server.py). Previously transitive deps of the full llama-index package.
+python-docx>=1.1.0
+openpyxl>=3.1.0
+python-pptx>=0.6.23
+# gRPC server (Parse/Embed/Generate/GenerateStream RPCs) + internal rag.proto
+# generated stubs.
 grpcio>=1.62.0
 grpcio-tools>=1.62.0
-# NATS client for parse_worker subscription (US-015 / SPEC §5.1).
-nats-py>=2.7.0

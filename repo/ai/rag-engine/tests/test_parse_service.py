@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 
 # Force stub modules for optional heavy deps so parse_service imports cleanly
-# without installing docling / llama_index readers / minio / pymilvus.
+# without installing docling / llama_index readers.
 for _mod in (
     "docling",
     "docling.datamodel.base_models",
@@ -26,10 +26,6 @@ for _mod in (
     "llama_index",
     "llama_index.readers",
     "llama_index.readers.docling",
-    "minio",
-    "minio.error",
-    "pymilvus",
-    "pymilvus.connections",
 ):
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()

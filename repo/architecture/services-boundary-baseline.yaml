@@ -28,10 +28,5 @@ exceptions:
     owner: ANI Services 团队
     reason: inference-service 配置嵌入 `bootstrap.Config`，与 model-service/auth-service 启动约定对齐
     disposition: 仅限配置装配；业务控制面不得依赖 Core ports/adapters
-  - path: ai/rag-engine/app/core/milvus.py
-    rule: provider_sdk_python_import
-    import: pymilvus
-    status: accepted_baseline
-    owner: ANI Services 团队
-    reason: rag-engine 当前仍在业务代码中直接导入 Milvus provider SDK `pymilvus`，属于冻结前保留的现存 provider 直连事实
-    disposition: 保留为精确存量基线并告警；后续如继续演进需先明确保留理由或迁移到受控边界，不得新增未登记 provider 直连
+  # rag-engine pymilvus provider_sdk_python_import entry removed in Issue #039
+  # (RAG refactor Step 11 — delete old path). rag-engine no longer imports pymilvus.

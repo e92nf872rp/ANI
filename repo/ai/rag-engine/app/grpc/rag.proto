@@ -4,10 +4,6 @@ package rag.v1;
 
 // rag-engine internal RPC definitions (SPEC §4.1, RAG-REFACTOR-STEP-2).
 //
-// The legacy Query RPC (QueryRequest/QueryResponse) is retained until
-// STEP-11 removes it. The old Query path uses REST (not gRPC), so the
-// SourceChunk field renumbering below does not affect it.
-//
 // SourceChunk has been renumbered: chunk_id is now field 1, and the
 // legacy fields (doc_id, file_name, page, content, score) shifted to
 // 2-6. This is NOT wire-compatible with kb_service.proto's SourceChunk
@@ -15,19 +11,14 @@ package rag.v1;
 // (STEP-3, issue-030) uses rag.proto's definition directly, so no
 // cross-proto serialization occurs.
 //
-// New stateless RPCs (Parse/Embed/Generate/GenerateStream) are the
-// compliance-compliant execution surface: rag-engine becomes a stateless
+// Stateless RPCs (Parse/Embed/Generate/GenerateStream) are the
+// compliance-compliant execution surface: rag-engine is a stateless
 // RPC engine orchestrated by kb-service. These RPCs do NOT depend on
 // LlamaIndex.
 
 option go_package = "github.com/kubercloud/ani/ai/rag-engine/app/generated/rag/v1;ragv1";
 
 service RagEngine {
-  // [DEPRECATED] Query performs a synchronous RAG query and returns the
-  // answer + sources. Retained until STEP-11; new callers should use
-  // retrieve (kb-service) + Generate.
-  rpc Query(QueryRequest) returns (QueryResponse);
-
   // Parse downloads a document from download_url, parses + chunks it, and
   // returns the chunks (parents + children + images). Stateless.
   rpc Parse(ParseRequest) returns (ParseResponse);
@@ -44,31 +35,7 @@ service RagEngine {
   rpc GenerateStream(GenerateRequest) returns (stream GenerateToken);
 }
 
-// ── Legacy Query messages (deprecated, unchanged) ────────────────────────────
-
-message QueryRequest {
-  string tenant_id        = 1;
-  string kb_id            = 2;
-  string question         = 3;
-  string session_id       = 4;   // optional; empty creates new session
-  string idempotency_key  = 5;   // prevents duplicate billing on retry
-  int32  top_k            = 6;   // override if nonzero
-  float  score_threshold  = 7;   // override if nonzero; negative disables
-  string inference_service_name = 8; // which vLLM service to use; "default" if empty
-  string retrieval_mode   = 9;   // vector | hybrid | keyword (empty = use KB default)
-}
-
-message QueryResponse {
-  string answer           = 1;
-  repeated SourceChunk sources = 2;
-  string session_id       = 3;
-  int32  input_tokens     = 4;
-  int32  output_tokens    = 5;
-}
-
 // SourceChunk: chunk_id added (field 1) for RRF rank-fusion key.
-// Backwards compatible: legacy Query RPC callers that don't set chunk_id
-// get the default empty string (old behavior unchanged).
 message SourceChunk {
   string chunk_id  = 1;   // NEW: chunk unique ID (RRF fusion key)
   string doc_id    = 2;

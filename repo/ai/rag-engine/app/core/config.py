@@ -1,4 +1,4 @@
-from pydantic import AliasChoices, Field, ValidationInfo, field_validator
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -10,11 +10,6 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Full Milvus address ``host:port``; takes precedence over the separate
-    # fields below when set (matches the ``MILVUS_ADDR`` env var in .env).
-    milvus_addr: str = ""
-    milvus_host: str = "localhost"
-    milvus_port: int = 19530
     # Embedding model served by the AI inference service (OpenAI compatible
     # /v1/embeddings). US-013: rag-engine calls the remote endpoint instead of
     # loading a local HuggingFace model. ``embedding_model`` is the model name
@@ -28,24 +23,7 @@ class Settings(BaseSettings):
     # interim service has no api_key); the formal inference-service may set one.
     embedding_api_key: str = ""
     embedding_dim: int = 1024
-    # Redis for ChatMemoryBuffer(RedisChatStore) — qa_service multi-turn session
-    # memory (SPEC §5.1 qa_service). Defaults to the dev Redis in .env.
-    redis_url: str = "redis://localhost:6379/0"
-    # PostgreSQL DSN for kb_chunks table (pg_trgm keyword retrieval + parent
-    # backfill + chunk writes). SPEC §2.4 requires config.py to include PG
-    # configuration. Used by make_pg_trgm_search_fn / make_parent_lookup_fn /
-    # chunks repository (all accept a DSN string or asyncpg pool).
-    # #5: Accept both PG_DSN (legacy) and DATABASE_URL (shared .env convention
-    # used by kb-service) via validation_alias.
-    pg_dsn: str = Field(
-        default="postgresql://ani:ani_dev_password@localhost:5432/ani",
-        validation_alias=AliasChoices("pg_dsn", "database_url", "DATABASE_URL", "PG_DSN"),
-    )
-    # NATS for parse_worker subscription (SPEC §2.4, §5.1 parse_worker).
-    # parse_worker subscribes to ani.tasks.kb.parse (US-015).
-    nats_url: str = "nats://localhost:4222"
-    nats_parse_subject: str = "ani.tasks.kb.parse"
-    # LLM served by the AI inference service (OpenAI-compatible /v1). US-012
+    # LLM served by the AI inference service (OpenAI-compatible /v1). US-0012
     # summary_service calls this endpoint for document-level summarization.
     # The AI inference service exposes the OpenAI interface to the knowledge
     # base module; rag-engine does NOT load a local LLM. The defaults below
@@ -69,33 +47,9 @@ class Settings(BaseSettings):
     # AI service OCR API base URL (PaddleOCR PP-OCRv4, deployed by inference-service, issue #5).
     ocr_api_base: str = "http://inference-service.ani-system.svc.cluster.local:8000"
     ocr_timeout_seconds: float = 30.0
-    # MinIO endpoint for image upload during document parsing.
-    minio_endpoint: str = "minio.ani-system.svc.cluster.local:9000"
-    minio_access_key: str = ""
-    minio_secret_key: str = ""
-    minio_secure: bool = False
-    minio_bucket: str = "ani-kb-docs"
-
-    @field_validator("milvus_host", mode="after")
-    @classmethod
-    def _apply_milvus_addr(cls, v: str, info: ValidationInfo) -> str:
-        addr = info.data.get("milvus_addr")
-        if addr and ":" in addr:
-            host, _ = addr.rsplit(":", 1)
-            return host
-        return v
-
-    @field_validator("milvus_port", mode="after")
-    @classmethod
-    def _apply_milvus_port(cls, v: int, info: ValidationInfo) -> int:
-        addr = info.data.get("milvus_addr")
-        if addr and ":" in addr:
-            _, port = addr.rsplit(":", 1)
-            try:
-                return int(port)
-            except ValueError:
-                return v
-        return v
+    # gRPC server bind address (Plan §2.3: stateless gRPC engine).
+    # Override via GRPC_BIND_ADDR env var.
+    grpc_bind_addr: str = "[::]:50052"
 
 
 settings = Settings()

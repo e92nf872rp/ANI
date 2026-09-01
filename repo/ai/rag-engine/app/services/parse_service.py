@@ -3,28 +3,42 @@
 Parses PDF/Word/Excel/PPT/MD/TXT into platform content nodes:
 
 * PDF: lightweight text extraction via PyMuPDF (no model download). Embedded
-  images are extracted and uploaded to MinIO as ``[图片: caption](OSS_URL)``
-  placeholder nodes. Scanned-page OCR is deferred to a later phase.
+  image bytes are extracted and returned as placeholder nodes. Scanned-page
+  OCR is deferred to a later phase.
 * Word/Excel/PPT/MD/TXT: parsed by LlamaIndex DoclingReader.
 
 Post-processing rules applied to all formats:
 
 * Tables → HTML; tables larger than 2048 tokens are split by row groups, each
   preserving the header row.
-* Images → uploaded to MinIO and replaced with ``[图片: caption](OSS_URL)``
-  placeholder nodes.
+* Images → extracted as placeholder nodes (``[图片: caption](...)``).
+
+Image upload to object storage is handled by kb-service after the Parse RPC
+returns image bytes. The optional ``uploader`` parameter is retained for
+backward compatibility but is always ``None`` in the RPC path (Issue #039).
 """
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from llama_index.readers.docling import DoclingReader
 
-from app.clients.minio_client import ImageUploader
+if TYPE_CHECKING:
+
+    class ImageUploader(Protocol):
+        """Protocol for the optional image uploader (backward compat).
+
+        The concrete ``app.clients.minio_client.ImageUploader`` was deleted
+        in Issue #039. The RPC path always passes ``uploader=None``; image
+        bytes are returned to kb-service for upload. This Protocol preserves
+        type checking for any caller that still constructs an uploader.
+        """
+
+        def upload(self, image_bytes: bytes, object_prefix: str, ext: str) -> str: ...
 
 # Markdown table token threshold for row-group splitting (plan.md §4.2).
 TABLE_TOKEN_THRESHOLD = 2048
@@ -40,6 +54,11 @@ _FENCE_RE = re.compile(r"^```", re.MULTILINE)
 _CAPTION_RE = re.compile(r"^(?:图|Figure|Fig\.?)\s*\d*[：:.\s]+(?P<cap>.+)$", re.IGNORECASE)
 # Markdown ATX heading: ``# Title`` / ``## Title`` … (1-6 levels).
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*$")
+
+# Markdown image reference using ``image://{object_id}`` syntax — the parser
+# downloads the image from Core API by object_id, uploads it to MinIO, and
+# replaces the link with ``[图片: alt](oss_url)``.
+_MD_IMAGE_REF_RE = re.compile(r"!\[([^\]]*)\]\(image://([a-f0-9\-]+)\)")
 
 
 @dataclass
@@ -330,9 +349,22 @@ def _build_image_placeholder(alt: str, url: str, caption: str | None = None) -> 
 class ParseService:
     """Parse documents into platform content nodes using DoclingReader."""
 
-    def __init__(self, uploader: ImageUploader | None = None) -> None:
-        # Optional MinIO uploader for extracting and storing embedded images.
+    def __init__(
+        self,
+        uploader: ImageUploader | None = None,
+        image_downloader: Callable[[str], bytes] | None = None,
+    ) -> None:
+        """Initialize the parse service.
+
+        Args:
+            uploader: Optional MinIO image uploader for storing extracted
+                images. Used by PDF/Office/MD image extraction paths.
+            image_downloader: Optional sync callable that downloads an image
+                by Core API object_id and returns raw bytes. Used to resolve
+                ``image://{object_id}`` references in markdown files.
+        """
         self._uploader = uploader
+        self._image_downloader = image_downloader
 
     def parse(
         self,
@@ -371,6 +403,15 @@ class ParseService:
             docs = reader.load_data(file_path=file_path)
             markdown = "\n\n".join(d.text for d in docs)
 
+        # For md files with image:// references, download images from Core API,
+        # upload to MinIO, and replace the references in the text with OSS links.
+        # This runs BEFORE _emit_text_table_nodes so the text nodes contain
+        # [图片: alt](oss_url) instead of ![alt](image://...).
+        if ext == ".md" and self._image_downloader and self._uploader and object_prefix:
+            markdown = _replace_md_image_refs(
+                markdown, self._image_downloader, self._uploader, object_prefix
+            )
+
         nodes = _emit_text_table_nodes(markdown)
 
         # Extract embedded images from Word/Excel/PPT and upload to MinIO.
@@ -379,6 +420,7 @@ class ParseService:
                 file_path, ext, self._uploader, object_prefix
             )
             nodes.extend(image_nodes)
+
         return nodes
 
 
@@ -452,6 +494,44 @@ def _emit_text_table_nodes(
                     nodes.append(chunk)
 
     return nodes
+
+
+def _replace_md_image_refs(
+    markdown: str,
+    image_downloader: Callable[[str], bytes],
+    uploader: ImageUploader,
+    object_prefix: str,
+) -> str:
+    """Replace ``image://{object_id}`` references in markdown with OSS links.
+
+    For each ``![alt](image://{object_id})`` reference:
+    1. Download image bytes from Core API via ``image_downloader(object_id)``
+    2. Upload to MinIO via ``uploader``
+    3. Replace the reference in the markdown text with ``[图片: alt](oss_url)``
+
+    Best-effort: failures to download/upload individual images are logged
+    and the original reference is stripped to avoid leaking ``image://`` URLs
+    into chunk content.
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    def _replace(m: re.Match) -> str:
+        alt_text = m.group(1).strip()
+        object_id = m.group(2).strip()
+        try:
+            image_bytes = image_downloader(object_id)
+            if not image_bytes:
+                logger.warning("md image download returned empty bytes for object_id=%s", object_id)
+                return ""
+            oss_url = uploader.upload(image_bytes, object_prefix, "png")
+            return _build_image_placeholder(alt_text, oss_url)
+        except Exception as exc:  # noqa: BLE001 — best-effort
+            logger.warning("md image extraction failed for object_id=%s: %s", object_id, exc)
+            return ""
+
+    return _MD_IMAGE_REF_RE.sub(_replace, markdown)
 
 
 def _extract_office_images(

@@ -45,18 +45,18 @@ from app.services.parse_service import ParsedNode, _compose_table, _html_table_r
 
 # ── Constants (SPEC §5.2) ─────────────────────────────────────────────────────
 
-# Default child chunk size (tokens). The value is overridable by each parse
-# task via the KB's ``chunk_size`` (passed into ``ChunkService``) so it is NOT
-# a hard-coded constant; this is only the fallback default when no per-KB
-# value is supplied. Default is 1024 (user requirement).
-CHILD_CHUNK_SIZE = 1024
-# Lower bound for a child chunk (user-requested optimisation). Once a chunk
-# reaches this size, the next sentence boundary is preferred as the cut
-# point, so child chunks land in [CHILD_CHUNK_MIN, CHILD_CHUNK_SIZE] rather
-# than always filling toward the upper bound.
-CHILD_CHUNK_MIN = 128
-# Parent block target (SPEC §5.2 / §5.1: fixed-window nesting at 2048).
-PARENT_CHUNK_SIZE = 2048
+# Child chunk size (tokens). Fixed at 256 — child chunks are sentence-level
+# segments (1-2 sentences). NOT controlled by KB chunk_size.
+CHILD_CHUNK_SIZE = 256
+# Lower bound for a child chunk. Once a chunk reaches this size, the next
+# sentence boundary is preferred as the cut point, so child chunks land in
+# [CHILD_CHUNK_MIN, CHILD_CHUNK_SIZE] rather than always filling toward the
+# upper bound.
+CHILD_CHUNK_MIN = 64
+# Parent block default size (tokens). Controlled by KB chunk_size (default
+# 1024 when KB row is missing or has no chunk_size set). The value is
+# overridable by each parse task via the KB's chunk_size.
+PARENT_CHUNK_SIZE = 1024
 # Validation bounds for child_chunk_size (used by ChunkService). These mirror
 # the per-KB ``chunk_size`` bounds in api/openapi/services/v1.yaml
 # (minimum: 1, maximum: 8192), so any value valid for a KB is valid here.
@@ -66,12 +66,11 @@ CHILD_CHUNK_SIZE_MAX = 8192
 # consistent across the parse → chunk pipeline.
 CHARS_PER_TOKEN = 2
 
-# Content types that must never be split (SPEC §5.1: 表格/代码块/超链接).
-# NB: ``image`` is deliberately NOT here — images are extracted to MinIO and
-# become ``![caption](oss_url)`` markdown image links, which we let flow into the
-# surrounding text/parent segment (a standalone image chunk is not useful for
-# semantic retrieval). The link itself remains atomically intact via _LINK_RE.
-INDIVISIBLE_TYPES = {"table", "code", "image"}
+# Content types that must never be split (SPEC §5.1: 表格/代码块).
+# Images are NOT atomic — they flow into the surrounding text/parent segment
+# (a standalone image chunk is not useful for semantic retrieval). The image
+# link itself remains atomically intact via _LINK_RE.
+INDIVISIBLE_TYPES = {"table", "code"}
 
 # Sentence boundary: CJK terminal punctuation （。！？）and ASCII (.!?) followed
 # by whitespace, plus newlines. Keep CJK punctuation glued to its sentence.
@@ -242,15 +241,12 @@ def _split_text_by_sentences(
         ulen = len(unit)
         if kind in ("link", "code"):
             # Indivisible: never split. If it cannot fit in the current
-            # chunk, flush first; if it alone exceeds chunk_size it still
-            # becomes one chunk (per SPEC §5.1 "不可切断单元").
+            # chunk, flush first. The link stays with surrounding text so
+            # images do not become standalone chunks.
             if current and current_chars + ulen > max_chars:
                 flush()
             current.append(unit)
             current_chars += ulen
-            if ulen >= max_chars:
-                # Unit itself fills/exceeds a chunk → emit on its own.
-                flush()
             continue
         # Plain sentence.
         if ulen > max_chars:
@@ -285,26 +281,13 @@ class _PureSentenceSplitter:
 def _make_default_splitter(chunk_size: int, chunk_min: int = CHILD_CHUNK_MIN) -> _Splitter:
     """Build the default splitter.
 
-    Prefers LlamaIndex :class:`SentenceSplitter` (SPEC §5.1) when genuinely
-    importable; falls back to :class:`_PureSentenceSplitter` otherwise so the
-    module loads and is unit-testable without the heavy dependency. A smoke
-    test guards against stubbed (MagicMock) imports returning non-list output.
-
-    Note: the LlamaIndex ``SentenceSplitter`` does not expose a min-size knob,
-    so when it is genuinely importable the min-threshold optimisation does
-    not apply (it fills toward ``chunk_size``). The pure-logic fallback
-    honours ``chunk_min``. Tests pin behaviour to the fallback path.
+    Always uses :class:`_PureSentenceSplitter` which honours ``chunk_min``
+    (the preferred cut threshold). The LlamaIndex ``SentenceSplitter`` does
+    not expose a min-size knob, so it cannot implement the [chunk_min,
+    chunk_size] range required by SPEC §5.1 — it fills toward ``chunk_size``
+    producing oversized child chunks.
     """
-    try:
-        from llama_index.core.node_parser import SentenceSplitter
-
-        sp = SentenceSplitter(chunk_size=chunk_size, chunk_overlap=0)
-        probe = sp.split_text("测试句子一。测试句子二。")
-        if not isinstance(probe, list) or not all(isinstance(x, str) for x in probe):
-            raise TypeError("SentenceSplitter probe returned non-list[str]")
-        return sp
-    except Exception:  # noqa: BLE001 — fall back to pure splitter
-        return _PureSentenceSplitter(chunk_size, chunk_min)
+    return _PureSentenceSplitter(chunk_size, chunk_min)
 
 
 # ── Meta-aware segmentation ───────────────────────────────────────────────────
@@ -414,14 +397,16 @@ class ChunkService:
     """Parent-child chunking (SPEC §5.1).
 
     Args:
-        child_chunk_size: Target child chunk size in tokens (1-8192, matching
-            the per-KB ``chunk_size`` bounds in v1.yaml; default 1024).
+        parent_chunk_size: Parent block target in tokens, controlled by KB
+            ``chunk_size`` (default 1024). Consecutive child chunks accumulate
+            into a parent block until this limit is reached.
+        child_chunk_size: Child chunk size in tokens (fixed 256). Child chunks
+            are sentence-level segments (1-2 sentences).
         child_chunk_min: Lower bound for child chunks in tokens (default
-            ``CHILD_CHUNK_MIN=128``). Once a chunk reaches this size, the
+            ``CHILD_CHUNK_MIN=64``). Once a chunk reaches this size, the
             next sentence boundary is preferred as the cut point, so child
             chunks land in ``[child_chunk_min, child_chunk_size]`` rather
             than always filling toward the upper bound.
-        parent_chunk_size: Parent block target in tokens (default 2048).
         splitter: Optional sentence-aware splitter (LlamaIndex
             :class:`SentenceSplitter`-compatible). When ``None`` a default
             is constructed via :func:`_make_default_splitter`.
@@ -434,9 +419,9 @@ class ChunkService:
     def __init__(
         self,
         *,
+        parent_chunk_size: int = PARENT_CHUNK_SIZE,
         child_chunk_size: int = CHILD_CHUNK_SIZE,
         child_chunk_min: int = CHILD_CHUNK_MIN,
-        parent_chunk_size: int = PARENT_CHUNK_SIZE,
         splitter: _Splitter | None = None,
         respect_section_boundaries: bool = True,
     ) -> None:

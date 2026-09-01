@@ -271,7 +271,7 @@ func main() {
 		InferenceServiceClient:                inferenceServiceClient,
 		ModelServiceClient:                    modelServiceClient,
 		KBServiceClient:                       kbServiceClient,
-		KBSSEConfig:                           newGatewaySSEConfig(gatewaySSERuntimeConfigFromEnv()),
+		KBSSEConfig:                           newGatewaySSEConfig(gatewaySSERuntimeConfigFromEnv(), kbServiceClient),
 		AsyncTaskStore:                        instanceRuntime.AsyncTasks,
 		QuotaAdminService:                     quotaAdminService,
 		PlatformWorkloadService:               platformWorkloadService,

@@ -41,7 +41,7 @@ type RegisterOptions struct {
 	// still boots in environments without kb-service configured.
 	KBServiceClient KBGRPCClient
 	// KBSSEConfig wires the SSE streaming query endpoint (US-017). When
-	// ragClient or vllmStreamer is nil the SSE handler degrades to an
+	// vllmStreamer is nil the SSE handler degrades to an
 	// empty stream so the gateway stays functional without backends.
 	KBSSEConfig             KbSSEConfig
 	AsyncTaskStore          ports.AsyncTaskStore

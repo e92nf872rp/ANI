@@ -11,6 +11,7 @@ httpx==0.28.1
 asyncpg==0.30.0
 nats-py==2.9.0
 redis==5.2.0
+jieba>=0.42.1          # keyword tokenization (migrated from rag-engine to kb-service, Plan §3.6)
 
 # Test dependencies (issue-007)
 pytest==8.4.2

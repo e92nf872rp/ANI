@@ -164,41 +164,6 @@ allowed:
     imports:
       - asyncpg
     reason: RLS tenant context helper is PostgreSQL-specific platform metadata plumbing and must remain explicit for stability
-  # ── rag-engine: asyncpg direct PG (temporary_exception — Phase 2 removes) ──
-  - path: ai/rag-engine/main.py
-    coupling_level: temporary_exception
-    imports:
-      - asyncpg
-    reason: rag-engine temporarily owns an asyncpg pool for kb_chunks writes and parse_status updates during the parse pipeline
-    migrate_by: Phase 2 — KB gRPC API replaces direct PG access
-  - path: ai/rag-engine/app/repositories/chunks.py
-    coupling_level: temporary_exception
-    imports:
-      - asyncpg
-    reason: rag-engine temporarily writes kb_chunks directly; will be replaced by kb-service WriteChunks gRPC API
-    migrate_by: Phase 2 — KB gRPC API replaces direct PG access
-  - path: ai/rag-engine/app/workers/parse_worker.py
-    coupling_level: temporary_exception
-    imports:
-      - asyncpg
-    reason: rag-engine temporarily updates kb_documents.parse_status directly; will be replaced by kb-service UpdateParseStatus gRPC API
-    migrate_by: Phase 2 — KB gRPC API replaces direct PG access
-  - path: ai/rag-engine/app/routers/query.py
-    coupling_level: temporary_exception
-    imports:
-      - asyncpg
-    reason: rag-engine temporarily checks KB existence via direct PG query; will be replaced by kb-service KBExists gRPC API
-    migrate_by: Phase 2 — KB gRPC API replaces direct PG access
-  - path: ai/rag-engine/app/services/retrieve_service.py
-    coupling_level: temporary_exception
-    imports:
-      - asyncpg
-    reason: rag-engine temporarily runs pg_trgm keyword search and parent backfill via direct PG; will be replaced by kb-service KeywordSearch and GetParentChunks gRPC APIs
-    migrate_by: Phase 2 — KB gRPC API replaces direct PG access
-  # ── rag-engine: pymilvus direct Milvus (bounded_direct) ────────────────────
-  - path: ai/rag-engine/app/core/milvus.py
-    coupling_level: bounded_direct
-    imports:
-      - pymilvus
-      - llama_index.vector_stores.milvus
-    reason: rag-engine owns the vector data path (embedding + indexing + retrieval); direct pymilvus keeps HNSW index params, collection lifecycle, and COSINE similarity semantics explicit. Vector store management (create/delete collection) goes through Core API via kb-service; only the data path (insert/search) remains direct
+  # rag-engine temporary_exception and bounded_direct entries removed in Issue #039
+  # (RAG refactor Step 11 — delete old path). rag-engine is now a stateless gRPC
+  # engine with zero infrastructure SDK dependencies (no pymilvus/asyncpg/nats-py/minio).
