@@ -7,12 +7,11 @@ import (
 	"time"
 
 	miniredis "github.com/alicebob/miniredis/v2"
-	"github.com/kubercloud/ani/services/inference-service/internal/service"
 	goredis "github.com/redis/go-redis/v9"
 )
 
 func TestRateLimiterAdapterImplementsServicePort(t *testing.T) {
-	var limiter service.RateLimiter = NewRateLimiter(nil)
+	limiter := NewRateLimiter(nil)
 	if limiter == nil {
 		t.Fatal("NewRateLimiter(nil) returned nil adapter")
 	}

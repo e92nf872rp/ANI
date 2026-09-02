@@ -197,7 +197,7 @@ func (client *KubeClient) request(ctx context.Context, method, path string, body
 		}
 		return nil, fmt.Errorf("%s Kubernetes request failed", method)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode == http.StatusNotFound {
 		discardBounded(response.Body)
 		return nil, ErrNotFound
@@ -409,8 +409,11 @@ func validRouteRule(rule map[string]any, name string, tenantID, serviceID uuid.U
 		return false
 	}
 	mutation, ok := ref["headerMutation"].(map[string]any)
+	if !ok || !exactKeys(mutation, "remove") {
+		return false
+	}
 	removed, ok := mutation["remove"].([]any)
-	if !ok || !exactKeys(mutation, "remove") || len(removed) != 6 {
+	if !ok || len(removed) != 6 {
 		return false
 	}
 	wantedRemoval := map[string]bool{"Authorization": true, "x-api-key": true, "x-ai-eg-model": true, "x-ani-tenant-id": true, "x-ani-inference-service-id": true, "x-ani-user-id": true}
@@ -471,7 +474,7 @@ func validResourceName(name string) bool {
 			return false
 		}
 		for _, character := range label {
-			if !(character >= 'a' && character <= 'z' || character >= '0' && character <= '9' || character == '-') {
+			if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '-' {
 				return false
 			}
 		}

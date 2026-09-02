@@ -20,7 +20,8 @@ func (rateLimiterContractFake) ReleaseLease(context.Context, string) error { ret
 
 func TestRateLimiterPortIsOwnedByAccessPolicyService(t *testing.T) {
 	var limiter RateLimiter = rateLimiterContractFake{}
-	if limiter == nil {
-		t.Fatal("RateLimiter contract rejected a service-owned implementation")
+	allowed, _, err := limiter.AllowFixedWindow(context.Background(), "test", 0, time.Second, time.Now())
+	if !allowed || err != nil {
+		t.Fatalf("RateLimiter contract rejected a service-owned implementation: allowed=%v err=%v", allowed, err)
 	}
 }

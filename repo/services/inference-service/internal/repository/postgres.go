@@ -1420,7 +1420,7 @@ func (p *Postgres) ListAccessPolicies(ctx context.Context, tenantID uuid.UUID) (
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	if err := setTenant(ctx, tx, tenantID); err != nil {
 		return nil, err
 	}
@@ -1454,7 +1454,7 @@ func (p *Postgres) GetAccessPolicy(ctx context.Context, tenantID, policyID uuid.
 	if err != nil {
 		return domain.AccessPolicy{}, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	if err := setTenant(ctx, tx, tenantID); err != nil {
 		return domain.AccessPolicy{}, err
 	}
@@ -1556,7 +1556,7 @@ func (p *Postgres) CreateAccessPolicy(ctx context.Context, policy domain.AccessP
 	if err != nil {
 		return domain.AccessPolicy{}, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	if err := setTenant(ctx, tx, policy.TenantID); err != nil {
 		return domain.AccessPolicy{}, err
 	}
@@ -1642,7 +1642,7 @@ func (p *Postgres) UpdateAccessPolicy(ctx context.Context, policy domain.AccessP
 	if err != nil {
 		return domain.AccessPolicy{}, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	if err := setTenant(ctx, tx, policy.TenantID); err != nil {
 		return domain.AccessPolicy{}, err
 	}
@@ -1730,7 +1730,7 @@ func (p *Postgres) DeleteAccessPolicy(ctx context.Context, tenantID, policyID, i
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	if err := setTenant(ctx, tx, tenantID); err != nil {
 		return err
 	}
@@ -1770,7 +1770,7 @@ func (p *Postgres) ListServiceAccessPolicies(ctx context.Context, tenantID, serv
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	if err := setTenant(ctx, tx, tenantID); err != nil {
 		return nil, err
 	}
@@ -1833,7 +1833,7 @@ func (p *Postgres) ReplaceServiceAccessPolicies(ctx context.Context, tenantID, s
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	if err := setTenant(ctx, tx, tenantID); err != nil {
 		return nil, err
 	}
@@ -1890,7 +1890,7 @@ func (p *Postgres) RecordAccessPolicyEvent(ctx context.Context, event domain.Acc
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	if err := setTenant(ctx, tx, event.TenantID); err != nil {
 		return err
 	}
@@ -1913,7 +1913,7 @@ func (p *Postgres) ListAccessPolicyEvents(ctx context.Context, tenantID uuid.UUI
 	if err != nil {
 		return nil, "", err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	if err := setTenant(ctx, tx, tenantID); err != nil {
 		return nil, "", err
 	}
