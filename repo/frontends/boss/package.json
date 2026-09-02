@@ -23,7 +23,8 @@
     "zustand": "^4.5.0"
   },
   "overrides": {
-    "js-yaml": "^4.3.1"
+    "js-yaml": "^4.3.1",
+    "browserslist": "^4.28.8"
   },
   "devDependencies": {
     "@tanstack/router-plugin": "^1.40.0",
