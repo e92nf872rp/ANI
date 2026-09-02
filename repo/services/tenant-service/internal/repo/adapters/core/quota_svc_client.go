@@ -66,17 +66,12 @@ func (c *QuotaSvcClient) GetQuota(ctx context.Context, tenantID uuid.UUID) ([]po
 	return decodeQuotaItems(raw)
 }
 
-// PutQuota 调用 Core PUT /admin/tenants/{id}/quota（Idempotency-Key header）。
+// PutQuota 调用 Core PUT /admin/tenants/{id}/quota。
 func (c *QuotaSvcClient) PutQuota(ctx context.Context, tenantID uuid.UUID, items []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error) {
 	_ = ctx
-	headers, err := idempotencyHeaders()
-	if err != nil {
-		return nil, err
-	}
 	path := fmt.Sprintf("/admin/tenants/%s/quota", tenantID.String())
 	raw, err := c.sdk.Request("PUT", path, anisdk.RequestOptions{
-		Body:    map[string]any{"items": encodeQuotaItems(items)},
-		Headers: headers,
+		Body: map[string]any{"items": encodeQuotaItems(items)},
 	})
 	if err != nil {
 		return nil, mapSDKError(err)
@@ -87,14 +82,9 @@ func (c *QuotaSvcClient) PutQuota(ctx context.Context, tenantID uuid.UUID, items
 // CreateQuota 调用 Core POST /admin/tenants/{id}/quota。
 func (c *QuotaSvcClient) CreateQuota(ctx context.Context, tenantID uuid.UUID, items []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error) {
 	_ = ctx
-	headers, err := idempotencyHeaders()
-	if err != nil {
-		return nil, err
-	}
 	path := fmt.Sprintf("/admin/tenants/%s/quota", tenantID.String())
 	raw, err := c.sdk.Request("POST", path, anisdk.RequestOptions{
-		Body:    map[string]any{"items": encodeQuotaItems(items)},
-		Headers: headers,
+		Body: map[string]any{"items": encodeQuotaItems(items)},
 	})
 	if err != nil {
 		return nil, mapSDKError(err)
@@ -102,17 +92,12 @@ func (c *QuotaSvcClient) CreateQuota(ctx context.Context, tenantID uuid.UUID, it
 	return decodeQuotaItems(raw)
 }
 
-// UpsertQuota 调用 Core PUT /admin/tenants/{id}/quota/upsert（Idempotency-Key header）。
+// UpsertQuota 调用 Core PUT /admin/tenants/{id}/quota/upsert。
 func (c *QuotaSvcClient) UpsertQuota(ctx context.Context, tenantID uuid.UUID, items []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error) {
 	_ = ctx
-	headers, err := idempotencyHeaders()
-	if err != nil {
-		return nil, err
-	}
 	path := fmt.Sprintf("/admin/tenants/%s/quota/upsert", tenantID.String())
 	raw, err := c.sdk.Request("PUT", path, anisdk.RequestOptions{
-		Body:    map[string]any{"items": encodeQuotaItems(items)},
-		Headers: headers,
+		Body: map[string]any{"items": encodeQuotaItems(items)},
 	})
 	if err != nil {
 		return nil, mapSDKError(err)
@@ -123,12 +108,8 @@ func (c *QuotaSvcClient) UpsertQuota(ctx context.Context, tenantID uuid.UUID, it
 // DeleteQuota 调用 Core DELETE /admin/tenants/{id}/quota。
 func (c *QuotaSvcClient) DeleteQuota(ctx context.Context, tenantID uuid.UUID) error {
 	_ = ctx
-	headers, err := idempotencyHeaders()
-	if err != nil {
-		return err
-	}
 	path := fmt.Sprintf("/admin/tenants/%s/quota", tenantID.String())
-	_, err = c.sdk.Request("DELETE", path, anisdk.RequestOptions{Headers: headers})
+	_, err := c.sdk.Request("DELETE", path, anisdk.RequestOptions{})
 	if err != nil {
 		return mapSDKError(err)
 	}

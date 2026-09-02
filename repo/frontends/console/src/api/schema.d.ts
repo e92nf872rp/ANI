@@ -1426,7 +1426,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 跨租户管理员列表（仅返回 owner/admin/邀请中）（需 platform-admin / platform-ops / platform-readonly） */
+        /** 跨租户管理员列表（仅返回 admin/邀请中/已过期）（需 platform-admin / platform-ops / platform-readonly） */
         get: operations["listAllTenantAdmins"];
         put?: never;
         post?: never;
@@ -1495,45 +1495,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 查询指定管理员角色与权限（4 维权限模型）（需 platform-admin / platform-ops / platform-readonly） */
+        /** 查询指定管理员角色与权限（需 platform-admin / platform-ops / platform-readonly） */
         get: operations["getTenantAdminRole"];
         /** 修改管理员角色（需 platform-admin / platform-ops） */
         put: operations["updateTenantAdminRole"];
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tenants/{tenantId}/admins/{userId}/changeable-roles": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 查询可变更角色选项（排除 tenant-owner）（需 platform-admin / platform-ops / platform-readonly） */
-        get: operations["getChangeableRoles"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tenants/{tenantId}/transfer-ownership": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 移交租户所有者（对 tenant-admin 行发起，原 owner 降级为 admin）（需 platform-admin / platform-ops） */
-        post: operations["transferTenantOwnership"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1600,6 +1566,44 @@ export interface paths {
         };
         /** 查询管理员操作历史（需 platform-admin / platform-ops / platform-readonly） */
         get: operations["listTenantAdminAuditLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenant-admins/tenants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询可用租户列表（邀请管理员租户选择器数据源，需 platform-admin / platform-ops / platform-readonly） */
+        get: operations["listAvailableTenantsForAdmin"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenantId}/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询租户可分配角色列表（修改管理员角色选择器数据源，需 platform-admin / platform-ops / platform-readonly）
+         * @description 返回 name NOT LIKE 'platform-%' 且 tenant_id IS NULL OR tenant_id = $tenantId 的角色，不分页。
+         *     网关经 gRPC 转发 tenant-service；tenant-service 经 Core SDK 查询 roles 表。
+         */
+        get: operations["listTenantAssignableRoles"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2944,7 +2948,7 @@ export interface components {
             name: string;
             display_name: string;
         };
-        /** @description 跨租户管理员列表项。仅返回 role ∈ (tenant-owner, tenant-admin) 或正在被邀请的用户； is_inviting 仅作标记，不影响 role/status（邀请中用户仍展示原有角色，可为 user）。 列表不返回 created_at/updated_at。 */
+        /** @description 跨租户管理员列表项。仅返回 role ∈ (tenant-admin) 或正在被邀请或邀请已过期的用户； is_inviting 仅作标记，不影响 role/status（邀请中或已过期用户仍展示原有角色，可为 user）。 列表不返回 created_at/updated_at。 */
         AdminWithTenant: {
             /** Format: uuid */
             id: string;
@@ -2953,14 +2957,16 @@ export interface components {
             username: string;
             display_name?: string | null;
             /**
-             * @description 租户内角色；列表仅含 owner/admin/邀请中
+             * @description 租户内角色；列表仅含 admin/邀请中/已过期
              * @enum {string}
              */
-            role: "tenant-owner" | "tenant-admin" | "user" | "auditor";
+            role: "tenant-admin" | "user" | "auditor";
             /** @enum {string} */
             status: "active" | "disabled";
             /** @description true = 该租户下存在 status='inviting' 的邀请；仅作标记，不影响 role/status */
             is_inviting: boolean;
+            /** @description true = 该租户下存在 status='expired' 的邀请；仅作标记，不影响 role/status */
+            is_expired: boolean;
             /** @enum {string} */
             source: "local" | "third_party";
             /** Format: date-time */
@@ -2976,10 +2982,11 @@ export interface components {
             username: string;
             display_name?: string | null;
             /** @enum {string} */
-            role: "tenant-owner" | "tenant-admin" | "user" | "auditor";
+            role: "tenant-admin" | "user" | "auditor";
             /** @enum {string} */
             status: "active" | "disabled";
             is_inviting: boolean;
+            is_expired: boolean;
             /** @enum {string} */
             source: "local" | "third_party";
             /** Format: date-time */
@@ -3018,7 +3025,7 @@ export interface components {
             expire_at: string;
             message: string;
         };
-        /** @description 指定管理员的 4 维权限模型；仅返回租户成员（tenant_id 非空），平台账户不可查 */
+        /** @description 指定管理员的权限模型；仅返回租户成员（tenant_id 非空），平台账户不可查 */
         UserPermissions: {
             /** Format: uuid */
             user_id: string;
@@ -3028,33 +3035,20 @@ export interface components {
              */
             tenant_id?: string | null;
             /** @enum {string} */
-            role: "tenant-owner" | "tenant-admin" | "user" | "auditor";
+            role: "tenant-admin" | "user" | "auditor";
             permissions: {
+                /** @description 资源标识，如 compute / inference / member */
+                resource: string;
                 /** @enum {string} */
-                compute: "read" | "write" | "none";
-                /** @enum {string} */
-                inference: "read" | "write" | "none";
-                /** @enum {string} */
-                member: "read" | "write" | "none";
-                /** @enum {string} */
-                transfer: "read" | "write" | "none";
-            };
-        };
-        /** @description 可变更角色选项（当前为 tenant-owner 时 changeable_roles 为空） */
-        ChangeableRolesResponse: {
-            /** @enum {string} */
-            current_role: "tenant-owner" | "tenant-admin" | "user" | "auditor";
-            changeable_roles: {
-                /** @enum {string} */
-                role: "user" | "auditor" | "tenant-admin";
-                /** @description 展示名（普通成员 / 审计员 / 租户管理员） */
-                label: string;
+                action: "read" | "write" | "none";
+                /** @description 权限作用域，如 tenant / platform */
+                scope: string;
             }[];
         };
         TenantAdminAuditLog: {
             /** Format: uuid */
             id: string;
-            /** @description 如 tenant_admin.invite / resend_invitation / change_role / transfer_ownership / reset_password / disable / enable / delete */
+            /** @description 如 tenant_admin.invite / resend_invitation / change_role / reset_password / disable / enable / delete */
             action: string;
             resource: string;
             /** @enum {string} */
@@ -3071,6 +3065,36 @@ export interface components {
             items: components["schemas"]["TenantAdminAuditLog"][];
             /** @description 下一页游标；null 表示已无更多数据 */
             next_cursor?: string | null;
+        };
+        AvailableTenantListResponse: {
+            items: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+                display_name: string | null;
+                /**
+                 * @description 非停用租户（不含 disabled）
+                 * @enum {string}
+                 */
+                status: "active" | "frozen";
+            }[];
+        };
+        AssignableTenantRoleListResponse: {
+            items: {
+                /** Format: uuid */
+                id: string;
+                /**
+                 * Format: uuid
+                 * @description NULL=平台内置角色
+                 */
+                tenant_id?: string | null;
+                /** @description 非 platform-* 角色名（如 tenant-admin / user / auditor） */
+                name: string;
+                /** @description roles.permissions JSONB（resource/actions/scope） */
+                permissions: {
+                    [key: string]: unknown;
+                }[];
+            }[];
         };
         InviteAdminRequest: {
             /**
@@ -3100,22 +3124,10 @@ export interface components {
              */
             idempotency_key: string;
             /**
-             * @description 不可设 tenant-owner
-             * @enum {string}
-             */
-            role: "user" | "auditor" | "tenant-admin";
-        };
-        TransferOwnershipRequest: {
-            /**
              * Format: uuid
-             * @description 客户端生成UUID，防重复提交
+             * @description 目标角色 UUID；须为可分配角色（非 platform-*，tenant_id 为空或等于路径 tenantId）
              */
-            idempotency_key: string;
-            /**
-             * Format: uuid
-             * @description 当前租户内 active 且角色为 tenant-admin 的成员
-             */
-            target_user_id: string;
+            role_id: string;
         };
         ResetPasswordRequest: {
             /**
@@ -6409,12 +6421,17 @@ export interface operations {
                 cursor?: string;
                 /** @description 可选；按指定租户过滤 */
                 tenant_id?: string;
-                role?: "tenant-owner" | "tenant-admin";
                 status?: "active" | "disabled";
                 /** @description true = 仅邀请中 */
                 is_inviting?: boolean;
-                /** @description 模糊匹配 email/username */
+                /** @description true = 仅邀请已过期 */
+                is_expired?: boolean;
+                /** @description 模糊匹配 email/username/display_name */
                 search?: string;
+                /** @description 按角色过滤 */
+                role?: "tenant-admin" | "user" | "auditor";
+                /** @description 按来源过滤 */
+                source?: "local" | "third_party";
             };
             header?: never;
             path?: never;
@@ -6553,10 +6570,8 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description TENANT_ADMIN_NOT_FOUND */
             404: components["responses"]["NotFound"];
-            /** @description TENANT_OWNER_ROLE_LOCKED */
+            /** @description IDEMPOTENCY_CONFLICT */
             409: components["responses"]["Conflict"];
-            /** @description LAST_TENANT_OWNER */
-            422: components["responses"]["UnprocessableEntity"];
         };
     };
     getTenantAdminRole: {
@@ -6616,70 +6631,9 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description TENANT_ADMIN_NOT_FOUND */
             404: components["responses"]["NotFound"];
-            /** @description TENANT_OWNER_ROLE_LOCKED / IDEMPOTENCY_CONFLICT */
-            409: components["responses"]["Conflict"];
-            /** @description ROLE_CHANGE_INVALID */
-            422: components["responses"]["UnprocessableEntity"];
-        };
-    };
-    getChangeableRoles: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tenantId: string;
-                userId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 可变更角色列表 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ChangeableRolesResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            /** @description TENANT_ADMIN_NOT_FOUND */
-            404: components["responses"]["NotFound"];
-        };
-    };
-    transferTenantOwnership: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tenantId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TransferOwnershipRequest"];
-            };
-        };
-        responses: {
-            /** @description 所有权已移交 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["IdempotentResult"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            /** @description TENANT_NOT_FOUND / TENANT_ADMIN_NOT_FOUND */
-            404: components["responses"]["NotFound"];
             /** @description IDEMPOTENCY_CONFLICT */
             409: components["responses"]["Conflict"];
-            /** @description TRANSFER_TARGET_INVALID */
+            /** @description ROLE_CHANGE_INVALID */
             422: components["responses"]["UnprocessableEntity"];
         };
     };
@@ -6751,8 +6705,6 @@ export interface operations {
             404: components["responses"]["NotFound"];
             /** @description IDEMPOTENCY_CONFLICT */
             409: components["responses"]["Conflict"];
-            /** @description LAST_TENANT_OWNER */
-            422: components["responses"]["UnprocessableEntity"];
         };
     };
     enableTenantAdmin: {
@@ -6821,6 +6773,52 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description TENANT_ADMIN_NOT_FOUND */
             404: components["responses"]["NotFound"];
+        };
+    };
+    listAvailableTenantsForAdmin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 非停用租户列表（status <> disabled，不分页） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AvailableTenantListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listTenantAssignableRoles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 可分配角色列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignableTenantRoleListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
 }

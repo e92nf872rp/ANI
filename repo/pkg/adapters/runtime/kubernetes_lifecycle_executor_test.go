@@ -258,3 +258,54 @@ func lifecycleResponse() *http.Response {
 		Body:       io.NopCloser(strings.NewReader(`{}`)),
 	}
 }
+
+func TestKubernetesLifecycleExecutorScalesDeploymentReplicas(t *testing.T) {
+	var gotPath, gotBody string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPatch {
+			t.Fatalf("method = %s, want PATCH", r.Method)
+		}
+		gotPath = r.URL.Path
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	req := lifecycleRequest(ports.WorkloadLifecycleScale)
+	three := int32(3)
+	req.Replicas = &three
+
+	result, err := executor.Apply(context.Background(), req, record)
+	if err != nil {
+		t.Fatalf("Scale Apply() error = %v", err)
+	}
+	if !result.Accepted {
+		t.Fatalf("Accepted = false, reason = %s", result.Reason)
+	}
+	wantPath := "/apis/apps/v1/namespaces/ani-tenant-tenant-a/deployments/app-01/scale"
+	if gotPath != wantPath {
+		t.Fatalf("path = %q, want %q", gotPath, wantPath)
+	}
+	if !strings.Contains(gotBody, `"replicas":3`) {
+		t.Fatalf("body = %q, want spec replicas=3", gotBody)
+	}
+}
+
+func TestKubernetesLifecycleExecutorScaleRejectsNonPositiveReplicas(t *testing.T) {
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		t.Fatalf("unexpected request issued for invalid scale: %s %s", r.Method, r.URL.Path)
+		return lifecycleResponse(), nil
+	})
+	record := lifecycleRecord()
+	req := lifecycleRequest(ports.WorkloadLifecycleScale)
+	zero := int32(0)
+	req.Replicas = &zero
+
+	_, err := executor.Apply(context.Background(), req, record)
+	if err == nil {
+		t.Fatalf("expected error for replicas=0 scale, got nil")
+	}
+	if !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("error = %v, want ErrInvalid", err)
+	}
+}

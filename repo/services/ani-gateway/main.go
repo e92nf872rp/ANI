@@ -48,10 +48,13 @@ func main() {
 		logger.Error("failed to configure kubernetes rest client for orphan discovery", "err", err)
 		os.Exit(1)
 	}
-	networkService, err := newGatewayNetworkService(gatewayNetworkRuntimeConfigFromEnv())
+	networkService, closeNetworkRuntime, err := newGatewayNetworkService(runtimeCtx, gatewayNetworkRuntimeConfigFromEnv())
 	if err != nil {
 		logger.Error("failed to configure network provider runtime", "err", err)
 		os.Exit(1)
+	}
+	if closeNetworkRuntime != nil {
+		defer closeNetworkRuntime()
 	}
 	storageRuntimeCfg := gatewayStorageRuntimeConfigFromEnv()
 	storageService, closeStorageRuntime, err := newGatewayStorageService(runtimeCtx, storageRuntimeCfg)
@@ -216,6 +219,14 @@ func main() {
 		os.Exit(1)
 	}
 	defer closeQuotaStore()
+	meteringService, closeMeteringRuntime, err := newGatewayMeteringService(runtimeCtx)
+	if err != nil {
+		logger.Error("failed to configure metering service", "err", err)
+		os.Exit(1)
+	}
+	if closeMeteringRuntime != nil {
+		defer closeMeteringRuntime()
+	}
 	platformWorkloadRuntimeConfig := gatewayPlatformWorkloadRuntimeConfigFromEnv()
 	platformWorkloadService, closePlatformWorkload, err := newGatewayPlatformWorkloadService(runtimeCtx, platformWorkloadRuntimeConfig)
 	if err != nil {
@@ -228,12 +239,24 @@ func main() {
 		platformWorkloadProvider = "local"
 	}
 	logger.Info("platform workload provider runtime configured", "provider", platformWorkloadProvider)
-	tenantService, closeTenantStore, err := newGatewayTenantStore(runtimeCtx)
+	tenantService, closeTenantStore, err := newGatewayTenantService(runtimeCtx)
 	if err != nil {
 		logger.Error("failed to configure tenant admin store", "err", err)
 		os.Exit(1)
 	}
 	defer closeTenantStore()
+	tenantPlanService, closeTenantPlanStore, err := newGatewayTenantPlanService(runtimeCtx)
+	if err != nil {
+		logger.Error("failed to configure tenant plan service", "err", err)
+		os.Exit(1)
+	}
+	defer closeTenantPlanStore()
+	tenantAdminService, closeTenantAdmin, err := newGatewayTenantAdminService(runtimeCtx)
+	if err != nil {
+		logger.Error("failed to configure tenant admin service", "err", err)
+		os.Exit(1)
+	}
+	defer closeTenantAdmin()
 	gpuInventory, err := newGatewayGPUInventory(gatewayGPUInventoryRuntimeConfigFromEnv(), gpuSchedulingQueueStore, gpuSpecStore, quotaStoreService)
 	if err != nil {
 		logger.Error("failed to configure gpu inventory provider runtime", "err", err)
@@ -276,9 +299,12 @@ func main() {
 		QuotaAdminService:                     quotaAdminService,
 		PlatformWorkloadService:               platformWorkloadService,
 		TenantService:                         tenantService,
+		TenantPlanService:                     tenantPlanService,
+		TenantAdminService:                    tenantAdminService,
 		GPUSpecStore:                          gpuSpecStore,
 		MetadataStore:                         quotaMetadataStore,
 		QuotaStoreService:                     quotaStoreService,
+		MeteringService:                       meteringService,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

@@ -10,7 +10,7 @@ import (
 // 租户管理员邀请与审计的端口（ports）定义。
 // 本文件只声明接口与领域结构体，不含实现。
 // Postgres 适配器仅操作 tenant_admin_invitation / audit_logs；
-// users / user_roles / roles 一律经 UserSvcClient（见 core_user.go）。
+// users / user_roles / roles 一律经 TenantAdminSvcClient（见 core_tenant_admin.go）。
 
 // =============================================================================
 // 枚举常量
@@ -22,7 +22,6 @@ const (
 	InvitationStatusRejected = "rejected"
 	InvitationStatusExpired  = "expired"
 
-	TenantAdminRoleOwner   = "tenant-owner"
 	TenantAdminRoleAdmin   = "tenant-admin"
 	TenantAdminRoleUser    = "user"
 	TenantAdminRoleAuditor = "auditor"
@@ -67,9 +66,10 @@ type AdminWithTenant struct {
 	Email       string
 	Username    string
 	DisplayName *string
-	Role        string // tenant-owner | tenant-admin | user（列表仅含 owner/admin/邀请中）
+	Role        string // tenant-admin | user | auditor（列表仅含 admin/邀请中/已过期）
 	Status      string // active | disabled
-	IsInviting  bool   // true = 该租户下存在 status='inviting' 的邀请；仅作标记
+	IsInviting  bool   // true = 最新邀请 status='inviting'；仅作标记
+	IsExpired   bool   // true = 最新邀请 status='expired'；仅作标记
 	Source      string // third_party | local
 	LastLoginAt *time.Time
 	CreatedAt   *time.Time // 详情返回
@@ -82,10 +82,18 @@ type TenantAdminListFilter struct {
 	Limit      int
 	Cursor     string
 	TenantID   *uuid.UUID
-	Role       string // tenant-owner | tenant-admin
 	Status     string
 	IsInviting *bool
+	IsExpired  *bool
 	Search     string
+}
+
+// InvitationFlag 是 (tenant_id, user_id) 上的邀请中/已过期标记。
+type InvitationFlag struct {
+	TenantID   uuid.UUID
+	UserID     uuid.UUID
+	IsInviting bool
+	IsExpired  bool
 }
 
 // ListResult 是跨租户管理员列表返回（游标分页；具体类型、不用泛型）。
@@ -109,26 +117,22 @@ type InvitationResult struct {
 	Message  string
 }
 
-// UserPermissions 是指定管理员的 4 维权限模型。
+// UserPermissions 是指定管理员的权限模型。
 // 仅返回租户成员（TenantID 非空）；平台账户不可经本模块查询。
 type UserPermissions struct {
 	UserID      uuid.UUID
 	TenantID    *uuid.UUID
+	RoleID      uuid.UUID // 无绑定时为零值
 	Role        string
-	Permissions map[string]string // compute/inference/member/transfer → read/write/none
+	Permissions []any // roles.permissions JSONB 原样
 }
 
-// ChangeableRoleOption 是可变更角色下拉的一项。
-type ChangeableRoleOption struct {
-	Role  string // user | auditor | tenant-admin
-	Label string
-}
-
-// ChangeableRoles 是 GET .../changeable-roles 的返回。
-// 当前角色为 tenant-owner 时 ChangeableRoles 为空（owner 不可变更）。
-type ChangeableRoles struct {
-	CurrentRole     string
-	ChangeableRoles []ChangeableRoleOption
+// AssignableRole 是 GET /tenants/{tenantId}/roles 的一项。
+type AssignableRole struct {
+	ID          uuid.UUID
+	TenantID    *uuid.UUID // nil = 平台内置
+	Name        string
+	Permissions []any // roles.permissions JSONB 原样
 }
 
 // AuditLogListItem 是租户管理员操作历史列表项。
@@ -136,7 +140,7 @@ type AuditLogListItem struct {
 	ID        uuid.UUID
 	Action    string
 	Resource  string
-	Result    string // success | failed
+	Result    string // success | failure
 	UserID    *uuid.UUID
 	Details   map[string]any
 	CreatedAt time.Time
@@ -147,7 +151,7 @@ type TenantAdminAuditLogFilter struct {
 	Limit  int
 	Cursor string
 	Action string
-	Result string // success | failed；空 = 全部
+	Result string // success | failure
 }
 
 // TenantAdminAuditLogListResult 是操作历史查询返回。
@@ -163,12 +167,13 @@ type TenantAdminAuditLogListResult struct {
 // TenantAdminStore 定义租户管理员模块对本地表的数据访问。
 // 实现：internal/repo/adapters/postgres/tenant_admin_store.go。
 //
-// 禁止直接 SQL 操作 users / user_roles / roles；这些走 UserSvcClient。
+// 禁止直接 SQL 操作 users / user_roles / roles；这些走 TenantAdminSvcClient。
 type TenantAdminStore interface {
 	// HasPendingInvitation 报告该租户下该用户是否存在 status='inviting' 的邀请。
 	HasPendingInvitation(ctx context.Context, tenantID, userID uuid.UUID) (bool, error)
 
-	// InsertInvitation 插入邀请行（status='inviting'，token_hash，expire_at）。
+	// InsertInvitation 写入邀请（status='inviting'，token_hash，expire_at）。
+	// 实现须在事务内：先查该租户+用户最新一条；若为 expired 则原地更新 token/过期时间并回归 inviting，否则 INSERT。
 	// 不改 users.status、不预绑角色。token_hash 冲突 → 实现侧映射领域错误。
 	InsertInvitation(ctx context.Context, inv TenantAdminInvitation) (TenantAdminInvitation, error)
 
@@ -179,8 +184,13 @@ type TenantAdminStore interface {
 	// UpdateInvitation 更新邀请（重发：新 token_hash / expire_at / status='inviting'，清空 accepted_at/rejected_at）。
 	UpdateInvitation(ctx context.Context, inv TenantAdminInvitation) (TenantAdminInvitation, error)
 
-	// CreateAuditLog 写入一条 tenant_admin.* 审计（复用 audit_logs）。
-	CreateAuditLog(ctx context.Context, log AuditLog) (uuid.UUID, error)
+	// ListInvitationFlags 返回 inviting/expired 标记；读取前先将「最新邀请仍为 inviting 且 expire_at < now」落库为 expired。
+	// tenantID 非空时按租户过滤；statusFilter 为 inviting|expired 时仅返回带该标记的行；空串返回两者。
+	ListInvitationFlags(ctx context.Context, tenantID *uuid.UUID, statusFilter string) ([]InvitationFlag, error)
+
+	// GetInvitationFlags 按最新邀请设置标记（inviting/expired 互斥；其余/无记录两者 false）。
+	// 读取后若最新为 inviting 且 expire_at < now，先写回 expired 再返回。
+	GetInvitationFlags(ctx context.Context, tenantID, userID uuid.UUID) (InvitationFlag, error)
 
 	// ListAuditLogs 按 tenant_id + 目标 user_id 查询操作历史，游标分页。
 	ListAuditLogs(ctx context.Context, tenantID, userID uuid.UUID, filter TenantAdminAuditLogFilter) (TenantAdminAuditLogListResult, error)

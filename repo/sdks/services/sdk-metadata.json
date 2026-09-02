@@ -503,6 +503,12 @@
       "scope": ""
     },
     {
+      "operationId": "listAvailableTenantsForAdmin",
+      "method": "GET",
+      "path": "/tenant-admins/tenants",
+      "scope": ""
+    },
+    {
       "operationId": "listTenantPlans",
       "method": "GET",
       "path": "/tenant-plans",
@@ -671,12 +677,6 @@
       "scope": ""
     },
     {
-      "operationId": "getChangeableRoles",
-      "method": "GET",
-      "path": "/tenants/{tenantId}/admins/{userId}/changeable-roles",
-      "scope": ""
-    },
-    {
       "operationId": "disableTenantAdmin",
       "method": "POST",
       "path": "/tenants/{tenantId}/admins/{userId}/disable",
@@ -719,9 +719,9 @@
       "scope": ""
     },
     {
-      "operationId": "transferTenantOwnership",
-      "method": "POST",
-      "path": "/tenants/{tenantId}/transfer-ownership",
+      "operationId": "listTenantAssignableRoles",
+      "method": "GET",
+      "path": "/tenants/{tenantId}/roles",
       "scope": ""
     }
   ],
@@ -729,12 +729,13 @@
     "AdminDetail",
     "AdminListResponse",
     "AdminWithTenant",
+    "AssignableTenantRoleListResponse",
     "AsyncTask",
     "AvailableGpu",
+    "AvailableTenantListResponse",
     "BindPlanRequest",
     "BoundTenant",
     "BoundTenantsResponse",
-    "ChangeableRolesResponse",
     "CreateGpuContainerRequest",
     "CreateInferenceAccessPolicyRequest",
     "CreateInferenceEndpointRequest",
@@ -838,7 +839,6 @@
     "TenantPlanStateChangeRequest",
     "TenantRef",
     "TenantRole",
-    "TransferOwnershipRequest",
     "UpdateInferenceServicePoliciesRequest",
     "UpdateInferenceServiceRequest",
     "UpdateKBConfigRequest",
@@ -898,8 +898,7 @@
     "resendTenantAdminInvitation",
     "resetTenantAdminPassword",
     "updateTenantAdminRole",
-    "bindTenantPlan",
-    "transferTenantOwnership"
+    "bindTenantPlan"
   ],
   "cursorPaginationOperations": [
     "listGpuContainers",

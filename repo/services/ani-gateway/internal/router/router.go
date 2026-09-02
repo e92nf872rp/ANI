@@ -48,6 +48,8 @@ type RegisterOptions struct {
 	QuotaAdminService       ports.QuotaAdminService
 	PlatformWorkloadService ports.PlatformWorkloadService
 	TenantService           ports.TenantService
+	TenantPlanService       ports.TenantPlanService
+	TenantAdminService      ports.TenantAdminService
 	// GPUSpecStore backs the GPU spec directory CRUD endpoints (POST/DELETE
 	// in gpu_spec_resources.go). When nil those handlers return 503.
 	GPUSpecStore ports.GPUSpecStore
@@ -59,6 +61,10 @@ type RegisterOptions struct {
 	// (GetMy self-opens a tenant-scoped transaction so RLS applies). When nil
 	// the handler returns 503.
 	QuotaStoreService ports.QuotaStoreService
+	// MeteringService backs the metering usage query endpoints
+	// (GET /metering/usage + GET /metering/usage/platform). When nil the
+	// handlers fall back to the in-process local adapter.
+	MeteringService ports.MeteringService
 }
 
 // Register wires all route groups onto the Hertz server.
@@ -76,7 +82,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	v1 := h.Group("/api/v1")
 	registerBranding(v1)
 	registerAuth(v1)
-	registerMetering(v1)
+	registerMetering(v1, options.MeteringService)
 	registerHarbor(v1, options.ImageRegistry)
 	// Instances register first so their service can act as InstanceLookup.
 	// 注入到 ObservabilityService（时序图 PromQL 代理需要解析实例记录的
@@ -108,6 +114,8 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerQuotaResources(v1, options.QuotaAdminService, options.QuotaStoreService)
 	registerPlatformWorkloadResources(v1, options.PlatformWorkloadService, options.AsyncTaskStore)
 	registerAdminTenantResources(v1, options.TenantService)
+	registerAdminTenantAdminResources(v1, options.TenantAdminService)
+	registerAdminTenantPlanResources(v1, options.TenantPlanService)
 	// GPU spec directory CRUD (POST/DELETE) + reservation management +
 	// tenant self-query endpoints (SPEC §4.3).
 	registerGPUSpecResources(v1, options.GPUSpecStore, options.GPUInventory, options.GPUInstanceStore, options.MetadataStore)
@@ -129,6 +137,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerSandboxes(svc)
 	registerTenant(svc)
 	registerTenantPlans(svc)
+	registerTenantAdmins(svc)
 
 	// OpenAI-compatible inference proxy (separate URL prefix, no /api prefix)
 	h.Group("/v1").POST("/chat/completions", inferenceProxy)

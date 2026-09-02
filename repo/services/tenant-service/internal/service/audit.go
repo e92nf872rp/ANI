@@ -11,11 +11,17 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const auditResourceTenantPlan = "tenant_plan"
+const (
+	auditResourceTenantPlan  = "tenant_plan"
+	auditResourceTenantAdmin = "tenant_admin"
+)
 
 // writeAuditSuccess 写入 result=success 的审计（best-effort：写失败只告警，不阻断已成功业务）。
-// tenantID 可选：平台级套餐操作为 nil，绑定租户时传入租户 ID。
-func writeAuditSuccess(ctx context.Context, audit ports.TenantPlanAuditStore, action string, details map[string]any, tenantID *uuid.UUID) {
+// resource 由调用方传入（如 tenant_plan / tenant_admin）；tenantID 可选（平台级操作为 nil）。
+func writeAuditSuccess(ctx context.Context, audit ports.TenantPlanAuditStore, resource, action string, details map[string]any, tenantID *uuid.UUID) {
+	if audit == nil {
+		return
+	}
 	// 步骤 1：details 缺省空对象
 	if details == nil {
 		details = map[string]any{}
@@ -26,12 +32,12 @@ func writeAuditSuccess(ctx context.Context, audit ports.TenantPlanAuditStore, ac
 		UserID:    userIDFromCtx(ctx),
 		RequestID: requestIDFromCtx(ctx),
 		Action:    action,
-		Resource:  auditResourceTenantPlan,
+		Resource:  resource,
 		Result:    "success",
 		Details:   details,
 	})
 	if err != nil {
-		attrs := []any{"action", action, "error", err}
+		attrs := []any{"action", action, "resource", resource, "error", err}
 		if tenantID != nil {
 			attrs = append(attrs, "tenant_id", tenantID.String())
 		}
@@ -43,26 +49,32 @@ func writeAuditSuccess(ctx context.Context, audit ports.TenantPlanAuditStore, ac
 }
 
 // writeAuditFailure 写入 result=failure 的审计（best-effort：写失败只 Warn，不掩盖业务错误）。
-// tenantID 可选，语义同 writeAuditSuccess。
-func writeAuditFailure(ctx context.Context, audit ports.TenantPlanAuditStore, action string, details map[string]any, cause error, tenantID *uuid.UUID) {
-	// 步骤 1：复制 details 并附加 reason
+// resource / tenantID 语义同 writeAuditSuccess。
+func writeAuditFailure(ctx context.Context, audit ports.TenantPlanAuditStore, resource, action string, details map[string]any, cause error, tenantID *uuid.UUID) {
+	if audit == nil {
+		return
+	}
+	// 步骤 1：复制 details，并写入业务码 + 异常信息
 	out := map[string]any{}
 	for k, v := range details {
 		out[k] = v
 	}
-	out["reason"] = auditReason(cause)
+	code, message := auditErrorParts(cause)
+	out["code"] = code
+	out["message"] = message
+	out["reason"] = auditReason(cause) // 兼容既有「CODE: detail」摘要
 	// 步骤 2：best-effort 写入；失败只告警，不影响调用方已返回的业务错误
 	_, err := audit.Create(ctx, ports.AuditLog{
 		TenantID:  tenantID,
 		UserID:    userIDFromCtx(ctx),
 		RequestID: requestIDFromCtx(ctx),
 		Action:    action,
-		Resource:  auditResourceTenantPlan,
+		Resource:  resource,
 		Result:    "failure",
 		Details:   out,
 	})
 	if err != nil {
-		attrs := []any{"action", action, "error", err}
+		attrs := []any{"action", action, "resource", resource, "error", err}
 		if tenantID != nil {
 			attrs = append(attrs, "tenant_id", tenantID.String())
 		}
@@ -82,6 +94,22 @@ func auditReason(err error) string {
 		return st.Message()
 	}
 	return err.Error()
+}
+
+// auditErrorParts 拆出业务码与异常信息（message 为 CODE 后的 detail；无前缀时 code 为空）。
+func auditErrorParts(err error) (code, message string) {
+	raw := auditReason(err)
+	if raw == "" {
+		return "", ""
+	}
+	if idx := strings.Index(raw, ":"); idx > 0 {
+		code = strings.TrimSpace(raw[:idx])
+		message = strings.TrimSpace(raw[idx+1:])
+		if code != "" {
+			return code, message
+		}
+	}
+	return "", raw
 }
 
 // coreItemsForAudit 把 Core 配额项压成可 JSON 序列化的审计 details 片段。

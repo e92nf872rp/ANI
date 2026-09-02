@@ -869,11 +869,16 @@ var generatedCorePolicies = map[string]Policy{
 		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
 	},
 	"GET /api/v1/metering/usage/platform": {
-		Source:               PolicySourceLegacy,
+		Source:               PolicySourceGenerated,
 		OperationID:          "getPlatformMeteringUsage",
 		Method:               "GET",
 		PathTemplate:         "/api/v1/metering/usage/platform",
 		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
+		Version:              "v1",
+		Resource:             "metering",
+		Action:               "read",
+		Boundary:             BoundaryPlatform,
+		PrincipalKinds:       []PrincipalKind{PrincipalUser},
 	},
 	"GET /api/v1/networks/load-balancers": {
 		Source:               PolicySourceLegacy,

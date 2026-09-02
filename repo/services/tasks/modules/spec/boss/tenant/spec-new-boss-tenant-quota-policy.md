@@ -32,7 +32,7 @@
 | total=null 写入 | service `mapAndValidateQuotaLimits` 用 Core default_quota **物化落库** | 不保留 NULL；历史 NULL 仅由 GET `buildQuotaLimitViews` 回写 |
 | code 唯一约束 | partial unique index WHERE is_deleted=FALSE | 软删除后 code 可复用 |
 | 配额自动收紧 | Core API 返回 `tightened` 字段（正常 200 响应），不报错 | total < used+reserved 时 Core 自动收紧为 used+reserved，响应含 tightened=true |
-| 修改限额同步存量租户 | 逐租户 GetQuota→CreateQuota/PutQuota 分流 | 先查询配额行是否存在，不存在→POST 新建，已存在→PUT 修改 |
+| 修改限额同步存量租户 | 逐租户调 Core UpsertQuota 一律 upsert | 不再先 GetQuota 判断存在性；Core 原子 upsert（不存在→新建 used/reserved=0，已存在→修改 total 自动收紧） |
 | 限额查询元数据 | Core `ListQuotaMeta`（禁止 store JOIN meta） | Services 不直连 Core 表 |
 | 前端修改限额交互 | 直接编辑 InputNumber + 底部修改按钮批量提交 | 简化交互，无需行级编辑态切换 |
 | 前端路由 | `/tenants/quotas` + `/new` + `/$planId` | 独立创建/详情页 |
@@ -108,8 +108,7 @@
       → TenantPlanStore.ListBoundTenants (查 tenants WHERE plan_id=planId)
       → FOR EACH tenant:
           → TenantPlanStore.GetApprovedQuotaChanges (查 approved 维度)
-          → QuotaSvcClient.GetQuota (先查询判断配额行是否存在)
-          → QuotaSvcClient.CreateQuota/PutQuota (不存在→POST 新建；已存在→PUT 修改 total)
+          → QuotaSvcClient.UpsertQuota (一律 upsert，不存在→新建 used/reserved=0；已存在→修改 total 自动收紧)
       → TenantPlanAuditStore.Create
     → Response { id, message }
 
@@ -119,8 +118,7 @@
       → service.buildQuotaLimitViews    // COALESCE total, default_quota 兜底为具体 total（内部调 GetQuotaLimits + Core ListQuotaMeta）
       → TenantStore.UpdatePlan (先更新 tenants.plan_id，若与当前不同)
       → TenantPlanStore.GetApprovedQuotaChanges (查 approved 维度，跳过不覆盖)
-      → QuotaSvcClient.GetQuota (先查询判断配额行是否存在)
-      → QuotaSvcClient.CreateQuota/PutQuota (不存在→POST 新建 used/reserved=0；已存在→PUT 修改 total 自动收紧)
+      → QuotaSvcClient.UpsertQuota (一律 upsert，不存在→新建 used/reserved=0；已存在→PUT 修改 total 自动收紧)
       → Core 失败时 best-effort 回滚 plan_id（回滚失败也返回错误）
       → TenantPlanAuditStore.Create
     → Response { id, message }
@@ -411,15 +409,15 @@ type TenantPlanListFilter struct {
 // 分页结果：具体类型（不用泛型，对齐项目 ports 风格）。
 // Items + Total（总数，用于前端展示）+ NextCursor（游标，"" = 已无更多数据）。
 type TenantPlanListResult struct {
-    Items      []TenantPlanListItem
-    Total      int
-    NextCursor string // "" = 已无更多数据
+	Items      []TenantPlanListItem
+	Total      int
+	NextCursor string // "" = 已无更多数据（网关经 nullIfEmpty 映射为 JSON null）
 }
 
 type AuditLogListResult struct {
-    Items      []AuditLog
-    Total      int
-    NextCursor string // "" = 已无更多数据
+	Items      []AuditLog
+	Total      int
+	NextCursor string // "" = 已无更多数据（网关经 nullIfEmpty 映射为 JSON null）
 }
 
 // TenantPlanListItem：套餐列表的查询视图。
@@ -577,8 +575,8 @@ audit_logs (N)  [details->>'plan_id' 关联，非外键]
       "description": "专业版套餐",
       "status": "active",
       "tenant_count": 12,
-      "created_at": "2026-07-20T10:00:00Z",
-      "updated_at": "2026-07-20T10:00:00Z"
+      "created_at": "2026-07-20 10:00:00",
+      "updated_at": "2026-07-20 10:00:00"
     }
   ],
   "total": 12,
@@ -599,8 +597,8 @@ audit_logs (N)  [details->>'plan_id' 关联，非外键]
   "description": "适用于中小团队",
   "status": "active",
   "tenant_count": 12,
-  "created_at": "2026-07-20T10:00:00Z",
-  "updated_at": "2026-07-20T10:00:00Z"
+  "created_at": "2026-07-20 10:00:00",
+  "updated_at": "2026-07-20 10:00:00"
 }
 ```
 
@@ -616,7 +614,7 @@ audit_logs (N)  [details->>'plan_id' 关联，非外键]
 }
 ```
 
-> 展示路径：`buildQuotaLimitViews` = store.GetQuotaLimits 原始行 + Core `ListQuotaMeta`（**禁止** store JOIN `resource_quota_meta`）。历史 `total` 为 NULL 时用 `default_quota` 兜底返回并可回写库；写入侧 Create/PUT 的 `total: null` 在 service 层物化为具体 `default_quota` 再落库（不保留 NULL）。列表 `next_cursor` 网关返回空串 `""` 表示无更多；审计列表经 `nullIfEmpty` 返回 JSON `null`。时间字段为 `YYYY-MM-DD HH:mm:ss`（Asia/Shanghai），非 RFC3339。
+> 展示路径：`buildQuotaLimitViews` = store.GetQuotaLimits 原始行 + Core `ListQuotaMeta`（**禁止** store JOIN `resource_quota_meta`）。历史 `total` 为 NULL 时用 `default_quota` 兜底返回并可回写库；写入侧 Create/PUT 的 `total: null` 在 service 层物化为具体 `default_quota` 再落库（不保留 NULL）。列表与审计列表的 `next_cursor` 均经网关 `nullIfEmpty` 映射：空串 → JSON `null`（表示已无更多）。时间字段为 `YYYY-MM-DD HH:mm:ss`（Asia/Shanghai），非 RFC3339。
 
 #### PUT /tenant-plans/{planId}/quota-limits — 修改限额
 
@@ -841,12 +839,7 @@ audit_logs (N)  [details->>'plan_id' 关联，非外键]
       WHERE tenant_id=tenant.id AND status='approved'
     update_items = [维度 NOT IN approved_dims 的 items]
     IF len(update_items) > 0:
-      existing = QuotaSvcClient.GetQuota(tenant_id)  // 查询当前已存在的配额行
-      → 逐维度分流（per resource_type）：
-        - 维度在 existing 中 → putItems（PutQuota 修改 total，自动收紧）
-        - 维度不在 existing 中 → createItems（CreateQuota 新建配额行）
-      IF len(putItems) > 0: QuotaSvcClient.PutQuota(tenant_id, putItems)
-      IF len(createItems) > 0: QuotaSvcClient.CreateQuota(tenant_id, createItems)
+      QuotaSvcClient.UpsertQuota(tenant_id, update_items)  // 一律 upsert（不存在→新建 used/reserved=0；已存在→修改 total 自动收紧）
       → Core 自动收紧：total < used+reserved 时 tightened=true
 ```
 
@@ -868,11 +861,7 @@ audit_logs (N)  [details->>'plan_id' 关联，非外键]
   IF new_plan_id != current_plan_id:
     UPDATE tenants SET plan_id=new_plan_id
   IF len(update_items) > 0:
-    existing = QuotaSvcClient.GetQuota(tenant_id)  // 先查询判断配额行是否存在
-    IF existing 为空:
-      QuotaSvcClient.CreateQuota(tenant_id, update_items)  // POST 新建配额行 used/reserved=0
-    ELSE:
-      QuotaSvcClient.PutQuota(tenant_id, update_items)  // PUT 修改 total，自动收紧
+    QuotaSvcClient.UpsertQuota(tenant_id, update_items)  // 一律 upsert（不存在→新建 used/reserved=0；已存在→修改 total 自动收紧）
     → Core 自动收紧：total < used+reserved 时 tightened=true
     -- Core 失败 → 回滚 plan_id（best-effort：回滚失败也返回错误）
     IF core_err != nil AND plan_changed:
@@ -971,8 +960,7 @@ audit_logs (N)  [details->>'plan_id' 关联，非外键]
 
 | Operation | Retry | Max | Backoff |
 |-----------|-------|-----|---------|
-| Core POST /quota（绑定新建配额行） | 是 | 3 次 | 指数退避 |
-| Core PUT /quota（改限额同步存量租户） | 是 | 3 次 | 指数退避 |
+| Core PUT /quota/upsert（绑定/改限额同步存量租户） | 是 | 3 次 | 指数退避 |
 | 创建/修改/删除套餐 | 否 | — | — |
 
 ### 6.3 Failure Modes
@@ -1038,7 +1026,7 @@ audit_logs (N)  [details->>'plan_id' 关联，非外键]
 | Strategy | Application |
 |----------|-------------|
 | tenant_count 子查询 | 列表页 COUNT(tenants WHERE plan_id=id AND status!='disabled')，数据量小无需缓存 |
-| 逐租户分流调 Core API | 修改限额同步时逐租户 GetQuota→CreateQuota/PutQuota 分流，减少 API 往返 |
+| 逐租户调 Core UpsertQuota | 修改限额同步时逐租户调 Core UpsertQuota 一律 upsert，减少 API 往返（单次请求原子完成） |
 | 限额查询 | GET quota-limits：store 原始行 + Core ListQuotaMeta 组装（无本地 JOIN meta） |
 
 ### 8.3 Database Considerations
@@ -1169,8 +1157,8 @@ audit_logs (N)  [details->>'plan_id' 关联，非外键]
 
 ### 11.1 Unresolved Questions
 
-- Core `resource_quota_meta` / Core quota API 是否可用？限额查询与同步依赖 Core `ListQuotaMeta` / GetQuota / PutQuota / CreateQuota（非本地 JOIN）。
-- Core API `GET/POST/PUT/DELETE /api/v1/admin/tenants/{tenant_id}/quota` 端点是否均已实现？本文档假设已实现（GetQuota 查存在性 + CreateQuota 新建 + PutQuota 修改 + DeleteQuota 删除）。
+- Core `resource_quota_meta` / Core quota API 是否可用？限额查询与同步依赖 Core `ListQuotaMeta` / `UpsertQuota`（非本地 JOIN）。
+- Core API `GET/PUT/PUT upsert/DELETE /api/v1/admin/tenants/{tenant_id}/quota` 端点是否均已实现？本文档假设已实现（GetQuota 查询 + UpsertQuota 一律 upsert + DeleteQuota 删除）。
 
 ### 11.2 Technical Risks
 
@@ -1183,9 +1171,8 @@ audit_logs (N)  [details->>'plan_id' 关联，非外键]
 ### 11.3 Assumptions
 
 - Core `resource_quota_meta` 表已存在且有 enabled=true 的维度数据
-- Core API `GET /api/v1/admin/tenants/{tenant_id}/quota`（查询配额行是否存在）已实现
-- Core API `POST /api/v1/admin/tenants/{tenant_id}/quota`（新建配额行，used/reserved 初始 0）已实现
-- Core API `PUT /api/v1/admin/tenants/{tenant_id}/quota`（批量修改 total）已实现，返回含 `tightened` 字段
+- Core API `GET /api/v1/admin/tenants/{tenant_id}/quota`（查询配额行）已实现
+- Core API `PUT /api/v1/admin/tenants/{tenant_id}/quota/upsert`（批量 upsert，不存在→新建 used/reserved=0，已存在→修改 total）已实现，返回含 `tightened` 字段
 - Core API `DELETE /api/v1/admin/tenants/{tenant_id}/quota`（删除租户全部配额行）已实现（QuotaSvcClient.DeleteQuota 封装，当前预留，尚未被业务流程调用）
 - ani-gateway 通过 gRPC client（`TENANT_SERVICE_ADDR`，缺省 `127.0.0.1:9105`，与 tenant-service `GRPC_PORT` 一致）将 `/api/v1/svc/tenant-plans*`、`/tenants/:tenantId/plan` 请求转发到 tenant-service
 - 路由分发、鉴权、限流、幂等性校验由 ani-gateway 网关完成，tenant-service 仅处理业务逻辑

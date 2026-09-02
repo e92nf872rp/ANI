@@ -29,6 +29,8 @@ type MeteringUsageQueryRequest struct {
 	EndTime      time.Time
 	ResourceType MeteringResourceType
 	GroupBy      string
+	// PlatformTenantID 平台查询时可选筛选单租户（v1.yaml tenant_id query 参数）。
+	PlatformTenantID string
 }
 
 // MeteringUsageRecord 表示一条计量用量记录。
@@ -77,6 +79,8 @@ type TokenUsageReportRecord struct {
 
 type MeteringService interface {
 	QueryUsage(ctx context.Context, request MeteringUsageQueryRequest) (MeteringUsageResult, error)
+	// QueryPlatformUsage 平台视角跨租户用量查询（BOSS 平台计量页使用）。
+	QueryPlatformUsage(ctx context.Context, request MeteringUsageQueryRequest) (MeteringUsageResult, error)
 	ReportTokenUsage(ctx context.Context, request TokenUsageReportRequest) (TokenUsageReportRecord, error)
 }
 

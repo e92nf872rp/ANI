@@ -27,6 +27,9 @@ var (
 	// ErrCoreUnavailable 表示 Core 配额 API 不可用（HTTP 502 GRPC_CLIENT_UNAVAILABLE）。
 	ErrCoreUnavailable = errors.New("GRPC_CLIENT_UNAVAILABLE")
 
+	// ErrStoreUnavailable 表示本地 store（tenant-service DB）不可用（HTTP 502 STORE_UNAVAILABLE）。
+	ErrStoreUnavailable = errors.New("STORE_UNAVAILABLE")
+
 	// ErrTenantNotFound 表示 Core 侧租户不存在（HTTP 404）。
 	ErrTenantNotFound = errors.New("TENANT_NOT_FOUND")
 
@@ -48,7 +51,7 @@ var (
 	// ErrTenantAdminNotFound 表示管理员不存在、已禁用或邀请未匹配到用户（HTTP 404）。
 	ErrTenantAdminNotFound = errors.New("TENANT_ADMIN_NOT_FOUND")
 
-	// ErrTenantAdminAlreadyAdmin 表示邀请对象已是本租户 admin/owner（HTTP 409）。
+	// ErrTenantAdminAlreadyAdmin 表示邀请对象已是本租户 admin（HTTP 409）。
 	ErrTenantAdminAlreadyAdmin = errors.New("TENANT_ADMIN_ALREADY_ADMIN")
 
 	// ErrTenantInvitationPending 表示该用户已有 status=inviting 的邀请（HTTP 409）。
@@ -60,18 +63,12 @@ var (
 	// ErrTenantInvitationSettled 表示最新邀请已 accepted/rejected，不可重发（HTTP 409）。
 	ErrTenantInvitationSettled = errors.New("TENANT_INVITATION_SETTLED")
 
-	// ErrTenantOwnerRoleLocked 表示目标为 tenant-owner，禁止改角色/删除（HTTP 409）。
-	ErrTenantOwnerRoleLocked = errors.New("TENANT_OWNER_ROLE_LOCKED")
-
-	// ErrLastTenantOwner 表示唯一活跃 tenant-owner 不可禁用/删除（HTTP 422）。
-	ErrLastTenantOwner = errors.New("LAST_TENANT_OWNER")
-
-	// ErrTransferTargetInvalid 表示移交目标不是本租户 active tenant-admin（HTTP 422）。
-	ErrTransferTargetInvalid = errors.New("TRANSFER_TARGET_INVALID")
-
 	// ErrRoleChangeInvalid 表示 PUT role 不在 user/auditor/tenant-admin（HTTP 422）。
 	ErrRoleChangeInvalid = errors.New("ROLE_CHANGE_INVALID")
 
 	// ErrPasswordSameAsOld 表示新密码与旧密码相同（HTTP 422）。
 	ErrPasswordSameAsOld = errors.New("PASSWORD_SAME_AS_OLD")
+
+	// ErrUserStateInvalid 表示用户状态不允许该操作（如重复 disable/enable，HTTP 409）。
+	ErrUserStateInvalid = errors.New("USER_STATE_INVALID")
 )

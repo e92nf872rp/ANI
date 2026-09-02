@@ -104,6 +104,15 @@ func TestGPUStatusInfoRequiresNodeEvidenceForScheduledState(t *testing.T) {
 	}
 }
 
+func TestStoppedStateReportsStoppedNotPending(t *testing.T) {
+	if got := gpuSchedulingState(ports.WorkloadStatus{State: ports.WorkloadStateStopped}); got != "stopped" {
+		t.Fatalf("gpu scheduling state = %q, want stopped", got)
+	}
+	if got := containerRolloutStatus(ports.WorkloadStateStopped); got != "stopped" {
+		t.Fatalf("container rollout status = %q, want stopped", got)
+	}
+}
+
 func TestLocalInstanceOrchestratorPersistsApprovedInstanceSummaries(t *testing.T) {
 	store := &fakeInstanceStore{}
 	orchestrator := newTestInstanceOrchestrator(true, store)
