@@ -125,10 +125,11 @@ func startRealHertzServer(t *testing.T, observability ports.InstanceObservabilit
 	return nil, addr
 }
 
-// TestStreamInstanceLogs_LocalProfileDegradesTo503JSON 验证 local profile
-// （StreamLogs 返回 ErrNotConfigured）在进入 SSE 流前降级为 503 JSON。
-// 必须用真实 server：503 由 Hijack 连接上的手写响应返回，ut 环境无法触达。
-func TestStreamInstanceLogs_LocalProfileDegradesTo503JSON(t *testing.T) {
+// TestStreamInstanceLogs_NotConfiguredSendsSSEError 验证 local profile
+// （StreamLogs 返回 ErrNotConfigured）时客户端仍立即收到 SSE 响应头，
+// 随后以 event:error 帧告知错误并关闭（不再返回 503 JSON）。
+// 必须用真实 server：SSE 头由 Hijack 连接上的手写响应返回，ut 环境无法触达。
+func TestStreamInstanceLogs_NotConfiguredSendsSSEError(t *testing.T) {
 	// 传 nil observability → fallback 到 local adapter → StreamLogs 返回 ErrNotConfigured
 	h, addr := startRealHertzServer(t, nil)
 	_ = h // server 生命周期随测试进程结束
@@ -142,11 +143,15 @@ func TestStreamInstanceLogs_LocalProfileDegradesTo503JSON(t *testing.T) {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 
-	if resp.StatusCode != 503 {
-		t.Fatalf("status = %d, want 503; body=%s", resp.StatusCode, string(body))
+	// SSE 头立即写出：即使未配置 Loki 也必须先拿到 200 + text/event-stream
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, string(body))
 	}
-	if !strings.Contains(string(body), "LOG_STREAM_NOT_CONFIGURED") {
-		t.Fatalf("body = %q, want LOG_STREAM_NOT_CONFIGURED", string(body))
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "text/event-stream") {
+		t.Fatalf("content-type = %q, want text/event-stream", ct)
+	}
+	if !strings.Contains(string(body), "event: error") {
+		t.Fatalf("body = %q, want event: error frame", string(body))
 	}
 }
 
@@ -251,6 +256,52 @@ done:
 	}
 	if !strings.Contains(frames[1], "stream-line-2") {
 		t.Fatalf("second frame should contain stream-line-2: %q", frames[1])
+	}
+}
+
+// TestStreamInstanceLogs_EmptyReplayStillWritesHeadersImmediately 回归用例：
+// Loki 回放为空（实例无历史日志）时，SSE 响应头也必须立即写出，
+// 客户端马上拿到 200 + text/event-stream，随后进入增量等待——
+// 不能等首条日志才写头（会导致连接零字节挂起，前端表现为“连接无反应”）。
+func TestStreamInstanceLogs_EmptyReplayStillWritesHeadersImmediately(t *testing.T) {
+	// mock Loki：backward / forward 全部返回空
+	lokiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"streams","result":[]}}`))
+	}))
+	defer lokiSrv.Close()
+
+	lokiStore, err := runtimeadapter.NewLokiLogStore(runtimeadapter.LokiLogStoreConfig{
+		BaseURL: lokiSrv.URL,
+	})
+	if err != nil {
+		t.Fatalf("NewLokiLogStore: %v", err)
+	}
+	obs, err := runtimeadapter.NewPrometheusInstanceObservability(runtimeadapter.PrometheusInstanceObservabilityConfig{
+		PrometheusURL:     "http://127.0.0.1:9090",
+		KubernetesAPIHost: "https://127.0.0.1:6443",
+	})
+	if err != nil {
+		t.Fatalf("NewPrometheusInstanceObservability: %v", err)
+	}
+	obs.SetLogStore(lokiStore)
+
+	h, addr := startRealHertzServer(t, obs)
+	_ = h
+
+	instanceID := createInstanceForStreamTest(t, h, "inst-empty", "inst-empty-create")
+
+	resp, err := http.Get("http://" + addr + "/api/v1/instances/" + instanceID + "/logs/stream?interval_seconds=30")
+	if err != nil {
+		t.Fatalf("GET stream: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// http.Get 在收到响应头即返回；若头未写出会阻塞直到超时/卡死
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200 immediately", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "text/event-stream") {
+		t.Fatalf("content-type = %q, want text/event-stream", ct)
 	}
 }
 
@@ -384,29 +435,6 @@ func TestSSELogSink_WriteSSEDone(t *testing.T) {
 	}
 	if !strings.Contains(output, "timeout") {
 		t.Fatalf("missing reason: %q", output)
-	}
-}
-
-// TestWriteRawJSONResponse 验证 Hijack 连接上的 JSON 错误响应格式。
-func TestWriteRawJSONResponse(t *testing.T) {
-	conn := &mockNetworkConn{}
-	writeRawJSONResponse(conn, 503, "LOG_STREAM_NOT_CONFIGURED", "loki not configured", "req-123")
-
-	output := conn.buf.String()
-	if !strings.HasPrefix(output, "HTTP/1.1 503 Service Unavailable") {
-		t.Fatalf("missing status line: %q", output)
-	}
-	if !strings.Contains(output, "application/json") {
-		t.Fatalf("missing content-type: %q", output)
-	}
-	if !strings.Contains(output, "LOG_STREAM_NOT_CONFIGURED") {
-		t.Fatalf("missing error code: %q", output)
-	}
-	if !strings.Contains(output, "loki not configured") {
-		t.Fatalf("missing error message: %q", output)
-	}
-	if !strings.Contains(output, "req-123") {
-		t.Fatalf("missing request_id: %q", output)
 	}
 }
 

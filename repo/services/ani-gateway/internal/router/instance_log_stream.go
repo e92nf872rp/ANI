@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,7 +14,6 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/network"
 	"github.com/kubercloud/ani/pkg/ports"
-	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 )
 
 // logStreamTimeout 是 SSE 日志流连接的固定时长上限（方案 §3.4：10 分钟）。
@@ -89,29 +89,45 @@ func (api *instanceAPI) streamInstanceLogs(ctx context.Context, c *app.RequestCo
 	c.Hijack(func(conn network.Conn) {
 		defer conn.Close()
 
-		streamCtx, cancel := context.WithTimeout(ctx, logStreamTimeout)
+		// 注意：不能使用 handler 的 ctx（hertz handler ctx 生命周期到 handler 返回为止，
+		// Hijack 回调执行时它已被取消/复用——netpoll 下必现，会导致首个 Loki 查询以
+		// ctx 取消失败、连接静默秒退）。这里改用独立 ctx；客户端断开由 sink 写出
+		// 失败感知（StreamLogs 契约，方案 §3.4），轮询周期内最多延迟 interval 秒退出。
+		streamCtx, cancel := context.WithTimeout(context.Background(), logStreamTimeout)
 		defer cancel()
 
 		sink := &sseLogSink{
 			conn:        conn,
-			headersBuf:  nil,
 			headWritten: false,
 		}
 
-		// 写出辅助：首次 sink 调用时写 SSE 响应头
+		// 立即写出 SSE 响应头：客户端必须马上拿到 200 + text/event-stream。
+		// 不能等首条日志才写——回放为空的实例会让连接零字节挂起，
+		// 前端表现为“连接无反应、看不到状态码”。
+		// 注意 WriteBinary 只入缓冲，必须显式 Flush 才会真正发到网络上。
+		if _, err := conn.WriteBinary([]byte(sseHeaders)); err != nil {
+			return // 客户端已断开
+		}
+		// 紧跟一个 SSE 注释帧（RFC 冒号开头为注释，客户端不可见）：
+		// node 系代理（vite dev proxy 等）的响应头要等首个 body 字节才向外 flush，
+		// 纯头无 body 的流会卡在代理层，客户端看不到状态码。
+		if _, err := conn.WriteBinary([]byte(sseConnectedComment)); err != nil {
+			return
+		}
+		if err := conn.Flush(); err != nil {
+			return
+		}
+		sink.headWritten = true
+
 		err := api.observability.StreamLogs(streamCtx, req, sink.Write)
 
 		if err != nil {
-			if errors.Is(err, ports.ErrNotConfigured) && !sink.headWritten {
-				// 未进入流：返回 JSON 503
-				writeRawJSONResponse(conn, http.StatusServiceUnavailable,
-					"LOG_STREAM_NOT_CONFIGURED", err.Error(), middleware.GetRequestID(c))
-				return
-			}
-			// 已进入流：发 SSE error 事件
-			if sink.headWritten {
-				sink.writeSSEError(err.Error())
-			}
+			// SSE 头已在进入流前写出，错误统一以 event:error 帧告知后关闭；
+			// 预流错误（401/404/400/503）在 Hijack 之前由 JSON 路径处理。
+			slog.Error("instance log stream failed",
+				"tenant_id", req.TenantID, "instance_id", req.InstanceID,
+				"head_written", sink.headWritten, "error", err.Error())
+			sink.writeSSEError(err.Error())
 			return
 		}
 
@@ -140,6 +156,11 @@ var sseHeaders = "HTTP/1.1 200 OK\r\n" +
 	"Connection: keep-alive\r\n" +
 	"X-Accel-Buffering: no\r\n" +
 	"\r\n"
+
+// sseConnectedComment 是连接建立后立即发出的 SSE 注释帧：
+// 冒号开头按 SSE 规范是注释，EventSource / fetch 解析器都会忽略，
+// 但它作为首个 body 字节能让 node 系代理立刻 flush 响应头。
+const sseConnectedComment = ": connected\n\n"
 
 // Write 实现 sink 回调：首次调用写 SSE 头，然后写 event:log 帧。
 func (s *sseLogSink) Write(entry ports.InstanceLogEntry) error {
@@ -182,23 +203,6 @@ func (s *sseLogSink) writeSSEDone(reason string) {
 	frame := fmt.Sprintf("event: done\ndata: %s\n\n", string(data))
 	_, _ = s.conn.WriteBinary([]byte(frame))
 	_ = s.conn.Flush()
-}
-
-// writeRawJSONResponse 手写 HTTP JSON 响应（用于 Hijack 连接上的预流错误）。
-func writeRawJSONResponse(conn network.Conn, status int, code, message, requestID string) {
-	body, _ := json.Marshal(map[string]string{
-		"code":       code,
-		"message":    message,
-		"request_id": requestID,
-	})
-	statusText := http.StatusText(status)
-	if statusText == "" {
-		statusText = "Error"
-	}
-	resp := fmt.Sprintf("HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
-		status, statusText, len(body), string(body))
-	_, _ = conn.WriteBinary([]byte(resp))
-	_ = conn.Flush()
 }
 
 // noopExtWriter 是一个不写任何内容的 ExtWriter，用于抑制 hertz 默认响应写出。
