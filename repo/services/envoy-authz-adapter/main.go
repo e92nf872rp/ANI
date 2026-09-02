@@ -55,7 +55,11 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("set up inference service connection: %w", err)
 	}
-	defer inferenceConnection.Close()
+	defer func() {
+		if err := inferenceConnection.Close(); err != nil {
+			log.Printf("close inference service connection: %v", err)
+		}
+	}()
 	checker := policyclient.New(inferencev1.NewInferenceControlClient(inferenceConnection), cfg.InferenceTimeout)
 
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.GRPCPort))
