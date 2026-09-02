@@ -367,7 +367,9 @@ func TestStreamLogs_LokiTransientFailureSelfHeals(t *testing.T) {
 	store := newLokiStreamStore(t, srv.URL, clock.Now)
 
 	var collected []ports.InstanceLogEntry
+	var collectedN int32
 	sink := func(entry ports.InstanceLogEntry) error {
+		atomic.AddInt32(&collectedN, 1)
 		collected = append(collected, entry)
 		return nil
 	}
@@ -379,8 +381,13 @@ func TestStreamLogs_LokiTransientFailureSelfHeals(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 		}
 		clock.Advance(10 * time.Second) // now=base+10s，lastTS=base，forward 能查到 base+6s 的日志
-		for atomic.LoadInt32(&callCount) < 3 {
-			time.Sleep(10 * time.Millisecond)
+		// 等 sink 真正收到 entry 再取消：callCount>=3 时携带 entry 的响应刚被服务端
+		// 写出，若此刻立即 cancel 会与客户端读取响应 body 竞态，ctx 取消使 body
+		// 读取中断并走瞬时失败 continue 路径，entry 丢失（CI 偶发 got 0 的根因）。
+		// 加 deadline 防止真实回归时测试挂死。
+		deadline := time.Now().Add(10 * time.Second)
+		for atomic.LoadInt32(&collectedN) < 1 && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
 		}
 		cancel()
 	}()
