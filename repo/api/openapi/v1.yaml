@@ -1827,8 +1827,9 @@ components:
           type: string
           enum: [start, stop, restart, resize, rebuild, delete, snapshot, attach_volume, detach_volume, attach_filesystem, detach_filesystem, rollback, scale, update_image, bind_secret, unbind_secret, change_security_groups, set_termination_protection, pause, resume, extend, touch_idle]
         idempotency_key: { type: string, minLength: 1, maxLength: 128 }
-        cpu:            { type: string, nullable: true, description: "resize 时使用" }
-        memory:         { type: string, nullable: true, description: "resize 时使用" }
+        cpu:            { type: string, nullable: true, description: "resize 时使用；变配重建时写入容器 resources" }
+        memory:         { type: string, nullable: true, description: "resize 时使用；变配重建时写入容器 resources" }
+        spec_id:        { type: string, nullable: true, description: "resize 时换 GPU 规格使用；通过 /gpu-specs 查询可用规格；与 cpu/memory 可同时传，至少传一项；仅 stopped 实例可执行" }
         snapshot_name:  { type: string, nullable: true, description: "snapshot 时指定快照名称" }
         snapshot_id:    { type: string, nullable: true, description: "rollback 时指定目标快照" }
         include_data_disks: { type: boolean, nullable: true, description: "snapshot 时是否包含数据盘" }

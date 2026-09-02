@@ -565,6 +565,10 @@ type WorkloadInstanceLifecycleRequest struct {
 	InstanceID       string
 	Action           WorkloadLifecycleAction
 	Resources        WorkloadResourceRequest
+	// SpecID is the target Core GPUSpec ID for resize (换 GPU 规格). When set,
+	// the resize flow translates it to Volcano resources and rebuilds the
+	// workload. Validated against GPUSpecService /gpu-specs.
+	SpecID           string
 	SnapshotName     string
 	SnapshotID       string
 	IncludeDataDisks *bool

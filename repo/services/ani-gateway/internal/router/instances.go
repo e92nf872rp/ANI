@@ -253,6 +253,7 @@ type instanceLifecycleRequest struct {
 	Action           string   `json:"action"`
 	CPU              string   `json:"cpu"`
 	Memory           string   `json:"memory"`
+	SpecID           string   `json:"spec_id"`
 	SnapshotName     string   `json:"snapshot_name"`
 	SnapshotID       string   `json:"snapshot_id"`
 	IncludeDataDisks *bool    `json:"include_data_disks"`
@@ -1838,16 +1839,14 @@ func workloadLifecycleRequestFromHTTP(request instanceLifecycleRequest, tenantID
 		}
 		duration = parsed
 	}
-	resources := ports.WorkloadResourceRequest{}
-	if action == ports.WorkloadLifecycleResize {
-		resources = ports.WorkloadResourceRequest{CPU: firstNonEmpty(request.CPU, "4"), Memory: firstNonEmpty(request.Memory, "8Gi")}
-	}
+	resources := ports.WorkloadResourceRequest{CPU: strings.TrimSpace(request.CPU), Memory: strings.TrimSpace(request.Memory)}
 	return ports.WorkloadInstanceLifecycleRequest{
 		IdempotencyKey:   request.IdempotencyKey,
 		TenantID:         tenantID,
 		InstanceID:       instanceID,
 		Action:           action,
 		Resources:        resources,
+		SpecID:           strings.TrimSpace(request.SpecID),
 		SnapshotName:     request.SnapshotName,
 		SnapshotID:       request.SnapshotID,
 		IncludeDataDisks: request.IncludeDataDisks,
