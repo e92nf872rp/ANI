@@ -4060,16 +4060,102 @@ components:
 
     Tenant:
       type: object
-      description: "租户最小视图（绑定配额套餐所需：status / plan_id）"
+      description: >
+        租户视图。getTenant 在最小字段基础上 additive 扩展 contact_email / frozen_at / disabled_at /
+        user_count / admin_count；列表项使用 TenantListItem。
       required: [id, name, display_name, status, plan_id, created_at, updated_at]
       properties:
-        id:           { type: string, format: uuid, description: "租户 ID" }
-        name:         { type: string, description: "租户标识" }
-        display_name: { type: string, description: "展示名" }
-        status:       { type: string, enum: [active, frozen, disabled], description: "租户状态" }
-        plan_id:      { type: string, format: uuid, description: "当前绑定的配额套餐 ID" }
+        id:             { type: string, format: uuid, description: "租户 ID" }
+        name:           { type: string, description: "租户标识" }
+        display_name:   { type: string, description: "展示名" }
+        status:         { type: string, enum: [active, frozen, disabled], description: "租户状态" }
+        plan_id:        { type: string, format: uuid, description: "当前绑定的配额套餐 ID" }
+        contact_email:  { type: string, format: email, nullable: true, description: "联系邮箱（getTenant 扩展）" }
+        frozen_at:      { type: string, format: date-time, nullable: true, description: "冻结时间（status=frozen 时有值）" }
+        disabled_at:    { type: string, format: date-time, nullable: true, description: "禁用时间（status=disabled 时有值）" }
+        user_count:     { type: integer, format: int64, description: "租户成员数（getTenant 计算列）" }
+        admin_count:    { type: integer, format: int64, description: "tenant-admin 角色成员数（getTenant / listTenants 计算列）" }
+        created_at:     { type: string, format: date-time }
+        updated_at:     { type: string, format: date-time }
+
+    TenantCreateRequest:
+      type: object
+      description: "创建租户请求（POST /admin/tenants）；事务内建 tenants + tenant_auth + users + user_roles + tenant_lifecycle"
+      required: [name, display_name, email, plan_id, admin_email, admin_name, admin_password_hash]
+      properties:
+        name:                 { type: string, minLength: 3, maxLength: 40, pattern: '^[a-z0-9-]{3,40}$', description: "租户标识；活动租户内唯一" }
+        display_name:         { type: string, minLength: 1, maxLength: 128 }
+        email:                { type: string, format: email, description: "租户联系邮箱（落库 tenants.contact_email）" }
+        plan_id:              { type: string, format: uuid, description: "初始绑定套餐 ID" }
+        admin_email:          { type: string, format: email, description: "首位管理员邮箱" }
+        admin_name:           { type: string, minLength: 1, maxLength: 128, description: "首位管理员显示名" }
+        admin_password_hash:  { type: string, description: "首位管理员密码 bcrypt 哈希（tenant-service 侧生成，Core 不接触明文）" }
+
+    TenantListItem:
+      type: object
+      description: "租户列表项（GET /admin/tenants）"
+      required: [id, name, display_name, status, plan_id, admin_count, created_at]
+      properties:
+        id:           { type: string, format: uuid }
+        name:         { type: string }
+        display_name: { type: string }
+        status:       { type: string, enum: [active, frozen, disabled] }
+        plan_id:      { type: string, format: uuid }
+        admin_count:  { type: integer, format: int64, description: "tenant-admin 角色成员数（LATERAL 连表统计）" }
         created_at:   { type: string, format: date-time }
+
+    TenantListResponse:
+      type: object
+      description: "租户列表（游标分页；created_at DESC, id DESC）"
+      required: [items]
+      properties:
+        items:       { type: array, items: { $ref: '#/components/schemas/TenantListItem' } }
+        next_cursor: { type: string, nullable: true, description: "下一页游标；null 表示已无更多" }
+
+    TenantUpdateRequest:
+      type: object
+      description: "更新租户基本信息（PUT /admin/tenants/{tenant_id}）；不可改 name / status"
+      properties:
+        display_name:  { type: string, minLength: 1, maxLength: 128, description: "未传表示不更新" }
+        contact_email: { type: string, format: email, description: "未传表示不更新" }
+
+    TenantAuthConfig:
+      type: object
+      description: "租户认证配置（tenant_auth 表）"
+      required: [sso_enabled, mfa_required, updated_at]
+      properties:
+        sso_enabled:  { type: boolean, description: "是否启用 SSO" }
+        provider:     { type: string, nullable: true, description: "SSO 提供商标识；未配置时为 null" }
+        mfa_required: { type: boolean, description: "租户级 MFA 强制开关" }
         updated_at:   { type: string, format: date-time }
+
+    TenantAuthUpdateRequest:
+      type: object
+      description: "更新租户认证配置（PUT /admin/tenants/{tenant_id}/auth）"
+      properties:
+        sso_enabled:  { type: boolean, description: "未传表示不更新" }
+        provider:     { type: string, nullable: true, description: "未传表示不更新" }
+        mfa_required: { type: boolean, description: "未传表示不更新" }
+
+    TenantLifecycleEntry:
+      type: object
+      description: "租户生命周期记录（tenant_lifecycle 表）"
+      required: [id, action, created_at]
+      properties:
+        id:         { type: string, format: uuid }
+        action:     { type: string, enum: [create, freeze, unfreeze, disable] }
+        reason:     { type: string, nullable: true, description: "操作原因（预留，当前多为 null）" }
+        user_id:    { type: string, format: uuid, nullable: true, description: "触发人（平台用户）" }
+        request_id: { type: string, nullable: true, description: "全链路追踪 ID" }
+        created_at: { type: string, format: date-time }
+
+    TenantLifecycleListResponse:
+      type: object
+      description: "租户生命周期列表（游标分页）"
+      required: [items]
+      properties:
+        items:       { type: array, items: { $ref: '#/components/schemas/TenantLifecycleEntry' } }
+        next_cursor: { type: string, nullable: true, description: "下一页游标；null 表示已无更多" }
 
     TenantPlanUpdateRequest:
       type: object
@@ -9311,13 +9397,61 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
 
+  /admin/tenants:
+    post:
+      operationId: createTenant
+      summary: 创建租户
+      description: |
+        事务内 INSERT tenants(status='active') + tenant_auth(默认值) + users + user_roles(tenant-admin)
+        + tenant_lifecycle('create')。name UNIQUE 冲突返回 409 TENANT_NAME_CONFLICT。
+        配额初始化由 tenant-service 在事务外调用 upsertTenantQuota。
+      tags: [Tenants]
+      x-ani-rbac-scope: "scope:tenant:write"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TenantCreateRequest' }
+      responses:
+        "200":
+          description: 租户已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tenant' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "409": { $ref: '#/components/responses/Conflict', description: "TENANT_NAME_CONFLICT" }
+    get:
+      operationId: listTenants
+      summary: 租户列表
+      description: |
+        游标分页（created_at DESC, id DESC）；支持 status / search（name 或 display_name ILIKE）过滤。
+        admin_count 由 LATERAL 连表统计 tenant-admin 角色成员数。
+      tags: [Tenants]
+      x-ani-rbac-scope: "scope:tenant:read"
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string }, description: "上一页返回的 next_cursor" }
+        - { name: status, in: query, schema: { type: string, enum: [active, frozen, disabled] } }
+        - { name: search, in: query, schema: { type: string }, description: "模糊匹配 name 或 display_name" }
+      responses:
+        "200":
+          description: 租户列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantListResponse' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
   /admin/tenants/{tenant_id}:
     get:
       operationId: getTenant
-      summary: 查询租户（最小视图）
+      summary: 查询租户
       description: |
-        平台侧查询租户最小字段（含 status / plan_id），供 Services 绑定配额套餐等场景调用。
-        不替代完整租户管理 API。
+        平台侧查询租户；在最小字段基础上 additive 返回 contact_email / frozen_at / disabled_at /
+        user_count / admin_count。供 Services 绑定配额套餐与租户详情等场景调用。
       tags: [Tenants]
       x-ani-rbac-scope: "scope:tenant:read"
       parameters:
@@ -9328,6 +9462,160 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Tenant' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/TenantNotFound' }
+    put:
+      operationId: updateTenant
+      summary: 更新租户基本信息
+      description: |
+        部分更新 display_name / contact_email；不可改 name / status。
+      tags: [Tenants]
+      x-ani-rbac-scope: "scope:tenant:write"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TenantUpdateRequest' }
+      responses:
+        "200":
+          description: 更新后的租户视图
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tenant' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/TenantNotFound' }
+
+  /admin/tenants/{tenant_id}/freeze:
+    post:
+      operationId: freezeTenant
+      summary: 冻结租户
+      description: |
+        active → frozen；设置 frozen_at 并写入 tenant_lifecycle('freeze')。
+        非法状态返回 409 TENANT_STATE_INVALID。
+      tags: [Tenants]
+      x-ani-rbac-scope: "scope:tenant:write"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 租户已冻结
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tenant' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/TenantNotFound' }
+        "409": { $ref: '#/components/responses/Conflict', description: "TENANT_STATE_INVALID" }
+
+  /admin/tenants/{tenant_id}/unfreeze:
+    post:
+      operationId: unfreezeTenant
+      summary: 解冻租户
+      description: |
+        frozen → active；清空 frozen_at 并写入 tenant_lifecycle('unfreeze')。
+        非法状态返回 409 TENANT_STATE_INVALID。
+      tags: [Tenants]
+      x-ani-rbac-scope: "scope:tenant:write"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 租户已解冻
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tenant' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/TenantNotFound' }
+        "409": { $ref: '#/components/responses/Conflict', description: "TENANT_STATE_INVALID" }
+
+  /admin/tenants/{tenant_id}/disable:
+    post:
+      operationId: disableTenant
+      summary: 禁用租户
+      description: |
+        active/frozen → disabled（终态）；设置 disabled_at 并写入 tenant_lifecycle('disable')。
+        非法状态返回 409 TENANT_STATE_INVALID。运行中资源前置校验由 tenant-service 编排。
+      tags: [Tenants]
+      x-ani-rbac-scope: "scope:tenant:write"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 租户已禁用
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tenant' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/TenantNotFound' }
+        "409": { $ref: '#/components/responses/Conflict', description: "TENANT_STATE_INVALID" }
+
+  /admin/tenants/{tenant_id}/auth:
+    get:
+      operationId: getTenantAuth
+      summary: 查询租户认证配置
+      tags: [Tenants]
+      x-ani-rbac-scope: "scope:tenant:read"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 租户认证配置
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantAuthConfig' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/TenantNotFound' }
+    put:
+      operationId: updateTenantAuth
+      summary: 更新租户认证配置
+      description: |
+        部分更新 sso_enabled / provider / mfa_required。Services 层 SSO/MFA 两个 PUT 均映射到此端点。
+      tags: [Tenants]
+      x-ani-rbac-scope: "scope:tenant:write"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TenantAuthUpdateRequest' }
+      responses:
+        "200":
+          description: 更新后的认证配置
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantAuthConfig' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/TenantNotFound' }
+
+  /admin/tenants/{tenant_id}/lifecycle:
+    get:
+      operationId: listTenantLifecycle
+      summary: 查询租户生命周期记录
+      tags: [Tenants]
+      x-ani-rbac-scope: "scope:tenant:read"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string }, description: "上一页返回的 next_cursor" }
+        - { name: action, in: query, schema: { type: string, enum: [create, freeze, unfreeze, disable] } }
+      responses:
+        "200":
+          description: 生命周期记录列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantLifecycleListResponse' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/TenantNotFound' }
@@ -9827,7 +10115,7 @@ tags:
   - { name: Branding,       description: "平台品牌化配置" }
   - { name: Tasks,          description: "异步任务查询" }
   - { name: QuotaAdmin,     description: "平台级配额管理（租户配额 CRUD + 配额元数据）" }
-  - { name: Tenants,        description: "平台级租户最小读写（status / plan_id / 套餐绑定租户计数）" }
+  - { name: Tenants,        description: "平台级租户管理（创建/列表/详情/状态机/认证/生命周期 + 套餐绑定租户计数）" }
   - { name: PlatformUsers,  description: "平台运营账号（tenant_id 为空的 users / user_roles / roles）" }
   - { name: TenantUsers,    description: "平台级租户用户与角色（users / user_roles / roles）" }
   - { name: GPUSpec,        description: "GPU 规格目录管理（创建/删除/可用性查询）" }

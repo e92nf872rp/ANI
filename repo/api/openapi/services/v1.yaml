@@ -1189,6 +1189,195 @@ components:
         id:      { type: string, format: uuid }
         message: { type: string }
 
+    # ===== Tenant List (租户列表管理) =====
+
+    AvailableTenantPlan:
+      type: object
+      required: [id, code, name]
+      properties:
+        id:   { type: string, format: uuid }
+        code: { type: string, description: "套餐代码" }
+        name: { type: string, description: "套餐名称" }
+
+    AvailableTenantPlanListResponse:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/AvailableTenantPlan' } }
+
+    CreateTenantRequest:
+      type: object
+      required: [idempotency_key, name, display_name, email, plan_id, admin_email, admin_name, admin_password]
+      properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落）" }
+        name:            { type: string, minLength: 3, maxLength: 40, pattern: '^[a-z0-9-]{3,40}$', description: "租户标识；活动租户内唯一" }
+        display_name:    { type: string, minLength: 1, maxLength: 128 }
+        email:           { type: string, format: email, description: "租户联系邮箱" }
+        plan_id:         { type: string, format: uuid, description: "须指向 status=active 的套餐" }
+        admin_email:     { type: string, format: email, description: "首位管理员邮箱" }
+        admin_name:      { type: string, minLength: 1, maxLength: 128, description: "首位管理员显示名" }
+        admin_password:  { type: string, minLength: 8, maxLength: 64, description: "至少包含大写/小写/数字/特殊字符中的三类；任何响应不回显" }
+
+    TenantListItem:
+      type: object
+      required: [id, name, display_name, plan_id, plan_code, status, admin_count, created_at]
+      properties:
+        id:           { type: string, format: uuid }
+        name:         { type: string }
+        display_name: { type: string }
+        plan_id:      { type: string, format: uuid }
+        plan_code:    { type: string, description: "套餐代码（service 层 JOIN tenant_plans 装配）" }
+        status:       { type: string, enum: [active, frozen, disabled] }
+        admin_count:  { type: integer, format: int64, description: "tenant-admin 角色成员数（Core 连表统计透传）" }
+        created_at:   { type: string, format: date-time }
+
+    TenantDetail:
+      type: object
+      description: "租户详情（GET /tenants/{tenantId}）"
+      required: [id, name, display_name, plan_id, plan_code, status, contact_email, user_count, admin_count, created_at, updated_at]
+      properties:
+        id:            { type: string, format: uuid }
+        name:          { type: string }
+        display_name:  { type: string }
+        plan_id:       { type: string, format: uuid }
+        plan_code:     { type: string }
+        status:        { type: string, enum: [active, frozen, disabled] }
+        contact_email: { type: string, format: email, nullable: true }
+        user_count:    { type: integer, format: int64, description: "租户成员总数" }
+        admin_count:   { type: integer, format: int64 }
+        frozen_at:     { type: string, format: date-time, nullable: true }
+        disabled_at:   { type: string, format: date-time, nullable: true }
+        created_at:    { type: string, format: date-time }
+        updated_at:    { type: string, format: date-time }
+
+    UpdateTenantRequest:
+      type: object
+      required: [idempotency_key]
+      description: "更新租户基本信息；不可改 name / status"
+      properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID；也可改传请求头 Idempotency-Key" }
+        display_name:    { type: string, minLength: 1, maxLength: 128, description: "未传表示不更新" }
+        contact_email:   { type: string, format: email, description: "未传表示不更新" }
+
+    TenantAuthConfig:
+      type: object
+      description: "租户 SSO/MFA 配置视图（tenant_auth 表）"
+      required: [sso_enabled, mfa_required, updated_at]
+      properties:
+        sso_enabled:  { type: boolean }
+        provider:     { type: string, nullable: true, description: "SSO 提供商标识；未配置时为 null" }
+        mfa_required: { type: boolean, description: "租户级 MFA 强制开关" }
+        updated_at:   { type: string, format: date-time }
+
+    UpdateTenantSsoRequest:
+      type: object
+      required: [idempotency_key]
+      properties:
+        idempotency_key: { type: string, format: uuid }
+        sso_enabled:     { type: boolean, description: "未传表示不更新" }
+        provider:        { type: string, nullable: true, description: "未传表示不更新" }
+
+    SsoTestResult:
+      type: object
+      required: [success, tested_at]
+      description: "SSO OIDC discovery 测试结果；不写库不写审计"
+      properties:
+        success:           { type: boolean }
+        discovery_result:  { type: object, additionalProperties: true, nullable: true, description: "OIDC discovery 文档摘要" }
+        error:             { type: string, nullable: true }
+        tested_at:         { type: string, format: date-time }
+
+    UpdateTenantMfaRequest:
+      type: object
+      required: [idempotency_key, mfa_required]
+      properties:
+        idempotency_key: { type: string, format: uuid }
+        mfa_required:    { type: boolean }
+
+    TenantQuotaViewItem:
+      type: object
+      required: [resource_type, display_name, used, total, unit]
+      properties:
+        resource_type: { type: string }
+        display_name:  { type: string, description: "来自 resource_quota_meta" }
+        used:          { type: integer, format: int64, minimum: 0 }
+        total:         { type: integer, format: int64, minimum: 0 }
+        unit:          { type: string }
+
+    TenantQuotaViewResponse:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/TenantQuotaViewItem' } }
+
+    QuotaChangeRequestInput:
+      type: object
+      required: [resource_type, new_value]
+      properties:
+        resource_type: { type: string, pattern: '^[a-z0-9_]{2,40}$' }
+        new_value:     { type: integer, format: int64, minimum: 0 }
+
+    SubmitQuotaChangeRequest:
+      type: object
+      required: [idempotency_key, items]
+      properties:
+        idempotency_key: { type: string, format: uuid }
+        items:
+          type: array
+          minItems: 1
+          description: "批内 resource_type 不可重复"
+          items: { $ref: '#/components/schemas/QuotaChangeRequestInput' }
+
+    QuotaChangeRequest:
+      type: object
+      required: [id, tenant_id, resource_type, old_value, new_value, status, requested_by, created_at]
+      properties:
+        id:            { type: string, format: uuid }
+        tenant_id:     { type: string, format: uuid }
+        resource_type: { type: string }
+        old_value:     { type: integer, format: int64, minimum: 0, description: "提交时从 Core resource_quota 冻结的 total" }
+        new_value:     { type: integer, format: int64, minimum: 0 }
+        status:        { type: string, enum: [pending, approved, rejected] }
+        requested_by:  { type: string, format: uuid, description: "申请人（平台用户）" }
+        created_at:    { type: string, format: date-time }
+
+    QuotaChangeRequestListResponse:
+      type: object
+      required: [items]
+      description: "配额变更申请列表（不分页）"
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/QuotaChangeRequest' } }
+
+    ReviewQuotaChangeRequest:
+      type: object
+      required: [idempotency_key, approved]
+      properties:
+        idempotency_key: { type: string, format: uuid }
+        approved:        { type: boolean, description: "true=通过并生效配额；false=驳回" }
+
+    TenantLifecycleEntry:
+      type: object
+      required: [id, action, created_at]
+      properties:
+        id:         { type: string, format: uuid }
+        action:     { type: string, enum: [create, freeze, unfreeze, disable] }
+        reason:     { type: string, nullable: true }
+        user_id:    { type: string, format: uuid, nullable: true }
+        request_id: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    TenantAuditLogEntry:
+      type: object
+      required: [id, action, resource, result, created_at]
+      properties:
+        id:         { type: string, format: uuid }
+        action:     { type: string, description: "如 tenant.create / tenant.freeze / tenant.quota_change_request.submit" }
+        resource:   { type: string }
+        result:     { type: string, enum: [success, failure] }
+        user_id:    { type: string, format: uuid, nullable: true }
+        details:    { type: object, additionalProperties: true, nullable: true }
+        created_at: { type: string, format: date-time }
+
     # ===== Platform Admins (平台运营账号管理) =====
 
     PlatformAdminListItem:
@@ -3399,6 +3588,444 @@ paths:
         "502": { $ref: '#/components/responses/BadGateway' }
         "504": { $ref: '#/components/responses/GatewayTimeout' }
 
+  # ===== Tenant List (租户列表管理) =====
+
+  /tenants/available-plans:
+    get:
+      operationId: listAvailableTenantPlans
+      summary: 查询可用套餐（创建租户选择器数据源，需 platform-admin / platform-ops / platform-readonly）
+      description: 仅返回 status=active 的套餐，不分页。
+      tags: [Tenants]
+      responses:
+        "200":
+          description: 可用套餐列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AvailableTenantPlanListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "502": { $ref: '#/components/responses/BadGateway' }
+
+  /tenants:
+    get:
+      operationId: listTenants
+      summary: 租户列表（需 platform-admin / platform-ops / platform-readonly）
+      tags: [Tenants]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 }, description: "每页数量" }
+        - { name: cursor, in: query, schema: { type: string }, description: "上一页返回的 next_cursor" }
+        - { name: status, in: query, schema: { type: string, enum: [active, frozen, disabled] } }
+        - { name: search, in: query, schema: { type: string }, description: "模糊匹配 name 或 display_name" }
+      responses:
+        "200":
+          description: 租户列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CursorPage'
+                  - properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/TenantListItem' } }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "502": { $ref: '#/components/responses/BadGateway' }
+    post:
+      operationId: createTenant
+      summary: 创建租户（需 platform-admin / platform-ops）
+      tags: [Tenants]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTenantRequest' }
+      responses:
+        "200":
+          description: 租户已创建（admin_password 不回显）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "409": { $ref: '#/components/responses/Conflict', description: "TENANT_NAME_CONFLICT / IDEMPOTENCY_KEY_REUSED" }
+        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "PLAN_NOT_ACTIVE" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+
+  /tenants/{tenantId}:
+    get:
+      operationId: getTenantDetail
+      summary: 查询租户详情（需 platform-admin / platform-ops / platform-readonly）
+      tags: [Tenants]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 租户详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_NOT_FOUND" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+    put:
+      operationId: updateTenant
+      summary: 更新租户基本信息（需 platform-admin / platform-ops）
+      tags: [Tenants]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateTenantRequest' }
+      responses:
+        "200":
+          description: 租户基本信息已更新
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_KEY_REUSED" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+
+  /tenants/{tenantId}/freeze:
+    post:
+      operationId: freezeTenant
+      summary: 冻结租户（需 platform-admin / platform-ops）
+      tags: [Tenants]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IdempotentOnlyRequest' }
+      responses:
+        "200":
+          description: 租户已冻结
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "TENANT_STATE_INVALID / IDEMPOTENCY_KEY_REUSED" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+
+  /tenants/{tenantId}/unfreeze:
+    post:
+      operationId: unfreezeTenant
+      summary: 解冻租户（需 platform-admin / platform-ops）
+      tags: [Tenants]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IdempotentOnlyRequest' }
+      responses:
+        "200":
+          description: 租户已解冻
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "TENANT_STATE_INVALID / IDEMPOTENCY_KEY_REUSED" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+
+  /tenants/{tenantId}/disable:
+    post:
+      operationId: disableTenant
+      summary: 禁用租户（需 platform-admin / platform-ops）
+      description: |
+        禁用前校验各维度配额 used=0；任一维度 used>0 返回 409 TENANT_HAS_RUNNING_RESOURCES。
+        disabled 为不可逆终态。
+      tags: [Tenants]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IdempotentOnlyRequest' }
+      responses:
+        "200":
+          description: 租户已禁用
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "TENANT_STATE_INVALID / TENANT_HAS_RUNNING_RESOURCES / IDEMPOTENCY_KEY_REUSED" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+
+  /tenants/{tenantId}/auth/sso:
+    get:
+      operationId: getTenantSso
+      summary: 查询租户 SSO 配置（需 platform-admin / platform-ops / platform-readonly）
+      tags: [Tenants]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: SSO/MFA 配置
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantAuthConfig' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_NOT_FOUND" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+    put:
+      operationId: updateTenantSso
+      summary: 更新租户 SSO 配置（需 platform-admin / platform-ops）
+      tags: [Tenants]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateTenantSsoRequest' }
+      responses:
+        "200":
+          description: SSO 配置已更新
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_KEY_REUSED" }
+        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "TENANT_SSO_CONFIG_INVALID" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+
+  /tenants/{tenantId}/auth/sso/test:
+    post:
+      operationId: testTenantSso
+      summary: 测试租户 SSO 连接（需 platform-admin / platform-ops）
+      description: 从 K8s Secret 加载配置并发起 OIDC discovery；不写库不写审计。
+      tags: [Tenants]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: SSO 测试结果
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SsoTestResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_NOT_FOUND" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+
+  /tenants/{tenantId}/auth/mfa:
+    put:
+      operationId: updateTenantMfa
+      summary: 切换租户 MFA 强制开关（需 platform-admin / platform-ops）
+      tags: [Tenants]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateTenantMfaRequest' }
+      responses:
+        "200":
+          description: MFA 配置已更新
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_KEY_REUSED" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+
+  /tenants/{tenantId}/quota:
+    get:
+      operationId: getTenantQuotaView
+      summary: 查询租户配额使用情况（需 platform-admin / platform-ops / platform-readonly）
+      description: 代理 Core GET /admin/tenants/{tenant_id}/quota 并 JOIN quota-meta 组装 display_name/unit。
+      tags: [Tenants]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 租户配额视图
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantQuotaViewResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_NOT_FOUND" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+
+  /tenants/{tenantId}/quota-requests:
+    get:
+      operationId: listQuotaChangeRequests
+      summary: 查询配额变更申请列表（需 platform-admin / platform-ops / platform-readonly）
+      description: 不分页；按 created_at DESC 排序。
+      tags: [Tenants]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [pending, approved, rejected] } }
+      responses:
+        "200":
+          description: 配额变更申请列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuotaChangeRequestListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_NOT_FOUND" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+    post:
+      operationId: submitQuotaChangeRequest
+      summary: 提交配额变更申请（需 platform-admin / platform-ops）
+      description: |
+        支持多维度批量提交；同一 tenant_id+resource_type 已有 pending 时覆盖（不返回 409）。
+      tags: [Tenants]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubmitQuotaChangeRequest' }
+      responses:
+        "200":
+          description: 配额变更申请已提交
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_KEY_REUSED" }
+        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "QUOTA_CHANGE_REQUEST_INVALID" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+
+  /tenants/{tenantId}/quota-requests/{reqId}/approve:
+    post:
+      operationId: reviewQuotaChangeRequest
+      summary: 审批配额变更申请（需 platform-admin / platform-ops）
+      tags: [Tenants]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: reqId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReviewQuotaChangeRequest' }
+      responses:
+        "200":
+          description: 配额变更申请已审批
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotentResult' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_NOT_FOUND / QUOTA_CHANGE_REQUEST_NOT_FOUND" }
+        "409": { $ref: '#/components/responses/Conflict', description: "QUOTA_CHANGE_REQUEST_NOT_PENDING / IDEMPOTENCY_KEY_REUSED" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+
+  /tenants/{tenantId}/lifecycle:
+    get:
+      operationId: listTenantLifecycle
+      summary: 查询租户生命周期记录（需 platform-admin / platform-ops / platform-readonly）
+      tags: [Tenants]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: action, in: query, schema: { type: string, enum: [create, freeze, unfreeze, disable] } }
+      responses:
+        "200":
+          description: 生命周期记录列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CursorPage'
+                  - properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/TenantLifecycleEntry' } }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_NOT_FOUND" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+
+  /tenants/{tenantId}/audit-logs:
+    get:
+      operationId: listTenantAuditLogs
+      summary: 查询租户操作历史（需 platform-admin / platform-ops / platform-readonly）
+      tags: [Tenants]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: action, in: query, schema: { type: string }, description: "过滤操作类型" }
+        - { name: result, in: query, schema: { type: string, enum: [success, failure] } }
+      responses:
+        "200":
+          description: 操作历史列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CursorPage'
+                  - properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/TenantAuditLogEntry' } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_NOT_FOUND" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+
+  /tenants/{tenantId}/admins:
+    get:
+      operationId: listTenantScopedAdmins
+      summary: 查询租户内管理员列表（需 platform-admin / platform-ops / platform-readonly）
+      description: |
+        复用 Core listTenantUsers（tenant_id 过滤）；返回 tenant-admin / user / auditor 角色成员。
+      tags: [Tenants]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: role, in: query, schema: { type: string, enum: [tenant-admin, user, auditor] } }
+        - { name: status, in: query, schema: { type: string, enum: [active, disabled] } }
+        - { name: search, in: query, schema: { type: string }, description: "模糊匹配 email/username/display_name" }
+      responses:
+        "200":
+          description: 租户内管理员列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CursorPage'
+                  - properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/AdminWithTenant' } }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_NOT_FOUND" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+
   /tenants/{tenantId}/plan:
     post:
       operationId: bindTenantPlan
@@ -3927,6 +4554,7 @@ tags:
   - { name: GpuContainers, description: "GPU容器（已废弃）" }
   - { name: Sandboxes, description: "Sandbox（已废弃）" }
   - { name: Tenant, description: "租户管理（成员/角色/SSO/Webhook）" }
+  - { name: Tenants, description: "租户列表管理（创建/列表/详情/状态机/认证/配额/生命周期/审计）" }
   - { name: TenantPlans, description: "配额套餐管理" }
   - { name: PlatformAdmins, description: "平台运营账号管理（创建/详情/角色/密码/禁用启用删除/审计）" }
   - { name: TenantAdmins, description: "租户管理员管理（邀请/角色/移交/禁用启用删除/审计）" }
