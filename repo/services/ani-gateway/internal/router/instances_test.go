@@ -179,6 +179,7 @@ func TestWorkloadLifecycleRequestFromHTTPMapsExtendedPayload(t *testing.T) {
 		Action:           "resize",
 		CPU:              "8",
 		Memory:           "16Gi",
+		SpecID:           "gpu-a100-full",
 		SnapshotName:     "checkpoint",
 		SnapshotID:       "snap-1",
 		IncludeDataDisks: &includeDataDisks,
@@ -204,7 +205,7 @@ func TestWorkloadLifecycleRequestFromHTTPMapsExtendedPayload(t *testing.T) {
 	if lifecycle.Action != ports.WorkloadLifecycleResize || lifecycle.TenantID != "tenant-1" || lifecycle.InstanceID != "instance-1" || lifecycle.IdempotencyKey != "idem-1" {
 		t.Fatalf("lifecycle identity = %+v", lifecycle)
 	}
-	if lifecycle.Resources.CPU != "8" || lifecycle.Resources.Memory != "16Gi" || lifecycle.SnapshotID != "snap-1" || lifecycle.VolumeID != "vol-1" || lifecycle.FilesystemID != "fs-1" || lifecycle.MountPath != "/mnt/data" {
+	if lifecycle.Resources.CPU != "8" || lifecycle.Resources.Memory != "16Gi" || lifecycle.SpecID != "gpu-a100-full" || lifecycle.SnapshotID != "snap-1" || lifecycle.VolumeID != "vol-1" || lifecycle.FilesystemID != "fs-1" || lifecycle.MountPath != "/mnt/data" {
 		t.Fatalf("lifecycle resources = %+v", lifecycle)
 	}
 	if lifecycle.IncludeDataDisks == nil || !*lifecycle.IncludeDataDisks || lifecycle.ReadOnly == nil || !*lifecycle.ReadOnly || lifecycle.Replicas == nil || *lifecycle.Replicas != 3 || lifecycle.Enabled == nil || *lifecycle.Enabled {
@@ -212,6 +213,50 @@ func TestWorkloadLifecycleRequestFromHTTPMapsExtendedPayload(t *testing.T) {
 	}
 	if lifecycle.ImageID != "img-2" || lifecycle.Strategy != "rolling" || lifecycle.SecretID != "secret-1" || lifecycle.BindingType != "env" || lifecycle.EnvName != "DATABASE_URL" || len(lifecycle.SecurityGroupIDs) != 1 || lifecycle.Duration != 15*time.Minute {
 		t.Fatalf("lifecycle operation fields = %+v", lifecycle)
+	}
+}
+
+type capturingResizeService struct {
+	ports.WorkloadInstanceService
+	resizeReq *ports.WorkloadInstanceResizeRequest
+}
+
+func (s *capturingResizeService) Resize(ctx context.Context, request ports.WorkloadInstanceResizeRequest) (ports.WorkloadInstanceRecord, error) {
+	s.resizeReq = &request
+	return ports.WorkloadInstanceRecord{}, nil
+}
+
+// Regression: the gateway lifecycle handler must forward spec_id into
+// service.Resize; otherwise resize with only spec_id is rejected as "at least
+// one of cpu, memory, or spec_id is required".
+func TestInstanceLifecycleResizeForwardsSpecIDToService(t *testing.T) {
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Set("user_id", "user-a")
+		c.Next(ctx)
+	})
+	real := newInstanceAPI()
+	fake := &capturingResizeService{WorkloadInstanceService: real.service}
+	registerInstancesWithRuntime(h.Group("/api/v1"), nil, false, nil, nil, nil, &InstanceRuntime{
+		Service:    fake,
+		Store:      real.store,
+		Operations: real.operations,
+	}, nil)
+
+	body := `{"action":"resize","idempotency_key":"resize-spec-a","spec_id":"gpu-a100-full"}`
+	resp := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/instances/inst-1/lifecycle",
+		&ut.Body{Body: bytes.NewBufferString(body), Len: len(body)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+	).Result()
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode(), resp.Body())
+	}
+	if fake.resizeReq == nil {
+		t.Fatal("service.Resize was not called")
+	}
+	if fake.resizeReq.SpecID != "gpu-a100-full" {
+		t.Fatalf("Resize SpecID = %q, want gpu-a100-full", fake.resizeReq.SpecID)
 	}
 }
 

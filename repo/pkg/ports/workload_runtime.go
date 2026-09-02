@@ -605,6 +605,7 @@ type WorkloadInstanceResizeRequest struct {
 	TenantID        string
 	InstanceID      string
 	Resources       WorkloadResourceRequest
+	SpecID          string
 	UserID          string
 	PermissionProof string
 	RequestedAt     time.Time

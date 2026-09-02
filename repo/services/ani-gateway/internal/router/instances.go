@@ -1751,6 +1751,7 @@ func (api *instanceAPI) lifecycle(ctx context.Context, c *app.RequestContext) {
 			InstanceID:      lifecycle.InstanceID,
 			IdempotencyKey:  lifecycle.IdempotencyKey,
 			Resources:       lifecycle.Resources,
+			SpecID:          lifecycle.SpecID,
 			UserID:          lifecycle.UserID,
 			PermissionProof: lifecycle.PermissionProof,
 			RequestedAt:     lifecycle.RequestedAt,

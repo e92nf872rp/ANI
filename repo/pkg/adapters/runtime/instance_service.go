@@ -729,6 +729,7 @@ func (s *LocalInstanceService) Resize(ctx context.Context, request ports.Workloa
 		InstanceID:      request.InstanceID,
 		Action:          ports.WorkloadLifecycleResize,
 		Resources:       request.Resources,
+		SpecID:          request.SpecID,
 		UserID:          request.UserID,
 		PermissionProof: request.PermissionProof,
 		RequestedAt:     request.RequestedAt,
