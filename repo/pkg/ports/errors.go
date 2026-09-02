@@ -27,11 +27,9 @@ var (
 	// Tenant user admin sentinel errors (users / user_roles / roles).
 	ErrUserNotFound           = errors.New("user not found")
 	ErrUserAlreadyTenantAdmin = errors.New("user already tenant admin")
-	ErrTenantOwnerRoleLocked  = errors.New("tenant owner role locked")
-	ErrLastTenantOwner        = errors.New("last tenant owner")
-	ErrTransferTargetInvalid  = errors.New("transfer target invalid")
 	ErrRoleChangeInvalid      = errors.New("role change invalid")
 	ErrPasswordSameAsOld      = errors.New("password same as old")
+	ErrUserStateInvalid       = errors.New("user state invalid")
 	// Metadata transaction sentinel errors.
 	ErrMetadataTenantTxBegin    = errors.New("metadata tenant tx begin")
 	ErrMetadataTenantTxCommit   = errors.New("metadata tenant tx commit")

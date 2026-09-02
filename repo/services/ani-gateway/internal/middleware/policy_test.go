@@ -32,8 +32,9 @@ func TestRateLimitAppliesToPlatformPrincipal(t *testing.T) {
 	h := server.New()
 	h.Use(
 		RequestID(),
-		AuthWithClient(client),
-		RBACWithClient(client),
+		ResolveAuthzPolicy(authz.CoreRegistry(), authz.Config{}),
+		AuthenticatePrincipal(client),
+		AuthorizePrincipal(client),
 		RateLimit(store),
 	)
 	h.GET("/api/v1/admin/plans/bound-tenant-counts", func(ctx context.Context, c *app.RequestContext) {
@@ -55,42 +56,11 @@ func TestRateLimitAppliesToPlatformPrincipal(t *testing.T) {
 	}
 }
 
-// TestRegisterFailsClosedOnInvalidAuthzConfig 验证非法 authz 配置在注册阶段失败。
-func TestRegisterFailsClosedOnInvalidAuthzConfig(t *testing.T) {
-	if err := Register(server.New(), nil); err == nil {
-		t.Fatal("nil store: want error")
-	}
-
-	cases := map[string]struct {
-		mode       string
-		operations string
-		authMode   string
-	}{
-		"invalid mode":        {mode: "bogus"},
-		"dev with pilot":      {mode: "pilot", operations: "listQuotaMeta", authMode: "dev"},
-		"dev with full":       {mode: "full", authMode: "dev"},
-		"full with allowlist": {mode: "full", operations: "listQuotaMeta"},
-		"off with allowlist":  {mode: "off", operations: "listQuotaMeta"},
-	}
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			t.Setenv("GATEWAY_AUTHZ_POLICY_MODE", tc.mode)
-			t.Setenv("GATEWAY_AUTHZ_PILOT_OPERATIONS", tc.operations)
-			t.Setenv("ANI_AUTH_MODE", tc.authMode)
-			if err := Register(server.New(), newMemoryGatewayStoreForTest()); err == nil {
-				t.Fatal("want configuration error before serving")
-			}
-		})
-	}
-}
-
-// TestRegisterSucceedsWithDefaultOff 验证默认配置（mode off）注册成功。
-func TestRegisterSucceedsWithDefaultOff(t *testing.T) {
-	t.Setenv("GATEWAY_AUTHZ_POLICY_MODE", "")
-	t.Setenv("GATEWAY_AUTHZ_PILOT_OPERATIONS", "")
-	t.Setenv("ANI_AUTH_MODE", "")
+// TestRegisterSucceedsWithAuthServiceMode 验证 auth_service 模式下无 policy env 注册成功。
+func TestRegisterSucceedsWithAuthServiceMode(t *testing.T) {
+	t.Setenv("ANI_AUTH_MODE", "auth_service")
 	if err := Register(server.New(), newMemoryGatewayStoreForTest()); err != nil {
-		t.Fatalf("default off config: %v", err)
+		t.Fatalf("auth_service config: %v", err)
 	}
 }
 
@@ -117,19 +87,19 @@ func TestIsCorePolicyPath(t *testing.T) {
 	}
 }
 
-// TestAuthWithClientRejectsMissingPolicy 验证 Core 注册路由缺 registry 时 fail closed。
-func TestAuthWithClientRejectsMissingPolicy(t *testing.T) {
+// TestAuthenticatePrincipalRejectsMissingPolicy 验证 Core 注册路由缺 registry 时 fail closed。
+func TestAuthenticatePrincipalRejectsMissingPolicy(t *testing.T) {
 	// 空 registry 模拟生成物漂移：路由已注册但 policy 缺失。
 	registry, err := authz.NewRegistry(nil)
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
-	cfg := authz.Config{Mode: authz.ModeOff}
+	cfg := authz.Config{}
 	h := server.New()
 	h.Use(
 		RequestID(),
 		ResolveAuthzPolicy(registry, cfg),
-		AuthWithResolvedPolicy(tokenStub{}),
+		AuthenticatePrincipal(tokenStub{}),
 	)
 	h.GET("/api/v1/instances", func(ctx context.Context, c *app.RequestContext) {
 		c.Status(http.StatusOK)
@@ -150,7 +120,7 @@ func TestUnmatchedRouteReturns404Not503(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
-	cfg := authz.Config{Mode: authz.ModeOff}
+	cfg := authz.Config{}
 	h := server.New()
 	h.Use(
 		RequestID(),

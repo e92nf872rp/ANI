@@ -328,21 +328,21 @@ func (s *MinIOObjectStore) StatObject(ctx context.Context, ref ports.ObjectRef) 
 }
 
 func (s *MinIOObjectStore) SignedUploadURL(ctx context.Context, ref ports.ObjectRef, ttl time.Duration) (ports.SignedURL, error) {
-	return s.presign(ctx, http.MethodPut, ref, ttl)
+	return s.presignWithEndpoint(ctx, http.MethodPut, ref, ttl, s.publicEndpoint)
 }
 
 func (s *MinIOObjectStore) SignedDownloadURL(ctx context.Context, ref ports.ObjectRef, ttl time.Duration) (ports.SignedURL, error) {
-	return s.presign(ctx, http.MethodGet, ref, ttl)
+	return s.presignWithEndpoint(ctx, http.MethodGet, ref, ttl, s.endpoint)
 }
 
-func (s *MinIOObjectStore) presign(ctx context.Context, method string, ref ports.ObjectRef, ttl time.Duration) (ports.SignedURL, error) {
+func (s *MinIOObjectStore) presignWithEndpoint(ctx context.Context, method string, ref ports.ObjectRef, ttl time.Duration, endpoint *url.URL) (ports.SignedURL, error) {
 	if err := ctx.Err(); err != nil {
 		return ports.SignedURL{}, err
 	}
 	if ttl <= 0 {
 		return ports.SignedURL{}, fmt.Errorf("%w: signed URL ttl must be positive", ports.ErrInvalid)
 	}
-	target, err := s.objectURLForEndpoint(ref, s.publicEndpoint)
+	target, err := s.objectURLForEndpoint(ref, endpoint)
 	if err != nil {
 		return ports.SignedURL{}, err
 	}

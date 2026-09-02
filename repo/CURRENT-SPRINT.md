@@ -96,10 +96,18 @@
 
 > **MODEL TENANT ISOLATION + VECTOR INFERENCE A（2026-08-25）：** `MODEL-TENANT-ISOLATION-VECTOR-INFERENCE-A` 已完成限定 live passed：ModelRepository Get/List/count/Delete/CreateVersion/ListVersions 均使用显式 tenant SQL fence并保留 RLS；真实 foreign Model Get=404，owner List 不含 foreign ID。inference-service 从既有 Model capabilities 派生并冻结 `generate`/`embed`；当前 vLLM embedding argv 使用 `--runner pooling --convert embed`，有界 1 MiB smoke 可解析真实约 19 KiB 响应。CPU 测试服务到 `running`，internal ClusterIP `/v1/embeddings`=200 且 data/embedding 非空；测试资源已清理，控制面镜像已恢复。未改 OpenAPI；公开 Envoy `/v1/embeddings`、GPU 与 embedding 质量不在结论范围。evidence：`development-records/live-evidence/model-tenant-vector-inference-live-20260825.json`；记录：`development-records/model-tenant-isolation-vector-inference.md`。
 
+> **TASKCENTER-C1（2026-08-27）：** `TASKCENTER-C1` 契约批次已完成 local verified（分支 `feat/async-task-core-integration`）：AsyncTask enum 扩展 5 种 `instance.*` task_type + `instance` resource_type（含存量缺口 `sandbox.checkpoint.restore` 补齐）；AsyncTask description 写入真进度语义与实例 state→任务映射表；新增 `GET /tasks` list 契约与 `TaskListResponse`；`GET /tasks/{task_id}` 补 operationId/security/`x-ani-authz`/rbac scope/401/403；鉴权注册表两 tasks 路由翻转为 generated（pilot 集合未扩，运行时零变化）；Core SDK/静态 docs/Console schema 生成物同步；Core API v1 兼容基线有意再生成（补 operationId 触发门禁）。validate-architecture / validate-gateway-authz / validate-auth-contract / go test / compileall / validate-core-api-compatibility / openapi_spec_validator / git diff --check 全过（本地 Windows 存量 sandbox symlink 测试环境失败已确认与基线一致）。后续 `TASKCENTER-A1`（list + 实例真进度懒同步）按方案 §6 阶段 B 执行。记录：`development-records/TASKCENTER-C1.md`。
+
+> **TASKCENTER-A1（2026-08-27）：** `TASKCENTER-A1` 实现批次已完成 local verified（分支 `feat/async-task-core-integration`）：`ports.AsyncTaskStore` 追加 `List`（keyset cursor）并固化 Update 终态写保护接口语义；Local/Metadata 双 store List + Update 终态写保护（SQL 守卫 + 0 行重读返回当前记录 / mutex 内同语义比较）；`20260827_001_async_tasks_list_index.sql` 复合索引；Gateway `GET /tasks` list handler（limit 1-100 默认 20、status/task_type/resource_type 筛选、非法入参 400）；实例 create（含 409 completed 重放补写）/lifecycle 四 action 写入点（running/10 真进度 + `writeAuditTask` 旁路失败降级仅日志，实例响应契约零变化）；`observeInstance`（store 读 + 单实例 K8s 刷新）提取注入任务路由；`GET /tasks/{task_id}` 非终态 `instance.*` 任务读时懒同步按实例 state 映射表推进（写放大抑制、失败降级、终态守卫并发乱序不回退）；任务响应补 `resource_id`/`error_message`/`dead_letter_at`（单查/list/模式 B 三处共用）；任务中心页面文档同步（list 上线、kb 域噪声声明、TODO-YAML 解除、取消归延后方案 V2-3）。go test 全包 + go vet + validate-architecture + validate-services 等价拆解（boundary/contract/route/spec-split/sdk-beta/生成物零漂移/rag compileall/Console schema 零漂移）+ validate-async-task-store + git diff --check 全过；§8.2/§8.3 验收矩阵由 29 个新测试逐条覆盖。真实 PG：连接成功，索引迁移成功应用并确认存量索引缺失属实；RLS 跨租户拦截无法验证（dev 库 `ani` 账号 SUPERUSER+BYPASSRLS 绕过 FORCE RLS），应用层隔离由 `WHERE tenant_id` + Local store 键隔离测试保证。不建 worker/outbox、不做取消、无 Services 层改动。方案范围内任务全部完成；Services 集成延后项存档 `async-task-services-integration-deferred.md`。记录：`development-records/TASKCENTER-A1.md`；差异文档：仓库根目录 `implementation-diff-async-task.md`。
+
+> **TASKCENTER-A2（2026-08-31）：** `TASKCENTER-A2` RLS 真实验证与仓库对齐修复批次已完成 local verified（分支 `feat/async-task-core-integration`）：切换 `ani_app_user`（非 SUPERUSER/非 BYPASSRLS，`ani_app` 成员）收口 A1 遗留项——async_tasks 跨租户 SELECT/Get 拦截实测 0 行、Create 同款 INSERT 与 Update 同款 SQL（懒同步 + 终态写保护守卫）写路径通过、平台上下文全可见；live-verified 后回写仓库迁移 `20260831_001_async_tasks_rls_fix.sql`，修复仓库与 dev 库三处漂移：init_schema 的 RESTRICTIVE-only `tenant_isolation` 对非 BYPASSRLS 角色 fail-closed（改双 PERMISSIVE `platform_bypass` + `self`，对齐 20260825_001 workload_instances 模式）、`GRANT ON ALL TABLES` 在建表前执行导致表级授权缺失（补 SELECT/INSERT/UPDATE，不授 DELETE）、platform_bypass 用 `NULLIF` 形态免疫池化连接空串残留。新增 2 个 integration 测试（策略形态防回归 + 跨租户行为断言，固定 UUID/幂等键，已多轮幂等重跑全绿，build tag 隔离不进默认 make test）；validate-architecture 核心守卫全过（make 包装沙箱噪音与 A1 一致）+ `git diff --check` 通过。dev 库执行 `20260831_001` 待 DBA（admin 凭据密码认证失败），迁移幂等重放安全。记录：`development-records/TASKCENTER-A2.md`；差异文档遗留风险第 1 条已标注收口。
+
 > **Sprint 13（当前活跃冲刺，2026-06-19 起）：** Core real provider 与 live gate 收敛。前置 Sprint 12 已闭合 19 个 Core handler + 2 个 422；Sprint 13 不重写 Core handler，不把 Services 业务资源回流 Core API，而是在既有 `pkg/ports` / `pkg/adapters` / Gateway handler 边界接入真实组件，并形成可复跑 live gate 与 evidence JSON。历史冻结原因和历史结论仍保留在旧批次记录中，但不是当前 PR 规则。计划见 [`development-records/sprint13-real-provider-readiness-plan.md`](development-records/sprint13-real-provider-readiness-plan.md)。
 
 > **Sprint 14 计划与分支状态：** Sprint 14 Core 韧性与服务语义计划见 [`development-records/sprint14-core-resilience-plan.md`](development-records/sprint14-core-resilience-plan.md)（限流/幂等重放/超时/readyz/重试断路/降级/failover）。配套交付 Services 的前端加速设计：[`development-records/frontend-acceleration-design-for-services.md`](development-records/frontend-acceleration-design-for-services.md)。当前主线入口仍保留 Sprint 13 production-shaped 边界；`feature/sprint14-core-resilience-semantics` 已完成 Sprint14 aggregate live gate，待 PR/评审后再进入主线状态。
 > **Sprint 14 分支执行记录：** `feature/sprint14-core-resilience-semantics` 已完成 R-P0-0 gateway shared store 前置批次、R-P0-1 gateway rate limit、R-P0-2 gateway idempotency replay、R-P0-3 adapter per-call timeout、R-P0-4 data-plane readyz health、R-P1-5 retry/circuit-breaker foundation、R-P1-6 resilience degradation 与 R-P2-7 multi-endpoint failover config，见 [`development-records/r-p0-0-gateway-shared-store.md`](development-records/r-p0-0-gateway-shared-store.md)、[`development-records/r-p0-1-gateway-rate-limit.md`](development-records/r-p0-1-gateway-rate-limit.md)、[`development-records/r-p0-2-gateway-idempotency-replay.md`](development-records/r-p0-2-gateway-idempotency-replay.md)、[`development-records/r-p0-3-adapter-resilience-timeout.md`](development-records/r-p0-3-adapter-resilience-timeout.md)、[`development-records/r-p0-4-readyz-dataplane-health.md`](development-records/r-p0-4-readyz-dataplane-health.md)、[`development-records/r-p1-5-retry-circuit-breaker.md`](development-records/r-p1-5-retry-circuit-breaker.md)、[`development-records/r-p1-6-resilience-degradation.md`](development-records/r-p1-6-resilience-degradation.md)、[`development-records/r-p2-7-multi-endpoint-failover-config.md`](development-records/r-p2-7-multi-endpoint-failover-config.md)。R-P0-0..R-P2-7 单批次仍保持 local/logic verified 边界；其生产就绪结论由 `SPRINT14-CORE-RESILIENCE-LIVE-GATE` / `validate-sprint14-resilience-live-gate` / Sprint14 resilience live gate 补齐：已在 `ani-sprint14-resilience` 隔离 namespace 真实执行 P0 strong backend kill、P1 weak dependency degraded、P2 controller primary kill / follower failover，并归档脱敏 evidence。该 production-ready 范围仅限隔离 Sprint14 Core resilience fixture；不把现有 Sprint13 单副本后端或 full platform 标为 production ready。
+
+> **INSTANCE-NETWORK-STORE-READ-RLS-A（2026-08-27~09-01）：** live passed（K8s 测试环境 10.10.1.66）。GPU 容器实例创建引用 VPC NOT_FOUND 的三层根因修复：`NetworkResourceStore` 补读方法 + `LocalNetworkService` 穿透读 + Gateway 注入 store；迁移 `20260828_001` 修复实例链路 8 张表 RESTRICTIVE-only RLS；`WORKLOAD_PROVIDER_APPLY_ENABLED=true` 接线。验证止于实例 201 → provisioning → Volcano 排队（GPU 容量问题非代码）；不外推 GPU runtime ready / production ready。批次记录见 [`development-records/instance-network-store-read-rls-a.md`](development-records/instance-network-store-read-rls-a.md)。
 
 ## 当前冲刺
 
@@ -138,10 +146,13 @@
 | AUTHZ-COMPAT-B0 (PR2) | ✅ local verified | `e2eb502`；规范 Principal + LegacyPrincipalView + Mode/Config + ResolveAuthzPolicy + 横切 identity key；gateway 仍走旧 ValidateToken/CheckPermission |
 | AUTHZ-CONTRACT-B1 (PR3) | ✅ local verified | `65f00f3`；additive V2 proto + auth-service JWT/API Key principal + permission evaluator + Gateway V2 client；gateway 仍 mode=off 不调 V2 |
 | AUTHZ-PILOT-C (PR4) | ✅ local verified | `ad83e41`；v1.yaml security 注解 + mode Validate + V2 授权链路 + pilot E2E + deployment env；仅 listQuotaMeta 启用 V2 |
+| AUTHZ-MODE-SIMPLIFY-D (PR5) | ✅ local verified | `4753a42` + 第六版修订；契约即开关收敛——删除 mode 开关（policy/dev/pilot/off）与 pilot allowlist，policy 路由恒为 x-ani-authz（generated）→V2、其余 legacy、public 放行，dev 自动回落 legacy；`ANI_AUTH_MODE` 唯一保留 env，不设废弃 env 残留检测（新集群从头部署拍板）；deploy 清单删除两个废弃 env 条目；`mode.go`/`mode_test.go` 改名 `config.go`/`config_test.go`，删兼容入口 6 函数 |
 
 **gofmt 修复：** `cfe5b30`。**批次记录：** `development-records/authz-policy-compat-contract-pilot.md`。**验证命令：** `go build ./services/ani-gateway/... ./services/auth-service/...` + `go test -count=1 ./services/ani-gateway/... ./services/auth-service/...` + `gofmt -l`。
 
 **预存问题修复（2026-08-25）：** 本地实测 pilot 模式后修复 4 个文件的预存不一致——删 v1.yaml 已弃用的 branding PUT/POST logo + tasks DELETE 路由的 router 注册和 registry 条目（branding_resources.go / task_resources.go / zz_generated_core_policies.go）；gpu_scheduling_resources.go `:id`→`:queue_id` 与 v1.yaml 一致（修复运行时 `LookupByRequest` lookup miss + route coverage 门禁）。修复后 drift 门禁通过、route coverage 0 error（274 registered, 224 registry）。详见 `development-records/authz-policy-compat-contract-pilot.md`。
+
+**PR5 批次记录：** `development-records/authz-mode-simplify-d.md`（含 2026-08-31 第六版修订章节：删废弃 env 残留检测、改名 config.go、删兼容入口 6 函数、测试归一，12 files +51/−222）。**验证命令：** `go test ./services/ani-gateway/...` + `make gen-gateway-authz`（生成物零漂移）+ `make validate-gateway-authz`（18 tests、283 registered routes 0 errors）+ `make validate-architecture` + `git diff --check`；`make test` 仅 `pkg/adapters/runtime` 的 Windows 预存失败（sandbox symlink 特权 / Python `os.O_DIRECTORY`；origin/main @ `9c7bf2b` worktree 复跑同包同样 FAIL，不在本次改动集）。**本地实测：** `ANI_AUTH_MODE=auth_service`（无任何 policy env）启动正常；public 放行（branding 200）、generated 接口 `/api/v1/admin/quota-meta` 无凭证被 V2 拒绝 401、legacy 无效 token 401；`ANI_AUTH_MODE=dev` 启动正常且 quota-meta 回落 legacy 返回真实数据 200。登录全链路（有 token 200）受数据库角色权限迁移（#124 `ani_app_user`）未应用阻塞，暂缓验证。修订后代码已与方案第六版 §4.1–§4.5 逐项复核一致。
 
 ## 账密登录模块（2026-07）
 
@@ -380,6 +391,44 @@ make validate-doc-entrypoints
 git diff --check
 ```
 
+## BOSS 租户管理员功能流（2026-08）
+
+> BOSS 平台租户管理员管理功能开发流，覆盖管理员全生命周期（OpenAPI 契约 → 接口/数据模型 → DB 迁移 → 网关接入 → 13 端点端到端实现 → 多轮 review-it → 文档对齐）。14 个 issue 全部实现完成。批次记录归档于 `development-records/tenant-admin-issue-*.md` 和 `tenant-admin-feature-batch.md`。
+
+| Issue | 描述 | 状态 | 证据 |
+|---|---|---|---|
+| #1 | OpenAPI 契约：13 端点 + 14 schema + 错误码表（FORBIDDEN/USER_STATE_INVALID，IDEMPOTENCY_* 为网关中间件） | ✅ 已完成 | `tenant-admin-issue-001-openapi-contract.md` |
+| #2 | 接口与数据模型：TenantAdminStore（仅 invitation/audit）+ TenantAdminSvcClient（12 方法）+ TenantSvcClient（2 方法）+ proto 13 RPC | ✅ 已完成 | `tenant-admin-issue-002-interfaces-data-model.md` |
+| #3 | 数据库迁移：三个独立文件（20260821_001 建表 + token_hash 唯一索引 + RLS、20260825_001 部分唯一索引 uk_tenant_admin_invitation_pending、20260827000200 users ALTER display_name + is_deleted + deleted_at） | ✅ 已完成 | `tenant-admin-issue-03-database-migration.md` |
+| #4 | 网关接入：REST→gRPC 转发 + Core DB 直连双路径，12 端点 + tenant_admin_resources.go + tenant_admin_runtime.go | ✅ 已完成 | `tenant-admin-issue-04-gateway-integration.md` |
+| #5 | 可用租户列表：ListAvailableTenants 端到端（gRPC → Core SDK HTTP → ani-gateway Core handler → PG bypass RLS） | ✅ 已完成 | `tenant-admin-issue-005-available-tenants-api.md` |
+| #6 | 邀请管理员：InviteTenantAdmin 10 步流程 + 部分唯一索引竞态防护 + ConstraintName 区分冲突 + 审计 best-effort | ✅ 已完成 | `tenant-admin-issue-006-invite-api.md` |
+| #7 | 重发邀请：ResendTenantAdminInvitation 8 步流程 + UpdateInvitation 冲突处理 + 终态错误 detail 区分 | ✅ 已完成 | `tenant-admin-issue-007-resend-api.md` |
+| #8 | 跨租户管理员列表：Core SDK ListTenantAdmins 全量拉取 + 本地 Store ListInvitationFlags 内存合并 + BatchGetUsers 三层贯通 + 27 sub-tests | ✅ 已完成 | `tenant-admin-issue-008-list-all-tenant-admins.md` |
+| #9 | 管理员详情：GetTenantAdminDetail + lazy expire 写回 DB + ErrStoreUnavailable/ErrCoreUnavailable 分离 | ✅ 已完成 | `tenant-admin-issue-009-detail-api.md` |
+| #10 | 可分配角色列表：ListTenantRoles + 排除 platform-* + 租户软删除后仅返回系统角色 + EXISTS 子查询 | ✅ 已完成 | `tenant-admin-issue-010-roles-api.md` |
+| #11 | 角色查询与修改：UpdateTenantAdminRole role_id UUID 全链路 + upsert 简化 + user_id 唯一索引 + GetTenantAdminRole + 5 轮 review-it | ✅ 已完成 | `tenant-admin-issue-011-role-change-and-query.md` |
+| #12 | 重置密码：ResetTenantAdminPassword + bcrypt cost=12 + 禁用态允许 + 明文不落审计/日志/响应 | ✅ 已完成 | `tenant-admin-issue-012-reset-password.md` |
+| #13 | 禁用/启用/删除：SetStatus + SoftDelete 不改 status + 重复 disable/enable 409 USER_STATE_INVALID + Core DB 事务内 SELECT+UPDATE | ✅ 已完成 | `tenant-admin-issue-013-disable-enable-delete.md` |
+| #14 | 操作历史：ListTenantAdminAuditLogs + WHERE details->>'target_id'=userId + result 过滤 success/failure + limit 三层截断 | ✅ 已完成 | `tenant-admin-issue-014-audit-logs-api.md` |
+| 文档对齐 | 以代码和 issue 为标准，5+ 轮深度审计修正 SPEC/UX/PRD/Plan 四份文档 + 7 处 issue 修正 | ✅ 已完成 | `tenant-admin-doc-alignment-batch.md` |
+| 批次汇总 | 功能批次汇总：13 项设计决策、5 张偏差表、4 项 tradeoff、4 项 open question | ✅ 已完成 | `tenant-admin-feature-batch.md` |
+
+验收命令：
+
+```bash
+cd repo/services/tenant-service
+go build ./...
+go test ./internal/... -run "TestTenantAdminService" -v
+
+cd repo/services/ani-gateway
+go build ./...
+go test ./internal/router/ -run "TestTenantAdmin|TestHandler_ListAvailableTenants|TestHandler_ListTenantRoles" -v
+
+make validate-architecture
+git diff --check
+```
+
 ## Metering Service 功能流（2026-08）
 
 > 独立于 Sprint 13/14 real provider 收敛的 Metering Service 计量采集功能开发流，覆盖 metering_usage_records migration、port 接口、collector 实现、consumer/rebuilder、集成测试、部署清单与 Live Gate 缺陷修复。批次记录归档于 `development-records/pr-m1-metering-consumer.md` ~ `pr-m5-metering-consumer.md`。
@@ -391,6 +440,7 @@ git diff --check
 | #003 | Consumer handleEvent + seenSeq 两阶段锁（11 测试）+ Rebuilder WithPlatformTx 绕过 RLS（8 测试）+ main.go bootstrap | ✅ 已完成 | `pr-m3-metering-consumer.md` |
 | #004 | 9 集成测试场景（事件驱动/保底/幂等/rebuild/seenSeq 乱序/失败重投/租户 mismatch/poison/DB UNIQUE）9/9 PASS | ✅ 已完成 | `pr-m4-metering-consumer.md` |
 | #005 | 部署清单 metering-service-live-deps.yaml + Live Gate 4 缺陷修复 + NATS 事件验证 | ✅ 已完成 | `pr-m5-metering-consumer.md` |
+| #006 | 计量查询 PG adapter（V3 方案）：ports 扩展 + PgMeteringService（租户 RLS / 平台 BYPASSRLS）+ Gateway METERING_PROVIDER_MODE 装配 + 平台查询 handler + pilot 鉴权接入 + 前端同步 | ✅ 已完成 | `pr-m6-metering-query-pg-adapter.md` |
 
 Live Gate 修复详情（2026-08-14，真实 K8s 集群部署后）：
 
@@ -463,6 +513,10 @@ git diff --check
 - **cursor 分页 blocked-by-core**：`listInstanceEvents` 和 `listInstanceSecurityEvents` query 缺 `cursor` 入参（response 有 `next_cursor`），遵守契约不发明字段，降级为一次性加载
 - **后端 WebSocket exec 服务端未实现**：SPEC §11.2 已知边界，归后续 Core 批次
 - **Issue #011 lazy re-observe**：非终态实例在 Get/List 时触发 K8s 状态同步，避免引入后台 controller
+
+### 热修复：实例运行时信息回填（INSTANCE-RUNTIME-HYDRATE-A，2026-09-01）
+
+> 前端反馈 GPU 容器实例列表/详情缺节点、私网 IP、访问端点、终端。Gateway `instances.go` 修复：节点字段错位（`refreshOneStoreStatus` 补回填 `Compute.NodeName`）、从 Pod 回读 PodIP 填 `Network.PrivateIP`/`Endpoint`/`Endpoints`、运行态 container/gpu_container 置 `Access.ExecAvailable=true`；`get` 详情处理器接入 `refreshOneStoreStatus`。已在 10.10.1.66 live passed（镜像 `ani-gateway:dev-20260901`）：运行中 GPU 容器实例 `test-gpu-inst-create` 列表/详情一致回填 dev-phys-02 / 10.60.0.3 / exec_available=true；`go test ./services/ani-gateway/...` + `make validate-architecture` 通过。批次详情见 `repo/development-records/instance-runtime-hydrate-a.md`。
 
 ## Instance Observability Completion 增量补全（2026-07，PR4 分支）
 

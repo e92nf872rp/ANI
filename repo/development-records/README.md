@@ -13,6 +13,14 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 任务中心异步任务 Core 集成（2026-08，分支 feat/async-task-core-integration）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| TASKCENTER-C1 | 契约批次：AsyncTask enum 扩展 5 种 `instance.*` + `instance` resource_type + 存量缺口 `sandbox.checkpoint.restore`；AsyncTask description 写入真进度语义（running 起步 / GET 单查懒同步 / 状态阶梯 / list 快照）与实例 state→任务映射表；新增 `GET /tasks`（cursor 分页/筛选/authz/401/403）与 `TaskListResponse`；`GET /tasks/{task_id}` 补 operationId/security/authz/rbac scope/401/403；鉴权注册表两条 tasks 路由翻转为 generated（pilot 集合未扩，运行时零变化）；Core SDK/静态 docs/Console schema 生成物同步；Core API v1 兼容基线有意再生成。纯契约，不含 handler 实现 | TASKCENTER-C1.md |
+| TASKCENTER-A1 | 实现批次：`ports.AsyncTaskStore` 追加 `List`（keyset cursor）+ 接口注释固化 Update 终态写保护；Local/Metadata 双 store List 与 Update 终态写保护（SQL 守卫 + 0 行重读 / mutex 内比较）；`20260827_001` 复合索引迁移；Gateway `GET /tasks` list handler（limit 1-100/筛选/400）；实例 create（含 409 completed 重放补写）/lifecycle 写入点（running/10 + writeAuditTask 旁路失败降级）；`observeInstance` 提取注入任务路由；GET 单查非终态 `instance.*` 任务懒同步（state 映射表 + 写放大抑制 + 降级 + 终态守卫并发乱序保护）；响应结构补 `resource_id`/`error_message`/`dead_letter_at`（单查/list/模式 B 三处共用）；页面文档同步（list 上线、kb 域噪声声明、TODO-YAML 解除）。真实 PG：索引迁移已应用；RLS 拦截因 dev 账号 BYPASSRLS 无法验证（A2 收口）。§8.2/§8.3 验收矩阵由 29 个新测试逐条覆盖 | TASKCENTER-A1.md |
+| TASKCENTER-A2 | RLS 真实验证与仓库对齐修复批次：切换 `ani_app_user`（非 BYPASSRLS）完成 A1 遗留项——async_tasks 跨租户 SELECT/Get 拦截实测 0 行、Create/Update（懒同步+终态守卫）写路径实测通过；live-verified 后回写仓库 `20260831_001`（RESTRICTIVE-only fail-closed 改双 PERMISSIVE、补 init_schema GRANT-on-empty 失效的表级授权、platform_bypass 用 NULLIF 形态免疫空串残留）；2 个 integration 测试（策略形态防回归 + 跨租户行为断言，幂等可重跑） | TASKCENTER-A2.md |
+
 ### Gateway OpenAPI 鉴权四批次（2026-08）
 
 | 批次 | 内容摘要 | 文件 |
@@ -21,6 +29,7 @@
 | AUTHZ-COMPAT-B0 | PR2：统一 Principal 与 identity key（默认 off）——规范 Principal + LegacyPrincipalView + Mode/Config + ResolveAuthzPolicy 中间件 + 横切 identity key 改造；gateway 仍走旧 ValidateToken/CheckPermission | authz-policy-compat-contract-pilot.md |
 | AUTHZ-CONTRACT-B1 | PR3：V2 授权契约——additive proto（ValidatePrincipal/CheckPermissionV2）+ auth-service JWT/API Key principal + permission evaluator + Gateway V2 client；gateway 仍 mode=off 不调 V2 | authz-policy-compat-contract-pilot.md |
 | AUTHZ-PILOT-C | PR4：listQuotaMeta pilot——v1.yaml security/x-ani-authz 注解 + mode Validate 冻结校验 + generated_authz V2 授权链路 + pilot E2E 测试 + deployment env；仅该 operation 使用 V2 | authz-policy-compat-contract-pilot.md |
+| AUTHZ-MODE-SIMPLIFY-D | PR5：契约即开关收敛——删除 mode 开关（policy/dev/pilot/off）与 pilot allowlist，policy 路由恒为 x-ani-authz（generated）→V2、其余 legacy、public 放行，dev 自动回落 legacy；`ANI_AUTH_MODE` 唯一保留 env，不设废弃 env 残留检测（新集群从头部署拍板）；deploy 清单删除两个废弃 env 条目；第六版修订改名 `config.go`/`config_test.go`、删兼容入口 6 函数、测试归一；commit `4753a42` | authz-mode-simplify-d.md |
 
 **预存问题修复（2026-08-25）：** 本地实测 pilot 模式后修复 4 个文件的预存不一致——删 v1.yaml 已弃用的 branding PUT/POST logo + tasks DELETE 路由的 router 注册和 registry 条目（branding_resources.go / task_resources.go / zz_generated_core_policies.go）；gpu_scheduling_resources.go 的 `:id`→`:queue_id` 与 v1.yaml 一致（修复运行时 `LookupByRequest` lookup miss + route coverage 门禁）。详见 `authz-policy-compat-contract-pilot.md`。
 
@@ -98,6 +107,28 @@
 | QUOTA-POLICY-ISSUE-12 | 可绑定租户列表（issue-12）：`ListBindableTenants` GET /tenant-plans/{planId}/bindable-tenants（status≠disabled 且 plan_id IS DISTINCT FROM planId，按 name 排序，无 search）；单测覆盖正常/404/空列表 | quota-policy-issue-12-list-bindable-tenants-api.md |
 | QUOTA-POLICY-ISSUE-13 | 查询操作历史（issue-13）：`ListTenantPlanAuditLogs` GET /tenant-plans/{planId}/audit-logs + store 游标分页（`resource='tenant_plan' AND details->>'plan_id'`）+ 网关 `auditLogJSON` 手动映射 + details→structpb.NewStruct + next_cursor null 处理；review-it 1 finding（action/result 过滤未实现，设计决策） | quota-policy-issue-13-audit-logs-api.md |
 | QUOTA-POLICY-ISSUE-14-18 | BOSS 配额套餐前端（issue-014~018）：`/tenants/plans` 列表+创建 Wizard、详情页（概览+4 Tab）、限额 Tab 行内编辑+同步提示、绑定租户 Tab+Select、操作历史 Tab 游标分页+本地过滤；`tenant-plans.ts` 17 API 函数 + `canWritePlatform` + `planStatus.tsx` + `quotaResourceOrder.ts`；对齐当前 audit API（无服务端筛选/无 user_id）；`tsc --noEmit` PASS | quota-policy-issue-14-18-boss-frontend.md |
+
+### BOSS 租户管理员功能流（2026-08）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| TENANT-ADMIN-ISSUE-001 | OpenAPI 契约：Services v1.yaml 13 端点 + 错误码表（FORBIDDEN/USER_STATE_INVALID，IDEMPOTENCY_* 为网关中间件） | tenant-admin-issue-001-openapi-contract.md |
+| TENANT-ADMIN-ISSUE-002 | 接口与结构体：TenantAdminStore（仅 invitation/audit）+ TenantAdminSvcClient（12 方法）+ TenantSvcClient（2 方法） | tenant-admin-issue-002-interfaces-data-model.md |
+| TENANT-ADMIN-ISSUE-003 | 数据库迁移：三个独立文件（20260821_001 建表 + 20260825_001 部分唯一索引 uk_tenant_admin_invitation_pending + 20260827000200 users ALTER） | tenant-admin-issue-03-database-migration.md |
+| TENANT-ADMIN-ISSUE-004 | 网关接入 | tenant-admin-issue-04-gateway-integration.md |
+| TENANT-ADMIN-ISSUE-005 | 可用租户列表 | tenant-admin-issue-005-available-tenants-api.md |
+| TENANT-ADMIN-ISSUE-006 | 邀请管理员 | tenant-admin-issue-006-invite-api.md |
+| TENANT-ADMIN-ISSUE-007 | 重发邀请 | tenant-admin-issue-007-resend-api.md |
+| TENANT-ADMIN-ISSUE-008 | 跨租户管理员列表：Core SDK ListTenantAdmins + 本地 Store ListInvitationFlags 内存合并；Go subtest 测试 | tenant-admin-issue-008-list-all-tenant-admins.md |
+| TENANT-ADMIN-ISSUE-009 | 管理员详情 | tenant-admin-issue-009-detail-api.md |
+| TENANT-ADMIN-ISSUE-010 | 可分配角色列表：返回 {id, name, tenant_id, permissions} | tenant-admin-issue-010-roles-api.md |
+| TENANT-ADMIN-ISSUE-011 | 修改角色：入参 role_id（UUID），约束非 platform-*、非 tenant-admin | tenant-admin-issue-011-role-change-and-query.md |
+| TENANT-ADMIN-ISSUE-012 | 重置密码：已软删除→404，禁用态允许 | tenant-admin-issue-012-reset-password.md |
+| TENANT-ADMIN-ISSUE-013 | 禁用/启用/删除：不改 status；重复 disable/enable 409 USER_STATE_INVALID | tenant-admin-issue-013-disable-enable-delete.md |
+| TENANT-ADMIN-ISSUE-014 | 操作历史：WHERE details->>'target_id'=userId，result 过滤 success/failure | tenant-admin-issue-014-audit-logs-api.md |
+| TENANT-ADMIN-DOC-ALIGNMENT | 文档对齐批次：以代码和 issue 为标准，5+ 轮深度审计修正 SPEC/UX/PRD/Plan 四份文档；14 项设计决策、4 张偏差表（spec/ux/prd/plan）、3 项 tradeoff、4 项 open question | tenant-admin-doc-alignment-batch.md |
+| TENANT-ADMIN-FEATURE-BATCH | 功能批次汇总：14 个 issue 全量实现完成（OpenAPI 契约 → 接口/数据模型 → DB 迁移 → 网关接入 → 13 端点端到端 → 多轮 review-it → 文档对齐）；13 项设计决策（Core/Services 边界拆分、全量拉取+内存合并、部分唯一索引竞态防护、审计统一/查询条件/枚举值、ResetPassword 禁用态策略、ChangeRole UUID 入参、Delete 不改 status、幂等键网关处理、接口重命名、迁移三文件拆分、Go subtest 命名）；5 张偏差表（vs SPEC/PRD/UX/Plan/Issue）；4 项 tradeoff；4 项 open question | tenant-admin-feature-batch.md |
+
 ### Metering Service（2026-08）
 
 | 批次 | 内容摘要 | 文件 |
@@ -107,6 +138,7 @@
 | PR-M3-METERING-CONSUMER | Consumer + handleEvent + seenSeq 两阶段锁（成功后推进 high-watermark，Nak 重投不丢消息）+ safeLog nil-safe logger（11 测试 PASS）；Rebuilder + WithPlatformTx 绕过 RLS + 查询 workload_instances WHERE state='running' + gpu_status JSONB 解析 + count++ 无条件（8 测试 PASS）；main.go bootstrap：MustConnect→Rebuild→Subscribe→ctx.Done + HandleEvent 导出适配器 + metering.CollectAll 注入 + signal.NotifyContext + DeliverAllPolicy via durable consumer default | pr-m3-metering-consumer.md |
 | PR-M4-METERING-CONSUMER | 9 个集成测试场景：事件驱动采集、stop+保底采集、幂等 no-op、rebuild+DeliverAll、seenSeq 乱序、seenSeq 失败重投、租户 mismatch Nak、poison message Ack、DB UNIQUE 兜底（1214 行；fallbackCollector 包装 real+mock Prometheus；filteredMetaStore 测试实例过滤；shortIntervalSvc 2s；`//go:build integration` tag；9/9 PASS in 25.359s） | pr-m4-metering-consumer.md |
 | PR-M5-METERING-CONSUMER | 部署清单 metering-service-live-deps.yaml（ServiceAccount + Deployment replicas:1 + Service 9210 + secret 创建命令注释）+ Live Gate 4 个阻断缺陷修复：① PromQL pod 匹配失败→CollectionSpec 新增 WorkloadName 字段用 K8s 资源名做正则匹配；② CPU 多副本只取第一个 pod→查询加外层 sum() 聚合；③ 写入错误 schema→ALTER ROLE SET search_path TO public；④ RLS 阻止写入→persistRecords 用 SET ROLE ani_metering_writer 绕过 RLS + GRANT ani_metering_writer TO ani_app_user + migration 同步补充；NATS 事件监听验证通过（nats-box 发布测试事件确认 Subscribe→handleEvent→StartCollection 链路正常） | pr-m5-metering-consumer.md |
+| PR-M6-METERING-QUERY-PG-ADAPTER | 计量查询 PG adapter（V3 方案）：ports 扩展（`QueryPlatformUsage` + `PlatformTenantID`）+ `PgMeteringService`（租户 `WithTenantTx` 依赖 RLS / 平台 `WithPlatformTx` + `SET LOCAL ROLE ani_metering_writer` BYPASSRLS 跨租户聚合）+ 固定输出列 + period `to_char AT TIME ZONE 'UTC'` 字符串比较 + `ReportTokenUsage` 委托 LocalMeteringService + Gateway `METERING_PROVIDER_MODE` 装配（postgres 模式 Ping 失败阻止启动不静默降级）+ 平台查询 handler `queryPlatformUsage`（503 METERING_UNAVAILABLE 映射）+ `getPlatformMeteringUsage` 加入 pilot allowlist + 生成物重生成 + 写入侧 period 统一 UTC + 前端 group_by 移除 az；11 单测 + 8 handler 测试 + pilot 鉴权矩阵 + 真实 PG 集成 + 浏览器 E2E 全通过；4 commit 在 `feat/metering-query-interface-v2` 分支本地待 push | pr-m6-metering-query-pg-adapter.md |
 
 ### Storage Control Plane State（2026-08）
 
@@ -119,6 +151,13 @@
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
 | STORAGE-ASYNC-CORRECTNESS-A | live passed：保持 Core v1 Vector 文档写入 `202` 自定义响应，补齐 `Location` 和 `vector_store.document.insert`；任务落 PG，Gateway rollout 后原 task ID 仍可查询；Milvus 临时夹具已清理；evidence `live-evidence/storage-async-vector-task-live-20260803.json` | storage-async-correctness-a.md |
+
+### Instance Network Store Read-Through + RLS（2026-08）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-NETWORK-STORE-READ-RLS-A | live passed（10.10.1.66）：GPU 容器实例创建引用 VPC NOT_FOUND 三层根因修复——`NetworkResourceStore` 补 5 个读方法（端口+PG SELECT 实现，WithTenantTx）、`LocalNetworkService` Get/List 穿透读、Gateway 有 `DATABASE_URL` 时注入 store；迁移 `20260828_001` 把实例链路 8 张表 RESTRICTIVE-only policy 替换为 PERMISSIVE 双策略（对齐 `20260825_001`）；`WORKLOAD_PROVIDER=kubernetes_rest` + `WORKLOAD_PROVIDER_APPLY_ENABLED=true` 接线。验证：VPC/Subnet 创建落库、实例 201 → provisioning → Volcano 排队（容量问题非代码）；不外推 GPU runtime ready / production ready | instance-network-store-read-rls-a.md |
+| INSTANCE-RUNTIME-HYDRATE-A | live passed（10.10.1.66，镜像 dev-20260901）：GPU 容器实例列表/详情缺节点/私网IP/访问端点/终端——修复 `refreshOneStoreStatus` 节点字段错位（回填 `Compute.NodeName`）、回读 PodIP 填 `Network.PrivateIP`/`Endpoint`/`Endpoints`、运行态 container/gpu_container 置 `Access.ExecAvailable=true`；`get` 详情处理器接入刷新；新增 2 个 httptest 单测；真实 running 实例 `test-gpu-inst-create` 列表/详情均回填 dev-phys-02 / 10.60.0.3 / exec_available=true；`go test` + `make validate-architecture` 通过 | instance-runtime-hydrate-a.md |
 
 ### Instance Sandbox 无状态化（2026-08）
 

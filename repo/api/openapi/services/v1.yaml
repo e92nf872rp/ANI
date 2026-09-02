@@ -1294,26 +1294,27 @@ components:
 
     AdminWithTenant:
       type: object
-      required: [id, email, username, role, status, is_inviting, source, tenant]
+      required: [id, email, username, role, status, is_inviting, is_expired, source, tenant]
       description: >
-        跨租户管理员列表项。仅返回 role ∈ (tenant-owner, tenant-admin) 或正在被邀请的用户；
-        is_inviting 仅作标记，不影响 role/status（邀请中用户仍展示原有角色，可为 user）。
+        跨租户管理员列表项。仅返回 role ∈ (tenant-admin) 或正在被邀请或邀请已过期的用户；
+        is_inviting 仅作标记，不影响 role/status（邀请中或已过期用户仍展示原有角色，可为 user）。
         列表不返回 created_at/updated_at。
       properties:
         id:           { type: string, format: uuid }
         email:        { type: string, format: email }
         username:     { type: string }
         display_name: { type: string, nullable: true }
-        role:         { type: string, enum: [tenant-owner, tenant-admin, user, auditor], description: "租户内角色；列表仅含 owner/admin/邀请中" }
+        role:         { type: string, enum: [tenant-admin, user, auditor], description: "租户内角色；列表仅含 admin/邀请中/已过期" }
         status:       { type: string, enum: [active, disabled] }
         is_inviting:  { type: boolean, description: "true = 该租户下存在 status='inviting' 的邀请；仅作标记，不影响 role/status" }
+        is_expired:   { type: boolean, description: "true = 该租户下存在 status='expired' 的邀请；仅作标记，不影响 role/status" }
         source:       { type: string, enum: [local, third_party] }
         last_login_at: { type: string, format: date-time, nullable: true }
         tenant:       { $ref: '#/components/schemas/TenantRef' }
 
     AdminDetail:
       type: object
-      required: [id, email, username, role, status, is_inviting, source, tenant]
+      required: [id, email, username, role, status, is_inviting, is_expired, source, tenant]
       description: >
         管理员详情（不含 password_hash、无顶层 tenant_id 冗余）；
         相比 AdminWithTenant 额外返回 created_at/updated_at。
@@ -1322,9 +1323,10 @@ components:
         email:        { type: string, format: email }
         username:     { type: string }
         display_name: { type: string, nullable: true }
-        role:         { type: string, enum: [tenant-owner, tenant-admin, user, auditor] }
+        role:         { type: string, enum: [tenant-admin, user, auditor] }
         status:       { type: string, enum: [active, disabled] }
         is_inviting:  { type: boolean }
+        is_expired:   { type: boolean }
         source:       { type: string, enum: [local, third_party] }
         last_login_at: { type: string, format: date-time, nullable: true }
         created_at:   { type: string, format: date-time, nullable: true, description: "详情响应返回；跨租户列表不返回" }
@@ -1352,41 +1354,27 @@ components:
     UserPermissions:
       type: object
       required: [user_id, role, permissions]
-      description: 指定管理员的 4 维权限模型；仅返回租户成员（tenant_id 非空），平台账户不可查
+      description: 指定管理员的权限模型；仅返回租户成员（tenant_id 非空），平台账户不可查
       properties:
         user_id:     { type: string, format: uuid }
         tenant_id:   { type: string, format: uuid, nullable: true, description: "租户成员非空；平台账户为 null（不可经本端点查询）" }
-        role:        { type: string, enum: [tenant-owner, tenant-admin, user, auditor] }
+        role:        { type: string, enum: [tenant-admin, user, auditor] }
         permissions:
-          type: object
-          required: [compute, inference, member, transfer]
-          properties:
-            compute:   { type: string, enum: [read, write, none] }
-            inference:  { type: string, enum: [read, write, none] }
-            member:     { type: string, enum: [read, write, none] }
-            transfer:   { type: string, enum: [read, write, none] }
-
-    ChangeableRolesResponse:
-      type: object
-      required: [current_role, changeable_roles]
-      description: 可变更角色选项（当前为 tenant-owner 时 changeable_roles 为空）
-      properties:
-        current_role:     { type: string, enum: [tenant-owner, tenant-admin, user, auditor] }
-        changeable_roles:
           type: array
           items:
             type: object
-            required: [role, label]
+            required: [resource, action, scope]
             properties:
-              role:  { type: string, enum: [user, auditor, tenant-admin] }
-              label: { type: string, description: "展示名（普通成员 / 审计员 / 租户管理员）" }
+              resource: { type: string, description: "资源标识，如 compute / inference / member" }
+              action:   { type: string, enum: [read, write, none] }
+              scope:    { type: string, description: "权限作用域，如 tenant / platform" }
 
     TenantAdminAuditLog:
       type: object
       required: [id, action, resource, result, created_at]
       properties:
         id:         { type: string, format: uuid }
-        action:     { type: string, description: "如 tenant_admin.invite / resend_invitation / change_role / transfer_ownership / reset_password / disable / enable / delete" }
+        action:     { type: string, description: "如 tenant_admin.invite / resend_invitation / change_role / reset_password / disable / enable / delete" }
         resource:   { type: string }
         result:     { type: string, enum: [success, failure] }
         user_id:    { type: string, format: uuid, nullable: true }
@@ -1399,6 +1387,39 @@ components:
       properties:
         items:       { type: array, items: { $ref: '#/components/schemas/TenantAdminAuditLog' } }
         next_cursor: { type: string, nullable: true, description: "下一页游标；null 表示已无更多数据" }
+
+    AvailableTenantListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, name, display_name, status]
+            properties:
+              id:           { type: string, format: uuid }
+              name:         { type: string }
+              display_name: { type: string, nullable: true }
+              status:       { type: string, enum: [active, frozen], description: "非停用租户（不含 disabled）" }
+
+    AssignableTenantRoleListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, name, permissions]
+            properties:
+              id:        { type: string, format: uuid }
+              tenant_id: { type: string, format: uuid, nullable: true, description: "NULL=平台内置角色" }
+              name:      { type: string, description: "非 platform-* 角色名（如 tenant-admin / user / auditor）" }
+              permissions:
+                type: array
+                description: "roles.permissions JSONB（resource/actions/scope）"
+                items: { type: object, additionalProperties: true }
 
     InviteAdminRequest:
       type: object
@@ -1416,17 +1437,10 @@ components:
 
     UpdateRoleRequest:
       type: object
-      required: [idempotency_key, role]
+      required: [idempotency_key, role_id]
       properties:
         idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
-        role:            { type: string, enum: [user, auditor, tenant-admin], description: "不可设 tenant-owner" }
-
-    TransferOwnershipRequest:
-      type: object
-      required: [idempotency_key, target_user_id]
-      properties:
-        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
-        target_user_id:  { type: string, format: uuid, description: "当前租户内 active 且角色为 tenant-admin 的成员" }
+        role_id:         { type: string, format: uuid, description: "目标角色 UUID；须为可分配角色（非 platform-*，tenant_id 为空或等于路径 tenantId）" }
 
     ResetPasswordRequest:
       type: object
@@ -3631,16 +3645,18 @@ paths:
   /tenant-admins:
     get:
       operationId: listAllTenantAdmins
-      summary: 跨租户管理员列表（仅返回 owner/admin/邀请中）（需 platform-admin / platform-ops / platform-readonly）
+      summary: 跨租户管理员列表（仅返回 admin/邀请中/已过期）（需 platform-admin / platform-ops / platform-readonly）
       tags: [TenantAdmins]
       parameters:
         - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 }, description: "每页数量" }
         - { name: cursor, in: query, schema: { type: string }, description: "上一页返回的 next_cursor" }
         - { name: tenant_id, in: query, schema: { type: string, format: uuid }, description: "可选；按指定租户过滤" }
-        - { name: role, in: query, schema: { type: string, enum: [tenant-owner, tenant-admin] } }
         - { name: status, in: query, schema: { type: string, enum: [active, disabled] } }
         - { name: is_inviting, in: query, schema: { type: boolean }, description: "true = 仅邀请中" }
-        - { name: search, in: query, schema: { type: string }, description: "模糊匹配 email/username" }
+        - { name: is_expired, in: query, schema: { type: boolean }, description: "true = 仅邀请已过期" }
+        - { name: search, in: query, schema: { type: string }, description: "模糊匹配 email/username/display_name" }
+        - { name: role, in: query, schema: { type: string, enum: [tenant-admin, user, auditor] }, description: "按角色过滤" }
+        - { name: source, in: query, schema: { type: string, enum: [local, third_party] }, description: "按来源过滤" }
       responses:
         "200":
           description: 跨租户管理员列表
@@ -3731,13 +3747,12 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound', description: "TENANT_ADMIN_NOT_FOUND" }
-        "409": { $ref: '#/components/responses/Conflict', description: "TENANT_OWNER_ROLE_LOCKED" }
-        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "LAST_TENANT_OWNER" }
+        "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
 
   /tenants/{tenantId}/admins/{userId}/role:
     get:
       operationId: getTenantAdminRole
-      summary: 查询指定管理员角色与权限（4 维权限模型）（需 platform-admin / platform-ops / platform-readonly）
+      summary: 查询指定管理员角色与权限（需 platform-admin / platform-ops / platform-readonly）
       tags: [TenantAdmins]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -3773,50 +3788,8 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound', description: "TENANT_ADMIN_NOT_FOUND" }
-        "409": { $ref: '#/components/responses/Conflict', description: "TENANT_OWNER_ROLE_LOCKED / IDEMPOTENCY_CONFLICT" }
-        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "ROLE_CHANGE_INVALID" }
-
-  /tenants/{tenantId}/admins/{userId}/changeable-roles:
-    get:
-      operationId: getChangeableRoles
-      summary: 查询可变更角色选项（排除 tenant-owner）（需 platform-admin / platform-ops / platform-readonly）
-      tags: [TenantAdmins]
-      parameters:
-        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
-      responses:
-        "200":
-          description: 可变更角色列表
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ChangeableRolesResponse' }
-        "401": { $ref: '#/components/responses/Unauthorized' }
-        "403": { $ref: '#/components/responses/Forbidden' }
-        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_ADMIN_NOT_FOUND" }
-
-  /tenants/{tenantId}/transfer-ownership:
-    post:
-      operationId: transferTenantOwnership
-      summary: 移交租户所有者（对 tenant-admin 行发起，原 owner 降级为 admin）（需 platform-admin / platform-ops）
-      tags: [TenantAdmins]
-      parameters:
-        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/TransferOwnershipRequest' }
-      responses:
-        "200":
-          description: 所有权已移交
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/IdempotentResult' }
-        "401": { $ref: '#/components/responses/Unauthorized' }
-        "403": { $ref: '#/components/responses/Forbidden' }
-        "404": { $ref: '#/components/responses/NotFound', description: "TENANT_NOT_FOUND / TENANT_ADMIN_NOT_FOUND" }
         "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
-        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "TRANSFER_TARGET_INVALID" }
+        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "ROLE_CHANGE_INVALID" }
 
   /tenants/{tenantId}/admins/{userId}/reset-password:
     post:
@@ -3867,7 +3840,6 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound', description: "TENANT_ADMIN_NOT_FOUND" }
         "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_CONFLICT" }
-        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "LAST_TENANT_OWNER" }
 
   /tenants/{tenantId}/admins/{userId}/enable:
     post:
@@ -3914,6 +3886,39 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound', description: "TENANT_ADMIN_NOT_FOUND" }
+
+  /tenant-admins/tenants:
+    get:
+      operationId: listAvailableTenantsForAdmin
+      summary: 查询可用租户列表（邀请管理员租户选择器数据源，需 platform-admin / platform-ops / platform-readonly）
+      tags: [TenantAdmins]
+      responses:
+        "200":
+          description: 非停用租户列表（status <> disabled，不分页）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AvailableTenantListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /tenants/{tenantId}/roles:
+    get:
+      operationId: listTenantAssignableRoles
+      summary: 查询租户可分配角色列表（修改管理员角色选择器数据源，需 platform-admin / platform-ops / platform-readonly）
+      description: |
+        返回 name NOT LIKE 'platform-%' 且 tenant_id IS NULL OR tenant_id = $tenantId 的角色，不分页。
+        网关经 gRPC 转发 tenant-service；tenant-service 经 Core SDK 查询 roles 表。
+      tags: [TenantAdmins]
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 可分配角色列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AssignableTenantRoleListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
 
 tags:
   - { name: Models, description: "模型仓库" }

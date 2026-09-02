@@ -2,7 +2,6 @@ package router
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -12,45 +11,13 @@ import (
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
+
+	"google.golang.org/grpc/metadata"
+
+	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
+	kbv1 "github.com/kubercloud/ani/pkg/generated/pb/kb/v1"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
-
-// fakeRagEngineClient is a test double for RagEngineClient. It returns canned
-// sources so the SSE handler can exercise the retrieval→prompt→vLLM path
-// without a real rag-engine.
-type fakeRagEngineClient struct {
-	resp    *ragQueryResponse
-	err     error
-	called  bool
-	lastReq *ragQueryRequest
-}
-
-func (f *fakeRagEngineClient) Query(_ context.Context, req *ragQueryRequest) (*ragQueryResponse, error) {
-	f.called = true
-	f.lastReq = req
-	return f.resp, f.err
-}
-
-// fakeVLLMStreamer is a test double for VLLMStreamer. It returns a canned
-// SSE-formatted reader that the SSE handler parses and forwards as token
-// events (SPEC §5.1 step 6).
-type fakeVLLMStreamer struct {
-	reader io.ReadCloser
-	err    error
-}
-
-func (f *fakeVLLMStreamer) StreamChat(_ context.Context, _ *vllmChatRequest) (io.ReadCloser, error) {
-	if f.err != nil {
-		return nil, f.err
-	}
-	return f.reader, nil
-}
-
-// stringReadCloser wraps a string reader to implement io.ReadCloser.
-type stringReadCloser struct {
-	*strings.Reader
-}
-
-func (s *stringReadCloser) Close() error { return nil }
 
 // setupSSETestServer builds a gateway with the SSE handler wired to the
 // given fake backends so tests can assert the token→sources→done sequence.
@@ -68,158 +35,6 @@ func setupSSETestServer(sseCfg KbSSEConfig) *server.Hertz {
 	svc := h.Group("/api/v1/svc")
 	registerKnowledgeBasesWithClient(svc, nil, sseCfg)
 	return h
-}
-
-// TestSSE_TokenPassthroughAndSourcesAndDone asserts the full event sequence
-// token*→sources→done (SPEC §4.3 事件序列). The fake vLLM streams two token
-// deltas; the handler must forward each as a token event, then emit sources
-// and done.
-func TestSSE_TokenPassthroughAndSourcesAndDone(t *testing.T) {
-	ragClient := &fakeRagEngineClient{
-		resp: &ragQueryResponse{
-			Sources: []ragSourceChunk{
-				{DocID: "doc-1", FileName: "a.pdf", Page: 1, Content: "ctx", Score: 0.9},
-			},
-			SessionID: "sess-1",
-		},
-	}
-	// OpenAI-compatible SSE stream: two content chunks + [DONE].
-	vllmStream := "data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\n\n" +
-		"data: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}\n\n" +
-		"data: [DONE]\n\n"
-	vllmStreamer := &fakeVLLMStreamer{reader: &stringReadCloser{strings.NewReader(vllmStream)}}
-
-	h := setupSSETestServer(KbSSEConfig{
-		RagClient:    ragClient,
-		VLLMStreamer: vllmStreamer,
-		VLLMModel:    "test-model",
-	})
-	resp := ut.PerformRequest(h.Engine, http.MethodGet,
-		"/api/v1/svc/knowledge-bases/kb-1/query/stream?question=hi", nil,
-		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
-	).Result()
-
-	if resp.StatusCode() != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode())
-	}
-	if ct := string(resp.Header.ContentType()); !strings.Contains(ct, "text/event-stream") {
-		t.Fatalf("content-type = %q, want text/event-stream", ct)
-	}
-	body := string(resp.Body())
-
-	// Event sequence: token* → sources → done (SPEC §4.3).
-	tokenIdx := strings.Index(body, "event: token")
-	sourcesIdx := strings.Index(body, "event: sources")
-	doneIdx := strings.Index(body, "event: done")
-	if tokenIdx < 0 {
-		t.Fatalf("body missing token event: %q", body)
-	}
-	if sourcesIdx < 0 {
-		t.Fatalf("body missing sources event: %q", body)
-	}
-	if doneIdx < 0 {
-		t.Fatalf("body missing done event: %q", body)
-	}
-	if tokenIdx >= sourcesIdx || sourcesIdx >= doneIdx {
-		t.Fatalf("event order wrong: token=%d sources=%d done=%d", tokenIdx, sourcesIdx, doneIdx)
-	}
-	// Two token events expected.
-	if got := strings.Count(body, "event: token"); got != 2 {
-		t.Fatalf("token events = %d, want 2", got)
-	}
-	// Sources event contains the doc_id.
-	if !strings.Contains(body, "doc-1") {
-		t.Fatalf("sources event missing doc-1: %q", body)
-	}
-	// rag-engine was called with the question + kb_id.
-	if !ragClient.called {
-		t.Fatal("rag-engine client was not called")
-	}
-	if ragClient.lastReq.Question != "hi" || ragClient.lastReq.KbID != "kb-1" {
-		t.Fatalf("rag req = %+v, want question=hi kb=kb-1", ragClient.lastReq)
-	}
-}
-
-// TestSSE_RetrieveNotFoundReturnsJSON404 asserts a rag-engine 404 (KB not
-// found) returns JSON 404 pre-stream (SPEC §4.3: "首部 400/401/404 不进入流"),
-// NOT an SSE error event.
-func TestSSE_RetrieveNotFoundReturnsJSON404(t *testing.T) {
-	ragClient := &fakeRagEngineClient{err: &ragEngineError{status: http.StatusNotFound, body: "kb not found"}}
-	h := setupSSETestServer(KbSSEConfig{
-		RagClient:    ragClient,
-		VLLMStreamer: &fakeVLLMStreamer{},
-		VLLMModel:    "test-model",
-	})
-	resp := ut.PerformRequest(h.Engine, http.MethodGet,
-		"/api/v1/svc/knowledge-bases/kb-1/query/stream?question=hi", nil,
-		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
-	).Result()
-
-	// Pre-stream 404 must return JSON, not enter the SSE stream (SPEC §4.3).
-	if resp.StatusCode() != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", resp.StatusCode())
-	}
-	body := string(resp.Body())
-	if strings.Contains(body, "event:") {
-		t.Fatalf("404 must not enter SSE stream, got: %q", body)
-	}
-	var errBody map[string]any
-	_ = json.Unmarshal(resp.Body(), &errBody)
-	if errBody["code"] != "KB_NOT_FOUND" {
-		t.Fatalf("code = %v, want KB_NOT_FOUND", errBody["code"])
-	}
-}
-
-// TestSSE_RetrieveFailureEmitsErrorEvent asserts a non-4xx rag-engine failure
-// (e.g. 503) emits an SSE error event (SPEC §4.3 line 172: 检索失败 → event: error).
-func TestSSE_RetrieveFailureEmitsErrorEvent(t *testing.T) {
-	ragClient := &fakeRagEngineClient{err: &ragEngineError{status: http.StatusServiceUnavailable, body: "rag down"}}
-	h := setupSSETestServer(KbSSEConfig{
-		RagClient:    ragClient,
-		VLLMStreamer: &fakeVLLMStreamer{},
-		VLLMModel:    "test-model",
-	})
-	resp := ut.PerformRequest(h.Engine, http.MethodGet,
-		"/api/v1/svc/knowledge-bases/kb-1/query/stream?question=hi", nil,
-		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
-	).Result()
-
-	if resp.StatusCode() != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (SSE stream started)", resp.StatusCode())
-	}
-	body := string(resp.Body())
-	if !strings.Contains(body, "event: error") {
-		t.Fatalf("body missing error event: %q", body)
-	}
-	if !strings.Contains(body, "RETRIEVE_FAILED") {
-		t.Fatalf("error code wrong: %q", body)
-	}
-}
-
-// TestSSE_VLLMStreamErrorEmitsErrorEvent asserts a mid-stream vLLM failure
-// emits an SSE error event and closes the stream (SPEC §4.3 错误处理).
-func TestSSE_VLLMStreamErrorEmitsErrorEvent(t *testing.T) {
-	ragClient := &fakeRagEngineClient{
-		resp: &ragQueryResponse{Sources: nil, SessionID: "sess-1"},
-	}
-	vllmStreamer := &fakeVLLMStreamer{err: &vllmError{status: http.StatusServiceUnavailable, body: "vllm down"}}
-	h := setupSSETestServer(KbSSEConfig{
-		RagClient:    ragClient,
-		VLLMStreamer: vllmStreamer,
-		VLLMModel:    "test-model",
-	})
-	resp := ut.PerformRequest(h.Engine, http.MethodGet,
-		"/api/v1/svc/knowledge-bases/kb-1/query/stream?question=hi", nil,
-		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
-	).Result()
-
-	body := string(resp.Body())
-	if !strings.Contains(body, "event: error") {
-		t.Fatalf("body missing error event: %q", body)
-	}
-	if !strings.Contains(body, "STREAM_INTERRUPTED") {
-		t.Fatalf("error code wrong: %q", body)
-	}
 }
 
 // TestSSE_NoBackendsDegradesToSourcesAndDone asserts the handler degrades
@@ -260,96 +75,208 @@ func TestSSE_QuestionTooLongReturns400(t *testing.T) {
 	}
 }
 
-// TestSSE_RetrieveTimeoutMapsToErrorEvent asserts a rag-engine timeout
-// surfaces as an SSE error event (not a hang or JSON 504).
-func TestSSE_RetrieveTimeoutMapsToErrorEvent(t *testing.T) {
-	ragClient := &fakeRagEngineClient{err: &ragEngineError{status: http.StatusGatewayTimeout, body: "timeout"}}
+// ── New path (issue-038/039) test doubles ──────────────────────────────────
+
+// fakeKBRetrieveClient implements KBGRPCClient for the new SSE path tests.
+// Only Retrieve is functional; all other methods panic to catch misuse.
+type fakeKBRetrieveClient struct {
+	stream  kbv1.KBService_RetrieveClient
+	err     error
+	called  bool
+	lastReq *kbv1.RetrieveRequest
+}
+
+func (f *fakeKBRetrieveClient) Retrieve(_ context.Context, tenantID string, kbID string, req *kbv1.RetrieveRequest) (kbv1.KBService_RetrieveClient, error) {
+	f.called = true
+	// Mirror real kbGRPCClient.Retrieve: set tenant_id and kb_id on the request.
+	req.TenantId = tenantID
+	req.KbId = kbID
+	f.lastReq = req
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.stream, nil
+}
+
+// Unused methods — return zero values to satisfy the interface.
+func (f *fakeKBRetrieveClient) CreateKB(context.Context, string, string, *kbv1.CreateKBRequest) (*kbv1.KnowledgeBase, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) GetKB(context.Context, string, string) (*kbv1.KnowledgeBase, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) ListKBs(context.Context, string, int32, string) (*kbv1.ListKBsResponse, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) DeleteKB(context.Context, string, string) (*emptypb.Empty, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) GetDocumentUploadURL(context.Context, string, string, string, *kbv1.GetDocumentUploadURLRequest) (*kbv1.GetDocumentUploadURLResponse, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) NotifyDocumentUploaded(context.Context, string, string, string, string) (*commonv1.AsyncTaskRef, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) GetDocument(context.Context, string, string, string) (*kbv1.KBDocument, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) ListDocuments(context.Context, string, string, string, int32, string) (*kbv1.ListDocumentsResponse, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) DeleteDocument(context.Context, string, string, string) (*emptypb.Empty, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) Query(context.Context, string, string, string, *kbv1.QueryRequest) (*kbv1.QueryResponse, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) ListKBCitations(context.Context, string, string, int32, string) (*kbv1.ListKBCitationsResponse, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) ListKBSessions(context.Context, string, string, int32, string) (*kbv1.ListKBSessionsResponse, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) UpdateKBPermissions(context.Context, string, string, string, *kbv1.UpdateKBPermissionsRequest) (*kbv1.KnowledgeBase, error) {
+	return nil, nil
+}
+
+// fakeRetrieveStream implements kbv1.KBService_RetrieveClient for tests.
+// It replays a canned list of RetrieveEvent messages, then returns io.EOF.
+type fakeRetrieveStream struct {
+	events []*kbv1.RetrieveEvent
+	idx    int
+}
+
+func (s *fakeRetrieveStream) Recv() (*kbv1.RetrieveEvent, error) {
+	if s.idx >= len(s.events) {
+		return nil, io.EOF
+	}
+	ev := s.events[s.idx]
+	s.idx++
+	return ev, nil
+}
+
+// grpc.ClientStream methods — no-ops for test purposes.
+func (s *fakeRetrieveStream) Header() (metadata.MD, error) { return nil, nil }
+func (s *fakeRetrieveStream) Trailer() metadata.MD         { return nil }
+func (s *fakeRetrieveStream) CloseSend() error             { return nil }
+func (s *fakeRetrieveStream) Context() context.Context     { return context.Background() }
+func (s *fakeRetrieveStream) SendMsg(interface{}) error    { return nil }
+func (s *fakeRetrieveStream) RecvMsg(interface{}) error {
+	if s.idx >= len(s.events) {
+		return io.EOF
+	}
+	return nil
+}
+
+// Ensure fakeRetrieveStream satisfies the interface.
+var _ kbv1.KBService_RetrieveClient = (*fakeRetrieveStream)(nil)
+
+// TestSSE_NewPath_TokenSourcesDone asserts the new path (kb-service Retrieve
+// gRPC stream) produces the same token*→sources→done event sequence as the
+// legacy path (Plan §10.3, issue-038 AC 7).
+func TestSSE_NewPath_TokenSourcesDone(t *testing.T) {
+	stream := &fakeRetrieveStream{
+		events: []*kbv1.RetrieveEvent{
+			{Event: &kbv1.RetrieveEvent_Token{Token: &kbv1.RetrieveTokenEvent{Content: "Hel"}}},
+			{Event: &kbv1.RetrieveEvent_Token{Token: &kbv1.RetrieveTokenEvent{Content: "lo"}}},
+			{Event: &kbv1.RetrieveEvent_Sources{Sources: &kbv1.RetrieveSourcesEvent{
+				Sources: []*kbv1.SourceChunk{
+					{DocId: "doc-1", FileName: "a.pdf", Page: 1, Content: "ctx", Score: 0.9},
+				},
+			}}},
+			{Event: &kbv1.RetrieveEvent_Done{Done: &kbv1.RetrieveDoneEvent{
+				InputTokens: 10, OutputTokens: 20, SessionId: "sess-1",
+			}}},
+		},
+	}
+	kbClient := &fakeKBRetrieveClient{stream: stream}
 	h := setupSSETestServer(KbSSEConfig{
-		RagClient:    ragClient,
-		VLLMStreamer: &fakeVLLMStreamer{},
-		VLLMModel:    "test-model",
+		KBClient: kbClient,
 	})
 	resp := ut.PerformRequest(h.Engine, http.MethodGet,
 		"/api/v1/svc/knowledge-bases/kb-1/query/stream?question=hi", nil,
 		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
 	).Result()
+
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
+	}
+	if ct := string(resp.Header.ContentType()); !strings.Contains(ct, "text/event-stream") {
+		t.Fatalf("content-type = %q, want text/event-stream", ct)
+	}
 	body := string(resp.Body())
-	if !strings.Contains(body, "event: error") {
-		t.Fatalf("body missing error event: %q", body)
+
+	// Event sequence: token* → sources → done (SPEC §4.3).
+	tokenIdx := strings.Index(body, "event: token")
+	sourcesIdx := strings.Index(body, "event: sources")
+	doneIdx := strings.Index(body, "event: done")
+	if tokenIdx < 0 {
+		t.Fatalf("body missing token event: %q", body)
+	}
+	if sourcesIdx < 0 {
+		t.Fatalf("body missing sources event: %q", body)
+	}
+	if doneIdx < 0 {
+		t.Fatalf("body missing done event: %q", body)
+	}
+	if tokenIdx >= sourcesIdx || sourcesIdx >= doneIdx {
+		t.Fatalf("event order wrong: token=%d sources=%d done=%d", tokenIdx, sourcesIdx, doneIdx)
+	}
+	// Two token events expected.
+	if got := strings.Count(body, "event: token"); got != 2 {
+		t.Fatalf("token events = %d, want 2", got)
+	}
+	// Sources event contains the doc_id.
+	if !strings.Contains(body, "doc-1") {
+		t.Fatalf("sources event missing doc-1: %q", body)
+	}
+	// kb-service Retrieve was called.
+	if !kbClient.called {
+		t.Fatal("kb-service Retrieve was not called")
+	}
+	if kbClient.lastReq.GetQuestion() != "hi" || kbClient.lastReq.GetKbId() != "kb-1" {
+		t.Fatalf("retrieve req = %+v, want question=hi kb=kb-1", kbClient.lastReq)
 	}
 }
 
-// TestSSE_VLLMStreamReadErrorEmitsErrorEvent asserts that when the vLLM
-// stream errors mid-read (simulating a client disconnect / context cancel
-// that aborts the vLLM HTTP body), the handler emits a STREAM_INTERRUPTED
-// error event and closes the stream (SPEC §5.4 客户端断开 → 取消 vLLM stream).
-func TestSSE_VLLMStreamReadErrorEmitsErrorEvent(t *testing.T) {
-	ragClient := &fakeRagEngineClient{
-		resp: &ragQueryResponse{Sources: nil, SessionID: "sess-1"},
-	}
-	// A partial stream that yields one token then errors (simulates context
-	// cancel mid-stream).
-	vllmStreamer := &fakeVLLMStreamer{reader: &stringReadCloser{strings.NewReader(
-		"data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n",
-	)}}
+// TestSSE_NewPath_NoClientDegrades asserts the new path degrades to an empty
+// stream (sources=[] + done) when KBClient is nil (SPEC §5.4, issue-038 AC 8).
+func TestSSE_NewPath_NoClientDegrades(t *testing.T) {
 	h := setupSSETestServer(KbSSEConfig{
-		RagClient:    ragClient,
-		VLLMStreamer: vllmStreamer,
-		VLLMModel:    "test-model",
+		// KBClient is nil → degrade to empty stream.
 	})
 	resp := ut.PerformRequest(h.Engine, http.MethodGet,
 		"/api/v1/svc/knowledge-bases/kb-1/query/stream?question=hi", nil,
 		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
 	).Result()
-	body := string(resp.Body())
-	// The partial token was forwarded.
-	if !strings.Contains(body, "event: token") {
-		t.Fatalf("body missing token event: %q", body)
+
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode())
 	}
-	// Scanner reaches EOF without [DONE], so scanner.Err() is nil and the
-	// stream completes normally with sources + done. This verifies the
-	// handler does not hang on a truncated stream.
+	body := string(resp.Body())
+	if !strings.Contains(body, "event: sources") {
+		t.Fatalf("body missing sources event: %q", body)
+	}
 	if !strings.Contains(body, "event: done") {
 		t.Fatalf("body missing done event: %q", body)
 	}
+	if strings.Contains(body, "event: token") {
+		t.Fatalf("body should not contain token events: %q", body)
+	}
 }
 
-// TestSSE_ContextCancelAbortsVLLMStream asserts the request context is
-// propagated to the vLLM StreamChat call so a client disconnect cancels
-// the in-flight vLLM HTTP request (SPEC §5.4). We verify by capturing the
-// context passed to StreamChat and asserting it is derived from the request.
-func TestSSE_ContextCancelAbortsVLLMStream(t *testing.T) {
-	ragClient := &fakeRagEngineClient{
-		resp: &ragQueryResponse{Sources: nil, SessionID: "sess-1"},
-	}
-	var capturedCtx context.Context
-	vllmStreamer := &ctxCapturingStreamer{onStream: func(ctx context.Context) {
-		capturedCtx = ctx
-	}}
+// TestSSE_NewPath_QuestionTooLongReturns400 asserts the 2000-char limit
+// works on the new path (SPEC §4.3).
+func TestSSE_NewPath_QuestionTooLongReturns400(t *testing.T) {
 	h := setupSSETestServer(KbSSEConfig{
-		RagClient:    ragClient,
-		VLLMStreamer: vllmStreamer,
-		VLLMModel:    "test-model",
+		KBClient: &fakeKBRetrieveClient{},
 	})
-	_ = ut.PerformRequest(h.Engine, http.MethodGet,
-		"/api/v1/svc/knowledge-bases/kb-1/query/stream?question=hi", nil,
+	longQ := strings.Repeat("a", 2001)
+	resp := ut.PerformRequest(h.Engine, http.MethodGet,
+		"/api/v1/svc/knowledge-bases/kb-1/query/stream?question="+longQ, nil,
 		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-test"},
 	).Result()
-	if capturedCtx == nil {
-		t.Fatal("StreamChat was not called; context not captured")
+	if resp.StatusCode() != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode())
 	}
-	if capturedCtx.Err() != nil {
-		t.Fatalf("captured context already done: %v", capturedCtx.Err())
-	}
-}
-
-// ctxCapturingStreamer captures the context passed to StreamChat so tests
-// can assert context propagation for client-disconnect cancellation.
-type ctxCapturingStreamer struct {
-	onStream func(ctx context.Context)
-}
-
-func (s *ctxCapturingStreamer) StreamChat(ctx context.Context, _ *vllmChatRequest) (io.ReadCloser, error) {
-	s.onStream(ctx)
-	return &stringReadCloser{strings.NewReader("data: [DONE]\n\n")}, nil
 }

@@ -164,7 +164,7 @@ func TestStorageHTTPAsyncTasksKeepOperationTypeAndLocation(t *testing.T) {
 	})
 	v1 := h.Group("/api/v1")
 	registerStorageResourcesWithServiceAndTasks(v1, runtimeadapter.NewLocalStorageService(), tasks)
-	registerTasksWithStore(v1, tasks)
+	registerTasksWithStore(v1, tasks, nil)
 
 	created := performJSONRequest(t, h, http.MethodPost, "/api/v1/volumes", `{"idempotency_key":"http-volume-async","name":"async-data","size_gib":10}`, http.StatusCreated)
 	volumeID := jsonStringField(t, created, "id")
@@ -216,7 +216,7 @@ func TestStorageHTTPAsyncTasksKeepOperationTypeAndLocation(t *testing.T) {
 		c.Set("tenant_id", "tenant-a")
 		c.Next(ctx)
 	})
-	registerTasksWithStore(restarted.Group("/api/v1"), tasks)
+	registerTasksWithStore(restarted.Group("/api/v1"), tasks, nil)
 	restartedReq := ut.PerformRequest(restarted.Engine, http.MethodGet, "/api/v1/tasks/"+taskID, nil)
 	if got := restartedReq.Result().StatusCode(); got != http.StatusOK {
 		t.Fatalf("task status after router restart = %d body=%s, want 200", got, restartedReq.Result().Body())
@@ -232,7 +232,7 @@ func TestStorageHTTPAsyncTasksKeepOperationTypeAndLocation(t *testing.T) {
 		c.Set("tenant_id", "tenant-b")
 		c.Next(ctx)
 	})
-	registerTasksWithStore(otherTenant.Group("/api/v1"), tasks)
+	registerTasksWithStore(otherTenant.Group("/api/v1"), tasks, nil)
 	crossTenantReq := ut.PerformRequest(otherTenant.Engine, http.MethodGet, "/api/v1/tasks/"+taskID, nil)
 	if got := crossTenantReq.Result().StatusCode(); got != http.StatusNotFound {
 		t.Fatalf("cross-tenant task status = %d, want 404", got)

@@ -9,6 +9,9 @@ persistence + Redis session cache.
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
+import queue
 import threading
 import uuid
 from datetime import datetime
@@ -20,14 +23,21 @@ from google.protobuf import empty_pb2
 from google.protobuf import timestamp_pb2
 
 from app.api import p1_rpcs
+import httpx
 from app.core_api.client import CoreAPIError, CoreClient
 from app.generated.common.v1 import common_pb2
 from app.generated.kb.v1 import kb_service_pb2 as kb_pb
 from app.generated.kb.v1 import kb_service_pb2_grpc as pb_grpc
-from app.rag_engine.client import RagEngineClient, RagEngineError
+from app.rag_engine.client import RagEngineError
 from app.repositories import async_task as async_task_repo
+from app.repositories import chunk as chunk_repo
 from app.repositories import document as document_repo
 from app.repositories import knowledge_base as kb_repo
+from app.repositories import message as message_repo
+from app.core.config import settings
+from app.services.contracts import QueryResult
+
+logger = logging.getLogger(__name__)
 
 
 # ── async bridge for gRPC ThreadPoolExecutor worker threads ──────────────────
@@ -106,8 +116,9 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         *,
         pool: asyncpg.Pool | None = None,
         core_client_factory: Any | None = None,
-        rag_engine_client_factory: Any | None = None,
         session_cache_factory: Any | None = None,
+        retrieve_service_factory: Any | None = None,
+        rag_engine_grpc_client_factory: Any | None = None,
     ) -> None:
         # When pool is None the servicer still serves RPCs that don't need DB
         # (used by the skeleton tests in test_grpc_server.py). DB-backed RPCs
@@ -116,12 +127,21 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         # core_client_factory(tenant_id) -> CoreClient; injected for testing.
         # In production, constructed from settings in main.py.
         self._core_client_factory = core_client_factory or _default_core_client
-        # rag_engine_client_factory() -> RagEngineClient; injected for testing.
-        # In production, constructed from settings in main.py.
-        self._rag_engine_client_factory = rag_engine_client_factory or _default_rag_engine_client
         # session_cache_factory() -> SessionCache | None; injected for testing.
         # Returns None when Redis is unavailable (Query degrades to DB-only).
         self._session_cache_factory = session_cache_factory or _default_session_cache
+        # retrieve_service_factory(tenant_id) -> RetrieveService; injected for
+        # testing. In production, constructed from settings in main.py.
+        self._retrieve_service_factory = retrieve_service_factory
+        # rag_engine_grpc_client_factory() -> RagEngineGRPCClient; injected for
+        # testing. In production, constructed from settings in main.py.
+        self._rag_engine_grpc_client_factory = rag_engine_grpc_client_factory
+        # Per-tenant orchestrator cache. Each tenant gets its own
+        # QueryOrchestrator instance backed by a tenant-scoped
+        # RetrieveService (which holds a tenant-scoped CoreClient). This
+        # preserves multi-tenant isolation — a single global orchestrator
+        # would cross tenant boundaries.
+        self._orchestrators: dict[str, Any] = {}
 
     # ── 10 P0 RPCs ───────────────────────────────────────────────────────────
 
@@ -201,17 +221,28 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             kb_id = str(kb_row["id"])
 
         # 4. Core POST /vector-stores (SPEC §6.1)
+        vector_store_id = ""
         try:
             async with self._core_client_factory(tenant_id) as core:
                 # dimension: bge-m3 = 1024; fallback to 1024 when unknown.
                 dim = 1024
-                await core.create_vector_store(
+                vs_resp = await core.create_vector_store(
                     name=_vector_store_name(kb_id),
                     dimension=dim,
                     metric="cosine",
                     embedding_model=request.embedding_model or "bge-m3",
                     idempotency_key=idem_key,
                 )
+                # Persist the Core-returned vector store id (Plan §3.1).
+                vector_store_id = str(vs_resp.get("id") or "")
+                if vector_store_id:
+                    async with self._pool.acquire() as conn:
+                        await kb_repo.set_vector_store_id(
+                            conn,
+                            tenant_id=tenant_id,
+                            kb_id=kb_id,
+                            vector_store_id=vector_store_id,
+                        )
         except CoreAPIError as e:
             # Best-effort cleanup: soft-delete the KB row so retries can
             # re-create. We don't abort here on cleanup failure.
@@ -290,8 +321,14 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         tenant_id = request.tenant_id
         kb_id = request.kb_id
 
-        # 1. soft-delete KB
+        # 1. soft-delete KB + fetch persisted vector_store_id for Core cleanup
         async with self._pool.acquire() as conn:
+            kb_row = await kb_repo.get_kb(
+                conn, tenant_id=tenant_id, kb_id=kb_id
+            )
+            if not kb_row:
+                context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
+                return
             deleted = await kb_repo.soft_delete_kb(
                 conn, tenant_id=tenant_id, kb_id=kb_id
             )
@@ -299,16 +336,27 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
             return
 
-        # 2. Core DELETE /vector-stores/{id} (SPEC §6.1) — best-effort
-        try:
-            async with self._core_client_factory(tenant_id) as core:
-                await core.delete_vector_store(
-                    vector_store_id=_vector_store_name(kb_id)
+        # 2. Core DELETE /vector-stores/{id} (SPEC §6.1) — best-effort.
+        # Use the persisted vector_store_id (Core UUID), not the derived name.
+        vector_store_id = str(kb_row.get("vector_store_id") or "")
+        if not vector_store_id:
+            logger.warning(
+                "kb-service: DeleteKB kb_id=%s has no persisted vector_store_id; "
+                "skipping Core vector cleanup", kb_id,
+            )
+        else:
+            try:
+                async with self._core_client_factory(tenant_id) as core:
+                    await core.delete_vector_store(
+                        vector_store_id=vector_store_id
+                    )
+            except (CoreAPIError, httpx.RequestError) as e:
+                # best-effort: KB is already soft-deleted; vector cleanup can be
+                # retried by a reconciler.
+                logger.warning(
+                    "kb-service: DeleteKB kb_id=%s Core vector cleanup failed "
+                    "(best-effort): %s", kb_id, e,
                 )
-        except CoreAPIError:
-            # best-effort: KB is already soft-deleted; vector cleanup can be
-            # retried by a reconciler. Log and continue.
-            pass
 
         return empty_pb2.Empty()
 
@@ -545,6 +593,14 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         limit = request.page.limit or 20
         cursor = request.page.cursor or None
         async with self._pool.acquire() as conn:
+            # KB existence gate: a deleted/unknown KB must yield NOT_FOUND, not
+            # an empty list (SPEC §6.1 ListDocuments 404 semantics).
+            kb_row = await kb_repo.get_kb(
+                conn, tenant_id=request.tenant_id, kb_id=request.kb_id
+            )
+            if not kb_row:
+                context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
+                return
             rows, total = await document_repo.list_documents(
                 conn,
                 tenant_id=request.tenant_id,
@@ -567,27 +623,51 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         if self._pool is None:
             context.abort(grpc.StatusCode.FAILED_PRECONDITION, "DB pool not configured")
             return
-        # 1. soft-delete document
+        # 1. soft-delete document + delete chunks + fetch persisted vector_store_id
         async with self._pool.acquire() as conn:
+            kb_row = await kb_repo.get_kb(
+                conn, tenant_id=request.tenant_id, kb_id=request.kb_id
+            )
+            if not kb_row:
+                context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
+                return
             deleted = await document_repo.soft_delete_document(
                 conn,
                 tenant_id=request.tenant_id,
                 kb_id=request.kb_id,
                 doc_id=request.doc_id,
             )
-        if not deleted:
-            context.abort(grpc.StatusCode.NOT_FOUND, "document not found")
-            return
-        # 2. Core DELETE /vector-stores/{id}/documents?filter=doc_id=="..." — best-effort
-        try:
-            async with self._core_client_factory(request.tenant_id) as core:
-                await core.delete_vector_store_documents(
-                    vector_store_id=_vector_store_name(request.kb_id),
-                    filter_expr=f'doc_id == "{request.doc_id}"',
+            if not deleted:
+                context.abort(grpc.StatusCode.NOT_FOUND, "document not found")
+                return
+            await chunk_repo.delete_chunks_by_doc(
+                conn,
+                tenant_id=request.tenant_id,
+                kb_id=request.kb_id,
+                doc_id=request.doc_id,
+            )
+        # 2. Core DELETE /vector-stores/{id}/documents?filter=doc_id=="..." — best-effort.
+        # Use the persisted vector_store_id (Core UUID), not the derived name.
+        vector_store_id = str(kb_row.get("vector_store_id") or "")
+        if not vector_store_id:
+            logger.warning(
+                "kb-service: DeleteDocument kb_id=%s has no persisted vector_store_id; "
+                "skipping Core vector cleanup", request.kb_id,
+            )
+        else:
+            try:
+                async with self._core_client_factory(request.tenant_id) as core:
+                    await core.delete_vector_store_documents(
+                        vector_store_id=vector_store_id,
+                        filter_expr=f'doc_id == "{request.doc_id}"',
+                    )
+            except (CoreAPIError, httpx.RequestError) as e:
+                # best-effort vector cleanup; document already soft-deleted.
+                logger.warning(
+                    "kb-service: DeleteDocument kb_id=%s doc_id=%s Core vector "
+                    "cleanup failed (best-effort): %s",
+                    request.kb_id, request.doc_id, e,
                 )
-        except CoreAPIError:
-            # best-effort vector cleanup; document already soft-deleted.
-            pass
         return empty_pb2.Empty()
 
     def Query(self, request, context):
@@ -660,8 +740,6 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         # a partial user-message write can't survive a crash mid-RPC (SPEC §6.1).
         if self._pool is not None:
             async with self._pool.acquire() as conn:
-                from app.repositories import message as message_repo
-
                 async with conn.transaction():
                     await message_repo.create_session_in_tx(
                         conn,
@@ -693,52 +771,31 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
         )
         retrieval_mode = (request.retrieval_mode or kb_cfg["retrieval_mode"] or "hybrid")
 
-        # 6. call rag-engine Query (injected factory for testability).
-        try:
-            async with self._rag_engine_client_factory() as rag:
-                resp = await rag.query(
-                    kb_id=kb_id,
-                    tenant_id=tenant_id,
-                    question=request.question,
-                    session_id=session_id,
-                    top_k=top_k,
-                    score_threshold=score_threshold,
-                    retrieval_mode=retrieval_mode,
-                    inference_service_name=request.inference_service_name or "default",
-                )
-        except RagEngineError as e:
-            context.abort(grpc.StatusCode.UNAVAILABLE, f"rag-engine unavailable: {e}")
-            return
-
-        answer = resp.get("answer", "")
-        sources = resp.get("sources", [])
-        input_tokens = int(resp.get("input_tokens", 0) or 0)
-        output_tokens = int(resp.get("output_tokens", 0) or 0)
+        # 6. QueryOrchestrator: retrieve → gates → Generate RPC.
+        result = await self._query_new_path(
+            tenant_id=tenant_id,
+            kb_id=kb_id,
+            question=request.question,
+            session_id=session_id,
+            top_k=top_k,
+            score_threshold=score_threshold,
+            retrieval_mode=retrieval_mode,
+            inference_service_name=request.inference_service_name or "default",
+            vector_store_id=str(kb_row.get("vector_store_id") or ""),
+            cache=cache,
+        )
+        answer = result.answer
+        sources = result.sources
+        input_tokens = result.input_tokens
+        output_tokens = result.output_tokens
 
         # 6-7. persist assistant message + Redis cache (best-effort).
-        if self._pool is not None:
-            async with self._pool.acquire() as conn:
-                from app.repositories import message as message_repo
-
-                await message_repo.insert_message(
-                    conn,
-                    tenant_id=tenant_id,
-                    session_id=session_id,
-                    role="assistant",
-                    content=answer,
-                    source_chunks=sources,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                )
-        if cache is not None:
-            await cache.append_message(
-                session_id=session_id,
-                role="assistant",
-                content=answer,
-                sources=sources,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-            )
+        await self._persist_assistant(
+            tenant_id=tenant_id, session_id=session_id,
+            answer=answer, sources=sources,
+            input_tokens=input_tokens, output_tokens=output_tokens,
+            cache=cache,
+        )
 
         # 8. build response (session_id may have been newly created).
         source_chunks = [
@@ -759,6 +816,423 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
             output_tokens=output_tokens,
         )
 
+    # ── Plan step 10 (issue-038): Retrieve server-streaming RPC ───────────
+
+    def Retrieve(self, request, context):
+        """Retrieve — server-streaming RAG: retrieve → sources → tokens → done.
+
+        Plan §10.2: Gateway SSE switches to this gRPC stream when
+        ``KB_SSE_USE_NEW_PATH=True``. The handler orchestrates retrieve →
+        three no-result gates → GenerateStream, yielding RetrieveEvent
+        messages (token* → sources → done), matching the legacy SSE event
+        sequence.
+
+        Session management and persistence mirror Query RPC: persist user
+        message first, load history (includes current-turn user), stream
+        GenerateStream, then persist assistant message.
+
+        gRPC server-streaming RPC methods must be sync generators (yield
+        RetrieveEvent). The async orchestrator runs on the dedicated
+        gRPC event loop; events are bridged via a thread-safe queue so the
+        sync generator can yield them to the gRPC transport.
+        """
+        yield from self._retrieve_stream_sync(request, context)
+
+    def _retrieve_stream_sync(self, request, context):
+        """Sync generator wrapper: bridge async _retrieve_stream to gRPC.
+
+        Runs the async generator on the dedicated gRPC event loop and
+        bridges events through a thread-safe queue. A sentinel (None)
+        signals completion; exceptions are re-raised in the sync thread
+        so gRPC can map them to status codes.
+
+        Cancellation safety (S1/S2): if the gRPC client disconnects mid-stream
+        the sync generator stops iterating (GeneratorExit), which cancels the
+        pending ``run_coroutine_threadsafe`` future — the ``_runner`` coroutine
+        receives ``CancelledError`` and stops the LLM generation + DB work.
+        ``ev_q.get`` uses a timeout so the sync thread cannot hang forever if
+        the event loop dies without producing the sentinel.
+        """
+        if _grpc_loop is None:
+            _start_grpc_loop()
+
+        ev_q: queue.Queue = queue.Queue()
+        loop = _grpc_loop
+        # Max wait for a single event; the gRPC query timeout is 120s on the
+        # gateway side, so 130s gives a grace margin before we give up.
+        _EVENT_TIMEOUT = 130.0
+        future: asyncio.Future | None = None
+
+        async def _runner():
+            try:
+                async for event in self._retrieve_stream(request, context):
+                    ev_q.put(event)
+            except Exception as exc:  # noqa: BLE001 — propagate to sync side
+                ev_q.put(exc)
+            finally:
+                ev_q.put(None)  # sentinel: stream complete
+
+        try:
+            future = asyncio.run_coroutine_threadsafe(_runner(), loop)
+
+            while True:
+                try:
+                    item = ev_q.get(timeout=_EVENT_TIMEOUT)
+                except queue.Empty:
+                    # S2: event loop died or runner hung — cancel and abort.
+                    if future is not None and not future.done():
+                        future.cancel()
+                    context.abort(
+                        grpc.StatusCode.DEADLINE_EXCEEDED,
+                        "retrieve stream timed out waiting for event",
+                    )
+                    return
+                if item is None:
+                    break
+                if isinstance(item, BaseException):
+                    if isinstance(item, grpc.RpcError):
+                        raise item
+                    # Map common exceptions to gRPC status codes.
+                    if isinstance(item, (CoreAPIError, RagEngineError)):
+                        context.abort(
+                            grpc.StatusCode.UNAVAILABLE,
+                            f"backend unavailable: {item}",
+                        )
+                        return
+                    raise item
+                yield item
+        except GeneratorExit:
+            # S1: client disconnected — cancel the runner coroutine so the
+            # LLM generation / DB work stops instead of leaking.
+            if future is not None and not future.done():
+                future.cancel()
+            raise
+
+    async def _retrieve_stream(self, request, context):
+        """Async generator: orchestrate retrieve → gates → GenerateStream.
+
+        Yields RetrieveEvent messages (token* → sources → done). Session
+        management mirrors Query RPC (issue-038 AC 2).
+        """
+        # 1. validate request (mirror Query validation).
+        if not request.idempotency_key:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, "idempotency_key is required"
+            )
+            return
+        if not request.question:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "question is required")
+            return
+        tenant_id = request.tenant_id or ""
+        kb_id = request.kb_id or ""
+        if not tenant_id or not kb_id:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                "tenant_id and kb_id are required",
+            )
+            return
+
+        # 2. resolve / create session id.
+        session_id = request.session_id or str(uuid.uuid4())
+
+        # 2.5. Load KB row (NOT_FOUND gate, mirror Query).
+        kb_row = None
+        if self._pool is not None:
+            try:
+                async with self._pool.acquire() as conn:
+                    kb_row = await kb_repo.get_kb(
+                        conn, tenant_id=tenant_id, kb_id=kb_id
+                    )
+            except Exception:  # noqa: BLE001
+                logger.warning("kb-service: failed to load KB config, using defaults", exc_info=True)
+                kb_row = None
+        if kb_row is None:
+            context.abort(grpc.StatusCode.NOT_FOUND, "knowledge base not found")
+            return
+
+        kb_cfg = {
+            "top_k": kb_row.get("top_k") or 5,
+            "score_threshold": kb_row.get("score_threshold") or 0.0,
+            "retrieval_mode": kb_row.get("retrieval_mode") or "hybrid",
+        }
+
+        # 3-4. persist user message + Redis cache (mirror Query).
+        if self._pool is not None:
+            async with self._pool.acquire() as conn:
+                async with conn.transaction():
+                    await message_repo.create_session_in_tx(
+                        conn,
+                        tenant_id=tenant_id,
+                        kb_id=kb_id,
+                        session_id=session_id,
+                    )
+                    await message_repo.insert_message_in_tx(
+                        conn,
+                        tenant_id=tenant_id,
+                        session_id=session_id,
+                        role="user",
+                        content=request.question,
+                    )
+
+        cache = self._session_cache_factory()
+        if cache is not None:
+            await cache.append_message(
+                session_id=session_id, role="user", content=request.question
+            )
+
+        # 5. Resolve retrieval config (client overrides KB defaults).
+        top_k = request.top_k if request.top_k else kb_cfg["top_k"]
+        score_threshold = (
+            request.score_threshold if request.score_threshold != 0
+            else kb_cfg["score_threshold"]
+        )
+        retrieval_mode = request.retrieval_mode or kb_cfg["retrieval_mode"] or "hybrid"
+        inference_service_name = request.inference_service_name or "default"
+        vector_store_id = str(kb_row.get("vector_store_id") or "")
+
+        # 6. Load chat history (includes current-turn user, already persisted).
+        history = await self._load_history(
+            tenant_id=tenant_id,
+            session_id=session_id,
+            cache=cache,
+        )
+
+        # 7. Build or reuse per-tenant orchestrator (mirror _query_new_path).
+        from app.services.query_orchestrator import (
+            QueryOrchestrator,
+            StreamDoneEvent,
+            StreamNoResultEvent,
+            StreamSourcesEvent,
+            StreamTokenEvent,
+        )
+
+        orch = self._orchestrators.get(tenant_id)
+        if orch is None:
+            if self._retrieve_service_factory is not None:
+                retrieve_service = self._retrieve_service_factory(tenant_id)
+            else:
+                retrieve_service = _default_retrieve_service(tenant_id, self._pool)
+
+            if self._rag_engine_grpc_client_factory is not None:
+                rag_engine_grpc = self._rag_engine_grpc_client_factory()
+            else:
+                rag_engine_grpc = _default_rag_engine_grpc_client()
+
+            orch = QueryOrchestrator(
+                retrieve_service=retrieve_service,
+                rag_engine_client=rag_engine_grpc,
+            )
+            self._orchestrators[tenant_id] = orch
+
+        # 8. Delegate to orchestrator.query_stream (single source of gate logic).
+        answer = ""
+        final_sources: list[dict[str, Any]] = []
+        final_input_tokens = 0
+        final_output_tokens = 0
+        async for ev in orch.query_stream(
+            tenant_id=tenant_id,
+            kb_id=kb_id,
+            question=request.question,
+            session_id=session_id,
+            top_k=top_k,
+            score_threshold=score_threshold,
+            retrieval_mode=retrieval_mode,
+            inference_service_name=inference_service_name,
+            vector_store_id=vector_store_id,
+            history=history,
+        ):
+            if isinstance(ev, StreamTokenEvent):
+                answer += ev.content
+                yield kb_pb.RetrieveEvent(
+                    token=kb_pb.RetrieveTokenEvent(content=ev.content)
+                )
+            elif isinstance(ev, StreamNoResultEvent):
+                answer = ev.answer
+                final_input_tokens = ev.input_tokens
+                final_output_tokens = ev.output_tokens
+                yield kb_pb.RetrieveEvent(
+                    token=kb_pb.RetrieveTokenEvent(content=ev.answer)
+                )
+            elif isinstance(ev, StreamSourcesEvent):
+                final_sources = ev.sources
+                source_chunks = [
+                    kb_pb.SourceChunk(
+                        doc_id=str(s.get("doc_id", "")),
+                        file_name=str(s.get("file_name", "")),
+                        page=int(s.get("page", 0) or 0),
+                        content=str(s.get("content", "")),
+                        score=float(s.get("score", 0.0) or 0.0),
+                    )
+                    for s in ev.sources
+                ]
+                yield kb_pb.RetrieveEvent(
+                    sources=kb_pb.RetrieveSourcesEvent(sources=source_chunks)
+                )
+            elif isinstance(ev, StreamDoneEvent):
+                final_input_tokens = ev.input_tokens
+                final_output_tokens = ev.output_tokens
+                yield kb_pb.RetrieveEvent(
+                    done=kb_pb.RetrieveDoneEvent(
+                        input_tokens=ev.input_tokens,
+                        output_tokens=ev.output_tokens,
+                        session_id=ev.session_id,
+                    )
+                )
+
+        # 9. Persist assistant message + Redis cache (mirror Query).
+        await self._persist_assistant(
+            tenant_id=tenant_id, session_id=session_id,
+            answer=answer, sources=final_sources,
+            input_tokens=final_input_tokens, output_tokens=final_output_tokens,
+            cache=cache,
+        )
+
+    async def _persist_assistant(
+        self, *, tenant_id: str, session_id: str,
+        answer: str, sources: list[dict[str, Any]],
+        input_tokens: int, output_tokens: int, cache: Any,
+    ) -> None:
+        """Persist assistant message to DB + Redis (shared by Query and Retrieve)."""
+        if self._pool is not None:
+            async with self._pool.acquire() as conn:
+                await message_repo.insert_message(
+                    conn,
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    role="assistant",
+                    content=answer,
+                    source_chunks=sources,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                )
+        if cache is not None:
+            await cache.append_message(
+                session_id=session_id,
+                role="assistant",
+                content=answer,
+                sources=sources,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
+
+    # ── Plan step 8A: new path helpers (flag=true) ───────────────────────────
+
+    async def _load_history(
+        self,
+        *,
+        tenant_id: str,
+        session_id: str,
+        cache: Any,
+        limit: int = 20,
+    ) -> list[dict[str, str]]:
+        """Load chat history for the current session (Plan step 8A).
+
+        Priority: Redis cache (``LRANGE key -limit -1`` → most recent N in
+        chronological order, matching legacy ChatMemoryBuffer token_limit
+        behavior) → fallback to DB ``list_session_messages`` (oldest N).
+
+        The current-turn user message was already persisted to Redis (step
+        3-4 of ``_query``) BEFORE this call, so the Redis history INCLUDES
+        the current-turn user. The Generate RPC appends ``question`` as the
+        final USER message, so the current-turn user appears twice — this
+        matches the legacy ContextChatEngine behavior and is intentional.
+
+        Returns a list of ``{role, content}`` dicts in chronological order
+        (oldest-first), ready to pass as ``history`` to Generate RPC.
+        """
+        # 1. Try Redis first (most recent N, chronological order).
+        if cache is not None:
+            msgs = await cache.list_recent_messages(
+                session_id=session_id, limit=limit
+            )
+            if msgs:
+                return [
+                    {"role": str(m.get("role", "")), "content": str(m.get("content", ""))}
+                    for m in msgs
+                ]
+
+        # 2. Fallback to DB (oldest N by created_at ASC).
+        if self._pool is not None:
+            async with self._pool.acquire() as conn:
+                rows = await message_repo.list_session_messages(
+                    conn,
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    limit=limit,
+                )
+            return [
+                {"role": r.get("role", ""), "content": r.get("content", "")}
+                for r in rows
+            ]
+
+        return []
+
+    async def _query_new_path(
+        self,
+        *,
+        tenant_id: str,
+        kb_id: str,
+        question: str,
+        session_id: str,
+        top_k: int,
+        score_threshold: float,
+        retrieval_mode: str,
+        inference_service_name: str,
+        vector_store_id: str,
+        cache: Any,
+    ) -> QueryResult:
+        """QueryOrchestrator: retrieve → gates → Generate RPC.
+
+        Returns a ``QueryResult`` dataclass (answer, sources, session_id,
+        input_tokens, output_tokens).
+        """
+        from app.services.query_orchestrator import QueryOrchestrator
+
+        # 1. Load chat history (includes current-turn user, already persisted).
+        history = await self._load_history(
+            tenant_id=tenant_id,
+            session_id=session_id,
+            cache=cache,
+        )
+
+        # 2. Build or reuse the per-tenant orchestrator.
+        #    Each tenant gets its own QueryOrchestrator backed by a
+        #    tenant-scoped RetrieveService (which holds a tenant-scoped
+        #    CoreClient). This preserves multi-tenant isolation.
+        orch = self._orchestrators.get(tenant_id)
+        if orch is None:
+            if self._retrieve_service_factory is not None:
+                retrieve_service = self._retrieve_service_factory(tenant_id)
+            else:
+                retrieve_service = _default_retrieve_service(tenant_id, self._pool)
+
+            if self._rag_engine_grpc_client_factory is not None:
+                rag_engine_grpc = self._rag_engine_grpc_client_factory()
+            else:
+                rag_engine_grpc = _default_rag_engine_grpc_client()
+
+            orch = QueryOrchestrator(
+                retrieve_service=retrieve_service,
+                rag_engine_client=rag_engine_grpc,
+            )
+            self._orchestrators[tenant_id] = orch
+
+        # 3. Run the orchestrator.
+        result = await orch.query(
+            tenant_id=tenant_id,
+            kb_id=kb_id,
+            question=question,
+            session_id=session_id,
+            top_k=top_k,
+            score_threshold=score_threshold,
+            retrieval_mode=retrieval_mode,
+            inference_service_name=inference_service_name,
+            vector_store_id=vector_store_id,
+            history=history,
+        )
+
+        return result
+
     # ── 3 P1 RPC declarations (always UNIMPLEMENTED in P0) ────────────────────
 
     def ListKBCitations(self, request, context):
@@ -775,20 +1249,20 @@ class KBServiceServicer(pb_grpc.KBServiceServicer):
 
 
 def _default_core_client(tenant_id: str) -> CoreClient:
-    """Build a CoreClient from app settings (production default)."""
+    """Build a CoreClient from app settings (production default).
+
+    Reads the service-account token from CORE_SERVICE_TOKEN env var and
+    forwards it as the Authorization header so the gateway auth middleware
+    accepts the request.
+    """
     from app.core.config import settings
 
+    auth_token = os.environ.get("CORE_SERVICE_TOKEN", "")
     return CoreClient(
         base_url=settings.core_api_base_url,
         tenant_id=tenant_id,
+        auth_token=auth_token or None,
     )
-
-
-def _default_rag_engine_client() -> RagEngineClient:
-    """Build a RagEngineClient from app settings (production default)."""
-    from app.core.config import settings
-
-    return RagEngineClient(base_url=f"http://{settings.rag_engine_addr}")
 
 
 def _default_session_cache() -> Any:
@@ -802,12 +1276,9 @@ def _default_session_cache() -> Any:
     mocking the factory. Query degrades to DB-only when Redis is down
     (SPEC §7.3).
     """
-    import logging
-
     from app.core.config import settings
     from app.session.cache import SessionCache
 
-    logger = logging.getLogger(__name__)
     try:
         import redis.asyncio as aioredis
 
@@ -816,6 +1287,50 @@ def _default_session_cache() -> Any:
     except Exception as e:  # noqa: BLE001 — best-effort cache wiring
         logger.warning("Redis session cache unavailable (Query will be DB-only): %s", e)
         return None
+
+
+def _default_rag_engine_grpc_client() -> Any:
+    """Build a RagEngineGRPCClient from app settings (production default).
+
+    Used when no factory was injected. In production, main.py constructs
+    the client once at startup and injects it via
+    ``rag_engine_grpc_client_factory``.
+
+    This fallback creates a module-level singleton so the gRPC channel is
+    not re-created on every request (avoids channel leak / connection storm).
+    """
+    global _default_grpc_client_instance
+    if _default_grpc_client_instance is None:
+        from app.rag_engine.client import RagEngineGRPCClient
+
+        _default_grpc_client_instance = RagEngineGRPCClient(
+            addr=settings.rag_engine_grpc_addr
+        )
+    return _default_grpc_client_instance
+
+
+def _default_retrieve_service(tenant_id: str, pool: Any) -> Any:
+    """Build a RetrieveService from app settings (production default).
+
+    Used when no factory was injected. In production, main.py constructs
+    the service once at startup and injects it via
+    ``retrieve_service_factory``.
+
+    Reuses the module-level ``_default_rag_engine_grpc_client`` singleton so
+    the gRPC channel is shared, not re-created per request.
+    """
+    from app.services.retrieve_service import RetrieveService
+
+    rag_engine = _default_rag_engine_grpc_client()
+    return RetrieveService(
+        db_pool=pool,
+        core_client_factory=_default_core_client,
+        rag_engine_client=rag_engine,
+    )
+
+
+# Module-level singleton for the fallback gRPC client (avoids channel leak).
+_default_grpc_client_instance: Any = None
 
 
 def _kb_bucket_id(kb_id: str) -> str:

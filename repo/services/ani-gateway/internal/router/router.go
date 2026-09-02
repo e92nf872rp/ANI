@@ -41,13 +41,15 @@ type RegisterOptions struct {
 	// still boots in environments without kb-service configured.
 	KBServiceClient KBGRPCClient
 	// KBSSEConfig wires the SSE streaming query endpoint (US-017). When
-	// ragClient or vllmStreamer is nil the SSE handler degrades to an
+	// vllmStreamer is nil the SSE handler degrades to an
 	// empty stream so the gateway stays functional without backends.
 	KBSSEConfig             KbSSEConfig
 	AsyncTaskStore          ports.AsyncTaskStore
 	QuotaAdminService       ports.QuotaAdminService
 	PlatformWorkloadService ports.PlatformWorkloadService
 	TenantService           ports.TenantService
+	TenantPlanService       ports.TenantPlanService
+	TenantAdminService      ports.TenantAdminService
 	// GPUSpecStore backs the GPU spec directory CRUD endpoints (POST/DELETE
 	// in gpu_spec_resources.go). When nil those handlers return 503.
 	GPUSpecStore ports.GPUSpecStore
@@ -59,6 +61,10 @@ type RegisterOptions struct {
 	// (GetMy self-opens a tenant-scoped transaction so RLS applies). When nil
 	// the handler returns 503.
 	QuotaStoreService ports.QuotaStoreService
+	// MeteringService backs the metering usage query endpoints
+	// (GET /metering/usage + GET /metering/usage/platform). When nil the
+	// handlers fall back to the in-process local adapter.
+	MeteringService ports.MeteringService
 }
 
 // Register wires all route groups onto the Hertz server.
@@ -75,9 +81,8 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 
 	v1 := h.Group("/api/v1")
 	registerBranding(v1)
-	registerTasksWithStore(v1, options.AsyncTaskStore)
 	registerAuth(v1)
-	registerMetering(v1)
+	registerMetering(v1, options.MeteringService)
 	registerHarbor(v1, options.ImageRegistry)
 	// Instances register first so their service can act as InstanceLookup.
 	// 注入到 ObservabilityService（时序图 PromQL 代理需要解析实例记录的
@@ -85,7 +90,10 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	if options.InstanceRuntime != nil && options.InstanceRuntime.TaskStore == nil {
 		options.InstanceRuntime.TaskStore = options.AsyncTaskStore
 	}
-	instanceLookup := registerInstancesWithRuntime(v1, options.InstanceObservability, options.InstanceObservabilityUsesInstanceName, options.GPUInventory, options.KubernetesRESTClient, options.SecretService, options.InstanceRuntime, options.GPUSpecStore)
+	instanceLookup, observeInstance := registerInstancesWithRuntime(v1, options.InstanceObservability, options.InstanceObservabilityUsesInstanceName, options.GPUInventory, options.KubernetesRESTClient, options.SecretService, options.InstanceRuntime, options.GPUSpecStore)
+	// Tasks register after instances so the lazy-sync observer (store read +
+	// single-instance Kubernetes refresh) is available for GET /tasks/{id}.
+	registerTasksWithStore(v1, options.AsyncTaskStore, observeInstance)
 	if promSvc, ok := options.ObservabilityService.(*runtimeadapter.PrometheusObservabilityService); ok {
 		promSvc.SetInstanceLookup(instanceLookup)
 	}
@@ -106,6 +114,8 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerQuotaResources(v1, options.QuotaAdminService, options.QuotaStoreService)
 	registerPlatformWorkloadResources(v1, options.PlatformWorkloadService, options.AsyncTaskStore)
 	registerAdminTenantResources(v1, options.TenantService)
+	registerAdminTenantAdminResources(v1, options.TenantAdminService)
+	registerAdminTenantPlanResources(v1, options.TenantPlanService)
 	// GPU spec directory CRUD (POST/DELETE) + reservation management +
 	// tenant self-query endpoints (SPEC §4.3).
 	registerGPUSpecResources(v1, options.GPUSpecStore, options.GPUInventory, options.GPUInstanceStore, options.MetadataStore)
@@ -131,6 +141,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerSandboxes(svc)
 	registerTenant(svc)
 	registerTenantPlans(svc)
+	registerTenantAdmins(svc)
 
 	// OpenAI-compatible inference proxy (separate URL prefix, no /api prefix)
 	h.Group("/v1").POST("/chat/completions", inferenceProxy)

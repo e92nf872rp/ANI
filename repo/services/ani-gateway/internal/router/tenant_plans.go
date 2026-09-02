@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -16,7 +15,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
@@ -25,12 +23,7 @@ import (
 // 本文件实现配额套餐网关接入：/api/v1/svc/tenant-plans* 与 /api/v1/svc/tenants/{id}/plan
 // 把 REST 请求转发到 tenant-service 的 gRPC，并把 gRPC 错误映射为 HTTP 状态与业务码。
 // gRPC client 在 router 层持有（不放 middleware），每方法施加 5s 调用超时（对应 SPEC §2.4 / issue-004）。
-const (
-	// tenantServiceDefaultAddr 缺省 gRPC 地址，可由 TENANT_SERVICE_ADDR 覆盖（对应 GRPC_PORT=9105）。
-	tenantServiceDefaultAddr = "127.0.0.1:9105"
-	// tenantCallTimeout 单次 gRPC 调用超时。
-	tenantCallTimeout = 5 * time.Second
-)
+// 通用常量与工具函数（tenantCallCtx / idempotencyHeader / cursorLimit / nullIfEmpty）见 tenant_common.go。
 
 // tenantPlansAPI 持有 tenant-service 两个 gRPC 客户端，作为各路由 handler 的接收者。
 // plans=TenantPlanServiceClient；tenants=TenantServiceClient(供 BindPlanQuota)。
@@ -474,14 +467,6 @@ func (api *tenantPlansAPI) listTenantPlanAuditLogs(ctx context.Context, c *app.R
 	})
 }
 
-// nullIfEmpty 空串映射为 JSON null（OpenAPI next_cursor nullable：null = 已无更多）。
-func nullIfEmpty(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
-}
-
 // ---- helpers ----
 
 // tenantPlanJSON 把 gRPC TenantPlan 映射为 OpenAPI TenantPlan / TenantPlanListItem。
@@ -582,36 +567,6 @@ func toPlanQuotaLimitInputs(items []planQuotaLimitJSON) []*tenantv1.PlanQuotaLim
 		out = append(out, in)
 	}
 	return out
-}
-
-// tenantCallCtx 构造 gRPC 调用 context：注入 5s 超时，并把网关 request_id / user_id 透传到 gRPC metadata。
-// 供 tenant-service 审计日志关联请求与操作者。
-func tenantCallCtx(ctx context.Context, c *app.RequestContext) (context.Context, context.CancelFunc) {
-	callCtx, cancel := context.WithTimeout(ctx, tenantCallTimeout)
-	callCtx = metadata.AppendToOutgoingContext(callCtx, "x-request-id", middleware.GetRequestID(c))
-	if userID := strings.TrimSpace(middleware.GetUserID(c)); userID != "" {
-		callCtx = metadata.AppendToOutgoingContext(callCtx, "x-user-id", userID)
-	}
-	return callCtx, cancel
-}
-
-// idempotencyHeader 读取 Idempotency-Key 请求头（去除首尾空白）。
-func idempotencyHeader(c *app.RequestContext) string {
-	return strings.TrimSpace(string(c.GetHeader("Idempotency-Key")))
-}
-
-// cursorLimit 解析 limit 查询参数，默认 20、上限 100。
-func cursorLimit(c *app.RequestContext) int32 {
-	limit := int32(20)
-	if v := c.Query("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			limit = int32(n)
-			if limit > 100 {
-				limit = 100
-			}
-		}
-	}
-	return limit
 }
 
 // businessCodeByHTTP 是套餐业务码 → HTTP 状态码映射表（对齐 SPEC §6.1 Error Taxonomy）。

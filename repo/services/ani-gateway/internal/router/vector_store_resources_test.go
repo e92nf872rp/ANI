@@ -115,6 +115,113 @@ func TestVectorStoreAPIDevProfileCreateSearchAndDelete(t *testing.T) {
 	}
 }
 
+// contentReturningVectorStoreService is a mock VectorStoreService whose
+// SearchVectorStore returns hits carrying the Content field (issue #028).
+type contentReturningVectorStoreService struct {
+	recordingVectorStoreService
+	searchHits []ports.VectorSearchResult
+}
+
+func (s *contentReturningVectorStoreService) GetVectorStore(_ context.Context, _ ports.VectorStoreResourceGetRequest) (ports.VectorStoreRecord, error) {
+	return ports.VectorStoreRecord{
+		TenantID:  "tenant-a",
+		StoreID:   "vst_search_content",
+		Name:      "kb-main",
+		Dimension: 3,
+		Metric:    "cosine",
+		State:     ports.VectorStoreReady,
+	}, nil
+}
+
+func (s *contentReturningVectorStoreService) SearchVectorStore(_ context.Context, _ ports.VectorStoreResourceSearchRequest) ([]ports.VectorSearchResult, error) {
+	return s.searchHits, nil
+}
+
+func TestVectorStoreAPISearchResponseIncludesContentField(t *testing.T) {
+	service := &contentReturningVectorStoreService{
+		searchHits: []ports.VectorSearchResult{
+			{ID: "chunk-1", Score: 0.92, Content: "chunk text from backend", Metadata: map[string]string{"doc_id": "d1"}},
+			{ID: "chunk-2", Score: 0.81, Content: "second chunk text", Metadata: map[string]string{"doc_id": "d2"}},
+		},
+	}
+	h := setupVectorStoreTestServer(service)
+
+	body := `{"vector":[0.1,0.2,0.3],"top_k":5}`
+	resp := ut.PerformRequest(
+		h.Engine,
+		http.MethodPost,
+		"/api/v1/vector-stores/vst_search_content/search",
+		&ut.Body{Body: bytes.NewBufferString(body), Len: len(body)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-a"},
+	).Result()
+
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("search status = %d body=%s, want 200", resp.StatusCode(), resp.Body())
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(resp.Body(), &decoded); err != nil {
+		t.Fatalf("decode search body: %v", err)
+	}
+	items, _ := decoded["items"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("items = %d, want 2", len(items))
+	}
+	first, _ := items[0].(map[string]any)
+	if first["id"] != "chunk-1" || first["score"] != 0.92 {
+		t.Fatalf("first item = %v, want id and score preserved", first)
+	}
+	if first["content"] != "chunk text from backend" {
+		t.Fatalf("first content = %v, want content field from backend", first["content"])
+	}
+	second, _ := items[1].(map[string]any)
+	if second["content"] != "second chunk text" {
+		t.Fatalf("second content = %v, want content field from backend", second["content"])
+	}
+}
+
+func TestVectorStoreAPIInsertDocumentsPassesPrecomputedVectorToService(t *testing.T) {
+	captured := &capturingInsertVectorStoreService{}
+	h := setupVectorStoreTestServer(captured)
+
+	body := `{"idempotency_key":"http-insert-precomputed","documents":[{"id":"doc-pre","content":"hello","vector":[0.11,0.22,0.33]}]}`
+	resp := ut.PerformRequest(
+		h.Engine,
+		http.MethodPost,
+		"/api/v1/vector-stores/vst_insert_pre/documents",
+		&ut.Body{Body: bytes.NewBufferString(body), Len: len(body)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+		ut.Header{Key: "X-Dev-Tenant-ID", Value: "tenant-a"},
+	).Result()
+
+	if resp.StatusCode() != http.StatusAccepted {
+		t.Fatalf("insert status = %d body=%s, want 202", resp.StatusCode(), resp.Body())
+	}
+	if len(captured.lastDocuments) != 1 {
+		t.Fatalf("captured documents = %d, want 1", len(captured.lastDocuments))
+	}
+	got := captured.lastDocuments[0]
+	if got.ID != "doc-pre" || got.Content != "hello" {
+		t.Fatalf("captured doc = %+v, want id and content", got)
+	}
+	if len(got.Vector) != 3 || got.Vector[0] != 0.11 || got.Vector[1] != 0.22 || got.Vector[2] != 0.33 {
+		t.Fatalf("captured vector = %v, want precomputed [0.11 0.22 0.33]", got.Vector)
+	}
+}
+
+// capturingInsertVectorStoreService records the last InsertDocuments request
+// so the handler can be verified to forward the precomputed Vector field.
+// Embeds recordingVectorStoreService for the remaining interface methods.
+type capturingInsertVectorStoreService struct {
+	recordingVectorStoreService
+	lastDocuments []ports.VectorDocumentInput
+}
+
+func (s *capturingInsertVectorStoreService) InsertDocuments(_ context.Context, request ports.VectorStoreDocumentInsertRequest) (ports.VectorStoreDocumentInsertResult, error) {
+	s.lastDocuments = append([]ports.VectorDocumentInput(nil), request.Documents...)
+	return ports.VectorStoreDocumentInsertResult{InsertedCount: len(request.Documents), TaskID: "11111111-1111-4111-8111-111111111111", Status: "completed"}, nil
+}
+
 func TestVectorStoreAPIServiceKeepsTenantIsolation(t *testing.T) {
 	api := newVectorStoreAPI()
 	store, err := api.service.CreateVectorStore(context.Background(), ports.VectorStoreCreateRequest{
@@ -175,7 +282,7 @@ func TestVectorStoreHTTPDocumentInsertPersistsPollableTask(t *testing.T) {
 	})
 	v1 := h.Group("/api/v1")
 	registerVectorStoreResourcesWithServiceAndTasks(v1, runtimeadapter.NewLocalVectorStoreService(), tasks)
-	registerTasksWithStore(v1, tasks)
+	registerTasksWithStore(v1, tasks, nil)
 
 	created := performJSONRequest(t, h, http.MethodPost, "/api/v1/vector-stores", `{"idempotency_key":"http-vector-doc-task-create","name":"kb-doc-task","dimension":3}`, http.StatusCreated)
 	storeID := jsonStringField(t, created, "id")

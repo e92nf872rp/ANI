@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-from . import rag_pb2 as rag__pb2
+from app.grpc import rag_pb2 as rag__pb2
 
 GRPC_GENERATED_VERSION = '1.83.0'
 GRPC_VERSION = grpc.__version__
@@ -34,11 +34,6 @@ class RagEngineStub:
         Args:
             channel: A grpc.Channel.
         """
-        self.Query = channel.unary_unary(
-                '/rag.v1.RagEngine/Query',
-                request_serializer=rag__pb2.QueryRequest.SerializeToString,
-                response_deserializer=rag__pb2.QueryResponse.FromString,
-                _registered_method=True)
         self.Parse = channel.unary_unary(
                 '/rag.v1.RagEngine/Parse',
                 request_serializer=rag__pb2.ParseRequest.SerializeToString,
@@ -63,15 +58,6 @@ class RagEngineStub:
 
 class RagEngineServicer:
     """Missing associated documentation comment in .proto file."""
-
-    def Query(self, request, context):
-        """[DEPRECATED] Query performs a synchronous RAG query and returns the
-        answer + sources. Retained until STEP-11; new callers should use
-        retrieve (kb-service) + Generate.
-        """
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
 
     def Parse(self, request, context):
         """Parse downloads a document from download_url, parses + chunks it, and
@@ -107,11 +93,6 @@ class RagEngineServicer:
 
 def add_RagEngineServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'Query': grpc.unary_unary_rpc_method_handler(
-                    servicer.Query,
-                    request_deserializer=rag__pb2.QueryRequest.FromString,
-                    response_serializer=rag__pb2.QueryResponse.SerializeToString,
-            ),
             'Parse': grpc.unary_unary_rpc_method_handler(
                     servicer.Parse,
                     request_deserializer=rag__pb2.ParseRequest.FromString,
@@ -142,33 +123,6 @@ def add_RagEngineServicer_to_server(servicer, server):
  # This class is part of an EXPERIMENTAL API.
 class RagEngine:
     """Missing associated documentation comment in .proto file."""
-
-    @staticmethod
-    def Query(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/rag.v1.RagEngine/Query',
-            rag__pb2.QueryRequest.SerializeToString,
-            rag__pb2.QueryResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
 
     @staticmethod
     def Parse(request,

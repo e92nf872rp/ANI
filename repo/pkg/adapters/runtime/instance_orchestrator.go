@@ -659,6 +659,8 @@ func containerRolloutStatus(state ports.WorkloadState) string {
 		return "progressing"
 	case ports.WorkloadStateFailed:
 		return "degraded"
+	case ports.WorkloadStateStopped:
+		return "stopped"
 	default:
 		return "pending"
 	}
@@ -715,6 +717,8 @@ func gpuSchedulingState(status ports.WorkloadStatus) string {
 		return "pending"
 	case ports.WorkloadStateFailed:
 		return "failed"
+	case ports.WorkloadStateStopped:
+		return "stopped"
 	default:
 		return "pending"
 	}

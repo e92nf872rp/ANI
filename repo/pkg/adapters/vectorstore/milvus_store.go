@@ -417,10 +417,11 @@ func milvusSearchResults(data json.RawMessage) []ports.VectorSearchResult {
 				metadata[key] = fmt.Sprint(value)
 			}
 		}
-		if content, ok := item["content"].(string); ok && content != "" {
+		content, _ := item["content"].(string)
+		if content != "" {
 			metadata["content"] = content
 		}
-		results = append(results, ports.VectorSearchResult{ID: id, Score: score, Metadata: metadata})
+		results = append(results, ports.VectorSearchResult{ID: id, Score: score, Content: content, Metadata: metadata})
 	}
 	return results
 }

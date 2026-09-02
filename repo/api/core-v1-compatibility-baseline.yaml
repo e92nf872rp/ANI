@@ -1,7 +1,7 @@
 batch: SPEC-COMPAT-A
 phase: Phase 1 / Sprint 4
 source: api/openapi/v1.yaml
-generated_at: '2026-08-27'
+generated_at: '2026-08-31'
 compatibility_rules:
   allowed:
   - Add optional request fields.
@@ -5258,10 +5258,53 @@ paths:
           schema: '{}'
         '409':
           schema: '{}'
+  /tasks:
+    get:
+      operation_id: listAsyncTasks
+      rbac_scope: scope:tasks:read
+      parameters:
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - in: query
+        name: cursor
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: status
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: task_type
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: resource_type
+        required: false
+        schema:
+          type: string
+      request_body_required: false
+      request_schema: '{}'
+      responses:
+        '200':
+          schema: TaskListResponse
+        '400':
+          schema: '{}'
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
   /tasks/{task_id}:
     get:
-      operation_id: ''
-      rbac_scope: ''
+      operation_id: getTask
+      rbac_scope: scope:tasks:read
       parameters:
       - in: path
         name: task_id
@@ -5274,6 +5317,10 @@ paths:
       responses:
         '200':
           schema: AsyncTask
+        '401':
+          schema: '{}'
+        '403':
+          schema: '{}'
         '404':
           schema: '{}'
   /vector-stores:
@@ -5973,6 +6020,7 @@ schemas:
         - vector_store
         - sandbox_checkpoint
         - sandbox_code_run
+        - instance
       result:
         signature:
           type: object
@@ -6016,6 +6064,11 @@ schemas:
         - sandbox.checkpoint.create
         - sandbox.checkpoint.restore
         - sandbox.code_run.create
+        - instance.create
+        - instance.start
+        - instance.stop
+        - instance.restart
+        - instance.delete
   BeginOIDCLoginRequest:
     type: object
     required:
@@ -15114,6 +15167,22 @@ schemas:
           type: string
           minLength: 1
           maxLength: 128
+        enum: []
+  TaskListResponse:
+    type: object
+    required:
+    - items
+    properties:
+      items:
+        signature:
+          type: array
+          items:
+            $ref: '#/components/schemas/AsyncTask'
+        enum: []
+      next_cursor:
+        signature:
+          type: string
+          nullable: true
         enum: []
   Tenant:
     type: object

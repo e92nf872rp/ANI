@@ -34,14 +34,6 @@ func newCoreSDKClient() anisdk.Client {
 	return anisdk.NewClient(strings.TrimRight(base, "/"), strings.TrimSpace(os.Getenv("CORE_API_TOKEN")))
 }
 
-func idempotencyHeaders() (map[string]string, error) {
-	key, err := anisdk.NewIdempotencyKey("ani")
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ports.ErrCoreUnavailable, err)
-	}
-	return map[string]string{"Idempotency-Key": key}, nil
-}
-
 func mapSDKError(err error) error {
 	if err == nil {
 		return nil
@@ -65,6 +57,16 @@ func mapSDKError(err error) error {
 			return fmt.Errorf("%w: %s", ports.ErrQuotaResourceNotRegistered, detail)
 		case ports.ErrValidationFailed.Error():
 			return fmt.Errorf("%w: %s", ports.ErrValidationFailed, detail)
+		case "USER_NOT_FOUND":
+			return fmt.Errorf("%w: %s", ports.ErrTenantAdminNotFound, detail)
+		case ports.ErrTenantAdminNotFound.Error():
+			return fmt.Errorf("%w: %s", ports.ErrTenantAdminNotFound, detail)
+		case ports.ErrRoleChangeInvalid.Error():
+			return fmt.Errorf("%w: %s", ports.ErrRoleChangeInvalid, detail)
+		case ports.ErrPasswordSameAsOld.Error():
+			return fmt.Errorf("%w: %s", ports.ErrPasswordSameAsOld, detail)
+		case ports.ErrUserStateInvalid.Error():
+			return fmt.Errorf("%w: %s", ports.ErrUserStateInvalid, detail)
 		default:
 			return fmt.Errorf("%w: %s", ports.ErrCoreUnavailable, detail)
 		}

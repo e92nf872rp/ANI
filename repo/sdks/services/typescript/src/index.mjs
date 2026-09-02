@@ -82,6 +82,7 @@ export const operations = [
   "listSandboxSecurityEvents",
   "getSandboxSecurityOverview",
   "listAllTenantAdmins",
+  "listAvailableTenantsForAdmin",
   "listTenantPlans",
   "createTenantPlan",
   "deleteTenantPlan",
@@ -110,7 +111,6 @@ export const operations = [
   "deleteTenantAdmin",
   "getTenantAdminDetail",
   "listTenantAdminAuditLogs",
-  "getChangeableRoles",
   "disableTenantAdmin",
   "enableTenantAdmin",
   "resendTenantAdminInvitation",
@@ -118,7 +118,7 @@ export const operations = [
   "getTenantAdminRole",
   "updateTenantAdminRole",
   "bindTenantPlan",
-  "transferTenantOwnership"
+  "listTenantAssignableRoles"
 ];
 export const paths = [
   "GET /gpu-containers",
@@ -199,6 +199,7 @@ export const paths = [
   "GET /sandboxes/{sandbox_id}/security-events",
   "GET /sandboxes/{sandbox_id}/security-overview",
   "GET /tenant-admins",
+  "GET /tenant-admins/tenants",
   "GET /tenant-plans",
   "POST /tenant-plans",
   "DELETE /tenant-plans/{planId}",
@@ -227,7 +228,6 @@ export const paths = [
   "DELETE /tenants/{tenantId}/admins/{userId}",
   "GET /tenants/{tenantId}/admins/{userId}",
   "GET /tenants/{tenantId}/admins/{userId}/audit-logs",
-  "GET /tenants/{tenantId}/admins/{userId}/changeable-roles",
   "POST /tenants/{tenantId}/admins/{userId}/disable",
   "POST /tenants/{tenantId}/admins/{userId}/enable",
   "POST /tenants/{tenantId}/admins/{userId}/invitation/resend",
@@ -235,18 +235,19 @@ export const paths = [
   "GET /tenants/{tenantId}/admins/{userId}/role",
   "PUT /tenants/{tenantId}/admins/{userId}/role",
   "POST /tenants/{tenantId}/plan",
-  "POST /tenants/{tenantId}/transfer-ownership"
+  "GET /tenants/{tenantId}/roles"
 ];
 export const schemas = [
   "AdminDetail",
   "AdminListResponse",
   "AdminWithTenant",
+  "AssignableTenantRoleListResponse",
   "AsyncTask",
   "AvailableGpu",
+  "AvailableTenantListResponse",
   "BindPlanRequest",
   "BoundTenant",
   "BoundTenantsResponse",
-  "ChangeableRolesResponse",
   "CreateGpuContainerRequest",
   "CreateInferenceAccessPolicyRequest",
   "CreateInferenceEndpointRequest",
@@ -345,7 +346,6 @@ export const schemas = [
   "TenantPlanStateChangeRequest",
   "TenantRef",
   "TenantRole",
-  "TransferOwnershipRequest",
   "UpdateInferenceServicePoliciesRequest",
   "UpdateInferenceServiceRequest",
   "UpdateKBConfigRequest",
@@ -403,8 +403,7 @@ export const idempotencyOperations = [
   "resendTenantAdminInvitation",
   "resetTenantAdminPassword",
   "updateTenantAdminRole",
-  "bindTenantPlan",
-  "transferTenantOwnership"
+  "bindTenantPlan"
 ];
 export const cursorPaginationOperations = [
   "listGpuContainers",

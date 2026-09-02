@@ -86,6 +86,7 @@ OPERATIONS = [
     "listSandboxSecurityEvents",
     "getSandboxSecurityOverview",
     "listAllTenantAdmins",
+    "listAvailableTenantsForAdmin",
     "listTenantPlans",
     "createTenantPlan",
     "deleteTenantPlan",
@@ -114,7 +115,6 @@ OPERATIONS = [
     "deleteTenantAdmin",
     "getTenantAdminDetail",
     "listTenantAdminAuditLogs",
-    "getChangeableRoles",
     "disableTenantAdmin",
     "enableTenantAdmin",
     "resendTenantAdminInvitation",
@@ -122,7 +122,7 @@ OPERATIONS = [
     "getTenantAdminRole",
     "updateTenantAdminRole",
     "bindTenantPlan",
-    "transferTenantOwnership"
+    "listTenantAssignableRoles"
 ]
 PATHS = [
     "GET /gpu-containers",
@@ -203,6 +203,7 @@ PATHS = [
     "GET /sandboxes/{sandbox_id}/security-events",
     "GET /sandboxes/{sandbox_id}/security-overview",
     "GET /tenant-admins",
+    "GET /tenant-admins/tenants",
     "GET /tenant-plans",
     "POST /tenant-plans",
     "DELETE /tenant-plans/{planId}",
@@ -231,7 +232,6 @@ PATHS = [
     "DELETE /tenants/{tenantId}/admins/{userId}",
     "GET /tenants/{tenantId}/admins/{userId}",
     "GET /tenants/{tenantId}/admins/{userId}/audit-logs",
-    "GET /tenants/{tenantId}/admins/{userId}/changeable-roles",
     "POST /tenants/{tenantId}/admins/{userId}/disable",
     "POST /tenants/{tenantId}/admins/{userId}/enable",
     "POST /tenants/{tenantId}/admins/{userId}/invitation/resend",
@@ -239,18 +239,19 @@ PATHS = [
     "GET /tenants/{tenantId}/admins/{userId}/role",
     "PUT /tenants/{tenantId}/admins/{userId}/role",
     "POST /tenants/{tenantId}/plan",
-    "POST /tenants/{tenantId}/transfer-ownership"
+    "GET /tenants/{tenantId}/roles"
 ]
 SCHEMAS = [
     "AdminDetail",
     "AdminListResponse",
     "AdminWithTenant",
+    "AssignableTenantRoleListResponse",
     "AsyncTask",
     "AvailableGpu",
+    "AvailableTenantListResponse",
     "BindPlanRequest",
     "BoundTenant",
     "BoundTenantsResponse",
-    "ChangeableRolesResponse",
     "CreateGpuContainerRequest",
     "CreateInferenceAccessPolicyRequest",
     "CreateInferenceEndpointRequest",
@@ -349,7 +350,6 @@ SCHEMAS = [
     "TenantPlanStateChangeRequest",
     "TenantRef",
     "TenantRole",
-    "TransferOwnershipRequest",
     "UpdateInferenceServicePoliciesRequest",
     "UpdateInferenceServiceRequest",
     "UpdateKBConfigRequest",
@@ -407,8 +407,7 @@ IDEMPOTENCY_OPERATIONS = [
     "resendTenantAdminInvitation",
     "resetTenantAdminPassword",
     "updateTenantAdminRole",
-    "bindTenantPlan",
-    "transferTenantOwnership"
+    "bindTenantPlan"
 ]
 CURSOR_PAGINATION_OPERATIONS = [
     "listGpuContainers",

@@ -391,6 +391,17 @@ func (s *LocalVectorStoreService) InsertDocuments(ctx context.Context, request p
 		if content == "" {
 			return ports.VectorStoreDocumentInsertResult{}, fmt.Errorf("%w: document content is required", ports.ErrInvalid)
 		}
+		var vec []float32
+		if len(document.Vector) > 0 {
+			// 调用方预计算向量 (生产: kb-service 调 rag-engine.Embed), Core 不做 embedding 推理 (CLAUDE.md §3.1)
+			if len(document.Vector) != record.Dimension {
+				return ports.VectorStoreDocumentInsertResult{}, fmt.Errorf("%w: document vector dimension %d does not match vector store dimension %d", ports.ErrInvalid, len(document.Vector), record.Dimension)
+			}
+			vec = append([]float32(nil), document.Vector...)
+		} else {
+			// 无预计算向量时用伪向量 (dev/测试占位, 与现有行为一致)
+			vec = localDocumentVector(content, record.Dimension, i)
+		}
 		metadata := cloneStringMap(document.Metadata)
 		if metadata == nil {
 			metadata = map[string]string{}
@@ -402,7 +413,7 @@ func (s *LocalVectorStoreService) InsertDocuments(ctx context.Context, request p
 		}
 		vectorRecords = append(vectorRecords, ports.VectorRecord{
 			ID:       documentID,
-			Vector:   localDocumentVector(content, record.Dimension, i),
+			Vector:   vec,
 			Metadata: metadata,
 		})
 	}
@@ -426,6 +437,9 @@ func (s *LocalVectorStoreService) InsertDocuments(ctx context.Context, request p
 	record.IndexStatus = "ready"
 	record.LastIndexedAt = s.now().UTC()
 	record.UpdatedAt = record.LastIndexedAt
+	if err := s.upsertVectorStore(ctx, record); err != nil {
+		return ports.VectorStoreDocumentInsertResult{}, err
+	}
 	s.stores[record.StoreID] = record
 	s.insertIdempotency[idemKey] = result
 	return result, nil

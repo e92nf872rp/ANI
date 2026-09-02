@@ -28,15 +28,15 @@ type TenantPlanService struct {
 	// 嵌入未实现接口：proto 新增 RPC 时本结构仍可编译（栅栏模式）。
 	tenantv1.UnimplementedTenantPlanServiceServer
 
-	plans   ports.TenantPlanStore      // 套餐 + plan_quota_limits 持久化
-	audit   ports.TenantPlanAuditStore // 配额套餐域审计（audit_logs）；
-	core    ports.QuotaSvcClient       // Core 配额 API（校验维度 / 后续下发限额）
-	tenants ports.TenantSvcClient      // Core 租户 API（tenant_count / 删除占用检查）
+	plans       ports.TenantPlanStore      // 套餐 + plan_quota_limits 持久化
+	audit       ports.TenantPlanAuditStore // 配额套餐域审计（audit_logs）；
+	core        ports.QuotaSvcClient       // Core 配额 API（校验维度 / 后续下发限额）
+	tenantPlans ports.TenantPlanSvcClient  // Core 配额套餐绑定 API（tenant_count / 绑定列表）
 }
 
 // NewTenantPlanService 装配依赖并返回可注册的 gRPC server。
-func NewTenantPlanService(plans ports.TenantPlanStore, audit ports.TenantPlanAuditStore, core ports.QuotaSvcClient, tenants ports.TenantSvcClient) *TenantPlanService {
-	return &TenantPlanService{plans: plans, audit: audit, core: core, tenants: tenants}
+func NewTenantPlanService(plans ports.TenantPlanStore, audit ports.TenantPlanAuditStore, core ports.QuotaSvcClient, tenantPlans ports.TenantPlanSvcClient) *TenantPlanService {
+	return &TenantPlanService{plans: plans, audit: audit, core: core, tenantPlans: tenantPlans}
 }
 
 // Register 向 gRPC Server 注册本服务（由 services/pkg/bootstrap.RunGRPC 回调）。
@@ -111,7 +111,7 @@ func (s *TenantPlanService) CreateTenantPlan(ctx context.Context, req *tenantv1.
 
 	if req == nil {
 		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "request required")
-		writeAuditFailure(ctx, s.audit, action, nil, err, nil)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, nil, err, nil)
 		return nil, err
 	}
 
@@ -123,24 +123,24 @@ func (s *TenantPlanService) CreateTenantPlan(ctx context.Context, req *tenantv1.
 	// code：^[a-z0-9-]{3,40}$；唯一性由库 partial unique index 保证
 	if !tenantPlanCodePattern.MatchString(code) {
 		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "code must match ^[a-z0-9-]{3,40}$")
-		writeAuditFailure(ctx, s.audit, action, map[string]any{"code": code}, err, nil)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"code": code}, err, nil)
 		return nil, err
 	}
 	if name == "" || utf8.RuneCountInString(name) > 64 {
 		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "name must be 1-64 characters")
-		writeAuditFailure(ctx, s.audit, action, map[string]any{"code": code}, err, nil)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"code": code}, err, nil)
 		return nil, err
 	}
 	if utf8.RuneCountInString(description) > 512 {
 		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "description must be <= 512 characters")
-		writeAuditFailure(ctx, s.audit, action, map[string]any{"code": code}, err, nil)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"code": code}, err, nil)
 		return nil, err
 	}
 
 	// ── 2. 配额维度校验────────────
 	limits, err := s.mapAndValidateQuotaLimits(ctx, req.GetQuotaLimits())
 	if err != nil {
-		writeAuditFailure(ctx, s.audit, action, map[string]any{"code": code}, err, nil)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"code": code}, err, nil)
 		return nil, err
 	}
 
@@ -153,7 +153,7 @@ func (s *TenantPlanService) CreateTenantPlan(ctx context.Context, req *tenantv1.
 	})
 	if err != nil {
 		mapped := mapStoreError(err)
-		writeAuditFailure(ctx, s.audit, action, map[string]any{
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{
 			"code":         code,
 			"quota_limits": quotaLimitsForAudit(limits),
 		}, mapped, nil)
@@ -161,7 +161,7 @@ func (s *TenantPlanService) CreateTenantPlan(ctx context.Context, req *tenantv1.
 	}
 
 	// ── 4. 写成功审计（事后记录；失败不阻断已创建成功）
-	writeAuditSuccess(ctx, s.audit, action, map[string]any{
+	writeAuditSuccess(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{
 		"plan_id":      plan.ID.String(),
 		"code":         plan.Code,
 		"quota_limits": quotaLimitsForAudit(limits),
@@ -213,7 +213,7 @@ func (s *TenantPlanService) UpdateTenantPlan(ctx context.Context, req *tenantv1.
 	}
 	id, err := parsePlanID(rawPlanID)
 	if err != nil {
-		writeAuditFailure(ctx, s.audit, action, map[string]any{"plan_id": rawPlanID}, err, nil)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"plan_id": rawPlanID}, err, nil)
 		return nil, err
 	}
 
@@ -224,12 +224,12 @@ func (s *TenantPlanService) UpdateTenantPlan(ctx context.Context, req *tenantv1.
 		v := req.Name.GetValue()
 		if v == "" {
 			err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "name must not be empty")
-			writeAuditFailure(ctx, s.audit, action, map[string]any{"plan_id": id.String()}, err, nil)
+			writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"plan_id": id.String()}, err, nil)
 			return nil, err
 		}
 		if utf8.RuneCountInString(v) > 64 {
 			err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "name must be <= 64 characters")
-			writeAuditFailure(ctx, s.audit, action, map[string]any{"plan_id": id.String()}, err, nil)
+			writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"plan_id": id.String()}, err, nil)
 			return nil, err
 		}
 		in.Name = &v
@@ -239,7 +239,7 @@ func (s *TenantPlanService) UpdateTenantPlan(ctx context.Context, req *tenantv1.
 		v := req.Description.GetValue()
 		if utf8.RuneCountInString(v) > 512 {
 			err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "description must be <= 512 characters")
-			writeAuditFailure(ctx, s.audit, action, map[string]any{"plan_id": id.String()}, err, nil)
+			writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"plan_id": id.String()}, err, nil)
 			return nil, err
 		}
 		in.Description = &v
@@ -249,7 +249,7 @@ func (s *TenantPlanService) UpdateTenantPlan(ctx context.Context, req *tenantv1.
 	// 步骤 3：落库更新（套餐不存在 / 已删 → TENANT_PLAN_NOT_FOUND）
 	if _, err := s.plans.Update(ctx, id, in); err != nil {
 		mapped := mapStoreError(err)
-		writeAuditFailure(ctx, s.audit, action, map[string]any{
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{
 			"plan_id":             id.String(),
 			"name_updated":        nameUpdated,
 			"description_updated": descUpdated,
@@ -258,7 +258,7 @@ func (s *TenantPlanService) UpdateTenantPlan(ctx context.Context, req *tenantv1.
 	}
 
 	// 步骤 4：写成功审计（事后记录；失败不阻断已更新成功）
-	writeAuditSuccess(ctx, s.audit, action, map[string]any{
+	writeAuditSuccess(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{
 		"plan_id":             id.String(),
 		"name_updated":        nameUpdated,
 		"description_updated": descUpdated,
@@ -284,38 +284,38 @@ func (s *TenantPlanService) DeleteTenantPlan(ctx context.Context, req *tenantv1.
 	// 步骤 1：校验 plan_id
 	id, err := parsePlanID(rawPlanID)
 	if err != nil {
-		writeAuditFailure(ctx, s.audit, action, map[string]any{"plan_id": rawPlanID}, err, nil)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"plan_id": rawPlanID}, err, nil)
 		return nil, err
 	}
 
 	// 步骤 2：套餐须存在且未删除（404 优先于占用检查，保持原错误语义）
 	if _, err := s.plans.GetByID(ctx, id); err != nil {
 		mapped := mapStoreError(err)
-		writeAuditFailure(ctx, s.audit, action, map[string]any{"plan_id": id.String()}, mapped, nil)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"plan_id": id.String()}, mapped, nil)
 		return nil, mapped
 	}
 
 	// 步骤 3：Core 统计非 disabled 绑定租户；有则 409 TENANT_PLAN_IN_USE
 	counts, err := s.boundTenantCounts(ctx, []uuid.UUID{id})
 	if err != nil {
-		writeAuditFailure(ctx, s.audit, action, map[string]any{"plan_id": id.String()}, err, nil)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"plan_id": id.String()}, err, nil)
 		return nil, err
 	}
 	if counts[id] > 0 {
 		mapped := mapStoreError(ports.ErrTenantPlanInUse)
-		writeAuditFailure(ctx, s.audit, action, map[string]any{"plan_id": id.String()}, mapped, nil)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"plan_id": id.String()}, mapped, nil)
 		return nil, mapped
 	}
 
 	// 步骤 4：软删除
 	if err := s.plans.Delete(ctx, id); err != nil {
 		mapped := mapStoreError(err)
-		writeAuditFailure(ctx, s.audit, action, map[string]any{"plan_id": id.String()}, mapped, nil)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"plan_id": id.String()}, mapped, nil)
 		return nil, mapped
 	}
 
 	// 步骤 5：写成功审计（事后记录；失败不阻断已删除成功）
-	writeAuditSuccess(ctx, s.audit, action, map[string]any{"plan_id": id.String()}, nil)
+	writeAuditSuccess(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"plan_id": id.String()}, nil)
 
 	return &tenantv1.IdempotentResult{
 		Id:      id.String(),
@@ -366,7 +366,7 @@ func (s *TenantPlanService) UpdateTenantPlanQuotaLimits(ctx context.Context, req
 	}
 	id, err := parsePlanID(rawPlanID)
 	if err != nil {
-		writeAuditFailure(ctx, s.audit, action, map[string]any{"plan_id": rawPlanID}, err, nil)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"plan_id": rawPlanID}, err, nil)
 		return nil, err
 	}
 
@@ -377,21 +377,21 @@ func (s *TenantPlanService) UpdateTenantPlanQuotaLimits(ctx context.Context, req
 	}
 	if len(itemsPB) == 0 {
 		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "items required (at least 1)")
-		writeAuditFailure(ctx, s.audit, action, map[string]any{"plan_id": id.String()}, err, nil)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"plan_id": id.String()}, err, nil)
 		return nil, err
 	}
 
 	// 步骤 3：校验维度；nil total 用 Core default_quota 填成具体值再落库
 	limits, err := s.mapAndValidateQuotaLimits(ctx, itemsPB)
 	if err != nil {
-		writeAuditFailure(ctx, s.audit, action, map[string]any{"plan_id": id.String()}, err, nil)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"plan_id": id.String()}, err, nil)
 		return nil, err
 	}
 
 	// 步骤 4：UPSERT plan_quota_limits（事务内不写审计）
 	if err := s.plans.UpdateQuotaLimits(ctx, id, limits); err != nil {
 		mapped := mapStoreError(err)
-		writeAuditFailure(ctx, s.audit, action, map[string]any{"plan_id": id.String()}, mapped, nil)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"plan_id": id.String()}, mapped, nil)
 		return nil, mapped
 	}
 
@@ -399,7 +399,7 @@ func (s *TenantPlanService) UpdateTenantPlanQuotaLimits(ctx context.Context, req
 	synced, skipped, tightened, updatedDims := s.syncBoundTenantQuotaLimits(ctx, id, limits)
 
 	// 步骤 6：写成功审计（含同步计数；审计失败不阻断已提交限额）
-	writeAuditSuccess(ctx, s.audit, action, map[string]any{
+	writeAuditSuccess(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{
 		"plan_id":             id.String(),
 		"updated_dimensions":  updatedDims,
 		"synced_tenant_count": synced,
@@ -425,7 +425,7 @@ func (s *TenantPlanService) ActivateTenantPlan(ctx context.Context, req *tenantv
 	// 步骤 1：校验 plan_id
 	id, err := parsePlanID(rawPlanID)
 	if err != nil {
-		writeAuditFailure(ctx, s.audit, action, map[string]any{"plan_id": rawPlanID}, err, nil)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"plan_id": rawPlanID}, err, nil)
 		return nil, err
 	}
 
@@ -433,12 +433,12 @@ func (s *TenantPlanService) ActivateTenantPlan(ctx context.Context, req *tenantv
 	plan, err := s.plans.Activate(ctx, id)
 	if err != nil {
 		mapped := mapStoreError(err)
-		writeAuditFailure(ctx, s.audit, action, map[string]any{"plan_id": id.String()}, mapped, nil)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"plan_id": id.String()}, mapped, nil)
 		return nil, mapped
 	}
 
 	// 步骤 3：写成功审计（事后记录；失败不阻断已激活成功）
-	writeAuditSuccess(ctx, s.audit, action, map[string]any{
+	writeAuditSuccess(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{
 		"plan_id": plan.ID.String(),
 		"status":  string(plan.Status),
 	}, nil)
@@ -461,7 +461,7 @@ func (s *TenantPlanService) DisableTenantPlan(ctx context.Context, req *tenantv1
 	// 步骤 1：校验 plan_id
 	id, err := parsePlanID(rawPlanID)
 	if err != nil {
-		writeAuditFailure(ctx, s.audit, action, map[string]any{"plan_id": rawPlanID}, err, nil)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"plan_id": rawPlanID}, err, nil)
 		return nil, err
 	}
 
@@ -469,12 +469,12 @@ func (s *TenantPlanService) DisableTenantPlan(ctx context.Context, req *tenantv1
 	plan, err := s.plans.Disable(ctx, id)
 	if err != nil {
 		mapped := mapStoreError(err)
-		writeAuditFailure(ctx, s.audit, action, map[string]any{"plan_id": id.String()}, mapped, nil)
+		writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{"plan_id": id.String()}, mapped, nil)
 		return nil, mapped
 	}
 
 	// 步骤 3：写成功审计（事后记录；失败不阻断已禁用成功）
-	writeAuditSuccess(ctx, s.audit, action, map[string]any{
+	writeAuditSuccess(ctx, s.audit, auditResourceTenantPlan, action, map[string]any{
 		"plan_id": plan.ID.String(),
 		"status":  string(plan.Status),
 	}, nil)
@@ -703,7 +703,7 @@ func (s *TenantPlanService) syncBoundTenantQuotaLimits(ctx context.Context, plan
 		skippedApproved += len(res.SkippedApproved)
 		tightened += len(res.Tightened)
 		if err != nil {
-			writeAuditFailure(ctx, s.audit, "tenant.quota_init_failed", map[string]any{
+			writeAuditFailure(ctx, s.audit, auditResourceTenantPlan, "tenant.quota_init_failed", map[string]any{
 				"plan_id":   planID.String(),
 				"tenant_id": t.ID.String(),
 				"items":     coreItemsForAudit(res.Items),
@@ -938,7 +938,7 @@ func (s *TenantPlanService) scheduleQuotaSyncRetry(planID, tenantID uuid.UUID, t
 			if err == nil {
 				return
 			}
-			writeAuditFailure(context.Background(), s.audit, "tenant.quota_init_failed", map[string]any{
+			writeAuditFailure(context.Background(), s.audit, auditResourceTenantPlan, "tenant.quota_init_failed", map[string]any{
 				"plan_id":   planID.String(),
 				"tenant_id": tenantID.String(),
 				"attempt":   attempt,
@@ -949,55 +949,15 @@ func (s *TenantPlanService) scheduleQuotaSyncRetry(planID, tenantID uuid.UUID, t
 	}()
 }
 
-// mapStoreError 将 store 哨兵错误映射为带业务码前缀的 gRPC status。
-// 网关按 message 前缀（如 PLAN_CODE_CONFLICT:）还原 HTTP 状态与 ErrorResponse.code。
-func mapStoreError(err error) error {
-	switch {
-	case errors.Is(err, ports.ErrPlanCodeConflict):
-		return businessError(codes.AlreadyExists, ports.ErrPlanCodeConflict, "plan code already exists")
-	case errors.Is(err, ports.ErrTenantPlanNotFound):
-		return businessError(codes.NotFound, ports.ErrTenantPlanNotFound, "tenant plan not found")
-	case errors.Is(err, ports.ErrPlanStateInvalid):
-		detail := strings.TrimSpace(strings.TrimPrefix(err.Error(), ports.ErrPlanStateInvalid.Error()+":"))
-		detail = strings.TrimSpace(strings.TrimPrefix(detail, ports.ErrPlanStateInvalid.Error()))
-		if detail == "" {
-			detail = "plan status does not allow this transition"
-		}
-		return businessError(codes.FailedPrecondition, ports.ErrPlanStateInvalid, detail)
-	case errors.Is(err, ports.ErrTenantPlanInUse):
-		return businessError(codes.FailedPrecondition, ports.ErrTenantPlanInUse, "tenant plan has bound tenants")
-	case errors.Is(err, ports.ErrQuotaResourceNotRegistered):
-		return businessError(codes.FailedPrecondition, ports.ErrQuotaResourceNotRegistered, "resource_type not registered or disabled")
-	case errors.Is(err, ports.ErrTenantNotFound):
-		return businessError(codes.NotFound, ports.ErrTenantNotFound, "tenant not found")
-	case errors.Is(err, ports.ErrQuotaNotFound):
-		return businessError(codes.NotFound, ports.ErrQuotaNotFound, "tenant quota not found")
-	case errors.Is(err, ports.ErrQuotaAlreadyExists):
-		return businessError(codes.AlreadyExists, ports.ErrQuotaAlreadyExists, "tenant quota already exists")
-	case errors.Is(err, ports.ErrPlanNotActive):
-		return businessError(codes.FailedPrecondition, ports.ErrPlanNotActive, "tenant plan is not active")
-	case errors.Is(err, ports.ErrTenantStateInvalid):
-		return businessError(codes.FailedPrecondition, ports.ErrTenantStateInvalid, "tenant state does not allow this operation")
-	case errors.Is(err, ports.ErrValidationFailed):
-		detail := strings.TrimSpace(strings.TrimPrefix(err.Error(), ports.ErrValidationFailed.Error()+":"))
-		detail = strings.TrimSpace(strings.TrimPrefix(detail, ports.ErrValidationFailed.Error()))
-		return businessError(codes.InvalidArgument, ports.ErrValidationFailed, detail)
-	case errors.Is(err, ports.ErrCoreUnavailable):
-		return businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant api unavailable")
-	default:
-		return status.Errorf(codes.Internal, "tenant plan operation failed: %v", err)
-	}
-}
-
 // boundTenantCounts 经 Core SDK 批量查询套餐绑定租户数（status <> disabled）。
 func (s *TenantPlanService) boundTenantCounts(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]int64, error) {
 	if len(ids) == 0 {
 		return map[uuid.UUID]int64{}, nil
 	}
-	if s.tenants == nil {
-		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant api unavailable")
+	if s.tenantPlans == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant plan api unavailable")
 	}
-	counts, err := s.tenants.CountBoundTenants(ctx, ids)
+	counts, err := s.tenantPlans.CountBoundTenants(ctx, ids)
 	if err != nil {
 		return nil, mapStoreError(err)
 	}
@@ -1008,10 +968,10 @@ func (s *TenantPlanService) boundTenantCounts(ctx context.Context, ids []uuid.UU
 }
 
 func (s *TenantPlanService) coreBoundTenants(ctx context.Context, planID uuid.UUID) ([]ports.BoundTenant, error) {
-	if s.tenants == nil {
-		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant api unavailable")
+	if s.tenantPlans == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant plan api unavailable")
 	}
-	tenants, err := s.tenants.ListBoundTenants(ctx, planID)
+	tenants, err := s.tenantPlans.ListBoundTenants(ctx, planID)
 	if err != nil {
 		return nil, mapStoreError(err)
 	}
@@ -1019,10 +979,10 @@ func (s *TenantPlanService) coreBoundTenants(ctx context.Context, planID uuid.UU
 }
 
 func (s *TenantPlanService) coreBindableTenants(ctx context.Context, planID uuid.UUID) ([]ports.BoundTenant, error) {
-	if s.tenants == nil {
-		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant api unavailable")
+	if s.tenantPlans == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "core tenant plan api unavailable")
 	}
-	tenants, err := s.tenants.ListBindableTenants(ctx, planID)
+	tenants, err := s.tenantPlans.ListBindableTenants(ctx, planID)
 	if err != nil {
 		return nil, mapStoreError(err)
 	}
@@ -1103,15 +1063,4 @@ func auditLogToPB(log ports.AuditLog) (*tenantv1.AuditLog, error) {
 		Details:   st,
 		CreatedAt: timestamppb.New(log.CreatedAt),
 	}, nil
-}
-
-// businessError 构造「CODE: detail」形式的 gRPC 错误。
-// sentinel.Error() 即为业务码字符串（如 VALIDATION_FAILED），必须保留前缀供网关解析。
-func businessError(code codes.Code, sentinel error, detail string) error {
-	msg := sentinel.Error()
-	detail = strings.TrimSpace(detail)
-	if detail != "" && detail != msg {
-		msg = fmt.Sprintf("%s: %s", msg, detail)
-	}
-	return status.Error(code, msg)
 }

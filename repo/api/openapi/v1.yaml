@@ -351,14 +351,46 @@ components:
     # 异步任务（统一格式，202 响应一律返回此 schema）
     AsyncTask:
       type: object
+      description: |
+        异步任务统一记录。v1 进度语义（两类任务区分）：
+
+        - 实例域任务（task_type=instance.*）采用真进度语义：create/lifecycle
+          受理成功即写入 status=running（progress=10，表示操作已提交至
+          runtime、资源收敛中，不是 pending）。GET /tasks/{task_id} 单查时对
+          非终态 instance.* 任务执行读时懒同步：先触发单实例状态刷新，再按
+          实例 state 映射推进至 completed/failed；懒同步失败降级返回库内
+          快照。
+        - 存储卷、向量库、platform_workload、sandbox 等受理审计任务维持
+          模式 B 语义：同步完成后创建即 completed（progress=100），不做
+          懒同步。
+        - 进度是粗粒度状态阶梯，不是真实百分比；实例卡在中间态时任务诚实
+          停留 running，不虚报 100%。
+        - list（GET /tasks）不做懒同步，返回库内快照；实时性由单查承担。
+          真实异步进度（worker/outbox/lease 模式）归后续版本。
+
+        实例 state → 任务推进映射（懒同步依据，state 取 Instance schema
+        九态枚举）：
+
+        - create/start/restart：实例 running → completed/100；实例 failed →
+          failed（error_message="instance entered failed state"）；实例
+          provisioning/pending → running/20；实例 starting/stopping/stopped/
+          deleting → running/40；实例 deleted → failed（"instance deleted
+          before reaching running"）；实例记录不存在 → failed（"instance
+          record not found"）。
+        - stop：实例 stopped → completed/100；实例 failed → failed；实例
+          stopping/deleting → running/60；实例 provisioning/pending/starting/
+          running → running/30；实例 deleted/记录不存在 → failed。
+        - delete：实例 deleted → completed/100（主终态；实例删除只置
+          state=deleted，记录不消失）；实例记录不存在 → completed/100
+          （防御分支）；其余任意 state（含 deleting）→ running/80。
       required: [id, idempotency_key, task_type, status, created_at]
       properties:
         id:               { type: string, format: uuid }
         idempotency_key:  { type: string, description: "客户端提供的幂等键" }
         task_type:        { type: string, example: "model.import",
-                            enum: [model.import, kb.parse, kb.index, inference.deploy, platform_workload.create, platform_workload.scale, platform_workload.start, platform_workload.stop, platform_workload.restart, platform_workload.delete, volume.snapshot.create, volume.expand, volume.mount, volume.unmount, volume.create_from_snapshot, filesystem.expand, filesystem.mount_target.create, filesystem.mount, filesystem.unmount, vector_store.index.rebuild, vector_store.document.insert, sandbox.checkpoint.create, sandbox.checkpoint.restore, sandbox.code_run.create] }
+                            enum: [model.import, kb.parse, kb.index, inference.deploy, platform_workload.create, platform_workload.scale, platform_workload.start, platform_workload.stop, platform_workload.restart, platform_workload.delete, volume.snapshot.create, volume.expand, volume.mount, volume.unmount, volume.create_from_snapshot, filesystem.expand, filesystem.mount_target.create, filesystem.mount, filesystem.unmount, vector_store.index.rebuild, vector_store.document.insert, sandbox.checkpoint.create, sandbox.checkpoint.restore, sandbox.code_run.create, instance.create, instance.start, instance.stop, instance.restart, instance.delete] }
         resource_type:    { type: string, nullable: true,
-                            enum: [inference_service, platform_workload, kb_document, model_version, volume_snapshot, volume, filesystem, filesystem_mount_target, vector_store, sandbox_checkpoint, sandbox_code_run] }
+                            enum: [inference_service, platform_workload, kb_document, model_version, volume_snapshot, volume, filesystem, filesystem_mount_target, vector_store, sandbox_checkpoint, sandbox_code_run, instance] }
         resource_id:      { type: string, format: uuid, nullable: true }
         status:           { type: string,
                             enum: [pending, running, completed, failed, cancelled, dead_letter] }
@@ -370,6 +402,18 @@ components:
         dead_letter_at:   { type: string, format: date-time, nullable: true }
         created_at:       { type: string, format: date-time }
         completed_at:     { type: string, format: date-time, nullable: true }
+
+    # 异步任务列表（cursor 分页，与 list 接口返回形状一致）
+    TaskListResponse:
+      type: object
+      description: |
+        当前租户的异步任务列表。排序 created_at DESC, id DESC（id 为 UUID
+        主键 tiebreaker，同毫秒创建多条任务时分页次序确定唯一）；cursor 为
+        不透明 token。list 返回库内快照，不做懒同步。
+      required: [items]
+      properties:
+        items:       { type: array, items: { $ref: '#/components/schemas/AsyncTask' } }
+        next_cursor: { type: string, nullable: true, description: "下一页游标；null 表示已到最后一页" }
 
     # ── 平台内部工作负载（仅服务身份）────────────────────────────────────────
     PlatformWorkloadAcceleratorCapability:
@@ -4089,11 +4133,11 @@ components:
         id:            { type: string, format: uuid }
         tenant_id:     { type: string, format: uuid }
         email:         { type: string, format: email }
-        username:      { type: string }
+        username:      { type: string, description: "对外返回时去掉存储前缀 oidc: / local:" }
         display_name:  { type: string, nullable: true }
-        role:          { type: string, enum: [tenant-owner, tenant-admin, user, auditor] }
+        role:          { type: string, enum: [tenant-admin, user, auditor] }
         status:        { type: string, enum: [active, disabled] }
-        source:        { type: string, enum: [local, third_party], description: "由 username 前缀推断：oidc: → third_party；local: → local" }
+        source:        { type: string, enum: [local, third_party], description: "由存储 username 前缀推断：oidc: → third_party；其余（含 local:）→ local" }
         last_login_at: { type: string, format: date-time, nullable: true }
         created_at:    { type: string, format: date-time }
         updated_at:    { type: string, format: date-time }
@@ -4167,43 +4211,44 @@ components:
 
     TenantUserPermissions:
       type: object
-      description: "租户成员 4 维权限；仅 tenant_id 非空的成员可查询"
+      description: "租户成员权限；仅 tenant_id 非空的成员可查询；permissions 为 roles.permissions JSONB 原样"
       required: [user_id, tenant_id, role, permissions]
       properties:
         user_id:   { type: string, format: uuid }
         tenant_id: { type: string, format: uuid }
-        role:      { type: string, enum: [tenant-owner, tenant-admin, user, auditor] }
+        role_id:   { type: string, format: uuid, description: "当前 roles.id；无绑定时可省略" }
+        role:      { type: string, description: "角色名（非 platform-*）" }
         permissions:
-          type: object
-          required: [compute, inference, member, transfer]
-          properties:
-            compute:   { type: string, enum: [read, write, none] }
-            inference: { type: string, enum: [read, write, none] }
-            member:    { type: string, enum: [read, write, none] }
-            transfer:  { type: string, enum: [read, write, none] }
+          type: array
+          description: "roles.permissions JSONB 原样（resource/actions/scope）"
+          items: { type: object, additionalProperties: true }
 
-    ChangeableRoleOption:
+    AssignableTenantRole:
       type: object
-      required: [role, label]
+      description: "租户可分配角色（排除 platform-*）"
+      required: [id, name, permissions]
       properties:
-        role:  { type: string, enum: [user, auditor, tenant-admin] }
-        label: { type: string }
+        id:          { type: string, format: uuid }
+        tenant_id:   { type: string, format: uuid, nullable: true, description: "NULL=平台内置角色" }
+        name:        { type: string }
+        permissions:
+          type: array
+          description: "roles.permissions JSONB（resource/actions/scope）"
+          items: { type: object, additionalProperties: true }
 
-    ChangeableRolesResponse:
+    AssignableTenantRoleList:
       type: object
-      description: "可变更角色选项；当前为 tenant-owner 时 changeable_roles 为空数组"
-      required: [current_role, changeable_roles]
+      required: [items]
       properties:
-        current_role:     { type: string, enum: [tenant-owner, tenant-admin, user, auditor] }
-        changeable_roles: { type: array, items: { $ref: '#/components/schemas/ChangeableRoleOption' } }
+        items: { type: array, items: { $ref: '#/components/schemas/AssignableTenantRole' } }
 
     UserRoleUpdateRequest:
       type: object
-      description: "修改租户内角色（不可设 tenant-owner）"
-      required: [idempotency_key, role]
+      description: "修改租户内角色（按 role_id）；old_role_id 用于定位既有 user_roles 行"
+      required: [role_id]
       properties:
-        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
-        role: { type: string, enum: [user, auditor, tenant-admin] }
+        old_role_id: { type: string, format: uuid, description: "当前绑定的 roles.id；缺省或无匹配行时改为 INSERT" }
+        role_id: { type: string, format: uuid, description: "目标角色 UUID；须非 platform-*，且 tenant_id 为空或等于路径租户" }
 
     UserStatusUpdateRequest:
       type: object
@@ -4212,14 +4257,6 @@ components:
       properties:
         idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
         status: { type: string, enum: [active, disabled] }
-
-    UserTransferOwnershipRequest:
-      type: object
-      description: "移交租户所有者；target 必须是本租户 active tenant-admin"
-      required: [idempotency_key, target_user_id]
-      properties:
-        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
-        target_user_id: { type: string, format: uuid }
 
     UserResetPasswordRequest:
       type: object
@@ -4320,22 +4357,7 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
     UserAlreadyTenantAdmin:
-      description: 该用户已是本租户 admin/owner（code=USER_ALREADY_TENANT_ADMIN）
-      content:
-        application/json:
-          schema: { $ref: '#/components/schemas/ErrorResponse' }
-    TenantOwnerRoleLocked:
-      description: 租户所有者角色不可修改/删除（code=TENANT_OWNER_ROLE_LOCKED）
-      content:
-        application/json:
-          schema: { $ref: '#/components/schemas/ErrorResponse' }
-    LastTenantOwner:
-      description: 唯一活跃 tenant-owner 不可禁用/删除（code=LAST_TENANT_OWNER）
-      content:
-        application/json:
-          schema: { $ref: '#/components/schemas/ErrorResponse' }
-    TransferTargetInvalid:
-      description: 移交目标不是本租户 active tenant-admin（code=TRANSFER_TARGET_INVALID）
+      description: 该用户已是本租户 admin（code=USER_ALREADY_TENANT_ADMIN）
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -7613,10 +7635,66 @@ paths:
         "404": { $ref: '#/components/responses/NotFound' }
 
   # ── 异步任务 ────────────────────────────────────────────────────────────────
+  /tasks:
+    get:
+      operationId: listAsyncTasks
+      summary: 列出当前租户的异步任务
+      description: |
+        按创建时间倒序（created_at DESC, id DESC）cursor 分页列出当前认证
+        租户的异步任务。租户隔离来自认证上下文，不接受 tenant_id 参数，
+        不提供跨租户/平台级任务视图。list 只读库内快照，不做懒同步——
+        instance.* 任务的实时进度由 GET /tasks/{task_id} 单查承担。
+        status 筛选有 enum 约束（非法值 400）；task_type/resource_type
+        筛选不做 enum 约束（前向兼容），未匹配值返回空列表而非 400。
+      tags: [Tasks]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      x-ani-rbac-scope: "scope:tasks:read"
+      x-ani-authz:
+        version: v1
+        resource: tasks
+        action: read
+        boundary: tenant
+        principal_kinds: [user, api_key]
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: cursor, in: query, required: false, schema: { type: string } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [pending, running, completed, failed, cancelled, dead_letter] } }
+        - { name: task_type, in: query, required: false, schema: { type: string },
+            description: "筛选 task_type；不做 enum 约束（前向兼容：新增 task_type 后旧客户端仍可筛选）；未匹配值返回空列表而非 400" }
+        - { name: resource_type, in: query, required: false, schema: { type: string },
+            description: "筛选 resource_type；不做 enum 约束，未匹配值返回空列表而非 400" }
+      responses:
+        "200":
+          description: 任务列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskListResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
   /tasks/{task_id}:
     get:
-      summary: 查询异步任务状态
+      operationId: getTask
+      summary: 查询单个异步任务
+      description: |
+        查询单个异步任务。非终态 instance.* 任务在返回前执行读时懒同步：
+        先触发单实例状态刷新，再按实例 state 映射（见 AsyncTask schema
+        description 的映射表）推进任务至 completed/failed；懒同步失败时
+        降级返回库内快照，不向客户端报错。
       tags: [Tasks]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      x-ani-rbac-scope: "scope:tasks:read"
+      x-ani-authz:
+        version: v1
+        resource: tasks
+        action: read
+        boundary: tenant
+        principal_kinds: [user, api_key]
       parameters:
         - { name: task_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -7625,6 +7703,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AsyncTask' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
         "404":
           $ref: '#/components/responses/NotFound'
 
@@ -7780,7 +7860,7 @@ paths:
         - { name: start_time, in: query, required: true, schema: { type: string, format: date-time } }
         - { name: end_time,   in: query, required: true, schema: { type: string, format: date-time } }
         - { name: resource_type, in: query, schema: { type: string } }
-        - { name: group_by, in: query, schema: { type: string, enum: [resource_type, az, day, hour] } }
+        - { name: group_by, in: query, schema: { type: string, enum: [resource_type, day, hour] } }
       responses:
         "200":
           description: 租户用量统计
@@ -7803,24 +7883,30 @@ paths:
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
 
   /metering/usage/platform:
     get:
       operationId: getPlatformMeteringUsage
       x-ani-rbac-scope: "scope:metering:platform:read"
+      x-ani-authz:
+        version: v1
+        resource: metering
+        action: read
+        boundary: platform
+        principal_kinds: [user]
       summary: 查询平台跨租户用量
       description: |
         在平台 RBAC 上下文中查询全平台或指定租户的用量数据。
         需 scope:metering:platform:read 权限。
         items[].tenant_id 在此端点下必填。
-        若带 tenant_id query 须二次 RBAC 校验。
       tags: [Metering]
       parameters:
         - { name: start_time, in: query, required: true, schema: { type: string, format: date-time } }
         - { name: end_time,   in: query, required: true, schema: { type: string, format: date-time } }
         - { name: resource_type, in: query, schema: { type: string } }
         - { name: group_by, in: query, schema: { type: string, enum: [tenant_id, day, hour] } }
-        - { name: tenant_id, in: query, required: false, schema: { type: string }, description: "可选筛选单租户，须平台 RBAC 校验" }
+        - { name: tenant_id, in: query, required: false, schema: { type: string, format: uuid }, description: "可选筛选单租户" }
       responses:
         "200":
           description: 平台用量查询成功
@@ -7831,6 +7917,7 @@ paths:
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
 
   /metering/token-usage:
     post:
@@ -9476,13 +9563,31 @@ paths:
 
   # ===== Tenant Users (平台级租户用户/角色，供 Services UserSvcClient 调用) =====
 
+  /admin/tenant-admins/available-tenants:
+    get:
+      operationId: listAvailableTenants
+      summary: 查询可用租户列表（邀请管理员选择器）
+      description: |
+        返回 status <> 'disabled' 的租户摘要，按 created_at DESC 排序，不分页。
+        供 Services 租户管理员邀请时选择目标租户。
+      tags: [TenantUsers]
+      x-ani-rbac-scope: "scope:users:read"
+      responses:
+        "200":
+          description: 可用租户摘要列表（status ∈ active / frozen）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantSummaryList' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
   /admin/tenant-users:
     get:
       operationId: listTenantUsers
       summary: 跨租户列出租户成员（默认 owner/admin）
       description: |
         平台侧跨租户查询 users + user_roles + roles。
-        默认仅返回 role ∈ (tenant-owner, tenant-admin)；不含 is_inviting（邀请由 Services 合成）。
+        默认仅返回 role ∈ (tenant-admin)；不含 is_inviting（邀请由 Services 合成）。
         不含 password_hash。
       tags: [TenantUsers]
       x-ani-rbac-scope: "scope:users:read"
@@ -9490,7 +9595,7 @@ paths:
         - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
         - { name: tenant_id, in: query, schema: { type: string, format: uuid }, description: "可选；按指定租户过滤" }
-        - { name: role, in: query, schema: { type: string, enum: [tenant-owner, tenant-admin] } }
+        - { name: role, in: query, schema: { type: string, enum: [tenant-admin] } }
         - { name: status, in: query, schema: { type: string, enum: [active, disabled] } }
         - { name: search, in: query, schema: { type: string }, description: "模糊匹配 email/username" }
       responses:
@@ -9524,6 +9629,32 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/UserNotFound' }
+
+  /admin/tenants/{tenant_id}/users/batch:
+    get:
+      operationId: batchGetTenantUsers
+      summary: 批量查询租户内用户
+      description: |
+        按 user_id 列表批量查询租户内未软删除用户；不存在的用户跳过。
+        不含 password_hash。用于 Services 层避免 N+1 查询。
+      tags: [TenantUsers]
+      x-ani-rbac-scope: "scope:users:read"
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: user_ids, in: query, required: true, schema: { type: string }, description: "逗号分隔的 user_id 列表" }
+      responses:
+        "200":
+          description: 批量用户列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/TenantUser' } }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
 
   /admin/tenants/{tenant_id}/users/{user_id}:
     get:
@@ -9561,13 +9692,11 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/UserNotFound' }
-        "409": { $ref: '#/components/responses/TenantOwnerRoleLocked' }
-        "422": { $ref: '#/components/responses/LastTenantOwner' }
 
   /admin/tenants/{tenant_id}/users/{user_id}/role:
     get:
       operationId: getTenantUserRole
-      summary: 查询租户成员角色与 4 维权限
+      summary: 查询租户成员角色与权限
       tags: [TenantUsers]
       x-ani-rbac-scope: "scope:users:read"
       parameters:
@@ -9605,53 +9734,27 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/UserNotFound' }
-        "409": { $ref: '#/components/responses/TenantOwnerRoleLocked' }
         "422": { $ref: '#/components/responses/RoleChangeInvalid' }
 
-  /admin/tenants/{tenant_id}/users/{user_id}/changeable-roles:
+  /admin/tenants/{tenant_id}/roles:
     get:
-      operationId: getTenantUserChangeableRoles
-      summary: 查询可变更角色选项（排除 tenant-owner）
+      operationId: listAssignableTenantRoles
+      summary: 查询租户可分配角色列表
+      description: |
+        返回 roles 表中 name NOT LIKE 'platform-%' 且 tenant_id IS NULL OR tenant_id = $tenant_id 的角色，
+        不分页。供 Services 修改管理员角色选择器使用。
       tags: [TenantUsers]
       x-ani-rbac-scope: "scope:users:read"
       parameters:
         - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: user_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         "200":
-          description: 可变更角色
+          description: 可分配角色列表
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ChangeableRolesResponse' }
+              schema: { $ref: '#/components/schemas/AssignableTenantRoleList' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
-        "404": { $ref: '#/components/responses/UserNotFound' }
-
-  /admin/tenants/{tenant_id}/transfer-ownership:
-    post:
-      operationId: transferCoreTenantOwnership
-      summary: 原子移交租户所有者
-      description: target 提升为 tenant-owner，原 owner 降级为 tenant-admin。
-      tags: [TenantUsers]
-      x-ani-rbac-scope: "scope:users:write"
-      parameters:
-        - { name: tenant_id, in: path, required: true, schema: { type: string, format: uuid } }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/UserTransferOwnershipRequest' }
-      responses:
-        "200":
-          description: 所有权已移交
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/UserMutationResult' }
-        "400": { $ref: '#/components/responses/BadRequest' }
-        "401": { $ref: '#/components/responses/Unauthorized' }
-        "403": { $ref: '#/components/responses/Forbidden' }
-        "404": { $ref: '#/components/responses/UserNotFound' }
-        "422": { $ref: '#/components/responses/TransferTargetInvalid' }
 
   /admin/tenants/{tenant_id}/users/{user_id}/status:
     post:
@@ -9677,7 +9780,6 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/UserNotFound' }
-        "422": { $ref: '#/components/responses/LastTenantOwner' }
 
   /admin/tenants/{tenant_id}/users/{user_id}/reset-password:
     post:

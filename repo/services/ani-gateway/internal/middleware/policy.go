@@ -59,7 +59,7 @@ func IsCorePolicyPath(path string) bool {
 }
 
 // ResolvePolicyForRequest 解析请求命中的 authz policy，但不触发 c.Next，
-// 供组合式中间件（AuthWithClient/RBACWithClient 兼容入口）内部复用。
+// 供测试或主链之外的组合场景复用。
 func ResolvePolicyForRequest(registry authz.Registry, cfg authz.Config, c *app.RequestContext) (ResolvedPolicy, error) {
 	fullPath := string(c.FullPath())
 	if fullPath == "" {
