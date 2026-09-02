@@ -307,6 +307,10 @@ func (e *KubernetesLifecycleExecutor) buildResizePatch(ctx context.Context, requ
 		templateSpec["schedulerName"] = schedulerName
 	}
 	if len(nodeSelector) > 0 {
+		// strategic-merge patches maps by merging, so a spec switch (e.g.
+		// vGPU -> wholecard) would leave the other mode's node labels behind.
+		// $patch: replace makes the nodeSelector wholesale-replaced instead.
+		nodeSelector["$patch"] = "replace"
 		templateSpec["nodeSelector"] = nodeSelector
 	}
 	if len(requests) > 0 || len(limits) > 0 {

@@ -424,6 +424,99 @@ func TestKubernetesLifecycleExecutorResizeWithSpecIDRequiresTranslator(t *testin
 	}
 }
 
+func TestKubernetesLifecycleExecutorResizeSpecSwitchReplacesNodeSelector(t *testing.T) {
+	var gotBody string
+	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		return lifecycleResponse(), nil
+	})
+	executor.translator = NewVolcanoResourceTranslator(byIDSpecStore{
+		specs: map[string]ports.GPUSpecCRD{
+			"spec-vgpu-4090": {
+				ID:         "spec-vgpu-4090",
+				GPUType:    "NVIDIA-RTX-4090",
+				GPUMode:    "vgpu",
+				Shares:     4,
+				MBPerShare: 12280,
+				NodeAffinity: ports.GPUSpecNodeAffinity{
+					GPUMode:          "vgpu",
+					GPUSharingSpec:   "NVIDIA-RTX-4090-12285MiB",
+					GPUSharingPolicy: "quarter",
+				},
+				VolcanoResources: ports.GPUSpecVolcanoResources{
+					VGPU: map[string]string{
+						"volcano.sh/vgpu-number": "{count}",
+						"volcano.sh/vgpu-memory": "{mb_per_share}",
+					},
+				},
+			},
+			"spec-whole-4090": {
+				ID:      "spec-whole-4090",
+				GPUType: "NVIDIA-RTX-4090",
+				GPUMode: "wholecard",
+				Shares:  1,
+				NodeAffinity: ports.GPUSpecNodeAffinity{
+					GPUMode:  "wholecard",
+					GPUSpec:  "NVIDIA-RTX-4090-49140MiB",
+				},
+				VolcanoResources: ports.GPUSpecVolcanoResources{
+					Wholecard: map[string]string{
+						"nvidia.com/gpu": "{count}",
+					},
+				},
+			},
+		},
+	})
+	record := lifecycleRecord()
+	record.Kind = ports.WorkloadKindGPUContainer
+	record.GPU = &ports.GPUInstanceStatus{Count: 1, QueueName: "ani-inference"}
+	req := lifecycleRequest(ports.WorkloadLifecycleResize)
+	req.SpecID = "spec-whole-4090"
+
+	if _, err := executor.Apply(context.Background(), req, record); err != nil {
+		t.Fatalf("Resize Apply() error = %v", err)
+	}
+	for _, want := range []string{
+		`"$patch":"replace"`,
+		`"ani.kubercloud.io/gpu-mode":"wholecard"`,
+		`"ani.kubercloud.io/gpu-spec":"NVIDIA-RTX-4090-49140MiB"`,
+		`"nvidia.com/gpu":"1"`,
+	} {
+		if !strings.Contains(gotBody, want) {
+			t.Fatalf("body = %s, want %s", gotBody, want)
+		}
+	}
+	for _, stale := range []string{
+		`"ani.kubercloud.io/gpu-sharing-policy"`,
+		`"ani.kubercloud.io/gpu-sharing-spec"`,
+	} {
+		if strings.Contains(gotBody, stale) {
+			t.Fatalf("body = %s, must not contain stale %s", gotBody, stale)
+		}
+	}
+	// vGPU resource keys must be cleared via null (strategic-merge delete),
+	// never requested with a real value alongside the wholecard resource.
+	for _, stale := range []string{
+		`"volcano.sh/vgpu-number":"1"`,
+		`"volcano.sh/vgpu-memory":"1228"`,
+		`"volcano.sh/vgpu-cores":"1"`,
+	} {
+		if strings.Contains(gotBody, stale) {
+			t.Fatalf("body = %s, must not request stale %s", gotBody, stale)
+		}
+	}
+	for _, want := range []string{
+		`"volcano.sh/vgpu-number":null`,
+		`"volcano.sh/vgpu-memory":null`,
+		`"volcano.sh/vgpu-cores":null`,
+	} {
+		if !strings.Contains(gotBody, want) {
+			t.Fatalf("body = %s, want vGPU key cleared via %s", gotBody, want)
+		}
+	}
+}
+
 func TestKubernetesLifecycleExecutorResizeVMWithSpecIDUnsupported(t *testing.T) {
 	executor := newTestLifecycleExecutor(t, func(r *http.Request) (*http.Response, error) {
 		t.Fatalf("unexpected request issued for VM spec resize: %s %s", r.Method, r.URL.Path)
