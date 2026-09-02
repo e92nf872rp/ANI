@@ -522,6 +522,10 @@ git diff --check
 
 > 前端反馈 GPU 容器实例列表/详情缺节点、私网 IP、访问端点、终端。Gateway `instances.go` 修复：节点字段错位（`refreshOneStoreStatus` 补回填 `Compute.NodeName`）、从 Pod 回读 PodIP 填 `Network.PrivateIP`/`Endpoint`/`Endpoints`、运行态 container/gpu_container 置 `Access.ExecAvailable=true`；`get` 详情处理器接入 `refreshOneStoreStatus`。已在 10.10.1.66 live passed（镜像 `ani-gateway:dev-20260901`）：运行中 GPU 容器实例 `test-gpu-inst-create` 列表/详情一致回填 dev-phys-02 / 10.60.0.3 / exec_available=true；`go test ./services/ani-gateway/...` + `make validate-architecture` 通过。批次详情见 `repo/development-records/instance-runtime-hydrate-a.md`。
 
+### 热修复：存储挂载重启后 store 回落（INSTANCE-STORAGE-MOUNT-STORE-A，2026-09-02）
+
+> 网关重启后实例创建挂载卷/文件系统报 `mount volume "...": capability resource not found`。根因：解析阶段 `GetVolume/GetFilesystem` 优先读 DB store，挂载阶段 `MountVolume/MountFilesystem/UnmountVolume/UnmountFilesystem` 只查进程内存 map，重启后内存清空导致两阶段数据源不一致。修复：新增 `lookupVolumeRecord/lookupFilesystemRecord`（内存优先、miss 回落 store 并回填）与 `hydrateFilesystemMountTargets`（挂载前从 store 恢复 mount target），四个 mount/unmount 方法全部接入；回归测试复现重启场景。已在 10.10.1.66 live passed（镜像 `ani-gateway:dev-20260902-mount-store`）：rollout 后新 idempotency_key 创建挂载卷实例 201（provisioning，`storage_attachments` resolved，resource_refs 产出）。已知边界：租户 PVC 卡 `pending`（后端未绑定）属独立排查项，文件系统 Available 挂载门禁维持不变。批次详情见 `repo/development-records/instance-storage-mount-store-a.md`。
+
 ## Instance Observability Completion 增量补全（2026-07，PR4 分支）
 
 > 本节记录 `feat/instance-observability-pr4` 分支对 Sprint 15 实例可观测性的增量补全工作，对应 SPEC `spec-console-instance-observability-completion.md` 的 16 个设计决策（D-1~D-16）、12 个 User Story（US-001~US-012）和 8 个批次（B-1~B-8）。覆盖 LogStore port 抽象、Loki 日志持久化、Prometheus GPU/VM 指标采集、PromQL label 重写扩展和 VM 前端模板。各批次实现与验证细节见 `repo/development-records/instance-observability-completion-*.md`。

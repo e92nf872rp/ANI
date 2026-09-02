@@ -178,6 +178,12 @@
 |---|---|---|
 | INSTANCE-RESIZE-SPEC-A | local verified：`resize` 从"纯重启"改为真正变配——`InstanceLifecycleRequest` 新增可选 `spec_id`（换 GPU 规格，v1 兼容）；状态机 resize 仅允许 stopped（running 409）；字段组合 cpu/memory/spec_id 至少一项；`resolveResizeGPUSpec` 经 `GPUSpecService.GetGPUSpec` + `GPUInventory.ListSpecAvailability` 前置校验（不可用 409，避免 Volcano quota 卡死）；executor 注入 Volcano translator，resize 走 targeted strategic-merge patch（方案B）：`volcano.sh/vgpu-*` 资源、schedulerName=volcano、queue 注解、nodeSelector，切换 wholecard/vgpu 清另一模式资源键；变配后回写 `record.Compute.SpecID/GPUType/GPUShares/GPUMBPerShare`。新增 5 个 executor spec_id 用例 + planning/instance_service 用例更新；`go test` + `make validate-architecture` + `git diff --check` 通过。未做真实集群 resize live gate，不外推 GPU runtime ready | instance-resize-spec-a.md |
 
+### Instance Storage Mount Store Fallback（2026-09）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-STORAGE-MOUNT-STORE-A | live passed（10.10.1.66，镜像 dev-20260902-mount-store）：网关重启后实例创建挂载卷/文件系统报 `mount volume ...: capability resource not found`——根因是解析阶段 `GetVolume/GetFilesystem` 优先读 DB store 而挂载阶段 `MountVolume/MountFilesystem/UnmountVolume/UnmountFilesystem` 只查内存 map；新增 `lookupVolumeRecord/lookupFilesystemRecord`（内存 miss 回落 store 并回填）与 `hydrateFilesystemMountTargets`（挂载前从 store 恢复 mount target），四个 mount/unmount 方法接入；回归测试 `TestLocalStorageServiceMountSurvivesRestartViaStore` 复现重启场景；真实环境网关 rollout 后新 idempotency_key 创建挂载卷实例 201（provisioning，attachments resolved）。已知边界：租户 PVC 卡 `pending`（后端未绑定）属独立问题，文件系统 Available 门禁维持不变 | instance-storage-mount-store-a.md |
+
 ### Instance Sandbox 无状态化（2026-08）
 
 | 批次 | 内容摘要 | 文件 |
