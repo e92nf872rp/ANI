@@ -328,6 +328,104 @@ func (s *LocalStorageService) ExpandVolume(ctx context.Context, request ports.St
 	return record, nil
 }
 
+// lookupVolumeRecord resolves a volume for mount/unmount operations.
+// The in-memory map is checked first; on a miss the control-plane store is
+// read and the record is hydrated back into memory so a restarted gateway can
+// still mount volumes created before the restart.
+func (s *LocalStorageService) lookupVolumeRecord(ctx context.Context, tenantID, volumeID string) (ports.StorageVolumeRecord, bool, error) {
+	volumeID = strings.TrimSpace(volumeID)
+	s.mu.RLock()
+	record, ok := s.volumes[volumeID]
+	s.mu.RUnlock()
+	if ok && record.TenantID == tenantID && record.State != ports.StorageResourceDeleted {
+		return record, true, nil
+	}
+	if s.store == nil {
+		return ports.StorageVolumeRecord{}, false, nil
+	}
+	stored, err := s.store.GetVolume(ctx, tenantID, volumeID)
+	if err != nil {
+		if errors.Is(err, ports.ErrNotFound) {
+			return ports.StorageVolumeRecord{}, false, nil
+		}
+		return ports.StorageVolumeRecord{}, false, err
+	}
+	s.mu.Lock()
+	if current, exists := s.volumes[stored.VolumeID]; exists {
+		record = current
+	} else {
+		s.volumes[stored.VolumeID] = stored
+		record = stored
+	}
+	s.mu.Unlock()
+	return record, true, nil
+}
+
+// lookupFilesystemRecord mirrors lookupVolumeRecord for filesystem mounts.
+func (s *LocalStorageService) lookupFilesystemRecord(ctx context.Context, tenantID, filesystemID string) (ports.StorageFilesystemRecord, bool, error) {
+	filesystemID = strings.TrimSpace(filesystemID)
+	s.mu.RLock()
+	record, ok := s.filesystems[filesystemID]
+	s.mu.RUnlock()
+	if ok && record.TenantID == tenantID && record.State != ports.StorageResourceDeleted {
+		return record, true, nil
+	}
+	if s.store == nil {
+		return ports.StorageFilesystemRecord{}, false, nil
+	}
+	stored, err := s.store.GetFilesystem(ctx, tenantID, filesystemID)
+	if err != nil {
+		if errors.Is(err, ports.ErrNotFound) {
+			return ports.StorageFilesystemRecord{}, false, nil
+		}
+		return ports.StorageFilesystemRecord{}, false, err
+	}
+	s.mu.Lock()
+	if current, exists := s.filesystems[stored.FilesystemID]; exists {
+		record = current
+	} else {
+		s.filesystems[stored.FilesystemID] = stored
+		record = stored
+	}
+	s.mu.Unlock()
+	return record, true, nil
+}
+
+// hydrateFilesystemMountTargets restores mount targets from the control-plane
+// store when the in-memory map has none for the filesystem (gateway restart).
+func (s *LocalStorageService) hydrateFilesystemMountTargets(ctx context.Context, tenantID, filesystemID string) error {
+	if s.store == nil {
+		return nil
+	}
+	s.mu.RLock()
+	hasTarget := false
+	for _, target := range s.mountTargets {
+		if target.FilesystemID == filesystemID {
+			hasTarget = true
+			break
+		}
+	}
+	s.mu.RUnlock()
+	if hasTarget {
+		return nil
+	}
+	targets, err := s.store.ListFilesystemMountTargets(ctx, tenantID, filesystemID)
+	if err != nil {
+		return err
+	}
+	if len(targets) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	for _, target := range targets {
+		if _, exists := s.mountTargets[target.MountTargetID]; !exists {
+			s.mountTargets[target.MountTargetID] = target
+		}
+	}
+	s.mu.Unlock()
+	return nil
+}
+
 func (s *LocalStorageService) MountVolume(ctx context.Context, request ports.StorageVolumeMountRequest) (ports.StorageVolumeRecord, error) {
 	idemKey, err := requireIdempotencyKey(request.TenantID, request.IdempotencyKey)
 	if err != nil {
@@ -336,12 +434,15 @@ func (s *LocalStorageService) MountVolume(ctx context.Context, request ports.Sto
 	if strings.TrimSpace(request.InstanceID) == "" || strings.TrimSpace(request.InstanceRoute) == "" {
 		return ports.StorageVolumeRecord{}, fmt.Errorf("%w: instance_id and instance_route are required", ports.ErrInvalid)
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	record, ok := s.volumes[strings.TrimSpace(request.VolumeID)]
-	if !ok || record.TenantID != request.TenantID || record.State == ports.StorageResourceDeleted {
+	record, found, err := s.lookupVolumeRecord(ctx, request.TenantID, request.VolumeID)
+	if err != nil {
+		return ports.StorageVolumeRecord{}, err
+	}
+	if !found {
 		return ports.StorageVolumeRecord{}, ports.ErrNotFound
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if id, ok := s.volumeOpIdem[storageOperationIdempotencyKey(idemKey, "mount")]; ok && id == record.VolumeID {
 		return record, nil
 	}
@@ -369,12 +470,15 @@ func (s *LocalStorageService) UnmountVolume(ctx context.Context, request ports.S
 	if err != nil {
 		return ports.StorageVolumeRecord{}, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	record, ok := s.volumes[strings.TrimSpace(request.VolumeID)]
-	if !ok || record.TenantID != request.TenantID || record.State == ports.StorageResourceDeleted {
+	record, found, err := s.lookupVolumeRecord(ctx, request.TenantID, request.VolumeID)
+	if err != nil {
+		return ports.StorageVolumeRecord{}, err
+	}
+	if !found {
 		return ports.StorageVolumeRecord{}, ports.ErrNotFound
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if id, ok := s.volumeOpIdem[storageOperationIdempotencyKey(idemKey, "unmount")]; ok && id == record.VolumeID {
 		return record, nil
 	}
@@ -806,12 +910,18 @@ func (s *LocalStorageService) MountFilesystem(ctx context.Context, request ports
 	if strings.TrimSpace(request.InstanceID) == "" || strings.TrimSpace(request.InstanceRoute) == "" {
 		return ports.StorageFilesystemRecord{}, fmt.Errorf("%w: instance_id and instance_route are required", ports.ErrInvalid)
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	record, ok := s.filesystems[strings.TrimSpace(request.FilesystemID)]
-	if !ok || record.TenantID != request.TenantID || record.State == ports.StorageResourceDeleted {
+	record, found, err := s.lookupFilesystemRecord(ctx, request.TenantID, request.FilesystemID)
+	if err != nil {
+		return ports.StorageFilesystemRecord{}, err
+	}
+	if !found {
 		return ports.StorageFilesystemRecord{}, ports.ErrNotFound
 	}
+	if err := s.hydrateFilesystemMountTargets(ctx, request.TenantID, record.FilesystemID); err != nil {
+		return ports.StorageFilesystemRecord{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if id, ok := s.fsOpIdem[storageOperationIdempotencyKey(idemKey, "mount")]; ok && id == record.FilesystemID {
 		return s.enrichFilesystemLocked(record), nil
 	}
@@ -856,12 +966,15 @@ func (s *LocalStorageService) UnmountFilesystem(ctx context.Context, request por
 	if strings.TrimSpace(request.InstanceID) == "" {
 		return ports.StorageFilesystemRecord{}, fmt.Errorf("%w: instance_id is required", ports.ErrInvalid)
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	record, ok := s.filesystems[strings.TrimSpace(request.FilesystemID)]
-	if !ok || record.TenantID != request.TenantID || record.State == ports.StorageResourceDeleted {
+	record, found, err := s.lookupFilesystemRecord(ctx, request.TenantID, request.FilesystemID)
+	if err != nil {
+		return ports.StorageFilesystemRecord{}, err
+	}
+	if !found {
 		return ports.StorageFilesystemRecord{}, ports.ErrNotFound
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if id, ok := s.fsOpIdem[storageOperationIdempotencyKey(idemKey, "unmount")]; ok && id == record.FilesystemID {
 		return s.enrichFilesystemLocked(record), nil
 	}
