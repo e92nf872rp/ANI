@@ -936,6 +936,10 @@ func (api *instanceAPI) refreshOneStoreStatus(ctx context.Context, record *ports
 	if api.k8sClient == nil || record == nil || record.Name == "" || record.Provider != "kubernetes" {
 		return
 	}
+	// Deleting/deleted instances never need a Deployment read (the workload is
+	// gone). stopping/stopped instances still read the Deployment so their real
+	// replica count (0/0 after scale-to-0) is surfaced, but their lifecycle
+	// state is preserved below instead of being rewritten to "pending".
 	if record.Status.State == ports.WorkloadStateDeleting || record.Status.State == ports.WorkloadStateDeleted {
 		return
 	}
@@ -944,6 +948,12 @@ func (api *instanceAPI) refreshOneStoreStatus(ctx context.Context, record *ports
 	body, status, err := api.k8sClient.Do(ctx, http.MethodGet, depEndpoint, "", nil)
 	if err != nil {
 		if status == http.StatusNotFound {
+			// A lifecycle-stopped instance keeps its terminal state even if the
+			// Deployment was removed out-of-band; only non-terminal instances are
+			// surfaced as failed instead of a stale provisioning.
+			if record.Status.State == ports.WorkloadStateStopping || record.Status.State == ports.WorkloadStateStopped {
+				return
+			}
 			// Deployment gone: surface as failed instead of stale provisioning.
 			record.Status.State = ports.WorkloadStateFailed
 			record.Status.Reason = "deployment not found in cluster"
@@ -954,6 +964,9 @@ func (api *instanceAPI) refreshOneStoreStatus(ctx context.Context, record *ports
 		return
 	}
 	var dep struct {
+		Spec struct {
+			Replicas *int32 `json:"replicas"`
+		} `json:"spec"`
 		Status struct {
 			Replicas          int32 `json:"replicas"`
 			UpdatedReplicas   int32 `json:"updatedReplicas"`
@@ -976,10 +989,20 @@ func (api *instanceAPI) refreshOneStoreStatus(ctx context.Context, record *ports
 		phase = "Running"
 	case dep.Status.Replicas > 0 || dep.Status.UpdatedReplicas > 0:
 		phase = "Provisioning"
+	case dep.Spec.Replicas != nil && *dep.Spec.Replicas == 0:
+		// Intentionally scaled to 0 by a lifecycle stop: this is a stopped
+		// instance, not a never-started pending one. spec.replicas is the
+		// intent contract and is reliable even if the store state was already
+		// overwritten to pending by an older refresh.
+		phase = "Stopped"
 	default:
 		phase = "Pending"
 	}
-	record.Status.State = mapProviderPhaseToState(phase)
+	// Preserve lifecycle terminal states: a scaled-to-0 Deployment would map to
+	// "Pending", which must not resurrect a stopped/stopping instance.
+	if record.Status.State != ports.WorkloadStateStopping && record.Status.State != ports.WorkloadStateStopped {
+		record.Status.State = mapProviderPhaseToState(phase)
+	}
 	record.Status.Reason = ""
 	for _, condition := range dep.Status.Conditions {
 		if strings.EqualFold(condition.Status, "False") {
@@ -994,10 +1017,14 @@ func (api *instanceAPI) refreshOneStoreStatus(ctx context.Context, record *ports
 	if record.Container != nil {
 		record.Container.Replicas = dep.Status.Replicas
 		record.Container.ReadyReplicas = dep.Status.ReadyReplicas
-		switch phase {
-		case "Running":
+		switch {
+		case record.Status.State == ports.WorkloadStateStopped:
+			record.Container.RolloutStatus = "stopped"
+		case record.Status.State == ports.WorkloadStateStopping:
+			record.Container.RolloutStatus = "stopping"
+		case phase == "Running":
 			record.Container.RolloutStatus = "running"
-		case "Provisioning":
+		case phase == "Provisioning":
 			record.Container.RolloutStatus = "progressing"
 		default:
 			record.Container.RolloutStatus = "pending"
@@ -1186,6 +1213,8 @@ func mapProviderPhaseToState(phase string) ports.WorkloadState {
 		return ports.WorkloadStateProvisioning
 	case "pending":
 		return ports.WorkloadStatePending
+	case "stopped":
+		return ports.WorkloadStateStopped
 	case "failed":
 		return ports.WorkloadStateFailed
 	default:

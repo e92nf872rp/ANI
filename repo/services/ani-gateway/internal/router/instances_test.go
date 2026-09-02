@@ -304,6 +304,66 @@ func TestRefreshOneStoreStatusSkipsDeletedInstance(t *testing.T) {
 	}
 }
 
+// TestRefreshOneStoreStatusPreservesStoppedState verifies a stopped instance is
+// not overwritten by the Deployment rollout when it is scaled to 0 (which would
+// otherwise surface as "pending"). It uses spec.replicas==0 (the lifecycle stop
+// intent) as the signal, so it also recovers instances whose in-memory state was
+// already clobbered to pending, while surfacing the real replica count (0/0)
+// and rollout_status from the live Deployment.
+func TestRefreshOneStoreStatusPreservesStoppedState(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/apis/apps/v1/namespaces/"):
+			// Deployment scaled to 0 after stop: spec.replicas=0 keeps the
+			// instance classified as stopped instead of pending.
+			_, _ = w.Write([]byte(`{"metadata":{"name":"stopped-app"},"spec":{"replicas":0},"status":{"replicas":0,"readyReplicas":0,"availableReplicas":0,"updatedReplicas":0}}`))
+		case strings.HasPrefix(r.URL.Path, "/api/v1/namespaces/"):
+			_, _ = w.Write([]byte(`{"items":[]}`))
+		default:
+			http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	k8s, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
+		Host:       srv.URL,
+		HTTPClient: srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("NewKubernetesRESTClient error = %v", err)
+	}
+	store := newMemoryInstanceStore()
+	api := &instanceAPI{k8sClient: k8s, store: store}
+
+	record := ports.WorkloadInstanceRecord{
+		InstanceID: "inst_stopped",
+		TenantID:   "tenant-a",
+		Name:       "stopped-app",
+		Provider:   "kubernetes",
+		Container: &ports.ContainerInstanceStatus{
+			// stale snapshot from before stop; must be refreshed to 0/0
+			Replicas: 1, ReadyReplicas: 1,
+		},
+		Status: ports.WorkloadStatus{
+			// realistic worst case: an older refresh already clobbered it to pending
+			State: ports.WorkloadStatePending,
+		},
+	}
+
+	api.refreshOneStoreStatus(context.Background(), &record)
+
+	if record.Status.State != ports.WorkloadStateStopped {
+		t.Fatalf("state = %s, want stopped (recovered from pending via spec.replicas==0)", record.Status.State)
+	}
+	if record.Container == nil || record.Container.Replicas != 0 || record.Container.ReadyReplicas != 0 {
+		t.Fatalf("container replicas = %+v, want 0/0 from scaled-to-0 deployment", record.Container)
+	}
+	if record.Container.RolloutStatus != "stopped" {
+		t.Fatalf("rollout status = %q, want stopped", record.Container.RolloutStatus)
+	}
+}
+
 func TestInstanceSpecFromRequestMapsSandboxConfig(t *testing.T) {
 	spec, err := instanceSpecFromRequest(createInstanceRequest{
 		Kind: "sandbox",
