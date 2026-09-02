@@ -1,4 +1,4 @@
-package router
+﻿package router
 
 import (
 	"bufio"
@@ -140,7 +140,7 @@ func TestStreamInstanceLogs_NotConfiguredSendsSSEError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET stream: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 
 	// SSE 头立即写出：即使未配置 Loki 也必须先拿到 200 + text/event-stream
@@ -211,7 +211,7 @@ func TestStreamInstanceLogs_SSEStreamEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET stream: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
@@ -294,7 +294,7 @@ func TestStreamInstanceLogs_EmptyReplayStillWritesHeadersImmediately(t *testing.
 	if err != nil {
 		t.Fatalf("GET stream: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// http.Get 在收到响应头即返回；若头未写出会阻塞直到超时/卡死
 	if resp.StatusCode != 200 {

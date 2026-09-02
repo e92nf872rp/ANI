@@ -87,7 +87,7 @@ func (api *instanceAPI) streamInstanceLogs(ctx context.Context, c *app.RequestCo
 	c.Response.HijackWriter(&noopExtWriter{})
 
 	c.Hijack(func(conn network.Conn) {
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		// 注意：不能使用 handler 的 ctx（hertz handler ctx 生命周期到 handler 返回为止，
 		// Hijack 回调执行时它已被取消/复用——netpoll 下必现，会导致首个 Loki 查询以
@@ -145,7 +145,6 @@ func (api *instanceAPI) streamInstanceLogs(ctx context.Context, c *app.RequestCo
 // sseLogSink 封装 SSE 流式写出的连接状态。
 type sseLogSink struct {
 	conn        network.Conn
-	headersBuf  []byte
 	headWritten bool
 }
 

@@ -102,16 +102,16 @@ func TestStreamLogs_ReplayToIncrementalHandoff(t *testing.T) {
 				lokiStreamValues(base.Add(-2*time.Minute), "info", "line2"),
 				lokiStreamValues(base.Add(-3*time.Minute), "info", "line3"),
 			}
-			fmt.Fprint(w, lokiStreamResponse(values))
+			_, _ = fmt.Fprint(w, lokiStreamResponse(values))
 		} else {
 			// forward：第 2 次调用时时钟已推进，返回在 [lastTS+1ns, now] 范围内的新日志
 			if n == 2 {
 				values := [][]string{
 					lokiStreamValues(base.Add(1*time.Second), "info", "new-line"),
 				}
-				fmt.Fprint(w, lokiStreamResponse(values))
+				_, _ = fmt.Fprint(w, lokiStreamResponse(values))
 			} else {
-				fmt.Fprint(w, emptyLokiStreamResponse())
+				_, _ = fmt.Fprint(w, emptyLokiStreamResponse())
 			}
 		}
 	})
@@ -175,13 +175,13 @@ func TestStreamLogs_ForwardDedup(t *testing.T) {
 		atomic.AddInt32(&callCount, 1)
 
 		if direction == "backward" {
-			fmt.Fprint(w, emptyLokiStreamResponse())
+			_, _ = fmt.Fprint(w, emptyLokiStreamResponse())
 		} else {
 			// 每次 forward 都返回同一条日志
 			values := [][]string{
 				lokiStreamValues(base.Add(1*time.Second), "info", "dup-line"),
 			}
-			fmt.Fprint(w, lokiStreamResponse(values))
+			_, _ = fmt.Fprint(w, lokiStreamResponse(values))
 		}
 	})
 	defer srv.Close()
@@ -239,9 +239,9 @@ func TestStreamLogs_LevelFilter(t *testing.T) {
 				lokiStreamValues(base.Add(-2*time.Minute), "info", "info-line"),
 				lokiStreamValues(base.Add(-1*time.Minute), "error", "error-line"),
 			}
-			fmt.Fprint(w, lokiStreamResponse(values))
+			_, _ = fmt.Fprint(w, lokiStreamResponse(values))
 		} else {
-			fmt.Fprint(w, emptyLokiStreamResponse())
+			_, _ = fmt.Fprint(w, emptyLokiStreamResponse())
 		}
 	})
 	defer srv.Close()
@@ -294,9 +294,9 @@ func TestStreamLogs_SinkDisconnectExits(t *testing.T) {
 				lokiStreamValues(base.Add(-2*time.Minute), "info", "line2"),
 				lokiStreamValues(base.Add(-1*time.Minute), "info", "line3"),
 			}
-			fmt.Fprint(w, lokiStreamResponse(values))
+			_, _ = fmt.Fprint(w, lokiStreamResponse(values))
 		} else {
-			fmt.Fprint(w, emptyLokiStreamResponse())
+			_, _ = fmt.Fprint(w, emptyLokiStreamResponse())
 		}
 	})
 	defer srv.Close()
@@ -346,19 +346,20 @@ func TestStreamLogs_LokiTransientFailureSelfHeals(t *testing.T) {
 		direction := r.URL.Query().Get("direction")
 		atomic.AddInt32(&callCount, 1)
 		if direction == "backward" {
-			fmt.Fprint(w, emptyLokiStreamResponse())
+			_, _ = fmt.Fprint(w, emptyLokiStreamResponse())
 		} else {
 			n := atomic.AddInt32(&fwdCount, 1)
-			if n == 1 {
+			switch n {
+			case 1:
 				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprint(w, `{"status":"error","error":"internal"}`)
-			} else if n == 2 {
+				_, _ = fmt.Fprint(w, `{"status":"error","error":"internal"}`)
+			case 2:
 				values := [][]string{
 					lokiStreamValues(base.Add(6*time.Second), "info", "after-fail"),
 				}
-				fmt.Fprint(w, lokiStreamResponse(values))
-			} else {
-				fmt.Fprint(w, emptyLokiStreamResponse())
+				_, _ = fmt.Fprint(w, lokiStreamResponse(values))
+			default:
+				_, _ = fmt.Fprint(w, emptyLokiStreamResponse())
 			}
 		}
 	})
@@ -416,7 +417,7 @@ func TestStreamLogs_EmptyReplaySetsCursorToNow(t *testing.T) {
 	clock := &mutableClock{now: base}
 
 	srv := lokiStreamTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, emptyLokiStreamResponse())
+		_, _ = fmt.Fprint(w, emptyLokiStreamResponse())
 	})
 	defer srv.Close()
 
