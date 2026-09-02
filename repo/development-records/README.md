@@ -13,6 +13,14 @@
 
 ## 已完成批次（按完成时间排列）
 
+### KB 接口补全（2026-09，分支 feat/kb-api-completion）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| KB-API-B1 (issue-040) | 契约批次：Services v1.yaml 既有 path 追加 PUT `updateKnowledgeBase`（UpdateKnowledgeBaseRequest：idempotency_key required uuid / name / description nullable，空=不修改；400/401/403/404/409）与 GET `getKnowledgeBaseDocument`（200 返回既有 KBDocument）；proto 新增 `UpdateKB` RPC（tenant_id/kb_id/idempotency_key/name/description → KnowledgeBase）+ UpdateKBRequest message（GetDocument 已存在仅校验）；contract-baseline 登记 2 条 operation_security 豁免；buf+grpc_tools 生成两侧 pb；四语言 SDK/docs/services.html/Console schema.d.ts 重生成（updateKnowledgeBase 自动入幂等集）；范围外良性同步：tenant/inference pb 生成物 reserved 字段追平。纯契约无实现；route-contract 2 条 spec_not_in_code 按 SPEC §4.2 由 issue-044 Gateway 同 PR 解除 | kb-api-b1-issue-040-contract-updatekb-getdoc.md |
+| KB-API-B2 (issue-041) | 契约批次：Services v1.yaml 新增 3 path（GET listKnowledgeBaseDocumentChunks 单列 id keyset、GET listKnowledgeBaseSessionMessages 复合 created_at\|id 游标、DELETE deleteKnowledgeBaseSession 204 幂等）+ 5 新 schema（KBSourceChunk/KBChunk/KBChunkListResponse/KBSessionMessage/KBSessionMessageListResponse）+ KBCitation 追加 message_id/session_id（uuid nullable）；proto 新增 3 RPC（ListDocumentChunks/GetSessionMessages/DeleteSession→Empty）+ 7 message，分页复用 common.v1.CursorPageRequest，JSONB 双字段（custom_metadata/source_chunks）proto 侧统一 string；contract-baseline 登记 3 条豁免；buf+grpc_tools 生成两侧 pb；四语言 SDK/docs/api/Console schema.d.ts 重生成（零漂移双门禁）；范围外良性同步：common pb Python 侧 IdempotentResult 追平。纯契约无实现；route-contract 5 条 spec_not_in_code（B1 2 + B2 3）按 SPEC §4.2 由 issue-046 Gateway 同 PR 解除。⚠ 勘误（B3 记录 OQ1）：B2 的 SDK/docs 重生成因 route-contract 短路未实际执行（缺 B2 3 operation + 5 schema），由 B3 批次 review-it 发现并补齐 | kb-api-b2-issue-041-contract-chunks-sessions-citations.md |
+| KB-API-B3 (issue-042) | 契约批次：proto 新增 ReparseDocument RPC（→ common.v1.AsyncTaskRef，注释固化 202 异步语义 + Outbox→NATSGo `ani.tasks.kb.parse` 复用 NotifyDocumentUploaded 管线）+ ReparseDocumentRequest（tenant_id/kb_id/doc_id/idempotency_key，对齐 NotifyDocumentUploaded 模式）；buf+grpc_tools 生成两侧 pb；**零 OpenAPI/baseline 改动**（AC #4 冻结事实：v1.yaml diff 空）。纯 proto 补齐无 servicer；review-it 收口发现并修复 B2 批次 SDK 四语言欠账（缺 3 operation + 5 schema，根因：门禁链 route-contract 中间态短路使 SDK 零漂移检查漏执行），补齐后 8 文件 MD5 幂等验证；validate-services 全链路逐阶段单跑补证（route-contract 之后 8 阶段全绿） | kb-api-b3-issue-042-contract-reparse-proto.md |
+
 ### 任务中心异步任务 Core 集成（2026-08，分支 feat/async-task-core-integration）
 
 | 批次 | 内容摘要 | 文件 |

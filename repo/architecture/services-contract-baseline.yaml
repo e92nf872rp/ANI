@@ -14,6 +14,9 @@ exceptions:
   - operation_id: deleteKnowledgeBase
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: updateKnowledgeBase
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
   - operation_id: listKnowledgeBaseDocuments
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
@@ -26,6 +29,9 @@ exceptions:
   - operation_id: deleteKnowledgeBaseDocument
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: getKnowledgeBaseDocument
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
   - operation_id: queryKnowledgeBase
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
@@ -36,6 +42,15 @@ exceptions:
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
   - operation_id: listKnowledgeBaseSessions
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: listKnowledgeBaseDocumentChunks
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: listKnowledgeBaseSessionMessages
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: deleteKnowledgeBaseSession
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
   - operation_id: updateKnowledgeBasePermissions

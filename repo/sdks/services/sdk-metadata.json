@@ -209,6 +209,12 @@
       "scope": ""
     },
     {
+      "operationId": "updateKnowledgeBase",
+      "method": "PUT",
+      "path": "/knowledge-bases/{kb_id}",
+      "scope": ""
+    },
+    {
       "operationId": "listKnowledgeBaseCitations",
       "method": "GET",
       "path": "/knowledge-bases/{kb_id}/citations",
@@ -242,6 +248,18 @@
       "operationId": "deleteKnowledgeBaseDocument",
       "method": "DELETE",
       "path": "/knowledge-bases/{kb_id}/documents/{doc_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "getKnowledgeBaseDocument",
+      "method": "GET",
+      "path": "/knowledge-bases/{kb_id}/documents/{doc_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "listKnowledgeBaseDocumentChunks",
+      "method": "GET",
+      "path": "/knowledge-bases/{kb_id}/documents/{doc_id}/chunks",
       "scope": ""
     },
     {
@@ -290,6 +308,18 @@
       "operationId": "listKnowledgeBaseSessions",
       "method": "GET",
       "path": "/knowledge-bases/{kb_id}/sessions",
+      "scope": ""
+    },
+    {
+      "operationId": "deleteKnowledgeBaseSession",
+      "method": "DELETE",
+      "path": "/knowledge-bases/{kb_id}/sessions/{session_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "listKnowledgeBaseSessionMessages",
+      "method": "GET",
+      "path": "/knowledge-bases/{kb_id}/sessions/{session_id}/messages",
       "scope": ""
     },
     {
@@ -753,6 +783,8 @@
     "InvitationResult",
     "InviteAdminRequest",
     "InviteMemberRequest",
+    "KBChunk",
+    "KBChunkListResponse",
     "KBCitation",
     "KBCitationListResponse",
     "KBConfig",
@@ -761,6 +793,9 @@
     "KBQueryResponse",
     "KBSession",
     "KBSessionListResponse",
+    "KBSessionMessage",
+    "KBSessionMessageListResponse",
+    "KBSourceChunk",
     "KnowledgeBase",
     "Model",
     "ModelList",
@@ -808,6 +843,7 @@
     "UpdateInferenceServiceRequest",
     "UpdateKBConfigRequest",
     "UpdateKBPermissionsRequest",
+    "UpdateKnowledgeBaseRequest",
     "UpdateQuotaLimitsRequest",
     "UpdateRoleRequest",
     "UpdateSsoConfigRequest",
@@ -830,6 +866,7 @@
     "testInferenceService",
     "createIntegration",
     "createIntegrationBot",
+    "updateKnowledgeBase",
     "updateKnowledgeBaseConfig",
     "getDocumentUploadURL",
     "notifyDocumentUploaded",
@@ -870,7 +907,9 @@
     "getInferenceServiceLogs",
     "listIntegrations",
     "listKnowledgeBaseCitations",
+    "listKnowledgeBaseDocumentChunks",
     "listKnowledgeBaseSessions",
+    "listKnowledgeBaseSessionMessages",
     "listModels",
     "listModelVersions",
     "listPlatformAdmins",
