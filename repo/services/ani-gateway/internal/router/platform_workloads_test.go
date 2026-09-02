@@ -39,6 +39,10 @@ func (s *capturingAsyncTaskStore) Update(context.Context, ports.AsyncTaskUpdate)
 	return ports.AsyncTaskRecord{}, ports.ErrNotFound
 }
 
+func (s *capturingAsyncTaskStore) List(context.Context, string, ports.AsyncTaskListFilter) ([]ports.AsyncTaskRecord, string, error) {
+	return nil, "", ports.ErrNotFound
+}
+
 func TestPlatformWorkloadHTTPCPUCreateGetAndServiceGate(t *testing.T) {
 	h := setupPlatformWorkloadTestServer(t)
 	tenant := "11111111-1111-1111-1111-111111111111"

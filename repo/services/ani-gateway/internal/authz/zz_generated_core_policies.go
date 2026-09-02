@@ -91,6 +91,13 @@ var generatedCorePolicies = map[string]Policy{
 		Boundary:             BoundaryPlatform,
 		PrincipalKinds:       []PrincipalKind{PrincipalUser},
 	},
+	"GET /api/v1/admin/tenant-admins/available-tenants": {
+		Source:               PolicySourceLegacy,
+		OperationID:          "listAvailableTenants",
+		Method:               "GET",
+		PathTemplate:         "/api/v1/admin/tenant-admins/available-tenants",
+		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
+	},
 	"GET /api/v1/admin/tenant-users": {
 		Source:               PolicySourceLegacy,
 		OperationID:          "listTenantUsers",
@@ -161,11 +168,11 @@ var generatedCorePolicies = map[string]Policy{
 		PathTemplate:         "/api/v1/admin/tenants/{tenant_id}/reservations",
 		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
 	},
-	"POST /api/v1/admin/tenants/{tenant_id}/transfer-ownership": {
+	"GET /api/v1/admin/tenants/{tenant_id}/roles": {
 		Source:               PolicySourceLegacy,
-		OperationID:          "transferCoreTenantOwnership",
-		Method:               "POST",
-		PathTemplate:         "/api/v1/admin/tenants/{tenant_id}/transfer-ownership",
+		OperationID:          "listAssignableTenantRoles",
+		Method:               "GET",
+		PathTemplate:         "/api/v1/admin/tenants/{tenant_id}/roles",
 		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
 	},
 	"GET /api/v1/admin/tenants/{tenant_id}/user-lookup": {
@@ -173,6 +180,13 @@ var generatedCorePolicies = map[string]Policy{
 		OperationID:          "lookupTenantUser",
 		Method:               "GET",
 		PathTemplate:         "/api/v1/admin/tenants/{tenant_id}/user-lookup",
+		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
+	},
+	"GET /api/v1/admin/tenants/{tenant_id}/users/batch": {
+		Source:               PolicySourceLegacy,
+		OperationID:          "batchGetTenantUsers",
+		Method:               "GET",
+		PathTemplate:         "/api/v1/admin/tenants/{tenant_id}/users/batch",
 		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
 	},
 	"DELETE /api/v1/admin/tenants/{tenant_id}/users/{user_id}": {
@@ -187,13 +201,6 @@ var generatedCorePolicies = map[string]Policy{
 		OperationID:          "getTenantUser",
 		Method:               "GET",
 		PathTemplate:         "/api/v1/admin/tenants/{tenant_id}/users/{user_id}",
-		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
-	},
-	"GET /api/v1/admin/tenants/{tenant_id}/users/{user_id}/changeable-roles": {
-		Source:               PolicySourceLegacy,
-		OperationID:          "getTenantUserChangeableRoles",
-		Method:               "GET",
-		PathTemplate:         "/api/v1/admin/tenants/{tenant_id}/users/{user_id}/changeable-roles",
 		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
 	},
 	"POST /api/v1/admin/tenants/{tenant_id}/users/{user_id}/reset-password": {
