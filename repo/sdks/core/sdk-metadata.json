@@ -77,6 +77,12 @@
       "scope": "scope:quota:read"
     },
     {
+      "operationId": "listAvailableTenants",
+      "method": "GET",
+      "path": "/admin/tenant-admins/available-tenants",
+      "scope": "scope:users:read"
+    },
+    {
       "operationId": "listTenantUsers",
       "method": "GET",
       "path": "/admin/tenant-users",
@@ -137,15 +143,21 @@
       "scope": "scope:quota:write"
     },
     {
-      "operationId": "transferCoreTenantOwnership",
-      "method": "POST",
-      "path": "/admin/tenants/{tenant_id}/transfer-ownership",
-      "scope": "scope:users:write"
+      "operationId": "listAssignableTenantRoles",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/roles",
+      "scope": "scope:users:read"
     },
     {
       "operationId": "lookupTenantUser",
       "method": "GET",
       "path": "/admin/tenants/{tenant_id}/user-lookup",
+      "scope": "scope:users:read"
+    },
+    {
+      "operationId": "batchGetTenantUsers",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/users/batch",
       "scope": "scope:users:read"
     },
     {
@@ -158,12 +170,6 @@
       "operationId": "getTenantUser",
       "method": "GET",
       "path": "/admin/tenants/{tenant_id}/users/{user_id}",
-      "scope": "scope:users:read"
-    },
-    {
-      "operationId": "getTenantUserChangeableRoles",
-      "method": "GET",
-      "path": "/admin/tenants/{tenant_id}/users/{user_id}/changeable-roles",
       "scope": "scope:users:read"
     },
     {
@@ -1253,10 +1259,16 @@
       "scope": "scope:secrets:bind"
     },
     {
-      "operationId": "getTasksTaskId",
+      "operationId": "listAsyncTasks",
+      "method": "GET",
+      "path": "/tasks",
+      "scope": "scope:tasks:read"
+    },
+    {
+      "operationId": "getTask",
       "method": "GET",
       "path": "/tasks/{task_id}",
-      "scope": ""
+      "scope": "scope:tasks:read"
     },
     {
       "operationId": "listVectorStores",
@@ -1405,6 +1417,8 @@
   ],
   "schemas": [
     "APIKeyInfo",
+    "AssignableTenantRole",
+    "AssignableTenantRoleList",
     "AsyncTask",
     "BeginOIDCLoginRequest",
     "BeginOIDCLoginResponse",
@@ -1412,8 +1426,6 @@
     "BucketObjectPresignedURLRequest",
     "BucketObjectUploadRequest",
     "BucketPrefixCreateRequest",
-    "ChangeableRoleOption",
-    "ChangeableRolesResponse",
     "CloneSandboxCheckpointRequest",
     "CompleteOIDCLoginRequest",
     "CoreDevProfileInfo",
@@ -1684,6 +1696,7 @@
     "StorageVolumeMountHistoryEntry",
     "StorageVolumeMountRequest",
     "StorageVolumeUnmountRequest",
+    "TaskListResponse",
     "Tenant",
     "TenantPlanUpdateRequest",
     "TenantSummary",
@@ -1701,7 +1714,6 @@
     "UserRoleUpdateRequest",
     "UserStatusUpdateRequest",
     "UserTenantRef",
-    "UserTransferOwnershipRequest",
     "VectorStore",
     "VectorStoreDeletePrecheck",
     "VectorStoreDocumentDeleteResponse",
@@ -1728,9 +1740,7 @@
     "enablePlatformUser",
     "resetPlatformUserPassword",
     "updatePlatformUserRole",
-    "transferCoreTenantOwnership",
     "resetTenantUserPassword",
-    "updateTenantUserRole",
     "updateTenantUserStatus",
     "createStorageBucket",
     "setStorageBucketACL",
@@ -1832,6 +1842,7 @@
     "listRegistryArtifacts",
     "listSandboxTemplates",
     "listSecrets",
+    "listAsyncTasks",
     "listVectorStores",
     "listStorageVolumes",
     "listVolumeSnapshots"
@@ -1848,7 +1859,6 @@
     "INTERNAL_ERROR",
     "INVALID_FILTER",
     "LAST_PLATFORM_ADMIN",
-    "LAST_TENANT_OWNER",
     "NOT_FOUND",
     "NOT_IMPLEMENTED",
     "PASSWORD_SAME_AS_OLD",
@@ -1864,9 +1874,7 @@
     "RESERVED_INSUFFICIENT",
     "ROLE_CHANGE_INVALID",
     "TENANT_NOT_FOUND",
-    "TENANT_OWNER_ROLE_LOCKED",
     "TENANT_PLAN_NOT_FOUND",
-    "TRANSFER_TARGET_INVALID",
     "UNAUTHORIZED",
     "UNAVAILABLE",
     "USER_ALREADY_TENANT_ADMIN",

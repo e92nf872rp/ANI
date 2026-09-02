@@ -282,7 +282,7 @@ func TestVectorStoreHTTPDocumentInsertPersistsPollableTask(t *testing.T) {
 	})
 	v1 := h.Group("/api/v1")
 	registerVectorStoreResourcesWithServiceAndTasks(v1, runtimeadapter.NewLocalVectorStoreService(), tasks)
-	registerTasksWithStore(v1, tasks)
+	registerTasksWithStore(v1, tasks, nil)
 
 	created := performJSONRequest(t, h, http.MethodPost, "/api/v1/vector-stores", `{"idempotency_key":"http-vector-doc-task-create","name":"kb-doc-task","dimension":3}`, http.StatusCreated)
 	storeID := jsonStringField(t, created, "id")

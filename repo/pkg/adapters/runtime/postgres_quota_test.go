@@ -28,12 +28,28 @@ func (r quotaFakeRow) Scan(dest ...any) error {
 		switch ptr := target.(type) {
 		case *string:
 			*ptr = r.values[i].(string)
+		case **string:
+			if r.values[i] == nil {
+				*ptr = nil
+			} else if s, ok := r.values[i].(string); ok {
+				*ptr = &s
+			} else {
+				*ptr = r.values[i].(*string)
+			}
 		case *bool:
 			*ptr = r.values[i].(bool)
 		case *int64:
 			*ptr = r.values[i].(int64)
 		case *time.Time:
 			*ptr = r.values[i].(time.Time)
+		case **time.Time:
+			if r.values[i] == nil {
+				*ptr = nil
+			} else if ts, ok := r.values[i].(time.Time); ok {
+				*ptr = &ts
+			} else {
+				*ptr = r.values[i].(*time.Time)
+			}
 		case *[]byte:
 			*ptr = r.values[i].([]byte)
 		case *uuid.UUID:

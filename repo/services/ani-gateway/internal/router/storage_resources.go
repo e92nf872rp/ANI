@@ -388,13 +388,16 @@ type storageSnapshotTaskResponse struct {
 	IdempotencyKey string         `json:"idempotency_key"`
 	TaskType       string         `json:"task_type"`
 	ResourceType   string         `json:"resource_type,omitempty"`
+	ResourceID     string         `json:"resource_id,omitempty"`
 	Status         string         `json:"status"`
 	AttemptCount   int            `json:"attempt_count"`
 	MaxAttempts    int            `json:"max_attempts"`
 	ProgressPct    int            `json:"progress_pct"`
 	Result         map[string]any `json:"result"`
+	ErrorMessage   string         `json:"error_message,omitempty"`
+	DeadLetterAt   string         `json:"dead_letter_at,omitempty"`
 	CreatedAt      string         `json:"created_at"`
-	CompletedAt    string         `json:"completed_at"`
+	CompletedAt    string         `json:"completed_at,omitempty"`
 }
 
 func newStorageAPI() *storageAPI {

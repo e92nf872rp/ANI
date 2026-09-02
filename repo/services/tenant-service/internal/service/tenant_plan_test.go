@@ -152,7 +152,13 @@ type fakeTenantClient struct {
 	countErr    error
 	bound       []ports.BoundTenant
 	bindable    []ports.BoundTenant
+	available   []ports.BoundTenant
 }
+
+var (
+	_ ports.TenantSvcClient     = (*fakeTenantClient)(nil)
+	_ ports.TenantPlanSvcClient = (*fakeTenantClient)(nil)
+)
 
 func (f *fakeQuotaClient) ListQuotaMeta(context.Context) ([]ports.QuotaMeta, error) {
 	f.calls++
@@ -229,6 +235,10 @@ func (f *fakeTenantClient) GetTenant(_ context.Context, id uuid.UUID) (ports.Ten
 		return ports.Tenant{}, ports.ErrTenantNotFound
 	}
 	return f.tenant, nil
+}
+
+func (f *fakeTenantClient) ListAvailableTenants(_ context.Context) ([]ports.BoundTenant, error) {
+	return f.available, nil
 }
 
 func (f *fakeTenantClient) UpdateTenantPlan(_ context.Context, id uuid.UUID, planID uuid.UUID) (ports.Tenant, error) {
@@ -1716,21 +1726,21 @@ func TestTenantPlanService_ListTenantPlanAuditLogs(t *testing.T) {
 	}
 	audit := &fakeAuditStore{}
 	// 模拟创建成功后的审计 + 另一套餐噪声
-	writeAuditSuccess(context.Background(), audit, "tenant_plan.create", map[string]any{
+	writeAuditSuccess(context.Background(), audit, auditResourceTenantPlan, "tenant_plan.create", map[string]any{
 		"plan_id": planID.String(),
 		"code":    "pro",
 	}, nil)
 	audit.logs[0].ID = createLogID
 	audit.logs[0].CreatedAt = time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC)
 
-	writeAuditSuccess(context.Background(), audit, "tenant_plan.activate", map[string]any{
+	writeAuditSuccess(context.Background(), audit, auditResourceTenantPlan, "tenant_plan.activate", map[string]any{
 		"plan_id": planID.String(),
 		"status":  "active",
 	}, nil)
 	audit.logs[1].ID = activateLogID
 	audit.logs[1].CreatedAt = time.Date(2026, 8, 13, 11, 0, 0, 0, time.UTC)
 
-	writeAuditSuccess(context.Background(), audit, "tenant_plan.create", map[string]any{
+	writeAuditSuccess(context.Background(), audit, auditResourceTenantPlan, "tenant_plan.create", map[string]any{
 		"plan_id": otherPlan.String(),
 		"code":    "other",
 	}, nil)
@@ -1848,7 +1858,7 @@ func TestTenantService_BindPlanQuota(t *testing.T) {
 		},
 	}
 	audit := &fakeAuditStore{}
-	svc := NewTenantService(plans, tenants, quota, audit)
+	svc := NewTenantService(plans, tenants, tenants, quota, audit)
 
 	res, err := svc.BindPlanQuota(context.Background(), &tenantv1.BindPlanQuotaRequest{
 		TenantId: tenantID.String(),
@@ -1892,7 +1902,7 @@ func Test_BindPlanQuota_PlanNotActive(t *testing.T) {
 	tenants := &fakeTenantClient{
 		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusActive, PlanID: uuid.New()},
 	}
-	svc := NewTenantService(plans, tenants, &fakeQuotaClient{}, &fakeAuditStore{})
+	svc := NewTenantService(plans, tenants, tenants, &fakeQuotaClient{}, &fakeAuditStore{})
 
 	_, err := svc.BindPlanQuota(context.Background(), &tenantv1.BindPlanQuotaRequest{
 		TenantId: tenantID.String(),
@@ -1912,7 +1922,7 @@ func Test_BindPlanQuota_DisabledTenant(t *testing.T) {
 	tenants := &fakeTenantClient{
 		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusDisabled, PlanID: uuid.New()},
 	}
-	svc := NewTenantService(plans, tenants, &fakeQuotaClient{}, &fakeAuditStore{})
+	svc := NewTenantService(plans, tenants, tenants, &fakeQuotaClient{}, &fakeAuditStore{})
 
 	_, err := svc.BindPlanQuota(context.Background(), &tenantv1.BindPlanQuotaRequest{
 		TenantId: tenantID.String(),
@@ -1948,7 +1958,7 @@ func Test_BindPlanQuota_AuditWriteErrorStillSucceeds(t *testing.T) {
 			return uuid.Nil, errors.New("db down")
 		},
 	}
-	svc := NewTenantService(plans, tenants, quota, audit)
+	svc := NewTenantService(plans, tenants, tenants, quota, audit)
 
 	res, err := svc.BindPlanQuota(context.Background(), &tenantv1.BindPlanQuotaRequest{
 		TenantId: tenantID.String(),
@@ -1992,7 +2002,7 @@ func Test_BindPlanQuota_CoreFailRollsBackPlanID(t *testing.T) {
 		},
 	}
 	audit := &fakeAuditStore{}
-	svc := NewTenantService(plans, tenants, quota, audit)
+	svc := NewTenantService(plans, tenants, tenants, quota, audit)
 
 	_, err := svc.BindPlanQuota(context.Background(), &tenantv1.BindPlanQuotaRequest{
 		TenantId: tenantID.String(),
@@ -2041,7 +2051,7 @@ func Test_BindPlanQuota_ApprovedSkip(t *testing.T) {
 		},
 	}
 	audit := &fakeAuditStore{}
-	svc := NewTenantService(plans, tenants, quota, audit)
+	svc := NewTenantService(plans, tenants, tenants, quota, audit)
 
 	_, err := svc.BindPlanQuota(context.Background(), &tenantv1.BindPlanQuotaRequest{
 		TenantId: tenantID.String(),

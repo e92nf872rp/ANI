@@ -48,6 +48,8 @@ type RegisterOptions struct {
 	QuotaAdminService       ports.QuotaAdminService
 	PlatformWorkloadService ports.PlatformWorkloadService
 	TenantService           ports.TenantService
+	TenantPlanService       ports.TenantPlanService
+	TenantAdminService      ports.TenantAdminService
 	// GPUSpecStore backs the GPU spec directory CRUD endpoints (POST/DELETE
 	// in gpu_spec_resources.go). When nil those handlers return 503.
 	GPUSpecStore ports.GPUSpecStore
@@ -79,7 +81,6 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 
 	v1 := h.Group("/api/v1")
 	registerBranding(v1)
-	registerTasksWithStore(v1, options.AsyncTaskStore)
 	registerAuth(v1)
 	registerMetering(v1, options.MeteringService)
 	registerHarbor(v1, options.ImageRegistry)
@@ -89,7 +90,10 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	if options.InstanceRuntime != nil && options.InstanceRuntime.TaskStore == nil {
 		options.InstanceRuntime.TaskStore = options.AsyncTaskStore
 	}
-	instanceLookup := registerInstancesWithRuntime(v1, options.InstanceObservability, options.InstanceObservabilityUsesInstanceName, options.GPUInventory, options.KubernetesRESTClient, options.SecretService, options.InstanceRuntime, options.GPUSpecStore)
+	instanceLookup, observeInstance := registerInstancesWithRuntime(v1, options.InstanceObservability, options.InstanceObservabilityUsesInstanceName, options.GPUInventory, options.KubernetesRESTClient, options.SecretService, options.InstanceRuntime, options.GPUSpecStore)
+	// Tasks register after instances so the lazy-sync observer (store read +
+	// single-instance Kubernetes refresh) is available for GET /tasks/{id}.
+	registerTasksWithStore(v1, options.AsyncTaskStore, observeInstance)
 	if promSvc, ok := options.ObservabilityService.(*runtimeadapter.PrometheusObservabilityService); ok {
 		promSvc.SetInstanceLookup(instanceLookup)
 	}
@@ -110,6 +114,8 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerQuotaResources(v1, options.QuotaAdminService, options.QuotaStoreService)
 	registerPlatformWorkloadResources(v1, options.PlatformWorkloadService, options.AsyncTaskStore)
 	registerAdminTenantResources(v1, options.TenantService)
+	registerAdminTenantAdminResources(v1, options.TenantAdminService)
+	registerAdminTenantPlanResources(v1, options.TenantPlanService)
 	// GPU spec directory CRUD (POST/DELETE) + reservation management +
 	// tenant self-query endpoints (SPEC §4.3).
 	registerGPUSpecResources(v1, options.GPUSpecStore, options.GPUInventory, options.GPUInstanceStore, options.MetadataStore)
@@ -131,6 +137,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerSandboxes(svc)
 	registerTenant(svc)
 	registerTenantPlans(svc)
+	registerTenantAdmins(svc)
 
 	// OpenAI-compatible inference proxy (separate URL prefix, no /api prefix)
 	h.Group("/v1").POST("/chat/completions", inferenceProxy)

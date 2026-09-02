@@ -26,13 +26,13 @@ const (
 	TenantAdminService_GetTenantAdminDetail_FullMethodName        = "/tenant.v1.TenantAdminService/GetTenantAdminDetail"
 	TenantAdminService_UpdateTenantAdminRole_FullMethodName       = "/tenant.v1.TenantAdminService/UpdateTenantAdminRole"
 	TenantAdminService_GetTenantAdminRole_FullMethodName          = "/tenant.v1.TenantAdminService/GetTenantAdminRole"
-	TenantAdminService_GetChangeableRoles_FullMethodName          = "/tenant.v1.TenantAdminService/GetChangeableRoles"
-	TenantAdminService_TransferTenantOwnership_FullMethodName     = "/tenant.v1.TenantAdminService/TransferTenantOwnership"
 	TenantAdminService_ResetTenantAdminPassword_FullMethodName    = "/tenant.v1.TenantAdminService/ResetTenantAdminPassword"
 	TenantAdminService_DisableTenantAdmin_FullMethodName          = "/tenant.v1.TenantAdminService/DisableTenantAdmin"
 	TenantAdminService_EnableTenantAdmin_FullMethodName           = "/tenant.v1.TenantAdminService/EnableTenantAdmin"
 	TenantAdminService_DeleteTenantAdmin_FullMethodName           = "/tenant.v1.TenantAdminService/DeleteTenantAdmin"
 	TenantAdminService_ListTenantAdminAuditLogs_FullMethodName    = "/tenant.v1.TenantAdminService/ListTenantAdminAuditLogs"
+	TenantAdminService_ListAvailableTenants_FullMethodName        = "/tenant.v1.TenantAdminService/ListAvailableTenants"
+	TenantAdminService_ListTenantRoles_FullMethodName             = "/tenant.v1.TenantAdminService/ListTenantRoles"
 )
 
 // TenantAdminServiceClient is the client API for TenantAdminService service.
@@ -44,18 +44,14 @@ type TenantAdminServiceClient interface {
 	// ResendTenantAdminInvitation regenerates token/expiry for inviting|expired invitations.
 	ResendTenantAdminInvitation(ctx context.Context, in *ResendTenantAdminInvitationRequest, opts ...grpc.CallOption) (*InvitationResult, error)
 	// ListAllTenantAdmins returns a cursor-paginated cross-tenant admin list
-	// (owner / admin / currently inviting only).
+	// (admin / currently inviting / expired invitations).
 	ListAllTenantAdmins(ctx context.Context, in *ListAllTenantAdminsRequest, opts ...grpc.CallOption) (*ListAllTenantAdminsResponse, error)
-	// GetTenantAdminDetail returns one admin (includes is_inviting, created_at, updated_at, tenant).
+	// GetTenantAdminDetail returns one admin (includes is_inviting, is_expired, created_at, updated_at, tenant).
 	GetTenantAdminDetail(ctx context.Context, in *GetTenantAdminDetailRequest, opts ...grpc.CallOption) (*AdminWithTenant, error)
 	// UpdateTenantAdminRole changes a member role (user / auditor / tenant-admin).
 	UpdateTenantAdminRole(ctx context.Context, in *UpdateTenantAdminRoleRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error)
-	// GetTenantAdminRole returns the four-dimension permission model for a tenant member.
+	// GetTenantAdminRole returns the role and permissions for a tenant member.
 	GetTenantAdminRole(ctx context.Context, in *GetTenantAdminRoleRequest, opts ...grpc.CallOption) (*UserPermissions, error)
-	// GetChangeableRoles returns selectable target roles (excludes tenant-owner).
-	GetChangeableRoles(ctx context.Context, in *GetChangeableRolesRequest, opts ...grpc.CallOption) (*GetChangeableRolesResponse, error)
-	// TransferTenantOwnership promotes a tenant-admin to owner and demotes the current owner.
-	TransferTenantOwnership(ctx context.Context, in *TransferTenantOwnershipRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error)
 	// ResetTenantAdminPassword resets a local-password admin (plaintext never logged).
 	ResetTenantAdminPassword(ctx context.Context, in *ResetTenantAdminPasswordRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error)
 	// DisableTenantAdmin sets users.status=disabled.
@@ -66,6 +62,10 @@ type TenantAdminServiceClient interface {
 	DeleteTenantAdmin(ctx context.Context, in *DeleteTenantAdminRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error)
 	// ListTenantAdminAuditLogs returns cursor-paginated tenant_admin.* audit rows.
 	ListTenantAdminAuditLogs(ctx context.Context, in *ListTenantAdminAuditLogsRequest, opts ...grpc.CallOption) (*ListTenantAdminAuditLogsResponse, error)
+	// ListAvailableTenants returns all non-disabled tenants for the invite-admin tenant selector.
+	ListAvailableTenants(ctx context.Context, in *ListAvailableTenantsRequest, opts ...grpc.CallOption) (*ListAvailableTenantsResponse, error)
+	// ListTenantRoles returns assignable roles for a tenant (excludes platform-* roles).
+	ListTenantRoles(ctx context.Context, in *ListTenantRolesRequest, opts ...grpc.CallOption) (*ListTenantRolesResponse, error)
 }
 
 type tenantAdminServiceClient struct {
@@ -130,24 +130,6 @@ func (c *tenantAdminServiceClient) GetTenantAdminRole(ctx context.Context, in *G
 	return out, nil
 }
 
-func (c *tenantAdminServiceClient) GetChangeableRoles(ctx context.Context, in *GetChangeableRolesRequest, opts ...grpc.CallOption) (*GetChangeableRolesResponse, error) {
-	out := new(GetChangeableRolesResponse)
-	err := c.cc.Invoke(ctx, TenantAdminService_GetChangeableRoles_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *tenantAdminServiceClient) TransferTenantOwnership(ctx context.Context, in *TransferTenantOwnershipRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error) {
-	out := new(v1.IdempotentResult)
-	err := c.cc.Invoke(ctx, TenantAdminService_TransferTenantOwnership_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *tenantAdminServiceClient) ResetTenantAdminPassword(ctx context.Context, in *ResetTenantAdminPasswordRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error) {
 	out := new(v1.IdempotentResult)
 	err := c.cc.Invoke(ctx, TenantAdminService_ResetTenantAdminPassword_FullMethodName, in, out, opts...)
@@ -193,6 +175,24 @@ func (c *tenantAdminServiceClient) ListTenantAdminAuditLogs(ctx context.Context,
 	return out, nil
 }
 
+func (c *tenantAdminServiceClient) ListAvailableTenants(ctx context.Context, in *ListAvailableTenantsRequest, opts ...grpc.CallOption) (*ListAvailableTenantsResponse, error) {
+	out := new(ListAvailableTenantsResponse)
+	err := c.cc.Invoke(ctx, TenantAdminService_ListAvailableTenants_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tenantAdminServiceClient) ListTenantRoles(ctx context.Context, in *ListTenantRolesRequest, opts ...grpc.CallOption) (*ListTenantRolesResponse, error) {
+	out := new(ListTenantRolesResponse)
+	err := c.cc.Invoke(ctx, TenantAdminService_ListTenantRoles_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TenantAdminServiceServer is the server API for TenantAdminService service.
 // All implementations must embed UnimplementedTenantAdminServiceServer
 // for forward compatibility
@@ -202,18 +202,14 @@ type TenantAdminServiceServer interface {
 	// ResendTenantAdminInvitation regenerates token/expiry for inviting|expired invitations.
 	ResendTenantAdminInvitation(context.Context, *ResendTenantAdminInvitationRequest) (*InvitationResult, error)
 	// ListAllTenantAdmins returns a cursor-paginated cross-tenant admin list
-	// (owner / admin / currently inviting only).
+	// (admin / currently inviting / expired invitations).
 	ListAllTenantAdmins(context.Context, *ListAllTenantAdminsRequest) (*ListAllTenantAdminsResponse, error)
-	// GetTenantAdminDetail returns one admin (includes is_inviting, created_at, updated_at, tenant).
+	// GetTenantAdminDetail returns one admin (includes is_inviting, is_expired, created_at, updated_at, tenant).
 	GetTenantAdminDetail(context.Context, *GetTenantAdminDetailRequest) (*AdminWithTenant, error)
 	// UpdateTenantAdminRole changes a member role (user / auditor / tenant-admin).
 	UpdateTenantAdminRole(context.Context, *UpdateTenantAdminRoleRequest) (*v1.IdempotentResult, error)
-	// GetTenantAdminRole returns the four-dimension permission model for a tenant member.
+	// GetTenantAdminRole returns the role and permissions for a tenant member.
 	GetTenantAdminRole(context.Context, *GetTenantAdminRoleRequest) (*UserPermissions, error)
-	// GetChangeableRoles returns selectable target roles (excludes tenant-owner).
-	GetChangeableRoles(context.Context, *GetChangeableRolesRequest) (*GetChangeableRolesResponse, error)
-	// TransferTenantOwnership promotes a tenant-admin to owner and demotes the current owner.
-	TransferTenantOwnership(context.Context, *TransferTenantOwnershipRequest) (*v1.IdempotentResult, error)
 	// ResetTenantAdminPassword resets a local-password admin (plaintext never logged).
 	ResetTenantAdminPassword(context.Context, *ResetTenantAdminPasswordRequest) (*v1.IdempotentResult, error)
 	// DisableTenantAdmin sets users.status=disabled.
@@ -224,6 +220,10 @@ type TenantAdminServiceServer interface {
 	DeleteTenantAdmin(context.Context, *DeleteTenantAdminRequest) (*v1.IdempotentResult, error)
 	// ListTenantAdminAuditLogs returns cursor-paginated tenant_admin.* audit rows.
 	ListTenantAdminAuditLogs(context.Context, *ListTenantAdminAuditLogsRequest) (*ListTenantAdminAuditLogsResponse, error)
+	// ListAvailableTenants returns all non-disabled tenants for the invite-admin tenant selector.
+	ListAvailableTenants(context.Context, *ListAvailableTenantsRequest) (*ListAvailableTenantsResponse, error)
+	// ListTenantRoles returns assignable roles for a tenant (excludes platform-* roles).
+	ListTenantRoles(context.Context, *ListTenantRolesRequest) (*ListTenantRolesResponse, error)
 	mustEmbedUnimplementedTenantAdminServiceServer()
 }
 
@@ -249,12 +249,6 @@ func (UnimplementedTenantAdminServiceServer) UpdateTenantAdminRole(context.Conte
 func (UnimplementedTenantAdminServiceServer) GetTenantAdminRole(context.Context, *GetTenantAdminRoleRequest) (*UserPermissions, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetTenantAdminRole not implemented")
 }
-func (UnimplementedTenantAdminServiceServer) GetChangeableRoles(context.Context, *GetChangeableRolesRequest) (*GetChangeableRolesResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetChangeableRoles not implemented")
-}
-func (UnimplementedTenantAdminServiceServer) TransferTenantOwnership(context.Context, *TransferTenantOwnershipRequest) (*v1.IdempotentResult, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method TransferTenantOwnership not implemented")
-}
 func (UnimplementedTenantAdminServiceServer) ResetTenantAdminPassword(context.Context, *ResetTenantAdminPasswordRequest) (*v1.IdempotentResult, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ResetTenantAdminPassword not implemented")
 }
@@ -269,6 +263,12 @@ func (UnimplementedTenantAdminServiceServer) DeleteTenantAdmin(context.Context, 
 }
 func (UnimplementedTenantAdminServiceServer) ListTenantAdminAuditLogs(context.Context, *ListTenantAdminAuditLogsRequest) (*ListTenantAdminAuditLogsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListTenantAdminAuditLogs not implemented")
+}
+func (UnimplementedTenantAdminServiceServer) ListAvailableTenants(context.Context, *ListAvailableTenantsRequest) (*ListAvailableTenantsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListAvailableTenants not implemented")
+}
+func (UnimplementedTenantAdminServiceServer) ListTenantRoles(context.Context, *ListTenantRolesRequest) (*ListTenantRolesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListTenantRoles not implemented")
 }
 func (UnimplementedTenantAdminServiceServer) mustEmbedUnimplementedTenantAdminServiceServer() {}
 
@@ -391,42 +391,6 @@ func _TenantAdminService_GetTenantAdminRole_Handler(srv interface{}, ctx context
 	return interceptor(ctx, in, info, handler)
 }
 
-func _TenantAdminService_GetChangeableRoles_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetChangeableRolesRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(TenantAdminServiceServer).GetChangeableRoles(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: TenantAdminService_GetChangeableRoles_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TenantAdminServiceServer).GetChangeableRoles(ctx, req.(*GetChangeableRolesRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _TenantAdminService_TransferTenantOwnership_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(TransferTenantOwnershipRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(TenantAdminServiceServer).TransferTenantOwnership(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: TenantAdminService_TransferTenantOwnership_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TenantAdminServiceServer).TransferTenantOwnership(ctx, req.(*TransferTenantOwnershipRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _TenantAdminService_ResetTenantAdminPassword_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ResetTenantAdminPasswordRequest)
 	if err := dec(in); err != nil {
@@ -517,6 +481,42 @@ func _TenantAdminService_ListTenantAdminAuditLogs_Handler(srv interface{}, ctx c
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TenantAdminService_ListAvailableTenants_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAvailableTenantsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantAdminServiceServer).ListAvailableTenants(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantAdminService_ListAvailableTenants_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantAdminServiceServer).ListAvailableTenants(ctx, req.(*ListAvailableTenantsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TenantAdminService_ListTenantRoles_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTenantRolesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantAdminServiceServer).ListTenantRoles(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantAdminService_ListTenantRoles_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantAdminServiceServer).ListTenantRoles(ctx, req.(*ListTenantRolesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TenantAdminService_ServiceDesc is the grpc.ServiceDesc for TenantAdminService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -549,14 +549,6 @@ var TenantAdminService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _TenantAdminService_GetTenantAdminRole_Handler,
 		},
 		{
-			MethodName: "GetChangeableRoles",
-			Handler:    _TenantAdminService_GetChangeableRoles_Handler,
-		},
-		{
-			MethodName: "TransferTenantOwnership",
-			Handler:    _TenantAdminService_TransferTenantOwnership_Handler,
-		},
-		{
 			MethodName: "ResetTenantAdminPassword",
 			Handler:    _TenantAdminService_ResetTenantAdminPassword_Handler,
 		},
@@ -575,6 +567,14 @@ var TenantAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListTenantAdminAuditLogs",
 			Handler:    _TenantAdminService_ListTenantAdminAuditLogs_Handler,
+		},
+		{
+			MethodName: "ListAvailableTenants",
+			Handler:    _TenantAdminService_ListAvailableTenants_Handler,
+		},
+		{
+			MethodName: "ListTenantRoles",
+			Handler:    _TenantAdminService_ListTenantRoles_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

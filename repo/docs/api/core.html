@@ -140,7 +140,7 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>233</dd></div>
+          <div><dt>Operations</dt><dd>235</dd></div>
           <div><dt>Schemas</dt><dd>317</dd></div>
         </dl>
       </section>
@@ -257,6 +257,14 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/admin/tenant-admins/available-tenants</code></td>
+          <td><code>listAvailableTenants</code></td>
+          <td>查询可用租户列表（邀请管理员选择器）</td>
+          <td><code>scope:users:read</code></td>
+          <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/admin/tenant-users</code></td>
           <td><code>listTenantUsers</code></td>
           <td>跨租户列出租户成员（默认 owner/admin）</td>
@@ -336,12 +344,12 @@
           <td>200, 401, 403, 404, 422</td>
         </tr>
         <tr>
-          <td><span class="method method-post">POST</span></td>
-          <td><code>/admin/tenants/{tenant_id}/transfer-ownership</code></td>
-          <td><code>transferCoreTenantOwnership</code></td>
-          <td>原子移交租户所有者</td>
-          <td><code>scope:users:write</code></td>
-          <td>200, 400, 401, 403, 404, 422</td>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/admin/tenants/{tenant_id}/roles</code></td>
+          <td><code>listAssignableTenantRoles</code></td>
+          <td>查询租户可分配角色列表</td>
+          <td><code>scope:users:read</code></td>
+          <td>200, 401, 403</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -352,26 +360,26 @@
           <td>200, 400, 401, 403, 404</td>
         </tr>
         <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/admin/tenants/{tenant_id}/users/batch</code></td>
+          <td><code>batchGetTenantUsers</code></td>
+          <td>批量查询租户内用户</td>
+          <td><code>scope:users:read</code></td>
+          <td>200, 400, 401, 403</td>
+        </tr>
+        <tr>
           <td><span class="method method-delete">DELETE</span></td>
           <td><code>/admin/tenants/{tenant_id}/users/{user_id}</code></td>
           <td><code>deleteTenantUser</code></td>
           <td>软删除租户成员（不幂等）</td>
           <td><code>scope:users:write</code></td>
-          <td>200, 401, 403, 404, 409, 422</td>
+          <td>200, 401, 403, 404</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
           <td><code>/admin/tenants/{tenant_id}/users/{user_id}</code></td>
           <td><code>getTenantUser</code></td>
           <td>查询租户成员详情</td>
-          <td><code>scope:users:read</code></td>
-          <td>200, 401, 403, 404</td>
-        </tr>
-        <tr>
-          <td><span class="method method-get">GET</span></td>
-          <td><code>/admin/tenants/{tenant_id}/users/{user_id}/changeable-roles</code></td>
-          <td><code>getTenantUserChangeableRoles</code></td>
-          <td>查询可变更角色选项（排除 tenant-owner）</td>
           <td><code>scope:users:read</code></td>
           <td>200, 401, 403, 404</td>
         </tr>
@@ -387,7 +395,7 @@
           <td><span class="method method-get">GET</span></td>
           <td><code>/admin/tenants/{tenant_id}/users/{user_id}/role</code></td>
           <td><code>getTenantUserRole</code></td>
-          <td>查询租户成员角色与 4 维权限</td>
+          <td>查询租户成员角色与权限</td>
           <td><code>scope:users:read</code></td>
           <td>200, 401, 403, 404</td>
         </tr>
@@ -397,7 +405,7 @@
           <td><code>updateTenantUserRole</code></td>
           <td>修改租户成员角色</td>
           <td><code>scope:users:write</code></td>
-          <td>200, 400, 401, 403, 404, 409, 422</td>
+          <td>200, 400, 401, 403, 404, 422</td>
         </tr>
         <tr>
           <td><span class="method method-post">POST</span></td>
@@ -405,7 +413,7 @@
           <td><code>updateTenantUserStatus</code></td>
           <td>启用或禁用租户成员</td>
           <td><code>scope:users:write</code></td>
-          <td>200, 400, 401, 403, 404, 422</td>
+          <td>200, 400, 401, 403, 404</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1825,11 +1833,19 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/tasks</code></td>
+          <td><code>listAsyncTasks</code></td>
+          <td>列出当前租户的异步任务</td>
+          <td><code>scope:tasks:read</code></td>
+          <td>200, 400, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/tasks/{task_id}</code></td>
-          <td><code>getTasksTaskId</code></td>
-          <td>查询异步任务状态</td>
-          <td><code></code></td>
-          <td>200, 404</td>
+          <td><code>getTask</code></td>
+          <td>查询单个异步任务</td>
+          <td><code>scope:tasks:read</code></td>
+          <td>200, 401, 403, 404</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -2031,6 +2047,8 @@
         <h2>Schemas</h2>
         <ul class="schema-list">
         <li><code>APIKeyInfo</code></li>
+        <li><code>AssignableTenantRole</code></li>
+        <li><code>AssignableTenantRoleList</code></li>
         <li><code>AsyncTask</code></li>
         <li><code>BeginOIDCLoginRequest</code></li>
         <li><code>BeginOIDCLoginResponse</code></li>
@@ -2038,8 +2056,6 @@
         <li><code>BucketObjectPresignedURLRequest</code></li>
         <li><code>BucketObjectUploadRequest</code></li>
         <li><code>BucketPrefixCreateRequest</code></li>
-        <li><code>ChangeableRoleOption</code></li>
-        <li><code>ChangeableRolesResponse</code></li>
         <li><code>CloneSandboxCheckpointRequest</code></li>
         <li><code>CompleteOIDCLoginRequest</code></li>
         <li><code>CoreDevProfileInfo</code></li>
@@ -2310,6 +2326,7 @@
         <li><code>StorageVolumeMountHistoryEntry</code></li>
         <li><code>StorageVolumeMountRequest</code></li>
         <li><code>StorageVolumeUnmountRequest</code></li>
+        <li><code>TaskListResponse</code></li>
         <li><code>Tenant</code></li>
         <li><code>TenantPlanUpdateRequest</code></li>
         <li><code>TenantSummary</code></li>
@@ -2327,7 +2344,6 @@
         <li><code>UserRoleUpdateRequest</code></li>
         <li><code>UserStatusUpdateRequest</code></li>
         <li><code>UserTenantRef</code></li>
-        <li><code>UserTransferOwnershipRequest</code></li>
         <li><code>VectorStore</code></li>
         <li><code>VectorStoreDeletePrecheck</code></li>
         <li><code>VectorStoreDocumentDeleteResponse</code></li>

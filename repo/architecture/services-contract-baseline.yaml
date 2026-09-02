@@ -275,9 +275,6 @@ exceptions:
   - operation_id: updateTenantAdminRole
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: transferTenantOwnership
-    rule: operation_security
-    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
   - operation_id: resetTenantAdminPassword
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
@@ -290,7 +287,10 @@ exceptions:
   - operation_id: listTenantAdminAuditLogs
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
-  - operation_id: getChangeableRoles
+  - operation_id: listAvailableTenantsForAdmin
+    rule: operation_security
+    reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
+  - operation_id: listTenantAssignableRoles
     rule: operation_security
     reason: 当前 Services OpenAPI 尚未声明顶层或操作级认证要求。
   - operation_id: createPlatformAdmin
