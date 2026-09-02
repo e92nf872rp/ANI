@@ -75,7 +75,7 @@ func (e *KubernetesLifecycleExecutor) Apply(ctx context.Context, request ports.W
 	if err != nil {
 		return ports.WorkloadInstanceLifecycleResult{}, err
 	}
-	if err := e.execute(ctx, request.Action, resource); err != nil {
+	if err := e.execute(ctx, request.Action, resource, replicasFromRequest(request.Replicas)); err != nil {
 		return ports.WorkloadInstanceLifecycleResult{}, err
 	}
 	return ports.WorkloadInstanceLifecycleResult{
@@ -105,7 +105,7 @@ func (e *KubernetesLifecycleExecutor) deleteResources(ctx context.Context, recor
 	return errors.Join(deleteErrors...)
 }
 
-func (e *KubernetesLifecycleExecutor) execute(ctx context.Context, action ports.WorkloadLifecycleAction, resource kubernetesResource) error {
+func (e *KubernetesLifecycleExecutor) execute(ctx context.Context, action ports.WorkloadLifecycleAction, resource kubernetesResource, replicas int) error {
 	switch action {
 	case ports.WorkloadLifecycleStart:
 		return e.start(ctx, resource)
@@ -115,9 +115,23 @@ func (e *KubernetesLifecycleExecutor) execute(ctx context.Context, action ports.
 		return e.restart(ctx, resource)
 	case ports.WorkloadLifecycleResize:
 		return e.restart(ctx, resource)
+	case ports.WorkloadLifecycleScale:
+		if replicas < 1 {
+			return fmt.Errorf("%w: scale replicas must be at least 1, got %d", ports.ErrInvalid, replicas)
+		}
+		return e.patchScale(ctx, resource, replicas)
 	default:
 		return fmt.Errorf("%w: unsupported Kubernetes lifecycle action %q", ports.ErrUnsupported, action)
 	}
+}
+
+// replicasFromRequest returns the target replica count carried on a lifecycle
+// request, 0 when unset so callers can validate before applying.
+func replicasFromRequest(replicas *int32) int {
+	if replicas == nil {
+		return 0
+	}
+	return int(*replicas)
 }
 
 func (e *KubernetesLifecycleExecutor) start(ctx context.Context, resource kubernetesResource) error {

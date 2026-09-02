@@ -164,7 +164,8 @@ func (s *meteringCollectionService) collectFullLifetime(ctx context.Context, spe
 	if elapsed <= 0 {
 		return nil, nil
 	}
-	period := time.Now().Format("2006-01-02T15:04")
+	// period 按 UTC 写入，与查询侧 to_char(... AT TIME ZONE 'UTC') 形成完整 UTC 契约。
+	period := time.Now().UTC().Format("2006-01-02T15:04")
 	elapsedSec := elapsed.Seconds()
 	var out []ports.MeteringUsageRecord
 	for _, dim := range spec.Dimensions {

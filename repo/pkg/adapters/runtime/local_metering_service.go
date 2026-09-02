@@ -76,6 +76,12 @@ func (s *LocalMeteringService) QueryUsage(_ context.Context, request ports.Meter
 	return ports.MeteringUsageResult{Items: items, DevProfile: meteringDevProfile()}, nil
 }
 
+// QueryPlatformUsage 平台查询在 local/dev 模式下返回空 items，
+// 不校验 TenantID（平台 token 可能无租户归属）。
+func (s *LocalMeteringService) QueryPlatformUsage(_ context.Context, _ ports.MeteringUsageQueryRequest) (ports.MeteringUsageResult, error) {
+	return ports.MeteringUsageResult{Items: []ports.MeteringUsageRecord{}, DevProfile: meteringDevProfile()}, nil
+}
+
 func (s *LocalMeteringService) ReportTokenUsage(_ context.Context, request ports.TokenUsageReportRequest) (ports.TokenUsageReportRecord, error) {
 	if strings.TrimSpace(request.TenantID) == "" {
 		return ports.TokenUsageReportRecord{}, fmt.Errorf("%w: tenant_id is required", ports.ErrInvalid)

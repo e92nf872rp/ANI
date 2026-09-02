@@ -105,6 +105,8 @@
 > **Sprint 14 计划与分支状态：** Sprint 14 Core 韧性与服务语义计划见 [`development-records/sprint14-core-resilience-plan.md`](development-records/sprint14-core-resilience-plan.md)（限流/幂等重放/超时/readyz/重试断路/降级/failover）。配套交付 Services 的前端加速设计：[`development-records/frontend-acceleration-design-for-services.md`](development-records/frontend-acceleration-design-for-services.md)。当前主线入口仍保留 Sprint 13 production-shaped 边界；`feature/sprint14-core-resilience-semantics` 已完成 Sprint14 aggregate live gate，待 PR/评审后再进入主线状态。
 > **Sprint 14 分支执行记录：** `feature/sprint14-core-resilience-semantics` 已完成 R-P0-0 gateway shared store 前置批次、R-P0-1 gateway rate limit、R-P0-2 gateway idempotency replay、R-P0-3 adapter per-call timeout、R-P0-4 data-plane readyz health、R-P1-5 retry/circuit-breaker foundation、R-P1-6 resilience degradation 与 R-P2-7 multi-endpoint failover config，见 [`development-records/r-p0-0-gateway-shared-store.md`](development-records/r-p0-0-gateway-shared-store.md)、[`development-records/r-p0-1-gateway-rate-limit.md`](development-records/r-p0-1-gateway-rate-limit.md)、[`development-records/r-p0-2-gateway-idempotency-replay.md`](development-records/r-p0-2-gateway-idempotency-replay.md)、[`development-records/r-p0-3-adapter-resilience-timeout.md`](development-records/r-p0-3-adapter-resilience-timeout.md)、[`development-records/r-p0-4-readyz-dataplane-health.md`](development-records/r-p0-4-readyz-dataplane-health.md)、[`development-records/r-p1-5-retry-circuit-breaker.md`](development-records/r-p1-5-retry-circuit-breaker.md)、[`development-records/r-p1-6-resilience-degradation.md`](development-records/r-p1-6-resilience-degradation.md)、[`development-records/r-p2-7-multi-endpoint-failover-config.md`](development-records/r-p2-7-multi-endpoint-failover-config.md)。R-P0-0..R-P2-7 单批次仍保持 local/logic verified 边界；其生产就绪结论由 `SPRINT14-CORE-RESILIENCE-LIVE-GATE` / `validate-sprint14-resilience-live-gate` / Sprint14 resilience live gate 补齐：已在 `ani-sprint14-resilience` 隔离 namespace 真实执行 P0 strong backend kill、P1 weak dependency degraded、P2 controller primary kill / follower failover，并归档脱敏 evidence。该 production-ready 范围仅限隔离 Sprint14 Core resilience fixture；不把现有 Sprint13 单副本后端或 full platform 标为 production ready。
 
+> **INSTANCE-NETWORK-STORE-READ-RLS-A（2026-08-27~09-01）：** live passed（K8s 测试环境 10.10.1.66）。GPU 容器实例创建引用 VPC NOT_FOUND 的三层根因修复：`NetworkResourceStore` 补读方法 + `LocalNetworkService` 穿透读 + Gateway 注入 store；迁移 `20260828_001` 修复实例链路 8 张表 RESTRICTIVE-only RLS；`WORKLOAD_PROVIDER_APPLY_ENABLED=true` 接线。验证止于实例 201 → provisioning → Volcano 排队（GPU 容量问题非代码）；不外推 GPU runtime ready / production ready。批次记录见 [`development-records/instance-network-store-read-rls-a.md`](development-records/instance-network-store-read-rls-a.md)。
+
 ## 当前冲刺
 
 | 字段 | 值 |
@@ -436,6 +438,7 @@ git diff --check
 | #003 | Consumer handleEvent + seenSeq 两阶段锁（11 测试）+ Rebuilder WithPlatformTx 绕过 RLS（8 测试）+ main.go bootstrap | ✅ 已完成 | `pr-m3-metering-consumer.md` |
 | #004 | 9 集成测试场景（事件驱动/保底/幂等/rebuild/seenSeq 乱序/失败重投/租户 mismatch/poison/DB UNIQUE）9/9 PASS | ✅ 已完成 | `pr-m4-metering-consumer.md` |
 | #005 | 部署清单 metering-service-live-deps.yaml + Live Gate 4 缺陷修复 + NATS 事件验证 | ✅ 已完成 | `pr-m5-metering-consumer.md` |
+| #006 | 计量查询 PG adapter（V3 方案）：ports 扩展 + PgMeteringService（租户 RLS / 平台 BYPASSRLS）+ Gateway METERING_PROVIDER_MODE 装配 + 平台查询 handler + pilot 鉴权接入 + 前端同步 | ✅ 已完成 | `pr-m6-metering-query-pg-adapter.md` |
 
 Live Gate 修复详情（2026-08-14，真实 K8s 集群部署后）：
 
@@ -508,6 +511,10 @@ git diff --check
 - **cursor 分页 blocked-by-core**：`listInstanceEvents` 和 `listInstanceSecurityEvents` query 缺 `cursor` 入参（response 有 `next_cursor`），遵守契约不发明字段，降级为一次性加载
 - **后端 WebSocket exec 服务端未实现**：SPEC §11.2 已知边界，归后续 Core 批次
 - **Issue #011 lazy re-observe**：非终态实例在 Get/List 时触发 K8s 状态同步，避免引入后台 controller
+
+### 热修复：实例运行时信息回填（INSTANCE-RUNTIME-HYDRATE-A，2026-09-01）
+
+> 前端反馈 GPU 容器实例列表/详情缺节点、私网 IP、访问端点、终端。Gateway `instances.go` 修复：节点字段错位（`refreshOneStoreStatus` 补回填 `Compute.NodeName`）、从 Pod 回读 PodIP 填 `Network.PrivateIP`/`Endpoint`/`Endpoints`、运行态 container/gpu_container 置 `Access.ExecAvailable=true`；`get` 详情处理器接入 `refreshOneStoreStatus`。已在 10.10.1.66 live passed（镜像 `ani-gateway:dev-20260901`）：运行中 GPU 容器实例 `test-gpu-inst-create` 列表/详情一致回填 dev-phys-02 / 10.60.0.3 / exec_available=true；`go test ./services/ani-gateway/...` + `make validate-architecture` 通过。批次详情见 `repo/development-records/instance-runtime-hydrate-a.md`。
 
 ## Instance Observability Completion 增量补全（2026-07，PR4 分支）
 

@@ -428,3 +428,130 @@ func TestQuotaMetaDevFallsBackToLegacy(t *testing.T) {
 		t.Fatalf("RPC calls = %+v, want %+v", gotCalls, wantCalls)
 	}
 }
+
+// ── 计量平台查询 V2 契约用例（getPlatformMeteringUsage 契约即开关） ──
+//
+// getPlatformMeteringUsage 已通过 v1.yaml x-ani-authz 切为 generated，
+// 按契约直通 V2（无需任何 policy env / allowlist）。
+
+// newMeteringV2Gateway 构造带 metering 路由的契约即开关 gateway。
+// 平台路由 /api/v1/metering/usage/platform 命中 generated 链路；
+// 租户路由 /api/v1/metering/usage 保持 legacy。
+func newMeteringV2Gateway(t *testing.T, behavior fakeAuthBehavior) (*server.Hertz, *fakePilotAuthClient) {
+	t.Helper()
+	t.Setenv("ANI_AUTH_MODE", "auth_service")
+
+	fake := &fakePilotAuthClient{behavior: behavior}
+	h := server.New()
+	h.Use(
+		RequestID(),
+		ResolveAuthzPolicy(authz.CoreRegistry(), authz.Config{AuthMode: "auth_service"}),
+		AuthenticatePrincipal(fake),
+		AuthorizePrincipal(fake),
+	)
+	h.GET("/api/v1/metering/usage/platform", func(ctx context.Context, c *app.RequestContext) {
+		c.JSON(http.StatusOK, map[string]any{"ok": true})
+	})
+	h.GET("/api/v1/metering/usage", func(ctx context.Context, c *app.RequestContext) {
+		c.JSON(http.StatusOK, map[string]any{"ok": true})
+	})
+	return h, fake
+}
+
+func TestMeteringPlatformV2AllowsPlatformAdmin(t *testing.T) {
+	gateway, fake := newMeteringV2Gateway(t, fakeAuthBehavior{Allowed: true})
+	response := doGET(t, gateway, "/api/v1/metering/usage/platform", platformAdmin().headers())
+	if response.StatusCode() != http.StatusOK {
+		t.Fatalf("got %d, want 200", response.StatusCode())
+	}
+	wantCalls := authRPCCallCounts{ValidatePrincipal: 1, CheckPermissionV2: 1}
+	if gotCalls := countCalls(fake); gotCalls != wantCalls {
+		t.Fatalf("RPC calls = %+v, want %+v", gotCalls, wantCalls)
+	}
+}
+
+func TestMeteringPlatformV2RejectsTenantDomain(t *testing.T) {
+	gateway, fake := newMeteringV2Gateway(t, fakeAuthBehavior{Allowed: true})
+	response := doGET(t, gateway, "/api/v1/metering/usage/platform", tenantUser().headers())
+	if response.StatusCode() != http.StatusForbidden {
+		t.Fatalf("got %d, want 403", response.StatusCode())
+	}
+	// tenant domain 主体在策略复核（DomainAllowsBoundary）阶段被拒，
+	// 不进入 CheckPermissionV2 权限查询。
+	wantCalls := authRPCCallCounts{ValidatePrincipal: 1}
+	if gotCalls := countCalls(fake); gotCalls != wantCalls {
+		t.Fatalf("RPC calls = %+v, want %+v", gotCalls, wantCalls)
+	}
+}
+
+func TestMeteringPlatformV2RejectsAPIKey(t *testing.T) {
+	gateway, fake := newMeteringV2Gateway(t, fakeAuthBehavior{Allowed: true})
+	response := doGET(t, gateway, "/api/v1/metering/usage/platform", tenantAPIKey().headers())
+	if response.StatusCode() != http.StatusForbidden {
+		t.Fatalf("got %d, want 403", response.StatusCode())
+	}
+	wantCalls := authRPCCallCounts{ValidatePrincipal: 1}
+	if gotCalls := countCalls(fake); gotCalls != wantCalls {
+		t.Fatalf("RPC calls = %+v, want %+v", gotCalls, wantCalls)
+	}
+}
+
+func TestMeteringPlatformV2RejectsMissingCredential(t *testing.T) {
+	gateway, fake := newMeteringV2Gateway(t, fakeAuthBehavior{Allowed: true})
+	response := doGET(t, gateway, "/api/v1/metering/usage/platform", none().headers())
+	if response.StatusCode() != http.StatusUnauthorized {
+		t.Fatalf("got %d, want 401", response.StatusCode())
+	}
+	if gotCalls := countCalls(fake); gotCalls != (authRPCCallCounts{}) {
+		t.Fatalf("RPC calls = %+v, want zero", gotCalls)
+	}
+}
+
+func TestMeteringPlatformV2FailsClosedWhenAuthServiceUnavailable(t *testing.T) {
+	gateway, fake := newMeteringV2Gateway(t, fakeAuthBehavior{
+		ErrorStage: authRPCErrorValidate,
+		Err:        status.Error(codes.Unavailable, "down"),
+	})
+	response := doGET(t, gateway, "/api/v1/metering/usage/platform", platformAdmin().headers())
+	if response.StatusCode() != http.StatusServiceUnavailable {
+		t.Fatalf("got %d, want 503", response.StatusCode())
+	}
+	// V2 deny/error 不回退 legacy：legacy RPC 调用次数为 0。
+	wantCalls := authRPCCallCounts{ValidatePrincipal: 1}
+	if gotCalls := countCalls(fake); gotCalls != wantCalls {
+		t.Fatalf("RPC calls = %+v, want %+v", gotCalls, wantCalls)
+	}
+}
+
+func TestMeteringTenantRoutesStayLegacy(t *testing.T) {
+	t.Setenv("ANI_AUTH_MODE", "auth_service")
+
+	fake := &fakePilotAuthClient{
+		behavior: fakeAuthBehavior{Allowed: true},
+		legacyTenant: &commonv1.TenantContext{
+			TenantId: quotaMetaTenantID,
+			UserId:   quotaMetaUserID,
+			Roles:    []string{"tenant-admin"},
+			Scope:    "tenant",
+		},
+	}
+	h := server.New()
+	h.Use(
+		RequestID(),
+		ResolveAuthzPolicy(authz.CoreRegistry(), authz.Config{AuthMode: "auth_service"}),
+		AuthenticatePrincipal(fake),
+		AuthorizePrincipal(fake),
+	)
+	h.GET("/api/v1/metering/usage", func(ctx context.Context, c *app.RequestContext) {
+		c.JSON(http.StatusOK, map[string]any{"ok": true})
+	})
+
+	response := doGET(t, h, "/api/v1/metering/usage", tenantUser().headers())
+	if response.StatusCode() != http.StatusOK {
+		t.Fatalf("got %d, want 200", response.StatusCode())
+	}
+	wantCalls := authRPCCallCounts{ValidateToken: 1, CheckPermission: 1}
+	if gotCalls := countCalls(fake); gotCalls != wantCalls {
+		t.Fatalf("RPC calls = %+v, want %+v (legacy chain)", gotCalls, wantCalls)
+	}
+}

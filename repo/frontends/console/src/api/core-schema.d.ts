@@ -2130,7 +2130,6 @@ export interface paths {
          * @description 在平台 RBAC 上下文中查询全平台或指定租户的用量数据。
          *     需 scope:metering:platform:read 权限。
          *     items[].tenant_id 在此端点下必填。
-         *     若带 tenant_id query 须二次 RBAC 校验。
          */
         get: operations["getPlatformMeteringUsage"];
         put?: never;
@@ -11742,7 +11741,7 @@ export interface operations {
                 start_time: string;
                 end_time: string;
                 resource_type?: string;
-                group_by?: "resource_type" | "az" | "day" | "hour";
+                group_by?: "resource_type" | "day" | "hour";
             };
             header?: never;
             path?: never;
@@ -11771,6 +11770,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     getPlatformMeteringUsage: {
@@ -11780,7 +11780,7 @@ export interface operations {
                 end_time: string;
                 resource_type?: string;
                 group_by?: "tenant_id" | "day" | "hour";
-                /** @description 可选筛选单租户，须平台 RBAC 校验 */
+                /** @description 可选筛选单租户 */
                 tenant_id?: string;
             };
             header?: never;
@@ -11801,6 +11801,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     reportTokenUsage: {

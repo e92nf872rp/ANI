@@ -1,6 +1,7 @@
 import { createFileRoute, Link, Outlet, redirect, useNavigate } from '@tanstack/react-router'
 import { Button, Layout, Menu, MessagePlugin } from 'tdesign-react'
 import {
+  ChartIcon,
   CpuIcon,
   DashboardIcon,
   RootListIcon,
@@ -89,6 +90,32 @@ function AuthenticatedLayout() {
             <Menu.SubMenu value="tenant" title="租户管理" icon={<UsergroupIcon />}>
               <Menu.MenuItem value="tenant-quotas" icon={<RootListIcon />}>
                 <Link to="/tenants/quotas">配额策略</Link>
+              </Menu.MenuItem>
+              <Menu.MenuItem value="tenant-usage-billing">
+                <Link to="/tenant/usage-billing">租户计费与用量</Link>
+              </Menu.MenuItem>
+            </Menu.SubMenu>
+            <Menu.SubMenu value="metering" title="平台计量与结算" icon={<ChartIcon />}>
+              <Menu.MenuItem value="metering-gpu-hours">
+                <Link to="/metering/gpu-hours">平台 GPU-Hours</Link>
+              </Menu.MenuItem>
+              <Menu.MenuItem value="metering-cpu-hours">
+                <Link to="/metering/cpu-hours">平台 CPU-Hours</Link>
+              </Menu.MenuItem>
+              <Menu.MenuItem value="metering-memory-gbhours">
+                <Link to="/metering/memory-gbhours">平台 Memory-GBHours</Link>
+              </Menu.MenuItem>
+              <Menu.MenuItem value="metering-input-tokens">
+                <Link to="/metering/input-tokens">平台 Input Tokens</Link>
+              </Menu.MenuItem>
+              <Menu.MenuItem value="metering-output-tokens">
+                <Link to="/metering/output-tokens">平台 Output Tokens</Link>
+              </Menu.MenuItem>
+              <Menu.MenuItem value="metering-storage-gbdays">
+                <Link to="/metering/storage-gbdays">平台 Storage-GBDays</Link>
+              </Menu.MenuItem>
+              <Menu.MenuItem value="metering-kb-queries">
+                <Link to="/metering/kb-queries">平台 KB Queries</Link>
               </Menu.MenuItem>
             </Menu.SubMenu>
             <Menu.MenuItem value="settings" icon={<SettingIcon />}>

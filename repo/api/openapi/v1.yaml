@@ -7946,7 +7946,7 @@ paths:
         - { name: start_time, in: query, required: true, schema: { type: string, format: date-time } }
         - { name: end_time,   in: query, required: true, schema: { type: string, format: date-time } }
         - { name: resource_type, in: query, schema: { type: string } }
-        - { name: group_by, in: query, schema: { type: string, enum: [resource_type, az, day, hour] } }
+        - { name: group_by, in: query, schema: { type: string, enum: [resource_type, day, hour] } }
       responses:
         "200":
           description: 租户用量统计
@@ -7969,24 +7969,30 @@ paths:
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
 
   /metering/usage/platform:
     get:
       operationId: getPlatformMeteringUsage
       x-ani-rbac-scope: "scope:metering:platform:read"
+      x-ani-authz:
+        version: v1
+        resource: metering
+        action: read
+        boundary: platform
+        principal_kinds: [user]
       summary: 查询平台跨租户用量
       description: |
         在平台 RBAC 上下文中查询全平台或指定租户的用量数据。
         需 scope:metering:platform:read 权限。
         items[].tenant_id 在此端点下必填。
-        若带 tenant_id query 须二次 RBAC 校验。
       tags: [Metering]
       parameters:
         - { name: start_time, in: query, required: true, schema: { type: string, format: date-time } }
         - { name: end_time,   in: query, required: true, schema: { type: string, format: date-time } }
         - { name: resource_type, in: query, schema: { type: string } }
         - { name: group_by, in: query, schema: { type: string, enum: [tenant_id, day, hour] } }
-        - { name: tenant_id, in: query, required: false, schema: { type: string }, description: "可选筛选单租户，须平台 RBAC 校验" }
+        - { name: tenant_id, in: query, required: false, schema: { type: string, format: uuid }, description: "可选筛选单租户" }
       responses:
         "200":
           description: 平台用量查询成功
@@ -7997,6 +8003,7 @@ paths:
         "400": { $ref: '#/components/responses/BadRequest' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
 
   /metering/token-usage:
     post:

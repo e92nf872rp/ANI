@@ -48,10 +48,13 @@ func main() {
 		logger.Error("failed to configure kubernetes rest client for orphan discovery", "err", err)
 		os.Exit(1)
 	}
-	networkService, err := newGatewayNetworkService(gatewayNetworkRuntimeConfigFromEnv())
+	networkService, closeNetworkRuntime, err := newGatewayNetworkService(runtimeCtx, gatewayNetworkRuntimeConfigFromEnv())
 	if err != nil {
 		logger.Error("failed to configure network provider runtime", "err", err)
 		os.Exit(1)
+	}
+	if closeNetworkRuntime != nil {
+		defer closeNetworkRuntime()
 	}
 	storageRuntimeCfg := gatewayStorageRuntimeConfigFromEnv()
 	storageService, closeStorageRuntime, err := newGatewayStorageService(runtimeCtx, storageRuntimeCfg)
@@ -216,6 +219,14 @@ func main() {
 		os.Exit(1)
 	}
 	defer closeQuotaStore()
+	meteringService, closeMeteringRuntime, err := newGatewayMeteringService(runtimeCtx)
+	if err != nil {
+		logger.Error("failed to configure metering service", "err", err)
+		os.Exit(1)
+	}
+	if closeMeteringRuntime != nil {
+		defer closeMeteringRuntime()
+	}
 	platformWorkloadRuntimeConfig := gatewayPlatformWorkloadRuntimeConfigFromEnv()
 	platformWorkloadService, closePlatformWorkload, err := newGatewayPlatformWorkloadService(runtimeCtx, platformWorkloadRuntimeConfig)
 	if err != nil {
@@ -293,6 +304,7 @@ func main() {
 		GPUSpecStore:                          gpuSpecStore,
 		MetadataStore:                         quotaMetadataStore,
 		QuotaStoreService:                     quotaStoreService,
+		MeteringService:                       meteringService,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

@@ -137,6 +137,7 @@
 | PR-M3-METERING-CONSUMER | Consumer + handleEvent + seenSeq 两阶段锁（成功后推进 high-watermark，Nak 重投不丢消息）+ safeLog nil-safe logger（11 测试 PASS）；Rebuilder + WithPlatformTx 绕过 RLS + 查询 workload_instances WHERE state='running' + gpu_status JSONB 解析 + count++ 无条件（8 测试 PASS）；main.go bootstrap：MustConnect→Rebuild→Subscribe→ctx.Done + HandleEvent 导出适配器 + metering.CollectAll 注入 + signal.NotifyContext + DeliverAllPolicy via durable consumer default | pr-m3-metering-consumer.md |
 | PR-M4-METERING-CONSUMER | 9 个集成测试场景：事件驱动采集、stop+保底采集、幂等 no-op、rebuild+DeliverAll、seenSeq 乱序、seenSeq 失败重投、租户 mismatch Nak、poison message Ack、DB UNIQUE 兜底（1214 行；fallbackCollector 包装 real+mock Prometheus；filteredMetaStore 测试实例过滤；shortIntervalSvc 2s；`//go:build integration` tag；9/9 PASS in 25.359s） | pr-m4-metering-consumer.md |
 | PR-M5-METERING-CONSUMER | 部署清单 metering-service-live-deps.yaml（ServiceAccount + Deployment replicas:1 + Service 9210 + secret 创建命令注释）+ Live Gate 4 个阻断缺陷修复：① PromQL pod 匹配失败→CollectionSpec 新增 WorkloadName 字段用 K8s 资源名做正则匹配；② CPU 多副本只取第一个 pod→查询加外层 sum() 聚合；③ 写入错误 schema→ALTER ROLE SET search_path TO public；④ RLS 阻止写入→persistRecords 用 SET ROLE ani_metering_writer 绕过 RLS + GRANT ani_metering_writer TO ani_app_user + migration 同步补充；NATS 事件监听验证通过（nats-box 发布测试事件确认 Subscribe→handleEvent→StartCollection 链路正常） | pr-m5-metering-consumer.md |
+| PR-M6-METERING-QUERY-PG-ADAPTER | 计量查询 PG adapter（V3 方案）：ports 扩展（`QueryPlatformUsage` + `PlatformTenantID`）+ `PgMeteringService`（租户 `WithTenantTx` 依赖 RLS / 平台 `WithPlatformTx` + `SET LOCAL ROLE ani_metering_writer` BYPASSRLS 跨租户聚合）+ 固定输出列 + period `to_char AT TIME ZONE 'UTC'` 字符串比较 + `ReportTokenUsage` 委托 LocalMeteringService + Gateway `METERING_PROVIDER_MODE` 装配（postgres 模式 Ping 失败阻止启动不静默降级）+ 平台查询 handler `queryPlatformUsage`（503 METERING_UNAVAILABLE 映射）+ `getPlatformMeteringUsage` 加入 pilot allowlist + 生成物重生成 + 写入侧 period 统一 UTC + 前端 group_by 移除 az；11 单测 + 8 handler 测试 + pilot 鉴权矩阵 + 真实 PG 集成 + 浏览器 E2E 全通过；4 commit 在 `feat/metering-query-interface-v2` 分支本地待 push | pr-m6-metering-query-pg-adapter.md |
 
 ### Storage Control Plane State（2026-08）
 
@@ -149,6 +150,13 @@
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
 | STORAGE-ASYNC-CORRECTNESS-A | live passed：保持 Core v1 Vector 文档写入 `202` 自定义响应，补齐 `Location` 和 `vector_store.document.insert`；任务落 PG，Gateway rollout 后原 task ID 仍可查询；Milvus 临时夹具已清理；evidence `live-evidence/storage-async-vector-task-live-20260803.json` | storage-async-correctness-a.md |
+
+### Instance Network Store Read-Through + RLS（2026-08）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-NETWORK-STORE-READ-RLS-A | live passed（10.10.1.66）：GPU 容器实例创建引用 VPC NOT_FOUND 三层根因修复——`NetworkResourceStore` 补 5 个读方法（端口+PG SELECT 实现，WithTenantTx）、`LocalNetworkService` Get/List 穿透读、Gateway 有 `DATABASE_URL` 时注入 store；迁移 `20260828_001` 把实例链路 8 张表 RESTRICTIVE-only policy 替换为 PERMISSIVE 双策略（对齐 `20260825_001`）；`WORKLOAD_PROVIDER=kubernetes_rest` + `WORKLOAD_PROVIDER_APPLY_ENABLED=true` 接线。验证：VPC/Subnet 创建落库、实例 201 → provisioning → Volcano 排队（容量问题非代码）；不外推 GPU runtime ready / production ready | instance-network-store-read-rls-a.md |
+| INSTANCE-RUNTIME-HYDRATE-A | live passed（10.10.1.66，镜像 dev-20260901）：GPU 容器实例列表/详情缺节点/私网IP/访问端点/终端——修复 `refreshOneStoreStatus` 节点字段错位（回填 `Compute.NodeName`）、回读 PodIP 填 `Network.PrivateIP`/`Endpoint`/`Endpoints`、运行态 container/gpu_container 置 `Access.ExecAvailable=true`；`get` 详情处理器接入刷新；新增 2 个 httptest 单测；真实 running 实例 `test-gpu-inst-create` 列表/详情均回填 dev-phys-02 / 10.60.0.3 / exec_available=true；`go test` + `make validate-architecture` 通过 | instance-runtime-hydrate-a.md |
 
 ### Instance Sandbox 无状态化（2026-08）
 
