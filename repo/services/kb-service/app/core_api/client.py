@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
+import os
 
 
 class CoreAPIError(Exception):
@@ -59,6 +60,11 @@ class CoreClient:
         headers = {"X-Tenant-Id": tenant_id, "Accept": "application/json"}
         if auth_token:
             headers["Authorization"] = f"Bearer {auth_token}"
+        # Dev mode: forward X-Dev-Tenant-ID so the gateway's dev auth middleware
+        # uses the correct tenant for object storage lookups.
+        dev_tenant_id = os.environ.get("ANI_DEV_TENANT_ID", "")
+        if dev_tenant_id:
+            headers["X-Dev-Tenant-ID"] = dev_tenant_id
         if client is not None:
             # Merge tenant headers into the injected client (used for testing
             # with MockTransport so the caller doesn't have to set them).
@@ -200,6 +206,104 @@ class CoreClient:
         if resp.status_code != 200:
             raise _to_error(resp, "getStorageObject")
         return resp.json()
+
+    # ── vector-stores documents (Plan §3.3 — insert / search / upload) ───────
+
+    async def insert_vector_documents(
+        self,
+        *,
+        vector_store_id: str,
+        documents: list[dict[str, Any]],
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        """POST /vector-stores/{id}/documents — insert pre-computed vectors.
+
+        body: {idempotency_key, documents: [{id, content, vector, metadata}]}
+        The `vector` field is the pre-computed embedding (computed by
+        rag-engine Embed RPC); Core stores it directly without embedding
+        (Plan §2.2 / Core API §1.4).
+        """
+        body = {
+            "idempotency_key": idempotency_key,
+            "documents": documents,
+        }
+        resp = await self._client.post(
+            f"/vector-stores/{vector_store_id}/documents", json=body
+        )
+        # Core API returns 202 Accepted (async insert: returns task_id +
+        # Location polling header, VectorStoreDocumentInsertResponse).
+        if resp.status_code != 202:
+            raise _to_error(resp, "insertVectorStoreDocuments")
+        return resp.json()
+
+    async def search_vector_store(
+        self,
+        *,
+        vector_store_id: str,
+        vector: list[float],
+        top_k: int = 10,
+        filter_expr: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """POST /vector-stores/{id}/search — vector search returning content.
+
+        Sends the pre-computed query vector (from rag-engine Embed RPC).
+        Returns the `items` list; each item has {id, score, content, metadata}
+        (Core API §1.4 added the `content` field so kb-service avoids a second
+        PG round-trip).
+        """
+        body: dict[str, Any] = {"vector": vector, "top_k": top_k}
+        if filter_expr:
+            body["filter"] = filter_expr
+        resp = await self._client.post(
+            f"/vector-stores/{vector_store_id}/search", json=body
+        )
+        if resp.status_code != 200:
+            raise _to_error(resp, "searchVectorStore")
+        data = resp.json()
+        return data.get("items", [])
+
+    async def upload_object(
+        self,
+        *,
+        bucket_id: str,
+        key: str,
+        content_bytes: bytes,
+        content_type: str | None = None,
+        idempotency_key: str,
+    ) -> str:
+        """Two-step object upload (Plan §3.3).
+
+        1. POST /objects/upload → {upload_url, object_id} (presigned PUT URL).
+        2. PUT {upload_url} body=content_bytes → upload to object storage.
+
+        Returns the object_id. The PUT goes to the presigned URL (not the Core
+        base URL), so it uses a standalone httpx.AsyncClient without tenant
+        headers.
+        """
+        pre = await self.request_upload_url(
+            bucket_id=bucket_id,
+            key=key,
+            content_type=content_type,
+            idempotency_key=idempotency_key,
+        )
+        upload_url = pre.get("upload_url") or pre.get("uploadUrl")
+        object_id = pre.get("object_id") or pre.get("objectId")
+        if not upload_url or not object_id:
+            raise CoreAPIError(
+                "uploadStorageObject: missing upload_url/object_id in response",
+                status_code=200,
+            )
+        headers: dict[str, str] = {}
+        if content_type:
+            headers["Content-Type"] = content_type
+        async with httpx.AsyncClient(timeout=60.0) as put_client:
+            put_resp = await put_client.put(upload_url, content=content_bytes, headers=headers)
+        if put_resp.status_code not in (200, 204):
+            raise CoreAPIError(
+                f"uploadObject PUT failed: HTTP {put_resp.status_code}",
+                status_code=put_resp.status_code,
+            )
+        return object_id
 
 
 def _to_error(resp: httpx.Response, op: str) -> CoreAPIError:

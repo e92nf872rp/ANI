@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -50,6 +51,11 @@ type KBGRPCClient interface {
 	ListDocuments(ctx context.Context, tenantID string, kbID string, parseStatus string, limit int32, cursor string) (*kbv1.ListDocumentsResponse, error)
 	DeleteDocument(ctx context.Context, tenantID string, kbID string, docID string) (*emptypb.Empty, error)
 	Query(ctx context.Context, tenantID string, kbID string, idempotencyKey string, req *kbv1.QueryRequest) (*kbv1.QueryResponse, error)
+	// Retrieve opens a server-streaming Retrieve RPC (Plan §10.2, issue-038).
+	// Returns a stream the caller iterates to receive RetrieveEvent messages
+	// (token* → sources → done). The caller owns the stream lifecycle and must
+	// read until EOF or error. The context controls the per-call deadline.
+	Retrieve(ctx context.Context, tenantID string, kbID string, req *kbv1.RetrieveRequest) (kbv1.KBService_RetrieveClient, error)
 	ListKBCitations(ctx context.Context, tenantID string, kbID string, limit int32, cursor string) (*kbv1.ListKBCitationsResponse, error)
 	ListKBSessions(ctx context.Context, tenantID string, kbID string, limit int32, cursor string) (*kbv1.ListKBSessionsResponse, error)
 	UpdateKBPermissions(ctx context.Context, tenantID string, kbID string, idempotencyKey string, req *kbv1.UpdateKBPermissionsRequest) (*kbv1.KnowledgeBase, error)
@@ -184,10 +190,73 @@ func (c *kbGRPCClient) Query(ctx context.Context, tenantID, kbID, idempotencyKey
 	req.IdempotencyKey = idempotencyKey
 	// Query performs an LLM RAG call downstream (kb-service → rag-engine), so
 	// it needs a longer budget than the generic 5s per-RPC timeout (SPEC §5.1).
-	// Match rag-engine REST/SSE timeout (RagEngineTimeout = 30s).
+	// queryRPCTimeout (120s) covers the full retrieve → LLM generate chain.
 	queryCtx, cancel := context.WithTimeout(ctx, queryRPCTimeout)
 	defer cancel()
 	return c.client.Query(queryCtx, req)
+}
+
+// Retrieve opens a server-streaming Retrieve RPC to kb-service (Plan §10.2,
+// issue-038). The caller iterates the returned stream to receive RetrieveEvent
+// messages (token* → sources → done). The per-call timeout uses queryRPCTimeout
+// (120s) because Retrieve triggers an LLM generation downstream, matching the
+// Query RPC budget. The caller must read the stream to completion (EOF or error)
+// and is responsible for cancelling the context on client disconnect.
+func (c *kbGRPCClient) Retrieve(ctx context.Context, tenantID, kbID string, req *kbv1.RetrieveRequest) (kbv1.KBService_RetrieveClient, error) {
+	if req == nil {
+		req = &kbv1.RetrieveRequest{}
+	}
+	req.TenantId = tenantID
+	req.KbId = kbID
+	// Retrieve streams tokens from an LLM downstream, so it needs the same
+	// long budget as Query (120s). The stream stays open for the duration
+	// of generation; the caller's context handles client-disconnect cancel.
+	retrieveCtx, cancel := context.WithTimeout(ctx, queryRPCTimeout)
+	stream, err := c.client.Retrieve(retrieveCtx, req)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	// Wrap the stream so CloseSend also cancels the timeout context,
+	// preventing a leaked timer if the caller abandons the stream early.
+	return &retrieveStreamWrapper{stream: stream, cancel: cancel}, nil
+}
+
+// retrieveStreamWrapper wraps KBService_RetrieveClient to cancel the per-call
+// context when the caller closes the stream (or it reaches EOF). This prevents
+// a leaked timeout timer if the caller stops reading before the stream ends.
+type retrieveStreamWrapper struct {
+	stream kbv1.KBService_RetrieveClient
+	cancel context.CancelFunc
+}
+
+func (w *retrieveStreamWrapper) Recv() (*kbv1.RetrieveEvent, error) {
+	ev, err := w.stream.Recv()
+	if err != nil {
+		w.cancel()
+	}
+	return ev, err
+}
+
+func (w *retrieveStreamWrapper) Header() (metadata.MD, error) { return w.stream.Header() }
+func (w *retrieveStreamWrapper) Trailer() metadata.MD         { return w.stream.Trailer() }
+func (w *retrieveStreamWrapper) CloseSend() error {
+	err := w.stream.CloseSend()
+	w.cancel()
+	return err
+}
+
+func (w *retrieveStreamWrapper) Context() context.Context { return w.stream.Context() }
+func (w *retrieveStreamWrapper) SendMsg(m interface{}) error {
+	return w.stream.SendMsg(m)
+}
+
+func (w *retrieveStreamWrapper) RecvMsg(m interface{}) error {
+	err := w.stream.RecvMsg(m)
+	if err != nil {
+		w.cancel()
+	}
+	return err
 }
 
 func (c *kbGRPCClient) ListKBCitations(ctx context.Context, tenantID, kbID string, limit int32, cursor string) (*kbv1.ListKBCitationsResponse, error) {
@@ -290,125 +359,6 @@ func writeKBError(c *app.RequestContext, err error) {
 		ke = mapGRPCError(err)
 	}
 	writeInstanceError(c, ke.httpStatus, ke.code, ke.message)
-}
-
-// ── rag-engine retrieval client (SSE handler dependency) ─────────────────────
-//
-// The SSE handler (kb_sse.go) needs to call rag-engine for hybrid retrieval to
-// obtain the SourceChunk list before streaming tokens from vLLM (SPEC §5.1
-// SSE handler algorithm steps 3-4). rag-engine exposes both a gRPC Query RPC
-// (rag.proto) and a REST endpoint (POST /api/v1/kb/{kb_id}/query). Since the
-// rag-engine proto is not part of the buf.gen module (it lives in
-// ai/rag-engine/app/grpc/rag.proto outside api/proto), the gateway calls the
-// REST endpoint instead of generating a Go gRPC client. This keeps the
-// SSE handler's dependencies within the gateway code boundary and avoids a
-// cross-team proto generation step.
-//
-// The message shapes mirror kb_service.proto QueryRequest/QueryResponse so the
-// gateway can switch to gRPC later without changing the handler.
-
-// RagEngineClient performs synchronous RAG retrieval against rag-engine.
-// The SSE handler uses it to fetch sources before constructing the vLLM
-// prompt (SPEC §5.1 step 3). When nil the SSE handler degrades to a
-// well-formed empty stream (sources=[] + done) so the gateway stays up.
-type RagEngineClient interface {
-	Query(ctx context.Context, req *ragQueryRequest) (*ragQueryResponse, error)
-}
-
-// ragQueryRequest mirrors kb_service.proto QueryRequest / rag.proto
-// QueryRequest so the gateway can switch transports later.
-type ragQueryRequest struct {
-	TenantID             string  `json:"tenant_id"`
-	KbID                 string  `json:"kb_id"`
-	Question             string  `json:"question"`
-	SessionID            string  `json:"session_id,omitempty"`
-	IdempotencyKey       string  `json:"idempotency_key,omitempty"`
-	TopK                 int32   `json:"top_k,omitempty"`
-	ScoreThreshold       float32 `json:"score_threshold,omitempty"`
-	InferenceServiceName string  `json:"inference_service_name,omitempty"`
-}
-
-// ragSourceChunk mirrors kb_service.proto SourceChunk.
-type ragSourceChunk struct {
-	DocID    string  `json:"doc_id"`
-	FileName string  `json:"file_name"`
-	Page     int32   `json:"page"`
-	Content  string  `json:"content"`
-	Score    float32 `json:"score"`
-}
-
-// ragQueryResponse mirrors kb_service.proto QueryResponse. The SSE handler
-// uses sources + session_id from retrieval; the answer field is ignored
-// because the handler streams its own answer from vLLM (SPEC §5.1 steps 5-6).
-type ragQueryResponse struct {
-	Answer       string           `json:"answer"`
-	Sources      []ragSourceChunk `json:"sources"`
-	SessionID    string           `json:"session_id"`
-	InputTokens  int32            `json:"input_tokens"`
-	OutputTokens int32            `json:"output_tokens"`
-}
-
-// ragEngineHTTPClient is the production implementation backed by rag-engine
-// REST API (POST {base}/api/v1/kb/{kb_id}/query). A per-call timeout is
-// applied via the http.Client.Timeout so a slow rag-engine cannot
-// indefinitely hold the SSE handler goroutine (SPEC §5.1 "同步检索").
-type ragEngineHTTPClient struct {
-	baseURL    string
-	httpClient *http.Client
-}
-
-// NewRagEngineHTTPClient creates a REST client for rag-engine retrieval.
-// baseURL is the rag-engine root (e.g. "http://rag-engine:8001"); the client
-// appends /api/v1/kb/{kb_id}/query. timeout defaults to 30s for retrieval.
-func NewRagEngineHTTPClient(baseURL string, timeout time.Duration) RagEngineClient {
-	if timeout <= 0 {
-		timeout = 30 * time.Second
-	}
-	return &ragEngineHTTPClient{
-		baseURL:    strings.TrimRight(baseURL, "/"),
-		httpClient: &http.Client{Timeout: timeout},
-	}
-}
-
-func (c *ragEngineHTTPClient) Query(ctx context.Context, req *ragQueryRequest) (*ragQueryResponse, error) {
-	if c == nil || c.baseURL == "" {
-		return nil, fmt.Errorf("rag-engine base URL not configured")
-	}
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("encode rag-engine request: %w", err)
-	}
-	url := fmt.Sprintf("%s/api/v1/kb/%s/query", c.baseURL, req.KbID)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("build rag-engine request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("rag-engine request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, &ragEngineError{status: resp.StatusCode, body: string(raw)}
-	}
-	var result ragQueryResponse
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 10<<20)).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode rag-engine response: %w", err)
-	}
-	return &result, nil
-}
-
-// ragEngineError carries the rag-engine HTTP status so the SSE handler can
-// map it to the appropriate SSE error code (SPEC §4.3 错误处理).
-type ragEngineError struct {
-	status int
-	body   string
-}
-
-func (e *ragEngineError) Error() string {
-	return fmt.Sprintf("rag-engine returned %d: %s", e.status, e.body)
 }
 
 // ── vLLM streaming client (SSE handler dependency) ───────────────────────────

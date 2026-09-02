@@ -94,3 +94,39 @@ class SessionCache:
             except (json.JSONDecodeError, TypeError):
                 continue
         return out
+
+    async def list_recent_messages(
+        self, *, session_id: str, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        """Read the most recent `limit` session messages in chronological order.
+
+        Uses ``LRANGE key -limit -1`` to take the newest N entries (matching
+        the legacy LlamaIndex ``ChatMemoryBuffer`` token_limit behavior of
+        keeping the most recent messages, NOT the oldest N). Plan step 8A.
+
+        The returned list is in chronological order (oldest-first among the
+        selected window) so callers can pass it directly as chat history to
+        the Generate RPC.
+
+        Best-effort: on Redis failure, returns an empty list so the caller
+        can fall back to kb_messages DB history.
+        """
+        try:
+            key = _session_key(session_id)
+            # LRANGE with negative start: -limit .. -1 takes the last N
+            # elements. Redis returns them in index order (oldest-first
+            # within the window), which is the chronological order we want.
+            start = -limit
+            raw = await self._redis.lrange(key, start, -1)
+        except Exception as e:  # noqa: BLE001 — best-effort cache
+            logger.warning("session cache read failed (falling back to DB): %s", e)
+            return []
+        out: list[dict[str, Any]] = []
+        for item in raw:
+            try:
+                if isinstance(item, (bytes, bytearray)):
+                    item = item.decode("utf-8")
+                out.append(json.loads(item))
+            except (json.JSONDecodeError, TypeError):
+                continue
+        return out

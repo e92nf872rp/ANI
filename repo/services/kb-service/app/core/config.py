@@ -21,14 +21,26 @@ class Settings(BaseSettings):
     ani_gateway_internal_url: str = "http://ani-gateway.ani-system.svc.cluster.local:8080"
     core_api_base_path: str = "/api/v1"
 
-    # rag-engine REST (Query). kb-service calls rag-engine's Query RPC over
-    # REST (POST /api/v1/kb/{kb_id}/query), so this must point at the
-    # rag-engine HTTP server (spec §2.1). Default: rag-engine REST on 8001.
-    rag_engine_addr: str = "localhost:8001"
+    # rag-engine gRPC (Parse/Embed/Generate). Plan §3.4: the stateless
+    # RPCs are accessed via gRPC (default localhost:50052).
+    rag_engine_grpc_addr: str = "localhost:50052"
 
     # NATS (outbox dispatch) — maps to env NATS_URL
     nats_url: str = "nats://localhost:4222"
     nats_parse_subject: str = "ani.tasks.kb.parse"
+    # Plan §0.3 / step 6: new v2 subject consumed by the kb-service
+    # NATS consumer (app/consumers/parse_consumer.py). The legacy subject
+    # ``nats_parse_subject`` is kept unchanged for the rag-engine parse_worker
+    # path; the Outbox Dispatcher switches between the two via
+    # ``kb_parse_consumer_enabled``.
+    nats_parse_subject_v2: str = "ani.tasks.kb.parse.v2"
+
+    # Plan step 6: kb-service NATS consumer flag (default OFF).
+    # When False, the consumer does not start and the Outbox Dispatcher
+    # publishes to the legacy subject (rag-engine parse_worker path).
+    # When True, the consumer starts and the Outbox Dispatcher publishes
+    # to ``nats_parse_subject_v2`` (kb-service consumer path).
+    kb_parse_consumer_enabled: bool = False
 
     # Redis (session cache) — maps to env REDIS_URL
     redis_url: str = "redis://localhost:6379/0"

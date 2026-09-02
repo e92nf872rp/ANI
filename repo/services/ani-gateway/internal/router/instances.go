@@ -20,6 +20,7 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/route"
+	"github.com/google/uuid"
 	registryadapter "github.com/kubercloud/ani/pkg/adapters/registry"
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
@@ -774,10 +775,14 @@ func newInstanceAPIWithObservability(observability ports.InstanceObservability, 
 }
 
 func registerInstancesWithObservability(v1 *route.RouterGroup, observability ports.InstanceObservability, useInstanceName bool, gpuInventory ports.GPUInventory, k8sClient *runtimeadapter.KubernetesRESTClient) ports.WorkloadInstanceService {
-	return registerInstancesWithRuntime(v1, observability, useInstanceName, gpuInventory, k8sClient, nil, nil, nil)
+	service, _ := registerInstancesWithRuntime(v1, observability, useInstanceName, gpuInventory, k8sClient, nil, nil, nil)
+	return service
 }
 
-func registerInstancesWithRuntime(v1 *route.RouterGroup, observability ports.InstanceObservability, useInstanceName bool, gpuInventory ports.GPUInventory, k8sClient *runtimeadapter.KubernetesRESTClient, secrets ports.SecretService, runtime *InstanceRuntime, specStore ports.GPUSpecStore) ports.WorkloadInstanceService {
+// registerInstancesWithRuntime registers the instance routes and returns the
+// instance service (used as InstanceLookup by the observability proxy) plus
+// the shared observeInstance entry used by the task API lazy sync.
+func registerInstancesWithRuntime(v1 *route.RouterGroup, observability ports.InstanceObservability, useInstanceName bool, gpuInventory ports.GPUInventory, k8sClient *runtimeadapter.KubernetesRESTClient, secrets ports.SecretService, runtime *InstanceRuntime, specStore ports.GPUSpecStore) (ports.WorkloadInstanceService, instanceObserver) {
 	api := newInstanceAPIWithObservability(observability, useInstanceName, gpuInventory, k8sClient, secrets, specStore)
 	if runtime != nil {
 		if runtime.Service == nil || runtime.Store == nil || runtime.Operations == nil {
@@ -824,7 +829,7 @@ func registerInstancesWithRuntime(v1 *route.RouterGroup, observability ports.Ins
 	v1.POST("/demo/instances/:instance_id/console", api.console)
 	v1.POST("/demo/instances/:instance_id/console/exec", api.consoleExec)
 	v1.GET("/instance-operations/:operation_id", api.getOperation)
-	return api.service
+	return api.service, api.observeInstance
 }
 
 func (api *instanceAPI) create(ctx context.Context, c *app.RequestContext) {
@@ -852,6 +857,15 @@ func (api *instanceAPI) create(ctx context.Context, c *app.RequestContext) {
 	if err != nil {
 		writeInstanceCreateError(c, err)
 		return
+	}
+	if strings.HasPrefix(result.Ref.InstanceID, "pending:") {
+		// In-progress idempotent replay: the ref is "pending:<operation-id>",
+		// so the instance ID is not resolvable here and no task can be bound
+		// to a resource yet. The completed-replay retry below repairs the
+		// audit record with the real instance ID.
+		log.Printf("[TASK-AUDIT] skip instance.create write for in-progress replay (instance id unresolved): idempotency_key=%s", req.IdempotencyKey)
+	} else {
+		api.writeAuditTask(ctx, instanceTenantID(c), instanceProgressTask("instance.create", result.Ref.InstanceID, string(spec.Kind), spec.Name, string(result.FinalStatus.State), req.IdempotencyKey))
 	}
 	if result.IdempotentReplay && strings.HasPrefix(result.Ref.InstanceID, "pending:") {
 		c.JSON(http.StatusConflict, map[string]any{
@@ -919,7 +933,7 @@ func (api *instanceAPI) refreshStoreStatuses(ctx context.Context, tenantID strin
 // the same Deployment GET + phase mapping as orphan discovery so the phase
 // semantics stay consistent.
 func (api *instanceAPI) refreshOneStoreStatus(ctx context.Context, record *ports.WorkloadInstanceRecord) {
-	if record == nil || record.Name == "" || record.Provider != "kubernetes" {
+	if api.k8sClient == nil || record == nil || record.Name == "" || record.Provider != "kubernetes" {
 		return
 	}
 	if record.Status.State == ports.WorkloadStateDeleting || record.Status.State == ports.WorkloadStateDeleted {
@@ -1052,6 +1066,75 @@ func (api *instanceAPI) refreshOneStoreStatus(ctx context.Context, record *ports
 	record.Status.UpdatedAt = time.Now().UTC()
 	record.UpdatedAt = record.Status.UpdatedAt
 	_ = api.store.UpsertStatus(ctx, *record)
+}
+
+// observeInstance is the lazy-sync observation entry shared with the task
+// API: a store read followed by a single-instance Kubernetes refresh. A pure
+// service.Get reads the stored snapshot only, so without the refresh the
+// task progress would never advance for instances whose list endpoint was
+// never called.
+func (api *instanceAPI) observeInstance(ctx context.Context, tenantID, instanceID string) (ports.WorkloadInstanceRecord, error) {
+	record, err := api.service.Get(ctx, ports.WorkloadInstanceGetRequest{
+		TenantID:   tenantID,
+		InstanceID: instanceID,
+	})
+	if err != nil {
+		return ports.WorkloadInstanceRecord{}, err
+	}
+	api.refreshOneStoreStatus(ctx, &record)
+	return record, nil
+}
+
+// writeAuditTask persists an instance task as a side effect: it never
+// rewrites the main response. storageWriteAcceptedTask is not reused because
+// it also rewrites the response (500 on persist failure, 202 + Location on
+// success) for the storage domain; instance responses keep their
+// 201/200/409 contract even when the task store hiccups.
+func (api *instanceAPI) writeAuditTask(ctx context.Context, tenantID string, task ports.AsyncTaskRecord) {
+	if api.tasks == nil {
+		return
+	}
+	task.TenantID = tenantID
+	if _, _, err := api.tasks.Create(ctx, task); err != nil {
+		log.Printf("[TASK-AUDIT] write failed: task_type=%s err=%v", task.TaskType, err)
+	}
+}
+
+// instanceProgressTask builds a running instance task record: the operation
+// has been accepted by the runtime and is converging, so running/10 is the
+// honest snapshot at write time. storageCompletedTask is not reused: it
+// hardcodes status=completed/progress=100 acceptance-audit semantics.
+func instanceProgressTask(taskType, instanceID, kind, name, state, idempotencyKey string) ports.AsyncTaskRecord {
+	return ports.AsyncTaskRecord{
+		IdempotencyKey: idempotencyKey,
+		TaskType:       taskType,
+		ResourceType:   "instance",
+		ResourceID:     instanceResourceID(instanceID),
+		Status:         "running",
+		ProgressPct:    10,
+		Result: map[string]any{
+			"instance_id": instanceID,
+			"kind":        kind,
+			"name":        name,
+			"state":       state,
+		},
+		MaxAttempts:  1,
+		AttemptCount: 1,
+		CreatedAt:    time.Now().UTC(),
+	}
+}
+
+// instanceResourceID extracts the UUID part of an "inst_<uuid>" instance ID
+// for the UUID-typed async_tasks.resource_id column (contract format: uuid).
+// The full instance ID is preserved in result.instance_id for lazy-sync
+// lookups; the same convention as the reconcile controller's outbox
+// aggregate_id handling.
+func instanceResourceID(instanceID string) string {
+	raw := strings.TrimPrefix(instanceID, "inst_")
+	if _, err := uuid.Parse(raw); err != nil {
+		return ""
+	}
+	return raw
 }
 
 // mapProviderPhaseToState mirrors the status_reconciler mapping for the
@@ -1642,6 +1725,17 @@ func (api *instanceAPI) lifecycle(ctx context.Context, c *app.RequestContext) {
 	if err != nil {
 		writeInstanceError(c, instanceLifecycleErrorStatus(err), instanceLifecycleErrorCode(err), err.Error())
 		return
+	}
+	// Task write point for the four instance lifecycle actions with task
+	// records: placed after the error check (covering both the first-switch
+	// success and the orphan-import retry success) and before the response,
+	// so every successful path is audited exactly once.
+	switch strings.ToLower(strings.TrimSpace(req.Action)) {
+	case "start", "stop", "restart", "delete":
+		action := strings.ToLower(strings.TrimSpace(req.Action))
+		task := instanceProgressTask("instance."+action, record.InstanceID, string(record.Kind), record.Name, string(record.Status.State), req.IdempotencyKey)
+		task.Result["action"] = action
+		api.writeAuditTask(ctx, instanceTenantID(c), task)
 	}
 	c.JSON(http.StatusOK, instanceLifecycleResponse{
 		Instance:    api.instanceResponseFromRecord(record),

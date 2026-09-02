@@ -124,6 +124,9 @@ func (f *fakeKBClient) UpdateKBPermissions(_ context.Context, tenantID, kbID, id
 	f.lastIDemKey = idem
 	return f.permissionsResp, f.permissionsErr
 }
+func (f *fakeKBClient) Retrieve(_ context.Context, _ string, _ string, _ *kbv1.RetrieveRequest) (kbv1.KBService_RetrieveClient, error) {
+	return nil, status.Error(codes.Unimplemented, "fakeKBClient.Retrieve not implemented")
+}
 
 // setupKBTestServer builds a gateway with the KB routes registered under
 // /api/v1/svc using the injected client. A RequestID middleware + dev tenant

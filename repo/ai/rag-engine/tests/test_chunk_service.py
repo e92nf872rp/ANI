@@ -160,11 +160,11 @@ def test_split_text_min_threshold_cuts_at_sentence_boundary():
         assert _estimate_tokens(c) <= CHILD_CHUNK_SIZE
 
 
-def test_split_text_min_threshold_default_is_128():
-    """The default chunk_min equals CHILD_CHUNK_MIN (128)."""
+def test_split_text_min_threshold_default_is_64():
+    """The default chunk_min equals CHILD_CHUNK_MIN (64)."""
     sp = _PureSentenceSplitter(CHILD_CHUNK_SIZE)
     assert sp._chunk_min == CHILD_CHUNK_MIN
-    assert CHILD_CHUNK_MIN == 128
+    assert CHILD_CHUNK_MIN == 64
 
 
 def test_split_text_min_threshold_no_cut_below_min():
@@ -242,13 +242,14 @@ def test_segment_nodes_section_change_without_heading():
     assert segs[1].section_path == "S2", "second segment must carry S2, not stale S1"
 
 
-def test_segment_nodes_image_atomic():
+def test_segment_nodes_image_flows_into_text():
+    """Image nodes are NOT atomic — they flow into surrounding text segments."""
     nodes = [
         ParsedNode(content="[图片: x](url)", content_type="image", metadata={"sub_type": "image", "section_path": ""}),
     ]
     segs = _segment_nodes(nodes)
     assert len(segs) == 1
-    assert segs[0].kind == "atomic"
+    assert segs[0].kind == "text"
 
 
 def test_segment_nodes_code_atomic():
@@ -302,12 +303,13 @@ def test_chunk_table_is_atomic_child():
     assert len(children) >= 1
 
 
-def test_chunk_image_is_atomic_child():
+def test_chunk_image_flows_into_text_child():
+    """Image nodes are NOT atomic — they become text child chunks."""
     svc = ChunkService()
     nodes = [_image_node("[图片: x](http://u)")]
     _, children = svc.chunk(nodes)
     assert len(children) == 1
-    assert children[0].content_type == "image"
+    assert children[0].content_type == "text"
 
 
 def test_chunk_link_not_split():
@@ -416,9 +418,9 @@ def test_chunk_child_token_count_within_size_or_oversized_unit():
     nodes = [_text_node("段落内容足够长以触发分块。" * 200, section="S1")]
     _, children = svc.chunk(nodes)
     for c in children:
-        # Child either fits in chunk_size or is an indivisible unit (table/image/code/link).
+        # Child either fits in chunk_size or is an indivisible unit (table/code/link).
         if c.token_count > CHILD_CHUNK_SIZE:
-            assert c.content_type in ("table", "image", "code")
+            assert c.content_type in ("table", "code")
 
 
 # ── ChunkService validation ───────────────────────────────────────────────────
@@ -443,8 +445,9 @@ def test_chunk_service_accepts_valid_range():
 # ── splitter fallback ─────────────────────────────────────────────────────────
 
 
-def test_make_default_splitter_returns_pure_when_llamaindex_missing():
-    # In the test env SentenceSplitter is a MagicMock → probe fails → fallback.
+def test_make_default_splitter_always_returns_pure():
+    # _make_default_splitter always returns _PureSentenceSplitter because
+    # LlamaIndex's SentenceSplitter does not support chunk_min.
     sp = _make_default_splitter(CHILD_CHUNK_SIZE)
     assert isinstance(sp, _PureSentenceSplitter)
 

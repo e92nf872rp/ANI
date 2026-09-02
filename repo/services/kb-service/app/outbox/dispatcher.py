@@ -41,6 +41,11 @@ DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 # persistent DB/NATS outage doesn't flood logs with a traceback every second.
 MAX_BACKOFF_INTERVAL_SECONDS = 30.0
 MAX_BACKOFF_MULTIPLIER = 30  # cap at 30x the base poll interval (30s @ 1s base)
+# Per-event NATS publish timeout: nats.publish awaits a server PUB ack window
+# on a possibly-dead TCP connection (no keepalive by default on Windows), so
+# an unbounded await can hang the whole dispatch loop forever. Bounded waits
+# turn that into a normal failure → backoff → retry (at-least-once, safe).
+DEFAULT_PUBLISH_TIMEOUT_SECONDS = 10.0
 
 
 class OutboxDispatcher:
@@ -61,12 +66,14 @@ class OutboxDispatcher:
         subject: str = "ani.tasks.kb.parse",
         batch_size: int = DEFAULT_BATCH_SIZE,
         poll_interval: float = DEFAULT_POLL_INTERVAL_SECONDS,
+        publish_timeout: float = DEFAULT_PUBLISH_TIMEOUT_SECONDS,
     ) -> None:
         self._pool = pool
         self._nats = nats_client
         self._subject = subject
         self._batch_size = batch_size
         self._poll_interval = poll_interval
+        self._publish_timeout = publish_timeout
         self._task: asyncio.Task | None = None
         self._stopped = False
         # Backoff state for persistent-error log dedup.
@@ -160,9 +167,25 @@ class OutboxDispatcher:
             if "tenant_id" not in payload_dict and row.get("tenant_id"):
                 payload_dict["tenant_id"] = str(row["tenant_id"])
             payload_str = json.dumps(payload_dict, default=str)
-            await self._nats.publish(self._subject, payload_str.encode("utf-8"))
+            # Bounded publish: a dead NATS TCP connection must not hang the
+            # loop forever. On timeout the event stays un-dispatched and is
+            # retried on the next poll (at-least-once semantics preserved).
+            await asyncio.wait_for(
+                self._nats.publish(
+                    self._subject, payload_str.encode("utf-8")
+                ),
+                timeout=self._publish_timeout,
+            )
             published_ids.append(event_id)
         # Batch-mark all published events in one UPDATE on one connection.
         async with self._pool.acquire() as conn:
             await outbox_repo.mark_dispatched_batch(conn, event_ids=published_ids)
+        # Heartbeat: one INFO line per productive iteration. If the loop is
+        # ever suspected of hanging again, the timestamp gap between two
+        # consecutive lines localizes exactly when the last successful
+        # iteration ran (an idle-but-healthy loop logs nothing by design).
+        logger.info(
+            "outbox dispatch: published %d event(s) (ids=%s)",
+            len(published_ids), published_ids,
+        )
         return len(published_ids)

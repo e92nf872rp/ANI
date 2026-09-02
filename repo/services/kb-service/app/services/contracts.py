@@ -12,7 +12,7 @@ References:
 - Plan step 5 (ParseOrchestrator)
 - Plan step 8A (QueryOrchestrator)
 - Plan §3.3 (CoreClient)
-- Plan §3.4 (RagEngineClient / RagEngineGRPCClient)
+- Plan §3.4 (RagEngineGRPCClient)
 - CLAUDE.md §4.1 (API contract first, then implementation)
 """
 from __future__ import annotations
@@ -56,9 +56,7 @@ class QueryResult:
 class RagEngineClientProtocol(Protocol):
     """Abstract gRPC client surface for rag-engine Parse/Embed/Generate(Stream).
 
-    The concrete RagEngineGRPCClient is implemented in issue-030 (STEP-3
-    feature). The legacy REST RagEngineClient (app/rag_engine/client.py) does
-    NOT satisfy this protocol — it only exposes `query()`.
+    The concrete RagEngineGRPCClient is implemented in app/rag_engine/client.py.
     """
 
     async def parse(
@@ -443,5 +441,29 @@ class QueryOrchestratorProtocol(Protocol):
         Returns:
             QueryResult dataclass (answer, sources, session_id, input_tokens,
             output_tokens).
+        """
+        ...
+
+    async def query_stream(
+        self,
+        *,
+        tenant_id: str,
+        kb_id: str,
+        question: str,
+        session_id: str,
+        top_k: int,
+        score_threshold: float,
+        retrieval_mode: str,
+        inference_service_name: str,
+        vector_store_id: str,
+        history: list[dict[str, str]],
+    ) -> AsyncIterator[Any]:
+        """Streaming RAG query — async generator (issue-038: Retrieve RPC).
+
+        Same gate logic as ``query()`` but yields typed stream events
+        (StreamTokenEvent, StreamSourcesEvent, StreamDoneEvent,
+        StreamNoResultEvent) so the Retrieve gRPC handler can map them
+        directly to ``RetrieveEvent`` proto messages without duplicating
+        the three-gate logic.
         """
         ...

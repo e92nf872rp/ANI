@@ -184,6 +184,101 @@ async def test_publish_uses_subject_from_settings():
     assert nats.published[0][0] == "ani.tasks.kb.parse"
 
 
+# ── Issue 037: v2 subject switch + rollback ─────────────────────────────────
+
+
+def test_config_v2_subject_and_flag_defaults():
+    """Issue 037: nats_parse_subject_v2 differs from legacy subject and the
+    consumer flag defaults to False (rollback / pre-switch state)."""
+    from app.core.config import Settings
+
+    s = Settings()
+    assert s.nats_parse_subject == "ani.tasks.kb.parse"
+    assert s.nats_parse_subject_v2 == "ani.tasks.kb.parse.v2"
+    assert s.nats_parse_subject_v2 != s.nats_parse_subject
+    assert s.kb_parse_consumer_enabled is False
+
+
+@pytest.mark.asyncio
+async def test_dispatch_publishes_to_v2_subject_when_flag_enabled():
+    """Issue 037 / Plan step 9: when kb_parse_consumer_enabled=True the
+    Outbox Dispatcher is constructed with nats_parse_subject_v2 and publishes
+    to ``ani.tasks.kb.parse.v2`` (consumed by the kb-service parse consumer),
+    NOT the legacy subject."""
+    from app.core.config import Settings
+
+    s = Settings()
+    # Simulate the flag-on wiring done in main.py (lines 202-206):
+    #   outbox_subject = v2 if flag else legacy
+    outbox_subject = (
+        s.nats_parse_subject_v2 if True else s.nats_parse_subject
+    )
+    rows = [_make_event(1), _make_event(2)]
+    pool = _MockPool(rows=rows)
+    nats = _MockNATS()
+    dispatcher = OutboxDispatcher(
+        pool=pool, nats_client=nats, subject=outbox_subject
+    )
+    await dispatcher._dispatch_once()
+    assert len(nats.published) == 2
+    assert all(
+        subject == "ani.tasks.kb.parse.v2" for subject, _ in nats.published
+    )
+    # None of the events should go to the legacy subject.
+    assert all(
+        subject != "ani.tasks.kb.parse" for subject, _ in nats.published
+    )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_publishes_to_legacy_subject_when_flag_disabled():
+    """Issue 037 rollback path: when kb_parse_consumer_enabled=False the
+    Outbox Dispatcher publishes to the legacy subject
+    ``ani.tasks.kb.parse`` (consumed by rag-engine parse_worker). This is
+    the pre-switch and rollback state."""
+    from app.core.config import Settings
+
+    s = Settings()
+    # Simulate the flag-off wiring done in main.py (lines 202-206):
+    outbox_subject = (
+        s.nats_parse_subject_v2 if False else s.nats_parse_subject
+    )
+    rows = [_make_event(1)]
+    pool = _MockPool(rows=rows)
+    nats = _MockNATS()
+    dispatcher = OutboxDispatcher(
+        pool=pool, nats_client=nats, subject=outbox_subject
+    )
+    await dispatcher._dispatch_once()
+    assert len(nats.published) == 1
+    assert nats.published[0][0] == "ani.tasks.kb.parse"
+
+
+@pytest.mark.asyncio
+async def test_rollback_reverts_from_v2_to_legacy_subject():
+    """Issue 037 rollback plan: switching the flag back to False makes the
+    dispatcher publish to the legacy subject again, unblocking the
+    rag-engine parse_worker path."""
+    rows = [_make_event(1)]
+    pool = _MockPool(rows=rows)
+    nats = _MockNATS()
+
+    # Switched state (flag=True → v2 subject)
+    dispatcher_v2 = OutboxDispatcher(
+        pool=pool, nats_client=nats, subject="ani.tasks.kb.parse.v2"
+    )
+    await dispatcher_v2._dispatch_once()
+    assert nats.published[-1][0] == "ani.tasks.kb.parse.v2"
+
+    # Rollback (flag=False → legacy subject). New event dispatched.
+    pool2 = _MockPool(rows=[_make_event(2)])
+    dispatcher_legacy = OutboxDispatcher(
+        pool=pool2, nats_client=nats, subject="ani.tasks.kb.parse"
+    )
+    await dispatcher_legacy._dispatch_once()
+    assert nats.published[-1][0] == "ani.tasks.kb.parse"
+
+
 # ── lifecycle ─────────────────────────────────────────────────────────────────
 
 

@@ -236,7 +236,8 @@ class _QueryMockConn:
     async def fetchrow(self, sql, *args):
         # get_kb (KB existence check) → return a KB row with defaults
         if "FROM knowledge_bases" in sql:
-            return {"top_k": 5, "score_threshold": 0.3, "retrieval_mode": "hybrid"}
+            return {"top_k": 5, "score_threshold": 0.3, "retrieval_mode": "hybrid",
+                    "vector_store_id": "vs-test-001"}
         # create_session returns id; insert_message returns a row
         if "kb_sessions" in sql:
             self.events.append(("create_session", args))
@@ -264,35 +265,41 @@ class _QueryMockPool:
         yield conn
 
 
-class _MockRagClient:
-    """Mock RagEngineClient returning a canned QueryResponse."""
+class _MockRagGrpcClient:
+    """Mock RagEngineGRPCClient returning a canned Generate response."""
 
     def __init__(self, answer="hello", sources=None):
         self._answer = answer
         self._sources = sources or [{"doc_id": "d1", "file_name": "a.pdf",
                                        "page": 1, "content": "ctx", "score": 0.9}]
 
-    async def query(self, **kwargs):
+    async def generate(self, **kwargs):
         return {
             "answer": self._answer,
-            "sources": self._sources,
-            "session_id": kwargs.get("session_id", "new"),
             "input_tokens": 10,
             "output_tokens": 5,
+            "session_id": kwargs.get("session_id", ""),
         }
 
     async def aclose(self):
         pass
 
-    async def __aenter__(self):
-        return self
 
-    async def __aexit__(self, *args):
-        pass
+class _MockRetrieveService:
+    """Mock RetrieveService returning canned sources."""
+
+    def __init__(self, sources=None):
+        self._sources = sources or [{"doc_id": "d1", "file_name": "a.pdf",
+                                      "page": 1, "content": "ctx", "score": 0.9,
+                                      "chunk_id": "c1"}]
+
+    async def retrieve(self, **kwargs):
+        return self._sources, 0.9
 
 
 class _MockSessionCache:
-    """Records append_message calls."""
+    """Records append_message calls; list_recent_messages returns appended
+    messages (simulates Redis read-after-write)."""
 
     def __init__(self):
         self.appended: list[dict] = []
@@ -301,15 +308,19 @@ class _MockSessionCache:
         self.appended.append(kwargs)
 
     async def list_messages(self, **kwargs):
-        return []
+        return self.appended
+
+    async def list_recent_messages(self, **kwargs):
+        limit = kwargs.get("limit", 20)
+        return [
+            {"role": m.get("role", ""), "content": m.get("content", "")}
+            for m in self.appended[-limit:]
+        ]
 
 
-def _make_query_servicer(*, pool=None, rag_client=None, cache=None):
-    rag = rag_client or _MockRagClient()
-
-    @asynccontextmanager
-    async def rag_factory():
-        yield rag
+def _make_query_servicer(*, pool=None, rag_grpc=None, retrieve_svc=None, cache=None):
+    rag = rag_grpc or _MockRagGrpcClient()
+    svc = retrieve_svc or _MockRetrieveService()
 
     target_cache = cache or _MockSessionCache()
 
@@ -317,7 +328,9 @@ def _make_query_servicer(*, pool=None, rag_client=None, cache=None):
         return target_cache
 
     return KBServiceServicer(
-        pool=pool, rag_engine_client_factory=rag_factory,
+        pool=pool,
+        retrieve_service_factory=lambda tenant_id: svc,
+        rag_engine_grpc_client_factory=lambda: rag,
         session_cache_factory=cache_factory,
     ), target_cache
 
@@ -439,15 +452,13 @@ def test_query_works_without_cache_factory_returning_none():
     (Redis unavailable, SPEC §7.3)."""
     pool = _QueryMockPool()
 
-    @asynccontextmanager
-    async def rag_factory():
-        yield _MockRagClient()
-
     def cache_factory():
         return None
 
     servicer = KBServiceServicer(
-        pool=pool, rag_engine_client_factory=rag_factory,
+        pool=pool,
+        retrieve_service_factory=lambda tenant_id: _MockRetrieveService(),
+        rag_engine_grpc_client_factory=lambda: _MockRagGrpcClient(),
         session_cache_factory=cache_factory,
     )
     ctx = _make_context()
@@ -458,34 +469,32 @@ def test_query_works_without_cache_factory_returning_none():
     import asyncio
     resp = asyncio.new_event_loop().run_until_complete(servicer._query(req, ctx))
     # Still persists both messages to DB (cache is best-effort).
-    # 3 connections: KB existence check + user msg + assistant msg.
-    assert len(pool.conns) == 3
+    # 4 connections: KB existence check + user msg + history load (no
+    # cache, so _load_history falls back to DB) + assistant msg.
+    assert len(pool.conns) == 4
     assert resp.answer == "hello"
 
 
 def test_query_rag_engine_error_returns_unavailable():
     pool = _QueryMockPool()
 
-    class _FailingRag:
-        async def query(self, **kwargs):
+    class _FailingRagGrpc:
+        async def generate(self, **kwargs):
             from app.rag_engine.client import RagEngineError
             raise RagEngineError("rag down", status_code=503)
 
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            pass
-
-    @asynccontextmanager
-    async def rag_factory():
-        yield _FailingRag()
+    class _FakeRetrieveSvc:
+        async def retrieve(self, **kwargs):
+            return [{"doc_id": "d1", "file_name": "a.pdf", "page": 1,
+                      "content": "ctx", "score": 0.9, "chunk_id": "c1"}], 0.9
 
     def cache_factory():
         return _MockSessionCache()
 
     servicer = KBServiceServicer(
-        pool=pool, rag_engine_client_factory=rag_factory,
+        pool=pool,
+        retrieve_service_factory=lambda tenant_id: _FakeRetrieveSvc(),
+        rag_engine_grpc_client_factory=lambda: _FailingRagGrpc(),
         session_cache_factory=cache_factory,
     )
     ctx = _make_context()

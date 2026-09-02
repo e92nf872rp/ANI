@@ -51,36 +51,29 @@ func newGatewayKBServiceClient(ctx context.Context, cfg gatewayKBServiceRuntimeC
 
 // ── SSE streaming query runtime (US-017) ─────────────────────────────────────
 //
-// The SSE handler (kb_sse.go) depends on two backends:
-//   - rag-engine for retrieval (RAG_ENGINE_URL, REST)
+// The SSE handler (kb_sse.go) depends on:
+//   - kb-service for retrieval + generation via the Retrieve gRPC stream
 //   - vLLM for token streaming (VLLM_API_BASE + VLLM_API_KEY + VLLM_MODEL)
 //
-// When either backend is not configured the SSE handler degrades gracefully:
-//   - RAG_ENGINE_URL empty → sources=[] + done (no retrieval)
+// When a backend is not configured the SSE handler degrades gracefully:
+//   - KBClient nil → empty stream (sources=[] + done)
 //   - VLLM_API_BASE/VLLM_MODEL empty → no token events (sources + done only)
 //
-// This preserves the local-dev behaviour where rag-engine/vLLM are not
+// This preserves the local-dev behaviour where kb-service/vLLM are not
 // deployed: the SSE endpoint stays functional with an empty stream.
 
 // gatewaySSERuntimeConfig configures the SSE streaming query dependencies.
 type gatewaySSERuntimeConfig struct {
-	RagEngineURL     string
-	VLLMBaseURL      string
-	VLLMAPIKey       string
-	VLLMModel        string
-	RagEngineTimeout time.Duration
+	VLLMBaseURL string
+	VLLMAPIKey  string
+	VLLMModel   string
 }
 
 func gatewaySSERuntimeConfigFromEnv() gatewaySSERuntimeConfig {
 	cfg := gatewaySSERuntimeConfig{
-		RagEngineURL:     strings.TrimSpace(os.Getenv("RAG_ENGINE_URL")),
-		RagEngineTimeout: gatewayDurationFromEnv("RAG_ENGINE_TIMEOUT"),
-		VLLMBaseURL:      strings.TrimSpace(os.Getenv("VLLM_API_BASE")),
-		VLLMAPIKey:       strings.TrimSpace(os.Getenv("VLLM_API_KEY")),
-		VLLMModel:        strings.TrimSpace(os.Getenv("VLLM_MODEL")),
-	}
-	if cfg.RagEngineTimeout <= 0 {
-		cfg.RagEngineTimeout = 30 * time.Second
+		VLLMBaseURL: strings.TrimSpace(os.Getenv("VLLM_API_BASE")),
+		VLLMAPIKey:  strings.TrimSpace(os.Getenv("VLLM_API_KEY")),
+		VLLMModel:   strings.TrimSpace(os.Getenv("VLLM_MODEL")),
 	}
 	return cfg
 }
@@ -88,18 +81,16 @@ func gatewaySSERuntimeConfigFromEnv() gatewaySSERuntimeConfig {
 // newGatewaySSEConfig builds the kbSSEConfig from environment. When backends
 // are not configured the returned config has nil clients so the SSE handler
 // degrades to an empty stream.
-func newGatewaySSEConfig(cfg gatewaySSERuntimeConfig) router.KbSSEConfig {
-	var ragClient router.RagEngineClient
-	if cfg.RagEngineURL != "" {
-		ragClient = router.NewRagEngineHTTPClient(cfg.RagEngineURL, cfg.RagEngineTimeout)
-	}
+// kbClient is the kb-service gRPC client (may be nil when kb-service is not
+// configured); the SSE handler degrades to an empty stream when nil.
+func newGatewaySSEConfig(cfg gatewaySSERuntimeConfig, kbClient router.KBGRPCClient) router.KbSSEConfig {
 	var vllmStreamer router.VLLMStreamer
 	if cfg.VLLMBaseURL != "" {
 		vllmStreamer = router.NewVLLMHTTPStreamer(cfg.VLLMBaseURL, cfg.VLLMAPIKey)
 	}
 	return router.KbSSEConfig{
-		RagClient:    ragClient,
 		VLLMStreamer: vllmStreamer,
 		VLLMModel:    cfg.VLLMModel,
+		KBClient:     kbClient,
 	}
 }

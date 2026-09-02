@@ -41,7 +41,7 @@ async def create_kb(
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active')
             RETURNING id, tenant_id, name, description, embedding_model,
                       chunk_size, top_k, score_threshold, retrieval_mode,
-                      status, doc_count, created_at, updated_at
+                      status, doc_count, created_at, updated_at, vector_store_id
             """,
             uuid.UUID(tenant_id),
             name,
@@ -55,19 +55,50 @@ async def create_kb(
     return dict(row)
 
 
+async def set_vector_store_id(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: str,
+    kb_id: str,
+    vector_store_id: str,
+) -> None:
+    """Persist the Core API vector-store id onto the knowledge_bases row.
+
+    Called by CreateKB after the Core `POST /vector-stores` returns the
+    vector store id (Plan §3.1). RLS-scoped.
+    """
+    async with conn.transaction():
+        await set_tenant_context(conn, tenant_id)
+        await conn.execute(
+            """
+            UPDATE knowledge_bases
+               SET vector_store_id = $2,
+                   updated_at = now()
+             WHERE id = $1
+            """,
+            uuid.UUID(kb_id),
+            vector_store_id,
+        )
+
+
 async def get_kb(
     conn: asyncpg.Connection, *, tenant_id: str, kb_id: str
 ) -> dict[str, Any] | None:
-    """SELECT a single knowledge_bases row by id (RLS-scoped)."""
+    """SELECT a single knowledge_bases row by id (RLS-scoped).
+
+    Soft-deleted rows (status='deleted') are filtered out so callers see a
+    deleted KB as NOT_FOUND (SPEC §6.1 DeleteKB semantics; the row stays for
+    audit but is hidden from all read paths).
+    """
     async with conn.transaction():
         await set_tenant_context(conn, tenant_id)
         row = await conn.fetchrow(
             """
             SELECT id, tenant_id, name, description, embedding_model,
                    chunk_size, top_k, score_threshold, retrieval_mode,
-                   status, doc_count, created_at, updated_at
+                   status, doc_count, created_at, updated_at, vector_store_id
               FROM knowledge_bases
-             WHERE id = $1
+             WHERE id = $1 AND status <> 'deleted'
             """,
             uuid.UUID(kb_id),
         )
@@ -84,21 +115,22 @@ async def list_kbs(
     """List knowledge_bases with cursor pagination (RLS-scoped).
 
     Returns (rows, total). Cursor is the `id` of the last row of the previous
-    page (lexicographic UUID ordering).
+    page (lexicographic UUID ordering). Soft-deleted rows (status='deleted')
+    are excluded from both the page and the total.
     """
     async with conn.transaction():
         await set_tenant_context(conn, tenant_id)
         total = await conn.fetchval(
-            "SELECT count(*) FROM knowledge_bases"
+            "SELECT count(*) FROM knowledge_bases WHERE status <> 'deleted'"
         )
         if cursor:
             rows = await conn.fetch(
                 """
                 SELECT id, tenant_id, name, description, embedding_model,
                        chunk_size, top_k, score_threshold, retrieval_mode,
-                       status, doc_count, created_at, updated_at
+                       status, doc_count, created_at, updated_at, vector_store_id
                   FROM knowledge_bases
-                 WHERE id > $1
+                 WHERE id > $1 AND status <> 'deleted'
                  ORDER BY id ASC
                  LIMIT $2
                 """,
@@ -110,8 +142,9 @@ async def list_kbs(
                 """
                 SELECT id, tenant_id, name, description, embedding_model,
                        chunk_size, top_k, score_threshold, retrieval_mode,
-                       status, doc_count, created_at, updated_at
+                       status, doc_count, created_at, updated_at, vector_store_id
                   FROM knowledge_bases
+                 WHERE status <> 'deleted'
                  ORDER BY id ASC
                  LIMIT $1
                 """,

@@ -94,7 +94,12 @@ async def create_document(
 async def get_document(
     conn: asyncpg.Connection, *, tenant_id: str, kb_id: str, doc_id: str
 ) -> dict[str, Any] | None:
-    """SELECT a single kb_documents row (RLS-scoped)."""
+    """SELECT a single kb_documents row (RLS-scoped).
+
+    Soft-deleted rows (parse_status='failed' + error_message='deleted', the
+    marker written by soft_delete_document) are filtered out so callers see
+    them as NOT_FOUND.
+    """
     async with conn.transaction():
         await set_tenant_context(conn, tenant_id)
         row = await conn.fetchrow(
@@ -105,6 +110,7 @@ async def get_document(
                    custom_metadata, created_at, parsed_at, object_id
               FROM kb_documents
              WHERE id = $1 AND kb_id = $2
+               AND NOT (parse_status = 'failed' AND error_message = 'deleted')
             """,
             uuid.UUID(doc_id),
             uuid.UUID(kb_id),
@@ -121,12 +127,20 @@ async def list_documents(
     limit: int = 20,
     cursor: str | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
-    """List kb_documents with optional parse_status filter + cursor paging."""
+    """List kb_documents with optional parse_status filter + cursor paging.
+
+    Soft-deleted rows (parse_status='failed' + error_message='deleted') are
+    excluded from both the page and the total.
+    """
     async with conn.transaction():
         await set_tenant_context(conn, tenant_id)
         if parse_status:
             total = await conn.fetchval(
-                "SELECT count(*) FROM kb_documents WHERE kb_id = $1 AND parse_status = $2",
+                """
+                SELECT count(*) FROM kb_documents
+                 WHERE kb_id = $1 AND parse_status = $2
+                   AND NOT (parse_status = 'failed' AND error_message = 'deleted')
+                """,
                 uuid.UUID(kb_id),
                 parse_status,
             )
@@ -139,6 +153,7 @@ async def list_documents(
                            custom_metadata, created_at, parsed_at
                       FROM kb_documents
                      WHERE kb_id = $1 AND parse_status = $2 AND id > $3
+                       AND NOT (parse_status = 'failed' AND error_message = 'deleted')
                      ORDER BY id ASC
                      LIMIT $4
                     """,
@@ -156,6 +171,7 @@ async def list_documents(
                            custom_metadata, created_at, parsed_at
                       FROM kb_documents
                      WHERE kb_id = $1 AND parse_status = $2
+                       AND NOT (parse_status = 'failed' AND error_message = 'deleted')
                      ORDER BY id ASC
                      LIMIT $3
                     """,
@@ -165,7 +181,11 @@ async def list_documents(
                 )
         else:
             total = await conn.fetchval(
-                "SELECT count(*) FROM kb_documents WHERE kb_id = $1",
+                """
+                SELECT count(*) FROM kb_documents
+                 WHERE kb_id = $1
+                   AND NOT (parse_status = 'failed' AND error_message = 'deleted')
+                """,
                 uuid.UUID(kb_id),
             )
             if cursor:
@@ -177,6 +197,7 @@ async def list_documents(
                            custom_metadata, created_at, parsed_at
                       FROM kb_documents
                      WHERE kb_id = $1 AND id > $2
+                       AND NOT (parse_status = 'failed' AND error_message = 'deleted')
                      ORDER BY id ASC
                      LIMIT $3
                     """,
@@ -193,6 +214,7 @@ async def list_documents(
                            custom_metadata, created_at, parsed_at
                       FROM kb_documents
                      WHERE kb_id = $1
+                       AND NOT (parse_status = 'failed' AND error_message = 'deleted')
                      ORDER BY id ASC
                      LIMIT $2
                     """,

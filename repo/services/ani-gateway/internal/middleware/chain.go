@@ -10,21 +10,13 @@ import (
 )
 
 // Register wires all middleware onto the Hertz server in the correct order.
-// 启动前校验 authz 配置；非法组合返回 error，调用方必须在监听前 fail closed。
+// policy 路由恒为契约即开关：ConfigFromEnv 只解析 ANI_AUTH_MODE，无启动校验。
 func Register(h *server.Hertz, store GatewayStore) error {
 	if store == nil {
 		return errors.New("gateway middleware store is required")
 	}
 	registry := authz.CoreRegistry()
-	cfg, err := authz.ConfigFromEnv()
-	if err != nil {
-		return err
-	}
-	// C2：监听前执行带 registry 的完整校验，非法 pilot 组合直接启动失败。
-	if err := cfg.Validate(registry); err != nil {
-		return err
-	}
-	registerChain(h, store, NewAuthClientFromEnv(), registry, cfg)
+	registerChain(h, store, NewAuthClientFromEnv(), registry, authz.ConfigFromEnv())
 	return nil
 }
 

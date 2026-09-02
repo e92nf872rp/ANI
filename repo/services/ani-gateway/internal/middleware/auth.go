@@ -16,53 +16,6 @@ import (
 	"github.com/kubercloud/ani/services/ani-gateway/internal/authz"
 )
 
-// Auth validates JWT Bearer tokens or API Keys.
-// On success it sets "tenant_id", "user_id", "roles", and "scope" in the request context.
-// This is fail-closed by default. Local development may set ANI_AUTH_MODE=dev
-// and pass X-Dev-Tenant-ID to exercise routes before auth-service exists.
-func Auth() app.HandlerFunc {
-	return AuthWithClient(NewAuthClientFromEnv())
-}
-
-// AuthWithClient 保持既有直接调用入口：解析 policy 后走 legacy 认证。
-// 内部复用 ResolvePolicyForRequest（不触发 c.Next），再交给
-// AuthWithResolvedPolicy 执行且只 c.Next 一次，避免 Hertz 链路提前推进。
-func AuthWithClient(authClient AuthClient) app.HandlerFunc {
-	registry := authz.CoreRegistry()
-	cfg := authz.Config{Mode: authz.ModeOff}
-	return func(ctx context.Context, c *app.RequestContext) {
-		resolved, err := ResolvePolicyForRequest(registry, cfg, c)
-		if err != nil {
-			respond503(c, "registered route has no authz policy")
-			return
-		}
-		SetResolvedPolicy(c, resolved)
-		AuthWithResolvedPolicy(authClient)(ctx, c)
-	}
-}
-
-// AuthWithResolvedPolicy 是 policy 分流后的认证入口。
-// B0 只允许 public/legacy：出现 generated 说明配置/接线违约，直接 fail closed。
-func AuthWithResolvedPolicy(client AuthClient) app.HandlerFunc {
-	return func(ctx context.Context, c *app.RequestContext) {
-		resolved, err := GetResolvedPolicy(c)
-		if err != nil {
-			respond503(c, "authz policy context missing")
-			return
-		}
-		if resolved.Source == authz.PolicySourcePublic {
-			c.Next(ctx)
-			return
-		}
-		if resolved.Source != authz.PolicySourceLegacy {
-			// B0 不允许新链路；出现 generated 说明配置/接线违约。
-			respond503(c, "generated authentication is not enabled")
-			return
-		}
-		authenticateLegacy(ctx, c, client)
-	}
-}
-
 // legacyViewFromContext 从旧 TenantContext 构造 legacy view；
 // 严格规范化失败时降级为未规范化 view（identity key 仍按 scheme 规则校验）。
 func legacyViewFromContext(tc *commonv1.TenantContext, scheme authz.CredentialScheme, claims *sandboxtoken.Claims) authz.LegacyPrincipalView {

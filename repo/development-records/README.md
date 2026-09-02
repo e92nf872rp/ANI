@@ -13,6 +13,14 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 任务中心异步任务 Core 集成（2026-08，分支 feat/async-task-core-integration）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| TASKCENTER-C1 | 契约批次：AsyncTask enum 扩展 5 种 `instance.*` + `instance` resource_type + 存量缺口 `sandbox.checkpoint.restore`；AsyncTask description 写入真进度语义（running 起步 / GET 单查懒同步 / 状态阶梯 / list 快照）与实例 state→任务映射表；新增 `GET /tasks`（cursor 分页/筛选/authz/401/403）与 `TaskListResponse`；`GET /tasks/{task_id}` 补 operationId/security/authz/rbac scope/401/403；鉴权注册表两条 tasks 路由翻转为 generated（pilot 集合未扩，运行时零变化）；Core SDK/静态 docs/Console schema 生成物同步；Core API v1 兼容基线有意再生成。纯契约，不含 handler 实现 | TASKCENTER-C1.md |
+| TASKCENTER-A1 | 实现批次：`ports.AsyncTaskStore` 追加 `List`（keyset cursor）+ 接口注释固化 Update 终态写保护；Local/Metadata 双 store List 与 Update 终态写保护（SQL 守卫 + 0 行重读 / mutex 内比较）；`20260827_001` 复合索引迁移；Gateway `GET /tasks` list handler（limit 1-100/筛选/400）；实例 create（含 409 completed 重放补写）/lifecycle 写入点（running/10 + writeAuditTask 旁路失败降级）；`observeInstance` 提取注入任务路由；GET 单查非终态 `instance.*` 任务懒同步（state 映射表 + 写放大抑制 + 降级 + 终态守卫并发乱序保护）；响应结构补 `resource_id`/`error_message`/`dead_letter_at`（单查/list/模式 B 三处共用）；页面文档同步（list 上线、kb 域噪声声明、TODO-YAML 解除）。真实 PG：索引迁移已应用；RLS 拦截因 dev 账号 BYPASSRLS 无法验证（A2 收口）。§8.2/§8.3 验收矩阵由 29 个新测试逐条覆盖 | TASKCENTER-A1.md |
+| TASKCENTER-A2 | RLS 真实验证与仓库对齐修复批次：切换 `ani_app_user`（非 BYPASSRLS）完成 A1 遗留项——async_tasks 跨租户 SELECT/Get 拦截实测 0 行、Create/Update（懒同步+终态守卫）写路径实测通过；live-verified 后回写仓库 `20260831_001`（RESTRICTIVE-only fail-closed 改双 PERMISSIVE、补 init_schema GRANT-on-empty 失效的表级授权、platform_bypass 用 NULLIF 形态免疫空串残留）；2 个 integration 测试（策略形态防回归 + 跨租户行为断言，幂等可重跑） | TASKCENTER-A2.md |
+
 ### Gateway OpenAPI 鉴权四批次（2026-08）
 
 | 批次 | 内容摘要 | 文件 |
@@ -21,6 +29,7 @@
 | AUTHZ-COMPAT-B0 | PR2：统一 Principal 与 identity key（默认 off）——规范 Principal + LegacyPrincipalView + Mode/Config + ResolveAuthzPolicy 中间件 + 横切 identity key 改造；gateway 仍走旧 ValidateToken/CheckPermission | authz-policy-compat-contract-pilot.md |
 | AUTHZ-CONTRACT-B1 | PR3：V2 授权契约——additive proto（ValidatePrincipal/CheckPermissionV2）+ auth-service JWT/API Key principal + permission evaluator + Gateway V2 client；gateway 仍 mode=off 不调 V2 | authz-policy-compat-contract-pilot.md |
 | AUTHZ-PILOT-C | PR4：listQuotaMeta pilot——v1.yaml security/x-ani-authz 注解 + mode Validate 冻结校验 + generated_authz V2 授权链路 + pilot E2E 测试 + deployment env；仅该 operation 使用 V2 | authz-policy-compat-contract-pilot.md |
+| AUTHZ-MODE-SIMPLIFY-D | PR5：契约即开关收敛——删除 mode 开关（policy/dev/pilot/off）与 pilot allowlist，policy 路由恒为 x-ani-authz（generated）→V2、其余 legacy、public 放行，dev 自动回落 legacy；`ANI_AUTH_MODE` 唯一保留 env，不设废弃 env 残留检测（新集群从头部署拍板）；deploy 清单删除两个废弃 env 条目；第六版修订改名 `config.go`/`config_test.go`、删兼容入口 6 函数、测试归一；commit `4753a42` | authz-mode-simplify-d.md |
 
 **预存问题修复（2026-08-25）：** 本地实测 pilot 模式后修复 4 个文件的预存不一致——删 v1.yaml 已弃用的 branding PUT/POST logo + tasks DELETE 路由的 router 注册和 registry 条目（branding_resources.go / task_resources.go / zz_generated_core_policies.go）；gpu_scheduling_resources.go 的 `:id`→`:queue_id` 与 v1.yaml 一致（修复运行时 `LookupByRequest` lookup miss + route coverage 门禁）。详见 `authz-policy-compat-contract-pilot.md`。
 

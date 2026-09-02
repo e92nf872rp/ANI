@@ -15,7 +15,7 @@ import (
 	"github.com/kubercloud/ani/services/ani-gateway/internal/authz"
 )
 
-// v2CallCounts 记录 tokenStub 的 V2 方法调用数；mode=off 测试断言其始终为零。
+// v2CallCounts 记录 tokenStub 的 V2 方法调用数；legacy 链路测试断言其始终为零。
 type v2CallCounts struct {
 	ValidatePrincipal int
 	CheckPermissionV2 int
@@ -42,16 +42,16 @@ func (s tokenStub) CheckPermission(context.Context, *authv1.CheckPermissionReque
 	return &authv1.CheckPermissionResponse{Allowed: true}, nil
 }
 
-// ValidatePrincipal 是 V2 stub：B1 mode=off 下不允许被调用，调用即测试失败。
+// ValidatePrincipal 是 V2 stub：legacy 链路测试中不允许被调用，调用即测试失败。
 func (s tokenStub) ValidatePrincipal(context.Context, string, authz.CredentialScheme) (*authv1.PrincipalContext, error) {
 	s.v2c().ValidatePrincipal++
-	return nil, errors.New("V2 ValidatePrincipal must not be called in mode=off")
+	return nil, errors.New("V2 ValidatePrincipal must not be called on legacy route")
 }
 
-// CheckPermissionV2 是 V2 stub：B1 mode=off 下不允许被调用，调用即测试失败。
+// CheckPermissionV2 是 V2 stub：legacy 链路测试中不允许被调用，调用即测试失败。
 func (s tokenStub) CheckPermissionV2(context.Context, *authv1.AuthorizationRequest) (*authv1.AuthorizationDecision, error) {
 	s.v2c().CheckPermissionV2++
-	return nil, errors.New("V2 CheckPermissionV2 must not be called in mode=off")
+	return nil, errors.New("V2 CheckPermissionV2 must not be called on legacy route")
 }
 func (tokenStub) BeginOIDCLogin(context.Context, *authv1.BeginOIDCLoginRequest) (*authv1.BeginOIDCLoginResponse, error) {
 	return nil, nil
@@ -100,8 +100,11 @@ func TestAuthAcceptsServiceJWTOnPlatformWorkloads(t *testing.T) {
 		v2: &v2CallCounts{},
 	}
 	h := server.New()
-	h.Use(AuthWithClient(client))
-	h.Use(RBACWithClient(client))
+	h.Use(
+		ResolveAuthzPolicy(authz.CoreRegistry(), authz.Config{}),
+		AuthenticatePrincipal(client),
+		AuthorizePrincipal(client),
+	)
 	h.POST("/api/v1/platform-workloads", func(ctx context.Context, c *app.RequestContext) {
 		if GetPrincipalKind(c) != "service" {
 			t.Fatalf("principal = %q", GetPrincipalKind(c))
@@ -121,9 +124,9 @@ func TestAuthAcceptsServiceJWTOnPlatformWorkloads(t *testing.T) {
 	if resp.StatusCode() != http.StatusAccepted {
 		t.Fatalf("status = %d body=%s", resp.StatusCode(), resp.Body())
 	}
-	// mode=off：legacy 链路不得触发 V2 RPC。
+	// legacy 链路不得触发 V2 RPC。
 	if client.v2.ValidatePrincipal != 0 || client.v2.CheckPermissionV2 != 0 {
-		t.Fatalf("V2 calls in mode=off = %+v, want zero", client.v2)
+		t.Fatalf("V2 calls on legacy route = %+v, want zero", client.v2)
 	}
 }
 
@@ -148,7 +151,10 @@ func TestAuthRejectsTenantJWTOnPlatformWorkloads(t *testing.T) {
 		v2: &v2CallCounts{},
 	}
 	h := server.New()
-	h.Use(AuthWithClient(client))
+	h.Use(
+		ResolveAuthzPolicy(authz.CoreRegistry(), authz.Config{}),
+		AuthenticatePrincipal(client),
+	)
 	h.POST("/api/v1/platform-workloads", func(ctx context.Context, c *app.RequestContext) {
 		c.JSON(http.StatusOK, map[string]string{"ok": "true"})
 	})
@@ -159,8 +165,8 @@ func TestAuthRejectsTenantJWTOnPlatformWorkloads(t *testing.T) {
 	if resp.StatusCode() != http.StatusForbidden {
 		t.Fatalf("status = %d body=%s", resp.StatusCode(), resp.Body())
 	}
-	// mode=off：legacy 链路（含拒绝分支）不得触发 V2 RPC。
+	// legacy 链路（含拒绝分支）不得触发 V2 RPC。
 	if client.v2.ValidatePrincipal != 0 || client.v2.CheckPermissionV2 != 0 {
-		t.Fatalf("V2 calls in mode=off = %+v, want zero", client.v2)
+		t.Fatalf("V2 calls on legacy route = %+v, want zero", client.v2)
 	}
 }

@@ -76,7 +76,7 @@ func TestRegisterInstancesUsesInjectedRuntime(t *testing.T) {
 	h := server.Default()
 	injected := newInstanceAPI()
 
-	got := registerInstancesWithRuntime(
+	got, _ := registerInstancesWithRuntime(
 		h.Group("/api/v1"),
 		nil,
 		false,

@@ -1972,6 +1972,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 列出当前租户的异步任务
+         * @description 按创建时间倒序（created_at DESC, id DESC）cursor 分页列出当前认证
+         *     租户的异步任务。租户隔离来自认证上下文，不接受 tenant_id 参数，
+         *     不提供跨租户/平台级任务视图。list 只读库内快照，不做懒同步——
+         *     instance.* 任务的实时进度由 GET /tasks/{task_id} 单查承担。
+         *     status 筛选有 enum 约束（非法值 400）；task_type/resource_type
+         *     筛选不做 enum 约束（前向兼容），未匹配值返回空列表而非 400。
+         */
+        get: operations["listAsyncTasks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tasks/{task_id}": {
         parameters: {
             query?: never;
@@ -1979,30 +2004,14 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 查询异步任务状态 */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    task_id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description 异步任务状态 */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["AsyncTask"];
-                    };
-                };
-                404: components["responses"]["NotFound"];
-            };
-        };
+        /**
+         * 查询单个异步任务
+         * @description 查询单个异步任务。非终态 instance.* 任务在返回前执行读时懒同步：
+         *     先触发单实例状态刷新，再按实例 state 映射（见 AsyncTask schema
+         *     description 的映射表）推进任务至 completed/failed；懒同步失败时
+         *     降级返回库内快照，不向客户端报错。
+         */
+        get: operations["getTask"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3637,6 +3646,39 @@ export interface components {
             /** @description 下一页游标；null 表示已到最后一页 */
             next_cursor?: string | null;
         };
+        /**
+         * @description 异步任务统一记录。v1 进度语义（两类任务区分）：
+         *
+         *     - 实例域任务（task_type=instance.*）采用真进度语义：create/lifecycle
+         *       受理成功即写入 status=running（progress=10，表示操作已提交至
+         *       runtime、资源收敛中，不是 pending）。GET /tasks/{task_id} 单查时对
+         *       非终态 instance.* 任务执行读时懒同步：先触发单实例状态刷新，再按
+         *       实例 state 映射推进至 completed/failed；懒同步失败降级返回库内
+         *       快照。
+         *     - 存储卷、向量库、platform_workload、sandbox 等受理审计任务维持
+         *       模式 B 语义：同步完成后创建即 completed（progress=100），不做
+         *       懒同步。
+         *     - 进度是粗粒度状态阶梯，不是真实百分比；实例卡在中间态时任务诚实
+         *       停留 running，不虚报 100%。
+         *     - list（GET /tasks）不做懒同步，返回库内快照；实时性由单查承担。
+         *       真实异步进度（worker/outbox/lease 模式）归后续版本。
+         *
+         *     实例 state → 任务推进映射（懒同步依据，state 取 Instance schema
+         *     九态枚举）：
+         *
+         *     - create/start/restart：实例 running → completed/100；实例 failed →
+         *       failed（error_message="instance entered failed state"）；实例
+         *       provisioning/pending → running/20；实例 starting/stopping/stopped/
+         *       deleting → running/40；实例 deleted → failed（"instance deleted
+         *       before reaching running"）；实例记录不存在 → failed（"instance
+         *       record not found"）。
+         *     - stop：实例 stopped → completed/100；实例 failed → failed；实例
+         *       stopping/deleting → running/60；实例 provisioning/pending/starting/
+         *       running → running/30；实例 deleted/记录不存在 → failed。
+         *     - delete：实例 deleted → completed/100（主终态；实例删除只置
+         *       state=deleted，记录不消失）；实例记录不存在 → completed/100
+         *       （防御分支）；其余任意 state（含 deleting）→ running/80。
+         */
         AsyncTask: {
             /** Format: uuid */
             id: string;
@@ -3646,9 +3688,9 @@ export interface components {
              * @example model.import
              * @enum {string}
              */
-            task_type: "model.import" | "kb.parse" | "kb.index" | "inference.deploy" | "platform_workload.create" | "platform_workload.scale" | "platform_workload.start" | "platform_workload.stop" | "platform_workload.restart" | "platform_workload.delete" | "volume.snapshot.create" | "volume.expand" | "volume.mount" | "volume.unmount" | "volume.create_from_snapshot" | "filesystem.expand" | "filesystem.mount_target.create" | "filesystem.mount" | "filesystem.unmount" | "vector_store.index.rebuild" | "vector_store.document.insert" | "sandbox.checkpoint.create" | "sandbox.checkpoint.restore" | "sandbox.code_run.create";
+            task_type: "model.import" | "kb.parse" | "kb.index" | "inference.deploy" | "platform_workload.create" | "platform_workload.scale" | "platform_workload.start" | "platform_workload.stop" | "platform_workload.restart" | "platform_workload.delete" | "volume.snapshot.create" | "volume.expand" | "volume.mount" | "volume.unmount" | "volume.create_from_snapshot" | "filesystem.expand" | "filesystem.mount_target.create" | "filesystem.mount" | "filesystem.unmount" | "vector_store.index.rebuild" | "vector_store.document.insert" | "sandbox.checkpoint.create" | "sandbox.checkpoint.restore" | "sandbox.code_run.create" | "instance.create" | "instance.start" | "instance.stop" | "instance.restart" | "instance.delete";
             /** @enum {string|null} */
-            resource_type?: "inference_service" | "platform_workload" | "kb_document" | "model_version" | "volume_snapshot" | "volume" | "filesystem" | "filesystem_mount_target" | "vector_store" | "sandbox_checkpoint" | "sandbox_code_run" | null;
+            resource_type?: "inference_service" | "platform_workload" | "kb_document" | "model_version" | "volume_snapshot" | "volume" | "filesystem" | "filesystem_mount_target" | "vector_store" | "sandbox_checkpoint" | "sandbox_code_run" | "instance" | null;
             /** Format: uuid */
             resource_id?: string | null;
             /** @enum {string} */
@@ -3664,6 +3706,16 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             completed_at?: string | null;
+        };
+        /**
+         * @description 当前租户的异步任务列表。排序 created_at DESC, id DESC（id 为 UUID
+         *     主键 tiebreaker，同毫秒创建多条任务时分页次序确定唯一）；cursor 为
+         *     不透明 token。list 返回库内快照，不做懒同步。
+         */
+        TaskListResponse: {
+            items: components["schemas"]["AsyncTask"][];
+            /** @description 下一页游标；null 表示已到最后一页 */
+            next_cursor?: string | null;
         };
         /** @description 单个 GPU 型号对平台内部工作负载的准入能力摘要。spec_id 只表示型号。 */
         PlatformWorkloadAcceleratorCapability: {
@@ -11433,6 +11485,62 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InstanceOperation"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listAsyncTasks: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string;
+                status?: "pending" | "running" | "completed" | "failed" | "cancelled" | "dead_letter";
+                /** @description 筛选 task_type；不做 enum 约束（前向兼容：新增 task_type 后旧客户端仍可筛选）；未匹配值返回空列表而非 400 */
+                task_type?: string;
+                /** @description 筛选 resource_type；不做 enum 约束，未匹配值返回空列表而非 400 */
+                resource_type?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 任务列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 异步任务状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
                 };
             };
             401: components["responses"]["Unauthorized"];

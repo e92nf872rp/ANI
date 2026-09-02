@@ -29,7 +29,7 @@ type AuthClient interface {
 	ListAPIKeys(ctx context.Context, req *authv1.ListAPIKeysRequest) (*authv1.ListAPIKeysResponse, error)
 	RevokeAPIKey(ctx context.Context, req *authv1.RevokeAPIKeyRequest) error
 
-	// V2 鉴权契约：B1 只闭合接口，mode=off 下不被调用。
+	// V2 鉴权契约：B1 只闭合接口，legacy 链路不经过此处。
 	ValidatePrincipal(ctx context.Context, credential string, scheme authz.CredentialScheme) (*authv1.PrincipalContext, error)
 	CheckPermissionV2(ctx context.Context, req *authv1.AuthorizationRequest) (*authv1.AuthorizationDecision, error)
 }
