@@ -9,8 +9,10 @@ import (
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
+var _ ports.RateLimiter = (*RateLimiter)(nil)
+
 func TestRateLimiterAdapterImplementsPort(t *testing.T) {
-	var limiter ports.RateLimiter = NewRateLimiter(nil)
+	limiter := NewRateLimiter(nil)
 	if limiter == nil {
 		t.Fatal("NewRateLimiter(nil) returned nil adapter")
 	}

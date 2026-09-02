@@ -121,7 +121,7 @@ export interface paths {
         put?: never;
         /**
          * 部署推理服务
-         * @description 接受后立即返回 pending 资源；current_operation_id 用于查询持久化 operation。工作负载就绪且 Envoy AI Gateway 路由发布成功后，资源的 invocation_url 才返回可调用地址。
+         * @description 接受后立即返回 pending 资源；current_operation_id 用于查询持久化 operation，P0 不返回可调用 URL。
          */
         post: operations["createInferenceService"];
         delete?: never;
@@ -1651,7 +1651,7 @@ export interface components {
             image_id?: string;
             /** @description 创建时解析并冻结的 digest 引用；只读 */
             image_ref?: string | null;
-            /** @description OpenAI-compatible 请求体中的 model 值；在当前租户的活动推理服务内唯一，创建后不可变 */
+            /** @description 集群内 OpenAI-compatible 请求使用的 model 值，不代表公网路由 */
             served_model_name?: string;
             /** @default 1 */
             replicas: number;
@@ -1694,7 +1694,7 @@ export interface components {
             current_operation_id?: string | null;
             /**
              * Format: uri
-             * @description Envoy AI Gateway 的 OpenAI-compatible 调用地址；仅在工作负载就绪且网关路由发布成功后返回，未发布、停止、失败或删除过程中返回 null
+             * @description P0 未建设调用网关，固定返回 null
              */
             invocation_url?: string | null;
             /**
@@ -1773,7 +1773,7 @@ export interface components {
             image_id?: string;
             /** @description 用户直接输入的镜像引用；与 image_id 至少填一个，同时传入时优先 image_id。创建前固定 digest。 */
             image_ref?: string;
-            /** @description OpenAI-compatible 请求体中的 model 值；默认使用服务 name，在当前租户的活动推理服务内唯一，创建后不可变 */
+            /** @description 默认使用服务 name，创建后不可变 */
             served_model_name?: string;
             /** @description 省略时服务按 1 个副本处理 */
             replicas?: number;
