@@ -122,6 +122,40 @@ func (f *fakeAuditStore) ListPlanAuditLogs(_ context.Context, planID uuid.UUID, 
 	return ports.AuditLogListResult{Items: matched, Total: total, NextCursor: ""}, nil
 }
 
+func (f *fakeAuditStore) ListTenantAuditLogs(_ context.Context, tenantID uuid.UUID, filter ports.TenantAuditLogFilter) (ports.AuditLogListResult, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	matched := make([]ports.AuditLog, 0, len(f.logs))
+	for _, log := range f.logs {
+		if log.TenantID == nil || *log.TenantID != tenantID {
+			continue
+		}
+		if filter.Action != "" && log.Action != filter.Action {
+			continue
+		}
+		if filter.Result != "" && log.Result != filter.Result {
+			continue
+		}
+		matched = append(matched, log)
+	}
+
+	for i, j := 0, len(matched)-1; i < j; i, j = i+1, j-1 {
+		matched[i], matched[j] = matched[j], matched[i]
+	}
+
+	total := len(matched)
+	if len(matched) > limit {
+		matched = matched[:limit]
+	}
+	return ports.AuditLogListResult{Items: matched, Total: total, NextCursor: ""}, nil
+}
+
 type fakeQuotaClient struct {
 	meta            []ports.QuotaMeta
 	metaErr         error
@@ -239,6 +273,38 @@ func (f *fakeTenantClient) GetTenant(_ context.Context, id uuid.UUID) (ports.Ten
 
 func (f *fakeTenantClient) ListAvailableTenants(_ context.Context) ([]ports.BoundTenant, error) {
 	return f.available, nil
+}
+
+func (f *fakeTenantClient) CreateTenant(context.Context, ports.CreateTenantInput) (ports.Tenant, error) {
+	panic("unused in tenant plan tests")
+}
+
+func (f *fakeTenantClient) ListTenants(context.Context, ports.ListTenantsFilter) (ports.TenantListResult, error) {
+	panic("unused in tenant plan tests")
+}
+
+func (f *fakeTenantClient) UpdateTenant(context.Context, uuid.UUID, ports.UpdateTenantInput) (ports.Tenant, error) {
+	panic("unused in tenant plan tests")
+}
+
+func (f *fakeTenantClient) FreezeTenant(context.Context, uuid.UUID, string) (ports.Tenant, error) {
+	panic("unused in tenant plan tests")
+}
+
+func (f *fakeTenantClient) UnfreezeTenant(context.Context, uuid.UUID, string) (ports.Tenant, error) {
+	panic("unused in tenant plan tests")
+}
+
+func (f *fakeTenantClient) DisableTenant(context.Context, uuid.UUID, string) (ports.Tenant, error) {
+	panic("unused in tenant plan tests")
+}
+
+func (f *fakeTenantClient) GetTenantAuth(context.Context, uuid.UUID) (ports.TenantAuth, error) {
+	panic("unused in tenant plan tests")
+}
+
+func (f *fakeTenantClient) UpdateTenantAuth(context.Context, uuid.UUID, ports.TenantAuthPatch) (ports.TenantAuth, error) {
+	panic("unused in tenant plan tests")
 }
 
 func (f *fakeTenantClient) UpdateTenantPlan(_ context.Context, id uuid.UUID, planID uuid.UUID) (ports.Tenant, error) {

@@ -71,6 +71,38 @@ func (c *TenantSvcClient) ListAvailableTenants(ctx context.Context) ([]ports.Bou
 	return out, nil
 }
 
+func (c *TenantSvcClient) CreateTenant(context.Context, ports.CreateTenantInput) (ports.Tenant, error) {
+	return ports.Tenant{}, ports.ErrNotImplemented
+}
+
+func (c *TenantSvcClient) ListTenants(context.Context, ports.ListTenantsFilter) (ports.TenantListResult, error) {
+	return ports.TenantListResult{}, ports.ErrNotImplemented
+}
+
+func (c *TenantSvcClient) UpdateTenant(context.Context, uuid.UUID, ports.UpdateTenantInput) (ports.Tenant, error) {
+	return ports.Tenant{}, ports.ErrNotImplemented
+}
+
+func (c *TenantSvcClient) FreezeTenant(context.Context, uuid.UUID, string) (ports.Tenant, error) {
+	return ports.Tenant{}, ports.ErrNotImplemented
+}
+
+func (c *TenantSvcClient) UnfreezeTenant(context.Context, uuid.UUID, string) (ports.Tenant, error) {
+	return ports.Tenant{}, ports.ErrNotImplemented
+}
+
+func (c *TenantSvcClient) DisableTenant(context.Context, uuid.UUID, string) (ports.Tenant, error) {
+	return ports.Tenant{}, ports.ErrNotImplemented
+}
+
+func (c *TenantSvcClient) GetTenantAuth(context.Context, uuid.UUID) (ports.TenantAuth, error) {
+	return ports.TenantAuth{}, ports.ErrNotImplemented
+}
+
+func (c *TenantSvcClient) UpdateTenantAuth(context.Context, uuid.UUID, ports.TenantAuthPatch) (ports.TenantAuth, error) {
+	return ports.TenantAuth{}, ports.ErrNotImplemented
+}
+
 func decodeTenant(raw any) (ports.Tenant, error) {
 	obj, err := asObject(raw)
 	if err != nil {

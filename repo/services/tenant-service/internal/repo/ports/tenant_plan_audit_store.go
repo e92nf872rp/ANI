@@ -37,6 +37,14 @@ type AuditLogFilter struct {
 	Cursor string // 上一页返回的 next_cursor；空串 = 第一页
 }
 
+// TenantAuditLogFilter 过滤租户操作历史（US-016）。
+type TenantAuditLogFilter struct {
+	Limit  int
+	Cursor string
+	Action string
+	Result string // success | failure；空串表示不过滤
+}
+
 // AuditLogListResult 是审计日志查询的返回（游标分页）。
 // 风格与项目内其他分页结果一致（Items + Total + NextCursor，具体类型、不使用泛型）。
 type AuditLogListResult struct {
@@ -45,19 +53,20 @@ type AuditLogListResult struct {
 	NextCursor string     // 下一页游标；空串 = 已无更多数据
 }
 
-// TenantPlanAuditStore 定义【配额套餐域】的审计日志数据访问接口。
-// 实现：services/tenant-service/internal/repo/adapters（tenant-service 自有 repo 层）。
+// TenantPlanAuditStore 定义 tenant-service 侧 audit_logs 读写（复用分区表）。
+// 实现：services/tenant-service/internal/repo/adapters/postgres/tenant_plan_audit_store.go。
 //
-// 审计按业务域拆分：本接口仅覆盖“配额套餐”域（resource='tenant_plan'）。
-// 其余业务域（租户列表 tenant / 租户管理员 tenant-admin / 平台运营账户 platform-admin）
-// 各自拥有独立的审计 store，留待对应 PR 在 internal/repo/ports 下新增，不入本接口。
+// Create 供各业务域写入；List* 按不同维度查询（套餐 plan_id / 租户 tenant_id）。
 type TenantPlanAuditStore interface {
-	// Create 写入一条配额套餐域审计日志并返回其 ID。
+	// Create 写入一条审计日志并返回其 ID。
 	// 调用方（service 层）负责构造完整的 AuditLog（含 action/resource/details）。
-	// 各业务操作的 action/details 约定见接口顶部注释。
 	Create(ctx context.Context, log AuditLog) (uuid.UUID, error)
 
 	// ListPlanAuditLogs 按套餐（details->>'plan_id' = planID）查询配额套餐操作历史，
 	// 游标分页。用于 GET /tenant-plans/{planId}/audit-logs。
 	ListPlanAuditLogs(ctx context.Context, planID uuid.UUID, filter AuditLogFilter) (AuditLogListResult, error)
+
+	// ListTenantAuditLogs 按 tenant_id 查询租户操作历史，游标分页。
+	// 用于 GET /tenants/{tenantId}/audit-logs（US-016）。
+	ListTenantAuditLogs(ctx context.Context, tenantID uuid.UUID, filter TenantAuditLogFilter) (AuditLogListResult, error)
 }

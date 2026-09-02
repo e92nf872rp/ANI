@@ -1,0 +1,308 @@
+syntax = "proto3";
+
+package tenant.v1;
+
+import "common/v1/common.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+option go_package = "github.com/kubercloud/ani/pkg/generated/pb/tenant/v1;tenantv1";
+
+// TenantListService manages BOSS tenant list lifecycle (create / list / detail /
+// state machine / SSO-MFA / quota proxy / quota change requests / lifecycle / audit).
+// The gateway (BOSS API) handles auth/scope/idempotency and calls this service
+// over gRPC. All RPCs return UNIMPLEMENTED until later issues fill them in.
+service TenantListService {
+  // ListAvailablePlans returns active tenant plans for create-tenant selector.
+  rpc ListAvailablePlans(ListAvailablePlansRequest) returns (ListAvailablePlansResponse);
+  // CreateTenant creates a tenant with first admin and plan binding.
+  rpc CreateTenant(CreateTenantRequest) returns (common.v1.IdempotentResult);
+  // ListTenants returns a cursor-paginated tenant list.
+  rpc ListTenants(ListTenantsRequest) returns (ListTenantsResponse);
+  // GetTenantDetail returns full tenant detail.
+  rpc GetTenantDetail(GetTenantDetailRequest) returns (TenantDetail);
+  // UpdateTenant updates display_name / contact_email.
+  rpc UpdateTenant(UpdateTenantRequest) returns (common.v1.IdempotentResult);
+  // FreezeTenant transitions active -> frozen.
+  rpc FreezeTenant(FreezeTenantRequest) returns (common.v1.IdempotentResult);
+  // UnfreezeTenant transitions frozen -> active.
+  rpc UnfreezeTenant(UnfreezeTenantRequest) returns (common.v1.IdempotentResult);
+  // DisableTenant transitions active/frozen -> disabled (terminal).
+  rpc DisableTenant(DisableTenantRequest) returns (common.v1.IdempotentResult);
+  // GetTenantAuth returns SSO/MFA config view.
+  rpc GetTenantAuth(GetTenantAuthRequest) returns (TenantAuthConfig);
+  // UpdateTenantSso updates SSO fields (maps to Core updateTenantAuth).
+  rpc UpdateTenantSso(UpdateTenantSsoRequest) returns (common.v1.IdempotentResult);
+  // TestTenantSso runs OIDC discovery without persisting state.
+  rpc TestTenantSso(TestTenantSsoRequest) returns (SsoTestResult);
+  // UpdateTenantMfa toggles tenant-level MFA requirement.
+  rpc UpdateTenantMfa(UpdateTenantMfaRequest) returns (common.v1.IdempotentResult);
+  // GetTenantQuota returns quota usage view (Core proxy + meta join).
+  rpc GetTenantQuota(GetTenantQuotaRequest) returns (GetTenantQuotaResponse);
+  // SubmitQuotaChangeRequest submits or overwrites pending quota change rows.
+  rpc SubmitQuotaChangeRequest(SubmitQuotaChangeRequestRequest) returns (common.v1.IdempotentResult);
+  // ListQuotaChangeRequests lists quota change requests (no pagination).
+  rpc ListQuotaChangeRequests(ListQuotaChangeRequestsRequest) returns (ListQuotaChangeRequestsResponse);
+  // ReviewQuotaChangeRequest approves or rejects a pending request.
+  rpc ReviewQuotaChangeRequest(ReviewQuotaChangeRequestRequest) returns (common.v1.IdempotentResult);
+  // ListTenantLifecycle returns tenant lifecycle entries.
+  rpc ListTenantLifecycle(ListTenantLifecycleRequest) returns (ListTenantLifecycleResponse);
+  // ListTenantAuditLogs returns tenant-scoped audit logs.
+  rpc ListTenantAuditLogs(ListTenantAuditLogsRequest) returns (ListTenantAuditLogsResponse);
+  // ListTenantAdmins returns tenant-scoped admin list (Core listTenantUsers proxy).
+  rpc ListTenantAdmins(ListTenantAdminsRequest) returns (ListTenantAdminsResponse);
+}
+
+// ── RPC request / response ───────────────────────────────────────────────────
+
+message ListAvailablePlansRequest {}
+
+message ListAvailablePlansResponse {
+  repeated AvailableTenantPlan items = 1;
+}
+
+message CreateTenantRequest {
+  string name = 1;             // ^[a-z0-9-]{3,40}$
+  string display_name = 2;
+  string email = 3;            // tenant contact email
+  string plan_id = 4;
+  string admin_email = 5;
+  string admin_name = 6;
+  string admin_password = 7;   // plaintext; never echoed in responses
+  string idempotency_key = 8;  // required UUID
+}
+
+message ListTenantsRequest {
+  string status = 1;  // active | frozen | disabled; empty = all
+  string search = 2;  // fuzzy match name or display_name
+  common.v1.CursorPageRequest page = 3;
+}
+
+message ListTenantsResponse {
+  repeated TenantListItem items = 1;
+  string next_cursor = 2;  // empty = no more
+}
+
+message GetTenantDetailRequest {
+  string tenant_id = 1;
+}
+
+message UpdateTenantRequest {
+  string tenant_id = 1;
+  google.protobuf.StringValue display_name = 2;   // unset = no change
+  google.protobuf.StringValue contact_email = 3;  // unset = no change
+  string idempotency_key = 4;  // required UUID
+}
+
+message FreezeTenantRequest {
+  string tenant_id = 1;
+  string idempotency_key = 2;  // required UUID
+}
+
+message UnfreezeTenantRequest {
+  string tenant_id = 1;
+  string idempotency_key = 2;  // required UUID
+}
+
+message DisableTenantRequest {
+  string tenant_id = 1;
+  string idempotency_key = 2;  // required UUID
+}
+
+message GetTenantAuthRequest {
+  string tenant_id = 1;
+}
+
+message UpdateTenantSsoRequest {
+  string tenant_id = 1;
+  google.protobuf.BoolValue sso_enabled = 2;   // unset = no change
+  google.protobuf.StringValue provider = 3;  // unset = no change
+  string idempotency_key = 4;  // required UUID
+}
+
+message TestTenantSsoRequest {
+  string tenant_id = 1;
+}
+
+message UpdateTenantMfaRequest {
+  string tenant_id = 1;
+  bool mfa_required = 2;
+  string idempotency_key = 3;  // required UUID
+}
+
+message GetTenantQuotaRequest {
+  string tenant_id = 1;
+}
+
+message GetTenantQuotaResponse {
+  repeated TenantQuotaViewItem items = 1;
+}
+
+message SubmitQuotaChangeRequestRequest {
+  string tenant_id = 1;
+  repeated QuotaChangeRequestInput items = 2;  // min 1; unique resource_type per batch
+  string idempotency_key = 3;  // required UUID
+}
+
+message ListQuotaChangeRequestsRequest {
+  string tenant_id = 1;
+  string status = 2;  // pending | approved | rejected; empty = all
+}
+
+message ListQuotaChangeRequestsResponse {
+  repeated QuotaChangeRequest items = 1;
+}
+
+message ReviewQuotaChangeRequestRequest {
+  string tenant_id = 1;
+  string request_id = 2;
+  bool approved = 3;
+  string idempotency_key = 4;  // required UUID
+}
+
+message ListTenantLifecycleRequest {
+  string tenant_id = 1;
+  string action = 2;  // create | freeze | unfreeze | disable; empty = all
+  common.v1.CursorPageRequest page = 3;
+}
+
+message ListTenantLifecycleResponse {
+  repeated TenantLifecycleEntry items = 1;
+  string next_cursor = 2;  // empty = no more
+}
+
+message ListTenantAuditLogsRequest {
+  string tenant_id = 1;
+  string action = 2;   // optional filter
+  string result = 3;   // success | failure; empty = all
+  common.v1.CursorPageRequest page = 4;
+}
+
+message ListTenantAuditLogsResponse {
+  repeated TenantAuditLogEntry items = 1;
+  string next_cursor = 2;  // empty = no more
+}
+
+message ListTenantAdminsRequest {
+  string tenant_id = 1;
+  string role = 2;     // tenant-admin | user | auditor; empty = all
+  string status = 3;   // active | disabled; empty = all
+  string search = 4; // fuzzy match email/username/display_name
+  common.v1.CursorPageRequest page = 5;
+}
+
+message ListTenantAdminsResponse {
+  repeated TenantScopedAdmin items = 1;
+  string next_cursor = 2;  // empty = no more
+}
+
+// ── Domain messages (align OpenAPI services/v1.yaml) ─────────────────────────
+
+message AvailableTenantPlan {
+  string id = 1;
+  string code = 2;
+  string name = 3;
+}
+
+message TenantListItem {
+  string id = 1;
+  string name = 2;
+  string display_name = 3;
+  string plan_id = 4;
+  string plan_code = 5;
+  string status = 6;       // active | frozen | disabled
+  int64 admin_count = 7;
+  google.protobuf.Timestamp created_at = 8;
+}
+
+message TenantDetail {
+  string id = 1;
+  string name = 2;
+  string display_name = 3;
+  string plan_id = 4;
+  string plan_code = 5;
+  string status = 6;
+  google.protobuf.StringValue contact_email = 7;
+  int64 user_count = 8;
+  int64 admin_count = 9;
+  google.protobuf.Timestamp frozen_at = 10;
+  google.protobuf.Timestamp disabled_at = 11;
+  google.protobuf.Timestamp created_at = 12;
+  google.protobuf.Timestamp updated_at = 13;
+}
+
+message TenantAuthConfig {
+  bool sso_enabled = 1;
+  google.protobuf.StringValue provider = 2;
+  bool mfa_required = 3;
+  google.protobuf.Timestamp updated_at = 4;
+}
+
+message SsoTestResult {
+  bool success = 1;
+  google.protobuf.Struct discovery_result = 2;
+  google.protobuf.StringValue error = 3;
+  google.protobuf.Timestamp tested_at = 4;
+}
+
+message TenantQuotaViewItem {
+  string resource_type = 1;
+  string display_name = 2;
+  int64 used = 3;
+  int64 total = 4;
+  string unit = 5;
+}
+
+message QuotaChangeRequestInput {
+  string resource_type = 1;  // ^[a-z0-9_]{2,40}$
+  int64 new_value = 2;       // >= 0
+}
+
+message QuotaChangeRequest {
+  string id = 1;
+  string tenant_id = 2;
+  string resource_type = 3;
+  int64 old_value = 4;
+  int64 new_value = 5;
+  string status = 6;         // pending | approved | rejected
+  string requested_by = 7;
+  google.protobuf.Timestamp created_at = 8;
+}
+
+message TenantLifecycleEntry {
+  string id = 1;
+  string action = 2;         // create | freeze | unfreeze | disable
+  google.protobuf.StringValue reason = 3;
+  google.protobuf.StringValue user_id = 4;
+  google.protobuf.StringValue request_id = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+message TenantAuditLogEntry {
+  string id = 1;
+  string action = 2;
+  string resource = 3;
+  string result = 4;         // success | failure
+  google.protobuf.StringValue user_id = 5;
+  google.protobuf.Struct details = 6;
+  google.protobuf.Timestamp created_at = 7;
+}
+
+message TenantScopedAdminTenantRef {
+  string id = 1;
+  string name = 2;
+  string display_name = 3;
+}
+
+message TenantScopedAdmin {
+  string id = 1;
+  string email = 2;
+  string username = 3;
+  google.protobuf.StringValue display_name = 4;
+  string role = 5;           // tenant-admin | user | auditor
+  string status = 6;         // active | disabled
+  string source = 7;         // local | third_party
+  google.protobuf.Timestamp last_login_at = 8;
+  TenantScopedAdminTenantRef tenant = 9;
+}

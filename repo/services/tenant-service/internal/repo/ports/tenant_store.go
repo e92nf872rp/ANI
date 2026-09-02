@@ -1,14 +1,15 @@
 package ports
 
 import (
+	"context"
 	"time"
 
 	"github.com/google/uuid"
 )
 
-// 租户领域结构体（DTO）。
-// tenants 表的读写已迁到 Core（GET/PUT /admin/tenants/...）；本包仅保留 BindPlanQuota
-// 所需的领域类型，供 Core HTTP 客户端反序列化与 service 层状态判断使用。
+// 租户领域结构体与本地表 store 端口。
+// tenants 主表读写经 Core（GET/PUT /admin/tenants/...）；本包保留领域 DTO 供 Core HTTP 客户端
+// 反序列化与 service 层状态判断，并承载 tenant_lifecycle / tenant_quota_change 本地持久化。
 
 // =============================================================================
 // 状态枚举
@@ -51,4 +52,78 @@ type Tenant struct {
 	DisabledAt   *time.Time
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+}
+
+// TenantLifecycleEntry 是租户生命周期记录（tenant_lifecycle 表一行）。
+// 写入由 Core 状态转换事务完成；US-015 列表查询 intentionally 经 TenantStore 直读 PG
+//（同 audit_logs 先例），不走 Core GET /admin/tenants/{id}/lifecycle SDK。
+type TenantLifecycleEntry struct {
+	ID        uuid.UUID
+	TenantID  uuid.UUID
+	Action    string // create | freeze | unfreeze | disable
+	Reason    *string
+	UserID    *uuid.UUID
+	RequestID *string
+	CreatedAt time.Time
+}
+
+// TenantLifecycleFilter 过滤租户生命周期列表（US-015）。
+type TenantLifecycleFilter struct {
+	Limit  int
+	Cursor string
+	Action string
+}
+
+// TenantLifecycleListResult 是生命周期游标分页结果。
+type TenantLifecycleListResult struct {
+	Items      []TenantLifecycleEntry
+	NextCursor string
+}
+
+// QuotaChangeRequest 表示 tenant_quota_change 表一行（US-012~014）。
+type QuotaChangeRequest struct {
+	ID           uuid.UUID
+	TenantID     uuid.UUID
+	ResourceType string
+	OldValue     *int64 // NULL = 首次设置
+	NewValue     int64
+	Status       string // pending | approved | rejected
+	RequestedBy  uuid.UUID
+	ReviewedBy   *uuid.UUID
+	ReviewedAt   *time.Time
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+// QuotaChangePendingInput 是 UpsertPendingQuotaChanges 单维度写入输入。
+type QuotaChangePendingInput struct {
+	ResourceType string
+	OldValue     *int64
+	NewValue     int64
+	RequestedBy  uuid.UUID
+}
+
+// =============================================================================
+// Store 接口（tenant_lifecycle / tenant_quota_change）
+// =============================================================================
+
+// TenantStore 定义租户模块对本地表的只读/读写访问。
+// 实现：internal/repo/adapters/postgres/tenant_store.go。
+//
+// tenants / tenant_auth 主数据经 TenantSvcClient（Core API）；禁止在本 store 直接 SQL 操作。
+type TenantStore interface {
+	// ListLifecycle 查询 tenant_lifecycle；action 空串表示不过滤。
+	ListLifecycle(ctx context.Context, tenantID uuid.UUID, filter TenantLifecycleFilter) (TenantLifecycleListResult, error)
+
+	// UpsertPendingQuotaChanges 逐维度覆盖：UPDATE WHERE status='pending' 命中则覆盖；0 行则 INSERT。
+	UpsertPendingQuotaChanges(ctx context.Context, tenantID uuid.UUID, items []QuotaChangePendingInput) error
+
+	// ListQuotaChangesByTenant 按租户查询；status 空串表示不过滤；不分页，按 created_at DESC。
+	ListQuotaChangesByTenant(ctx context.Context, tenantID uuid.UUID, status string) ([]QuotaChangeRequest, error)
+
+	// GetQuotaChangeByID 按主键查询；不存在 → ErrQuotaChangeRequestNotFound。
+	GetQuotaChangeByID(ctx context.Context, tenantID, id uuid.UUID) (QuotaChangeRequest, error)
+
+	// SetQuotaChangeStatus 乐观锁更新 status（WHERE status='pending'）；返回受影响行数（0 → 非 pending）。
+	SetQuotaChangeStatus(ctx context.Context, tenantID, id uuid.UUID, status string, reviewedBy uuid.UUID) (int64, error)
 }

@@ -1187,9 +1187,14 @@ type InferenceServiceAccelerator struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	SpecId          string `protobuf:"bytes,1,opt,name=spec_id,json=specId,proto3" json:"spec_id,omitempty"`
-	CountPerReplica int32  `protobuf:"varint,2,opt,name=count_per_replica,json=countPerReplica,proto3" json:"count_per_replica,omitempty"`
-	Memory          int32  `protobuf:"varint,3,opt,name=memory,proto3" json:"memory,omitempty"`
+	// GPU 型号，例如 gpu-nvidia-geforce-rtx-4090。只表示型号，不表示整卡或 vGPU。
+	// 历史 -full / -Nx 剥后缀后仍按型号处理。
+	SpecId string `protobuf:"bytes,1,opt,name=spec_id,json=specId,proto3" json:"spec_id,omitempty"`
+	// 每个副本申请的卡数。整卡和 vGPU 都必填，最小 1。
+	CountPerReplica int32 `protobuf:"varint,2,opt,name=count_per_replica,json=countPerReplica,proto3" json:"count_per_replica,omitempty"`
+	// 申请 GPU 显存，单位 MiB。内部 0 表示未填，按整卡；>=1=vGPU。
+	// JSON 若出现 memory，必须 >= 1。不是 InferenceServiceResources.memory 的内存预算。
+	Memory int32 `protobuf:"varint,3,opt,name=memory,proto3" json:"memory,omitempty"`
 }
 
 func (x *InferenceServiceAccelerator) Reset() {

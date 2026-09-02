@@ -45,6 +45,24 @@ var (
 	// ErrTenantStateInvalid 表示租户状态不允许该操作（如 disabled 绑套餐，HTTP 409）。
 	ErrTenantStateInvalid = errors.New("TENANT_STATE_INVALID")
 
+	// ErrTenantNameConflict 表示租户 name UNIQUE 冲突（HTTP 409）。
+	ErrTenantNameConflict = errors.New("TENANT_NAME_CONFLICT")
+
+	// ErrTenantHasRunningResources 表示禁用前配额 used>0（HTTP 409）。
+	ErrTenantHasRunningResources = errors.New("TENANT_HAS_RUNNING_RESOURCES")
+
+	// ErrTenantSsoConfigInvalid 表示 sso_enabled 无 provider（HTTP 422）。
+	ErrTenantSsoConfigInvalid = errors.New("TENANT_SSO_CONFIG_INVALID")
+
+	// ErrQuotaChangeRequestInvalid 表示配额变更申请参数非法（HTTP 422）。
+	ErrQuotaChangeRequestInvalid = errors.New("QUOTA_CHANGE_REQUEST_INVALID")
+
+	// ErrQuotaChangeRequestNotPending 表示审批时非 pending 状态（HTTP 409）。
+	ErrQuotaChangeRequestNotPending = errors.New("QUOTA_CHANGE_REQUEST_NOT_PENDING")
+
+	// ErrQuotaChangeRequestNotFound 表示配额变更申请不存在（HTTP 404）。
+	ErrQuotaChangeRequestNotFound = errors.New("QUOTA_CHANGE_REQUEST_NOT_FOUND")
+
 	// ErrNotImplemented 表示接口已声明但业务尚未实现（gRPC UNIMPLEMENTED / HTTP 501）。
 	ErrNotImplemented = errors.New("NOT_IMPLEMENTED")
 

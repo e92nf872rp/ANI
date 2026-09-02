@@ -173,3 +173,7 @@ func (s *PostgresTenantPlanAuditStore) ListPlanAuditLogs(ctx context.Context, pl
 		NextCursor: nextCursor,
 	}, nil
 }
+
+func (s *PostgresTenantPlanAuditStore) ListTenantAuditLogs(context.Context, uuid.UUID, ports.TenantAuditLogFilter) (ports.AuditLogListResult, error) {
+	return ports.AuditLogListResult{}, ports.ErrNotImplemented
+}

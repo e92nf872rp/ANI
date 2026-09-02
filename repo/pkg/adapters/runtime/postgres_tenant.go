@@ -71,6 +71,42 @@ func (t *PostgresTenant) GetTenant(ctx context.Context, tenantID string) (ports.
 	return out, nil
 }
 
+func (t *PostgresTenant) CreateTenant(context.Context, ports.CreateTenantInput) (ports.Tenant, error) {
+	return ports.Tenant{}, ports.ErrUnsupported
+}
+
+func (t *PostgresTenant) ListTenants(context.Context, ports.ListTenantsFilter) (ports.TenantListResult, error) {
+	return ports.TenantListResult{}, ports.ErrUnsupported
+}
+
+func (t *PostgresTenant) UpdateTenant(context.Context, string, ports.UpdateTenantInput) (ports.Tenant, error) {
+	return ports.Tenant{}, ports.ErrUnsupported
+}
+
+func (t *PostgresTenant) FreezeTenant(context.Context, string, string) (ports.Tenant, error) {
+	return ports.Tenant{}, ports.ErrUnsupported
+}
+
+func (t *PostgresTenant) UnfreezeTenant(context.Context, string, string) (ports.Tenant, error) {
+	return ports.Tenant{}, ports.ErrUnsupported
+}
+
+func (t *PostgresTenant) DisableTenant(context.Context, string, string) (ports.Tenant, error) {
+	return ports.Tenant{}, ports.ErrUnsupported
+}
+
+func (t *PostgresTenant) GetTenantAuth(context.Context, string) (ports.TenantAuth, error) {
+	return ports.TenantAuth{}, ports.ErrUnsupported
+}
+
+func (t *PostgresTenant) UpdateTenantAuth(context.Context, string, ports.TenantAuthPatch) (ports.TenantAuth, error) {
+	return ports.TenantAuth{}, ports.ErrUnsupported
+}
+
+func (t *PostgresTenant) ListTenantLifecycle(context.Context, string, ports.TenantLifecycleFilter) (ports.TenantLifecycleListResult, error) {
+	return ports.TenantLifecycleListResult{}, ports.ErrUnsupported
+}
+
 func parseTenantUUID(raw string) (uuid.UUID, error) {
 	return parseAdminUUID(raw, "tenant_id")
 }
