@@ -15,7 +15,7 @@ func main() {
 	defer deps.Close()
 
 	plans := postgres.NewPostgresTenantPlanStore(deps.DB)
-	audit := postgres.NewPostgresTenantPlanAuditStore(deps.DB)
+	audit := postgres.NewPostgresAuditStore(deps.DB)
 	coreQuota := core.NewQuotaSvcClient()
 	coreTenants := core.NewTenantSvcClient()
 	coreTenantPlans := core.NewTenantPlanSvcClient()
@@ -24,15 +24,12 @@ func main() {
 	tenantStore := postgres.NewPostgresTenantStore(deps.DB)
 
 	tenantPlanSvc := service.NewTenantPlanService(plans, audit, coreQuota, coreTenantPlans)
-	tenantSvc := service.NewTenantService(plans, coreTenants, coreTenantPlans, coreQuota, audit)
+	tenantSvc := service.NewTenantService(plans, coreTenants, coreTenantPlans, coreQuota, tenantStore, audit, coreTenantAdmins, nil, nil)
 	tenantAdminSvc := service.NewTenantAdminService(coreTenantAdmins, coreTenants, tenantAdmin, audit)
-	// SSO adapter 在 Issue-005 接入；lifecycle/quota_change 经 tenantStore 直读 PG（与 audit_logs 先例一致）。
-	tenantListSvc := service.NewTenantListService(plans, coreTenants, coreTenantAdmins, coreQuota, tenantStore, audit, nil, nil)
 
 	bootstrap.RunGRPC(cfg.GRPCPort, func(s *grpc.Server) {
 		tenantPlanSvc.Register(s)
 		tenantSvc.Register(s)
 		tenantAdminSvc.Register(s)
-		tenantListSvc.Register(s)
 	}, deps)
 }

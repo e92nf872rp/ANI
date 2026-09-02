@@ -8,6 +8,7 @@ package tenantv1
 
 import (
 	context "context"
+	v1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -579,7 +580,26 @@ var TenantPlanService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	TenantService_BindPlanQuota_FullMethodName = "/tenant.v1.TenantService/BindPlanQuota"
+	TenantService_BindPlanQuota_FullMethodName            = "/tenant.v1.TenantService/BindPlanQuota"
+	TenantService_ListAvailablePlans_FullMethodName       = "/tenant.v1.TenantService/ListAvailablePlans"
+	TenantService_CreateTenant_FullMethodName             = "/tenant.v1.TenantService/CreateTenant"
+	TenantService_ListTenants_FullMethodName              = "/tenant.v1.TenantService/ListTenants"
+	TenantService_GetTenantDetail_FullMethodName          = "/tenant.v1.TenantService/GetTenantDetail"
+	TenantService_UpdateTenant_FullMethodName             = "/tenant.v1.TenantService/UpdateTenant"
+	TenantService_FreezeTenant_FullMethodName             = "/tenant.v1.TenantService/FreezeTenant"
+	TenantService_UnfreezeTenant_FullMethodName           = "/tenant.v1.TenantService/UnfreezeTenant"
+	TenantService_DisableTenant_FullMethodName            = "/tenant.v1.TenantService/DisableTenant"
+	TenantService_GetTenantAuth_FullMethodName            = "/tenant.v1.TenantService/GetTenantAuth"
+	TenantService_UpdateTenantSso_FullMethodName          = "/tenant.v1.TenantService/UpdateTenantSso"
+	TenantService_TestTenantSso_FullMethodName            = "/tenant.v1.TenantService/TestTenantSso"
+	TenantService_UpdateTenantMfa_FullMethodName          = "/tenant.v1.TenantService/UpdateTenantMfa"
+	TenantService_GetTenantQuota_FullMethodName           = "/tenant.v1.TenantService/GetTenantQuota"
+	TenantService_SubmitQuotaChangeRequest_FullMethodName = "/tenant.v1.TenantService/SubmitQuotaChangeRequest"
+	TenantService_ListQuotaChangeRequests_FullMethodName  = "/tenant.v1.TenantService/ListQuotaChangeRequests"
+	TenantService_ReviewQuotaChangeRequest_FullMethodName = "/tenant.v1.TenantService/ReviewQuotaChangeRequest"
+	TenantService_ListTenantLifecycle_FullMethodName      = "/tenant.v1.TenantService/ListTenantLifecycle"
+	TenantService_ListTenantAuditLogs_FullMethodName      = "/tenant.v1.TenantService/ListTenantAuditLogs"
+	TenantService_ListTenantAdmins_FullMethodName         = "/tenant.v1.TenantService/ListTenantAdmins"
 )
 
 // TenantServiceClient is the client API for TenantService service.
@@ -588,6 +608,44 @@ const (
 type TenantServiceClient interface {
 	// BindPlanQuota binds a quota plan to a tenant and pushes effective quota to Core.
 	BindPlanQuota(ctx context.Context, in *BindPlanQuotaRequest, opts ...grpc.CallOption) (*IdempotentResult, error)
+	// ListAvailablePlans returns active tenant plans for create-tenant selector.
+	ListAvailablePlans(ctx context.Context, in *ListAvailablePlansRequest, opts ...grpc.CallOption) (*ListAvailablePlansResponse, error)
+	// CreateTenant creates a tenant with first admin and plan binding.
+	CreateTenant(ctx context.Context, in *CreateTenantRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error)
+	// ListTenants returns a cursor-paginated tenant list.
+	ListTenants(ctx context.Context, in *ListTenantsRequest, opts ...grpc.CallOption) (*ListTenantsResponse, error)
+	// GetTenantDetail returns full tenant detail.
+	GetTenantDetail(ctx context.Context, in *GetTenantDetailRequest, opts ...grpc.CallOption) (*TenantDetail, error)
+	// UpdateTenant updates display_name / contact_email.
+	UpdateTenant(ctx context.Context, in *UpdateTenantRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error)
+	// FreezeTenant transitions active -> frozen.
+	FreezeTenant(ctx context.Context, in *FreezeTenantRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error)
+	// UnfreezeTenant transitions frozen -> active.
+	UnfreezeTenant(ctx context.Context, in *UnfreezeTenantRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error)
+	// DisableTenant transitions active/frozen -> disabled (terminal).
+	DisableTenant(ctx context.Context, in *DisableTenantRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error)
+	// GetTenantAuth returns SSO/MFA config view.
+	GetTenantAuth(ctx context.Context, in *GetTenantAuthRequest, opts ...grpc.CallOption) (*TenantAuthConfig, error)
+	// UpdateTenantSso updates SSO fields (maps to Core updateTenantAuth).
+	UpdateTenantSso(ctx context.Context, in *UpdateTenantSsoRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error)
+	// TestTenantSso runs OIDC discovery without persisting state.
+	TestTenantSso(ctx context.Context, in *TestTenantSsoRequest, opts ...grpc.CallOption) (*SsoTestResult, error)
+	// UpdateTenantMfa toggles tenant-level MFA requirement.
+	UpdateTenantMfa(ctx context.Context, in *UpdateTenantMfaRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error)
+	// GetTenantQuota returns quota usage view (Core proxy + meta join).
+	GetTenantQuota(ctx context.Context, in *GetTenantQuotaRequest, opts ...grpc.CallOption) (*GetTenantQuotaResponse, error)
+	// SubmitQuotaChangeRequest submits or overwrites pending quota change rows.
+	SubmitQuotaChangeRequest(ctx context.Context, in *SubmitQuotaChangeRequestRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error)
+	// ListQuotaChangeRequests lists quota change requests (no pagination).
+	ListQuotaChangeRequests(ctx context.Context, in *ListQuotaChangeRequestsRequest, opts ...grpc.CallOption) (*ListQuotaChangeRequestsResponse, error)
+	// ReviewQuotaChangeRequest approves or rejects a pending request.
+	ReviewQuotaChangeRequest(ctx context.Context, in *ReviewQuotaChangeRequestRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error)
+	// ListTenantLifecycle returns tenant lifecycle entries.
+	ListTenantLifecycle(ctx context.Context, in *ListTenantLifecycleRequest, opts ...grpc.CallOption) (*ListTenantLifecycleResponse, error)
+	// ListTenantAuditLogs returns tenant-scoped audit logs.
+	ListTenantAuditLogs(ctx context.Context, in *ListTenantAuditLogsRequest, opts ...grpc.CallOption) (*ListTenantAuditLogsResponse, error)
+	// ListTenantAdmins returns tenant-scoped admin list (Core listTenantUsers proxy).
+	ListTenantAdmins(ctx context.Context, in *ListTenantAdminsRequest, opts ...grpc.CallOption) (*ListTenantAdminsResponse, error)
 }
 
 type tenantServiceClient struct {
@@ -607,12 +665,221 @@ func (c *tenantServiceClient) BindPlanQuota(ctx context.Context, in *BindPlanQuo
 	return out, nil
 }
 
+func (c *tenantServiceClient) ListAvailablePlans(ctx context.Context, in *ListAvailablePlansRequest, opts ...grpc.CallOption) (*ListAvailablePlansResponse, error) {
+	out := new(ListAvailablePlansResponse)
+	err := c.cc.Invoke(ctx, TenantService_ListAvailablePlans_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tenantServiceClient) CreateTenant(ctx context.Context, in *CreateTenantRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error) {
+	out := new(v1.IdempotentResult)
+	err := c.cc.Invoke(ctx, TenantService_CreateTenant_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tenantServiceClient) ListTenants(ctx context.Context, in *ListTenantsRequest, opts ...grpc.CallOption) (*ListTenantsResponse, error) {
+	out := new(ListTenantsResponse)
+	err := c.cc.Invoke(ctx, TenantService_ListTenants_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tenantServiceClient) GetTenantDetail(ctx context.Context, in *GetTenantDetailRequest, opts ...grpc.CallOption) (*TenantDetail, error) {
+	out := new(TenantDetail)
+	err := c.cc.Invoke(ctx, TenantService_GetTenantDetail_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tenantServiceClient) UpdateTenant(ctx context.Context, in *UpdateTenantRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error) {
+	out := new(v1.IdempotentResult)
+	err := c.cc.Invoke(ctx, TenantService_UpdateTenant_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tenantServiceClient) FreezeTenant(ctx context.Context, in *FreezeTenantRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error) {
+	out := new(v1.IdempotentResult)
+	err := c.cc.Invoke(ctx, TenantService_FreezeTenant_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tenantServiceClient) UnfreezeTenant(ctx context.Context, in *UnfreezeTenantRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error) {
+	out := new(v1.IdempotentResult)
+	err := c.cc.Invoke(ctx, TenantService_UnfreezeTenant_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tenantServiceClient) DisableTenant(ctx context.Context, in *DisableTenantRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error) {
+	out := new(v1.IdempotentResult)
+	err := c.cc.Invoke(ctx, TenantService_DisableTenant_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tenantServiceClient) GetTenantAuth(ctx context.Context, in *GetTenantAuthRequest, opts ...grpc.CallOption) (*TenantAuthConfig, error) {
+	out := new(TenantAuthConfig)
+	err := c.cc.Invoke(ctx, TenantService_GetTenantAuth_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tenantServiceClient) UpdateTenantSso(ctx context.Context, in *UpdateTenantSsoRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error) {
+	out := new(v1.IdempotentResult)
+	err := c.cc.Invoke(ctx, TenantService_UpdateTenantSso_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tenantServiceClient) TestTenantSso(ctx context.Context, in *TestTenantSsoRequest, opts ...grpc.CallOption) (*SsoTestResult, error) {
+	out := new(SsoTestResult)
+	err := c.cc.Invoke(ctx, TenantService_TestTenantSso_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tenantServiceClient) UpdateTenantMfa(ctx context.Context, in *UpdateTenantMfaRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error) {
+	out := new(v1.IdempotentResult)
+	err := c.cc.Invoke(ctx, TenantService_UpdateTenantMfa_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tenantServiceClient) GetTenantQuota(ctx context.Context, in *GetTenantQuotaRequest, opts ...grpc.CallOption) (*GetTenantQuotaResponse, error) {
+	out := new(GetTenantQuotaResponse)
+	err := c.cc.Invoke(ctx, TenantService_GetTenantQuota_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tenantServiceClient) SubmitQuotaChangeRequest(ctx context.Context, in *SubmitQuotaChangeRequestRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error) {
+	out := new(v1.IdempotentResult)
+	err := c.cc.Invoke(ctx, TenantService_SubmitQuotaChangeRequest_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tenantServiceClient) ListQuotaChangeRequests(ctx context.Context, in *ListQuotaChangeRequestsRequest, opts ...grpc.CallOption) (*ListQuotaChangeRequestsResponse, error) {
+	out := new(ListQuotaChangeRequestsResponse)
+	err := c.cc.Invoke(ctx, TenantService_ListQuotaChangeRequests_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tenantServiceClient) ReviewQuotaChangeRequest(ctx context.Context, in *ReviewQuotaChangeRequestRequest, opts ...grpc.CallOption) (*v1.IdempotentResult, error) {
+	out := new(v1.IdempotentResult)
+	err := c.cc.Invoke(ctx, TenantService_ReviewQuotaChangeRequest_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tenantServiceClient) ListTenantLifecycle(ctx context.Context, in *ListTenantLifecycleRequest, opts ...grpc.CallOption) (*ListTenantLifecycleResponse, error) {
+	out := new(ListTenantLifecycleResponse)
+	err := c.cc.Invoke(ctx, TenantService_ListTenantLifecycle_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tenantServiceClient) ListTenantAuditLogs(ctx context.Context, in *ListTenantAuditLogsRequest, opts ...grpc.CallOption) (*ListTenantAuditLogsResponse, error) {
+	out := new(ListTenantAuditLogsResponse)
+	err := c.cc.Invoke(ctx, TenantService_ListTenantAuditLogs_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tenantServiceClient) ListTenantAdmins(ctx context.Context, in *ListTenantAdminsRequest, opts ...grpc.CallOption) (*ListTenantAdminsResponse, error) {
+	out := new(ListTenantAdminsResponse)
+	err := c.cc.Invoke(ctx, TenantService_ListTenantAdmins_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TenantServiceServer is the server API for TenantService service.
 // All implementations must embed UnimplementedTenantServiceServer
 // for forward compatibility
 type TenantServiceServer interface {
 	// BindPlanQuota binds a quota plan to a tenant and pushes effective quota to Core.
 	BindPlanQuota(context.Context, *BindPlanQuotaRequest) (*IdempotentResult, error)
+	// ListAvailablePlans returns active tenant plans for create-tenant selector.
+	ListAvailablePlans(context.Context, *ListAvailablePlansRequest) (*ListAvailablePlansResponse, error)
+	// CreateTenant creates a tenant with first admin and plan binding.
+	CreateTenant(context.Context, *CreateTenantRequest) (*v1.IdempotentResult, error)
+	// ListTenants returns a cursor-paginated tenant list.
+	ListTenants(context.Context, *ListTenantsRequest) (*ListTenantsResponse, error)
+	// GetTenantDetail returns full tenant detail.
+	GetTenantDetail(context.Context, *GetTenantDetailRequest) (*TenantDetail, error)
+	// UpdateTenant updates display_name / contact_email.
+	UpdateTenant(context.Context, *UpdateTenantRequest) (*v1.IdempotentResult, error)
+	// FreezeTenant transitions active -> frozen.
+	FreezeTenant(context.Context, *FreezeTenantRequest) (*v1.IdempotentResult, error)
+	// UnfreezeTenant transitions frozen -> active.
+	UnfreezeTenant(context.Context, *UnfreezeTenantRequest) (*v1.IdempotentResult, error)
+	// DisableTenant transitions active/frozen -> disabled (terminal).
+	DisableTenant(context.Context, *DisableTenantRequest) (*v1.IdempotentResult, error)
+	// GetTenantAuth returns SSO/MFA config view.
+	GetTenantAuth(context.Context, *GetTenantAuthRequest) (*TenantAuthConfig, error)
+	// UpdateTenantSso updates SSO fields (maps to Core updateTenantAuth).
+	UpdateTenantSso(context.Context, *UpdateTenantSsoRequest) (*v1.IdempotentResult, error)
+	// TestTenantSso runs OIDC discovery without persisting state.
+	TestTenantSso(context.Context, *TestTenantSsoRequest) (*SsoTestResult, error)
+	// UpdateTenantMfa toggles tenant-level MFA requirement.
+	UpdateTenantMfa(context.Context, *UpdateTenantMfaRequest) (*v1.IdempotentResult, error)
+	// GetTenantQuota returns quota usage view (Core proxy + meta join).
+	GetTenantQuota(context.Context, *GetTenantQuotaRequest) (*GetTenantQuotaResponse, error)
+	// SubmitQuotaChangeRequest submits or overwrites pending quota change rows.
+	SubmitQuotaChangeRequest(context.Context, *SubmitQuotaChangeRequestRequest) (*v1.IdempotentResult, error)
+	// ListQuotaChangeRequests lists quota change requests (no pagination).
+	ListQuotaChangeRequests(context.Context, *ListQuotaChangeRequestsRequest) (*ListQuotaChangeRequestsResponse, error)
+	// ReviewQuotaChangeRequest approves or rejects a pending request.
+	ReviewQuotaChangeRequest(context.Context, *ReviewQuotaChangeRequestRequest) (*v1.IdempotentResult, error)
+	// ListTenantLifecycle returns tenant lifecycle entries.
+	ListTenantLifecycle(context.Context, *ListTenantLifecycleRequest) (*ListTenantLifecycleResponse, error)
+	// ListTenantAuditLogs returns tenant-scoped audit logs.
+	ListTenantAuditLogs(context.Context, *ListTenantAuditLogsRequest) (*ListTenantAuditLogsResponse, error)
+	// ListTenantAdmins returns tenant-scoped admin list (Core listTenantUsers proxy).
+	ListTenantAdmins(context.Context, *ListTenantAdminsRequest) (*ListTenantAdminsResponse, error)
 	mustEmbedUnimplementedTenantServiceServer()
 }
 
@@ -622,6 +889,63 @@ type UnimplementedTenantServiceServer struct {
 
 func (UnimplementedTenantServiceServer) BindPlanQuota(context.Context, *BindPlanQuotaRequest) (*IdempotentResult, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BindPlanQuota not implemented")
+}
+func (UnimplementedTenantServiceServer) ListAvailablePlans(context.Context, *ListAvailablePlansRequest) (*ListAvailablePlansResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListAvailablePlans not implemented")
+}
+func (UnimplementedTenantServiceServer) CreateTenant(context.Context, *CreateTenantRequest) (*v1.IdempotentResult, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateTenant not implemented")
+}
+func (UnimplementedTenantServiceServer) ListTenants(context.Context, *ListTenantsRequest) (*ListTenantsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListTenants not implemented")
+}
+func (UnimplementedTenantServiceServer) GetTenantDetail(context.Context, *GetTenantDetailRequest) (*TenantDetail, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetTenantDetail not implemented")
+}
+func (UnimplementedTenantServiceServer) UpdateTenant(context.Context, *UpdateTenantRequest) (*v1.IdempotentResult, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateTenant not implemented")
+}
+func (UnimplementedTenantServiceServer) FreezeTenant(context.Context, *FreezeTenantRequest) (*v1.IdempotentResult, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method FreezeTenant not implemented")
+}
+func (UnimplementedTenantServiceServer) UnfreezeTenant(context.Context, *UnfreezeTenantRequest) (*v1.IdempotentResult, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UnfreezeTenant not implemented")
+}
+func (UnimplementedTenantServiceServer) DisableTenant(context.Context, *DisableTenantRequest) (*v1.IdempotentResult, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DisableTenant not implemented")
+}
+func (UnimplementedTenantServiceServer) GetTenantAuth(context.Context, *GetTenantAuthRequest) (*TenantAuthConfig, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetTenantAuth not implemented")
+}
+func (UnimplementedTenantServiceServer) UpdateTenantSso(context.Context, *UpdateTenantSsoRequest) (*v1.IdempotentResult, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateTenantSso not implemented")
+}
+func (UnimplementedTenantServiceServer) TestTenantSso(context.Context, *TestTenantSsoRequest) (*SsoTestResult, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method TestTenantSso not implemented")
+}
+func (UnimplementedTenantServiceServer) UpdateTenantMfa(context.Context, *UpdateTenantMfaRequest) (*v1.IdempotentResult, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateTenantMfa not implemented")
+}
+func (UnimplementedTenantServiceServer) GetTenantQuota(context.Context, *GetTenantQuotaRequest) (*GetTenantQuotaResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetTenantQuota not implemented")
+}
+func (UnimplementedTenantServiceServer) SubmitQuotaChangeRequest(context.Context, *SubmitQuotaChangeRequestRequest) (*v1.IdempotentResult, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SubmitQuotaChangeRequest not implemented")
+}
+func (UnimplementedTenantServiceServer) ListQuotaChangeRequests(context.Context, *ListQuotaChangeRequestsRequest) (*ListQuotaChangeRequestsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListQuotaChangeRequests not implemented")
+}
+func (UnimplementedTenantServiceServer) ReviewQuotaChangeRequest(context.Context, *ReviewQuotaChangeRequestRequest) (*v1.IdempotentResult, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReviewQuotaChangeRequest not implemented")
+}
+func (UnimplementedTenantServiceServer) ListTenantLifecycle(context.Context, *ListTenantLifecycleRequest) (*ListTenantLifecycleResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListTenantLifecycle not implemented")
+}
+func (UnimplementedTenantServiceServer) ListTenantAuditLogs(context.Context, *ListTenantAuditLogsRequest) (*ListTenantAuditLogsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListTenantAuditLogs not implemented")
+}
+func (UnimplementedTenantServiceServer) ListTenantAdmins(context.Context, *ListTenantAdminsRequest) (*ListTenantAdminsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListTenantAdmins not implemented")
 }
 func (UnimplementedTenantServiceServer) mustEmbedUnimplementedTenantServiceServer() {}
 
@@ -654,6 +978,348 @@ func _TenantService_BindPlanQuota_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TenantService_ListAvailablePlans_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAvailablePlansRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantServiceServer).ListAvailablePlans(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantService_ListAvailablePlans_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantServiceServer).ListAvailablePlans(ctx, req.(*ListAvailablePlansRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TenantService_CreateTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateTenantRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantServiceServer).CreateTenant(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantService_CreateTenant_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantServiceServer).CreateTenant(ctx, req.(*CreateTenantRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TenantService_ListTenants_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTenantsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantServiceServer).ListTenants(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantService_ListTenants_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantServiceServer).ListTenants(ctx, req.(*ListTenantsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TenantService_GetTenantDetail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTenantDetailRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantServiceServer).GetTenantDetail(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantService_GetTenantDetail_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantServiceServer).GetTenantDetail(ctx, req.(*GetTenantDetailRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TenantService_UpdateTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateTenantRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantServiceServer).UpdateTenant(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantService_UpdateTenant_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantServiceServer).UpdateTenant(ctx, req.(*UpdateTenantRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TenantService_FreezeTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FreezeTenantRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantServiceServer).FreezeTenant(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantService_FreezeTenant_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantServiceServer).FreezeTenant(ctx, req.(*FreezeTenantRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TenantService_UnfreezeTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UnfreezeTenantRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantServiceServer).UnfreezeTenant(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantService_UnfreezeTenant_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantServiceServer).UnfreezeTenant(ctx, req.(*UnfreezeTenantRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TenantService_DisableTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DisableTenantRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantServiceServer).DisableTenant(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantService_DisableTenant_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantServiceServer).DisableTenant(ctx, req.(*DisableTenantRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TenantService_GetTenantAuth_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTenantAuthRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantServiceServer).GetTenantAuth(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantService_GetTenantAuth_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantServiceServer).GetTenantAuth(ctx, req.(*GetTenantAuthRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TenantService_UpdateTenantSso_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateTenantSsoRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantServiceServer).UpdateTenantSso(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantService_UpdateTenantSso_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantServiceServer).UpdateTenantSso(ctx, req.(*UpdateTenantSsoRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TenantService_TestTenantSso_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TestTenantSsoRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantServiceServer).TestTenantSso(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantService_TestTenantSso_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantServiceServer).TestTenantSso(ctx, req.(*TestTenantSsoRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TenantService_UpdateTenantMfa_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateTenantMfaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantServiceServer).UpdateTenantMfa(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantService_UpdateTenantMfa_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantServiceServer).UpdateTenantMfa(ctx, req.(*UpdateTenantMfaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TenantService_GetTenantQuota_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTenantQuotaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantServiceServer).GetTenantQuota(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantService_GetTenantQuota_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantServiceServer).GetTenantQuota(ctx, req.(*GetTenantQuotaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TenantService_SubmitQuotaChangeRequest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SubmitQuotaChangeRequestRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantServiceServer).SubmitQuotaChangeRequest(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantService_SubmitQuotaChangeRequest_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantServiceServer).SubmitQuotaChangeRequest(ctx, req.(*SubmitQuotaChangeRequestRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TenantService_ListQuotaChangeRequests_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListQuotaChangeRequestsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantServiceServer).ListQuotaChangeRequests(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantService_ListQuotaChangeRequests_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantServiceServer).ListQuotaChangeRequests(ctx, req.(*ListQuotaChangeRequestsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TenantService_ReviewQuotaChangeRequest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReviewQuotaChangeRequestRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantServiceServer).ReviewQuotaChangeRequest(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantService_ReviewQuotaChangeRequest_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantServiceServer).ReviewQuotaChangeRequest(ctx, req.(*ReviewQuotaChangeRequestRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TenantService_ListTenantLifecycle_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTenantLifecycleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantServiceServer).ListTenantLifecycle(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantService_ListTenantLifecycle_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantServiceServer).ListTenantLifecycle(ctx, req.(*ListTenantLifecycleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TenantService_ListTenantAuditLogs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTenantAuditLogsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantServiceServer).ListTenantAuditLogs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantService_ListTenantAuditLogs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantServiceServer).ListTenantAuditLogs(ctx, req.(*ListTenantAuditLogsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TenantService_ListTenantAdmins_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTenantAdminsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantServiceServer).ListTenantAdmins(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantService_ListTenantAdmins_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantServiceServer).ListTenantAdmins(ctx, req.(*ListTenantAdminsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TenantService_ServiceDesc is the grpc.ServiceDesc for TenantService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -664,6 +1330,82 @@ var TenantService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "BindPlanQuota",
 			Handler:    _TenantService_BindPlanQuota_Handler,
+		},
+		{
+			MethodName: "ListAvailablePlans",
+			Handler:    _TenantService_ListAvailablePlans_Handler,
+		},
+		{
+			MethodName: "CreateTenant",
+			Handler:    _TenantService_CreateTenant_Handler,
+		},
+		{
+			MethodName: "ListTenants",
+			Handler:    _TenantService_ListTenants_Handler,
+		},
+		{
+			MethodName: "GetTenantDetail",
+			Handler:    _TenantService_GetTenantDetail_Handler,
+		},
+		{
+			MethodName: "UpdateTenant",
+			Handler:    _TenantService_UpdateTenant_Handler,
+		},
+		{
+			MethodName: "FreezeTenant",
+			Handler:    _TenantService_FreezeTenant_Handler,
+		},
+		{
+			MethodName: "UnfreezeTenant",
+			Handler:    _TenantService_UnfreezeTenant_Handler,
+		},
+		{
+			MethodName: "DisableTenant",
+			Handler:    _TenantService_DisableTenant_Handler,
+		},
+		{
+			MethodName: "GetTenantAuth",
+			Handler:    _TenantService_GetTenantAuth_Handler,
+		},
+		{
+			MethodName: "UpdateTenantSso",
+			Handler:    _TenantService_UpdateTenantSso_Handler,
+		},
+		{
+			MethodName: "TestTenantSso",
+			Handler:    _TenantService_TestTenantSso_Handler,
+		},
+		{
+			MethodName: "UpdateTenantMfa",
+			Handler:    _TenantService_UpdateTenantMfa_Handler,
+		},
+		{
+			MethodName: "GetTenantQuota",
+			Handler:    _TenantService_GetTenantQuota_Handler,
+		},
+		{
+			MethodName: "SubmitQuotaChangeRequest",
+			Handler:    _TenantService_SubmitQuotaChangeRequest_Handler,
+		},
+		{
+			MethodName: "ListQuotaChangeRequests",
+			Handler:    _TenantService_ListQuotaChangeRequests_Handler,
+		},
+		{
+			MethodName: "ReviewQuotaChangeRequest",
+			Handler:    _TenantService_ReviewQuotaChangeRequest_Handler,
+		},
+		{
+			MethodName: "ListTenantLifecycle",
+			Handler:    _TenantService_ListTenantLifecycle_Handler,
+		},
+		{
+			MethodName: "ListTenantAuditLogs",
+			Handler:    _TenantService_ListTenantAuditLogs_Handler,
+		},
+		{
+			MethodName: "ListTenantAdmins",
+			Handler:    _TenantService_ListTenantAdmins_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

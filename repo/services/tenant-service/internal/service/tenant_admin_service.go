@@ -39,14 +39,14 @@ type TenantAdminService struct {
 	core    ports.TenantAdminSvcClient
 	tenants ports.TenantSvcClient
 	store   ports.TenantAdminStore
-	audit   ports.TenantPlanAuditStore // 复用 audit_logs 写入（与配额套餐同一 store）
+	audit   ports.AuditStore // 复用 audit_logs 写入（与配额套餐同一 store）
 }
 
 var _ tenantv1.TenantAdminServiceServer = (*TenantAdminService)(nil)
 
 // NewTenantAdminService 装配 Core 客户端、邀请 store 与审计 store。
 // ListAvailableTenants 走 tenants；Invite 走 core + store，审计走 audit（writeAudit*）。
-func NewTenantAdminService(core ports.TenantAdminSvcClient, tenants ports.TenantSvcClient, store ports.TenantAdminStore, audit ports.TenantPlanAuditStore) *TenantAdminService {
+func NewTenantAdminService(core ports.TenantAdminSvcClient, tenants ports.TenantSvcClient, store ports.TenantAdminStore, audit ports.AuditStore) *TenantAdminService {
 	return &TenantAdminService{core: core, tenants: tenants, store: store, audit: audit}
 }
 

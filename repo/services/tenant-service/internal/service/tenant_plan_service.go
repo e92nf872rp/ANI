@@ -29,13 +29,13 @@ type TenantPlanService struct {
 	tenantv1.UnimplementedTenantPlanServiceServer
 
 	plans       ports.TenantPlanStore      // 套餐 + plan_quota_limits 持久化
-	audit       ports.TenantPlanAuditStore // 配额套餐域审计（audit_logs）；
+	audit       ports.AuditStore // 配额套餐域审计（audit_logs）；
 	core        ports.QuotaSvcClient       // Core 配额 API（校验维度 / 后续下发限额）
 	tenantPlans ports.TenantPlanSvcClient  // Core 配额套餐绑定 API（tenant_count / 绑定列表）
 }
 
 // NewTenantPlanService 装配依赖并返回可注册的 gRPC server。
-func NewTenantPlanService(plans ports.TenantPlanStore, audit ports.TenantPlanAuditStore, core ports.QuotaSvcClient, tenantPlans ports.TenantPlanSvcClient) *TenantPlanService {
+func NewTenantPlanService(plans ports.TenantPlanStore, audit ports.AuditStore, core ports.QuotaSvcClient, tenantPlans ports.TenantPlanSvcClient) *TenantPlanService {
 	return &TenantPlanService{plans: plans, audit: audit, core: core, tenantPlans: tenantPlans}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 	"github.com/google/uuid"
 	tenantv1 "github.com/kubercloud/ani/pkg/generated/pb/tenant/v1"
 	"github.com/kubercloud/ani/services/tenant-service/internal/repo/ports"
@@ -11,22 +12,47 @@ import (
 	"google.golang.org/grpc/codes"
 )
 
-// TenantService 是 gRPC TenantService server。
-// 目前承载绑定套餐 RPC：BindPlanQuota（US-009 / issue-009）。
+// TenantService 是租户域 gRPC 服务：套餐绑定（BindPlanQuota）与租户列表生命周期 RPC。
+// 网关经 TenantServiceClient 转发 /api/v1/svc/tenants*。
 type TenantService struct {
-	// 嵌入未实现接口，确保 proto 新增 RPC 后本结构仍能向后兼容（栅栏模式）。
 	tenantv1.UnimplementedTenantServiceServer
 
-	plans       ports.TenantPlanStore      // 套餐 store（限额原始行；展示/下发经 Core ListQuotaMeta 组装）
-	tenants     ports.TenantSvcClient      // Core 租户 API（GetTenant）
-	tenantPlans ports.TenantPlanSvcClient  // Core 配额套餐绑定 API（UpdateTenantPlan）
-	quota       ports.QuotaSvcClient       // Core 配额 API（Get/Put/Create/Upsert）
-	audit       ports.TenantPlanAuditStore // 审计日志（配额套餐域）
+	plans        ports.TenantPlanStore
+	tenants      ports.TenantSvcClient
+	tenantPlans  ports.TenantPlanSvcClient
+	quota        ports.QuotaSvcClient
+	tenantStore  ports.TenantStore
+	audit        ports.AuditStore
+	tenantAdmins ports.TenantAdminSvcClient
+	ssoLoader    ports.SsoConfigLoader
+	oidcTester   ports.OidcDiscoveryTester
 }
 
+var _ tenantv1.TenantServiceServer = (*TenantService)(nil)
+
 // NewTenantService 构造租户 gRPC 服务实例。
-func NewTenantService(plans ports.TenantPlanStore, tenants ports.TenantSvcClient, tenantPlans ports.TenantPlanSvcClient, quota ports.QuotaSvcClient, audit ports.TenantPlanAuditStore) *TenantService {
-	return &TenantService{plans: plans, tenants: tenants, tenantPlans: tenantPlans, quota: quota, audit: audit}
+func NewTenantService(
+	plans ports.TenantPlanStore,
+	tenants ports.TenantSvcClient,
+	tenantPlans ports.TenantPlanSvcClient,
+	quota ports.QuotaSvcClient,
+	tenantStore ports.TenantStore,
+	audit ports.AuditStore,
+	tenantAdmins ports.TenantAdminSvcClient,
+	ssoLoader ports.SsoConfigLoader,
+	oidcTester ports.OidcDiscoveryTester,
+) *TenantService {
+	return &TenantService{
+		plans:        plans,
+		tenants:      tenants,
+		tenantPlans:  tenantPlans,
+		quota:        quota,
+		tenantStore:  tenantStore,
+		audit:        audit,
+		tenantAdmins: tenantAdmins,
+		ssoLoader:    ssoLoader,
+		oidcTester:   oidcTester,
+	}
 }
 
 // Register 向 gRPC server 注册本服务（services/pkg/bootstrap.RunGRPC 会调用）。
@@ -186,4 +212,122 @@ func parseTenantID(raw string) (uuid.UUID, error) {
 		return uuid.Nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "tenant_id must be a uuid")
 	}
 	return id, nil
+}
+
+func (s *TenantService) ListAvailablePlans(ctx context.Context, req *tenantv1.ListAvailablePlansRequest) (*tenantv1.ListAvailablePlansResponse, error) {
+	_ = ctx
+	_ = req
+	return nil, tenantRPCNotImplemented()
+}
+
+func (s *TenantService) CreateTenant(ctx context.Context, req *tenantv1.CreateTenantRequest) (*commonv1.IdempotentResult, error) {
+	_ = ctx
+	_ = req
+	return nil, tenantRPCNotImplemented()
+}
+
+func (s *TenantService) ListTenants(ctx context.Context, req *tenantv1.ListTenantsRequest) (*tenantv1.ListTenantsResponse, error) {
+	_ = ctx
+	_ = req
+	return nil, tenantRPCNotImplemented()
+}
+
+func (s *TenantService) GetTenantDetail(ctx context.Context, req *tenantv1.GetTenantDetailRequest) (*tenantv1.TenantDetail, error) {
+	_ = ctx
+	_ = req
+	return nil, tenantRPCNotImplemented()
+}
+
+func (s *TenantService) UpdateTenant(ctx context.Context, req *tenantv1.UpdateTenantRequest) (*commonv1.IdempotentResult, error) {
+	_ = ctx
+	_ = req
+	return nil, tenantRPCNotImplemented()
+}
+
+func (s *TenantService) FreezeTenant(ctx context.Context, req *tenantv1.FreezeTenantRequest) (*commonv1.IdempotentResult, error) {
+	_ = ctx
+	_ = req
+	return nil, tenantRPCNotImplemented()
+}
+
+func (s *TenantService) UnfreezeTenant(ctx context.Context, req *tenantv1.UnfreezeTenantRequest) (*commonv1.IdempotentResult, error) {
+	_ = ctx
+	_ = req
+	return nil, tenantRPCNotImplemented()
+}
+
+func (s *TenantService) DisableTenant(ctx context.Context, req *tenantv1.DisableTenantRequest) (*commonv1.IdempotentResult, error) {
+	_ = ctx
+	_ = req
+	return nil, tenantRPCNotImplemented()
+}
+
+func (s *TenantService) GetTenantAuth(ctx context.Context, req *tenantv1.GetTenantAuthRequest) (*tenantv1.TenantAuthConfig, error) {
+	_ = ctx
+	_ = req
+	return nil, tenantRPCNotImplemented()
+}
+
+func (s *TenantService) UpdateTenantSso(ctx context.Context, req *tenantv1.UpdateTenantSsoRequest) (*commonv1.IdempotentResult, error) {
+	_ = ctx
+	_ = req
+	return nil, tenantRPCNotImplemented()
+}
+
+func (s *TenantService) TestTenantSso(ctx context.Context, req *tenantv1.TestTenantSsoRequest) (*tenantv1.SsoTestResult, error) {
+	_ = ctx
+	_ = req
+	return nil, tenantRPCNotImplemented()
+}
+
+func (s *TenantService) UpdateTenantMfa(ctx context.Context, req *tenantv1.UpdateTenantMfaRequest) (*commonv1.IdempotentResult, error) {
+	_ = ctx
+	_ = req
+	return nil, tenantRPCNotImplemented()
+}
+
+func (s *TenantService) GetTenantQuota(ctx context.Context, req *tenantv1.GetTenantQuotaRequest) (*tenantv1.GetTenantQuotaResponse, error) {
+	_ = ctx
+	_ = req
+	return nil, tenantRPCNotImplemented()
+}
+
+func (s *TenantService) SubmitQuotaChangeRequest(ctx context.Context, req *tenantv1.SubmitQuotaChangeRequestRequest) (*commonv1.IdempotentResult, error) {
+	_ = ctx
+	_ = req
+	return nil, tenantRPCNotImplemented()
+}
+
+func (s *TenantService) ListQuotaChangeRequests(ctx context.Context, req *tenantv1.ListQuotaChangeRequestsRequest) (*tenantv1.ListQuotaChangeRequestsResponse, error) {
+	_ = ctx
+	_ = req
+	return nil, tenantRPCNotImplemented()
+}
+
+func (s *TenantService) ReviewQuotaChangeRequest(ctx context.Context, req *tenantv1.ReviewQuotaChangeRequestRequest) (*commonv1.IdempotentResult, error) {
+	_ = ctx
+	_ = req
+	return nil, tenantRPCNotImplemented()
+}
+
+func (s *TenantService) ListTenantLifecycle(ctx context.Context, req *tenantv1.ListTenantLifecycleRequest) (*tenantv1.ListTenantLifecycleResponse, error) {
+	_ = ctx
+	_ = req
+	return nil, tenantRPCNotImplemented()
+}
+
+func (s *TenantService) ListTenantAuditLogs(ctx context.Context, req *tenantv1.ListTenantAuditLogsRequest) (*tenantv1.ListTenantAuditLogsResponse, error) {
+	_ = ctx
+	_ = req
+	return nil, tenantRPCNotImplemented()
+}
+
+func (s *TenantService) ListTenantAdmins(ctx context.Context, req *tenantv1.ListTenantAdminsRequest) (*tenantv1.ListTenantAdminsResponse, error) {
+	_ = ctx
+	_ = req
+	return nil, tenantRPCNotImplemented()
+}
+
+func tenantRPCNotImplemented() error {
+	return mapStoreError(ports.ErrNotImplemented)
 }

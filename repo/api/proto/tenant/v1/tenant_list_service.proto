@@ -9,52 +9,8 @@ import "google/protobuf/wrappers.proto";
 
 option go_package = "github.com/kubercloud/ani/pkg/generated/pb/tenant/v1;tenantv1";
 
-// TenantListService manages BOSS tenant list lifecycle (create / list / detail /
-// state machine / SSO-MFA / quota proxy / quota change requests / lifecycle / audit).
-// The gateway (BOSS API) handles auth/scope/idempotency and calls this service
-// over gRPC. All RPCs return UNIMPLEMENTED until later issues fill them in.
-service TenantListService {
-  // ListAvailablePlans returns active tenant plans for create-tenant selector.
-  rpc ListAvailablePlans(ListAvailablePlansRequest) returns (ListAvailablePlansResponse);
-  // CreateTenant creates a tenant with first admin and plan binding.
-  rpc CreateTenant(CreateTenantRequest) returns (common.v1.IdempotentResult);
-  // ListTenants returns a cursor-paginated tenant list.
-  rpc ListTenants(ListTenantsRequest) returns (ListTenantsResponse);
-  // GetTenantDetail returns full tenant detail.
-  rpc GetTenantDetail(GetTenantDetailRequest) returns (TenantDetail);
-  // UpdateTenant updates display_name / contact_email.
-  rpc UpdateTenant(UpdateTenantRequest) returns (common.v1.IdempotentResult);
-  // FreezeTenant transitions active -> frozen.
-  rpc FreezeTenant(FreezeTenantRequest) returns (common.v1.IdempotentResult);
-  // UnfreezeTenant transitions frozen -> active.
-  rpc UnfreezeTenant(UnfreezeTenantRequest) returns (common.v1.IdempotentResult);
-  // DisableTenant transitions active/frozen -> disabled (terminal).
-  rpc DisableTenant(DisableTenantRequest) returns (common.v1.IdempotentResult);
-  // GetTenantAuth returns SSO/MFA config view.
-  rpc GetTenantAuth(GetTenantAuthRequest) returns (TenantAuthConfig);
-  // UpdateTenantSso updates SSO fields (maps to Core updateTenantAuth).
-  rpc UpdateTenantSso(UpdateTenantSsoRequest) returns (common.v1.IdempotentResult);
-  // TestTenantSso runs OIDC discovery without persisting state.
-  rpc TestTenantSso(TestTenantSsoRequest) returns (SsoTestResult);
-  // UpdateTenantMfa toggles tenant-level MFA requirement.
-  rpc UpdateTenantMfa(UpdateTenantMfaRequest) returns (common.v1.IdempotentResult);
-  // GetTenantQuota returns quota usage view (Core proxy + meta join).
-  rpc GetTenantQuota(GetTenantQuotaRequest) returns (GetTenantQuotaResponse);
-  // SubmitQuotaChangeRequest submits or overwrites pending quota change rows.
-  rpc SubmitQuotaChangeRequest(SubmitQuotaChangeRequestRequest) returns (common.v1.IdempotentResult);
-  // ListQuotaChangeRequests lists quota change requests (no pagination).
-  rpc ListQuotaChangeRequests(ListQuotaChangeRequestsRequest) returns (ListQuotaChangeRequestsResponse);
-  // ReviewQuotaChangeRequest approves or rejects a pending request.
-  rpc ReviewQuotaChangeRequest(ReviewQuotaChangeRequestRequest) returns (common.v1.IdempotentResult);
-  // ListTenantLifecycle returns tenant lifecycle entries.
-  rpc ListTenantLifecycle(ListTenantLifecycleRequest) returns (ListTenantLifecycleResponse);
-  // ListTenantAuditLogs returns tenant-scoped audit logs.
-  rpc ListTenantAuditLogs(ListTenantAuditLogsRequest) returns (ListTenantAuditLogsResponse);
-  // ListTenantAdmins returns tenant-scoped admin list (Core listTenantUsers proxy).
-  rpc ListTenantAdmins(ListTenantAdminsRequest) returns (ListTenantAdminsResponse);
-}
-
-// ── RPC request / response ───────────────────────────────────────────────────
+// Tenant list RPC messages (service methods live on TenantService in tenant_plan.proto).
+// The gateway (BOSS API) handles auth/scope/idempotency and calls TenantService over gRPC.
 
 message ListAvailablePlansRequest {}
 
