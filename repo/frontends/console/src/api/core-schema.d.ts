@@ -4979,10 +4979,12 @@ export interface components {
             /** @enum {string} */
             action: "start" | "stop" | "restart" | "resize" | "rebuild" | "delete" | "snapshot" | "attach_volume" | "detach_volume" | "attach_filesystem" | "detach_filesystem" | "rollback" | "scale" | "update_image" | "bind_secret" | "unbind_secret" | "change_security_groups" | "set_termination_protection" | "pause" | "resume" | "extend" | "touch_idle";
             idempotency_key: string;
-            /** @description resize 时使用 */
+            /** @description resize 时使用；变配重建时写入容器 resources */
             cpu?: string | null;
-            /** @description resize 时使用 */
+            /** @description resize 时使用；变配重建时写入容器 resources */
             memory?: string | null;
+            /** @description resize 时换 GPU 规格使用；通过 /gpu-specs 查询可用规格；与 cpu/memory 可同时传，至少传一项；仅 stopped 实例可执行 */
+            spec_id?: string | null;
             /** @description snapshot 时指定快照名称 */
             snapshot_name?: string | null;
             /** @description rollback 时指定目标快照 */

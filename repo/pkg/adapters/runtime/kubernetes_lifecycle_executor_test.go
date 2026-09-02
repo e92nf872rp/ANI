@@ -457,8 +457,8 @@ func TestKubernetesLifecycleExecutorResizeSpecSwitchReplacesNodeSelector(t *test
 				GPUMode: "wholecard",
 				Shares:  1,
 				NodeAffinity: ports.GPUSpecNodeAffinity{
-					GPUMode:  "wholecard",
-					GPUSpec:  "NVIDIA-RTX-4090-49140MiB",
+					GPUMode: "wholecard",
+					GPUSpec: "NVIDIA-RTX-4090-49140MiB",
 				},
 				VolcanoResources: ports.GPUSpecVolcanoResources{
 					Wholecard: map[string]string{
