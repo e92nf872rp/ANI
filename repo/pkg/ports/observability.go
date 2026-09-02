@@ -80,6 +80,27 @@ type ObservabilityRangeQueryResult struct {
 	DevProfile DevProfileInfo
 }
 
+// ObservabilityResourceTrendMetric 租户级资源趋势维度。
+type ObservabilityResourceTrendMetric string
+
+const (
+	ObservabilityResourceTrendGPU    ObservabilityResourceTrendMetric = "gpu"
+	ObservabilityResourceTrendCPU    ObservabilityResourceTrendMetric = "cpu"
+	ObservabilityResourceTrendMemory ObservabilityResourceTrendMetric = "memory"
+)
+
+// ObservabilityResourceTrendRequest 租户级资源使用率趋势请求。
+// TenantID 必须由后端从 JWT 提取并强制锚定 namespace="ani-tenant-<id>"，
+// 禁止透传/接受前端 PromQL，保证租户隔离不破。
+type ObservabilityResourceTrendRequest struct {
+	TenantID string
+	Metric   ObservabilityResourceTrendMetric
+	Start    time.Time
+	End      time.Time
+	Step     time.Duration
+	Timeout  time.Duration
+}
+
 type ObservabilityAlertRuleRecord struct {
 	TenantID    string
 	RuleID      string
@@ -135,6 +156,9 @@ type ObservabilityAlertRuleListRequest struct {
 type ObservabilityService interface {
 	Query(ctx context.Context, request ObservabilityQueryRequest) (ObservabilityQueryResult, error)
 	QueryRange(ctx context.Context, request ObservabilityRangeQueryRequest) (ObservabilityRangeQueryResult, error)
+	// QueryResourceTrend 返回租户级资源使用率趋势（matrix），
+	// 后端强制锚定当前租户 namespace，杜绝跨租户裸聚合。
+	QueryResourceTrend(ctx context.Context, request ObservabilityResourceTrendRequest) (ObservabilityRangeQueryResult, error)
 	CreateAlertRule(ctx context.Context, request ObservabilityAlertRuleCreateRequest) (ObservabilityAlertRuleRecord, error)
 	ListAlertRules(ctx context.Context, request ObservabilityAlertRuleListRequest) ([]ObservabilityAlertRuleRecord, error)
 	GetAlertRule(ctx context.Context, request ObservabilityAlertRuleGetRequest) (ObservabilityAlertRuleRecord, error)

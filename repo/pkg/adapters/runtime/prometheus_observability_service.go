@@ -175,6 +175,50 @@ func (s *PrometheusObservabilityService) QueryRange(ctx context.Context, request
 	return result, nil
 }
 
+// QueryResourceTrend 返回租户级资源使用率趋势（matrix）。
+// 直接生成只锚 namespace=<tenantNamespace(tenantID)> 的聚合 PromQL 后走 queryPrometheusRange，
+// 不经过 rewritePromQLLabels（其 instanceID=="" 分支会原样透传，是跨租户裸聚合根源）。
+// metric/namespace 全部由后端推导，不接收/不透传前端 PromQL 或租户标识，保证租户隔离不破。
+func (s *PrometheusObservabilityService) QueryResourceTrend(ctx context.Context, request ports.ObservabilityResourceTrendRequest) (ports.ObservabilityRangeQueryResult, error) {
+	if strings.TrimSpace(request.TenantID) == "" {
+		return ports.ObservabilityRangeQueryResult{}, fmt.Errorf("%w: tenant_id is required", ports.ErrInvalid)
+	}
+	if request.Start.IsZero() || request.End.IsZero() || request.Step <= 0 {
+		return ports.ObservabilityRangeQueryResult{}, fmt.Errorf("%w: start, end and positive step are required", ports.ErrInvalid)
+	}
+	query, err := resourceTrendPromQL(request.Metric, tenantNamespace(request.TenantID))
+	if err != nil {
+		return ports.ObservabilityRangeQueryResult{}, err
+	}
+	result, err := s.queryPrometheusRange(ctx, query, request.Start, request.End, request.Step)
+	if err != nil {
+		return ports.ObservabilityRangeQueryResult{
+			Query:      query,
+			ResultType: ports.ObservabilityResultMatrix,
+			Results:    []ports.ObservabilityRangeSeries{},
+			DevProfile: prometheusObservabilityDegradedProfile("prometheus range query failed: " + err.Error()),
+		}, nil
+	}
+	return result, nil
+}
+
+// resourceTrendPromQL 生成租户级资源使用率聚合 PromQL。
+// 统一只锚真实租户 namespace，聚合该租户全部 workload 容器，利用率统一为 %（0-100）。
+// GPU 用 DCGM_FI_DEV_GPU_UTIL（已为 %，不乘 100）；CPU/内存用 cAdvisor 容器维度，
+// 用 container!="" 与 container!="POD" 过滤 pause 容器（承接实例 metrics 冻结口径）。
+func resourceTrendPromQL(metric ports.ObservabilityResourceTrendMetric, ns string) (string, error) {
+	switch metric {
+	case ports.ObservabilityResourceTrendGPU:
+		return fmt.Sprintf(`avg(DCGM_FI_DEV_GPU_UTIL{namespace=%q})`, ns), nil
+	case ports.ObservabilityResourceTrendCPU:
+		return fmt.Sprintf(`100 * avg(rate(container_cpu_usage_seconds_total{namespace=%q,container!="",container!="POD"}[5m]))`, ns), nil
+	case ports.ObservabilityResourceTrendMemory:
+		return fmt.Sprintf(`100 * avg(container_memory_working_set_bytes{namespace=%q,container!="",container!="POD"} / container_spec_memory_limit_bytes{namespace=%q,container!="",container!="POD"})`, ns, ns), nil
+	default:
+		return "", fmt.Errorf("%w: unsupported resource trend metric %q", ports.ErrInvalid, metric)
+	}
+}
+
 // queryPrometheusRange 转发 range query 到 Prometheus /api/v1/query_range 并解析 matrix 结果。
 func (s *PrometheusObservabilityService) queryPrometheusRange(ctx context.Context, query string, start, end time.Time, step time.Duration) (ports.ObservabilityRangeQueryResult, error) {
 	values := url.Values{

@@ -38,6 +38,7 @@
 Auth 边界：SPRINT13-AUTH-DEX-PRODUCTION-GATE / Auth/Dex production gate 已通过；production-shaped Gateway 使用 ANI_AUTH_MODE=auth_service。
 实例链路热修复：INSTANCE-NETWORK-STORE-READ-RLS-A 已在 K8s 测试环境 live passed（2026-08-27~09-01）——NetworkResourceStore 补读方法 + LocalNetworkService 穿透读 + Gateway 注入 store；迁移 20260828_001 修复实例链路 8 张表 RESTRICTIVE-only RLS；WORKLOAD_PROVIDER_APPLY_ENABLED=true 接线。验证止于实例 201 → provisioning → Volcano 排队（GPU 容量问题非代码），不外推 GPU runtime ready / production ready。
 实例运行时回填：INSTANCE-RUNTIME-HYDRATE-A（2026-09-01，local verified）——修复 GPU 容器实例列表/详情缺节点（`Compute.NodeName` 错位）、私网IP/访问端点（回读 PodIP 填 `Network.PrivateIP`/`Endpoint`/`Endpoints`）、终端（运行态 container/gpu_container 置 `Access.ExecAvailable=true`），`get` 详情接入 `refreshOneStoreStatus`；`go test ./services/ani-gateway/...` + `make validate-architecture` 通过，待 live。
+首页资源趋势接口：OBS-RESOURCE-TREND-A（2026-09-02，local verified + in-cluster gateway 实测）——按方案「首页资源趋势接口方案.md」新增 Core `GET /observability/resource_trend` 租户级资源使用率趋势；不复用 query_range 裸透传（跨租户泄露），tenant_id 全从 JWT 取、后端直接生成只锚 `namespace="ani-tenant-<id>"` 聚合 PromQL 走 queryPrometheusRange、不暴露 query PromQL；三 metric（GPU 不乘 100；CPU/内存 cAdvisor 容器维度 `100*avg` 且过滤 pause 容器）、统一利用率 %（0-100）；OpenAPI + x-ani-authz + Core SDK/authz 生成物零漂移；router resourceTrend handler + local 空 matrix 降级；单测 + 实测（三 metric 200 matrix、参数校验 400、无凭证 401）通过。不标记 runtime ready / production ready。
 当前执行入口：repo/CURRENT-SPRINT.md
 详细计划：repo/development-records/sprint13-real-provider-readiness-plan.md
 完整批次：repo/development-records/README.md

@@ -1085,6 +1085,12 @@
       "scope": "scope:observability:read"
     },
     {
+      "operationId": "queryResourceTrendObservability",
+      "method": "GET",
+      "path": "/observability/resource_trend",
+      "scope": "scope:observability:read"
+    },
+    {
       "operationId": "getPlatformWorkloadCapabilities",
       "method": "GET",
       "path": "/platform-workload-capabilities",

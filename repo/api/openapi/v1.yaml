@@ -7795,6 +7795,42 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
 
+  /observability/resource_trend:
+    get:
+      operationId: queryResourceTrendObservability
+      summary: 租户级资源使用率趋势
+      description: |
+        按当前登录租户视角聚合返回 gpu/cpu/memory 资源使用率趋势（单位 %，0-100）。
+        tenant_id 全部从 JWT 提取，后端据此生成 namespace="ani-tenant-<id>" 的聚合 PromQL，
+        天然租户隔离；不接收/不暴露 query PromQL。返回结构与 query_range 一致（matrix），
+        前端复用既有出图逻辑。三条曲线各用一次本请求（一次一个 metric）。
+      tags: [Observability]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      x-ani-rbac-scope: "scope:observability:read"
+      x-ani-authz:
+        version: v1
+        resource: observability
+        action: read
+        boundary: tenant
+        principal_kinds: [user, api_key]
+      parameters:
+        - { name: metric, in: query, required: true, schema: { type: string, enum: [gpu, cpu, memory] } }
+        - { name: start, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: end, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: step, in: query, required: true, schema: { type: string, description: "采样步长，Go duration 正数，如 15s / 30s / 1m；0/负 → 400" } }
+        - { name: timeout, in: query, required: false, schema: { type: string, default: 30s } }
+      responses:
+        "200":
+          description: 租户资源使用率趋势（matrix），value ∈ 0-100（%）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObservabilityRangeQueryResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
   /observability/alert-rules:
     get:
       operationId: listObservabilityAlertRules
