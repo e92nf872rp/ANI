@@ -1040,9 +1040,9 @@ func (api *instanceAPI) refreshOneStoreStatus(ctx context.Context, record *ports
 					NodeName string `json:"nodeName"`
 				} `json:"spec"`
 				Status struct {
-					NodeName   string `json:"nodeName"`
-					PodIP      string `json:"podIP"`
-					PodIPs     []struct {
+					NodeName string `json:"nodeName"`
+					PodIP    string `json:"podIP"`
+					PodIPs   []struct {
 						IP string `json:"ip"`
 					} `json:"podIPs"`
 					Conditions []struct {
