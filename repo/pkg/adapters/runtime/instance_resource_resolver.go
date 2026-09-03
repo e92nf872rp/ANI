@@ -366,7 +366,12 @@ func (r *LocalInstanceResourceResolver) resolveStorage(ctx context.Context, tena
 		if err != nil {
 			return fmt.Errorf("resolve instance filesystem %q: %w", filesystemID, err)
 		}
-		if filesystem.State != ports.StorageResourceAvailable {
+		// WaitForFirstConsumer PVCs remain Pending until a consumer Pod mounts
+		// them. Mounting the filesystem is itself the first consumer for RWX
+		// PVCs, so Pending means the PVC intent exists and is attachable;
+		// Failed/Deleting/Deleted remain reject states. Without this allowance
+		// a WFFC filesystem can never be attached by any instance.
+		if filesystem.State != ports.StorageResourceAvailable && filesystem.State != ports.StorageResourcePending {
 			return fmt.Errorf("%w: instance filesystem %q is %s", ports.ErrConflict, filesystemID, filesystem.State)
 		}
 		seenFilesystems[filesystemID] = struct{}{}

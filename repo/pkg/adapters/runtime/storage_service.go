@@ -40,6 +40,9 @@ type LocalStorageService struct {
 	fsIdempotency     map[string]string
 	volumeOpIdem      map[string]string
 	fsOpIdem          map[string]string
+	// storageObserveAt throttles re-observation of pending storage resources;
+	// keys are "<resource_kind>/<resource_id>".
+	storageObserveAt  map[string]time.Time
 	objectIdempotency map[string]string
 	bucketIdem        map[string]string
 	uploadIdem        map[string]string
@@ -112,6 +115,7 @@ func NewLocalStorageService(options ...StorageServiceOption) *LocalStorageServic
 		prefixIdem:        map[string]string{},
 		bucketUpdateIdem:  map[string]string{},
 		idempotencyFlight: map[string]chan struct{}{},
+		storageObserveAt:  map[string]time.Time{},
 	}
 	for _, option := range options {
 		option(service)
@@ -255,15 +259,130 @@ func (s *LocalStorageService) GetVolume(ctx context.Context, request ports.Stora
 		if err != nil {
 			return ports.StorageVolumeRecord{}, err
 		}
-		return s.enrichStorageVolumeRecord(record), nil
+		return s.enrichStorageVolumeRecord(s.reobserveVolumeState(ctx, record)), nil
+	}
+	record := s.reobserveVolumeStateMemory(ctx, request.TenantID, request.ResourceID)
+	if record == nil {
+		return ports.StorageVolumeRecord{}, ports.ErrNotFound
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	record, ok := s.volumes[request.ResourceID]
-	if !ok || record.TenantID != request.TenantID || record.State == ports.StorageResourceDeleted {
-		return ports.StorageVolumeRecord{}, ports.ErrNotFound
+	return s.enrichStorageVolumeLocked(*record), nil
+}
+
+// storageObserveRefreshInterval throttles re-observation of the same pending
+// resource so UI polling does not hammer the Kubernetes API.
+const storageObserveRefreshInterval = 30 * time.Second
+
+// reobserveStorageState refreshes a pending storage resource from the live
+// provider. WaitForFirstConsumer PVCs are observed as Pending right after
+// create-apply and only bind once a consumer Pod mounts them; without this
+// path the control-plane state would never leave pending even after the PVC
+// binds (same observe-on-read pattern as instance status). Returns false when
+// observation was skipped or failed; the caller keeps the original record.
+func (s *LocalStorageService) reobserveStorageState(ctx context.Context, resourceKind string, recordTenantID string, recordID string, render func() ([]ports.WorkloadManifest, error)) (ports.StorageProviderStatusResult, bool) {
+	if s.providerStatus == nil || s.providerRenderer == nil {
+		return ports.StorageProviderStatusResult{}, false
 	}
-	return s.enrichStorageVolumeLocked(record), nil
+	throttleKey := resourceKind + "/" + recordID
+	s.mu.Lock()
+	if last, ok := s.storageObserveAt[throttleKey]; ok && s.now().Sub(last) < storageObserveRefreshInterval {
+		s.mu.Unlock()
+		return ports.StorageProviderStatusResult{}, false
+	}
+	s.storageObserveAt[throttleKey] = s.now()
+	s.mu.Unlock()
+
+	manifests, err := render()
+	if err != nil {
+		slog.Warn("storage provider re-observe render failed",
+			"resource_kind", resourceKind,
+			"resource_id", recordID,
+			"err", err,
+		)
+		return ports.StorageProviderStatusResult{}, false
+	}
+	observation, err := s.providerStatus.Observe(ctx, ports.StorageProviderStatusRequest{
+		TenantID:        recordTenantID,
+		UserID:          s.providerExecution.UserID,
+		ResourceKind:    resourceKind,
+		ResourceID:      recordID,
+		PermissionProof: s.providerExecution.PermissionProof,
+		RequestedAt:     s.now().UTC(),
+		ApplyResult: ports.StorageProviderApplyResult{
+			Applied:      true,
+			Provider:     "kubernetes",
+			ResourceRefs: storageResourceRefs(manifests),
+		},
+	})
+	if err != nil {
+		slog.Warn("storage provider re-observe failed",
+			"resource_kind", resourceKind,
+			"resource_id", recordID,
+			"err", err,
+		)
+		return ports.StorageProviderStatusResult{}, false
+	}
+	return observation, true
+}
+
+// reobserveVolumeState refreshes a pending volume record from the live
+// provider and persists the new state to the store and memory map.
+func (s *LocalStorageService) reobserveVolumeState(ctx context.Context, record ports.StorageVolumeRecord) ports.StorageVolumeRecord {
+	if record.State != ports.StorageResourcePending {
+		return record
+	}
+	observation, ok := s.reobserveStorageState(ctx, "volume", record.TenantID, record.VolumeID, func() ([]ports.WorkloadManifest, error) {
+		return s.providerRenderer.RenderVolume(ctx, record)
+	})
+	if !ok || observation.State == record.State {
+		return record
+	}
+	record.State = observation.State
+	record.Reason = observation.Reason
+	record.UpdatedAt = observation.ObservedAt
+	if err := s.upsertVolume(ctx, record); err != nil {
+		slog.Warn("storage volume re-observe persist failed", "resource_id", record.VolumeID, "err", err)
+	}
+	s.mu.Lock()
+	s.volumes[record.VolumeID] = record
+	s.mu.Unlock()
+	return record
+}
+
+func (s *LocalStorageService) reobserveVolumeStateMemory(ctx context.Context, tenantID, volumeID string) *ports.StorageVolumeRecord {
+	s.mu.RLock()
+	record, ok := s.volumes[volumeID]
+	s.mu.RUnlock()
+	if !ok || record.TenantID != tenantID || record.State == ports.StorageResourceDeleted {
+		return nil
+	}
+	refreshed := s.reobserveVolumeState(ctx, record)
+	return &refreshed
+}
+
+// reobserveFilesystemState refreshes a pending filesystem record from the live
+// provider and persists the new state to the store and memory map.
+func (s *LocalStorageService) reobserveFilesystemState(ctx context.Context, record ports.StorageFilesystemRecord) ports.StorageFilesystemRecord {
+	if record.State != ports.StorageResourcePending {
+		return record
+	}
+	observation, ok := s.reobserveStorageState(ctx, "filesystem", record.TenantID, record.FilesystemID, func() ([]ports.WorkloadManifest, error) {
+		return s.providerRenderer.RenderFilesystem(ctx, record)
+	})
+	if !ok || observation.State == record.State {
+		return record
+	}
+	record.State = observation.State
+	record.Reason = observation.Reason
+	record.UpdatedAt = observation.ObservedAt
+	if err := s.upsertFilesystem(ctx, record); err != nil {
+		slog.Warn("storage filesystem re-observe persist failed", "resource_id", record.FilesystemID, "err", err)
+	}
+	s.mu.Lock()
+	s.filesystems[record.FilesystemID] = record
+	s.mu.Unlock()
+	return record
 }
 
 func (s *LocalStorageService) DeleteVolume(ctx context.Context, request ports.StorageResourceGetRequest) (ports.StorageVolumeRecord, error) {
@@ -735,16 +854,20 @@ func (s *LocalStorageService) GetFilesystem(ctx context.Context, request ports.S
 		if err != nil {
 			return ports.StorageFilesystemRecord{}, err
 		}
+		record = s.reobserveFilesystemState(ctx, record)
 		s.mu.RLock()
 		defer s.mu.RUnlock()
 		return s.enrichFilesystemLocked(record), nil
 	}
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	record, ok := s.filesystems[request.ResourceID]
+	s.mu.RUnlock()
 	if !ok || record.TenantID != request.TenantID || record.State == ports.StorageResourceDeleted {
 		return ports.StorageFilesystemRecord{}, ports.ErrNotFound
 	}
+	record = s.reobserveFilesystemState(ctx, record)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.enrichFilesystemLocked(record), nil
 }
 
@@ -935,8 +1058,11 @@ func (s *LocalStorageService) MountFilesystem(ctx context.Context, request ports
 		AttachedAt:    s.now().UTC(),
 	}
 	for _, target := range s.mountTargets {
+		// WaitForFirstConsumer mount targets stay Creating until the backing
+		// PVC binds; the pod mount consumes the shared PVC through CSI, not
+		// the synthesized target IP, so Creating targets remain attachable.
 		if target.FilesystemID == record.FilesystemID &&
-			target.Status == ports.MountTargetAvailable &&
+			(target.Status == ports.MountTargetAvailable || target.Status == ports.MountTargetCreating) &&
 			strings.TrimSpace(target.IPAddress) != "" {
 			attachment.IPAddress = target.IPAddress
 			break
