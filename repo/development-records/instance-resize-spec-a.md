@@ -1,8 +1,8 @@
 # INSTANCE-RESIZE-SPEC-A
 
-> 日期：2026-09-02
+> 日期：2026-09-02（live gate 补验 2026-09-03）
 > 范围：ANI Core / Gateway / instance lifecycle `resize` + GPU 规格（`spec_id`）变配
-> 状态：local verified（代码 + 单测 + 架构门禁通过；未做真实集群 resize live gate）
+> 状态：live passed（10.10.1.66，镜像 dev-20260902-resize-ns；双向规格切换 + nodeSelector 修复）
 > 分支：`hotfix/network-store-read`（ani-hotfix worktree）
 
 ## 问题背景
@@ -73,10 +73,36 @@ python scripts/validate_yaml.py api/openapi/v1.yaml       # validated 1 YAML fil
 > （`GOCACHE=... go test`）无法直接执行；等价 `go test` 全包通过（仅存量
 > `TestSandboxFileScripts*` symlink 测试在 Windows 必挂，与本次改动无关，CI/Linux 正常）。
 
+## 真实集群 live gate（2026-09-03，10.10.1.66）
+
+镜像 `dev-20260902-resize-ns` 部署后，用 tenant-a/admin 登录 API 对 stopped 实例
+`test-gpu-inst-create` 做双向规格切换验证：
+
+- **quarter → wholecard**（`rtx4090-12g-4` → `rtx-4090-48g-1`）：请求 200，`compute.spec_id`
+  更新为 `rtx-4090-48g-1`、`gpu_type=NVIDIA-RTX-4090-49140MiB`、`gpu_shares=1`；Deployment
+  patch 为 `nvidia.com/gpu: "1"`、nodeSelector `gpu-mode=wholecard`、schedulerName=volcano。
+- **wholecard → quarter**（`rtx-4090-48g-1` → `rtx4090-12g-4`）：请求 200，`compute.spec_id`
+  更新回 `rtx4090-12g-4`、`gpu_type=NVIDIA-RTX-4090-12285MiB`、`gpu_shares=4`；Deployment
+  patch 为 `volcano.sh/vgpu-number: "1"` + `vgpu-memory: "1228"`、nodeSelector vgpu quarter、
+  schedulerName=volcano、queue=ani-inference。
+- **同规格重复 resize**：返回 409 `instance already runs gpu spec`（冲突保护正确）。
+- 两个 operation 状态均 `succeeded`；实例保持 stopped（replicas=0）。
+
+### live gate 发现并修复的缺陷：nodeSelector 残留
+
+首次 quarter→wholecard 验证发现 Deployment `nodeSelector` 残留 vgpu 标签
+（`gpu-sharing-policy: quarter` + `gpu-sharing-spec` 未清除，`gpu-mode` 已改为 wholecard）。
+根因：`buildResizePatch` 用 strategic-merge patch 更新 nodeSelector，而 strategic-merge 对
+map 是**合并语义**——新 wholecard 标签合并进旧 vgpu 标签而非替换。修复：nodeSelector 片段加
+`$patch: replace` 强制整体替换；新增回归测试
+`TestKubernetesLifecycleExecutorResizeSpecSwitchReplacesNodeSelector`（断言 stale 标签消失、
+vgpu 资源键以 null 清除、wholecard 资源请求）。重新部署 `dev-20260902-resize-ns` 后双向切换
+nodeSelector 均干净无残留。
+
 ## 能力边界
 
-- 本批为 local verified：代码、单测、架构门禁通过；**未做真实集群 resize live gate**
-  （stopped 实例变配到新规格、Volcano quota 不足拦截、vGPU 规格切换等场景待 REAL-K8S-LAB 验证）。
+- 本批为 live passed：真实集群双向规格切换（quarter↔wholecard）、冲突保护、Deployment patch
+  均验证通过；Volcano quota 不足拦截（不可用 spec 409）为代码路径，未在 live 复现。
 - 方案B 只 patch Volcano 调度片段与容器 GPU 资源，不整体重渲染 Deployment；
   env/ports/command 等既有意图保持不变。
 - 不外推 GPU runtime ready / production ready。

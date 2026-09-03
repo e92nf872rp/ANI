@@ -176,7 +176,7 @@
 
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
-| INSTANCE-RESIZE-SPEC-A | local verified：`resize` 从"纯重启"改为真正变配——`InstanceLifecycleRequest` 新增可选 `spec_id`（换 GPU 规格，v1 兼容）；状态机 resize 仅允许 stopped（running 409）；字段组合 cpu/memory/spec_id 至少一项；`resolveResizeGPUSpec` 经 `GPUSpecService.GetGPUSpec` + `GPUInventory.ListSpecAvailability` 前置校验（不可用 409，避免 Volcano quota 卡死）；executor 注入 Volcano translator，resize 走 targeted strategic-merge patch（方案B）：`volcano.sh/vgpu-*` 资源、schedulerName=volcano、queue 注解、nodeSelector，切换 wholecard/vgpu 清另一模式资源键；变配后回写 `record.Compute.SpecID/GPUType/GPUShares/GPUMBPerShare`。新增 5 个 executor spec_id 用例 + planning/instance_service 用例更新；`go test` + `make validate-architecture` + `git diff --check` 通过。未做真实集群 resize live gate，不外推 GPU runtime ready | instance-resize-spec-a.md |
+| INSTANCE-RESIZE-SPEC-A | live passed（10.10.1.66，镜像 dev-20260902-resize-ns）：`resize` 从"纯重启"改为真正变配——`InstanceLifecycleRequest` 新增可选 `spec_id`（换 GPU 规格，v1 兼容）；状态机 resize 仅允许 stopped（running 409）；字段组合 cpu/memory/spec_id 至少一项；`resolveResizeGPUSpec` 经 `GPUSpecService.GetGPUSpec` + `GPUInventory.ListSpecAvailability` 前置校验（不可用 409，避免 Volcano quota 卡死）；executor 注入 Volcano translator，resize 走 targeted strategic-merge patch（方案B）：`volcano.sh/vgpu-*` 资源、schedulerName=volcano、queue 注解、nodeSelector，切换 wholecard/vgpu 清另一模式资源键；变配后回写 `record.Compute.SpecID/GPUType/GPUShares/GPUMBPerShare`。新增 5 个 executor spec_id 用例 + planning/instance_service 用例更新；`go test` + `make validate-architecture` + `git diff --check` 通过。真实集群双向规格切换（quarter↔wholecard）live gate 通过，live 发现并修复 nodeSelector 残留（`$patch: replace`），不外推 GPU runtime ready | instance-resize-spec-a.md |
 
 ### Instance Storage Mount Store Fallback（2026-09）
 
