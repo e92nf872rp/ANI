@@ -139,7 +139,8 @@ func (api *tenantListAPI) createTenant(ctx context.Context, c *app.RequestContex
 	if idem == "" {
 		idem = idempotencyHeader(c)
 	}
-	callCtx, cancel := tenantCallCtx(ctx, c)
+	// 创建含 bcrypt(12)+Core 事务+配额初始化；默认 5s gRPC 超时易导致「Core 已成功、网关已取消」竞态。
+	callCtx, cancel := tenantWriteCallCtx(ctx, c, 30*time.Second)
 	defer cancel()
 	res, err := api.tenants.CreateTenant(callCtx, &tenantv1.CreateTenantRequest{
 		Name:           body.Name,

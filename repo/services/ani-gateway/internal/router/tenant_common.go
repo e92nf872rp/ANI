@@ -24,7 +24,15 @@ const (
 // tenantCallCtx 构造 gRPC 调用 context：注入 5s 超时，并把网关 request_id / user_id 透传到 gRPC metadata。
 // 供 tenant-service 审计日志关联请求与操作者。
 func tenantCallCtx(ctx context.Context, c *app.RequestContext) (context.Context, context.CancelFunc) {
-	callCtx, cancel := context.WithTimeout(ctx, tenantCallTimeout)
+	return tenantWriteCallCtx(ctx, c, tenantCallTimeout)
+}
+
+// tenantWriteCallCtx 与 tenantCallCtx 相同，但允许写路径自定义超时（如创建租户 30s）。
+func tenantWriteCallCtx(ctx context.Context, c *app.RequestContext, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		timeout = tenantCallTimeout
+	}
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	callCtx = metadata.AppendToOutgoingContext(callCtx, "x-request-id", middleware.GetRequestID(c))
 	if userID := strings.TrimSpace(middleware.GetUserID(c)); userID != "" {
 		callCtx = metadata.AppendToOutgoingContext(callCtx, "x-user-id", userID)

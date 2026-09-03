@@ -84,10 +84,12 @@ func (api *adminTenantAPI) getTenant(ctx context.Context, c *app.RequestContext)
 }
 
 func (api *adminTenantAPI) createTenant(ctx context.Context, c *app.RequestContext) {
+	// 步骤 1：服务可用性
 	if api.tenant == nil {
 		writeDemoError(c, http.StatusServiceUnavailable, "TENANT_UNAVAILABLE", "tenant service unavailable")
 		return
 	}
+	// 步骤 2：解析 OpenAPI TenantCreateRequest（email → ContactEmail）
 	var body struct {
 		Name              string `json:"name"`
 		DisplayName       string `json:"display_name"`
@@ -101,6 +103,7 @@ func (api *adminTenantAPI) createTenant(ctx context.Context, c *app.RequestConte
 		writeDemoError(c, http.StatusBadRequest, "VALIDATION_FAILED", "invalid request body")
 		return
 	}
+	// 步骤 3：注入网关 request_id / user_id 后调用 Core store
 	tenant, err := api.tenant.CreateTenant(ctx, ports.CreateTenantInput{
 		Name:              strings.TrimSpace(body.Name),
 		DisplayName:       strings.TrimSpace(body.DisplayName),
@@ -109,11 +112,14 @@ func (api *adminTenantAPI) createTenant(ctx context.Context, c *app.RequestConte
 		AdminEmail:        strings.TrimSpace(body.AdminEmail),
 		AdminName:         strings.TrimSpace(body.AdminName),
 		AdminPasswordHash: strings.TrimSpace(body.AdminPasswordHash),
+		RequestID:         middleware.GetRequestID(c),
+		ActorUserID:       middleware.GetUserID(c),
 	})
 	if err != nil {
 		writeAdminTenantError(c, err)
 		return
 	}
+	// 步骤 4：返回 Tenant 视图
 	c.JSON(http.StatusOK, toAdminTenantResponse(tenant))
 }
 

@@ -140,3 +140,20 @@ func TestToAdminTenantResponse_IncludesNullableFields(t *testing.T) {
 		t.Fatalf("disabled_at=%v", got["disabled_at"])
 	}
 }
+
+func TestAdminActorUserID_PrefersTrustedHeader(t *testing.T) {
+	c := app.NewContext(0)
+	c.Request.Header.Set("X-ANI-Actor-User-ID", "cccccccc-cccc-cccc-cccc-cccccccccccc")
+	c.Set("user_id", "dddddddd-dddd-dddd-dddd-dddddddddddd")
+	if got := adminActorUserID(c); got != "cccccccc-cccc-cccc-cccc-cccccccccccc" {
+		t.Fatalf("got=%q", got)
+	}
+}
+
+func TestAdminActorUserID_FallsBackToAuthUser(t *testing.T) {
+	c := app.NewContext(0)
+	c.Set("user_id", "dddddddd-dddd-dddd-dddd-dddddddddddd")
+	if got := adminActorUserID(c); got != "dddddddd-dddd-dddd-dddd-dddddddddddd" {
+		t.Fatalf("got=%q", got)
+	}
+}

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 
 	anisdk "github.com/kubercloud/ani-sdks/core-go/anisdk"
 	"github.com/kubercloud/ani/services/tenant-service/internal/repo/ports"
+	"google.golang.org/grpc/metadata"
 )
 
 const defaultCoreAPIBaseURL = "http://127.0.0.1:8080/api/v1"
@@ -34,6 +36,42 @@ func newCoreSDKClient() anisdk.Client {
 	return anisdk.NewClient(strings.TrimRight(base, "/"), strings.TrimSpace(os.Getenv("CORE_API_TOKEN")))
 }
 
+// corePropagateHeaders 组装调用 Core 时应透传的 HTTP 头。
+// - X-Request-ID：对齐全链路 request_id → tenant_lifecycle.request_id
+// - X-ANI-Actor-User-ID：BOSS 操作者（网关 x-user-id）→ tenant_lifecycle.user_id
+// 优先使用 CreateTenantInput 显式字段，缺省再读 gRPC incoming metadata。
+func corePropagateHeaders(ctx context.Context, requestID, actorUserID string) map[string]string {
+	if strings.TrimSpace(requestID) == "" {
+		requestID = metadataFirst(ctx, "x-request-id")
+	}
+	if strings.TrimSpace(actorUserID) == "" {
+		actorUserID = metadataFirst(ctx, "x-user-id")
+	}
+	headers := map[string]string{}
+	if id := strings.TrimSpace(requestID); id != "" {
+		headers["X-Request-ID"] = id
+	}
+	if id := strings.TrimSpace(actorUserID); id != "" {
+		headers["X-ANI-Actor-User-ID"] = id
+	}
+	if len(headers) == 0 {
+		return nil
+	}
+	return headers
+}
+
+func metadataFirst(ctx context.Context, key string) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return ""
+	}
+	vals := md.Get(key)
+	if len(vals) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(vals[0])
+}
+
 func mapSDKError(err error) error {
 	if err == nil {
 		return nil
@@ -55,6 +93,10 @@ func mapSDKError(err error) error {
 			return fmt.Errorf("%w: %s", ports.ErrQuotaAlreadyExists, detail)
 		case ports.ErrQuotaResourceNotRegistered.Error():
 			return fmt.Errorf("%w: %s", ports.ErrQuotaResourceNotRegistered, detail)
+		case ports.ErrTenantNameConflict.Error():
+			return fmt.Errorf("%w: %s", ports.ErrTenantNameConflict, detail)
+		case ports.ErrTenantStateInvalid.Error():
+			return fmt.Errorf("%w: %s", ports.ErrTenantStateInvalid, detail)
 		case ports.ErrValidationFailed.Error():
 			return fmt.Errorf("%w: %s", ports.ErrValidationFailed, detail)
 		case "USER_NOT_FOUND":

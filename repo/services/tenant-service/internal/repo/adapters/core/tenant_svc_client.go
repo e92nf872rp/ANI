@@ -71,8 +71,28 @@ func (c *TenantSvcClient) ListAvailableTenants(ctx context.Context) ([]ports.Bou
 	return out, nil
 }
 
-func (c *TenantSvcClient) CreateTenant(context.Context, ports.CreateTenantInput) (ports.Tenant, error) {
-	return ports.Tenant{}, ports.ErrNotImplemented
+func (c *TenantSvcClient) CreateTenant(ctx context.Context, in ports.CreateTenantInput) (ports.Tenant, error) {
+	// 步骤 1：调用 Core POST /admin/tenants（密码已为 bcrypt hash）
+	// 透传 request_id / BOSS 操作者，写入 Core tenant_lifecycle。
+	opts := anisdk.RequestOptions{
+		Body: map[string]any{
+			"name":                in.Name,
+			"display_name":        in.DisplayName,
+			"email":               in.ContactEmail,
+			"plan_id":             in.PlanID.String(),
+			"admin_email":         in.AdminEmail,
+			"admin_name":          in.AdminName,
+			"admin_password_hash": in.AdminPasswordHash,
+		},
+		Headers: corePropagateHeaders(ctx, in.RequestID, in.ActorUserID),
+	}
+	raw, err := c.sdk.Request("POST", "/admin/tenants", opts)
+	if err != nil {
+		// 步骤 2：SDK 错误映射（含 TENANT_NAME_CONFLICT）
+		return ports.Tenant{}, mapSDKError(err)
+	}
+	// 步骤 3：解码 Tenant 视图
+	return decodeTenant(raw)
 }
 
 func (c *TenantSvcClient) ListTenants(context.Context, ports.ListTenantsFilter) (ports.TenantListResult, error) {

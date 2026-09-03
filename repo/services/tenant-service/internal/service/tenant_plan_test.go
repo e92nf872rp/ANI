@@ -59,6 +59,9 @@ func (f *fakePlanStore) GetByID(_ context.Context, id uuid.UUID) (ports.TenantPl
 func (f *fakePlanStore) List(context.Context, ports.TenantPlanListFilter) (ports.TenantPlanListResult, error) {
 	panic("unused")
 }
+func (f *fakePlanStore) ListActivePlans(context.Context) ([]ports.AvailableTenantPlan, error) {
+	panic("unused")
+}
 func (f *fakePlanStore) Update(context.Context, uuid.UUID, ports.UpdateTenantPlanInput) (ports.TenantPlan, error) {
 	panic("unused")
 }
@@ -225,6 +228,10 @@ type fakeTenantClient struct {
 	bound       []ports.BoundTenant
 	bindable    []ports.BoundTenant
 	available   []ports.BoundTenant
+
+	createFn   func(ctx context.Context, in ports.CreateTenantInput) (ports.Tenant, error)
+	createIn   *ports.CreateTenantInput
+	createCalls int
 }
 
 var (
@@ -313,8 +320,22 @@ func (f *fakeTenantClient) ListAvailableTenants(_ context.Context) ([]ports.Boun
 	return f.available, nil
 }
 
-func (f *fakeTenantClient) CreateTenant(context.Context, ports.CreateTenantInput) (ports.Tenant, error) {
-	panic("unused in tenant plan tests")
+func (f *fakeTenantClient) CreateTenant(ctx context.Context, in ports.CreateTenantInput) (ports.Tenant, error) {
+	f.createCalls++
+	cp := in
+	f.createIn = &cp
+	if f.createFn != nil {
+		return f.createFn(ctx, in)
+	}
+	if f.tenant.ID == uuid.Nil {
+		f.tenant.ID = uuid.New()
+	}
+	f.tenant.Name = in.Name
+	f.tenant.DisplayName = in.DisplayName
+	f.tenant.ContactEmail = in.ContactEmail
+	f.tenant.PlanID = in.PlanID
+	f.tenant.Status = ports.TenantStatusActive
+	return f.tenant, nil
 }
 
 func (f *fakeTenantClient) ListTenants(context.Context, ports.ListTenantsFilter) (ports.TenantListResult, error) {
@@ -684,6 +705,9 @@ func (f *listFakePlanStore) List(ctx context.Context, filter ports.TenantPlanLis
 	}
 	return ports.TenantPlanListResult{}, nil
 }
+func (f *listFakePlanStore) ListActivePlans(context.Context) ([]ports.AvailableTenantPlan, error) {
+	panic("unused")
+}
 func (f *listFakePlanStore) Update(context.Context, uuid.UUID, ports.UpdateTenantPlanInput) (ports.TenantPlan, error) {
 	panic("unused")
 }
@@ -849,6 +873,9 @@ func (f *updateFakePlanStore) GetByID(_ context.Context, id uuid.UUID) (ports.Te
 	return f.plan, nil
 }
 func (f *updateFakePlanStore) List(context.Context, ports.TenantPlanListFilter) (ports.TenantPlanListResult, error) {
+	panic("unused")
+}
+func (f *updateFakePlanStore) ListActivePlans(context.Context) ([]ports.AvailableTenantPlan, error) {
 	panic("unused")
 }
 func (f *updateFakePlanStore) Update(_ context.Context, id uuid.UUID, in ports.UpdateTenantPlanInput) (ports.TenantPlan, error) {
@@ -1043,6 +1070,9 @@ func (f *stateFakePlanStore) GetByID(_ context.Context, id uuid.UUID) (ports.Ten
 	return plan, nil
 }
 func (f *stateFakePlanStore) List(context.Context, ports.TenantPlanListFilter) (ports.TenantPlanListResult, error) {
+	panic("unused")
+}
+func (f *stateFakePlanStore) ListActivePlans(context.Context) ([]ports.AvailableTenantPlan, error) {
 	panic("unused")
 }
 func (f *stateFakePlanStore) Update(context.Context, uuid.UUID, ports.UpdateTenantPlanInput) (ports.TenantPlan, error) {
@@ -1365,6 +1395,9 @@ func (f *quotaLimitsFakeStore) GetByID(context.Context, uuid.UUID) (ports.Tenant
 	return f.plan, nil
 }
 func (f *quotaLimitsFakeStore) List(context.Context, ports.TenantPlanListFilter) (ports.TenantPlanListResult, error) {
+	panic("unused")
+}
+func (f *quotaLimitsFakeStore) ListActivePlans(context.Context) ([]ports.AvailableTenantPlan, error) {
 	panic("unused")
 }
 func (f *quotaLimitsFakeStore) Update(context.Context, uuid.UUID, ports.UpdateTenantPlanInput) (ports.TenantPlan, error) {

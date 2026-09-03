@@ -69,6 +69,7 @@ type TenantLifecycleEntry struct {
 
 // CreateTenantInput is the Core createTenant request body
 // (admin_password_hash is bcrypt output from tenant-service).
+// RequestID / ActorUserID 由 Gateway 从中间件注入，不在 OpenAPI body 中。
 type CreateTenantInput struct {
 	Name              string
 	DisplayName       string
@@ -77,6 +78,8 @@ type CreateTenantInput struct {
 	AdminEmail        string
 	AdminName         string
 	AdminPasswordHash string
+	RequestID         string // optional → tenant_lifecycle.request_id
+	ActorUserID       string // optional platform user UUID → tenant_lifecycle.user_id
 }
 
 // UpdateTenantInput is a partial update for display_name / contact_email.

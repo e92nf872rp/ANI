@@ -10,6 +10,7 @@ import (
 	tenantv1 "github.com/kubercloud/ani/pkg/generated/pb/tenant/v1"
 	"github.com/kubercloud/ani/services/tenant-service/internal/repo/ports"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -32,6 +33,9 @@ func (f *bindFakePlanStore) GetByID(_ context.Context, id uuid.UUID) (ports.Tena
 	return f.plan, nil
 }
 func (f *bindFakePlanStore) List(context.Context, ports.TenantPlanListFilter) (ports.TenantPlanListResult, error) {
+	panic("unused")
+}
+func (f *bindFakePlanStore) ListActivePlans(context.Context) ([]ports.AvailableTenantPlan, error) {
 	panic("unused")
 }
 func (f *bindFakePlanStore) Update(context.Context, uuid.UUID, ports.UpdateTenantPlanInput) (ports.TenantPlan, error) {
@@ -377,5 +381,181 @@ func TestMapStoreError_TenantListCodes(t *testing.T) {
 		if !strings.HasPrefix(status.Convert(mapped).Message(), tc.msg) {
 			t.Fatalf("%v: msg=%q want prefix %q", tc.err, status.Convert(mapped).Message(), tc.msg)
 		}
+	}
+}
+
+type availablePlansFakeStore struct {
+	bindFakePlanStore
+	items []ports.AvailableTenantPlan
+}
+
+func (f *availablePlansFakeStore) ListActivePlans(context.Context) ([]ports.AvailableTenantPlan, error) {
+	return append([]ports.AvailableTenantPlan(nil), f.items...), nil
+}
+
+func TestTenantService_ListAvailablePlans_OnlyActive(t *testing.T) {
+	activeID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	plans := &availablePlansFakeStore{
+		items: []ports.AvailableTenantPlan{
+			{ID: activeID, Code: "pro", Name: "Pro"},
+		},
+	}
+	svc := NewTenantService(plans, nil, nil, nil, nil, nil, nil, nil, nil)
+	res, err := svc.ListAvailablePlans(context.Background(), &tenantv1.ListAvailablePlansRequest{})
+	if err != nil {
+		t.Fatalf("ListAvailablePlans: %v", err)
+	}
+	if len(res.GetItems()) != 1 || res.GetItems()[0].GetCode() != "pro" {
+		t.Fatalf("items=%v", res.GetItems())
+	}
+}
+
+func TestTenantService_ListAvailablePlans_Empty(t *testing.T) {
+	svc := NewTenantService(&availablePlansFakeStore{}, nil, nil, nil, nil, nil, nil, nil, nil)
+	res, err := svc.ListAvailablePlans(context.Background(), &tenantv1.ListAvailablePlansRequest{})
+	if err != nil {
+		t.Fatalf("ListAvailablePlans: %v", err)
+	}
+	if res.GetItems() == nil {
+		t.Fatal("items should be empty slice not nil for JSON []")
+	}
+	if len(res.GetItems()) != 0 {
+		t.Fatalf("len=%d", len(res.GetItems()))
+	}
+}
+
+func TestValidateAdminPassword(t *testing.T) {
+	cases := []struct {
+		name    string
+		pwd     string
+		wantErr bool
+	}{
+		{"too_short", "Ab1!", true},
+		{"too_long", strings.Repeat("Aa1!", 20), true}, // 80 chars
+		{"two_classes", "Abcdefgh", true},
+		{"three_classes", "Abcdefg1", false},
+		{"three_with_special", "Abcdefg!", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateAdminPassword(tc.pwd)
+			if tc.wantErr && err == nil {
+				t.Fatal("want error")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("unexpected: %v", err)
+			}
+		})
+	}
+}
+
+func TestTenantService_CreateTenant_NilRequest(t *testing.T) {
+	svc := NewTenantService(&bindFakePlanStore{}, &fakeTenantClient{}, nil, &fakeQuotaClient{}, nil, &fakeAuditStore{}, nil, nil, nil)
+	_, err := svc.CreateTenant(context.Background(), nil)
+	if status.Code(err) != codes.InvalidArgument || !strings.Contains(status.Convert(err).Message(), "request required") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestTenantService_CreateTenant_Success(t *testing.T) {
+	prev := enablePutQuotaRetry
+	enablePutQuotaRetry = false
+	defer func() { enablePutQuotaRetry = prev }()
+
+	planID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	actorID := uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc")
+	total := int64(8)
+	plans := &bindFakePlanStore{
+		plan: ports.TenantPlan{ID: planID, Code: "pro", Status: ports.TenantPlanStatusActive},
+		limits: []ports.PlanQuotaLimit{
+			{PlanID: planID, ResourceType: "gpu_count", Total: &total},
+		},
+	}
+	tenants := &fakeTenantClient{}
+	quota := &fakeQuotaClient{
+		meta: []ports.QuotaMeta{
+			{ResourceType: "gpu_count", Enabled: true, DefaultQuota: 4, DisplayName: "GPU", Unit: "card"},
+		},
+	}
+	audit := &fakeAuditStore{}
+	svc := NewTenantService(plans, tenants, nil, quota, nil, audit, nil, nil, nil)
+
+	mdCtx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
+		"x-request-id", "req_create-tenant-1",
+		"x-user-id", actorID.String(),
+	))
+	res, err := svc.CreateTenant(mdCtx, &tenantv1.CreateTenantRequest{
+		Name: "acme-co", DisplayName: "Acme", Email: "ops@acme.io",
+		PlanId: planID.String(), AdminEmail: "admin@acme.io", AdminName: "acme_admin",
+		AdminPassword: "Abcdefg1",
+	})
+	if err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	if res.GetId() == "" || strings.Contains(strings.ToLower(res.GetMessage()), "password") {
+		t.Fatalf("response=%+v", res)
+	}
+	if tenants.createCalls != 1 || tenants.createIn == nil {
+		t.Fatalf("createCalls=%d", tenants.createCalls)
+	}
+	if tenants.createIn.AdminPasswordHash == "" || tenants.createIn.AdminPasswordHash == "Abcdefg1" {
+		t.Fatal("password must be bcrypt hash, never plaintext")
+	}
+	if tenants.createIn.RequestID != "req_create-tenant-1" {
+		t.Fatalf("RequestID=%q", tenants.createIn.RequestID)
+	}
+	if tenants.createIn.ActorUserID != actorID.String() {
+		t.Fatalf("ActorUserID=%q, want BOSS operator", tenants.createIn.ActorUserID)
+	}
+	if quota.upsertCalls != 1 {
+		t.Fatalf("upsertCalls=%d", quota.upsertCalls)
+	}
+	if len(audit.logs) == 0 || audit.logs[0].Action != "tenant.create" || audit.logs[0].Result != "success" {
+		t.Fatalf("audit=%+v", audit.logs)
+	}
+	if _, ok := audit.logs[0].Details["admin_password"]; ok {
+		t.Fatal("audit must not contain password")
+	}
+}
+
+func TestTenantService_CreateTenant_PlanNotActive(t *testing.T) {
+	planID := uuid.New()
+	plans := &bindFakePlanStore{
+		plan: ports.TenantPlan{ID: planID, Status: ports.TenantPlanStatusDraft},
+	}
+	svc := NewTenantService(plans, &fakeTenantClient{}, nil, &fakeQuotaClient{}, nil, &fakeAuditStore{}, nil, nil, nil)
+	_, err := svc.CreateTenant(context.Background(), &tenantv1.CreateTenantRequest{
+		Name: "acme-co", DisplayName: "Acme", Email: "ops@acme.io",
+		PlanId: planID.String(), AdminEmail: "admin@acme.io", AdminName: "acme_admin",
+		AdminPassword: "Abcdefg1",
+	})
+	if status.Code(err) != codes.FailedPrecondition || !strings.HasPrefix(status.Convert(err).Message(), "PLAN_NOT_ACTIVE") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestTenantService_CreateTenant_NameConflict(t *testing.T) {
+	planID := uuid.New()
+	total := int64(1)
+	plans := &bindFakePlanStore{
+		plan:   ports.TenantPlan{ID: planID, Status: ports.TenantPlanStatusActive},
+		limits: []ports.PlanQuotaLimit{{PlanID: planID, ResourceType: "gpu_count", Total: &total}},
+	}
+	tenants := &fakeTenantClient{
+		createFn: func(context.Context, ports.CreateTenantInput) (ports.Tenant, error) {
+			return ports.Tenant{}, ports.ErrTenantNameConflict
+		},
+	}
+	quota := &fakeQuotaClient{
+		meta: []ports.QuotaMeta{{ResourceType: "gpu_count", Enabled: true, DefaultQuota: 1}},
+	}
+	svc := NewTenantService(plans, tenants, nil, quota, nil, &fakeAuditStore{}, nil, nil, nil)
+	_, err := svc.CreateTenant(context.Background(), &tenantv1.CreateTenantRequest{
+		Name: "acme-co", DisplayName: "Acme", Email: "ops@acme.io",
+		PlanId: planID.String(), AdminEmail: "admin@acme.io", AdminName: "acme_admin",
+		AdminPassword: "Abcdefg1",
+	})
+	if status.Code(err) != codes.AlreadyExists || !strings.HasPrefix(status.Convert(err).Message(), "TENANT_NAME_CONFLICT") {
+		t.Fatalf("err=%v", err)
 	}
 }

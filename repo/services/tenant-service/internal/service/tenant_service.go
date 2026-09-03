@@ -2,12 +2,16 @@ package service
 
 import (
 	"context"
+	"net/mail"
+	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/google/uuid"
 	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 	tenantv1 "github.com/kubercloud/ani/pkg/generated/pb/tenant/v1"
 	"github.com/kubercloud/ani/services/tenant-service/internal/repo/ports"
+	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -216,16 +220,233 @@ func parseTenantID(raw string) (uuid.UUID, error) {
 	return id, nil
 }
 
+// auditResourceTenant 审计资源类型：租户
+const auditResourceTenant = "tenant"
+
+// tenantNamePattern 租户名称正则
+var (
+	tenantNamePattern = regexp.MustCompile(`^[a-z0-9-]{3,40}$`)
+)
+
+// ListAvailablePlans 返回 status=active 套餐摘要（供创建向导 Step2；不分页、不调 Core）。
 func (s *TenantService) ListAvailablePlans(ctx context.Context, req *tenantv1.ListAvailablePlansRequest) (*tenantv1.ListAvailablePlansResponse, error) {
-	_ = ctx
 	_ = req
-	return nil, tenantRPCNotImplemented()
+	// 步骤 1：依赖校验
+	if s.plans == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant plan store unavailable")
+	}
+	// 步骤 2：经 store.ListActivePlans 一次取齐全部 active 套餐（不分页）
+	listed, err := s.plans.ListActivePlans(ctx)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	// 步骤 3：组装 proto AvailableTenantPlan（仅 id/code/name）；空列表合法
+	items := make([]*tenantv1.AvailableTenantPlan, 0, len(listed))
+	for _, p := range listed {
+		items = append(items, &tenantv1.AvailableTenantPlan{
+			Id:   p.ID.String(),
+			Code: p.Code,
+			Name: p.Name,
+		})
+	}
+	return &tenantv1.ListAvailablePlansResponse{Items: items}, nil
 }
 
+// CreateTenant 编排创建租户：校验 → 套餐 → bcrypt → Core 事务 → 事务外配额初始化 → 审计。
 func (s *TenantService) CreateTenant(ctx context.Context, req *tenantv1.CreateTenantRequest) (*commonv1.IdempotentResult, error) {
-	_ = ctx
-	_ = req
-	return nil, tenantRPCNotImplemented()
+	const action = "tenant.create"
+
+	// 步骤 1：请求体必填
+	if req == nil {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "request required")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, nil, err, nil)
+		return nil, err
+	}
+
+	// 步骤 2：入参校验（name 正则 / email / admin_password 强度）→ 400 VALIDATION_FAILED
+	name, displayName, contactEmail, adminEmail, adminName, err := validateCreateTenantInput(
+		req.GetName(), req.GetDisplayName(), req.GetEmail(),
+		req.GetAdminEmail(), req.GetAdminName(), req.GetAdminPassword(),
+	)
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"name": name, "email": contactEmail, "admin_email": adminEmail,
+		}, err, nil)
+		return nil, err
+	}
+	planID, err := parsePlanID(req.GetPlanId())
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"plan_id": req.GetPlanId()}, err, nil)
+		return nil, err
+	}
+
+	// 步骤 3：套餐存在且 status=active；否则 404 / 422 PLAN_NOT_ACTIVE
+	plan, err := s.plans.GetByID(ctx, planID)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"plan_id": planID.String()}, mapped, nil)
+		return nil, mapped
+	}
+	if plan.Status != ports.TenantPlanStatusActive {
+		err := businessError(codes.FailedPrecondition, ports.ErrPlanNotActive, "tenant plan status is "+string(plan.Status))
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"plan_id": planID.String(), "status": string(plan.Status),
+		}, err, nil)
+		return nil, err
+	}
+
+	// 步骤 4：组装套餐配额视图（plan_quota_limits + Core meta default_quota 兜底）
+	views, err := buildQuotaLimitViews(ctx, s.plans, s.quota, planID)
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"plan_id": planID.String()}, err, nil)
+		return nil, err
+	}
+
+	// 步骤 5：bcrypt(admin_password, 12)；明文不出 service 边界
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.GetAdminPassword()), 12)
+	if err != nil {
+		mapped := businessError(codes.Internal, ports.ErrValidationFailed, "password hash failed")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"name": name}, mapped, nil)
+		return nil, mapped
+	}
+
+	// 步骤 6：经 Core SDK 创建租户（事务内 5 表）；name UNIQUE → 409 TENANT_NAME_CONFLICT
+	// ActorUserID / RequestID 取自网关 gRPC metadata（BOSS 操作者），供 Core lifecycle 归因。
+	actorID := ""
+	if uid := userIDFromCtx(ctx); uid != nil {
+		actorID = uid.String()
+	}
+	created, err := s.tenants.CreateTenant(ctx, ports.CreateTenantInput{
+		Name:              name,
+		DisplayName:       displayName,
+		ContactEmail:      contactEmail,
+		PlanID:            planID,
+		AdminEmail:        adminEmail,
+		AdminName:         adminName,
+		AdminPasswordHash: string(hash),
+		RequestID:         requestIDFromCtx(ctx),
+		ActorUserID:       actorID,
+	})
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"name": name, "email": contactEmail, "admin_email": adminEmail, "username": adminName,
+			"plan_id": planID.String(),
+		}, mapped, nil)
+		return nil, mapped
+	}
+
+	// 步骤 7：事务外配额初始化；失败不回滚租户，审计 failure + 异步重试（1s/2s/4s）
+	totals := totalsFromQuotaViews(views)
+	dims := dimsFromQuotaViews(views)
+	syncRes, syncErr := syncPlanQuotaToTenant(ctx, s.plans, s.quota, created.ID, totals, dims)
+	if syncErr != nil {
+		mapped := mapStoreError(syncErr)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, "tenant.quota_init_failed", map[string]any{
+			"tenant_id": created.ID.String(),
+			"plan_id":   planID.String(),
+			"items":     coreItemsForAudit(syncRes.Items),
+		}, mapped, &created.ID)
+		scheduleQuotaSyncRetry(s.audit, s.plans, s.quota, planID, created.ID, totals, dims)
+	}
+
+	// 步骤 8：成功审计（details 含 email/username，不含密码）+ 返回 { id, message }
+	writeAuditSuccess(ctx, s.audit, auditResourceTenant, action, map[string]any{
+		"tenant_id":     created.ID.String(),
+		"name":          created.Name,
+		"email":         contactEmail,
+		"admin_email":   adminEmail,
+		"username":      adminName,
+		"plan_id":       planID.String(),
+		"quota_init_ok": syncErr == nil,
+		"quota_updated": syncRes.Updated,
+		"quota_skipped": syncRes.SkippedApproved,
+	}, &created.ID)
+
+	return &commonv1.IdempotentResult{
+		Id:      created.ID.String(),
+		Message: "tenant created",
+	}, nil
+}
+
+func validateCreateTenantInput(
+	rawName, rawDisplay, rawEmail, rawAdminEmail, rawAdminName, rawPassword string,
+) (name, displayName, contactEmail, adminEmail, adminName string, err error) {
+	// 步骤 1：trim 入参
+	name = strings.TrimSpace(rawName)
+	displayName = strings.TrimSpace(rawDisplay)
+	contactEmail = strings.TrimSpace(rawEmail)
+	adminEmail = strings.TrimSpace(rawAdminEmail)
+	adminName = strings.TrimSpace(rawAdminName)
+
+	// 步骤 2：逐字段校验
+	if !tenantNamePattern.MatchString(name) {
+		return name, displayName, contactEmail, adminEmail, adminName,
+			businessError(codes.InvalidArgument, ports.ErrValidationFailed, "name must match ^[a-z0-9-]{3,40}$")
+	}
+	if displayName == "" || len(displayName) > 128 {
+		return name, displayName, contactEmail, adminEmail, adminName,
+			businessError(codes.InvalidArgument, ports.ErrValidationFailed, "display_name required (1-128)")
+	}
+	if !validEmail(contactEmail) {
+		return name, displayName, contactEmail, adminEmail, adminName,
+			businessError(codes.InvalidArgument, ports.ErrValidationFailed, "email invalid")
+	}
+	if !validEmail(adminEmail) {
+		return name, displayName, contactEmail, adminEmail, adminName,
+			businessError(codes.InvalidArgument, ports.ErrValidationFailed, "admin_email invalid")
+	}
+	if adminName == "" || len(adminName) > 128 {
+		return name, displayName, contactEmail, adminEmail, adminName,
+			businessError(codes.InvalidArgument, ports.ErrValidationFailed, "admin_name required (1-128)")
+	}
+	// 步骤 3：密码强度（8-64 且 ≥3 类）
+	if err := validateAdminPassword(rawPassword); err != nil {
+		return name, displayName, contactEmail, adminEmail, adminName, err
+	}
+	return name, displayName, contactEmail, adminEmail, adminName, nil
+}
+
+func validEmail(raw string) bool {
+	if raw == "" || len(raw) > 254 {
+		return false
+	}
+	addr, err := mail.ParseAddress(raw)
+	return err == nil && addr.Address == raw
+}
+
+// validateAdminPassword：8-64 字符，且至少满足大写/小写/数字/特殊 四类中的三类。
+func validateAdminPassword(password string) error {
+	// 步骤 1：长度边界
+	n := len(password)
+	if n < 8 || n > 64 {
+		return businessError(codes.InvalidArgument, ports.ErrValidationFailed, "admin_password must be 8-64 characters")
+	}
+	// 步骤 2：统计字符类别
+	var upper, lower, digit, special bool
+	for _, r := range password {
+		switch {
+		case unicode.IsUpper(r):
+			upper = true
+		case unicode.IsLower(r):
+			lower = true
+		case unicode.IsDigit(r):
+			digit = true
+		case unicode.IsPunct(r) || unicode.IsSymbol(r):
+			special = true
+		}
+	}
+	classes := 0
+	for _, ok := range []bool{upper, lower, digit, special} {
+		if ok {
+			classes++
+		}
+	}
+	// 步骤 3：至少三类
+	if classes < 3 {
+		return businessError(codes.InvalidArgument, ports.ErrValidationFailed, "admin_password must include at least 3 of upper/lower/digit/special")
+	}
+	return nil
 }
 
 func (s *TenantService) ListTenants(ctx context.Context, req *tenantv1.ListTenantsRequest) (*tenantv1.ListTenantsResponse, error) {
@@ -236,6 +457,7 @@ func (s *TenantService) ListTenants(ctx context.Context, req *tenantv1.ListTenan
 
 // GetTenantDetail 经 Core GetTenant 返回最小租户详情（plan_code / 计数等后续 Issue 补齐）。
 func (s *TenantService) GetTenantDetail(ctx context.Context, req *tenantv1.GetTenantDetailRequest) (*tenantv1.TenantDetail, error) {
+	// 步骤 1：校验 tenant_id
 	rawID := ""
 	if req != nil {
 		rawID = req.GetTenantId()
@@ -244,10 +466,12 @@ func (s *TenantService) GetTenantDetail(ctx context.Context, req *tenantv1.GetTe
 	if err != nil {
 		return nil, err
 	}
+	// 步骤 2：经 Core SDK 查询租户
 	t, err := s.tenants.GetTenant(ctx, tenantID)
 	if err != nil {
 		return nil, mapStoreError(err)
 	}
+	// 步骤 3：组装最小详情（plan_code / user_count / admin_count 暂为零值）
 	out := &tenantv1.TenantDetail{
 		Id:          t.ID.String(),
 		Name:        t.Name,
