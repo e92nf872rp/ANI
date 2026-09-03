@@ -314,6 +314,7 @@ func TestInstanceResponseIncludesContractSummaryFields(t *testing.T) {
 			{ResourceType: "volume", ResourceID: "vol-1", Name: "data", MountPath: "/data", ReadOnly: true, Status: "attached"},
 		},
 		Status:    ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+		Lifecycle: ports.InstanceLifecyclePolicy{AutoStart: true},
 		CreatedAt: time.Unix(1000, 0).UTC(),
 		UpdatedAt: time.Unix(1100, 0).UTC(),
 	})
@@ -326,7 +327,7 @@ func TestInstanceResponseIncludesContractSummaryFields(t *testing.T) {
 	if err := json.Unmarshal(raw, &body); err != nil {
 		t.Fatalf("Unmarshal response error = %v", err)
 	}
-	for _, field := range []string{"description", "labels", "image", "compute", "network", "access", "storage_attachments"} {
+	for _, field := range []string{"description", "labels", "image", "compute", "network", "access", "storage_attachments", "auto_start"} {
 		if _, ok := body[field]; !ok {
 			t.Fatalf("response JSON missing %q: %s", field, raw)
 		}

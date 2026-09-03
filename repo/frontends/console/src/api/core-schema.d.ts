@@ -4278,6 +4278,11 @@ export interface components {
              * @default false
              */
             termination_protection: boolean;
+            /**
+             * @description 实例创建后是否自动启动（开机自启）
+             * @default true
+             */
+            auto_start: boolean;
             /** @description VM SSH 连接信息；仅返回连接元数据，不返回私钥 */
             ssh?: {
                 /** @example ubuntu */

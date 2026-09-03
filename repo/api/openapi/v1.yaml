@@ -1084,6 +1084,7 @@ components:
           type: array
           items: { $ref: '#/components/schemas/InstanceStorageAttachment' }
         termination_protection: { type: boolean, default: false, description: "VM 危险操作保护开关；开启后 stop/delete/rebuild 等操作必须先关闭保护" }
+        auto_start: { type: boolean, default: true, description: "实例创建后是否自动启动（开机自启）" }
         ssh:
           type: object
           nullable: true
