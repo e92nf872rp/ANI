@@ -1091,7 +1091,7 @@ None — 实现严格遵循 SPEC §5.1 Subscribe 算法和 Issue #004 Scope。
 ## v4 修订 — Subscribe 删 ctx + ack/nak 失败打日志
 
 修订日期：2026-08-03
-前置文档：`kjs-study/plan-nats-integration-v4.md`（v3 已实现，v4 为增量修订）
+前置文档：`services/tasks/modules/plan/plan-nats-integration-v4.md`（v3 已实现，v4 为增量修订）
 修订范围：v3 已落地代码 + 单测 + 集成测试
 
 ### 实现了什么

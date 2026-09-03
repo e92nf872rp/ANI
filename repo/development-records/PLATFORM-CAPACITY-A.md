@@ -3,8 +3,8 @@
 完成日期：2026-09-03
 对应 Sprint：Sprint 13 并行功能流（BOSS「资源池与容量态势」/「平台资源池总览」）
 分支：`feat/platform-capacity`（commit `64bc8ab` + 生成物补齐 `fae60b0`，未 push）
-方案依据：`kjs-study/容量态势相关文档/容量态势接口方案.md`
-交付文档：`kjs-study/容量态势相关文档/` 下 `implementation-diff-platform-capacity.md`（方案-实现差异）、`platform-capacity-test-report.md`（测试报告）、`platform-capacity-api.md`（接口文档）
+方案依据：`services/tasks/modules/plan/plan-platform-capacity.md`
+交付文档：`development-records/` 下 `platform-capacity-implementation-diff.md`（方案-实现差异）、`platform-capacity-test-report.md`（测试报告）、`platform-capacity-api.md`（接口文档）
 验证结果：`make test`、`make validate-architecture`、`make validate-openapi-spec`、`validate-auth-contract`、`make validate-gateway-authz`、`gen-core-sdk` 零漂移、`git diff --check` 全过；真实环境实测（10.10.1.66 K8s 测试集群，镜像 `dev-20260903-platformcapacity`）平台/租户/无凭证/坏 token 四类用例全过（详见测试报告）。
 
 ## 实现了什么
