@@ -176,6 +176,7 @@
 
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
+| INSTANCE-SANDBOX-KATA-STORAGE-A | Kata lab 部署基线同步到私有 `kata-deploy:4.0.0` 和 3 节点现状；Sandbox 创建/clone/restore 的 5Gi RWO workspace PVC 显式使用 `ani-block`，避免无默认 StorageClass 环境持续 Pending；底座 live verified，代码 local/logic verified；sysctl 不入库 | instance-sandbox-kata-storage-a.md |
 | INSTANCE-SANDBOX-CHECKPOINT-A | live passed：新 Sandbox `/workspace` 使用 5Gi RBD PVC；CSI VolumeSnapshot create/list/restore/clone，Gateway restart 后 provider list 与 PG task 可恢复；filesystem-only，keep_memory/legacy emptyDir 返回 422；删除 Sandbox 级联清理 managed snapshots；default 网络 evidence `live-evidence/instance-sandbox-checkpoint-live-20260802.json`；Gateway `instance-sandbox-checkpoint-20260802-v1` | instance-sandbox-checkpoint-a.md |
 | INSTANCE-SANDBOX-STATELESS-A | live passed：PG 请求上下文驱动 Kubernetes Sandbox、UUID、PG AsyncTaskStore、端口摘要、Redis DELETE/指纹/Token 过期幂等与 checkpoint 422；真实 Gateway rollout 后实例/文件/端口/task 可恢复，原请求可重放、不同 intent 冲突，清理后 provider 资源为 0；evidence `live-evidence/instance-sandbox-stateless-live-20260802.json`；Gateway `instance-sandbox-stateless-20260802-v1` | instance-sandbox-stateless-a.md |
 

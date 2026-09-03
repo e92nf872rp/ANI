@@ -10,6 +10,8 @@ import (
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
+const sandboxWorkspaceStorageClassName = "ani-block"
+
 type KubernetesDryRunRenderer struct {
 	planner *PlanningRuntime
 }
@@ -219,7 +221,8 @@ func renderSandboxWorkspacePVC(spec ports.WorkloadSpec) ports.WorkloadManifest {
 	meta := metadata(spec, "sandbox-workspace")
 	meta["name"] = name
 	pvcSpec := map[string]any{
-		"accessModes": []any{"ReadWriteOnce"},
+		"accessModes":      []any{"ReadWriteOnce"},
+		"storageClassName": sandboxWorkspaceStorageClassName,
 		"resources": map[string]any{
 			"requests": map[string]any{"storage": "5Gi"},
 		},
