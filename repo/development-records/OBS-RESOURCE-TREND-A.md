@@ -8,7 +8,7 @@
 
 ## 实现了什么
 
-Core 新增 `GET /api/v1/observability/resource_trend` 租户级资源使用率趋势接口：`metric` 枚举 `gpu|cpu|memory`，`start/end`(RFC3339)/`step`(Go duration 正数，0/负→400)/`timeout`(可选默认30s 不读取)。tenant_id **全部从 JWT 提取**（`instanceTenantID(c)`），后端据此直接生成只锚 `namespace="ani-tenant-<id>"` 的聚合 PromQL 后走既有 `queryPrometheusRange`，**不经过 `rewritePromQLLabels`**（其 `instanceID==""` 分支原样透传是跨租户裸聚合根源）、**不接收/不暴露 `query` PromQL**。三条曲线统一利用率 %（0-100）：GPU 用 `DCGM_FI_DEV_GPU_UTIL`（已为 %，不乘 100）；CPU/内存用 cAdvisor 容器维度 `100*avg(...)` 且带 `container!="",container!="POD"` 过滤 pause 容器。返回结构与 `query_range` 完全一致（`ObservabilityRangeQueryResponse` matrix），前端复用既有出图逻辑；降级沿用 `prometheusObservabilityDegradedProfile`（空 matrix + `dev_profile.real_provider=false`）。local profile 返回空 matrix 闭环。
+Core 新增 `GET /api/v1/observability/resource_trend` 租户级资源使用率趋势接口：`metric` 枚举 `gpu|cpu|memory`，`start/end`(RFC3339)/`step`(Go duration 正数，0/负→400)/`timeout`(可选默认30s 不读取)。tenant_id **全部从 JWT 提取**（`instanceTenantID(c)`），后端据此直接生成只锚 `namespace="ani-tenant-<id>"` 的聚合 PromQL 后走既有 `queryPrometheusRange`，**不经过 `rewritePromQLLabels`**（其 `instanceID==""` 分支原样透传是跨租户裸聚合根源）、**不接收/不暴露 `query` PromQL**。三条曲线统一利用率 %（0-100）：GPU 用 `DCGM_FI_DEV_GPU_UTIL`（已为 %，不乘 100）；CPU/内存用 cAdvisor 容器维度 `100*avg(...)` 且带 `container!="",container!="POD"` 过滤 pause 容器。**内存表达式的 limit 侧带 `> 0` 保护**（`... / (container_spec_memory_limit_bytes{...,container!="",container!="POD"} > 0)`）：对未配置内存 limit（`limit=0`，如 KubeVirt compute 容器）的采样点用向量过滤避免除零得 `+Inf`，防止整租户 memory 曲线被 `queryPrometheusRange` 的 Inf/NaN 过滤整条丢弃。返回结构与 `query_range` 完全一致（`ObservabilityRangeQueryResponse` matrix），前端复用既有出图逻辑；降级沿用 `prometheusObservabilityDegradedProfile`（空 matrix + `dev_profile.real_provider=false`）。local profile 返回空 matrix 闭环。
 
 ## 关键文件改动
 
@@ -30,6 +30,7 @@ Core 新增 `GET /api/v1/observability/resource_trend` 租户级资源使用率�
 环境：K8s 测试环境（10.10.1.66，nodePort 30080），`kubectl set image` 滚动部署 `ani-gateway` 到新 tag，`INSTANCE_OBSERVABILITY_PROVIDER` 保持现值（真实 Prometheus 链路）。`/healthz` 200。
 
 - **三 metric 各一次**：`GET /api/v1/observability/resource_trend?metric=gpu|cpu|memory&start=<now-1h>&end=<now>&step=30s`（Bearer token）均返回 200 + `result_type=matrix`，`dev_profile` 反映真实/降级 provider；`value` 口径 0-100（GPU 不乘 100）。
+- **memory 空结果修复（真实根因+解决，2026-09-03）**：`metric=memory` 曾返回空 matrix，初判「无内存数据」为误。复核真实 Prometheus（该租户 ns `ani-tenant-00000000-0000-0000-0000-000000000001`：`container_spec_memory_limit_bytes` / `container_memory_working_set_bytes` / `container_cpu_usage_seconds_total` 各 14 条 series）确认数据存在，根因是存在 `limit=0` 的 KubeVirt compute 容器 → `working_set/limit` 得 `+Inf` → `100*avg(...)=+Inf` → 被 `queryPrometheusRange` 的 Inf/NaN 过滤（`prometheus_observability_service.go:269-273`）整条丢弃。已按方案对 memory 表达式 limit 侧加 `> 0` 向量过滤修复（`resourceTrendPromQL`），实测修复后表达式返回有限值（该租户约 8.47%）。
 - **参数校验**：缺参 / `step=0s` / `step=-30s` / `start=not-a-time`（非 RFC3339）→ 400。
 - **租户隔离回归**：该端点不认前端租户参数只认 JWT；无凭证 → 401。
 - **收尾**：实测发现的问题（若有）已在差异文档列明并重打 tag 重走部署。

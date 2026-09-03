@@ -546,7 +546,7 @@ func TestResourceTrendPromQLBuildsTenantAnchoredQueries(t *testing.T) {
 		{"cpu", ports.ObservabilityResourceTrendCPU,
 			`100 * avg(rate(container_cpu_usage_seconds_total{namespace="ani-tenant-tenant-1",container!="",container!="POD"}[5m]))`},
 		{"memory", ports.ObservabilityResourceTrendMemory,
-			`100 * avg(container_memory_working_set_bytes{namespace="ani-tenant-tenant-1",container!="",container!="POD"} / container_spec_memory_limit_bytes{namespace="ani-tenant-tenant-1",container!="",container!="POD"})`},
+			`100 * avg(container_memory_working_set_bytes{namespace="ani-tenant-tenant-1",container!="",container!="POD"} / (container_spec_memory_limit_bytes{namespace="ani-tenant-tenant-1",container!="",container!="POD"} > 0))`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

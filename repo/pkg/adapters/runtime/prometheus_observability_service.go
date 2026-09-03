@@ -213,7 +213,11 @@ func resourceTrendPromQL(metric ports.ObservabilityResourceTrendMetric, ns strin
 	case ports.ObservabilityResourceTrendCPU:
 		return fmt.Sprintf(`100 * avg(rate(container_cpu_usage_seconds_total{namespace=%q,container!="",container!="POD"}[5m]))`, ns), nil
 	case ports.ObservabilityResourceTrendMemory:
-		return fmt.Sprintf(`100 * avg(container_memory_working_set_bytes{namespace=%q,container!="",container!="POD"} / container_spec_memory_limit_bytes{namespace=%q,container!="",container!="POD"})`, ns, ns), nil
+		// 内存利用率仅统计明确配置了内存 limit（limit>0）的容器。
+		// limit=0（如 KubeVirt compute 容器标识未配 limit）会令 working_set/limit 得 +Inf，
+		// 进而被 queryPrometheusRange 的 Inf/NaN 过滤整条丢弃，导致整租户 memory 曲线为空。
+		// 用 limit>0 向量过滤避免除零（承接方案 §3.3 口径：租户容器维度、利用率% 0-100）。
+		return fmt.Sprintf(`100 * avg(container_memory_working_set_bytes{namespace=%q,container!="",container!="POD"} / (container_spec_memory_limit_bytes{namespace=%q,container!="",container!="POD"} > 0))`, ns, ns), nil
 	default:
 		return "", fmt.Errorf("%w: unsupported resource trend metric %q", ports.ErrInvalid, metric)
 	}
