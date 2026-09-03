@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### VM cloud-init 密码注入（2026-09，分支 ani-hotfix）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| VM-CLOUDINIT-PASSWORD-A | `password_secret_ref` 接线到 `cloudInitNoCloud.secretRef`（原只解析未接线，设不了密码）：渲染层拆 `vmCloudInitEnabled`（disks `cloudinitdisk` 条件纳入 `PasswordSecret`）+ `vmCloudInitVolume` 二选一 secretRef；Gateway `validateCreateInstanceConfigs` 加 `cloud_init_secret` 与 `password_secret_ref` 互斥（400）；resolver `resolveSecrets` 对 cloud-init secret 校验 `userdata` 键存在（缺键 `ErrConflict`）；OpenAPI 补 `cloud_init_secret` 声明 + 澄清 `password_secret_ref`；core-schema.d.ts 重生成。local verified（go test 5/5 + gateway 全过 + validate-architecture + git diff --check）；live gate 第三条路径待真实集群执行 | vm-cloudinit-password-a.md |
+
 ### 实例日志流式输出（2026-09，分支 feat/instance-log-stream）
 
 | 批次 | 内容摘要 | 文件 |
@@ -188,7 +194,7 @@
 
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
-| INSTANCE-STORAGE-REOBSERVE-A | local verified（live 待执行）：租户卷/文件系统状态永远停在 `pending` 且文件系统永远无法被实例挂载。三处修复：① `GetVolume`/`GetFilesystem` 对 pending 记录发起 provider re-observe 并持久化（store+内存双写，30s 节流，失败降级 warn）——原观测仅在创建 apply 后执行一次，WFFC PVC 在那一刻必然 Pending，`LocalStorageStatusReconciler` 虽已实现但无调用方；② resolver 文件系统门禁 `Available` → `Available 或 Pending`（挂载即 WFFC 第一个消费者，消除"PVC 等消费者、消费者等 Available"死锁），Failed/Deleting/Deleted 仍拒；③ `MountFilesystem` 放行 `Creating` 状态 mount target（Pod 经共享 PVC/CSI 挂载而非合成 IP）。排查同时确认并修复集群缺失的 `ani-block` StorageClass（helm values 声明但部署规格从未创建，PVC `ProvisioningFailed ×11724`；按 ani-rbd-ssd 参数手工创建后 PVC 绑定；清单落地为独立事项）。新增 4 个回归测试（reobserve 持久化/节流/请求形状、resolver 门禁、Creating target 挂载）；`go test` + `go build`（pkg+gateway）+ gofmt 通过；live 验证未执行，不外推 storage runtime ready | instance-storage-reobserve-a.md |
+| INSTANCE-STORAGE-REOBSERVE-A | local verified + live passed（2026-09-03，镜像 dev-20260903-reobserve）：租户卷/文件系统状态永远停在 `pending` 且文件系统永远无法被实例挂载。三处修复：① `GetVolume`/`GetFilesystem` 对 pending 记录发起 provider re-observe 并持久化（store+内存双写，30s 节流，失败降级 warn）——原观测仅在创建 apply 后执行一次，WFFC PVC 在那一刻必然 Pending，`LocalStorageStatusReconciler` 虽已实现但无调用方；② resolver 文件系统门禁 `Available` → `Available 或 Pending`（挂载即 WFFC 第一个消费者，消除"PVC 等消费者、消费者等 Available"死锁），Failed/Deleting/Deleted 仍拒；③ `MountFilesystem` 放行 `Creating` 状态 mount target（Pod 经共享 PVC/CSI 挂载而非合成 IP）。排查同时确认并修复集群缺失的 `ani-block` StorageClass（helm values 声明但部署规格从未创建，PVC `ProvisioningFailed ×11724`；按 ani-rbd-ssd 参数手工创建后 PVC 绑定；清单落地为独立事项）。live 证据：挂载 Pending NFS 文件系统的容器实例 201（`inst_a60c1092`），Pod 起来后 `fs_306220e7` 经 re-observe pending→available；期间排除两个环境干扰（Harbor `ani-purpose-system` 标签误标 rocky:10 触发 ImagePurposeMismatch、另一部署管道 digest 镜像覆盖 gateway 后已恢复）。新增 4 个回归测试；`go test` + `go build`（pkg+gateway）+ gofmt 通过 | instance-storage-reobserve-a.md |
 
 ### Instance Sandbox 无状态化（2026-08）
 

@@ -2,7 +2,7 @@
 
 完成日期：2026-09-03
 对应 Sprint：Sprint 13/14 之间的实例链路热修复（hotfix/network-store-read）
-验证结果：`go test ./pkg/adapters/runtime/` 目标回归测试全通（仅 Windows 本机环境必挂的 sandbox symlink 用例失败，与本次改动无关）；`go build ./...`（pkg + ani-gateway）通过；gofmt 清洁。**live 验证未执行**（待部署），不外推 storage runtime ready。
+验证结果：`go test ./pkg/adapters/runtime/` 目标回归测试全通（仅 Windows 本机环境必挂的 sandbox symlink 用例失败，与本次改动无关）；`go build ./...`（pkg + ani-gateway）通过；gofmt 清洁。**live 验证通过**（镜像 `dev-20260903-reobserve`，2026-09-03）：挂载 Pending 文件系统的容器实例创建 201（`inst_a60c1092-c55b-4937-bbe7-180826baea35`，real provider），Pod 成为 WFFC 首消费者后 `fs_306220e7`（NFS）经 re-observe 由 pending 转 available。
 
 ## 实现了什么
 
@@ -31,10 +31,12 @@
 - [x] `go test ./pkg/adapters/runtime/` 目标回归测试全通（含新增 4 个）
 - [x] `go build ./...`（pkg 与 ani-gateway module）通过
 - [x] `gofmt -l` 清洁
-- [ ] **live 验证（待执行）**：部署新镜像后，对 `fs_306220e7`/`fs_db95dc76` 创建挂载实例 → Pod 起来后 PVC 绑定 → 30 秒内 GET 文件系统应显示 available
+- [x] **live 验证通过（2026-09-03，镜像 `dev-20260903-reobserve`）**：创建挂载 `fs_306220e7` 的容器实例 → 201（`inst_a60c1092`，Pending 放行生效）→ Pod 成为 WFFC 首消费者 → PVC 绑定 → GET 文件系统经 re-observe 转 available
 - [x] `git diff --check` 通过
 
 ## 备注
+
+- live 验证当天发现并排除了两个环境干扰：① Harbor 上 `rocky:10` 被外加 `ani-purpose-system` 全局标签（当日 03:21 创建），触发 `ImagePurposeMismatch` 拦截容器创建——删除该标签后按命名启发式判定为 container；② **另一个部署管道在我部署后数分钟内用 digest 固定镜像（sha256:72d1af13）覆盖了 gateway Deployment**，导致旧二进制短暂接管流量并复现已修复的 pending 拒绝——已重新 `set image` 到 `dev-20260903-reobserve` 并完成验证。多会话/多管道并发部署 gateway 需要协调（与 2026-09-02 `model-repository-live-20260902` 覆盖事件同模式）。
 
 - mount target 的 `Creating → Available` 状态翻转暂无 re-observe（纯展示问题，不影响挂载），如需要可在后续 reconcile 批次补。
 - `ani-block` StorageClass 目前是集群手工创建，yaml 存于仓库外（`ANI/ani-block-storageclass.yaml`），需落 `deploy/real-k8s-lab/` 部署规格并考虑与 helm values `defaultStorageClass` 的一致性校验。

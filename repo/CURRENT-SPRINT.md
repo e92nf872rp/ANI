@@ -528,7 +528,23 @@ git diff --check
 
 ### 热修复：存储 pending re-observe 与 WFFC 挂载放行（INSTANCE-STORAGE-REOBSERVE-A，2026-09-03）
 
-> 承接 INSTANCE-STORAGE-MOUNT-STORE-A 的遗留排查项（租户 PVC 卡 pending）。根因三层：① 存储状态只在创建 apply 后观测一次，WFFC PVC 那一刻必然 Pending 且再无 re-observe 途径（`LocalStorageStatusReconciler` 已实现但无调用方），控制面状态永远停在 pending；② resolver 文件系统门禁要求 Available 与 WFFC 语义死锁（PVC 等第一个消费者、消费者等 Available）；③ `MountFilesystem` 只认 Available mount target，而 provider 模式下 target 因后端 PVC 未绑定停 Creating。修复：`GetVolume`/`GetFilesystem` 对 pending 记录发起 provider re-observe 并 store+内存双写（30s 节流，失败降级 warn）；resolver 放行 Pending 文件系统（挂载即 WFFC 首消费者，Failed/Deleting/Deleted 仍拒）；`MountFilesystem` 放行 Creating target（Pod 经共享 PVC/CSI 挂载而非合成 IP）。排查同时确认集群缺失 `ani-block` StorageClass（helm values 声明但部署规格从未创建），已按 ani-rbd-ssd 参数在集群手工创建使 PVC 绑定，清单落地 `deploy/real-k8s-lab/` 为独立事项。新增 4 个回归测试；`go test` + `go build`（pkg+gateway）+ gofmt 通过。**live 验证未执行**：待部署后对 `fs_306220e7`/`fs_db95dc76` 创建挂载实例验证 PVC 绑定 → 30s 内状态转 available；不外推 storage runtime ready。批次详情见 `repo/development-records/instance-storage-reobserve-a.md`。
+> 承接 INSTANCE-STORAGE-MOUNT-STORE-A 的遗留排查项（租户 PVC 卡 pending）。根因三层：① 存储状态只在创建 apply 后观测一次，WFFC PVC 那一刻必然 Pending 且再无 re-observe 途径（`LocalStorageStatusReconciler` 已实现但无调用方），控制面状态永远停在 pending；② resolver 文件系统门禁要求 Available 与 WFFC 语义死锁（PVC 等第一个消费者、消费者等 Available）；③ `MountFilesystem` 只认 Available mount target，而 provider 模式下 target 因后端 PVC 未绑定停 Creating。修复：`GetVolume`/`GetFilesystem` 对 pending 记录发起 provider re-observe 并 store+内存双写（30s 节流，失败降级 warn）；resolver 放行 Pending 文件系统（挂载即 WFFC 首消费者，Failed/Deleting/Deleted 仍拒）；`MountFilesystem` 放行 Creating target（Pod 经共享 PVC/CSI 挂载而非合成 IP）。排查同时确认集群缺失 `ani-block` StorageClass（helm values 声明但部署规格从未创建），已按 ani-rbd-ssd 参数在集群手工创建使 PVC 绑定，清单落地 `deploy/real-k8s-lab/` 为独立事项。新增 4 个回归测试；`go test` + `go build`（pkg+gateway）+ gofmt 通过。**live 验证通过（2026-09-03，镜像 `dev-20260903-reobserve`）**：挂载 Pending NFS 文件系统的容器实例创建 201（`inst_a60c1092-c55b-4937-bbe7-180826baea35`，real provider），Pod 成为首消费者后 `fs_306220e7` 经 re-observe pending→available；期间排除两个环境干扰（Harbor `ani-purpose-system` 标签误标 rocky:10 触发 ImagePurposeMismatch；另一部署管道在我部署后用 digest镜像 `sha256:72d1af13` 覆盖 gateway 导致旧二进制短暂接管，已恢复并复验——多管道并发部署 gateway 需协调）。批次详情见 `repo/development-records/instance-storage-reobserve-a.md`。
+
+### 热修复：VM cloud-init 用户名密码注入（VM-CLOUDINIT-PASSWORD-A，2026-09-03）
+
+> `password_secret_ref` 在契约里声明但渲染层未接线，设不了 VM 密码。修复（方案 A，见
+> `repo/design/vm-cloudinit-password-fix-plan.md`）：渲染层拆 `vmCloudInitEnabled`（disks
+> `cloudinitdisk` 追加条件纳入 `PasswordSecret`，避免 volume/device 不匹配 VMI 校验失败）+ 
+> `vmCloudInitVolume` 把 `PasswordSecret` 与 `CloudInitSecret` 二选一接线到
+> `cloudInitNoCloud.secretRef`；Gateway `validateCreateInstanceConfigs` 加 `cloud_init_secret`
+> 与 `password_secret_ref` 互斥校验（400，沿用既有映射）；resolver `resolveSecrets` 对 cloud-init
+> secret 校验 `userdata` 键存在（缺键 `ErrConflict`，复用 `Keys` 不新增安全面）；OpenAPI v1.yaml
+> 补 `cloud_init_secret` 声明 + 澄清 `password_secret_ref` 描述，`core-schema.d.ts` 重生成。
+> 新增 3 组测试（renderer PasswordSecret + disks 联动 / resolver 缺键两路径 / gateway 互斥）。
+> `go build` + `go test`（runtime 5/5 + gateway 全过）+ `validate_component_imports.py` +
+> `git diff --check` 通过。**live gate 第三条路径待真实集群执行**（`password_secret_ref` 替代
+> `cloud_init_secret` 复用既有探针），不外推 VM password runtime ready。批次详情见
+> `repo/development-records/vm-cloudinit-password-a.md`。
 
 ## Instance Observability Completion 增量补全（2026-07，PR4 分支）
 
