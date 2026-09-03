@@ -238,7 +238,7 @@ func TestInstanceLifecycleResizeForwardsSpecIDToService(t *testing.T) {
 	})
 	real := newInstanceAPI()
 	fake := &capturingResizeService{WorkloadInstanceService: real.service}
-	registerInstancesWithRuntime(h.Group("/api/v1"), nil, false, nil, nil, nil, &InstanceRuntime{
+	registerInstancesWithRuntime(h.Group("/api/v1"), nil, nil, false, nil, nil, nil, &InstanceRuntime{
 		Service:    fake,
 		Store:      real.store,
 		Operations: real.operations,
