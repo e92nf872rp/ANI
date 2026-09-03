@@ -184,6 +184,12 @@
 |---|---|---|
 | INSTANCE-STORAGE-MOUNT-STORE-A | live passed（10.10.1.66，镜像 dev-20260902-mount-store）：网关重启后实例创建挂载卷/文件系统报 `mount volume ...: capability resource not found`——根因是解析阶段 `GetVolume/GetFilesystem` 优先读 DB store 而挂载阶段 `MountVolume/MountFilesystem/UnmountVolume/UnmountFilesystem` 只查内存 map；新增 `lookupVolumeRecord/lookupFilesystemRecord`（内存 miss 回落 store 并回填）与 `hydrateFilesystemMountTargets`（挂载前从 store 恢复 mount target），四个 mount/unmount 方法接入；回归测试 `TestLocalStorageServiceMountSurvivesRestartViaStore` 复现重启场景；真实环境网关 rollout 后新 idempotency_key 创建挂载卷实例 201（provisioning，attachments resolved）。已知边界：租户 PVC 卡 `pending`（后端未绑定）属独立问题，文件系统 Available 门禁维持不变 | instance-storage-mount-store-a.md |
 
+### Instance Storage Re-observe & WFFC Attach（2026-09）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-STORAGE-REOBSERVE-A | local verified（live 待执行）：租户卷/文件系统状态永远停在 `pending` 且文件系统永远无法被实例挂载。三处修复：① `GetVolume`/`GetFilesystem` 对 pending 记录发起 provider re-observe 并持久化（store+内存双写，30s 节流，失败降级 warn）——原观测仅在创建 apply 后执行一次，WFFC PVC 在那一刻必然 Pending，`LocalStorageStatusReconciler` 虽已实现但无调用方；② resolver 文件系统门禁 `Available` → `Available 或 Pending`（挂载即 WFFC 第一个消费者，消除"PVC 等消费者、消费者等 Available"死锁），Failed/Deleting/Deleted 仍拒；③ `MountFilesystem` 放行 `Creating` 状态 mount target（Pod 经共享 PVC/CSI 挂载而非合成 IP）。排查同时确认并修复集群缺失的 `ani-block` StorageClass（helm values 声明但部署规格从未创建，PVC `ProvisioningFailed ×11724`；按 ani-rbd-ssd 参数手工创建后 PVC 绑定；清单落地为独立事项）。新增 4 个回归测试（reobserve 持久化/节流/请求形状、resolver 门禁、Creating target 挂载）；`go test` + `go build`（pkg+gateway）+ gofmt 通过；live 验证未执行，不外推 storage runtime ready | instance-storage-reobserve-a.md |
+
 ### Instance Sandbox 无状态化（2026-08）
 
 | 批次 | 内容摘要 | 文件 |

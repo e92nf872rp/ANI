@@ -526,6 +526,10 @@ git diff --check
 
 > 网关重启后实例创建挂载卷/文件系统报 `mount volume "...": capability resource not found`。根因：解析阶段 `GetVolume/GetFilesystem` 优先读 DB store，挂载阶段 `MountVolume/MountFilesystem/UnmountVolume/UnmountFilesystem` 只查进程内存 map，重启后内存清空导致两阶段数据源不一致。修复：新增 `lookupVolumeRecord/lookupFilesystemRecord`（内存优先、miss 回落 store 并回填）与 `hydrateFilesystemMountTargets`（挂载前从 store 恢复 mount target），四个 mount/unmount 方法全部接入；回归测试复现重启场景。已在 10.10.1.66 live passed（镜像 `ani-gateway:dev-20260902-mount-store`）：rollout 后新 idempotency_key 创建挂载卷实例 201（provisioning，`storage_attachments` resolved，resource_refs 产出）。已知边界：租户 PVC 卡 `pending`（后端未绑定）属独立排查项，文件系统 Available 挂载门禁维持不变。批次详情见 `repo/development-records/instance-storage-mount-store-a.md`。
 
+### 热修复：存储 pending re-observe 与 WFFC 挂载放行（INSTANCE-STORAGE-REOBSERVE-A，2026-09-03）
+
+> 承接 INSTANCE-STORAGE-MOUNT-STORE-A 的遗留排查项（租户 PVC 卡 pending）。根因三层：① 存储状态只在创建 apply 后观测一次，WFFC PVC 那一刻必然 Pending 且再无 re-observe 途径（`LocalStorageStatusReconciler` 已实现但无调用方），控制面状态永远停在 pending；② resolver 文件系统门禁要求 Available 与 WFFC 语义死锁（PVC 等第一个消费者、消费者等 Available）；③ `MountFilesystem` 只认 Available mount target，而 provider 模式下 target 因后端 PVC 未绑定停 Creating。修复：`GetVolume`/`GetFilesystem` 对 pending 记录发起 provider re-observe 并 store+内存双写（30s 节流，失败降级 warn）；resolver 放行 Pending 文件系统（挂载即 WFFC 首消费者，Failed/Deleting/Deleted 仍拒）；`MountFilesystem` 放行 Creating target（Pod 经共享 PVC/CSI 挂载而非合成 IP）。排查同时确认集群缺失 `ani-block` StorageClass（helm values 声明但部署规格从未创建），已按 ani-rbd-ssd 参数在集群手工创建使 PVC 绑定，清单落地 `deploy/real-k8s-lab/` 为独立事项。新增 4 个回归测试；`go test` + `go build`（pkg+gateway）+ gofmt 通过。**live 验证未执行**：待部署后对 `fs_306220e7`/`fs_db95dc76` 创建挂载实例验证 PVC 绑定 → 30s 内状态转 available；不外推 storage runtime ready。批次详情见 `repo/development-records/instance-storage-reobserve-a.md`。
+
 ## Instance Observability Completion 增量补全（2026-07，PR4 分支）
 
 > 本节记录 `feat/instance-observability-pr4` 分支对 Sprint 15 实例可观测性的增量补全工作，对应 SPEC `spec-console-instance-observability-completion.md` 的 16 个设计决策（D-1~D-16）、12 个 User Story（US-001~US-012）和 8 个批次（B-1~B-8）。覆盖 LogStore port 抽象、Loki 日志持久化、Prometheus GPU/VM 指标采集、PromQL label 重写扩展和 VM 前端模板。各批次实现与验证细节见 `repo/development-records/instance-observability-completion-*.md`。
