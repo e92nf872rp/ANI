@@ -427,7 +427,7 @@ func (c *KubernetesRESTClient) Observe(ctx context.Context, request ports.Worklo
 		Phase:        phase,
 		NodeName:     nodeName,
 		Reason:       reason,
-		Networks:      networks,
+		Networks:     networks,
 		ObservedAt:   c.now().UTC(),
 	}, nil
 }
