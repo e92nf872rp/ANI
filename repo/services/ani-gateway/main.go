@@ -271,6 +271,11 @@ func main() {
 		logger.Error("failed to configure gpu inventory provider runtime", "err", err)
 		os.Exit(1)
 	}
+	platformCapacityService, err := newGatewayPlatformCapacityService(gatewayGPUInventoryRuntimeConfigFromEnv(), gpuInventory, kubernetesRESTClient, tenantService)
+	if err != nil {
+		logger.Error("failed to configure platform capacity provider runtime", "err", err)
+		os.Exit(1)
+	}
 	var routeInstanceRuntime *router.InstanceRuntime
 	if instanceRuntime.Service != nil {
 		routeInstanceRuntime = &router.InstanceRuntime{
@@ -315,6 +320,7 @@ func main() {
 		MetadataStore:                         quotaMetadataStore,
 		QuotaStoreService:                     quotaStoreService,
 		MeteringService:                       meteringService,
+		PlatformCapacityService:               platformCapacityService,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

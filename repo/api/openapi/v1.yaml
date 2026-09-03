@@ -903,6 +903,68 @@ components:
         real_provider: { type: boolean }
         reason:        { type: string, nullable: true }
 
+    PlatformCapacityResponse:
+      type: object
+      description: "平台容量态势汇总（整平台 = 1 个默认区域；只读，无区域 CRUD）。"
+      required: [regions, summary, dev_profile]
+      properties:
+        regions:
+          type: array
+          items: { $ref: '#/components/schemas/PlatformRegion' }
+          description: "固定返回 1 条区域记录（整平台 = 默认区域）。"
+        summary:
+          $ref: '#/components/schemas/PlatformCapacitySummary'
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+
+    PlatformRegion:
+      type: object
+      description: "平台默认区域记录；id/code/name/display_name/status/open_for_tenant 为平台主数据常量。"
+      required: [id, code, name, display_name, status, open_for_tenant, azs, tenant_count, capacity]
+      properties:
+        id:              { type: string, example: "platform" }
+        code:            { type: string, example: "platform" }
+        name:            { type: string, example: "平台" }
+        display_name:    { type: string, example: "平台（默认区域）" }
+        status:          { type: string, enum: [enabled], example: "enabled" }
+        open_for_tenant: { type: boolean, example: true }
+        azs:
+          type: array
+          items: { type: string }
+          description: "Ready GPU 节点 zone label 去重（topology.kubernetes.io/zone 优先，回退 failure-domain.beta.kubernetes.io/zone；缺失为空数组）。"
+        tenant_count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: "可用租户数（status <> 'disabled'）；租户服务不可用时为 0 并写入 dev_profile.reason。"
+        capacity:
+          $ref: '#/components/schemas/PlatformRegionCapacity'
+
+    PlatformRegionCapacity:
+      type: object
+      description: "区域容量口径：GPU 总量含 vGPU 切片；gpu_free = gpu_total - in_use - fault；nodes 仅 Ready GPU 节点；cpu/memory 为节点 allocatable 总量（非可用量）。"
+      required: [gpu_total, gpu_free, nodes, cpu_cores, memory_gib]
+      properties:
+        gpu_total:  { type: integer, format: int64, minimum: 0, description: "全部 GPU 设备数（含 vGPU 切片）" }
+        gpu_free:   { type: integer, format: int64, minimum: 0, description: "gpu_total - in_use - fault；in_use 为跨租户 Running GPU Pod 数（每 Pod 占 1 设备）" }
+        nodes:      { type: integer, format: int64, minimum: 0, description: "Ready GPU 节点数" }
+        cpu_cores:  { type: integer, format: int64, minimum: 0, description: "Ready GPU 节点 cpu allocatable 求和（向下取整）" }
+        memory_gib: { type: integer, format: int64, minimum: 0, description: "Ready GPU 节点 memory allocatable 求和（GiB 向下取整）" }
+
+    PlatformCapacitySummary:
+      type: object
+      description: "regions 汇总（当前即单区域值），供顶部指标直接消费。"
+      required: [region_count, gpu_total, gpu_free, tenant_count, nodes, azs]
+      properties:
+        region_count: { type: integer, format: int64, minimum: 0, example: 1 }
+        gpu_total:    { type: integer, format: int64, minimum: 0 }
+        gpu_free:     { type: integer, format: int64, minimum: 0 }
+        tenant_count: { type: integer, format: int64, minimum: 0 }
+        nodes:        { type: integer, format: int64, minimum: 0 }
+        azs:
+          type: array
+          items: { type: string }
+
     InstanceNetworkConfig:
       type: object
       description: "实例网络引用；只表达 Core 产品意图，不暴露 provider 对象。"
@@ -7980,6 +8042,34 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "503": { $ref: '#/components/responses/ServiceUnavailable' }
 
+  /platform/capacity:
+    get:
+      operationId: getPlatformCapacity
+      x-ani-rbac-scope: "scope:capacity:read"
+      x-ani-authz:
+        version: v1
+        resource: capacity
+        action: get
+        boundary: platform
+        principal_kinds: [user]
+      summary: 查询平台容量态势汇总
+      description: |
+        平台级（跨租户）只读容量汇总视图。整平台作为 1 个默认区域返回，
+        数据从真实集群计算（GPU 节点清单 + 跨租户 Running GPU Pod + 租户列表）。
+        任一数据源失败不阻塞 200：缺失字段降级为 0/空，
+        dev_profile.real_provider=false + reason 记录降级原因。
+      tags: [PlatformCapacity]
+      responses:
+        "200":
+          description: 平台容量态势汇总
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformCapacityResponse'
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
+
   /metering/token-usage:
     post:
       operationId: reportTokenUsage
@@ -9899,3 +9989,4 @@ tags:
   - { name: PlatformUsers,  description: "平台运营账号（tenant_id 为空的 users / user_roles / roles）" }
   - { name: TenantUsers,    description: "平台级租户用户与角色（users / user_roles / roles）" }
   - { name: GPUSpec,        description: "GPU 规格目录管理（创建/删除/可用性查询）" }
+  - { name: PlatformCapacity, description: "平台容量态势汇总（整平台 = 1 个默认区域，只读）" }
