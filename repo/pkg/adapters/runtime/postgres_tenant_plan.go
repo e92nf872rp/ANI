@@ -59,7 +59,7 @@ func (t *PostgresTenant) UpdateTenantPlan(ctx context.Context, tenantID string, 
 			ID:          rowID.String(),
 			Name:        name,
 			DisplayName: displayName,
-			Status:      status,
+			Status:      ports.TenantStatus(status),
 			PlanID:      newPlanID.String(),
 			CreatedAt:   createdAt,
 			UpdatedAt:   updatedAt,
@@ -175,7 +175,7 @@ func (t *PostgresTenant) queryTenantSummaries(ctx context.Context, sql string, p
 				ID:          id.String(),
 				Name:        name,
 				DisplayName: displayName,
-				Status:      status,
+				Status:      ports.TenantStatus(status),
 			})
 		}
 		if rows.Err() != nil {

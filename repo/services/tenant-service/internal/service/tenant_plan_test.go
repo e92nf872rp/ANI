@@ -62,6 +62,9 @@ func (f *fakePlanStore) List(context.Context, ports.TenantPlanListFilter) (ports
 func (f *fakePlanStore) ListActivePlans(context.Context) ([]ports.AvailableTenantPlan, error) {
 	panic("unused")
 }
+func (f *fakePlanStore) MapPlanCodes(context.Context, []uuid.UUID) (map[uuid.UUID]string, error) {
+	panic("unused")
+}
 func (f *fakePlanStore) Update(context.Context, uuid.UUID, ports.UpdateTenantPlanInput) (ports.TenantPlan, error) {
 	panic("unused")
 }
@@ -228,9 +231,11 @@ type fakeTenantClient struct {
 	bound       []ports.BoundTenant
 	bindable    []ports.BoundTenant
 	available   []ports.BoundTenant
+	listItems   []ports.TenantListItem
+	listFn      func(ports.ListTenantsFilter) (ports.TenantListResult, error)
 
-	createFn   func(ctx context.Context, in ports.CreateTenantInput) (ports.Tenant, error)
-	createIn   *ports.CreateTenantInput
+	createFn    func(ctx context.Context, in ports.CreateTenantInput) (ports.Tenant, error)
+	createIn    *ports.CreateTenantInput
 	createCalls int
 }
 
@@ -338,8 +343,11 @@ func (f *fakeTenantClient) CreateTenant(ctx context.Context, in ports.CreateTena
 	return f.tenant, nil
 }
 
-func (f *fakeTenantClient) ListTenants(context.Context, ports.ListTenantsFilter) (ports.TenantListResult, error) {
-	panic("unused in tenant plan tests")
+func (f *fakeTenantClient) ListTenants(_ context.Context, filter ports.ListTenantsFilter) (ports.TenantListResult, error) {
+	if f.listFn != nil {
+		return f.listFn(filter)
+	}
+	return ports.TenantListResult{Items: append([]ports.TenantListItem(nil), f.listItems...)}, nil
 }
 
 func (f *fakeTenantClient) UpdateTenant(context.Context, uuid.UUID, ports.UpdateTenantInput) (ports.Tenant, error) {
@@ -708,6 +716,9 @@ func (f *listFakePlanStore) List(ctx context.Context, filter ports.TenantPlanLis
 func (f *listFakePlanStore) ListActivePlans(context.Context) ([]ports.AvailableTenantPlan, error) {
 	panic("unused")
 }
+func (f *listFakePlanStore) MapPlanCodes(context.Context, []uuid.UUID) (map[uuid.UUID]string, error) {
+	panic("unused")
+}
 func (f *listFakePlanStore) Update(context.Context, uuid.UUID, ports.UpdateTenantPlanInput) (ports.TenantPlan, error) {
 	panic("unused")
 }
@@ -876,6 +887,9 @@ func (f *updateFakePlanStore) List(context.Context, ports.TenantPlanListFilter) 
 	panic("unused")
 }
 func (f *updateFakePlanStore) ListActivePlans(context.Context) ([]ports.AvailableTenantPlan, error) {
+	panic("unused")
+}
+func (f *updateFakePlanStore) MapPlanCodes(context.Context, []uuid.UUID) (map[uuid.UUID]string, error) {
 	panic("unused")
 }
 func (f *updateFakePlanStore) Update(_ context.Context, id uuid.UUID, in ports.UpdateTenantPlanInput) (ports.TenantPlan, error) {
@@ -1073,6 +1087,9 @@ func (f *stateFakePlanStore) List(context.Context, ports.TenantPlanListFilter) (
 	panic("unused")
 }
 func (f *stateFakePlanStore) ListActivePlans(context.Context) ([]ports.AvailableTenantPlan, error) {
+	panic("unused")
+}
+func (f *stateFakePlanStore) MapPlanCodes(context.Context, []uuid.UUID) (map[uuid.UUID]string, error) {
 	panic("unused")
 }
 func (f *stateFakePlanStore) Update(context.Context, uuid.UUID, ports.UpdateTenantPlanInput) (ports.TenantPlan, error) {
@@ -1398,6 +1415,9 @@ func (f *quotaLimitsFakeStore) List(context.Context, ports.TenantPlanListFilter)
 	panic("unused")
 }
 func (f *quotaLimitsFakeStore) ListActivePlans(context.Context) ([]ports.AvailableTenantPlan, error) {
+	panic("unused")
+}
+func (f *quotaLimitsFakeStore) MapPlanCodes(context.Context, []uuid.UUID) (map[uuid.UUID]string, error) {
 	panic("unused")
 }
 func (f *quotaLimitsFakeStore) Update(context.Context, uuid.UUID, ports.UpdateTenantPlanInput) (ports.TenantPlan, error) {

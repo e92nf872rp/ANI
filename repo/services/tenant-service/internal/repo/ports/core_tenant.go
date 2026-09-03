@@ -93,7 +93,7 @@ type TenantListItem struct {
 type ListTenantsFilter struct {
 	Limit  int
 	Cursor string
-	Status string
+	Status TenantStatus // "" = 全部；否则 active | frozen | disabled
 	Search string
 }
 

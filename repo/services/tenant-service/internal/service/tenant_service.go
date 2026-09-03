@@ -450,12 +450,72 @@ func validateAdminPassword(password string) error {
 }
 
 func (s *TenantService) ListTenants(ctx context.Context, req *tenantv1.ListTenantsRequest) (*tenantv1.ListTenantsResponse, error) {
-	_ = ctx
-	_ = req
-	return nil, tenantRPCNotImplemented()
+	if req == nil {
+		req = &tenantv1.ListTenantsRequest{}
+	}
+	// 步骤 1：依赖校验
+	if s.tenants == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant client unavailable")
+	}
+	if s.plans == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant plan store unavailable")
+	}
+	// 步骤 2：status 枚举（空=全部）
+	status, err := ports.ParseTenantStatusFilter(req.GetStatus())
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	// 步骤 3：游标分页入参
+	limit := 20
+	cursor := ""
+	if page := req.GetPage(); page != nil {
+		if page.GetLimit() > 0 {
+			limit = int(page.GetLimit())
+		}
+		cursor = page.GetCursor()
+	}
+	// 步骤 4：经 Core 列表（含 admin_count）
+	listed, err := s.tenants.ListTenants(ctx, ports.ListTenantsFilter{
+		Limit:  limit,
+		Cursor: cursor,
+		Status: status,
+		Search: strings.TrimSpace(req.GetSearch()),
+	})
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	// 步骤 5：批量装配 plan_code
+	planIDs := make([]uuid.UUID, 0, len(listed.Items))
+	seen := make(map[uuid.UUID]struct{}, len(listed.Items))
+	for _, it := range listed.Items {
+		if _, ok := seen[it.PlanID]; ok || it.PlanID == uuid.Nil {
+			continue
+		}
+		seen[it.PlanID] = struct{}{}
+		planIDs = append(planIDs, it.PlanID)
+	}
+	codes, err := s.plans.MapPlanCodes(ctx, planIDs)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	// 步骤 6：组装 proto 列表项
+	items := make([]*tenantv1.TenantListItem, 0, len(listed.Items))
+	for _, it := range listed.Items {
+		items = append(items, &tenantv1.TenantListItem{
+			Id:          it.ID.String(),
+			Name:        it.Name,
+			DisplayName: it.DisplayName,
+			PlanId:      it.PlanID.String(),
+			PlanCode:    codes[it.PlanID],
+			Status:      string(it.Status),
+			AdminCount:  it.AdminCount,
+			CreatedAt:   timestamppb.New(it.CreatedAt.UTC()),
+		})
+	}
+	return &tenantv1.ListTenantsResponse{Items: items, NextCursor: listed.NextCursor}, nil
 }
 
-// GetTenantDetail 经 Core GetTenant 返回最小租户详情（plan_code / 计数等后续 Issue 补齐）。
+// GetTenantDetail 经 Core GetTenant 返回完整租户详情（含 counts / auth 摘要 / plan_code）。
 func (s *TenantService) GetTenantDetail(ctx context.Context, req *tenantv1.GetTenantDetailRequest) (*tenantv1.TenantDetail, error) {
 	// 步骤 1：校验 tenant_id
 	rawID := ""
@@ -466,18 +526,39 @@ func (s *TenantService) GetTenantDetail(ctx context.Context, req *tenantv1.GetTe
 	if err != nil {
 		return nil, err
 	}
-	// 步骤 2：经 Core SDK 查询租户
+	if s.tenants == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant client unavailable")
+	}
+	// 步骤 2：经 Core SDK 查询租户（含 user_count/admin_count/auth）
 	t, err := s.tenants.GetTenant(ctx, tenantID)
 	if err != nil {
 		return nil, mapStoreError(err)
 	}
-	// 步骤 3：组装最小详情（plan_code / user_count / admin_count 暂为零值）
+	// 步骤 3：装配 plan_code（批量接口单 id）
+	planCode := ""
+	if s.plans != nil && t.PlanID != uuid.Nil {
+		codes, mapErr := s.plans.MapPlanCodes(ctx, []uuid.UUID{t.PlanID})
+		if mapErr != nil {
+			return nil, mapStoreError(mapErr)
+		}
+		planCode = codes[t.PlanID]
+	}
+	// 步骤 4：组装详情（auth 缺省双 false）
+	auth := &tenantv1.TenantAuthSummary{}
+	if t.Auth != nil {
+		auth.SsoEnabled = t.Auth.SsoEnabled
+		auth.MfaRequired = t.Auth.MfaRequired
+	}
 	out := &tenantv1.TenantDetail{
 		Id:          t.ID.String(),
 		Name:        t.Name,
 		DisplayName: t.DisplayName,
 		PlanId:      t.PlanID.String(),
+		PlanCode:    planCode,
 		Status:      string(t.Status),
+		UserCount:   t.UserCount,
+		AdminCount:  t.AdminCount,
+		Auth:        auth,
 		CreatedAt:   timestamppb.New(t.CreatedAt.UTC()),
 		UpdatedAt:   timestamppb.New(t.UpdatedAt.UTC()),
 	}

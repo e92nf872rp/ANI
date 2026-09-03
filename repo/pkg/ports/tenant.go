@@ -2,8 +2,41 @@ package ports
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 )
+
+// TenantStatus is the tenant lifecycle state machine: active → frozen → disabled.
+type TenantStatus string
+
+const (
+	TenantStatusActive   TenantStatus = "active"
+	TenantStatusFrozen   TenantStatus = "frozen"
+	TenantStatusDisabled TenantStatus = "disabled"
+)
+
+// Valid reports whether s is a known tenant status (empty is not valid).
+func (s TenantStatus) Valid() bool {
+	switch s {
+	case TenantStatusActive, TenantStatusFrozen, TenantStatusDisabled:
+		return true
+	default:
+		return false
+	}
+}
+
+// ParseTenantStatusFilter parses list filter status: empty = all; invalid → ErrInvalid.
+func ParseTenantStatusFilter(raw string) (TenantStatus, error) {
+	s := TenantStatus(strings.TrimSpace(raw))
+	if s == "" {
+		return "", nil
+	}
+	if !s.Valid() {
+		return "", fmt.Errorf("%w: status must be active, frozen, or disabled", ErrInvalid)
+	}
+	return s, nil
+}
 
 // Tenant is the Core tenant view used by platform admin flows
 // (e.g. binding a quota plan, tenant list management).
@@ -11,7 +44,7 @@ type Tenant struct {
 	ID           string
 	Name         string
 	DisplayName  string
-	Status       string // active | frozen | disabled
+	Status       TenantStatus
 	PlanID       string
 	ContactEmail string
 	FrozenAt     *time.Time
@@ -28,7 +61,7 @@ type TenantSummary struct {
 	ID          string
 	Name        string
 	DisplayName string
-	Status      string // active | frozen | disabled
+	Status      TenantStatus
 }
 
 // TenantListItem is a single row in GET /admin/tenants list responses.
@@ -36,7 +69,7 @@ type TenantListItem struct {
 	ID          string
 	Name        string
 	DisplayName string
-	Status      string
+	Status      TenantStatus
 	PlanID      string
 	AdminCount  int64
 	CreatedAt   time.Time
@@ -106,7 +139,7 @@ type TenantAuthPatch struct {
 type ListTenantsFilter struct {
 	Limit  int
 	Cursor string
-	Status string
+	Status TenantStatus // "" = all; otherwise active | frozen | disabled
 	Search string
 }
 

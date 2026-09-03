@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/kubercloud/ani/pkg/ports"
+	"github.com/kubercloud/ani/pkg/types"
 )
 
 // PostgresTenant implements tenant read / tenant-plan adapters against the control-plane DB.
@@ -25,7 +26,9 @@ func NewPostgresTenant(store ports.MetadataStore) *PostgresTenant {
 
 var _ ports.TenantService = (*PostgresTenant)(nil)
 
-// GetTenant returns the minimal tenant row (status / plan_id).
+const tenantAdminRoleNameForCount = "tenant-admin"
+
+// GetTenant returns the tenant detail view (counts + auth summary).
 func (t *PostgresTenant) GetTenant(ctx context.Context, tenantID string) (ports.Tenant, error) {
 	id, err := parseTenantUUID(tenantID)
 	if err != nil {
@@ -42,12 +45,45 @@ func (t *PostgresTenant) GetTenant(ctx context.Context, tenantID string) (ports.
 			name        string
 			displayName string
 			status      string
+			contact     *string
+			frozenAt    *time.Time
+			disabledAt  *time.Time
+			userCount   int64
+			adminCount  int64
+			ssoEnabled  bool
+			mfaRequired bool
 		)
 		scanErr := tx.QueryRow(ctx, `
-			SELECT id, name, display_name, status, plan_id, created_at, updated_at
-			FROM tenants
-			WHERE id = $1
-		`, id).Scan(&rowID, &name, &displayName, &status, &planID, &createdAt, &updatedAt)
+			SELECT t.id, t.name, t.display_name, t.status, t.plan_id, t.contact_email,
+			       t.frozen_at, t.disabled_at, t.created_at, t.updated_at,
+			       COALESCE(uc.user_count, 0),
+			       COALESCE(ac.admin_count, 0),
+			       COALESCE(ta.sso_enabled, FALSE),
+			       COALESCE(ta.mfa_required, FALSE)
+			FROM tenants t
+			LEFT JOIN tenant_auth ta ON ta.tenant_id = t.id
+			LEFT JOIN LATERAL (
+				SELECT COUNT(*)::bigint AS user_count
+				FROM users u
+				WHERE u.tenant_id = t.id
+				  AND COALESCE(u.is_deleted, FALSE) = FALSE
+			) uc ON TRUE
+			LEFT JOIN LATERAL (
+				SELECT COUNT(*)::bigint AS admin_count
+				FROM users u
+				JOIN user_roles ur ON ur.user_id = u.id
+				JOIN roles r ON r.id = ur.role_id
+				WHERE u.tenant_id = t.id
+				  AND COALESCE(u.is_deleted, FALSE) = FALSE
+				  AND r.tenant_id IS NULL
+				  AND r.name = $2
+			) ac ON TRUE
+			WHERE t.id = $1
+		`, id, tenantAdminRoleNameForCount).Scan(
+			&rowID, &name, &displayName, &status, &planID, &contact,
+			&frozenAt, &disabledAt, &createdAt, &updatedAt,
+			&userCount, &adminCount, &ssoEnabled, &mfaRequired,
+		)
 		if errors.Is(scanErr, pgx.ErrNoRows) {
 			return ports.ErrTenantNotFound
 		}
@@ -58,10 +94,21 @@ func (t *PostgresTenant) GetTenant(ctx context.Context, tenantID string) (ports.
 			ID:          rowID.String(),
 			Name:        name,
 			DisplayName: displayName,
-			Status:      status,
+			Status:      ports.TenantStatus(status),
 			PlanID:      planID.String(),
-			CreatedAt:   createdAt,
-			UpdatedAt:   updatedAt,
+			FrozenAt:    frozenAt,
+			DisabledAt:  disabledAt,
+			UserCount:   userCount,
+			AdminCount:  adminCount,
+			Auth: &ports.TenantAuthSummary{
+				SsoEnabled:  ssoEnabled,
+				MfaRequired: mfaRequired,
+			},
+			CreatedAt: createdAt,
+			UpdatedAt: updatedAt,
+		}
+		if contact != nil {
+			out.ContactEmail = *contact
 		}
 		return nil
 	})
@@ -184,7 +231,7 @@ func (t *PostgresTenant) CreateTenant(ctx context.Context, in ports.CreateTenant
 			ID:           rowID.String(),
 			Name:         rowName,
 			DisplayName:  rowDisplay,
-			Status:       rowStatus,
+			Status:       ports.TenantStatus(rowStatus),
 			PlanID:       rowPlanID.String(),
 			ContactEmail: rowContact,
 			FrozenAt:     rowFrozen,
@@ -207,8 +254,113 @@ func isPGUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
-func (t *PostgresTenant) ListTenants(context.Context, ports.ListTenantsFilter) (ports.TenantListResult, error) {
-	return ports.TenantListResult{}, ports.ErrUnsupported
+func (t *PostgresTenant) ListTenants(ctx context.Context, filter ports.ListTenantsFilter) (ports.TenantListResult, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	status, err := ports.ParseTenantStatusFilter(string(filter.Status))
+	if err != nil {
+		return ports.TenantListResult{}, err
+	}
+	search := strings.TrimSpace(filter.Search)
+
+	var cursorCreatedAt *time.Time
+	var cursorID *uuid.UUID
+	if raw := strings.TrimSpace(filter.Cursor); raw != "" {
+		createdAt, id, err := types.DecodeCursor(raw)
+		if err != nil {
+			return ports.TenantListResult{}, fmt.Errorf("%w: invalid cursor", ports.ErrInvalid)
+		}
+		cursorCreatedAt = &createdAt
+		cursorID = &id
+	}
+
+	var items []ports.TenantListItem
+	err = t.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		args := []any{tenantAdminRoleNameForCount, string(status), search}
+		where := `
+			WHERE ($2 = '' OR t.status = $2)
+			  AND ($3 = '' OR t.name ILIKE '%' || $3 || '%' OR t.display_name ILIKE '%' || $3 || '%')
+		`
+		if cursorCreatedAt != nil && cursorID != nil {
+			args = append(args, *cursorCreatedAt, *cursorID)
+			where += fmt.Sprintf(" AND (t.created_at, t.id) < ($%d, $%d)", len(args)-1, len(args))
+		}
+		args = append(args, limit+1)
+		limitArg := len(args)
+
+		rows, queryErr := tx.Query(ctx, `
+			SELECT t.id, t.name, t.display_name, t.status, t.plan_id, t.created_at,
+			       COALESCE(ac.admin_count, 0)
+			FROM tenants t
+			LEFT JOIN LATERAL (
+				SELECT COUNT(*)::bigint AS admin_count
+				FROM users u
+				JOIN user_roles ur ON ur.user_id = u.id
+				JOIN roles r ON r.id = ur.role_id
+				WHERE u.tenant_id = t.id
+				  AND COALESCE(u.is_deleted, FALSE) = FALSE
+				  AND r.tenant_id IS NULL
+				  AND r.name = $1
+			) ac ON TRUE
+			`+where+`
+			ORDER BY t.created_at DESC, t.id DESC
+			LIMIT $`+fmt.Sprintf("%d", limitArg), args...)
+		if queryErr != nil {
+			return fmt.Errorf("list tenants: %w", queryErr)
+		}
+		defer rows.Close()
+
+		out := make([]ports.TenantListItem, 0, limit+1)
+		for rows.Next() {
+			var (
+				id          uuid.UUID
+				planID      uuid.UUID
+				createdAt   time.Time
+				name        string
+				displayName string
+				statusVal   string
+				adminCount  int64
+			)
+			if scanErr := rows.Scan(&id, &name, &displayName, &statusVal, &planID, &createdAt, &adminCount); scanErr != nil {
+				return fmt.Errorf("scan tenant list item: %w", scanErr)
+			}
+			out = append(out, ports.TenantListItem{
+				ID:          id.String(),
+				Name:        name,
+				DisplayName: displayName,
+				Status:      ports.TenantStatus(statusVal),
+				PlanID:      planID.String(),
+				AdminCount:  adminCount,
+				CreatedAt:   createdAt,
+			})
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("iterate tenants: %w", err)
+		}
+		items = out
+		return nil
+	})
+	if err != nil {
+		return ports.TenantListResult{}, err
+	}
+
+	nextCursor := ""
+	if len(items) > limit {
+		last := items[limit-1]
+		lastID, parseErr := uuid.Parse(last.ID)
+		if parseErr != nil {
+			return ports.TenantListResult{}, fmt.Errorf("encode cursor: %w", parseErr)
+		}
+		nextCursor = types.EncodeCursor(last.CreatedAt, lastID)
+		items = items[:limit]
+	}
+	return ports.TenantListResult{Items: items, NextCursor: nextCursor}, nil
 }
 
 func (t *PostgresTenant) UpdateTenant(context.Context, string, ports.UpdateTenantInput) (ports.Tenant, error) {
@@ -274,7 +426,7 @@ func (t *PostgresTenant) ListAvailableTenants(ctx context.Context) ([]ports.Tena
 				ID:          id.String(),
 				Name:        name,
 				DisplayName: displayName,
-				Status:      status,
+				Status:      ports.TenantStatus(status),
 			})
 		}
 		if rows.Err() != nil {

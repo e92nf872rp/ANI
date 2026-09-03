@@ -2,6 +2,8 @@ package ports
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -35,6 +37,18 @@ func (s TenantStatus) Valid() bool {
 	}
 }
 
+// ParseTenantStatusFilter 解析列表过滤用 status：空=全部；非法值报错。
+func ParseTenantStatusFilter(raw string) (TenantStatus, error) {
+	s := TenantStatus(strings.TrimSpace(raw))
+	if s == "" {
+		return "", nil
+	}
+	if !s.Valid() {
+		return "", fmt.Errorf("%w: status must be active, frozen, or disabled", ErrValidationFailed)
+	}
+	return s, nil
+}
+
 // =============================================================================
 // 实体与 DTO
 // =============================================================================
@@ -51,6 +65,8 @@ type Tenant struct {
 	PlanID       uuid.UUID    // 外键 → tenant_plans.id
 	FrozenAt     *time.Time
 	DisabledAt   *time.Time
+	UserCount    int64
+	AdminCount   int64
 	Auth         *TenantAuthSummary // getTenant 连查；仅 sso_enabled / mfa_required；nil → 双 false
 	CreatedAt    time.Time
 	UpdatedAt    time.Time

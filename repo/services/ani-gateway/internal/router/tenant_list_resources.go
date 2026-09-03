@@ -682,6 +682,11 @@ func tenantDetailJSON(t *tenantv1.TenantDetail) map[string]any {
 	} else {
 		out["disabled_at"] = nil
 	}
+	auth := t.GetAuth()
+	out["auth"] = map[string]any{
+		"sso_enabled":  auth.GetSsoEnabled(),
+		"mfa_required": auth.GetMfaRequired(),
+	}
 	return out
 }
 

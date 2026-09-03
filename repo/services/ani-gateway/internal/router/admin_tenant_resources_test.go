@@ -126,7 +126,7 @@ func TestToAdminTenantResponse_IncludesNullableFields(t *testing.T) {
 	now := time.Date(2026, 9, 3, 10, 0, 0, 0, time.UTC)
 	frozen := now.Add(-time.Hour)
 	got := toAdminTenantResponse(ports.Tenant{
-		ID: "t1", Name: "acme", DisplayName: "ACME", Status: "frozen",
+		ID: "t1", Name: "acme", DisplayName: "ACME", Status: ports.TenantStatusFrozen,
 		PlanID: "p1", ContactEmail: "a@acme.io", FrozenAt: &frozen,
 		CreatedAt: now, UpdatedAt: now, AdminCount: 2,
 	})
@@ -138,6 +138,13 @@ func TestToAdminTenantResponse_IncludesNullableFields(t *testing.T) {
 	}
 	if got["disabled_at"] != nil {
 		t.Fatalf("disabled_at=%v", got["disabled_at"])
+	}
+	auth, ok := got["auth"].(map[string]any)
+	if !ok {
+		t.Fatalf("auth=%T", got["auth"])
+	}
+	if auth["sso_enabled"] != false || auth["mfa_required"] != false {
+		t.Fatalf("auth defaults=%v", auth)
 	}
 }
 

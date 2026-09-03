@@ -178,6 +178,10 @@ type TenantPlanStore interface {
 	// 供创建租户向导 GET /tenants/available-plans；空切片合法。
 	ListActivePlans(ctx context.Context) ([]AvailableTenantPlan, error)
 
+	// MapPlanCodes 按 plan_id 批量查询 code（WHERE id = ANY($1) AND is_deleted=FALSE）；缺失 id 不出现在 map。
+	// 供 ListTenants / GetTenantDetail 装配 plan_code。
+	MapPlanCodes(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error)
+
 	// Update 更新套餐的可变字段（name / description）。
 	// PUT /tenant-plans/{planId} 修改 name/description（nil=不更新，空串=清空）；亦用于 service 层内部。
 	Update(ctx context.Context, id uuid.UUID, in UpdateTenantPlanInput) (TenantPlan, error)

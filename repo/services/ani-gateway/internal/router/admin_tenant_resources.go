@@ -65,7 +65,7 @@ func (api *adminTenantAPI) listAvailableTenants(ctx context.Context, c *app.Requ
 			"id":           t.ID,
 			"name":         t.Name,
 			"display_name": t.DisplayName,
-			"status":       t.Status,
+			"status":       string(t.Status),
 		})
 	}
 	c.JSON(http.StatusOK, map[string]any{"items": out})
@@ -140,10 +140,15 @@ func (api *adminTenantAPI) listTenants(ctx context.Context, c *app.RequestContex
 			}
 		}
 	}
+	statusFilter, err := ports.ParseTenantStatusFilter(c.Query("status"))
+	if err != nil {
+		writeDemoError(c, http.StatusBadRequest, "VALIDATION_FAILED", "status must be active, frozen, or disabled")
+		return
+	}
 	listed, err := api.tenant.ListTenants(ctx, ports.ListTenantsFilter{
 		Limit:  limit,
 		Cursor: c.Query("cursor"),
-		Status: c.Query("status"),
+		Status: statusFilter,
 		Search: c.Query("search"),
 	})
 	if err != nil {
@@ -156,7 +161,7 @@ func (api *adminTenantAPI) listTenants(ctx context.Context, c *app.RequestContex
 			"id":           it.ID,
 			"name":         it.Name,
 			"display_name": it.DisplayName,
-			"status":       it.Status,
+			"status":       string(it.Status),
 			"plan_id":      it.PlanID,
 			"admin_count":  it.AdminCount,
 			"created_at":   it.CreatedAt.UTC().Format(time.RFC3339Nano),
@@ -328,17 +333,23 @@ func (api *adminTenantAPI) listTenantLifecycle(ctx context.Context, c *app.Reque
 }
 
 func toAdminTenantResponse(t ports.Tenant) map[string]any {
+	auth := map[string]any{"sso_enabled": false, "mfa_required": false}
+	if t.Auth != nil {
+		auth["sso_enabled"] = t.Auth.SsoEnabled
+		auth["mfa_required"] = t.Auth.MfaRequired
+	}
 	return map[string]any{
 		"id":            t.ID,
 		"name":          t.Name,
 		"display_name":  t.DisplayName,
-		"status":        t.Status,
+		"status":        string(t.Status),
 		"plan_id":       t.PlanID,
 		"contact_email": nullIfEmpty(t.ContactEmail),
 		"frozen_at":     timePtrRFC3339OrNil(t.FrozenAt),
 		"disabled_at":   timePtrRFC3339OrNil(t.DisabledAt),
 		"user_count":    t.UserCount,
 		"admin_count":   t.AdminCount,
+		"auth":          auth,
 		"created_at":    t.CreatedAt.UTC().Format(time.RFC3339Nano),
 		"updated_at":    t.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}

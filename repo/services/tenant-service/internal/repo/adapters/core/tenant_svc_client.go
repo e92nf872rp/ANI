@@ -3,6 +3,8 @@ package core
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -95,8 +97,61 @@ func (c *TenantSvcClient) CreateTenant(ctx context.Context, in ports.CreateTenan
 	return decodeTenant(raw)
 }
 
-func (c *TenantSvcClient) ListTenants(context.Context, ports.ListTenantsFilter) (ports.TenantListResult, error) {
-	return ports.TenantListResult{}, ports.ErrNotImplemented
+func (c *TenantSvcClient) ListTenants(ctx context.Context, filter ports.ListTenantsFilter) (ports.TenantListResult, error) {
+	_ = ctx
+	q := url.Values{}
+	if filter.Limit > 0 {
+		q.Set("limit", strconv.Itoa(filter.Limit))
+	}
+	if strings.TrimSpace(filter.Cursor) != "" {
+		q.Set("cursor", strings.TrimSpace(filter.Cursor))
+	}
+	if filter.Status != "" {
+		q.Set("status", string(filter.Status))
+	}
+	if strings.TrimSpace(filter.Search) != "" {
+		q.Set("search", strings.TrimSpace(filter.Search))
+	}
+	path := "/admin/tenants"
+	if encoded := q.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	raw, err := c.sdk.Request("GET", path, anisdk.RequestOptions{})
+	if err != nil {
+		return ports.TenantListResult{}, mapSDKError(err)
+	}
+	obj, err := asObject(raw)
+	if err != nil {
+		return ports.TenantListResult{}, err
+	}
+	itemsRaw, err := asObjectSlice(obj["items"])
+	if err != nil {
+		return ports.TenantListResult{}, err
+	}
+	items := make([]ports.TenantListItem, 0, len(itemsRaw))
+	for _, it := range itemsRaw {
+		id, parseErr := uuid.Parse(strings.TrimSpace(stringField(it, "id")))
+		if parseErr != nil {
+			return ports.TenantListResult{}, fmt.Errorf("%w: tenant id: %v", ports.ErrCoreUnavailable, parseErr)
+		}
+		planID, parseErr := uuid.Parse(strings.TrimSpace(stringField(it, "plan_id")))
+		if parseErr != nil {
+			return ports.TenantListResult{}, fmt.Errorf("%w: plan_id: %v", ports.ErrCoreUnavailable, parseErr)
+		}
+		items = append(items, ports.TenantListItem{
+			ID:          id,
+			Name:        stringField(it, "name"),
+			DisplayName: stringField(it, "display_name"),
+			Status:      ports.TenantStatus(stringField(it, "status")),
+			PlanID:      planID,
+			AdminCount:  int64Field(it, "admin_count"),
+			CreatedAt:   parseTimeField(it, "created_at"),
+		})
+	}
+	return ports.TenantListResult{
+		Items:      items,
+		NextCursor: stringField(obj, "next_cursor"),
+	}, nil
 }
 
 func (c *TenantSvcClient) UpdateTenant(context.Context, uuid.UUID, ports.UpdateTenantInput) (ports.Tenant, error) {
@@ -147,6 +202,8 @@ func decodeTenant(raw any) (ports.Tenant, error) {
 		ContactEmail: stringField(obj, "contact_email"),
 		Status:       ports.TenantStatus(stringField(obj, "status")),
 		PlanID:       planID,
+		UserCount:    int64Field(obj, "user_count"),
+		AdminCount:   int64Field(obj, "admin_count"),
 		CreatedAt:    parseTimeField(obj, "created_at"),
 		UpdatedAt:    parseTimeField(obj, "updated_at"),
 	}
@@ -155,6 +212,18 @@ func decodeTenant(raw any) (ports.Tenant, error) {
 	}
 	if t := parseTimeField(obj, "disabled_at"); !t.IsZero() {
 		out.DisabledAt = &t
+	}
+	if rawAuth, ok := obj["auth"]; ok && rawAuth != nil {
+		authObj, authErr := asObject(rawAuth)
+		if authErr != nil {
+			return ports.Tenant{}, authErr
+		}
+		out.Auth = &ports.TenantAuthSummary{
+			SsoEnabled:  boolField(authObj, "sso_enabled"),
+			MfaRequired: boolField(authObj, "mfa_required"),
+		}
+	} else {
+		out.Auth = &ports.TenantAuthSummary{}
 	}
 	return out, nil
 }

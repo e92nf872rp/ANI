@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	tenantv1 "github.com/kubercloud/ani/pkg/generated/pb/tenant/v1"
@@ -37,6 +38,15 @@ func (f *bindFakePlanStore) List(context.Context, ports.TenantPlanListFilter) (p
 }
 func (f *bindFakePlanStore) ListActivePlans(context.Context) ([]ports.AvailableTenantPlan, error) {
 	panic("unused")
+}
+func (f *bindFakePlanStore) MapPlanCodes(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error) {
+	out := make(map[uuid.UUID]string, len(ids))
+	for _, id := range ids {
+		if f.plan.ID != uuid.Nil && f.plan.ID == id {
+			out[id] = f.plan.Code
+		}
+	}
+	return out, nil
 }
 func (f *bindFakePlanStore) Update(context.Context, uuid.UUID, ports.UpdateTenantPlanInput) (ports.TenantPlan, error) {
 	panic("unused")
@@ -319,30 +329,82 @@ func Test_BindPlanQuota_ApprovedSkip(t *testing.T) {
 	}
 }
 
-func TestTenantService_GetTenantDetail_MinimalClosedLoop(t *testing.T) {
+func TestTenantService_GetTenantDetail_FullFields(t *testing.T) {
+	tenantID := uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc")
+	planID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	frozen := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	tenants := &fakeTenantClient{
+		tenant: ports.Tenant{
+			ID: tenantID, Name: "acme", DisplayName: "ACME",
+			Status: ports.TenantStatusFrozen, PlanID: planID,
+			ContactEmail: "ops@acme.io",
+			UserCount:    5,
+			AdminCount:   2,
+			Auth:         &ports.TenantAuthSummary{SsoEnabled: true, MfaRequired: true},
+			FrozenAt:     &frozen,
+			CreatedAt:    frozen,
+			UpdatedAt:    frozen,
+		},
+	}
+	plans := &bindFakePlanStore{
+		plan: ports.TenantPlan{ID: planID, Code: "pro", Status: ports.TenantPlanStatusActive},
+	}
+	svc := NewTenantService(plans, tenants, nil, nil, nil, nil, nil, nil, nil)
+
+	res, err := svc.GetTenantDetail(context.Background(), &tenantv1.GetTenantDetailRequest{TenantId: tenantID.String()})
+	if err != nil {
+		t.Fatalf("GetTenantDetail: %v", err)
+	}
+	if res.GetPlanCode() != "pro" || res.GetUserCount() != 5 || res.GetAdminCount() != 2 {
+		t.Fatalf("detail=%+v", res)
+	}
+	if res.GetAuth() == nil || !res.GetAuth().GetSsoEnabled() || !res.GetAuth().GetMfaRequired() {
+		t.Fatalf("auth=%v", res.GetAuth())
+	}
+	if res.GetFrozenAt() == nil {
+		t.Fatal("frozen_at expected")
+	}
+}
+
+func TestTenantService_GetTenantDetail_AuthDefaults(t *testing.T) {
 	tenantID := uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc")
 	planID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 	tenants := &fakeTenantClient{
 		tenant: ports.Tenant{
 			ID: tenantID, Name: "acme", DisplayName: "ACME",
 			Status: ports.TenantStatusActive, PlanID: planID,
-			ContactEmail: "ops@acme.io",
 		},
 	}
-	svc := NewTenantService(nil, tenants, nil, nil, nil, nil, nil, nil, nil)
-
+	svc := NewTenantService(&bindFakePlanStore{plan: ports.TenantPlan{ID: planID, Code: "starter"}}, tenants, nil, nil, nil, nil, nil, nil, nil)
 	res, err := svc.GetTenantDetail(context.Background(), &tenantv1.GetTenantDetailRequest{TenantId: tenantID.String()})
 	if err != nil {
 		t.Fatalf("GetTenantDetail: %v", err)
 	}
-	if res.GetId() != tenantID.String() || res.GetName() != "acme" || res.GetPlanId() != planID.String() {
-		t.Fatalf("detail=%+v", res)
+	if res.GetAuth() == nil || res.GetAuth().GetSsoEnabled() || res.GetAuth().GetMfaRequired() {
+		t.Fatalf("auth defaults=%v", res.GetAuth())
 	}
-	if res.GetContactEmail() == nil || res.GetContactEmail().GetValue() != "ops@acme.io" {
-		t.Fatalf("contact_email=%v", res.GetContactEmail())
+}
+
+func TestTenantService_ListTenants_AssemblesPlanCode(t *testing.T) {
+	planID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	tenantID := uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc")
+	tenants := &fakeTenantClient{
+		listItems: []ports.TenantListItem{{
+			ID: tenantID, Name: "acme", DisplayName: "ACME",
+			Status: ports.TenantStatusActive, PlanID: planID, AdminCount: 2,
+			CreatedAt: time.Date(2026, 9, 3, 0, 0, 0, 0, time.UTC),
+		}},
 	}
-	if res.GetPlanCode() != "" || res.GetUserCount() != 0 {
-		t.Fatalf("minimal detail should omit plan_code/user_count, got plan_code=%q user_count=%d", res.GetPlanCode(), res.GetUserCount())
+	plans := &bindFakePlanStore{
+		plan: ports.TenantPlan{ID: planID, Code: "pro", Status: ports.TenantPlanStatusActive},
+	}
+	svc := NewTenantService(plans, tenants, nil, nil, nil, nil, nil, nil, nil)
+	res, err := svc.ListTenants(context.Background(), &tenantv1.ListTenantsRequest{})
+	if err != nil {
+		t.Fatalf("ListTenants: %v", err)
+	}
+	if len(res.GetItems()) != 1 || res.GetItems()[0].GetPlanCode() != "pro" || res.GetItems()[0].GetAdminCount() != 2 {
+		t.Fatalf("items=%v", res.GetItems())
 	}
 }
 
