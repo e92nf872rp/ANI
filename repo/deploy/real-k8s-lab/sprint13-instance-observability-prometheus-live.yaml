@@ -81,6 +81,8 @@ data:
       # relabel_configs 过滤 kubevirt.io=virt-handler label 且端口为 8443。
       # 采集 kubevirt_vmi_* 系列指标，无 VM 时指标为空 series（正常响应，非报错）。
       - job_name: 'kubevirt-virt-handler'
+        scheme: https
+        honor_labels: true
         metrics_path: /metrics
         bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
         tls_config:
@@ -96,10 +98,11 @@ data:
           - source_labels: [__meta_kubernetes_pod_container_port_number]
             regex: 8443
             action: keep
-          - source_labels: [__meta_kubernetes_namespace]
-            target_label: namespace
-          - source_labels: [__meta_kubernetes_pod_name]
-            target_label: pod
+          # 不要用 __meta_kubernetes_namespace/__meta_kubernetes_pod_name 做
+          # target_label: namespace / pod 覆盖：KubeVirt exporter 原生会输出
+          # namespace(=VMI 租户 namespace) / name / pod 标签，target_label 覆盖会把
+          # 租户 namespace 挤成 exported_namespace，导致 adapter 按租户 namespace+name
+          # 查询匹配不到（与 dcgm job 相同的 relabel 覆盖教训）。保留 exporter 原生标签。
 ---
 apiVersion: apps/v1
 kind: Deployment
