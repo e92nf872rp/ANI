@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 平台容量态势接口（2026-09，分支 feat/platform-capacity）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| PLATFORM-CAPACITY-A | 平台容量态势只读汇总：OpenAPI 新增 `GET /platform/capacity`（operationId=getPlatformCapacity，`scope:capacity:read`，boundary=platform），整平台 = 1 个默认区域，只读不实现区域 CRUD；ports 新增 `PlatformCapacityService`；real adapter 组合 GPUInventory（ListNodeClasses 设备/zone/allocatable）+ KubernetesRESTClient（集群级存在性 label selector 统计跨租户 Running GPU Pod，每 Pod 占 1 设备，与 gpu-inventory occupancy 语义一致，in_use 超设备数截断保证 gpu_free ≥ 0）+ TenantService（可用租户数）；单源失败不阻塞 200，降级字段置 0/空 + `real_provider=false` + reason；Gateway runtime 按 `PLATFORM_CAPACITY_PROVIDER` 装配（kubernetes_rest 真实链路 / 空或 local 回退确定性 local 降级）；authz 注册表与 Core SDK 四语言 + 静态文档 + Console schema 生成物同步（64bc8ab + fae60b0）。真实环境实测（10.10.1.66，镜像 dev-20260903-platformcapacity）：平台 token 200 返回真实集群数据（gpu_total=11/gpu_free=3/nodes=3/tenant_count=22，real_provider=true），租户 token 403，无凭证/坏 token 401，全部通过 | PLATFORM-CAPACITY-A.md |
+
 ### 实例日志流式输出（2026-09，分支 feat/instance-log-stream）
 
 | 批次 | 内容摘要 | 文件 |
