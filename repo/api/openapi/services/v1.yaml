@@ -1233,8 +1233,8 @@ components:
 
     TenantDetail:
       type: object
-      description: "租户详情（GET /tenants/{tenantId}）"
-      required: [id, name, display_name, plan_id, plan_code, status, contact_email, user_count, admin_count, created_at, updated_at]
+      description: "租户详情（GET /tenants/{tenantId}）；含 tenant_auth 摘要"
+      required: [id, name, display_name, plan_id, plan_code, status, contact_email, user_count, admin_count, auth, created_at, updated_at]
       properties:
         id:            { type: string, format: uuid }
         name:          { type: string }
@@ -1247,6 +1247,7 @@ components:
         admin_count:   { type: integer, format: int64 }
         frozen_at:     { type: string, format: date-time, nullable: true }
         disabled_at:   { type: string, format: date-time, nullable: true }
+        auth:          { $ref: '#/components/schemas/TenantAuthSummary', description: "tenant_auth 摘要：仅 sso_enabled / mfa_required" }
         created_at:    { type: string, format: date-time }
         updated_at:    { type: string, format: date-time }
 
@@ -1258,6 +1259,14 @@ components:
         idempotency_key: { type: string, format: uuid, description: "客户端生成UUID；也可改传请求头 Idempotency-Key" }
         display_name:    { type: string, minLength: 1, maxLength: 128, description: "未传表示不更新" }
         contact_email:   { type: string, format: email, description: "未传表示不更新" }
+
+    TenantAuthSummary:
+      type: object
+      description: "租户详情内嵌的 auth 摘要（仅开关；完整配置见 TenantAuthConfig / GET .../auth/sso）"
+      required: [sso_enabled, mfa_required]
+      properties:
+        sso_enabled:  { type: boolean }
+        mfa_required: { type: boolean, description: "租户级 MFA 强制开关" }
 
     TenantAuthConfig:
       type: object

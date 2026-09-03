@@ -122,35 +122,30 @@ func (api *tenantListAPI) createTenant(ctx context.Context, c *app.RequestContex
 		return
 	}
 	var body struct {
-		IdempotencyKey string `json:"idempotency_key"`
-		Name           string `json:"name"`
-		DisplayName    string `json:"display_name"`
-		Email          string `json:"email"`
-		PlanID         string `json:"plan_id"`
-		AdminEmail     string `json:"admin_email"`
-		AdminName      string `json:"admin_name"`
-		AdminPassword  string `json:"admin_password"`
+		Name          string `json:"name"`
+		DisplayName   string `json:"display_name"`
+		Email         string `json:"email"`
+		PlanID        string `json:"plan_id"`
+		AdminEmail    string `json:"admin_email"`
+		AdminName     string `json:"admin_name"`
+		AdminPassword string `json:"admin_password"`
 	}
 	if err := json.Unmarshal(c.Request.Body(), &body); err != nil {
 		writeTenantListError(c, http.StatusBadRequest, "VALIDATION_FAILED", "invalid request body")
 		return
 	}
-	idem := strings.TrimSpace(body.IdempotencyKey)
-	if idem == "" {
-		idem = idempotencyHeader(c)
-	}
+	// 幂等由网关 Idempotency 中间件处理（读 body/header 的 idempotency_key）；不传入 gRPC。
 	// 创建含 bcrypt(12)+Core 事务+配额初始化；默认 5s gRPC 超时易导致「Core 已成功、网关已取消」竞态。
 	callCtx, cancel := tenantWriteCallCtx(ctx, c, 30*time.Second)
 	defer cancel()
 	res, err := api.tenants.CreateTenant(callCtx, &tenantv1.CreateTenantRequest{
-		Name:           body.Name,
-		DisplayName:    body.DisplayName,
-		Email:          body.Email,
-		PlanId:         body.PlanID,
-		AdminEmail:     body.AdminEmail,
-		AdminName:      body.AdminName,
-		AdminPassword:  body.AdminPassword,
-		IdempotencyKey: idem,
+		Name:          body.Name,
+		DisplayName:   body.DisplayName,
+		Email:         body.Email,
+		PlanId:        body.PlanID,
+		AdminEmail:    body.AdminEmail,
+		AdminName:     body.AdminName,
+		AdminPassword: body.AdminPassword,
 	})
 	if err != nil {
 		mapTenantListError(c, err)

@@ -4062,7 +4062,7 @@ components:
       type: object
       description: >
         租户视图。getTenant 在最小字段基础上 additive 扩展 contact_email / frozen_at / disabled_at /
-        user_count / admin_count；列表项使用 TenantListItem。
+        user_count / admin_count / auth（tenant_auth）；列表项使用 TenantListItem。
       required: [id, name, display_name, status, plan_id, created_at, updated_at]
       properties:
         id:             { type: string, format: uuid, description: "租户 ID" }
@@ -4075,6 +4075,7 @@ components:
         disabled_at:    { type: string, format: date-time, nullable: true, description: "禁用时间（status=disabled 时有值）" }
         user_count:     { type: integer, format: int64, description: "租户成员数（getTenant 计算列）" }
         admin_count:    { type: integer, format: int64, description: "tenant-admin 角色成员数（getTenant / listTenants 计算列）" }
+        auth:           { $ref: '#/components/schemas/TenantAuthSummary', description: "tenant_auth 摘要：仅 sso_enabled / mfa_required（getTenant 连查；缺行时双 false）" }
         created_at:     { type: string, format: date-time }
         updated_at:     { type: string, format: date-time }
 
@@ -4118,6 +4119,14 @@ components:
       properties:
         display_name:  { type: string, minLength: 1, maxLength: 128, description: "未传表示不更新" }
         contact_email: { type: string, format: email, description: "未传表示不更新" }
+
+    TenantAuthSummary:
+      type: object
+      description: "getTenant 内嵌的 auth 摘要（仅开关；完整配置见 TenantAuthConfig）"
+      required: [sso_enabled, mfa_required]
+      properties:
+        sso_enabled:  { type: boolean, description: "是否启用 SSO" }
+        mfa_required: { type: boolean, description: "租户级 MFA 强制开关" }
 
     TenantAuthConfig:
       type: object
@@ -9458,7 +9467,7 @@ paths:
       summary: 查询租户
       description: |
         平台侧查询租户；在最小字段基础上 additive 返回 contact_email / frozen_at / disabled_at /
-        user_count / admin_count。供 Services 绑定配额套餐与租户详情等场景调用。
+        user_count / admin_count / auth（tenant_auth）。供 Services 绑定配额套餐与租户详情等场景调用。
       tags: [Tenants]
       x-ani-rbac-scope: "scope:tenant:read"
       parameters:

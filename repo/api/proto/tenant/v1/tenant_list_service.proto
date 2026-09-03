@@ -186,6 +186,13 @@ message TenantDetail {
   google.protobuf.Timestamp disabled_at = 11;
   google.protobuf.Timestamp created_at = 12;
   google.protobuf.Timestamp updated_at = 13;
+  TenantAuthSummary auth = 14; // 仅 sso_enabled / mfa_required；完整配置见 TenantAuthConfig
+}
+
+// TenantAuthSummary is the auth snippet embedded in TenantDetail (switches only).
+message TenantAuthSummary {
+  bool sso_enabled = 1;
+  bool mfa_required = 2;
 }
 
 message TenantAuthConfig {

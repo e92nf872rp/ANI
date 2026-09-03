@@ -18,6 +18,7 @@ type Tenant struct {
 	DisabledAt   *time.Time
 	UserCount    int64 // getTenant / listTenants computed column
 	AdminCount   int64 // tenant-admin role member count
+	Auth         *TenantAuthSummary // getTenant JOIN tenant_auth；仅两开关；nil/缺行 → 双 false
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -45,6 +46,12 @@ type TenantListItem struct {
 type TenantListResult struct {
 	Items      []TenantListItem
 	NextCursor string // "" = no more
+}
+
+// TenantAuthSummary is the getTenant embedded auth snippet (switches only).
+type TenantAuthSummary struct {
+	SsoEnabled  bool
+	MfaRequired bool
 }
 
 // TenantAuth is the tenant_auth row (1:1 with tenants).

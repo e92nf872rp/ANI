@@ -51,8 +51,15 @@ type Tenant struct {
 	PlanID       uuid.UUID    // 外键 → tenant_plans.id
 	FrozenAt     *time.Time
 	DisabledAt   *time.Time
+	Auth         *TenantAuthSummary // getTenant 连查；仅 sso_enabled / mfa_required；nil → 双 false
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+}
+
+// TenantAuthSummary 是详情内嵌的 auth 摘要（仅开关）。
+type TenantAuthSummary struct {
+	SsoEnabled  bool
+	MfaRequired bool
 }
 
 // QuotaChangeRequest 表示 tenant_quota_change 表一行（US-012~014）。

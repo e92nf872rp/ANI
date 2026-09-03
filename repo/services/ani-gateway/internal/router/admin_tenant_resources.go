@@ -11,6 +11,7 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/route"
+	"github.com/google/uuid"
 	"github.com/kubercloud/ani/pkg/ports"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 )
@@ -103,7 +104,9 @@ func (api *adminTenantAPI) createTenant(ctx context.Context, c *app.RequestConte
 		writeDemoError(c, http.StatusBadRequest, "VALIDATION_FAILED", "invalid request body")
 		return
 	}
-	// 步骤 3：注入网关 request_id / user_id 后调用 Core store
+	// 步骤 3：注入网关 request_id / 操作者后调用 Core store。
+	// svc→Core 路径下操作者来自可信头 X-ANI-Actor-User-ID（BOSS 平台用户）；
+	// 直调 Core 时无该头，回退为当前认证主体 GetUserID。
 	tenant, err := api.tenant.CreateTenant(ctx, ports.CreateTenantInput{
 		Name:              strings.TrimSpace(body.Name),
 		DisplayName:       strings.TrimSpace(body.DisplayName),
@@ -113,7 +116,7 @@ func (api *adminTenantAPI) createTenant(ctx context.Context, c *app.RequestConte
 		AdminName:         strings.TrimSpace(body.AdminName),
 		AdminPasswordHash: strings.TrimSpace(body.AdminPasswordHash),
 		RequestID:         middleware.GetRequestID(c),
-		ActorUserID:       middleware.GetUserID(c),
+		ActorUserID:       adminActorUserID(c),
 	})
 	if err != nil {
 		writeAdminTenantError(c, err)
@@ -362,6 +365,18 @@ func timePtrRFC3339OrNil(t *time.Time) any {
 		return nil
 	}
 	return t.UTC().Format(time.RFC3339Nano)
+}
+
+// adminActorUserID 解析写入 tenant_lifecycle.user_id 的操作者。
+// 优先可信头 X-ANI-Actor-User-ID（tenant-service 透传的 BOSS 平台用户）；
+// 非法/缺失时回退当前认证主体（直调 Core admin API）。
+func adminActorUserID(c *app.RequestContext) string {
+	if raw := strings.TrimSpace(string(c.GetHeader("X-ANI-Actor-User-ID"))); raw != "" {
+		if _, err := uuid.Parse(raw); err == nil {
+			return raw
+		}
+	}
+	return middleware.GetUserID(c)
 }
 
 func writeAdminTenantError(c *app.RequestContext, err error) {
