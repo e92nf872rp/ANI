@@ -1,11 +1,11 @@
 # VM-CLOUDINIT-PASSWORD-A
 
-> 日期：2026-09-03（契约 + 实现 local verified）
+> 日期：2026-09-03（契约 + 实现 local verified）；2026-09-04（live gate 三条路径通过）
 > 范围：ANI Core / Gateway / VM cloud-init 用户名密码注入（password_secret_ref 接线）
-> 状态：local verified（go test + go build + alidate-architecture + git diff --check 通过；
-> live gate 第三条路径待真实集群执行）
-> 分支：ni-hotfix（hotfix worktree）
-> 方案文档：epo/design/vm-cloudinit-password-fix-plan.md
+> 状态：live passed（10.10.1.66 真实集群，镜像 dev-20260904-vm-cloudinit-password-1；
+> user_data / cloud_init_secret / password_secret_ref 三条路径探针均 ANI_VM_PASS_STATUS=SET）
+> 分支：ani-hotfix（hotfix worktree）
+> 方案文档：repo/design/vm-cloudinit-password-fix-plan.md
 
 ## 问题背景
 
@@ -75,17 +75,24 @@ node frontends/console/scripts/gen-core-schema.mjs                              
 > TestSandboxFileScripts* symlink 失败（Python/os.O_DIRECTORY 兼容），与本次改动无关
 > （改动前即存在，CI/Linux 正常）已用 -run 圈定相关用例验证通过。
 
-## 待办（live gate，第三条路径）
+## Live gate（2026-09-04 完成）
 
-方案 §4.6 第 4 点要求：在 alidate_vm_cloudinit_password_live_gate.py 新增第三条路径，用
-password_secret_ref 替代 cloud_init_secret，复用既有探针断言（用户创建 + shadow 密码已设置），
-契约 epo/deploy/real-k8s-lab/vm-cloudinit-password-live-gate.yaml。需真实集群 + 网关镜像部署后
-执行，evidence 落 epo/development-records/live-evidence/。执行后置此批次状态为 live passed。
+方案 §4.6 第 4 点：`validate_vm_cloudinit_password_live_gate.py` 新增第三条路径，用
+`password_secret_ref` 替代 `cloud_init_secret`，复用既有探针断言（用户创建 + shadow 密码已设置）。
+已在真实集群（10.10.1.66，镜像 dev-20260904-vm-cloudinit-password-1）执行三条路径全部通过，
+evidence 落 `repo/development-records/live-evidence/`：
+
+- `vm-cloudinit-password-userdata-live-20260904.json`（user_data，dev-phys-03）
+- `vm-cloudinit-password-secret-live-20260904.json`（cloud_init_secret，dev-phys-03）
+- `vm-cloudinit-password-password-secret-ref-live-20260904.json`（password_secret_ref，dev-phys-03）
+
+三条路径 `password_injected: true`、`probe_markers_complete: true`，探针 VM/Secret 已清理。
+live gate YAML 已新增 `vm-cloudinit-password-secret-ref-password` 检查并置 status: live。
 
 ## 能力边界
 
-- 本批为 local verified：契约、渲染接线、互斥/键校验、生成物已闭环并测试通过；live gate 第三条
-  路径待执行，不外推 VM password runtime ready。
+- 本批为 live passed：契约、渲染接线、互斥/键校验、生成物已闭环并测试通过；三条 cloud-init
+  密码注入路径已在真实集群验证，VM password 注入 runtime ready。
 - password_secret_ref 与 cloud_init_secret 功能等价，长期建议收敛为一个字段（决策项 D1，
   方案文档）。
 - 明文密码以 cloud-init user-data 进入 VM cloud-init 盘，与 user_data 现状一致；文档需提示用户。

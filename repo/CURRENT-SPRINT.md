@@ -542,8 +542,11 @@ git diff --check
 > 补 `cloud_init_secret` 声明 + 澄清 `password_secret_ref` 描述，`core-schema.d.ts` 重生成。
 > 新增 3 组测试（renderer PasswordSecret + disks 联动 / resolver 缺键两路径 / gateway 互斥）。
 > `go build` + `go test`（runtime 5/5 + gateway 全过）+ `validate_component_imports.py` +
-> `git diff --check` 通过。**live gate 第三条路径待真实集群执行**（`password_secret_ref` 替代
-> `cloud_init_secret` 复用既有探针），不外推 VM password runtime ready。批次详情见
+> `git diff --check` 通过。**live gate 三条路径已通过**（2026-09-04，真实集群 10.10.1.66，
+> 镜像 `dev-20260904-vm-cloudinit-password-1`）：`user_data` / `cloud_init_secret` /
+> `password_secret_ref` 探针均 `ANI_VM_PASS_STATUS=SET`，evidence 落
+> `repo/development-records/live-evidence/`，live gate YAML 新增
+> `vm-cloudinit-password-secret-ref-password` 检查并置 status: live。批次详情见
 > `repo/development-records/vm-cloudinit-password-a.md`。
 
 ## Instance Observability Completion 增量补全（2026-07，PR4 分支）
