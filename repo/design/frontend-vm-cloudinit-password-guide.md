@@ -1,9 +1,9 @@
 # VM 登录用户名 / 密码设置 前端对接文档
 
-> 版本：v1（2026-09-03）
+> 版本：v1.1（2026-09-04）
 > 适用范围：Console 前端对接 Core API 的 VM 初始化（cloud-init nocloud）用户名 / 密码注入能力
 > 契约来源：`repo/api/openapi/v1.yaml`（Core API 唯一真实来源）
-> 关联后端批次：`VM-CLOUDINIT-PASSWORD-A`（ani-hotfix worktree；hotfix 分支待合入）
+> 关联后端批次：`VM-CLOUDINIT-PASSWORD-A`（ani-hotfix worktree；已 live passed，hotfix 分支待合入）
 
 ***
 
@@ -153,13 +153,13 @@ stringData:
 
 ## 5. 校验规则与错误码
 
-| 场景                                              | HTTP      | code                 | 说明                                                                                     |
-| ----------------------------------------------- | --------- | -------------------- | -------------------------------------------------------------------------------------- |
-| `cloud_init_secret` 与 `password_secret_ref` 同时传 | 400       | `VALIDATION_ERROR`   | `vm_config.cloud_init_secret and vm_config.password_secret_ref are mutually exclusive` |
-| Secret 引用但不含 `userdata` 键                       | 409       | `CONFLICT`           | `cloud-init secret "<name>" must contain a "userdata" key (value: #cloud-config)`      |
-| Secret 不存在 / 状态非可用                              | 409       | `CONFLICT`           | resolver 对 Secret 状态校验失败                                                               |
-| 实例不存在（后续 lifecycle）                             | 404       | `INSTANCE_NOT_FOUND` | —                                                                                      |
-| 未认证 / 无权限                                       | 401 / 403 | —                    | RBAC scope：`scope:instances:create` 等                                                  |
+| 场景                                              | HTTP      | code                     | 说明                                                                                     |
+| ----------------------------------------------- | --------- | ------------------------ | -------------------------------------------------------------------------------------- |
+| `cloud_init_secret` 与 `password_secret_ref` 同时传 | 400       | `INSTANCE_CREATE_FAILED` | `vm_config.cloud_init_secret and vm_config.password_secret_ref are mutually exclusive` |
+| Secret 引用但不含 `userdata` 键                       | 409       | `CONFLICT`               | `cloud-init secret "<name>" must contain a "userdata" key (value: #cloud-config)`      |
+| Secret 不存在 / 状态非可用                              | 409       | `CONFLICT`               | resolver 对 Secret 状态校验失败                                                               |
+| 实例不存在（后续 lifecycle）                             | 404       | `INSTANCE_NOT_FOUND`     | —                                                                                      |
+| 未认证 / 无权限                                       | 401 / 403 | —                        | RBAC scope：`scope:instances:create` 等                                                  |
 
 **前端建议**：
 
@@ -223,3 +223,4 @@ ssh_pwauth: true
 ```
 
 > `lock_passwd: false` + `ssh_pwauth: true` 可同时开放密码 SSH 登录（按需取舍）。
+
