@@ -22,6 +22,7 @@ import (
 //   - gpu_free = gpu_total - in_use - fault；
 //   - nodes：Ready GPU 节点数；azs：Ready 节点 zone label 去重；
 //   - cpu/memory：Ready 节点 Allocatable 求和（总量口径）。
+//
 // 任一数据源失败不阻塞 200：缺失字段降级为 0/空，real_provider=false + reason。
 type KubernetesPlatformCapacityService struct {
 	inventory     ports.GPUInventory
@@ -42,9 +43,9 @@ func NewKubernetesPlatformCapacityService(inventory ports.GPUInventory, k8sClien
 const platformCapacityTenantLabel = "ani.kubercloud.io/tenant-id"
 
 const (
-	platformCapacityZoneLabel        = "topology.kubernetes.io/zone"
-	platformCapacityZoneLabelLegacy  = "failure-domain.beta.kubernetes.io/zone"
-	platformCapacityProviderName     = "kubernetes-platform-capacity"
+	platformCapacityZoneLabel          = "topology.kubernetes.io/zone"
+	platformCapacityZoneLabelLegacy    = "failure-domain.beta.kubernetes.io/zone"
+	platformCapacityProviderName       = "kubernetes-platform-capacity"
 	platformCapacityProviderRealReason = "capacity computed from real cluster (GPU inventory + nodes + tenant store)"
 )
 

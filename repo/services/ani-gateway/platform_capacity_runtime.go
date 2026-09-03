@@ -16,6 +16,7 @@ import (
 //     KubernetesRESTClient + TenantService），任一依赖缺失时按降级语义
 //     仍返回 real adapter（adapter 内部 real_provider=false + reason）；
 //   - 其他值 → 返回 ErrUnsupported。
+//
 // 复用 GPU_INVENTORY_PROVIDER 的 K8s 连接配置与已装配的 gpuInventory /
 // kubernetesRESTClient / tenantService，不重复建连。
 func newGatewayPlatformCapacityService(cfg gatewayGPUInventoryRuntimeConfig, gpuInventory ports.GPUInventory, k8sClient *runtimeadapter.KubernetesRESTClient, tenantService ports.TenantService) (ports.PlatformCapacityService, error) {

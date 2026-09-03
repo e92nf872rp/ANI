@@ -24,14 +24,14 @@ type platformCapacityResponse struct {
 }
 
 type platformRegionResponse struct {
-	ID            string                        `json:"id"`
-	Code          string                        `json:"code"`
-	Name          string                        `json:"name"`
-	DisplayName   string                        `json:"display_name"`
-	Status        string                        `json:"status"`
-	OpenForTenant bool                          `json:"open_for_tenant"`
-	AZs           []string                      `json:"azs"`
-	TenantCount   int64                         `json:"tenant_count"`
+	ID            string                         `json:"id"`
+	Code          string                         `json:"code"`
+	Name          string                         `json:"name"`
+	DisplayName   string                         `json:"display_name"`
+	Status        string                         `json:"status"`
+	OpenForTenant bool                           `json:"open_for_tenant"`
+	AZs           []string                       `json:"azs"`
+	TenantCount   int64                          `json:"tenant_count"`
 	Capacity      platformRegionCapacityResponse `json:"capacity"`
 }
 
