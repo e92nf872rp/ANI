@@ -531,7 +531,6 @@ func instanceObservabilityAdapter(cfg Config) (ports.InstanceObservability, erro
 			KubernetesServiceAccountTokenFile: cfg.KubernetesServiceAccountTokenFile,
 			KubernetesServiceAccountCAFile:    cfg.KubernetesServiceAccountCAFile,
 			KubernetesFieldManager:            cfg.KubernetesProviderFieldManager,
-			ExecBaseURL:                       cfg.InstanceObservabilityExecBaseURL,
 		})
 	default:
 		return nil, fmt.Errorf("%w: unsupported instance observability provider %q", ports.ErrUnsupported, cfg.InstanceObservabilityProvider)

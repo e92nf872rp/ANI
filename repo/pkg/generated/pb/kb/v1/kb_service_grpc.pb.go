@@ -24,6 +24,7 @@ const (
 	KBService_CreateKB_FullMethodName               = "/kb.v1.KBService/CreateKB"
 	KBService_GetKB_FullMethodName                  = "/kb.v1.KBService/GetKB"
 	KBService_ListKBs_FullMethodName                = "/kb.v1.KBService/ListKBs"
+	KBService_UpdateKB_FullMethodName               = "/kb.v1.KBService/UpdateKB"
 	KBService_DeleteKB_FullMethodName               = "/kb.v1.KBService/DeleteKB"
 	KBService_GetDocumentUploadURL_FullMethodName   = "/kb.v1.KBService/GetDocumentUploadURL"
 	KBService_NotifyDocumentUploaded_FullMethodName = "/kb.v1.KBService/NotifyDocumentUploaded"
@@ -35,6 +36,10 @@ const (
 	KBService_ListKBCitations_FullMethodName        = "/kb.v1.KBService/ListKBCitations"
 	KBService_ListKBSessions_FullMethodName         = "/kb.v1.KBService/ListKBSessions"
 	KBService_UpdateKBPermissions_FullMethodName    = "/kb.v1.KBService/UpdateKBPermissions"
+	KBService_ListDocumentChunks_FullMethodName     = "/kb.v1.KBService/ListDocumentChunks"
+	KBService_GetSessionMessages_FullMethodName     = "/kb.v1.KBService/GetSessionMessages"
+	KBService_DeleteSession_FullMethodName          = "/kb.v1.KBService/DeleteSession"
+	KBService_ReparseDocument_FullMethodName        = "/kb.v1.KBService/ReparseDocument"
 )
 
 // KBServiceClient is the client API for KBService service.
@@ -44,6 +49,9 @@ type KBServiceClient interface {
 	CreateKB(ctx context.Context, in *CreateKBRequest, opts ...grpc.CallOption) (*KnowledgeBase, error)
 	GetKB(ctx context.Context, in *GetKBRequest, opts ...grpc.CallOption) (*KnowledgeBase, error)
 	ListKBs(ctx context.Context, in *ListKBsRequest, opts ...grpc.CallOption) (*ListKBsResponse, error)
+	// UpdateKB updates KB name/description; empty fields mean "no change".
+	// Pure metadata update — does not trigger index rebuild (unlike config).
+	UpdateKB(ctx context.Context, in *UpdateKBRequest, opts ...grpc.CallOption) (*KnowledgeBase, error)
 	DeleteKB(ctx context.Context, in *DeleteKBRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// GetDocumentUploadURL returns a presigned MinIO PUT URL for direct upload.
 	// Creates a kb_documents record (parse_status=pending) and returns the doc_id.
@@ -73,6 +81,17 @@ type KBServiceClient interface {
 	ListKBSessions(ctx context.Context, in *ListKBSessionsRequest, opts ...grpc.CallOption) (*ListKBSessionsResponse, error)
 	// UpdateKBPermissions updates KB access permissions (P1).
 	UpdateKBPermissions(ctx context.Context, in *UpdateKBPermissionsRequest, opts ...grpc.CallOption) (*KnowledgeBase, error)
+	// ListDocumentChunks returns the chunk details of a document (P1).
+	ListDocumentChunks(ctx context.Context, in *ListDocumentChunksRequest, opts ...grpc.CallOption) (*ListDocumentChunksResponse, error)
+	// GetSessionMessages returns the message history of a chat session (P1).
+	GetSessionMessages(ctx context.Context, in *GetSessionMessagesRequest, opts ...grpc.CallOption) (*GetSessionMessagesResponse, error)
+	// DeleteSession removes a chat session and its messages (idempotent).
+	DeleteSession(ctx context.Context, in *DeleteSessionRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	// ReparseDocument re-triggers parsing of an existing document.
+	// Returns 202-style async task semantics: resets the doc row and enqueues
+	// a reparse task via Outbox pattern onto NATS ani.tasks.kb.parse (reuses
+	// the NotifyDocumentUploaded event pipeline).
+	ReparseDocument(ctx context.Context, in *ReparseDocumentRequest, opts ...grpc.CallOption) (*v1.AsyncTaskRef, error)
 }
 
 type kBServiceClient struct {
@@ -104,6 +123,15 @@ func (c *kBServiceClient) GetKB(ctx context.Context, in *GetKBRequest, opts ...g
 func (c *kBServiceClient) ListKBs(ctx context.Context, in *ListKBsRequest, opts ...grpc.CallOption) (*ListKBsResponse, error) {
 	out := new(ListKBsResponse)
 	err := c.cc.Invoke(ctx, KBService_ListKBs_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kBServiceClient) UpdateKB(ctx context.Context, in *UpdateKBRequest, opts ...grpc.CallOption) (*KnowledgeBase, error) {
+	out := new(KnowledgeBase)
+	err := c.cc.Invoke(ctx, KBService_UpdateKB_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -232,6 +260,42 @@ func (c *kBServiceClient) UpdateKBPermissions(ctx context.Context, in *UpdateKBP
 	return out, nil
 }
 
+func (c *kBServiceClient) ListDocumentChunks(ctx context.Context, in *ListDocumentChunksRequest, opts ...grpc.CallOption) (*ListDocumentChunksResponse, error) {
+	out := new(ListDocumentChunksResponse)
+	err := c.cc.Invoke(ctx, KBService_ListDocumentChunks_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kBServiceClient) GetSessionMessages(ctx context.Context, in *GetSessionMessagesRequest, opts ...grpc.CallOption) (*GetSessionMessagesResponse, error) {
+	out := new(GetSessionMessagesResponse)
+	err := c.cc.Invoke(ctx, KBService_GetSessionMessages_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kBServiceClient) DeleteSession(ctx context.Context, in *DeleteSessionRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, KBService_DeleteSession_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kBServiceClient) ReparseDocument(ctx context.Context, in *ReparseDocumentRequest, opts ...grpc.CallOption) (*v1.AsyncTaskRef, error) {
+	out := new(v1.AsyncTaskRef)
+	err := c.cc.Invoke(ctx, KBService_ReparseDocument_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // KBServiceServer is the server API for KBService service.
 // All implementations must embed UnimplementedKBServiceServer
 // for forward compatibility
@@ -239,6 +303,9 @@ type KBServiceServer interface {
 	CreateKB(context.Context, *CreateKBRequest) (*KnowledgeBase, error)
 	GetKB(context.Context, *GetKBRequest) (*KnowledgeBase, error)
 	ListKBs(context.Context, *ListKBsRequest) (*ListKBsResponse, error)
+	// UpdateKB updates KB name/description; empty fields mean "no change".
+	// Pure metadata update — does not trigger index rebuild (unlike config).
+	UpdateKB(context.Context, *UpdateKBRequest) (*KnowledgeBase, error)
 	DeleteKB(context.Context, *DeleteKBRequest) (*emptypb.Empty, error)
 	// GetDocumentUploadURL returns a presigned MinIO PUT URL for direct upload.
 	// Creates a kb_documents record (parse_status=pending) and returns the doc_id.
@@ -268,6 +335,17 @@ type KBServiceServer interface {
 	ListKBSessions(context.Context, *ListKBSessionsRequest) (*ListKBSessionsResponse, error)
 	// UpdateKBPermissions updates KB access permissions (P1).
 	UpdateKBPermissions(context.Context, *UpdateKBPermissionsRequest) (*KnowledgeBase, error)
+	// ListDocumentChunks returns the chunk details of a document (P1).
+	ListDocumentChunks(context.Context, *ListDocumentChunksRequest) (*ListDocumentChunksResponse, error)
+	// GetSessionMessages returns the message history of a chat session (P1).
+	GetSessionMessages(context.Context, *GetSessionMessagesRequest) (*GetSessionMessagesResponse, error)
+	// DeleteSession removes a chat session and its messages (idempotent).
+	DeleteSession(context.Context, *DeleteSessionRequest) (*emptypb.Empty, error)
+	// ReparseDocument re-triggers parsing of an existing document.
+	// Returns 202-style async task semantics: resets the doc row and enqueues
+	// a reparse task via Outbox pattern onto NATS ani.tasks.kb.parse (reuses
+	// the NotifyDocumentUploaded event pipeline).
+	ReparseDocument(context.Context, *ReparseDocumentRequest) (*v1.AsyncTaskRef, error)
 	mustEmbedUnimplementedKBServiceServer()
 }
 
@@ -283,6 +361,9 @@ func (UnimplementedKBServiceServer) GetKB(context.Context, *GetKBRequest) (*Know
 }
 func (UnimplementedKBServiceServer) ListKBs(context.Context, *ListKBsRequest) (*ListKBsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListKBs not implemented")
+}
+func (UnimplementedKBServiceServer) UpdateKB(context.Context, *UpdateKBRequest) (*KnowledgeBase, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateKB not implemented")
 }
 func (UnimplementedKBServiceServer) DeleteKB(context.Context, *DeleteKBRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteKB not implemented")
@@ -316,6 +397,18 @@ func (UnimplementedKBServiceServer) ListKBSessions(context.Context, *ListKBSessi
 }
 func (UnimplementedKBServiceServer) UpdateKBPermissions(context.Context, *UpdateKBPermissionsRequest) (*KnowledgeBase, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateKBPermissions not implemented")
+}
+func (UnimplementedKBServiceServer) ListDocumentChunks(context.Context, *ListDocumentChunksRequest) (*ListDocumentChunksResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListDocumentChunks not implemented")
+}
+func (UnimplementedKBServiceServer) GetSessionMessages(context.Context, *GetSessionMessagesRequest) (*GetSessionMessagesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetSessionMessages not implemented")
+}
+func (UnimplementedKBServiceServer) DeleteSession(context.Context, *DeleteSessionRequest) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteSession not implemented")
+}
+func (UnimplementedKBServiceServer) ReparseDocument(context.Context, *ReparseDocumentRequest) (*v1.AsyncTaskRef, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReparseDocument not implemented")
 }
 func (UnimplementedKBServiceServer) mustEmbedUnimplementedKBServiceServer() {}
 
@@ -380,6 +473,24 @@ func _KBService_ListKBs_Handler(srv interface{}, ctx context.Context, dec func(i
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(KBServiceServer).ListKBs(ctx, req.(*ListKBsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KBService_UpdateKB_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateKBRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KBServiceServer).UpdateKB(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KBService_UpdateKB_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KBServiceServer).UpdateKB(ctx, req.(*UpdateKBRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -585,6 +696,78 @@ func _KBService_UpdateKBPermissions_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _KBService_ListDocumentChunks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListDocumentChunksRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KBServiceServer).ListDocumentChunks(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KBService_ListDocumentChunks_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KBServiceServer).ListDocumentChunks(ctx, req.(*ListDocumentChunksRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KBService_GetSessionMessages_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSessionMessagesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KBServiceServer).GetSessionMessages(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KBService_GetSessionMessages_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KBServiceServer).GetSessionMessages(ctx, req.(*GetSessionMessagesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KBService_DeleteSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteSessionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KBServiceServer).DeleteSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KBService_DeleteSession_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KBServiceServer).DeleteSession(ctx, req.(*DeleteSessionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KBService_ReparseDocument_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReparseDocumentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KBServiceServer).ReparseDocument(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KBService_ReparseDocument_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KBServiceServer).ReparseDocument(ctx, req.(*ReparseDocumentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // KBService_ServiceDesc is the grpc.ServiceDesc for KBService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -603,6 +786,10 @@ var KBService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListKBs",
 			Handler:    _KBService_ListKBs_Handler,
+		},
+		{
+			MethodName: "UpdateKB",
+			Handler:    _KBService_UpdateKB_Handler,
 		},
 		{
 			MethodName: "DeleteKB",
@@ -643,6 +830,22 @@ var KBService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateKBPermissions",
 			Handler:    _KBService_UpdateKBPermissions_Handler,
+		},
+		{
+			MethodName: "ListDocumentChunks",
+			Handler:    _KBService_ListDocumentChunks_Handler,
+		},
+		{
+			MethodName: "GetSessionMessages",
+			Handler:    _KBService_GetSessionMessages_Handler,
+		},
+		{
+			MethodName: "DeleteSession",
+			Handler:    _KBService_DeleteSession_Handler,
+		},
+		{
+			MethodName: "ReparseDocument",
+			Handler:    _KBService_ReparseDocument_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

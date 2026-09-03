@@ -34,6 +34,7 @@
 交付目标：2026-09-30 ANI Core v1.0.0（Services P0 由外部团队负责）。
 关键节奏：Core Sprint 13/14 既有事实继续有效；Services 团队维护业务产品/API 定义并可在主责目录提交 PR；目录、API、handler、生成物和跨层边界分别受 CODEOWNERS 共同审查、API split、Services boundary gate、make validate-architecture 约束。
 当前重心：Sprint 13 从 Sprint 12 已闭合的 handler/ports/adapters/router 边界接入真实 provider 与 live gate。
+ANI-GW-1：2026-09-02 已达 `LOCAL_VERIFIED`；固定 Session Gateway `api/v0.1.0` / Go module `v0.1.0` / commit `d86a40d33369b128aabc680d4ea0b3f790ac0bb6`，完成 exec/console gRPC `CreateSession` 与 `InstanceSessionIssuer` seam，real provider 依赖缺失/非法/不可用时 503 fail-closed。真实 Session Gateway 进程、数据面和集群 rollout 仍为 `not_verified`，不得外推为 live/runtime ready；见 `repo/development-records/ANI-GW-1.md`。
 生产化边界：S01-S07 均达到 production-shaped acceptance passed；full platform production ready 仍需正式镜像发布/升级、长期 SLA/soak、备份/恢复和故障注入等 release gate。Sprint14 resilience live gate 当前以 ani-sprint14-resilience 隔离 fixture 验证 backend kill、degradation 与 controller primary failover，不把现有 Sprint13 单副本后端误标为自身 HA。
 Auth 边界：SPRINT13-AUTH-DEX-PRODUCTION-GATE / Auth/Dex production gate 已通过；production-shaped Gateway 使用 ANI_AUTH_MODE=auth_service。
 实例链路热修复：INSTANCE-NETWORK-STORE-READ-RLS-A 已在 K8s 测试环境 live passed（2026-08-27~09-01）——NetworkResourceStore 补读方法 + LocalNetworkService 穿透读 + Gateway 注入 store；迁移 20260828_001 修复实例链路 8 张表 RESTRICTIVE-only RLS；WORKLOAD_PROVIDER_APPLY_ENABLED=true 接线。验证止于实例 201 → provisioning → Volcano 排队（GPU 容量问题非代码），不外推 GPU runtime ready / production ready。

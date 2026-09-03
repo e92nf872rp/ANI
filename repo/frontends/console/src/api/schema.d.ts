@@ -328,7 +328,13 @@ export interface paths {
         };
         /** 获取知识库详情 */
         get: operations["getKnowledgeBase"];
-        put?: never;
+        /**
+         * 更新知识库基础信息（名称/描述）
+         * @description 更新知识库名称与描述；空字段表示不修改（部分更新语义）。
+         *     与 `PUT .../config`（配置变更触发全库重建）语义分离。
+         *     对齐 kb_service.proto UpdateKB。
+         */
+        put: operations["updateKnowledgeBase"];
         post?: never;
         /** 删除知识库 */
         delete: operations["deleteKnowledgeBase"];
@@ -390,11 +396,29 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** 获取知识库文档详情 */
+        get: operations["getKnowledgeBaseDocument"];
         put?: never;
         post?: never;
         /** 删除知识库文档 */
         delete: operations["deleteKnowledgeBaseDocument"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/knowledge-bases/{kb_id}/documents/{doc_id}/chunks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 知识库文档分块明细列表 */
+        get: operations["listKnowledgeBaseDocumentChunks"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -460,6 +484,40 @@ export interface paths {
         };
         /** 知识库对话历史列表 */
         get: operations["listKnowledgeBaseSessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/knowledge-bases/{kb_id}/sessions/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除知识库对话会话 */
+        delete: operations["deleteKnowledgeBaseSession"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/knowledge-bases/{kb_id}/sessions/{session_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 知识库会话消息列表 */
+        get: operations["listKnowledgeBaseSessionMessages"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2346,6 +2404,16 @@ export interface components {
             score?: number | null;
             /** Format: date-time */
             created_at: string;
+            /**
+             * Format: uuid
+             * @description 引用该文档的回答消息 id（定位/跳转用）
+             */
+            message_id?: string | null;
+            /**
+             * Format: uuid
+             * @description 回答所属会话 id
+             */
+            session_id?: string | null;
         };
         KBCitationListResponse: {
             items: components["schemas"]["KBCitation"][];
@@ -2366,6 +2434,74 @@ export interface components {
         KBSessionListResponse: {
             items: components["schemas"]["KBSession"][];
             next_cursor?: string | null;
+        };
+        KBSourceChunk: {
+            /** Format: uuid */
+            doc_id?: string;
+            file_name?: string;
+            page?: number | null;
+            content?: string;
+            score?: number | null;
+        };
+        KBChunk: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            doc_id: string;
+            /** Format: uuid */
+            kb_id: string;
+            /** Format: uuid */
+            parent_chunk_id?: string | null;
+            /** @enum {string} */
+            chunk_type: "child" | "parent" | "doc_summary";
+            content: string;
+            parent_content?: string | null;
+            page_number?: number | null;
+            content_type?: string;
+            /** @description 所属文档文件名（kb_chunks.file_name，NOT NULL 冗余列） */
+            file_name: string;
+            token_count?: number;
+            /** @description 客户端自定义元数据（JSONB，≤ 64KB） */
+            custom_metadata?: {
+                [key: string]: unknown;
+            } | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        KBChunkListResponse: {
+            items: components["schemas"]["KBChunk"][];
+            next_cursor?: string | null;
+        };
+        KBSessionMessage: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            session_id: string;
+            /** @enum {string} */
+            role: "user" | "assistant";
+            content: string;
+            sources?: components["schemas"]["KBSourceChunk"][] | null;
+            input_tokens?: number | null;
+            output_tokens?: number | null;
+            duration_ms?: number | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        KBSessionMessageListResponse: {
+            items: components["schemas"]["KBSessionMessage"][];
+            next_cursor?: string | null;
+        };
+        /** @description 更新知识库基础信息（名称/描述）；空字段表示不修改。对齐 kb_service.proto UpdateKB。 */
+        UpdateKnowledgeBaseRequest: {
+            /**
+             * Format: uuid
+             * @description 客户端生成UUID，防重复提交
+             */
+            idempotency_key: string;
+            /** @description 新名称；空表示不修改 */
+            name?: string;
+            /** @description 新描述；空表示不修改 */
+            description?: string | null;
         };
         UpdateKBPermissionsRequest: {
             /** Format: uuid */
@@ -4016,6 +4152,37 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    updateKnowledgeBase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateKnowledgeBaseRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新后的知识库 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeBase"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
     deleteKnowledgeBase: {
         parameters: {
             query?: never;
@@ -4159,6 +4326,32 @@ export interface operations {
             };
         };
     };
+    getKnowledgeBaseDocument: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+                doc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 文档详情 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KBDocument"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     deleteKnowledgeBaseDocument: {
         parameters: {
             query?: never;
@@ -4178,6 +4371,36 @@ export interface operations {
                 };
                 content?: never;
             };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listKnowledgeBaseDocumentChunks: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string;
+                chunk_type?: "child" | "parent" | "doc_summary";
+            };
+            header?: never;
+            path: {
+                kb_id: string;
+                doc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 分块明细列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KBChunkListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -4295,6 +4518,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KBSessionListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteKnowledgeBaseSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除（幂等：会话不存在也返回 204） */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listKnowledgeBaseSessionMessages: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                kb_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 会话消息列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KBSessionMessageListResponse"];
                 };
             };
             401: components["responses"]["Unauthorized"];

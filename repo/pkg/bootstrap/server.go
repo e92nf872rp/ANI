@@ -83,7 +83,6 @@ type Config struct {
 	WorkloadOpsEnabled                 bool
 	InstanceObservabilityProvider      string
 	InstanceObservabilityPrometheusURL string
-	InstanceObservabilityExecBaseURL   string
 	KubernetesAPIHost                  string
 	KubernetesServiceHost              string
 	KubernetesServicePort              string
@@ -256,9 +255,6 @@ func (c Config) withEnvironmentOverrides() Config {
 	}
 	if value := os.Getenv("INSTANCE_OBSERVABILITY_PROMETHEUS_URL"); value != "" {
 		c.InstanceObservabilityPrometheusURL = value
-	}
-	if value := os.Getenv("INSTANCE_OBSERVABILITY_EXEC_BASE_URL"); value != "" {
-		c.InstanceObservabilityExecBaseURL = value
 	}
 	if value := os.Getenv("KUBERNETES_API_HOST"); value != "" {
 		c.KubernetesAPIHost = value

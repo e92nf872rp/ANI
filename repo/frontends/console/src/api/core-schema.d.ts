@@ -5034,6 +5034,8 @@ export interface components {
              * @enum {string}
              */
             protocol: "console" | "vnc" | "novnc" | "serial";
+            /** @description 可选；旧客户端省略时 Gateway 仅为本次 HTTP 请求生成内部键，不承诺跨 HTTP 重试重放。 */
+            idempotency_key?: string;
         };
         InstanceConsoleSession: {
             /** @description 对应 operation timeline，可通过 /instance-operations/{operation_id} 查询 */
@@ -8224,6 +8226,19 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["PreconditionFailed"];
+            429: components["responses"]["RateLimitExceeded"];
+            /** @description Session Gateway 返回未预期错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listInstanceLogs: {
@@ -8376,6 +8391,19 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["PreconditionFailed"];
+            429: components["responses"]["RateLimitExceeded"];
+            /** @description Session Gateway 返回未预期错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listInstanceSecurityEvents: {

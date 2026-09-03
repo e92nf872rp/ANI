@@ -81,6 +81,7 @@ func TestRegisterInstancesUsesInjectedRuntime(t *testing.T) {
 	got, _ := registerInstancesWithRuntime(
 		h.Group("/api/v1"),
 		nil,
+		nil,
 		false,
 		nil,
 		nil,
@@ -685,7 +686,7 @@ func TestInstanceInstanceObservabilityResponsesUseLocalProfile(t *testing.T) {
 	}
 	requireLocalCoreDevProfile(t, metricsResponse.DevProfile, "local-instance-observability")
 
-	execSession, err := api.observability.CreateExecSession(context.Background(), ports.InstanceExecSessionCreateRequest{
+	execSession, err := api.sessions.CreateExecSession(context.Background(), ports.InstanceExecSessionCreateRequest{
 		TenantID:       "tenant-a",
 		InstanceID:     created.Ref.InstanceID,
 		IdempotencyKey: "exec-observe",
@@ -707,7 +708,7 @@ func TestInstanceInstanceObservabilityResponsesUseLocalProfile(t *testing.T) {
 }
 
 func TestInstanceInstanceObservabilityCanUseInstanceNameForProviderTarget(t *testing.T) {
-	api := newInstanceAPIWithObservability(nil, true, nil, nil, nil, nil)
+	api := newInstanceAPIWithObservability(nil, nil, true, nil, nil, nil, nil)
 	spec, err := instanceSpecFromRequest(createInstanceRequest{Kind: "container", Name: "s07-observability-live"}, "tenant-a")
 	if err != nil {
 		t.Fatalf("instanceSpecFromRequest error = %v", err)
@@ -733,7 +734,7 @@ func TestInstanceInstanceObservabilityCanUseInstanceNameForProviderTarget(t *tes
 		t.Fatalf("observability target = %q, want instance name", got)
 	}
 
-	localAPI := newInstanceAPIWithObservability(nil, false, nil, nil, nil, nil)
+	localAPI := newInstanceAPIWithObservability(nil, nil, false, nil, nil, nil, nil)
 	if got := localAPI.observabilityTargetID(record); got != created.Ref.InstanceID {
 		t.Fatalf("local observability target = %q, want instance id %q", got, created.Ref.InstanceID)
 	}

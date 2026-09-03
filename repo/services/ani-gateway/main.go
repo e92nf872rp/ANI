@@ -105,6 +105,15 @@ func main() {
 			}
 		}()
 	}
+	instanceSessionIssuer, closeInstanceSession, err := newGatewayInstanceSessionIssuer(gatewayInstanceSessionRuntimeConfigFromEnv())
+	if err != nil {
+		logger.Warn("session gateway gRPC client unavailable; real-provider session routes will fail closed", "err", err)
+		instanceSessionIssuer = nil
+		closeInstanceSession = nil
+	}
+	if closeInstanceSession != nil {
+		defer closeInstanceSession()
+	}
 	gpuSchedulingQueueStore, err := newGatewayGPUSchedulingQueueStore(gatewayGPUSchedulingQueueRuntimeConfigFromEnv())
 	if err != nil {
 		logger.Error("failed to configure gpu scheduling queue store runtime", "err", err)
@@ -286,6 +295,7 @@ func main() {
 		ImageRegistry:                         imageRegistry,
 		VectorStoreService:                    vectorStoreService,
 		InstanceObservability:                 instanceObservability,
+		InstanceSessionIssuer:                 instanceSessionIssuer,
 		InstanceObservabilityUsesInstanceName: instanceObservabilityUsesInstanceName,
 		InstanceRuntime:                       routeInstanceRuntime,
 		KubernetesRESTClient:                  kubernetesRESTClient,

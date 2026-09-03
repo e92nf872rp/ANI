@@ -22,6 +22,7 @@ type RegisterOptions struct {
 	ImageRegistry                         ports.ImageRegistry
 	VectorStoreService                    ports.VectorStoreService
 	InstanceObservability                 ports.InstanceObservability
+	InstanceSessionIssuer                 ports.InstanceSessionIssuer
 	InstanceObservabilityUsesInstanceName bool
 	InstanceRuntime                       *InstanceRuntime
 	KubernetesRESTClient                  *runtimeadapter.KubernetesRESTClient
@@ -90,7 +91,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	if options.InstanceRuntime != nil && options.InstanceRuntime.TaskStore == nil {
 		options.InstanceRuntime.TaskStore = options.AsyncTaskStore
 	}
-	instanceLookup, observeInstance := registerInstancesWithRuntime(v1, options.InstanceObservability, options.InstanceObservabilityUsesInstanceName, options.GPUInventory, options.KubernetesRESTClient, options.SecretService, options.InstanceRuntime, options.GPUSpecStore)
+	instanceLookup, observeInstance := registerInstancesWithRuntime(v1, options.InstanceObservability, options.InstanceSessionIssuer, options.InstanceObservabilityUsesInstanceName, options.GPUInventory, options.KubernetesRESTClient, options.SecretService, options.InstanceRuntime, options.GPUSpecStore)
 	// Tasks register after instances so the lazy-sync observer (store read +
 	// single-instance Kubernetes refresh) is available for GET /tasks/{id}.
 	registerTasksWithStore(v1, options.AsyncTaskStore, observeInstance)
