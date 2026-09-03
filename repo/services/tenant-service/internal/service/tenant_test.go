@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // 租户（TenantService）service 层单测。
@@ -619,5 +620,111 @@ func TestTenantService_CreateTenant_NameConflict(t *testing.T) {
 	})
 	if status.Code(err) != codes.AlreadyExists || !strings.HasPrefix(status.Convert(err).Message(), "TENANT_NAME_CONFLICT") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestTenantService_UpdateTenant_EmptyRejected(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	tenants := &fakeTenantClient{
+		tenant: ports.Tenant{ID: tenantID, Name: "acme", DisplayName: "Acme", Status: ports.TenantStatusActive, ContactEmail: "ops@acme.io"},
+	}
+	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	_, err := svc.UpdateTenant(context.Background(), &tenantv1.UpdateTenantRequest{TenantId: tenantID.String()})
+	if status.Code(err) != codes.InvalidArgument || !strings.HasPrefix(status.Convert(err).Message(), "VALIDATION_FAILED") {
+		t.Fatalf("err=%v", err)
+	}
+	if tenants.updateTenantCalls != 0 {
+		t.Fatalf("UpdateTenant should not be called, got %d", tenants.updateTenantCalls)
+	}
+}
+
+func TestTenantService_UpdateTenant_DisabledRejected(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	tenants := &fakeTenantClient{
+		tenant: ports.Tenant{
+			ID: tenantID, Name: "acme", DisplayName: "Acme",
+			Status: ports.TenantStatusDisabled, ContactEmail: "ops@acme.io",
+		},
+	}
+	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	dn := "New Name"
+	_, err := svc.UpdateTenant(context.Background(), &tenantv1.UpdateTenantRequest{
+		TenantId:    tenantID.String(),
+		DisplayName: wrapperspb.String(dn),
+	})
+	if status.Code(err) != codes.FailedPrecondition || !strings.HasPrefix(status.Convert(err).Message(), "TENANT_STATE_INVALID") {
+		t.Fatalf("err=%v", err)
+	}
+	if tenants.updateTenantCalls != 0 {
+		t.Fatalf("UpdateTenant should not be called on disabled tenant")
+	}
+}
+
+func TestTenantService_UpdateTenant_PartialFields(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	tenants := &fakeTenantClient{
+		tenant: ports.Tenant{
+			ID: tenantID, Name: "acme", DisplayName: "Acme",
+			Status: ports.TenantStatusActive, ContactEmail: "ops@acme.io", PlanID: uuid.New(),
+		},
+	}
+	audit := &fakeAuditStore{}
+	svc := NewTenantService(nil, tenants, nil, nil, nil, audit, nil, nil, nil)
+
+	res, err := svc.UpdateTenant(context.Background(), &tenantv1.UpdateTenantRequest{
+		TenantId:     tenantID.String(),
+		DisplayName:  wrapperspb.String("Acme Corp"),
+		ContactEmail: wrapperspb.String("new@acme.io"),
+	})
+	if err != nil {
+		t.Fatalf("UpdateTenant: %v", err)
+	}
+	if res.GetId() != tenantID.String() || res.GetMessage() == "" {
+		t.Fatalf("response=%+v", res)
+	}
+	if tenants.updateTenantCalls != 1 || tenants.updateTenantIn == nil {
+		t.Fatalf("update calls=%d in=%v", tenants.updateTenantCalls, tenants.updateTenantIn)
+	}
+	if tenants.updateTenantIn.DisplayName == nil || *tenants.updateTenantIn.DisplayName != "Acme Corp" {
+		t.Fatalf("display_name=%v", tenants.updateTenantIn.DisplayName)
+	}
+	if tenants.updateTenantIn.ContactEmail == nil || *tenants.updateTenantIn.ContactEmail != "new@acme.io" {
+		t.Fatalf("contact_email=%v", tenants.updateTenantIn.ContactEmail)
+	}
+	// name / status 不可经 UpdateTenantInput 改写（仅两可选字段）
+	if tenants.tenant.Name != "acme" || tenants.tenant.Status != ports.TenantStatusActive {
+		t.Fatalf("name/status mutated: %+v", tenants.tenant)
+	}
+	if len(audit.logs) == 0 || audit.logs[0].Action != "tenant.update" || audit.logs[0].Result != "success" {
+		t.Fatalf("audit=%+v", audit.logs)
+	}
+	before, _ := audit.logs[0].Details["before"].(map[string]any)
+	after, _ := audit.logs[0].Details["after"].(map[string]any)
+	if before["display_name"] != "Acme" || after["display_name"] != "Acme Corp" {
+		t.Fatalf("audit before/after=%v / %v", before, after)
+	}
+}
+
+func TestTenantService_UpdateTenant_DisplayNameOnly(t *testing.T) {
+	tenantID := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+	tenants := &fakeTenantClient{
+		tenant: ports.Tenant{
+			ID: tenantID, Name: "beta", DisplayName: "Beta",
+			Status: ports.TenantStatusFrozen, ContactEmail: "ops@beta.io", PlanID: uuid.New(),
+		},
+	}
+	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	_, err := svc.UpdateTenant(context.Background(), &tenantv1.UpdateTenantRequest{
+		TenantId:    tenantID.String(),
+		DisplayName: wrapperspb.String("Beta Inc"),
+	})
+	if err != nil {
+		t.Fatalf("UpdateTenant: %v", err)
+	}
+	if tenants.updateTenantIn == nil || tenants.updateTenantIn.ContactEmail != nil {
+		t.Fatalf("want contact_email unset, got %+v", tenants.updateTenantIn)
+	}
+	if tenants.tenant.ContactEmail != "ops@beta.io" || tenants.tenant.DisplayName != "Beta Inc" {
+		t.Fatalf("tenant=%+v", tenants.tenant)
 	}
 }

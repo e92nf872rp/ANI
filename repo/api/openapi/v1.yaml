@@ -9486,6 +9486,7 @@ paths:
       summary: 更新租户基本信息
       description: |
         部分更新 display_name / contact_email；不可改 name / status。
+        disabled 或不存在均返回 404 TENANT_NOT_FOUND（WHERE status <> 'disabled'）。
       tags: [Tenants]
       x-ani-rbac-scope: "scope:tenant:write"
       parameters:

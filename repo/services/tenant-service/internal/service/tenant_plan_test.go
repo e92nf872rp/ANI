@@ -237,6 +237,10 @@ type fakeTenantClient struct {
 	createFn    func(ctx context.Context, in ports.CreateTenantInput) (ports.Tenant, error)
 	createIn    *ports.CreateTenantInput
 	createCalls int
+
+	updateTenantFn    func(ctx context.Context, id uuid.UUID, in ports.UpdateTenantInput) (ports.Tenant, error)
+	updateTenantIn    *ports.UpdateTenantInput
+	updateTenantCalls int
 }
 
 var (
@@ -350,8 +354,23 @@ func (f *fakeTenantClient) ListTenants(_ context.Context, filter ports.ListTenan
 	return ports.TenantListResult{Items: append([]ports.TenantListItem(nil), f.listItems...)}, nil
 }
 
-func (f *fakeTenantClient) UpdateTenant(context.Context, uuid.UUID, ports.UpdateTenantInput) (ports.Tenant, error) {
-	panic("unused in tenant plan tests")
+func (f *fakeTenantClient) UpdateTenant(ctx context.Context, id uuid.UUID, in ports.UpdateTenantInput) (ports.Tenant, error) {
+	f.updateTenantCalls++
+	cp := in
+	f.updateTenantIn = &cp
+	if f.updateTenantFn != nil {
+		return f.updateTenantFn(ctx, id, in)
+	}
+	if f.tenant.ID == uuid.Nil || f.tenant.ID != id {
+		return ports.Tenant{}, ports.ErrTenantNotFound
+	}
+	if in.DisplayName != nil {
+		f.tenant.DisplayName = *in.DisplayName
+	}
+	if in.ContactEmail != nil {
+		f.tenant.ContactEmail = *in.ContactEmail
+	}
+	return f.tenant, nil
 }
 
 func (f *fakeTenantClient) FreezeTenant(context.Context, uuid.UUID, string) (ports.Tenant, error) {

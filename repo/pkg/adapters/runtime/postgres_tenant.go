@@ -37,79 +37,11 @@ func (t *PostgresTenant) GetTenant(ctx context.Context, tenantID string) (ports.
 
 	var out ports.Tenant
 	err = t.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
-		var (
-			rowID       uuid.UUID
-			planID      uuid.UUID
-			createdAt   time.Time
-			updatedAt   time.Time
-			name        string
-			displayName string
-			status      string
-			contact     *string
-			frozenAt    *time.Time
-			disabledAt  *time.Time
-			userCount   int64
-			adminCount  int64
-			ssoEnabled  bool
-			mfaRequired bool
-		)
-		scanErr := tx.QueryRow(ctx, `
-			SELECT t.id, t.name, t.display_name, t.status, t.plan_id, t.contact_email,
-			       t.frozen_at, t.disabled_at, t.created_at, t.updated_at,
-			       COALESCE(uc.user_count, 0),
-			       COALESCE(ac.admin_count, 0),
-			       COALESCE(ta.sso_enabled, FALSE),
-			       COALESCE(ta.mfa_required, FALSE)
-			FROM tenants t
-			LEFT JOIN tenant_auth ta ON ta.tenant_id = t.id
-			LEFT JOIN LATERAL (
-				SELECT COUNT(*)::bigint AS user_count
-				FROM users u
-				WHERE u.tenant_id = t.id
-				  AND COALESCE(u.is_deleted, FALSE) = FALSE
-			) uc ON TRUE
-			LEFT JOIN LATERAL (
-				SELECT COUNT(*)::bigint AS admin_count
-				FROM users u
-				JOIN user_roles ur ON ur.user_id = u.id
-				JOIN roles r ON r.id = ur.role_id
-				WHERE u.tenant_id = t.id
-				  AND COALESCE(u.is_deleted, FALSE) = FALSE
-				  AND r.tenant_id IS NULL
-				  AND r.name = $2
-			) ac ON TRUE
-			WHERE t.id = $1
-		`, id, tenantAdminRoleNameForCount).Scan(
-			&rowID, &name, &displayName, &status, &planID, &contact,
-			&frozenAt, &disabledAt, &createdAt, &updatedAt,
-			&userCount, &adminCount, &ssoEnabled, &mfaRequired,
-		)
-		if errors.Is(scanErr, pgx.ErrNoRows) {
-			return ports.ErrTenantNotFound
+		loaded, loadErr := loadTenantDetail(ctx, tx, id)
+		if loadErr != nil {
+			return loadErr
 		}
-		if scanErr != nil {
-			return fmt.Errorf("get tenant: %w", scanErr)
-		}
-		out = ports.Tenant{
-			ID:          rowID.String(),
-			Name:        name,
-			DisplayName: displayName,
-			Status:      ports.TenantStatus(status),
-			PlanID:      planID.String(),
-			FrozenAt:    frozenAt,
-			DisabledAt:  disabledAt,
-			UserCount:   userCount,
-			AdminCount:  adminCount,
-			Auth: &ports.TenantAuthSummary{
-				SsoEnabled:  ssoEnabled,
-				MfaRequired: mfaRequired,
-			},
-			CreatedAt: createdAt,
-			UpdatedAt: updatedAt,
-		}
-		if contact != nil {
-			out.ContactEmail = *contact
-		}
+		out = loaded
 		return nil
 	})
 	if err != nil {
@@ -363,8 +295,151 @@ func (t *PostgresTenant) ListTenants(ctx context.Context, filter ports.ListTenan
 	return ports.TenantListResult{Items: items, NextCursor: nextCursor}, nil
 }
 
-func (t *PostgresTenant) UpdateTenant(context.Context, string, ports.UpdateTenantInput) (ports.Tenant, error) {
-	return ports.Tenant{}, ports.ErrUnsupported
+// UpdateTenant 部分更新 display_name / contact_email；不触碰 name / status / plan_id。
+func (t *PostgresTenant) UpdateTenant(ctx context.Context, tenantID string, in ports.UpdateTenantInput) (ports.Tenant, error) {
+	id, err := parseTenantUUID(tenantID)
+	if err != nil {
+		return ports.Tenant{}, err
+	}
+	if in.DisplayName == nil && in.ContactEmail == nil {
+		return ports.Tenant{}, fmt.Errorf("%w: display_name or contact_email required", ports.ErrInvalid)
+	}
+
+	var displayName *string
+	if in.DisplayName != nil {
+		v := strings.TrimSpace(*in.DisplayName)
+		if v == "" || len(v) > 128 {
+			return ports.Tenant{}, fmt.Errorf("%w: display_name required (1-128)", ports.ErrInvalid)
+		}
+		displayName = &v
+	}
+	var contactEmail *string
+	if in.ContactEmail != nil {
+		v := strings.TrimSpace(*in.ContactEmail)
+		if v == "" {
+			return ports.Tenant{}, fmt.Errorf("%w: contact_email required", ports.ErrInvalid)
+		}
+		contactEmail = &v
+	}
+
+	var out ports.Tenant
+	err = t.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		// 动态 SET（仅提供的字段）+ updated_at；disabled 与不存在一律 0 行 → NotFound
+		sets := []string{"updated_at = now()"}
+		args := []any{id}
+		argN := 2
+		if displayName != nil {
+			sets = append(sets, fmt.Sprintf("display_name = $%d", argN))
+			args = append(args, *displayName)
+			argN++
+		}
+		if contactEmail != nil {
+			sets = append(sets, fmt.Sprintf("contact_email = $%d", argN))
+			args = append(args, *contactEmail)
+		}
+		q := fmt.Sprintf(`
+			UPDATE tenants
+			SET %s
+			WHERE id = $1 AND status <> 'disabled'
+			RETURNING id
+		`, strings.Join(sets, ", "))
+		var updatedID uuid.UUID
+		if scanErr := tx.QueryRow(ctx, q, args...).Scan(&updatedID); scanErr != nil {
+			if errors.Is(scanErr, pgx.ErrNoRows) {
+				return ports.ErrTenantNotFound
+			}
+			return fmt.Errorf("update tenant: %w", scanErr)
+		}
+
+		loaded, loadErr := loadTenantDetail(ctx, tx, id)
+		if loadErr != nil {
+			return loadErr
+		}
+		out = loaded
+		return nil
+	})
+	if err != nil {
+		return ports.Tenant{}, err
+	}
+	return out, nil
+}
+
+// loadTenantDetail 在已有平台事务内读取租户详情（counts + auth summary）。
+func loadTenantDetail(ctx context.Context, tx ports.MetadataTx, id uuid.UUID) (ports.Tenant, error) {
+	var (
+		rowID       uuid.UUID
+		planID      uuid.UUID
+		createdAt   time.Time
+		updatedAt   time.Time
+		name        string
+		displayName string
+		status      string
+		contact     *string
+		frozenAt    *time.Time
+		disabledAt  *time.Time
+		userCount   int64
+		adminCount  int64
+		ssoEnabled  bool
+		mfaRequired bool
+	)
+	scanErr := tx.QueryRow(ctx, `
+		SELECT t.id, t.name, t.display_name, t.status, t.plan_id, t.contact_email,
+		       t.frozen_at, t.disabled_at, t.created_at, t.updated_at,
+		       COALESCE(uc.user_count, 0),
+		       COALESCE(ac.admin_count, 0),
+		       COALESCE(ta.sso_enabled, FALSE),
+		       COALESCE(ta.mfa_required, FALSE)
+		FROM tenants t
+		LEFT JOIN tenant_auth ta ON ta.tenant_id = t.id
+		LEFT JOIN LATERAL (
+			SELECT COUNT(*)::bigint AS user_count
+			FROM users u
+			WHERE u.tenant_id = t.id
+			  AND COALESCE(u.is_deleted, FALSE) = FALSE
+		) uc ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT COUNT(*)::bigint AS admin_count
+			FROM users u
+			JOIN user_roles ur ON ur.user_id = u.id
+			JOIN roles r ON r.id = ur.role_id
+			WHERE u.tenant_id = t.id
+			  AND COALESCE(u.is_deleted, FALSE) = FALSE
+			  AND r.tenant_id IS NULL
+			  AND r.name = $2
+		) ac ON TRUE
+		WHERE t.id = $1
+	`, id, tenantAdminRoleNameForCount).Scan(
+		&rowID, &name, &displayName, &status, &planID, &contact,
+		&frozenAt, &disabledAt, &createdAt, &updatedAt,
+		&userCount, &adminCount, &ssoEnabled, &mfaRequired,
+	)
+	if errors.Is(scanErr, pgx.ErrNoRows) {
+		return ports.Tenant{}, ports.ErrTenantNotFound
+	}
+	if scanErr != nil {
+		return ports.Tenant{}, fmt.Errorf("get tenant: %w", scanErr)
+	}
+	out := ports.Tenant{
+		ID:          rowID.String(),
+		Name:        name,
+		DisplayName: displayName,
+		Status:      ports.TenantStatus(status),
+		PlanID:      planID.String(),
+		FrozenAt:    frozenAt,
+		DisabledAt:  disabledAt,
+		UserCount:   userCount,
+		AdminCount:  adminCount,
+		Auth: &ports.TenantAuthSummary{
+			SsoEnabled:  ssoEnabled,
+			MfaRequired: mfaRequired,
+		},
+		CreatedAt: createdAt,
+		UpdatedAt: updatedAt,
+	}
+	if contact != nil {
+		out.ContactEmail = *contact
+	}
+	return out, nil
 }
 
 func (t *PostgresTenant) FreezeTenant(context.Context, string, string) (ports.Tenant, error) {

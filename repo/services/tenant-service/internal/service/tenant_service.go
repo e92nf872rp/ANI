@@ -575,9 +575,91 @@ func (s *TenantService) GetTenantDetail(ctx context.Context, req *tenantv1.GetTe
 }
 
 func (s *TenantService) UpdateTenant(ctx context.Context, req *tenantv1.UpdateTenantRequest) (*commonv1.IdempotentResult, error) {
-	_ = ctx
-	_ = req
-	return nil, tenantRPCNotImplemented()
+	const action = "tenant.update"
+
+	// 步骤 1：依赖与 tenant_id
+	if s.tenants == nil {
+		err := businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant client unavailable")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, nil, err, nil)
+		return nil, err
+	}
+	rawID := ""
+	if req != nil {
+		rawID = req.GetTenantId()
+	}
+	tenantID, err := parseTenantID(rawID)
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": rawID}, err, nil)
+		return nil, err
+	}
+
+	// 步骤 2：部分更新映射；两者均未传 → 400 VALIDATION_FAILED（空更新拒绝）
+	in := ports.UpdateTenantInput{}
+	if req != nil && req.DisplayName != nil {
+		v := strings.TrimSpace(req.DisplayName.GetValue())
+		if v == "" || len(v) > 128 {
+			err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "display_name required (1-128)")
+			writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+			return nil, err
+		}
+		in.DisplayName = &v
+	}
+	if req != nil && req.ContactEmail != nil {
+		v := strings.TrimSpace(req.ContactEmail.GetValue())
+		if !validEmail(v) {
+			err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "contact_email invalid")
+			writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+			return nil, err
+		}
+		in.ContactEmail = &v
+	}
+	if in.DisplayName == nil && in.ContactEmail == nil {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "display_name or contact_email required")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+		return nil, err
+	}
+
+	// 步骤 3：读当前租户；不存在 → 404；disabled → 409 TENANT_STATE_INVALID
+	before, err := s.tenants.GetTenant(ctx, tenantID)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, mapped, &tenantID)
+		return nil, mapped
+	}
+	if before.Status == ports.TenantStatusDisabled {
+		err := businessError(codes.FailedPrecondition, ports.ErrTenantStateInvalid, "tenant is disabled")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id": tenantID.String(),
+			"status":    string(before.Status),
+		}, err, &tenantID)
+		return nil, err
+	}
+
+	// 步骤 4：经 Core 部分更新（不触碰 name / status）
+	after, err := s.tenants.UpdateTenant(ctx, tenantID, in)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, mapped, &tenantID)
+		return nil, mapped
+	}
+
+	// 步骤 5：成功审计（变更前后非敏感字段）
+	writeAuditSuccess(ctx, s.audit, auditResourceTenant, action, map[string]any{
+		"tenant_id": tenantID.String(),
+		"before": map[string]any{
+			"display_name":  before.DisplayName,
+			"contact_email": before.ContactEmail,
+		},
+		"after": map[string]any{
+			"display_name":  after.DisplayName,
+			"contact_email": after.ContactEmail,
+		},
+	}, &tenantID)
+
+	return &commonv1.IdempotentResult{
+		Id:      tenantID.String(),
+		Message: "tenant updated",
+	}, nil
 }
 
 func (s *TenantService) FreezeTenant(ctx context.Context, req *tenantv1.FreezeTenantRequest) (*commonv1.IdempotentResult, error) {

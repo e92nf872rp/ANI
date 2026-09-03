@@ -225,3 +225,92 @@ func TestPostgresTenantCreateTenant_NameConflictRace(t *testing.T) {
 		t.Fatalf("want ErrTenantNameConflict, got %v", err)
 	}
 }
+
+func TestPostgresTenantUpdateTenant_PartialFields(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	planID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
+	createdAt := time.Date(2026, 9, 3, 10, 0, 0, 0, time.UTC)
+	updatedAt := createdAt.Add(time.Minute)
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(
+		quotaFakeRow{values: []any{tenantID}}, // UPDATE RETURNING id
+		quotaFakeRow{values: []any{ // GetTenant detail
+			tenantID, "acme", "Acme Corp", "active", planID, "new@acme.io",
+			(*time.Time)(nil), (*time.Time)(nil), createdAt, updatedAt,
+			int64(2), int64(1), false, true,
+		}},
+	)
+	svc := NewPostgresTenant(&quotaFakeStore{tx: tx})
+	dn := "Acme Corp"
+	email := "new@acme.io"
+	got, err := svc.UpdateTenant(context.Background(), tenantID.String(), ports.UpdateTenantInput{
+		DisplayName: &dn, ContactEmail: &email,
+	})
+	if err != nil {
+		t.Fatalf("UpdateTenant: %v", err)
+	}
+	if got.DisplayName != "Acme Corp" || got.ContactEmail != "new@acme.io" {
+		t.Fatalf("got=%+v", got)
+	}
+	if got.Name != "acme" || got.Status != ports.TenantStatusActive || got.PlanID != planID.String() {
+		t.Fatalf("name/status/plan must stay unchanged: %+v", got)
+	}
+	if got.UserCount != 2 || got.AdminCount != 1 || got.Auth == nil || !got.Auth.MfaRequired {
+		t.Fatalf("detail view=%+v", got)
+	}
+}
+
+func TestPostgresTenantUpdateTenant_DisplayNameOnly(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	planID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
+	now := time.Date(2026, 9, 3, 10, 0, 0, 0, time.UTC)
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(
+		quotaFakeRow{values: []any{tenantID}},
+		quotaFakeRow{values: []any{
+			tenantID, "acme", "Only Name", "frozen", planID, "ops@acme.io",
+			(*time.Time)(nil), (*time.Time)(nil), now, now,
+			int64(0), int64(0), false, false,
+		}},
+	)
+	svc := NewPostgresTenant(&quotaFakeStore{tx: tx})
+	dn := "Only Name"
+	got, err := svc.UpdateTenant(context.Background(), tenantID.String(), ports.UpdateTenantInput{DisplayName: &dn})
+	if err != nil {
+		t.Fatalf("UpdateTenant: %v", err)
+	}
+	if got.DisplayName != "Only Name" || got.ContactEmail != "ops@acme.io" || got.Status != ports.TenantStatusFrozen {
+		t.Fatalf("got=%+v", got)
+	}
+}
+
+func TestPostgresTenantUpdateTenant_EmptyRejected(t *testing.T) {
+	svc := NewPostgresTenant(&quotaFakeStore{tx: &quotaFakeTx{}})
+	_, err := svc.UpdateTenant(context.Background(), uuid.NewString(), ports.UpdateTenantInput{})
+	if !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("want ErrInvalid, got %v", err)
+	}
+}
+
+func TestPostgresTenantUpdateTenant_NotFound(t *testing.T) {
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(quotaFakeRow{err: pgx.ErrNoRows})
+	svc := NewPostgresTenant(&quotaFakeStore{tx: tx})
+	dn := "X"
+	_, err := svc.UpdateTenant(context.Background(), uuid.NewString(), ports.UpdateTenantInput{DisplayName: &dn})
+	if !errors.Is(err, ports.ErrTenantNotFound) {
+		t.Fatalf("want ErrTenantNotFound, got %v", err)
+	}
+}
+
+func TestPostgresTenantUpdateTenant_DisabledAsNotFound(t *testing.T) {
+	// disabled 命中 WHERE status <> 'disabled' → 0 行，与不存在同为 NotFound
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(quotaFakeRow{err: pgx.ErrNoRows})
+	svc := NewPostgresTenant(&quotaFakeStore{tx: tx})
+	dn := "Nope"
+	_, err := svc.UpdateTenant(context.Background(), uuid.NewString(), ports.UpdateTenantInput{DisplayName: &dn})
+	if !errors.Is(err, ports.ErrTenantNotFound) {
+		t.Fatalf("want ErrTenantNotFound, got %v", err)
+	}
+}

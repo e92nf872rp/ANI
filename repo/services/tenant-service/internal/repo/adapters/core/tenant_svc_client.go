@@ -154,8 +154,21 @@ func (c *TenantSvcClient) ListTenants(ctx context.Context, filter ports.ListTena
 	}, nil
 }
 
-func (c *TenantSvcClient) UpdateTenant(context.Context, uuid.UUID, ports.UpdateTenantInput) (ports.Tenant, error) {
-	return ports.Tenant{}, ports.ErrNotImplemented
+func (c *TenantSvcClient) UpdateTenant(ctx context.Context, tenantID uuid.UUID, in ports.UpdateTenantInput) (ports.Tenant, error) {
+	_ = ctx
+	body := map[string]any{}
+	if in.DisplayName != nil {
+		body["display_name"] = *in.DisplayName
+	}
+	if in.ContactEmail != nil {
+		body["contact_email"] = *in.ContactEmail
+	}
+	path := fmt.Sprintf("/admin/tenants/%s", tenantID.String())
+	raw, err := c.sdk.Request("PUT", path, anisdk.RequestOptions{Body: body})
+	if err != nil {
+		return ports.Tenant{}, mapSDKError(err)
+	}
+	return decodeTenant(raw)
 }
 
 func (c *TenantSvcClient) FreezeTenant(context.Context, uuid.UUID, string) (ports.Tenant, error) {
