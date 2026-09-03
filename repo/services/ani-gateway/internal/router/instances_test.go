@@ -740,6 +740,67 @@ func TestInstanceInstanceObservabilityCanUseInstanceNameForProviderTarget(t *tes
 	}
 }
 
+// instanceLogTargetID 对 VM 实例必须附加 virt-launcher- 前缀（匹配 virt-launcher pod），
+// 且不依赖 observabilityUsesInstanceName；container 实例沿用原 target 不受影响。
+func TestInstanceInstanceLogTargetIDPrefixesVirtLauncherForVM(t *testing.T) {
+	api := newInstanceAPIWithObservability(nil, nil, true, nil, nil, nil, nil)
+	vmSpec, err := instanceSpecFromRequest(createInstanceRequest{Kind: "vm", Name: "demo-log-vm"}, "tenant-a")
+	if err != nil {
+		t.Fatalf("instanceSpecFromRequest vm error = %v", err)
+	}
+	vmCreated, err := api.service.Create(context.Background(), ports.WorkloadInstanceCreateRequest{
+		IdempotencyKey:  "demo-log-vm-create",
+		Spec:            vmSpec,
+		UserID:          "user-a",
+		PermissionProof: "demo:test",
+		RequestedAt:     time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("vm Create error = %v", err)
+	}
+	vmRecord, err := api.service.Get(context.Background(), ports.WorkloadInstanceGetRequest{
+		TenantID:   "tenant-a",
+		InstanceID: vmCreated.Ref.InstanceID,
+	})
+	if err != nil {
+		t.Fatalf("vm Get error = %v", err)
+	}
+
+	// useInstanceName=true 与 false 均应得到 virt-launcher-<VM名>
+	for _, useName := range []bool{true, false} {
+		api := newInstanceAPIWithObservability(nil, nil, useName, nil, nil, nil, nil)
+		if got := api.instanceLogTargetID(vmRecord); got != "virt-launcher-demo-log-vm" {
+			t.Fatalf("vm log target (useName=%v) = %q, want \"virt-launcher-demo-log-vm\"", useName, got)
+		}
+	}
+
+	// container 实例沿用原 observability target（instance name），不受 VM 分支影响
+	ctSpec, err := instanceSpecFromRequest(createInstanceRequest{Kind: "container", Name: "demo-log-ct"}, "tenant-a")
+	if err != nil {
+		t.Fatalf("instanceSpecFromRequest container error = %v", err)
+	}
+	ctCreated, err := api.service.Create(context.Background(), ports.WorkloadInstanceCreateRequest{
+		IdempotencyKey:  "demo-log-ct-create",
+		Spec:            ctSpec,
+		UserID:          "user-a",
+		PermissionProof: "demo:test",
+		RequestedAt:     time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("container Create error = %v", err)
+	}
+	ctRecord, err := api.service.Get(context.Background(), ports.WorkloadInstanceGetRequest{
+		TenantID:   "tenant-a",
+		InstanceID: ctCreated.Ref.InstanceID,
+	})
+	if err != nil {
+		t.Fatalf("container Get error = %v", err)
+	}
+	if got := api.instanceLogTargetID(ctRecord); got != "demo-log-ct" {
+		t.Fatalf("container log target = %q, want \"demo-log-ct\"", got)
+	}
+}
+
 func TestInstanceInstanceServiceVMConsoleSession(t *testing.T) {
 	api := newInstanceAPI()
 	spec, err := instanceSpecFromRequest(createInstanceRequest{Kind: "vm", Name: "demo-vm"}, "tenant-a")

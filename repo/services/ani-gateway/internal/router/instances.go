@@ -1897,7 +1897,7 @@ func (api *instanceAPI) listLogs(ctx context.Context, c *app.RequestContext) {
 	}
 	result, err := api.observability.ListLogs(ctx, ports.InstanceObservationListRequest{
 		TenantID:   instanceTenantID(c),
-		InstanceID: api.observabilityTargetID(record),
+		InstanceID: api.instanceLogTargetID(record),
 		Limit:      queryInt(c, "limit", 100),
 		Cursor:     c.Query("cursor"),
 		Level:      c.Query("level"),
@@ -2795,6 +2795,21 @@ func (api *instanceAPI) observabilityTargetID(record ports.WorkloadInstanceRecor
 		return record.Name
 	}
 	return record.InstanceID
+}
+
+// instanceLogTargetID 返回日志链路用于匹配 Loki pod 标签的目标名。
+// KubeVirt VM 实例的日志存放在 virt-launcher pod 中，其 pod 名是
+// `virt-launcher-<VM名>[-<随机hash>]`（real 环境实测，见 INSTANCE-LOG-STREAM 系列）。
+// 直接复用 observabilityTargetID（VM 名）构造正则 `^<name>(-.*)?$` 匹配不到
+// virt-launcher pod，导致 VM 日志为空；这里对 VM 附加 `virt-launcher-` 前缀。
+// 仅日志链路使用，不影响事件/指标的目标映射。非 VM 实例沿用原目标。
+func (api *instanceAPI) instanceLogTargetID(record ports.WorkloadInstanceRecord) string {
+	if record.Kind == ports.WorkloadKindVM {
+		if name := strings.TrimSpace(record.Name); name != "" {
+			return "virt-launcher-" + name
+		}
+	}
+	return api.observabilityTargetID(record)
 }
 
 func consoleAction(protocol string) ports.WorkloadInstanceOpsAction {
