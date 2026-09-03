@@ -85,45 +85,6 @@ type InstanceSecurityEventListResult struct {
 	DevProfile DevProfileInfo
 }
 
-type InstanceExecSessionCreateRequest struct {
-	TenantID       string
-	InstanceID     string
-	IdempotencyKey string
-	Container      string
-	Command        []string
-	TTY            bool
-	Rows           int
-	Cols           int
-}
-
-type InstanceExecSessionRecord struct {
-	ID         string
-	InstanceID string
-	WSURL      string
-	Token      string
-	ExpiresAt  time.Time
-	DevProfile DevProfileInfo
-}
-
-// InstanceConsoleSessionCreateRequest 用于请求打开 VM 实例的 console 会话。
-type InstanceConsoleSessionCreateRequest struct {
-	TenantID       string
-	InstanceID     string
-	Protocol       string
-	IdempotencyKey string
-}
-
-// InstanceConsoleSessionRecord 表示一次 console 会话的连接信息。
-type InstanceConsoleSessionRecord struct {
-	SessionID  string
-	InstanceID string
-	Protocol   string
-	ConnectURL string
-	URL        string
-	ExpiresAt  time.Time
-	DevProfile DevProfileInfo
-}
-
 // InstanceLogStreamRequest 是流式日志查询请求。
 type InstanceLogStreamRequest struct {
 	TenantID   string
@@ -136,14 +97,12 @@ type InstanceLogStreamRequest struct {
 }
 
 // InstanceObservability exposes local/real runtime observations without
-// leaking Kubernetes, kubelet, Prometheus, or terminal provider SDK objects.
+// leaking Kubernetes, kubelet, or Prometheus provider SDK objects.
 type InstanceObservability interface {
 	ListLogs(ctx context.Context, request InstanceObservationListRequest) (InstanceLogListResult, error)
 	ListEvents(ctx context.Context, request InstanceObservationListRequest) (InstanceEventListResult, error)
 	GetMetrics(ctx context.Context, request InstanceObservationGetRequest) (InstanceMetricsRecord, error)
 	ListSecurityEvents(ctx context.Context, request InstanceObservationListRequest) (InstanceSecurityEventListResult, error)
-	CreateExecSession(ctx context.Context, request InstanceExecSessionCreateRequest) (InstanceExecSessionRecord, error)
-	CreateConsoleSession(ctx context.Context, request InstanceConsoleSessionCreateRequest) (InstanceConsoleSessionRecord, error)
 	// StreamLogs 先回放最近 Limit 条历史日志（时间正序），再持续增量推送新日志，
 	// 每条通过 sink 回调写出；sink 返回 error 表示下游断开，实现必须立即退出。
 	// ctx 取消（客户端断开）也应立即退出并返回 nil。

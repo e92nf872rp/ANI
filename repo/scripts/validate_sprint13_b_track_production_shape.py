@@ -193,7 +193,8 @@ REQUIRED_DEPLOYMENT_ENVS = {
     "VECTOR_STORE_COLLECTION_PREFIX",
     "INSTANCE_OBSERVABILITY_PROVIDER",
     "INSTANCE_OBSERVABILITY_PROMETHEUS_URL",
-    "INSTANCE_OBSERVABILITY_EXEC_BASE_URL",
+    "SESSION_GATEWAY_GRPC_ADDR",
+    "SESSION_GATEWAY_GRPC_TIMEOUT",
 }
 REQUIRED_PRODUCTION_READINESS_DOC_TOKENS = {
     "Auth/Dex production gate",
@@ -610,8 +611,10 @@ def validate_production_deployment_contract() -> None:
         fail("production Deployment INSTANCE_OBSERVABILITY_PROVIDER must be prometheus_kubernetes")
     if env_by_name.get("INSTANCE_OBSERVABILITY_PROMETHEUS_URL", {}).get("value") != "http://sprint13-prometheus.ani-s07-observability.svc.cluster.local:9090":
         fail("production Deployment INSTANCE_OBSERVABILITY_PROMETHEUS_URL must point at in-cluster Sprint 13 Prometheus")
-    if env_by_name.get("INSTANCE_OBSERVABILITY_EXEC_BASE_URL", {}).get("value") != "wss://ani-gateway.ani-system.svc.cluster.local:8080/api/v1":
-        fail("production Deployment INSTANCE_OBSERVABILITY_EXEC_BASE_URL must point at in-cluster Gateway API")
+    if env_by_name.get("SESSION_GATEWAY_GRPC_ADDR", {}).get("value") != "ani-session-gateway-grpc.ani-system.svc.cluster.local:9090":
+        fail("production Deployment SESSION_GATEWAY_GRPC_ADDR must point at the in-cluster Session Gateway control plane")
+    if env_by_name.get("SESSION_GATEWAY_GRPC_TIMEOUT", {}).get("value") != "5s":
+        fail("production Deployment SESSION_GATEWAY_GRPC_TIMEOUT must remain bounded at 5s")
     proxy_template = env_by_name.get("VCLUSTER_PROXY_SERVER_TEMPLATE", {}).get("value")
     kubeconfig_template = env_by_name.get("VCLUSTER_KUBECONFIG_SERVER_TEMPLATE", {}).get("value")
     if proxy_template != "https://{cluster_id}.{namespace}:443":

@@ -235,6 +235,7 @@
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
 | GATEWAY-INSTANCE-CREATE-REAL-K8S-PROVIDER-A | issue-011：Gateway 实例创建链路接入 real K8s provider；新增 `bootstrap.ConnectInstanceService` helper（连 DB→`NewCapabilitiesWithConfig(pool,nil,nil,cfg)`→返回 `caps.InstanceService`+close）让 Gateway 间接使用 real K8s provider 不违反组件边界守卫；新增 `instance_service_runtime.go` 按 `WORKLOAD_PROVIDER` env 切换（`""`/`local`→nil 回退 local 闭环，`kubernetes_rest`→调 `ConnectInstanceService`，其他→unsupported）；`router.RegisterOptions` 新增 `InstanceService` 字段；`demo_instances.go` 非 nil 时优先用注入的 real service（operations 仍用 local `LocalOperationStore`），nil 时回退 local 内存闭环；`main.go` 调用 `newGatewayInstanceService` 注入 `RegisterOptions.InstanceService` + `defer closeInstanceService()`；观测前置耦合自动解决（`instanceForObservation`→`api.service.Get` 从真实 DB 读取）；新增 9 个测试覆盖 env 切换 + 注入逻辑；不修改 OpenAPI `v1.yaml`；`make validate-architecture` 通过；真实 K8s 可见性需 live gate 验证 | gateway-instance-create-real-k8s-provider-a.md |
+| ANI-GW-1 | `LOCAL_VERIFIED`：固定 `api/v0.1.0` / `github.com/zhangzhe-ctrl/ani-session-gateway/api v0.1.0` / commit `d86a40d33369b128aabc680d4ea0b3f790ac0bb6`；拆分 `InstanceObservability` 与 `InstanceSessionIssuer`，real-provider exec/console 经内部 gRPC `CreateSession` 签发，缺失/非法/不可用时 503 fail-closed；REST 成功 schema 兼容，OpenAPI 只增加 console 可选幂等键和 409/422/429/500/503；fake/bufconn、race/vet、`make test`、契约/生成/架构/文档门禁全过；真实进程/数据面/集群 rollout 均 `not_verified`，未 commit/push/deploy | ANI-GW-1.md |
 
 ### GPU 调度功能流（2026-07）
 

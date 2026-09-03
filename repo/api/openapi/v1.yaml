@@ -1862,6 +1862,7 @@ components:
       type: object
       properties:
         protocol: { type: string, enum: [console, vnc, novnc, serial], default: "vnc" }
+        idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "可选；旧客户端省略时 Gateway 仅为本次 HTTP 请求生成内部键，不承诺跨 HTTP 重试重放。" }
 
     InstanceConsoleSession:
       type: object
@@ -5099,6 +5100,15 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+        "429": { $ref: '#/components/responses/RateLimitExceeded' }
+        "500":
+          description: Session Gateway 返回未预期错误
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
 
   /instances/{instance_id}/logs:
     get:
@@ -5226,6 +5236,15 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+        "429": { $ref: '#/components/responses/RateLimitExceeded' }
+        "500":
+          description: Session Gateway 返回未预期错误
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
 
   /instances/{instance_id}/security-events:
     get:

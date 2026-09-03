@@ -81,6 +81,7 @@ type instanceAPI struct {
 	service                       ports.WorkloadInstanceService
 	operations                    ports.WorkloadOperationStore
 	observability                 ports.InstanceObservability
+	sessions                      ports.InstanceSessionIssuer
 	observabilityUsesInstanceName bool
 	gpuInventory                  ports.GPUInventory
 	k8sClient                     *runtimeadapter.KubernetesRESTClient
@@ -273,7 +274,8 @@ type instanceLifecycleRequest struct {
 }
 
 type instanceConsoleRequest struct {
-	Protocol string `json:"protocol"`
+	Protocol       string `json:"protocol"`
+	IdempotencyKey string `json:"idempotency_key"`
 }
 
 type shellExecRequest struct {
@@ -669,10 +671,10 @@ type instanceTimelineStepResponse struct {
 }
 
 func newInstanceAPI() *instanceAPI {
-	return newInstanceAPIWithObservability(nil, false, nil, nil, nil, nil)
+	return newInstanceAPIWithObservability(nil, nil, false, nil, nil, nil, nil)
 }
 
-func newInstanceAPIWithObservability(observability ports.InstanceObservability, useInstanceName bool, gpuInventory ports.GPUInventory, k8sClient *runtimeadapter.KubernetesRESTClient, secrets ports.SecretService, specStore ports.GPUSpecStore) *instanceAPI {
+func newInstanceAPIWithObservability(observability ports.InstanceObservability, sessions ports.InstanceSessionIssuer, useInstanceName bool, gpuInventory ports.GPUInventory, k8sClient *runtimeadapter.KubernetesRESTClient, secrets ports.SecretService, specStore ports.GPUSpecStore) *instanceAPI {
 	store := newMemoryInstanceStore()
 	operations := runtimeadapter.NewLocalOperationStore()
 	identity := runtimeadapter.NewLocalWorkloadIdentityService()
@@ -759,12 +761,20 @@ func newInstanceAPIWithObservability(observability ports.InstanceObservability, 
 		serviceOpts...,
 	)
 	if observability == nil {
-		observability = runtimeadapter.NewLocalInstanceObservabilityService()
+		local := runtimeadapter.NewLocalInstanceObservabilityService()
+		observability = local
+		if sessions == nil {
+			sessions = local
+		}
+	}
+	if sessions == nil {
+		sessions = runtimeadapter.NewLocalInstanceObservabilityService()
 	}
 	return &instanceAPI{
 		service:                       service,
 		operations:                    operations,
 		observability:                 observability,
+		sessions:                      sessions,
 		observabilityUsesInstanceName: useInstanceName,
 		gpuInventory:                  gpuInventory,
 		k8sClient:                     k8sClient,
@@ -775,15 +785,15 @@ func newInstanceAPIWithObservability(observability ports.InstanceObservability, 
 }
 
 func registerInstancesWithObservability(v1 *route.RouterGroup, observability ports.InstanceObservability, useInstanceName bool, gpuInventory ports.GPUInventory, k8sClient *runtimeadapter.KubernetesRESTClient) ports.WorkloadInstanceService {
-	service, _ := registerInstancesWithRuntime(v1, observability, useInstanceName, gpuInventory, k8sClient, nil, nil, nil)
+	service, _ := registerInstancesWithRuntime(v1, observability, nil, useInstanceName, gpuInventory, k8sClient, nil, nil, nil)
 	return service
 }
 
 // registerInstancesWithRuntime registers the instance routes and returns the
 // instance service (used as InstanceLookup by the observability proxy) plus
 // the shared observeInstance entry used by the task API lazy sync.
-func registerInstancesWithRuntime(v1 *route.RouterGroup, observability ports.InstanceObservability, useInstanceName bool, gpuInventory ports.GPUInventory, k8sClient *runtimeadapter.KubernetesRESTClient, secrets ports.SecretService, runtime *InstanceRuntime, specStore ports.GPUSpecStore) (ports.WorkloadInstanceService, instanceObserver) {
-	api := newInstanceAPIWithObservability(observability, useInstanceName, gpuInventory, k8sClient, secrets, specStore)
+func registerInstancesWithRuntime(v1 *route.RouterGroup, observability ports.InstanceObservability, sessions ports.InstanceSessionIssuer, useInstanceName bool, gpuInventory ports.GPUInventory, k8sClient *runtimeadapter.KubernetesRESTClient, secrets ports.SecretService, runtime *InstanceRuntime, specStore ports.GPUSpecStore) (ports.WorkloadInstanceService, instanceObserver) {
+	api := newInstanceAPIWithObservability(observability, sessions, useInstanceName, gpuInventory, k8sClient, secrets, specStore)
 	if runtime != nil {
 		if runtime.Service == nil || runtime.Store == nil || runtime.Operations == nil {
 			panic("instance runtime requires service, store, and operations")
@@ -797,6 +807,9 @@ func registerInstancesWithRuntime(v1 *route.RouterGroup, observability ports.Ins
 		}
 		api.realProvider = runtime.RealProvider
 		api.providerName = strings.TrimSpace(runtime.Provider)
+		if runtime.RealProvider {
+			api.sessions = sessions
+		}
 	}
 	v1.GET("/instances", api.list)
 	v1.POST("/instances", api.create)
@@ -1940,7 +1953,7 @@ func (api *instanceAPI) getMetrics(ctx context.Context, c *app.RequestContext) {
 func (api *instanceAPI) createExecSession(ctx context.Context, c *app.RequestContext) {
 	record, err := api.instanceForObservation(ctx, c)
 	if err != nil {
-		writeInstanceObservabilityError(c, err)
+		writeInstanceSessionError(c, err)
 		return
 	}
 	var req createExecSessionRequest
@@ -1954,22 +1967,56 @@ func (api *instanceAPI) createExecSession(ctx context.Context, c *app.RequestCon
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
 		return
 	}
+	if record.Kind != ports.WorkloadKindContainer && record.Kind != ports.WorkloadKindGPUContainer && record.Kind != ports.WorkloadKindSandbox {
+		writeInstanceError(c, http.StatusBadRequest, "UNSUPPORTED", "exec session is only available for container, gpu_container, or sandbox instances")
+		return
+	}
+	if record.Status.State != ports.WorkloadStateRunning {
+		writeInstanceError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", "instance must be running to open an exec session")
+		return
+	}
+	command := append([]string(nil), req.Command...)
+	if len(command) == 0 {
+		command = []string{"/bin/sh"}
+	}
+	if !validExecCommand(command) {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "command must contain non-empty arguments")
+		return
+	}
+	rows, ok := sessionDimension(req.Rows, 24)
+	if !ok {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "rows must be between 1 and 4096")
+		return
+	}
+	cols, ok := sessionDimension(req.Cols, 80)
+	if !ok {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "cols must be between 1 and 4096")
+		return
+	}
 	tty := true
 	if req.TTY != nil {
 		tty = *req.TTY
 	}
-	result, err := api.observability.CreateExecSession(ctx, ports.InstanceExecSessionCreateRequest{
+	if api.sessions == nil {
+		writeInstanceSessionError(c, ports.ErrNotConfigured)
+		return
+	}
+	result, err := api.sessions.CreateExecSession(ctx, ports.InstanceExecSessionCreateRequest{
+		RequestID:      middleware.GetRequestID(c),
 		TenantID:       instanceTenantID(c),
-		InstanceID:     api.observabilityTargetID(record),
+		SubjectID:      instanceUserID(c),
+		InstanceID:     record.InstanceID,
+		WorkloadName:   record.Name,
+		WorkloadKind:   record.Kind,
 		IdempotencyKey: req.IdempotencyKey,
 		Container:      req.Container,
-		Command:        req.Command,
+		Command:        command,
 		TTY:            tty,
-		Rows:           maxInt(req.Rows, 24),
-		Cols:           maxInt(req.Cols, 80),
+		Rows:           rows,
+		Cols:           cols,
 	})
 	if err != nil {
-		writeInstanceObservabilityError(c, err)
+		writeInstanceSessionError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, instanceExecSessionFromRecord(result))
@@ -1978,7 +2025,7 @@ func (api *instanceAPI) createExecSession(ctx context.Context, c *app.RequestCon
 func (api *instanceAPI) createConsoleSession(ctx context.Context, c *app.RequestContext) {
 	record, err := api.instanceForObservation(ctx, c)
 	if err != nil {
-		writeInstanceObservabilityError(c, err)
+		writeInstanceSessionError(c, err)
 		return
 	}
 	if record.Kind != ports.WorkloadKindVM {
@@ -2004,13 +2051,26 @@ func (api *instanceAPI) createConsoleSession(ctx context.Context, c *app.Request
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "protocol must be one of console, vnc, novnc, serial")
 		return
 	}
-	result, err := api.observability.CreateConsoleSession(ctx, ports.InstanceConsoleSessionCreateRequest{
-		TenantID:   instanceTenantID(c),
-		InstanceID: api.observabilityTargetID(record),
-		Protocol:   protocol,
+	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
+	if idempotencyKey == "" {
+		idempotencyKey = uuid.NewString()
+	}
+	if api.sessions == nil {
+		writeInstanceSessionError(c, ports.ErrNotConfigured)
+		return
+	}
+	result, err := api.sessions.CreateConsoleSession(ctx, ports.InstanceConsoleSessionCreateRequest{
+		RequestID:      middleware.GetRequestID(c),
+		IdempotencyKey: idempotencyKey,
+		TenantID:       instanceTenantID(c),
+		SubjectID:      instanceUserID(c),
+		InstanceID:     record.InstanceID,
+		WorkloadName:   record.Name,
+		WorkloadKind:   record.Kind,
+		Protocol:       protocol,
 	})
 	if err != nil {
-		writeInstanceObservabilityError(c, err)
+		writeInstanceSessionError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, instanceConsoleSessionFromRecord(result))
@@ -3741,6 +3801,28 @@ func isValidConsoleProtocol(protocol string) bool {
 	}
 }
 
+func validExecCommand(command []string) bool {
+	if len(command) == 0 || len(command) > 128 {
+		return false
+	}
+	for _, argument := range command {
+		if strings.TrimSpace(argument) == "" || len(argument) > 4096 {
+			return false
+		}
+	}
+	return true
+}
+
+func sessionDimension(value, fallback int) (int, bool) {
+	if value == 0 {
+		return fallback, true
+	}
+	if value < 1 || value > 4096 {
+		return 0, false
+	}
+	return value, true
+}
+
 func instanceTenantID(c *app.RequestContext) string {
 	if tenantID := middleware.GetTenantID(c); tenantID != "" {
 		return tenantID
@@ -3818,6 +3900,27 @@ func writeInstanceObservabilityError(c *app.RequestContext, err error) {
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	default:
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+	}
+}
+
+func writeInstanceSessionError(c *app.RequestContext, err error) {
+	switch {
+	case errors.Is(err, ports.ErrInvalid):
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid session request")
+	case errors.Is(err, ports.ErrInvalidCredentials):
+		writeInstanceError(c, http.StatusForbidden, "FORBIDDEN", "session request denied")
+	case errors.Is(err, ports.ErrNotFound):
+		writeInstanceError(c, http.StatusNotFound, "INSTANCE_NOT_FOUND", "session target not found")
+	case errors.Is(err, ports.ErrConflict):
+		writeInstanceError(c, http.StatusConflict, "CONFLICT", "session request conflicts with an existing request")
+	case errors.Is(err, ports.ErrFailedPrecondition):
+		writeInstanceError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", "session precondition failed")
+	case errors.Is(err, ports.ErrSessionCapacity):
+		writeInstanceError(c, http.StatusTooManyRequests, "CAPACITY_EXHAUSTED", "session capacity exhausted")
+	case errors.Is(err, ports.ErrNotConfigured), errors.Is(err, ports.ErrUnavailable):
+		writeInstanceError(c, http.StatusServiceUnavailable, "DEPENDENCY_UNAVAILABLE", "session gateway is unavailable")
+	default:
+		writeInstanceError(c, http.StatusInternalServerError, "INTERNAL", "session creation failed")
 	}
 }
 
