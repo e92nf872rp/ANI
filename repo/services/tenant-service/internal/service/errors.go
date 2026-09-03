@@ -39,6 +39,18 @@ func mapStoreError(err error) error {
 		return businessError(codes.FailedPrecondition, ports.ErrPlanNotActive, "tenant plan is not active")
 	case errors.Is(err, ports.ErrTenantStateInvalid):
 		return businessError(codes.FailedPrecondition, ports.ErrTenantStateInvalid, "tenant state does not allow this operation")
+	case errors.Is(err, ports.ErrTenantNameConflict):
+		return businessError(codes.AlreadyExists, ports.ErrTenantNameConflict, "tenant name already exists")
+	case errors.Is(err, ports.ErrTenantHasRunningResources):
+		return businessError(codes.FailedPrecondition, ports.ErrTenantHasRunningResources, "tenant has running resources")
+	case errors.Is(err, ports.ErrTenantSsoConfigInvalid):
+		return businessError(codes.FailedPrecondition, ports.ErrTenantSsoConfigInvalid, "sso enabled requires provider")
+	case errors.Is(err, ports.ErrQuotaChangeRequestInvalid):
+		return businessError(codes.FailedPrecondition, ports.ErrQuotaChangeRequestInvalid, "quota change request invalid")
+	case errors.Is(err, ports.ErrQuotaChangeRequestNotPending):
+		return businessError(codes.FailedPrecondition, ports.ErrQuotaChangeRequestNotPending, "quota change request is not pending")
+	case errors.Is(err, ports.ErrQuotaChangeRequestNotFound):
+		return businessError(codes.NotFound, ports.ErrQuotaChangeRequestNotFound, "quota change request not found")
 	case errors.Is(err, ports.ErrUserStateInvalid):
 		return businessError(codes.FailedPrecondition, ports.ErrUserStateInvalid, "user state does not allow this operation")
 	case errors.Is(err, ports.ErrValidationFailed):

@@ -314,3 +314,68 @@ func Test_BindPlanQuota_ApprovedSkip(t *testing.T) {
 		t.Fatalf("tightened=%v (want int 0)", audit.logs[0].Details["tightened"])
 	}
 }
+
+func TestTenantService_GetTenantDetail_MinimalClosedLoop(t *testing.T) {
+	tenantID := uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc")
+	planID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	tenants := &fakeTenantClient{
+		tenant: ports.Tenant{
+			ID: tenantID, Name: "acme", DisplayName: "ACME",
+			Status: ports.TenantStatusActive, PlanID: planID,
+			ContactEmail: "ops@acme.io",
+		},
+	}
+	svc := NewTenantService(nil, tenants, nil, nil, nil, nil, nil, nil, nil)
+
+	res, err := svc.GetTenantDetail(context.Background(), &tenantv1.GetTenantDetailRequest{TenantId: tenantID.String()})
+	if err != nil {
+		t.Fatalf("GetTenantDetail: %v", err)
+	}
+	if res.GetId() != tenantID.String() || res.GetName() != "acme" || res.GetPlanId() != planID.String() {
+		t.Fatalf("detail=%+v", res)
+	}
+	if res.GetContactEmail() == nil || res.GetContactEmail().GetValue() != "ops@acme.io" {
+		t.Fatalf("contact_email=%v", res.GetContactEmail())
+	}
+	if res.GetPlanCode() != "" || res.GetUserCount() != 0 {
+		t.Fatalf("minimal detail should omit plan_code/user_count, got plan_code=%q user_count=%d", res.GetPlanCode(), res.GetUserCount())
+	}
+}
+
+func TestTenantService_GetTenantDetail_NotFound(t *testing.T) {
+	svc := NewTenantService(nil, &fakeTenantClient{}, nil, nil, nil, nil, nil, nil, nil)
+	_, err := svc.GetTenantDetail(context.Background(), &tenantv1.GetTenantDetailRequest{
+		TenantId: uuid.NewString(),
+	})
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("code=%v err=%v", status.Code(err), err)
+	}
+	if !strings.HasPrefix(status.Convert(err).Message(), "TENANT_NOT_FOUND") {
+		t.Fatalf("msg=%q", status.Convert(err).Message())
+	}
+}
+
+func TestMapStoreError_TenantListCodes(t *testing.T) {
+	cases := []struct {
+		err  error
+		code codes.Code
+		msg  string
+	}{
+		{ports.ErrTenantNameConflict, codes.AlreadyExists, "TENANT_NAME_CONFLICT"},
+		{ports.ErrTenantHasRunningResources, codes.FailedPrecondition, "TENANT_HAS_RUNNING_RESOURCES"},
+		{ports.ErrTenantSsoConfigInvalid, codes.FailedPrecondition, "TENANT_SSO_CONFIG_INVALID"},
+		{ports.ErrQuotaChangeRequestInvalid, codes.FailedPrecondition, "QUOTA_CHANGE_REQUEST_INVALID"},
+		{ports.ErrQuotaChangeRequestNotPending, codes.FailedPrecondition, "QUOTA_CHANGE_REQUEST_NOT_PENDING"},
+		{ports.ErrQuotaChangeRequestNotFound, codes.NotFound, "QUOTA_CHANGE_REQUEST_NOT_FOUND"},
+		{ports.ErrNotImplemented, codes.Unimplemented, "NOT_IMPLEMENTED"},
+	}
+	for _, tc := range cases {
+		mapped := mapStoreError(tc.err)
+		if status.Code(mapped) != tc.code {
+			t.Fatalf("%v: code=%v want %v", tc.err, status.Code(mapped), tc.code)
+		}
+		if !strings.HasPrefix(status.Convert(mapped).Message(), tc.msg) {
+			t.Fatalf("%v: msg=%q want prefix %q", tc.err, status.Convert(mapped).Message(), tc.msg)
+		}
+	}
+}

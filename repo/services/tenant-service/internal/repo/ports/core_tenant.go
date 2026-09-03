@@ -13,9 +13,10 @@ import (
 //	PUT  /api/v1/admin/tenants/{tenant_id}
 //	POST /api/v1/admin/tenants/{tenant_id}/freeze|unfreeze|disable
 //	GET/PUT /api/v1/admin/tenants/{tenant_id}/auth
+//	GET  /api/v1/admin/tenants/{tenant_id}/lifecycle
 //
 // 实现：services/tenant-service/internal/repo/adapters/core（封装 Core Go SDK anisdk.Client）。
-// 租户生命周期与配额变更申请查询/持久化归属 TenantStore（见 tenant_store.go），不经本客户端。
+// 配额变更申请查询/持久化归属 TenantStore（见 tenant_store.go），不经本客户端。
 
 // CreateTenantInput 是 Core POST /admin/tenants 请求体（密码已 bcrypt）。
 type CreateTenantInput struct {
@@ -48,6 +49,30 @@ type TenantAuthPatch struct {
 	SsoEnabled  *bool
 	SsoProvider *string
 	MfaRequired *bool
+}
+
+// TenantLifecycleEntry 是 Core tenant_lifecycle 记录（GET /admin/tenants/{id}/lifecycle）。
+type TenantLifecycleEntry struct {
+	ID        uuid.UUID
+	TenantID  uuid.UUID
+	Action    string // create | freeze | unfreeze | disable
+	Reason    *string
+	UserID    *uuid.UUID
+	RequestID *string
+	CreatedAt time.Time
+}
+
+// TenantLifecycleFilter 过滤 Core GET /admin/tenants/{id}/lifecycle。
+type TenantLifecycleFilter struct {
+	Limit  int
+	Cursor string
+	Action string
+}
+
+// TenantLifecycleListResult 是生命周期游标分页结果。
+type TenantLifecycleListResult struct {
+	Items      []TenantLifecycleEntry
+	NextCursor string
 }
 
 // TenantListItem 是 Core GET /admin/tenants 列表项。
@@ -109,4 +134,8 @@ type TenantSvcClient interface {
 
 	// UpdateTenantAuth 更新认证配置（Core PUT /admin/tenants/{id}/auth）。
 	UpdateTenantAuth(ctx context.Context, tenantID uuid.UUID, patch TenantAuthPatch) (TenantAuth, error)
+
+	// ListTenantLifecycle 查询租户生命周期（Core GET /admin/tenants/{id}/lifecycle）。
+	// action 空串表示不过滤。
+	ListTenantLifecycle(ctx context.Context, tenantID uuid.UUID, filter TenantLifecycleFilter) (TenantLifecycleListResult, error)
 }

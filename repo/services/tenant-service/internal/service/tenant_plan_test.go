@@ -345,6 +345,10 @@ func (f *fakeTenantClient) UpdateTenantAuth(context.Context, uuid.UUID, ports.Te
 	panic("unused in tenant plan tests")
 }
 
+func (f *fakeTenantClient) ListTenantLifecycle(context.Context, uuid.UUID, ports.TenantLifecycleFilter) (ports.TenantLifecycleListResult, error) {
+	panic("unused in tenant plan tests")
+}
+
 func (f *fakeTenantClient) UpdateTenantPlan(_ context.Context, id uuid.UUID, planID uuid.UUID) (ports.Tenant, error) {
 	f.updateCalls++
 	if f.tenant.ID == uuid.Nil || f.tenant.ID != id {

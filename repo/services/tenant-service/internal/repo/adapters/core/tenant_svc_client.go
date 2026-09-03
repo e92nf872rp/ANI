@@ -103,6 +103,10 @@ func (c *TenantSvcClient) UpdateTenantAuth(context.Context, uuid.UUID, ports.Ten
 	return ports.TenantAuth{}, ports.ErrNotImplemented
 }
 
+func (c *TenantSvcClient) ListTenantLifecycle(context.Context, uuid.UUID, ports.TenantLifecycleFilter) (ports.TenantLifecycleListResult, error) {
+	return ports.TenantLifecycleListResult{}, ports.ErrNotImplemented
+}
+
 func decodeTenant(raw any) (ports.Tenant, error) {
 	obj, err := asObject(raw)
 	if err != nil {
@@ -116,15 +120,23 @@ func decodeTenant(raw any) (ports.Tenant, error) {
 	if err != nil {
 		return ports.Tenant{}, fmt.Errorf("%w: plan_id: %v", ports.ErrCoreUnavailable, err)
 	}
-	return ports.Tenant{
-		ID:          id,
-		Name:        stringField(obj, "name"),
-		DisplayName: stringField(obj, "display_name"),
-		Status:      ports.TenantStatus(stringField(obj, "status")),
-		PlanID:      planID,
-		CreatedAt:   parseTimeField(obj, "created_at"),
-		UpdatedAt:   parseTimeField(obj, "updated_at"),
-	}, nil
+	out := ports.Tenant{
+		ID:           id,
+		Name:         stringField(obj, "name"),
+		DisplayName:  stringField(obj, "display_name"),
+		ContactEmail: stringField(obj, "contact_email"),
+		Status:       ports.TenantStatus(stringField(obj, "status")),
+		PlanID:       planID,
+		CreatedAt:    parseTimeField(obj, "created_at"),
+		UpdatedAt:    parseTimeField(obj, "updated_at"),
+	}
+	if t := parseTimeField(obj, "frozen_at"); !t.IsZero() {
+		out.FrozenAt = &t
+	}
+	if t := parseTimeField(obj, "disabled_at"); !t.IsZero() {
+		out.DisabledAt = &t
+	}
+	return out, nil
 }
 
 func parseTimeField(m map[string]any, key string) time.Time {

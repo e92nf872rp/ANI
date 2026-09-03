@@ -9,7 +9,7 @@ import (
 )
 
 // PostgresTenantStore 是 TenantStore 的 PostgreSQL 适配器。
-// 操作 tenant_lifecycle / tenant_quota_change；不直接读写 tenants / tenant_auth。
+// 操作 tenant_quota_change；不直接读写 tenants / tenant_auth / tenant_lifecycle。
 type PostgresTenantStore struct {
 	db *pgxpool.Pool
 }
@@ -19,10 +19,6 @@ var _ ports.TenantStore = (*PostgresTenantStore)(nil)
 // NewPostgresTenantStore 构造租户本地表存储。
 func NewPostgresTenantStore(db *pgxpool.Pool) ports.TenantStore {
 	return &PostgresTenantStore{db: db}
-}
-
-func (s *PostgresTenantStore) ListLifecycle(context.Context, uuid.UUID, ports.TenantLifecycleFilter) (ports.TenantLifecycleListResult, error) {
-	return ports.TenantLifecycleListResult{}, ports.ErrNotImplemented
 }
 
 func (s *PostgresTenantStore) UpsertPendingQuotaChanges(context.Context, uuid.UUID, []ports.QuotaChangePendingInput) error {

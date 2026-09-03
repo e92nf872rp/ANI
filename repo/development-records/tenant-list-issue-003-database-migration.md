@@ -139,5 +139,5 @@ make db-migrate-dry-run
 | Issue | 依赖本迁移 |
 |---|---|
 | Core TenantService 实现（create/状态机/auth） | 需要 tenant_auth / tenant_lifecycle / 新列 |
-| tenant-service `TenantStore.ListLifecycle` | 直读 `tenant_lifecycle`（Issue-002 已定；存量已有 create 行） |
+| tenant-service `TenantSvcClient.ListTenantLifecycle` | 经 Core SDK 读 `tenant_lifecycle`（存量已有 create 行） |
 | Gateway / 业务 API | 无直接依赖本 SQL；依赖表存在 |

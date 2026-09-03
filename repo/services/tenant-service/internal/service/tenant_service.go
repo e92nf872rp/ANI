@@ -4,12 +4,14 @@ import (
 	"context"
 	"strings"
 
-	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 	"github.com/google/uuid"
+	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 	tenantv1 "github.com/kubercloud/ani/pkg/generated/pb/tenant/v1"
 	"github.com/kubercloud/ani/services/tenant-service/internal/repo/ports"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // TenantService 是租户域 gRPC 服务：套餐绑定（BindPlanQuota）与租户列表生命周期 RPC。
@@ -232,10 +234,39 @@ func (s *TenantService) ListTenants(ctx context.Context, req *tenantv1.ListTenan
 	return nil, tenantRPCNotImplemented()
 }
 
+// GetTenantDetail 经 Core GetTenant 返回最小租户详情（plan_code / 计数等后续 Issue 补齐）。
 func (s *TenantService) GetTenantDetail(ctx context.Context, req *tenantv1.GetTenantDetailRequest) (*tenantv1.TenantDetail, error) {
-	_ = ctx
-	_ = req
-	return nil, tenantRPCNotImplemented()
+	rawID := ""
+	if req != nil {
+		rawID = req.GetTenantId()
+	}
+	tenantID, err := parseTenantID(rawID)
+	if err != nil {
+		return nil, err
+	}
+	t, err := s.tenants.GetTenant(ctx, tenantID)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	out := &tenantv1.TenantDetail{
+		Id:          t.ID.String(),
+		Name:        t.Name,
+		DisplayName: t.DisplayName,
+		PlanId:      t.PlanID.String(),
+		Status:      string(t.Status),
+		CreatedAt:   timestamppb.New(t.CreatedAt.UTC()),
+		UpdatedAt:   timestamppb.New(t.UpdatedAt.UTC()),
+	}
+	if strings.TrimSpace(t.ContactEmail) != "" {
+		out.ContactEmail = wrapperspb.String(t.ContactEmail)
+	}
+	if t.FrozenAt != nil {
+		out.FrozenAt = timestamppb.New(t.FrozenAt.UTC())
+	}
+	if t.DisabledAt != nil {
+		out.DisabledAt = timestamppb.New(t.DisabledAt.UTC())
+	}
+	return out, nil
 }
 
 func (s *TenantService) UpdateTenant(ctx context.Context, req *tenantv1.UpdateTenantRequest) (*commonv1.IdempotentResult, error) {
