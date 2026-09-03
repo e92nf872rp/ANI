@@ -1186,6 +1186,12 @@ func (api *instanceAPI) refreshOneVMStoreStatus(ctx context.Context, record *por
 			break
 		}
 	}
+	// Persist the merged node/ip back so list (which re-reads from the store)
+	// surfaces the same values as detail instead of dropping the in-place
+	// mutation, mirroring refreshOneStoreStatus.
+	if api.store != nil {
+		_ = api.store.UpsertStatus(ctx, *record)
+	}
 }
 
 // observeInstance is the lazy-sync observation entry shared with the task
