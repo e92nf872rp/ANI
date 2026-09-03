@@ -824,7 +824,7 @@ func vmDisks(spec ports.WorkloadSpec) []any {
 			"disk": map[string]any{"bus": "virtio"},
 		})
 	}
-	if spec.VM != nil && (strings.TrimSpace(spec.VM.CloudInitSecret) != "" || strings.TrimSpace(spec.VM.UserData) != "") {
+	if vmCloudInitEnabled(spec) {
 		disks = append(disks, map[string]any{
 			"name": "cloudinitdisk",
 			"disk": map[string]any{"bus": "virtio"},
@@ -842,6 +842,15 @@ func vmDisks(spec ports.WorkloadSpec) []any {
 	return disks
 }
 
+func vmCloudInitEnabled(spec ports.WorkloadSpec) bool {
+	if spec.VM == nil {
+		return false
+	}
+	return strings.TrimSpace(spec.VM.CloudInitSecret) != "" ||
+		strings.TrimSpace(spec.VM.PasswordSecret) != "" ||
+		strings.TrimSpace(spec.VM.UserData) != ""
+}
+
 func vmCloudInitVolume(spec ports.WorkloadSpec) map[string]any {
 	if spec.VM == nil {
 		return nil
@@ -849,6 +858,10 @@ func vmCloudInitVolume(spec ports.WorkloadSpec) map[string]any {
 	cloudInit := map[string]any{}
 	if secretID := strings.TrimSpace(spec.VM.CloudInitSecret); secretID != "" {
 		cloudInit["secretRef"] = map[string]any{"name": secretID}
+	} else if passSecret := strings.TrimSpace(spec.VM.PasswordSecret); passSecret != "" {
+		// password_secret_ref 与 cloud_init_secret 互斥（Gateway 校验），
+		// 二者都指向含 userdata 键的 cloud-init Secret。
+		cloudInit["secretRef"] = map[string]any{"name": passSecret}
 	}
 	if userData := strings.TrimSpace(spec.VM.UserData); userData != "" {
 		cloudInit["userData"] = userData

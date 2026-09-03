@@ -123,6 +123,18 @@ func TestInstanceSpecFromRequestMapsSecretBindings(t *testing.T) {
 	}
 }
 
+func TestValidateCreateInstanceConfigsRejectsCloudInitAndPasswordSecretRef(t *testing.T) {
+	req := createInstanceRequest{
+		VMConfig: &vmConfigRequest{
+			CloudInitSecret:   "ci-secret",
+			PasswordSecretRef: "pw-secret",
+		},
+	}
+	if err := validateCreateInstanceConfigs(req, ports.WorkloadKindVM); err == nil {
+		t.Fatal("expected mutually-exclusive error, got nil")
+	}
+}
+
 func TestInstanceSpecFromRequestMapsProviderNeutralContainerConfig(t *testing.T) {
 	envValue := "plain"
 	spec, err := instanceSpecFromRequest(createInstanceRequest{

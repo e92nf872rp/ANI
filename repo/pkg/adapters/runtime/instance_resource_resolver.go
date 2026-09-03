@@ -131,7 +131,7 @@ func (r *LocalInstanceResourceResolver) ResolveCreate(ctx context.Context, reque
 				secretIDs = append(secretIDs, secretRef)
 			}
 		}
-		resolvedRefs, err := r.resolveSecrets(ctx, request.TenantID, secretIDs)
+		resolvedRefs, err := r.resolveSecrets(ctx, request.TenantID, secretIDs, nil)
 		if err != nil {
 			return ports.WorkloadResourceResolveResult{}, err
 		}
@@ -143,7 +143,10 @@ func (r *LocalInstanceResourceResolver) ResolveCreate(ctx context.Context, reque
 			spec.VM.PasswordSecret,
 			spec.VM.CloudInitSecret,
 		}
-		resolvedRefs, err := r.resolveSecrets(ctx, request.TenantID, secretIDs)
+		resolvedRefs, err := r.resolveSecrets(ctx, request.TenantID, secretIDs, map[string]struct{}{
+			spec.VM.PasswordSecret:  {},
+			spec.VM.CloudInitSecret: {},
+		})
 		if err != nil {
 			return ports.WorkloadResourceResolveResult{}, err
 		}
@@ -456,7 +459,7 @@ func upsertResolvedStorageAttachment(items []ports.WorkloadStorageAttachment, ne
 	return append(items, next)
 }
 
-func (r *LocalInstanceResourceResolver) resolveSecrets(ctx context.Context, tenantID string, secretIDs []string) ([]string, error) {
+func (r *LocalInstanceResourceResolver) resolveSecrets(ctx context.Context, tenantID string, secretIDs []string, cloudInitSecretIDs map[string]struct{}) ([]string, error) {
 	refs := make([]string, 0)
 	seen := map[string]struct{}{}
 	for _, secretID := range secretIDs {
@@ -474,10 +477,22 @@ func (r *LocalInstanceResourceResolver) resolveSecrets(ctx context.Context, tena
 		if secret.State != "active" {
 			return nil, fmt.Errorf("%w: instance secret %q is %s", ports.ErrConflict, secretID, secret.State)
 		}
+		if _, isCloudInit := cloudInitSecretIDs[secretID]; isCloudInit && !secretHasKey(secret.Keys, "userdata") {
+			return nil, fmt.Errorf("%w: cloud-init secret %q must contain a %q key (value: #cloud-config)", ports.ErrConflict, secretID, "userdata")
+		}
 		seen[secretID] = struct{}{}
 		refs = append(refs, "secret/"+secret.SecretID)
 	}
 	return refs, nil
+}
+
+func secretHasKey(keys []string, want string) bool {
+	for _, k := range keys {
+		if k == want {
+			return true
+		}
+	}
+	return false
 }
 
 var _ ports.WorkloadInstanceResourceResolver = (*LocalInstanceResourceResolver)(nil)

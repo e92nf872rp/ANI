@@ -1307,7 +1307,8 @@ components:
         boot_image:          { type: string, nullable: true, deprecated: true, description: "兼容字段；优先使用 CreateInstanceRequest.image_id。" }
         ssh_username:        { type: string, nullable: true, default: "ubuntu", description: "VM SSH 用户名" }
         ssh_key_ref:         { type: string, nullable: true, description: "VM SSH key/secret 引用；不包含私钥内容" }
-        password_secret_ref: { type: string, nullable: true, description: "登录密码 Secret 引用；不返回明文。" }
+        password_secret_ref: { type: string, nullable: true, description: "登录密码 cloud-init Secret 引用；Secret 需含 userdata 键（值为 #cloud-config，设置 users/plain_text_passwd 或 chpasswd）。与 cloud_init_secret 互斥；不返回明文。" }
+        cloud_init_secret:   { type: string, nullable: true, description: "cloud-init user-data Secret 引用；Secret 需含 userdata 键（值为 #cloud-config）。与 password_secret_ref 互斥。" }
         user_data:           { type: string, nullable: true, description: "cloud-init user data；不得包含长期明文凭据。" }
         system_disk:
           $ref: '#/components/schemas/InstanceDiskSpec'

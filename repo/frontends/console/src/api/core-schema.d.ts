@@ -4537,8 +4537,10 @@ export interface components {
             ssh_username: string | null;
             /** @description VM SSH key/secret 引用；不包含私钥内容 */
             ssh_key_ref?: string | null;
-            /** @description 登录密码 Secret 引用；不返回明文。 */
+            /** @description 登录密码 cloud-init Secret 引用；Secret 需含 userdata 键（值为 #cloud-config，设置 users/plain_text_passwd 或 chpasswd）。与 cloud_init_secret 互斥；不返回明文。 */
             password_secret_ref?: string | null;
+            /** @description cloud-init user-data Secret 引用；Secret 需含 userdata 键（值为 #cloud-config）。与 password_secret_ref 互斥。 */
+            cloud_init_secret?: string | null;
             /** @description cloud-init user data；不得包含长期明文凭据。 */
             user_data?: string | null;
             system_disk?: components["schemas"]["InstanceDiskSpec"];

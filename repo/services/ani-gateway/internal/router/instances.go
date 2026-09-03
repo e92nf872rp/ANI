@@ -3343,6 +3343,13 @@ func validateCreateInstanceConfigs(req createInstanceRequest, kind ports.Workloa
 			return fmt.Errorf("%s is only valid when kind=%s", cfg.name, cfg.allowedFor)
 		}
 	}
+	// vm_config: cloud_init_secret 与 password_secret_ref 都指向含 userdata 键的
+	// cloud-init Secret，二者互斥，避免 secretRef 二选一歧义。
+	if req.VMConfig != nil &&
+		strings.TrimSpace(req.VMConfig.CloudInitSecret) != "" &&
+		strings.TrimSpace(req.VMConfig.PasswordSecretRef) != "" {
+		return fmt.Errorf("vm_config.cloud_init_secret and vm_config.password_secret_ref are mutually exclusive")
+	}
 	return nil
 }
 
