@@ -155,8 +155,6 @@ type fakeTenantAdminStore struct {
 	invitations []ports.TenantAdminInvitation
 	insertCalls int
 	updateCalls int
-	auditItems  []ports.AuditLogListItem
-	auditErr    error
 }
 
 func (f *fakeTenantAdminStore) HasPendingInvitation(context.Context, uuid.UUID, uuid.UUID) (bool, error) {
@@ -312,41 +310,6 @@ func invitationFlagFromLatest(inv ports.TenantAdminInvitation) ports.InvitationF
 		out.IsExpired = true
 	}
 	return out
-}
-func (f *fakeTenantAdminStore) ListAuditLogs(_ context.Context, tenantID, userID uuid.UUID, filter ports.TenantAdminAuditLogFilter) (ports.TenantAdminAuditLogListResult, error) {
-	if f.auditErr != nil {
-		return ports.TenantAdminAuditLogListResult{}, f.auditErr
-	}
-	limit := filter.Limit
-	if limit <= 0 {
-		limit = 20
-	}
-	if limit > 100 {
-		limit = 100
-	}
-	matched := make([]ports.AuditLogListItem, 0, len(f.auditItems))
-	for _, it := range f.auditItems {
-		target, _ := it.Details["target_id"].(string)
-		if target != userID.String() {
-			continue
-		}
-		if tid, ok := it.Details["tenant_id"].(string); ok && tid != "" && tid != tenantID.String() {
-			continue
-		}
-		if action := strings.TrimSpace(filter.Action); action != "" && it.Action != action {
-			continue
-		}
-		if result := strings.TrimSpace(filter.Result); result != "" && it.Result != result {
-			continue
-		}
-		matched = append(matched, it)
-	}
-	next := ""
-	if len(matched) > limit {
-		next = "next"
-		matched = matched[:limit]
-	}
-	return ports.TenantAdminAuditLogListResult{Items: matched, NextCursor: next}, nil
 }
 
 func TestTenantAdminService_ListAvailableTenants(t *testing.T) {
@@ -1468,22 +1431,23 @@ func TestTenantAdminService_ListAuditLogs(t *testing.T) {
 
 	t.Run("list_and_filter", func(t *testing.T) {
 		t.Parallel()
-		store := &fakeTenantAdminStore{
-			auditItems: []ports.AuditLogListItem{
+		tid := tenantID
+		audit := &fakeAuditStore{
+			logs: []ports.AuditLog{
 				{
 					ID: logID, Action: "tenant_admin.invite", Resource: "tenant_admin",
-					Result: "success", UserID: &actorID, CreatedAt: now,
+					Result: "success", UserID: &actorID, TenantID: &tid, CreatedAt: now,
 					Details: map[string]any{"target_id": userID.String(), "tenant_id": tenantID.String()},
 				},
 				{
 					ID:     uuid.MustParse("55555555-5555-4555-8555-555555555555"),
 					Action: "tenant_admin.disable", Resource: "tenant_admin",
-					Result: "failure", UserID: &actorID, CreatedAt: now.Add(-time.Minute),
+					Result: "failure", UserID: &actorID, TenantID: &tid, CreatedAt: now.Add(-time.Minute),
 					Details: map[string]any{"target_id": userID.String(), "tenant_id": tenantID.String()},
 				},
 			},
 		}
-		svc := NewTenantAdminService(nil, nil, store, nil)
+		svc := NewTenantAdminService(nil, nil, nil, audit)
 		res, err := svc.ListTenantAdminAuditLogs(context.Background(), &tenantv1.ListTenantAdminAuditLogsRequest{
 			TenantId: tenantID.String(), UserId: userID.String(),
 			Page: &commonv1.CursorPageRequest{Limit: 20},
@@ -1537,10 +1501,8 @@ func TestTenantAdminService_ListAuditLogs(t *testing.T) {
 		if target != userID.String() {
 			t.Fatalf("target_id=%q", target)
 		}
-		store.auditItems = []ports.AuditLogListItem{{
-			ID: uuid.New(), Action: audit.logs[0].Action, Resource: audit.logs[0].Resource,
-			Result: audit.logs[0].Result, Details: audit.logs[0].Details, CreatedAt: now,
-		}}
+		audit.logs[0].ID = uuid.New()
+		audit.logs[0].CreatedAt = now
 		listed, err := svc.ListTenantAdminAuditLogs(context.Background(), &tenantv1.ListTenantAdminAuditLogsRequest{
 			TenantId: tenantID.String(), UserId: userID.String(),
 		})

@@ -56,7 +56,7 @@ type AuditLogListResult struct {
 // AuditStore 定义 tenant-service 侧 audit_logs 读写（复用分区表）。
 // 实现：services/tenant-service/internal/repo/adapters/postgres/audit_store.go。
 //
-// Create 供各业务域写入；List* 按不同维度查询（套餐 plan_id / 租户 tenant_id）。
+// Create 供各业务域写入；List* 按不同维度查询（套餐 plan_id / 租户 tenant_id / 管理员 target_id）。
 type AuditStore interface {
 	// Create 写入一条审计日志并返回其 ID。
 	// 调用方（service 层）负责构造完整的 AuditLog（含 action/resource/details）。
@@ -69,4 +69,9 @@ type AuditStore interface {
 	// ListTenantAuditLogs 按 tenant_id 查询租户操作历史，游标分页。
 	// 用于 GET /tenants/{tenantId}/audit-logs（US-016）。
 	ListTenantAuditLogs(ctx context.Context, tenantID uuid.UUID, filter TenantAuditLogFilter) (AuditLogListResult, error)
+
+	// ListTenantAdminAuditLogs 按 tenant_id + details->>'target_id' 查询管理员操作历史，
+	// 游标分页。resource 固定 tenant_admin。
+	// 用于 GET /tenants/{tenantId}/admins/{userId}/audit-logs。
+	ListTenantAdminAuditLogs(ctx context.Context, tenantID, userID uuid.UUID, filter TenantAuditLogFilter) (AuditLogListResult, error)
 }

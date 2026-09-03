@@ -1006,8 +1006,8 @@ func (s *TenantAdminService) DeleteTenantAdmin(ctx context.Context, req *tenantv
 // 只读、无审计；按 tenant_id + details.target_id 游标分页；不调 Core。
 func (s *TenantAdminService) ListTenantAdminAuditLogs(ctx context.Context, req *tenantv1.ListTenantAdminAuditLogsRequest) (*tenantv1.ListTenantAdminAuditLogsResponse, error) {
 	// 步骤 1：校验依赖
-	if s.store == nil {
-		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant admin store unavailable")
+	if s.audit == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "audit store unavailable")
 	}
 	if req == nil {
 		req = &tenantv1.ListTenantAdminAuditLogsRequest{}
@@ -1036,8 +1036,8 @@ func (s *TenantAdminService) ListTenantAdminAuditLogs(ctx context.Context, req *
 		cursor = page.GetCursor()
 	}
 
-	// 步骤 4：查 audit_logs（目标管理员 = details.target_id）
-	listed, err := s.store.ListAuditLogs(ctx, tenantID, userID, ports.TenantAdminAuditLogFilter{
+	// 步骤 4：经 AuditStore 查 audit_logs（目标管理员 = details.target_id）
+	listed, err := s.audit.ListTenantAdminAuditLogs(ctx, tenantID, userID, ports.TenantAuditLogFilter{
 		Limit:  limit,
 		Cursor: cursor,
 		Action: strings.TrimSpace(req.GetAction()),
@@ -1063,7 +1063,7 @@ func (s *TenantAdminService) ListTenantAdminAuditLogs(ctx context.Context, req *
 }
 
 // tenantAdminAuditLogToPB 把管理员审计领域对象映射为 gRPC TenantAdminAuditLog。
-func tenantAdminAuditLogToPB(log ports.AuditLogListItem) (*tenantv1.TenantAdminAuditLog, error) {
+func tenantAdminAuditLogToPB(log ports.AuditLog) (*tenantv1.TenantAdminAuditLog, error) {
 	details := log.Details
 	if details == nil {
 		details = map[string]any{}

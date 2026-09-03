@@ -161,3 +161,93 @@ func (s *PostgresAuditStore) ListPlanAuditLogs(ctx context.Context, planID uuid.
 func (s *PostgresAuditStore) ListTenantAuditLogs(context.Context, uuid.UUID, ports.TenantAuditLogFilter) (ports.AuditLogListResult, error) {
 	return ports.AuditLogListResult{}, ports.ErrNotImplemented
 }
+
+// ListTenantAdminAuditLogs 按租户 + 目标管理员查询操作历史（details.target_id），游标分页。
+// resource 固定 tenant_admin。
+func (s *PostgresAuditStore) ListTenantAdminAuditLogs(ctx context.Context, tenantID, userID uuid.UUID, filter ports.TenantAuditLogFilter) (ports.AuditLogListResult, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	where := []string{
+		"tenant_id = $1",
+		"resource = 'tenant_admin'",
+		"details->>'target_id' = $2",
+	}
+	args := []any{tenantID, userID.String()}
+
+	if action := strings.TrimSpace(filter.Action); action != "" {
+		args = append(args, action)
+		where = append(where, fmt.Sprintf("action = $%d", len(args)))
+	}
+	if result := strings.TrimSpace(filter.Result); result != "" {
+		args = append(args, result)
+		where = append(where, fmt.Sprintf("result = $%d", len(args)))
+	}
+	whereSQL := strings.Join(where, " AND ")
+
+	listArgs := append([]any{}, args...)
+	listWhere := whereSQL
+	if cursor := strings.TrimSpace(filter.Cursor); cursor != "" {
+		createdAt, id, err := types.DecodeCursor(cursor)
+		if err != nil {
+			return ports.AuditLogListResult{}, fmt.Errorf("%w: invalid cursor", ports.ErrValidationFailed)
+		}
+		listArgs = append(listArgs, createdAt, id)
+		listWhere += fmt.Sprintf(" AND (created_at, id) < ($%d, $%d)", len(listArgs)-1, len(listArgs))
+	}
+
+	listArgs = append(listArgs, limit+1)
+	rows, err := s.db.Query(ctx, `
+		SELECT id, action, resource, result, user_id, details, created_at
+		FROM audit_logs
+		WHERE `+listWhere+`
+		ORDER BY created_at DESC, id DESC
+		LIMIT $`+fmt.Sprintf("%d", len(listArgs)), listArgs...)
+	if err != nil {
+		return ports.AuditLogListResult{}, fmt.Errorf("list tenant admin audit logs: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]ports.AuditLog, 0, limit)
+	for rows.Next() {
+		var (
+			item       ports.AuditLog
+			detailsRaw []byte
+		)
+		if err := rows.Scan(
+			&item.ID, &item.Action, &item.Resource, &item.Result, &item.UserID, &detailsRaw, &item.CreatedAt,
+		); err != nil {
+			return ports.AuditLogListResult{}, fmt.Errorf("scan tenant admin audit log: %w", err)
+		}
+		if len(detailsRaw) > 0 {
+			details := map[string]any{}
+			if err := json.Unmarshal(detailsRaw, &details); err != nil {
+				return ports.AuditLogListResult{}, fmt.Errorf("decode audit details: %w", err)
+			}
+			item.Details = details
+		} else {
+			item.Details = map[string]any{}
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return ports.AuditLogListResult{}, fmt.Errorf("iterate tenant admin audit logs: %w", err)
+	}
+
+	nextCursor := ""
+	if len(items) > limit {
+		last := items[limit-1]
+		nextCursor = types.EncodeCursor(last.CreatedAt, last.ID)
+		items = items[:limit]
+	}
+
+	return ports.AuditLogListResult{
+		Items:      items,
+		NextCursor: nextCursor,
+	}, nil
+}

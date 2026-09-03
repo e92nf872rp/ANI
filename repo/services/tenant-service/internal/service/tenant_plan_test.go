@@ -156,6 +156,44 @@ func (f *fakeAuditStore) ListTenantAuditLogs(_ context.Context, tenantID uuid.UU
 	return ports.AuditLogListResult{Items: matched, Total: total, NextCursor: ""}, nil
 }
 
+func (f *fakeAuditStore) ListTenantAdminAuditLogs(_ context.Context, tenantID, userID uuid.UUID, filter ports.TenantAuditLogFilter) (ports.AuditLogListResult, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	matched := make([]ports.AuditLog, 0, len(f.logs))
+	for _, log := range f.logs {
+		target, _ := log.Details["target_id"].(string)
+		if target != userID.String() {
+			continue
+		}
+		if log.TenantID != nil && *log.TenantID != tenantID {
+			continue
+		}
+		if tid, ok := log.Details["tenant_id"].(string); ok && tid != "" && tid != tenantID.String() {
+			continue
+		}
+		if action := strings.TrimSpace(filter.Action); action != "" && log.Action != action {
+			continue
+		}
+		if result := strings.TrimSpace(filter.Result); result != "" && log.Result != result {
+			continue
+		}
+		matched = append(matched, log)
+	}
+
+	next := ""
+	if len(matched) > limit {
+		next = "next"
+		matched = matched[:limit]
+	}
+	return ports.AuditLogListResult{Items: matched, NextCursor: next}, nil
+}
+
 type fakeQuotaClient struct {
 	meta            []ports.QuotaMeta
 	metaErr         error
