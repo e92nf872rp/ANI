@@ -2084,6 +2084,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/observability/resource_trend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 租户级资源使用率趋势
+         * @description 按当前登录租户视角聚合返回 gpu/cpu/memory 资源使用率趋势（单位 %，0-100）。
+         *     tenant_id 全部从 JWT 提取，后端据此生成 namespace="ani-tenant-<id>" 的聚合 PromQL，
+         *     天然租户隔离；不接收/不暴露 query PromQL。返回结构与 query_range 一致（matrix），
+         *     前端复用既有出图逻辑。三条曲线各用一次本请求（一次一个 metric）。
+         */
+        get: operations["queryResourceTrendObservability"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/observability/alert-rules": {
         parameters: {
             query?: never;
@@ -11681,6 +11704,35 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description PromQL 区间查询结果（matrix） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservabilityRangeQueryResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    queryResourceTrendObservability: {
+        parameters: {
+            query: {
+                metric: "gpu" | "cpu" | "memory";
+                start: string;
+                end: string;
+                step: string;
+                timeout?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 租户资源使用率趋势（matrix），value ∈ 0-100（%） */
             200: {
                 headers: {
                     [name: string]: unknown;
