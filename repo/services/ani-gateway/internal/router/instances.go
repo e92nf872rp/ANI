@@ -804,6 +804,7 @@ func registerInstancesWithRuntime(v1 *route.RouterGroup, observability ports.Ins
 	v1.POST("/instances/:instance_id/lifecycle", api.lifecycle)
 	v1.POST("/instances/:instance_id/console", api.createConsoleSession)
 	v1.GET("/instances/:instance_id/logs", api.listLogs)
+	v1.GET("/instances/:instance_id/logs/stream", api.streamInstanceLogs)
 	v1.GET("/instances/:instance_id/events", api.listEvents)
 	v1.GET("/instances/:instance_id/metrics", api.getMetrics)
 	v1.POST("/instances/:instance_id/exec", api.createExecSession)

@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 实例日志流式输出（2026-09，分支 feat/instance-log-stream）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-LOG-STREAM-A | 实例日志 SSE 流式输出：OpenAPI 新增 `GET /instances/{id}/logs/stream`（level/limit/interval_seconds，SSE 事件 log/error/done，预流 401/404/400 普通 JSON + 非 loki profile 503 降级）；port 层 `InstanceLogStreamRequest` + `StreamLogs`；Loki adapter（backward 回放 → lastTS 游标 → forward 轮询，排序去重、失败下一周期自愈）；Gateway Hijack 式 SSE handler（逐帧 Flush，10 分钟上限 `done{timeout}`，sink 断开即取消，不沿用 kb_sse 缓冲写出）；Core SDK/静态 docs/Console schema/authz 生成物同步。真实环境 curl 实测：首屏回放正序、nginx 访问日志增量约 20s 内到达无重复无乱序、404 预流 JSON、客户端断开立即退出；`done{timeout}` 由 handler 单测覆盖 | INSTANCE-LOG-STREAM-A.md |
+
 ### KB 接口补全（2026-09，分支 feat/kb-api-completion）
 
 | 批次 | 内容摘要 | 文件 |

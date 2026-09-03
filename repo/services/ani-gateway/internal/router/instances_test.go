@@ -1704,6 +1704,10 @@ func (s *metricsKindSpy) CreateConsoleSession(ctx context.Context, request ports
 	return ports.InstanceConsoleSessionRecord{}, nil
 }
 
+func (s *metricsKindSpy) StreamLogs(ctx context.Context, request ports.InstanceLogStreamRequest, sink func(ports.InstanceLogEntry) error) error {
+	return ports.ErrNotConfigured
+}
+
 func (s *metricsKindSpy) capturedKindValue() ports.WorkloadKind {
 	s.capturedMu.Lock()
 	defer s.capturedMu.Unlock()

@@ -628,3 +628,22 @@ func prometheusInstanceObservabilityDevProfile() ports.DevProfileInfo {
 }
 
 var _ ports.InstanceObservability = (*PrometheusInstanceObservability)(nil)
+
+// StreamLogs 流式输出实例日志。仅在注入 LokiLogStore 时可用，
+// 非 loki profile（logStore=nil 或非 *LokiLogStore）返回 ErrNotConfigured（gateway 映射 503）。
+func (o *PrometheusInstanceObservability) StreamLogs(ctx context.Context, request ports.InstanceLogStreamRequest, sink func(ports.InstanceLogEntry) error) error {
+	if err := validateInstanceObservationIdentity(request.TenantID, request.InstanceID); err != nil {
+		return err
+	}
+	o.mu.RLock()
+	store := o.logStore
+	o.mu.RUnlock()
+	if store == nil {
+		return fmt.Errorf("%w: log stream requires INSTANCE_OBSERVABILITY_LOG_STORE=loki", ports.ErrNotConfigured)
+	}
+	lokiStore, ok := store.(*LokiLogStore)
+	if !ok {
+		return fmt.Errorf("%w: log stream requires Loki log store", ports.ErrNotConfigured)
+	}
+	return lokiStore.StreamLogs(ctx, request, tenantNamespace(request.TenantID), sink)
+}

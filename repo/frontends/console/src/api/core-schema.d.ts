@@ -427,6 +427,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/instances/{instance_id}/logs/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 实例日志 SSE 流式输出
+         * @description SSE 流式输出实例日志：首屏回放最近 limit 条历史日志（时间正序），
+         *     然后持续增量推送新日志。每条日志通过 event: log 帧推送，
+         *     错误通过 event: error 帧推送，结束通过 event: done 帧推送。
+         *     连接时长上限 10 分钟，到达后发 done{reason:"timeout"} 并关闭。
+         *     预流错误（401/404/400）返回普通 JSON，不进入 SSE 流。
+         */
+        get: operations["streamInstanceLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/instances/{instance_id}/events": {
         parameters: {
             query?: never;
@@ -8229,6 +8253,45 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    streamInstanceLogs: {
+        parameters: {
+            query?: {
+                level?: "debug" | "info" | "warn" | "error";
+                limit?: number;
+                interval_seconds?: number;
+            };
+            header?: never;
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SSE 日志流 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 日志流未配置（非 loki profile） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     listInstanceEvents: {

@@ -581,6 +581,12 @@
       "scope": "scope:instances:read"
     },
     {
+      "operationId": "streamInstanceLogs",
+      "method": "GET",
+      "path": "/instances/{instance_id}/logs/stream",
+      "scope": "scope:instances:read"
+    },
+    {
       "operationId": "getInstanceMetrics",
       "method": "GET",
       "path": "/instances/{instance_id}/metrics",
