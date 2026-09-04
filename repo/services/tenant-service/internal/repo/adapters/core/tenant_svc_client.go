@@ -204,12 +204,55 @@ func (c *TenantSvcClient) DisableTenant(ctx context.Context, tenantID uuid.UUID)
 	return decodeTenant(raw)
 }
 
-func (c *TenantSvcClient) GetTenantAuth(context.Context, uuid.UUID) (ports.TenantAuth, error) {
-	return ports.TenantAuth{}, ports.ErrNotImplemented
+func (c *TenantSvcClient) GetTenantAuth(ctx context.Context, tenantID uuid.UUID) (ports.TenantAuth, error) {
+	path := fmt.Sprintf("/admin/tenants/%s/auth", tenantID.String())
+	raw, err := c.sdk.Request("GET", path, anisdk.RequestOptions{})
+	if err != nil {
+		return ports.TenantAuth{}, mapSDKError(err)
+	}
+	return decodeTenantAuth(tenantID, raw)
 }
 
-func (c *TenantSvcClient) UpdateTenantAuth(context.Context, uuid.UUID, ports.TenantAuthPatch) (ports.TenantAuth, error) {
-	return ports.TenantAuth{}, ports.ErrNotImplemented
+func (c *TenantSvcClient) UpdateTenantAuth(ctx context.Context, tenantID uuid.UUID, patch ports.TenantAuthPatch) (ports.TenantAuth, error) {
+	body := map[string]any{}
+	if patch.SsoEnabled != nil {
+		body["sso_enabled"] = *patch.SsoEnabled
+	}
+	if patch.SsoProvider != nil {
+		// 空串表示清空；JSON 传 ""（null 在网关层表示不更新，不会进入 patch）
+		body["provider"] = strings.TrimSpace(*patch.SsoProvider)
+	}
+	if patch.MfaRequired != nil {
+		body["mfa_required"] = *patch.MfaRequired
+	}
+	path := fmt.Sprintf("/admin/tenants/%s/auth", tenantID.String())
+	raw, err := c.sdk.Request("PUT", path, anisdk.RequestOptions{Body: body})
+	if err != nil {
+		return ports.TenantAuth{}, mapSDKError(err)
+	}
+	return decodeTenantAuth(tenantID, raw)
+}
+
+func decodeTenantAuth(tenantID uuid.UUID, raw any) (ports.TenantAuth, error) {
+	obj, err := asObject(raw)
+	if err != nil {
+		return ports.TenantAuth{}, err
+	}
+	out := ports.TenantAuth{
+		TenantID:    tenantID,
+		SsoEnabled:  boolField(obj, "sso_enabled"),
+		MfaRequired: boolField(obj, "mfa_required"),
+		UpdatedAt:   parseTimeField(obj, "updated_at"),
+	}
+	if v, ok := obj["provider"]; ok && v != nil {
+		if s, ok := v.(string); ok {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				out.SsoProvider = &s
+			}
+		}
+	}
+	return out, nil
 }
 
 func (c *TenantSvcClient) ListTenantLifecycle(context.Context, uuid.UUID, ports.TenantLifecycleFilter) (ports.TenantLifecycleListResult, error) {

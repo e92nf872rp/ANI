@@ -620,12 +620,142 @@ func tenantStateTransitionReject(ctx context.Context, tx ports.MetadataTx, id uu
 	return fmt.Errorf("%w: current status is %s", ports.ErrTenantStateInvalid, status)
 }
 
-func (t *PostgresTenant) GetTenantAuth(context.Context, string) (ports.TenantAuth, error) {
-	return ports.TenantAuth{}, ports.ErrUnsupported
+func (t *PostgresTenant) GetTenantAuth(ctx context.Context, tenantID string) (ports.TenantAuth, error) {
+	id, err := parseTenantUUID(tenantID)
+	if err != nil {
+		return ports.TenantAuth{}, err
+	}
+	var out ports.TenantAuth
+	err = t.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		// 步骤 1：租户必须存在，否则 404（与缺 auth 行默认值路径区分）
+		var exists bool
+		if qErr := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tenants WHERE id = $1)`, id).Scan(&exists); qErr != nil {
+			return fmt.Errorf("check tenant exists: %w", qErr)
+		}
+		if !exists {
+			return ports.ErrTenantNotFound
+		}
+		// 步骤 2：读 tenant_auth；缺行返回默认值（SPEC §5.4-6）
+		var (
+			ssoEnabled  bool
+			ssoProvider *string
+			mfaRequired bool
+			updatedAt   time.Time
+		)
+		qErr := tx.QueryRow(ctx, `
+			SELECT sso_enabled, sso_provider, mfa_required, updated_at
+			FROM tenant_auth
+			WHERE tenant_id = $1
+		`, id).Scan(&ssoEnabled, &ssoProvider, &mfaRequired, &updatedAt)
+		if errors.Is(qErr, pgx.ErrNoRows) {
+			out = ports.TenantAuth{
+				TenantID:    id.String(),
+				SsoEnabled:  false,
+				SsoProvider: nil,
+				MfaRequired: false,
+				UpdatedAt:   time.Now().UTC(),
+			}
+			return nil
+		}
+		if qErr != nil {
+			return fmt.Errorf("get tenant_auth: %w", qErr)
+		}
+		out = ports.TenantAuth{
+			TenantID:    id.String(),
+			SsoEnabled:  ssoEnabled,
+			SsoProvider: ssoProvider,
+			MfaRequired: mfaRequired,
+			UpdatedAt:   updatedAt,
+		}
+		return nil
+	})
+	if err != nil {
+		return ports.TenantAuth{}, err
+	}
+	return out, nil
 }
 
-func (t *PostgresTenant) UpdateTenantAuth(context.Context, string, ports.TenantAuthPatch) (ports.TenantAuth, error) {
-	return ports.TenantAuth{}, ports.ErrUnsupported
+func (t *PostgresTenant) UpdateTenantAuth(ctx context.Context, tenantID string, patch ports.TenantAuthPatch) (ports.TenantAuth, error) {
+	id, err := parseTenantUUID(tenantID)
+	if err != nil {
+		return ports.TenantAuth{}, err
+	}
+	if patch.SsoEnabled == nil && patch.SsoProvider == nil && patch.MfaRequired == nil {
+		return ports.TenantAuth{}, fmt.Errorf("%w: sso_enabled, provider, or mfa_required required", ports.ErrInvalid)
+	}
+
+	var out ports.TenantAuth
+	err = t.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		// 步骤 1：租户必须存在；disabled 终态不可改 Auth → TENANT_STATE_INVALID（409）
+		var status string
+		if qErr := tx.QueryRow(ctx, `SELECT status FROM tenants WHERE id = $1`, id).Scan(&status); qErr != nil {
+			if errors.Is(qErr, pgx.ErrNoRows) {
+				return ports.ErrTenantNotFound
+			}
+			return fmt.Errorf("lookup tenant status: %w", qErr)
+		}
+		if ports.TenantStatus(status) == ports.TenantStatusDisabled {
+			return fmt.Errorf("%w: tenant is disabled", ports.ErrTenantStateInvalid)
+		}
+		// 步骤 2：确保 1:1 auth 行（存量缺行防御）
+		if _, execErr := tx.Exec(ctx, `
+			INSERT INTO tenant_auth (tenant_id) VALUES ($1)
+			ON CONFLICT (tenant_id) DO NOTHING
+		`, id); execErr != nil {
+			return fmt.Errorf("ensure tenant_auth: %w", execErr)
+		}
+		// 步骤 3：部分更新（仅提供的字段）+ updated_at
+		sets := []string{"updated_at = now()"}
+		args := []any{id}
+		argN := 2
+		if patch.SsoEnabled != nil {
+			sets = append(sets, fmt.Sprintf("sso_enabled = $%d", argN))
+			args = append(args, *patch.SsoEnabled)
+			argN++
+		}
+		if patch.SsoProvider != nil {
+			sets = append(sets, fmt.Sprintf("sso_provider = $%d", argN))
+			v := strings.TrimSpace(*patch.SsoProvider)
+			if v == "" {
+				args = append(args, nil)
+			} else {
+				args = append(args, v)
+			}
+			argN++
+		}
+		if patch.MfaRequired != nil {
+			sets = append(sets, fmt.Sprintf("mfa_required = $%d", argN))
+			args = append(args, *patch.MfaRequired)
+			argN++
+		}
+		var (
+			ssoEnabled  bool
+			ssoProvider *string
+			mfaRequired bool
+			updatedAt   time.Time
+		)
+		qErr := tx.QueryRow(ctx, fmt.Sprintf(`
+			UPDATE tenant_auth
+			SET %s
+			WHERE tenant_id = $1
+			RETURNING sso_enabled, sso_provider, mfa_required, updated_at
+		`, strings.Join(sets, ", ")), args...).Scan(&ssoEnabled, &ssoProvider, &mfaRequired, &updatedAt)
+		if qErr != nil {
+			return fmt.Errorf("update tenant_auth: %w", qErr)
+		}
+		out = ports.TenantAuth{
+			TenantID:    id.String(),
+			SsoEnabled:  ssoEnabled,
+			SsoProvider: ssoProvider,
+			MfaRequired: mfaRequired,
+			UpdatedAt:   updatedAt,
+		}
+		return nil
+	})
+	if err != nil {
+		return ports.TenantAuth{}, err
+	}
+	return out, nil
 }
 
 func (t *PostgresTenant) ListTenantLifecycle(context.Context, string, ports.TenantLifecycleFilter) (ports.TenantLifecycleListResult, error) {

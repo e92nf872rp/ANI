@@ -270,12 +270,8 @@ func (api *adminTenantAPI) updateTenantAuth(ctx context.Context, c *app.RequestC
 		}
 	}
 	if v, ok := raw["provider"]; ok {
-		var s *string
-		if string(v) == "null" {
-			empty := ""
-			s = &empty
-			patch.SsoProvider = s
-		} else {
+		// 未传 / null → 不更新；"" → 清空
+		if string(v) != "null" {
 			var str string
 			if json.Unmarshal(v, &str) == nil {
 				patch.SsoProvider = &str

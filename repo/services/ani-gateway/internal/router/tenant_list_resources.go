@@ -272,25 +272,37 @@ func (api *tenantListAPI) updateTenantSso(ctx context.Context, c *app.RequestCon
 		writeTenantListError(c, http.StatusBadGateway, "GRPC_CLIENT_UNAVAILABLE", "tenant grpc client unavailable")
 		return
 	}
-	var body struct {
-		IdempotencyKey string  `json:"idempotency_key"`
-		SsoEnabled     *bool   `json:"sso_enabled"`
-		Provider       *string `json:"provider"`
-	}
-	if err := json.Unmarshal(c.Request.Body(), &body); err != nil {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(c.Request.Body(), &raw); err != nil {
 		writeTenantListError(c, http.StatusBadRequest, "VALIDATION_FAILED", "invalid request body")
 		return
 	}
-	idem := strings.TrimSpace(body.IdempotencyKey)
-	if idem == "" {
-		idem = idempotencyHeader(c)
+	idem := idempotencyHeader(c)
+	if v, ok := raw["idempotency_key"]; ok {
+		var s string
+		if json.Unmarshal(v, &s) == nil && strings.TrimSpace(s) != "" {
+			idem = strings.TrimSpace(s)
+		}
 	}
 	req := &tenantv1.UpdateTenantSsoRequest{TenantId: c.Param("tenantId"), IdempotencyKey: idem}
-	if body.SsoEnabled != nil {
-		req.SsoEnabled = wrapperspb.Bool(*body.SsoEnabled)
+	if v, ok := raw["sso_enabled"]; ok && string(v) != "null" {
+		var b bool
+		if err := json.Unmarshal(v, &b); err != nil {
+			writeTenantListError(c, http.StatusBadRequest, "VALIDATION_FAILED", "sso_enabled must be boolean")
+			return
+		}
+		req.SsoEnabled = wrapperspb.Bool(b)
 	}
-	if body.Provider != nil {
-		req.Provider = wrapperspb.String(*body.Provider)
+	if v, ok := raw["provider"]; ok {
+		// 未传 / null → 不更新；"" → 清空（传空串给 service）
+		if string(v) != "null" {
+			var s string
+			if err := json.Unmarshal(v, &s); err != nil {
+				writeTenantListError(c, http.StatusBadRequest, "VALIDATION_FAILED", "provider must be string")
+				return
+			}
+			req.Provider = wrapperspb.String(s)
+		}
 	}
 	callCtx, cancel := tenantCallCtx(ctx, c)
 	defer cancel()
@@ -336,23 +348,33 @@ func (api *tenantListAPI) updateTenantMfa(ctx context.Context, c *app.RequestCon
 		writeTenantListError(c, http.StatusBadGateway, "GRPC_CLIENT_UNAVAILABLE", "tenant grpc client unavailable")
 		return
 	}
-	var body struct {
-		IdempotencyKey string `json:"idempotency_key"`
-		MfaRequired    bool   `json:"mfa_required"`
-	}
-	if err := json.Unmarshal(c.Request.Body(), &body); err != nil {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(c.Request.Body(), &raw); err != nil {
 		writeTenantListError(c, http.StatusBadRequest, "VALIDATION_FAILED", "invalid request body")
 		return
 	}
-	idem := strings.TrimSpace(body.IdempotencyKey)
-	if idem == "" {
-		idem = idempotencyHeader(c)
+	idem := idempotencyHeader(c)
+	if v, ok := raw["idempotency_key"]; ok {
+		var s string
+		if json.Unmarshal(v, &s) == nil && strings.TrimSpace(s) != "" {
+			idem = strings.TrimSpace(s)
+		}
+	}
+	v, ok := raw["mfa_required"]
+	if !ok || string(v) == "null" {
+		writeTenantListError(c, http.StatusBadRequest, "VALIDATION_FAILED", "mfa_required required")
+		return
+	}
+	var mfa bool
+	if err := json.Unmarshal(v, &mfa); err != nil {
+		writeTenantListError(c, http.StatusBadRequest, "VALIDATION_FAILED", "mfa_required must be boolean")
+		return
 	}
 	callCtx, cancel := tenantCallCtx(ctx, c)
 	defer cancel()
 	res, err := api.tenants.UpdateTenantMfa(callCtx, &tenantv1.UpdateTenantMfaRequest{
 		TenantId:       c.Param("tenantId"),
-		MfaRequired:    body.MfaRequired,
+		MfaRequired:    mfa,
 		IdempotencyKey: idem,
 	})
 	if err != nil {

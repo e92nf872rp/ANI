@@ -417,3 +417,94 @@ func TestPostgresTenantDisableTenant_NotFound(t *testing.T) {
 		t.Fatalf("want ErrTenantNotFound, got %v", err)
 	}
 }
+
+func TestPostgresTenantGetTenantAuth_Success(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	now := time.Date(2026, 9, 4, 10, 0, 0, 0, time.UTC)
+	provider := "oidc"
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(
+		quotaFakeRow{values: []any{true}}, // EXISTS
+		quotaFakeRow{values: []any{true, &provider, true, now}},
+	)
+	svc := NewPostgresTenant(&quotaFakeStore{tx: tx})
+	got, err := svc.GetTenantAuth(context.Background(), tenantID.String())
+	if err != nil {
+		t.Fatalf("GetTenantAuth: %v", err)
+	}
+	if !got.SsoEnabled || !got.MfaRequired || got.SsoProvider == nil || *got.SsoProvider != "oidc" {
+		t.Fatalf("got=%+v", got)
+	}
+}
+
+func TestPostgresTenantGetTenantAuth_MissingRowDefaults(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(
+		quotaFakeRow{values: []any{true}},
+		quotaFakeRow{err: pgx.ErrNoRows},
+	)
+	svc := NewPostgresTenant(&quotaFakeStore{tx: tx})
+	got, err := svc.GetTenantAuth(context.Background(), tenantID.String())
+	if err != nil {
+		t.Fatalf("GetTenantAuth: %v", err)
+	}
+	if got.SsoEnabled || got.MfaRequired || got.SsoProvider != nil {
+		t.Fatalf("defaults=%+v", got)
+	}
+}
+
+func TestPostgresTenantGetTenantAuth_NotFound(t *testing.T) {
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(quotaFakeRow{values: []any{false}})
+	svc := NewPostgresTenant(&quotaFakeStore{tx: tx})
+	_, err := svc.GetTenantAuth(context.Background(), uuid.NewString())
+	if !errors.Is(err, ports.ErrTenantNotFound) {
+		t.Fatalf("want ErrTenantNotFound, got %v", err)
+	}
+}
+
+func TestPostgresTenantUpdateTenantAuth_Partial(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	now := time.Date(2026, 9, 4, 11, 0, 0, 0, time.UTC)
+	provider := "oidc"
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(
+		quotaFakeRow{values: []any{"active"}}, // SELECT status
+		quotaFakeRow{values: []any{true, &provider, false, now}}, // RETURNING
+	)
+	svc := NewPostgresTenant(&quotaFakeStore{tx: tx})
+	enabled := true
+	got, err := svc.UpdateTenantAuth(context.Background(), tenantID.String(), ports.TenantAuthPatch{
+		SsoEnabled:  &enabled,
+		SsoProvider: &provider,
+	})
+	if err != nil {
+		t.Fatalf("UpdateTenantAuth: %v", err)
+	}
+	if !got.SsoEnabled || got.SsoProvider == nil || *got.SsoProvider != "oidc" {
+		t.Fatalf("got=%+v", got)
+	}
+	if !hasExec(tx, "INSERT INTO tenant_auth") {
+		t.Fatal("missing ensure tenant_auth insert")
+	}
+}
+
+func TestPostgresTenantUpdateTenantAuth_DisabledAsStateInvalid(t *testing.T) {
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(quotaFakeRow{values: []any{"disabled"}})
+	svc := NewPostgresTenant(&quotaFakeStore{tx: tx})
+	enabled := true
+	_, err := svc.UpdateTenantAuth(context.Background(), uuid.NewString(), ports.TenantAuthPatch{SsoEnabled: &enabled})
+	if !errors.Is(err, ports.ErrTenantStateInvalid) {
+		t.Fatalf("want ErrTenantStateInvalid, got %v", err)
+	}
+}
+
+func TestPostgresTenantUpdateTenantAuth_EmptyPatch(t *testing.T) {
+	svc := NewPostgresTenant(&quotaFakeStore{tx: &quotaFakeTx{}})
+	_, err := svc.UpdateTenantAuth(context.Background(), uuid.NewString(), ports.TenantAuthPatch{})
+	if !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("want ErrInvalid, got %v", err)
+	}
+}

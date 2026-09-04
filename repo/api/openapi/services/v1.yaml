@@ -1284,7 +1284,7 @@ components:
       properties:
         idempotency_key: { type: string, format: uuid }
         sso_enabled:     { type: boolean, description: "未传表示不更新" }
-        provider:        { type: string, nullable: true, description: "未传表示不更新" }
+        provider:        { type: string, nullable: true, description: "未传或 null=不更新；空串=清空；仅当更新后 sso_enabled=true 时有效值须非空（可沿用原值）" }
 
     SsoTestResult:
       type: object
@@ -3817,7 +3817,7 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound', description: "TENANT_NOT_FOUND" }
-        "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_KEY_REUSED" }
+        "409": { $ref: '#/components/responses/Conflict', description: "TENANT_STATE_INVALID（disabled 不可改 Auth）/ IDEMPOTENCY_KEY_REUSED" }
         "422": { $ref: '#/components/responses/UnprocessableEntity', description: "TENANT_SSO_CONFIG_INVALID" }
         "502": { $ref: '#/components/responses/BadGateway' }
 
@@ -3862,7 +3862,7 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound', description: "TENANT_NOT_FOUND" }
-        "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_KEY_REUSED" }
+        "409": { $ref: '#/components/responses/Conflict', description: "TENANT_STATE_INVALID（disabled 不可改 Auth）/ IDEMPOTENCY_KEY_REUSED" }
         "502": { $ref: '#/components/responses/BadGateway' }
 
   /tenants/{tenantId}/quota:

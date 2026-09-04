@@ -883,3 +883,198 @@ func TestTenantService_DisableTenant_AllGuardZero(t *testing.T) {
 		t.Fatalf("status=%s", tenants.tenant.Status)
 	}
 }
+
+func TestTenantService_GetTenantAuth_Defaults(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	tenants := &fakeTenantClient{} // auth.TenantID Nil → defaults
+	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	got, err := svc.GetTenantAuth(context.Background(), &tenantv1.GetTenantAuthRequest{TenantId: tenantID.String()})
+	if err != nil {
+		t.Fatalf("GetTenantAuth: %v", err)
+	}
+	if got.GetSsoEnabled() || got.GetMfaRequired() || got.GetProvider() != nil {
+		t.Fatalf("defaults=%+v", got)
+	}
+}
+
+func TestTenantService_UpdateTenantSso_RequiresProvider(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	tenants := &fakeTenantClient{
+		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusActive},
+		auth:   ports.TenantAuth{TenantID: tenantID, SsoEnabled: false},
+	}
+	audit := &fakeAuditStore{}
+	svc := NewTenantService(nil, tenants, nil, nil, nil, audit, nil, nil, nil)
+	_, err := svc.UpdateTenantSso(context.Background(), &tenantv1.UpdateTenantSsoRequest{
+		TenantId:   tenantID.String(),
+		SsoEnabled: wrapperspb.Bool(true),
+	})
+	st, _ := status.FromError(err)
+	if st.Code() != codes.FailedPrecondition || !strings.Contains(st.Message(), "TENANT_SSO_CONFIG_INVALID") {
+		t.Fatalf("want TENANT_SSO_CONFIG_INVALID, got %v", err)
+	}
+	if tenants.updateAuthCalls != 0 {
+		t.Fatalf("must not call Core on invalid SSO, calls=%d", tenants.updateAuthCalls)
+	}
+	if len(audit.logs) == 0 || audit.logs[0].Result != "failure" {
+		t.Fatalf("audit=%+v", audit.logs)
+	}
+}
+
+func TestTenantService_UpdateTenantSso_TenantDisabledAsStateInvalid(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	tenants := &fakeTenantClient{
+		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusDisabled},
+		auth:   ports.TenantAuth{TenantID: tenantID, SsoEnabled: false},
+	}
+	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	_, err := svc.UpdateTenantSso(context.Background(), &tenantv1.UpdateTenantSsoRequest{
+		TenantId:   tenantID.String(),
+		SsoEnabled: wrapperspb.Bool(true),
+		Provider:   wrapperspb.String("oidc"),
+	})
+	// Core 层判断 disabled → TENANT_STATE_INVALID，svc 透传 409
+	if status.Code(err) != codes.FailedPrecondition || !strings.HasPrefix(status.Convert(err).Message(), "TENANT_STATE_INVALID") {
+		t.Fatalf("err=%v", err)
+	}
+	if tenants.updateAuthCalls != 1 {
+		t.Fatalf("must reach Core UpdateTenantAuth, calls=%d", tenants.updateAuthCalls)
+	}
+}
+
+func TestTenantService_UpdateTenantSso_DisableWithoutProvider(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	provider := "oidc"
+	tenants := &fakeTenantClient{
+		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusActive},
+		auth:   ports.TenantAuth{TenantID: tenantID, SsoEnabled: true, SsoProvider: &provider},
+	}
+	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	res, err := svc.UpdateTenantSso(context.Background(), &tenantv1.UpdateTenantSsoRequest{
+		TenantId:   tenantID.String(),
+		SsoEnabled: wrapperspb.Bool(false),
+	})
+	if err != nil {
+		t.Fatalf("disable SSO without provider: %v", err)
+	}
+	if res.GetId() != tenantID.String() || tenants.auth.SsoEnabled {
+		t.Fatalf("res=%+v auth=%+v", res, tenants.auth)
+	}
+	if tenants.updateAuthIn == nil || tenants.updateAuthIn.SsoProvider != nil {
+		t.Fatalf("provider must not be required/patched on disable-only, patch=%+v", tenants.updateAuthIn)
+	}
+}
+
+func TestTenantService_UpdateTenantSso_ProviderWhileSSOOff(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	tenants := &fakeTenantClient{
+		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusFrozen},
+		auth:   ports.TenantAuth{TenantID: tenantID, SsoEnabled: false},
+	}
+	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	_, err := svc.UpdateTenantSso(context.Background(), &tenantv1.UpdateTenantSsoRequest{
+		TenantId: tenantID.String(),
+		Provider: wrapperspb.String("oidc"),
+	})
+	if err != nil {
+		t.Fatalf("set provider while SSO off: %v", err)
+	}
+	if tenants.auth.SsoProvider == nil || *tenants.auth.SsoProvider != "oidc" || tenants.auth.SsoEnabled {
+		t.Fatalf("auth=%+v", tenants.auth)
+	}
+}
+
+func TestTenantService_UpdateTenantSso_KeepExistingProvider(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	provider := "oidc"
+	tenants := &fakeTenantClient{
+		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusActive},
+		auth:   ports.TenantAuth{TenantID: tenantID, SsoEnabled: false, SsoProvider: &provider},
+	}
+	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	res, err := svc.UpdateTenantSso(context.Background(), &tenantv1.UpdateTenantSsoRequest{
+		TenantId:   tenantID.String(),
+		SsoEnabled: wrapperspb.Bool(true),
+	})
+	if err != nil {
+		t.Fatalf("UpdateTenantSso: %v", err)
+	}
+	if res.GetId() != tenantID.String() || !tenants.auth.SsoEnabled {
+		t.Fatalf("res=%+v auth=%+v", res, tenants.auth)
+	}
+}
+
+func TestTenantService_UpdateTenantMfa_TenantDisabledAsStateInvalid(t *testing.T) {
+	tenantID := uuid.MustParse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+	tenants := &fakeTenantClient{
+		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusDisabled},
+		auth:   ports.TenantAuth{TenantID: tenantID},
+	}
+	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	_, err := svc.UpdateTenantMfa(context.Background(), &tenantv1.UpdateTenantMfaRequest{
+		TenantId:    tenantID.String(),
+		MfaRequired: true,
+	})
+	if status.Code(err) != codes.FailedPrecondition || !strings.HasPrefix(status.Convert(err).Message(), "TENANT_STATE_INVALID") {
+		t.Fatalf("err=%v", err)
+	}
+	if tenants.updateAuthCalls != 1 {
+		t.Fatalf("must reach Core UpdateTenantAuth, calls=%d", tenants.updateAuthCalls)
+	}
+}
+
+func TestTenantService_Auth_ReadWriteRoundTrip(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	beforeAt := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	tenants := &fakeTenantClient{
+		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusActive},
+		auth:   ports.TenantAuth{TenantID: tenantID, UpdatedAt: beforeAt},
+	}
+	audit := &fakeAuditStore{}
+	svc := NewTenantService(nil, tenants, nil, nil, nil, audit, nil, nil, nil)
+
+	got, err := svc.GetTenantAuth(context.Background(), &tenantv1.GetTenantAuthRequest{TenantId: tenantID.String()})
+	if err != nil || got.GetSsoEnabled() || got.GetMfaRequired() {
+		t.Fatalf("initial get: err=%v got=%+v", err, got)
+	}
+
+	_, err = svc.UpdateTenantSso(context.Background(), &tenantv1.UpdateTenantSsoRequest{
+		TenantId:   tenantID.String(),
+		SsoEnabled: wrapperspb.Bool(true),
+		Provider:   wrapperspb.String("oidc"),
+	})
+	if err != nil {
+		t.Fatalf("UpdateTenantSso: %v", err)
+	}
+	_, err = svc.UpdateTenantMfa(context.Background(), &tenantv1.UpdateTenantMfaRequest{
+		TenantId:    tenantID.String(),
+		MfaRequired: true,
+	})
+	if err != nil {
+		t.Fatalf("UpdateTenantMfa: %v", err)
+	}
+
+	after, err := svc.GetTenantAuth(context.Background(), &tenantv1.GetTenantAuthRequest{TenantId: tenantID.String()})
+	if err != nil {
+		t.Fatalf("GetTenantAuth after: %v", err)
+	}
+	if !after.GetSsoEnabled() || !after.GetMfaRequired() {
+		t.Fatalf("after=%+v", after)
+	}
+	if after.GetProvider() == nil || after.GetProvider().GetValue() != "oidc" {
+		t.Fatalf("provider=%v", after.GetProvider())
+	}
+	if !after.GetUpdatedAt().AsTime().After(beforeAt) {
+		t.Fatalf("updated_at not advanced: %v", after.GetUpdatedAt())
+	}
+
+	actions := map[string]int{}
+	for _, log := range audit.logs {
+		if log.Result == "success" {
+			actions[log.Action]++
+		}
+	}
+	if actions["tenant.sso.update"] != 1 || actions["tenant.mfa.update"] != 1 {
+		t.Fatalf("audit actions=%v logs=%+v", actions, audit.logs)
+	}
+}

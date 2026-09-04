@@ -822,24 +822,166 @@ func quotaUsedSnapshot(items []ports.CoreQuotaResult) map[string]any {
 }
 
 func (s *TenantService) GetTenantAuth(ctx context.Context, req *tenantv1.GetTenantAuthRequest) (*tenantv1.TenantAuthConfig, error) {
-	_ = ctx
-	_ = req
-	return nil, tenantRPCNotImplemented()
+	rawID := ""
+	if req != nil {
+		rawID = req.GetTenantId()
+	}
+	tenantID, err := parseTenantID(rawID)
+	if err != nil {
+		return nil, err
+	}
+	if s.tenants == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant client unavailable")
+	}
+	auth, err := s.tenants.GetTenantAuth(ctx, tenantID)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	return toProtoTenantAuthConfig(auth), nil
 }
 
 func (s *TenantService) UpdateTenantSso(ctx context.Context, req *tenantv1.UpdateTenantSsoRequest) (*commonv1.IdempotentResult, error) {
-	_ = ctx
-	_ = req
-	return nil, tenantRPCNotImplemented()
-}
+	const action = "tenant.sso.update"
 
-func (s *TenantService) TestTenantSso(ctx context.Context, req *tenantv1.TestTenantSsoRequest) (*tenantv1.SsoTestResult, error) {
-	_ = ctx
-	_ = req
-	return nil, tenantRPCNotImplemented()
+	if s.tenants == nil {
+		err := businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant client unavailable")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, nil, err, nil)
+		return nil, err
+	}
+	rawID := ""
+	if req != nil {
+		rawID = req.GetTenantId()
+	}
+	tenantID, err := parseTenantID(rawID)
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": rawID}, err, nil)
+		return nil, err
+	}
+
+	// 步骤 1：至少提供一个 SSO 字段（部分更新）
+	hasEnabled := req != nil && req.SsoEnabled != nil
+	hasProvider := req != nil && req.Provider != nil
+	if !hasEnabled && !hasProvider {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "sso_enabled or provider required")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+		return nil, err
+	}
+
+	// 步骤 2：读当前配置并计算更新后有效值。
+	// provider 仅在更新后 sso_enabled=true 时必填非空（可沿用原 provider）；
+	// sso_enabled=false（关闭）时 provider 非必传，可省略或一并清空。
+	// disabled 终态由 Core UpdateTenantAuth 拒绝（TENANT_STATE_INVALID → 409）。
+	before, err := s.tenants.GetTenantAuth(ctx, tenantID)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, mapped, &tenantID)
+		return nil, mapped
+	}
+	effectiveEnabled := before.SsoEnabled
+	if hasEnabled {
+		effectiveEnabled = req.SsoEnabled.GetValue()
+	}
+	effectiveProvider := ""
+	if before.SsoProvider != nil {
+		effectiveProvider = strings.TrimSpace(*before.SsoProvider)
+	}
+	if hasProvider {
+		effectiveProvider = strings.TrimSpace(req.Provider.GetValue())
+	}
+	if effectiveEnabled && effectiveProvider == "" {
+		err := businessError(codes.FailedPrecondition, ports.ErrTenantSsoConfigInvalid, "sso enabled requires provider")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id":   tenantID.String(),
+			"sso_enabled": effectiveEnabled,
+			"provider":    effectiveProvider,
+		}, err, &tenantID)
+		return nil, err
+	}
+
+	// 步骤 3：映射 Core 部分更新
+	patch := ports.TenantAuthPatch{}
+	if hasEnabled {
+		v := req.SsoEnabled.GetValue()
+		patch.SsoEnabled = &v
+	}
+	if hasProvider {
+		v := strings.TrimSpace(req.Provider.GetValue())
+		patch.SsoProvider = &v
+	}
+	after, err := s.tenants.UpdateTenantAuth(ctx, tenantID, patch)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, mapped, &tenantID)
+		return nil, mapped
+	}
+
+	providerOut := ""
+	if after.SsoProvider != nil {
+		providerOut = *after.SsoProvider
+	}
+	writeAuditSuccess(ctx, s.audit, auditResourceTenant, action, map[string]any{
+		"tenant_id":   tenantID.String(),
+		"sso_enabled": after.SsoEnabled,
+		"provider":    providerOut,
+	}, &tenantID)
+	return &commonv1.IdempotentResult{Id: tenantID.String(), Message: "tenant sso updated"}, nil
 }
 
 func (s *TenantService) UpdateTenantMfa(ctx context.Context, req *tenantv1.UpdateTenantMfaRequest) (*commonv1.IdempotentResult, error) {
+	const action = "tenant.mfa.update"
+
+	if s.tenants == nil {
+		err := businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant client unavailable")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, nil, err, nil)
+		return nil, err
+	}
+	rawID := ""
+	if req != nil {
+		rawID = req.GetTenantId()
+	}
+	tenantID, err := parseTenantID(rawID)
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": rawID}, err, nil)
+		return nil, err
+	}
+	if req == nil {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "mfa_required required")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+		return nil, err
+	}
+
+	// disabled 终态由 Core UpdateTenantAuth 拒绝（TENANT_STATE_INVALID → 409）。
+	mfa := req.GetMfaRequired()
+	after, err := s.tenants.UpdateTenantAuth(ctx, tenantID, ports.TenantAuthPatch{MfaRequired: &mfa})
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id":    tenantID.String(),
+			"mfa_required": mfa,
+		}, mapped, &tenantID)
+		return nil, mapped
+	}
+
+	writeAuditSuccess(ctx, s.audit, auditResourceTenant, action, map[string]any{
+		"tenant_id":    tenantID.String(),
+		"mfa_required": after.MfaRequired,
+	}, &tenantID)
+	return &commonv1.IdempotentResult{Id: tenantID.String(), Message: "tenant mfa updated"}, nil
+}
+
+func toProtoTenantAuthConfig(auth ports.TenantAuth) *tenantv1.TenantAuthConfig {
+	out := &tenantv1.TenantAuthConfig{
+		SsoEnabled:  auth.SsoEnabled,
+		MfaRequired: auth.MfaRequired,
+		UpdatedAt:   timestamppb.New(auth.UpdatedAt.UTC()),
+	}
+	if auth.SsoProvider != nil && strings.TrimSpace(*auth.SsoProvider) != "" {
+		out.Provider = wrapperspb.String(strings.TrimSpace(*auth.SsoProvider))
+	}
+	return out
+}
+
+func (s *TenantService) TestTenantSso(ctx context.Context, req *tenantv1.TestTenantSsoRequest) (*tenantv1.SsoTestResult, error) {
 	_ = ctx
 	_ = req
 	return nil, tenantRPCNotImplemented()

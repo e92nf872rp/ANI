@@ -4143,7 +4143,7 @@ components:
       description: "更新租户认证配置（PUT /admin/tenants/{tenant_id}/auth）"
       properties:
         sso_enabled:  { type: boolean, description: "未传表示不更新" }
-        provider:     { type: string, nullable: true, description: "未传表示不更新" }
+        provider:     { type: string, nullable: true, description: "未传或 null=不更新；空串=清空" }
         mfa_required: { type: boolean, description: "未传表示不更新" }
 
     TenantLifecycleEntry:
@@ -9595,6 +9595,8 @@ paths:
       summary: 更新租户认证配置
       description: |
         部分更新 sso_enabled / provider / mfa_required。Services 层 SSO/MFA 两个 PUT 均映射到此端点。
+        disabled 终态返回 409 TENANT_STATE_INVALID；不存在返回 404。SSO provider 联动校验由 Services UpdateTenantSso 负责。
+        provider：未传或 null=不更新；空串=清空。
       tags: [Tenants]
       x-ani-rbac-scope: "scope:tenant:write"
       parameters:
@@ -9614,6 +9616,7 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/TenantNotFound' }
+        "409": { $ref: '#/components/responses/Conflict', description: "TENANT_STATE_INVALID（disabled 不可改 Auth）" }
 
   /admin/tenants/{tenant_id}/lifecycle:
     get:

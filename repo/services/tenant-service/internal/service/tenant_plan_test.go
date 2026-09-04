@@ -247,6 +247,12 @@ type fakeTenantClient struct {
 	unfreezeFn   func(ctx context.Context, id uuid.UUID) (ports.Tenant, error)
 	disableFn    func(ctx context.Context, id uuid.UUID) (ports.Tenant, error)
 	disableCalls int
+
+	auth          ports.TenantAuth
+	getAuthFn     func(ctx context.Context, id uuid.UUID) (ports.TenantAuth, error)
+	updateAuthFn  func(ctx context.Context, id uuid.UUID, patch ports.TenantAuthPatch) (ports.TenantAuth, error)
+	updateAuthIn  *ports.TenantAuthPatch
+	updateAuthCalls int
 }
 
 var (
@@ -423,12 +429,53 @@ func (f *fakeTenantClient) DisableTenant(ctx context.Context, id uuid.UUID) (por
 	return f.tenant, nil
 }
 
-func (f *fakeTenantClient) GetTenantAuth(context.Context, uuid.UUID) (ports.TenantAuth, error) {
-	panic("unused in tenant plan tests")
+func (f *fakeTenantClient) GetTenantAuth(ctx context.Context, id uuid.UUID) (ports.TenantAuth, error) {
+	if f.getAuthFn != nil {
+		return f.getAuthFn(ctx, id)
+	}
+	if f.auth.TenantID == uuid.Nil {
+		// 缺行默认值路径
+		return ports.TenantAuth{TenantID: id, UpdatedAt: time.Now().UTC()}, nil
+	}
+	if f.auth.TenantID != id {
+		return ports.TenantAuth{}, ports.ErrTenantNotFound
+	}
+	return f.auth, nil
 }
 
-func (f *fakeTenantClient) UpdateTenantAuth(context.Context, uuid.UUID, ports.TenantAuthPatch) (ports.TenantAuth, error) {
-	panic("unused in tenant plan tests")
+func (f *fakeTenantClient) UpdateTenantAuth(ctx context.Context, id uuid.UUID, patch ports.TenantAuthPatch) (ports.TenantAuth, error) {
+	f.updateAuthCalls++
+	in := patch
+	f.updateAuthIn = &in
+	if f.updateAuthFn != nil {
+		return f.updateAuthFn(ctx, id, patch)
+	}
+	// 模拟 Core：disabled 终态 → TENANT_STATE_INVALID
+	if f.tenant.ID != uuid.Nil && f.tenant.ID == id && f.tenant.Status == ports.TenantStatusDisabled {
+		return ports.TenantAuth{}, ports.ErrTenantStateInvalid
+	}
+	if f.auth.TenantID != uuid.Nil && f.auth.TenantID != id {
+		return ports.TenantAuth{}, ports.ErrTenantNotFound
+	}
+	if f.auth.TenantID == uuid.Nil {
+		f.auth = ports.TenantAuth{TenantID: id, UpdatedAt: time.Now().UTC()}
+	}
+	if patch.SsoEnabled != nil {
+		f.auth.SsoEnabled = *patch.SsoEnabled
+	}
+	if patch.SsoProvider != nil {
+		v := strings.TrimSpace(*patch.SsoProvider)
+		if v == "" {
+			f.auth.SsoProvider = nil
+		} else {
+			f.auth.SsoProvider = &v
+		}
+	}
+	if patch.MfaRequired != nil {
+		f.auth.MfaRequired = *patch.MfaRequired
+	}
+	f.auth.UpdatedAt = time.Now().UTC()
+	return f.auth, nil
 }
 
 func (f *fakeTenantClient) ListTenantLifecycle(context.Context, uuid.UUID, ports.TenantLifecycleFilter) (ports.TenantLifecycleListResult, error) {
