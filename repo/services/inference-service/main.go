@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kubercloud/ani/pkg/bootstrap"
+	redisadapter "github.com/kubercloud/ani/services/inference-service/internal/adapter/redis"
 	"github.com/kubercloud/ani/services/inference-service/internal/catalog"
 	"github.com/kubercloud/ani/services/inference-service/internal/catalog/modelsvc"
 	"github.com/kubercloud/ani/services/inference-service/internal/config"
@@ -48,6 +49,12 @@ func main() {
 		creator.WithRuntime(rt),
 		service.NewController(store, time.Now).WithRuntime(rt),
 	).WithLogs(service.NewLogReader(store, rt))
+	// Policy CRUD is part of the inference control plane. The enforcement
+	// path is attached separately once the shared Redis limiter is configured;
+	// keeping the control use case wired here makes the contract available
+	// without silently bypassing limits in the data plane.
+	policyService := service.NewAccessPolicyService(store, redisadapter.NewRateLimiter(deps.Redis), time.Now)
+	server.WithAccessPolicyControl(policyService).WithAccessPolicies(policyService)
 	bootstrap.RunGRPC(cfg.GRPCPort, server.Register, deps)
 }
 

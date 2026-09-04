@@ -77,6 +77,9 @@ func (*storeStub) BeginScaleRollback(context.Context, repository.ScaleRollback) 
 func (*storeStub) FinishScaleRollback(context.Context, repository.ScaleRollbackFinish) error {
 	panic("unexpected FinishScaleRollback")
 }
+func (*storeStub) PublicationWithdrawn(context.Context, uuid.UUID, uuid.UUID, int64) (bool, error) {
+	return false, nil
+}
 
 func readyVersion() catalog.ModelVersion {
 	cpuProfile := catalog.EngineProfile{ID: "vllm-chat-cpu", Version: "1", Runtime: "vllm", ImageRef: "registry/vllm-cpu@sha256:image"}

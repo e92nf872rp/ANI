@@ -15,7 +15,7 @@ export
         image image-gateway image-auth-service \
         clean
 
-.PHONY: test-inference-control-plane-postgres validate-inference-gpu-lws-volcano-live-gate validate-inference-legacy-control-plane validate-inference-incluster-e2e-live-gate validate-inference-console-shaped-e2e-live-gate validate-inference-local-model-source-live-gate validate-inference-create-image-live-gate validate-inference-create-image-harbor-live-gate validate-inference-gpu-single-node-live-gate validate-gpu-plugin-node-partition-live-gate validate-inference-gpu-vllm-eager-live-gate validate-inference-engine-vgpu-live-gate validate-inference-gpu-memory-live-gate validate-inference-envoy-ai-gateway-manifest validate-inference-envoy-ai-gateway-live-gate run-inference-envoy-ai-gateway-live image-envoy-authz-adapter
+.PHONY: test-inference-control-plane-postgres validate-inference-gpu-lws-volcano-live-gate validate-inference-legacy-control-plane validate-inference-incluster-e2e-live-gate validate-inference-console-shaped-e2e-live-gate validate-inference-local-model-source-live-gate validate-inference-create-image-live-gate validate-inference-create-image-harbor-live-gate validate-inference-gpu-single-node-live-gate validate-gpu-plugin-node-partition-live-gate validate-inference-gpu-vllm-eager-live-gate validate-inference-engine-vgpu-live-gate validate-inference-gpu-memory-live-gate validate-inference-envoy-ai-gateway-manifest validate-inference-envoy-ai-gateway-ratelimit-config validate-inference-envoy-ai-gateway-c41-manifest validate-inference-envoy-ai-gateway-live-gate validate-inference-access-policy-migration run-inference-envoy-ai-gateway-live image-envoy-authz-adapter
 
 # ── 帮助 ──────────────────────────────────────────────────────────────────────
 help:
@@ -1053,12 +1053,39 @@ validate-inference-envoy-ai-gateway-manifest:
 	python scripts/validate_inference_envoy_ai_gateway_manifest_test.py
 	python scripts/validate_inference_envoy_ai_gateway_manifest.py
 
+validate-inference-envoy-ai-gateway-ratelimit-config:
+	python scripts/validate_inference_envoy_ai_gateway_ratelimit_config_test.py
+	python scripts/validate_inference_envoy_ai_gateway_ratelimit_config.py
+
+validate-inference-envoy-ai-gateway-c41-manifest:
+	$(PYTHON) scripts/validate_inference_envoy_ai_gateway_c41_manifest_test.py
+	$(PYTHON) scripts/validate_inference_envoy_ai_gateway_c41_manifest.py
+
+validate-inference-access-policy-migration:
+	python scripts/validate_inference_access_policy_migration_test.py
+	python scripts/validate_inference_access_policy_migration.py
+
+.PHONY: validate-inference-gateway-publication-migration
+PYTHON := $(or $(PYTHON),python3)
+validate-inference-gateway-publication-migration:
+	$(PYTHON) scripts/validate_inference_gateway_publication_migration_test.py
+	$(PYTHON) scripts/validate_inference_gateway_publication_migration.py
+
 validate-inference-envoy-ai-gateway-live-gate:
 	python scripts/validate_inference_envoy_ai_gateway_live_gate_test.py
 	python scripts/validate_inference_envoy_ai_gateway_live_gate.py
 
 run-inference-envoy-ai-gateway-live:
 	python scripts/run_inference_envoy_ai_gateway_live.py
+
+.PHONY: validate-inference-envoy-ai-gateway-c41-live-gate run-inference-envoy-ai-gateway-c41-live
+
+validate-inference-envoy-ai-gateway-c41-live-gate:
+	$(PYTHON) scripts/validate_inference_envoy_ai_gateway_c41_live_gate_test.py
+	$(PYTHON) scripts/validate_inference_envoy_ai_gateway_c41_live_gate.py
+
+run-inference-envoy-ai-gateway-c41-live:
+	$(PYTHON) scripts/run_inference_envoy_ai_gateway_c41_live.py
 
 validate-inference-legacy-control-plane:
 	@echo "→ 校验旧 inference.v1 / operator 控制面已退役..."
@@ -1297,6 +1324,14 @@ image-envoy-authz-adapter:
 	docker build -t $(REGISTRY)/envoy-authz-adapter:$(VERSION) \
 		-f services/envoy-authz-adapter/Dockerfile \
 		.
+
+image-inference-service:
+	docker build -f services/inference-service/Dockerfile -t $(REGISTRY)/inference-service:$(VERSION) .
+
+image-inference-gateway-publisher:
+	docker build -f services/inference-service/Dockerfile.publisher -t $(REGISTRY)/inference-gateway-publisher:$(VERSION) .
+
+.PHONY: image-inference-service image-inference-gateway-publisher
 
 # ── 清理 ──────────────────────────────────────────────────────────────────────
 clean:

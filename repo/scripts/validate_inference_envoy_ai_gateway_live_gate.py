@@ -20,6 +20,7 @@ READINESS_CLAIMS = {
 }
 REQUIRED_CHECKS = {
     "envoy-resources-accepted",
+    "gateway-global-rate-limit-configured",
     "adapter-ready",
     "valid-ak-nonstream-chat",
     "valid-ak-embedding",

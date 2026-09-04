@@ -131,6 +131,10 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	modelServiceClient = options.ModelServiceClient
 	registerModels(svc)
 	inferenceControlClient = options.InferenceServiceClient
+	inferencePolicyClient = nil
+	if policyClient, ok := options.InferenceServiceClient.(InferencePolicyClient); ok {
+		inferencePolicyClient = policyClient
+	}
 	inferenceImageRegistry = options.ImageRegistry
 	registerInferenceServices(svc)
 	// Inject the KB gRPC client + SSE wiring into the package-level holders

@@ -59,6 +59,7 @@ def lifecycle_plan() -> list[str]:
     """Return the fixed live sequence without performing any side effects."""
     return [
         "apply-and-wait",
+        "gateway-global-rate-limit-configured",
         "owner-nonstream",
         "owner-embedding",
         "owner-sse",
@@ -811,9 +812,11 @@ def run_live() -> dict[str, Any]:
             ("aiservicebackend", "ani-c40-embed-vllm"),
             ("aigatewayroute", "ani-c40"),
             ("securitypolicy", "ani-c40-ext-auth"),
+            ("backendtrafficpolicy", "ani-c40-ratelimit"),
         ):
             wait_condition(kind, name, "Accepted", ADAPTER_NAMESPACE)
         checks["envoy-resources-accepted"] = {"status": "passed"}
+        checks["gateway-global-rate-limit-configured"] = {"status": "passed"}
         checks["adapter-ready"] = {"status": "passed"}
 
         owner_id, owner_key = create_registered_api_key(owner_access, key_cleanup, name=temporary_name("owner"), scopes=["scope:models:read"], rpm=60)

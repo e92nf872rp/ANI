@@ -103,6 +103,10 @@ func (m *memoryCache) Increment(_ context.Context, key string, _ time.Duration) 
 	return current, nil
 }
 
+func (m *memoryCache) TTL(_ context.Context, _ string) (time.Duration, error) {
+	return time.Minute, nil
+}
+
 func (m *memoryCache) Exists(_ context.Context, key string) (bool, error) {
 	_, ok := m.values[key]
 	return ok, nil

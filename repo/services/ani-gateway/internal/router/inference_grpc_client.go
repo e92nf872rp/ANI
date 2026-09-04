@@ -28,6 +28,18 @@ type InferenceControlClient interface {
 	ListInferenceServiceLogs(ctx context.Context, tenantID, serviceID string, limit int32, cursor, level string) (*inferencecontrolv1.ListInferenceServiceLogsResponse, error)
 }
 
+// InferencePolicyClient is optional so existing inference test doubles remain compatible.
+type InferencePolicyClient interface {
+	ListInferenceAccessPolicies(context.Context, string) (*inferencecontrolv1.ListInferenceAccessPoliciesResponse, error)
+	CreateInferenceAccessPolicy(context.Context, string, *inferencecontrolv1.CreateInferenceAccessPolicyRequest) (*inferencecontrolv1.InferenceAccessPolicy, error)
+	GetInferenceAccessPolicy(context.Context, string, string) (*inferencecontrolv1.InferenceAccessPolicy, error)
+	PatchInferenceAccessPolicy(context.Context, string, string, *inferencecontrolv1.PatchInferenceAccessPolicyRequest) (*inferencecontrolv1.InferenceAccessPolicy, error)
+	DeleteInferenceAccessPolicy(context.Context, string, string, string) error
+	ListInferenceServicePolicies(context.Context, string, string) (*inferencecontrolv1.InferenceServicePolicies, error)
+	UpdateInferenceServicePolicies(context.Context, string, string, *inferencecontrolv1.UpdateInferenceServicePoliciesRequest) (*inferencecontrolv1.InferenceServicePolicies, error)
+	ListInferencePolicyEvents(context.Context, *inferencecontrolv1.ListInferencePolicyEventsRequest) (*inferencecontrolv1.InferencePolicyEventListResponse, error)
+}
+
 type inferenceGRPCClient struct {
 	client  inferencecontrolv1.InferenceControlClient
 	timeout time.Duration
@@ -116,6 +128,53 @@ func (c *inferenceGRPCClient) ListInferenceServiceLogs(ctx context.Context, tena
 	return c.client.ListInferenceServiceLogs(callCtx, &inferencecontrolv1.ListInferenceServiceLogsRequest{
 		TenantId: tenantID, ServiceId: serviceID, Limit: limit, Cursor: cursor, Level: level,
 	})
+}
+
+func (c *inferenceGRPCClient) ListInferenceAccessPolicies(ctx context.Context, tenantID string) (*inferencecontrolv1.ListInferenceAccessPoliciesResponse, error) {
+	callCtx, cancel := c.callCtx(ctx)
+	defer cancel()
+	return c.client.ListInferenceAccessPolicies(callCtx, &inferencecontrolv1.ListInferenceAccessPoliciesRequest{TenantId: tenantID})
+}
+func (c *inferenceGRPCClient) CreateInferenceAccessPolicy(ctx context.Context, tenantID string, req *inferencecontrolv1.CreateInferenceAccessPolicyRequest) (*inferencecontrolv1.InferenceAccessPolicy, error) {
+	req.TenantId = tenantID
+	callCtx, cancel := c.callCtx(ctx)
+	defer cancel()
+	return c.client.CreateInferenceAccessPolicy(callCtx, req)
+}
+func (c *inferenceGRPCClient) GetInferenceAccessPolicy(ctx context.Context, tenantID, id string) (*inferencecontrolv1.InferenceAccessPolicy, error) {
+	callCtx, cancel := c.callCtx(ctx)
+	defer cancel()
+	return c.client.GetInferenceAccessPolicy(callCtx, &inferencecontrolv1.GetInferenceAccessPolicyRequest{TenantId: tenantID, PolicyId: id})
+}
+func (c *inferenceGRPCClient) PatchInferenceAccessPolicy(ctx context.Context, tenantID, id string, req *inferencecontrolv1.PatchInferenceAccessPolicyRequest) (*inferencecontrolv1.InferenceAccessPolicy, error) {
+	req.TenantId = tenantID
+	req.PolicyId = id
+	callCtx, cancel := c.callCtx(ctx)
+	defer cancel()
+	return c.client.PatchInferenceAccessPolicy(callCtx, req)
+}
+func (c *inferenceGRPCClient) DeleteInferenceAccessPolicy(ctx context.Context, tenantID, id, key string) error {
+	callCtx, cancel := c.callCtx(ctx)
+	defer cancel()
+	_, err := c.client.DeleteInferenceAccessPolicy(callCtx, &inferencecontrolv1.DeleteInferenceAccessPolicyRequest{TenantId: tenantID, PolicyId: id, IdempotencyKey: key})
+	return err
+}
+func (c *inferenceGRPCClient) ListInferenceServicePolicies(ctx context.Context, tenantID, id string) (*inferencecontrolv1.InferenceServicePolicies, error) {
+	callCtx, cancel := c.callCtx(ctx)
+	defer cancel()
+	return c.client.ListInferenceServicePolicies(callCtx, &inferencecontrolv1.ListInferenceServicePoliciesRequest{TenantId: tenantID, InferenceServiceId: id})
+}
+func (c *inferenceGRPCClient) UpdateInferenceServicePolicies(ctx context.Context, tenantID, id string, req *inferencecontrolv1.UpdateInferenceServicePoliciesRequest) (*inferencecontrolv1.InferenceServicePolicies, error) {
+	req.TenantId = tenantID
+	req.InferenceServiceId = id
+	callCtx, cancel := c.callCtx(ctx)
+	defer cancel()
+	return c.client.UpdateInferenceServicePolicies(callCtx, req)
+}
+func (c *inferenceGRPCClient) ListInferencePolicyEvents(ctx context.Context, req *inferencecontrolv1.ListInferencePolicyEventsRequest) (*inferencecontrolv1.InferencePolicyEventListResponse, error) {
+	callCtx, cancel := c.callCtx(ctx)
+	defer cancel()
+	return c.client.ListInferencePolicyEvents(callCtx, req)
 }
 
 func writeInferenceUnavailable(c *app.RequestContext) {
