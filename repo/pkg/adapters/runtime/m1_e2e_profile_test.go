@@ -23,8 +23,8 @@ func TestM1E2EProfileVMContainerAndGPUContainer(t *testing.T) {
 			},
 		},
 	})
-	assertE2ELifecycle(t, service, vm.Ref.InstanceID, ports.WorkloadKindVM)
-	assertE2EQuery(t, service, vm.Ref.InstanceID, ports.WorkloadKindVM)
+	// VM terminal ops must be unsupported regardless of state; assert while
+	// the VM is still running (before the lifecycle helper stops it for resize).
 	if _, err := service.Ops(context.Background(), ports.WorkloadInstanceOpsRequest{
 		TenantID:        "tenant-a",
 		InstanceID:      vm.Ref.InstanceID,
@@ -34,6 +34,8 @@ func TestM1E2EProfileVMContainerAndGPUContainer(t *testing.T) {
 	}); err == nil {
 		t.Fatalf("VM terminal ops error = nil, want unsupported")
 	}
+	assertE2ELifecycle(t, service, vm.Ref.InstanceID, ports.WorkloadKindVM)
+	assertE2EQuery(t, service, vm.Ref.InstanceID, ports.WorkloadKindVM)
 	assertE2EDelete(t, service, vm.Ref.InstanceID)
 
 	container := createE2EInstance(t, service, ports.WorkloadSpec{
@@ -42,10 +44,11 @@ func TestM1E2EProfileVMContainerAndGPUContainer(t *testing.T) {
 		Kind:     ports.WorkloadKindContainer,
 		Image:    "harbor/app:1",
 	})
+	// Terminal requires a running instance; assert before lifecycle stops it.
+	assertE2EOps(t, service, container.Ref.InstanceID, ports.WorkloadInstanceOpsTerminal)
 	assertE2ELifecycle(t, service, container.Ref.InstanceID, ports.WorkloadKindContainer)
 	assertE2EQuery(t, service, container.Ref.InstanceID, ports.WorkloadKindContainer)
 	assertE2EOps(t, service, container.Ref.InstanceID, ports.WorkloadInstanceOpsLogs)
-	assertE2EOps(t, service, container.Ref.InstanceID, ports.WorkloadInstanceOpsTerminal)
 	assertE2EDelete(t, service, container.Ref.InstanceID)
 
 	gpu := createE2EInstance(t, service, ports.WorkloadSpec{
@@ -59,10 +62,11 @@ func TestM1E2EProfileVMContainerAndGPUContainer(t *testing.T) {
 			},
 		},
 	})
+	// Exec requires a running instance; assert before lifecycle stops it.
+	assertE2EOps(t, service, gpu.Ref.InstanceID, ports.WorkloadInstanceOpsExec)
 	assertE2ELifecycle(t, service, gpu.Ref.InstanceID, ports.WorkloadKindGPUContainer)
 	assertE2EQuery(t, service, gpu.Ref.InstanceID, ports.WorkloadKindGPUContainer)
 	assertE2EOps(t, service, gpu.Ref.InstanceID, ports.WorkloadInstanceOpsMetrics)
-	assertE2EOps(t, service, gpu.Ref.InstanceID, ports.WorkloadInstanceOpsExec)
 	assertE2EDelete(t, service, gpu.Ref.InstanceID)
 }
 
@@ -147,22 +151,19 @@ func assertE2ELifecycle(t *testing.T, service ports.WorkloadInstanceService, ins
 	if restart.Status.State != ports.WorkloadStateRunning {
 		t.Fatalf("Restart(%s) state = %s, want running", instanceID, restart.Status.State)
 	}
-	expectedResizeState := ports.WorkloadStateRunning
-	if kind == ports.WorkloadKindVM {
-		stopped, err := service.Stop(context.Background(), ports.WorkloadInstanceLifecycleRequest{
-			IdempotencyKey:  "stop-for-resize-" + instanceID,
-			TenantID:        "tenant-a",
-			InstanceID:      instanceID,
-			UserID:          "user-a",
-			PermissionProof: "rbac:update:workload",
-		})
-		if err != nil {
-			t.Fatalf("Stop before resize(%s) error = %v", instanceID, err)
-		}
-		if stopped.Status.State != ports.WorkloadStateStopped {
-			t.Fatalf("Stop before resize(%s) state = %s, want stopped", instanceID, stopped.Status.State)
-		}
-		expectedResizeState = ports.WorkloadStateStopped
+	// D1: resize requires a stopped instance for every kind, so stop first.
+	stopped, err := service.Stop(context.Background(), ports.WorkloadInstanceLifecycleRequest{
+		IdempotencyKey:  "stop-for-resize-" + instanceID,
+		TenantID:        "tenant-a",
+		InstanceID:      instanceID,
+		UserID:          "user-a",
+		PermissionProof: "rbac:update:workload",
+	})
+	if err != nil {
+		t.Fatalf("Stop before resize(%s) error = %v", instanceID, err)
+	}
+	if stopped.Status.State != ports.WorkloadStateStopped {
+		t.Fatalf("Stop before resize(%s) state = %s, want stopped", instanceID, stopped.Status.State)
 	}
 	resize, err := service.Resize(context.Background(), ports.WorkloadInstanceResizeRequest{
 		IdempotencyKey:  "resize-" + instanceID,
@@ -178,8 +179,8 @@ func assertE2ELifecycle(t *testing.T, service ports.WorkloadInstanceService, ins
 	if err != nil {
 		t.Fatalf("Resize(%s) error = %v", instanceID, err)
 	}
-	if resize.Status.State != expectedResizeState {
-		t.Fatalf("Resize(%s) state = %s, want %s", instanceID, resize.Status.State, expectedResizeState)
+	if resize.Status.State != ports.WorkloadStateStopped {
+		t.Fatalf("Resize(%s) state = %s, want stopped", instanceID, resize.Status.State)
 	}
 }
 

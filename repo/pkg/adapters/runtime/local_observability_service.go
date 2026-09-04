@@ -74,6 +74,19 @@ func (s *LocalObservabilityService) QueryRange(_ context.Context, request ports.
 	}, nil
 }
 
+// QueryResourceTrend local profile 返回空 matrix，不伪造租户级资源使用率曲线。
+func (s *LocalObservabilityService) QueryResourceTrend(_ context.Context, request ports.ObservabilityResourceTrendRequest) (ports.ObservabilityRangeQueryResult, error) {
+	if strings.TrimSpace(request.TenantID) == "" {
+		return ports.ObservabilityRangeQueryResult{}, fmt.Errorf("%w: tenant_id is required", ports.ErrInvalid)
+	}
+	return ports.ObservabilityRangeQueryResult{
+		Query:      "",
+		ResultType: ports.ObservabilityResultMatrix,
+		Results:    []ports.ObservabilityRangeSeries{},
+		DevProfile: observabilityDevProfile(),
+	}, nil
+}
+
 func (s *LocalObservabilityService) CreateAlertRule(_ context.Context, request ports.ObservabilityAlertRuleCreateRequest) (ports.ObservabilityAlertRuleRecord, error) {
 	if err := requireObservabilityTenantAndName(request.TenantID, request.Name); err != nil {
 		return ports.ObservabilityAlertRuleRecord{}, err

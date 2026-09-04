@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app/server"
 
@@ -105,6 +106,15 @@ func main() {
 			}
 		}()
 	}
+	instanceSessionIssuer, closeInstanceSession, err := newGatewayInstanceSessionIssuer(gatewayInstanceSessionRuntimeConfigFromEnv())
+	if err != nil {
+		logger.Warn("session gateway gRPC client unavailable; real-provider session routes will fail closed", "err", err)
+		instanceSessionIssuer = nil
+		closeInstanceSession = nil
+	}
+	if closeInstanceSession != nil {
+		defer closeInstanceSession()
+	}
 	gpuSchedulingQueueStore, err := newGatewayGPUSchedulingQueueStore(gatewayGPUSchedulingQueueRuntimeConfigFromEnv())
 	if err != nil {
 		logger.Error("failed to configure gpu scheduling queue store runtime", "err", err)
@@ -168,6 +178,16 @@ func main() {
 		logger.Info("observability provider runtime configured",
 			"provider", strings.TrimSpace(os.Getenv("INSTANCE_OBSERVABILITY_PROVIDER")),
 		)
+	}
+	platformServiceHealthConfig, err := gatewayPlatformServiceHealthRuntimeConfigFromEnv()
+	if err != nil {
+		logger.Error("failed to configure platform service health", "err", err)
+		os.Exit(1)
+	}
+	platformServiceHealthReader, err := newGatewayPlatformServiceHealthReader(platformServiceHealthConfig, logger)
+	if err != nil {
+		logger.Error("failed to configure platform service health reader", "err", err)
+		os.Exit(1)
 	}
 	inferenceServiceClient, closeInferenceGRPC, err := newGatewayInferenceServiceClient(runtimeCtx, gatewayInferenceServiceRuntimeConfigFromEnv())
 	if err != nil {
@@ -262,6 +282,11 @@ func main() {
 		logger.Error("failed to configure gpu inventory provider runtime", "err", err)
 		os.Exit(1)
 	}
+	platformCapacityService, err := newGatewayPlatformCapacityService(gatewayGPUInventoryRuntimeConfigFromEnv(), gpuInventory, kubernetesRESTClient, tenantService)
+	if err != nil {
+		logger.Error("failed to configure platform capacity provider runtime", "err", err)
+		os.Exit(1)
+	}
 	var routeInstanceRuntime *router.InstanceRuntime
 	if instanceRuntime.Service != nil {
 		routeInstanceRuntime = &router.InstanceRuntime{
@@ -286,10 +311,12 @@ func main() {
 		ImageRegistry:                         imageRegistry,
 		VectorStoreService:                    vectorStoreService,
 		InstanceObservability:                 instanceObservability,
+		InstanceSessionIssuer:                 instanceSessionIssuer,
 		InstanceObservabilityUsesInstanceName: instanceObservabilityUsesInstanceName,
 		InstanceRuntime:                       routeInstanceRuntime,
 		KubernetesRESTClient:                  kubernetesRESTClient,
 		ObservabilityService:                  observabilityService,
+		PlatformServiceHealthReader:           platformServiceHealthReader,
 		EmailNotificationStore:                runtimeadapter.NewLocalEmailNotificationStore(),
 		InferenceServiceClient:                inferenceServiceClient,
 		ModelServiceClient:                    modelServiceClient,
@@ -305,19 +332,39 @@ func main() {
 		MetadataStore:                         quotaMetadataStore,
 		QuotaStoreService:                     quotaStoreService,
 		MeteringService:                       meteringService,
+		PlatformCapacityService:               platformCapacityService,
 	})
+	runtimeAdmin, err := startGatewayRuntimeAdmin(logger)
+	if err != nil {
+		logger.Error("failed to start runtime admin", "err", err)
+		os.Exit(1)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-
-	go func() {
-		<-ctx.Done()
-		if shutdownErr := h.Shutdown(context.Background()); shutdownErr != nil {
-			logger.Error("failed to shut down gateway", "err", shutdownErr)
+	h.SetCustomSignalWaiter(func(serverErrors chan error) error {
+		startupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		if waitErr := waitForGatewayPublicListener(startupCtx, gatewayListenAddr(), serverErrors); waitErr != nil {
+			return waitErr
 		}
-	}()
-
+		runtimeAdmin.SetServing(true)
+		select {
+		case <-ctx.Done():
+			runtimeAdmin.SetServing(false)
+			return nil
+		case serveErr := <-serverErrors:
+			runtimeAdmin.SetServing(false)
+			return serveErr
+		}
+	})
 	h.Spin()
+	runtimeAdmin.SetServing(false)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if shutdownErr := runtimeAdmin.Shutdown(shutdownCtx); shutdownErr != nil {
+		logger.Error("failed to shut down runtime admin", "err", shutdownErr)
+	}
 }
 
 func gatewayRedisURLFromEnv() string {

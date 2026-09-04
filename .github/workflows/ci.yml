@@ -178,6 +178,8 @@ jobs:
         working-directory: repo
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-go@v5
         with:
@@ -203,6 +205,11 @@ jobs:
       - name: Install Python gate dependencies
         run: |
           pip install -r ci/requirements-contract.txt
+
+      - name: Validate service runtime observability
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+        run: make validate-service-runtime-observability
 
       - name: Run Services PR gate
         run: make validate-services
@@ -252,7 +259,10 @@ jobs:
       - name: Scan Python dependencies
         run: |
           pip install pip-audit==2.10.1
-          pip-audit -r ai/rag-engine/requirements.txt
+          # PYSEC-2026-3740 (nltk pathsec model-artifact 漏洞): nltk 3.10.3 已是最新版且无修复版本
+          # (GHSA-8mgp-746c-j5xp last_affected=3.10.3, Not yet patched); rag-engine 仅将 nltk 作为
+          # llama-index-core 传递依赖, 不调用受影响的 TransitionParser/AveragedPerceptron 等 API。
+          pip-audit -r ai/rag-engine/requirements.txt --ignore-vuln PYSEC-2026-3740 --ignore-vuln GHSA-8mgp-746c-j5xp
 
   # ── OpenAPI Spec 校验 ────────────────────────────────────────────────────────
   api-spec-lint:

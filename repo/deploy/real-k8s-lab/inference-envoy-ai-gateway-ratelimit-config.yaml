@@ -1,0 +1,20 @@
+# Fragment for the existing Envoy Gateway control-plane configuration.
+# Merge this rateLimit section into the installed EnvoyGateway resource; this
+# fragment is intentionally not a standalone replacement for that resource.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ani-inference-ratelimit
+  namespace: envoy-gateway-system
+data:
+  envoy-gateway.yaml: |
+    apiVersion: gateway.envoyproxy.io/v1alpha1
+    kind: EnvoyGateway
+    rateLimit:
+      backend:
+        type: Redis
+        redis:
+          urlRef:
+            secretKeyRef:
+              name: ani-envoy-ratelimit-redis
+              key: REDIS_ENDPOINT

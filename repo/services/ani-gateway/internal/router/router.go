@@ -22,10 +22,12 @@ type RegisterOptions struct {
 	ImageRegistry                         ports.ImageRegistry
 	VectorStoreService                    ports.VectorStoreService
 	InstanceObservability                 ports.InstanceObservability
+	InstanceSessionIssuer                 ports.InstanceSessionIssuer
 	InstanceObservabilityUsesInstanceName bool
 	InstanceRuntime                       *InstanceRuntime
 	KubernetesRESTClient                  *runtimeadapter.KubernetesRESTClient
 	ObservabilityService                  ports.ObservabilityService
+	PlatformServiceHealthReader           ports.PlatformServiceHealthReader
 	EmailNotificationStore                ports.EmailNotificationStore
 	// InferenceServiceClient routes /api/v1/svc/inference-services* to
 	// inference-service via internal InferenceControl gRPC. When nil the
@@ -65,6 +67,10 @@ type RegisterOptions struct {
 	// (GET /metering/usage + GET /metering/usage/platform). When nil the
 	// handlers fall back to the in-process local adapter.
 	MeteringService ports.MeteringService
+	// PlatformCapacityService backs the platform capacity overview endpoint
+	// (GET /platform/capacity). When nil the handler falls back to the
+	// local deterministic adapter.
+	PlatformCapacityService ports.PlatformCapacityService
 }
 
 // Register wires all route groups onto the Hertz server.
@@ -83,6 +89,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerBranding(v1)
 	registerAuth(v1)
 	registerMetering(v1, options.MeteringService)
+	registerPlatformCapacity(v1, options.PlatformCapacityService)
 	registerHarbor(v1, options.ImageRegistry)
 	// Instances register first so their service can act as InstanceLookup.
 	// 注入到 ObservabilityService（时序图 PromQL 代理需要解析实例记录的
@@ -90,7 +97,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	if options.InstanceRuntime != nil && options.InstanceRuntime.TaskStore == nil {
 		options.InstanceRuntime.TaskStore = options.AsyncTaskStore
 	}
-	instanceLookup, observeInstance := registerInstancesWithRuntime(v1, options.InstanceObservability, options.InstanceObservabilityUsesInstanceName, options.GPUInventory, options.KubernetesRESTClient, options.SecretService, options.InstanceRuntime, options.GPUSpecStore)
+	instanceLookup, observeInstance := registerInstancesWithRuntime(v1, options.InstanceObservability, options.InstanceSessionIssuer, options.InstanceObservabilityUsesInstanceName, options.GPUInventory, options.KubernetesRESTClient, options.SecretService, options.InstanceRuntime, options.GPUSpecStore)
 	// Tasks register after instances so the lazy-sync observer (store read +
 	// single-instance Kubernetes refresh) is available for GET /tasks/{id}.
 	registerTasksWithStore(v1, options.AsyncTaskStore, observeInstance)
@@ -98,6 +105,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 		promSvc.SetInstanceLookup(instanceLookup)
 	}
 	registerObservability(v1, options.ObservabilityService)
+	registerPlatformServiceHealth(v1, options.PlatformServiceHealthReader)
 	registerGPUInventoryResourcesWithStore(v1, options.GPUInventory, options.GPUInstanceStore, options.KubernetesRESTClient, options.GPUSpecStore, options.QuotaStoreService, options.QuotaAdminService)
 	registerGPUSchedulingResourcesWithStore(v1, options.GPUSchedulingQueueStore)
 	registerNetworkResourcesWithService(v1, options.NetworkService)
@@ -125,6 +133,10 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	modelServiceClient = options.ModelServiceClient
 	registerModels(svc)
 	inferenceControlClient = options.InferenceServiceClient
+	inferencePolicyClient = nil
+	if policyClient, ok := options.InferenceServiceClient.(InferencePolicyClient); ok {
+		inferencePolicyClient = policyClient
+	}
 	inferenceImageRegistry = options.ImageRegistry
 	registerInferenceServices(svc)
 	// Inject the KB gRPC client + SSE wiring into the package-level holders

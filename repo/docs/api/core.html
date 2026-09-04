@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>235</dd></div>
-          <div><dt>Schemas</dt><dd>317</dd></div>
+          <div><dt>Operations</dt><dd>239</dd></div>
+          <div><dt>Schemas</dt><dd>323</dd></div>
         </dl>
       </section>
 
@@ -893,7 +893,7 @@
           <td><code>createInstanceConsoleSession</code></td>
           <td>申请 VM console/VNC session</td>
           <td><code>scope:instances:console</code></td>
-          <td>200, 400, 401, 403, 404</td>
+          <td>200, 400, 401, 403, 404, 409, 422, 429, 500, 503</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -909,7 +909,7 @@
           <td><code>createInstanceExecSession</code></td>
           <td>创建实例终端 exec session</td>
           <td><code>scope:instances:exec</code></td>
-          <td>200, 400, 401, 403, 404</td>
+          <td>200, 400, 401, 403, 404, 409, 422, 429, 500, 503</td>
         </tr>
         <tr>
           <td><span class="method method-post">POST</span></td>
@@ -926,6 +926,14 @@
           <td>查询实例日志</td>
           <td><code>scope:instances:read</code></td>
           <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/instances/{instance_id}/logs/stream</code></td>
+          <td><code>streamInstanceLogs</code></td>
+          <td>实例日志 SSE 流式输出</td>
+          <td><code>scope:instances:read</code></td>
+          <td>200, 400, 401, 403, 404, 503</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -1593,6 +1601,14 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/observability/resource_trend</code></td>
+          <td><code>queryResourceTrendObservability</code></td>
+          <td>租户级资源使用率趋势</td>
+          <td><code>scope:observability:read</code></td>
+          <td>200, 400, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/platform-workload-capabilities</code></td>
           <td><code>getPlatformWorkloadCapabilities</code></td>
           <td>查询平台工作负载能力</td>
@@ -1646,6 +1662,22 @@
           <td>查询平台内部工作负载日志</td>
           <td><code>scope:platform-workloads:read</code></td>
           <td>200, 400, 401, 403, 404, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/platform/capacity</code></td>
+          <td><code>getPlatformCapacity</code></td>
+          <td>查询平台容量态势汇总</td>
+          <td><code>scope:capacity:read</code></td>
+          <td>200, 401, 403, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/platform/services/health</code></td>
+          <td><code>getPlatformServiceHealth</code></td>
+          <td>查询 ANI 服务监控可达性</td>
+          <td><code>scope:observability:read</code></td>
+          <td>200, 401, 403, 503</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -2206,7 +2238,13 @@
         <li><code>PasswordLoginRequest</code></li>
         <li><code>PlanBoundTenantCount</code></li>
         <li><code>PlanBoundTenantCountList</code></li>
+        <li><code>PlatformCapacityResponse</code></li>
+        <li><code>PlatformCapacitySummary</code></li>
         <li><code>PlatformPasswordLoginRequest</code></li>
+        <li><code>PlatformRegion</code></li>
+        <li><code>PlatformRegionCapacity</code></li>
+        <li><code>PlatformServiceHealthComponent</code></li>
+        <li><code>PlatformServiceHealthResponse</code></li>
         <li><code>PlatformUser</code></li>
         <li><code>PlatformUserCreateRequest</code></li>
         <li><code>PlatformUserIdempotentRequest</code></li>

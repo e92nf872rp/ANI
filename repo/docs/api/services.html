@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1/svc</code></dd></div>
-          <div><dt>Operations</dt><dd>115</dd></div>
-          <div><dt>Schemas</dt><dd>121</dd></div>
+          <div><dt>Operations</dt><dd>120</dd></div>
+          <div><dt>Schemas</dt><dd>127</dd></div>
         </dl>
       </section>
 
@@ -432,6 +432,14 @@
           <td>200, 404</td>
         </tr>
         <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/knowledge-bases/{kb_id}</code></td>
+          <td><code>updateKnowledgeBase</code></td>
+          <td>更新知识库基础信息（名称/描述）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
           <td><span class="method method-get">GET</span></td>
           <td><code>/knowledge-bases/{kb_id}/citations</code></td>
           <td><code>listKnowledgeBaseCitations</code></td>
@@ -478,6 +486,22 @@
           <td>删除知识库文档</td>
           <td><code></code></td>
           <td>204, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/knowledge-bases/{kb_id}/documents/{doc_id}</code></td>
+          <td><code>getKnowledgeBaseDocument</code></td>
+          <td>获取知识库文档详情</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/knowledge-bases/{kb_id}/documents/{doc_id}/chunks</code></td>
+          <td><code>listKnowledgeBaseDocumentChunks</code></td>
+          <td>知识库文档分块明细列表</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
         </tr>
         <tr>
           <td><span class="method method-post">POST</span></td>
@@ -540,6 +564,22 @@
           <td><code>/knowledge-bases/{kb_id}/sessions</code></td>
           <td><code>listKnowledgeBaseSessions</code></td>
           <td>知识库对话历史列表</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/knowledge-bases/{kb_id}/sessions/{session_id}</code></td>
+          <td><code>deleteKnowledgeBaseSession</code></td>
+          <td>删除知识库对话会话</td>
+          <td><code></code></td>
+          <td>204, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/knowledge-bases/{kb_id}/sessions/{session_id}/messages</code></td>
+          <td><code>listKnowledgeBaseSessionMessages</code></td>
+          <td>知识库会话消息列表</td>
           <td><code></code></td>
           <td>200, 401, 403, 404</td>
         </tr>
@@ -1144,6 +1184,8 @@
         <li><code>InvitationResult</code></li>
         <li><code>InviteAdminRequest</code></li>
         <li><code>InviteMemberRequest</code></li>
+        <li><code>KBChunk</code></li>
+        <li><code>KBChunkListResponse</code></li>
         <li><code>KBCitation</code></li>
         <li><code>KBCitationListResponse</code></li>
         <li><code>KBConfig</code></li>
@@ -1152,6 +1194,9 @@
         <li><code>KBQueryResponse</code></li>
         <li><code>KBSession</code></li>
         <li><code>KBSessionListResponse</code></li>
+        <li><code>KBSessionMessage</code></li>
+        <li><code>KBSessionMessageListResponse</code></li>
+        <li><code>KBSourceChunk</code></li>
         <li><code>KnowledgeBase</code></li>
         <li><code>Model</code></li>
         <li><code>ModelList</code></li>
@@ -1198,6 +1243,7 @@
         <li><code>UpdateInferenceServiceRequest</code></li>
         <li><code>UpdateKBConfigRequest</code></li>
         <li><code>UpdateKBPermissionsRequest</code></li>
+        <li><code>UpdateKnowledgeBaseRequest</code></li>
         <li><code>UpdateQuotaLimitsRequest</code></li>
         <li><code>UpdateRoleRequest</code></li>
         <li><code>UpdateSsoConfigRequest</code></li>

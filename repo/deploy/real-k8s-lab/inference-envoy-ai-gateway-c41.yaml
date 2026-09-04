@@ -1,0 +1,351 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: envoy-authz-adapter
+  namespace: ani-aigw
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: envoy-authz-adapter
+  namespace: ani-aigw
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: envoy-authz-adapter
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: envoy-authz-adapter
+    spec:
+      serviceAccountName: envoy-authz-adapter
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: envoy-authz-adapter
+          image: docker.changqingyun.cn/ani/envoy-authz-adapter:c41-20260831
+          imagePullPolicy: Always
+          ports:
+            - name: grpc
+              containerPort: 9002
+              protocol: TCP
+          env:
+            - name: AUTH_SERVICE_GRPC_ADDR
+              value: ani-auth-service.ani-system.svc.cluster.local:9101
+            - name: INFERENCE_SERVICE_GRPC_ADDR
+              value: inference-service.ani-system.svc.cluster.local:9104
+            - name: AUTH_TIMEOUT
+              value: 2s
+            - name: INFERENCE_TIMEOUT
+              value: 2s
+            - name: GRPC_PORT
+              value: "9002"
+          readinessProbe:
+            grpc:
+              port: 9002
+            initialDelaySeconds: 2
+          livenessProbe:
+            grpc:
+              port: 9002
+            initialDelaySeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: envoy-authz-adapter
+  namespace: ani-aigw
+spec:
+  selector:
+    app.kubernetes.io/name: envoy-authz-adapter
+  ports:
+    - name: grpc
+      port: 9002
+      protocol: TCP
+      targetPort: grpc
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: envoy-authz-adapter
+  namespace: ani-aigw
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: envoy-authz-adapter
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: envoy
+              gateway.envoyproxy.io/owning-gateway-name: ani-aigw
+              gateway.envoyproxy.io/owning-gateway-namespace: ani-aigw
+      ports:
+        - protocol: TCP
+          port: 9002
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: TCP
+          port: 53
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ani-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ani-auth-service
+      ports:
+        - protocol: TCP
+          port: 9101
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ani-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: inference-service
+      ports:
+        - protocol: TCP
+          port: 9104
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: ani-inference-ext-auth
+  namespace: ani-aigw
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: ani-aigw
+  extAuth:
+    failOpen: false
+    statusOnError: 503
+    recomputeRoute: true
+    headersToExtAuth:
+      - authorization
+      - x-ai-eg-model
+      - accept
+    grpc:
+      backendRefs:
+        - name: envoy-authz-adapter
+          port: 9002
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: inference-gateway-publisher
+  namespace: ani-system
+automountServiceAccountToken: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference-gateway-publisher
+  namespace: ani-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: inference-gateway-publisher
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: inference-gateway-publisher
+    spec:
+      serviceAccountName: inference-gateway-publisher
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: inference-gateway-publisher
+          image: docker.changqingyun.cn/ani/inference-gateway-publisher:c41-20260831
+          imagePullPolicy: Always
+          ports:
+            - name: health
+              containerPort: 9206
+              protocol: TCP
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ani-services-runtime
+                  key: database_url
+            - name: INFERENCE_AI_GATEWAY_PUBLIC_BASE_URL
+              value: https://ai.example.com
+            - name: INFERENCE_AI_GATEWAY_NAMESPACE
+              value: ani-aigw
+            - name: INFERENCE_AI_GATEWAY_NAME
+              value: ani-aigw
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: inference-gateway-publisher
+  namespace: ani-aigw
+rules:
+  - apiGroups:
+      - gateway.envoyproxy.io
+    resources:
+      - backends
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - patch
+      - delete
+  - apiGroups:
+      - aigateway.envoyproxy.io
+    resources:
+      - aiservicebackends
+      - aigatewayroutes
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - patch
+      - delete
+  - apiGroups:
+      - gateway.networking.k8s.io
+    resources:
+      - gateways
+    verbs:
+      - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: inference-gateway-publisher
+  namespace: ani-aigw
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: inference-gateway-publisher
+subjects:
+  - kind: ServiceAccount
+    name: inference-gateway-publisher
+    namespace: ani-system
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: inference-gateway-publisher
+  namespace: ani-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: inference-gateway-publisher
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels:
+              app: ani-reconcile-ha-postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    - ports:
+        - protocol: TCP
+          port: 443
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: ani-inference-ratelimit
+  namespace: ani-aigw
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: ani-aigw
+  rateLimit:
+    global:
+      rules:
+        - limit:
+            requests: 600
+            unit: Minute
+          shared: true

@@ -25,19 +25,15 @@ type PrometheusInstanceObservabilityConfig struct {
 	KubernetesServiceAccountTokenFile string
 	KubernetesServiceAccountCAFile    string
 	KubernetesFieldManager            string
-	ExecBaseURL                       string
 	HTTPClient                        *http.Client
 	Now                               func() time.Time
 }
 
 type PrometheusInstanceObservability struct {
-	prometheusURL   string
-	kubeClient      *KubernetesRESTClient
-	execBaseURL     string
-	now             func() time.Time
-	mu              sync.RWMutex
-	sessions        map[string]ports.InstanceExecSessionRecord
-	consoleSessions map[string]ports.InstanceConsoleSessionRecord
+	prometheusURL string
+	kubeClient    *KubernetesRESTClient
+	now           func() time.Time
+	mu            sync.RWMutex
 	// logStore 是可选的日志持久化存储实现（ports.LogStore），nil 时 fallback 到
 	// 现有 K8s pod log API（零回归）。由 runtime 在创建时通过 SetLogStore 注入，
 	// 通常根据环境变量 INSTANCE_OBSERVABILITY_LOG_STORE 选择具体实现（loki / nil）。
@@ -76,12 +72,9 @@ func NewPrometheusInstanceObservability(config PrometheusInstanceObservabilityCo
 		now = time.Now
 	}
 	return &PrometheusInstanceObservability{
-		prometheusURL:   prometheusURL,
-		kubeClient:      client,
-		execBaseURL:     strings.TrimRight(firstNonEmpty(strings.TrimSpace(config.ExecBaseURL), "ws://127.0.0.1:8080/api/v1"), "/"),
-		now:             now,
-		sessions:        make(map[string]ports.InstanceExecSessionRecord),
-		consoleSessions: make(map[string]ports.InstanceConsoleSessionRecord),
+		prometheusURL: prometheusURL,
+		kubeClient:    client,
+		now:           now,
 	}, nil
 }
 
@@ -375,78 +368,6 @@ func (o *PrometheusInstanceObservability) ListSecurityEvents(ctx context.Context
 	return ports.InstanceSecurityEventListResult{Items: items, Total: len(items), DevProfile: prometheusInstanceObservabilityDevProfile()}, nil
 }
 
-// CreateExecSession 为实例创建 exec 会话记录，支持幂等。
-func (o *PrometheusInstanceObservability) CreateExecSession(_ context.Context, request ports.InstanceExecSessionCreateRequest) (ports.InstanceExecSessionRecord, error) {
-	if err := validateInstanceObservationIdentity(request.TenantID, request.InstanceID); err != nil {
-		return ports.InstanceExecSessionRecord{}, err
-	}
-	if strings.TrimSpace(request.IdempotencyKey) == "" {
-		return ports.InstanceExecSessionRecord{}, fmt.Errorf("%w: idempotency_key is required", ports.ErrInvalid)
-	}
-	key := request.TenantID + "/" + request.InstanceID + "/" + request.IdempotencyKey
-	o.mu.RLock()
-	if record, ok := o.sessions[key]; ok {
-		o.mu.RUnlock()
-		return record, nil
-	}
-	o.mu.RUnlock()
-
-	now := o.now().UTC()
-	sessionID := uuid.NewString()
-	record := ports.InstanceExecSessionRecord{
-		ID:         sessionID,
-		InstanceID: request.InstanceID,
-		WSURL:      o.execBaseURL + "/instances/" + url.PathEscape(request.InstanceID) + "/exec/" + sessionID,
-		ExpiresAt:  now.Add(15 * time.Minute),
-		DevProfile: prometheusInstanceObservabilityDevProfile(),
-	}
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if existing, ok := o.sessions[key]; ok {
-		return existing, nil
-	}
-	o.sessions[key] = record
-	return record, nil
-}
-
-func (o *PrometheusInstanceObservability) CreateConsoleSession(_ context.Context, request ports.InstanceConsoleSessionCreateRequest) (ports.InstanceConsoleSessionRecord, error) {
-	if err := validateInstanceObservationIdentity(request.TenantID, request.InstanceID); err != nil {
-		return ports.InstanceConsoleSessionRecord{}, err
-	}
-	protocol := normalizeConsoleProtocol(request.Protocol)
-	idempotencyKey := strings.TrimSpace(request.IdempotencyKey)
-	key := request.TenantID + "/" + request.InstanceID + "/" + protocol
-	if idempotencyKey != "" {
-		key += "/" + idempotencyKey
-	}
-	o.mu.RLock()
-	if record, ok := o.consoleSessions[key]; ok {
-		o.mu.RUnlock()
-		return record, nil
-	}
-	o.mu.RUnlock()
-
-	now := o.now().UTC()
-	sessionID := uuid.NewString()
-	connectURL := o.execBaseURL + "/instances/" + url.PathEscape(request.InstanceID) + "/console/" + sessionID
-	record := ports.InstanceConsoleSessionRecord{
-		SessionID:  sessionID,
-		InstanceID: request.InstanceID,
-		Protocol:   protocol,
-		ConnectURL: connectURL,
-		URL:        connectURL,
-		ExpiresAt:  now.Add(15 * time.Minute),
-		DevProfile: prometheusInstanceObservabilityDevProfile(),
-	}
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if existing, ok := o.consoleSessions[key]; ok {
-		return existing, nil
-	}
-	o.consoleSessions[key] = record
-	return record, nil
-}
-
 func (o *PrometheusInstanceObservability) readKubernetesEvents(ctx context.Context, tenantID string, instanceID string) ([]ports.InstanceEventRecord, error) {
 	query := "fieldSelector=" + url.QueryEscape("involvedObject.name="+instanceID)
 	body, err := o.kubeClient.do(ctx, http.MethodGet, o.kubeClient.host+"/api/v1/namespaces/"+url.PathEscape(tenantNamespace(tenantID))+"/events?"+query, "", nil)
@@ -628,3 +549,22 @@ func prometheusInstanceObservabilityDevProfile() ports.DevProfileInfo {
 }
 
 var _ ports.InstanceObservability = (*PrometheusInstanceObservability)(nil)
+
+// StreamLogs 流式输出实例日志。仅在注入 LokiLogStore 时可用，
+// 非 loki profile（logStore=nil 或非 *LokiLogStore）返回 ErrNotConfigured（gateway 映射 503）。
+func (o *PrometheusInstanceObservability) StreamLogs(ctx context.Context, request ports.InstanceLogStreamRequest, sink func(ports.InstanceLogEntry) error) error {
+	if err := validateInstanceObservationIdentity(request.TenantID, request.InstanceID); err != nil {
+		return err
+	}
+	o.mu.RLock()
+	store := o.logStore
+	o.mu.RUnlock()
+	if store == nil {
+		return fmt.Errorf("%w: log stream requires INSTANCE_OBSERVABILITY_LOG_STORE=loki", ports.ErrNotConfigured)
+	}
+	lokiStore, ok := store.(*LokiLogStore)
+	if !ok {
+		return fmt.Errorf("%w: log stream requires Loki log store", ports.ErrNotConfigured)
+	}
+	return lokiStore.StreamLogs(ctx, request, tenantNamespace(request.TenantID), sink)
+}

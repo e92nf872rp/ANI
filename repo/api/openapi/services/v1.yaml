@@ -846,6 +846,8 @@ components:
         content:    { type: string }
         score:      { type: number, nullable: true }
         created_at: { type: string, format: date-time }
+        message_id: { type: string, format: uuid, nullable: true, description: "引用该文档的回答消息 id（定位/跳转用）" }
+        session_id: { type: string, format: uuid, nullable: true, description: "回答所属会话 id" }
 
     KBCitationListResponse:
       type: object
@@ -871,6 +873,70 @@ components:
       properties:
         items:       { type: array, items: { $ref: '#/components/schemas/KBSession' } }
         next_cursor: { type: string, nullable: true }
+
+    KBSourceChunk:
+      type: object
+      properties:
+        doc_id:    { type: string, format: uuid }
+        file_name: { type: string }
+        page:      { type: integer, nullable: true }
+        content:   { type: string }
+        score:     { type: number, nullable: true }
+
+    KBChunk:
+      type: object
+      required: [id, doc_id, kb_id, chunk_type, content, file_name, created_at]
+      properties:
+        id:              { type: string, format: uuid }
+        doc_id:          { type: string, format: uuid }
+        kb_id:           { type: string, format: uuid }
+        parent_chunk_id: { type: string, format: uuid, nullable: true }
+        chunk_type:      { type: string, enum: [child, parent, doc_summary] }
+        content:         { type: string }
+        parent_content:  { type: string, nullable: true }
+        page_number:     { type: integer, nullable: true }
+        content_type:    { type: string }
+        file_name:       { type: string, description: "所属文档文件名（kb_chunks.file_name，NOT NULL 冗余列）" }
+        token_count:     { type: integer }
+        custom_metadata: { type: object, additionalProperties: true, nullable: true, description: "客户端自定义元数据（JSONB，≤ 64KB）" }
+        created_at:      { type: string, format: date-time }
+
+    KBChunkListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:       { type: array, items: { $ref: '#/components/schemas/KBChunk' } }
+        next_cursor: { type: string, nullable: true }
+
+    KBSessionMessage:
+      type: object
+      required: [id, session_id, role, content, created_at]
+      properties:
+        id:            { type: string, format: uuid }
+        session_id:    { type: string, format: uuid }
+        role:          { type: string, enum: [user, assistant] }
+        content:       { type: string }
+        sources:       { type: array, items: { $ref: '#/components/schemas/KBSourceChunk' }, nullable: true }
+        input_tokens:  { type: integer, nullable: true }
+        output_tokens: { type: integer, nullable: true }
+        duration_ms:   { type: integer, nullable: true }
+        created_at:    { type: string, format: date-time }
+
+    KBSessionMessageListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:       { type: array, items: { $ref: '#/components/schemas/KBSessionMessage' } }
+        next_cursor: { type: string, nullable: true }
+
+    UpdateKnowledgeBaseRequest:
+      type: object
+      required: [idempotency_key]
+      description: 更新知识库基础信息（名称/描述）；空字段表示不修改。对齐 kb_service.proto UpdateKB。
+      properties:
+        idempotency_key: { type: string, format: uuid, description: "客户端生成UUID，防重复提交" }
+        name:            { type: string, description: "新名称；空表示不修改" }
+        description:     { type: string, nullable: true, description: "新描述；空表示不修改" }
 
     UpdateKBPermissionsRequest:
       type: object
@@ -2389,6 +2455,32 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/KnowledgeBase' }
         "404": { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: updateKnowledgeBase
+      summary: 更新知识库基础信息（名称/描述）
+      description: |
+        更新知识库名称与描述；空字段表示不修改（部分更新语义）。
+        与 `PUT .../config`（配置变更触发全库重建）语义分离。
+        对齐 kb_service.proto UpdateKB。
+      tags: [KnowledgeBases]
+      parameters:
+        - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateKnowledgeBaseRequest' }
+      responses:
+        "200":
+          description: 更新后的知识库
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KnowledgeBase' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
     delete:
       operationId: deleteKnowledgeBase
       summary: 删除知识库
@@ -2475,6 +2567,22 @@ paths:
         "503": { description: 对象存储/解析服务暂不可用（inference.unavailable）, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
 
   /knowledge-bases/{kb_id}/documents/{doc_id}:
+    get:
+      operationId: getKnowledgeBaseDocument
+      summary: 获取知识库文档详情
+      tags: [KnowledgeBases]
+      parameters:
+        - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: doc_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 文档详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KBDocument' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
     delete:
       operationId: deleteKnowledgeBaseDocument
       summary: 删除知识库文档
@@ -2484,6 +2592,27 @@ paths:
         - { name: doc_id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         "204": { description: 已删除 }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /knowledge-bases/{kb_id}/documents/{doc_id}/chunks:
+    get:
+      operationId: listKnowledgeBaseDocumentChunks
+      summary: 知识库文档分块明细列表
+      tags: [KnowledgeBases]
+      parameters:
+        - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: doc_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: chunk_type, in: query, schema: { type: string, enum: [child, parent, doc_summary] } }
+      responses:
+        "200":
+          description: 分块明细列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KBChunkListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
 
   /knowledge-bases/{kb_id}/query:
@@ -2561,6 +2690,40 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/KBSessionListResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /knowledge-bases/{kb_id}/sessions/{session_id}:
+    delete:
+      operationId: deleteKnowledgeBaseSession
+      summary: 删除知识库对话会话
+      tags: [KnowledgeBases]
+      parameters:
+        - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: session_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: 已删除（幂等：会话不存在也返回 204） }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /knowledge-bases/{kb_id}/sessions/{session_id}/messages:
+    get:
+      operationId: listKnowledgeBaseSessionMessages
+      summary: 知识库会话消息列表
+      tags: [KnowledgeBases]
+      parameters:
+        - { name: kb_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: session_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, default: 100, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string, description: "created_at|id 复合键升序游标" } }
+      responses:
+        "200":
+          description: 会话消息列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KBSessionMessageListResponse' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }

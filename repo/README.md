@@ -90,6 +90,12 @@ make validate-doc-entrypoints
 5. `../ANI-05-系统架构设计.md`
 6. `api/openapi/v1.yaml` 和 `api/openapi/services/v1.yaml`
 
+运维与部署：
+
+- [七服务 Prometheus 状态对接与部署指南](docs/operations/service-runtime-observability.md)
+- [Kubernetes/Helm 部署说明](deploy/helm/ani-platform/README.md)
+- [本地 Docker 依赖环境](deploy/docker/README.md)
+
 版本管理：
 - 策略文档：`../ANI-12-版本管理策略.md`
 - 当前阶段：`v0.x` 开发期

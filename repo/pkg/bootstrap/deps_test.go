@@ -391,7 +391,6 @@ func TestNewCapabilitiesCanWirePrometheusInstanceObservabilityProvider(t *testin
 		InstanceObservabilityProvider:      "prometheus_kubernetes",
 		InstanceObservabilityPrometheusURL: "https://prometheus.example.test",
 		KubernetesAPIHost:                  "https://kubernetes.example.test",
-		InstanceObservabilityExecBaseURL:   "wss://gateway.example.test/api/v1",
 	})
 	if err != nil {
 		t.Fatalf("NewCapabilitiesWithConfig() error = %v", err)
@@ -410,7 +409,6 @@ func TestNewCapabilitiesCanWirePrometheusInstanceObservabilityProviderWithInClus
 		KubernetesServicePort:              "443",
 		KubernetesServiceAccountTokenFile:  tokenPath,
 		KubernetesServiceAccountCAFile:     caPath,
-		InstanceObservabilityExecBaseURL:   "wss://gateway.example.test/api/v1",
 	})
 	if err != nil {
 		t.Fatalf("NewCapabilitiesWithConfig() error = %v", err)

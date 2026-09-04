@@ -10,15 +10,21 @@ import (
 )
 
 type Config struct {
-	GRPCPort            int
-	AuthServiceGRPCAddr string
-	AuthTimeout         time.Duration
+	GRPCPort                 int
+	AuthServiceGRPCAddr      string
+	InferenceServiceGRPCAddr string
+	AuthTimeout              time.Duration
+	InferenceTimeout         time.Duration
 }
 
 func Load() (Config, error) {
 	addr := strings.TrimSpace(os.Getenv("AUTH_SERVICE_GRPC_ADDR"))
 	if addr == "" {
 		return Config{}, errors.New("AUTH_SERVICE_GRPC_ADDR is required")
+	}
+	inferenceAddr := strings.TrimSpace(os.Getenv("INFERENCE_SERVICE_GRPC_ADDR"))
+	if inferenceAddr == "" {
+		return Config{}, errors.New("INFERENCE_SERVICE_GRPC_ADDR is required")
 	}
 	port, err := positiveInt("GRPC_PORT", 9002)
 	if err != nil {
@@ -28,7 +34,11 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	return Config{GRPCPort: port, AuthServiceGRPCAddr: addr, AuthTimeout: timeout}, nil
+	inferenceTimeout, err := positiveDuration("INFERENCE_TIMEOUT", 2*time.Second)
+	if err != nil {
+		return Config{}, err
+	}
+	return Config{GRPCPort: port, AuthServiceGRPCAddr: addr, InferenceServiceGRPCAddr: inferenceAddr, AuthTimeout: timeout, InferenceTimeout: inferenceTimeout}, nil
 }
 
 func positiveInt(name string, fallback int) (int, error) {

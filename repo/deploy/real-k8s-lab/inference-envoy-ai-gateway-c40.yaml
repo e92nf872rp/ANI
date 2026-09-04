@@ -249,3 +249,21 @@ spec:
       backendRefs:
         - name: envoy-authz-adapter
           port: 9002
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: ani-c40-ratelimit
+  namespace: ani-aigw
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: ani-aigw
+  rateLimit:
+    global:
+      rules:
+        - limit:
+            requests: 600
+            unit: Minute
+          shared: true

@@ -893,6 +893,53 @@ components:
               latency_ms: { type: integer }
               error:      { type: string, nullable: true }
 
+    PlatformServiceHealthComponent:
+      type: object
+      description: 单个 ANI 目标服务的 Prometheus 抓取可达性；不表示业务依赖或业务请求健康。
+      required: [service_name, scrape_status, observed_replicas, reachable_replicas, versions, sample_age_seconds]
+      properties:
+        service_name:
+          type: string
+          enum: [ani-gateway, auth-service, model-service, task-service, inference-service, tenant-service, metering-service]
+        scrape_status:
+          type: string
+          enum: [reachable, unreachable, unknown]
+        observed_replicas:
+          type: integer
+          minimum: 0
+          description: freshness window 内存在 up series 的目标数。
+        reachable_replicas:
+          type: integer
+          minimum: 0
+          description: freshness window 内 up=1 且 OTel target_info 身份契约有效的目标数。
+        versions:
+          type: array
+          uniqueItems: true
+          items: { type: string }
+          description: 可抓取目标中经 target_info 与 K8s 标签交叉校验的版本集合；冲突目标不返回版本。
+        sample_age_seconds:
+          type: number
+          format: double
+          minimum: 0
+          nullable: true
+          description: 当前组件纳入聚合的最旧 fresh up 样本年龄；无 fresh target 时为 null。
+
+    PlatformServiceHealthResponse:
+      type: object
+      description: 固定七个 ANI 服务的 Prometheus 抓取可达性聚合；coverage=partial，禁止解释为全平台或业务健康。
+      required: [scope, coverage, signal, observed_at, source_status, components]
+      properties:
+        scope: { type: string, enum: [ani_services] }
+        coverage: { type: string, enum: [partial] }
+        signal: { type: string, enum: [prometheus_scrape] }
+        observed_at: { type: string, format: date-time }
+        source_status: { type: string, enum: [ok] }
+        components:
+          type: array
+          minItems: 7
+          maxItems: 7
+          items: { $ref: '#/components/schemas/PlatformServiceHealthComponent' }
+
     CoreDevProfileInfo:
       type: object
       description: "Core dev/local profile 标记；用于区分本地联调成功与真实 provider 执行成功。"
@@ -902,6 +949,68 @@ components:
         provider:      { type: string }
         real_provider: { type: boolean }
         reason:        { type: string, nullable: true }
+
+    PlatformCapacityResponse:
+      type: object
+      description: "平台容量态势汇总（整平台 = 1 个默认区域；只读，无区域 CRUD）。"
+      required: [regions, summary, dev_profile]
+      properties:
+        regions:
+          type: array
+          items: { $ref: '#/components/schemas/PlatformRegion' }
+          description: "固定返回 1 条区域记录（整平台 = 默认区域）。"
+        summary:
+          $ref: '#/components/schemas/PlatformCapacitySummary'
+        dev_profile:
+          $ref: '#/components/schemas/CoreDevProfileInfo'
+
+    PlatformRegion:
+      type: object
+      description: "平台默认区域记录；id/code/name/display_name/status/open_for_tenant 为平台主数据常量。"
+      required: [id, code, name, display_name, status, open_for_tenant, azs, tenant_count, capacity]
+      properties:
+        id:              { type: string, example: "platform" }
+        code:            { type: string, example: "platform" }
+        name:            { type: string, example: "平台" }
+        display_name:    { type: string, example: "平台（默认区域）" }
+        status:          { type: string, enum: [enabled], example: "enabled" }
+        open_for_tenant: { type: boolean, example: true }
+        azs:
+          type: array
+          items: { type: string }
+          description: "Ready GPU 节点 zone label 去重（topology.kubernetes.io/zone 优先，回退 failure-domain.beta.kubernetes.io/zone；缺失为空数组）。"
+        tenant_count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: "可用租户数（status <> 'disabled'）；租户服务不可用时为 0 并写入 dev_profile.reason。"
+        capacity:
+          $ref: '#/components/schemas/PlatformRegionCapacity'
+
+    PlatformRegionCapacity:
+      type: object
+      description: "区域容量口径：GPU 总量含 vGPU 切片；gpu_free = gpu_total - in_use - fault；nodes 仅 Ready GPU 节点；cpu/memory 为节点 allocatable 总量（非可用量）。"
+      required: [gpu_total, gpu_free, nodes, cpu_cores, memory_gib]
+      properties:
+        gpu_total:  { type: integer, format: int64, minimum: 0, description: "全部 GPU 设备数（含 vGPU 切片）" }
+        gpu_free:   { type: integer, format: int64, minimum: 0, description: "gpu_total - in_use - fault；in_use 为跨租户 Running GPU Pod 数（每 Pod 占 1 设备）" }
+        nodes:      { type: integer, format: int64, minimum: 0, description: "Ready GPU 节点数" }
+        cpu_cores:  { type: integer, format: int64, minimum: 0, description: "Ready GPU 节点 cpu allocatable 求和（向下取整）" }
+        memory_gib: { type: integer, format: int64, minimum: 0, description: "Ready GPU 节点 memory allocatable 求和（GiB 向下取整）" }
+
+    PlatformCapacitySummary:
+      type: object
+      description: "regions 汇总（当前即单区域值），供顶部指标直接消费。"
+      required: [region_count, gpu_total, gpu_free, tenant_count, nodes, azs]
+      properties:
+        region_count: { type: integer, format: int64, minimum: 0, example: 1 }
+        gpu_total:    { type: integer, format: int64, minimum: 0 }
+        gpu_free:     { type: integer, format: int64, minimum: 0 }
+        tenant_count: { type: integer, format: int64, minimum: 0 }
+        nodes:        { type: integer, format: int64, minimum: 0 }
+        azs:
+          type: array
+          items: { type: string }
 
     InstanceNetworkConfig:
       type: object
@@ -1084,6 +1193,7 @@ components:
           type: array
           items: { $ref: '#/components/schemas/InstanceStorageAttachment' }
         termination_protection: { type: boolean, default: false, description: "VM 危险操作保护开关；开启后 stop/delete/rebuild 等操作必须先关闭保护" }
+        auto_start: { type: boolean, default: true, description: "实例创建后是否自动启动（开机自启）" }
         ssh:
           type: object
           nullable: true
@@ -1306,7 +1416,8 @@ components:
         boot_image:          { type: string, nullable: true, deprecated: true, description: "兼容字段；优先使用 CreateInstanceRequest.image_id。" }
         ssh_username:        { type: string, nullable: true, default: "ubuntu", description: "VM SSH 用户名" }
         ssh_key_ref:         { type: string, nullable: true, description: "VM SSH key/secret 引用；不包含私钥内容" }
-        password_secret_ref: { type: string, nullable: true, description: "登录密码 Secret 引用；不返回明文。" }
+        password_secret_ref: { type: string, nullable: true, description: "登录密码 cloud-init Secret 引用；Secret 需含 userdata 键（值为 #cloud-config，设置 users/plain_text_passwd 或 chpasswd）。与 cloud_init_secret 互斥；不返回明文。" }
+        cloud_init_secret:   { type: string, nullable: true, description: "cloud-init user-data Secret 引用；Secret 需含 userdata 键（值为 #cloud-config）。与 password_secret_ref 互斥。" }
         user_data:           { type: string, nullable: true, description: "cloud-init user data；不得包含长期明文凭据。" }
         system_disk:
           $ref: '#/components/schemas/InstanceDiskSpec'
@@ -1827,8 +1938,9 @@ components:
           type: string
           enum: [start, stop, restart, resize, rebuild, delete, snapshot, attach_volume, detach_volume, attach_filesystem, detach_filesystem, rollback, scale, update_image, bind_secret, unbind_secret, change_security_groups, set_termination_protection, pause, resume, extend, touch_idle]
         idempotency_key: { type: string, minLength: 1, maxLength: 128 }
-        cpu:            { type: string, nullable: true, description: "resize 时使用" }
-        memory:         { type: string, nullable: true, description: "resize 时使用" }
+        cpu:            { type: string, nullable: true, description: "resize 时使用；变配重建时写入容器 resources" }
+        memory:         { type: string, nullable: true, description: "resize 时使用；变配重建时写入容器 resources" }
+        spec_id:        { type: string, nullable: true, description: "resize 时换 GPU 规格使用；通过 /gpu-specs 查询可用规格；与 cpu/memory 可同时传，至少传一项；仅 stopped 实例可执行" }
         snapshot_name:  { type: string, nullable: true, description: "snapshot 时指定快照名称" }
         snapshot_id:    { type: string, nullable: true, description: "rollback 时指定目标快照" }
         include_data_disks: { type: boolean, nullable: true, description: "snapshot 时是否包含数据盘" }
@@ -1862,6 +1974,7 @@ components:
       type: object
       properties:
         protocol: { type: string, enum: [console, vnc, novnc, serial], default: "vnc" }
+        idempotency_key: { type: string, minLength: 1, maxLength: 128, description: "可选；旧客户端省略时 Gateway 仅为本次 HTTP 请求生成内部键，不承诺跨 HTTP 重试重放。" }
 
     InstanceConsoleSession:
       type: object
@@ -5194,6 +5307,15 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+        "429": { $ref: '#/components/responses/RateLimitExceeded' }
+        "500":
+          description: Session Gateway 返回未预期错误
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
 
   /instances/{instance_id}/logs:
     get:
@@ -5215,6 +5337,48 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+
+  /instances/{instance_id}/logs/stream:
+    get:
+      operationId: streamInstanceLogs
+      summary: 实例日志 SSE 流式输出
+      description: |
+        SSE 流式输出实例日志：首屏回放最近 limit 条历史日志（时间正序），
+        然后持续增量推送新日志。每条日志通过 event: log 帧推送，
+        错误通过 event: error 帧推送，结束通过 event: done 帧推送。
+        连接时长上限 10 分钟，到达后发 done{reason:"timeout"} 并关闭。
+        预流错误（401/404/400）返回普通 JSON，不进入 SSE 流。
+      tags: [Instances]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      x-ani-rbac-scope: "scope:instances:read"
+      x-ani-authz:
+        version: v1
+        resource: instances
+        action: read
+        boundary: tenant
+        principal_kinds: [user, api_key]
+      parameters:
+        - { name: instance_id, in: path, required: true, schema: { type: string } }
+        - { name: level,             in: query, schema: { type: string, enum: [debug, info, warn, error] } }
+        - { name: limit,             in: query, schema: { type: integer, default: 1000, minimum: 1, maximum: 1000 } }
+        - { name: interval_seconds,  in: query, schema: { type: integer, default: 2, minimum: 1, maximum: 30 } }
+      responses:
+        "200":
+          description: SSE 日志流
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503":
+          description: 日志流未配置（非 loki profile）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
 
   /instances/{instance_id}/events:
     get:
@@ -5279,6 +5443,15 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/PreconditionFailed' }
+        "429": { $ref: '#/components/responses/RateLimitExceeded' }
+        "500":
+          description: Session Gateway 返回未预期错误
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
 
   /instances/{instance_id}/security-events:
     get:
@@ -7804,6 +7977,33 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   # ── 可观测性 ────────────────────────────────────────────────────────────────
+  /platform/services/health:
+    get:
+      operationId: getPlatformServiceHealth
+      summary: 查询 ANI 服务监控可达性
+      description: |
+        返回固定七个 ANI 服务的 Prometheus scrape reachability。该响应仅覆盖 ANI 服务子集，
+        不表示全平台健康、业务依赖健康或流量就绪。Prometheus 不可用、响应非法或身份连接契约失败时返回 503，
+        不把数据源失败伪装为七个 unknown。
+      tags: [Observability]
+      x-ani-rbac-scope: "scope:observability:read"
+      x-ani-authz:
+        version: v1
+        resource: observability
+        action: read
+        boundary: platform
+        principal_kinds: [user, service]
+      security: [{ BearerAuth: [] }]
+      responses:
+        "200":
+          description: ANI 服务 Prometheus 抓取可达性
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformServiceHealthResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
+
   /observability/query:
     get:
       operationId: queryObservability
@@ -7841,6 +8041,42 @@ paths:
       responses:
         "200":
           description: PromQL 区间查询结果（matrix）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObservabilityRangeQueryResponse' }
+        "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /observability/resource_trend:
+    get:
+      operationId: queryResourceTrendObservability
+      summary: 租户级资源使用率趋势
+      description: |
+        按当前登录租户视角聚合返回 gpu/cpu/memory 资源使用率趋势（单位 %，0-100）。
+        tenant_id 全部从 JWT 提取，后端据此生成 namespace="ani-tenant-<id>" 的聚合 PromQL，
+        天然租户隔离；不接收/不暴露 query PromQL。返回结构与 query_range 一致（matrix），
+        前端复用既有出图逻辑。三条曲线各用一次本请求（一次一个 metric）。
+      tags: [Observability]
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      x-ani-rbac-scope: "scope:observability:read"
+      x-ani-authz:
+        version: v1
+        resource: observability
+        action: read
+        boundary: tenant
+        principal_kinds: [user, api_key]
+      parameters:
+        - { name: metric, in: query, required: true, schema: { type: string, enum: [gpu, cpu, memory] } }
+        - { name: start, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: end, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: step, in: query, required: true, schema: { type: string, description: "采样步长，Go duration 正数，如 15s / 30s / 1m；0/负 → 400" } }
+        - { name: timeout, in: query, required: false, schema: { type: string, default: 30s } }
+      responses:
+        "200":
+          description: 租户资源使用率趋势（matrix），value ∈ 0-100（%）
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ObservabilityRangeQueryResponse' }
@@ -8010,6 +8246,34 @@ paths:
               schema:
                 $ref: '#/components/schemas/MeteringUsageResponse'
         "400": { $ref: '#/components/responses/BadRequest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /platform/capacity:
+    get:
+      operationId: getPlatformCapacity
+      x-ani-rbac-scope: "scope:capacity:read"
+      x-ani-authz:
+        version: v1
+        resource: capacity
+        action: get
+        boundary: platform
+        principal_kinds: [user]
+      summary: 查询平台容量态势汇总
+      description: |
+        平台级（跨租户）只读容量汇总视图。整平台作为 1 个默认区域返回，
+        数据从真实集群计算（GPU 节点清单 + 跨租户 Running GPU Pod + 租户列表）。
+        任一数据源失败不阻塞 200：缺失字段降级为 0/空，
+        dev_profile.real_provider=false + reason 记录降级原因。
+      tags: [PlatformCapacity]
+      responses:
+        "200":
+          description: 平台容量态势汇总
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformCapacityResponse'
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "503": { $ref: '#/components/responses/ServiceUnavailable' }
@@ -10139,3 +10403,4 @@ tags:
   - { name: PlatformUsers,  description: "平台运营账号（tenant_id 为空的 users / user_roles / roles）" }
   - { name: TenantUsers,    description: "平台级租户用户与角色（users / user_roles / roles）" }
   - { name: GPUSpec,        description: "GPU 规格目录管理（创建/删除/可用性查询）" }
+  - { name: PlatformCapacity, description: "平台容量态势汇总（整平台 = 1 个默认区域，只读）" }

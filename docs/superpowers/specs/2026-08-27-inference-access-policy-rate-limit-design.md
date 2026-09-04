@@ -4,6 +4,8 @@
 > 阶段：`INFERENCE-SERVICE-C42`
 > 状态：草案
 
+> **C41 集成说明（2026-08-31）：** 本文的访问策略 API、匹配优先级、Redis 限流、命中记录和错误语义继续有效；鉴权前从静态路由取得 `tenant_id`、`inference_service_id`、`external_model` 的部分，已由 [`2026-08-31-envoy-ai-gateway-tenant-aware-dynamic-publication-design.md`](./2026-08-31-envoy-ai-gateway-tenant-aware-dynamic-publication-design.md) 取代。动态链路由 auth-service 先解析 AK 租户，再以 `(tenant_id, served_model_name, openai_path)` 解析服务；不再新增独立 `external_model` 概念。
+
 ## 背景
 
 原型中的“推理服务”已经不仅是控制面生命周期页，还包含面向租户开发者的 OpenAI 兼容调用闭环：选择 API Key、在 Playground 调用、查看调用地址，并把推理服务绑定到“限流与访问策略”。本阶段只处理后端服务、契约、数据面鉴权和真实门禁；Console 前端不在 C42 实施范围内，只作为后续消费者保留接口形态。
@@ -166,7 +168,7 @@ CheckInferenceAccess(response)
   retry_after_seconds
 ```
 
-P0 中 `lease_id` 用于并发限制的保守 TTL 释放。非流式请求可以在请求结束时由适配器尽力释放；SSE 请求第一版允许依赖 TTL 自动释放。
+P0 中 `lease_id` 用于并发限制的保守 TTL 释放。标准 ext_authz 没有请求结束回调，因此普通请求与 SSE 均依赖 TTL；adapter 不执行猜测性 release。精确完成释放需要 P1 的 Envoy access log、ext_proc 或等价结束回调。
 
 ## 数据模型
 
@@ -277,7 +279,7 @@ Client
 
 ### AK 自身 RPM
 
-auth-service 已有 AK 级 `rate_limit_rpm`。这是认证凭据保护，优先于 C42 策略执行。超限返回 429，原因归类为 `CREDENTIAL_RATE_LIMIT_EXCEEDED`。
+auth-service 已有 AK 级 `rate_limit_rpm`。这是认证凭据保护，优先于 C42 策略执行。超限返回 429，原因归类为 `CREDENTIAL_RATE_LIMIT_EXCEEDED`，并通过 gRPC status details 传递 Redis 窗口剩余秒数，由 Envoy ext_authz adapter 输出 `Retry-After`。
 
 ### 策略 QPS/RPM
 
@@ -302,11 +304,11 @@ P0 使用固定窗口计数：
 - allow 前尝试递增 in-flight；
 - 成功则返回 `lease_id`；
 - 超限返回 429；
-- 非流式请求结束后尽力释放；
-- SSE 请求依赖 TTL 自动释放；
-- 适配器进程崩溃时 TTL 保证最终释放。
+- P0 的所有 Envoy 数据面请求（普通 JSON 和 SSE）都依赖 lease TTL 保守释放；
+- 标准 ext_authz 只在上游请求开始前执行 `Check`，没有上游响应结束 hook，因此 adapter 不立即、定时或猜测性释放 lease；
+- 适配器、Envoy 或上游中断后仍由 TTL 保证最终释放。
 
-P0 不声明严格实时并发精度。P1 可通过 Envoy access log、stream 结束回调或专用计量通道做精确释放。
+P0 不声明严格实时并发精度。P1 需要接入 Envoy access log、ext_proc 或等价的请求结束回调，才能做精确释放；在该通道落地前不得把 `lease_id` 注入上游、响应、日志或事件。
 
 ## 错误语义
 
@@ -451,7 +453,7 @@ C42 可以在 C40 静态路由上先验证，再接入 C41 动态发布。
 
 P1：
 
-- 精确 SSE 并发释放；
+- 精确 JSON 与 SSE（全部数据面请求）并发释放；
 - 请求成功/失败用量聚合；
 - token usage 采集；
 - BOSS 运营视角的全租户推理调用审计。

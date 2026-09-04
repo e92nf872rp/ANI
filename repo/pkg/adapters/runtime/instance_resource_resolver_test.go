@@ -371,7 +371,7 @@ func TestLocalInstanceResourceResolverValidatesVMSecretRefs(t *testing.T) {
 		TenantID:       "tenant-a",
 		IdempotencyKey: "resolver-vm-secret",
 		Name:           "vm-secret",
-		Data:           map[string]string{"value": "secret"},
+		Data:           map[string]string{"value": "secret", "userdata": "#cloud-config\nusers:\n  - name: aniverify\n    plain_text_passwd: x\n"},
 	})
 	if err != nil {
 		t.Fatalf("CreateSecret error = %v", err)
@@ -406,6 +406,36 @@ func TestLocalInstanceResourceResolverValidatesVMSecretRefs(t *testing.T) {
 	})
 	if !errors.Is(err, ports.ErrNotFound) {
 		t.Fatalf("ResolveCreate cross-tenant VM secret error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestLocalInstanceResourceResolverRejectsCloudInitSecretMissingUserdataKey(t *testing.T) {
+	secrets := NewLocalSecretService()
+	secret, err := secrets.CreateSecret(context.Background(), ports.SecretCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "resolver-vm-secret-nokey",
+		Name:           "vm-secret",
+		Data:           map[string]string{"value": "secret"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSecret error = %v", err)
+	}
+	resolver := NewLocalInstanceResourceResolverWithDependencies(nil, nil, nil, nil, secrets)
+	for _, vm := range []*ports.VMInstanceSpec{
+		{PasswordSecret: secret.SecretID},
+		{CloudInitSecret: secret.SecretID},
+	} {
+		_, err := resolver.ResolveCreate(context.Background(), ports.WorkloadResourceResolveRequest{
+			TenantID: "tenant-a",
+			Spec: ports.WorkloadSpec{
+				TenantID: "tenant-a",
+				Kind:     ports.WorkloadKindVM,
+				VM:       vm,
+			},
+		})
+		if !errors.Is(err, ports.ErrConflict) {
+			t.Fatalf("ResolveCreate cloud-init secret missing userdata key error = %v, want ErrConflict", err)
+		}
 	}
 }
 

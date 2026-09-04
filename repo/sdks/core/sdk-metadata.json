@@ -581,6 +581,12 @@
       "scope": "scope:instances:read"
     },
     {
+      "operationId": "streamInstanceLogs",
+      "method": "GET",
+      "path": "/instances/{instance_id}/logs/stream",
+      "scope": "scope:instances:read"
+    },
+    {
       "operationId": "getInstanceMetrics",
       "method": "GET",
       "path": "/instances/{instance_id}/metrics",
@@ -1079,6 +1085,12 @@
       "scope": "scope:observability:read"
     },
     {
+      "operationId": "queryResourceTrendObservability",
+      "method": "GET",
+      "path": "/observability/resource_trend",
+      "scope": "scope:observability:read"
+    },
+    {
       "operationId": "getPlatformWorkloadCapabilities",
       "method": "GET",
       "path": "/platform-workload-capabilities",
@@ -1119,6 +1131,18 @@
       "method": "GET",
       "path": "/platform-workloads/{workload_id}/logs",
       "scope": "scope:platform-workloads:read"
+    },
+    {
+      "operationId": "getPlatformCapacity",
+      "method": "GET",
+      "path": "/platform/capacity",
+      "scope": "scope:capacity:read"
+    },
+    {
+      "operationId": "getPlatformServiceHealth",
+      "method": "GET",
+      "path": "/platform/services/health",
+      "scope": "scope:observability:read"
     },
     {
       "operationId": "listQuotas",
@@ -1576,7 +1600,13 @@
     "PasswordLoginRequest",
     "PlanBoundTenantCount",
     "PlanBoundTenantCountList",
+    "PlatformCapacityResponse",
+    "PlatformCapacitySummary",
     "PlatformPasswordLoginRequest",
+    "PlatformRegion",
+    "PlatformRegionCapacity",
+    "PlatformServiceHealthComponent",
+    "PlatformServiceHealthResponse",
     "PlatformUser",
     "PlatformUserCreateRequest",
     "PlatformUserIdempotentRequest",

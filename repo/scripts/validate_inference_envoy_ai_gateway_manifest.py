@@ -238,6 +238,21 @@ def validate_security_policy(documents: list[dict[str, Any]]) -> None:
     require(ext_auth.get("grpc") == {"backendRefs": [{"name": "envoy-authz-adapter", "port": 9002}]}, "extAuth must use the adapter gRPC Service")
 
 
+def validate_rate_limit_policy(documents: list[dict[str, Any]]) -> None:
+    policy = by_kind_name(documents, "BackendTrafficPolicy", "ani-c40-ratelimit")
+    require(policy.get("apiVersion") == "gateway.envoyproxy.io/v1alpha1", "rate-limit policy must use installed v1alpha1")
+    require(
+        policy.get("spec", {}).get("targetRefs")
+        == [{"group": "gateway.networking.k8s.io", "kind": "Gateway", "name": "ani-aigw"}],
+        "rate-limit policy must target only the owning Gateway",
+    )
+    require(
+        policy.get("spec", {}).get("rateLimit", {}).get("global", {}).get("rules")
+        == [{"limit": {"requests": 600, "unit": "Minute"}, "shared": True}],
+        "rate-limit policy must define one shared global 600 requests/minute rule",
+    )
+
+
 def validate(documents: list[dict[str, Any]]) -> None:
     required = {
         ("ServiceAccount", "envoy-authz-adapter"),
@@ -250,15 +265,17 @@ def validate(documents: list[dict[str, Any]]) -> None:
         ("AIServiceBackend", "ani-c40-embed-vllm"),
         ("AIGatewayRoute", "ani-c40"),
         ("SecurityPolicy", "ani-c40-ext-auth"),
+        ("BackendTrafficPolicy", "ani-c40-ratelimit"),
     }
     actual = {(document.get("kind"), document.get("metadata", {}).get("name")) for document in documents}
-    require(actual == required and len(documents) == len(required), "manifest must contain exactly the ten C40 resources")
+    require(actual == required and len(documents) == len(required), "manifest must contain exactly the eleven C40 resources")
     for document in documents:
         require(document.get("metadata", {}).get("namespace") == NAMESPACE, "every C40 resource must be in ani-aigw")
     validate_adapter(documents)
     validate_network_policy(documents)
     validate_data_plane(documents)
     validate_security_policy(documents)
+    validate_rate_limit_policy(documents)
 
 
 def main() -> None:

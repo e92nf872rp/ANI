@@ -613,7 +613,7 @@ func TestKubernetesRESTClientObservesKubeVirtVMIForPhaseAndNode(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/virtualmachines/vm-01"):
 			return jsonResponse(http.StatusOK, `{"kind":"VirtualMachine","status":{"printableStatus":"Running"}}`), nil
 		case strings.HasSuffix(r.URL.Path, "/virtualmachineinstances/vm-01"):
-			return jsonResponse(http.StatusOK, `{"kind":"VirtualMachineInstance","status":{"phase":"Running","nodeName":"node-a"}}`), nil
+			return jsonResponse(http.StatusOK, `{"kind":"VirtualMachineInstance","status":{"phase":"Running","nodeName":"node-a","interfaces":[{"name":"eth0","ipAddress":"10.20.0.5","primary":true},{"name":"eth1","ip":"10.20.0.6"}]}}`), nil
 		default:
 			t.Fatalf("unexpected path %q", r.URL.Path)
 			return nil, nil
@@ -636,6 +636,9 @@ func TestKubernetesRESTClientObservesKubeVirtVMIForPhaseAndNode(t *testing.T) {
 	}
 	if observation.Phase != "Running" || observation.NodeName != "node-a" {
 		t.Fatalf("observation = %#v, want VMI phase/node", observation)
+	}
+	if len(observation.Networks) != 2 || observation.Networks[0].IPAddress != "10.20.0.5" || !observation.Networks[0].Primary || observation.Networks[1].IPAddress != "10.20.0.6" {
+		t.Fatalf("observation.Networks = %#v, want interfaces parsed into networks", observation.Networks)
 	}
 	if len(paths) != 2 {
 		t.Fatalf("paths = %#v, want VirtualMachine and VMI reads", paths)

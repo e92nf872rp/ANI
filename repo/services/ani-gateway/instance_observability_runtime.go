@@ -14,7 +14,6 @@ import (
 type gatewayInstanceObservabilityRuntimeConfig struct {
 	Provider                          string
 	PrometheusURL                     string
-	ExecBaseURL                       string
 	KubernetesAPIHost                 string
 	KubernetesServiceHost             string
 	KubernetesServicePort             string
@@ -35,7 +34,6 @@ func gatewayInstanceObservabilityRuntimeConfigFromEnv() gatewayInstanceObservabi
 	return gatewayInstanceObservabilityRuntimeConfig{
 		Provider:                          os.Getenv("INSTANCE_OBSERVABILITY_PROVIDER"),
 		PrometheusURL:                     os.Getenv("INSTANCE_OBSERVABILITY_PROMETHEUS_URL"),
-		ExecBaseURL:                       os.Getenv("INSTANCE_OBSERVABILITY_EXEC_BASE_URL"),
 		KubernetesAPIHost:                 os.Getenv("KUBERNETES_API_HOST"),
 		KubernetesServiceHost:             os.Getenv("KUBERNETES_SERVICE_HOST"),
 		KubernetesServicePort:             os.Getenv("KUBERNETES_SERVICE_PORT"),
@@ -62,7 +60,6 @@ func newGatewayInstanceObservability(cfg gatewayInstanceObservabilityRuntimeConf
 			KubernetesServiceAccountTokenFile: cfg.KubernetesServiceAccountTokenFile,
 			KubernetesServiceAccountCAFile:    cfg.KubernetesServiceAccountCAFile,
 			KubernetesFieldManager:            cfg.KubernetesFieldManager,
-			ExecBaseURL:                       cfg.ExecBaseURL,
 			HTTPClient:                        cfg.HTTPClient,
 		})
 		if err != nil {

@@ -50,7 +50,7 @@ func newTaskTestHarnessWithK8s(t *testing.T, tasks ports.AsyncTaskStore, k8sClie
 		c.Next(ctx)
 	})
 	v1 := h.Group("/api/v1")
-	_, observer := registerInstancesWithRuntime(v1, nil, false, nil, k8sClient, nil, runtime, nil)
+	_, observer := registerInstancesWithRuntime(v1, nil, nil, false, nil, k8sClient, nil, runtime, nil)
 	registerTasksWithStore(v1, tasks, observer)
 	return &taskTestHarness{h: h, tasks: tasks, injected: injected, tenantID: "tenant-a"}
 }
