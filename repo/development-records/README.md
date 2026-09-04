@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 沙箱模板镜像接入可复用 python 镜像（2026-09-04，分支 ani-hotfix）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-SANDBOX-TEMPLATE-IMAGE-A | 修复沙箱 code-run `PRECONDITION_FAILED: sandbox pod is not ready`：内置模板目录 `Image` 占位 `registry.local/ani/sandbox-*:dev` 在集群不可达导致走 `ImagePullBackOff`。两内置模板（`python-secure` 与 `cuda-notebook-secure`，后者临时以 python 镜像承接 code-run）默认镜像接入已验证可拉的复用镜像 `docker.changqingyun.cn/hub/library/python:3.12`（10.10.1.66 探针验证可拉、python3.12.10）；description 如实澄清。catalog 测试新增防回归断言（模板镜像必须以 `docker.changqingyun.cn/` 开头）；`go build` + `go test` + validate-architecture + `git diff --check` 通过。未 rollout 前线上不生效；存量占位镜像实例需重建；GPU/notebook 专用镜像与 live-gate 镜像注入待后续 | instance-sandbox-template-image-a.md |
+
 ### RWO 卷占用保守预检（2026-09，分支 ani-hotfix）
 
 | 批次 | 内容摘要 | 文件 |

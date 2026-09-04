@@ -26,8 +26,8 @@ func NewLocalSandboxTemplateCatalog() *LocalSandboxTemplateCatalog {
 		{
 			ID:          uuid.NewString(),
 			Name:        "python-secure",
-			Image:       "registry.local/ani/sandbox-python:dev",
-			Description: "Local Python sandbox template for Services integration development",
+			Image:       "docker.changqingyun.cn/hub/library/python:3.12",
+			Description: "Python sandbox template backed by a reusable python image (python code-run ready)",
 			CPUCores:    &cpuSmall,
 			MemoryGB:    &memSmall,
 			StorageGB:   &storageSmall,
@@ -38,8 +38,8 @@ func NewLocalSandboxTemplateCatalog() *LocalSandboxTemplateCatalog {
 		{
 			ID:          uuid.NewString(),
 			Name:        "cuda-notebook-secure",
-			Image:       "registry.local/ani/sandbox-cuda-notebook:dev",
-			Description: "Local GPU-aware sandbox template; real runtime is gated separately",
+			Image:       "docker.changqingyun.cn/hub/library/python:3.12",
+			Description: "GPU sandbox template currently backed by a reusable python image (python code-run ready); dedicated GPU/notebook image pending",
 			CPUCores:    &cpuGPU,
 			MemoryGB:    &memGPU,
 			StorageGB:   &storageGPU,
