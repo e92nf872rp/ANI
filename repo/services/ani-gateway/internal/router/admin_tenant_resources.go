@@ -309,7 +309,7 @@ func (api *adminTenantAPI) listTenantLifecycle(ctx context.Context, c *app.Reque
 	listed, err := api.tenant.ListTenantLifecycle(ctx, c.Param("tenant_id"), ports.TenantLifecycleFilter{
 		Limit:  limit,
 		Cursor: c.Query("cursor"),
-		Action: c.Query("action"),
+		Action: ports.TenantLifecycleAction(c.Query("action")),
 	})
 	if err != nil {
 		writeAdminTenantError(c, err)

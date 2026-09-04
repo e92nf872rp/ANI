@@ -33,7 +33,7 @@ func writeAuditSuccess(ctx context.Context, audit ports.AuditStore, resource, ac
 		RequestID: requestIDFromCtx(ctx),
 		Action:    action,
 		Resource:  resource,
-		Result:    "success",
+		Result:    ports.AuditResultSuccess,
 		Details:   details,
 	})
 	if err != nil {
@@ -70,7 +70,7 @@ func writeAuditFailure(ctx context.Context, audit ports.AuditStore, resource, ac
 		RequestID: requestIDFromCtx(ctx),
 		Action:    action,
 		Resource:  resource,
-		Result:    "failure",
+		Result:    ports.AuditResultFailure,
 		Details:   out,
 	})
 	if err != nil {

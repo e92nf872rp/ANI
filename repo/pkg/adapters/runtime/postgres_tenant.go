@@ -142,12 +142,12 @@ func (t *PostgresTenant) CreateTenant(ctx context.Context, in ports.CreateTenant
 			return fmt.Errorf("insert user_roles: %w", execErr)
 		}
 
-		// 步骤 2f：INSERT tenant_lifecycle('create')（归因来自 Gateway 注入的 ctx）
+		// 步骤 2f：INSERT tenant_lifecycle(create)（归因来自 Gateway 注入的 ctx）
 		actor, requestID := lifecycleAttributionArgs(ctx)
 		if _, execErr := tx.Exec(ctx, `
 			INSERT INTO tenant_lifecycle (tenant_id, action, user_id, request_id)
-			VALUES ($1, 'create', $2, $3)
-		`, rowID, actor, requestID); execErr != nil {
+			VALUES ($1, $2, $3, $4)
+		`, rowID, string(ports.TenantLifecycleActionCreate), actor, requestID); execErr != nil {
 			return fmt.Errorf("insert tenant_lifecycle: %w", execErr)
 		}
 
@@ -463,8 +463,8 @@ func (t *PostgresTenant) FreezeTenant(ctx context.Context, tenantID string) (por
 		actor, reqID := lifecycleAttributionArgs(ctx)
 		if _, execErr := tx.Exec(ctx, `
 			INSERT INTO tenant_lifecycle (tenant_id, action, user_id, request_id)
-			VALUES ($1, 'freeze', $2, $3)
-		`, id, actor, reqID); execErr != nil {
+			VALUES ($1, $2, $3, $4)
+		`, id, string(ports.TenantLifecycleActionFreeze), actor, reqID); execErr != nil {
 			return fmt.Errorf("insert tenant_lifecycle(freeze): %w", execErr)
 		}
 
@@ -510,8 +510,8 @@ func (t *PostgresTenant) UnfreezeTenant(ctx context.Context, tenantID string) (p
 		actor, reqID := lifecycleAttributionArgs(ctx)
 		if _, execErr := tx.Exec(ctx, `
 			INSERT INTO tenant_lifecycle (tenant_id, action, user_id, request_id)
-			VALUES ($1, 'unfreeze', $2, $3)
-		`, id, actor, reqID); execErr != nil {
+			VALUES ($1, $2, $3, $4)
+		`, id, string(ports.TenantLifecycleActionUnfreeze), actor, reqID); execErr != nil {
 			return fmt.Errorf("insert tenant_lifecycle(unfreeze): %w", execErr)
 		}
 
@@ -558,8 +558,8 @@ func (t *PostgresTenant) DisableTenant(ctx context.Context, tenantID string) (po
 		actor, reqID := lifecycleAttributionArgs(ctx)
 		if _, execErr := tx.Exec(ctx, `
 			INSERT INTO tenant_lifecycle (tenant_id, action, user_id, request_id)
-			VALUES ($1, 'disable', $2, $3)
-		`, id, actor, reqID); execErr != nil {
+			VALUES ($1, $2, $3, $4)
+		`, id, string(ports.TenantLifecycleActionDisable), actor, reqID); execErr != nil {
 			return fmt.Errorf("insert tenant_lifecycle(disable): %w", execErr)
 		}
 
@@ -758,8 +758,124 @@ func (t *PostgresTenant) UpdateTenantAuth(ctx context.Context, tenantID string, 
 	return out, nil
 }
 
-func (t *PostgresTenant) ListTenantLifecycle(context.Context, string, ports.TenantLifecycleFilter) (ports.TenantLifecycleListResult, error) {
-	return ports.TenantLifecycleListResult{}, ports.ErrUnsupported
+// ListTenantLifecycle 查询 tenant_lifecycle（平台管理员）：可选 action 过滤 + keyset 游标分页。
+func (t *PostgresTenant) ListTenantLifecycle(ctx context.Context, tenantID string, filter ports.TenantLifecycleFilter) (ports.TenantLifecycleListResult, error) {
+	// 步骤 1：解析 tenant_id；规范化 limit（默认 20 / 上限 100）
+	id, err := parseTenantUUID(tenantID)
+	if err != nil {
+		return ports.TenantLifecycleListResult{}, err
+	}
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	// 步骤 2：校验可选 action 枚举（空 = 不过滤）
+	action, err := ports.ParseTenantLifecycleActionFilter(string(filter.Action))
+	if err != nil {
+		return ports.TenantLifecycleListResult{}, err
+	}
+
+	// 步骤 3：解码游标（created_at, id）
+	var cursorCreatedAt *time.Time
+	var cursorID *uuid.UUID
+	if raw := strings.TrimSpace(filter.Cursor); raw != "" {
+		createdAt, cid, decErr := types.DecodeCursor(raw)
+		if decErr != nil {
+			return ports.TenantLifecycleListResult{}, fmt.Errorf("%w: invalid cursor", ports.ErrInvalid)
+		}
+		cursorCreatedAt = &createdAt
+		cursorID = &cid
+	}
+
+	var items []ports.TenantLifecycleEntry
+	err = t.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		// 步骤 4：租户必须存在，否则 TENANT_NOT_FOUND
+		var exists bool
+		if qErr := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tenants WHERE id = $1)`, id).Scan(&exists); qErr != nil {
+			return fmt.Errorf("check tenant exists: %w", qErr)
+		}
+		if !exists {
+			return ports.ErrTenantNotFound
+		}
+
+		// 步骤 5：keyset 分页查询（created_at DESC, id DESC；走 idx_tenant_lifecycle_tenant）
+		args := []any{id, string(action)}
+		where := `
+			WHERE tenant_id = $1
+			  AND ($2 = '' OR action = $2)
+		`
+		if cursorCreatedAt != nil && cursorID != nil {
+			args = append(args, *cursorCreatedAt, *cursorID)
+			where += fmt.Sprintf(" AND (created_at, id) < ($%d, $%d)", len(args)-1, len(args))
+		}
+		args = append(args, limit+1)
+		limitArg := len(args)
+
+		rows, queryErr := tx.Query(ctx, `
+			SELECT id, tenant_id, action, reason, user_id, request_id, created_at
+			FROM tenant_lifecycle
+			`+where+`
+			ORDER BY created_at DESC, id DESC
+			LIMIT $`+fmt.Sprintf("%d", limitArg), args...)
+		if queryErr != nil {
+			return fmt.Errorf("list tenant_lifecycle: %w", queryErr)
+		}
+		defer rows.Close()
+
+		out := make([]ports.TenantLifecycleEntry, 0, limit+1)
+		for rows.Next() {
+			var (
+				entryID   uuid.UUID
+				tid       uuid.UUID
+				act       string
+				reason    *string
+				userID    *uuid.UUID
+				requestID *string
+				createdAt time.Time
+			)
+			if scanErr := rows.Scan(&entryID, &tid, &act, &reason, &userID, &requestID, &createdAt); scanErr != nil {
+				return fmt.Errorf("scan tenant_lifecycle: %w", scanErr)
+			}
+			var userIDStr *string
+			if userID != nil {
+				s := userID.String()
+				userIDStr = &s
+			}
+			out = append(out, ports.TenantLifecycleEntry{
+				ID:        entryID.String(),
+				TenantID:  tid.String(),
+				Action:    ports.TenantLifecycleAction(act),
+				Reason:    reason,
+				UserID:    userIDStr,
+				RequestID: requestID,
+				CreatedAt: createdAt,
+			})
+		}
+		if rows.Err() != nil {
+			return fmt.Errorf("iterate tenant_lifecycle: %w", rows.Err())
+		}
+		items = out
+		return nil
+	})
+	if err != nil {
+		return ports.TenantLifecycleListResult{}, err
+	}
+
+	// 步骤 6：截断并编码 next_cursor
+	nextCursor := ""
+	if len(items) > limit {
+		last := items[limit-1]
+		lastID, parseErr := uuid.Parse(last.ID)
+		if parseErr != nil {
+			return ports.TenantLifecycleListResult{}, fmt.Errorf("encode cursor: %w", parseErr)
+		}
+		nextCursor = types.EncodeCursor(last.CreatedAt, lastID)
+		items = items[:limit]
+	}
+	return ports.TenantLifecycleListResult{Items: items, NextCursor: nextCursor}, nil
 }
 
 func parseTenantUUID(raw string) (uuid.UUID, error) {

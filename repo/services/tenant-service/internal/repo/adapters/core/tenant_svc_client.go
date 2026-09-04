@@ -255,8 +255,75 @@ func decodeTenantAuth(tenantID uuid.UUID, raw any) (ports.TenantAuth, error) {
 	return out, nil
 }
 
-func (c *TenantSvcClient) ListTenantLifecycle(context.Context, uuid.UUID, ports.TenantLifecycleFilter) (ports.TenantLifecycleListResult, error) {
-	return ports.TenantLifecycleListResult{}, ports.ErrNotImplemented
+// ListTenantLifecycle 调用 Core GET /admin/tenants/{id}/lifecycle。
+func (c *TenantSvcClient) ListTenantLifecycle(ctx context.Context, tenantID uuid.UUID, filter ports.TenantLifecycleFilter) (ports.TenantLifecycleListResult, error) {
+	_ = ctx
+	// 步骤 1：组装 query（limit / cursor / action）
+	q := url.Values{}
+	if filter.Limit > 0 {
+		q.Set("limit", strconv.Itoa(filter.Limit))
+	}
+	if strings.TrimSpace(filter.Cursor) != "" {
+		q.Set("cursor", strings.TrimSpace(filter.Cursor))
+	}
+	if strings.TrimSpace(string(filter.Action)) != "" {
+		q.Set("action", strings.TrimSpace(string(filter.Action)))
+	}
+	path := fmt.Sprintf("/admin/tenants/%s/lifecycle", tenantID.String())
+	if encoded := q.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	// 步骤 2：发 GET；404 TENANT_NOT_FOUND 等经 mapSDKError
+	raw, err := c.sdk.Request("GET", path, anisdk.RequestOptions{})
+	if err != nil {
+		return ports.TenantLifecycleListResult{}, mapSDKError(err)
+	}
+	// 步骤 3：解码 items + next_cursor
+	obj, err := asObject(raw)
+	if err != nil {
+		return ports.TenantLifecycleListResult{}, err
+	}
+	itemsRaw, err := asObjectSlice(obj["items"])
+	if err != nil {
+		return ports.TenantLifecycleListResult{}, err
+	}
+	items := make([]ports.TenantLifecycleEntry, 0, len(itemsRaw))
+	for _, it := range itemsRaw {
+		id, parseErr := uuid.Parse(strings.TrimSpace(stringField(it, "id")))
+		if parseErr != nil {
+			return ports.TenantLifecycleListResult{}, fmt.Errorf("%w: lifecycle id: %v", ports.ErrCoreUnavailable, parseErr)
+		}
+		entry := ports.TenantLifecycleEntry{
+			ID:        id,
+			TenantID:  tenantID,
+			Action:    ports.TenantLifecycleAction(stringField(it, "action")),
+			CreatedAt: parseTimeField(it, "created_at"),
+		}
+		if v, ok := it["reason"]; ok && v != nil {
+			if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+				s = strings.TrimSpace(s)
+				entry.Reason = &s
+			}
+		}
+		if v, ok := it["request_id"]; ok && v != nil {
+			if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+				s = strings.TrimSpace(s)
+				entry.RequestID = &s
+			}
+		}
+		if v, ok := it["user_id"]; ok && v != nil {
+			if s, ok := v.(string); ok {
+				if uid, err := uuid.Parse(strings.TrimSpace(s)); err == nil {
+					entry.UserID = &uid
+				}
+			}
+		}
+		items = append(items, entry)
+	}
+	return ports.TenantLifecycleListResult{
+		Items:      items,
+		NextCursor: stringField(obj, "next_cursor"),
+	}, nil
 }
 
 func decodeTenant(raw any) (ports.Tenant, error) {

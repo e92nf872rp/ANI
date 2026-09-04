@@ -2,6 +2,8 @@ package ports
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -52,11 +54,43 @@ type TenantAuthPatch struct {
 	MfaRequired *bool
 }
 
+// TenantLifecycleAction 是 tenant_lifecycle.action 枚举。
+type TenantLifecycleAction string
+
+const (
+	TenantLifecycleActionCreate   TenantLifecycleAction = "create"
+	TenantLifecycleActionFreeze   TenantLifecycleAction = "freeze"
+	TenantLifecycleActionUnfreeze TenantLifecycleAction = "unfreeze"
+	TenantLifecycleActionDisable  TenantLifecycleAction = "disable"
+)
+
+// Valid 报告是否为已知生命周期动作（不含空串）。
+func (a TenantLifecycleAction) Valid() bool {
+	switch a {
+	case TenantLifecycleActionCreate, TenantLifecycleActionFreeze, TenantLifecycleActionUnfreeze, TenantLifecycleActionDisable:
+		return true
+	default:
+		return false
+	}
+}
+
+// ParseTenantLifecycleActionFilter 解析列表过滤用 action：空=全部；非法值报错。
+func ParseTenantLifecycleActionFilter(raw string) (TenantLifecycleAction, error) {
+	a := TenantLifecycleAction(strings.TrimSpace(raw))
+	if a == "" {
+		return "", nil
+	}
+	if !a.Valid() {
+		return "", fmt.Errorf("%w: action must be create, freeze, unfreeze, or disable", ErrValidationFailed)
+	}
+	return a, nil
+}
+
 // TenantLifecycleEntry 是 Core tenant_lifecycle 记录（GET /admin/tenants/{id}/lifecycle）。
 type TenantLifecycleEntry struct {
 	ID        uuid.UUID
 	TenantID  uuid.UUID
-	Action    string // create | freeze | unfreeze | disable
+	Action    TenantLifecycleAction
 	Reason    *string
 	UserID    *uuid.UUID
 	RequestID *string
@@ -67,7 +101,7 @@ type TenantLifecycleEntry struct {
 type TenantLifecycleFilter struct {
 	Limit  int
 	Cursor string
-	Action string
+	Action TenantLifecycleAction // "" = all
 }
 
 // TenantLifecycleListResult 是生命周期游标分页结果。

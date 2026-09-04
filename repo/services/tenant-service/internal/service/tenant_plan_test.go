@@ -155,11 +155,13 @@ func (f *fakeAuditStore) ListTenantAuditLogs(_ context.Context, tenantID uuid.UU
 		matched[i], matched[j] = matched[j], matched[i]
 	}
 
-	total := len(matched)
+	nextCursor := ""
 	if len(matched) > limit {
+		last := matched[limit-1]
+		nextCursor = last.ID.String()
 		matched = matched[:limit]
 	}
-	return ports.AuditLogListResult{Items: matched, Total: total, NextCursor: ""}, nil
+	return ports.AuditLogListResult{Items: matched, NextCursor: nextCursor}, nil
 }
 
 func (f *fakeAuditStore) ListTenantAdminAuditLogs(_ context.Context, tenantID, userID uuid.UUID, filter ports.TenantAuditLogFilter) (ports.AuditLogListResult, error) {
@@ -186,7 +188,7 @@ func (f *fakeAuditStore) ListTenantAdminAuditLogs(_ context.Context, tenantID, u
 		if action := strings.TrimSpace(filter.Action); action != "" && log.Action != action {
 			continue
 		}
-		if result := strings.TrimSpace(filter.Result); result != "" && log.Result != result {
+		if result := strings.TrimSpace(string(filter.Result)); result != "" && string(log.Result) != result {
 			continue
 		}
 		matched = append(matched, log)
@@ -253,6 +255,9 @@ type fakeTenantClient struct {
 	updateAuthFn  func(ctx context.Context, id uuid.UUID, patch ports.TenantAuthPatch) (ports.TenantAuth, error)
 	updateAuthIn  *ports.TenantAuthPatch
 	updateAuthCalls int
+
+	lifecycleItems []ports.TenantLifecycleEntry
+	lifecycleFn    func(ctx context.Context, id uuid.UUID, filter ports.TenantLifecycleFilter) (ports.TenantLifecycleListResult, error)
 }
 
 var (
@@ -478,8 +483,34 @@ func (f *fakeTenantClient) UpdateTenantAuth(ctx context.Context, id uuid.UUID, p
 	return f.auth, nil
 }
 
-func (f *fakeTenantClient) ListTenantLifecycle(context.Context, uuid.UUID, ports.TenantLifecycleFilter) (ports.TenantLifecycleListResult, error) {
-	panic("unused in tenant plan tests")
+func (f *fakeTenantClient) ListTenantLifecycle(ctx context.Context, id uuid.UUID, filter ports.TenantLifecycleFilter) (ports.TenantLifecycleListResult, error) {
+	if f.lifecycleFn != nil {
+		return f.lifecycleFn(ctx, id, filter)
+	}
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	matched := make([]ports.TenantLifecycleEntry, 0, len(f.lifecycleItems))
+	for _, it := range f.lifecycleItems {
+		if it.TenantID != id {
+			continue
+		}
+		if filter.Action != "" && it.Action != filter.Action {
+			continue
+		}
+		matched = append(matched, it)
+	}
+	next := ""
+	if len(matched) > limit {
+		last := matched[limit-1]
+		next = last.ID.String() // 单测仅断言非空翻页时够用；真实实现用 EncodeCursor
+		matched = matched[:limit]
+	}
+	return ports.TenantLifecycleListResult{Items: matched, NextCursor: next}, nil
 }
 
 func (f *fakeTenantClient) UpdateTenantPlan(_ context.Context, id uuid.UUID, planID uuid.UUID) (ports.Tenant, error) {

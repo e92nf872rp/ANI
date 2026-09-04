@@ -1023,7 +1023,11 @@ func (s *TenantAdminService) ListTenantAdminAuditLogs(ctx context.Context, req *
 		return nil, err
 	}
 
-	// 步骤 3：游标分页入参
+	// 步骤 3：可选 result 枚举（空=不过滤）+ 游标分页入参
+	result, err := ports.ParseAuditResultFilter(req.GetResult())
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
 	limit := 20
 	cursor := ""
 	if page := req.GetPage(); page != nil {
@@ -1041,7 +1045,7 @@ func (s *TenantAdminService) ListTenantAdminAuditLogs(ctx context.Context, req *
 		Limit:  limit,
 		Cursor: cursor,
 		Action: strings.TrimSpace(req.GetAction()),
-		Result: strings.TrimSpace(req.GetResult()),
+		Result: result,
 	})
 	if err != nil {
 		return nil, mapStoreError(err)
@@ -1076,7 +1080,7 @@ func tenantAdminAuditLogToPB(log ports.AuditLog) (*tenantv1.TenantAdminAuditLog,
 		Id:        log.ID.String(),
 		Action:    log.Action,
 		Resource:  log.Resource,
-		Result:    log.Result,
+		Result:    string(log.Result),
 		Details:   st,
 		CreatedAt: timestamppb.New(log.CreatedAt),
 	}

@@ -2,6 +2,8 @@ package ports
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +18,36 @@ import (
 //   - 平台级操作 tenant_id 为 NULL
 //   - 套餐相关记录使用 resource='tenant_plan'，并以 details->>'plan_id' 关联套餐
 
+// AuditResult 是 audit_logs.result 枚举。
+type AuditResult string
+
+const (
+	AuditResultSuccess AuditResult = "success"
+	AuditResultFailure AuditResult = "failure"
+)
+
+// Valid 报告是否为已知审计结果（不含空串）。
+func (r AuditResult) Valid() bool {
+	switch r {
+	case AuditResultSuccess, AuditResultFailure:
+		return true
+	default:
+		return false
+	}
+}
+
+// ParseAuditResultFilter 解析列表过滤用 result：空=全部；非法值报错。
+func ParseAuditResultFilter(raw string) (AuditResult, error) {
+	r := AuditResult(strings.TrimSpace(raw))
+	if r == "" {
+		return "", nil
+	}
+	if !r.Valid() {
+		return "", fmt.Errorf("%w: result must be success or failure", ErrValidationFailed)
+	}
+	return r, nil
+}
+
 // AuditLog 表示一条审计日志记录（对应 audit_logs 表一行）。
 type AuditLog struct {
 	ID        uuid.UUID
@@ -24,7 +56,7 @@ type AuditLog struct {
 	RequestID string         // 网关透传的请求 ID（TEXT；可含 req_ 前缀），空则 store 侧生成
 	Action    string         // 操作类型，如 plan.create / plan.activate / tenant.bind_plan_quota
 	Resource  string         // 资源类型，如 tenant_plan
-	Result    string         // success | failure
+	Result    AuditResult    // success | failure
 	Details   map[string]any // 扩展信息，如 {plan_id, skipped_approved, updated}
 	IPAddress string         // 来源 IP
 	UserAgent string         // UA
@@ -42,7 +74,7 @@ type TenantAuditLogFilter struct {
 	Limit  int
 	Cursor string
 	Action string
-	Result string // success | failure；空串表示不过滤
+	Result AuditResult // "" = all；否则 success | failure
 }
 
 // AuditLogListResult 是审计日志查询的返回（游标分页）。

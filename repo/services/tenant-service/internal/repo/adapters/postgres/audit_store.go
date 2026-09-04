@@ -43,7 +43,7 @@ func (s *PostgresAuditStore) Create(ctx context.Context, log ports.AuditLog) (uu
 
 	result := log.Result
 	if result == "" {
-		result = "success"
+		result = ports.AuditResultSuccess
 	}
 
 	var id uuid.UUID
@@ -158,8 +158,99 @@ func (s *PostgresAuditStore) ListPlanAuditLogs(ctx context.Context, planID uuid.
 	}, nil
 }
 
-func (s *PostgresAuditStore) ListTenantAuditLogs(context.Context, uuid.UUID, ports.TenantAuditLogFilter) (ports.AuditLogListResult, error) {
-	return ports.AuditLogListResult{}, ports.ErrNotImplemented
+// ListTenantAuditLogs 按 tenant_id 查询租户操作历史（US-016），游标分页。
+// 可选 action / result 过滤；resource 列透传，不作为过滤条件。
+func (s *PostgresAuditStore) ListTenantAuditLogs(ctx context.Context, tenantID uuid.UUID, filter ports.TenantAuditLogFilter) (ports.AuditLogListResult, error) {
+	// 步骤 1：规范化 limit（默认 20 / 上限 100）
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	// 步骤 2：拼 WHERE（tenant_id 必选；action/result 可选）
+	where := []string{"tenant_id = $1"}
+	args := []any{tenantID}
+
+	if action := strings.TrimSpace(filter.Action); action != "" {
+		args = append(args, action)
+		where = append(where, fmt.Sprintf("action = $%d", len(args)))
+	}
+	if result := strings.TrimSpace(string(filter.Result)); result != "" {
+		if !filter.Result.Valid() {
+			return ports.AuditLogListResult{}, fmt.Errorf("%w: result must be success or failure", ports.ErrValidationFailed)
+		}
+		args = append(args, result)
+		where = append(where, fmt.Sprintf("result = $%d", len(args)))
+	}
+	whereSQL := strings.Join(where, " AND ")
+
+	// 步骤 3：追加 keyset 游标条件（created_at DESC, id DESC）
+	listArgs := append([]any{}, args...)
+	listWhere := whereSQL
+	if cursor := strings.TrimSpace(filter.Cursor); cursor != "" {
+		createdAt, id, err := types.DecodeCursor(cursor)
+		if err != nil {
+			return ports.AuditLogListResult{}, fmt.Errorf("%w: invalid cursor", ports.ErrValidationFailed)
+		}
+		listArgs = append(listArgs, createdAt, id)
+		listWhere += fmt.Sprintf(" AND (created_at, id) < ($%d, $%d)", len(listArgs)-1, len(listArgs))
+	}
+
+	// 步骤 4：查询 audit_logs（多取 1 行判定是否有下一页）
+	listArgs = append(listArgs, limit+1)
+	rows, err := s.db.Query(ctx, `
+		SELECT id, action, resource, result, user_id, details, created_at
+		FROM audit_logs
+		WHERE `+listWhere+`
+		ORDER BY created_at DESC, id DESC
+		LIMIT $`+fmt.Sprintf("%d", len(listArgs)), listArgs...)
+	if err != nil {
+		return ports.AuditLogListResult{}, fmt.Errorf("list tenant audit logs: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]ports.AuditLog, 0, limit)
+	for rows.Next() {
+		var (
+			item       ports.AuditLog
+			detailsRaw []byte
+		)
+		if err := rows.Scan(
+			&item.ID, &item.Action, &item.Resource, &item.Result, &item.UserID, &detailsRaw, &item.CreatedAt,
+		); err != nil {
+			return ports.AuditLogListResult{}, fmt.Errorf("scan tenant audit log: %w", err)
+		}
+		item.TenantID = &tenantID
+		if len(detailsRaw) > 0 {
+			details := map[string]any{}
+			if err := json.Unmarshal(detailsRaw, &details); err != nil {
+				return ports.AuditLogListResult{}, fmt.Errorf("decode audit details: %w", err)
+			}
+			item.Details = details
+		} else {
+			item.Details = map[string]any{}
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return ports.AuditLogListResult{}, fmt.Errorf("iterate tenant audit logs: %w", err)
+	}
+
+	// 步骤 5：截断并编码 next_cursor
+	nextCursor := ""
+	if len(items) > limit {
+		last := items[limit-1]
+		nextCursor = types.EncodeCursor(last.CreatedAt, last.ID)
+		items = items[:limit]
+	}
+
+	return ports.AuditLogListResult{
+		Items:      items,
+		NextCursor: nextCursor,
+	}, nil
 }
 
 // ListTenantAdminAuditLogs 按租户 + 目标管理员查询操作历史（details.target_id），游标分页。
@@ -184,7 +275,10 @@ func (s *PostgresAuditStore) ListTenantAdminAuditLogs(ctx context.Context, tenan
 		args = append(args, action)
 		where = append(where, fmt.Sprintf("action = $%d", len(args)))
 	}
-	if result := strings.TrimSpace(filter.Result); result != "" {
+	if result := strings.TrimSpace(string(filter.Result)); result != "" {
+		if !filter.Result.Valid() {
+			return ports.AuditLogListResult{}, fmt.Errorf("%w: result must be success or failure", ports.ErrValidationFailed)
+		}
 		args = append(args, result)
 		where = append(where, fmt.Sprintf("result = $%d", len(args)))
 	}

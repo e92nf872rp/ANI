@@ -508,3 +508,52 @@ func TestPostgresTenantUpdateTenantAuth_EmptyPatch(t *testing.T) {
 		t.Fatalf("want ErrInvalid, got %v", err)
 	}
 }
+
+func TestPostgresTenantListTenantLifecycle_SuccessFilterAndPage(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	id1 := uuid.MustParse("11111111-1111-4111-8111-111111111111")
+	id2 := uuid.MustParse("22222222-2222-4222-8222-222222222222")
+	id3 := uuid.MustParse("33333333-3333-4333-8333-333333333333")
+	t1 := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 9, 4, 11, 0, 0, 0, time.UTC)
+	t3 := time.Date(2026, 9, 4, 10, 0, 0, 0, time.UTC)
+	reqID := "req-1"
+	userID := uuid.MustParse("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(quotaFakeRow{values: []any{true}}) // EXISTS
+	tx.enqueueQuery(&quotaFakeRows{rows: []quotaFakeRow{
+		{values: []any{id1, tenantID, "freeze", (*string)(nil), &userID, &reqID, t1}},
+		{values: []any{id2, tenantID, "create", (*string)(nil), (*uuid.UUID)(nil), (*string)(nil), t2}},
+		{values: []any{id3, tenantID, "disable", (*string)(nil), (*uuid.UUID)(nil), (*string)(nil), t3}},
+	}})
+	svc := NewPostgresTenant(&quotaFakeStore{tx: tx})
+	got, err := svc.ListTenantLifecycle(context.Background(), tenantID.String(), ports.TenantLifecycleFilter{Limit: 2})
+	if err != nil {
+		t.Fatalf("ListTenantLifecycle: %v", err)
+	}
+	if len(got.Items) != 2 || got.NextCursor == "" {
+		t.Fatalf("got=%+v", got)
+	}
+	if got.Items[0].Action != ports.TenantLifecycleActionFreeze || got.Items[0].UserID == nil || *got.Items[0].UserID != userID.String() {
+		t.Fatalf("item0=%+v", got.Items[0])
+	}
+}
+
+func TestPostgresTenantListTenantLifecycle_NotFound(t *testing.T) {
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(quotaFakeRow{values: []any{false}})
+	svc := NewPostgresTenant(&quotaFakeStore{tx: tx})
+	_, err := svc.ListTenantLifecycle(context.Background(), uuid.NewString(), ports.TenantLifecycleFilter{})
+	if !errors.Is(err, ports.ErrTenantNotFound) {
+		t.Fatalf("want ErrTenantNotFound, got %v", err)
+	}
+}
+
+func TestPostgresTenantListTenantLifecycle_InvalidAction(t *testing.T) {
+	svc := NewPostgresTenant(&quotaFakeStore{tx: &quotaFakeTx{}})
+	_, err := svc.ListTenantLifecycle(context.Background(), uuid.NewString(), ports.TenantLifecycleFilter{Action: ports.TenantLifecycleAction("suspend")})
+	if !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("want ErrInvalid, got %v", err)
+	}
+}

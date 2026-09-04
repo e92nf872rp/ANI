@@ -4007,6 +4007,7 @@ paths:
                   - $ref: '#/components/schemas/CursorPage'
                   - properties:
                       items: { type: array, items: { $ref: '#/components/schemas/TenantAuditLogEntry' } }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound', description: "TENANT_NOT_FOUND" }

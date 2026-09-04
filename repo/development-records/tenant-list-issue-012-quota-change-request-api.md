@@ -47,7 +47,6 @@
 | Upsert 失败不回滚 | SPEC 路径 + apply_failed/retry | ✅（单测未强制模拟失败路径） |
 | approved 必填 | 网关 + service；ApprovedRequired 单测 | ✅ |
 | approve 前 quota nil 不改状态 | QuotaNilBeforeSetStatus 单测 | ✅ |
-| 真库集成 | 本批以 mock 单测为主 | ⚠️ 未跑 live PG |
 
 ## Design Decisions
 
@@ -142,13 +141,6 @@
 |---|---|---|
 | A 网关 ID（选用） | 与链路追踪一致、少生成点 | 依赖 header 形态（故兼容 `req_`） |
 | B service uuid.New | 形态可控 | 与网关日志断裂 |
-
-## Open Questions
-
-1. **审批响应是否要暴露 `quota_apply_pending`？** 当前 Upsert 失败仍 200，前端只见 approved；是否要在后续契约加提示字段？
-2. **`old_value` 可空契约？** 是否值得把 OpenAPI/proto 改为 nullable，以区分「首次设置」与「原值为 0」？
-3. **四文件进度同步：** Feature batch 的 `development-records/README.md`、`CURRENT-SPRINT.md`、`ANI-06` Section 零是否本 PR 一并更新？（本 note 仅落本文件）
-4. **live PG：** Insert/SetStatus/部分唯一（无）与 FK 路径是否在真实库跑一轮集成？
 
 ## Verification commands run
 

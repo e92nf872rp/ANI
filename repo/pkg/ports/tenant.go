@@ -38,6 +38,38 @@ func ParseTenantStatusFilter(raw string) (TenantStatus, error) {
 	return s, nil
 }
 
+// TenantLifecycleAction is a tenant_lifecycle.action value.
+type TenantLifecycleAction string
+
+const (
+	TenantLifecycleActionCreate   TenantLifecycleAction = "create"
+	TenantLifecycleActionFreeze   TenantLifecycleAction = "freeze"
+	TenantLifecycleActionUnfreeze TenantLifecycleAction = "unfreeze"
+	TenantLifecycleActionDisable  TenantLifecycleAction = "disable"
+)
+
+// Valid reports whether a is a known lifecycle action (empty is not valid).
+func (a TenantLifecycleAction) Valid() bool {
+	switch a {
+	case TenantLifecycleActionCreate, TenantLifecycleActionFreeze, TenantLifecycleActionUnfreeze, TenantLifecycleActionDisable:
+		return true
+	default:
+		return false
+	}
+}
+
+// ParseTenantLifecycleActionFilter parses list filter action: empty = all; invalid → ErrInvalid.
+func ParseTenantLifecycleActionFilter(raw string) (TenantLifecycleAction, error) {
+	a := TenantLifecycleAction(strings.TrimSpace(raw))
+	if a == "" {
+		return "", nil
+	}
+	if !a.Valid() {
+		return "", fmt.Errorf("%w: action must be create, freeze, unfreeze, or disable", ErrInvalid)
+	}
+	return a, nil
+}
+
 // Tenant is the Core tenant view used by platform admin flows
 // (e.g. binding a quota plan, tenant list management).
 type Tenant struct {
@@ -100,7 +132,7 @@ type TenantAuth struct {
 type TenantLifecycleEntry struct {
 	ID        string
 	TenantID  string
-	Action    string // create | freeze | unfreeze | disable
+	Action    TenantLifecycleAction
 	Reason    *string
 	UserID    *string
 	RequestID *string
@@ -145,7 +177,7 @@ type ListTenantsFilter struct {
 type TenantLifecycleFilter struct {
 	Limit  int
 	Cursor string
-	Action string
+	Action TenantLifecycleAction // "" = all
 }
 
 // TenantLifecycleListResult is the cursor-paginated lifecycle list.

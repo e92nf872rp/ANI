@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 	tenantv1 "github.com/kubercloud/ani/pkg/generated/pb/tenant/v1"
 	"github.com/kubercloud/ani/services/tenant-service/internal/repo/ports"
 	"google.golang.org/grpc/codes"
@@ -1489,5 +1490,159 @@ func TestTenantService_ReviewQuotaChangeRequest_QuotaNilBeforeSetStatus(t *testi
 	}
 	if store.setStatusCalls != 0 || store.rows[0].Status != "pending" {
 		t.Fatalf("must not SetStatus when quota nil: calls=%d status=%s", store.setStatusCalls, store.rows[0].Status)
+	}
+}
+
+func TestTenantService_ListTenantLifecycle_FilterAndPage(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	actor := uuid.MustParse("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+	now := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
+	reqID := "req-freeze"
+	tenants := &fakeTenantClient{
+		lifecycleItems: []ports.TenantLifecycleEntry{
+			{ID: uuid.MustParse("11111111-1111-4111-8111-111111111111"), TenantID: tenantID, Action: "freeze", UserID: &actor, RequestID: &reqID, CreatedAt: now},
+			{ID: uuid.MustParse("22222222-2222-4222-8222-222222222222"), TenantID: tenantID, Action: "create", CreatedAt: now.Add(-time.Hour)},
+			{ID: uuid.MustParse("33333333-3333-4333-8333-333333333333"), TenantID: tenantID, Action: "disable", CreatedAt: now.Add(-2 * time.Hour)},
+		},
+	}
+	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+
+	page1, err := svc.ListTenantLifecycle(context.Background(), &tenantv1.ListTenantLifecycleRequest{
+		TenantId: tenantID.String(),
+		Page:     &commonv1.CursorPageRequest{Limit: 2},
+	})
+	if err != nil {
+		t.Fatalf("ListTenantLifecycle: %v", err)
+	}
+	if len(page1.GetItems()) != 2 || page1.GetNextCursor() == "" {
+		t.Fatalf("page1=%+v", page1)
+	}
+	if page1.GetItems()[0].GetAction() != "freeze" {
+		t.Fatalf("want freeze first, got %+v", page1.GetItems()[0])
+	}
+
+	filtered, err := svc.ListTenantLifecycle(context.Background(), &tenantv1.ListTenantLifecycleRequest{
+		TenantId: tenantID.String(),
+		Action:   "create",
+	})
+	if err != nil {
+		t.Fatalf("filter: %v", err)
+	}
+	if len(filtered.GetItems()) != 1 || filtered.GetItems()[0].GetAction() != "create" {
+		t.Fatalf("filtered=%+v", filtered.GetItems())
+	}
+}
+
+func TestTenantService_ListTenantLifecycle_InvalidAction(t *testing.T) {
+	tenantID := uuid.New()
+	svc := NewTenantService(nil, &fakeTenantClient{}, nil, nil, nil, nil, nil, nil, nil)
+	_, err := svc.ListTenantLifecycle(context.Background(), &tenantv1.ListTenantLifecycleRequest{
+		TenantId: tenantID.String(),
+		Action:   "suspend",
+	})
+	st, _ := status.FromError(err)
+	if st.Code() != codes.InvalidArgument || !strings.Contains(st.Message(), "VALIDATION_FAILED") {
+		t.Fatalf("want VALIDATION_FAILED, got %v", err)
+	}
+}
+
+func TestTenantService_ListTenantLifecycle_NotFound(t *testing.T) {
+	tenantID := uuid.New()
+	tenants := &fakeTenantClient{
+		lifecycleFn: func(context.Context, uuid.UUID, ports.TenantLifecycleFilter) (ports.TenantLifecycleListResult, error) {
+			return ports.TenantLifecycleListResult{}, ports.ErrTenantNotFound
+		},
+	}
+	svc := NewTenantService(nil, tenants, nil, nil, nil, nil, nil, nil, nil)
+	_, err := svc.ListTenantLifecycle(context.Background(), &tenantv1.ListTenantLifecycleRequest{TenantId: tenantID.String()})
+	st, _ := status.FromError(err)
+	if st.Code() != codes.NotFound || !strings.Contains(st.Message(), "TENANT_NOT_FOUND") {
+		t.Fatalf("want TENANT_NOT_FOUND, got %v", err)
+	}
+}
+
+func TestTenantService_ListTenantAuditLogs_FilterAndPage(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	actor := uuid.MustParse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+	now := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
+	tid := tenantID
+	audit := &fakeAuditStore{logs: []ports.AuditLog{
+		// 写入顺序：旧 → 新；fake 反转后最新在前
+		{ID: uuid.MustParse("33333333-3333-4333-8333-333333333333"), TenantID: &tid, Action: "tenant.create", Resource: "tenant", Result: "success", CreatedAt: now.Add(-2 * time.Minute)},
+		{ID: uuid.MustParse("22222222-2222-4222-8222-222222222222"), TenantID: &tid, Action: "tenant.disable", Resource: "tenant", Result: "failure", CreatedAt: now.Add(-time.Minute)},
+		{ID: uuid.MustParse("11111111-1111-4111-8111-111111111111"), TenantID: &tid, UserID: &actor, Action: "tenant.freeze", Resource: "tenant", Result: "success", Details: map[string]any{"x": 1}, CreatedAt: now},
+	}}
+	tenants := &fakeTenantClient{tenant: ports.Tenant{ID: tenantID, Name: "acme", Status: ports.TenantStatusActive}}
+	svc := NewTenantService(nil, tenants, nil, nil, nil, audit, nil, nil, nil)
+
+	page1, err := svc.ListTenantAuditLogs(context.Background(), &tenantv1.ListTenantAuditLogsRequest{
+		TenantId: tenantID.String(),
+		Page:     &commonv1.CursorPageRequest{Limit: 2},
+	})
+	if err != nil {
+		t.Fatalf("ListTenantAuditLogs: %v", err)
+	}
+	if len(page1.GetItems()) != 2 || page1.GetNextCursor() == "" {
+		t.Fatalf("page1=%+v", page1)
+	}
+	if page1.GetItems()[0].GetAction() != "tenant.freeze" || page1.GetItems()[0].GetResource() != "tenant" {
+		t.Fatalf("first=%+v", page1.GetItems()[0])
+	}
+	if page1.GetItems()[0].GetUserId() == nil || page1.GetItems()[0].GetUserId().GetValue() != actor.String() {
+		t.Fatalf("user_id=%v", page1.GetItems()[0].GetUserId())
+	}
+
+	filtered, err := svc.ListTenantAuditLogs(context.Background(), &tenantv1.ListTenantAuditLogsRequest{
+		TenantId: tenantID.String(),
+		Action:   "tenant.disable",
+		Result:   "failure",
+	})
+	if err != nil {
+		t.Fatalf("filter: %v", err)
+	}
+	if len(filtered.GetItems()) != 1 || filtered.GetItems()[0].GetResult() != "failure" {
+		t.Fatalf("filtered=%+v", filtered.GetItems())
+	}
+}
+
+func TestTenantService_ListTenantAuditLogs_InvalidResult(t *testing.T) {
+	tenantID := uuid.New()
+	tenants := &fakeTenantClient{tenant: ports.Tenant{ID: tenantID, Name: "acme", Status: ports.TenantStatusActive}}
+	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	_, err := svc.ListTenantAuditLogs(context.Background(), &tenantv1.ListTenantAuditLogsRequest{
+		TenantId: tenantID.String(),
+		Result:   "ok",
+	})
+	st, _ := status.FromError(err)
+	if st.Code() != codes.InvalidArgument || !strings.Contains(st.Message(), "VALIDATION_FAILED") {
+		t.Fatalf("want VALIDATION_FAILED, got %v", err)
+	}
+}
+
+func TestTenantService_ListTenantAuditLogs_NotFound(t *testing.T) {
+	tenantID := uuid.New()
+	svc := NewTenantService(nil, &fakeTenantClient{}, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	_, err := svc.ListTenantAuditLogs(context.Background(), &tenantv1.ListTenantAuditLogsRequest{TenantId: tenantID.String()})
+	st, _ := status.FromError(err)
+	if st.Code() != codes.NotFound || !strings.Contains(st.Message(), "TENANT_NOT_FOUND") {
+		t.Fatalf("want TENANT_NOT_FOUND, got %v", err)
+	}
+}
+
+func TestTenantService_ListTenantAuditLogs_NoWriteAudit(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	tid := tenantID
+	audit := &fakeAuditStore{logs: []ports.AuditLog{
+		{ID: uuid.New(), TenantID: &tid, Action: "tenant.create", Resource: "tenant", Result: "success", CreatedAt: time.Now().UTC()},
+	}}
+	before := len(audit.logs)
+	tenants := &fakeTenantClient{tenant: ports.Tenant{ID: tenantID, Name: "acme", Status: ports.TenantStatusActive}}
+	svc := NewTenantService(nil, tenants, nil, nil, nil, audit, nil, nil, nil)
+	_, err := svc.ListTenantAuditLogs(context.Background(), &tenantv1.ListTenantAuditLogsRequest{TenantId: tenantID.String()})
+	if err != nil {
+		t.Fatalf("ListTenantAuditLogs: %v", err)
+	}
+	if len(audit.logs) != before {
+		t.Fatalf("read path must not append audit, before=%d after=%d", before, len(audit.logs))
 	}
 }

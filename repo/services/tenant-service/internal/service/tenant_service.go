@@ -16,6 +16,8 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
@@ -1416,16 +1418,162 @@ func scheduleQuotaChangeApplyRetry(audit ports.AuditStore, core ports.QuotaSvcCl
 	}()
 }
 
+// ListTenantLifecycle 查询租户生命周期（US-015）：代理 Core GET /admin/tenants/{id}/lifecycle。
+// 只读、不写审计。
 func (s *TenantService) ListTenantLifecycle(ctx context.Context, req *tenantv1.ListTenantLifecycleRequest) (*tenantv1.ListTenantLifecycleResponse, error) {
-	_ = ctx
-	_ = req
-	return nil, tenantRPCNotImplemented()
+	// 步骤 1：依赖与 tenant_id
+	if req == nil {
+		req = &tenantv1.ListTenantLifecycleRequest{}
+	}
+	tenantID, err := parseTenantID(req.GetTenantId())
+	if err != nil {
+		return nil, err
+	}
+	if s.tenants == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant client unavailable")
+	}
+
+	// 步骤 2：可选 action 枚举（空=不过滤）
+	action, err := ports.ParseTenantLifecycleActionFilter(req.GetAction())
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+
+	// 步骤 3：游标分页入参（默认 20，上限 100）
+	limit := 20
+	cursor := ""
+	if page := req.GetPage(); page != nil {
+		if page.GetLimit() > 0 {
+			limit = int(page.GetLimit())
+		}
+		if limit > 100 {
+			limit = 100
+		}
+		cursor = page.GetCursor()
+	}
+
+	// 步骤 4：经 Core SDK 查询 tenant_lifecycle（缺租户 → TENANT_NOT_FOUND）
+	listed, err := s.tenants.ListTenantLifecycle(ctx, tenantID, ports.TenantLifecycleFilter{
+		Limit:  limit,
+		Cursor: cursor,
+		Action: action,
+	})
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+
+	// 步骤 5：映射 gRPC TenantLifecycleEntry
+	items := make([]*tenantv1.TenantLifecycleEntry, 0, len(listed.Items))
+	for _, it := range listed.Items {
+		items = append(items, toProtoTenantLifecycleEntry(it))
+	}
+	return &tenantv1.ListTenantLifecycleResponse{Items: items, NextCursor: listed.NextCursor}, nil
 }
 
+// ListTenantAuditLogs 查询租户操作历史（US-016）：读自有 audit_logs 分区表。
+// 只读、不写审计；resource 透传展示，不提供过滤参数。
 func (s *TenantService) ListTenantAuditLogs(ctx context.Context, req *tenantv1.ListTenantAuditLogsRequest) (*tenantv1.ListTenantAuditLogsResponse, error) {
-	_ = ctx
-	_ = req
-	return nil, tenantRPCNotImplemented()
+	// 步骤 1：依赖与 tenant_id
+	if req == nil {
+		req = &tenantv1.ListTenantAuditLogsRequest{}
+	}
+	tenantID, err := parseTenantID(req.GetTenantId())
+	if err != nil {
+		return nil, err
+	}
+	if s.tenants == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant client unavailable")
+	}
+	if s.audit == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "audit store unavailable")
+	}
+
+	// 步骤 2：可选 result 枚举（空=不过滤；先于 GetTenant，非法入参不打 Core）
+	result, err := ports.ParseAuditResultFilter(req.GetResult())
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+
+	// 步骤 3：租户必须存在（与 lifecycle / OpenAPI 404 TENANT_NOT_FOUND 对齐）
+	if _, err := s.tenants.GetTenant(ctx, tenantID); err != nil {
+		return nil, mapStoreError(err)
+	}
+
+	// 步骤 4：游标分页入参（默认 20，上限 100）
+	limit := 20
+	cursor := ""
+	if page := req.GetPage(); page != nil {
+		if page.GetLimit() > 0 {
+			limit = int(page.GetLimit())
+		}
+		if limit > 100 {
+			limit = 100
+		}
+		cursor = page.GetCursor()
+	}
+
+	// 步骤 5：经 AuditStore 按 tenant_id 查询（可选 action/result 过滤）
+	listed, err := s.audit.ListTenantAuditLogs(ctx, tenantID, ports.TenantAuditLogFilter{
+		Limit:  limit,
+		Cursor: cursor,
+		Action: strings.TrimSpace(req.GetAction()),
+		Result: result,
+	})
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+
+	// 步骤 6：映射 gRPC TenantAuditLogEntry（含 resource / details）
+	items := make([]*tenantv1.TenantAuditLogEntry, 0, len(listed.Items))
+	for _, it := range listed.Items {
+		pb, mapErr := toProtoTenantAuditLogEntry(it)
+		if mapErr != nil {
+			return nil, status.Errorf(codes.Internal, "INTERNAL_ERROR: encode audit log: %v", mapErr)
+		}
+		items = append(items, pb)
+	}
+	return &tenantv1.ListTenantAuditLogsResponse{Items: items, NextCursor: listed.NextCursor}, nil
+}
+
+func toProtoTenantLifecycleEntry(it ports.TenantLifecycleEntry) *tenantv1.TenantLifecycleEntry {
+	out := &tenantv1.TenantLifecycleEntry{
+		Id:        it.ID.String(),
+		Action:    string(it.Action),
+		CreatedAt: timestamppb.New(it.CreatedAt.UTC()),
+	}
+	if it.Reason != nil && strings.TrimSpace(*it.Reason) != "" {
+		out.Reason = wrapperspb.String(strings.TrimSpace(*it.Reason))
+	}
+	if it.UserID != nil {
+		out.UserId = wrapperspb.String(it.UserID.String())
+	}
+	if it.RequestID != nil && strings.TrimSpace(*it.RequestID) != "" {
+		out.RequestId = wrapperspb.String(strings.TrimSpace(*it.RequestID))
+	}
+	return out
+}
+
+func toProtoTenantAuditLogEntry(log ports.AuditLog) (*tenantv1.TenantAuditLogEntry, error) {
+	details := log.Details
+	if details == nil {
+		details = map[string]any{}
+	}
+	st, err := structpb.NewStruct(details)
+	if err != nil {
+		return nil, err
+	}
+	out := &tenantv1.TenantAuditLogEntry{
+		Id:        log.ID.String(),
+		Action:    log.Action,
+		Resource:  log.Resource,
+		Result:    string(log.Result),
+		Details:   st,
+		CreatedAt: timestamppb.New(log.CreatedAt.UTC()),
+	}
+	if log.UserID != nil {
+		out.UserId = wrapperspb.String(log.UserID.String())
+	}
+	return out, nil
 }
 
 func (s *TenantService) ListTenantAdmins(ctx context.Context, req *tenantv1.ListTenantAdminsRequest) (*tenantv1.ListTenantAdminsResponse, error) {

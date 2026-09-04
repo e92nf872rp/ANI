@@ -1071,7 +1071,7 @@ func auditLogToPB(log ports.AuditLog) (*tenantv1.AuditLog, error) {
 	return &tenantv1.AuditLog{
 		Id:        log.ID.String(),
 		Action:    log.Action,
-		Result:    log.Result,
+		Result:    string(log.Result),
 		Details:   st,
 		CreatedAt: timestamppb.New(log.CreatedAt),
 	}, nil
