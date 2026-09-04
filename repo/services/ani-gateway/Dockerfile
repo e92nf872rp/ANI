@@ -19,6 +19,9 @@ RUN apk add --no-cache ca-certificates && \
     adduser -D -H -u 65532 ani
 
 COPY --from=build /out/ani-gateway /usr/local/bin/ani-gateway
+COPY ani-tools/helm /usr/local/bin/helm
+COPY ani-tools/vcluster /usr/local/bin/vcluster
+COPY ani-tools/kubectl /usr/local/bin/kubectl
 
 USER 65532:65532
 EXPOSE 8080 9200
