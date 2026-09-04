@@ -177,6 +177,8 @@ func TestMapTenantListError_AllBusinessCodes(t *testing.T) {
 		{"QUOTA_CHANGE_REQUEST_INVALID: items", http.StatusUnprocessableEntity, "QUOTA_CHANGE_REQUEST_INVALID"},
 		{"QUOTA_CHANGE_REQUEST_NOT_PENDING: approved", http.StatusConflict, "QUOTA_CHANGE_REQUEST_NOT_PENDING"},
 		{"QUOTA_CHANGE_REQUEST_NOT_FOUND: missing", http.StatusNotFound, "QUOTA_CHANGE_REQUEST_NOT_FOUND"},
+		{"QUOTA_CHANGE_REQUEST_CONFLICT: same request dim", http.StatusConflict, "QUOTA_CHANGE_REQUEST_CONFLICT"},
+		{"QUOTA_RESOURCE_NOT_REGISTERED: disabled", http.StatusUnprocessableEntity, "QUOTA_RESOURCE_NOT_REGISTERED"},
 		{"NOT_IMPLEMENTED", http.StatusNotImplemented, "NOT_IMPLEMENTED"},
 		{"GRPC_CLIENT_UNAVAILABLE: down", http.StatusBadGateway, "GRPC_CLIENT_UNAVAILABLE"},
 		{"STORE_UNAVAILABLE: db", http.StatusBadGateway, "STORE_UNAVAILABLE"},

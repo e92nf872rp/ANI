@@ -51,6 +51,8 @@ func mapStoreError(err error) error {
 		return businessError(codes.FailedPrecondition, ports.ErrQuotaChangeRequestNotPending, "quota change request is not pending")
 	case errors.Is(err, ports.ErrQuotaChangeRequestNotFound):
 		return businessError(codes.NotFound, ports.ErrQuotaChangeRequestNotFound, "quota change request not found")
+	case errors.Is(err, ports.ErrQuotaChangeRequestConflict):
+		return businessError(codes.AlreadyExists, ports.ErrQuotaChangeRequestConflict, "quota change request dimension already exists for this request_id")
 	case errors.Is(err, ports.ErrUserStateInvalid):
 		return businessError(codes.FailedPrecondition, ports.ErrUserStateInvalid, "user state does not allow this operation")
 	case errors.Is(err, ports.ErrValidationFailed):

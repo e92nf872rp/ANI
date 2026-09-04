@@ -63,6 +63,9 @@ var (
 	// ErrQuotaChangeRequestNotFound 表示配额变更申请不存在（HTTP 404）。
 	ErrQuotaChangeRequestNotFound = errors.New("QUOTA_CHANGE_REQUEST_NOT_FOUND")
 
+	// ErrQuotaChangeRequestConflict 表示同 request_id 同维已存在（HTTP 409）。
+	ErrQuotaChangeRequestConflict = errors.New("QUOTA_CHANGE_REQUEST_CONFLICT")
+
 	// ErrNotImplemented 表示接口已声明但业务尚未实现（gRPC UNIMPLEMENTED / HTTP 501）。
 	ErrNotImplemented = errors.New("NOT_IMPLEMENTED")
 

@@ -116,8 +116,9 @@ allowed:
   - path: services/tenant-service/internal/repo/adapters/postgres/tenant_store.go
     coupling_level: bounded_direct
     imports:
+      - github.com/jackc/pgx/v5
       - github.com/jackc/pgx/v5/pgxpool
-    reason: tenant lifecycle/quota-change repository is a bounded persistence module; direct pgx keeps PostgreSQL/RLS transactions explicit
+    reason: tenant quota-change repository is a bounded persistence module; direct pgx keeps PostgreSQL/RLS transactions and row scanning explicit
   - path: services/tenant-service/internal/repo/adapters/postgres/tenant_admin_store.go
     coupling_level: bounded_direct
     imports:

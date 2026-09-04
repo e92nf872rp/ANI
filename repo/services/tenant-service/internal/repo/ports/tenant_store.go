@@ -94,7 +94,7 @@ type QuotaChangeRequest struct {
 	UpdatedAt    time.Time
 }
 
-// QuotaChangePendingInput 是 UpsertPendingQuotaChanges 单维度写入输入。
+// QuotaChangePendingInput 是 InsertPendingQuotaChanges 单维度写入输入。
 type QuotaChangePendingInput struct {
 	ResourceType string
 	OldValue     *int64
@@ -111,9 +111,10 @@ type QuotaChangePendingInput struct {
 //
 // tenants / tenant_auth / tenant_lifecycle 经 TenantSvcClient（Core API）；禁止在本 store 直接 SQL 操作。
 type TenantStore interface {
-	// UpsertPendingQuotaChanges 单事务：同批共用 requestID。
-	// 逐维度 UPDATE WHERE tenant_id+resource_type+status='pending'（覆盖并改写 request_id）；0 行则 INSERT。
-	UpsertPendingQuotaChanges(ctx context.Context, tenantID, requestID uuid.UUID, items []QuotaChangePendingInput) error
+	// InsertPendingQuotaChanges 单事务 INSERT 同批行（共用网关 requestID）。
+	// 不同 request_id 允许同一 tenant+resource_type 并存 pending；
+	// 同 request 同维重复由 PK (tenant_id, request_id, resource_type) 拒绝。
+	InsertPendingQuotaChanges(ctx context.Context, tenantID, requestID uuid.UUID, items []QuotaChangePendingInput) error
 
 	// ListQuotaChangesByTenant 按租户查询；status 空串表示不过滤；不分页，按 created_at DESC。
 	ListQuotaChangesByTenant(ctx context.Context, tenantID uuid.UUID, status string) ([]QuotaChangeRequest, error)

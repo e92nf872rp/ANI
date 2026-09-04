@@ -488,10 +488,14 @@ func (api *tenantListAPI) reviewQuotaChangeRequest(ctx context.Context, c *app.R
 	}
 	var body struct {
 		IdempotencyKey string `json:"idempotency_key"`
-		Approved       bool   `json:"approved"`
+		Approved       *bool  `json:"approved"`
 	}
 	if err := json.Unmarshal(c.Request.Body(), &body); err != nil {
 		writeTenantListError(c, http.StatusBadRequest, "VALIDATION_FAILED", "invalid request body")
+		return
+	}
+	if body.Approved == nil {
+		writeTenantListError(c, http.StatusBadRequest, "VALIDATION_FAILED", "approved required")
 		return
 	}
 	idem := strings.TrimSpace(body.IdempotencyKey)
@@ -503,7 +507,7 @@ func (api *tenantListAPI) reviewQuotaChangeRequest(ctx context.Context, c *app.R
 	res, err := api.tenants.ReviewQuotaChangeRequest(callCtx, &tenantv1.ReviewQuotaChangeRequestRequest{
 		TenantId:       c.Param("tenantId"),
 		RequestId:      c.Param("reqId"),
-		Approved:       body.Approved,
+		Approved:       wrapperspb.Bool(*body.Approved),
 		IdempotencyKey: idem,
 	})
 	if err != nil {
@@ -749,10 +753,12 @@ var tenantListBusinessCodeByHTTP = map[string]int{
 	"TENANT_HAS_RUNNING_RESOURCES":    http.StatusConflict,
 	"PLAN_NOT_ACTIVE":                 http.StatusUnprocessableEntity,
 	"TENANT_SSO_CONFIG_INVALID":       http.StatusUnprocessableEntity,
-	"QUOTA_CHANGE_REQUEST_INVALID":    http.StatusUnprocessableEntity,
+	"QUOTA_CHANGE_REQUEST_INVALID":     http.StatusUnprocessableEntity,
 	"QUOTA_CHANGE_REQUEST_NOT_PENDING": http.StatusConflict,
-	"QUOTA_CHANGE_REQUEST_NOT_FOUND":  http.StatusNotFound,
-	"NOT_IMPLEMENTED":                 http.StatusNotImplemented,
+	"QUOTA_CHANGE_REQUEST_NOT_FOUND":   http.StatusNotFound,
+	"QUOTA_CHANGE_REQUEST_CONFLICT":    http.StatusConflict,
+	"QUOTA_RESOURCE_NOT_REGISTERED":    http.StatusUnprocessableEntity,
+	"NOT_IMPLEMENTED":                  http.StatusNotImplemented,
 	"GRPC_CLIENT_UNAVAILABLE":         http.StatusBadGateway,
 	"STORE_UNAVAILABLE":               http.StatusBadGateway,
 }

@@ -1163,3 +1163,331 @@ func TestTenantService_Auth_ReadWriteRoundTrip(t *testing.T) {
 		t.Fatalf("audit actions=%v logs=%+v", actions, audit.logs)
 	}
 }
+
+type fakeTenantStore struct {
+	rows           []ports.QuotaChangeRequest
+	insertErr      error
+	insertCalls    int
+	lastRequestID  uuid.UUID
+	lastTenantID   uuid.UUID
+	setStatusCalls int
+	setStatusN     int64
+	setStatusErr   error
+}
+
+func (f *fakeTenantStore) InsertPendingQuotaChanges(_ context.Context, tenantID, requestID uuid.UUID, items []ports.QuotaChangePendingInput) error {
+	f.insertCalls++
+	f.lastTenantID = tenantID
+	f.lastRequestID = requestID
+	if f.insertErr != nil {
+		return f.insertErr
+	}
+	now := time.Now().UTC()
+	for _, it := range items {
+		for _, existing := range f.rows {
+			if existing.TenantID == tenantID && existing.RequestID == requestID && existing.ResourceType == it.ResourceType {
+				return ports.ErrQuotaChangeRequestConflict
+			}
+		}
+		f.rows = append(f.rows, ports.QuotaChangeRequest{
+			TenantID: tenantID, RequestID: requestID, ResourceType: it.ResourceType,
+			OldValue: it.OldValue, NewValue: it.NewValue, Status: "pending",
+			RequestedBy: it.RequestedBy, CreatedAt: now, UpdatedAt: now,
+		})
+	}
+	return nil
+}
+
+func (f *fakeTenantStore) ListQuotaChangesByTenant(_ context.Context, tenantID uuid.UUID, status string) ([]ports.QuotaChangeRequest, error) {
+	out := make([]ports.QuotaChangeRequest, 0)
+	for _, row := range f.rows {
+		if row.TenantID != tenantID {
+			continue
+		}
+		if status != "" && row.Status != status {
+			continue
+		}
+		out = append(out, row)
+	}
+	return out, nil
+}
+
+func (f *fakeTenantStore) ListQuotaChangesByRequestID(_ context.Context, tenantID, requestID uuid.UUID) ([]ports.QuotaChangeRequest, error) {
+	out := make([]ports.QuotaChangeRequest, 0)
+	for _, row := range f.rows {
+		if row.TenantID == tenantID && row.RequestID == requestID {
+			out = append(out, row)
+		}
+	}
+	if len(out) == 0 {
+		return nil, ports.ErrQuotaChangeRequestNotFound
+	}
+	return out, nil
+}
+
+func (f *fakeTenantStore) SetQuotaChangeStatusByRequestID(_ context.Context, tenantID, requestID uuid.UUID, status string, reviewedBy uuid.UUID) (int64, error) {
+	f.setStatusCalls++
+	if f.setStatusErr != nil {
+		return 0, f.setStatusErr
+	}
+	if f.setStatusN != 0 {
+		return f.setStatusN, nil
+	}
+	var n int64
+	now := time.Now().UTC()
+	for i := range f.rows {
+		if f.rows[i].TenantID == tenantID && f.rows[i].RequestID == requestID && f.rows[i].Status == "pending" {
+			f.rows[i].Status = status
+			f.rows[i].ReviewedBy = &reviewedBy
+			f.rows[i].ReviewedAt = &now
+			f.rows[i].UpdatedAt = now
+			n++
+		}
+	}
+	return n, nil
+}
+
+func quotaChangeCtx(actorID, requestID uuid.UUID) context.Context {
+	return metadata.NewIncomingContext(context.Background(), metadata.Pairs(
+		"x-request-id", requestID.String(),
+		"x-user-id", actorID.String(),
+	))
+}
+
+func TestTenantService_SubmitQuotaChangeRequest_HappyPath(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	actorID := uuid.MustParse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+	requestID := uuid.MustParse("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+	oldTotal := int64(8)
+	quota := &fakeQuotaClient{
+		meta: []ports.QuotaMeta{{ResourceType: "gpu_count", Enabled: true}},
+		existing: map[uuid.UUID][]ports.CoreQuotaResult{
+			tenantID: {{ResourceType: "gpu_count", Total: oldTotal}},
+		},
+	}
+	store := &fakeTenantStore{}
+	audit := &fakeAuditStore{}
+	svc := NewTenantService(nil, nil, nil, quota, store, audit, nil, nil, nil)
+
+	res, err := svc.SubmitQuotaChangeRequest(quotaChangeCtx(actorID, requestID), &tenantv1.SubmitQuotaChangeRequestRequest{
+		TenantId: tenantID.String(),
+		Items:    []*tenantv1.QuotaChangeRequestInput{{ResourceType: "gpu_count", NewValue: 16}},
+	})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if res.GetId() != requestID.String() {
+		t.Fatalf("id=%s want %s", res.GetId(), requestID.String())
+	}
+	if store.insertCalls != 1 || store.lastRequestID != requestID {
+		t.Fatalf("insertCalls=%d requestID=%s", store.insertCalls, store.lastRequestID)
+	}
+	if len(store.rows) != 1 || store.rows[0].OldValue == nil || *store.rows[0].OldValue != oldTotal {
+		t.Fatalf("row=%+v", store.rows)
+	}
+	if quota.calls != 1 {
+		t.Fatalf("ListQuotaMeta calls=%d want 1", quota.calls)
+	}
+	if len(audit.logs) != 1 || audit.logs[0].Action != "tenant.quota_change_request.submit" {
+		t.Fatalf("audit=%+v", audit.logs)
+	}
+}
+
+func TestTenantService_SubmitQuotaChangeRequest_DuplicateDimInBatch(t *testing.T) {
+	tenantID := uuid.New()
+	actorID := uuid.New()
+	requestID := uuid.New()
+	svc := NewTenantService(nil, nil, nil, &fakeQuotaClient{meta: []ports.QuotaMeta{{ResourceType: "gpu_count", Enabled: true}}}, &fakeTenantStore{}, &fakeAuditStore{}, nil, nil, nil)
+	_, err := svc.SubmitQuotaChangeRequest(quotaChangeCtx(actorID, requestID), &tenantv1.SubmitQuotaChangeRequestRequest{
+		TenantId: tenantID.String(),
+		Items: []*tenantv1.QuotaChangeRequestInput{
+			{ResourceType: "gpu_count", NewValue: 1},
+			{ResourceType: "gpu_count", NewValue: 2},
+		},
+	})
+	st, _ := status.FromError(err)
+	if st.Code() != codes.FailedPrecondition || !strings.Contains(st.Message(), "QUOTA_CHANGE_REQUEST_INVALID") {
+		t.Fatalf("want QUOTA_CHANGE_REQUEST_INVALID, got %v", err)
+	}
+}
+
+func TestTenantService_SubmitQuotaChangeRequest_MetaDisabled(t *testing.T) {
+	tenantID := uuid.New()
+	actorID := uuid.New()
+	requestID := uuid.New()
+	quota := &fakeQuotaClient{meta: []ports.QuotaMeta{{ResourceType: "gpu_count", Enabled: false}}}
+	svc := NewTenantService(nil, nil, nil, quota, &fakeTenantStore{}, &fakeAuditStore{}, nil, nil, nil)
+	_, err := svc.SubmitQuotaChangeRequest(quotaChangeCtx(actorID, requestID), &tenantv1.SubmitQuotaChangeRequestRequest{
+		TenantId: tenantID.String(),
+		Items:    []*tenantv1.QuotaChangeRequestInput{{ResourceType: "gpu_count", NewValue: 1}},
+	})
+	st, _ := status.FromError(err)
+	if st.Code() != codes.FailedPrecondition || !strings.Contains(st.Message(), "QUOTA_RESOURCE_NOT_REGISTERED") {
+		t.Fatalf("want QUOTA_RESOURCE_NOT_REGISTERED, got %v", err)
+	}
+}
+
+func TestTenantService_SubmitQuotaChangeRequest_MissingRequestID(t *testing.T) {
+	tenantID := uuid.New()
+	actorID := uuid.New()
+	svc := NewTenantService(nil, nil, nil, &fakeQuotaClient{}, &fakeTenantStore{}, &fakeAuditStore{}, nil, nil, nil)
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-user-id", actorID.String()))
+	_, err := svc.SubmitQuotaChangeRequest(ctx, &tenantv1.SubmitQuotaChangeRequestRequest{
+		TenantId: tenantID.String(),
+		Items:    []*tenantv1.QuotaChangeRequestInput{{ResourceType: "gpu_count", NewValue: 1}},
+	})
+	st, _ := status.FromError(err)
+	if st.Code() != codes.InvalidArgument || !strings.Contains(st.Message(), "VALIDATION_FAILED") {
+		t.Fatalf("want VALIDATION_FAILED, got %v", err)
+	}
+}
+
+func TestTenantService_SubmitQuotaChangeRequest_CrossRequestSameDimAllowed(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	actorID := uuid.MustParse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+	req1 := uuid.MustParse("11111111-1111-4111-8111-111111111111")
+	req2 := uuid.MustParse("22222222-2222-4222-8222-222222222222")
+	quota := &fakeQuotaClient{
+		meta:     []ports.QuotaMeta{{ResourceType: "gpu_count", Enabled: true}},
+		existing: map[uuid.UUID][]ports.CoreQuotaResult{tenantID: {{ResourceType: "gpu_count", Total: 4}}},
+	}
+	store := &fakeTenantStore{}
+	svc := NewTenantService(nil, nil, nil, quota, store, &fakeAuditStore{}, nil, nil, nil)
+	for _, rid := range []uuid.UUID{req1, req2} {
+		if _, err := svc.SubmitQuotaChangeRequest(quotaChangeCtx(actorID, rid), &tenantv1.SubmitQuotaChangeRequestRequest{
+			TenantId: tenantID.String(),
+			Items:    []*tenantv1.QuotaChangeRequestInput{{ResourceType: "gpu_count", NewValue: 10}},
+		}); err != nil {
+			t.Fatalf("Submit %s: %v", rid, err)
+		}
+	}
+	if len(store.rows) != 2 {
+		t.Fatalf("rows=%d want 2", len(store.rows))
+	}
+}
+
+func TestTenantService_SubmitQuotaChangeRequest_SameRequestDimConflict(t *testing.T) {
+	tenantID := uuid.New()
+	actorID := uuid.New()
+	requestID := uuid.New()
+	quota := &fakeQuotaClient{
+		meta:     []ports.QuotaMeta{{ResourceType: "gpu_count", Enabled: true}},
+		existing: map[uuid.UUID][]ports.CoreQuotaResult{tenantID: {{ResourceType: "gpu_count", Total: 1}}},
+	}
+	store := &fakeTenantStore{insertErr: ports.ErrQuotaChangeRequestConflict}
+	svc := NewTenantService(nil, nil, nil, quota, store, &fakeAuditStore{}, nil, nil, nil)
+	_, err := svc.SubmitQuotaChangeRequest(quotaChangeCtx(actorID, requestID), &tenantv1.SubmitQuotaChangeRequestRequest{
+		TenantId: tenantID.String(),
+		Items:    []*tenantv1.QuotaChangeRequestInput{{ResourceType: "gpu_count", NewValue: 2}},
+	})
+	st, _ := status.FromError(err)
+	if st.Code() != codes.AlreadyExists || !strings.Contains(st.Message(), "QUOTA_CHANGE_REQUEST_CONFLICT") {
+		t.Fatalf("want QUOTA_CHANGE_REQUEST_CONFLICT, got %v", err)
+	}
+}
+
+func TestTenantService_ListAndReviewQuotaChangeRequest(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	actorID := uuid.MustParse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+	requestID := uuid.MustParse("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+	old := int64(8)
+	store := &fakeTenantStore{rows: []ports.QuotaChangeRequest{{
+		TenantID: tenantID, RequestID: requestID, ResourceType: "gpu_count",
+		OldValue: &old, NewValue: 16, Status: "pending", RequestedBy: actorID, CreatedAt: time.Now().UTC(),
+	}}}
+	quota := &fakeQuotaClient{}
+	audit := &fakeAuditStore{}
+	svc := NewTenantService(nil, nil, nil, quota, store, audit, nil, nil, nil)
+
+	listed, err := svc.ListQuotaChangeRequests(context.Background(), &tenantv1.ListQuotaChangeRequestsRequest{
+		TenantId: tenantID.String(), Status: "pending",
+	})
+	if err != nil || len(listed.GetItems()) != 1 {
+		t.Fatalf("list: err=%v items=%+v", err, listed)
+	}
+
+	res, err := svc.ReviewQuotaChangeRequest(quotaChangeCtx(actorID, uuid.New()), &tenantv1.ReviewQuotaChangeRequestRequest{
+		TenantId: tenantID.String(), RequestId: requestID.String(), Approved: wrapperspb.Bool(true),
+	})
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if res.GetId() != requestID.String() {
+		t.Fatalf("id=%s", res.GetId())
+	}
+	if quota.upsertCalls != 1 || len(quota.upsertItems) != 1 || quota.upsertItems[0].Total != 16 {
+		t.Fatalf("upsertCalls=%d items=%+v", quota.upsertCalls, quota.upsertItems)
+	}
+	if store.rows[0].Status != "approved" {
+		t.Fatalf("status=%s", store.rows[0].Status)
+	}
+
+	_, err = svc.ReviewQuotaChangeRequest(quotaChangeCtx(actorID, uuid.New()), &tenantv1.ReviewQuotaChangeRequestRequest{
+		TenantId: tenantID.String(), RequestId: requestID.String(), Approved: wrapperspb.Bool(true),
+	})
+	st, _ := status.FromError(err)
+	if st.Code() != codes.FailedPrecondition || !strings.Contains(st.Message(), "QUOTA_CHANGE_REQUEST_NOT_PENDING") {
+		t.Fatalf("want NOT_PENDING, got %v", err)
+	}
+}
+
+func TestTenantService_ReviewQuotaChangeRequest_ApprovedRequired(t *testing.T) {
+	tenantID := uuid.New()
+	actorID := uuid.New()
+	requestID := uuid.New()
+	svc := NewTenantService(nil, nil, nil, &fakeQuotaClient{}, &fakeTenantStore{}, &fakeAuditStore{}, nil, nil, nil)
+	_, err := svc.ReviewQuotaChangeRequest(quotaChangeCtx(actorID, uuid.New()), &tenantv1.ReviewQuotaChangeRequestRequest{
+		TenantId: tenantID.String(), RequestId: requestID.String(),
+	})
+	st, _ := status.FromError(err)
+	if st.Code() != codes.InvalidArgument || !strings.Contains(st.Message(), "VALIDATION_FAILED") || !strings.Contains(st.Message(), "approved required") {
+		t.Fatalf("want approved required, got %v", err)
+	}
+}
+
+func TestTenantService_SubmitQuotaChangeRequest_RequestIDWithReqPrefix(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	actorID := uuid.MustParse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+	rawUUID := uuid.MustParse("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+	quota := &fakeQuotaClient{
+		meta:     []ports.QuotaMeta{{ResourceType: "gpu_count", Enabled: true}},
+		existing: map[uuid.UUID][]ports.CoreQuotaResult{tenantID: {{ResourceType: "gpu_count", Total: 1}}},
+	}
+	store := &fakeTenantStore{}
+	svc := NewTenantService(nil, nil, nil, quota, store, &fakeAuditStore{}, nil, nil, nil)
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
+		"x-request-id", "req_"+rawUUID.String(),
+		"x-user-id", actorID.String(),
+	))
+	res, err := svc.SubmitQuotaChangeRequest(ctx, &tenantv1.SubmitQuotaChangeRequestRequest{
+		TenantId: tenantID.String(),
+		Items:    []*tenantv1.QuotaChangeRequestInput{{ResourceType: "gpu_count", NewValue: 2}},
+	})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if res.GetId() != rawUUID.String() || store.lastRequestID != rawUUID {
+		t.Fatalf("id=%s store=%s want %s", res.GetId(), store.lastRequestID, rawUUID)
+	}
+}
+
+func TestTenantService_ReviewQuotaChangeRequest_QuotaNilBeforeSetStatus(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	actorID := uuid.MustParse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+	requestID := uuid.MustParse("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+	store := &fakeTenantStore{rows: []ports.QuotaChangeRequest{{
+		TenantID: tenantID, RequestID: requestID, ResourceType: "gpu_count",
+		NewValue: 16, Status: "pending", RequestedBy: actorID, CreatedAt: time.Now().UTC(),
+	}}}
+	svc := NewTenantService(nil, nil, nil, nil /* quota */, store, &fakeAuditStore{}, nil, nil, nil)
+	_, err := svc.ReviewQuotaChangeRequest(quotaChangeCtx(actorID, uuid.New()), &tenantv1.ReviewQuotaChangeRequestRequest{
+		TenantId: tenantID.String(), RequestId: requestID.String(), Approved: wrapperspb.Bool(true),
+	})
+	st, _ := status.FromError(err)
+	if st.Code() != codes.Unavailable || !strings.Contains(st.Message(), "STORE_UNAVAILABLE") {
+		t.Fatalf("want STORE_UNAVAILABLE before SetStatus, got %v", err)
+	}
+	if store.setStatusCalls != 0 || store.rows[0].Status != "pending" {
+		t.Fatalf("must not SetStatus when quota nil: calls=%d status=%s", store.setStatusCalls, store.rows[0].Status)
+	}
+}

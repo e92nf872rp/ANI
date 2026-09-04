@@ -6,6 +6,7 @@ import (
 	"net/mail"
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/google/uuid"
@@ -1031,22 +1032,388 @@ func assembleTenantQuotaViews(items []ports.CoreQuotaResult) []*tenantv1.TenantQ
 	return out
 }
 
+// SubmitQuotaChangeRequest 提交配额变更申请（US-012）：
+// 网关 request_id → meta 启用校验 → GetQuota 冻 old_value → INSERT pending。
 func (s *TenantService) SubmitQuotaChangeRequest(ctx context.Context, req *tenantv1.SubmitQuotaChangeRequestRequest) (*commonv1.IdempotentResult, error) {
-	_ = ctx
-	_ = req
-	return nil, tenantRPCNotImplemented()
+	const action = "tenant.quota_change_request.submit"
+
+	// 步骤 1：依赖与入参校验（tenant_id / 网关 x-request-id / x-user-id / 客户端）
+	if req == nil {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "request required")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, nil, err, nil)
+		return nil, err
+	}
+	tenantID, err := parseTenantID(req.GetTenantId())
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": req.GetTenantId()}, err, nil)
+		return nil, err
+	}
+	requestID, err := parseGatewayRequestID(ctx)
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+		return nil, err
+	}
+	actor := userIDFromCtx(ctx)
+	if actor == nil {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "x-user-id required")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+		return nil, err
+	}
+	if s.quota == nil {
+		err := businessError(codes.Unavailable, ports.ErrStoreUnavailable, "quota client unavailable")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+		return nil, err
+	}
+	if s.tenantStore == nil {
+		err := businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant store unavailable")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+		return nil, err
+	}
+
+	// 步骤 2：校验 items（≥1、resource_type 正则、new_value≥0、批内维度不重复）
+	resourceTypes, pendingInputs, err := validateQuotaChangeItems(req.GetItems(), *actor)
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id":  tenantID.String(),
+			"request_id": requestID.String(),
+		}, err, &tenantID)
+		return nil, err
+	}
+
+	// 步骤 3：先 ListQuotaMeta —— 批内维度均须在 Core 元数据中且已启用
+	if err := validateEnabledQuotaResourceTypes(ctx, s.quota, resourceTypes); err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id":  tenantID.String(),
+			"request_id": requestID.String(),
+			"items":      quotaChangeItemsForAudit(pendingInputs),
+		}, err, &tenantID)
+		return nil, err
+	}
+
+	// 步骤 4：再 GetQuota —— 按维度冻结当前 total 为 old_value（无行则保持 NULL=首次设置）
+	quotaItems, err := s.quota.GetQuota(ctx, tenantID)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id":  tenantID.String(),
+			"request_id": requestID.String(),
+		}, mapped, &tenantID)
+		return nil, mapped
+	}
+	totalsByType := make(map[string]int64, len(quotaItems))
+	for _, q := range quotaItems {
+		totalsByType[q.ResourceType] = q.Total
+	}
+	for i := range pendingInputs {
+		if total, ok := totalsByType[pendingInputs[i].ResourceType]; ok {
+			v := total
+			pendingInputs[i].OldValue = &v
+		}
+	}
+
+	// 步骤 5：单事务 INSERT pending（同批共用网关 request_id；跨请求同维允许；同 request 同维靠 PK）
+	if err := s.tenantStore.InsertPendingQuotaChanges(ctx, tenantID, requestID, pendingInputs); err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id":  tenantID.String(),
+			"request_id": requestID.String(),
+			"items":      quotaChangeItemsForAudit(pendingInputs),
+		}, mapped, &tenantID)
+		return nil, mapped
+	}
+
+	// 步骤 6：成功审计 + 返回 { id=request_id, message }
+	writeAuditSuccess(ctx, s.audit, auditResourceTenant, action, map[string]any{
+		"tenant_id":  tenantID.String(),
+		"request_id": requestID.String(),
+		"items":      quotaChangeItemsForAudit(pendingInputs),
+	}, &tenantID)
+	return &commonv1.IdempotentResult{
+		Id:      requestID.String(),
+		Message: "quota change request submitted",
+	}, nil
 }
 
+// ListQuotaChangeRequests 查询租户配额变更申请列表（US-013）：status 可选过滤，不分页。
 func (s *TenantService) ListQuotaChangeRequests(ctx context.Context, req *tenantv1.ListQuotaChangeRequestsRequest) (*tenantv1.ListQuotaChangeRequestsResponse, error) {
-	_ = ctx
-	_ = req
-	return nil, tenantRPCNotImplemented()
+	// 步骤 1：解析 tenant_id 与可选 status 过滤
+	rawID, statusFilter := "", ""
+	if req != nil {
+		rawID = req.GetTenantId()
+		statusFilter = strings.TrimSpace(req.GetStatus())
+	}
+	tenantID, err := parseTenantID(rawID)
+	if err != nil {
+		return nil, err
+	}
+	if statusFilter != "" {
+		switch statusFilter {
+		case "pending", "approved", "rejected":
+		default:
+			return nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "status must be pending, approved, or rejected")
+		}
+	}
+	if s.tenantStore == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant store unavailable")
+	}
+
+	// 步骤 2：按租户查询（不分页，created_at DESC）；空 status=全部
+	rows, err := s.tenantStore.ListQuotaChangesByTenant(ctx, tenantID, statusFilter)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+
+	// 步骤 3：组装 proto 列表（每行一维度；同批共享 request_id）
+	items := make([]*tenantv1.QuotaChangeRequest, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, toProtoQuotaChangeRequest(row))
+	}
+	return &tenantv1.ListQuotaChangeRequestsResponse{Items: items}, nil
 }
 
+// ReviewQuotaChangeRequest 按 request_id 整批审批（US-014）：先 SetStatus，approved 再 UpsertQuota。
 func (s *TenantService) ReviewQuotaChangeRequest(ctx context.Context, req *tenantv1.ReviewQuotaChangeRequestRequest) (*commonv1.IdempotentResult, error) {
-	_ = ctx
-	_ = req
-	return nil, tenantRPCNotImplemented()
+	const actionPending = "tenant.quota_change_request.review"
+
+	// 步骤 1：依赖与入参校验（tenant_id / request_id / approved / x-user-id / store / quota）
+	if req == nil {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "request required")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, actionPending, nil, err, nil)
+		return nil, err
+	}
+	tenantID, err := parseTenantID(req.GetTenantId())
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, actionPending, map[string]any{"tenant_id": req.GetTenantId()}, err, nil)
+		return nil, err
+	}
+	requestID, err := parseUUIDField(req.GetRequestId(), "request_id")
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, actionPending, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+		return nil, err
+	}
+	// approved 必填：proto BoolValue；nil → 400（与网关 *bool 校验对齐）
+	if req.GetApproved() == nil {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "approved required")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, actionPending, map[string]any{
+			"tenant_id": tenantID.String(), "request_id": requestID.String(),
+		}, err, &tenantID)
+		return nil, err
+	}
+	approved := req.GetApproved().GetValue()
+	action := "tenant.quota_change_request.reject"
+	if approved {
+		action = "tenant.quota_change_request.approve"
+	}
+	actor := userIDFromCtx(ctx)
+	if actor == nil {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "x-user-id required")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id": tenantID.String(), "request_id": requestID.String(),
+		}, err, &tenantID)
+		return nil, err
+	}
+	if s.tenantStore == nil {
+		err := businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant store unavailable")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id": tenantID.String(), "request_id": requestID.String(),
+		}, err, &tenantID)
+		return nil, err
+	}
+	// approved 路径在改状态前校验 quota 客户端，避免 SetStatus 成功后无法 Upsert 却返回失败
+	if approved && s.quota == nil {
+		err := businessError(codes.Unavailable, ports.ErrStoreUnavailable, "quota client unavailable")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id": tenantID.String(), "request_id": requestID.String(),
+		}, err, &tenantID)
+		return nil, err
+	}
+
+	// 步骤 2：按 request_id 加载整批行；无行 → 404
+	existing, err := s.tenantStore.ListQuotaChangesByRequestID(ctx, tenantID, requestID)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id": tenantID.String(), "request_id": requestID.String(),
+		}, mapped, &tenantID)
+		return nil, mapped
+	}
+
+	// 步骤 3：乐观锁整批 SetStatus（WHERE pending）；0 行 → 409 非 pending
+	newStatus := "rejected"
+	if approved {
+		newStatus = "approved"
+	}
+	affected, err := s.tenantStore.SetQuotaChangeStatusByRequestID(ctx, tenantID, requestID, newStatus, *actor)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id": tenantID.String(), "request_id": requestID.String(),
+		}, mapped, &tenantID)
+		return nil, mapped
+	}
+	if affected == 0 {
+		err := businessError(codes.FailedPrecondition, ports.ErrQuotaChangeRequestNotPending, "quota change request is not pending")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id": tenantID.String(), "request_id": requestID.String(),
+			"status":    existing[0].Status,
+		}, err, &tenantID)
+		return nil, err
+	}
+
+	// 步骤 4：approved 时逐维 UpsertQuota；失败不回滚状态，审计 failure + 异步补偿
+	if approved {
+		coreItems := make([]ports.CoreQuotaItem, 0, len(existing))
+		for _, row := range existing {
+			if row.Status != "pending" {
+				continue
+			}
+			coreItems = append(coreItems, ports.CoreQuotaItem{ResourceType: row.ResourceType, Total: row.NewValue})
+		}
+		if _, syncErr := applyTenantQuotaItems(ctx, s.quota, tenantID, coreItems); syncErr != nil {
+			mapped := mapStoreError(syncErr)
+			writeAuditFailure(ctx, s.audit, auditResourceTenant, "tenant.quota_change_request.apply_failed", map[string]any{
+				"tenant_id":  tenantID.String(),
+				"request_id": requestID.String(),
+				"items":      coreItemsForAudit(coreItems),
+			}, mapped, &tenantID)
+			scheduleQuotaChangeApplyRetry(s.audit, s.quota, tenantID, requestID, coreItems)
+			// 状态已改，不回滚；仍返回审批成功（SPEC §5.4-3）
+		}
+	}
+
+	// 步骤 5：成功审计 + 返回 { id=request_id, message }
+	msg := "quota change request rejected"
+	if approved {
+		msg = "quota change request approved"
+	}
+	writeAuditSuccess(ctx, s.audit, auditResourceTenant, action, map[string]any{
+		"tenant_id":  tenantID.String(),
+		"request_id": requestID.String(),
+		"approved":   approved,
+	}, &tenantID)
+	return &commonv1.IdempotentResult{Id: requestID.String(), Message: msg}, nil
+}
+
+var quotaChangeResourceTypePattern = regexp.MustCompile(`^[a-z0-9_]{2,40}$`)
+
+func validateQuotaChangeItems(items []*tenantv1.QuotaChangeRequestInput, requestedBy uuid.UUID) ([]string, []ports.QuotaChangePendingInput, error) {
+	// 步骤 1：至少 1 项
+	if len(items) == 0 {
+		return nil, nil, businessError(codes.FailedPrecondition, ports.ErrQuotaChangeRequestInvalid, "items must contain at least 1 entry")
+	}
+	// 步骤 2：逐项校验格式 / 非负 / 批内唯一，并组装 pending 写入 DTO
+	seen := make(map[string]struct{}, len(items))
+	resourceTypes := make([]string, 0, len(items))
+	out := make([]ports.QuotaChangePendingInput, 0, len(items))
+	for _, it := range items {
+		if it == nil {
+			return nil, nil, businessError(codes.FailedPrecondition, ports.ErrQuotaChangeRequestInvalid, "items entry required")
+		}
+		rt := strings.TrimSpace(it.GetResourceType())
+		if !quotaChangeResourceTypePattern.MatchString(rt) {
+			return nil, nil, businessError(codes.FailedPrecondition, ports.ErrQuotaChangeRequestInvalid, "resource_type format invalid: "+rt)
+		}
+		if _, dup := seen[rt]; dup {
+			return nil, nil, businessError(codes.FailedPrecondition, ports.ErrQuotaChangeRequestInvalid, "duplicate resource_type in batch: "+rt)
+		}
+		if it.GetNewValue() < 0 {
+			return nil, nil, businessError(codes.FailedPrecondition, ports.ErrQuotaChangeRequestInvalid, "new_value must be >= 0")
+		}
+		seen[rt] = struct{}{}
+		resourceTypes = append(resourceTypes, rt)
+		out = append(out, ports.QuotaChangePendingInput{
+			ResourceType: rt,
+			NewValue:     it.GetNewValue(),
+			RequestedBy:  requestedBy,
+		})
+	}
+	return resourceTypes, out, nil
+}
+
+func parseGatewayRequestID(ctx context.Context) (uuid.UUID, error) {
+	// 步骤 1：读网关透传 x-request-id；兼容 "req_<uuid>" 前缀；缺失或非 UUID → 400（service 不自行生成）
+	raw := strings.TrimSpace(requestIDFromCtx(ctx))
+	if raw == "" {
+		return uuid.Nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "x-request-id required")
+	}
+	raw = strings.TrimPrefix(raw, "req_")
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return uuid.Nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "x-request-id must be a uuid")
+	}
+	return id, nil
+}
+
+func parseUUIDField(raw, field string) (uuid.UUID, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return uuid.Nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, field+" required")
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return uuid.Nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, field+" must be a uuid")
+	}
+	return id, nil
+}
+
+func toProtoQuotaChangeRequest(row ports.QuotaChangeRequest) *tenantv1.QuotaChangeRequest {
+	// old_value 为 NULL（首次设置）时 proto int64 用 0 占位
+	oldValue := int64(0)
+	if row.OldValue != nil {
+		oldValue = *row.OldValue
+	}
+	return &tenantv1.QuotaChangeRequest{
+		RequestId:    row.RequestID.String(),
+		TenantId:     row.TenantID.String(),
+		ResourceType: row.ResourceType,
+		OldValue:     oldValue,
+		NewValue:     row.NewValue,
+		Status:       row.Status,
+		RequestedBy:  row.RequestedBy.String(),
+		CreatedAt:    timestamppb.New(row.CreatedAt),
+	}
+}
+
+func quotaChangeItemsForAudit(items []ports.QuotaChangePendingInput) []map[string]any {
+	out := make([]map[string]any, 0, len(items))
+	for _, it := range items {
+		entry := map[string]any{"resource_type": it.ResourceType, "new_value": it.NewValue}
+		if it.OldValue != nil {
+			entry["old_value"] = *it.OldValue
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+// scheduleQuotaChangeApplyRetry 审批已落库后 Core UpsertQuota 失败时的异步补偿（最多 3 次，1s/2s/4s）。
+func scheduleQuotaChangeApplyRetry(audit ports.AuditStore, core ports.QuotaSvcClient, tenantID, requestID uuid.UUID, items []ports.CoreQuotaItem) {
+	if core == nil || len(items) == 0 {
+		return
+	}
+	go func() {
+		// 步骤 1：指数退避重试 UpsertQuota；成功或耗尽后写审计
+		delays := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
+		for i, d := range delays {
+			time.Sleep(d)
+			if _, err := applyTenantQuotaItems(context.Background(), core, tenantID, items); err == nil {
+				writeAuditSuccess(context.Background(), audit, auditResourceTenant, "tenant.quota_change_request.apply_retry", map[string]any{
+					"tenant_id":  tenantID.String(),
+					"request_id": requestID.String(),
+					"attempt":    i + 1,
+					"items":      coreItemsForAudit(items),
+				}, &tenantID)
+				return
+			} else if i == len(delays)-1 {
+				writeAuditFailure(context.Background(), audit, auditResourceTenant, "tenant.quota_change_request.apply_retry", map[string]any{
+					"tenant_id":  tenantID.String(),
+					"request_id": requestID.String(),
+					"attempt":    i + 1,
+					"items":      coreItemsForAudit(items),
+				}, mapStoreError(err), &tenantID)
+			}
+		}
+	}()
 }
 
 func (s *TenantService) ListTenantLifecycle(ctx context.Context, req *tenantv1.ListTenantLifecycleRequest) (*tenantv1.ListTenantLifecycleResponse, error) {

@@ -6,8 +6,10 @@
 -- Rationale:
 --   BOSS 租户配额变更审批流（plan v3.0 §4.1.6）：
 --     - tenant_quota_change  记录某租户某配额维度的变更申请；一次 HTTP 提交的多维度
---                          共享同一 request_id（复合主键含 request_id + resource_type）。
+--                          共享同一 request_id（取自网关 X-Request-ID，非 service 新生成）。
 --                          status: pending | approved | rejected
+--                          不同 request_id 允许同一 tenant+resource_type 各有 pending；
+--                          同一 request 内维度唯一由 PK (tenant_id, request_id, resource_type) 保证。
 --                          审批按 request_id 整批处理（同批全部维度一并通过/驳回）。
 --                          approved 状态的维度在套餐绑定/限额修改同步时被跳过
 --                         （保留 approved 值不被套餐模板覆盖）。

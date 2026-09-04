@@ -1362,7 +1362,7 @@ components:
       required: [idempotency_key, approved]
       properties:
         idempotency_key: { type: string, format: uuid }
-        approved:        { type: boolean, description: "true=通过并生效配额；false=驳回" }
+        approved:        { type: boolean, description: "必填；true=通过并生效配额；false=驳回；缺省 → 400 VALIDATION_FAILED" }
 
     TenantLifecycleEntry:
       type: object
@@ -3907,7 +3907,10 @@ paths:
       operationId: submitQuotaChangeRequest
       summary: 提交配额变更申请（需 platform-admin / platform-ops）
       description: |
-        支持多维度批量提交；同一 tenant_id+resource_type 已有 pending 时覆盖（不返回 409）。
+        多维度批量提交。request_id 取自网关 X-Request-ID（同批共享）。
+        先 ListQuotaMeta 校验维度均启用，再 GetQuota 冻结 old_value。
+        不同 request_id 允许同一租户同一维度各自 pending；
+        同一请求内 resource_type 不可重复（批内 422；同 request_id 同维 PK 冲突 409）。
       tags: [Tenants]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -3926,15 +3929,15 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound', description: "TENANT_NOT_FOUND" }
-        "409": { $ref: '#/components/responses/Conflict', description: "IDEMPOTENCY_KEY_REUSED" }
-        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "QUOTA_CHANGE_REQUEST_INVALID" }
+        "409": { $ref: '#/components/responses/Conflict', description: "QUOTA_CHANGE_REQUEST_CONFLICT（同 request_id 同维）/ IDEMPOTENCY_KEY_REUSED" }
+        "422": { $ref: '#/components/responses/UnprocessableEntity', description: "QUOTA_CHANGE_REQUEST_INVALID（批内重复维）/ QUOTA_RESOURCE_NOT_REGISTERED" }
         "502": { $ref: '#/components/responses/BadGateway' }
 
   /tenants/{tenantId}/quota-requests/{reqId}/approve:
     post:
       operationId: reviewQuotaChangeRequest
       summary: 审批配额变更申请（需 platform-admin / platform-ops）
-      description: reqId 为提交时生成的 request_id；一次审批该批全部维度（通过则逐维 UpsertQuota）。
+      description: reqId 为提交时的网关 request_id（X-Request-ID）；一次审批该批全部维度（通过则逐维 UpsertQuota）。
       tags: [Tenants]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }

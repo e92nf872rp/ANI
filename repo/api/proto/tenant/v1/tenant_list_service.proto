@@ -113,7 +113,7 @@ message ListQuotaChangeRequestsResponse {
 message ReviewQuotaChangeRequestRequest {
   string tenant_id = 1;
   string request_id = 2;
-  bool approved = 3;
+  google.protobuf.BoolValue approved = 3;  // required; unset → VALIDATION_FAILED
   string idempotency_key = 4;  // required UUID
 }
 
