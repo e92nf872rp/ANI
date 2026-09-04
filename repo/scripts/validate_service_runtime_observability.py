@@ -362,6 +362,22 @@ def validate_changed_path_allowlist(changed: set[str]) -> list[str]:
     ]
 
 
+# OBS-RUNTIME-P0 批次锚点：批次计划与批次记录。
+# 批次精确 allowlist 只约束"延续/修订本批次"的 PR（触碰锚点文件者），
+# 避免批次门禁外溢成全仓库全局锁（ANI-15：开发并行，main 串行收口，
+# 不存在全局锁）；FORBIDDEN_PREFIXES 全域禁令仍然无条件生效。
+P0_BATCH_ANCHOR_GIT_PATHS = frozenset(
+    {
+        FIXED_PLAN_GIT_PATH,
+        "repo/development-records/service-runtime-observability-p0.md",
+    }
+)
+
+
+def should_enforce_changed_path_allowlist(changed: set[str]) -> bool:
+    return bool(changed & P0_BATCH_ANCHOR_GIT_PATHS)
+
+
 def validate_fixed_plan(root: Path) -> list[str]:
     plan_path = root / FIXED_PLAN_REPO_PATH
     # The Goal plan is a user-owned, intentionally untracked input. Validate it
@@ -455,7 +471,8 @@ def validate_repository(root: Path, run_promtool: bool, base: str | None) -> lis
         errors.extend(validate_fixed_plan(root))
         changed = changed_paths(root, base)
         errors.extend(validate_forbidden_changes(changed))
-        errors.extend(validate_changed_path_allowlist(changed))
+        if should_enforce_changed_path_allowlist(changed):
+            errors.extend(validate_changed_path_allowlist(changed))
         if run_promtool:
             errors.extend(globals()["run_promtool"](root))
     except (OSError, KeyError, TypeError, ValueError, subprocess.CalledProcessError, yaml.YAMLError) as exc:

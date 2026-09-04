@@ -195,6 +195,100 @@ func TestPrometheusObservabilityServiceRewritePromQLLabelsContainerPodNotRegress
 	}
 }
 
+// TestPrometheusObservabilityServiceRewritePromQLLabelsKataCriLabels 验证 kata-monitor 系列
+// （sandbox/kata 实例内存数据源 kata_guest_meminfo）的 cri_namespace/cri_name 重写：
+//   - cri_namespace="inst_xxx" → 真实租户 namespace 精确匹配（与 namespace 同语义）
+//   - cri_name="inst_xxx" → 完整 pod 名正则匹配（与 pod 同理；kata-monitor 上报的 cri_name
+//     是完整 pod 名，如 sandbox-5dc9fccd44-hppsj，精确匹配会查空）
+//
+// 同时验证交替顺序防回归：cri_namespace/cri_name 必须整体命中，不得被子串匹配残留 cri_ 前缀。
+func TestPrometheusObservabilityServiceRewritePromQLLabelsKataCriLabels(t *testing.T) {
+	lookup := &fakeInstanceLookup{record: ports.WorkloadInstanceRecord{
+		TenantID:   "00000000-0000-0000-0000-000000000001",
+		InstanceID: "inst_1",
+		Name:       "sandbox",
+	}}
+	service, err := NewPrometheusObservabilityService(PrometheusObservabilityServiceConfig{
+		PrometheusURL:  "http://prometheus:9090",
+		InstanceLookup: lookup,
+	})
+	if err != nil {
+		t.Fatalf("NewPrometheusObservabilityService error = %v", err)
+	}
+
+	// sandbox 内存趋势模板：前端把 instance_id 注入 cri_namespace 和 cri_name 占位符
+	input := `100 * (1 - sum(kata_guest_meminfo{item="mem_available",cri_namespace="inst_1",cri_name="inst_1"}) / sum(kata_guest_meminfo{item="mem_total",cri_namespace="inst_1",cri_name="inst_1"}))`
+	rewritten, err := service.rewritePromQLLabels(context.Background(), "00000000-0000-0000-0000-000000000001", input)
+	if err != nil {
+		t.Fatalf("rewritePromQLLabels error = %v", err)
+	}
+
+	// cri_namespace 应被重写为真实 namespace（精确匹配）
+	if !strings.Contains(rewritten, `cri_namespace="ani-tenant-00000000-0000-0000-0000-000000000001"`) {
+		t.Fatalf("cri_namespace not rewritten: %s", rewritten)
+	}
+	// cri_name 应被重写为完整 pod 名正则匹配（=~）
+	if !strings.Contains(rewritten, `cri_name=~"^sandbox(-.*)?$"`) {
+		t.Fatalf("cri_name not rewritten to regex: %s", rewritten)
+	}
+	// 原始精确匹配不应残留
+	if strings.Contains(rewritten, `cri_namespace="inst_1"`) || strings.Contains(rewritten, `cri_name="inst_1"`) {
+		t.Fatalf("original cri_* label values still present: %s", rewritten)
+	}
+	// 子串误伤防回归：cri_ 前缀不得出现错位替换（如 cri_ + 重写后的 namespace 值出现两次）
+	if got := strings.Count(rewritten, `cri_namespace="ani-tenant-00000000-0000-0000-0000-000000000001"`); got != 2 {
+		t.Fatalf("expected 2 cri_namespace labels rewritten, got %d: %s", got, rewritten)
+	}
+	if got := strings.Count(rewritten, `cri_name=~"^sandbox(-.*)?$"`); got != 2 {
+		t.Fatalf("expected 2 cri_name labels rewritten, got %d: %s", got, rewritten)
+	}
+	// item="mem_total"/"mem_available" 等普通 label 不受影响
+	if !strings.Contains(rewritten, `item="mem_total"`) || !strings.Contains(rewritten, `item="mem_available"`) {
+		t.Fatalf("item labels unexpectedly rewritten: %s", rewritten)
+	}
+}
+
+// TestPrometheusObservabilityServiceRewritePromQLLabelsInjectedPodMatcher 验证注入精确
+// pod 匹配器（InstancePodNamesResolver.Matcher）后，pod/cri_name 重写为锚定精确列表
+// （根治实例名前缀重叠互相污染）；未注入时保持前缀正则（其他测试覆盖）。
+func TestPrometheusObservabilityServiceRewritePromQLLabelsInjectedPodMatcher(t *testing.T) {
+	lookup := &fakeInstanceLookup{record: ports.WorkloadInstanceRecord{
+		TenantID:   "00000000-0000-0000-0000-000000000001",
+		InstanceID: "inst_1",
+		Name:       "sandbox",
+	}}
+	service, err := NewPrometheusObservabilityService(PrometheusObservabilityServiceConfig{
+		PrometheusURL:  "http://prometheus:9090",
+		InstanceLookup: lookup,
+		PodMatcher: func(_ context.Context, tenantID, instanceName string) string {
+			if tenantID != "00000000-0000-0000-0000-000000000001" || instanceName != "sandbox" {
+				t.Fatalf("unexpected matcher args tenantID=%q instanceName=%q", tenantID, instanceName)
+			}
+			return `^(sandbox-5dc9fccd44-hppsj)$`
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewPrometheusObservabilityService error = %v", err)
+	}
+
+	input := `sum(rate(container_cpu_usage_seconds_total{namespace="inst_1",pod="inst_1"}[5m])) + sum(kata_guest_meminfo{item="mem_total",cri_namespace="inst_1",cri_name="inst_1"})`
+	rewritten, err := service.rewritePromQLLabels(context.Background(), "00000000-0000-0000-0000-000000000001", input)
+	if err != nil {
+		t.Fatalf("rewritePromQLLabels error = %v", err)
+	}
+
+	if !strings.Contains(rewritten, `pod=~"^(sandbox-5dc9fccd44-hppsj)$"`) {
+		t.Fatalf("pod not rewritten to injected precise matcher: %s", rewritten)
+	}
+	if !strings.Contains(rewritten, `cri_name=~"^(sandbox-5dc9fccd44-hppsj)$"`) {
+		t.Fatalf("cri_name not rewritten to injected precise matcher: %s", rewritten)
+	}
+	// 前缀正则不应残留（前缀重叠实例会互相命中）
+	if strings.Contains(rewritten, `(-.*)?$`) {
+		t.Fatalf("prefix regex still present: %s", rewritten)
+	}
+}
+
 // TestPrometheusObservabilityServiceQueryVMForwardsToPrometheus 验证 VM 模板的 name label
 // 在 Query 端到端流程中被正确重写后转发到 Prometheus。
 func TestPrometheusObservabilityServiceQueryVMForwardsToPrometheus(t *testing.T) {
