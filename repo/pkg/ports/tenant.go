@@ -109,7 +109,7 @@ type TenantLifecycleEntry struct {
 
 // CreateTenantInput is the Core createTenant request body
 // (admin_password_hash is bcrypt output from tenant-service).
-// RequestID / ActorUserID 由 Gateway 从中间件注入，不在 OpenAPI body 中。
+// lifecycle 归因（request_id / actor）由 Gateway 注入 ctx，不在本结构体。
 type CreateTenantInput struct {
 	Name              string
 	DisplayName       string
@@ -118,8 +118,6 @@ type CreateTenantInput struct {
 	AdminEmail        string
 	AdminName         string
 	AdminPasswordHash string
-	RequestID         string // optional → tenant_lifecycle.request_id
-	ActorUserID       string // optional platform user UUID → tenant_lifecycle.user_id
 }
 
 // UpdateTenantInput is a partial update for display_name / contact_email.
@@ -170,11 +168,11 @@ type TenantService interface {
 	// UpdateTenant 部分更新 display_name / contact_email；不可改 name / status。
 	UpdateTenant(ctx context.Context, tenantID string, in UpdateTenantInput) (Tenant, error)
 	// FreezeTenant active -> frozen。
-	FreezeTenant(ctx context.Context, tenantID, requestID string) (Tenant, error)
+	FreezeTenant(ctx context.Context, tenantID string) (Tenant, error)
 	// UnfreezeTenant frozen -> active。
-	UnfreezeTenant(ctx context.Context, tenantID, requestID string) (Tenant, error)
+	UnfreezeTenant(ctx context.Context, tenantID string) (Tenant, error)
 	// DisableTenant active/frozen -> disabled（终态）。
-	DisableTenant(ctx context.Context, tenantID, requestID string) (Tenant, error)
+	DisableTenant(ctx context.Context, tenantID string) (Tenant, error)
 	// GetTenantAuth 读取 tenant_auth 配置。
 	GetTenantAuth(ctx context.Context, tenantID string) (TenantAuth, error)
 	// UpdateTenantAuth 部分更新 SSO/MFA 字段。

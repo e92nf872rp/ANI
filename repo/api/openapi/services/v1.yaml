@@ -3755,7 +3755,9 @@ paths:
       operationId: disableTenant
       summary: 禁用租户（需 platform-admin / platform-ops）
       description: |
-        禁用前校验各维度配额 used=0；任一维度 used>0 返回 409 TENANT_HAS_RUNNING_RESOURCES。
+        禁用前仅校验 gpu_count / cpu_core / memory_gb / storage_gb 四维：任一 used+reserved>0 → 409 TENANT_HAS_RUNNING_RESOURCES。
+        其余配额维度暂不参与；本阶段不实现资源释放。
+        其余配额维度暂不参与；本阶段不编排资源释放（仅落 disabled 状态 + lifecycle）。
         disabled 为不可逆终态。
       tags: [Tenants]
       parameters:

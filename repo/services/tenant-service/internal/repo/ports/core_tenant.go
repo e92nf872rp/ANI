@@ -19,7 +19,7 @@ import (
 // 配额变更申请查询/持久化归属 TenantStore（见 tenant_store.go），不经本客户端。
 
 // CreateTenantInput 是 Core POST /admin/tenants 请求体（密码已 bcrypt）。
-// RequestID / ActorUserID 不进 OpenAPI body：经 SDK Headers 透传给 Core Gateway 注入 lifecycle。
+// lifecycle 归因经 SDK Headers 透传，由 Core Gateway 注入 ctx，不进本结构体。
 type CreateTenantInput struct {
 	Name              string
 	DisplayName       string
@@ -28,8 +28,6 @@ type CreateTenantInput struct {
 	AdminEmail        string
 	AdminName         string
 	AdminPasswordHash string
-	RequestID         string // optional → X-Request-ID → tenant_lifecycle.request_id
-	ActorUserID       string // optional BOSS 操作者 UUID → X-ANI-Actor-User-ID → tenant_lifecycle.user_id
 }
 
 // UpdateTenantInput 是 Core PUT /admin/tenants/{id} 部分更新。
@@ -124,13 +122,13 @@ type TenantSvcClient interface {
 	UpdateTenant(ctx context.Context, tenantID uuid.UUID, in UpdateTenantInput) (Tenant, error)
 
 	// FreezeTenant 冻结租户（Core POST /admin/tenants/{id}/freeze）。
-	FreezeTenant(ctx context.Context, tenantID uuid.UUID, requestID string) (Tenant, error)
+	FreezeTenant(ctx context.Context, tenantID uuid.UUID) (Tenant, error)
 
 	// UnfreezeTenant 解冻租户（Core POST /admin/tenants/{id}/unfreeze）。
-	UnfreezeTenant(ctx context.Context, tenantID uuid.UUID, requestID string) (Tenant, error)
+	UnfreezeTenant(ctx context.Context, tenantID uuid.UUID) (Tenant, error)
 
 	// DisableTenant 禁用租户（Core POST /admin/tenants/{id}/disable）。
-	DisableTenant(ctx context.Context, tenantID uuid.UUID, requestID string) (Tenant, error)
+	DisableTenant(ctx context.Context, tenantID uuid.UUID) (Tenant, error)
 
 	// GetTenantAuth 读取认证配置（Core GET /admin/tenants/{id}/auth）。
 	GetTenantAuth(ctx context.Context, tenantID uuid.UUID) (TenantAuth, error)

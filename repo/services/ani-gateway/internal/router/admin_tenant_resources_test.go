@@ -30,13 +30,13 @@ func (stubAdminTenantService) ListTenants(context.Context, ports.ListTenantsFilt
 func (stubAdminTenantService) UpdateTenant(context.Context, string, ports.UpdateTenantInput) (ports.Tenant, error) {
 	return ports.Tenant{}, ports.ErrUnsupported
 }
-func (stubAdminTenantService) FreezeTenant(context.Context, string, string) (ports.Tenant, error) {
+func (stubAdminTenantService) FreezeTenant(context.Context, string) (ports.Tenant, error) {
 	return ports.Tenant{}, ports.ErrUnsupported
 }
-func (stubAdminTenantService) UnfreezeTenant(context.Context, string, string) (ports.Tenant, error) {
+func (stubAdminTenantService) UnfreezeTenant(context.Context, string) (ports.Tenant, error) {
 	return ports.Tenant{}, ports.ErrUnsupported
 }
-func (stubAdminTenantService) DisableTenant(context.Context, string, string) (ports.Tenant, error) {
+func (stubAdminTenantService) DisableTenant(context.Context, string) (ports.Tenant, error) {
 	return ports.Tenant{}, ports.ErrUnsupported
 }
 func (stubAdminTenantService) GetTenantAuth(context.Context, string) (ports.TenantAuth, error) {

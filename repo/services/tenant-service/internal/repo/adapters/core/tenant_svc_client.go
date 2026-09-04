@@ -75,7 +75,7 @@ func (c *TenantSvcClient) ListAvailableTenants(ctx context.Context) ([]ports.Bou
 
 func (c *TenantSvcClient) CreateTenant(ctx context.Context, in ports.CreateTenantInput) (ports.Tenant, error) {
 	// 步骤 1：调用 Core POST /admin/tenants（密码已为 bcrypt hash）
-	// 透传 request_id / BOSS 操作者，写入 Core tenant_lifecycle。
+	// request_id / actor 经 Headers 统一透传，由 Core Gateway 注入 ctx。
 	opts := anisdk.RequestOptions{
 		Body: map[string]any{
 			"name":                in.Name,
@@ -86,7 +86,7 @@ func (c *TenantSvcClient) CreateTenant(ctx context.Context, in ports.CreateTenan
 			"admin_name":          in.AdminName,
 			"admin_password_hash": in.AdminPasswordHash,
 		},
-		Headers: corePropagateHeaders(ctx, in.RequestID, in.ActorUserID),
+		Headers: corePropagateHeaders(ctx),
 	}
 	raw, err := c.sdk.Request("POST", "/admin/tenants", opts)
 	if err != nil {
@@ -171,16 +171,37 @@ func (c *TenantSvcClient) UpdateTenant(ctx context.Context, tenantID uuid.UUID, 
 	return decodeTenant(raw)
 }
 
-func (c *TenantSvcClient) FreezeTenant(context.Context, uuid.UUID, string) (ports.Tenant, error) {
-	return ports.Tenant{}, ports.ErrNotImplemented
+func (c *TenantSvcClient) FreezeTenant(ctx context.Context, tenantID uuid.UUID) (ports.Tenant, error) {
+	path := fmt.Sprintf("/admin/tenants/%s/freeze", tenantID.String())
+	raw, err := c.sdk.Request("POST", path, anisdk.RequestOptions{
+		Headers: corePropagateHeaders(ctx),
+	})
+	if err != nil {
+		return ports.Tenant{}, mapSDKError(err)
+	}
+	return decodeTenant(raw)
 }
 
-func (c *TenantSvcClient) UnfreezeTenant(context.Context, uuid.UUID, string) (ports.Tenant, error) {
-	return ports.Tenant{}, ports.ErrNotImplemented
+func (c *TenantSvcClient) UnfreezeTenant(ctx context.Context, tenantID uuid.UUID) (ports.Tenant, error) {
+	path := fmt.Sprintf("/admin/tenants/%s/unfreeze", tenantID.String())
+	raw, err := c.sdk.Request("POST", path, anisdk.RequestOptions{
+		Headers: corePropagateHeaders(ctx),
+	})
+	if err != nil {
+		return ports.Tenant{}, mapSDKError(err)
+	}
+	return decodeTenant(raw)
 }
 
-func (c *TenantSvcClient) DisableTenant(context.Context, uuid.UUID, string) (ports.Tenant, error) {
-	return ports.Tenant{}, ports.ErrNotImplemented
+func (c *TenantSvcClient) DisableTenant(ctx context.Context, tenantID uuid.UUID) (ports.Tenant, error) {
+	path := fmt.Sprintf("/admin/tenants/%s/disable", tenantID.String())
+	raw, err := c.sdk.Request("POST", path, anisdk.RequestOptions{
+		Headers: corePropagateHeaders(ctx),
+	})
+	if err != nil {
+		return ports.Tenant{}, mapSDKError(err)
+	}
+	return decodeTenant(raw)
 }
 
 func (c *TenantSvcClient) GetTenantAuth(context.Context, uuid.UUID) (ports.TenantAuth, error) {

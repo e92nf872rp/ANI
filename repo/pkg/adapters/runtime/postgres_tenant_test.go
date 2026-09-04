@@ -171,10 +171,10 @@ func TestPostgresTenantCreateTenant_TransactionInserts(t *testing.T) {
 	)
 	svc := NewPostgresTenant(&quotaFakeStore{tx: tx})
 
-	got, err := svc.CreateTenant(context.Background(), ports.CreateTenantInput{
+	ctx := WithTenantLifecycleAttribution(context.Background(), "req-1", "cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+	got, err := svc.CreateTenant(ctx, ports.CreateTenantInput{
 		Name: "acme", DisplayName: "Acme", ContactEmail: "ops@acme.io", PlanID: planID.String(),
 		AdminEmail: "admin@acme.io", AdminName: "acme_admin", AdminPasswordHash: "$2a$12$hash",
-		RequestID: "req-1", ActorUserID: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
 	})
 	if err != nil {
 		t.Fatalf("CreateTenant: %v", err)
@@ -310,6 +310,109 @@ func TestPostgresTenantUpdateTenant_DisabledAsNotFound(t *testing.T) {
 	svc := NewPostgresTenant(&quotaFakeStore{tx: tx})
 	dn := "Nope"
 	_, err := svc.UpdateTenant(context.Background(), uuid.NewString(), ports.UpdateTenantInput{DisplayName: &dn})
+	if !errors.Is(err, ports.ErrTenantNotFound) {
+		t.Fatalf("want ErrTenantNotFound, got %v", err)
+	}
+}
+
+func TestPostgresTenantFreezeTenant_Success(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	planID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
+	now := time.Date(2026, 9, 3, 10, 0, 0, 0, time.UTC)
+	frozenAt := now
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(
+		quotaFakeRow{values: []any{tenantID}}, // UPDATE RETURNING
+		quotaFakeRow{values: []any{ // loadTenantDetail
+			tenantID, "acme", "Acme", "frozen", planID, "ops@acme.io",
+			&frozenAt, (*time.Time)(nil), now, now,
+			int64(1), int64(1), false, false,
+		}},
+	)
+	svc := NewPostgresTenant(&quotaFakeStore{tx: tx})
+	ctx := WithTenantLifecycleAttribution(context.Background(), "req-freeze-1", "cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+	got, err := svc.FreezeTenant(ctx, tenantID.String())
+	if err != nil {
+		t.Fatalf("FreezeTenant: %v", err)
+	}
+	if got.Status != ports.TenantStatusFrozen {
+		t.Fatalf("status=%s", got.Status)
+	}
+	if !hasExec(tx, "INSERT INTO tenant_lifecycle") {
+		t.Fatal("missing lifecycle insert")
+	}
+}
+
+func TestPostgresTenantFreezeTenant_StateInvalid(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(
+		quotaFakeRow{err: pgx.ErrNoRows},     // UPDATE miss
+		quotaFakeRow{values: []any{"frozen"}}, // current status
+	)
+	svc := NewPostgresTenant(&quotaFakeStore{tx: tx})
+	_, err := svc.FreezeTenant(WithTenantLifecycleAttribution(context.Background(), "r1", ""), tenantID.String())
+	if !errors.Is(err, ports.ErrTenantStateInvalid) {
+		t.Fatalf("want ErrTenantStateInvalid, got %v", err)
+	}
+}
+
+func TestPostgresTenantUnfreezeTenant_ClearsFrozen(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	planID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
+	now := time.Date(2026, 9, 3, 10, 0, 0, 0, time.UTC)
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(
+		quotaFakeRow{values: []any{tenantID}},
+		quotaFakeRow{values: []any{
+			tenantID, "acme", "Acme", "active", planID, "ops@acme.io",
+			(*time.Time)(nil), (*time.Time)(nil), now, now,
+			int64(0), int64(0), false, false,
+		}},
+	)
+	svc := NewPostgresTenant(&quotaFakeStore{tx: tx})
+	got, err := svc.UnfreezeTenant(WithTenantLifecycleAttribution(context.Background(), "r1", ""), tenantID.String())
+	if err != nil {
+		t.Fatalf("UnfreezeTenant: %v", err)
+	}
+	if got.Status != ports.TenantStatusActive || got.FrozenAt != nil {
+		t.Fatalf("got=%+v", got)
+	}
+}
+
+func TestPostgresTenantDisableTenant_FromFrozen(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	planID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
+	now := time.Date(2026, 9, 3, 10, 0, 0, 0, time.UTC)
+	disabledAt := now
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(
+		quotaFakeRow{values: []any{tenantID}},
+		quotaFakeRow{values: []any{
+			tenantID, "acme", "Acme", "disabled", planID, "ops@acme.io",
+			(*time.Time)(nil), &disabledAt, now, now,
+			int64(0), int64(0), false, false,
+		}},
+	)
+	svc := NewPostgresTenant(&quotaFakeStore{tx: tx})
+	got, err := svc.DisableTenant(WithTenantLifecycleAttribution(context.Background(), "r1", ""), tenantID.String())
+	if err != nil {
+		t.Fatalf("DisableTenant: %v", err)
+	}
+	if got.Status != ports.TenantStatusDisabled {
+		t.Fatalf("status=%s", got.Status)
+	}
+}
+
+func TestPostgresTenantDisableTenant_NotFound(t *testing.T) {
+	tenantID := uuid.New()
+	tx := &quotaFakeTx{}
+	tx.enqueueRows(
+		quotaFakeRow{err: pgx.ErrNoRows},
+		quotaFakeRow{err: pgx.ErrNoRows},
+	)
+	svc := NewPostgresTenant(&quotaFakeStore{tx: tx})
+	_, err := svc.DisableTenant(WithTenantLifecycleAttribution(context.Background(), "r1", ""), tenantID.String())
 	if !errors.Is(err, ports.ErrTenantNotFound) {
 		t.Fatalf("want ErrTenantNotFound, got %v", err)
 	}

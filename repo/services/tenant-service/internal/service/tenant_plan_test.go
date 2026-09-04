@@ -241,6 +241,12 @@ type fakeTenantClient struct {
 	updateTenantFn    func(ctx context.Context, id uuid.UUID, in ports.UpdateTenantInput) (ports.Tenant, error)
 	updateTenantIn    *ports.UpdateTenantInput
 	updateTenantCalls int
+
+	freezeFn     func(ctx context.Context, id uuid.UUID) (ports.Tenant, error)
+	freezeCalls  int
+	unfreezeFn   func(ctx context.Context, id uuid.UUID) (ports.Tenant, error)
+	disableFn    func(ctx context.Context, id uuid.UUID) (ports.Tenant, error)
+	disableCalls int
 }
 
 var (
@@ -373,16 +379,48 @@ func (f *fakeTenantClient) UpdateTenant(ctx context.Context, id uuid.UUID, in po
 	return f.tenant, nil
 }
 
-func (f *fakeTenantClient) FreezeTenant(context.Context, uuid.UUID, string) (ports.Tenant, error) {
-	panic("unused in tenant plan tests")
+func (f *fakeTenantClient) FreezeTenant(ctx context.Context, id uuid.UUID) (ports.Tenant, error) {
+	f.freezeCalls++
+	if f.freezeFn != nil {
+		return f.freezeFn(ctx, id)
+	}
+	if f.tenant.ID == uuid.Nil || f.tenant.ID != id {
+		return ports.Tenant{}, ports.ErrTenantNotFound
+	}
+	if f.tenant.Status != ports.TenantStatusActive {
+		return ports.Tenant{}, ports.ErrTenantStateInvalid
+	}
+	f.tenant.Status = ports.TenantStatusFrozen
+	return f.tenant, nil
 }
 
-func (f *fakeTenantClient) UnfreezeTenant(context.Context, uuid.UUID, string) (ports.Tenant, error) {
-	panic("unused in tenant plan tests")
+func (f *fakeTenantClient) UnfreezeTenant(ctx context.Context, id uuid.UUID) (ports.Tenant, error) {
+	if f.unfreezeFn != nil {
+		return f.unfreezeFn(ctx, id)
+	}
+	if f.tenant.ID == uuid.Nil || f.tenant.ID != id {
+		return ports.Tenant{}, ports.ErrTenantNotFound
+	}
+	if f.tenant.Status != ports.TenantStatusFrozen {
+		return ports.Tenant{}, ports.ErrTenantStateInvalid
+	}
+	f.tenant.Status = ports.TenantStatusActive
+	return f.tenant, nil
 }
 
-func (f *fakeTenantClient) DisableTenant(context.Context, uuid.UUID, string) (ports.Tenant, error) {
-	panic("unused in tenant plan tests")
+func (f *fakeTenantClient) DisableTenant(ctx context.Context, id uuid.UUID) (ports.Tenant, error) {
+	f.disableCalls++
+	if f.disableFn != nil {
+		return f.disableFn(ctx, id)
+	}
+	if f.tenant.ID == uuid.Nil || f.tenant.ID != id {
+		return ports.Tenant{}, ports.ErrTenantNotFound
+	}
+	if f.tenant.Status != ports.TenantStatusActive && f.tenant.Status != ports.TenantStatusFrozen {
+		return ports.Tenant{}, ports.ErrTenantStateInvalid
+	}
+	f.tenant.Status = ports.TenantStatusDisabled
+	return f.tenant, nil
 }
 
 func (f *fakeTenantClient) GetTenantAuth(context.Context, uuid.UUID) (ports.TenantAuth, error) {

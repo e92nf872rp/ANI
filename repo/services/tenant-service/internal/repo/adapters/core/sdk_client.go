@@ -36,22 +36,16 @@ func newCoreSDKClient() anisdk.Client {
 	return anisdk.NewClient(strings.TrimRight(base, "/"), strings.TrimSpace(os.Getenv("CORE_API_TOKEN")))
 }
 
-// corePropagateHeaders 组装调用 Core 时应透传的 HTTP 头。
-// - X-Request-ID：对齐全链路 request_id → tenant_lifecycle.request_id
-// - X-ANI-Actor-User-ID：BOSS 操作者（网关 x-user-id）→ tenant_lifecycle.user_id
-// 优先使用 CreateTenantInput 显式字段，缺省再读 gRPC incoming metadata。
-func corePropagateHeaders(ctx context.Context, requestID, actorUserID string) map[string]string {
-	if strings.TrimSpace(requestID) == "" {
-		requestID = metadataFirst(ctx, "x-request-id")
-	}
-	if strings.TrimSpace(actorUserID) == "" {
-		actorUserID = metadataFirst(ctx, "x-user-id")
-	}
+// corePropagateHeaders 统一从 gRPC incoming metadata 组装调用 Core 的 HTTP 头。
+// - X-Request-ID ← x-request-id（BOSS 网关注入）
+// - X-ANI-Actor-User-ID ← x-user-id（BOSS 操作者）
+// Core Gateway 再把这两头注入 ctx，供 PostgresTenant 写 tenant_lifecycle。
+func corePropagateHeaders(ctx context.Context) map[string]string {
 	headers := map[string]string{}
-	if id := strings.TrimSpace(requestID); id != "" {
+	if id := metadataFirst(ctx, "x-request-id"); id != "" {
 		headers["X-Request-ID"] = id
 	}
-	if id := strings.TrimSpace(actorUserID); id != "" {
+	if id := metadataFirst(ctx, "x-user-id"); id != "" {
 		headers["X-ANI-Actor-User-ID"] = id
 	}
 	if len(headers) == 0 {

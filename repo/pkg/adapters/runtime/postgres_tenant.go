@@ -142,15 +142,8 @@ func (t *PostgresTenant) CreateTenant(ctx context.Context, in ports.CreateTenant
 			return fmt.Errorf("insert user_roles: %w", execErr)
 		}
 
-		// 步骤 2f：INSERT tenant_lifecycle('create')（可选 user_id / request_id）
-		var actor any
-		if actorID, parseErr := uuid.Parse(strings.TrimSpace(in.ActorUserID)); parseErr == nil {
-			actor = actorID
-		}
-		var requestID any
-		if rid := strings.TrimSpace(in.RequestID); rid != "" {
-			requestID = rid
-		}
+		// 步骤 2f：INSERT tenant_lifecycle('create')（归因来自 Gateway 注入的 ctx）
+		actor, requestID := lifecycleAttributionArgs(ctx)
 		if _, execErr := tx.Exec(ctx, `
 			INSERT INTO tenant_lifecycle (tenant_id, action, user_id, request_id)
 			VALUES ($1, 'create', $2, $3)
@@ -442,16 +435,189 @@ func loadTenantDetail(ctx context.Context, tx ports.MetadataTx, id uuid.UUID) (p
 	return out, nil
 }
 
-func (t *PostgresTenant) FreezeTenant(context.Context, string, string) (ports.Tenant, error) {
-	return ports.Tenant{}, ports.ErrUnsupported
+// FreezeTenant：active → frozen；同事务写 lifecycle('freeze') + 回读详情。
+func (t *PostgresTenant) FreezeTenant(ctx context.Context, tenantID string) (ports.Tenant, error) {
+	id, err := parseTenantUUID(tenantID)
+	if err != nil {
+		return ports.Tenant{}, err
+	}
+
+	var out ports.Tenant
+	err = t.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		// 步骤 1：仅 active 可冻结
+		var updatedID uuid.UUID
+		scanErr := tx.QueryRow(ctx, `
+			UPDATE tenants
+			SET status = 'frozen', frozen_at = now(), updated_at = now()
+			WHERE id = $1 AND status = $2
+			RETURNING id
+		`, id, ports.TenantStatusActive).Scan(&updatedID)
+		if scanErr != nil {
+			if !errors.Is(scanErr, pgx.ErrNoRows) {
+				return fmt.Errorf("freeze tenant: %w", scanErr)
+			}
+			return tenantStateTransitionReject(ctx, tx, id)
+		}
+
+		// 步骤 2：同事务写入 lifecycle（归因来自 Gateway 注入的 ctx）
+		actor, reqID := lifecycleAttributionArgs(ctx)
+		if _, execErr := tx.Exec(ctx, `
+			INSERT INTO tenant_lifecycle (tenant_id, action, user_id, request_id)
+			VALUES ($1, 'freeze', $2, $3)
+		`, id, actor, reqID); execErr != nil {
+			return fmt.Errorf("insert tenant_lifecycle(freeze): %w", execErr)
+		}
+
+		// 步骤 3：回读详情
+		loaded, loadErr := loadTenantDetail(ctx, tx, id)
+		if loadErr != nil {
+			return loadErr
+		}
+		out = loaded
+		return nil
+	})
+	if err != nil {
+		return ports.Tenant{}, err
+	}
+	return out, nil
 }
 
-func (t *PostgresTenant) UnfreezeTenant(context.Context, string, string) (ports.Tenant, error) {
-	return ports.Tenant{}, ports.ErrUnsupported
+// UnfreezeTenant：frozen → active，清空 frozen_at；同事务写 lifecycle('unfreeze') + 回读详情。
+func (t *PostgresTenant) UnfreezeTenant(ctx context.Context, tenantID string) (ports.Tenant, error) {
+	id, err := parseTenantUUID(tenantID)
+	if err != nil {
+		return ports.Tenant{}, err
+	}
+
+	var out ports.Tenant
+	err = t.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		// 步骤 1：仅 frozen 可解冻
+		var updatedID uuid.UUID
+		scanErr := tx.QueryRow(ctx, `
+			UPDATE tenants
+			SET status = 'active', frozen_at = NULL, updated_at = now()
+			WHERE id = $1 AND status = $2
+			RETURNING id
+		`, id, ports.TenantStatusFrozen).Scan(&updatedID)
+		if scanErr != nil {
+			if !errors.Is(scanErr, pgx.ErrNoRows) {
+				return fmt.Errorf("unfreeze tenant: %w", scanErr)
+			}
+			return tenantStateTransitionReject(ctx, tx, id)
+		}
+
+		// 步骤 2：同事务写入 lifecycle
+		actor, reqID := lifecycleAttributionArgs(ctx)
+		if _, execErr := tx.Exec(ctx, `
+			INSERT INTO tenant_lifecycle (tenant_id, action, user_id, request_id)
+			VALUES ($1, 'unfreeze', $2, $3)
+		`, id, actor, reqID); execErr != nil {
+			return fmt.Errorf("insert tenant_lifecycle(unfreeze): %w", execErr)
+		}
+
+		// 步骤 3：回读详情
+		loaded, loadErr := loadTenantDetail(ctx, tx, id)
+		if loadErr != nil {
+			return loadErr
+		}
+		out = loaded
+		return nil
+	})
+	if err != nil {
+		return ports.Tenant{}, err
+	}
+	return out, nil
 }
 
-func (t *PostgresTenant) DisableTenant(context.Context, string, string) (ports.Tenant, error) {
-	return ports.Tenant{}, ports.ErrUnsupported
+// DisableTenant：active/frozen → disabled；同事务写 lifecycle('disable') + 回读详情。
+// 禁用前置 used+reserved 校验由 tenant-service 编排；本方法不释放资源。
+func (t *PostgresTenant) DisableTenant(ctx context.Context, tenantID string) (ports.Tenant, error) {
+	id, err := parseTenantUUID(tenantID)
+	if err != nil {
+		return ports.Tenant{}, err
+	}
+
+	var out ports.Tenant
+	err = t.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		// 步骤 1：仅 active/frozen 可禁用
+		var updatedID uuid.UUID
+		scanErr := tx.QueryRow(ctx, `
+			UPDATE tenants
+			SET status = 'disabled', disabled_at = now(), frozen_at = NULL, updated_at = now()
+			WHERE id = $1 AND status IN ($2, $3)
+			RETURNING id
+		`, id, ports.TenantStatusActive, ports.TenantStatusFrozen).Scan(&updatedID)
+		if scanErr != nil {
+			if !errors.Is(scanErr, pgx.ErrNoRows) {
+				return fmt.Errorf("disable tenant: %w", scanErr)
+			}
+			return tenantStateTransitionReject(ctx, tx, id)
+		}
+
+		// 步骤 2：同事务写入 lifecycle
+		actor, reqID := lifecycleAttributionArgs(ctx)
+		if _, execErr := tx.Exec(ctx, `
+			INSERT INTO tenant_lifecycle (tenant_id, action, user_id, request_id)
+			VALUES ($1, 'disable', $2, $3)
+		`, id, actor, reqID); execErr != nil {
+			return fmt.Errorf("insert tenant_lifecycle(disable): %w", execErr)
+		}
+
+		// 步骤 3：回读详情
+		loaded, loadErr := loadTenantDetail(ctx, tx, id)
+		if loadErr != nil {
+			return loadErr
+		}
+		out = loaded
+		return nil
+	})
+	if err != nil {
+		return ports.Tenant{}, err
+	}
+	return out, nil
+}
+
+type tenantLifecycleAttrKey struct{}
+
+// WithTenantLifecycleAttribution 由 Core Gateway 统一注入 request_id / actor_user_id，
+// 供 PostgresTenant 写 tenant_lifecycle（create/freeze/unfreeze/disable）。
+func WithTenantLifecycleAttribution(ctx context.Context, requestID, actorUserID string) context.Context {
+	requestID = strings.TrimSpace(requestID)
+	actorUserID = strings.TrimSpace(actorUserID)
+	if requestID == "" && actorUserID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, tenantLifecycleAttrKey{}, [2]string{requestID, actorUserID})
+}
+
+func tenantLifecycleAttributionFromCtx(ctx context.Context) (requestID, actorUserID string) {
+	v, _ := ctx.Value(tenantLifecycleAttrKey{}).([2]string)
+	return strings.TrimSpace(v[0]), strings.TrimSpace(v[1])
+}
+
+// lifecycleAttributionArgs 从 Gateway 注入的 ctx 取 lifecycle.user_id / request_id。
+func lifecycleAttributionArgs(ctx context.Context) (actor any, requestID any) {
+	reqID, actorID := tenantLifecycleAttributionFromCtx(ctx)
+	if id, err := uuid.Parse(actorID); err == nil {
+		actor = id
+	}
+	if reqID != "" {
+		requestID = reqID
+	}
+	return actor, requestID
+}
+
+// tenantStateTransitionReject：UPDATE 未命中时区分租户不存在 vs 状态非法。
+func tenantStateTransitionReject(ctx context.Context, tx ports.MetadataTx, id uuid.UUID) error {
+	var status string
+	err := tx.QueryRow(ctx, `SELECT status FROM tenants WHERE id = $1`, id).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ports.ErrTenantNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("lookup tenant status: %w", err)
+	}
+	return fmt.Errorf("%w: current status is %s", ports.ErrTenantStateInvalid, status)
 }
 
 func (t *PostgresTenant) GetTenantAuth(context.Context, string) (ports.TenantAuth, error) {

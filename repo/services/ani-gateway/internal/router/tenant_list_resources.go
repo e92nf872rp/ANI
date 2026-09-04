@@ -242,7 +242,7 @@ func (api *tenantListAPI) stateTransition(
 	if strings.TrimSpace(body.IdempotencyKey) != "" {
 		idem = strings.TrimSpace(body.IdempotencyKey)
 	}
-	callCtx, cancel := tenantCallCtx(ctx, c)
+	callCtx, cancel := tenantWriteCallCtx(ctx, c, 15*time.Second)
 	defer cancel()
 	res, err := fn(callCtx, c.Param("tenantId"), idem)
 	if err != nil {

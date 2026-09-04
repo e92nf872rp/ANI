@@ -12,6 +12,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/route"
 	"github.com/google/uuid"
+	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 )
@@ -104,10 +105,8 @@ func (api *adminTenantAPI) createTenant(ctx context.Context, c *app.RequestConte
 		writeDemoError(c, http.StatusBadRequest, "VALIDATION_FAILED", "invalid request body")
 		return
 	}
-	// 步骤 3：注入网关 request_id / 操作者后调用 Core store。
-	// svc→Core 路径下操作者来自可信头 X-ANI-Actor-User-ID（BOSS 平台用户）；
-	// 直调 Core 时无该头，回退为当前认证主体 GetUserID。
-	tenant, err := api.tenant.CreateTenant(ctx, ports.CreateTenantInput{
+	// 步骤 3：调用 Core store（lifecycle 归因由 withTenantLifecycleCtx 统一注入）
+	tenant, err := api.tenant.CreateTenant(withTenantLifecycleCtx(ctx, c), ports.CreateTenantInput{
 		Name:              strings.TrimSpace(body.Name),
 		DisplayName:       strings.TrimSpace(body.DisplayName),
 		ContactEmail:      strings.TrimSpace(body.Email),
@@ -115,8 +114,6 @@ func (api *adminTenantAPI) createTenant(ctx context.Context, c *app.RequestConte
 		AdminEmail:        strings.TrimSpace(body.AdminEmail),
 		AdminName:         strings.TrimSpace(body.AdminName),
 		AdminPasswordHash: strings.TrimSpace(body.AdminPasswordHash),
-		RequestID:         middleware.GetRequestID(c),
-		ActorUserID:       adminActorUserID(c),
 	})
 	if err != nil {
 		writeAdminTenantError(c, err)
@@ -220,19 +217,26 @@ func (api *adminTenantAPI) disableTenant(ctx context.Context, c *app.RequestCont
 func (api *adminTenantAPI) stateTransition(
 	ctx context.Context,
 	c *app.RequestContext,
-	fn func(context.Context, string, string) (ports.Tenant, error),
+	fn func(context.Context, string) (ports.Tenant, error),
 ) {
 	if api.tenant == nil {
 		writeDemoError(c, http.StatusServiceUnavailable, "TENANT_UNAVAILABLE", "tenant service unavailable")
 		return
 	}
-	requestID := middleware.GetRequestID(c)
-	tenant, err := fn(ctx, c.Param("tenant_id"), requestID)
+	tenant, err := fn(withTenantLifecycleCtx(ctx, c), c.Param("tenant_id"))
 	if err != nil {
 		writeAdminTenantError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, toAdminTenantResponse(tenant))
+}
+
+// withTenantLifecycleCtx 统一解析 request_id / actor_user_id 并注入 ctx，
+// 供 Core PostgresTenant 写 tenant_lifecycle（create/freeze/unfreeze/disable）。
+// - RequestID：网关 X-Request-ID 中间件
+// - ActorUserID：优先可信头 X-ANI-Actor-User-ID（tenant-service 透传），否则回退认证主体
+func withTenantLifecycleCtx(ctx context.Context, c *app.RequestContext) context.Context {
+	return runtimeadapter.WithTenantLifecycleAttribution(ctx, middleware.GetRequestID(c), adminActorUserID(c))
 }
 
 func (api *adminTenantAPI) getTenantAuth(ctx context.Context, c *app.RequestContext) {

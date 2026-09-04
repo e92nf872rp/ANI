@@ -564,11 +564,11 @@ func TestTenantService_CreateTenant_Success(t *testing.T) {
 	if tenants.createIn.AdminPasswordHash == "" || tenants.createIn.AdminPasswordHash == "Abcdefg1" {
 		t.Fatal("password must be bcrypt hash, never plaintext")
 	}
-	if tenants.createIn.RequestID != "req_create-tenant-1" {
-		t.Fatalf("RequestID=%q", tenants.createIn.RequestID)
+	if len(audit.logs) == 0 || audit.logs[0].RequestID != "req_create-tenant-1" {
+		t.Fatalf("expected audit RequestID from gateway metadata, got %+v", audit.logs)
 	}
-	if tenants.createIn.ActorUserID != actorID.String() {
-		t.Fatalf("ActorUserID=%q, want BOSS operator", tenants.createIn.ActorUserID)
+	if len(audit.logs) == 0 || audit.logs[0].UserID == nil || *audit.logs[0].UserID != actorID {
+		t.Fatalf("expected audit UserID from gateway metadata, got %+v", audit.logs)
 	}
 	if quota.upsertCalls != 1 {
 		t.Fatalf("upsertCalls=%d", quota.upsertCalls)
@@ -726,5 +726,160 @@ func TestTenantService_UpdateTenant_DisplayNameOnly(t *testing.T) {
 	}
 	if tenants.tenant.ContactEmail != "ops@beta.io" || tenants.tenant.DisplayName != "Beta Inc" {
 		t.Fatalf("tenant=%+v", tenants.tenant)
+	}
+}
+
+func TestTenantService_FreezeTenant_Success(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	tenants := &fakeTenantClient{
+		tenant: ports.Tenant{ID: tenantID, Name: "acme", Status: ports.TenantStatusActive},
+	}
+	audit := &fakeAuditStore{}
+	svc := NewTenantService(nil, tenants, nil, nil, nil, audit, nil, nil, nil)
+	res, err := svc.FreezeTenant(context.Background(), &tenantv1.FreezeTenantRequest{TenantId: tenantID.String()})
+	if err != nil {
+		t.Fatalf("FreezeTenant: %v", err)
+	}
+	if res.GetId() != tenantID.String() || tenants.tenant.Status != ports.TenantStatusFrozen {
+		t.Fatalf("res=%+v tenant=%+v", res, tenants.tenant)
+	}
+	if len(audit.logs) == 0 || audit.logs[0].Action != "tenant.freeze" || audit.logs[0].Result != "success" {
+		t.Fatalf("audit=%+v", audit.logs)
+	}
+	if audit.logs[0].Details["before_status"] != "active" || audit.logs[0].Details["after_status"] != "frozen" {
+		t.Fatalf("details=%v", audit.logs[0].Details)
+	}
+}
+
+func TestTenantService_FreezeTenant_StateInvalid(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	tenants := &fakeTenantClient{
+		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusFrozen},
+	}
+	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	_, err := svc.FreezeTenant(context.Background(), &tenantv1.FreezeTenantRequest{TenantId: tenantID.String()})
+	if status.Code(err) != codes.FailedPrecondition || !strings.HasPrefix(status.Convert(err).Message(), "TENANT_STATE_INVALID") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestTenantService_UnfreezeTenant_Success(t *testing.T) {
+	tenantID := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+	tenants := &fakeTenantClient{
+		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusFrozen},
+	}
+	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	_, err := svc.UnfreezeTenant(context.Background(), &tenantv1.UnfreezeTenantRequest{TenantId: tenantID.String()})
+	if err != nil {
+		t.Fatalf("UnfreezeTenant: %v", err)
+	}
+	if tenants.tenant.Status != ports.TenantStatusActive {
+		t.Fatalf("status=%s", tenants.tenant.Status)
+	}
+}
+
+func TestTenantService_DisableTenant_UsedBlocked(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	tenants := &fakeTenantClient{
+		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusActive},
+	}
+	quota := &fakeQuotaClient{
+		getFn: func(context.Context, uuid.UUID) ([]ports.CoreQuotaResult, error) {
+			return []ports.CoreQuotaResult{
+				{ResourceType: "gpu_count", Used: 1, Reserved: 0, Total: 8},
+				{ResourceType: "token_count", Used: 0, Total: 100},
+			}, nil
+		},
+	}
+	svc := NewTenantService(nil, tenants, nil, quota, nil, &fakeAuditStore{}, nil, nil, nil)
+	_, err := svc.DisableTenant(context.Background(), &tenantv1.DisableTenantRequest{TenantId: tenantID.String()})
+	if status.Code(err) != codes.FailedPrecondition || !strings.HasPrefix(status.Convert(err).Message(), "TENANT_HAS_RUNNING_RESOURCES") {
+		t.Fatalf("err=%v", err)
+	}
+	if tenants.disableCalls != 0 {
+		t.Fatal("Core DisableTenant must not be called when used+reserved>0")
+	}
+}
+
+func TestTenantService_DisableTenant_ReservedBlocked(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	tenants := &fakeTenantClient{
+		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusActive},
+	}
+	quota := &fakeQuotaClient{
+		getFn: func(context.Context, uuid.UUID) ([]ports.CoreQuotaResult, error) {
+			return []ports.CoreQuotaResult{
+				{ResourceType: "gpu_count", Used: 0, Reserved: 2, Total: 8},
+				{ResourceType: "cpu_core", Used: 0, Reserved: 0, Total: 16},
+				{ResourceType: "memory_gb", Used: 0, Reserved: 0, Total: 32},
+				{ResourceType: "storage_gb", Used: 0, Reserved: 0, Total: 100},
+			}, nil
+		},
+	}
+	svc := NewTenantService(nil, tenants, nil, quota, nil, &fakeAuditStore{}, nil, nil, nil)
+	_, err := svc.DisableTenant(context.Background(), &tenantv1.DisableTenantRequest{TenantId: tenantID.String()})
+	if status.Code(err) != codes.FailedPrecondition || !strings.Contains(status.Convert(err).Message(), "used+reserved > 0") {
+		t.Fatalf("err=%v", err)
+	}
+	if tenants.disableCalls != 0 {
+		t.Fatal("Core DisableTenant must not be called when reserved>0")
+	}
+}
+
+func TestTenantService_DisableTenant_OtherDimUsedAllowed(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	tenants := &fakeTenantClient{
+		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusActive},
+	}
+	quota := &fakeQuotaClient{
+		getFn: func(context.Context, uuid.UUID) ([]ports.CoreQuotaResult, error) {
+			return []ports.CoreQuotaResult{
+				{ResourceType: "gpu_count", Used: 0, Reserved: 0, Total: 8},
+				{ResourceType: "cpu_core", Used: 0, Reserved: 0, Total: 16},
+				{ResourceType: "memory_gb", Used: 0, Reserved: 0, Total: 32},
+				{ResourceType: "storage_gb", Used: 0, Reserved: 0, Total: 100},
+				{ResourceType: "token_count", Used: 999, Reserved: 1, Total: 1000}, // 非守卫维度
+			}, nil
+		},
+	}
+	audit := &fakeAuditStore{}
+	svc := NewTenantService(nil, tenants, nil, quota, nil, audit, nil, nil, nil)
+	res, err := svc.DisableTenant(context.Background(), &tenantv1.DisableTenantRequest{TenantId: tenantID.String()})
+	if err != nil {
+		t.Fatalf("DisableTenant: %v", err)
+	}
+	if res.GetMessage() == "" || tenants.tenant.Status != ports.TenantStatusDisabled {
+		t.Fatalf("res=%+v status=%s", res, tenants.tenant.Status)
+	}
+	if tenants.disableCalls != 1 {
+		t.Fatalf("disableCalls=%d", tenants.disableCalls)
+	}
+	if len(audit.logs) == 0 || audit.logs[0].Action != "tenant.disable" {
+		t.Fatalf("audit=%+v", audit.logs)
+	}
+}
+
+func TestTenantService_DisableTenant_AllGuardZero(t *testing.T) {
+	tenantID := uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc")
+	tenants := &fakeTenantClient{
+		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusFrozen},
+	}
+	quota := &fakeQuotaClient{
+		existing: map[uuid.UUID][]ports.CoreQuotaResult{
+			tenantID: {
+				{ResourceType: "gpu_count", Used: 0, Reserved: 0},
+				{ResourceType: "cpu_core", Used: 0, Reserved: 0},
+				{ResourceType: "memory_gb", Used: 0, Reserved: 0},
+				{ResourceType: "storage_gb", Used: 0, Reserved: 0},
+			},
+		},
+	}
+	svc := NewTenantService(nil, tenants, nil, quota, nil, &fakeAuditStore{}, nil, nil, nil)
+	_, err := svc.DisableTenant(context.Background(), &tenantv1.DisableTenantRequest{TenantId: tenantID.String()})
+	if err != nil {
+		t.Fatalf("DisableTenant: %v", err)
+	}
+	if tenants.tenant.Status != ports.TenantStatusDisabled {
+		t.Fatalf("status=%s", tenants.tenant.Status)
 	}
 }

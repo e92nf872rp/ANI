@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"net/mail"
 	"regexp"
 	"strings"
@@ -311,11 +312,7 @@ func (s *TenantService) CreateTenant(ctx context.Context, req *tenantv1.CreateTe
 	}
 
 	// 步骤 6：经 Core SDK 创建租户（事务内 5 表）；name UNIQUE → 409 TENANT_NAME_CONFLICT
-	// ActorUserID / RequestID 取自网关 gRPC metadata（BOSS 操作者），供 Core lifecycle 归因。
-	actorID := ""
-	if uid := userIDFromCtx(ctx); uid != nil {
-		actorID = uid.String()
-	}
+	// request_id / actor 由 SDK 从 gRPC metadata 统一透传 Headers，Core Gateway 注入 ctx。
 	created, err := s.tenants.CreateTenant(ctx, ports.CreateTenantInput{
 		Name:              name,
 		DisplayName:       displayName,
@@ -324,8 +321,6 @@ func (s *TenantService) CreateTenant(ctx context.Context, req *tenantv1.CreateTe
 		AdminEmail:        adminEmail,
 		AdminName:         adminName,
 		AdminPasswordHash: string(hash),
-		RequestID:         requestIDFromCtx(ctx),
-		ActorUserID:       actorID,
 	})
 	if err != nil {
 		mapped := mapStoreError(err)
@@ -663,21 +658,167 @@ func (s *TenantService) UpdateTenant(ctx context.Context, req *tenantv1.UpdateTe
 }
 
 func (s *TenantService) FreezeTenant(ctx context.Context, req *tenantv1.FreezeTenantRequest) (*commonv1.IdempotentResult, error) {
-	_ = ctx
-	_ = req
-	return nil, tenantRPCNotImplemented()
+	rawID := ""
+	if req != nil {
+		rawID = req.GetTenantId()
+	}
+	return s.transitionTenantState(ctx, "tenant.freeze", "tenant frozen", rawID,
+		func(ctx context.Context, tenantID uuid.UUID) (ports.Tenant, error) {
+			return s.tenants.FreezeTenant(ctx, tenantID)
+		})
 }
 
 func (s *TenantService) UnfreezeTenant(ctx context.Context, req *tenantv1.UnfreezeTenantRequest) (*commonv1.IdempotentResult, error) {
-	_ = ctx
-	_ = req
-	return nil, tenantRPCNotImplemented()
+	rawID := ""
+	if req != nil {
+		rawID = req.GetTenantId()
+	}
+	return s.transitionTenantState(ctx, "tenant.unfreeze", "tenant unfrozen", rawID,
+		func(ctx context.Context, tenantID uuid.UUID) (ports.Tenant, error) {
+			return s.tenants.UnfreezeTenant(ctx, tenantID)
+		})
 }
 
 func (s *TenantService) DisableTenant(ctx context.Context, req *tenantv1.DisableTenantRequest) (*commonv1.IdempotentResult, error) {
-	_ = ctx
-	_ = req
-	return nil, tenantRPCNotImplemented()
+	const action = "tenant.disable"
+
+	if s.tenants == nil {
+		err := businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant client unavailable")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, nil, err, nil)
+		return nil, err
+	}
+	if s.quota == nil {
+		err := businessError(codes.Unavailable, ports.ErrStoreUnavailable, "quota client unavailable")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, nil, err, nil)
+		return nil, err
+	}
+
+	rawID := ""
+	if req != nil {
+		rawID = req.GetTenantId()
+	}
+	tenantID, err := parseTenantID(rawID)
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": rawID}, err, nil)
+		return nil, err
+	}
+
+	// 步骤 1：禁用前置 — 仅 gpu/cpu/memory/storage 四维 used+reserved>0 拒绝（其余维度忽略；不释放资源）
+	items, err := s.quota.GetQuota(ctx, tenantID)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, mapped, &tenantID)
+		return nil, mapped
+	}
+	if blocked, dim := disableBlockedByComputeQuota(items); blocked {
+		err := businessError(codes.FailedPrecondition, ports.ErrTenantHasRunningResources,
+			fmt.Sprintf("%s used+reserved > 0", dim))
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id":   tenantID.String(),
+			"blocked_dim": dim,
+			"quota_dims":  quotaUsedSnapshot(items),
+		}, err, &tenantID)
+		return nil, err
+	}
+
+	// 步骤 2：读转换前状态 → Core disable → 审计
+	before, err := s.tenants.GetTenant(ctx, tenantID)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, mapped, &tenantID)
+		return nil, mapped
+	}
+	after, err := s.tenants.DisableTenant(ctx, tenantID)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id":     tenantID.String(),
+			"before_status": string(before.Status),
+		}, mapped, &tenantID)
+		return nil, mapped
+	}
+
+	writeAuditSuccess(ctx, s.audit, auditResourceTenant, action, map[string]any{
+		"tenant_id":     tenantID.String(),
+		"before_status": string(before.Status),
+		"after_status":  string(after.Status),
+	}, &tenantID)
+
+	return &commonv1.IdempotentResult{Id: tenantID.String(), Message: "tenant disabled"}, nil
+}
+
+// transitionTenantState 编排 freeze/unfreeze：读 before → Core 转换 → 审计前后状态。
+func (s *TenantService) transitionTenantState(
+	ctx context.Context,
+	action, successMsg, rawTenantID string,
+	fn func(context.Context, uuid.UUID) (ports.Tenant, error),
+) (*commonv1.IdempotentResult, error) {
+	if s.tenants == nil {
+		err := businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant client unavailable")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, nil, err, nil)
+		return nil, err
+	}
+	tenantID, err := parseTenantID(rawTenantID)
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": rawTenantID}, err, nil)
+		return nil, err
+	}
+
+	before, err := s.tenants.GetTenant(ctx, tenantID)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, mapped, &tenantID)
+		return nil, mapped
+	}
+
+	after, err := fn(ctx, tenantID)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id":     tenantID.String(),
+			"before_status": string(before.Status),
+		}, mapped, &tenantID)
+		return nil, mapped
+	}
+
+	writeAuditSuccess(ctx, s.audit, auditResourceTenant, action, map[string]any{
+		"tenant_id":     tenantID.String(),
+		"before_status": string(before.Status),
+		"after_status":  string(after.Status),
+	}, &tenantID)
+
+	return &commonv1.IdempotentResult{Id: tenantID.String(), Message: successMsg}, nil
+}
+
+// disableQuotaGuardDims 禁用前置校验的计算/存储维度（其余维度暂不参与）。
+var disableQuotaGuardDims = map[string]struct{}{
+	"gpu_count":  {},
+	"cpu_core":   {},
+	"memory_gb":  {},
+	"storage_gb": {},
+}
+
+func disableBlockedByComputeQuota(items []ports.CoreQuotaResult) (blocked bool, dim string) {
+	for _, it := range items {
+		if _, ok := disableQuotaGuardDims[it.ResourceType]; !ok {
+			continue
+		}
+		if it.Used+it.Reserved > 0 {
+			return true, it.ResourceType
+		}
+	}
+	return false, ""
+}
+
+func quotaUsedSnapshot(items []ports.CoreQuotaResult) map[string]any {
+	out := make(map[string]any, len(items))
+	for _, it := range items {
+		out[it.ResourceType] = map[string]int64{
+			"used":     it.Used,
+			"reserved": it.Reserved,
+		}
+	}
+	return out
 }
 
 func (s *TenantService) GetTenantAuth(ctx context.Context, req *tenantv1.GetTenantAuthRequest) (*tenantv1.TenantAuthConfig, error) {
