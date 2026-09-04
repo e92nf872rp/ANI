@@ -79,9 +79,10 @@ type TenantAuthSummary struct {
 }
 
 // QuotaChangeRequest 表示 tenant_quota_change 表一行（US-012~014）。
+// 同一次提交的多维度共享 RequestID；复合主键 (tenant_id, request_id, resource_type)。
 type QuotaChangeRequest struct {
-	ID           uuid.UUID
 	TenantID     uuid.UUID
+	RequestID    uuid.UUID
 	ResourceType string
 	OldValue     *int64 // NULL = 首次设置
 	NewValue     int64
@@ -110,15 +111,17 @@ type QuotaChangePendingInput struct {
 //
 // tenants / tenant_auth / tenant_lifecycle 经 TenantSvcClient（Core API）；禁止在本 store 直接 SQL 操作。
 type TenantStore interface {
-	// UpsertPendingQuotaChanges 逐维度覆盖：UPDATE WHERE status='pending' 命中则覆盖；0 行则 INSERT。
-	UpsertPendingQuotaChanges(ctx context.Context, tenantID uuid.UUID, items []QuotaChangePendingInput) error
+	// UpsertPendingQuotaChanges 单事务：同批共用 requestID。
+	// 逐维度 UPDATE WHERE tenant_id+resource_type+status='pending'（覆盖并改写 request_id）；0 行则 INSERT。
+	UpsertPendingQuotaChanges(ctx context.Context, tenantID, requestID uuid.UUID, items []QuotaChangePendingInput) error
 
 	// ListQuotaChangesByTenant 按租户查询；status 空串表示不过滤；不分页，按 created_at DESC。
 	ListQuotaChangesByTenant(ctx context.Context, tenantID uuid.UUID, status string) ([]QuotaChangeRequest, error)
 
-	// GetQuotaChangeByID 按主键查询；不存在 → ErrQuotaChangeRequestNotFound。
-	GetQuotaChangeByID(ctx context.Context, tenantID, id uuid.UUID) (QuotaChangeRequest, error)
+	// ListQuotaChangesByRequestID 按 request_id 列出该批全部维度行；无行 → ErrQuotaChangeRequestNotFound。
+	ListQuotaChangesByRequestID(ctx context.Context, tenantID, requestID uuid.UUID) ([]QuotaChangeRequest, error)
 
-	// SetQuotaChangeStatus 乐观锁更新 status（WHERE status='pending'）；返回受影响行数（0 → 非 pending）。
-	SetQuotaChangeStatus(ctx context.Context, tenantID, id uuid.UUID, status string, reviewedBy uuid.UUID) (int64, error)
+	// SetQuotaChangeStatusByRequestID 乐观锁：将该 request_id 下全部 pending 行更新为 approved/rejected；
+	// 返回受影响行数（0 → 无 pending 行：不存在或已审）。
+	SetQuotaChangeStatusByRequestID(ctx context.Context, tenantID, requestID uuid.UUID, status string, reviewedBy uuid.UUID) (int64, error)
 }

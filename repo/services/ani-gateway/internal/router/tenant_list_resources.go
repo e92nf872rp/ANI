@@ -427,7 +427,7 @@ func (api *tenantListAPI) listQuotaChangeRequests(ctx context.Context, c *app.Re
 	items := make([]map[string]any, 0, len(res.GetItems()))
 	for _, it := range res.GetItems() {
 		items = append(items, map[string]any{
-			"id":            it.GetId(),
+			"request_id":    it.GetRequestId(),
 			"tenant_id":     it.GetTenantId(),
 			"resource_type": it.GetResourceType(),
 			"old_value":     it.GetOldValue(),

@@ -1339,9 +1339,9 @@ components:
 
     QuotaChangeRequest:
       type: object
-      required: [id, tenant_id, resource_type, old_value, new_value, status, requested_by, created_at]
+      required: [request_id, tenant_id, resource_type, old_value, new_value, status, requested_by, created_at]
       properties:
-        id:            { type: string, format: uuid }
+        request_id:    { type: string, format: uuid, description: "同一次提交共享；审批路径 reqId 对齐此字段" }
         tenant_id:     { type: string, format: uuid }
         resource_type: { type: string }
         old_value:     { type: integer, format: int64, minimum: 0, description: "提交时从 Core resource_quota 冻结的 total" }
@@ -3934,10 +3934,11 @@ paths:
     post:
       operationId: reviewQuotaChangeRequest
       summary: 审批配额变更申请（需 platform-admin / platform-ops）
+      description: reqId 为提交时生成的 request_id；一次审批该批全部维度（通过则逐维 UpsertQuota）。
       tags: [Tenants]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
-        - { name: reqId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: reqId, in: path, required: true, schema: { type: string, format: uuid }, description: "request_id（同批共享）" }
       requestBody:
         required: true
         content:

@@ -21,7 +21,7 @@ func NewPostgresTenantStore(db *pgxpool.Pool) ports.TenantStore {
 	return &PostgresTenantStore{db: db}
 }
 
-func (s *PostgresTenantStore) UpsertPendingQuotaChanges(context.Context, uuid.UUID, []ports.QuotaChangePendingInput) error {
+func (s *PostgresTenantStore) UpsertPendingQuotaChanges(context.Context, uuid.UUID, uuid.UUID, []ports.QuotaChangePendingInput) error {
 	return ports.ErrNotImplemented
 }
 
@@ -29,10 +29,10 @@ func (s *PostgresTenantStore) ListQuotaChangesByTenant(context.Context, uuid.UUI
 	return nil, ports.ErrNotImplemented
 }
 
-func (s *PostgresTenantStore) GetQuotaChangeByID(context.Context, uuid.UUID, uuid.UUID) (ports.QuotaChangeRequest, error) {
-	return ports.QuotaChangeRequest{}, ports.ErrNotImplemented
+func (s *PostgresTenantStore) ListQuotaChangesByRequestID(context.Context, uuid.UUID, uuid.UUID) ([]ports.QuotaChangeRequest, error) {
+	return nil, ports.ErrNotImplemented
 }
 
-func (s *PostgresTenantStore) SetQuotaChangeStatus(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (int64, error) {
+func (s *PostgresTenantStore) SetQuotaChangeStatusByRequestID(context.Context, uuid.UUID, uuid.UUID, string, uuid.UUID) (int64, error) {
 	return 0, ports.ErrNotImplemented
 }

@@ -223,7 +223,7 @@ message QuotaChangeRequestInput {
 }
 
 message QuotaChangeRequest {
-  string id = 1;
+  string request_id = 1;     // shared by all dimensions in one submit; approve path reqId
   string tenant_id = 2;
   string resource_type = 3;
   int64 old_value = 4;
