@@ -2,7 +2,7 @@
 
 > 对应后端批次：`INSTANCE-STORAGE-USAGE-A`（方案见 [instance-storage-usage-a.md](./instance-storage-usage-a.md)）
 > 后端拦截批次：`INSTANCE-RWO-PRECHECK-B` 已实施（见第 6 节：创建/挂载/启动命中占用卷返回 409）
-> 状态：契约已定稿，后端实施中；本文档所有字段均为 **additive**，不影响现有解析。
+> 状态：**后端已实施并通过真实集群 live 验证（2026-09-04）**；本文档所有字段均为 **additive**，不影响现有解析。
 > 变更范围：`GET /api/v1/volumes`、`GET /api/v1/volumes/{volume_id}`、`GET /api/v1/filesystems`、`GET /api/v1/filesystems/{filesystem_id}`
 
 ---
@@ -20,7 +20,7 @@
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `in_use` | boolean | 是否被活跃实例占用（实例状态为 provisioning/running 时算占用；stopped/deleted 已释放不算） |
+| `in_use` | boolean | 是否被活跃实例占用（实例状态为 pending/provisioning/starting/running/stopping 算占用；stopped/deleted 已释放不算） |
 | `used_by` | array | 占用/引用该资源的实例列表，可能为空数组 |
 | `used_by[].instance_id` | string | 实例 ID |
 | `used_by[].instance_name` | string | 实例名 |
@@ -108,11 +108,11 @@ GET /api/v1/filesystems?limit=100
 
 ## 4. 注意事项
 
-1. **过渡态（重要）**：后端暂不拦截冲突挂载。前端 `?in_use=false` 过滤是唯一控制手段，卷下拉**必须**接上；不要依赖后端报错兜底。
+1. **过滤仍是推荐的体验手段**：后端 409 预检已上线（第 6 节），但 `?in_use=false` 让用户选不到冲突卷，体验优于提交后报错；卷下拉建议保留过滤。
 2. **`in_use` 的翻转时机**：实例 stop（replicas=0）/删除后，卷的占用立即按接口实时计算返回，无异步延迟；但前端列表页若做了缓存，需在实例状态变化后刷新。
 3. **文件系统永远不过滤**：`in_use=true` 的文件系统照常可选，过滤属于误伤。
-4. **并发窗口**：两个用户同时创建实例挂同一卷，极端情况下前端看到的 `in_use=false` 可能已过期——这是已接受的过渡态，后续后端预检批次（PRECHECK-B）会补 409 拦截，届时前端只需补充错误提示。
-5. **重启盲区（已知过渡态）**：实例 A 停止后其卷被新实例 B 占用，A 再次启动/重启时可能因跨节点 Multi-Attach 卡在 provisioning——该路径不经过选卷 UI，前端过滤管不到。后端 PRECHECK-B 会在 start/restart 入口拦截并返回 409（提示占用实例）。在此之前，前端可在实例启动失败的展示中建议用户检查实例挂载卷的占用情况（`GET /volumes/{id}` 看 `used_by`）。
+4. **并发窗口**：两个用户同时创建实例挂同一卷，前端看到的 `in_use=false` 可能已过期——此时后端预检会拦截并返回 409，前端按第 6 节展示错误信息即可。
+5. **启动冲突（停机期间卷被抢占）**：实例 A 停止后其卷被新实例 B 占用，A 再次启动/重启时后端在 start/resume 入口拦截并返回 409（消息含占用实例 ID 与状态）。前端在启动失败的提示中直接展示 `message`，或用 `GET /volumes/{id}` 的 `used_by` 补充占用者信息。
 6. 字段为新增，旧版本前端不读这些字段不受影响；灰度期间新老前端可并行。
 
 ---
