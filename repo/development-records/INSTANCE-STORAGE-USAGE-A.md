@@ -3,7 +3,7 @@
 > 状态：已完成（本地验证通过；真实环境 live 验证见下文）
 > 批次类型：Feature batch
 > 方案来源：[design/instance-storage-usage-a.md](../design/instance-storage-usage-a.md)
-> 前端对接：[design/storage-in-use-frontend-integration.md](../design/storage-in-use-frontend-integration.md)
+> 前端对接：对接文档线下发送前端团队（不入库）
 
 ## 1. 背景与目标
 
