@@ -5599,6 +5599,17 @@ export interface components {
             total: number;
             next_cursor?: string | null;
         };
+        /** @description 存储资源消费者：引用该存储资源的活跃实例 */
+        StorageConsumerInfo: {
+            instance_id: string;
+            instance_name: string;
+            /** @enum {string} */
+            kind: "container" | "vm" | "batch_job" | "sandbox";
+            /** @description 实例状态（provisioning/running 等） */
+            state: string;
+            /** @description 挂载点，来自实例 storage_attachments */
+            mount_path?: string | null;
+        };
         StorageObjectListResponse: {
             items: components["schemas"]["StorageObject"][];
             total: number;
@@ -10151,6 +10162,8 @@ export interface operations {
             query?: {
                 limit?: number;
                 cursor?: string;
+                /** @description 按占用状态过滤；省略时不过滤。占用判定：被本租户 provisioning/running 状态实例的 storage_attachments 引用 */
+                in_use?: boolean;
             };
             header?: never;
             path?: never;

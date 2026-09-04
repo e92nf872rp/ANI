@@ -13,6 +13,18 @@
 
 ## 已完成批次（按完成时间排列）
 
+### RWO 卷占用保守预检（2026-09，分支 ani-hotfix）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-RWO-PRECHECK-B | RWO 卷占用保守预检（承接 USAGE-A，后端拦截落地）：resolver `resolveStorage` 对创建入口全部卷路径（spec.Storage/VM 系统盘/数据盘/container VolumeMounts）做占用检查（`WithWorkloadStore` 链式装配，nil 跳过）；`applyLifecycle` 在 `transition` 后计算 `volumeOccupancyConflict` 传入 `lifecyclePrecheck`，`attach_volume` 检查目标卷、`start/resume` 检查实例自身引用卷（`recordVolumeIDs` 汇总 Status.Storage + StorageAttachments，排除实例自身——覆盖"停机期间卷被接管后再启动"场景）；命中活跃消费者 409 `ErrConflict`，消息带占用实例 ID 与状态，operation `FailureReason=volume_occupied_by_active_instance`；文件系统（RWX）共享豁免；stopped/failed/deleted 不占用；store 读失败 fail-open，K8s Multi-Attach 兜底；deps.go + gateway instances.go 装配接线；restart 不预检（运行中自身持卷）。7 个单测（创建拦截/释放放行/RWX 豁免/start 拦截/start 放行/attach 拦截/attach 豁免）；未改 OpenAPI 契约无生成物变更；validate-architecture + openapi lint + gofmt + git diff --check 通过 | instance-rwo-precheck-b.md |
+
+### 存储占用标记与过滤（2026-09，分支 ani-hotfix）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-STORAGE-USAGE-A | 存储资源占用可见性（2026-09-04 范围决策：只做打标+过滤，后端拦截留 PRECHECK-B）：`/volumes`、`/filesystems` 列表与详情响应新增 `in_use`/`used_by`（恒输出 `[]` 不输出 null），list 支持 `?in_use=true|false` 过滤（非法值 400）；新增判定 helper `storage_consumers.go`（单资源 + 批量索引两形态，规则：attachments 引用 + 状态 ∈ {pending,provisioning,starting,running,stopping}，stopped/failed/deleted 释放；遍历全部 kind，每页一次扫描避免 N+1）；gateway `storageAPI` 注入 `WorkloadInstanceStore`（nil 安全降级）；OpenAPI additive（in_use 参数 + StorageConsumerInfo schema）+ core-schema.d.ts 重生成。6 个 router HTTP 测试 + 6 组 adapter 单测；openapi lint / validate-architecture / go build 通过。已知边界：孤儿 Deployment、legacy mount API 不参与判定；并发竞态由 K8s 兜底 | instance-storage-usage-a.md |
+
 ### 七服务运行时观测与平台聚合 API（2026-09）
 
 | 批次 | 内容摘要 | 文件 |
@@ -24,6 +36,7 @@
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
 | PLATFORM-CAPACITY-A | 平台容量态势只读汇总：OpenAPI 新增 `GET /platform/capacity`（operationId=getPlatformCapacity，`scope:capacity:read`，boundary=platform），整平台 = 1 个默认区域，只读不实现区域 CRUD；ports 新增 `PlatformCapacityService`；real adapter 组合 GPUInventory（ListNodeClasses 设备/zone/allocatable）+ KubernetesRESTClient（集群级存在性 label selector 统计跨租户 Running GPU Pod，每 Pod 占 1 设备，与 gpu-inventory occupancy 语义一致，in_use 超设备数截断保证 gpu_free ≥ 0）+ TenantService（可用租户数）；单源失败不阻塞 200，降级字段置 0/空 + `real_provider=false` + reason；Gateway runtime 按 `PLATFORM_CAPACITY_PROVIDER` 装配（kubernetes_rest 真实链路 / 空或 local 回退确定性 local 降级）；authz 注册表与 Core SDK 四语言 + 静态文档 + Console schema 生成物同步（64bc8ab + fae60b0）。真实环境实测（10.10.1.66，镜像 dev-20260903-platformcapacity）：平台 token 200 返回真实集群数据（gpu_total=11/gpu_free=3/nodes=3/tenant_count=22，real_provider=true），租户 token 403，无凭证/坏 token 401，全部通过 | PLATFORM-CAPACITY-A.md |
+
 ### VM cloud-init 密码注入（2026-09，分支 ani-hotfix）
 
 | 批次 | 内容摘要 | 文件 |

@@ -751,7 +751,7 @@ func newInstanceAPIWithObservability(observability ports.InstanceObservability, 
 			runtimeadapter.NewCompositeGPUSpecService(specStore, runtimeadapter.NewLocalGPUSpecService(inventory)),
 			registryadapter.NewLocalImageRegistry(),
 			secrets,
-		)),
+		).WithWorkloadStore(store)),
 	}
 	if lifecycle != nil {
 		serviceOpts = append(serviceOpts, runtimeadapter.WithInstanceLifecycleExecutor(lifecycle))

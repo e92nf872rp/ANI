@@ -37,7 +37,17 @@ type LocalInstanceResourceResolver struct {
 	gpuSpecs      ports.GPUSpecService
 	registry      ports.ImageRegistry
 	secrets       ports.SecretService
+	instances     ports.WorkloadInstanceStore
 	imageVulnGate ImageVulnGateMode
+}
+
+// WithWorkloadStore attaches the tenant workload instance store used by the
+// conservative RWO volume occupancy precheck at instance create time. When
+// nil (default) the precheck is skipped and volume sharing remains gated by
+// the Kubernetes Multi-Attach controller.
+func (r *LocalInstanceResourceResolver) WithWorkloadStore(store ports.WorkloadInstanceStore) *LocalInstanceResourceResolver {
+	r.instances = store
+	return r
 }
 
 func NewLocalInstanceResourceResolver(network ports.NetworkService, storage ports.StorageService, gpuSpecServices ...ports.GPUSpecService) *LocalInstanceResourceResolver {
@@ -352,6 +362,18 @@ func (r *LocalInstanceResourceResolver) resolveStorage(ctx context.Context, tena
 		// and is attachable; Failed/Deleting/Deleted remain reject states.
 		if volume.State != ports.StorageResourceAvailable && volume.State != ports.StorageResourcePending {
 			return fmt.Errorf("%w: instance volume %q is %s", ports.ErrConflict, volumeID, volume.State)
+		}
+		// Conservative RWO occupancy precheck (INSTANCE-RWO-PRECHECK-B): a
+		// block volume already referenced by an active tenant instance is not
+		// attachable by a new one. Store failures fail open; the Kubernetes
+		// Multi-Attach controller stays the concurrency backstop.
+		if r.instances != nil {
+			consumers, err := ListStorageConsumers(ctx, r.instances, tenantID, "volume", volumeID)
+			if err == nil {
+				for _, consumer := range consumers {
+					return fmt.Errorf("%w: instance volume %q is occupied by instance %q (%s)", ports.ErrConflict, volumeID, consumer.InstanceID, consumer.State)
+				}
+			}
 		}
 		seenVolumes[volumeID] = struct{}{}
 		refs = append(refs, "volume/"+volume.VolumeID)
