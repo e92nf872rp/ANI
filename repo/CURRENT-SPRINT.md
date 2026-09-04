@@ -170,6 +170,21 @@
 
 批次记录：`development-records/DP2-02-public-iam-operation-registry.md`。本地提交不会自动进入主线；未来合入演进中的 ANI 主线时必须重新运行 breaking、生成物、route 和调用方回归。
 
+## ANI IAM Direct P2 DP2-03 IAM/Core 集成契约冻结（2026-09）
+
+> 本批已人工接受精确 Proto/Core contract diff。只冻结独立 ani-iam 的三个目标 gRPC service、Core-owned Tenant Lifecycle/Bootstrap/Snapshot contract、descriptors、pins 和 producer-consumer fixtures；不接线运行时、不创建 NATS、不发布、不部署、不切流。
+
+| 项目 | 状态 | 证据 |
+|---|---|---|
+| IAM Authentication/Authorization/Admin descriptor | `pass` | 3 services / 69 RPC；旧 `auth.v1.AuthService` absent；SHA-256 `df863beb3b095d1f01350c5334d80daf10cdf48083ce0e5663781171aa99a001` |
+| Core Lifecycle/Heartbeat/Bootstrap/Snapshot descriptor | `pass` | 1 read-only service / 2 RPC；无 lifecycle writer；SHA-256 `7dd40f9053b7c1c0c8905decab0f81b07173d0b25651113147bde9a5370d352a` |
+| producer-consumer fixtures / immutable pins | `pass` | 两仓库八组 fixtures byte-identical；pins SHA-256 `33376182b2bcd2f0dd7c84bdf9790d492b6a643560a169e80c0fe63e9113c3b9` |
+| Buf、可复现生成、相关 Go tests/vet、architecture | `pass` | 固定 Buf 1.72.0 / protoc plugins；生成无漂移 |
+| ANI 聚合旧 Auth operationId gate | `fail` | 仍要求 `logout` / `revokeAPIKey`；已接受目标是 `logoutSession` / `revokeIAMAPIKey`，本批不回退 |
+| 运行时 registration、Core/NATS、Gateway mapping/cutover | `not_verified` | 后续 DP2-05 及切换事项验证 |
+
+批次记录：`development-records/DP2-03-iam-core-integration-contracts.md`。本地契约提交不会自动进入演进中的 ANI 主线；未来合入前必须重新执行完整 Proto breaking、生成物、Gateway/Auth 和调用方回归。
+
 ## 账密登录模块（2026-07）
 
 > 独立于 Sprint 13/14 的账密登录功能开发流。覆盖 Core Auth API（租户账密 + 平台账密）、Console 前端（OIDC + 账密 Tab）、BOSS 前端（平台账密登录）。
