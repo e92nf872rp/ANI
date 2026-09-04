@@ -893,6 +893,53 @@ components:
               latency_ms: { type: integer }
               error:      { type: string, nullable: true }
 
+    PlatformServiceHealthComponent:
+      type: object
+      description: 单个 ANI 目标服务的 Prometheus 抓取可达性；不表示业务依赖或业务请求健康。
+      required: [service_name, scrape_status, observed_replicas, reachable_replicas, versions, sample_age_seconds]
+      properties:
+        service_name:
+          type: string
+          enum: [ani-gateway, auth-service, model-service, task-service, inference-service, tenant-service, metering-service]
+        scrape_status:
+          type: string
+          enum: [reachable, unreachable, unknown]
+        observed_replicas:
+          type: integer
+          minimum: 0
+          description: freshness window 内存在 up series 的目标数。
+        reachable_replicas:
+          type: integer
+          minimum: 0
+          description: freshness window 内 up=1 且 OTel target_info 身份契约有效的目标数。
+        versions:
+          type: array
+          uniqueItems: true
+          items: { type: string }
+          description: 可抓取目标中经 target_info 与 K8s 标签交叉校验的版本集合；冲突目标不返回版本。
+        sample_age_seconds:
+          type: number
+          format: double
+          minimum: 0
+          nullable: true
+          description: 当前组件纳入聚合的最旧 fresh up 样本年龄；无 fresh target 时为 null。
+
+    PlatformServiceHealthResponse:
+      type: object
+      description: 固定七个 ANI 服务的 Prometheus 抓取可达性聚合；coverage=partial，禁止解释为全平台或业务健康。
+      required: [scope, coverage, signal, observed_at, source_status, components]
+      properties:
+        scope: { type: string, enum: [ani_services] }
+        coverage: { type: string, enum: [partial] }
+        signal: { type: string, enum: [prometheus_scrape] }
+        observed_at: { type: string, format: date-time }
+        source_status: { type: string, enum: [ok] }
+        components:
+          type: array
+          minItems: 7
+          maxItems: 7
+          items: { $ref: '#/components/schemas/PlatformServiceHealthComponent' }
+
     CoreDevProfileInfo:
       type: object
       description: "Core dev/local profile 标记；用于区分本地联调成功与真实 provider 执行成功。"
@@ -7835,6 +7882,33 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   # ── 可观测性 ────────────────────────────────────────────────────────────────
+  /platform/services/health:
+    get:
+      operationId: getPlatformServiceHealth
+      summary: 查询 ANI 服务监控可达性
+      description: |
+        返回固定七个 ANI 服务的 Prometheus scrape reachability。该响应仅覆盖 ANI 服务子集，
+        不表示全平台健康、业务依赖健康或流量就绪。Prometheus 不可用、响应非法或身份连接契约失败时返回 503，
+        不把数据源失败伪装为七个 unknown。
+      tags: [Observability]
+      x-ani-rbac-scope: "scope:observability:read"
+      x-ani-authz:
+        version: v1
+        resource: observability
+        action: read
+        boundary: platform
+        principal_kinds: [user, service]
+      security: [{ BearerAuth: [] }]
+      responses:
+        "200":
+          description: ANI 服务 Prometheus 抓取可达性
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformServiceHealthResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/ServiceUnavailable' }
+
   /observability/query:
     get:
       operationId: queryObservability

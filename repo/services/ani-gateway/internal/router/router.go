@@ -27,6 +27,7 @@ type RegisterOptions struct {
 	InstanceRuntime                       *InstanceRuntime
 	KubernetesRESTClient                  *runtimeadapter.KubernetesRESTClient
 	ObservabilityService                  ports.ObservabilityService
+	PlatformServiceHealthReader           ports.PlatformServiceHealthReader
 	EmailNotificationStore                ports.EmailNotificationStore
 	// InferenceServiceClient routes /api/v1/svc/inference-services* to
 	// inference-service via internal InferenceControl gRPC. When nil the
@@ -104,6 +105,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 		promSvc.SetInstanceLookup(instanceLookup)
 	}
 	registerObservability(v1, options.ObservabilityService)
+	registerPlatformServiceHealth(v1, options.PlatformServiceHealthReader)
 	registerGPUInventoryResourcesWithStore(v1, options.GPUInventory, options.GPUInstanceStore, options.KubernetesRESTClient, options.GPUSpecStore, options.QuotaStoreService, options.QuotaAdminService)
 	registerGPUSchedulingResourcesWithStore(v1, options.GPUSchedulingQueueStore)
 	registerNetworkResourcesWithService(v1, options.NetworkService)

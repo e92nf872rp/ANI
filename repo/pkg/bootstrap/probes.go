@@ -142,12 +142,13 @@ func writeProbeJSON(w http.ResponseWriter, statusCode int, body probeResponse) {
 }
 
 func dependencyProbeChecks(deps *Deps) []probeCheck {
-	dependencyCheck := func(name string, run func(context.Context) error) probeCheck {
-		return probeCheck{name: name, mode: adapterresilience.DependencyModeFor(name), run: run}
+	dependencyCheck := func(name string, mode adapterresilience.DependencyMode, run func(context.Context) error) probeCheck {
+		return probeCheck{name: name, mode: mode, run: run}
 	}
 	return []probeCheck{
 		dependencyCheck(
 			"postgres",
+			adapterresilience.DependencyStrong,
 			func(ctx context.Context) error {
 				if deps == nil || deps.DB == nil {
 					return errors.New("postgres dependency is not configured")
@@ -157,6 +158,7 @@ func dependencyProbeChecks(deps *Deps) []probeCheck {
 		),
 		dependencyCheck(
 			"nats",
+			adapterresilience.DependencyStrong,
 			func(context.Context) error {
 				if deps == nil || deps.NATS == nil {
 					return errors.New("nats dependency is not configured")
@@ -169,6 +171,7 @@ func dependencyProbeChecks(deps *Deps) []probeCheck {
 		),
 		dependencyCheck(
 			"redis",
+			adapterresilience.DependencyStrong,
 			func(ctx context.Context) error {
 				if deps == nil || deps.Redis == nil {
 					return errors.New("redis dependency is not configured")
@@ -178,6 +181,7 @@ func dependencyProbeChecks(deps *Deps) []probeCheck {
 		),
 		dependencyCheck(
 			"object-store",
+			adapterresilience.DependencyWeak,
 			func(ctx context.Context) error {
 				if deps == nil || isNilDependencyPort(deps.Ports.ObjectStore) {
 					return nil
@@ -191,6 +195,7 @@ func dependencyProbeChecks(deps *Deps) []probeCheck {
 		),
 		dependencyCheck(
 			"vector-store",
+			adapterresilience.DependencyWeak,
 			func(ctx context.Context) error {
 				if deps == nil || isNilDependencyPort(deps.Ports.VectorStore) {
 					return nil
@@ -204,6 +209,7 @@ func dependencyProbeChecks(deps *Deps) []probeCheck {
 		),
 		dependencyCheck(
 			"kubernetes-api",
+			adapterresilience.DependencyStrong,
 			func(ctx context.Context) error {
 				if deps == nil || isNilDependencyPort(deps.Ports.KubernetesAPI) {
 					return nil

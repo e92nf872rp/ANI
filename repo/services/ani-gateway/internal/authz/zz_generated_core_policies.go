@@ -1343,6 +1343,18 @@ var generatedCorePolicies = map[string]Policy{
 		Boundary:             BoundaryPlatform,
 		PrincipalKinds:       []PrincipalKind{PrincipalUser},
 	},
+	"GET /api/v1/platform/services/health": {
+		Source:               PolicySourceGenerated,
+		OperationID:          "getPlatformServiceHealth",
+		Method:               "GET",
+		PathTemplate:         "/api/v1/platform/services/health",
+		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}},
+		Version:              "v1",
+		Resource:             "observability",
+		Action:               "read",
+		Boundary:             BoundaryPlatform,
+		PrincipalKinds:       []PrincipalKind{PrincipalUser, PrincipalService},
+	},
 	"GET /api/v1/quotas": {
 		Source:               PolicySourceLegacy,
 		OperationID:          "listQuotas",

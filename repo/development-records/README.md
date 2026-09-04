@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 七服务运行时观测与平台聚合 API（2026-09）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| OBS-RUNTIME-P0 | 七个 canonical 服务统一内部 `/healthz`、`/readyz`、`/metrics`、OTel identity/`target_info`、单一 `ani-components` Pod discovery；Core OpenAPI-first 新增 `GET /platform/services/health`，四条固定 Prometheus 查询逐 target 判定 reachable/unreachable/unknown，并在数据源异常时 503 fail closed。L0～L2 与供应链门禁通过；L3 在 `kubernetes-admin@kubernetes` 的隔离 namespace `ani-service-observability-e2e-0cedae8-0904` 完成七服务 discovery、authz、up=0、missing/stale、Pod 删除自动恢复、Prometheus 故障与最终恢复，30 个新对象、0 个既有对象修改，随后 namespace 清理通过。BOSS/Console 前端因用户明确判定 ANI 前端已废弃而 `not_applicable`，只完成接口测试；不含 P1/L4/生产 rollout，不外推业务健康或 production ready | service-runtime-observability-p0.md |
+
 ### 平台容量态势接口（2026-09，分支 feat/platform-capacity）
 
 | 批次 | 内容摘要 | 文件 |

@@ -178,6 +178,8 @@ jobs:
         working-directory: repo
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-go@v5
         with:
@@ -203,6 +205,11 @@ jobs:
       - name: Install Python gate dependencies
         run: |
           pip install -r ci/requirements-contract.txt
+
+      - name: Validate service runtime observability
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+        run: make validate-service-runtime-observability
 
       - name: Run Services PR gate
         run: make validate-services

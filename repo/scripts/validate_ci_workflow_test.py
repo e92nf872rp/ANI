@@ -91,6 +91,20 @@ class CIWorkflowContractTest(unittest.TestCase):
         errors = validator.validate(self.workflow, self.makefile)
         self.assertTrue(any("high and critical npm audit" in error for error in errors))
 
+    def test_runtime_observability_contract_runs_with_base_sha(self) -> None:
+        services_text = str(self.workflow["jobs"]["services-pr-gate"])
+        self.assertIn("make validate-service-runtime-observability", services_text)
+        self.assertIn("BASE_SHA", services_text)
+
+    def test_runtime_observability_base_sha_has_full_git_history(self) -> None:
+        checkout = next(
+            step for step in self.workflow["jobs"]["services-pr-gate"]["steps"]
+            if str(step.get("uses", "")).startswith("actions/checkout@")
+        )
+        checkout["with"] = {"fetch-depth": 1}
+        errors = validator.validate(self.workflow, self.makefile)
+        self.assertTrue(any("full Git history" in error for error in errors), errors)
+
 
 if __name__ == "__main__":
     unittest.main()

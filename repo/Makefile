@@ -7,15 +7,16 @@ export
 
 .PHONY: help deps deps-down deps-status deps-clean db-validate db-list db-status db-migrate-dry-run db-migrate \
         tools-proto gen-api gen-console-api gen-proto gen-core-sdk gen-api-docs gen-gateway-authz \
-        build build-gateway build-auth-service build-model-service build-task-service build-reconcile-worker build-cli \
+        build build-gateway build-auth-service build-model-service build-task-service build-inference-service build-tenant-service build-metering-service build-reconcile-worker build-cli \
         test test-go test-python test-cover \
 	validate-infra validate-gpu-preflight validate-gpu-contracts validate-runtime-contracts validate-instance-contracts validate-instance-planner validate-instance-renderer validate-instance-admission validate-instance-audit validate-instance-provider-dry-run validate-instance-provider-apply validate-instance-status-reconcile validate-instance-orchestrator validate-instance-store validate-instance-provider-adapter validate-instance-service validate-instance-lifecycle-ops validate-m1-e2e validate-kubernetes-provider-execution validate-kubernetes-rest-client validate-kubernetes-bootstrap-wiring validate-kubernetes-lifecycle-execution validate-kubernetes-ops-execution validate-m1-real-provider-profile validate-real-k8s-profile validate-vcluster-live-gate validate-vcluster-upgrade-live-gate validate-k8s-node-pool-live-gate validate-kubeovn-network-live-gate validate-kubevirt-vm-live-gate validate-reconcile-ha-live-gate validate-kms-sm4-live-gate validate-secrets-live-gate validate-storage-live-gate validate-storage-control-plane-state validate-storage-control-plane-state-live-gate validate-gpu-inventory-live-gate validate-object-store-live-gate validate-vector-store-live-gate validate-instance-observability-live-gate validate-registry-harbor-live-gate validate-instance-management-live-gate validate-sandbox-live-gate validate-instance-sandbox-stateless-live-gate validate-instance-sandbox-checkpoint-live-gate validate-instance-reconcile-provider-loss-live-gate validate-instance-orchestration-live-gate validate-sprint13-b-track-production-shape validate-gateway-ratelimit validate-gateway-idempotency validate-adapter-resilience-timeout validate-resilience-faultinjection-live-gate validate-resilience-degradation validate-ha-failover-live-gate validate-readyz-dataplane-live-gate validate-sprint14-resilience-live-gate validate-core-installer validate-core-offline validate-core-cli validate-sprint7-core-regression validate-core-release-hardening validate-core-installer-live validate-core-offline-pack validate-core-doc-consistency validate-sprint8-core-release validate-core-release-evidence validate-sprint9-core-rc validate-sprint9-core-doc-consistency validate-sprint9-rc validate-core-artifact-manifest validate-core-version-policy validate-sprint10-final-readiness validate-sprint10-core-doc-consistency validate-sprint10-release-prep validate-sprint11-storage-disk-plan validate-sprint11-core-real-deployment validate-sprint11-rook-ceph-formal-deployment validate-sprint11-rook-ceph-live-deployment-result validate-sprint11-rook-ceph-vm-storage-smoke validate-sprint11-rook-ceph-reboot-resilience validate-sprint11-safe-completion validate-sprint11-core-doc-consistency validate-sprint11-real-deployment validate-demo-instances validate-core-alpha validate-network-alpha validate-storage-alpha validate-vector-alpha validate-workload-identity validate-core-dev-profile validate-sdk-alpha validate-sdk-beta validate-sdk-mock-smoke validate-sprint3-closure validate-sprint4-closure validate-spec-split validate-core-beta validate-core-api-compatibility validate-mock-a validate-doc-api validate-openapi-spec validate-doc-entrypoints validate-auth-contract validate-gateway-authz validate-auth-dex-smoke validate-auth-dex-production-gate validate-services validate-services-contract validate-services-route-contract validate-inference-control-plane validate-platform-workload-k8s-live-gate validate-ci-workflow validate-architecture validate-async-task-store \
         lint lint-go lint-python lint-ts \
         dev-gateway dev-console dev-core-mock \
-        image image-gateway image-auth-service \
+		image image-runtime-services image-gateway image-auth-service image-model-service image-task-service image-inference-service image-tenant-service image-metering-service \
         clean
 
 .PHONY: test-inference-control-plane-postgres validate-inference-gpu-lws-volcano-live-gate validate-inference-legacy-control-plane validate-inference-incluster-e2e-live-gate validate-inference-console-shaped-e2e-live-gate validate-inference-local-model-source-live-gate validate-inference-create-image-live-gate validate-inference-create-image-harbor-live-gate validate-inference-gpu-single-node-live-gate validate-gpu-plugin-node-partition-live-gate validate-inference-gpu-vllm-eager-live-gate validate-inference-engine-vgpu-live-gate validate-inference-gpu-memory-live-gate validate-inference-envoy-ai-gateway-manifest validate-inference-envoy-ai-gateway-ratelimit-config validate-inference-envoy-ai-gateway-c41-manifest validate-inference-envoy-ai-gateway-live-gate validate-inference-access-policy-migration run-inference-envoy-ai-gateway-live image-envoy-authz-adapter
+.PHONY: validate-service-runtime-observability validate-service-runtime-observability-licenses validate-service-runtime-observability-sbom validate-service-runtime-observability-vulnerabilities
 
 # ── 帮助 ──────────────────────────────────────────────────────────────────────
 help:
@@ -151,6 +152,7 @@ help:
 	@echo "    make validate-gateway-authz 校验 Gateway authz 注册表生成链与 route coverage"
 	@echo "    make validate-auth-dex-smoke 校验 M2.2 Docker Dex OIDC auth-code flow（需 Docker）"
 	@echo "    make validate-openapi-spec 校验 Core/Services OpenAPI 结构"
+	@echo "    make validate-service-runtime-observability 校验七服务运行时观测契约与 Prometheus 配置"
 	@echo "    make validate-services 校验 Services boundary/spec/route/SDK/model/RAG/Console 真实门禁"
 	@echo "    make validate-architecture 校验 ports/adapters 组件边界"
 	@echo "    make validate-platform-workload-k8s-live-gate 校验 CPU PlatformWorkload Kubernetes live gate"
@@ -186,8 +188,16 @@ ATLAS ?= atlas
 ATLAS_MIGRATION_DIR ?= file://deploy/migrations
 DB_ENV ?= local
 GO_CACHE_ENV = GOCACHE=$(CURDIR)/.cache/go-build GOMODCACHE=$(CURDIR)/.cache/gomod
+GO_LICENSES_VERSION := v2.0.1
+GOVULNCHECK_VERSION := v1.6.0
+CYCLONEDX_GOMOD_VERSION := v1.10.0
+SESSION_API_LICENSE_EXCEPTION_MODULE := github.com/zhangzhe-ctrl/ani-session-gateway/api
+SESSION_API_LICENSE_EXCEPTION_VERSION := v0.1.0
+SESSION_API_LICENSE_EXCEPTION_SUM := h1:x38aXUxXlJFcLtsPDtNN2aW8vloUbS88DScWdcLuLMo=
+SESSION_API_LICENSE_EXCEPTION_COMMIT := d86a40d33369b128aabc680d4ea0b3f790ac0bb6
+RUNTIME_OBSERVABILITY_GO_MODULES := runtimeadmin pkg services/pkg services/ani-gateway services/auth-service services/model-service services/task-service services/inference-service services/tenant-service services/metering-service
 BUF_CACHE_ENV = BUF_CACHE_DIR=$(CURDIR)/.cache/buf
-GO_PACKAGES = ./pkg/... ./services/ani-gateway/... ./services/auth-service/... ./services/envoy-authz-adapter/... ./services/model-service/... ./services/inference-service/... ./services/task-service/... ./services/reconcile-worker/...
+GO_PACKAGES = ./runtimeadmin/... ./pkg/... ./services/pkg/... ./services/ani-gateway/... ./services/auth-service/... ./services/envoy-authz-adapter/... ./services/model-service/... ./services/inference-service/... ./services/task-service/... ./services/tenant-service/... ./services/metering-service/... ./services/reconcile-worker/...
 TOOLS_BIN = $(CURDIR)/.bin
 
 deps:
@@ -295,7 +305,7 @@ validate-gateway-authz:
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS = -X main.Version=$(VERSION) -X main.BuildTime=$(shell date -u +%Y%m%dT%H%M%SZ)
 
-build: build-gateway build-auth-service build-model-service build-task-service build-reconcile-worker build-cli
+build: build-gateway build-auth-service build-model-service build-task-service build-inference-service build-tenant-service build-metering-service build-reconcile-worker build-cli
 
 build-gateway:
 	@echo "→ 构建 ANI Gateway..."
@@ -324,6 +334,27 @@ build-task-service:
 	cd services/task-service && \
 		$(GO_CACHE_ENV) CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o ../../bin/task-service .
 	@echo "✅ bin/task-service"
+
+build-inference-service:
+	@echo "→ 构建 Inference Service..."
+	@mkdir -p bin
+	cd services/inference-service && \
+		$(GO_CACHE_ENV) CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o ../../bin/inference-service .
+	@echo "✅ bin/inference-service"
+
+build-tenant-service:
+	@echo "→ 构建 Tenant Service..."
+	@mkdir -p bin
+	cd services/tenant-service && \
+		$(GO_CACHE_ENV) CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o ../../bin/tenant-service .
+	@echo "✅ bin/tenant-service"
+
+build-metering-service:
+	@echo "→ 构建 Metering Service..."
+	@mkdir -p bin
+	cd services/metering-service && \
+		$(GO_CACHE_ENV) CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o ../../bin/metering-service .
+	@echo "✅ bin/metering-service"
 
 build-reconcile-worker:
 	@echo "→ 构建 Reconcile Worker..."
@@ -452,6 +483,43 @@ validate-runtime-contracts:
 	@echo "→ 校验 M1-RUNTIME-A workload runtime contracts..."
 	python scripts/validate_runtime_contracts.py deploy/manifests/m1-runtime-a
 	@echo "✅ workload runtime contracts valid"
+
+validate-service-runtime-observability:
+	@echo "→ 校验七服务运行时观测契约..."
+	python scripts/render_service_runtime_observability_test.py
+	python scripts/render_service_runtime_observability_l3_test.py
+	python scripts/run_service_runtime_observability_l3_test.py
+	python scripts/validate_service_runtime_observability_test.py
+	python scripts/validate_service_runtime_observability.py
+	$(MAKE) validate-service-runtime-observability-licenses
+	$(MAKE) validate-service-runtime-observability-sbom
+	$(MAKE) validate-service-runtime-observability-vulnerabilities
+	@echo "✅ 七服务运行时观测契约有效"
+
+validate-service-runtime-observability-licenses:
+	@set -eu; \
+	actual_version="$$(cd services/ani-gateway && go list -m -f '{{.Version}}' $(SESSION_API_LICENSE_EXCEPTION_MODULE))"; \
+	test "$$actual_version" = "$(SESSION_API_LICENSE_EXCEPTION_VERSION)" || { \
+		echo "Session API license exception version drift: $$actual_version" >&2; \
+		exit 1; \
+	}; \
+	grep -Fqx "$(SESSION_API_LICENSE_EXCEPTION_MODULE) $(SESSION_API_LICENSE_EXCEPTION_VERSION) $(SESSION_API_LICENSE_EXCEPTION_SUM)" services/ani-gateway/go.sum; \
+	echo "→ 第一方内部模块例外：$(SESSION_API_LICENSE_EXCEPTION_MODULE)@$(SESSION_API_LICENSE_EXCEPTION_VERSION) ($(SESSION_API_LICENSE_EXCEPTION_COMMIT))"; \
+	for module in $(RUNTIME_OBSERVABILITY_GO_MODULES); do \
+		echo "→ license $$module"; \
+		(cd "$$module" && $(GO_CACHE_ENV) go run github.com/google/go-licenses/v2@$(GO_LICENSES_VERSION) check --include_tests ./... --ignore github.com/kubercloud/ani --ignore $(SESSION_API_LICENSE_EXCEPTION_MODULE)); \
+	done
+
+validate-service-runtime-observability-sbom:
+	python scripts/validate_runtime_observability_sbom_test.py
+	$(GO_CACHE_ENV) python scripts/validate_runtime_observability_sbom.py --generate --tool-version $(CYCLONEDX_GOMOD_VERSION)
+
+validate-service-runtime-observability-vulnerabilities:
+	@set -eu; \
+	for module in $(RUNTIME_OBSERVABILITY_GO_MODULES); do \
+		echo "→ govulncheck $$module"; \
+		(cd "$$module" && $(GO_CACHE_ENV) go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...); \
+	done
 
 validate-instance-contracts:
 	@echo "→ 校验 M1-INSTANCE-A instance contracts..."
@@ -1210,6 +1278,8 @@ validate-ci-workflow:
 	python scripts/list_go_modules_test.py
 	python scripts/validate_python_test_policy_test.py
 	python scripts/validate_ci_workflow_test.py
+	python scripts/validate_runtime_image_workflow_test.py
+	python scripts/validate_runtime_image_workflow.py
 	@echo "✅ CI workflow contract valid"
 
 validate-services-route-contract:
@@ -1251,9 +1321,9 @@ validate-services:
 	$(MAKE) validate-spec-split
 	$(MAKE) validate-sdk-beta
 	@echo "→ 从 Core/Services OpenAPI source 重新生成 SDK 与 API docs..."
-	python scripts/gen_sdk_alpha.py
-	python scripts/generate_api_docs.py
-	git diff --exit-code -- sdks/core sdks/services docs/api
+	python scripts/validate_generated_idempotence_test.py
+	python scripts/validate_generated_idempotence.py --path sdks/core --path sdks/services -- python scripts/gen_sdk_alpha.py
+	python scripts/validate_generated_idempotence.py --path docs/api -- python scripts/generate_api_docs.py
 	$(MAKE) validate-doc-api
 	$(MAKE) validate-doc-entrypoints
 	@echo "→ 运行 Services model-service Go tests..."
@@ -1262,11 +1332,6 @@ validate-services:
 	$(GO_CACHE_ENV) go test ./services/inference-service/... -v
 	@echo "→ 检查 RAG Python compile（运行级测试见 python-ci job，依赖完整 rag-engine requirements）..."
 	python -m compileall -q ai/rag-engine
-	@echo "→ 安装 Console npm dependencies from frontends/console/package-lock.json..."
-	npm --prefix frontends/console ci
-	@echo "→ 从 Services OpenAPI source 重新生成 Console API schema..."
-	npm --prefix frontends/console run gen-api
-	git diff --exit-code -- frontends/console/src/api/schema.d.ts frontends/console/src/api/core-schema.d.ts
 	$(MAKE) validate-architecture
 	@echo "✅ Services PR gate valid"
 
@@ -1307,17 +1372,46 @@ dev-core-mock:
 
 # ── 镜像构建 ──────────────────────────────────────────────────────────────────
 REGISTRY ?= harbor.ani.internal/ani
+RUNTIME_IMAGE_BUILD := docker buildx build
+RUNTIME_IMAGE_BUILD_FLAGS := --load --sbom=true --provenance=mode=max
 
-image: image-gateway image-auth-service image-envoy-authz-adapter
+image: image-runtime-services image-envoy-authz-adapter
+
+image-runtime-services: image-gateway image-auth-service image-model-service image-task-service image-inference-service image-tenant-service image-metering-service
 
 image-gateway:
-	docker build -t $(REGISTRY)/ani-gateway:$(VERSION) \
+	$(RUNTIME_IMAGE_BUILD) $(RUNTIME_IMAGE_BUILD_FLAGS) -t $(REGISTRY)/ani-gateway:$(VERSION) \
 		-f services/ani-gateway/Dockerfile \
 		.
 
 image-auth-service:
-	docker build -t $(REGISTRY)/ani-auth-service:$(VERSION) \
+	$(RUNTIME_IMAGE_BUILD) $(RUNTIME_IMAGE_BUILD_FLAGS) -t $(REGISTRY)/ani-auth-service:$(VERSION) \
 		-f services/auth-service/Dockerfile \
+		.
+
+image-model-service:
+	$(RUNTIME_IMAGE_BUILD) $(RUNTIME_IMAGE_BUILD_FLAGS) -t $(REGISTRY)/model-service:$(VERSION) \
+		-f services/model-service/Dockerfile \
+		.
+
+image-task-service:
+	$(RUNTIME_IMAGE_BUILD) $(RUNTIME_IMAGE_BUILD_FLAGS) -t $(REGISTRY)/task-service:$(VERSION) \
+		-f services/task-service/Dockerfile \
+		.
+
+image-inference-service:
+	$(RUNTIME_IMAGE_BUILD) $(RUNTIME_IMAGE_BUILD_FLAGS) -t $(REGISTRY)/inference-service:$(VERSION) \
+		-f services/inference-service/Dockerfile \
+		.
+
+image-tenant-service:
+	$(RUNTIME_IMAGE_BUILD) $(RUNTIME_IMAGE_BUILD_FLAGS) -t $(REGISTRY)/tenant-service:$(VERSION) \
+		-f services/tenant-service/Dockerfile \
+		.
+
+image-metering-service:
+	$(RUNTIME_IMAGE_BUILD) $(RUNTIME_IMAGE_BUILD_FLAGS) -t $(REGISTRY)/metering-service:$(VERSION) \
+		-f services/metering-service/Dockerfile \
 		.
 
 image-envoy-authz-adapter:
@@ -1325,13 +1419,10 @@ image-envoy-authz-adapter:
 		-f services/envoy-authz-adapter/Dockerfile \
 		.
 
-image-inference-service:
-	docker build -f services/inference-service/Dockerfile -t $(REGISTRY)/inference-service:$(VERSION) .
-
 image-inference-gateway-publisher:
 	docker build -f services/inference-service/Dockerfile.publisher -t $(REGISTRY)/inference-gateway-publisher:$(VERSION) .
 
-.PHONY: image-inference-service image-inference-gateway-publisher
+.PHONY: image-inference-gateway-publisher
 
 # ── 清理 ──────────────────────────────────────────────────────────────────────
 clean:
