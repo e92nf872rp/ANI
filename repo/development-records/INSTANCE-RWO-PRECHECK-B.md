@@ -2,8 +2,8 @@
 
 > 状态：已完成（本地验证通过；真实环境 live 验证见下文）
 > 批次类型：Feature batch
-> 前置批次：[INSTANCE-STORAGE-USAGE-A](instance-storage-usage-a.md)（占用打标 + 过滤，本批次复用其判定 helper）
-> 前端对接：[design/storage-in-use-frontend-integration.md](../design/storage-in-use-frontend-integration.md)
+> 前置批次：[INSTANCE-STORAGE-USAGE-A](INSTANCE-STORAGE-USAGE-A.md)（占用打标 + 过滤，本批次复用其判定 helper）
+> 前端对接：对接文档线下发送前端团队（不入库）
 
 ## 1. 背景与目标
 
