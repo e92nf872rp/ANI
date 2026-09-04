@@ -54,6 +54,36 @@ exceptions:
     owner: ANI Services
     reason: OpenAPI 已声明第三方集成列表，当前 Gateway 尚未注册对应过渡路由。
   - kind: spec_not_in_code
+    method: PUT
+    path: /knowledge-bases/{kb_id}
+    status: accepted_baseline
+    owner: ANI Services
+    reason: KB-API-B1 契约先行（#040），Gateway 路由将由 #044 后续批次注册。
+  - kind: spec_not_in_code
+    method: GET
+    path: /knowledge-bases/{kb_id}/documents/{doc_id}
+    status: accepted_baseline
+    owner: ANI Services
+    reason: KB-API-B1 契约先行（#040），Gateway 路由将由 #044 后续批次注册。
+  - kind: spec_not_in_code
+    method: GET
+    path: /knowledge-bases/{kb_id}/documents/{doc_id}/chunks
+    status: accepted_baseline
+    owner: ANI Services
+    reason: KB-API-B2 契约先行（#041），Gateway 路由将由 #046 后续批次注册。
+  - kind: spec_not_in_code
+    method: GET
+    path: /knowledge-bases/{kb_id}/sessions/{session_id}/messages
+    status: accepted_baseline
+    owner: ANI Services
+    reason: KB-API-B2 契约先行（#041），Gateway 路由将由 #046 后续批次注册。
+  - kind: spec_not_in_code
+    method: DELETE
+    path: /knowledge-bases/{kb_id}/sessions/{session_id}
+    status: accepted_baseline
+    owner: ANI Services
+    reason: KB-API-B2 契约先行（#041），Gateway 路由将由 #046 后续批次注册。
+  - kind: spec_not_in_code
     method: POST
     path: /knowledge-bases/{kb_id}/documents/{doc_id}/reparse
     status: accepted_baseline

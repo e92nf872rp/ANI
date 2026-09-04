@@ -439,6 +439,37 @@ func TestKubernetesDryRunRendererRendersVMCloudInitSecret(t *testing.T) {
 	}
 }
 
+func TestKubernetesDryRunRendererRendersVMPasswordSecretRef(t *testing.T) {
+	manifests, err := NewKubernetesDryRunRenderer(NewPlanningRuntime()).Render(context.Background(), ports.WorkloadSpec{
+		TenantID: "tenant-a",
+		Name:     "vm-passwordsecret-01",
+		Kind:     ports.WorkloadKindVM,
+		VM: &ports.VMInstanceSpec{
+			BootImage:      "ubuntu.qcow2",
+			PasswordSecret: "secret-passwd",
+			RootDisk: ports.WorkloadStorageAttachment{
+				Name:    "root",
+				Kind:    ports.StorageAttachmentRootDisk,
+				SizeGiB: 80,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Render(VM) error = %v", err)
+	}
+	content := manifests[0].Content
+	for _, want := range []string{
+		`"name": "cloudinitdisk"`,
+		`"cloudInitNoCloud"`,
+		`"secretRef"`,
+		`"name": "secret-passwd"`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("VM manifest missing %q:\n%s", want, content)
+		}
+	}
+}
+
 func TestKubernetesDryRunRendererInjectsVMSecretBindingsAsKubeVirtVolumes(t *testing.T) {
 	renderer := NewKubernetesDryRunRenderer(NewPlanningRuntime())
 

@@ -93,6 +93,9 @@ func TestKubernetesSandboxCheckpointRestore(t *testing.T) {
 		!strings.Contains(provider.pvcApplyBody, `"name": "sandbox-checkpoint-`+checkpointID+`"`) {
 		t.Fatalf("restore PVC apply body = %s", provider.pvcApplyBody)
 	}
+	if !strings.Contains(provider.pvcApplyBody, `"storageClassName": "ani-block"`) {
+		t.Fatalf("restore PVC apply body missing ani-block storage class: %s", provider.pvcApplyBody)
+	}
 }
 
 func TestKubernetesSandboxCheckpointRestoreRejectsInvalidSnapshot(t *testing.T) {

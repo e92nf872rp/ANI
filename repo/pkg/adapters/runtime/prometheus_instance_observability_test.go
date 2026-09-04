@@ -519,41 +519,6 @@ func TestPromQLPodMatcher(t *testing.T) {
 	}
 }
 
-func TestPrometheusInstanceObservabilityCreatesIdempotentShortLivedExecSession(t *testing.T) {
-	now := time.Date(2026, 6, 19, 8, 30, 0, 0, time.UTC)
-	service := newTestPrometheusInstanceObservabilityWithClock(t, nil, func() time.Time { return now })
-	request := ports.InstanceExecSessionCreateRequest{
-		TenantID:       "tenant-a",
-		InstanceID:     "pod-a",
-		IdempotencyKey: "exec-once",
-		Command:        []string{"/bin/sh"},
-		TTY:            true,
-		Rows:           24,
-		Cols:           80,
-	}
-
-	first, err := service.CreateExecSession(context.Background(), request)
-	if err != nil {
-		t.Fatalf("CreateExecSession() first error = %v", err)
-	}
-	second, err := service.CreateExecSession(context.Background(), request)
-	if err != nil {
-		t.Fatalf("CreateExecSession() replay error = %v", err)
-	}
-	if first.ID == "" || second.ID != first.ID || second.WSURL != first.WSURL {
-		t.Fatalf("replay = %+v, want same session as %+v", second, first)
-	}
-	if first.Token != "" {
-		t.Fatalf("token = %q, want no long-lived credential", first.Token)
-	}
-	if !strings.HasPrefix(first.WSURL, "wss://gateway.example.test/api/v1/instances/pod-a/exec/") {
-		t.Fatalf("ws_url = %q, want gateway exec URL", first.WSURL)
-	}
-	if !first.ExpiresAt.Equal(now.Add(15 * time.Minute)) {
-		t.Fatalf("expires_at = %s, want 15 minute TTL", first.ExpiresAt)
-	}
-}
-
 func newTestPrometheusInstanceObservability(t *testing.T, roundTrip roundTripFunc) *PrometheusInstanceObservability {
 	t.Helper()
 	return newTestPrometheusInstanceObservabilityWithClock(t, roundTrip, func() time.Time {
@@ -571,7 +536,6 @@ func newTestPrometheusInstanceObservabilityWithClock(t *testing.T, roundTrip rou
 		PrometheusURL:         "https://prometheus.example.test",
 		KubernetesAPIHost:     "https://kubernetes.example.test",
 		KubernetesBearerToken: "token",
-		ExecBaseURL:           "wss://gateway.example.test/api/v1",
 		HTTPClient:            &http.Client{Transport: transport},
 		Now:                   now,
 	})

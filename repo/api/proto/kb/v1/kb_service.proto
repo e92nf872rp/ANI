@@ -13,6 +13,9 @@ service KBService {
   rpc CreateKB(CreateKBRequest) returns (KnowledgeBase);
   rpc GetKB(GetKBRequest) returns (KnowledgeBase);
   rpc ListKBs(ListKBsRequest) returns (ListKBsResponse);
+  // UpdateKB updates KB name/description; empty fields mean "no change".
+  // Pure metadata update — does not trigger index rebuild (unlike config).
+  rpc UpdateKB(UpdateKBRequest) returns (KnowledgeBase);
   rpc DeleteKB(DeleteKBRequest) returns (google.protobuf.Empty);
 
   // GetDocumentUploadURL returns a presigned MinIO PUT URL for direct upload.
@@ -50,6 +53,19 @@ service KBService {
   rpc ListKBSessions(ListKBSessionsRequest) returns (ListKBSessionsResponse);
   // UpdateKBPermissions updates KB access permissions (P1).
   rpc UpdateKBPermissions(UpdateKBPermissionsRequest) returns (KnowledgeBase);
+
+  // ListDocumentChunks returns the chunk details of a document (P1).
+  rpc ListDocumentChunks(ListDocumentChunksRequest) returns (ListDocumentChunksResponse);
+  // GetSessionMessages returns the message history of a chat session (P1).
+  rpc GetSessionMessages(GetSessionMessagesRequest) returns (GetSessionMessagesResponse);
+  // DeleteSession removes a chat session and its messages (idempotent).
+  rpc DeleteSession(DeleteSessionRequest) returns (google.protobuf.Empty);
+
+  // ReparseDocument re-triggers parsing of an existing document.
+  // Returns 202-style async task semantics: resets the doc row and enqueues
+  // a reparse task via Outbox pattern onto NATS ani.tasks.kb.parse (reuses
+  // the NotifyDocumentUploaded event pipeline).
+  rpc ReparseDocument(ReparseDocumentRequest) returns (common.v1.AsyncTaskRef);
 }
 
 // ── Request / Response messages ───────────────────────────────────────────────
@@ -83,6 +99,14 @@ message ListKBsResponse {
 message DeleteKBRequest {
   string tenant_id = 1;
   string kb_id     = 2;
+}
+
+message UpdateKBRequest {
+  string tenant_id       = 1;
+  string kb_id           = 2;
+  string idempotency_key = 3;   // client-generated; replay-safe
+  string name            = 4;   // empty = keep current name
+  string description     = 5;   // empty = keep current description
 }
 
 message GetDocumentUploadURLRequest {
@@ -257,6 +281,8 @@ message KBCitation {
   string content    = 6;
   float  score      = 7;
   google.protobuf.Timestamp created_at = 8;
+  string message_id = 9;   // answering message id that cited this doc; empty = unknown
+  string session_id = 10;  // session the answer belongs to
 }
 
 message ListKBCitationsResponse {
@@ -290,4 +316,70 @@ message UpdateKBPermissionsRequest {
   string idempotency_key = 3;
   bool   public_read     = 4;
   repeated string allowed_user_ids = 5;
+}
+
+message KBChunk {
+  string id              = 1;
+  string doc_id          = 2;
+  string kb_id           = 3;
+  string parent_chunk_id = 4;
+  string chunk_type      = 5;   // child | parent | doc_summary
+  string content         = 6;
+  string parent_content  = 7;
+  int32  page_number     = 8;
+  string content_type    = 9;
+  int32  token_count     = 10;
+  string custom_metadata = 11;  // JSONB string
+  google.protobuf.Timestamp created_at = 12;
+  string file_name       = 13;  // kb_chunks.file_name (NOT NULL)
+}
+
+message ListDocumentChunksRequest {
+  string tenant_id  = 1;
+  string kb_id      = 2;
+  string doc_id     = 3;
+  string chunk_type = 4;   // optional filter: child | parent | doc_summary
+  common.v1.CursorPageRequest page = 5;
+}
+
+message ListDocumentChunksResponse {
+  repeated KBChunk items = 1;
+  string next_cursor     = 2;
+}
+
+message KBSessionMessage {
+  string id            = 1;
+  string session_id    = 2;
+  string role          = 3;    // user | assistant
+  string content       = 4;
+  string source_chunks = 5;   // JSONB string
+  int32  input_tokens  = 6;
+  int32  output_tokens = 7;
+  int64  duration_ms   = 8;
+  google.protobuf.Timestamp created_at = 9;
+}
+
+message GetSessionMessagesRequest {
+  string tenant_id = 1;
+  string kb_id     = 2;
+  string session_id = 3;
+  common.v1.CursorPageRequest page = 4;
+}
+
+message GetSessionMessagesResponse {
+  repeated KBSessionMessage items = 1;
+  string next_cursor             = 2;
+}
+
+message DeleteSessionRequest {
+  string tenant_id = 1;
+  string kb_id     = 2;
+  string session_id = 3;
+}
+
+message ReparseDocumentRequest {
+  string tenant_id       = 1;
+  string kb_id           = 2;
+  string doc_id          = 3;
+  string idempotency_key = 4;   // client-generated uuid; replay-safe, required
 }

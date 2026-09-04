@@ -52,6 +52,11 @@ class KBServiceStub:
                 request_serializer=kb_dot_v1_dot_kb__service__pb2.ListKBsRequest.SerializeToString,
                 response_deserializer=kb_dot_v1_dot_kb__service__pb2.ListKBsResponse.FromString,
                 _registered_method=True)
+        self.UpdateKB = channel.unary_unary(
+                '/kb.v1.KBService/UpdateKB',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.UpdateKBRequest.SerializeToString,
+                response_deserializer=kb_dot_v1_dot_kb__service__pb2.KnowledgeBase.FromString,
+                _registered_method=True)
         self.DeleteKB = channel.unary_unary(
                 '/kb.v1.KBService/DeleteKB',
                 request_serializer=kb_dot_v1_dot_kb__service__pb2.DeleteKBRequest.SerializeToString,
@@ -107,6 +112,26 @@ class KBServiceStub:
                 request_serializer=kb_dot_v1_dot_kb__service__pb2.UpdateKBPermissionsRequest.SerializeToString,
                 response_deserializer=kb_dot_v1_dot_kb__service__pb2.KnowledgeBase.FromString,
                 _registered_method=True)
+        self.ListDocumentChunks = channel.unary_unary(
+                '/kb.v1.KBService/ListDocumentChunks',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.ListDocumentChunksRequest.SerializeToString,
+                response_deserializer=kb_dot_v1_dot_kb__service__pb2.ListDocumentChunksResponse.FromString,
+                _registered_method=True)
+        self.GetSessionMessages = channel.unary_unary(
+                '/kb.v1.KBService/GetSessionMessages',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.GetSessionMessagesRequest.SerializeToString,
+                response_deserializer=kb_dot_v1_dot_kb__service__pb2.GetSessionMessagesResponse.FromString,
+                _registered_method=True)
+        self.DeleteSession = channel.unary_unary(
+                '/kb.v1.KBService/DeleteSession',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.DeleteSessionRequest.SerializeToString,
+                response_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                _registered_method=True)
+        self.ReparseDocument = channel.unary_unary(
+                '/kb.v1.KBService/ReparseDocument',
+                request_serializer=kb_dot_v1_dot_kb__service__pb2.ReparseDocumentRequest.SerializeToString,
+                response_deserializer=common_dot_v1_dot_common__pb2.AsyncTaskRef.FromString,
+                _registered_method=True)
 
 
 class KBServiceServicer:
@@ -127,6 +152,14 @@ class KBServiceServicer:
 
     def ListKBs(self, request, context):
         """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def UpdateKB(self, request, context):
+        """UpdateKB updates KB name/description; empty fields mean "no change".
+        Pure metadata update — does not trigger index rebuild (unlike config).
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -215,6 +248,37 @@ class KBServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ListDocumentChunks(self, request, context):
+        """ListDocumentChunks returns the chunk details of a document (P1).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetSessionMessages(self, request, context):
+        """GetSessionMessages returns the message history of a chat session (P1).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DeleteSession(self, request, context):
+        """DeleteSession removes a chat session and its messages (idempotent).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ReparseDocument(self, request, context):
+        """ReparseDocument re-triggers parsing of an existing document.
+        Returns 202-style async task semantics: resets the doc row and enqueues
+        a reparse task via Outbox pattern onto NATS ani.tasks.kb.parse (reuses
+        the NotifyDocumentUploaded event pipeline).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_KBServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -232,6 +296,11 @@ def add_KBServiceServicer_to_server(servicer, server):
                     servicer.ListKBs,
                     request_deserializer=kb_dot_v1_dot_kb__service__pb2.ListKBsRequest.FromString,
                     response_serializer=kb_dot_v1_dot_kb__service__pb2.ListKBsResponse.SerializeToString,
+            ),
+            'UpdateKB': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateKB,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.UpdateKBRequest.FromString,
+                    response_serializer=kb_dot_v1_dot_kb__service__pb2.KnowledgeBase.SerializeToString,
             ),
             'DeleteKB': grpc.unary_unary_rpc_method_handler(
                     servicer.DeleteKB,
@@ -287,6 +356,26 @@ def add_KBServiceServicer_to_server(servicer, server):
                     servicer.UpdateKBPermissions,
                     request_deserializer=kb_dot_v1_dot_kb__service__pb2.UpdateKBPermissionsRequest.FromString,
                     response_serializer=kb_dot_v1_dot_kb__service__pb2.KnowledgeBase.SerializeToString,
+            ),
+            'ListDocumentChunks': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListDocumentChunks,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.ListDocumentChunksRequest.FromString,
+                    response_serializer=kb_dot_v1_dot_kb__service__pb2.ListDocumentChunksResponse.SerializeToString,
+            ),
+            'GetSessionMessages': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetSessionMessages,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.GetSessionMessagesRequest.FromString,
+                    response_serializer=kb_dot_v1_dot_kb__service__pb2.GetSessionMessagesResponse.SerializeToString,
+            ),
+            'DeleteSession': grpc.unary_unary_rpc_method_handler(
+                    servicer.DeleteSession,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.DeleteSessionRequest.FromString,
+                    response_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            ),
+            'ReparseDocument': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReparseDocument,
+                    request_deserializer=kb_dot_v1_dot_kb__service__pb2.ReparseDocumentRequest.FromString,
+                    response_serializer=common_dot_v1_dot_common__pb2.AsyncTaskRef.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -371,6 +460,33 @@ class KBService:
             '/kb.v1.KBService/ListKBs',
             kb_dot_v1_dot_kb__service__pb2.ListKBsRequest.SerializeToString,
             kb_dot_v1_dot_kb__service__pb2.ListKBsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UpdateKB(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/UpdateKB',
+            kb_dot_v1_dot_kb__service__pb2.UpdateKBRequest.SerializeToString,
+            kb_dot_v1_dot_kb__service__pb2.KnowledgeBase.FromString,
             options,
             channel_credentials,
             insecure,
@@ -668,6 +784,114 @@ class KBService:
             '/kb.v1.KBService/UpdateKBPermissions',
             kb_dot_v1_dot_kb__service__pb2.UpdateKBPermissionsRequest.SerializeToString,
             kb_dot_v1_dot_kb__service__pb2.KnowledgeBase.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListDocumentChunks(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/ListDocumentChunks',
+            kb_dot_v1_dot_kb__service__pb2.ListDocumentChunksRequest.SerializeToString,
+            kb_dot_v1_dot_kb__service__pb2.ListDocumentChunksResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetSessionMessages(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/GetSessionMessages',
+            kb_dot_v1_dot_kb__service__pb2.GetSessionMessagesRequest.SerializeToString,
+            kb_dot_v1_dot_kb__service__pb2.GetSessionMessagesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DeleteSession(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/DeleteSession',
+            kb_dot_v1_dot_kb__service__pb2.DeleteSessionRequest.SerializeToString,
+            google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReparseDocument(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kb.v1.KBService/ReparseDocument',
+            kb_dot_v1_dot_kb__service__pb2.ReparseDocumentRequest.SerializeToString,
+            common_dot_v1_dot_common__pb2.AsyncTaskRef.FromString,
             options,
             channel_credentials,
             insecure,

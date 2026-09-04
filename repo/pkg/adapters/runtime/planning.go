@@ -428,6 +428,9 @@ func transition(state ports.WorkloadState, action ports.WorkloadLifecycleAction)
 		if state == ports.WorkloadStateDeleted || state == ports.WorkloadStateDeleting {
 			return "", fmt.Errorf("%w: cannot resize deleted instance", ports.ErrConflict)
 		}
+		if state != ports.WorkloadStateStopped {
+			return "", fmt.Errorf("%w: resize requires a stopped instance, stop first", ports.ErrConflict)
+		}
 		return state, nil
 	case ports.WorkloadLifecycleRebuild:
 		if state == ports.WorkloadStateDeleted || state == ports.WorkloadStateDeleting {

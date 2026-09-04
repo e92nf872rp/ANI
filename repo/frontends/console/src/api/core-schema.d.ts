@@ -427,6 +427,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/instances/{instance_id}/logs/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 实例日志 SSE 流式输出
+         * @description SSE 流式输出实例日志：首屏回放最近 limit 条历史日志（时间正序），
+         *     然后持续增量推送新日志。每条日志通过 event: log 帧推送，
+         *     错误通过 event: error 帧推送，结束通过 event: done 帧推送。
+         *     连接时长上限 10 分钟，到达后发 done{reason:"timeout"} 并关闭。
+         *     预流错误（401/404/400）返回普通 JSON，不进入 SSE 流。
+         */
+        get: operations["streamInstanceLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/instances/{instance_id}/events": {
         parameters: {
             query?: never;
@@ -4254,6 +4278,11 @@ export interface components {
              * @default false
              */
             termination_protection: boolean;
+            /**
+             * @description 实例创建后是否自动启动（开机自启）
+             * @default true
+             */
+            auto_start: boolean;
             /** @description VM SSH 连接信息；仅返回连接元数据，不返回私钥 */
             ssh?: {
                 /** @example ubuntu */
@@ -4508,8 +4537,10 @@ export interface components {
             ssh_username: string | null;
             /** @description VM SSH key/secret 引用；不包含私钥内容 */
             ssh_key_ref?: string | null;
-            /** @description 登录密码 Secret 引用；不返回明文。 */
+            /** @description 登录密码 cloud-init Secret 引用；Secret 需含 userdata 键（值为 #cloud-config，设置 users/plain_text_passwd 或 chpasswd）。与 cloud_init_secret 互斥；不返回明文。 */
             password_secret_ref?: string | null;
+            /** @description cloud-init user-data Secret 引用；Secret 需含 userdata 键（值为 #cloud-config）。与 password_secret_ref 互斥。 */
+            cloud_init_secret?: string | null;
             /** @description cloud-init user data；不得包含长期明文凭据。 */
             user_data?: string | null;
             system_disk?: components["schemas"]["InstanceDiskSpec"];
@@ -4955,10 +4986,12 @@ export interface components {
             /** @enum {string} */
             action: "start" | "stop" | "restart" | "resize" | "rebuild" | "delete" | "snapshot" | "attach_volume" | "detach_volume" | "attach_filesystem" | "detach_filesystem" | "rollback" | "scale" | "update_image" | "bind_secret" | "unbind_secret" | "change_security_groups" | "set_termination_protection" | "pause" | "resume" | "extend" | "touch_idle";
             idempotency_key: string;
-            /** @description resize 时使用 */
+            /** @description resize 时使用；变配重建时写入容器 resources */
             cpu?: string | null;
-            /** @description resize 时使用 */
+            /** @description resize 时使用；变配重建时写入容器 resources */
             memory?: string | null;
+            /** @description resize 时换 GPU 规格使用；通过 /gpu-specs 查询可用规格；与 cpu/memory 可同时传，至少传一项；仅 stopped 实例可执行 */
+            spec_id?: string | null;
             /** @description snapshot 时指定快照名称 */
             snapshot_name?: string | null;
             /** @description rollback 时指定目标快照 */
@@ -5010,6 +5043,8 @@ export interface components {
              * @enum {string}
              */
             protocol: "console" | "vnc" | "novnc" | "serial";
+            /** @description 可选；旧客户端省略时 Gateway 仅为本次 HTTP 请求生成内部键，不承诺跨 HTTP 重试重放。 */
+            idempotency_key?: string;
         };
         InstanceConsoleSession: {
             /** @description 对应 operation timeline，可通过 /instance-operations/{operation_id} 查询 */
@@ -8200,6 +8235,19 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["PreconditionFailed"];
+            429: components["responses"]["RateLimitExceeded"];
+            /** @description Session Gateway 返回未预期错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listInstanceLogs: {
@@ -8229,6 +8277,45 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    streamInstanceLogs: {
+        parameters: {
+            query?: {
+                level?: "debug" | "info" | "warn" | "error";
+                limit?: number;
+                interval_seconds?: number;
+            };
+            header?: never;
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SSE 日志流 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 日志流未配置（非 loki profile） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     listInstanceEvents: {
@@ -8313,6 +8400,19 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["PreconditionFailed"];
+            429: components["responses"]["RateLimitExceeded"];
+            /** @description Session Gateway 返回未预期错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listInstanceSecurityEvents: {
