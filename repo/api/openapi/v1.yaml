@@ -1146,6 +1146,7 @@ components:
           type: array
           items: { $ref: '#/components/schemas/InstanceStorageAttachment' }
         termination_protection: { type: boolean, default: false, description: "VM 危险操作保护开关；开启后 stop/delete/rebuild 等操作必须先关闭保护" }
+        auto_start: { type: boolean, default: true, description: "实例创建后是否自动启动（开机自启）" }
         ssh:
           type: object
           nullable: true
@@ -1368,7 +1369,8 @@ components:
         boot_image:          { type: string, nullable: true, deprecated: true, description: "兼容字段；优先使用 CreateInstanceRequest.image_id。" }
         ssh_username:        { type: string, nullable: true, default: "ubuntu", description: "VM SSH 用户名" }
         ssh_key_ref:         { type: string, nullable: true, description: "VM SSH key/secret 引用；不包含私钥内容" }
-        password_secret_ref: { type: string, nullable: true, description: "登录密码 Secret 引用；不返回明文。" }
+        password_secret_ref: { type: string, nullable: true, description: "登录密码 cloud-init Secret 引用；Secret 需含 userdata 键（值为 #cloud-config，设置 users/plain_text_passwd 或 chpasswd）。与 cloud_init_secret 互斥；不返回明文。" }
+        cloud_init_secret:   { type: string, nullable: true, description: "cloud-init user-data Secret 引用；Secret 需含 userdata 键（值为 #cloud-config）。与 password_secret_ref 互斥。" }
         user_data:           { type: string, nullable: true, description: "cloud-init user data；不得包含长期明文凭据。" }
         system_disk:
           $ref: '#/components/schemas/InstanceDiskSpec'
@@ -1889,8 +1891,9 @@ components:
           type: string
           enum: [start, stop, restart, resize, rebuild, delete, snapshot, attach_volume, detach_volume, attach_filesystem, detach_filesystem, rollback, scale, update_image, bind_secret, unbind_secret, change_security_groups, set_termination_protection, pause, resume, extend, touch_idle]
         idempotency_key: { type: string, minLength: 1, maxLength: 128 }
-        cpu:            { type: string, nullable: true, description: "resize 时使用" }
-        memory:         { type: string, nullable: true, description: "resize 时使用" }
+        cpu:            { type: string, nullable: true, description: "resize 时使用；变配重建时写入容器 resources" }
+        memory:         { type: string, nullable: true, description: "resize 时使用；变配重建时写入容器 resources" }
+        spec_id:        { type: string, nullable: true, description: "resize 时换 GPU 规格使用；通过 /gpu-specs 查询可用规格；与 cpu/memory 可同时传，至少传一项；仅 stopped 实例可执行" }
         snapshot_name:  { type: string, nullable: true, description: "snapshot 时指定快照名称" }
         snapshot_id:    { type: string, nullable: true, description: "rollback 时指定目标快照" }
         include_data_disks: { type: boolean, nullable: true, description: "snapshot 时是否包含数据盘" }

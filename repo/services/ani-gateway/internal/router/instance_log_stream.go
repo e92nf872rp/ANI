@@ -74,7 +74,7 @@ func (api *instanceAPI) streamInstanceLogs(ctx context.Context, c *app.RequestCo
 
 	req := ports.InstanceLogStreamRequest{
 		TenantID:        instanceTenantID(c),
-		InstanceID:      api.observabilityTargetID(record),
+		InstanceID:      api.instanceLogTargetID(record),
 		Level:           level,
 		Limit:           limit,
 		IntervalSeconds: interval,

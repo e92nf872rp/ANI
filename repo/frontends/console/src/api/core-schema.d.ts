@@ -4379,6 +4379,11 @@ export interface components {
              * @default false
              */
             termination_protection: boolean;
+            /**
+             * @description 实例创建后是否自动启动（开机自启）
+             * @default true
+             */
+            auto_start: boolean;
             /** @description VM SSH 连接信息；仅返回连接元数据，不返回私钥 */
             ssh?: {
                 /** @example ubuntu */
@@ -4633,8 +4638,10 @@ export interface components {
             ssh_username: string | null;
             /** @description VM SSH key/secret 引用；不包含私钥内容 */
             ssh_key_ref?: string | null;
-            /** @description 登录密码 Secret 引用；不返回明文。 */
+            /** @description 登录密码 cloud-init Secret 引用；Secret 需含 userdata 键（值为 #cloud-config，设置 users/plain_text_passwd 或 chpasswd）。与 cloud_init_secret 互斥；不返回明文。 */
             password_secret_ref?: string | null;
+            /** @description cloud-init user-data Secret 引用；Secret 需含 userdata 键（值为 #cloud-config）。与 password_secret_ref 互斥。 */
+            cloud_init_secret?: string | null;
             /** @description cloud-init user data；不得包含长期明文凭据。 */
             user_data?: string | null;
             system_disk?: components["schemas"]["InstanceDiskSpec"];
@@ -5080,10 +5087,12 @@ export interface components {
             /** @enum {string} */
             action: "start" | "stop" | "restart" | "resize" | "rebuild" | "delete" | "snapshot" | "attach_volume" | "detach_volume" | "attach_filesystem" | "detach_filesystem" | "rollback" | "scale" | "update_image" | "bind_secret" | "unbind_secret" | "change_security_groups" | "set_termination_protection" | "pause" | "resume" | "extend" | "touch_idle";
             idempotency_key: string;
-            /** @description resize 时使用 */
+            /** @description resize 时使用；变配重建时写入容器 resources */
             cpu?: string | null;
-            /** @description resize 时使用 */
+            /** @description resize 时使用；变配重建时写入容器 resources */
             memory?: string | null;
+            /** @description resize 时换 GPU 规格使用；通过 /gpu-specs 查询可用规格；与 cpu/memory 可同时传，至少传一项；仅 stopped 实例可执行 */
+            spec_id?: string | null;
             /** @description snapshot 时指定快照名称 */
             snapshot_name?: string | null;
             /** @description rollback 时指定目标快照 */

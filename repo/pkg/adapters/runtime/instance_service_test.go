@@ -886,6 +886,17 @@ func TestLocalInstanceServiceLifecycleRecordsOperation(t *testing.T) {
 	if len(operation.Steps) == 0 {
 		t.Fatalf("operation steps are empty")
 	}
+	// D1: resize requires a stopped instance, so stop before resizing.
+	if _, err := service.Stop(context.Background(), ports.WorkloadInstanceLifecycleRequest{
+		IdempotencyKey:  "stop-for-resize-key-1",
+		TenantID:        "tenant-a",
+		InstanceID:      "instance-a",
+		UserID:          "user-a",
+		PermissionProof: "rbac:update:workload",
+		RequestedAt:     time.Unix(1250, 0),
+	}); err != nil {
+		t.Fatalf("Stop() before resize error = %v", err)
+	}
 	resized, err := service.Resize(context.Background(), ports.WorkloadInstanceResizeRequest{
 		IdempotencyKey:  "resize-key-1",
 		TenantID:        "tenant-a",
@@ -920,8 +931,8 @@ func TestLocalInstanceServiceLifecycleRecordsOperation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListOperations error = %v", err)
 	}
-	if len(list.Items) != 2 {
-		t.Fatalf("operations = %d, want start + resize only", len(list.Items))
+	if len(list.Items) != 3 {
+		t.Fatalf("operations = %d, want start + stop + resize only", len(list.Items))
 	}
 }
 
