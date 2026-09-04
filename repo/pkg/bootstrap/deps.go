@@ -376,7 +376,7 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 				runtimeadapter.WithWorkloadIdentityService(workloadIdentity),
 				runtimeadapter.WithSandboxRuntime(sandboxRuntime),
 				runtimeadapter.WithInstanceStorageService(resolverStorage),
-				runtimeadapter.WithInstanceResourceResolver(runtimeadapter.NewLocalInstanceResourceResolverWithDependencies(resolverNetwork, resolverStorage, gpuSpecs, resourceRegistry, secretService)),
+				runtimeadapter.WithInstanceResourceResolver(runtimeadapter.NewLocalInstanceResourceResolverWithDependencies(resolverNetwork, resolverStorage, gpuSpecs, resourceRegistry, secretService).WithWorkloadStore(instanceStore)),
 			}, instanceServiceQuotaOptions(cfg, quotaService, metadata, instanceStore)...)...,
 		),
 		InstanceOps:           instanceOps,

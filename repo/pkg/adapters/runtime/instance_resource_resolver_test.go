@@ -578,3 +578,114 @@ func TestLocalInstanceResourceResolverInfersPurposeFromRepositoryWhenMetadataMis
 		t.Fatalf("ResolveCreate error = %v, want ErrConflict ImagePurposeMismatch", err)
 	}
 }
+
+func TestLocalInstanceResourceResolverRejectsCreateOnVolumeHeldByActiveInstance(t *testing.T) {
+	storage := NewLocalStorageService()
+	volume, err := storage.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{
+		TenantID: "tenant-a", IdempotencyKey: "resolver-rwo-held", Name: "held", SizeGiB: 10,
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume error = %v", err)
+	}
+	store := &fakeInstanceStore{records: []ports.WorkloadInstanceRecord{{
+		TenantID:   "tenant-a",
+		InstanceID: "inst-holder",
+		Name:       "holder",
+		Kind:       ports.WorkloadKindContainer,
+		Status:     ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+		StorageAttachments: []ports.WorkloadStorageAttachment{{
+			Name: "data", ResourceType: "volume", ResourceID: volume.VolumeID, MountPath: "/data",
+		}},
+	}}}
+	resolver := NewLocalInstanceResourceResolver(nil, storage).WithWorkloadStore(store)
+	_, err = resolver.ResolveCreate(context.Background(), ports.WorkloadResourceResolveRequest{
+		TenantID: "tenant-a",
+		Spec: ports.WorkloadSpec{
+			TenantID: "tenant-a",
+			Kind:     ports.WorkloadKindContainer,
+			Container: &ports.ContainerInstanceSpec{
+				VolumeMounts: []ports.InstanceVolumeMount{{VolumeID: volume.VolumeID, MountPath: "/data"}},
+			},
+		},
+	})
+	if !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("ResolveCreate error = %v, want ErrConflict for volume held by active instance", err)
+	}
+	if !strings.Contains(err.Error(), "inst-holder") {
+		t.Fatalf("error = %v, want occupying instance id in message", err)
+	}
+}
+
+func TestLocalInstanceResourceResolverAllowsCreateOnVolumeReleasedByStoppedInstance(t *testing.T) {
+	storage := NewLocalStorageService()
+	volume, err := storage.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{
+		TenantID: "tenant-a", IdempotencyKey: "resolver-rwo-stopped", Name: "released", SizeGiB: 10,
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume error = %v", err)
+	}
+	store := &fakeInstanceStore{records: []ports.WorkloadInstanceRecord{{
+		TenantID:   "tenant-a",
+		InstanceID: "inst-stopped",
+		Name:       "stopped",
+		Kind:       ports.WorkloadKindContainer,
+		Status:     ports.WorkloadStatus{State: ports.WorkloadStateStopped},
+		StorageAttachments: []ports.WorkloadStorageAttachment{{
+			Name: "data", ResourceType: "volume", ResourceID: volume.VolumeID, MountPath: "/data",
+		}},
+	}}}
+	resolver := NewLocalInstanceResourceResolver(nil, storage).WithWorkloadStore(store)
+	result, err := resolver.ResolveCreate(context.Background(), ports.WorkloadResourceResolveRequest{
+		TenantID: "tenant-a",
+		Spec: ports.WorkloadSpec{
+			TenantID: "tenant-a",
+			Kind:     ports.WorkloadKindContainer,
+			Container: &ports.ContainerInstanceSpec{
+				VolumeMounts: []ports.InstanceVolumeMount{{VolumeID: volume.VolumeID, MountPath: "/data"}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveCreate error = %v, want stopped holder to release the volume", err)
+	}
+	if len(result.ResourceRefs) != 1 || result.ResourceRefs[0] != "volume/"+volume.VolumeID {
+		t.Fatalf("resource refs = %#v, want volume ref", result.ResourceRefs)
+	}
+}
+
+func TestLocalInstanceResourceResolverAllowsCreateOnFilesystemHeldByActiveInstance(t *testing.T) {
+	storage := NewLocalStorageService()
+	filesystem, err := storage.CreateFilesystem(context.Background(), ports.StorageFilesystemCreateRequest{
+		TenantID: "tenant-a", IdempotencyKey: "resolver-rwx-shared", Name: "shared", Protocol: "nfs", SizeGiB: 100,
+	})
+	if err != nil {
+		t.Fatalf("CreateFilesystem error = %v", err)
+	}
+	store := &fakeInstanceStore{records: []ports.WorkloadInstanceRecord{{
+		TenantID:   "tenant-a",
+		InstanceID: "inst-fs-holder",
+		Name:       "fs-holder",
+		Kind:       ports.WorkloadKindContainer,
+		Status:     ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+		StorageAttachments: []ports.WorkloadStorageAttachment{{
+			Name: "share", ResourceType: "filesystem", ResourceID: filesystem.FilesystemID, MountPath: "/share",
+		}},
+	}}}
+	resolver := NewLocalInstanceResourceResolver(nil, storage).WithWorkloadStore(store)
+	result, err := resolver.ResolveCreate(context.Background(), ports.WorkloadResourceResolveRequest{
+		TenantID: "tenant-a",
+		Spec: ports.WorkloadSpec{
+			TenantID: "tenant-a",
+			Kind:     ports.WorkloadKindContainer,
+			Container: &ports.ContainerInstanceSpec{
+				FilesystemMounts: []ports.InstanceFilesystemMount{{FilesystemID: filesystem.FilesystemID, MountPath: "/share"}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveCreate error = %v, want RWX filesystem sharing to stay allowed", err)
+	}
+	if len(result.ResourceRefs) != 1 || result.ResourceRefs[0] != "filesystem/"+filesystem.FilesystemID {
+		t.Fatalf("resource refs = %#v, want filesystem ref", result.ResourceRefs)
+	}
+}

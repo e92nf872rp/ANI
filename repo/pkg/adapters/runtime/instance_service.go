@@ -873,7 +873,7 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 		return ports.WorkloadInstanceRecord{}, err
 	}
 	previousState := record.Status.State
-	precheck := lifecyclePrecheck(record, request, next)
+	precheck := lifecyclePrecheck(record, request, next, s.volumeOccupancyConflict(ctx, record, request))
 	if requestFingerprint != "" {
 		precheck.details["request_fingerprint"] = requestFingerprint
 	}
@@ -1811,7 +1811,7 @@ type lifecyclePrecheckResult struct {
 	details       map[string]any
 }
 
-func lifecyclePrecheck(record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceLifecycleRequest, next ports.WorkloadState) lifecyclePrecheckResult {
+func lifecyclePrecheck(record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceLifecycleRequest, next ports.WorkloadState, occupancy *volumeOccupancy) lifecyclePrecheckResult {
 	details := map[string]any{
 		"allowed":                true,
 		"action":                 string(request.Action),
@@ -1855,6 +1855,11 @@ func lifecyclePrecheck(record ports.WorkloadInstanceRecord, request ports.Worklo
 				return blockedLifecyclePrecheck(details, "volume_not_attached", "volume is not attached")
 			}
 		}
+	}
+	if occupancy != nil {
+		details["volume_id"] = occupancy.volumeID
+		return blockedLifecyclePrecheck(details, "volume_occupied_by_active_instance",
+			fmt.Sprintf("volume %q is occupied by instance %q (%s)", occupancy.volumeID, occupancy.consumer.InstanceID, occupancy.consumer.State))
 	}
 	if request.Action == ports.WorkloadLifecycleAttachFilesystem || request.Action == ports.WorkloadLifecycleDetachFilesystem {
 		filesystemID := strings.TrimSpace(request.FilesystemID)
@@ -1912,6 +1917,82 @@ func blockedLifecyclePrecheck(details map[string]any, reason string, message str
 		retryEligible: false,
 		details:       details,
 	}
+}
+
+// volumeOccupancy is a conservative RWO block-volume conflict found during
+// lifecycle precheck: volumeID is already referenced by another active
+// (pending/provisioning/starting/running/stopping) instance.
+type volumeOccupancy struct {
+	volumeID string
+	consumer StorageConsumer
+}
+
+// volumeOccupancyConflict implements the conservative RWO precheck
+// (INSTANCE-RWO-PRECHECK-B) for lifecycle actions:
+//   - attach_volume: the target volume must not be held by another active
+//     instance;
+//   - start/resume: a stopped instance may have lost its volumes to another
+//     instance while it was stopped; starting would multi-attach the RWO
+//     volume across nodes, so the start is refused until the volume is free.
+//
+// Filesystem (RWX) attachments are shared by design and never conflict here.
+// The instance itself is excluded (start is legal from transient active
+// states, and attach on a running instance does not yet reference the volume
+// in the store). Store failures fail open: the Kubernetes Multi-Attach
+// controller remains the concurrency backstop.
+func (s *LocalInstanceService) volumeOccupancyConflict(ctx context.Context, record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceLifecycleRequest) *volumeOccupancy {
+	if s.store == nil {
+		return nil
+	}
+	var volumeIDs []string
+	switch request.Action {
+	case ports.WorkloadLifecycleAttachVolume:
+		volumeIDs = []string{strings.TrimSpace(request.VolumeID)}
+	case ports.WorkloadLifecycleStart, ports.WorkloadLifecycleResume:
+		volumeIDs = recordVolumeIDs(record)
+	default:
+		return nil
+	}
+	for _, volumeID := range volumeIDs {
+		if volumeID == "" {
+			continue
+		}
+		consumers, err := ListStorageConsumers(ctx, s.store, record.TenantID, "volume", volumeID)
+		if err != nil {
+			continue
+		}
+		for _, consumer := range consumers {
+			if consumer.InstanceID == record.InstanceID {
+				continue
+			}
+			return &volumeOccupancy{volumeID: volumeID, consumer: consumer}
+		}
+	}
+	return nil
+}
+
+// recordVolumeIDs collects the distinct block-volume IDs referenced by the
+// record's status storage and requested storage attachments.
+func recordVolumeIDs(record ports.WorkloadInstanceRecord) []string {
+	ids := make([]string, 0)
+	seen := map[string]struct{}{}
+	for _, attachments := range [][]ports.WorkloadStorageAttachment{record.Status.Storage, record.StorageAttachments} {
+		for _, attachment := range attachments {
+			if attachment.ResourceType != "volume" {
+				continue
+			}
+			id := strings.TrimSpace(attachment.ResourceID)
+			if id == "" {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 func terminationProtectedAction(action ports.WorkloadLifecycleAction) bool {

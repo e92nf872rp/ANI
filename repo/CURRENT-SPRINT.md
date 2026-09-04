@@ -559,6 +559,14 @@ git diff --check
 > `vm-cloudinit-password-secret-ref-password` 检查并置 status: live。批次详情见
 > `repo/development-records/vm-cloudinit-password-a.md`。
 
+### 热修复：RWO 卷占用保守预检（INSTANCE-RWO-PRECHECK-B，2026-09-04）
+
+> 承接 INSTANCE-STORAGE-USAGE-A 立项预告，把后端拦截落地：创建入口 resolver `resolveStorage` 对全部卷路径做占用检查（resolver 新增 `WithWorkloadStore` 链式装配，deps.go + gateway instances.go 接线，nil 跳过）；生命周期入口 `applyLifecycle` 计算 `volumeOccupancyConflict` 传入 `lifecyclePrecheck`——`attach_volume` 检查目标卷，`start/resume` 检查实例自身引用卷（覆盖"停机期间卷被接管、重启撞不同节点"用户场景），排除实例自身；命中活跃消费者返回 409 `ErrConflict`（消息带占用实例 ID 与状态），operation `FailureReason=volume_occupied_by_active_instance`。文件系统（RWX）共享豁免；stopped/failed/deleted 不占用；store 读失败 fail-open，K8s Multi-Attach 仍是并发竞态兜底；restart 不预检。7 个单测；未改 OpenAPI 契约无生成物变更；validate-architecture + openapi lint + gofmt + git diff --check 通过。批次详情见 `repo/development-records/INSTANCE-RWO-PRECHECK-B.md`。
+
+### 热修复：存储占用标记与过滤（INSTANCE-STORAGE-USAGE-A，2026-09-04）
+
+> 承接 9/3 事故复盘（`test-mount-filesystem2` 因 RWO 卷被旧实例占用卡 provisioning，用户无从得知卷被谁占用）。按 2026-09-04 范围决策**只做占用可见性，不做后端拦截**：`/volumes`、`/filesystems` 列表与详情响应新增 `in_use`/`used_by`（恒输出 `[]`），list 支持 `?in_use=true|false` 过滤（非法值 400）；新增判定 helper `pkg/adapters/runtime/storage_consumers.go`（单资源 + 批量索引，规则：attachments 引用且实例状态 ∈ {pending,provisioning,starting,running,stopping}，stopped/failed/deleted 释放；每页一次扫描避免 N+1）；`storageAPI` 注入 `WorkloadInstanceStore`（nil 安全降级）；OpenAPI additive（`in_use` 参数 + `StorageConsumerInfo` schema）+ core-schema.d.ts 重生成。前端对接文档（线下发送前端团队，不入库；创建实例卷下拉接 `in_use=false`，409 拦截见 PRECHECK-B 批次）。方案 `repo/design/instance-storage-usage-a.md`，后续批次 PRECHECK-B（create/attach_volume/start/restart 409 预检）已立项预告。6 个 router HTTP 测试 + adapter 单测；openapi lint / validate-architecture / go build 通过；live 验证见批次记录。批次详情见 `repo/development-records/INSTANCE-STORAGE-USAGE-A.md`。
+
 ## Instance Observability Completion 增量补全（2026-07，PR4 分支）
 
 > 本节记录 `feat/instance-observability-pr4` 分支对 Sprint 15 实例可观测性的增量补全工作，对应 SPEC `spec-console-instance-observability-completion.md` 的 16 个设计决策（D-1~D-16）、12 个 User Story（US-001~US-012）和 8 个批次（B-1~B-8）。覆盖 LogStore port 抽象、Loki 日志持久化、Prometheus GPU/VM 指标采集、PromQL label 重写扩展和 VM 前端模板。各批次实现与验证细节见 `repo/development-records/instance-observability-completion-*.md`。

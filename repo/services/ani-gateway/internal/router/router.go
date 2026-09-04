@@ -109,7 +109,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerGPUInventoryResourcesWithStore(v1, options.GPUInventory, options.GPUInstanceStore, options.KubernetesRESTClient, options.GPUSpecStore, options.QuotaStoreService, options.QuotaAdminService)
 	registerGPUSchedulingResourcesWithStore(v1, options.GPUSchedulingQueueStore)
 	registerNetworkResourcesWithService(v1, options.NetworkService)
-	registerStorageResourcesWithServiceAndTasks(v1, options.StorageService, options.AsyncTaskStore)
+	registerStorageResourcesWithServiceAndTasksAndStore(v1, options.StorageService, options.AsyncTaskStore, options.GPUInstanceStore)
 	if options.VectorStoreService != nil {
 		registerVectorStoreResourcesWithServiceAndTasks(v1, options.VectorStoreService, options.AsyncTaskStore)
 	} else {

@@ -2478,6 +2478,17 @@ components:
         total: { type: integer }
         next_cursor: { type: string, nullable: true }
 
+    StorageConsumerInfo:
+      type: object
+      description: "存储资源消费者：引用该存储资源的活跃实例"
+      required: [instance_id, instance_name, kind, state]
+      properties:
+        instance_id:   { type: string }
+        instance_name: { type: string }
+        kind:          { type: string, enum: [container, vm, batch_job, sandbox] }
+        state:         { type: string, description: "实例状态（provisioning/running 等）" }
+        mount_path:    { type: string, nullable: true, description: "挂载点，来自实例 storage_attachments" }
+
     StorageObjectListResponse:
       type: object
       required: [items, total]
@@ -6287,6 +6298,7 @@ paths:
       parameters:
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
+        - { name: in_use, in: query, schema: { type: boolean }, description: "按占用状态过滤；省略时不过滤。占用判定：被本租户活跃实例（pending/provisioning/starting/running/stopping）的 storage_attachments 引用" }
       responses:
         "200":
           description: 块存储卷列表
@@ -6590,6 +6602,7 @@ paths:
       parameters:
         - { name: limit,  in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
+        - { name: in_use, in: query, schema: { type: boolean }, description: "按占用状态过滤；省略时不过滤。占用判定：被本租户 provisioning/running 状态实例的 storage_attachments 引用" }
       responses:
         "200":
           description: 文件存储列表

@@ -3,7 +3,10 @@ package router
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
@@ -16,6 +19,9 @@ import (
 type storageAPI struct {
 	service ports.StorageService
 	tasks   ports.AsyncTaskStore
+	// instanceStore backs the storage occupancy tags (in_use/used_by).
+	// When nil the tags stay false/empty and the in_use filter is a no-op.
+	instanceStore ports.WorkloadInstanceStore
 }
 
 type storageCreateVolumeRequest struct {
@@ -184,6 +190,14 @@ type storageBucketLifecycleRuleCreateRequest struct {
 	Enabled          bool   `json:"enabled"`
 }
 
+type storageConsumerResponse struct {
+	InstanceID   string `json:"instance_id"`
+	InstanceName string `json:"instance_name"`
+	Kind         string `json:"kind"`
+	State        string `json:"state"`
+	MountPath    string `json:"mount_path"`
+}
+
 type storageVolumeResponse struct {
 	ID               string                              `json:"id"`
 	TenantID         string                              `json:"tenant_id"`
@@ -202,6 +216,8 @@ type storageVolumeResponse struct {
 	OSInitStatus     string                              `json:"os_init_status,omitempty"`
 	OSInitDevice     string                              `json:"os_init_device,omitempty"`
 	MountHistory     []storageVolumeMountHistoryJSON     `json:"mount_history,omitempty"`
+	InUse            bool                                `json:"in_use"`
+	UsedBy           []storageConsumerResponse           `json:"used_by"`
 	FromSnapshotID   string                              `json:"from_snapshot_id,omitempty"`
 	FromSnapshotName string                              `json:"from_snapshot_name,omitempty"`
 	State            string                              `json:"state"`
@@ -249,6 +265,8 @@ type storageFilesystemResponse struct {
 	Mounts            int                            `json:"mounts,omitempty"`
 	MountCommand      string                         `json:"mount_command,omitempty"`
 	AttachedInstances []filesystemAttachmentResponse `json:"attached_instances,omitempty"`
+	InUse             bool                           `json:"in_use"`
+	UsedBy            []storageConsumerResponse      `json:"used_by"`
 	State             string                         `json:"state"`
 	Reason            string                         `json:"reason,omitempty"`
 	DevProfile        coreDevProfileResponse         `json:"dev_profile"`
@@ -409,13 +427,17 @@ func newStorageAPIWithService(service ports.StorageService) *storageAPI {
 }
 
 func newStorageAPIWithServiceAndTasks(service ports.StorageService, tasks ports.AsyncTaskStore) *storageAPI {
+	return newStorageAPIWithServiceAndTasksAndStore(service, tasks, nil)
+}
+
+func newStorageAPIWithServiceAndTasksAndStore(service ports.StorageService, tasks ports.AsyncTaskStore, instanceStore ports.WorkloadInstanceStore) *storageAPI {
 	if service == nil {
 		service = runtimeadapter.NewLocalStorageService()
 	}
 	if tasks == nil {
 		tasks = defaultTaskStore
 	}
-	return &storageAPI{service: service, tasks: tasks}
+	return &storageAPI{service: service, tasks: tasks, instanceStore: instanceStore}
 }
 
 func registerStorageResourcesWithService(v1 *route.RouterGroup, service ports.StorageService) {
@@ -423,7 +445,11 @@ func registerStorageResourcesWithService(v1 *route.RouterGroup, service ports.St
 }
 
 func registerStorageResourcesWithServiceAndTasks(v1 *route.RouterGroup, service ports.StorageService, tasks ports.AsyncTaskStore) {
-	api := newStorageAPIWithServiceAndTasks(service, tasks)
+	registerStorageResourcesWithServiceAndTasksAndStore(v1, service, tasks, nil)
+}
+
+func registerStorageResourcesWithServiceAndTasksAndStore(v1 *route.RouterGroup, service ports.StorageService, tasks ports.AsyncTaskStore, instanceStore ports.WorkloadInstanceStore) {
+	api := newStorageAPIWithServiceAndTasksAndStore(service, tasks, instanceStore)
 	v1.GET("/volumes", api.listVolumes)
 	v1.POST("/volumes", api.createVolume)
 	v1.GET("/volumes/:volume_id", api.getVolume)
@@ -472,6 +498,71 @@ func registerStorageResourcesWithServiceAndTasks(v1 *route.RouterGroup, service 
 	v1.POST("/objects/:object_id/complete", api.completeStorageObject)
 }
 
+// storageVolumeConsumerKey / storageFilesystemConsumerKey build the index
+// keys produced by runtimeadapter.ListAllStorageConsumers.
+func storageVolumeConsumerKey(volumeID string) string {
+	return "volume/" + volumeID
+}
+
+func storageFilesystemConsumerKey(filesystemID string) string {
+	return "filesystem/" + filesystemID
+}
+
+// storageConsumersToResponse maps adapter consumers to the wire shape used
+// by in_use/used_by. The result is never nil so responses carry
+// "used_by": [] instead of null.
+func storageConsumersToResponse(consumers []runtimeadapter.StorageConsumer) []storageConsumerResponse {
+	out := make([]storageConsumerResponse, 0, len(consumers))
+	for _, consumer := range consumers {
+		out = append(out, storageConsumerResponse{
+			InstanceID:   consumer.InstanceID,
+			InstanceName: consumer.InstanceName,
+			Kind:         string(consumer.Kind),
+			State:        string(consumer.State),
+			MountPath:    consumer.MountPath,
+		})
+	}
+	return out
+}
+
+// tagVolumeConsumers stamps occupancy info onto a volume response. An empty
+// consumer list marks the volume as unused.
+func tagVolumeConsumers(resp *storageVolumeResponse, consumers []runtimeadapter.StorageConsumer) {
+	resp.InUse = len(consumers) > 0
+	resp.UsedBy = storageConsumersToResponse(consumers)
+}
+
+// tagFilesystemConsumers is the filesystem counterpart of tagVolumeConsumers.
+// Filesystems are RWX shared resources, so occupancy is informational only.
+func tagFilesystemConsumers(resp *storageFilesystemResponse, consumers []runtimeadapter.StorageConsumer) {
+	resp.InUse = len(consumers) > 0
+	resp.UsedBy = storageConsumersToResponse(consumers)
+}
+
+// storageInUseFilter parses the optional in_use query parameter. The first
+// return reports whether filtering was requested; an invalid value returns
+// an error so handlers can reject with 400 instead of silently ignoring it.
+func storageInUseFilter(c *app.RequestContext) (bool, bool, error) {
+	raw := strings.TrimSpace(c.Query("in_use"))
+	if raw == "" {
+		return false, false, nil
+	}
+	parsed, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, false, fmt.Errorf("invalid in_use value %q", raw)
+	}
+	return true, parsed, nil
+}
+
+// storageLoadConsumerIndex builds the tenant-wide consumer index used by
+// list handlers. A nil store yields an empty index (tags stay unused).
+func (api *storageAPI) storageLoadConsumerIndex(ctx context.Context, tenantID string) (map[string][]runtimeadapter.StorageConsumer, error) {
+	if api.instanceStore == nil {
+		return map[string][]runtimeadapter.StorageConsumer{}, nil
+	}
+	return runtimeadapter.ListAllStorageConsumers(ctx, api.instanceStore, tenantID)
+}
+
 func (api *storageAPI) createVolume(ctx context.Context, c *app.RequestContext) {
 	var req storageCreateVolumeRequest
 	if err := c.BindJSON(&req); err != nil {
@@ -498,9 +589,24 @@ func (api *storageAPI) listVolumes(ctx context.Context, c *app.RequestContext) {
 		writeStorageError(c, err)
 		return
 	}
+	filterSet, wantInUse, err := storageInUseFilter(c)
+	if err != nil {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		return
+	}
+	consumerIndex, err := api.storageLoadConsumerIndex(ctx, instanceTenantID(c))
+	if err != nil {
+		writeInstanceError(c, http.StatusInternalServerError, "STORAGE_OCCUPANCY_UNAVAILABLE", "failed to load storage occupancy")
+		return
+	}
 	items := make([]storageVolumeResponse, 0, len(records))
 	for _, record := range records {
-		items = append(items, storageVolumeFromRecord(record))
+		item := storageVolumeFromRecord(record)
+		tagVolumeConsumers(&item, consumerIndex[storageVolumeConsumerKey(record.VolumeID)])
+		if filterSet && item.InUse != wantInUse {
+			continue
+		}
+		items = append(items, item)
 	}
 	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
 }
@@ -511,7 +617,14 @@ func (api *storageAPI) getVolume(ctx context.Context, c *app.RequestContext) {
 		writeStorageError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, storageVolumeFromRecord(record))
+	item := storageVolumeFromRecord(record)
+	consumers, err := runtimeadapter.ListStorageConsumers(ctx, api.instanceStore, instanceTenantID(c), "volume", record.VolumeID)
+	if err != nil {
+		writeInstanceError(c, http.StatusInternalServerError, "STORAGE_OCCUPANCY_UNAVAILABLE", "failed to load storage occupancy")
+		return
+	}
+	tagVolumeConsumers(&item, consumers)
+	c.JSON(http.StatusOK, item)
 }
 
 func (api *storageAPI) deleteVolume(ctx context.Context, c *app.RequestContext) {
@@ -680,9 +793,24 @@ func (api *storageAPI) listFilesystems(ctx context.Context, c *app.RequestContex
 		writeStorageError(c, err)
 		return
 	}
+	filterSet, wantInUse, err := storageInUseFilter(c)
+	if err != nil {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		return
+	}
+	consumerIndex, err := api.storageLoadConsumerIndex(ctx, instanceTenantID(c))
+	if err != nil {
+		writeInstanceError(c, http.StatusInternalServerError, "STORAGE_OCCUPANCY_UNAVAILABLE", "failed to load storage occupancy")
+		return
+	}
 	items := make([]storageFilesystemResponse, 0, len(records))
 	for _, record := range records {
-		items = append(items, storageFilesystemFromRecord(record))
+		item := storageFilesystemFromRecord(record)
+		tagFilesystemConsumers(&item, consumerIndex[storageFilesystemConsumerKey(record.FilesystemID)])
+		if filterSet && item.InUse != wantInUse {
+			continue
+		}
+		items = append(items, item)
 	}
 	c.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items), "next_cursor": nil})
 }
@@ -693,7 +821,14 @@ func (api *storageAPI) getFilesystem(ctx context.Context, c *app.RequestContext)
 		writeStorageError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, storageFilesystemFromRecord(record))
+	item := storageFilesystemFromRecord(record)
+	consumers, err := runtimeadapter.ListStorageConsumers(ctx, api.instanceStore, instanceTenantID(c), "filesystem", record.FilesystemID)
+	if err != nil {
+		writeInstanceError(c, http.StatusInternalServerError, "STORAGE_OCCUPANCY_UNAVAILABLE", "failed to load storage occupancy")
+		return
+	}
+	tagFilesystemConsumers(&item, consumers)
+	c.JSON(http.StatusOK, item)
 }
 
 func (api *storageAPI) deleteFilesystem(ctx context.Context, c *app.RequestContext) {
@@ -1248,6 +1383,8 @@ func storageVolumeFromRecord(record ports.StorageVolumeRecord) storageVolumeResp
 		OSInitStatus:     record.OSInitStatus,
 		OSInitDevice:     record.OSInitDevice,
 		MountHistory:     history,
+		InUse:            false,
+		UsedBy:           []storageConsumerResponse{},
 		FromSnapshotID:   record.FromSnapshotID,
 		FromSnapshotName: record.FromSnapshotName,
 		State:            string(record.State),
@@ -1297,6 +1434,8 @@ func storageFilesystemFromRecord(record ports.StorageFilesystemRecord) storageFi
 		Mounts:            record.Mounts,
 		MountCommand:      record.MountCommand,
 		AttachedInstances: attachments,
+		InUse:             false,
+		UsedBy:            []storageConsumerResponse{},
 		State:             string(record.State),
 		Reason:            record.Reason,
 		DevProfile:        localCoreDevProfile("local-storage-service", "Core dev/local profile; provider execution is gated separately"),
