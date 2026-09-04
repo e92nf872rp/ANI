@@ -63,4 +63,24 @@ Core 新增 `GET /api/v1/platform/capacity` 平台容量态势只读汇总端点
 - 本批为 Core 只读汇总单功能批次：不含前端接入、不含区域 CRUD、不含容量告警/预测；`cpu/memory` 为节点 allocatable 总量口径（非可用量），如需"可用容量"需另立契约字段。
 - 真实环境实测基于测试集群真实 provider，证明的是本接口的 real 链路与平台/租户边界，不外推 full platform production ready。
 - Core API v1 变更为 additive（新端点 + 新 schema），无需再生成兼容性基线。
-- 分支未 push；push / PR 由用户决定。
+- 分支已 push（fork），PR：e92nf872rp/ANI#140，CI Required PR Gates 全绿。
+
+## 已知口径问题（2026-09-04 实测复核记录）
+
+**现象**：三台 GPU 节点 `nvidia-smi` 物理卡数为 2+1+2=5，但接口返回 `gpu_total=11`，数字对不上，前端/用户可能困惑。
+
+**根因**（非缺陷，口径差异）：三节点 GPU 注册方式不同——
+
+| 节点 | 物理卡 | K8s 注册 | inventory 设备数 |
+|---|---|---|---|
+| dev-phys-02 | 1 | `nvidia.com/gpu=1` 整卡 | 1 |
+| kubercloud | 2 | `nvidia.com/gpu=2` 整卡 | 2 |
+| dev-phys-03 | 2 | Volcano vGPU（HAMi-core）插件，`nvidia.com/gpu=0`，注解 `volcano.sh/node-vgpu-register` 显示 2 卡各切 4 切片 ×4914MB | 8 |
+
+`gpu_total` 语义是**切片后可调度设备数**（`kubernetes_gpu_inventory.go` 优先解析 vGPU 注册注解，无注解才退回整卡计数）：1+2+8=11，与 gpu-inventory / 配额体系口径一致。物理卡数（按 GPU UUID 去重）为 5。
+
+**关联口径**：`in_use` 按 Pod 数计（每 Running GPU Pod 占 1 设备），不感知 Pod 实际申请卡数/切片数。
+
+**待办（如需消除困惑）**：
+1. 前端展示注明"设备数含 vGPU 切片"口径，或同时展示物理卡数——后者需契约新增按 UUID 去重的物理口径字段（Core API v1 additive，可另立小批次）；
+2. `gpu_free` 随集群实时波动（09-03 实测 3，09-04 复测 2），属预期行为。
