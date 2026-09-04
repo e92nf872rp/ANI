@@ -1,0 +1,92 @@
+apiVersion: ani.dev/v1alpha1
+kind: ServiceRuntimeObservabilityBundle
+metadata:
+  name: service-runtime-observability-p0
+spec:
+  secretName: ani-service-runtime-observability-p0
+  services:
+    - name: ani-gateway
+      ports:
+        - {name: http, port: 8080}
+        - {name: health, port: 9200}
+      probe:
+        httpGet: {path: /healthz, port: http}
+      env:
+        ANI_AUTH_MODE: auth_service
+        AUTH_SERVICE_ADDR: auth-service:9101
+        PLATFORM_SERVICE_HEALTH_ENABLED: "true"
+        PLATFORM_SERVICE_HEALTH_PROMETHEUS_URL: http://ani-service-observability-prometheus:9090
+        PLATFORM_SERVICE_HEALTH_QUERY_TIMEOUT: 3s
+        METERING_PROVIDER_MODE: postgres
+      secretEnv:
+        DATABASE_URL: database_url
+        GATEWAY_REDIS_URL: redis_url
+    - name: auth-service
+      ports:
+        - {name: grpc, port: 9101}
+        - {name: health, port: 9201}
+      probe:
+        tcpSocket: {port: grpc}
+      secretEnv:
+        DATABASE_URL: database_url
+        NATS_URL: nats_url
+        REDIS_URL: redis_url
+        AUTH_JWT_PUBLIC_KEY_PEM: auth_jwt_public_key_pem
+        AUTH_JWT_PRIVATE_KEY_PEM: auth_jwt_private_key_pem
+        AUTH_OIDC_CLIENT_SECRET: auth_oidc_client_secret
+        AUTH_SERVICE_MINT_CREDENTIALS: auth_service_mint_credentials
+      env:
+        AUTH_JWT_ISSUER: auth-service
+    - name: model-service
+      ports:
+        - {name: grpc, port: 9103}
+        - {name: health, port: 9203}
+      probe:
+        tcpSocket: {port: grpc}
+      secretEnv: &coreRuntimeSecretEnv
+        DATABASE_URL: database_url
+        NATS_URL: nats_url
+        REDIS_URL: redis_url
+    - name: task-service
+      ports:
+        - {name: grpc, port: 9104}
+        - {name: health, port: 9204}
+      probe:
+        tcpSocket: {port: grpc}
+      secretEnv: *coreRuntimeSecretEnv
+    - name: inference-service
+      ports:
+        - {name: grpc, port: 9104}
+        - {name: health, port: 9204}
+      probe:
+        tcpSocket: {port: grpc}
+      env:
+        CORE_API_BASE_URL: http://ani-gateway:8080/api/v1
+        MODEL_SERVICE_GRPC_ADDR: model-service:9103
+        AUTH_SERVICE_GRPC_ADDR: auth-service:9101
+      secretEnv:
+        DATABASE_URL: database_url
+        NATS_URL: nats_url
+        REDIS_URL: redis_url
+        CORE_SERVICE_TOKEN: core_service_token
+        AUTH_SERVICE_MINT_SECRET: auth_service_mint_secret
+    - name: tenant-service
+      ports:
+        - {name: grpc, port: 9105}
+        - {name: health, port: 9205}
+      probe:
+        tcpSocket: {port: grpc}
+      env:
+        CORE_API_BASE_URL: http://ani-gateway:8080/api/v1
+      secretEnv:
+        DATABASE_URL: database_url
+        CORE_API_TOKEN: core_service_token
+    - name: metering-service
+      ports:
+        - {name: health, port: 9210}
+      probe:
+        tcpSocket: {port: health}
+      env:
+        METERING_PROMETHEUS_URL: http://ani-service-observability-prometheus:9090
+        METERING_COLLECTION_INTERVAL_SECONDS: "60"
+      secretEnv: *coreRuntimeSecretEnv

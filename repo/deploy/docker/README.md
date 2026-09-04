@@ -50,6 +50,12 @@ Dex 开发配置位于 `deploy/docker/config/dex-dev.yaml`：
 auth-service 只需要配置 `AUTH_OIDC_ISSUER_URL`、`AUTH_OIDC_CLIENT_ID`、`AUTH_OIDC_CLIENT_SECRET`。
 Dex-compatible 端点会自动推导为 `{issuer}/auth`、`{issuer}/token`、`{issuer}/keys`；接入非 Dex-compatible IdP 时再显式覆盖 `AUTH_OIDC_AUTH_URL` / `AUTH_OIDC_TOKEN_URL` / `AUTH_OIDC_JWKS_URL`。
 
+## 七服务监控端点
+
+七个 Go 服务启动后会在各自的 `HEALTH_PORT` 暴露 `/metrics`、`/healthz` 和 `/readyz`。docker-compose 当前只负责本地依赖，不包含 Kubernetes Pod discovery，也不会自动创建 Prometheus `ani-components` job。
+
+本地排障可以直接访问单个服务的 `/metrics`；需要验证固定七服务聚合、标签身份、新鲜度和 fail-closed 语义时，应使用 Kubernetes 部署契约。对接方式、端口表和部署清单见[七服务 Prometheus 状态对接与部署指南](../../docs/operations/service-runtime-observability.md)。
+
 ## Dex smoke 验收
 
 具备 Docker 的环境执行：

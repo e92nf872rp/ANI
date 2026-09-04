@@ -1139,6 +1139,12 @@
       "scope": "scope:capacity:read"
     },
     {
+      "operationId": "getPlatformServiceHealth",
+      "method": "GET",
+      "path": "/platform/services/health",
+      "scope": "scope:observability:read"
+    },
+    {
       "operationId": "listQuotas",
       "method": "GET",
       "path": "/quotas",
@@ -1599,6 +1605,8 @@
     "PlatformPasswordLoginRequest",
     "PlatformRegion",
     "PlatformRegionCapacity",
+    "PlatformServiceHealthComponent",
+    "PlatformServiceHealthResponse",
     "PlatformUser",
     "PlatformUserCreateRequest",
     "PlatformUserIdempotentRequest",

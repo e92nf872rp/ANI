@@ -1,0 +1,162 @@
+{
+  "checks": [
+    {
+      "id": "isolated-object-apply",
+      "status": "passed"
+    },
+    {
+      "id": "deployments-available",
+      "status": "passed"
+    },
+    {
+      "id": "seven-management-endpoints",
+      "status": "passed"
+    },
+    {
+      "id": "kubernetes-discovery-target-info-exclusions",
+      "status": "passed"
+    },
+    {
+      "id": "gateway-missing-credential-unauthorized",
+      "status": "passed"
+    },
+    {
+      "id": "gateway-tenant-domain-forbidden",
+      "status": "passed"
+    },
+    {
+      "id": "gateway-seven-reachable",
+      "status": "passed"
+    },
+    {
+      "id": "real-up-zero-unreachable",
+      "status": "passed"
+    },
+    {
+      "id": "scrape-recovery",
+      "status": "passed"
+    },
+    {
+      "id": "pod-delete-automatic-recovery",
+      "new_pod": "auth-service-6cd4886b69-khc5j",
+      "new_uid": "83515dc3-e70b-48f0-9f77-d13741182082",
+      "old_pod": "auth-service-6cd4886b69-zb6rr",
+      "old_uid": "8ec7f284-4000-40df-a35e-fa2deabe95f6",
+      "selector": "ani.dev/run-id=0cedae8-0904,ani.dev/service-name=auth-service",
+      "status": "passed"
+    },
+    {
+      "id": "target-missing-prometheus-staleness-unknown",
+      "status": "passed"
+    },
+    {
+      "id": "prometheus-unavailable-gateway-fail-closed",
+      "status": "passed"
+    },
+    {
+      "id": "final-full-recovery",
+      "status": "passed"
+    }
+  ],
+  "cleanup": {
+    "deleted": "Namespace/ani-service-observability-e2e-0cedae8-0904",
+    "status": "passed"
+  },
+  "cluster_server": "redacted",
+  "context": "kubernetes-admin@kubernetes",
+  "fixture_images": {
+    "nats": "docker.changqingyun.cn/ani/nats@sha256:b83efabe3e7def1e0a4a31ec6e078999bb17c80363f881df35edc70fcb6bb927",
+    "postgres": "docker.changqingyun.cn/ani/postgres@sha256:5660c2cbfea50c7a9127d17dc4e48543eedd3d7a41a595a2dfa572471e37e64c",
+    "prometheus": "docker.changqingyun.cn/ani/prometheus@sha256:2659f4c2ebb718e7695cb9b25ffa7d6be64db013daba13e05c875451cf51b0d3",
+    "redis": "docker.changqingyun.cn/ani/redis@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf"
+  },
+  "fixture_manifest_sha256": "sha256:c3c93e8f1af76e7d137895123e31c9a02005e340d1b9b9da7e1339da361dbc07",
+  "images": {
+    "ani-gateway": "docker.changqingyun.cn/ani/ani-gateway@sha256:268ad6bbb569cc3657b3c8f43b3c079a26950da37e75426d18abe4c213ff15d9",
+    "auth-service": "docker.changqingyun.cn/ani/ani-auth-service@sha256:98d2b70a405ffe51c5ee875f2219bc0043950cb4bc015b3671633d3050624b63",
+    "inference-service": "docker.changqingyun.cn/ani/inference-service@sha256:c123250101b7ce7c4baf5f4469f6c6ed394ff7981c867756dde6ec7221b7f30c",
+    "metering-service": "docker.changqingyun.cn/ani/metering-service@sha256:62cd4e777e69369af0750a9d76d32dfb57ed27e0cc77906ced0f8e6d8d25fe22",
+    "model-service": "docker.changqingyun.cn/ani/model-service@sha256:403fdae7f8b84a6f4b6533bd6ec2fab7b2f669e67a6c90a5b80759f5b1514df6",
+    "task-service": "docker.changqingyun.cn/ani/task-service@sha256:412f25f552ed071a77d9ec8ed5a01465838903cd1a33574f027f0fad34bbe169",
+    "tenant-service": "docker.changqingyun.cn/ani/tenant-service@sha256:39c879574b4434a39400c10b7569c14d37fed99da4398b2faff5485e60d00cf6"
+  },
+  "namespace": "ani-service-observability-e2e-0cedae8-0904",
+  "object_plan": {
+    "cleanup": [
+      "Namespace/ani-service-observability-e2e-0cedae8-0904"
+    ],
+    "create": [
+      "Namespace/ani-service-observability-e2e-0cedae8-0904",
+      "ConfigMap/ani-service-observability-e2e-0cedae8-0904/ani-service-observability-postgres-init",
+      "Deployment/ani-service-observability-e2e-0cedae8-0904/ani-service-observability-postgres",
+      "Service/ani-service-observability-e2e-0cedae8-0904/ani-service-observability-postgres",
+      "Deployment/ani-service-observability-e2e-0cedae8-0904/ani-service-observability-nats",
+      "Service/ani-service-observability-e2e-0cedae8-0904/ani-service-observability-nats",
+      "Deployment/ani-service-observability-e2e-0cedae8-0904/ani-service-observability-redis",
+      "Service/ani-service-observability-e2e-0cedae8-0904/ani-service-observability-redis",
+      "ServiceAccount/ani-service-observability-e2e-0cedae8-0904/ani-service-observability-prometheus",
+      "Role/ani-service-observability-e2e-0cedae8-0904/ani-service-observability-prometheus",
+      "RoleBinding/ani-service-observability-e2e-0cedae8-0904/ani-service-observability-prometheus",
+      "ConfigMap/ani-service-observability-e2e-0cedae8-0904/ani-service-observability-prometheus",
+      "Deployment/ani-service-observability-e2e-0cedae8-0904/ani-service-observability-prometheus",
+      "Service/ani-service-observability-e2e-0cedae8-0904/ani-service-observability-prometheus",
+      "NetworkPolicy/ani-service-observability-e2e-0cedae8-0904/ani-service-observability-ingress",
+      "Deployment/ani-service-observability-e2e-0cedae8-0904/ani-gateway",
+      "Service/ani-service-observability-e2e-0cedae8-0904/ani-gateway",
+      "Deployment/ani-service-observability-e2e-0cedae8-0904/auth-service",
+      "Service/ani-service-observability-e2e-0cedae8-0904/auth-service",
+      "Deployment/ani-service-observability-e2e-0cedae8-0904/inference-service",
+      "Service/ani-service-observability-e2e-0cedae8-0904/inference-service",
+      "Deployment/ani-service-observability-e2e-0cedae8-0904/metering-service",
+      "Service/ani-service-observability-e2e-0cedae8-0904/metering-service",
+      "Deployment/ani-service-observability-e2e-0cedae8-0904/model-service",
+      "Service/ani-service-observability-e2e-0cedae8-0904/model-service",
+      "Deployment/ani-service-observability-e2e-0cedae8-0904/task-service",
+      "Service/ani-service-observability-e2e-0cedae8-0904/task-service",
+      "Deployment/ani-service-observability-e2e-0cedae8-0904/tenant-service",
+      "Service/ani-service-observability-e2e-0cedae8-0904/tenant-service",
+      "Secret/ani-service-observability-e2e-0cedae8-0904/ani-service-runtime-observability-p0"
+    ],
+    "modify_existing": [],
+    "pod_delete_target": {
+      "cardinality": "exactly_one",
+      "label_selector": "ani.dev/run-id=0cedae8-0904,ani.dev/service-name=auth-service",
+      "namespace": "ani-service-observability-e2e-0cedae8-0904"
+    },
+    "temporary": [
+      "NetworkPolicy/ani-service-observability-e2e-0cedae8-0904/ani-service-observability-ingress",
+      "Pod/ani-service-observability-e2e-0cedae8-0904 selected by ani.dev/run-id=0cedae8-0904,ani.dev/service-name=auth-service; delete one resolved name and UID",
+      "Deployment/ani-service-observability-e2e-0cedae8-0904/model-service replicas 1->0->1",
+      "Deployment/ani-service-observability-e2e-0cedae8-0904/ani-service-observability-prometheus replicas 1->0->1"
+    ]
+  },
+  "permission_preflight": {
+    "checks": 20,
+    "source_secret_read": false,
+    "status": "passed"
+  },
+  "profile": "OBS-RUNTIME-P0-L3",
+  "prometheus_image": "docker.changqingyun.cn/ani/prometheus@sha256:2659f4c2ebb718e7695cb9b25ffa7d6be64db013daba13e05c875451cf51b0d3",
+  "result": "passed",
+  "runtime_secret": {
+    "keys": [
+      "auth_jwt_private_key_pem",
+      "auth_jwt_public_key_pem",
+      "auth_oidc_client_secret",
+      "auth_service_mint_credentials",
+      "auth_service_mint_secret",
+      "core_api_token",
+      "core_service_token",
+      "database_url",
+      "nats_url",
+      "postgres_password",
+      "redis_password",
+      "redis_url"
+    ],
+    "kind": "Secret",
+    "name": "ani-service-runtime-observability-p0",
+    "namespace": "ani-service-observability-e2e-0cedae8-0904"
+  },
+  "source_commit": "0cedae825a489d936cf41815dc27f278f6d3213c",
+  "version": "obs-runtime-p0-0cedae8"
+}
