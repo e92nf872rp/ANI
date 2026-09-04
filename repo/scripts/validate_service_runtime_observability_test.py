@@ -103,6 +103,26 @@ class ValidateServiceRuntimeObservabilityTest(unittest.TestCase):
             errors,
         )
 
+    def test_allowlist_enforcement_is_scoped_to_batch_anchors(self) -> None:
+        # 批次锚点（批次计划/批次记录）被触碰时才启用精确 allowlist，
+        # 其余 PR（不延续本批次）不受批次文件清单约束，避免全局锁。
+        self.assertTrue(
+            validator.should_enforce_changed_path_allowlist(
+                {validator.FIXED_PLAN_GIT_PATH}
+            )
+        )
+        self.assertTrue(
+            validator.should_enforce_changed_path_allowlist(
+                {"repo/development-records/service-runtime-observability-p0.md"}
+            )
+        )
+        self.assertFalse(
+            validator.should_enforce_changed_path_allowlist(
+                {"repo/pkg/adapters/runtime/prometheus_instance_observability.go"}
+            )
+        )
+        self.assertFalse(validator.should_enforce_changed_path_allowlist(set()))
+
     def test_exact_p0_allowlist_rejects_unknown_service_change(self) -> None:
         errors = validator.validate_changed_path_allowlist(
             {"repo/services/auth-service/main.go"}
