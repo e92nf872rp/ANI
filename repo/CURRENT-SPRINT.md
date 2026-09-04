@@ -156,6 +156,20 @@
 
 **PR5 批次记录：** `development-records/authz-mode-simplify-d.md`（含 2026-08-31 第六版修订章节：删废弃 env 残留检测、改名 config.go、删兼容入口 6 函数、测试归一，12 files +51/−222）。**验证命令：** `go test ./services/ani-gateway/...` + `make gen-gateway-authz`（生成物零漂移）+ `make validate-gateway-authz`（18 tests、283 registered routes 0 errors）+ `make validate-architecture` + `git diff --check`；`make test` 仅 `pkg/adapters/runtime` 的 Windows 预存失败（sandbox symlink 特权 / Python `os.O_DIRECTORY`；origin/main @ `9c7bf2b` worktree 复跑同包同样 FAIL，不在本次改动集）。**本地实测：** `ANI_AUTH_MODE=auth_service`（无任何 policy env）启动正常；public 放行（branding 200）、generated 接口 `/api/v1/admin/quota-meta` 无凭证被 V2 拒绝 401、legacy 无效 token 401；`ANI_AUTH_MODE=dev` 启动正常且 quota-meta 回落 legacy 返回真实数据 200。登录全链路（有 token 200）受数据库角色权限迁移（#124 `ani_app_user`）未应用阻塞，暂缓验证。修订后代码已与方案第六版 §4.1–§4.5 逐项复核一致。
 
+## ANI IAM Direct P2 DP2-02 公网契约冻结（2026-09）
+
+> 独立 Direct P2 工作流，固定 ANI 来源 `0cedae825a489d936cf41815dc27f278f6d3213c`。本批已经人工接受精确 breaking diff，只冻结目标公网 OpenAPI、operation registry/policy、生成器、SDK 和契约测试，不接线运行时、不部署、不切流。
+
+| 项目 | 状态 | 证据 |
+|---|---|---|
+| OpenAPI / registry / breaking / stable errors | `pass` | 295 operations；59 added、0 removed、6 operationId changes；263 machine-readable breaking rows |
+| unique Handler/Owner、authn/authz、Permission、typed obligation | `pass` | target generator 20/20；deterministic `--check` |
+| Console/BOSS schema 与四语言 Core SDK | `pass` | pinned generation；Go/Python/TypeScript smoke；Java source smoke |
+| Java compile/run | `not_verified` | 当前环境无 JDK |
+| Gateway 目标运行时接线与新增 Handler | `not_verified` | 后续 DP2-05 及切换事项实现 |
+
+批次记录：`development-records/DP2-02-public-iam-operation-registry.md`。本地提交不会自动进入主线；未来合入演进中的 ANI 主线时必须重新运行 breaking、生成物、route 和调用方回归。
+
 ## 账密登录模块（2026-07）
 
 > 独立于 Sprint 13/14 的账密登录功能开发流。覆盖 Core Auth API（租户账密 + 平台账密）、Console 前端（OIDC + 账密 Tab）、BOSS 前端（平台账密登录）。

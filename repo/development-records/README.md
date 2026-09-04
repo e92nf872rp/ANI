@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### ANI IAM Direct P2 公网契约冻结（2026-09，分支 codex/direct-p2-01-05）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| DP2-02 | 基于固定 ANI `0cedae825a489d936cf41815dc27f278f6d3213c` 冻结目标 IAM 公网 OpenAPI、295-operation registry、唯一 Handler/Owner、认证授权分类、Permission/typed obligation、稳定 `401/403/409/429/503/504`、policy revision、可信 Header 和 D001–D028 replacement trace；breaking 为 operation 236→295、59 新增、0 删除、6 个 operationId 变化、45 个新增 schema；Console/BOSS 类型与四语言 Core SDK 同源生成。契约与生成门禁 `pass`；Gateway 运行时接线、实际新增 Handler 和调用方切换 `not_verified`，本批不部署、不切流 | DP2-02-public-iam-operation-registry.md |
+
 ### 实例日志流式输出（2026-09，分支 feat/instance-log-stream）
 
 | 批次 | 内容摘要 | 文件 |
