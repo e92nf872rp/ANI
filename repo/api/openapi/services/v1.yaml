@@ -3869,7 +3869,7 @@ paths:
     get:
       operationId: getTenantQuotaView
       summary: 查询租户配额使用情况（需 platform-admin / platform-ops / platform-readonly）
-      description: 代理 Core GET /admin/tenants/{tenant_id}/quota 并 JOIN quota-meta 组装 display_name/unit。
+      description: 代理 Core GET /admin/tenants/{tenant_id}/quota（响应已含 JOIN meta 的 display_name/unit，不再二次 ListQuotaMeta）。
       tags: [Tenants]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }

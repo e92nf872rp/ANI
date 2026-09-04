@@ -988,9 +988,47 @@ func (s *TenantService) TestTenantSso(ctx context.Context, req *tenantv1.TestTen
 }
 
 func (s *TenantService) GetTenantQuota(ctx context.Context, req *tenantv1.GetTenantQuotaRequest) (*tenantv1.GetTenantQuotaResponse, error) {
-	_ = ctx
-	_ = req
-	return nil, tenantRPCNotImplemented()
+	rawID := ""
+	if req != nil {
+		rawID = req.GetTenantId()
+	}
+	tenantID, err := parseTenantID(rawID)
+	if err != nil {
+		return nil, err
+	}
+	if s.quota == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "quota client unavailable")
+	}
+
+	// 代理 Core GET /admin/tenants/{id}/quota（已 JOIN meta 的 display_name/unit；不存在 → TENANT_NOT_FOUND）
+	quotaItems, err := s.quota.GetQuota(ctx, tenantID)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	return &tenantv1.GetTenantQuotaResponse{Items: assembleTenantQuotaViews(quotaItems)}, nil
+}
+
+// assembleTenantQuotaViews 将 Core GET 配额行封装为 BOSS 展示视图。
+func assembleTenantQuotaViews(items []ports.CoreQuotaResult) []*tenantv1.TenantQuotaViewItem {
+	out := make([]*tenantv1.TenantQuotaViewItem, 0, len(items))
+	for _, it := range items {
+		rt := strings.TrimSpace(it.ResourceType)
+		if rt == "" {
+			continue
+		}
+		displayName := strings.TrimSpace(it.DisplayName)
+		if displayName == "" {
+			displayName = rt
+		}
+		out = append(out, &tenantv1.TenantQuotaViewItem{
+			ResourceType: rt,
+			DisplayName:  displayName,
+			Used:         it.Used,
+			Total:        it.Total,
+			Unit:         it.Unit,
+		})
+	}
+	return out
 }
 
 func (s *TenantService) SubmitQuotaChangeRequest(ctx context.Context, req *tenantv1.SubmitQuotaChangeRequestRequest) (*commonv1.IdempotentResult, error) {

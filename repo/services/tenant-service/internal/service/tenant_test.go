@@ -884,6 +884,91 @@ func TestTenantService_DisableTenant_AllGuardZero(t *testing.T) {
 	}
 }
 
+func TestTenantService_GetTenantQuota_AssemblesFromGetQuota(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	quota := &fakeQuotaClient{
+		existing: map[uuid.UUID][]ports.CoreQuotaResult{
+			tenantID: {
+				{ResourceType: "gpu_count", Used: 2, Total: 8, DisplayName: "GPU", Unit: "card"},
+				{ResourceType: "cpu_core", Used: 4, Total: 16, DisplayName: "CPU", Unit: "core"},
+				{ResourceType: "mystery_dim", Used: 1, Total: 3}, // display_name 空 → resource_type 兜底
+			},
+		},
+	}
+	svc := NewTenantService(nil, nil, nil, quota, nil, &fakeAuditStore{}, nil, nil, nil)
+	res, err := svc.GetTenantQuota(context.Background(), &tenantv1.GetTenantQuotaRequest{TenantId: tenantID.String()})
+	if err != nil {
+		t.Fatalf("GetTenantQuota: %v", err)
+	}
+	if len(res.GetItems()) != 3 {
+		t.Fatalf("items=%+v", res.GetItems())
+	}
+	if quota.calls != 0 {
+		t.Fatalf("must not call ListQuotaMeta, calls=%d", quota.calls)
+	}
+	byType := map[string]*tenantv1.TenantQuotaViewItem{}
+	for _, it := range res.GetItems() {
+		byType[it.GetResourceType()] = it
+	}
+	if byType["gpu_count"].GetDisplayName() != "GPU" || byType["gpu_count"].GetUnit() != "card" {
+		t.Fatalf("gpu=%+v", byType["gpu_count"])
+	}
+	if byType["gpu_count"].GetUsed() != 2 || byType["gpu_count"].GetTotal() != 8 {
+		t.Fatalf("gpu used/total=%+v", byType["gpu_count"])
+	}
+	if byType["mystery_dim"].GetDisplayName() != "mystery_dim" || byType["mystery_dim"].GetUnit() != "" {
+		t.Fatalf("fallback=%+v", byType["mystery_dim"])
+	}
+}
+
+func TestTenantService_GetTenantQuota_TenantNotFound(t *testing.T) {
+	tenantID := uuid.New()
+	quota := &fakeQuotaClient{
+		getFn: func(context.Context, uuid.UUID) ([]ports.CoreQuotaResult, error) {
+			return nil, ports.ErrTenantNotFound
+		},
+	}
+	svc := NewTenantService(nil, nil, nil, quota, nil, &fakeAuditStore{}, nil, nil, nil)
+	_, err := svc.GetTenantQuota(context.Background(), &tenantv1.GetTenantQuotaRequest{TenantId: tenantID.String()})
+	st, _ := status.FromError(err)
+	if st.Code() != codes.NotFound || !strings.Contains(st.Message(), "TENANT_NOT_FOUND") {
+		t.Fatalf("want TENANT_NOT_FOUND, got %v", err)
+	}
+}
+
+func TestTenantService_GetTenantQuota_CoreUnavailable(t *testing.T) {
+	tenantID := uuid.New()
+	quota := &fakeQuotaClient{
+		getFn: func(context.Context, uuid.UUID) ([]ports.CoreQuotaResult, error) {
+			return nil, ports.ErrCoreUnavailable
+		},
+	}
+	svc := NewTenantService(nil, nil, nil, quota, nil, &fakeAuditStore{}, nil, nil, nil)
+	_, err := svc.GetTenantQuota(context.Background(), &tenantv1.GetTenantQuotaRequest{TenantId: tenantID.String()})
+	st, _ := status.FromError(err)
+	if st.Code() != codes.Unavailable || !strings.Contains(st.Message(), "GRPC_CLIENT_UNAVAILABLE") {
+		t.Fatalf("want GRPC_CLIENT_UNAVAILABLE, got %v", err)
+	}
+}
+
+func TestTenantService_GetTenantQuota_NoAudit(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	quota := &fakeQuotaClient{
+		existing: map[uuid.UUID][]ports.CoreQuotaResult{
+			tenantID: {{ResourceType: "gpu_count", Used: 0, Total: 1, DisplayName: "GPU", Unit: "card"}},
+		},
+	}
+	audit := &fakeAuditStore{}
+	svc := NewTenantService(nil, nil, nil, quota, nil, audit, nil, nil, nil)
+	_, err := svc.GetTenantQuota(context.Background(), &tenantv1.GetTenantQuotaRequest{TenantId: tenantID.String()})
+	if err != nil {
+		t.Fatalf("GetTenantQuota: %v", err)
+	}
+	if len(audit.logs) != 0 {
+		t.Fatalf("read path must not write audit, got %+v", audit.logs)
+	}
+}
+
 func TestTenantService_GetTenantAuth_Defaults(t *testing.T) {
 	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 	tenants := &fakeTenantClient{} // auth.TenantID Nil → defaults

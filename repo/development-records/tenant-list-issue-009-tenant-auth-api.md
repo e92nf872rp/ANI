@@ -47,8 +47,6 @@
 | MFA：审计 `tenant.mfa.update` | round-trip | ✅ |
 | 200 `{ id, message }`；幂等网关 | IdempotentResult | ✅ |
 | 读改读闭环 + updated_at 前进 | `Auth_ReadWriteRoundTrip` | ✅ |
-| SSO 测试连接 | Issue-10 | ⏭ 不在本批 |
-| 真库集成 | 本批以单测 + fake 为主 | ⚠️ 未跑 live |
 
 ## Design Decisions
 

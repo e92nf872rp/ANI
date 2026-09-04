@@ -25,12 +25,15 @@ type CoreQuotaItem struct {
 
 // CoreQuotaResult 表示 Core 对单个维度下发后的返回结果（响应侧）。
 // tightened 为 true 表示 Core 因 total < used+reserved 而自动收紧为当前已占用值（不是错误）。
+// DisplayName / Unit 来自 Core GET JOIN resource_quota_meta；写接口响应通常为空。
 type CoreQuotaResult struct {
 	ResourceType string // 配额维度标识
 	Total        int64  // 生效后的限额值
 	Used         int64  // 当前已用
 	Reserved     int64  // 当前预留
 	Tightened    bool   // 是否被自动收紧
+	DisplayName  string // GET 时来自 meta；缺失则为空
+	Unit         string // GET 时来自 meta；缺失则为空
 }
 
 // QuotaMeta 表示 Core GET /admin/quota-meta 返回的单个维度。
@@ -53,6 +56,7 @@ type QuotaSvcClient interface {
 
 	// GetQuota 查询租户配额（Core GET /admin/tenants/{id}/quota）。
 	// 租户不存在 → ErrTenantNotFound；租户存在但无配额行 → 空切片。
+	// GET 响应含 JOIN meta 的 display_name/unit（解码进 CoreQuotaResult）。
 	GetQuota(ctx context.Context, tenantID uuid.UUID) ([]CoreQuotaResult, error)
 
 	// PutQuota 批量更新租户配额上限（Core PUT /admin/tenants/{id}/quota）。
