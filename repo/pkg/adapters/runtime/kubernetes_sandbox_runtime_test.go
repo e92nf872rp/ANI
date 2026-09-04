@@ -55,6 +55,9 @@ func TestKubernetesSandboxRuntimeCreateAppliesDeploymentWithRuntimeClass(t *test
 	if !strings.Contains(provider.applyBody, `"claimName":"sbx-01-workspace"`) && !strings.Contains(provider.applyBody, `"claimName": "sbx-01-workspace"`) {
 		t.Fatalf("apply body missing workspace PVC claim: %s", provider.applyBody)
 	}
+	if !strings.Contains(provider.pvcApplyBody, `"storageClassName": "ani-block"`) {
+		t.Fatalf("PVC apply body missing ani-block storage class: %s", provider.pvcApplyBody)
+	}
 	if strings.Contains(provider.applyBody, `"emptyDir":{}`) || strings.Contains(provider.applyBody, `"emptyDir": {}`) {
 		t.Fatalf("apply body must not use workspace emptyDir: %s", provider.applyBody)
 	}
@@ -73,6 +76,9 @@ func TestKubernetesSandboxRuntimeCreateRestoresWorkspaceFromCheckpoint(t *testin
 	}
 	if !strings.Contains(provider.pvcApplyBody, `"kind": "VolumeSnapshot"`) || !strings.Contains(provider.pvcApplyBody, `"name": "sandbox-checkpoint-a"`) {
 		t.Fatalf("PVC apply body = %s, want checkpoint dataSource", provider.pvcApplyBody)
+	}
+	if !strings.Contains(provider.pvcApplyBody, `"storageClassName": "ani-block"`) {
+		t.Fatalf("PVC apply body missing ani-block storage class: %s", provider.pvcApplyBody)
 	}
 }
 

@@ -253,6 +253,7 @@ type instanceLifecycleRequest struct {
 	Action           string   `json:"action"`
 	CPU              string   `json:"cpu"`
 	Memory           string   `json:"memory"`
+	SpecID           string   `json:"spec_id"`
 	SnapshotName     string   `json:"snapshot_name"`
 	SnapshotID       string   `json:"snapshot_id"`
 	IncludeDataDisks *bool    `json:"include_data_disks"`
@@ -395,6 +396,7 @@ type instanceResponse struct {
 	Network               instanceNetworkSummary              `json:"network"`
 	Access                instanceAccessSummary               `json:"access"`
 	StorageAttachments    []instanceStorageAttachmentResponse `json:"storage_attachments,omitempty"`
+	AutoStart             bool                                `json:"auto_start"`
 	TerminationProtection bool                                `json:"termination_protection"`
 	SSH                   *instanceSSHResponse                `json:"ssh,omitempty"`
 	Volumes               []instanceVolumeResponse            `json:"volumes,omitempty"`
@@ -939,7 +941,11 @@ func (api *instanceAPI) refreshStoreStatuses(ctx context.Context, tenantID strin
 		return
 	}
 	for i := range records {
-		api.refreshOneStoreStatus(ctx, &records[i])
+		if records[i].Kind == ports.WorkloadKindVM {
+			api.refreshOneVMStoreStatus(ctx, &records[i])
+		} else {
+			api.refreshOneStoreStatus(ctx, &records[i])
+		}
 	}
 }
 
@@ -1143,6 +1149,49 @@ func (api *instanceAPI) refreshOneStoreStatus(ctx context.Context, record *ports
 	record.Status.UpdatedAt = time.Now().UTC()
 	record.UpdatedAt = record.Status.UpdatedAt
 	_ = api.store.UpsertStatus(ctx, *record)
+}
+
+// refreshOneVMStoreStatus backfills a KubeVirt VM instance's node_name and
+// private_ip from its live VirtualMachineInstance. The Deployment-based
+// refreshOneStoreStatus only covers container-family instances, and the
+// background reconcile controller persists to the PostgreSQL store rather than
+// this in-memory store, so the detail/list GET must observe the VMI itself.
+func (api *instanceAPI) refreshOneVMStoreStatus(ctx context.Context, record *ports.WorkloadInstanceRecord) {
+	if api.k8sClient == nil || record == nil || record.Kind != ports.WorkloadKindVM || len(record.ResourceRefs) == 0 {
+		return
+	}
+	observation, err := api.k8sClient.Observe(ctx, ports.WorkloadProviderStatusRequest{
+		TenantID:   record.TenantID,
+		InstanceID: record.InstanceID,
+		Kind:       record.Kind,
+		ApplyResult: ports.WorkloadProviderApplyResult{
+			Applied:      true,
+			Provider:     record.Provider,
+			ResourceRefs: record.ResourceRefs,
+		},
+	})
+	if err != nil {
+		return
+	}
+	if nodeName := strings.TrimSpace(observation.NodeName); nodeName != "" {
+		record.Status.NodeName = nodeName
+		record.Compute.NodeName = nodeName
+	}
+	for _, network := range observation.Networks {
+		if strings.TrimSpace(network.IPAddress) == "" {
+			continue
+		}
+		record.Network.PrivateIP = network.IPAddress
+		if network.Primary {
+			break
+		}
+	}
+	// Persist the merged node/ip back so list (which re-reads from the store)
+	// surfaces the same values as detail instead of dropping the in-place
+	// mutation, mirroring refreshOneStoreStatus.
+	if api.store != nil {
+		_ = api.store.UpsertStatus(ctx, *record)
+	}
 }
 
 // observeInstance is the lazy-sync observation entry shared with the task
@@ -1592,7 +1641,11 @@ func (api *instanceAPI) get(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	if api.k8sClient != nil && api.store != nil {
-		api.refreshOneStoreStatus(ctx, &record)
+		if record.Kind == ports.WorkloadKindVM {
+			api.refreshOneVMStoreStatus(ctx, &record)
+		} else {
+			api.refreshOneStoreStatus(ctx, &record)
+		}
 	}
 	c.JSON(http.StatusOK, api.instanceResponseFromRecord(record))
 }
@@ -1750,6 +1803,7 @@ func (api *instanceAPI) lifecycle(ctx context.Context, c *app.RequestContext) {
 			InstanceID:      lifecycle.InstanceID,
 			IdempotencyKey:  lifecycle.IdempotencyKey,
 			Resources:       lifecycle.Resources,
+			SpecID:          lifecycle.SpecID,
 			UserID:          lifecycle.UserID,
 			PermissionProof: lifecycle.PermissionProof,
 			RequestedAt:     lifecycle.RequestedAt,
@@ -1838,16 +1892,14 @@ func workloadLifecycleRequestFromHTTP(request instanceLifecycleRequest, tenantID
 		}
 		duration = parsed
 	}
-	resources := ports.WorkloadResourceRequest{}
-	if action == ports.WorkloadLifecycleResize {
-		resources = ports.WorkloadResourceRequest{CPU: firstNonEmpty(request.CPU, "4"), Memory: firstNonEmpty(request.Memory, "8Gi")}
-	}
+	resources := ports.WorkloadResourceRequest{CPU: strings.TrimSpace(request.CPU), Memory: strings.TrimSpace(request.Memory)}
 	return ports.WorkloadInstanceLifecycleRequest{
 		IdempotencyKey:   request.IdempotencyKey,
 		TenantID:         tenantID,
 		InstanceID:       instanceID,
 		Action:           action,
 		Resources:        resources,
+		SpecID:           strings.TrimSpace(request.SpecID),
 		SnapshotName:     request.SnapshotName,
 		SnapshotID:       request.SnapshotID,
 		IncludeDataDisks: request.IncludeDataDisks,
@@ -1897,7 +1949,7 @@ func (api *instanceAPI) listLogs(ctx context.Context, c *app.RequestContext) {
 	}
 	result, err := api.observability.ListLogs(ctx, ports.InstanceObservationListRequest{
 		TenantID:   instanceTenantID(c),
-		InstanceID: api.observabilityTargetID(record),
+		InstanceID: api.instanceLogTargetID(record),
 		Limit:      queryInt(c, "limit", 100),
 		Cursor:     c.Query("cursor"),
 		Level:      c.Query("level"),
@@ -2797,6 +2849,21 @@ func (api *instanceAPI) observabilityTargetID(record ports.WorkloadInstanceRecor
 	return record.InstanceID
 }
 
+// instanceLogTargetID 返回日志链路用于匹配 Loki pod 标签的目标名。
+// KubeVirt VM 实例的日志存放在 virt-launcher pod 中，其 pod 名是
+// `virt-launcher-<VM名>[-<随机hash>]`（real 环境实测，见 INSTANCE-LOG-STREAM 系列）。
+// 直接复用 observabilityTargetID（VM 名）构造正则 `^<name>(-.*)?$` 匹配不到
+// virt-launcher pod，导致 VM 日志为空；这里对 VM 附加 `virt-launcher-` 前缀。
+// 仅日志链路使用，不影响事件/指标的目标映射。非 VM 实例沿用原目标。
+func (api *instanceAPI) instanceLogTargetID(record ports.WorkloadInstanceRecord) string {
+	if record.Kind == ports.WorkloadKindVM {
+		if name := strings.TrimSpace(record.Name); name != "" {
+			return "virt-launcher-" + name
+		}
+	}
+	return api.observabilityTargetID(record)
+}
+
 func consoleAction(protocol string) ports.WorkloadInstanceOpsAction {
 	switch strings.ToLower(strings.TrimSpace(protocol)) {
 	case "vnc", "novnc":
@@ -3291,6 +3358,13 @@ func validateCreateInstanceConfigs(req createInstanceRequest, kind ports.Workloa
 			return fmt.Errorf("%s is only valid when kind=%s", cfg.name, cfg.allowedFor)
 		}
 	}
+	// vm_config: cloud_init_secret 与 password_secret_ref 都指向含 userdata 键的
+	// cloud-init Secret，二者互斥，避免 secretRef 二选一歧义。
+	if req.VMConfig != nil &&
+		strings.TrimSpace(req.VMConfig.CloudInitSecret) != "" &&
+		strings.TrimSpace(req.VMConfig.PasswordSecretRef) != "" {
+		return fmt.Errorf("vm_config.cloud_init_secret and vm_config.password_secret_ref are mutually exclusive")
+	}
 	return nil
 }
 
@@ -3403,6 +3477,7 @@ func instanceResponseFromRecord(record ports.WorkloadInstanceRecord) instanceRes
 		Network:               networkSummaryFromRecord(record),
 		Access:                accessSummaryFromRecord(record),
 		StorageAttachments:    storageAttachmentResponsesFromRecord(record),
+		AutoStart:             record.Lifecycle.AutoStart,
 		TerminationProtection: record.Lifecycle.TerminationProtection,
 		SSH:                   sshResponseFromRecord(record),
 		Volumes:               volumeResponsesFromRecord(record),

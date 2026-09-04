@@ -65,6 +65,14 @@ func (s *CacheStore) Increment(ctx context.Context, key string, ttl time.Duratio
 	return incr.Val(), nil
 }
 
+func (s *CacheStore) TTL(ctx context.Context, key string) (time.Duration, error) {
+	ttl, err := s.client.PTTL(ctx, key).Result()
+	if err != nil {
+		return 0, fmt.Errorf("cache pttl: %w", err)
+	}
+	return ttl, nil
+}
+
 func (s *CacheStore) Exists(ctx context.Context, key string) (bool, error) {
 	count, err := s.client.Exists(ctx, key).Result()
 	if err != nil {

@@ -13,6 +13,16 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 平台容量态势接口（2026-09，分支 feat/platform-capacity）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| PLATFORM-CAPACITY-A | 平台容量态势只读汇总：OpenAPI 新增 `GET /platform/capacity`（operationId=getPlatformCapacity，`scope:capacity:read`，boundary=platform），整平台 = 1 个默认区域，只读不实现区域 CRUD；ports 新增 `PlatformCapacityService`；real adapter 组合 GPUInventory（ListNodeClasses 设备/zone/allocatable）+ KubernetesRESTClient（集群级存在性 label selector 统计跨租户 Running GPU Pod，每 Pod 占 1 设备，与 gpu-inventory occupancy 语义一致，in_use 超设备数截断保证 gpu_free ≥ 0）+ TenantService（可用租户数）；单源失败不阻塞 200，降级字段置 0/空 + `real_provider=false` + reason；Gateway runtime 按 `PLATFORM_CAPACITY_PROVIDER` 装配（kubernetes_rest 真实链路 / 空或 local 回退确定性 local 降级）；authz 注册表与 Core SDK 四语言 + 静态文档 + Console schema 生成物同步（64bc8ab + fae60b0）。真实环境实测（10.10.1.66，镜像 dev-20260903-platformcapacity）：平台 token 200 返回真实集群数据（gpu_total=11/gpu_free=3/nodes=3/tenant_count=22，real_provider=true），租户 token 403，无凭证/坏 token 401，全部通过 | PLATFORM-CAPACITY-A.md |
+### VM cloud-init 密码注入（2026-09，分支 ani-hotfix）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| VM-CLOUDINIT-PASSWORD-A | `password_secret_ref` 接线到 `cloudInitNoCloud.secretRef`（原只解析未接线，设不了密码）：渲染层拆 `vmCloudInitEnabled`（disks `cloudinitdisk` 条件纳入 `PasswordSecret`）+ `vmCloudInitVolume` 二选一 secretRef；Gateway `validateCreateInstanceConfigs` 加 `cloud_init_secret` 与 `password_secret_ref` 互斥（400）；resolver `resolveSecrets` 对 cloud-init secret 校验 `userdata` 键存在（缺键 `ErrConflict`）；OpenAPI 补 `cloud_init_secret` 声明 + 澄清 `password_secret_ref`；core-schema.d.ts 重生成。local verified（go test 5/5 + gateway 全过 + validate-architecture + git diff --check）；live gate 第三条路径待真实集群执行 | vm-cloudinit-password-a.md |
 ### 首页租户级资源趋势接口（2026-09-02，分支 feat/observability-resource-trend）
 
 | 批次 | 内容摘要 | 文件 |
@@ -100,6 +110,7 @@
 | INFERENCE-SERVICE-GPU-MEMORY-CONTRACT-C38 | Core/Services 加速器契约：`spec_id` 只表示型号；`count` / `count_per_replica` 必填；可选 `memory` 为申请显存，不填整卡、填写 vGPU。不另加 `gpu_mode`。历史 `-full`/`-Nx` 剥后缀后按型号处理。不含 handler/runtime。不得外推 GPU/runtime ready | inference-service-gpu-memory-contract-c38.md |
 | INFERENCE-SERVICE-GPU-MEMORY-C39 | 按 C38 实现 handler/proto/runtime：capabilities 广告型号 ID；有 `memory` 申请 volcano vGPU 显存，无 `memory` 申请整卡。live passed：清理残留测试后，`memory: 0` 400、型号 `gpu-nvidia-geforce-rtx-4090`、省略 memory 为 `nvidia.com/gpu=1`、填写 memory 为 `volcano.sh/vgpu-number=1`/`vgpu-memory=1228`。首次 live 两条路径 running 后删除；二次 live 保留服务并 ClusterIP 压测 60 秒。不含 Console。不得外推 GPU/runtime ready | inference-service-gpu-memory-c39.md |
 | MODEL-TENANT-ISOLATION-VECTOR-INFERENCE-A | live passed（限定 CPU / internal ClusterIP）：ModelRepository 全操作增加显式 tenant SQL fence，真实 foreign Model Get=404 且 owner List 不含 foreign ID；从既有 Model capabilities 派生并冻结 `generate`/`embed`，当前 vLLM embedding argv 使用 `--runner pooling --convert embed`，有界 1 MiB smoke 可解析真实约 19 KiB 向量响应。测试服务已到 running 并直连 `/v1/embeddings` 200 / data 非空，随后清理测试资源、恢复控制面基线；公开 Envoy `/v1/embeddings`、GPU 与 embedding 质量不在结论范围。evidence `live-evidence/model-tenant-vector-inference-live-20260825.json` | model-tenant-isolation-vector-inference.md |
+| INFERENCE-SERVICE-C41 | Envoy AI Gateway 多租户动态发布 local/logic verified：Services v1 无新 endpoint/field，只有 `served_model_name`/`invocation_url` 描述澄清；AK-only authentication、认证后 tenant/model/path 解析、trusted header overwrite + `recomputeRoute`、generation-fenced Publisher、withdraw-before-runtime lifecycle、least-privilege RBAC/NetworkPolicy 与脱敏 live-gate contract 已落地。Task 8 server dry-run 为 10/11 accepted，已安装 BackendTrafficPolicy CRD 的 `int32`/`maximum` schema 自相矛盾；live status `not-run`，不得标 runtime/production ready。外部 normal/race/module/repository tests 均通过；Console schema 三处 description 生成更新纳入隔离 shipping index 后 `make validate-services` EXIT:0，真实 index 保持为空；PG live integration 因 DSN 未设而 skip。 | inference-envoy-ai-gateway-c41.md |
 
 
 ### Core Quota Service（2026-08）
@@ -178,10 +189,29 @@
 | INSTANCE-NETWORK-STORE-READ-RLS-A | live passed（10.10.1.66）：GPU 容器实例创建引用 VPC NOT_FOUND 三层根因修复——`NetworkResourceStore` 补 5 个读方法（端口+PG SELECT 实现，WithTenantTx）、`LocalNetworkService` Get/List 穿透读、Gateway 有 `DATABASE_URL` 时注入 store；迁移 `20260828_001` 把实例链路 8 张表 RESTRICTIVE-only policy 替换为 PERMISSIVE 双策略（对齐 `20260825_001`）；`WORKLOAD_PROVIDER=kubernetes_rest` + `WORKLOAD_PROVIDER_APPLY_ENABLED=true` 接线。验证：VPC/Subnet 创建落库、实例 201 → provisioning → Volcano 排队（容量问题非代码）；不外推 GPU runtime ready / production ready | instance-network-store-read-rls-a.md |
 | INSTANCE-RUNTIME-HYDRATE-A | live passed（10.10.1.66，镜像 dev-20260901）：GPU 容器实例列表/详情缺节点/私网IP/访问端点/终端——修复 `refreshOneStoreStatus` 节点字段错位（回填 `Compute.NodeName`）、回读 PodIP 填 `Network.PrivateIP`/`Endpoint`/`Endpoints`、运行态 container/gpu_container 置 `Access.ExecAvailable=true`；`get` 详情处理器接入刷新；新增 2 个 httptest 单测；真实 running 实例 `test-gpu-inst-create` 列表/详情均回填 dev-phys-02 / 10.60.0.3 / exec_available=true；`go test` + `make validate-architecture` 通过 | instance-runtime-hydrate-a.md |
 
+### Instance Resize GPU Spec（2026-09）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-RESIZE-SPEC-A | live passed（10.10.1.66，镜像 dev-20260902-resize-ns）：`resize` 从"纯重启"改为真正变配——`InstanceLifecycleRequest` 新增可选 `spec_id`（换 GPU 规格，v1 兼容）；状态机 resize 仅允许 stopped（running 409）；字段组合 cpu/memory/spec_id 至少一项；`resolveResizeGPUSpec` 经 `GPUSpecService.GetGPUSpec` + `GPUInventory.ListSpecAvailability` 前置校验（不可用 409，避免 Volcano quota 卡死）；executor 注入 Volcano translator，resize 走 targeted strategic-merge patch（方案B）：`volcano.sh/vgpu-*` 资源、schedulerName=volcano、queue 注解、nodeSelector，切换 wholecard/vgpu 清另一模式资源键；变配后回写 `record.Compute.SpecID/GPUType/GPUShares/GPUMBPerShare`。新增 5 个 executor spec_id 用例 + planning/instance_service 用例更新；`go test` + `make validate-architecture` + `git diff --check` 通过。真实集群双向规格切换（quarter↔wholecard）live gate 通过，live 发现并修复 nodeSelector 残留（`$patch: replace`），不外推 GPU runtime ready | instance-resize-spec-a.md |
+
+### Instance Storage Mount Store Fallback（2026-09）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-STORAGE-MOUNT-STORE-A | live passed（10.10.1.66，镜像 dev-20260902-mount-store）：网关重启后实例创建挂载卷/文件系统报 `mount volume ...: capability resource not found`——根因是解析阶段 `GetVolume/GetFilesystem` 优先读 DB store 而挂载阶段 `MountVolume/MountFilesystem/UnmountVolume/UnmountFilesystem` 只查内存 map；新增 `lookupVolumeRecord/lookupFilesystemRecord`（内存 miss 回落 store 并回填）与 `hydrateFilesystemMountTargets`（挂载前从 store 恢复 mount target），四个 mount/unmount 方法接入；回归测试 `TestLocalStorageServiceMountSurvivesRestartViaStore` 复现重启场景；真实环境网关 rollout 后新 idempotency_key 创建挂载卷实例 201（provisioning，attachments resolved）。已知边界：租户 PVC 卡 `pending`（后端未绑定）属独立问题，文件系统 Available 门禁维持不变 | instance-storage-mount-store-a.md |
+
+### Instance Storage Re-observe & WFFC Attach（2026-09）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-STORAGE-REOBSERVE-A | local verified + live passed（2026-09-03，镜像 dev-20260903-reobserve）：租户卷/文件系统状态永远停在 `pending` 且文件系统永远无法被实例挂载。三处修复：① `GetVolume`/`GetFilesystem` 对 pending 记录发起 provider re-observe 并持久化（store+内存双写，30s 节流，失败降级 warn）——原观测仅在创建 apply 后执行一次，WFFC PVC 在那一刻必然 Pending，`LocalStorageStatusReconciler` 虽已实现但无调用方；② resolver 文件系统门禁 `Available` → `Available 或 Pending`（挂载即 WFFC 第一个消费者，消除"PVC 等消费者、消费者等 Available"死锁），Failed/Deleting/Deleted 仍拒；③ `MountFilesystem` 放行 `Creating` 状态 mount target（Pod 经共享 PVC/CSI 挂载而非合成 IP）。排查同时确认并修复集群缺失的 `ani-block` StorageClass（helm values 声明但部署规格从未创建，PVC `ProvisioningFailed ×11724`；按 ani-rbd-ssd 参数手工创建后 PVC 绑定；清单落地为独立事项）。live 证据：挂载 Pending NFS 文件系统的容器实例 201（`inst_a60c1092`），Pod 起来后 `fs_306220e7` 经 re-observe pending→available；期间排除两个环境干扰（Harbor `ani-purpose-system` 标签误标 rocky:10 触发 ImagePurposeMismatch、另一部署管道 digest 镜像覆盖 gateway 后已恢复）。新增 4 个回归测试；`go test` + `go build`（pkg+gateway）+ gofmt 通过 | instance-storage-reobserve-a.md |
+
 ### Instance Sandbox 无状态化（2026-08）
 
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
+| INSTANCE-SANDBOX-KATA-STORAGE-A | Kata lab 部署基线同步到私有 `kata-deploy:4.0.0` 和 3 节点现状；Sandbox 创建/clone/restore 的 5Gi RWO workspace PVC 显式使用 `ani-block`，避免无默认 StorageClass 环境持续 Pending；底座 live verified，代码 local/logic verified；sysctl 不入库 | instance-sandbox-kata-storage-a.md |
 | INSTANCE-SANDBOX-CHECKPOINT-A | live passed：新 Sandbox `/workspace` 使用 5Gi RBD PVC；CSI VolumeSnapshot create/list/restore/clone，Gateway restart 后 provider list 与 PG task 可恢复；filesystem-only，keep_memory/legacy emptyDir 返回 422；删除 Sandbox 级联清理 managed snapshots；default 网络 evidence `live-evidence/instance-sandbox-checkpoint-live-20260802.json`；Gateway `instance-sandbox-checkpoint-20260802-v1` | instance-sandbox-checkpoint-a.md |
 | INSTANCE-SANDBOX-STATELESS-A | live passed：PG 请求上下文驱动 Kubernetes Sandbox、UUID、PG AsyncTaskStore、端口摘要、Redis DELETE/指纹/Token 过期幂等与 checkpoint 422；真实 Gateway rollout 后实例/文件/端口/task 可恢复，原请求可重放、不同 intent 冲突，清理后 provider 资源为 0；evidence `live-evidence/instance-sandbox-stateless-live-20260802.json`；Gateway `instance-sandbox-stateless-20260802-v1` | instance-sandbox-stateless-a.md |
 
@@ -692,6 +722,7 @@
 | M2.1-TASK-C | worker mutation RPCs | m2-1-task-c-worker-mutations.md |
 | M2.2-AUTH-A~K | auth-service 完整实现（JWT/OIDC/JWKS/RBAC/API Key）| m2-2-auth-*.md |
 | M2.2-AUTH-FINAL | Auth 生产收尾：OIDC/Dex 护栏、Gateway Auth REST、API Key 管理、合同守卫与 Docker Dex smoke | m2-2-auth-final-production-closeout.md |
+| INFERENCE-ENVOY-AI-GATEWAY-RATELIMIT | Envoy AI Gateway 推理入口共享全局限流与 Redis 后端契约 | inference-envoy-ai-gateway-ratelimit.md |
 
 ---
 

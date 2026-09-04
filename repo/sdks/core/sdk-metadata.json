@@ -1133,6 +1133,12 @@
       "scope": "scope:platform-workloads:read"
     },
     {
+      "operationId": "getPlatformCapacity",
+      "method": "GET",
+      "path": "/platform/capacity",
+      "scope": "scope:capacity:read"
+    },
+    {
       "operationId": "listQuotas",
       "method": "GET",
       "path": "/quotas",
@@ -1588,7 +1594,11 @@
     "PasswordLoginRequest",
     "PlanBoundTenantCount",
     "PlanBoundTenantCountList",
+    "PlatformCapacityResponse",
+    "PlatformCapacitySummary",
     "PlatformPasswordLoginRequest",
+    "PlatformRegion",
+    "PlatformRegionCapacity",
     "PlatformUser",
     "PlatformUserCreateRequest",
     "PlatformUserIdempotentRequest",

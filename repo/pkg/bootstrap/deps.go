@@ -112,10 +112,6 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 	}
 	localGPUSpecs := runtimeadapter.NewLocalGPUSpecService(gpuInventory)
 	planner := runtimeadapter.NewPlanningRuntime(runtimeadapter.WithGPUInventory(gpuInventory))
-	lifecycle, err := workloadLifecycleExecutor(cfg, kubeClient)
-	if err != nil {
-		return Capabilities{}, err
-	}
 	instanceOps, err := workloadOpsExecutor(cfg, kubeClient)
 	if err != nil {
 		return Capabilities{}, err
@@ -150,6 +146,14 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 		volcanoTranslator = runtimeadapter.NewVolcanoResourceTranslator(gpuSpecStore)
 	}
 	gpuSpecs := runtimeadapter.NewCompositeGPUSpecService(gpuSpecStore, localGPUSpecs)
+
+	// Lifecycle executor needs the Volcano translator for spec_id resize.
+	// Constructed here (after translator/gpuSpecs resolution) and passed via
+	// WorkloadCapabilities.Lifecycle below.
+	lifecycle, err := workloadLifecycleExecutor(cfg, kubeClient, volcanoTranslator)
+	if err != nil {
+		return Capabilities{}, err
+	}
 
 	reconcileControllerOptions := []runtimeadapter.ReconcileControllerOption{}
 	if cfg.GPUQuotaEnabled {
@@ -367,6 +371,8 @@ func NewCapabilitiesWithConfig(db *pgxpool.Pool, js nats.JetStreamContext, redis
 			append([]runtimeadapter.InstanceServiceOption{
 				runtimeadapter.WithOperationStore(operationStore),
 				runtimeadapter.WithInstanceLifecycleExecutor(lifecycle),
+				runtimeadapter.WithInstanceGPUSpecService(gpuSpecs),
+				runtimeadapter.WithInstanceGPUInventory(gpuInventory),
 				runtimeadapter.WithWorkloadIdentityService(workloadIdentity),
 				runtimeadapter.WithSandboxRuntime(sandboxRuntime),
 				runtimeadapter.WithInstanceStorageService(resolverStorage),
@@ -570,7 +576,7 @@ func workloadProviderAdapters(cfg Config) (ports.WorkloadProviderDryRun, ports.W
 	}
 }
 
-func workloadLifecycleExecutor(cfg Config, kubeClient *runtimeadapter.KubernetesRESTClient) (ports.WorkloadInstanceLifecycleExecutor, error) {
+func workloadLifecycleExecutor(cfg Config, kubeClient *runtimeadapter.KubernetesRESTClient, translator *runtimeadapter.VolcanoResourceTranslator) (ports.WorkloadInstanceLifecycleExecutor, error) {
 	switch strings.TrimSpace(cfg.WorkloadLifecycleProvider) {
 	case "", "local":
 		return nil, nil
@@ -583,10 +589,13 @@ func workloadLifecycleExecutor(cfg Config, kubeClient *runtimeadapter.Kubernetes
 				return nil, err
 			}
 		}
-		return runtimeadapter.NewKubernetesLifecycleExecutor(
-			client,
+		options := []runtimeadapter.KubernetesLifecycleOption{
 			runtimeadapter.WithKubernetesLifecycleEnabled(cfg.WorkloadLifecycleApplyEnabled),
-		), nil
+		}
+		if translator != nil {
+			options = append(options, runtimeadapter.WithKubernetesLifecycleTranslator(translator))
+		}
+		return runtimeadapter.NewKubernetesLifecycleExecutor(client, options...), nil
 	default:
 		return nil, fmt.Errorf("%w: unsupported workload lifecycle provider %q", ports.ErrUnsupported, cfg.WorkloadLifecycleProvider)
 	}

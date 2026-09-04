@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>237</dd></div>
-          <div><dt>Schemas</dt><dd>317</dd></div>
+          <div><dt>Operations</dt><dd>238</dd></div>
+          <div><dt>Schemas</dt><dd>321</dd></div>
         </dl>
       </section>
 
@@ -1665,6 +1665,14 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/platform/capacity</code></td>
+          <td><code>getPlatformCapacity</code></td>
+          <td>查询平台容量态势汇总</td>
+          <td><code>scope:capacity:read</code></td>
+          <td>200, 401, 403, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/quotas</code></td>
           <td><code>listQuotas</code></td>
           <td>BOSS 分页查询租户配额列表</td>
@@ -2222,7 +2230,11 @@
         <li><code>PasswordLoginRequest</code></li>
         <li><code>PlanBoundTenantCount</code></li>
         <li><code>PlanBoundTenantCountList</code></li>
+        <li><code>PlatformCapacityResponse</code></li>
+        <li><code>PlatformCapacitySummary</code></li>
         <li><code>PlatformPasswordLoginRequest</code></li>
+        <li><code>PlatformRegion</code></li>
+        <li><code>PlatformRegionCapacity</code></li>
         <li><code>PlatformUser</code></li>
         <li><code>PlatformUserCreateRequest</code></li>
         <li><code>PlatformUserIdempotentRequest</code></li>

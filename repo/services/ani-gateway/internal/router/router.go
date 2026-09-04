@@ -66,6 +66,10 @@ type RegisterOptions struct {
 	// (GET /metering/usage + GET /metering/usage/platform). When nil the
 	// handlers fall back to the in-process local adapter.
 	MeteringService ports.MeteringService
+	// PlatformCapacityService backs the platform capacity overview endpoint
+	// (GET /platform/capacity). When nil the handler falls back to the
+	// local deterministic adapter.
+	PlatformCapacityService ports.PlatformCapacityService
 }
 
 // Register wires all route groups onto the Hertz server.
@@ -84,6 +88,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerBranding(v1)
 	registerAuth(v1)
 	registerMetering(v1, options.MeteringService)
+	registerPlatformCapacity(v1, options.PlatformCapacityService)
 	registerHarbor(v1, options.ImageRegistry)
 	// Instances register first so their service can act as InstanceLookup.
 	// 注入到 ObservabilityService（时序图 PromQL 代理需要解析实例记录的
@@ -126,6 +131,10 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	modelServiceClient = options.ModelServiceClient
 	registerModels(svc)
 	inferenceControlClient = options.InferenceServiceClient
+	inferencePolicyClient = nil
+	if policyClient, ok := options.InferenceServiceClient.(InferencePolicyClient); ok {
+		inferencePolicyClient = policyClient
+	}
 	inferenceImageRegistry = options.ImageRegistry
 	registerInferenceServices(svc)
 	// Inject the KB gRPC client + SSE wiring into the package-level holders

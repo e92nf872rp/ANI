@@ -560,11 +560,15 @@ type WorkloadInstanceListRequest struct {
 
 type WorkloadInstanceLifecycleRequest struct {
 	// IdempotencyKey prevents duplicate lifecycle actions on retry.
-	IdempotencyKey   string
-	TenantID         string
-	InstanceID       string
-	Action           WorkloadLifecycleAction
-	Resources        WorkloadResourceRequest
+	IdempotencyKey string
+	TenantID       string
+	InstanceID     string
+	Action         WorkloadLifecycleAction
+	Resources      WorkloadResourceRequest
+	// SpecID is the target Core GPUSpec ID for resize (换 GPU 规格). When set,
+	// the resize flow translates it to Volcano resources and rebuilds the
+	// workload. Validated against GPUSpecService /gpu-specs.
+	SpecID           string
 	SnapshotName     string
 	SnapshotID       string
 	IncludeDataDisks *bool
@@ -601,6 +605,7 @@ type WorkloadInstanceResizeRequest struct {
 	TenantID        string
 	InstanceID      string
 	Resources       WorkloadResourceRequest
+	SpecID          string
 	UserID          string
 	PermissionProof string
 	RequestedAt     time.Time

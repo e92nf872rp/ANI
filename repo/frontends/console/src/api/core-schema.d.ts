@@ -2187,6 +2187,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/platform/capacity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询平台容量态势汇总
+         * @description 平台级（跨租户）只读容量汇总视图。整平台作为 1 个默认区域返回，
+         *     数据从真实集群计算（GPU 节点清单 + 跨租户 Running GPU Pod + 租户列表）。
+         *     任一数据源失败不阻塞 200：缺失字段降级为 0/空，
+         *     dev_profile.real_provider=false + reason 记录降级原因。
+         */
+        get: operations["getPlatformCapacity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/metering/token-usage": {
         parameters: {
             query?: never;
@@ -4149,6 +4172,84 @@ export interface components {
             real_provider: boolean;
             reason?: string | null;
         };
+        /** @description 平台容量态势汇总（整平台 = 1 个默认区域；只读，无区域 CRUD）。 */
+        PlatformCapacityResponse: {
+            /** @description 固定返回 1 条区域记录（整平台 = 默认区域）。 */
+            regions: components["schemas"]["PlatformRegion"][];
+            summary: components["schemas"]["PlatformCapacitySummary"];
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
+        };
+        /** @description 平台默认区域记录；id/code/name/display_name/status/open_for_tenant 为平台主数据常量。 */
+        PlatformRegion: {
+            /** @example platform */
+            id: string;
+            /** @example platform */
+            code: string;
+            /** @example 平台 */
+            name: string;
+            /** @example 平台（默认区域） */
+            display_name: string;
+            /**
+             * @example enabled
+             * @enum {string}
+             */
+            status: "enabled";
+            /** @example true */
+            open_for_tenant: boolean;
+            /** @description Ready GPU 节点 zone label 去重（topology.kubernetes.io/zone 优先，回退 failure-domain.beta.kubernetes.io/zone；缺失为空数组）。 */
+            azs: string[];
+            /**
+             * Format: int64
+             * @description 可用租户数（status <> 'disabled'）；租户服务不可用时为 0 并写入 dev_profile.reason。
+             */
+            tenant_count: number;
+            capacity: components["schemas"]["PlatformRegionCapacity"];
+        };
+        /** @description 区域容量口径：GPU 总量含 vGPU 切片；gpu_free = gpu_total - in_use - fault；nodes 仅 Ready GPU 节点；cpu/memory 为节点 allocatable 总量（非可用量）。 */
+        PlatformRegionCapacity: {
+            /**
+             * Format: int64
+             * @description 全部 GPU 设备数（含 vGPU 切片）
+             */
+            gpu_total: number;
+            /**
+             * Format: int64
+             * @description gpu_total - in_use - fault；in_use 为跨租户 Running GPU Pod 数（每 Pod 占 1 设备）
+             */
+            gpu_free: number;
+            /**
+             * Format: int64
+             * @description Ready GPU 节点数
+             */
+            nodes: number;
+            /**
+             * Format: int64
+             * @description Ready GPU 节点 cpu allocatable 求和（向下取整）
+             */
+            cpu_cores: number;
+            /**
+             * Format: int64
+             * @description Ready GPU 节点 memory allocatable 求和（GiB 向下取整）
+             */
+            memory_gib: number;
+        };
+        /** @description regions 汇总（当前即单区域值），供顶部指标直接消费。 */
+        PlatformCapacitySummary: {
+            /**
+             * Format: int64
+             * @example 1
+             */
+            region_count: number;
+            /** Format: int64 */
+            gpu_total: number;
+            /** Format: int64 */
+            gpu_free: number;
+            /** Format: int64 */
+            tenant_count: number;
+            /** Format: int64 */
+            nodes: number;
+            azs: string[];
+        };
         /** @description 实例网络引用；只表达 Core 产品意图，不暴露 provider 对象。 */
         InstanceNetworkConfig: {
             vpc_id?: string | null;
@@ -4301,6 +4402,11 @@ export interface components {
              * @default false
              */
             termination_protection: boolean;
+            /**
+             * @description 实例创建后是否自动启动（开机自启）
+             * @default true
+             */
+            auto_start: boolean;
             /** @description VM SSH 连接信息；仅返回连接元数据，不返回私钥 */
             ssh?: {
                 /** @example ubuntu */
@@ -4555,8 +4661,10 @@ export interface components {
             ssh_username: string | null;
             /** @description VM SSH key/secret 引用；不包含私钥内容 */
             ssh_key_ref?: string | null;
-            /** @description 登录密码 Secret 引用；不返回明文。 */
+            /** @description 登录密码 cloud-init Secret 引用；Secret 需含 userdata 键（值为 #cloud-config，设置 users/plain_text_passwd 或 chpasswd）。与 cloud_init_secret 互斥；不返回明文。 */
             password_secret_ref?: string | null;
+            /** @description cloud-init user-data Secret 引用；Secret 需含 userdata 键（值为 #cloud-config）。与 password_secret_ref 互斥。 */
+            cloud_init_secret?: string | null;
             /** @description cloud-init user data；不得包含长期明文凭据。 */
             user_data?: string | null;
             system_disk?: components["schemas"]["InstanceDiskSpec"];
@@ -5002,10 +5110,12 @@ export interface components {
             /** @enum {string} */
             action: "start" | "stop" | "restart" | "resize" | "rebuild" | "delete" | "snapshot" | "attach_volume" | "detach_volume" | "attach_filesystem" | "detach_filesystem" | "rollback" | "scale" | "update_image" | "bind_secret" | "unbind_secret" | "change_security_groups" | "set_termination_protection" | "pause" | "resume" | "extend" | "touch_idle";
             idempotency_key: string;
-            /** @description resize 时使用 */
+            /** @description resize 时使用；变配重建时写入容器 resources */
             cpu?: string | null;
-            /** @description resize 时使用 */
+            /** @description resize 时使用；变配重建时写入容器 resources */
             memory?: string | null;
+            /** @description resize 时换 GPU 规格使用；通过 /gpu-specs 查询可用规格；与 cpu/memory 可同时传，至少传一项；仅 stopped 实例可执行 */
+            spec_id?: string | null;
             /** @description snapshot 时指定快照名称 */
             snapshot_name?: string | null;
             /** @description rollback 时指定目标快照 */
@@ -11942,6 +12052,29 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getPlatformCapacity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 平台容量态势汇总 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformCapacityResponse"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             503: components["responses"]["ServiceUnavailable"];

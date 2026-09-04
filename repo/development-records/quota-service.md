@@ -1707,7 +1707,7 @@ Upsert 是 set-total 语义，相同请求重复执行后最终 DB 状态一致�
 
 ### 对齐文档
 
-- 方案：`kjs-study/配额操作任务/plan-quota-service-v3.md`
+- 方案：`services/tasks/modules/plan/plan-quota-service-v3.md`
 - 接口定义前置：`kjs-study/配额操作任务/配额core层upsert端点设计.md`
 - Core API 真实来源：`api/openapi/v1.yaml`
 - 代码边界：`pkg/ports/quota_admin.go`、`pkg/adapters/runtime/postgres_quota.go`、`services/ani-gateway/internal/router/quota_resources.go`

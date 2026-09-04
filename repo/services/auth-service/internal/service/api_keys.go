@@ -28,6 +28,25 @@ const maxAPIKeyRateLimitRPM int32 = 10000
 
 var errAPIKeyRateLimitExceeded = errors.New("api key rate limit exceeded")
 
+type apiKeyRateLimitError struct {
+	retryAfter time.Duration
+}
+
+func (e *apiKeyRateLimitError) Error() string {
+	return errAPIKeyRateLimitExceeded.Error()
+}
+
+func (e *apiKeyRateLimitError) Unwrap() error {
+	return errAPIKeyRateLimitExceeded
+}
+
+func (e *apiKeyRateLimitError) RetryAfter() time.Duration {
+	if e == nil {
+		return 0
+	}
+	return e.retryAfter
+}
+
 // errInvalidAPIKeyFormat 表示客户端提交的 API Key 格式非法（缺前缀/分段/tenant 非 UUID），
 // 属于无效凭证（401），不能被错误分类为后端故障（503）。
 var errInvalidAPIKeyFormat = errors.New("invalid api key format")
@@ -388,7 +407,17 @@ func (s *apiKeyStore) enforceRateLimit(ctx context.Context, keyHash string, limi
 		return fmt.Errorf("api key rate limit check: %w", err)
 	}
 	if count > int64(limitRPM) {
-		return errAPIKeyRateLimitExceeded
+		ttl, err := s.cache.TTL(ctx, "api-key:rate:"+keyHash)
+		if err != nil {
+			return fmt.Errorf("api key rate limit ttl: %w", err)
+		}
+		if ttl <= 0 {
+			// The counter was just incremented, so an expired/missing TTL is
+			// unexpected. Do not emit a false Retry-After value; fail closed as
+			// an unavailable rate-limit dependency instead.
+			return fmt.Errorf("api key rate limit ttl unavailable")
+		}
+		return &apiKeyRateLimitError{retryAfter: ttl}
 	}
 	return nil
 }
