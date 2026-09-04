@@ -2,31 +2,71 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"net/mail"
+	"regexp"
+	"sort"
 	"strings"
+	"time"
+	"unicode"
 
 	"github.com/google/uuid"
+	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 	tenantv1 "github.com/kubercloud/ani/pkg/generated/pb/tenant/v1"
 	"github.com/kubercloud/ani/services/tenant-service/internal/repo/ports"
+	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
-// TenantService 是 gRPC TenantService server。
-// 目前承载绑定套餐 RPC：BindPlanQuota（US-009 / issue-009）。
+// TenantService 是租户域 gRPC 服务：套餐绑定（BindPlanQuota）与租户列表生命周期 RPC。
+// 网关经 TenantServiceClient 转发 /api/v1/svc/tenants*。
 type TenantService struct {
-	// 嵌入未实现接口，确保 proto 新增 RPC 后本结构仍能向后兼容（栅栏模式）。
 	tenantv1.UnimplementedTenantServiceServer
 
-	plans       ports.TenantPlanStore      // 套餐 store（限额原始行；展示/下发经 Core ListQuotaMeta 组装）
-	tenants     ports.TenantSvcClient      // Core 租户 API（GetTenant）
-	tenantPlans ports.TenantPlanSvcClient  // Core 配额套餐绑定 API（UpdateTenantPlan）
-	quota       ports.QuotaSvcClient       // Core 配额 API（Get/Put/Create/Upsert）
-	audit       ports.TenantPlanAuditStore // 审计日志（配额套餐域）
+	plans        ports.TenantPlanStore
+	tenants      ports.TenantSvcClient
+	tenantPlans  ports.TenantPlanSvcClient
+	quota        ports.QuotaSvcClient
+	tenantStore  ports.TenantStore
+	audit        ports.AuditStore
+	tenantAdmins ports.TenantAdminSvcClient
+	adminStore   ports.TenantAdminStore
+	ssoLoader    ports.SsoConfigLoader
+	oidcTester   ports.OidcDiscoveryTester
 }
 
+var _ tenantv1.TenantServiceServer = (*TenantService)(nil)
+
 // NewTenantService 构造租户 gRPC 服务实例。
-func NewTenantService(plans ports.TenantPlanStore, tenants ports.TenantSvcClient, tenantPlans ports.TenantPlanSvcClient, quota ports.QuotaSvcClient, audit ports.TenantPlanAuditStore) *TenantService {
-	return &TenantService{plans: plans, tenants: tenants, tenantPlans: tenantPlans, quota: quota, audit: audit}
+func NewTenantService(
+	plans ports.TenantPlanStore,
+	tenants ports.TenantSvcClient,
+	tenantPlans ports.TenantPlanSvcClient,
+	quota ports.QuotaSvcClient,
+	tenantStore ports.TenantStore,
+	audit ports.AuditStore,
+	tenantAdmins ports.TenantAdminSvcClient,
+	ssoLoader ports.SsoConfigLoader,
+	oidcTester ports.OidcDiscoveryTester,
+	adminStore ports.TenantAdminStore,
+) *TenantService {
+	return &TenantService{
+		plans:        plans,
+		tenants:      tenants,
+		tenantPlans:  tenantPlans,
+		quota:        quota,
+		tenantStore:  tenantStore,
+		audit:        audit,
+		tenantAdmins: tenantAdmins,
+		adminStore:   adminStore,
+		ssoLoader:    ssoLoader,
+		oidcTester:   oidcTester,
+	}
 }
 
 // Register 向 gRPC server 注册本服务（services/pkg/bootstrap.RunGRPC 会调用）。
@@ -186,4 +226,1516 @@ func parseTenantID(raw string) (uuid.UUID, error) {
 		return uuid.Nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "tenant_id must be a uuid")
 	}
 	return id, nil
+}
+
+// auditResourceTenant 审计资源类型：租户
+const auditResourceTenant = "tenant"
+
+// tenantNamePattern 租户名称正则
+var (
+	tenantNamePattern = regexp.MustCompile(`^[a-z0-9-]{3,40}$`)
+)
+
+// ListAvailablePlans 返回 status=active 套餐摘要（供创建向导 Step2；不分页、不调 Core）。
+func (s *TenantService) ListAvailablePlans(ctx context.Context, req *tenantv1.ListAvailablePlansRequest) (*tenantv1.ListAvailablePlansResponse, error) {
+	_ = req
+	// 步骤 1：依赖校验
+	if s.plans == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant plan store unavailable")
+	}
+	// 步骤 2：经 store.ListActivePlans 一次取齐全部 active 套餐（不分页）
+	listed, err := s.plans.ListActivePlans(ctx)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	// 步骤 3：组装 proto AvailableTenantPlan（仅 id/code/name）；空列表合法
+	items := make([]*tenantv1.AvailableTenantPlan, 0, len(listed))
+	for _, p := range listed {
+		items = append(items, &tenantv1.AvailableTenantPlan{
+			Id:   p.ID.String(),
+			Code: p.Code,
+			Name: p.Name,
+		})
+	}
+	return &tenantv1.ListAvailablePlansResponse{Items: items}, nil
+}
+
+// CreateTenant 编排创建租户：校验 → 套餐 → bcrypt → Core 事务 → 事务外配额初始化 → 审计。
+func (s *TenantService) CreateTenant(ctx context.Context, req *tenantv1.CreateTenantRequest) (*commonv1.IdempotentResult, error) {
+	const action = "tenant.create"
+
+	// 步骤 1：请求体必填
+	if req == nil {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "request required")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, nil, err, nil)
+		return nil, err
+	}
+
+	// 步骤 2：入参校验（name 正则 / email / admin_password 强度）→ 400 VALIDATION_FAILED
+	name, displayName, contactEmail, adminEmail, adminName, err := validateCreateTenantInput(
+		req.GetName(), req.GetDisplayName(), req.GetEmail(),
+		req.GetAdminEmail(), req.GetAdminName(), req.GetAdminPassword(),
+	)
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"name": name, "email": contactEmail, "admin_email": adminEmail,
+		}, err, nil)
+		return nil, err
+	}
+	planID, err := parsePlanID(req.GetPlanId())
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"plan_id": req.GetPlanId()}, err, nil)
+		return nil, err
+	}
+
+	// 步骤 3：套餐存在且 status=active；否则 404 / 422 PLAN_NOT_ACTIVE
+	plan, err := s.plans.GetByID(ctx, planID)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"plan_id": planID.String()}, mapped, nil)
+		return nil, mapped
+	}
+	if plan.Status != ports.TenantPlanStatusActive {
+		err := businessError(codes.FailedPrecondition, ports.ErrPlanNotActive, "tenant plan status is "+string(plan.Status))
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"plan_id": planID.String(), "status": string(plan.Status),
+		}, err, nil)
+		return nil, err
+	}
+
+	// 步骤 4：组装套餐配额视图（plan_quota_limits + Core meta default_quota 兜底）
+	views, err := buildQuotaLimitViews(ctx, s.plans, s.quota, planID)
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"plan_id": planID.String()}, err, nil)
+		return nil, err
+	}
+
+	// 步骤 5：bcrypt(admin_password, 12)；明文不出 service 边界
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.GetAdminPassword()), 12)
+	if err != nil {
+		mapped := businessError(codes.Internal, ports.ErrValidationFailed, "password hash failed")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"name": name}, mapped, nil)
+		return nil, mapped
+	}
+
+	// 步骤 6：经 Core SDK 创建租户（事务内 5 表）；name UNIQUE → 409 TENANT_NAME_CONFLICT
+	// request_id / actor 由 SDK 从 gRPC metadata 统一透传 Headers，Core Gateway 注入 ctx。
+	created, err := s.tenants.CreateTenant(ctx, ports.CreateTenantInput{
+		Name:              name,
+		DisplayName:       displayName,
+		ContactEmail:      contactEmail,
+		PlanID:            planID,
+		AdminEmail:        adminEmail,
+		AdminName:         adminName,
+		AdminPasswordHash: string(hash),
+	})
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"name": name, "email": contactEmail, "admin_email": adminEmail, "username": adminName,
+			"plan_id": planID.String(),
+		}, mapped, nil)
+		return nil, mapped
+	}
+
+	// 步骤 7：事务外配额初始化；失败不回滚租户，审计 failure + 异步重试（1s/2s/4s）
+	totals := totalsFromQuotaViews(views)
+	dims := dimsFromQuotaViews(views)
+	syncRes, syncErr := syncPlanQuotaToTenant(ctx, s.plans, s.quota, created.ID, totals, dims)
+	if syncErr != nil {
+		mapped := mapStoreError(syncErr)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, "tenant.quota_init_failed", map[string]any{
+			"tenant_id": created.ID.String(),
+			"plan_id":   planID.String(),
+			"items":     coreItemsForAudit(syncRes.Items),
+		}, mapped, &created.ID)
+		scheduleQuotaSyncRetry(s.audit, s.plans, s.quota, planID, created.ID, totals, dims)
+	}
+
+	// 步骤 8：成功审计（details 含 email/username，不含密码）+ 返回 { id, message }
+	writeAuditSuccess(ctx, s.audit, auditResourceTenant, action, map[string]any{
+		"tenant_id":     created.ID.String(),
+		"name":          created.Name,
+		"email":         contactEmail,
+		"admin_email":   adminEmail,
+		"username":      adminName,
+		"plan_id":       planID.String(),
+		"quota_init_ok": syncErr == nil,
+		"quota_updated": syncRes.Updated,
+		"quota_skipped": syncRes.SkippedApproved,
+	}, &created.ID)
+
+	return &commonv1.IdempotentResult{
+		Id:      created.ID.String(),
+		Message: "tenant created",
+	}, nil
+}
+
+func validateCreateTenantInput(
+	rawName, rawDisplay, rawEmail, rawAdminEmail, rawAdminName, rawPassword string,
+) (name, displayName, contactEmail, adminEmail, adminName string, err error) {
+	// 步骤 1：trim 入参
+	name = strings.TrimSpace(rawName)
+	displayName = strings.TrimSpace(rawDisplay)
+	contactEmail = strings.TrimSpace(rawEmail)
+	adminEmail = strings.TrimSpace(rawAdminEmail)
+	adminName = strings.TrimSpace(rawAdminName)
+
+	// 步骤 2：逐字段校验
+	if !tenantNamePattern.MatchString(name) {
+		return name, displayName, contactEmail, adminEmail, adminName,
+			businessError(codes.InvalidArgument, ports.ErrValidationFailed, "name must match ^[a-z0-9-]{3,40}$")
+	}
+	if displayName == "" || len(displayName) > 128 {
+		return name, displayName, contactEmail, adminEmail, adminName,
+			businessError(codes.InvalidArgument, ports.ErrValidationFailed, "display_name required (1-128)")
+	}
+	if !validEmail(contactEmail) {
+		return name, displayName, contactEmail, adminEmail, adminName,
+			businessError(codes.InvalidArgument, ports.ErrValidationFailed, "email invalid")
+	}
+	if !validEmail(adminEmail) {
+		return name, displayName, contactEmail, adminEmail, adminName,
+			businessError(codes.InvalidArgument, ports.ErrValidationFailed, "admin_email invalid")
+	}
+	if adminName == "" || len(adminName) > 128 {
+		return name, displayName, contactEmail, adminEmail, adminName,
+			businessError(codes.InvalidArgument, ports.ErrValidationFailed, "admin_name required (1-128)")
+	}
+	// 步骤 3：密码强度（8-64 且 ≥3 类）
+	if err := validateAdminPassword(rawPassword); err != nil {
+		return name, displayName, contactEmail, adminEmail, adminName, err
+	}
+	return name, displayName, contactEmail, adminEmail, adminName, nil
+}
+
+func validEmail(raw string) bool {
+	if raw == "" || len(raw) > 254 {
+		return false
+	}
+	addr, err := mail.ParseAddress(raw)
+	return err == nil && addr.Address == raw
+}
+
+// validateAdminPassword：8-64 字符，且至少满足大写/小写/数字/特殊 四类中的三类。
+func validateAdminPassword(password string) error {
+	// 步骤 1：长度边界
+	n := len(password)
+	if n < 8 || n > 64 {
+		return businessError(codes.InvalidArgument, ports.ErrValidationFailed, "admin_password must be 8-64 characters")
+	}
+	// 步骤 2：统计字符类别
+	var upper, lower, digit, special bool
+	for _, r := range password {
+		switch {
+		case unicode.IsUpper(r):
+			upper = true
+		case unicode.IsLower(r):
+			lower = true
+		case unicode.IsDigit(r):
+			digit = true
+		case unicode.IsPunct(r) || unicode.IsSymbol(r):
+			special = true
+		}
+	}
+	classes := 0
+	for _, ok := range []bool{upper, lower, digit, special} {
+		if ok {
+			classes++
+		}
+	}
+	// 步骤 3：至少三类
+	if classes < 3 {
+		return businessError(codes.InvalidArgument, ports.ErrValidationFailed, "admin_password must include at least 3 of upper/lower/digit/special")
+	}
+	return nil
+}
+
+func (s *TenantService) ListTenants(ctx context.Context, req *tenantv1.ListTenantsRequest) (*tenantv1.ListTenantsResponse, error) {
+	if req == nil {
+		req = &tenantv1.ListTenantsRequest{}
+	}
+	// 步骤 1：依赖校验
+	if s.tenants == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant client unavailable")
+	}
+	if s.plans == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant plan store unavailable")
+	}
+	// 步骤 2：status 枚举（空=全部）
+	status, err := ports.ParseTenantStatusFilter(req.GetStatus())
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	// 步骤 3：游标分页入参
+	limit := 20
+	cursor := ""
+	if page := req.GetPage(); page != nil {
+		if page.GetLimit() > 0 {
+			limit = int(page.GetLimit())
+		}
+		cursor = page.GetCursor()
+	}
+	// 步骤 4：经 Core 列表（含 admin_count）
+	listed, err := s.tenants.ListTenants(ctx, ports.ListTenantsFilter{
+		Limit:  limit,
+		Cursor: cursor,
+		Status: status,
+		Search: strings.TrimSpace(req.GetSearch()),
+	})
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	// 步骤 5：批量装配 plan_code
+	planIDs := make([]uuid.UUID, 0, len(listed.Items))
+	seen := make(map[uuid.UUID]struct{}, len(listed.Items))
+	for _, it := range listed.Items {
+		if _, ok := seen[it.PlanID]; ok || it.PlanID == uuid.Nil {
+			continue
+		}
+		seen[it.PlanID] = struct{}{}
+		planIDs = append(planIDs, it.PlanID)
+	}
+	codes, err := s.plans.MapPlanCodes(ctx, planIDs)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	// 步骤 6：组装 proto 列表项
+	items := make([]*tenantv1.TenantListItem, 0, len(listed.Items))
+	for _, it := range listed.Items {
+		items = append(items, &tenantv1.TenantListItem{
+			Id:          it.ID.String(),
+			Name:        it.Name,
+			DisplayName: it.DisplayName,
+			PlanId:      it.PlanID.String(),
+			PlanCode:    codes[it.PlanID],
+			Status:      string(it.Status),
+			AdminCount:  it.AdminCount,
+			CreatedAt:   timestamppb.New(it.CreatedAt.UTC()),
+		})
+	}
+	return &tenantv1.ListTenantsResponse{Items: items, NextCursor: listed.NextCursor}, nil
+}
+
+// GetTenantDetail 经 Core GetTenant 返回完整租户详情（含 counts / auth 摘要 / plan_code）。
+func (s *TenantService) GetTenantDetail(ctx context.Context, req *tenantv1.GetTenantDetailRequest) (*tenantv1.TenantDetail, error) {
+	// 步骤 1：校验 tenant_id
+	rawID := ""
+	if req != nil {
+		rawID = req.GetTenantId()
+	}
+	tenantID, err := parseTenantID(rawID)
+	if err != nil {
+		return nil, err
+	}
+	if s.tenants == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant client unavailable")
+	}
+	// 步骤 2：经 Core SDK 查询租户（含 user_count/admin_count/auth）
+	t, err := s.tenants.GetTenant(ctx, tenantID)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	// 步骤 3：装配 plan_code（批量接口单 id）
+	planCode := ""
+	if s.plans != nil && t.PlanID != uuid.Nil {
+		codes, mapErr := s.plans.MapPlanCodes(ctx, []uuid.UUID{t.PlanID})
+		if mapErr != nil {
+			return nil, mapStoreError(mapErr)
+		}
+		planCode = codes[t.PlanID]
+	}
+	// 步骤 4：组装详情（auth 缺省双 false）
+	auth := &tenantv1.TenantAuthSummary{}
+	if t.Auth != nil {
+		auth.SsoEnabled = t.Auth.SsoEnabled
+		auth.MfaRequired = t.Auth.MfaRequired
+	}
+	out := &tenantv1.TenantDetail{
+		Id:          t.ID.String(),
+		Name:        t.Name,
+		DisplayName: t.DisplayName,
+		PlanId:      t.PlanID.String(),
+		PlanCode:    planCode,
+		Status:      string(t.Status),
+		UserCount:   t.UserCount,
+		AdminCount:  t.AdminCount,
+		Auth:        auth,
+		CreatedAt:   timestamppb.New(t.CreatedAt.UTC()),
+		UpdatedAt:   timestamppb.New(t.UpdatedAt.UTC()),
+	}
+	if strings.TrimSpace(t.ContactEmail) != "" {
+		out.ContactEmail = wrapperspb.String(t.ContactEmail)
+	}
+	if t.FrozenAt != nil {
+		out.FrozenAt = timestamppb.New(t.FrozenAt.UTC())
+	}
+	if t.DisabledAt != nil {
+		out.DisabledAt = timestamppb.New(t.DisabledAt.UTC())
+	}
+	return out, nil
+}
+
+func (s *TenantService) UpdateTenant(ctx context.Context, req *tenantv1.UpdateTenantRequest) (*commonv1.IdempotentResult, error) {
+	const action = "tenant.update"
+
+	// 步骤 1：依赖与 tenant_id
+	if s.tenants == nil {
+		err := businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant client unavailable")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, nil, err, nil)
+		return nil, err
+	}
+	rawID := ""
+	if req != nil {
+		rawID = req.GetTenantId()
+	}
+	tenantID, err := parseTenantID(rawID)
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": rawID}, err, nil)
+		return nil, err
+	}
+
+	// 步骤 2：部分更新映射；两者均未传 → 400 VALIDATION_FAILED（空更新拒绝）
+	in := ports.UpdateTenantInput{}
+	if req != nil && req.DisplayName != nil {
+		v := strings.TrimSpace(req.DisplayName.GetValue())
+		if v == "" || len(v) > 128 {
+			err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "display_name required (1-128)")
+			writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+			return nil, err
+		}
+		in.DisplayName = &v
+	}
+	if req != nil && req.ContactEmail != nil {
+		v := strings.TrimSpace(req.ContactEmail.GetValue())
+		if !validEmail(v) {
+			err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "contact_email invalid")
+			writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+			return nil, err
+		}
+		in.ContactEmail = &v
+	}
+	if in.DisplayName == nil && in.ContactEmail == nil {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "display_name or contact_email required")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+		return nil, err
+	}
+
+	// 步骤 3：读当前租户；不存在 → 404；disabled → 409 TENANT_STATE_INVALID
+	before, err := s.tenants.GetTenant(ctx, tenantID)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, mapped, &tenantID)
+		return nil, mapped
+	}
+	if before.Status == ports.TenantStatusDisabled {
+		err := businessError(codes.FailedPrecondition, ports.ErrTenantStateInvalid, "tenant is disabled")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id": tenantID.String(),
+			"status":    string(before.Status),
+		}, err, &tenantID)
+		return nil, err
+	}
+
+	// 步骤 4：经 Core 部分更新（不触碰 name / status）
+	after, err := s.tenants.UpdateTenant(ctx, tenantID, in)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, mapped, &tenantID)
+		return nil, mapped
+	}
+
+	// 步骤 5：成功审计（变更前后非敏感字段）
+	writeAuditSuccess(ctx, s.audit, auditResourceTenant, action, map[string]any{
+		"tenant_id": tenantID.String(),
+		"before": map[string]any{
+			"display_name":  before.DisplayName,
+			"contact_email": before.ContactEmail,
+		},
+		"after": map[string]any{
+			"display_name":  after.DisplayName,
+			"contact_email": after.ContactEmail,
+		},
+	}, &tenantID)
+
+	return &commonv1.IdempotentResult{
+		Id:      tenantID.String(),
+		Message: "tenant updated",
+	}, nil
+}
+
+func (s *TenantService) FreezeTenant(ctx context.Context, req *tenantv1.FreezeTenantRequest) (*commonv1.IdempotentResult, error) {
+	rawID := ""
+	if req != nil {
+		rawID = req.GetTenantId()
+	}
+	return s.transitionTenantState(ctx, "tenant.freeze", "tenant frozen", rawID,
+		func(ctx context.Context, tenantID uuid.UUID) (ports.Tenant, error) {
+			return s.tenants.FreezeTenant(ctx, tenantID)
+		})
+}
+
+func (s *TenantService) UnfreezeTenant(ctx context.Context, req *tenantv1.UnfreezeTenantRequest) (*commonv1.IdempotentResult, error) {
+	rawID := ""
+	if req != nil {
+		rawID = req.GetTenantId()
+	}
+	return s.transitionTenantState(ctx, "tenant.unfreeze", "tenant unfrozen", rawID,
+		func(ctx context.Context, tenantID uuid.UUID) (ports.Tenant, error) {
+			return s.tenants.UnfreezeTenant(ctx, tenantID)
+		})
+}
+
+func (s *TenantService) DisableTenant(ctx context.Context, req *tenantv1.DisableTenantRequest) (*commonv1.IdempotentResult, error) {
+	const action = "tenant.disable"
+
+	if s.tenants == nil {
+		err := businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant client unavailable")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, nil, err, nil)
+		return nil, err
+	}
+	if s.quota == nil {
+		err := businessError(codes.Unavailable, ports.ErrStoreUnavailable, "quota client unavailable")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, nil, err, nil)
+		return nil, err
+	}
+
+	rawID := ""
+	if req != nil {
+		rawID = req.GetTenantId()
+	}
+	tenantID, err := parseTenantID(rawID)
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": rawID}, err, nil)
+		return nil, err
+	}
+
+	// 步骤 1：禁用前置 — 仅 gpu/cpu/memory/storage 四维 used+reserved>0 拒绝（其余维度忽略；不释放资源）
+	items, err := s.quota.GetQuota(ctx, tenantID)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, mapped, &tenantID)
+		return nil, mapped
+	}
+	if blocked, dim := disableBlockedByComputeQuota(items); blocked {
+		err := businessError(codes.FailedPrecondition, ports.ErrTenantHasRunningResources,
+			fmt.Sprintf("%s used+reserved > 0", dim))
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id":   tenantID.String(),
+			"blocked_dim": dim,
+			"quota_dims":  quotaUsedSnapshot(items),
+		}, err, &tenantID)
+		return nil, err
+	}
+
+	// 步骤 2：读转换前状态 → Core disable → 审计
+	before, err := s.tenants.GetTenant(ctx, tenantID)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, mapped, &tenantID)
+		return nil, mapped
+	}
+	after, err := s.tenants.DisableTenant(ctx, tenantID)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id":     tenantID.String(),
+			"before_status": string(before.Status),
+		}, mapped, &tenantID)
+		return nil, mapped
+	}
+
+	writeAuditSuccess(ctx, s.audit, auditResourceTenant, action, map[string]any{
+		"tenant_id":     tenantID.String(),
+		"before_status": string(before.Status),
+		"after_status":  string(after.Status),
+	}, &tenantID)
+
+	return &commonv1.IdempotentResult{Id: tenantID.String(), Message: "tenant disabled"}, nil
+}
+
+// transitionTenantState 编排 freeze/unfreeze：读 before → Core 转换 → 审计前后状态。
+func (s *TenantService) transitionTenantState(
+	ctx context.Context,
+	action, successMsg, rawTenantID string,
+	fn func(context.Context, uuid.UUID) (ports.Tenant, error),
+) (*commonv1.IdempotentResult, error) {
+	if s.tenants == nil {
+		err := businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant client unavailable")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, nil, err, nil)
+		return nil, err
+	}
+	tenantID, err := parseTenantID(rawTenantID)
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": rawTenantID}, err, nil)
+		return nil, err
+	}
+
+	before, err := s.tenants.GetTenant(ctx, tenantID)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, mapped, &tenantID)
+		return nil, mapped
+	}
+
+	after, err := fn(ctx, tenantID)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id":     tenantID.String(),
+			"before_status": string(before.Status),
+		}, mapped, &tenantID)
+		return nil, mapped
+	}
+
+	writeAuditSuccess(ctx, s.audit, auditResourceTenant, action, map[string]any{
+		"tenant_id":     tenantID.String(),
+		"before_status": string(before.Status),
+		"after_status":  string(after.Status),
+	}, &tenantID)
+
+	return &commonv1.IdempotentResult{Id: tenantID.String(), Message: successMsg}, nil
+}
+
+// disableQuotaGuardDims 禁用前置校验的计算/存储维度（其余维度暂不参与）。
+var disableQuotaGuardDims = map[string]struct{}{
+	"gpu_count":  {},
+	"cpu_core":   {},
+	"memory_gb":  {},
+	"storage_gb": {},
+}
+
+func disableBlockedByComputeQuota(items []ports.CoreQuotaResult) (blocked bool, dim string) {
+	for _, it := range items {
+		if _, ok := disableQuotaGuardDims[it.ResourceType]; !ok {
+			continue
+		}
+		if it.Used+it.Reserved > 0 {
+			return true, it.ResourceType
+		}
+	}
+	return false, ""
+}
+
+func quotaUsedSnapshot(items []ports.CoreQuotaResult) map[string]any {
+	out := make(map[string]any, len(items))
+	for _, it := range items {
+		out[it.ResourceType] = map[string]int64{
+			"used":     it.Used,
+			"reserved": it.Reserved,
+		}
+	}
+	return out
+}
+
+func (s *TenantService) GetTenantAuth(ctx context.Context, req *tenantv1.GetTenantAuthRequest) (*tenantv1.TenantAuthConfig, error) {
+	rawID := ""
+	if req != nil {
+		rawID = req.GetTenantId()
+	}
+	tenantID, err := parseTenantID(rawID)
+	if err != nil {
+		return nil, err
+	}
+	if s.tenants == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant client unavailable")
+	}
+	auth, err := s.tenants.GetTenantAuth(ctx, tenantID)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	return toProtoTenantAuthConfig(auth), nil
+}
+
+func (s *TenantService) UpdateTenantSso(ctx context.Context, req *tenantv1.UpdateTenantSsoRequest) (*commonv1.IdempotentResult, error) {
+	const action = "tenant.sso.update"
+
+	if s.tenants == nil {
+		err := businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant client unavailable")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, nil, err, nil)
+		return nil, err
+	}
+	rawID := ""
+	if req != nil {
+		rawID = req.GetTenantId()
+	}
+	tenantID, err := parseTenantID(rawID)
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": rawID}, err, nil)
+		return nil, err
+	}
+
+	// 步骤 1：至少提供一个 SSO 字段（部分更新）
+	hasEnabled := req != nil && req.SsoEnabled != nil
+	hasProvider := req != nil && req.Provider != nil
+	if !hasEnabled && !hasProvider {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "sso_enabled or provider required")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+		return nil, err
+	}
+
+	// 步骤 2：读当前配置并计算更新后有效值。
+	// provider 仅在更新后 sso_enabled=true 时必填非空（可沿用原 provider）；
+	// sso_enabled=false（关闭）时 provider 非必传，可省略或一并清空。
+	// disabled 终态由 Core UpdateTenantAuth 拒绝（TENANT_STATE_INVALID → 409）。
+	before, err := s.tenants.GetTenantAuth(ctx, tenantID)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, mapped, &tenantID)
+		return nil, mapped
+	}
+	effectiveEnabled := before.SsoEnabled
+	if hasEnabled {
+		effectiveEnabled = req.SsoEnabled.GetValue()
+	}
+	effectiveProvider := ""
+	if before.SsoProvider != nil {
+		effectiveProvider = strings.TrimSpace(*before.SsoProvider)
+	}
+	if hasProvider {
+		effectiveProvider = strings.TrimSpace(req.Provider.GetValue())
+	}
+	if effectiveEnabled && effectiveProvider == "" {
+		err := businessError(codes.FailedPrecondition, ports.ErrTenantSsoConfigInvalid, "sso enabled requires provider")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id":   tenantID.String(),
+			"sso_enabled": effectiveEnabled,
+			"provider":    effectiveProvider,
+		}, err, &tenantID)
+		return nil, err
+	}
+
+	// 步骤 3：映射 Core 部分更新
+	patch := ports.TenantAuthPatch{}
+	if hasEnabled {
+		v := req.SsoEnabled.GetValue()
+		patch.SsoEnabled = &v
+	}
+	if hasProvider {
+		v := strings.TrimSpace(req.Provider.GetValue())
+		patch.SsoProvider = &v
+	}
+	after, err := s.tenants.UpdateTenantAuth(ctx, tenantID, patch)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, mapped, &tenantID)
+		return nil, mapped
+	}
+
+	providerOut := ""
+	if after.SsoProvider != nil {
+		providerOut = *after.SsoProvider
+	}
+	writeAuditSuccess(ctx, s.audit, auditResourceTenant, action, map[string]any{
+		"tenant_id":   tenantID.String(),
+		"sso_enabled": after.SsoEnabled,
+		"provider":    providerOut,
+	}, &tenantID)
+	return &commonv1.IdempotentResult{Id: tenantID.String(), Message: "tenant sso updated"}, nil
+}
+
+func (s *TenantService) UpdateTenantMfa(ctx context.Context, req *tenantv1.UpdateTenantMfaRequest) (*commonv1.IdempotentResult, error) {
+	const action = "tenant.mfa.update"
+
+	if s.tenants == nil {
+		err := businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant client unavailable")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, nil, err, nil)
+		return nil, err
+	}
+	rawID := ""
+	if req != nil {
+		rawID = req.GetTenantId()
+	}
+	tenantID, err := parseTenantID(rawID)
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": rawID}, err, nil)
+		return nil, err
+	}
+	if req == nil {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "mfa_required required")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+		return nil, err
+	}
+
+	// disabled 终态由 Core UpdateTenantAuth 拒绝（TENANT_STATE_INVALID → 409）。
+	mfa := req.GetMfaRequired()
+	after, err := s.tenants.UpdateTenantAuth(ctx, tenantID, ports.TenantAuthPatch{MfaRequired: &mfa})
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id":    tenantID.String(),
+			"mfa_required": mfa,
+		}, mapped, &tenantID)
+		return nil, mapped
+	}
+
+	writeAuditSuccess(ctx, s.audit, auditResourceTenant, action, map[string]any{
+		"tenant_id":    tenantID.String(),
+		"mfa_required": after.MfaRequired,
+	}, &tenantID)
+	return &commonv1.IdempotentResult{Id: tenantID.String(), Message: "tenant mfa updated"}, nil
+}
+
+func toProtoTenantAuthConfig(auth ports.TenantAuth) *tenantv1.TenantAuthConfig {
+	out := &tenantv1.TenantAuthConfig{
+		SsoEnabled:  auth.SsoEnabled,
+		MfaRequired: auth.MfaRequired,
+		UpdatedAt:   timestamppb.New(auth.UpdatedAt.UTC()),
+	}
+	if auth.SsoProvider != nil && strings.TrimSpace(*auth.SsoProvider) != "" {
+		out.Provider = wrapperspb.String(strings.TrimSpace(*auth.SsoProvider))
+	}
+	return out
+}
+
+func (s *TenantService) TestTenantSso(ctx context.Context, req *tenantv1.TestTenantSsoRequest) (*tenantv1.SsoTestResult, error) {
+	_ = ctx
+	_ = req
+	return nil, tenantRPCNotImplemented()
+}
+
+func (s *TenantService) GetTenantQuota(ctx context.Context, req *tenantv1.GetTenantQuotaRequest) (*tenantv1.GetTenantQuotaResponse, error) {
+	rawID := ""
+	if req != nil {
+		rawID = req.GetTenantId()
+	}
+	tenantID, err := parseTenantID(rawID)
+	if err != nil {
+		return nil, err
+	}
+	if s.quota == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "quota client unavailable")
+	}
+
+	// 代理 Core GET /admin/tenants/{id}/quota（已 JOIN meta 的 display_name/unit；不存在 → TENANT_NOT_FOUND）
+	quotaItems, err := s.quota.GetQuota(ctx, tenantID)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	return &tenantv1.GetTenantQuotaResponse{Items: assembleTenantQuotaViews(quotaItems)}, nil
+}
+
+// assembleTenantQuotaViews 将 Core GET 配额行封装为 BOSS 展示视图。
+func assembleTenantQuotaViews(items []ports.CoreQuotaResult) []*tenantv1.TenantQuotaViewItem {
+	out := make([]*tenantv1.TenantQuotaViewItem, 0, len(items))
+	for _, it := range items {
+		rt := strings.TrimSpace(it.ResourceType)
+		if rt == "" {
+			continue
+		}
+		displayName := strings.TrimSpace(it.DisplayName)
+		if displayName == "" {
+			displayName = rt
+		}
+		out = append(out, &tenantv1.TenantQuotaViewItem{
+			ResourceType: rt,
+			DisplayName:  displayName,
+			Used:         it.Used,
+			Total:        it.Total,
+			Unit:         it.Unit,
+		})
+	}
+	return out
+}
+
+// SubmitQuotaChangeRequest 提交配额变更申请（US-012）：
+// 网关 request_id → meta 启用校验 → GetQuota 冻 old_value → INSERT pending。
+func (s *TenantService) SubmitQuotaChangeRequest(ctx context.Context, req *tenantv1.SubmitQuotaChangeRequestRequest) (*commonv1.IdempotentResult, error) {
+	const action = "tenant.quota_change_request.submit"
+
+	// 步骤 1：依赖与入参校验（tenant_id / 网关 x-request-id / x-user-id / 客户端）
+	if req == nil {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "request required")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, nil, err, nil)
+		return nil, err
+	}
+	tenantID, err := parseTenantID(req.GetTenantId())
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": req.GetTenantId()}, err, nil)
+		return nil, err
+	}
+	requestID, err := parseGatewayRequestID(ctx)
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+		return nil, err
+	}
+	actor := userIDFromCtx(ctx)
+	if actor == nil {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "x-user-id required")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+		return nil, err
+	}
+	if s.quota == nil {
+		err := businessError(codes.Unavailable, ports.ErrStoreUnavailable, "quota client unavailable")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+		return nil, err
+	}
+	if s.tenantStore == nil {
+		err := businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant store unavailable")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+		return nil, err
+	}
+
+	// 步骤 2：校验 items（≥1、resource_type 正则、new_value≥0、批内维度不重复）
+	resourceTypes, pendingInputs, err := validateQuotaChangeItems(req.GetItems(), *actor)
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id":  tenantID.String(),
+			"request_id": requestID.String(),
+		}, err, &tenantID)
+		return nil, err
+	}
+
+	// 步骤 3：先 ListQuotaMeta —— 批内维度均须在 Core 元数据中且已启用
+	if err := validateEnabledQuotaResourceTypes(ctx, s.quota, resourceTypes); err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id":  tenantID.String(),
+			"request_id": requestID.String(),
+			"items":      quotaChangeItemsForAudit(pendingInputs),
+		}, err, &tenantID)
+		return nil, err
+	}
+
+	// 步骤 4：再 GetQuota —— 按维度冻结当前 total 为 old_value（无行则保持 NULL=首次设置）
+	quotaItems, err := s.quota.GetQuota(ctx, tenantID)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id":  tenantID.String(),
+			"request_id": requestID.String(),
+		}, mapped, &tenantID)
+		return nil, mapped
+	}
+	totalsByType := make(map[string]int64, len(quotaItems))
+	for _, q := range quotaItems {
+		totalsByType[q.ResourceType] = q.Total
+	}
+	for i := range pendingInputs {
+		if total, ok := totalsByType[pendingInputs[i].ResourceType]; ok {
+			v := total
+			pendingInputs[i].OldValue = &v
+		}
+	}
+
+	// 步骤 5：单事务 INSERT pending（同批共用网关 request_id；跨请求同维允许；同 request 同维靠 PK）
+	if err := s.tenantStore.InsertPendingQuotaChanges(ctx, tenantID, requestID, pendingInputs); err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id":  tenantID.String(),
+			"request_id": requestID.String(),
+			"items":      quotaChangeItemsForAudit(pendingInputs),
+		}, mapped, &tenantID)
+		return nil, mapped
+	}
+
+	// 步骤 6：成功审计 + 返回 { id=request_id, message }
+	writeAuditSuccess(ctx, s.audit, auditResourceTenant, action, map[string]any{
+		"tenant_id":  tenantID.String(),
+		"request_id": requestID.String(),
+		"items":      quotaChangeItemsForAudit(pendingInputs),
+	}, &tenantID)
+	return &commonv1.IdempotentResult{
+		Id:      requestID.String(),
+		Message: "quota change request submitted",
+	}, nil
+}
+
+// ListQuotaChangeRequests 查询租户配额变更申请列表（US-013）：status 可选过滤，不分页。
+func (s *TenantService) ListQuotaChangeRequests(ctx context.Context, req *tenantv1.ListQuotaChangeRequestsRequest) (*tenantv1.ListQuotaChangeRequestsResponse, error) {
+	// 步骤 1：解析 tenant_id 与可选 status 过滤
+	rawID, statusFilter := "", ""
+	if req != nil {
+		rawID = req.GetTenantId()
+		statusFilter = strings.TrimSpace(req.GetStatus())
+	}
+	tenantID, err := parseTenantID(rawID)
+	if err != nil {
+		return nil, err
+	}
+	if statusFilter != "" {
+		switch statusFilter {
+		case "pending", "approved", "rejected":
+		default:
+			return nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "status must be pending, approved, or rejected")
+		}
+	}
+	if s.tenantStore == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant store unavailable")
+	}
+
+	// 步骤 2：按租户查询（不分页，created_at DESC）；空 status=全部
+	rows, err := s.tenantStore.ListQuotaChangesByTenant(ctx, tenantID, statusFilter)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+
+	// 步骤 3：组装 proto 列表（每行一维度；同批共享 request_id）
+	items := make([]*tenantv1.QuotaChangeRequest, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, toProtoQuotaChangeRequest(row))
+	}
+	return &tenantv1.ListQuotaChangeRequestsResponse{Items: items}, nil
+}
+
+// ReviewQuotaChangeRequest 按 request_id 整批审批（US-014）：先 SetStatus，approved 再 UpsertQuota。
+func (s *TenantService) ReviewQuotaChangeRequest(ctx context.Context, req *tenantv1.ReviewQuotaChangeRequestRequest) (*commonv1.IdempotentResult, error) {
+	const actionPending = "tenant.quota_change_request.review"
+
+	// 步骤 1：依赖与入参校验（tenant_id / request_id / approved / x-user-id / store / quota）
+	if req == nil {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "request required")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, actionPending, nil, err, nil)
+		return nil, err
+	}
+	tenantID, err := parseTenantID(req.GetTenantId())
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, actionPending, map[string]any{"tenant_id": req.GetTenantId()}, err, nil)
+		return nil, err
+	}
+	requestID, err := parseUUIDField(req.GetRequestId(), "request_id")
+	if err != nil {
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, actionPending, map[string]any{"tenant_id": tenantID.String()}, err, &tenantID)
+		return nil, err
+	}
+	// approved 必填：proto BoolValue；nil → 400（与网关 *bool 校验对齐）
+	if req.GetApproved() == nil {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "approved required")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, actionPending, map[string]any{
+			"tenant_id": tenantID.String(), "request_id": requestID.String(),
+		}, err, &tenantID)
+		return nil, err
+	}
+	approved := req.GetApproved().GetValue()
+	action := "tenant.quota_change_request.reject"
+	if approved {
+		action = "tenant.quota_change_request.approve"
+	}
+	actor := userIDFromCtx(ctx)
+	if actor == nil {
+		err := businessError(codes.InvalidArgument, ports.ErrValidationFailed, "x-user-id required")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id": tenantID.String(), "request_id": requestID.String(),
+		}, err, &tenantID)
+		return nil, err
+	}
+	if s.tenantStore == nil {
+		err := businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant store unavailable")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id": tenantID.String(), "request_id": requestID.String(),
+		}, err, &tenantID)
+		return nil, err
+	}
+	// approved 路径在改状态前校验 quota 客户端，避免 SetStatus 成功后无法 Upsert 却返回失败
+	if approved && s.quota == nil {
+		err := businessError(codes.Unavailable, ports.ErrStoreUnavailable, "quota client unavailable")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id": tenantID.String(), "request_id": requestID.String(),
+		}, err, &tenantID)
+		return nil, err
+	}
+
+	// 步骤 2：按 request_id 加载整批行；无行 → 404
+	existing, err := s.tenantStore.ListQuotaChangesByRequestID(ctx, tenantID, requestID)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id": tenantID.String(), "request_id": requestID.String(),
+		}, mapped, &tenantID)
+		return nil, mapped
+	}
+
+	// 步骤 3：乐观锁整批 SetStatus（WHERE pending）；0 行 → 409 非 pending
+	newStatus := "rejected"
+	if approved {
+		newStatus = "approved"
+	}
+	affected, err := s.tenantStore.SetQuotaChangeStatusByRequestID(ctx, tenantID, requestID, newStatus, *actor)
+	if err != nil {
+		mapped := mapStoreError(err)
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id": tenantID.String(), "request_id": requestID.String(),
+		}, mapped, &tenantID)
+		return nil, mapped
+	}
+	if affected == 0 {
+		err := businessError(codes.FailedPrecondition, ports.ErrQuotaChangeRequestNotPending, "quota change request is not pending")
+		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
+			"tenant_id": tenantID.String(), "request_id": requestID.String(),
+			"status":    existing[0].Status,
+		}, err, &tenantID)
+		return nil, err
+	}
+
+	// 步骤 4：approved 时逐维 UpsertQuota；失败不回滚状态，审计 failure + 异步补偿
+	if approved {
+		coreItems := make([]ports.CoreQuotaItem, 0, len(existing))
+		for _, row := range existing {
+			if row.Status != "pending" {
+				continue
+			}
+			coreItems = append(coreItems, ports.CoreQuotaItem{ResourceType: row.ResourceType, Total: row.NewValue})
+		}
+		if _, syncErr := applyTenantQuotaItems(ctx, s.quota, tenantID, coreItems); syncErr != nil {
+			mapped := mapStoreError(syncErr)
+			writeAuditFailure(ctx, s.audit, auditResourceTenant, "tenant.quota_change_request.apply_failed", map[string]any{
+				"tenant_id":  tenantID.String(),
+				"request_id": requestID.String(),
+				"items":      coreItemsForAudit(coreItems),
+			}, mapped, &tenantID)
+			scheduleQuotaChangeApplyRetry(s.audit, s.quota, tenantID, requestID, coreItems)
+			// 状态已改，不回滚；仍返回审批成功（SPEC §5.4-3）
+		}
+	}
+
+	// 步骤 5：成功审计 + 返回 { id=request_id, message }
+	msg := "quota change request rejected"
+	if approved {
+		msg = "quota change request approved"
+	}
+	writeAuditSuccess(ctx, s.audit, auditResourceTenant, action, map[string]any{
+		"tenant_id":  tenantID.String(),
+		"request_id": requestID.String(),
+		"approved":   approved,
+	}, &tenantID)
+	return &commonv1.IdempotentResult{Id: requestID.String(), Message: msg}, nil
+}
+
+var quotaChangeResourceTypePattern = regexp.MustCompile(`^[a-z0-9_]{2,40}$`)
+
+func validateQuotaChangeItems(items []*tenantv1.QuotaChangeRequestInput, requestedBy uuid.UUID) ([]string, []ports.QuotaChangePendingInput, error) {
+	// 步骤 1：至少 1 项
+	if len(items) == 0 {
+		return nil, nil, businessError(codes.FailedPrecondition, ports.ErrQuotaChangeRequestInvalid, "items must contain at least 1 entry")
+	}
+	// 步骤 2：逐项校验格式 / 非负 / 批内唯一，并组装 pending 写入 DTO
+	seen := make(map[string]struct{}, len(items))
+	resourceTypes := make([]string, 0, len(items))
+	out := make([]ports.QuotaChangePendingInput, 0, len(items))
+	for _, it := range items {
+		if it == nil {
+			return nil, nil, businessError(codes.FailedPrecondition, ports.ErrQuotaChangeRequestInvalid, "items entry required")
+		}
+		rt := strings.TrimSpace(it.GetResourceType())
+		if !quotaChangeResourceTypePattern.MatchString(rt) {
+			return nil, nil, businessError(codes.FailedPrecondition, ports.ErrQuotaChangeRequestInvalid, "resource_type format invalid: "+rt)
+		}
+		if _, dup := seen[rt]; dup {
+			return nil, nil, businessError(codes.FailedPrecondition, ports.ErrQuotaChangeRequestInvalid, "duplicate resource_type in batch: "+rt)
+		}
+		if it.GetNewValue() < 0 {
+			return nil, nil, businessError(codes.FailedPrecondition, ports.ErrQuotaChangeRequestInvalid, "new_value must be >= 0")
+		}
+		seen[rt] = struct{}{}
+		resourceTypes = append(resourceTypes, rt)
+		out = append(out, ports.QuotaChangePendingInput{
+			ResourceType: rt,
+			NewValue:     it.GetNewValue(),
+			RequestedBy:  requestedBy,
+		})
+	}
+	return resourceTypes, out, nil
+}
+
+func parseGatewayRequestID(ctx context.Context) (uuid.UUID, error) {
+	// 步骤 1：读网关透传 x-request-id；兼容 "req_<uuid>" 前缀；缺失或非 UUID → 400（service 不自行生成）
+	raw := strings.TrimSpace(requestIDFromCtx(ctx))
+	if raw == "" {
+		return uuid.Nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "x-request-id required")
+	}
+	raw = strings.TrimPrefix(raw, "req_")
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return uuid.Nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "x-request-id must be a uuid")
+	}
+	return id, nil
+}
+
+func parseUUIDField(raw, field string) (uuid.UUID, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return uuid.Nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, field+" required")
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return uuid.Nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, field+" must be a uuid")
+	}
+	return id, nil
+}
+
+func toProtoQuotaChangeRequest(row ports.QuotaChangeRequest) *tenantv1.QuotaChangeRequest {
+	// old_value 为 NULL（首次设置）时 proto int64 用 0 占位
+	oldValue := int64(0)
+	if row.OldValue != nil {
+		oldValue = *row.OldValue
+	}
+	return &tenantv1.QuotaChangeRequest{
+		RequestId:    row.RequestID.String(),
+		TenantId:     row.TenantID.String(),
+		ResourceType: row.ResourceType,
+		OldValue:     oldValue,
+		NewValue:     row.NewValue,
+		Status:       row.Status,
+		RequestedBy:  row.RequestedBy.String(),
+		CreatedAt:    timestamppb.New(row.CreatedAt),
+	}
+}
+
+func quotaChangeItemsForAudit(items []ports.QuotaChangePendingInput) []map[string]any {
+	out := make([]map[string]any, 0, len(items))
+	for _, it := range items {
+		entry := map[string]any{"resource_type": it.ResourceType, "new_value": it.NewValue}
+		if it.OldValue != nil {
+			entry["old_value"] = *it.OldValue
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+// scheduleQuotaChangeApplyRetry 审批已落库后 Core UpsertQuota 失败时的异步补偿（最多 3 次，1s/2s/4s）。
+func scheduleQuotaChangeApplyRetry(audit ports.AuditStore, core ports.QuotaSvcClient, tenantID, requestID uuid.UUID, items []ports.CoreQuotaItem) {
+	if core == nil || len(items) == 0 {
+		return
+	}
+	go func() {
+		// 步骤 1：指数退避重试 UpsertQuota；成功或耗尽后写审计
+		delays := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
+		for i, d := range delays {
+			time.Sleep(d)
+			if _, err := applyTenantQuotaItems(context.Background(), core, tenantID, items); err == nil {
+				writeAuditSuccess(context.Background(), audit, auditResourceTenant, "tenant.quota_change_request.apply_retry", map[string]any{
+					"tenant_id":  tenantID.String(),
+					"request_id": requestID.String(),
+					"attempt":    i + 1,
+					"items":      coreItemsForAudit(items),
+				}, &tenantID)
+				return
+			} else if i == len(delays)-1 {
+				writeAuditFailure(context.Background(), audit, auditResourceTenant, "tenant.quota_change_request.apply_retry", map[string]any{
+					"tenant_id":  tenantID.String(),
+					"request_id": requestID.String(),
+					"attempt":    i + 1,
+					"items":      coreItemsForAudit(items),
+				}, mapStoreError(err), &tenantID)
+			}
+		}
+	}()
+}
+
+// ListTenantLifecycle 查询租户生命周期（US-015）：代理 Core GET /admin/tenants/{id}/lifecycle。
+// 只读、不写审计。
+func (s *TenantService) ListTenantLifecycle(ctx context.Context, req *tenantv1.ListTenantLifecycleRequest) (*tenantv1.ListTenantLifecycleResponse, error) {
+	// 步骤 1：依赖与 tenant_id
+	if req == nil {
+		req = &tenantv1.ListTenantLifecycleRequest{}
+	}
+	tenantID, err := parseTenantID(req.GetTenantId())
+	if err != nil {
+		return nil, err
+	}
+	if s.tenants == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant client unavailable")
+	}
+
+	// 步骤 2：可选 action 枚举（空=不过滤）
+	action, err := ports.ParseTenantLifecycleActionFilter(req.GetAction())
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+
+	// 步骤 3：游标分页入参（默认 20，上限 100）
+	limit := 20
+	cursor := ""
+	if page := req.GetPage(); page != nil {
+		if page.GetLimit() > 0 {
+			limit = int(page.GetLimit())
+		}
+		if limit > 100 {
+			limit = 100
+		}
+		cursor = page.GetCursor()
+	}
+
+	// 步骤 4：经 Core SDK 查询 tenant_lifecycle（缺租户 → TENANT_NOT_FOUND）
+	listed, err := s.tenants.ListTenantLifecycle(ctx, tenantID, ports.TenantLifecycleFilter{
+		Limit:  limit,
+		Cursor: cursor,
+		Action: action,
+	})
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+
+	// 步骤 5：映射 gRPC TenantLifecycleEntry
+	items := make([]*tenantv1.TenantLifecycleEntry, 0, len(listed.Items))
+	for _, it := range listed.Items {
+		items = append(items, toProtoTenantLifecycleEntry(it))
+	}
+	return &tenantv1.ListTenantLifecycleResponse{Items: items, NextCursor: listed.NextCursor}, nil
+}
+
+// ListTenantAuditLogs 查询租户操作历史（US-016）：读自有 audit_logs 分区表。
+// 只读、不写审计；resource 透传展示，不提供过滤参数。
+func (s *TenantService) ListTenantAuditLogs(ctx context.Context, req *tenantv1.ListTenantAuditLogsRequest) (*tenantv1.ListTenantAuditLogsResponse, error) {
+	// 步骤 1：依赖与 tenant_id
+	if req == nil {
+		req = &tenantv1.ListTenantAuditLogsRequest{}
+	}
+	tenantID, err := parseTenantID(req.GetTenantId())
+	if err != nil {
+		return nil, err
+	}
+	if s.tenants == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant client unavailable")
+	}
+	if s.audit == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "audit store unavailable")
+	}
+
+	// 步骤 2：可选 result 枚举（空=不过滤；先于 GetTenant，非法入参不打 Core）
+	result, err := ports.ParseAuditResultFilter(req.GetResult())
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+
+	// 步骤 3：租户必须存在（与 lifecycle / OpenAPI 404 TENANT_NOT_FOUND 对齐）
+	if _, err := s.tenants.GetTenant(ctx, tenantID); err != nil {
+		return nil, mapStoreError(err)
+	}
+
+	// 步骤 4：游标分页入参（默认 20，上限 100）
+	limit := 20
+	cursor := ""
+	if page := req.GetPage(); page != nil {
+		if page.GetLimit() > 0 {
+			limit = int(page.GetLimit())
+		}
+		if limit > 100 {
+			limit = 100
+		}
+		cursor = page.GetCursor()
+	}
+
+	// 步骤 5：经 AuditStore 按 tenant_id 查询（可选 action/result 过滤）
+	listed, err := s.audit.ListTenantAuditLogs(ctx, tenantID, ports.TenantAuditLogFilter{
+		Limit:  limit,
+		Cursor: cursor,
+		Action: strings.TrimSpace(req.GetAction()),
+		Result: result,
+	})
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+
+	// 步骤 6：映射 gRPC TenantAuditLogEntry（含 resource / details）
+	items := make([]*tenantv1.TenantAuditLogEntry, 0, len(listed.Items))
+	for _, it := range listed.Items {
+		pb, mapErr := toProtoTenantAuditLogEntry(it)
+		if mapErr != nil {
+			return nil, status.Errorf(codes.Internal, "INTERNAL_ERROR: encode audit log: %v", mapErr)
+		}
+		items = append(items, pb)
+	}
+	return &tenantv1.ListTenantAuditLogsResponse{Items: items, NextCursor: listed.NextCursor}, nil
+}
+
+func toProtoTenantLifecycleEntry(it ports.TenantLifecycleEntry) *tenantv1.TenantLifecycleEntry {
+	out := &tenantv1.TenantLifecycleEntry{
+		Id:        it.ID.String(),
+		Action:    string(it.Action),
+		CreatedAt: timestamppb.New(it.CreatedAt.UTC()),
+	}
+	if it.Reason != nil && strings.TrimSpace(*it.Reason) != "" {
+		out.Reason = wrapperspb.String(strings.TrimSpace(*it.Reason))
+	}
+	if it.UserID != nil {
+		out.UserId = wrapperspb.String(it.UserID.String())
+	}
+	if it.RequestID != nil && strings.TrimSpace(*it.RequestID) != "" {
+		out.RequestId = wrapperspb.String(strings.TrimSpace(*it.RequestID))
+	}
+	return out
+}
+
+func toProtoTenantAuditLogEntry(log ports.AuditLog) (*tenantv1.TenantAuditLogEntry, error) {
+	details := log.Details
+	if details == nil {
+		details = map[string]any{}
+	}
+	st, err := structpb.NewStruct(details)
+	if err != nil {
+		return nil, err
+	}
+	out := &tenantv1.TenantAuditLogEntry{
+		Id:        log.ID.String(),
+		Action:    log.Action,
+		Resource:  log.Resource,
+		Result:    string(log.Result),
+		Details:   st,
+		CreatedAt: timestamppb.New(log.CreatedAt.UTC()),
+	}
+	if log.UserID != nil {
+		out.UserId = wrapperspb.String(log.UserID.String())
+	}
+	return out, nil
+}
+
+func (s *TenantService) ListTenantAdmins(ctx context.Context, req *tenantv1.ListTenantAdminsRequest) (*tenantv1.ListTenantAdminsResponse, error) {
+	// 步骤 1：依赖与 tenant_id（固定租户作用域）
+	if req == nil {
+		req = &tenantv1.ListTenantAdminsRequest{}
+	}
+	tenantID, err := parseTenantID(req.GetTenantId())
+	if err != nil {
+		return nil, err
+	}
+	if s.tenants == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant client unavailable")
+	}
+	if s.tenantAdmins == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "tenant admin client unavailable")
+	}
+	if s.adminStore == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant admin store unavailable")
+	}
+
+	// 步骤 2：可选 role / status / search（先于 GetTenant，非法入参不打 Core）
+	roleFilter := strings.TrimSpace(req.GetRole())
+	if roleFilter != "" && roleFilter != ports.TenantAdminRoleAdmin && roleFilter != ports.TenantAdminRoleUser && roleFilter != ports.TenantAdminRoleAuditor {
+		return nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "role must be tenant-admin, user, or auditor")
+	}
+	statusFilter := strings.TrimSpace(req.GetStatus())
+	if statusFilter != "" && statusFilter != ports.TenantAdminUserStatusActive && statusFilter != ports.TenantAdminUserStatusDisabled {
+		return nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "status must be active or disabled")
+	}
+	search := strings.TrimSpace(req.GetSearch())
+
+	limit := 20
+	cursor := ""
+	if page := req.GetPage(); page != nil {
+		if page.GetLimit() > 0 {
+			limit = int(page.GetLimit())
+		}
+		if limit > 100 {
+			limit = 100
+		}
+		cursor = strings.TrimSpace(page.GetCursor())
+	}
+
+	// 步骤 3：租户必须存在
+	if _, err := s.tenants.GetTenant(ctx, tenantID); err != nil {
+		return nil, mapStoreError(err)
+	}
+
+	// 步骤 4：仅 inviting 邀请标记（不含 expired；与跨租户列表默认集合不同）
+	tid := tenantID
+	adminHelper := &TenantAdminService{core: s.tenantAdmins, store: s.adminStore, tenants: s.tenants}
+	flags, err := s.adminStore.ListInvitationFlags(ctx, &tid, ports.InvitationStatusInviting)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	flagByKey := make(map[string]ports.InvitationFlag, len(flags))
+	for _, f := range flags {
+		flagByKey[tenantUserKey(f.TenantID, f.UserID)] = f
+	}
+
+	// 步骤 5：Core tenant-admin ∪ inviting 非 admin（去重）
+	merged := make(map[string]ports.AdminWithTenant)
+	admins, listErr := adminHelper.listAllCoreTenantAdmins(ctx, &tid, statusFilter, search)
+	if listErr != nil {
+		return nil, listErr
+	}
+	for _, admin := range admins {
+		merged[tenantUserKey(admin.Tenant.ID, admin.ID)] = admin
+	}
+	pendingFlags := make([]ports.InvitationFlag, 0)
+	for _, f := range flags {
+		key := tenantUserKey(f.TenantID, f.UserID)
+		if _, ok := merged[key]; ok {
+			continue
+		}
+		pendingFlags = append(pendingFlags, f)
+	}
+	if len(pendingFlags) > 0 {
+		users, batchErr := adminHelper.batchGetUsersByFlags(ctx, pendingFlags)
+		if batchErr != nil {
+			return nil, batchErr
+		}
+		for _, f := range pendingFlags {
+			if user, ok := users[f.UserID]; ok {
+				if statusFilter != "" && user.Status != statusFilter {
+					continue
+				}
+				merged[tenantUserKey(f.TenantID, f.UserID)] = user
+			}
+		}
+	}
+
+	// 步骤 6：填充 is_inviting + role/search 过滤
+	items := make([]ports.AdminWithTenant, 0, len(merged))
+	for key, user := range merged {
+		if search != "" && !tenantAdminSearchMatch(user, search) {
+			continue
+		}
+		if roleFilter != "" && user.Role != roleFilter {
+			continue
+		}
+		if f, ok := flagByKey[key]; ok {
+			user.IsInviting = f.IsInviting
+			user.IsExpired = f.IsExpired
+		} else {
+			user.IsInviting = false
+			user.IsExpired = false
+		}
+		items = append(items, user)
+	}
+
+	// 步骤 7：排序 + 游标分页
+	sort.Slice(items, func(i, j int) bool {
+		ci, cj := adminCreatedAt(items[i]), adminCreatedAt(items[j])
+		if !ci.Equal(cj) {
+			return ci.After(cj)
+		}
+		return items[i].ID.String() > items[j].ID.String()
+	})
+	pageItems, nextCursor, pageErr := pageTenantAdmins(items, limit, cursor)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+
+	// 步骤 8：映射 TenantScopedAdmin（含 id/username/display_name/role/status + is_inviting）
+	out := make([]*tenantv1.TenantScopedAdmin, 0, len(pageItems))
+	for _, it := range pageItems {
+		out = append(out, toProtoTenantScopedAdmin(it))
+	}
+	return &tenantv1.ListTenantAdminsResponse{Items: out, NextCursor: nextCursor}, nil
+}
+
+func toProtoTenantScopedAdmin(user ports.AdminWithTenant) *tenantv1.TenantScopedAdmin {
+	out := &tenantv1.TenantScopedAdmin{
+		Id:         user.ID.String(),
+		Email:      user.Email,
+		Username:   user.Username,
+		Role:       user.Role,
+		Status:     user.Status,
+		Source:     user.Source,
+		IsInviting: user.IsInviting,
+		IsExpired:  user.IsExpired,
+		Tenant: &tenantv1.TenantScopedAdminTenantRef{
+			Id:          user.Tenant.ID.String(),
+			Name:        user.Tenant.Name,
+			DisplayName: user.Tenant.DisplayName,
+		},
+	}
+	if user.DisplayName != nil {
+		out.DisplayName = wrapperspb.String(*user.DisplayName)
+	}
+	if user.LastLoginAt != nil {
+		out.LastLoginAt = timestamppb.New(user.LastLoginAt.UTC())
+	}
+	return out
+}
+
+func tenantRPCNotImplemented() error {
+	return mapStoreError(ports.ErrNotImplemented)
 }

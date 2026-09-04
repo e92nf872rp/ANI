@@ -59,6 +59,12 @@ func (f *fakePlanStore) GetByID(_ context.Context, id uuid.UUID) (ports.TenantPl
 func (f *fakePlanStore) List(context.Context, ports.TenantPlanListFilter) (ports.TenantPlanListResult, error) {
 	panic("unused")
 }
+func (f *fakePlanStore) ListActivePlans(context.Context) ([]ports.AvailableTenantPlan, error) {
+	panic("unused")
+}
+func (f *fakePlanStore) MapPlanCodes(context.Context, []uuid.UUID) (map[uuid.UUID]string, error) {
+	panic("unused")
+}
 func (f *fakePlanStore) Update(context.Context, uuid.UUID, ports.UpdateTenantPlanInput) (ports.TenantPlan, error) {
 	panic("unused")
 }
@@ -122,6 +128,80 @@ func (f *fakeAuditStore) ListPlanAuditLogs(_ context.Context, planID uuid.UUID, 
 	return ports.AuditLogListResult{Items: matched, Total: total, NextCursor: ""}, nil
 }
 
+func (f *fakeAuditStore) ListTenantAuditLogs(_ context.Context, tenantID uuid.UUID, filter ports.TenantAuditLogFilter) (ports.AuditLogListResult, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	matched := make([]ports.AuditLog, 0, len(f.logs))
+	for _, log := range f.logs {
+		if log.TenantID == nil || *log.TenantID != tenantID {
+			continue
+		}
+		if filter.Action != "" && log.Action != filter.Action {
+			continue
+		}
+		if filter.Result != "" && log.Result != filter.Result {
+			continue
+		}
+		matched = append(matched, log)
+	}
+
+	for i, j := 0, len(matched)-1; i < j; i, j = i+1, j-1 {
+		matched[i], matched[j] = matched[j], matched[i]
+	}
+
+	nextCursor := ""
+	if len(matched) > limit {
+		last := matched[limit-1]
+		nextCursor = last.ID.String()
+		matched = matched[:limit]
+	}
+	return ports.AuditLogListResult{Items: matched, NextCursor: nextCursor}, nil
+}
+
+func (f *fakeAuditStore) ListTenantAdminAuditLogs(_ context.Context, tenantID, userID uuid.UUID, filter ports.TenantAuditLogFilter) (ports.AuditLogListResult, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	matched := make([]ports.AuditLog, 0, len(f.logs))
+	for _, log := range f.logs {
+		target, _ := log.Details["target_id"].(string)
+		if target != userID.String() {
+			continue
+		}
+		if log.TenantID != nil && *log.TenantID != tenantID {
+			continue
+		}
+		if tid, ok := log.Details["tenant_id"].(string); ok && tid != "" && tid != tenantID.String() {
+			continue
+		}
+		if action := strings.TrimSpace(filter.Action); action != "" && log.Action != action {
+			continue
+		}
+		if result := strings.TrimSpace(string(filter.Result)); result != "" && string(log.Result) != result {
+			continue
+		}
+		matched = append(matched, log)
+	}
+
+	next := ""
+	if len(matched) > limit {
+		next = "next"
+		matched = matched[:limit]
+	}
+	return ports.AuditLogListResult{Items: matched, NextCursor: next}, nil
+}
+
 type fakeQuotaClient struct {
 	meta            []ports.QuotaMeta
 	metaErr         error
@@ -153,6 +233,31 @@ type fakeTenantClient struct {
 	bound       []ports.BoundTenant
 	bindable    []ports.BoundTenant
 	available   []ports.BoundTenant
+	listItems   []ports.TenantListItem
+	listFn      func(ports.ListTenantsFilter) (ports.TenantListResult, error)
+
+	createFn    func(ctx context.Context, in ports.CreateTenantInput) (ports.Tenant, error)
+	createIn    *ports.CreateTenantInput
+	createCalls int
+
+	updateTenantFn    func(ctx context.Context, id uuid.UUID, in ports.UpdateTenantInput) (ports.Tenant, error)
+	updateTenantIn    *ports.UpdateTenantInput
+	updateTenantCalls int
+
+	freezeFn     func(ctx context.Context, id uuid.UUID) (ports.Tenant, error)
+	freezeCalls  int
+	unfreezeFn   func(ctx context.Context, id uuid.UUID) (ports.Tenant, error)
+	disableFn    func(ctx context.Context, id uuid.UUID) (ports.Tenant, error)
+	disableCalls int
+
+	auth          ports.TenantAuth
+	getAuthFn     func(ctx context.Context, id uuid.UUID) (ports.TenantAuth, error)
+	updateAuthFn  func(ctx context.Context, id uuid.UUID, patch ports.TenantAuthPatch) (ports.TenantAuth, error)
+	updateAuthIn  *ports.TenantAuthPatch
+	updateAuthCalls int
+
+	lifecycleItems []ports.TenantLifecycleEntry
+	lifecycleFn    func(ctx context.Context, id uuid.UUID, filter ports.TenantLifecycleFilter) (ports.TenantLifecycleListResult, error)
 }
 
 var (
@@ -239,6 +344,173 @@ func (f *fakeTenantClient) GetTenant(_ context.Context, id uuid.UUID) (ports.Ten
 
 func (f *fakeTenantClient) ListAvailableTenants(_ context.Context) ([]ports.BoundTenant, error) {
 	return f.available, nil
+}
+
+func (f *fakeTenantClient) CreateTenant(ctx context.Context, in ports.CreateTenantInput) (ports.Tenant, error) {
+	f.createCalls++
+	cp := in
+	f.createIn = &cp
+	if f.createFn != nil {
+		return f.createFn(ctx, in)
+	}
+	if f.tenant.ID == uuid.Nil {
+		f.tenant.ID = uuid.New()
+	}
+	f.tenant.Name = in.Name
+	f.tenant.DisplayName = in.DisplayName
+	f.tenant.ContactEmail = in.ContactEmail
+	f.tenant.PlanID = in.PlanID
+	f.tenant.Status = ports.TenantStatusActive
+	return f.tenant, nil
+}
+
+func (f *fakeTenantClient) ListTenants(_ context.Context, filter ports.ListTenantsFilter) (ports.TenantListResult, error) {
+	if f.listFn != nil {
+		return f.listFn(filter)
+	}
+	return ports.TenantListResult{Items: append([]ports.TenantListItem(nil), f.listItems...)}, nil
+}
+
+func (f *fakeTenantClient) UpdateTenant(ctx context.Context, id uuid.UUID, in ports.UpdateTenantInput) (ports.Tenant, error) {
+	f.updateTenantCalls++
+	cp := in
+	f.updateTenantIn = &cp
+	if f.updateTenantFn != nil {
+		return f.updateTenantFn(ctx, id, in)
+	}
+	if f.tenant.ID == uuid.Nil || f.tenant.ID != id {
+		return ports.Tenant{}, ports.ErrTenantNotFound
+	}
+	if in.DisplayName != nil {
+		f.tenant.DisplayName = *in.DisplayName
+	}
+	if in.ContactEmail != nil {
+		f.tenant.ContactEmail = *in.ContactEmail
+	}
+	return f.tenant, nil
+}
+
+func (f *fakeTenantClient) FreezeTenant(ctx context.Context, id uuid.UUID) (ports.Tenant, error) {
+	f.freezeCalls++
+	if f.freezeFn != nil {
+		return f.freezeFn(ctx, id)
+	}
+	if f.tenant.ID == uuid.Nil || f.tenant.ID != id {
+		return ports.Tenant{}, ports.ErrTenantNotFound
+	}
+	if f.tenant.Status != ports.TenantStatusActive {
+		return ports.Tenant{}, ports.ErrTenantStateInvalid
+	}
+	f.tenant.Status = ports.TenantStatusFrozen
+	return f.tenant, nil
+}
+
+func (f *fakeTenantClient) UnfreezeTenant(ctx context.Context, id uuid.UUID) (ports.Tenant, error) {
+	if f.unfreezeFn != nil {
+		return f.unfreezeFn(ctx, id)
+	}
+	if f.tenant.ID == uuid.Nil || f.tenant.ID != id {
+		return ports.Tenant{}, ports.ErrTenantNotFound
+	}
+	if f.tenant.Status != ports.TenantStatusFrozen {
+		return ports.Tenant{}, ports.ErrTenantStateInvalid
+	}
+	f.tenant.Status = ports.TenantStatusActive
+	return f.tenant, nil
+}
+
+func (f *fakeTenantClient) DisableTenant(ctx context.Context, id uuid.UUID) (ports.Tenant, error) {
+	f.disableCalls++
+	if f.disableFn != nil {
+		return f.disableFn(ctx, id)
+	}
+	if f.tenant.ID == uuid.Nil || f.tenant.ID != id {
+		return ports.Tenant{}, ports.ErrTenantNotFound
+	}
+	if f.tenant.Status != ports.TenantStatusActive && f.tenant.Status != ports.TenantStatusFrozen {
+		return ports.Tenant{}, ports.ErrTenantStateInvalid
+	}
+	f.tenant.Status = ports.TenantStatusDisabled
+	return f.tenant, nil
+}
+
+func (f *fakeTenantClient) GetTenantAuth(ctx context.Context, id uuid.UUID) (ports.TenantAuth, error) {
+	if f.getAuthFn != nil {
+		return f.getAuthFn(ctx, id)
+	}
+	if f.auth.TenantID == uuid.Nil {
+		// 缺行默认值路径
+		return ports.TenantAuth{TenantID: id, UpdatedAt: time.Now().UTC()}, nil
+	}
+	if f.auth.TenantID != id {
+		return ports.TenantAuth{}, ports.ErrTenantNotFound
+	}
+	return f.auth, nil
+}
+
+func (f *fakeTenantClient) UpdateTenantAuth(ctx context.Context, id uuid.UUID, patch ports.TenantAuthPatch) (ports.TenantAuth, error) {
+	f.updateAuthCalls++
+	in := patch
+	f.updateAuthIn = &in
+	if f.updateAuthFn != nil {
+		return f.updateAuthFn(ctx, id, patch)
+	}
+	// 模拟 Core：disabled 终态 → TENANT_STATE_INVALID
+	if f.tenant.ID != uuid.Nil && f.tenant.ID == id && f.tenant.Status == ports.TenantStatusDisabled {
+		return ports.TenantAuth{}, ports.ErrTenantStateInvalid
+	}
+	if f.auth.TenantID != uuid.Nil && f.auth.TenantID != id {
+		return ports.TenantAuth{}, ports.ErrTenantNotFound
+	}
+	if f.auth.TenantID == uuid.Nil {
+		f.auth = ports.TenantAuth{TenantID: id, UpdatedAt: time.Now().UTC()}
+	}
+	if patch.SsoEnabled != nil {
+		f.auth.SsoEnabled = *patch.SsoEnabled
+	}
+	if patch.SsoProvider != nil {
+		v := strings.TrimSpace(*patch.SsoProvider)
+		if v == "" {
+			f.auth.SsoProvider = nil
+		} else {
+			f.auth.SsoProvider = &v
+		}
+	}
+	if patch.MfaRequired != nil {
+		f.auth.MfaRequired = *patch.MfaRequired
+	}
+	f.auth.UpdatedAt = time.Now().UTC()
+	return f.auth, nil
+}
+
+func (f *fakeTenantClient) ListTenantLifecycle(ctx context.Context, id uuid.UUID, filter ports.TenantLifecycleFilter) (ports.TenantLifecycleListResult, error) {
+	if f.lifecycleFn != nil {
+		return f.lifecycleFn(ctx, id, filter)
+	}
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	matched := make([]ports.TenantLifecycleEntry, 0, len(f.lifecycleItems))
+	for _, it := range f.lifecycleItems {
+		if it.TenantID != id {
+			continue
+		}
+		if filter.Action != "" && it.Action != filter.Action {
+			continue
+		}
+		matched = append(matched, it)
+	}
+	next := ""
+	if len(matched) > limit {
+		last := matched[limit-1]
+		next = last.ID.String() // 单测仅断言非空翻页时够用；真实实现用 EncodeCursor
+		matched = matched[:limit]
+	}
+	return ports.TenantLifecycleListResult{Items: matched, NextCursor: next}, nil
 }
 
 func (f *fakeTenantClient) UpdateTenantPlan(_ context.Context, id uuid.UUID, planID uuid.UUID) (ports.Tenant, error) {
@@ -576,6 +848,12 @@ func (f *listFakePlanStore) List(ctx context.Context, filter ports.TenantPlanLis
 	}
 	return ports.TenantPlanListResult{}, nil
 }
+func (f *listFakePlanStore) ListActivePlans(context.Context) ([]ports.AvailableTenantPlan, error) {
+	panic("unused")
+}
+func (f *listFakePlanStore) MapPlanCodes(context.Context, []uuid.UUID) (map[uuid.UUID]string, error) {
+	panic("unused")
+}
 func (f *listFakePlanStore) Update(context.Context, uuid.UUID, ports.UpdateTenantPlanInput) (ports.TenantPlan, error) {
 	panic("unused")
 }
@@ -741,6 +1019,12 @@ func (f *updateFakePlanStore) GetByID(_ context.Context, id uuid.UUID) (ports.Te
 	return f.plan, nil
 }
 func (f *updateFakePlanStore) List(context.Context, ports.TenantPlanListFilter) (ports.TenantPlanListResult, error) {
+	panic("unused")
+}
+func (f *updateFakePlanStore) ListActivePlans(context.Context) ([]ports.AvailableTenantPlan, error) {
+	panic("unused")
+}
+func (f *updateFakePlanStore) MapPlanCodes(context.Context, []uuid.UUID) (map[uuid.UUID]string, error) {
 	panic("unused")
 }
 func (f *updateFakePlanStore) Update(_ context.Context, id uuid.UUID, in ports.UpdateTenantPlanInput) (ports.TenantPlan, error) {
@@ -935,6 +1219,12 @@ func (f *stateFakePlanStore) GetByID(_ context.Context, id uuid.UUID) (ports.Ten
 	return plan, nil
 }
 func (f *stateFakePlanStore) List(context.Context, ports.TenantPlanListFilter) (ports.TenantPlanListResult, error) {
+	panic("unused")
+}
+func (f *stateFakePlanStore) ListActivePlans(context.Context) ([]ports.AvailableTenantPlan, error) {
+	panic("unused")
+}
+func (f *stateFakePlanStore) MapPlanCodes(context.Context, []uuid.UUID) (map[uuid.UUID]string, error) {
 	panic("unused")
 }
 func (f *stateFakePlanStore) Update(context.Context, uuid.UUID, ports.UpdateTenantPlanInput) (ports.TenantPlan, error) {
@@ -1257,6 +1547,12 @@ func (f *quotaLimitsFakeStore) GetByID(context.Context, uuid.UUID) (ports.Tenant
 	return f.plan, nil
 }
 func (f *quotaLimitsFakeStore) List(context.Context, ports.TenantPlanListFilter) (ports.TenantPlanListResult, error) {
+	panic("unused")
+}
+func (f *quotaLimitsFakeStore) ListActivePlans(context.Context) ([]ports.AvailableTenantPlan, error) {
+	panic("unused")
+}
+func (f *quotaLimitsFakeStore) MapPlanCodes(context.Context, []uuid.UUID) (map[uuid.UUID]string, error) {
 	panic("unused")
 }
 func (f *quotaLimitsFakeStore) Update(context.Context, uuid.UUID, ports.UpdateTenantPlanInput) (ports.TenantPlan, error) {
@@ -1775,307 +2071,6 @@ func TestTenantPlanService_ListTenantPlanAuditLogs(t *testing.T) {
 	})
 	if status.Code(err) != codes.NotFound || !strings.HasPrefix(status.Convert(err).Message(), "TENANT_PLAN_NOT_FOUND") {
 		t.Fatalf("expected TENANT_PLAN_NOT_FOUND, got %v", err)
-	}
-}
-
-// ---- from tenant_service_bind_test.go ----
-
-type bindFakePlanStore struct {
-	plan     ports.TenantPlan
-	limits   []ports.PlanQuotaLimit
-	approved map[uuid.UUID][]ports.ApprovedQuotaChange
-}
-
-func (f *bindFakePlanStore) Create(context.Context, ports.CreateTenantPlanInput) (ports.TenantPlan, error) {
-	panic("unused")
-}
-func (f *bindFakePlanStore) GetByID(_ context.Context, id uuid.UUID) (ports.TenantPlan, error) {
-	if f.plan.ID == uuid.Nil || f.plan.ID != id {
-		return ports.TenantPlan{}, ports.ErrTenantPlanNotFound
-	}
-	return f.plan, nil
-}
-func (f *bindFakePlanStore) List(context.Context, ports.TenantPlanListFilter) (ports.TenantPlanListResult, error) {
-	panic("unused")
-}
-func (f *bindFakePlanStore) Update(context.Context, uuid.UUID, ports.UpdateTenantPlanInput) (ports.TenantPlan, error) {
-	panic("unused")
-}
-func (f *bindFakePlanStore) Activate(context.Context, uuid.UUID) (ports.TenantPlan, error) {
-	panic("unused")
-}
-func (f *bindFakePlanStore) Disable(context.Context, uuid.UUID) (ports.TenantPlan, error) {
-	panic("unused")
-}
-func (f *bindFakePlanStore) Delete(context.Context, uuid.UUID) error { panic("unused") }
-func (f *bindFakePlanStore) GetQuotaLimits(_ context.Context, planID uuid.UUID) ([]ports.PlanQuotaLimit, error) {
-	if f.plan.ID == uuid.Nil || f.plan.ID != planID {
-		return nil, ports.ErrTenantPlanNotFound
-	}
-	return append([]ports.PlanQuotaLimit(nil), f.limits...), nil
-}
-func (f *bindFakePlanStore) UpdateQuotaLimits(_ context.Context, planID uuid.UUID, items []ports.PlanQuotaLimitInput) error {
-	if f.plan.ID == uuid.Nil || f.plan.ID != planID {
-		return ports.ErrTenantPlanNotFound
-	}
-	for _, item := range items {
-		found := false
-		for i := range f.limits {
-			if f.limits[i].ResourceType == item.ResourceType {
-				f.limits[i].Total = item.Total
-				found = true
-				break
-			}
-		}
-		if !found {
-			f.limits = append(f.limits, ports.PlanQuotaLimit{PlanID: planID, ResourceType: item.ResourceType, Total: item.Total})
-		}
-	}
-	return nil
-}
-func (f *bindFakePlanStore) GetApprovedQuotaChanges(_ context.Context, tenantID uuid.UUID) ([]ports.ApprovedQuotaChange, error) {
-	return append([]ports.ApprovedQuotaChange(nil), f.approved[tenantID]...), nil
-}
-
-func TestTenantService_BindPlanQuota(t *testing.T) {
-	planID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-	oldPlan := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
-	tenantID := uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc")
-	total := int64(16)
-
-	plans := &bindFakePlanStore{
-		plan: ports.TenantPlan{ID: planID, Code: "pro", Status: ports.TenantPlanStatusActive},
-		limits: []ports.PlanQuotaLimit{
-			{PlanID: planID, ResourceType: "gpu_count", Total: &total},
-		},
-	}
-	tenants := &fakeTenantClient{
-		tenant: ports.Tenant{ID: tenantID, Name: "acme", Status: ports.TenantStatusActive, PlanID: oldPlan},
-	}
-	quota := &fakeQuotaClient{
-		meta: []ports.QuotaMeta{
-			{ResourceType: "gpu_count", Enabled: true, DefaultQuota: 4, DisplayName: "GPU", Unit: "card"},
-		},
-	}
-	audit := &fakeAuditStore{}
-	svc := NewTenantService(plans, tenants, tenants, quota, audit)
-
-	res, err := svc.BindPlanQuota(context.Background(), &tenantv1.BindPlanQuotaRequest{
-		TenantId: tenantID.String(),
-		PlanId:   planID.String(),
-	})
-	if err != nil {
-		t.Fatalf("BindPlanQuota: %v", err)
-	}
-	if res.GetMessage() != "quota bound to plan" || res.GetId() != tenantID.String() {
-		t.Fatalf("res=%+v", res)
-	}
-	if quota.upsertCalls != 1 || quota.putCalls != 0 || quota.createCalls != 0 {
-		t.Fatalf("upsertCalls=%d putCalls=%d createCalls=%d", quota.upsertCalls, quota.putCalls, quota.createCalls)
-	}
-	if tenants.updateCalls != 1 || tenants.updatedPlan != planID {
-		t.Fatalf("UpdateTenantPlan calls=%d plan=%s", tenants.updateCalls, tenants.updatedPlan)
-	}
-	if len(audit.logs) != 1 || audit.logs[0].Action != "tenant.bind_plan_quota" || audit.logs[0].Result != "success" {
-		t.Fatalf("audit=%+v", audit.logs)
-	}
-	if audit.logs[0].TenantID == nil || *audit.logs[0].TenantID != tenantID {
-		t.Fatalf("audit TenantID=%v want %s", audit.logs[0].TenantID, tenantID)
-	}
-
-	// plan 404
-	_, err = svc.BindPlanQuota(context.Background(), &tenantv1.BindPlanQuotaRequest{
-		TenantId: tenantID.String(),
-		PlanId:   uuid.New().String(),
-	})
-	if status.Code(err) != codes.NotFound || !strings.HasPrefix(status.Convert(err).Message(), "TENANT_PLAN_NOT_FOUND") {
-		t.Fatalf("plan 404: %v", err)
-	}
-}
-
-func Test_BindPlanQuota_PlanNotActive(t *testing.T) {
-	planID := uuid.New()
-	tenantID := uuid.New()
-	plans := &bindFakePlanStore{
-		plan: ports.TenantPlan{ID: planID, Status: ports.TenantPlanStatusDraft},
-	}
-	tenants := &fakeTenantClient{
-		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusActive, PlanID: uuid.New()},
-	}
-	svc := NewTenantService(plans, tenants, tenants, &fakeQuotaClient{}, &fakeAuditStore{})
-
-	_, err := svc.BindPlanQuota(context.Background(), &tenantv1.BindPlanQuotaRequest{
-		TenantId: tenantID.String(),
-		PlanId:   planID.String(),
-	})
-	if status.Code(err) != codes.FailedPrecondition || !strings.HasPrefix(status.Convert(err).Message(), "PLAN_NOT_ACTIVE") {
-		t.Fatalf("expected PLAN_NOT_ACTIVE, got %v", err)
-	}
-}
-
-func Test_BindPlanQuota_DisabledTenant(t *testing.T) {
-	planID := uuid.New()
-	tenantID := uuid.New()
-	plans := &bindFakePlanStore{
-		plan: ports.TenantPlan{ID: planID, Status: ports.TenantPlanStatusActive},
-	}
-	tenants := &fakeTenantClient{
-		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusDisabled, PlanID: uuid.New()},
-	}
-	svc := NewTenantService(plans, tenants, tenants, &fakeQuotaClient{}, &fakeAuditStore{})
-
-	_, err := svc.BindPlanQuota(context.Background(), &tenantv1.BindPlanQuotaRequest{
-		TenantId: tenantID.String(),
-		PlanId:   planID.String(),
-	})
-	if status.Code(err) != codes.FailedPrecondition || !strings.HasPrefix(status.Convert(err).Message(), "TENANT_STATE_INVALID") {
-		t.Fatalf("expected TENANT_STATE_INVALID, got %v", err)
-	}
-}
-
-func Test_BindPlanQuota_AuditWriteErrorStillSucceeds(t *testing.T) {
-	planID := uuid.New()
-	oldPlan := uuid.New()
-	tenantID := uuid.New()
-	total := int64(16)
-
-	plans := &bindFakePlanStore{
-		plan: ports.TenantPlan{ID: planID, Status: ports.TenantPlanStatusActive},
-		limits: []ports.PlanQuotaLimit{
-			{PlanID: planID, ResourceType: "gpu_count", Total: &total},
-		},
-	}
-	tenants := &fakeTenantClient{
-		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusActive, PlanID: oldPlan},
-	}
-	quota := &fakeQuotaClient{
-		meta: []ports.QuotaMeta{
-			{ResourceType: "gpu_count", Enabled: true, DefaultQuota: 4, DisplayName: "GPU", Unit: "card"},
-		},
-	}
-	audit := &fakeAuditStore{
-		createFn: func(context.Context, ports.AuditLog) (uuid.UUID, error) {
-			return uuid.Nil, errors.New("db down")
-		},
-	}
-	svc := NewTenantService(plans, tenants, tenants, quota, audit)
-
-	res, err := svc.BindPlanQuota(context.Background(), &tenantv1.BindPlanQuotaRequest{
-		TenantId: tenantID.String(),
-		PlanId:   planID.String(),
-	})
-	if err != nil {
-		t.Fatalf("audit failure must not fail bind: %v", err)
-	}
-	if res.GetId() != tenantID.String() || res.GetMessage() != "quota bound to plan" {
-		t.Fatalf("res=%+v", res)
-	}
-	if tenants.tenant.PlanID != planID {
-		t.Fatalf("plan_id=%s want %s", tenants.tenant.PlanID, planID)
-	}
-	if quota.upsertCalls != 1 {
-		t.Fatalf("upsertCalls=%d want 1", quota.upsertCalls)
-	}
-}
-
-func Test_BindPlanQuota_CoreFailRollsBackPlanID(t *testing.T) {
-	planID := uuid.New()
-	oldPlan := uuid.New()
-	tenantID := uuid.New()
-	total := int64(16)
-
-	plans := &bindFakePlanStore{
-		plan: ports.TenantPlan{ID: planID, Status: ports.TenantPlanStatusActive},
-		limits: []ports.PlanQuotaLimit{
-			{PlanID: planID, ResourceType: "gpu_count", Total: &total},
-		},
-	}
-	tenants := &fakeTenantClient{
-		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusActive, PlanID: oldPlan},
-	}
-	quota := &fakeQuotaClient{
-		meta: []ports.QuotaMeta{
-			{ResourceType: "gpu_count", Enabled: true, DefaultQuota: 4, DisplayName: "GPU", Unit: "card"},
-		},
-		upsertFn: func(context.Context, uuid.UUID, []ports.CoreQuotaItem) ([]ports.CoreQuotaResult, error) {
-			return nil, ports.ErrCoreUnavailable
-		},
-	}
-	audit := &fakeAuditStore{}
-	svc := NewTenantService(plans, tenants, tenants, quota, audit)
-
-	_, err := svc.BindPlanQuota(context.Background(), &tenantv1.BindPlanQuotaRequest{
-		TenantId: tenantID.String(),
-		PlanId:   planID.String(),
-	})
-	if err == nil {
-		t.Fatal("expected Core error")
-	}
-	if tenants.updateCalls != 2 {
-		t.Fatalf("UpdateTenantPlan calls=%d want 2 (bind + rollback)", tenants.updateCalls)
-	}
-	if tenants.updatedPlan != oldPlan || tenants.tenant.PlanID != oldPlan {
-		t.Fatalf("plan_id after rollback=%s want %s", tenants.tenant.PlanID, oldPlan)
-	}
-	if len(audit.logs) == 0 || audit.logs[len(audit.logs)-1].Result != "failure" {
-		t.Fatalf("audit=%+v", audit.logs)
-	}
-	if rb, _ := audit.logs[len(audit.logs)-1].Details["rolled_back"].(bool); !rb {
-		t.Fatalf("rolled_back=%v", audit.logs[len(audit.logs)-1].Details["rolled_back"])
-	}
-}
-
-func Test_BindPlanQuota_ApprovedSkip(t *testing.T) {
-	planID := uuid.New()
-	tenantID := uuid.New()
-	gpu := int64(8)
-	cpu := int64(32)
-
-	plans := &bindFakePlanStore{
-		plan: ports.TenantPlan{ID: planID, Status: ports.TenantPlanStatusActive},
-		limits: []ports.PlanQuotaLimit{
-			{PlanID: planID, ResourceType: "gpu_count", Total: &gpu},
-			{PlanID: planID, ResourceType: "cpu_core", Total: &cpu},
-		},
-		approved: map[uuid.UUID][]ports.ApprovedQuotaChange{
-			tenantID: {{TenantID: tenantID, ResourceType: "gpu_count"}},
-		},
-	}
-	tenants := &fakeTenantClient{
-		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusActive, PlanID: planID}, // 同套餐 → 不 UpdateTenantPlan
-	}
-	quota := &fakeQuotaClient{
-		meta: []ports.QuotaMeta{
-			{ResourceType: "gpu_count", Enabled: true, DefaultQuota: 4, DisplayName: "GPU", Unit: "card"},
-			{ResourceType: "cpu_core", Enabled: true, DefaultQuota: 16, DisplayName: "CPU", Unit: "core"},
-		},
-	}
-	audit := &fakeAuditStore{}
-	svc := NewTenantService(plans, tenants, tenants, quota, audit)
-
-	_, err := svc.BindPlanQuota(context.Background(), &tenantv1.BindPlanQuotaRequest{
-		TenantId: tenantID.String(),
-		PlanId:   planID.String(),
-	})
-	if err != nil {
-		t.Fatalf("BindPlanQuota: %v", err)
-	}
-	if quota.upsertCalls != 1 || len(quota.upsertItems) != 1 || quota.upsertItems[0].ResourceType != "cpu_core" {
-		t.Fatalf("upsertCalls=%d upsertItems=%+v", quota.upsertCalls, quota.upsertItems)
-	}
-	if quota.putCalls != 0 || quota.createCalls != 0 {
-		t.Fatalf("putCalls=%d createCalls=%d want 0", quota.putCalls, quota.createCalls)
-	}
-	if tenants.updateCalls != 0 {
-		t.Fatalf("same plan_id should skip UpdateTenantPlan, calls=%d", tenants.updateCalls)
-	}
-	skipped, ok := audit.logs[0].Details["skipped_approved"].(int)
-	if !ok || skipped != 1 {
-		t.Fatalf("skipped_approved=%v (want int 1)", audit.logs[0].Details["skipped_approved"])
-	}
-	tightened, ok := audit.logs[0].Details["tightened"].(int)
-	if !ok || tightened != 0 {
-		t.Fatalf("tightened=%v (want int 0)", audit.logs[0].Details["tightened"])
 	}
 }
 

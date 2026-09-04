@@ -62,7 +62,7 @@ func TestPostgresTenantListBoundAndBindableTenants(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListBoundTenants: %v", err)
 	}
-	if len(bound) != 1 || bound[0].Name != "acme" || bound[0].Status != "active" {
+	if len(bound) != 1 || bound[0].Name != "acme" || bound[0].Status != ports.TenantStatusActive {
 		t.Fatalf("bound=%+v", bound)
 	}
 
@@ -73,7 +73,7 @@ func TestPostgresTenantListBoundAndBindableTenants(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListBindableTenants: %v", err)
 	}
-	if len(bindable) != 1 || bindable[0].Name != "beta" || bindable[0].Status != "frozen" {
+	if len(bindable) != 1 || bindable[0].Name != "beta" || bindable[0].Status != ports.TenantStatusFrozen {
 		t.Fatalf("bindable=%+v", bindable)
 	}
 }

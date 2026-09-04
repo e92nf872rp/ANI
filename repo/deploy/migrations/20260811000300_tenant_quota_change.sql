@@ -5,8 +5,12 @@
 -- Depends on: 20260501000100_init_schema.sql (tenants, users), 20260810000100_resource_quota.sql (resource_quota_meta)
 -- Rationale:
 --   BOSS 租户配额变更审批流（plan v3.0 §4.1.6）：
---     - tenant_quota_change  记录某租户某配额维度的变更申请，一个申请对应一个维度。
+--     - tenant_quota_change  记录某租户某配额维度的变更申请；一次 HTTP 提交的多维度
+--                          共享同一 request_id（取自网关 X-Request-ID，非 service 新生成）。
 --                          status: pending | approved | rejected
+--                          不同 request_id 允许同一 tenant+resource_type 各有 pending；
+--                          同一 request 内维度唯一由 PK (tenant_id, request_id, resource_type) 保证。
+--                          审批按 request_id 整批处理（同批全部维度一并通过/驳回）。
 --                          approved 状态的维度在套餐绑定/限额修改同步时被跳过
 --                         （保留 approved 值不被套餐模板覆盖）。
 --     - 外键 → tenants (ON DELETE CASCADE，租户删除时清理申请记录)
@@ -21,9 +25,9 @@
 -- 1. tenant_quota_change — 配额变更申请表
 -- ===========================================================================
 CREATE TABLE tenant_quota_change (
-    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id       UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    resource_type   TEXT        NOT NULL,                    -- 配额维度（如 storage_gb / token_count / kb_query_count / member_count / inference_service_count）
+    request_id      UUID        NOT NULL,                    -- 同一次提交共享；审批路径 /quota-requests/{reqId} 对齐此列
+    resource_type   TEXT        NOT NULL,                    -- 配额维度（如 storage_gb / gpu_count / cpu_core / memory_gb）
     old_value       BIGINT,                                  -- 变更前配额值（NULL=首次设置）
     new_value       BIGINT      NOT NULL,                    -- 申请变更为的配额值
     requested_by    UUID        NOT NULL REFERENCES users(id) ON DELETE RESTRICT,  -- 申请人 user_id
@@ -32,12 +36,14 @@ CREATE TABLE tenant_quota_change (
     reviewed_at     TIMESTAMPTZ,                             -- 审核时间（NULL=未审核）
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, request_id, resource_type),
     CONSTRAINT chk_quota_change_status CHECK (status IN ('pending', 'approved', 'rejected'))
 );
 
 CREATE INDEX idx_tenant_quota_change_tenant ON tenant_quota_change(tenant_id);
 CREATE INDEX idx_tenant_quota_change_status ON tenant_quota_change(status);
 CREATE INDEX idx_tenant_quota_change_requested_by ON tenant_quota_change(requested_by);
+CREATE INDEX idx_tenant_quota_change_request ON tenant_quota_change(tenant_id, request_id);
 
 -- ===========================================================================
 -- 2. RLS — 平台操作绕过 / 租户只能看自己

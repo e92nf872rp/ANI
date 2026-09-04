@@ -510,7 +510,7 @@ flowchart LR
 
 ### 8.2 Explicitly Out of Scope
 
-- **查询可用套餐**（`GET /tenants/{tenantId}/available-plans`）— 属租户列表 PRD 范围
+- **查询可用套餐**（`GET /svc/tenants/available-plans`）— 属租户列表 PRD 范围
 - **配额元数据管理 UI**（resource_quota_meta CRUD）— Core 责任
 - **租户配额查询与修改 UI** — Core 责任
 - **计费单价字段** — 后续 PR

@@ -9,8 +9,8 @@ import (
 
 // 租户管理员邀请与审计的端口（ports）定义。
 // 本文件只声明接口与领域结构体，不含实现。
-// Postgres 适配器仅操作 tenant_admin_invitation / audit_logs；
-// users / user_roles / roles 一律经 TenantAdminSvcClient（见 core_tenant_admin.go）。
+// Postgres 适配器仅操作 tenant_admin_invitation；
+// audit_logs 一律经 AuditStore；users / user_roles / roles 一律经 TenantAdminSvcClient。
 
 // =============================================================================
 // 枚举常量
@@ -135,39 +135,15 @@ type AssignableRole struct {
 	Permissions []any // roles.permissions JSONB 原样
 }
 
-// AuditLogListItem 是租户管理员操作历史列表项。
-type AuditLogListItem struct {
-	ID        uuid.UUID
-	Action    string
-	Resource  string
-	Result    string // success | failure
-	UserID    *uuid.UUID
-	Details   map[string]any
-	CreatedAt time.Time
-}
-
-// TenantAdminAuditLogFilter 是操作历史查询过滤（游标分页）。
-type TenantAdminAuditLogFilter struct {
-	Limit  int
-	Cursor string
-	Action string
-	Result string // success | failure
-}
-
-// TenantAdminAuditLogListResult 是操作历史查询返回。
-type TenantAdminAuditLogListResult struct {
-	Items      []AuditLogListItem
-	NextCursor string // "" = 无更多
-}
-
 // =============================================================================
-// Store 接口（仅 invitation / audit_logs）
+// Store 接口（仅 invitation）
 // =============================================================================
 
 // TenantAdminStore 定义租户管理员模块对本地表的数据访问。
 // 实现：internal/repo/adapters/postgres/tenant_admin_store.go。
 //
 // 禁止直接 SQL 操作 users / user_roles / roles；这些走 TenantAdminSvcClient。
+// audit_logs 读写走 AuditStore，不在本接口。
 type TenantAdminStore interface {
 	// HasPendingInvitation 报告该租户下该用户是否存在 status='inviting' 的邀请。
 	HasPendingInvitation(ctx context.Context, tenantID, userID uuid.UUID) (bool, error)
@@ -191,7 +167,4 @@ type TenantAdminStore interface {
 	// GetInvitationFlags 按最新邀请设置标记（inviting/expired 互斥；其余/无记录两者 false）。
 	// 读取后若最新为 inviting 且 expire_at < now，先写回 expired 再返回。
 	GetInvitationFlags(ctx context.Context, tenantID, userID uuid.UUID) (InvitationFlag, error)
-
-	// ListAuditLogs 按 tenant_id + 目标 user_id 查询操作历史，游标分页。
-	ListAuditLogs(ctx context.Context, tenantID, userID uuid.UUID, filter TenantAdminAuditLogFilter) (TenantAdminAuditLogListResult, error)
 }

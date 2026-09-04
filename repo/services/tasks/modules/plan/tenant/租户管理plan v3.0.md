@@ -1,9 +1,66 @@
 # BOSS 端租户管理功能设计 plan.md
 
-> 生成日期：2026-07-24
-> 目标仓库：`D:/Jczn/project/ANI/ANI`
-> 设计依据：`CLAUDE.md`、`ANI-DOCS-INDEX.md`、`ANI-02-产品功能设计.md`、`ANI-05-系统架构设计.md`、`ANI-09-数据模型设计.md`、`ANI-11-代码实现规范.md`、`ANI-14-API对齐与开发工作流.md`、`ANI-SERVICES-TEAM-GUIDE.md`、`repo/api/openapi/v1.yaml`、`repo/api/openapi/services/v1.yaml`、`repo/deploy/migrations/`、原型 `ANI-doc/00-prd/产品原型-7.22/` 全套
-> 实现路径：3 个 PR 阶段（契约 → 接口 → 实现+文档），全部新 API 放入 `repo/api/openapi/services/v1.yaml`，SQL 迁移与具体实现集中在 PR-3
+> 生成日期：2026-07-24  
+> **租户列表实现对齐修订：2026-09-04**（以实现为准；证据见 `repo/development-records/tenant-list-issue-*.md`、已回写的 PRD/SPEC/UX/Issue）  
+> 目标仓库：`D:/Jczn/project/ANI/ANI`  
+> 设计依据：`CLAUDE.md`、`ANI-DOCS-INDEX.md`、`ANI-02`～`ANI-14`、`ANI-SERVICES-TEAM-GUIDE.md`、OpenAPI、migrations、原型等  
+> 权威实现文档（租户列表）：`prd-new-boss-tenant-list.md` / `spec-new-boss-tenant-list.md` / `ux-boss-tenant-list.md` / `issue/boss/tenant/tenant-list/*`
+
+---
+
+## §0 租户列表 — 实现真相覆盖（2026-09-04）
+
+> **本节优先于下文任何与之冲突的表述。** 仅覆盖「租户列表」模块（US-001～017）；套餐 / 跨租户管理员 / 平台账号等其它域仍以下文为准，除非另有实现对齐修订。
+
+### 0.1 已交付 vs Deferred / OPEN
+
+| 项 | 状态 |
+|----|------|
+| Services 19 端点 `/tenants*` + Core 9 端点 `/admin/tenants*` + getTenant 扩展 | **已交付** |
+| Gateway `tenant_list_resources.go` + `admin_tenant_resources.go` | **已交付** |
+| tenant-service：`TenantService` 上挂 **19 RPC**（非独立 TenantListService） | **已交付** |
+| Core：`PostgresTenant`（`postgres_tenant.go`）+ 迁移 `20260902_001_tenant_list_management.sql` | **已交付** |
+| SSO/MFA 配置读写、配额代理、配额变更三件套、lifecycle、audit-logs、租户内 admins | **已交付** |
+| `POST .../auth/sso/test` | **OPEN / stub → 501 `NOT_IMPLEMENTED`**（Issue-010） |
+| Gateway 登录拦截 `TENANT_FROZEN` / `TENANT_DISABLED` | **Deferred** |
+| MFA 登录强制执行 | **Deferred**（仅配置落库） |
+| 禁用时资源释放 / 停实例 | **Deferred**（本阶段不释放） |
+| BOSS 前端租户列表页 | **未交付**（规格见 UX） |
+
+### 0.2 架构与契约（覆盖旧 plan）
+
+| 旧 plan 表述 | 实现真相 |
+|--------------|----------|
+| Core `v1.yaml` **不修改** | **已修改**：新增 `/admin/tenants*` + getTenant additive |
+| 独立 `TenantListService` / HTTP handlers | **无**；gRPC 并入 `TenantService`（`tenant_plan.proto`）；messages 在 `tenant_list_service.proto` |
+| `postgres_tenant_store.go` / `pkg/ports` 下独立 LifecycleStore | Core 扩展 `pkg/ports/tenant.go` + `postgres_tenant.go` |
+| lifecycle `action` = active/frozen/disabled | **`create` / `freeze` / `unfreeze` / `disable`**（`TenantLifecycleAction` ≠ `TenantStatus`） |
+| 禁用「资源删除」+ 登录拦截已接线 | **仅状态落库**；四维 `used+reserved` 守卫；登录拦截 Deferred |
+| SSO test 已可用 | **501 stub** |
+| 配额变更：同维全局 pending 唯一 / `QUOTA_CHANGE_REQUEST_DUPLICATE` | **跨请求同维 pending 允许**；同 request 同维 → `QUOTA_CHANGE_REQUEST_CONFLICT`；未注册维 → `QUOTA_RESOURCE_NOT_REGISTERED` |
+| GetQuota：svc 二次 JOIN meta | **单次** Core GetQuota（响应已含 meta）；不可达 **502** |
+| lifecycle 直查 service 表、不调 Core | **经 Core** `GET /admin/tenants/{id}/lifecycle` |
+| admins 仅 tenant-admin | 默认 **tenant-admin ∪ inviting**；proto `TenantScopedAdmin` |
+| lifecycle 归因方法入参 | Gateway headers → Core ctx（`WithTenantLifecycleAttribution`） |
+| 幂等 | Services：body `idempotency_key`（header 回落）；**Core 写无幂等字段** |
+| 迁移 `20260723_015_...` 含 lifecycle/auth | 租户列表专用迁移：**`20260902_001_tenant_list_management.sql`**（NULLIF RLS + lifecycle create 回填） |
+
+### 0.3 关键路径（租户列表）
+
+```
+repo/api/openapi/v1.yaml                          # Core /admin/tenants*
+repo/api/openapi/services/v1.yaml                 # /tenants*（相对 base /api/v1/svc）
+repo/api/proto/tenant/v1/tenant_list_service.proto  # messages only
+repo/api/proto/tenant/v1/tenant_plan.proto          # TenantService + 19 RPCs
+repo/deploy/migrations/20260902_001_tenant_list_management.sql
+repo/pkg/ports/tenant.go
+repo/pkg/adapters/runtime/postgres_tenant.go
+repo/services/ani-gateway/internal/router/tenant_list_resources.go
+repo/services/ani-gateway/internal/router/admin_tenant_resources.go
+repo/services/tenant-service/internal/service/tenant_service.go
+repo/services/tenant-service/internal/repo/adapters/core/tenant_svc_client.go
+repo/services/tenant-service/internal/repo/adapters/postgres/{tenant_store,audit_store}.go
+```
 
 ---
 
@@ -28,7 +85,7 @@
 | API 契约位置 | `repo/api/openapi/services/v1.yaml` | 租户管理是业务能力，归 Services；遵循 ANI-14 API 优先与分层 |
 | PR 拆分 | 3 阶段：契约 → 接口 → 实现+文档 | 用户明确要求；契约稳定后再写实现，降低返工 |
 | 数据库迁移位置 | PR-3 | PR-1 仅含 v1.yaml 及衍生；用户明确要求 |
-| 状态机 | active / frozen / disabled | 管理员可手动冻结（无法登录、实例继续运行）；管理员可手动禁用（禁止登录、资源删除）；管理员可解冻（frozen → active），禁用不可逆 |
+| 状态机 | active / frozen / disabled | 冻结：状态落库、实例可继续运行；禁用：不可逆终态、**本阶段不释放资源**、四维 used+reserved 守卫。**登录拦截 TENANT_FROZEN/DISABLED = Deferred**（旧「无法登录/资源删除」文案作废） |
 | 配额与计量归属 | Core（`通用资源配额与计量落地方案.md`） | BOSS 仅负责：配额元数据 UI/代理、租户配额配置 UI、创建租户时配额初始化；TCC（Try/Confirm/Cancel）与计量采集属 Core 责任 |
 | 平台角色 | 保留 platform-admin，新增 platform-ops / platform-readonly 作为种子 | 与用户要求一致；platform-admin 仍为超级管理员 |
 | 租户角色 | 保留 tenant-admin / user / auditor；permissions 沿用已有的 resource/action/scope JSONB 数组格式（见 migration 003） | 租户用户相关权限不变，不引入新维度模型 |
@@ -41,24 +98,18 @@
 
 **本设计覆盖：**
 
-- Core API 契约 `repo/api/openapi/v1.yaml` — **不修改**；租户管理属 Services 业务能力，按 CLAUDE.md §3 跨层契约规则不回流 Core API
-- Services API 契约 `repo/api/openapi/services/v1.yaml` — 重新设计新增 `tenants` / `tenant-admins` / `platform-admins` / `tenant-plans` 路径与全套 schema/错误码/标签
-- tenant-service 服务骨架（cmd / handlers / internal/service / internal/wiring）
-- pkg/ports 接口抽象（TenantStore / TenantAdminStore / PlatformAdminStore / TenantPlanStore / TenantLifecycleStore / TenantAuthStore / AuditLogStore / QuotaSvcClient；QuotaSvcClient 封装 Core 配额 API 调用；幂等由 Gateway 中间件处理，不入 ports）
-- postgres adapter 实现
-- SQL 迁移 `20260723_015_tenant_management.sql`（含 tenant_plans 表；不新建 tenant_quotas 与 tenant_usage_records——配额与用量由 Core `resource_quota` / `metering_usage_records` 表承载，详见 `通用资源配额与计量落地方案.md`）
-- BOSS 前端 5 页面（含套餐管理页面）+ API 客户端 + 受保护路由
-- 单测、集成测试、E2E 验证清单
-- 验收脚本与文档
+- Core API 契约 `repo/api/openapi/v1.yaml` — **租户列表模块已扩展** `/admin/tenants*` + getTenant additive（见 §0）；其它 Core 能力仍按既有规则不回流业务资源
+- Services API 契约 `repo/api/openapi/services/v1.yaml` — 含 `tenants` / `tenant-admins` / `platform-admins` / `tenant-plans` 等
+- tenant-service：gRPC（`TenantService` / `TenantPlanService` / `TenantAdminService` 等）+ Gateway REST 转发（**非**独立 HTTP handlers 进程模型）
+- 租户列表实现路径与迁移见 **§0**；套餐/管理员/平台账号仍按下文与既有 development-records
+- BOSS 前端：套餐等已有页；**租户列表前端未交付**（UX 规格另文）
+- 单测 / 文档
 
 **本设计不覆盖：**
 
-- Console 端租户自助功能（`/api/v1/svc/tenant/members` 已存在，由 Console inviteTenantMember 维护）
-- 计费与用量管理（充值/扣费/账单/欠费冻结等）——后续 PR 再补充
-- TCC 配额扣减（Try/Confirm/Cancel）与计量采集——属 Core 责任，见 `通用资源配额与计量落地方案.md`，本设计仅在 BOSS 侧提供 UI 代理与租户创建时的配额初始化调用
-- 业务配额（max_models / max_kb / max_sessions 等）的下发与快照——后续 PR
-- 实际 SMTP / 短信通道接入——使用现有 notification-service stub
-
+- Console 端租户自助；计费与用量；TCC 扣减与计量采集（Core）
+- 业务配额快照下发（后续 PR）；真实 SMTP/短信（notification stub）
+- **Deferred：** 登录拦截 FROZEN/DISABLED；MFA 登录强制；禁用资源释放；SSO test 真实现（当前 501）
 ---
 
 ## §2 设计大纲
@@ -150,45 +201,40 @@
          │      Core Gateway            │
          │  - 平台 JWT 校验              │
          │  - 平台角色鉴权              │
-│  - frozen 状态禁止登录拦截     │
-│  - disabled 状态禁止登录拦截   │
+         │  - frozen/disabled 登录拦截   │  ← Deferred（未接线；见 §0）
          │  - RLS 上下文设置            │
+         │  - body idempotency_key       │
          └──────────┬───────────────────┘
-                    │ /api/v1/svc/tenants*
+                    │ /api/v1/svc/tenants*  (+ Core /api/v1/admin/tenants* 内部转发)
                     │ /api/v1/svc/tenant-admins*
                     │ /api/v1/svc/platform-admins*
                     │ /api/v1/svc/tenant-plans*
                     ▼
          ┌──────────────────────────────┐
-         │      tenant-service          │
-         │  handlers → service → ports  │
-         │  + audit log                 │
-         │  + idempotency (复用)         │
+         │      tenant-service (gRPC)   │
+         │  TenantService 等 Register   │
+         │  + audit；幂等在 Gateway     │
          └──────────┬───────────────────┘
-                    │ SQL (RLS)
+                    │ Core SDK + 自有 PG
                     ▼
          ┌──────────────────────────────┐
-         │       PostgreSQL              │
-         │  tenants / tenant_admins      │
-         │  tenant_plans / platform_admins │
-         │  audit_logs                    │
-         │  (existing, partitioned)       │
-         │  + Core 配额表（由 Core 维护）: │
-         │  resource_quota_meta            │
-         │  resource_quota                 │
-         │  resource_reservations          │
-         │  metering_usage_records         │
+         │  PostgreSQL（共享）           │
+         │  Core: tenants/tenant_auth/  │
+         │        tenant_lifecycle/…    │
+         │  Svc: tenant_plans/quota_chg/│
+         │       audit_logs/…           │
          └──────────────────────────────┘
 ```
 
+> 旧图中「HTTP handlers → ports」及「Core 不改 /admin」已被租户列表实现取代，见 §0。
 ### 3.2 组件职责
 
 | 组件 | 职责 | 不做 |
 |------|------|------|
 | BOSS 前端 | 页面渲染、表单校验、TanStack Query 缓存、调用 fetch | 不直接连数据库；不内嵌业务规则 |
-| Core Gateway | AuthN、AuthZ、冻结/禁用状态拦截、RLS 上下文、幂等 body 字段校验 | 不实现租户 CRUD |
-| tenant-service handlers | HTTP 解析、请求体校验、错误转换、审计日志触发 | 不直接写 SQL |
-| tenant-service service 层 | 业务规则：状态机、配额边界、最后管理员保护 | 不直接 HTTP；不直接 SQL |
+| Core Gateway | AuthN、AuthZ、RLS、幂等；**登录拦截 FROZEN/DISABLED 未接线（Deferred）**；Core admin 路由注入 lifecycle 归因头 | 不实现租户业务编排 |
+| tenant-service | gRPC RPC（TenantService 含租户列表 19 RPC）；编排 Core SDK + 自有 store；审计 | 不直接对外 HTTP |
+| Core PostgresTenant | tenants/auth/lifecycle 写读事务 | 不写 Services 业务表 |
 | ports 接口 | 抽象数据访问，便于 mock | 不含业务规则 |
 | postgres adapter | SQL 生成、RLS 设置、事务管理 | 不做业务决策 |
 | 审计日志 | 跨服务可观测、合规追溯 | 不阻塞主流程（异步写入或同步事务内） |
@@ -196,43 +242,27 @@
 ### 3.3 数据流（创建租户为例）
 
 ```
-1. BOSS 前端
-   POST /api/v1/svc/tenants
-   Headers: Authorization: Bearer <platform JWT>
-   Body: { name, display_name, email, plan_id, admin_email, admin_name, admin_password, idempotency_key }
+1. BOSS → POST /api/v1/svc/tenants
+   Body: { name, display_name, email, plan_id, admin_*, idempotency_key }
+   Headers: Authorization + X-Request-Id（链路）+ 平台用户上下文
 
-2. Core Gateway
-   - 校验 JWT → 解出 platform_user_id, roles
-   - 检查 roles 包含 platform-admin 或 platform-ops
-   - 检查 body idempotency_key 格式（UUID）
-   - 设置 RLS 上下文：SET app.current_tenant_id = NULL（平台操作绕过租户隔离）
-   - 转发至 tenant-service
+2. Gateway：JWT/RBAC/幂等 Redis；tenantCallCtx 注入 x-user-id / x-request-id → gRPC TenantService.CreateTenant
 
-3. tenant-service handler
-   - 解析 body（OpenAPI 校验）
-   - 透传 body idempotency_key 至 service
+3. tenant-service：
+   - 校验 name/密码/plan active
+   - bcrypt(admin_password) → Core CreateTenant（admin_password_hash）
+   - Core 单事务：tenants + tenant_auth + users + user_roles(tenant-admin)
+                 + tenant_lifecycle(action='create')  ← 归因来自 Core ctx，非 body
+   - 事务外 UpsertQuota（失败不回滚租户 + 重试）
+   - audit('tenant.create')
+   → 200 { id, message }
 
-4. tenant-service service.CreateTenant
-   - 校验 name 全局唯一（UNIQUE 约束保证）
-   - 校验 plan_id 对应套餐 status='active'
-   - 幂等由 Gateway 中间件处理（Redis `idempotency:platform::POST:/api/v1/svc/tenants:{sha256(key)}`）
-   - 事务内：
-     INSERT tenants (name, display_name, contact_email, plan_id, status='active')
-     INSERT tenant_auth (tenant_id) VALUES (tenant.id) -- 1:1 关系，全部默认值
-     INSERT users (email=admin_email, username=admin_name, status='active', password_hash=bcrypt(admin_password, 12))
-     INSERT user_roles (绑定 tenant-admin 内置角色)
-     调用 Core API 逐维度初始化该租户各 resource_type 的 resource_quota.total（按 plan_quota_limits 读取套餐限额，total=NULL 时用 resource_quota_meta.default_quota 兜底）
-     INSERT audit_logs (action='tenant.create', ...) -- 复用现有分区表
-     INSERT tenant_lifecycle (action='active', ...) -- 生命周期记录
-   - 提交
-
-5. 响应 200 OK
-   { id, message }
-
-6. 前端 invalidateQuery(['tenants'])
+（配额初始化不在 Core 创建事务内——与旧 plan「同事务调 Core 配额」不同，见实现。）
 ```
 
 ### 3.4 文件结构（新增）
+
+> **租户列表真实路径以 §0.3 为准。** 下文历史树（HTTP handlers / `20260723_015` / `pkg/ports/tenant_lifecycle_store.go`）部分已被实现取代，保留作历史参考。
 
 ```
 repo/
@@ -399,52 +429,35 @@ CREATE POLICY tenant_auth_self_read
 
 #### 4.1.3 tenant_lifecycle — 租户生命周期记录表（新增）
 
-记录租户状态变化的完整历史，与 `audit_logs` 互补：`audit_logs` 记录所有操作审计（含非状态变更操作如 reset_password），本表专注状态流转，便于按租户查询生命周期时间线。
+记录租户**状态转换动作**历史（与 `TenantStatus` 不同）。实现迁移：`20260902_001_tenant_list_management.sql`。
 
 ```sql
--- deploy/migrations/20260723_015_tenant_management.sql（同迁移文件内）
 CREATE TABLE tenant_lifecycle (
     id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id       UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    action          TEXT        NOT NULL,           -- 当前状态/动作：active / frozen / disabled
-    reason          TEXT,                           -- 变更原因（如"管理员手动冻结"）
-    user_id         UUID,                           -- 操作者 user_id（系统触发时为 NULL）
-    request_id      TEXT,                           -- 关联请求 ID（与 audit_logs.request_id 对应）
+    action          TEXT        NOT NULL CHECK (action IN ('create','freeze','unfreeze','disable')),
+    reason          TEXT,
+    user_id         UUID REFERENCES users(id) ON DELETE SET NULL,
+    request_id      TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
 CREATE INDEX idx_tenant_lifecycle_tenant ON tenant_lifecycle(tenant_id, created_at DESC);
-CREATE INDEX idx_tenant_lifecycle_action ON tenant_lifecycle(action, created_at DESC);
-
--- RLS: 平台操作绕过 RLS（平台管理员可查所有租户生命周期）
-ALTER TABLE tenant_lifecycle ENABLE ROW LEVEL SECURITY;
-ALTER TABLE tenant_lifecycle FORCE ROW LEVEL SECURITY;
-CREATE POLICY tenant_lifecycle_platform_bypass
-  ON tenant_lifecycle
-  USING (current_setting('app.current_tenant_id', true) IS NULL);
-
--- 租户上下文只能看自己的生命周期记录（Console 自助场景）
-CREATE POLICY tenant_lifecycle_self_read
-  ON tenant_lifecycle
-  USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
+-- RLS：平台绕过使用 NULLIF(current_setting(...), '') IS NULL（见迁移文件）
 ```
 
-**设计要点：**
+**设计要点（以实现为准）：**
 
-- **一行一次状态变更**：每次租户状态转换时，在事务内同步写入一行，`action` 记录当前状态、原因、操作者。
-- **创建时记录**：`CreateTenant` 时写入第一行，`action='active'`。
-- **与 audit_logs 互补**：`audit_logs` 是全量操作审计（含 reset_password 等非状态变更），本表只记录状态流转，便于按租户快速查询生命周期时间线。
-- **request_id 关联**：通过 `request_id` 与 `audit_logs` 关联，可交叉查询完整操作上下文。
+- `action` = **`TenantLifecycleAction`**：`create` / `freeze` / `unfreeze` / `disable`（**不是** active/frozen/disabled）
+- 创建写入 `action='create'`；归因 user_id/request_id 来自 Gateway→Core ctx
+- 存量租户幂等回填 create 行；查询经 Core `GET /admin/tenants/{id}/lifecycle`（非 service 直查冒充 Core）
+- 与 audit_logs 互补：本表专注状态机动作，audit 记全量操作
 
-**写入时机（与 §4.4 状态机转换表对应）：**
-
-| action | reason 示例 | user_id |
-|--------|------------|---------|
-| active | "新建租户，套餐 pro" | platform-admin |
-| frozen | "管理员手动冻结" | platform-admin |
-| active | "管理员解冻" | platform-admin |
-| disabled | "违规停用" | platform-admin |
-
+| action | 含义 |
+|--------|------|
+| create | 新建租户 |
+| freeze | active→frozen |
+| unfreeze | frozen→active |
+| disable | →disabled |
 #### 4.1.4 tenant_admins
 
 **不新建表，不新增列**。完全复用现有 `users` + `roles` + `user_roles` 三张表（见 `20260501000100_init_schema.sql` SECTION 2）：
@@ -900,49 +913,27 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ani_app_user;
 
 ### 4.4 状态机
 
-**三种状态：**
+**三种状态（`TenantStatus`）：**
 
-| 状态 | 含义 | 登录 | 资源操作 | 实例 |
-|------|------|------|---------|------|
-| **active** | 活跃 | 可登录 | 全部操作 | 正常运行 |
-| **frozen** | 冻结（资源保持原状，无法登录，无法创建） | 禁止登录 | 无（禁止登录） | 已创建实例继续运行 |
-| **disabled** | 禁用（资源删除，无法登录/查看/创建，不可逆） | 禁止登录 | 无 | 资源停止运行 |
+| 状态 | 含义 | 登录拦截 | 资源 | 实例 |
+|------|------|----------|------|------|
+| **active** | 活跃 | 可登录 | 全部操作 | 正常 |
+| **frozen** | 冻结 | **Deferred**（本阶段仅落库） | 状态机禁止新建等由产品后续定 | 可继续运行 |
+| **disabled** | 禁用（终态） | **Deferred** | **本阶段不释放/不删除资源**；禁用前四维 used+reserved 守卫 | 不编排停实例 |
 
 ```
-       ┌─────────────┐
-       │   active    │
-       │   活跃      │
-       └──────┬──────┘
-              │ 管理员手动冻结
-              ▼
-       ┌─────────────┐
-       │   frozen    │
-       │   冻结      │
-       └──────┬──────┘
-              │ 管理员手动禁用
-              ▼
-       ┌─────────────┐
-       │  disabled   │
-       │   禁用      │
-       └─────────────┘
+active ──freeze──▶ frozen ──unfreeze──▶ active
+  │                    │
+  └──── disable ───────┴──── disable ──▶ disabled（终态，无 enable）
 ```
 
-| 转换 | 触发 | 谁能触发 | 行为说明 |
-|------|------|---------|---------|
-| active → frozen | 管理员手动冻结 | platform-admin / platform-ops | 设置 frozen_at；禁止登录、实例继续运行 |
-| frozen → active | 管理员解冻 | platform-admin / platform-ops | 清空 frozen_at，恢复全部操作 |
-| active → disabled | 管理员手动禁用 | platform-admin / platform-ops | 设置 disabled_at；禁止登录、资源强制删除 |
-| frozen → disabled | 管理员手动禁用 | platform-admin / platform-ops | 同上 |
+| 转换 | 行为（已实现） |
+|------|----------------|
+| active→frozen | frozen_at + lifecycle(`freeze`) |
+| frozen→active | 清 frozen_at + lifecycle(`unfreeze`) |
+| active/frozen→disabled | 四维守卫通过后 disabled_at + lifecycle(`disable`)；**不释放资源** |
 
-**冻结 vs 禁用核心区别：**
-
-| 维度 | 冻结 (frozen) | 禁用 (disabled) |
-|------|-------------|---------------|
-| 触发方 | 管理员手动 | 管理员手动 |
-| 登录 | 禁止 | 禁止 |
-| 资源操作 | 无（禁止登录） | 无 |
-| 实例 | 继续运行 | 停止运行 |
-| 恢复后 | 解冻恢复全功能 | 不可逆（终态） |
+**冻结 vs 禁用（产品意图 vs 本阶段实现）：** 登录禁止与资源停止为产品目标，**当前仅状态+lifecycle+审计落地**；见 §0 / PRD Deferred。
 
 ### 4.5 audit_logs 表（复用现有分区表）
 
@@ -1059,13 +1050,13 @@ CREATE POLICY audit_platform_bypass
 
 ## §5 API 契约设计
 
-全部新增路径放入 `repo/api/openapi/services/v1.yaml`，前缀 `/api/v1/svc`。Core API `repo/api/openapi/v1.yaml` 不修改。
+租户列表 Services 路径放入 `services/v1.yaml`（相对 `/tenants*`，base `/api/v1/svc`）。**Core `v1.yaml` 已随租户列表扩展** `/admin/tenants*`（见 §0）——旧「Core 不修改」作废。
 
 ### 5.0 路径组职责说明
 
 | 路径组 | 作用 | 主要端点 |
 |--------|------|---------|
-| **tenants** | 租户生命周期管理：创建/查看/编辑/冻结/解冻/禁用（禁用后关联资源强制删除，不可逆）；身份认证（SSO/IdP 配置与测试、MFA 强制开关）；配额查询与变更申请（配额实际数据由 Core API 承载，本服务代理查询并记录变更申请至 `tenant_quota_change` 表 §4.1.6）；租户管理员列表；生命周期查询；操作历史查询 | `POST /tenants` 创建、`GET /tenants` 列表、`GET /tenants/{tenantId}` 详情、`PUT /tenants/{tenantId}` 修改基本信息、`POST /tenants/{tenantId}/freeze`、`POST /tenants/{tenantId}/unfreeze`、`POST /tenants/{tenantId}/disable`、`GET /tenants/{tenantId}/auth/sso` 查看 SSO、`PUT /tenants/{tenantId}/auth/sso` 修改 SSO、`POST /tenants/{tenantId}/auth/sso/test` 测试连接、`PUT /tenants/{tenantId}/auth/mfa` 切换强制 MFA、`GET /tenants/{tenantId}/quota` 查询配额、`POST /tenants/{tenantId}/quota-requests` 配额变更申请、`GET /tenants/{tenantId}/quota-requests` 查询申请列表、`POST /tenants/{tenantId}/quota-requests/{reqId}/approve` 审批申请、`GET /tenant-plans/{planId}/bindable-tenants` 查询可绑定该套餐的租户、`GET /tenants/{tenantId}/admins` 分页查询租户管理员（§5.2.7）、`GET /tenants/{tenantId}/lifecycle` 分页查看生命周期、`GET /tenants/{tenantId}/audit-logs` 分页查看操作历史 |
+| **tenants** | 租户生命周期：创建/查看/编辑/冻结/解冻/禁用（**本阶段不释放资源**；四维守卫）；SSO/MFA **配置**（测试连接 **501 stub**）；配额代理与变更申请；lifecycle（经 Core）；audit-logs；租户内 admins（admin∪inviting） | 见 OpenAPI 19 端点；权威 AC 见 PRD/Issue |
 | **tenant-admins** | 租户管理员管理（跨租户）：跨租户分页查询、可用租户列表 | `GET /tenant-admins` 跨租户分页查询所有管理员（返回租户对象）、`GET /tenant-admins/tenants` 查询可用租户列表（用于邀请管理员选择目标租户） |
 | **tenants/{tenantId}/admins** | 租户管理员管理（租户内）：详情、查询/修改角色权限、重置密码、禁用/启用、软删除；管理员操作历史查询 | `GET /tenants/{tenantId}/admins/{userId}` 详情、`GET /tenants/{tenantId}/admins/{userId}/role` 查询角色权限、`PUT /tenants/{tenantId}/admins/{userId}/role` 改权限、`POST /tenants/{tenantId}/admins/{userId}/reset-password`、`POST /tenants/{tenantId}/admins/{userId}/disable`、`POST /tenants/{tenantId}/admins/{userId}/enable`、`DELETE /tenants/{tenantId}/admins/{userId}`、`GET /tenants/{tenantId}/admins/{userId}/audit-logs` 管理员操作历史 |
 | **tenant-plans** | 套餐模板管理：draft→active→disabled 状态机；套餐限额查询与修改（任意状态可改，修改后同步存量租户）；删除套餐（有租户关联时不可删除）；套餐绑定租户查询；可绑定租户列表；套餐操作历史；配额元数据透传 | `POST /tenant-plans`、`GET /tenant-plans`、`GET /tenant-plans/{planId}`、`PUT /tenant-plans/{planId}`（更新 name/description）、`GET /tenant-plans/{planId}/quota-limits`、`PUT /tenant-plans/{planId}/quota-limits`、`POST /tenant-plans/{planId}/activate`、`POST /tenant-plans/{planId}/disable`、`DELETE /tenant-plans/{planId}`、`GET /tenant-plans/{planId}/tenants`、`GET /tenant-plans/{planId}/bindable-tenants`、`GET /tenant-plans/{planId}/audit-logs`、`GET /quota-meta`、`POST /tenants/{tenantId}/plan` |
@@ -1289,7 +1280,7 @@ tags:
 |------|------|------|------|
 | tenantId | uuid | 是 | 租户 ID |
 
-**说明:** 冻结后用户无法登录，实例继续运行，资源保持原状。设置 `status='frozen'`, `frozen_at`。`tenant_lifecycle.reason` 由后端自动填充（如"管理员手动冻结"）。
+**说明:** 设置 `status='frozen'`, `frozen_at`；写 lifecycle(`freeze`)+审计。实例可继续运行。**登录拦截 Deferred**（勿当作已接线）。
 
 **Response 200:** `{ id, message }`
 
@@ -1325,7 +1316,7 @@ tags:
 |------|------|------|------|
 | tenantId | uuid | 是 | 租户 ID |
 
-**说明:** 禁用后资源删除，无法登录/查看/创建（Gateway 登录链路检查 `tenants.status='disabled'` → 403 `TENANT_DISABLED`）。设置 `status='disabled'`, `disabled_at`。**不修改 users.status**，登录时由 Gateway 拦截租户级禁用即可。**禁用不可逆，无法恢复**（禁用是终态，不存在启用端点）。Core 侧 `resource_quota` 行保留（数据不删除），但资源实例停止运行。`tenant_lifecycle.reason` 由后端自动填充（如"管理员手动禁用"）。
+**说明:** 不可逆终态：`status='disabled'`, `disabled_at`；lifecycle(`disable`)+审计。**不修改 users.status**。前置：仅 `gpu_count`/`cpu_core`/`memory_gb`/`storage_gb` 任一 `used+reserved>0` → 409 `TENANT_HAS_RUNNING_RESOURCES`。**本阶段不释放资源、不停实例**；**登录拦截 Deferred**。保留 `resource_quota` 行。
 
 **Response 200:** `{ id, message }`
 
@@ -1353,7 +1344,7 @@ tags:
 | status | string | 否 | 全部 | 过滤：`active` / `disabled`（直接对应 `users.status`） |
 | search | string | 否 | 无 | email / username 模糊匹配 |
 
-**Response 200:** `CursorPage`（items + next_cursor），items 每条含 id / email / username / display_name / role / status / source / last_login_at（最近登录时间）及 tenant 对象（id / name / display_name），字段与详情（§5.4.4）一致。按 created_at DESC 排序，`next_cursor: null` 表示无更多数据
+**Response 200:** `CursorPage`；默认集合 = **tenant-admin ∪ inviting**（不含未邀请普通成员；默认不含 expired）。字段对齐 `TenantScopedAdmin`（含 is_inviting/is_expired）；**无 permissions[]**。
 
 > MFA/SSO 字段存放在 `tenant_auth` 表（§4.1.2），共 3 个业务字段：`mfa_required`（BOOLEAN）+ `sso_enabled`（BOOLEAN）+ `sso_provider`（TEXT，'oidc'/'custom'/NULL）。SSO 详细配置（issuer_url / client_id / client_secret_ref / scopes / auto_provision / email_domains）不在 tenant_auth 表中存放，由外部系统（K8s Secret/ConfigMap）承载，通过 `sso_provider` 标识提供商类型。身份认证共 3 个写接口 + 1 个查询接口，统一以 `/tenants/{tenantId}/auth` 为前缀，租户 ID 通过路径参数 `{tenantId}` 传递。
 
@@ -1405,8 +1396,10 @@ tags:
 **说明：**
 
 - 本端点支持部分更新：仅传入 `sso_enabled` 则切换开关，仅传入 `provider` 则更新 `sso_provider`，两者同时传入则一并更新。
-- 本端点只修改 `sso_enabled` 和 `sso_provider` 两个字段；SSO 详细配置（issuer_url / client_id / client_secret_ref / scopes / auto_provision / email_domains）由外部系统（K8s Secret/ConfigMap）承载，不在本端点处理。
-- `sso_enabled=TRUE` 时要求 `sso_provider` 已存在（表中已有值或本次请求同时传入 `provider`），否则 422 `TENANT_SSO_CONFIG_INVALID`。
+- 本端点只修改 `sso_enabled` 和 `sso_provider`；详细密钥在外部 Secret
+- `sso_enabled=true` 时有效 provider 必填，否则 422 `TENANT_SSO_CONFIG_INVALID`
+- provider：**省略/null=不更新；`""`=清空**；disabled 租户改 Auth → 409
+- Services PUT 映射 Core 单一 `PUT /admin/tenants/{id}/auth`；审计 `tenant.sso.update`
 - `sso_enabled=FALSE` 无前置条件，关闭后保留 `sso_provider` 值以备重新开启。
 - 关闭 SSO 后，已存在的 SSO 用户（`users.password_hash IS NULL`）无法登录，需平台改回本地密码或重新开启 SSO。
 
@@ -1419,59 +1412,13 @@ tags:
 
 #### 5.2.10 `POST /tenants/{tenantId}/auth/sso/test` — 测试 SSO 连接
 
+> **实现状态：OPEN / stub → Gateway 501 `NOT_IMPLEMENTED`**（Issue-010）。下列为**目标**行为，非当前可调用成功路径。
+
 **AuthZ:** platform-admin, platform-ops
 
-**Path 参数：**
+**目标 Response 200:** `{ success, discovery_result, error, tested_at }`（不写库不写审计）
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| tenantId | uuid | 是 | 租户 ID |
-
-**Response 200:**
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| success | boolean | 连接是否成功 |
-| provider | string | 测试的 IdP 提供商 |
-| discovery_result | object \| null | 成功时返回 OIDC discovery 文档摘要（authorization_endpoint / token_endpoint / userinfo_endpoint） |
-| error | string \| null | 失败时返回错误信息 |
-| tested_at | timestamp | 测试时间 |
-
-```json
-{
-  "success": true,
-  "provider": "oidc",
-  "discovery_result": {
-    "authorization_endpoint": "https://idp.example.com/auth",
-    "token_endpoint": "https://idp.example.com/token",
-    "userinfo_endpoint": "https://idp.example.com/userinfo"
-  },
-  "error": null,
-  "tested_at": "2026-07-24T10:00:00Z"
-}
-```
-
-```json
-{
-  "success": false,
-  "provider": "oidc",
-  "discovery_result": null,
-  "error": "issuer_url 不可达：连接超时",
-  "tested_at": "2026-07-24T10:00:00Z"
-}
-```
-
-**说明：**
-
-- 测试流程：读取 `tenant_auth.sso_provider`，根据 provider 类型从外部系统（K8s Secret/ConfigMap）加载 SSO 详细配置（issuer_url / client_id 等）进行连接测试 → 向 issuer_url 发起 OIDC discovery 请求（GET `/.well-known/openid-configuration`）→ 校验返回的 discovery 文档是否包含必需 endpoint。
-- 不修改任何数据，不写审计日志，不触发幂等。
-- 前端"测试连接"按钮调用此端点；建议在 `PUT /tenants/{tenantId}/auth/sso` 保存配置后、开启 `sso_enabled` 前先测试连接。
-
-**错误:**
-
-| HTTP | code | 说明 |
-|------|------|------|
-| 422 | TENANT_SSO_CONFIG_INVALID | 当前租户未配置 SSO（sso_provider 为 NULL）或外部系统缺少 SSO 详细配置 |
+**目标流程：** GetTenantAuth → 读 K8s Secret → OIDC discovery；未配置 → 422 `TENANT_SSO_CONFIG_INVALID`；Secret 缺失 → success=false（非 5xx）。
 
 #### 5.2.11 `PUT /tenants/{tenantId}/auth/mfa` — 切换强制 MFA（B2）
 
@@ -1499,12 +1446,10 @@ tags:
 
 **说明:**
 
-- 切换为 TRUE 后，该租户所有用户下次登录必须完成 MFA 二次校验；已登录 session 不受影响，但下次刷新 token 时强制
-- 切换为 FALSE 后，用户可继续用 MFA 或关闭 MFA（用户级 MFA 配置不修改，仅租户级强制开关变更）
-- 与用户级 MFA 配置关系：`tenant_auth.mfa_required=TRUE` 时，即使用户未开启 MFA 也会被强制要求设置；`FALSE` 时遵循用户级配置
-- MFA 校验形式：TOTP（Google Authenticator / 1Password 等）；本设计不包含 SMS/邮箱验证码
-- MFA secret 存储：用户级（`users.mfa_secret_encrypted`，由后续 PR 添加），不在本设计范围
-- 本端点仅切换租户级开关；用户级 MFA enrollment 端点（`POST /api/v1/auth/mfa/enroll` 等）属 auth-service 现有职责，不在本设计范围
+- **本阶段仅配置落库**；审计 `tenant.mfa.update`
+- **Deferred：**「下次登录必须 MFA」的登录侧强制执行
+- Gateway 要求 body 显式带 `mfa_required`（omit → 400）
+- 用户级 MFA enrollment 属 auth-service，不在本设计范围
 
 > 配额变更申请记录在 `tenant_quota_change` 表（§4.1.6）。配额实际数据（已用/限额）由 Core `resource_quota` 表承载，本服务通过 Core API 代理查询。共 3 个接口：查询租户配额、提交配额变更申请、查询申请列表与审批。`tenantId` 通过路径参数传递。
 
@@ -1550,7 +1495,7 @@ tags:
 }
 ```
 
-**说明：** 本端点代理 Core API `GET /api/v1/admin/tenants/{tenant_id}/quota`，组装 `resource_quota`（used / total）与 `resource_quota_meta`（display_name / unit）的 JOIN 结果返回。
+**说明：** 单次代理 Core `GET /admin/tenants/{tenant_id}/quota`（响应已含 display_name/unit）；svc **不再二次 ListQuotaMeta JOIN**。display_name 空则兜底 resource_type。Core 不可达 → **502 `GRPC_CLIENT_UNAVAILABLE`**。只读不写审计。
 
 #### 5.2.13 `POST /tenants/{tenantId}/quota-requests` — 提交配额变更申请
 
@@ -1593,20 +1538,23 @@ tags:
 { "id": "uuid", "message": "quota change request submitted" }
 ```
 
-**说明：**
+**说明（以实现为准）：**
 
-- 支持一次提交多个配额维度的变更申请，每个维度生成一条独立的 `tenant_quota_change` 记录。
-- 提交时逐维度从 Core `resource_quota` 读取当前 `total` 值冻结到 `old_value`，`status` 置为 `pending`。
-- 重复检查：同一租户同一 `resource_type` 已有 `pending` 状态的申请时，该维度跳过并返回 409 `QUOTA_CHANGE_REQUEST_DUPLICATE`（其他维度仍正常处理）。
-- `items` 中同一 `resource_type` 不可重复出现，否则 422 `QUOTA_CHANGE_REQUEST_INVALID`。
-- 申请创建后需平台管理员审核（审核端点属后续需求）。
+- 同批共享网关 `x-request-id`（兼容 `req_<uuid>`）；service **不** `uuid.New()`；缺失 → 400
+- **`x-user-id` 必填** 作 `requested_by`；缺失 → 400
+- 先 `ListQuotaMeta`：未注册/未启用 → **422 `QUOTA_RESOURCE_NOT_REGISTERED`**；再 GetQuota 冻 `old_value`（线协议 int64，无行→**0**）
+- **跨请求**同维 pending **允许**；批内重复维 → 422 `QUOTA_CHANGE_REQUEST_INVALID`；同 request 同维 PK → **409 `QUOTA_CHANGE_REQUEST_CONFLICT`**
+- 仅 INSERT；审批见 `.../approve`（整批按 request_id）
+- 响应 id = request_id
 
 **错误:**
 
 | HTTP | code | 说明 |
 |------|------|------|
-| 409 | QUOTA_CHANGE_REQUEST_DUPLICATE | 该租户该配额维度已有待审核的申请 |
-| 422 | QUOTA_CHANGE_REQUEST_INVALID | resource_type 不存在于 resource_quota_meta / new_value 为负数 / items 为空 / items 中 resource_type 重复 |
+| 409 | QUOTA_CHANGE_REQUEST_CONFLICT | 同 request_id 同维已存在 |
+| 422 | QUOTA_RESOURCE_NOT_REGISTERED | 维度未注册/未启用 |
+| 422 | QUOTA_CHANGE_REQUEST_INVALID | items 校验失败（空/重复/负数等） |
+| 400 | VALIDATION_FAILED | 缺 request_id / x-user-id |
 
 #### 5.2.14 `GET /tenant-plans/{planId}/bindable-tenants` — 查询可绑定该套餐的租户列表
 
@@ -1655,40 +1603,18 @@ tags:
 |------|------|------|------|------|
 | limit | integer | 否 | 20（max 100） | 每页数量 |
 | cursor | string | 否 | 无 | 上一页返回的 next_cursor |
-| action | string | 否 | 全部 | 过滤：`active` / `frozen` / `disabled` |
+| action | string | 否 | 全部 | 过滤：`create` / `freeze` / `unfreeze` / `disable`（`TenantLifecycleAction`） |
 
 **Response 200:**
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| items | array | 生命周期记录列表（按 created_at DESC 排序） |
-| items[].id | string | 记录 ID |
-| items[].tenant_id | string | 租户 ID |
-| items[].action | string | 当前状态/动作：active / frozen / disabled |
-| items[].reason | string \| null | 变更原因 |
-| items[].user_id | string \| null | 操作者 user_id（NULL=系统触发） |
-| items[].request_id | string \| null | 关联请求 ID |
-| items[].created_at | timestamp | 记录时间 |
-| next_cursor | string \| null | 下一页游标；null 表示无更多数据 |
+| items | array | 按 created_at DESC |
+| items[].action | string | create / freeze / unfreeze / disable |
+| items[].reason / user_id / request_id / created_at | … | |
+| next_cursor | string \| null | |
 
-```json
-{
-  "items": [
-    {
-      "id": "uuid",
-      "tenant_id": "uuid",
-      "action": "frozen",
-      "reason": "管理员手动冻结",
-      "user_id": "uuid",
-      "request_id": "req-123",
-      "created_at": "2026-07-24T10:00:00Z"
-    }
-  ],
-  "next_cursor": "<base64-cursor>"
-}
-```
-
-**说明：** 本端点直接查询 `tenant_lifecycle` 表（§4.1.3），按 `created_at DESC` 排序，支持按 `action` 过滤。不调用 Core API。
+**说明：** 经 Core `GET /admin/tenants/{id}/lifecycle`（**不是** service 直查冒充）；租户不存在 → 404。
 
 #### 5.2.16 `GET /tenants/{tenantId}/audit-logs` — 分页查看操作历史
 
@@ -3215,26 +3141,31 @@ tags:
 | PLAN_NOT_ACTIVE | 422 | 套餐状态非 active，不可被租户引用 |
 | QUOTA_RESOURCE_NOT_REGISTERED | 422 | resource_type 未注册或 enabled=false |
 | GRPC_CLIENT_UNAVAILABLE | 502 | Core 服务不可用（配额元数据/配额下发失败） |
-| TENANT_FROZEN | 403 | 租户已冻结，禁止登录 |
-| TENANT_DISABLED | 403 | 租户已禁用，禁止登录 |
-| TENANT_ADMIN_NOT_FOUND | 404 | 租户管理员不存在（含邀请时无匹配用户、重置密码遇到已软删除用户） |
-| TENANT_ADMIN_ALREADY_ADMIN | 409 | 邀请时该用户已是本租户 tenant-admin |
-| TENANT_INVITATION_PENDING | 409 | 该用户在本租户下已有 status='inviting' 的待接受邀请（应改用重发） |
-| TENANT_ADMIN_INVITATION_NOT_FOUND | 404 | 重发邀请时该租户内无匹配的邀请记录 |
-| TENANT_INVITATION_SETTLED | 409 | 最新邀请已 accepted / rejected（终态，不可重发） |
-| TENANT_SSO_CONFIG_INVALID | 422 | SSO 配置校验失败（issuer_url 不合法 / client_id 缺失 / client_secret_ref 未指向有效 K8s Secret / 开启 sso_enabled 但 provider / issuer_url / client_id / client_secret_ref 为空） |
+| TENANT_HAS_RUNNING_RESOURCES | 409 | 禁用前四维 used+reserved>0 |
+| TENANT_FROZEN | 403 | **Deferred**（登录拦截未接线） |
+| TENANT_DISABLED | 403 | **Deferred** |
+| TENANT_ADMIN_NOT_FOUND | 404 | 租户管理员不存在 |
+| TENANT_ADMIN_ALREADY_ADMIN | 409 | 已是本租户 tenant-admin |
+| TENANT_INVITATION_PENDING | 409 | 已有 inviting 邀请 |
+| TENANT_ADMIN_INVITATION_NOT_FOUND | 404 | 无匹配邀请 |
+| TENANT_INVITATION_SETTLED | 409 | 邀请已终态 |
+| TENANT_SSO_CONFIG_INVALID | 422 | SSO 配置非法 |
 | PLATFORM_ADMIN_NOT_FOUND | 404 | 平台账号不存在 |
-| LAST_PLATFORM_ADMIN | 422 | 最后管理员保护触发 |
-| MFA_REQUIRED | 403 | 该租户已启用 mfa_required，但用户未完成 MFA 二次校验 |
-| IDEMPOTENCY_CONFLICT | 409 | 同 key 不同 body（网关中间件处理，不在 service 错误码表中） |
-| IDEMPOTENCY_KEY_INVALID | 400 | idempotency_key body 字段格式错（网关中间件处理，不在 service 错误码表中） |
+| LAST_PLATFORM_ADMIN | 422 | 最后管理员保护 |
+| MFA_REQUIRED | 403 | **Deferred**（登录 MFA 强制未接线） |
+| NOT_IMPLEMENTED | 501 | SSO test stub（Issue-010） |
+| IDEMPOTENCY_CONFLICT | 409 | 同 key 不同 body（网关） |
+| IDEMPOTENCY_KEY_INVALID | 400 | idempotency_key 格式错（网关） |
 | VALIDATION_FAILED | 400 | 请求体校验失败 |
-| FORBIDDEN | 403 | 角色不匹配（RBAC 校验失败） |
-| QUOTA_CHANGE_REQUEST_DUPLICATE | 409 | 该租户该配额维度已有待审核的申请 |
-| QUOTA_CHANGE_REQUEST_INVALID | 422 | resource_type 不存在 / new_value 为负数 |
-| ROLE_CHANGE_INVALID | 422 | role_id 非可分配角色（非 platform-*、非 tenant-admin，tenant_id 为空或等于路径 tenantId） |
-| USER_STATE_INVALID | 409 | 重复 disable/enable（状态未变化） |
-| PASSWORD_SAME_AS_OLD | 422 | 重置密码时新密码与旧密码相同 |
+| FORBIDDEN | 403 | RBAC 失败 |
+| QUOTA_CHANGE_REQUEST_CONFLICT | 409 | 同 request 同维冲突（取代旧全局 DUPLICATE） |
+| QUOTA_CHANGE_REQUEST_DUPLICATE | 409 | **已废弃语义**；实现用 CONFLICT + 跨请求同维允许 |
+| QUOTA_CHANGE_REQUEST_INVALID | 422 | items 校验失败 |
+| QUOTA_RESOURCE_NOT_REGISTERED | 422 | 维度未注册/未启用 |
+| GRPC_CLIENT_UNAVAILABLE | 502 | Core/gRPC 不可达 |
+| ROLE_CHANGE_INVALID | 422 | 角色不可分配 |
+| USER_STATE_INVALID | 409 | 重复 disable/enable |
+| PASSWORD_SAME_AS_OLD | 422 | 新密码与旧密码相同 |
 
 > 计费相关错误码（BILLING_*）暂不实现，后续 PR 再补充。
 
@@ -3248,22 +3179,22 @@ tags:
 
 ```
 repo/services/tenant-service/
-├── cmd/
-│   └── main.go                      # 入口，加载配置，启动 gRPC server（bootstrap.RunGRPC）；每个 service 经 Register(grpc.Server) 挂载
-├── internal/service/                # gRPC server 层（仿 model-service）：RPC handler + 业务逻辑，Register(*grpc.Server)
-│   ├── tenant_service.go            # gRPC TenantService server（BindPlanQuota）；不含 Quotas 子路径业务；CreateTenant 调用 Core QuotaService 初始化
+├── main.go                          # bootstrap.RunGRPC；装配各 Service.Register
+├── internal/service/
+│   ├── tenant_service.go            # TenantService：含租户列表 19 RPC + BindPlanQuota 等
 │   ├── tenant_admin_service.go
-│   ├── tenant_plan_service.go       # gRPC TenantPlanService server（10 个 RPC，嵌入 UnimplementedTenantPlanServiceServer + Register）
-│   ├── platform_admin_service.go
-│   └── audit_helper.go
-├── internal/repo/                   # tenant-service 自有仓储层（Services 自包含、不依赖 Core 的 ports/adapters）
-│   ├── ports/                       # 接口与领域模型：TenantPlanStore / TenantStore / TenantPlanAuditStore / TenantAdminStore / TenantAdminSvcClient / TenantSvcClient / QuotaSvcClient
-│   └── adapters/                    # 实现：postgres（PostgresTenantPlanStore / PostgresTenantPlanAuditStore / PostgresTenantStore / PostgresTenantAdminStore）+ core（QuotaSvcClient / TenantAdminSvcClient / TenantSvcClient）
-└── internal/wiring/
-    └── wiring.go                    # 依赖注入：ports ↔ adapters ↔ services；注入 Core QuotaService / QuotaMetaService 客户端
+│   ├── tenant_plan_service.go
+│   └── … 
+├── internal/repo/
+│   ├── ports/                       # TenantSvcClient / TenantStore / AuditStore / QuotaSvcClient / sso.go（ports only）
+│   └── adapters/
+│       ├── core/tenant_svc_client.go
+│       └── postgres/{tenant_store,audit_store,…}.go
+# SSO adapters/sso：未实现（Issue-010）；main 注入 nil
 ```
 
-> 传输层说明：QUOTA 套餐（tenant-plan）功能已按 gRPC 模式落地——`internal/service/tenant_plan_service.go` 为 gRPC server（`Register(server *grpc.Server)`）；对外 REST 由 ani-gateway 提供（`/api/v1/svc/tenant-plans*`、`/api/v1/svc/tenants/:tenantId/plan`），网关注册对应路由后经 gRPC client 转发到 tenant-service（`TENANT_SERVICE_ADDR`，缺省 `127.0.0.1:9105`，与 tenant-service `GRPC_PORT`/`HEALTH_PORT` 一致）。
+> 对外 REST 由 ani-gateway：`/api/v1/svc/tenants*`、`tenant-plans*`、`tenant-admins*` 等经 gRPC 转发。  
+> Core 租户写模型：`pkg/adapters/runtime/postgres_tenant.go`。详见 §0。
 
 ### 6.2 端口接口（pkg/ports）
 

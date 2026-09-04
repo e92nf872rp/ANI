@@ -29,13 +29,13 @@ type TenantPlanService struct {
 	tenantv1.UnimplementedTenantPlanServiceServer
 
 	plans       ports.TenantPlanStore      // 套餐 + plan_quota_limits 持久化
-	audit       ports.TenantPlanAuditStore // 配额套餐域审计（audit_logs）；
+	audit       ports.AuditStore // 配额套餐域审计（audit_logs）；
 	core        ports.QuotaSvcClient       // Core 配额 API（校验维度 / 后续下发限额）
 	tenantPlans ports.TenantPlanSvcClient  // Core 配额套餐绑定 API（tenant_count / 绑定列表）
 }
 
 // NewTenantPlanService 装配依赖并返回可注册的 gRPC server。
-func NewTenantPlanService(plans ports.TenantPlanStore, audit ports.TenantPlanAuditStore, core ports.QuotaSvcClient, tenantPlans ports.TenantPlanSvcClient) *TenantPlanService {
+func NewTenantPlanService(plans ports.TenantPlanStore, audit ports.AuditStore, core ports.QuotaSvcClient, tenantPlans ports.TenantPlanSvcClient) *TenantPlanService {
 	return &TenantPlanService{plans: plans, audit: audit, core: core, tenantPlans: tenantPlans}
 }
 
@@ -911,11 +911,23 @@ func buildQuotaLimitViews(ctx context.Context, plans ports.TenantPlanStore, core
 	return out, nil
 }
 
-// scheduleQuotaSyncRetry 异步重试租户配额同步（复用 syncPlanQuotaToTenant）：最多 3 次，指数退避 1s/2s/4s。
-// 单测可将 enablePutQuotaRetry 置 false 以禁用后台重试。
+func (s *TenantPlanService) scheduleQuotaSyncRetry(planID, tenantID uuid.UUID, totalByType map[string]int64, dims []string) {
+	scheduleQuotaSyncRetry(s.audit, s.plans, s.core, planID, tenantID, totalByType, dims)
+}
+
+// enablePutQuotaRetry 控制配额异步重试；单测可置 false。
 var enablePutQuotaRetry = true
 
-func (s *TenantPlanService) scheduleQuotaSyncRetry(planID, tenantID uuid.UUID, totalByType map[string]int64, dims []string) {
+// scheduleQuotaSyncRetry 异步重试租户配额同步（复用 syncPlanQuotaToTenant）：最多 3 次，指数退避 1s/2s/4s。
+// 单测可将 enablePutQuotaRetry 置 false 以禁用后台重试。
+func scheduleQuotaSyncRetry(
+	audit ports.AuditStore,
+	plans ports.TenantPlanStore,
+	core ports.QuotaSvcClient,
+	planID, tenantID uuid.UUID,
+	totalByType map[string]int64,
+	dims []string,
+) {
 	// 步骤 1：单测开关关闭时不启 goroutine
 	if !enablePutQuotaRetry {
 		return
@@ -933,12 +945,12 @@ func (s *TenantPlanService) scheduleQuotaSyncRetry(planID, tenantID uuid.UUID, t
 		for attempt := 1; attempt <= 3; attempt++ {
 			time.Sleep(backoff)
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			res, err := syncPlanQuotaToTenant(ctx, s.plans, s.core, tenantID, totalsCopy, dimsCopy)
+			res, err := syncPlanQuotaToTenant(ctx, plans, core, tenantID, totalsCopy, dimsCopy)
 			cancel()
 			if err == nil {
 				return
 			}
-			writeAuditFailure(context.Background(), s.audit, auditResourceTenantPlan, "tenant.quota_init_failed", map[string]any{
+			writeAuditFailure(context.Background(), audit, auditResourceTenantPlan, "tenant.quota_init_failed", map[string]any{
 				"plan_id":   planID.String(),
 				"tenant_id": tenantID.String(),
 				"attempt":   attempt,
@@ -1059,7 +1071,7 @@ func auditLogToPB(log ports.AuditLog) (*tenantv1.AuditLog, error) {
 	return &tenantv1.AuditLog{
 		Id:        log.ID.String(),
 		Action:    log.Action,
-		Result:    log.Result,
+		Result:    string(log.Result),
 		Details:   st,
 		CreatedAt: timestamppb.New(log.CreatedAt),
 	}, nil

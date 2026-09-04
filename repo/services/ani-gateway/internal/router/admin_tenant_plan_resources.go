@@ -110,7 +110,7 @@ func (api *adminTenantPlanAPI) listPlanTenantSummaries(ctx context.Context, c *a
 			ID:          row.ID,
 			Name:        row.Name,
 			DisplayName: row.DisplayName,
-			Status:      row.Status,
+			Status:      string(row.Status),
 		})
 	}
 	c.JSON(http.StatusOK, map[string]any{"items": items})

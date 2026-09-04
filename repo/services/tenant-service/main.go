@@ -15,15 +15,16 @@ func main() {
 	defer deps.Close()
 
 	plans := postgres.NewPostgresTenantPlanStore(deps.DB)
-	audit := postgres.NewPostgresTenantPlanAuditStore(deps.DB)
+	audit := postgres.NewPostgresAuditStore(deps.DB)
 	coreQuota := core.NewQuotaSvcClient()
 	coreTenants := core.NewTenantSvcClient()
 	coreTenantPlans := core.NewTenantPlanSvcClient()
 	coreTenantAdmins := core.NewTenantAdminSvcClient()
 	tenantAdmin := postgres.NewPostgresTenantAdminStore(deps.DB)
+	tenantStore := postgres.NewPostgresTenantStore(deps.DB)
 
 	tenantPlanSvc := service.NewTenantPlanService(plans, audit, coreQuota, coreTenantPlans)
-	tenantSvc := service.NewTenantService(plans, coreTenants, coreTenantPlans, coreQuota, audit)
+	tenantSvc := service.NewTenantService(plans, coreTenants, coreTenantPlans, coreQuota, tenantStore, audit, coreTenantAdmins, nil, nil, tenantAdmin)
 	tenantAdminSvc := service.NewTenantAdminService(coreTenantAdmins, coreTenants, tenantAdmin, audit)
 
 	bootstrap.RunGRPC(cfg.GRPCPort, func(s *grpc.Server) {

@@ -6,6 +6,7 @@ import "common/v1/common.proto";
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/wrappers.proto";
+import "tenant/v1/tenant_list_service.proto";
 
 option go_package = "github.com/kubercloud/ani/pkg/generated/pb/tenant/v1;tenantv1";
 
@@ -41,10 +42,48 @@ service TenantPlanService {
   rpc ListQuotaMeta(ListQuotaMetaRequest) returns (ListQuotaMetaResponse);
 }
 
-// TenantService manages tenant-plan binding (BindPlanQuota).
+// TenantService manages tenant lifecycle (BOSS tenant list) and plan binding.
 service TenantService {
   // BindPlanQuota binds a quota plan to a tenant and pushes effective quota to Core.
   rpc BindPlanQuota(BindPlanQuotaRequest) returns (IdempotentResult);
+  // ListAvailablePlans returns active tenant plans for create-tenant selector.
+  rpc ListAvailablePlans(ListAvailablePlansRequest) returns (ListAvailablePlansResponse);
+  // CreateTenant creates a tenant with first admin and plan binding.
+  rpc CreateTenant(CreateTenantRequest) returns (common.v1.IdempotentResult);
+  // ListTenants returns a cursor-paginated tenant list.
+  rpc ListTenants(ListTenantsRequest) returns (ListTenantsResponse);
+  // GetTenantDetail returns full tenant detail.
+  rpc GetTenantDetail(GetTenantDetailRequest) returns (TenantDetail);
+  // UpdateTenant updates display_name / contact_email.
+  rpc UpdateTenant(UpdateTenantRequest) returns (common.v1.IdempotentResult);
+  // FreezeTenant transitions active -> frozen.
+  rpc FreezeTenant(FreezeTenantRequest) returns (common.v1.IdempotentResult);
+  // UnfreezeTenant transitions frozen -> active.
+  rpc UnfreezeTenant(UnfreezeTenantRequest) returns (common.v1.IdempotentResult);
+  // DisableTenant transitions active/frozen -> disabled (terminal).
+  rpc DisableTenant(DisableTenantRequest) returns (common.v1.IdempotentResult);
+  // GetTenantAuth returns SSO/MFA config view.
+  rpc GetTenantAuth(GetTenantAuthRequest) returns (TenantAuthConfig);
+  // UpdateTenantSso updates SSO fields (maps to Core updateTenantAuth).
+  rpc UpdateTenantSso(UpdateTenantSsoRequest) returns (common.v1.IdempotentResult);
+  // TestTenantSso runs OIDC discovery without persisting state.
+  rpc TestTenantSso(TestTenantSsoRequest) returns (SsoTestResult);
+  // UpdateTenantMfa toggles tenant-level MFA requirement.
+  rpc UpdateTenantMfa(UpdateTenantMfaRequest) returns (common.v1.IdempotentResult);
+  // GetTenantQuota returns quota usage view (Core proxy + meta join).
+  rpc GetTenantQuota(GetTenantQuotaRequest) returns (GetTenantQuotaResponse);
+  // SubmitQuotaChangeRequest submits or overwrites pending quota change rows.
+  rpc SubmitQuotaChangeRequest(SubmitQuotaChangeRequestRequest) returns (common.v1.IdempotentResult);
+  // ListQuotaChangeRequests lists quota change requests (no pagination).
+  rpc ListQuotaChangeRequests(ListQuotaChangeRequestsRequest) returns (ListQuotaChangeRequestsResponse);
+  // ReviewQuotaChangeRequest approves or rejects a pending request.
+  rpc ReviewQuotaChangeRequest(ReviewQuotaChangeRequestRequest) returns (common.v1.IdempotentResult);
+  // ListTenantLifecycle returns tenant lifecycle entries.
+  rpc ListTenantLifecycle(ListTenantLifecycleRequest) returns (ListTenantLifecycleResponse);
+  // ListTenantAuditLogs returns tenant-scoped audit logs.
+  rpc ListTenantAuditLogs(ListTenantAuditLogsRequest) returns (ListTenantAuditLogsResponse);
+  // ListTenantAdmins returns tenant-scoped admin list (Core listTenantUsers proxy).
+  rpc ListTenantAdmins(ListTenantAdminsRequest) returns (ListTenantAdminsResponse);
 }
 
 // ── TenantPlan RPC request / response ────────────────────────────────────────
