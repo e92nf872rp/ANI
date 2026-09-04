@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/mail"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -34,6 +35,7 @@ type TenantService struct {
 	tenantStore  ports.TenantStore
 	audit        ports.AuditStore
 	tenantAdmins ports.TenantAdminSvcClient
+	adminStore   ports.TenantAdminStore
 	ssoLoader    ports.SsoConfigLoader
 	oidcTester   ports.OidcDiscoveryTester
 }
@@ -51,6 +53,7 @@ func NewTenantService(
 	tenantAdmins ports.TenantAdminSvcClient,
 	ssoLoader ports.SsoConfigLoader,
 	oidcTester ports.OidcDiscoveryTester,
+	adminStore ports.TenantAdminStore,
 ) *TenantService {
 	return &TenantService{
 		plans:        plans,
@@ -60,6 +63,7 @@ func NewTenantService(
 		tenantStore:  tenantStore,
 		audit:        audit,
 		tenantAdmins: tenantAdmins,
+		adminStore:   adminStore,
 		ssoLoader:    ssoLoader,
 		oidcTester:   oidcTester,
 	}
@@ -1577,9 +1581,159 @@ func toProtoTenantAuditLogEntry(log ports.AuditLog) (*tenantv1.TenantAuditLogEnt
 }
 
 func (s *TenantService) ListTenantAdmins(ctx context.Context, req *tenantv1.ListTenantAdminsRequest) (*tenantv1.ListTenantAdminsResponse, error) {
-	_ = ctx
-	_ = req
-	return nil, tenantRPCNotImplemented()
+	// 步骤 1：依赖与 tenant_id（固定租户作用域）
+	if req == nil {
+		req = &tenantv1.ListTenantAdminsRequest{}
+	}
+	tenantID, err := parseTenantID(req.GetTenantId())
+	if err != nil {
+		return nil, err
+	}
+	if s.tenants == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant client unavailable")
+	}
+	if s.tenantAdmins == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrCoreUnavailable, "tenant admin client unavailable")
+	}
+	if s.adminStore == nil {
+		return nil, businessError(codes.Unavailable, ports.ErrStoreUnavailable, "tenant admin store unavailable")
+	}
+
+	// 步骤 2：可选 role / status / search（先于 GetTenant，非法入参不打 Core）
+	roleFilter := strings.TrimSpace(req.GetRole())
+	if roleFilter != "" && roleFilter != ports.TenantAdminRoleAdmin && roleFilter != ports.TenantAdminRoleUser && roleFilter != ports.TenantAdminRoleAuditor {
+		return nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "role must be tenant-admin, user, or auditor")
+	}
+	statusFilter := strings.TrimSpace(req.GetStatus())
+	if statusFilter != "" && statusFilter != ports.TenantAdminUserStatusActive && statusFilter != ports.TenantAdminUserStatusDisabled {
+		return nil, businessError(codes.InvalidArgument, ports.ErrValidationFailed, "status must be active or disabled")
+	}
+	search := strings.TrimSpace(req.GetSearch())
+
+	limit := 20
+	cursor := ""
+	if page := req.GetPage(); page != nil {
+		if page.GetLimit() > 0 {
+			limit = int(page.GetLimit())
+		}
+		if limit > 100 {
+			limit = 100
+		}
+		cursor = strings.TrimSpace(page.GetCursor())
+	}
+
+	// 步骤 3：租户必须存在
+	if _, err := s.tenants.GetTenant(ctx, tenantID); err != nil {
+		return nil, mapStoreError(err)
+	}
+
+	// 步骤 4：仅 inviting 邀请标记（不含 expired；与跨租户列表默认集合不同）
+	tid := tenantID
+	adminHelper := &TenantAdminService{core: s.tenantAdmins, store: s.adminStore, tenants: s.tenants}
+	flags, err := s.adminStore.ListInvitationFlags(ctx, &tid, ports.InvitationStatusInviting)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	flagByKey := make(map[string]ports.InvitationFlag, len(flags))
+	for _, f := range flags {
+		flagByKey[tenantUserKey(f.TenantID, f.UserID)] = f
+	}
+
+	// 步骤 5：Core tenant-admin ∪ inviting 非 admin（去重）
+	merged := make(map[string]ports.AdminWithTenant)
+	admins, listErr := adminHelper.listAllCoreTenantAdmins(ctx, &tid, statusFilter, search)
+	if listErr != nil {
+		return nil, listErr
+	}
+	for _, admin := range admins {
+		merged[tenantUserKey(admin.Tenant.ID, admin.ID)] = admin
+	}
+	pendingFlags := make([]ports.InvitationFlag, 0)
+	for _, f := range flags {
+		key := tenantUserKey(f.TenantID, f.UserID)
+		if _, ok := merged[key]; ok {
+			continue
+		}
+		pendingFlags = append(pendingFlags, f)
+	}
+	if len(pendingFlags) > 0 {
+		users, batchErr := adminHelper.batchGetUsersByFlags(ctx, pendingFlags)
+		if batchErr != nil {
+			return nil, batchErr
+		}
+		for _, f := range pendingFlags {
+			if user, ok := users[f.UserID]; ok {
+				if statusFilter != "" && user.Status != statusFilter {
+					continue
+				}
+				merged[tenantUserKey(f.TenantID, f.UserID)] = user
+			}
+		}
+	}
+
+	// 步骤 6：填充 is_inviting + role/search 过滤
+	items := make([]ports.AdminWithTenant, 0, len(merged))
+	for key, user := range merged {
+		if search != "" && !tenantAdminSearchMatch(user, search) {
+			continue
+		}
+		if roleFilter != "" && user.Role != roleFilter {
+			continue
+		}
+		if f, ok := flagByKey[key]; ok {
+			user.IsInviting = f.IsInviting
+			user.IsExpired = f.IsExpired
+		} else {
+			user.IsInviting = false
+			user.IsExpired = false
+		}
+		items = append(items, user)
+	}
+
+	// 步骤 7：排序 + 游标分页
+	sort.Slice(items, func(i, j int) bool {
+		ci, cj := adminCreatedAt(items[i]), adminCreatedAt(items[j])
+		if !ci.Equal(cj) {
+			return ci.After(cj)
+		}
+		return items[i].ID.String() > items[j].ID.String()
+	})
+	pageItems, nextCursor, pageErr := pageTenantAdmins(items, limit, cursor)
+	if pageErr != nil {
+		return nil, pageErr
+	}
+
+	// 步骤 8：映射 TenantScopedAdmin（含 id/username/display_name/role/status + is_inviting）
+	out := make([]*tenantv1.TenantScopedAdmin, 0, len(pageItems))
+	for _, it := range pageItems {
+		out = append(out, toProtoTenantScopedAdmin(it))
+	}
+	return &tenantv1.ListTenantAdminsResponse{Items: out, NextCursor: nextCursor}, nil
+}
+
+func toProtoTenantScopedAdmin(user ports.AdminWithTenant) *tenantv1.TenantScopedAdmin {
+	out := &tenantv1.TenantScopedAdmin{
+		Id:         user.ID.String(),
+		Email:      user.Email,
+		Username:   user.Username,
+		Role:       user.Role,
+		Status:     user.Status,
+		Source:     user.Source,
+		IsInviting: user.IsInviting,
+		IsExpired:  user.IsExpired,
+		Tenant: &tenantv1.TenantScopedAdminTenantRef{
+			Id:          user.Tenant.ID.String(),
+			Name:        user.Tenant.Name,
+			DisplayName: user.Tenant.DisplayName,
+		},
+	}
+	if user.DisplayName != nil {
+		out.DisplayName = wrapperspb.String(*user.DisplayName)
+	}
+	if user.LastLoginAt != nil {
+		out.LastLoginAt = timestamppb.New(user.LastLoginAt.UTC())
+	}
+	return out
 }
 
 func tenantRPCNotImplemented() error {

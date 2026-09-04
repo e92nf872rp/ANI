@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -110,7 +111,7 @@ func TestTenantService_BindPlanQuota(t *testing.T) {
 		},
 	}
 	audit := &fakeAuditStore{}
-	svc := NewTenantService(plans, tenants, tenants, quota, nil, audit, nil, nil, nil)
+	svc := NewTenantService(plans, tenants, tenants, quota, nil, audit, nil, nil, nil, nil)
 
 	res, err := svc.BindPlanQuota(context.Background(), &tenantv1.BindPlanQuotaRequest{
 		TenantId: tenantID.String(),
@@ -154,7 +155,7 @@ func Test_BindPlanQuota_PlanNotActive(t *testing.T) {
 	tenants := &fakeTenantClient{
 		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusActive, PlanID: uuid.New()},
 	}
-	svc := NewTenantService(plans, tenants, tenants, &fakeQuotaClient{}, nil, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(plans, tenants, tenants, &fakeQuotaClient{}, nil, &fakeAuditStore{}, nil, nil, nil, nil)
 
 	_, err := svc.BindPlanQuota(context.Background(), &tenantv1.BindPlanQuotaRequest{
 		TenantId: tenantID.String(),
@@ -174,7 +175,7 @@ func Test_BindPlanQuota_DisabledTenant(t *testing.T) {
 	tenants := &fakeTenantClient{
 		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusDisabled, PlanID: uuid.New()},
 	}
-	svc := NewTenantService(plans, tenants, tenants, &fakeQuotaClient{}, nil, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(plans, tenants, tenants, &fakeQuotaClient{}, nil, &fakeAuditStore{}, nil, nil, nil, nil)
 
 	_, err := svc.BindPlanQuota(context.Background(), &tenantv1.BindPlanQuotaRequest{
 		TenantId: tenantID.String(),
@@ -210,7 +211,7 @@ func Test_BindPlanQuota_AuditWriteErrorStillSucceeds(t *testing.T) {
 			return uuid.Nil, errors.New("db down")
 		},
 	}
-	svc := NewTenantService(plans, tenants, tenants, quota, nil, audit, nil, nil, nil)
+	svc := NewTenantService(plans, tenants, tenants, quota, nil, audit, nil, nil, nil, nil)
 
 	res, err := svc.BindPlanQuota(context.Background(), &tenantv1.BindPlanQuotaRequest{
 		TenantId: tenantID.String(),
@@ -254,7 +255,7 @@ func Test_BindPlanQuota_CoreFailRollsBackPlanID(t *testing.T) {
 		},
 	}
 	audit := &fakeAuditStore{}
-	svc := NewTenantService(plans, tenants, tenants, quota, nil, audit, nil, nil, nil)
+	svc := NewTenantService(plans, tenants, tenants, quota, nil, audit, nil, nil, nil, nil)
 
 	_, err := svc.BindPlanQuota(context.Background(), &tenantv1.BindPlanQuotaRequest{
 		TenantId: tenantID.String(),
@@ -303,7 +304,7 @@ func Test_BindPlanQuota_ApprovedSkip(t *testing.T) {
 		},
 	}
 	audit := &fakeAuditStore{}
-	svc := NewTenantService(plans, tenants, tenants, quota, nil, audit, nil, nil, nil)
+	svc := NewTenantService(plans, tenants, tenants, quota, nil, audit, nil, nil, nil, nil)
 
 	_, err := svc.BindPlanQuota(context.Background(), &tenantv1.BindPlanQuotaRequest{
 		TenantId: tenantID.String(),
@@ -351,7 +352,7 @@ func TestTenantService_GetTenantDetail_FullFields(t *testing.T) {
 	plans := &bindFakePlanStore{
 		plan: ports.TenantPlan{ID: planID, Code: "pro", Status: ports.TenantPlanStatusActive},
 	}
-	svc := NewTenantService(plans, tenants, nil, nil, nil, nil, nil, nil, nil)
+	svc := NewTenantService(plans, tenants, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	res, err := svc.GetTenantDetail(context.Background(), &tenantv1.GetTenantDetailRequest{TenantId: tenantID.String()})
 	if err != nil {
@@ -377,7 +378,7 @@ func TestTenantService_GetTenantDetail_AuthDefaults(t *testing.T) {
 			Status: ports.TenantStatusActive, PlanID: planID,
 		},
 	}
-	svc := NewTenantService(&bindFakePlanStore{plan: ports.TenantPlan{ID: planID, Code: "starter"}}, tenants, nil, nil, nil, nil, nil, nil, nil)
+	svc := NewTenantService(&bindFakePlanStore{plan: ports.TenantPlan{ID: planID, Code: "starter"}}, tenants, nil, nil, nil, nil, nil, nil, nil, nil)
 	res, err := svc.GetTenantDetail(context.Background(), &tenantv1.GetTenantDetailRequest{TenantId: tenantID.String()})
 	if err != nil {
 		t.Fatalf("GetTenantDetail: %v", err)
@@ -400,7 +401,7 @@ func TestTenantService_ListTenants_AssemblesPlanCode(t *testing.T) {
 	plans := &bindFakePlanStore{
 		plan: ports.TenantPlan{ID: planID, Code: "pro", Status: ports.TenantPlanStatusActive},
 	}
-	svc := NewTenantService(plans, tenants, nil, nil, nil, nil, nil, nil, nil)
+	svc := NewTenantService(plans, tenants, nil, nil, nil, nil, nil, nil, nil, nil)
 	res, err := svc.ListTenants(context.Background(), &tenantv1.ListTenantsRequest{})
 	if err != nil {
 		t.Fatalf("ListTenants: %v", err)
@@ -411,7 +412,7 @@ func TestTenantService_ListTenants_AssemblesPlanCode(t *testing.T) {
 }
 
 func TestTenantService_GetTenantDetail_NotFound(t *testing.T) {
-	svc := NewTenantService(nil, &fakeTenantClient{}, nil, nil, nil, nil, nil, nil, nil)
+	svc := NewTenantService(nil, &fakeTenantClient{}, nil, nil, nil, nil, nil, nil, nil, nil)
 	_, err := svc.GetTenantDetail(context.Background(), &tenantv1.GetTenantDetailRequest{
 		TenantId: uuid.NewString(),
 	})
@@ -464,7 +465,7 @@ func TestTenantService_ListAvailablePlans_OnlyActive(t *testing.T) {
 			{ID: activeID, Code: "pro", Name: "Pro"},
 		},
 	}
-	svc := NewTenantService(plans, nil, nil, nil, nil, nil, nil, nil, nil)
+	svc := NewTenantService(plans, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	res, err := svc.ListAvailablePlans(context.Background(), &tenantv1.ListAvailablePlansRequest{})
 	if err != nil {
 		t.Fatalf("ListAvailablePlans: %v", err)
@@ -475,7 +476,7 @@ func TestTenantService_ListAvailablePlans_OnlyActive(t *testing.T) {
 }
 
 func TestTenantService_ListAvailablePlans_Empty(t *testing.T) {
-	svc := NewTenantService(&availablePlansFakeStore{}, nil, nil, nil, nil, nil, nil, nil, nil)
+	svc := NewTenantService(&availablePlansFakeStore{}, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	res, err := svc.ListAvailablePlans(context.Background(), &tenantv1.ListAvailablePlansRequest{})
 	if err != nil {
 		t.Fatalf("ListAvailablePlans: %v", err)
@@ -514,7 +515,7 @@ func TestValidateAdminPassword(t *testing.T) {
 }
 
 func TestTenantService_CreateTenant_NilRequest(t *testing.T) {
-	svc := NewTenantService(&bindFakePlanStore{}, &fakeTenantClient{}, nil, &fakeQuotaClient{}, nil, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(&bindFakePlanStore{}, &fakeTenantClient{}, nil, &fakeQuotaClient{}, nil, &fakeAuditStore{}, nil, nil, nil, nil)
 	_, err := svc.CreateTenant(context.Background(), nil)
 	if status.Code(err) != codes.InvalidArgument || !strings.Contains(status.Convert(err).Message(), "request required") {
 		t.Fatalf("err=%v", err)
@@ -542,7 +543,7 @@ func TestTenantService_CreateTenant_Success(t *testing.T) {
 		},
 	}
 	audit := &fakeAuditStore{}
-	svc := NewTenantService(plans, tenants, nil, quota, nil, audit, nil, nil, nil)
+	svc := NewTenantService(plans, tenants, nil, quota, nil, audit, nil, nil, nil, nil)
 
 	mdCtx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
 		"x-request-id", "req_create-tenant-1",
@@ -587,7 +588,7 @@ func TestTenantService_CreateTenant_PlanNotActive(t *testing.T) {
 	plans := &bindFakePlanStore{
 		plan: ports.TenantPlan{ID: planID, Status: ports.TenantPlanStatusDraft},
 	}
-	svc := NewTenantService(plans, &fakeTenantClient{}, nil, &fakeQuotaClient{}, nil, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(plans, &fakeTenantClient{}, nil, &fakeQuotaClient{}, nil, &fakeAuditStore{}, nil, nil, nil, nil)
 	_, err := svc.CreateTenant(context.Background(), &tenantv1.CreateTenantRequest{
 		Name: "acme-co", DisplayName: "Acme", Email: "ops@acme.io",
 		PlanId: planID.String(), AdminEmail: "admin@acme.io", AdminName: "acme_admin",
@@ -613,7 +614,7 @@ func TestTenantService_CreateTenant_NameConflict(t *testing.T) {
 	quota := &fakeQuotaClient{
 		meta: []ports.QuotaMeta{{ResourceType: "gpu_count", Enabled: true, DefaultQuota: 1}},
 	}
-	svc := NewTenantService(plans, tenants, nil, quota, nil, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(plans, tenants, nil, quota, nil, &fakeAuditStore{}, nil, nil, nil, nil)
 	_, err := svc.CreateTenant(context.Background(), &tenantv1.CreateTenantRequest{
 		Name: "acme-co", DisplayName: "Acme", Email: "ops@acme.io",
 		PlanId: planID.String(), AdminEmail: "admin@acme.io", AdminName: "acme_admin",
@@ -629,7 +630,7 @@ func TestTenantService_UpdateTenant_EmptyRejected(t *testing.T) {
 	tenants := &fakeTenantClient{
 		tenant: ports.Tenant{ID: tenantID, Name: "acme", DisplayName: "Acme", Status: ports.TenantStatusActive, ContactEmail: "ops@acme.io"},
 	}
-	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil, nil)
 	_, err := svc.UpdateTenant(context.Background(), &tenantv1.UpdateTenantRequest{TenantId: tenantID.String()})
 	if status.Code(err) != codes.InvalidArgument || !strings.HasPrefix(status.Convert(err).Message(), "VALIDATION_FAILED") {
 		t.Fatalf("err=%v", err)
@@ -647,7 +648,7 @@ func TestTenantService_UpdateTenant_DisabledRejected(t *testing.T) {
 			Status: ports.TenantStatusDisabled, ContactEmail: "ops@acme.io",
 		},
 	}
-	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil, nil)
 	dn := "New Name"
 	_, err := svc.UpdateTenant(context.Background(), &tenantv1.UpdateTenantRequest{
 		TenantId:    tenantID.String(),
@@ -670,7 +671,7 @@ func TestTenantService_UpdateTenant_PartialFields(t *testing.T) {
 		},
 	}
 	audit := &fakeAuditStore{}
-	svc := NewTenantService(nil, tenants, nil, nil, nil, audit, nil, nil, nil)
+	svc := NewTenantService(nil, tenants, nil, nil, nil, audit, nil, nil, nil, nil)
 
 	res, err := svc.UpdateTenant(context.Background(), &tenantv1.UpdateTenantRequest{
 		TenantId:     tenantID.String(),
@@ -714,7 +715,7 @@ func TestTenantService_UpdateTenant_DisplayNameOnly(t *testing.T) {
 			Status: ports.TenantStatusFrozen, ContactEmail: "ops@beta.io", PlanID: uuid.New(),
 		},
 	}
-	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil, nil)
 	_, err := svc.UpdateTenant(context.Background(), &tenantv1.UpdateTenantRequest{
 		TenantId:    tenantID.String(),
 		DisplayName: wrapperspb.String("Beta Inc"),
@@ -736,7 +737,7 @@ func TestTenantService_FreezeTenant_Success(t *testing.T) {
 		tenant: ports.Tenant{ID: tenantID, Name: "acme", Status: ports.TenantStatusActive},
 	}
 	audit := &fakeAuditStore{}
-	svc := NewTenantService(nil, tenants, nil, nil, nil, audit, nil, nil, nil)
+	svc := NewTenantService(nil, tenants, nil, nil, nil, audit, nil, nil, nil, nil)
 	res, err := svc.FreezeTenant(context.Background(), &tenantv1.FreezeTenantRequest{TenantId: tenantID.String()})
 	if err != nil {
 		t.Fatalf("FreezeTenant: %v", err)
@@ -757,7 +758,7 @@ func TestTenantService_FreezeTenant_StateInvalid(t *testing.T) {
 	tenants := &fakeTenantClient{
 		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusFrozen},
 	}
-	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil, nil)
 	_, err := svc.FreezeTenant(context.Background(), &tenantv1.FreezeTenantRequest{TenantId: tenantID.String()})
 	if status.Code(err) != codes.FailedPrecondition || !strings.HasPrefix(status.Convert(err).Message(), "TENANT_STATE_INVALID") {
 		t.Fatalf("err=%v", err)
@@ -769,7 +770,7 @@ func TestTenantService_UnfreezeTenant_Success(t *testing.T) {
 	tenants := &fakeTenantClient{
 		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusFrozen},
 	}
-	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil, nil)
 	_, err := svc.UnfreezeTenant(context.Background(), &tenantv1.UnfreezeTenantRequest{TenantId: tenantID.String()})
 	if err != nil {
 		t.Fatalf("UnfreezeTenant: %v", err)
@@ -792,7 +793,7 @@ func TestTenantService_DisableTenant_UsedBlocked(t *testing.T) {
 			}, nil
 		},
 	}
-	svc := NewTenantService(nil, tenants, nil, quota, nil, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, tenants, nil, quota, nil, &fakeAuditStore{}, nil, nil, nil, nil)
 	_, err := svc.DisableTenant(context.Background(), &tenantv1.DisableTenantRequest{TenantId: tenantID.String()})
 	if status.Code(err) != codes.FailedPrecondition || !strings.HasPrefix(status.Convert(err).Message(), "TENANT_HAS_RUNNING_RESOURCES") {
 		t.Fatalf("err=%v", err)
@@ -817,7 +818,7 @@ func TestTenantService_DisableTenant_ReservedBlocked(t *testing.T) {
 			}, nil
 		},
 	}
-	svc := NewTenantService(nil, tenants, nil, quota, nil, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, tenants, nil, quota, nil, &fakeAuditStore{}, nil, nil, nil, nil)
 	_, err := svc.DisableTenant(context.Background(), &tenantv1.DisableTenantRequest{TenantId: tenantID.String()})
 	if status.Code(err) != codes.FailedPrecondition || !strings.Contains(status.Convert(err).Message(), "used+reserved > 0") {
 		t.Fatalf("err=%v", err)
@@ -844,7 +845,7 @@ func TestTenantService_DisableTenant_OtherDimUsedAllowed(t *testing.T) {
 		},
 	}
 	audit := &fakeAuditStore{}
-	svc := NewTenantService(nil, tenants, nil, quota, nil, audit, nil, nil, nil)
+	svc := NewTenantService(nil, tenants, nil, quota, nil, audit, nil, nil, nil, nil)
 	res, err := svc.DisableTenant(context.Background(), &tenantv1.DisableTenantRequest{TenantId: tenantID.String()})
 	if err != nil {
 		t.Fatalf("DisableTenant: %v", err)
@@ -875,7 +876,7 @@ func TestTenantService_DisableTenant_AllGuardZero(t *testing.T) {
 			},
 		},
 	}
-	svc := NewTenantService(nil, tenants, nil, quota, nil, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, tenants, nil, quota, nil, &fakeAuditStore{}, nil, nil, nil, nil)
 	_, err := svc.DisableTenant(context.Background(), &tenantv1.DisableTenantRequest{TenantId: tenantID.String()})
 	if err != nil {
 		t.Fatalf("DisableTenant: %v", err)
@@ -896,7 +897,7 @@ func TestTenantService_GetTenantQuota_AssemblesFromGetQuota(t *testing.T) {
 			},
 		},
 	}
-	svc := NewTenantService(nil, nil, nil, quota, nil, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, nil, nil, quota, nil, &fakeAuditStore{}, nil, nil, nil, nil)
 	res, err := svc.GetTenantQuota(context.Background(), &tenantv1.GetTenantQuotaRequest{TenantId: tenantID.String()})
 	if err != nil {
 		t.Fatalf("GetTenantQuota: %v", err)
@@ -929,7 +930,7 @@ func TestTenantService_GetTenantQuota_TenantNotFound(t *testing.T) {
 			return nil, ports.ErrTenantNotFound
 		},
 	}
-	svc := NewTenantService(nil, nil, nil, quota, nil, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, nil, nil, quota, nil, &fakeAuditStore{}, nil, nil, nil, nil)
 	_, err := svc.GetTenantQuota(context.Background(), &tenantv1.GetTenantQuotaRequest{TenantId: tenantID.String()})
 	st, _ := status.FromError(err)
 	if st.Code() != codes.NotFound || !strings.Contains(st.Message(), "TENANT_NOT_FOUND") {
@@ -944,7 +945,7 @@ func TestTenantService_GetTenantQuota_CoreUnavailable(t *testing.T) {
 			return nil, ports.ErrCoreUnavailable
 		},
 	}
-	svc := NewTenantService(nil, nil, nil, quota, nil, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, nil, nil, quota, nil, &fakeAuditStore{}, nil, nil, nil, nil)
 	_, err := svc.GetTenantQuota(context.Background(), &tenantv1.GetTenantQuotaRequest{TenantId: tenantID.String()})
 	st, _ := status.FromError(err)
 	if st.Code() != codes.Unavailable || !strings.Contains(st.Message(), "GRPC_CLIENT_UNAVAILABLE") {
@@ -960,7 +961,7 @@ func TestTenantService_GetTenantQuota_NoAudit(t *testing.T) {
 		},
 	}
 	audit := &fakeAuditStore{}
-	svc := NewTenantService(nil, nil, nil, quota, nil, audit, nil, nil, nil)
+	svc := NewTenantService(nil, nil, nil, quota, nil, audit, nil, nil, nil, nil)
 	_, err := svc.GetTenantQuota(context.Background(), &tenantv1.GetTenantQuotaRequest{TenantId: tenantID.String()})
 	if err != nil {
 		t.Fatalf("GetTenantQuota: %v", err)
@@ -973,7 +974,7 @@ func TestTenantService_GetTenantQuota_NoAudit(t *testing.T) {
 func TestTenantService_GetTenantAuth_Defaults(t *testing.T) {
 	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 	tenants := &fakeTenantClient{} // auth.TenantID Nil → defaults
-	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil, nil)
 	got, err := svc.GetTenantAuth(context.Background(), &tenantv1.GetTenantAuthRequest{TenantId: tenantID.String()})
 	if err != nil {
 		t.Fatalf("GetTenantAuth: %v", err)
@@ -990,7 +991,7 @@ func TestTenantService_UpdateTenantSso_RequiresProvider(t *testing.T) {
 		auth:   ports.TenantAuth{TenantID: tenantID, SsoEnabled: false},
 	}
 	audit := &fakeAuditStore{}
-	svc := NewTenantService(nil, tenants, nil, nil, nil, audit, nil, nil, nil)
+	svc := NewTenantService(nil, tenants, nil, nil, nil, audit, nil, nil, nil, nil)
 	_, err := svc.UpdateTenantSso(context.Background(), &tenantv1.UpdateTenantSsoRequest{
 		TenantId:   tenantID.String(),
 		SsoEnabled: wrapperspb.Bool(true),
@@ -1013,7 +1014,7 @@ func TestTenantService_UpdateTenantSso_TenantDisabledAsStateInvalid(t *testing.T
 		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusDisabled},
 		auth:   ports.TenantAuth{TenantID: tenantID, SsoEnabled: false},
 	}
-	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil, nil)
 	_, err := svc.UpdateTenantSso(context.Background(), &tenantv1.UpdateTenantSsoRequest{
 		TenantId:   tenantID.String(),
 		SsoEnabled: wrapperspb.Bool(true),
@@ -1035,7 +1036,7 @@ func TestTenantService_UpdateTenantSso_DisableWithoutProvider(t *testing.T) {
 		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusActive},
 		auth:   ports.TenantAuth{TenantID: tenantID, SsoEnabled: true, SsoProvider: &provider},
 	}
-	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil, nil)
 	res, err := svc.UpdateTenantSso(context.Background(), &tenantv1.UpdateTenantSsoRequest{
 		TenantId:   tenantID.String(),
 		SsoEnabled: wrapperspb.Bool(false),
@@ -1057,7 +1058,7 @@ func TestTenantService_UpdateTenantSso_ProviderWhileSSOOff(t *testing.T) {
 		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusFrozen},
 		auth:   ports.TenantAuth{TenantID: tenantID, SsoEnabled: false},
 	}
-	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil, nil)
 	_, err := svc.UpdateTenantSso(context.Background(), &tenantv1.UpdateTenantSsoRequest{
 		TenantId: tenantID.String(),
 		Provider: wrapperspb.String("oidc"),
@@ -1077,7 +1078,7 @@ func TestTenantService_UpdateTenantSso_KeepExistingProvider(t *testing.T) {
 		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusActive},
 		auth:   ports.TenantAuth{TenantID: tenantID, SsoEnabled: false, SsoProvider: &provider},
 	}
-	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil, nil)
 	res, err := svc.UpdateTenantSso(context.Background(), &tenantv1.UpdateTenantSsoRequest{
 		TenantId:   tenantID.String(),
 		SsoEnabled: wrapperspb.Bool(true),
@@ -1096,7 +1097,7 @@ func TestTenantService_UpdateTenantMfa_TenantDisabledAsStateInvalid(t *testing.T
 		tenant: ports.Tenant{ID: tenantID, Status: ports.TenantStatusDisabled},
 		auth:   ports.TenantAuth{TenantID: tenantID},
 	}
-	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil, nil)
 	_, err := svc.UpdateTenantMfa(context.Background(), &tenantv1.UpdateTenantMfaRequest{
 		TenantId:    tenantID.String(),
 		MfaRequired: true,
@@ -1117,7 +1118,7 @@ func TestTenantService_Auth_ReadWriteRoundTrip(t *testing.T) {
 		auth:   ports.TenantAuth{TenantID: tenantID, UpdatedAt: beforeAt},
 	}
 	audit := &fakeAuditStore{}
-	svc := NewTenantService(nil, tenants, nil, nil, nil, audit, nil, nil, nil)
+	svc := NewTenantService(nil, tenants, nil, nil, nil, audit, nil, nil, nil, nil)
 
 	got, err := svc.GetTenantAuth(context.Background(), &tenantv1.GetTenantAuthRequest{TenantId: tenantID.String()})
 	if err != nil || got.GetSsoEnabled() || got.GetMfaRequired() {
@@ -1268,7 +1269,7 @@ func TestTenantService_SubmitQuotaChangeRequest_HappyPath(t *testing.T) {
 	}
 	store := &fakeTenantStore{}
 	audit := &fakeAuditStore{}
-	svc := NewTenantService(nil, nil, nil, quota, store, audit, nil, nil, nil)
+	svc := NewTenantService(nil, nil, nil, quota, store, audit, nil, nil, nil, nil)
 
 	res, err := svc.SubmitQuotaChangeRequest(quotaChangeCtx(actorID, requestID), &tenantv1.SubmitQuotaChangeRequestRequest{
 		TenantId: tenantID.String(),
@@ -1298,7 +1299,7 @@ func TestTenantService_SubmitQuotaChangeRequest_DuplicateDimInBatch(t *testing.T
 	tenantID := uuid.New()
 	actorID := uuid.New()
 	requestID := uuid.New()
-	svc := NewTenantService(nil, nil, nil, &fakeQuotaClient{meta: []ports.QuotaMeta{{ResourceType: "gpu_count", Enabled: true}}}, &fakeTenantStore{}, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, nil, nil, &fakeQuotaClient{meta: []ports.QuotaMeta{{ResourceType: "gpu_count", Enabled: true}}}, &fakeTenantStore{}, &fakeAuditStore{}, nil, nil, nil, nil)
 	_, err := svc.SubmitQuotaChangeRequest(quotaChangeCtx(actorID, requestID), &tenantv1.SubmitQuotaChangeRequestRequest{
 		TenantId: tenantID.String(),
 		Items: []*tenantv1.QuotaChangeRequestInput{
@@ -1317,7 +1318,7 @@ func TestTenantService_SubmitQuotaChangeRequest_MetaDisabled(t *testing.T) {
 	actorID := uuid.New()
 	requestID := uuid.New()
 	quota := &fakeQuotaClient{meta: []ports.QuotaMeta{{ResourceType: "gpu_count", Enabled: false}}}
-	svc := NewTenantService(nil, nil, nil, quota, &fakeTenantStore{}, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, nil, nil, quota, &fakeTenantStore{}, &fakeAuditStore{}, nil, nil, nil, nil)
 	_, err := svc.SubmitQuotaChangeRequest(quotaChangeCtx(actorID, requestID), &tenantv1.SubmitQuotaChangeRequestRequest{
 		TenantId: tenantID.String(),
 		Items:    []*tenantv1.QuotaChangeRequestInput{{ResourceType: "gpu_count", NewValue: 1}},
@@ -1331,7 +1332,7 @@ func TestTenantService_SubmitQuotaChangeRequest_MetaDisabled(t *testing.T) {
 func TestTenantService_SubmitQuotaChangeRequest_MissingRequestID(t *testing.T) {
 	tenantID := uuid.New()
 	actorID := uuid.New()
-	svc := NewTenantService(nil, nil, nil, &fakeQuotaClient{}, &fakeTenantStore{}, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, nil, nil, &fakeQuotaClient{}, &fakeTenantStore{}, &fakeAuditStore{}, nil, nil, nil, nil)
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-user-id", actorID.String()))
 	_, err := svc.SubmitQuotaChangeRequest(ctx, &tenantv1.SubmitQuotaChangeRequestRequest{
 		TenantId: tenantID.String(),
@@ -1353,7 +1354,7 @@ func TestTenantService_SubmitQuotaChangeRequest_CrossRequestSameDimAllowed(t *te
 		existing: map[uuid.UUID][]ports.CoreQuotaResult{tenantID: {{ResourceType: "gpu_count", Total: 4}}},
 	}
 	store := &fakeTenantStore{}
-	svc := NewTenantService(nil, nil, nil, quota, store, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, nil, nil, quota, store, &fakeAuditStore{}, nil, nil, nil, nil)
 	for _, rid := range []uuid.UUID{req1, req2} {
 		if _, err := svc.SubmitQuotaChangeRequest(quotaChangeCtx(actorID, rid), &tenantv1.SubmitQuotaChangeRequestRequest{
 			TenantId: tenantID.String(),
@@ -1376,7 +1377,7 @@ func TestTenantService_SubmitQuotaChangeRequest_SameRequestDimConflict(t *testin
 		existing: map[uuid.UUID][]ports.CoreQuotaResult{tenantID: {{ResourceType: "gpu_count", Total: 1}}},
 	}
 	store := &fakeTenantStore{insertErr: ports.ErrQuotaChangeRequestConflict}
-	svc := NewTenantService(nil, nil, nil, quota, store, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, nil, nil, quota, store, &fakeAuditStore{}, nil, nil, nil, nil)
 	_, err := svc.SubmitQuotaChangeRequest(quotaChangeCtx(actorID, requestID), &tenantv1.SubmitQuotaChangeRequestRequest{
 		TenantId: tenantID.String(),
 		Items:    []*tenantv1.QuotaChangeRequestInput{{ResourceType: "gpu_count", NewValue: 2}},
@@ -1398,7 +1399,7 @@ func TestTenantService_ListAndReviewQuotaChangeRequest(t *testing.T) {
 	}}}
 	quota := &fakeQuotaClient{}
 	audit := &fakeAuditStore{}
-	svc := NewTenantService(nil, nil, nil, quota, store, audit, nil, nil, nil)
+	svc := NewTenantService(nil, nil, nil, quota, store, audit, nil, nil, nil, nil)
 
 	listed, err := svc.ListQuotaChangeRequests(context.Background(), &tenantv1.ListQuotaChangeRequestsRequest{
 		TenantId: tenantID.String(), Status: "pending",
@@ -1436,7 +1437,7 @@ func TestTenantService_ReviewQuotaChangeRequest_ApprovedRequired(t *testing.T) {
 	tenantID := uuid.New()
 	actorID := uuid.New()
 	requestID := uuid.New()
-	svc := NewTenantService(nil, nil, nil, &fakeQuotaClient{}, &fakeTenantStore{}, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, nil, nil, &fakeQuotaClient{}, &fakeTenantStore{}, &fakeAuditStore{}, nil, nil, nil, nil)
 	_, err := svc.ReviewQuotaChangeRequest(quotaChangeCtx(actorID, uuid.New()), &tenantv1.ReviewQuotaChangeRequestRequest{
 		TenantId: tenantID.String(), RequestId: requestID.String(),
 	})
@@ -1455,7 +1456,7 @@ func TestTenantService_SubmitQuotaChangeRequest_RequestIDWithReqPrefix(t *testin
 		existing: map[uuid.UUID][]ports.CoreQuotaResult{tenantID: {{ResourceType: "gpu_count", Total: 1}}},
 	}
 	store := &fakeTenantStore{}
-	svc := NewTenantService(nil, nil, nil, quota, store, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, nil, nil, quota, store, &fakeAuditStore{}, nil, nil, nil, nil)
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
 		"x-request-id", "req_"+rawUUID.String(),
 		"x-user-id", actorID.String(),
@@ -1480,7 +1481,7 @@ func TestTenantService_ReviewQuotaChangeRequest_QuotaNilBeforeSetStatus(t *testi
 		TenantID: tenantID, RequestID: requestID, ResourceType: "gpu_count",
 		NewValue: 16, Status: "pending", RequestedBy: actorID, CreatedAt: time.Now().UTC(),
 	}}}
-	svc := NewTenantService(nil, nil, nil, nil /* quota */, store, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, nil, nil, nil /* quota */, store, &fakeAuditStore{}, nil, nil, nil, nil)
 	_, err := svc.ReviewQuotaChangeRequest(quotaChangeCtx(actorID, uuid.New()), &tenantv1.ReviewQuotaChangeRequestRequest{
 		TenantId: tenantID.String(), RequestId: requestID.String(), Approved: wrapperspb.Bool(true),
 	})
@@ -1505,7 +1506,7 @@ func TestTenantService_ListTenantLifecycle_FilterAndPage(t *testing.T) {
 			{ID: uuid.MustParse("33333333-3333-4333-8333-333333333333"), TenantID: tenantID, Action: "disable", CreatedAt: now.Add(-2 * time.Hour)},
 		},
 	}
-	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil, nil)
 
 	page1, err := svc.ListTenantLifecycle(context.Background(), &tenantv1.ListTenantLifecycleRequest{
 		TenantId: tenantID.String(),
@@ -1535,7 +1536,7 @@ func TestTenantService_ListTenantLifecycle_FilterAndPage(t *testing.T) {
 
 func TestTenantService_ListTenantLifecycle_InvalidAction(t *testing.T) {
 	tenantID := uuid.New()
-	svc := NewTenantService(nil, &fakeTenantClient{}, nil, nil, nil, nil, nil, nil, nil)
+	svc := NewTenantService(nil, &fakeTenantClient{}, nil, nil, nil, nil, nil, nil, nil, nil)
 	_, err := svc.ListTenantLifecycle(context.Background(), &tenantv1.ListTenantLifecycleRequest{
 		TenantId: tenantID.String(),
 		Action:   "suspend",
@@ -1553,7 +1554,7 @@ func TestTenantService_ListTenantLifecycle_NotFound(t *testing.T) {
 			return ports.TenantLifecycleListResult{}, ports.ErrTenantNotFound
 		},
 	}
-	svc := NewTenantService(nil, tenants, nil, nil, nil, nil, nil, nil, nil)
+	svc := NewTenantService(nil, tenants, nil, nil, nil, nil, nil, nil, nil, nil)
 	_, err := svc.ListTenantLifecycle(context.Background(), &tenantv1.ListTenantLifecycleRequest{TenantId: tenantID.String()})
 	st, _ := status.FromError(err)
 	if st.Code() != codes.NotFound || !strings.Contains(st.Message(), "TENANT_NOT_FOUND") {
@@ -1573,7 +1574,7 @@ func TestTenantService_ListTenantAuditLogs_FilterAndPage(t *testing.T) {
 		{ID: uuid.MustParse("11111111-1111-4111-8111-111111111111"), TenantID: &tid, UserID: &actor, Action: "tenant.freeze", Resource: "tenant", Result: "success", Details: map[string]any{"x": 1}, CreatedAt: now},
 	}}
 	tenants := &fakeTenantClient{tenant: ports.Tenant{ID: tenantID, Name: "acme", Status: ports.TenantStatusActive}}
-	svc := NewTenantService(nil, tenants, nil, nil, nil, audit, nil, nil, nil)
+	svc := NewTenantService(nil, tenants, nil, nil, nil, audit, nil, nil, nil, nil)
 
 	page1, err := svc.ListTenantAuditLogs(context.Background(), &tenantv1.ListTenantAuditLogsRequest{
 		TenantId: tenantID.String(),
@@ -1608,7 +1609,7 @@ func TestTenantService_ListTenantAuditLogs_FilterAndPage(t *testing.T) {
 func TestTenantService_ListTenantAuditLogs_InvalidResult(t *testing.T) {
 	tenantID := uuid.New()
 	tenants := &fakeTenantClient{tenant: ports.Tenant{ID: tenantID, Name: "acme", Status: ports.TenantStatusActive}}
-	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, tenants, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil, nil)
 	_, err := svc.ListTenantAuditLogs(context.Background(), &tenantv1.ListTenantAuditLogsRequest{
 		TenantId: tenantID.String(),
 		Result:   "ok",
@@ -1621,7 +1622,7 @@ func TestTenantService_ListTenantAuditLogs_InvalidResult(t *testing.T) {
 
 func TestTenantService_ListTenantAuditLogs_NotFound(t *testing.T) {
 	tenantID := uuid.New()
-	svc := NewTenantService(nil, &fakeTenantClient{}, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil)
+	svc := NewTenantService(nil, &fakeTenantClient{}, nil, nil, nil, &fakeAuditStore{}, nil, nil, nil, nil)
 	_, err := svc.ListTenantAuditLogs(context.Background(), &tenantv1.ListTenantAuditLogsRequest{TenantId: tenantID.String()})
 	st, _ := status.FromError(err)
 	if st.Code() != codes.NotFound || !strings.Contains(st.Message(), "TENANT_NOT_FOUND") {
@@ -1637,12 +1638,189 @@ func TestTenantService_ListTenantAuditLogs_NoWriteAudit(t *testing.T) {
 	}}
 	before := len(audit.logs)
 	tenants := &fakeTenantClient{tenant: ports.Tenant{ID: tenantID, Name: "acme", Status: ports.TenantStatusActive}}
-	svc := NewTenantService(nil, tenants, nil, nil, nil, audit, nil, nil, nil)
+	svc := NewTenantService(nil, tenants, nil, nil, nil, audit, nil, nil, nil, nil)
 	_, err := svc.ListTenantAuditLogs(context.Background(), &tenantv1.ListTenantAuditLogsRequest{TenantId: tenantID.String()})
 	if err != nil {
 		t.Fatalf("ListTenantAuditLogs: %v", err)
 	}
 	if len(audit.logs) != before {
 		t.Fatalf("read path must not append audit, before=%d after=%d", before, len(audit.logs))
+	}
+}
+
+func TestTenantService_ListTenantAdmins_AdminAndInviting(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	adminID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
+	admin2ID := uuid.MustParse("22222222-2222-4222-8222-222222222222")
+	invitingID := uuid.MustParse("33333333-3333-4333-8333-333333333333")
+	plainID := uuid.MustParse("44444444-4444-4444-8444-444444444444")
+	now := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
+	mk := func(id uuid.UUID, role, username string, created time.Time) ports.AdminWithTenant {
+		dn := username + "-dn"
+		return ports.AdminWithTenant{
+			ID: id, Email: username + "@acme.io", Username: username, DisplayName: &dn,
+			Role: role, Status: ports.TenantAdminUserStatusActive, Source: ports.TenantAdminSourceLocal,
+			CreatedAt: &created,
+			Tenant:    ports.TenantRef{ID: tenantID, Name: "acme", DisplayName: "Acme"},
+		}
+	}
+	admin1 := mk(adminID, ports.TenantAdminRoleAdmin, "admin1", now)
+	admin2 := mk(admin2ID, ports.TenantAdminRoleAdmin, "admin2", now.Add(-time.Minute))
+	inviting := mk(invitingID, ports.TenantAdminRoleUser, "invitee", now.Add(-2*time.Minute))
+	plain := mk(plainID, ports.TenantAdminRoleUser, "plain", now.Add(-3*time.Minute))
+
+	core := &fakeTenantAdminCoreClient{
+		listItems: []ports.AdminWithTenant{admin1, admin2},
+		users: map[string]ports.AdminWithTenant{
+			tenantUserKey(tenantID, invitingID): inviting,
+			tenantUserKey(tenantID, plainID):    plain,
+		},
+	}
+	store := &fakeTenantAdminStore{flags: []ports.InvitationFlag{
+		{TenantID: tenantID, UserID: invitingID, IsInviting: true},
+	}}
+	tenants := &fakeTenantClient{tenant: ports.Tenant{ID: tenantID, Name: "acme", Status: ports.TenantStatusActive}}
+	svc := NewTenantService(nil, tenants, nil, nil, nil, nil, core, nil, nil, store)
+
+	res, err := svc.ListTenantAdmins(context.Background(), &tenantv1.ListTenantAdminsRequest{
+		TenantId: tenantID.String(),
+		Page:     &commonv1.CursorPageRequest{Limit: 20},
+	})
+	if err != nil {
+		t.Fatalf("ListTenantAdmins: %v", err)
+	}
+	if len(res.GetItems()) != 3 {
+		t.Fatalf("want 2 admin + 1 inviting, got %d %+v", len(res.GetItems()), res.GetItems())
+	}
+	ids := map[string]bool{}
+	for _, it := range res.GetItems() {
+		ids[it.GetId()] = true
+		if it.GetId() == "" || it.GetUsername() == "" || it.GetRole() == "" || it.GetStatus() == "" {
+			t.Fatalf("missing required fields: %+v", it)
+		}
+		if it.GetDisplayName() == nil || it.GetDisplayName().GetValue() == "" {
+			t.Fatalf("display_name required: %+v", it)
+		}
+	}
+	if !ids[adminID.String()] || !ids[admin2ID.String()] || !ids[invitingID.String()] {
+		t.Fatalf("unexpected ids=%v", ids)
+	}
+	if ids[plainID.String()] {
+		t.Fatal("plain user without invite must not appear")
+	}
+	for _, it := range res.GetItems() {
+		if it.GetId() == invitingID.String() && !it.GetIsInviting() {
+			t.Fatal("inviting user must have is_inviting=true")
+		}
+	}
+}
+
+func TestTenantService_ListTenantAdmins_DedupAdminInviting(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	adminID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
+	now := time.Now().UTC()
+	admin := ports.AdminWithTenant{
+		ID: adminID, Email: "a@acme.io", Username: "admin", Role: ports.TenantAdminRoleAdmin,
+		Status: ports.TenantAdminUserStatusActive, Source: ports.TenantAdminSourceLocal, CreatedAt: &now,
+		Tenant: ports.TenantRef{ID: tenantID, Name: "acme", DisplayName: "Acme"},
+	}
+	core := &fakeTenantAdminCoreClient{listItems: []ports.AdminWithTenant{admin}}
+	store := &fakeTenantAdminStore{flags: []ports.InvitationFlag{
+		{TenantID: tenantID, UserID: adminID, IsInviting: true},
+	}}
+	tenants := &fakeTenantClient{tenant: ports.Tenant{ID: tenantID, Name: "acme", Status: ports.TenantStatusActive}}
+	svc := NewTenantService(nil, tenants, nil, nil, nil, nil, core, nil, nil, store)
+	res, err := svc.ListTenantAdmins(context.Background(), &tenantv1.ListTenantAdminsRequest{TenantId: tenantID.String()})
+	if err != nil {
+		t.Fatalf("ListTenantAdmins: %v", err)
+	}
+	if len(res.GetItems()) != 1 {
+		t.Fatalf("want 1 deduped row, got %d", len(res.GetItems()))
+	}
+	if !res.GetItems()[0].GetIsInviting() || res.GetItems()[0].GetRole() != ports.TenantAdminRoleAdmin {
+		t.Fatalf("want admin+is_inviting, got %+v", res.GetItems()[0])
+	}
+}
+
+func TestTenantService_ListTenantAdmins_Page(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	now := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
+	items := make([]ports.AdminWithTenant, 0, 3)
+	for i := 0; i < 3; i++ {
+		id := uuid.MustParse(fmt.Sprintf("%d1111111-1111-4111-8111-111111111111", i+1))
+		created := now.Add(-time.Duration(i) * time.Minute)
+		items = append(items, ports.AdminWithTenant{
+			ID: id, Email: fmt.Sprintf("a%d@acme.io", i), Username: fmt.Sprintf("a%d", i),
+			Role: ports.TenantAdminRoleAdmin, Status: ports.TenantAdminUserStatusActive,
+			Source: ports.TenantAdminSourceLocal, CreatedAt: &created,
+			Tenant: ports.TenantRef{ID: tenantID, Name: "acme", DisplayName: "Acme"},
+		})
+	}
+	core := &fakeTenantAdminCoreClient{listItems: items}
+	tenants := &fakeTenantClient{tenant: ports.Tenant{ID: tenantID, Name: "acme", Status: ports.TenantStatusActive}}
+	svc := NewTenantService(nil, tenants, nil, nil, nil, nil, core, nil, nil, &fakeTenantAdminStore{})
+	page1, err := svc.ListTenantAdmins(context.Background(), &tenantv1.ListTenantAdminsRequest{
+		TenantId: tenantID.String(),
+		Page:     &commonv1.CursorPageRequest{Limit: 2},
+	})
+	if err != nil {
+		t.Fatalf("page1: %v", err)
+	}
+	if len(page1.GetItems()) != 2 || page1.GetNextCursor() == "" {
+		t.Fatalf("page1=%+v", page1)
+	}
+	page2, err := svc.ListTenantAdmins(context.Background(), &tenantv1.ListTenantAdminsRequest{
+		TenantId: tenantID.String(),
+		Page:     &commonv1.CursorPageRequest{Limit: 2, Cursor: page1.GetNextCursor()},
+	})
+	if err != nil {
+		t.Fatalf("page2: %v", err)
+	}
+	if len(page2.GetItems()) != 1 {
+		t.Fatalf("page2 items=%d", len(page2.GetItems()))
+	}
+}
+
+func TestTenantService_ListTenantAdmins_NotFound(t *testing.T) {
+	tenantID := uuid.New()
+	svc := NewTenantService(nil, &fakeTenantClient{}, nil, nil, nil, nil, &fakeTenantAdminCoreClient{}, nil, nil, &fakeTenantAdminStore{})
+	_, err := svc.ListTenantAdmins(context.Background(), &tenantv1.ListTenantAdminsRequest{TenantId: tenantID.String()})
+	st, _ := status.FromError(err)
+	if st.Code() != codes.NotFound || !strings.Contains(st.Message(), "TENANT_NOT_FOUND") {
+		t.Fatalf("want TENANT_NOT_FOUND, got %v", err)
+	}
+}
+
+func TestTenantService_ListTenantAdmins_InvalidRole(t *testing.T) {
+	tenantID := uuid.New()
+	tenants := &fakeTenantClient{tenant: ports.Tenant{ID: tenantID, Name: "acme", Status: ports.TenantStatusActive}}
+	svc := NewTenantService(nil, tenants, nil, nil, nil, nil, &fakeTenantAdminCoreClient{}, nil, nil, &fakeTenantAdminStore{})
+	_, err := svc.ListTenantAdmins(context.Background(), &tenantv1.ListTenantAdminsRequest{
+		TenantId: tenantID.String(),
+		Role:     "platform-admin",
+	})
+	st, _ := status.FromError(err)
+	if st.Code() != codes.InvalidArgument || !strings.Contains(st.Message(), "VALIDATION_FAILED") {
+		t.Fatalf("want VALIDATION_FAILED, got %v", err)
+	}
+}
+
+func TestTenantService_ListTenantAdmins_NoWriteAudit(t *testing.T) {
+	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	now := time.Now().UTC()
+	admin := ports.AdminWithTenant{
+		ID: uuid.New(), Email: "a@acme.io", Username: "admin", Role: ports.TenantAdminRoleAdmin,
+		Status: ports.TenantAdminUserStatusActive, Source: ports.TenantAdminSourceLocal, CreatedAt: &now,
+		Tenant: ports.TenantRef{ID: tenantID, Name: "acme", DisplayName: "Acme"},
+	}
+	audit := &fakeAuditStore{}
+	tenants := &fakeTenantClient{tenant: ports.Tenant{ID: tenantID, Name: "acme", Status: ports.TenantStatusActive}}
+	svc := NewTenantService(nil, tenants, nil, nil, nil, audit, &fakeTenantAdminCoreClient{listItems: []ports.AdminWithTenant{admin}}, nil, nil, &fakeTenantAdminStore{})
+	_, err := svc.ListTenantAdmins(context.Background(), &tenantv1.ListTenantAdminsRequest{TenantId: tenantID.String()})
+	if err != nil {
+		t.Fatalf("ListTenantAdmins: %v", err)
+	}
+	if len(audit.logs) != 0 {
+		t.Fatalf("read path must not write audit, got %d", len(audit.logs))
 	}
 }

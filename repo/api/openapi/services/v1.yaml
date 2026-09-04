@@ -4018,7 +4018,8 @@ paths:
       operationId: listTenantScopedAdmins
       summary: 查询租户内管理员列表（需 platform-admin / platform-ops / platform-readonly）
       description: |
-        复用 Core listTenantUsers（tenant_id 过滤）；返回 tenant-admin / user / auditor 角色成员。
+        返回该租户下 role=tenant-admin 的用户，以及存在 inviting 邀请的用户（AdminWithTenant，含 is_inviting/is_expired）。
+        不含未邀请的普通 user/auditor。复用租户管理员模块列表合并模式（Core + 邀请表），不新增 Core 端点。
       tags: [Tenants]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -4037,6 +4038,7 @@ paths:
                   - $ref: '#/components/schemas/CursorPage'
                   - properties:
                       items: { type: array, items: { $ref: '#/components/schemas/AdminWithTenant' } }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound', description: "TENANT_NOT_FOUND" }

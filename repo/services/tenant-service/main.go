@@ -24,7 +24,7 @@ func main() {
 	tenantStore := postgres.NewPostgresTenantStore(deps.DB)
 
 	tenantPlanSvc := service.NewTenantPlanService(plans, audit, coreQuota, coreTenantPlans)
-	tenantSvc := service.NewTenantService(plans, coreTenants, coreTenantPlans, coreQuota, tenantStore, audit, coreTenantAdmins, nil, nil)
+	tenantSvc := service.NewTenantService(plans, coreTenants, coreTenantPlans, coreQuota, tenantStore, audit, coreTenantAdmins, nil, nil, tenantAdmin)
 	tenantAdminSvc := service.NewTenantAdminService(coreTenantAdmins, coreTenants, tenantAdmin, audit)
 
 	bootstrap.RunGRPC(cfg.GRPCPort, func(s *grpc.Server) {

@@ -650,6 +650,8 @@ func (api *tenantListAPI) listTenantAdmins(ctx context.Context, c *app.RequestCo
 			"display_name":  displayName,
 			"role":          it.GetRole(),
 			"status":        it.GetStatus(),
+			"is_inviting":   it.GetIsInviting(),
+			"is_expired":    it.GetIsExpired(),
 			"source":        it.GetSource(),
 			"last_login_at": lastLogin,
 			"tenant":        tenantRef,

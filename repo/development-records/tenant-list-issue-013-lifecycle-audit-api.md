@@ -137,12 +137,6 @@
 
 选用 A：与既有 plan audit 编码路径一致。
 
-## Open Questions
-
-- [ ] 审计 `GetTenant` 是否值得后续换成轻量 EXISTS（仅当延迟成为问题）？
-- [ ] 分区表是否需要时间窗参数，避免跨分区全扫？
-- [ ] Feature batch 四文件（README / CURRENT-SPRINT / ANI-06）是否与 Issue-012 同 PR 一并收口？
-
 ## Verification commands run
 
 ```text

@@ -268,4 +268,6 @@ message TenantScopedAdmin {
   string source = 7;         // local | third_party
   google.protobuf.Timestamp last_login_at = 8;
   TenantScopedAdminTenantRef tenant = 9;
+  bool is_inviting = 10;     // true = tenant_admin_invitation.status=inviting
+  bool is_expired = 11;      // true = tenant_admin_invitation.status=expired；本列表默认不含仅 expired
 }
