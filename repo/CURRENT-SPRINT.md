@@ -13,6 +13,7 @@
 > **ANI-GW-1（2026-09-02）：** `LOCAL_VERIFIED`。固定 Session Gateway `api/v0.1.0`（Go module `v0.1.0`，commit `d86a40d33369b128aabc680d4ea0b3f790ac0bb6`）完成 instance exec/console gRPC `CreateSession` 接入，并拆分 `InstanceObservability` / `InstanceSessionIssuer`；real provider 缺失、非法或不可用时 503 fail-closed，不再生成占位 URL。fake/bufconn、race/vet、全仓测试与契约/生成/架构门禁通过；真实 Session Gateway 进程、WebSocket/terminal/serial/VNC 数据面和集群 rollout 均 `not_verified`。不含 Console、CONSOLE-1、LIVE-1；详情见 `development-records/ANI-GW-1.md`。
 
 > **INSTANCE-SANDBOX-KATA-STORAGE-A（2026-09-03）：** Kata lab values 同步到 `docker.changqingyun.cn/kubercon/kata-deploy:4.0.0`；当前底座 3/3 Ready，`sandbox-kata` 冒烟通过。Sandbox 新建、clone、restore 的 5Gi RWO workspace PVC 显式使用 `ani-block`，避免无默认 StorageClass 环境持续 Pending。底座 live verified，代码 local/logic verified；待合并和 Gateway rollout 后补产品路径 E2E。sysctl 按任务边界不入库；详情见 `development-records/instance-sandbox-kata-storage-a.md`。
+> **ANI IAM Direct P2 DP2-05（2026-09-06）：** 专用本地 worktree 中的 Console/Tenant Password→Session/Grant→Access Token→CheckPermission→`listInstances` tracer bullet 使用真实 PostgreSQL/Redis、受限 runtime role 和真实 IAM/Gateway 进程验证为 `pass`；Go/No-Go A 已由人工接受为 Go，结果为 `pass`。BOSS/Platform Password Login 与 BOSS caller E2E 为 `not_verified`。本批只形成本地 commit，未 push、部署、切流、删除旧 Auth或启动 DP2-06；详情见 `development-records/DP2-05-target-iam-vertical-slice.md`。
 
 > **INSTANCE-SANDBOX-CHECKPOINT-A（2026-08-02）：** live passed。新 Sandbox `/workspace` 使用 5Gi RBD PVC，CSI VolumeSnapshot create/list/restore/clone、Gateway 重启后 provider list、PG create/restore task、keep_memory/legacy emptyDir 422 和删除级联清理均已在 default 网络验证。Gateway `instance-sandbox-checkpoint-20260802-v1`；evidence：`development-records/live-evidence/instance-sandbox-checkpoint-live-20260802.json`。仅 filesystem checkpoint，不含内存状态；私有 VPC 尚未打通。
 
@@ -167,6 +168,67 @@
 **预存问题修复（2026-08-25）：** 本地实测 pilot 模式后修复 4 个文件的预存不一致——删 v1.yaml 已弃用的 branding PUT/POST logo + tasks DELETE 路由的 router 注册和 registry 条目（branding_resources.go / task_resources.go / zz_generated_core_policies.go）；gpu_scheduling_resources.go `:id`→`:queue_id` 与 v1.yaml 一致（修复运行时 `LookupByRequest` lookup miss + route coverage 门禁）。修复后 drift 门禁通过、route coverage 0 error（274 registered, 224 registry）。详见 `development-records/authz-policy-compat-contract-pilot.md`。
 
 **PR5 批次记录：** `development-records/authz-mode-simplify-d.md`（含 2026-08-31 第六版修订章节：删废弃 env 残留检测、改名 config.go、删兼容入口 6 函数、测试归一，12 files +51/−222）。**验证命令：** `go test ./services/ani-gateway/...` + `make gen-gateway-authz`（生成物零漂移）+ `make validate-gateway-authz`（18 tests、283 registered routes 0 errors）+ `make validate-architecture` + `git diff --check`；`make test` 仅 `pkg/adapters/runtime` 的 Windows 预存失败（sandbox symlink 特权 / Python `os.O_DIRECTORY`；origin/main @ `9c7bf2b` worktree 复跑同包同样 FAIL，不在本次改动集）。**本地实测：** `ANI_AUTH_MODE=auth_service`（无任何 policy env）启动正常；public 放行（branding 200）、generated 接口 `/api/v1/admin/quota-meta` 无凭证被 V2 拒绝 401、legacy 无效 token 401；`ANI_AUTH_MODE=dev` 启动正常且 quota-meta 回落 legacy 返回真实数据 200。登录全链路（有 token 200）受数据库角色权限迁移（#124 `ani_app_user`）未应用阻塞，暂缓验证。修订后代码已与方案第六版 §4.1–§4.5 逐项复核一致。
+
+## ANI IAM Direct P2 DP2-02 公网契约冻结（2026-09）
+
+> 独立 Direct P2 工作流，固定 ANI 来源 `0cedae825a489d936cf41815dc27f278f6d3213c`。本批已经人工接受精确 breaking diff，只冻结目标公网 OpenAPI、operation registry/policy、生成器、SDK 和契约测试，不接线运行时、不部署、不切流。
+
+| 项目 | 状态 | 证据 |
+|---|---|---|
+| OpenAPI / registry / breaking / stable errors | `pass` | 295 operations；59 added、0 removed、6 operationId changes；263 machine-readable breaking rows |
+| unique Handler/Owner、authn/authz、Permission、typed obligation | `pass` | target generator 20/20；deterministic `--check` |
+| Console/BOSS schema 与四语言 Core SDK | `pass` | pinned generation；Go/Python/TypeScript smoke；Java source smoke |
+| Java compile/run | `not_verified` | 当前环境无 JDK |
+| Gateway 目标运行时接线与新增 Handler | `not_verified` | 后续 DP2-05 及切换事项实现 |
+
+批次记录：`development-records/DP2-02-public-iam-operation-registry.md`。本地提交不会自动进入主线；未来合入演进中的 ANI 主线时必须重新运行 breaking、生成物、route 和调用方回归。
+
+## ANI IAM Direct P2 DP2-03 IAM/Core 集成契约冻结（2026-09）
+
+> 本批已人工接受精确 Proto/Core contract diff。只冻结独立 ani-iam 的三个目标 gRPC service、Core-owned Tenant Lifecycle/Bootstrap/Snapshot contract、descriptors、pins 和 producer-consumer fixtures；不接线运行时、不创建 NATS、不发布、不部署、不切流。
+
+| 项目 | 状态 | 证据 |
+|---|---|---|
+| IAM Authentication/Authorization/Admin descriptor | `pass` | 3 services / 69 RPC；旧 `auth.v1.AuthService` absent；SHA-256 `df863beb3b095d1f01350c5334d80daf10cdf48083ce0e5663781171aa99a001` |
+| Core Lifecycle/Heartbeat/Bootstrap/Snapshot descriptor | `pass` | 1 read-only service / 2 RPC；无 lifecycle writer；SHA-256 `7dd40f9053b7c1c0c8905decab0f81b07173d0b25651113147bde9a5370d352a` |
+| producer-consumer fixtures / immutable pins | `pass` | 两仓库八组 fixtures byte-identical；pins SHA-256 `33376182b2bcd2f0dd7c84bdf9790d492b6a643560a169e80c0fe63e9113c3b9` |
+| Buf、可复现生成、相关 Go tests/vet、architecture | `pass` | 固定 Buf 1.72.0 / protoc plugins；生成无漂移 |
+| ANI 聚合旧 Auth operationId gate | `fail` | 仍要求 `logout` / `revokeAPIKey`；已接受目标是 `logoutSession` / `revokeIAMAPIKey`，本批不回退 |
+| 运行时 registration、Core/NATS、Gateway mapping/cutover | `not_verified` | 后续 DP2-05 及切换事项验证 |
+
+批次记录：`development-records/DP2-03-iam-core-integration-contracts.md`。本地契约提交不会自动进入演进中的 ANI 主线；未来合入前必须重新执行完整 Proto breaking、生成物、Gateway/Auth 和调用方回归。
+
+## ANI IAM Direct P2 DP2-05 目标纵向链路（2026-09）
+
+> 本批只在独立 ani-iam 与专用 ANI worktree 中验证 Go/No-Go A tracer bullet。工程实现、隔离真实依赖门禁和人工 Go 结论均为 `pass`。只形成本地 commit，未 push 或提交到 ANI 主线，未部署、切流、删除旧 Auth 或启动 DP2-06。
+
+| 项目 | 状态 | 证据 |
+|---|---|---|
+| Password→Session/Grant→Access Token→CheckPermission→`listInstances` | `pass` | 真实 PostgreSQL/Redis、受限 runtime role、真实 IAM 与 Gateway 进程 |
+| Public 0 次 / Authorized 1 次 IAM decision、hostile Header strip | `pass` | DP2-02 固定 registry；`listInstances` 只调用一次 `CheckPermission` |
+| Gateway 401/403/503/504、policy mismatch | `pass` | 真实登录/deny、关闭 endpoint、TLS handshake blackhole、stable fail-closed mapping |
+| Audit transaction、two-Tenant、query mutation、empty replay | `pass` | 完整 real-dependency integration suite |
+| TLS 1.3 mTLS + Gateway DNS/RPC allowlist | `pass` | IAM server/client transport 与 workload identity tests |
+| unified 24h Idempotency Ledger | `not_verified` | 已接受 Direct P2 graph 将完整 ledger 归 DP2-16；本 tracer bullet 不提前实现 |
+| Go/No-Go A 人工接受 | `pass` | 2026-09-06 明确接受 Go；只证明目标最小纵向架构可行，不等于 production ready 或切流授权 |
+
+批次记录：`development-records/DP2-05-target-iam-vertical-slice.md`。不含 OIDC、完整 Refresh/browser、Invitation、完整 Role、API Key、Service Token、Core/NATS、五类调用方整体切换或部署。
+
+## ANI IAM Direct P2 安全合并候选（2026-09）
+
+> 固定来源 a221a7b/573d373/f09a436 已在专用 `codex/direct-p2-safe-merge` worktree 以 `--no-ff --no-commit` 整合到人工接受的 main `bde4ea72b5a91cd43cc271dd44c09ff262c637e5`。默认/disabled 继续旧 Auth；`dp2_05` 仍只是 Password Login 与 `listInstances` 隔离 tracer，不是全 Gateway 切换。Standards/Spec 双轴评审均为 0 findings，Merge-Ready 已于 2026-09-06 人工接受，80-path staged package 与检查点后全部门禁通过；本记录随本地 merge commit 落地。未 push、未部署、未切流，也未启动 DP2-06。
+
+| 项目 | 状态 | 证据 |
+|---|---|---|
+| 默认/disabled、幂等 Refresh Cookie、稳定 429、manifest disabled | `pass` | Gateway full/vet/race 与安全合并回归测试 |
+| OpenAPI/registry/authz、Proto、SDK、Console/BOSS schema | `pass` | 固定工具重生成与幂等/descriptor/contract 门禁 |
+| ANI `make test` / `make validate-architecture` / doc entrypoints | `pass` | 当前未提交候选完整运行 |
+| ANI `make validate-services` | `pass` | Services/SDK/docs idempotence、model/inference tests 与 architecture 完整通过 |
+| Target IAM 架构迁移 | `pass` | Gateway 依赖 `pkg/ports.TargetIAM`；gRPC/mTLS/protobuf 翻译归 `pkg/adapters/iam`，固定生成物归公共 `pkg/generated/pb/iam/v1` |
+| Java compile/run、cluster rollout、production traffic、BOSS caller E2E | `not_verified` | 当前无 JDK；本 Goal 不部署或切流，Console 证据不替代 BOSS |
+| Merge-Ready / local merge commit | `pass` | 双轴评审 0 findings；2026-09-06 人工接受 Merge-Ready；80-path staged diff 已审查并在全部门禁通过后随本地 merge commit 落地，精确 SHA 以 Git history 与最终报告为准 |
+
+批次记录：`development-records/DP2-DIRECT-P2-SAFE-MERGE.md`。本地 merge commit 不授权 push、远端 PR、main merge、部署、切流或后续 IAM ticket。
 
 ## 账密登录模块（2026-07）
 

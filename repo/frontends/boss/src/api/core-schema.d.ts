@@ -57,7 +57,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 租户账密登录（账号密码 Tab） */
+        /** 使用密码建立边界会话 */
         post: operations["passwordLogin"];
         delete?: never;
         options?: never;
@@ -74,7 +74,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 平台管理员账密登录 */
+        /**
+         * 平台管理员账密登录
+         * @deprecated
+         * @description DP2-19 删除前保留的旧入口；目标调用方使用 passwordLogin 并显式 audience=boss、boundary=platform。
+         */
         post: operations["platformPasswordLogin"];
         delete?: never;
         options?: never;
@@ -108,8 +112,32 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** OIDC callback 换取 TokenPair */
+        /**
+         * OIDC callback 换取 TokenPair
+         * @deprecated
+         * @description DP2-19 删除前保留的旧 JSON code-exchange；目标浏览器使用 completeOIDCCallback。
+         */
         post: operations["completeOIDCLogin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/oidc/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 完成 OIDC Code + PKCE 登录
+         * @description Gateway 交换 code、建立 Session、设置 audience 隔离的 Refresh Cookie，并 303 跳转到固定页面；Token 和 code 不进入 Location。
+         */
+        get: operations["completeOIDCCallback"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -125,33 +153,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 刷新 AccessToken */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["RefreshAccessTokenRequest"];
-                };
-            };
-            responses: {
-                /** @description 刷新成功 */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["RefreshAccessTokenResponse"];
-                    };
-                };
-                400: components["responses"]["BadRequest"];
-                401: components["responses"]["Unauthorized"];
-            };
-        };
+        /** 轮换 Refresh Cookie 并刷新 Access Token */
+        post: operations["refreshSession"];
         delete?: never;
         options?: never;
         head?: never;
@@ -167,12 +170,168 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 吊销当前 JWT JTI */
-        post: operations["logout"];
+        /** 幂等撤销当前 Session */
+        post: operations["logoutSession"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/auth/switch-tenant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 为同一 Session 建立或轮换目标 Tenant Grant */
+        post: operations["switchTenant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/password-actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 请求密码设置或重置动作 */
+        post: operations["requestPasswordAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/password-actions/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 完成单次密码设置或重置动作 */
+        post: operations["completePasswordAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/identity-links/oidc/begin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 为已登录 Human Principal 发起 OIDC Identity Link */
+        post: operations["beginOIDCIdentityLink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/identity-links/oidc/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 完成显式 OIDC Identity Link */
+        get: operations["completeOIDCIdentityLink"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 列出当前 Human Principal 的设备 Session */
+        get: operations["listSessions"];
+        put?: never;
+        post?: never;
+        /** 撤销当前 Human Principal 的全部 Session */
+        delete: operations["revokeAllSessions"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/sessions/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 撤销一个设备 Session */
+        delete: operations["revokeSession"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/service-principals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 列出当前 Tenant 的 Service Principal */
+        get: operations["listServicePrincipals"];
+        put?: never;
+        /** 原子创建 Service Principal、Membership 和初始 Role Binding */
+        post: operations["createServicePrincipal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/service-principals/{principal_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询 Service Principal */
+        get: operations["getServicePrincipal"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** 修改 Service Principal 名称或状态；disable 同事务撤销全部 API Key */
+        patch: operations["updateServicePrincipal"];
         trace?: never;
     };
     "/auth/api-keys": {
@@ -182,11 +341,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 列出当前租户 API Key */
-        get: operations["listAPIKeys"];
+        /** 列出 Service Principal 的 API Key */
+        get: operations["listIAMAPIKeys"];
         put?: never;
-        /** 创建 API Key */
-        post: operations["createAPIKey"];
+        /** 为 Service Principal 创建 API Key */
+        post: operations["createIAMAPIKey"];
         delete?: never;
         options?: never;
         head?: never;
@@ -203,8 +362,582 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** 吊销 API Key */
-        delete: operations["revokeAPIKey"];
+        /** 不可逆吊销 API Key */
+        delete: operations["revokeIAMAPIKey"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/tenants/{tenant_id}/access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询 IAM Tenant Access */
+        get: operations["getTenantAccess"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** 暂停或恢复 IAM Tenant Access */
+        patch: operations["updateTenantAccess"];
+        trace?: never;
+    };
+    "/iam/tenants/{tenant_id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 列出 Tenant Membership */
+        get: operations["listTenantIAMMembers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/tenants/{tenant_id}/members/{membership_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询 Tenant Membership */
+        get: operations["getTenantIAMMember"];
+        put?: never;
+        post?: never;
+        /** 显式移除 Tenant Membership */
+        delete: operations["removeTenantIAMMember"];
+        options?: never;
+        head?: never;
+        /** 更新 Tenant Membership 状态 */
+        patch: operations["updateTenantIAMMember"];
+        trace?: never;
+    };
+    "/iam/tenants/{tenant_id}/members/{membership_id}/role-bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 为 Tenant Membership 增加 Role Binding */
+        post: operations["bindTenantIAMRole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/tenants/{tenant_id}/members/{membership_id}/role-bindings/{role_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除 Tenant Membership 的一个 Role Binding */
+        delete: operations["unbindTenantIAMRole"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/tenants/{tenant_id}/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 列出 Tenant Role */
+        get: operations["listTenantIAMRoles"];
+        put?: never;
+        /** 创建 Tenant custom Role */
+        post: operations["createTenantIAMRole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/tenants/{tenant_id}/roles/{role_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询 Tenant Role */
+        get: operations["getTenantIAMRole"];
+        put?: never;
+        post?: never;
+        /** 删除无引用的 Tenant custom Role */
+        delete: operations["deleteTenantIAMRole"];
+        options?: never;
+        head?: never;
+        /** 使用 expected_version 更新 Tenant custom Role */
+        patch: operations["updateTenantIAMRole"];
+        trace?: never;
+    };
+    "/iam/tenants/{tenant_id}/invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 列出 Tenant Invitation */
+        get: operations["listTenantIAMInvitations"];
+        put?: never;
+        /** 创建 Tenant Invitation */
+        post: operations["createTenantIAMInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/tenants/{tenant_id}/invitations/{invitation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询 Tenant Invitation */
+        get: operations["getTenantIAMInvitation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/tenants/{tenant_id}/invitations/{invitation_id}/resend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 轮换并重发 Tenant Invitation Secret */
+        post: operations["resendTenantIAMInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/tenants/{tenant_id}/invitations/{invitation_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 取消 Tenant Invitation */
+        post: operations["cancelTenantIAMInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/tenants/{tenant_id}/invitations/{invitation_id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 接受 Tenant Invitation 并原子建立 Membership/Binding */
+        post: operations["acceptTenantIAMInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/platform/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 列出 Platform Membership */
+        get: operations["listPlatformIAMMembers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/platform/members/{membership_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询 Platform Membership */
+        get: operations["getPlatformIAMMember"];
+        put?: never;
+        post?: never;
+        /** 移除 Platform Membership */
+        delete: operations["removePlatformIAMMember"];
+        options?: never;
+        head?: never;
+        /** 更新 Platform Membership 状态 */
+        patch: operations["updatePlatformIAMMember"];
+        trace?: never;
+    };
+    "/iam/platform/members/{membership_id}/role-bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 为 Platform Membership 增加 Role Binding */
+        post: operations["bindPlatformIAMRole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/platform/members/{membership_id}/role-bindings/{role_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除 Platform Role Binding */
+        delete: operations["unbindPlatformIAMRole"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/platform/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 列出 Platform Role */
+        get: operations["listPlatformIAMRoles"];
+        put?: never;
+        /** 创建 Platform custom Role */
+        post: operations["createPlatformIAMRole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/platform/roles/{role_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询 Platform Role */
+        get: operations["getPlatformIAMRole"];
+        put?: never;
+        post?: never;
+        /** 删除无引用的 Platform custom Role */
+        delete: operations["deletePlatformIAMRole"];
+        options?: never;
+        head?: never;
+        /** 使用 expected_version 更新 Platform custom Role */
+        patch: operations["updatePlatformIAMRole"];
+        trace?: never;
+    };
+    "/iam/platform/invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 列出 Platform Invitation */
+        get: operations["listPlatformIAMInvitations"];
+        put?: never;
+        /** 创建 Platform Invitation */
+        post: operations["createPlatformIAMInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/platform/invitations/{invitation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询 Platform Invitation */
+        get: operations["getPlatformIAMInvitation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/platform/invitations/{invitation_id}/resend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 轮换并重发 Platform Invitation Secret */
+        post: operations["resendPlatformIAMInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/platform/invitations/{invitation_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 取消 Platform Invitation */
+        post: operations["cancelPlatformIAMInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/platform/invitations/{invitation_id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 接受 Platform Invitation */
+        post: operations["acceptPlatformIAMInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/platform/recovery-bootstrap-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 请求 Recovery Bootstrap 双人审批 */
+        post: operations["requestRecoveryBootstrap"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/platform/recovery-bootstrap-requests/{operation_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 由不同主体批准 Recovery Bootstrap */
+        post: operations["approveRecoveryBootstrap"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/platform/recovery-bootstrap-requests/{operation_id}/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 在近期重新认证后执行已批准的 Recovery Bootstrap */
+        post: operations["executeRecoveryBootstrap"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/platform/restore-tenant-admin-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 请求 RestoreTenantAdmin 双人审批 */
+        post: operations["requestRestoreTenantAdmin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/platform/restore-tenant-admin-requests/{operation_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 由不同主体批准 RestoreTenantAdmin */
+        post: operations["approveRestoreTenantAdmin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/platform/restore-tenant-admin-requests/{operation_id}/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 在近期重新认证后执行已批准的 RestoreTenantAdmin */
+        post: operations["executeRestoreTenantAdmin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/audit-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 按当前授权 boundary 查询 IAM Security Audit */
+        get: operations["listIAMSecurityAuditEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/audit-events/{event_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询一个 IAM Security Audit Event */
+        get: operations["getIAMSecurityAuditEvent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/platform/audit-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 使用 Platform Auditor capability 查询跨 Tenant IAM Security Audit */
+        get: operations["listPlatformIAMSecurityAuditEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iam/platform/audit-events/{event_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 使用 Platform Auditor capability 查询一个 IAM Security Audit Event */
+        get: operations["getPlatformIAMSecurityAuditEvent"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -419,6 +1152,30 @@ export interface paths {
         };
         /** 查询实例日志 */
         get: operations["listInstanceLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/instances/{instance_id}/logs/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 实例日志 SSE 流式输出
+         * @description SSE 流式输出实例日志：首屏回放最近 limit 条历史日志（时间正序），
+         *     然后持续增量推送新日志。每条日志通过 event: log 帧推送，
+         *     错误通过 event: error 帧推送，结束通过 event: done 帧推送。
+         *     连接时长上限 10 分钟，到达后发 done{reason:"timeout"} 并关闭。
+         *     预流错误（401/404/400）返回普通 JSON，不进入 SSE 流。
+         */
+        get: operations["streamInstanceLogs"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1891,38 +2648,7 @@ export interface paths {
             cookie?: never;
         };
         /** 获取平台品牌配置 */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description 品牌配置 */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            platform_name?: string;
-                            /** Format: uri */
-                            logo_light_url?: string;
-                            /** Format: uri */
-                            logo_dark_url?: string;
-                            /** Format: uri */
-                            favicon_url?: string;
-                            /** @example #1677FF */
-                            primary_color?: string;
-                            secondary_color?: string;
-                            icp_number?: string;
-                        };
-                    };
-                };
-            };
-        };
+        get: operations["getBranding"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1972,6 +2698,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 列出当前租户的异步任务
+         * @description 按创建时间倒序（created_at DESC, id DESC）cursor 分页列出当前认证
+         *     租户的异步任务。租户隔离来自认证上下文，不接受 tenant_id 参数，
+         *     不提供跨租户/平台级任务视图。list 只读库内快照，不做懒同步——
+         *     instance.* 任务的实时进度由 GET /tasks/{task_id} 单查承担。
+         *     status 筛选有 enum 约束（非法值 400）；task_type/resource_type
+         *     筛选不做 enum 约束（前向兼容），未匹配值返回空列表而非 400。
+         */
+        get: operations["listAsyncTasks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tasks/{task_id}": {
         parameters: {
             query?: never;
@@ -1979,30 +2730,36 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 查询异步任务状态 */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    task_id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description 异步任务状态 */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["AsyncTask"];
-                    };
-                };
-                404: components["responses"]["NotFound"];
-            };
+        /**
+         * 查询单个异步任务
+         * @description 查询单个异步任务。非终态 instance.* 任务在返回前执行读时懒同步：
+         *     先触发单实例状态刷新，再按实例 state 映射（见 AsyncTask schema
+         *     description 的映射表）推进任务至 completed/failed；懒同步失败时
+         *     降级返回库内快照，不向客户端报错。
+         */
+        get: operations["getTask"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/platform/services/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
         };
+        /**
+         * 查询 ANI 服务监控可达性
+         * @description 返回固定七个 ANI 服务的 Prometheus scrape reachability。该响应仅覆盖 ANI 服务子集，
+         *     不表示全平台健康、业务依赖健康或流量就绪。Prometheus 不可用、响应非法或身份连接契约失败时返回 503，
+         *     不把数据源失败伪装为七个 unknown。
+         */
+        get: operations["getPlatformServiceHealth"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2043,6 +2800,29 @@ export interface paths {
          * @description 通过 Core 代理 PromQL 区间查询（range query），返回时间区间内多个采样点，用于绘制时序曲线。不暴露底层 Prometheus 地址。
          */
         get: operations["queryRangeObservability"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/observability/resource_trend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 租户级资源使用率趋势
+         * @description 按当前登录租户视角聚合返回 gpu/cpu/memory 资源使用率趋势（单位 %，0-100）。
+         *     tenant_id 全部从 JWT 提取，后端据此生成 namespace="ani-tenant-<id>" 的聚合 PromQL，
+         *     天然租户隔离；不接收/不暴露 query PromQL。返回结构与 query_range 一致（matrix），
+         *     前端复用既有出图逻辑。三条曲线各用一次本请求（一次一个 metric）。
+         */
+        get: operations["queryResourceTrendObservability"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2123,6 +2903,29 @@ export interface paths {
          *     items[].tenant_id 在此端点下必填。
          */
         get: operations["getPlatformMeteringUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/platform/capacity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询平台容量态势汇总
+         * @description 平台级（跨租户）只读容量汇总视图。整平台作为 1 个默认区域返回，
+         *     数据从真实集群计算（GPU 节点清单 + 跨租户 Running GPU Pod + 租户列表）。
+         *     任一数据源失败不阻塞 200：缺失字段降级为 0/空，
+         *     dev_profile.real_provider=false + reason 记录降级原因。
+         */
+        get: operations["getPlatformCapacity"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3202,6 +4005,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/tenant-admins/available-tenants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询可用租户列表（邀请管理员选择器）
+         * @description 返回 status <> 'disabled' 的租户摘要，按 created_at DESC 排序，不分页。
+         *     供 Services 租户管理员邀请时选择目标租户。
+         */
+        get: operations["listAvailableTenants"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/tenant-users": {
         parameters: {
             query?: never;
@@ -3212,7 +4036,7 @@ export interface paths {
         /**
          * 跨租户列出租户成员（默认 owner/admin）
          * @description 平台侧跨租户查询 users + user_roles + roles。
-         *     默认仅返回 role ∈ (tenant-owner, tenant-admin)；不含 is_inviting（邀请由 Services 合成）。
+         *     默认仅返回 role ∈ (tenant-admin)；不含 is_inviting（邀请由 Services 合成）。
          *     不含 password_hash。
          */
         get: operations["listTenantUsers"];
@@ -3236,6 +4060,27 @@ export interface paths {
          * @description 邀请前匹配已有用户；无匹配返回 404 USER_NOT_FOUND。不新建用户。
          */
         get: operations["lookupTenantUser"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/tenants/{tenant_id}/users/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 批量查询租户内用户
+         * @description 按 user_id 列表批量查询租户内未软删除用户；不存在的用户跳过。
+         *     不含 password_hash。用于 Services 层避免 N+1 查询。
+         */
+        get: operations["batchGetTenantUsers"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3272,7 +4117,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 查询租户成员角色与 4 维权限 */
+        /** 查询租户成员角色与权限 */
         get: operations["getTenantUserRole"];
         /** 修改租户成员角色 */
         put: operations["updateTenantUserRole"];
@@ -3283,37 +4128,21 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/admin/tenants/{tenant_id}/users/{user_id}/changeable-roles": {
+    "/admin/tenants/{tenant_id}/roles": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** 查询可变更角色选项（排除 tenant-owner） */
-        get: operations["getTenantUserChangeableRoles"];
+        /**
+         * 查询租户可分配角色列表
+         * @description 返回 roles 表中 name NOT LIKE 'platform-%' 且 tenant_id IS NULL OR tenant_id = $tenant_id 的角色，
+         *     不分页。供 Services 修改管理员角色选择器使用。
+         */
+        get: operations["listAssignableTenantRoles"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/tenants/{tenant_id}/transfer-ownership": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 原子移交租户所有者
-         * @description target 提升为 tenant-owner，原 owner 降级为 tenant-admin。
-         */
-        post: operations["transferCoreTenantOwnership"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3610,6 +4439,39 @@ export interface components {
             /** @description 下一页游标；null 表示已到最后一页 */
             next_cursor?: string | null;
         };
+        /**
+         * @description 异步任务统一记录。v1 进度语义（两类任务区分）：
+         *
+         *     - 实例域任务（task_type=instance.*）采用真进度语义：create/lifecycle
+         *       受理成功即写入 status=running（progress=10，表示操作已提交至
+         *       runtime、资源收敛中，不是 pending）。GET /tasks/{task_id} 单查时对
+         *       非终态 instance.* 任务执行读时懒同步：先触发单实例状态刷新，再按
+         *       实例 state 映射推进至 completed/failed；懒同步失败降级返回库内
+         *       快照。
+         *     - 存储卷、向量库、platform_workload、sandbox 等受理审计任务维持
+         *       模式 B 语义：同步完成后创建即 completed（progress=100），不做
+         *       懒同步。
+         *     - 进度是粗粒度状态阶梯，不是真实百分比；实例卡在中间态时任务诚实
+         *       停留 running，不虚报 100%。
+         *     - list（GET /tasks）不做懒同步，返回库内快照；实时性由单查承担。
+         *       真实异步进度（worker/outbox/lease 模式）归后续版本。
+         *
+         *     实例 state → 任务推进映射（懒同步依据，state 取 Instance schema
+         *     九态枚举）：
+         *
+         *     - create/start/restart：实例 running → completed/100；实例 failed →
+         *       failed（error_message="instance entered failed state"）；实例
+         *       provisioning/pending → running/20；实例 starting/stopping/stopped/
+         *       deleting → running/40；实例 deleted → failed（"instance deleted
+         *       before reaching running"）；实例记录不存在 → failed（"instance
+         *       record not found"）。
+         *     - stop：实例 stopped → completed/100；实例 failed → failed；实例
+         *       stopping/deleting → running/60；实例 provisioning/pending/starting/
+         *       running → running/30；实例 deleted/记录不存在 → failed。
+         *     - delete：实例 deleted → completed/100（主终态；实例删除只置
+         *       state=deleted，记录不消失）；实例记录不存在 → completed/100
+         *       （防御分支）；其余任意 state（含 deleting）→ running/80。
+         */
         AsyncTask: {
             /** Format: uuid */
             id: string;
@@ -3619,9 +4481,9 @@ export interface components {
              * @example model.import
              * @enum {string}
              */
-            task_type: "model.import" | "kb.parse" | "kb.index" | "inference.deploy" | "platform_workload.create" | "platform_workload.scale" | "platform_workload.start" | "platform_workload.stop" | "platform_workload.restart" | "platform_workload.delete" | "volume.snapshot.create" | "volume.expand" | "volume.mount" | "volume.unmount" | "volume.create_from_snapshot" | "filesystem.expand" | "filesystem.mount_target.create" | "filesystem.mount" | "filesystem.unmount" | "vector_store.index.rebuild" | "vector_store.document.insert" | "sandbox.checkpoint.create" | "sandbox.checkpoint.restore" | "sandbox.code_run.create";
+            task_type: "model.import" | "kb.parse" | "kb.index" | "inference.deploy" | "platform_workload.create" | "platform_workload.scale" | "platform_workload.start" | "platform_workload.stop" | "platform_workload.restart" | "platform_workload.delete" | "volume.snapshot.create" | "volume.expand" | "volume.mount" | "volume.unmount" | "volume.create_from_snapshot" | "filesystem.expand" | "filesystem.mount_target.create" | "filesystem.mount" | "filesystem.unmount" | "vector_store.index.rebuild" | "vector_store.document.insert" | "sandbox.checkpoint.create" | "sandbox.checkpoint.restore" | "sandbox.code_run.create" | "instance.create" | "instance.start" | "instance.stop" | "instance.restart" | "instance.delete";
             /** @enum {string|null} */
-            resource_type?: "inference_service" | "platform_workload" | "kb_document" | "model_version" | "volume_snapshot" | "volume" | "filesystem" | "filesystem_mount_target" | "vector_store" | "sandbox_checkpoint" | "sandbox_code_run" | null;
+            resource_type?: "inference_service" | "platform_workload" | "kb_document" | "model_version" | "volume_snapshot" | "volume" | "filesystem" | "filesystem_mount_target" | "vector_store" | "sandbox_checkpoint" | "sandbox_code_run" | "instance" | null;
             /** Format: uuid */
             resource_id?: string | null;
             /** @enum {string} */
@@ -3637,6 +4499,16 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             completed_at?: string | null;
+        };
+        /**
+         * @description 当前租户的异步任务列表。排序 created_at DESC, id DESC（id 为 UUID
+         *     主键 tiebreaker，同毫秒创建多条任务时分页次序确定唯一）；cursor 为
+         *     不透明 token。list 返回库内快照，不做懒同步。
+         */
+        TaskListResponse: {
+            items: components["schemas"]["AsyncTask"][];
+            /** @description 下一页游标；null 表示已到最后一页 */
+            next_cursor?: string | null;
         };
         /** @description 单个 GPU 型号对平台内部工作负载的准入能力摘要。spec_id 只表示型号。 */
         PlatformWorkloadAcceleratorCapability: {
@@ -4016,6 +4888,38 @@ export interface components {
                 };
             };
         };
+        /** @description 单个 ANI 目标服务的 Prometheus 抓取可达性；不表示业务依赖或业务请求健康。 */
+        PlatformServiceHealthComponent: {
+            /** @enum {string} */
+            service_name: "ani-gateway" | "auth-service" | "model-service" | "task-service" | "inference-service" | "tenant-service" | "metering-service";
+            /** @enum {string} */
+            scrape_status: "reachable" | "unreachable" | "unknown";
+            /** @description freshness window 内存在 up series 的目标数。 */
+            observed_replicas: number;
+            /** @description freshness window 内 up=1 且 OTel target_info 身份契约有效的目标数。 */
+            reachable_replicas: number;
+            /** @description 可抓取目标中经 target_info 与 K8s 标签交叉校验的版本集合；冲突目标不返回版本。 */
+            versions: string[];
+            /**
+             * Format: double
+             * @description 当前组件纳入聚合的最旧 fresh up 样本年龄；无 fresh target 时为 null。
+             */
+            sample_age_seconds: number | null;
+        };
+        /** @description 固定七个 ANI 服务的 Prometheus 抓取可达性聚合；coverage=partial，禁止解释为全平台或业务健康。 */
+        PlatformServiceHealthResponse: {
+            /** @enum {string} */
+            scope: "ani_services";
+            /** @enum {string} */
+            coverage: "partial";
+            /** @enum {string} */
+            signal: "prometheus_scrape";
+            /** Format: date-time */
+            observed_at: string;
+            /** @enum {string} */
+            source_status: "ok";
+            components: components["schemas"]["PlatformServiceHealthComponent"][];
+        };
         /** @description Core dev/local profile 标记；用于区分本地联调成功与真实 provider 执行成功。 */
         CoreDevProfileInfo: {
             /** @enum {string} */
@@ -4023,6 +4927,84 @@ export interface components {
             provider: string;
             real_provider: boolean;
             reason?: string | null;
+        };
+        /** @description 平台容量态势汇总（整平台 = 1 个默认区域；只读，无区域 CRUD）。 */
+        PlatformCapacityResponse: {
+            /** @description 固定返回 1 条区域记录（整平台 = 默认区域）。 */
+            regions: components["schemas"]["PlatformRegion"][];
+            summary: components["schemas"]["PlatformCapacitySummary"];
+            dev_profile: components["schemas"]["CoreDevProfileInfo"];
+        };
+        /** @description 平台默认区域记录；id/code/name/display_name/status/open_for_tenant 为平台主数据常量。 */
+        PlatformRegion: {
+            /** @example platform */
+            id: string;
+            /** @example platform */
+            code: string;
+            /** @example 平台 */
+            name: string;
+            /** @example 平台（默认区域） */
+            display_name: string;
+            /**
+             * @example enabled
+             * @enum {string}
+             */
+            status: "enabled";
+            /** @example true */
+            open_for_tenant: boolean;
+            /** @description Ready GPU 节点 zone label 去重（topology.kubernetes.io/zone 优先，回退 failure-domain.beta.kubernetes.io/zone；缺失为空数组）。 */
+            azs: string[];
+            /**
+             * Format: int64
+             * @description 可用租户数（status <> 'disabled'）；租户服务不可用时为 0 并写入 dev_profile.reason。
+             */
+            tenant_count: number;
+            capacity: components["schemas"]["PlatformRegionCapacity"];
+        };
+        /** @description 区域容量口径：GPU 总量含 vGPU 切片；gpu_free = gpu_total - in_use - fault；nodes 仅 Ready GPU 节点；cpu/memory 为节点 allocatable 总量（非可用量）。 */
+        PlatformRegionCapacity: {
+            /**
+             * Format: int64
+             * @description 全部 GPU 设备数（含 vGPU 切片）
+             */
+            gpu_total: number;
+            /**
+             * Format: int64
+             * @description gpu_total - in_use - fault；in_use 为跨租户 Running GPU Pod 数（每 Pod 占 1 设备）
+             */
+            gpu_free: number;
+            /**
+             * Format: int64
+             * @description Ready GPU 节点数
+             */
+            nodes: number;
+            /**
+             * Format: int64
+             * @description Ready GPU 节点 cpu allocatable 求和（向下取整）
+             */
+            cpu_cores: number;
+            /**
+             * Format: int64
+             * @description Ready GPU 节点 memory allocatable 求和（GiB 向下取整）
+             */
+            memory_gib: number;
+        };
+        /** @description regions 汇总（当前即单区域值），供顶部指标直接消费。 */
+        PlatformCapacitySummary: {
+            /**
+             * Format: int64
+             * @example 1
+             */
+            region_count: number;
+            /** Format: int64 */
+            gpu_total: number;
+            /** Format: int64 */
+            gpu_free: number;
+            /** Format: int64 */
+            tenant_count: number;
+            /** Format: int64 */
+            nodes: number;
+            azs: string[];
         };
         /** @description 实例网络引用；只表达 Core 产品意图，不暴露 provider 对象。 */
         InstanceNetworkConfig: {
@@ -4176,6 +5158,11 @@ export interface components {
              * @default false
              */
             termination_protection: boolean;
+            /**
+             * @description 实例创建后是否自动启动（开机自启）
+             * @default true
+             */
+            auto_start: boolean;
             /** @description VM SSH 连接信息；仅返回连接元数据，不返回私钥 */
             ssh?: {
                 /** @example ubuntu */
@@ -4430,8 +5417,10 @@ export interface components {
             ssh_username: string | null;
             /** @description VM SSH key/secret 引用；不包含私钥内容 */
             ssh_key_ref?: string | null;
-            /** @description 登录密码 Secret 引用；不返回明文。 */
+            /** @description 登录密码 cloud-init Secret 引用；Secret 需含 userdata 键（值为 #cloud-config，设置 users/plain_text_passwd 或 chpasswd）。与 cloud_init_secret 互斥；不返回明文。 */
             password_secret_ref?: string | null;
+            /** @description cloud-init user-data Secret 引用；Secret 需含 userdata 键（值为 #cloud-config）。与 password_secret_ref 互斥。 */
+            cloud_init_secret?: string | null;
             /** @description cloud-init user data；不得包含长期明文凭据。 */
             user_data?: string | null;
             system_disk?: components["schemas"]["InstanceDiskSpec"];
@@ -4877,10 +5866,12 @@ export interface components {
             /** @enum {string} */
             action: "start" | "stop" | "restart" | "resize" | "rebuild" | "delete" | "snapshot" | "attach_volume" | "detach_volume" | "attach_filesystem" | "detach_filesystem" | "rollback" | "scale" | "update_image" | "bind_secret" | "unbind_secret" | "change_security_groups" | "set_termination_protection" | "pause" | "resume" | "extend" | "touch_idle";
             idempotency_key: string;
-            /** @description resize 时使用 */
+            /** @description resize 时使用；变配重建时写入容器 resources */
             cpu?: string | null;
-            /** @description resize 时使用 */
+            /** @description resize 时使用；变配重建时写入容器 resources */
             memory?: string | null;
+            /** @description resize 时换 GPU 规格使用；通过 /gpu-specs 查询可用规格；与 cpu/memory 可同时传，至少传一项；仅 stopped 实例可执行 */
+            spec_id?: string | null;
             /** @description snapshot 时指定快照名称 */
             snapshot_name?: string | null;
             /** @description rollback 时指定目标快照 */
@@ -4932,6 +5923,8 @@ export interface components {
              * @enum {string}
              */
             protocol: "console" | "vnc" | "novnc" | "serial";
+            /** @description 可选；旧客户端省略时 Gateway 仅为本次 HTTP 请求生成内部键，不承诺跨 HTTP 重试重放。 */
+            idempotency_key?: string;
         };
         InstanceConsoleSession: {
             /** @description 对应 operation timeline，可通过 /instance-operations/{operation_id} 查询 */
@@ -6907,14 +7900,15 @@ export interface components {
             tenant_id: string;
             /** Format: email */
             email: string;
+            /** @description 对外返回时去掉存储前缀 oidc: / local: */
             username: string;
             display_name?: string | null;
             /** @enum {string} */
-            role: "tenant-owner" | "tenant-admin" | "user" | "auditor";
+            role: "tenant-admin" | "user" | "auditor";
             /** @enum {string} */
             status: "active" | "disabled";
             /**
-             * @description 由 username 前缀推断：oidc: → third_party；local: → local
+             * @description 由存储 username 前缀推断：oidc: → third_party；其余（含 local:）→ local
              * @enum {string}
              */
             source: "local" | "third_party";
@@ -7008,45 +8002,54 @@ export interface components {
             /** @description 下一页游标；null 表示已无更多 */
             next_cursor?: string | null;
         };
-        /** @description 租户成员 4 维权限；仅 tenant_id 非空的成员可查询 */
+        /** @description 租户成员权限；仅 tenant_id 非空的成员可查询；permissions 为 roles.permissions JSONB 原样 */
         TenantUserPermissions: {
             /** Format: uuid */
             user_id: string;
             /** Format: uuid */
             tenant_id: string;
-            /** @enum {string} */
-            role: "tenant-owner" | "tenant-admin" | "user" | "auditor";
+            /**
+             * Format: uuid
+             * @description 当前 roles.id；无绑定时可省略
+             */
+            role_id?: string;
+            /** @description 角色名（非 platform-*） */
+            role: string;
+            /** @description roles.permissions JSONB 原样（resource/actions/scope） */
             permissions: {
-                /** @enum {string} */
-                compute: "read" | "write" | "none";
-                /** @enum {string} */
-                inference: "read" | "write" | "none";
-                /** @enum {string} */
-                member: "read" | "write" | "none";
-                /** @enum {string} */
-                transfer: "read" | "write" | "none";
-            };
+                [key: string]: unknown;
+            }[];
         };
-        ChangeableRoleOption: {
-            /** @enum {string} */
-            role: "user" | "auditor" | "tenant-admin";
-            label: string;
+        /** @description 租户可分配角色（排除 platform-*） */
+        AssignableTenantRole: {
+            /** Format: uuid */
+            id: string;
+            /**
+             * Format: uuid
+             * @description NULL=平台内置角色
+             */
+            tenant_id?: string | null;
+            name: string;
+            /** @description roles.permissions JSONB（resource/actions/scope） */
+            permissions: {
+                [key: string]: unknown;
+            }[];
         };
-        /** @description 可变更角色选项；当前为 tenant-owner 时 changeable_roles 为空数组 */
-        ChangeableRolesResponse: {
-            /** @enum {string} */
-            current_role: "tenant-owner" | "tenant-admin" | "user" | "auditor";
-            changeable_roles: components["schemas"]["ChangeableRoleOption"][];
+        AssignableTenantRoleList: {
+            items: components["schemas"]["AssignableTenantRole"][];
         };
-        /** @description 修改租户内角色（不可设 tenant-owner） */
+        /** @description 修改租户内角色（按 role_id）；old_role_id 用于定位既有 user_roles 行 */
         UserRoleUpdateRequest: {
             /**
              * Format: uuid
-             * @description 客户端生成UUID，防重复提交
+             * @description 当前绑定的 roles.id；缺省或无匹配行时改为 INSERT
              */
-            idempotency_key: string;
-            /** @enum {string} */
-            role: "user" | "auditor" | "tenant-admin";
+            old_role_id?: string;
+            /**
+             * Format: uuid
+             * @description 目标角色 UUID；须非 platform-*，且 tenant_id 为空或等于路径租户
+             */
+            role_id: string;
         };
         /** @description 设置 users.status */
         UserStatusUpdateRequest: {
@@ -7057,16 +8060,6 @@ export interface components {
             idempotency_key: string;
             /** @enum {string} */
             status: "active" | "disabled";
-        };
-        /** @description 移交租户所有者；target 必须是本租户 active tenant-admin */
-        UserTransferOwnershipRequest: {
-            /**
-             * Format: uuid
-             * @description 客户端生成UUID，防重复提交
-             */
-            idempotency_key: string;
-            /** Format: uuid */
-            target_user_id: string;
         };
         /** @description 重置密码；明文不落日志/审计/响应 */
         UserResetPasswordRequest: {
@@ -7084,9 +8077,361 @@ export interface components {
             id: string;
             message: string;
         };
+        IAMTenantBoundary: {
+            /** @constant */
+            type: "tenant";
+            /** Format: uuid */
+            tenant_id: string;
+        };
+        IAMPlatformBoundary: {
+            /** @constant */
+            type: "platform";
+        };
+        IAMBoundary: components["schemas"]["IAMTenantBoundary"] | components["schemas"]["IAMPlatformBoundary"];
+        IAMPrincipalSummary: {
+            /** Format: uuid */
+            principal_id: string;
+            /** @enum {string} */
+            principal_type: "human" | "service";
+            /** @enum {string} */
+            status: "active" | "disabled";
+            display_name?: string;
+        };
+        IAMSessionSummary: {
+            /** Format: uuid */
+            session_id: string;
+            /** @enum {string} */
+            status: "active" | "revoked" | "expired";
+            grants: components["schemas"]["IAMSessionGrantSummary"][];
+            authn_methods: ("password" | "oidc")[];
+            device_name?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            idle_expires_at: string;
+            /** Format: date-time */
+            absolute_expires_at: string;
+        };
+        IAMSessionGrantSummary: {
+            /** Format: uuid */
+            grant_id: string;
+            boundary: components["schemas"]["IAMBoundary"];
+            /** Format: int64 */
+            version: number;
+            /** @enum {string} */
+            status: "active" | "revoked" | "expired";
+        };
+        /** @description Refresh Token 只通过 Secure HttpOnly Cookie 返回，永不进入 JSON。 */
+        IAMAccessTokenResponse: {
+            readonly access_token: string;
+            /** @enum {string} */
+            token_type: "Bearer";
+            expires_in: number;
+            principal: components["schemas"]["IAMPrincipalSummary"];
+            session: components["schemas"]["IAMSessionSummary"];
+            grant: components["schemas"]["IAMSessionGrantSummary"];
+        };
+        IAMPasswordLoginRequest: {
+            account: string;
+            /** Format: password */
+            password: string;
+            /** @enum {string} */
+            audience: "console" | "boss";
+            boundary: components["schemas"]["IAMBoundary"];
+            device_name?: string;
+        } & ({
+            /** @constant */
+            audience?: "console";
+            boundary?: components["schemas"]["IAMTenantBoundary"];
+        } | {
+            /** @constant */
+            audience?: "boss";
+            boundary?: components["schemas"]["IAMPlatformBoundary"];
+        });
+        IAMOIDCBeginRequest: {
+            /** @enum {string} */
+            audience: "console" | "boss";
+            boundary: components["schemas"]["IAMBoundary"];
+        } & ({
+            /** @constant */
+            audience?: "console";
+            boundary?: components["schemas"]["IAMTenantBoundary"];
+        } | {
+            /** @constant */
+            audience?: "boss";
+            boundary?: components["schemas"]["IAMPlatformBoundary"];
+        });
+        IAMOIDCBeginResponse: {
+            /** Format: uri */
+            authorization_url: string;
+            readonly state: string;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        IAMSwitchTenantRequest: {
+            /** Format: uuid */
+            tenant_id: string;
+        };
+        IAMPasswordActionRequest: {
+            account: string;
+            /** @enum {string} */
+            audience: "console" | "boss";
+        };
+        IAMPasswordActionCompleteRequest: {
+            token: string;
+            /** Format: password */
+            new_password: string;
+        };
+        IAMIdentityLinkBeginRequest: {
+            provider: string;
+        };
+        IAMSessionListResponse: {
+            items: components["schemas"]["IAMSessionSummary"][];
+            next_cursor?: string;
+        };
+        IAMServicePrincipal: {
+            /** Format: uuid */
+            principal_id: string;
+            /** Format: uuid */
+            tenant_id: string;
+            name: string;
+            /** @enum {string} */
+            status: "active" | "disabled";
+            /** Format: int64 */
+            version: number;
+            /** Format: date-time */
+            created_at: string;
+        };
+        IAMServicePrincipalCreateRequest: {
+            name: string;
+            role_ids: string[];
+        };
+        IAMServicePrincipalUpdateRequest: {
+            /** Format: int64 */
+            expected_version: number;
+            name?: string;
+            /** @enum {string} */
+            status?: "active" | "disabled";
+        };
+        IAMServicePrincipalListResponse: {
+            items: components["schemas"]["IAMServicePrincipal"][];
+            next_cursor?: string;
+        };
+        IAMAPIKey: {
+            /** Format: uuid */
+            key_id: string;
+            /** Format: uuid */
+            service_principal_id: string;
+            display_hint?: string;
+            /** @enum {string} */
+            status: "active" | "revoked" | "expired";
+            /** Format: date-time */
+            expires_at?: string;
+            /** Format: date-time */
+            last_used_at?: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        IAMAPIKeyCreateRequest: {
+            /** Format: uuid */
+            service_principal_id: string;
+            name: string;
+            never_expires?: boolean;
+            /** Format: date-time */
+            expires_at?: string;
+        } & ({
+            /** @constant */
+            never_expires: true;
+        } | unknown);
+        IAMAPIKeyCreateResponse: {
+            api_key: components["schemas"]["IAMAPIKey"];
+            /** @description 只在本响应显示一次。 */
+            readonly secret: string;
+        };
+        IAMAPIKeyListResponse: {
+            items: components["schemas"]["IAMAPIKey"][];
+            next_cursor?: string;
+        };
+        IAMTenantAccess: {
+            /** Format: uuid */
+            tenant_id: string;
+            /** @enum {string} */
+            status: "bootstrap_pending" | "active" | "suspended";
+            reason_code?: string;
+            /** Format: int64 */
+            version: number;
+        };
+        IAMTenantAccessUpdateRequest: {
+            /** Format: int64 */
+            expected_version: number;
+            /** @enum {string} */
+            status: "active" | "suspended";
+            reason_code: string;
+        };
+        IAMMembership: {
+            /** Format: uuid */
+            membership_id: string;
+            principal: components["schemas"]["IAMPrincipalSummary"];
+            boundary: components["schemas"]["IAMBoundary"];
+            /** @enum {string} */
+            status: "active" | "suspended" | "removed";
+            role_ids: string[];
+            /** Format: int64 */
+            version: number;
+        };
+        IAMMembershipUpdateRequest: {
+            /** Format: int64 */
+            expected_version: number;
+            /** @enum {string} */
+            status: "active" | "suspended";
+        };
+        IAMMembershipListResponse: {
+            items: components["schemas"]["IAMMembership"][];
+            next_cursor?: string;
+        };
+        IAMRole: {
+            /** Format: uuid */
+            role_id: string;
+            code: string;
+            name: string;
+            system: boolean;
+            permissions: string[];
+            /** Format: int64 */
+            version: number;
+        };
+        IAMRoleCreateRequest: {
+            name: string;
+            permissions: string[];
+        };
+        IAMRoleUpdateRequest: {
+            /** Format: int64 */
+            expected_version: number;
+            name: string;
+            permissions: string[];
+        };
+        IAMRoleBindingRequest: {
+            /** Format: uuid */
+            role_id: string;
+        };
+        IAMRoleListResponse: {
+            items: components["schemas"]["IAMRole"][];
+            next_cursor?: string;
+        };
+        IAMInvitation: {
+            /** Format: uuid */
+            invitation_id: string;
+            boundary: components["schemas"]["IAMBoundary"];
+            normalized_email_hint: string;
+            role_ids: string[];
+            /** @enum {string} */
+            status: "pending" | "accepted" | "cancelled" | "expired";
+            /** Format: int64 */
+            version: number;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        IAMInvitationCreateRequest: {
+            /** Format: email */
+            email: string;
+            role_ids: string[];
+            locale?: string;
+        };
+        IAMInvitationMutationRequest: {
+            /** Format: int64 */
+            expected_version: number;
+        };
+        IAMInvitationAcceptRequest: {
+            invitation_token: string;
+        };
+        IAMInvitationListResponse: {
+            items: components["schemas"]["IAMInvitation"][];
+            next_cursor?: string;
+        };
+        IAMRecoveryRequest: {
+            /** Format: uuid */
+            tenant_id: string;
+            /** Format: uuid */
+            target_principal_id: string;
+            reason_code: string;
+            payload_hash: string;
+        };
+        IAMRecoveryApprovalRequest: {
+            approval_reference: string;
+            payload_hash: string;
+        };
+        IAMRecoveryExecuteRequest: {
+            approval_reference: string;
+            payload_hash: string;
+            reauthentication_proof: string;
+        };
+        IAMRecoveryOperation: {
+            /** Format: uuid */
+            operation_id: string;
+            /** @enum {string} */
+            kind: "recovery_bootstrap" | "restore_tenant_admin";
+            /** Format: uuid */
+            tenant_id: string;
+            /** Format: uuid */
+            target_principal_id: string;
+            /** Format: uuid */
+            requester_principal_id: string;
+            /** Format: uuid */
+            approver_principal_id?: string;
+            /** @enum {string} */
+            status: "pending_approval" | "approved" | "executed" | "expired" | "rejected";
+            payload_hash: string;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        /** @description 仅允许公开契约列出的脱敏安全差异；不得包含请求/响应、邮箱、Token、Secret 或 Hash。 */
+        IAMSecurityAuditDetails: {
+            /** @enum {string} */
+            status_before?: "active" | "disabled" | "suspended" | "removed" | "pending" | "cancelled" | "expired" | "revoked";
+            /** @enum {string} */
+            status_after?: "active" | "disabled" | "suspended" | "removed" | "pending" | "cancelled" | "expired" | "revoked";
+            role_ids_before?: string[];
+            role_ids_after?: string[];
+            /** @enum {string} */
+            authn_method?: "password" | "oidc" | "access_token" | "api_key" | "service_token" | "refresh_cookie";
+            /** @enum {string} */
+            credential_kind?: "password" | "oidc_identity" | "access_token" | "api_key" | "service_token" | "refresh_token";
+            delivery_attempt?: number;
+            /** Format: int64 */
+            object_version_before?: number;
+            /** Format: int64 */
+            object_version_after?: number;
+        };
+        IAMSecurityAuditEvent: {
+            /** Format: uuid */
+            event_id: string;
+            /** Format: date-time */
+            occurred_at: string;
+            /** Format: date-time */
+            recorded_at: string;
+            /** @enum {string} */
+            actor_type: "principal" | "workload" | "anonymous";
+            /** Format: uuid */
+            actor_principal_id?: string;
+            boundary: components["schemas"]["IAMBoundary"];
+            action: string;
+            target_type: string;
+            target_id: string;
+            /** @enum {string} */
+            result: "success" | "denied" | "failed";
+            reason_code: string;
+            request_id: string;
+            correlation_id?: string;
+            decision_id?: string;
+            source_service: string;
+            details?: components["schemas"]["IAMSecurityAuditDetails"];
+        };
+        IAMSecurityAuditEventListResponse: {
+            items: components["schemas"]["IAMSecurityAuditEvent"][];
+            next_cursor?: string;
+        };
     };
     responses: {
-        /** @description 未认证或 Token 无效（code=UNAUTHORIZED） */
+        /** @description 缺失、畸形、未知、过期或已撤销 Credential（code=CREDENTIAL_INVALID） */
         Unauthorized: {
             headers: {
                 [name: string]: unknown;
@@ -7095,7 +8440,7 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
-        /** @description 无权访问该资源（code=FORBIDDEN） */
+        /** @description 身份有效但状态、boundary 或 Permission 拒绝（code=PERMISSION_DENIED） */
         Forbidden: {
             headers: {
                 [name: string]: unknown;
@@ -7149,7 +8494,7 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
-        /** @description 资源已存在或冲突（code=CONFLICT） */
+        /** @description 幂等、版本或资源状态冲突（code=IDEMPOTENCY_CONFLICT） */
         Conflict: {
             headers: {
                 [name: string]: unknown;
@@ -7158,7 +8503,7 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
-        /** @description 超出速率限制（code=RATE_LIMIT_EXCEEDED） */
+        /** @description 认证或授权速率限制（code=AUTH_RATE_LIMITED） */
         RateLimitExceeded: {
             headers: {
                 /** @description 建议等待的秒数 */
@@ -7178,8 +8523,17 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
-        /** @description 依赖服务暂不可用（code=UNAVAILABLE） */
+        /** @description IAM 依赖、投影或 policy 不可用（code=IAM_UNAVAILABLE） */
         ServiceUnavailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description IAM 500ms deadline 到期且 Gateway 不自动重试（code=IAM_TIMEOUT） */
+        GatewayTimeout: {
             headers: {
                 [name: string]: unknown;
             };
@@ -7223,35 +8577,8 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
-        /** @description 该用户已是本租户 admin/owner（code=USER_ALREADY_TENANT_ADMIN） */
+        /** @description 该用户已是本租户 admin（code=USER_ALREADY_TENANT_ADMIN） */
         UserAlreadyTenantAdmin: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                "application/json": components["schemas"]["ErrorResponse"];
-            };
-        };
-        /** @description 租户所有者角色不可修改/删除（code=TENANT_OWNER_ROLE_LOCKED） */
-        TenantOwnerRoleLocked: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                "application/json": components["schemas"]["ErrorResponse"];
-            };
-        };
-        /** @description 唯一活跃 tenant-owner 不可禁用/删除（code=LAST_TENANT_OWNER） */
-        LastTenantOwner: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                "application/json": components["schemas"]["ErrorResponse"];
-            };
-        };
-        /** @description 移交目标不是本租户 active tenant-admin（code=TRANSFER_TARGET_INVALID） */
-        TransferTargetInvalid: {
             headers: {
                 [name: string]: unknown;
             };
@@ -7408,7 +8735,13 @@ export interface components {
             };
         };
     };
-    parameters: never;
+    parameters: {
+        /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+        IAMIdempotencyKey: string;
+        IAMCSRFToken: string;
+        IAMLimit: number;
+        IAMCursor: string;
+    };
     requestBodies: never;
     headers: never;
     pathItems: never;
@@ -7520,45 +8853,36 @@ export interface operations {
     passwordLogin: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["PasswordLoginRequest"];
+                "application/json": components["schemas"]["IAMPasswordLoginRequest"];
             };
         };
         responses: {
-            /** @description 账密登录成功，返回 TokenPair */
+            /** @description 登录成功；Refresh Token 只通过 audience 对应的 HttpOnly Cookie 返回。 */
             200: {
                 headers: {
+                    /** @description Console/BOSS 隔离的 Secure HttpOnly SameSite=Lax Refresh Cookie。 */
+                    "Set-Cookie"?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TokenPairResponse"];
+                    "application/json": components["schemas"]["IAMAccessTokenResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
-            /** @description 用户名或密码错误（code=INVALID_CREDENTIALS） */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 租户不存在（code=TENANT_NOT_FOUND） */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
             429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     platformPasswordLogin: {
@@ -7599,13 +8923,16 @@ export interface operations {
     beginOIDCLogin: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["BeginOIDCLoginRequest"];
+                "application/json": components["schemas"]["IAMOIDCBeginRequest"];
             };
         };
         responses: {
@@ -7615,10 +8942,14 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BeginOIDCLoginResponse"];
+                    "application/json": components["schemas"]["IAMOIDCBeginResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     completeOIDCLogin: {
@@ -7647,37 +8978,466 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
         };
     };
-    logout: {
+    completeOIDCCallback: {
+        parameters: {
+            query: {
+                code: string;
+                state: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OIDC 登录完成并跳转到固定 Console/BOSS 页面。 */
+            303: {
+                headers: {
+                    Location?: string;
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    refreshSession: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["IAMCSRFToken"];
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 单次轮换成功；新 Refresh Token 只在 Set-Cookie 返回。 */
+            200: {
+                headers: {
+                    /** @description 与输入 audience 相同的已轮换 HttpOnly Cookie。 */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMAccessTokenResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    logoutSession: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+                /** @description 使用 Refresh Cookie 时必须提供；Bearer-only 请求不要求。 */
+                "X-CSRF-Token"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session 已撤销；重复请求仍成功。 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    switchTenant: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["IAMCSRFToken"];
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["LogoutRequest"];
+                "application/json": components["schemas"]["IAMSwitchTenantRequest"];
             };
         };
         responses: {
-            /** @description Token 已吊销 */
+            /** @description 新 Tenant boundary 的 Access Token 与 Refresh Cookie。 */
             200: {
                 headers: {
+                    "Set-Cookie"?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RevokeStatusResponse"];
+                    "application/json": components["schemas"]["IAMAccessTokenResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
-    listAPIKeys: {
+    requestPasswordAction: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMPasswordActionRequest"];
+            };
+        };
+        responses: {
+            /** @description 请求已统一接受，不泄漏账号是否存在。 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    completePasswordAction: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMPasswordActionCompleteRequest"];
+            };
+        };
+        responses: {
+            /** @description 密码已设置；重置时全部 Human Session 同事务撤销。 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    beginOIDCIdentityLink: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMIdentityLinkBeginRequest"];
+            };
+        };
+        responses: {
+            /** @description 返回一次性 state/PKCE 授权地址。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMOIDCBeginResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    completeOIDCIdentityLink: {
+        parameters: {
+            query: {
+                code: string;
+                state: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Link 完成后跳转固定账户页面。 */
+            303: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    listSessions: {
         parameters: {
             query?: {
-                user_id?: string;
+                limit?: components["parameters"]["IAMLimit"];
+                cursor?: components["parameters"]["IAMCursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session 列表。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMSessionListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    revokeAllSessions: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 全部 Session 已撤销。 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    revokeSession: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session 已撤销。 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    listServicePrincipals: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["IAMLimit"];
+                cursor?: components["parameters"]["IAMCursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Service Principal 列表。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMServicePrincipalListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    createServicePrincipal: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMServicePrincipalCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Service Principal 已创建，不隐式创建 API Key。 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMServicePrincipal"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    getServicePrincipal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                principal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Service Principal。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMServicePrincipal"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    updateServicePrincipal: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                principal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMServicePrincipalUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新后的 Service Principal。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMServicePrincipal"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    listIAMAPIKeys: {
+        parameters: {
+            query: {
+                service_principal_id: string;
+                limit?: components["parameters"]["IAMLimit"];
+                cursor?: components["parameters"]["IAMCursor"];
             };
             header?: never;
             path?: never;
@@ -7691,23 +9451,28 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ListAPIKeysResponse"];
+                    "application/json": components["schemas"]["IAMAPIKeyListResponse"];
                 };
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
-    createAPIKey: {
+    createIAMAPIKey: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateAPIKeyRequest"];
+                "application/json": components["schemas"]["IAMAPIKeyCreateRequest"];
             };
         };
         responses: {
@@ -7717,18 +9482,25 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CreateAPIKeyResponse"];
+                    "application/json": components["schemas"]["IAMAPIKeyCreateResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
-    revokeAPIKey: {
+    revokeIAMAPIKey: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
             path: {
                 key_id: string;
             };
@@ -7736,22 +9508,1514 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description API Key 已吊销 */
+            /** @description API Key 已吊销。 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    getTenantAccess: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Tenant Access 状态。 */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        status: "revoked";
-                    };
+                    "application/json": components["schemas"]["IAMTenantAccess"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    updateTenantAccess: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMTenantAccessUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新后的 Tenant Access。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMTenantAccess"];
                 };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    listTenantIAMMembers: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["IAMLimit"];
+                cursor?: components["parameters"]["IAMCursor"];
+            };
+            header?: never;
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Membership 列表。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMMembershipListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    getTenantIAMMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+                membership_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Membership。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMMembership"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    removeTenantIAMMember: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                tenant_id: string;
+                membership_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Membership 已进入 removed 状态。 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    updateTenantIAMMember: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                tenant_id: string;
+                membership_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMMembershipUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新后的 Membership。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMMembership"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    bindTenantIAMRole: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                tenant_id: string;
+                membership_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMRoleBindingRequest"];
+            };
+        };
+        responses: {
+            /** @description Role Binding 已建立。 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    unbindTenantIAMRole: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                tenant_id: string;
+                membership_id: string;
+                role_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Role Binding 已删除。 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    listTenantIAMRoles: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["IAMLimit"];
+                cursor?: components["parameters"]["IAMCursor"];
+            };
+            header?: never;
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Role 列表。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMRoleListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    createTenantIAMRole: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMRoleCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Role 已创建。 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMRole"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    getTenantIAMRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+                role_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Role。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMRole"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    deleteTenantIAMRole: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                tenant_id: string;
+                role_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Role 已删除。 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    updateTenantIAMRole: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                tenant_id: string;
+                role_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMRoleUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新后的 Role。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMRole"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    listTenantIAMInvitations: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["IAMLimit"];
+                cursor?: components["parameters"]["IAMCursor"];
+            };
+            header?: never;
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invitation 列表。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMInvitationListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    createTenantIAMInvitation: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMInvitationCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Invitation 已创建；Secret 不会在幂等重放时再次返回。 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMInvitation"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    getTenantIAMInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+                invitation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invitation。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMInvitation"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    resendTenantIAMInvitation: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                tenant_id: string;
+                invitation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMInvitationMutationRequest"];
+            };
+        };
+        responses: {
+            /** @description Invitation metadata 已更新。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMInvitation"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    cancelTenantIAMInvitation: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                tenant_id: string;
+                invitation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMInvitationMutationRequest"];
+            };
+        };
+        responses: {
+            /** @description Invitation 已取消。 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    acceptTenantIAMInvitation: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                tenant_id: string;
+                invitation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMInvitationAcceptRequest"];
+            };
+        };
+        responses: {
+            /** @description 新 Membership。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMMembership"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    listPlatformIAMMembers: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["IAMLimit"];
+                cursor?: components["parameters"]["IAMCursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Platform Membership 列表。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMMembershipListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    getPlatformIAMMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                membership_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Platform Membership。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMMembership"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    removePlatformIAMMember: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                membership_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Platform Membership 已移除。 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    updatePlatformIAMMember: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                membership_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMMembershipUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新后的 Platform Membership。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMMembership"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    bindPlatformIAMRole: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                membership_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMRoleBindingRequest"];
+            };
+        };
+        responses: {
+            /** @description Platform Role Binding 已建立。 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    unbindPlatformIAMRole: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                membership_id: string;
+                role_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Platform Role Binding 已删除。 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    listPlatformIAMRoles: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["IAMLimit"];
+                cursor?: components["parameters"]["IAMCursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Platform Role 列表。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMRoleListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    createPlatformIAMRole: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMRoleCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Platform Role 已创建。 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMRole"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    getPlatformIAMRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                role_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Platform Role。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMRole"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    deletePlatformIAMRole: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                role_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Platform Role 已删除。 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    updatePlatformIAMRole: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                role_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMRoleUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新后的 Platform Role。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMRole"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    listPlatformIAMInvitations: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["IAMLimit"];
+                cursor?: components["parameters"]["IAMCursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Platform Invitation 列表。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMInvitationListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    createPlatformIAMInvitation: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMInvitationCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Platform Invitation 已创建。 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMInvitation"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    getPlatformIAMInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invitation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Platform Invitation。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMInvitation"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    resendPlatformIAMInvitation: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                invitation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMInvitationMutationRequest"];
+            };
+        };
+        responses: {
+            /** @description Platform Invitation metadata 已更新。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMInvitation"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    cancelPlatformIAMInvitation: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                invitation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMInvitationMutationRequest"];
+            };
+        };
+        responses: {
+            /** @description Platform Invitation 已取消。 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    acceptPlatformIAMInvitation: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                invitation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMInvitationAcceptRequest"];
+            };
+        };
+        responses: {
+            /** @description 新 Platform Membership。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMMembership"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    requestRecoveryBootstrap: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMRecoveryRequest"];
+            };
+        };
+        responses: {
+            /** @description 等待独立 approver 的 Recovery Bootstrap operation。 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMRecoveryOperation"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    approveRecoveryBootstrap: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMRecoveryApprovalRequest"];
+            };
+        };
+        responses: {
+            /** @description 已批准的 operation。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMRecoveryOperation"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    executeRecoveryBootstrap: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMRecoveryExecuteRequest"];
+            };
+        };
+        responses: {
+            /** @description 已执行的 operation。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMRecoveryOperation"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    requestRestoreTenantAdmin: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMRecoveryRequest"];
+            };
+        };
+        responses: {
+            /** @description 等待独立 approver 的 RestoreTenantAdmin operation。 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMRecoveryOperation"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    approveRestoreTenantAdmin: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMRecoveryApprovalRequest"];
+            };
+        };
+        responses: {
+            /** @description 已批准的 operation。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMRecoveryOperation"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    executeRestoreTenantAdmin: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 同 boundary、actor、operation、key 的 24 小时幂等键。 */
+                "Idempotency-Key": components["parameters"]["IAMIdempotencyKey"];
+            };
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IAMRecoveryExecuteRequest"];
+            };
+        };
+        responses: {
+            /** @description 已执行的 operation。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMRecoveryOperation"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitExceeded"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    listIAMSecurityAuditEvents: {
+        parameters: {
+            query?: {
+                action?: string;
+                result?: "success" | "denied" | "failed";
+                limit?: components["parameters"]["IAMLimit"];
+                cursor?: components["parameters"]["IAMCursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description allowlisted Audit Event 列表。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMSecurityAuditEventListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    getIAMSecurityAuditEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description allowlisted Audit Event。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMSecurityAuditEvent"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    listPlatformIAMSecurityAuditEvents: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+                action?: string;
+                result?: "success" | "denied" | "failed";
+                limit?: components["parameters"]["IAMLimit"];
+                cursor?: components["parameters"]["IAMCursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Platform Auditor 可见的 allowlisted Audit Event 列表。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMSecurityAuditEventListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    getPlatformIAMSecurityAuditEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Platform Auditor 可见的 allowlisted Audit Event。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IAMSecurityAuditEvent"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     getPlatformWorkloadCapabilities: {
@@ -8149,6 +11413,19 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["PreconditionFailed"];
+            429: components["responses"]["RateLimitExceeded"];
+            /** @description Session Gateway 返回未预期错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listInstanceLogs: {
@@ -8178,6 +11455,45 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    streamInstanceLogs: {
+        parameters: {
+            query?: {
+                level?: "debug" | "info" | "warn" | "error";
+                limit?: number;
+                interval_seconds?: number;
+            };
+            header?: never;
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SSE 日志流 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 日志流未配置（非 loki profile） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     listInstanceEvents: {
@@ -8262,6 +11578,19 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["PreconditionFailed"];
+            429: components["responses"]["RateLimitExceeded"];
+            /** @description Session Gateway 返回未预期错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listInstanceSecurityEvents: {
@@ -11385,6 +14714,38 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
+    getBranding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 品牌配置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        platform_name?: string;
+                        /** Format: uri */
+                        logo_light_url?: string;
+                        /** Format: uri */
+                        logo_dark_url?: string;
+                        /** Format: uri */
+                        favicon_url?: string;
+                        /** @example #1677FF */
+                        primary_color?: string;
+                        secondary_color?: string;
+                        icp_number?: string;
+                    };
+                };
+            };
+        };
+    };
     listInstanceOperations: {
         parameters: {
             query?: {
@@ -11440,6 +14801,85 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    listAsyncTasks: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string;
+                status?: "pending" | "running" | "completed" | "failed" | "cancelled" | "dead_letter";
+                /** @description 筛选 task_type；不做 enum 约束（前向兼容：新增 task_type 后旧客户端仍可筛选）；未匹配值返回空列表而非 400 */
+                task_type?: string;
+                /** @description 筛选 resource_type；不做 enum 约束，未匹配值返回空列表而非 400 */
+                resource_type?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 任务列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 异步任务状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AsyncTask"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getPlatformServiceHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description ANI 服务 Prometheus 抓取可达性 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformServiceHealthResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     queryObservability: {
         parameters: {
             query: {
@@ -11483,6 +14923,35 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description PromQL 区间查询结果（matrix） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservabilityRangeQueryResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    queryResourceTrendObservability: {
+        parameters: {
+            query: {
+                metric: "gpu" | "cpu" | "memory";
+                start: string;
+                end: string;
+                step: string;
+                timeout?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 租户资源使用率趋势（matrix），value ∈ 0-100（%） */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11692,6 +15161,29 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getPlatformCapacity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 平台容量态势汇总 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformCapacityResponse"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             503: components["responses"]["ServiceUnavailable"];
@@ -13699,6 +17191,28 @@ export interface operations {
             409: components["responses"]["Conflict"];
         };
     };
+    listAvailableTenants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 可用租户摘要列表（status ∈ active / frozen） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantSummaryList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
     listTenantUsers: {
         parameters: {
             query?: {
@@ -13706,7 +17220,7 @@ export interface operations {
                 cursor?: string;
                 /** @description 可选；按指定租户过滤 */
                 tenant_id?: string;
-                role?: "tenant-owner" | "tenant-admin";
+                role?: "tenant-admin";
                 status?: "active" | "disabled";
                 /** @description 模糊匹配 email/username */
                 search?: string;
@@ -13759,6 +17273,36 @@ export interface operations {
             404: components["responses"]["UserNotFound"];
         };
     };
+    batchGetTenantUsers: {
+        parameters: {
+            query: {
+                /** @description 逗号分隔的 user_id 列表 */
+                user_ids: string;
+            };
+            header?: never;
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 批量用户列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["TenantUser"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
     getTenantUser: {
         parameters: {
             query?: never;
@@ -13809,8 +17353,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["UserNotFound"];
-            409: components["responses"]["TenantOwnerRoleLocked"];
-            422: components["responses"]["LastTenantOwner"];
         };
     };
     getTenantUserRole: {
@@ -13868,65 +17410,31 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["UserNotFound"];
-            409: components["responses"]["TenantOwnerRoleLocked"];
             422: components["responses"]["RoleChangeInvalid"];
         };
     };
-    getTenantUserChangeableRoles: {
+    listAssignableTenantRoles: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 tenant_id: string;
-                user_id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description 可变更角色 */
+            /** @description 可分配角色列表 */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ChangeableRolesResponse"];
+                    "application/json": components["schemas"]["AssignableTenantRoleList"];
                 };
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["UserNotFound"];
-        };
-    };
-    transferCoreTenantOwnership: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tenant_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UserTransferOwnershipRequest"];
-            };
-        };
-        responses: {
-            /** @description 所有权已移交 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UserMutationResult"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["UserNotFound"];
-            422: components["responses"]["TransferTargetInvalid"];
         };
     };
     updateTenantUserStatus: {
@@ -13958,7 +17466,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["UserNotFound"];
-            422: components["responses"]["LastTenantOwner"];
         };
     };
     resetTenantUserPassword: {

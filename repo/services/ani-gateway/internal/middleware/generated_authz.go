@@ -154,6 +154,10 @@ func InstallGeneratedPrincipalContext(
 // SetPrincipal + InstallGeneratedPrincipalContext + request-local raw credential。
 func AuthenticatePrincipal(client AuthClient) app.HandlerFunc {
 	return func(ctx context.Context, c *app.RequestContext) {
+		if isTargetIAMHandled(c) {
+			c.Next(ctx)
+			return
+		}
 		resolved, err := GetResolvedPolicy(c)
 		if err != nil {
 			respond503(c, "authz policy context missing")
@@ -234,6 +238,10 @@ func AuthenticatePrincipal(client AuthClient) app.HandlerFunc {
 // capability + instance binding，其余主体走 CheckPermissionV2（无 legacy fallback）。
 func AuthorizePrincipal(client AuthClient) app.HandlerFunc {
 	return func(ctx context.Context, c *app.RequestContext) {
+		if isTargetIAMHandled(c) {
+			c.Next(ctx)
+			return
+		}
 		resolved, err := GetResolvedPolicy(c)
 		if err != nil {
 			respond503(c, "authz policy context missing")

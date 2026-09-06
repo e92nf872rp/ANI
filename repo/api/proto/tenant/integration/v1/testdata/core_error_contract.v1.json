@@ -1,0 +1,11 @@
+{
+  "domain": "core.ani.internal",
+  "reasons": [
+    {"reason": "INVALID_ARGUMENT", "grpc_code": "INVALID_ARGUMENT", "required_metadata": ["field"]},
+    {"reason": "SCHEMA_MAJOR_UNSUPPORTED", "grpc_code": "FAILED_PRECONDITION", "required_metadata": ["schema_major", "supported_schema_major"]},
+    {"reason": "SNAPSHOT_CURSOR_INVALID", "grpc_code": "INVALID_ARGUMENT", "required_metadata": ["cursor"]},
+    {"reason": "SNAPSHOT_CURSOR_EXPIRED", "grpc_code": "FAILED_PRECONDITION", "required_metadata": ["cursor", "expired_at"]},
+    {"reason": "SNAPSHOT_PAGE_TOKEN_INVALID", "grpc_code": "INVALID_ARGUMENT", "required_metadata": ["cursor", "page_token"]},
+    {"reason": "SNAPSHOT_UNAVAILABLE", "grpc_code": "UNAVAILABLE", "required_metadata": ["dependency"]}
+  ]
+}

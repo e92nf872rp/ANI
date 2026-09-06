@@ -36,6 +36,8 @@ spec:
           env:
             - name: ANI_AUTH_MODE
               value: auth_service
+            - name: IAM_TARGET_MODE
+              value: disabled
             - name: AUTH_SERVICE_ADDR
               value: ani-auth-service.ani-system.svc.cluster.local:9101
             - name: KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE
