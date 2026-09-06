@@ -8,9 +8,11 @@ import (
 	"github.com/cloudwego/hertz/pkg/app/server"
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
+	"github.com/kubercloud/ani/services/ani-gateway/internal/targetiam"
 )
 
 type RegisterOptions struct {
+	TargetIAMClient                       targetiam.Client
 	K8sClusterService                     ports.K8sClusterService
 	EncryptionService                     ports.EncryptionService
 	SecretService                         ports.SecretService
@@ -82,7 +84,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 
 	v1 := h.Group("/api/v1")
 	registerBranding(v1)
-	registerAuth(v1)
+	registerAuth(v1, options.TargetIAMClient)
 	registerMetering(v1, options.MeteringService)
 	registerHarbor(v1, options.ImageRegistry)
 	// Instances register first so their service can act as InstanceLookup.

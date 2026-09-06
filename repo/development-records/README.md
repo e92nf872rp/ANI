@@ -19,6 +19,7 @@
 |---|---|---|
 | DP2-02 | 基于固定 ANI `0cedae825a489d936cf41815dc27f278f6d3213c` 冻结目标 IAM 公网 OpenAPI、295-operation registry、唯一 Handler/Owner、认证授权分类、Permission/typed obligation、稳定 `401/403/409/429/503/504`、policy revision、可信 Header 和 D001–D028 replacement trace；breaking 为 operation 236→295、59 新增、0 删除、6 个 operationId 变化、45 个新增 schema；Console/BOSS 类型与四语言 Core SDK 同源生成。契约与生成门禁 `pass`；Gateway 运行时接线、实际新增 Handler 和调用方切换 `not_verified`，本批不部署、不切流 | DP2-02-public-iam-operation-registry.md |
 | DP2-03 | 冻结目标 `iam.v1` Authentication/Authorization/Admin 3 services / 69 RPC，以及 Core-owned `tenant.integration.v1` Lifecycle/Heartbeat/Bootstrap/Snapshot 契约和只读 2-RPC snapshot service；两仓库固定 descriptors、pins 和八组 producer-consumer fixtures。Buf、生成、fixtures 与相关回归 `pass`；旧 DP2-02 aggregate operationId gate `fail`；运行时 registration、Core/NATS、Gateway 映射与切换 `not_verified` | DP2-03-iam-core-integration-contracts.md |
+| DP2-05 | 在真实独立 PostgreSQL/Redis、受限 runtime role、真实 IAM/Gateway 进程上跑通 Console/Tenant Password→Session/Grant→Access Token→CheckPermission→`listInstances` tracer bullet；0/1 IAM decision、可信 Header、401/403/503/504、Audit 原子、two-Tenant/query mutation、空库重放和人工接受的 Go/No-Go A Go 结论均为 `pass`。BOSS/Platform Password Login 与 BOSS caller E2E 为 `not_verified`；未 push、部署、切流或启动 DP2-06 | DP2-05-target-iam-vertical-slice.md |
 
 ### 实例日志流式输出（2026-09，分支 feat/instance-log-stream）
 

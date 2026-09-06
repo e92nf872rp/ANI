@@ -1,0 +1,28 @@
+version: v2
+clean: true
+plugins:
+  - local: protoc-gen-go
+    out: gen
+    opt: paths=source_relative
+  - local: protoc-gen-go-grpc
+    out: gen
+    opt:
+      - paths=source_relative
+      - require_unimplemented_servers=true
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/kubercloud/ani/services/ani-gateway/internal/targetiam/gen
+  disable:
+    - file_option: go_package_prefix
+      path: google/protobuf/timestamp.proto
+    - file_option: go_package_prefix
+      path: google/rpc/error_details.proto
+inputs:
+  - binary_image: ../../../../pkg/generated/pb/iam/v1/iam_descriptor.pb
+    types:
+      - iam.v1.**
+    exclude_paths:
+      - google/protobuf/timestamp.proto
+      - google/rpc/error_details.proto

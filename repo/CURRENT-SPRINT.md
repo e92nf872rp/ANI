@@ -8,6 +8,8 @@
 
 > **ANI-GW-1（2026-09-02）：** `LOCAL_VERIFIED`。固定 Session Gateway `api/v0.1.0`（Go module `v0.1.0`，commit `d86a40d33369b128aabc680d4ea0b3f790ac0bb6`）完成 instance exec/console gRPC `CreateSession` 接入，并拆分 `InstanceObservability` / `InstanceSessionIssuer`；real provider 缺失、非法或不可用时 503 fail-closed，不再生成占位 URL。fake/bufconn、race/vet、全仓测试与契约/生成/架构门禁通过；真实 Session Gateway 进程、WebSocket/terminal/serial/VNC 数据面和集群 rollout 均 `not_verified`。不含 Console、CONSOLE-1、LIVE-1；详情见 `development-records/ANI-GW-1.md`。
 
+> **ANI IAM Direct P2 DP2-05（2026-09-06）：** 专用本地 worktree 中的 Console/Tenant Password→Session/Grant→Access Token→CheckPermission→`listInstances` tracer bullet 使用真实 PostgreSQL/Redis、受限 runtime role 和真实 IAM/Gateway 进程验证为 `pass`；Go/No-Go A 已由人工接受为 Go，结果为 `pass`。BOSS/Platform Password Login 与 BOSS caller E2E 为 `not_verified`。本批只形成本地 commit，未 push、部署、切流、删除旧 Auth或启动 DP2-06；详情见 `development-records/DP2-05-target-iam-vertical-slice.md`。
+
 > **INSTANCE-SANDBOX-CHECKPOINT-A（2026-08-02）：** live passed。新 Sandbox `/workspace` 使用 5Gi RBD PVC，CSI VolumeSnapshot create/list/restore/clone、Gateway 重启后 provider list、PG create/restore task、keep_memory/legacy emptyDir 422 和删除级联清理均已在 default 网络验证。Gateway `instance-sandbox-checkpoint-20260802-v1`；evidence：`development-records/live-evidence/instance-sandbox-checkpoint-live-20260802.json`。仅 filesystem checkpoint，不含内存状态；私有 VPC 尚未打通。
 
 > **INSTANCE-SANDBOX-STATELESS-A（2026-08-02，历史前置）：** live passed。Core 使用请求级 PG 上下文、UUID、PG AsyncTaskStore、Redis DELETE/指纹/Token 过期幂等和端口摘要写回；Gateway `instance-sandbox-stateless-20260802-v1` 重启验证通过。该批次当时的 `emptyDir/checkpoint 422` 边界已由 `INSTANCE-SANDBOX-CHECKPOINT-A` 取代，历史 evidence 仍保留在 `development-records/live-evidence/instance-sandbox-stateless-live-20260802.json`。
@@ -184,6 +186,22 @@
 | 运行时 registration、Core/NATS、Gateway mapping/cutover | `not_verified` | 后续 DP2-05 及切换事项验证 |
 
 批次记录：`development-records/DP2-03-iam-core-integration-contracts.md`。本地契约提交不会自动进入演进中的 ANI 主线；未来合入前必须重新执行完整 Proto breaking、生成物、Gateway/Auth 和调用方回归。
+
+## ANI IAM Direct P2 DP2-05 目标纵向链路（2026-09）
+
+> 本批只在独立 ani-iam 与专用 ANI worktree 中验证 Go/No-Go A tracer bullet。工程实现、隔离真实依赖门禁和人工 Go 结论均为 `pass`。只形成本地 commit，未 push 或提交到 ANI 主线，未部署、切流、删除旧 Auth 或启动 DP2-06。
+
+| 项目 | 状态 | 证据 |
+|---|---|---|
+| Password→Session/Grant→Access Token→CheckPermission→`listInstances` | `pass` | 真实 PostgreSQL/Redis、受限 runtime role、真实 IAM 与 Gateway 进程 |
+| Public 0 次 / Authorized 1 次 IAM decision、hostile Header strip | `pass` | DP2-02 固定 registry；`listInstances` 只调用一次 `CheckPermission` |
+| Gateway 401/403/503/504、policy mismatch | `pass` | 真实登录/deny、关闭 endpoint、TLS handshake blackhole、stable fail-closed mapping |
+| Audit transaction、two-Tenant、query mutation、empty replay | `pass` | 完整 real-dependency integration suite |
+| TLS 1.3 mTLS + Gateway DNS/RPC allowlist | `pass` | IAM server/client transport 与 workload identity tests |
+| unified 24h Idempotency Ledger | `not_verified` | 已接受 Direct P2 graph 将完整 ledger 归 DP2-16；本 tracer bullet 不提前实现 |
+| Go/No-Go A 人工接受 | `pass` | 2026-09-06 明确接受 Go；只证明目标最小纵向架构可行，不等于 production ready 或切流授权 |
+
+批次记录：`development-records/DP2-05-target-iam-vertical-slice.md`。不含 OIDC、完整 Refresh/browser、Invitation、完整 Role、API Key、Service Token、Core/NATS、五类调用方整体切换或部署。
 
 ## 账密登录模块（2026-07）
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -15,7 +16,46 @@ import (
 	"github.com/kubercloud/ani/pkg/bootstrap"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/router"
+	"github.com/kubercloud/ani/services/ani-gateway/internal/targetiam"
 )
+
+type targetIAMRuntimeConfig struct {
+	Mode      string
+	Address   string
+	MutualTLS targetiam.MutualTLSConfig
+}
+
+const (
+	targetIAMModeDisabled = "disabled"
+	targetIAMModeDP205    = "dp2_05"
+)
+
+func targetIAMRuntimeConfigFromEnv() targetIAMRuntimeConfig {
+	return targetIAMRuntimeConfig{
+		Mode:    strings.TrimSpace(os.Getenv("IAM_TARGET_MODE")),
+		Address: strings.TrimSpace(os.Getenv("IAM_TARGET_GRPC_ADDR")),
+		MutualTLS: targetiam.MutualTLSConfig{
+			ServerName:      strings.TrimSpace(os.Getenv("IAM_TARGET_TLS_SERVER_NAME")),
+			CAFile:          strings.TrimSpace(os.Getenv("IAM_TARGET_TLS_CA_FILE")),
+			CertificateFile: strings.TrimSpace(os.Getenv("IAM_TARGET_TLS_CERT_FILE")),
+			PrivateKeyFile:  strings.TrimSpace(os.Getenv("IAM_TARGET_TLS_KEY_FILE")),
+		},
+	}
+}
+
+func newTargetIAMClient(config targetIAMRuntimeConfig) (targetiam.Client, func() error, error) {
+	switch strings.TrimSpace(config.Mode) {
+	case targetIAMModeDisabled:
+		return nil, nil, nil
+	case targetIAMModeDP205:
+		if strings.TrimSpace(config.Address) == "" {
+			return nil, nil, fmt.Errorf("IAM_TARGET_GRPC_ADDR is required when IAM_TARGET_MODE=%s", targetIAMModeDP205)
+		}
+	default:
+		return nil, nil, fmt.Errorf("IAM_TARGET_MODE must be %q or %q", targetIAMModeDisabled, targetIAMModeDP205)
+	}
+	return targetiam.Dial(config.Address, config.MutualTLS)
+}
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -27,6 +67,20 @@ func main() {
 	)
 
 	runtimeCtx := context.Background()
+	targetIAMConfig := targetIAMRuntimeConfigFromEnv()
+	targetIAMClient, closeTargetIAM, targetErr := newTargetIAMClient(targetIAMConfig)
+	if targetErr != nil {
+		logger.Error("failed to configure target IAM client", "err", targetErr)
+		os.Exit(1)
+	}
+	if closeTargetIAM != nil {
+		defer func() { _ = closeTargetIAM() }()
+	}
+	if targetIAMClient != nil {
+		logger.Info("target IAM tracer configured", "address", targetIAMConfig.Address)
+	} else {
+		logger.Info("target IAM tracer explicitly disabled")
+	}
 	k8sClusterService, closeK8sClusterRuntime, err := newGatewayK8sClusterRuntime(runtimeCtx, gatewayK8sClusterRuntimeConfigFromEnv())
 	if err != nil {
 		logger.Error("failed to configure k8s cluster proxy runtime", "err", err)
@@ -218,7 +272,7 @@ func main() {
 		)
 	}
 	middleware.StartAuditWorker()
-	if err := middleware.Register(h, gatewayStore); err != nil {
+	if err := middleware.RegisterWithTargetIAM(h, gatewayStore, targetIAMClient); err != nil {
 		logger.Error("failed to configure gateway authz", "err", err)
 		os.Exit(1)
 	}
@@ -284,6 +338,7 @@ func main() {
 		}
 	}
 	router.RegisterWithOptions(h, router.RegisterOptions{
+		TargetIAMClient:                       targetIAMClient,
 		K8sClusterService:                     k8sClusterService,
 		EncryptionService:                     encryptionService,
 		SecretService:                         secretService,
