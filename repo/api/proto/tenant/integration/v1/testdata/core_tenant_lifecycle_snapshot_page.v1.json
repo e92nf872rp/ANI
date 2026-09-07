@@ -1,0 +1,21 @@
+{
+  "cursor": "snapshot-v1:018ff0c0-0000-7000-8000-000000000030",
+  "items": [
+    {
+      "tenant_id": "018ff0c0-0000-7000-8000-000000000001",
+      "status": "TENANT_LIFECYCLE_STATUS_ACTIVE",
+      "reason": "TENANT_LIFECYCLE_REASON_CREATED",
+      "lifecycle_version": "42",
+      "effective_at": "2026-09-04T02:00:00Z"
+    },
+    {
+      "tenant_id": "018ff0c0-0000-7000-8000-000000000031",
+      "status": "TENANT_LIFECYCLE_STATUS_FROZEN",
+      "reason": "TENANT_LIFECYCLE_REASON_ADMINISTRATIVE_FREEZE",
+      "lifecycle_version": "7",
+      "effective_at": "2026-09-04T02:00:05Z"
+    }
+  ],
+  "next_page_token": "page-v1:2",
+  "snapshot_version": "1042"
+}
