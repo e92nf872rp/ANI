@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 仓库范围清理（2026-09）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| REPO-SCOPE-CLEANUP-A | 回滚 PR #60/#62/#68 的邮件通知契约与实现；移除已独立维护的 Console/BOSS 前端源码及 monorepo 构建、CI、CODEOWNERS wiring；本地不跑 CI，GitHub PR 验证待完成 | repo-scope-cleanup-a.md |
+
 ### 沙箱模板镜像接入 + code-run 执行依赖（2026-09，分支 ani-hotfix）
 
 | 批次 | 内容摘要 | 文件 |
@@ -352,12 +358,6 @@
 | CORE-REGISTRY-CONSOLE-FLOW-CORE-A | Core 镜像仓库后端实现：RegistryImage purpose 贯通 port/adapter/router，`/registry/images?purpose=` 支持过滤；不含 instances、Console、BOSS 或权限实现 | core-registry-console-flow-core-a.md |
 | SPRINT13-REGISTRY-HARBOR-LIVE-A | 镜像仓库 Harbor-backed live gate：`validate-registry-harbor-live-gate` 契约通过；2026-07-27 真实 Gateway 验证 Harbor project/list/push-instructions/pull-secret/scan-report 并归档脱敏 evidence，artifact/purpose 回读在提供 repository/tag 时执行；不含 Console/BOSS/实例创建镜像门禁 | sprint13-registry-harbor-live-gate.md |
 | REGISTRY-P0-CLOSURE-A | Registry P0 闭环：purpose/scan terminal=`complete`/实例引用/删除 409；live passed（evidence `registry-p0-closure-live-20260803.json`）；不含 BOSS quota/GC | registry-p0-closure-a.md |
-
-### 邮件通知（2026-07）
-
-| 批次 | 内容摘要 | 文件 |
-|---|---|---|
-| EMAIL-NOTIFY | 邮件通知 API + BOSS 发信设置页：9 个 Core endpoint（SMTP CRUD / 收件人 CRUD / 事件订阅批量更新 / 测试发送）；local 内存 adapter；BOSS 前端 SMTP 表单 + 收件人表格 + 订阅开关 + 测试发送；48 store 测试 + 34 handler 测试；RequestID store 层 UUID 生成 + handler 透传 | email-notify.md |
 
 ### NATS 接入（2026-07）
 

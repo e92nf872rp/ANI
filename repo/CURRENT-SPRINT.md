@@ -3,6 +3,7 @@
 > 新开发者（人类或 AI 工具）的第一个入口文件。本文只描述当前真实执行状态；历史完成批次查 `repo/development-records/README.md`。
 
 > **仓库范围：ANI Core + 受控 Services PR。** ANI Core 继续负责基础设施平台底座；Services 受控并行 PR 阶段已经启动，不再按旧冻结规则处理。Services PR 统一运行 `make validate-services`，覆盖 CODEOWNERS 共同审查要求之外的 API split、Services boundary gate、OpenAPI/Gateway route contract、语义契约、生成物漂移、模块检查和 `make validate-architecture`。
+> **仓库范围更新（2026-09-07）：** Console/BOSS 前端源码已迁至独立仓库，本仓库已移除 `repo/frontends/`、前端代码生成/构建目标和前端 CI job；历史批次中的前端描述仅作归档。PR #60/#62/#68 引入的邮件通知契约与实现已回滚，Core 不再提供 `/api/v1/notifications/email/*`。本批次按用户要求不跑本地 CI，完整验证交由 GitHub PR。
 > **当前重心：Sprint 13 / Core real provider 与 live gate 收敛。** Core Sprint 13/14 既有事实继续有效：Sprint 12 已完成 Core「Services 支撑 Handler」A/B1/B2/B3 全部 19 个 handler + 2 个 422 的 Tier1 local profile 收口；Sprint 13 S01-S07 production-shaped live gate 事实保留；Sprint14 resilience 结论仅限隔离 fixture。未跑通对应 live gate 前，不得标记 real-provider、runtime ready 或 production ready。Services PR 可在主责目录推进业务实现，但不得绕过 Core OpenAPI REST API / Core SDK、Core review 或现有架构门禁。
 > **INFERENCE-ENVOY-AI-GATEWAY-RATELIMIT（2026-08-28）：** 已完成 local/logic verified。Envoy AI Gateway Gateway 级共享全局 600 requests/minute `BackendTrafficPolicy`、Redis Secret 引用配置片段、C40 live-gate Accepted 检查和敏感信息校验均已落地；未执行真实集群限流压力测试，不宣称 runtime ready。
 > **INFERENCE-SERVICE-C41（2026-08-31）：** Envoy AI Gateway 多租户动态发布已完成 local/logic verified：Services v1 不新增 endpoint/field，仅澄清既有 `served_model_name` 与 `invocation_url` 描述；Gateway 已修正既有 policy flat DTO 实现，不是契约新增。AK-only、tenant/model/path 解析、可信头覆盖、`recomputeRoute`、Publisher publication/lifecycle fencing、最小权限清单和红线 live-gate contract 均有本地证据。Task 8 server dry-run 为 10/11 accepted；剩余 BackendTrafficPolicy 是已安装 CRD `int32`/`maximum` schema 自相矛盾。外部 inference-service normal/race 与 repo `make test` 均 EXIT:0；Console schema 三处 description 生成更新纳入隔离 shipping index 后 `make validate-services` EXIT:0，真实 index 保持为空。live status=`not-run`；不得标 runtime/production ready；PG live integration 因 DSN 未设 skip。
@@ -249,26 +250,13 @@ Issue 清单：`repo/services/tasks/issues/issue-01-openapi-queue-crud.md` ~ `is
 
 | 批次 | 状态 | 说明 |
 |---|---|---|
-| CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A | 契约/Console schema 已完成 | 按 7.22 原型”暂不考虑 BOSS 和权限”边界，Core v1 新增 `RegistryImage.purpose`、`/registry/images?purpose=`、四类算力引用 enum 与 createInstance 镜像门禁 422 语义；仅契约，不含 handler/adapter/Console 页面实现 |
+| CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A | 契约/Console schema 已完成 | 按 7.22 原型“暂不考虑 BOSS 和权限”边界，Core v1 新增 `RegistryImage.purpose`、`/registry/images?purpose=`、四类算力引用 enum 与 createInstance 镜像门禁 422 语义；仅契约，不含 handler/adapter/Console 页面实现 |
 | CORE-REGISTRY-CONSOLE-FLOW-CORE-A | Core 镜像仓库后端实现已完成 | RegistryImage purpose 贯通 port/adapter/router，`/registry/images?purpose=` 支持过滤；不含 instances、Console、BOSS 或权限实现 |
 | SPRINT13-REGISTRY-HARBOR-LIVE-A | Harbor live gate passed | `validate-registry-harbor-live-gate` 契约通过；2026-07-27 通过真实 Gateway 验证 Harbor project/list/push-instructions/pull-secret/scan-report 并归档脱敏 evidence；artifact/purpose 回读需提供 repository/tag；不含 Console/BOSS/实例创建镜像门禁 |
 | REGISTRY-P0-CLOSURE-A | live passed | P0 闭环 gate：purpose/scan/实例引用/删除 409；`validate-registry-harbor-live-gate`；evidence `registry-p0-closure-live-20260803.json`；scan terminal=`complete`；不含 BOSS quota/GC / Console |
 | STORAGE-CONTROL-PLANE-STATE-A | B4 live passed | B1 冻结现有 v1；B2 真实 PG 已 apply；B3 Store/Service 以 PG 为权威；B4 Gateway 缺 `DATABASE_URL`/schema fail-closed + `validate-storage-control-plane-state-live-gate` production-shaped passed（rollout 后回读/幂等/墓碑）；evidence `live-evidence/storage-control-plane-state-live-20260803.json`；不含 Console / full platform production ready |
 | CORE-STORAGE-CONSOLE-APIS-BACKEND-A | Core 存储模块后端实现已完成 | 上游 PR #71 契约合入后，补齐对象桶、块卷、文件系统和向量库管理接口的 ports/local service/gateway handlers 与后端 HTTP E2E/API 测试；2026-07-27 本地 Gateway + 真实依赖复验 Rook-Ceph/MinIO/Milvus 后端 E2E 通过；不含前端，不升级为 production-shaped Gateway 结论 |
 
-## 邮件通知（2026-07-22）
-
-| 批次 | 状态 | 说明 |
-|---|---|---|
-| EMAIL-NOTIFY | 后端 API + BOSS 前端已完成 | 9 个 Core endpoint（SMTP CRUD / 收件人 CRUD / 事件订阅批量更新 / 测试发送）；local 内存 adapter；BOSS 前端 SMTP 表单 + 收件人表格 + 订阅开关 + 测试发送；store 层 RequestID UUID 生成 + handler 透传；48 store 测试 + 34 handler 测试通过；`make validate-architecture` 和前端 `pnpm` 验证待补跑 |
-
-验收命令：
-
-```bash
-go test ./pkg/adapters/runtime/... -run “TestStore_|TestSendVia”
-go test ./services/ani-gateway/internal/router/... -run “TestEmailNotif_”
-go vet ./pkg/adapters/runtime/... ./services/ani-gateway/internal/router/...
-```
 
 ## NATS 接入（2026-07）
 
@@ -369,7 +357,7 @@ git diff --check
 
 ## BOSS 租户配额套餐功能流（2026-08）
 
-> BOSS 平台租户配额套餐管理功能开发流，覆盖套餐全生命周期（OpenAPI 契约 → gRPC 接口 → DB 迁移 → 网关接入 → CRUD + 状态机 + 限额同步 + 租户绑定 + 审计 + 配额元数据透传 → BOSS 前端）。18 个 issue 全部实现完成。批次记录统一归档于 `development-records/quota-policy-issue-*.md`。
+> BOSS 平台租户配额套餐管理后端功能流，覆盖 OpenAPI 契约、gRPC、DB 迁移、网关接入、CRUD、状态机、限额同步、租户绑定、审计和配额元数据透传。后端 #1-#13 已完成；历史前端 #14-#18 已迁至独立仓库，不再由本仓库构建或验证。批次记录统一归档于 `development-records/quota-policy-issue-*.md`。
 
 | Issue | 描述 | 状态 | 证据 |
 |---|---|---|---|
@@ -386,7 +374,6 @@ git diff --check
 | #11 | 查询配额元数据：ListQuotaMeta GET /quota-meta 透传 Core | ✅ 已完成 | `development-records/quota-policy-issue-11-list-quota-meta.md` |
 | #12 | 可绑定租户列表：ListBindableTenants + plan_id IS DISTINCT FROM | ✅ 已完成 | `development-records/quota-policy-issue-12-list-bindable-tenants-api.md` |
 | #13 | 查询操作历史：ListTenantPlanAuditLogs + store 游标分页 + JSON 映射 | ✅ 已完成 | `development-records/quota-policy-issue-13-audit-logs-api.md` |
-| #14–#18 | BOSS 前端：列表+创建 Wizard、详情页(概览+4 Tab)、限额 Tab、绑定租户 Tab、操作历史 Tab | ✅ 已完成（未 commit） | `development-records/quota-policy-issue-14-18-boss-frontend.md` |
 
 验收命令：
 
@@ -398,12 +385,6 @@ go test ./internal/service/ -run "TestTenantPlanService_(Create|List|Get|Activat
 cd repo/services/ani-gateway
 go build ./...
 
-cd repo/frontends/boss
-.\node_modules\.bin\tsc.cmd --noEmit
-
-# 集成验收（Issue #013）
-cd repo/frontends/boss && npx tsc --noEmit && npx vite build
-cd repo/frontends/console && npx tsc --noEmit && npx vite build
 make test
 make validate-architecture
 make validate-doc-entrypoints
