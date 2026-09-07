@@ -5,6 +5,8 @@ COPY runtimeadmin ./runtimeadmin
 COPY pkg ./pkg
 COPY services/auth-service ./services/auth-service
 
+ENV GOWORK=off
+
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
 	go work init ./runtimeadmin ./pkg ./services/auth-service && \
