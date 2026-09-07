@@ -9,6 +9,10 @@ import (
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
+// strPtr 返回指向 s 的指针，用于构造可空列/参数的测试数据。
+// 注：该辅助函数原定义于已删除的 local_email_notification_store_test.go，这里复刻以保持独立。
+func strPtr(s string) *string { return &s }
+
 // meteringFakeRow 模拟单行查询结果（支持 string/float64/*string 目标）。
 type meteringFakeRow struct {
 	values []any
