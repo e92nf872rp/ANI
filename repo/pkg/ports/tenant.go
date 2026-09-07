@@ -81,8 +81,8 @@ type Tenant struct {
 	ContactEmail string
 	FrozenAt     *time.Time
 	DisabledAt   *time.Time
-	UserCount    int64 // getTenant / listTenants computed column
-	AdminCount   int64 // tenant-admin role member count
+	UserCount    int64              // getTenant / listTenants computed column
+	AdminCount   int64              // tenant-admin role member count
 	Auth         *TenantAuthSummary // getTenant JOIN tenant_auth；仅两开关；nil/缺行 → 双 false
 	CreatedAt    time.Time
 	UpdatedAt    time.Time

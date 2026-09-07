@@ -28,10 +28,10 @@ type TenantPlanService struct {
 	// 嵌入未实现接口：proto 新增 RPC 时本结构仍可编译（栅栏模式）。
 	tenantv1.UnimplementedTenantPlanServiceServer
 
-	plans       ports.TenantPlanStore      // 套餐 + plan_quota_limits 持久化
-	audit       ports.AuditStore // 配额套餐域审计（audit_logs）；
-	core        ports.QuotaSvcClient       // Core 配额 API（校验维度 / 后续下发限额）
-	tenantPlans ports.TenantPlanSvcClient  // Core 配额套餐绑定 API（tenant_count / 绑定列表）
+	plans       ports.TenantPlanStore     // 套餐 + plan_quota_limits 持久化
+	audit       ports.AuditStore          // 配额套餐域审计（audit_logs）；
+	core        ports.QuotaSvcClient      // Core 配额 API（校验维度 / 后续下发限额）
+	tenantPlans ports.TenantPlanSvcClient // Core 配额套餐绑定 API（tenant_count / 绑定列表）
 }
 
 // NewTenantPlanService 装配依赖并返回可注册的 gRPC server。

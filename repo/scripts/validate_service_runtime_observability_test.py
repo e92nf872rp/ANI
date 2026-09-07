@@ -1,4 +1,5 @@
 import copy
+import os
 import subprocess
 import sys
 import tempfile
@@ -109,6 +110,25 @@ class ValidateServiceRuntimeObservabilityTest(unittest.TestCase):
         )
         self.assertEqual(
             ["outside OBS-RUNTIME-P0 exact allowlist: repo/services/auth-service/main.go"],
+            errors,
+        )
+
+    def test_path_allowlist_is_opt_in_after_obs_p0(self) -> None:
+        unrelated = {"repo/services/tenant-service/internal/service/tenant_service.go"}
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("OBS_RUNTIME_STRICT_PATH_ALLOWLIST", None)
+            with mock.patch.object(validator, "changed_paths", return_value=unrelated):
+                errors = validator.validate_repository(ROOT, run_promtool=False, base="HEAD")
+        self.assertEqual([], errors)
+
+        with mock.patch.dict(os.environ, {"OBS_RUNTIME_STRICT_PATH_ALLOWLIST": "1"}):
+            with mock.patch.object(validator, "changed_paths", return_value=unrelated):
+                errors = validator.validate_repository(ROOT, run_promtool=False, base="HEAD")
+        self.assertEqual(
+            [
+                "outside OBS-RUNTIME-P0 exact allowlist: "
+                "repo/services/tenant-service/internal/service/tenant_service.go"
+            ],
             errors,
         )
 

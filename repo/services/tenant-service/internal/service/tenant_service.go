@@ -1265,7 +1265,7 @@ func (s *TenantService) ReviewQuotaChangeRequest(ctx context.Context, req *tenan
 		err := businessError(codes.FailedPrecondition, ports.ErrQuotaChangeRequestNotPending, "quota change request is not pending")
 		writeAuditFailure(ctx, s.audit, auditResourceTenant, action, map[string]any{
 			"tenant_id": tenantID.String(), "request_id": requestID.String(),
-			"status":    existing[0].Status,
+			"status": existing[0].Status,
 		}, err, &tenantID)
 		return nil, err
 	}

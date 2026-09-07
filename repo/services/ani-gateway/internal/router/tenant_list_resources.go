@@ -725,21 +725,21 @@ func tenantAuthJSON(a *tenantv1.TenantAuthConfig) map[string]any {
 
 // tenantListBusinessCodeByHTTP 对齐 SPEC §6.1 Error Taxonomy。
 var tenantListBusinessCodeByHTTP = map[string]int{
-	"VALIDATION_FAILED":               http.StatusBadRequest,
-	"TENANT_NOT_FOUND":                http.StatusNotFound,
-	"TENANT_NAME_CONFLICT":            http.StatusConflict,
-	"TENANT_STATE_INVALID":            http.StatusConflict,
-	"TENANT_HAS_RUNNING_RESOURCES":    http.StatusConflict,
-	"PLAN_NOT_ACTIVE":                 http.StatusUnprocessableEntity,
-	"TENANT_SSO_CONFIG_INVALID":       http.StatusUnprocessableEntity,
+	"VALIDATION_FAILED":                http.StatusBadRequest,
+	"TENANT_NOT_FOUND":                 http.StatusNotFound,
+	"TENANT_NAME_CONFLICT":             http.StatusConflict,
+	"TENANT_STATE_INVALID":             http.StatusConflict,
+	"TENANT_HAS_RUNNING_RESOURCES":     http.StatusConflict,
+	"PLAN_NOT_ACTIVE":                  http.StatusUnprocessableEntity,
+	"TENANT_SSO_CONFIG_INVALID":        http.StatusUnprocessableEntity,
 	"QUOTA_CHANGE_REQUEST_INVALID":     http.StatusUnprocessableEntity,
 	"QUOTA_CHANGE_REQUEST_NOT_PENDING": http.StatusConflict,
 	"QUOTA_CHANGE_REQUEST_NOT_FOUND":   http.StatusNotFound,
 	"QUOTA_CHANGE_REQUEST_CONFLICT":    http.StatusConflict,
 	"QUOTA_RESOURCE_NOT_REGISTERED":    http.StatusUnprocessableEntity,
 	"NOT_IMPLEMENTED":                  http.StatusNotImplemented,
-	"GRPC_CLIENT_UNAVAILABLE":         http.StatusBadGateway,
-	"STORE_UNAVAILABLE":               http.StatusBadGateway,
+	"GRPC_CLIENT_UNAVAILABLE":          http.StatusBadGateway,
+	"STORE_UNAVAILABLE":                http.StatusBadGateway,
 }
 
 var tenantListSortedBusinessCodes = func() []string {

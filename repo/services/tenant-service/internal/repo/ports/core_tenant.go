@@ -132,7 +132,7 @@ type ListTenantsFilter struct {
 // TenantListResult 是 Core 租户列表游标分页结果。
 type TenantListResult struct {
 	Items      []TenantListItem
-	Total      int64  // 满足筛选条件的总条数（不含游标裁剪）
+	Total      int64 // 满足筛选条件的总条数（不含游标裁剪）
 	NextCursor string
 }
 

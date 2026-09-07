@@ -250,10 +250,10 @@ type fakeTenantClient struct {
 	disableFn    func(ctx context.Context, id uuid.UUID) (ports.Tenant, error)
 	disableCalls int
 
-	auth          ports.TenantAuth
-	getAuthFn     func(ctx context.Context, id uuid.UUID) (ports.TenantAuth, error)
-	updateAuthFn  func(ctx context.Context, id uuid.UUID, patch ports.TenantAuthPatch) (ports.TenantAuth, error)
-	updateAuthIn  *ports.TenantAuthPatch
+	auth            ports.TenantAuth
+	getAuthFn       func(ctx context.Context, id uuid.UUID) (ports.TenantAuth, error)
+	updateAuthFn    func(ctx context.Context, id uuid.UUID, patch ports.TenantAuthPatch) (ports.TenantAuth, error)
+	updateAuthIn    *ports.TenantAuthPatch
 	updateAuthCalls int
 
 	lifecycleItems []ports.TenantLifecycleEntry

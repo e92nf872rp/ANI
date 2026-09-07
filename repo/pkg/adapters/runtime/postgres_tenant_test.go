@@ -214,7 +214,7 @@ func TestPostgresTenantCreateTenant_NameConflict(t *testing.T) {
 func TestPostgresTenantCreateTenant_NameConflictRace(t *testing.T) {
 	tx := &quotaFakeTx{}
 	tx.enqueueRows(
-		quotaFakeRow{values: []any{false}}, // 预查未命中
+		quotaFakeRow{values: []any{false}},                // 预查未命中
 		quotaFakeRow{err: &pgconn.PgError{Code: "23505"}}, // INSERT 撞 UNIQUE
 	)
 	svc := NewPostgresTenant(&quotaFakeStore{tx: tx})
@@ -348,7 +348,7 @@ func TestPostgresTenantFreezeTenant_StateInvalid(t *testing.T) {
 	tenantID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 	tx := &quotaFakeTx{}
 	tx.enqueueRows(
-		quotaFakeRow{err: pgx.ErrNoRows},     // UPDATE miss
+		quotaFakeRow{err: pgx.ErrNoRows},      // UPDATE miss
 		quotaFakeRow{values: []any{"frozen"}}, // current status
 	)
 	svc := NewPostgresTenant(&quotaFakeStore{tx: tx})
@@ -471,7 +471,7 @@ func TestPostgresTenantUpdateTenantAuth_Partial(t *testing.T) {
 	provider := "oidc"
 	tx := &quotaFakeTx{}
 	tx.enqueueRows(
-		quotaFakeRow{values: []any{"active"}}, // SELECT status
+		quotaFakeRow{values: []any{"active"}},                    // SELECT status
 		quotaFakeRow{values: []any{true, &provider, false, now}}, // RETURNING
 	)
 	svc := NewPostgresTenant(&quotaFakeStore{tx: tx})
