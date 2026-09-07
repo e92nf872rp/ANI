@@ -13,11 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
-### 沙箱模板镜像接入可复用 python 镜像（2026-09-04，分支 ani-hotfix）
+### 沙箱模板镜像接入 + code-run 执行依赖（2026-09，分支 ani-hotfix）
 
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
 | INSTANCE-SANDBOX-TEMPLATE-IMAGE-A | 修复沙箱 code-run `PRECONDITION_FAILED: sandbox pod is not ready`：内置模板目录 `Image` 占位 `registry.local/ani/sandbox-*:dev` 在集群不可达导致走 `ImagePullBackOff`。两内置模板（`python-secure` 与 `cuda-notebook-secure`，后者临时以 python 镜像承接 code-run）默认镜像接入已验证可拉的复用镜像 `docker.changqingyun.cn/hub/library/python:3.12`（10.10.1.66 探针验证可拉、python3.12.10）；description 如实澄清。catalog 测试新增防回归断言（模板镜像必须以 `docker.changqingyun.cn/` 开头）；`go build` + `go test` + validate-architecture + `git diff --check` 通过。未 rollout 前线上不生效；存量占位镜像实例需重建；GPU/notebook 专用镜像与 live-gate 镜像注入待后续 | instance-sandbox-template-image-a.md |
+| INSTANCE-SANDBOX-CODERRUN-KUBECTL-A | 修复 code-run `exec: "kubectl": executable file not found in $PATH`：`KubernetesSandboxRuntime` 代码执行 shell-out 到 `kubectl exec`，而 gateway 镜像 `alpine:3.20` 未装 kubectl。在 `services/ani-gateway/Dockerfile` 运行镜像阶段 `wget` 安装 kubectl v1.36.0。live 验证（10.10.1.66，rollout `dev-20260907-kubectl-a`）：pod 内 `kubectl version` v1.36.0、in-cluster 认证 `kubectl get ns` 成功、`kubectl auth can-i create pods/exec`=yes、gateway SA 可 exec 进沙箱 Pod。code-run 仍需实例非 paused（replicas=0 时返回 `PRECONDITION_FAILED not ready`，属预期） | instance-sandbox-coderun-kubectl-a.md |
 
 ### RWO 卷占用保守预检（2026-09，分支 ani-hotfix）
 
