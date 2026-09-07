@@ -20,6 +20,12 @@
 | INSTANCE-SANDBOX-TEMPLATE-IMAGE-A | 修复沙箱 code-run `PRECONDITION_FAILED: sandbox pod is not ready`：内置模板目录 `Image` 占位 `registry.local/ani/sandbox-*:dev` 在集群不可达导致走 `ImagePullBackOff`。两内置模板（`python-secure` 与 `cuda-notebook-secure`，后者临时以 python 镜像承接 code-run）默认镜像接入已验证可拉的复用镜像 `docker.changqingyun.cn/hub/library/python:3.12`（10.10.1.66 探针验证可拉、python3.12.10）；description 如实澄清。catalog 测试新增防回归断言（模板镜像必须以 `docker.changqingyun.cn/` 开头）；`go build` + `go test` + validate-architecture + `git diff --check` 通过。未 rollout 前线上不生效；存量占位镜像实例需重建；GPU/notebook 专用镜像与 live-gate 镜像注入待后续 | instance-sandbox-template-image-a.md |
 | INSTANCE-SANDBOX-CODERRUN-KUBECTL-A | 修复 code-run `exec: "kubectl": executable file not found in $PATH`：`KubernetesSandboxRuntime` 代码执行 shell-out 到 `kubectl exec`，而 gateway 镜像 `alpine:3.20` 未装 kubectl。在 `services/ani-gateway/Dockerfile` 运行镜像阶段 `wget` 安装 kubectl v1.36.0。live 验证（10.10.1.66，rollout `dev-20260907-kubectl-a`）：pod 内 `kubectl version` v1.36.0、in-cluster 认证 `kubectl get ns` 成功、`kubectl auth can-i create pods/exec`=yes、gateway SA 可 exec 进沙箱 Pod。code-run 仍需实例非 paused（replicas=0 时返回 `PRECONDITION_FAILED not ready`，属预期） | instance-sandbox-coderun-kubectl-a.md |
 
+### GPU 接口 platform scope 放行（2026-09，分支 ani-hotfix）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| GATEWAY-GPU-PLATFORM-SCOPE-A | 修复 BOSS root（platform scope）访问 `/api/v1/gpu-specs*`、`/api/v1/gpu-inventory*` 报 403 `token scope not allowed for this path`：GPU 接口属 legacy policy 走 `scopeAllowedForPath` 末尾 tenant-only 默认。GPU 规格/清单是双域共享资源（Console tenant + BOSS platform），V2 `x-ani-authz` boundary 为域互斥单选无法表达，故按 `/svc/` 分支模式在 `scopeAllowedForPath` 放行 `platform\|\|tenant`，角色准入仍由 rbac.go CheckPermission 承担；auth_test.go 新增 10 用例。live 验证（10.10.1.66，rollout `dev-20260907-gpuscope-a`）：gpu-specs/availability/gpu-inventory/occupancy 全 200，负向对照 /instances 仍 403。部署插曲：滚动更新期间 PG max_connections=100 被 gateway 多 store 连接池打满致新 Pod CrashLoop，已 patch 滚动策略 maxUnavailable:1 解决（策略修改留在线上，连接池收敛待后续）。后续项：GPU 接口迁移 V2 authz（cluster boundary）+ availability 平台视角语义 | gateway-gpu-platform-scope-a.md |
+
 ### RWO 卷占用保守预检（2026-09，分支 ani-hotfix）
 
 | 批次 | 内容摘要 | 文件 |
