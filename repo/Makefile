@@ -6,12 +6,12 @@
 export
 
 .PHONY: help deps deps-down deps-status deps-clean db-validate db-list db-status db-migrate-dry-run db-migrate \
-        tools-proto gen-api gen-console-api gen-proto gen-core-sdk gen-api-docs gen-gateway-authz \
+        tools-proto gen-api gen-proto gen-core-sdk gen-api-docs gen-gateway-authz \
         build build-gateway build-auth-service build-model-service build-task-service build-inference-service build-tenant-service build-metering-service build-reconcile-worker build-cli \
         test test-go test-python test-cover \
 	validate-infra validate-gpu-preflight validate-gpu-contracts validate-runtime-contracts validate-instance-contracts validate-instance-planner validate-instance-renderer validate-instance-admission validate-instance-audit validate-instance-provider-dry-run validate-instance-provider-apply validate-instance-status-reconcile validate-instance-orchestrator validate-instance-store validate-instance-provider-adapter validate-instance-service validate-instance-lifecycle-ops validate-m1-e2e validate-kubernetes-provider-execution validate-kubernetes-rest-client validate-kubernetes-bootstrap-wiring validate-kubernetes-lifecycle-execution validate-kubernetes-ops-execution validate-m1-real-provider-profile validate-real-k8s-profile validate-vcluster-live-gate validate-vcluster-upgrade-live-gate validate-k8s-node-pool-live-gate validate-kubeovn-network-live-gate validate-kubevirt-vm-live-gate validate-reconcile-ha-live-gate validate-kms-sm4-live-gate validate-secrets-live-gate validate-storage-live-gate validate-storage-control-plane-state validate-storage-control-plane-state-live-gate validate-gpu-inventory-live-gate validate-object-store-live-gate validate-vector-store-live-gate validate-instance-observability-live-gate validate-registry-harbor-live-gate validate-instance-management-live-gate validate-sandbox-live-gate validate-instance-sandbox-stateless-live-gate validate-instance-sandbox-checkpoint-live-gate validate-instance-reconcile-provider-loss-live-gate validate-instance-orchestration-live-gate validate-sprint13-b-track-production-shape validate-gateway-ratelimit validate-gateway-idempotency validate-adapter-resilience-timeout validate-resilience-faultinjection-live-gate validate-resilience-degradation validate-ha-failover-live-gate validate-readyz-dataplane-live-gate validate-sprint14-resilience-live-gate validate-core-installer validate-core-offline validate-core-cli validate-sprint7-core-regression validate-core-release-hardening validate-core-installer-live validate-core-offline-pack validate-core-doc-consistency validate-sprint8-core-release validate-core-release-evidence validate-sprint9-core-rc validate-sprint9-core-doc-consistency validate-sprint9-rc validate-core-artifact-manifest validate-core-version-policy validate-sprint10-final-readiness validate-sprint10-core-doc-consistency validate-sprint10-release-prep validate-sprint11-storage-disk-plan validate-sprint11-core-real-deployment validate-sprint11-rook-ceph-formal-deployment validate-sprint11-rook-ceph-live-deployment-result validate-sprint11-rook-ceph-vm-storage-smoke validate-sprint11-rook-ceph-reboot-resilience validate-sprint11-safe-completion validate-sprint11-core-doc-consistency validate-sprint11-real-deployment validate-demo-instances validate-core-alpha validate-network-alpha validate-storage-alpha validate-vector-alpha validate-workload-identity validate-core-dev-profile validate-sdk-alpha validate-sdk-beta validate-sdk-mock-smoke validate-sprint3-closure validate-sprint4-closure validate-spec-split validate-core-beta validate-core-api-compatibility validate-mock-a validate-doc-api validate-openapi-spec validate-doc-entrypoints validate-auth-contract validate-gateway-authz validate-auth-dex-smoke validate-auth-dex-production-gate validate-services validate-services-contract validate-services-route-contract validate-inference-control-plane validate-platform-workload-k8s-live-gate validate-ci-workflow validate-architecture validate-async-task-store \
-        lint lint-go lint-python lint-ts \
-        dev-gateway dev-console dev-core-mock \
+        lint lint-go lint-python \
+        dev-gateway dev-core-mock \
 		image image-runtime-services image-gateway image-auth-service image-model-service image-task-service image-inference-service image-tenant-service image-metering-service \
         clean
 
@@ -30,8 +30,7 @@ help:
 	@echo ""
 	@echo "  代码生成:"
 	@echo "    make tools-proto    安装本地 Protobuf 生成插件"
-	@echo "    make gen-api        从 OpenAPI Spec 生成 Gateway Go 代码 + Console TS 类型"
-	@echo "    make gen-console-api  仅从 services/v1.yaml 生成 Console TypeScript 类型"
+	@echo "    make gen-api        从 OpenAPI Spec 生成 Gateway Go 代码"
 	@echo "    make gen-proto      从 Protobuf 生成 Go gRPC 代码"
 	@echo "    make gen-core-sdk   从 Core/Services API 契约生成四语言 SDK Alpha"
 	@echo "    make gen-api-docs   从 Core/Services API 契约生成静态 API 文档"
@@ -179,7 +178,6 @@ help:
 	@echo ""
 	@echo "  本地开发:"
 	@echo "    make dev-gateway    启动 ANI Gateway（热重载）"
-	@echo "    make dev-console    启动 Console 前端（Vite HMR）"
 	@echo "    make dev-core-mock  启动 Core API Mock Server（http://127.0.0.1:4010/api/v1）"
 
 # ── 依赖服务 ──────────────────────────────────────────────────────────────────
@@ -255,18 +253,7 @@ gen-api:
 	@echo "→ 从 OpenAPI Spec 生成 Go 代码..."
 	cd services/ani-gateway && \
 		go generate ./...
-	@echo "→ 从 Services OpenAPI Spec 生成 Console TypeScript 类型..."
-	npx openapi-typescript api/openapi/services/v1.yaml -o frontends/console/src/api/schema.d.ts
-	@echo "→ 从 Core OpenAPI Spec 生成 Console TypeScript 类型..."
-	node frontends/console/scripts/gen-core-schema.mjs
 	@echo "✅ API 代码生成完成"
-
-gen-console-api:
-	@echo "→ 从 Services OpenAPI Spec 生成 Console TypeScript 类型..."
-	npx openapi-typescript api/openapi/services/v1.yaml -o frontends/console/src/api/schema.d.ts
-	@echo "→ 从 Core OpenAPI Spec 生成 Console TypeScript 类型..."
-	node frontends/console/scripts/gen-core-schema.mjs
-	@echo "✅ Console API types generated"
 
 gen-proto: tools-proto
 	@echo "→ 从 Protobuf 生成 Go gRPC 代码..."
@@ -1342,7 +1329,7 @@ validate-architecture:
 	@echo "✅ architecture guardrails valid"
 
 # ── 代码检查 ──────────────────────────────────────────────────────────────────
-lint: lint-go lint-python lint-ts
+lint: lint-go lint-python
 
 lint-go:
 	@echo "→ Go 静态分析..."
@@ -1353,18 +1340,10 @@ lint-python:
 	@echo "→ Python 代码检查..."
 	cd ai && ruff check . && mypy .
 
-lint-ts:
-	@echo "→ TypeScript 代码检查..."
-	npm --prefix frontends/console run lint
-
 # ── 本地开发（热重载）────────────────────────────────────────────────────────
 dev-gateway:
 	@echo "→ 启动 ANI Gateway（air 热重载）..."
 	cd services/ani-gateway && air
-
-dev-console:
-	@echo "→ 启动 Console 前端（Vite HMR）..."
-	npm --prefix frontends/console run dev
 
 dev-core-mock:
 	@echo "→ 启动 Core API Mock Server..."

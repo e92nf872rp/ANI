@@ -11,7 +11,6 @@ import yaml
 REQUIRED_JOBS = {
     "go-ci",
     "python-ci",
-    "frontend-ci",
     "services-pr-gate",
     "api-spec-lint",
 }
@@ -116,10 +115,6 @@ def validate(
     python_ci = jobs.get("python-ci")
     if "scripts/validate_python_test_policy.py" not in str(python_ci):
         errors.append("Python CI must enforce the changed-source test policy")
-
-    frontend_ci = jobs.get("frontend-ci")
-    if "npm --prefix frontends/console audit --audit-level=high" not in str(frontend_ci):
-        errors.append("Frontend CI must block high and critical npm audit findings")
 
     if (
         "make validate-service-runtime-observability" not in str(services)

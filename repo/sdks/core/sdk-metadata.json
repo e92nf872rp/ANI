@@ -947,60 +947,6 @@
       "scope": "scope:networks:read"
     },
     {
-      "operationId": "listEmailRecipients",
-      "method": "GET",
-      "path": "/notifications/email/recipients",
-      "scope": "scope:notifications:read"
-    },
-    {
-      "operationId": "createEmailRecipient",
-      "method": "POST",
-      "path": "/notifications/email/recipients",
-      "scope": "scope:notifications:write"
-    },
-    {
-      "operationId": "deleteEmailRecipient",
-      "method": "DELETE",
-      "path": "/notifications/email/recipients/{recipient_id}",
-      "scope": "scope:notifications:write"
-    },
-    {
-      "operationId": "updateEmailRecipient",
-      "method": "PATCH",
-      "path": "/notifications/email/recipients/{recipient_id}",
-      "scope": "scope:notifications:write"
-    },
-    {
-      "operationId": "getEmailSmtpConfig",
-      "method": "GET",
-      "path": "/notifications/email/smtp",
-      "scope": "scope:notifications:read"
-    },
-    {
-      "operationId": "putEmailSmtpConfig",
-      "method": "PUT",
-      "path": "/notifications/email/smtp",
-      "scope": "scope:notifications:write"
-    },
-    {
-      "operationId": "listEmailSubscriptions",
-      "method": "GET",
-      "path": "/notifications/email/subscriptions",
-      "scope": "scope:notifications:read"
-    },
-    {
-      "operationId": "putEmailSubscriptions",
-      "method": "PUT",
-      "path": "/notifications/email/subscriptions",
-      "scope": "scope:notifications:write"
-    },
-    {
-      "operationId": "sendTestEmail",
-      "method": "POST",
-      "path": "/notifications/email/test",
-      "scope": "scope:notifications:write"
-    },
-    {
       "operationId": "listStorageObjects",
       "method": "GET",
       "path": "/objects",
@@ -1456,7 +1402,6 @@
     "CreateAPIKeyRequest",
     "CreateAPIKeyResponse",
     "CreateContainerInstanceConfig",
-    "CreateEmailRecipientRequest",
     "CreateGPUContainerInstanceConfig",
     "CreateInstanceConsoleSessionRequest",
     "CreateInstanceExecSessionRequest",
@@ -1485,11 +1430,6 @@
     "CreateVectorStoreRequest",
     "CreateVolumeSnapshotRequest",
     "CursorPage",
-    "EmailRecipient",
-    "EmailRecipientListResponse",
-    "EmailSmtpConfigResponse",
-    "EmailSubscription",
-    "EmailSubscriptionListResponse",
     "EncryptionKey",
     "EncryptionKeyCreateRequest",
     "EncryptionKeyListResponse",
@@ -1632,8 +1572,6 @@
     "PlatformWorkloadSecretBinding",
     "PlatformWorkloadTopology",
     "PlatformWorkloadUpdateRequest",
-    "PutEmailSmtpConfigRequest",
-    "PutEmailSubscriptionsRequest",
     "Quota",
     "QuotaCreateItem",
     "QuotaCreateRequest",
@@ -1694,7 +1632,6 @@
     "SecretBindingRequest",
     "SecretCreateRequest",
     "SecretListResponse",
-    "SendTestEmailResponse",
     "SetRegistryPermissionRequest",
     "StorageBucketACLUpdateRequest",
     "StorageBucketClassUpdateRequest",
@@ -1706,6 +1643,7 @@
     "StorageBucketObjectEntry",
     "StorageBucketObjectListResponse",
     "StorageBucketRecord",
+    "StorageConsumerInfo",
     "StorageFilesystem",
     "StorageFilesystemExpandRequest",
     "StorageFilesystemListResponse",
@@ -1736,7 +1674,6 @@
     "TenantUserPermissions",
     "TokenPairResponse",
     "TokenUsageReport",
-    "UpdateEmailRecipientRequest",
     "UpdateNetworkSecurityGroupRuleRequest",
     "UpdateObservabilityAlertRuleRequest",
     "UserMutationResult",
