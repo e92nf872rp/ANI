@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>230</dd></div>
-          <div><dt>Schemas</dt><dd>314</dd></div>
+          <div><dt>Operations</dt><dd>239</dd></div>
+          <div><dt>Schemas</dt><dd>323</dd></div>
         </dl>
       </section>
 
@@ -273,11 +273,75 @@
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
+          <td><code>/admin/tenants</code></td>
+          <td><code>listTenants</code></td>
+          <td>租户列表</td>
+          <td><code>scope:tenant:read</code></td>
+          <td>200, 400, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/admin/tenants</code></td>
+          <td><code>createTenant</code></td>
+          <td>创建租户</td>
+          <td><code>scope:tenant:write</code></td>
+          <td>200, 400, 401, 403, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
           <td><code>/admin/tenants/{tenant_id}</code></td>
           <td><code>getTenant</code></td>
-          <td>查询租户（最小视图）</td>
+          <td>查询租户</td>
           <td><code>scope:tenant:read</code></td>
           <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/admin/tenants/{tenant_id}</code></td>
+          <td><code>updateTenant</code></td>
+          <td>更新租户基本信息</td>
+          <td><code>scope:tenant:write</code></td>
+          <td>200, 400, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/admin/tenants/{tenant_id}/auth</code></td>
+          <td><code>getTenantAuth</code></td>
+          <td>查询租户认证配置</td>
+          <td><code>scope:tenant:read</code></td>
+          <td>200, 401, 403, 404</td>
+        </tr>
+        <tr>
+          <td><span class="method method-put">PUT</span></td>
+          <td><code>/admin/tenants/{tenant_id}/auth</code></td>
+          <td><code>updateTenantAuth</code></td>
+          <td>更新租户认证配置</td>
+          <td><code>scope:tenant:write</code></td>
+          <td>200, 400, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/admin/tenants/{tenant_id}/disable</code></td>
+          <td><code>disableTenant</code></td>
+          <td>禁用租户</td>
+          <td><code>scope:tenant:write</code></td>
+          <td>200, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/admin/tenants/{tenant_id}/freeze</code></td>
+          <td><code>freezeTenant</code></td>
+          <td>冻结租户</td>
+          <td><code>scope:tenant:write</code></td>
+          <td>200, 401, 403, 404, 409</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/admin/tenants/{tenant_id}/lifecycle</code></td>
+          <td><code>listTenantLifecycle</code></td>
+          <td>查询租户生命周期记录</td>
+          <td><code>scope:tenant:read</code></td>
+          <td>200, 400, 401, 403, 404</td>
         </tr>
         <tr>
           <td><span class="method method-put">PUT</span></td>
@@ -350,6 +414,14 @@
           <td>查询租户可分配角色列表</td>
           <td><code>scope:users:read</code></td>
           <td>200, 401, 403</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/admin/tenants/{tenant_id}/unfreeze</code></td>
+          <td><code>unfreezeTenant</code></td>
+          <td>解冻租户</td>
+          <td><code>scope:tenant:write</code></td>
+          <td>200, 401, 403, 404, 409</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -2286,9 +2358,18 @@
         <li><code>StorageVolumeUnmountRequest</code></li>
         <li><code>TaskListResponse</code></li>
         <li><code>Tenant</code></li>
+        <li><code>TenantAuthConfig</code></li>
+        <li><code>TenantAuthSummary</code></li>
+        <li><code>TenantAuthUpdateRequest</code></li>
+        <li><code>TenantCreateRequest</code></li>
+        <li><code>TenantLifecycleEntry</code></li>
+        <li><code>TenantLifecycleListResponse</code></li>
+        <li><code>TenantListItem</code></li>
+        <li><code>TenantListResponse</code></li>
         <li><code>TenantPlanUpdateRequest</code></li>
         <li><code>TenantSummary</code></li>
         <li><code>TenantSummaryList</code></li>
+        <li><code>TenantUpdateRequest</code></li>
         <li><code>TenantUser</code></li>
         <li><code>TenantUserListResponse</code></li>
         <li><code>TenantUserPermissions</code></li>
