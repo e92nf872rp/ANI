@@ -767,6 +767,7 @@ var Schemas = []string{
 	"StorageBucketObjectEntry",
 	"StorageBucketObjectListResponse",
 	"StorageBucketRecord",
+	"StorageConsumerInfo",
 	"StorageFilesystem",
 	"StorageFilesystemExpandRequest",
 	"StorageFilesystemListResponse",
