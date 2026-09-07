@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/kubercloud/ani/pkg/ports"
@@ -24,5 +25,10 @@ func TestLocalSandboxTemplateCatalogListsBuiltinTemplates(t *testing.T) {
 	}
 	if result.DevProfile.Mode != "local" || result.DevProfile.Provider != "local-sandbox-template-catalog" || result.DevProfile.RealProvider {
 		t.Fatalf("dev profile = %+v, want local catalog marker", result.DevProfile)
+	}
+	for _, item := range result.Items {
+		if !strings.HasPrefix(item.Image, "docker.changqingyun.cn/") {
+			t.Fatalf("template %q image %q must point to a pullable registry image, not a local placeholder", item.Name, item.Image)
+		}
 	}
 }

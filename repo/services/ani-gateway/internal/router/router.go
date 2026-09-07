@@ -11,6 +11,7 @@ import (
 )
 
 type RegisterOptions struct {
+	TargetIAMClient                       ports.TargetIAM
 	K8sClusterService                     ports.K8sClusterService
 	EncryptionService                     ports.EncryptionService
 	SecretService                         ports.SecretService
@@ -28,7 +29,6 @@ type RegisterOptions struct {
 	KubernetesRESTClient                  *runtimeadapter.KubernetesRESTClient
 	ObservabilityService                  ports.ObservabilityService
 	PlatformServiceHealthReader           ports.PlatformServiceHealthReader
-	EmailNotificationStore                ports.EmailNotificationStore
 	// InferenceServiceClient routes /api/v1/svc/inference-services* to
 	// inference-service via internal InferenceControl gRPC. When nil the
 	// product handlers return 503 DEPENDENCY_UNAVAILABLE so the gateway
@@ -87,7 +87,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 
 	v1 := h.Group("/api/v1")
 	registerBranding(v1)
-	registerAuth(v1)
+	registerAuth(v1, options.TargetIAMClient)
 	registerMetering(v1, options.MeteringService)
 	registerPlatformCapacity(v1, options.PlatformCapacityService)
 	registerHarbor(v1, options.ImageRegistry)
@@ -109,7 +109,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerGPUInventoryResourcesWithStore(v1, options.GPUInventory, options.GPUInstanceStore, options.KubernetesRESTClient, options.GPUSpecStore, options.QuotaStoreService, options.QuotaAdminService)
 	registerGPUSchedulingResourcesWithStore(v1, options.GPUSchedulingQueueStore)
 	registerNetworkResourcesWithService(v1, options.NetworkService)
-	registerStorageResourcesWithServiceAndTasks(v1, options.StorageService, options.AsyncTaskStore)
+	registerStorageResourcesWithServiceAndTasksAndStore(v1, options.StorageService, options.AsyncTaskStore, options.GPUInstanceStore)
 	if options.VectorStoreService != nil {
 		registerVectorStoreResourcesWithServiceAndTasks(v1, options.VectorStoreService, options.AsyncTaskStore)
 	} else {
@@ -118,7 +118,6 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerK8sClusterResourcesWithService(v1, options.K8sClusterService)
 	registerEncryptionResourcesWithService(v1, options.EncryptionService)
 	registerSecretResourcesWithService(v1, options.SecretService)
-	registerEmailNotificationResourcesWithService(v1, options.EmailNotificationStore)
 	registerQuotaResources(v1, options.QuotaAdminService, options.QuotaStoreService)
 	registerPlatformWorkloadResources(v1, options.PlatformWorkloadService, options.AsyncTaskStore)
 	registerAdminTenantResources(v1, options.TenantService)

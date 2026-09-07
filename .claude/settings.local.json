@@ -10,7 +10,26 @@
       "Bash(git commit -m ' *)",
       "Bash(make validate-doc-entrypoints *)",
       "Bash(echo \"Exit: $?\")",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(git rm *)",
+      "Bash(go build *)",
+      "Bash(echo \"BUILD_EXIT=$?\")",
+      "Bash(go test *)",
+      "Bash(grep -vE \"^\\\\s*$\")",
+      "Bash(make validate-architecture *)",
+      "Bash(echo \"ARCH_EXIT=$?\")",
+      "Bash(python scripts/validate_component_imports.py --root .)",
+      "Bash(echo \"IMPORTS_EXIT=$?\")",
+      "Bash(python scripts/validate_inference_legacy_control_plane.py)",
+      "Bash(echo \"INFERENCE_EXIT=$?\")",
+      "Bash(python scripts/validate_openapi_spec_test.py)",
+      "Bash(python scripts/validate_openapi_spec.py)",
+      "Bash(grep -nA2 \"validate-doc-entrypoints:\" repo/Makefile)",
+      "Bash(grep -nA3 \"^validate-doc-entrypoints:\" Makefile)",
+      "Bash(python scripts/validate_doc_entrypoints.py)",
+      "Bash(python scripts/validate_doc_entrypoints_test.py)",
+      "Bash(gofmt -l pkg/adapters/runtime/dryrun_renderer.go pkg/adapters/runtime/dryrun_renderer_test.go pkg/adapters/runtime/instance_resource_resolver.go pkg/adapters/runtime/instance_resource_resolver_test.go pkg/adapters/runtime/instance_service.go pkg/adapters/runtime/instance_service_test.go pkg/adapters/runtime/kubernetes_rest_client.go pkg/adapters/runtime/kubernetes_rest_client_test.go services/ani-gateway/internal/router/instances.go services/ani-gateway/internal/router/instances_test.go)",
+      "Bash(git commit *)"
     ]
   }
 }

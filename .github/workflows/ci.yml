@@ -10,7 +10,6 @@ on:
 env:
   GO_VERSION: "1.25.13"
   PYTHON_VERSION: "3.12"
-  NODE_VERSION: "20"
 
 permissions:
   contents: read
@@ -136,38 +135,6 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: python scripts/validate_python_test_policy.py --base "$BASE_SHA"
 
-  # ── 前端 CI ─────────────────────────────────────────────────────────────────
-  frontend-ci:
-    name: Frontend Build
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: repo
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: repo/frontends/console/package-lock.json
-
-      - name: Install dependencies
-        run: npm --prefix frontends/console ci
-
-      - name: Dependency audit
-        run: npm --prefix frontends/console audit --audit-level=high
-
-      - name: Type check
-        run: npm --prefix frontends/console run type-check
-
-      - name: Lint
-        run: npm --prefix frontends/console run lint
-
-      - name: Build
-        run: npm --prefix frontends/console run build
-
   # ── Services PR 门禁 ────────────────────────────────────────────────────────
   services-pr-gate:
     name: Services Boundary / API / Docs Gate
@@ -195,12 +162,6 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
           cache-dependency-path: repo/ci/requirements-contract.txt
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: repo/frontends/console/package-lock.json
 
       - name: Install Python gate dependencies
         run: |
@@ -295,7 +256,6 @@ jobs:
     needs:
       - go-ci
       - python-ci
-      - frontend-ci
       - services-pr-gate
       # - dependency-scan
       - api-spec-lint
@@ -306,12 +266,11 @@ jobs:
         env:
           GO_RESULT: ${{ needs.go-ci.result }}
           PYTHON_RESULT: ${{ needs.python-ci.result }}
-          FRONTEND_RESULT: ${{ needs.frontend-ci.result }}
           SERVICES_RESULT: ${{ needs.services-pr-gate.result }}
           OPENAPI_RESULT: ${{ needs.api-spec-lint.result }}
         run: |
           set -euo pipefail
-          for result in "$GO_RESULT" "$PYTHON_RESULT" "$FRONTEND_RESULT" "$SERVICES_RESULT" "$OPENAPI_RESULT"; do
+          for result in "$GO_RESULT" "$PYTHON_RESULT" "$SERVICES_RESULT" "$OPENAPI_RESULT"; do
             test "$result" = success || {
               echo "Required PR Gates blocked by job result: $result"
               exit 1

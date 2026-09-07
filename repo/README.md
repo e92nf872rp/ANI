@@ -7,7 +7,7 @@
 ```text
 当前阶段：以 ../ANI-DOCS-INDEX.md、../ANI-06-开发计划.md Section 零和 CURRENT-SPRINT.md 为准
 当前执行：Phase 1 / Sprint 13 / Core real provider 与 live gate 收敛启动；Sprint 12 Core「Services 支撑 Handler」已完成 Tier1 local profile 收口
-并行功能流：账密登录模块已完成（Core Auth API + Console 账密 Tab + BOSS 平台登录）；PRD/SPEC 已按产品线拆分
+并行功能流：账密登录模块的 Core Auth API 已完成；Console/BOSS 前端源码由独立仓库维护
 当前执行入口：CURRENT-SPRINT.md
 全局计划入口：../ANI-06-开发计划.md
 文档导航：../ANI-DOCS-INDEX.md
@@ -35,10 +35,6 @@ repo/
 ├── operators/                  # Go K8s Operator
 │   ├── inference-operator/     # InferenceService CRD Controller
 │   └── upgrade-operator/       # ANIPatch CRD Controller（在线升级）
-│
-├── frontends/                  # TypeScript 前端（需拆 Core client 与 Services client）
-│   ├── console/                # 用户控制台（React 18 + TDesign）
-│   └── boss/                   # 运营运维后台（React 18 + TDesign）
 │
 ├── cli/ani/                    # Go CLI 工具（cobra + viper）
 ├── installer/ani-installer/    # Go 安装程序（bubbletea TUI）

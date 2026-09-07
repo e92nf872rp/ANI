@@ -146,7 +146,7 @@ None — 前提已验证成立，issue-000 AC 全部满足。#3/#4/#5 可继续�
 
 **D1：idempotency_key 使用 header 风格而非 body 字段风格**
 
-文件中 `idempotency_key` 有两种风格：body 字段风格（50+ 处，如 CreateInstanceRequest）和 header 风格（`Idempotency-Key` header，行 7420 `/notifications/email/test`）。Issue AC 明确要求 "POST/PUT/DELETE 支持 `idempotency_key` header"。
+文件中 `idempotency_key` 有 body 字段和 header 两种历史风格。Issue AC 明确要求 "POST/PUT/DELETE 支持 `idempotency_key` header"。
 
 选择：使用 `idempotency_key` header（小写下划线，required: true），而非 body 字段。原因：Issue AC 文字明确要求 header，且 admin 端点批量操作（items 数组）的幂等性用 header 更合适（幂等键针对整个请求而非单个 item）。
 

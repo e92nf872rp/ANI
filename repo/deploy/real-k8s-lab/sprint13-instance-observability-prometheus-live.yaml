@@ -132,6 +132,24 @@ data:
             target_label: kubernetes_namespace
           - source_labels: [__meta_kubernetes_pod_name]
             target_label: pod
+      # kata-monitor for sandbox(kata) guest 内指标（kata_guest_meminfo 等，2026-09-04 追加，
+      # 与集群 sprint13-prometheus-config 实际配置同步）。清单见同目录 kata-monitor-live.yaml。
+      # kubernetes_sd(role: node) 按节点抓取 hostNetwork 端口 8091；kata-monitor 每个
+      # 节点只暴露本节点 sandbox，不能用 Service（负载均衡会丢数据）。
+      # relabel 必须用 __meta_kubernetes_node_address_InternalIP：写成
+      # __meta_kubernetes_node_address 会匹配失败，target 回落 kubelet 10250（400 错误）。
+      # series 自带 cri_name/cri_namespace（pod 名/租户 namespace，实测有值），查询可直接过滤。
+      - job_name: kata-monitor
+        metrics_path: /metrics
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_node_address_InternalIP]
+            regex: (.+)
+            replacement: ${1}:8091
+            target_label: __address__
+          - source_labels: [__meta_kubernetes_node_name]
+            target_label: node
 ---
 apiVersion: apps/v1
 kind: Deployment
