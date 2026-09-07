@@ -26,6 +26,12 @@
 |---|---|---|
 | GATEWAY-GPU-PLATFORM-SCOPE-A | 修复 BOSS root（platform scope）访问 `/api/v1/gpu-specs*`、`/api/v1/gpu-inventory*` 报 403 `token scope not allowed for this path`：GPU 接口属 legacy policy 走 `scopeAllowedForPath` 末尾 tenant-only 默认。GPU 规格/清单是双域共享资源（Console tenant + BOSS platform），V2 `x-ani-authz` boundary 为域互斥单选无法表达，故按 `/svc/` 分支模式在 `scopeAllowedForPath` 放行 `platform\|\|tenant`，角色准入仍由 rbac.go CheckPermission 承担；auth_test.go 新增 10 用例。live 验证（10.10.1.66，rollout `dev-20260907-gpuscope-a`）：gpu-specs/availability/gpu-inventory/occupancy 全 200，负向对照 /instances 仍 403。部署插曲：滚动更新期间 PG max_connections=100 被 gateway 多 store 连接池打满致新 Pod CrashLoop，已 patch 滚动策略 maxUnavailable:1 解决（策略修改留在线上，连接池收敛待后续）。后续项：GPU 接口迁移 V2 authz（cluster boundary）+ availability 平台视角语义 | gateway-gpu-platform-scope-a.md |
 
+### 实例列表孤儿 GPU 过滤（2026-09，分支 ani-hotfix）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| INSTANCE-ORPHAN-GPU-FILTER-A | 修复 `GET /instances?kind=gpu_container` 混入非 GPU 实例：`discoverOrphanDeployments` 对带租户标签且不在 store 的 Deployment 无条件硬编码 `Kind=gpu_container` 生成孤儿记录（`GPUCount>0` 只控制 GPU 字段填充不控制生成），gateway 重启后所有非 GPU Deployment（nginx/sandbox/测试实例等）被当作 gpu_container 回显，列表端 kind 过滤因 orphan.Kind 恒为 gpu_container 而失效。修复：`obs.GPUCount<=0` 直接跳过不再生成记录；`observeOrphan` GPU 探测从仅 `nvidia.com/gpu*` 扩展为兼容 `volcano.sh/vgpu-number`（对齐既定"孤儿仅 GPU"约定）。新增 `TestListOrphanDiscoverySkipsNonGPUDeployments`；既有孤儿重试测试 fake 补 vgpu limits。live 验证（10.10.1.66，rollout `dev-20260907-orphan-a`）：tenant-a 命名空间 35 个 Deployment 中 18 个非 GPU 全部不再回显，3 条孤儿记录经集群核对均真实携带 `nvidia.com/gpu=1`。行为收紧说明：非 GPU 未入库实例重启后不再出现在实例列表，孤儿兜底定位收敛为 GPU 实例专用 | instance-orphan-gpu-filter-a.md |
+
 ### RWO 卷占用保守预检（2026-09，分支 ani-hotfix）
 
 | 批次 | 内容摘要 | 文件 |
