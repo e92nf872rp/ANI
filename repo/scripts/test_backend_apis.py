@@ -439,30 +439,13 @@ if cluster_id:
     test_api("Gateway List Workloads", "GET", f"{GATEWAY}/api/v1/k8s-clusters/{cluster_id}/workloads")
     test_api("Gateway Delete K8s Cluster", "DELETE", f"{GATEWAY}/api/v1/k8s-clusters/{cluster_id}")
 
-# ── 3.15 Email Notifications ──────────────────────────────────────────────
-print("\n  -- Email Notification APIs --")
-test_api("Gateway Get SMTP Config", "GET", f"{GATEWAY}/api/v1/notifications/email/smtp")
-test_api("Gateway List Email Recipients", "GET", f"{GATEWAY}/api/v1/notifications/email/recipients")
-test_api("Gateway List Email Subscriptions", "GET", f"{GATEWAY}/api/v1/notifications/email/subscriptions")
-
-smtp_body = {
-    "idempotency_key": str(uuid.uuid4()),
-    "smtp_host": "smtp.example.com",
-    "smtp_port": 587,
-    "encryption": "starttls",
-    "from_address": "noreply@example.com",
-    "username": "user",
-    "password": "pass",
-}
-test_api("Gateway Update SMTP Config", "PUT", f"{GATEWAY}/api/v1/notifications/email/smtp", body=smtp_body)
-
-# ── 3.16 Image Registry ──────────────────────────────────────────────────
+# ── 3.15 Image Registry ──────────────────────────────────────────────────
 print("\n  -- Image Registry APIs --")
 test_api("Gateway List Registry Projects", "GET", f"{GATEWAY}/api/v1/registry/projects")
 test_api("Gateway List Repositories", "GET", f"{GATEWAY}/api/v1/registry/repositories")
 test_api("Gateway List Artifacts", "GET", f"{GATEWAY}/api/v1/registry/artifacts")
 
-# ── 3.17 Observability ────────────────────────────────────────────────────
+# ── 3.16 Observability ────────────────────────────────────────────────────
 print("\n  -- Observability APIs --")
 test_api("Gateway Observability Query", "GET", f"{GATEWAY}/api/v1/observability/query", params={"query": "up"})
 test_api("Gateway Observability Query Range", "GET", f"{GATEWAY}/api/v1/observability/query_range", params={

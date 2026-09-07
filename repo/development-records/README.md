@@ -13,6 +13,12 @@
 
 ## 已完成批次（按完成时间排列）
 
+### 仓库范围清理（2026-09）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| REPO-SCOPE-CLEANUP-A | 回滚 PR #60/#62/#68 的邮件通知契约与实现；移除已独立维护的 Console/BOSS 前端源码及 monorepo 构建、CI、CODEOWNERS wiring；本地不跑 CI，GitHub PR 验证待完成 | repo-scope-cleanup-a.md |
+
 ### 七服务运行时观测与平台聚合 API（2026-09）
 
 | 批次 | 内容摘要 | 文件 |
