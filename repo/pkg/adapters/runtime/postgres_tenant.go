@@ -741,7 +741,6 @@ func (t *PostgresTenant) UpdateTenantAuth(ctx context.Context, tenantID string, 
 		if patch.MfaRequired != nil {
 			sets = append(sets, fmt.Sprintf("mfa_required = $%d", argN))
 			args = append(args, *patch.MfaRequired)
-			argN++
 		}
 		var (
 			ssoEnabled  bool
