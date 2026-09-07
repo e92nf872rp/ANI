@@ -51,12 +51,6 @@
 |---|---|---|
 | INSTANCE-ORPHAN-GPU-FILTER-A | 修复 `GET /instances?kind=gpu_container` 混入非 GPU 实例：`discoverOrphanDeployments` 对带租户标签且不在 store 的 Deployment 无条件硬编码 `Kind=gpu_container` 生成孤儿记录（`GPUCount>0` 只控制 GPU 字段填充不控制生成），gateway 重启后所有非 GPU Deployment（nginx/sandbox/测试实例等）被当作 gpu_container 回显，列表端 kind 过滤因 orphan.Kind 恒为 gpu_container 而失效。修复：`obs.GPUCount<=0` 直接跳过不再生成记录；`observeOrphan` GPU 探测从仅 `nvidia.com/gpu*` 扩展为兼容 `volcano.sh/vgpu-number`（对齐既定"孤儿仅 GPU"约定）。新增 `TestListOrphanDiscoverySkipsNonGPUDeployments`；既有孤儿重试测试 fake 补 vgpu limits。live 验证（10.10.1.66，rollout `dev-20260907-orphan-a`）：tenant-a 命名空间 35 个 Deployment 中 18 个非 GPU 全部不再回显，3 条孤儿记录经集群核对均真实携带 `nvidia.com/gpu=1`。行为收紧说明：非 GPU 未入库实例重启后不再出现在实例列表，孤儿兜底定位收敛为 GPU 实例专用 | instance-orphan-gpu-filter-a.md |
 
-### 实例列表孤儿 GPU 过滤（2026-09，分支 ani-hotfix）
-
-| 批次 | 内容摘要 | 文件 |
-|---|---|---|
-| INSTANCE-ORPHAN-GPU-FILTER-A | 修复 `GET /instances?kind=gpu_container` 混入非 GPU 实例：`discoverOrphanDeployments` 对带租户标签且不在 store 的 Deployment 无条件硬编码 `Kind=gpu_container` 生成孤儿记录（`GPUCount>0` 只控制 GPU 字段填充不控制生成），gateway 重启后所有非 GPU Deployment（nginx/sandbox/测试实例等）被当作 gpu_container 回显，列表端 kind 过滤因 orphan.Kind 恒为 gpu_container 而失效。修复：`obs.GPUCount<=0` 直接跳过不再生成记录；`observeOrphan` GPU 探测从仅 `nvidia.com/gpu*` 扩展为兼容 `volcano.sh/vgpu-number`（对齐既定"孤儿仅 GPU"约定）。新增 `TestListOrphanDiscoverySkipsNonGPUDeployments`；既有孤儿重试测试 fake 补 vgpu limits。live 验证（10.10.1.66，rollout `dev-20260907-orphan-a`）：tenant-a 命名空间 35 个 Deployment 中 18 个非 GPU 全部不再回显，3 条孤儿记录经集群核对均真实携带 `nvidia.com/gpu=1`。行为收紧说明：非 GPU 未入库实例重启后不再出现在实例列表，孤儿兜底定位收敛为 GPU 实例专用 | instance-orphan-gpu-filter-a.md |
-
 ### RWO 卷占用保守预检（2026-09，分支 ani-hotfix）
 
 | 批次 | 内容摘要 | 文件 |
