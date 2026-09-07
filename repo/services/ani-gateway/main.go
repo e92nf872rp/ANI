@@ -317,7 +317,6 @@ func main() {
 		KubernetesRESTClient:                  kubernetesRESTClient,
 		ObservabilityService:                  observabilityService,
 		PlatformServiceHealthReader:           platformServiceHealthReader,
-		EmailNotificationStore:                runtimeadapter.NewLocalEmailNotificationStore(),
 		InferenceServiceClient:                inferenceServiceClient,
 		ModelServiceClient:                    modelServiceClient,
 		KBServiceClient:                       kbServiceClient,

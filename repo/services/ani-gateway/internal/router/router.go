@@ -28,7 +28,6 @@ type RegisterOptions struct {
 	KubernetesRESTClient                  *runtimeadapter.KubernetesRESTClient
 	ObservabilityService                  ports.ObservabilityService
 	PlatformServiceHealthReader           ports.PlatformServiceHealthReader
-	EmailNotificationStore                ports.EmailNotificationStore
 	// InferenceServiceClient routes /api/v1/svc/inference-services* to
 	// inference-service via internal InferenceControl gRPC. When nil the
 	// product handlers return 503 DEPENDENCY_UNAVAILABLE so the gateway
@@ -118,7 +117,6 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerK8sClusterResourcesWithService(v1, options.K8sClusterService)
 	registerEncryptionResourcesWithService(v1, options.EncryptionService)
 	registerSecretResourcesWithService(v1, options.SecretService)
-	registerEmailNotificationResourcesWithService(v1, options.EmailNotificationStore)
 	registerQuotaResources(v1, options.QuotaAdminService, options.QuotaStoreService)
 	registerPlatformWorkloadResources(v1, options.PlatformWorkloadService, options.AsyncTaskStore)
 	registerAdminTenantResources(v1, options.TenantService)

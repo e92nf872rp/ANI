@@ -320,12 +320,6 @@
 | SPRINT13-REGISTRY-HARBOR-LIVE-A | 镜像仓库 Harbor-backed live gate：`validate-registry-harbor-live-gate` 契约通过；2026-07-27 真实 Gateway 验证 Harbor project/list/push-instructions/pull-secret/scan-report 并归档脱敏 evidence，artifact/purpose 回读在提供 repository/tag 时执行；不含 Console/BOSS/实例创建镜像门禁 | sprint13-registry-harbor-live-gate.md |
 | REGISTRY-P0-CLOSURE-A | Registry P0 闭环：purpose/scan terminal=`complete`/实例引用/删除 409；live passed（evidence `registry-p0-closure-live-20260803.json`）；不含 BOSS quota/GC | registry-p0-closure-a.md |
 
-### 邮件通知（2026-07）
-
-| 批次 | 内容摘要 | 文件 |
-|---|---|---|
-| EMAIL-NOTIFY | 邮件通知 API + BOSS 发信设置页：9 个 Core endpoint（SMTP CRUD / 收件人 CRUD / 事件订阅批量更新 / 测试发送）；local 内存 adapter；BOSS 前端 SMTP 表单 + 收件人表格 + 订阅开关 + 测试发送；48 store 测试 + 34 handler 测试；RequestID store 层 UUID 生成 + handler 透传 | email-notify.md |
-
 ### NATS 接入（2026-07）
 
 | 批次 | 内容摘要 | 文件 |

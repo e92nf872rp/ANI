@@ -211,9 +211,6 @@ Instance Observability Completion 增量补全（2026-07，PR4 分支）：
 - 已知边界：VM 端到端 live 验证待补（当前系统无 VM）；MinIO emptyDir 非持久化风险；Local mock GPU 返回 0 而非 nil（与 port 注释”缺失不等于 0”原则不一致）；Loki 方向与 pod 匹配偏离 SPEC 待 SPEC 同步。
 - 详细批次索引见 `repo/development-records/README.md`「Console Instance Observability Completion（2026-07）」章节；执行状态见 `repo/CURRENT-SPRINT.md`「Instance Observability Completion 增量补全」章节。
 
-邮件通知（2026-07-22）：
-- EMAIL-NOTIFY：9 个 Core `/api/v1/notifications/email/*` endpoint（SMTP CRUD / 收件人 CRUD / 事件订阅批量更新 / 测试发送）+ BOSS 前端发信设置页；local 内存 adapter；store 层 RequestID UUID 生成 + handler 透传；48 store 测试 + 34 handler 测试通过；`make validate-architecture` 和前端 `pnpm` 验证待补跑；详见 `repo/development-records/email-notify.md`。M1-NOTIFY-A 的 email 通道已完成，webhook/内部消息通道和通知历史查询待后续。
-
 NATS 接入（2026-07）：
 - NATS-INTEGRATION-A：NATS JetStream 适配器健壮性 + 示例 consumer + 集成测试，覆盖 Issue #001-#009：ports 契约扩展（AckWait/MaxDeliver/Headers）、ANI_EVENTS stream 改 InterestPolicy、Publish 写入 NATS headers + 注入 logger、Subscribe 业务层 Ack/Nak + panic recover + AckWait/MaxDeliver 透传、`message.Headers()` 实现 + 内部 jetStream 接口、metering 示例 consumer、adapter 单元测试（fake/mock JetStream，9 场景 65.3% coverage）、adapter 集成测试（7 场景连真实 NATS）+ Consumer 端到端集成测试（2 场景）、task 流示例 consumer + 集成测试（2 场景，WorkQueuePolicy 语义验证）；`//go:build integration` build tag 隔离集成测试不影响默认 `make test`；**v3 修订**（基于 `plan-nats-integration-v3.md`）：handler 每条消息用 `context.Background()` 独立上下文、adapter 根据 handler 返回值统一 ack/nak（`nil→Ack`/`error→Nak`/`panic→Nak`）、`ports.Message` 接口去掉 `Ack/Nack` 方法编译期禁止业务显式确认、毒丸消息业务侧返回 nil 吞错误让 adapter Ack 跳过、两 service consumer 与单测/集成测试同步改造；**v4 修订**（基于 `plan-nats-integration-v4.md`）：Subscribe 签名删除 ctx 死参数（v3 已确认不透传给 handler）、consumer `Start()` 同步删 ctx `Stop(ctx)` 保留、三处 ack/nak 返回值不再忽略改打 Error 日志、删除 `TestHandlerBackgroundCtx` 用例；关键设计决策：adapter 返回值驱动 ack/nak（v3 反转 v2 的业务层决策）、Subscribe 删 ctx 死参数（v4 反转 v3 的保留决策）、`safeBuffer`（sync.Mutex + bytes.Buffer）解决并发数据竞争、测试清理 PurgeStream + Drain；详见 `repo/development-records/nats-integration-a.md`。
 ```
@@ -1930,12 +1927,6 @@ M5（9月）
   - `CRUD /api/v1/service-endpoints`
   - Services 层注册 PaaS 服务的稳定内部域名（如 `postgres.prod.ani.internal`）
   - 底层：CoreDNS 自定义 zone 动态管理
-
-- [x] `M1-NOTIFY-A`：事件通知 API（BOSS 邮件通知已完成，Console 侧待 P2）
-  - `CRUD /api/v1/notifications/subscriptions`（订阅事件：webhook/email/内部消息）
-  - `GET /api/v1/notifications/events`（通知历史查询）
-  - 已完成：EMAIL-NOTIFY 批次（2026-07-22）实现 9 个 Core `/api/v1/notifications/email/*` endpoint + BOSS 前端发信设置页；store 层 RequestID UUID 生成；48 store 测试 + 34 handler 测试通过；详见 `repo/development-records/email-notify.md`
-  - 未完成：webhook/内部消息通道、通知历史查询、Console 侧通知配置
 
 ### 模块 M1-DPU：DPU 加速节点纳管
 
