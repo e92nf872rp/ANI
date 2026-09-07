@@ -1,0 +1,36 @@
+# ani-block：ANI 平台块存储 StorageClass（平台契约名）
+#
+# 平台按名字 ani-block 引用该存储类：
+#   - deploy/helm/ani-platform/values.yaml：defaultStorageClass: ani-block
+#   - 实例创建 API：storage_class: "ani-block"
+# 实际供给方为 Rook-Ceph RBD（CephBlockPool ceph-rbd-ssd）。Sprint 11 正式部署
+# 清单 deploy/real-k8s-lab/sprint11-rook-ceph-formal-deployment.yaml 中的
+# ani-rbd-ssd 与本 StorageClass 使用同一 pool/provisioner；ani-block 是平台
+# 契约名，此前缺失导致 dev 集群需要手工创建（INSTANCE-RWO-PRECHECK-B live
+# 验证时补齐），现随仓库下发。
+#
+# 行为要点（live 验证确认）：
+#   - volumeBindingMode: WaitForFirstConsumer：卷创建后为 pending，直到首个
+#     消费实例调度后再绑定 PV，属预期行为
+#   - allowVolumeExpansion: true：支持 PVC 在线扩容
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ani-block
+  labels:
+    app.kubernetes.io/part-of: ani-core
+parameters:
+  clusterID: rook-ceph
+  csi.storage.k8s.io/controller-expand-secret-name: rook-csi-rbd-provisioner
+  csi.storage.k8s.io/controller-expand-secret-namespace: rook-ceph
+  csi.storage.k8s.io/node-stage-secret-name: rook-csi-rbd-node
+  csi.storage.k8s.io/node-stage-secret-namespace: rook-ceph
+  csi.storage.k8s.io/provisioner-secret-name: rook-csi-rbd-provisioner
+  csi.storage.k8s.io/provisioner-secret-namespace: rook-ceph
+  imageFeatures: layering
+  imageFormat: "2"
+  pool: ceph-rbd-ssd
+provisioner: rook-ceph.rbd.csi.ceph.com
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true

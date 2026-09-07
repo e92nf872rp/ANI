@@ -83,14 +83,6 @@ class CIWorkflowContractTest(unittest.TestCase):
         errors = validator.validate(self.workflow, self.makefile)
         self.assertTrue(any("mutable @latest" in error for error in errors))
 
-    def test_frontend_high_severity_audit_is_required(self) -> None:
-        frontend = self.workflow["jobs"]["frontend-ci"]
-        frontend["steps"] = [
-            step for step in frontend["steps"] if step.get("name") != "Dependency audit"
-        ]
-        errors = validator.validate(self.workflow, self.makefile)
-        self.assertTrue(any("high and critical npm audit" in error for error in errors))
-
     def test_runtime_observability_contract_runs_with_base_sha(self) -> None:
         services_text = str(self.workflow["jobs"]["services-pr-gate"])
         self.assertIn("make validate-service-runtime-observability", services_text)

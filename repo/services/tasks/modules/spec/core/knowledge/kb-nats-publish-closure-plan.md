@@ -56,7 +56,6 @@ CLAUDE.md §3 要求 Services 只能经 Core OpenAPI/SDK 调用 Core；§5.3 要
 
 Core OpenAPI（`repo/api/openapi/v1.yaml`）**没有"发布事件到消息总线"的 HTTP 端点**。现有端点只有：
 - `/data/query`、`/data/tables`（数据面，kb-service 已用于 outbox 读写）
-- `/notifications/email/*`（邮件通知，与消息总线无关）
 - `/instances/{id}/events`（实例事件查询，非发布）
 
 → 需新增 `POST /events` 端点，让 Services 经 HTTP 发布事件，Core handler 转交 `MessageBus.Publish`。
