@@ -74,6 +74,8 @@ func (r *LocalInstanceResourceResolver) ResolveCreate(ctx context.Context, reque
 			return ports.WorkloadResourceResolveResult{}, err
 		}
 		refs = append(refs, resolvedRefs...)
+	} else if hasExplicitInstanceNetworkReferences(spec.Network) {
+		return ports.WorkloadResourceResolveResult{}, fmt.Errorf("%w: instance network resolver is not configured", ports.ErrFailedPrecondition)
 	}
 	if r.storage != nil {
 		resolvedRefs, err := r.resolveStorage(ctx, request.TenantID, &spec)
@@ -153,6 +155,18 @@ func (r *LocalInstanceResourceResolver) ResolveCreate(ctx context.Context, reque
 		refs = append(refs, resolvedRefs...)
 	}
 	return ports.WorkloadResourceResolveResult{Spec: spec, ResourceRefs: refs}, nil
+}
+
+func hasExplicitInstanceNetworkReferences(network ports.WorkloadNetworkPolicy) bool {
+	if strings.TrimSpace(network.VPCID) != "" || strings.TrimSpace(network.SubnetID) != "" {
+		return true
+	}
+	for _, securityGroupID := range network.SecurityGroupIDs {
+		if strings.TrimSpace(securityGroupID) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func validateImagePurposeForInstanceKind(kind ports.WorkloadKind, image ports.RegistryImage) error {
@@ -300,6 +314,9 @@ func (r *LocalInstanceResourceResolver) resolveNetwork(ctx context.Context, tena
 			return nil, fmt.Errorf("%w: instance vpc %q is %s", ports.ErrConflict, spec.Network.VPCID, vpc.State)
 		}
 		refs = append(refs, "vpc/"+vpc.VPCID)
+		if strings.TrimSpace(spec.Network.SubnetID) == "" {
+			return nil, fmt.Errorf("%w: instance vpc %q requires an explicit subnet_id", ports.ErrFailedPrecondition, vpc.VPCID)
+		}
 	}
 	if strings.TrimSpace(spec.Network.SubnetID) != "" {
 		subnet, err := r.network.GetSubnet(ctx, ports.NetworkResourceGetRequest{TenantID: tenantID, ResourceID: spec.Network.SubnetID})
@@ -308,6 +325,17 @@ func (r *LocalInstanceResourceResolver) resolveNetwork(ctx context.Context, tena
 		}
 		if subnet.State != ports.NetworkResourceAvailable {
 			return nil, fmt.Errorf("%w: instance subnet %q is %s", ports.ErrConflict, spec.Network.SubnetID, subnet.State)
+		}
+		if strings.TrimSpace(spec.Network.VPCID) == "" {
+			vpc, err := r.network.GetVPC(ctx, ports.NetworkResourceGetRequest{TenantID: tenantID, ResourceID: subnet.VPCID})
+			if err != nil {
+				return nil, fmt.Errorf("resolve instance vpc %q from subnet %q: %w", subnet.VPCID, subnet.SubnetID, err)
+			}
+			if vpc.State != ports.NetworkResourceAvailable {
+				return nil, fmt.Errorf("%w: instance vpc %q is %s", ports.ErrConflict, vpc.VPCID, vpc.State)
+			}
+			spec.Network.VPCID = vpc.VPCID
+			refs = append(refs, "vpc/"+vpc.VPCID)
 		}
 		if spec.Network.VPCID != "" && subnet.VPCID != spec.Network.VPCID {
 			return nil, fmt.Errorf("%w: instance subnet %q does not belong to vpc %q", ports.ErrConflict, subnet.SubnetID, spec.Network.VPCID)

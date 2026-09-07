@@ -164,6 +164,9 @@ func (s *LocalInstanceService) Create(ctx context.Context, request ports.Workloa
 		return ports.WorkloadInstanceCreateResult{}, ports.ErrNotConfigured
 	}
 	var resolvedResourceRefs []string
+	if s.resources == nil && hasExplicitInstanceNetworkReferences(request.Spec.Network) {
+		return ports.WorkloadInstanceCreateResult{}, fmt.Errorf("%w: instance network resolver is not configured", ports.ErrFailedPrecondition)
+	}
 	if s.resources != nil {
 		resolved, err := s.resources.ResolveCreate(ctx, ports.WorkloadResourceResolveRequest{
 			TenantID: request.Spec.TenantID,

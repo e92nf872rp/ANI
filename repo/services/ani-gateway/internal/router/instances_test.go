@@ -137,6 +137,13 @@ func TestValidateCreateInstanceConfigsRejectsCloudInitAndPasswordSecretRef(t *te
 
 func TestInstanceSpecFromRequestMapsProviderNeutralContainerConfig(t *testing.T) {
 	envValue := "plain"
+	networkRequest := &instanceNetworkRequest{
+		VPCID:            "vpc-1",
+		SubnetID:         "subnet-1",
+		SecurityGroupIDs: []string{"sg-1"},
+		AssignPrivateIP:  true,
+		PrivateIP:        "10.0.0.10",
+	}
 	spec, err := instanceSpecFromRequest(createInstanceRequest{
 		Kind:     "container",
 		Name:     "app",
@@ -144,13 +151,7 @@ func TestInstanceSpecFromRequestMapsProviderNeutralContainerConfig(t *testing.T)
 		ImageID:  "img-1",
 		ImageRef: "harbor.local/app@sha256:abc",
 		ContainerConfig: &containerConfigRequest{
-			Network: &instanceNetworkRequest{
-				VPCID:            "vpc-1",
-				SubnetID:         "subnet-1",
-				SecurityGroupIDs: []string{"sg-1"},
-				AssignPrivateIP:  true,
-				PrivateIP:        "10.0.0.10",
-			},
+			Network:          networkRequest,
 			Replicas:         2,
 			Ports:            []instancePortRequest{{Name: "http", ContainerPort: 8080, Protocol: "tcp"}},
 			Env:              []instanceEnvRequest{{Name: "MODE", Value: &envValue}},
@@ -171,6 +172,28 @@ func TestInstanceSpecFromRequestMapsProviderNeutralContainerConfig(t *testing.T)
 	if spec.Network.VPCID != "vpc-1" || spec.Network.SubnetID != "subnet-1" || spec.Network.PrivateIP != "10.0.0.10" || len(spec.Network.SecurityGroupIDs) != 1 {
 		t.Fatalf("network = %+v, want provider-neutral network request", spec.Network)
 	}
+	if len(spec.Network.Attachments) != 3 {
+		t.Fatalf("network attachments = %+v, want all default conceptual planes preserved", spec.Network.Attachments)
+	}
+	foundTenantVPC := false
+	for _, attachment := range spec.Network.Attachments {
+		if attachment.NetworkID == networkRequest.VPCID {
+			t.Fatalf("attachment = %+v, ANI vpc_id must not be used as provider NetworkID", attachment)
+		}
+		if attachment.Plane == ports.NetworkPlaneTenantVPC {
+			foundTenantVPC = true
+			if attachment.NetworkID != "tenant-vpc" || attachment.SubnetID != "subnet-1" || !attachment.Primary {
+				t.Fatalf("tenant_vpc attachment = %+v, want conceptual ID with requested subnet", attachment)
+			}
+		}
+	}
+	if !foundTenantVPC {
+		t.Fatal("network attachments missing tenant_vpc plane")
+	}
+	networkRequest.SecurityGroupIDs[0] = "mutated"
+	if spec.Network.SecurityGroupIDs[0] != "sg-1" {
+		t.Fatalf("security group IDs alias request slice: got %q", spec.Network.SecurityGroupIDs[0])
+	}
 	if spec.Container == nil || spec.Container.Replicas != 2 || len(spec.Container.PortSpecs) != 1 || len(spec.Container.Env) != 1 || len(spec.Container.VolumeMounts) != 1 || len(spec.Container.FilesystemMounts) != 1 {
 		t.Fatalf("container = %+v, want mapped ports/env/storage mounts", spec.Container)
 	}
@@ -179,6 +202,34 @@ func TestInstanceSpecFromRequestMapsProviderNeutralContainerConfig(t *testing.T)
 	}
 	if !spec.Container.WorkloadIdentity.Enabled || len(spec.Container.WorkloadIdentity.Scopes) != 1 {
 		t.Fatalf("workload identity = %+v, want enabled scope", spec.Container.WorkloadIdentity)
+	}
+}
+
+func TestInstanceSpecFromRequestNeverMapsVPCIDToNetworkAttachment(t *testing.T) {
+	network := func() *instanceNetworkRequest {
+		return &instanceNetworkRequest{VPCID: "vpc-public-id", SubnetID: "subnet-public-id"}
+	}
+	tests := []struct {
+		name    string
+		request createInstanceRequest
+	}{
+		{name: "top level", request: createInstanceRequest{Kind: "vm", Name: "vm-top-network", NetworkConfig: network()}},
+		{name: "vm config", request: createInstanceRequest{Kind: "vm", Name: "vm-network", VMConfig: &vmConfigRequest{Network: network()}}},
+		{name: "container config", request: createInstanceRequest{Kind: "container", Name: "container-network", ContainerConfig: &containerConfigRequest{Network: network()}}},
+		{name: "gpu container config", request: createInstanceRequest{Kind: "gpu_container", Name: "gpu-network", GPUContainerConfig: &gpuContainerConfigRequest{Network: network()}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec, err := instanceSpecFromRequest(tt.request, "tenant-a")
+			if err != nil {
+				t.Fatalf("instanceSpecFromRequest error = %v", err)
+			}
+			for _, attachment := range spec.Network.Attachments {
+				if attachment.NetworkID == spec.Network.VPCID {
+					t.Fatalf("attachment = %+v, ANI vpc_id must never become provider NetworkID", attachment)
+				}
+			}
+		})
 	}
 }
 

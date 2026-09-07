@@ -3118,16 +3118,30 @@ func networkPolicyFromRequest(request *instanceNetworkRequest, fallback ports.Wo
 	if request == nil {
 		return fallback
 	}
+	fallback.Attachments = append([]ports.WorkloadNetworkAttachment(nil), fallback.Attachments...)
+	for index := range fallback.Attachments {
+		fallback.Attachments[index].PolicyRefs = append([]string(nil), fallback.Attachments[index].PolicyRefs...)
+	}
 	fallback.VPCID = strings.TrimSpace(request.VPCID)
 	fallback.SubnetID = strings.TrimSpace(request.SubnetID)
 	fallback.SecurityGroupIDs = append([]string(nil), request.SecurityGroupIDs...)
 	fallback.AssignPrivateIP = request.AssignPrivateIP
 	fallback.PrivateIP = strings.TrimSpace(request.PrivateIP)
-	if fallback.VPCID != "" {
-		fallback.Attachments = []ports.WorkloadNetworkAttachment{{
-			NetworkID: fallback.VPCID, SubnetID: fallback.SubnetID, Plane: ports.NetworkPlaneTenantVPC, Required: true, Primary: true,
-		}}
+	tenantVPCIndex := -1
+	for index := range fallback.Attachments {
+		if fallback.Attachments[index].Plane == ports.NetworkPlaneTenantVPC {
+			tenantVPCIndex = index
+			break
+		}
 	}
+	if tenantVPCIndex == -1 {
+		fallback.Attachments = append(fallback.Attachments, ports.WorkloadNetworkAttachment{
+			NetworkID: "tenant-vpc", Plane: ports.NetworkPlaneTenantVPC, Required: true, Primary: true,
+		})
+		tenantVPCIndex = len(fallback.Attachments) - 1
+	}
+	fallback.Attachments[tenantVPCIndex].SubnetID = fallback.SubnetID
+	fallback.Attachments[tenantVPCIndex].IPAddress = fallback.PrivateIP
 	return fallback
 }
 

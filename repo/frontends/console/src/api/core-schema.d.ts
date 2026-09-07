@@ -4250,9 +4250,11 @@ export interface components {
             nodes: number;
             azs: string[];
         };
-        /** @description 实例网络引用；只表达 Core 产品意图，不暴露 provider 对象。 */
+        /** @description 实例网络引用；vpc_id 和 subnet_id 都是 ANI Core 产品资源 ID，不是 NetworkAttachmentDefinition（NAD）名称或其他 provider 对象标识。显式提供 vpc_id 时必须同时提供 subnet_id；仅提供 subnet_id 时，服务端从该 Subnet 补全其所属 vpc_id。服务端不会猜测默认 Subnet，也不会向调用方暴露 NAD 或其他 provider 对象。 */
         InstanceNetworkConfig: {
+            /** @description ANI Core VPC 资源 ID，不是 provider NAD 名称；显式提供时必须同时提供 subnet_id。 */
             vpc_id?: string | null;
+            /** @description ANI Core Subnet 资源 ID；可单独提供，服务端将从 Subnet 补全其所属 vpc_id。 */
             subnet_id?: string | null;
             security_group_ids?: string[];
             /** @default true */
