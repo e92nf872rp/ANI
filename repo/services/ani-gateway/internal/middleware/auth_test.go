@@ -76,6 +76,14 @@ func TestPlatformLogin_TenantIsolation(t *testing.T) {
 		{"platform token on gpu-inventory occupancy", "/api/v1/gpu-inventory/occupancy", "platform", true},
 		{"tenant token on gpu-inventory", "/api/v1/gpu-inventory", "tenant", true},
 		{"sandbox token on gpu-specs", "/api/v1/gpu-specs", "sandbox", false},
+		// GPU 调度队列：handler 按 tenant label 过滤，platform 只见平台默认队列，双域放行
+		{"platform token on gpu-scheduling queues", "/api/v1/gpu-scheduling/queues", "platform", true},
+		{"tenant token on gpu-scheduling queues", "/api/v1/gpu-scheduling/queues", "tenant", true},
+		// GET /quotas 是跨租户配额总览（绕过 RLS），仅 platform；租户自查走 /quotas/me
+		{"platform token on quotas list", "/api/v1/quotas", "platform", true},
+		{"tenant token on quotas list denied", "/api/v1/quotas", "tenant", false},
+		{"platform token on quotas/me denied", "/api/v1/quotas/me", "platform", false},
+		{"tenant token on quotas/me allowed", "/api/v1/quotas/me", "tenant", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
