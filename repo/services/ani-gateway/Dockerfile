@@ -15,7 +15,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates && \
+RUN apk add --no-cache ca-certificates wget && \
+    wget -q https://dl.k8s.io/release/v1.36.0/bin/linux/amd64/kubectl -O /usr/local/bin/kubectl && \
+    chmod +x /usr/local/bin/kubectl && \
     adduser -D -H -u 65532 ani
 
 COPY --from=build /out/ani-gateway /usr/local/bin/ani-gateway

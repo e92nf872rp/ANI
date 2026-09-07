@@ -104,3 +104,27 @@ git merge --abort
 Standards/Spec 双轴评审最终均为 0 findings。2026-09-06 人工明确接受 Merge-Ready；随后显式暂存 80 个允许路径，完整 staged diff 已审查，Gateway full/vet/race、ANI 聚合、Services、architecture、文档、契约、生成幂等和 drift 门禁全部重跑为 `pass`。本记录随本地 merge commit 落地，精确 commit SHA 以 Git history 与最终报告为准。
 
 本地 merge commit 创建后的恢复必须针对该精确 merge commit 创建新的 revert commit；不得 reset、stash、rebase、amend 或 force。
+
+## PR #145 Actions 修复与最新 main 对齐（2026-09-07）
+
+PR #145 首轮 CI（run `34027791029`，head `745ab93817a402b6ebc05de8f79176162c730704`）提供了三个独立 RED 信号：
+
+- `Go Build & Test`：`golangci-lint` 报告 `internal/middleware/chain.go:37:6: func registerChain is unused`。
+- `Frontend Build`：Direct P2 Core schema 与旧 monorepo Console 调用端产生 6 个 TypeScript 契约错误。
+- `Services Boundary / API / Docs Gate`：OBS-RUNTIME-P0 的历史精确文件白名单把本 PR 的非 OBS 路径全部误判为越界。
+
+修复前刷新远端，确认 `origin/main` 已前进到 `e895af8cdfd5431804b64e1f571b3c6803278cc5`。其中：
+
+- `db6cb084c96a192b727c27498c60789d846ad8c4` 已解除 OBS-RUNTIME-P0 的历史精确文件白名单，同时保留其余观测契约校验。
+- `13d3eae` 已删除 monorepo Console/BOSS 及对应 Frontend CI，因此不再为已删除调用端新增兼容补丁。
+- 后续 main 变更继续作为 PR 目标分支事实保留。
+
+本 PR 使用普通 merge commit 纳入该精确 `origin/main`，不 rebase、不改写三个 Direct P2 来源提交。冲突处理如下：
+
+- `repo/api/openapi/v1.yaml`：保留 main 对邮件通知契约的删除，并在最新 main 契约上保留 Direct P2 IAM 变更。
+- `repo/services/ani-gateway/main.go`：保留 target IAM wiring，移除已随邮件实现删除的 `runtimeadapter` import。
+- `repo/frontends/{boss,console}/src/api/core-schema.d.ts`：跟随 main 的整个 monorepo frontend 删除。
+- `repo/docs/api/core.html`、`repo/docs/api/index.html`：从最终 OpenAPI 使用仓库固定生成器重建。
+- `repo/services/ani-gateway/internal/middleware/chain.go`：删除无调用者的旧 `registerChain` helper；生产入口继续使用 `RegisterWithTargetIAM`。
+
+仅运行固定生成器同步 OpenAPI 派生物：`make gen-api-docs gen-core-sdk gen-gateway-authz gen-api`。兼容性 baseline 保持最新 main 版本，用于继续检测本 PR 已接受的 breaking contract，不随本 PR 重置。按人工要求未运行本地门禁；修复后的唯一 GREEN 结论由推送后 GitHub Actions 给出。

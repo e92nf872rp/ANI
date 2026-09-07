@@ -8,7 +8,7 @@
 > ## 关键架构事实（本方案的落点依据）
 > - **ani-core 是外部平台内核服务（不在本 repo 内）**；ani-gateway 是其对外统一入口，对外暴露 `https://{host}/api/v1`（v1.yaml）：servers[0].url 前缀规范），Core 资源全部经 gateway 的 `/api/v1` 转发。
 > - kb-service 走 Core OpenAPI 时即调 `ANI_GATEWAY_INTERNAL_URL + /api/v1`（[config.py:20-21,43-44](file:///c:/Users/PC/Desktop/ANI/repo/services/kb-service/app/core/config.py#L20-L44)），故"调 Core"在实际拓扑中等价于经 ani-gateway。
-> - **Core 契约 v1.yaml 已具备的能力**：对象存储（`/buckets`、`/buckets/{id}/objects`、upload、presigned-url，`/objects/upload`、`/objects/{id}/download`）、向量存储（`/vector-stores` 含 search/rebuild-index/documents）、异步任务（`/tasks/{id}`）、邮件通知（`/notifications/email/*`）、密钥（`/secrets`）。
+> - **Core 契约 v1.yaml 已具备的能力**：对象存储（`/buckets`、`/buckets/{id}/objects`、upload、presigned-url，`/objects/upload`、`/objects/{id}/download`）、向量存储（`/vector-stores` 含 search/rebuild-index/documents）、异步任务（`/tasks/{id}`）、密钥（`/secrets`）。
 > - **Core 契约目前缺失的能力**：事件/消息总线（outbox 所需）、通用缓存/会话、通用数据托管。这三类是"Core 需新增"的核心；其余改动仅需在 Services 侧收口到已有 Core 能力。
 
 ---

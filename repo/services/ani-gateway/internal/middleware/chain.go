@@ -31,20 +31,6 @@ func RegisterWithTargetIAM(h *server.Hertz, store GatewayStore, targetClient por
 	return nil
 }
 
-// registerChain 注册 C 阶段链路：
-// policy resolver → generated/legacy 分流认证 → generated/legacy 分流授权 →
-// 横切（限流/幂等/审计，统一 identity key）。
-func registerChain(
-	h *server.Hertz, store GatewayStore, client AuthClient,
-	registry authz.Registry, cfg authz.Config,
-) {
-	targetRegistry, err := authz.NewTargetOperationRegistry(authz.TargetPolicyRevision)
-	if err != nil {
-		panic(err)
-	}
-	registerChainWithTarget(h, store, client, nil, registry, targetRegistry, cfg)
-}
-
 func registerChainWithTarget(
 	h *server.Hertz, store GatewayStore, client AuthClient, targetClient ports.TargetIAM,
 	registry authz.Registry, targetRegistry authz.TargetOperationRegistry, cfg authz.Config,

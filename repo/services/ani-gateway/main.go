@@ -14,7 +14,6 @@ import (
 	"github.com/cloudwego/hertz/pkg/app/server"
 
 	iamadapter "github.com/kubercloud/ani/pkg/adapters/iam"
-	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/bootstrap"
 	"github.com/kubercloud/ani/pkg/ports"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
@@ -377,7 +376,6 @@ func main() {
 		KubernetesRESTClient:                  kubernetesRESTClient,
 		ObservabilityService:                  observabilityService,
 		PlatformServiceHealthReader:           platformServiceHealthReader,
-		EmailNotificationStore:                runtimeadapter.NewLocalEmailNotificationStore(),
 		InferenceServiceClient:                inferenceServiceClient,
 		ModelServiceClient:                    modelServiceClient,
 		KBServiceClient:                       kbServiceClient,

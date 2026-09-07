@@ -30,9 +30,12 @@ import (
 type PrometheusObservabilityService struct {
 	prometheusURL  string
 	instanceLookup InstanceLookup
-	local          *LocalObservabilityService
-	httpClient     *http.Client
-	now            func() time.Time
+	// podMatcher 可选：实例 pod 精确匹配器（经 K8s label 解析），nil 时 pod/cri_name
+	// 重写降级回前缀正则 promQLPodMatcher。
+	podMatcher func(ctx context.Context, tenantID, instanceName string) string
+	local      *LocalObservabilityService
+	httpClient *http.Client
+	now        func() time.Time
 }
 
 // InstanceLookup 用 instance_id 查实例记录，解析真实 namespace 与 pod 名前缀。
@@ -46,6 +49,11 @@ type PrometheusObservabilityServiceConfig struct {
 	InstanceLookup InstanceLookup
 	HTTPClient     *http.Client
 	Now            func() time.Time
+	// PodMatcher 可选注入实例 pod 精确匹配器（经 K8s label 解析真实 pod 名列表，
+	// 见 InstancePodNamesResolver.Matcher）。用于根治实例名前缀重叠（如 sandbox 与
+	// sandbox-dongjm）时前缀正则互相命中导致的趋势数据静默污染。
+	// nil 或调用返回降级结果时行为回退：pod/cri_name 用前缀正则 promQLPodMatcher。
+	PodMatcher func(ctx context.Context, tenantID, instanceName string) string
 }
 
 // NewPrometheusObservabilityService 创建真实 Prometheus 可观测性代理服务。
@@ -70,6 +78,7 @@ func NewPrometheusObservabilityService(config PrometheusObservabilityServiceConf
 	return &PrometheusObservabilityService{
 		prometheusURL:  prometheusURL,
 		instanceLookup: config.InstanceLookup,
+		podMatcher:     config.PodMatcher,
 		local:          NewLocalObservabilityService(),
 		httpClient:     client,
 		now:            now,
@@ -85,12 +94,14 @@ func (s *PrometheusObservabilityService) SetInstanceLookup(lookup InstanceLookup
 	}
 }
 
-// labelValuePattern 匹配 PromQL label 选择器中的 namespace/pod/name="..." 值。
-// 捕获组 1 为 label 名（namespace、pod 或 name），捕获组 2 为双引号内的值。
+// labelValuePattern 匹配 PromQL label 选择器中的 cri_namespace/cri_name/namespace/pod/name="..." 值。
+// 捕获组 1 为 label 名，捕获组 2 为双引号内的值。
+// 交替项必须把 cri_namespace/cri_name 放在 namespace/name 之前：否则 cri_namespace="x" 会被
+// namespace 交替项命中子串，导致 cri_ 前缀残留 + 错误替换。
 // name label 用于 VM 指标（kubevirt_vmi_*），VMI metadata.name 无随机后缀，重写时用精确匹配。
-var labelValuePattern = regexp.MustCompile(`(namespace|pod|name)="([^"]*)"`)
+var labelValuePattern = regexp.MustCompile(`(cri_namespace|cri_name|namespace|pod|name)="([^"]*)"`)
 
-// Query 重写前端 PromQL 中的 namespace/pod/name label 并转发到真实 Prometheus。
+// Query 重写前端 PromQL 中的 namespace/pod/name/cri_namespace/cri_name label 并转发到真实 Prometheus。
 func (s *PrometheusObservabilityService) Query(ctx context.Context, request ports.ObservabilityQueryRequest) (ports.ObservabilityQueryResult, error) {
 	query := strings.TrimSpace(request.Query)
 	if query == "" {
@@ -287,10 +298,14 @@ func (s *PrometheusObservabilityService) queryPrometheusRange(ctx context.Contex
 	return result, nil
 }
 
-// rewritePromQLLabels 将 PromQL 中的 namespace="x"、pod="x" 和 name="x" 重写为真实 namespace、pod 正则与 VMI name。
-// 前端把 instance_id 同时注入 namespace 和 pod 占位符，后端用首次出现的 label 值查实例记录，
+// rewritePromQLLabels 将 PromQL 中的 namespace="x"、pod="x"、name="x"、cri_namespace="x" 和
+// cri_name="x" 重写为真实 namespace、pod 正则、VMI name 及 kata-monitor 系列的对应值。
+// 前端把 instance_id 同时注入各占位符，后端用首次出现的 label 值查实例记录，
 // 后续同名 label 用同一实例记录的映射结果替换，保证同一 PromQL 内多个选择器一致。
 // name label 用于 VM 指标（kubevirt_vmi_*），VMI metadata.name 等于 record.Name（无随机后缀），用精确匹配。
+// cri_namespace/cri_name 用于 kata-monitor 指标（kata_guest_meminfo 等，sandbox/kata 实例内存数据源）：
+// 该系列无 namespace/pod 标签，cri_namespace 承载租户 namespace（与 namespace 同语义，精确匹配），
+// cri_name 承载完整 pod 名（可能带控制器 hash 后缀，与 pod 同理用正则匹配）。
 func (s *PrometheusObservabilityService) rewritePromQLLabels(ctx context.Context, tenantID string, query string) (string, error) {
 	matches := labelValuePattern.FindAllStringSubmatchIndex(query, -1)
 	if len(matches) == 0 {
@@ -328,23 +343,33 @@ func (s *PrometheusObservabilityService) rewritePromQLLabels(ctx context.Context
 		return "", fmt.Errorf("%w: instance tenant_id mismatch", ports.ErrInvalid)
 	}
 	realNamespace := tenantNamespace(record.TenantID)
+	// pod/cri_name 匹配器：优先注入的精确解析（K8s label → 真实 pod 名列表，无前缀歧义），
+	// 未注入时降级回前缀正则（兼容 Deployment/Job hash 后缀，但实例名前缀重叠时会互相命中）。
 	podMatcher := promQLPodMatcher(record.Name)
+	if s.podMatcher != nil {
+		podMatcher = s.podMatcher(ctx, tenantID, record.Name)
+	}
 
-	// 逐个替换 label 值。namespace → 精确匹配真实 namespace，pod → 正则匹配带 hash 后缀的 pod，name → 精确匹配 VMI name。
+	// 逐个替换 label 值。namespace/cri_namespace → 精确匹配真实 namespace，pod/cri_name → 正则匹配带
+	// hash 后缀的 pod 名，name → 精确匹配 VMI name。
 	var b strings.Builder
 	last := 0
 	for _, idx := range matches {
 		b.WriteString(query[last:idx[0]])
 		labelName := query[idx[2]:idx[3]]
 		switch labelName {
-		case "namespace":
+		case "namespace", "cri_namespace":
 			// namespace 是固定字符串，用精确匹配 =（与既有实例观测 adapter 一致），不走正则引擎。
-			b.WriteString(`namespace="`)
+			// cri_namespace 是 kata-monitor 系列承载租户 namespace 的 label，语义相同。
+			b.WriteString(labelName)
+			b.WriteString(`="`)
 			b.WriteString(realNamespace)
 			b.WriteString(`"`)
-		case "pod":
+		case "pod", "cri_name":
 			// pod 名由 Deployment/Job 控制器追加 hash 后缀，必须用正则 =~ 匹配。
-			b.WriteString(`pod=~"`)
+			// cri_name 是 kata-monitor 系列承载完整 pod 名的 label，同理用正则。
+			b.WriteString(labelName)
+			b.WriteString(`=~"`)
 			b.WriteString(podMatcher)
 			b.WriteString(`"`)
 		case "name":

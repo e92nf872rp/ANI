@@ -939,7 +939,7 @@ func newFakeK8sOrphanServer(t *testing.T, deploymentName string) (*runtimeadapte
 		case strings.HasSuffix(r.URL.Path, "/deployments"):
 			_, _ = fmt.Fprintf(w, `{"items":[{"metadata":{"name":%q,"creationTimestamp":"2026-01-01T00:00:00Z"}}]}`, deploymentName)
 		case strings.Contains(r.URL.Path, "/deployments/"+deploymentName):
-			_, _ = fmt.Fprintf(w, `{"metadata":{"name":%q,"creationTimestamp":"2026-01-01T00:00:00Z"},"spec":{"template":{"spec":{"containers":[{"resources":{"limits":{}}}]}}},"status":{"replicas":1,"readyReplicas":1,"availableReplicas":1}}`, deploymentName)
+			_, _ = fmt.Fprintf(w, `{"metadata":{"name":%q,"creationTimestamp":"2026-01-01T00:00:00Z"},"spec":{"template":{"spec":{"containers":[{"resources":{"limits":{"volcano.sh/vgpu-number":"1"}}}]}}},"status":{"replicas":1,"readyReplicas":1,"availableReplicas":1}}`, deploymentName)
 		default:
 			_, _ = fmt.Fprint(w, `{"items":[]}`)
 		}
@@ -952,6 +952,51 @@ func newFakeK8sOrphanServer(t *testing.T, deploymentName string) (*runtimeadapte
 		t.Fatalf("fake K8s client error = %v", err)
 	}
 	return client, srv
+}
+
+// TestListOrphanDiscoverySkipsNonGPUDeployments verifies orphan discovery only
+// surfaces deployments that actually request GPU resources. Every orphan record
+// is classified as gpu_container, so a plain container deployment surviving a
+// gateway restart must not leak into kind=gpu_container instance lists.
+func TestListOrphanDiscoverySkipsNonGPUDeployments(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/deployments"):
+			_, _ = fmt.Fprint(w, `{"items":[`+
+				`{"metadata":{"name":"gpu-orphan","creationTimestamp":"2026-01-01T00:00:00Z"}},`+
+				`{"metadata":{"name":"plain-orphan","creationTimestamp":"2026-01-01T00:00:00Z"}}]}`)
+		case strings.HasSuffix(r.URL.Path, "/deployments/gpu-orphan"):
+			_, _ = fmt.Fprint(w, `{"metadata":{"name":"gpu-orphan","creationTimestamp":"2026-01-01T00:00:00Z"},"spec":{"template":{"spec":{"containers":[{"resources":{"limits":{"volcano.sh/vgpu-number":"2"}}}]}}},"status":{"replicas":1,"readyReplicas":1,"availableReplicas":1}}`)
+		case strings.HasSuffix(r.URL.Path, "/deployments/plain-orphan"):
+			_, _ = fmt.Fprint(w, `{"metadata":{"name":"plain-orphan","creationTimestamp":"2026-01-01T00:00:00Z"},"spec":{"template":{"spec":{"containers":[{"resources":{"limits":{"cpu":"1","memory":"2Gi"}}}]}}},"status":{"replicas":1,"readyReplicas":1,"availableReplicas":1}}`)
+		default:
+			_, _ = fmt.Fprint(w, `{"items":[]}`)
+		}
+	}))
+	defer srv.Close()
+	k8sClient, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
+		Host:       srv.URL,
+		HTTPClient: srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("fake K8s client error = %v", err)
+	}
+	harness := newTaskTestHarnessWithK8s(t, runtimeadapter.NewLocalAsyncTaskStore(), k8sClient)
+
+	body := performJSONRequest(t, harness.h, http.MethodGet, "/api/v1/instances?kind=gpu_container&limit=10", "", http.StatusOK)
+	listed := decodedObject(t, body, "")
+	items, _ := listed["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("gpu_container list items = %d, want 1 (only the GPU orphan): %v", len(items), listed)
+	}
+	item, _ := items[0].(map[string]any)
+	if item["name"] != "gpu-orphan" {
+		t.Fatalf("gpu_container list item name = %v, want gpu-orphan", item["name"])
+	}
+	if item["kind"] != "gpu_container" {
+		t.Fatalf("gpu_container list item kind = %v, want gpu_container", item["kind"])
+	}
 }
 
 // --- §8.2 response fields, mode B visibility, kb domain ---

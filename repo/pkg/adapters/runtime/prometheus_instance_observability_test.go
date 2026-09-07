@@ -530,7 +530,16 @@ func newTestPrometheusInstanceObservabilityWithClock(t *testing.T, roundTrip rou
 	t.Helper()
 	transport := http.RoundTripper(http.DefaultTransport)
 	if roundTrip != nil {
-		transport = roundTrip
+		// GetMetrics 会先经 pod 精确解析器请求 K8s pods list（path 以 /pods 结尾）。
+		// 既有测试均按旧前缀正则行为编写，这里默认让 pods list 返回 500 触发降级，
+		// 保证既有断言不受影响；需要验证精确解析的测试自行构造 service（见
+		// TestPrometheusInstanceObservabilityGetMetricsUsesPrecisePodNames）。
+		transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/pods") {
+				return jsonResponse(http.StatusInternalServerError, `{"message":"pod resolver disabled by test default"}`), nil
+			}
+			return roundTrip(r)
+		})
 	}
 	service, err := NewPrometheusInstanceObservability(PrometheusInstanceObservabilityConfig{
 		PrometheusURL:         "https://prometheus.example.test",
@@ -926,5 +935,211 @@ func TestPrometheusInstanceObservabilityGetMetricsNonVMDoesNotQueryKubeVirt(t *t
 				t.Fatalf("GetMetrics(kind=%q) error = %v", kind, err)
 			}
 		})
+	}
+}
+
+// TestPrometheusInstanceObservabilityGetMetricsSandboxKata 验证 kind=sandbox 的 kata 主路径：
+//   - CPU/网络走 kata 兼容 cAdvisor 选择器（container="" 匹配 kata series 无标签，
+//     id!~"/kata_overhead/.*" 排除 shim/qemu 开销），命中后不得再发 fallback 标准查询；
+//   - 内存走 kata-monitor 的 kata_guest_meminfo：total=mem_total，used=mem_total-mem_available，
+//     不得误取宿主机 working_set（kata 下 pause ~5MB 假数据）；
+//   - GPU 字段保持 nil（sandbox 无 GPU 数据源）；
+//   - sample 时间戳覆盖 record.Timestamp。
+func TestPrometheusInstanceObservabilityGetMetricsSandboxKata(t *testing.T) {
+	service := newTestPrometheusInstanceObservability(t, func(r *http.Request) (*http.Response, error) {
+		query, _ := url.QueryUnescape(r.URL.RawQuery)
+		const okBody = `{"status":"success","data":{"resultType":"vector","result":[{"value":[1780000000,`
+		switch {
+		case strings.Contains(query, "kata_guest_meminfo"):
+			if strings.Contains(query, `item="mem_total"`) {
+				return jsonResponse(http.StatusOK, okBody+`"2147483648"]}]}}`), nil // 2 GiB
+			}
+			if strings.Contains(query, `item="mem_available"`) {
+				return jsonResponse(http.StatusOK, okBody+`"1073741824"]}]}}`), nil // 1 GiB
+			}
+			t.Fatalf("unexpected kata_guest_meminfo query without item matcher: %q", query)
+			return nil, nil
+		case strings.Contains(query, "container_cpu_usage_seconds_total"):
+			// kata 主路径命中后不允许再发标准 container fallback 查询
+			if !strings.Contains(query, `container=""`) {
+				t.Fatalf("kata cpu primary hit but fallback query issued: %q", query)
+			}
+			if !strings.Contains(query, `id!~"/kata_overhead/.*"`) {
+				t.Fatalf("kata cpu query should exclude kata_overhead series: %q", query)
+			}
+			// CPU 必须做 rate 换算（计数器原始值是开机以来累计秒数，不是利用率）
+			if !strings.Contains(query, "rate(") || !strings.Contains(query, "[5m]") {
+				t.Fatalf("kata cpu query should use rate(...[5m]) for utilization semantics: %q", query)
+			}
+			return jsonResponse(http.StatusOK, okBody+`"23.5"]}]}}`), nil
+		case strings.Contains(query, "container_network_receive_bytes_total"):
+			if !strings.Contains(query, `container=""`) {
+				t.Fatalf("kata network rx primary hit but fallback query issued: %q", query)
+			}
+			return jsonResponse(http.StatusOK, okBody+`"2048"]}]}}`), nil
+		case strings.Contains(query, "container_network_transmit_bytes_total"):
+			if !strings.Contains(query, `container=""`) {
+				t.Fatalf("kata network tx primary hit but fallback query issued: %q", query)
+			}
+			return jsonResponse(http.StatusOK, okBody+`"1024"]}]}}`), nil
+		default:
+			t.Fatalf("unexpected query in kata main path: %q", query)
+			return nil, nil
+		}
+	})
+
+	metrics, err := service.GetMetrics(context.Background(), ports.InstanceObservationGetRequest{
+		TenantID:   "tenant-sandbox",
+		InstanceID: "sandbox-kata-1",
+		Kind:       ports.WorkloadKindSandbox,
+	})
+	if err != nil {
+		t.Fatalf("GetMetrics() error = %v", err)
+	}
+	if metrics.CPUUtilizationPct == nil || *metrics.CPUUtilizationPct != 23.5 {
+		t.Fatalf("cpu_utilization_pct = %+v, want 23.5 (kata cAdvisor selector)", metrics.CPUUtilizationPct)
+	}
+	// total = 2 GiB = 2048 MB；used = 2 GiB - 1 GiB = 1024 MB（guest 内真实内存语义）
+	if metrics.MemoryTotalMB == nil || *metrics.MemoryTotalMB != 2048.0 {
+		t.Fatalf("memory_total_mb = %+v, want 2048 MB (kata_guest_meminfo mem_total)", metrics.MemoryTotalMB)
+	}
+	if metrics.MemoryUsedMB == nil || *metrics.MemoryUsedMB != 1024.0 {
+		t.Fatalf("memory_used_mb = %+v, want 1024 MB (mem_total - mem_available)", metrics.MemoryUsedMB)
+	}
+	if metrics.NetworkRXBytes == nil || *metrics.NetworkRXBytes != 2048 {
+		t.Fatalf("network_rx_bytes = %+v, want 2048", metrics.NetworkRXBytes)
+	}
+	if metrics.NetworkTXBytes == nil || *metrics.NetworkTXBytes != 1024 {
+		t.Fatalf("network_tx_bytes = %+v, want 1024", metrics.NetworkTXBytes)
+	}
+	if metrics.GPUUtilizationPct != nil || metrics.GPUMemoryUsedMB != nil || metrics.GPUMemoryTotalMB != nil {
+		t.Fatalf("gpu fields = %+v/%+v/%+v, want all nil for sandbox", metrics.GPUUtilizationPct, metrics.GPUMemoryUsedMB, metrics.GPUMemoryTotalMB)
+	}
+	if metrics.Timestamp.Unix() != 1780000000 {
+		t.Fatalf("timestamp = %v, want sample timestamp 1780000000 (not fallback clock)", metrics.Timestamp)
+	}
+}
+
+// TestPrometheusInstanceObservabilityGetMetricsUsesPrecisePodNames 验证 GetMetrics 优先
+// 使用 pod 精确解析（K8s instance label → 真实 pod 名列表）：查询中的 pod=~ 使用锚定
+// 精确列表而非前缀正则，且 TTL 内复用解析结果（第二次 GetMetrics 不再请求 pods API）。
+func TestPrometheusInstanceObservabilityGetMetricsUsesPrecisePodNames(t *testing.T) {
+	var podListCalls int
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/pods"):
+			podListCalls++
+			if got := r.URL.Query().Get("labelSelector"); got != "ani.kubercloud.io/instance=pod-a" {
+				t.Fatalf("labelSelector = %q, want instance label selector", got)
+			}
+			return jsonResponse(http.StatusOK, `{"items":[
+				{"metadata":{"name":"pod-a-x9k2z"}},
+				{"metadata":{"name":"pod-a-abc12"}}
+			]}`), nil
+		case r.URL.Path == "/api/v1/query":
+			query, _ := url.QueryUnescape(r.URL.RawQuery)
+			if !strings.Contains(query, `pod=~"^(pod-a-abc12|pod-a-x9k2z)$"`) {
+				t.Fatalf("query should use anchored precise pod list, got: %s", query)
+			}
+			if strings.Contains(query, `(-.*)?$`) {
+				t.Fatalf("query should not fall back to prefix regex: %s", query)
+			}
+			return jsonResponse(http.StatusOK, `{"status":"success","data":{"resultType":"vector","result":[{"value":[1780000000,"23.5"]}]}}`), nil
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+			return nil, nil
+		}
+	})
+	service, err := NewPrometheusInstanceObservability(PrometheusInstanceObservabilityConfig{
+		PrometheusURL:         "https://prometheus.example.test",
+		KubernetesAPIHost:     "https://kubernetes.example.test",
+		KubernetesBearerToken: "token",
+		HTTPClient:            &http.Client{Transport: transport},
+	})
+	if err != nil {
+		t.Fatalf("NewPrometheusInstanceObservability() error = %v", err)
+	}
+
+	for i := 0; i < 2; i++ {
+		record, err := service.GetMetrics(context.Background(), ports.InstanceObservationGetRequest{
+			TenantID:   "tenant-a",
+			InstanceID: "pod-a",
+		})
+		if err != nil {
+			t.Fatalf("GetMetrics() call %d error = %v", i+1, err)
+		}
+		if record.CPUUtilizationPct == nil || *record.CPUUtilizationPct != 23.5 {
+			t.Fatalf("GetMetrics() call %d cpu = %v, want 23.5", i+1, record.CPUUtilizationPct)
+		}
+	}
+	if podListCalls != 1 {
+		t.Fatalf("pods API calls = %d, want 1 (resolver cache within TTL)", podListCalls)
+	}
+}
+
+// TestPrometheusInstanceObservabilityGetMetricsSandboxRuncFallback 验证 kind=sandbox 的
+// runc fallback 场景：kata 查询全部查空（RuntimeClass 换用 runc / kata-monitor 未部署）时，
+// CPU/网络/内存自动 fallback 到标准 container 选择器，行为与 container 分支一致。
+func TestPrometheusInstanceObservabilityGetMetricsSandboxRuncFallback(t *testing.T) {
+	service := newTestPrometheusInstanceObservability(t, func(r *http.Request) (*http.Response, error) {
+		query, _ := url.QueryUnescape(r.URL.RawQuery)
+		const okBody = `{"status":"success","data":{"resultType":"vector","result":[{"value":[1780000000,`
+		emptyBody := `{"status":"success","data":{"resultType":"vector","result":[]}}`
+		switch {
+		case strings.Contains(query, "kata_guest_meminfo"):
+			// kata-monitor 未部署/无 series：内存走 runc fallback
+			return jsonResponse(http.StatusOK, emptyBody), nil
+		case strings.Contains(query, "container_cpu_usage_seconds_total"):
+			if strings.Contains(query, `container=""`) {
+				// kata 选择器查空 → 触发 fallback
+				return jsonResponse(http.StatusOK, emptyBody), nil
+			}
+			// fallback 查询也必须做 rate 换算（与公共 container 分支语义一致）
+			if !strings.Contains(query, "rate(") || !strings.Contains(query, "[5m]") {
+				t.Fatalf("runc fallback cpu query should use rate(...[5m]): %q", query)
+			}
+			return jsonResponse(http.StatusOK, okBody+`"30.0"]}]}}`), nil
+		case strings.Contains(query, "container_spec_memory_limit_bytes"):
+			return jsonResponse(http.StatusOK, okBody+`"1073741824"]}]}}`), nil // 1 GiB
+		case strings.Contains(query, "container_memory_working_set_bytes"):
+			return jsonResponse(http.StatusOK, okBody+`"536870912"]}]}}`), nil // 512 MiB
+		case strings.Contains(query, "container_network_receive_bytes_total"):
+			if strings.Contains(query, `container=""`) {
+				return jsonResponse(http.StatusOK, emptyBody), nil
+			}
+			return jsonResponse(http.StatusOK, okBody+`"4096"]}]}}`), nil
+		case strings.Contains(query, "container_network_transmit_bytes_total"):
+			if strings.Contains(query, `container=""`) {
+				return jsonResponse(http.StatusOK, emptyBody), nil
+			}
+			return jsonResponse(http.StatusOK, okBody+`"2048"]}]}}`), nil
+		default:
+			t.Fatalf("unexpected query in runc fallback path: %q", query)
+			return nil, nil
+		}
+	})
+
+	metrics, err := service.GetMetrics(context.Background(), ports.InstanceObservationGetRequest{
+		TenantID:   "tenant-sandbox",
+		InstanceID: "sandbox-runc-1",
+		Kind:       ports.WorkloadKindSandbox,
+	})
+	if err != nil {
+		t.Fatalf("GetMetrics() error = %v", err)
+	}
+	if metrics.CPUUtilizationPct == nil || *metrics.CPUUtilizationPct != 30.0 {
+		t.Fatalf("cpu_utilization_pct = %+v, want 30.0 (standard container fallback)", metrics.CPUUtilizationPct)
+	}
+	if metrics.MemoryTotalMB == nil || *metrics.MemoryTotalMB != 1024.0 {
+		t.Fatalf("memory_total_mb = %+v, want 1024 MB (container limit fallback)", metrics.MemoryTotalMB)
+	}
+	if metrics.MemoryUsedMB == nil || *metrics.MemoryUsedMB != 512.0 {
+		t.Fatalf("memory_used_mb = %+v, want 512 MB (working_set fallback)", metrics.MemoryUsedMB)
+	}
+	if metrics.NetworkRXBytes == nil || *metrics.NetworkRXBytes != 4096 {
+		t.Fatalf("network_rx_bytes = %+v, want 4096", metrics.NetworkRXBytes)
+	}
+	if metrics.NetworkTXBytes == nil || *metrics.NetworkTXBytes != 2048 {
+		t.Fatalf("network_tx_bytes = %+v, want 2048", metrics.NetworkTXBytes)
 	}
 }

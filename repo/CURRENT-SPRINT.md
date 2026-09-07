@@ -3,6 +3,7 @@
 > 新开发者（人类或 AI 工具）的第一个入口文件。本文只描述当前真实执行状态；历史完成批次查 `repo/development-records/README.md`。
 
 > **仓库范围：ANI Core + 受控 Services PR。** ANI Core 继续负责基础设施平台底座；Services 受控并行 PR 阶段已经启动，不再按旧冻结规则处理。Services PR 统一运行 `make validate-services`，覆盖 CODEOWNERS 共同审查要求之外的 API split、Services boundary gate、OpenAPI/Gateway route contract、语义契约、生成物漂移、模块检查和 `make validate-architecture`。
+> **仓库范围更新（2026-09-07）：** Console/BOSS 前端源码已迁至独立仓库，本仓库已移除 `repo/frontends/`、前端代码生成/构建目标和前端 CI job；历史批次中的前端描述仅作归档。PR #60/#62/#68 引入的邮件通知契约与实现已回滚，Core 不再提供 `/api/v1/notifications/email/*`。本批次按用户要求不跑本地 CI，完整验证交由 GitHub PR。
 > **当前重心：Sprint 13 / Core real provider 与 live gate 收敛。** Core Sprint 13/14 既有事实继续有效：Sprint 12 已完成 Core「Services 支撑 Handler」A/B1/B2/B3 全部 19 个 handler + 2 个 422 的 Tier1 local profile 收口；Sprint 13 S01-S07 production-shaped live gate 事实保留；Sprint14 resilience 结论仅限隔离 fixture。未跑通对应 live gate 前，不得标记 real-provider、runtime ready 或 production ready。Services PR 可在主责目录推进业务实现，但不得绕过 Core OpenAPI REST API / Core SDK、Core review 或现有架构门禁。
 > **INFERENCE-ENVOY-AI-GATEWAY-RATELIMIT（2026-08-28）：** 已完成 local/logic verified。Envoy AI Gateway Gateway 级共享全局 600 requests/minute `BackendTrafficPolicy`、Redis Secret 引用配置片段、C40 live-gate Accepted 检查和敏感信息校验均已落地；未执行真实集群限流压力测试，不宣称 runtime ready。
 > **INFERENCE-SERVICE-C41（2026-08-31）：** Envoy AI Gateway 多租户动态发布已完成 local/logic verified：Services v1 不新增 endpoint/field，仅澄清既有 `served_model_name` 与 `invocation_url` 描述；Gateway 已修正既有 policy flat DTO 实现，不是契约新增。AK-only、tenant/model/path 解析、可信头覆盖、`recomputeRoute`、Publisher publication/lifecycle fencing、最小权限清单和红线 live-gate contract 均有本地证据。Task 8 server dry-run 为 10/11 accepted；剩余 BackendTrafficPolicy 是已安装 CRD `int32`/`maximum` schema 自相矛盾。外部 inference-service normal/race 与 repo `make test` 均 EXIT:0；Console schema 三处 description 生成更新纳入隔离 shipping index 后 `make validate-services` EXIT:0，真实 index 保持为空。live status=`not-run`；不得标 runtime/production ready；PG live integration 因 DSN 未设 skip。
@@ -12,6 +13,11 @@
 
 > **ANI-GW-1（2026-09-02）：** `LOCAL_VERIFIED`。固定 Session Gateway `api/v0.1.0`（Go module `v0.1.0`，commit `d86a40d33369b128aabc680d4ea0b3f790ac0bb6`）完成 instance exec/console gRPC `CreateSession` 接入，并拆分 `InstanceObservability` / `InstanceSessionIssuer`；real provider 缺失、非法或不可用时 503 fail-closed，不再生成占位 URL。fake/bufconn、race/vet、全仓测试与契约/生成/架构门禁通过；真实 Session Gateway 进程、WebSocket/terminal/serial/VNC 数据面和集群 rollout 均 `not_verified`。不含 Console、CONSOLE-1、LIVE-1；详情见 `development-records/ANI-GW-1.md`。
 
+> **INSTANCE-SANDBOX-TEMPLATE-IMAGE-A（2026-09-04，local verified，hotfix）：** 修复沙箱 code-run 报 `PRECONDITION_FAILED: sandbox pod is not ready`。根因：内置模板 `Image` 是占位 `registry.local/ani/sandbox-*:dev`，集群不可达，沙箱 Pod `ImagePullBackOff`，code-run `waitReadySandboxPod` 等满超时。修复：两模板（`python-secure`、`cuda-notebook-secure` 临时以 python 镜像承接）默认镜像接入已验证可拉取的复用镜像 `docker.changqingyun.cn/hub/library/python:3.12`（10.10.1.66 探针验证 python3.12.10），Description 如实澄清；catalog 测试新增防回归断言（模板镜像必须以 `docker.changqingyun.cn/` 开头），`go build`/`go test`/validate-architecture/`git diff --check` 通过。未 rollout 前线上不生效；存量占位镜像实例需重建；GPU/notebook 专用镜像与 live-gate `ANI_SANDBOX_LIVE_IMAGE_REF` 注入待后续。
+> **INSTANCE-SANDBOX-KUBECTL-A（2026-09-07，live verified，hotfix）：** 修复 code-run 报 `exec: "kubectl": executable file not found in $PATH`。根因：`KubernetesSandboxRuntime` 代码执行走 `KubectlSandboxPodExecutor` shell-out 到 `kubectl exec`，而 gateway `alpine:3.20` 镜像未装 kubectl。修复：`services/ani-gateway/Dockerfile` 运行镜像阶段添加 `wget https://dl.k8s.io/release/v1.36.0/.../kubectl`。live 验证（10.10.1.66，rollout `dev-20260907-kubectl-a`）：pod 内 `kubectl version`=v1.36.0、in-cluster 认证 `kubectl get ns` 成功、`kubectl auth can-i create pods/exec`=yes、gateway SA 可 exec 进沙箱 Pod。code-run 仍要求实例非 paused（replicas=0 时返回 `PRECONDITION_FAILED not ready`，属预期）。记录：`development-records/instance-sandbox-coderun-kubectl-a.md`。
+> **GATEWAY-GPU-PLATFORM-SCOPE-A（2026-09-07，live verified，hotfix）：** 修复 BOSS root（platform scope）访问 `/api/v1/gpu-specs*`、`/api/v1/gpu-inventory*` 报 403 `token scope not allowed for this path`。GPU 接口为双域共享资源（Console tenant + BOSS platform），V2 boundary 域互斥无法表达，按 `/svc/` 模式在 `scopeAllowedForPath` 放行 `platform||tenant`，角色准入仍由 rbac.go 承担。live 验证（rollout `dev-20260907-gpuscope-a`）：GPU 四端点 200、`/instances` 负向对照仍 403。部署插曲：PG max_connections=100 被 gateway 多 store 连接池打满致新 Pod CrashLoop，已 patch 滚动策略 `maxUnavailable:1`（留在线上，连接池收敛待后续）。后续项：GPU 接口迁移 V2 authz（cluster boundary）+ availability 平台视角语义。记录：`development-records/gateway-gpu-platform-scope-a.md`。
+> **GATEWAY-QUOTA-PLATFORM-SCOPE-A（2026-09-07，live verified，hotfix + 安全修复）：** 修复 BOSS `GET /api/v1/quotas?limit=100` 403，并封堵**已存在的跨租户配额泄露**：`listQuotas` 不注入租户过滤、store 走 `WithPlatformTx` 绕过 RLS 返回全部租户行，而 `scopeAllowedForPath` 末尾默认放行 tenant，导致任意租户 token 可读全平台配额。修法与 GPU 相反：`/api/v1/quotas` 精确匹配仅 platform（对齐 `/admin/*`；精确匹配避免误伤 tenant-only 的 `/quotas/me`），`/gpu-scheduling*` 并入 GPU 双放行分支（handler 按 tenant label 过滤无泄露）。auth_test.go 新增 6 用例。live 验证（`dev-20260907-quotas-a`）：platform /quotas 200（39 租户跨租户确认）、/quotas/me 403；tenant /quotas 403（泄露封堵）、/quotas/me 200、gpu-specs 200。记录：`development-records/gateway-quota-platform-scope-a.md`。
+> **INSTANCE-ORPHAN-GPU-FILTER-A（2026-09-07，live verified，hotfix）：** 修复 `GET /instances?kind=gpu_container` 混入非 GPU 实例。根因：`discoverOrphanDeployments` 对带租户标签且不在 store 的 Deployment 无条件硬编码 `Kind=gpu_container` 生成孤儿记录（`GPUCount>0` 只控制 GPU 字段填充，不控制记录生成），gateway 重启后所有非 GPU Deployment 被当作 gpu_container 回显，列表端 kind 过滤形同虚设。修复：`obs.GPUCount<=0` 直接跳过；`observeOrphan` GPU 探测兼容 `volcano.sh/vgpu-number`。新增 `TestListOrphanDiscoverySkipsNonGPUDeployments`。live 验证（rollout `dev-20260907-orphan-a`）：tenant-a 命名空间 18 个非 GPU Deployment 全部不再回显，3 条孤儿记录经集群核对均携带 `nvidia.com/gpu=1`。行为收紧：非 GPU 未入库实例重启后不再出现在实例列表（对齐"孤儿仅 GPU"既定约定）。记录：`development-records/instance-orphan-gpu-filter-a.md`。
 > **INSTANCE-SANDBOX-KATA-STORAGE-A（2026-09-03）：** Kata lab values 同步到 `docker.changqingyun.cn/kubercon/kata-deploy:4.0.0`；当前底座 3/3 Ready，`sandbox-kata` 冒烟通过。Sandbox 新建、clone、restore 的 5Gi RWO workspace PVC 显式使用 `ani-block`，避免无默认 StorageClass 环境持续 Pending。底座 live verified，代码 local/logic verified；待合并和 Gateway rollout 后补产品路径 E2E。sysctl 按任务边界不入库；详情见 `development-records/instance-sandbox-kata-storage-a.md`。
 > **ANI IAM Direct P2 DP2-05（2026-09-06）：** 专用本地 worktree 中的 Console/Tenant Password→Session/Grant→Access Token→CheckPermission→`listInstances` tracer bullet 使用真实 PostgreSQL/Redis、受限 runtime role 和真实 IAM/Gateway 进程验证为 `pass`；Go/No-Go A 已由人工接受为 Go，结果为 `pass`。BOSS/Platform Password Login 与 BOSS caller E2E 为 `not_verified`。本批只形成本地 commit，未 push、部署、切流、删除旧 Auth或启动 DP2-06；详情见 `development-records/DP2-05-target-iam-vertical-slice.md`。
 
@@ -306,26 +312,13 @@ Issue 清单：`repo/services/tasks/issues/issue-01-openapi-queue-crud.md` ~ `is
 
 | 批次 | 状态 | 说明 |
 |---|---|---|
-| CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A | 契约/Console schema 已完成 | 按 7.22 原型”暂不考虑 BOSS 和权限”边界，Core v1 新增 `RegistryImage.purpose`、`/registry/images?purpose=`、四类算力引用 enum 与 createInstance 镜像门禁 422 语义；仅契约，不含 handler/adapter/Console 页面实现 |
+| CORE-REGISTRY-CONSOLE-FLOW-CONTRACT-A | 契约/Console schema 已完成 | 按 7.22 原型“暂不考虑 BOSS 和权限”边界，Core v1 新增 `RegistryImage.purpose`、`/registry/images?purpose=`、四类算力引用 enum 与 createInstance 镜像门禁 422 语义；仅契约，不含 handler/adapter/Console 页面实现 |
 | CORE-REGISTRY-CONSOLE-FLOW-CORE-A | Core 镜像仓库后端实现已完成 | RegistryImage purpose 贯通 port/adapter/router，`/registry/images?purpose=` 支持过滤；不含 instances、Console、BOSS 或权限实现 |
 | SPRINT13-REGISTRY-HARBOR-LIVE-A | Harbor live gate passed | `validate-registry-harbor-live-gate` 契约通过；2026-07-27 通过真实 Gateway 验证 Harbor project/list/push-instructions/pull-secret/scan-report 并归档脱敏 evidence；artifact/purpose 回读需提供 repository/tag；不含 Console/BOSS/实例创建镜像门禁 |
 | REGISTRY-P0-CLOSURE-A | live passed | P0 闭环 gate：purpose/scan/实例引用/删除 409；`validate-registry-harbor-live-gate`；evidence `registry-p0-closure-live-20260803.json`；scan terminal=`complete`；不含 BOSS quota/GC / Console |
 | STORAGE-CONTROL-PLANE-STATE-A | B4 live passed | B1 冻结现有 v1；B2 真实 PG 已 apply；B3 Store/Service 以 PG 为权威；B4 Gateway 缺 `DATABASE_URL`/schema fail-closed + `validate-storage-control-plane-state-live-gate` production-shaped passed（rollout 后回读/幂等/墓碑）；evidence `live-evidence/storage-control-plane-state-live-20260803.json`；不含 Console / full platform production ready |
 | CORE-STORAGE-CONSOLE-APIS-BACKEND-A | Core 存储模块后端实现已完成 | 上游 PR #71 契约合入后，补齐对象桶、块卷、文件系统和向量库管理接口的 ports/local service/gateway handlers 与后端 HTTP E2E/API 测试；2026-07-27 本地 Gateway + 真实依赖复验 Rook-Ceph/MinIO/Milvus 后端 E2E 通过；不含前端，不升级为 production-shaped Gateway 结论 |
 
-## 邮件通知（2026-07-22）
-
-| 批次 | 状态 | 说明 |
-|---|---|---|
-| EMAIL-NOTIFY | 后端 API + BOSS 前端已完成 | 9 个 Core endpoint（SMTP CRUD / 收件人 CRUD / 事件订阅批量更新 / 测试发送）；local 内存 adapter；BOSS 前端 SMTP 表单 + 收件人表格 + 订阅开关 + 测试发送；store 层 RequestID UUID 生成 + handler 透传；48 store 测试 + 34 handler 测试通过；`make validate-architecture` 和前端 `pnpm` 验证待补跑 |
-
-验收命令：
-
-```bash
-go test ./pkg/adapters/runtime/... -run “TestStore_|TestSendVia”
-go test ./services/ani-gateway/internal/router/... -run “TestEmailNotif_”
-go vet ./pkg/adapters/runtime/... ./services/ani-gateway/internal/router/...
-```
 
 ## NATS 接入（2026-07）
 
@@ -426,7 +419,7 @@ git diff --check
 
 ## BOSS 租户配额套餐功能流（2026-08）
 
-> BOSS 平台租户配额套餐管理功能开发流，覆盖套餐全生命周期（OpenAPI 契约 → gRPC 接口 → DB 迁移 → 网关接入 → CRUD + 状态机 + 限额同步 + 租户绑定 + 审计 + 配额元数据透传 → BOSS 前端）。18 个 issue 全部实现完成。批次记录统一归档于 `development-records/quota-policy-issue-*.md`。
+> BOSS 平台租户配额套餐管理后端功能流，覆盖 OpenAPI 契约、gRPC、DB 迁移、网关接入、CRUD、状态机、限额同步、租户绑定、审计和配额元数据透传。后端 #1-#13 已完成；历史前端 #14-#18 已迁至独立仓库，不再由本仓库构建或验证。批次记录统一归档于 `development-records/quota-policy-issue-*.md`。
 
 | Issue | 描述 | 状态 | 证据 |
 |---|---|---|---|
@@ -443,7 +436,6 @@ git diff --check
 | #11 | 查询配额元数据：ListQuotaMeta GET /quota-meta 透传 Core | ✅ 已完成 | `development-records/quota-policy-issue-11-list-quota-meta.md` |
 | #12 | 可绑定租户列表：ListBindableTenants + plan_id IS DISTINCT FROM | ✅ 已完成 | `development-records/quota-policy-issue-12-list-bindable-tenants-api.md` |
 | #13 | 查询操作历史：ListTenantPlanAuditLogs + store 游标分页 + JSON 映射 | ✅ 已完成 | `development-records/quota-policy-issue-13-audit-logs-api.md` |
-| #14–#18 | BOSS 前端：列表+创建 Wizard、详情页(概览+4 Tab)、限额 Tab、绑定租户 Tab、操作历史 Tab | ✅ 已完成（未 commit） | `development-records/quota-policy-issue-14-18-boss-frontend.md` |
 
 验收命令：
 
@@ -455,12 +447,6 @@ go test ./internal/service/ -run "TestTenantPlanService_(Create|List|Get|Activat
 cd repo/services/ani-gateway
 go build ./...
 
-cd repo/frontends/boss
-.\node_modules\.bin\tsc.cmd --noEmit
-
-# 集成验收（Issue #013）
-cd repo/frontends/boss && npx tsc --noEmit && npx vite build
-cd repo/frontends/console && npx tsc --noEmit && npx vite build
 make test
 make validate-architecture
 make validate-doc-entrypoints
@@ -620,6 +606,14 @@ git diff --check
 > `repo/development-records/live-evidence/`，live gate YAML 新增
 > `vm-cloudinit-password-secret-ref-password` 检查并置 status: live。批次详情见
 > `repo/development-records/vm-cloudinit-password-a.md`。
+
+### 热修复：RWO 卷占用保守预检（INSTANCE-RWO-PRECHECK-B，2026-09-04）
+
+> 承接 INSTANCE-STORAGE-USAGE-A 立项预告，把后端拦截落地：创建入口 resolver `resolveStorage` 对全部卷路径做占用检查（resolver 新增 `WithWorkloadStore` 链式装配，deps.go + gateway instances.go 接线，nil 跳过）；生命周期入口 `applyLifecycle` 计算 `volumeOccupancyConflict` 传入 `lifecyclePrecheck`——`attach_volume` 检查目标卷，`start/resume` 检查实例自身引用卷（覆盖"停机期间卷被接管、重启撞不同节点"用户场景），排除实例自身；命中活跃消费者返回 409 `ErrConflict`（消息带占用实例 ID 与状态），operation `FailureReason=volume_occupied_by_active_instance`。文件系统（RWX）共享豁免；stopped/failed/deleted 不占用；store 读失败 fail-open，K8s Multi-Attach 仍是并发竞态兜底；restart 不预检。7 个单测；未改 OpenAPI 契约无生成物变更；validate-architecture + openapi lint + gofmt + git diff --check 通过。批次详情见 `repo/development-records/INSTANCE-RWO-PRECHECK-B.md`。
+
+### 热修复：存储占用标记与过滤（INSTANCE-STORAGE-USAGE-A，2026-09-04）
+
+> 承接 9/3 事故复盘（`test-mount-filesystem2` 因 RWO 卷被旧实例占用卡 provisioning，用户无从得知卷被谁占用）。按 2026-09-04 范围决策**只做占用可见性，不做后端拦截**：`/volumes`、`/filesystems` 列表与详情响应新增 `in_use`/`used_by`（恒输出 `[]`），list 支持 `?in_use=true|false` 过滤（非法值 400）；新增判定 helper `pkg/adapters/runtime/storage_consumers.go`（单资源 + 批量索引，规则：attachments 引用且实例状态 ∈ {pending,provisioning,starting,running,stopping}，stopped/failed/deleted 释放；每页一次扫描避免 N+1）；`storageAPI` 注入 `WorkloadInstanceStore`（nil 安全降级）；OpenAPI additive（`in_use` 参数 + `StorageConsumerInfo` schema）+ core-schema.d.ts 重生成。前端对接文档（线下发送前端团队，不入库；创建实例卷下拉接 `in_use=false`，409 拦截见 PRECHECK-B 批次）。方案 `repo/design/instance-storage-usage-a.md`，后续批次 PRECHECK-B（create/attach_volume/start/restart 409 预检）已立项预告。6 个 router HTTP 测试 + adapter 单测；openapi lint / validate-architecture / go build 通过；live 验证见批次记录。批次详情见 `repo/development-records/INSTANCE-STORAGE-USAGE-A.md`。
 
 ## Instance Observability Completion 增量补全（2026-07，PR4 分支）
 

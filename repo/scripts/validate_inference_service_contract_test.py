@@ -133,12 +133,6 @@ class InferenceServiceContractTest(unittest.TestCase):
         for field in ("replicas", "placement_mode", "gpu_count_per_pod", "max_concurrency", "image_id", "image_ref", "engine"):
             self.assertNotIn("default", properties[field], f"{field} must remain optional in generated clients")
 
-    def test_generated_types_keep_legacy_create_fields_optional(self) -> None:
-        generated = (ROOT / "frontends/console/src/api/schema.d.ts").read_text(encoding="utf-8")
-        block = generated.split("CreateInferenceServiceRequest: {", 1)[1].split("\n        };", 1)[0]
-        for field in ("replicas", "placement_mode", "gpu_count_per_pod", "max_concurrency", "image_id", "image_ref", "engine"):
-            self.assertIn(f"{field}?:", block)
-
     def test_create_freezes_optional_engine_env_and_command(self) -> None:
         schemas = self.spec["components"]["schemas"]
         self.assertEqual(
