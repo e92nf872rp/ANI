@@ -98,13 +98,6 @@ var generatedCorePolicies = map[string]Policy{
 		PathTemplate:         "/api/v1/admin/tenant-admins/available-tenants",
 		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
 	},
-	"GET /api/v1/admin/tenant-admins/available-tenants": {
-		Source:               PolicySourceLegacy,
-		OperationID:          "listAvailableTenants",
-		Method:               "GET",
-		PathTemplate:         "/api/v1/admin/tenant-admins/available-tenants",
-		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
-	},
 	"GET /api/v1/admin/tenant-users": {
 		Source:               PolicySourceLegacy,
 		OperationID:          "listTenantUsers",
@@ -232,7 +225,6 @@ var generatedCorePolicies = map[string]Policy{
 		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
 	},
 	"GET /api/v1/admin/tenants/{tenant_id}/roles": {
-	"GET /api/v1/admin/tenants/{tenant_id}/roles": {
 		Source:               PolicySourceLegacy,
 		OperationID:          "listAssignableTenantRoles",
 		Method:               "GET",
@@ -251,13 +243,6 @@ var generatedCorePolicies = map[string]Policy{
 		OperationID:          "lookupTenantUser",
 		Method:               "GET",
 		PathTemplate:         "/api/v1/admin/tenants/{tenant_id}/user-lookup",
-		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
-	},
-	"GET /api/v1/admin/tenants/{tenant_id}/users/batch": {
-		Source:               PolicySourceLegacy,
-		OperationID:          "batchGetTenantUsers",
-		Method:               "GET",
-		PathTemplate:         "/api/v1/admin/tenants/{tenant_id}/users/batch",
 		SecurityAlternatives: []SecurityRequirement{{AllOf: []OpenAPISecurityScheme{OpenAPISecurityBearer}}, {AllOf: []OpenAPISecurityScheme{OpenAPISecurityAPIKey}}},
 	},
 	"GET /api/v1/admin/tenants/{tenant_id}/users/batch": {
