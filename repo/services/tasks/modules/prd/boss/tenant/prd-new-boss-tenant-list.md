@@ -41,7 +41,7 @@ MFA/SSO 开关由独立 `tenant_auth`（1:1）承载；配额由 Core `resource_
 **Description:** As platform-admin/ops，创建租户并指定套餐与首位管理员。
 **Acceptance Criteria:**
 - [x] POST `/svc/tenants`：name/display_name/email/plan_id/admin_* + body `idempotency_key`
-- [x] name `^[a-z0-9-]{3,40}$`；冲突 409 `TENANT_NAME_CONFLICT`
+- [x] name `^[a-zA-Z0-9-]{3,40}$`；冲突 409 `TENANT_NAME_CONFLICT`
 - [x] plan 非 active → 422 `PLAN_NOT_ACTIVE`
 - [x] admin_password 8–64 且 ≥3 类字符；bcrypt 后传 Core `admin_password_hash`
 - [x] Core 事务：tenants + tenant_auth + users + user_roles(tenant-admin) + lifecycle(`create`)

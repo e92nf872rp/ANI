@@ -114,7 +114,7 @@ type CreateTenantRequest struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Name           string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"` // ^[a-z0-9-]{3,40}$
+	Name           string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"` // ^[a-zA-Z0-9-]{3,40}$
 	DisplayName    string `protobuf:"bytes,2,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
 	Email          string `protobuf:"bytes,3,opt,name=email,proto3" json:"email,omitempty"` // tenant contact email
 	PlanId         string `protobuf:"bytes,4,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`

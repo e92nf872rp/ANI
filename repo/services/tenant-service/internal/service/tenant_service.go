@@ -231,9 +231,9 @@ func parseTenantID(raw string) (uuid.UUID, error) {
 // auditResourceTenant 审计资源类型：租户
 const auditResourceTenant = "tenant"
 
-// tenantNamePattern 租户名称正则
+// tenantNamePattern 租户名称正则（大小写字母、数字、连字符；3–40）
 var (
-	tenantNamePattern = regexp.MustCompile(`^[a-z0-9-]{3,40}$`)
+	tenantNamePattern = regexp.MustCompile(`^[a-zA-Z0-9-]{3,40}$`)
 )
 
 // ListAvailablePlans 返回 status=active 套餐摘要（供创建向导 Step2；不分页、不调 Core）。
@@ -384,7 +384,7 @@ func validateCreateTenantInput(
 	// 步骤 2：逐字段校验
 	if !tenantNamePattern.MatchString(name) {
 		return name, displayName, contactEmail, adminEmail, adminName,
-			businessError(codes.InvalidArgument, ports.ErrValidationFailed, "name must match ^[a-z0-9-]{3,40}$")
+			businessError(codes.InvalidArgument, ports.ErrValidationFailed, "name must match ^[a-zA-Z0-9-]{3,40}$")
 	}
 	if displayName == "" || len(displayName) > 128 {
 		return name, displayName, contactEmail, adminEmail, adminName,

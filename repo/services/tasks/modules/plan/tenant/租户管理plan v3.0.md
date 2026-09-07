@@ -38,6 +38,7 @@
 | 禁用「资源删除」+ 登录拦截已接线 | **仅状态落库**；四维 `used+reserved` 守卫；登录拦截 Deferred |
 | SSO test 已可用 | **501 stub** |
 | 配额变更：同维全局 pending 唯一 / `QUOTA_CHANGE_REQUEST_DUPLICATE` | **跨请求同维 pending 允许**；同 request 同维 → `QUOTA_CHANGE_REQUEST_CONFLICT`；未注册维 → `QUOTA_RESOURCE_NOT_REGISTERED` |
+| name 仅小写 `^[a-z0-9-]{3,40}$` | **`^[a-zA-Z0-9-]{3,40}$`**（允许大小写；UNIQUE 按字面量） |
 | GetQuota：svc 二次 JOIN meta | **单次** Core GetQuota（响应已含 meta）；不可达 **502** |
 | lifecycle 直查 service 表、不调 Core | **经 Core** `GET /admin/tenants/{id}/lifecycle` |
 | admins 仅 tenant-admin | 默认 **tenant-admin ∪ inviting**；proto `TenantScopedAdmin` |
@@ -369,9 +370,9 @@ ALTER TABLE tenants ADD CONSTRAINT tenants_status_chk
   CHECK (status IN ('active', 'frozen', 'disabled'));
 
 -- name 唯一性：保留现有全局 UNIQUE 约束（init_schema 中 UNIQUE 约束默认名 tenants_name_key）
--- name 格式约束：英文 slug 风格（小写字母数字 + 连字符，3-40 字符）
+-- name 格式约束：英文 slug 风格（大小写字母数字 + 连字符，3-40 字符）
 ALTER TABLE tenants ADD CONSTRAINT tenants_name_format_chk
-  CHECK (name ~ '^[a-z0-9-]{3,40}$');
+  CHECK (name ~ '^[a-zA-Z0-9-]{3,40}$');
 
 CREATE INDEX IF NOT EXISTS idx_tenants_status
   ON tenants (status);
@@ -1121,7 +1122,7 @@ tags:
 
 | 字段 | 类型 | 必填 | 约束 | 说明 |
 |------|------|------|------|------|
-| name | string | 是 | `^[a-z0-9-]{3,40}$`，活动租户间唯一 | 租户名（英文 slug 风格唯一 key；不可改） |
+| name | string | 是 | `^[a-zA-Z0-9-]{3,40}$`，活动租户间唯一 | 租户名（英文 slug 风格唯一 key；可含大小写；不可改） |
 | display_name | string | 是 | 1-128 字符 | 租户显示名（中英文均可；可改） |
 | email | string | 是 | RFC 5322 | 租户联系邮箱（平台联系租户的商务/管理员邮箱；与首位管理员邮箱不同） |
 | plan_id | uuid | 是 | 必须指向 active 套餐 | 配额套餐 ID（tenants.plan_id 外键 → tenant_plans.id） |
@@ -3203,7 +3204,7 @@ repo/services/tenant-service/
 package ports
 
 type CreateTenantInput struct {
-    Name        string   // ^[a-z0-9-]{3,40}$，活动租户间唯一
+    Name        string   // ^[a-zA-Z0-9-]{3,40}$，活动租户间唯一
     DisplayName string   // 1-128 字符
     Email       string   // 租户联系邮箱 RFC 5322
     PlanID      uuid.UUID
@@ -3568,7 +3569,7 @@ type TenantSvcClient interface {
 
 ```
 输入校验
-  - name 正则 ^[a-z0-9-]{3,40}$
+  - name 正则 ^[a-zA-Z0-9-]{3,40}$
   - name 活动租户间唯一（全局 UNIQUE 约束保证）
   - display_name 1-128 字符（可改）
   - email（租户联系邮箱）RFC 5322；与首位管理员邮箱 admin_email 不同字段

@@ -514,6 +514,34 @@ func TestValidateAdminPassword(t *testing.T) {
 	}
 }
 
+func TestValidateCreateTenantInput_NameAllowsUppercase(t *testing.T) {
+	cases := []struct {
+		name    string
+		rawName string
+		wantErr bool
+	}{
+		{"lowercase", "acme-co", false},
+		{"uppercase", "Acme-Co", false},
+		{"all_caps", "ACME", false},
+		{"too_short", "ab", true},
+		{"underscore", "Acme_Co", true},
+		{"space", "Acme Co", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, _, _, _, err := validateCreateTenantInput(
+				tc.rawName, "Acme", "ops@acme.io", "admin@acme.io", "admin", "Abcdefg1",
+			)
+			if tc.wantErr && err == nil {
+				t.Fatal("want error")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("unexpected: %v", err)
+			}
+		})
+	}
+}
+
 func TestTenantService_CreateTenant_NilRequest(t *testing.T) {
 	svc := NewTenantService(&bindFakePlanStore{}, &fakeTenantClient{}, nil, &fakeQuotaClient{}, nil, &fakeAuditStore{}, nil, nil, nil, nil)
 	_, err := svc.CreateTenant(context.Background(), nil)

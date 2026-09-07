@@ -19,7 +19,7 @@ message ListAvailablePlansResponse {
 }
 
 message CreateTenantRequest {
-  string name = 1;             // ^[a-z0-9-]{3,40}$
+  string name = 1;             // ^[a-zA-Z0-9-]{3,40}$
   string display_name = 2;
   string email = 3;            // tenant contact email
   string plan_id = 4;

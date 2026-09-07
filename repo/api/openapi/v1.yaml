@@ -4197,7 +4197,7 @@ components:
       description: "创建租户请求（POST /admin/tenants）；事务内建 tenants + tenant_auth + users + user_roles + tenant_lifecycle"
       required: [name, display_name, email, plan_id, admin_email, admin_name, admin_password_hash]
       properties:
-        name:                 { type: string, minLength: 3, maxLength: 40, pattern: '^[a-z0-9-]{3,40}$', description: "租户标识；活动租户内唯一" }
+        name:                 { type: string, minLength: 3, maxLength: 40, pattern: '^[a-zA-Z0-9-]{3,40}$', description: "租户标识（大小写字母/数字/连字符）；活动租户内唯一" }
         display_name:         { type: string, minLength: 1, maxLength: 128 }
         email:                { type: string, format: email, description: "租户联系邮箱（落库 tenants.contact_email）" }
         plan_id:              { type: string, format: uuid, description: "初始绑定套餐 ID" }

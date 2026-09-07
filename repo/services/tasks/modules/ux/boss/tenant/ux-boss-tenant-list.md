@@ -316,7 +316,7 @@ flowchart LR
 | UI element | TDesign component | Props / variant | Data source |
 |------------|-------------------|-----------------|-------------|
 | 向导容器 | `Steps` + 表单区 | 4 步：基础信息/绑定套餐/首位管理员/确认 | — |
-| name | `FormItem` + `Input` | required；rules 正则 `^[a-z0-9-]{3,40}$`；helper「3-40 位小写字母、数字、连字符，创建后不可修改」 | user input |
+| name | `FormItem` + `Input` | required；rules 正则 `^[a-zA-Z0-9-]{3,40}$`；helper「3-40 位大小写字母、数字、连字符，创建后不可修改」 | user input |
 | display_name | `FormItem` + `Input` | required | user input |
 | email | `FormItem` + `Input` | required，type email | user input |
 | plan_id | `FormItem` + `Select`（或 `RadioGroup` 卡片） | required；options: 可用套餐（仅 active，label=name + code） | `GET /svc/tenants/available-plans` |
