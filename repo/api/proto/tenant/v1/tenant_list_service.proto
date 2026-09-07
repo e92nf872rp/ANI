@@ -38,6 +38,7 @@ message ListTenantsRequest {
 message ListTenantsResponse {
   repeated TenantListItem items = 1;
   string next_cursor = 2;  // empty = no more
+  int64 total = 3;         // 满足筛选条件的总条数（用于前端分页；不含游标裁剪）
 }
 
 message GetTenantDetailRequest {

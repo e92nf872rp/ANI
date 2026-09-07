@@ -409,6 +409,9 @@ func TestTenantService_ListTenants_AssemblesPlanCode(t *testing.T) {
 	if len(res.GetItems()) != 1 || res.GetItems()[0].GetPlanCode() != "pro" || res.GetItems()[0].GetAdminCount() != 2 {
 		t.Fatalf("items=%v", res.GetItems())
 	}
+	if res.GetTotal() != 1 {
+		t.Fatalf("total=%d want 1", res.GetTotal())
+	}
 }
 
 func TestTenantService_GetTenantDetail_NotFound(t *testing.T) {

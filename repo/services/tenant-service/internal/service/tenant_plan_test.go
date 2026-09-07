@@ -368,7 +368,10 @@ func (f *fakeTenantClient) ListTenants(_ context.Context, filter ports.ListTenan
 	if f.listFn != nil {
 		return f.listFn(filter)
 	}
-	return ports.TenantListResult{Items: append([]ports.TenantListItem(nil), f.listItems...)}, nil
+	return ports.TenantListResult{
+		Items: append([]ports.TenantListItem(nil), f.listItems...),
+		Total: int64(len(f.listItems)),
+	}, nil
 }
 
 func (f *fakeTenantClient) UpdateTenant(ctx context.Context, id uuid.UUID, in ports.UpdateTenantInput) (ports.Tenant, error) {

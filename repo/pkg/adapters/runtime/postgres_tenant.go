@@ -205,8 +205,23 @@ func (t *PostgresTenant) ListTenants(ctx context.Context, filter ports.ListTenan
 		cursorID = &id
 	}
 
-	var items []ports.TenantListItem
+	var (
+		items []ports.TenantListItem
+		total int64
+	)
 	err = t.store.WithPlatformTx(ctx, func(ctx context.Context, tx ports.MetadataTx) error {
+		filterArgs := []any{string(status), search}
+		filterWhere := `
+			WHERE ($1 = '' OR t.status = $1)
+			  AND ($2 = '' OR t.name ILIKE '%' || $2 || '%' OR t.display_name ILIKE '%' || $2 || '%')
+		`
+		if scanErr := tx.QueryRow(ctx, `
+			SELECT COUNT(*)::bigint
+			FROM tenants t
+			`+filterWhere, filterArgs...).Scan(&total); scanErr != nil {
+			return fmt.Errorf("count tenants: %w", scanErr)
+		}
+
 		args := []any{tenantAdminRoleNameForCount, string(status), search}
 		where := `
 			WHERE ($2 = '' OR t.status = $2)
@@ -285,7 +300,7 @@ func (t *PostgresTenant) ListTenants(ctx context.Context, filter ports.ListTenan
 		nextCursor = types.EncodeCursor(last.CreatedAt, lastID)
 		items = items[:limit]
 	}
-	return ports.TenantListResult{Items: items, NextCursor: nextCursor}, nil
+	return ports.TenantListResult{Items: items, Total: total, NextCursor: nextCursor}, nil
 }
 
 // UpdateTenant 部分更新 display_name / contact_email；不触碰 name / status / plan_id。

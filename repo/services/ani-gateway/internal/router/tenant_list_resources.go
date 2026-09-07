@@ -112,6 +112,7 @@ func (api *tenantListAPI) listTenants(ctx context.Context, c *app.RequestContext
 	}
 	c.JSON(http.StatusOK, map[string]any{
 		"items":       items,
+		"total":       res.GetTotal(),
 		"next_cursor": nullIfEmpty(res.GetNextCursor()),
 	})
 }

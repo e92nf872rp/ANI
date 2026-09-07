@@ -4221,9 +4221,10 @@ components:
     TenantListResponse:
       type: object
       description: "租户列表（游标分页；created_at DESC, id DESC）"
-      required: [items]
+      required: [items, total, next_cursor]
       properties:
         items:       { type: array, items: { $ref: '#/components/schemas/TenantListItem' } }
+        total:       { type: integer, format: int64, description: "满足筛选条件的总条数（用于前端分页）" }
         next_cursor: { type: string, nullable: true, description: "下一页游标；null 表示已无更多" }
 
     TenantUpdateRequest:

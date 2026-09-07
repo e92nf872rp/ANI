@@ -150,6 +150,7 @@ func (c *TenantSvcClient) ListTenants(ctx context.Context, filter ports.ListTena
 	}
 	return ports.TenantListResult{
 		Items:      items,
+		Total:      int64Field(obj, "total"),
 		NextCursor: stringField(obj, "next_cursor"),
 	}, nil
 }

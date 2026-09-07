@@ -514,7 +514,11 @@ func (s *TenantService) ListTenants(ctx context.Context, req *tenantv1.ListTenan
 			CreatedAt:   timestamppb.New(it.CreatedAt.UTC()),
 		})
 	}
-	return &tenantv1.ListTenantsResponse{Items: items, NextCursor: listed.NextCursor}, nil
+	return &tenantv1.ListTenantsResponse{
+		Items:      items,
+		Total:      listed.Total,
+		NextCursor: listed.NextCursor,
+	}, nil
 }
 
 // GetTenantDetail 经 Core GetTenant 返回完整租户详情（含 counts / auth 摘要 / plan_code）。

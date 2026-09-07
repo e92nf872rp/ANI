@@ -74,6 +74,7 @@ func TestPostgresTenantListTenants(t *testing.T) {
 	t1 := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
 	t2 := time.Date(2026, 9, 3, 11, 0, 0, 0, time.UTC)
 	tx := &quotaFakeTx{}
+	tx.enqueueRows(quotaFakeRow{values: []any{int64(2)}}) // COUNT(*)
 	tx.enqueueQuery(&quotaFakeRows{rows: []quotaFakeRow{
 		{values: []any{id1, "acme", "Acme", "active", planID, t1, int64(2)}},
 		{values: []any{id2, "beta", "Beta", "frozen", planID, t2, int64(1)}},
@@ -84,7 +85,7 @@ func TestPostgresTenantListTenants(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTenants: %v", err)
 	}
-	if len(got.Items) != 2 || got.NextCursor != "" {
+	if len(got.Items) != 2 || got.NextCursor != "" || got.Total != 2 {
 		t.Fatalf("got=%+v", got)
 	}
 	if got.Items[0].AdminCount != 2 || got.Items[0].Name != "acme" {

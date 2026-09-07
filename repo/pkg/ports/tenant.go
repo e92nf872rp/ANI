@@ -110,6 +110,7 @@ type TenantListItem struct {
 // TenantListResult is the cursor-paginated tenant list (created_at DESC, id DESC).
 type TenantListResult struct {
 	Items      []TenantListItem
+	Total      int64  // matches filter (status/search); not reduced by cursor/limit
 	NextCursor string // "" = no more
 }
 

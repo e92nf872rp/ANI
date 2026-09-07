@@ -166,6 +166,7 @@ func (api *adminTenantAPI) listTenants(ctx context.Context, c *app.RequestContex
 	}
 	c.JSON(http.StatusOK, map[string]any{
 		"items":       items,
+		"total":       listed.Total,
 		"next_cursor": nullIfEmpty(listed.NextCursor),
 	})
 }

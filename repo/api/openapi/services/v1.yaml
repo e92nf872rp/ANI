@@ -1297,6 +1297,15 @@ components:
         admin_count:  { type: integer, format: int64, description: "tenant-admin 角色成员数（Core 连表统计透传）" }
         created_at:   { type: string, format: date-time }
 
+    TenantListResponse:
+      type: object
+      description: "租户列表（游标分页；created_at DESC, id DESC）"
+      required: [items, total, next_cursor]
+      properties:
+        items:       { type: array, items: { $ref: '#/components/schemas/TenantListItem' } }
+        total:       { type: integer, format: int64, description: "满足筛选条件的总条数（用于前端分页）" }
+        next_cursor: { type: string, nullable: true, description: "下一页游标；null 表示已无更多数据（网关将空串映射为 null）" }
+
     TenantDetail:
       type: object
       description: "租户详情（GET /tenants/{tenantId}）；含 tenant_auth 摘要"
@@ -3793,11 +3802,7 @@ paths:
           description: 租户列表
           content:
             application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/CursorPage'
-                  - properties:
-                      items: { type: array, items: { $ref: '#/components/schemas/TenantListItem' } }
+              schema: { $ref: '#/components/schemas/TenantListResponse' }
         "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED" }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
