@@ -1339,6 +1339,13 @@ func (api *instanceAPI) discoverOrphanDeployments(ctx context.Context, tenantID 
 			continue
 		}
 		obs := api.observeOrphan(ctx, tenantID, depName)
+		// Only untracked deployments that actually request GPU resources are
+		// surfaced as orphans: every orphan record is classified as a
+		// gpu_container, so admitting plain container/sandbox deployments here
+		// would leak non-GPU instances into kind=gpu_container lists.
+		if obs.GPUCount <= 0 {
+			continue
+		}
 		record := ports.WorkloadInstanceRecord{
 			InstanceID:   depName,
 			TenantID:     tenantID,
@@ -1360,9 +1367,7 @@ func (api *instanceAPI) discoverOrphanDeployments(ctx context.Context, tenantID 
 			CreatedAt: obs.CreatedAt,
 			UpdatedAt: time.Now().UTC(),
 		}
-		if obs.GPUCount > 0 {
-			record.GPU = api.orphanGPUStatus(ctx, obs.NodeName, obs.GPUCount, obs.Phase)
-		}
+		record.GPU = api.orphanGPUStatus(ctx, obs.NodeName, obs.GPUCount, obs.Phase)
 		records = append(records, record)
 		log.Printf("[LIST] orphan discovery found untracked deployment %s/%s phase=%s node=%s gpu=%d", namespace, depName, obs.Phase, obs.NodeName, obs.GPUCount)
 	}
@@ -1453,7 +1458,9 @@ func (api *instanceAPI) observeOrphan(ctx context.Context, tenantID string, depN
 			continue
 		}
 		for resourceName, raw := range container.Resources.Limits {
-			if !strings.HasPrefix(resourceName, "nvidia.com/gpu") && resourceName != "nvidia.com/gpu" {
+			// Volcano vGPU pods request GPU count through
+			// volcano.sh/vgpu-number rather than nvidia.com/gpu.
+			if !strings.HasPrefix(resourceName, "nvidia.com/gpu") && resourceName != "volcano.sh/vgpu-number" {
 				continue
 			}
 			count := orphanGPUCount(raw)
