@@ -32,8 +32,11 @@ type PrometheusInstanceObservabilityConfig struct {
 type PrometheusInstanceObservability struct {
 	prometheusURL string
 	kubeClient    *KubernetesRESTClient
-	now           func() time.Time
-	mu            sync.RWMutex
+	// podResolver 按渲染层 instance label 精确解析实例真实 pod 名（无前缀歧义）。
+	// nil 时 instancePodMatcher 降级回前缀正则 promQLPodMatcher。
+	podResolver *InstancePodNamesResolver
+	now         func() time.Time
+	mu          sync.RWMutex
 	// logStore 是可选的日志持久化存储实现（ports.LogStore），nil 时 fallback 到
 	// 现有 K8s pod log API（零回归）。由 runtime 在创建时通过 SetLogStore 注入，
 	// 通常根据环境变量 INSTANCE_OBSERVABILITY_LOG_STORE 选择具体实现（loki / nil）。
@@ -67,6 +70,21 @@ func NewPrometheusInstanceObservability(config PrometheusInstanceObservabilityCo
 	if err != nil {
 		return nil, err
 	}
+	// pod 精确解析器：与 kubeClient 同源 K8s 配置。构造失败（如 API host 未配置）时置 nil，
+	// instancePodMatcher 自动降级回前缀正则。
+	podResolver, resolverErr := NewInstancePodNamesResolver(KubernetesRESTClientConfig{
+		Host:            config.KubernetesAPIHost,
+		ServiceHost:     config.KubernetesServiceHost,
+		ServicePort:     config.KubernetesServicePort,
+		BearerToken:     config.KubernetesBearerToken,
+		BearerTokenFile: config.KubernetesServiceAccountTokenFile,
+		CAFile:          config.KubernetesServiceAccountCAFile,
+		HTTPClient:      config.HTTPClient,
+		Now:             config.Now,
+	})
+	if resolverErr != nil {
+		podResolver = nil
+	}
 	now := config.Now
 	if now == nil {
 		now = time.Now
@@ -74,6 +92,7 @@ func NewPrometheusInstanceObservability(config PrometheusInstanceObservabilityCo
 	return &PrometheusInstanceObservability{
 		prometheusURL: prometheusURL,
 		kubeClient:    client,
+		podResolver:   podResolver,
 		now:           now,
 	}, nil
 }
@@ -165,18 +184,27 @@ func (o *PrometheusInstanceObservability) GetMetrics(ctx context.Context, reques
 		return o.getMetricsForVM(ctx, namespace, pod, record), nil
 	}
 
-	// 实例名到真实 pod 名的匹配：container/batch 渲染为 Deployment/Job，
-	// K8s 生成的 pod 名带 ReplicaSet/Job hash 后缀（如 name-<hash>-<hash>），
-	// 用正则 pod=~"^name(-.*)?$" 同时匹配直接 Pod 与控制器生成的 pod。
-	// 用 sum() 聚合消除多 series 非确定性：正则可能匹配多个 pod 或同一 pod
-	// 多 container，sum() 将多 series 合并为单一标量，避免 Result[0] 取值不稳定。
-	podMatcher := promQLPodMatcher(pod)
+	// sandbox 分支：kind=sandbox 走 kata 兼容查询（kata_guest_meminfo guest 真实内存 +
+	// kata cAdvisor 选择器），kata 查询查空时自动 fallback 标准 container 选择器（runc sandbox）。
+	if request.Kind == ports.WorkloadKindSandbox {
+		return o.getMetricsForSandbox(ctx, namespace, o.instancePodMatcher(ctx, request.TenantID, pod), record), nil
+	}
+
+	// 实例名到真实 pod 名的匹配：优先按渲染层 selector label（ani.kubercloud.io/instance=<Name>）
+	// 经 K8s API 精确解析真实 pod 名列表（无前缀歧义，根治实例名前缀重叠互相污染），
+	// K8s API 不可用时降级回前缀正则 pod=~"^name(-.*)?$"（保持可用，容忍歧义）。
+	// 用 sum() 聚合消除多 series 非确定性：可能匹配多个 pod 或同一 pod 多 container，
+	// sum() 将多 series 合并为单一标量，避免 Result[0] 取值不稳定。
+	podMatcher := o.instancePodMatcher(ctx, request.TenantID, pod)
 
 	// metrics.k8s.io exporter：CPU、内存、网络
 	// 单个 exporter 不可用时不阻塞其他字段采集；已采集字段正常返回，不可采集字段为 nil。
 	// container!="",container!="POD" 过滤 pause container 与 pod 级聚合 series，
 	// 确保取到业务 container 的指标而非 pause 容器或 cAdvisor 聚合值。
-	if sample, err := o.queryPrometheusScalar(ctx, fmt.Sprintf(`sum(container_cpu_usage_seconds_total{namespace=%q,pod=~%q,container!="",container!="POD"})`, namespace, podMatcher)); err == nil {
+	// CPU 利用率：container_cpu_usage_seconds_total 是累计计数器（单位秒），直接取值会
+	// 返回开机以来的累计值（如 669），必须 rate([5m]) 换算成每秒核数后 ×100 得到百分比
+	// （100% = 1 核满载），与趋势图 100*avg(rate(...[5m])) 模板语义对齐。
+	if sample, err := o.queryPrometheusScalar(ctx, fmt.Sprintf(`100 * sum(rate(container_cpu_usage_seconds_total{namespace=%q,pod=~%q,container!="",container!="POD"}[5m]))`, namespace, podMatcher)); err == nil {
 		record.CPUUtilizationPct = &sample.Value
 		if !sample.Timestamp.IsZero() {
 			record.Timestamp = sample.Timestamp
@@ -316,6 +344,123 @@ func (o *PrometheusInstanceObservability) getMetricsForVM(ctx context.Context, n
 	return record
 }
 
+// getMetricsForSandbox 查询 sandbox 实例指标（Kind=sandbox）。
+// kata 场景（RuntimeClass=sandbox-kata，集群默认）：kata pod 的宿主机 cAdvisor series
+// 无 container 标签（现有 container!="" 过滤会把它们全部排除，导致指标恒 null），
+// 且业务容器真实内存在 Kata VM guest 内、宿主机不可见（cAdvisor 只能看到 pause ~5MB
+// 与 kata_overhead 0）。因此：
+//   - 内存改用 kata-monitor 暴露的 kata_guest_meminfo（guest 内 /proc/meminfo）：
+//     total = mem_total，used = mem_total - mem_available（与 VM 分支 domain-usable 语义对齐）。
+//     kata-monitor series 无 namespace/pod 标签，用 cri_namespace（=租户 namespace）与
+//     cri_name（=pod 名）过滤（2026-09-04 集群实测两者均有值）。
+//   - CPU/网络沿用 cAdvisor，选择器加 container=""（PromQL 中匹配"标签缺失"，恰好只命中
+//     kata series；runc 业务容器 container 非空、聚合 series container="POD"，均不命中），
+//     并用 id!~"/kata_overhead/.*" 排除 kata shim/qemu 开销 series（约占 CPU 9% 偏差）。
+//
+// runc 场景（config.RuntimeClass 配置换用 runc）：kata 查询查空，自动 fallback 到标准
+// container 选择器，行为与 container 分支一致。
+// GPU 字段保持 nil（sandbox 无 GPU 数据源）。
+// 单数据源不可用时对应字段为 nil，不伪造 0（延续现有降级语义）。
+// podMatcher 由调用方经 instancePodMatcher 提供（精确 pod 名列表或降级前缀正则），
+// 同时用于 pod=（kata cAdvisor series）与 cri_name=（kata_guest_meminfo series）过滤。
+func (o *PrometheusInstanceObservability) getMetricsForSandbox(ctx context.Context, namespace, podMatcher string, record ports.InstanceMetricsRecord) ports.InstanceMetricsRecord {
+
+	// CPU：kata 选择器优先，查空 fallback 标准 container 选择器。
+	// 与公共分支同语义：rate([5m]) ×100 得百分比（计数器原始值会是开机以来累计秒数）。
+	if sample, ok := o.queryScalarOrFallback(ctx,
+		fmt.Sprintf(`100 * sum(rate(container_cpu_usage_seconds_total{namespace=%q,pod=~%q,container="",id!~"/kata_overhead/.*"}[5m]))`, namespace, podMatcher),
+		fmt.Sprintf(`100 * sum(rate(container_cpu_usage_seconds_total{namespace=%q,pod=~%q,container!="",container!="POD"}[5m]))`, namespace, podMatcher),
+	); ok {
+		record.CPUUtilizationPct = &sample.Value
+		if !sample.Timestamp.IsZero() {
+			record.Timestamp = sample.Timestamp
+		}
+	}
+
+	// 内存：kata 路径（kata_guest_meminfo 命中）与 runc 路径（limit/working_set）互斥，
+	// 避免 kata 下 used 误取宿主机 working_set（pause ~5MB 假数据）。
+	memTotalBytes := 0.0
+	memInfoOK := true
+	if sample, err := o.queryPrometheusScalar(ctx, fmt.Sprintf(`sum(kata_guest_meminfo{item="mem_total",cri_namespace=%q,cri_name=~%q})`, namespace, podMatcher)); err == nil {
+		memTotalBytes = sample.Value
+		mb := sample.Value / 1024 / 1024
+		record.MemoryTotalMB = &mb
+		if !sample.Timestamp.IsZero() {
+			record.Timestamp = sample.Timestamp
+		}
+	} else {
+		memInfoOK = false
+	}
+	if memInfoOK && memTotalBytes > 0 {
+		if sample, err := o.queryPrometheusScalar(ctx, fmt.Sprintf(`sum(kata_guest_meminfo{item="mem_available",cri_namespace=%q,cri_name=~%q})`, namespace, podMatcher)); err == nil {
+			if used := memTotalBytes - sample.Value; used > 0 {
+				mb := used / 1024 / 1024
+				record.MemoryUsedMB = &mb
+			}
+			if !sample.Timestamp.IsZero() {
+				record.Timestamp = sample.Timestamp
+			}
+		}
+	}
+	if !memInfoOK {
+		// runc sandbox fallback：与 container 分支一致的 limit/working_set 查询
+		// （limit=0/未设时返回空，MemoryTotalMB 保持 nil，不伪造 0）
+		if sample, err := o.queryPrometheusScalar(ctx, fmt.Sprintf(`sum(container_spec_memory_limit_bytes{namespace=%q,pod=~%q,container!="",container!="POD"})`, namespace, podMatcher)); err == nil && sample.Value > 0 {
+			mb := sample.Value / 1024 / 1024
+			record.MemoryTotalMB = &mb
+			if !sample.Timestamp.IsZero() {
+				record.Timestamp = sample.Timestamp
+			}
+		}
+		if sample, err := o.queryPrometheusScalar(ctx, fmt.Sprintf(`sum(container_memory_working_set_bytes{namespace=%q,pod=~%q,container!="",container!="POD"})`, namespace, podMatcher)); err == nil {
+			mb := sample.Value / 1024 / 1024
+			record.MemoryUsedMB = &mb
+			if !sample.Timestamp.IsZero() {
+				record.Timestamp = sample.Timestamp
+			}
+		}
+	}
+
+	// 网络 RX/TX：kata 选择器（排除 overhead），查空 fallback 现有查询
+	if sample, ok := o.queryScalarOrFallback(ctx,
+		fmt.Sprintf(`sum(container_network_receive_bytes_total{namespace=%q,pod=~%q,container="",id!~"/kata_overhead/.*"})`, namespace, podMatcher),
+		fmt.Sprintf(`sum(container_network_receive_bytes_total{namespace=%q,pod=~%q})`, namespace, podMatcher),
+	); ok {
+		v := int64(sample.Value)
+		record.NetworkRXBytes = &v
+		if !sample.Timestamp.IsZero() {
+			record.Timestamp = sample.Timestamp
+		}
+	}
+	if sample, ok := o.queryScalarOrFallback(ctx,
+		fmt.Sprintf(`sum(container_network_transmit_bytes_total{namespace=%q,pod=~%q,container="",id!~"/kata_overhead/.*"})`, namespace, podMatcher),
+		fmt.Sprintf(`sum(container_network_transmit_bytes_total{namespace=%q,pod=~%q})`, namespace, podMatcher),
+	); ok {
+		v := int64(sample.Value)
+		record.NetworkTXBytes = &v
+		if !sample.Timestamp.IsZero() {
+			record.Timestamp = sample.Timestamp
+		}
+	}
+
+	return record
+}
+
+// queryScalarOrFallback 先执行 primary 查询，查空/出错时执行 fallback 查询。
+// 两者均无样本时返回 ok=false，调用方保持字段 nil。
+func (o *PrometheusInstanceObservability) queryScalarOrFallback(ctx context.Context, primary, fallback string) (prometheusScalarSample, bool) {
+	if sample, err := o.queryPrometheusScalar(ctx, primary); err == nil {
+		return sample, true
+	}
+	if fallback == "" {
+		return prometheusScalarSample{}, false
+	}
+	if sample, err := o.queryPrometheusScalar(ctx, fallback); err == nil {
+		return sample, true
+	}
+	return prometheusScalarSample{}, false
+}
+
 // promQLPodMatcher 构造 PromQL pod label 正则匹配器，兼容直接 Pod（无后缀）
 // 与 Deployment/Job 控制器生成的 pod（name-<hash>[-<hash>]）。
 // 返回带锚定的正则 ^name(-.*)?$，配合 pod=~ 使用。
@@ -338,6 +483,17 @@ func promQLPodMatcher(pod string) string {
 		`|`, `\|`,
 	).Replace(pod)
 	return "^" + escaped + "(-.*)?$"
+}
+
+// instancePodMatcher 返回实例 pod 的 PromQL 匹配器（GetMetrics 各分支共用）。
+// 优先经 K8s API 按渲染层 selector label（ani.kubercloud.io/instance=<Name>）精确解析
+// 真实 pod 名列表（无前缀歧义，根治实例名前缀重叠互相污染）；K8s API 不可用或 resolver
+// 未构造时降级回前缀正则 promQLPodMatcher（保持可用，容忍歧义）。
+func (o *PrometheusInstanceObservability) instancePodMatcher(ctx context.Context, tenantID, instanceName string) string {
+	if o.podResolver != nil {
+		return o.podResolver.Matcher(ctx, tenantID, instanceName)
+	}
+	return promQLPodMatcher(instanceName)
 }
 
 // ListSecurityEvents 返回 K8s Warning 事件作为安全事件列表。
