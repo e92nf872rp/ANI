@@ -154,6 +154,14 @@ go test ./pkg/adapters/runtime/ -count=1 -run "PostgresTenant(GetTenantAuth|Upda
 go test ./services/tenant-service/internal/service/ -count=1 -run "GetTenantAuth|UpdateTenantSso|UpdateTenantMfa|Auth_"
 ```
 
+
+## Open Questions
+
+- Cross-cutting 决策/偏差/开放问题见 `tenant-list-feature-batch.md` 与 `tenant-list-doc-alignment-batch.md`。
+- 本 Issue 未强制 live PG 集成；真库造数验证为可选 Follow-up。
+- Issue-010 SSO test、Gateway 登录拦截（FROZEN/DISABLED）、MFA 登录强制、禁用时资源释放均不在本 Issue 交付范围（除非 Follow-ups 另有说明）。
+- Issue-010 Secret 命名与 K8s 部署约定是否已定稿？未定稿前保持 501。
+
 ## 后续 Issue 依赖
 
 | Issue / 项 | 依赖本批次 |

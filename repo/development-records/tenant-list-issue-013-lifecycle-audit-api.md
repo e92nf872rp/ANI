@@ -147,8 +147,16 @@ python -c "import yaml; yaml.safe_load(open('api/openapi/services/v1.yaml',encod
 # review-it（二次）：clean — Tab 与 result 校验顺序已修；无剩余 accepted findings
 ```
 
+
+## Open Questions
+
+- Cross-cutting 决策/偏差/开放问题见 `tenant-list-feature-batch.md` 与 `tenant-list-doc-alignment-batch.md`。
+- 本 Issue 未强制 live PG 集成；真库造数验证为可选 Follow-up。
+- Issue-010 SSO test、Gateway 登录拦截（FROZEN/DISABLED）、MFA 登录强制、禁用时资源释放均不在本 Issue 交付范围（除非 Follow-ups 另有说明）。
+- 审计存在性检查是否值得轻量化为 EXISTS（见 Tradeoffs T1）？
+
 ## Follow-ups
 
-- [ ] Feature batch 四文件：README / CURRENT-SPRINT / ANI-06（合入前）
+- [x] Feature batch 四文件：README / CURRENT-SPRINT / ANI-06（note-it 已补）
 - [ ] 可选：live PG 集成（freeze/disable 后 lifecycle 有序 + audit 过滤翻页）
 - [ ] 可选：审计存在性检查轻量化（见 Open Questions）

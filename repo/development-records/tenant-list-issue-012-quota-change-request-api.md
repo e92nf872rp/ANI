@@ -152,7 +152,15 @@ python scripts/validate_component_imports.py --root .
 # make test 全量：曾因 Windows Sandbox symlink 无关失败；本批聚焦测试通过
 ```
 
+
+## Open Questions
+
+- Cross-cutting 决策/偏差/开放问题见 `tenant-list-feature-batch.md` 与 `tenant-list-doc-alignment-batch.md`。
+- 本 Issue 未强制 live PG 集成；真库造数验证为可选 Follow-up。
+- Issue-010 SSO test、Gateway 登录拦截（FROZEN/DISABLED）、MFA 登录强制、禁用时资源释放均不在本 Issue 交付范围（除非 Follow-ups 另有说明）。
+- 跨请求同维多条 pending 是否需运营侧告警/去重策略？
+
 ## Follow-ups
 
-- [ ] Feature batch 四文件：README / CURRENT-SPRINT / ANI-06（若本 PR 合入）
+- [x] Feature batch 四文件：README / CURRENT-SPRINT / ANI-06（note-it 已补）
 - [ ] 可选：live PG 集成；审批响应提示字段 / old_value nullable（见 Open Questions）
