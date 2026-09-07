@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
@@ -139,11 +140,12 @@ func TestTenantListRoutes_RegisterNineteen(t *testing.T) {
 
 func TestTenantListRoutes_GetTenantDetailForwards(t *testing.T) {
 	t.Setenv("ANI_AUTH_MODE", "dev")
-	now := timestamppb.Now()
+	// UTC 10:00 → Asia/Shanghai 18:00
+	ts := timestamppb.New(time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC))
 	client := &fakeTenantListGRPC{
 		detailResp: &tenantv1.TenantDetail{
 			Id: "t1", Name: "acme", DisplayName: "ACME", PlanId: "p1", Status: "active",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt: ts, UpdatedAt: ts, FrozenAt: ts,
 		},
 	}
 	h := newTenantListTestServer(client)
@@ -157,6 +159,14 @@ func TestTenantListRoutes_GetTenantDetailForwards(t *testing.T) {
 	}
 	if body["id"] != "t1" || body["name"] != "acme" {
 		t.Fatalf("body=%#v", body)
+	}
+	wantTS := "2026-08-10 18:00:00"
+	if body["created_at"] != wantTS || body["updated_at"] != wantTS || body["frozen_at"] != wantTS {
+		t.Fatalf("want Shanghai display %q, got created=%v updated=%v frozen=%v",
+			wantTS, body["created_at"], body["updated_at"], body["frozen_at"])
+	}
+	if body["disabled_at"] != nil {
+		t.Fatalf("disabled_at want null, got %v", body["disabled_at"])
 	}
 }
 

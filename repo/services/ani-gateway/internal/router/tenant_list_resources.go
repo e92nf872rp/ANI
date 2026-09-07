@@ -17,7 +17,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
@@ -329,7 +328,7 @@ func (api *tenantListAPI) testTenantSso(ctx context.Context, c *app.RequestConte
 	}
 	out := map[string]any{
 		"success":   res.GetSuccess(),
-		"tested_at": pbTimestampRFC3339(res.GetTestedAt()),
+		"tested_at": pbTimestampFormat(res.GetTestedAt()),
 	}
 	if res.GetDiscoveryResult() != nil {
 		out["discovery_result"] = res.GetDiscoveryResult().AsMap()
@@ -435,7 +434,7 @@ func (api *tenantListAPI) listQuotaChangeRequests(ctx context.Context, c *app.Re
 			"new_value":     it.GetNewValue(),
 			"status":        it.GetStatus(),
 			"requested_by":  it.GetRequestedBy(),
-			"created_at":    pbTimestampRFC3339(it.GetCreatedAt()),
+			"created_at":    pbTimestampFormat(it.GetCreatedAt()),
 		})
 	}
 	c.JSON(http.StatusOK, map[string]any{"items": items})
@@ -539,7 +538,7 @@ func (api *tenantListAPI) listTenantLifecycle(ctx context.Context, c *app.Reques
 		row := map[string]any{
 			"id":         it.GetId(),
 			"action":     it.GetAction(),
-			"created_at": pbTimestampRFC3339(it.GetCreatedAt()),
+			"created_at": pbTimestampFormat(it.GetCreatedAt()),
 		}
 		if it.GetReason() != nil {
 			row["reason"] = it.GetReason().GetValue()
@@ -588,7 +587,7 @@ func (api *tenantListAPI) listTenantAuditLogs(ctx context.Context, c *app.Reques
 			"action":     it.GetAction(),
 			"resource":   it.GetResource(),
 			"result":     it.GetResult(),
-			"created_at": pbTimestampRFC3339(it.GetCreatedAt()),
+			"created_at": pbTimestampFormat(it.GetCreatedAt()),
 		}
 		if it.GetUserId() != nil {
 			row["user_id"] = it.GetUserId().GetValue()
@@ -640,10 +639,6 @@ func (api *tenantListAPI) listTenantAdmins(ctx context.Context, c *app.RequestCo
 		if dn := it.GetDisplayName(); dn != nil {
 			displayName = dn.GetValue()
 		}
-		var lastLogin any
-		if s := pbTimestampRFC3339(it.GetLastLoginAt()); s != "" {
-			lastLogin = s
-		}
 		items = append(items, map[string]any{
 			"id":            it.GetId(),
 			"email":         it.GetEmail(),
@@ -654,7 +649,7 @@ func (api *tenantListAPI) listTenantAdmins(ctx context.Context, c *app.RequestCo
 			"is_inviting":   it.GetIsInviting(),
 			"is_expired":    it.GetIsExpired(),
 			"source":        it.GetSource(),
-			"last_login_at": lastLogin,
+			"last_login_at": tenantAdminTimestampOrNil(it.GetLastLoginAt()),
 			"tenant":        tenantRef,
 		})
 	}
@@ -676,7 +671,7 @@ func tenantListItemJSON(t *tenantv1.TenantListItem) map[string]any {
 		"plan_code":    t.GetPlanCode(),
 		"status":       t.GetStatus(),
 		"admin_count":  t.GetAdminCount(),
-		"created_at":   pbTimestampRFC3339(t.GetCreatedAt()),
+		"created_at":   pbTimestampFormat(t.GetCreatedAt()),
 	}
 }
 
@@ -693,24 +688,16 @@ func tenantDetailJSON(t *tenantv1.TenantDetail) map[string]any {
 		"status":       t.GetStatus(),
 		"user_count":   t.GetUserCount(),
 		"admin_count":  t.GetAdminCount(),
-		"created_at":   pbTimestampRFC3339(t.GetCreatedAt()),
-		"updated_at":   pbTimestampRFC3339(t.GetUpdatedAt()),
+		"created_at":   pbTimestampFormat(t.GetCreatedAt()),
+		"updated_at":   pbTimestampFormat(t.GetUpdatedAt()),
 	}
 	if t.GetContactEmail() != nil {
 		out["contact_email"] = t.GetContactEmail().GetValue()
 	} else {
 		out["contact_email"] = nil
 	}
-	if t.GetFrozenAt() != nil {
-		out["frozen_at"] = pbTimestampRFC3339(t.GetFrozenAt())
-	} else {
-		out["frozen_at"] = nil
-	}
-	if t.GetDisabledAt() != nil {
-		out["disabled_at"] = pbTimestampRFC3339(t.GetDisabledAt())
-	} else {
-		out["disabled_at"] = nil
-	}
+	out["frozen_at"] = tenantAdminTimestampOrNil(t.GetFrozenAt())
+	out["disabled_at"] = tenantAdminTimestampOrNil(t.GetDisabledAt())
 	auth := t.GetAuth()
 	out["auth"] = map[string]any{
 		"sso_enabled":  auth.GetSsoEnabled(),
@@ -726,7 +713,7 @@ func tenantAuthJSON(a *tenantv1.TenantAuthConfig) map[string]any {
 	out := map[string]any{
 		"sso_enabled":  a.GetSsoEnabled(),
 		"mfa_required": a.GetMfaRequired(),
-		"updated_at":   pbTimestampRFC3339(a.GetUpdatedAt()),
+		"updated_at":   pbTimestampFormat(a.GetUpdatedAt()),
 	}
 	if a.GetProvider() != nil {
 		out["provider"] = a.GetProvider().GetValue()
@@ -734,17 +721,6 @@ func tenantAuthJSON(a *tenantv1.TenantAuthConfig) map[string]any {
 		out["provider"] = nil
 	}
 	return out
-}
-
-func pbTimestampRFC3339(ts *timestamppb.Timestamp) string {
-	if ts == nil {
-		return ""
-	}
-	t := ts.AsTime()
-	if t.IsZero() {
-		return ""
-	}
-	return t.UTC().Format(time.RFC3339Nano)
 }
 
 // tenantListBusinessCodeByHTTP 对齐 SPEC §6.1 Error Taxonomy。

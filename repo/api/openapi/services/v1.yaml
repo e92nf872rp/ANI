@@ -115,6 +115,13 @@ components:
       properties:
         next_cursor: { type: string, nullable: true }
 
+    # BOSS 网关展示时间：Asia/Shanghai「YYYY-MM-DD HH:mm:ss」，空格分隔、无时区后缀；非 RFC3339 / 非 format:date-time。
+    ShanghaiDisplayTime:
+      type: string
+      pattern: '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
+      description: "展示时间 YYYY-MM-DD HH:mm:ss（Asia/Shanghai）；空格分隔、无时区标识；非 RFC3339"
+      example: "2026-09-07 11:26:37"
+
     AsyncTask:
       type: object
       required: [id, idempotency_key, task_type, status, created_at]
@@ -1096,8 +1103,8 @@ components:
         description:  { type: string, nullable: true, description: "套餐说明；网关 JSON 始终包含该字段（空则为 null）" }
         status:       { type: string, enum: [draft, active, disabled] }
         tenant_count: { type: integer, format: int64, description: "绑定租户数量（status≠disabled）" }
-        created_at:   { type: string, description: "展示时间 YYYY-MM-DD HH:mm:ss（Asia/Shanghai）；非 RFC3339" }
-        updated_at:   { type: string, description: "展示时间 YYYY-MM-DD HH:mm:ss（Asia/Shanghai）；非 RFC3339" }
+        created_at:   { $ref: '#/components/schemas/ShanghaiDisplayTime' }
+        updated_at:   { $ref: '#/components/schemas/ShanghaiDisplayTime' }
 
     TenantPlanListItem:
       type: object
@@ -1109,8 +1116,8 @@ components:
         description:  { type: string, nullable: true, description: "套餐说明；网关 JSON 始终包含该字段（空则为 null）" }
         status:       { type: string, enum: [draft, active, disabled] }
         tenant_count: { type: integer, format: int64 }
-        created_at:   { type: string, description: "展示时间 YYYY-MM-DD HH:mm:ss（Asia/Shanghai）；非 RFC3339" }
-        updated_at:   { type: string, description: "展示时间 YYYY-MM-DD HH:mm:ss（Asia/Shanghai）；非 RFC3339" }
+        created_at:   { $ref: '#/components/schemas/ShanghaiDisplayTime' }
+        updated_at:   { $ref: '#/components/schemas/ShanghaiDisplayTime' }
 
     TenantPlanListResponse:
       type: object
@@ -1238,7 +1245,7 @@ components:
         action:     { type: string }
         result:     { type: string, enum: [success, failure] }
         details:    { type: object, additionalProperties: true, nullable: true }
-        created_at: { type: string, description: "展示时间 YYYY-MM-DD HH:mm:ss（Asia/Shanghai）；非 RFC3339" }
+        created_at: { $ref: '#/components/schemas/ShanghaiDisplayTime' }
 
     PlanAuditLogListResponse:
       type: object
@@ -1295,7 +1302,7 @@ components:
         plan_code:    { type: string, description: "套餐代码（service 层 JOIN tenant_plans 装配）" }
         status:       { type: string, enum: [active, frozen, disabled] }
         admin_count:  { type: integer, format: int64, description: "tenant-admin 角色成员数（Core 连表统计透传）" }
-        created_at:   { type: string, format: date-time }
+        created_at:   { $ref: '#/components/schemas/ShanghaiDisplayTime' }
 
     TenantListResponse:
       type: object
@@ -1320,11 +1327,11 @@ components:
         contact_email: { type: string, format: email, nullable: true }
         user_count:    { type: integer, format: int64, description: "租户成员总数" }
         admin_count:   { type: integer, format: int64 }
-        frozen_at:     { type: string, format: date-time, nullable: true }
-        disabled_at:   { type: string, format: date-time, nullable: true }
+        frozen_at:     { allOf: [ { $ref: '#/components/schemas/ShanghaiDisplayTime' } ], nullable: true, description: "未冻结为 null" }
+        disabled_at:   { allOf: [ { $ref: '#/components/schemas/ShanghaiDisplayTime' } ], nullable: true, description: "未禁用为 null" }
         auth:          { $ref: '#/components/schemas/TenantAuthSummary', description: "tenant_auth 摘要：仅 sso_enabled / mfa_required" }
-        created_at:    { type: string, format: date-time }
-        updated_at:    { type: string, format: date-time }
+        created_at:    { $ref: '#/components/schemas/ShanghaiDisplayTime' }
+        updated_at:    { $ref: '#/components/schemas/ShanghaiDisplayTime' }
 
     UpdateTenantRequest:
       type: object
@@ -1351,7 +1358,7 @@ components:
         sso_enabled:  { type: boolean }
         provider:     { type: string, nullable: true, description: "SSO 提供商标识；未配置时为 null" }
         mfa_required: { type: boolean, description: "租户级 MFA 强制开关" }
-        updated_at:   { type: string, format: date-time }
+        updated_at:   { $ref: '#/components/schemas/ShanghaiDisplayTime' }
 
     UpdateTenantSsoRequest:
       type: object
@@ -1369,7 +1376,7 @@ components:
         success:           { type: boolean }
         discovery_result:  { type: object, additionalProperties: true, nullable: true, description: "OIDC discovery 文档摘要" }
         error:             { type: string, nullable: true }
-        tested_at:         { type: string, format: date-time }
+        tested_at:         { $ref: '#/components/schemas/ShanghaiDisplayTime' }
 
     UpdateTenantMfaRequest:
       type: object
@@ -1423,7 +1430,7 @@ components:
         new_value:     { type: integer, format: int64, minimum: 0 }
         status:        { type: string, enum: [pending, approved, rejected] }
         requested_by:  { type: string, format: uuid, description: "申请人（平台用户）" }
-        created_at:    { type: string, format: date-time }
+        created_at:    { $ref: '#/components/schemas/ShanghaiDisplayTime' }
 
     QuotaChangeRequestListResponse:
       type: object
@@ -1448,7 +1455,7 @@ components:
         reason:     { type: string, nullable: true }
         user_id:    { type: string, format: uuid, nullable: true }
         request_id: { type: string, nullable: true }
-        created_at: { type: string, format: date-time }
+        created_at: { $ref: '#/components/schemas/ShanghaiDisplayTime' }
 
     TenantAuditLogEntry:
       type: object
@@ -1460,7 +1467,7 @@ components:
         result:     { type: string, enum: [success, failure] }
         user_id:    { type: string, format: uuid, nullable: true }
         details:    { type: object, additionalProperties: true, nullable: true }
-        created_at: { type: string, format: date-time }
+        created_at: { $ref: '#/components/schemas/ShanghaiDisplayTime' }
 
     # ===== Platform Admins (平台运营账号管理) =====
 
@@ -1582,7 +1589,7 @@ components:
         is_inviting:  { type: boolean, description: "true = 该租户下存在 status='inviting' 的邀请；仅作标记，不影响 role/status" }
         is_expired:   { type: boolean, description: "true = 该租户下存在 status='expired' 的邀请；仅作标记，不影响 role/status" }
         source:       { type: string, enum: [local, third_party] }
-        last_login_at: { type: string, format: date-time, nullable: true }
+        last_login_at: { allOf: [ { $ref: '#/components/schemas/ShanghaiDisplayTime' } ], nullable: true, description: "无登录为 null" }
         tenant:       { $ref: '#/components/schemas/TenantRef' }
 
     AdminDetail:
@@ -1601,9 +1608,9 @@ components:
         is_inviting:  { type: boolean }
         is_expired:   { type: boolean }
         source:       { type: string, enum: [local, third_party] }
-        last_login_at: { type: string, format: date-time, nullable: true }
-        created_at:   { type: string, format: date-time, nullable: true, description: "详情响应返回；跨租户列表不返回" }
-        updated_at:   { type: string, format: date-time, nullable: true, description: "详情响应返回；跨租户列表不返回" }
+        last_login_at: { allOf: [ { $ref: '#/components/schemas/ShanghaiDisplayTime' } ], nullable: true, description: "无登录为 null" }
+        created_at:   { allOf: [ { $ref: '#/components/schemas/ShanghaiDisplayTime' } ], nullable: true, description: "详情响应返回；跨租户列表不返回" }
+        updated_at:   { allOf: [ { $ref: '#/components/schemas/ShanghaiDisplayTime' } ], nullable: true, description: "详情响应返回；跨租户列表不返回" }
         tenant:       { $ref: '#/components/schemas/TenantRef' }
 
     AdminListResponse:
