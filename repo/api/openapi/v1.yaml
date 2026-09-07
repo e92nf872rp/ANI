@@ -8084,7 +8084,8 @@ paths:
         按组件对象名（静态注册表）返回资源指标快照：CPU 核数（5m rate）、
         内存用量/上限（MiB）、网络收发速率（B/s），Prometheus cAdvisor 指标按
         namespace + pod 前缀正则聚合。单源失败不阻塞 200：缺失字段为 null。
-        组件级 P99/错误率/QPS 等业务指标依赖业务埋点，当前未建设，不在本接口返回。
+        组件级 P99/错误率/QPS 等业务指标不在本接口返回（产品决策 2026-09-07：
+        组件状态仅提供资源口径与日志下钻，业务指标列不做）。
       tags: [Observability]
       x-ani-rbac-scope: "scope:observability:read"
       x-ani-authz:

@@ -5,9 +5,6 @@ import (
 )
 
 // componentRegistration 组件状态静态注册表条目。
-// 基线为 2026-09-04 集群实测（kjs-study/组件状态相关文档/组件状态实测清单.md
-// 与当日 `kubectl get deploy,sts,ds -A` 地面真值核对）；覆盖不到的组件
-// （如 kms-sm4-live-fixture、model-import-worker）宁缺勿错，不纳入。
 type componentRegistration struct {
 	// Name 是 K8s 工作负载对象名（deployment/sts/ds 的 metadata.name）。
 	Name string
