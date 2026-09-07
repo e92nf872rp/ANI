@@ -632,6 +632,24 @@ components:
           pattern: '^/'
           description: artifact 在容器中的绝对挂载路径。
 
+    PlatformWorkloadModelMaterialization:
+      type: object
+      description: >-
+        Core 内部的 provider-neutral 模型物化描述。Core 只接收租户/版本、
+        canonical object reference、期望大小和 SHA-256，以及受控 fetcher 配置；
+        不得传递 signed URL、AK 或其他凭据。
+      required: [tenant_id, model_version_id, object_ref, size_bytes, checksum_sha256, model_service_grpc_addr, fetcher_image_ref, target_path]
+      additionalProperties: false
+      properties:
+        tenant_id: { type: string, format: uuid, description: "模型版本所属租户；Core 用于租户边界校验。" }
+        model_version_id: { type: string, format: uuid, description: "不可变模型版本标识。" }
+        object_ref: { type: string, minLength: 1, pattern: '^object://models/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/[^/?#]+/[^/?#]+/[^/?#]+$', description: "model-service 返回的 canonical object reference；不得是 signed URL。" }
+        size_bytes: { type: integer, format: int64, minimum: 1, description: "物化文件的期望字节数。" }
+        checksum_sha256: { type: string, pattern: '^sha256:[a-f0-9]{64}$', description: "物化文件的期望 SHA-256 摘要。" }
+        model_service_grpc_addr: { type: string, minLength: 1, description: "受控 model-service gRPC 地址；不含凭据。" }
+        fetcher_image_ref: { type: string, minLength: 1, pattern: '^.+@sha256:[a-f0-9]{64}$', description: "digest-pinned model-fetcher 镜像引用。" }
+        target_path: { type: string, minLength: 1, pattern: '^/(?!.*\\.\\.).+$', description: "校验后写入共享模型卷的绝对目标路径；不得包含路径穿越片段。" }
+
     PlatformWorkloadSecretBinding:
       type: object
       description: 由 Core 解析并以文件形式挂载的租户内 Secret 引用。
@@ -745,6 +763,11 @@ components:
           type: array
           description: 需要由 Core 解析并挂载的租户内 artifact 列表。
           items: { $ref: '#/components/schemas/PlatformWorkloadArtifact' }
+        model_materialization:
+          $ref: '#/components/schemas/PlatformWorkloadModelMaterialization'
+          description: >-
+            对象模型的受限物化元数据。存在 object-backed 模型时必须提供；
+            不得与 artifacts 中的 object:// 引用重复传递。
         secret_bindings:
           type: array
           description: 需要由 Core 解析并挂载的租户内 Secret 引用列表。
