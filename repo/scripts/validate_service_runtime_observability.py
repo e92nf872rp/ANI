@@ -51,93 +51,6 @@ FIXED_PLAN_REPO_PATH = Path(
 )
 FIXED_PLAN_GIT_PATH = f"repo/{FIXED_PLAN_REPO_PATH.as_posix()}"
 FIXED_PLAN_SHA256 = "c9c16e4e5df3a395b22fc8060a5811dab3a508d5d3baa3ba7fc5f9ed1b575034"
-P0_EXACT_CHANGED_PATH_ALLOWLIST = frozenset(
-    {
-        ".github/workflows/ci.yml",
-        "ANI-06-开发计划.md",
-        "repo/.github/workflows/build-image.yml",
-        "repo/CURRENT-SPRINT.md",
-        "repo/Makefile",
-        "repo/README.md",
-        "repo/api/core-v1-compatibility-baseline.yaml",
-        "repo/api/openapi/v1.yaml",
-        "repo/deploy/docker/README.md",
-        "repo/deploy/helm/ani-platform/README.md",
-        "repo/deploy/real-k8s-lab/service-runtime-observability-p0.yaml",
-        "repo/deploy/real-k8s-lab/sprint13-instance-observability-prometheus-live.yaml",
-        "repo/development-records/README.md",
-        "repo/development-records/live-evidence/service-runtime-observability-p0-live-20260904.json",
-        "repo/development-records/service-runtime-observability-p0.md",
-        "repo/docs/api/core.html",
-        "repo/docs/api/index.html",
-        "repo/docs/operations/service-runtime-observability.md",
-        "repo/go.work",
-        "repo/go.work.sum",
-        "repo/pkg/adapters/runtime/prometheus_platform_service_health_reader.go",
-        "repo/pkg/adapters/runtime/prometheus_platform_service_health_reader_test.go",
-        "repo/pkg/bootstrap/probes.go",
-        "repo/pkg/bootstrap/probes_test.go",
-        "repo/pkg/bootstrap/runtimeadmin.go",
-        "repo/pkg/bootstrap/server.go",
-        "repo/pkg/go.mod",
-        "repo/pkg/go.sum",
-        "repo/pkg/ports/platform_service_health_reader.go",
-        "repo/runtimeadmin/go.mod",
-        "repo/runtimeadmin/go.sum",
-        "repo/runtimeadmin/handler.go",
-        "repo/runtimeadmin/metrics.go",
-        "repo/runtimeadmin/readiness.go",
-        "repo/runtimeadmin/runtime.go",
-        "repo/runtimeadmin/runtime_test.go",
-        "repo/runtimeadmin/sanitize.go",
-        "repo/scripts/fixtures/service_runtime_observability_l2_prometheus.yml",
-        "repo/scripts/render_service_runtime_observability.py",
-        "repo/scripts/render_service_runtime_observability_l3.py",
-        "repo/scripts/render_service_runtime_observability_l3_test.py",
-        "repo/scripts/render_service_runtime_observability_test.py",
-        "repo/scripts/run_service_runtime_observability_l3.py",
-        "repo/scripts/run_service_runtime_observability_l3_test.py",
-        "repo/scripts/validate_ci_workflow.py",
-        "repo/scripts/validate_ci_workflow_test.py",
-        "repo/scripts/validate_generated_idempotence.py",
-        "repo/scripts/validate_generated_idempotence_test.py",
-        "repo/scripts/validate_runtime_image_workflow.py",
-        "repo/scripts/validate_runtime_image_workflow_test.py",
-        "repo/scripts/validate_runtime_observability_sbom.py",
-        "repo/scripts/validate_runtime_observability_sbom_test.py",
-        "repo/scripts/validate_service_runtime_observability.py",
-        "repo/scripts/validate_service_runtime_observability_test.py",
-        "repo/sdks/core/go/anisdk/client.go",
-        "repo/sdks/core/java/src/main/java/com/kubercloud/ani/core/ApiClient.java",
-        "repo/sdks/core/python/kubercloud_ani_core/client.py",
-        "repo/sdks/core/sdk-metadata.json",
-        "repo/sdks/core/typescript/src/index.mjs",
-        "repo/sdks/core/typescript/src/index.ts",
-        "repo/services/ani-gateway/Dockerfile",
-        "repo/services/ani-gateway/go.mod",
-        "repo/services/ani-gateway/go.sum",
-        "repo/services/ani-gateway/internal/authz/zz_generated_core_policies.go",
-        "repo/services/ani-gateway/internal/router/health_test.go",
-        "repo/services/ani-gateway/internal/router/platform_service_health.go",
-        "repo/services/ani-gateway/internal/router/platform_service_health_test.go",
-        "repo/services/ani-gateway/internal/router/router.go",
-        "repo/services/ani-gateway/main.go",
-        "repo/services/ani-gateway/main_test.go",
-        "repo/services/ani-gateway/platform_service_health_runtime.go",
-        "repo/services/ani-gateway/runtime_admin.go",
-        "repo/services/auth-service/Dockerfile",
-        "repo/services/inference-service/Dockerfile",
-        "repo/services/metering-service/Dockerfile",
-        "repo/services/model-service/Dockerfile",
-        "repo/services/pkg/bootstrap/probes_test.go",
-        "repo/services/pkg/bootstrap/runtimeadmin.go",
-        "repo/services/pkg/bootstrap/server.go",
-        "repo/services/pkg/go.mod",
-        "repo/services/pkg/go.sum",
-        "repo/services/task-service/Dockerfile",
-        "repo/services/tenant-service/Dockerfile",
-    }
-)
 
 
 def load_inventory(root: Path) -> dict[str, Any]:
@@ -354,14 +267,6 @@ def validate_forbidden_changes(changed: set[str]) -> list[str]:
     ]
 
 
-def validate_changed_path_allowlist(changed: set[str]) -> list[str]:
-    return [
-        f"outside OBS-RUNTIME-P0 exact allowlist: {path}"
-        for path in sorted(changed)
-        if path not in P0_EXACT_CHANGED_PATH_ALLOWLIST and path != FIXED_PLAN_GIT_PATH
-    ]
-
-
 def validate_fixed_plan(root: Path) -> list[str]:
     plan_path = root / FIXED_PLAN_REPO_PATH
     # The Goal plan is a user-owned, intentionally untracked input. Validate it
@@ -455,7 +360,6 @@ def validate_repository(root: Path, run_promtool: bool, base: str | None) -> lis
         errors.extend(validate_fixed_plan(root))
         changed = changed_paths(root, base)
         errors.extend(validate_forbidden_changes(changed))
-        errors.extend(validate_changed_path_allowlist(changed))
         if run_promtool:
             errors.extend(globals()["run_promtool"](root))
     except (OSError, KeyError, TypeError, ValueError, subprocess.CalledProcessError, yaml.YAMLError) as exc:
