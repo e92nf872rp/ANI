@@ -270,6 +270,7 @@ func isPublicPath(path string) bool {
 // - 平台/管理路由前缀 /auth/platform/*、/platform/*、/admin/* 仅 scope=platform 可访问
 // - sandbox token 仅可访问 /api/v1/instances/{id}/sandbox/* 子资源
 // - /api/v1/svc/* Services 层路由允许 platform 和 tenant scope（角色级 RBAC 由 rbac.go 校验）
+// - /api/v1/gpu-specs*、/api/v1/gpu-inventory* 集群级资源目录允许 platform 和 tenant scope（角色级 RBAC 由 rbac.go 校验）
 // - 其他路由仅 scope=tenant 可访问（API key 默认 tenant scope）
 func scopeAllowedForPath(path, scope string) bool {
 	if scope == sandboxtoken.ScopeSandbox {
@@ -287,6 +288,13 @@ func scopeAllowedForPath(path, scope string) bool {
 	// Services 层路由：platform（BOSS 管理端）和 tenant 均可访问，
 	// 具体角色准入（platform-admin/ops/readonly vs tenant-admin）由 rbac.go CheckPermission 校验。
 	if strings.HasPrefix(path, "/api/v1/svc/") {
+		return scope == "platform" || scope == "tenant"
+	}
+	// 集群级 GPU 资源目录（规格目录与设备清单）：GPU spec 是集群级 CRD、
+	// 设备清单是集群级视图，platform（BOSS 管理端）和 tenant 均可访问，
+	// 写操作（POST/DELETE /gpu-specs）角色准入由 rbac.go CheckPermission 校验。
+	if strings.HasPrefix(path, "/api/v1/gpu-specs") ||
+		strings.HasPrefix(path, "/api/v1/gpu-inventory") {
 		return scope == "platform" || scope == "tenant"
 	}
 	return scope == "tenant"

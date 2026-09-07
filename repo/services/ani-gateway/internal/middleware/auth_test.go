@@ -66,6 +66,16 @@ func TestPlatformLogin_TenantIsolation(t *testing.T) {
 		{"sandbox token on svc endpoint", "/api/v1/svc/tenant-plans", "sandbox", false},
 		{"platform token on admin endpoint", "/api/v1/admin/tenants/123", "platform", true},
 		{"tenant token on admin endpoint", "/api/v1/admin/tenants/123", "tenant", false},
+		// 集群级 GPU 资源目录：platform（BOSS）和 tenant 均允许（角色级 RBAC 由 rbac.go 校验）
+		{"platform token on gpu-specs", "/api/v1/gpu-specs", "platform", true},
+		{"platform token on gpu-specs detail", "/api/v1/gpu-specs/rtx4090-quarter", "platform", true},
+		{"platform token on gpu-specs availability", "/api/v1/gpu-specs/availability", "platform", true},
+		{"platform token on gpu-specs create", "/api/v1/gpu-specs", "platform", true},
+		{"tenant token on gpu-specs", "/api/v1/gpu-specs", "tenant", true},
+		{"platform token on gpu-inventory", "/api/v1/gpu-inventory", "platform", true},
+		{"platform token on gpu-inventory occupancy", "/api/v1/gpu-inventory/occupancy", "platform", true},
+		{"tenant token on gpu-inventory", "/api/v1/gpu-inventory", "tenant", true},
+		{"sandbox token on gpu-specs", "/api/v1/gpu-specs", "sandbox", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
