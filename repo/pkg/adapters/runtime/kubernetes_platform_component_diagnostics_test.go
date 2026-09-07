@@ -16,12 +16,12 @@ import (
 )
 
 // componentDiagnosticsPromFixture 是单条 Prometheus vector 样本的固定时间戳
-//（2026-09-04T12:00:00Z 附近），供 mock handler 与断言共用。
+// （2026-09-04T12:00:00Z 附近），供 mock handler 与断言共用。
 var componentDiagnosticsPromFixtureTime = time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
 
 // newComponentDiagnosticsPromServer 构造 mock Prometheus /api/v1/query：
 // 按 PromQL 中的指标名分发固定样本值；missing 中的指标返回空 result
-//（对应「单源无样本 → 字段级降级为 nil」）；promQueries 记录收到的 PromQL
+// （对应「单源无样本 → 字段级降级为 nil」）；promQueries 记录收到的 PromQL
 // 以便断言 namespace/pod 正则构造。
 func newComponentDiagnosticsPromServer(t *testing.T, values map[string]float64, missing map[string]bool, promQueries *[]string) *httptest.Server {
 	t.Helper()

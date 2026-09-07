@@ -262,8 +262,8 @@ func TestComponentStatusFromObjectDaemonSet(t *testing.T) {
 func TestKubernetesComponentStatusScrapeFusion(t *testing.T) {
 	rt := &componentStatusRoundTripper{objects: componentStatusAllRunningObjects()}
 	service := newComponentStatusTestService(t, rt, &componentStatusFakeHealth{statuses: map[string]string{
-		"ani-gateway":   ports.PlatformServiceScrapeReachable,
-		"auth-service":  ports.PlatformServiceScrapeUnreachable,
+		"ani-gateway":      ports.PlatformServiceScrapeReachable,
+		"auth-service":     ports.PlatformServiceScrapeUnreachable,
 		"metering-service": ports.PlatformServiceScrapeUnknown,
 	}})
 

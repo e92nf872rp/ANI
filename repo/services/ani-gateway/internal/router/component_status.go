@@ -20,9 +20,9 @@ type componentStatusAPI struct {
 }
 
 type componentStatusResponse struct {
-	ObservedAt string                            `json:"observed_at"`
-	Groups     []componentGroupResponse          `json:"groups"`
-	DevProfile coreDevProfileResponse            `json:"dev_profile"`
+	ObservedAt string                   `json:"observed_at"`
+	Groups     []componentGroupResponse `json:"groups"`
+	DevProfile coreDevProfileResponse   `json:"dev_profile"`
 }
 
 type componentGroupResponse struct {

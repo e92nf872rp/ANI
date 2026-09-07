@@ -50,7 +50,7 @@ func setupComponentDiagnosticsTestServer(metrics ports.PlatformComponentMetricsR
 }
 
 // startComponentDiagnosticsRealServer 在空闲端口启动真实 hertz server
-//（SSE Hijack 仅在真实网络下生效，与 instance_log_stream_test 同模式）。
+// （SSE Hijack 仅在真实网络下生效，与 instance_log_stream_test 同模式）。
 func startComponentDiagnosticsRealServer(t *testing.T, metrics ports.PlatformComponentMetricsReader, logs ports.PlatformComponentLogReader) string {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")

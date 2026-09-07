@@ -25,9 +25,9 @@ type PlatformComponentRef struct {
 // PlatformComponentMetrics 单个组件资源指标快照。
 // 各指标字段单源失败时为 nil（缺失不等于 0，禁止用 0 代替缺失）。
 type PlatformComponentMetrics struct {
-	Component  PlatformComponentRef
-	Timestamp  time.Time
-	CPUCores   *float64
+	Component    PlatformComponentRef
+	Timestamp    time.Time
+	CPUCores     *float64
 	MemoryUsedMB *float64
 	// MemoryTotalMB 取容器内存 limit 聚合；未设 limits 时为 nil。
 	MemoryTotalMB        *float64

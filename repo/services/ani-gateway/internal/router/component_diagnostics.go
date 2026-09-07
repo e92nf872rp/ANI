@@ -31,13 +31,13 @@ type componentDiagnosticsAPI struct {
 }
 
 type componentMetricsResponse struct {
-	Component            componentRefResponse  `json:"component"`
-	Timestamp            string                `json:"timestamp"`
-	CPUCores             *float64              `json:"cpu_cores"`
-	MemoryUsedMB         *float64              `json:"memory_used_mb"`
-	MemoryTotalMB        *float64              `json:"memory_total_mb"`
-	NetworkRxBytesPerSec *float64              `json:"network_rx_bytes_per_sec"`
-	NetworkTxBytesPerSec *float64              `json:"network_tx_bytes_per_sec"`
+	Component            componentRefResponse   `json:"component"`
+	Timestamp            string                 `json:"timestamp"`
+	CPUCores             *float64               `json:"cpu_cores"`
+	MemoryUsedMB         *float64               `json:"memory_used_mb"`
+	MemoryTotalMB        *float64               `json:"memory_total_mb"`
+	NetworkRxBytesPerSec *float64               `json:"network_rx_bytes_per_sec"`
+	NetworkTxBytesPerSec *float64               `json:"network_tx_bytes_per_sec"`
 	DevProfile           coreDevProfileResponse `json:"dev_profile"`
 }
 
@@ -290,8 +290,8 @@ func componentLogListResponseFromResult(result ports.PlatformComponentLogListRes
 		items = append(items, item)
 	}
 	response := componentLogListResponse{
-		Items:      items,
-		Total:      result.Total,
+		Items: items,
+		Total: result.Total,
 		DevProfile: coreDevProfileResponse{
 			Mode:         result.DevProfile.Mode,
 			Provider:     result.DevProfile.Provider,
