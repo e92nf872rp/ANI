@@ -151,7 +151,7 @@ help:
 	@echo "    make validate-gateway-authz 校验 Gateway authz 注册表生成链与 route coverage"
 	@echo "    make validate-auth-dex-smoke 校验 M2.2 Docker Dex OIDC auth-code flow（需 Docker）"
 	@echo "    make validate-openapi-spec 校验 Core/Services OpenAPI 结构"
-	@echo "    make validate-service-runtime-observability 校验七服务运行时观测契约与 Prometheus 配置（路径白名单需 OBS_RUNTIME_STRICT_PATH_ALLOWLIST=1）"
+	@echo "    make validate-service-runtime-observability 校验七服务运行时观测契约与 Prometheus 配置"
 	@echo "    make validate-services 校验 Services boundary/spec/route/SDK/model/RAG/Console 真实门禁"
 	@echo "    make validate-architecture 校验 ports/adapters 组件边界"
 	@echo "    make validate-platform-workload-k8s-live-gate 校验 CPU PlatformWorkload Kubernetes live gate"

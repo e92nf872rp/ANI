@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""Validate OBS-RUNTIME-P0 contracts and run promtool from the pinned image.
-
-Path-scope freeze (exact changed-path allowlist + excluded-service prefixes) was for
-the OBS-RUNTIME-P0 feature PR. After that batch closed, default CI only validates
-contracts. Set OBS_RUNTIME_STRICT_PATH_ALLOWLIST=1 to re-enable the P0 path freeze
-for observability follow-up work.
-"""
+"""Validate OBS-RUNTIME-P0 contracts and run promtool from the pinned image."""
 
 from __future__ import annotations
 
@@ -265,15 +259,6 @@ def validate_sources(root: Path) -> list[str]:
     return errors
 
 
-def strict_path_allowlist_enabled() -> bool:
-    return os.environ.get("OBS_RUNTIME_STRICT_PATH_ALLOWLIST", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-
-
 def validate_forbidden_changes(changed: set[str]) -> list[str]:
     return [
         f"excluded service changed: {path}"
@@ -373,10 +358,8 @@ def validate_repository(root: Path, run_promtool: bool, base: str | None) -> lis
         errors.extend(validate_prometheus_manifest(root))
         errors.extend(validate_sources(root))
         errors.extend(validate_fixed_plan(root))
-        if strict_path_allowlist_enabled():
-            changed = changed_paths(root, base)
-            errors.extend(validate_forbidden_changes(changed))
-            errors.extend(validate_changed_path_allowlist(changed))
+        changed = changed_paths(root, base)
+        errors.extend(validate_forbidden_changes(changed))
         if run_promtool:
             errors.extend(globals()["run_promtool"](root))
     except (OSError, KeyError, TypeError, ValueError, subprocess.CalledProcessError, yaml.YAMLError) as exc:

@@ -1,5 +1,4 @@
 import copy
-import os
 import subprocess
 import sys
 import tempfile
@@ -60,77 +59,6 @@ class ValidateServiceRuntimeObservabilityTest(unittest.TestCase):
         }
         errors = validator.validate_forbidden_changes(changed)
         self.assertEqual(3, len(errors))
-
-    def test_exact_p0_allowlist_accepts_known_paths_and_fixed_input(self) -> None:
-        changed = {
-            ".github/workflows/ci.yml",
-            "ANI-06-开发计划.md",
-            "repo/api/core-v1-compatibility-baseline.yaml",
-            "repo/deploy/docker/README.md",
-            "repo/deploy/helm/ani-platform/README.md",
-            "repo/development-records/README.md",
-            "repo/development-records/live-evidence/service-runtime-observability-p0-live-20260904.json",
-            "repo/development-records/service-runtime-observability-p0.md",
-            "repo/docs/operations/service-runtime-observability.md",
-            "repo/runtimeadmin/runtime.go",
-            validator.FIXED_PLAN_GIT_PATH,
-        }
-        self.assertEqual([], validator.validate_changed_path_allowlist(changed))
-
-    def test_exact_p0_allowlist_rejects_other_development_record(self) -> None:
-        errors = validator.validate_changed_path_allowlist(
-            {"repo/development-records/unrelated-batch.md"}
-        )
-        self.assertEqual(
-            [
-                "outside OBS-RUNTIME-P0 exact allowlist: "
-                "repo/development-records/unrelated-batch.md"
-            ],
-            errors,
-        )
-
-    def test_exact_p0_allowlist_rejects_deprecated_frontend_changes(self) -> None:
-        frontend_paths = {
-            "repo/frontends/boss/src/features/platform-service-health/PlatformServiceHealthCard.tsx",
-            "repo/frontends/console/src/api/core-schema.d.ts",
-        }
-        errors = validator.validate_changed_path_allowlist(frontend_paths)
-        self.assertEqual(
-            [
-                "outside OBS-RUNTIME-P0 exact allowlist: "
-                "repo/frontends/boss/src/features/platform-service-health/PlatformServiceHealthCard.tsx",
-                "outside OBS-RUNTIME-P0 exact allowlist: repo/frontends/console/src/api/core-schema.d.ts",
-            ],
-            errors,
-        )
-
-    def test_exact_p0_allowlist_rejects_unknown_service_change(self) -> None:
-        errors = validator.validate_changed_path_allowlist(
-            {"repo/services/auth-service/main.go"}
-        )
-        self.assertEqual(
-            ["outside OBS-RUNTIME-P0 exact allowlist: repo/services/auth-service/main.go"],
-            errors,
-        )
-
-    def test_path_allowlist_is_opt_in_after_obs_p0(self) -> None:
-        unrelated = {"repo/services/tenant-service/internal/service/tenant_service.go"}
-        with mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("OBS_RUNTIME_STRICT_PATH_ALLOWLIST", None)
-            with mock.patch.object(validator, "changed_paths", return_value=unrelated):
-                errors = validator.validate_repository(ROOT, run_promtool=False, base="HEAD")
-        self.assertEqual([], errors)
-
-        with mock.patch.dict(os.environ, {"OBS_RUNTIME_STRICT_PATH_ALLOWLIST": "1"}):
-            with mock.patch.object(validator, "changed_paths", return_value=unrelated):
-                errors = validator.validate_repository(ROOT, run_promtool=False, base="HEAD")
-        self.assertEqual(
-            [
-                "outside OBS-RUNTIME-P0 exact allowlist: "
-                "repo/services/tenant-service/internal/service/tenant_service.go"
-            ],
-            errors,
-        )
 
     def test_first_party_session_api_license_exception_is_exact_and_version_bound(self) -> None:
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
