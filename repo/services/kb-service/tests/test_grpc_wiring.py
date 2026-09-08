@@ -234,6 +234,25 @@ def test_b2_rpcs_wired_not_unimplemented(stub):
         assert exc.value.code() == grpc.StatusCode.FAILED_PRECONDITION
 
 
+def test_b2_rpcs_wired_not_unimplemented(stub):
+    """ListKBCitations/ListKBSessions are implemented in B2 (issue-045).
+
+    Constructed without a pool they must return FAILED_PRECONDITION — never
+    UNIMPLEMENTED (that would mean the P1 stub still shadows the servicer).
+    """
+    for rpc, req in [
+        ("ListKBCitations", kb_pb.ListKBCitationsRequest(tenant_id=TENANT_ID, kb_id=KB_ID)),
+        ("ListKBSessions", kb_pb.ListKBSessionsRequest(tenant_id=TENANT_ID, kb_id=KB_ID)),
+        ("ListDocumentChunks", kb_pb.ListDocumentChunksRequest(tenant_id=TENANT_ID, kb_id=KB_ID, doc_id=str(uuid.uuid4()))),
+        ("GetSessionMessages", kb_pb.GetSessionMessagesRequest(tenant_id=TENANT_ID, kb_id=KB_ID, session_id=str(uuid.uuid4()))),
+        ("DeleteSession", kb_pb.DeleteSessionRequest(tenant_id=TENANT_ID, kb_id=KB_ID, session_id=str(uuid.uuid4()))),
+    ]:
+        with pytest.raises(grpc.RpcError) as exc:
+            getattr(stub, rpc)(req)
+        assert exc.value.code() != grpc.StatusCode.UNIMPLEMENTED
+        assert exc.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+
+
 # ── CreateKB validation ───────────────────────────────────────────────────────
 
 
