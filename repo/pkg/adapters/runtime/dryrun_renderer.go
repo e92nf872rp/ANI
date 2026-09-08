@@ -936,11 +936,22 @@ func isPlaceholderNetworkAttachment(attachment ports.WorkloadNetworkAttachment) 
 }
 
 // vmNetworksAndInterfaces renders KubeVirt networks/interfaces as a matched pair.
-// Planning/Gateway defaults use plane-like NetworkIDs as placeholders; those fall
-// back to the pod network until a real Multus NAD is supplied.
+// ANI VPC/Subnet IDs are product resources, not Multus NAD names. An explicitly
+// resolved Kube-OVN subnet therefore uses the pod network with bridge binding;
+// Multus is reserved for non-primary, non-placeholder internal attachments.
 func vmNetworksAndInterfaces(spec ports.WorkloadSpec) (networks []any, interfaces []any) {
+	if strings.TrimSpace(spec.Network.SubnetID) != "" {
+		networks = append(networks, map[string]any{
+			"name": "default",
+			"pod":  map[string]any{},
+		})
+		interfaces = append(interfaces, map[string]any{
+			"name":   "default",
+			"bridge": map[string]any{},
+		})
+	}
 	for _, attachment := range spec.Network.Attachments {
-		if isPlaceholderNetworkAttachment(attachment) {
+		if attachment.Primary || attachment.Plane == ports.NetworkPlaneTenantVPC || isPlaceholderNetworkAttachment(attachment) {
 			continue
 		}
 		networkID := strings.TrimSpace(attachment.NetworkID)

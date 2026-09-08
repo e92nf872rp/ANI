@@ -140,8 +140,8 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1</code></dd></div>
-          <div><dt>Operations</dt><dd>234</dd></div>
-          <div><dt>Schemas</dt><dd>321</dd></div>
+          <div><dt>Operations</dt><dd>293</dd></div>
+          <div><dt>Schemas</dt><dd>366</dd></div>
         </dl>
       </section>
 
@@ -418,34 +418,50 @@
         <tr>
           <td><span class="method method-get">GET</span></td>
           <td><code>/auth/api-keys</code></td>
-          <td><code>listAPIKeys</code></td>
-          <td>列出当前租户 API Key</td>
+          <td><code>listIAMAPIKeys</code></td>
+          <td>列出 Service Principal 的 API Key</td>
           <td><code></code></td>
-          <td>200, 401, 403</td>
+          <td>200, 401, 403, 503, 504</td>
         </tr>
         <tr>
           <td><span class="method method-post">POST</span></td>
           <td><code>/auth/api-keys</code></td>
-          <td><code>createAPIKey</code></td>
-          <td>创建 API Key</td>
+          <td><code>createIAMAPIKey</code></td>
+          <td>为 Service Principal 创建 API Key</td>
           <td><code></code></td>
-          <td>201, 400, 401, 403</td>
+          <td>201, 400, 401, 403, 409, 429, 503, 504</td>
         </tr>
         <tr>
           <td><span class="method method-delete">DELETE</span></td>
           <td><code>/auth/api-keys/{key_id}</code></td>
-          <td><code>revokeAPIKey</code></td>
-          <td>吊销 API Key</td>
+          <td><code>revokeIAMAPIKey</code></td>
+          <td>不可逆吊销 API Key</td>
           <td><code></code></td>
-          <td>200, 400, 401, 403, 404</td>
+          <td>204, 400, 401, 403, 404, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/auth/identity-links/oidc/begin</code></td>
+          <td><code>beginOIDCIdentityLink</code></td>
+          <td>为已登录 Human Principal 发起 OIDC Identity Link</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/auth/identity-links/oidc/callback</code></td>
+          <td><code>completeOIDCIdentityLink</code></td>
+          <td>完成显式 OIDC Identity Link</td>
+          <td><code></code></td>
+          <td>303, 400, 401, 409, 429, 503, 504</td>
         </tr>
         <tr>
           <td><span class="method method-post">POST</span></td>
           <td><code>/auth/logout</code></td>
-          <td><code>logout</code></td>
-          <td>吊销当前 JWT JTI</td>
+          <td><code>logoutSession</code></td>
+          <td>幂等撤销当前 Session</td>
           <td><code></code></td>
-          <td>200, 400, 401, 403</td>
+          <td>204, 400, 401, 409, 429, 503, 504</td>
         </tr>
         <tr>
           <td><span class="method method-post">POST</span></td>
@@ -453,15 +469,39 @@
           <td><code>beginOIDCLogin</code></td>
           <td>发起 OIDC 登录</td>
           <td><code></code></td>
-          <td>200, 400</td>
+          <td>200, 400, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/auth/oidc/callback</code></td>
+          <td><code>completeOIDCCallback</code></td>
+          <td>完成 OIDC Code + PKCE 登录</td>
+          <td><code></code></td>
+          <td>303, 400, 401, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/auth/password-actions</code></td>
+          <td><code>requestPasswordAction</code></td>
+          <td>请求密码设置或重置动作</td>
+          <td><code></code></td>
+          <td>202, 400, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/auth/password-actions/complete</code></td>
+          <td><code>completePasswordAction</code></td>
+          <td>完成单次密码设置或重置动作</td>
+          <td><code></code></td>
+          <td>204, 400, 401, 409, 429, 503, 504</td>
         </tr>
         <tr>
           <td><span class="method method-post">POST</span></td>
           <td><code>/auth/password/login</code></td>
           <td><code>passwordLogin</code></td>
-          <td>租户账密登录（账号密码 Tab）</td>
+          <td>使用密码建立边界会话</td>
           <td><code></code></td>
-          <td>200, 400, 401, 404, 429</td>
+          <td>200, 400, 401, 409, 429, 503, 504</td>
         </tr>
         <tr>
           <td><span class="method method-post">POST</span></td>
@@ -474,10 +514,74 @@
         <tr>
           <td><span class="method method-post">POST</span></td>
           <td><code>/auth/refresh</code></td>
-          <td><code>postAuthRefresh</code></td>
-          <td>刷新 AccessToken</td>
+          <td><code>refreshSession</code></td>
+          <td>轮换 Refresh Cookie 并刷新 Access Token</td>
           <td><code></code></td>
-          <td>200, 400, 401</td>
+          <td>200, 400, 401, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/auth/service-principals</code></td>
+          <td><code>listServicePrincipals</code></td>
+          <td>列出当前 Tenant 的 Service Principal</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/auth/service-principals</code></td>
+          <td><code>createServicePrincipal</code></td>
+          <td>原子创建 Service Principal、Membership 和初始 Role Binding</td>
+          <td><code></code></td>
+          <td>201, 400, 401, 403, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/auth/service-principals/{principal_id}</code></td>
+          <td><code>getServicePrincipal</code></td>
+          <td>查询 Service Principal</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-patch">PATCH</span></td>
+          <td><code>/auth/service-principals/{principal_id}</code></td>
+          <td><code>updateServicePrincipal</code></td>
+          <td>修改 Service Principal 名称或状态；disable 同事务撤销全部 API Key</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/auth/sessions</code></td>
+          <td><code>revokeAllSessions</code></td>
+          <td>撤销当前 Human Principal 的全部 Session</td>
+          <td><code></code></td>
+          <td>204, 401, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/auth/sessions</code></td>
+          <td><code>listSessions</code></td>
+          <td>列出当前 Human Principal 的设备 Session</td>
+          <td><code></code></td>
+          <td>200, 401, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/auth/sessions/{session_id}</code></td>
+          <td><code>revokeSession</code></td>
+          <td>撤销一个设备 Session</td>
+          <td><code></code></td>
+          <td>204, 401, 404, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/auth/switch-tenant</code></td>
+          <td><code>switchTenant</code></td>
+          <td>为同一 Session 建立或轮换目标 Tenant Grant</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 409, 429, 503, 504</td>
         </tr>
         <tr>
           <td><span class="method method-post">POST</span></td>
@@ -854,6 +958,374 @@
           <td>Liveness probe（进程存活检查）</td>
           <td><code></code></td>
           <td>200, 503</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/iam/audit-events</code></td>
+          <td><code>listIAMSecurityAuditEvents</code></td>
+          <td>按当前授权 boundary 查询 IAM Security Audit</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/iam/audit-events/{event_id}</code></td>
+          <td><code>getIAMSecurityAuditEvent</code></td>
+          <td>查询一个 IAM Security Audit Event</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/iam/platform/audit-events</code></td>
+          <td><code>listPlatformIAMSecurityAuditEvents</code></td>
+          <td>使用 Platform Auditor capability 查询跨 Tenant IAM Security Audit</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/iam/platform/audit-events/{event_id}</code></td>
+          <td><code>getPlatformIAMSecurityAuditEvent</code></td>
+          <td>使用 Platform Auditor capability 查询一个 IAM Security Audit Event</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/iam/platform/invitations</code></td>
+          <td><code>listPlatformIAMInvitations</code></td>
+          <td>列出 Platform Invitation</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/iam/platform/invitations</code></td>
+          <td><code>createPlatformIAMInvitation</code></td>
+          <td>创建 Platform Invitation</td>
+          <td><code></code></td>
+          <td>201, 400, 401, 403, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/iam/platform/invitations/{invitation_id}</code></td>
+          <td><code>getPlatformIAMInvitation</code></td>
+          <td>查询 Platform Invitation</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/iam/platform/invitations/{invitation_id}/accept</code></td>
+          <td><code>acceptPlatformIAMInvitation</code></td>
+          <td>接受 Platform Invitation</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/iam/platform/invitations/{invitation_id}/cancel</code></td>
+          <td><code>cancelPlatformIAMInvitation</code></td>
+          <td>取消 Platform Invitation</td>
+          <td><code></code></td>
+          <td>204, 400, 401, 403, 404, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/iam/platform/invitations/{invitation_id}/resend</code></td>
+          <td><code>resendPlatformIAMInvitation</code></td>
+          <td>轮换并重发 Platform Invitation Secret</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/iam/platform/members</code></td>
+          <td><code>listPlatformIAMMembers</code></td>
+          <td>列出 Platform Membership</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/iam/platform/members/{membership_id}</code></td>
+          <td><code>removePlatformIAMMember</code></td>
+          <td>移除 Platform Membership</td>
+          <td><code></code></td>
+          <td>204, 401, 403, 404, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/iam/platform/members/{membership_id}</code></td>
+          <td><code>getPlatformIAMMember</code></td>
+          <td>查询 Platform Membership</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-patch">PATCH</span></td>
+          <td><code>/iam/platform/members/{membership_id}</code></td>
+          <td><code>updatePlatformIAMMember</code></td>
+          <td>更新 Platform Membership 状态</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/iam/platform/members/{membership_id}/role-bindings</code></td>
+          <td><code>bindPlatformIAMRole</code></td>
+          <td>为 Platform Membership 增加 Role Binding</td>
+          <td><code></code></td>
+          <td>204, 400, 401, 403, 404, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/iam/platform/members/{membership_id}/role-bindings/{role_id}</code></td>
+          <td><code>unbindPlatformIAMRole</code></td>
+          <td>删除 Platform Role Binding</td>
+          <td><code></code></td>
+          <td>204, 401, 403, 404, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/iam/platform/recovery-bootstrap-requests</code></td>
+          <td><code>requestRecoveryBootstrap</code></td>
+          <td>请求 Recovery Bootstrap 双人审批</td>
+          <td><code></code></td>
+          <td>202, 400, 401, 403, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/iam/platform/recovery-bootstrap-requests/{operation_id}/approve</code></td>
+          <td><code>approveRecoveryBootstrap</code></td>
+          <td>由不同主体批准 Recovery Bootstrap</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/iam/platform/recovery-bootstrap-requests/{operation_id}/execute</code></td>
+          <td><code>executeRecoveryBootstrap</code></td>
+          <td>在近期重新认证后执行已批准的 Recovery Bootstrap</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/iam/platform/restore-tenant-admin-requests</code></td>
+          <td><code>requestRestoreTenantAdmin</code></td>
+          <td>请求 RestoreTenantAdmin 双人审批</td>
+          <td><code></code></td>
+          <td>202, 400, 401, 403, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/iam/platform/restore-tenant-admin-requests/{operation_id}/approve</code></td>
+          <td><code>approveRestoreTenantAdmin</code></td>
+          <td>由不同主体批准 RestoreTenantAdmin</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/iam/platform/restore-tenant-admin-requests/{operation_id}/execute</code></td>
+          <td><code>executeRestoreTenantAdmin</code></td>
+          <td>在近期重新认证后执行已批准的 RestoreTenantAdmin</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/iam/platform/roles</code></td>
+          <td><code>listPlatformIAMRoles</code></td>
+          <td>列出 Platform Role</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/iam/platform/roles</code></td>
+          <td><code>createPlatformIAMRole</code></td>
+          <td>创建 Platform custom Role</td>
+          <td><code></code></td>
+          <td>201, 400, 401, 403, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/iam/platform/roles/{role_id}</code></td>
+          <td><code>deletePlatformIAMRole</code></td>
+          <td>删除无引用的 Platform custom Role</td>
+          <td><code></code></td>
+          <td>204, 401, 403, 404, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/iam/platform/roles/{role_id}</code></td>
+          <td><code>getPlatformIAMRole</code></td>
+          <td>查询 Platform Role</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-patch">PATCH</span></td>
+          <td><code>/iam/platform/roles/{role_id}</code></td>
+          <td><code>updatePlatformIAMRole</code></td>
+          <td>使用 expected_version 更新 Platform custom Role</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/iam/tenants/{tenant_id}/access</code></td>
+          <td><code>getTenantAccess</code></td>
+          <td>查询 IAM Tenant Access</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-patch">PATCH</span></td>
+          <td><code>/iam/tenants/{tenant_id}/access</code></td>
+          <td><code>updateTenantAccess</code></td>
+          <td>暂停或恢复 IAM Tenant Access</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/iam/tenants/{tenant_id}/invitations</code></td>
+          <td><code>listTenantIAMInvitations</code></td>
+          <td>列出 Tenant Invitation</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/iam/tenants/{tenant_id}/invitations</code></td>
+          <td><code>createTenantIAMInvitation</code></td>
+          <td>创建 Tenant Invitation</td>
+          <td><code></code></td>
+          <td>201, 400, 401, 403, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/iam/tenants/{tenant_id}/invitations/{invitation_id}</code></td>
+          <td><code>getTenantIAMInvitation</code></td>
+          <td>查询 Tenant Invitation</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/iam/tenants/{tenant_id}/invitations/{invitation_id}/accept</code></td>
+          <td><code>acceptTenantIAMInvitation</code></td>
+          <td>接受 Tenant Invitation 并原子建立 Membership/Binding</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/iam/tenants/{tenant_id}/invitations/{invitation_id}/cancel</code></td>
+          <td><code>cancelTenantIAMInvitation</code></td>
+          <td>取消 Tenant Invitation</td>
+          <td><code></code></td>
+          <td>204, 400, 401, 403, 404, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/iam/tenants/{tenant_id}/invitations/{invitation_id}/resend</code></td>
+          <td><code>resendTenantIAMInvitation</code></td>
+          <td>轮换并重发 Tenant Invitation Secret</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/iam/tenants/{tenant_id}/members</code></td>
+          <td><code>listTenantIAMMembers</code></td>
+          <td>列出 Tenant Membership</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/iam/tenants/{tenant_id}/members/{membership_id}</code></td>
+          <td><code>removeTenantIAMMember</code></td>
+          <td>显式移除 Tenant Membership</td>
+          <td><code></code></td>
+          <td>204, 401, 403, 404, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/iam/tenants/{tenant_id}/members/{membership_id}</code></td>
+          <td><code>getTenantIAMMember</code></td>
+          <td>查询 Tenant Membership</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-patch">PATCH</span></td>
+          <td><code>/iam/tenants/{tenant_id}/members/{membership_id}</code></td>
+          <td><code>updateTenantIAMMember</code></td>
+          <td>更新 Tenant Membership 状态</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/iam/tenants/{tenant_id}/members/{membership_id}/role-bindings</code></td>
+          <td><code>bindTenantIAMRole</code></td>
+          <td>为 Tenant Membership 增加 Role Binding</td>
+          <td><code></code></td>
+          <td>204, 400, 401, 403, 404, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/iam/tenants/{tenant_id}/members/{membership_id}/role-bindings/{role_id}</code></td>
+          <td><code>unbindTenantIAMRole</code></td>
+          <td>删除 Tenant Membership 的一个 Role Binding</td>
+          <td><code></code></td>
+          <td>204, 401, 403, 404, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/iam/tenants/{tenant_id}/roles</code></td>
+          <td><code>listTenantIAMRoles</code></td>
+          <td>列出 Tenant Role</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-post">POST</span></td>
+          <td><code>/iam/tenants/{tenant_id}/roles</code></td>
+          <td><code>createTenantIAMRole</code></td>
+          <td>创建 Tenant custom Role</td>
+          <td><code></code></td>
+          <td>201, 400, 401, 403, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/iam/tenants/{tenant_id}/roles/{role_id}</code></td>
+          <td><code>deleteTenantIAMRole</code></td>
+          <td>删除无引用的 Tenant custom Role</td>
+          <td><code></code></td>
+          <td>204, 401, 403, 404, 409, 429, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-get">GET</span></td>
+          <td><code>/iam/tenants/{tenant_id}/roles/{role_id}</code></td>
+          <td><code>getTenantIAMRole</code></td>
+          <td>查询 Tenant Role</td>
+          <td><code></code></td>
+          <td>200, 401, 403, 404, 503, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-patch">PATCH</span></td>
+          <td><code>/iam/tenants/{tenant_id}/roles/{role_id}</code></td>
+          <td><code>updateTenantIAMRole</code></td>
+          <td>使用 expected_version 更新 Tenant custom Role</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 429, 503, 504</td>
         </tr>
         <tr>
           <td><span class="method method-get">GET</span></td>
@@ -2115,6 +2587,51 @@
         <li><code>GPUSpecSummary</code></li>
         <li><code>GPUSpecVolcanoResources</code></li>
         <li><code>HealthCheck</code></li>
+        <li><code>IAMAPIKey</code></li>
+        <li><code>IAMAPIKeyCreateRequest</code></li>
+        <li><code>IAMAPIKeyCreateResponse</code></li>
+        <li><code>IAMAPIKeyListResponse</code></li>
+        <li><code>IAMAccessTokenResponse</code></li>
+        <li><code>IAMBoundary</code></li>
+        <li><code>IAMIdentityLinkBeginRequest</code></li>
+        <li><code>IAMInvitation</code></li>
+        <li><code>IAMInvitationAcceptRequest</code></li>
+        <li><code>IAMInvitationCreateRequest</code></li>
+        <li><code>IAMInvitationListResponse</code></li>
+        <li><code>IAMInvitationMutationRequest</code></li>
+        <li><code>IAMMembership</code></li>
+        <li><code>IAMMembershipListResponse</code></li>
+        <li><code>IAMMembershipUpdateRequest</code></li>
+        <li><code>IAMOIDCBeginRequest</code></li>
+        <li><code>IAMOIDCBeginResponse</code></li>
+        <li><code>IAMPasswordActionCompleteRequest</code></li>
+        <li><code>IAMPasswordActionRequest</code></li>
+        <li><code>IAMPasswordLoginRequest</code></li>
+        <li><code>IAMPlatformBoundary</code></li>
+        <li><code>IAMPrincipalSummary</code></li>
+        <li><code>IAMRecoveryApprovalRequest</code></li>
+        <li><code>IAMRecoveryExecuteRequest</code></li>
+        <li><code>IAMRecoveryOperation</code></li>
+        <li><code>IAMRecoveryRequest</code></li>
+        <li><code>IAMRole</code></li>
+        <li><code>IAMRoleBindingRequest</code></li>
+        <li><code>IAMRoleCreateRequest</code></li>
+        <li><code>IAMRoleListResponse</code></li>
+        <li><code>IAMRoleUpdateRequest</code></li>
+        <li><code>IAMSecurityAuditDetails</code></li>
+        <li><code>IAMSecurityAuditEvent</code></li>
+        <li><code>IAMSecurityAuditEventListResponse</code></li>
+        <li><code>IAMServicePrincipal</code></li>
+        <li><code>IAMServicePrincipalCreateRequest</code></li>
+        <li><code>IAMServicePrincipalListResponse</code></li>
+        <li><code>IAMServicePrincipalUpdateRequest</code></li>
+        <li><code>IAMSessionGrantSummary</code></li>
+        <li><code>IAMSessionListResponse</code></li>
+        <li><code>IAMSessionSummary</code></li>
+        <li><code>IAMSwitchTenantRequest</code></li>
+        <li><code>IAMTenantAccess</code></li>
+        <li><code>IAMTenantAccessUpdateRequest</code></li>
+        <li><code>IAMTenantBoundary</code></li>
         <li><code>InstanceAccessSummary</code></li>
         <li><code>InstanceComputeSummary</code></li>
         <li><code>InstanceConsoleSession</code></li>

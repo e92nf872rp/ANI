@@ -145,6 +145,29 @@ func TestLocalInstanceServiceResolvesReferencedResourcesBeforeOrchestration(t *t
 	}
 }
 
+func TestLocalInstanceServiceCreateFailsClosedWhenNetworkResolverMissing(t *testing.T) {
+	orchestrator := &fakeInstanceOrchestrator{}
+	service := NewLocalInstanceService(orchestrator, &fakeInstanceStore{}, NewLocalInstanceOpsGuard())
+	_, err := service.Create(context.Background(), ports.WorkloadInstanceCreateRequest{
+		IdempotencyKey: "create-explicit-network-without-resolver",
+		Spec: ports.WorkloadSpec{
+			TenantID: "tenant-a",
+			Name:     "vm-explicit-network",
+			Kind:     ports.WorkloadKindVM,
+			Network:  ports.WorkloadNetworkPolicy{VPCID: "vpc-a", SubnetID: "subnet-a"},
+			VM:       &ports.VMInstanceSpec{BootImage: "images/ubuntu.qcow2"},
+		},
+		UserID:          "user-a",
+		PermissionProof: "rbac:create:workload",
+	})
+	if !errors.Is(err, ports.ErrFailedPrecondition) {
+		t.Fatalf("Create error = %v, want ErrFailedPrecondition", err)
+	}
+	if orchestrator.creates != 0 {
+		t.Fatalf("orchestrator creates = %d, want 0 before provider apply", orchestrator.creates)
+	}
+}
+
 func TestLocalInstanceServiceRequiresCreateIdempotencyKey(t *testing.T) {
 	orchestrator := &fakeInstanceOrchestrator{}
 	service := NewLocalInstanceService(orchestrator, &fakeInstanceStore{}, NewLocalInstanceOpsGuard())

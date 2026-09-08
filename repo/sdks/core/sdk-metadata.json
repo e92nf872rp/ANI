@@ -197,25 +197,37 @@
       "scope": "scope:users:write"
     },
     {
-      "operationId": "listAPIKeys",
+      "operationId": "listIAMAPIKeys",
       "method": "GET",
       "path": "/auth/api-keys",
       "scope": ""
     },
     {
-      "operationId": "createAPIKey",
+      "operationId": "createIAMAPIKey",
       "method": "POST",
       "path": "/auth/api-keys",
       "scope": ""
     },
     {
-      "operationId": "revokeAPIKey",
+      "operationId": "revokeIAMAPIKey",
       "method": "DELETE",
       "path": "/auth/api-keys/{key_id}",
       "scope": ""
     },
     {
-      "operationId": "logout",
+      "operationId": "beginOIDCIdentityLink",
+      "method": "POST",
+      "path": "/auth/identity-links/oidc/begin",
+      "scope": ""
+    },
+    {
+      "operationId": "completeOIDCIdentityLink",
+      "method": "GET",
+      "path": "/auth/identity-links/oidc/callback",
+      "scope": ""
+    },
+    {
+      "operationId": "logoutSession",
       "method": "POST",
       "path": "/auth/logout",
       "scope": ""
@@ -224,6 +236,24 @@
       "operationId": "beginOIDCLogin",
       "method": "POST",
       "path": "/auth/oidc/begin",
+      "scope": ""
+    },
+    {
+      "operationId": "completeOIDCCallback",
+      "method": "GET",
+      "path": "/auth/oidc/callback",
+      "scope": ""
+    },
+    {
+      "operationId": "requestPasswordAction",
+      "method": "POST",
+      "path": "/auth/password-actions",
+      "scope": ""
+    },
+    {
+      "operationId": "completePasswordAction",
+      "method": "POST",
+      "path": "/auth/password-actions/complete",
       "scope": ""
     },
     {
@@ -239,9 +269,57 @@
       "scope": ""
     },
     {
-      "operationId": "postAuthRefresh",
+      "operationId": "refreshSession",
       "method": "POST",
       "path": "/auth/refresh",
+      "scope": ""
+    },
+    {
+      "operationId": "listServicePrincipals",
+      "method": "GET",
+      "path": "/auth/service-principals",
+      "scope": ""
+    },
+    {
+      "operationId": "createServicePrincipal",
+      "method": "POST",
+      "path": "/auth/service-principals",
+      "scope": ""
+    },
+    {
+      "operationId": "getServicePrincipal",
+      "method": "GET",
+      "path": "/auth/service-principals/{principal_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "updateServicePrincipal",
+      "method": "PATCH",
+      "path": "/auth/service-principals/{principal_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "revokeAllSessions",
+      "method": "DELETE",
+      "path": "/auth/sessions",
+      "scope": ""
+    },
+    {
+      "operationId": "listSessions",
+      "method": "GET",
+      "path": "/auth/sessions",
+      "scope": ""
+    },
+    {
+      "operationId": "revokeSession",
+      "method": "DELETE",
+      "path": "/auth/sessions/{session_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "switchTenant",
+      "method": "POST",
+      "path": "/auth/switch-tenant",
       "scope": ""
     },
     {
@@ -524,6 +602,282 @@
       "operationId": "liveness",
       "method": "GET",
       "path": "/healthz",
+      "scope": ""
+    },
+    {
+      "operationId": "listIAMSecurityAuditEvents",
+      "method": "GET",
+      "path": "/iam/audit-events",
+      "scope": ""
+    },
+    {
+      "operationId": "getIAMSecurityAuditEvent",
+      "method": "GET",
+      "path": "/iam/audit-events/{event_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "listPlatformIAMSecurityAuditEvents",
+      "method": "GET",
+      "path": "/iam/platform/audit-events",
+      "scope": ""
+    },
+    {
+      "operationId": "getPlatformIAMSecurityAuditEvent",
+      "method": "GET",
+      "path": "/iam/platform/audit-events/{event_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "listPlatformIAMInvitations",
+      "method": "GET",
+      "path": "/iam/platform/invitations",
+      "scope": ""
+    },
+    {
+      "operationId": "createPlatformIAMInvitation",
+      "method": "POST",
+      "path": "/iam/platform/invitations",
+      "scope": ""
+    },
+    {
+      "operationId": "getPlatformIAMInvitation",
+      "method": "GET",
+      "path": "/iam/platform/invitations/{invitation_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "acceptPlatformIAMInvitation",
+      "method": "POST",
+      "path": "/iam/platform/invitations/{invitation_id}/accept",
+      "scope": ""
+    },
+    {
+      "operationId": "cancelPlatformIAMInvitation",
+      "method": "POST",
+      "path": "/iam/platform/invitations/{invitation_id}/cancel",
+      "scope": ""
+    },
+    {
+      "operationId": "resendPlatformIAMInvitation",
+      "method": "POST",
+      "path": "/iam/platform/invitations/{invitation_id}/resend",
+      "scope": ""
+    },
+    {
+      "operationId": "listPlatformIAMMembers",
+      "method": "GET",
+      "path": "/iam/platform/members",
+      "scope": ""
+    },
+    {
+      "operationId": "removePlatformIAMMember",
+      "method": "DELETE",
+      "path": "/iam/platform/members/{membership_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "getPlatformIAMMember",
+      "method": "GET",
+      "path": "/iam/platform/members/{membership_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "updatePlatformIAMMember",
+      "method": "PATCH",
+      "path": "/iam/platform/members/{membership_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "bindPlatformIAMRole",
+      "method": "POST",
+      "path": "/iam/platform/members/{membership_id}/role-bindings",
+      "scope": ""
+    },
+    {
+      "operationId": "unbindPlatformIAMRole",
+      "method": "DELETE",
+      "path": "/iam/platform/members/{membership_id}/role-bindings/{role_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "requestRecoveryBootstrap",
+      "method": "POST",
+      "path": "/iam/platform/recovery-bootstrap-requests",
+      "scope": ""
+    },
+    {
+      "operationId": "approveRecoveryBootstrap",
+      "method": "POST",
+      "path": "/iam/platform/recovery-bootstrap-requests/{operation_id}/approve",
+      "scope": ""
+    },
+    {
+      "operationId": "executeRecoveryBootstrap",
+      "method": "POST",
+      "path": "/iam/platform/recovery-bootstrap-requests/{operation_id}/execute",
+      "scope": ""
+    },
+    {
+      "operationId": "requestRestoreTenantAdmin",
+      "method": "POST",
+      "path": "/iam/platform/restore-tenant-admin-requests",
+      "scope": ""
+    },
+    {
+      "operationId": "approveRestoreTenantAdmin",
+      "method": "POST",
+      "path": "/iam/platform/restore-tenant-admin-requests/{operation_id}/approve",
+      "scope": ""
+    },
+    {
+      "operationId": "executeRestoreTenantAdmin",
+      "method": "POST",
+      "path": "/iam/platform/restore-tenant-admin-requests/{operation_id}/execute",
+      "scope": ""
+    },
+    {
+      "operationId": "listPlatformIAMRoles",
+      "method": "GET",
+      "path": "/iam/platform/roles",
+      "scope": ""
+    },
+    {
+      "operationId": "createPlatformIAMRole",
+      "method": "POST",
+      "path": "/iam/platform/roles",
+      "scope": ""
+    },
+    {
+      "operationId": "deletePlatformIAMRole",
+      "method": "DELETE",
+      "path": "/iam/platform/roles/{role_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "getPlatformIAMRole",
+      "method": "GET",
+      "path": "/iam/platform/roles/{role_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "updatePlatformIAMRole",
+      "method": "PATCH",
+      "path": "/iam/platform/roles/{role_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "getTenantAccess",
+      "method": "GET",
+      "path": "/iam/tenants/{tenant_id}/access",
+      "scope": ""
+    },
+    {
+      "operationId": "updateTenantAccess",
+      "method": "PATCH",
+      "path": "/iam/tenants/{tenant_id}/access",
+      "scope": ""
+    },
+    {
+      "operationId": "listTenantIAMInvitations",
+      "method": "GET",
+      "path": "/iam/tenants/{tenant_id}/invitations",
+      "scope": ""
+    },
+    {
+      "operationId": "createTenantIAMInvitation",
+      "method": "POST",
+      "path": "/iam/tenants/{tenant_id}/invitations",
+      "scope": ""
+    },
+    {
+      "operationId": "getTenantIAMInvitation",
+      "method": "GET",
+      "path": "/iam/tenants/{tenant_id}/invitations/{invitation_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "acceptTenantIAMInvitation",
+      "method": "POST",
+      "path": "/iam/tenants/{tenant_id}/invitations/{invitation_id}/accept",
+      "scope": ""
+    },
+    {
+      "operationId": "cancelTenantIAMInvitation",
+      "method": "POST",
+      "path": "/iam/tenants/{tenant_id}/invitations/{invitation_id}/cancel",
+      "scope": ""
+    },
+    {
+      "operationId": "resendTenantIAMInvitation",
+      "method": "POST",
+      "path": "/iam/tenants/{tenant_id}/invitations/{invitation_id}/resend",
+      "scope": ""
+    },
+    {
+      "operationId": "listTenantIAMMembers",
+      "method": "GET",
+      "path": "/iam/tenants/{tenant_id}/members",
+      "scope": ""
+    },
+    {
+      "operationId": "removeTenantIAMMember",
+      "method": "DELETE",
+      "path": "/iam/tenants/{tenant_id}/members/{membership_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "getTenantIAMMember",
+      "method": "GET",
+      "path": "/iam/tenants/{tenant_id}/members/{membership_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "updateTenantIAMMember",
+      "method": "PATCH",
+      "path": "/iam/tenants/{tenant_id}/members/{membership_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "bindTenantIAMRole",
+      "method": "POST",
+      "path": "/iam/tenants/{tenant_id}/members/{membership_id}/role-bindings",
+      "scope": ""
+    },
+    {
+      "operationId": "unbindTenantIAMRole",
+      "method": "DELETE",
+      "path": "/iam/tenants/{tenant_id}/members/{membership_id}/role-bindings/{role_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "listTenantIAMRoles",
+      "method": "GET",
+      "path": "/iam/tenants/{tenant_id}/roles",
+      "scope": ""
+    },
+    {
+      "operationId": "createTenantIAMRole",
+      "method": "POST",
+      "path": "/iam/tenants/{tenant_id}/roles",
+      "scope": ""
+    },
+    {
+      "operationId": "deleteTenantIAMRole",
+      "method": "DELETE",
+      "path": "/iam/tenants/{tenant_id}/roles/{role_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "getTenantIAMRole",
+      "method": "GET",
+      "path": "/iam/tenants/{tenant_id}/roles/{role_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "updateTenantIAMRole",
+      "method": "PATCH",
+      "path": "/iam/tenants/{tenant_id}/roles/{role_id}",
       "scope": ""
     },
     {
@@ -1487,6 +1841,51 @@
     "GPUSpecSummary",
     "GPUSpecVolcanoResources",
     "HealthCheck",
+    "IAMAPIKey",
+    "IAMAPIKeyCreateRequest",
+    "IAMAPIKeyCreateResponse",
+    "IAMAPIKeyListResponse",
+    "IAMAccessTokenResponse",
+    "IAMBoundary",
+    "IAMIdentityLinkBeginRequest",
+    "IAMInvitation",
+    "IAMInvitationAcceptRequest",
+    "IAMInvitationCreateRequest",
+    "IAMInvitationListResponse",
+    "IAMInvitationMutationRequest",
+    "IAMMembership",
+    "IAMMembershipListResponse",
+    "IAMMembershipUpdateRequest",
+    "IAMOIDCBeginRequest",
+    "IAMOIDCBeginResponse",
+    "IAMPasswordActionCompleteRequest",
+    "IAMPasswordActionRequest",
+    "IAMPasswordLoginRequest",
+    "IAMPlatformBoundary",
+    "IAMPrincipalSummary",
+    "IAMRecoveryApprovalRequest",
+    "IAMRecoveryExecuteRequest",
+    "IAMRecoveryOperation",
+    "IAMRecoveryRequest",
+    "IAMRole",
+    "IAMRoleBindingRequest",
+    "IAMRoleCreateRequest",
+    "IAMRoleListResponse",
+    "IAMRoleUpdateRequest",
+    "IAMSecurityAuditDetails",
+    "IAMSecurityAuditEvent",
+    "IAMSecurityAuditEventListResponse",
+    "IAMServicePrincipal",
+    "IAMServicePrincipalCreateRequest",
+    "IAMServicePrincipalListResponse",
+    "IAMServicePrincipalUpdateRequest",
+    "IAMSessionGrantSummary",
+    "IAMSessionListResponse",
+    "IAMSessionSummary",
+    "IAMSwitchTenantRequest",
+    "IAMTenantAccess",
+    "IAMTenantAccessUpdateRequest",
+    "IAMTenantBoundary",
     "InstanceAccessSummary",
     "InstanceComputeSummary",
     "InstanceConsoleSession",
@@ -1847,20 +2246,27 @@
     "listVolumeSnapshots"
   ],
   "errorCodes": [
+    "AUTHZ_OPERATION_UNREGISTERED",
+    "AUTHZ_POLICY_MISMATCH",
+    "AUTH_RATE_LIMITED",
     "BAD_REQUEST",
     "CONFLICT",
+    "CREDENTIAL_INVALID",
     "DEVICE_NOT_FOUND",
     "FORBIDDEN",
     "GPU_SPEC_CONFLICT",
     "GPU_SPEC_IN_USE",
     "GPU_SPEC_NOT_FOUND",
     "GPU_TYPE_NOT_IN_NODES",
-    "INTERNAL_ERROR",
+    "IAM_TIMEOUT",
+    "IAM_UNAVAILABLE",
+    "IDEMPOTENCY_CONFLICT",
+    "IDEMPOTENCY_KEY_EXPIRED",
     "INVALID_FILTER",
     "LAST_PLATFORM_ADMIN",
     "NOT_FOUND",
-    "NOT_IMPLEMENTED",
     "PASSWORD_SAME_AS_OLD",
+    "PERMISSION_DENIED",
     "PLATFORM_USER_NOT_FOUND",
     "PRECONDITION_FAILED",
     "QUOTA_ALREADY_EXISTS",
@@ -1872,13 +2278,15 @@
     "RESERVATION_EXCEEDS_QUOTA",
     "RESERVED_INSUFFICIENT",
     "ROLE_CHANGE_INVALID",
+    "ROLE_IN_USE",
+    "TENANT_IAM_NOT_READY",
     "TENANT_NOT_FOUND",
     "TENANT_PLAN_NOT_FOUND",
     "UNAUTHORIZED",
-    "UNAVAILABLE",
     "USER_ALREADY_TENANT_ADMIN",
     "USER_NOT_FOUND",
     "VALIDATION_FAILED",
-    "VECTOR_STORE_NOT_FOUND"
+    "VECTOR_STORE_NOT_FOUND",
+    "VERSION_CONFLICT"
   ]
 }

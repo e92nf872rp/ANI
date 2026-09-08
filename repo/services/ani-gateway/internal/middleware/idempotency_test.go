@@ -59,6 +59,93 @@ func TestIdempotentReplayReturnsSameResponseForPublicPlatformEndpoint(t *testing
 	}
 }
 
+func TestTargetPasswordLoginRetryNeverReplaysSuccessWithoutRefreshCookie(t *testing.T) {
+	store := newMemoryGatewayStoreForTest()
+	registry, err := authz.NewTargetOperationRegistry(authz.TargetPolicyRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := server.New()
+	h.Use(
+		RequestID(),
+		TargetIAMAuthorization(&targetIAMStub{}, registry),
+		Idempotency(store),
+	)
+
+	var calls int32
+	h.POST("/api/v1/auth/password/login", func(ctx context.Context, c *app.RequestContext) {
+		atomic.AddInt32(&calls, 1)
+		c.SetCookie("ani_console_refresh", "target-refresh-secret", 3600, "/api/v1/auth", "", protocol.CookieSameSiteLaxMode, true, true)
+		c.JSON(http.StatusOK, map[string]any{"access_token": "target-access-token"})
+	})
+
+	body := `{"account":"user@example.com","password":"correct","audience":"console","boundary":{"type":"tenant","tenant_id":"0198f062-b76d-7f2a-b0ad-50a417bf1f70"}}`
+	perform := func() *protocol.Response {
+		return ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/auth/password/login",
+			&ut.Body{Body: bytes.NewBufferString(body), Len: len(body)},
+			ut.Header{Key: "Content-Type", Value: "application/json"},
+			ut.Header{Key: "Idempotency-Key", Value: "target-login-retry"},
+		).Result()
+	}
+	first := perform()
+	second := perform()
+
+	for index, response := range []*protocol.Response{first, second} {
+		if response.StatusCode() != http.StatusOK {
+			t.Fatalf("response %d status = %d, want 200; body=%s", index+1, response.StatusCode(), response.Body())
+		}
+		if cookie := string(response.Header.Peek("Set-Cookie")); !strings.Contains(cookie, "ani_console_refresh=target-refresh-secret") {
+			t.Fatalf("response %d Set-Cookie = %q, want refresh cookie", index+1, cookie)
+		}
+	}
+	if got := string(second.Header.Get(idempotencyReplayHeader)); got != "" {
+		t.Fatalf("target login retry Idempotent-Replay = %q, want empty", got)
+	}
+	if calls != 2 {
+		t.Fatalf("target login handler calls = %d, want 2 so IAM owns replay", calls)
+	}
+	if len(store.entries) != 0 {
+		t.Fatalf("generic Gateway idempotency cache contains %d target login record(s), want zero", len(store.entries))
+	}
+}
+
+func TestDisabledTargetIAMKeepsLegacyPasswordLoginReplay(t *testing.T) {
+	store := newMemoryGatewayStoreForTest()
+	registry, err := authz.NewTargetOperationRegistry(authz.TargetPolicyRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := server.New()
+	h.Use(
+		RequestID(),
+		TargetIAMAuthorization(nil, registry),
+		Idempotency(store),
+	)
+	var calls int32
+	h.POST("/api/v1/auth/password/login", func(ctx context.Context, c *app.RequestContext) {
+		call := atomic.AddInt32(&calls, 1)
+		c.JSON(http.StatusOK, map[string]any{"call": call, "access_token": "legacy-access-token"})
+	})
+	body := `{"idempotency_key":"legacy-login-retry"}`
+	perform := func() *protocol.Response {
+		return ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/auth/password/login",
+			&ut.Body{Body: bytes.NewBufferString(body), Len: len(body)},
+			ut.Header{Key: "Content-Type", Value: "application/json"},
+		).Result()
+	}
+	first := perform()
+	second := perform()
+	if first.StatusCode() != http.StatusOK || second.StatusCode() != http.StatusOK || string(first.Body()) != string(second.Body()) {
+		t.Fatalf("legacy responses = (%d %s, %d %s), want identical 200", first.StatusCode(), first.Body(), second.StatusCode(), second.Body())
+	}
+	if got := string(second.Header.Get(idempotencyReplayHeader)); got != "true" {
+		t.Fatalf("legacy Idempotent-Replay = %q, want true", got)
+	}
+	if calls != 1 {
+		t.Fatalf("legacy login handler calls = %d, want 1", calls)
+	}
+}
+
 func TestIdempotencyReplaysDeleteAndRejectsDifferentIntent(t *testing.T) {
 	store := newMemoryGatewayStoreForTest()
 	h := server.New()

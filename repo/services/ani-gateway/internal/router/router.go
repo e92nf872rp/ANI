@@ -11,6 +11,7 @@ import (
 )
 
 type RegisterOptions struct {
+	TargetIAMClient                       ports.TargetIAM
 	K8sClusterService                     ports.K8sClusterService
 	EncryptionService                     ports.EncryptionService
 	SecretService                         ports.SecretService
@@ -95,7 +96,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 
 	v1 := h.Group("/api/v1")
 	registerBranding(v1)
-	registerAuth(v1)
+	registerAuth(v1, options.TargetIAMClient)
 	registerMetering(v1, options.MeteringService)
 	registerPlatformCapacity(v1, options.PlatformCapacityService)
 	registerComponentStatus(v1, options.ComponentStatusService)
