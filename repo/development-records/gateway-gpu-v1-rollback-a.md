@@ -91,3 +91,28 @@ instances 全 200。
 - GPU 接口迁回 V2 authz：前置条件是 V2 boundary 模型扩展支持双域（cluster boundary），
   届时恢复 v1.yaml 的 x-ani-authz + 注册表/生成物同步 + permission 数据播种。
 - 本分支与 fork 远端已分叉（rebase），推送需 force push（已经用户确认）。
+
+## 8. Rebase 终态更新（2026-09-08，基于 ANI-IAM-PRE930-CONTAINMENT main）
+
+本分支随后再次 rebase 到最新 origin/main（含 ANI-IAM-PRE930-CONTAINMENT 批次），
+回退目标由 main 侧承载，本批次语义保持不变：
+
+- **V2 target registry 基建已被 main 整体移除**：`operation-registry.v1.json`、
+  `zz_generated_target_operation_registry.go`、`target_operation_registry_test.go`
+  在 main 上删除，本分支接受删除；第 3 节表格中这三个文件的同步动作以
+  main 的移除为最终形态。
+- **v1.yaml GPU 13 操作的 V2 注解被 main 全量移除**（不止 `x-ani-authz`，含
+  x-ani-handler/owner/classification/authn），契约终态与 V1 链路一致；
+  `zz_generated_core_policies.go` GPU 接口保持 `PolicySourceLegacy`。
+- **第 6 节 main 既有红门禁已由 ANI-IAM-PRE930-CONTAINMENT 恢复绿**：
+  `/admin/tenants*` 注解与 `/auth/api-keys` 兼容性基线漂移均已在 main 解决，
+  不再是遗留事项。
+- rebase 冲突解决引入两处文档回归，已在后续提交修复：README 丢失 main 的
+  「BOSS 租户列表管理」小节并带回已回滚的「邮件通知」小节；`docs/api/core.html`
+  为旧态重生成（缺 `/admin/tenants*` 行），取 main 版本。
+- rebase 后门禁复验：`generate_gateway_authz_test.py` 18 tests OK、
+  drift `no drift`、路由覆盖 311/243 无错误；架构守卫、gateway `go build`、
+  authz/middleware 单测、`git diff --check` 全部通过。
+- 本分支残余实际 delta：本批次与 GPU scope/quota/orphan 批次记录文档、
+  `docs/api/core.html` 同步，以及 auth-service `runtimeadmin` 本地 replace
+  构建修复（独立提交，随本分支携带）。

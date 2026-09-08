@@ -49,7 +49,7 @@
 
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
-| GATEWAY-GPU-V1-ROLLBACK-A | 生产 gateway 镜像回退致 BOSS GPU 接口 403 复现，且 main（PR #145）已将 v1.yaml 全量 V2 化、GPU 路径标单域 `scope: platform`，部署后 Console（tenant）将 403。V2 boundary 域互斥无法表达 GPU 双域共享，经产品确认**暂时回退 V1 链路**：v1.yaml 13 个 GPU 操作删除 `x-ani-authz` 且 classification `authorized→authenticated`（交叉校验要求两者一致），operation-registry.v1.json / zz_generated_target_operation_registry.go / zz_generated_core_policies.go 全链同步重生成（GPU 全部 `PolicySourceLegacy`），冻结计数 authenticated 9→22、authorized 278→265；`/quotas`+`/quotas/me` V2 定义与 V1 行为一致故保留；运行时 middleware 零改动（rebase 后已含双放行与 /quotas platform-only）。同期 `hotfix/network-store-read` rebase 到 origin/main（core-schema.d.ts 接受删除、auth.go/auth_test.go 保留 main V2 结构+完整双放行逻辑、修复 rebase 遗留冲突标记）。live 验证（ani-test2 隔离环境 10.10.1.66:30083，镜像 `test2-20260908-b`）：platform token GPU 三端点+/quotas 200、/quotas/me 403；tenant token GPU 三端点+/quotas/me+/instances 200、/quotas 403（泄露封堵保持）；tenant-a/admin Console 登录+核心接口 200。已知 main 既有红门禁不在本批范围：9 个 `/admin/tenants*` 缺 dp2 注解、`/auth/api-keys` operationId 基线漂移。后续项：GPU 迁回 V2 前置 boundary 模型双域扩展（cluster） | gateway-gpu-v1-rollback-a.md |
+| GATEWAY-GPU-V1-ROLLBACK-A | 生产 gateway 镜像回退致 BOSS GPU 接口 403 复现，且 main（PR #145）已将 v1.yaml 全量 V2 化、GPU 路径标单域 `scope: platform`，部署后 Console（tenant）将 403。V2 boundary 域互斥无法表达 GPU 双域共享，经产品确认**暂时回退 V1 链路**：v1.yaml 13 个 GPU 操作删除 `x-ani-authz` 且 classification `authorized→authenticated`（交叉校验要求两者一致），operation-registry.v1.json / zz_generated_target_operation_registry.go / zz_generated_core_policies.go 全链同步重生成（GPU 全部 `PolicySourceLegacy`），冻结计数 authenticated 9→22、authorized 278→265；`/quotas`+`/quotas/me` V2 定义与 V1 行为一致故保留；运行时 middleware 零改动（rebase 后已含双放行与 /quotas platform-only）。同期 `hotfix/network-store-read` rebase 到 origin/main（core-schema.d.ts 接受删除、auth.go/auth_test.go 保留 main V2 结构+完整双放行逻辑、修复 rebase 遗留冲突标记）。live 验证（ani-test2 隔离环境 10.10.1.66:30083，镜像 `test2-20260908-b`）：platform token GPU 三端点+/quotas 200、/quotas/me 403；tenant token GPU 三端点+/quotas/me+/instances 200、/quotas 403（泄露封堵保持）；tenant-a/admin Console 登录+核心接口 200。同期 `hotfix/network-store-read` rebase 到含 ANI-IAM-PRE930-CONTAINMENT 的最新 main：V2 target registry 基建（operation-registry.v1.json 等）与 GPU 接口 V2 注解已由 main 整体移除、回退终态由 main 承载，分支残余 delta 为批次记录与 auth-service runtimeadmin replace 构建修复；上述 main 既有红门禁已随隔离批次恢复绿，rebase 文档回归（README 租户列表小节/core.html 旧态）已修复；rebase 后 authz drift/路由覆盖/架构守卫/build/test 复验全绿。后续项：GPU 迁回 V2 前置 boundary 模型双域扩展（cluster） | gateway-gpu-v1-rollback-a.md |
 
 ### 实例列表孤儿 GPU 过滤（2026-09，分支 ani-hotfix）
 
@@ -223,6 +223,28 @@
 | TENANT-ADMIN-DOC-ALIGNMENT | 文档对齐批次：以代码和 issue 为标准，5+ 轮深度审计修正 SPEC/UX/PRD/Plan 四份文档；14 项设计决策、4 张偏差表（spec/ux/prd/plan）、3 项 tradeoff、4 项 open question | tenant-admin-doc-alignment-batch.md |
 | TENANT-ADMIN-FEATURE-BATCH | 功能批次汇总：14 个 issue 全量实现完成（OpenAPI 契约 → 接口/数据模型 → DB 迁移 → 网关接入 → 13 端点端到端 → 多轮 review-it → 文档对齐）；13 项设计决策（Core/Services 边界拆分、全量拉取+内存合并、部分唯一索引竞态防护、审计统一/查询条件/枚举值、ResetPassword 禁用态策略、ChangeRole UUID 入参、Delete 不改 status、幂等键网关处理、接口重命名、迁移三文件拆分、Go subtest 命名）；5 张偏差表（vs SPEC/PRD/UX/Plan/Issue）；4 项 tradeoff；4 项 open question | tenant-admin-feature-batch.md |
 
+### BOSS 租户列表管理（2026-09，分支 tenant-list）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| TENANT-LIST-ISSUE-001 | OpenAPI：Core 9 `/admin/tenants*` + getTenant 扩展；Services 19 `/tenants*` | tenant-list-issue-001-openapi-contract.md |
+| TENANT-LIST-ISSUE-002 | proto messages + ports；无独立 TenantListService；19 RPC 挂 TenantService | tenant-list-issue-002-interfaces-structs.md |
+| TENANT-LIST-ISSUE-003 | 迁移 `20260902_001`：三态 CHECK、tenant_auth/lifecycle、NULLIF RLS、create 回填 | tenant-list-issue-003-database-migration.md |
+| TENANT-LIST-ISSUE-004 | Gateway 19 svc + 9 admin；tenantCallCtx 归因；骨架后由 005+ 填满 | tenant-list-issue-004-gateway-integration.md |
+| TENANT-LIST-ISSUE-005 | available-plans + CreateTenant（bcrypt→Core 事务 + 事务外配额） | tenant-list-issue-005-create-tenant-api.md |
+| TENANT-LIST-ISSUE-006 | ListTenants/GetTenantDetail；LATERAL admin_count；auth 两布尔 | tenant-list-issue-006-tenant-list-detail-api.md |
+| TENANT-LIST-ISSUE-007 | UpdateTenant；svc disabled→409；Core 动态 SET | tenant-list-issue-007-update-tenant-api.md |
+| TENANT-LIST-ISSUE-008 | freeze/unfreeze/disable；四维 used+reserved；不释放资源；归因 ctx | tenant-list-issue-008-tenant-state-machine-api.md |
+| TENANT-LIST-ISSUE-009 | GetTenantAuth + Update SSO/MFA；不含 TestTenantSso | tenant-list-issue-009-tenant-auth-api.md |
+| TENANT-LIST-ISSUE-011 | GetTenantQuota 单次代理 Core；502 不可达 | tenant-list-issue-011-tenant-quota-api.md |
+| TENANT-LIST-ISSUE-012 | 配额变更提交/列表/整批审批；跨请求同维 pending；CONFLICT/NOT_REGISTERED | tenant-list-issue-012-quota-change-request-api.md |
+| TENANT-LIST-ISSUE-013 | ListTenantLifecycle（Core）+ ListTenantAuditLogs；枚举 Parse* | tenant-list-issue-013-lifecycle-audit-api.md |
+| TENANT-LIST-ISSUE-014 | 租户内 admins：tenant-admin ∪ inviting；TenantScopedAdmin | tenant-list-issue-014-tenant-admins-api.md |
+| TENANT-LIST-DOC-ALIGNMENT | 以实现为准回写 Issue/PRD/SPEC/UX/Plan（§0）；010 仍 OPEN/501 | tenant-list-doc-alignment-batch.md |
+| TENANT-LIST-FEATURE-BATCH | 功能批次汇总：13 issue 完成 + 文档对齐；跨 Issue 决策/偏差/取舍/开放问题 | tenant-list-feature-batch.md |
+
+> Issue-010（SSO test）未实现：契约/路由/ports 在，业务 stub→501；无单独 development-record。
+
 ### Metering Service（2026-08）
 
 | 批次 | 内容摘要 | 文件 |
@@ -377,12 +399,6 @@
 | CORE-REGISTRY-CONSOLE-FLOW-CORE-A | Core 镜像仓库后端实现：RegistryImage purpose 贯通 port/adapter/router，`/registry/images?purpose=` 支持过滤；不含 instances、Console、BOSS 或权限实现 | core-registry-console-flow-core-a.md |
 | SPRINT13-REGISTRY-HARBOR-LIVE-A | 镜像仓库 Harbor-backed live gate：`validate-registry-harbor-live-gate` 契约通过；2026-07-27 真实 Gateway 验证 Harbor project/list/push-instructions/pull-secret/scan-report 并归档脱敏 evidence，artifact/purpose 回读在提供 repository/tag 时执行；不含 Console/BOSS/实例创建镜像门禁 | sprint13-registry-harbor-live-gate.md |
 | REGISTRY-P0-CLOSURE-A | Registry P0 闭环：purpose/scan terminal=`complete`/实例引用/删除 409；live passed（evidence `registry-p0-closure-live-20260803.json`）；不含 BOSS quota/GC | registry-p0-closure-a.md |
-
-### 邮件通知（2026-07）
-
-| 批次 | 内容摘要 | 文件 |
-|---|---|---|
-| EMAIL-NOTIFY | 邮件通知 API + BOSS 发信设置页：9 个 Core endpoint（SMTP CRUD / 收件人 CRUD / 事件订阅批量更新 / 测试发送）；local 内存 adapter；BOSS 前端 SMTP 表单 + 收件人表格 + 订阅开关 + 测试发送；48 store 测试 + 34 handler 测试；RequestID store 层 UUID 生成 + handler 透传 | email-notify.md |
 
 ### NATS 接入（2026-07）
 
