@@ -242,7 +242,8 @@ func RegisterAll(prometheusURL string, httpClient *http.Client) {
 // 逐个 Resolve + Collect → 聚合返回。
 // unknown collector source 时 Warn 日志并跳过；单维度 Collect 失败时 Error 日志并跳过。
 func CollectAll(ctx context.Context, spec ports.CollectionSpec, logger *slog.Logger) ([]ports.MeteringUsageRecord, error) {
-	period := time.Now().Format("2006-01-02T15:04")
+	// period 按 UTC 写入，与查询侧 to_char(... AT TIME ZONE 'UTC') 形成完整 UTC 契约。
+	period := time.Now().UTC().Format("2006-01-02T15:04")
 	out := make([]ports.MeteringUsageRecord, 0, len(spec.Dimensions))
 	for _, dim := range spec.Dimensions {
 		// 先复制 collector 实例引用，释放锁后再调用 Collect（避免 Collect 中的阻塞 IO 持有读锁）。

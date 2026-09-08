@@ -298,6 +298,36 @@ async def update_parse_status_in_tx(
     return result == "UPDATE 1"
 
 
+async def reset_for_reparse_in_tx(
+    conn: asyncpg.Connection, *, tenant_id: str, kb_id: str, doc_id: str
+) -> bool:
+    """Reset a document for re-parsing inside the caller's transaction.
+
+    Sets parse_status='pending', clears error_message/parsed_at, and resets
+    chunk_count to 0 (NOT NULL — the column has a CHECK/NOT NULL constraint,
+    so NULL would abort the transaction). Returns True if a row was updated.
+
+    Distinct from update_parse_status_in_tx: that function's COALESCE
+    semantics cannot reset chunk_count to 0 or clear nullable columns, hence
+    this dedicated statement (SPEC §5.1 #12 reparse, issue-047).
+    """
+    await set_tenant_context(conn, tenant_id)
+    result = await conn.execute(
+        """
+        UPDATE kb_documents
+           SET parse_status = 'pending',
+               error_message = NULL,
+               parsed_at = NULL,
+               chunk_count = 0
+         WHERE id = $1 AND kb_id = $2
+           AND NOT (parse_status = 'failed' AND error_message = 'deleted')
+        """,
+        uuid.UUID(doc_id),
+        uuid.UUID(kb_id),
+    )
+    return result == "UPDATE 1"
+
+
 async def soft_delete_document(
     conn: asyncpg.Connection, *, tenant_id: str, kb_id: str, doc_id: str
 ) -> bool:

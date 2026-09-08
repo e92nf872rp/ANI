@@ -3,6 +3,7 @@ package reconcile_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -12,7 +13,6 @@ import (
 	"github.com/kubercloud/ani/services/inference-service/internal/domain"
 	"github.com/kubercloud/ani/services/inference-service/internal/reconcile"
 	"github.com/kubercloud/ani/services/inference-service/internal/repository"
-	runtimeport "github.com/kubercloud/ani/services/inference-service/internal/runtime"
 	runtimefake "github.com/kubercloud/ani/services/inference-service/internal/runtime/fake"
 	"github.com/kubercloud/ani/services/inference-service/internal/service"
 )
@@ -77,6 +77,22 @@ func (m *memoryStore) AbortCreate(_ context.Context, binding repository.RuntimeB
 	m.operation = domain.Operation{}
 	delete(m.operations, binding.OperationID)
 	return nil
+}
+func (m *memoryStore) PublicationWithdrawn(_ context.Context, tenantID, serviceID uuid.UUID, generation int64) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.resource.TenantID != tenantID || m.resource.ID != serviceID || m.resource.Generation != generation {
+		return false, repository.ErrStaleGeneration
+	}
+	if m.resource.Publication.Desired != domain.PublicationUnpublished || m.resource.Publication.Generation != generation {
+		return false, nil
+	}
+	// This flow fake models the publisher having reconciled the withdrawal.
+	m.resource.Publication.ObservedGeneration = generation
+	m.resource.Publication.Phase = domain.PublicationUnpublishedOK
+	m.resource.Publication.UpdatedAt = time.Now().UTC()
+	m.resource.InvocationURL = ""
+	return true, nil
 }
 func (m *memoryStore) AbortPendingMutation(_ context.Context, abort repository.MutationAbort) error {
 	m.mu.Lock()
@@ -163,11 +179,26 @@ func (m *memoryStore) MutateService(_ context.Context, request repository.Mutati
 	operation.CreatedAt = request.Now
 	operation.UpdatedAt = request.Now
 	if operation.PreemptedOperationID != uuid.Nil {
+		if m.resource.ActiveOperation == domain.ActionCreate && m.resource.RuntimeRef == uuid.Nil {
+			return repository.MutationResult{}, fmt.Errorf("%w: create runtime identity is not bound", domain.ErrOperationInProgress)
+		}
+		if preempted := m.operations[operation.PreemptedOperationID]; preempted.State != domain.OperationPending {
+			return repository.MutationResult{}, fmt.Errorf("%w: active inference operation is already claimed", domain.ErrOperationInProgress)
+		}
 		preempted := m.operations[operation.PreemptedOperationID]
 		preempted.State = domain.OperationCancelled
 		m.operations[preempted.ID] = preempted
 	}
 	m.resource = transition.Service
+	switch request.Action {
+	case domain.ActionStop, domain.ActionRestart, domain.ActionDelete:
+		m.resource.Publication.Desired = domain.PublicationUnpublished
+		m.resource.Publication.Generation = m.resource.Generation
+		m.resource.Publication.Phase = domain.PublicationPending
+		m.resource.Publication.LastError = ""
+		m.resource.Publication.UpdatedAt = request.Now
+		m.resource.InvocationURL = ""
+	}
 	m.operation = operation
 	m.operations[operation.ID] = operation
 	m.claimed = false
@@ -209,6 +240,13 @@ func (m *memoryStore) ApplyObservation(_ context.Context, observation repository
 			deletedAt := time.Now().UTC()
 			m.resource.DeletedAt = &deletedAt
 		}
+		if observation.Publish && observation.Status == domain.StatusRunning && !observation.Deleted {
+			m.resource.Publication.Desired = domain.PublicationPublished
+			m.resource.Publication.Generation = observation.TargetGeneration
+			m.resource.Publication.Phase = domain.PublicationPending
+			m.resource.Publication.LastError = ""
+			m.resource.InvocationURL = ""
+		}
 	}
 	m.operations[m.operation.ID] = m.operation
 	return nil
@@ -216,7 +254,9 @@ func (m *memoryStore) ApplyObservation(_ context.Context, observation repository
 func (m *memoryStore) FailOperation(_ context.Context, failure repository.Failure) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.operation.Attempt++
+	if failure.ErrorCode != "GATEWAY_UNPUBLISH_PENDING" && failure.ErrorCode != "GATEWAY_UNPUBLISH_CHECK_FAILED" {
+		m.operation.Attempt++
+	}
 	m.operation.ErrorCode = failure.ErrorCode
 	m.operation.ErrorMessage = failure.ErrorMessage
 	switch {
@@ -309,6 +349,9 @@ func TestCreateToRunningWithFakeDependencies(t *testing.T) {
 	if created.Status != domain.StatusDeploying || created.RuntimeRef == uuid.Nil || operation.State != domain.OperationPending {
 		t.Fatalf("create must dispatch runtime and stay pending for align: service=%+v operation=%+v", created, operation)
 	}
+	if created.Publication.Desired == domain.PublicationPublished {
+		t.Fatalf("create request path published before runtime observation: %+v", created.Publication)
+	}
 
 	worker := reconcile.NewWorker(store, runtimePort, "worker-flow", func() time.Time { return now })
 	handled, err := worker.RunOnce(ctx)
@@ -325,6 +368,10 @@ func TestCreateToRunningWithFakeDependencies(t *testing.T) {
 	}
 	if finished.Status != domain.StatusRunning || finished.ObservedGeneration != 1 || finished.RuntimeRef == uuid.Nil {
 		t.Fatalf("service did not converge to running: %+v", finished)
+	}
+	if finished.Publication.Desired != domain.PublicationPublished || finished.Publication.Generation != finished.Generation ||
+		finished.Publication.Phase != domain.PublicationPending {
+		t.Fatalf("successful create did not atomically request publication: %+v", finished.Publication)
 	}
 	if finishedOperation.State != domain.OperationCompleted {
 		t.Fatalf("operation state = %s, want completed", finishedOperation.State)
@@ -365,14 +412,56 @@ func TestFullLifecycleConvergesWithFakeDependencies(t *testing.T) {
 	}
 
 	run("create")
+	store.mu.Lock()
+	store.resource.Publication.Desired = domain.PublicationPublished
+	store.resource.Publication.Generation = store.resource.Generation
+	store.resource.Publication.ObservedGeneration = store.resource.Generation
+	store.resource.Publication.Phase = domain.PublicationPublishedOK
+	store.resource.InvocationURL = "https://ai.example.test/v1/chat/completions"
+	stablePublication := store.resource.Publication
+	stableInvocationURL := store.resource.InvocationURL
+	store.mu.Unlock()
 	if _, err := controller.Scale(ctx, tenantID, created.ID, uuid.New(), 2); err != nil {
 		t.Fatal(err)
 	}
-	run("scale")
-	assertFlowStatus(t, store, tenantID, created.ID, domain.StatusRunning, 2)
-
-	if _, err := controller.Lifecycle(ctx, tenantID, created.ID, uuid.New(), domain.ActionStop); err != nil {
+	scaledIntent, err := store.GetService(ctx, tenantID, created.ID)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if scaledIntent.Publication != stablePublication || scaledIntent.InvocationURL != stableInvocationURL {
+		t.Fatalf("scale request changed stable publication: publication=%+v url=%q", scaledIntent.Publication, scaledIntent.InvocationURL)
+	}
+	run("scale")
+	scaled := assertFlowStatus(t, store, tenantID, created.ID, domain.StatusRunning, 2)
+	if scaled.Publication != stablePublication || scaled.InvocationURL != stableInvocationURL {
+		t.Fatalf("scale completion changed stable publication: publication=%+v url=%q", scaled.Publication, scaled.InvocationURL)
+	}
+
+	stopKey := uuid.New()
+	stopOperation, err := controller.Lifecycle(ctx, tenantID, created.ID, stopKey, domain.ActionStop)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopIntent, err := store.GetService(ctx, tenantID, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stopIntent.Publication.Desired != domain.PublicationUnpublished ||
+		stopIntent.Publication.Generation != stopOperation.TargetGeneration ||
+		stopIntent.Publication.Phase != domain.PublicationPending || stopIntent.InvocationURL != "" {
+		t.Fatalf("stop did not atomically request withdrawal: %+v", stopIntent)
+	}
+	replayedStop, err := controller.Lifecycle(ctx, tenantID, created.ID, stopKey, domain.ActionStop)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayedIntent, err := store.GetService(ctx, tenantID, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replayedStop.ID != stopOperation.ID || replayedIntent.Generation != stopIntent.Generation ||
+		replayedIntent.Publication.Generation != stopIntent.Publication.Generation {
+		t.Fatalf("stop replay advanced generation: operation=%+v service=%+v", replayedStop, replayedIntent)
 	}
 	run("stop")
 	stopped := assertFlowStatus(t, store, tenantID, created.ID, domain.StatusStopped, 0)
@@ -401,7 +490,7 @@ func TestFullLifecycleConvergesWithFakeDependencies(t *testing.T) {
 	}
 }
 
-func TestCreatePreemptedByStopCannotRestoreRunning(t *testing.T) {
+func TestUnboundRequestPathCreateCannotBePreempted(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 14, 14, 0, 0, 0, time.UTC)
 	tenantID, versionID := uuid.New(), uuid.New()
@@ -412,9 +501,7 @@ func TestCreatePreemptedByStopCannotRestoreRunning(t *testing.T) {
 		ArtifactRef: "object://qwen", ArtifactDigest: "sha256:model", CPUProfile: &cpuProfile,
 	})
 	store := &memoryStore{}
-	runtimePort := runtimefake.New()
-	created, createOperation, err := service.NewCreator(store, catalogPort, func() time.Time { return now }).
-		WithRuntime(runtimePort).Create(
+	created, createOperation, err := service.NewCreator(store, catalogPort, func() time.Time { return now }).Create(
 		ctx, tenantID, service.CreateInput{
 			IdempotencyKey: uuid.New(), Name: "qwen-preempt", ModelVersionID: versionID,
 			ImageRef: "registry.local/user/vllm@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -424,37 +511,36 @@ func TestCreatePreemptedByStopCannotRestoreRunning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimedCreate, claimed, err := store.ClaimOperation(ctx, "old-create-worker", now, time.Minute)
-	if err != nil || !claimed {
-		t.Fatalf("claim create = (%+v,%v,%v)", claimedCreate, claimed, err)
+	controller := service.NewController(store, func() time.Time { return now.Add(time.Second) })
+	if _, err := controller.Lifecycle(ctx, tenantID, created.ID, uuid.New(), domain.ActionStop); !errors.Is(err, domain.ErrOperationInProgress) {
+		t.Fatalf("stop during unbound create error = %v, want ErrOperationInProgress", err)
 	}
-	controller := service.NewController(store, func() time.Time { return now.Add(time.Second) }).WithRuntime(runtimePort)
-	if _, err := controller.Lifecycle(ctx, tenantID, created.ID, uuid.New(), domain.ActionStop); err != nil {
-		t.Fatal(err)
+	unpreempted, err := store.GetService(ctx, tenantID, created.ID)
+	if err != nil || unpreempted.Generation != 1 || unpreempted.CurrentOperationID != createOperation.ID {
+		t.Fatalf("unbound create changed after rejected stop: (%+v,%v)", unpreempted, err)
 	}
-	worker := reconcile.NewWorker(store, runtimePort, "stop-worker", func() time.Time { return now.Add(2 * time.Second) })
-	if handled, err := worker.RunOnce(ctx); err != nil || !handled {
-		t.Fatalf("stop worker = (%v,%v)", handled, err)
+	persistedCreate, err := store.GetOperation(ctx, tenantID, createOperation.ID)
+	if err != nil || persistedCreate.State != domain.OperationPending {
+		t.Fatalf("unbound create operation changed after rejected stop: (%+v,%v)", persistedCreate, err)
 	}
-	stopped := assertFlowStatus(t, store, tenantID, created.ID, domain.StatusStopped, 0)
-	if stopped.RuntimeEndpoint != "" {
-		t.Fatalf("preempted create endpoint survived stop: %+v", stopped)
-	}
-	if _, err := runtimePort.Ensure(ctx, runtimeport.EnsureRequest{
-		TenantID: tenantID, ServiceID: created.ID, Generation: createOperation.TargetGeneration,
-		IdempotencyKey: uuid.New(), Name: created.Name, ServedModelName: created.ServedModelName,
-		Spec: createOperation.TargetSpec,
-	}); !errors.Is(err, runtimeport.ErrStaleRuntimeGeneration) {
-		t.Fatalf("late create after stop error = %v", err)
-	}
-	if err := store.ApplyObservation(ctx, repository.Observation{
+
+	runtimeRef := uuid.New()
+	if err := store.BindRuntimeRef(ctx, repository.RuntimeBinding{
 		TenantID: tenantID, ServiceID: created.ID, OperationID: createOperation.ID,
-		TargetGeneration: createOperation.TargetGeneration, Status: domain.StatusRunning,
-		AppliedSpec: createOperation.TargetSpec, RuntimeRef: uuid.New(),
-		RuntimeEndpoint: "http://late-create.internal.svc:8000", ReadyReplicas: 1, Complete: true,
-		LeaseToken: claimedCreate.LeaseToken,
-	}); err != repository.ErrStaleGeneration {
-		t.Fatalf("old create observation error = %v", err)
+		Generation: createOperation.TargetGeneration, RuntimeRef: runtimeRef,
+	}); err != nil {
+		t.Fatalf("bind create runtime identity: %v", err)
+	}
+	stopOperation, err := controller.Lifecycle(ctx, tenantID, created.ID, uuid.New(), domain.ActionStop)
+	if err != nil {
+		t.Fatalf("stop after runtime binding: %v", err)
+	}
+	if stopOperation.TargetGeneration != 2 || stopOperation.PreemptedOperationID != createOperation.ID {
+		t.Fatalf("stop after binding = %+v", stopOperation)
+	}
+	persistedCreate, err = store.GetOperation(ctx, tenantID, createOperation.ID)
+	if err != nil || persistedCreate.State != domain.OperationCancelled {
+		t.Fatalf("bound create was not safely preempted: (%+v,%v)", persistedCreate, err)
 	}
 }
 

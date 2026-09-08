@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"runtime"
@@ -18,6 +19,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/ut"
+	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
@@ -79,6 +81,7 @@ func TestRegisterInstancesUsesInjectedRuntime(t *testing.T) {
 	got, _ := registerInstancesWithRuntime(
 		h.Group("/api/v1"),
 		nil,
+		nil,
 		false,
 		nil,
 		nil,
@@ -120,8 +123,27 @@ func TestInstanceSpecFromRequestMapsSecretBindings(t *testing.T) {
 	}
 }
 
+func TestValidateCreateInstanceConfigsRejectsCloudInitAndPasswordSecretRef(t *testing.T) {
+	req := createInstanceRequest{
+		VMConfig: &vmConfigRequest{
+			CloudInitSecret:   "ci-secret",
+			PasswordSecretRef: "pw-secret",
+		},
+	}
+	if err := validateCreateInstanceConfigs(req, ports.WorkloadKindVM); err == nil {
+		t.Fatal("expected mutually-exclusive error, got nil")
+	}
+}
+
 func TestInstanceSpecFromRequestMapsProviderNeutralContainerConfig(t *testing.T) {
 	envValue := "plain"
+	networkRequest := &instanceNetworkRequest{
+		VPCID:            "vpc-1",
+		SubnetID:         "subnet-1",
+		SecurityGroupIDs: []string{"sg-1"},
+		AssignPrivateIP:  true,
+		PrivateIP:        "10.0.0.10",
+	}
 	spec, err := instanceSpecFromRequest(createInstanceRequest{
 		Kind:     "container",
 		Name:     "app",
@@ -129,13 +151,7 @@ func TestInstanceSpecFromRequestMapsProviderNeutralContainerConfig(t *testing.T)
 		ImageID:  "img-1",
 		ImageRef: "harbor.local/app@sha256:abc",
 		ContainerConfig: &containerConfigRequest{
-			Network: &instanceNetworkRequest{
-				VPCID:            "vpc-1",
-				SubnetID:         "subnet-1",
-				SecurityGroupIDs: []string{"sg-1"},
-				AssignPrivateIP:  true,
-				PrivateIP:        "10.0.0.10",
-			},
+			Network:          networkRequest,
 			Replicas:         2,
 			Ports:            []instancePortRequest{{Name: "http", ContainerPort: 8080, Protocol: "tcp"}},
 			Env:              []instanceEnvRequest{{Name: "MODE", Value: &envValue}},
@@ -156,6 +172,28 @@ func TestInstanceSpecFromRequestMapsProviderNeutralContainerConfig(t *testing.T)
 	if spec.Network.VPCID != "vpc-1" || spec.Network.SubnetID != "subnet-1" || spec.Network.PrivateIP != "10.0.0.10" || len(spec.Network.SecurityGroupIDs) != 1 {
 		t.Fatalf("network = %+v, want provider-neutral network request", spec.Network)
 	}
+	if len(spec.Network.Attachments) != 3 {
+		t.Fatalf("network attachments = %+v, want all default conceptual planes preserved", spec.Network.Attachments)
+	}
+	foundTenantVPC := false
+	for _, attachment := range spec.Network.Attachments {
+		if attachment.NetworkID == networkRequest.VPCID {
+			t.Fatalf("attachment = %+v, ANI vpc_id must not be used as provider NetworkID", attachment)
+		}
+		if attachment.Plane == ports.NetworkPlaneTenantVPC {
+			foundTenantVPC = true
+			if attachment.NetworkID != "tenant-vpc" || attachment.SubnetID != "subnet-1" || !attachment.Primary {
+				t.Fatalf("tenant_vpc attachment = %+v, want conceptual ID with requested subnet", attachment)
+			}
+		}
+	}
+	if !foundTenantVPC {
+		t.Fatal("network attachments missing tenant_vpc plane")
+	}
+	networkRequest.SecurityGroupIDs[0] = "mutated"
+	if spec.Network.SecurityGroupIDs[0] != "sg-1" {
+		t.Fatalf("security group IDs alias request slice: got %q", spec.Network.SecurityGroupIDs[0])
+	}
 	if spec.Container == nil || spec.Container.Replicas != 2 || len(spec.Container.PortSpecs) != 1 || len(spec.Container.Env) != 1 || len(spec.Container.VolumeMounts) != 1 || len(spec.Container.FilesystemMounts) != 1 {
 		t.Fatalf("container = %+v, want mapped ports/env/storage mounts", spec.Container)
 	}
@@ -164,6 +202,34 @@ func TestInstanceSpecFromRequestMapsProviderNeutralContainerConfig(t *testing.T)
 	}
 	if !spec.Container.WorkloadIdentity.Enabled || len(spec.Container.WorkloadIdentity.Scopes) != 1 {
 		t.Fatalf("workload identity = %+v, want enabled scope", spec.Container.WorkloadIdentity)
+	}
+}
+
+func TestInstanceSpecFromRequestNeverMapsVPCIDToNetworkAttachment(t *testing.T) {
+	network := func() *instanceNetworkRequest {
+		return &instanceNetworkRequest{VPCID: "vpc-public-id", SubnetID: "subnet-public-id"}
+	}
+	tests := []struct {
+		name    string
+		request createInstanceRequest
+	}{
+		{name: "top level", request: createInstanceRequest{Kind: "vm", Name: "vm-top-network", NetworkConfig: network()}},
+		{name: "vm config", request: createInstanceRequest{Kind: "vm", Name: "vm-network", VMConfig: &vmConfigRequest{Network: network()}}},
+		{name: "container config", request: createInstanceRequest{Kind: "container", Name: "container-network", ContainerConfig: &containerConfigRequest{Network: network()}}},
+		{name: "gpu container config", request: createInstanceRequest{Kind: "gpu_container", Name: "gpu-network", GPUContainerConfig: &gpuContainerConfigRequest{Network: network()}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec, err := instanceSpecFromRequest(tt.request, "tenant-a")
+			if err != nil {
+				t.Fatalf("instanceSpecFromRequest error = %v", err)
+			}
+			for _, attachment := range spec.Network.Attachments {
+				if attachment.NetworkID == spec.Network.VPCID {
+					t.Fatalf("attachment = %+v, ANI vpc_id must never become provider NetworkID", attachment)
+				}
+			}
+		})
 	}
 }
 
@@ -176,6 +242,7 @@ func TestWorkloadLifecycleRequestFromHTTPMapsExtendedPayload(t *testing.T) {
 		Action:           "resize",
 		CPU:              "8",
 		Memory:           "16Gi",
+		SpecID:           "gpu-a100-full",
 		SnapshotName:     "checkpoint",
 		SnapshotID:       "snap-1",
 		IncludeDataDisks: &includeDataDisks,
@@ -201,7 +268,7 @@ func TestWorkloadLifecycleRequestFromHTTPMapsExtendedPayload(t *testing.T) {
 	if lifecycle.Action != ports.WorkloadLifecycleResize || lifecycle.TenantID != "tenant-1" || lifecycle.InstanceID != "instance-1" || lifecycle.IdempotencyKey != "idem-1" {
 		t.Fatalf("lifecycle identity = %+v", lifecycle)
 	}
-	if lifecycle.Resources.CPU != "8" || lifecycle.Resources.Memory != "16Gi" || lifecycle.SnapshotID != "snap-1" || lifecycle.VolumeID != "vol-1" || lifecycle.FilesystemID != "fs-1" || lifecycle.MountPath != "/mnt/data" {
+	if lifecycle.Resources.CPU != "8" || lifecycle.Resources.Memory != "16Gi" || lifecycle.SpecID != "gpu-a100-full" || lifecycle.SnapshotID != "snap-1" || lifecycle.VolumeID != "vol-1" || lifecycle.FilesystemID != "fs-1" || lifecycle.MountPath != "/mnt/data" {
 		t.Fatalf("lifecycle resources = %+v", lifecycle)
 	}
 	if lifecycle.IncludeDataDisks == nil || !*lifecycle.IncludeDataDisks || lifecycle.ReadOnly == nil || !*lifecycle.ReadOnly || lifecycle.Replicas == nil || *lifecycle.Replicas != 3 || lifecycle.Enabled == nil || *lifecycle.Enabled {
@@ -209,6 +276,50 @@ func TestWorkloadLifecycleRequestFromHTTPMapsExtendedPayload(t *testing.T) {
 	}
 	if lifecycle.ImageID != "img-2" || lifecycle.Strategy != "rolling" || lifecycle.SecretID != "secret-1" || lifecycle.BindingType != "env" || lifecycle.EnvName != "DATABASE_URL" || len(lifecycle.SecurityGroupIDs) != 1 || lifecycle.Duration != 15*time.Minute {
 		t.Fatalf("lifecycle operation fields = %+v", lifecycle)
+	}
+}
+
+type capturingResizeService struct {
+	ports.WorkloadInstanceService
+	resizeReq *ports.WorkloadInstanceResizeRequest
+}
+
+func (s *capturingResizeService) Resize(ctx context.Context, request ports.WorkloadInstanceResizeRequest) (ports.WorkloadInstanceRecord, error) {
+	s.resizeReq = &request
+	return ports.WorkloadInstanceRecord{}, nil
+}
+
+// Regression: the gateway lifecycle handler must forward spec_id into
+// service.Resize; otherwise resize with only spec_id is rejected as "at least
+// one of cpu, memory, or spec_id is required".
+func TestInstanceLifecycleResizeForwardsSpecIDToService(t *testing.T) {
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Set("user_id", "user-a")
+		c.Next(ctx)
+	})
+	real := newInstanceAPI()
+	fake := &capturingResizeService{WorkloadInstanceService: real.service}
+	registerInstancesWithRuntime(h.Group("/api/v1"), nil, nil, false, nil, nil, nil, &InstanceRuntime{
+		Service:    fake,
+		Store:      real.store,
+		Operations: real.operations,
+	}, nil)
+
+	body := `{"action":"resize","idempotency_key":"resize-spec-a","spec_id":"gpu-a100-full"}`
+	resp := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/instances/inst-1/lifecycle",
+		&ut.Body{Body: bytes.NewBufferString(body), Len: len(body)},
+		ut.Header{Key: "Content-Type", Value: "application/json"},
+	).Result()
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode(), resp.Body())
+	}
+	if fake.resizeReq == nil {
+		t.Fatal("service.Resize was not called")
+	}
+	if fake.resizeReq.SpecID != "gpu-a100-full" {
+		t.Fatalf("Resize SpecID = %q, want gpu-a100-full", fake.resizeReq.SpecID)
 	}
 }
 
@@ -266,6 +377,7 @@ func TestInstanceResponseIncludesContractSummaryFields(t *testing.T) {
 			{ResourceType: "volume", ResourceID: "vol-1", Name: "data", MountPath: "/data", ReadOnly: true, Status: "attached"},
 		},
 		Status:    ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+		Lifecycle: ports.InstanceLifecyclePolicy{AutoStart: true},
 		CreatedAt: time.Unix(1000, 0).UTC(),
 		UpdatedAt: time.Unix(1100, 0).UTC(),
 	})
@@ -278,7 +390,7 @@ func TestInstanceResponseIncludesContractSummaryFields(t *testing.T) {
 	if err := json.Unmarshal(raw, &body); err != nil {
 		t.Fatalf("Unmarshal response error = %v", err)
 	}
-	for _, field := range []string{"description", "labels", "image", "compute", "network", "access", "storage_attachments"} {
+	for _, field := range []string{"description", "labels", "image", "compute", "network", "access", "storage_attachments", "auto_start"} {
 		if _, ok := body[field]; !ok {
 			t.Fatalf("response JSON missing %q: %s", field, raw)
 		}
@@ -299,6 +411,66 @@ func TestRefreshOneStoreStatusSkipsDeletedInstance(t *testing.T) {
 
 	if record.Status.State != ports.WorkloadStateDeleted {
 		t.Fatalf("state = %s, want deleted", record.Status.State)
+	}
+}
+
+// TestRefreshOneStoreStatusPreservesStoppedState verifies a stopped instance is
+// not overwritten by the Deployment rollout when it is scaled to 0 (which would
+// otherwise surface as "pending"). It uses spec.replicas==0 (the lifecycle stop
+// intent) as the signal, so it also recovers instances whose in-memory state was
+// already clobbered to pending, while surfacing the real replica count (0/0)
+// and rollout_status from the live Deployment.
+func TestRefreshOneStoreStatusPreservesStoppedState(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/apis/apps/v1/namespaces/"):
+			// Deployment scaled to 0 after stop: spec.replicas=0 keeps the
+			// instance classified as stopped instead of pending.
+			_, _ = w.Write([]byte(`{"metadata":{"name":"stopped-app"},"spec":{"replicas":0},"status":{"replicas":0,"readyReplicas":0,"availableReplicas":0,"updatedReplicas":0}}`))
+		case strings.HasPrefix(r.URL.Path, "/api/v1/namespaces/"):
+			_, _ = w.Write([]byte(`{"items":[]}`))
+		default:
+			http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	k8s, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
+		Host:       srv.URL,
+		HTTPClient: srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("NewKubernetesRESTClient error = %v", err)
+	}
+	store := newMemoryInstanceStore()
+	api := &instanceAPI{k8sClient: k8s, store: store}
+
+	record := ports.WorkloadInstanceRecord{
+		InstanceID: "inst_stopped",
+		TenantID:   "tenant-a",
+		Name:       "stopped-app",
+		Provider:   "kubernetes",
+		Container: &ports.ContainerInstanceStatus{
+			// stale snapshot from before stop; must be refreshed to 0/0
+			Replicas: 1, ReadyReplicas: 1,
+		},
+		Status: ports.WorkloadStatus{
+			// realistic worst case: an older refresh already clobbered it to pending
+			State: ports.WorkloadStatePending,
+		},
+	}
+
+	api.refreshOneStoreStatus(context.Background(), &record)
+
+	if record.Status.State != ports.WorkloadStateStopped {
+		t.Fatalf("state = %s, want stopped (recovered from pending via spec.replicas==0)", record.Status.State)
+	}
+	if record.Container == nil || record.Container.Replicas != 0 || record.Container.ReadyReplicas != 0 {
+		t.Fatalf("container replicas = %+v, want 0/0 from scaled-to-0 deployment", record.Container)
+	}
+	if record.Container.RolloutStatus != "stopped" {
+		t.Fatalf("rollout status = %q, want stopped", record.Container.RolloutStatus)
 	}
 }
 
@@ -623,7 +795,7 @@ func TestInstanceInstanceObservabilityResponsesUseLocalProfile(t *testing.T) {
 	}
 	requireLocalCoreDevProfile(t, metricsResponse.DevProfile, "local-instance-observability")
 
-	execSession, err := api.observability.CreateExecSession(context.Background(), ports.InstanceExecSessionCreateRequest{
+	execSession, err := api.sessions.CreateExecSession(context.Background(), ports.InstanceExecSessionCreateRequest{
 		TenantID:       "tenant-a",
 		InstanceID:     created.Ref.InstanceID,
 		IdempotencyKey: "exec-observe",
@@ -645,7 +817,7 @@ func TestInstanceInstanceObservabilityResponsesUseLocalProfile(t *testing.T) {
 }
 
 func TestInstanceInstanceObservabilityCanUseInstanceNameForProviderTarget(t *testing.T) {
-	api := newInstanceAPIWithObservability(nil, true, nil, nil, nil, nil)
+	api := newInstanceAPIWithObservability(nil, nil, true, nil, nil, nil, nil)
 	spec, err := instanceSpecFromRequest(createInstanceRequest{Kind: "container", Name: "s07-observability-live"}, "tenant-a")
 	if err != nil {
 		t.Fatalf("instanceSpecFromRequest error = %v", err)
@@ -671,9 +843,70 @@ func TestInstanceInstanceObservabilityCanUseInstanceNameForProviderTarget(t *tes
 		t.Fatalf("observability target = %q, want instance name", got)
 	}
 
-	localAPI := newInstanceAPIWithObservability(nil, false, nil, nil, nil, nil)
+	localAPI := newInstanceAPIWithObservability(nil, nil, false, nil, nil, nil, nil)
 	if got := localAPI.observabilityTargetID(record); got != created.Ref.InstanceID {
 		t.Fatalf("local observability target = %q, want instance id %q", got, created.Ref.InstanceID)
+	}
+}
+
+// instanceLogTargetID 对 VM 实例必须附加 virt-launcher- 前缀（匹配 virt-launcher pod），
+// 且不依赖 observabilityUsesInstanceName；container 实例沿用原 target 不受影响。
+func TestInstanceInstanceLogTargetIDPrefixesVirtLauncherForVM(t *testing.T) {
+	api := newInstanceAPIWithObservability(nil, nil, true, nil, nil, nil, nil)
+	vmSpec, err := instanceSpecFromRequest(createInstanceRequest{Kind: "vm", Name: "demo-log-vm"}, "tenant-a")
+	if err != nil {
+		t.Fatalf("instanceSpecFromRequest vm error = %v", err)
+	}
+	vmCreated, err := api.service.Create(context.Background(), ports.WorkloadInstanceCreateRequest{
+		IdempotencyKey:  "demo-log-vm-create",
+		Spec:            vmSpec,
+		UserID:          "user-a",
+		PermissionProof: "demo:test",
+		RequestedAt:     time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("vm Create error = %v", err)
+	}
+	vmRecord, err := api.service.Get(context.Background(), ports.WorkloadInstanceGetRequest{
+		TenantID:   "tenant-a",
+		InstanceID: vmCreated.Ref.InstanceID,
+	})
+	if err != nil {
+		t.Fatalf("vm Get error = %v", err)
+	}
+
+	// useInstanceName=true 与 false 均应得到 virt-launcher-<VM名>
+	for _, useName := range []bool{true, false} {
+		api := newInstanceAPIWithObservability(nil, nil, useName, nil, nil, nil, nil)
+		if got := api.instanceLogTargetID(vmRecord); got != "virt-launcher-demo-log-vm" {
+			t.Fatalf("vm log target (useName=%v) = %q, want \"virt-launcher-demo-log-vm\"", useName, got)
+		}
+	}
+
+	// container 实例沿用原 observability target（instance name），不受 VM 分支影响
+	ctSpec, err := instanceSpecFromRequest(createInstanceRequest{Kind: "container", Name: "demo-log-ct"}, "tenant-a")
+	if err != nil {
+		t.Fatalf("instanceSpecFromRequest container error = %v", err)
+	}
+	ctCreated, err := api.service.Create(context.Background(), ports.WorkloadInstanceCreateRequest{
+		IdempotencyKey:  "demo-log-ct-create",
+		Spec:            ctSpec,
+		UserID:          "user-a",
+		PermissionProof: "demo:test",
+		RequestedAt:     time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("container Create error = %v", err)
+	}
+	ctRecord, err := api.service.Get(context.Background(), ports.WorkloadInstanceGetRequest{
+		TenantID:   "tenant-a",
+		InstanceID: ctCreated.Ref.InstanceID,
+	})
+	if err != nil {
+		t.Fatalf("container Get error = %v", err)
+	}
+	if got := api.instanceLogTargetID(ctRecord); got != "demo-log-ct" {
+		t.Fatalf("container log target = %q, want \"demo-log-ct\"", got)
 	}
 }
 
@@ -958,6 +1191,81 @@ func TestCreateConsoleSessionNotRunningReturns422(t *testing.T) {
 	).Result()
 	if resp.StatusCode() != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want 422; body=%s", resp.StatusCode(), resp.Body())
+	}
+}
+
+func TestCreateConsoleSessionRefreshesVMStatusBeforeIssuingTicket(t *testing.T) {
+	tests := []struct {
+		name       string
+		vmiStatus  int
+		vmiPhase   string
+		vmiReason  string
+		wantStatus int
+	}{
+		{name: "vmi pending", vmiStatus: http.StatusOK, vmiPhase: "Pending", wantStatus: http.StatusUnprocessableEntity},
+		{name: "vmi failed", vmiStatus: http.StatusOK, vmiPhase: "Failed", vmiReason: "GuestPanic", wantStatus: http.StatusUnprocessableEntity},
+		{name: "observation unavailable", vmiStatus: http.StatusInternalServerError, wantStatus: http.StatusServiceUnavailable},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/virtualmachines/vm-console"):
+					_, _ = w.Write([]byte(`{"kind":"VirtualMachine","status":{"printableStatus":"Running"}}`))
+				case strings.HasSuffix(r.URL.Path, "/virtualmachineinstances/vm-console"):
+					if tt.vmiStatus != http.StatusOK {
+						http.Error(w, `{"message":"provider unavailable"}`, tt.vmiStatus)
+						return
+					}
+					_, _ = w.Write([]byte(`{"kind":"VirtualMachineInstance","status":{"phase":"` + tt.vmiPhase + `","reason":"` + tt.vmiReason + `"}}`))
+				default:
+					http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
+				}
+			}))
+			defer srv.Close()
+
+			k8s, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{Host: srv.URL, HTTPClient: srv.Client()})
+			if err != nil {
+				t.Fatalf("NewKubernetesRESTClient error = %v", err)
+			}
+			issuer := &recordingInstanceSessionIssuer{}
+			api := newInstanceAPIWithObservability(nil, issuer, false, nil, k8s, nil, nil)
+			record := ports.WorkloadInstanceRecord{
+				TenantID:     "tenant-a",
+				InstanceID:   "inst_vm_console",
+				Name:         "vm-console",
+				Kind:         ports.WorkloadKindVM,
+				Provider:     "kubevirt",
+				ResourceRefs: []string{"kubevirt/VirtualMachine/vm-console"},
+				Status:       ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+				Access:       ports.InstanceAccessSummary{ConsoleAvailable: true, SSHAvailable: true},
+			}
+			if err := api.store.UpsertStatus(context.Background(), record); err != nil {
+				t.Fatalf("UpsertStatus error = %v", err)
+			}
+
+			h := server.New()
+			h.Use(func(ctx context.Context, c *app.RequestContext) {
+				c.Set("tenant_id", "tenant-a")
+				c.Set("user_id", "user-a")
+				c.Next(ctx)
+			})
+			h.Group("/api/v1").POST("/instances/:instance_id/console", api.createConsoleSession)
+			body := `{"protocol":"vnc"}`
+			resp := ut.PerformRequest(h.Engine, http.MethodPost, "/api/v1/instances/"+record.InstanceID+"/console",
+				&ut.Body{Body: bytes.NewBufferString(body), Len: len(body)},
+				ut.Header{Key: "Content-Type", Value: "application/json"},
+			).Result()
+
+			if resp.StatusCode() != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body=%s", resp.StatusCode(), tt.wantStatus, resp.Body())
+			}
+			if issuer.consoleCalls != 0 {
+				t.Fatalf("console issuer calls = %d, want 0", issuer.consoleCalls)
+			}
+		})
 	}
 }
 
@@ -1642,6 +1950,10 @@ func (s *metricsKindSpy) CreateConsoleSession(ctx context.Context, request ports
 	return ports.InstanceConsoleSessionRecord{}, nil
 }
 
+func (s *metricsKindSpy) StreamLogs(ctx context.Context, request ports.InstanceLogStreamRequest, sink func(ports.InstanceLogEntry) error) error {
+	return ports.ErrNotConfigured
+}
+
 func (s *metricsKindSpy) capturedKindValue() ports.WorkloadKind {
 	s.capturedMu.Lock()
 	defer s.capturedMu.Unlock()
@@ -1760,5 +2072,452 @@ func TestInstanceCreatePreconditionCodeMapsImageGateReasons(t *testing.T) {
 		if ok != tc.ok || code != tc.code {
 			t.Fatalf("instanceCreatePreconditionCode(%v) = (%q, %v), want (%q, %v)", tc.err, code, ok, tc.code, tc.ok)
 		}
+	}
+}
+
+// TestRefreshOneStoreStatusHydratesRuntimeFields 验证 refreshOneStoreStatus 从真实
+// Pod 回读运行时字段：compute.node_name、network.private_ip、endpoint、
+// network.endpoints 以及运行态 container/gpu_container 的 access.exec_available。
+// 修复前这些字段只在创建时快照，list/detail 返回空，前端看不到节点/私网IP/终端。
+func TestRefreshOneStoreStatusHydratesRuntimeFields(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/apis/apps/v1/namespaces/"):
+			_, _ = w.Write([]byte(`{"metadata":{"name":"inst-1"},"status":{"replicas":1,"readyReplicas":1,"availableReplicas":1,"updatedReplicas":1}}`))
+		case strings.HasPrefix(r.URL.Path, "/api/v1/namespaces/"):
+			_, _ = w.Write([]byte(`{"items":[{"metadata":{"name":"inst-1-pod"},"spec":{"nodeName":"dev-phys-02"},"status":{"nodeName":"dev-phys-02","podIP":"10.10.1.77","conditions":[]}}]}`))
+		default:
+			http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	k8s, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
+		Host:       srv.URL,
+		HTTPClient: srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("NewKubernetesRESTClient error = %v", err)
+	}
+	store := newMemoryInstanceStore()
+	api := &instanceAPI{k8sClient: k8s, store: store}
+
+	record := ports.WorkloadInstanceRecord{
+		InstanceID: "inst_1",
+		TenantID:   "tenant-a",
+		Name:       "inst-1",
+		Kind:       ports.WorkloadKindGPUContainer,
+		Provider:   "kubernetes",
+		Status: ports.WorkloadStatus{
+			State: ports.WorkloadStateProvisioning,
+		},
+	}
+
+	api.refreshOneStoreStatus(context.Background(), &record)
+
+	if record.Status.State != ports.WorkloadStateRunning {
+		t.Fatalf("state = %s, want running", record.Status.State)
+	}
+	if record.Compute.NodeName != "dev-phys-02" {
+		t.Fatalf("compute.node_name = %q, want dev-phys-02", record.Compute.NodeName)
+	}
+	if record.Network.PrivateIP != "10.10.1.77" {
+		t.Fatalf("network.private_ip = %q, want 10.10.1.77", record.Network.PrivateIP)
+	}
+	if record.Status.Endpoint != "10.10.1.77" {
+		t.Fatalf("endpoint = %q, want 10.10.1.77", record.Status.Endpoint)
+	}
+	if len(record.Network.Endpoints) != 1 || record.Network.Endpoints[0].Address != "10.10.1.77" {
+		t.Fatalf("network.endpoints = %+v, want a private endpoint for 10.10.1.77", record.Network.Endpoints)
+	}
+	if !record.Access.ExecAvailable {
+		t.Fatalf("access.exec_available = false, want true for a running gpu_container")
+	}
+}
+
+// TestRefreshOneStoreStatusDoesNotSetExecForVM verifies exec_available is only
+// hydrated for container/gpu_container kinds, not VM.
+func TestRefreshOneStoreStatusDoesNotSetExecForVM(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/apis/apps/v1/namespaces/"):
+			_, _ = w.Write([]byte(`{"metadata":{"name":"vm-1"},"status":{"replicas":1,"readyReplicas":1,"availableReplicas":1,"updatedReplicas":1}}`))
+		case strings.HasPrefix(r.URL.Path, "/api/v1/namespaces/"):
+			_, _ = w.Write([]byte(`{"items":[{"metadata":{"name":"vm-1-pod"},"spec":{"nodeName":"dev-phys-02"},"status":{"nodeName":"dev-phys-02","podIP":"10.10.1.78","conditions":[]}}]}`))
+		default:
+			http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	k8s, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
+		Host:       srv.URL,
+		HTTPClient: srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("NewKubernetesRESTClient error = %v", err)
+	}
+	api := &instanceAPI{k8sClient: k8s, store: newMemoryInstanceStore()}
+
+	record := ports.WorkloadInstanceRecord{
+		InstanceID: "vm_1",
+		TenantID:   "tenant-a",
+		Name:       "vm-1",
+		Kind:       ports.WorkloadKindVM,
+		Provider:   "kubernetes",
+		Status: ports.WorkloadStatus{
+			State: ports.WorkloadStateProvisioning,
+		},
+	}
+
+	api.refreshOneStoreStatus(context.Background(), &record)
+
+	if record.Status.State != ports.WorkloadStateRunning {
+		t.Fatalf("state = %s, want running", record.Status.State)
+	}
+	if record.Compute.NodeName != "dev-phys-02" {
+		t.Fatalf("compute.node_name = %q, want dev-phys-02", record.Compute.NodeName)
+	}
+	if record.Access.ExecAvailable {
+		t.Fatalf("access.exec_available = true, want false for VM")
+	}
+}
+
+func TestRefreshOneVMStoreStatusMergesProviderObservation(t *testing.T) {
+	observedAt := time.Date(2026, 9, 7, 10, 30, 0, 0, time.UTC)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/virtualmachines/vm-1"):
+			_, _ = w.Write([]byte(`{"kind":"VirtualMachine","status":{"printableStatus":"Running"}}`))
+		case strings.HasSuffix(r.URL.Path, "/virtualmachineinstances/vm-1"):
+			_, _ = w.Write([]byte(`{"kind":"VirtualMachineInstance","status":{"phase":"Running","reason":"GuestReady","nodeName":"dev-phys-02","interfaces":[{"name":"default","ipAddress":"10.60.0.8","primary":true}]}}`))
+		default:
+			http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	k8s, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
+		Host:       srv.URL,
+		HTTPClient: srv.Client(),
+		Now:        func() time.Time { return observedAt },
+	})
+	if err != nil {
+		t.Fatalf("NewKubernetesRESTClient error = %v", err)
+	}
+	store := newMemoryInstanceStore()
+	api := &instanceAPI{k8sClient: k8s, store: store}
+	record := ports.WorkloadInstanceRecord{
+		TenantID:     "tenant-a",
+		InstanceID:   "inst_vm_1",
+		Name:         "vm-1",
+		Kind:         ports.WorkloadKindVM,
+		Provider:     "kubevirt",
+		ResourceRefs: []string{"kubevirt/VirtualMachine/vm-1"},
+		Status: ports.WorkloadStatus{
+			State:     ports.WorkloadStateProvisioning,
+			Reason:    "stale provider snapshot",
+			UpdatedAt: time.Unix(1, 0).UTC(),
+		},
+		Access: ports.InstanceAccessSummary{
+			Reason: "instance is not ready",
+		},
+		SSH:       &ports.VMSSHConnectionInfo{Ready: false, Reason: "waiting for guest"},
+		UpdatedAt: time.Unix(1, 0).UTC(),
+	}
+
+	if err := api.refreshOneVMStoreStatus(context.Background(), &record); err != nil {
+		t.Fatalf("refreshOneVMStoreStatus error = %v", err)
+	}
+
+	if record.Status.State != ports.WorkloadStateRunning || record.Status.Reason != "GuestReady" {
+		t.Fatalf("status = %+v, want running/GuestReady", record.Status)
+	}
+	if record.Status.NodeName != "dev-phys-02" || record.Compute.NodeName != "dev-phys-02" {
+		t.Fatalf("node names = status:%q compute:%q, want dev-phys-02", record.Status.NodeName, record.Compute.NodeName)
+	}
+	if len(record.Status.Networks) != 1 || record.Status.Networks[0].IPAddress != "10.60.0.8" || record.Network.PrivateIP != "10.60.0.8" {
+		t.Fatalf("networks = status:%+v private_ip:%q, want VMI network", record.Status.Networks, record.Network.PrivateIP)
+	}
+	if record.Status.UpdatedAt != observedAt || record.UpdatedAt != observedAt {
+		t.Fatalf("updated_at = status:%s record:%s, want %s", record.Status.UpdatedAt, record.UpdatedAt, observedAt)
+	}
+	if !record.Access.ConsoleAvailable || !record.Access.SSHAvailable || record.Access.Reason != "" {
+		t.Fatalf("access = %+v, want console/ssh available without stale reason", record.Access)
+	}
+	if record.SSH == nil || !record.SSH.Ready || record.SSH.Reason != "" {
+		t.Fatalf("ssh = %+v, want ready without stale reason", record.SSH)
+	}
+	persisted, err := store.Get(context.Background(), record.TenantID, record.InstanceID)
+	if err != nil {
+		t.Fatalf("store.Get error = %v", err)
+	}
+	if persisted.Status.State != ports.WorkloadStateRunning || persisted.Status.UpdatedAt != observedAt || !persisted.Access.ConsoleAvailable {
+		t.Fatalf("persisted record = %+v, want refreshed VM status", persisted)
+	}
+}
+
+func TestRefreshOneVMStoreStatusPreservesLifecycleStateAgainstLateRunningVMI(t *testing.T) {
+	observedAt := time.Date(2026, 9, 7, 11, 0, 0, 0, time.UTC)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/virtualmachines/vm-lifecycle"):
+			_, _ = w.Write([]byte(`{"kind":"VirtualMachine","status":{"printableStatus":"Running"}}`))
+		case strings.HasSuffix(r.URL.Path, "/virtualmachineinstances/vm-lifecycle"):
+			_, _ = w.Write([]byte(`{"kind":"VirtualMachineInstance","status":{"phase":"Running","nodeName":"node-late"}}`))
+		default:
+			http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	k8s, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
+		Host: srv.URL, HTTPClient: srv.Client(), Now: func() time.Time { return observedAt },
+	})
+	if err != nil {
+		t.Fatalf("NewKubernetesRESTClient error = %v", err)
+	}
+
+	for _, state := range []ports.WorkloadState{ports.WorkloadStateStopping, ports.WorkloadStateStopped} {
+		t.Run(string(state), func(t *testing.T) {
+			store := newMemoryInstanceStore()
+			api := &instanceAPI{k8sClient: k8s, store: store}
+			record := ports.WorkloadInstanceRecord{
+				TenantID:     "tenant-a",
+				InstanceID:   "inst_vm_lifecycle_" + string(state),
+				Name:         "vm-lifecycle",
+				Kind:         ports.WorkloadKindVM,
+				Provider:     "kubevirt",
+				ResourceRefs: []string{"kubevirt/VirtualMachine/vm-lifecycle"},
+				Status:       ports.WorkloadStatus{State: state},
+				Access:       ports.InstanceAccessSummary{ConsoleAvailable: true, SSHAvailable: true},
+				SSH:          &ports.VMSSHConnectionInfo{Ready: true},
+			}
+
+			if err := api.refreshOneVMStoreStatus(context.Background(), &record); err != nil {
+				t.Fatalf("refreshOneVMStoreStatus error = %v", err)
+			}
+			if record.Status.State != state {
+				t.Fatalf("state = %s, want lifecycle state %s", record.Status.State, state)
+			}
+			if record.Access.ConsoleAvailable || record.Access.SSHAvailable || record.SSH == nil || record.SSH.Ready {
+				t.Fatalf("access=%+v ssh=%+v, want disabled for %s", record.Access, record.SSH, state)
+			}
+			wantReason := "instance is " + string(state)
+			if record.Access.Reason != wantReason || record.SSH.Reason != wantReason {
+				t.Fatalf("access reason=%q ssh reason=%q, want %q", record.Access.Reason, record.SSH.Reason, wantReason)
+			}
+		})
+	}
+}
+
+func TestRefreshOneVMStoreStatusSkipsDeletingAndDeleted(t *testing.T) {
+	requestCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		http.Error(w, "provider must not be called", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	k8s, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{Host: srv.URL, HTTPClient: srv.Client()})
+	if err != nil {
+		t.Fatalf("NewKubernetesRESTClient error = %v", err)
+	}
+
+	for _, state := range []ports.WorkloadState{ports.WorkloadStateDeleting, ports.WorkloadStateDeleted} {
+		record := ports.WorkloadInstanceRecord{
+			TenantID: "tenant-a", InstanceID: "inst_vm_terminal", Name: "vm-terminal",
+			Kind: ports.WorkloadKindVM, Provider: "kubevirt", ResourceRefs: []string{"kubevirt/VirtualMachine/vm-terminal"},
+			Status: ports.WorkloadStatus{State: state, UpdatedAt: time.Unix(7, 0).UTC()},
+		}
+		api := &instanceAPI{k8sClient: k8s, store: newMemoryInstanceStore()}
+		if err := api.refreshOneVMStoreStatus(context.Background(), &record); err != nil {
+			t.Fatalf("refreshOneVMStoreStatus(%s) error = %v", state, err)
+		}
+		if record.Status.State != state || record.Status.UpdatedAt != time.Unix(7, 0).UTC() {
+			t.Fatalf("record = %+v, want unchanged %s", record, state)
+		}
+	}
+	if requestCount != 0 {
+		t.Fatalf("provider request count = %d, want 0", requestCount)
+	}
+}
+
+func TestRefreshOneVMStoreStatusFailedDisablesAccess(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/virtualmachines/vm-failed"):
+			_, _ = w.Write([]byte(`{"kind":"VirtualMachine","status":{"printableStatus":"Running"}}`))
+		case strings.HasSuffix(r.URL.Path, "/virtualmachineinstances/vm-failed"):
+			_, _ = w.Write([]byte(`{"kind":"VirtualMachineInstance","status":{"phase":"Failed","reason":"GuestPanic"}}`))
+		default:
+			http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	k8s, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{Host: srv.URL, HTTPClient: srv.Client()})
+	if err != nil {
+		t.Fatalf("NewKubernetesRESTClient error = %v", err)
+	}
+	record := ports.WorkloadInstanceRecord{
+		TenantID: "tenant-a", InstanceID: "inst_vm_failed", Name: "vm-failed",
+		Kind: ports.WorkloadKindVM, Provider: "kubevirt", ResourceRefs: []string{"kubevirt/VirtualMachine/vm-failed"},
+		Status: ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+		Access: ports.InstanceAccessSummary{ConsoleAvailable: true, SSHAvailable: true},
+		SSH:    &ports.VMSSHConnectionInfo{Ready: true},
+	}
+	api := &instanceAPI{k8sClient: k8s, store: newMemoryInstanceStore()}
+	if err := api.refreshOneVMStoreStatus(context.Background(), &record); err != nil {
+		t.Fatalf("refreshOneVMStoreStatus error = %v", err)
+	}
+	if record.Status.State != ports.WorkloadStateFailed || record.Status.Reason != "GuestPanic" {
+		t.Fatalf("status = %+v, want failed/GuestPanic", record.Status)
+	}
+	if record.Access.ConsoleAvailable || record.Access.SSHAvailable || record.Access.Reason != "GuestPanic" || record.SSH == nil || record.SSH.Ready {
+		t.Fatalf("access=%+v ssh=%+v, want disabled with GuestPanic", record.Access, record.SSH)
+	}
+}
+
+func TestRefreshOneVMStoreStatusObservationFailurePreservesRecord(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "provider unavailable", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	k8s, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{Host: srv.URL, HTTPClient: srv.Client()})
+	if err != nil {
+		t.Fatalf("NewKubernetesRESTClient error = %v", err)
+	}
+	oldTime := time.Unix(11, 0).UTC()
+	record := ports.WorkloadInstanceRecord{
+		TenantID: "tenant-a", InstanceID: "inst_vm_preserve", Name: "vm-preserve",
+		Kind: ports.WorkloadKindVM, Provider: "kubevirt", ResourceRefs: []string{"kubevirt/VirtualMachine/vm-preserve"},
+		Status:  ports.WorkloadStatus{State: ports.WorkloadStateRunning, Reason: "known-good", NodeName: "node-old", UpdatedAt: oldTime},
+		Compute: ports.InstanceComputeSummary{NodeName: "node-old"},
+		Network: ports.InstanceNetworkSummary{PrivateIP: "10.60.0.9"},
+		Access:  ports.InstanceAccessSummary{ConsoleAvailable: true, SSHAvailable: true},
+		SSH:     &ports.VMSSHConnectionInfo{Ready: true}, UpdatedAt: oldTime,
+	}
+	store := newMemoryInstanceStore()
+	if err := store.UpsertStatus(context.Background(), record); err != nil {
+		t.Fatalf("initial UpsertStatus error = %v", err)
+	}
+	api := &instanceAPI{k8sClient: k8s, store: store}
+	if err := api.refreshOneVMStoreStatus(context.Background(), &record); err == nil {
+		t.Fatal("refreshOneVMStoreStatus error = nil, want provider error")
+	}
+	if record.Status.State != ports.WorkloadStateRunning || record.Status.Reason != "known-good" || record.Status.NodeName != "node-old" || record.Status.UpdatedAt != oldTime || record.Network.PrivateIP != "10.60.0.9" || !record.Access.ConsoleAvailable || record.SSH == nil || !record.SSH.Ready {
+		t.Fatalf("record changed after failed observation: %+v", record)
+	}
+	persisted, err := store.Get(context.Background(), record.TenantID, record.InstanceID)
+	if err != nil {
+		t.Fatalf("store.Get error = %v", err)
+	}
+	if persisted.Status.Reason != "known-good" || persisted.Status.UpdatedAt != oldTime || persisted.Network.PrivateIP != "10.60.0.9" {
+		t.Fatalf("persisted record changed after failed observation: %+v", persisted)
+	}
+}
+
+func TestRefreshOneVMStoreStatusFallsBackToCurrentTime(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "/virtualmachines/"):
+			_, _ = w.Write([]byte(`{"kind":"VirtualMachine","status":{"printableStatus":"Running"}}`))
+		case strings.Contains(r.URL.Path, "/virtualmachineinstances/"):
+			_, _ = w.Write([]byte(`{"kind":"VirtualMachineInstance","status":{"phase":"Running"}}`))
+		default:
+			http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	k8s, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
+		Host: srv.URL, HTTPClient: srv.Client(), Now: func() time.Time { return time.Time{} },
+	})
+	if err != nil {
+		t.Fatalf("NewKubernetesRESTClient error = %v", err)
+	}
+	record := ports.WorkloadInstanceRecord{
+		TenantID: "tenant-a", InstanceID: "inst_vm_clock", Name: "vm-clock", Kind: ports.WorkloadKindVM,
+		Provider: "kubevirt", ResourceRefs: []string{"kubevirt/VirtualMachine/vm-clock"},
+		Status: ports.WorkloadStatus{State: ports.WorkloadStateProvisioning},
+	}
+	api := &instanceAPI{k8sClient: k8s, store: newMemoryInstanceStore()}
+	before := time.Now().UTC()
+	if err := api.refreshOneVMStoreStatus(context.Background(), &record); err != nil {
+		t.Fatalf("refreshOneVMStoreStatus error = %v", err)
+	}
+	after := time.Now().UTC()
+	if record.UpdatedAt.Before(before) || record.UpdatedAt.After(after) || record.Status.UpdatedAt != record.UpdatedAt {
+		t.Fatalf("updated_at = status:%s record:%s, want current time between %s and %s", record.Status.UpdatedAt, record.UpdatedAt, before, after)
+	}
+}
+
+func TestVMReadRepairDispatchesGetListAndTaskObservation(t *testing.T) {
+	observedAt := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/virtualmachines/vm-dispatch"):
+			_, _ = w.Write([]byte(`{"kind":"VirtualMachine","status":{"printableStatus":"Running"}}`))
+		case strings.HasSuffix(r.URL.Path, "/virtualmachineinstances/vm-dispatch"):
+			_, _ = w.Write([]byte(`{"kind":"VirtualMachineInstance","status":{"phase":"Running","nodeName":"node-dispatch"}}`))
+		case strings.HasSuffix(r.URL.Path, "/deployments"):
+			_, _ = w.Write([]byte(`{"items":[]}`))
+		default:
+			http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	k8s, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
+		Host: srv.URL, HTTPClient: srv.Client(), Now: func() time.Time { return observedAt },
+	})
+	if err != nil {
+		t.Fatalf("NewKubernetesRESTClient error = %v", err)
+	}
+	api := newInstanceAPIWithObservability(nil, nil, false, nil, k8s, nil, nil)
+	staleRecord := ports.WorkloadInstanceRecord{
+		TenantID: "tenant-a", InstanceID: "inst_vm_dispatch", Name: "vm-dispatch", Kind: ports.WorkloadKindVM,
+		Provider: "kubevirt", ResourceRefs: []string{"kubevirt/VirtualMachine/vm-dispatch"},
+		Status: ports.WorkloadStatus{State: ports.WorkloadStateProvisioning}, CreatedAt: time.Unix(1, 0).UTC(), UpdatedAt: time.Unix(1, 0).UTC(),
+	}
+	reset := func() {
+		t.Helper()
+		if err := api.store.UpsertStatus(context.Background(), staleRecord); err != nil {
+			t.Fatalf("UpsertStatus error = %v", err)
+		}
+	}
+
+	h := server.New()
+	h.Use(func(ctx context.Context, c *app.RequestContext) {
+		c.Set("tenant_id", "tenant-a")
+		c.Set("user_id", "user-a")
+		c.Next(ctx)
+	})
+	v1 := h.Group("/api/v1")
+	v1.GET("/instances", api.list)
+	v1.GET("/instances/:instance_id", api.get)
+
+	reset()
+	getResp := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/instances/"+staleRecord.InstanceID, nil).Result()
+	if getResp.StatusCode() != http.StatusOK || !bytes.Contains(getResp.Body(), []byte(`"status":"running"`)) {
+		t.Fatalf("GET status=%d body=%s, want refreshed running VM", getResp.StatusCode(), getResp.Body())
+	}
+
+	reset()
+	listResp := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/instances?kind=vm&state=running", nil).Result()
+	if listResp.StatusCode() != http.StatusOK || !bytes.Contains(listResp.Body(), []byte(staleRecord.InstanceID)) || !bytes.Contains(listResp.Body(), []byte(`"status":"running"`)) {
+		t.Fatalf("LIST status=%d body=%s, want refreshed VM included by running filter", listResp.StatusCode(), listResp.Body())
+	}
+
+	reset()
+	observed, err := api.observeInstance(context.Background(), staleRecord.TenantID, staleRecord.InstanceID)
+	if err != nil {
+		t.Fatalf("observeInstance error = %v", err)
+	}
+	if observed.Status.State != ports.WorkloadStateRunning || observed.Status.UpdatedAt != observedAt || observed.Compute.NodeName != "node-dispatch" {
+		t.Fatalf("task observation = %+v, want refreshed running VM", observed)
 	}
 }

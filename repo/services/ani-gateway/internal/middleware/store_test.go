@@ -117,6 +117,20 @@ func (s *memoryGatewayStoreForTest) Increment(_ context.Context, key string, ttl
 	return current, nil
 }
 
+func (s *memoryGatewayStoreForTest) TTL(_ context.Context, key string) (time.Duration, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry, ok := s.entries[key]
+	if !ok || entry.expired() {
+		delete(s.entries, key)
+		return 0, ports.ErrNotFound
+	}
+	if entry.expiresAt.IsZero() {
+		return -1, nil
+	}
+	return time.Until(entry.expiresAt), nil
+}
+
 func (s *memoryGatewayStoreForTest) Exists(_ context.Context, key string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

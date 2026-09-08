@@ -356,6 +356,12 @@ type NetworkResourceStore interface {
 	UpsertLoadBalancer(ctx context.Context, record NetworkLoadBalancerRecord) error
 	UpsertRoute(ctx context.Context, record NetworkRouteRecord) error
 	UpdateResourceState(ctx context.Context, request NetworkResourceStateUpdateRequest) error
+
+	GetVPC(ctx context.Context, tenantID string, vpcID string) (NetworkVPCRecord, error)
+	ListVPCs(ctx context.Context, tenantID string) ([]NetworkVPCRecord, error)
+	GetSubnet(ctx context.Context, tenantID string, subnetID string) (NetworkSubnetRecord, error)
+	ListSubnets(ctx context.Context, tenantID string) ([]NetworkSubnetRecord, error)
+	GetSecurityGroup(ctx context.Context, tenantID string, securityGroupID string) (NetworkSecurityGroupRecord, error)
 }
 
 type NetworkProviderRenderer interface {

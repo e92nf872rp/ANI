@@ -2,9 +2,13 @@ package repository
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,6 +22,18 @@ const setTenantSQL = `SELECT set_config('app.current_tenant_id', $1, true)`
 
 const lockIdempotencySQL = `
 SELECT pg_advisory_xact_lock(hashtextextended($1, 0))
+`
+
+const findAccessPolicyMutationSQL = `
+SELECT request_hash, result_snapshot
+FROM inference_access_policy_mutations
+WHERE tenant_id = $1 AND operation_scope = $2 AND idempotency_key = $3
+`
+
+const insertAccessPolicyMutationSQL = `
+INSERT INTO inference_access_policy_mutations (
+    tenant_id, operation_scope, idempotency_key, request_hash, result_snapshot
+) VALUES ($1, $2, $3, $4, $5::jsonb)
 `
 
 const findReplaySQL = `
@@ -66,7 +82,10 @@ SELECT service.id, service.tenant_id, service.name, service.model_version_id,
        service.ready_replicas,
        COALESCE(service.current_operation_id, '00000000-0000-0000-0000-000000000000'::uuid),
        COALESCE(active.type, ''), COALESCE(active.state, ''),
-       service.created_at, service.updated_at, service.deleted_at, service.legacy_quarantined
+       service.created_at, service.updated_at, service.deleted_at, service.legacy_quarantined,
+       service.publication_desired, service.publication_generation,
+       service.publication_observed_generation, service.publication_phase,
+       COALESCE(service.publication_last_error, ''), service.publication_updated_at
 FROM inference_services AS service
 LEFT JOIN inference_operations AS active
   ON active.id = service.current_operation_id AND active.state IN ('pending', 'running')
@@ -89,7 +108,10 @@ SELECT service.id, service.tenant_id, service.name, service.model_version_id,
        COALESCE((SELECT operation.state FROM inference_operations AS operation
                  WHERE operation.id = service.current_operation_id
                    AND operation.state IN ('pending', 'running')), ''),
-       service.created_at, service.updated_at, service.deleted_at, service.legacy_quarantined
+       service.created_at, service.updated_at, service.deleted_at, service.legacy_quarantined,
+       service.publication_desired, service.publication_generation,
+       service.publication_observed_generation, service.publication_phase,
+       COALESCE(service.publication_last_error, ''), service.publication_updated_at
 FROM inference_services AS service
 WHERE service.tenant_id = $1 AND service.id = $2 AND service.deleted_at IS NULL
 FOR UPDATE
@@ -102,7 +124,10 @@ SELECT service.id, service.tenant_id, service.name, service.model_version_id,
        service.desired_state, service.generation, service.observed_generation,
        service.desired_spec, service.applied_spec, service.ready_replicas,
        COALESCE(service.current_operation_id, '00000000-0000-0000-0000-000000000000'::uuid),
-       service.created_at, service.updated_at, service.deleted_at, service.legacy_quarantined
+       service.created_at, service.updated_at, service.deleted_at, service.legacy_quarantined,
+       service.publication_desired, service.publication_generation,
+       service.publication_observed_generation, service.publication_phase,
+       COALESCE(service.publication_last_error, ''), service.publication_updated_at
 FROM inference_services AS service
 WHERE service.tenant_id = $1 AND service.deleted_at IS NULL
 ORDER BY service.created_at, service.id
@@ -113,13 +138,19 @@ UPDATE inference_operations
 SET state = 'cancelled', lease_owner = NULL, lease_until = NULL, lease_token = NULL,
     completed_at = $4, updated_at = $4
 WHERE tenant_id = $1 AND service_id = $2 AND id = $3
-  AND state IN ('pending', 'running')
+  AND state = 'pending'
 `
 
 const updateServiceTransitionSQL = `
 UPDATE inference_services
 SET desired_spec = $3, desired_state = $4, generation = $5,
-    current_operation_id = $6, status = $7, updated_at = $8
+    current_operation_id = $6, status = $7, updated_at = $8,
+    publication_desired = CASE WHEN $9 THEN 'unpublished' ELSE publication_desired END,
+    publication_generation = CASE WHEN $9 THEN $5 ELSE publication_generation END,
+    publication_phase = CASE WHEN $9 THEN 'pending' ELSE publication_phase END,
+    publication_last_error = CASE WHEN $9 THEN NULL ELSE publication_last_error END,
+    publication_updated_at = CASE WHEN $9 THEN $8 ELSE publication_updated_at END,
+    invocation_url = CASE WHEN $9 THEN NULL ELSE invocation_url END
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
 `
 
@@ -176,35 +207,166 @@ RETURNING operation.id, operation.tenant_id, operation.service_id, operation.typ
           operation.updated_at, operation.completed_at
 `
 
-const applyObservationSQL = `
+const claimPublicationSQL = `
+WITH candidate AS (
+    SELECT service.id
+    FROM inference_services AS service
+    WHERE service.deleted_at IS NULL
+      AND (service.publication_generation <> service.publication_observed_generation
+           OR service.publication_phase IN ('pending', 'publishing', 'unpublishing', 'failed'))
+      AND (service.publication_lease_until IS NULL OR service.publication_lease_until <= $2)
+    ORDER BY service.publication_updated_at, service.id
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+)
+UPDATE inference_services AS service
+SET publication_phase = CASE WHEN service.publication_desired = 'published' THEN 'publishing' ELSE 'unpublishing' END,
+    publication_lease_owner = $1,
+    publication_lease_until = $3,
+    publication_lease_token = gen_random_uuid(),
+    publication_updated_at = $2
+FROM candidate
+WHERE service.id = candidate.id
+RETURNING service.tenant_id, service.id, service.publication_generation, service.publication_desired,
+          service.served_model_name,
+          COALESCE(NULLIF(service.desired_spec #>> '{execution_profile,task}', ''), 'generate'),
+          COALESCE(service.runtime_endpoint, ''), service.publication_lease_token
+`
+
+const completePublicationSQL = `
 UPDATE inference_services
+SET publication_observed_generation = $3,
+    publication_phase = $6,
+    invocation_url = CASE
+        WHEN $6 = 'published' AND publication_desired = 'published' THEN NULLIF($7, '')
+        WHEN $6 = 'unpublished' AND publication_desired = 'unpublished' THEN NULL
+        ELSE invocation_url
+    END,
+    publication_lease_owner = NULL,
+    publication_lease_until = NULL,
+    publication_lease_token = NULL,
+    publication_last_error = NULL,
+    publication_updated_at = $8
+WHERE tenant_id = $1 AND id = $2 AND publication_generation = $3
+  AND publication_lease_token = $4 AND publication_lease_until > $5
+  AND ((publication_desired = 'published' AND publication_phase = 'publishing' AND $6 = 'published')
+       OR (publication_desired = 'unpublished' AND publication_phase = 'unpublishing' AND $6 = 'unpublished'))
+`
+
+const renewPublicationSQL = `
+UPDATE inference_services
+SET publication_lease_until = $5
+WHERE tenant_id = $1 AND id = $2 AND publication_generation = $3
+  AND publication_lease_token = $4 AND publication_lease_until > $6
+  AND publication_phase IN ('publishing', 'unpublishing')
+`
+
+const failPublicationSQL = `
+UPDATE inference_services
+SET publication_phase = 'failed',
+    invocation_url = CASE WHEN publication_desired = 'published' THEN NULL ELSE invocation_url END,
+    publication_lease_owner = NULL,
+    publication_lease_until = NULL,
+    publication_lease_token = NULL,
+    publication_last_error = $5,
+    publication_updated_at = $6
+WHERE tenant_id = $1 AND id = $2 AND publication_generation = $3
+  AND publication_lease_token = $4 AND publication_lease_until > $6
+`
+
+const publicationWithdrawnSQL = `
+SELECT EXISTS (
+    SELECT 1
+    FROM inference_services
+    WHERE tenant_id = $1 AND id = $2 AND publication_generation = $3
+      AND publication_observed_generation = $3
+      AND publication_desired = 'unpublished' AND publication_phase = 'unpublished'
+      AND invocation_url IS NULL AND deleted_at IS NULL
+)
+`
+
+const resolvePublishedServiceSQL = `
+SELECT service.id, service.tenant_id, service.name, service.model_version_id,
+       service.served_model_name, service.model_display_snapshot,
+       service.status, COALESCE(service.status_reason, ''), COALESCE(service.status_message, ''),
+       service.desired_state, service.generation, service.observed_generation,
+       service.desired_spec, service.applied_spec,
+       COALESCE(service.runtime_ref, '00000000-0000-0000-0000-000000000000'::uuid),
+       COALESCE(service.runtime_endpoint, ''), COALESCE(service.invocation_url, ''),
+       service.ready_replicas,
+       COALESCE(service.current_operation_id, '00000000-0000-0000-0000-000000000000'::uuid),
+       '' AS active_type, '' AS active_state,
+       service.created_at, service.updated_at, service.deleted_at, service.legacy_quarantined,
+       service.publication_desired, service.publication_generation,
+       service.publication_observed_generation, service.publication_phase,
+       COALESCE(service.publication_last_error, ''), service.publication_updated_at
+FROM inference_services AS service
+WHERE service.tenant_id = $1
+  AND service.served_model_name = $2
+  AND service.deleted_at IS NULL
+  AND (service.status = 'running'
+      OR (service.status = 'deploying'
+          AND EXISTS (
+              SELECT 1
+              FROM inference_operations AS operation
+              WHERE operation.id = service.current_operation_id
+                AND operation.tenant_id = service.tenant_id
+                AND operation.service_id = service.id
+                AND operation.type = 'scale'
+                AND operation.state IN ('pending', 'running')
+                AND (service.generation = operation.target_generation
+                     OR service.generation = operation.rollback_generation)
+          )
+      )
+  )
+  AND service.desired_state = 'running'
+  AND service.publication_desired = 'published'
+  AND service.publication_phase = 'published'
+  AND service.publication_generation = service.publication_observed_generation
+  AND service.invocation_url IS NOT NULL
+LIMIT 1
+`
+
+const applyObservationSQL = `
+UPDATE inference_services AS service
 SET status = $5,
     applied_spec = CASE WHEN $11 THEN $6 ELSE applied_spec END,
     runtime_ref = NULLIF($7, '00000000-0000-0000-0000-000000000000'::uuid),
     runtime_endpoint = NULLIF($8, ''), ready_replicas = $9,
     observed_generation = CASE WHEN $11 THEN $3 ELSE observed_generation END,
     deleted_at = CASE WHEN $13 THEN $10 ELSE deleted_at END,
+    publication_desired = CASE WHEN $11 AND $14 AND $5 = 'running' AND NOT $13 AND service.desired_state = 'running' AND operation.type IN ('create', 'start', 'restart') THEN 'published' ELSE publication_desired END,
+    publication_generation = CASE WHEN $11 AND $14 AND $5 = 'running' AND NOT $13 AND service.desired_state = 'running' AND operation.type IN ('create', 'start', 'restart') THEN $3 ELSE publication_generation END,
+    publication_phase = CASE WHEN $11 AND $14 AND $5 = 'running' AND NOT $13 AND service.desired_state = 'running' AND operation.type IN ('create', 'start', 'restart') THEN 'pending' ELSE publication_phase END,
+    publication_last_error = CASE WHEN $11 AND $14 AND $5 = 'running' AND NOT $13 AND service.desired_state = 'running' AND operation.type IN ('create', 'start', 'restart') THEN NULL ELSE publication_last_error END,
+    publication_updated_at = CASE WHEN $11 AND $14 AND $5 = 'running' AND NOT $13 AND service.desired_state = 'running' AND operation.type IN ('create', 'start', 'restart') THEN $10 ELSE publication_updated_at END,
+    invocation_url = CASE WHEN $11 AND $14 AND $5 = 'running' AND NOT $13 AND service.desired_state = 'running' AND operation.type IN ('create', 'start', 'restart') THEN NULL ELSE invocation_url END,
     updated_at = $10
-WHERE tenant_id = $1 AND id = $2 AND generation = $3 AND current_operation_id = $4
-  AND EXISTS (
-      SELECT 1 FROM inference_operations AS operation
-      WHERE operation.id = $4 AND operation.tenant_id = $1
-        AND operation.lease_token = $12 AND operation.lease_until > $10
-        AND operation.state = 'running'
-  )
+FROM inference_operations AS operation
+WHERE service.tenant_id = $1 AND service.id = $2 AND service.generation = $3
+  AND service.current_operation_id = $4
+  AND operation.id = $4 AND operation.tenant_id = $1 AND operation.service_id = $2
+  AND operation.target_generation = $3 AND operation.lease_token = $12
+  AND operation.lease_until > $10 AND operation.state = 'running'
 `
 
 const completeOperationSQL = `
 UPDATE inference_operations
 SET state = 'completed', lease_owner = NULL, lease_until = NULL,
-    lease_token = NULL, completed_at = $5, updated_at = $5
+    lease_token = NULL, error_code = NULL, error_message = NULL,
+    next_attempt_at = $5, completed_at = $5, updated_at = $5
 WHERE tenant_id = $1 AND service_id = $2 AND target_generation = $3 AND id = $4
   AND lease_token = $6 AND lease_until > $5 AND state = 'running'
 `
 
 const failOperationSQL = `
 UPDATE inference_operations
-SET state = $5, attempt = attempt + 1, next_attempt_at = COALESCE($6, next_attempt_at),
+SET state = $5,
+    attempt = attempt + CASE
+        WHEN $7 IN ('GATEWAY_UNPUBLISH_PENDING', 'GATEWAY_UNPUBLISH_CHECK_FAILED') THEN 0
+        ELSE 1
+    END,
+    next_attempt_at = COALESCE($6, next_attempt_at),
     lease_owner = NULL, lease_until = NULL, lease_token = NULL, error_code = $7, error_message = $8,
     completed_at = CASE WHEN $6 IS NULL THEN $9 ELSE NULL END, updated_at = $9
 WHERE tenant_id = $1 AND service_id = $2 AND target_generation = $3 AND id = $4
@@ -325,6 +487,20 @@ func OpenStore(ctx context.Context, tenantDSN, platformDSN string) (*Postgres, f
 		tenantPool.Close()
 		platformPool.Close()
 	}, nil
+}
+
+// Ping proves both tenant-scoped and platform claim pools are reachable.
+func (p *Postgres) Ping(ctx context.Context) error {
+	if p == nil || p.tenantPool == nil || p.platformPool == nil {
+		return errors.New("inference database readiness failed")
+	}
+	if err := p.tenantPool.Ping(ctx); err != nil {
+		return errors.New("inference database readiness failed")
+	}
+	if err := p.platformPool.Ping(ctx); err != nil {
+		return errors.New("inference database readiness failed")
+	}
+	return nil
 }
 
 func classifyReplay(existingHash, requestedHash string) error {
@@ -615,6 +791,50 @@ func (p *Postgres) ListServices(ctx context.Context, tenantID uuid.UUID) ([]doma
 	return services, nil
 }
 
+func requiresPublicationWithdrawal(action domain.Action) bool {
+	switch action {
+	case domain.ActionStop, domain.ActionRestart, domain.ActionDelete:
+		return true
+	default:
+		return false
+	}
+}
+
+func mutationTransitionArgs(request MutationRequest, service domain.Service, operationID uuid.UUID, desired []byte, now time.Time) ([]any, bool) {
+	withdraw := requiresPublicationWithdrawal(request.Action)
+	return []any{
+		request.TenantID, request.ServiceID, desired, service.DesiredState,
+		service.Generation, operationID, service.Status, now, withdraw,
+	}, withdraw
+}
+
+func observationArgs(observation Observation, applied []byte, now time.Time) []any {
+	return []any{
+		observation.TenantID, observation.ServiceID, observation.TargetGeneration,
+		observation.OperationID, observation.Status, applied, observation.RuntimeRef,
+		observation.RuntimeEndpoint, observation.ReadyReplicas, now, observation.Complete,
+		observation.LeaseToken, observation.Deleted, observation.Publish,
+	}
+}
+
+func withPublicationWithdrawal(service domain.Service, now time.Time) domain.Service {
+	service.Publication.Desired = domain.PublicationUnpublished
+	service.Publication.Generation = service.Generation
+	service.Publication.Phase = domain.PublicationPending
+	service.Publication.LastError = ""
+	service.Publication.UpdatedAt = now
+	service.InvocationURL = ""
+	return service
+}
+
+func validatePreemptionFence(service domain.Service, operation domain.Operation) error {
+	if operation.PreemptedOperationID != uuid.Nil &&
+		service.ActiveOperation == domain.ActionCreate && service.RuntimeRef == uuid.Nil {
+		return fmt.Errorf("%w: create runtime identity is not bound", domain.ErrOperationInProgress)
+	}
+	return nil
+}
+
 func (p *Postgres) MutateService(ctx context.Context, request MutationRequest) (result MutationResult, err error) {
 	if err := validateMutationRequest(request); err != nil {
 		return result, err
@@ -714,27 +934,36 @@ func (p *Postgres) MutateService(ctx context.Context, request MutationRequest) (
 	operation.CreatedAt = now
 	operation.UpdatedAt = now
 	if operation.PreemptedOperationID != uuid.Nil {
+		// Request-path create may be inside Core Ensure before BindRuntimeRef. Since
+		// the Core lifecycle API cannot fence by generation, cancelling this row
+		// would let a late Ensure leave an untracked workload. Once binding commits,
+		// a retry has a stable runtime identity that stop/delete can converge.
+		if err = validatePreemptionFence(service, operation); err != nil {
+			return result, err
+		}
 		tag, cancelErr := tx.Exec(ctx, cancelOperationSQL, request.TenantID, request.ServiceID,
 			operation.PreemptedOperationID, now)
 		if cancelErr != nil {
 			return result, fmt.Errorf("cancel preempted inference operation: %w", cancelErr)
 		}
 		if tag.RowsAffected() != 1 {
-			return result, ErrStaleGeneration
+			return result, fmt.Errorf("%w: active inference operation is already claimed", domain.ErrOperationInProgress)
 		}
 	}
 	desired, err := json.Marshal(transition.Service.DesiredSpec)
 	if err != nil {
 		return result, fmt.Errorf("marshal mutated desired inference spec: %w", err)
 	}
-	tag, err := tx.Exec(ctx, updateServiceTransitionSQL,
-		request.TenantID, request.ServiceID, desired, transition.Service.DesiredState,
-		transition.Service.Generation, operation.ID, transition.Service.Status, now)
+	transitionArgs, withdrawPublication := mutationTransitionArgs(request, transition.Service, operation.ID, desired, now)
+	tag, err := tx.Exec(ctx, updateServiceTransitionSQL, transitionArgs...)
 	if err != nil {
 		return result, fmt.Errorf("update inference service transition: %w", err)
 	}
 	if tag.RowsAffected() != 1 {
 		return result, ErrStaleGeneration
+	}
+	if withdrawPublication {
+		transition.Service = withPublicationWithdrawal(transition.Service, now)
 	}
 	before, err := json.Marshal(operation.BeforeSpec)
 	if err != nil {
@@ -801,6 +1030,171 @@ func (p *Postgres) ClaimOperation(ctx context.Context, owner string, now time.Ti
 	return operation, true, nil
 }
 
+const (
+	maxPublicationLease       = 5 * time.Minute
+	publicationFailureMessage = "GATEWAY_PUBLISH_FAILED"
+)
+
+func redactPublicationError(string) string {
+	return publicationFailureMessage
+}
+
+func (p *Postgres) ClaimPublication(ctx context.Context, owner string, now time.Time, leaseDuration time.Duration) (PublicationTarget, bool, error) {
+	if strings.TrimSpace(owner) == "" || leaseDuration <= 0 || leaseDuration > maxPublicationLease {
+		return PublicationTarget{}, false, errors.New("publication lease owner and bounded positive duration are required")
+	}
+	tx, err := p.platformPool.Begin(ctx)
+	if err != nil {
+		return PublicationTarget{}, false, fmt.Errorf("begin claim inference publication: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var target PublicationTarget
+	err = tx.QueryRow(ctx, claimPublicationSQL, owner, now.UTC(), now.UTC().Add(leaseDuration)).Scan(
+		&target.TenantID, &target.ServiceID, &target.Generation, &target.Desired,
+		&target.ServedModelName, &target.Task, &target.RuntimeEndpoint, &target.LeaseToken,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return PublicationTarget{}, false, nil
+	}
+	if err != nil {
+		return PublicationTarget{}, false, fmt.Errorf("claim inference publication: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return PublicationTarget{}, false, fmt.Errorf("commit inference publication claim: %w", err)
+	}
+	return target, true, nil
+}
+
+func (p *Postgres) RenewPublication(ctx context.Context, target PublicationTarget, now time.Time, leaseDuration time.Duration) error {
+	if target.TenantID == uuid.Nil || target.ServiceID == uuid.Nil || target.Generation < 0 || target.LeaseToken == uuid.Nil || now.IsZero() || leaseDuration <= 0 || leaseDuration > maxPublicationLease {
+		return errors.New("publication renewal requires tenant, service, generation, lease token, time, and bounded duration")
+	}
+	tx, err := p.platformPool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin renew inference publication: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := setTenant(ctx, tx, target.TenantID); err != nil {
+		return err
+	}
+	now = now.UTC()
+	tag, err := tx.Exec(ctx, renewPublicationSQL, target.TenantID, target.ServiceID, target.Generation, target.LeaseToken, now.Add(leaseDuration), now)
+	if err != nil {
+		return fmt.Errorf("renew inference publication: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrStaleGeneration
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit inference publication renewal: %w", err)
+	}
+	return nil
+}
+
+func (p *Postgres) CompletePublication(ctx context.Context, result PublicationResult) error {
+	if result.TenantID == uuid.Nil || result.ServiceID == uuid.Nil || result.Generation < 0 || result.LeaseToken == uuid.Nil || result.Now.IsZero() {
+		return errors.New("publication completion requires tenant, service, generation, lease token, and time")
+	}
+	if result.Phase != domain.PublicationPublishedOK && result.Phase != domain.PublicationUnpublishedOK {
+		return errors.New("publication completion phase must be published or unpublished")
+	}
+	if result.Phase == domain.PublicationPublishedOK && strings.TrimSpace(result.InvocationURL) == "" {
+		return errors.New("published publication completion requires invocation url")
+	}
+	tx, err := p.platformPool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin complete inference publication: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := setTenant(ctx, tx, result.TenantID); err != nil {
+		return err
+	}
+	now := result.Now.UTC()
+	tag, err := tx.Exec(ctx, completePublicationSQL, result.TenantID, result.ServiceID, result.Generation,
+		result.LeaseToken, now, result.Phase, strings.TrimSpace(result.InvocationURL), now)
+	if err != nil {
+		return fmt.Errorf("complete inference publication: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrStaleGeneration
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit inference publication completion: %w", err)
+	}
+	return nil
+}
+
+func (p *Postgres) FailPublication(ctx context.Context, target PublicationTarget, message string, now time.Time) error {
+	if target.TenantID == uuid.Nil || target.ServiceID == uuid.Nil || target.Generation < 0 || target.LeaseToken == uuid.Nil || now.IsZero() {
+		return errors.New("publication failure requires tenant, service, generation, lease token, and time")
+	}
+	tx, err := p.platformPool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin fail inference publication: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := setTenant(ctx, tx, target.TenantID); err != nil {
+		return err
+	}
+	now = now.UTC()
+	tag, err := tx.Exec(ctx, failPublicationSQL, target.TenantID, target.ServiceID, target.Generation,
+		target.LeaseToken, redactPublicationError(message), now)
+	if err != nil {
+		return fmt.Errorf("fail inference publication: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrStaleGeneration
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit failed inference publication: %w", err)
+	}
+	return nil
+}
+
+func (p *Postgres) PublicationWithdrawn(ctx context.Context, tenantID, serviceID uuid.UUID, generation int64) (bool, error) {
+	if tenantID == uuid.Nil || serviceID == uuid.Nil || generation < 0 {
+		return false, errors.New("publication withdrawal lookup requires tenant, service, and generation")
+	}
+	tx, err := p.tenantPool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("begin inference publication withdrawal lookup: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := setTenant(ctx, tx, tenantID); err != nil {
+		return false, err
+	}
+	var withdrawn bool
+	if err := tx.QueryRow(ctx, publicationWithdrawnSQL, tenantID, serviceID, generation).Scan(&withdrawn); err != nil {
+		return false, fmt.Errorf("lookup inference publication withdrawal: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit inference publication withdrawal lookup: %w", err)
+	}
+	return withdrawn, nil
+}
+
+func (p *Postgres) ResolvePublishedService(ctx context.Context, tenantID uuid.UUID, servedModelName string) (domain.Service, error) {
+	if tenantID == uuid.Nil || strings.TrimSpace(servedModelName) == "" {
+		return domain.Service{}, errors.New("published service resolution requires tenant and served model name")
+	}
+	tx, err := p.tenantPool.Begin(ctx)
+	if err != nil {
+		return domain.Service{}, fmt.Errorf("begin resolve published inference service: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := setTenant(ctx, tx, tenantID); err != nil {
+		return domain.Service{}, err
+	}
+	service, err := scanService(tx.QueryRow(ctx, resolvePublishedServiceSQL, tenantID, servedModelName))
+	if err != nil {
+		return domain.Service{}, mapNotFound(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.Service{}, fmt.Errorf("commit resolve published inference service: %w", err)
+	}
+	return service, nil
+}
+
 func (p *Postgres) ApplyObservation(ctx context.Context, observation Observation) error {
 	tx, err := p.platformPool.Begin(ctx)
 	if err != nil {
@@ -812,10 +1206,7 @@ func (p *Postgres) ApplyObservation(ctx context.Context, observation Observation
 		return fmt.Errorf("marshal applied inference spec: %w", err)
 	}
 	now := time.Now().UTC()
-	tag, err := tx.Exec(ctx, applyObservationSQL, observation.TenantID, observation.ServiceID,
-		observation.TargetGeneration, observation.OperationID, observation.Status, applied,
-		observation.RuntimeRef, observation.RuntimeEndpoint, observation.ReadyReplicas, now,
-		observation.Complete, observation.LeaseToken, observation.Deleted)
+	tag, err := tx.Exec(ctx, applyObservationSQL, observationArgs(observation, applied, now)...)
 	if err != nil {
 		return fmt.Errorf("apply inference observation: %w", err)
 	}
@@ -989,6 +1380,575 @@ func setTenant(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) error {
 	return nil
 }
 
+const accessPolicySelectSQL = `
+SELECT p.id, p.tenant_id, p.name, p.status, COALESCE(p.description,''), p.priority,
+       p.scope_type, p.allow_all_tenant_keys, COALESCE(p.rate_qps,0), COALESCE(p.rate_rpm,0),
+       COALESCE(p.max_in_flight,0), p.lease_ttl_seconds,
+       COALESCE(array_agg(DISTINCT s.inference_service_id) FILTER (WHERE s.inference_service_id IS NOT NULL), '{}'),
+       COALESCE(array_agg(DISTINCT k.api_key_id::text) FILTER (WHERE k.effect = 'scope'), '{}'),
+       COALESCE(array_agg(DISTINCT k.api_key_id::text) FILTER (WHERE k.effect = 'allow'), '{}'),
+       COALESCE(array_agg(DISTINCT k.api_key_id::text) FILTER (WHERE k.effect = 'deny'), '{}'),
+       p.created_at, p.updated_at
+FROM inference_access_policies p
+LEFT JOIN inference_access_policy_services s ON s.policy_id = p.id AND s.tenant_id = p.tenant_id
+LEFT JOIN inference_access_policy_api_keys k ON k.policy_id = p.id AND k.tenant_id = p.tenant_id
+WHERE p.tenant_id = $1 AND p.deleted_at IS NULL
+GROUP BY p.id
+ORDER BY p.priority, p.created_at, p.id`
+
+func scanAccessPolicy(row pgx.Row) (domain.AccessPolicy, error) {
+	var p domain.AccessPolicy
+	var scope string
+	var serviceIDs []uuid.UUID
+	var scopeKeyIDs, allowKeyIDs, denyKeyIDs []string
+	if err := row.Scan(&p.ID, &p.TenantID, &p.Name, &p.Status, &p.Description, &p.Priority, &scope, &p.Access.AllowAllTenantKeys, &p.RateLimits.QPS, &p.RateLimits.RPM, &p.Concurrency.MaxInFlight, &p.Concurrency.LeaseTTLSeconds, &serviceIDs, &scopeKeyIDs, &allowKeyIDs, &denyKeyIDs, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		return domain.AccessPolicy{}, err
+	}
+	p.Scope.Type = domain.AccessPolicyScopeType(scope)
+	p.Scope.InferenceServiceIDs = serviceIDs
+	p.Scope.APIKeyIDs = scopeKeyIDs
+	p.Access.AllowAPIKeyIDs = allowKeyIDs
+	p.Access.DenyAPIKeyIDs = denyKeyIDs
+	return p, nil
+}
+
+func (p *Postgres) ListAccessPolicies(ctx context.Context, tenantID uuid.UUID) ([]domain.AccessPolicy, error) {
+	if tenantID == uuid.Nil {
+		return nil, errors.New("tenant id is required")
+	}
+	tx, err := p.tenantPool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := setTenant(ctx, tx, tenantID); err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(ctx, accessPolicySelectSQL, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list access policies: %w", err)
+	}
+	defer rows.Close()
+	items := make([]domain.AccessPolicy, 0)
+	for rows.Next() {
+		item, scanErr := scanAccessPolicy(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("scan access policy: %w", scanErr)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (p *Postgres) GetAccessPolicy(ctx context.Context, tenantID, policyID uuid.UUID) (domain.AccessPolicy, error) {
+	if tenantID == uuid.Nil || policyID == uuid.Nil {
+		return domain.AccessPolicy{}, errors.New("tenant and policy ids are required")
+	}
+	tx, err := p.tenantPool.Begin(ctx)
+	if err != nil {
+		return domain.AccessPolicy{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := setTenant(ctx, tx, tenantID); err != nil {
+		return domain.AccessPolicy{}, err
+	}
+	query := strings.Replace(accessPolicySelectSQL, "WHERE p.tenant_id = $1", "WHERE p.tenant_id = $1 AND p.id = $2", 1)
+	row := tx.QueryRow(ctx, query+" LIMIT 1", tenantID, policyID)
+	item, err := scanAccessPolicy(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.AccessPolicy{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.AccessPolicy{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.AccessPolicy{}, err
+	}
+	return item, nil
+}
+
+func hashAccessPolicyMutation(operationScope string, intent any) (string, error) {
+	encoded, err := json.Marshal(struct {
+		OperationScope string `json:"operation_scope"`
+		Intent         any    `json:"intent"`
+	}{OperationScope: operationScope, Intent: intent})
+	if err != nil {
+		return "", fmt.Errorf("marshal access policy mutation intent: %w", err)
+	}
+	sum := sha256.Sum256(encoded)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+func isCanonicalSHA256(value string) bool {
+	if len(value) != len("sha256:")+sha256.Size*2 || !strings.HasPrefix(value, "sha256:") || value != strings.ToLower(value) {
+		return false
+	}
+	decoded, err := hex.DecodeString(strings.TrimPrefix(value, "sha256:"))
+	return err == nil && len(decoded) == sha256.Size
+}
+
+func beginAccessPolicyMutation(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, operationScope string, idempotencyKey uuid.UUID, requestHash string) ([]byte, bool, error) {
+	if idempotencyKey == uuid.Nil {
+		return nil, false, errors.New("idempotency key is required")
+	}
+	lockKey := tenantID.String() + "/" + operationScope + "/" + idempotencyKey.String()
+	if _, err := tx.Exec(ctx, lockIdempotencySQL, lockKey); err != nil {
+		return nil, false, fmt.Errorf("lock access policy idempotency key: %w", err)
+	}
+	var existingHash string
+	var snapshot []byte
+	err := tx.QueryRow(ctx, findAccessPolicyMutationSQL, tenantID, operationScope, idempotencyKey).Scan(&existingHash, &snapshot)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("query access policy idempotency key: %w", err)
+	}
+	if err := classifyReplay(existingHash, requestHash); err != nil {
+		return nil, false, err
+	}
+	return snapshot, true, nil
+}
+
+func completeAccessPolicyMutation(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, operationScope string, idempotencyKey uuid.UUID, requestHash string, result any) error {
+	snapshot, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Errorf("marshal access policy mutation result: %w", err)
+	}
+	if _, err := tx.Exec(ctx, insertAccessPolicyMutationSQL, tenantID, operationScope, idempotencyKey, requestHash, string(snapshot)); err != nil {
+		return fmt.Errorf("persist access policy idempotency result: %w", err)
+	}
+	return nil
+}
+
+func decodeAccessPolicyMutation[T any](snapshot []byte) (T, error) {
+	var result T
+	if err := json.Unmarshal(snapshot, &result); err != nil {
+		return result, fmt.Errorf("decode access policy idempotency result: %w", err)
+	}
+	return result, nil
+}
+
+func (p *Postgres) CreateAccessPolicy(ctx context.Context, policy domain.AccessPolicy, idempotencyKey uuid.UUID) (domain.AccessPolicy, error) {
+	if policy.Concurrency.LeaseTTLSeconds == 0 {
+		policy.Concurrency.LeaseTTLSeconds = 60
+	}
+	if err := policy.Validate(); err != nil {
+		return domain.AccessPolicy{}, err
+	}
+	if idempotencyKey == uuid.Nil {
+		return domain.AccessPolicy{}, errors.New("idempotency key is required")
+	}
+	intent := policy
+	intent.ID, intent.CreatedAt, intent.UpdatedAt = uuid.Nil, time.Time{}, time.Time{}
+	operationScope := "inference_access_policy.create"
+	requestHash, err := hashAccessPolicyMutation(operationScope, intent)
+	if err != nil {
+		return domain.AccessPolicy{}, err
+	}
+	tx, err := p.tenantPool.Begin(ctx)
+	if err != nil {
+		return domain.AccessPolicy{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := setTenant(ctx, tx, policy.TenantID); err != nil {
+		return domain.AccessPolicy{}, err
+	}
+	snapshot, replayed, err := beginAccessPolicyMutation(ctx, tx, policy.TenantID, operationScope, idempotencyKey, requestHash)
+	if err != nil {
+		return domain.AccessPolicy{}, err
+	}
+	if replayed {
+		result, decodeErr := decodeAccessPolicyMutation[domain.AccessPolicy](snapshot)
+		if decodeErr != nil {
+			return domain.AccessPolicy{}, decodeErr
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return domain.AccessPolicy{}, err
+		}
+		return result, nil
+	}
+	if policy.ID == uuid.Nil {
+		policy.ID = uuid.New()
+	}
+	policy.CreatedAt = time.Now().UTC()
+	policy.UpdatedAt = policy.CreatedAt
+	_, err = tx.Exec(ctx, `INSERT INTO inference_access_policies (id,tenant_id,name,status,description,priority,scope_type,allow_all_tenant_keys,rate_qps,rate_rpm,max_in_flight,lease_ttl_seconds,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,0),NULLIF($10,0),NULLIF($11,0),$12,$13,$14)`, policy.ID, policy.TenantID, policy.Name, policy.Status, policy.Description, policy.Priority, policy.Scope.Type, policy.Access.AllowAllTenantKeys, policy.RateLimits.QPS, policy.RateLimits.RPM, policy.Concurrency.MaxInFlight, policy.Concurrency.LeaseTTLSeconds, policy.CreatedAt, policy.UpdatedAt)
+	if err != nil {
+		return domain.AccessPolicy{}, mapPolicyWriteError(err)
+	}
+	for _, serviceID := range policy.Scope.InferenceServiceIDs {
+		if _, err = tx.Exec(ctx, `INSERT INTO inference_access_policy_services(policy_id,tenant_id,inference_service_id) VALUES($1,$2,$3)`, policy.ID, policy.TenantID, serviceID); err != nil {
+			return domain.AccessPolicy{}, err
+		}
+	}
+	for _, keyID := range policy.Scope.APIKeyIDs {
+		parsed, parseErr := uuid.Parse(keyID)
+		if parseErr != nil {
+			return domain.AccessPolicy{}, parseErr
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO inference_access_policy_api_keys(policy_id,tenant_id,api_key_id,key_prefix,effect) VALUES($1,$2,$3,$4,'scope') ON CONFLICT DO NOTHING`, policy.ID, policy.TenantID, parsed, ""); err != nil {
+			return domain.AccessPolicy{}, err
+		}
+	}
+	for _, keyID := range policy.Access.AllowAPIKeyIDs {
+		parsed, parseErr := uuid.Parse(keyID)
+		if parseErr != nil {
+			return domain.AccessPolicy{}, parseErr
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO inference_access_policy_api_keys(policy_id,tenant_id,api_key_id,key_prefix,effect) VALUES($1,$2,$3,$4,'allow') ON CONFLICT DO NOTHING`, policy.ID, policy.TenantID, parsed, ""); err != nil {
+			return domain.AccessPolicy{}, err
+		}
+	}
+	for _, keyID := range policy.Access.DenyAPIKeyIDs {
+		parsed, parseErr := uuid.Parse(keyID)
+		if parseErr != nil {
+			return domain.AccessPolicy{}, parseErr
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO inference_access_policy_api_keys(policy_id,tenant_id,api_key_id,key_prefix,effect) VALUES($1,$2,$3,$4,'deny') ON CONFLICT DO NOTHING`, policy.ID, policy.TenantID, parsed, ""); err != nil {
+			return domain.AccessPolicy{}, err
+		}
+	}
+	if err := completeAccessPolicyMutation(ctx, tx, policy.TenantID, operationScope, idempotencyKey, requestHash, policy); err != nil {
+		return domain.AccessPolicy{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.AccessPolicy{}, err
+	}
+	return policy, nil
+}
+
+func (p *Postgres) UpdateAccessPolicy(ctx context.Context, policy domain.AccessPolicy, idempotencyKey uuid.UUID, requestHash string) (domain.AccessPolicy, error) {
+	if policy.Concurrency.LeaseTTLSeconds == 0 {
+		policy.Concurrency.LeaseTTLSeconds = 60
+	}
+	if err := policy.Validate(); err != nil {
+		return domain.AccessPolicy{}, err
+	}
+	if policy.ID == uuid.Nil || idempotencyKey == uuid.Nil {
+		return domain.AccessPolicy{}, errors.New("policy and idempotency ids are required")
+	}
+	if !isCanonicalSHA256(requestHash) {
+		return domain.AccessPolicy{}, errors.New("canonical request hash is required")
+	}
+	operationScope := "inference_access_policy.update/" + policy.ID.String()
+	tx, err := p.tenantPool.Begin(ctx)
+	if err != nil {
+		return domain.AccessPolicy{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := setTenant(ctx, tx, policy.TenantID); err != nil {
+		return domain.AccessPolicy{}, err
+	}
+	snapshot, replayed, err := beginAccessPolicyMutation(ctx, tx, policy.TenantID, operationScope, idempotencyKey, requestHash)
+	if err != nil {
+		return domain.AccessPolicy{}, err
+	}
+	if replayed {
+		result, decodeErr := decodeAccessPolicyMutation[domain.AccessPolicy](snapshot)
+		if decodeErr != nil {
+			return domain.AccessPolicy{}, decodeErr
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return domain.AccessPolicy{}, err
+		}
+		return result, nil
+	}
+	policy.UpdatedAt = time.Now().UTC()
+	err = tx.QueryRow(ctx, `UPDATE inference_access_policies SET name=$3,status=$4,description=$5,priority=$6,scope_type=$7,allow_all_tenant_keys=$8,rate_qps=NULLIF($9,0),rate_rpm=NULLIF($10,0),max_in_flight=NULLIF($11,0),lease_ttl_seconds=$12,updated_at=$13 WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL RETURNING created_at`, policy.TenantID, policy.ID, policy.Name, policy.Status, policy.Description, policy.Priority, policy.Scope.Type, policy.Access.AllowAllTenantKeys, policy.RateLimits.QPS, policy.RateLimits.RPM, policy.Concurrency.MaxInFlight, policy.Concurrency.LeaseTTLSeconds, policy.UpdatedAt).Scan(&policy.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.AccessPolicy{}, ErrNotFound
+		}
+		return domain.AccessPolicy{}, mapPolicyWriteError(err)
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM inference_access_policy_services WHERE tenant_id=$1 AND policy_id=$2`, policy.TenantID, policy.ID); err != nil {
+		return domain.AccessPolicy{}, err
+	}
+	for _, serviceID := range policy.Scope.InferenceServiceIDs {
+		if _, err = tx.Exec(ctx, `INSERT INTO inference_access_policy_services(policy_id,tenant_id,inference_service_id) VALUES($1,$2,$3)`, policy.ID, policy.TenantID, serviceID); err != nil {
+			return domain.AccessPolicy{}, err
+		}
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM inference_access_policy_api_keys WHERE tenant_id=$1 AND policy_id=$2`, policy.TenantID, policy.ID); err != nil {
+		return domain.AccessPolicy{}, err
+	}
+	for _, keyID := range policy.Scope.APIKeyIDs {
+		parsed, parseErr := uuid.Parse(keyID)
+		if parseErr != nil {
+			return domain.AccessPolicy{}, parseErr
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO inference_access_policy_api_keys(policy_id,tenant_id,api_key_id,key_prefix,effect) VALUES($1,$2,$3,$4,'scope')`, policy.ID, policy.TenantID, parsed, ""); err != nil {
+			return domain.AccessPolicy{}, err
+		}
+	}
+	for _, keyID := range policy.Access.AllowAPIKeyIDs {
+		parsed, parseErr := uuid.Parse(keyID)
+		if parseErr != nil {
+			return domain.AccessPolicy{}, parseErr
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO inference_access_policy_api_keys(policy_id,tenant_id,api_key_id,key_prefix,effect) VALUES($1,$2,$3,$4,'allow')`, policy.ID, policy.TenantID, parsed, ""); err != nil {
+			return domain.AccessPolicy{}, err
+		}
+	}
+	for _, keyID := range policy.Access.DenyAPIKeyIDs {
+		parsed, parseErr := uuid.Parse(keyID)
+		if parseErr != nil {
+			return domain.AccessPolicy{}, parseErr
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO inference_access_policy_api_keys(policy_id,tenant_id,api_key_id,key_prefix,effect) VALUES($1,$2,$3,$4,'deny')`, policy.ID, policy.TenantID, parsed, ""); err != nil {
+			return domain.AccessPolicy{}, err
+		}
+	}
+	if err := completeAccessPolicyMutation(ctx, tx, policy.TenantID, operationScope, idempotencyKey, requestHash, policy); err != nil {
+		return domain.AccessPolicy{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.AccessPolicy{}, err
+	}
+	return policy, nil
+}
+
+func (p *Postgres) DeleteAccessPolicy(ctx context.Context, tenantID, policyID, idempotencyKey uuid.UUID) error {
+	if tenantID == uuid.Nil || policyID == uuid.Nil || idempotencyKey == uuid.Nil {
+		return errors.New("tenant, policy, and idempotency ids are required")
+	}
+	operationScope := "inference_access_policy.delete/" + policyID.String()
+	requestHash, err := hashAccessPolicyMutation(operationScope, struct {
+		PolicyID uuid.UUID `json:"policy_id"`
+	}{PolicyID: policyID})
+	if err != nil {
+		return err
+	}
+	tx, err := p.tenantPool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := setTenant(ctx, tx, tenantID); err != nil {
+		return err
+	}
+	_, replayed, err := beginAccessPolicyMutation(ctx, tx, tenantID, operationScope, idempotencyKey, requestHash)
+	if err != nil {
+		return err
+	}
+	if replayed {
+		return tx.Commit(ctx)
+	}
+	tag, err := tx.Exec(ctx, `UPDATE inference_access_policies SET deleted_at=NOW(),status='disabled',updated_at=NOW() WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL`, tenantID, policyID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrNotFound
+	}
+	if err := completeAccessPolicyMutation(ctx, tx, tenantID, operationScope, idempotencyKey, requestHash, struct{}{}); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func mapPolicyWriteError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return ErrNameConflict
+	}
+	return err
+}
+
+func (p *Postgres) ListServiceAccessPolicies(ctx context.Context, tenantID, serviceID uuid.UUID) ([]domain.AccessPolicy, error) {
+	if tenantID == uuid.Nil || serviceID == uuid.Nil {
+		return nil, errors.New("tenant and service ids are required")
+	}
+	tx, err := p.tenantPool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := setTenant(ctx, tx, tenantID); err != nil {
+		return nil, err
+	}
+	items, err := listServiceAccessPoliciesTx(ctx, tx, tenantID, serviceID)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func listServiceAccessPoliciesTx(ctx context.Context, tx pgx.Tx, tenantID, serviceID uuid.UUID) ([]domain.AccessPolicy, error) {
+	query := strings.Replace(accessPolicySelectSQL, "WHERE p.tenant_id = $1", "WHERE p.tenant_id = $1 AND EXISTS (SELECT 1 FROM inference_access_policy_services ps WHERE ps.policy_id=p.id AND ps.tenant_id=$1 AND ps.inference_service_id=$2)", 1)
+	rows, err := tx.Query(ctx, query, tenantID, serviceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.AccessPolicy, 0)
+	for rows.Next() {
+		item, scanErr := scanAccessPolicy(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (p *Postgres) ReplaceServiceAccessPolicies(ctx context.Context, tenantID, serviceID uuid.UUID, policyIDs []uuid.UUID, idempotencyKey uuid.UUID) ([]domain.AccessPolicy, error) {
+	if tenantID == uuid.Nil || serviceID == uuid.Nil || idempotencyKey == uuid.Nil {
+		return nil, errors.New("tenant, service, and idempotency ids are required")
+	}
+	normalizedPolicyIDs := append([]uuid.UUID(nil), policyIDs...)
+	sort.Slice(normalizedPolicyIDs, func(i, j int) bool { return normalizedPolicyIDs[i].String() < normalizedPolicyIDs[j].String() })
+	uniquePolicyIDs := normalizedPolicyIDs[:0]
+	for _, policyID := range normalizedPolicyIDs {
+		if policyID == uuid.Nil {
+			return nil, errors.New("policy id is required")
+		}
+		if len(uniquePolicyIDs) == 0 || uniquePolicyIDs[len(uniquePolicyIDs)-1] != policyID {
+			uniquePolicyIDs = append(uniquePolicyIDs, policyID)
+		}
+	}
+	policyIDs = uniquePolicyIDs
+	operationScope := "inference_access_policy.binding/" + serviceID.String()
+	requestHash, err := hashAccessPolicyMutation(operationScope, struct {
+		ServiceID uuid.UUID   `json:"service_id"`
+		PolicyIDs []uuid.UUID `json:"policy_ids"`
+	}{ServiceID: serviceID, PolicyIDs: policyIDs})
+	if err != nil {
+		return nil, err
+	}
+	tx, err := p.tenantPool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := setTenant(ctx, tx, tenantID); err != nil {
+		return nil, err
+	}
+	snapshot, replayed, err := beginAccessPolicyMutation(ctx, tx, tenantID, operationScope, idempotencyKey, requestHash)
+	if err != nil {
+		return nil, err
+	}
+	if replayed {
+		result, decodeErr := decodeAccessPolicyMutation[[]domain.AccessPolicy](snapshot)
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM inference_access_policy_services WHERE tenant_id=$1 AND inference_service_id=$2`, tenantID, serviceID); err != nil {
+		return nil, err
+	}
+	for _, policyID := range policyIDs {
+		tag, execErr := tx.Exec(ctx, `INSERT INTO inference_access_policy_services(policy_id,tenant_id,inference_service_id) SELECT $1,$2,$3 WHERE EXISTS (SELECT 1 FROM inference_access_policies WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL)`, policyID, tenantID, serviceID)
+		if execErr != nil {
+			return nil, execErr
+		}
+		if tag.RowsAffected() != 1 {
+			return nil, ErrNotFound
+		}
+	}
+	items, err := listServiceAccessPoliciesTx(ctx, tx, tenantID, serviceID)
+	if err != nil {
+		return nil, err
+	}
+	if err := completeAccessPolicyMutation(ctx, tx, tenantID, operationScope, idempotencyKey, requestHash, items); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (p *Postgres) RecordAccessPolicyEvent(ctx context.Context, event domain.AccessPolicyEvent) error {
+	if event.TenantID == uuid.Nil {
+		return errors.New("tenant id is required")
+	}
+	if event.ID == uuid.Nil {
+		event.ID = uuid.New()
+	}
+	if event.CreatedAt.IsZero() {
+		event.CreatedAt = time.Now().UTC()
+	}
+	tx, err := p.tenantPool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := setTenant(ctx, tx, event.TenantID); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO inference_access_policy_events(id,tenant_id,policy_id,inference_service_id,api_key_id,key_prefix,request_id,openai_path,external_model,decision,reason_code,http_status,retry_after_seconds,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`, event.ID, event.TenantID, event.PolicyID, event.InferenceServiceID, event.APIKeyID, event.KeyPrefix, event.RequestID, event.OpenAIPath, event.ExternalModel, event.Decision, event.ReasonCode, event.HTTPStatus, event.RetryAfterSeconds, event.CreatedAt)
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (p *Postgres) ListAccessPolicyEvents(ctx context.Context, tenantID uuid.UUID, query domain.AccessPolicyEventQuery) ([]domain.AccessPolicyEvent, string, error) {
+	if tenantID == uuid.Nil {
+		return nil, "", errors.New("tenant id is required")
+	}
+	limit := query.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	tx, err := p.tenantPool.Begin(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := setTenant(ctx, tx, tenantID); err != nil {
+		return nil, "", err
+	}
+	var serviceFilter, policyFilter, keyFilter any
+	if query.InferenceServiceID != nil {
+		serviceFilter = *query.InferenceServiceID
+	}
+	if query.PolicyID != nil {
+		policyFilter = *query.PolicyID
+	}
+	if query.APIKeyID != nil {
+		keyFilter = *query.APIKeyID
+	}
+	rows, err := tx.Query(ctx, `SELECT id,tenant_id,policy_id,inference_service_id,api_key_id,COALESCE(key_prefix,''),COALESCE(request_id,''),COALESCE(openai_path,''),COALESCE(external_model,''),decision,reason_code,http_status,COALESCE(retry_after_seconds,0),created_at FROM inference_access_policy_events WHERE tenant_id=$1 AND ($2::uuid IS NULL OR inference_service_id=$2) AND ($3::uuid IS NULL OR policy_id=$3) AND ($4::uuid IS NULL OR api_key_id=$4) AND ($5='' OR decision=$5) ORDER BY created_at DESC,id DESC LIMIT $6`, tenantID, serviceFilter, policyFilter, keyFilter, query.Decision, limit)
+	if err != nil {
+		return nil, "", err
+	}
+	defer rows.Close()
+	items := make([]domain.AccessPolicyEvent, 0)
+	for rows.Next() {
+		var item domain.AccessPolicyEvent
+		if err := rows.Scan(&item.ID, &item.TenantID, &item.PolicyID, &item.InferenceServiceID, &item.APIKeyID, &item.KeyPrefix, &item.RequestID, &item.OpenAIPath, &item.ExternalModel, &item.Decision, &item.ReasonCode, &item.HTTPStatus, &item.RetryAfterSeconds, &item.CreatedAt); err != nil {
+			return nil, "", err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "", err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, "", err
+	}
+	return items, "", nil
+}
+
 func validateMutationRequest(request MutationRequest) error {
 	switch {
 	case request.TenantID == uuid.Nil:
@@ -1020,7 +1980,10 @@ func scanService(row pgx.Row) (service domain.Service, err error) {
 		&service.ObservedGeneration, &desired, &applied, &service.RuntimeRef,
 		&service.RuntimeEndpoint, &service.InvocationURL, &service.ReadyReplicas,
 		&service.CurrentOperationID, &activeAction, &activeState,
-		&service.CreatedAt, &service.UpdatedAt, &service.DeletedAt, &service.LegacyQuarantined)
+		&service.CreatedAt, &service.UpdatedAt, &service.DeletedAt, &service.LegacyQuarantined,
+		&service.Publication.Desired, &service.Publication.Generation,
+		&service.Publication.ObservedGeneration, &service.Publication.Phase,
+		&service.Publication.LastError, &service.Publication.UpdatedAt)
 	if err != nil {
 		return service, err
 	}
@@ -1044,7 +2007,10 @@ func scanPublicService(row pgx.Row) (service domain.Service, err error) {
 		&service.StatusMessage, &service.DesiredState, &service.Generation,
 		&service.ObservedGeneration, &desired, &applied, &service.ReadyReplicas,
 		&service.CurrentOperationID, &service.CreatedAt, &service.UpdatedAt,
-		&service.DeletedAt, &service.LegacyQuarantined)
+		&service.DeletedAt, &service.LegacyQuarantined,
+		&service.Publication.Desired, &service.Publication.Generation,
+		&service.Publication.ObservedGeneration, &service.Publication.Phase,
+		&service.Publication.LastError, &service.Publication.UpdatedAt)
 	if err != nil {
 		return service, err
 	}

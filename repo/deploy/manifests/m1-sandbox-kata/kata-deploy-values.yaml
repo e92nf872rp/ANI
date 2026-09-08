@@ -4,9 +4,9 @@
 
 deploymentMode: daemonset
 
-# Lab nodes cannot reliably pull quay.io (large image). Mirror used by DaemonSet:
+# Lab nodes cannot reliably pull quay.io (large image). Private mirror used by DaemonSet:
 image:
-  reference: docker.kubercon.local/common/kata-deploy
+  reference: docker.changqingyun.cn/kubercon/kata-deploy
   tag: "4.0.0"
 imagePullPolicy: IfNotPresent
 
@@ -29,7 +29,7 @@ runtimeClasses:
   defaultName: sandbox-kata
   overheadEnabled: true
 
-# node1 is control-plane+worker; tolerate so DaemonSet lands on both nodes.
+# Tolerate control-plane/worker hybrids so the DaemonSet reaches every eligible node.
 tolerations:
   - key: node-role.kubernetes.io/control-plane
     operator: Exists

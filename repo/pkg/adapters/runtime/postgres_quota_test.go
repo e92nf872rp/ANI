@@ -31,6 +31,14 @@ func (r quotaFakeRow) Scan(dest ...any) error {
 		case **string:
 			if r.values[i] == nil {
 				*ptr = nil
+			} else if s, ok := r.values[i].(string); ok {
+				*ptr = &s
+			} else {
+				*ptr = r.values[i].(*string)
+			}
+		case **string:
+			if r.values[i] == nil {
+				*ptr = nil
 			} else if sp, ok := r.values[i].(*string); ok {
 				*ptr = sp
 			} else {
@@ -46,6 +54,14 @@ func (r quotaFakeRow) Scan(dest ...any) error {
 		case **time.Time:
 			if r.values[i] == nil {
 				*ptr = nil
+			} else if ts, ok := r.values[i].(time.Time); ok {
+				*ptr = &ts
+			} else {
+				*ptr = r.values[i].(*time.Time)
+			}
+		case **time.Time:
+			if r.values[i] == nil {
+				*ptr = nil
 			} else if tp, ok := r.values[i].(*time.Time); ok {
 				*ptr = tp
 			} else {
@@ -56,6 +72,14 @@ func (r quotaFakeRow) Scan(dest ...any) error {
 			*ptr = r.values[i].([]byte)
 		case *uuid.UUID:
 			*ptr = r.values[i].(uuid.UUID)
+		case **uuid.UUID:
+			if r.values[i] == nil {
+				*ptr = nil
+			} else if id, ok := r.values[i].(uuid.UUID); ok {
+				*ptr = &id
+			} else {
+				*ptr = r.values[i].(*uuid.UUID)
+			}
 		default:
 			return ports.ErrUnsupported
 		}

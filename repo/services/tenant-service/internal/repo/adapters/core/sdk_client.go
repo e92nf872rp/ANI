@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 
 	anisdk "github.com/kubercloud/ani-sdks/core-go/anisdk"
 	"github.com/kubercloud/ani/services/tenant-service/internal/repo/ports"
+	"google.golang.org/grpc/metadata"
 )
 
 const defaultCoreAPIBaseURL = "http://127.0.0.1:8080/api/v1"
@@ -34,12 +36,34 @@ func newCoreSDKClient() anisdk.Client {
 	return anisdk.NewClient(strings.TrimRight(base, "/"), strings.TrimSpace(os.Getenv("CORE_API_TOKEN")))
 }
 
-func idempotencyHeaders() (map[string]string, error) {
-	key, err := anisdk.NewIdempotencyKey("ani")
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ports.ErrCoreUnavailable, err)
+// corePropagateHeaders 统一从 gRPC incoming metadata 组装调用 Core 的 HTTP 头。
+// - X-Request-ID ← x-request-id（BOSS 网关注入）
+// - X-ANI-Actor-User-ID ← x-user-id（BOSS 操作者）
+// Core Gateway 再把这两头注入 ctx，供 PostgresTenant 写 tenant_lifecycle。
+func corePropagateHeaders(ctx context.Context) map[string]string {
+	headers := map[string]string{}
+	if id := metadataFirst(ctx, "x-request-id"); id != "" {
+		headers["X-Request-ID"] = id
 	}
-	return map[string]string{"Idempotency-Key": key}, nil
+	if id := metadataFirst(ctx, "x-user-id"); id != "" {
+		headers["X-ANI-Actor-User-ID"] = id
+	}
+	if len(headers) == 0 {
+		return nil
+	}
+	return headers
+}
+
+func metadataFirst(ctx context.Context, key string) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return ""
+	}
+	vals := md.Get(key)
+	if len(vals) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(vals[0])
 }
 
 func mapSDKError(err error) error {
@@ -63,8 +87,22 @@ func mapSDKError(err error) error {
 			return fmt.Errorf("%w: %s", ports.ErrQuotaAlreadyExists, detail)
 		case ports.ErrQuotaResourceNotRegistered.Error():
 			return fmt.Errorf("%w: %s", ports.ErrQuotaResourceNotRegistered, detail)
+		case ports.ErrTenantNameConflict.Error():
+			return fmt.Errorf("%w: %s", ports.ErrTenantNameConflict, detail)
+		case ports.ErrTenantStateInvalid.Error():
+			return fmt.Errorf("%w: %s", ports.ErrTenantStateInvalid, detail)
 		case ports.ErrValidationFailed.Error():
 			return fmt.Errorf("%w: %s", ports.ErrValidationFailed, detail)
+		case "USER_NOT_FOUND":
+			return fmt.Errorf("%w: %s", ports.ErrTenantAdminNotFound, detail)
+		case ports.ErrTenantAdminNotFound.Error():
+			return fmt.Errorf("%w: %s", ports.ErrTenantAdminNotFound, detail)
+		case ports.ErrRoleChangeInvalid.Error():
+			return fmt.Errorf("%w: %s", ports.ErrRoleChangeInvalid, detail)
+		case ports.ErrPasswordSameAsOld.Error():
+			return fmt.Errorf("%w: %s", ports.ErrPasswordSameAsOld, detail)
+		case ports.ErrUserStateInvalid.Error():
+			return fmt.Errorf("%w: %s", ports.ErrUserStateInvalid, detail)
 		default:
 			return fmt.Errorf("%w: %s", ports.ErrCoreUnavailable, detail)
 		}

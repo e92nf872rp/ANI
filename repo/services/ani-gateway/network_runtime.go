@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
+	"github.com/kubercloud/ani/pkg/bootstrap"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
@@ -25,6 +27,7 @@ type gatewayNetworkRuntimeConfig struct {
 	KubernetesProviderManager         string
 	KubernetesHTTPClient              *http.Client
 	KubernetesRequestTimeout          time.Duration
+	DatabaseURL                       string
 }
 
 func gatewayNetworkRuntimeConfigFromEnv() gatewayNetworkRuntimeConfig {
@@ -41,16 +44,28 @@ func gatewayNetworkRuntimeConfigFromEnv() gatewayNetworkRuntimeConfig {
 		KubernetesServiceAccountCAFile:    os.Getenv("KUBERNETES_SERVICE_ACCOUNT_CA_FILE"),
 		KubernetesProviderManager:         os.Getenv("KUBERNETES_PROVIDER_FIELD_MANAGER"),
 		KubernetesRequestTimeout:          gatewayDurationFromEnv("KUBERNETES_REQUEST_TIMEOUT"),
+		DatabaseURL:                       os.Getenv("DATABASE_URL"),
 	}
 }
 
-func newGatewayNetworkService(cfg gatewayNetworkRuntimeConfig) (ports.NetworkService, error) {
+func newGatewayNetworkService(ctx context.Context, cfg gatewayNetworkRuntimeConfig) (ports.NetworkService, func(), error) {
 	switch mode := strings.TrimSpace(cfg.ProviderMode); mode {
 	case "", "local", "not_configured":
-		return nil, nil
+		dsn := strings.TrimSpace(cfg.DatabaseURL)
+		if dsn == "" {
+			return nil, func() {}, nil
+		}
+		metadata, closeStore, err := bootstrap.ConnectMetadataStore(ctx, dsn)
+		if err != nil {
+			return nil, func() {}, fmt.Errorf("connect network metadata store: %w", err)
+		}
+		store := runtimeadapter.NewMetadataNetworkStore(metadata)
+		return runtimeadapter.NewLocalNetworkService(
+			runtimeadapter.WithNetworkResourceStore(store),
+		), closeStore, nil
 	case "kubeovn_rest":
 		if strings.TrimSpace(cfg.ProviderUserID) == "" || strings.TrimSpace(cfg.ProviderProof) == "" {
-			return nil, fmt.Errorf("%w: network provider requires NETWORK_PROVIDER_USER_ID and NETWORK_PROVIDER_PERMISSION_PROOF", ports.ErrInvalid)
+			return nil, func() {}, fmt.Errorf("%w: network provider requires NETWORK_PROVIDER_USER_ID and NETWORK_PROVIDER_PERMISSION_PROOF", ports.ErrInvalid)
 		}
 		client, err := runtimeadapter.NewKubernetesRESTClient(runtimeadapter.KubernetesRESTClientConfig{
 			Host:            cfg.KubernetesAPIHost,
@@ -64,13 +79,13 @@ func newGatewayNetworkService(cfg gatewayNetworkRuntimeConfig) (ports.NetworkSer
 			RequestTimeout:  cfg.KubernetesRequestTimeout,
 		})
 		if err != nil {
-			return nil, err
+			return nil, func() {}, err
 		}
 		provider := runtimeadapter.NewKubeOVNNetworkProviderAdapter(
 			client,
 			runtimeadapter.WithKubeOVNNetworkProviderApplyEnabled(cfg.ProviderApply),
 		)
-		return runtimeadapter.NewLocalNetworkService(
+		opts := []runtimeadapter.NetworkServiceOption{
 			runtimeadapter.WithNetworkRouteProvider(
 				runtimeadapter.NewKubeOVNNetworkRenderer(),
 				provider,
@@ -81,8 +96,19 @@ func newGatewayNetworkService(cfg gatewayNetworkRuntimeConfig) (ports.NetworkSer
 					PermissionProof: cfg.ProviderProof,
 				},
 			),
-		), nil
+		}
+		closeStore := func() {}
+		if dsn := strings.TrimSpace(cfg.DatabaseURL); dsn != "" {
+			metadata, closeFn, err := bootstrap.ConnectMetadataStore(ctx, dsn)
+			if err != nil {
+				return nil, func() {}, fmt.Errorf("connect network metadata store: %w", err)
+			}
+			store := runtimeadapter.NewMetadataNetworkStore(metadata)
+			opts = append(opts, runtimeadapter.WithNetworkResourceStore(store))
+			closeStore = closeFn
+		}
+		return runtimeadapter.NewLocalNetworkService(opts...), closeStore, nil
 	default:
-		return nil, fmt.Errorf("%w: unsupported NETWORK_PROVIDER %q", ports.ErrUnsupported, mode)
+		return nil, func() {}, fmt.Errorf("%w: unsupported NETWORK_PROVIDER %q", ports.ErrUnsupported, mode)
 	}
 }

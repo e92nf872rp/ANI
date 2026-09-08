@@ -130,7 +130,9 @@ func actionAllowed(status Status, action Action) bool {
 	}
 }
 
-// canPreempt：delete 抢占一切非 delete；stop 可打断 create/scale/start/restart；scale 可打断未完成的 scale。
+// canPreempt 描述领域上允许替代的动作；持久层只会真正取消尚未被 worker
+// claim 的 pending operation，已 running/leased 的操作返回 ErrOperationInProgress。
+// delete 可替代非 delete；stop 可替代 create/scale/start/restart；scale 可替代 scale。
 func canPreempt(next, active Action) bool {
 	if next == ActionDelete {
 		return active != ActionDelete

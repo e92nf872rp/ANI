@@ -503,8 +503,8 @@ func TestCollectAll_PeriodMinuteAligned(t *testing.T) {
 	if len(records) == 0 {
 		t.Fatalf("expected at least 1 record")
 	}
-	// Period 应为分钟对齐格式 "2006-01-02T15:04"
-	now := time.Now().Format("2006-01-02T15:04")
+	// Period 应为分钟对齐格式 "2006-01-02T15:04"（UTC，与查询侧时区契约一致）
+	now := time.Now().UTC().Format("2006-01-02T15:04")
 	for _, r := range records {
 		if r.Period != now {
 			t.Errorf("expected period %s, got %s", now, r.Period)

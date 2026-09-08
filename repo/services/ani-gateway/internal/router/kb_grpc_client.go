@@ -43,6 +43,7 @@ const queryRPCTimeout = 120 * time.Second
 type KBGRPCClient interface {
 	CreateKB(ctx context.Context, tenantID string, idempotencyKey string, req *kbv1.CreateKBRequest) (*kbv1.KnowledgeBase, error)
 	GetKB(ctx context.Context, tenantID string, kbID string) (*kbv1.KnowledgeBase, error)
+	UpdateKB(ctx context.Context, tenantID string, kbID string, idempotencyKey string, name string, description string) (*kbv1.KnowledgeBase, error)
 	ListKBs(ctx context.Context, tenantID string, limit int32, cursor string) (*kbv1.ListKBsResponse, error)
 	DeleteKB(ctx context.Context, tenantID string, kbID string) (*emptypb.Empty, error)
 	GetDocumentUploadURL(ctx context.Context, tenantID string, kbID string, idempotencyKey string, req *kbv1.GetDocumentUploadURLRequest) (*kbv1.GetDocumentUploadURLResponse, error)
@@ -58,7 +59,14 @@ type KBGRPCClient interface {
 	Retrieve(ctx context.Context, tenantID string, kbID string, req *kbv1.RetrieveRequest) (kbv1.KBService_RetrieveClient, error)
 	ListKBCitations(ctx context.Context, tenantID string, kbID string, limit int32, cursor string) (*kbv1.ListKBCitationsResponse, error)
 	ListKBSessions(ctx context.Context, tenantID string, kbID string, limit int32, cursor string) (*kbv1.ListKBSessionsResponse, error)
+	ListDocumentChunks(ctx context.Context, tenantID string, kbID string, docID string, chunkType string, limit int32, cursor string) (*kbv1.ListDocumentChunksResponse, error)
+	GetSessionMessages(ctx context.Context, tenantID string, kbID string, sessionID string, limit int32, cursor string) (*kbv1.GetSessionMessagesResponse, error)
+	DeleteSession(ctx context.Context, tenantID string, kbID string, sessionID string) (*emptypb.Empty, error)
 	UpdateKBPermissions(ctx context.Context, tenantID string, kbID string, idempotencyKey string, req *kbv1.UpdateKBPermissionsRequest) (*kbv1.KnowledgeBase, error)
+	// ReparseDocument re-queues an already-ingested document for parsing
+	// (SPEC §5.1 reparse 事件流). It returns an AsyncTaskRef because reparse
+	// is asynchronous; the client polls the task via the tasks API.
+	ReparseDocument(ctx context.Context, tenantID string, kbID string, docID string, idempotencyKey string) (*commonv1.AsyncTaskRef, error)
 }
 
 // kbGRPCClient is the production implementation backed by a gRPC ClientConn.
@@ -118,6 +126,21 @@ func (c *kbGRPCClient) GetKB(ctx context.Context, tenantID, kbID string) (*kbv1.
 	callCtx, cancel := c.callCtx(ctx)
 	defer cancel()
 	return c.client.GetKB(callCtx, &kbv1.GetKBRequest{TenantId: tenantID, KbId: kbID})
+}
+
+// UpdateKB updates KB name/description; empty name/description mean "no
+// change" (SPEC §5.1 #5). The tenant id comes from the Auth middleware, and
+// the idempotency key is client-generated for replay safety.
+func (c *kbGRPCClient) UpdateKB(ctx context.Context, tenantID, kbID, idempotencyKey, name, description string) (*kbv1.KnowledgeBase, error) {
+	callCtx, cancel := c.callCtx(ctx)
+	defer cancel()
+	return c.client.UpdateKB(callCtx, &kbv1.UpdateKBRequest{
+		TenantId:       tenantID,
+		KbId:           kbID,
+		IdempotencyKey: idempotencyKey,
+		Name:           name,
+		Description:    description,
+	})
 }
 
 func (c *kbGRPCClient) ListKBs(ctx context.Context, tenantID string, limit int32, cursor string) (*kbv1.ListKBsResponse, error) {
@@ -279,6 +302,39 @@ func (c *kbGRPCClient) ListKBSessions(ctx context.Context, tenantID, kbID string
 	})
 }
 
+func (c *kbGRPCClient) ListDocumentChunks(ctx context.Context, tenantID, kbID, docID, chunkType string, limit int32, cursor string) (*kbv1.ListDocumentChunksResponse, error) {
+	callCtx, cancel := c.callCtx(ctx)
+	defer cancel()
+	return c.client.ListDocumentChunks(callCtx, &kbv1.ListDocumentChunksRequest{
+		TenantId:  tenantID,
+		KbId:      kbID,
+		DocId:     docID,
+		ChunkType: chunkType,
+		Page:      &commonv1.CursorPageRequest{Limit: limit, Cursor: cursor},
+	})
+}
+
+func (c *kbGRPCClient) GetSessionMessages(ctx context.Context, tenantID, kbID, sessionID string, limit int32, cursor string) (*kbv1.GetSessionMessagesResponse, error) {
+	callCtx, cancel := c.callCtx(ctx)
+	defer cancel()
+	return c.client.GetSessionMessages(callCtx, &kbv1.GetSessionMessagesRequest{
+		TenantId:  tenantID,
+		KbId:      kbID,
+		SessionId: sessionID,
+		Page:      &commonv1.CursorPageRequest{Limit: limit, Cursor: cursor},
+	})
+}
+
+func (c *kbGRPCClient) DeleteSession(ctx context.Context, tenantID, kbID, sessionID string) (*emptypb.Empty, error) {
+	callCtx, cancel := c.callCtx(ctx)
+	defer cancel()
+	return c.client.DeleteSession(callCtx, &kbv1.DeleteSessionRequest{
+		TenantId:  tenantID,
+		KbId:      kbID,
+		SessionId: sessionID,
+	})
+}
+
 func (c *kbGRPCClient) UpdateKBPermissions(ctx context.Context, tenantID, kbID, idempotencyKey string, req *kbv1.UpdateKBPermissionsRequest) (*kbv1.KnowledgeBase, error) {
 	if req == nil {
 		req = &kbv1.UpdateKBPermissionsRequest{}
@@ -289,6 +345,21 @@ func (c *kbGRPCClient) UpdateKBPermissions(ctx context.Context, tenantID, kbID, 
 	callCtx, cancel := c.callCtx(ctx)
 	defer cancel()
 	return c.client.UpdateKBPermissions(callCtx, req)
+}
+
+// ReparseDocument re-queues an already-ingested document for parsing
+// (SPEC §5.1 reparse 事件流). The tenant id comes from the Auth middleware,
+// and the idempotency key is client-generated for replay safety, mirroring
+// the NotifyDocumentUploaded async-task pattern.
+func (c *kbGRPCClient) ReparseDocument(ctx context.Context, tenantID, kbID, docID, idempotencyKey string) (*commonv1.AsyncTaskRef, error) {
+	callCtx, cancel := c.callCtx(ctx)
+	defer cancel()
+	return c.client.ReparseDocument(callCtx, &kbv1.ReparseDocumentRequest{
+		TenantId:       tenantID,
+		KbId:           kbID,
+		DocId:          docID,
+		IdempotencyKey: idempotencyKey,
+	})
 }
 
 // kbError is the structured error produced by mapGRPCError. Handlers convert

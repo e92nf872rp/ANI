@@ -11,7 +11,7 @@ import (
 )
 
 func TestGatewayNetworkServiceFromConfigDefaultsToRouterLocalService(t *testing.T) {
-	service, err := newGatewayNetworkService(gatewayNetworkRuntimeConfig{})
+	service, _, err := newGatewayNetworkService(context.Background(), gatewayNetworkRuntimeConfig{})
 	if err != nil {
 		t.Fatalf("newGatewayNetworkService() error = %v", err)
 	}
@@ -22,7 +22,7 @@ func TestGatewayNetworkServiceFromConfigDefaultsToRouterLocalService(t *testing.
 
 func TestGatewayNetworkServiceFromConfigUsesKubeOVNProvider(t *testing.T) {
 	transport := &gatewayNetworkRoundTripper{}
-	service, err := newGatewayNetworkService(gatewayNetworkRuntimeConfig{
+	service, _, err := newGatewayNetworkService(context.Background(), gatewayNetworkRuntimeConfig{
 		ProviderMode:         "kubeovn_rest",
 		ProviderApply:        true,
 		ProviderUserID:       "ani-core-network-provider",
@@ -64,7 +64,7 @@ func TestGatewayNetworkServiceFromConfigUsesKubeOVNProvider(t *testing.T) {
 }
 
 func TestGatewayNetworkServiceRejectsKubeOVNProviderWithoutProof(t *testing.T) {
-	if _, err := newGatewayNetworkService(gatewayNetworkRuntimeConfig{
+	if _, _, err := newGatewayNetworkService(context.Background(), gatewayNetworkRuntimeConfig{
 		ProviderMode:      "kubeovn_rest",
 		KubernetesAPIHost: "https://kubernetes.example.test",
 	}); err == nil {

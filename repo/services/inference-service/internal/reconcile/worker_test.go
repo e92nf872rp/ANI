@@ -14,14 +14,21 @@ import (
 )
 
 type workerStore struct {
-	mu           sync.Mutex
-	operation    domain.Operation
-	service      domain.Service
-	claimed      bool
-	repeatClaims bool
-	observations []repository.Observation
-	failures     []repository.Failure
-	applyErr     error
+	mu                sync.Mutex
+	operation         domain.Operation
+	service           domain.Service
+	claimed           bool
+	repeatClaims      bool
+	observations      []repository.Observation
+	failures          []repository.Failure
+	applyErr          error
+	withdrawn         bool
+	withdrawErr       error
+	withdrawals       int
+	claimAt           time.Time
+	withdrawnButStale bool
+	getServiceCalls   int
+	getServiceErrAt   int
 }
 
 func (*workerStore) FindCreateReplay(context.Context, uuid.UUID, string, uuid.UUID, string) (repository.CreateResult, bool, error) {
@@ -37,7 +44,31 @@ func (*workerStore) BindRuntimeRef(context.Context, repository.RuntimeBinding) e
 func (*workerStore) AbortCreate(context.Context, repository.RuntimeBinding) error {
 	panic("unexpected AbortCreate")
 }
+func (s *workerStore) PublicationWithdrawn(_ context.Context, tenantID, serviceID uuid.UUID, generation int64) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.withdrawals++
+	if tenantID != s.operation.TenantID || serviceID != s.operation.ServiceID || generation != s.operation.TargetGeneration {
+		return false, errors.New("unexpected publication withdrawal identity")
+	}
+	if s.withdrawn && !s.withdrawnButStale && !publicationWithdrawalMatches(s.service, s.operation) {
+		s.service.Publication = domain.Publication{
+			Desired: domain.PublicationUnpublished, Generation: generation,
+			ObservedGeneration: generation, Phase: domain.PublicationUnpublishedOK,
+			UpdatedAt: s.claimAt,
+		}
+		s.service.InvocationURL = ""
+	}
+	return s.withdrawn, s.withdrawErr
+}
+
 func (s *workerStore) GetService(context.Context, uuid.UUID, uuid.UUID) (domain.Service, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.getServiceCalls++
+	if s.getServiceErrAt == s.getServiceCalls {
+		return domain.Service{}, errors.New("service lookup temporarily unavailable")
+	}
 	return s.service, nil
 }
 func (*workerStore) GetOperation(context.Context, uuid.UUID, uuid.UUID) (domain.Operation, error) {
@@ -52,6 +83,7 @@ func (s *workerStore) ClaimOperation(_ context.Context, owner string, now time.T
 	s.claimed = true
 	s.operation.LeaseOwner = owner
 	s.operation.LeaseToken = uuid.New()
+	s.claimAt = now.UTC()
 	until := now.Add(duration)
 	s.operation.LeaseUntil = &until
 	return s.operation, true, nil
@@ -81,7 +113,9 @@ func (s *workerStore) FailOperation(_ context.Context, failure repository.Failur
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.failures = append(s.failures, failure)
-	s.operation.Attempt++
+	if failure.ErrorCode != codeGatewayUnpublishPending && failure.ErrorCode != codeGatewayUnpublishCheck {
+		s.operation.Attempt++
+	}
 	s.operation.ErrorCode = failure.ErrorCode
 	s.operation.ErrorMessage = failure.ErrorMessage
 	switch {
@@ -221,6 +255,7 @@ func workerFixture() (*workerStore, *runtimeStub) {
 	serviceID := uuid.MustParse("60000000-0000-0000-0000-000000000006")
 	operationID := uuid.MustParse("70000000-0000-0000-0000-000000000007")
 	store := &workerStore{
+		withdrawn: true,
 		operation: domain.Operation{
 			ID: operationID, TenantID: tenantID, ServiceID: serviceID,
 			Type: domain.ActionCreate, State: domain.OperationPending, TargetGeneration: 1,
@@ -257,11 +292,37 @@ func TestRunOncePersistsRuntimeBeforeHealthAndOnlyThenMarksRunning(t *testing.T)
 	if last.Status != domain.StatusRunning || !last.Complete {
 		t.Fatalf("final running observation missing: %+v", last)
 	}
+	if !last.Publish {
+		t.Fatalf("successful create did not request publication: %+v", last)
+	}
+	for i, observation := range store.observations[:len(store.observations)-1] {
+		if observation.Publish {
+			t.Fatalf("partial observation %d requested publication: %+v", i, observation)
+		}
+	}
 	if runtime.healthCalls != 1 || runtime.smokeCalls != 1 {
 		t.Fatalf("health/smoke calls = %d/%d, want 1/1", runtime.healthCalls, runtime.smokeCalls)
 	}
 	if len(runtime.requests) != 1 || runtime.requests[0].IdempotencyKey == uuid.Nil {
 		t.Fatalf("runtime request lacks deterministic key: %+v", runtime.requests)
+	}
+}
+
+func TestWorkerDoesNotPublishBeforeHealthAndSmokeSucceed(t *testing.T) {
+	store, runtime := workerFixture()
+	runtime.smokeErr = errors.New("task smoke failed")
+
+	handled, err := NewWorker(store, runtime, "worker-smoke", time.Now).RunOnce(context.Background())
+	if err != nil || !handled {
+		t.Fatalf("RunOnce() = (%v,%v)", handled, err)
+	}
+	for _, observation := range store.observations {
+		if observation.Publish {
+			t.Fatalf("failed smoke requested publication: %+v", observation)
+		}
+	}
+	if len(store.failures) != 1 || store.failures[0].ErrorCode != "RUNTIME_SMOKE_FAILED" {
+		t.Fatalf("smoke failure = %+v", store.failures)
 	}
 }
 
@@ -456,6 +517,27 @@ func TestWorkerScaleWaitsForTargetReadyReplicas(t *testing.T) {
 	}
 }
 
+func TestWorkerScaleCompletionDoesNotRequestPublication(t *testing.T) {
+	store, runtime := workerFixture()
+	store.operation.Type = domain.ActionScale
+	store.operation.TargetGeneration = 2
+	store.operation.TargetSpec.Replicas = 2
+	store.service.Status = domain.StatusDeploying
+	store.service.Generation = 2
+	store.service.RuntimeRef = runtime.observation.RuntimeRef
+	store.service.ActiveOperationID = store.operation.ID
+	runtime.observation.ReadyReplicas = 2
+
+	handled, err := NewWorker(store, runtime, "worker-scale-publish", time.Now).RunOnce(context.Background())
+	if err != nil || !handled {
+		t.Fatalf("RunOnce() = (%v,%v)", handled, err)
+	}
+	last := store.observations[len(store.observations)-1]
+	if !last.Complete || last.Status != domain.StatusRunning || last.Publish {
+		t.Fatalf("scale completion publication = %+v", last)
+	}
+}
+
 func TestWorkerUsesObservedStateAfterMutationAcceptance(t *testing.T) {
 	store, runtime := workerFixture()
 	runtime.observedSet = true
@@ -508,6 +590,314 @@ func TestWorkerStopClearsEndpointButRetainsRuntimeRef(t *testing.T) {
 	}
 }
 
+func TestWorkerWaitsForPublicationWithdrawalBeforeRuntimeMutation(t *testing.T) {
+	for _, action := range []domain.Action{domain.ActionStop, domain.ActionRestart, domain.ActionDelete} {
+		t.Run(string(action), func(t *testing.T) {
+			store, runtime := workerFixture()
+			store.withdrawn = false
+			store.operation.Type = action
+			store.operation.TargetGeneration = 2
+			store.service.Generation = 2
+			store.service.RuntimeRef = runtime.observation.RuntimeRef
+			store.service.ActiveOperationID = store.operation.ID
+			if action == domain.ActionStop || action == domain.ActionDelete {
+				store.service.Status = domain.StatusStopping
+			} else {
+				store.service.Status = domain.StatusDeploying
+			}
+
+			handled, err := NewWorker(store, runtime, "worker-withdraw", time.Now).RunOnce(context.Background())
+			if err != nil || !handled {
+				t.Fatalf("RunOnce() = (%v,%v)", handled, err)
+			}
+			if store.withdrawals != 1 {
+				t.Fatalf("withdrawal checks = %d, want 1", store.withdrawals)
+			}
+			if len(runtime.requests) != 0 || len(runtime.lifecycles) != 0 || len(runtime.deletes) != 0 {
+				t.Fatalf("runtime mutated before withdrawal: ensure=%d lifecycle=%d delete=%d",
+					len(runtime.requests), len(runtime.lifecycles), len(runtime.deletes))
+			}
+			if len(store.failures) != 1 || store.failures[0].ErrorCode != "GATEWAY_UNPUBLISH_PENDING" || store.failures[0].RetryAt == nil {
+				t.Fatalf("withdrawal pending failure = %+v", store.failures)
+			}
+		})
+	}
+}
+
+func TestWorkerWithdrawalCheckFailureFailsClosed(t *testing.T) {
+	store, runtime := workerFixture()
+	store.withdrawErr = errors.New("publisher state unavailable")
+	store.operation.Type = domain.ActionStop
+	store.operation.TargetGeneration = 2
+	store.service.Generation = 2
+	store.service.Status = domain.StatusStopping
+	store.service.RuntimeRef = runtime.observation.RuntimeRef
+	store.service.ActiveOperationID = store.operation.ID
+
+	handled, err := NewWorker(store, runtime, "worker-withdraw-error", time.Now).RunOnce(context.Background())
+	if err != nil || !handled {
+		t.Fatalf("RunOnce() = (%v,%v)", handled, err)
+	}
+	if len(runtime.lifecycles) != 0 || len(runtime.deletes) != 0 {
+		t.Fatal("runtime mutated when withdrawal check failed")
+	}
+	if len(store.failures) != 1 || store.failures[0].ErrorCode != "GATEWAY_UNPUBLISH_CHECK_FAILED" || store.failures[0].RetryAt == nil {
+		t.Fatalf("withdrawal check failure = %+v", store.failures)
+	}
+}
+
+func TestWorkerRunsRuntimeWhenWithdrawalRecoversOnFinalRetry(t *testing.T) {
+	store, runtime := workerFixture()
+	store.operation.Type = domain.ActionStop
+	store.operation.TargetGeneration = 2
+	store.operation.Attempt = 1
+	store.operation.ErrorCode = "GATEWAY_UNPUBLISH_PENDING"
+	store.service.Generation = 2
+	store.service.Status = domain.StatusStopping
+	store.service.RuntimeRef = runtime.observation.RuntimeRef
+	store.service.ActiveOperationID = store.operation.ID
+	runtime.observation = runtimeport.Observation{RuntimeRef: store.service.RuntimeRef}
+	worker := NewWorker(store, runtime, "worker-withdraw-recovered", time.Now)
+	worker.maxAttempts = 2
+
+	handled, err := worker.RunOnce(context.Background())
+	if err != nil || !handled {
+		t.Fatalf("RunOnce() = (%v,%v)", handled, err)
+	}
+	if len(runtime.lifecycles) != 1 || runtime.lifecycles[0].Action != domain.ActionStop {
+		t.Fatalf("recovered withdrawal did not permit runtime stop: %+v", runtime.lifecycles)
+	}
+}
+
+func TestWorkerKeepsTimedOutWithdrawalRetryableWithoutTouchingRuntime(t *testing.T) {
+	createdAt := time.Date(2026, 8, 31, 10, 0, 0, 0, time.UTC)
+	store, runtime := workerFixture()
+	store.withdrawn = false
+	store.operation.Type = domain.ActionDelete
+	store.operation.TargetGeneration = 2
+	store.operation.CreatedAt = createdAt
+	store.service.Generation = 2
+	store.service.Status = domain.StatusStopping
+	store.service.RuntimeRef = runtime.observation.RuntimeRef
+	store.service.ActiveOperationID = store.operation.ID
+	worker := NewWorker(store, runtime, "worker-withdraw-retryable", func() time.Time { return createdAt.Add(defaultDeployTimeout) })
+
+	handled, err := worker.RunOnce(context.Background())
+	if err != nil || !handled {
+		t.Fatalf("RunOnce() = (%v,%v)", handled, err)
+	}
+	if len(runtime.deletes) != 0 || len(runtime.lifecycles) != 0 {
+		t.Fatal("timed-out withdrawal retry touched runtime")
+	}
+	if len(store.failures) != 1 || store.failures[0].RetryAt == nil || store.failures[0].ErrorCode != "GATEWAY_UNPUBLISH_PENDING" {
+		t.Fatalf("retryable withdrawal failure = %+v", store.failures)
+	}
+	if store.operation.State != domain.OperationPending || store.service.Status == domain.StatusFailed {
+		t.Fatalf("withdrawal timeout became terminal: operation=%s service=%s", store.operation.State, store.service.Status)
+	}
+}
+
+func TestWorkerWithdrawalRetryDoesNotConsumeRuntimeAttemptBudget(t *testing.T) {
+	store, runtime := workerFixture()
+	store.withdrawn = false
+	store.operation.Type = domain.ActionStop
+	store.operation.TargetGeneration = 2
+	store.service.Generation = 2
+	store.service.Status = domain.StatusStopping
+	store.service.RuntimeRef = runtime.observation.RuntimeRef
+	store.service.ActiveOperationID = store.operation.ID
+
+	handled, err := NewWorker(store, runtime, "worker-withdraw-budget", time.Now).RunOnce(context.Background())
+	if err != nil || !handled {
+		t.Fatalf("RunOnce() = (%v,%v)", handled, err)
+	}
+	if store.operation.Attempt != 0 {
+		t.Fatalf("withdrawal retry consumed runtime attempt budget: %d", store.operation.Attempt)
+	}
+}
+
+func TestWorkerRuntimeTimeoutStartsAtConfirmedWithdrawal(t *testing.T) {
+	now := time.Date(2026, 8, 31, 14, 0, 0, 0, time.UTC)
+	store, runtime := workerFixture()
+	store.operation.Type = domain.ActionStop
+	store.operation.TargetGeneration = 2
+	store.operation.CreatedAt = now.Add(-20 * time.Minute)
+	store.operation.ErrorCode = codeGatewayUnpublishPending
+	store.service.Generation = 2
+	store.service.Status = domain.StatusStopping
+	store.service.RuntimeRef = runtime.observation.RuntimeRef
+	store.service.ActiveOperationID = store.operation.ID
+	store.service.Publication = domain.Publication{
+		Desired: domain.PublicationUnpublished, Generation: 2, ObservedGeneration: 2,
+		Phase: domain.PublicationUnpublishedOK, UpdatedAt: now.Add(-time.Second),
+	}
+	runtime.observation = runtimeport.Observation{
+		RuntimeRef: store.service.RuntimeRef, RuntimeEndpoint: "http://still-running.internal.svc:8000",
+		ReadyReplicas: 1, Ready: true,
+	}
+
+	handled, err := NewWorker(store, runtime, "worker-runtime-budget", func() time.Time { return now }).RunOnce(context.Background())
+	if err != nil || !handled {
+		t.Fatalf("RunOnce() = (%v,%v)", handled, err)
+	}
+	if len(runtime.lifecycles) != 1 {
+		t.Fatalf("runtime stop was not attempted after withdrawal: %+v", runtime.lifecycles)
+	}
+	if len(store.failures) != 1 || store.failures[0].ErrorCode != "RUNTIME_STOP_PENDING" || store.failures[0].RetryAt == nil {
+		t.Fatalf("first runtime failure did not receive a fresh timeout budget: %+v", store.failures)
+	}
+}
+
+func TestWorkerRejectsStaleWithdrawalSnapshotBeforeRuntimeMutation(t *testing.T) {
+	store, runtime := workerFixture()
+	store.operation.Type = domain.ActionDelete
+	store.operation.TargetGeneration = 2
+	store.service.Generation = 2
+	store.service.Status = domain.StatusStopping
+	store.service.RuntimeRef = runtime.observation.RuntimeRef
+	store.service.ActiveOperationID = store.operation.ID
+	store.withdrawnButStale = true
+
+	handled, err := NewWorker(store, runtime, "worker-stale-withdrawal", time.Now).RunOnce(context.Background())
+	if err != nil || !handled {
+		t.Fatalf("RunOnce() = (%v,%v)", handled, err)
+	}
+	if len(runtime.deletes) != 0 || len(runtime.lifecycles) != 0 || len(runtime.requests) != 0 {
+		t.Fatalf("stale withdrawal snapshot touched runtime: delete=%d lifecycle=%d ensure=%d",
+			len(runtime.deletes), len(runtime.lifecycles), len(runtime.requests))
+	}
+	if len(store.failures) != 1 || store.failures[0].ErrorCode != codeGatewayUnpublishPending || store.failures[0].RetryAt == nil {
+		t.Fatalf("stale withdrawal failure = %+v", store.failures)
+	}
+}
+
+func TestWorkerRuntimeRetriesUseNormalBudgetAfterWithdrawal(t *testing.T) {
+	now := time.Date(2026, 8, 31, 14, 0, 0, 0, time.UTC)
+	store, runtime := workerFixture()
+	store.operation.Type = domain.ActionStop
+	store.operation.TargetGeneration = 2
+	store.operation.CreatedAt = now.Add(-14 * time.Minute)
+	store.operation.ErrorCode = codeGatewayUnpublishPending
+	store.service.Generation = 2
+	store.service.Status = domain.StatusStopping
+	store.service.RuntimeRef = runtime.observation.RuntimeRef
+	store.service.ActiveOperationID = store.operation.ID
+	store.service.Publication = domain.Publication{
+		Desired: domain.PublicationUnpublished, Generation: 2, ObservedGeneration: 2,
+		Phase: domain.PublicationUnpublishedOK, UpdatedAt: now.Add(-time.Second),
+	}
+	runtime.observation = runtimeport.Observation{
+		RuntimeRef: store.service.RuntimeRef, RuntimeEndpoint: "http://still-running.internal.svc:8000",
+		ReadyReplicas: 1, Ready: true,
+	}
+	worker := NewWorker(store, runtime, "worker-runtime-retries", func() time.Time { return now })
+	worker.maxAttempts = 2
+
+	if handled, err := worker.RunOnce(context.Background()); err != nil || !handled {
+		t.Fatalf("first RunOnce() = (%v,%v)", handled, err)
+	}
+	if len(store.failures) != 1 || store.failures[0].RetryAt == nil || store.operation.Attempt != 1 {
+		t.Fatalf("first runtime retry = failures=%+v attempt=%d", store.failures, store.operation.Attempt)
+	}
+	if handled, err := worker.RunOnce(context.Background()); err != nil || !handled {
+		t.Fatalf("second RunOnce() = (%v,%v)", handled, err)
+	}
+	if len(store.failures) != 2 || !store.failures[1].DeadLetter || store.failures[1].ErrorCode != "RUNTIME_STOP_PENDING" {
+		t.Fatalf("runtime retry budget was not exhausted normally: %+v", store.failures)
+	}
+}
+
+func TestWorkerWithdrawalCheckErrorUsesCompletedWithdrawalTimeoutBudget(t *testing.T) {
+	now := time.Date(2026, 8, 31, 15, 0, 0, 0, time.UTC)
+	store, runtime := workerFixture()
+	store.withdrawn = false
+	store.withdrawErr = errors.New("publisher lookup temporarily unavailable")
+	store.operation.Type = domain.ActionStop
+	store.operation.TargetGeneration = 2
+	store.operation.CreatedAt = now.Add(-20 * time.Minute)
+	store.operation.Attempt = 1
+	store.operation.ErrorCode = "RUNTIME_STOP_PENDING"
+	store.service.Generation = 2
+	store.service.Status = domain.StatusStopping
+	store.service.RuntimeRef = runtime.observation.RuntimeRef
+	store.service.ActiveOperationID = store.operation.ID
+	store.service.Publication = domain.Publication{
+		Desired: domain.PublicationUnpublished, Generation: 2, ObservedGeneration: 2,
+		Phase: domain.PublicationUnpublishedOK, UpdatedAt: now.Add(-time.Minute),
+	}
+
+	handled, err := NewWorker(store, runtime, "worker-withdraw-check-budget", func() time.Time { return now }).RunOnce(context.Background())
+	if err != nil || !handled {
+		t.Fatalf("RunOnce() = (%v,%v)", handled, err)
+	}
+	if len(store.failures) != 1 || store.failures[0].ErrorCode != codeGatewayUnpublishCheck || store.failures[0].RetryAt == nil {
+		t.Fatalf("withdrawal check error used the old operation deadline: %+v", store.failures)
+	}
+	if store.operation.Attempt != 1 {
+		t.Fatalf("withdrawal check error changed runtime attempt budget: %d", store.operation.Attempt)
+	}
+}
+
+func TestWorkerWithdrawalFalseUsesCompletedWithdrawalTimeoutBudget(t *testing.T) {
+	now := time.Date(2026, 8, 31, 15, 0, 0, 0, time.UTC)
+	store, runtime := workerFixture()
+	store.withdrawn = false
+	store.operation.Type = domain.ActionDelete
+	store.operation.TargetGeneration = 2
+	store.operation.CreatedAt = now.Add(-20 * time.Minute)
+	store.operation.Attempt = 1
+	store.operation.ErrorCode = "RUNTIME_DELETE_PENDING"
+	store.service.Generation = 2
+	store.service.Status = domain.StatusStopping
+	store.service.RuntimeRef = runtime.observation.RuntimeRef
+	store.service.ActiveOperationID = store.operation.ID
+	store.service.Publication = domain.Publication{
+		Desired: domain.PublicationUnpublished, Generation: 2, ObservedGeneration: 2,
+		Phase: domain.PublicationUnpublishedOK, UpdatedAt: now.Add(-time.Minute),
+	}
+
+	handled, err := NewWorker(store, runtime, "worker-withdraw-false-budget", func() time.Time { return now }).RunOnce(context.Background())
+	if err != nil || !handled {
+		t.Fatalf("RunOnce() = (%v,%v)", handled, err)
+	}
+	if len(store.failures) != 1 || store.failures[0].ErrorCode != codeGatewayUnpublishPending || store.failures[0].RetryAt == nil {
+		t.Fatalf("false withdrawal result used the old operation deadline: %+v", store.failures)
+	}
+	if len(runtime.deletes) != 0 {
+		t.Fatal("false withdrawal result touched runtime")
+	}
+}
+
+func TestWorkerWithdrawalRefreshErrorUsesCompletedWithdrawalTimeoutBudget(t *testing.T) {
+	now := time.Date(2026, 8, 31, 15, 0, 0, 0, time.UTC)
+	store, runtime := workerFixture()
+	store.operation.Type = domain.ActionRestart
+	store.operation.TargetGeneration = 2
+	store.operation.CreatedAt = now.Add(-20 * time.Minute)
+	store.operation.Attempt = 1
+	store.operation.ErrorCode = "RUNTIME_RESTART_PENDING"
+	store.service.Generation = 2
+	store.service.Status = domain.StatusDeploying
+	store.service.RuntimeRef = runtime.observation.RuntimeRef
+	store.service.ActiveOperationID = store.operation.ID
+	store.service.Publication = domain.Publication{
+		Desired: domain.PublicationUnpublished, Generation: 2, ObservedGeneration: 2,
+		Phase: domain.PublicationUnpublishedOK, UpdatedAt: now.Add(-time.Minute),
+	}
+	store.getServiceErrAt = 2
+
+	handled, err := NewWorker(store, runtime, "worker-withdraw-refresh-budget", func() time.Time { return now }).RunOnce(context.Background())
+	if err != nil || !handled {
+		t.Fatalf("RunOnce() = (%v,%v)", handled, err)
+	}
+	if len(store.failures) != 1 || store.failures[0].ErrorCode != codeGatewayUnpublishCheck || store.failures[0].RetryAt == nil {
+		t.Fatalf("withdrawal refresh error used the old operation deadline: %+v", store.failures)
+	}
+	if len(runtime.lifecycles) != 0 || len(runtime.requests) != 0 {
+		t.Fatal("withdrawal refresh error touched runtime")
+	}
+}
+
 func TestWorkerStartRestoresStoppedRuntime(t *testing.T) {
 	store, runtime := workerFixture()
 	runtimeRef := runtime.observation.RuntimeRef
@@ -529,6 +919,9 @@ func TestWorkerStartRestoresStoppedRuntime(t *testing.T) {
 	if len(store.observations) != 2 || store.observations[1].Status != domain.StatusRunning || !store.observations[1].Complete {
 		t.Fatalf("start observations = %+v", store.observations)
 	}
+	if !store.observations[1].Publish {
+		t.Fatalf("successful start did not request publication: %+v", store.observations[1])
+	}
 }
 
 func TestWorkerRestartUsesLifecycleIdempotencyKey(t *testing.T) {
@@ -546,6 +939,9 @@ func TestWorkerRestartUsesLifecycleIdempotencyKey(t *testing.T) {
 	}
 	if len(runtime.lifecycles) != 1 || runtime.lifecycles[0].Action != domain.ActionRestart || runtime.lifecycles[0].IdempotencyKey == uuid.Nil {
 		t.Fatalf("restart lifecycle request = %+v", runtime.lifecycles)
+	}
+	if len(store.observations) == 0 || !store.observations[len(store.observations)-1].Publish {
+		t.Fatalf("successful restart did not request publication: %+v", store.observations)
 	}
 }
 

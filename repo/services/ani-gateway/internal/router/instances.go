@@ -81,6 +81,7 @@ type instanceAPI struct {
 	service                       ports.WorkloadInstanceService
 	operations                    ports.WorkloadOperationStore
 	observability                 ports.InstanceObservability
+	sessions                      ports.InstanceSessionIssuer
 	observabilityUsesInstanceName bool
 	gpuInventory                  ports.GPUInventory
 	k8sClient                     *runtimeadapter.KubernetesRESTClient
@@ -252,6 +253,7 @@ type instanceLifecycleRequest struct {
 	Action           string   `json:"action"`
 	CPU              string   `json:"cpu"`
 	Memory           string   `json:"memory"`
+	SpecID           string   `json:"spec_id"`
 	SnapshotName     string   `json:"snapshot_name"`
 	SnapshotID       string   `json:"snapshot_id"`
 	IncludeDataDisks *bool    `json:"include_data_disks"`
@@ -273,7 +275,8 @@ type instanceLifecycleRequest struct {
 }
 
 type instanceConsoleRequest struct {
-	Protocol string `json:"protocol"`
+	Protocol       string `json:"protocol"`
+	IdempotencyKey string `json:"idempotency_key"`
 }
 
 type shellExecRequest struct {
@@ -393,6 +396,7 @@ type instanceResponse struct {
 	Network               instanceNetworkSummary              `json:"network"`
 	Access                instanceAccessSummary               `json:"access"`
 	StorageAttachments    []instanceStorageAttachmentResponse `json:"storage_attachments,omitempty"`
+	AutoStart             bool                                `json:"auto_start"`
 	TerminationProtection bool                                `json:"termination_protection"`
 	SSH                   *instanceSSHResponse                `json:"ssh,omitempty"`
 	Volumes               []instanceVolumeResponse            `json:"volumes,omitempty"`
@@ -669,10 +673,10 @@ type instanceTimelineStepResponse struct {
 }
 
 func newInstanceAPI() *instanceAPI {
-	return newInstanceAPIWithObservability(nil, false, nil, nil, nil, nil)
+	return newInstanceAPIWithObservability(nil, nil, false, nil, nil, nil, nil)
 }
 
-func newInstanceAPIWithObservability(observability ports.InstanceObservability, useInstanceName bool, gpuInventory ports.GPUInventory, k8sClient *runtimeadapter.KubernetesRESTClient, secrets ports.SecretService, specStore ports.GPUSpecStore) *instanceAPI {
+func newInstanceAPIWithObservability(observability ports.InstanceObservability, sessions ports.InstanceSessionIssuer, useInstanceName bool, gpuInventory ports.GPUInventory, k8sClient *runtimeadapter.KubernetesRESTClient, secrets ports.SecretService, specStore ports.GPUSpecStore) *instanceAPI {
 	store := newMemoryInstanceStore()
 	operations := runtimeadapter.NewLocalOperationStore()
 	identity := runtimeadapter.NewLocalWorkloadIdentityService()
@@ -747,7 +751,7 @@ func newInstanceAPIWithObservability(observability ports.InstanceObservability, 
 			runtimeadapter.NewCompositeGPUSpecService(specStore, runtimeadapter.NewLocalGPUSpecService(inventory)),
 			registryadapter.NewLocalImageRegistry(),
 			secrets,
-		)),
+		).WithWorkloadStore(store)),
 	}
 	if lifecycle != nil {
 		serviceOpts = append(serviceOpts, runtimeadapter.WithInstanceLifecycleExecutor(lifecycle))
@@ -759,12 +763,20 @@ func newInstanceAPIWithObservability(observability ports.InstanceObservability, 
 		serviceOpts...,
 	)
 	if observability == nil {
-		observability = runtimeadapter.NewLocalInstanceObservabilityService()
+		local := runtimeadapter.NewLocalInstanceObservabilityService()
+		observability = local
+		if sessions == nil {
+			sessions = local
+		}
+	}
+	if sessions == nil {
+		sessions = runtimeadapter.NewLocalInstanceObservabilityService()
 	}
 	return &instanceAPI{
 		service:                       service,
 		operations:                    operations,
 		observability:                 observability,
+		sessions:                      sessions,
 		observabilityUsesInstanceName: useInstanceName,
 		gpuInventory:                  gpuInventory,
 		k8sClient:                     k8sClient,
@@ -775,15 +787,15 @@ func newInstanceAPIWithObservability(observability ports.InstanceObservability, 
 }
 
 func registerInstancesWithObservability(v1 *route.RouterGroup, observability ports.InstanceObservability, useInstanceName bool, gpuInventory ports.GPUInventory, k8sClient *runtimeadapter.KubernetesRESTClient) ports.WorkloadInstanceService {
-	service, _ := registerInstancesWithRuntime(v1, observability, useInstanceName, gpuInventory, k8sClient, nil, nil, nil)
+	service, _ := registerInstancesWithRuntime(v1, observability, nil, useInstanceName, gpuInventory, k8sClient, nil, nil, nil)
 	return service
 }
 
 // registerInstancesWithRuntime registers the instance routes and returns the
 // instance service (used as InstanceLookup by the observability proxy) plus
 // the shared observeInstance entry used by the task API lazy sync.
-func registerInstancesWithRuntime(v1 *route.RouterGroup, observability ports.InstanceObservability, useInstanceName bool, gpuInventory ports.GPUInventory, k8sClient *runtimeadapter.KubernetesRESTClient, secrets ports.SecretService, runtime *InstanceRuntime, specStore ports.GPUSpecStore) (ports.WorkloadInstanceService, instanceObserver) {
-	api := newInstanceAPIWithObservability(observability, useInstanceName, gpuInventory, k8sClient, secrets, specStore)
+func registerInstancesWithRuntime(v1 *route.RouterGroup, observability ports.InstanceObservability, sessions ports.InstanceSessionIssuer, useInstanceName bool, gpuInventory ports.GPUInventory, k8sClient *runtimeadapter.KubernetesRESTClient, secrets ports.SecretService, runtime *InstanceRuntime, specStore ports.GPUSpecStore) (ports.WorkloadInstanceService, instanceObserver) {
+	api := newInstanceAPIWithObservability(observability, sessions, useInstanceName, gpuInventory, k8sClient, secrets, specStore)
 	if runtime != nil {
 		if runtime.Service == nil || runtime.Store == nil || runtime.Operations == nil {
 			panic("instance runtime requires service, store, and operations")
@@ -797,6 +809,9 @@ func registerInstancesWithRuntime(v1 *route.RouterGroup, observability ports.Ins
 		}
 		api.realProvider = runtime.RealProvider
 		api.providerName = strings.TrimSpace(runtime.Provider)
+		if runtime.RealProvider {
+			api.sessions = sessions
+		}
 	}
 	v1.GET("/instances", api.list)
 	v1.POST("/instances", api.create)
@@ -804,6 +819,7 @@ func registerInstancesWithRuntime(v1 *route.RouterGroup, observability ports.Ins
 	v1.POST("/instances/:instance_id/lifecycle", api.lifecycle)
 	v1.POST("/instances/:instance_id/console", api.createConsoleSession)
 	v1.GET("/instances/:instance_id/logs", api.listLogs)
+	v1.GET("/instances/:instance_id/logs/stream", api.streamInstanceLogs)
 	v1.GET("/instances/:instance_id/events", api.listEvents)
 	v1.GET("/instances/:instance_id/metrics", api.getMetrics)
 	v1.POST("/instances/:instance_id/exec", api.createExecSession)
@@ -925,8 +941,16 @@ func (api *instanceAPI) refreshStoreStatuses(ctx context.Context, tenantID strin
 		return
 	}
 	for i := range records {
-		api.refreshOneStoreStatus(ctx, &records[i])
+		_ = api.refreshOneInstanceStoreStatus(ctx, &records[i])
 	}
+}
+
+func (api *instanceAPI) refreshOneInstanceStoreStatus(ctx context.Context, record *ports.WorkloadInstanceRecord) error {
+	if record != nil && record.Kind == ports.WorkloadKindVM {
+		return api.refreshOneVMStoreStatus(ctx, record)
+	}
+	api.refreshOneStoreStatus(ctx, record)
+	return nil
 }
 
 // refreshOneStoreStatus refreshes a single store record from K8s. It reuses
@@ -936,6 +960,10 @@ func (api *instanceAPI) refreshOneStoreStatus(ctx context.Context, record *ports
 	if api.k8sClient == nil || record == nil || record.Name == "" || record.Provider != "kubernetes" {
 		return
 	}
+	// Deleting/deleted instances never need a Deployment read (the workload is
+	// gone). stopping/stopped instances still read the Deployment so their real
+	// replica count (0/0 after scale-to-0) is surfaced, but their lifecycle
+	// state is preserved below instead of being rewritten to "pending".
 	if record.Status.State == ports.WorkloadStateDeleting || record.Status.State == ports.WorkloadStateDeleted {
 		return
 	}
@@ -944,6 +972,12 @@ func (api *instanceAPI) refreshOneStoreStatus(ctx context.Context, record *ports
 	body, status, err := api.k8sClient.Do(ctx, http.MethodGet, depEndpoint, "", nil)
 	if err != nil {
 		if status == http.StatusNotFound {
+			// A lifecycle-stopped instance keeps its terminal state even if the
+			// Deployment was removed out-of-band; only non-terminal instances are
+			// surfaced as failed instead of a stale provisioning.
+			if record.Status.State == ports.WorkloadStateStopping || record.Status.State == ports.WorkloadStateStopped {
+				return
+			}
 			// Deployment gone: surface as failed instead of stale provisioning.
 			record.Status.State = ports.WorkloadStateFailed
 			record.Status.Reason = "deployment not found in cluster"
@@ -954,6 +988,9 @@ func (api *instanceAPI) refreshOneStoreStatus(ctx context.Context, record *ports
 		return
 	}
 	var dep struct {
+		Spec struct {
+			Replicas *int32 `json:"replicas"`
+		} `json:"spec"`
 		Status struct {
 			Replicas          int32 `json:"replicas"`
 			UpdatedReplicas   int32 `json:"updatedReplicas"`
@@ -976,10 +1013,20 @@ func (api *instanceAPI) refreshOneStoreStatus(ctx context.Context, record *ports
 		phase = "Running"
 	case dep.Status.Replicas > 0 || dep.Status.UpdatedReplicas > 0:
 		phase = "Provisioning"
+	case dep.Spec.Replicas != nil && *dep.Spec.Replicas == 0:
+		// Intentionally scaled to 0 by a lifecycle stop: this is a stopped
+		// instance, not a never-started pending one. spec.replicas is the
+		// intent contract and is reliable even if the store state was already
+		// overwritten to pending by an older refresh.
+		phase = "Stopped"
 	default:
 		phase = "Pending"
 	}
-	record.Status.State = mapProviderPhaseToState(phase)
+	// Preserve lifecycle terminal states: a scaled-to-0 Deployment would map to
+	// "Pending", which must not resurrect a stopped/stopping instance.
+	if record.Status.State != ports.WorkloadStateStopping && record.Status.State != ports.WorkloadStateStopped {
+		record.Status.State = mapProviderPhaseToState(phase)
+	}
 	record.Status.Reason = ""
 	for _, condition := range dep.Status.Conditions {
 		if strings.EqualFold(condition.Status, "False") {
@@ -994,10 +1041,14 @@ func (api *instanceAPI) refreshOneStoreStatus(ctx context.Context, record *ports
 	if record.Container != nil {
 		record.Container.Replicas = dep.Status.Replicas
 		record.Container.ReadyReplicas = dep.Status.ReadyReplicas
-		switch phase {
-		case "Running":
+		switch {
+		case record.Status.State == ports.WorkloadStateStopped:
+			record.Container.RolloutStatus = "stopped"
+		case record.Status.State == ports.WorkloadStateStopping:
+			record.Container.RolloutStatus = "stopping"
+		case phase == "Running":
 			record.Container.RolloutStatus = "running"
-		case "Provisioning":
+		case phase == "Provisioning":
 			record.Container.RolloutStatus = "progressing"
 		default:
 			record.Container.RolloutStatus = "pending"
@@ -1013,7 +1064,11 @@ func (api *instanceAPI) refreshOneStoreStatus(ctx context.Context, record *ports
 					NodeName string `json:"nodeName"`
 				} `json:"spec"`
 				Status struct {
-					NodeName   string `json:"nodeName"`
+					NodeName string `json:"nodeName"`
+					PodIP    string `json:"podIP"`
+					PodIPs   []struct {
+						IP string `json:"ip"`
+					} `json:"podIPs"`
 					Conditions []struct {
 						Type    string `json:"type"`
 						Status  string `json:"status"`
@@ -1029,6 +1084,7 @@ func (api *instanceAPI) refreshOneStoreStatus(ctx context.Context, record *ports
 			// scheduled pod for node name and only surface the scheduling
 			// failure reason when no pod has been scheduled.
 			scheduledPod := false
+			podIP := ""
 			for _, pod := range podList.Items {
 				if pod.Spec.NodeName != "" || pod.Status.NodeName != "" {
 					scheduledPod = true
@@ -1037,6 +1093,37 @@ func (api *instanceAPI) refreshOneStoreStatus(ctx context.Context, record *ports
 					} else if pod.Status.NodeName != "" {
 						record.Status.NodeName = pod.Status.NodeName
 					}
+					if podIP == "" {
+						podIP = pod.Status.PodIP
+						if podIP == "" && len(pod.Status.PodIPs) > 0 {
+							podIP = pod.Status.PodIPs[0].IP
+						}
+					}
+				}
+			}
+			if record.Status.NodeName != "" {
+				record.Compute.NodeName = record.Status.NodeName
+			}
+			// Hydrate the private access endpoint and terminal availability from
+			// the scheduled Pod so the instance response surfaces the private IP,
+			// access endpoint and exec terminal without a separate Service lookup.
+			if podIP != "" {
+				record.Network.PrivateIP = podIP
+				if record.Status.Endpoint == "" {
+					record.Status.Endpoint = podIP
+				}
+				if len(record.Network.Endpoints) == 0 {
+					record.Network.Endpoints = []ports.InstanceEndpointSummary{{
+						Name:     "private",
+						Address:  podIP,
+						Protocol: "tcp",
+					}}
+				}
+			}
+			if record.Status.State == ports.WorkloadStateRunning {
+				if record.Kind == ports.WorkloadKindContainer || record.Kind == ports.WorkloadKindGPUContainer {
+					record.Access.ExecAvailable = true
+					record.Access.Reason = ""
 				}
 			}
 			if scheduledPod {
@@ -1068,6 +1155,107 @@ func (api *instanceAPI) refreshOneStoreStatus(ctx context.Context, record *ports
 	_ = api.store.UpsertStatus(ctx, *record)
 }
 
+// refreshOneVMStoreStatus merges a KubeVirt VM instance's live phase, reason,
+// node, network, timestamp, and access readiness from its VirtualMachineInstance.
+// The Deployment-based refreshOneStoreStatus only covers container-family
+// instances, so VM read-repair must observe the VMI itself.
+func (api *instanceAPI) refreshOneVMStoreStatus(ctx context.Context, record *ports.WorkloadInstanceRecord) error {
+	if api.k8sClient == nil || record == nil || record.Kind != ports.WorkloadKindVM || len(record.ResourceRefs) == 0 {
+		return nil
+	}
+	if record.Status.State == ports.WorkloadStateDeleting || record.Status.State == ports.WorkloadStateDeleted {
+		return nil
+	}
+	observation, err := api.k8sClient.Observe(ctx, ports.WorkloadProviderStatusRequest{
+		TenantID:   record.TenantID,
+		InstanceID: record.InstanceID,
+		Kind:       record.Kind,
+		ApplyResult: ports.WorkloadProviderApplyResult{
+			Applied:      true,
+			Provider:     record.Provider,
+			ResourceRefs: record.ResourceRefs,
+		},
+	})
+	if err != nil {
+		return err
+	}
+
+	updated := *record
+	if record.SSH != nil {
+		ssh := *record.SSH
+		updated.SSH = &ssh
+	}
+	providerState := mapProviderPhaseToState(observation.Phase)
+	if updated.Status.State != ports.WorkloadStateStopping && updated.Status.State != ports.WorkloadStateStopped {
+		updated.Status.State = providerState
+	}
+	updated.Status.Reason = observation.Reason
+	if nodeName := strings.TrimSpace(observation.NodeName); nodeName != "" {
+		updated.Status.NodeName = nodeName
+		updated.Compute.NodeName = nodeName
+	}
+	updated.Status.Networks = append([]ports.WorkloadNetworkAttachment(nil), observation.Networks...)
+	privateIP := ""
+	for _, network := range observation.Networks {
+		ipAddress := strings.TrimSpace(network.IPAddress)
+		if ipAddress == "" {
+			continue
+		}
+		if privateIP == "" || network.Primary {
+			privateIP = ipAddress
+		}
+		if network.Primary {
+			break
+		}
+	}
+	if privateIP != "" {
+		updated.Network.PrivateIP = privateIP
+	}
+	observedAt := observation.ObservedAt
+	if observedAt.IsZero() {
+		observedAt = time.Now().UTC()
+	} else {
+		observedAt = observedAt.UTC()
+	}
+	updated.Status.UpdatedAt = observedAt
+	updated.UpdatedAt = observedAt
+
+	if updated.Status.State == ports.WorkloadStateRunning {
+		updated.Access.ConsoleAvailable = true
+		updated.Access.SSHAvailable = true
+		updated.Access.Reason = ""
+		if updated.SSH != nil {
+			updated.SSH.Ready = true
+			updated.SSH.Reason = ""
+		}
+	} else {
+		accessReason := strings.TrimSpace(updated.Status.Reason)
+		if providerState == ports.WorkloadStateRunning {
+			accessReason = ""
+		}
+		if accessReason == "" {
+			accessReason = "instance is " + string(updated.Status.State)
+		}
+		updated.Access.ConsoleAvailable = false
+		updated.Access.SSHAvailable = false
+		updated.Access.Reason = accessReason
+		if updated.SSH != nil {
+			updated.SSH.Ready = false
+			updated.SSH.Reason = accessReason
+		}
+	}
+	// Persist the merged node/ip back so list (which re-reads from the store)
+	// surfaces the same values as detail instead of dropping the in-place
+	// mutation, mirroring refreshOneStoreStatus.
+	if api.store != nil {
+		if err := api.store.UpsertStatus(ctx, updated); err != nil {
+			return err
+		}
+	}
+	*record = updated
+	return nil
+}
+
 // observeInstance is the lazy-sync observation entry shared with the task
 // API: a store read followed by a single-instance Kubernetes refresh. A pure
 // service.Get reads the stored snapshot only, so without the refresh the
@@ -1081,7 +1269,7 @@ func (api *instanceAPI) observeInstance(ctx context.Context, tenantID, instanceI
 	if err != nil {
 		return ports.WorkloadInstanceRecord{}, err
 	}
-	api.refreshOneStoreStatus(ctx, &record)
+	_ = api.refreshOneInstanceStoreStatus(ctx, &record)
 	return record, nil
 }
 
@@ -1150,6 +1338,8 @@ func mapProviderPhaseToState(phase string) ports.WorkloadState {
 		return ports.WorkloadStateProvisioning
 	case "pending":
 		return ports.WorkloadStatePending
+	case "stopped":
+		return ports.WorkloadStateStopped
 	case "failed":
 		return ports.WorkloadStateFailed
 	default:
@@ -1211,6 +1401,13 @@ func (api *instanceAPI) discoverOrphanDeployments(ctx context.Context, tenantID 
 			continue
 		}
 		obs := api.observeOrphan(ctx, tenantID, depName)
+		// Only untracked deployments that actually request GPU resources are
+		// surfaced as orphans: every orphan record is classified as a
+		// gpu_container, so admitting plain container/sandbox deployments here
+		// would leak non-GPU instances into kind=gpu_container lists.
+		if obs.GPUCount <= 0 {
+			continue
+		}
 		record := ports.WorkloadInstanceRecord{
 			InstanceID:   depName,
 			TenantID:     tenantID,
@@ -1232,9 +1429,7 @@ func (api *instanceAPI) discoverOrphanDeployments(ctx context.Context, tenantID 
 			CreatedAt: obs.CreatedAt,
 			UpdatedAt: time.Now().UTC(),
 		}
-		if obs.GPUCount > 0 {
-			record.GPU = api.orphanGPUStatus(ctx, obs.NodeName, obs.GPUCount, obs.Phase)
-		}
+		record.GPU = api.orphanGPUStatus(ctx, obs.NodeName, obs.GPUCount, obs.Phase)
 		records = append(records, record)
 		log.Printf("[LIST] orphan discovery found untracked deployment %s/%s phase=%s node=%s gpu=%d", namespace, depName, obs.Phase, obs.NodeName, obs.GPUCount)
 	}
@@ -1325,7 +1520,9 @@ func (api *instanceAPI) observeOrphan(ctx context.Context, tenantID string, depN
 			continue
 		}
 		for resourceName, raw := range container.Resources.Limits {
-			if !strings.HasPrefix(resourceName, "nvidia.com/gpu") && resourceName != "nvidia.com/gpu" {
+			// Volcano vGPU pods request GPU count through
+			// volcano.sh/vgpu-number rather than nvidia.com/gpu.
+			if !strings.HasPrefix(resourceName, "nvidia.com/gpu") && resourceName != "volcano.sh/vgpu-number" {
 				continue
 			}
 			count := orphanGPUCount(raw)
@@ -1512,6 +1709,9 @@ func (api *instanceAPI) get(ctx context.Context, c *app.RequestContext) {
 		writeInstanceError(c, http.StatusNotFound, "INSTANCE_NOT_FOUND", err.Error())
 		return
 	}
+	if api.k8sClient != nil && api.store != nil {
+		_ = api.refreshOneInstanceStoreStatus(ctx, &record)
+	}
 	c.JSON(http.StatusOK, api.instanceResponseFromRecord(record))
 }
 
@@ -1668,6 +1868,7 @@ func (api *instanceAPI) lifecycle(ctx context.Context, c *app.RequestContext) {
 			InstanceID:      lifecycle.InstanceID,
 			IdempotencyKey:  lifecycle.IdempotencyKey,
 			Resources:       lifecycle.Resources,
+			SpecID:          lifecycle.SpecID,
 			UserID:          lifecycle.UserID,
 			PermissionProof: lifecycle.PermissionProof,
 			RequestedAt:     lifecycle.RequestedAt,
@@ -1756,16 +1957,14 @@ func workloadLifecycleRequestFromHTTP(request instanceLifecycleRequest, tenantID
 		}
 		duration = parsed
 	}
-	resources := ports.WorkloadResourceRequest{}
-	if action == ports.WorkloadLifecycleResize {
-		resources = ports.WorkloadResourceRequest{CPU: firstNonEmpty(request.CPU, "4"), Memory: firstNonEmpty(request.Memory, "8Gi")}
-	}
+	resources := ports.WorkloadResourceRequest{CPU: strings.TrimSpace(request.CPU), Memory: strings.TrimSpace(request.Memory)}
 	return ports.WorkloadInstanceLifecycleRequest{
 		IdempotencyKey:   request.IdempotencyKey,
 		TenantID:         tenantID,
 		InstanceID:       instanceID,
 		Action:           action,
 		Resources:        resources,
+		SpecID:           strings.TrimSpace(request.SpecID),
 		SnapshotName:     request.SnapshotName,
 		SnapshotID:       request.SnapshotID,
 		IncludeDataDisks: request.IncludeDataDisks,
@@ -1815,7 +2014,7 @@ func (api *instanceAPI) listLogs(ctx context.Context, c *app.RequestContext) {
 	}
 	result, err := api.observability.ListLogs(ctx, ports.InstanceObservationListRequest{
 		TenantID:   instanceTenantID(c),
-		InstanceID: api.observabilityTargetID(record),
+		InstanceID: api.instanceLogTargetID(record),
 		Limit:      queryInt(c, "limit", 100),
 		Cursor:     c.Query("cursor"),
 		Level:      c.Query("level"),
@@ -1871,7 +2070,7 @@ func (api *instanceAPI) getMetrics(ctx context.Context, c *app.RequestContext) {
 func (api *instanceAPI) createExecSession(ctx context.Context, c *app.RequestContext) {
 	record, err := api.instanceForObservation(ctx, c)
 	if err != nil {
-		writeInstanceObservabilityError(c, err)
+		writeInstanceSessionError(c, err)
 		return
 	}
 	var req createExecSessionRequest
@@ -1885,22 +2084,56 @@ func (api *instanceAPI) createExecSession(ctx context.Context, c *app.RequestCon
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "idempotency_key is required")
 		return
 	}
+	if record.Kind != ports.WorkloadKindContainer && record.Kind != ports.WorkloadKindGPUContainer && record.Kind != ports.WorkloadKindSandbox {
+		writeInstanceError(c, http.StatusBadRequest, "UNSUPPORTED", "exec session is only available for container, gpu_container, or sandbox instances")
+		return
+	}
+	if record.Status.State != ports.WorkloadStateRunning {
+		writeInstanceError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", "instance must be running to open an exec session")
+		return
+	}
+	command := append([]string(nil), req.Command...)
+	if len(command) == 0 {
+		command = []string{"/bin/sh"}
+	}
+	if !validExecCommand(command) {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "command must contain non-empty arguments")
+		return
+	}
+	rows, ok := sessionDimension(req.Rows, 24)
+	if !ok {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "rows must be between 1 and 4096")
+		return
+	}
+	cols, ok := sessionDimension(req.Cols, 80)
+	if !ok {
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "cols must be between 1 and 4096")
+		return
+	}
 	tty := true
 	if req.TTY != nil {
 		tty = *req.TTY
 	}
-	result, err := api.observability.CreateExecSession(ctx, ports.InstanceExecSessionCreateRequest{
+	if api.sessions == nil {
+		writeInstanceSessionError(c, ports.ErrNotConfigured)
+		return
+	}
+	result, err := api.sessions.CreateExecSession(ctx, ports.InstanceExecSessionCreateRequest{
+		RequestID:      middleware.GetRequestID(c),
 		TenantID:       instanceTenantID(c),
-		InstanceID:     api.observabilityTargetID(record),
+		SubjectID:      instanceUserID(c),
+		InstanceID:     record.InstanceID,
+		WorkloadName:   record.Name,
+		WorkloadKind:   record.Kind,
 		IdempotencyKey: req.IdempotencyKey,
 		Container:      req.Container,
-		Command:        req.Command,
+		Command:        command,
 		TTY:            tty,
-		Rows:           maxInt(req.Rows, 24),
-		Cols:           maxInt(req.Cols, 80),
+		Rows:           rows,
+		Cols:           cols,
 	})
 	if err != nil {
-		writeInstanceObservabilityError(c, err)
+		writeInstanceSessionError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, instanceExecSessionFromRecord(result))
@@ -1909,11 +2142,16 @@ func (api *instanceAPI) createExecSession(ctx context.Context, c *app.RequestCon
 func (api *instanceAPI) createConsoleSession(ctx context.Context, c *app.RequestContext) {
 	record, err := api.instanceForObservation(ctx, c)
 	if err != nil {
-		writeInstanceObservabilityError(c, err)
+		writeInstanceSessionError(c, err)
 		return
 	}
 	if record.Kind != ports.WorkloadKindVM {
 		writeInstanceError(c, http.StatusBadRequest, "UNSUPPORTED", "console session is only available for vm instances")
+		return
+	}
+	if err := api.refreshOneInstanceStoreStatus(ctx, &record); err != nil {
+		log.Printf("[CONSOLE] VM provider status refresh failed instance_id=%s err=%v", record.InstanceID, err)
+		writeInstanceError(c, http.StatusServiceUnavailable, "DEPENDENCY_UNAVAILABLE", "instance provider status is unavailable")
 		return
 	}
 	if record.Status.State != ports.WorkloadStateRunning {
@@ -1935,13 +2173,26 @@ func (api *instanceAPI) createConsoleSession(ctx context.Context, c *app.Request
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "protocol must be one of console, vnc, novnc, serial")
 		return
 	}
-	result, err := api.observability.CreateConsoleSession(ctx, ports.InstanceConsoleSessionCreateRequest{
-		TenantID:   instanceTenantID(c),
-		InstanceID: api.observabilityTargetID(record),
-		Protocol:   protocol,
+	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
+	if idempotencyKey == "" {
+		idempotencyKey = uuid.NewString()
+	}
+	if api.sessions == nil {
+		writeInstanceSessionError(c, ports.ErrNotConfigured)
+		return
+	}
+	result, err := api.sessions.CreateConsoleSession(ctx, ports.InstanceConsoleSessionCreateRequest{
+		RequestID:      middleware.GetRequestID(c),
+		IdempotencyKey: idempotencyKey,
+		TenantID:       instanceTenantID(c),
+		SubjectID:      instanceUserID(c),
+		InstanceID:     record.InstanceID,
+		WorkloadName:   record.Name,
+		WorkloadKind:   record.Kind,
+		Protocol:       protocol,
 	})
 	if err != nil {
-		writeInstanceObservabilityError(c, err)
+		writeInstanceSessionError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, instanceConsoleSessionFromRecord(result))
@@ -2668,6 +2919,21 @@ func (api *instanceAPI) observabilityTargetID(record ports.WorkloadInstanceRecor
 	return record.InstanceID
 }
 
+// instanceLogTargetID 返回日志链路用于匹配 Loki pod 标签的目标名。
+// KubeVirt VM 实例的日志存放在 virt-launcher pod 中，其 pod 名是
+// `virt-launcher-<VM名>[-<随机hash>]`（real 环境实测，见 INSTANCE-LOG-STREAM 系列）。
+// 直接复用 observabilityTargetID（VM 名）构造正则 `^<name>(-.*)?$` 匹配不到
+// virt-launcher pod，导致 VM 日志为空；这里对 VM 附加 `virt-launcher-` 前缀。
+// 仅日志链路使用，不影响事件/指标的目标映射。非 VM 实例沿用原目标。
+func (api *instanceAPI) instanceLogTargetID(record ports.WorkloadInstanceRecord) string {
+	if record.Kind == ports.WorkloadKindVM {
+		if name := strings.TrimSpace(record.Name); name != "" {
+			return "virt-launcher-" + name
+		}
+	}
+	return api.observabilityTargetID(record)
+}
+
 func consoleAction(protocol string) ports.WorkloadInstanceOpsAction {
 	switch strings.ToLower(strings.TrimSpace(protocol)) {
 	case "vnc", "novnc":
@@ -2922,16 +3188,30 @@ func networkPolicyFromRequest(request *instanceNetworkRequest, fallback ports.Wo
 	if request == nil {
 		return fallback
 	}
+	fallback.Attachments = append([]ports.WorkloadNetworkAttachment(nil), fallback.Attachments...)
+	for index := range fallback.Attachments {
+		fallback.Attachments[index].PolicyRefs = append([]string(nil), fallback.Attachments[index].PolicyRefs...)
+	}
 	fallback.VPCID = strings.TrimSpace(request.VPCID)
 	fallback.SubnetID = strings.TrimSpace(request.SubnetID)
 	fallback.SecurityGroupIDs = append([]string(nil), request.SecurityGroupIDs...)
 	fallback.AssignPrivateIP = request.AssignPrivateIP
 	fallback.PrivateIP = strings.TrimSpace(request.PrivateIP)
-	if fallback.VPCID != "" {
-		fallback.Attachments = []ports.WorkloadNetworkAttachment{{
-			NetworkID: fallback.VPCID, SubnetID: fallback.SubnetID, Plane: ports.NetworkPlaneTenantVPC, Required: true, Primary: true,
-		}}
+	tenantVPCIndex := -1
+	for index := range fallback.Attachments {
+		if fallback.Attachments[index].Plane == ports.NetworkPlaneTenantVPC {
+			tenantVPCIndex = index
+			break
+		}
 	}
+	if tenantVPCIndex == -1 {
+		fallback.Attachments = append(fallback.Attachments, ports.WorkloadNetworkAttachment{
+			NetworkID: "tenant-vpc", Plane: ports.NetworkPlaneTenantVPC, Required: true, Primary: true,
+		})
+		tenantVPCIndex = len(fallback.Attachments) - 1
+	}
+	fallback.Attachments[tenantVPCIndex].SubnetID = fallback.SubnetID
+	fallback.Attachments[tenantVPCIndex].IPAddress = fallback.PrivateIP
 	return fallback
 }
 
@@ -3162,6 +3442,13 @@ func validateCreateInstanceConfigs(req createInstanceRequest, kind ports.Workloa
 			return fmt.Errorf("%s is only valid when kind=%s", cfg.name, cfg.allowedFor)
 		}
 	}
+	// vm_config: cloud_init_secret 与 password_secret_ref 都指向含 userdata 键的
+	// cloud-init Secret，二者互斥，避免 secretRef 二选一歧义。
+	if req.VMConfig != nil &&
+		strings.TrimSpace(req.VMConfig.CloudInitSecret) != "" &&
+		strings.TrimSpace(req.VMConfig.PasswordSecretRef) != "" {
+		return fmt.Errorf("vm_config.cloud_init_secret and vm_config.password_secret_ref are mutually exclusive")
+	}
 	return nil
 }
 
@@ -3274,6 +3561,7 @@ func instanceResponseFromRecord(record ports.WorkloadInstanceRecord) instanceRes
 		Network:               networkSummaryFromRecord(record),
 		Access:                accessSummaryFromRecord(record),
 		StorageAttachments:    storageAttachmentResponsesFromRecord(record),
+		AutoStart:             record.Lifecycle.AutoStart,
 		TerminationProtection: record.Lifecycle.TerminationProtection,
 		SSH:                   sshResponseFromRecord(record),
 		Volumes:               volumeResponsesFromRecord(record),
@@ -3672,6 +3960,28 @@ func isValidConsoleProtocol(protocol string) bool {
 	}
 }
 
+func validExecCommand(command []string) bool {
+	if len(command) == 0 || len(command) > 128 {
+		return false
+	}
+	for _, argument := range command {
+		if strings.TrimSpace(argument) == "" || len(argument) > 4096 {
+			return false
+		}
+	}
+	return true
+}
+
+func sessionDimension(value, fallback int) (int, bool) {
+	if value == 0 {
+		return fallback, true
+	}
+	if value < 1 || value > 4096 {
+		return 0, false
+	}
+	return value, true
+}
+
 func instanceTenantID(c *app.RequestContext) string {
 	if tenantID := middleware.GetTenantID(c); tenantID != "" {
 		return tenantID
@@ -3749,6 +4059,27 @@ func writeInstanceObservabilityError(c *app.RequestContext, err error) {
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	default:
 		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+	}
+}
+
+func writeInstanceSessionError(c *app.RequestContext, err error) {
+	switch {
+	case errors.Is(err, ports.ErrInvalid):
+		writeInstanceError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid session request")
+	case errors.Is(err, ports.ErrInvalidCredentials):
+		writeInstanceError(c, http.StatusForbidden, "FORBIDDEN", "session request denied")
+	case errors.Is(err, ports.ErrNotFound):
+		writeInstanceError(c, http.StatusNotFound, "INSTANCE_NOT_FOUND", "session target not found")
+	case errors.Is(err, ports.ErrConflict):
+		writeInstanceError(c, http.StatusConflict, "CONFLICT", "session request conflicts with an existing request")
+	case errors.Is(err, ports.ErrFailedPrecondition):
+		writeInstanceError(c, http.StatusUnprocessableEntity, "PRECONDITION_FAILED", "session precondition failed")
+	case errors.Is(err, ports.ErrSessionCapacity):
+		writeInstanceError(c, http.StatusTooManyRequests, "CAPACITY_EXHAUSTED", "session capacity exhausted")
+	case errors.Is(err, ports.ErrNotConfigured), errors.Is(err, ports.ErrUnavailable):
+		writeInstanceError(c, http.StatusServiceUnavailable, "DEPENDENCY_UNAVAILABLE", "session gateway is unavailable")
+	default:
+		writeInstanceError(c, http.StatusInternalServerError, "INTERNAL", "session creation failed")
 	}
 }
 

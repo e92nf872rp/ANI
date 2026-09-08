@@ -97,3 +97,38 @@ func TestLocalObservabilityServiceManagesAlertRulesWithIdempotency(t *testing.T)
 func boolPtr(value bool) *bool {
 	return &value
 }
+
+func TestLocalObservabilityServiceQueryResourceTrendReturnsEmptyMatrix(t *testing.T) {
+	service := NewLocalObservabilityService()
+	result, err := service.QueryResourceTrend(context.Background(), ports.ObservabilityResourceTrendRequest{
+		TenantID: "tenant-a",
+		Metric:   ports.ObservabilityResourceTrendCPU,
+		Start:    time.Now().Add(-time.Hour),
+		End:      time.Now(),
+		Step:     time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("QueryResourceTrend error = %v", err)
+	}
+	if result.ResultType != ports.ObservabilityResultMatrix {
+		t.Fatalf("result_type = %s, want matrix", result.ResultType)
+	}
+	if len(result.Results) != 0 {
+		t.Fatalf("results = %d, want empty local matrix", len(result.Results))
+	}
+	if result.DevProfile.Mode != "local" || result.DevProfile.Provider != "local-observability-service" || result.DevProfile.RealProvider {
+		t.Fatalf("dev profile = %+v, want local non-real marker", result.DevProfile)
+	}
+}
+
+func TestLocalObservabilityServiceQueryResourceTrendRejectsEmptyTenant(t *testing.T) {
+	service := NewLocalObservabilityService()
+	if _, err := service.QueryResourceTrend(context.Background(), ports.ObservabilityResourceTrendRequest{
+		Metric: ports.ObservabilityResourceTrendGPU,
+		Start:  time.Now().Add(-time.Hour),
+		End:    time.Now(),
+		Step:   time.Minute,
+	}); err == nil {
+		t.Fatal("expected error for empty tenant_id")
+	}
+}

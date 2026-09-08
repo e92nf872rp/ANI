@@ -220,6 +220,64 @@ func (s *PostgresTenantPlanStore) List(ctx context.Context, filter ports.TenantP
 	}, nil
 }
 
+// ListActivePlans 返回全部未删除且 status=active 的套餐摘要（不分页）。
+func (s *PostgresTenantPlanStore) ListActivePlans(ctx context.Context) ([]ports.AvailableTenantPlan, error) {
+	// 步骤 1：查询全部 active 未删除套餐（created_at DESC, id DESC）
+	rows, err := s.db.Query(ctx, `
+		SELECT p.id, p.code, p.name
+		FROM tenant_plans p
+		WHERE p.is_deleted = FALSE AND p.status = $1
+		ORDER BY p.created_at DESC, p.id DESC
+	`, ports.TenantPlanStatusActive)
+	if err != nil {
+		return nil, fmt.Errorf("list active tenant plans: %w", err)
+	}
+	defer rows.Close()
+
+	// 步骤 2：扫描为 AvailableTenantPlan；空结果返回空切片
+	out := make([]ports.AvailableTenantPlan, 0)
+	for rows.Next() {
+		var item ports.AvailableTenantPlan
+		if err := rows.Scan(&item.ID, &item.Code, &item.Name); err != nil {
+			return nil, fmt.Errorf("scan active tenant plan: %w", err)
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate active tenant plans: %w", err)
+	}
+	return out, nil
+}
+
+// MapPlanCodes 按 id 批量查询未删除套餐的 code。
+func (s *PostgresTenantPlanStore) MapPlanCodes(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error) {
+	out := make(map[uuid.UUID]string, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := s.db.Query(ctx, `
+		SELECT id, code
+		FROM tenant_plans
+		WHERE is_deleted = FALSE AND id = ANY($1)
+	`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("map tenant plan codes: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id uuid.UUID
+		var code string
+		if err := rows.Scan(&id, &code); err != nil {
+			return nil, fmt.Errorf("scan tenant plan code: %w", err)
+		}
+		out[id] = code
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate tenant plan codes: %w", err)
+	}
+	return out, nil
+}
+
 // Update 更新套餐基本信息（name / description）；nil 字段表示不更新。
 func (s *PostgresTenantPlanStore) Update(ctx context.Context, id uuid.UUID, in ports.UpdateTenantPlanInput) (ports.TenantPlan, error) {
 	// 步骤 1：动态拼 SET（仅非 nil 字段）；始终刷新 updated_at

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -141,6 +142,58 @@ func TestLifecycleReturnsPersistedCompletedNoop(t *testing.T) {
 	}
 }
 
+func TestStopRestartDeleteDoNotTouchRuntimeBeforePublisherWithdraws(t *testing.T) {
+	for _, action := range []domain.Action{domain.ActionStop, domain.ActionRestart, domain.ActionDelete} {
+		t.Run(string(action), func(t *testing.T) {
+			resource := runningControlService()
+			store := &controlStoreStub{service: resource}
+			store.mutate = func(request repository.MutationRequest) (repository.MutationResult, error) {
+				updated := resource
+				updated.Generation++
+				updated.CurrentOperationID = request.OperationID
+				operation := domain.Operation{
+					ID: request.OperationID, TenantID: resource.TenantID, ServiceID: resource.ID,
+					Type: request.Action, State: domain.OperationPending,
+					TargetGeneration: updated.Generation, TargetSpec: resource.DesiredSpec,
+				}
+				return repository.MutationResult{
+					Service: updated, Operation: operation, Disposition: domain.TransitionCreated,
+				}, nil
+			}
+			rt := runtimefake.New()
+			controller := NewController(store, time.Now).WithRuntime(rt)
+
+			var err error
+			if action == domain.ActionDelete {
+				_, err = controller.Delete(context.Background(), resource.TenantID, resource.ID)
+			} else {
+				_, err = controller.Lifecycle(context.Background(), resource.TenantID, resource.ID, uuid.New(), action)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rt.EnsureCalls) != 0 || len(rt.LifecycleCalls) != 0 || len(rt.DeleteCalls) != 0 {
+				t.Fatalf("request path touched runtime before withdrawal: ensure=%d lifecycle=%d delete=%d",
+					len(rt.EnsureCalls), len(rt.LifecycleCalls), len(rt.DeleteCalls))
+			}
+		})
+	}
+}
+
+func TestLifecyclePropagatesClaimedOperationConflict(t *testing.T) {
+	resource := runningControlService()
+	store := &controlStoreStub{service: resource, mutate: func(repository.MutationRequest) (repository.MutationResult, error) {
+		return repository.MutationResult{}, fmt.Errorf("preempt active operation: %w", domain.ErrOperationInProgress)
+	}}
+
+	_, err := NewController(store, time.Now).Lifecycle(
+		context.Background(), resource.TenantID, resource.ID, uuid.New(), domain.ActionStop,
+	)
+	if !errors.Is(err, domain.ErrOperationInProgress) {
+		t.Fatalf("Lifecycle() error = %v, want ErrOperationInProgress", err)
+	}
+}
+
 func TestDeleteUsesServiceDesiredStateForDeduplication(t *testing.T) {
 	resource := runningControlService()
 	var keys []uuid.UUID
@@ -196,6 +249,18 @@ func TestQueriesNeverProjectRuntimeEndpoint(t *testing.T) {
 	}
 	if operationView.IdempotencyKey != operation.IdempotencyKey.String() {
 		t.Fatalf("operation idempotency key = %q", operationView.IdempotencyKey)
+	}
+}
+
+func TestProjectServicePublishesOnlyPublicInvocationURL(t *testing.T) {
+	resource := runningControlService()
+	resource.InvocationURL = " https://ai.example.com/v1/chat/completions "
+	view := ProjectService(resource)
+	if view.InvocationURL == nil || *view.InvocationURL != "https://ai.example.com/v1/chat/completions" {
+		t.Fatalf("invocation_url = %v", view.InvocationURL)
+	}
+	if view.EndpointURL != nil {
+		t.Fatalf("endpoint_url leaked: %v", view.EndpointURL)
 	}
 }
 

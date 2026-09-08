@@ -1,0 +1,54 @@
+profile: INFERENCE-SERVICE-ENVOY-AI-GATEWAY-LIVE-C41
+status: contract
+readiness_claims:
+  dynamic_publication_ready: false
+  runtime_ready: false
+required_tools:
+  - kubectl
+required_env:
+  - KUBECONFIG
+  - ANI_C41_CONTROL_PLANE_URL
+  - ANI_C41_GATEWAY_URL
+  - ANI_C41_TENANT_A_ACCESS_TOKEN
+  - ANI_C41_TENANT_B_ACCESS_TOKEN
+  - ANI_C41_CHAT_MODEL_VERSION_ID
+  - ANI_C41_EMBED_MODEL_VERSION_ID
+  - ANI_C41_CHAT_IMAGE_REF
+  - ANI_C41_EMBED_IMAGE_REF
+required_endpoints:
+  - ani_control_plane_api
+  - envoy_ai_gateway_chat
+  - envoy_ai_gateway_embeddings
+  - kubernetes_api
+live_checks:
+  - {id: tenant-a-chat-json-200}
+  - {id: tenant-a-chat-sse-200}
+  - {id: tenant-a-embeddings-200}
+  - {id: tenant-isolation-same-model}
+  - {id: tenant-b-a-only-404}
+  - {id: generate-embeddings-404}
+  - {id: embed-chat-404}
+  - {id: invalid-credentials-401}
+  - {id: body-model-wins-over-client-header}
+  - {id: tenant-service-spoof-ignored}
+  - {id: models-404}
+  - {id: rpm-429-retry-after}
+  - {id: service-ak-policy-overrides-tenant}
+  - {id: dependency-faults-503-no-vllm}
+  - {id: stop-unpublishes-before-workload-stop}
+  - {id: start-republishes-200}
+  - {id: delete-releases-same-tenant-name}
+  - {id: publisher-restart-idempotent}
+  - {id: no-managed-ak-secret}
+  - {id: temporary-key-log-redaction}
+  - {id: cleanup-complete}
+evidence_policy:
+  mode: atomic-0600
+  forbidden_content:
+    - Authorization
+    - Bearer
+    - ani_
+    - prompts
+    - completions
+    - vectors
+    - Kubernetes Secret data

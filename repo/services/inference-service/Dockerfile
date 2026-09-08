@@ -1,13 +1,15 @@
 FROM golang:1.25.13-alpine AS build
 
 WORKDIR /src
+COPY runtimeadmin ./runtimeadmin
 COPY pkg ./pkg
 COPY sdks/core/go ./sdks/core/go
 COPY services/inference-service ./services/inference-service
 
-ENV GOWORK=off CGO_ENABLED=0
+ENV CGO_ENABLED=0
 RUN apk add --no-cache git ca-certificates
-RUN cd services/inference-service && go build -ldflags "-s -w" -o /out/inference-service .
+RUN go work init ./runtimeadmin ./pkg ./sdks/core/go ./services/inference-service && \
+    cd services/inference-service && go build -ldflags "-s -w" -o /out/inference-service .
 
 FROM alpine:3.20
 

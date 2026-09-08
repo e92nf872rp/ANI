@@ -43,11 +43,29 @@ DOC_ID = "33333333-3333-3333-3333-333333333333"
 
 class _NotifyMockConn:
     """Records every write so we can assert all three tables are touched in
-    one transaction (atomic outbox)."""
+    one transaction (atomic outbox).
 
-    def __init__(self, *, doc_exists=True, existing_task=None):
+    UNIQUE-race simulation: `insert_raise_exc` makes INSERT INTO
+    async_tasks raise (asyncpg.UniqueViolationError); the retry
+    find_by_idempotency_key (2nd call) then returns `race_task`.
+    `revive_result` feeds the revive_task_in_tx UPDATE ... RETURNING
+    (None → raced out of 'failed')."""
+
+    def __init__(
+        self,
+        *,
+        doc_exists=True,
+        existing_task=None,
+        insert_raise_exc=None,
+        race_task=None,
+        revive_result="default",
+    ):
         self.doc_exists = doc_exists
         self.existing_task = existing_task
+        self.insert_raise_exc = insert_raise_exc
+        self.race_task = race_task
+        self.revive_result = revive_result
+        self._find_calls = 0
         # record of operations in order
         self.events: list[tuple] = []
         # tx nesting tracking
@@ -70,19 +88,31 @@ class _NotifyMockConn:
         if "UPDATE kb_documents" in sql:
             self.events.append(("update_kb_documents", args))
             return "UPDATE 1" if self.doc_exists else "UPDATE 0"
-        # mark_dispatched not used in notify path; stub
+        # revive_task_in_tx → conditional UPDATE ... RETURNING; simulated at
+        # fetchrow below. mark_dispatched not used in notify path; stub
         return "UPDATE 1"
 
     async def fetchrow(self, sql, *args):
         # find_by_idempotency_key → returns existing task or None
         if "FROM async_tasks" in sql and "idempotency_key" in sql:
             self.events.append(("find_idempotency", args))
-            if self.existing_task is not None:
-                return self.existing_task
-            return None
+            self._find_calls += 1
+            # After the UNIQUE-race INSERT violation, the servicer
+            # re-queries; return the concurrent winner's row.
+            if self._find_calls > 1:
+                return self.race_task
+            return self.existing_task
+        # revive_task_in_tx UPDATE ... RETURNING (status='failed' conditional)
+        if "UPDATE async_tasks" in sql and "RETURNING" in sql:
+            self.events.append(("revive_async_tasks", args))
+            if self.revive_result == "default":
+                return {"id": uuid.uuid4(), "task_type": "kb.parse", "status": "pending"}
+            return self.revive_result
         # create_task_in_tx / insert_event RETURNING
         if "INSERT INTO async_tasks" in sql:
             self.events.append(("insert_async_tasks", args))
+            if self.insert_raise_exc is not None:
+                raise self.insert_raise_exc
             return {"id": uuid.UUID(DOC_ID), "task_type": "kb.parse", "status": "pending"}
         if "INSERT INTO outbox_events" in sql:
             self.events.append(("insert_outbox_events", args))
@@ -209,6 +239,76 @@ def test_notify_doc_not_found_aborts_without_outbox_write():
     kinds = [e[0] for e in conn.events]
     assert "insert_outbox_events" not in kinds
     assert "insert_async_tasks" not in kinds
+
+
+def test_notify_unique_race_pending_replays_winner_task():
+    """TOCTOU self-heal: the replay pre-check sees no task, but a concurrent
+    notify for the same (tenant, kb, doc) commits in between. The UNIQUE
+    violation is caught; the re-lookup returns the winner's pending row →
+    same task_id replayed (not a gRPC UNKNOWN), no second outbox event."""
+    import asyncpg
+    import asyncio
+
+    winner_id = uuid.uuid4()
+    conn = _NotifyMockConn(
+        insert_raise_exc=asyncpg.UniqueViolationError(
+            'duplicate key value violates unique constraint '
+            '"async_tasks_tenant_id_idempotency_key_key"'
+        ),
+        race_task={"id": winner_id, "task_type": "kb.parse", "status": "pending"},
+    )
+    servicer = _make_notify_servicer(conn)
+    ctx = _make_context()
+    req = kb_pb.NotifyDocumentUploadedRequest(
+        tenant_id=TENANT_ID, kb_id=KB_ID, doc_id=DOC_ID, storage_path="kb-docs/kb1/d"
+    )
+    result = asyncio.new_event_loop().run_until_complete(
+        servicer._notify_document_uploaded(req, ctx)
+    )
+    assert str(result.task_id) == str(winner_id)
+    assert result.status == "pending"
+    # The doc update ran (outer tx survives the SAVEPOINT abort)…
+    kinds = [e[0] for e in conn.events]
+    assert "update_kb_documents" in kinds
+    # …but no second outbox event: the winner's tx already published one.
+    assert "insert_outbox_events" not in kinds
+
+
+def test_notify_unique_race_failed_revives_row_and_republishes():
+    """Re-upload after a failed parse: the pre-check skips the failed row,
+    the INSERT hits UNIQUE, and the self-heal revives the row to pending
+    and publishes a fresh outbox event (notify synthesizes the key, so the
+    client cannot pick a fresh one — revival is the only path)."""
+    import asyncpg
+    import asyncio
+
+    failed_id = uuid.uuid4()
+    conn = _NotifyMockConn(
+        insert_raise_exc=asyncpg.UniqueViolationError(
+            'duplicate key value violates unique constraint '
+            '"async_tasks_tenant_id_idempotency_key_key"'
+        ),
+        race_task={"id": failed_id, "task_type": "kb.parse", "status": "failed"},
+    )
+    servicer = _make_notify_servicer(conn)
+    ctx = _make_context()
+    req = kb_pb.NotifyDocumentUploadedRequest(
+        tenant_id=TENANT_ID, kb_id=KB_ID, doc_id=DOC_ID, storage_path="kb-docs/kb1/d"
+    )
+    result = asyncio.new_event_loop().run_until_complete(
+        servicer._notify_document_uploaded(req, ctx)
+    )
+    assert str(result.task_id) == str(failed_id)
+    assert result.status == "pending"
+    kinds = [e[0] for e in conn.events]
+    assert "revive_async_tasks" in kinds
+    # A fresh event republished for the revived task…
+    assert "insert_outbox_events" in kinds
+    # …and the event payload carries the revived task_id (consumer closure).
+    outbox = [e for e in conn.events if e[0] == "insert_outbox_events"][0]
+    import json as _json
+    payload = _json.loads(outbox[1][4])  # args: (agg_type, agg_id, event_type, tenant, payload_json)
+    assert payload["task_id"] == str(failed_id)
 
 
 # ── Query: kb_messages + Redis session cache ──────────────────────────────────

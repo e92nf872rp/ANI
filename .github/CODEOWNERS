@@ -93,7 +93,6 @@
 /repo/services/prototypes/                                         @viccao-yue @e92nf872rp
 /repo/services/README.md                                           @viccao-yue @e92nf872rp
 /repo/ai/                                                          @viccao-yue @e92nf872rp
-/repo/frontends/                                                   @viccao-yue @e92nf872rp
 # bounded operator 共享范围：仅 inference-operator 共同审查；
 # 不意味着 Kubernetes operator、Core pkg/、deploy、scripts 或生成的 Core SDK 被一并解冻。
 /repo/operators/inference-operator/                                @viccao-yue @e92nf872rp

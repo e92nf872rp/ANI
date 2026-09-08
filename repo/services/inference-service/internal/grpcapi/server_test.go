@@ -52,6 +52,17 @@ type fakeController struct {
 	err    error
 }
 
+type fakeAccessPolicies struct {
+	input    service.AccessCheckInput
+	decision service.AccessDecision
+}
+
+func (f *fakeAccessPolicies) CheckAccess(_ context.Context, input service.AccessCheckInput) (service.AccessDecision, error) {
+	f.input = input
+	return f.decision, nil
+}
+func (*fakeAccessPolicies) ReleaseAccessLease(context.Context, string) error { return nil }
+
 func (f *fakeController) Get(_ context.Context, tenantID, serviceID uuid.UUID) (service.ServiceView, error) {
 	f.tenant, f.id = tenantID, serviceID
 	return f.view, f.err
@@ -102,6 +113,22 @@ func TestCreateRejectsMissingTenant(t *testing.T) {
 		Resources: &inferencecontrolv1.InferenceServiceResources{Cpu: "2", Memory: "4Gi"},
 	})
 	assertStatus(t, err, codes.Unauthenticated, "UNAUTHORIZED")
+}
+
+func TestCheckInferenceAccessDelegatesTenantAndKeyIdentity(t *testing.T) {
+	keyID := testKey
+	policies := &fakeAccessPolicies{decision: service.AccessDecision{Decision: "rate_limited", HTTPStatus: 429, ReasonCode: "POLICY_RPM_LIMIT", InferenceServiceID: testService, PolicyID: testOp, RetryAfter: 3 * time.Second}}
+	server := NewServer(&fakeCreator{}, &fakeController{}).WithAccessPolicies(policies)
+	response, err := server.CheckInferenceAccess(context.Background(), &inferencecontrolv1.CheckInferenceAccessRequest{TenantId: testTenant.String(), UserId: testModel.String(), ApiKeyId: keyID.String(), KeyPrefix: "ani_live", ServedModelName: " ani-c40-chat ", OpenaiPath: "/v1/chat/completions", RequestId: "req-1", Stream: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.GetDecision() != "rate_limited" || response.GetHttpStatus() != 429 || response.GetRetryAfterSeconds() != 3 || response.GetInferenceServiceId() != testService.String() {
+		t.Fatalf("response=%+v", response)
+	}
+	if policies.input.TenantID != testTenant || policies.input.APIKeyID != keyID || policies.input.ServedModelName != "ani-c40-chat" || policies.input.KeyPrefix != "ani_live" {
+		t.Fatalf("input=%+v", policies.input)
+	}
 }
 
 func TestCreateRejectsGPUCountWithoutGPUType(t *testing.T) {
@@ -329,6 +356,78 @@ func TestListUsesTenantFromRequest(t *testing.T) {
 	}
 	if controller.tenant != testTenant || len(resp.GetItems()) != 1 {
 		t.Fatalf("tenant=%s items=%d", controller.tenant, len(resp.GetItems()))
+	}
+}
+
+func TestParsePolicyPatchRequestHash(t *testing.T) {
+	valid := "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	if got, err := parsePolicyPatchRequestHash(valid); err != nil || got != valid {
+		t.Fatalf("valid hash = (%q,%v)", got, err)
+	}
+	for _, value := range []string{"", "sha256:short", "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "md5:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"} {
+		if _, err := parsePolicyPatchRequestHash(value); err == nil {
+			t.Fatalf("invalid hash accepted: %q", value)
+		}
+	}
+}
+
+type policyControlRecorder struct {
+	updateHash  string
+	updateCalls int
+}
+
+func (*policyControlRecorder) ListPolicies(context.Context, uuid.UUID) ([]domain.AccessPolicy, error) {
+	return nil, nil
+}
+func (*policyControlRecorder) GetPolicy(context.Context, uuid.UUID, uuid.UUID) (domain.AccessPolicy, error) {
+	return domain.AccessPolicy{}, nil
+}
+func (*policyControlRecorder) CreatePolicy(_ context.Context, policy domain.AccessPolicy, _ uuid.UUID) (domain.AccessPolicy, error) {
+	return policy, nil
+}
+func (f *policyControlRecorder) UpdatePolicy(_ context.Context, policy domain.AccessPolicy, _ uuid.UUID, requestHash string) (domain.AccessPolicy, error) {
+	f.updateHash = requestHash
+	f.updateCalls++
+	return policy, nil
+}
+func (*policyControlRecorder) DeletePolicy(context.Context, uuid.UUID, uuid.UUID, uuid.UUID) error {
+	return nil
+}
+func (*policyControlRecorder) ListServicePolicies(context.Context, uuid.UUID, uuid.UUID) ([]domain.AccessPolicy, error) {
+	return nil, nil
+}
+func (*policyControlRecorder) ReplaceServicePolicies(context.Context, uuid.UUID, uuid.UUID, []uuid.UUID, uuid.UUID) ([]domain.AccessPolicy, error) {
+	return nil, nil
+}
+func (*policyControlRecorder) ListEvents(context.Context, uuid.UUID, domain.AccessPolicyEventQuery) ([]domain.AccessPolicyEvent, string, error) {
+	return nil, "", nil
+}
+
+func TestPatchInferenceAccessPolicyForwardsValidatedOriginalRequestHash(t *testing.T) {
+	recorder := &policyControlRecorder{}
+	server := NewServer(&fakeCreator{}, &fakeController{}).WithAccessPolicyControl(recorder)
+	hash := "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	req := &inferencecontrolv1.PatchInferenceAccessPolicyRequest{
+		TenantId: testTenant.String(), PolicyId: uuid.NewString(), IdempotencyKey: uuid.NewString(), RequestHash: hash,
+		Policy: &inferencecontrolv1.InferenceAccessPolicy{
+			Name: "policy", Status: string(domain.AccessPolicyEnabled), Priority: 1000,
+			Scope:       &inferencecontrolv1.InferenceAccessPolicyScope{Type: string(domain.ScopeTenantDefault)},
+			Access:      &inferencecontrolv1.InferenceAccessPolicyAccess{AllowAllTenantKeys: true},
+			Concurrency: &inferencecontrolv1.InferenceAccessPolicyConcurrency{LeaseTtlSeconds: 60},
+		},
+	}
+	if _, err := server.PatchInferenceAccessPolicy(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.updateCalls != 1 || recorder.updateHash != hash {
+		t.Fatalf("update calls=%d hash=%q", recorder.updateCalls, recorder.updateHash)
+	}
+	req.RequestHash = "sha256:short"
+	if _, err := server.PatchInferenceAccessPolicy(context.Background(), req); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("invalid hash status = %v", err)
+	}
+	if recorder.updateCalls != 1 {
+		t.Fatalf("invalid hash reached policy control: calls=%d", recorder.updateCalls)
 	}
 }
 

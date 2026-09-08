@@ -409,9 +409,10 @@ func (c *KubernetesRESTClient) Observe(ctx context.Context, request ports.Worklo
 	phase := phaseFromKubernetesObject(resource, doc)
 	nodeName := nodeNameFromKubernetesObject(doc)
 	reason := reasonFromKubernetesObject(doc)
+	var networks []ports.WorkloadNetworkAttachment
 	if request.Kind == ports.WorkloadKindVM && resource.Kind == "VirtualMachine" {
 		var err error
-		phase, nodeName, reason, err = c.observeKubeVirtVMI(ctx, resource.Namespace, resource.Name, phase, nodeName, reason)
+		phase, nodeName, reason, networks, err = c.observeKubeVirtVMI(ctx, resource.Namespace, resource.Name, phase, nodeName, reason)
 		if err != nil {
 			return ports.WorkloadProviderObservation{}, err
 		}
@@ -426,11 +427,12 @@ func (c *KubernetesRESTClient) Observe(ctx context.Context, request ports.Worklo
 		Phase:        phase,
 		NodeName:     nodeName,
 		Reason:       reason,
+		Networks:     networks,
 		ObservedAt:   c.now().UTC(),
 	}, nil
 }
 
-func (c *KubernetesRESTClient) observeKubeVirtVMI(ctx context.Context, namespace string, name string, phase string, nodeName string, reason string) (string, string, string, error) {
+func (c *KubernetesRESTClient) observeKubeVirtVMI(ctx context.Context, namespace string, name string, phase string, nodeName string, reason string) (string, string, string, []ports.WorkloadNetworkAttachment, error) {
 	resource := kubernetesResource{
 		Provider:   "kubevirt",
 		APIGroup:   "kubevirt.io",
@@ -444,24 +446,67 @@ func (c *KubernetesRESTClient) observeKubeVirtVMI(ctx context.Context, namespace
 	body, err := c.doIdempotent(ctx, http.MethodGet, c.resourceURL(resource, ""), "", nil)
 	if err != nil {
 		if isKubernetesNotFound(err) {
-			return phase, nodeName, reason, nil
+			switch strings.ToLower(strings.TrimSpace(phase)) {
+			case "stopped", "halted":
+				return "Stopped", nodeName, reason, nil, nil
+			case "running", "starting":
+				return "Pending", nodeName, fmt.Sprintf("VirtualMachineInstance not found while VirtualMachine status is %s", phase), nil, nil
+			default:
+				return phase, nodeName, reason, nil, nil
+			}
 		}
-		return phase, nodeName, reason, err
+		return phase, nodeName, reason, nil, err
 	}
 	var doc map[string]any
 	if err := json.Unmarshal(body, &doc); err != nil {
-		return phase, nodeName, reason, fmt.Errorf("%w: invalid KubeVirt VMI observation response: %v", ports.ErrInvalid, err)
+		return phase, nodeName, reason, nil, fmt.Errorf("%w: invalid KubeVirt VMI observation response: %v", ports.ErrInvalid, err)
 	}
-	if observed := phaseFromKubernetesObject(resource, doc); observed != "Pending" {
-		phase = observed
-	}
+	phase = phaseFromKubernetesObject(resource, doc)
 	if observed := nodeNameFromKubernetesObject(doc); observed != "" {
 		nodeName = observed
 	}
 	if observed := reasonFromKubernetesObject(doc); observed != "" {
 		reason = observed
 	}
-	return phase, nodeName, reason, nil
+	return phase, nodeName, reason, kubevirtVMINetworks(doc), nil
+}
+
+// kubevirtVMINetworks extracts the private IP addresses reported by a
+// KubeVirt VirtualMachineInstance's status.interfaces so a VM instance can
+// surface its real private_ip instead of an empty value. The first non-empty
+// interface is marked primary so primaryIPAddress picks it up deterministically.
+func kubevirtVMINetworks(doc map[string]any) []ports.WorkloadNetworkAttachment {
+	status, _ := doc["status"].(map[string]any)
+	raw, _ := status["interfaces"].([]any)
+	if len(raw) == 0 {
+		return nil
+	}
+	networks := make([]ports.WorkloadNetworkAttachment, 0, len(raw))
+	for i, item := range raw {
+		iface, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		ip := firstNonEmpty(stringValue(iface["ipAddress"]), stringValue(iface["ip"]))
+		if strings.TrimSpace(ip) == "" {
+			continue
+		}
+		networks = append(networks, ports.WorkloadNetworkAttachment{
+			IPAddress: ip,
+			Primary:   i == 0,
+		})
+	}
+	return networks
+}
+
+func stringValue(value any) string {
+	if value == nil {
+		return ""
+	}
+	if text, ok := value.(string); ok {
+		return text
+	}
+	return ""
 }
 
 func isKubernetesNotFound(err error) bool {

@@ -51,6 +51,33 @@ func NormalizeInferenceTask(task InferenceTask) InferenceTask {
 	return InferenceTaskGenerate
 }
 
+type PublicationDesired string
+
+const (
+	PublicationPublished   PublicationDesired = "published"
+	PublicationUnpublished PublicationDesired = "unpublished"
+)
+
+type PublicationPhase string
+
+const (
+	PublicationPending       PublicationPhase = "pending"
+	PublicationPublishing    PublicationPhase = "publishing"
+	PublicationPublishedOK   PublicationPhase = "published"
+	PublicationUnpublishing  PublicationPhase = "unpublishing"
+	PublicationUnpublishedOK PublicationPhase = "unpublished"
+	PublicationFailed        PublicationPhase = "failed"
+)
+
+type Publication struct {
+	Desired            PublicationDesired
+	Generation         int64
+	ObservedGeneration int64
+	Phase              PublicationPhase
+	LastError          string
+	UpdatedAt          time.Time
+}
+
 type OperationState string
 
 const (
@@ -135,7 +162,7 @@ type Service struct {
 	AppliedSpec        Spec      // 已在 Core 落地的规格，scale 失败时回滚到这里
 	RuntimeRef         uuid.UUID // Core platform-workload ID
 	RuntimeEndpoint    string    // 集群内 ClusterIP，不对租户返回
-	InvocationURL      string    // P0 固定空
+	InvocationURL      string    // 仅成功发布后可解析的 Gateway 调用地址
 	ReadyReplicas      int
 	CurrentOperationID uuid.UUID
 	ActiveOperationID  uuid.UUID
@@ -144,6 +171,7 @@ type Service struct {
 	UpdatedAt          time.Time
 	DeletedAt          *time.Time
 	LegacyQuarantined  bool // 旧行不可继续 mutation，需显式迁移
+	Publication        Publication
 }
 
 // Operation 是一次 create/scale/lifecycle/delete。worker 按 lease 领取 pending 行。

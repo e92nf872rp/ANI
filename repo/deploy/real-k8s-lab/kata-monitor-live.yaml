@@ -1,0 +1,117 @@
+# kata-monitor 部署清单（K8s 测试环境实测版，sandbox/kata 实例内存监控数据源）
+#
+# 目的：暴露 Kata guest 内真实资源统计（kata_guest_meminfo / kata_guest_load / kata_guest_netdev_stat 等），
+#       补齐 sandbox (kata) 实例的内存监控数据——宿主机 cAdvisor 对 Kata VM 内部完全失明
+#       （只能看到 pause 容器 ~5MB 与 kata_overhead 0，guest 真实内存不可见）。
+#
+# 前置条件（2026-09-04 测试环境实测均已满足）：
+#   - kata-deploy DaemonSet 已装 kata 4.0.0（kube-system/kata-deploy，3/3）
+#   - kata-monitor 独立镜像已推送到 registry：
+#     docker.changqingyun.cn/ani/kata-monitor:4.0.0（ubuntu22.04 glibc 底座 + COPY
+#     节点上 kata-deploy 官方二进制；kata-deploy:4.0.0 镜像本身无 glibc，不能直接运行它）
+#   - RuntimeClass sandbox-kata → handler kata-qemu 已创建
+#
+# 镜像构建方法（在有 docker 的内网构建机执行）：
+#   1. 获取二进制（必须与集群 kata 版本对齐，kata 4.0.0）：
+#      从任一 kata 节点取 /opt/kata/bin/kata-monitor（kata-deploy 官方产物），
+#      与 Dockerfile 一起放入同一构建目录。
+#   2. 同目录 Dockerfile 内容：
+#        FROM docker.changqingyun.cn/ani/gpu-cuda:12.4.1-base-ubuntu22.04
+#        COPY kata-monitor /usr/local/bin/kata-monitor
+#        RUN chmod +x /usr/local/bin/kata-monitor
+#        ENTRYPOINT ["/usr/local/bin/kata-monitor"]
+#      （FROM 说明：内网 registry 无 ubuntu:22.04、docker.io 直拉超慢，故借用 registry 内
+#        已有的 ubuntu22.04 glibc 底座；镜像层与集群节点复用，部署秒拉。后续 mirror
+#        同步 ubuntu:22.04 后可换 FROM 瘦身。）
+#   3. 构建并推送：
+#        cd <构建目录>
+#        docker build -t docker.changqingyun.cn/ani/kata-monitor:4.0.0 .
+#        docker push docker.changqingyun.cn/ani/kata-monitor:4.0.0
+#   4. 维护：集群 kata 版本升级时必须重打镜像（二进制与 runtime 版本对齐），tag 同步更新。
+#
+# 端口说明：kata-monitor 默认监听 127.0.0.1:8090，但 8090 已被 kata-deploy 健康检查占用
+#          （kata-deploy DS 的 HEALTH_PORT=8090，livenessProbe /healthz:8090），故改用 8091。
+#
+# 实测（2026-09-04，测试环境节点）：
+#   - GET /sandboxes   → 列出本节点 kata sandbox id（与 cAdvisor series 的 name 标签值一致）
+#   - GET /metrics     → 聚合本节点全部 kata sandbox 指标，series 带 sandbox_id 标签；
+#                        cri_uid/cri_name/cri_namespace 实测有值
+#                        （pod 名 + 租户 namespace，可直接用于查询过滤，无需 sandbox_id join）
+#   - kata_guest_meminfo{item=...} 为 guest 内 /proc/meminfo 全套（mem_total/mem_available/
+#     anon_pages/cached 等，下划线小写风格），即 guest 真实内存数据源
+#
+# Prometheus 抓取 job：见 sprint13-instance-observability-prometheus-live.yaml 的
+# kata-monitor job（仓库与集群已同步）。
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kata-monitor
+  namespace: ani-s07-observability
+  labels:
+    app.kubernetes.io/name: kata-monitor
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kata-monitor
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kata-monitor
+    spec:
+      # hostNetwork 直接监听节点 IP，Prometheus 用 kubernetes_sd(role: node) 按节点抓取。
+      # 不能用 Service 抓取：每个节点的 kata-monitor 只暴露本节点 sandbox，Service 负载均衡会丢数据。
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      # 与 kata-deploy DS 相同的 tolerations：sandbox pod 可调度到 control-plane，monitor 必须全覆盖
+      tolerations:
+        - effect: NoSchedule
+          key: node-role.kubernetes.io/control-plane
+          operator: Exists
+        - effect: NoSchedule
+          key: node-role.kubernetes.io/master
+          operator: Exists
+      containers:
+        - name: kata-monitor
+          # 独立镜像（构建方法见文件头注释）：ubuntu22.04 glibc 底座 + COPY 节点上
+          # kata-deploy 4.0.0 官方二进制。
+          # 不复用 kata-deploy:4.0.0 镜像：其底座无 glibc，动态链接二进制 exec 报
+          # "no such file or directory"（实为缺 /lib64/ld-linux-x86-64.so.2）。
+          image: docker.changqingyun.cn/ani/kata-monitor:4.0.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /usr/local/bin/kata-monitor
+            - -listen-address=0.0.0.0:8091
+            - -runtime-endpoint=/run/containerd/containerd.sock
+          ports:
+            - name: metrics
+              containerPort: 8091
+              hostPort: 8091
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          volumeMounts:
+            - name: containerd-sock
+              mountPath: /run/containerd/containerd.sock
+              readOnly: true
+            # kata-monitor 通过扫描宿主机 /run/vc/sbs（virtcontainers sandbox 目录）发现
+            # kata sandbox，缺它则日志报 "cannot monitor /run/vc/sbs" 且 /sandboxes 为空。
+            # 这两个 hostPath 是 kata-monitor 的本职运行时依赖（读 containerd 与 shim 状态），
+            # 非镜像外挂二进制类 hack。
+            - name: kata-run
+              mountPath: /run/vc
+              readOnly: true
+      volumes:
+        - name: containerd-sock
+          hostPath:
+            path: /run/containerd/containerd.sock
+            type: Socket
+        - name: kata-run
+          hostPath:
+            path: /run/vc
+            # 部分节点尚未运行过 kata pod 时 /run/vc 不存在，用 DirectoryOrCreate 容忍
+            type: DirectoryOrCreate

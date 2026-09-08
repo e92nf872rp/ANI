@@ -18,6 +18,7 @@ from concurrent import futures
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
+import asyncpg
 import grpc
 import httpx
 import pytest
@@ -188,18 +189,10 @@ def test_delete_kb_without_pool_returns_failed_precondition(stub):
     assert exc.value.code() == grpc.StatusCode.FAILED_PRECONDITION
 
 
-# ── P1 RPCs still UNIMPLEMENTED ───────────────────────────────────────────────
+# ── P1 RPCs: UpdateKBPermissions still UNIMPLEMENTED; B2 RPCs wired ──────────
 
 
-def test_p1_rpcs_still_unimplemented(stub):
-    for rpc, req in [
-        ("ListKBCitations", kb_pb.ListKBCitationsRequest(tenant_id=TENANT_ID, kb_id=KB_ID)),
-        ("ListKBSessions", kb_pb.ListKBSessionsRequest(tenant_id=TENANT_ID, kb_id=KB_ID)),
-    ]:
-        with pytest.raises(grpc.RpcError) as exc:
-            getattr(stub, rpc)(req)
-        assert exc.value.code() == grpc.StatusCode.UNIMPLEMENTED
-
+def test_update_kb_permissions_still_unimplemented(stub):
     with pytest.raises(grpc.RpcError) as exc:
         stub.UpdateKBPermissions(
             kb_pb.UpdateKBPermissionsRequest(
@@ -207,6 +200,25 @@ def test_p1_rpcs_still_unimplemented(stub):
             )
         )
     assert exc.value.code() == grpc.StatusCode.UNIMPLEMENTED
+
+
+def test_b2_rpcs_wired_not_unimplemented(stub):
+    """ListKBCitations/ListKBSessions are implemented in B2 (issue-045).
+
+    Constructed without a pool they must return FAILED_PRECONDITION — never
+    UNIMPLEMENTED (that would mean the P1 stub still shadows the servicer).
+    """
+    for rpc, req in [
+        ("ListKBCitations", kb_pb.ListKBCitationsRequest(tenant_id=TENANT_ID, kb_id=KB_ID)),
+        ("ListKBSessions", kb_pb.ListKBSessionsRequest(tenant_id=TENANT_ID, kb_id=KB_ID)),
+        ("ListDocumentChunks", kb_pb.ListDocumentChunksRequest(tenant_id=TENANT_ID, kb_id=KB_ID, doc_id=str(uuid.uuid4()))),
+        ("GetSessionMessages", kb_pb.GetSessionMessagesRequest(tenant_id=TENANT_ID, kb_id=KB_ID, session_id=str(uuid.uuid4()))),
+        ("DeleteSession", kb_pb.DeleteSessionRequest(tenant_id=TENANT_ID, kb_id=KB_ID, session_id=str(uuid.uuid4()))),
+    ]:
+        with pytest.raises(grpc.RpcError) as exc:
+            getattr(stub, rpc)(req)
+        assert exc.value.code() != grpc.StatusCode.UNIMPLEMENTED
+        assert exc.value.code() == grpc.StatusCode.FAILED_PRECONDITION
 
 
 # ── CreateKB validation ───────────────────────────────────────────────────────
@@ -222,3 +234,167 @@ def test_create_kb_missing_name_returns_invalid_argument(stub):
     with pytest.raises(grpc.RpcError) as exc:
         stub.CreateKB(kb_pb.CreateKBRequest(tenant_id=TENANT_ID))
     assert exc.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+
+# ── CreateKB name conflict → ALREADY_EXISTS ───────────────────────────────────
+
+
+def test_create_kb_name_conflict_returns_already_exists():
+    """CreateKB hits UNIQUE(tenant_id, name) on the knowledge_bases INSERT.
+    Two paths: (a) a genuine name conflict with an active KB, or (b) a retry
+    whose prior attempt committed the kb INSERT but crashed before the
+    async_tasks record was written (replay check finds nothing, so this
+    retry re-inserts). Both must surface ALREADY_EXISTS, not UNKNOWN."""
+    class _ConflictConn:
+        """Minimal conn: the replay find returns nothing; the kb INSERT
+        raises UniqueViolationError (SQLSTATE 23505)."""
+
+        def __init__(self):
+            self.events: list[str] = []
+
+        def transaction(self):
+            @asynccontextmanager
+            async def _tx():
+                yield self
+            return _tx()
+
+        async def execute(self, sql, *args):
+            return "UPDATE 1"
+
+        async def fetchrow(self, sql, *args):
+            if "INSERT INTO knowledge_bases" in sql:
+                self.events.append("insert_kb")
+                raise asyncpg.UniqueViolationError(
+                    'duplicate key value violates unique constraint '
+                    '"knowledge_bases_tenant_id_name_key"'
+                )
+            if "FROM async_tasks" in sql and "idempotency_key" in sql:
+                self.events.append("find_idempotency")
+                return None  # no replay record (crash window / fresh conflict)
+            return None
+
+        async def fetch(self, sql, *args):
+            return []
+
+        async def fetchval(self, sql, *args):
+            return 0
+
+    class _SingleConnPool:
+        @asynccontextmanager
+        async def acquire(self):
+            yield _ConflictConn()
+
+    @asynccontextmanager
+    async def core_factory(tenant_id):
+        yield core
+
+    core = _MockCoreClient()
+    servicer = KBServiceServicer(pool=_SingleConnPool(), core_client_factory=core_factory)
+    req = kb_pb.CreateKBRequest(tenant_id=TENANT_ID, name="kb-taken")
+
+    import asyncio
+
+    with pytest.raises(RuntimeError, match="ALREADY_EXISTS"):
+        asyncio.new_event_loop().run_until_complete(
+            servicer._create_kb(req, _StubContext())
+        )
+    # The abort happens before the Core step and before any async_tasks
+    # write — a 409 path must stay side-effect free.
+    assert core.calls == []
+
+
+# ── CreateKB poison-key self-heal ────────────────────────────────────────────
+
+
+def test_create_kb_poison_key_self_heals():
+    """A prior CreateKB attempt crashed between create_task and complete_task,
+    leaving an async_tasks row (pending, result=NULL). The replay check skips
+    it (no result), the KB insert + Core vector-store call re-run, and the
+    task INSERT now violates UNIQUE(tenant_id, idempotency_key). The servicer
+    must reuse the pending row, complete it, and return success."""
+    poison_task_id = uuid.uuid4()
+
+    class _PoisonConn:
+        """Minimal conn for the CreateKB poison-key flow.
+
+        find_by_idempotency_key: first call returns the stale pending row
+        (no result → no replay); the post-violation re-find returns it too.
+        create_task INSERT raises UniqueViolationError.
+        """
+
+        def __init__(self):
+            self.events: list[str] = []
+
+        def transaction(self):
+            @asynccontextmanager
+            async def _tx():
+                yield self
+            return _tx()
+
+        async def execute(self, sql, *args):
+            return "UPDATE 1"
+
+        async def fetchrow(self, sql, *args):
+            if "INSERT INTO knowledge_bases" in sql:
+                self.events.append("insert_kb")
+                return {
+                    "id": uuid.uuid4(),
+                    "tenant_id": uuid.UUID(TENANT_ID),
+                    "name": "kb-poison",
+                    "description": "",
+                    "embedding_model": "bge-m3",
+                    "chunk_size": 1024,
+                    "top_k": 5,
+                    "score_threshold": 0.0,
+                    "retrieval_mode": "hybrid",
+                    "status": "active",
+                    "doc_count": 0,
+                }
+            if "FROM async_tasks" in sql and "idempotency_key" in sql:
+                self.events.append("find_idempotency")
+                return {
+                    "id": poison_task_id,
+                    "status": "pending",  # stale: never completed
+                    "result": None,
+                }
+            if "INSERT INTO async_tasks" in sql:
+                self.events.append("insert_async_tasks")
+                raise asyncpg.UniqueViolationError(
+                    'duplicate key value violates unique constraint '
+                    '"async_tasks_tenant_id_idempotency_key_key"'
+                )
+            return None
+
+        async def fetch(self, sql, *args):
+            return []
+
+        async def fetchval(self, sql, *args):
+            return 0
+
+    class _SingleConnPool:
+        @asynccontextmanager
+        async def acquire(self):
+            yield _PoisonConn()
+
+    @asynccontextmanager
+    async def core_factory(tenant_id):
+        yield _MockCoreClient()
+
+    servicer = KBServiceServicer(pool=_SingleConnPool(), core_client_factory=core_factory)
+    req = kb_pb.CreateKBRequest(tenant_id=TENANT_ID, name="kb-poison")
+
+    import asyncio
+
+    result = asyncio.new_event_loop().run_until_complete(
+        servicer._create_kb(req, _StubContext())
+    )
+
+    # Retry self-heals: returns the KB row instead of UNKNOWN.
+    assert result.name == "kb-poison"
+
+
+class _StubContext:
+    """grpc.ServicerContext stand-in (abort raises)."""
+
+    def abort(self, code, message):
+        raise RuntimeError(f"aborted: {code} {message}")

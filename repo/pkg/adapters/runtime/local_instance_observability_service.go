@@ -180,6 +180,11 @@ func (s *LocalInstanceObservabilityService) CreateConsoleSession(_ context.Conte
 	return record, nil
 }
 
+// StreamLogs 在 local profile 下不支持流式日志，返回 ErrNotConfigured（gateway 映射 503）。
+func (s *LocalInstanceObservabilityService) StreamLogs(_ context.Context, _ ports.InstanceLogStreamRequest, _ func(ports.InstanceLogEntry) error) error {
+	return ports.ErrNotConfigured
+}
+
 func validateInstanceObservationIdentity(tenantID string, instanceID string) error {
 	if strings.TrimSpace(tenantID) == "" {
 		return fmt.Errorf("%w: tenant_id is required", ports.ErrInvalid)
@@ -281,3 +286,4 @@ func limitSecurityEventRecords(items []ports.InstanceSecurityEventRecord, limit 
 }
 
 var _ ports.InstanceObservability = (*LocalInstanceObservabilityService)(nil)
+var _ ports.InstanceSessionIssuer = (*LocalInstanceObservabilityService)(nil)

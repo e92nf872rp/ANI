@@ -217,7 +217,33 @@ func (s *LocalNetworkService) CreateVPC(ctx context.Context, request ports.Netwo
 	return applied, nil
 }
 
-func (s *LocalNetworkService) ListVPCs(_ context.Context, request ports.NetworkResourceListRequest) ([]ports.NetworkVPCRecord, error) {
+func (s *LocalNetworkService) ListVPCs(ctx context.Context, request ports.NetworkResourceListRequest) ([]ports.NetworkVPCRecord, error) {
+	if s.store != nil {
+		items, err := s.store.ListVPCs(ctx, request.TenantID)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(request.Name) != "" {
+			filtered := make([]ports.NetworkVPCRecord, 0, len(items))
+			for _, record := range items {
+				if strings.HasPrefix(record.Name, strings.TrimSpace(request.Name)) {
+					filtered = append(filtered, record)
+				}
+			}
+			items = filtered
+		}
+		if request.State != "" {
+			filtered := make([]ports.NetworkVPCRecord, 0, len(items))
+			for _, record := range items {
+				if record.State == request.State {
+					filtered = append(filtered, record)
+				}
+			}
+			items = filtered
+		}
+		sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.After(items[j].UpdatedAt) })
+		return items, nil
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	items := make([]ports.NetworkVPCRecord, 0, len(s.vpcs))
@@ -237,7 +263,10 @@ func (s *LocalNetworkService) ListVPCs(_ context.Context, request ports.NetworkR
 	return items, nil
 }
 
-func (s *LocalNetworkService) GetVPC(_ context.Context, request ports.NetworkResourceGetRequest) (ports.NetworkVPCRecord, error) {
+func (s *LocalNetworkService) GetVPC(ctx context.Context, request ports.NetworkResourceGetRequest) (ports.NetworkVPCRecord, error) {
+	if s.store != nil {
+		return s.store.GetVPC(ctx, request.TenantID, request.ResourceID)
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	record, ok := s.vpcs[request.ResourceID]
@@ -330,7 +359,33 @@ func (s *LocalNetworkService) CreateSubnet(ctx context.Context, request ports.Ne
 	return applied, nil
 }
 
-func (s *LocalNetworkService) ListSubnets(_ context.Context, request ports.NetworkResourceListRequest) ([]ports.NetworkSubnetRecord, error) {
+func (s *LocalNetworkService) ListSubnets(ctx context.Context, request ports.NetworkResourceListRequest) ([]ports.NetworkSubnetRecord, error) {
+	if s.store != nil {
+		items, err := s.store.ListSubnets(ctx, request.TenantID)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(request.VPCID) != "" {
+			filtered := make([]ports.NetworkSubnetRecord, 0, len(items))
+			for _, record := range items {
+				if record.VPCID == strings.TrimSpace(request.VPCID) {
+					filtered = append(filtered, record)
+				}
+			}
+			items = filtered
+		}
+		if request.State != "" {
+			filtered := make([]ports.NetworkSubnetRecord, 0, len(items))
+			for _, record := range items {
+				if record.State == request.State {
+					filtered = append(filtered, record)
+				}
+			}
+			items = filtered
+		}
+		sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.After(items[j].UpdatedAt) })
+		return items, nil
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	items := make([]ports.NetworkSubnetRecord, 0, len(s.subnets))
@@ -350,7 +405,10 @@ func (s *LocalNetworkService) ListSubnets(_ context.Context, request ports.Netwo
 	return items, nil
 }
 
-func (s *LocalNetworkService) GetSubnet(_ context.Context, request ports.NetworkResourceGetRequest) (ports.NetworkSubnetRecord, error) {
+func (s *LocalNetworkService) GetSubnet(ctx context.Context, request ports.NetworkResourceGetRequest) (ports.NetworkSubnetRecord, error) {
+	if s.store != nil {
+		return s.store.GetSubnet(ctx, request.TenantID, request.ResourceID)
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	record, ok := s.subnets[request.ResourceID]
@@ -479,7 +537,10 @@ func (s *LocalNetworkService) ListSecurityGroups(_ context.Context, request port
 	return items, nil
 }
 
-func (s *LocalNetworkService) GetSecurityGroup(_ context.Context, request ports.NetworkResourceGetRequest) (ports.NetworkSecurityGroupRecord, error) {
+func (s *LocalNetworkService) GetSecurityGroup(ctx context.Context, request ports.NetworkResourceGetRequest) (ports.NetworkSecurityGroupRecord, error) {
+	if s.store != nil {
+		return s.store.GetSecurityGroup(ctx, request.TenantID, request.ResourceID)
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	record, ok := s.securityGroup[request.ResourceID]

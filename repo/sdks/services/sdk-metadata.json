@@ -209,6 +209,12 @@
       "scope": ""
     },
     {
+      "operationId": "updateKnowledgeBase",
+      "method": "PUT",
+      "path": "/knowledge-bases/{kb_id}",
+      "scope": ""
+    },
+    {
       "operationId": "listKnowledgeBaseCitations",
       "method": "GET",
       "path": "/knowledge-bases/{kb_id}/citations",
@@ -242,6 +248,18 @@
       "operationId": "deleteKnowledgeBaseDocument",
       "method": "DELETE",
       "path": "/knowledge-bases/{kb_id}/documents/{doc_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "getKnowledgeBaseDocument",
+      "method": "GET",
+      "path": "/knowledge-bases/{kb_id}/documents/{doc_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "listKnowledgeBaseDocumentChunks",
+      "method": "GET",
+      "path": "/knowledge-bases/{kb_id}/documents/{doc_id}/chunks",
       "scope": ""
     },
     {
@@ -290,6 +308,18 @@
       "operationId": "listKnowledgeBaseSessions",
       "method": "GET",
       "path": "/knowledge-bases/{kb_id}/sessions",
+      "scope": ""
+    },
+    {
+      "operationId": "deleteKnowledgeBaseSession",
+      "method": "DELETE",
+      "path": "/knowledge-bases/{kb_id}/sessions/{session_id}",
+      "scope": ""
+    },
+    {
+      "operationId": "listKnowledgeBaseSessionMessages",
+      "method": "GET",
+      "path": "/knowledge-bases/{kb_id}/sessions/{session_id}/messages",
       "scope": ""
     },
     {
@@ -473,6 +503,12 @@
       "scope": ""
     },
     {
+      "operationId": "listAvailableTenantsForAdmin",
+      "method": "GET",
+      "path": "/tenant-admins/tenants",
+      "scope": ""
+    },
+    {
       "operationId": "listTenantPlans",
       "method": "GET",
       "path": "/tenant-plans",
@@ -617,6 +653,42 @@
       "scope": ""
     },
     {
+      "operationId": "listTenants",
+      "method": "GET",
+      "path": "/tenants",
+      "scope": ""
+    },
+    {
+      "operationId": "createTenant",
+      "method": "POST",
+      "path": "/tenants",
+      "scope": ""
+    },
+    {
+      "operationId": "listAvailableTenantPlans",
+      "method": "GET",
+      "path": "/tenants/available-plans",
+      "scope": ""
+    },
+    {
+      "operationId": "getTenantDetail",
+      "method": "GET",
+      "path": "/tenants/{tenantId}",
+      "scope": ""
+    },
+    {
+      "operationId": "updateTenant",
+      "method": "PUT",
+      "path": "/tenants/{tenantId}",
+      "scope": ""
+    },
+    {
+      "operationId": "listTenantScopedAdmins",
+      "method": "GET",
+      "path": "/tenants/{tenantId}/admins",
+      "scope": ""
+    },
+    {
       "operationId": "inviteTenantAdmin",
       "method": "POST",
       "path": "/tenants/{tenantId}/admins/invite",
@@ -638,12 +710,6 @@
       "operationId": "listTenantAdminAuditLogs",
       "method": "GET",
       "path": "/tenants/{tenantId}/admins/{userId}/audit-logs",
-      "scope": ""
-    },
-    {
-      "operationId": "getChangeableRoles",
-      "method": "GET",
-      "path": "/tenants/{tenantId}/admins/{userId}/changeable-roles",
       "scope": ""
     },
     {
@@ -683,15 +749,93 @@
       "scope": ""
     },
     {
+      "operationId": "listTenantAuditLogs",
+      "method": "GET",
+      "path": "/tenants/{tenantId}/audit-logs",
+      "scope": ""
+    },
+    {
+      "operationId": "updateTenantMfa",
+      "method": "PUT",
+      "path": "/tenants/{tenantId}/auth/mfa",
+      "scope": ""
+    },
+    {
+      "operationId": "getTenantSso",
+      "method": "GET",
+      "path": "/tenants/{tenantId}/auth/sso",
+      "scope": ""
+    },
+    {
+      "operationId": "updateTenantSso",
+      "method": "PUT",
+      "path": "/tenants/{tenantId}/auth/sso",
+      "scope": ""
+    },
+    {
+      "operationId": "testTenantSso",
+      "method": "POST",
+      "path": "/tenants/{tenantId}/auth/sso/test",
+      "scope": ""
+    },
+    {
+      "operationId": "disableTenant",
+      "method": "POST",
+      "path": "/tenants/{tenantId}/disable",
+      "scope": ""
+    },
+    {
+      "operationId": "freezeTenant",
+      "method": "POST",
+      "path": "/tenants/{tenantId}/freeze",
+      "scope": ""
+    },
+    {
+      "operationId": "listTenantLifecycle",
+      "method": "GET",
+      "path": "/tenants/{tenantId}/lifecycle",
+      "scope": ""
+    },
+    {
       "operationId": "bindTenantPlan",
       "method": "POST",
       "path": "/tenants/{tenantId}/plan",
       "scope": ""
     },
     {
-      "operationId": "transferTenantOwnership",
+      "operationId": "getTenantQuotaView",
+      "method": "GET",
+      "path": "/tenants/{tenantId}/quota",
+      "scope": ""
+    },
+    {
+      "operationId": "listQuotaChangeRequests",
+      "method": "GET",
+      "path": "/tenants/{tenantId}/quota-requests",
+      "scope": ""
+    },
+    {
+      "operationId": "submitQuotaChangeRequest",
       "method": "POST",
-      "path": "/tenants/{tenantId}/transfer-ownership",
+      "path": "/tenants/{tenantId}/quota-requests",
+      "scope": ""
+    },
+    {
+      "operationId": "reviewQuotaChangeRequest",
+      "method": "POST",
+      "path": "/tenants/{tenantId}/quota-requests/{reqId}/approve",
+      "scope": ""
+    },
+    {
+      "operationId": "listTenantAssignableRoles",
+      "method": "GET",
+      "path": "/tenants/{tenantId}/roles",
+      "scope": ""
+    },
+    {
+      "operationId": "unfreezeTenant",
+      "method": "POST",
+      "path": "/tenants/{tenantId}/unfreeze",
       "scope": ""
     }
   ],
@@ -699,12 +843,15 @@
     "AdminDetail",
     "AdminListResponse",
     "AdminWithTenant",
+    "AssignableTenantRoleListResponse",
     "AsyncTask",
     "AvailableGpu",
+    "AvailableTenantListResponse",
+    "AvailableTenantPlan",
+    "AvailableTenantPlanListResponse",
     "BindPlanRequest",
     "BoundTenant",
     "BoundTenantsResponse",
-    "ChangeableRolesResponse",
     "CreateGpuContainerRequest",
     "CreateInferenceAccessPolicyRequest",
     "CreateInferenceEndpointRequest",
@@ -715,6 +862,7 @@
     "CreateModelUploadURLRequest",
     "CreateSandboxRequest",
     "CreateTenantPlanRequest",
+    "CreateTenantRequest",
     "CreateWebhookRequest",
     "CursorPage",
     "ErrorResponse",
@@ -753,6 +901,8 @@
     "InvitationResult",
     "InviteAdminRequest",
     "InviteMemberRequest",
+    "KBChunk",
+    "KBChunkListResponse",
     "KBCitation",
     "KBCitationListResponse",
     "KBConfig",
@@ -761,6 +911,9 @@
     "KBQueryResponse",
     "KBSession",
     "KBSessionListResponse",
+    "KBSessionMessage",
+    "KBSessionMessageListResponse",
+    "KBSourceChunk",
     "KnowledgeBase",
     "Model",
     "ModelList",
@@ -784,35 +937,54 @@
     "PlatformAdminRoleUpdateRequest",
     "PlatformRole",
     "PlatformRoleListResponse",
+    "QuotaChangeRequest",
+    "QuotaChangeRequestInput",
+    "QuotaChangeRequestListResponse",
     "QuotaMetaItem",
     "QuotaMetaListResponse",
     "RebuildKnowledgeBaseRequest",
     "ReparseDocumentRequest",
     "ResendInvitationRequest",
     "ResetPasswordRequest",
+    "ReviewQuotaChangeRequest",
     "Sandbox",
     "SecurityEvent",
     "SecurityOverview",
+    "ShanghaiDisplayTime",
     "SsoConfig",
+    "SsoTestResult",
+    "SubmitQuotaChangeRequest",
     "TenantAdminAuditLog",
     "TenantAdminAuditLogListResponse",
+    "TenantAuditLogEntry",
+    "TenantAuthConfig",
+    "TenantAuthSummary",
+    "TenantDetail",
+    "TenantLifecycleEntry",
+    "TenantListItem",
+    "TenantListResponse",
     "TenantMember",
     "TenantPlan",
     "TenantPlanListItem",
     "TenantPlanListResponse",
     "TenantPlanStateChangeRequest",
+    "TenantQuotaViewItem",
+    "TenantQuotaViewResponse",
     "TenantRef",
     "TenantRole",
-    "TransferOwnershipRequest",
     "UpdateInferenceServicePoliciesRequest",
     "UpdateInferenceServiceRequest",
     "UpdateKBConfigRequest",
     "UpdateKBPermissionsRequest",
+    "UpdateKnowledgeBaseRequest",
     "UpdateQuotaLimitsRequest",
     "UpdateRoleRequest",
     "UpdateSsoConfigRequest",
+    "UpdateTenantMfaRequest",
     "UpdateTenantPlanRequest",
+    "UpdateTenantRequest",
     "UpdateTenantRoleRequest",
+    "UpdateTenantSsoRequest",
     "UserPermissions",
     "Webhook",
     "WebhookDelivery",
@@ -830,6 +1002,7 @@
     "testInferenceService",
     "createIntegration",
     "createIntegrationBot",
+    "updateKnowledgeBase",
     "updateKnowledgeBaseConfig",
     "getDocumentUploadURL",
     "notifyDocumentUploaded",
@@ -855,14 +1028,23 @@
     "updateTenantRole",
     "updateSsoConfig",
     "createWebhook",
+    "createTenant",
+    "updateTenant",
     "inviteTenantAdmin",
     "disableTenantAdmin",
     "enableTenantAdmin",
     "resendTenantAdminInvitation",
     "resetTenantAdminPassword",
     "updateTenantAdminRole",
+    "updateTenantMfa",
+    "updateTenantSso",
+    "testTenantSso",
+    "disableTenant",
+    "freezeTenant",
     "bindTenantPlan",
-    "transferTenantOwnership"
+    "submitQuotaChangeRequest",
+    "reviewQuotaChangeRequest",
+    "unfreezeTenant"
   ],
   "cursorPaginationOperations": [
     "listGpuContainers",
@@ -870,7 +1052,9 @@
     "getInferenceServiceLogs",
     "listIntegrations",
     "listKnowledgeBaseCitations",
+    "listKnowledgeBaseDocumentChunks",
     "listKnowledgeBaseSessions",
+    "listKnowledgeBaseSessionMessages",
     "listModels",
     "listModelVersions",
     "listPlatformAdmins",
@@ -880,7 +1064,11 @@
     "listTenantPlans",
     "listTenantPlanAuditLogs",
     "listWebhookDeliveries",
-    "listTenantAdminAuditLogs"
+    "listTenants",
+    "listTenantScopedAdmins",
+    "listTenantAdminAuditLogs",
+    "listTenantAuditLogs",
+    "listTenantLifecycle"
   ],
   "errorCodes": [
     "ACCELERATOR_SPEC_UNAVAILABLE",

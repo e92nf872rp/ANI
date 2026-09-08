@@ -19,6 +19,7 @@ from typing import Any
 
 import asyncpg
 
+from .cursor import parse_chunk_cursor
 from .rls import set_tenant_context
 
 # Minimal CJK stop-words dropped from segmented keyword queries. These are the
@@ -113,6 +114,93 @@ async def list_chunks_by_doc(
             uuid.UUID(doc_id),
             limit,
         )
+    return [dict(r) for r in rows]
+
+
+async def list_chunks_by_doc_paged(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: str,
+    kb_id: str,
+    doc_id: str,
+    chunk_type: str | None = None,
+    limit: int = 50,
+    cursor: str | None = None,
+) -> list[dict[str, Any]]:
+    """List chunks of a document with keyset pagination (SPEC §5.1 #11).
+
+    ORDER BY id ASC, cursor = last chunk id, next-page condition
+    ``id > $cursor``. Optional chunk_type filter (child | parent |
+    doc_summary) is validated by the servicer before reaching here.
+    RLS-scoped transaction.
+    """
+    async with conn.transaction():
+        await set_tenant_context(conn, tenant_id)
+        if chunk_type and cursor:
+            rows = await conn.fetch(
+                """
+                SELECT id, tenant_id, kb_id, doc_id, parent_chunk_id, chunk_type,
+                       content, parent_content, page_number, content_type,
+                       file_name, token_count, custom_metadata, created_at
+                  FROM kb_chunks
+                 WHERE kb_id = $1 AND doc_id = $2 AND chunk_type = $3
+                   AND id > $4
+                 ORDER BY id ASC
+                 LIMIT $5
+                """,
+                uuid.UUID(kb_id),
+                uuid.UUID(doc_id),
+                chunk_type,
+                parse_chunk_cursor(cursor),
+                limit,
+            )
+        elif chunk_type:
+            rows = await conn.fetch(
+                """
+                SELECT id, tenant_id, kb_id, doc_id, parent_chunk_id, chunk_type,
+                       content, parent_content, page_number, content_type,
+                       file_name, token_count, custom_metadata, created_at
+                  FROM kb_chunks
+                 WHERE kb_id = $1 AND doc_id = $2 AND chunk_type = $3
+                 ORDER BY id ASC
+                 LIMIT $4
+                """,
+                uuid.UUID(kb_id),
+                uuid.UUID(doc_id),
+                chunk_type,
+                limit,
+            )
+        elif cursor:
+            rows = await conn.fetch(
+                """
+                SELECT id, tenant_id, kb_id, doc_id, parent_chunk_id, chunk_type,
+                       content, parent_content, page_number, content_type,
+                       file_name, token_count, custom_metadata, created_at
+                  FROM kb_chunks
+                 WHERE kb_id = $1 AND doc_id = $2 AND id > $3
+                 ORDER BY id ASC
+                 LIMIT $4
+                """,
+                uuid.UUID(kb_id),
+                uuid.UUID(doc_id),
+                parse_chunk_cursor(cursor),
+                limit,
+            )
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT id, tenant_id, kb_id, doc_id, parent_chunk_id, chunk_type,
+                       content, parent_content, page_number, content_type,
+                       file_name, token_count, custom_metadata, created_at
+                  FROM kb_chunks
+                 WHERE kb_id = $1 AND doc_id = $2
+                 ORDER BY id ASC
+                 LIMIT $3
+                """,
+                uuid.UUID(kb_id),
+                uuid.UUID(doc_id),
+                limit,
+            )
     return [dict(r) for r in rows]
 
 

@@ -13,8 +13,8 @@
 - 套餐模板 CRUD + draft/active/disabled 状态机
 - 套餐基本信息（name/description）创建后可修改（PUT /tenant-plans/{planId}）
 - 套餐限额查询（service 层 buildQuotaLimitViews 组装：store 原始行 + Core ListQuotaMeta，COALESCE 兜底为具体 total）
-- 套餐限额修改（同步存量租户，保留 approved 维度；逐租户 GetQuota→CreateQuota/PutQuota 分流）
-- 绑定套餐按限额更新租户配额（调 Core API，GetQuota→Create/Put 分流）
+- 套餐限额修改（同步存量租户，保留 approved 维度；逐租户调 Core UpsertQuota 一律 upsert）
+- 绑定套餐按限额更新租户配额（调 Core API，UpsertQuota 一律 upsert）
 - 配额元数据查询（GET /quota-meta 透传 Core resource_quota_meta）
 - 可绑定租户列表查询（GET /tenant-plans/{planId}/bindable-tenants）
 - 有租户关联的套餐不可删除
@@ -39,7 +39,7 @@
 - [x] GET `/api/v1/svc/tenant-plans`，支持 limit/cursor/status/search
 - [x] search 关键字模糊查询（匹配 name，大小写不敏感）
 - [x] items 含 id/code/name/description/status/tenant_count/created_at/updated_at，不含 quota_limits（网关 JSON 含 description；时间字段为 `YYYY-MM-DD HH:mm:ss` Asia/Shanghai，非 RFC3339）
-- [x] 响应含 total（满足筛选条件的总条数）与 next_cursor（空字符串 `""` = 已无更多；与审计列表的 JSON `null` 不同）
+- [x] 响应含 total（满足筛选条件的总条数）与 next_cursor（网关经 nullIfEmpty 将空串映射为 JSON `null` = 已无更多；与审计列表一致）
 - [x] 软删除套餐不出现
 - [x] Typecheck/lint passes
 
@@ -96,7 +96,7 @@
 - [x] resource_type 未注册或 enabled=false → 422 `QUOTA_RESOURCE_NOT_REGISTERED`
 - [x] 任意状态（draft/active/disabled）均可修改限额
 - [x] 修改 plan_quota_limits 表中该套餐的 total（落库为具体数值）
-- [x] 同步存量租户：查询 tenants WHERE plan_id=planId AND status!='disabled'，逐租户收集需更新的维度，逐租户调 Core API——先 `GET /api/v1/admin/tenants/{tenant_id}/quota` 判断配额行是否存在，不存在则 `POST`（新建配额行 used/reserved=0），已存在则 `PUT`（修改 total，自动收紧）
+- [x] 同步存量租户：查询 tenants WHERE plan_id=planId AND status!='disabled'，逐租户收集需更新的维度，逐租户调 Core `UpsertQuota`（一律 upsert，不再先 GET 判断存在性）
 - [x] 已 approved 配额变更申请的维度保留不覆盖（跳过 Core API 调用）
 - [x] 不影响已有资源：新限额低于 used+reserved 时自动收紧为 used+reserved，已有资源继续运行，不会强制停止或回收
 - [x] Core API 同步失败时写 `tenant.quota_init_failed` 审计并异步重试（最多 3 次，指数退避 1s/2s/4s），不阻塞限额修改成功响应
@@ -113,7 +113,7 @@
 - [x] 租户已 disabled 返回 409 `TENANT_STATE_INVALID`
 - [x] 读 plan_quota_limits 逐维度：total 非 NULL 时 total=total；为 NULL 时 total=default_quota（service 层 buildQuotaLimitViews 组装兜底）
 - [x] 已 approved 配额变更申请的维度保留不覆盖（跳过 Core API 调用）
-- [x] 调 Core API 下发配额：先查 `GET /api/v1/admin/tenants/{tenant_id}/quota` 判断配额行是否存在——不存在则 `POST`（新建配额行，used/reserved 初始 0），已存在则 `PUT`（修改 total，自动收紧）
+- [x] 调 Core `UpsertQuota` 下发配额（一律 upsert，不再先 GET 判断存在性；自动收紧）
 - [x] 同步更新 tenants.plan_id（若与当前不同）；Core 同步失败时 best-effort 回滚 plan_id（回滚失败也返回错误）
 - [x] 不影响已有资源：更换套餐后已创建实例继续运行；新 total < used+reserved 时自动收紧为 used+reserved，不会强制停止或回收
 - [x] 本端点直接修改配额，不走审批流程
@@ -174,10 +174,10 @@
 
 - FR-1: 系统必须支持套餐 CRUD，code 全局唯一（partial unique index WHERE is_deleted=FALSE），状态 draft/active/disabled
 - FR-2: 系统必须支持套餐限额查询，service 层 buildQuotaLimitViews 组装：store.GetQuotaLimits 原始行 + Core ListQuotaMeta；历史 NULL 用 default_quota 兜底为具体 total（并可回写）；Create/PUT 写入侧 total=null 一律物化为 default_quota 落库
-- FR-3: 系统必须支持套餐限额修改（PUT），任意状态均可修改，修改后自动同步存量租户（保留 approved 维度；逐租户 GetQuota→CreateQuota/PutQuota 分流；Core 失败异步重试不阻塞；成功响应不含同步计数）
+- FR-3: 系统必须支持套餐限额修改（PUT），任意状态均可修改，修改后自动同步存量租户（保留 approved 维度；逐租户调 Core UpsertQuota 一律 upsert；Core 失败异步重试不阻塞；成功响应不含同步计数）
 - FR-4: 套餐模板字段（name/description）创建后可通过 PUT /tenant-plans/{planId} 修改（可选字段语义：未设置=不更新，空串=清空；idempotency_key 可选）
 - FR-5: 有租户关联（status!='disabled'）的套餐不可删除（409 TENANT_PLAN_IN_USE）
-- FR-6: 系统必须支持绑定套餐更新配额，读 plan_quota_limits 收集维度后逐租户调 Core API（GetQuota→Create/Put 分流），保留 approved 维度；Core 失败 best-effort 回滚 plan_id
+- FR-6: 系统必须支持绑定套餐更新配额，读 plan_quota_limits 收集维度后逐租户调 Core `UpsertQuota`（一律 upsert），保留 approved 维度；Core 失败 best-effort 回滚 plan_id
 - FR-7: 状态转换：draft→active（activate）、active→disabled（disable）、disabled→active（activate）
 - FR-8: 系统必须支持配额元数据查询（GET /quota-meta），透传 Core resource_quota_meta，无缓存
 - FR-9: 系统必须支持可绑定租户列表查询（GET /tenant-plans/{planId}/bindable-tenants），排除已停用租户和已绑定该套餐的租户

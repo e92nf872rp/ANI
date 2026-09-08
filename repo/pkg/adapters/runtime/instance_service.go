@@ -30,6 +30,12 @@ type LocalInstanceService struct {
 	storage      instanceStorageBinder
 	sandbox      ports.SandboxRuntime
 	ops          ports.WorkloadInstanceOps
+	// gpuSpecs resolves /gpu-specs and validates spec_id during resize.
+	// nil means GPU spec validation for resize is skipped.
+	gpuSpecs ports.GPUSpecService
+	// gpuInventory reports per-spec tenant availability during resize.
+	// nil means tenant-level spec availability is skipped.
+	gpuInventory ports.GPUInventory
 	// quotaService performs TCC Cancel+Release on Delete (SPEC §5.1).
 	// nil means GPU quota is disabled.
 	quotaService ports.QuotaService
@@ -70,6 +76,18 @@ func WithInstanceResourceResolver(resources ports.WorkloadInstanceResourceResolv
 func WithSandboxRuntime(sandbox ports.SandboxRuntime) InstanceServiceOption {
 	return func(service *LocalInstanceService) {
 		service.sandbox = sandbox
+	}
+}
+
+func WithInstanceGPUSpecService(gpuSpecs ports.GPUSpecService) InstanceServiceOption {
+	return func(service *LocalInstanceService) {
+		service.gpuSpecs = gpuSpecs
+	}
+}
+
+func WithInstanceGPUInventory(gpuInventory ports.GPUInventory) InstanceServiceOption {
+	return func(service *LocalInstanceService) {
+		service.gpuInventory = gpuInventory
 	}
 }
 
@@ -146,6 +164,9 @@ func (s *LocalInstanceService) Create(ctx context.Context, request ports.Workloa
 		return ports.WorkloadInstanceCreateResult{}, ports.ErrNotConfigured
 	}
 	var resolvedResourceRefs []string
+	if s.resources == nil && hasExplicitInstanceNetworkReferences(request.Spec.Network) {
+		return ports.WorkloadInstanceCreateResult{}, fmt.Errorf("%w: instance network resolver is not configured", ports.ErrFailedPrecondition)
+	}
 	if s.resources != nil {
 		resolved, err := s.resources.ResolveCreate(ctx, ports.WorkloadResourceResolveRequest{
 			TenantID: request.Spec.TenantID,
@@ -711,6 +732,7 @@ func (s *LocalInstanceService) Resize(ctx context.Context, request ports.Workloa
 		InstanceID:      request.InstanceID,
 		Action:          ports.WorkloadLifecycleResize,
 		Resources:       request.Resources,
+		SpecID:          request.SpecID,
 		UserID:          request.UserID,
 		PermissionProof: request.PermissionProof,
 		RequestedAt:     request.RequestedAt,
@@ -825,6 +847,10 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 	if err := validateLifecycleIntent(record, request); err != nil {
 		return ports.WorkloadInstanceRecord{}, err
 	}
+	resizeGPUSpec, err := s.resolveResizeGPUSpec(ctx, record, request)
+	if err != nil {
+		return ports.WorkloadInstanceRecord{}, err
+	}
 	requestFingerprint := ""
 	if s.operations != nil {
 		requestFingerprint, err = lifecycleIntentFingerprint(request)
@@ -850,7 +876,7 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 		return ports.WorkloadInstanceRecord{}, err
 	}
 	previousState := record.Status.State
-	precheck := lifecyclePrecheck(record, request, next)
+	precheck := lifecyclePrecheck(record, request, next, s.volumeOccupancyConflict(ctx, record, request))
 	if requestFingerprint != "" {
 		precheck.details["request_fingerprint"] = requestFingerprint
 	}
@@ -988,6 +1014,12 @@ func (s *LocalInstanceService) applyLifecycle(ctx context.Context, request ports
 		record.Container = rollback
 	}
 	applyApprovedLifecycleSummary(&record, request)
+	if resizeGPUSpec != nil {
+		record.Compute.SpecID = resizeGPUSpec.ID
+		record.Compute.GPUType = resizeGPUSpec.GPUType
+		record.Compute.GPUShares = resizeGPUSpec.Shares
+		record.Compute.GPUMBPerShare = resizeGPUSpec.MBPerShare
+	}
 	record.Status.State = next
 	record.Status.Reason = "lifecycle " + string(request.Action) + " requested"
 	record.Access = instanceAccessSummary(record.Kind, next)
@@ -1237,8 +1269,10 @@ func validateLifecycleIntent(record ports.WorkloadInstanceRecord, request ports.
 	}
 	switch request.Action {
 	case ports.WorkloadLifecycleResize:
-		if strings.TrimSpace(request.Resources.CPU) == "" || strings.TrimSpace(request.Resources.Memory) == "" {
-			return fmt.Errorf("%w: cpu and memory are required for resize", ports.ErrInvalid)
+		hasResource := strings.TrimSpace(request.Resources.CPU) != "" || strings.TrimSpace(request.Resources.Memory) != ""
+		hasSpec := strings.TrimSpace(request.SpecID) != ""
+		if !hasResource && !hasSpec {
+			return fmt.Errorf("%w: at least one of cpu, memory, or spec_id is required for resize", ports.ErrInvalid)
 		}
 	case ports.WorkloadLifecycleRebuild:
 		if record.Kind != ports.WorkloadKindVM {
@@ -1377,6 +1411,7 @@ func unexpectedLifecycleFields(request ports.WorkloadInstanceLifecycleRequest) [
 	present := map[string]bool{
 		"cpu":                strings.TrimSpace(request.Resources.CPU) != "",
 		"memory":             strings.TrimSpace(request.Resources.Memory) != "",
+		"spec_id":            strings.TrimSpace(request.SpecID) != "",
 		"snapshot_name":      strings.TrimSpace(request.SnapshotName) != "",
 		"snapshot_id":        strings.TrimSpace(request.SnapshotID) != "",
 		"include_data_disks": request.IncludeDataDisks != nil,
@@ -1396,7 +1431,7 @@ func unexpectedLifecycleFields(request ports.WorkloadInstanceLifecycleRequest) [
 		"duration":           request.Duration != 0,
 	}
 	allowed := map[ports.WorkloadLifecycleAction]map[string]bool{
-		ports.WorkloadLifecycleResize:                   fieldSet("cpu", "memory"),
+		ports.WorkloadLifecycleResize:                   fieldSet("cpu", "memory", "spec_id"),
 		ports.WorkloadLifecycleSnapshot:                 fieldSet("snapshot_name", "include_data_disks"),
 		ports.WorkloadLifecycleAttachVolume:             fieldSet("volume_id", "mount_path", "read_only"),
 		ports.WorkloadLifecycleDetachVolume:             fieldSet("volume_id"),
@@ -1460,8 +1495,12 @@ func sandboxCreateReason(instance ports.SandboxInstanceStatus) string {
 func applyApprovedLifecycleSummary(record *ports.WorkloadInstanceRecord, request ports.WorkloadInstanceLifecycleRequest) {
 	switch request.Action {
 	case ports.WorkloadLifecycleResize:
-		record.Compute.CPU = strings.TrimSpace(request.Resources.CPU)
-		record.Compute.Memory = strings.TrimSpace(request.Resources.Memory)
+		if cpu := strings.TrimSpace(request.Resources.CPU); cpu != "" {
+			record.Compute.CPU = cpu
+		}
+		if memory := strings.TrimSpace(request.Resources.Memory); memory != "" {
+			record.Compute.Memory = memory
+		}
 	case ports.WorkloadLifecycleScale:
 		if record.Container != nil && request.Replicas != nil {
 			record.Container.Replicas = *request.Replicas
@@ -1499,6 +1538,57 @@ func applyApprovedLifecycleSummary(record *ports.WorkloadInstanceRecord, request
 	case ports.WorkloadLifecycleSetTerminationProtection:
 		record.Lifecycle.TerminationProtection = *request.Enabled
 	}
+}
+
+// resolveResizeGPUSpec validates the resize spec_id against the configured GPU
+// spec service and returns the resolved spec (nil when not a spec resize). It
+// guards against rolling rebuilds stuck on insufficient Volcano quota by
+// rejecting unavailable specs before they reach the executor.
+func (s *LocalInstanceService) resolveResizeGPUSpec(ctx context.Context, record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceLifecycleRequest) (*ports.GPUSpec, error) {
+	if request.Action != ports.WorkloadLifecycleResize {
+		return nil, nil
+	}
+	specID := strings.TrimSpace(request.SpecID)
+	if specID == "" {
+		return nil, nil
+	}
+	if s.gpuSpecs == nil {
+		return nil, fmt.Errorf("%w: gpu spec service is not configured", ports.ErrNotConfigured)
+	}
+	spec, err := s.gpuSpecs.GetGPUSpec(ctx, specID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: gpu spec %q is not available for resize", ports.ErrInvalid, specID)
+	}
+	if !spec.Available {
+		return nil, fmt.Errorf("%w: gpu spec %q is not available for resize", ports.ErrConflict, specID)
+	}
+	if record.Compute.SpecID != "" && strings.EqualFold(strings.TrimSpace(record.Compute.SpecID), specID) {
+		return nil, fmt.Errorf("%w: instance already runs gpu spec %q", ports.ErrConflict, specID)
+	}
+	if s.gpuInventory != nil {
+		if unavailable := specUnavailableForTenant(s.gpuInventory, ctx, specID, request.TenantID); unavailable != "" {
+			return nil, fmt.Errorf("%w: %s", ports.ErrConflict, unavailable)
+		}
+	}
+	return &spec, nil
+}
+
+// specUnavailableForTenant returns a non-empty reason when the target spec is
+// reported unavailable/full for the tenant; empty means it can proceed.
+func specUnavailableForTenant(inventory ports.GPUInventory, ctx context.Context, specID, tenantID string) string {
+	availability, err := inventory.ListSpecAvailability(ctx, tenantID)
+	if err != nil {
+		return ""
+	}
+	for _, item := range availability {
+		if strings.EqualFold(item.SpecID, specID) {
+			if item.Status != ports.GPUSpecStatusAvailable {
+				return fmt.Sprintf("gpu spec %q is %s for tenant quota or devices", specID, item.Status)
+			}
+			return ""
+		}
+	}
+	return ""
 }
 
 func removeStorageResource(items []ports.WorkloadStorageAttachment, resourceType, resourceID string) []ports.WorkloadStorageAttachment {
@@ -1724,7 +1814,7 @@ type lifecyclePrecheckResult struct {
 	details       map[string]any
 }
 
-func lifecyclePrecheck(record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceLifecycleRequest, next ports.WorkloadState) lifecyclePrecheckResult {
+func lifecyclePrecheck(record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceLifecycleRequest, next ports.WorkloadState, occupancy *volumeOccupancy) lifecyclePrecheckResult {
 	details := map[string]any{
 		"allowed":                true,
 		"action":                 string(request.Action),
@@ -1768,6 +1858,11 @@ func lifecyclePrecheck(record ports.WorkloadInstanceRecord, request ports.Worklo
 				return blockedLifecyclePrecheck(details, "volume_not_attached", "volume is not attached")
 			}
 		}
+	}
+	if occupancy != nil {
+		details["volume_id"] = occupancy.volumeID
+		return blockedLifecyclePrecheck(details, "volume_occupied_by_active_instance",
+			fmt.Sprintf("volume %q is occupied by instance %q (%s)", occupancy.volumeID, occupancy.consumer.InstanceID, occupancy.consumer.State))
 	}
 	if request.Action == ports.WorkloadLifecycleAttachFilesystem || request.Action == ports.WorkloadLifecycleDetachFilesystem {
 		filesystemID := strings.TrimSpace(request.FilesystemID)
@@ -1825,6 +1920,82 @@ func blockedLifecyclePrecheck(details map[string]any, reason string, message str
 		retryEligible: false,
 		details:       details,
 	}
+}
+
+// volumeOccupancy is a conservative RWO block-volume conflict found during
+// lifecycle precheck: volumeID is already referenced by another active
+// (pending/provisioning/starting/running/stopping) instance.
+type volumeOccupancy struct {
+	volumeID string
+	consumer StorageConsumer
+}
+
+// volumeOccupancyConflict implements the conservative RWO precheck
+// (INSTANCE-RWO-PRECHECK-B) for lifecycle actions:
+//   - attach_volume: the target volume must not be held by another active
+//     instance;
+//   - start/resume: a stopped instance may have lost its volumes to another
+//     instance while it was stopped; starting would multi-attach the RWO
+//     volume across nodes, so the start is refused until the volume is free.
+//
+// Filesystem (RWX) attachments are shared by design and never conflict here.
+// The instance itself is excluded (start is legal from transient active
+// states, and attach on a running instance does not yet reference the volume
+// in the store). Store failures fail open: the Kubernetes Multi-Attach
+// controller remains the concurrency backstop.
+func (s *LocalInstanceService) volumeOccupancyConflict(ctx context.Context, record ports.WorkloadInstanceRecord, request ports.WorkloadInstanceLifecycleRequest) *volumeOccupancy {
+	if s.store == nil {
+		return nil
+	}
+	var volumeIDs []string
+	switch request.Action {
+	case ports.WorkloadLifecycleAttachVolume:
+		volumeIDs = []string{strings.TrimSpace(request.VolumeID)}
+	case ports.WorkloadLifecycleStart, ports.WorkloadLifecycleResume:
+		volumeIDs = recordVolumeIDs(record)
+	default:
+		return nil
+	}
+	for _, volumeID := range volumeIDs {
+		if volumeID == "" {
+			continue
+		}
+		consumers, err := ListStorageConsumers(ctx, s.store, record.TenantID, "volume", volumeID)
+		if err != nil {
+			continue
+		}
+		for _, consumer := range consumers {
+			if consumer.InstanceID == record.InstanceID {
+				continue
+			}
+			return &volumeOccupancy{volumeID: volumeID, consumer: consumer}
+		}
+	}
+	return nil
+}
+
+// recordVolumeIDs collects the distinct block-volume IDs referenced by the
+// record's status storage and requested storage attachments.
+func recordVolumeIDs(record ports.WorkloadInstanceRecord) []string {
+	ids := make([]string, 0)
+	seen := map[string]struct{}{}
+	for _, attachments := range [][]ports.WorkloadStorageAttachment{record.Status.Storage, record.StorageAttachments} {
+		for _, attachment := range attachments {
+			if attachment.ResourceType != "volume" {
+				continue
+			}
+			id := strings.TrimSpace(attachment.ResourceID)
+			if id == "" {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 func terminationProtectedAction(action ports.WorkloadLifecycleAction) bool {
