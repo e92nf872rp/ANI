@@ -54,6 +54,14 @@ func (r quotaFakeRow) Scan(dest ...any) error {
 			*ptr = r.values[i].([]byte)
 		case *uuid.UUID:
 			*ptr = r.values[i].(uuid.UUID)
+		case **uuid.UUID:
+			if r.values[i] == nil {
+				*ptr = nil
+			} else if id, ok := r.values[i].(uuid.UUID); ok {
+				*ptr = &id
+			} else {
+				*ptr = r.values[i].(*uuid.UUID)
+			}
 		default:
 			return ports.ErrUnsupported
 		}

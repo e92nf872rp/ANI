@@ -89,9 +89,57 @@
       "scope": "scope:users:read"
     },
     {
+      "operationId": "listTenants",
+      "method": "GET",
+      "path": "/admin/tenants",
+      "scope": "scope:tenant:read"
+    },
+    {
+      "operationId": "createTenant",
+      "method": "POST",
+      "path": "/admin/tenants",
+      "scope": "scope:tenant:write"
+    },
+    {
       "operationId": "getTenant",
       "method": "GET",
       "path": "/admin/tenants/{tenant_id}",
+      "scope": "scope:tenant:read"
+    },
+    {
+      "operationId": "updateTenant",
+      "method": "PUT",
+      "path": "/admin/tenants/{tenant_id}",
+      "scope": "scope:tenant:write"
+    },
+    {
+      "operationId": "getTenantAuth",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/auth",
+      "scope": "scope:tenant:read"
+    },
+    {
+      "operationId": "updateTenantAuth",
+      "method": "PUT",
+      "path": "/admin/tenants/{tenant_id}/auth",
+      "scope": "scope:tenant:write"
+    },
+    {
+      "operationId": "disableTenant",
+      "method": "POST",
+      "path": "/admin/tenants/{tenant_id}/disable",
+      "scope": "scope:tenant:write"
+    },
+    {
+      "operationId": "freezeTenant",
+      "method": "POST",
+      "path": "/admin/tenants/{tenant_id}/freeze",
+      "scope": "scope:tenant:write"
+    },
+    {
+      "operationId": "listTenantLifecycle",
+      "method": "GET",
+      "path": "/admin/tenants/{tenant_id}/lifecycle",
       "scope": "scope:tenant:read"
     },
     {
@@ -147,6 +195,12 @@
       "method": "GET",
       "path": "/admin/tenants/{tenant_id}/roles",
       "scope": "scope:users:read"
+    },
+    {
+      "operationId": "unfreezeTenant",
+      "method": "POST",
+      "path": "/admin/tenants/{tenant_id}/unfreeze",
+      "scope": "scope:tenant:write"
     },
     {
       "operationId": "lookupTenantUser",
@@ -2096,9 +2150,18 @@
     "StorageVolumeUnmountRequest",
     "TaskListResponse",
     "Tenant",
+    "TenantAuthConfig",
+    "TenantAuthSummary",
+    "TenantAuthUpdateRequest",
+    "TenantCreateRequest",
+    "TenantLifecycleEntry",
+    "TenantLifecycleListResponse",
+    "TenantListItem",
+    "TenantListResponse",
     "TenantPlanUpdateRequest",
     "TenantSummary",
     "TenantSummaryList",
+    "TenantUpdateRequest",
     "TenantUser",
     "TenantUserListResponse",
     "TenantUserPermissions",
@@ -2205,6 +2268,8 @@
   "cursorPaginationOperations": [
     "listPlatformUsers",
     "listTenantUsers",
+    "listTenants",
+    "listTenantLifecycle",
     "listStorageBuckets",
     "listBucketObjects",
     "listEncryptionKeys",

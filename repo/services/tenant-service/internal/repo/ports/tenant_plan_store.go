@@ -135,6 +135,13 @@ type TenantPlanListResult struct {
 	NextCursor string               // 下一页游标；空串 = 已无更多数据
 }
 
+// AvailableTenantPlan 是创建租户向导可选套餐摘要（仅 status=active；不分页）。
+type AvailableTenantPlan struct {
+	ID   uuid.UUID
+	Code string
+	Name string
+}
+
 // BoundTenant 表示绑定/可绑定套餐的租户摘要（由 Core SDK 填充，不再由 store 查 tenants）。
 type BoundTenant struct {
 	ID          uuid.UUID
@@ -166,6 +173,14 @@ type TenantPlanStore interface {
 	// List 按过滤条件查询未删除的套餐列表，使用游标分页（limit + cursor + next_cursor）。
 	// 返回 TenantPlanListItem（不含 quota_limits，需另调 GetQuotaLimits + Core meta 组装视图）。
 	List(ctx context.Context, filter TenantPlanListFilter) (TenantPlanListResult, error)
+
+	// ListActivePlans 返回全部未删除且 status=active 的套餐摘要（不分页；按 created_at DESC, id DESC）。
+	// 供创建租户向导 GET /tenants/available-plans；空切片合法。
+	ListActivePlans(ctx context.Context) ([]AvailableTenantPlan, error)
+
+	// MapPlanCodes 按 plan_id 批量查询 code（WHERE id = ANY($1) AND is_deleted=FALSE）；缺失 id 不出现在 map。
+	// 供 ListTenants / GetTenantDetail 装配 plan_code。
+	MapPlanCodes(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error)
 
 	// Update 更新套餐的可变字段（name / description）。
 	// PUT /tenant-plans/{planId} 修改 name/description（nil=不更新，空串=清空）；亦用于 service 层内部。
