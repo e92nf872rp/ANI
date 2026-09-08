@@ -34,13 +34,13 @@ func NewPostgresBillingStore(db *pgxpool.Pool) ports.BillingStore {
 	return &PostgresBillingStore{db: db}
 }
 
-// ListInvoicesByTenant 返回该租户全部账单（issued_at 倒序）。
+// ListInvoicesByTenant 返回该租户全部账单（issued_at 倒序；软删行不返回）。
 func (s *PostgresBillingStore) ListInvoicesByTenant(ctx context.Context, tenantID uuid.UUID) ([]ports.BillingInvoice, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT id, tenant_id, period, no, amount_usd, status, due_date,
 		       issued_at, settled_at, credited_at, idempotency_key, created_at
 		FROM billing_invoices
-		WHERE tenant_id = $1
+		WHERE tenant_id = $1 AND deleted_at IS NULL
 		ORDER BY issued_at DESC, created_at DESC
 	`, tenantID)
 	if err != nil {
@@ -62,13 +62,13 @@ func (s *PostgresBillingStore) ListInvoicesByTenant(ctx context.Context, tenantI
 	return out, nil
 }
 
-// GetInvoiceByPeriod 返回该租户该账期的账单；无账单返回 nil（不视为错误）。
+// GetInvoiceByPeriod 返回该租户该账期的活跃账单（软删行视为无账单，可重新出账）；无账单返回 nil（不视为错误）。
 func (s *PostgresBillingStore) GetInvoiceByPeriod(ctx context.Context, tenantID uuid.UUID, period string) (*ports.BillingInvoice, error) {
 	inv, err := queryBillingInvoice(ctx, s.db, `
 		SELECT id, tenant_id, period, no, amount_usd, status, due_date,
 		       issued_at, settled_at, credited_at, idempotency_key, created_at
 		FROM billing_invoices
-		WHERE tenant_id = $1 AND period = $2
+		WHERE tenant_id = $1 AND period = $2 AND deleted_at IS NULL
 	`, tenantID, period)
 	if err != nil {
 		return nil, err
@@ -76,13 +76,13 @@ func (s *PostgresBillingStore) GetInvoiceByPeriod(ctx context.Context, tenantID 
 	return inv, nil
 }
 
-// GetInvoice 按主键查账单；不存在返回 ErrBillingInvoiceNotFound。
+// GetInvoice 按 id 查活跃账单（软删行不可见，404）；供结清/授信/删除预读组装流水摘要。
 func (s *PostgresBillingStore) GetInvoice(ctx context.Context, id uuid.UUID) (*ports.BillingInvoice, error) {
 	inv, err := queryBillingInvoice(ctx, s.db, `
 		SELECT id, tenant_id, period, no, amount_usd, status, due_date,
 		       issued_at, settled_at, credited_at, idempotency_key, created_at
 		FROM billing_invoices
-		WHERE id = $1
+		WHERE id = $1 AND deleted_at IS NULL
 	`, id)
 	if err != nil {
 		return nil, err
@@ -90,7 +90,7 @@ func (s *PostgresBillingStore) GetInvoice(ctx context.Context, id uuid.UUID) (*p
 	return inv, nil
 }
 
-// CountInvoicesByNoPrefix 统计账单号前缀匹配数（账单号 seq 生成用）。
+// CountInvoicesByNoPrefix 统计账单号前缀匹配数（账单号 seq 生成用；含软删行——历史单号不复用）。
 func (s *PostgresBillingStore) CountInvoicesByNoPrefix(ctx context.Context, prefix string) (int, error) {
 	var count int
 	if err := s.db.QueryRow(ctx, `
@@ -175,10 +175,10 @@ func (s *PostgresBillingStore) UpdateInvoiceStatus(ctx context.Context, id uuid.
 		id, status, settledAt, creditedAt, ports.BillingInvoiceIssued)
 	if err != nil {
 		if errors.Is(err, ports.ErrBillingInvoiceNotFound) {
-			// 未命中时区分 404（账单不存在）与 409（状态不满足 CAS）
+			// 未命中时区分 404（账单不存在或已删除——软删行不可见）与 409（状态不满足 CAS）
 			var exists bool
 			if existsErr := tx.QueryRow(ctx,
-				`SELECT EXISTS(SELECT 1 FROM billing_invoices WHERE id = $1)`, id).Scan(&exists); existsErr != nil {
+				`SELECT EXISTS(SELECT 1 FROM billing_invoices WHERE id = $1 AND deleted_at IS NULL)`, id).Scan(&exists); existsErr != nil {
 				return nil, fmt.Errorf("check billing invoice exists: %w", existsErr)
 			}
 			if !exists {
@@ -207,7 +207,73 @@ func (s *PostgresBillingStore) casUpdateInvoice(ctx context.Context, q billingQu
 		if errors.Is(err, ports.ErrBillingInvoiceNotFound) {
 			var exists bool
 			if existsErr := s.db.QueryRow(ctx,
-				`SELECT EXISTS(SELECT 1 FROM billing_invoices WHERE id = $1)`, id).Scan(&exists); existsErr != nil {
+				`SELECT EXISTS(SELECT 1 FROM billing_invoices WHERE id = $1 AND deleted_at IS NULL)`, id).Scan(&exists); existsErr != nil {
+				return nil, fmt.Errorf("check billing invoice exists: %w", existsErr)
+			}
+			if !exists {
+				return nil, ports.ErrBillingInvoiceNotFound
+			}
+			return nil, ports.ErrBillingStateConflict
+		}
+		return nil, err
+	}
+	return inv, nil
+}
+
+// SoftDeleteInvoice 软删除账单（deleted_at 标记，行保留可审计）；
+// 仅活跃 issued 行可删：CAS 前提 status='issued' AND deleted_at IS NULL；
+// 终态（settled/credited）→ ErrBillingStateConflict；不存在或已删除 → ErrBillingInvoiceNotFound
+// （重复删除 404 幂等无害）。op 非 nil 时与软删同一事务落一条 invoice.deleted 流水；
+// CAS 失败（404/409）则事务回滚、不落流水。成功返回删除前账单快照（status 仍为 issued）。
+func (s *PostgresBillingStore) SoftDeleteInvoice(ctx context.Context, id uuid.UUID, at time.Time, op *ports.BillingOperationLogInput) (*ports.BillingInvoice, error) {
+	// 步骤 1：无流水要求时走直写路径（条件更新 + 404/409 区分）
+	if op == nil {
+		return s.softDeleteInvoiceDirect(ctx, s.db, id, at)
+	}
+
+	// 步骤 2：事务路径——CAS 软删 + invoice.deleted 流水原子落库；
+	// CAS 未命中（404/409）在事务内甄别后回滚，不落流水。
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin billing invoice delete transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) // 已 Commit 时为 no-op
+
+	inv, err := softDeleteBillingInvoice(ctx, tx, id, at)
+	if err != nil {
+		if errors.Is(err, ports.ErrBillingInvoiceNotFound) {
+			// 未命中时甄别：活跃行不存在但终态行存在 → 409；活跃行不存在（含已删除）→ 404
+			var exists bool
+			if existsErr := tx.QueryRow(ctx,
+				`SELECT EXISTS(SELECT 1 FROM billing_invoices WHERE id = $1 AND deleted_at IS NULL)`, id).Scan(&exists); existsErr != nil {
+				return nil, fmt.Errorf("check billing invoice exists: %w", existsErr)
+			}
+			if !exists {
+				return nil, ports.ErrBillingInvoiceNotFound
+			}
+			return nil, ports.ErrBillingStateConflict
+		}
+		return nil, err
+	}
+	period, refID := inv.Period, inv.ID
+	if err := insertBillingOperationLog(ctx, tx, inv.TenantID, &period, &refID, op); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit billing invoice delete transaction: %w", err)
+	}
+	return inv, nil
+}
+
+// softDeleteInvoiceDirect 直写路径的软删（无事务流水要求时）；未命中区分 404 / 409：
+// 活跃行（未删除）不存在 → 已删除返回 404、终态返回 409。
+func (s *PostgresBillingStore) softDeleteInvoiceDirect(ctx context.Context, q billingQuerier, id uuid.UUID, at time.Time) (*ports.BillingInvoice, error) {
+	inv, err := softDeleteBillingInvoice(ctx, q, id, at)
+	if err != nil {
+		if errors.Is(err, ports.ErrBillingInvoiceNotFound) {
+			var exists bool
+			if existsErr := s.db.QueryRow(ctx,
+				`SELECT EXISTS(SELECT 1 FROM billing_invoices WHERE id = $1 AND deleted_at IS NULL)`, id).Scan(&exists); existsErr != nil {
 				return nil, fmt.Errorf("check billing invoice exists: %w", existsErr)
 			}
 			if !exists {
@@ -337,12 +403,13 @@ func (s *PostgresBillingStore) ListPricing(ctx context.Context) ([]ports.Billing
 	return out, nil
 }
 
-// ListBillingTenantIDs 返回计费域有足迹（账单/调账/授信）的租户集合；
+// ListBillingTenantIDs 返回计费域有足迹（活跃账单/调账/授信）的租户集合；
+// 软删账单不算足迹（删除后无其他足迹的租户行从总览消失）；
 // tenantFilter 非 nil 时仅返回该租户（存在足迹才返回，无足迹返回空）。
 func (s *PostgresBillingStore) ListBillingTenantIDs(ctx context.Context, tenantFilter *uuid.UUID) ([]uuid.UUID, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT DISTINCT tenant_id FROM (
-			SELECT tenant_id FROM billing_invoices
+			SELECT tenant_id FROM billing_invoices WHERE deleted_at IS NULL
 			UNION
 			SELECT tenant_id FROM billing_adjustments
 			UNION
@@ -418,14 +485,30 @@ const insertBillingInvoiceSQL = `
 	          issued_at, settled_at, credited_at, idempotency_key, created_at
 `
 
-// casUpdateBillingInvoiceSQL 账单状态 CAS 迁移语句（仅 issued 可迁移；直写与事务路径共用）。
+// casUpdateBillingInvoiceSQL 账单状态 CAS 迁移语句（仅活跃 issued 行可迁移，软删行不可见；
+// 直写与事务路径共用）。
 const casUpdateBillingInvoiceSQL = `
 	UPDATE billing_invoices
 	SET status = $2, settled_at = $3, credited_at = $4
-	WHERE id = $1 AND status = $5
+	WHERE id = $1 AND status = $5 AND deleted_at IS NULL
 	RETURNING id, tenant_id, period, no, amount_usd, status, due_date,
 	          issued_at, settled_at, credited_at, idempotency_key, created_at
 `
+
+// softDeleteBillingInvoiceSQL 账单软删语句（仅活跃 issued 行可删；直写与事务路径共用）。
+const softDeleteBillingInvoiceSQL = `
+	UPDATE billing_invoices
+	SET deleted_at = $2
+	WHERE id = $1 AND status = $3 AND deleted_at IS NULL
+	RETURNING id, tenant_id, period, no, amount_usd, status, due_date,
+	          issued_at, settled_at, credited_at, idempotency_key, created_at
+`
+
+// softDeleteBillingInvoice 在给定 querier（pool 或 tx）上执行账单软删并组装快照实体；
+// CAS 未命中统一映射为 ErrBillingInvoiceNotFound（由调用方甄别 404 与 409）。
+func softDeleteBillingInvoice(ctx context.Context, q billingQuerier, id uuid.UUID, at time.Time) (*ports.BillingInvoice, error) {
+	return queryBillingInvoice(ctx, q, softDeleteBillingInvoiceSQL, id, at, ports.BillingInvoiceIssued)
+}
 
 // mapBillingInvoiceInsertErr 将账单插入错误统一映射（唯一冲突 → ErrBillingInvoiceExists）。
 func mapBillingInvoiceInsertErr(err error) error {

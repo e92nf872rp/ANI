@@ -1,9 +1,9 @@
-# TENANT-BILLING-B — 租户计费操作历史（抽屉「操作历史」Tab）
+# TENANT-BILLING-B — 租户计费操作历史（抽屉「操作历史」Tab）+ 账单软删除
 
 完成日期：2026-09-08
 对应 Sprint：Services 受控并行 PR（Core Sprint 13/14 既有事实继续有效）
 前置：TENANT-BILLING-A（5 端点计费结算）已合入本分支；本批次为同一 PR 范围内的功能追加批次（kjs-study 文档中又称 OPERATION-HISTORY 批次）。
-验证结果：契约类校验（services boundary / YAML 结构 / 语义契约 / 路由契约 / spec-split / openapi_spec_validator）全绿；单测 tenant-service（service+core）与 gateway（router+authz）全过；SDK/docs 生成物幂等零漂移；混合联调矩阵 13 用例（e30–e43）全部通过（本地 gateway/tenant-service 进程 × 测试环境 PG/Redis/auth-service，真实鉴权 401 与 operator 透传经环境库复核）。Windows 本机 `make` 聚合入口存在环境性缺陷（子 make 路径含空格、bash echo/date 不兼容），按约定直跑各底层校验脚本，`make validate-services` 聚合复核由人工补跑。未部署 K8s，不标 live/runtime ready。
+验证结果：契约类校验（services boundary / YAML 结构 / 语义契约 / 路由契约 / spec-split / openapi_spec_validator）全绿；单测 tenant-service（service+core）与 gateway（router+authz）全过；SDK/docs 生成物幂等零漂移；混合联调矩阵 13 用例（e30–e43）全部通过（本地 gateway/tenant-service 进程 × 测试环境 PG/Redis/auth-service，真实鉴权 401 与 operator 透传经环境库复核）。本批次后续追加账单软删除 `DELETE /billing/invoices/{invoiceId}`（第 7 个端点，见下方"追加范围"节），单测全过、迁移已应用测试环境 PG、混合联调 6/6 PASS（e44–e48）。Windows 本机 `make` 聚合入口存在环境性缺陷（子 make 路径含空格、bash echo/date 不兼容），按约定直跑各底层校验脚本，`make validate-services` 聚合复核由人工补跑。未部署 K8s，不标 live/runtime ready。
 
 ## 实现了什么
 
@@ -45,3 +45,30 @@
 - 与实施方案《租户计费操作历史-实施方案.md》的偏差：端点形态为 `GET /billing/operations?tenant_id=...`（query 参数，对齐既有端点风格），未做 `period/action` 过滤（原型无对应 UI 入口）；详见 `kjs-study/租户与计费用量/implementation-diff-tenant-billing.md` D12/D13。
 - 操作历史无存量追溯：上线前已发生的计费动作不补记流水（billing 为新域未上生产，实际无影响）；operator 为 user_id，显示名快照挂后续。
 - 测试报告：`kjs-study/租户与计费用量/tenant-billing-test-report.md`（门禁层补充节 + 操作历史补充矩阵）；前端接口文档：`kjs-study/租户与计费用量/tenant-billing-api.md`（3.6 节）。
+
+## 追加范围：账单软删除 `DELETE /api/v1/svc/billing/invoices/{invoiceId}`（2026-09-08 同批次追加）
+
+对应 BOSS 租户计费页「更多操作 → 删除」按钮的后端能力。第 7 个 billing 端点（6 读/写 + 1 删除）。
+
+### 语义（与产品确认的边界）
+
+- **软删除**：`deleted_at` 时间戳标记，行保留可审计；总览/对账/操作历史/预读一律不再返回该账单。
+- **仅 issued 可删**：settled/credited 终态 → 409 `BILLING_STATE_CONFLICT`；不存在或已删除 → 404 `BILLING_INVOICE_NOT_FOUND`（重复删除 404 幂等无害）。
+- **唯一键释放**：`(tenant_id, period)` 一期一单约束改为部分唯一索引（仅约束 `deleted_at IS NULL` 活跃行），删除后同账期可重新出账；账单号 seq 含软删行（历史单号不复用，重新出账为 INV-xx-02 而非复用 01）。
+- **同事务流水**：删除与 `invoice.deleted` 操作流水同一事务落库；CAS 失败（404/409）事务回滚、不落流水。删除动作计入操作历史（抽屉可见「删除账单 …（软删除，可重新出账）」）。
+- **无幂等键**：DELETE 非创建类写，重放同一 id 幂等返回 404。
+- **权限**：x-ani-authz resource=billing，action=write，boundary=platform，principal_kinds=[user]（与出账/结清一致）。
+
+### 实现要点
+
+- **契约先行**：`services/v1.yaml` 新增 `DELETE /billing/invoices/{invoiceId}`（响应 200 返回删除前账单快照，status 仍为 issued）+ proto `DeleteInvoice` RPC；pb/Services SDK 四语言/docs/api 重生成幂等零漂移。
+- **迁移** `20260908_002_billing_invoice_soft_delete.sql`（+atlas.sum）：`billing_invoices` 加 `deleted_at TIMESTAMPTZ`；原唯一约束 `billing_invoices_tenant_id_period_key` 替换为部分唯一索引 `billing_invoices_tenant_period_active_uidx`（`WHERE deleted_at IS NULL`）；`billing_operation_logs.action` CHECK 扩展 `invoice.deleted`。
+- **store**：`SoftDeleteInvoice`（CAS 软删 SQL `WHERE id=$1 AND status='issued' AND deleted_at IS NULL`；op 非 nil 时事务路径——CAS 软删 + 流水原子落库，CAS 未命中在事务内甄别 404/409 后回滚）；读路径过滤软删行（List/GetByPeriod/ListTenantIDs）；`CountInvoicesByNoPrefix` 含软删行（seq 不复用）。
+- **边界缺陷修复（本批次实现中发现并修复）**：`GetInvoice` 预读与 `casUpdateBillingInvoiceSQL`（settle/credit CAS）未排除软删行——已删除账单仍可被结清/授信，且 EXISTS 甄别会把已删除误判为 409。修复：预读与 CAS、404/409 甄别查询统一加 `deleted_at IS NULL`，删除后账单对外完全不可见（再 settle/credit → 404）；svc 单测补断言锁定该语义。
+- **gateway**：`svc.DELETE("/billing/invoices/:invoiceId", api.deleteInvoice)`，operator 透传 token user_id；fake gRPC 客户端补 `DeleteInvoice`。
+
+### 追加范围验证
+
+- 单测：svc `TestBillingDeleteInvoiceSuccessAndReissue`（删除成功快照+流水、重复删除 404、删除后不可 settle 404、同账期重新出账 INV-2609-02）、`TestBillingDeleteInvoiceConflictsAndValidation`（终态 409、404、invoice_id 缺失/非 UUID 400）；gateway `TestBillingDeleteInvoiceHandler`（200 快照 + operator 透传、409/404 错误映射）+ nil-guard 补 DELETE 路径，全 PASS。
+- 迁移已应用到测试环境 PG（SSH + `kubectl exec psql`，幂等脚本可重放）：`deleted_at` 列、部分唯一索引 `billing_invoices_tenant_period_active_uidx`、action CHECK 扩展 `invoice.deleted` 三项均已在环境库复核。
+- 混合联调 6/6 PASS（本地 gateway/tenant-service 进程 × 环境 PG 30945/Redis 30453/auth-service 30091，测试租户 tc-billing-env-test，跑前预清理/跑后复位 credit=104.6）：e48 无凭证 401 + invoiceId 非 UUID 400；e44 删除主链路（出账 INV-2606-01 → 删除 200 快照 status=issued → 总览 invoices 1→0 → 操作历史含 invoice.deleted 同事务流水）；e44b 删除后同账期重新出账 INV-2606-02（唯一键释放、seq 含软删行）；e45 重复删除 404 不落流水（流水 2→3 仅新增重出账）；e46 终态账单删除 409 不落流水；e47 已删账单再结清 404（软删行对 settle CAS 不可见）。证据存 `repo/.tmp/billing-del-report/`（不入库）。未部署 K8s，不标 live/runtime ready。

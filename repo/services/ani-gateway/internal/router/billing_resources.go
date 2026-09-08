@@ -43,7 +43,7 @@ func newBillingAPI() *billingAPI {
 	return &billingAPI{billing: tenantv1.NewBillingServiceClient(conn)}
 }
 
-// registerBilling 在 /api/v1/svc 下注册计费结算全部端点（6 个，方案 §3 + 操作历史）。
+// registerBilling 在 /api/v1/svc 下注册计费结算全部端点（7 个，方案 §3 + 操作历史 + 账单删除）。
 func registerBilling(svc *route.RouterGroup) {
 	api := newBillingAPI()
 
@@ -53,6 +53,8 @@ func registerBilling(svc *route.RouterGroup) {
 	svc.POST("/billing/invoices/generate", api.generateInvoice)
 	// 路径参数名与 Services OpenAPI 一致：{invoiceId}
 	svc.POST("/billing/invoices/:invoiceId/actions", api.invoiceAction)
+	// 账单软删除（无幂等键；重复删除同一账单 404 幂等无害）
+	svc.DELETE("/billing/invoices/:invoiceId", api.deleteInvoice)
 	svc.POST("/billing/adjustments", api.createAdjustment)
 	svc.GET("/billing/operations", api.listBillingOperations)
 }
@@ -186,6 +188,28 @@ func (api *billingAPI) invoiceAction(ctx context.Context, c *app.RequestContext)
 		return
 	}
 	// 步骤 4：返回更新后的账单
+	c.JSON(http.StatusOK, billingInvoiceJSON(res))
+}
+
+// deleteInvoice DELETE /billing/invoices/:invoiceId：账单软删除（仅 issued 可删；终态 409；重复删除 404）。
+func (api *billingAPI) deleteInvoice(ctx context.Context, c *app.RequestContext) {
+	// 步骤 1：gRPC 客户端可用性守卫
+	if api.billing == nil {
+		writeBillingError(c, http.StatusBadGateway, "GRPC_CLIENT_UNAVAILABLE", "billing grpc client unavailable")
+		return
+	}
+	// 步骤 2：调用 gRPC（无幂等键；operator = 网关透传 user_id）
+	callCtx, cancel := tenantCallCtx(ctx, c)
+	defer cancel()
+	res, err := api.billing.DeleteInvoice(callCtx, &tenantv1.DeleteInvoiceRequest{
+		InvoiceId: c.Param("invoiceId"),
+		Operator:  middleware.GetUserID(c),
+	})
+	if err != nil {
+		mapBillingError(c, err)
+		return
+	}
+	// 步骤 3：返回删除前账单快照（200）
 	c.JSON(http.StatusOK, billingInvoiceJSON(res))
 }
 

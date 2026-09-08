@@ -137,6 +137,8 @@ type fakeBillingGRPCClient struct {
 	actionErr   error
 	adjustment  *tenantv1.BillingAdjustment
 	adjustErr   error
+	deleteRes   *tenantv1.BillingInvoice
+	deleteErr   error
 	operations  *tenantv1.ListBillingOperationsResponse
 	opsErr      error
 
@@ -144,6 +146,7 @@ type fakeBillingGRPCClient struct {
 	lastGenReq      *tenantv1.GenerateInvoiceRequest
 	lastActionReq   *tenantv1.InvoiceActionRequest
 	lastAdjustReq   *tenantv1.CreateAdjustmentRequest
+	lastDeleteReq   *tenantv1.DeleteInvoiceRequest
 	lastOpsReq      *tenantv1.ListBillingOperationsRequest
 }
 
@@ -201,6 +204,17 @@ func (f *fakeBillingGRPCClient) CreateAdjustment(_ context.Context, in *tenantv1
 	return &tenantv1.BillingAdjustment{}, nil
 }
 
+func (f *fakeBillingGRPCClient) DeleteInvoice(_ context.Context, in *tenantv1.DeleteInvoiceRequest, _ ...grpc.CallOption) (*tenantv1.BillingInvoice, error) {
+	f.lastDeleteReq = in
+	if f.deleteErr != nil {
+		return nil, f.deleteErr
+	}
+	if f.deleteRes != nil {
+		return f.deleteRes, nil
+	}
+	return &tenantv1.BillingInvoice{}, nil
+}
+
 func (f *fakeBillingGRPCClient) ListBillingOperations(_ context.Context, in *tenantv1.ListBillingOperationsRequest, _ ...grpc.CallOption) (*tenantv1.ListBillingOperationsResponse, error) {
 	f.lastOpsReq = in
 	if f.opsErr != nil {
@@ -226,6 +240,7 @@ func newBillingTestServer(client tenantv1.BillingServiceClient) *server.Hertz {
 	svc.GET("/billing/overview/export", api.exportBillingOverview)
 	svc.POST("/billing/invoices/generate", api.generateInvoice)
 	svc.POST("/billing/invoices/:invoiceId/actions", api.invoiceAction)
+	svc.DELETE("/billing/invoices/:invoiceId", api.deleteInvoice)
 	svc.POST("/billing/adjustments", api.createAdjustment)
 	svc.GET("/billing/operations", api.listBillingOperations)
 	return h
@@ -297,6 +312,57 @@ func TestBillingGenerateInvoiceHandlerConflictPassthrough(t *testing.T) {
 	}
 }
 
+func TestBillingDeleteInvoiceHandler(t *testing.T) {
+	fake := &fakeBillingGRPCClient{deleteRes: &tenantv1.BillingInvoice{
+		Id: "inv-1", No: "INV-2609-01", Period: "2026-09", AmountUsd: 10, Status: "issued",
+	}}
+	h := newBillingTestServer(fake)
+
+	// 删除成功 → 200 返回删除前账单快照（status 仍 issued）
+	resp := ut.PerformRequest(h.Engine, http.MethodDelete, "/api/v1/svc/billing/invoices/inv-1", nil).Result()
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode(), resp.Body())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(resp.Body(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["id"] != "inv-1" || body["no"] != "INV-2609-01" || body["status"] != "issued" {
+		t.Fatalf("snapshot body = %+v", body)
+	}
+	if fake.lastDeleteReq == nil || fake.lastDeleteReq.InvoiceId != "inv-1" || fake.lastDeleteReq.Operator != "user-boss" {
+		t.Fatalf("delete req passthrough = %+v", fake.lastDeleteReq)
+	}
+
+	// 终态冲突 → 409 BILLING_STATE_CONFLICT
+	conflict := &fakeBillingGRPCClient{deleteErr: status.Error(codes.FailedPrecondition,
+		"BILLING_STATE_CONFLICT: only issued invoices can be deleted")}
+	resp = ut.PerformRequest(newBillingTestServer(conflict).Engine, http.MethodDelete,
+		"/api/v1/svc/billing/invoices/inv-1", nil).Result()
+	if resp.StatusCode() != http.StatusConflict {
+		t.Fatalf("conflict status = %d, want 409; body=%s", resp.StatusCode(), resp.Body())
+	}
+	var conflictBody map[string]any
+	if err := json.Unmarshal(resp.Body(), &conflictBody); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if conflictBody["code"] != "BILLING_STATE_CONFLICT" {
+		t.Fatalf("conflict code = %v", conflictBody["code"])
+	}
+
+	// 不存在 / 已删除 → 404 BILLING_INVOICE_NOT_FOUND
+	notFound := &fakeBillingGRPCClient{deleteErr: status.Error(codes.NotFound,
+		"BILLING_INVOICE_NOT_FOUND: invoice not found or already deleted")}
+	resp = ut.PerformRequest(newBillingTestServer(notFound).Engine, http.MethodDelete,
+		"/api/v1/svc/billing/invoices/inv-x", nil).Result()
+	if resp.StatusCode() != http.StatusNotFound {
+		t.Fatalf("not-found status = %d, want 404; body=%s", resp.StatusCode(), resp.Body())
+	}
+	if !strings.Contains(string(resp.Body()), "BILLING_INVOICE_NOT_FOUND") {
+		t.Fatalf("not-found body = %s", resp.Body())
+	}
+}
+
 func TestBillingHandlerNilClientGuard(t *testing.T) {
 	h := newBillingTestServer(nil) // billing client 不可用（newBillingAPI 连接失败场景）
 	paths := []struct{ method, path string }{
@@ -304,6 +370,7 @@ func TestBillingHandlerNilClientGuard(t *testing.T) {
 		{http.MethodGet, "/api/v1/svc/billing/overview/export"},
 		{http.MethodPost, "/api/v1/svc/billing/invoices/generate"},
 		{http.MethodPost, "/api/v1/svc/billing/invoices/inv-1/actions"},
+		{http.MethodDelete, "/api/v1/svc/billing/invoices/inv-1"},
 		{http.MethodPost, "/api/v1/svc/billing/adjustments"},
 		{http.MethodGet, "/api/v1/svc/billing/operations"},
 	}

@@ -23,6 +23,7 @@ import (
 type fakeBillingStore struct {
 	invoices    map[uuid.UUID]*ports.BillingInvoice
 	byPeriod    map[string]*ports.BillingInvoice // key: tenantID|period
+	deleted     []*ports.BillingInvoice          // 软删行（no 计数仍含——历史单号不复用）
 	adjustments []ports.BillingAdjustment
 	credits     map[uuid.UUID]float64
 	pricing     []ports.BillingPricing
@@ -76,6 +77,11 @@ func (f *fakeBillingStore) GetInvoice(_ context.Context, id uuid.UUID) (*ports.B
 func (f *fakeBillingStore) CountInvoicesByNoPrefix(_ context.Context, prefix string) (int, error) {
 	n := 0
 	for _, inv := range f.invoices {
+		if strings.HasPrefix(inv.No, prefix) {
+			n++
+		}
+	}
+	for _, inv := range f.deleted { // 软删行计入 seq（历史单号不复用，与真实 SQL 一致）
 		if strings.HasPrefix(inv.No, prefix) {
 			n++
 		}
@@ -146,6 +152,32 @@ func (f *fakeBillingStore) UpdateInvoiceStatus(_ context.Context, id uuid.UUID, 
 		})
 	}
 	cp := *inv
+	return &cp, nil
+}
+
+// SoftDeleteInvoice 内存版软删（fake 语义：活跃 issued 行移出 invoices/byPeriod 并存入 deleted；
+// 终态 → 409；不存在（含已删除，fake 直接移除条目）→ 404）。
+func (f *fakeBillingStore) SoftDeleteInvoice(_ context.Context, id uuid.UUID, at time.Time, op *ports.BillingOperationLogInput) (*ports.BillingInvoice, error) {
+	inv, ok := f.invoices[id]
+	if !ok {
+		return nil, ports.ErrBillingInvoiceNotFound
+	}
+	if inv.Status != ports.BillingInvoiceIssued {
+		return nil, ports.ErrBillingStateConflict // CAS 失败：不落流水
+	}
+	delete(f.invoices, id)
+	delete(f.byPeriod, billingPeriodKey(inv.TenantID, inv.Period))
+	cp := *inv
+	f.deleted = append(f.deleted, &cp)
+	if op != nil {
+		period := inv.Period
+		refID := inv.ID
+		f.opLogs = append(f.opLogs, ports.BillingOperationLog{
+			ID: uuid.New(), TenantID: inv.TenantID, Period: &period,
+			Action: op.Action, RefID: &refID,
+			Message: op.Message, Operator: op.Operator, CreatedAt: at,
+		})
+	}
 	return &cp, nil
 }
 
@@ -497,6 +529,115 @@ func TestBillingInvoiceActionStateMachine(t *testing.T) {
 	_, err = svc.InvoiceAction(context.Background(), &tenantv1.InvoiceActionRequest{
 		InvoiceId: seeded2.ID.String(), Action: "settle",
 	})
+	requireBizCode(t, err, codes.InvalidArgument, "VALIDATION_FAILED")
+}
+
+// ── DeleteInvoice（软删除）──────────────────────────────────────────────
+
+func TestBillingDeleteInvoiceSuccessAndReissue(t *testing.T) {
+	store := newFakeBillingStore()
+	meter := &fakeBillingMetering{}
+	tenants := &fakeTenantClient{tenant: ports.Tenant{ID: billingTenantA}}
+	svc := newBillingTestSvc(store, meter, tenants)
+
+	seeded, err := store.CreateInvoice(context.Background(), ports.CreateBillingInvoiceInput{
+		TenantID: billingTenantA, Period: "2026-09", No: "INV-2609-01",
+		AmountUSD: 10, DueDate: billingDueDate(time.Now()), IssuedAt: time.Now(), IdempotencyKey: uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// 删除成功 → 返回删除前快照（status 仍 issued）+ invoice.deleted 流水
+	res, err := svc.DeleteInvoice(context.Background(), &tenantv1.DeleteInvoiceRequest{
+		InvoiceId: seeded.ID.String(), Operator: "op-4",
+	})
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if res.GetId() != seeded.ID.String() || res.GetStatus() != "issued" || res.GetNo() != "INV-2609-01" {
+		t.Fatalf("deleted snapshot = %+v", res)
+	}
+	if len(store.opLogs) != 1 {
+		t.Fatalf("op logs = %d, want 1", len(store.opLogs))
+	}
+	log := store.opLogs[0]
+	if log.Action != ports.BillingOpInvoiceDeleted ||
+		log.Message != "删除账单 INV-2609-01 $10.00（软删除，可重新出账）" ||
+		log.Operator != "op-4" {
+		t.Fatalf("delete log = %+v", log)
+	}
+	if log.RefID == nil || log.RefID.String() != seeded.ID.String() {
+		t.Fatalf("delete log ref_id = %v, want %q", log.RefID, seeded.ID)
+	}
+
+	// 重复删除 → 404 BILLING_INVOICE_NOT_FOUND（幂等无害）
+	_, err = svc.DeleteInvoice(context.Background(), &tenantv1.DeleteInvoiceRequest{
+		InvoiceId: seeded.ID.String(), Operator: "op-4",
+	})
+	requireBizCode(t, err, codes.NotFound, "BILLING_INVOICE_NOT_FOUND")
+	if len(store.opLogs) != 1 {
+		t.Fatalf("op logs after re-delete = %d, want 1（404 不落流水）", len(store.opLogs))
+	}
+
+	// 删除后的账单对外不可见：再结清/授信 → 404（软删行对状态迁移 CAS 不可见）
+	_, err = svc.InvoiceAction(context.Background(), &tenantv1.InvoiceActionRequest{
+		InvoiceId: seeded.ID.String(), Action: "settle", IdempotencyKey: uuid.New().String(),
+	})
+	requireBizCode(t, err, codes.NotFound, "BILLING_INVOICE_NOT_FOUND")
+
+	// 删除后同账期重新出账成功（(tenant_id, period) 唯一键释放；seq 含软删行 → INV-2609-02）
+	reissued, err := svc.GenerateInvoice(context.Background(), &tenantv1.GenerateInvoiceRequest{
+		TenantId: billingTenantA.String(), Period: "2026-09", IdempotencyKey: uuid.New().String(),
+	})
+	if err != nil {
+		t.Fatalf("reissue after delete: %v", err)
+	}
+	if reissued.GetNo() != "INV-2609-02" {
+		t.Fatalf("reissued no = %q, want INV-2609-02（软删行计入 seq）", reissued.GetNo())
+	}
+	if reissued.GetId() == seeded.ID.String() {
+		t.Fatalf("reissued id must differ from deleted invoice")
+	}
+}
+
+func TestBillingDeleteInvoiceConflictsAndValidation(t *testing.T) {
+	store := newFakeBillingStore()
+	meter := &fakeBillingMetering{}
+	svc := newBillingTestSvc(store, meter, nil)
+
+	seeded, err := store.CreateInvoice(context.Background(), ports.CreateBillingInvoiceInput{
+		TenantID: billingTenantA, Period: "2026-09", No: "INV-2609-01",
+		AmountUSD: 10, DueDate: billingDueDate(time.Now()), IssuedAt: time.Now(), IdempotencyKey: uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// 终态账单不可删：settle 后 delete → 409 BILLING_STATE_CONFLICT，不落流水
+	if _, err := svc.InvoiceAction(context.Background(), &tenantv1.InvoiceActionRequest{
+		InvoiceId: seeded.ID.String(), Action: "settle", IdempotencyKey: uuid.New().String(),
+	}); err != nil {
+		t.Fatalf("settle: %v", err)
+	}
+	_, err = svc.DeleteInvoice(context.Background(), &tenantv1.DeleteInvoiceRequest{
+		InvoiceId: seeded.ID.String(), Operator: "op-4",
+	})
+	requireBizCode(t, err, codes.FailedPrecondition, "BILLING_STATE_CONFLICT")
+	if len(store.opLogs) != 1 { // settle 1 条；删除 409 不落
+		t.Fatalf("op logs after 409 delete = %d, want 1", len(store.opLogs))
+	}
+
+	// 账单不存在 → 404
+	_, err = svc.DeleteInvoice(context.Background(), &tenantv1.DeleteInvoiceRequest{
+		InvoiceId: uuid.New().String(),
+	})
+	requireBizCode(t, err, codes.NotFound, "BILLING_INVOICE_NOT_FOUND")
+
+	// invoice_id 缺失 / 非 UUID → 400 VALIDATION_FAILED
+	_, err = svc.DeleteInvoice(context.Background(), &tenantv1.DeleteInvoiceRequest{})
+	requireBizCode(t, err, codes.InvalidArgument, "VALIDATION_FAILED")
+	_, err = svc.DeleteInvoice(context.Background(), &tenantv1.DeleteInvoiceRequest{InvoiceId: "not-a-uuid"})
 	requireBizCode(t, err, codes.InvalidArgument, "VALIDATION_FAILED")
 }
 

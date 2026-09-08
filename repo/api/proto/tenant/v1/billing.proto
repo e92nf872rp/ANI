@@ -27,6 +27,13 @@ service BillingService {
   // CreateAdjustment writes a (possibly negative) adjustment record for a
   // tenant/period; amount must not be zero.
   rpc CreateAdjustment(CreateAdjustmentRequest) returns (BillingAdjustment);
+  // DeleteInvoice soft-deletes an issued invoice (status stays issued, the row
+  // is kept for audit via deleted_at). settled/credited invoices are rejected
+  // with BILLING_STATE_CONFLICT; unknown or already-deleted ids return
+  // BILLING_INVOICE_NOT_FOUND. The invoice.deleted operation log is written in
+  // the same transaction; a failed delete writes no log. No idempotency key:
+  // replaying a delete on the same id simply returns 404 again.
+  rpc DeleteInvoice(DeleteInvoiceRequest) returns (BillingInvoice);
   // ListBillingOperations returns the tenant's billing operation log (the
   // drawer "操作历史" tab). Logs are written in the same DB transaction as the
   // business write; idempotent replays and 409 conflicts produce no log.
@@ -69,6 +76,11 @@ message InvoiceActionRequest {
   string action = 2;          // settle | credit
   string idempotency_key = 3; // required
   string operator = 4;
+}
+
+message DeleteInvoiceRequest {
+  string invoice_id = 1; // required
+  string operator = 2;   // gateway-provided user_id for audit/operator fields
 }
 
 message CreateAdjustmentRequest {

@@ -5190,6 +5190,39 @@ paths:
         "502": { $ref: '#/components/responses/BadGateway' }
         "504": { $ref: '#/components/responses/GatewayTimeout' }
 
+  /billing/invoices/{invoiceId}:
+    delete:
+      operationId: deleteBillingInvoice
+      summary: 删除账单（软删除；需 platform-admin / platform-ops）
+      description: |
+        仅 issued（账期内未结清）账单可删除；settled / credited 终态 409 BILLING_STATE_CONFLICT。
+        软删除（deleted_at 标记，行保留可审计）：删除后总览/对账/操作历史不再返回该账单，
+        (tenant_id, period) 唯一键释放、同账期可重新出账；删除与 invoice.deleted 操作流水同一事务落库，
+        删除失败回滚则不落流水；已删除账单再删返回 404（幂等无害）。无幂等键（DELETE 非创建类写）。
+      tags: [Billing]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: billing
+        action: write
+        boundary: platform
+        principal_kinds: [user]
+      parameters:
+        - { name: invoiceId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 账单已删除（返回删除前账单快照，status 仍为 issued）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BillingInvoiceSummary' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "VALIDATION_FAILED（invoiceId 非 UUID）" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound', description: "BILLING_INVOICE_NOT_FOUND（不存在或已删除）" }
+        "409": { $ref: '#/components/responses/Conflict', description: "BILLING_STATE_CONFLICT（已 settled/credited 终态不可删）" }
+        "502": { $ref: '#/components/responses/BadGateway' }
+        "504": { $ref: '#/components/responses/GatewayTimeout' }
+
   /billing/adjustments:
     post:
       operationId: createBillingAdjustment

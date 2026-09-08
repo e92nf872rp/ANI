@@ -140,7 +140,7 @@
         <dl class="facts">
           <div><dt>Version</dt><dd>1.0.0</dd></div>
           <div><dt>Server</dt><dd><code>https://{host}/api/v1/svc</code></dd></div>
-          <div><dt>Operations</dt><dd>145</dd></div>
+          <div><dt>Operations</dt><dd>146</dd></div>
           <div><dt>Schemas</dt><dd>160</dd></div>
         </dl>
       </section>
@@ -172,6 +172,14 @@
           <td><code>/billing/invoices/generate</code></td>
           <td><code>generateBillingInvoice</code></td>
           <td>生成账单（生成即出账 status=issued；需 platform-admin / platform-ops）</td>
+          <td><code></code></td>
+          <td>200, 400, 401, 403, 404, 409, 502, 504</td>
+        </tr>
+        <tr>
+          <td><span class="method method-delete">DELETE</span></td>
+          <td><code>/billing/invoices/{invoiceId}</code></td>
+          <td><code>deleteBillingInvoice</code></td>
+          <td>删除账单（软删除；需 platform-admin / platform-ops）</td>
           <td><code></code></td>
           <td>200, 400, 401, 403, 404, 409, 502, 504</td>
         </tr>

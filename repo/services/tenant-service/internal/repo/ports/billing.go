@@ -126,12 +126,14 @@ func DeriveBillingRowStatus(inv *BillingInvoice, now time.Time) BillingRowStatus
 }
 
 // BillingOperationAction 操作流水动作（billing_operation_logs.action 枚举，
-// 迁移 20260908_001_billing_operation_logs.sql CHECK 约束）。
+// 迁移 20260908_001_billing_operation_logs.sql CHECK 约束；
+// invoice.deleted 由迁移 20260908_002_billing_invoice_soft_delete.sql 扩展）。
 const (
 	BillingOpInvoiceGenerated  = "invoice.generated"
 	BillingOpInvoiceSettled    = "invoice.settled"
 	BillingOpInvoiceCredited   = "invoice.credited"
 	BillingOpAdjustmentCreated = "adjustment.created"
+	BillingOpInvoiceDeleted    = "invoice.deleted"
 )
 
 // BillingOperationLogInput 是与业务写同一事务落库的流水内容。
@@ -261,6 +263,13 @@ type BillingStore interface {
 	// UpdateInvoiceStatus 以 status='issued' 为 CAS 前提应用状态迁移；不满足 → ErrBillingStateConflict。
 	// op 非 nil 时与状态迁移同一事务落一条操作流水；CAS 失败（409/404）则事务回滚、不落流水。
 	UpdateInvoiceStatus(ctx context.Context, id uuid.UUID, action BillingInvoiceAction, at time.Time, op *BillingOperationLogInput) (*BillingInvoice, error)
+
+	// SoftDeleteInvoice 软删除账单（deleted_at 标记，行保留可审计）；
+	// 仅 status='issued' 且未删除的活跃行可删，终态（settled/credited）→ ErrBillingStateConflict，
+	// 不存在或已删除 → ErrBillingInvoiceNotFound（重复删除 404 幂等无害）。
+	// op 非 nil 时与软删同一事务落一条操作流水；CAS 失败（404/409）则事务回滚、不落流水。
+	// 成功返回删除前账单快照（status 仍为 issued）。
+	SoftDeleteInvoice(ctx context.Context, id uuid.UUID, at time.Time, op *BillingOperationLogInput) (*BillingInvoice, error)
 
 	// ListAdjustmentsByTenant 返回该租户全部调账（created_at 升序）。
 	ListAdjustmentsByTenant(ctx context.Context, tenantID uuid.UUID) ([]BillingAdjustment, error)

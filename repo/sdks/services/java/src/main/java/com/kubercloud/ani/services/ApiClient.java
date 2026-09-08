@@ -28,6 +28,7 @@ public final class ApiClient {
     public static final List<String> OPERATIONS = Collections.unmodifiableList(Arrays.asList(
         "createBillingAdjustment",
         "generateBillingInvoice",
+        "deleteBillingInvoice",
         "invoiceBillingAction",
         "listBillingOperations",
         "getBillingOverview",
@@ -175,6 +176,7 @@ public final class ApiClient {
     public static final List<String> PATHS = Collections.unmodifiableList(Arrays.asList(
         "POST /billing/adjustments",
         "POST /billing/invoices/generate",
+        "DELETE /billing/invoices/{invoiceId}",
         "POST /billing/invoices/{invoiceId}/actions",
         "GET /billing/operations",
         "GET /billing/overview",

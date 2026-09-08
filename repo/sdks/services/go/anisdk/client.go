@@ -21,6 +21,7 @@ const ServerURL = "https://{host}/api/v1/svc"
 var Operations = []string{
 	"createBillingAdjustment",
 	"generateBillingInvoice",
+	"deleteBillingInvoice",
 	"invoiceBillingAction",
 	"listBillingOperations",
 	"getBillingOverview",
@@ -168,6 +169,7 @@ var Operations = []string{
 var Paths = []string{
 	"POST /billing/adjustments",
 	"POST /billing/invoices/generate",
+	"DELETE /billing/invoices/{invoiceId}",
 	"POST /billing/invoices/{invoiceId}/actions",
 	"GET /billing/operations",
 	"GET /billing/overview",

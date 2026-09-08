@@ -1,4 +1,4 @@
-h1:TDlKVLhDavyO44FF5rE96yg8+wQwONNyR1UqFsfTN50=
+h1:XVgA811minBWNAVWZ4o61PXN7hYM9TD6VLXQ+gjPHbw=
 20260501000100_init_schema.sql h1:M4G3Wd+Bw2Zt4FUz5wq1kw519PAMb37SpkfRhS02ubI=
 20260502000200_operations_idempotency.sql h1:c79fYzupq5/lgRDB2t4xMUB4eRKrzpNnJ0UT5ZAOnqQ=
 20260502000300_permissions_schema.sql h1:7E8kXUbRLQZrNrMkGdqIrHvTZjl/7v2IxsPZhz8KIe0=
@@ -46,3 +46,4 @@ h1:TDlKVLhDavyO44FF5rE96yg8+wQwONNyR1UqFsfTN50=
 20260902_001_tenant_list_management.sql h1:Ahzbk4M8CuZSIxAKEBGCDWmbtPVJJ44MiyqwdC+JySA=
 20260907_001_tenant_billing.sql h1:ziNnBTwBE9ZwFBedmp9hIJqMX4RuatTVJ1jljvDkUYA=
 20260908_001_billing_operation_logs.sql h1:/4kCY3cCh/KGSgKT0JIEcjRzXz86Fnv6W3x2JWfN9SE=
+20260908_002_billing_invoice_soft_delete.sql h1:CfCq5nTsfkvEFMXcdk7vXH0ATOI1xl8ZBCQOZv+N1pQ=

@@ -10,6 +10,7 @@ SERVER_URL = "https://{host}/api/v1/svc"
 OPERATIONS = [
     "createBillingAdjustment",
     "generateBillingInvoice",
+    "deleteBillingInvoice",
     "invoiceBillingAction",
     "listBillingOperations",
     "getBillingOverview",
@@ -157,6 +158,7 @@ OPERATIONS = [
 PATHS = [
     "POST /billing/adjustments",
     "POST /billing/invoices/generate",
+    "DELETE /billing/invoices/{invoiceId}",
     "POST /billing/invoices/{invoiceId}/actions",
     "GET /billing/operations",
     "GET /billing/overview",

@@ -24,6 +24,7 @@ const (
 	BillingService_GenerateInvoice_FullMethodName       = "/tenant.v1.BillingService/GenerateInvoice"
 	BillingService_InvoiceAction_FullMethodName         = "/tenant.v1.BillingService/InvoiceAction"
 	BillingService_CreateAdjustment_FullMethodName      = "/tenant.v1.BillingService/CreateAdjustment"
+	BillingService_DeleteInvoice_FullMethodName         = "/tenant.v1.BillingService/DeleteInvoice"
 	BillingService_ListBillingOperations_FullMethodName = "/tenant.v1.BillingService/ListBillingOperations"
 )
 
@@ -47,6 +48,13 @@ type BillingServiceClient interface {
 	// CreateAdjustment writes a (possibly negative) adjustment record for a
 	// tenant/period; amount must not be zero.
 	CreateAdjustment(ctx context.Context, in *CreateAdjustmentRequest, opts ...grpc.CallOption) (*BillingAdjustment, error)
+	// DeleteInvoice soft-deletes an issued invoice (status stays issued, the row
+	// is kept for audit via deleted_at). settled/credited invoices are rejected
+	// with BILLING_STATE_CONFLICT; unknown or already-deleted ids return
+	// BILLING_INVOICE_NOT_FOUND. The invoice.deleted operation log is written in
+	// the same transaction; a failed delete writes no log. No idempotency key:
+	// replaying a delete on the same id simply returns 404 again.
+	DeleteInvoice(ctx context.Context, in *DeleteInvoiceRequest, opts ...grpc.CallOption) (*BillingInvoice, error)
 	// ListBillingOperations returns the tenant's billing operation log (the
 	// drawer "操作历史" tab). Logs are written in the same DB transaction as the
 	// business write; idempotent replays and 409 conflicts produce no log.
@@ -106,6 +114,15 @@ func (c *billingServiceClient) CreateAdjustment(ctx context.Context, in *CreateA
 	return out, nil
 }
 
+func (c *billingServiceClient) DeleteInvoice(ctx context.Context, in *DeleteInvoiceRequest, opts ...grpc.CallOption) (*BillingInvoice, error) {
+	out := new(BillingInvoice)
+	err := c.cc.Invoke(ctx, BillingService_DeleteInvoice_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *billingServiceClient) ListBillingOperations(ctx context.Context, in *ListBillingOperationsRequest, opts ...grpc.CallOption) (*ListBillingOperationsResponse, error) {
 	out := new(ListBillingOperationsResponse)
 	err := c.cc.Invoke(ctx, BillingService_ListBillingOperations_FullMethodName, in, out, opts...)
@@ -135,6 +152,13 @@ type BillingServiceServer interface {
 	// CreateAdjustment writes a (possibly negative) adjustment record for a
 	// tenant/period; amount must not be zero.
 	CreateAdjustment(context.Context, *CreateAdjustmentRequest) (*BillingAdjustment, error)
+	// DeleteInvoice soft-deletes an issued invoice (status stays issued, the row
+	// is kept for audit via deleted_at). settled/credited invoices are rejected
+	// with BILLING_STATE_CONFLICT; unknown or already-deleted ids return
+	// BILLING_INVOICE_NOT_FOUND. The invoice.deleted operation log is written in
+	// the same transaction; a failed delete writes no log. No idempotency key:
+	// replaying a delete on the same id simply returns 404 again.
+	DeleteInvoice(context.Context, *DeleteInvoiceRequest) (*BillingInvoice, error)
 	// ListBillingOperations returns the tenant's billing operation log (the
 	// drawer "操作历史" tab). Logs are written in the same DB transaction as the
 	// business write; idempotent replays and 409 conflicts produce no log.
@@ -160,6 +184,9 @@ func (UnimplementedBillingServiceServer) InvoiceAction(context.Context, *Invoice
 }
 func (UnimplementedBillingServiceServer) CreateAdjustment(context.Context, *CreateAdjustmentRequest) (*BillingAdjustment, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateAdjustment not implemented")
+}
+func (UnimplementedBillingServiceServer) DeleteInvoice(context.Context, *DeleteInvoiceRequest) (*BillingInvoice, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteInvoice not implemented")
 }
 func (UnimplementedBillingServiceServer) ListBillingOperations(context.Context, *ListBillingOperationsRequest) (*ListBillingOperationsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListBillingOperations not implemented")
@@ -267,6 +294,24 @@ func _BillingService_CreateAdjustment_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _BillingService_DeleteInvoice_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteInvoiceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BillingServiceServer).DeleteInvoice(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BillingService_DeleteInvoice_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BillingServiceServer).DeleteInvoice(ctx, req.(*DeleteInvoiceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _BillingService_ListBillingOperations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListBillingOperationsRequest)
 	if err := dec(in); err != nil {
@@ -311,6 +356,10 @@ var BillingService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateAdjustment",
 			Handler:    _BillingService_CreateAdjustment_Handler,
+		},
+		{
+			MethodName: "DeleteInvoice",
+			Handler:    _BillingService_DeleteInvoice_Handler,
 		},
 		{
 			MethodName: "ListBillingOperations",

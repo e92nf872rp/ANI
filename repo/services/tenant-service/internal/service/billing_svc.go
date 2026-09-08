@@ -248,6 +248,35 @@ func (s *BillingService) InvoiceAction(ctx context.Context, req *tenantv1.Invoic
 	return invoiceToProto(*updated), nil
 }
 
+// DeleteInvoice 软删除账单（仅 issued 可删；终态 409；已删除/不存在 404）。
+// 删除与 invoice.deleted 操作流水同一事务落库；CAS 失败回滚则不落流水。
+// 无幂等键（DELETE 非创建类写）：重复删除同一账单幂等返回 404。
+func (s *BillingService) DeleteInvoice(ctx context.Context, req *tenantv1.DeleteInvoiceRequest) (*tenantv1.BillingInvoice, error) {
+	// 步骤 1：校验 invoice_id
+	invoiceID, err := parseBillingUUID(req.GetInvoiceId(), "invoice_id")
+	if err != nil {
+		return nil, err
+	}
+
+	// 步骤 2：预读账单组装流水摘要（no/amount 为不变字段；不存在 → 404 提前返回）
+	inv, err := s.store.GetInvoice(ctx, invoiceID)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+
+	// 步骤 3：CAS 软删（仅活跃 issued 行可删；终态 → 409；已删除 → 404）；
+	// CAS 失败由 store 事务回滚、不落流水（404/409 不产生操作历史）。
+	deleted, err := s.store.SoftDeleteInvoice(ctx, invoiceID, time.Now(), &ports.BillingOperationLogInput{
+		Action:   ports.BillingOpInvoiceDeleted,
+		Message:  fmt.Sprintf("删除账单 %s $%.2f（软删除，可重新出账）", inv.No, inv.AmountUSD),
+		Operator: strings.TrimSpace(req.GetOperator()),
+	})
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	return invoiceToProto(*deleted), nil
+}
+
 // CreateAdjustment 写调账记录（金额可负、不可为 0）；同幂等键重放返回已有记录。
 func (s *BillingService) CreateAdjustment(ctx context.Context, req *tenantv1.CreateAdjustmentRequest) (*tenantv1.BillingAdjustment, error) {
 	const action = "billing.create_adjustment"

@@ -17,6 +17,12 @@
       "scope": ""
     },
     {
+      "operationId": "deleteBillingInvoice",
+      "method": "DELETE",
+      "path": "/billing/invoices/{invoiceId}",
+      "scope": ""
+    },
+    {
       "operationId": "invoiceBillingAction",
       "method": "POST",
       "path": "/billing/invoices/{invoiceId}/actions",
