@@ -31,14 +31,6 @@ type idempotencyRecord struct {
 // Idempotency replays completed mutating responses for repeated idempotency keys.
 func Idempotency(store GatewayStore) app.HandlerFunc {
 	return func(ctx context.Context, c *app.RequestContext) {
-		// Target IAM owns PasswordLogin idempotency and returns the same refresh
-		// result for a repeated key. Replaying only the generic Gateway body would
-		// lose Set-Cookie; storing that cookie here would persist a plaintext
-		// refresh secret. Let every target retry reach IAM instead.
-		if isTargetIAMPasswordLogin(c) {
-			c.Next(ctx)
-			return
-		}
 		if store == nil || !idempotencyApplies(string(c.Method())) {
 			c.Next(ctx)
 			return

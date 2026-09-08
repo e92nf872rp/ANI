@@ -60,26 +60,6 @@ def authz_extension(**overrides) -> dict:
     return ext
 
 
-def direct_p2_target_operation(
-    operation_id: str = "listInstances",
-    method: str = "GET",
-    path: str = "/instances",
-    classification: str = "authorized",
-) -> dict:
-    return {
-        "operation_id": operation_id,
-        "method": method,
-        "path": path,
-        "auth_classification": classification,
-        "iam_decision": {
-            "public": "none",
-            "authenticated": "validate_principal",
-            "authorized": "check_permission",
-        }[classification],
-        "iam_decision_calls": 0 if classification == "public" else 1,
-    }
-
-
 class GeneratorClassifyTest(unittest.TestCase):
     def test_legacy_with_or_security(self) -> None:
         spec = make_spec()
@@ -166,81 +146,6 @@ class GeneratorClassifyTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             generator.parse_authz(authz_extension(principal_kinds=["user", "user"]))
 
-    def test_direct_p2_authorized_contract_stays_legacy_in_core_registry(self) -> None:
-        spec = make_spec()
-        operation = {
-            "operationId": "listInstances",
-            "x-ani-contract": "direct-p2",
-            "security": [{"BearerAuth": []}],
-            "x-ani-authn": {
-                "principal_kinds": ["human", "service"],
-                "credential_kinds": ["access_token", "api_key", "service_token"],
-            },
-            "x-ani-authz": {
-                "version": "v1",
-                "resource": "instances",
-                "actions": ["read"],
-                "scope": "tenant",
-                "obligations": [],
-            },
-        }
-        policy = generator.classify(
-            spec,
-            "/instances",
-            "get",
-            operation,
-            direct_p2_target_operation(),
-        )
-        self.assertEqual(policy.source, "legacy")
-        self.assertEqual(policy.operation_id, "listInstances")
-        self.assertEqual(policy.security, (("BearerAuth",),))
-
-    def test_direct_p2_cookie_security_is_preserved_for_legacy_compatibility(self) -> None:
-        spec = make_spec()
-        operation = {
-            "operationId": "refreshSession",
-            "x-ani-contract": "direct-p2",
-            "security": [{"ConsoleRefreshCookie": []}, {"BossRefreshCookie": []}],
-            "x-ani-authn": {
-                "principal_kinds": ["human"],
-                "credential_kinds": ["refresh_cookie"],
-            },
-        }
-        policy = generator.classify(
-            spec,
-            "/auth/refresh",
-            "post",
-            operation,
-            direct_p2_target_operation("refreshSession", "POST", "/auth/refresh", "authenticated"),
-        )
-        self.assertEqual(policy.source, "legacy")
-        self.assertEqual(policy.security, (("ConsoleRefreshCookie",), ("BossRefreshCookie",)))
-
-    def test_direct_p2_requires_matching_target_registry_entry(self) -> None:
-        spec = make_spec()
-        operation = {
-            "operationId": "listInstances",
-            "x-ani-contract": "direct-p2",
-            "security": [{"BearerAuth": []}],
-            "x-ani-authz": {
-                "version": "v1",
-                "resource": "instances",
-                "actions": ["read"],
-                "scope": "tenant",
-                "obligations": [],
-            },
-        }
-        with self.assertRaisesRegex(ValueError, "target registry"):
-            generator.classify(spec, "/instances", "get", operation, {})
-        with self.assertRaisesRegex(ValueError, "target registry"):
-            generator.classify(
-                spec,
-                "/instances",
-                "get",
-                operation,
-                direct_p2_target_operation(path="/wrong"),
-            )
-
 
 class GeneratorCollectTest(unittest.TestCase):
     def test_duplicate_route_rejected(self) -> None:
@@ -279,9 +184,7 @@ class GeneratorRealSpecTest(unittest.TestCase):
 
     def test_real_v1_spec_generates(self) -> None:
         spec = generator.load_spec(generator.DEFAULT_INPUT)
-        target_operations = generator.load_target_operations(generator.DEFAULT_TARGET_REGISTRY)
-        compatibility_policies = generator.load_core_compatibility_policies(generator.DEFAULT_REPLACEMENT_MANIFEST)
-        policies = generator.collect_policies(spec, target_operations, compatibility_policies)
+        policies = generator.collect_policies(spec)
         sources = {policy.source for policy in policies}
         self.assertTrue(sources <= {"public", "generated", "legacy"})
         # PR4 C1 起 listQuotaMeta 携带 x-ani-authz，迁移为 generated。
@@ -297,50 +200,10 @@ class GeneratorRealSpecTest(unittest.TestCase):
         self.assertEqual(quota.action, "read")
         self.assertEqual(quota.boundary, "platform")
         self.assertEqual(quota.principal_kinds, ("user",))
-        # Direct P2 接受的显式 operationId 取代旧派生名。
-        self.assertIn("refreshSession", by_op)
-        self.assertNotIn("refreshToken", by_op)
+        # 派生 operationId 存在于真实契约。
+        self.assertIn("refreshToken", by_op)
         self.assertIn("getBranding", by_op)
         self.assertIn("getTask", by_op)
-
-        # Direct P2 remains target-registry-owned while disabled mode keeps the
-        # current Gateway compatibility chain.
-        instances = by_op["listInstances"]
-        self.assertEqual(instances.source, "legacy")
-
-        accepted_main_policies = {
-            "queryResourceTrendObservability": {
-                "security": (("BearerAuth",), ("ApiKeyAuth",)),
-                "resource": "observability",
-                "action": "read",
-                "boundary": "tenant",
-                "principal_kinds": ("user", "api_key"),
-            },
-            "getPlatformCapacity": {
-                "security": (("BearerAuth",), ("ApiKeyAuth",)),
-                "resource": "capacity",
-                "action": "get",
-                "boundary": "platform",
-                "principal_kinds": ("user",),
-            },
-            "getPlatformServiceHealth": {
-                "security": (("BearerAuth",),),
-                "resource": "observability",
-                "action": "read",
-                "boundary": "platform",
-                "principal_kinds": ("user", "service"),
-            },
-        }
-        for operation_id, expected in accepted_main_policies.items():
-            with self.subTest(operation_id=operation_id):
-                policy = by_op[operation_id]
-                self.assertEqual(policy.source, "generated")
-                self.assertEqual(policy.security, expected["security"])
-                self.assertEqual(policy.version, "v1")
-                self.assertEqual(policy.resource, expected["resource"])
-                self.assertEqual(policy.action, expected["action"])
-                self.assertEqual(policy.boundary, expected["boundary"])
-                self.assertEqual(policy.principal_kinds, expected["principal_kinds"])
 
 
 if __name__ == "__main__":
