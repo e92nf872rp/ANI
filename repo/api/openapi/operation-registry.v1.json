@@ -1740,6 +1740,32 @@
           "human"
         ]
       },
+      "backend_owner": "core-control",
+      "gateway_handler": "gateway.createTenant",
+      "iam_decision": "check_permission",
+      "iam_decision_calls": 1,
+      "method": "POST",
+      "obligations": [],
+      "operation_id": "createTenant",
+      "path": "/admin/tenants",
+      "permission": {
+        "actions": [
+          "create"
+        ],
+        "resource": "tenants",
+        "scope": "platform"
+      }
+    },
+    {
+      "auth_classification": "authorized",
+      "authn": {
+        "credential_kinds": [
+          "access_token"
+        ],
+        "principal_kinds": [
+          "human"
+        ]
+      },
       "backend_owner": "iam",
       "gateway_handler": "gateway.createTenantIAMInvitation",
       "iam_decision": "check_permission",
@@ -2880,6 +2906,32 @@
       "auth_classification": "authorized",
       "authn": {
         "credential_kinds": [
+          "access_token"
+        ],
+        "principal_kinds": [
+          "human"
+        ]
+      },
+      "backend_owner": "core-control",
+      "gateway_handler": "gateway.disableTenant",
+      "iam_decision": "check_permission",
+      "iam_decision_calls": 1,
+      "method": "POST",
+      "obligations": [],
+      "operation_id": "disableTenant",
+      "path": "/admin/tenants/{tenant_id}/disable",
+      "permission": {
+        "actions": [
+          "update"
+        ],
+        "resource": "tenants",
+        "scope": "platform"
+      }
+    },
+    {
+      "auth_classification": "authorized",
+      "authn": {
+        "credential_kinds": [
           "access_token",
           "api_key",
           "service_token"
@@ -3054,6 +3106,32 @@
         ],
         "resource": "volumes",
         "scope": "tenant"
+      }
+    },
+    {
+      "auth_classification": "authorized",
+      "authn": {
+        "credential_kinds": [
+          "access_token"
+        ],
+        "principal_kinds": [
+          "human"
+        ]
+      },
+      "backend_owner": "core-control",
+      "gateway_handler": "gateway.freezeTenant",
+      "iam_decision": "check_permission",
+      "iam_decision_calls": 1,
+      "method": "POST",
+      "obligations": [],
+      "operation_id": "freezeTenant",
+      "path": "/admin/tenants/{tenant_id}/freeze",
+      "permission": {
+        "actions": [
+          "update"
+        ],
+        "resource": "tenants",
+        "scope": "platform"
       }
     },
     {
@@ -4537,6 +4615,32 @@
           "read"
         ],
         "resource": "iam.tenant-access",
+        "scope": "platform"
+      }
+    },
+    {
+      "auth_classification": "authorized",
+      "authn": {
+        "credential_kinds": [
+          "access_token"
+        ],
+        "principal_kinds": [
+          "human"
+        ]
+      },
+      "backend_owner": "core-control",
+      "gateway_handler": "gateway.getTenantAuth",
+      "iam_decision": "check_permission",
+      "iam_decision_calls": 1,
+      "method": "GET",
+      "obligations": [],
+      "operation_id": "getTenantAuth",
+      "path": "/admin/tenants/{tenant_id}/auth",
+      "permission": {
+        "actions": [
+          "read"
+        ],
+        "resource": "tenants",
         "scope": "platform"
       }
     },
@@ -6534,6 +6638,32 @@
           "human"
         ]
       },
+      "backend_owner": "core-control",
+      "gateway_handler": "gateway.listTenantLifecycle",
+      "iam_decision": "check_permission",
+      "iam_decision_calls": 1,
+      "method": "GET",
+      "obligations": [],
+      "operation_id": "listTenantLifecycle",
+      "path": "/admin/tenants/{tenant_id}/lifecycle",
+      "permission": {
+        "actions": [
+          "read"
+        ],
+        "resource": "tenants",
+        "scope": "platform"
+      }
+    },
+    {
+      "auth_classification": "authorized",
+      "authn": {
+        "credential_kinds": [
+          "access_token"
+        ],
+        "principal_kinds": [
+          "human"
+        ]
+      },
       "backend_owner": "iam",
       "gateway_handler": "gateway.listTenantUsers",
       "iam_decision": "check_permission",
@@ -6547,6 +6677,32 @@
           "read"
         ],
         "resource": "iam.memberships",
+        "scope": "platform"
+      }
+    },
+    {
+      "auth_classification": "authorized",
+      "authn": {
+        "credential_kinds": [
+          "access_token"
+        ],
+        "principal_kinds": [
+          "human"
+        ]
+      },
+      "backend_owner": "core-control",
+      "gateway_handler": "gateway.listTenants",
+      "iam_decision": "check_permission",
+      "iam_decision_calls": 1,
+      "method": "GET",
+      "obligations": [],
+      "operation_id": "listTenants",
+      "path": "/admin/tenants",
+      "permission": {
+        "actions": [
+          "read"
+        ],
+        "resource": "tenants",
         "scope": "platform"
       }
     },
@@ -7804,6 +7960,32 @@
       "auth_classification": "authorized",
       "authn": {
         "credential_kinds": [
+          "access_token"
+        ],
+        "principal_kinds": [
+          "human"
+        ]
+      },
+      "backend_owner": "core-control",
+      "gateway_handler": "gateway.unfreezeTenant",
+      "iam_decision": "check_permission",
+      "iam_decision_calls": 1,
+      "method": "POST",
+      "obligations": [],
+      "operation_id": "unfreezeTenant",
+      "path": "/admin/tenants/{tenant_id}/unfreeze",
+      "permission": {
+        "actions": [
+          "update"
+        ],
+        "resource": "tenants",
+        "scope": "platform"
+      }
+    },
+    {
+      "auth_classification": "authorized",
+      "authn": {
+        "credential_kinds": [
           "access_token",
           "api_key",
           "service_token"
@@ -8159,6 +8341,32 @@
           "human"
         ]
       },
+      "backend_owner": "core-control",
+      "gateway_handler": "gateway.updateTenant",
+      "iam_decision": "check_permission",
+      "iam_decision_calls": 1,
+      "method": "PUT",
+      "obligations": [],
+      "operation_id": "updateTenant",
+      "path": "/admin/tenants/{tenant_id}",
+      "permission": {
+        "actions": [
+          "update"
+        ],
+        "resource": "tenants",
+        "scope": "platform"
+      }
+    },
+    {
+      "auth_classification": "authorized",
+      "authn": {
+        "credential_kinds": [
+          "access_token"
+        ],
+        "principal_kinds": [
+          "human"
+        ]
+      },
       "backend_owner": "iam",
       "gateway_handler": "gateway.updateTenantAccess",
       "iam_decision": "check_permission",
@@ -8172,6 +8380,32 @@
           "update"
         ],
         "resource": "iam.tenant-access",
+        "scope": "platform"
+      }
+    },
+    {
+      "auth_classification": "authorized",
+      "authn": {
+        "credential_kinds": [
+          "access_token"
+        ],
+        "principal_kinds": [
+          "human"
+        ]
+      },
+      "backend_owner": "core-control",
+      "gateway_handler": "gateway.updateTenantAuth",
+      "iam_decision": "check_permission",
+      "iam_decision_calls": 1,
+      "method": "PUT",
+      "obligations": [],
+      "operation_id": "updateTenantAuth",
+      "path": "/admin/tenants/{tenant_id}/auth",
+      "permission": {
+        "actions": [
+          "update"
+        ],
+        "resource": "tenants",
         "scope": "platform"
       }
     },
@@ -8481,7 +8715,7 @@
       }
     }
   ],
-  "policy_revision": "sha256:3e8292df863c8740236ac0c46a16e839ff366a6adc8454473f934e47a1bcea1b",
+  "policy_revision": "sha256:e7195aff87e6b92a331d96f39a4002f0791f89950046e027d1da754833dc8c16",
   "schema_version": "ani.operation-policy/v1",
   "trusted_context": {
     "inject_headers": [

@@ -14883,6 +14883,18 @@ paths:
   /admin/tenants:
     post:
       operationId: createTenant
+      x-ani-handler: gateway.createTenant
+      x-ani-owner: core-control
+      x-ani-auth-classification: authorized
+      x-ani-authn:
+        principal_kinds: [human]
+        credential_kinds: [access_token]
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        actions: [create]
+        scope: platform
+        obligations: []
       summary: 创建租户
       description: |
         事务内 INSERT tenants(status='active') + tenant_auth(默认值) + users + user_roles(tenant-admin)
@@ -14907,6 +14919,18 @@ paths:
         "409": { $ref: '#/components/responses/Conflict', description: "TENANT_NAME_CONFLICT" }
     get:
       operationId: listTenants
+      x-ani-handler: gateway.listTenants
+      x-ani-owner: core-control
+      x-ani-auth-classification: authorized
+      x-ani-authn:
+        principal_kinds: [human]
+        credential_kinds: [access_token]
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        actions: [read]
+        scope: platform
+        obligations: []
       summary: 租户列表
       description: |
         游标分页（created_at DESC, id DESC）；支持 status / search（name 或 display_name ILIKE）过滤。
@@ -14962,6 +14986,18 @@ paths:
         "404": { $ref: '#/components/responses/TenantNotFound' }
     put:
       operationId: updateTenant
+      x-ani-handler: gateway.updateTenant
+      x-ani-owner: core-control
+      x-ani-auth-classification: authorized
+      x-ani-authn:
+        principal_kinds: [human]
+        credential_kinds: [access_token]
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        actions: [update]
+        scope: platform
+        obligations: []
       summary: 更新租户基本信息
       description: |
         部分更新 display_name / contact_email；不可改 name / status。
@@ -14989,6 +15025,18 @@ paths:
   /admin/tenants/{tenant_id}/freeze:
     post:
       operationId: freezeTenant
+      x-ani-handler: gateway.freezeTenant
+      x-ani-owner: core-control
+      x-ani-auth-classification: authorized
+      x-ani-authn:
+        principal_kinds: [human]
+        credential_kinds: [access_token]
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        actions: [update]
+        scope: platform
+        obligations: []
       summary: 冻结租户
       description: |
         active → frozen；设置 frozen_at 并写入 tenant_lifecycle('freeze')。
@@ -15011,6 +15059,18 @@ paths:
   /admin/tenants/{tenant_id}/unfreeze:
     post:
       operationId: unfreezeTenant
+      x-ani-handler: gateway.unfreezeTenant
+      x-ani-owner: core-control
+      x-ani-auth-classification: authorized
+      x-ani-authn:
+        principal_kinds: [human]
+        credential_kinds: [access_token]
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        actions: [update]
+        scope: platform
+        obligations: []
       summary: 解冻租户
       description: |
         frozen → active；清空 frozen_at 并写入 tenant_lifecycle('unfreeze')。
@@ -15033,6 +15093,18 @@ paths:
   /admin/tenants/{tenant_id}/disable:
     post:
       operationId: disableTenant
+      x-ani-handler: gateway.disableTenant
+      x-ani-owner: core-control
+      x-ani-auth-classification: authorized
+      x-ani-authn:
+        principal_kinds: [human]
+        credential_kinds: [access_token]
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        actions: [update]
+        scope: platform
+        obligations: []
       summary: 禁用租户
       description: |
         active/frozen → disabled（终态）；设置 disabled_at 并写入 tenant_lifecycle('disable')。
@@ -15055,6 +15127,18 @@ paths:
   /admin/tenants/{tenant_id}/auth:
     get:
       operationId: getTenantAuth
+      x-ani-handler: gateway.getTenantAuth
+      x-ani-owner: core-control
+      x-ani-auth-classification: authorized
+      x-ani-authn:
+        principal_kinds: [human]
+        credential_kinds: [access_token]
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        actions: [read]
+        scope: platform
+        obligations: []
       summary: 查询租户认证配置
       tags: [Tenants]
       x-ani-rbac-scope: "scope:tenant:read"
@@ -15071,6 +15155,18 @@ paths:
         "404": { $ref: '#/components/responses/TenantNotFound' }
     put:
       operationId: updateTenantAuth
+      x-ani-handler: gateway.updateTenantAuth
+      x-ani-owner: core-control
+      x-ani-auth-classification: authorized
+      x-ani-authn:
+        principal_kinds: [human]
+        credential_kinds: [access_token]
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        actions: [update]
+        scope: platform
+        obligations: []
       summary: 更新租户认证配置
       description: |
         部分更新 sso_enabled / provider / mfa_required。Services 层 SSO/MFA 两个 PUT 均映射到此端点。
@@ -15100,6 +15196,18 @@ paths:
   /admin/tenants/{tenant_id}/lifecycle:
     get:
       operationId: listTenantLifecycle
+      x-ani-handler: gateway.listTenantLifecycle
+      x-ani-owner: core-control
+      x-ani-auth-classification: authorized
+      x-ani-authn:
+        principal_kinds: [human]
+        credential_kinds: [access_token]
+      x-ani-authz:
+        version: v1
+        resource: tenants
+        actions: [read]
+        scope: platform
+        obligations: []
       summary: 查询租户生命周期记录
       tags: [Tenants]
       x-ani-rbac-scope: "scope:tenant:read"
