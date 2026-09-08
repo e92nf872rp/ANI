@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -191,6 +192,100 @@ func TestPrometheusObservabilityServiceRewritePromQLLabelsContainerPodNotRegress
 	// 不应意外引入 name label
 	if strings.Contains(rewritten, `name=`) {
 		t.Fatalf("unexpected name label in container query: %s", rewritten)
+	}
+}
+
+// TestPrometheusObservabilityServiceRewritePromQLLabelsKataCriLabels 验证 kata-monitor 系列
+// （sandbox/kata 实例内存数据源 kata_guest_meminfo）的 cri_namespace/cri_name 重写：
+//   - cri_namespace="inst_xxx" → 真实租户 namespace 精确匹配（与 namespace 同语义）
+//   - cri_name="inst_xxx" → 完整 pod 名正则匹配（与 pod 同理；kata-monitor 上报的 cri_name
+//     是完整 pod 名，如 sandbox-5dc9fccd44-hppsj，精确匹配会查空）
+//
+// 同时验证交替顺序防回归：cri_namespace/cri_name 必须整体命中，不得被子串匹配残留 cri_ 前缀。
+func TestPrometheusObservabilityServiceRewritePromQLLabelsKataCriLabels(t *testing.T) {
+	lookup := &fakeInstanceLookup{record: ports.WorkloadInstanceRecord{
+		TenantID:   "00000000-0000-0000-0000-000000000001",
+		InstanceID: "inst_1",
+		Name:       "sandbox",
+	}}
+	service, err := NewPrometheusObservabilityService(PrometheusObservabilityServiceConfig{
+		PrometheusURL:  "http://prometheus:9090",
+		InstanceLookup: lookup,
+	})
+	if err != nil {
+		t.Fatalf("NewPrometheusObservabilityService error = %v", err)
+	}
+
+	// sandbox 内存趋势模板：前端把 instance_id 注入 cri_namespace 和 cri_name 占位符
+	input := `100 * (1 - sum(kata_guest_meminfo{item="mem_available",cri_namespace="inst_1",cri_name="inst_1"}) / sum(kata_guest_meminfo{item="mem_total",cri_namespace="inst_1",cri_name="inst_1"}))`
+	rewritten, err := service.rewritePromQLLabels(context.Background(), "00000000-0000-0000-0000-000000000001", input)
+	if err != nil {
+		t.Fatalf("rewritePromQLLabels error = %v", err)
+	}
+
+	// cri_namespace 应被重写为真实 namespace（精确匹配）
+	if !strings.Contains(rewritten, `cri_namespace="ani-tenant-00000000-0000-0000-0000-000000000001"`) {
+		t.Fatalf("cri_namespace not rewritten: %s", rewritten)
+	}
+	// cri_name 应被重写为完整 pod 名正则匹配（=~）
+	if !strings.Contains(rewritten, `cri_name=~"^sandbox(-.*)?$"`) {
+		t.Fatalf("cri_name not rewritten to regex: %s", rewritten)
+	}
+	// 原始精确匹配不应残留
+	if strings.Contains(rewritten, `cri_namespace="inst_1"`) || strings.Contains(rewritten, `cri_name="inst_1"`) {
+		t.Fatalf("original cri_* label values still present: %s", rewritten)
+	}
+	// 子串误伤防回归：cri_ 前缀不得出现错位替换（如 cri_ + 重写后的 namespace 值出现两次）
+	if got := strings.Count(rewritten, `cri_namespace="ani-tenant-00000000-0000-0000-0000-000000000001"`); got != 2 {
+		t.Fatalf("expected 2 cri_namespace labels rewritten, got %d: %s", got, rewritten)
+	}
+	if got := strings.Count(rewritten, `cri_name=~"^sandbox(-.*)?$"`); got != 2 {
+		t.Fatalf("expected 2 cri_name labels rewritten, got %d: %s", got, rewritten)
+	}
+	// item="mem_total"/"mem_available" 等普通 label 不受影响
+	if !strings.Contains(rewritten, `item="mem_total"`) || !strings.Contains(rewritten, `item="mem_available"`) {
+		t.Fatalf("item labels unexpectedly rewritten: %s", rewritten)
+	}
+}
+
+// TestPrometheusObservabilityServiceRewritePromQLLabelsInjectedPodMatcher 验证注入精确
+// pod 匹配器（InstancePodNamesResolver.Matcher）后，pod/cri_name 重写为锚定精确列表
+// （根治实例名前缀重叠互相污染）；未注入时保持前缀正则（其他测试覆盖）。
+func TestPrometheusObservabilityServiceRewritePromQLLabelsInjectedPodMatcher(t *testing.T) {
+	lookup := &fakeInstanceLookup{record: ports.WorkloadInstanceRecord{
+		TenantID:   "00000000-0000-0000-0000-000000000001",
+		InstanceID: "inst_1",
+		Name:       "sandbox",
+	}}
+	service, err := NewPrometheusObservabilityService(PrometheusObservabilityServiceConfig{
+		PrometheusURL:  "http://prometheus:9090",
+		InstanceLookup: lookup,
+		PodMatcher: func(_ context.Context, tenantID, instanceName string) string {
+			if tenantID != "00000000-0000-0000-0000-000000000001" || instanceName != "sandbox" {
+				t.Fatalf("unexpected matcher args tenantID=%q instanceName=%q", tenantID, instanceName)
+			}
+			return `^(sandbox-5dc9fccd44-hppsj)$`
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewPrometheusObservabilityService error = %v", err)
+	}
+
+	input := `sum(rate(container_cpu_usage_seconds_total{namespace="inst_1",pod="inst_1"}[5m])) + sum(kata_guest_meminfo{item="mem_total",cri_namespace="inst_1",cri_name="inst_1"})`
+	rewritten, err := service.rewritePromQLLabels(context.Background(), "00000000-0000-0000-0000-000000000001", input)
+	if err != nil {
+		t.Fatalf("rewritePromQLLabels error = %v", err)
+	}
+
+	if !strings.Contains(rewritten, `pod=~"^(sandbox-5dc9fccd44-hppsj)$"`) {
+		t.Fatalf("pod not rewritten to injected precise matcher: %s", rewritten)
+	}
+	if !strings.Contains(rewritten, `cri_name=~"^(sandbox-5dc9fccd44-hppsj)$"`) {
+		t.Fatalf("cri_name not rewritten to injected precise matcher: %s", rewritten)
+	}
+	// 前缀正则不应残留（前缀重叠实例会互相命中）
+	if strings.Contains(rewritten, `(-.*)?$`) {
+		t.Fatalf("prefix regex still present: %s", rewritten)
 	}
 }
 
@@ -525,5 +620,196 @@ func TestPrometheusObservabilityServiceQueryRangeFiltersInf(t *testing.T) {
 	}
 	if result.Results[0].Values[0].Value != 6.95 {
 		t.Fatalf("value = %v, want 6.95", result.Results[0].Values[0].Value)
+	}
+}
+
+func TestResourceTrendPromQLBuildsTenantAnchoredQueries(t *testing.T) {
+	// 租户 id 含下划线应替换为连字符（与 dryrun_renderer.tenantNamespace 一致）
+	ns := tenantNamespace("tenant_1")
+	if ns != "ani-tenant-tenant-1" {
+		t.Fatalf("tenantNamespace = %q, want ani-tenant-tenant-1", ns)
+	}
+
+	cases := []struct {
+		name   string
+		metric ports.ObservabilityResourceTrendMetric
+		want   string
+	}{
+		{"gpu", ports.ObservabilityResourceTrendGPU,
+			`avg(DCGM_FI_DEV_GPU_UTIL{namespace="ani-tenant-tenant-1"})`},
+		{"cpu", ports.ObservabilityResourceTrendCPU,
+			`100 * avg(rate(container_cpu_usage_seconds_total{namespace="ani-tenant-tenant-1",container!="",container!="POD"}[5m]))`},
+		{"memory", ports.ObservabilityResourceTrendMemory,
+			`100 * avg(container_memory_working_set_bytes{namespace="ani-tenant-tenant-1",container!="",container!="POD"} / (container_spec_memory_limit_bytes{namespace="ani-tenant-tenant-1",container!="",container!="POD"} > 0))`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := resourceTrendPromQL(tc.metric, ns)
+			if err != nil {
+				t.Fatalf("resourceTrendPromQL error = %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("query = %s\nwant %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestResourceTrendPromQLGPUNotScaledBy100 验证 GPU 曲线用 DCGM 原生 %（不乘 100）。
+func TestResourceTrendPromQLGPUNotScaledBy100(t *testing.T) {
+	got, err := resourceTrendPromQL(ports.ObservabilityResourceTrendGPU, "ani-tenant-1")
+	if err != nil {
+		t.Fatalf("resourceTrendPromQL error = %v", err)
+	}
+	if strings.Contains(got, "100 ") || strings.Contains(got, "* 100") {
+		t.Fatalf("GPU query must not scale by 100: %s", got)
+	}
+}
+
+func TestResourceTrendPromQLRejectsUnknownMetric(t *testing.T) {
+	if _, err := resourceTrendPromQL("bogus", "ani-tenant-1"); !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("want ErrInvalid, got %v", err)
+	}
+}
+
+// TestPrometheusObservabilityQueryResourceTrendTenantIsolation 验证租户级趋势强制锚定
+// 真实租户 namespace 转发，后端自建 PromQL，不透传任何前端/输入可控制的裸查询。
+func TestPrometheusObservabilityQueryResourceTrendTenantIsolation(t *testing.T) {
+	var capturedQuery, capturedPath string
+	service := newTestPrometheusObservabilityService(t, func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		capturedQuery = r.URL.Query().Get("query")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "success",
+			"data": map[string]any{
+				"resultType": "matrix",
+				"result": []map[string]any{
+					{"metric": map[string]string{}, "values": [][]any{{float64(1780000000), "25"}}},
+				},
+			},
+		})
+	}, nil)
+
+	start := time.Unix(1780000000, 0).UTC()
+	result, err := service.QueryResourceTrend(context.Background(), ports.ObservabilityResourceTrendRequest{
+		TenantID: "tenant_1",
+		Metric:   ports.ObservabilityResourceTrendCPU,
+		Start:    start.Add(-time.Hour),
+		End:      start,
+		Step:     30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("QueryResourceTrend error = %v", err)
+	}
+	if !strings.Contains(capturedPath, "/api/v1/query_range") {
+		t.Fatalf("expected query_range endpoint, got %s", capturedPath)
+	}
+	// 租户 namespace 被强制锚定，且含容器过滤，不含任何可注入的任意 label
+	if !strings.Contains(capturedQuery, `namespace="ani-tenant-tenant-1"`) {
+		t.Fatalf("query not tenant-anchored: %s", capturedQuery)
+	}
+	if !strings.Contains(capturedQuery, `container!="",container!="POD"`) {
+		t.Fatalf("cpu query missing pause-container filters: %s", capturedQuery)
+	}
+	// 透传 input 中若夹带 namespace/pod 裸 label，不应出现（后端只锚真实租户 ns）
+	if strings.Contains(capturedQuery, `namespace="evil"`) {
+		t.Fatalf("query contains un-anchored namespace: %s", capturedQuery)
+	}
+	if !result.DevProfile.RealProvider {
+		t.Fatalf("dev_profile.real_provider = false, want true")
+	}
+	if len(result.Results) != 1 || result.Results[0].Values[0].Value != 25 {
+		t.Fatalf("unexpected result: %+v", result.Results)
+	}
+}
+
+// TestPrometheusObservabilityQueryResourceTrendRestrictsToOwnTenant 验证后端按请求方
+// tenant_id 生成 namespace，前端无法通过参数改写成其他租户 namespace。
+func TestPrometheusObservabilityQueryResourceTrendRestrictsToOwnTenant(t *testing.T) {
+	var capturedQuery string
+	service := newTestPrometheusObservabilityService(t, func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query().Get("query")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "success",
+			"data":   map[string]any{"resultType": "matrix", "result": []map[string]any{}},
+		})
+	}, nil)
+
+	_, err := service.QueryResourceTrend(context.Background(), ports.ObservabilityResourceTrendRequest{
+		TenantID: "tenant_A", // 只有 JWT 层能决定，请求结构不接收任何租户/查询字段
+		Metric:   ports.ObservabilityResourceTrendGPU,
+		Start:    time.Unix(1780000000, 0).UTC().Add(-time.Hour),
+		End:      time.Unix(1780000000, 0).UTC(),
+		Step:     time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("QueryResourceTrend error = %v", err)
+	}
+	if !strings.Contains(capturedQuery, `namespace="ani-tenant-tenant-A"`) {
+		t.Fatalf("gpu query not anchored to own tenant: %s", capturedQuery)
+	}
+}
+
+func TestPrometheusObservabilityQueryResourceTrendDegradesOnError(t *testing.T) {
+	service := newTestPrometheusObservabilityService(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}, nil)
+
+	start := time.Unix(1780000000, 0).UTC()
+	result, err := service.QueryResourceTrend(context.Background(), ports.ObservabilityResourceTrendRequest{
+		TenantID: "tenant_1",
+		Metric:   ports.ObservabilityResourceTrendMemory,
+		Start:    start.Add(-time.Hour),
+		End:      start,
+		Step:     time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("QueryResourceTrend error = %v, should degrade to empty matrix", err)
+	}
+	if result.DevProfile.RealProvider {
+		t.Fatalf("dev_profile.real_provider = true, want degraded false")
+	}
+	if len(result.Results) != 0 {
+		t.Fatalf("want empty results on degradation, got %d", len(result.Results))
+	}
+}
+
+func TestPrometheusObservabilityQueryResourceTrendValidation(t *testing.T) {
+	service := newTestPrometheusObservabilityService(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}, nil)
+	start := time.Unix(1780000000, 0).UTC()
+	valid := func() ports.ObservabilityResourceTrendRequest {
+		return ports.ObservabilityResourceTrendRequest{
+			TenantID: "tenant_1",
+			Metric:   ports.ObservabilityResourceTrendCPU,
+			Start:    start.Add(-time.Hour),
+			End:      start,
+			Step:     time.Minute,
+		}
+	}
+	if _, err := service.QueryResourceTrend(context.Background(), valid()); err != nil {
+		t.Fatalf("valid request error = %v", err)
+	}
+	if _, err := service.QueryResourceTrend(context.Background(), func() ports.ObservabilityResourceTrendRequest {
+		req := valid()
+		req.TenantID = ""
+		return req
+	}()); !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("empty tenant want ErrInvalid, got %v", err)
+	}
+	if _, err := service.QueryResourceTrend(context.Background(), func() ports.ObservabilityResourceTrendRequest {
+		req := valid()
+		req.Step = 0
+		return req
+	}()); !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("zero step want ErrInvalid, got %v", err)
+	}
+	if _, err := service.QueryResourceTrend(context.Background(), func() ports.ObservabilityResourceTrendRequest {
+		req := valid()
+		req.Metric = "bogus"
+		return req
+	}()); !errors.Is(err, ports.ErrInvalid) {
+		t.Fatalf("unknown metric want ErrInvalid, got %v", err)
 	}
 }

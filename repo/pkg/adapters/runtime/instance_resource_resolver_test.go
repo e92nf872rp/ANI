@@ -87,6 +87,12 @@ func TestLocalInstanceResourceResolverValidatesTenantAndReadyResources(t *testin
 	if err != nil {
 		t.Fatalf("CreateVPC error = %v", err)
 	}
+	subnet, err := network.CreateSubnet(context.Background(), ports.NetworkSubnetCreateRequest{
+		TenantID: "tenant-a", IdempotencyKey: "resolver-subnet", VPCID: vpc.VPCID, Name: "tenant-a-subnet",
+	})
+	if err != nil {
+		t.Fatalf("CreateSubnet error = %v", err)
+	}
 	volume, err := storage.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{
 		TenantID: "tenant-a", IdempotencyKey: "resolver-volume", Name: "data", SizeGiB: 10,
 	})
@@ -99,7 +105,7 @@ func TestLocalInstanceResourceResolverValidatesTenantAndReadyResources(t *testin
 		Spec: ports.WorkloadSpec{
 			TenantID: "tenant-a",
 			Kind:     ports.WorkloadKindContainer,
-			Network:  ports.WorkloadNetworkPolicy{VPCID: vpc.VPCID},
+			Network:  ports.WorkloadNetworkPolicy{VPCID: vpc.VPCID, SubnetID: subnet.SubnetID},
 			Container: &ports.ContainerInstanceSpec{
 				VolumeMounts: []ports.InstanceVolumeMount{{VolumeID: volume.VolumeID, MountPath: "/data"}},
 			},
@@ -108,14 +114,164 @@ func TestLocalInstanceResourceResolverValidatesTenantAndReadyResources(t *testin
 	if err != nil {
 		t.Fatalf("ResolveCreate error = %v", err)
 	}
-	if len(result.ResourceRefs) != 2 || result.ResourceRefs[0] != "vpc/"+vpc.VPCID || result.ResourceRefs[1] != "volume/"+volume.VolumeID {
-		t.Fatalf("resource refs = %#v, want VPC and volume refs", result.ResourceRefs)
+	if len(result.ResourceRefs) != 3 || result.ResourceRefs[0] != "vpc/"+vpc.VPCID || result.ResourceRefs[1] != "subnet/"+subnet.SubnetID || result.ResourceRefs[2] != "volume/"+volume.VolumeID {
+		t.Fatalf("resource refs = %#v, want VPC, subnet, and volume refs", result.ResourceRefs)
 	}
 	if len(result.Spec.Storage) != 1 ||
 		result.Spec.Storage[0].Kind != ports.StorageAttachmentSharedPVC ||
 		result.Spec.Storage[0].SourceRef != storageProviderName("vol", volume.VolumeID) ||
 		result.Spec.Storage[0].MountPath != "/data" {
 		t.Fatalf("storage attachments = %#v, want shared PVC claim for resolved volume", result.Spec.Storage)
+	}
+}
+
+func TestLocalInstanceResourceResolverCompletesNetworkVPCFromSubnet(t *testing.T) {
+	network := NewLocalNetworkService()
+	vpc, err := network.CreateVPC(context.Background(), ports.NetworkVPCCreateRequest{
+		TenantID: "tenant-a", IdempotencyKey: "resolver-subnet-only-vpc", Name: "tenant-a-vpc",
+	})
+	if err != nil {
+		t.Fatalf("CreateVPC error = %v", err)
+	}
+	subnet, err := network.CreateSubnet(context.Background(), ports.NetworkSubnetCreateRequest{
+		TenantID: "tenant-a", IdempotencyKey: "resolver-subnet-only", VPCID: vpc.VPCID, Name: "tenant-a-subnet",
+	})
+	if err != nil {
+		t.Fatalf("CreateSubnet error = %v", err)
+	}
+
+	resolver := NewLocalInstanceResourceResolver(network, nil)
+	result, err := resolver.ResolveCreate(context.Background(), ports.WorkloadResourceResolveRequest{
+		TenantID: "tenant-a",
+		Spec: ports.WorkloadSpec{
+			Kind:    ports.WorkloadKindVM,
+			Network: ports.WorkloadNetworkPolicy{SubnetID: subnet.SubnetID},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveCreate error = %v", err)
+	}
+	if result.Spec.Network.VPCID != vpc.VPCID {
+		t.Fatalf("resolved vpc_id = %q, want %q from subnet", result.Spec.Network.VPCID, vpc.VPCID)
+	}
+	if len(result.ResourceRefs) != 2 || result.ResourceRefs[0] != "vpc/"+vpc.VPCID || result.ResourceRefs[1] != "subnet/"+subnet.SubnetID {
+		t.Fatalf("resource refs = %#v, want completed VPC and subnet refs", result.ResourceRefs)
+	}
+}
+
+func TestLocalInstanceResourceResolverRejectsNetworkVPCWithoutSubnet(t *testing.T) {
+	network := NewLocalNetworkService()
+	vpc, err := network.CreateVPC(context.Background(), ports.NetworkVPCCreateRequest{
+		TenantID: "tenant-a", IdempotencyKey: "resolver-vpc-only", Name: "tenant-a-vpc",
+	})
+	if err != nil {
+		t.Fatalf("CreateVPC error = %v", err)
+	}
+	resolver := NewLocalInstanceResourceResolver(network, nil)
+	_, err = resolver.ResolveCreate(context.Background(), ports.WorkloadResourceResolveRequest{
+		TenantID: "tenant-a",
+		Spec: ports.WorkloadSpec{
+			Kind:    ports.WorkloadKindVM,
+			Network: ports.WorkloadNetworkPolicy{VPCID: vpc.VPCID},
+		},
+	})
+	if !errors.Is(err, ports.ErrFailedPrecondition) {
+		t.Fatalf("ResolveCreate error = %v, want ErrFailedPrecondition", err)
+	}
+}
+
+func TestLocalInstanceResourceResolverFailsClosedWhenNetworkServiceMissing(t *testing.T) {
+	tests := []struct {
+		name    string
+		network ports.WorkloadNetworkPolicy
+	}{
+		{name: "vpc", network: ports.WorkloadNetworkPolicy{VPCID: "vpc-a", SubnetID: "subnet-a"}},
+		{name: "subnet", network: ports.WorkloadNetworkPolicy{SubnetID: "subnet-a"}},
+		{name: "security group", network: ports.WorkloadNetworkPolicy{SecurityGroupIDs: []string{"sg-a"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolver := NewLocalInstanceResourceResolver(nil, nil)
+			_, err := resolver.ResolveCreate(context.Background(), ports.WorkloadResourceResolveRequest{
+				TenantID: "tenant-a",
+				Spec: ports.WorkloadSpec{
+					Kind:    ports.WorkloadKindVM,
+					Network: tt.network,
+				},
+			})
+			if !errors.Is(err, ports.ErrFailedPrecondition) {
+				t.Fatalf("ResolveCreate error = %v, want ErrFailedPrecondition", err)
+			}
+		})
+	}
+}
+
+func TestLocalInstanceResourceResolverRejectsInvalidNetworkRelationships(t *testing.T) {
+	network := NewLocalNetworkService()
+	createVPC := func(tenantID, key string) ports.NetworkVPCRecord {
+		t.Helper()
+		vpc, err := network.CreateVPC(context.Background(), ports.NetworkVPCCreateRequest{
+			TenantID: tenantID, IdempotencyKey: key, Name: key,
+		})
+		if err != nil {
+			t.Fatalf("CreateVPC(%s) error = %v", key, err)
+		}
+		return vpc
+	}
+	createSubnet := func(tenantID, key, vpcID string) ports.NetworkSubnetRecord {
+		t.Helper()
+		subnet, err := network.CreateSubnet(context.Background(), ports.NetworkSubnetCreateRequest{
+			TenantID: tenantID, IdempotencyKey: key, VPCID: vpcID, Name: key,
+		})
+		if err != nil {
+			t.Fatalf("CreateSubnet(%s) error = %v", key, err)
+		}
+		return subnet
+	}
+
+	vpcA := createVPC("tenant-a", "resolver-vpc-a")
+	vpcB := createVPC("tenant-a", "resolver-vpc-b")
+	subnetA := createSubnet("tenant-a", "resolver-subnet-a", vpcA.VPCID)
+	unavailableVPC := createVPC("tenant-a", "resolver-vpc-unavailable")
+	unavailableVPCSubnet := createSubnet("tenant-a", "resolver-subnet-on-unavailable-vpc", unavailableVPC.VPCID)
+	unavailableSubnet := createSubnet("tenant-a", "resolver-subnet-unavailable", vpcA.VPCID)
+	foreignVPC := createVPC("tenant-b", "resolver-vpc-foreign")
+	foreignSubnet := createSubnet("tenant-b", "resolver-subnet-foreign", foreignVPC.VPCID)
+	network.mu.Lock()
+	vpcRecord := network.vpcs[unavailableVPC.VPCID]
+	vpcRecord.State = ports.NetworkResourceFailed
+	network.vpcs[unavailableVPC.VPCID] = vpcRecord
+	subnetRecord := network.subnets[unavailableSubnet.SubnetID]
+	subnetRecord.State = ports.NetworkResourceFailed
+	network.subnets[unavailableSubnet.SubnetID] = subnetRecord
+	network.mu.Unlock()
+
+	tests := []struct {
+		name    string
+		network ports.WorkloadNetworkPolicy
+		wantErr error
+	}{
+		{name: "subnet belongs to another vpc", network: ports.WorkloadNetworkPolicy{VPCID: vpcB.VPCID, SubnetID: subnetA.SubnetID}, wantErr: ports.ErrConflict},
+		{name: "vpc unavailable", network: ports.WorkloadNetworkPolicy{VPCID: unavailableVPC.VPCID, SubnetID: unavailableVPCSubnet.SubnetID}, wantErr: ports.ErrConflict},
+		{name: "subnet unavailable", network: ports.WorkloadNetworkPolicy{VPCID: vpcA.VPCID, SubnetID: unavailableSubnet.SubnetID}, wantErr: ports.ErrConflict},
+		{name: "vpc missing", network: ports.WorkloadNetworkPolicy{VPCID: "vpc-missing", SubnetID: subnetA.SubnetID}, wantErr: ports.ErrNotFound},
+		{name: "subnet missing", network: ports.WorkloadNetworkPolicy{VPCID: vpcA.VPCID, SubnetID: "subnet-missing"}, wantErr: ports.ErrNotFound},
+		{name: "subnet tenant invisible", network: ports.WorkloadNetworkPolicy{SubnetID: foreignSubnet.SubnetID}, wantErr: ports.ErrNotFound},
+	}
+	resolver := NewLocalInstanceResourceResolver(network, nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := resolver.ResolveCreate(context.Background(), ports.WorkloadResourceResolveRequest{
+				TenantID: "tenant-a",
+				Spec: ports.WorkloadSpec{
+					Kind:    ports.WorkloadKindVM,
+					Network: tt.network,
+				},
+			})
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("ResolveCreate error = %v, want %v", err, tt.wantErr)
+			}
+		})
 	}
 }
 
@@ -371,7 +527,7 @@ func TestLocalInstanceResourceResolverValidatesVMSecretRefs(t *testing.T) {
 		TenantID:       "tenant-a",
 		IdempotencyKey: "resolver-vm-secret",
 		Name:           "vm-secret",
-		Data:           map[string]string{"value": "secret"},
+		Data:           map[string]string{"value": "secret", "userdata": "#cloud-config\nusers:\n  - name: aniverify\n    plain_text_passwd: x\n"},
 	})
 	if err != nil {
 		t.Fatalf("CreateSecret error = %v", err)
@@ -406,6 +562,36 @@ func TestLocalInstanceResourceResolverValidatesVMSecretRefs(t *testing.T) {
 	})
 	if !errors.Is(err, ports.ErrNotFound) {
 		t.Fatalf("ResolveCreate cross-tenant VM secret error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestLocalInstanceResourceResolverRejectsCloudInitSecretMissingUserdataKey(t *testing.T) {
+	secrets := NewLocalSecretService()
+	secret, err := secrets.CreateSecret(context.Background(), ports.SecretCreateRequest{
+		TenantID:       "tenant-a",
+		IdempotencyKey: "resolver-vm-secret-nokey",
+		Name:           "vm-secret",
+		Data:           map[string]string{"value": "secret"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSecret error = %v", err)
+	}
+	resolver := NewLocalInstanceResourceResolverWithDependencies(nil, nil, nil, nil, secrets)
+	for _, vm := range []*ports.VMInstanceSpec{
+		{PasswordSecret: secret.SecretID},
+		{CloudInitSecret: secret.SecretID},
+	} {
+		_, err := resolver.ResolveCreate(context.Background(), ports.WorkloadResourceResolveRequest{
+			TenantID: "tenant-a",
+			Spec: ports.WorkloadSpec{
+				TenantID: "tenant-a",
+				Kind:     ports.WorkloadKindVM,
+				VM:       vm,
+			},
+		})
+		if !errors.Is(err, ports.ErrConflict) {
+			t.Fatalf("ResolveCreate cloud-init secret missing userdata key error = %v, want ErrConflict", err)
+		}
 	}
 }
 
@@ -546,5 +732,116 @@ func TestLocalInstanceResourceResolverInfersPurposeFromRepositoryWhenMetadataMis
 	})
 	if !errors.Is(err, ports.ErrConflict) || !strings.Contains(err.Error(), "ImagePurposeMismatch") {
 		t.Fatalf("ResolveCreate error = %v, want ErrConflict ImagePurposeMismatch", err)
+	}
+}
+
+func TestLocalInstanceResourceResolverRejectsCreateOnVolumeHeldByActiveInstance(t *testing.T) {
+	storage := NewLocalStorageService()
+	volume, err := storage.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{
+		TenantID: "tenant-a", IdempotencyKey: "resolver-rwo-held", Name: "held", SizeGiB: 10,
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume error = %v", err)
+	}
+	store := &fakeInstanceStore{records: []ports.WorkloadInstanceRecord{{
+		TenantID:   "tenant-a",
+		InstanceID: "inst-holder",
+		Name:       "holder",
+		Kind:       ports.WorkloadKindContainer,
+		Status:     ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+		StorageAttachments: []ports.WorkloadStorageAttachment{{
+			Name: "data", ResourceType: "volume", ResourceID: volume.VolumeID, MountPath: "/data",
+		}},
+	}}}
+	resolver := NewLocalInstanceResourceResolver(nil, storage).WithWorkloadStore(store)
+	_, err = resolver.ResolveCreate(context.Background(), ports.WorkloadResourceResolveRequest{
+		TenantID: "tenant-a",
+		Spec: ports.WorkloadSpec{
+			TenantID: "tenant-a",
+			Kind:     ports.WorkloadKindContainer,
+			Container: &ports.ContainerInstanceSpec{
+				VolumeMounts: []ports.InstanceVolumeMount{{VolumeID: volume.VolumeID, MountPath: "/data"}},
+			},
+		},
+	})
+	if !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("ResolveCreate error = %v, want ErrConflict for volume held by active instance", err)
+	}
+	if !strings.Contains(err.Error(), "inst-holder") {
+		t.Fatalf("error = %v, want occupying instance id in message", err)
+	}
+}
+
+func TestLocalInstanceResourceResolverAllowsCreateOnVolumeReleasedByStoppedInstance(t *testing.T) {
+	storage := NewLocalStorageService()
+	volume, err := storage.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{
+		TenantID: "tenant-a", IdempotencyKey: "resolver-rwo-stopped", Name: "released", SizeGiB: 10,
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume error = %v", err)
+	}
+	store := &fakeInstanceStore{records: []ports.WorkloadInstanceRecord{{
+		TenantID:   "tenant-a",
+		InstanceID: "inst-stopped",
+		Name:       "stopped",
+		Kind:       ports.WorkloadKindContainer,
+		Status:     ports.WorkloadStatus{State: ports.WorkloadStateStopped},
+		StorageAttachments: []ports.WorkloadStorageAttachment{{
+			Name: "data", ResourceType: "volume", ResourceID: volume.VolumeID, MountPath: "/data",
+		}},
+	}}}
+	resolver := NewLocalInstanceResourceResolver(nil, storage).WithWorkloadStore(store)
+	result, err := resolver.ResolveCreate(context.Background(), ports.WorkloadResourceResolveRequest{
+		TenantID: "tenant-a",
+		Spec: ports.WorkloadSpec{
+			TenantID: "tenant-a",
+			Kind:     ports.WorkloadKindContainer,
+			Container: &ports.ContainerInstanceSpec{
+				VolumeMounts: []ports.InstanceVolumeMount{{VolumeID: volume.VolumeID, MountPath: "/data"}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveCreate error = %v, want stopped holder to release the volume", err)
+	}
+	if len(result.ResourceRefs) != 1 || result.ResourceRefs[0] != "volume/"+volume.VolumeID {
+		t.Fatalf("resource refs = %#v, want volume ref", result.ResourceRefs)
+	}
+}
+
+func TestLocalInstanceResourceResolverAllowsCreateOnFilesystemHeldByActiveInstance(t *testing.T) {
+	storage := NewLocalStorageService()
+	filesystem, err := storage.CreateFilesystem(context.Background(), ports.StorageFilesystemCreateRequest{
+		TenantID: "tenant-a", IdempotencyKey: "resolver-rwx-shared", Name: "shared", Protocol: "nfs", SizeGiB: 100,
+	})
+	if err != nil {
+		t.Fatalf("CreateFilesystem error = %v", err)
+	}
+	store := &fakeInstanceStore{records: []ports.WorkloadInstanceRecord{{
+		TenantID:   "tenant-a",
+		InstanceID: "inst-fs-holder",
+		Name:       "fs-holder",
+		Kind:       ports.WorkloadKindContainer,
+		Status:     ports.WorkloadStatus{State: ports.WorkloadStateRunning},
+		StorageAttachments: []ports.WorkloadStorageAttachment{{
+			Name: "share", ResourceType: "filesystem", ResourceID: filesystem.FilesystemID, MountPath: "/share",
+		}},
+	}}}
+	resolver := NewLocalInstanceResourceResolver(nil, storage).WithWorkloadStore(store)
+	result, err := resolver.ResolveCreate(context.Background(), ports.WorkloadResourceResolveRequest{
+		TenantID: "tenant-a",
+		Spec: ports.WorkloadSpec{
+			TenantID: "tenant-a",
+			Kind:     ports.WorkloadKindContainer,
+			Container: &ports.ContainerInstanceSpec{
+				FilesystemMounts: []ports.InstanceFilesystemMount{{FilesystemID: filesystem.FilesystemID, MountPath: "/share"}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveCreate error = %v, want RWX filesystem sharing to stay allowed", err)
+	}
+	if len(result.ResourceRefs) != 1 || result.ResourceRefs[0] != "filesystem/"+filesystem.FilesystemID {
+		t.Fatalf("resource refs = %#v, want filesystem ref", result.ResourceRefs)
 	}
 }

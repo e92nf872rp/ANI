@@ -36,6 +36,8 @@ spec:
           env:
             - name: ANI_AUTH_MODE
               value: auth_service
+            - name: IAM_TARGET_MODE
+              value: disabled
             - name: AUTH_SERVICE_ADDR
               value: ani-auth-service.ani-system.svc.cluster.local:9101
             - name: KUBERNETES_SERVICE_ACCOUNT_TOKEN_FILE
@@ -157,8 +159,10 @@ spec:
               value: prometheus_kubernetes
             - name: INSTANCE_OBSERVABILITY_PROMETHEUS_URL
               value: http://sprint13-prometheus.ani-s07-observability.svc.cluster.local:9090
-            - name: INSTANCE_OBSERVABILITY_EXEC_BASE_URL
-              value: wss://ani-gateway.ani-system.svc.cluster.local:8080/api/v1
+            - name: SESSION_GATEWAY_GRPC_ADDR
+              value: ani-session-gateway-grpc.ani-system.svc.cluster.local:9090
+            - name: SESSION_GATEWAY_GRPC_TIMEOUT
+              value: 5s
           readinessProbe:
             httpGet:
               path: /readyz

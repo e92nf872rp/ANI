@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	adapterresilience "github.com/kubercloud/ani/pkg/adapters/resilience"
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
@@ -185,6 +186,113 @@ func TestProbeHandlerMetricsExportsReconcileControllerCounters(t *testing.T) {
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("metrics body missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestRuntimeAdminPreservesLegacyReadinessAggregation(t *testing.T) {
+	tests := []struct {
+		name       string
+		check      probeCheck
+		wantLegacy string
+		wantNew    string
+		wantCode   int
+	}{
+		{
+			name:       "strong failure",
+			check:      probeCheck{name: "postgres", mode: adapterresilience.DependencyStrong, run: func(context.Context) error { return errors.New("database unavailable") }},
+			wantLegacy: "fail",
+			wantNew:    "error",
+			wantCode:   http.StatusServiceUnavailable,
+		},
+		{
+			name:       "weak failure",
+			check:      probeCheck{name: "object-store", mode: adapterresilience.DependencyWeak, run: func(context.Context) error { return errors.New("object store unavailable") }},
+			wantLegacy: "degraded",
+			wantNew:    "degraded",
+			wantCode:   http.StatusOK,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			legacy := runProbeChecks(context.Background(), []probeCheck{test.check})
+			if legacy.Status != test.wantLegacy {
+				t.Fatalf("legacy status = %q, want %q", legacy.Status, test.wantLegacy)
+			}
+
+			runtime, err := newRuntimeAdmin("test-service", []probeCheck{test.check}, nil, nil)
+			if err != nil {
+				t.Fatalf("new runtime admin: %v", err)
+			}
+			t.Cleanup(func() { _ = runtime.Shutdown(context.Background()) })
+			runtime.SetServing(true)
+			recorder := httptest.NewRecorder()
+			runtime.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+			if recorder.Code != test.wantCode {
+				t.Fatalf("new status code = %d, want %d: %s", recorder.Code, test.wantCode, recorder.Body.String())
+			}
+			var body probeResponse
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode new response: %v", err)
+			}
+			if body.Status != test.wantNew {
+				t.Fatalf("new status = %q, want %q", body.Status, test.wantNew)
+			}
+			if strings.Contains(recorder.Body.String(), "object store unavailable") || strings.Contains(recorder.Body.String(), "database unavailable") {
+				t.Fatalf("new response leaked raw error: %s", recorder.Body.String())
+			}
+		})
+	}
+}
+
+func TestRuntimeAdminRequiresExplicitCheckCriticality(t *testing.T) {
+	runtime, err := newRuntimeAdmin(
+		"test-service",
+		[]probeCheck{{
+			name: "object-store",
+			run:  func(context.Context) error { return nil },
+		}},
+		nil,
+		nil,
+	)
+	if runtime != nil {
+		_ = runtime.Shutdown(context.Background())
+		t.Fatal("runtime was created without explicit check criticality")
+	}
+	if err == nil || !strings.Contains(err.Error(), "criticality") {
+		t.Fatalf("error = %v, want explicit criticality error", err)
+	}
+}
+
+func TestRuntimeAdminPreservesReconcileMetrics(t *testing.T) {
+	runtime, err := newRuntimeAdmin("instance-service", nil, fakeReconcileMetricsReader{
+		metrics: ports.ReconcileControllerMetrics{
+			Ticks:          7,
+			Successes:      5,
+			Failures:       2,
+			SkippedBackoff: 3,
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("new runtime admin: %v", err)
+	}
+	t.Cleanup(func() { _ = runtime.Shutdown(context.Background()) })
+	recorder := httptest.NewRecorder()
+	runtime.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", recorder.Code)
+	}
+	for _, want := range []string{
+		`ani_workload_reconcile_ticks_total{service="instance-service"} 7`,
+		`ani_workload_reconcile_successes_total{service="instance-service"} 5`,
+		`ani_workload_reconcile_failures_total{service="instance-service"} 2`,
+		`ani_workload_reconcile_backoff_skips_total{service="instance-service"} 3`,
+		`target_info{service_instance_id=`,
+		`service_name="instance-service"`,
+		`service_namespace="ani"`,
+	} {
+		if !strings.Contains(recorder.Body.String(), want) {
+			t.Fatalf("metrics body missing %q:\n%s", want, recorder.Body.String())
 		}
 	}
 }

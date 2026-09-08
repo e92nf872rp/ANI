@@ -2,20 +2,65 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app/server"
 
-	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
+	iamadapter "github.com/kubercloud/ani/pkg/adapters/iam"
 	"github.com/kubercloud/ani/pkg/bootstrap"
+	"github.com/kubercloud/ani/pkg/ports"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/router"
 )
+
+type targetIAMRuntimeConfig struct {
+	Mode      string
+	Address   string
+	MutualTLS iamadapter.MutualTLSConfig
+}
+
+const (
+	targetIAMModeDisabled = "disabled"
+	targetIAMModeDP205    = "dp2_05"
+)
+
+func targetIAMRuntimeConfigFromEnv() targetIAMRuntimeConfig {
+	mode := strings.TrimSpace(os.Getenv("IAM_TARGET_MODE"))
+	if mode == "" {
+		mode = targetIAMModeDisabled
+	}
+	return targetIAMRuntimeConfig{
+		Mode:    mode,
+		Address: strings.TrimSpace(os.Getenv("IAM_TARGET_GRPC_ADDR")),
+		MutualTLS: iamadapter.MutualTLSConfig{
+			ServerName:      strings.TrimSpace(os.Getenv("IAM_TARGET_TLS_SERVER_NAME")),
+			CAFile:          strings.TrimSpace(os.Getenv("IAM_TARGET_TLS_CA_FILE")),
+			CertificateFile: strings.TrimSpace(os.Getenv("IAM_TARGET_TLS_CERT_FILE")),
+			PrivateKeyFile:  strings.TrimSpace(os.Getenv("IAM_TARGET_TLS_KEY_FILE")),
+		},
+	}
+}
+
+func newTargetIAMClient(config targetIAMRuntimeConfig) (ports.TargetIAM, func() error, error) {
+	switch strings.TrimSpace(config.Mode) {
+	case "", targetIAMModeDisabled:
+		return nil, nil, nil
+	case targetIAMModeDP205:
+		if strings.TrimSpace(config.Address) == "" {
+			return nil, nil, fmt.Errorf("IAM_TARGET_GRPC_ADDR is required when IAM_TARGET_MODE=%s", targetIAMModeDP205)
+		}
+	default:
+		return nil, nil, fmt.Errorf("IAM_TARGET_MODE must be %q or %q", targetIAMModeDisabled, targetIAMModeDP205)
+	}
+	return iamadapter.Dial(config.Address, config.MutualTLS)
+}
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -27,6 +72,20 @@ func main() {
 	)
 
 	runtimeCtx := context.Background()
+	targetIAMConfig := targetIAMRuntimeConfigFromEnv()
+	targetIAMClient, closeTargetIAM, targetErr := newTargetIAMClient(targetIAMConfig)
+	if targetErr != nil {
+		logger.Error("failed to configure target IAM client", "err", targetErr)
+		os.Exit(1)
+	}
+	if closeTargetIAM != nil {
+		defer func() { _ = closeTargetIAM() }()
+	}
+	if targetIAMClient != nil {
+		logger.Info("target IAM tracer configured", "address", targetIAMConfig.Address)
+	} else {
+		logger.Info("target IAM tracer explicitly disabled")
+	}
 	k8sClusterService, closeK8sClusterRuntime, err := newGatewayK8sClusterRuntime(runtimeCtx, gatewayK8sClusterRuntimeConfigFromEnv())
 	if err != nil {
 		logger.Error("failed to configure k8s cluster proxy runtime", "err", err)
@@ -105,6 +164,15 @@ func main() {
 			}
 		}()
 	}
+	instanceSessionIssuer, closeInstanceSession, err := newGatewayInstanceSessionIssuer(gatewayInstanceSessionRuntimeConfigFromEnv())
+	if err != nil {
+		logger.Warn("session gateway gRPC client unavailable; real-provider session routes will fail closed", "err", err)
+		instanceSessionIssuer = nil
+		closeInstanceSession = nil
+	}
+	if closeInstanceSession != nil {
+		defer closeInstanceSession()
+	}
 	gpuSchedulingQueueStore, err := newGatewayGPUSchedulingQueueStore(gatewayGPUSchedulingQueueRuntimeConfigFromEnv())
 	if err != nil {
 		logger.Error("failed to configure gpu scheduling queue store runtime", "err", err)
@@ -169,6 +237,16 @@ func main() {
 			"provider", strings.TrimSpace(os.Getenv("INSTANCE_OBSERVABILITY_PROVIDER")),
 		)
 	}
+	platformServiceHealthConfig, err := gatewayPlatformServiceHealthRuntimeConfigFromEnv()
+	if err != nil {
+		logger.Error("failed to configure platform service health", "err", err)
+		os.Exit(1)
+	}
+	platformServiceHealthReader, err := newGatewayPlatformServiceHealthReader(platformServiceHealthConfig, logger)
+	if err != nil {
+		logger.Error("failed to configure platform service health reader", "err", err)
+		os.Exit(1)
+	}
 	inferenceServiceClient, closeInferenceGRPC, err := newGatewayInferenceServiceClient(runtimeCtx, gatewayInferenceServiceRuntimeConfigFromEnv())
 	if err != nil {
 		logger.Error("failed to configure inference-service gRPC client", "err", err)
@@ -209,7 +287,7 @@ func main() {
 		)
 	}
 	middleware.StartAuditWorker()
-	if err := middleware.Register(h, gatewayStore); err != nil {
+	if err := middleware.RegisterWithTargetIAM(h, gatewayStore, targetIAMClient); err != nil {
 		logger.Error("failed to configure gateway authz", "err", err)
 		os.Exit(1)
 	}
@@ -262,6 +340,11 @@ func main() {
 		logger.Error("failed to configure gpu inventory provider runtime", "err", err)
 		os.Exit(1)
 	}
+	platformCapacityService, err := newGatewayPlatformCapacityService(gatewayGPUInventoryRuntimeConfigFromEnv(), gpuInventory, kubernetesRESTClient, tenantService)
+	if err != nil {
+		logger.Error("failed to configure platform capacity provider runtime", "err", err)
+		os.Exit(1)
+	}
 	var routeInstanceRuntime *router.InstanceRuntime
 	if instanceRuntime.Service != nil {
 		routeInstanceRuntime = &router.InstanceRuntime{
@@ -275,6 +358,7 @@ func main() {
 		}
 	}
 	router.RegisterWithOptions(h, router.RegisterOptions{
+		TargetIAMClient:                       targetIAMClient,
 		K8sClusterService:                     k8sClusterService,
 		EncryptionService:                     encryptionService,
 		SecretService:                         secretService,
@@ -286,11 +370,12 @@ func main() {
 		ImageRegistry:                         imageRegistry,
 		VectorStoreService:                    vectorStoreService,
 		InstanceObservability:                 instanceObservability,
+		InstanceSessionIssuer:                 instanceSessionIssuer,
 		InstanceObservabilityUsesInstanceName: instanceObservabilityUsesInstanceName,
 		InstanceRuntime:                       routeInstanceRuntime,
 		KubernetesRESTClient:                  kubernetesRESTClient,
 		ObservabilityService:                  observabilityService,
-		EmailNotificationStore:                runtimeadapter.NewLocalEmailNotificationStore(),
+		PlatformServiceHealthReader:           platformServiceHealthReader,
 		InferenceServiceClient:                inferenceServiceClient,
 		ModelServiceClient:                    modelServiceClient,
 		KBServiceClient:                       kbServiceClient,
@@ -305,19 +390,39 @@ func main() {
 		MetadataStore:                         quotaMetadataStore,
 		QuotaStoreService:                     quotaStoreService,
 		MeteringService:                       meteringService,
+		PlatformCapacityService:               platformCapacityService,
 	})
+	runtimeAdmin, err := startGatewayRuntimeAdmin(logger)
+	if err != nil {
+		logger.Error("failed to start runtime admin", "err", err)
+		os.Exit(1)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-
-	go func() {
-		<-ctx.Done()
-		if shutdownErr := h.Shutdown(context.Background()); shutdownErr != nil {
-			logger.Error("failed to shut down gateway", "err", shutdownErr)
+	h.SetCustomSignalWaiter(func(serverErrors chan error) error {
+		startupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		if waitErr := waitForGatewayPublicListener(startupCtx, gatewayListenAddr(), serverErrors); waitErr != nil {
+			return waitErr
 		}
-	}()
-
+		runtimeAdmin.SetServing(true)
+		select {
+		case <-ctx.Done():
+			runtimeAdmin.SetServing(false)
+			return nil
+		case serveErr := <-serverErrors:
+			runtimeAdmin.SetServing(false)
+			return serveErr
+		}
+	})
 	h.Spin()
+	runtimeAdmin.SetServing(false)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if shutdownErr := runtimeAdmin.Shutdown(shutdownCtx); shutdownErr != nil {
+		logger.Error("failed to shut down runtime admin", "err", shutdownErr)
+	}
 }
 
 func gatewayRedisURLFromEnv() string {

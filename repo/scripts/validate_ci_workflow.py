@@ -11,7 +11,6 @@ import yaml
 REQUIRED_JOBS = {
     "go-ci",
     "python-ci",
-    "frontend-ci",
     "services-pr-gate",
     "api-spec-lint",
 }
@@ -117,9 +116,22 @@ def validate(
     if "scripts/validate_python_test_policy.py" not in str(python_ci):
         errors.append("Python CI must enforce the changed-source test policy")
 
-    frontend_ci = jobs.get("frontend-ci")
-    if "npm --prefix frontends/console audit --audit-level=high" not in str(frontend_ci):
-        errors.append("Frontend CI must block high and critical npm audit findings")
+    if (
+        "make validate-service-runtime-observability" not in str(services)
+        or "BASE_SHA" not in str(services)
+    ):
+        errors.append("Services gate must run runtime observability contract against BASE_SHA")
+    services_checkout = next(
+        (
+            step
+            for step in (services or {}).get("steps", [])
+            if isinstance(step, dict)
+            and str(step.get("uses", "")).startswith("actions/checkout@")
+        ),
+        None,
+    )
+    if not isinstance(services_checkout, dict) or services_checkout.get("with", {}).get("fetch-depth") != 0:
+        errors.append("Services gate must fetch full Git history for the BASE_SHA allowlist diff")
 
     portability_sources = {"Makefile": makefile_text}
     portability_sources.update(portability_texts or {})

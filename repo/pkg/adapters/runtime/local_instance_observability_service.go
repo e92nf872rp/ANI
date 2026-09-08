@@ -286,3 +286,4 @@ func limitSecurityEventRecords(items []ports.InstanceSecurityEventRecord, limit 
 }
 
 var _ ports.InstanceObservability = (*LocalInstanceObservabilityService)(nil)
+var _ ports.InstanceSessionIssuer = (*LocalInstanceObservabilityService)(nil)

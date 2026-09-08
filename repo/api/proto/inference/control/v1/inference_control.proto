@@ -19,6 +19,16 @@ service InferenceControl {
   rpc ApplyInferenceServiceLifecycle(ApplyInferenceServiceLifecycleRequest) returns (InferenceOperation);
   rpc GetInferenceOperation(GetInferenceOperationRequest) returns (InferenceOperation);
   rpc ListInferenceServiceLogs(ListInferenceServiceLogsRequest) returns (ListInferenceServiceLogsResponse);
+  rpc ListInferenceAccessPolicies(ListInferenceAccessPoliciesRequest) returns (ListInferenceAccessPoliciesResponse);
+  rpc CreateInferenceAccessPolicy(CreateInferenceAccessPolicyRequest) returns (InferenceAccessPolicy);
+  rpc GetInferenceAccessPolicy(GetInferenceAccessPolicyRequest) returns (InferenceAccessPolicy);
+  rpc PatchInferenceAccessPolicy(PatchInferenceAccessPolicyRequest) returns (InferenceAccessPolicy);
+  rpc DeleteInferenceAccessPolicy(DeleteInferenceAccessPolicyRequest) returns (DeleteInferenceAccessPolicyResponse);
+  rpc ListInferenceServicePolicies(ListInferenceServicePoliciesRequest) returns (InferenceServicePolicies);
+  rpc UpdateInferenceServicePolicies(UpdateInferenceServicePoliciesRequest) returns (InferenceServicePolicies);
+  rpc ListInferencePolicyEvents(ListInferencePolicyEventsRequest) returns (InferencePolicyEventListResponse);
+  rpc CheckInferenceAccess(CheckInferenceAccessRequest) returns (CheckInferenceAccessResponse);
+  rpc ReleaseInferenceAccessLease(ReleaseInferenceAccessLeaseRequest) returns (ReleaseInferenceAccessLeaseResponse);
 }
 
 message ListInferenceServicesRequest {
@@ -120,6 +130,7 @@ message InferenceService {
   string image_id = 21;
   string image_ref = 22;
   InferenceServiceEngine engine = 23;
+  string invocation_url = 24;
 }
 
 message InferenceServiceEngine {
@@ -162,3 +173,73 @@ message InferenceOperation {
   google.protobuf.Timestamp created_at = 10;
   google.protobuf.Timestamp completed_at = 11;
 }
+
+message InferenceAccessPolicy {
+  string id = 1;
+  string tenant_id = 2;
+  string name = 3;
+  string status = 4;
+  string description = 5;
+  int32 priority = 6;
+  InferenceAccessPolicyScope scope = 7;
+  InferenceAccessPolicyAccess access = 8;
+  InferenceAccessPolicyRateLimits rate_limits = 9;
+  InferenceAccessPolicyConcurrency concurrency = 10;
+  google.protobuf.Timestamp created_at = 11;
+  google.protobuf.Timestamp updated_at = 12;
+}
+
+message InferenceAccessPolicyScope { string type = 1; repeated string inference_service_ids = 2; repeated string api_key_ids = 3; }
+message InferenceAccessPolicyAccess { bool allow_all_tenant_keys = 1; repeated string allow_api_key_ids = 2; repeated string deny_api_key_ids = 3; }
+message InferenceAccessPolicyRateLimits { int32 qps = 1; int32 rpm = 2; }
+message InferenceAccessPolicyConcurrency { int32 max_in_flight = 1; int32 lease_ttl_seconds = 2; }
+message InferenceAccessPolicyBinding { string policy_id = 1; string inference_service_id = 2; int32 priority = 3; }
+message InferenceAccessPolicyEvent {
+  string id = 1; string tenant_id = 2; string policy_id = 3; string inference_service_id = 4;
+  string api_key_id = 5; string key_prefix = 6; string request_id = 7; string openai_path = 8;
+  string external_model = 9; string decision = 10; string reason_code = 11; int32 http_status = 12;
+  int32 retry_after_seconds = 13; google.protobuf.Timestamp created_at = 14;
+}
+message ListInferenceAccessPoliciesRequest { string tenant_id = 1; }
+message ListInferenceAccessPoliciesResponse { repeated InferenceAccessPolicy items = 1; }
+message CreateInferenceAccessPolicyRequest { string tenant_id = 1; string idempotency_key = 2; InferenceAccessPolicy policy = 3; }
+message GetInferenceAccessPolicyRequest { string tenant_id = 1; string policy_id = 2; }
+message PatchInferenceAccessPolicyRequest {
+  string tenant_id = 1;
+  string policy_id = 2;
+  string idempotency_key = 3;
+  InferenceAccessPolicy policy = 4;
+  // request_hash is computed by ANI Gateway from the original public PATCH
+  // intent before it reads and merges the current policy state.
+  string request_hash = 5;
+}
+message DeleteInferenceAccessPolicyRequest { string tenant_id = 1; string policy_id = 2; string idempotency_key = 3; }
+message DeleteInferenceAccessPolicyResponse {}
+message ListInferenceServicePoliciesRequest { string tenant_id = 1; string inference_service_id = 2; }
+message InferenceServicePolicies { string inference_service_id = 1; repeated InferenceAccessPolicy policies = 2; }
+message UpdateInferenceServicePoliciesRequest { string tenant_id = 1; string inference_service_id = 2; string idempotency_key = 3; repeated string policy_ids = 4; }
+message ListInferencePolicyEventsRequest { string tenant_id = 1; string inference_service_id = 2; string policy_id = 3; string api_key_id = 4; string decision = 5; int32 limit = 6; string cursor = 7; }
+message InferencePolicyEventListResponse { repeated InferenceAccessPolicyEvent items = 1; string next_cursor = 2; }
+message CheckInferenceAccessRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+  string api_key_id = 3;
+  string key_prefix = 4;
+  reserved 5;
+  reserved "inference_service_id";
+  string served_model_name = 6;
+  string openai_path = 7;
+  string request_id = 8;
+  bool stream = 9;
+}
+message CheckInferenceAccessResponse {
+  string decision = 1;
+  int32 http_status = 2;
+  string reason_code = 3;
+  string policy_id = 4;
+  string lease_id = 5;
+  int32 retry_after_seconds = 6;
+  string inference_service_id = 7;
+}
+message ReleaseInferenceAccessLeaseRequest { string tenant_id = 1; string lease_id = 2; }
+message ReleaseInferenceAccessLeaseResponse {}

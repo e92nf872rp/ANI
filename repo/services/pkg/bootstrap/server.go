@@ -36,16 +36,34 @@ func RunGRPC(port int, register func(*grpc.Server), deps *Deps) {
 	reflection.Register(srv)
 
 	var probe *http.Server
+	var probeListener net.Listener
+	var runtimeAdminShutdown func(context.Context) error
+	var setServing func(bool)
 	if deps.HealthPort > 0 {
+		runtimeAdmin, runtimeErr := newRuntimeAdminForDeps(deps)
+		if runtimeErr != nil {
+			_ = lis.Close()
+			deps.Logger.Error("failed to initialize runtime admin", "err", runtimeErr)
+			os.Exit(1)
+		}
+		probeListener, err = net.Listen("tcp", fmt.Sprintf(":%d", deps.HealthPort))
+		if err != nil {
+			_ = runtimeAdmin.Shutdown(context.Background())
+			_ = lis.Close()
+			deps.Logger.Error("failed to listen for runtime admin", "port", deps.HealthPort, "err", err)
+			os.Exit(1)
+		}
 		probe = &http.Server{
 			Addr:              fmt.Sprintf(":%d", deps.HealthPort),
-			Handler:           newProbeHandler(deps.ServiceName, dependencyProbeChecks(deps)),
+			Handler:           runtimeAdmin,
 			ReadHeaderTimeout: 5 * time.Second,
 		}
+		runtimeAdminShutdown = runtimeAdmin.Shutdown
+		setServing = runtimeAdmin.SetServing
 		go func() {
-			deps.Logger.Info("health probe server listening", "port", deps.HealthPort)
-			if err := probe.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				deps.Logger.Error("health probe serve error", "err", err)
+			deps.Logger.Info("runtime admin server listening", "port", deps.HealthPort)
+			if serveErr := probe.Serve(probeListener); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+				deps.Logger.Error("runtime admin serve error", "err", serveErr)
 				os.Exit(1)
 			}
 		}()
@@ -60,15 +78,26 @@ func RunGRPC(port int, register func(*grpc.Server), deps *Deps) {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if setServing != nil {
+		setServing(true)
+	}
 	<-ctx.Done()
 
 	deps.Logger.Info("shutting down gRPC server gracefully")
+	if setServing != nil {
+		setServing(false)
+	}
 	if probe != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
 		if err := probe.Shutdown(shutdownCtx); err != nil {
-			deps.Logger.Error("health probe shutdown error", "err", err)
+			deps.Logger.Error("runtime admin shutdown error", "err", err)
 		}
+		if runtimeAdminShutdown != nil {
+			if err := runtimeAdminShutdown(shutdownCtx); err != nil {
+				deps.Logger.Error("runtime telemetry shutdown error", "err", err)
+			}
+		}
+		cancel()
 	}
 	srv.GracefulStop()
 	deps.Logger.Info("gRPC server stopped")

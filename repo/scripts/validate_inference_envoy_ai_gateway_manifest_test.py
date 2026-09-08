@@ -39,6 +39,31 @@ class InferenceEnvoyAIGatewayManifestTests(unittest.TestCase):
             },
         )
 
+    def test_repo_manifest_has_shared_global_gateway_rate_limit(self) -> None:
+        policy = manifest.by_kind_name(self.documents(), "BackendTrafficPolicy", "ani-c40-ratelimit")
+        self.assertEqual(policy["apiVersion"], "gateway.envoyproxy.io/v1alpha1")
+        self.assertEqual(
+            policy["spec"]["targetRefs"],
+            [{"group": "gateway.networking.k8s.io", "kind": "Gateway", "name": "ani-aigw"}],
+        )
+        self.assertEqual(
+            policy["spec"]["rateLimit"]["global"]["rules"],
+            [{"limit": {"requests": 600, "unit": "Minute"}, "shared": True}],
+        )
+
+    def test_rejects_rate_limit_that_is_not_shared_gateway_global(self) -> None:
+        for mutation in ("wrong_target", "local_only", "missing_shared"):
+            with self.subTest(mutation=mutation):
+                documents = self.documents()
+                policy = manifest.by_kind_name(documents, "BackendTrafficPolicy", "ani-c40-ratelimit")
+                if mutation == "wrong_target":
+                    policy["spec"]["targetRefs"][0]["name"] = "other-gateway"
+                elif mutation == "local_only":
+                    policy["spec"]["rateLimit"] = {"local": {"rules": [{"limit": {"requests": 600, "unit": "Minute"}}]}}
+                else:
+                    policy["spec"]["rateLimit"]["global"]["rules"][0].pop("shared")
+                self.assert_rejected(documents)
+
     def test_rejects_wrong_crd_api_version(self) -> None:
         documents = self.documents()
         manifest.by_kind_name(documents, "AIGatewayRoute", "ani-c40")["apiVersion"] = (

@@ -333,6 +333,97 @@ func TestLocalStorageServiceSharedStoreIsReadAuthority(t *testing.T) {
 	}
 }
 
+// TestLocalStorageServiceMountSurvivesRestartViaStore reproduces the live
+// incident: gateway restart wipes the in-memory maps while the store keeps the
+// records, so MountVolume/MountFilesystem must resolve through the store.
+func TestLocalStorageServiceMountSurvivesRestartViaStore(t *testing.T) {
+	store := newSharedMemoryStorageStore()
+	clock := func() time.Time { return time.Unix(400, 0).UTC() }
+	writer := NewLocalStorageService(WithStorageResourceStore(store), WithStorageServiceClock(clock))
+
+	volume, err := writer.CreateVolume(context.Background(), ports.StorageVolumeCreateRequest{
+		TenantID:       storageStoreTenantID,
+		IdempotencyKey: "restart-mount-volume",
+		Name:           "restart-volume",
+		SizeGiB:        10,
+		Zone:           "az-a",
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume() error = %v", err)
+	}
+	filesystem, err := writer.CreateFilesystem(context.Background(), ports.StorageFilesystemCreateRequest{
+		TenantID:       storageStoreTenantID,
+		IdempotencyKey: "restart-mount-fs",
+		Name:           "restart-fs",
+		Protocol:       "nfs",
+		SizeGiB:        100,
+	})
+	if err != nil {
+		t.Fatalf("CreateFilesystem() error = %v", err)
+	}
+	if _, err := writer.CreateFilesystemMountTarget(context.Background(), ports.FilesystemMountTargetCreateRequest{
+		TenantID:       storageStoreTenantID,
+		FilesystemID:   filesystem.FilesystemID,
+		IdempotencyKey: "restart-mount-target",
+		SubnetID:       "subnet-1",
+	}); err != nil {
+		t.Fatalf("CreateFilesystemMountTarget() error = %v", err)
+	}
+
+	// A restarted gateway only has the store: the in-memory maps are empty.
+	restarted := NewLocalStorageService(WithStorageResourceStore(store), WithStorageServiceClock(clock))
+
+	mounted, err := restarted.MountVolume(context.Background(), ports.StorageVolumeMountRequest{
+		TenantID:       storageStoreTenantID,
+		VolumeID:       volume.VolumeID,
+		IdempotencyKey: "restart-mount-volume-op",
+		InstanceID:     "inst-1",
+		InstanceRoute:  "instances/inst-1",
+		MountName:      "data",
+	})
+	if err != nil {
+		t.Fatalf("restarted MountVolume() error = %v", err)
+	}
+	if mounted.MountInstanceID != "inst-1" {
+		t.Fatalf("restarted MountVolume() = %#v, want mount recorded", mounted)
+	}
+	reread, err := writer.GetVolume(context.Background(), ports.StorageResourceGetRequest{
+		TenantID:   storageStoreTenantID,
+		ResourceID: volume.VolumeID,
+	})
+	if err != nil || reread.MountInstanceID != "inst-1" {
+		t.Fatalf("writer GetVolume() = %#v err = %v, want mount persisted to store", reread, err)
+	}
+
+	fsMounted, err := restarted.MountFilesystem(context.Background(), ports.StorageFilesystemMountRequest{
+		TenantID:       storageStoreTenantID,
+		FilesystemID:   filesystem.FilesystemID,
+		IdempotencyKey: "restart-mount-fs-op",
+		InstanceID:     "inst-1",
+		InstanceRoute:  "instances/inst-1",
+		MountPath:      "/data",
+		AutoMount:      true,
+	})
+	if err != nil {
+		t.Fatalf("restarted MountFilesystem() error = %v", err)
+	}
+	if fsMounted.Mounts != 1 {
+		t.Fatalf("restarted MountFilesystem() = %#v, want 1 mount", fsMounted)
+	}
+
+	unmounted, err := restarted.UnmountVolume(context.Background(), ports.StorageVolumeUnmountRequest{
+		TenantID:       storageStoreTenantID,
+		VolumeID:       volume.VolumeID,
+		IdempotencyKey: "restart-unmount-volume-op",
+	})
+	if err != nil {
+		t.Fatalf("restarted UnmountVolume() error = %v", err)
+	}
+	if unmounted.MountInstanceID != "" {
+		t.Fatalf("restarted UnmountVolume() = %#v, want mount cleared", unmounted)
+	}
+}
+
 type sharedMemoryVectorStore struct {
 	mu       sync.Mutex
 	stores   map[string]ports.VectorStoreRecord

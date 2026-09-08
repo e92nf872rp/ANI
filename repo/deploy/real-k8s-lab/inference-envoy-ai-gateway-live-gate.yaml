@@ -25,8 +25,11 @@ required_endpoints:
 
 live_checks:
   - id: envoy-resources-accepted
-    command: wait for Gateway, HTTPRoute, Backend, AIServiceBackend, AIGatewayRoute, and SecurityPolicy Accepted
+    command: wait for Gateway, HTTPRoute, Backend, AIServiceBackend, AIGatewayRoute, SecurityPolicy, and BackendTrafficPolicy Accepted
     pass_condition: all_c40_resources_accepted
+  - id: gateway-global-rate-limit-configured
+    command: inspect the Gateway-targeted BackendTrafficPolicy and Envoy Gateway rate-limit backend configuration
+    pass_condition: shared_global_600_per_minute_policy_and_redis_backend_are_accepted
   - id: adapter-ready
     command: wait for deployment/envoy-authz-adapter Ready
     pass_condition: adapter_ready

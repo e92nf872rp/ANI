@@ -43,6 +43,107 @@ func TestKubernetesDryRunRendererRendersVM(t *testing.T) {
 	}
 }
 
+func TestKubernetesDryRunRendererRendersVMOnKubeOVNSubnet(t *testing.T) {
+	manifests, err := NewKubernetesDryRunRenderer(NewPlanningRuntime()).Render(context.Background(), ports.WorkloadSpec{
+		TenantID: "tenant-a",
+		Name:     "vm-kubeovn",
+		Kind:     ports.WorkloadKindVM,
+		Network: ports.WorkloadNetworkPolicy{
+			VPCID:     "vpc-product-id",
+			SubnetID:  "subnet-product-id",
+			PrivateIP: "10.40.1.20",
+			Attachments: []ports.WorkloadNetworkAttachment{
+				{NetworkID: "tenant-vpc", Plane: ports.NetworkPlaneTenantVPC, Required: true, Primary: true, SubnetID: "subnet-product-id"},
+				{NetworkID: "foundation-mesh", Plane: ports.NetworkPlaneFoundationMesh, Required: true},
+				{NetworkID: "management", Plane: ports.NetworkPlaneManagement, Required: true},
+			},
+		},
+		VM: &ports.VMInstanceSpec{
+			BootImage: "ubuntu.qcow2",
+			RootDisk: ports.WorkloadStorageAttachment{
+				Name: "root", Kind: ports.StorageAttachmentRootDisk, SizeGiB: 40, SourceRef: "vm-kubeovn-root",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Render(VM) error = %v", err)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal([]byte(manifests[0].Content), &manifest); err != nil {
+		t.Fatalf("unmarshal VM manifest = %v", err)
+	}
+	template := manifest["spec"].(map[string]any)["template"].(map[string]any)
+	annotations := template["metadata"].(map[string]any)["annotations"].(map[string]any)
+	for key, want := range map[string]string{
+		"ani.kubercloud.io/vpc-id":         "vpc-product-id",
+		"ani.kubercloud.io/subnet-id":      "subnet-product-id",
+		"ovn.kubernetes.io/logical_switch": "subnet-subnet-product-id",
+		"ovn.kubernetes.io/ip_address":     "10.40.1.20",
+	} {
+		if got := annotations[key]; got != want {
+			t.Fatalf("annotation %s = %#v, want %q", key, got, want)
+		}
+	}
+	templateSpec := template["spec"].(map[string]any)
+	networks := templateSpec["networks"].([]any)
+	interfaces := templateSpec["domain"].(map[string]any)["devices"].(map[string]any)["interfaces"].([]any)
+	if len(networks) != 1 || networks[0].(map[string]any)["name"] != "default" || networks[0].(map[string]any)["pod"] == nil {
+		t.Fatalf("networks = %#v, want one default pod network", networks)
+	}
+	if len(interfaces) != 1 || interfaces[0].(map[string]any)["name"] != "default" || interfaces[0].(map[string]any)["bridge"] == nil {
+		t.Fatalf("interfaces = %#v, want one default bridge interface", interfaces)
+	}
+	if strings.Contains(manifests[0].Content, `"multus"`) {
+		t.Fatalf("product-only network must not render Multus or a VPC ID as networkName:\n%s", manifests[0].Content)
+	}
+}
+
+func TestKubernetesDryRunRendererRendersVMWithKubeOVNPrimaryAndResolvedNAD(t *testing.T) {
+	manifests, err := NewKubernetesDryRunRenderer(NewPlanningRuntime()).Render(context.Background(), ports.WorkloadSpec{
+		TenantID: "tenant-a",
+		Name:     "vm-kubeovn-nad",
+		Kind:     ports.WorkloadKindVM,
+		Network: ports.WorkloadNetworkPolicy{
+			VPCID:    "vpc-product-id",
+			SubnetID: "subnet-product-id",
+			Attachments: []ports.WorkloadNetworkAttachment{
+				{NetworkID: "tenant-vpc", Plane: ports.NetworkPlaneTenantVPC, Required: true, Primary: true, SubnetID: "subnet-product-id"},
+				{NetworkID: "tenant-a/secondary-nad", Plane: ports.NetworkPlaneStorage, Required: true},
+			},
+		},
+		VM: &ports.VMInstanceSpec{
+			BootImage: "ubuntu.qcow2",
+			RootDisk: ports.WorkloadStorageAttachment{
+				Name: "root", Kind: ports.StorageAttachmentRootDisk, SizeGiB: 40, SourceRef: "vm-kubeovn-nad-root",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Render(VM) error = %v", err)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal([]byte(manifests[0].Content), &manifest); err != nil {
+		t.Fatalf("unmarshal VM manifest = %v", err)
+	}
+	templateSpec := manifest["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)
+	networks := templateSpec["networks"].([]any)
+	interfaces := templateSpec["domain"].(map[string]any)["devices"].(map[string]any)["interfaces"].([]any)
+	if len(networks) != 2 || len(interfaces) != 2 {
+		t.Fatalf("networks/interfaces = %#v/%#v, want matched primary plus one attachment", networks, interfaces)
+	}
+	primaryNetwork := networks[0].(map[string]any)
+	primaryInterface := interfaces[0].(map[string]any)
+	if primaryNetwork["name"] != "default" || primaryNetwork["pod"] == nil || primaryInterface["name"] != "default" || primaryInterface["bridge"] == nil {
+		t.Fatalf("primary network/interface = %#v/%#v, want default pod/bridge", primaryNetwork, primaryInterface)
+	}
+	secondaryNetwork := networks[1].(map[string]any)
+	secondaryInterface := interfaces[1].(map[string]any)
+	multus := secondaryNetwork["multus"].(map[string]any)
+	if secondaryNetwork["name"] != "storage" || multus["networkName"] != "tenant-a/secondary-nad" || secondaryInterface["name"] != "storage" || secondaryInterface["bridge"] == nil {
+		t.Fatalf("secondary network/interface = %#v/%#v, want resolved NAD on matching bridge", secondaryNetwork, secondaryInterface)
+	}
+}
+
 func TestKubernetesDryRunRendererRendersGPUDeployment(t *testing.T) {
 	renderer := NewKubernetesDryRunRenderer(NewPlanningRuntime(WithGPUInventory(fakeGPUInventory{})))
 
@@ -432,6 +533,37 @@ func TestKubernetesDryRunRendererRendersVMCloudInitSecret(t *testing.T) {
 		`"cloudInitNoCloud"`,
 		`"secretRef"`,
 		`"name": "secret-cloudinit"`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("VM manifest missing %q:\n%s", want, content)
+		}
+	}
+}
+
+func TestKubernetesDryRunRendererRendersVMPasswordSecretRef(t *testing.T) {
+	manifests, err := NewKubernetesDryRunRenderer(NewPlanningRuntime()).Render(context.Background(), ports.WorkloadSpec{
+		TenantID: "tenant-a",
+		Name:     "vm-passwordsecret-01",
+		Kind:     ports.WorkloadKindVM,
+		VM: &ports.VMInstanceSpec{
+			BootImage:      "ubuntu.qcow2",
+			PasswordSecret: "secret-passwd",
+			RootDisk: ports.WorkloadStorageAttachment{
+				Name:    "root",
+				Kind:    ports.StorageAttachmentRootDisk,
+				SizeGiB: 80,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Render(VM) error = %v", err)
+	}
+	content := manifests[0].Content
+	for _, want := range []string{
+		`"name": "cloudinitdisk"`,
+		`"cloudInitNoCloud"`,
+		`"secretRef"`,
+		`"name": "secret-passwd"`,
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("VM manifest missing %q:\n%s", want, content)

@@ -10,8 +10,10 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/route"
+	"github.com/google/uuid"
 	runtimeadapter "github.com/kubercloud/ani/pkg/adapters/runtime"
 	"github.com/kubercloud/ani/pkg/ports"
+	"github.com/kubercloud/ani/pkg/types"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 )
 
@@ -306,7 +308,13 @@ func (api *platformWorkloadAPI) writeAccepted(ctx context.Context, c *app.Reques
 	}, record.UpdatedAt)
 	recordToStore := taskRecordFromResponse(tenantID, task)
 	recordToStore.ResourceID = record.ID
-	created, _, err := api.tasks.Create(ctx, recordToStore)
+	parsedTenantID, err := uuid.Parse(strings.TrimSpace(tenantID))
+	if err != nil {
+		writeInstanceError(c, http.StatusInternalServerError, "INVALID_TENANT_CONTEXT", "invalid tenant id")
+		return
+	}
+	taskCtx := types.WithTenant(ctx, &types.TenantContext{TenantID: parsedTenantID})
+	created, _, err := api.tasks.Create(taskCtx, recordToStore)
 	if err != nil {
 		writeInstanceError(c, http.StatusInternalServerError, "TASK_PERSIST_FAILED", err.Error())
 		return

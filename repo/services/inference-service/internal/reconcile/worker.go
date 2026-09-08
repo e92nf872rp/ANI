@@ -15,12 +15,14 @@ import (
 )
 
 const (
-	defaultLeaseDuration   = 30 * time.Second
-	defaultRetryDelay      = 5 * time.Second
-	defaultMaxAttempts     = 180
-	defaultDeployTimeout   = 15 * time.Minute
-	requestPathEnsureGrace = 45 * time.Second
-	codeRuntimeNotBound    = "RUNTIME_NOT_BOUND"
+	defaultLeaseDuration        = 30 * time.Second
+	defaultRetryDelay           = 5 * time.Second
+	defaultMaxAttempts          = 180
+	defaultDeployTimeout        = 15 * time.Minute
+	requestPathEnsureGrace      = 45 * time.Second
+	codeRuntimeNotBound         = "RUNTIME_NOT_BOUND"
+	codeGatewayUnpublishPending = "GATEWAY_UNPUBLISH_PENDING"
+	codeGatewayUnpublishCheck   = "GATEWAY_UNPUBLISH_CHECK_FAILED"
 )
 
 type Worker struct {
@@ -94,6 +96,46 @@ func (w *Worker) RunOnce(ctx context.Context) (bool, error) {
 	}
 	if operation.RollbackGeneration != 0 {
 		return true, w.reconcileScaleRollback(ctx, service, operation)
+	}
+	if requiresPublicationWithdrawal(operation.Type) {
+		withdrawalBudgetOperation := operation
+		if publicationWithdrawalMatches(service, operation) {
+			// A prior runtime-stage retry may encounter a transient publisher
+			// lookup/read failure. Preserve the already-confirmed withdrawal clock
+			// instead of falling back to time spent waiting for withdrawal.
+			withdrawalBudgetOperation.CreatedAt = service.Publication.UpdatedAt.UTC()
+		}
+		withdrawn, withdrawalErr := w.store.PublicationWithdrawn(
+			ctx, operation.TenantID, operation.ServiceID, operation.TargetGeneration,
+		)
+		if withdrawalErr != nil {
+			return true, w.retryPublicationWithdrawal(ctx, withdrawalBudgetOperation, codeGatewayUnpublishCheck, withdrawalErr)
+		}
+		if !withdrawn {
+			return true, w.retryPublicationWithdrawal(ctx, withdrawalBudgetOperation, codeGatewayUnpublishPending, errors.New("gateway route withdrawal is pending"))
+		}
+		// PublicationWithdrawn and the first GetService are separate reads. The
+		// publisher may complete between them, so only a fresh service snapshot is
+		// authoritative for both the withdrawal fence and the runtime-stage clock.
+		service, err = w.store.GetService(ctx, operation.TenantID, operation.ServiceID)
+		if err != nil {
+			return true, w.retryPublicationWithdrawal(ctx, withdrawalBudgetOperation, codeGatewayUnpublishCheck, err)
+		}
+		if !generationMatches(service, operation) {
+			return true, w.terminal(ctx, operation, codeStaleGeneration, repository.ErrStaleGeneration)
+		}
+		if !publicationWithdrawalMatches(service, operation) {
+			return true, w.retryPublicationWithdrawal(ctx, withdrawalBudgetOperation, codeGatewayUnpublishPending, errors.New("gateway route withdrawal observation is stale"))
+		}
+		// Withdrawal and runtime mutation have independent budgets. Persistence
+		// keeps the runtime attempt counter untouched for gateway waits; the
+		// completed publication timestamp starts the runtime-stage timeout.
+		operation.CreatedAt = service.Publication.UpdatedAt.UTC()
+		if operation.ErrorCode == codeGatewayUnpublishPending || operation.ErrorCode == codeGatewayUnpublishCheck {
+			// The publisher dependency recovered. Do not let its last error trigger
+			// the runtime-stage abandonment check below.
+			operation.ErrorCode = ""
+		}
 	}
 	if w.shouldAbandon(operation) {
 		return true, w.abandon(ctx, service, operation)
@@ -201,10 +243,29 @@ func (w *Worker) RunOnce(ctx context.Context) (bool, error) {
 	}
 	partial.Status = domain.StatusRunning
 	partial.Complete = true
+	partial.Publish = publishesAfterRuntimeSuccess(operation.Type)
 	if _, err := w.apply(ctx, partial); err != nil {
 		return true, err
 	}
 	return true, nil
+}
+
+func requiresPublicationWithdrawal(action domain.Action) bool {
+	switch action {
+	case domain.ActionStop, domain.ActionRestart, domain.ActionDelete:
+		return true
+	default:
+		return false
+	}
+}
+
+func publishesAfterRuntimeSuccess(action domain.Action) bool {
+	switch action {
+	case domain.ActionCreate, domain.ActionStart, domain.ActionRestart:
+		return true
+	default:
+		return false
+	}
 }
 
 // requestPathOwnsCreate 让刚写入的 create 把第一次 Ensure 留给请求路径，避免和 worker 抢同一把 Core 幂等键。
@@ -482,6 +543,23 @@ func (w *Worker) retry(ctx context.Context, operation domain.Operation, code str
 		ErrorCode: code, ErrorMessage: codedMessage(code, message), RetryAt: &retryAt,
 		LeaseToken: operation.LeaseToken,
 	})
+}
+
+// retryPublicationWithdrawal keeps stop/restart/delete fail-closed until the
+// publisher confirms withdrawal. Gateway dependency waits do not consume the
+// runtime attempt/deploy budgets and must never call runtime cleanup.
+func (w *Worker) retryPublicationWithdrawal(ctx context.Context, operation domain.Operation, code string, cause error) error {
+	return w.retry(ctx, operation, code, cause)
+}
+
+func publicationWithdrawalMatches(service domain.Service, operation domain.Operation) bool {
+	publication := service.Publication
+	return publication.Desired == domain.PublicationUnpublished &&
+		publication.Generation == operation.TargetGeneration &&
+		publication.ObservedGeneration == operation.TargetGeneration &&
+		publication.Phase == domain.PublicationUnpublishedOK &&
+		service.InvocationURL == "" &&
+		!publication.UpdatedAt.IsZero()
 }
 
 func (w *Worker) terminal(ctx context.Context, operation domain.Operation, code string, cause error) error {

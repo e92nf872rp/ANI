@@ -21,7 +21,7 @@ type ResourcesView struct {
 	Accelerator *domain.Accelerator `json:"accelerator,omitempty"`
 }
 
-// ServiceView 是对外产品投影：无 runtime_ref、无 ClusterIP、invocation_url 固定 null。
+// ServiceView 是对外产品投影：无 runtime_ref、无 ClusterIP；invocation_url 只在当前网关发布已确认时存在。
 type ServiceView struct {
 	ID                 uuid.UUID      `json:"id"`
 	Name               string         `json:"name"`
@@ -65,7 +65,8 @@ type OperationView struct {
 	CompletedAt    *time.Time            `json:"completed_at"`
 }
 
-// Controller 处理 list/get/scale/lifecycle/delete。mutation 同样在请求路径同步打 Core。
+// Controller 处理 list/get/scale/lifecycle/delete。stop/restart/delete 只接受意图，
+// 由 worker 在网关撤路由后触达 runtime；其余既有 mutation 保持请求路径行为。
 type Controller struct {
 	store   repository.ControlStore
 	runtime runtime.InferenceRuntime
@@ -198,9 +199,13 @@ func (c *Controller) Delete(ctx context.Context, tenantID, serviceID uuid.UUID) 
 	return c.dispatchMutation(ctx, resource, result)
 }
 
-// dispatchMutation 同步打 Core；失败回滚 pending mutation。
+// dispatchMutation 对无需先撤路由的动作同步打 Core；失败回滚 pending mutation。
 func (c *Controller) dispatchMutation(ctx context.Context, before domain.Service, result repository.MutationResult) (domain.Operation, error) {
 	if c.runtime == nil || result.Disposition != domain.TransitionCreated {
+		return result.Operation, nil
+	}
+	switch result.Operation.Type {
+	case domain.ActionStop, domain.ActionRestart, domain.ActionDelete:
 		return result.Operation, nil
 	}
 	observed, err := dispatchRuntime(ctx, c.runtime, result.Service, result.Operation)
@@ -243,7 +248,7 @@ func ProjectOperation(operation domain.Operation) OperationView {
 	return projectOperation(operation)
 }
 
-// projectService 去掉内部 runtime 字段，invocation_url / endpoint_url 固定为 null。
+// projectService 去掉内部 runtime 字段；只投影已经发布的公网 invocation_url。
 func projectService(resource domain.Service) ServiceView {
 	model := resource.Name
 	var snapshot struct {
@@ -271,6 +276,10 @@ func projectService(resource domain.Service) ServiceView {
 		value := resource.CurrentOperationID
 		currentOperationID = &value
 	}
+	var invocationURL *string
+	if value := strings.TrimSpace(resource.InvocationURL); value != "" {
+		invocationURL = &value
+	}
 	updatedAt := resource.UpdatedAt
 	return ServiceView{
 		ID: resource.ID, Name: resource.Name, Model: model, ModelVersionID: resource.ModelVersionID,
@@ -282,7 +291,7 @@ func projectService(resource domain.Service) ServiceView {
 		LegacyGPUCount: resource.DesiredSpec.LegacyGPUCountPerPod, MaxConcurrency: 8,
 		Status: resource.Status, StatusReason: statusReason, StatusMessage: statusMessage,
 		Generation: resource.Generation, ObservedGeneration: resource.ObservedGeneration,
-		CurrentOperationID: currentOperationID, InvocationURL: nil, EndpointURL: nil,
+		CurrentOperationID: currentOperationID, InvocationURL: invocationURL, EndpointURL: nil,
 		CreatedAt: resource.CreatedAt, UpdatedAt: &updatedAt,
 	}
 }

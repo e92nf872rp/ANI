@@ -81,6 +81,8 @@ data:
       # relabel_configs 过滤 kubevirt.io=virt-handler label 且端口为 8443。
       # 采集 kubevirt_vmi_* 系列指标，无 VM 时指标为空 series（正常响应，非报错）。
       - job_name: 'kubevirt-virt-handler'
+        scheme: https
+        honor_labels: true
         metrics_path: /metrics
         bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
         tls_config:
@@ -96,10 +98,58 @@ data:
           - source_labels: [__meta_kubernetes_pod_container_port_number]
             regex: 8443
             action: keep
+          # 不要用 __meta_kubernetes_namespace/__meta_kubernetes_pod_name 做
+          # target_label: namespace / pod 覆盖：KubeVirt exporter 原生会输出
+          # namespace(=VMI 租户 namespace) / name / pod 标签，target_label 覆盖会把
+          # 租户 namespace 挤成 exported_namespace，导致 adapter 按租户 namespace+name
+          # 查询匹配不到（与 dcgm job 相同的 relabel 覆盖教训）。保留 exporter 原生标签。
+      - job_name: ani-components
+        scrape_interval: 15s
+        scrape_timeout: 5s
+        metrics_path: /metrics
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names: [ani-system]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_ani_dev_metrics_scrape]
+            regex: "true"
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_container_port_name]
+            regex: health
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_phase]
+            regex: Running
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_label_ani_dev_service_name]
+            regex: ani-gateway|auth-service|model-service|task-service|inference-service|tenant-service|metering-service
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_label_ani_dev_service_name]
+            target_label: ani_service_name
+          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_version]
+            target_label: k8s_service_version
           - source_labels: [__meta_kubernetes_namespace]
-            target_label: namespace
+            target_label: kubernetes_namespace
           - source_labels: [__meta_kubernetes_pod_name]
             target_label: pod
+      # kata-monitor for sandbox(kata) guest 内指标（kata_guest_meminfo 等，2026-09-04 追加，
+      # 与集群 sprint13-prometheus-config 实际配置同步）。清单见同目录 kata-monitor-live.yaml。
+      # kubernetes_sd(role: node) 按节点抓取 hostNetwork 端口 8091；kata-monitor 每个
+      # 节点只暴露本节点 sandbox，不能用 Service（负载均衡会丢数据）。
+      # relabel 必须用 __meta_kubernetes_node_address_InternalIP：写成
+      # __meta_kubernetes_node_address 会匹配失败，target 回落 kubelet 10250（400 错误）。
+      # series 自带 cri_name/cri_namespace（pod 名/租户 namespace，实测有值），查询可直接过滤。
+      - job_name: kata-monitor
+        metrics_path: /metrics
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_node_address_InternalIP]
+            regex: (.+)
+            replacement: ${1}:8091
+            target_label: __address__
+          - source_labels: [__meta_kubernetes_node_name]
+            target_label: node
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -125,7 +175,7 @@ spec:
       serviceAccountName: sprint13-prometheus
       containers:
         - name: prometheus
-          image: prom/prometheus:v2.55.1
+          image: prom/prometheus:v2.55.1@sha256:2659f4c2ebb718e7695cb9b25ffa7d6be64db013daba13e05c875451cf51b0d3
           imagePullPolicy: IfNotPresent
           args:
             - --config.file=/etc/prometheus/prometheus.yml

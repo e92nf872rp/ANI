@@ -108,6 +108,9 @@ func (s *registryIdempotencyStore) Delete(_ context.Context, key string) error {
 func (s *registryIdempotencyStore) Increment(context.Context, string, time.Duration) (int64, error) {
 	return 0, nil
 }
+func (s *registryIdempotencyStore) TTL(context.Context, string) (time.Duration, error) {
+	return 0, ports.ErrNotFound
+}
 func (s *registryIdempotencyStore) Exists(_ context.Context, key string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -11,5 +11,6 @@ type CacheStore interface {
 	SetNX(ctx context.Context, key string, value []byte, ttl time.Duration) (bool, error)
 	Delete(ctx context.Context, key string) error
 	Increment(ctx context.Context, key string, ttl time.Duration) (int64, error)
+	TTL(ctx context.Context, key string) (time.Duration, error)
 	Exists(ctx context.Context, key string) (bool, error)
 }

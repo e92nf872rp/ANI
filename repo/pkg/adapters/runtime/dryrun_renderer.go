@@ -10,6 +10,8 @@ import (
 	"github.com/kubercloud/ani/pkg/ports"
 )
 
+const sandboxWorkspaceStorageClassName = "ani-block"
+
 type KubernetesDryRunRenderer struct {
 	planner *PlanningRuntime
 }
@@ -219,7 +221,8 @@ func renderSandboxWorkspacePVC(spec ports.WorkloadSpec) ports.WorkloadManifest {
 	meta := metadata(spec, "sandbox-workspace")
 	meta["name"] = name
 	pvcSpec := map[string]any{
-		"accessModes": []any{"ReadWriteOnce"},
+		"accessModes":      []any{"ReadWriteOnce"},
+		"storageClassName": sandboxWorkspaceStorageClassName,
 		"resources": map[string]any{
 			"requests": map[string]any{"storage": "5Gi"},
 		},
@@ -824,7 +827,7 @@ func vmDisks(spec ports.WorkloadSpec) []any {
 			"disk": map[string]any{"bus": "virtio"},
 		})
 	}
-	if spec.VM != nil && (strings.TrimSpace(spec.VM.CloudInitSecret) != "" || strings.TrimSpace(spec.VM.UserData) != "") {
+	if vmCloudInitEnabled(spec) {
 		disks = append(disks, map[string]any{
 			"name": "cloudinitdisk",
 			"disk": map[string]any{"bus": "virtio"},
@@ -842,6 +845,15 @@ func vmDisks(spec ports.WorkloadSpec) []any {
 	return disks
 }
 
+func vmCloudInitEnabled(spec ports.WorkloadSpec) bool {
+	if spec.VM == nil {
+		return false
+	}
+	return strings.TrimSpace(spec.VM.CloudInitSecret) != "" ||
+		strings.TrimSpace(spec.VM.PasswordSecret) != "" ||
+		strings.TrimSpace(spec.VM.UserData) != ""
+}
+
 func vmCloudInitVolume(spec ports.WorkloadSpec) map[string]any {
 	if spec.VM == nil {
 		return nil
@@ -849,6 +861,10 @@ func vmCloudInitVolume(spec ports.WorkloadSpec) map[string]any {
 	cloudInit := map[string]any{}
 	if secretID := strings.TrimSpace(spec.VM.CloudInitSecret); secretID != "" {
 		cloudInit["secretRef"] = map[string]any{"name": secretID}
+	} else if passSecret := strings.TrimSpace(spec.VM.PasswordSecret); passSecret != "" {
+		// password_secret_ref 与 cloud_init_secret 互斥（Gateway 校验），
+		// 二者都指向含 userdata 键的 cloud-init Secret。
+		cloudInit["secretRef"] = map[string]any{"name": passSecret}
 	}
 	if userData := strings.TrimSpace(spec.VM.UserData); userData != "" {
 		cloudInit["userData"] = userData
@@ -920,11 +936,22 @@ func isPlaceholderNetworkAttachment(attachment ports.WorkloadNetworkAttachment) 
 }
 
 // vmNetworksAndInterfaces renders KubeVirt networks/interfaces as a matched pair.
-// Planning/Gateway defaults use plane-like NetworkIDs as placeholders; those fall
-// back to the pod network until a real Multus NAD is supplied.
+// ANI VPC/Subnet IDs are product resources, not Multus NAD names. An explicitly
+// resolved Kube-OVN subnet therefore uses the pod network with bridge binding;
+// Multus is reserved for non-primary, non-placeholder internal attachments.
 func vmNetworksAndInterfaces(spec ports.WorkloadSpec) (networks []any, interfaces []any) {
+	if strings.TrimSpace(spec.Network.SubnetID) != "" {
+		networks = append(networks, map[string]any{
+			"name": "default",
+			"pod":  map[string]any{},
+		})
+		interfaces = append(interfaces, map[string]any{
+			"name":   "default",
+			"bridge": map[string]any{},
+		})
+	}
 	for _, attachment := range spec.Network.Attachments {
-		if isPlaceholderNetworkAttachment(attachment) {
+		if attachment.Primary || attachment.Plane == ports.NetworkPlaneTenantVPC || isPlaceholderNetworkAttachment(attachment) {
 			continue
 		}
 		networkID := strings.TrimSpace(attachment.NetworkID)

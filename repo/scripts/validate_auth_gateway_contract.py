@@ -17,9 +17,9 @@ EXPECTED_PATHS = {
     "/auth/oidc/begin": "beginOIDCLogin",
     "/auth/token": "completeOIDCLogin",
     "/auth/refresh": None,
-    "/auth/logout": "logout",
+    "/auth/logout": "logoutSession",
     "/auth/api-keys": None,
-    "/auth/api-keys/{key_id}": "revokeAPIKey",
+    "/auth/api-keys/{key_id}": "revokeIAMAPIKey",
 }
 
 EXPECTED_AUTH_ROUTES = {

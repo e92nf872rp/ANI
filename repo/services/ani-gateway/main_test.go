@@ -1,6 +1,16 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	iamadapter "github.com/kubercloud/ani/pkg/adapters/iam"
+)
 
 func TestGatewayRedisConfigFromEnvParsesSentinel(t *testing.T) {
 	t.Setenv("GATEWAY_REDIS_MODE", "sentinel")
@@ -19,5 +29,172 @@ func TestGatewayRedisConfigFromEnvParsesSentinel(t *testing.T) {
 	}
 	if cfg.Username != "ani" || cfg.Password != "secret" || cfg.DB != 2 {
 		t.Fatalf("redis auth/db = %q/%q/%d, want ani/secret/2", cfg.Username, cfg.Password, cfg.DB)
+	}
+}
+
+func TestGatewayPlatformServiceHealthRuntimeConfig(t *testing.T) {
+	t.Setenv("PLATFORM_SERVICE_HEALTH_ENABLED", "")
+	t.Setenv("PLATFORM_SERVICE_HEALTH_PROMETHEUS_URL", "")
+	t.Setenv("PLATFORM_SERVICE_HEALTH_QUERY_TIMEOUT", "")
+	config, err := gatewayPlatformServiceHealthRuntimeConfigFromEnv()
+	if err != nil || config.Enabled {
+		t.Fatalf("disabled config = %+v, err = %v", config, err)
+	}
+
+	t.Setenv("PLATFORM_SERVICE_HEALTH_ENABLED", "true")
+	if _, err := gatewayPlatformServiceHealthRuntimeConfigFromEnv(); err == nil {
+		t.Fatal("enabled config accepted missing Prometheus URL")
+	}
+	t.Setenv("PLATFORM_SERVICE_HEALTH_PROMETHEUS_URL", "http://prometheus.monitoring.svc:9090")
+	t.Setenv("PLATFORM_SERVICE_HEALTH_QUERY_TIMEOUT", "4s")
+	config, err = gatewayPlatformServiceHealthRuntimeConfigFromEnv()
+	if err != nil {
+		t.Fatalf("enabled config: %v", err)
+	}
+	if !config.Enabled || config.PrometheusURL != "http://prometheus.monitoring.svc:9090" || config.QueryTimeout != 4*time.Second {
+		t.Fatalf("enabled config = %+v", config)
+	}
+
+	t.Setenv("PLATFORM_SERVICE_HEALTH_QUERY_TIMEOUT", "6s")
+	if _, err := gatewayPlatformServiceHealthRuntimeConfigFromEnv(); err == nil {
+		t.Fatal("config accepted timeout above 5s")
+	}
+}
+
+func TestGatewayHealthPort(t *testing.T) {
+	t.Setenv("HEALTH_PORT", "")
+	if port, err := gatewayHealthPort(); err != nil || port != 9200 {
+		t.Fatalf("default port = %d, err = %v; want 9200", port, err)
+	}
+	t.Setenv("HEALTH_PORT", "9300")
+	if port, err := gatewayHealthPort(); err != nil || port != 9300 {
+		t.Fatalf("configured port = %d, err = %v; want 9300", port, err)
+	}
+	for _, value := range []string{"invalid", "0", "65536"} {
+		t.Setenv("HEALTH_PORT", value)
+		if _, err := gatewayHealthPort(); err == nil {
+			t.Fatalf("HEALTH_PORT=%q accepted, want error", value)
+		}
+	}
+}
+
+func TestGatewayRuntimeAdminPrivateContract(t *testing.T) {
+	t.Setenv("KUBERNETES_SERVICE_HOST", "")
+	t.Setenv("ANI_SERVICE_NAME", "")
+	runtime, err := newGatewayRuntimeAdmin(nil)
+	if err != nil {
+		t.Fatalf("new runtime admin: %v", err)
+	}
+	t.Cleanup(func() { _ = runtime.Shutdown(context.Background()) })
+
+	ready := httptest.NewRecorder()
+	runtime.ServeHTTP(ready, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if ready.Code != http.StatusServiceUnavailable {
+		t.Fatalf("not-serving status = %d, want 503", ready.Code)
+	}
+	runtime.SetServing(true)
+
+	metrics := httptest.NewRecorder()
+	runtime.ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if metrics.Code != http.StatusOK {
+		t.Fatalf("metrics status = %d, want 200", metrics.Code)
+	}
+	for _, want := range []string{`target_info{service_instance_id=`, `service_name="ani-gateway"`, `service_namespace="ani"`} {
+		if !strings.Contains(metrics.Body.String(), want) {
+			t.Fatalf("metrics missing %q:\n%s", want, metrics.Body.String())
+		}
+	}
+}
+
+func TestWaitForGatewayPublicListenerUsesPublicHealthContract(t *testing.T) {
+	public := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/healthz" {
+			http.NotFound(response, request)
+			return
+		}
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer public.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := waitForGatewayPublicListener(
+		ctx,
+		strings.TrimPrefix(public.URL, "http://"),
+		make(chan error),
+	); err != nil {
+		t.Fatalf("wait for public listener: %v", err)
+	}
+
+	serverErrors := make(chan error, 1)
+	serverErrors <- errors.New("bind failed")
+	if err := waitForGatewayPublicListener(ctx, "127.0.0.1:1", serverErrors); err == nil || !strings.Contains(err.Error(), "bind failed") {
+		t.Fatalf("server error = %v, want bind failure", err)
+	}
+}
+
+func TestTargetIAMRuntimeConfigFromEnv(t *testing.T) {
+	t.Setenv("IAM_TARGET_MODE", " dp2_05 ")
+	t.Setenv("IAM_TARGET_GRPC_ADDR", " 127.0.0.1:8443 ")
+	t.Setenv("IAM_TARGET_TLS_SERVER_NAME", " iam.dp2.test ")
+	t.Setenv("IAM_TARGET_TLS_CA_FILE", " /run/secrets/iam-ca.crt ")
+	t.Setenv("IAM_TARGET_TLS_CERT_FILE", " /run/secrets/gateway.crt ")
+	t.Setenv("IAM_TARGET_TLS_KEY_FILE", " /run/secrets/gateway.key ")
+
+	config := targetIAMRuntimeConfigFromEnv()
+	if config.Mode != "dp2_05" || config.Address != "127.0.0.1:8443" {
+		t.Fatalf("Mode/Address = %q/%q", config.Mode, config.Address)
+	}
+	wantTLS := iamadapter.MutualTLSConfig{
+		ServerName:      "iam.dp2.test",
+		CAFile:          "/run/secrets/iam-ca.crt",
+		CertificateFile: "/run/secrets/gateway.crt",
+		PrivateKeyFile:  "/run/secrets/gateway.key",
+	}
+	if config.MutualTLS != wantTLS {
+		t.Fatalf("MutualTLS = %#v, want %#v", config.MutualTLS, wantTLS)
+	}
+}
+
+func TestTargetIAMRuntimeConfigDefaultsToDisabled(t *testing.T) {
+	t.Setenv("IAM_TARGET_MODE", "")
+
+	config := targetIAMRuntimeConfigFromEnv()
+	if config.Mode != targetIAMModeDisabled {
+		t.Fatalf("Mode = %q, want %q when IAM_TARGET_MODE is unset", config.Mode, targetIAMModeDisabled)
+	}
+}
+
+func TestNewTargetIAMClientAllowsExplicitAndImplicitDisabledMode(t *testing.T) {
+	for _, mode := range []string{targetIAMModeDisabled, ""} {
+		client, closeClient, err := newTargetIAMClient(targetIAMRuntimeConfig{Mode: mode})
+		if err != nil || client != nil || closeClient != nil {
+			t.Fatalf("newTargetIAMClient(%q): clientNil=%v closeNil=%v error=%v", mode, client == nil, closeClient == nil, err)
+		}
+	}
+}
+
+func TestNewTargetIAMClientRejectsUnknownOrIncompleteTargetMode(t *testing.T) {
+	tests := []struct {
+		name   string
+		config targetIAMRuntimeConfig
+	}{
+		{name: "unknown mode", config: targetIAMRuntimeConfig{Mode: "auto"}},
+		{name: "target mode without address", config: targetIAMRuntimeConfig{Mode: "dp2_05"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client, closeClient, err := newTargetIAMClient(test.config)
+			if err == nil || client != nil || closeClient != nil {
+				t.Fatalf("newTargetIAMClient(%s): clientNil=%v closeNil=%v error=%v", test.name, client == nil, closeClient == nil, err)
+			}
+		})
+	}
+}
+
+func TestNewTargetIAMClientFailsClosedWithoutMutualTLS(t *testing.T) {
+	client, closeClient, err := newTargetIAMClient(targetIAMRuntimeConfig{Mode: "dp2_05", Address: "127.0.0.1:8443"})
+	if err == nil || client != nil || closeClient != nil {
+		t.Fatalf("newTargetIAMClient(incomplete TLS): clientNil=%v closeNil=%v error=%v", client == nil, closeClient == nil, err)
 	}
 }

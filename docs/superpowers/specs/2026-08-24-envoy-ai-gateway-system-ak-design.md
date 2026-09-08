@@ -4,6 +4,8 @@
 > 阶段：`INFERENCE-SERVICE-C40/C41`
 > 状态：已评审
 
+> **C41 取代说明（2026-08-31）：** 本文的 C40 静态 AK/ext_authz 真实链路事实继续有效；涉及 C41 的“鉴权前由静态路由提供 tenant/service”“对外模型名全局无歧义”和每服务静态 SecurityPolicy 延伸方案，已由 [`2026-08-31-envoy-ai-gateway-tenant-aware-dynamic-publication-design.md`](./2026-08-31-envoy-ai-gateway-tenant-aware-dynamic-publication-design.md) 取代。C41 采用单域名、AK 解析租户、认证后服务解析和 `recomputeRoute`。
+
 ## 背景
 
 ANI 推理控制面已经贯通 Console、ANI Gateway、inference-service、Core `platform-workloads`、Kubernetes 和 vLLM，并通过 CPU、整卡 GPU 与 vGPU 的真实集群门禁。当前缺口不是工作负载创建，而是租户可使用的 OpenAI 兼容推理数据面：现有 ANI Gateway `/v1/chat/completions` 仍是 `501` 占位，`invocation_url` 仍为空。

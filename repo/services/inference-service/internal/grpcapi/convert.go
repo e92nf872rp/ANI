@@ -12,6 +12,66 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+func protoAccessPolicy(p domain.AccessPolicy) *inferencecontrolv1.InferenceAccessPolicy {
+	serviceIDs := make([]string, 0, len(p.Scope.InferenceServiceIDs))
+	for _, id := range p.Scope.InferenceServiceIDs {
+		serviceIDs = append(serviceIDs, id.String())
+	}
+	out := &inferencecontrolv1.InferenceAccessPolicy{Id: p.ID.String(), TenantId: p.TenantID.String(), Name: p.Name, Status: string(p.Status), Description: p.Description, Priority: int32(p.Priority), Scope: &inferencecontrolv1.InferenceAccessPolicyScope{Type: string(p.Scope.Type), InferenceServiceIds: serviceIDs, ApiKeyIds: p.Scope.APIKeyIDs}, Access: &inferencecontrolv1.InferenceAccessPolicyAccess{AllowAllTenantKeys: p.Access.AllowAllTenantKeys, AllowApiKeyIds: p.Access.AllowAPIKeyIDs, DenyApiKeyIds: p.Access.DenyAPIKeyIDs}, RateLimits: &inferencecontrolv1.InferenceAccessPolicyRateLimits{Qps: int32(p.RateLimits.QPS), Rpm: int32(p.RateLimits.RPM)}, Concurrency: &inferencecontrolv1.InferenceAccessPolicyConcurrency{MaxInFlight: int32(p.Concurrency.MaxInFlight), LeaseTtlSeconds: int32(p.Concurrency.LeaseTTLSeconds)}}
+	if !p.CreatedAt.IsZero() {
+		out.CreatedAt = timestamppb.New(p.CreatedAt)
+	}
+	if !p.UpdatedAt.IsZero() {
+		out.UpdatedAt = timestamppb.New(p.UpdatedAt)
+	}
+	return out
+}
+
+func protoAccessPolicyEvent(e domain.AccessPolicyEvent) *inferencecontrolv1.InferenceAccessPolicyEvent {
+	out := &inferencecontrolv1.InferenceAccessPolicyEvent{Id: e.ID.String(), TenantId: e.TenantID.String(), KeyPrefix: e.KeyPrefix, RequestId: e.RequestID, OpenaiPath: e.OpenAIPath, ExternalModel: e.ExternalModel, Decision: e.Decision, ReasonCode: e.ReasonCode, HttpStatus: int32(e.HTTPStatus), RetryAfterSeconds: int32(e.RetryAfterSeconds)}
+	if e.PolicyID != nil {
+		out.PolicyId = e.PolicyID.String()
+	}
+	if e.InferenceServiceID != nil {
+		out.InferenceServiceId = e.InferenceServiceID.String()
+	}
+	if e.APIKeyID != nil {
+		out.ApiKeyId = e.APIKeyID.String()
+	}
+	if !e.CreatedAt.IsZero() {
+		out.CreatedAt = timestamppb.New(e.CreatedAt)
+	}
+	return out
+}
+
+func domainAccessPolicy(p *inferencecontrolv1.InferenceAccessPolicy, tenantID uuid.UUID) (domain.AccessPolicy, error) {
+	if p == nil {
+		return domain.AccessPolicy{}, fmt.Errorf("%w: policy is required", errInvalidArgument)
+	}
+	id := uuid.Nil
+	var err error
+	if p.GetId() != "" {
+		id, err = parseResourceID(p.GetId(), "policy_id")
+		if err != nil {
+			return domain.AccessPolicy{}, err
+		}
+	}
+	scope := p.GetScope()
+	result := domain.AccessPolicy{ID: id, TenantID: tenantID, Name: p.GetName(), Status: domain.AccessPolicyStatus(p.GetStatus()), Description: p.GetDescription(), Priority: int(p.GetPriority()), Access: domain.AccessPolicyAccess{AllowAllTenantKeys: p.GetAccess().GetAllowAllTenantKeys(), AllowAPIKeyIDs: p.GetAccess().GetAllowApiKeyIds(), DenyAPIKeyIDs: p.GetAccess().GetDenyApiKeyIds()}, RateLimits: domain.AccessPolicyRateLimits{QPS: int(p.GetRateLimits().GetQps()), RPM: int(p.GetRateLimits().GetRpm())}, Concurrency: domain.AccessPolicyConcurrency{MaxInFlight: int(p.GetConcurrency().GetMaxInFlight()), LeaseTTLSeconds: int(p.GetConcurrency().GetLeaseTtlSeconds())}}
+	if scope != nil {
+		result.Scope.Type = domain.AccessPolicyScopeType(scope.GetType())
+		result.Scope.APIKeyIDs = append([]string(nil), scope.GetApiKeyIds()...)
+		for _, raw := range scope.GetInferenceServiceIds() {
+			parsed, parseErr := parseResourceID(raw, "inference_service_id")
+			if parseErr != nil {
+				return domain.AccessPolicy{}, parseErr
+			}
+			result.Scope.InferenceServiceIDs = append(result.Scope.InferenceServiceIDs, parsed)
+		}
+	}
+	return result, result.Validate()
+}
+
 var digestPinnedImage = regexp.MustCompile(`^.+@sha256:[a-f0-9]{64}$`)
 
 // parseTenantID 要求 Gateway 注入真实租户 UUID，JSON 里的 tenant 字段不可信。
@@ -142,7 +202,7 @@ func parseModelVersionID(model, explicit string) (uuid.UUID, error) {
 	return explicitID, nil
 }
 
-// protoService 把产品投影编成 proto。invocation_url / endpoint_url 不在这里填。
+// protoService 把产品投影编成 proto。endpoint_url 不在内部契约中传递。
 func protoService(view service.ServiceView) *inferencecontrolv1.InferenceService {
 	msg := &inferencecontrolv1.InferenceService{
 		Id: view.ID.String(), Name: view.Name, Model: view.Model,
@@ -180,6 +240,9 @@ func protoService(view service.ServiceView) *inferencecontrolv1.InferenceService
 	}
 	if view.UpdatedAt != nil {
 		msg.UpdatedAt = timestamppb.New(*view.UpdatedAt)
+	}
+	if view.InvocationURL != nil {
+		msg.InvocationUrl = *view.InvocationURL
 	}
 	return msg
 }

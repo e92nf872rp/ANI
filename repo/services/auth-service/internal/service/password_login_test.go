@@ -329,6 +329,9 @@ func (b *brokenCache) Delete(context.Context, string) error { return errors.New(
 func (b *brokenCache) Increment(context.Context, string, time.Duration) (int64, error) {
 	return 0, errors.New("redis down")
 }
+func (b *brokenCache) TTL(context.Context, string) (time.Duration, error) {
+	return 0, errors.New("redis down")
+}
 func (b *brokenCache) Exists(context.Context, string) (bool, error) {
 	return false, errors.New("redis down")
 }

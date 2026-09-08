@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 	"github.com/kubercloud/ani/pkg/ports"
 	"github.com/kubercloud/ani/pkg/types"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -140,16 +142,14 @@ func (s *AuthService) ValidateToken(ctx context.Context, req *authv1.ValidateTok
 			EnforceRateLimit: true, TouchLastUsed: true,
 		})
 		if err != nil {
-			if errors.Is(err, errAPIKeyRateLimitExceeded) {
-				return nil, status.Error(codes.ResourceExhausted, "api key rate limit exceeded")
-			}
-			return nil, status.Error(codes.Unauthenticated, "invalid api key")
+			return nil, credentialValidationStatus(err)
 		}
 		return &commonv1.TenantContext{
 			TenantId: principal.TenantID.String(),
 			UserId:   uuidString(principal.UserID),
 			Roles:    append([]string{"service-account"}, principal.Permissions...),
 			Scope:    "tenant",
+			ApiKeyId: principal.CredentialID.String(),
 		}, nil
 	}
 	if s.jwt == nil {
@@ -189,7 +189,7 @@ func (s *AuthService) ValidateToken(ctx context.Context, req *authv1.ValidateTok
 func credentialValidationStatus(err error) error {
 	switch {
 	case errors.Is(err, errAPIKeyRateLimitExceeded):
-		return status.Error(codes.ResourceExhausted, "credential rate limit exceeded")
+		return rateLimitedCredentialStatus(err)
 	case errors.Is(err, context.DeadlineExceeded):
 		return status.Error(codes.DeadlineExceeded, "credential validation deadline exceeded")
 	case errors.Is(err, errInvalidJWT), errors.Is(err, pgx.ErrNoRows):
@@ -203,6 +203,36 @@ func credentialValidationStatus(err error) error {
 		// blocklist/cache/DB 等依赖错误不能伪装成无效凭证。
 		return status.Error(codes.Unavailable, "credential backend unavailable")
 	}
+}
+
+type retryAfterCarrier interface {
+	RetryAfter() time.Duration
+}
+
+func rateLimitedCredentialStatus(err error) error {
+	retryAfter := time.Minute
+	var carrier retryAfterCarrier
+	if errors.As(err, &carrier) && carrier.RetryAfter() > 0 {
+		retryAfter = carrier.RetryAfter()
+	}
+	seconds := int(retryAfter / time.Second)
+	if retryAfter%time.Second != 0 {
+		seconds++
+	}
+	if seconds < 1 {
+		seconds = 1
+	}
+	response := status.New(codes.ResourceExhausted, "credential rate limit exceeded")
+	withDetails, detailErr := response.WithDetails(&errdetails.ErrorInfo{
+		Reason: "RATE_LIMITED",
+		Metadata: map[string]string{
+			"retry_after_seconds": strconv.Itoa(seconds),
+		},
+	})
+	if detailErr != nil {
+		return response.Err()
+	}
+	return withDetails.Err()
 }
 
 // ValidatePrincipal 是 V2 入口：校验 raw credential 并返回权威 PrincipalContext。

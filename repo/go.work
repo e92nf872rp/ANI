@@ -3,6 +3,7 @@ go 1.25.0
 use (
 	./cli/ani
 	./pkg
+	./runtimeadmin
 	./sdks/core/go
 	./services/ani-gateway
 	./services/auth-service
@@ -11,6 +12,7 @@ use (
 	./services/metering-service
 	./services/model-service
 	./services/reconcile-worker
+	./services/pkg
 	./services/task-service
 	./services/tenant-service
 	./tools/kms-sm4-live-fixture
