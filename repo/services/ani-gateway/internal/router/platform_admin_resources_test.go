@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/cloudwego/hertz/pkg/protocol"
+	"github.com/google/uuid"
 	commonv1 "github.com/kubercloud/ani/pkg/generated/pb/common/v1"
 	platformsettingsv1 "github.com/kubercloud/ani/pkg/generated/pb/platform_settings/v1"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
@@ -26,21 +26,21 @@ import (
 )
 
 type fakePlatformAdminClient struct {
-	lastList   *platformsettingsv1.ListPlatformAdminsRequest
-	lastGetID  string
-	lastPermID string
-	lastUpdate *platformsettingsv1.UpdatePlatformAdminRoleRequest
-	lastCreate *platformsettingsv1.CreatePlatformAdminRequest
-	lastDisable *platformsettingsv1.DisablePlatformAdminRequest
-	lastEnable  *platformsettingsv1.EnablePlatformAdminRequest
-	lastDelete  *platformsettingsv1.DeletePlatformAdminRequest
+	lastList      *platformsettingsv1.ListPlatformAdminsRequest
+	lastGetID     string
+	lastPermID    string
+	lastUpdate    *platformsettingsv1.UpdatePlatformAdminRoleRequest
+	lastCreate    *platformsettingsv1.CreatePlatformAdminRequest
+	lastDisable   *platformsettingsv1.DisablePlatformAdminRequest
+	lastEnable    *platformsettingsv1.EnablePlatformAdminRequest
+	lastDelete    *platformsettingsv1.DeletePlatformAdminRequest
 	lastReset     *platformsettingsv1.ResetPlatformAdminPasswordRequest
 	lastListAudit *platformsettingsv1.ListPlatformAdminAuditLogsRequest
-	listResp   *platformsettingsv1.ListPlatformAdminsResponse
-	rolesResp  *platformsettingsv1.ListPlatformAdminRolesResponse
-	getResp    *platformsettingsv1.PlatformAdminDetail
-	permsResp  *platformsettingsv1.PlatformAdminPermissions
-	err        error
+	listResp      *platformsettingsv1.ListPlatformAdminsResponse
+	rolesResp     *platformsettingsv1.ListPlatformAdminRolesResponse
+	getResp       *platformsettingsv1.PlatformAdminDetail
+	permsResp     *platformsettingsv1.PlatformAdminPermissions
+	err           error
 
 	// stateful flow helpers（DisableEnableFlow / DeleteFlow / LastAdminProtection / ResetPasswordFlow / AuditLogsFlow）
 	status          string

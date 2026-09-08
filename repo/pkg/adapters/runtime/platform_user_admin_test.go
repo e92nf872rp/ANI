@@ -21,7 +21,7 @@ func TestPostgresPlatformUserAdminStore_Create_Success(t *testing.T) {
 	now := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
 	tx := &quotaFakeTx{}
 	tx.enqueueRows(
-		quotaFakeRow{values: []any{false}}, // username exists?
+		quotaFakeRow{values: []any{false}},          // username exists?
 		quotaFakeRow{values: []any{"platform-ops"}}, // role name by id
 		quotaFakeRow{values: []any{userID, now}},
 	)
@@ -532,9 +532,9 @@ func TestPostgresPlatformUserAdminStore_ChangeRole_UpdateExisting(t *testing.T) 
 	roleID := uuid.MustParse("00000000-0000-0000-0000-000000000006")
 	tx := &quotaFakeTx{}
 	tx.enqueueRows(
-		quotaFakeRow{values: []any{true}},           // ensurePlatformUserExists
-		quotaFakeRow{values: []any{"platform-ops"}}, // lookup new role name
-		quotaFakeRow{values: []any{true}},           // binding exists
+		quotaFakeRow{values: []any{true}},                     // ensurePlatformUserExists
+		quotaFakeRow{values: []any{"platform-ops"}},           // lookup new role name
+		quotaFakeRow{values: []any{true}},                     // binding exists
 		quotaFakeRow{values: []any{"active", "platform-ops"}}, // current status+role（同角色升级路径不触发 last-admin）
 	)
 	store := NewPostgresPlatformUserAdminStore(&quotaFakeStore{tx: tx})
@@ -577,9 +577,9 @@ func TestPostgresPlatformUserAdminStore_ChangeRole_LastPlatformAdmin(t *testing.
 	roleID := uuid.MustParse("00000000-0000-0000-0000-000000000007")
 	tx := &quotaFakeTx{}
 	tx.enqueueRows(
-		quotaFakeRow{values: []any{true}},              // ensurePlatformUserExists
-		quotaFakeRow{values: []any{"platform-ops"}},    // lookup new role
-		quotaFakeRow{values: []any{true}},              // binding exists
+		quotaFakeRow{values: []any{true}},                       // ensurePlatformUserExists
+		quotaFakeRow{values: []any{"platform-ops"}},             // lookup new role
+		quotaFakeRow{values: []any{true}},                       // binding exists
 		quotaFakeRow{values: []any{"active", "platform-admin"}}, // current status+role
 		quotaFakeRow{values: []any{int64(0)}},                   // other active admins
 	)
