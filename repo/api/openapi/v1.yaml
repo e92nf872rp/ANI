@@ -2098,7 +2098,7 @@ components:
         revision:       { type: string, nullable: true, description: "rollback 时指定目标 revision；与 snapshot_id 二选一" }
         volume_id:      { type: string, nullable: true, description: "attach_volume/detach_volume 时使用" }
         filesystem_id:  { type: string, nullable: true, description: "attach_filesystem/detach_filesystem 时使用" }
-        mount_path:     { type: string, nullable: true, description: "attach_volume/attach_filesystem 时使用" }
+        mount_path:     { type: string, nullable: true, description: "attach_filesystem 时必填；Container/GPU Container 的 attach_volume 时必填；VM attach_volume 仅接入块设备，不要求 guest 挂载路径。" }
         read_only:      { type: boolean, nullable: true, description: "挂载资源时使用" }
         replicas:       { type: integer, minimum: 1, nullable: true, description: "scale 时使用" }
         image_id:       { type: string, nullable: true, description: "update_image 时使用" }

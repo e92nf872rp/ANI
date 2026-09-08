@@ -1167,7 +1167,6 @@ func TestLocalInstanceServiceVMVolumeBindingLocalProfile(t *testing.T) {
 		TenantID:        "tenant-a",
 		InstanceID:      "vm-a",
 		VolumeID:        "vol-data-a",
-		MountPath:       "/mnt/vol-data-a",
 		UserID:          "user-a",
 		PermissionProof: "rbac:update:workload",
 		RequestedAt:     time.Unix(1600, 0),
@@ -1175,14 +1174,14 @@ func TestLocalInstanceServiceVMVolumeBindingLocalProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AttachVolume() error = %v", err)
 	}
-	if lifecycle.calls != 0 {
-		t.Fatalf("lifecycle calls = %d, want 0 for local volume binding", lifecycle.calls)
+	if lifecycle.calls != 1 || lifecycle.action != ports.WorkloadLifecycleAttachVolume {
+		t.Fatalf("lifecycle calls = %d action = %s, want provider attach_volume", lifecycle.calls, lifecycle.action)
 	}
 	if attached.Status.State != ports.WorkloadStateRunning || len(attached.Status.Storage) != 2 {
 		t.Fatalf("state=%s storage=%d, want running with root+data disk", attached.Status.State, len(attached.Status.Storage))
 	}
-	if got := attached.Status.Storage[1]; got.Name != "vol-data-a" || got.Kind != ports.StorageAttachmentDataDisk || got.MountPath != "/mnt/vol-data-a" {
-		t.Fatalf("attached volume = %+v, want local data disk binding", got)
+	if got := attached.Status.Storage[1]; got.Name != "vol-data-a" || got.Kind != ports.StorageAttachmentDataDisk || got.MountPath != "" || got.Status != "attached" {
+		t.Fatalf("attached volume = %+v, want provider-attached VM data disk without guest mount path", got)
 	}
 	attachOperation, err := operations.GetOperation(context.Background(), "tenant-a", attached.OperationID)
 	if err != nil {
@@ -1209,6 +1208,9 @@ func TestLocalInstanceServiceVMVolumeBindingLocalProfile(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("DetachVolume() error = %v", err)
+	}
+	if lifecycle.calls != 2 || lifecycle.action != ports.WorkloadLifecycleDetachVolume {
+		t.Fatalf("lifecycle calls = %d action = %s, want provider detach_volume", lifecycle.calls, lifecycle.action)
 	}
 	if detached.Status.State != ports.WorkloadStateRunning || len(detached.Status.Storage) != 1 {
 		t.Fatalf("state=%s storage=%d, want running with root disk only", detached.Status.State, len(detached.Status.Storage))
@@ -1823,7 +1825,7 @@ func TestLocalInstanceServiceSynchronizesVolumeAttachmentSummary(t *testing.T) {
 
 	attached, err := service.AttachVolume(context.Background(), ports.WorkloadInstanceLifecycleRequest{
 		IdempotencyKey: "attach-summary", TenantID: "tenant-a", InstanceID: "vm-a",
-		VolumeID: "data-a", MountPath: "/data", ReadOnly: boolPointer(true),
+		VolumeID: "data-a", ReadOnly: boolPointer(true),
 		UserID: "user-a", PermissionProof: "rbac:update:workload",
 	})
 	if err != nil {
@@ -1833,7 +1835,7 @@ func TestLocalInstanceServiceSynchronizesVolumeAttachmentSummary(t *testing.T) {
 		t.Fatalf("storage summary = %+v, want data-a", attached.StorageAttachments)
 	}
 	got := attached.StorageAttachments[len(attached.StorageAttachments)-1]
-	if got.ResourceType != "volume" || got.ResourceID != "data-a" || got.Status != "mounted" || got.MountPath != "/data" || !got.ReadOnly {
+	if got.ResourceType != "volume" || got.ResourceID != "data-a" || got.Status != "attached" || got.MountPath != "" || !got.ReadOnly {
 		t.Fatalf("attached volume summary = %+v, want canonical requested values", got)
 	}
 
@@ -2089,7 +2091,8 @@ func TestLocalInstanceServiceRejectsMissingLifecyclePayloadFields(t *testing.T) 
 	}{
 		{name: "resize", kind: ports.WorkloadKindVM, action: ports.WorkloadLifecycleResize},
 		{name: "snapshot", kind: ports.WorkloadKindVM, action: ports.WorkloadLifecycleSnapshot},
-		{name: "attach volume", kind: ports.WorkloadKindVM, action: ports.WorkloadLifecycleAttachVolume, request: ports.WorkloadInstanceLifecycleRequest{VolumeID: "volume-a"}},
+		{name: "attach volume id", kind: ports.WorkloadKindVM, action: ports.WorkloadLifecycleAttachVolume},
+		{name: "container attach volume mount path", kind: ports.WorkloadKindContainer, action: ports.WorkloadLifecycleAttachVolume, request: ports.WorkloadInstanceLifecycleRequest{VolumeID: "volume-a"}},
 		{name: "rollback", kind: ports.WorkloadKindContainer, action: ports.WorkloadLifecycleRollback},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2099,6 +2102,16 @@ func TestLocalInstanceServiceRejectsMissingLifecyclePayloadFields(t *testing.T) 
 				t.Fatalf("validateLifecycleIntent() error = %v, want ErrInvalid", err)
 			}
 		})
+	}
+}
+
+func TestLocalInstanceServiceAllowsVMVolumeAttachWithoutMountPath(t *testing.T) {
+	record := ports.WorkloadInstanceRecord{Kind: ports.WorkloadKindVM}
+	err := validateLifecycleIntent(record, ports.WorkloadInstanceLifecycleRequest{
+		Action: ports.WorkloadLifecycleAttachVolume, VolumeID: "volume-a",
+	})
+	if err != nil {
+		t.Fatalf("validateLifecycleIntent() error = %v, want VM block attachment without mount_path", err)
 	}
 }
 
