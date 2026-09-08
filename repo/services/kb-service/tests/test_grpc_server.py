@@ -111,10 +111,22 @@ def test_get_kb_no_pool_failed_precondition(stub):
     assert exc.value.code() == grpc.StatusCode.FAILED_PRECONDITION
 
 
+def test_get_kb_missing_tenant_invalid_argument(stub):
+    with pytest.raises(grpc.RpcError) as exc:
+        stub.GetKB(kb_pb.GetKBRequest(tenant_id="", kb_id=str(uuid.uuid4())))
+    assert exc.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+
 def test_list_kbs_no_pool_failed_precondition(stub):
     with pytest.raises(grpc.RpcError) as exc:
         stub.ListKBs(kb_pb.ListKBsRequest(tenant_id="t", page=common_pb2.CursorPageRequest(limit=20)))
     assert exc.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+
+
+def test_list_kbs_missing_tenant_invalid_argument(stub):
+    with pytest.raises(grpc.RpcError) as exc:
+        stub.ListKBs(kb_pb.ListKBsRequest(tenant_id="", page=common_pb2.CursorPageRequest(limit=20)))
+    assert exc.value.code() == grpc.StatusCode.INVALID_ARGUMENT
 
 
 def test_delete_kb_no_pool_failed_precondition(stub):
@@ -206,18 +218,46 @@ def test_query_no_pool_returns_unavailable_or_precondition(stub):
     assert exc.value.code() == grpc.StatusCode.NOT_FOUND
 
 
-# ── 3 P1 RPCs return UNIMPLEMENTED (AC4) ─────────────────────────────────────
+# ── P1 RPCs: UpdateKBPermissions still UNIMPLEMENTED; B2 RPCs wired ──────────
 
-def test_list_kb_citations_p1_unimplemented(stub):
+def test_list_kb_citations_b2_wired_not_unimplemented(stub):
+    # B2 (issue-045): without a pool the servicer returns FAILED_PRECONDITION —
+    # never UNIMPLEMENTED (that would mean the P1 stub still shadows it).
     with pytest.raises(grpc.RpcError) as exc:
         stub.ListKBCitations(kb_pb.ListKBCitationsRequest(tenant_id="t", kb_id=str(uuid.uuid4())))
-    assert exc.value.code() == grpc.StatusCode.UNIMPLEMENTED
+    assert exc.value.code() != grpc.StatusCode.UNIMPLEMENTED
+    assert exc.value.code() == grpc.StatusCode.FAILED_PRECONDITION
 
 
-def test_list_kb_sessions_p1_unimplemented(stub):
+def test_list_kb_sessions_b2_wired_not_unimplemented(stub):
     with pytest.raises(grpc.RpcError) as exc:
         stub.ListKBSessions(kb_pb.ListKBSessionsRequest(tenant_id="t", kb_id=str(uuid.uuid4())))
-    assert exc.value.code() == grpc.StatusCode.UNIMPLEMENTED
+    assert exc.value.code() != grpc.StatusCode.UNIMPLEMENTED
+    assert exc.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+
+
+def test_list_document_chunks_no_pool_failed_precondition(stub):
+    with pytest.raises(grpc.RpcError) as exc:
+        stub.ListDocumentChunks(
+            kb_pb.ListDocumentChunksRequest(tenant_id="t", kb_id=str(uuid.uuid4()), doc_id=str(uuid.uuid4()))
+        )
+    assert exc.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+
+
+def test_get_session_messages_no_pool_failed_precondition(stub):
+    with pytest.raises(grpc.RpcError) as exc:
+        stub.GetSessionMessages(
+            kb_pb.GetSessionMessagesRequest(tenant_id="t", kb_id=str(uuid.uuid4()), session_id=str(uuid.uuid4()))
+        )
+    assert exc.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+
+
+def test_delete_session_no_pool_failed_precondition(stub):
+    with pytest.raises(grpc.RpcError) as exc:
+        stub.DeleteSession(
+            kb_pb.DeleteSessionRequest(tenant_id="t", kb_id=str(uuid.uuid4()), session_id=str(uuid.uuid4()))
+        )
+    assert exc.value.code() == grpc.StatusCode.FAILED_PRECONDITION
 
 
 def test_update_kb_permissions_p1_unimplemented(stub):
