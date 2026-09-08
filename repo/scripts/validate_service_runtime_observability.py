@@ -44,8 +44,10 @@ ALLOWED_RUNTIMEADMIN_IMPORTERS = {
 FORBIDDEN_PREFIXES = (
     "repo/services/reconcile-worker/",
     "repo/services/envoy-authz-adapter/",
-    "repo/services/kb-service/",
 )
+# kb-service 禁改规则（OBS-RUNTIME-P0，#141 引入）已解除：kb-service 是 ANI Services
+# 活跃开发目录（CLAUDE.md），契约层（PR #134）已在 main，实现批次 `issue-043`~`048`
+# 合法落地；可观测性契约本身不受影响（kb-service 仍不在 SERVICES 清单中）。
 FIXED_PLAN_REPO_PATH = Path(
     "services/tasks/modules/plan/plan-service-runtime-observability-p0-p1.md"
 )
