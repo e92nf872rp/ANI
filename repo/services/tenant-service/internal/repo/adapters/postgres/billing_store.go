@@ -14,12 +14,20 @@ import (
 
 // PostgresBillingStore 基于 PostgreSQL 实现 ports.BillingStore。
 // 对应表：billing_invoices / billing_adjustments / billing_credit_accounts / billing_pricing
-// （迁移 20260907_001_tenant_billing.sql；计费结算域方案 §6.1）。
+// （迁移 20260907_001_tenant_billing.sql；计费结算域方案 §6.1）；
+// 操作流水表 billing_operation_logs（迁移 20260908_001_billing_operation_logs.sql），
+// 与业务写同一事务落库：业务写失败回滚则流水不落库。
 type PostgresBillingStore struct {
 	db *pgxpool.Pool
 }
 
 var _ ports.BillingStore = (*PostgresBillingStore)(nil)
+
+// billingQuerier 抽象 *pgxpool.Pool 与 pgx.Tx 的 QueryRow（同事务写入用；
+// 流水落库也走 QueryRow ... RETURNING，避免引入 Exec 依赖）。
+type billingQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
 
 // NewPostgresBillingStore 构造计费结算存储实例。
 func NewPostgresBillingStore(db *pgxpool.Pool) ports.BillingStore {
@@ -56,7 +64,7 @@ func (s *PostgresBillingStore) ListInvoicesByTenant(ctx context.Context, tenantI
 
 // GetInvoiceByPeriod 返回该租户该账期的账单；无账单返回 nil（不视为错误）。
 func (s *PostgresBillingStore) GetInvoiceByPeriod(ctx context.Context, tenantID uuid.UUID, period string) (*ports.BillingInvoice, error) {
-	inv, err := s.queryInvoice(ctx, `
+	inv, err := queryBillingInvoice(ctx, s.db, `
 		SELECT id, tenant_id, period, no, amount_usd, status, due_date,
 		       issued_at, settled_at, credited_at, idempotency_key, created_at
 		FROM billing_invoices
@@ -70,7 +78,7 @@ func (s *PostgresBillingStore) GetInvoiceByPeriod(ctx context.Context, tenantID 
 
 // GetInvoice 按主键查账单；不存在返回 ErrBillingInvoiceNotFound。
 func (s *PostgresBillingStore) GetInvoice(ctx context.Context, id uuid.UUID) (*ports.BillingInvoice, error) {
-	inv, err := s.queryInvoice(ctx, `
+	inv, err := queryBillingInvoice(ctx, s.db, `
 		SELECT id, tenant_id, period, no, amount_usd, status, due_date,
 		       issued_at, settled_at, credited_at, idempotency_key, created_at
 		FROM billing_invoices
@@ -96,26 +104,46 @@ func (s *PostgresBillingStore) CountInvoicesByNoPrefix(ctx context.Context, pref
 // CreateInvoice 插入账单（status 由入参隐含为 issued，落库固定 issued）；
 // (tenant_id, period) / no / idempotency_key 任一唯一冲突 → ErrBillingInvoiceExists
 // （由 service 重查后区分重放 / 409 / 撞号重试）。
+// in.Operation 非 nil 时与账单插入同一事务落一条操作流水；
+// 唯一冲突（事务回滚）或流水写入失败均不落库、不落流水。
 func (s *PostgresBillingStore) CreateInvoice(ctx context.Context, in ports.CreateBillingInvoiceInput) (*ports.BillingInvoice, error) {
-	inv, err := s.queryInvoice(ctx, `
-		INSERT INTO billing_invoices
-			(tenant_id, period, no, amount_usd, status, due_date, issued_at, idempotency_key)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		RETURNING id, tenant_id, period, no, amount_usd, status, due_date,
-		          issued_at, settled_at, credited_at, idempotency_key, created_at
-	`, in.TenantID, in.Period, in.No, in.AmountUSD, ports.BillingInvoiceIssued,
+	if in.Operation == nil {
+		inv, err := queryBillingInvoice(ctx, s.db, insertBillingInvoiceSQL,
+			in.TenantID, in.Period, in.No, in.AmountUSD, ports.BillingInvoiceIssued,
+			in.DueDate, in.IssuedAt, in.IdempotencyKey)
+		if err != nil {
+			return nil, mapBillingInvoiceInsertErr(err)
+		}
+		return inv, nil
+	}
+
+	// 事务路径：账单插入 + 操作流水原子落库
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin billing invoice transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) // 已 Commit 时为 no-op
+
+	inv, err := queryBillingInvoice(ctx, tx, insertBillingInvoiceSQL,
+		in.TenantID, in.Period, in.No, in.AmountUSD, ports.BillingInvoiceIssued,
 		in.DueDate, in.IssuedAt, in.IdempotencyKey)
 	if err != nil {
-		if isUniqueViolation(err) {
-			return nil, ports.ErrBillingInvoiceExists
-		}
+		return nil, mapBillingInvoiceInsertErr(err) // 返回前 defer Rollback 生效
+	}
+	period, refID := in.Period, inv.ID
+	if err := insertBillingOperationLog(ctx, tx, in.TenantID, &period, &refID, in.Operation); err != nil {
 		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit billing invoice transaction: %w", err)
 	}
 	return inv, nil
 }
 
-// UpdateInvoiceStatus 以 status='issued' 为 CAS 前提应用状态迁移；不满足 → ErrBillingStateConflict。
-func (s *PostgresBillingStore) UpdateInvoiceStatus(ctx context.Context, id uuid.UUID, action ports.BillingInvoiceAction, at time.Time) (*ports.BillingInvoice, error) {
+// UpdateInvoiceStatus 以 status='issued' 为 CAS 前提应用状态迁移；不满足 → ErrBillingStateConflict；
+// 账单不存在 → ErrBillingInvoiceNotFound。
+// op 非 nil 时与状态迁移同一事务落一条操作流水；CAS 失败（404/409）则事务回滚、不落流水。
+func (s *PostgresBillingStore) UpdateInvoiceStatus(ctx context.Context, id uuid.UUID, action ports.BillingInvoiceAction, at time.Time, op *ports.BillingOperationLogInput) (*ports.BillingInvoice, error) {
 	// 步骤 1：按 action 组装目标状态与时间戳列（issued → settled | credited，终态）
 	var status ports.BillingInvoiceStatus
 	var settledAt, creditedAt *time.Time
@@ -130,17 +158,53 @@ func (s *PostgresBillingStore) UpdateInvoiceStatus(ctx context.Context, id uuid.
 		return nil, ports.ErrBillingActionInvalid
 	}
 
-	// 步骤 2：条件更新（仅 issued 可迁移）；命中则 RETURNING 组装实体
-	inv, err := s.queryInvoice(ctx, `
-		UPDATE billing_invoices
-		SET status = $2, settled_at = $3, credited_at = $4
-		WHERE id = $1 AND status = $5
-		RETURNING id, tenant_id, period, no, amount_usd, status, due_date,
-		          issued_at, settled_at, credited_at, idempotency_key, created_at
-	`, id, status, settledAt, creditedAt, ports.BillingInvoiceIssued)
+	// 步骤 2：无流水要求时走直写路径（条件更新 + 404/409 区分）
+	if op == nil {
+		return s.casUpdateInvoice(ctx, s.db, id, status, settledAt, creditedAt)
+	}
+
+	// 步骤 3：事务路径——CAS 状态迁移 + 操作流水原子落库；
+	// CAS 未命中（404/409）在事务内甄别后回滚，不落流水。
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin billing invoice action transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) // 已 Commit 时为 no-op
+
+	inv, err := queryBillingInvoice(ctx, tx, casUpdateBillingInvoiceSQL,
+		id, status, settledAt, creditedAt, ports.BillingInvoiceIssued)
 	if err != nil {
 		if errors.Is(err, ports.ErrBillingInvoiceNotFound) {
-			// 步骤 3：未命中时区分 404（账单不存在）与 409（状态不满足 CAS）
+			// 未命中时区分 404（账单不存在）与 409（状态不满足 CAS）
+			var exists bool
+			if existsErr := tx.QueryRow(ctx,
+				`SELECT EXISTS(SELECT 1 FROM billing_invoices WHERE id = $1)`, id).Scan(&exists); existsErr != nil {
+				return nil, fmt.Errorf("check billing invoice exists: %w", existsErr)
+			}
+			if !exists {
+				return nil, ports.ErrBillingInvoiceNotFound
+			}
+			return nil, ports.ErrBillingStateConflict
+		}
+		return nil, err
+	}
+	period, refID := inv.Period, inv.ID
+	if err := insertBillingOperationLog(ctx, tx, inv.TenantID, &period, &refID, op); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit billing invoice action transaction: %w", err)
+	}
+	return inv, nil
+}
+
+// casUpdateInvoice 直写路径的条件更新（无事务流水要求时）；命中则 RETURNING 组装实体，
+// 未命中区分 404 / 409。
+func (s *PostgresBillingStore) casUpdateInvoice(ctx context.Context, q billingQuerier, id uuid.UUID, status ports.BillingInvoiceStatus, settledAt, creditedAt *time.Time) (*ports.BillingInvoice, error) {
+	inv, err := queryBillingInvoice(ctx, q, casUpdateBillingInvoiceSQL,
+		id, status, settledAt, creditedAt, ports.BillingInvoiceIssued)
+	if err != nil {
+		if errors.Is(err, ports.ErrBillingInvoiceNotFound) {
 			var exists bool
 			if existsErr := s.db.QueryRow(ctx,
 				`SELECT EXISTS(SELECT 1 FROM billing_invoices WHERE id = $1)`, id).Scan(&exists); existsErr != nil {
@@ -204,22 +268,32 @@ func (s *PostgresBillingStore) GetAdjustmentByIdempotencyKey(ctx context.Context
 
 // CreateAdjustment 插入调账记录；幂等键唯一冲突 → ErrBillingIdempotencyConflict
 // （由 service 重查后按重放语义返回已有记录）。
+// in.Operation 非 nil 时与调账插入同一事务落一条操作流水；
+// 唯一冲突（事务回滚）或流水写入失败均不落库、不落流水。
 func (s *PostgresBillingStore) CreateAdjustment(ctx context.Context, in ports.CreateBillingAdjustmentInput) (*ports.BillingAdjustment, error) {
-	var adj ports.BillingAdjustment
-	err := s.db.QueryRow(ctx, `
-		INSERT INTO billing_adjustments (tenant_id, period, amount_usd, reason, operator, idempotency_key)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id, tenant_id, period, amount_usd, reason, operator, idempotency_key, created_at
-	`, in.TenantID, in.Period, in.AmountUSD, in.Reason, in.Operator, in.IdempotencyKey).Scan(
-		&adj.ID, &adj.TenantID, &adj.Period, &adj.AmountUSD,
-		&adj.Reason, &adj.Operator, &adj.IdempotencyKey, &adj.CreatedAt)
-	if err != nil {
-		if isUniqueViolation(err) {
-			return nil, ports.ErrBillingIdempotencyConflict
-		}
-		return nil, fmt.Errorf("insert billing adjustment: %w", err)
+	if in.Operation == nil {
+		return insertBillingAdjustment(ctx, s.db, in)
 	}
-	return &adj, nil
+
+	// 事务路径：调账插入 + 操作流水原子落库
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin billing adjustment transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) // 已 Commit 时为 no-op
+
+	adj, err := insertBillingAdjustment(ctx, tx, in)
+	if err != nil {
+		return nil, err // 返回前 defer Rollback 生效
+	}
+	period, refID := adj.Period, adj.ID
+	if err := insertBillingOperationLog(ctx, tx, adj.TenantID, &period, &refID, in.Operation); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit billing adjustment transaction: %w", err)
+	}
+	return adj, nil
 }
 
 // GetCredit 返回该租户授信额度；无账户行返回 nil。
@@ -296,12 +370,76 @@ func (s *PostgresBillingStore) ListBillingTenantIDs(ctx context.Context, tenantF
 	return out, nil
 }
 
+// ListOperations 返回该租户操作流水（created_at 倒序、分页）；
+// total 为过滤后总条数（分页用）。无流水返回空切片（不视为错误）。
+func (s *PostgresBillingStore) ListOperations(ctx context.Context, tenantID uuid.UUID, limit, offset int) ([]ports.BillingOperationLog, int, error) {
+	var total int
+	if err := s.db.QueryRow(ctx, `
+		SELECT COUNT(*) FROM billing_operation_logs WHERE tenant_id = $1
+	`, tenantID).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count billing operation logs: %w", err)
+	}
+
+	rows, err := s.db.Query(ctx, `
+		SELECT id, tenant_id, period, action, ref_id, message, operator, created_at
+		FROM billing_operation_logs
+		WHERE tenant_id = $1
+		ORDER BY created_at DESC, id DESC
+		LIMIT $2 OFFSET $3
+	`, tenantID, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list billing operation logs: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]ports.BillingOperationLog, 0)
+	for rows.Next() {
+		var log ports.BillingOperationLog
+		if scanErr := rows.Scan(&log.ID, &log.TenantID, &log.Period, &log.Action,
+			&log.RefID, &log.Message, &log.Operator, &log.CreatedAt); scanErr != nil {
+			return nil, 0, fmt.Errorf("scan billing operation log: %w", scanErr)
+		}
+		out = append(out, log)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate billing operation logs: %w", err)
+	}
+	return out, total, nil
+}
+
 // ── helpers（勿穿插到上方 Store 方法中间）────────────────────────────────
 
-// queryInvoice 执行返回单行账单的查询；ErrNoRows 统一映射为 ErrBillingInvoiceNotFound。
-func (s *PostgresBillingStore) queryInvoice(ctx context.Context, sql string, args ...any) (*ports.BillingInvoice, error) {
+// insertBillingInvoiceSQL 账单插入语句（直写路径与流水事务路径共用）。
+const insertBillingInvoiceSQL = `
+	INSERT INTO billing_invoices
+		(tenant_id, period, no, amount_usd, status, due_date, issued_at, idempotency_key)
+	VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+	RETURNING id, tenant_id, period, no, amount_usd, status, due_date,
+	          issued_at, settled_at, credited_at, idempotency_key, created_at
+`
+
+// casUpdateBillingInvoiceSQL 账单状态 CAS 迁移语句（仅 issued 可迁移；直写与事务路径共用）。
+const casUpdateBillingInvoiceSQL = `
+	UPDATE billing_invoices
+	SET status = $2, settled_at = $3, credited_at = $4
+	WHERE id = $1 AND status = $5
+	RETURNING id, tenant_id, period, no, amount_usd, status, due_date,
+	          issued_at, settled_at, credited_at, idempotency_key, created_at
+`
+
+// mapBillingInvoiceInsertErr 将账单插入错误统一映射（唯一冲突 → ErrBillingInvoiceExists）。
+func mapBillingInvoiceInsertErr(err error) error {
+	if isUniqueViolation(err) {
+		return ports.ErrBillingInvoiceExists
+	}
+	return err
+}
+
+// queryBillingInvoice 在给定 querier（pool 或 tx）上执行返回单行账单的查询；
+// ErrNoRows 统一映射为 ErrBillingInvoiceNotFound。
+func queryBillingInvoice(ctx context.Context, q billingQuerier, sql string, args ...any) (*ports.BillingInvoice, error) {
 	var inv ports.BillingInvoice
-	err := s.db.QueryRow(ctx, sql, args...).Scan(
+	err := q.QueryRow(ctx, sql, args...).Scan(
 		&inv.ID, &inv.TenantID, &inv.Period, &inv.No, &inv.AmountUSD, &inv.Status, &inv.DueDate,
 		&inv.IssuedAt, &inv.SettledAt, &inv.CreditedAt, &inv.IdempotencyKey, &inv.CreatedAt,
 	)
@@ -312,6 +450,41 @@ func (s *PostgresBillingStore) queryInvoice(ctx context.Context, sql string, arg
 		return nil, fmt.Errorf("query billing invoice: %w", err)
 	}
 	return &inv, nil
+}
+
+// insertBillingAdjustment 在给定 querier（pool 或 tx）上插入调账记录并组装实体；
+// 幂等键唯一冲突 → ErrBillingIdempotencyConflict。
+func insertBillingAdjustment(ctx context.Context, q billingQuerier, in ports.CreateBillingAdjustmentInput) (*ports.BillingAdjustment, error) {
+	var adj ports.BillingAdjustment
+	err := q.QueryRow(ctx, `
+		INSERT INTO billing_adjustments (tenant_id, period, amount_usd, reason, operator, idempotency_key)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, tenant_id, period, amount_usd, reason, operator, idempotency_key, created_at
+	`, in.TenantID, in.Period, in.AmountUSD, in.Reason, in.Operator, in.IdempotencyKey).Scan(
+		&adj.ID, &adj.TenantID, &adj.Period, &adj.AmountUSD,
+		&adj.Reason, &adj.Operator, &adj.IdempotencyKey, &adj.CreatedAt)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return nil, ports.ErrBillingIdempotencyConflict
+		}
+		return nil, fmt.Errorf("insert billing adjustment: %w", err)
+	}
+	return &adj, nil
+}
+
+// insertBillingOperationLog 在给定 querier（pool 或 tx）上落一条操作流水；
+// tenant_id / period / ref_id 以业务落库事实为准，由调用方从业务行回填。
+// 仅应在与业务写相同的事务内调用（q 为 tx），保证业务写失败回滚则流水不落库。
+func insertBillingOperationLog(ctx context.Context, q billingQuerier, tenantID uuid.UUID, period *string, refID *uuid.UUID, op *ports.BillingOperationLogInput) error {
+	var id uuid.UUID
+	if err := q.QueryRow(ctx, `
+		INSERT INTO billing_operation_logs (tenant_id, period, action, ref_id, message, operator)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id
+	`, tenantID, period, op.Action, refID, op.Message, op.Operator).Scan(&id); err != nil {
+		return fmt.Errorf("insert billing operation log: %w", err)
+	}
+	return nil
 }
 
 // scanBillingInvoice 从行集合扫描一条账单（列序与 SELECT 一致）。

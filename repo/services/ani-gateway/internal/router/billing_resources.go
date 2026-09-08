@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/cloudwego/hertz/pkg/app"
@@ -42,7 +43,7 @@ func newBillingAPI() *billingAPI {
 	return &billingAPI{billing: tenantv1.NewBillingServiceClient(conn)}
 }
 
-// registerBilling 在 /api/v1/svc 下注册计费结算全部端点（5 个，方案 §3）。
+// registerBilling 在 /api/v1/svc 下注册计费结算全部端点（6 个，方案 §3 + 操作历史）。
 func registerBilling(svc *route.RouterGroup) {
 	api := newBillingAPI()
 
@@ -53,6 +54,7 @@ func registerBilling(svc *route.RouterGroup) {
 	// 路径参数名与 Services OpenAPI 一致：{invoiceId}
 	svc.POST("/billing/invoices/:invoiceId/actions", api.invoiceAction)
 	svc.POST("/billing/adjustments", api.createAdjustment)
+	svc.GET("/billing/operations", api.listBillingOperations)
 }
 
 // getBillingOverview GET /billing/overview：账务总览（表格 9 列 + 抽屉内嵌子数据）。
@@ -228,6 +230,37 @@ func (api *billingAPI) createAdjustment(ctx context.Context, c *app.RequestConte
 	c.JSON(http.StatusOK, billingAdjustmentJSON(res))
 }
 
+// listBillingOperations GET /billing/operations：租户计费操作流水（抽屉「操作历史」Tab）。
+func (api *billingAPI) listBillingOperations(ctx context.Context, c *app.RequestContext) {
+	// 步骤 1：gRPC 客户端可用性守卫
+	if api.billing == nil {
+		writeBillingError(c, http.StatusBadGateway, "GRPC_CLIENT_UNAVAILABLE", "billing grpc client unavailable")
+		return
+	}
+	// 步骤 2：调用 gRPC（limit/offset 缺省 0，由 tenant-service 钳制为默认 50 / 上限 200）
+	callCtx, cancel := tenantCallCtx(ctx, c)
+	defer cancel()
+	res, err := api.billing.ListBillingOperations(callCtx, &tenantv1.ListBillingOperationsRequest{
+		TenantId: c.Query("tenant_id"),
+		Limit:    billingQueryInt32(c, "limit"),
+		Offset:   billingQueryInt32(c, "offset"),
+	})
+	if err != nil {
+		mapBillingError(c, err)
+		return
+	}
+	// 步骤 3：映射为 OpenAPI JSON（period/ref_id optional → null）
+	items := make([]map[string]any, 0, len(res.GetItems()))
+	for _, l := range res.GetItems() {
+		items = append(items, billingOperationJSON(l))
+	}
+	c.JSON(http.StatusOK, map[string]any{
+		"items":       items,
+		"total":       res.GetTotal(),
+		"dev_profile": billingDevProfile(),
+	})
+}
+
 // ---- helpers ----
 
 // billingOverviewItemJSON 把 gRPC BillingOverviewItem 映射为 OpenAPI JSON（optional → null）。
@@ -279,14 +312,14 @@ func billingInvoiceJSON(inv *tenantv1.BillingInvoice) map[string]any {
 		return map[string]any{}
 	}
 	return map[string]any{
-		"id":         inv.GetId(),
-		"no":         inv.GetNo(),
-		"period":     inv.GetPeriod(),
-		"amount_usd": inv.GetAmountUsd(),
-		"status":     inv.GetStatus(),
-		"due_date":   inv.GetDueDate(),
-		"issued_at":  pbTimestampFormat(inv.GetIssuedAt()),
-		"settled_at": billingTimestampOrNil(inv.GetSettledAt()),
+		"id":          inv.GetId(),
+		"no":          inv.GetNo(),
+		"period":      inv.GetPeriod(),
+		"amount_usd":  inv.GetAmountUsd(),
+		"status":      inv.GetStatus(),
+		"due_date":    inv.GetDueDate(),
+		"issued_at":   pbTimestampFormat(inv.GetIssuedAt()),
+		"settled_at":  billingTimestampOrNil(inv.GetSettledAt()),
 		"credited_at": billingTimestampOrNil(inv.GetCreditedAt()),
 	}
 }
@@ -305,6 +338,33 @@ func billingAdjustmentJSON(adj *tenantv1.BillingAdjustment) map[string]any {
 		"operator":   adj.GetOperator(),
 		"created_at": pbTimestampFormat(adj.GetCreatedAt()),
 	}
+}
+
+// billingOperationJSON 把 gRPC BillingOperationLog 映射为 OpenAPI BillingOperationLog
+// （period/ref_id optional → null）。
+func billingOperationJSON(l *tenantv1.BillingOperationLog) map[string]any {
+	if l == nil {
+		return map[string]any{}
+	}
+	return map[string]any{
+		"id":         l.GetId(),
+		"tenant_id":  l.GetTenantId(),
+		"period":     optionalStringJSON(l.Period),
+		"action":     l.GetAction(),
+		"ref_id":     optionalStringJSON(l.RefId),
+		"message":    l.GetMessage(),
+		"operator":   l.GetOperator(),
+		"created_at": pbTimestampFormat(l.GetCreatedAt()),
+	}
+}
+
+// billingQueryInt32 解析非负整型 query 参数（非法/缺省 → 0，由 tenant-service 钳制默认值）。
+func billingQueryInt32(c *app.RequestContext, key string) int32 {
+	n, err := strconv.Atoi(c.Query(key))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return int32(n)
 }
 
 // optionalFloatJSON optional float → JSON（nil → null）。
@@ -343,18 +403,18 @@ func billingDevProfile() map[string]any {
 
 // billingCodeByHTTP 是计费业务码 → HTTP 状态码映射表。
 var billingCodeByHTTP = map[string]int{
-	"VALIDATION_FAILED":              http.StatusBadRequest,
-	"BILLING_INVALID_PERIOD":         http.StatusBadRequest,
-	"BILLING_ACTION_INVALID":         http.StatusBadRequest,
-	"BILLING_AMOUNT_INVALID":         http.StatusBadRequest,
-	"BILLING_TENANT_NOT_FOUND":       http.StatusNotFound,
-	"BILLING_INVOICE_NOT_FOUND":      http.StatusNotFound,
-	"TENANT_NOT_FOUND":               http.StatusNotFound,
-	"BILLING_INVOICE_EXISTS":         http.StatusConflict,
-	"BILLING_STATE_CONFLICT":         http.StatusConflict,
-	"BILLING_IDEMPOTENCY_CONFLICT":   http.StatusConflict,
-	"CORE_UNAVAILABLE":               http.StatusBadGateway,
-	"GRPC_CLIENT_UNAVAILABLE":        http.StatusBadGateway,
+	"VALIDATION_FAILED":            http.StatusBadRequest,
+	"BILLING_INVALID_PERIOD":       http.StatusBadRequest,
+	"BILLING_ACTION_INVALID":       http.StatusBadRequest,
+	"BILLING_AMOUNT_INVALID":       http.StatusBadRequest,
+	"BILLING_TENANT_NOT_FOUND":     http.StatusNotFound,
+	"BILLING_INVOICE_NOT_FOUND":    http.StatusNotFound,
+	"TENANT_NOT_FOUND":             http.StatusNotFound,
+	"BILLING_INVOICE_EXISTS":       http.StatusConflict,
+	"BILLING_STATE_CONFLICT":       http.StatusConflict,
+	"BILLING_IDEMPOTENCY_CONFLICT": http.StatusConflict,
+	"CORE_UNAVAILABLE":             http.StatusBadGateway,
+	"GRPC_CLIENT_UNAVAILABLE":      http.StatusBadGateway,
 }
 
 // sortedBillingCodes 按业务码长度降序排列，确保前缀匹配（"<CODE>: detail"）优先命中更具体的码。

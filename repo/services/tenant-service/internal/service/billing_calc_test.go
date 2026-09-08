@@ -141,8 +141,8 @@ func TestDeriveBalance(t *testing.T) {
 
 	// 未出账调账生效；已出账（issued）期间的调账不重复扣
 	adjustments := []ports.BillingAdjustment{
-		{Period: "2026-09", AmountUSD: -5},  // 该期已有 issued 账单 → 不扣
-		{Period: "2026-07", AmountUSD: -5},  // 无账单 → 生效
+		{Period: "2026-09", AmountUSD: -5}, // 该期已有 issued 账单 → 不扣
+		{Period: "2026-07", AmountUSD: -5}, // 无账单 → 生效
 	}
 	if got := deriveBalance(&credit, invoices, adjustments); got == nil || *got != 65 {
 		t.Fatalf("balance = %v, want 65", got)

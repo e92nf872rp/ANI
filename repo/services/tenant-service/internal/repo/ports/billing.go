@@ -88,9 +88,9 @@ const (
 type BillingRowStatus string
 
 const (
-	BillingRowCurrent BillingRowStatus = "current"
-	BillingRowOverdue BillingRowStatus = "overdue"
-	BillingRowSettled BillingRowStatus = "settled"
+	BillingRowCurrent  BillingRowStatus = "current"
+	BillingRowOverdue  BillingRowStatus = "overdue"
+	BillingRowSettled  BillingRowStatus = "settled"
 	BillingRowCredited BillingRowStatus = "credited"
 )
 
@@ -123,6 +123,36 @@ func DeriveBillingRowStatus(inv *BillingInvoice, now time.Time) BillingRowStatus
 		}
 		return BillingRowCurrent
 	}
+}
+
+// BillingOperationAction 操作流水动作（billing_operation_logs.action 枚举，
+// 迁移 20260908_001_billing_operation_logs.sql CHECK 约束）。
+const (
+	BillingOpInvoiceGenerated  = "invoice.generated"
+	BillingOpInvoiceSettled    = "invoice.settled"
+	BillingOpInvoiceCredited   = "invoice.credited"
+	BillingOpAdjustmentCreated = "adjustment.created"
+)
+
+// BillingOperationLogInput 是与业务写同一事务落库的流水内容。
+// tenant_id / period / ref_id / created_at 由 store 从业务行回填（以落库事实为准）；
+// 业务写失败回滚则流水一并回滚；幂等重放与 409 冲突路径不传入（不落流水）。
+type BillingOperationLogInput struct {
+	Action   string
+	Message  string
+	Operator string
+}
+
+// BillingOperationLog 表示一条操作流水（对应 billing_operation_logs 表一行）。
+type BillingOperationLog struct {
+	ID        uuid.UUID
+	TenantID  uuid.UUID
+	Period    *string
+	Action    string
+	RefID     *uuid.UUID
+	Message   string
+	Operator  string
+	CreatedAt time.Time
 }
 
 // BillingInvoice 表示一条账单（对应 billing_invoices 表一行）。
@@ -176,6 +206,8 @@ type CreateBillingInvoiceInput struct {
 	DueDate        time.Time
 	IssuedAt       time.Time
 	IdempotencyKey uuid.UUID
+	// Operation 非 nil 时与账单插入同一事务落一条操作流水。
+	Operation *BillingOperationLogInput
 }
 
 // CreateBillingAdjustmentInput 是写调账的入参。
@@ -186,6 +218,8 @@ type CreateBillingAdjustmentInput struct {
 	Reason         string
 	Operator       string
 	IdempotencyKey uuid.UUID
+	// Operation 非 nil 时与调账插入同一事务落一条操作流水。
+	Operation *BillingOperationLogInput
 }
 
 // BillingInvoiceAction 表示账单状态动作。
@@ -225,7 +259,8 @@ type BillingStore interface {
 	CreateInvoice(ctx context.Context, in CreateBillingInvoiceInput) (*BillingInvoice, error)
 
 	// UpdateInvoiceStatus 以 status='issued' 为 CAS 前提应用状态迁移；不满足 → ErrBillingStateConflict。
-	UpdateInvoiceStatus(ctx context.Context, id uuid.UUID, action BillingInvoiceAction, at time.Time) (*BillingInvoice, error)
+	// op 非 nil 时与状态迁移同一事务落一条操作流水；CAS 失败（409/404）则事务回滚、不落流水。
+	UpdateInvoiceStatus(ctx context.Context, id uuid.UUID, action BillingInvoiceAction, at time.Time, op *BillingOperationLogInput) (*BillingInvoice, error)
 
 	// ListAdjustmentsByTenant 返回该租户全部调账（created_at 升序）。
 	ListAdjustmentsByTenant(ctx context.Context, tenantID uuid.UUID) ([]BillingAdjustment, error)
@@ -245,6 +280,10 @@ type BillingStore interface {
 	// ListBillingTenantIDs 返回计费域有足迹（账单/调账/授信）的租户集合；
 	// tenantFilter 非 nil 时仅返回该租户（存在足迹才返回，无足迹返回空）。
 	ListBillingTenantIDs(ctx context.Context, tenantFilter *uuid.UUID) ([]uuid.UUID, error)
+
+	// ListOperations 返回该租户操作流水（created_at 倒序、分页）；
+	// total 为过滤后总条数（分页用）。无流水返回空切片（不视为错误）。
+	ListOperations(ctx context.Context, tenantID uuid.UUID, limit, offset int) ([]BillingOperationLog, int, error)
 }
 
 // BillingMeteringClient 定义经 Core OpenAPI 获取平台跨租户用量的端口。

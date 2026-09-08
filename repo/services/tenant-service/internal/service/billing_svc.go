@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -20,9 +21,9 @@ type BillingService struct {
 	// 嵌入未实现接口，确保 proto 新增 RPC 后本结构仍能向后兼容（栅栏模式）。
 	tenantv1.UnimplementedBillingServiceServer
 
-	store    ports.BillingStore         // billing_invoices/adjustments/credit_accounts/pricing
+	store    ports.BillingStore          // billing_invoices/adjustments/credit_accounts/pricing
 	metering ports.BillingMeteringClient // Core 平台跨租户用量聚合
-	tenants  ports.TenantSvcClient      // Core 租户 API（存在性校验 + 名称映射）
+	tenants  ports.TenantSvcClient       // Core 租户 API（存在性校验 + 名称映射）
 }
 
 // NewBillingService 构造计费结算 gRPC 服务实例。
@@ -179,30 +180,30 @@ func (s *BillingService) GenerateInvoice(ctx context.Context, req *tenantv1.Gene
 		return nil, mapStoreError(err)
 	}
 
-	// 步骤 4：账单号 seq + 到期日（issued_at + 30 天）
+	// 步骤 4：账单号 seq + 到期日（issued_at + 30 天）+ 操作流水（与插入同一事务）
 	now := time.Now()
 	seq, err := s.store.CountInvoicesByNoPrefix(ctx, billingInvoiceNoPrefix(period))
 	if err != nil {
 		return nil, mapStoreError(err)
 	}
-	inv, err := s.store.CreateInvoice(ctx, ports.CreateBillingInvoiceInput{
+	no := nextBillingInvoiceNo(period, seq)
+	in := ports.CreateBillingInvoiceInput{
 		TenantID:       tenantID,
 		Period:         period,
-		No:             nextBillingInvoiceNo(period, seq),
+		No:             no,
 		AmountUSD:      amount,
 		DueDate:        billingDueDate(now),
 		IssuedAt:       now,
 		IdempotencyKey: key,
-	})
+		Operation: &ports.BillingOperationLogInput{
+			Action:   ports.BillingOpInvoiceGenerated,
+			Message:  fmt.Sprintf("生成账单 %s $%.2f", no, amount),
+			Operator: strings.TrimSpace(req.GetOperator()),
+		},
+	}
+	inv, err := s.store.CreateInvoice(ctx, in)
 	if err != nil {
-		return s.handleCreateInvoiceConflict(ctx, ports.CreateBillingInvoiceInput{
-			TenantID:       tenantID,
-			Period:         period,
-			AmountUSD:      amount,
-			DueDate:        billingDueDate(now),
-			IssuedAt:       now,
-			IdempotencyKey: key,
-		}, key, err)
+		return s.handleCreateInvoiceConflict(ctx, in, key, err)
 	}
 	return invoiceToProto(*inv), nil
 }
@@ -224,12 +225,27 @@ func (s *BillingService) InvoiceAction(ctx context.Context, req *tenantv1.Invoic
 		return nil, err
 	}
 
-	// 步骤 2：CAS 状态迁移（仅 issued 可迁移；不存在 → 404；已终态 → 409）
-	inv, err := s.store.UpdateInvoiceStatus(ctx, invoiceID, billingAction, time.Now())
+	// 步骤 2：预读账单组装流水摘要（no/amount 为不变字段；不存在 → 404 提前返回）
+	inv, err := s.store.GetInvoice(ctx, invoiceID)
 	if err != nil {
 		return nil, mapStoreError(err)
 	}
-	return invoiceToProto(*inv), nil
+
+	// 步骤 3：CAS 状态迁移（仅 issued 可迁移；已终态 → 409）；
+	// CAS 失败由 store 事务回滚、不落流水（幂等冲突不产生操作历史）。
+	opAction, verb := ports.BillingOpInvoiceSettled, "结清"
+	if billingAction == ports.BillingActionCredit {
+		opAction, verb = ports.BillingOpInvoiceCredited, "授信冲抵"
+	}
+	updated, err := s.store.UpdateInvoiceStatus(ctx, invoiceID, billingAction, time.Now(), &ports.BillingOperationLogInput{
+		Action:   opAction,
+		Message:  fmt.Sprintf("账单 %s %s $%.2f", inv.No, verb, inv.AmountUSD),
+		Operator: strings.TrimSpace(req.GetOperator()),
+	})
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	return invoiceToProto(*updated), nil
 }
 
 // CreateAdjustment 写调账记录（金额可负、不可为 0）；同幂等键重放返回已有记录。
@@ -266,7 +282,7 @@ func (s *BillingService) CreateAdjustment(ctx context.Context, req *tenantv1.Cre
 		return adjustmentToProto(*existing), nil
 	}
 
-	// 步骤 4：写调账；幂等键并发冲突 → 重查后按重放语义返回
+	// 步骤 4：写调账 + 操作流水（同一事务）；幂等键并发冲突 → 重查后按重放语义返回（不落流水）
 	adj, err := s.store.CreateAdjustment(ctx, ports.CreateBillingAdjustmentInput{
 		TenantID:       tenantID,
 		Period:         period,
@@ -274,6 +290,11 @@ func (s *BillingService) CreateAdjustment(ctx context.Context, req *tenantv1.Cre
 		Reason:         reason,
 		Operator:       operator,
 		IdempotencyKey: key,
+		Operation: &ports.BillingOperationLogInput{
+			Action:   ports.BillingOpAdjustmentCreated,
+			Message:  fmt.Sprintf("调账 %s（%s）", formatBillingSignedUSD(amount), reason),
+			Operator: operator,
+		},
 	})
 	if err != nil {
 		if errors.Is(err, ports.ErrBillingIdempotencyConflict) {
@@ -286,6 +307,41 @@ func (s *BillingService) CreateAdjustment(ctx context.Context, req *tenantv1.Cre
 		return nil, mapStoreError(err)
 	}
 	return adjustmentToProto(*adj), nil
+}
+
+// ListBillingOperations 返回租户计费操作流水（抽屉「操作历史」Tab 数据源）。
+// 流水与业务写同一事务落库；幂等重放与 409 冲突不产生流水。
+// limit 默认 50、上限 200；offset 默认 0。
+func (s *BillingService) ListBillingOperations(ctx context.Context, req *tenantv1.ListBillingOperationsRequest) (*tenantv1.ListBillingOperationsResponse, error) {
+	// 步骤 1：校验 tenant_id（流水查询不做 Core 存在性校验，避免 Core 故障阻塞历史查看）
+	tenantID, err := parseBillingUUID(req.GetTenantId(), "tenant_id")
+	if err != nil {
+		return nil, err
+	}
+
+	// 步骤 2：分页参数钳制
+	limit := int(req.GetLimit())
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	offset := int(req.GetOffset())
+	if offset < 0 {
+		offset = 0
+	}
+
+	// 步骤 3：查询并映射（created_at 倒序）
+	logs, total, err := s.store.ListOperations(ctx, tenantID, limit, offset)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	items := make([]*tenantv1.BillingOperationLog, 0, len(logs))
+	for _, l := range logs {
+		items = append(items, billingOperationToProto(l))
+	}
+	return &tenantv1.ListBillingOperationsResponse{Items: items, Total: int64(total)}, nil
 }
 
 // ── 内部流程（勿穿插到上方 RPC 中间）──────────────────────────────────────
@@ -406,6 +462,10 @@ func (s *BillingService) handleCreateInvoiceConflict(ctx context.Context, in por
 		return nil, mapStoreError(seqErr)
 	}
 	in.No = nextBillingInvoiceNo(in.Period, seq+1)
+	if in.Operation != nil {
+		// 撞号重试换号后同步刷新流水摘要中的账单号
+		in.Operation.Message = fmt.Sprintf("生成账单 %s $%.2f", in.No, in.AmountUSD)
+	}
 	retried, createErr := s.store.CreateInvoice(ctx, in)
 	if createErr != nil {
 		return nil, businessError(codes.AlreadyExists, ports.ErrBillingInvoiceExists, "invoice number conflict, please retry")

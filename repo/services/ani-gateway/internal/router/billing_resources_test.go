@@ -137,11 +137,14 @@ type fakeBillingGRPCClient struct {
 	actionErr   error
 	adjustment  *tenantv1.BillingAdjustment
 	adjustErr   error
+	operations  *tenantv1.ListBillingOperationsResponse
+	opsErr      error
 
 	lastOverviewReq *tenantv1.GetBillingOverviewRequest
 	lastGenReq      *tenantv1.GenerateInvoiceRequest
 	lastActionReq   *tenantv1.InvoiceActionRequest
 	lastAdjustReq   *tenantv1.CreateAdjustmentRequest
+	lastOpsReq      *tenantv1.ListBillingOperationsRequest
 }
 
 func (f *fakeBillingGRPCClient) GetBillingOverview(_ context.Context, in *tenantv1.GetBillingOverviewRequest, _ ...grpc.CallOption) (*tenantv1.GetBillingOverviewResponse, error) {
@@ -198,6 +201,17 @@ func (f *fakeBillingGRPCClient) CreateAdjustment(_ context.Context, in *tenantv1
 	return &tenantv1.BillingAdjustment{}, nil
 }
 
+func (f *fakeBillingGRPCClient) ListBillingOperations(_ context.Context, in *tenantv1.ListBillingOperationsRequest, _ ...grpc.CallOption) (*tenantv1.ListBillingOperationsResponse, error) {
+	f.lastOpsReq = in
+	if f.opsErr != nil {
+		return nil, f.opsErr
+	}
+	if f.operations != nil {
+		return f.operations, nil
+	}
+	return &tenantv1.ListBillingOperationsResponse{}, nil
+}
+
 // newBillingTestServer 用注入的 gRPC 替身组装 billing 路由（路径与 registerBilling 一致）。
 func newBillingTestServer(client tenantv1.BillingServiceClient) *server.Hertz {
 	h := server.New()
@@ -213,6 +227,7 @@ func newBillingTestServer(client tenantv1.BillingServiceClient) *server.Hertz {
 	svc.POST("/billing/invoices/generate", api.generateInvoice)
 	svc.POST("/billing/invoices/:invoiceId/actions", api.invoiceAction)
 	svc.POST("/billing/adjustments", api.createAdjustment)
+	svc.GET("/billing/operations", api.listBillingOperations)
 	return h
 }
 
@@ -290,6 +305,7 @@ func TestBillingHandlerNilClientGuard(t *testing.T) {
 		{http.MethodPost, "/api/v1/svc/billing/invoices/generate"},
 		{http.MethodPost, "/api/v1/svc/billing/invoices/inv-1/actions"},
 		{http.MethodPost, "/api/v1/svc/billing/adjustments"},
+		{http.MethodGet, "/api/v1/svc/billing/operations"},
 	}
 	for _, p := range paths {
 		resp := ut.PerformRequest(h.Engine, p.method, p.path, nil).Result()
@@ -385,5 +401,78 @@ func TestBillingInvoiceActionAndAdjustmentHandlers(t *testing.T) {
 	resp = postJSON(h, "/api/v1/svc/billing/adjustments", `{bad json`).Result()
 	if resp.StatusCode() != http.StatusBadRequest || !strings.Contains(string(resp.Body()), "VALIDATION_FAILED") {
 		t.Fatalf("bad json status/body = %d/%s", resp.StatusCode(), resp.Body())
+	}
+}
+
+func TestBillingOperationsHandler(t *testing.T) {
+	period := "2026-09"
+	refID := "inv-1"
+	fake := &fakeBillingGRPCClient{operations: &tenantv1.ListBillingOperationsResponse{
+		Items: []*tenantv1.BillingOperationLog{
+			{
+				Id: "log-1", TenantId: "tid", Period: &period, Action: "invoice.generated",
+				RefId: &refID, Message: "生成账单 INV-2609-01 $2.00", Operator: "user-boss",
+				CreatedAt: timestamppb.New(time.Date(2026, 9, 8, 15, 4, 5, 0, time.FixedZone("CST", 8*3600))),
+			},
+			{
+				Id: "log-2", TenantId: "tid", Action: "adjustment_created",
+				Message: "调账 -$1.50", Operator: "user-boss",
+				CreatedAt: timestamppb.New(time.Date(2026, 9, 8, 15, 5, 0, 0, time.FixedZone("CST", 8*3600))),
+			},
+		},
+		Total: 2,
+	}}
+	h := newBillingTestServer(fake)
+
+	resp := ut.PerformRequest(h.Engine, http.MethodGet,
+		"/api/v1/svc/billing/operations?tenant_id=tid&limit=10&offset=5", nil).Result()
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", resp.StatusCode(), resp.Body())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(resp.Body(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["total"] != float64(2) || len(body["items"].([]any)) != 2 {
+		t.Fatalf("body = %+v", body)
+	}
+	first := body["items"].([]any)[0].(map[string]any)
+	if first["action"] != "invoice.generated" || first["message"] != "生成账单 INV-2609-01 $2.00" || first["operator"] != "user-boss" {
+		t.Fatalf("first item = %+v", first)
+	}
+	// ref_id 有值透传、period 有值透传
+	if first["ref_id"] != "inv-1" || first["period"] != "2026-09" {
+		t.Fatalf("optional passthrough = %+v", first)
+	}
+	// 第二条：period/ref_id 缺省 → null（optional 语义）
+	second := body["items"].([]any)[1].(map[string]any)
+	if second["period"] != nil || second["ref_id"] != nil {
+		t.Fatalf("optional null semantics = %+v", second)
+	}
+	// dev_profile 标记
+	dp, _ := body["dev_profile"].(map[string]any)
+	if dp == nil || dp["provider"] != "tenant-service" {
+		t.Fatalf("dev_profile = %+v", body["dev_profile"])
+	}
+	// 查询参数透传
+	if fake.lastOpsReq == nil || fake.lastOpsReq.GetTenantId() != "tid" || fake.lastOpsReq.GetLimit() != 10 || fake.lastOpsReq.GetOffset() != 5 {
+		t.Fatalf("query passthrough = %+v", fake.lastOpsReq)
+	}
+}
+
+func TestBillingOperationsHandlerErrorMapping(t *testing.T) {
+	fake := &fakeBillingGRPCClient{opsErr: status.Error(codes.InvalidArgument, "VALIDATION_FAILED: tenant_id required")}
+	h := newBillingTestServer(fake)
+
+	resp := ut.PerformRequest(h.Engine, http.MethodGet, "/api/v1/svc/billing/operations", nil).Result()
+	if resp.StatusCode() != http.StatusBadRequest {
+		t.Fatalf("status = %d; body=%s", resp.StatusCode(), resp.Body())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(resp.Body(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["code"] != "VALIDATION_FAILED" || body["request_id"] != "req-billing-1" {
+		t.Fatalf("body = %+v", body)
 	}
 }

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +27,7 @@ type fakeBillingStore struct {
 	credits     map[uuid.UUID]float64
 	pricing     []ports.BillingPricing
 	footprint   []uuid.UUID
+	opLogs      []ports.BillingOperationLog // 与业务写同事务落库的操作流水（fake 直接追加）
 
 	createInvoiceErr   error // 首次 CreateInvoice 返回该错误后自动清除（模拟唯一冲突一次）
 	createInvoiceCalls int
@@ -105,17 +107,26 @@ func (f *fakeBillingStore) CreateInvoice(_ context.Context, in ports.CreateBilli
 	}
 	f.invoices[inv.ID] = inv
 	f.byPeriod[billingPeriodKey(in.TenantID, in.Period)] = inv
+	if in.Operation != nil {
+		period := in.Period
+		refID := inv.ID
+		f.opLogs = append(f.opLogs, ports.BillingOperationLog{
+			ID: uuid.New(), TenantID: in.TenantID, Period: &period,
+			Action: in.Operation.Action, RefID: &refID,
+			Message: in.Operation.Message, Operator: in.Operation.Operator, CreatedAt: time.Now(),
+		})
+	}
 	cp := *inv
 	return &cp, nil
 }
 
-func (f *fakeBillingStore) UpdateInvoiceStatus(_ context.Context, id uuid.UUID, action ports.BillingInvoiceAction, at time.Time) (*ports.BillingInvoice, error) {
+func (f *fakeBillingStore) UpdateInvoiceStatus(_ context.Context, id uuid.UUID, action ports.BillingInvoiceAction, at time.Time, op *ports.BillingOperationLogInput) (*ports.BillingInvoice, error) {
 	inv, ok := f.invoices[id]
 	if !ok {
 		return nil, ports.ErrBillingInvoiceNotFound
 	}
 	if inv.Status != ports.BillingInvoiceIssued {
-		return nil, ports.ErrBillingStateConflict
+		return nil, ports.ErrBillingStateConflict // CAS 失败：不落流水
 	}
 	switch action {
 	case ports.BillingActionSettle:
@@ -124,6 +135,15 @@ func (f *fakeBillingStore) UpdateInvoiceStatus(_ context.Context, id uuid.UUID, 
 	case ports.BillingActionCredit:
 		inv.Status = ports.BillingInvoiceCredited
 		inv.CreditedAt = &at
+	}
+	if op != nil {
+		period := inv.Period
+		refID := inv.ID
+		f.opLogs = append(f.opLogs, ports.BillingOperationLog{
+			ID: uuid.New(), TenantID: inv.TenantID, Period: &period,
+			Action: op.Action, RefID: &refID,
+			Message: op.Message, Operator: op.Operator, CreatedAt: at,
+		})
 	}
 	cp := *inv
 	return &cp, nil
@@ -171,6 +191,15 @@ func (f *fakeBillingStore) CreateAdjustment(_ context.Context, in ports.CreateBi
 		CreatedAt:      time.Now(),
 	}
 	f.adjustments = append(f.adjustments, adj)
+	if in.Operation != nil {
+		period := in.Period
+		refID := adj.ID
+		f.opLogs = append(f.opLogs, ports.BillingOperationLog{
+			ID: uuid.New(), TenantID: in.TenantID, Period: &period,
+			Action: in.Operation.Action, RefID: &refID,
+			Message: in.Operation.Message, Operator: in.Operation.Operator, CreatedAt: adj.CreatedAt,
+		})
+	}
 	return &adj, nil
 }
 
@@ -194,6 +223,28 @@ func (f *fakeBillingStore) ListBillingTenantIDs(_ context.Context, tenantFilter 
 		out = append(out, id)
 	}
 	return out, nil
+}
+
+// ListOperations 内存版操作流水查询（created_at 插入序倒序 = 近似 created_at 倒序）。
+func (f *fakeBillingStore) ListOperations(_ context.Context, tenantID uuid.UUID, limit, offset int) ([]ports.BillingOperationLog, int, error) {
+	out := make([]ports.BillingOperationLog, 0)
+	for _, l := range f.opLogs {
+		if l.TenantID == tenantID {
+			out = append(out, l)
+		}
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 { // 倒序（最新在前）
+		out[i], out[j] = out[j], out[i]
+	}
+	total := len(out)
+	if offset >= total {
+		return []ports.BillingOperationLog{}, total, nil
+	}
+	end := total
+	if offset+limit < end {
+		end = offset + limit
+	}
+	return out[offset:end], total, nil
 }
 
 // fakeBillingMetering 内存版平台跨租户用量客户端。
@@ -539,6 +590,254 @@ func TestBillingCreateAdjustmentIdempotencyConflictReplay(t *testing.T) {
 	}
 }
 
+// ── 操作流水（billing_operation_logs）────────────────────────────────────
+
+func TestBillingGenerateInvoiceWritesOperationLog(t *testing.T) {
+	store := newFakeBillingStore()
+	store.pricing = seedBillingPricing()
+	store.adjustments = []ports.BillingAdjustment{{
+		ID: uuid.New(), TenantID: billingTenantA, Period: "2026-09", AmountUSD: -0.4, Reason: "goodwill",
+	}}
+	meter := &fakeBillingMetering{usage: []ports.BillingUsageRecord{
+		{TenantID: billingTenantA, ResourceType: "instance_gpu_seconds", TotalQuantity: 7200},
+	}}
+	tenants := &fakeTenantClient{tenant: ports.Tenant{ID: billingTenantA, DisplayName: "acme"}}
+	svc := newBillingTestSvc(store, meter, tenants)
+
+	key := uuid.New()
+	res, err := svc.GenerateInvoice(context.Background(), &tenantv1.GenerateInvoiceRequest{
+		TenantId: billingTenantA.String(), Period: "2026-09", IdempotencyKey: key.String(), Operator: "op-1",
+	})
+	if err != nil {
+		t.Fatalf("GenerateInvoice: %v", err)
+	}
+
+	// 成功路径：恰好 1 条 invoice.generated 流水，message 含账单号与金额
+	if len(store.opLogs) != 1 {
+		t.Fatalf("op logs = %d, want 1", len(store.opLogs))
+	}
+	log := store.opLogs[0]
+	if log.Action != ports.BillingOpInvoiceGenerated {
+		t.Fatalf("action = %q, want %q", log.Action, ports.BillingOpInvoiceGenerated)
+	}
+	if log.Message != "生成账单 INV-2609-01 $2.00" {
+		t.Fatalf("message = %q", log.Message)
+	}
+	if log.Operator != "op-1" {
+		t.Fatalf("operator = %q, want op-1", log.Operator)
+	}
+	if log.Period == nil || *log.Period != "2026-09" {
+		t.Fatalf("period = %v, want 2026-09", log.Period)
+	}
+	if log.RefID == nil || log.RefID.String() != res.GetId() {
+		t.Fatalf("ref_id = %v, want invoice id %q", log.RefID, res.GetId())
+	}
+
+	// 同幂等键重放 → 不新增流水
+	if _, err := svc.GenerateInvoice(context.Background(), &tenantv1.GenerateInvoiceRequest{
+		TenantId: billingTenantA.String(), Period: "2026-09", IdempotencyKey: key.String(), Operator: "op-1",
+	}); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if len(store.opLogs) != 1 {
+		t.Fatalf("op logs after replay = %d, want 1（重放不落流水）", len(store.opLogs))
+	}
+
+	// 换幂等键 → 409 冲突，不新增流水
+	_, err = svc.GenerateInvoice(context.Background(), &tenantv1.GenerateInvoiceRequest{
+		TenantId: billingTenantA.String(), Period: "2026-09", IdempotencyKey: uuid.New().String(),
+	})
+	requireBizCode(t, err, codes.AlreadyExists, "BILLING_INVOICE_EXISTS")
+	if len(store.opLogs) != 1 {
+		t.Fatalf("op logs after 409 = %d, want 1（冲突不落流水）", len(store.opLogs))
+	}
+}
+
+func TestBillingInvoiceActionWritesOperationLog(t *testing.T) {
+	store := newFakeBillingStore()
+	meter := &fakeBillingMetering{}
+	svc := newBillingTestSvc(store, meter, nil)
+
+	seeded, err := store.CreateInvoice(context.Background(), ports.CreateBillingInvoiceInput{
+		TenantID: billingTenantA, Period: "2026-09", No: "INV-2609-01",
+		AmountUSD: 10, DueDate: billingDueDate(time.Now()), IssuedAt: time.Now(), IdempotencyKey: uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// settle → 流水 invoice.settled（message 含账单号与金额）
+	if _, err := svc.InvoiceAction(context.Background(), &tenantv1.InvoiceActionRequest{
+		InvoiceId: seeded.ID.String(), Action: "settle", IdempotencyKey: uuid.New().String(), Operator: "op-2",
+	}); err != nil {
+		t.Fatalf("settle: %v", err)
+	}
+	if len(store.opLogs) != 1 {
+		t.Fatalf("op logs = %d, want 1", len(store.opLogs))
+	}
+	if store.opLogs[0].Action != ports.BillingOpInvoiceSettled ||
+		store.opLogs[0].Message != "账单 INV-2609-01 结清 $10.00" ||
+		store.opLogs[0].Operator != "op-2" {
+		t.Fatalf("settle log = %+v", store.opLogs[0])
+	}
+
+	// 终态重复 settle → 409 且不新增流水（CAS 失败事务回滚）
+	_, err = svc.InvoiceAction(context.Background(), &tenantv1.InvoiceActionRequest{
+		InvoiceId: seeded.ID.String(), Action: "settle", IdempotencyKey: uuid.New().String(),
+	})
+	requireBizCode(t, err, codes.FailedPrecondition, "BILLING_STATE_CONFLICT")
+	if len(store.opLogs) != 1 {
+		t.Fatalf("op logs after 409 = %d, want 1（CAS 失败不落流水）", len(store.opLogs))
+	}
+
+	// credit → 流水 invoice.credited
+	if _, err := svc.InvoiceAction(context.Background(), &tenantv1.InvoiceActionRequest{
+		InvoiceId: seeded.ID.String(), Action: "credit", IdempotencyKey: uuid.New().String(),
+	}); err == nil {
+		t.Fatalf("settle 后 credit 应 409")
+	}
+	seeded2, err := store.CreateInvoice(context.Background(), ports.CreateBillingInvoiceInput{
+		TenantID: billingTenantA, Period: "2026-08", No: "INV-2608-01",
+		AmountUSD: 3, DueDate: billingDueDate(time.Now()), IssuedAt: time.Now(), IdempotencyKey: uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("seed2: %v", err)
+	}
+	if _, err := svc.InvoiceAction(context.Background(), &tenantv1.InvoiceActionRequest{
+		InvoiceId: seeded2.ID.String(), Action: "credit", IdempotencyKey: uuid.New().String(),
+	}); err != nil {
+		t.Fatalf("credit: %v", err)
+	}
+	if len(store.opLogs) != 2 {
+		t.Fatalf("op logs = %d, want 2", len(store.opLogs))
+	}
+	last := store.opLogs[len(store.opLogs)-1]
+	if last.Action != ports.BillingOpInvoiceCredited || last.Message != "账单 INV-2608-01 授信冲抵 $3.00" {
+		t.Fatalf("credit log = %+v", last)
+	}
+}
+
+func TestBillingCreateAdjustmentWritesOperationLog(t *testing.T) {
+	store := newFakeBillingStore()
+	meter := &fakeBillingMetering{}
+	tenants := &fakeTenantClient{tenant: ports.Tenant{ID: billingTenantA}}
+	svc := newBillingTestSvc(store, meter, tenants)
+
+	// 正金额 → message "+$500.00"；负金额 → "-$1.50"
+	if _, err := svc.CreateAdjustment(context.Background(), &tenantv1.CreateAdjustmentRequest{
+		TenantId: billingTenantA.String(), Period: "2026-09", AmountUsd: 500,
+		Reason: "合同优惠调账", IdempotencyKey: uuid.New().String(), Operator: "op-3",
+	}); err != nil {
+		t.Fatalf("create adjustment: %v", err)
+	}
+	if _, err := svc.CreateAdjustment(context.Background(), &tenantv1.CreateAdjustmentRequest{
+		TenantId: billingTenantA.String(), Period: "2026-09", AmountUsd: -1.5,
+		Reason: "promo credit", IdempotencyKey: uuid.New().String(), Operator: "op-3",
+	}); err != nil {
+		t.Fatalf("create negative adjustment: %v", err)
+	}
+	if len(store.opLogs) != 2 {
+		t.Fatalf("op logs = %d, want 2", len(store.opLogs))
+	}
+	if store.opLogs[0].Action != ports.BillingOpAdjustmentCreated ||
+		store.opLogs[0].Message != "调账 +$500.00（合同优惠调账）" {
+		t.Fatalf("adjustment log = %+v", store.opLogs[0])
+	}
+	if store.opLogs[1].Message != "调账 -$1.50（promo credit）" {
+		t.Fatalf("negative adjustment log = %+v", store.opLogs[1])
+	}
+
+	// 同幂等键重放 → 不新增流水
+	key := uuid.New()
+	if _, err := svc.CreateAdjustment(context.Background(), &tenantv1.CreateAdjustmentRequest{
+		TenantId: billingTenantA.String(), Period: "2026-09", AmountUsd: 2,
+		Reason: "dup", IdempotencyKey: key.String(),
+	}); err != nil {
+		t.Fatalf("first dup: %v", err)
+	}
+	if _, err := svc.CreateAdjustment(context.Background(), &tenantv1.CreateAdjustmentRequest{
+		TenantId: billingTenantA.String(), Period: "2026-09", AmountUsd: 2,
+		Reason: "dup", IdempotencyKey: key.String(),
+	}); err != nil {
+		t.Fatalf("replay dup: %v", err)
+	}
+	if len(store.opLogs) != 3 {
+		t.Fatalf("op logs after replay = %d, want 3（重放不落流水）", len(store.opLogs))
+	}
+}
+
+func TestBillingListBillingOperationsPaginationAndValidation(t *testing.T) {
+	store := newFakeBillingStore()
+	meter := &fakeBillingMetering{}
+	tenants := &fakeTenantClient{tenant: ports.Tenant{ID: billingTenantA}}
+	svc := newBillingTestSvc(store, meter, tenants)
+
+	// 种子 3 条流水（3 次调账）
+	for i := 0; i < 3; i++ {
+		if _, err := svc.CreateAdjustment(context.Background(), &tenantv1.CreateAdjustmentRequest{
+			TenantId: billingTenantA.String(), Period: "2026-09", AmountUsd: 1,
+			Reason: fmt.Sprintf("adj-%d", i), IdempotencyKey: uuid.New().String(),
+		}); err != nil {
+			t.Fatalf("seed adjustment %d: %v", i, err)
+		}
+	}
+
+	// tenant_id 非 UUID → 400
+	_, err := svc.ListBillingOperations(context.Background(), &tenantv1.ListBillingOperationsRequest{TenantId: "bad"})
+	requireBizCode(t, err, codes.InvalidArgument, "VALIDATION_FAILED")
+	// tenant_id 缺失 → 400
+	_, err = svc.ListBillingOperations(context.Background(), &tenantv1.ListBillingOperationsRequest{})
+	requireBizCode(t, err, codes.InvalidArgument, "VALIDATION_FAILED")
+
+	// limit=2 → 2 条 + total=3；offset=2 → 剩 1 条
+	page1, err := svc.ListBillingOperations(context.Background(), &tenantv1.ListBillingOperationsRequest{
+		TenantId: billingTenantA.String(), Limit: 2,
+	})
+	if err != nil {
+		t.Fatalf("list page1: %v", err)
+	}
+	if page1.GetTotal() != 3 || len(page1.GetItems()) != 2 {
+		t.Fatalf("page1 total=%d items=%d, want 3/2", page1.GetTotal(), len(page1.GetItems()))
+	}
+	page2, err := svc.ListBillingOperations(context.Background(), &tenantv1.ListBillingOperationsRequest{
+		TenantId: billingTenantA.String(), Limit: 2, Offset: 2,
+	})
+	if err != nil {
+		t.Fatalf("list page2: %v", err)
+	}
+	if page2.GetTotal() != 3 || len(page2.GetItems()) != 1 {
+		t.Fatalf("page2 total=%d items=%d, want 3/1", page2.GetTotal(), len(page2.GetItems()))
+	}
+
+	// limit=0 → 默认 50（全量返回）；limit 超上限 → 钳制不报错
+	all, err := svc.ListBillingOperations(context.Background(), &tenantv1.ListBillingOperationsRequest{
+		TenantId: billingTenantA.String(),
+	})
+	if err != nil {
+		t.Fatalf("list default: %v", err)
+	}
+	if len(all.GetItems()) != 3 {
+		t.Fatalf("default limit items = %d, want 3", len(all.GetItems()))
+	}
+	if _, err := svc.ListBillingOperations(context.Background(), &tenantv1.ListBillingOperationsRequest{
+		TenantId: billingTenantA.String(), Limit: 9999,
+	}); err != nil {
+		t.Fatalf("list over-limit: %v", err)
+	}
+
+	// 条目字段映射：reason 倒序 → 最新在前；period/ref_id/operator 回填
+	first := all.GetItems()[0]
+	if first.GetMessage() != "调账 +$1.00（adj-2）" {
+		t.Fatalf("first message = %q（created_at 倒序）", first.GetMessage())
+	}
+	if first.GetAction() != ports.BillingOpAdjustmentCreated || first.GetOperator() != "" {
+		t.Fatalf("first = %+v", first)
+	}
+	if first.GetPeriod() != "2026-09" || first.GetRefId() == "" || first.GetId() == "" {
+		t.Fatalf("first fields = %+v", first)
+	}
+}
+
 // ── GetBillingOverview ──────────────────────────────────────────────────
 
 func TestBillingGetBillingOverviewEmpty(t *testing.T) {
@@ -670,7 +969,7 @@ func TestBillingGetBillingOverviewStatusFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed B: %v", err)
 	}
-	if _, err := store.UpdateInvoiceStatus(context.Background(), invB.ID, ports.BillingActionSettle, now); err != nil {
+	if _, err := store.UpdateInvoiceStatus(context.Background(), invB.ID, ports.BillingActionSettle, now, nil); err != nil {
 		t.Fatalf("settle B: %v", err)
 	}
 	store.footprint = []uuid.UUID{billingTenantA, billingTenantB}

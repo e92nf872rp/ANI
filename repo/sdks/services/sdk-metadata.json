@@ -23,6 +23,12 @@
       "scope": ""
     },
     {
+      "operationId": "listBillingOperations",
+      "method": "GET",
+      "path": "/billing/operations",
+      "scope": ""
+    },
+    {
       "operationId": "getBillingOverview",
       "method": "GET",
       "path": "/billing/overview",
@@ -768,6 +774,8 @@
     "BillingInvoiceActionRequest",
     "BillingInvoiceGenerateRequest",
     "BillingInvoiceSummary",
+    "BillingOperationLog",
+    "BillingOperationsResponse",
     "BillingOverviewItem",
     "BillingOverviewResponse",
     "BillingUsageBreakdownItem",

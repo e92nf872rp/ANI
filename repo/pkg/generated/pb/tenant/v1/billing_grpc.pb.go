@@ -24,6 +24,7 @@ const (
 	BillingService_GenerateInvoice_FullMethodName       = "/tenant.v1.BillingService/GenerateInvoice"
 	BillingService_InvoiceAction_FullMethodName         = "/tenant.v1.BillingService/InvoiceAction"
 	BillingService_CreateAdjustment_FullMethodName      = "/tenant.v1.BillingService/CreateAdjustment"
+	BillingService_ListBillingOperations_FullMethodName = "/tenant.v1.BillingService/ListBillingOperations"
 )
 
 // BillingServiceClient is the client API for BillingService service.
@@ -46,6 +47,10 @@ type BillingServiceClient interface {
 	// CreateAdjustment writes a (possibly negative) adjustment record for a
 	// tenant/period; amount must not be zero.
 	CreateAdjustment(ctx context.Context, in *CreateAdjustmentRequest, opts ...grpc.CallOption) (*BillingAdjustment, error)
+	// ListBillingOperations returns the tenant's billing operation log (the
+	// drawer "操作历史" tab). Logs are written in the same DB transaction as the
+	// business write; idempotent replays and 409 conflicts produce no log.
+	ListBillingOperations(ctx context.Context, in *ListBillingOperationsRequest, opts ...grpc.CallOption) (*ListBillingOperationsResponse, error)
 }
 
 type billingServiceClient struct {
@@ -101,6 +106,15 @@ func (c *billingServiceClient) CreateAdjustment(ctx context.Context, in *CreateA
 	return out, nil
 }
 
+func (c *billingServiceClient) ListBillingOperations(ctx context.Context, in *ListBillingOperationsRequest, opts ...grpc.CallOption) (*ListBillingOperationsResponse, error) {
+	out := new(ListBillingOperationsResponse)
+	err := c.cc.Invoke(ctx, BillingService_ListBillingOperations_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // BillingServiceServer is the server API for BillingService service.
 // All implementations must embed UnimplementedBillingServiceServer
 // for forward compatibility
@@ -121,6 +135,10 @@ type BillingServiceServer interface {
 	// CreateAdjustment writes a (possibly negative) adjustment record for a
 	// tenant/period; amount must not be zero.
 	CreateAdjustment(context.Context, *CreateAdjustmentRequest) (*BillingAdjustment, error)
+	// ListBillingOperations returns the tenant's billing operation log (the
+	// drawer "操作历史" tab). Logs are written in the same DB transaction as the
+	// business write; idempotent replays and 409 conflicts produce no log.
+	ListBillingOperations(context.Context, *ListBillingOperationsRequest) (*ListBillingOperationsResponse, error)
 	mustEmbedUnimplementedBillingServiceServer()
 }
 
@@ -142,6 +160,9 @@ func (UnimplementedBillingServiceServer) InvoiceAction(context.Context, *Invoice
 }
 func (UnimplementedBillingServiceServer) CreateAdjustment(context.Context, *CreateAdjustmentRequest) (*BillingAdjustment, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateAdjustment not implemented")
+}
+func (UnimplementedBillingServiceServer) ListBillingOperations(context.Context, *ListBillingOperationsRequest) (*ListBillingOperationsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListBillingOperations not implemented")
 }
 func (UnimplementedBillingServiceServer) mustEmbedUnimplementedBillingServiceServer() {}
 
@@ -246,6 +267,24 @@ func _BillingService_CreateAdjustment_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _BillingService_ListBillingOperations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListBillingOperationsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BillingServiceServer).ListBillingOperations(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BillingService_ListBillingOperations_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BillingServiceServer).ListBillingOperations(ctx, req.(*ListBillingOperationsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // BillingService_ServiceDesc is the grpc.ServiceDesc for BillingService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -272,6 +311,10 @@ var BillingService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateAdjustment",
 			Handler:    _BillingService_CreateAdjustment_Handler,
+		},
+		{
+			MethodName: "ListBillingOperations",
+			Handler:    _BillingService_ListBillingOperations_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

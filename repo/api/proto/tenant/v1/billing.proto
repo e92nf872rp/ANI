@@ -27,6 +27,10 @@ service BillingService {
   // CreateAdjustment writes a (possibly negative) adjustment record for a
   // tenant/period; amount must not be zero.
   rpc CreateAdjustment(CreateAdjustmentRequest) returns (BillingAdjustment);
+  // ListBillingOperations returns the tenant's billing operation log (the
+  // drawer "操作历史" tab). Logs are written in the same DB transaction as the
+  // business write; idempotent replays and 409 conflicts produce no log.
+  rpc ListBillingOperations(ListBillingOperationsRequest) returns (ListBillingOperationsResponse);
 }
 
 // ── Billing RPC request / response ───────────────────────────────────────────
@@ -76,6 +80,17 @@ message CreateAdjustmentRequest {
   string operator = 6;
 }
 
+message ListBillingOperationsRequest {
+  string tenant_id = 1; // required
+  int32 limit = 2;      // page size; default 50, max 200
+  int32 offset = 3;     // page offset; default 0
+}
+
+message ListBillingOperationsResponse {
+  repeated BillingOperationLog items = 1;
+  int64 total = 2; // total matching rows (pagination)
+}
+
 // ── Billing entities ─────────────────────────────────────────────────────────
 
 message BillingUsageBreakdown {
@@ -106,6 +121,17 @@ message BillingAdjustment {
   string reason = 5;
   string operator = 6;
   google.protobuf.Timestamp created_at = 7;
+}
+
+message BillingOperationLog {
+  string id = 1;
+  string tenant_id = 2;
+  optional string period = 3;  // YYYY-MM; null reserved for non-period actions
+  string action = 4;           // invoice.generated | invoice.settled | invoice.credited | adjustment.created
+  optional string ref_id = 5;  // related invoice_id / adjustment_id
+  string message = 6;          // human-readable summary (includes amount)
+  string operator = 7;         // gateway-provided user_id
+  google.protobuf.Timestamp created_at = 8;
 }
 
 message BillingOverviewItem {

@@ -34,7 +34,7 @@ var billingHourMetrics = map[string]bool{
 }
 
 // billingAlwaysUnavailable 是采集源缺失、永远 unavailable 的展示指标
-//（storage/kb：Core resource_type 枚举与采集链路均未落地，§4.1/§8）。
+// （storage/kb：Core resource_type 枚举与采集链路均未落地，§4.1/§8）。
 var billingAlwaysUnavailable = map[string]bool{
 	"storage_gi": true, "kb_queries": true,
 }
@@ -206,13 +206,13 @@ func round2(f float64) float64 {
 // invoiceToProto 账单实体 → BillingInvoice proto。
 func invoiceToProto(inv ports.BillingInvoice) *tenantv1.BillingInvoice {
 	out := &tenantv1.BillingInvoice{
-		Id:       inv.ID.String(),
-		No:       inv.No,
-		Period:   inv.Period,
+		Id:        inv.ID.String(),
+		No:        inv.No,
+		Period:    inv.Period,
 		AmountUsd: inv.AmountUSD,
-		Status:   string(inv.Status),
-		DueDate:  formatBillingDate(inv.DueDate),
-		IssuedAt: timestampOf(inv.IssuedAt),
+		Status:    string(inv.Status),
+		DueDate:   formatBillingDate(inv.DueDate),
+		IssuedAt:  timestampOf(inv.IssuedAt),
 	}
 	if inv.SettledAt != nil {
 		out.SettledAt = timestampOf(*inv.SettledAt)
@@ -234,6 +234,35 @@ func adjustmentToProto(adj ports.BillingAdjustment) *tenantv1.BillingAdjustment 
 		Operator:  adj.Operator,
 		CreatedAt: timestampOf(adj.CreatedAt),
 	}
+}
+
+// billingOperationToProto 操作流水实体 → BillingOperationLog proto
+// （可空 period/ref_id 仅在非 nil 时填充）。
+func billingOperationToProto(l ports.BillingOperationLog) *tenantv1.BillingOperationLog {
+	out := &tenantv1.BillingOperationLog{
+		Id:        l.ID.String(),
+		TenantId:  l.TenantID.String(),
+		Action:    l.Action,
+		Message:   l.Message,
+		Operator:  l.Operator,
+		CreatedAt: timestampOf(l.CreatedAt),
+	}
+	if l.Period != nil {
+		out.Period = l.Period
+	}
+	if l.RefID != nil {
+		ref := l.RefID.String()
+		out.RefId = &ref
+	}
+	return out
+}
+
+// formatBillingSignedUSD 带符号金额（流水摘要用）：+500 → "+$500.00"，-50 → "-$50.00"。
+func formatBillingSignedUSD(amount float64) string {
+	if amount >= 0 {
+		return fmt.Sprintf("+$%.2f", amount)
+	}
+	return fmt.Sprintf("-$%.2f", -amount)
 }
 
 // renderBillingCSV 渲染对账 CSV（§10.7：全扁平 + 每租户 breakdown 明细行）。

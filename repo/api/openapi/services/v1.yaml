@@ -1562,10 +1562,10 @@ components:
     BillingInvoiceSummary:
       type: object
       description: "账单摘要（生成即出账：无 draft 态；overdue 仅为读取时展示态，落库仍为 issued）。"
-      required: [id, no, period, amount_usd, status, issued_at, due_date]
+      required: [id, 'no', period, amount_usd, status, issued_at, due_date]
       properties:
         id:         { type: string, format: uuid }
-        no:         { type: string, description: "账单号 INV-{YYMM}-{seq}" }
+        'no':       { type: string, description: "账单号 INV-{YYMM}-{seq}" }
         period:     { type: string, description: "账期 YYYY-MM" }
         amount_usd: { type: number, format: double, description: "账单金额（USD）= 用量成本 + 当期调账合计" }
         status:     { type: string, enum: [issued, settled, credited] }
@@ -1673,6 +1673,31 @@ components:
           description: "调账金额（USD）；可为负，不可为 0"
         reason:         { type: string, minLength: 1, maxLength: 512 }
         idempotency_key: { type: string, format: uuid, description: "客户端生成UUID；也可改传请求头 Idempotency-Key（body 缺省时网关回落）" }
+
+    BillingOperationLog:
+      type: object
+      description: "计费操作流水（与业务写同一事务落库；幂等重放与 409 冲突不产生流水）。"
+      required: [id, tenant_id, action, message, operator, created_at]
+      properties:
+        id:         { type: string, format: uuid }
+        tenant_id:  { type: string, format: uuid }
+        period:     { type: string, nullable: true, description: "关联账期 YYYY-MM（账单/调账动作取对应账期）；预留可空" }
+        action:
+          type: string
+          enum: [invoice.generated, invoice.settled, invoice.credited, adjustment.created]
+          description: "动作：生成账单 / 结清 / 授信冲抵 / 调账写入"
+        ref_id:     { type: string, format: uuid, nullable: true, description: "关联 invoice_id / adjustment_id" }
+        message:    { type: string, description: "人类可读摘要（含金额），如「生成账单 INV-2609-01 $120.50」" }
+        operator:   { type: string, description: "操作人（网关透传 user_id）" }
+        created_at: { type: string, description: "操作时间 YYYY-MM-DD HH:mm:ss（Asia/Shanghai）；非 RFC3339" }
+
+    BillingOperationsResponse:
+      type: object
+      required: [items, total, dev_profile]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/BillingOperationLog' } }
+        total: { type: integer, description: "过滤后总条数（分页用）" }
+        dev_profile: { $ref: '#/components/schemas/DevProfileInfo' }
 
 paths:
   /models:
@@ -4403,6 +4428,38 @@ paths:
         "502": { $ref: '#/components/responses/BadGateway' }
         "504": { $ref: '#/components/responses/GatewayTimeout' }
 
+  /billing/operations:
+    get:
+      operationId: listBillingOperations
+      summary: 查询租户计费操作流水（抽屉「操作历史」Tab 数据源；需 platform-admin / platform-ops / platform-readonly）
+      description: |
+        返回该租户计费操作流水（生成账单 / 结清 / 授信冲抵 / 调账写入），created_at 倒序分页。
+        流水与业务写同一事务落库：业务写失败回滚则不落流水；幂等重放与 409 冲突不产生流水。
+        limit 默认 50、上限 200；offset 默认 0。
+      tags: [Billing]
+      security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: billing
+        action: read
+        boundary: platform
+        principal_kinds: [user]
+      parameters:
+        - { name: tenant_id, in: query, required: true, schema: { type: string, format: uuid }, description: "租户 ID（抽屉上下文租户）" }
+        - { name: limit, in: query, required: false, schema: { type: integer, default: 50, minimum: 1, maximum: 200 }, description: "页大小" }
+        - { name: offset, in: query, required: false, schema: { type: integer, default: 0, minimum: 0 }, description: "页偏移" }
+      responses:
+        "200":
+          description: 操作流水列表（created_at 倒序）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BillingOperationsResponse' }
+        "400": { $ref: '#/components/responses/BadRequest', description: "tenant_id 缺失或非 UUID" }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "502": { $ref: '#/components/responses/BadGateway' }
+        "504": { $ref: '#/components/responses/GatewayTimeout' }
+
 tags:
   - { name: Models, description: "模型仓库" }
   - { name: InferenceServices, description: "推理服务" }
@@ -4413,5 +4470,5 @@ tags:
   - { name: TenantPlans, description: "配额套餐管理" }
   - { name: PlatformAdmins, description: "平台运营账号管理（创建/详情/角色/密码/禁用启用删除/审计）" }
   - { name: TenantAdmins, description: "租户管理员管理（邀请/角色/移交/禁用启用删除/审计）" }
-  - { name: Billing, description: "BOSS 租户计费结算（账务总览/对账导出/生成账单/账单动作/调账）" }
+  - { name: Billing, description: "BOSS 租户计费结算（账务总览/对账导出/生成账单/账单动作/调账/操作历史）" }
   - { name: Integrations, description: "第三方集成与企业通知" }
