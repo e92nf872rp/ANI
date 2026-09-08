@@ -9,7 +9,7 @@
 // change requires a new versioned package and subject plus an explicit
 // dual-publish, dual-consume, and old-version retirement gate.
 
-package integrationv1
+package tenantintegrationv1
 
 import (
 	context "context"
