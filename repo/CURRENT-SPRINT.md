@@ -476,6 +476,31 @@ git diff --check
 | 文档对齐 | 以代码和 issue 为标准，5+ 轮深度审计修正 SPEC/UX/PRD/Plan 四份文档 + 7 处 issue 修正 | ✅ 已完成 | `tenant-admin-doc-alignment-batch.md` |
 | 批次汇总 | 功能批次汇总：13 项设计决策、5 张偏差表、4 项 tradeoff、4 项 open question | ✅ 已完成 | `tenant-admin-feature-batch.md` |
 
+## BOSS 租户列表管理功能流（2026-09）
+
+> BOSS 租户列表：创建/列表详情/更新/状态机/SSO·MFA 配置/配额代理/配额变更/lifecycle·audit/租户内 admins。**Issue-001～009、011～014 后端 local/logic 完成**；**Issue-010 SSO test 仍为 501 stub**；规划文档（Issue/PRD/SPEC/UX/Plan）已按实现回写。批次记录：`development-records/tenant-list-issue-*.md`、`tenant-list-doc-alignment-batch.md`、`tenant-list-feature-batch.md`。不含登录拦截 FROZEN/DISABLED、MFA 登录强制、禁用资源释放、BOSS 前端页。
+
+| Issue | 内容 | 状态 | 记录 |
+|-------|------|------|------|
+| #1 | OpenAPI Core 9 + Services 19 | ✅ | `tenant-list-issue-001-openapi-contract.md` |
+| #2 | proto messages + ports（TenantService 19 RPC） | ✅ | `tenant-list-issue-002-interfaces-structs.md` |
+| #3 | 迁移 `20260902_001_tenant_list_management.sql` | ✅ | `tenant-list-issue-003-database-migration.md` |
+| #4 | Gateway 路由 + 归因 ctx | ✅ | `tenant-list-issue-004-gateway-integration.md` |
+| #5 | available-plans + CreateTenant | ✅ | `tenant-list-issue-005-create-tenant-api.md` |
+| #6 | ListTenants / GetTenantDetail | ✅ | `tenant-list-issue-006-tenant-list-detail-api.md` |
+| #7 | UpdateTenant | ✅ | `tenant-list-issue-007-update-tenant-api.md` |
+| #8 | freeze / unfreeze / disable | ✅ | `tenant-list-issue-008-tenant-state-machine-api.md` |
+| #9 | GetTenantAuth / Update SSO·MFA | ✅ | `tenant-list-issue-009-tenant-auth-api.md` |
+| #10 | TestTenantSso | ⏸ OPEN / 501 | — |
+| #11 | GetTenantQuota | ✅ | `tenant-list-issue-011-tenant-quota-api.md` |
+| #12 | 配额变更三件套 | ✅ | `tenant-list-issue-012-quota-change-request-api.md` |
+| #13 | lifecycle + audit-logs | ✅ | `tenant-list-issue-013-lifecycle-audit-api.md` |
+| #14 | 租户内 ListTenantAdmins | ✅ | `tenant-list-issue-014-tenant-admins-api.md` |
+| 文档对齐 | Issue + PRD/SPEC/UX/Plan | ✅ | `tenant-list-doc-alignment-batch.md` |
+| 批次汇总 | note-it Feature batch | ✅ | `tenant-list-feature-batch.md` |
+
+**下一步（可选）：** Issue-010 SSO test；Gateway 登录拦截；MFA 登录强制；禁用资源释放；BOSS 前端（UX 已对齐）。
+
 验收命令：
 
 ```bash

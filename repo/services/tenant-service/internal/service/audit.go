@@ -18,7 +18,7 @@ const (
 
 // writeAuditSuccess 写入 result=success 的审计（best-effort：写失败只告警，不阻断已成功业务）。
 // resource 由调用方传入（如 tenant_plan / tenant_admin）；tenantID 可选（平台级操作为 nil）。
-func writeAuditSuccess(ctx context.Context, audit ports.TenantPlanAuditStore, resource, action string, details map[string]any, tenantID *uuid.UUID) {
+func writeAuditSuccess(ctx context.Context, audit ports.AuditStore, resource, action string, details map[string]any, tenantID *uuid.UUID) {
 	if audit == nil {
 		return
 	}
@@ -33,7 +33,7 @@ func writeAuditSuccess(ctx context.Context, audit ports.TenantPlanAuditStore, re
 		RequestID: requestIDFromCtx(ctx),
 		Action:    action,
 		Resource:  resource,
-		Result:    "success",
+		Result:    ports.AuditResultSuccess,
 		Details:   details,
 	})
 	if err != nil {
@@ -50,7 +50,7 @@ func writeAuditSuccess(ctx context.Context, audit ports.TenantPlanAuditStore, re
 
 // writeAuditFailure 写入 result=failure 的审计（best-effort：写失败只 Warn，不掩盖业务错误）。
 // resource / tenantID 语义同 writeAuditSuccess。
-func writeAuditFailure(ctx context.Context, audit ports.TenantPlanAuditStore, resource, action string, details map[string]any, cause error, tenantID *uuid.UUID) {
+func writeAuditFailure(ctx context.Context, audit ports.AuditStore, resource, action string, details map[string]any, cause error, tenantID *uuid.UUID) {
 	if audit == nil {
 		return
 	}
@@ -70,7 +70,7 @@ func writeAuditFailure(ctx context.Context, audit ports.TenantPlanAuditStore, re
 		RequestID: requestIDFromCtx(ctx),
 		Action:    action,
 		Resource:  resource,
-		Result:    "failure",
+		Result:    ports.AuditResultFailure,
 		Details:   out,
 	})
 	if err != nil {

@@ -213,6 +213,28 @@
 | TENANT-ADMIN-DOC-ALIGNMENT | 文档对齐批次：以代码和 issue 为标准，5+ 轮深度审计修正 SPEC/UX/PRD/Plan 四份文档；14 项设计决策、4 张偏差表（spec/ux/prd/plan）、3 项 tradeoff、4 项 open question | tenant-admin-doc-alignment-batch.md |
 | TENANT-ADMIN-FEATURE-BATCH | 功能批次汇总：14 个 issue 全量实现完成（OpenAPI 契约 → 接口/数据模型 → DB 迁移 → 网关接入 → 13 端点端到端 → 多轮 review-it → 文档对齐）；13 项设计决策（Core/Services 边界拆分、全量拉取+内存合并、部分唯一索引竞态防护、审计统一/查询条件/枚举值、ResetPassword 禁用态策略、ChangeRole UUID 入参、Delete 不改 status、幂等键网关处理、接口重命名、迁移三文件拆分、Go subtest 命名）；5 张偏差表（vs SPEC/PRD/UX/Plan/Issue）；4 项 tradeoff；4 项 open question | tenant-admin-feature-batch.md |
 
+### BOSS 租户列表管理（2026-09，分支 tenant-list）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| TENANT-LIST-ISSUE-001 | OpenAPI：Core 9 `/admin/tenants*` + getTenant 扩展；Services 19 `/tenants*` | tenant-list-issue-001-openapi-contract.md |
+| TENANT-LIST-ISSUE-002 | proto messages + ports；无独立 TenantListService；19 RPC 挂 TenantService | tenant-list-issue-002-interfaces-structs.md |
+| TENANT-LIST-ISSUE-003 | 迁移 `20260902_001`：三态 CHECK、tenant_auth/lifecycle、NULLIF RLS、create 回填 | tenant-list-issue-003-database-migration.md |
+| TENANT-LIST-ISSUE-004 | Gateway 19 svc + 9 admin；tenantCallCtx 归因；骨架后由 005+ 填满 | tenant-list-issue-004-gateway-integration.md |
+| TENANT-LIST-ISSUE-005 | available-plans + CreateTenant（bcrypt→Core 事务 + 事务外配额） | tenant-list-issue-005-create-tenant-api.md |
+| TENANT-LIST-ISSUE-006 | ListTenants/GetTenantDetail；LATERAL admin_count；auth 两布尔 | tenant-list-issue-006-tenant-list-detail-api.md |
+| TENANT-LIST-ISSUE-007 | UpdateTenant；svc disabled→409；Core 动态 SET | tenant-list-issue-007-update-tenant-api.md |
+| TENANT-LIST-ISSUE-008 | freeze/unfreeze/disable；四维 used+reserved；不释放资源；归因 ctx | tenant-list-issue-008-tenant-state-machine-api.md |
+| TENANT-LIST-ISSUE-009 | GetTenantAuth + Update SSO/MFA；不含 TestTenantSso | tenant-list-issue-009-tenant-auth-api.md |
+| TENANT-LIST-ISSUE-011 | GetTenantQuota 单次代理 Core；502 不可达 | tenant-list-issue-011-tenant-quota-api.md |
+| TENANT-LIST-ISSUE-012 | 配额变更提交/列表/整批审批；跨请求同维 pending；CONFLICT/NOT_REGISTERED | tenant-list-issue-012-quota-change-request-api.md |
+| TENANT-LIST-ISSUE-013 | ListTenantLifecycle（Core）+ ListTenantAuditLogs；枚举 Parse* | tenant-list-issue-013-lifecycle-audit-api.md |
+| TENANT-LIST-ISSUE-014 | 租户内 admins：tenant-admin ∪ inviting；TenantScopedAdmin | tenant-list-issue-014-tenant-admins-api.md |
+| TENANT-LIST-DOC-ALIGNMENT | 以实现为准回写 Issue/PRD/SPEC/UX/Plan（§0）；010 仍 OPEN/501 | tenant-list-doc-alignment-batch.md |
+| TENANT-LIST-FEATURE-BATCH | 功能批次汇总：13 issue 完成 + 文档对齐；跨 Issue 决策/偏差/取舍/开放问题 | tenant-list-feature-batch.md |
+
+> Issue-010（SSO test）未实现：契约/路由/ports 在，业务 stub→501；无单独 development-record。
+
 ### Metering Service（2026-08）
 
 | 批次 | 内容摘要 | 文件 |

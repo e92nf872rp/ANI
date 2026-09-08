@@ -144,6 +144,8 @@ func decodeQuotaItems(raw any) ([]ports.CoreQuotaResult, error) {
 			Used:         int64Field(it, "used"),
 			Reserved:     int64Field(it, "reserved"),
 			Tightened:    boolField(it, "tightened"),
+			DisplayName:  stringField(it, "display_name"),
+			Unit:         stringField(it, "unit"),
 		})
 	}
 	return out, nil
