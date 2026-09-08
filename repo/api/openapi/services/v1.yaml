@@ -3784,6 +3784,13 @@ paths:
       summary: 查询可用套餐（创建租户选择器数据源，需 platform-admin / platform-ops / platform-readonly）
       description: 仅返回 status=active 的套餐，不分页。
       tags: [Tenants]
+      security: [{ BearerAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: tenant
+        action: read
+        boundary: platform
+        principal_kinds: [user]
       responses:
         "200":
           description: 可用套餐列表
@@ -3799,6 +3806,13 @@ paths:
       operationId: listTenants
       summary: 租户列表（需 platform-admin / platform-ops / platform-readonly）
       tags: [Tenants]
+      security: [{ BearerAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: tenant
+        action: read
+        boundary: platform
+        principal_kinds: [user]
       parameters:
         - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 }, description: "每页数量" }
         - { name: cursor, in: query, schema: { type: string }, description: "上一页返回的 next_cursor" }
@@ -3818,6 +3832,13 @@ paths:
       operationId: createTenant
       summary: 创建租户（需 platform-admin / platform-ops）
       tags: [Tenants]
+      security: [{ BearerAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: tenant
+        action: create
+        boundary: platform
+        principal_kinds: [user]
       requestBody:
         required: true
         content:
@@ -3841,6 +3862,13 @@ paths:
       operationId: getTenantDetail
       summary: 查询租户详情（需 platform-admin / platform-ops / platform-readonly）
       tags: [Tenants]
+      security: [{ BearerAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: tenant
+        action: read
+        boundary: platform
+        principal_kinds: [user]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -3857,6 +3885,13 @@ paths:
       operationId: updateTenant
       summary: 更新租户基本信息（需 platform-admin / platform-ops）
       tags: [Tenants]
+      security: [{ BearerAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: tenant
+        action: update
+        boundary: platform
+        principal_kinds: [user]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -3882,6 +3917,13 @@ paths:
       operationId: freezeTenant
       summary: 冻结租户（需 platform-admin / platform-ops）
       tags: [Tenants]
+      security: [{ BearerAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: tenant
+        action: update
+        boundary: platform
+        principal_kinds: [user]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -3906,6 +3948,13 @@ paths:
       operationId: unfreezeTenant
       summary: 解冻租户（需 platform-admin / platform-ops）
       tags: [Tenants]
+      security: [{ BearerAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: tenant
+        action: update
+        boundary: platform
+        principal_kinds: [user]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -3935,6 +3984,13 @@ paths:
         其余配额维度暂不参与；本阶段不编排资源释放（仅落 disabled 状态 + lifecycle）。
         disabled 为不可逆终态。
       tags: [Tenants]
+      security: [{ BearerAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: tenant
+        action: update
+        boundary: platform
+        principal_kinds: [user]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -3959,6 +4015,13 @@ paths:
       operationId: getTenantSso
       summary: 查询租户 SSO 配置（需 platform-admin / platform-ops / platform-readonly）
       tags: [Tenants]
+      security: [{ BearerAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: tenant
+        action: read
+        boundary: platform
+        principal_kinds: [user]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -3975,6 +4038,13 @@ paths:
       operationId: updateTenantSso
       summary: 更新租户 SSO 配置（需 platform-admin / platform-ops）
       tags: [Tenants]
+      security: [{ BearerAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: tenant
+        action: update
+        boundary: platform
+        principal_kinds: [user]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -4002,8 +4072,20 @@ paths:
       summary: 测试租户 SSO 连接（需 platform-admin / platform-ops）
       description: 从 K8s Secret 加载配置并发起 OIDC discovery；不写库不写审计。
       tags: [Tenants]
+      security: [{ BearerAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: tenant
+        action: read
+        boundary: platform
+        principal_kinds: [user]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IdempotentOnlyRequest' }
       responses:
         "200":
           description: SSO 测试结果
@@ -4020,6 +4102,13 @@ paths:
       operationId: updateTenantMfa
       summary: 切换租户 MFA 强制开关（需 platform-admin / platform-ops）
       tags: [Tenants]
+      security: [{ BearerAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: tenant
+        action: update
+        boundary: platform
+        principal_kinds: [user]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -4046,6 +4135,13 @@ paths:
       summary: 查询租户配额使用情况（需 platform-admin / platform-ops / platform-readonly）
       description: 代理 Core GET /admin/tenants/{tenant_id}/quota（响应已含 JOIN meta 的 display_name/unit，不再二次 ListQuotaMeta）。
       tags: [Tenants]
+      security: [{ BearerAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: tenant
+        action: read
+        boundary: platform
+        principal_kinds: [user]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -4065,6 +4161,13 @@ paths:
       summary: 查询配额变更申请列表（需 platform-admin / platform-ops / platform-readonly）
       description: 不分页；按 created_at DESC 排序。
       tags: [Tenants]
+      security: [{ BearerAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: tenant
+        action: read
+        boundary: platform
+        principal_kinds: [user]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: status, in: query, schema: { type: string, enum: [pending, approved, rejected] } }
@@ -4087,6 +4190,13 @@ paths:
         不同 request_id 允许同一租户同一维度各自 pending；
         同一请求内 resource_type 不可重复（批内 422；同 request_id 同维 PK 冲突 409）。
       tags: [Tenants]
+      security: [{ BearerAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: tenant
+        action: create
+        boundary: platform
+        principal_kinds: [user]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -4114,6 +4224,13 @@ paths:
       summary: 审批配额变更申请（需 platform-admin / platform-ops）
       description: reqId 为提交时的网关 request_id（X-Request-ID）；一次审批该批全部维度（通过则逐维 UpsertQuota）。
       tags: [Tenants]
+      security: [{ BearerAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: tenant
+        action: update
+        boundary: platform
+        principal_kinds: [user]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: reqId, in: path, required: true, schema: { type: string, format: uuid }, description: "request_id（同批共享）" }
@@ -4140,6 +4257,13 @@ paths:
       operationId: listTenantLifecycle
       summary: 查询租户生命周期记录（需 platform-admin / platform-ops / platform-readonly）
       tags: [Tenants]
+      security: [{ BearerAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: tenant
+        action: read
+        boundary: platform
+        principal_kinds: [user]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
@@ -4166,6 +4290,13 @@ paths:
       operationId: listTenantAuditLogs
       summary: 查询租户操作历史（需 platform-admin / platform-ops / platform-readonly）
       tags: [Tenants]
+      security: [{ BearerAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: tenant
+        action: read
+        boundary: platform
+        principal_kinds: [user]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
@@ -4196,6 +4327,13 @@ paths:
         返回该租户下 role=tenant-admin 的用户，以及存在 inviting 邀请的用户（AdminWithTenant，含 is_inviting/is_expired）。
         不含未邀请的普通 user/auditor。复用租户管理员模块列表合并模式（Core + 邀请表），不新增 Core 端点。
       tags: [Tenants]
+      security: [{ BearerAuth: [] }]
+      x-ani-authz:
+        version: v1
+        resource: tenant
+        action: read
+        boundary: platform
+        principal_kinds: [user]
       parameters:
         - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
