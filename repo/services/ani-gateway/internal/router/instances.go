@@ -941,12 +941,16 @@ func (api *instanceAPI) refreshStoreStatuses(ctx context.Context, tenantID strin
 		return
 	}
 	for i := range records {
-		if records[i].Kind == ports.WorkloadKindVM {
-			api.refreshOneVMStoreStatus(ctx, &records[i])
-		} else {
-			api.refreshOneStoreStatus(ctx, &records[i])
-		}
+		_ = api.refreshOneInstanceStoreStatus(ctx, &records[i])
 	}
+}
+
+func (api *instanceAPI) refreshOneInstanceStoreStatus(ctx context.Context, record *ports.WorkloadInstanceRecord) error {
+	if record != nil && record.Kind == ports.WorkloadKindVM {
+		return api.refreshOneVMStoreStatus(ctx, record)
+	}
+	api.refreshOneStoreStatus(ctx, record)
+	return nil
 }
 
 // refreshOneStoreStatus refreshes a single store record from K8s. It reuses
@@ -1151,14 +1155,16 @@ func (api *instanceAPI) refreshOneStoreStatus(ctx context.Context, record *ports
 	_ = api.store.UpsertStatus(ctx, *record)
 }
 
-// refreshOneVMStoreStatus backfills a KubeVirt VM instance's node_name and
-// private_ip from its live VirtualMachineInstance. The Deployment-based
-// refreshOneStoreStatus only covers container-family instances, and the
-// background reconcile controller persists to the PostgreSQL store rather than
-// this in-memory store, so the detail/list GET must observe the VMI itself.
-func (api *instanceAPI) refreshOneVMStoreStatus(ctx context.Context, record *ports.WorkloadInstanceRecord) {
+// refreshOneVMStoreStatus merges a KubeVirt VM instance's live phase, reason,
+// node, network, timestamp, and access readiness from its VirtualMachineInstance.
+// The Deployment-based refreshOneStoreStatus only covers container-family
+// instances, so VM read-repair must observe the VMI itself.
+func (api *instanceAPI) refreshOneVMStoreStatus(ctx context.Context, record *ports.WorkloadInstanceRecord) error {
 	if api.k8sClient == nil || record == nil || record.Kind != ports.WorkloadKindVM || len(record.ResourceRefs) == 0 {
-		return
+		return nil
+	}
+	if record.Status.State == ports.WorkloadStateDeleting || record.Status.State == ports.WorkloadStateDeleted {
+		return nil
 	}
 	observation, err := api.k8sClient.Observe(ctx, ports.WorkloadProviderStatusRequest{
 		TenantID:   record.TenantID,
@@ -1171,27 +1177,83 @@ func (api *instanceAPI) refreshOneVMStoreStatus(ctx context.Context, record *por
 		},
 	})
 	if err != nil {
-		return
+		return err
 	}
+
+	updated := *record
+	if record.SSH != nil {
+		ssh := *record.SSH
+		updated.SSH = &ssh
+	}
+	providerState := mapProviderPhaseToState(observation.Phase)
+	if updated.Status.State != ports.WorkloadStateStopping && updated.Status.State != ports.WorkloadStateStopped {
+		updated.Status.State = providerState
+	}
+	updated.Status.Reason = observation.Reason
 	if nodeName := strings.TrimSpace(observation.NodeName); nodeName != "" {
-		record.Status.NodeName = nodeName
-		record.Compute.NodeName = nodeName
+		updated.Status.NodeName = nodeName
+		updated.Compute.NodeName = nodeName
 	}
+	updated.Status.Networks = append([]ports.WorkloadNetworkAttachment(nil), observation.Networks...)
+	privateIP := ""
 	for _, network := range observation.Networks {
-		if strings.TrimSpace(network.IPAddress) == "" {
+		ipAddress := strings.TrimSpace(network.IPAddress)
+		if ipAddress == "" {
 			continue
 		}
-		record.Network.PrivateIP = network.IPAddress
+		if privateIP == "" || network.Primary {
+			privateIP = ipAddress
+		}
 		if network.Primary {
 			break
+		}
+	}
+	if privateIP != "" {
+		updated.Network.PrivateIP = privateIP
+	}
+	observedAt := observation.ObservedAt
+	if observedAt.IsZero() {
+		observedAt = time.Now().UTC()
+	} else {
+		observedAt = observedAt.UTC()
+	}
+	updated.Status.UpdatedAt = observedAt
+	updated.UpdatedAt = observedAt
+
+	if updated.Status.State == ports.WorkloadStateRunning {
+		updated.Access.ConsoleAvailable = true
+		updated.Access.SSHAvailable = true
+		updated.Access.Reason = ""
+		if updated.SSH != nil {
+			updated.SSH.Ready = true
+			updated.SSH.Reason = ""
+		}
+	} else {
+		accessReason := strings.TrimSpace(updated.Status.Reason)
+		if providerState == ports.WorkloadStateRunning {
+			accessReason = ""
+		}
+		if accessReason == "" {
+			accessReason = "instance is " + string(updated.Status.State)
+		}
+		updated.Access.ConsoleAvailable = false
+		updated.Access.SSHAvailable = false
+		updated.Access.Reason = accessReason
+		if updated.SSH != nil {
+			updated.SSH.Ready = false
+			updated.SSH.Reason = accessReason
 		}
 	}
 	// Persist the merged node/ip back so list (which re-reads from the store)
 	// surfaces the same values as detail instead of dropping the in-place
 	// mutation, mirroring refreshOneStoreStatus.
 	if api.store != nil {
-		_ = api.store.UpsertStatus(ctx, *record)
+		if err := api.store.UpsertStatus(ctx, updated); err != nil {
+			return err
+		}
 	}
+	*record = updated
+	return nil
 }
 
 // observeInstance is the lazy-sync observation entry shared with the task
@@ -1207,7 +1269,7 @@ func (api *instanceAPI) observeInstance(ctx context.Context, tenantID, instanceI
 	if err != nil {
 		return ports.WorkloadInstanceRecord{}, err
 	}
-	api.refreshOneStoreStatus(ctx, &record)
+	_ = api.refreshOneInstanceStoreStatus(ctx, &record)
 	return record, nil
 }
 
@@ -1648,11 +1710,7 @@ func (api *instanceAPI) get(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	if api.k8sClient != nil && api.store != nil {
-		if record.Kind == ports.WorkloadKindVM {
-			api.refreshOneVMStoreStatus(ctx, &record)
-		} else {
-			api.refreshOneStoreStatus(ctx, &record)
-		}
+		_ = api.refreshOneInstanceStoreStatus(ctx, &record)
 	}
 	c.JSON(http.StatusOK, api.instanceResponseFromRecord(record))
 }
@@ -2089,6 +2147,11 @@ func (api *instanceAPI) createConsoleSession(ctx context.Context, c *app.Request
 	}
 	if record.Kind != ports.WorkloadKindVM {
 		writeInstanceError(c, http.StatusBadRequest, "UNSUPPORTED", "console session is only available for vm instances")
+		return
+	}
+	if err := api.refreshOneInstanceStoreStatus(ctx, &record); err != nil {
+		log.Printf("[CONSOLE] VM provider status refresh failed instance_id=%s err=%v", record.InstanceID, err)
+		writeInstanceError(c, http.StatusServiceUnavailable, "DEPENDENCY_UNAVAILABLE", "instance provider status is unavailable")
 		return
 	}
 	if record.Status.State != ports.WorkloadStateRunning {
@@ -3125,16 +3188,30 @@ func networkPolicyFromRequest(request *instanceNetworkRequest, fallback ports.Wo
 	if request == nil {
 		return fallback
 	}
+	fallback.Attachments = append([]ports.WorkloadNetworkAttachment(nil), fallback.Attachments...)
+	for index := range fallback.Attachments {
+		fallback.Attachments[index].PolicyRefs = append([]string(nil), fallback.Attachments[index].PolicyRefs...)
+	}
 	fallback.VPCID = strings.TrimSpace(request.VPCID)
 	fallback.SubnetID = strings.TrimSpace(request.SubnetID)
 	fallback.SecurityGroupIDs = append([]string(nil), request.SecurityGroupIDs...)
 	fallback.AssignPrivateIP = request.AssignPrivateIP
 	fallback.PrivateIP = strings.TrimSpace(request.PrivateIP)
-	if fallback.VPCID != "" {
-		fallback.Attachments = []ports.WorkloadNetworkAttachment{{
-			NetworkID: fallback.VPCID, SubnetID: fallback.SubnetID, Plane: ports.NetworkPlaneTenantVPC, Required: true, Primary: true,
-		}}
+	tenantVPCIndex := -1
+	for index := range fallback.Attachments {
+		if fallback.Attachments[index].Plane == ports.NetworkPlaneTenantVPC {
+			tenantVPCIndex = index
+			break
+		}
 	}
+	if tenantVPCIndex == -1 {
+		fallback.Attachments = append(fallback.Attachments, ports.WorkloadNetworkAttachment{
+			NetworkID: "tenant-vpc", Plane: ports.NetworkPlaneTenantVPC, Required: true, Primary: true,
+		})
+		tenantVPCIndex = len(fallback.Attachments) - 1
+	}
+	fallback.Attachments[tenantVPCIndex].SubnetID = fallback.SubnetID
+	fallback.Attachments[tenantVPCIndex].IPAddress = fallback.PrivateIP
 	return fallback
 }
 
