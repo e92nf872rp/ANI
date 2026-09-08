@@ -73,6 +73,18 @@ class SessionCache:
         except Exception as e:  # noqa: BLE001 — best-effort cache
             logger.warning("session cache append failed (degrading to DB-only): %s", e)
 
+    async def delete_session(self, *, session_id: str) -> None:
+        """DEL the cached session list (SPEC §5.1 #18, best-effort).
+
+        Called after the DeleteSession DB transaction commits. On Redis
+        failure, logs a warning and returns — the DB rows are already gone
+        and the cache entry expires naturally via the 24h TTL.
+        """
+        try:
+            await self._redis.delete(_session_key(session_id))
+        except Exception as e:  # noqa: BLE001 — best-effort cache
+            logger.warning("session cache delete failed (TTL will expire): %s", e)
+
     async def list_messages(self, *, session_id: str, limit: int = 20) -> list[dict[str, Any]]:
         """Read the cached session messages (most recent first up to `limit`).
 

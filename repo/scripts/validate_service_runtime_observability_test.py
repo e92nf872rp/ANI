@@ -55,10 +55,18 @@ class ValidateServiceRuntimeObservabilityTest(unittest.TestCase):
         changed = {
             "repo/services/reconcile-worker/main.go",
             "repo/services/envoy-authz-adapter/Dockerfile",
-            "repo/services/kb-service/go.mod",
         }
         errors = validator.validate_forbidden_changes(changed)
-        self.assertEqual(3, len(errors))
+        self.assertEqual(2, len(errors))
+
+    def test_kb_service_changes_are_allowed(self) -> None:
+        # kb-service 是 ANI Services 活跃开发目录，禁改规则已随 KB-API 实现批次解除。
+        changed = {
+            "repo/services/kb-service/go.mod",
+            "repo/services/kb-service/app/api/grpc_server.py",
+        }
+        errors = validator.validate_forbidden_changes(changed)
+        self.assertEqual([], errors)
 
     def test_first_party_session_api_license_exception_is_exact_and_version_bound(self) -> None:
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")

@@ -689,6 +689,42 @@
       "scope": ""
     },
     {
+      "operationId": "listTenants",
+      "method": "GET",
+      "path": "/tenants",
+      "scope": ""
+    },
+    {
+      "operationId": "createTenant",
+      "method": "POST",
+      "path": "/tenants",
+      "scope": ""
+    },
+    {
+      "operationId": "listAvailableTenantPlans",
+      "method": "GET",
+      "path": "/tenants/available-plans",
+      "scope": ""
+    },
+    {
+      "operationId": "getTenantDetail",
+      "method": "GET",
+      "path": "/tenants/{tenantId}",
+      "scope": ""
+    },
+    {
+      "operationId": "updateTenant",
+      "method": "PUT",
+      "path": "/tenants/{tenantId}",
+      "scope": ""
+    },
+    {
+      "operationId": "listTenantScopedAdmins",
+      "method": "GET",
+      "path": "/tenants/{tenantId}/admins",
+      "scope": ""
+    },
+    {
       "operationId": "inviteTenantAdmin",
       "method": "POST",
       "path": "/tenants/{tenantId}/admins/invite",
@@ -749,15 +785,93 @@
       "scope": ""
     },
     {
+      "operationId": "listTenantAuditLogs",
+      "method": "GET",
+      "path": "/tenants/{tenantId}/audit-logs",
+      "scope": ""
+    },
+    {
+      "operationId": "updateTenantMfa",
+      "method": "PUT",
+      "path": "/tenants/{tenantId}/auth/mfa",
+      "scope": ""
+    },
+    {
+      "operationId": "getTenantSso",
+      "method": "GET",
+      "path": "/tenants/{tenantId}/auth/sso",
+      "scope": ""
+    },
+    {
+      "operationId": "updateTenantSso",
+      "method": "PUT",
+      "path": "/tenants/{tenantId}/auth/sso",
+      "scope": ""
+    },
+    {
+      "operationId": "testTenantSso",
+      "method": "POST",
+      "path": "/tenants/{tenantId}/auth/sso/test",
+      "scope": ""
+    },
+    {
+      "operationId": "disableTenant",
+      "method": "POST",
+      "path": "/tenants/{tenantId}/disable",
+      "scope": ""
+    },
+    {
+      "operationId": "freezeTenant",
+      "method": "POST",
+      "path": "/tenants/{tenantId}/freeze",
+      "scope": ""
+    },
+    {
+      "operationId": "listTenantLifecycle",
+      "method": "GET",
+      "path": "/tenants/{tenantId}/lifecycle",
+      "scope": ""
+    },
+    {
       "operationId": "bindTenantPlan",
       "method": "POST",
       "path": "/tenants/{tenantId}/plan",
       "scope": ""
     },
     {
+      "operationId": "getTenantQuotaView",
+      "method": "GET",
+      "path": "/tenants/{tenantId}/quota",
+      "scope": ""
+    },
+    {
+      "operationId": "listQuotaChangeRequests",
+      "method": "GET",
+      "path": "/tenants/{tenantId}/quota-requests",
+      "scope": ""
+    },
+    {
+      "operationId": "submitQuotaChangeRequest",
+      "method": "POST",
+      "path": "/tenants/{tenantId}/quota-requests",
+      "scope": ""
+    },
+    {
+      "operationId": "reviewQuotaChangeRequest",
+      "method": "POST",
+      "path": "/tenants/{tenantId}/quota-requests/{reqId}/approve",
+      "scope": ""
+    },
+    {
       "operationId": "listTenantAssignableRoles",
       "method": "GET",
       "path": "/tenants/{tenantId}/roles",
+      "scope": ""
+    },
+    {
+      "operationId": "unfreezeTenant",
+      "method": "POST",
+      "path": "/tenants/{tenantId}/unfreeze",
       "scope": ""
     }
   ],
@@ -769,6 +883,8 @@
     "AsyncTask",
     "AvailableGpu",
     "AvailableTenantListResponse",
+    "AvailableTenantPlan",
+    "AvailableTenantPlanListResponse",
     "BillingAdjustment",
     "BillingAdjustmentCreateRequest",
     "BillingInvoiceActionRequest",
@@ -792,6 +908,7 @@
     "CreateModelUploadURLRequest",
     "CreateSandboxRequest",
     "CreateTenantPlanRequest",
+    "CreateTenantRequest",
     "CreateWebhookRequest",
     "CursorPage",
     "DevProfileInfo",
@@ -867,23 +984,39 @@
     "PlatformAdminRoleUpdateRequest",
     "PlatformRole",
     "PlatformRoleListResponse",
+    "QuotaChangeRequest",
+    "QuotaChangeRequestInput",
+    "QuotaChangeRequestListResponse",
     "QuotaMetaItem",
     "QuotaMetaListResponse",
     "RebuildKnowledgeBaseRequest",
     "ReparseDocumentRequest",
     "ResendInvitationRequest",
     "ResetPasswordRequest",
+    "ReviewQuotaChangeRequest",
     "Sandbox",
     "SecurityEvent",
     "SecurityOverview",
+    "ShanghaiDisplayTime",
     "SsoConfig",
+    "SsoTestResult",
+    "SubmitQuotaChangeRequest",
     "TenantAdminAuditLog",
     "TenantAdminAuditLogListResponse",
+    "TenantAuditLogEntry",
+    "TenantAuthConfig",
+    "TenantAuthSummary",
+    "TenantDetail",
+    "TenantLifecycleEntry",
+    "TenantListItem",
+    "TenantListResponse",
     "TenantMember",
     "TenantPlan",
     "TenantPlanListItem",
     "TenantPlanListResponse",
     "TenantPlanStateChangeRequest",
+    "TenantQuotaViewItem",
+    "TenantQuotaViewResponse",
     "TenantRef",
     "TenantRole",
     "UpdateInferenceServicePoliciesRequest",
@@ -894,8 +1027,11 @@
     "UpdateQuotaLimitsRequest",
     "UpdateRoleRequest",
     "UpdateSsoConfigRequest",
+    "UpdateTenantMfaRequest",
     "UpdateTenantPlanRequest",
+    "UpdateTenantRequest",
     "UpdateTenantRoleRequest",
+    "UpdateTenantSsoRequest",
     "UserPermissions",
     "Webhook",
     "WebhookDelivery",
@@ -942,13 +1078,23 @@
     "updateTenantRole",
     "updateSsoConfig",
     "createWebhook",
+    "createTenant",
+    "updateTenant",
     "inviteTenantAdmin",
     "disableTenantAdmin",
     "enableTenantAdmin",
     "resendTenantAdminInvitation",
     "resetTenantAdminPassword",
     "updateTenantAdminRole",
-    "bindTenantPlan"
+    "updateTenantMfa",
+    "updateTenantSso",
+    "testTenantSso",
+    "disableTenant",
+    "freezeTenant",
+    "bindTenantPlan",
+    "submitQuotaChangeRequest",
+    "reviewQuotaChangeRequest",
+    "unfreezeTenant"
   ],
   "cursorPaginationOperations": [
     "listGpuContainers",
@@ -968,7 +1114,11 @@
     "listTenantPlans",
     "listTenantPlanAuditLogs",
     "listWebhookDeliveries",
-    "listTenantAdminAuditLogs"
+    "listTenants",
+    "listTenantScopedAdmins",
+    "listTenantAdminAuditLogs",
+    "listTenantAuditLogs",
+    "listTenantLifecycle"
   ],
   "errorCodes": [
     "ACCELERATOR_SPEC_UNAVAILABLE",

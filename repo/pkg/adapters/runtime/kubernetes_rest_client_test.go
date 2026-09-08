@@ -645,6 +645,116 @@ func TestKubernetesRESTClientObservesKubeVirtVMIForPhaseAndNode(t *testing.T) {
 	}
 }
 
+func TestKubernetesRESTClientKubeVirtVMIPhaseIsAuthoritative(t *testing.T) {
+	tests := []struct {
+		name              string
+		vmPrintableStatus string
+		vmiStatus         int
+		vmiPhase          string
+		vmiReason         string
+		wantPhase         string
+		wantReason        string
+	}{
+		{
+			name:              "vm running vmi pending",
+			vmPrintableStatus: "Running",
+			vmiStatus:         http.StatusOK,
+			vmiPhase:          "Pending",
+			wantPhase:         "Pending",
+		},
+		{
+			name:              "vm running vmi running",
+			vmPrintableStatus: "Running",
+			vmiStatus:         http.StatusOK,
+			vmiPhase:          "Running",
+			wantPhase:         "Running",
+		},
+		{
+			name:              "vm running vmi failed",
+			vmPrintableStatus: "Running",
+			vmiStatus:         http.StatusOK,
+			vmiPhase:          "Failed",
+			vmiReason:         "GuestPanic",
+			wantPhase:         "Failed",
+			wantReason:        "GuestPanic",
+		},
+		{
+			name:              "vm stopped vmi missing",
+			vmPrintableStatus: "Stopped",
+			vmiStatus:         http.StatusNotFound,
+			wantPhase:         "Stopped",
+		},
+		{
+			name:              "vm halted vmi missing",
+			vmPrintableStatus: "Halted",
+			vmiStatus:         http.StatusNotFound,
+			wantPhase:         "Stopped",
+		},
+		{
+			name:              "vm running vmi missing",
+			vmPrintableStatus: "Running",
+			vmiStatus:         http.StatusNotFound,
+			wantPhase:         "Pending",
+			wantReason:        "VirtualMachineInstance not found while VirtualMachine status is Running",
+		},
+		{
+			name:              "vm starting vmi missing",
+			vmPrintableStatus: "Starting",
+			vmiStatus:         http.StatusNotFound,
+			wantPhase:         "Pending",
+			wantReason:        "VirtualMachineInstance not found while VirtualMachine status is Starting",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/virtualmachines/vm-01"):
+					return jsonResponse(http.StatusOK, `{"kind":"VirtualMachine","status":{"printableStatus":"`+tt.vmPrintableStatus+`"}}`), nil
+				case strings.HasSuffix(r.URL.Path, "/virtualmachineinstances/vm-01"):
+					if tt.vmiStatus == http.StatusNotFound {
+						return jsonResponse(http.StatusNotFound, `{"message":"not found"}`), nil
+					}
+					return jsonResponse(http.StatusOK, `{"kind":"VirtualMachineInstance","status":{"phase":"`+tt.vmiPhase+`","reason":"`+tt.vmiReason+`","nodeName":"node-a","interfaces":[{"name":"eth0","ipAddress":"10.20.0.5","primary":true}]}}`), nil
+				default:
+					t.Fatalf("unexpected path %q", r.URL.Path)
+					return nil, nil
+				}
+			})
+
+			client := newTestKubernetesRESTClient(t, transport)
+			observation, err := client.Observe(context.Background(), ports.WorkloadProviderStatusRequest{
+				TenantID:   "tenant-a",
+				InstanceID: "instance-a",
+				Kind:       ports.WorkloadKindVM,
+				ApplyResult: ports.WorkloadProviderApplyResult{
+					Applied:      true,
+					Provider:     "kubevirt",
+					ResourceRefs: []string{"kubevirt/VirtualMachine/vm-01"},
+				},
+			})
+			if err != nil {
+				t.Fatalf("Observe() error = %v", err)
+			}
+			if observation.Phase != tt.wantPhase {
+				t.Fatalf("observation.Phase = %q, want %q", observation.Phase, tt.wantPhase)
+			}
+			if observation.Reason != tt.wantReason {
+				t.Fatalf("observation.Reason = %q, want %q", observation.Reason, tt.wantReason)
+			}
+			if tt.vmiStatus == http.StatusOK {
+				if observation.NodeName != "node-a" {
+					t.Fatalf("observation.NodeName = %q, want node-a", observation.NodeName)
+				}
+				if len(observation.Networks) != 1 || observation.Networks[0].IPAddress != "10.20.0.5" {
+					t.Fatalf("observation.Networks = %#v, want VMI private IP", observation.Networks)
+				}
+			}
+		})
+	}
+}
+
 func TestKubernetesRESTClientSupportsKubeOVNNetworkResources(t *testing.T) {
 	var paths []string
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {

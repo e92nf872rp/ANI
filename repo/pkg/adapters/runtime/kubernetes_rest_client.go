@@ -446,7 +446,14 @@ func (c *KubernetesRESTClient) observeKubeVirtVMI(ctx context.Context, namespace
 	body, err := c.doIdempotent(ctx, http.MethodGet, c.resourceURL(resource, ""), "", nil)
 	if err != nil {
 		if isKubernetesNotFound(err) {
-			return phase, nodeName, reason, nil, nil
+			switch strings.ToLower(strings.TrimSpace(phase)) {
+			case "stopped", "halted":
+				return "Stopped", nodeName, reason, nil, nil
+			case "running", "starting":
+				return "Pending", nodeName, fmt.Sprintf("VirtualMachineInstance not found while VirtualMachine status is %s", phase), nil, nil
+			default:
+				return phase, nodeName, reason, nil, nil
+			}
 		}
 		return phase, nodeName, reason, nil, err
 	}
@@ -454,9 +461,7 @@ func (c *KubernetesRESTClient) observeKubeVirtVMI(ctx context.Context, namespace
 	if err := json.Unmarshal(body, &doc); err != nil {
 		return phase, nodeName, reason, nil, fmt.Errorf("%w: invalid KubeVirt VMI observation response: %v", ports.ErrInvalid, err)
 	}
-	if observed := phaseFromKubernetesObject(resource, doc); observed != "Pending" {
-		phase = observed
-	}
+	phase = phaseFromKubernetesObject(resource, doc)
 	if observed := nodeNameFromKubernetesObject(doc); observed != "" {
 		nodeName = observed
 	}

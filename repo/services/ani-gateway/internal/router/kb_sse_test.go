@@ -105,6 +105,9 @@ func (f *fakeKBRetrieveClient) CreateKB(context.Context, string, string, *kbv1.C
 func (f *fakeKBRetrieveClient) GetKB(context.Context, string, string) (*kbv1.KnowledgeBase, error) {
 	return nil, nil
 }
+func (f *fakeKBRetrieveClient) UpdateKB(context.Context, string, string, string, string, string) (*kbv1.KnowledgeBase, error) {
+	return nil, nil
+}
 func (f *fakeKBRetrieveClient) ListKBs(context.Context, string, int32, string) (*kbv1.ListKBsResponse, error) {
 	return nil, nil
 }
@@ -135,7 +138,19 @@ func (f *fakeKBRetrieveClient) ListKBCitations(context.Context, string, string, 
 func (f *fakeKBRetrieveClient) ListKBSessions(context.Context, string, string, int32, string) (*kbv1.ListKBSessionsResponse, error) {
 	return nil, nil
 }
+func (f *fakeKBRetrieveClient) ListDocumentChunks(context.Context, string, string, string, string, int32, string) (*kbv1.ListDocumentChunksResponse, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) GetSessionMessages(context.Context, string, string, string, int32, string) (*kbv1.GetSessionMessagesResponse, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) DeleteSession(context.Context, string, string, string) (*emptypb.Empty, error) {
+	return nil, nil
+}
 func (f *fakeKBRetrieveClient) UpdateKBPermissions(context.Context, string, string, string, *kbv1.UpdateKBPermissionsRequest) (*kbv1.KnowledgeBase, error) {
+	return nil, nil
+}
+func (f *fakeKBRetrieveClient) ReparseDocument(context.Context, string, string, string, string) (*commonv1.AsyncTaskRef, error) {
 	return nil, nil
 }
 

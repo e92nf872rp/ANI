@@ -2,19 +2,13 @@ package router
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/cloudwego/hertz/pkg/app"
-	"github.com/cloudwego/hertz/pkg/protocol"
 	"github.com/cloudwego/hertz/pkg/route"
-	"github.com/google/uuid"
 	authv1 "github.com/kubercloud/ani/pkg/generated/pb/auth/v1"
-	"github.com/kubercloud/ani/pkg/ports"
-	"github.com/kubercloud/ani/services/ani-gateway/internal/authz"
 	"github.com/kubercloud/ani/services/ani-gateway/internal/middleware"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -22,21 +16,7 @@ import (
 )
 
 type authAPI struct {
-	client       middleware.AuthClient
-	targetClient ports.TargetIAM
-}
-
-type targetPasswordLoginRequest struct {
-	Account    string                      `json:"account"`
-	Password   string                      `json:"password"`
-	Audience   string                      `json:"audience"`
-	Boundary   targetPasswordLoginBoundary `json:"boundary"`
-	DeviceName string                      `json:"device_name,omitempty"`
-}
-
-type targetPasswordLoginBoundary struct {
-	Type     string `json:"type"`
-	TenantID string `json:"tenant_id,omitempty"`
+	client middleware.AuthClient
 }
 
 type authBeginOIDCRequest struct {
@@ -119,8 +99,8 @@ type authListAPIKeysResponse struct {
 	Total int                      `json:"total"`
 }
 
-func registerAuth(v1 *route.RouterGroup, targetClient ports.TargetIAM) {
-	api := authAPI{client: middleware.NewAuthClientFromEnv(), targetClient: targetClient}
+func registerAuth(v1 *route.RouterGroup) {
+	api := authAPI{client: middleware.NewAuthClientFromEnv()}
 	v1.POST("/auth/password/login", api.passwordLogin)
 	v1.POST("/auth/platform/password/login", api.platformPasswordLogin)
 	v1.POST("/auth/oidc/begin", api.beginOIDC)
@@ -134,10 +114,6 @@ func registerAuth(v1 *route.RouterGroup, targetClient ports.TargetIAM) {
 
 // 账号密码登录
 func (api authAPI) passwordLogin(ctx context.Context, c *app.RequestContext) {
-	if api.targetClient != nil {
-		api.targetPasswordLogin(ctx, c)
-		return
-	}
 	var req authPasswordLoginRequest
 	if err := c.BindJSON(&req); err != nil {
 		writeAuthError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid password login request")
@@ -149,237 +125,6 @@ func (api authAPI) passwordLogin(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	c.JSON(http.StatusOK, resp)
-}
-
-func (api authAPI) targetPasswordLogin(ctx context.Context, c *app.RequestContext) {
-	var request targetPasswordLoginRequest
-	if err := c.BindJSON(&request); err != nil {
-		writeAuthError(c, http.StatusBadRequest, "BAD_REQUEST", "invalid password login request")
-		return
-	}
-	account := strings.TrimSpace(request.Account)
-	deviceName := strings.TrimSpace(request.DeviceName)
-	idempotencyKey := strings.TrimSpace(string(c.GetHeader("Idempotency-Key")))
-	if account == "" || utf8.RuneCountInString(account) > 320 ||
-		request.Password == "" || utf8.RuneCountInString(request.Password) > 1024 ||
-		utf8.RuneCountInString(deviceName) > 128 ||
-		idempotencyKey == "" || utf8.RuneCountInString(idempotencyKey) > 128 {
-		writeAuthError(c, http.StatusBadRequest, "BAD_REQUEST", "account, password, and Idempotency-Key are required")
-		return
-	}
-	audience, boundary, cookieName, ok := targetLoginBoundary(request.Audience, request.Boundary)
-	if !ok {
-		writeAuthError(c, http.StatusBadRequest, "BAD_REQUEST", "audience and boundary do not match")
-		return
-	}
-	response, err := api.targetClient.PasswordLogin(ctx, ports.TargetIAMPasswordLoginRequest{
-		Account:        account,
-		Password:       request.Password,
-		Audience:       audience,
-		Boundary:       boundary,
-		DeviceName:     deviceName,
-		IdempotencyKey: idempotencyKey,
-	})
-	if err != nil {
-		statusCode, code, message, retryAfter := targetPasswordLoginHTTPError(err)
-		if retryAfter != "" {
-			c.Header("Retry-After", retryAfter)
-		}
-		writeAuthError(c, statusCode, code, message)
-		return
-	}
-	document, refreshToken, refreshExpiry, err := targetPasswordLoginDocument(response)
-	if err != nil {
-		writeAuthError(c, http.StatusServiceUnavailable, "IAM_UNAVAILABLE", "IAM returned an invalid login response")
-		return
-	}
-	maxAge := int(time.Until(refreshExpiry).Seconds())
-	if maxAge < 1 {
-		writeAuthError(c, http.StatusServiceUnavailable, "IAM_UNAVAILABLE", "IAM returned an expired refresh token")
-		return
-	}
-	c.SetCookie(cookieName, refreshToken, maxAge, "/api/v1/auth", "", protocol.CookieSameSiteLaxMode, true, true)
-	c.JSON(http.StatusOK, document)
-}
-
-func targetLoginBoundary(audience string, boundary targetPasswordLoginBoundary) (ports.TargetIAMAudience, ports.TargetIAMBoundary, string, bool) {
-	switch strings.TrimSpace(audience) {
-	case "console":
-		if boundary.Type != "tenant" {
-			return "", ports.TargetIAMBoundary{}, "", false
-		}
-		tenantID, err := uuid.Parse(strings.TrimSpace(boundary.TenantID))
-		if err != nil || tenantID == uuid.Nil {
-			return "", ports.TargetIAMBoundary{}, "", false
-		}
-		return ports.TargetIAMAudienceConsole, ports.TargetIAMBoundary{
-			Type: ports.TargetIAMBoundaryTenant, TenantID: tenantID.String(),
-		}, "ani_console_refresh", true
-	case "boss":
-		if boundary.Type != "platform" || strings.TrimSpace(boundary.TenantID) != "" {
-			return "", ports.TargetIAMBoundary{}, "", false
-		}
-		return ports.TargetIAMAudienceBoss, ports.TargetIAMBoundary{
-			Type: ports.TargetIAMBoundaryPlatform,
-		}, "ani_boss_refresh", true
-	default:
-		return "", ports.TargetIAMBoundary{}, "", false
-	}
-}
-
-func targetPasswordLoginDocument(response ports.TargetIAMPasswordLoginResult) (map[string]any, string, time.Time, error) {
-	if response.Principal.ID == "" || response.Session.ID == "" || response.Grant.ID == "" ||
-		response.AccessToken == "" || response.ExpiresInSeconds == 0 || response.RefreshToken == "" || response.RefreshExpiresAt.IsZero() {
-		return nil, "", time.Time{}, errors.New("incomplete target login response")
-	}
-	principal := response.Principal
-	session := response.Session
-	grant := response.Grant
-	principalType := map[ports.TargetIAMPrincipalType]string{
-		ports.TargetIAMPrincipalHuman:   "human",
-		ports.TargetIAMPrincipalService: "service",
-	}[principal.Type]
-	principalStatus := map[ports.TargetIAMPrincipalStatus]string{
-		ports.TargetIAMPrincipalActive:   "active",
-		ports.TargetIAMPrincipalDisabled: "disabled",
-	}[principal.Status]
-	if principalType == "" || principalStatus == "" {
-		return nil, "", time.Time{}, errors.New("invalid principal summary")
-	}
-	grantDocument, err := targetGrantDocument(grant)
-	if err != nil {
-		return nil, "", time.Time{}, err
-	}
-	grants := make([]map[string]any, 0, len(session.Grants))
-	for _, sessionGrant := range session.Grants {
-		value, err := targetGrantDocument(sessionGrant)
-		if err != nil {
-			return nil, "", time.Time{}, err
-		}
-		grants = append(grants, value)
-	}
-	authnMethods, err := targetLoginAuthnMethods(session.AuthnMethods)
-	if err != nil || session.CreatedAt.IsZero() || session.IdleExpiresAt.IsZero() || session.AbsoluteExpiresAt.IsZero() {
-		return nil, "", time.Time{}, errors.New("invalid session summary")
-	}
-	document := map[string]any{
-		"access_token": response.AccessToken,
-		"token_type":   "Bearer",
-		"expires_in":   response.ExpiresInSeconds,
-		"principal": map[string]any{
-			"principal_id":   principal.ID,
-			"principal_type": principalType,
-			"status":         principalStatus,
-		},
-		"session": map[string]any{
-			"session_id":          session.ID,
-			"status":              targetSessionStatus(session.Status),
-			"grants":              grants,
-			"authn_methods":       authnMethods,
-			"device_name":         session.DeviceName,
-			"created_at":          session.CreatedAt.UTC().Format(time.RFC3339),
-			"idle_expires_at":     session.IdleExpiresAt.UTC().Format(time.RFC3339),
-			"absolute_expires_at": session.AbsoluteExpiresAt.UTC().Format(time.RFC3339),
-		},
-		"grant": grantDocument,
-	}
-	if document["session"].(map[string]any)["status"] == "" {
-		return nil, "", time.Time{}, errors.New("invalid session status")
-	}
-	return document, response.RefreshToken, response.RefreshExpiresAt, nil
-}
-
-func targetGrantDocument(grant ports.TargetIAMGrant) (map[string]any, error) {
-	if grant.ID == "" || grant.Version == 0 {
-		return nil, errors.New("invalid grant summary")
-	}
-	status := map[ports.TargetIAMGrantStatus]string{
-		ports.TargetIAMGrantActive:  "active",
-		ports.TargetIAMGrantRevoked: "revoked",
-		ports.TargetIAMGrantExpired: "expired",
-	}[grant.Status]
-	if status == "" || grant.Boundary.Type != ports.TargetIAMBoundaryTenant || grant.Boundary.TenantID == "" {
-		return nil, errors.New("invalid grant summary")
-	}
-	return map[string]any{
-		"grant_id": grant.ID,
-		"boundary": map[string]any{"type": "tenant", "tenant_id": grant.Boundary.TenantID},
-		"version":  grant.Version,
-		"status":   status,
-	}, nil
-}
-
-func targetSessionStatus(value ports.TargetIAMSessionStatus) string {
-	return map[ports.TargetIAMSessionStatus]string{
-		ports.TargetIAMSessionActive:  "active",
-		ports.TargetIAMSessionRevoked: "revoked",
-		ports.TargetIAMSessionExpired: "expired",
-	}[value]
-}
-
-func targetLoginAuthnMethods(values []ports.TargetIAMAuthnMethod) ([]string, error) {
-	methods := make([]string, 0, len(values))
-	for _, value := range values {
-		switch value {
-		case ports.TargetIAMAuthnPassword:
-			methods = append(methods, "password")
-		case ports.TargetIAMAuthnOIDC:
-			methods = append(methods, "oidc")
-		default:
-			return nil, errors.New("invalid session authentication method")
-		}
-	}
-	if len(methods) == 0 {
-		return nil, errors.New("session authentication method required")
-	}
-	return methods, nil
-}
-
-func targetPasswordLoginHTTPError(err error) (int, string, string, string) {
-	if errors.Is(err, context.DeadlineExceeded) {
-		return http.StatusGatewayTimeout, "IAM_TIMEOUT", "IAM operation timed out", ""
-	}
-	var failure *ports.TargetIAMError
-	if errors.As(err, &failure) {
-		if stable, known := authz.TargetStableErrorForReason(failure.Reason); known {
-			if message, allowed := targetPasswordLoginErrorMessage(stable.Code); allowed {
-				if stable.Code == "AUTH_RATE_LIMITED" {
-					retryAfter, valid := authz.TargetRetryAfter(failure.Metadata)
-					if !valid {
-						return http.StatusServiceUnavailable, "IAM_UNAVAILABLE", "IAM dependency is unavailable", ""
-					}
-					return stable.HTTPStatus, stable.Code, message, retryAfter
-				}
-				return stable.HTTPStatus, stable.Code, message, ""
-			}
-		}
-		switch failure.Kind {
-		case ports.TargetIAMFailureUnauthenticated:
-			return http.StatusUnauthorized, "CREDENTIAL_INVALID", "credential is invalid", ""
-		case ports.TargetIAMFailureResourceExhausted, ports.TargetIAMFailureUnavailable:
-			return http.StatusServiceUnavailable, "IAM_UNAVAILABLE", "IAM dependency is unavailable", ""
-		case ports.TargetIAMFailureDeadlineExceeded:
-			return http.StatusGatewayTimeout, "IAM_TIMEOUT", "IAM operation timed out", ""
-		case ports.TargetIAMFailureAlreadyExists, ports.TargetIAMFailureAborted:
-			return http.StatusConflict, "IDEMPOTENCY_CONFLICT", "idempotency key conflicts with an earlier request", ""
-		case ports.TargetIAMFailureInvalidArgument:
-			return http.StatusBadRequest, "BAD_REQUEST", "invalid password login request", ""
-		}
-	}
-	return http.StatusServiceUnavailable, "IAM_UNAVAILABLE", "IAM dependency is unavailable", ""
-}
-
-func targetPasswordLoginErrorMessage(reason string) (string, bool) {
-	message, ok := map[string]string{
-		"CREDENTIAL_INVALID":      "credential is invalid",
-		"IDEMPOTENCY_CONFLICT":    "idempotency key conflicts with an earlier request",
-		"IDEMPOTENCY_KEY_EXPIRED": "idempotency result has expired",
-		"AUTH_RATE_LIMITED":       "authentication rate limit exceeded",
-		"TENANT_IAM_NOT_READY":    "tenant IAM is not ready",
-		"IAM_UNAVAILABLE":         "IAM dependency is unavailable",
-		"IAM_TIMEOUT":             "IAM operation timed out",
-	}[reason]
-	return message, ok
 }
 
 // 账号密码登录处理函数

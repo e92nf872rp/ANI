@@ -59,6 +59,34 @@ func (f *platformCapacityFakeTenantService) ListAvailableTenants(ctx context.Con
 	return f.tenants, f.err
 }
 
+func (f *platformCapacityFakeTenantService) CreateTenant(context.Context, ports.CreateTenantInput) (ports.Tenant, error) {
+	return ports.Tenant{}, ports.ErrUnsupported
+}
+func (f *platformCapacityFakeTenantService) ListTenants(context.Context, ports.ListTenantsFilter) (ports.TenantListResult, error) {
+	return ports.TenantListResult{}, ports.ErrUnsupported
+}
+func (f *platformCapacityFakeTenantService) UpdateTenant(context.Context, string, ports.UpdateTenantInput) (ports.Tenant, error) {
+	return ports.Tenant{}, ports.ErrUnsupported
+}
+func (f *platformCapacityFakeTenantService) FreezeTenant(context.Context, string) (ports.Tenant, error) {
+	return ports.Tenant{}, ports.ErrUnsupported
+}
+func (f *platformCapacityFakeTenantService) UnfreezeTenant(context.Context, string) (ports.Tenant, error) {
+	return ports.Tenant{}, ports.ErrUnsupported
+}
+func (f *platformCapacityFakeTenantService) DisableTenant(context.Context, string) (ports.Tenant, error) {
+	return ports.Tenant{}, ports.ErrUnsupported
+}
+func (f *platformCapacityFakeTenantService) GetTenantAuth(context.Context, string) (ports.TenantAuth, error) {
+	return ports.TenantAuth{}, ports.ErrUnsupported
+}
+func (f *platformCapacityFakeTenantService) UpdateTenantAuth(context.Context, string, ports.TenantAuthPatch) (ports.TenantAuth, error) {
+	return ports.TenantAuth{}, ports.ErrUnsupported
+}
+func (f *platformCapacityFakeTenantService) ListTenantLifecycle(context.Context, string, ports.TenantLifecycleFilter) (ports.TenantLifecycleListResult, error) {
+	return ports.TenantLifecycleListResult{}, ports.ErrUnsupported
+}
+
 func TestLocalPlatformCapacityServiceTenantCount(t *testing.T) {
 	service := NewLocalPlatformCapacityService(&platformCapacityFakeTenantService{
 		tenants: []ports.TenantSummary{{ID: "t1"}, {ID: "t2"}, {ID: "t3"}},

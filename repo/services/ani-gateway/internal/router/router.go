@@ -11,7 +11,6 @@ import (
 )
 
 type RegisterOptions struct {
-	TargetIAMClient                       ports.TargetIAM
 	K8sClusterService                     ports.K8sClusterService
 	EncryptionService                     ports.EncryptionService
 	SecretService                         ports.SecretService
@@ -71,6 +70,15 @@ type RegisterOptions struct {
 	// (GET /platform/capacity). When nil the handler falls back to the
 	// local deterministic adapter.
 	PlatformCapacityService ports.PlatformCapacityService
+	// ComponentStatusService backs the platform component status endpoint
+	// (GET /platform/components). When nil the handler falls back to the
+	// local deterministic adapter.
+	ComponentStatusService ports.ComponentStatusService
+	// ComponentMetricsReader / ComponentLogReader 背书平台组件诊断接口
+	// （GET /platform/components/{name}/metrics、/logs、/logs/stream）。
+	// 为 nil 时 handler 回退 local 确定性 adapter。
+	ComponentMetricsReader ports.PlatformComponentMetricsReader
+	ComponentLogReader     ports.PlatformComponentLogReader
 }
 
 // Register wires all route groups onto the Hertz server.
@@ -87,9 +95,11 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 
 	v1 := h.Group("/api/v1")
 	registerBranding(v1)
-	registerAuth(v1, options.TargetIAMClient)
+	registerAuth(v1)
 	registerMetering(v1, options.MeteringService)
 	registerPlatformCapacity(v1, options.PlatformCapacityService)
+	registerComponentStatus(v1, options.ComponentStatusService)
+	registerComponentDiagnostics(v1, options.ComponentMetricsReader, options.ComponentLogReader)
 	registerHarbor(v1, options.ImageRegistry)
 	// Instances register first so their service can act as InstanceLookup.
 	// 注入到 ObservabilityService（时序图 PromQL 代理需要解析实例记录的
@@ -148,6 +158,7 @@ func RegisterWithOptions(h *server.Hertz, options RegisterOptions) {
 	registerSandboxes(svc)
 	registerTenant(svc)
 	registerTenantPlans(svc)
+	registerTenantList(svc)
 	registerTenantAdmins(svc)
 	registerBilling(svc)
 

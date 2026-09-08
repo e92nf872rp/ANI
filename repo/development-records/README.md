@@ -18,6 +18,19 @@
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
 | TENANT-BILLING-A | Services 层新增 BOSS 租户计费结算 5 端点 `/api/v1/svc/billing/*`（总览/CSV 导出/生成账单/账单动作 settle·credit/调账）：契约 `services/v1.yaml` + x-ani-authz（boundary=platform），实现 tenant-service gRPC + 网关 mixed handler；生成即出账（无 draft）、一期一单 `(tenant_id,period)` 唯一 + `idempotency_key` 幂等重放、overdue 读取时动态计算不落库、余额读取推导、单价只读 `billing_pricing`（6 行种子随迁移 ON CONFLICT DO NOTHING，代码零价格字面量）、用量仅经 Core SDK 调 `/metering/usage/platform` 不直查 Core 库、仅 token_total 计费其余 `data_source=unavailable`。本地集成实测 21 用例通过（测试环境占用未部署 K8s，不标 live/runtime ready）；`make validate-services`/`make validate-architecture` EXIT:0；`make test` 中 validate-gateway-authz 漂移为 main 既有问题 | TENANT-BILLING-A.md |
+
+### 平台组件状态与组件诊断（2026-09，分支 feat/component-status）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| PLATFORM-COMPONENT-STATUS-A | BOSS 平台健康组件状态只读能力：OpenAPI 契约优先新增 4 端点——`GET /platform/components`（22 组件静态注册表按 service/dependency/platform 三组聚合，K8s REST 逐对象读状态/副本/版本，service 组融合 Prometheus `up`+`target_info` 身份契约 scrape_status，任一组件失败不阻塞 200，15s TTL 缓存）与组件诊断三接口 metrics（cAdvisor 资源快照，单源失败字段 null）/logs（Loki backward 倒序 + cursor 翻页）/logs/stream（SSE 完全复刻实例日志流语义）；ports + real/local 双 adapter + env 装配（COMPONENT_STATUS_PROVIDER / COMPONENT_DIAGNOSTICS_PROVIDER）+ gateway 路由与错误映射 + authz/Core SDK 生成物；新增单测 35 个全 PASS，门禁全绿；K8s 测试环境实测（镜像 dev-20260905-compdiag）列表/metrics/logs/SSE/401/404 全通过；2026-09-07 补充产品决策：原型 P99/错误率/依赖检查三列裁剪不做（契约 description 同步为产品边界声明），并完成镜像被覆盖后的恢复与回归实测（services/health 503 定位为并行会话重部署服务缺 target_info 埋点的环境漂移，与本批次无关） | platform-component-status-a.md |
+
+### ANI IAM 9 月 30 日前隔离（2026-09）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| ANI-IAM-PRE930-CONTAINMENT | 基于 `804db51` 外科式移除 PR #145 提前进入当前发布轨道的 Direct P2 目标契约与 Gateway 集成，保留后续 VM/Tenant/KB/Observability 功能；恢复现行 Core v1 compatibility 和 Gateway authz 门禁，并纳入 required Actions。未部署、未切流；测试以 PR exact SHA 的 GitHub Actions 为准 | ANI-IAM-PRE930-CONTAINMENT.md |
+
 ### 仓库范围清理（2026-09）
 
 | 批次 | 内容摘要 | 文件 |
@@ -78,15 +91,6 @@
 | 批次 | 内容摘要 | 文件 |
 |---|---|---|
 | OBS-RESOURCE-TREND-A | Core 新增 `GET /observability/resource_trend` 租户级资源使用率趋势接口：不复用 query_range 裸透传（跨租户泄露），tenant_id 全从 JWT 取、后端直接生成只锚 `namespace="ani-tenant-<id>"` 的聚合 PromQL 走 queryPrometheusRange、不暴露 query PromQL；三张租户级 PromQL（GPU DCGM_FI_DEV_GPU_UTIL 不乘 100；CPU/内存 cAdvisor 容器维度 `100*avg` 且过滤 pause 容器）；OpenAPI 新 path + x-ani-authz（observability/read/tenant）生成物同步（Core SDK + authz registry 零漂移）；router resourceTrend handler（metric 枚举/RFC3339/step 正数/instanceTenantID）；local 空 matrix 降级；单测覆盖 PromQL 生成、GPU 不乘100、租户隔离、参数校验、忽略前端租户参数、拒绝 query 透传。in-cluster gateway 实测：三 metric matrix、参数校验 400、无凭证 401。不标记 runtime ready | OBS-RESOURCE-TREND-A.md |
-
-### ANI IAM Direct P2 契约冻结（2026-09，分支 codex/direct-p2-01-05）
-
-| 批次 | 内容摘要 | 文件 |
-|---|---|---|
-| DP2-02 | 基于固定 ANI `0cedae825a489d936cf41815dc27f278f6d3213c` 冻结目标 IAM 公网 OpenAPI、295-operation registry、唯一 Handler/Owner、认证授权分类、Permission/typed obligation、稳定 `401/403/409/429/503/504`、policy revision、可信 Header 和 D001–D028 replacement trace；breaking 为 operation 236→295、59 新增、0 删除、6 个 operationId 变化、45 个新增 schema；Console/BOSS 类型与四语言 Core SDK 同源生成。契约与生成门禁 `pass`；Gateway 运行时接线、实际新增 Handler 和调用方切换 `not_verified`，本批不部署、不切流 | DP2-02-public-iam-operation-registry.md |
-| DP2-03 | 冻结目标 `iam.v1` Authentication/Authorization/Admin 3 services / 69 RPC，以及 Core-owned `tenant.integration.v1` Lifecycle/Heartbeat/Bootstrap/Snapshot 契约和只读 2-RPC snapshot service；两仓库固定 descriptors、pins 和八组 producer-consumer fixtures。Buf、生成、fixtures 与相关回归 `pass`；旧 DP2-02 aggregate operationId gate `fail`；运行时 registration、Core/NATS、Gateway 映射与切换 `not_verified` | DP2-03-iam-core-integration-contracts.md |
-| DP2-05 | 在真实独立 PostgreSQL/Redis、受限 runtime role、真实 IAM/Gateway 进程上跑通 Console/Tenant Password→Session/Grant→Access Token→CheckPermission→`listInstances` tracer bullet；0/1 IAM decision、可信 Header、401/403/503/504、Audit 原子、two-Tenant/query mutation、空库重放和人工接受的 Go/No-Go A Go 结论均为 `pass`。BOSS/Platform Password Login 与 BOSS caller E2E 为 `not_verified`；未 push、部署、切流或启动 DP2-06 | DP2-05-target-iam-vertical-slice.md |
-| DP2-DIRECT-P2-SAFE-MERGE | 从人工接受的 main `bde4ea72b5a91cd43cc271dd44c09ff262c637e5` 以 `--no-ff --no-commit` 整合固定 a221a7b/573d373/f09a436；默认与显式 disabled 保持旧 Auth，`dp2_05` 仅隔离 Password Login/`listInstances` tracer；幂等 Cookie、429 Retry-After、manifest disabled、accepted-main 三项语义映射、ports/adapters 迁移及全部本地强制门禁已验证。Standards/Spec 均 0 findings，Merge-Ready 已于 2026-09-06 人工接受，80-path staged package 复验通过并随本地 merge commit 落地 | DP2-DIRECT-P2-SAFE-MERGE.md |
 
 ### 实例日志流式输出（2026-09，分支 feat/instance-log-stream）
 
@@ -217,6 +221,28 @@
 | TENANT-ADMIN-ISSUE-014 | 操作历史：WHERE details->>'target_id'=userId，result 过滤 success/failure | tenant-admin-issue-014-audit-logs-api.md |
 | TENANT-ADMIN-DOC-ALIGNMENT | 文档对齐批次：以代码和 issue 为标准，5+ 轮深度审计修正 SPEC/UX/PRD/Plan 四份文档；14 项设计决策、4 张偏差表（spec/ux/prd/plan）、3 项 tradeoff、4 项 open question | tenant-admin-doc-alignment-batch.md |
 | TENANT-ADMIN-FEATURE-BATCH | 功能批次汇总：14 个 issue 全量实现完成（OpenAPI 契约 → 接口/数据模型 → DB 迁移 → 网关接入 → 13 端点端到端 → 多轮 review-it → 文档对齐）；13 项设计决策（Core/Services 边界拆分、全量拉取+内存合并、部分唯一索引竞态防护、审计统一/查询条件/枚举值、ResetPassword 禁用态策略、ChangeRole UUID 入参、Delete 不改 status、幂等键网关处理、接口重命名、迁移三文件拆分、Go subtest 命名）；5 张偏差表（vs SPEC/PRD/UX/Plan/Issue）；4 项 tradeoff；4 项 open question | tenant-admin-feature-batch.md |
+
+### BOSS 租户列表管理（2026-09，分支 tenant-list）
+
+| 批次 | 内容摘要 | 文件 |
+|---|---|---|
+| TENANT-LIST-ISSUE-001 | OpenAPI：Core 9 `/admin/tenants*` + getTenant 扩展；Services 19 `/tenants*` | tenant-list-issue-001-openapi-contract.md |
+| TENANT-LIST-ISSUE-002 | proto messages + ports；无独立 TenantListService；19 RPC 挂 TenantService | tenant-list-issue-002-interfaces-structs.md |
+| TENANT-LIST-ISSUE-003 | 迁移 `20260902_001`：三态 CHECK、tenant_auth/lifecycle、NULLIF RLS、create 回填 | tenant-list-issue-003-database-migration.md |
+| TENANT-LIST-ISSUE-004 | Gateway 19 svc + 9 admin；tenantCallCtx 归因；骨架后由 005+ 填满 | tenant-list-issue-004-gateway-integration.md |
+| TENANT-LIST-ISSUE-005 | available-plans + CreateTenant（bcrypt→Core 事务 + 事务外配额） | tenant-list-issue-005-create-tenant-api.md |
+| TENANT-LIST-ISSUE-006 | ListTenants/GetTenantDetail；LATERAL admin_count；auth 两布尔 | tenant-list-issue-006-tenant-list-detail-api.md |
+| TENANT-LIST-ISSUE-007 | UpdateTenant；svc disabled→409；Core 动态 SET | tenant-list-issue-007-update-tenant-api.md |
+| TENANT-LIST-ISSUE-008 | freeze/unfreeze/disable；四维 used+reserved；不释放资源；归因 ctx | tenant-list-issue-008-tenant-state-machine-api.md |
+| TENANT-LIST-ISSUE-009 | GetTenantAuth + Update SSO/MFA；不含 TestTenantSso | tenant-list-issue-009-tenant-auth-api.md |
+| TENANT-LIST-ISSUE-011 | GetTenantQuota 单次代理 Core；502 不可达 | tenant-list-issue-011-tenant-quota-api.md |
+| TENANT-LIST-ISSUE-012 | 配额变更提交/列表/整批审批；跨请求同维 pending；CONFLICT/NOT_REGISTERED | tenant-list-issue-012-quota-change-request-api.md |
+| TENANT-LIST-ISSUE-013 | ListTenantLifecycle（Core）+ ListTenantAuditLogs；枚举 Parse* | tenant-list-issue-013-lifecycle-audit-api.md |
+| TENANT-LIST-ISSUE-014 | 租户内 admins：tenant-admin ∪ inviting；TenantScopedAdmin | tenant-list-issue-014-tenant-admins-api.md |
+| TENANT-LIST-DOC-ALIGNMENT | 以实现为准回写 Issue/PRD/SPEC/UX/Plan（§0）；010 仍 OPEN/501 | tenant-list-doc-alignment-batch.md |
+| TENANT-LIST-FEATURE-BATCH | 功能批次汇总：13 issue 完成 + 文档对齐；跨 Issue 决策/偏差/取舍/开放问题 | tenant-list-feature-batch.md |
+
+> Issue-010（SSO test）未实现：契约/路由/ports 在，业务 stub→501；无单独 development-record。
 
 ### Metering Service（2026-08）
 

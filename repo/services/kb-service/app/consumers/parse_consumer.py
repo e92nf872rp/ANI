@@ -22,7 +22,12 @@ Idempotency (SPEC §5.4 at-least-once):
 Payload shape (from kb-service outbox_events, SPEC §6.1)::
 
     {"doc_id", "kb_id", "storage_path", "tenant_id",
-     "object_id", "file_name", "chunk_size"}
+     "object_id", "file_name", "chunk_size", "task_id"}
+
+``task_id`` (optional) references the async_tasks row created by
+NotifyDocumentUploaded / ReparseDocument; when present the consumer
+closes it (completed/failed) once the document reaches a terminal
+parse_status. Messages without it (pre-change) keep the old behavior.
 
 The consumer additionally resolves ``file_type`` and ``vector_store_id``
 from the database (they are not carried in the outbox payload) before
@@ -40,6 +45,7 @@ from typing import Any, Protocol, runtime_checkable
 
 import asyncpg
 
+from app.repositories import async_task as async_task_repo
 from app.repositories import document as doc_repo
 from app.repositories import knowledge_base as kb_repo
 
@@ -182,7 +188,7 @@ class ParseConsumer:
         Payload shape (from kb-service outbox, SPEC §6.1)::
 
             {"doc_id", "kb_id", "storage_path", "tenant_id",
-             "object_id", "file_name", "chunk_size"}
+             "object_id", "file_name", "chunk_size", "task_id"}
 
         Resolves ``file_type`` (from kb_documents) and ``vector_store_id``
         (from knowledge_bases) before calling the orchestrator.
@@ -270,6 +276,7 @@ class ParseConsumer:
         # The pending → parsing UPDATE also serves as a row-existence
         # check (0 rows → skip). Both guards live in the orchestrator,
         # so the consumer simply dispatches.
+        task_id = payload.get("task_id") or ""
         try:
             await self._orchestrator.process_document(
                 tenant_id=tenant_id,
@@ -285,6 +292,49 @@ class ParseConsumer:
             logger.exception(
                 "parse_consumer: orchestrator failed for doc %s: %s",
                 doc_id, exc,
+            )
+
+        # Task lifecycle closure (issue-047 follow-up): the orchestrator
+        # records terminal state on kb_documents but never touches
+        # async_tasks — without this close-out the row stays pending
+        # forever and clients polling the task see no progress. The doc's
+        # terminal parse_status decides completed vs failed; the
+        # orchestrator swallows its own exceptions (writes failed), so a
+        # re-read here is the single source of truth. Messages without a
+        # task_id (published before this change) keep the old behavior.
+        if not task_id:
+            return
+        try:
+            async with self._pool.acquire() as conn:
+                doc_row = await doc_repo.get_document(
+                    conn, tenant_id=tenant_id, kb_id=kb_id, doc_id=doc_id,
+                )
+                if not doc_row:
+                    # Doc deleted mid-parse; nothing meaningful to record.
+                    return
+                status = doc_row.get("parse_status")
+                if status == "ready":
+                    await async_task_repo.complete_task(
+                        conn, tenant_id=tenant_id, task_id=task_id,
+                    )
+                elif status == "failed":
+                    await async_task_repo.complete_task(
+                        conn, tenant_id=tenant_id, task_id=task_id,
+                        status="failed",
+                    )
+                else:
+                    # Non-terminal (pending/parsing/indexing) — e.g. the
+                    # orchestrator skipped because the doc was concurrently
+                    # reset; leave the row for the next delivery.
+                    logger.warning(
+                        "parse_consumer: doc %s parse_status=%s after "
+                        "processing, leaving task %s open",
+                        doc_id, status, task_id,
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "parse_consumer: failed to close task %s for doc %s: %s",
+                task_id, doc_id, exc,
             )
 
 
