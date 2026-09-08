@@ -484,6 +484,7 @@ export const idempotencyOperations = [
   "updateTenantAdminRole",
   "updateTenantMfa",
   "updateTenantSso",
+  "testTenantSso",
   "disableTenant",
   "freezeTenant",
   "bindTenantPlan",

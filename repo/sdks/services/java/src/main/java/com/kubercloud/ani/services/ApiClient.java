@@ -506,6 +506,7 @@ public final class ApiClient {
         "updateTenantAdminRole",
         "updateTenantMfa",
         "updateTenantSso",
+        "testTenantSso",
         "disableTenant",
         "freezeTenant",
         "bindTenantPlan",

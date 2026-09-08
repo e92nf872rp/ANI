@@ -499,6 +499,7 @@ var IdempotencyOperations = []string{
 	"updateTenantAdminRole",
 	"updateTenantMfa",
 	"updateTenantSso",
+	"testTenantSso",
 	"disableTenant",
 	"freezeTenant",
 	"bindTenantPlan",

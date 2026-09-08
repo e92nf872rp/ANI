@@ -488,6 +488,7 @@ IDEMPOTENCY_OPERATIONS = [
     "updateTenantAdminRole",
     "updateTenantMfa",
     "updateTenantSso",
+    "testTenantSso",
     "disableTenant",
     "freezeTenant",
     "bindTenantPlan",
