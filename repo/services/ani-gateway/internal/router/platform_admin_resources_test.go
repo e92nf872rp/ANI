@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
@@ -103,11 +104,11 @@ func (f *fakePlatformAdminClient) GetPlatformAdmin(_ context.Context, in *platfo
 		return nil, status.Error(codes.NotFound, "PLATFORM_USER_NOT_FOUND")
 	}
 	if f.getResp != nil {
-		out := *f.getResp
+		out := proto.Clone(f.getResp).(*platformsettingsv1.PlatformAdminDetail)
 		if f.status != "" {
 			out.Status = f.status
 		}
-		return &out, nil
+		return out, nil
 	}
 	st := f.status
 	if st == "" {
@@ -217,13 +218,6 @@ func (f *fakePlatformAdminClient) ListPlatformAdminAuditLogs(_ context.Context, 
 		NextCursor: nextCursor,
 	}, nil
 }
-func (f *fakePlatformAdminClient) errOrOK() (*commonv1.IdempotentResult, error) {
-	if f.err != nil {
-		return nil, f.err
-	}
-	return &commonv1.IdempotentResult{Id: "u1", Message: "ok"}, nil
-}
-
 func setupPlatformAdminTestServer(t *testing.T, client platformsettingsv1.PlatformAdminServiceClient) *server.Hertz {
 	t.Helper()
 	h := server.Default()
