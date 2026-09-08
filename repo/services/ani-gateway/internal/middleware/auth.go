@@ -271,10 +271,7 @@ func isPublicPath(path string) bool {
 // - sandbox token 仅可访问 /api/v1/instances/{id}/sandbox/* 子资源
 // - /api/v1/svc/* Services 层路由允许 platform 和 tenant scope（角色级 RBAC 由 rbac.go 校验）
 // - /api/v1/gpu-specs*、/api/v1/gpu-inventory* 集群级资源目录允许 platform 和 tenant scope（角色级 RBAC 由 rbac.go 校验）
-<<<<<<< HEAD
 // - GET /api/v1/quotas（跨租户配额总览，绕过 RLS）仅 scope=platform；租户自查走 /quotas/me
-=======
->>>>>>> 882fb5f (fix(gateway): allow platform scope on cluster-level GPU spec/inventory routes)
 // - 其他路由仅 scope=tenant 可访问（API key 默认 tenant scope）
 func scopeAllowedForPath(path, scope string) bool {
 	if scope == sandboxtoken.ScopeSandbox {
